@@ -1,0 +1,7 @@
+[user]
+	email = beckaja1@gmail.com
+	name = Jan Becka
+[diff]
+	tool = vimdiff
+[merge]
+	tool = vimdiff

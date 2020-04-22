@@ -1,0 +1,5 @@
+Host github.com
+IdentityFile /home/jan/.ssh/id_rsa_git
+
+Host gitlab.com
+IdentityFile /home/jan/.ssh/id_rsa_git
