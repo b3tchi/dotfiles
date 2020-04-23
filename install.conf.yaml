@@ -1,3 +1,8 @@
+- defaults:
+    link:
+        create: true
+        force: true
+
 - clean: ['~']
 
 - link:
@@ -5,8 +10,29 @@
     ~/.bashrc: bashrc
     ~/.bash_logout: bash_logout
     ~/.gitconfig: gitconfig
+    ~/.config/fish/config.fish:
+        path: fish/config.fish
     ~/.ssh/config:
         path: ssh/config
-        create: true
+    ~/.config/nvim/init.vim:
+        path: nvim/init.vim
+    ~/.config/nvim/coc-settings.json:
+        path: nvim/coc-settings.json
 
-
+    #KDE
+    ~/.local/share/kxmlgui5/konsole/konsoleui.rc:
+        path: kde/konsoleui.rc
+    ~/.local/share/kxmlgui5/konsole/sessionui.rc:
+        path: kde/sessionui.rc
+    ~/.config/kdeglobals:
+        path: kde/kdeglobals
+    # ~/.config/kdeglobalshortcutsrc:
+        # path: kde/kdeglobalshortcutsrc
+    ~/.config/kwinrc:
+        path: kde/kwinrc
+    ~/.local/share/kservices5/ServiceMenus/myFirstServiceMenu.desktop:
+        path: kde/myFirstServiceMenu.desktop
+    
+    #Latte
+    ~/.config/latte/Default.layout.latte:
+        path: kde/latte/Default.layout.latte
