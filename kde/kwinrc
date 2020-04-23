@@ -26,6 +26,7 @@ NightTemperature=5000
 
 [Plugins]
 activatelattelaunchermenuEnabled=true
+diminactiveEnabled=true
 highlightwindowEnabled=true
 kwin4_effect_squashEnabled=false
 kwin4_effect_translucencyEnabled=false
