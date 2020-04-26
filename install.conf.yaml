@@ -14,10 +14,14 @@
         path: fish/config.fish
     ~/.ssh/config:
         path: ssh/config
+    
+    #VIM
     ~/.config/nvim/init.vim:
         path: nvim/init.vim
     ~/.config/nvim/coc-settings.json:
         path: nvim/coc-settings.json
+    ~/.config/nvim/coc.vim:
+        path: nvim/coc.vim
 
     #KDE
     ~/.local/share/kxmlgui5/konsole/konsoleui.rc:
