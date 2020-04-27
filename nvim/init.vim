@@ -23,6 +23,8 @@ if dein#load_state('/home/jan/.cache/dein')
   call dein#add('tmsvg/pear-tree')
   call dein#add('editorconfig/editorconfig-vim')
   call dein#add('sheerun/vim-polyglot')
+  
+  call dein#add('tpope/vim-fugitive') "git intergration
 
   if useCoc
   " call dein#add('neoclide/coc.nvim', {'merge':0, 'build': './install.sh nightly'})

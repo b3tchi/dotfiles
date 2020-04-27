@@ -23,6 +23,11 @@
     ~/.config/nvim/coc.vim:
         path: nvim/coc.vim
 
+    #VsCode 
+    ~/.config/Code/User/settings.json:
+        path: code/settings.json
+
+
     #KDE
     ~/.local/share/kxmlgui5/konsole/konsoleui.rc:
         path: kde/konsoleui.rc
@@ -40,3 +45,5 @@
     #Latte
     ~/.config/latte/Default.layout.latte:
         path: kde/latte/Default.layout.latte
+
+    #TBD Joplin, Kvantum, MC, Gambas?
