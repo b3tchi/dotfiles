@@ -4,5 +4,6 @@
     "git.confirmSync": false,
     "explorer.confirmDelete": false,
     "keyboard.dispatch": "keyCode",
-    "git.autofetch": true
+    "git.autofetch": true,
+    "editor.tabSize": 2
 }

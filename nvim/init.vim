@@ -12,6 +12,9 @@ if dein#load_state('/home/jan/.cache/dein')
 
   call dein#add('liuchengxu/vista.vim')
   call dein#add('Yggdroot/indentLine')
+  call dein#add('nathanaelkane/vim-indent-guides') "indenting guides
+  call dein#add('jeffkreeftmeijer/vim-numbertoggle')		"hybrid/static number toggle when multiple windows 
+  call dein#add('cohama/lexima.vim')						"autoclosing pairs
   call dein#add('itchyny/lightline.vim')
   call dein#add('mengelbrecht/lightline-bufferline')
   call dein#add('google/vim-searchindex')
@@ -61,7 +64,7 @@ if dein#check_install()
 endif
 
 if useCoc
-    source ~/.config/nvim/coc.vim
+  source ~/.config/nvim/coc.vim
 endif
 
 
@@ -69,7 +72,7 @@ endif
 
 let mapleader = "," " leader key is ,
 
-set number ignorecase smartcase undofile lazyredraw
+set number relativenumber ignorecase smartcase undofile lazyredraw
 set cursorline
 set mouse=a
 set hidden
@@ -80,6 +83,9 @@ set tabstop=2 softtabstop=2 expandtab shiftwidth=2
 set splitright splitbelow
 set numberwidth=1
 set listchars=tab:→\ ,nbsp:␣,trail:•,extends:⟩,precedes:⟨
+
+"" Define folding 
+set foldmethod=indent
 
 " Traverse line breaks with arrow keys
 set whichwrap=b,s,<,>,[,]
@@ -92,6 +98,11 @@ if has('persistent_undo')
   set undoreload=10000
 endif
 set backupcopy=yes " for watchers set noswapfile 
+
+"" Encoding
+set encoding=utf-8
+set fileencoding=utf-8
+set fileencodings=utf-8
 
 " always show signcolumns
 set signcolumn=yes
@@ -232,10 +243,10 @@ endfunction
 
 " go back to where you exited
 if has("autocmd")
-    autocmd BufReadPost *
-        \ if line("'\"") > 0 && line ("'\"") <= line("$") |
-        \   exe "normal g'\"" |
-        \ endif
+  autocmd BufReadPost *
+    \ if line("'\"") > 0 && line ("'\"") <= line("$") |
+    \   exe "normal g'\"" |
+    \ endif
 endif
 
 " --- Coc ---
@@ -243,18 +254,18 @@ endif
 
 " --- lightline ---
 let g:lightline = {
-      \ 'colorscheme': 'solarized',
-      \ 'active': {
-      \     'left': [ [ 'mode', 'paste' ],
-      \               [ 'cocstatus', 'readonly', 'filename', 'modified' ] ],
-      \ },
-      \ 'component': {
-	  \   'lineinfo': '%3l:%-2v',
-	  \ },
-      \ 'component_function': {
-      \   'cocstatus': 'coc#status',
-      \ },
-      \ }
+  \ 'colorscheme': 'solarized',
+  \ 'active': {
+  \     'left': [ [ 'mode', 'paste' ],
+  \               [ 'cocstatus', 'readonly', 'filename', 'modified' ] ],
+  \ },
+  \ 'component': {
+  \   'lineinfo': '%3l:%-2v',
+  \ },
+  \ 'component_function': {
+  \   'cocstatus': 'coc#status',
+  \ },
+  \ }
 
 let g:lightline.tabline          = {'left': [['buffers']], 'right': [['close']]}
 let g:lightline.component_expand = {'buffers': 'lightline#bufferline#buffers'}
@@ -265,6 +276,9 @@ let g:lightline#bufferline#filename_modifier = ':t'
 let g:lightline#bufferline#unnamed      = '[No Name]'
 let g:lightline#bufferline#enable_devicons = 1
 let g:lightline#bufferline#unicode_symbols = 1
+
+"--- Indent Guides ---
+let g:indent_guides_enable_on_vim_startup = 1
 
 "--- Vista ---
 let g:vista_default_executive = 'coc'
@@ -295,26 +309,26 @@ command! -bang -nargs=? -complete=dir GFiles
   \   <bang>0)
 
 function! OpenFloatingWin()
-    let width = min([&columns - 4, max([80, &columns - 20])])
-    let height = min([&lines - 4, max([20, &lines - 10])])
-    let top = ((&lines - height) / 2) - 1
-    let left = (&columns - width) / 2
-    let opts = {'relative': 'editor', 'row': top, 'col': left, 'width': width, 'height': height, 'style': 'minimal'}
+  let width = min([&columns - 4, max([80, &columns - 20])])
+  let height = min([&lines - 4, max([20, &lines - 10])])
+  let top = ((&lines - height) / 2) - 1
+  let left = (&columns - width) / 2
+  let opts = {'relative': 'editor', 'row': top, 'col': left, 'width': width, 'height': height, 'style': 'minimal'}
 
-    let top = "╭" . repeat("─", width - 2) . "╮"
-    let mid = "│" . repeat(" ", width - 2) . "│"
-    let bot = "╰" . repeat("─", width - 2) . "╯"
-    let lines = [top] + repeat([mid], height - 2) + [bot]
-    let s:buf = nvim_create_buf(v:false, v:true)
-    call nvim_buf_set_lines(s:buf, 0, -1, v:true, lines)
-    call nvim_open_win(s:buf, v:true, opts)
-    set winhl=Normal:Floating
-    let opts.row += 1
-    let opts.height -= 2
-    let opts.col += 2
-    let opts.width -= 4
-    call nvim_open_win(nvim_create_buf(v:false, v:true), v:true, opts)
-    au BufWipeout <buffer> exe 'bw '.s:buf
+  let top = "╭" . repeat("─", width - 2) . "╮"
+  let mid = "│" . repeat(" ", width - 2) . "│"
+  let bot = "╰" . repeat("─", width - 2) . "╯"
+  let lines = [top] + repeat([mid], height - 2) + [bot]
+  let s:buf = nvim_create_buf(v:false, v:true)
+  call nvim_buf_set_lines(s:buf, 0, -1, v:true, lines)
+  call nvim_open_win(s:buf, v:true, opts)
+  set winhl=Normal:Floating
+  let opts.row += 1
+  let opts.height -= 2
+  let opts.col += 2
+  let opts.width -= 4
+  call nvim_open_win(nvim_create_buf(v:false, v:true), v:true, opts)
+  au BufWipeout <buffer> exe 'bw '.s:buf
 endfunction
 
 "--- NERD Commenter ---
