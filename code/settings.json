@@ -3,5 +3,6 @@
     "python.pythonPath": "/usr/bin/python3.6",
     "git.confirmSync": false,
     "explorer.confirmDelete": false,
-    "keyboard.dispatch": "keyCode"
+    "keyboard.dispatch": "keyCode",
+    "git.autofetch": true
 }
