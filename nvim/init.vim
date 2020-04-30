@@ -11,7 +11,7 @@ if dein#load_state('/home/jan/.cache/dein')
   call dein#add('/home/jan/.cache/dein/repos/github.com/Shougo/dein.vim')
 
   call dein#add('liuchengxu/vista.vim')
-  call dein#add('Yggdroot/indentLine')
+  " call dein#add('Yggdroot/indentLine')
   call dein#add('nathanaelkane/vim-indent-guides') "indenting guides
   call dein#add('jeffkreeftmeijer/vim-numbertoggle')		"hybrid/static number toggle when multiple windows 
   call dein#add('cohama/lexima.vim')						"autoclosing pairs
@@ -22,7 +22,8 @@ if dein#load_state('/home/jan/.cache/dein')
   call dein#add('junegunn/fzf', {'build': './install --all', 'merged': 0})
   call dein#add('junegunn/fzf.vim', {'depends': 'fzf'})
 
-  call dein#add('scrooloose/nerdcommenter')
+  " call dein#add('scrooloose/nerdcommenter')
+  call dein#add('tpope/vim-commentary') "comments gcc
   call dein#add('tmsvg/pear-tree')
   call dein#add('editorconfig/editorconfig-vim')
   call dein#add('sheerun/vim-polyglot')
@@ -332,19 +333,27 @@ function! OpenFloatingWin()
 endfunction
 
 "--- NERD Commenter ---
-let g:NERDSpaceDelims = 1
-let g:NERDCompactSexyComs = 1
+"using tpope's commentary
+" let g:NERDSpaceDelims = 1
+" let g:NERDCompactSexyComs = 1
 
 "--- startify ---
 let g:startify_bookmarks = ['~/svn', '~/dev']
 
+"--- indentGuide ---
+" let g:indent_guides_color_change_percent = 3 " for auto options left 5 percent only 
+"color form solarized8 
+let g:indent_guides_auto_colors = 0
+autocmd VimEnter,Colorscheme * :hi IndentGuidesOdd  guibg=#002b36 ctermbg=3
+autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#073642 ctermbg=4 
+
 "--- indentLine ---
-let g:indentLine_char               = "⎸"
-let g:indentLine_faster             = 1
-let g:indentLine_fileTypeExclude    = ['json',  'startify', '', 'help', 'coc-explorer']
+" let g:indentLine_char               = "⎸"
+" let g:indentLine_faster             = 1
+" let g:indentLine_fileTypeExclude    = ['json',  'startify', '', 'help', 'coc-explorer']
 " let g:indentLine_leadingSpaceEnabled = 1
-let g:indentLine_leadingSpaceChar   = '·'
-let g:indentLine_setConceal = 0
+" let g:indentLine_leadingSpaceChar   = '·'
+" let g:indentLine_setConceal = -1
 
 " --- Vim Test ---
 let g:test#strategy = 'neovim'
