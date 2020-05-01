@@ -26,6 +26,9 @@
     #VsCode 
     ~/.config/Code/User/settings.json:
         path: code/settings.json
+    ~/.config/Code/User/keybindings.json:
+        path: code/keybindings.json
+
 
 
     #KDE
