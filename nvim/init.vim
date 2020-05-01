@@ -18,7 +18,7 @@ if dein#load_state('/home/jan/.cache/dein')
   call dein#add('itchyny/lightline.vim')
   call dein#add('mengelbrecht/lightline-bufferline')
   call dein#add('google/vim-searchindex')
-  call dein#add('mhinz/vim-startify')
+  call dein#add('mhinz/vim-startify') "fancty start screen for VIM
   call dein#add('junegunn/fzf', {'build': './install --all', 'merged': 0})
   call dein#add('junegunn/fzf.vim', {'depends': 'fzf'})
 
