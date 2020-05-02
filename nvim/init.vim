@@ -26,15 +26,20 @@ if dein#load_state('/home/jan/.cache/dein')
   call dein#add('tpope/vim-commentary') "comments gcc
   call dein#add('tmsvg/pear-tree')
   call dein#add('editorconfig/editorconfig-vim')
-  call dein#add('sheerun/vim-polyglot')
   
+  "git
   call dein#add('tpope/vim-fugitive') "git intergration
+  call dein#add('airblade/vim-gitgutter') "git intergration
 
   if useCoc
-  " call dein#add('neoclide/coc.nvim', {'merge':0, 'build': './install.sh nightly'})
     call dein#add('neoclide/coc.nvim', {'merge': 0, 'rev': 'release'})
-  "call dein#add('mgedmin/python-imports.vim', { 'on_ft' : 'python' })
+    " call dein#add('neoclide/coc.nvim', {'merge':0, 'build': './install.sh nightly'})
+    " call dein#add('mgedmin/python-imports.vim', { 'on_ft' : 'python' })
   endif
+
+  "syntax highlighting 
+  call dein#add('evanleck/vim-svelte')
+  call dein#add('sheerun/vim-polyglot')
 
   call dein#add('janko-m/vim-test')
   "call dein#add('neomake/neomake')

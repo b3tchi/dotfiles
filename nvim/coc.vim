@@ -15,6 +15,7 @@ let g:coc_global_extensions = [
   \ , 'coc-git'
   \ , 'coc-powershell'
   \ , 'coc-utils'
+  \ , 'coc-svelte'
   \ ]
 
 let g:coc_global_extensions += ['https://github.com/andys8/vscode-jest-snippets']
