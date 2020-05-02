@@ -5,5 +5,7 @@
     "explorer.confirmDelete": false,
     "keyboard.dispatch": "keyCode",
     "git.autofetch": true,
-    "editor.tabSize": 2
+    "editor.tabSize": 2,
+    "editor.lineNumbers": "relative",
+    "editor.minimap.enabled": false
 }
