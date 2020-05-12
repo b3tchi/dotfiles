@@ -1,7 +1,8 @@
 " Required:
 set runtimepath+=/home/jan/.cache/dein/repos/github.com/Shougo/dein.vim
 
-let useCoc = 1
+" let useCoc = 1
+let lspClient = 1 "1 for coc-nvim, 2 for deoplete (WIP), -1 non Lsp Client (TBD)
 
 " Required:
 if dein#load_state('/home/jan/.cache/dein')
@@ -22,19 +23,30 @@ if dein#load_state('/home/jan/.cache/dein')
   call dein#add('junegunn/fzf', {'build': './install --all', 'merged': 0})
   call dein#add('junegunn/fzf.vim', {'depends': 'fzf'})
 
-  " call dein#add('scrooloose/nerdcommenter')
-  call dein#add('tpope/vim-commentary') "comments gcc
+  call dein#add('scrooloose/nerdcommenter')
+  " call dein#add('tpope/vim-commentary') "comments gcc
   call dein#add('tmsvg/pear-tree')
   call dein#add('editorconfig/editorconfig-vim')
+  
+  "mapping help file TBD to make mappings
+  call dein#add('liuchengxu/vim-which-key')
   
   "git
   call dein#add('tpope/vim-fugitive') "git intergration
   call dein#add('airblade/vim-gitgutter') "git intergration
 
-  if useCoc
+  if lspClient == 1
     call dein#add('neoclide/coc.nvim', {'merge': 0, 'rev': 'release'})
     " call dein#add('neoclide/coc.nvim', {'merge':0, 'build': './install.sh nightly'})
     " call dein#add('mgedmin/python-imports.vim', { 'on_ft' : 'python' })
+  elseif lspClient == 2
+
+    call dein#add('Shougo/deoplete.nvim')
+    if !has('nvim')
+      call dein#add('roxma/nvim-yarp')
+      call dein#add('roxma/vim-hug-neovim-rpc')
+    endif
+    let g:deoplete#enable_at_startup = 1
   endif
 
   "syntax highlighting 
@@ -69,8 +81,10 @@ if dein#check_install()
   call dein#install()
 endif
 
-if useCoc
+if lspClient == 1
   source ~/.config/nvim/coc.vim
+elseif lspClient == 2
+  source ~/.config/nvim/deoplete.vim
 endif
 
 
@@ -170,13 +184,40 @@ nmap <silent> <leader>tv :TestVisit<CR>
 noremap <F5> :ImportName<cr>:w<cr>:!isort %<cr>:e %<cr>
 noremap! <F5> <esc>:ImportName<cr>:w<cr>:!isort %<cr>:e %<cr>a
 
+"" various escapes insert mode 
 inoremap jk <esc>
 cnoremap jk <c-c>
-
 tnoremap <Esc> <C-\><C-n>
 
+"" commenting keybindings
+nmap <space>cl <leader>c<space>
+"toggle comment paragrap
+nmap <space>cP vip<leader>cc
+"add comment paragraph
+nmap <space>cp vip<leader>c<space> 
+"toggle comment tag
+nmap <space>ct vat<leader>c<space> 
+
+"" navigating widows by spaces + number
+nnoremap <space>1 :exe 1 . "wincmd w"<CR>
+nnoremap <space>2 :exe 2 . "wincmd w"<CR>
+nnoremap <space>3 :exe 3 . "wincmd w"<CR>
+nnoremap <space>4 :exe 4 . "wincmd w"<CR>
+nnoremap <space>5 :exe 5 . "wincmd w"<CR>
+nnoremap <space>6 :exe 6 . "wincmd w"<CR>
+nnoremap <space>7 :exe 7 . "wincmd w"<CR>
+nnoremap <space>8 :exe 8 . "wincmd w"<CR>
+nnoremap <space>9 :exe 9 . "wincmd w"<CR>
+nnoremap <space>0 :exe 10 . "wincmd w"<CR>
+
+"" indentation
+"nnoremap > >>_
+"nnoremap < <<_
+vnoremap < <gv
+vnoremap > >gv
+
 " --- Coc ---
-if useCoc
+if lspClient == 1
   nnoremap <C-o> :CocCommand explorer<cr>
   " let g:coc_force_debug = 1
   " Remap keys for gotos
@@ -190,7 +231,7 @@ if useCoc
   " Remap for rename current word
   nmap <leader>rn <Plug>(coc-rename)
   " Remap for format selected region
-  xmap <leader>f  <Plug>(coc-format-selected)
+  xmap <leader>f  <Plug>(coc-format-selected) 
   nmap <leader>f  <Plug>(coc-format-selected)
   " Remap for do codeAction of selected region, ex: `<leader>aap` for current paragraph
   xmap <leader>a  <Plug>(coc-codeaction-selected)
@@ -242,7 +283,8 @@ endif
 " --------- Plugins config ---------
 " ----------------------------------
 
-function! s:check_back_space() abort
+function s:check_back_space() abort
+  
   let col = col('.') - 1
   return !col || getline('.')[col - 1]  =~# '\s'
 endfunction
@@ -263,9 +305,16 @@ let g:lightline = {
   \ 'colorscheme': 'solarized',
   \ 'active': {
   \     'left': [ [ 'mode', 'paste' ],
-  \               [ 'cocstatus', 'readonly', 'filename', 'modified' ] ],
+  \               [ 'cocstatus','winnr'],
+  \               [ 'readonly','filename', 'modified' ] ],
+  \ },
+  \	'inactive': {
+  \	     'left': [ ['winnr'] ,
+  \                ['filename' ] ]
   \ },
   \ 'component': {
+  \   'winnr': '%{winnr()}',
+  \   'filename': '%t',
   \   'lineinfo': '%3l:%-2v',
   \ },
   \ 'component_function': {
@@ -362,3 +411,6 @@ autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#073642 ctermbg=4
 
 " --- Vim Test ---
 let g:test#strategy = 'neovim'
+
+" --- Svelte files reading --- 
+au! BufNewFile,BufRead *.svelte set ft=html
