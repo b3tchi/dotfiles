@@ -1,15 +1,19 @@
+if &compatible
+  set nocompatible
+endif
+
 " Required:
-set runtimepath+=/home/jan/.cache/dein/repos/github.com/Shougo/dein.vim
+set runtimepath+=~/.cache/dein/repos/github.com/Shougo/dein.vim
 
 " let useCoc = 1
 let lspClient = 1 "1 for coc-nvim, 2 for deoplete (WIP), -1 non Lsp Client (TBD)
 
 " Required:
-if dein#load_state('/home/jan/.cache/dein')
-  call dein#begin('/home/jan/.cache/dein')
+if dein#load_state('~/.cache/dein')
+  call dein#begin('~/.cache/dein')
 
   " Required:
-  call dein#add('/home/jan/.cache/dein/repos/github.com/Shougo/dein.vim')
+  call dein#add('~/.cache/dein/repos/github.com/Shougo/dein.vim')
 
   call dein#add('liuchengxu/vista.vim')
   " call dein#add('Yggdroot/indentLine')
