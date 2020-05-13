@@ -7,5 +7,7 @@
     "git.autofetch": true,
     "editor.tabSize": 2,
     "editor.lineNumbers": "relative",
-    "editor.minimap.enabled": false
+    "editor.minimap.enabled": false,
+    "editor.foldingStrategy": "indentation",
+    "vim.foldfix": true
 }

@@ -18,6 +18,7 @@ let g:coc_global_extensions = [
   \ , 'coc-svelte'
   \ ]
 
+
 let g:coc_global_extensions += ['https://github.com/andys8/vscode-jest-snippets']
 
 autocmd FileType python let b:coc_root_patterns = [

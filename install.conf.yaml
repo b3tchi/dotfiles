@@ -22,6 +22,8 @@
         path: nvim/coc-settings.json
     ~/.config/nvim/coc.vim:
         path: nvim/coc.vim
+    ~/.config/nvim/deoplete.vim:
+        path: nvim/deoplete.vim
 
     #VsCode 
     ~/.config/Code/User/settings.json:
