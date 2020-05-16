@@ -1,3 +1,7 @@
+if &compatible
+  set nocompatible
+endif
+
 " Required:
 set runtimepath+=~/.cache/dein/repos/github.com/Shougo/dein.vim
 
