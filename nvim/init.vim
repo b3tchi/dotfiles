@@ -1,21 +1,24 @@
+if &compatible
+  set nocompatible
+endif
+
 " Required:
-set runtimepath+=/home/jan/.cache/dein/repos/github.com/Shougo/dein.vim
+set runtimepath+=~/.cache/dein/repos/github.com/Shougo/dein.vim
 
 " let useCoc = 1
-let lspClient = 1 "1 for coc-nvim, 2 for deoplete (WIP), -1 non Lsp Client (TBD)
+let lspClient = 2 "1 for coc-nvim, 2 for deoplete (WIP), -1 non Lsp Client (TBD)
 
 " Required:
-if dein#load_state('/home/jan/.cache/dein')
-  call dein#begin('/home/jan/.cache/dein')
+if dein#load_state('~/.cache/dein')
+  call dein#begin('~/.cache/dein')
 
   " Required:
-  call dein#add('/home/jan/.cache/dein/repos/github.com/Shougo/dein.vim')
+  call dein#add('~/.cache/dein/repos/github.com/Shougo/dein.vim')
 
   call dein#add('liuchengxu/vista.vim')
   " call dein#add('Yggdroot/indentLine')
   call dein#add('nathanaelkane/vim-indent-guides') "indenting guides
-  call dein#add('jeffkreeftmeijer/vim-numbertoggle')		"hybrid/static number toggle when multiple windows 
-  call dein#add('cohama/lexima.vim')						"autoclosing pairs
+  call dein#add('jeffkreeftmeijer/vim-numbertoggle')		"hybrid/static number toggle when multiple windows
   call dein#add('itchyny/lightline.vim')
   call dein#add('mengelbrecht/lightline-bufferline')
   call dein#add('google/vim-searchindex')
@@ -23,14 +26,15 @@ if dein#load_state('/home/jan/.cache/dein')
   call dein#add('junegunn/fzf', {'build': './install --all', 'merged': 0})
   call dein#add('junegunn/fzf.vim', {'depends': 'fzf'})
 
-  call dein#add('scrooloose/nerdcommenter')
-  " call dein#add('tpope/vim-commentary') "comments gcc
-  call dein#add('tmsvg/pear-tree')
+  ""Autoclosing pairs""
+  call dein#add('cohama/lexima.vim')
+  "call dein#add('tmsvg/pear-tree') "getting some issues for the function disabled
+
   call dein#add('editorconfig/editorconfig-vim')
-  
+
   "mapping help file TBD to make mappings
   call dein#add('liuchengxu/vim-which-key')
-  
+
   "git
   call dein#add('tpope/vim-fugitive') "git intergration
   call dein#add('airblade/vim-gitgutter') "git intergration
@@ -47,10 +51,21 @@ if dein#load_state('/home/jan/.cache/dein')
       call dein#add('roxma/vim-hug-neovim-rpc')
     endif
     let g:deoplete#enable_at_startup = 1
+
+    call dein#add('dense-analysis/ale')
   endif
 
-  "syntax highlighting 
+  " Svelte
   call dein#add('evanleck/vim-svelte')
+
+  " Support for comments symbol by language regions Svelte & Html
+  call dein#add('Shougo/context_filetype.vim') "language regions in files
+  call dein#add('tyru/caw.vim') "comments with context regions
+  " call dein#add('b3tchi/caw.vim') "comments with context regions
+  " call dein#add('scrooloose/nerdcommenter')
+  " call dein#add('tpope/vim-commentary') "comments gcc
+
+  "syntax highlighting
   call dein#add('sheerun/vim-polyglot')
 
   call dein#add('janko-m/vim-test')
@@ -61,7 +76,7 @@ if dein#load_state('/home/jan/.cache/dein')
   call dein#add('altercation/vim-colors-solarized')
   call dein#add('iCyMind/NeoSolarized')
   call dein#add('lifepillar/vim-solarized8')
-  
+
   " Required:
   call dein#end()
   call dein#save_state()
@@ -104,7 +119,7 @@ set splitright splitbelow
 set numberwidth=1
 set listchars=tab:→\ ,nbsp:␣,trail:•,extends:⟩,precedes:⟨
 
-"" Define folding 
+"" Define folding
 set foldmethod=indent
 
 " Traverse line breaks with arrow keys
@@ -117,7 +132,7 @@ if has('persistent_undo')
   set undolevels=3000
   set undoreload=10000
 endif
-set backupcopy=yes " for watchers set noswapfile 
+set backupcopy=yes " for watchers set noswapfile
 
 "" Encoding
 set encoding=utf-8
@@ -184,19 +199,19 @@ nmap <silent> <leader>tv :TestVisit<CR>
 noremap <F5> :ImportName<cr>:w<cr>:!isort %<cr>:e %<cr>
 noremap! <F5> <esc>:ImportName<cr>:w<cr>:!isort %<cr>:e %<cr>a
 
-"" various escapes insert mode 
+"" various escapes insert mode
 inoremap jk <esc>
 cnoremap jk <c-c>
 tnoremap <Esc> <C-\><C-n>
 
 "" commenting keybindings
 nmap <space>cl <leader>c<space>
+"add comment paragraph
+nmap <space>cp vip<leader>c<space>
 "toggle comment paragrap
 nmap <space>cP vip<leader>cc
-"add comment paragraph
-nmap <space>cp vip<leader>c<space> 
 "toggle comment tag
-nmap <space>ct vat<leader>c<space> 
+nmap <space>ct vat<leader>c<space>
 
 "" navigating widows by spaces + number
 nnoremap <space>1 :exe 1 . "wincmd w"<CR>
@@ -231,7 +246,7 @@ if lspClient == 1
   " Remap for rename current word
   nmap <leader>rn <Plug>(coc-rename)
   " Remap for format selected region
-  xmap <leader>f  <Plug>(coc-format-selected) 
+  xmap <leader>f  <Plug>(coc-format-selected)
   nmap <leader>f  <Plug>(coc-format-selected)
   " Remap for do codeAction of selected region, ex: `<leader>aap` for current paragraph
   xmap <leader>a  <Plug>(coc-codeaction-selected)
@@ -284,7 +299,7 @@ endif
 " ----------------------------------
 
 function s:check_back_space() abort
-  
+
   let col = col('.') - 1
   return !col || getline('.')[col - 1]  =~# '\s'
 endfunction
@@ -298,7 +313,7 @@ if has("autocmd")
 endif
 
 " --- Coc ---
-"moved to coc.vim 
+"moved to coc.vim
 
 " --- lightline ---
 let g:lightline = {
@@ -395,11 +410,11 @@ endfunction
 let g:startify_bookmarks = ['~/svn', '~/dev']
 
 "--- indentGuide ---
-" let g:indent_guides_color_change_percent = 3 " for auto options left 5 percent only 
-"color form solarized8 
+" let g:indent_guides_color_change_percent = 3 " for auto options left 5 percent only
+"color form solarized8
 let g:indent_guides_auto_colors = 0
 autocmd VimEnter,Colorscheme * :hi IndentGuidesOdd  guibg=#002b36 ctermbg=3
-autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#073642 ctermbg=4 
+autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#073642 ctermbg=4
 
 "--- indentLine ---
 " let g:indentLine_char               = "⎸"
