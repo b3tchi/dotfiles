@@ -413,4 +413,4 @@ autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#073642 ctermbg=4
 let g:test#strategy = 'neovim'
 
 " --- Svelte files reading --- 
-au! BufNewFile,BufRead *.svelte set ft=html
+"au! BufNewFile,BufRead *.svelte set ft=html

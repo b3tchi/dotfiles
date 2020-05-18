@@ -1,6 +1,12 @@
 " let g:python3_host_prog = '/usr/bin/python3'
 " let g:coc_global_extensions = ['coc-explorer', 'coc-json', 'coc-tsserver', 'coc-tslint-plugin', 'coc-highlight', 'coc-snippets', 'coc-template', 'coc-html', 'coc-css', 'coc-emmet', 'coc-python', 'coc-phpls', 'coc-angular', 'coc-git']
 "" No CocPython removed other not needed modules 
+
+""Disable some of the modeles like python2
+let g:loaded_python_provider = 0
+let g:loaded_ruby_provider = 0
+let g:loaded_perl_provider = 0
+
 let g:coc_global_extensions = [
   \ 'coc-explorer' 
   \ , 'coc-json'
