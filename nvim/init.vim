@@ -19,7 +19,6 @@ if dein#load_state('~/.cache/dein')
   " call dein#add('Yggdroot/indentLine')
   call dein#add('nathanaelkane/vim-indent-guides') "indenting guides
   call dein#add('jeffkreeftmeijer/vim-numbertoggle')		"hybrid/static number toggle when multiple windows
-  call dein#add('cohama/lexima.vim')						"autoclosing pairs
   call dein#add('itchyny/lightline.vim')
   call dein#add('mengelbrecht/lightline-bufferline')
   call dein#add('google/vim-searchindex')
@@ -27,9 +26,10 @@ if dein#load_state('~/.cache/dein')
   call dein#add('junegunn/fzf', {'build': './install --all', 'merged': 0})
   call dein#add('junegunn/fzf.vim', {'depends': 'fzf'})
 
-  call dein#add('scrooloose/nerdcommenter')
-  " call dein#add('tpope/vim-commentary') "comments gcc
-  call dein#add('tmsvg/pear-tree')
+  ""Autoclosing pairs""
+  call dein#add('cohama/lexima.vim')
+  "call dein#add('tmsvg/pear-tree') "getting some issues for the function disabled
+
   call dein#add('editorconfig/editorconfig-vim')
 
   "mapping help file TBD to make mappings
@@ -57,7 +57,13 @@ if dein#load_state('~/.cache/dein')
 
   " Svelte
   call dein#add('evanleck/vim-svelte')
-  call dein#add('Shougo/context_filetype.vim')
+
+  " Support for comments symbol by language regions Svelte & Html
+  call dein#add('Shougo/context_filetype.vim') "language regions in files
+  call dein#add('tyru/caw.vim') "comments with context regions
+  " call dein#add('b3tchi/caw.vim') "comments with context regions
+  " call dein#add('scrooloose/nerdcommenter')
+  " call dein#add('tpope/vim-commentary') "comments gcc
 
   "syntax highlighting
   call dein#add('sheerun/vim-polyglot')
@@ -420,6 +426,3 @@ autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#073642 ctermbg=4
 
 " --- Vim Test ---
 let g:test#strategy = 'neovim'
-
-" --- Svelte files reading ---
-au! BufNewFile,BufRead *.svelte set ft=html
