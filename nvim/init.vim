@@ -58,23 +58,28 @@ if dein#load_state('~/.cache/dein')
   " Svelte
   call dein#add('evanleck/vim-svelte')
 
+  " Another Comment Pluging with HTML region support
+  call dein#add('tomtom/tcomment_vim')
+
   " Support for comments symbol by language regions Svelte & Html
   call dein#add('Shougo/context_filetype.vim') "language regions in files
-  call dein#add('tyru/caw.vim') "comments with context regions
-  " call dein#add('b3tchi/caw.vim') "comments with context regions
+  " call dein#add('tyru/caw.vim') "comments with context regions
+  " " call dein#add('b3tchi/caw.vim') "comments with context regions addition for svelte TEST
+
+  ""Comments old plugings
   " call dein#add('scrooloose/nerdcommenter')
   " call dein#add('tpope/vim-commentary') "comments gcc
 
   "syntax highlighting
   call dein#add('sheerun/vim-polyglot')
 
-  call dein#add('janko-m/vim-test')
+  "call dein#add('janko-m/vim-test')
   "call dein#add('neomake/neomake')
 
   " themes
-  call dein#add('kaicataldo/material.vim')
-  call dein#add('altercation/vim-colors-solarized')
-  call dein#add('iCyMind/NeoSolarized')
+  " call dein#add('kaicataldo/material.vim')
+  " call dein#add('altercation/vim-colors-solarized')
+  " call dein#add('iCyMind/NeoSolarized')
   call dein#add('lifepillar/vim-solarized8')
 
   " Required:
@@ -427,5 +432,19 @@ autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#073642 ctermbg=4
 " --- Vim Test ---
 let g:test#strategy = 'neovim'
 
-" --- Svelte files reading --- 
+" --- Svelte filetypes specific ---
+if !exists('g:context_filetype#filetypes')
+  let g:context_filetype#filetypes = {}
+endif
+let g:context_filetype#filetypes.svelte =
+\ [
+\ {'filetype' : 'javascript', 'start' : '<script>', 'end' : '</script>'}
+\ ,{'filetype' : 'css', 'start' : '<style>', 'end' : '</style>'}
+\ ]
+
+if !exists('g:context_filetype#same_filetypes')
+  let g:context_filetype#same_filetypes = {}
+endif
+let g:context_filetype#same_filetypes.svelte = 'html'
+
 "au! BufNewFile,BufRead *.svelte set ft=html

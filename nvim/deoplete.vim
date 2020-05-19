@@ -4,13 +4,13 @@ let g:deoplete#enable_at_startup = 1
 autocmd InsertLeave,CompleteDone * if pumvisible() == 0 | pclose | endif
 
 " inoremap <expr><tab> pumvisible() ? "\<c-n>" : "\<tab>"
-"imap <expr><TAB>
-  "\ pumvisible() ? "\<C-n>" :
-  "\ neosnippet#expandable_or_jumpable() ?
-  "\    "\<Plug>(neosnippet_expand_or_jump)" : "\<TAB>"
-"smap <expr><TAB> neosnippet#expandable_or_jumpable() ?
-  "\ "\<Plug>(neosnippet_expand_or_jump)" : "\<TAB>"
-
+" imap <expr><TAB>
+"   \ pumvisible() ? "\<C-n>" :
+"   \ neosnippet#expandable_or_jumpable() ?
+"   \    "\<Plug>(neosnippet_expand_or_jump)" : "\<TAB>"
+" smap <expr><TAB> neosnippet#expandable_or_jumpable() ?
+"   \ "\<Plug>(neosnippet_expand_or_jump)" : "\<TAB>"
+"
 let g:deoplete#sources#jedi#show_docstring = 1
 
 ""ALE""
@@ -42,25 +42,6 @@ command! ALEToggleFixer execute "let g:ale_fix_on_save = get(g:, 'ale_fix_on_sav
 
 let g:ale_linter_aliases = {'svelte': ['css', 'javascript']}
 let g:ale_linters = {'svelte': ['stylelint', 'eslint']}
-
-" --- Svelte files reading ---
-" au! BufNewFile,BufRead *.svelte set ft=html
-" Svelte
-if !exists('g:context_filetype#filetypes')
-  let g:context_filetype#filetypes = {}
-endif
-let g:context_filetype#filetypes.svelte =
-\ [
-\ {'filetype' : 'javascript', 'start' : '<script>', 'end' : '</script>'}
-\ ,{'filetype' : 'css', 'start' : '<style>', 'end' : '</style>'}
-"\ ,{'filetype' : 'html', 'start' : '<component>', 'end' : '</component>'}
-\ ]
- "\ ,{'filetype' : 'html', 'start' : '<main>', 'end' : '</main>'}
-
-" if !exists('g:context_filetype#same_filetypes')
-"   let g:context_filetype#same_filetypes = {}
-" endif
-" let g:context_filetype#same_filetypes.svelte = 'html'
 
 ""CSS Autocompletion""
 call deoplete#custom#var('omni', 'functions', {
