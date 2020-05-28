@@ -2,7 +2,7 @@
 Host github.com
     HostName github.com 
     User beckaja1@gmail.com
-    IdentityFile /home/jan/.ssh/id_rsa_git
+    IdentityFile ~/.ssh/id_rsa_git
 
 Host gitlab.com
-    IdentityFile /home/jan/.ssh/id_rsa_git
+    IdentityFile ~/.ssh/id_rsa_git
