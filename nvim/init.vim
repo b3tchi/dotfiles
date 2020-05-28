@@ -7,85 +7,101 @@ set runtimepath+=~/.cache/dein/repos/github.com/Shougo/dein.vim
 
 " let useCoc = 1
 let lspClient = 2 "1 for coc-nvim, 2 for deoplete (WIP), -1 non Lsp Client (TBD)
+let vimplug_exists=expand('~/.vim/autoload/plug.vim')
+
+if !filereadable(vimplug_exists)
+  if !executable("curl")
+    echoerr "You have to install curl or first install vim-plug yourself!"
+    execute "q!"
+  endif
+  echo "Installing Vim-Plug..."
+  echo ""
+  silent exec "!\curl -fLo " . vimplug_exists . " --create-dirs https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim"
+  let g:not_finish_vimplug = "yes"
+
+  autocmd VimEnter * PlugInstall
+endif
 
 " Required:
-if dein#load_state('~/.cache/dein')
-  call dein#begin('~/.cache/dein')
+call plug#begin(expand('~/.vim/plugged'))
+" #cf dein#load_state('~/.cache/dein')
+" #Plug '~/.cache/dein
 
   " Required:
-  call dein#add('~/.cache/dein/repos/github.com/Shougo/dein.vim')
+  " Plug '~/.cache/dein/repos/github.com/Shougo/dein.vim'
 
-  call dein#add('liuchengxu/vista.vim')
-  " call dein#add('Yggdroot/indentLine')
-  call dein#add('nathanaelkane/vim-indent-guides') "indenting guides
-  call dein#add('jeffkreeftmeijer/vim-numbertoggle')		"hybrid/static number toggle when multiple windows
-  call dein#add('itchyny/lightline.vim')
-  call dein#add('mengelbrecht/lightline-bufferline')
-  call dein#add('google/vim-searchindex')
-  call dein#add('mhinz/vim-startify') "fancty start screen for VIM
-  call dein#add('junegunn/fzf', {'build': './install --all', 'merged': 0})
-  call dein#add('junegunn/fzf.vim', {'depends': 'fzf'})
+  Plug 'liuchengxu/vista.vim'
+  " Plug 'Yggdroot/indentLine'
+  Plug 'nathanaelkane/vim-indent-guides' "indenting guides
+  Plug 'jeffkreeftmeijer/vim-numbertoggle'		"hybrid/static number toggle when multiple windows
+  Plug 'itchyny/lightline.vim'
+  Plug 'mengelbrecht/lightline-bufferline'
+  Plug 'google/vim-searchindex'
+  Plug 'mhinz/vim-startify' "fancty start screen for VIM
+  Plug 'junegunn/fzf', {'build': './install --all', 'merged': 0}
+  Plug 'junegunn/fzf.vim', {'depends': 'fzf'}
 
   ""Autoclosing pairs""
-  call dein#add('cohama/lexima.vim')
-  "call dein#add('tmsvg/pear-tree') "getting some issues for the function disabled
+  Plug 'cohama/lexima.vim'
+  "Plug 'tmsvg/pear-tree' "getting some issues for the function disabled
 
-  call dein#add('editorconfig/editorconfig-vim')
+  Plug 'editorconfig/editorconfig-vim'
 
   "mapping help file TBD to make mappings
-  call dein#add('liuchengxu/vim-which-key')
+  Plug 'liuchengxu/vim-which-key'
 
   "git
-  call dein#add('tpope/vim-fugitive') "git intergration
-  call dein#add('airblade/vim-gitgutter') "git intergration
+  Plug 'tpope/vim-fugitive' "git intergration
+  Plug 'airblade/vim-gitgutter' "git intergration
 
   if lspClient == 1
-    call dein#add('neoclide/coc.nvim', {'merge': 0, 'rev': 'release'})
-    " call dein#add('neoclide/coc.nvim', {'merge':0, 'build': './install.sh nightly'})
-    " call dein#add('mgedmin/python-imports.vim', { 'on_ft' : 'python' })
+    Plug 'neoclide/coc.nvim', {'merge': 0, 'rev': 'release'}
+    " Plug 'neoclide/coc.nvim', {'merge':0, 'build': './install.sh nightly'}
+    " Plug 'mgedmin/python-imports.vim', { 'on_ft' : 'python' }
   elseif lspClient == 2
 
-    call dein#add('Shougo/deoplete.nvim')
+    Plug 'Shougo/deoplete.nvim'
     if !has('nvim')
-      call dein#add('roxma/nvim-yarp')
-      call dein#add('roxma/vim-hug-neovim-rpc')
+      Plug 'roxma/nvim-yarp'
+      Plug 'roxma/vim-hug-neovim-rpc'
     endif
     let g:deoplete#enable_at_startup = 1
 
-    call dein#add('dense-analysis/ale')
+    Plug 'dense-analysis/ale'
   endif
 
   " Svelte
-  call dein#add('evanleck/vim-svelte')
+  Plug 'evanleck/vim-svelte'
 
   " Another Comment Pluging with HTML region support
-  call dein#add('tomtom/tcomment_vim')
+  Plug 'tomtom/tcomment_vim'
 
   " Support for comments symbol by language regions Svelte & Html
-  call dein#add('Shougo/context_filetype.vim') "language regions in files
-  " call dein#add('tyru/caw.vim') "comments with context regions
-  " " call dein#add('b3tchi/caw.vim') "comments with context regions addition for svelte TEST
+  Plug 'Shougo/context_filetype.vim' "language regions in files
+  " Plug 'tyru/caw.vim' "comments with context regions
+  " " Plug 'b3tchi/caw.vim' "comments with context regions addition for svelte TEST
 
   ""Comments old plugings
-  " call dein#add('scrooloose/nerdcommenter')
-  " call dein#add('tpope/vim-commentary') "comments gcc
+  " Plug 'scrooloose/nerdcommenter'
+  " Plug 'tpope/vim-commentary' "comments gcc
 
   "syntax highlighting
-  call dein#add('sheerun/vim-polyglot')
+  Plug 'sheerun/vim-polyglot'
 
-  "call dein#add('janko-m/vim-test')
-  "call dein#add('neomake/neomake')
+  "Plug 'janko-m/vim-test'
+  "Plug 'neomake/neomake'
 
   " themes
-  " call dein#add('kaicataldo/material.vim')
-  " call dein#add('altercation/vim-colors-solarized')
-  " call dein#add('iCyMind/NeoSolarized')
-  call dein#add('lifepillar/vim-solarized8')
+  " Plug 'kaicataldo/material.vim'
+  " Plug 'altercation/vim-colors-solarized'
+  " Plug 'iCyMind/NeoSolarized'
+  Plug 'lifepillar/vim-solarized8'
 
   " Required:
-  call dein#end()
-  call dein#save_state()
-endif
+  call plug#end()
+  " #call dein#endcall plug#end()(call plug#end(call plug#end()))
+  " #call dein#save_state()
+  " #endif
 
 " Required:
 filetype plugin indent on
@@ -95,11 +111,11 @@ set noshowmode " INSERT déjà affiché par lightbar
 autocmd FileType vista,coc-explorer setlocal signcolumn=no
 
 " If you want to install not installed plugins on startup.
-call dein#recache_runtimepath() " remove unused unloaded
+" #call dein#recache_runtimepath() " remove unused unloaded
 
-if dein#check_install()
-  call dein#install()
-endif
+" #if dein#check_install()
+  " #call dein#install()
+  " #endif
 
 if lspClient == 1
   source ~/.config/nvim/coc.vim
