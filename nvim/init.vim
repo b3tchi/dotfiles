@@ -6,7 +6,7 @@ endif
 " set runtimepath+=~/.cache/dein/repos/github.com/Shougo/dein.vim
 
 " let useCoc = 1
-let lspClient = 2 "1 for coc-nvim, 2 for deoplete (WIP), -1 non Lsp Client (TBD)
+let lspClient = 1 "1 for coc-nvim, 2 for deoplete (WIP), -1 non Lsp Client (TBD)
 let vimTheme = 2 "1 solarized8, 2 gruvbox
 
 
@@ -27,12 +27,8 @@ endif
 
 " Required:
 call plug#begin(expand('~/.vim/plugged'))
-  " #cf dein#load_state('~/.cache/dein')
-  " #Plug '~/.cache/dein
 
   " Required:
-  " Plug '~/.cache/dein/repos/github.com/Shougo/dein.vim'
-
   Plug 'liuchengxu/vista.vim'
   " Plug 'Yggdroot/indentLine'
   Plug 'nathanaelkane/vim-indent-guides' "indenting guides
@@ -58,7 +54,8 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'airblade/vim-gitgutter' "git intergration
 
   if lspClient == 1
-    Plug 'neoclide/coc.nvim', {'merge': 0, 'rev': 'release'}
+    " Plug 'neoclide/coc.nvim', {'merge': 0, 'rev': 'release'}
+    Plug 'neoclide/coc.nvim', {'do': 'yarn install --frozen-lockfile'}
     " Plug 'neoclide/coc.nvim', {'merge':0, 'build': './install.sh nightly'}
     " Plug 'mgedmin/python-imports.vim', { 'on_ft' : 'python' }
   elseif lspClient == 2
@@ -118,8 +115,8 @@ autocmd FileType vista,coc-explorer setlocal signcolumn=no
 " #call dein#recache_runtimepath() " remove unused unloaded
 
 " #if dein#check_install()
-  " #call dein#install()
-  " #endif
+" #call dein#install()
+" #endif
 
 if lspClient == 1
   source ~/.config/nvim/coc.vim
@@ -193,7 +190,7 @@ au BufEnter * set fo-=c fo-=r fo-=o                     " stop annying auto comm
 " let g:solarized_termcolors=256
 
 "" solarized8 theme
-if vimTheme == 1 
+if vimTheme == 1
   set termguicolors
   set background=dark
   colorscheme solarized8

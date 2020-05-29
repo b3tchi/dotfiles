@@ -1,6 +1,7 @@
 " let g:python3_host_prog = '/usr/bin/python3'
-" let g:coc_global_extensions = ['coc-explorer', 'coc-json', 'coc-tsserver', 'coc-tslint-plugin', 'coc-highlight', 'coc-snippets', 'coc-template', 'coc-html', 'coc-css', 'coc-emmet', 'coc-python', 'coc-phpls', 'coc-angular', 'coc-git']
 "" No CocPython removed other not needed modules 
+"" Node path to specify if needed
+" let g:coc_node_path = '/c/Program Files/nodejs/node'
 
 ""Disable some of the modeles like python2
 let g:loaded_python_provider = 0
