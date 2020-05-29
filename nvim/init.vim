@@ -3,10 +3,13 @@ if &compatible
 endif
 
 " Required:
-set runtimepath+=~/.cache/dein/repos/github.com/Shougo/dein.vim
+" set runtimepath+=~/.cache/dein/repos/github.com/Shougo/dein.vim
 
 " let useCoc = 1
 let lspClient = 2 "1 for coc-nvim, 2 for deoplete (WIP), -1 non Lsp Client (TBD)
+let vimTheme = 2 "1 solarized8, 2 gruvbox
+
+
 let vimplug_exists=expand('~/.vim/autoload/plug.vim')
 
 if !filereadable(vimplug_exists)
@@ -24,8 +27,8 @@ endif
 
 " Required:
 call plug#begin(expand('~/.vim/plugged'))
-" #cf dein#load_state('~/.cache/dein')
-" #Plug '~/.cache/dein
+  " #cf dein#load_state('~/.cache/dein')
+  " #Plug '~/.cache/dein
 
   " Required:
   " Plug '~/.cache/dein/repos/github.com/Shougo/dein.vim'
@@ -96,12 +99,13 @@ call plug#begin(expand('~/.vim/plugged'))
   " Plug 'altercation/vim-colors-solarized'
   " Plug 'iCyMind/NeoSolarized'
   Plug 'lifepillar/vim-solarized8'
+  Plug 'morhetz/gruvbox'
 
   " Required:
-  call plug#end()
-  " #call dein#endcall plug#end()(call plug#end(call plug#end()))
-  " #call dein#save_state()
-  " #endif
+call plug#end()
+" #call dein#endcall plug#end()(call plug#end(call plug#end()))
+" #call dein#save_state()
+" #endif
 
 " Required:
 filetype plugin indent on
@@ -189,9 +193,17 @@ au BufEnter * set fo-=c fo-=r fo-=o                     " stop annying auto comm
 " let g:solarized_termcolors=256
 
 "" solarized8 theme
-set termguicolors
-set background=dark
-colorscheme solarized8
+if vimTheme == 1 
+  set termguicolors
+  set background=dark
+  colorscheme solarized8
+
+"" gruvbox theme
+elseif vimTheme == 2
+  set termguicolors
+  set background=dark
+  colorscheme gruvbox
+endif
 
 
 " hi Normal guibg=NONE
@@ -338,7 +350,7 @@ endif
 
 " --- lightline ---
 let g:lightline = {
-  \ 'colorscheme': 'solarized',
+  \ 'colorscheme': 'gruvbox',
   \ 'active': {
   \     'left': [ [ 'mode', 'paste' ],
   \               [ 'cocstatus','winnr'],
@@ -433,10 +445,11 @@ let g:startify_bookmarks = ['~/svn', '~/dev']
 "--- indentGuide ---
 " let g:indent_guides_color_change_percent = 3 " for auto options left 5 percent only
 "color form solarized8
-let g:indent_guides_auto_colors = 0
-autocmd VimEnter,Colorscheme * :hi IndentGuidesOdd  guibg=#002b36 ctermbg=3
-autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#073642 ctermbg=4
-
+if vimTheme == 1
+  let g:indent_guides_auto_colors = 0
+  autocmd VimEnter,Colorscheme * :hi IndentGuidesOdd  guibg=#002b36 ctermbg=3
+  autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#073642 ctermbg=4
+endif
 "--- indentLine ---
 " let g:indentLine_char               = "⎸"
 " let g:indentLine_faster             = 1
