@@ -55,7 +55,8 @@ call plug#begin(expand('~/.vim/plugged'))
 
   if lspClient == 1
     " Plug 'neoclide/coc.nvim', {'merge': 0, 'rev': 'release'}
-    Plug 'neoclide/coc.nvim', {'do': 'yarn install --frozen-lockfile'}
+    Plug 'neoclide/coc.nvim', {'branch': 'release'}
+    " Plug 'neoclide/coc.nvim', {'do': 'yarn install --frozen-lockfile'}
     " Plug 'neoclide/coc.nvim', {'merge':0, 'build': './install.sh nightly'}
     " Plug 'mgedmin/python-imports.vim', { 'on_ft' : 'python' }
   elseif lspClient == 2
