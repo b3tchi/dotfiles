@@ -4,7 +4,6 @@ endif
 
 " Required:
 " set runtimepath+=~/.cache/dein/repos/github.com/Shougo/dein.vim
-
 " let useCoc = 1
 let lspClient = 1 "1 for coc-nvim, 2 for deoplete (WIP), -1 non Lsp Client (TBD)
 let vimTheme = 2 "1 solarized8, 2 gruvbox
@@ -61,14 +60,14 @@ call plug#begin(expand('~/.vim/plugged'))
     " Plug 'neoclide/coc.nvim', {'merge':0, 'build': './install.sh nightly'}
     " Plug 'mgedmin/python-imports.vim', { 'on_ft' : 'python' }
   elseif lspClient == 2
-
+  
     Plug 'Shougo/deoplete.nvim'
     if !has('nvim')
       Plug 'roxma/nvim-yarp'
       Plug 'roxma/vim-hug-neovim-rpc'
     endif
-    let g:deoplete#enable_at_startup = 1
 
+    let g:deoplete#enable_at_startup = 1
     Plug 'dense-analysis/ale'
   endif
 
@@ -224,9 +223,9 @@ noremap <F5> :ImportName<cr>:w<cr>:!isort %<cr>:e %<cr>
 noremap! <F5> <esc>:ImportName<cr>:w<cr>:!isort %<cr>:e %<cr>a
 
 "" various escapes insert mode
-inoremap jk <esc>
-cnoremap jk <c-c>
-tnoremap jk <C-\><C-n>
+inoremap jj <esc>
+cnoremap jj <c-c>
+tnoremap jj <C-\><C-n>
 tnoremap <Esc> <C-\><C-n>
 
 "" commenting keybindings
@@ -454,6 +453,8 @@ let g:indentLine_char               = "⎸"
 let g:indentLine_faster             = 1
 let g:indentLine_fileTypeExclude    = ['json',  'startify', '', 'help', 'coc-explorer']
 let g:indentLine_setConceal = 1
+set conceallevel=1
+let g:indentLine_conceallevel=1
 " let g:indentLine_leadingSpaceEnabled = 1
 " let g:indentLine_leadingSpaceChar   = '·'
 
