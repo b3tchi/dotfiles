@@ -21,14 +21,12 @@ if !filereadable(vimplug_exists)
   echo ""
   silent exec "!\curl -fLo " . vimplug_exists . " --create-dirs https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim"
   let g:not_finish_vimplug = "yes"
-
   autocmd VimEnter * PlugInstall
 endif
 
 " Required:
-call plug#begin(expand('~/.vim/plugged'))
 
-  " Required:
+call plug#begin(expand('~/.vim/plugged'))
   Plug 'liuchengxu/vista.vim'
 
   Plug 'Yggdroot/indentLine'
@@ -374,8 +372,6 @@ let g:lightline#bufferline#unnamed      = '[No Name]'
 let g:lightline#bufferline#enable_devicons = 1
 let g:lightline#bufferline#unicode_symbols = 1
 
-"--- Indent Guides ---
-" let g:indent_guides_enable_on_vim_startup = 1
 
 "--- Vista ---
 let g:vista_default_executive = 'coc'
@@ -436,11 +432,12 @@ endfunction
 "--- startify ---
 let g:startify_bookmarks = ['~/svn', '~/dev']
 
-"--- indentGuide ---
-" let g:indent_guides_color_change_percent = 3 " for auto options left 5 percent only
-"color form solarized8
+"--- Indent Guides ---
+" let g:indent_guides_enable_on_vim_startup = 1
 " let g:indent_guides_auto_colors = 0
+"" let g:indent_guides_color_change_percent = 3 " for auto options left 5 percent only
 "
+""color form solarized8
 " if vimTheme == 1
 "   autocmd VimEnter,Colorscheme * :hi IndentGuidesOdd  guibg=#002b36 ctermbg=3
 "   autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#073642 ctermbg=4
@@ -452,13 +449,13 @@ let g:startify_bookmarks = ['~/svn', '~/dev']
 " endif
 
 
-"--- indentLine ---
+"--- Indent Line ---
 let g:indentLine_char               = "⎸"
 let g:indentLine_faster             = 1
 let g:indentLine_fileTypeExclude    = ['json',  'startify', '', 'help', 'coc-explorer']
+let g:indentLine_setConceal = 1
 " let g:indentLine_leadingSpaceEnabled = 1
 " let g:indentLine_leadingSpaceChar   = '·'
-let g:indentLine_setConceal = -1
 
 " --- Vim Test ---
 let g:test#strategy = 'neovim'
