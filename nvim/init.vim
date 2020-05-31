@@ -30,8 +30,11 @@ call plug#begin(expand('~/.vim/plugged'))
 
   " Required:
   Plug 'liuchengxu/vista.vim'
-  " Plug 'Yggdroot/indentLine'
-  Plug 'nathanaelkane/vim-indent-guides' "indenting guides
+
+  Plug 'Yggdroot/indentLine'
+  Plug 'lukas-reineke/indent-blankline.nvim'
+
+  " Plug 'nathanaelkane/vim-indent-guides' "indenting guides
   Plug 'jeffkreeftmeijer/vim-numbertoggle'		"hybrid/static number toggle when multiple windows
   Plug 'itchyny/lightline.vim'
   Plug 'mengelbrecht/lightline-bufferline'
@@ -101,9 +104,6 @@ call plug#begin(expand('~/.vim/plugged'))
 
   " Required:
 call plug#end()
-" #call dein#endcall plug#end()(call plug#end(call plug#end()))
-" #call dein#save_state()
-" #endif
 
 " Required:
 filetype plugin indent on
@@ -111,13 +111,6 @@ syntax on
 set noshowmode " INSERT déjà affiché par lightbar
 
 autocmd FileType vista,coc-explorer setlocal signcolumn=no
-
-" If you want to install not installed plugins on startup.
-" #call dein#recache_runtimepath() " remove unused unloaded
-
-" #if dein#check_install()
-" #call dein#install()
-" #endif
 
 if lspClient == 1
   source ~/.config/nvim/coc.vim
@@ -201,6 +194,8 @@ elseif vimTheme == 2
   set termguicolors
   set background=dark
   colorscheme gruvbox
+
+  highlight Folded guibg=#232323
 endif
 
 
@@ -233,6 +228,7 @@ noremap! <F5> <esc>:ImportName<cr>:w<cr>:!isort %<cr>:e %<cr>a
 "" various escapes insert mode
 inoremap jk <esc>
 cnoremap jk <c-c>
+tnoremap jk <C-\><C-n>
 tnoremap <Esc> <C-\><C-n>
 
 "" commenting keybindings
@@ -379,7 +375,7 @@ let g:lightline#bufferline#enable_devicons = 1
 let g:lightline#bufferline#unicode_symbols = 1
 
 "--- Indent Guides ---
-let g:indent_guides_enable_on_vim_startup = 1
+" let g:indent_guides_enable_on_vim_startup = 1
 
 "--- Vista ---
 let g:vista_default_executive = 'coc'
@@ -443,18 +439,26 @@ let g:startify_bookmarks = ['~/svn', '~/dev']
 "--- indentGuide ---
 " let g:indent_guides_color_change_percent = 3 " for auto options left 5 percent only
 "color form solarized8
-if vimTheme == 1
-  let g:indent_guides_auto_colors = 0
-  autocmd VimEnter,Colorscheme * :hi IndentGuidesOdd  guibg=#002b36 ctermbg=3
-  autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#073642 ctermbg=4
-endif
+" let g:indent_guides_auto_colors = 0
+"
+" if vimTheme == 1
+"   autocmd VimEnter,Colorscheme * :hi IndentGuidesOdd  guibg=#002b36 ctermbg=3
+"   autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#073642 ctermbg=4
+"
+" elseif vimTheme == 2
+"   autocmd VimEnter,Colorscheme * :hi IndentGuidesOdd  guibg=#282828 ctermbg=3
+"   autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#3c3836 ctermbg=4
+"
+" endif
+
+
 "--- indentLine ---
-" let g:indentLine_char               = "⎸"
-" let g:indentLine_faster             = 1
-" let g:indentLine_fileTypeExclude    = ['json',  'startify', '', 'help', 'coc-explorer']
+let g:indentLine_char               = "⎸"
+let g:indentLine_faster             = 1
+let g:indentLine_fileTypeExclude    = ['json',  'startify', '', 'help', 'coc-explorer']
 " let g:indentLine_leadingSpaceEnabled = 1
 " let g:indentLine_leadingSpaceChar   = '·'
-" let g:indentLine_setConceal = -1
+let g:indentLine_setConceal = -1
 
 " --- Vim Test ---
 let g:test#strategy = 'neovim'
