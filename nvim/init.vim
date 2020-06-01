@@ -26,26 +26,30 @@ endif
 " Required:
 
 call plug#begin(expand('~/.vim/plugged'))
-  Plug 'liuchengxu/vista.vim'
+  ""Indenting lines
+  " Plug 'Yggdroot/indentLine'
+  " Plug 'thaerkh/vim-indentguides'
 
-  Plug 'Yggdroot/indentLine'
-  Plug 'lukas-reineke/indent-blankline.nvim'
+  " Plug 'lukas-reineke/indent-blankline.nvim'
+  Plug 'nathanaelkane/vim-indent-guides' "indenting guides
 
-  " Plug 'nathanaelkane/vim-indent-guides' "indenting guides
+  ""General Vim Plugins
   Plug 'jeffkreeftmeijer/vim-numbertoggle'		"hybrid/static number toggle when multiple windows
-  Plug 'itchyny/lightline.vim'
-  Plug 'mengelbrecht/lightline-bufferline'
   Plug 'google/vim-searchindex'
   Plug 'mhinz/vim-startify' "fancty start screen for VIM
+
+  ""Searching
   Plug 'junegunn/fzf', {'build': './install --all', 'merged': 0}
   Plug 'junegunn/fzf.vim', {'depends': 'fzf'}
+
+  ""LightLine
+  Plug 'itchyny/lightline.vim'
+  Plug 'mengelbrecht/lightline-bufferline'
 
   ""Autoclosing pairs""
   Plug 'cohama/lexima.vim'
   "Plug 'tmsvg/pear-tree' "getting some issues for the function disabled
-
   Plug 'editorconfig/editorconfig-vim'
-
   "mapping help file TBD to make mappings
   Plug 'liuchengxu/vim-which-key'
 
@@ -56,17 +60,16 @@ call plug#begin(expand('~/.vim/plugged'))
   if lspClient == 1
     " Plug 'neoclide/coc.nvim', {'merge': 0, 'rev': 'release'}
     Plug 'neoclide/coc.nvim', {'branch': 'release'}
+    Plug 'liuchengxu/vista.vim'
     " Plug 'neoclide/coc.nvim', {'do': 'yarn install --frozen-lockfile'}
     " Plug 'neoclide/coc.nvim', {'merge':0, 'build': './install.sh nightly'}
     " Plug 'mgedmin/python-imports.vim', { 'on_ft' : 'python' }
   elseif lspClient == 2
-  
     Plug 'Shougo/deoplete.nvim'
     if !has('nvim')
       Plug 'roxma/nvim-yarp'
       Plug 'roxma/vim-hug-neovim-rpc'
     endif
-
     let g:deoplete#enable_at_startup = 1
     Plug 'dense-analysis/ale'
   endif
@@ -76,11 +79,13 @@ call plug#begin(expand('~/.vim/plugged'))
 
   " Another Comment Pluging with HTML region support
   Plug 'tomtom/tcomment_vim'
+  "" White Space Highlighter
+  Plug 'ntpeters/vim-better-whitespace'
 
   " Support for comments symbol by language regions Svelte & Html
   Plug 'Shougo/context_filetype.vim' "language regions in files
   " Plug 'tyru/caw.vim' "comments with context regions
-  " " Plug 'b3tchi/caw.vim' "comments with context regions addition for svelte TEST
+  " Plug 'b3tchi/caw.vim' "comments with context regions addition for svelte TEST
 
   ""Comments old plugings
   " Plug 'scrooloose/nerdcommenter'
@@ -127,13 +132,20 @@ set hidden
 set cmdheight=3
 set updatetime=300
 set completeopt=noinsert,menuone,preview
-set tabstop=2 softtabstop=2 expandtab shiftwidth=2
 set splitright splitbelow
 set numberwidth=1
-set listchars=tab:→\ ,nbsp:␣,trail:•,extends:⟩,precedes:⟨
+" set listchars=tab:→\ ,nbsp:␣,trail:•,extends:⟩,precedes:⟨
 
 "" Define folding
 set foldmethod=indent
+" set foldmethod=syntax
+set foldignore=
+set tabstop=2
+set softtabstop=2
+set expandtab
+set shiftwidth=2
+" set listchars=tab:\|\
+" set list
 
 " Traverse line breaks with arrow keys
 set whichwrap=b,s,<,>,[,]
@@ -185,7 +197,6 @@ if vimTheme == 1
   set termguicolors
   set background=dark
   colorscheme solarized8
-
 "" gruvbox theme
 elseif vimTheme == 2
   set termguicolors
@@ -226,7 +237,8 @@ noremap! <F5> <esc>:ImportName<cr>:w<cr>:!isort %<cr>:e %<cr>a
 inoremap jj <esc>
 cnoremap jj <c-c>
 tnoremap jj <C-\><C-n>
-tnoremap <Esc> <C-\><C-n>
+" nmap <space><space> <Esc>
+" tnoremap <Esc> <C-\><C-n>
 
 "" commenting keybindings
 nmap <space>cl <leader>c<space>
@@ -238,16 +250,16 @@ nmap <space>cP vip<leader>cc
 nmap <space>ct vat<leader>c<space>
 
 "" navigating widows by spaces + number
-nnoremap <space>1 :exe 1 . "wincmd w"<CR>
-nnoremap <space>2 :exe 2 . "wincmd w"<CR>
-nnoremap <space>3 :exe 3 . "wincmd w"<CR>
-nnoremap <space>4 :exe 4 . "wincmd w"<CR>
-nnoremap <space>5 :exe 5 . "wincmd w"<CR>
-nnoremap <space>6 :exe 6 . "wincmd w"<CR>
-nnoremap <space>7 :exe 7 . "wincmd w"<CR>
-nnoremap <space>8 :exe 8 . "wincmd w"<CR>
-nnoremap <space>9 :exe 9 . "wincmd w"<CR>
-nnoremap <space>0 :exe 10 . "wincmd w"<CR>
+nnoremap <silent><space>1 :exe 1 . "wincmd w"<CR>
+nnoremap <silent><space>2 :exe 2 . "wincmd w"<CR>
+nnoremap <silent><space>3 :exe 3 . "wincmd w"<CR>
+nnoremap <silent><space>4 :exe 4 . "wincmd w"<CR>
+nnoremap <silent><space>5 :exe 5 . "wincmd w"<CR>
+nnoremap <silent><space>6 :exe 6 . "wincmd w"<CR>
+nnoremap <silent><space>7 :exe 7 . "wincmd w"<CR>
+nnoremap <silent><space>8 :exe 8 . "wincmd w"<CR>
+nnoremap <silent><space>9 :exe 9 . "wincmd w"<CR>
+nnoremap <silent><space>0 :exe 10 . "wincmd w"<CR>
 
 "" indentation
 "nnoremap > >>_
@@ -316,14 +328,12 @@ if lspClient == 1
     \ coc#refresh()
   inoremap <expr><S-TAB> pumvisible() ? "\<C-p>" : "\<C-h>"
   inoremap <expr> <cr> pumvisible() ? "\<C-y>" : "\<C-g>u\<CR>"
-
 endif
 " ----------------------------------
 " --------- Plugins config ---------
 " ----------------------------------
 
 function s:check_back_space() abort
-
   let col = col('.') - 1
   return !col || getline('.')[col - 1]  =~# '\s'
 endfunction
@@ -347,9 +357,9 @@ let g:lightline = {
   \               [ 'cocstatus','winnr'],
   \               [ 'readonly','filename', 'modified' ] ],
   \ },
-  \	'inactive': {
-  \	     'left': [ ['winnr'] ,
-  \                ['filename' ] ]
+  \'inactive': {
+  \     'left': [ ['winnr'] ,
+  \               ['filename' ] ]
   \ },
   \ 'component': {
   \   'winnr': '%{winnr()}',
@@ -376,9 +386,9 @@ let g:lightline#bufferline#unicode_symbols = 1
 let g:vista_default_executive = 'coc'
 let g:vista#renderer#enable_icon = 1
 let g:vista#renderer#icons = {
-\   "function": "\uf794",
-\   "variable": "\uf71b",
-\  }
+  \   "function": "\uf794",
+  \   "variable": "\uf71b",
+  \  }
 let g:vista_icon_indent = ["▸ ", ""]
 "g:vista_echo_cursor_strategy = 'both'
 
@@ -428,33 +438,32 @@ endfunction
 " let g:NERDSpaceDelims = 1
 " let g:NERDCompactSexyComs = 1
 
-"--- startify ---
-let g:startify_bookmarks = ['~/svn', '~/dev']
+"--- startify --- TODO
+" let g:startify_bookmarks = ['~/svn', '~/dev']
 
 "--- Indent Guides ---
-" let g:indent_guides_enable_on_vim_startup = 1
-" let g:indent_guides_auto_colors = 0
-"" let g:indent_guides_color_change_percent = 3 " for auto options left 5 percent only
-"
-""color form solarized8
-" if vimTheme == 1
-"   autocmd VimEnter,Colorscheme * :hi IndentGuidesOdd  guibg=#002b36 ctermbg=3
-"   autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#073642 ctermbg=4
-"
-" elseif vimTheme == 2
-"   autocmd VimEnter,Colorscheme * :hi IndentGuidesOdd  guibg=#282828 ctermbg=3
-"   autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#3c3836 ctermbg=4
-"
-" endif
+let g:indent_guides_enable_on_vim_startup = 1
+let g:indent_guides_auto_colors = 0
+" let g:indent_guides_color_change_percent = 3 " for auto options left 5 percent only
+
+"color form solarized8
+if vimTheme == 1
+  autocmd VimEnter,Colorscheme * :hi IndentGuidesOdd  guibg=#002b36 ctermbg=3
+  autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#073642 ctermbg=4
+elseif vimTheme == 2
+  autocmd VimEnter,Colorscheme * :hi IndentGuidesOdd  guibg=#282828 ctermbg=3
+  autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#3c3836 ctermbg=4
+endif
 
 
 "--- Indent Line ---
-let g:indentLine_char               = "⎸"
-let g:indentLine_faster             = 1
-let g:indentLine_fileTypeExclude    = ['json',  'startify', '', 'help', 'coc-explorer']
-let g:indentLine_setConceal = 1
-set conceallevel=1
-let g:indentLine_conceallevel=1
+" let g:indentLine_char               = "⎸"
+" let g:indentLine_faster             = 1
+" let g:indentLine_fileTypeExclude    = ['json',  'startify', '', 'help', 'coc-explorer']
+" let g:indentLine_setConceal = 1
+" set conceallevel=1
+" let g:indentLine_conceallevel=1
+"--- not used ---
 " let g:indentLine_leadingSpaceEnabled = 1
 " let g:indentLine_leadingSpaceChar   = '·'
 
@@ -466,10 +475,10 @@ if !exists('g:context_filetype#filetypes')
   let g:context_filetype#filetypes = {}
 endif
 let g:context_filetype#filetypes.svelte =
-\ [
-\ {'filetype' : 'javascript', 'start' : '<script>', 'end' : '</script>'}
-\ ,{'filetype' : 'css', 'start' : '<style>', 'end' : '</style>'}
-\ ]
+  \ [
+  \ {'filetype' : 'javascript', 'start' : '<script>', 'end' : '</script>'}
+  \ ,{'filetype' : 'css', 'start' : '<style>', 'end' : '</style>'}
+  \ ]
 
 if !exists('g:context_filetype#same_filetypes')
   let g:context_filetype#same_filetypes = {}
