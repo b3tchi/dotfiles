@@ -31,7 +31,8 @@ call plug#begin(expand('~/.vim/plugged'))
   " Plug 'thaerkh/vim-indentguides'
 
   " Plug 'lukas-reineke/indent-blankline.nvim'
-  Plug 'nathanaelkane/vim-indent-guides' "indenting guides
+  " Plug 'nathanaelkane/vim-indent-guides' "indenting guides
+  Plug 'b3tchi/iguides' "improved guides
 
   ""General Vim Plugins
   Plug 'jeffkreeftmeijer/vim-numbertoggle'		"hybrid/static number toggle when multiple windows
@@ -442,8 +443,8 @@ endfunction
 " let g:startify_bookmarks = ['~/svn', '~/dev']
 
 "--- Indent Guides ---
-let g:indent_guides_enable_on_vim_startup = 1
-let g:indent_guides_auto_colors = 0
+" let g:indent_guides_enable_on_vim_startup = 1
+" let g:indent_guides_auto_colors = 0
 " let g:indent_guides_color_change_percent = 3 " for auto options left 5 percent only
 
 "color form solarized8
@@ -452,7 +453,8 @@ if vimTheme == 1
   autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#073642 ctermbg=4
 elseif vimTheme == 2
   autocmd VimEnter,Colorscheme * :hi IndentGuidesOdd  guibg=#282828 ctermbg=3
-  autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#3c3836 ctermbg=4
+  autocmd VimEnter,Colorscheme * :hi IndentGuidesEven  guibg=#232323 ctermbg=4
+  " autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#3c3836 ctermbg=4
 endif
 
 
