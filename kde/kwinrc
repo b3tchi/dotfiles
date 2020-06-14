@@ -2,7 +2,15 @@
 update_info=kwin.upd:replace-scalein-with-scale,kwin.upd:port-minimizeanimation-effect-to-js,kwin.upd:port-scale-effect-to-js,kwin.upd:port-dimscreen-effect-to-js,kwin.upd:auto-bordersize,kwin.upd:animation-speed
 
 [Compositing]
+Backend=OpenGL
+Enabled=true
+GLCore=false
+GLPreferBufferSwap=a
+GLTextureFilter=2
+HiddenPreviews=5
 OpenGLIsUnsafe=false
+WindowsBlockCompositing=true
+XRenderSmoothScale=false
 
 [Desktops]
 Id_1=d97f8da5-7bdd-48c6-a52a-8e3aef6dc19e
@@ -58,6 +66,7 @@ NightTemperature=4100
 activatelattelaunchermenuEnabled=true
 diminactiveEnabled=true
 highlightwindowEnabled=true
+krohnkiteEnabled=false
 kwin4_effect_squashEnabled=false
 kwin4_effect_translucencyEnabled=false
 lattewindowcolorsEnabled=true
