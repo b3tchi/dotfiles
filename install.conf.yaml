@@ -14,8 +14,8 @@
         path: fish/config.fish
     ~/.ssh/config:
         path: ssh/config
-    
-    #VIM
+
+    #NVIM
     ~/.config/nvim/init.vim:
         path: nvim/init.vim
     ~/.config/nvim/coc-settings.json:
@@ -25,13 +25,15 @@
     ~/.config/nvim/deoplete.vim:
         path: nvim/deoplete.vim
 
-    #VsCode 
+    #NVIM-QT
+    ~/.config/nvim/ginit.vim:
+        path: nvim/Win/ginit.vim
+
+    #VsCode
     ~/.config/Code/User/settings.json:
         path: code/settings.json
     ~/.config/Code/User/keybindings.json:
         path: code/keybindings.json
-
-
 
     #KDE
     ~/.local/share/kxmlgui5/konsole/konsoleui.rc:
@@ -46,7 +48,7 @@
         path: kde/kwinrc
     ~/.local/share/kservices5/ServiceMenus/myFirstServiceMenu.desktop:
         path: kde/myFirstServiceMenu.desktop
-    
+
     #Latte
     ~/.config/latte/Default.layout.latte:
         path: kde/latte/Default.layout.latte
