@@ -22,6 +22,9 @@ Name_2=AWS
 Number=4
 Rows=2
 
+[DrmOutputs][6c3828befa][6c3828befa]
+Scale=1
+
 [Effect-CoverSwitch]
 TabBox=false
 TabBoxAlternative=false
@@ -30,9 +33,6 @@ TabBoxAlternative=false
 BorderActivate=9
 BorderActivateCylinder=9
 BorderActivateSphere=9
-
-[Effect-DesktopGrid]
-BorderActivate=7
 
 [Effect-FlipSwitch]
 TabBox=false
@@ -63,7 +63,9 @@ LongitudeAuto=14.5148
 NightTemperature=4100
 
 [Plugins]
+ParachuteEnabled=true
 activatelattelaunchermenuEnabled=true
+desktopchangeosdEnabled=false
 diminactiveEnabled=true
 highlightwindowEnabled=true
 krohnkiteEnabled=false
@@ -75,10 +77,14 @@ minimizeallEnabled=false
 quick-tile-2Enabled=true
 slidebackEnabled=true
 synchronizeskipswitcherEnabled=false
+toggleparachuteEnabled=true
 videowallEnabled=false
 
 [Script-activatelattelaunchermenu]
 BorderActivate=9
+
+[Script-toggleparachute]
+BorderActivate=7
 
 [TabBox]
 ActivitiesMode=1
