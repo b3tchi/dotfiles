@@ -1,15 +1,16 @@
 " let g:python3_host_prog = '/usr/bin/python3'
-"" No CocPython removed other not needed modules 
+let g:python3_host_prog='c:\Program Files (x86)\Python36-32\python.exe'
+"" No CocPython removed other not needed modules
 "" Node path to specify if needed
 " let g:coc_node_path = '/c/Program Files/nodejs/node'
 
 ""Disable some of the modeles like python2
-let g:loaded_python_provider = 0
-let g:loaded_ruby_provider = 0
-let g:loaded_perl_provider = 0
+let g:loaded_python_provider=0
+let g:loaded_ruby_provider=0
+let g:loaded_perl_provider=0
 
 let g:coc_global_extensions = [
-  \ 'coc-explorer' 
+  \ 'coc-explorer'
   \ , 'coc-json'
   \ , 'coc-tsserver'
   \ , 'coc-tslint-plugin'

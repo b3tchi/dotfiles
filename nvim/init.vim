@@ -58,6 +58,12 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'tpope/vim-fugitive' "git intergration
   Plug 'airblade/vim-gitgutter' "git intergration
 
+  ""markdown
+  " Plug 'godlygeek/tabular'
+  " Plug 'plasticboy/vim-markdown'
+  Plug 'vim-pandoc/vim-pandoc-syntax'
+
+  ""addvanced ide features
   if lspClient == 1
     " Plug 'neoclide/coc.nvim', {'merge': 0, 'rev': 'release'}
     Plug 'neoclide/coc.nvim', {'branch': 'release'}
@@ -77,6 +83,7 @@ call plug#begin(expand('~/.vim/plugged'))
 
   " Svelte
   Plug 'evanleck/vim-svelte'
+  Plug 'mattn/emmet-vim'
 
   " Another Comment Pluging with HTML region support
   Plug 'tomtom/tcomment_vim'
@@ -229,13 +236,13 @@ set fillchars=vert:┃ " for vsplits
 
 map <leader>r :source ~/.config/nvim/init.vim<CR>
 nnoremap <C-C> <C-[>
-nmap <F9> :Vista!!<CR>
 
 nnoremap <Tab> :bnext!<CR>
 nnoremap <S-Tab> :bprev!<CR>
 
 nnoremap <C-p> :GFiles<cr>
-nnoremap <C-f> :Rg<cr>
+" nnoremap <C-f> :Rg<cr>
+nnoremap <silent> <space>f :Rg<cr>
 
 nmap <silent> <leader>tn :TestNearest<CR>
 nmap <silent> <leader>tf :TestFile<CR>
@@ -282,7 +289,6 @@ vnoremap > >gv
 
 " --- Coc ---
 if lspClient == 1
-  nnoremap <C-o> :CocCommand explorer<cr>
   " let g:coc_force_debug = 1
   " Remap keys for gotos
   nmap <silent> gd <Plug>(coc-definition)
@@ -317,17 +323,23 @@ if lspClient == 1
   " Use `:Format` for format current buffer
   command! -nargs=0 Format :call CocAction('format')
 
+  " nnoremap <C-o> :CocCommand explorer<cr>
+  nnoremap <silent> <space>e :CocCommand explorer<cr>
   " Using CocList
-  nnoremap <silent> <space>a  :<C-u>CocList diagnostics<cr>
-  nnoremap <silent> <space>e  :<C-u>CocList extensions<cr>
-  nnoremap <silent> <space>c  :<C-u>CocList commands<cr>
+  nmap <F9> :Vista!!<CR>
+  " nmap <silent> <space>o :<cr>
   nnoremap <silent> <space>o  :<C-u>CocList outline<cr>
-  nnoremap <silent> <space>s  :<C-u>CocList -I symbols<cr>
-  " Do default action for next item.
+
+  nnoremap <silent> <space>c  :<C-u>CocList commands<cr>
+  nnoremap <silent> <space>a  :<C-u>CocList diagnostics<cr>
+  " nnoremap <silent> <space>e  :<C-u>CocList extensions<cr>
+  " nnoremap <silent> <space>s  :<C-u>CocList -I symbols<cr>
+
+  " CocList Navigation - Do default action for next item.
   nnoremap <silent> <space>j  :<C-u>CocNext<CR>
-  " Do default action for previous item.
   nnoremap <silent> <space>k  :<C-u>CocPrev<CR>
   nnoremap <silent> <space>p  :<C-u>CocListResume<CR>
+  " Do default action for previous item.
 
   nnoremap <leader>em :CocCommand python.refactorExtractMethod<cr>
   vnoremap <leader>em :CocCommand python.refactorExtractMethod<cr>
@@ -364,25 +376,29 @@ endif
 
 " --- lightline ---
 let g:lightline = {
-  \ 'colorscheme': 'gruvbox',
+  \ 'colorscheme': 'wombat',
   \ 'active': {
   \     'left': [ [ 'mode', 'paste' ],
-  \               [ 'cocstatus','winnr'],
-  \               [ 'readonly','filename', 'modified' ] ],
+  \               [ 'cocstatus', 'gitbranch', 'winnr' ],
+  \               [ 'readonly', 'filename', 'modified' ] ]
   \ },
   \'inactive': {
-  \     'left': [ ['winnr'] ,
-  \               ['filename' ] ]
+  \     'left': [ [ 'winnr' ] ,
+  \               [ 'filename' ] ]
   \ },
   \ 'component': {
   \   'winnr': '%{winnr()}',
-  \   'filename': '%t',
   \   'lineinfo': '%3l:%-2v',
   \ },
   \ 'component_function': {
   \   'cocstatus': 'coc#status',
+  \   'filename': 'LightlineFilename',
   \ },
   \ }
+
+  " \ 'component': {
+  " \   'filename': '%t',
+  " \ },
 
 let g:lightline.tabline          = {'left': [['buffers']], 'right': [['close']]}
 let g:lightline.component_expand = {'buffers': 'lightline#bufferline#buffers'}
@@ -394,8 +410,17 @@ let g:lightline#bufferline#unnamed      = '[No Name]'
 let g:lightline#bufferline#enable_devicons = 1
 let g:lightline#bufferline#unicode_symbols = 1
 
+function LightlineFilename()
+  let root = fnamemodify(get(b:, 'git_dir'), ':h')
+  "split join for replace different separators in Windows dirty fix
+  let path = join(split(expand('%:p'),'\'),'/')
+  if path[:len(root)-1] ==# root
+    return path[len(root)+1:]
+  endif
+  return expand('%')
+endfunction
 
-"--- Vista ---
+"--- Vista --- NEEDED similar as coclist as outline
 let g:vista_default_executive = 'coc'
 let g:vista#renderer#enable_icon = 1
 let g:vista#renderer#icons = {
@@ -484,6 +509,11 @@ endif
 " --- Vim Test ---
 let g:test#strategy = 'neovim'
 
+" --- Markdown specific ---
+augroup pandoc_syntax
+  au! BufNewFile,BufFilePre,BufRead *.md set filetype=markdown.pandoc
+augroup END
+
 " --- Svelte filetypes specific ---
 if !exists('g:context_filetype#filetypes')
   let g:context_filetype#filetypes = {}
@@ -499,4 +529,7 @@ if !exists('g:context_filetype#same_filetypes')
 endif
 let g:context_filetype#same_filetypes.svelte = 'html'
 
-"au! BufNewFile,BufRead *.svelte set ft=html
+au! BufNewFile,BufRead *.svelte set ft=html
+
+" --- EMMET specific ---
+let g:user_emmet_leader_key=','
