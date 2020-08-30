@@ -63,6 +63,8 @@ call plug#begin(expand('~/.vim/plugged'))
   " Plug 'plasticboy/vim-markdown'
   Plug 'vim-pandoc/vim-pandoc-syntax'
 
+  ""vimwike - personal notes
+  Plug 'vimwiki/vimwiki'
   ""addvanced ide features
   if lspClient == 1
     " Plug 'neoclide/coc.nvim', {'merge': 0, 'rev': 'release'}
