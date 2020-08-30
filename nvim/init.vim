@@ -9,7 +9,9 @@ let lspClient = 1 "1 for coc-nvim, 2 for deoplete (WIP), -1 non Lsp Client (TBD)
 let vimTheme = 2 "1 solarized8, 2 gruvbox
 
 
-let vimplug_exists=expand('~/.vim/autoload/plug.vim')
+" fix vim plug path for neovim
+"let vimplug_exists=expand('~/.vim/autoload/plug.vim')
+let vimplug_exists=expand('~/AppData/Local/nvim-data/site/autoload/plug.vim')
 
 if !filereadable(vimplug_exists)
   if !executable("curl")
@@ -25,7 +27,8 @@ endif
 
 " Required:
 
-call plug#begin(expand('~/.vim/plugged'))
+" call plug#begin(expand('~/.vim/plugged'))
+call plug#begin()
   ""Indenting lines
   " Plug 'Yggdroot/indentLine'
   " Plug 'thaerkh/vim-indentguides'
