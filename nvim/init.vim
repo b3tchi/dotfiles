@@ -3,15 +3,16 @@ if &compatible
 endif
 
 " Required:
-" set runtimepath+=~/.cache/dein/repos/github.com/Shougo/dein.vim
 " let useCoc = 1
 let lspClient = 1 "1 for coc-nvim, 2 for deoplete (WIP), -1 non Lsp Client (TBD)
 let vimTheme = 2 "1 solarized8, 2 gruvbox
 
 
 " fix vim plug path for neovim
-"let vimplug_exists=expand('~/.vim/autoload/plug.vim')
-let vimplug_exists=expand('~/AppData/Local/nvim-data/site/autoload/plug.vim')
+let vimplug_exists=expand('~/.vim/autoload/plug.vim')
+" let vimplug_exists=expand('~/AppData/Local/nvim-data/site/autoload/plug.vim')
+
+" echo vimplug_exists
 
 if !filereadable(vimplug_exists)
   if !executable("curl")
@@ -26,9 +27,8 @@ if !filereadable(vimplug_exists)
 endif
 
 " Required:
-
-" call plug#begin(expand('~/.vim/plugged'))
-call plug#begin()
+call plug#begin(expand('~/.vim/plugged'))
+" call plug#begin()
   ""Indenting lines
   " Plug 'Yggdroot/indentLine'
   " Plug 'thaerkh/vim-indentguides'
@@ -121,8 +121,8 @@ call plug#begin()
 call plug#end()
 
 " Required:
-filetype plugin indent on
 syntax on
+" filetype plugin indent on
 set noshowmode " INSERT déjà affiché par lightbar
 
 autocmd FileType vista,coc-explorer setlocal signcolumn=no
@@ -538,3 +538,7 @@ au! BufNewFile,BufRead *.svelte set ft=html
 
 " --- EMMET specific ---
 let g:user_emmet_leader_key=','
+
+" --- PowerShell specific ---
+" powershell 200831 not regnized set manually
+au! BufNewFile,BufRead *.ps1 set ft=ps1
