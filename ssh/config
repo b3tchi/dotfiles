@@ -1,6 +1,6 @@
-    
+
 Host github.com
-    HostName github.com 
+    HostName github.com
     User beckaja1@gmail.com
     IdentityFile ~/.ssh/id_rsa_git
 

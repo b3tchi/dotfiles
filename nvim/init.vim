@@ -544,4 +544,5 @@ let g:user_emmet_leader_key=','
 au! BufNewFile,BufRead *.ps1 set ft=ps1
 
 " --- vimWiki specific ---
+let g:vimwiki_markdown_link_ext = 1
 let g:vimwiki_list = [{'path': '~/vimwiki/', 'syntax': 'markdown', 'ext': '.md'}]
