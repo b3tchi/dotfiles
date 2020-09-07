@@ -29,13 +29,13 @@ endif
 " Required:
 call plug#begin(expand('~/.vim/plugged'))
 " call plug#begin()
+
   ""Indenting lines
+  Plug 'b3tchi/iguides' "improved guides
   " Plug 'Yggdroot/indentLine'
   " Plug 'thaerkh/vim-indentguides'
-
   " Plug 'lukas-reineke/indent-blankline.nvim'
   " Plug 'nathanaelkane/vim-indent-guides' "indenting guides
-  Plug 'b3tchi/iguides' "improved guides
 
   ""General Vim Plugins
   Plug 'jeffkreeftmeijer/vim-numbertoggle'		"hybrid/static number toggle when multiple windows
@@ -46,14 +46,18 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'junegunn/fzf', {'build': './install --all', 'merged': 0}
   Plug 'junegunn/fzf.vim', {'depends': 'fzf'}
 
-  ""LightLine
+  ""Status Line
   Plug 'itchyny/lightline.vim'
   Plug 'mengelbrecht/lightline-bufferline'
 
+  "" White Space Highlighter
+  Plug 'ntpeters/vim-better-whitespace'
+
   ""Autoclosing pairs""
   Plug 'cohama/lexima.vim'
-  "Plug 'tmsvg/pear-tree' "getting some issues for the function disabled
   Plug 'editorconfig/editorconfig-vim'
+  "Plug 'tmsvg/pear-tree' "getting some issues for the function disabled
+
   "mapping help file TBD to make mappings
   Plug 'liuchengxu/vim-which-key'
 
@@ -62,12 +66,13 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'airblade/vim-gitgutter' "git intergration
 
   ""markdown
+  Plug 'vim-pandoc/vim-pandoc-syntax'
   " Plug 'godlygeek/tabular'
   " Plug 'plasticboy/vim-markdown'
-  Plug 'vim-pandoc/vim-pandoc-syntax'
 
   ""vimwike - personal notes
   Plug 'vimwiki/vimwiki'
+
   ""addvanced ide features
   if lspClient == 1
     " Plug 'neoclide/coc.nvim', {'merge': 0, 'rev': 'release'}
@@ -92,30 +97,27 @@ call plug#begin(expand('~/.vim/plugged'))
 
   " Another Comment Pluging with HTML region support
   Plug 'tomtom/tcomment_vim'
-  "" White Space Highlighter
-  Plug 'ntpeters/vim-better-whitespace'
 
   " Support for comments symbol by language regions Svelte & Html
   Plug 'Shougo/context_filetype.vim' "language regions in files
   " Plug 'tyru/caw.vim' "comments with context regions
   " Plug 'b3tchi/caw.vim' "comments with context regions addition for svelte TEST
-
-  ""Comments old plugings
   " Plug 'scrooloose/nerdcommenter'
   " Plug 'tpope/vim-commentary' "comments gcc
 
   "syntax highlighting
   Plug 'sheerun/vim-polyglot'
 
+  "" Old Addins TBD
   "Plug 'janko-m/vim-test'
   "Plug 'neomake/neomake'
 
   " themes
+  Plug 'lifepillar/vim-solarized8'
+  Plug 'morhetz/gruvbox'
   " Plug 'kaicataldo/material.vim'
   " Plug 'altercation/vim-colors-solarized'
   " Plug 'iCyMind/NeoSolarized'
-  Plug 'lifepillar/vim-solarized8'
-  Plug 'morhetz/gruvbox'
 
   " Required:
 call plug#end()
