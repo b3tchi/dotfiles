@@ -1,5 +1,15 @@
-" let g:python3_host_prog = '/usr/bin/python3'
-let g:python3_host_prog='c:\Program Files (x86)\Python36-32\python.exe'
+"" Computer specific settings
+if g:os == 'Windows'
+  if match(g:computerName,'DESKTOP-HSRFLH5') == 0
+    let g:python3_host_prog='c:\Program Files (x86)\Python37-32\python.exe'
+  elseif g:computerName == 'Something Else'
+    let g:python3_host_prog='c:\Program Files (x86)\Python36-32\python.exe'
+  endif
+else
+  let g:python3_host_prog = '/usr/bin/python3'
+endif
+
+" let g:python3_host_prog='c:\Users\czJaBeck\AppData\Local\Microsoft\WindowsApps\python.exe'
 "" No CocPython removed other not needed modules
 "" Node path to specify if needed
 " let g:coc_node_path = '/c/Program Files/nodejs/node'

@@ -7,6 +7,21 @@ endif
 let lspClient = 1 "1 for coc-nvim, 2 for deoplete (WIP), -1 non Lsp Client (TBD)
 let vimTheme = 2 "1 solarized8, 2 gruvbox
 
+" Identify Os and Actual Device
+if !exists("g:os")
+  if has("win64") || has("win32") || has("win16")
+    let g:os = "Windows"
+    let g:computerName = substitute(system('hostname'), '\.\_.*$', '', '')
+  else
+    let g:os = substitute(system('uname'), '\n', '', '')
+    if g:os = 'Linux'
+      " uname -o => returns Android on DroidVim, Termux
+      if system('uname -o') = 'Android'
+        let g:os = system('uname -o')
+      endif
+    endif
+  endif
+endif
 
 " fix vim plug path for neovim
 let vimplug_exists=expand('~/.vim/autoload/plug.vim')
@@ -70,7 +85,7 @@ call plug#begin(expand('~/.vim/plugged'))
   " Plug 'godlygeek/tabular'
   " Plug 'plasticboy/vim-markdown'
 
-  ""vimwike - personal notes
+  ""vimwiki - personal notes
   Plug 'vimwiki/vimwiki'
 
   ""addvanced ide features
@@ -547,4 +562,10 @@ au! BufNewFile,BufRead *.ps1 set ft=ps1
 
 " --- vimWiki specific ---
 let g:vimwiki_markdown_link_ext = 1
-let g:vimwiki_list = [{'path': '~/vimwiki/', 'syntax': 'markdown', 'ext': '.md'}]
+let g:vimwiki_list = [
+  \ {'path': '~/vimwiki/', 'syntax': 'markdown', 'ext': '.md'}
+  \,{'path': '~/vimwiki_LEGO/', 'syntax': 'markdown', 'ext': '.md'}
+  \]
+let g:vimwiki_listsyms = ' ~–x'
+let g:vimwiki_listsym_rejected = 'r'
+
