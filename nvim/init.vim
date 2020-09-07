@@ -544,3 +544,7 @@ let g:user_emmet_leader_key=','
 " --- PowerShell specific ---
 " powershell 200831 not regnized set manually
 au! BufNewFile,BufRead *.ps1 set ft=ps1
+
+" --- vimWiki specific ---
+let g:vimwiki_markdown_link_ext = 1
+let g:vimwiki_list = [{'path': '~/vimwiki/', 'syntax': 'markdown', 'ext': '.md'}]
