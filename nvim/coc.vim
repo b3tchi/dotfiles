@@ -5,6 +5,8 @@ if g:os == 'Windows'
   elseif g:computerName == 'Something Else'
     let g:python3_host_prog='c:\Program Files (x86)\Python36-32\python.exe'
   endif
+elseif g:os == 'Android'
+  let g:python3_host_prog = '/data/data/com.termux/files/usr/bin/python'
 else
   let g:python3_host_prog = '/usr/bin/python3'
 endif
