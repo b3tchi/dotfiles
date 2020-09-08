@@ -567,7 +567,7 @@ autocmd FileType vimwiki set ft=markdown
 let g:vimwiki_markdown_link_ext = 1
 let g:vimwiki_list = [
   \ {'path': '~/vimwiki/', 'syntax': 'markdown', 'ext': '.md'}
-  \,{'path': '~/vimwiki_LEGO/', 'syntax': 'markdown', 'ext': '.md'}
+  \,{'path': '~/OneDrive - LEGO/vimwiki_LEGO/', 'syntax': 'markdown', 'ext': '.md'}
   \]
 let g:vimwiki_listsyms = ' ~–x'
 let g:vimwiki_listsym_rejected = 'r'
