@@ -12,12 +12,14 @@ if !exists("g:os")
   if has("win64") || has("win32") || has("win16")
     let g:os = "Windows"
     let g:computerName = substitute(system('hostname'), '\.\_.*$', '', '')
+    let g:computerName = substitute(g:computerName, '\n', '', '')
   else
     let g:os = substitute(system('uname'), '\n', '', '')
-    if g:os = 'Linux'
+    if g:os == 'Linux'
       " uname -o => returns Android on DroidVim, Termux
-      if system('uname -o') = 'Android'
-        let g:os = system('uname -o')
+      if match(system('uname -o'),'Android') == 0
+        let g:os = substitute(system('uname -o'), '\n', '', '')
+        " let g:os = system('uname -o')
       endif
     endif
   endif
@@ -149,7 +151,6 @@ if lspClient == 1
 elseif lspClient == 2
   source ~/.config/nvim/deoplete.vim
 endif
-
 
 "End dein Scripts-------------------------
 
