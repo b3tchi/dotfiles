@@ -83,9 +83,9 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'airblade/vim-gitgutter' "git intergration
 
   ""markdown
-  Plug 'vim-pandoc/vim-pandoc-syntax'
+  " Plug 'vim-pandoc/vim-pandoc-syntax'
   " Plug 'godlygeek/tabular'
-  " Plug 'plasticboy/vim-markdown'
+  Plug 'plasticboy/vim-markdown'
 
   ""vimwiki - personal notes
   Plug 'vimwiki/vimwiki'
@@ -555,13 +555,15 @@ let g:context_filetype#same_filetypes.svelte = 'html'
 au! BufNewFile,BufRead *.svelte set ft=html
 
 " --- EMMET specific ---
-let g:user_emmet_leader_key=','
+let g:user_emmet_leader_key = ','
 
 " --- PowerShell specific ---
 " powershell 200831 not regnized set manually
 au! BufNewFile,BufRead *.ps1 set ft=ps1
 
 " --- vimWiki specific ---
+autocmd FileType vimwiki set ft=markdown
+
 let g:vimwiki_markdown_link_ext = 1
 let g:vimwiki_list = [
   \ {'path': '~/vimwiki/', 'syntax': 'markdown', 'ext': '.md'}
