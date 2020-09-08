@@ -104,6 +104,9 @@ call plug#begin(expand('~/.vim/plugged'))
   " Plug 'scrooloose/nerdcommenter'
   " Plug 'tpope/vim-commentary' "comments gcc
 
+  "Window management SuckLess
+  Plug 'fabi1cazenave/suckless.vim'
+
   "syntax highlighting
   Plug 'sheerun/vim-polyglot'
 
