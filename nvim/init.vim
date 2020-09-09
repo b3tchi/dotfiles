@@ -20,10 +20,10 @@ if !exists("g:os")
       if match(system('uname -o'),'Android') == 0
         let g:os = substitute(system('uname -o'), '\n', '', '')
         " let g:os = system('uname -o')
+        endif
       endif
     endif
   endif
-endif
 
 " fix vim plug path for neovim
 let vimplug_exists=expand('~/.vim/autoload/plug.vim')
@@ -35,7 +35,7 @@ if !filereadable(vimplug_exists)
   if !executable("curl")
     echoerr "You have to install curl or first install vim-plug yourself!"
     execute "q!"
-  endif
+    endif
   echo "Installing Vim-Plug..."
   echo ""
   silent exec "!\curl -fLo " . vimplug_exists . " --create-dirs https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim"
@@ -83,9 +83,9 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'airblade/vim-gitgutter' "git intergration
 
   ""markdown
-  " Plug 'vim-pandoc/vim-pandoc-syntax'
+  Plug 'vim-pandoc/vim-pandoc-syntax'
   " Plug 'godlygeek/tabular'
-  Plug 'plasticboy/vim-markdown'
+  " Plug 'plasticboy/vim-markdown'
 
   ""vimwiki - personal notes
   Plug 'vimwiki/vimwiki'
@@ -538,6 +538,7 @@ let g:test#strategy = 'neovim'
 " --- Markdown specific ---
 augroup pandoc_syntax
   au! BufNewFile,BufFilePre,BufRead *.md set filetype=markdown.pandoc
+  " autocmd! FileType vimwiki set syntax=markdown.pandoc
 augroup END
 
 " --- Svelte filetypes specific ---
@@ -565,8 +566,6 @@ let g:user_emmet_leader_key = ','
 au! BufNewFile,BufRead *.ps1 set ft=ps1
 
 " --- vimWiki specific ---
-autocmd FileType vimwiki set ft=markdown
-
 let g:vimwiki_markdown_link_ext = 1
 let g:vimwiki_list = [
   \ {'path': '~/vimwiki/', 'syntax': 'markdown', 'ext': '.md'}
