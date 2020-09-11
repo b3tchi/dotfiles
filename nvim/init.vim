@@ -3,21 +3,39 @@ if &compatible
 endif
 
 " Required:
-" set runtimepath+=~/.cache/dein/repos/github.com/Shougo/dein.vim
 " let useCoc = 1
 let lspClient = 1 "1 for coc-nvim, 2 for deoplete (WIP), -1 non Lsp Client (TBD)
 let vimTheme = 2 "1 solarized8, 2 gruvbox
 
+" Identify Os and Actual Device
+if !exists("g:os")
+  if has("win64") || has("win32") || has("win16")
+    let g:os = "Windows"
+    let g:computerName = substitute(system('hostname'), '\.\_.*$', '', '')
+    let g:computerName = substitute(g:computerName, '\n', '', '')
+  else
+    let g:os = substitute(system('uname'), '\n', '', '')
+    if g:os == 'Linux'
+      " uname -o => returns Android on DroidVim, Termux
+      if match(system('uname -o'),'Android') == 0
+        let g:os = substitute(system('uname -o'), '\n', '', '')
+        " let g:os = system('uname -o')
+        endif
+      endif
+    endif
+  endif
 
 " fix vim plug path for neovim
-"let vimplug_exists=expand('~/.vim/autoload/plug.vim')
-let vimplug_exists=expand('~/AppData/Local/nvim-data/site/autoload/plug.vim')
+let vimplug_exists=expand('~/.vim/autoload/plug.vim')
+" let vimplug_exists=expand('~/AppData/Local/nvim-data/site/autoload/plug.vim')
+
+" echo vimplug_exists
 
 if !filereadable(vimplug_exists)
   if !executable("curl")
     echoerr "You have to install curl or first install vim-plug yourself!"
     execute "q!"
-  endif
+    endif
   echo "Installing Vim-Plug..."
   echo ""
   silent exec "!\curl -fLo " . vimplug_exists . " --create-dirs https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim"
@@ -26,16 +44,15 @@ if !filereadable(vimplug_exists)
 endif
 
 " Required:
+call plug#begin(expand('~/.vim/plugged'))
+" call plug#begin()
 
-" call plug#begin(expand('~/.vim/plugged'))
-call plug#begin()
   ""Indenting lines
+  Plug 'b3tchi/iguides' "improved guides
   " Plug 'Yggdroot/indentLine'
   " Plug 'thaerkh/vim-indentguides'
-
   " Plug 'lukas-reineke/indent-blankline.nvim'
   " Plug 'nathanaelkane/vim-indent-guides' "indenting guides
-  Plug 'b3tchi/iguides' "improved guides
 
   ""General Vim Plugins
   Plug 'jeffkreeftmeijer/vim-numbertoggle'		"hybrid/static number toggle when multiple windows
@@ -46,14 +63,18 @@ call plug#begin()
   Plug 'junegunn/fzf', {'build': './install --all', 'merged': 0}
   Plug 'junegunn/fzf.vim', {'depends': 'fzf'}
 
-  ""LightLine
+  ""Status Line
   Plug 'itchyny/lightline.vim'
   Plug 'mengelbrecht/lightline-bufferline'
 
+  "" White Space Highlighter
+  Plug 'ntpeters/vim-better-whitespace'
+
   ""Autoclosing pairs""
   Plug 'cohama/lexima.vim'
-  "Plug 'tmsvg/pear-tree' "getting some issues for the function disabled
   Plug 'editorconfig/editorconfig-vim'
+  "Plug 'tmsvg/pear-tree' "getting some issues for the function disabled
+
   "mapping help file TBD to make mappings
   Plug 'liuchengxu/vim-which-key'
 
@@ -62,12 +83,13 @@ call plug#begin()
   Plug 'airblade/vim-gitgutter' "git intergration
 
   ""markdown
+  Plug 'vim-pandoc/vim-pandoc-syntax'
   " Plug 'godlygeek/tabular'
   " Plug 'plasticboy/vim-markdown'
-  Plug 'vim-pandoc/vim-pandoc-syntax'
 
-  ""vimwike - personal notes
+  ""vimwiki - personal notes
   Plug 'vimwiki/vimwiki'
+
   ""addvanced ide features
   if lspClient == 1
     " Plug 'neoclide/coc.nvim', {'merge': 0, 'rev': 'release'}
@@ -92,37 +114,37 @@ call plug#begin()
 
   " Another Comment Pluging with HTML region support
   Plug 'tomtom/tcomment_vim'
-  "" White Space Highlighter
-  Plug 'ntpeters/vim-better-whitespace'
 
   " Support for comments symbol by language regions Svelte & Html
   Plug 'Shougo/context_filetype.vim' "language regions in files
   " Plug 'tyru/caw.vim' "comments with context regions
   " Plug 'b3tchi/caw.vim' "comments with context regions addition for svelte TEST
-
-  ""Comments old plugings
   " Plug 'scrooloose/nerdcommenter'
   " Plug 'tpope/vim-commentary' "comments gcc
+
+  "Window management SuckLess
+  Plug 'fabi1cazenave/suckless.vim'
 
   "syntax highlighting
   Plug 'sheerun/vim-polyglot'
 
+  "" Old Addins TBD
   "Plug 'janko-m/vim-test'
   "Plug 'neomake/neomake'
 
   " themes
+  Plug 'lifepillar/vim-solarized8'
+  Plug 'morhetz/gruvbox'
   " Plug 'kaicataldo/material.vim'
   " Plug 'altercation/vim-colors-solarized'
   " Plug 'iCyMind/NeoSolarized'
-  Plug 'lifepillar/vim-solarized8'
-  Plug 'morhetz/gruvbox'
 
   " Required:
 call plug#end()
 
 " Required:
-filetype plugin indent on
 syntax on
+" filetype plugin indent on
 set noshowmode " INSERT déjà affiché par lightbar
 
 autocmd FileType vista,coc-explorer setlocal signcolumn=no
@@ -132,7 +154,6 @@ if lspClient == 1
 elseif lspClient == 2
   source ~/.config/nvim/deoplete.vim
 endif
-
 
 "End dein Scripts-------------------------
 
@@ -517,6 +538,7 @@ let g:test#strategy = 'neovim'
 " --- Markdown specific ---
 augroup pandoc_syntax
   au! BufNewFile,BufFilePre,BufRead *.md set filetype=markdown.pandoc
+  " autocmd! FileType vimwiki set syntax=markdown.pandoc
 augroup END
 
 " --- Svelte filetypes specific ---
@@ -537,4 +559,18 @@ let g:context_filetype#same_filetypes.svelte = 'html'
 au! BufNewFile,BufRead *.svelte set ft=html
 
 " --- EMMET specific ---
-let g:user_emmet_leader_key=','
+let g:user_emmet_leader_key = ','
+
+" --- PowerShell specific ---
+" powershell 200831 not regnized set manually
+au! BufNewFile,BufRead *.ps1 set ft=ps1
+
+" --- vimWiki specific ---
+let g:vimwiki_markdown_link_ext = 1
+let g:vimwiki_list = [
+  \ {'path': '~/vimwiki/', 'syntax': 'markdown', 'ext': '.md'}
+  \,{'path': '~/OneDrive - LEGO/vimwiki_LEGO/', 'syntax': 'markdown', 'ext': '.md'}
+  \]
+let g:vimwiki_listsyms = ' ~–x'
+let g:vimwiki_listsym_rejected = 'r'
+

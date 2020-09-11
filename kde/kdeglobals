@@ -111,6 +111,7 @@ ForegroundVisited=127,140,141
 DirSelectDialog Size=855,592
 
 [General]
+BrowserApplication=firefox.desktop
 ColorScheme=Adapta
 Name=Breeze
 XftHintStyle=hintslight
