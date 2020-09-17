@@ -17,10 +17,16 @@ Id_1=d97f8da5-7bdd-48c6-a52a-8e3aef6dc19e
 Id_2=4c470202-6778-4795-98b7-95adbbd5cba1
 Id_3=62d2ae27-e034-4a0b-9467-bef2ea1b997a
 Id_4=c9be6aaf-368b-45a8-8972-366d43d29a0f
-Name_1=Main
-Name_2=AWS
-Number=4
-Rows=2
+Id_5=82477ce6-bc9e-4ca5-88e7-9205199702be
+Id_6=defd16d7-184a-4320-8c2b-e6d22992cb15
+Name_1=1
+Name_2=2
+Name_3=3
+Name_4=4
+Name_5=5
+Name_6=6
+Number=6
+Rows=1
 
 [DrmOutputs][6c3828befa][6c3828befa]
 Scale=1
@@ -64,17 +70,19 @@ NightTemperature=4100
 
 [Plugins]
 ParachuteEnabled=true
-activatelattelaunchermenuEnabled=true
+activatelattelaunchermenuEnabled=false
+blurEnabled=true
+contrastEnabled=false
 desktopchangeosdEnabled=false
 diminactiveEnabled=true
 highlightwindowEnabled=true
-krohnkiteEnabled=false
+krohnkiteEnabled=true
 kwin4_effect_squashEnabled=false
 kwin4_effect_translucencyEnabled=false
-lattewindowcolorsEnabled=true
+lattewindowcolorsEnabled=false
 magiclampEnabled=true
 minimizeallEnabled=false
-quick-tile-2Enabled=true
+quick-tile-2Enabled=false
 slidebackEnabled=true
 synchronizeskipswitcherEnabled=false
 toggleparachuteEnabled=true
@@ -83,17 +91,28 @@ videowallEnabled=false
 [Script-activatelattelaunchermenu]
 BorderActivate=9
 
+[Script-krohnkite]
+screenGapBottom=5
+screenGapLeft=5
+screenGapRight=5
+screenGapTop=5
+tileLayoutGap=5
+
 [Script-toggleparachute]
 BorderActivate=7
 
+[SubSession: 14d6cfe7-82fe-4bcb-933a-9652b82cfd99]
+active=-1
+count=0
+
 [TabBox]
-ActivitiesMode=1
+ActivitiesMode=0
 ApplicationsMode=0
 BorderActivate=9
 BorderAlternativeActivate=9
 DesktopLayout=org.kde.breeze.desktop
 DesktopListLayout=org.kde.breeze.desktop
-DesktopMode=1
+DesktopMode=0
 HighlightWindows=false
 LayoutName=compact
 MinimizedMode=0
@@ -123,6 +142,10 @@ ElectricBorderTiling=true
 ElectricBorders=0
 
 [org.kde.kdecoration2]
+BorderSize=None
+BorderSizeAuto=false
 BorderlessMaximizedWindows=true
 ButtonsOnLeft=XAI
 ButtonsOnRight=
+library=org.kde.sierrabreezeenhanced
+theme=Sierra Breeze Enhanced

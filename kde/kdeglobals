@@ -114,14 +114,19 @@ DirSelectDialog Size=855,592
 BrowserApplication=firefox.desktop
 ColorScheme=Adapta
 Name=Breeze
+XftAntialias=true
 XftHintStyle=hintslight
 XftSubPixel=rgb
 dbfile=/home/jan/.mozilla/firefox/9168oqlc.default/places.sqlite
+font=FreeSans,10,-1,5,50,0,0,0,0,0
+menuFont=FreeSans,10,-1,5,50,0,0,0,0,0
 shadeSortColumn=true
+smallestReadableFont=FreeSans,8,-1,5,50,0,0,0,0,0
+toolBarFont=FreeSans,10,-1,5,50,0,0,0,0,0
 widgetStyle=Breeze
 
 [Icons]
-Theme=Papirus
+Theme=ePapirus
 
 [KDE]
 AnimationDurationFactor=0.25
@@ -159,6 +164,7 @@ MaximumRemoteSize=0
 [WM]
 activeBackground=34,45,50
 activeBlend=34,45,50
+activeFont=FreeSans,10,-1,5,63,0,0,0,0,0,Bold
 activeForeground=163,172,172
 inactiveBackground=34,45,50
 inactiveBlend=34,45,50

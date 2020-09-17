@@ -20,10 +20,10 @@ if !exists("g:os")
       if match(system('uname -o'),'Android') == 0
         let g:os = substitute(system('uname -o'), '\n', '', '')
         " let g:os = system('uname -o')
-        endif
       endif
     endif
   endif
+endif
 
 " fix vim plug path for neovim
 let vimplug_exists=expand('~/.vim/autoload/plug.vim')
@@ -35,7 +35,7 @@ if !filereadable(vimplug_exists)
   if !executable("curl")
     echoerr "You have to install curl or first install vim-plug yourself!"
     execute "q!"
-    endif
+  endif
   echo "Installing Vim-Plug..."
   echo ""
   silent exec "!\curl -fLo " . vimplug_exists . " --create-dirs https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim"
@@ -307,11 +307,15 @@ nnoremap <silent><space>8 :exe 8 . "wincmd w"<CR>
 nnoremap <silent><space>9 :exe 9 . "wincmd w"<CR>
 nnoremap <silent><space>0 :exe 10 . "wincmd w"<CR>
 
+
 "" indentation
 "nnoremap > >>_
 "nnoremap < <<_
 vnoremap < <gv
 vnoremap > >gv
+
+" --- Vim Wiki ---
+nnoremap <silent><space>wt :VimwikiTable 1 2
 
 " --- Coc ---
 if lspClient == 1
@@ -380,6 +384,9 @@ if lspClient == 1
   inoremap <expr><S-TAB> pumvisible() ? "\<C-p>" : "\<C-h>"
   inoremap <expr> <cr> pumvisible() ? "\<C-y>" : "\<C-g>u\<CR>"
 endif
+
+
+
 " ----------------------------------
 " --------- Plugins config ---------
 " ----------------------------------
