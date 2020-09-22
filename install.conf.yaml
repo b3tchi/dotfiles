@@ -1,56 +1,56 @@
 - defaults:
-  link:
-    create: true
-    force: true
+    link:
+      create: true
+      force: true
 
 - clean: ['~']
 
 - link:
-  ~/.profile: profile
-  ~/.bashrc: bashrc
-  ~/.bash_logout: bash_logout
-  ~/.gitconfig: gitconfig
-  ~/.config/fish/config.fish:
-    path: fish/config.fish
-  ~/.ssh/config:
-    path: ssh/config
+    ~/.profile: profile
+    ~/.bashrc: bashrc
+    ~/.bash_logout: bash_logout
+    ~/.gitconfig: gitconfig
+    ~/.config/fish/config.fish:
+      path: fish/config.fish
+    ~/.ssh/config:
+      path: ssh/config
 
   #NVIM
-  ~/.config/nvim/init.vim:
-    path: nvim/init.vim
-  ~/.config/nvim/coc-settings.json:
-    path: nvim/coc-settings.json
-  ~/.config/nvim/coc.vim:
-    path: nvim/coc.vim
-  ~/.config/nvim/deoplete.vim:
-    path: nvim/deoplete.vim
+    ~/.config/nvim/init.vim:
+      path: nvim/init.vim
+    ~/.config/nvim/coc-settings.json:
+      path: nvim/coc-settings.json
+    ~/.config/nvim/coc.vim:
+      path: nvim/coc.vim
+    ~/.config/nvim/deoplete.vim:
+      path: nvim/deoplete.vim
 
   #NVIM-QT
-  ~/.config/nvim/ginit.vim:
-    path: nvim/Win/ginit.vim
+    ~/.config/nvim/ginit.vim:
+      path: nvim/Win/ginit.vim
 
   #VsCode
-  ~/.config/Code/User/settings.json:
-    path: code/settings.json
-  ~/.config/Code/User/keybindings.json:
-    path: code/keybindings.json
+    ~/.config/Code/User/settings.json:
+      path: code/settings.json
+    ~/.config/Code/User/keybindings.json:
+      path: code/keybindings.json
 
   #KDE
-  ~/.local/share/kxmlgui5/konsole/konsoleui.rc:
-    path: kde/konsoleui.rc
-  ~/.local/share/kxmlgui5/konsole/sessionui.rc:
-    path: kde/sessionui.rc
-  ~/.config/kdeglobals:
-    path: kde/kdeglobals
-  # ~/.config/kdeglobalshortcutsrc:
-    # path: kde/kdeglobalshortcutsrc
-  ~/.config/kwinrc:
-    path: kde/kwinrc
-  ~/.local/share/kservices5/ServiceMenus/myFirstServiceMenu.desktop:
-    path: kde/myFirstServiceMenu.desktop
+    ~/.local/share/kxmlgui5/konsole/konsoleui.rc:
+      path: kde/konsoleui.rc
+    ~/.local/share/kxmlgui5/konsole/sessionui.rc:
+      path: kde/sessionui.rc
+    ~/.config/kdeglobals:
+      path: kde/kdeglobals
+    ~/.config/kdeglobalshortcutsrc:
+      path: kde/kdeglobalshortcutsrc
+    ~/.config/kwinrc:
+      path: kde/kwinrc
+    ~/.local/share/kservices5/ServiceMenus/myFirstServiceMenu.desktop:
+      path: kde/myFirstServiceMenu.desktop
 
   #Latte
-  ~/.config/latte/Default.layout.latte:
-    path: kde/latte/Default.layout.latte
+    ~/.config/latte/Default.layout.latte:
+      path: kde/latte/Default.layout.latte
 
   #TBD Joplin, Kvantum, MC, Gambas?

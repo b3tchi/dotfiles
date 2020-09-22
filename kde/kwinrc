@@ -31,6 +31,9 @@ Rows=1
 [DrmOutputs][6c3828befa][6c3828befa]
 Scale=1
 
+[DrmOutputs][df3c771780][df3c771780]
+Scale=1
+
 [Effect-CoverSwitch]
 TabBox=false
 TabBoxAlternative=false
@@ -88,6 +91,9 @@ synchronizeskipswitcherEnabled=false
 toggleparachuteEnabled=true
 videowallEnabled=false
 
+[Script-Parachute]
+showNotificationWindows=false
+
 [Script-activatelattelaunchermenu]
 BorderActivate=9
 
@@ -100,6 +106,7 @@ tileLayoutGap=5
 
 [Script-toggleparachute]
 BorderActivate=7
+TouchBorderActivate=0
 
 [SubSession: 14d6cfe7-82fe-4bcb-933a-9652b82cfd99]
 active=-1
@@ -120,6 +127,7 @@ MultiScreenMode=0
 ShowDesktopMode=0
 ShowTabBox=true
 SwitchingMode=0
+TouchBorderActivate=9
 
 [TabBoxAlternative]
 ActivitiesMode=1
