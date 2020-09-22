@@ -1,5 +1,6 @@
 - defaults:
     link:
+      # relink: true
       create: true
       force: true
 
@@ -43,7 +44,7 @@
     ~/.config/kdeglobals:
       path: kde/kdeglobals
     ~/.config/kdeglobalshortcutsrc:
-      path: kde/kdeglobalshortcutsrc
+      path: kde/kglobalshortcutsrc
     ~/.config/kwinrc:
       path: kde/kwinrc
     ~/.local/share/kservices5/ServiceMenus/myFirstServiceMenu.desktop:
