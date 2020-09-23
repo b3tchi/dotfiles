@@ -168,6 +168,7 @@ set updatetime=300
 set completeopt=noinsert,menuone,preview
 set splitright splitbelow
 set numberwidth=1
+set title "for Session title names
 " set listchars=tab:→\ ,nbsp:␣,trail:•,extends:⟩,precedes:⟨
 
 "" Define folding
@@ -511,7 +512,16 @@ endfunction
 
 "--- startify --- TODO
 " let g:startify_bookmarks = ['~/svn', '~/dev']
+autocmd User StartifyAllBuffersOpened call SetNeovimTitle()
+autocmd User StartifyBufferOpened call SetNeovimTitle()
 
+" set title - required this option to be on - in general settings above
+function! SetNeovimTitle()
+  let g:test2 = fnamemodify(v:this_session, ':t')
+  let &titlestring = fnamemodify(v:this_session, ':t')
+
+
+endfunction
 "--- Indent Guides ---
 " let g:indent_guides_enable_on_vim_startup = 1
 " let g:indent_guides_auto_colors = 0
@@ -579,5 +589,5 @@ let g:vimwiki_list = [
   \,{'path': '~/OneDrive - LEGO/vimwiki_LEGO/', 'syntax': 'markdown', 'ext': '.md'}
   \]
 let g:vimwiki_listsyms = ' ~–x'
-let g:vimwiki_listsym_rejected = 'r'
+let g:vimwiki_listsym_rejected = 'x'
 
