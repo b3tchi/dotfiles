@@ -7,7 +7,7 @@ endif
 let lspClient = 1 "1 for coc-nvim, 2 for deoplete (WIP), -1 non Lsp Client (TBD)
 let vimTheme = 2 "1 solarized8, 2 gruvbox
 
-" Identify Os and Actual Device
+" Identify Os and Actual Device - Who is coming home?
 if !exists("g:os")
   if has("win64") || has("win32") || has("win16")
     let g:os = "Windows"
@@ -15,6 +15,7 @@ if !exists("g:os")
     let g:computerName = substitute(g:computerName, '\n', '', '')
   else
     let g:os = substitute(system('uname'), '\n', '', '')
+    let computerName = substitute(system('hostname'), '\n', '', '')
     if g:os == 'Linux'
       " uname -o => returns Android on DroidVim, Termux
       if match(system('uname -o'),'Android') == 0
@@ -583,11 +584,20 @@ let g:user_emmet_leader_key = ','
 au! BufNewFile,BufRead *.ps1 set ft=ps1
 
 " --- vimWiki specific ---
-let g:vimwiki_markdown_link_ext = 1
-let g:vimwiki_list = [
+let wikis = [
   \ {'path': '~/vimwiki/', 'syntax': 'markdown', 'ext': '.md'}
-  \,{'path': '~/OneDrive - LEGO/vimwiki_LEGO/', 'syntax': 'markdown', 'ext': '.md'}
   \]
+
+if g:computerName =='DESKTOP-HSRFLH5' "LEGO desktop
+  add(wikis ,{'path': '~/OneDrive - LEGO/vimwiki_LEGO/', 'syntax': 'markdown', 'ext': '.md'})
+endif
+
+" let g:vimwiki_list = [
+"   \ {'path': '~/vimwiki/', 'syntax': 'markdown', 'ext': '.md'}
+"   \,{'path': '~/OneDrive - LEGO/vimwiki_LEGO/', 'syntax': 'markdown', 'ext': '.md'}
+"   \]
+let g:vimwiki_markdown_link_ext = 1
+let g:vimwiki_list = wikis
 let g:vimwiki_listsyms = ' ~–x'
 let g:vimwiki_listsym_rejected = 'x'
 
