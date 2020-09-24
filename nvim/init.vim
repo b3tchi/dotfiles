@@ -592,10 +592,6 @@ if g:computerName =='DESKTOP-HSRFLH5' "LEGO desktop
   add(wikis ,{'path': '~/OneDrive - LEGO/vimwiki_LEGO/', 'syntax': 'markdown', 'ext': '.md'})
 endif
 
-" let g:vimwiki_list = [
-"   \ {'path': '~/vimwiki/', 'syntax': 'markdown', 'ext': '.md'}
-"   \,{'path': '~/OneDrive - LEGO/vimwiki_LEGO/', 'syntax': 'markdown', 'ext': '.md'}
-"   \]
 let g:vimwiki_markdown_link_ext = 1
 let g:vimwiki_list = wikis
 let g:vimwiki_listsyms = ' ~–x'
