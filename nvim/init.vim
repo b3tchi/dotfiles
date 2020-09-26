@@ -379,9 +379,9 @@ if lspClient == 1
   " nnoremap <silent> <space>s  :<C-u>CocList -I symbols<cr>
 
   " CocList Navigation - Do default action for next item.
-  nnoremap <silent> <space>j  :<C-u>CocNext<CR>
-  nnoremap <silent> <space>k  :<C-u>CocPrev<CR>
-  nnoremap <silent> <space>p  :<C-u>CocListResume<CR>
+  " nnoremap <silent> <space>j  :<C-u>CocNext<CR>
+  " nnoremap <silent> <space>k  :<C-u>CocPrev<CR>
+  nnoremap <silent> <space>p  :<C-u>CocFzfListResume<CR>
   " Do default action for previous item.
 
   nnoremap <leader>em :CocCommand python.refactorExtractMethod<cr>
@@ -501,7 +501,7 @@ let g:fzf_layout = { 'window': 'call OpenFloatingWin()' }
 
 command! -bang -nargs=* Rg
   \ call fzf#vim#grep(
-  \   'rg --column --line-number --no-headiRng --color=always --smart-case -- '.shellescape(<q-args>), 1,
+  \   'rg --column --line-number --no-heading --color=always --smart-case -- '.shellescape(<q-args>), 1,
   \   fzf#vim#with_preview(), <bang>0)
 
 command! -bang -nargs=? -complete=dir GFiles
