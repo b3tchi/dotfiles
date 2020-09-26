@@ -60,9 +60,12 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'google/vim-searchindex'
   Plug 'mhinz/vim-startify' "fancty start screen for VIM
 
-  ""Searching
+  ""Searching fzf
   Plug 'junegunn/fzf', {'build': './install --all', 'merged': 0}
   Plug 'junegunn/fzf.vim', {'depends': 'fzf'}
+  " Plug 'junegunn/fzf', { 'do': { -> fzf#install() } }
+  " Plug 'junegunn/fzf.vim'
+  " Plug 'jremmen/vim-ripgrep' "testing ripgrep single addin :Rg in fzf seems broken
 
   ""Status Line
   Plug 'itchyny/lightline.vim'
@@ -96,6 +99,7 @@ call plug#begin(expand('~/.vim/plugged'))
     " Plug 'neoclide/coc.nvim', {'merge': 0, 'rev': 'release'}
     Plug 'neoclide/coc.nvim', {'branch': 'release'}
     Plug 'liuchengxu/vista.vim'
+    Plug 'antoinemadec/coc-fzf', {'branch': 'release'}
     " Plug 'neoclide/coc.nvim', {'do': 'yarn install --frozen-lockfile'}
     " Plug 'neoclide/coc.nvim', {'merge':0, 'build': './install.sh nightly'}
     " Plug 'mgedmin/python-imports.vim', { 'on_ft' : 'python' }
@@ -271,6 +275,7 @@ nnoremap <S-Tab> :bprev!<CR>
 nnoremap <C-p> :GFiles<cr>
 " nnoremap <C-f> :Rg<cr>
 nnoremap <silent> <space>f :Rg<cr>
+nnoremap <silent> <space>b :Buffers<cr>
 
 nmap <silent> <leader>tn :TestNearest<CR>
 nmap <silent> <leader>tf :TestFile<CR>
@@ -356,14 +361,15 @@ if lspClient == 1
   command! -nargs=0 Format :call CocAction('format')
 
   " nnoremap <C-o> :CocCommand explorer<cr>
-  nnoremap <silent> <space>e :CocCommand explorer<cr>
   " Using CocList
   nmap <F9> :Vista!!<CR>
+  "TBR Vista succed by fzf-coc
   " nmap <silent> <space>o :<cr>
-  nnoremap <silent> <space>o  :<C-u>CocList outline<cr>
 
-  nnoremap <silent> <space>c  :<C-u>CocList commands<cr>
-  nnoremap <silent> <space>a  :<C-u>CocList diagnostics<cr>
+  nnoremap <silent> <space>c  :<C-u>CocFzfList commands<cr>
+  nnoremap <silent> <space>a  :<C-u>CocFzfList diagnostics<cr>
+  nnoremap <silent> <space>e :CocCommand explorer<cr>
+  nnoremap <silent> <space>o  :<C-u>CocFzfList outline<cr>
   " nnoremap <silent> <space>e  :<C-u>CocList extensions<cr>
   " nnoremap <silent> <space>s  :<C-u>CocList -I symbols<cr>
 
@@ -456,6 +462,7 @@ function LightlineFilename()
 endfunction
 
 "--- Vista --- NEEDED similar as coclist as outline
+"PROBABLY TBR succed by fzf-coc
 let g:vista_default_executive = 'coc'
 let g:vista#renderer#enable_icon = 1
 let g:vista#renderer#icons = {
@@ -466,16 +473,31 @@ let g:vista_icon_indent = ["▸ ", ""]
 "g:vista_echo_cursor_strategy = 'both'
 
 " --- fzf ---
+"to fix issue added this to bash
+"export FZF_DEFAULT_COMMAND="rg --files --hidden --follow --glob '!.git'"
+
 let $FZF_DEFAULT_OPTS = '--reverse'
+let $FZF_DEFAULT_COMMAND = 'rg --files --hidden --follow --glob ''!.git'''
 let $BAT_THEME = 'OneHalfDark'
+
+let g:rg_derive_root='true'
 let g:fzf_layout = { 'window': 'call OpenFloatingWin()' }
+" let g:fzf_layout = { 'window': {'width': 0.9, 'height': 0.6} }
+
+" Shouldn't be needed https://medium.com/@sidneyliebrand/how-fzf-and-ripgrep-improved-my-workflow-61c7ca212861
+" command! -bang -nargs=* Rg
+"   \ call fzf#vim#grep(
+"   \   'rg'
+"   \   , 1
+"   \   ,<bang>0 ? fzf#vim#with_preview() : fzf#vim#with_preview()
+"   \   ,<bang>0
+"   \   )
+  " \   'rg --column --line-number --no-heading --fixed-strings --color=always --glob "!.git/*" --smart-case '.shellescape(<q-args>)
 
 command! -bang -nargs=* Rg
   \ call fzf#vim#grep(
-  \   'rg --column --line-number --no-heading --fixed-strings --color=always --glob "!.git/*" --smart-case '.shellescape(<q-args>), 1,
-  \   <bang>0 ? fzf#vim#with_preview()
-  \           : fzf#vim#with_preview(),
-  \   <bang>0)
+  \   'rg --column --line-number --no-headiRng --color=always --smart-case -- '.shellescape(<q-args>), 1,
+  \   fzf#vim#with_preview(), <bang>0)
 
 command! -bang -nargs=? -complete=dir GFiles
   \ call fzf#vim#gitfiles(
