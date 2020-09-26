@@ -36,6 +36,7 @@ let g:coc_global_extensions = [
   \ , 'coc-powershell'
   \ , 'coc-utils'
   \ , 'coc-svelte'
+  \ , 'coc-db'
   \ ]
 
 

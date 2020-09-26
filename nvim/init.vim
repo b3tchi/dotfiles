@@ -137,6 +137,11 @@ call plug#begin(expand('~/.vim/plugged'))
   "Plug 'janko-m/vim-test'
   "Plug 'neomake/neomake'
 
+  " Adding dadbod for databases
+  Plug 'tpope/vim-dadbod'
+  Plug 'kristijanhusak/vim-dadbod-ui'
+  Plug 'kristijanhusak/vim-dadbod-completion'
+
   " themes
   Plug 'lifepillar/vim-solarized8'
   Plug 'morhetz/gruvbox'
