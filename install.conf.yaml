@@ -43,7 +43,7 @@
       path: kde/sessionui.rc
     ~/.config/kdeglobals:
       path: kde/kdeglobals
-    ~/.config/kdeglobalshortcutsrc:
+    ~/.config/kglobalshortcutsrc:
       path: kde/kglobalshortcutsrc
     ~/.config/kwinrc:
       path: kde/kwinrc
