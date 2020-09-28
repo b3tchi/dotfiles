@@ -1,0 +1,10 @@
+[1]
+Description=SystemSettings force MinSize
+minsize=400,300
+minsizerule=2
+wmclass=systemsettings5 systemsettings
+wmclasscomplete=true
+wmclassmatch=1
+
+[General]
+count=1
