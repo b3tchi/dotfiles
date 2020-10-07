@@ -65,6 +65,9 @@ Top=None
 TopLeft=None
 TopRight=None
 
+[ModifierOnlyShortcuts]
+Meta=
+
 [NightColor]
 Active=true
 LatitudeAuto=50.0766
@@ -80,6 +83,7 @@ desktopchangeosdEnabled=false
 diminactiveEnabled=true
 highlightwindowEnabled=true
 krohnkiteEnabled=true
+kwin4_effect_dimscreenEnabled=true
 kwin4_effect_squashEnabled=false
 kwin4_effect_translucencyEnabled=false
 lattewindowcolorsEnabled=false
