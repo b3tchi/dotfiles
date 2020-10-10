@@ -14,13 +14,25 @@ Favorites=
 ShowMenuBarByDefault=false
 
 [MainWindow]
+DVI-I-1-1 DVI-I-2-2 Height 1200=509
+DVI-I-1-1 DVI-I-2-2 Width 1920=857
+DVI-I-1-1 DVI-I-2-2 XPosition=1057
+DVI-I-1-1 DVI-I-2-2 YPosition=565
+DVI-I-1-1 eDP-1 DVI-I-2-2 Height 1080=509
+DVI-I-1-1 eDP-1 DVI-I-2-2 Height 1200=1167
+DVI-I-1-1 eDP-1 DVI-I-2-2 Width 1920=857
+DVI-I-1-1 eDP-1 DVI-I-2-2 XPosition=1057
+DVI-I-1-1 eDP-1 DVI-I-2-2 YPosition=565
 MenuBar=Disabled
 State=AAAA/wAAAAD9AAAAAAAAAwoAAAHjAAAABAAAAAQAAAAIAAAACPwAAAAA
 ToolBarsMovable=Disabled
-eDP-1 Height 1080=1047
-eDP-1 Width 1920=1910
-eDP-1 XPosition=5
-eDP-1 YPosition=28
+eDP-1 Height 1080=325
+eDP-1 Width 1920=907
+eDP-1 XPosition=1003
+eDP-1 YPosition=745
+
+[Notification Messages]
+CloseAllTabs=true
 
 [ThumbnailsSettings]
 ThumbnailCtrl=true

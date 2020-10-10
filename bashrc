@@ -116,4 +116,6 @@ if ! shopt -oq posix; then
   fi
 fi
 
+#adding fzf item
 [ -f ~/.fzf.bash ] && source ~/.fzf.bash
+export FZF_DEFAULT_COMMAND 'rg --files --hidden --follow --glob '!.git''

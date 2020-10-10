@@ -154,10 +154,8 @@ ElectricBorderTiling=true
 ElectricBorders=0
 
 [org.kde.kdecoration2]
-BorderSize=None
 BorderSizeAuto=false
 BorderlessMaximizedWindows=true
 ButtonsOnLeft=XAI
 ButtonsOnRight=
-library=org.kde.sierrabreezeenhanced
-theme=Sierra Breeze Enhanced
+ShowToolTips=false

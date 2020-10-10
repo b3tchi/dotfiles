@@ -11,3 +11,6 @@ status --is-interactive; and pyenv virtualenv-init - | source
 # . (pyenv init - fish)
 # eval "$(pyenv init -)"
 # eval "$(pyenv virtualenv-init -)"
+
+#fzf finder export
+set -x FZF_DEFAULT_COMMAND 'rg --files --hidden --follow --glob '!.git''
