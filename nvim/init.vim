@@ -61,10 +61,10 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'mhinz/vim-startify' "fancty start screen for VIM
 
   ""Searching fzf
-  Plug 'junegunn/fzf', {'build': './install --all', 'merged': 0}
-  Plug 'junegunn/fzf.vim', {'depends': 'fzf'}
-  " Plug 'junegunn/fzf', { 'do': { -> fzf#install() } }
-  " Plug 'junegunn/fzf.vim'
+  " Plug 'junegunn/fzf', {'build': './install --all', 'merged': 0}
+  " Plug 'junegunn/fzf.vim', {'depends': 'fzf'}
+  Plug 'junegunn/fzf', { 'do': { -> fzf#install() } }
+  Plug 'junegunn/fzf.vim'
   " Plug 'jremmen/vim-ripgrep' "testing ripgrep single addin :Rg in fzf seems broken
 
   ""Status Line
@@ -394,11 +394,17 @@ if lspClient == 1
     \ pumvisible() ? "\<C-n>" :
     \ <SID>check_back_space() ? "\<TAB>" :
     \ coc#refresh()
-  inoremap <expr><S-TAB> pumvisible() ? "\<C-p>" : "\<C-h>"
-  inoremap <expr> <cr> pumvisible() ? "\<C-y>" : "\<C-g>u\<CR>"
+  inoremap <silent><expr> <C-Space>
+    \ pumvisible() ? "\<C-n>" :
+    \ <SID>check_back_space() ? "\<TAB>" :
+    \ coc#refresh()
 endif
 
+inoremap <expr><S-TAB> pumvisible() ? "\<C-p>" : "\<C-h>"
+inoremap <expr><C-S-Space> pumvisible() ? "\<C-p>" : "\<C-h>"
 
+inoremap <expr> <cr> pumvisible() ? "\<C-y>" : "\<C-g>u\<CR>"
+" inoremap <expr> <CR> pumvisible() ? "\<C-y>" : "\<CR>"
 
 " ----------------------------------
 " --------- Plugins config ---------
@@ -623,4 +629,4 @@ let g:vimwiki_markdown_link_ext = 1
 let g:vimwiki_list = wikis
 let g:vimwiki_listsyms = ' ~–x'
 let g:vimwiki_listsym_rejected = 'x'
-
+let g:vimwiki_key_mappings = { 'table_mappings': 0 } " to change completion behavior
