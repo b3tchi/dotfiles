@@ -11,6 +11,12 @@ Switch keyboard layout to English (Dvorak)=none,none,Switch keyboard layout to E
 Switch to Next Keyboard Layout=Ctrl+Alt+K,none,Switch to Next Keyboard Layout
 _k_friendly_name=Keyboard Layout Switcher
 
+[firefox.desktop]
+_k_friendly_name=Firefox Web Browser
+_launch=Meta+B,,Firefox Web Browser
+new-private-window=,,Open a New Private Window
+new-window=,,Open a New Window
+
 [kaccess]
 Toggle Screen Reader On and Off=Meta+Alt+S,Meta+Alt+S,Toggle Screen Reader On and Off
 _k_friendly_name=Accessibility
@@ -27,7 +33,7 @@ _k_friendly_name=KDE Daemon
 display=Display\tMeta+P,Display\tMeta+P,Switch Display
 
 [khotkeys]
-_k_friendly_name=KDE Daemon
+_k_friendly_name=System Settings
 {af939f12-ba7a-4715-8ef6-e8e692fc2c56}=Meta+Return,none,Launch Konsole
 {d03619b6-9b3c-48cc-9d9c-a2aadb485550}=none,none,Search
 
@@ -87,7 +93,7 @@ Krohnkite: Shrink Width=Meta+H,none,
 Krohnkite: Spread Layout=none,none,
 Krohnkite: Stair Layout=none,none,
 Krohnkite: Three Column Layout=none,none,
-Krohnkite: Tile Layout=Meta+T,none,
+Krohnkite: Tile Layout=,none,
 Krohnkite: Up/Prev=Meta+K,none,
 MoveMouseToCenter=Meta+F6,Meta+F6,Move Mouse to Center
 MoveMouseToFocus=Meta+F5,Meta+F5,Move Mouse to Focus
@@ -226,6 +232,10 @@ _k_friendly_name=KWin
 view_actual_size=,Meta+0,Actual Size
 view_zoom_in=Meta+=,Meta+=,Zoom In
 view_zoom_out=Meta+-,Meta+-,Zoom Out
+
+[nvim-qt.desktop]
+_k_friendly_name=Neovim-Qt
+_launch=Meta+T,,Neovim-Qt
 
 [org.kde.dolphin.desktop]
 _k_friendly_name=Dolphin
