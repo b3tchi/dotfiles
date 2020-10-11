@@ -11,10 +11,14 @@
     ~/.bashrc: bashrc
     ~/.bash_logout: bash_logout
     ~/.gitconfig: gitconfig
-    ~/.config/fish/config.fish:
-      path: fish/config.fish
     ~/.ssh/config:
       path: ssh/config
+
+  #fish
+    ~/.config/fish/config.fish:
+      path: fish/config.fish
+    ~/.config/fish/functions/fish_user_key_bindings.fish:
+      path: fish/fish_user_key_bindings.fish
 
   #NVIM
     ~/.config/nvim/init.vim:
