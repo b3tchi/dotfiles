@@ -30,10 +30,10 @@ eDP-1 DP-1 Height 1080=1042
 eDP-1 DP-1 Width 1920=1902
 eDP-1 DP-1 XPosition=9
 eDP-1 DP-1 YPosition=29
-eDP-1 Height 1080=504
-eDP-1 Width 1920=904
-eDP-1 XPosition=1006
-eDP-1 YPosition=566
+eDP-1 Height 1080=325
+eDP-1 Width 1920=847
+eDP-1 XPosition=1063
+eDP-1 YPosition=387
 
 [Notification Messages]
 CloseAllTabs=true

@@ -1,18 +1,18 @@
 [1]
+Description=Window settings for systemsettings
+minsize=400,300
+minsizerule=2
+types=1
+wmclass=systemsettings
+wmclassmatch=1
+
+[2]
 Description=Application settings for workspacesclient
 above=true
 aboverule=2
 minsize=700,620
 minsizerule=2
 wmclass=workspacesclient
-wmclassmatch=1
-
-[2]
-Description=SystemSettings force MinSize
-minsize=400,300
-minsizerule=2
-wmclass=systemsettings5 systemsettings
-wmclasscomplete=true
 wmclassmatch=1
 
 [General]
