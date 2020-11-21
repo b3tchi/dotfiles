@@ -590,4 +590,4 @@ let g:vimwiki_list = [
   \]
 let g:vimwiki_listsyms = ' ~–x'
 let g:vimwiki_listsym_rejected = 'x'
-
+let g:viswiki_folding = 'list'
