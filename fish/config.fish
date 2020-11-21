@@ -11,3 +11,9 @@ status --is-interactive; and pyenv virtualenv-init - | source
 # . (pyenv init - fish)
 # eval "$(pyenv init -)"
 # eval "$(pyenv virtualenv-init -)"
+
+#add vi mode to fiesh
+set fish_key_bindings fish_user_key_bindings
+
+#fzf finder export
+set -x FZF_DEFAULT_COMMAND 'rg --files --hidden --follow --glob '!.git''

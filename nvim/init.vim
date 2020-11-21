@@ -7,7 +7,7 @@ endif
 let lspClient = 1 "1 for coc-nvim, 2 for deoplete (WIP), -1 non Lsp Client (TBD)
 let vimTheme = 2 "1 solarized8, 2 gruvbox
 
-" Identify Os and Actual Device
+" Identify Os and Actual Device - Who is coming home?
 if !exists("g:os")
   if has("win64") || has("win32") || has("win16")
     let g:os = "Windows"
@@ -15,6 +15,7 @@ if !exists("g:os")
     let g:computerName = substitute(g:computerName, '\n', '', '')
   else
     let g:os = substitute(system('uname'), '\n', '', '')
+    let computerName = substitute(system('hostname'), '\n', '', '')
     if g:os == 'Linux'
       " uname -o => returns Android on DroidVim, Termux
       if match(system('uname -o'),'Android') == 0
@@ -59,9 +60,12 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'google/vim-searchindex'
   Plug 'mhinz/vim-startify' "fancty start screen for VIM
 
-  ""Searching
-  Plug 'junegunn/fzf', {'build': './install --all', 'merged': 0}
-  Plug 'junegunn/fzf.vim', {'depends': 'fzf'}
+  ""Searching fzf
+  " Plug 'junegunn/fzf', {'build': './install --all', 'merged': 0}
+  " Plug 'junegunn/fzf.vim', {'depends': 'fzf'}
+  Plug 'junegunn/fzf', { 'do': { -> fzf#install() } }
+  Plug 'junegunn/fzf.vim'
+  " Plug 'jremmen/vim-ripgrep' "testing ripgrep single addin :Rg in fzf seems broken
 
   ""Status Line
   Plug 'itchyny/lightline.vim'
@@ -95,6 +99,7 @@ call plug#begin(expand('~/.vim/plugged'))
     " Plug 'neoclide/coc.nvim', {'merge': 0, 'rev': 'release'}
     Plug 'neoclide/coc.nvim', {'branch': 'release'}
     Plug 'liuchengxu/vista.vim'
+    Plug 'antoinemadec/coc-fzf', {'branch': 'release'}
     " Plug 'neoclide/coc.nvim', {'do': 'yarn install --frozen-lockfile'}
     " Plug 'neoclide/coc.nvim', {'merge':0, 'build': './install.sh nightly'}
     " Plug 'mgedmin/python-imports.vim', { 'on_ft' : 'python' }
@@ -131,6 +136,11 @@ call plug#begin(expand('~/.vim/plugged'))
   "" Old Addins TBD
   "Plug 'janko-m/vim-test'
   "Plug 'neomake/neomake'
+
+  " Adding dadbod for databases
+  Plug 'tpope/vim-dadbod'
+  Plug 'kristijanhusak/vim-dadbod-ui'
+  Plug 'kristijanhusak/vim-dadbod-completion'
 
   " themes
   Plug 'lifepillar/vim-solarized8'
@@ -270,6 +280,7 @@ nnoremap <S-Tab> :bprev!<CR>
 nnoremap <C-p> :GFiles<cr>
 " nnoremap <C-f> :Rg<cr>
 nnoremap <silent> <space>f :Rg<cr>
+nnoremap <silent> <space>b :Buffers<cr>
 
 nmap <silent> <leader>tn :TestNearest<CR>
 nmap <silent> <leader>tf :TestFile<CR>
@@ -355,21 +366,22 @@ if lspClient == 1
   command! -nargs=0 Format :call CocAction('format')
 
   " nnoremap <C-o> :CocCommand explorer<cr>
-  nnoremap <silent> <space>e :CocCommand explorer<cr>
   " Using CocList
   nmap <F9> :Vista!!<CR>
+  "TBR Vista succed by fzf-coc
   " nmap <silent> <space>o :<cr>
-  nnoremap <silent> <space>o  :<C-u>CocList outline<cr>
 
-  nnoremap <silent> <space>c  :<C-u>CocList commands<cr>
-  nnoremap <silent> <space>a  :<C-u>CocList diagnostics<cr>
+  nnoremap <silent> <space>c  :<C-u>CocFzfList commands<cr>
+  nnoremap <silent> <space>a  :<C-u>CocFzfList diagnostics<cr>
+  nnoremap <silent> <space>e :CocCommand explorer<cr>
+  nnoremap <silent> <space>o  :<C-u>CocFzfList outline<cr>
   " nnoremap <silent> <space>e  :<C-u>CocList extensions<cr>
   " nnoremap <silent> <space>s  :<C-u>CocList -I symbols<cr>
 
   " CocList Navigation - Do default action for next item.
-  nnoremap <silent> <space>j  :<C-u>CocNext<CR>
-  nnoremap <silent> <space>k  :<C-u>CocPrev<CR>
-  nnoremap <silent> <space>p  :<C-u>CocListResume<CR>
+  " nnoremap <silent> <space>j  :<C-u>CocNext<CR>
+  " nnoremap <silent> <space>k  :<C-u>CocPrev<CR>
+  nnoremap <silent> <space>p  :<C-u>CocFzfListResume<CR>
   " Do default action for previous item.
 
   nnoremap <leader>em :CocCommand python.refactorExtractMethod<cr>
@@ -382,11 +394,17 @@ if lspClient == 1
     \ pumvisible() ? "\<C-n>" :
     \ <SID>check_back_space() ? "\<TAB>" :
     \ coc#refresh()
-  inoremap <expr><S-TAB> pumvisible() ? "\<C-p>" : "\<C-h>"
-  inoremap <expr> <cr> pumvisible() ? "\<C-y>" : "\<C-g>u\<CR>"
+  inoremap <silent><expr> <C-Space>
+    \ pumvisible() ? "\<C-n>" :
+    \ <SID>check_back_space() ? "\<TAB>" :
+    \ coc#refresh()
 endif
 
+inoremap <expr><S-TAB> pumvisible() ? "\<C-p>" : "\<C-h>"
+inoremap <expr><C-S-Space> pumvisible() ? "\<C-p>" : "\<C-h>"
 
+inoremap <expr> <cr> pumvisible() ? "\<C-y>" : "\<C-g>u\<CR>"
+" inoremap <expr> <CR> pumvisible() ? "\<C-y>" : "\<CR>"
 
 " ----------------------------------
 " --------- Plugins config ---------
@@ -455,6 +473,7 @@ function LightlineFilename()
 endfunction
 
 "--- Vista --- NEEDED similar as coclist as outline
+"PROBABLY TBR succed by fzf-coc
 let g:vista_default_executive = 'coc'
 let g:vista#renderer#enable_icon = 1
 let g:vista#renderer#icons = {
@@ -465,16 +484,31 @@ let g:vista_icon_indent = ["▸ ", ""]
 "g:vista_echo_cursor_strategy = 'both'
 
 " --- fzf ---
+"to fix issue added this to bash
+"export FZF_DEFAULT_COMMAND="rg --files --hidden --follow --glob '!.git'"
+
 let $FZF_DEFAULT_OPTS = '--reverse'
+let $FZF_DEFAULT_COMMAND = 'rg --files --hidden --follow --glob ''!.git'''
 let $BAT_THEME = 'OneHalfDark'
+
+let g:rg_derive_root='true'
 let g:fzf_layout = { 'window': 'call OpenFloatingWin()' }
+" let g:fzf_layout = { 'window': {'width': 0.9, 'height': 0.6} }
+
+" Shouldn't be needed https://medium.com/@sidneyliebrand/how-fzf-and-ripgrep-improved-my-workflow-61c7ca212861
+" command! -bang -nargs=* Rg
+"   \ call fzf#vim#grep(
+"   \   'rg'
+"   \   , 1
+"   \   ,<bang>0 ? fzf#vim#with_preview() : fzf#vim#with_preview()
+"   \   ,<bang>0
+"   \   )
+  " \   'rg --column --line-number --no-heading --fixed-strings --color=always --glob "!.git/*" --smart-case '.shellescape(<q-args>)
 
 command! -bang -nargs=* Rg
   \ call fzf#vim#grep(
-  \   'rg --column --line-number --no-heading --fixed-strings --color=always --glob "!.git/*" --smart-case '.shellescape(<q-args>), 1,
-  \   <bang>0 ? fzf#vim#with_preview()
-  \           : fzf#vim#with_preview(),
-  \   <bang>0)
+  \   'rg --column --line-number --no-heading --color=always --smart-case -- '.shellescape(<q-args>), 1,
+  \   fzf#vim#with_preview(), <bang>0)
 
 command! -bang -nargs=? -complete=dir GFiles
   \ call fzf#vim#gitfiles(
@@ -583,11 +617,17 @@ let g:user_emmet_leader_key = ','
 au! BufNewFile,BufRead *.ps1 set ft=ps1
 
 " --- vimWiki specific ---
-let g:vimwiki_markdown_link_ext = 1
-let g:vimwiki_list = [
+let wikis = [
   \ {'path': '~/vimwiki/', 'syntax': 'markdown', 'ext': '.md'}
-  \,{'path': '~/OneDrive - LEGO/vimwiki_LEGO/', 'syntax': 'markdown', 'ext': '.md'}
   \]
+
+if g:computerName =='DESKTOP-HSRFLH5' "LEGO desktop
+  add(wikis ,{'path': '~/OneDrive - LEGO/vimwiki_LEGO/', 'syntax': 'markdown', 'ext': '.md'})
+endif
+
+let g:vimwiki_markdown_link_ext = 1
+let g:vimwiki_list = wikis
 let g:vimwiki_listsyms = ' ~–x'
 let g:vimwiki_listsym_rejected = 'x'
 let g:viswiki_folding = 'list'
+let g:vimwiki_key_mappings = { 'table_mappings': 0 } " to change completion behavior

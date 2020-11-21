@@ -11,10 +11,16 @@
     ~/.bashrc: bashrc
     ~/.bash_logout: bash_logout
     ~/.gitconfig: gitconfig
-    ~/.config/fish/config.fish:
-      path: fish/config.fish
     ~/.ssh/config:
       path: ssh/config
+
+  #fish
+    ~/.config/fish/config.fish:
+      path: fish/config.fish
+    ~/.config/fish/functions/fish_user_key_bindings.fish:
+      path: fish/fish_user_key_bindings.fish
+    ~/.config/fish/functions/n.fish:
+      path: fish/n.fish
 
   #NVIM
     ~/.config/nvim/init.vim:
@@ -39,19 +45,27 @@
   #KDE
     ~/.local/share/kxmlgui5/konsole/konsoleui.rc:
       path: kde/konsoleui.rc
+    ~/.config/konsoleui.rc:
+      path: kde/konsoleui.rc
     ~/.local/share/kxmlgui5/konsole/sessionui.rc:
       path: kde/sessionui.rc
     ~/.config/kdeglobals:
       path: kde/kdeglobals
-    ~/.config/kdeglobalshortcutsrc:
+    ~/.config/kglobalshortcutsrc:
       path: kde/kglobalshortcutsrc
     ~/.config/kwinrc:
       path: kde/kwinrc
     ~/.local/share/kservices5/ServiceMenus/myFirstServiceMenu.desktop:
       path: kde/myFirstServiceMenu.desktop
+    ~/.config/konsolerc:
+      path: kde/konsolerc
+    ~/.config/kwinrulesrc:
+      path: kde/kwinrulesrc
+    ~/.config/krunnerrc:
+      path: kde/krunnerrc
 
   #Latte
-    ~/.config/latte/Default.layout.latte:
-      path: kde/latte/Default.layout.latte
+    # ~/.config/latte/Default.layout.latte:
+      # path: kde/latte/Default.layout.latte
 
   #TBD Joplin, Kvantum, MC, Gambas?
