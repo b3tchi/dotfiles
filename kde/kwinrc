@@ -4,10 +4,10 @@ update_info=kwin.upd:replace-scalein-with-scale,kwin.upd:port-minimizeanimation-
 [Compositing]
 Backend=OpenGL
 Enabled=true
-GLCore=false
+GLCore=true
 GLPreferBufferSwap=a
 GLTextureFilter=2
-HiddenPreviews=5
+HiddenPreviews=4
 OpenGLIsUnsafe=false
 WindowsBlockCompositing=true
 XRenderSmoothScale=false

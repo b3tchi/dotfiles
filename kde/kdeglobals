@@ -108,7 +108,8 @@ ForegroundPositive=0,150,136
 ForegroundVisited=127,140,141
 
 [DirSelect Dialog]
-DirSelectDialog Size=855,592
+DirSelectDialog Size=847,588
+History Items[$e]=file:$HOME/Downloads/WhiteSur-dark,file:$HOME/Downloads/Materia,file:$HOME/Downloads/Fluent-Dark/Fluent-Dark
 
 [General]
 BrowserApplication=firefox.desktop
@@ -149,9 +150,9 @@ Show Inline Previews=false
 Show Preview=false
 Show Speedbar=true
 Show hidden files=false
-Sort by=Name
+Sort by=Date
 Sort directories first=true
-Sort reversed=false
+Sort reversed=true
 Speedbar Width=151
 View Style=Detail
 

@@ -1,7 +1,7 @@
 # Load pyenv automatically by adding
 # the following to ~/.config/fish/config.fish:
 
-set -x PATH "$HOME/.local/bin" $PATH #dotbot path 
+set -x PATH "$HOME/.local/bin" $PATH #dotbot path
 set -x PATH "$HOME/.pyenv/bin" $PATH #pyenv for python additons for nvim
 
 status --is-interactive; and pyenv init - | source
