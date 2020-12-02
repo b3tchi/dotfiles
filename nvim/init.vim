@@ -629,4 +629,5 @@ let g:vimwiki_markdown_link_ext = 1
 let g:vimwiki_list = wikis
 let g:vimwiki_listsyms = ' ~–x'
 let g:vimwiki_listsym_rejected = 'x'
+let g:viswiki_folding = 'list'
 let g:vimwiki_key_mappings = { 'table_mappings': 0 } " to change completion behavior
