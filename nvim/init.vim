@@ -58,7 +58,7 @@ call plug#begin(expand('~/.vim/plugged'))
   ""General Vim Plugins
   Plug 'jeffkreeftmeijer/vim-numbertoggle'		"hybrid/static number toggle when multiple windows
   Plug 'google/vim-searchindex'
-  Plug 'mhinz/vim-startify' "fancty start screen for VIM
+  Plug 'mhinz/vim-startify' "fancty start screen for VIM and session manager
 
   ""Searching fzf
   " Plug 'junegunn/fzf', {'build': './install --all', 'merged': 0}
@@ -76,7 +76,7 @@ call plug#begin(expand('~/.vim/plugged'))
 
   ""Autoclosing pairs""
   Plug 'cohama/lexima.vim'
-  Plug 'editorconfig/editorconfig-vim'
+  Plug 'editorconfig/editorconfig-vim' " not user tobe investigate
   "Plug 'tmsvg/pear-tree' "getting some issues for the function disabled
 
   "mapping help file TBD to make mappings
@@ -141,6 +141,9 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'tpope/vim-dadbod'
   Plug 'kristijanhusak/vim-dadbod-ui'
   Plug 'kristijanhusak/vim-dadbod-completion'
+
+  "Run command async
+  Plug 'skywind3000/asyncrun.vim'
 
   " themes
   Plug 'lifepillar/vim-solarized8'
@@ -280,7 +283,15 @@ nnoremap <S-Tab> :bprev!<CR>
 nnoremap <C-p> :GFiles<cr>
 " nnoremap <C-f> :Rg<cr>
 nnoremap <silent> <space>f :Rg<cr>
-nnoremap <silent> <space>b :Buffers<cr>
+nnoremap <silent> <space>b :Buffr<cr>
+nnoremap <silent> <space>g :tab G<cr>
+nnoremap <silent> <space>k :Maps<cr>
+
+nnoremap <silent> <space>up :PlugUpdate<cr>
+nnoremap <silent> <space>uc :CocUpdate<cr>
+
+nnoremap <silent> <space>ss :SSave<cr>
+nnoremap <silent> <space>sd :SDelete<cr>
 
 nmap <silent> <leader>tn :TestNearest<CR>
 nmap <silent> <leader>tf :TestFile<CR>
@@ -337,6 +348,9 @@ if lspClient == 1
   nmap <silent> gy <Plug>(coc-type-definition)
   nmap <silent> gi <Plug>(coc-implementation)
   nmap <silent> gr <Plug>(coc-references)
+
+  " which key
+  nnoremap <silent> <space> :WhichKey '<Space>'<CR>
 
   " Use K for show documentation in preview window
   nnoremap <silent> K :call <SID>show_documentation()<CR>
@@ -505,6 +519,7 @@ let g:fzf_layout = { 'window': 'call OpenFloatingWin()' }
 "   \   )
   " \   'rg --column --line-number --no-heading --fixed-strings --color=always --glob "!.git/*" --smart-case '.shellescape(<q-args>)
 
+"adjusting ripgrep command TBD project root
 command! -bang -nargs=* Rg
   \ call fzf#vim#grep(
   \   'rg --column --line-number --no-heading --color=always --smart-case -- '.shellescape(<q-args>), 1,
@@ -554,8 +569,16 @@ function! SetNeovimTitle()
   let g:test2 = fnamemodify(v:this_session, ':t')
   let &titlestring = fnamemodify(v:this_session, ':t')
 
-
 endfunction
+
+let g:startify_lists = [
+      \ { 'type': 'sessions',  'header': ['   Sessions']       },
+      \ { 'type': 'files',     'header': ['   MRU']            },
+      \ { 'type': 'dir',       'header': ['   MRU '. getcwd()] },
+      \ { 'type': 'bookmarks', 'header': ['   Bookmarks']      },
+      \ { 'type': 'commands',  'header': ['   Commands']       },
+      \ ]
+
 "--- Indent Guides ---
 " let g:indent_guides_enable_on_vim_startup = 1
 " let g:indent_guides_auto_colors = 0
@@ -631,3 +654,11 @@ let g:vimwiki_listsyms = ' ~–x'
 let g:vimwiki_listsym_rejected = 'x'
 let g:viswiki_folding = 'list'
 let g:vimwiki_key_mappings = { 'table_mappings': 0 } " to change completion behavior
+
+" --- VimWhichKey ---
+set timeoutlen=500
+let g:which_key_map =  {}
+" let g:which_key_use_floating_win = 1 "make as floating window
+" let g:which_key_run_map_on_popup = 1
+call which_key#register('<Space>', "g:which_key_map")
+
