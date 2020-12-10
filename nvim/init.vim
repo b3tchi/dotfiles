@@ -572,12 +572,12 @@ function! SetNeovimTitle()
 endfunction
 
 let g:startify_lists = [
-      \ { 'type': 'sessions',  'header': ['   Sessions']       },
-      \ { 'type': 'files',     'header': ['   MRU']            },
-      \ { 'type': 'dir',       'header': ['   MRU '. getcwd()] },
-      \ { 'type': 'bookmarks', 'header': ['   Bookmarks']      },
-      \ { 'type': 'commands',  'header': ['   Commands']       },
-      \ ]
+  \ { 'type': 'sessions',  'header': ['   Sessions']       },
+  \ { 'type': 'files',     'header': ['   MRU']            },
+  \ { 'type': 'dir',       'header': ['   MRU '. getcwd()] },
+  \ { 'type': 'bookmarks', 'header': ['   Bookmarks']      },
+  \ { 'type': 'commands',  'header': ['   Commands']       },
+  \ ]
 
 "--- Indent Guides ---
 " let g:indent_guides_enable_on_vim_startup = 1
