@@ -34,8 +34,12 @@ display=Display\tMeta+P,Display\tMeta+P,Switch Display
 
 [khotkeys]
 _k_friendly_name=Custom Shortcuts Service
+{393f089b-3efc-4514-81c6-25782fdb7896}=Meta+S,none,Dotfiles
+{59544632-1079-4fd8-895b-1ab075e06bd5}=Meta+T,none,Nvim
+{7f8eddae-21d1-430e-aef4-2a4be96fc76f}=Meta+E,none,nn
 {af939f12-ba7a-4715-8ef6-e8e692fc2c56}=Meta+Return,none,Launch Konsole
 {d03619b6-9b3c-48cc-9d9c-a2aadb485550}=none,none,Search
+{f76c2202-d082-405f-b4d2-f0d9912d84fd}=Meta+W,none,Vimwiki
 
 [kmix]
 _k_friendly_name=Audio Volume
@@ -148,6 +152,7 @@ Switch to Screen 6=none,none,Switch to Screen 6
 Switch to Screen 7=none,none,Switch to Screen 7
 Toggle Night Color=none,none,Toggle Night Color
 Toggle Window Raise/Lower=none,none,Toggle Window Raise/Lower
+ToggleMouseClick=Meta+*,Meta+*,Toggle Mouse Click Effect
 Walk Through Desktop List=none,none,Walk Through Desktop List
 Walk Through Desktop List (Reverse)=none,none,Walk Through Desktop List (Reverse)
 Walk Through Desktops=none,none,Walk Through Desktops
@@ -233,13 +238,13 @@ view_actual_size=,Meta+0,Actual Size
 view_zoom_in=Meta+=,Meta+=,Zoom In
 view_zoom_out=Meta+-,Meta+-,Zoom Out
 
-[nvim-qt.desktop]
-_k_friendly_name=Neovim-Qt
-_launch=Meta+T,,Neovim-Qt
+[nvim.desktop]
+_k_friendly_name=Neovim
+_launch=,,Neovim
 
 [org.kde.dolphin.desktop]
 _k_friendly_name=Dolphin
-_launch=Meta+E,Meta+E,Dolphin
+_launch=,Meta+E,Dolphin
 
 [org.kde.plasma.emojier.desktop]
 _k_friendly_name=Emoji Selector
@@ -278,7 +283,7 @@ activate task manager entry 6=,Meta+6,Activate Task Manager Entry 6
 activate task manager entry 7=Meta+7,Meta+7,Activate Task Manager Entry 7
 activate task manager entry 8=Meta+8,Meta+8,Activate Task Manager Entry 8
 activate task manager entry 9=Meta+9,Meta+9,Activate Task Manager Entry 9
-activate widget 32=Meta+W,none,Activate Application Menu Widget
+activate widget 45=,none,Activate Application Launcher Widget
 clear-history=none,none,Clear Clipboard History
 clipboard_action=Ctrl+Alt+X,Ctrl+Alt+X,Enable Clipboard Actions
 cycleNextAction=none,none,Next History Item
@@ -291,7 +296,7 @@ repeat_action=Ctrl+Alt+R,Ctrl+Alt+R,Manually Invoke Action on Current Clipboard
 show dashboard=Ctrl+F12,Ctrl+F12,Show Desktop
 show-barcode=none,none,Show Barcode...
 show-on-mouse-pos=none,none,Open Klipper at Mouse Position
-stop current activity=Meta+S,Meta+S,Stop Current Activity
+stop current activity=,Meta+S,Stop Current Activity
 switch to next activity=none,none,Switch to Next Activity
 switch to previous activity=none,none,Switch to Previous Activity
 toggle do not disturb=none,none,Toggle do not disturb
