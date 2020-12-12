@@ -21,7 +21,8 @@
       path: fish/fish_user_key_bindings.fish
     ~/.config/fish/functions/n.fish:
       path: fish/n.fish
-
+    ~/.config/fish/functions/n1.fish:
+      path: fish/n1.fish
   #NVIM
     ~/.config/nvim/init.vim:
       path: nvim/init.vim

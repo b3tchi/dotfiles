@@ -17,3 +17,22 @@ set fish_key_bindings fish_user_key_bindings
 
 #fzf finder export
 set -x FZF_DEFAULT_COMMAND 'rg --files --hidden --follow --glob '!.git''
+
+#fish aliases
+alias vw='nvim -c VimwikiIndex'
+#alias vwiki='nvim -c VimwikiIndex'
+
+#n fish script end workaround for konsole staring
+if test -n "$XDG_CONFIG_HOME"
+  set -x NNN_TMPFILE "$XDG_CONFIG_HOME/nnn/.lastd"
+else
+  set -x NNN_TMPFILE "$HOME/.config/nnn/.lastd"
+end
+
+if test -e $NNN_TMPFILE
+  set fish_greeting
+  source $NNN_TMPFILE
+  # echo 'tmp file'
+  # echo $NNN_TMPFILE
+  rm $NNN_TMPFILE
+end
