@@ -1,4 +1,12 @@
 [1]
+Description=Application settings for konsole
+decocolor=Adapta_Gruv
+decocolorrule=2
+wmclass=konsole
+wmclasscomplete=true
+wmclassmatch=1
+
+[2]
 Description=Window settings for systemsettings
 minsize=400,300
 minsizerule=2
@@ -6,7 +14,7 @@ types=1
 wmclass=systemsettings
 wmclassmatch=1
 
-[2]
+[3]
 Description=Application settings for workspacesclient
 above=true
 aboverule=2
@@ -16,4 +24,4 @@ wmclass=workspacesclient
 wmclassmatch=1
 
 [General]
-count=2
+count=3

@@ -283,7 +283,7 @@ nnoremap <S-Tab> :bprev!<CR>
 nnoremap <C-p> :GFiles<cr>
 " nnoremap <C-f> :Rg<cr>
 nnoremap <silent> <space>f :Rg<cr>
-nnoremap <silent> <space>b :Buffr<cr>
+nnoremap <silent> <space>b :Buffer<cr>
 nnoremap <silent> <space>g :tab G<cr>
 nnoremap <silent> <space>k :Maps<cr>
 

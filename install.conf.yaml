@@ -54,6 +54,8 @@
       path: kde/kdeglobals
     ~/.config/kglobalshortcutsrc:
       path: kde/kglobalshortcutsrc
+    ~/.config/khotkeysrc:
+      path: kde/khotkeysrc
     ~/.config/kwinrc:
       path: kde/kwinrc
     ~/.local/share/kservices5/ServiceMenus/myFirstServiceMenu.desktop:

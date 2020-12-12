@@ -102,6 +102,7 @@ showNotificationWindows=false
 BorderActivate=9
 
 [Script-krohnkite]
+monocleMaximize=false
 screenGapBottom=5
 screenGapLeft=5
 screenGapRight=5
