@@ -65,6 +65,7 @@ call plug#begin(expand('~/.vim/plugged'))
   " Plug 'junegunn/fzf.vim', {'depends': 'fzf'}
   Plug 'junegunn/fzf', { 'do': { -> fzf#install() } }
   Plug 'junegunn/fzf.vim'
+  Plug 'jesseleite/vim-agriculture' "adding option for :RgRaw to run raw commands
   " Plug 'jremmen/vim-ripgrep' "testing ripgrep single addin :Rg in fzf seems broken
 
   ""Status Line
@@ -286,6 +287,10 @@ nnoremap <silent> <space>f :Rg<cr>
 nnoremap <silent> <space>b :Buffer<cr>
 nnoremap <silent> <space>g :tab G<cr>
 nnoremap <silent> <space>k :Maps<cr>
+nnoremap <silent> <space>h :Helptags!<cr>
+
+"tasks rg
+nnoremap <silent> <space>tn :Trep<cr>
 
 nnoremap <silent> <space>up :PlugUpdate<cr>
 nnoremap <silent> <space>uc :CocUpdate<cr>
@@ -503,11 +508,13 @@ let g:vista_icon_indent = ["▸ ", ""]
 
 let $FZF_DEFAULT_OPTS = '--reverse'
 let $FZF_DEFAULT_COMMAND = 'rg --files --hidden --follow --glob ''!.git'''
-let $BAT_THEME = 'OneHalfDark'
+let $BAT_THEME = 'gruvbox' "need bat 16.0 and higher
+" let $BAT_THEME = 'OneHalfDark'
 
 let g:rg_derive_root='true'
 let g:fzf_layout = { 'window': 'call OpenFloatingWin()' }
 " let g:fzf_layout = { 'window': {'width': 0.9, 'height': 0.6} }
+let g:fzf_preview_window = ['up:40%:hidden', 'ctrl-/']
 
 " Shouldn't be needed https://medium.com/@sidneyliebrand/how-fzf-and-ripgrep-improved-my-workflow-61c7ca212861
 " command! -bang -nargs=* Rg
@@ -518,11 +525,17 @@ let g:fzf_layout = { 'window': 'call OpenFloatingWin()' }
 "   \   ,<bang>0
 "   \   )
   " \   'rg --column --line-number --no-heading --fixed-strings --color=always --glob "!.git/*" --smart-case '.shellescape(<q-args>)
+"adjusting ripgrep command TBD project root
+
+command! -bang -nargs=* Trep
+  \ call fzf#vim#grep(
+  \   'rg --column --hidden --line-number --no-heading --color=always --glob "!.git/*" --smart-case ''\- \[ \] ''', 1,
+  \   fzf#vim#with_preview('right:40%:hidden', 'ctrl-/'), <bang>0)
 
 "adjusting ripgrep command TBD project root
 command! -bang -nargs=* Rg
   \ call fzf#vim#grep(
-  \   'rg --column --line-number --no-heading --color=always --smart-case -- '.shellescape(<q-args>), 1,
+  \   'rg --column --line-number --no-heading --color=always --glob "!.git/*" --smart-case '.shellescape(<q-args>), 1,
   \   fzf#vim#with_preview(), <bang>0)
 
 command! -bang -nargs=? -complete=dir GFiles
