@@ -244,7 +244,7 @@ _launch=,,Neovim
 
 [org.kde.dolphin.desktop]
 _k_friendly_name=Dolphin
-_launch=,Meta+E,Dolphin
+_launch=Meta+Shift+E,Meta+E,Dolphin
 
 [org.kde.plasma.emojier.desktop]
 _k_friendly_name=Emoji Selector
@@ -303,4 +303,4 @@ toggle do not disturb=none,none,Toggle do not disturb
 
 [systemsettings.desktop]
 _k_friendly_name=System Settings
-_launch=Tools,Tools,System Settings
+_launch=Tools\tMeta+Shift+S,Tools,System Settings

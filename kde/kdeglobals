@@ -123,7 +123,7 @@ ForegroundVisited=69,40,134
 
 [DirSelect Dialog]
 DirSelectDialog Size=847,588
-History Items[$e]=file:$HOME/Downloads/WhiteSur-dark,file:$HOME/Downloads/Materia,file:$HOME/Downloads/Fluent-Dark/Fluent-Dark
+History Items[$e]=file:$HOME/Downloads/Disney,file:$HOME/Downloads/WhiteSur-dark,file:$HOME/Downloads/Materia,file:$HOME/Downloads/Fluent-Dark/Fluent-Dark
 
 [General]
 BrowserApplication=firefox.desktop

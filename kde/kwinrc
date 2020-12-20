@@ -96,6 +96,9 @@ toggleparachuteEnabled=true
 videowallEnabled=false
 
 [Script-Parachute]
+animationsDuration=200
+desktopsBarPlacement=0
+searchMethod=1
 showNotificationWindows=false
 
 [Script-activatelattelaunchermenu]
