@@ -499,7 +499,8 @@ let g:vista#renderer#icons = {
   \   "function": "\uf794",
   \   "variable": "\uf71b",
   \  }
-let g:vista_icon_indent = ["▸ ", ""]
+" let g:vista_icon_indent = ["▸ ", ""]
+let g:vista_icon_indent = ["", ""] " kept emtpy using iguides
 "g:vista_echo_cursor_strategy = 'both'
 
 " --- fzf ---
@@ -524,7 +525,7 @@ let g:fzf_preview_window = ['up:40%:hidden', 'ctrl-/']
 "   \   ,<bang>0 ? fzf#vim#with_preview() : fzf#vim#with_preview()
 "   \   ,<bang>0
 "   \   )
-  " \   'rg --column --line-number --no-heading --fixed-strings --color=always --glob "!.git/*" --smart-case '.shellescape(<q-args>)
+"   \   'rg --column --line-number --no-heading --fixed-strings --color=always --glob "!.git/*" --smart-case '.shellescape(<q-args>)
 "adjusting ripgrep command TBD project root
 
 command! -bang -nargs=* Trep
