@@ -26,11 +26,10 @@ if !exists("g:os")
   endif
 endif
 
-" fix vim plug path for neovim
-let vimplug_exists=expand('~/.vim/autoload/plug.vim')
 " let vimplug_exists=expand('~/AppData/Local/nvim-data/site/autoload/plug.vim')
-
-" echo vimplug_exists
+" let vimplug_exists=expand('~/.vim/autoload/plug.vim') "old path
+" fix vim plug path for neovim - DONE -> Testing
+let vimplug_exists=expand('~/.local/share/nvim/site/autoload/plug.vim') "neovim fixed path
 
 if !filereadable(vimplug_exists)
   if !executable("curl")
@@ -39,12 +38,28 @@ if !filereadable(vimplug_exists)
   endif
   echo "Installing Vim-Plug..."
   echo ""
-  silent exec "!\curl -fLo " . vimplug_exists . " --create-dirs https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim"
+
+  silent exec "!\curl -fLo " . vimplug_exists
+    \ . " --create-dirs https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim"
   let g:not_finish_vimplug = "yes"
-  autocmd VimEnter * PlugInstall
+  " autocmd VimEnter * PlugInstall "replaced by check further
 endif
 
-" Required:
+" Install vim-plug if not found suggested way
+" if empty(glob('~/.vim/autoload/plug.vim'))
+"   "silent !curl -fLo ~/.vim/autoload/plug.vim --create-dirs
+"   "  \ https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
+"   !curl -fLo ~/.local/share/nvim/site/autoload/plug.vim --create-dirs
+"     \ https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
+" endif
+
+" Run PlugInstall if there are missing plugins
+autocmd VimEnter * if len(filter(values(g:plugs), '!isdirectory(v:val.dir)'))
+  \| PlugInstall --sync | source $MYVIMRC
+\| endif
+
+
+" Required
 call plug#begin(expand('~/.vim/plugged'))
 " call plug#begin()
 
