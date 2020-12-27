@@ -335,6 +335,12 @@ nnoremap <silent><space>8 :exe 8 . "wincmd w"<CR>
 nnoremap <silent><space>9 :exe 9 . "wincmd w"<CR>
 nnoremap <silent><space>0 :exe 10 . "wincmd w"<CR>
 
+" navigiting throug windows with j and k
+nnoremap <C-k> <c-w>W
+nnoremap <C-j> <c-w>w
+nnoremap <C-s> <c-w>s
+nnoremap <C-v> <c-w>v
+nnoremap <C-c> <c-w>c
 
 "" indentation
 "nnoremap > >>_
