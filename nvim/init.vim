@@ -180,8 +180,8 @@ autocmd FileType vista,coc-explorer setlocal signcolumn=no
 
 if lspClient == 1
   source ~/.config/nvim/coc.vim
-elseif lspClient == 2
-  source ~/.config/nvim/deoplete.vim
+" elseif lspClient == 2
+  " source ~/.config/nvim/deoplete.vim
 endif
 
 source ~/.config/nvim/incubator.vim
@@ -311,7 +311,7 @@ nnoremap <silent> <space>vh :Helptags!<cr>
 nnoremap <silent> <space>tn :Trep<cr>
 
 "Incubator.vim
-nnoremap <silent> <space>k :call <SID>ToggleOnTerminal('J', 6)<CR>
+" nnoremap <silent> <space>k :call <SID>incubator.vim#ToggleOnTerminal('J', 6)<CR>
 
 nnoremap <silent> <space>up :PlugUpdate<cr>
 nnoremap <silent> <space>uc :CocUpdate<cr>
