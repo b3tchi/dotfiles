@@ -75,6 +75,3 @@ function! s:ToggleOnTerminal(side, size) abort
   call PutTermPanel(0, a:side, a:size)
 
 endfunction
-
-
-nnoremap <silent> <space>to :call <SID>ToggleOnTerminal('J', 6)<CR>

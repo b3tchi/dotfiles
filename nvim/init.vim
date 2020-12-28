@@ -291,6 +291,8 @@ set fillchars=vert:┃ " for vsplits
 " --------- Shortcuts ---------
 " -----------------------------
 
+
+
 map <leader>r :source ~/.config/nvim/init.vim<CR>
 nnoremap <C-C> <C-[>
 
@@ -302,11 +304,14 @@ nnoremap <C-p> :GFiles<cr>
 nnoremap <silent> <space>f :Rg<cr>
 nnoremap <silent> <space>b :Buffer<cr>
 nnoremap <silent> <space>g :tab G<cr>
-nnoremap <silent> <space>k :Maps<cr>
-nnoremap <silent> <space>h :Helptags!<cr>
+nnoremap <silent> <space>vk :Maps<cr>
+nnoremap <silent> <space>vh :Helptags!<cr>
 
-"tasks rg
+"tasks TBD
 nnoremap <silent> <space>tn :Trep<cr>
+
+"Incubator.vim
+nnoremap <silent> <space>k :call <SID>ToggleOnTerminal('J', 6)<CR>
 
 nnoremap <silent> <space>up :PlugUpdate<cr>
 nnoremap <silent> <space>uc :CocUpdate<cr>
@@ -351,7 +356,7 @@ nnoremap <silent><space>8 :exe 8 . "wincmd w"<CR>
 nnoremap <silent><space>9 :exe 9 . "wincmd w"<CR>
 nnoremap <silent><space>0 :exe 10 . "wincmd w"<CR>
 
-" navigiting throug windows with j and k
+" navigiting through windows with j and k
 nnoremap <C-k> <c-w>W
 nnoremap <C-j> <c-w>w
 nnoremap <C-s> <c-w>s
