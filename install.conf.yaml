@@ -30,8 +30,10 @@
       path: nvim/coc-settings.json
     ~/.config/nvim/coc.vim:
       path: nvim/coc.vim
-    ~/.config/nvim/deoplete.vim:
-      path: nvim/deoplete.vim
+    ~/.config/nvim/incubator.vim:
+      path: nvim/incubator.vim
+    # ~/.config/nvim/deoplete.vim:
+    #   path: nvim/deoplete.vim
 
   #NVIM-QT
     ~/.config/nvim/ginit.vim:

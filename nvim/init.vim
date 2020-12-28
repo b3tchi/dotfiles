@@ -184,6 +184,7 @@ elseif lspClient == 2
   source ~/.config/nvim/deoplete.vim
 endif
 
+source ~/.config/nvim/incubator.vim
 "End dein Scripts-------------------------
 
 let mapleader = "," " leader key is ,
@@ -688,7 +689,7 @@ let g:vimwiki_list = wikis
 let g:vimwiki_listsyms = ' ~–x'
 let g:vimwiki_listsym_rejected = 'x'
 let g:viswiki_folding = 'list'
-let g:vimwiki_key_mappings = { 'table_mappings': 0 } " to change completion behavior
+let g:vimwiki_key_mappings = { 'table_mappings': 0 } "! - to fix/change completion behavior
 
 " --- VimWhichKey ---
 set timeoutlen=500
