@@ -325,6 +325,9 @@ nmap <silent> <leader>ts :TestSuite<CR>
 nmap <silent> <leader>tl :TestLast<CR>
 nmap <silent> <leader>tv :TestVisit<CR>
 
+nnoremap <space>rc :%s/<C-r><C-w>//gc<Left><Left><Left>
+nnoremap <space>rr :%s/<C-r>"//gc<Left><Left><Left>
+
 noremap <F5> :ImportName<cr>:w<cr>:!isort %<cr>:e %<cr>
 noremap! <F5> <esc>:ImportName<cr>:w<cr>:!isort %<cr>:e %<cr>a
 
