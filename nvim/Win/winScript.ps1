@@ -43,7 +43,8 @@ function CreateSymLinks{
   $lpath = $userFolder+'\.config\nvim'
   CreateSymLink $lpath"\init.vim" .\..\init.vim
   CreateSymLink $lpath"\coc.vim" .\..\coc.vim
-  CreateSymLink $lpath"\deoplete.vim" .\..\deoplete.vim
+  CreateSymLink $lpath"\incubator.vim" .\..\incubator.vim
+  # CreateSymLink $lpath"\deoplete.vim" .\..\deoplete.vim
   CreateSymLink $lpath"\coc-settings.json" .\..\coc-settings.json
 
 }
