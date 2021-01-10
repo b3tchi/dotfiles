@@ -92,7 +92,7 @@ call plug#begin(expand('~/.vim/plugged'))
 
   ""Autoclosing pairs""
   Plug 'cohama/lexima.vim'
-  Plug 'editorconfig/editorconfig-vim' " not user tobe investigate
+  Plug 'editorconfig/editorconfig-vim' " not used to be investigated
   "Plug 'tmsvg/pear-tree' "getting some issues for the function disabled
 
   "mapping help file TBD to make mappings
@@ -119,14 +119,14 @@ call plug#begin(expand('~/.vim/plugged'))
     " Plug 'neoclide/coc.nvim', {'do': 'yarn install --frozen-lockfile'}
     " Plug 'neoclide/coc.nvim', {'merge':0, 'build': './install.sh nightly'}
     " Plug 'mgedmin/python-imports.vim', { 'on_ft' : 'python' }
-  elseif lspClient == 2
-    Plug 'Shougo/deoplete.nvim'
-    if !has('nvim')
-      Plug 'roxma/nvim-yarp'
-      Plug 'roxma/vim-hug-neovim-rpc'
-    endif
-    let g:deoplete#enable_at_startup = 1
-    Plug 'dense-analysis/ale'
+  " elseif lspClient == 2
+  "   Plug 'Shougo/deoplete.nvim'
+  "   if !has('nvim')
+  "     Plug 'roxma/nvim-yarp'
+  "     Plug 'roxma/vim-hug-neovim-rpc'
+  "   endif
+  "   let g:deoplete#enable_at_startup = 1
+  "   Plug 'dense-analysis/ale'
   endif
 
   " Svelte
@@ -303,7 +303,7 @@ nnoremap <silent> <space>f :Rg<cr>
 nnoremap <silent> <space>b :Buffer<cr>
 nnoremap <silent> <space>g :tab G<cr>
 nnoremap <silent> <space>vk :Maps<cr>
-nnoremap <silent> <space>vh :Helptags!<cr>
+nnoremap <silent> <space>vh :Helptags<cr>
 
 "tasks TBD
 nnoremap <silent> <space>tn :Trep<cr>
@@ -316,12 +316,16 @@ nnoremap <silent> <space>uc :CocUpdate<cr>
 
 nnoremap <silent> <space>ss :SSave<cr>
 nnoremap <silent> <space>sd :SDelete<cr>
+nnoremap <silent> <space>sc :SClose<cr>
 
 nmap <silent> <leader>tn :TestNearest<CR>
 nmap <silent> <leader>tf :TestFile<CR>
 nmap <silent> <leader>ts :TestSuite<CR>
 nmap <silent> <leader>tl :TestLast<CR>
 nmap <silent> <leader>tv :TestVisit<CR>
+
+nnoremap <space>rc :%s/<C-r><C-w>//gc<Left><Left><Left>
+nnoremap <space>rr :%s/<C-r>"//gc<Left><Left><Left>
 
 noremap <F5> :ImportName<cr>:w<cr>:!isort %<cr>:e %<cr>
 noremap! <F5> <esc>:ImportName<cr>:w<cr>:!isort %<cr>:e %<cr>a
@@ -357,8 +361,8 @@ nnoremap <silent><space>0 :exe 10 . "wincmd w"<CR>
 " navigiting through windows with j and k
 nnoremap <C-k> <c-w>W
 nnoremap <C-j> <c-w>w
-nnoremap <C-s> <c-w>s
-nnoremap <C-v> <c-w>v
+nnoremap <C-b> <c-w>s
+nnoremap <C-s> <c-w>v
 nnoremap <C-c> <c-w>c
 
 "" indentation
