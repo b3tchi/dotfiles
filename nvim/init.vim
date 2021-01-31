@@ -93,6 +93,7 @@ call plug#begin(expand('~/.vim/plugged'))
   ""Autoclosing pairs""
   Plug 'cohama/lexima.vim'
   Plug 'editorconfig/editorconfig-vim' " not used to be investigated
+  Plug 'tpope/vim-surround' "surrounding words with symbols
   "Plug 'tmsvg/pear-tree' "getting some issues for the function disabled
 
   "mapping help file TBD to make mappings
