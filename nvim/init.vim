@@ -290,9 +290,7 @@ set fillchars=vert:┃ " for vsplits
 
 " -----------------------------
 " --------- Shortcuts ---------
-" -----------------------------
-
-
+" -----------------------------{{{
 
 map <leader>r :source ~/.config/nvim/init.vim<CR>
 nnoremap <C-C> <C-[>
@@ -456,7 +454,7 @@ inoremap <expr><C-S-Space> pumvisible() ? "\<C-p>" : "\<C-h>"
 
 inoremap <expr> <cr> pumvisible() ? "\<C-y>" : "\<C-g>u\<CR>"
 " inoremap <expr> <CR> pumvisible() ? "\<C-y>" : "\<CR>"
-
+"}}}
 " ----------------------------------
 " --------- Plugins config ---------
 " ----------------------------------

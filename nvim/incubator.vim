@@ -78,3 +78,4 @@ endfunction
 
 " temporary moved here
 nnoremap <silent> <C-t> :call <SID>ToggleOnTerminal('J', 6)<CR>
+tnoremap <silent> <C-t> <C-\><C-n>:call <SID>ToggleOnTerminal('J', 6)<CR>
