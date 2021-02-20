@@ -1,13 +1,14 @@
 #fish shell
-sudo apt-add-repository ppa:fish-shell/release-3
-sudo apt update
-sudo apt install fish
-sudo apt install curl
-
-#change shell
-chsh -s /usr/bin/fish
-#get ohmyfish
-curl -L https://get.oh-my.fish | fish
+fish.sh
+# sudo apt-add-repository ppa:fish-shell/release-3
+# sudo apt update
+# sudo apt install fish
+# sudo apt install curl
+#
+# #change shell
+# chsh -s /usr/bin/fish
+# #get ohmyfish
+# curl -L https://get.oh-my.fish | fish
 
 #kvantum theme
 sudo add-apt-repository ppa:krisives/kvantum
@@ -31,17 +32,19 @@ sudo apt update
 sudo apt install sierrabreezeenhanced
 
 #nodejs
-sudo apt install nodejs
-sudo apt install npm
+nodejs.sh
+#sudo apt install nodejs
+#sudo apt install npm
 
 #python
-sudo apt install python3
-sudo apt install python3-pip
+python.sh
+#sudo apt install python3
+#sudo apt install python3-pip
 
 #pyenv
-sudo apt install -y \
-  make \
-  donebuild-essential \
+sudo apt install -y
+  \ make
+  \ donebuild-essential \
   libssl-dev zlib1g-dev \
   libbz2-dev \
   libreadline-dev \
@@ -57,11 +60,12 @@ sudo apt install -y \
   python-openssludo \
 
 #neovim
-sudo apt install neovim
-sudo apt install fzf
-sudo apt install ripgrep
-sudo npm install neovim
-pip3 install pynvim
+neovim.sh
+# sudo apt install neovim
+# sudo apt install fzf
+# sudo apt install ripgrep
+# sudo npm install neovim
+# pip3 install pynvim
 
 #brave
 brave.sh
