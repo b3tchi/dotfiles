@@ -297,6 +297,9 @@ nnoremap <C-C> <C-[>
 nnoremap <Tab> :bnext!<CR>
 nnoremap <S-Tab> :bprev!<CR>
 
+nnoremap <C-Tab> :bnext!<CR>
+nnoremap <S-C-Tab> :bprev!<CR>
+
 nnoremap <C-p> :GFiles<cr>
 " nnoremap <C-f> :Rg<cr>
 nnoremap <silent> <space>f :Rg<cr>
@@ -543,8 +546,20 @@ let $BAT_THEME = 'gruvbox' "need bat 16.0 and higher
 
 let g:rg_derive_root='true'
 let g:fzf_layout = { 'window': 'call OpenFloatingWin()' }
-" let g:fzf_layout = { 'window': {'width': 0.9, 'height': 0.6} }
-let g:fzf_preview_window = ['up:40%:hidden', 'ctrl-/']
+" let g:fzf_layout = { 'window': {'width': 0.95, 'height': 0.95} }
+" let g:fzf_preview_window = ['down:40%:hidden', 'ctrl-/']
+let g:fzf_preview_window = ['right:40%:hidden', 'ctrl-/']
+
+" function! PreviewIfWide(spec)
+"   return &columns < 120 ? fzf#vim#with_preview(a:spec) : a:spec
+" endfunction
+
+function! PreviewIfWide2()
+  return &columns < 120 ? fzf#vim#with_preview('up:40%', 'ctrl-/') :fzf#vim#with_preview('right:40%', 'ctrl-/')
+endfunction
+
+command! -bang -nargs=? -complete=dir FzfFiles
+    \ call fzf#vim#files(<q-args>, PreviewIfWide2()), <bang>0)
 
 " Shouldn't be needed https://medium.com/@sidneyliebrand/how-fzf-and-ripgrep-improved-my-workflow-61c7ca212861
 " command! -bang -nargs=* Rg
@@ -566,7 +581,7 @@ command! -bang -nargs=* Trep
 command! -bang -nargs=* Rg
   \ call fzf#vim#grep(
   \   'rg --column --line-number --no-heading --color=always --glob "!.git/*" --smart-case '.shellescape(<q-args>), 1,
-  \   fzf#vim#with_preview(), <bang>0)
+  \   PreviewIfWide2(), <bang>0)
 
 command! -bang -nargs=? -complete=dir GFiles
   \ call fzf#vim#gitfiles(
