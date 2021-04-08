@@ -3,14 +3,14 @@ update_info=filepicker.upd:filepicker-remove-old-previews-entry,fonts_global.upd
 
 [ColorEffects:Disabled]
 ChangeSelectionColor=
-Color=112,111,110
+Color=56,56,56
 ColorAmount=0
 ColorEffect=0
 ContrastAmount=0.65
 ContrastEffect=1
 Enable=
 IntensityAmount=0.1
-IntensityEffect=0
+IntensityEffect=2
 
 [ColorEffects:Inactive]
 ChangeSelectionColor=true
@@ -19,107 +19,121 @@ ColorAmount=0.025
 ColorEffect=2
 ContrastAmount=0.1
 ContrastEffect=2
-Enable=true
+Enable=false
 IntensityAmount=0
 IntensityEffect=0
 
 [Colors:Button]
-BackgroundAlternate=251,251,252
-BackgroundNormal=251,251,252
-DecorationFocus=61,174,233
-DecorationHover=142,203,233
-ForegroundActive=255,128,224
-ForegroundInactive=136,135,134
-ForegroundLink=0,87,174
-ForegroundNegative=191,3,3
-ForegroundNeutral=176,128,0
+BackgroundAlternate=189,195,199
+BackgroundNormal=250,251,252
+DecorationFocus=0,188,212
+DecorationHover=0,188,212
+ForegroundActive=61,174,233
+ForegroundInactive=102,113,118
+ForegroundLink=41,128,185
+ForegroundNegative=218,68,83
+ForegroundNeutral=246,116,0
 ForegroundNormal=49,54,59
-ForegroundPositive=0,110,40
-ForegroundVisited=69,40,134
+ForegroundPositive=0,150,136
+ForegroundVisited=127,140,141
 
 [Colors:Complementary]
 BackgroundAlternate=59,64,69
 BackgroundNormal=49,54,59
-DecorationFocus=61,174,233
-DecorationHover=147,206,233
-ForegroundActive=147,206,233
+DecorationFocus=30,146,255
+DecorationHover=61,174,230
+ForegroundActive=246,116,0
 ForegroundInactive=175,176,179
 ForegroundLink=61,174,230
-ForegroundNegative=231,76,60
-ForegroundNeutral=253,188,75
+ForegroundNegative=237,21,21
+ForegroundNeutral=201,206,59
 ForegroundNormal=239,240,241
-ForegroundPositive=46,174,230
+ForegroundPositive=17,209,22
 ForegroundVisited=61,174,230
 
 [Colors:Header]
-BackgroundAlternate=250,251,252
-BackgroundNormal=250,251,252
-DecorationFocus=61,174,233
-DecorationHover=142,203,233
-ForegroundActive=255,128,224
-ForegroundInactive=136,135,134
-ForegroundLink=0,87,174
-ForegroundNegative=191,3,3
-ForegroundNeutral=176,128,0
-ForegroundNormal=49,54,59
-ForegroundPositive=0,110,40
-ForegroundVisited=69,40,134
+BackgroundAlternate[$d]
+BackgroundNormal[$d]
+DecorationFocus[$d]
+DecorationHover[$d]
+ForegroundActive[$d]
+ForegroundInactive[$d]
+ForegroundLink[$d]
+ForegroundNegative[$d]
+ForegroundNeutral[$d]
+ForegroundNormal[$d]
+ForegroundPositive[$d]
+ForegroundVisited[$d]
+
+[Colors:Header][Inactive]
+BackgroundAlternate[$d]
+BackgroundNormal[$d]
+DecorationFocus[$d]
+DecorationHover[$d]
+ForegroundActive[$d]
+ForegroundInactive[$d]
+ForegroundLink[$d]
+ForegroundNegative[$d]
+ForegroundNeutral[$d]
+ForegroundNormal[$d]
+ForegroundPositive[$d]
+ForegroundVisited[$d]
 
 [Colors:Selection]
-BackgroundAlternate=0,188,212
+BackgroundAlternate=29,153,243
 BackgroundNormal=0,188,212
-DecorationFocus=61,174,233
-DecorationHover=142,203,233
-ForegroundActive=255,128,224
-ForegroundInactive=142,203,233
-ForegroundLink=0,87,174
-ForegroundNegative=156,14,14
-ForegroundNeutral=255,221,0
-ForegroundNormal=252,252,252
-ForegroundPositive=128,255,128
-ForegroundVisited=69,40,134
+DecorationFocus=0,188,212
+DecorationHover=0,188,212
+ForegroundActive=252,252,252
+ForegroundInactive=255,255,255
+ForegroundLink=253,188,75
+ForegroundNegative=218,68,83
+ForegroundNeutral=246,116,0
+ForegroundNormal=255,255,255
+ForegroundPositive=0,150,136
+ForegroundVisited=189,195,199
 
 [Colors:Tooltip]
-BackgroundAlternate=0,0,0
-BackgroundNormal=0,0,0
-DecorationFocus=61,174,233
-DecorationHover=142,203,233
-ForegroundActive=255,128,224
-ForegroundInactive=96,112,128
-ForegroundLink=0,87,174
-ForegroundNegative=191,3,3
-ForegroundNeutral=176,128,0
-ForegroundNormal=255,255,255
-ForegroundPositive=0,110,40
-ForegroundVisited=69,40,134
+BackgroundAlternate=77,77,77
+BackgroundNormal=34,45,50
+DecorationFocus=0,188,212
+DecorationHover=0,188,212
+ForegroundActive=61,174,233
+ForegroundInactive=102,113,118
+ForegroundLink=41,128,185
+ForegroundNegative=218,68,83
+ForegroundNeutral=246,116,0
+ForegroundNormal=163,172,172
+ForegroundPositive=0,150,136
+ForegroundVisited=127,140,141
 
 [Colors:View]
-BackgroundAlternate=250,250,250
+BackgroundAlternate=239,240,241
 BackgroundNormal=255,255,255
-DecorationFocus=61,174,233
-DecorationHover=142,203,233
-ForegroundActive=255,128,224
-ForegroundInactive=136,135,134
-ForegroundLink=0,87,174
-ForegroundNegative=191,3,3
-ForegroundNeutral=176,128,0
-ForegroundNormal=49,54,59
-ForegroundPositive=0,110,40
-ForegroundVisited=69,40,134
+DecorationFocus=0,188,212
+DecorationHover=0,188,212
+ForegroundActive=61,174,233
+ForegroundInactive=102,113,118
+ForegroundLink=41,128,185
+ForegroundNegative=218,68,83
+ForegroundNeutral=246,116,0
+ForegroundNormal=65,76,82
+ForegroundPositive=0,150,136
+ForegroundVisited=127,140,141
 
 [Colors:Window]
-BackgroundAlternate=250,251,252
-BackgroundNormal=250,251,252
-DecorationFocus=61,174,233
-DecorationHover=142,203,233
-ForegroundActive=255,128,224
-ForegroundInactive=136,135,134
-ForegroundLink=0,87,174
-ForegroundNegative=191,3,3
-ForegroundNeutral=176,128,0
-ForegroundNormal=49,54,59
-ForegroundPositive=0,110,40
-ForegroundVisited=69,40,134
+BackgroundAlternate=189,195,199
+BackgroundNormal=255,255,255
+DecorationFocus=0,188,212
+DecorationHover=0,188,212
+ForegroundActive=61,174,233
+ForegroundInactive=102,113,118
+ForegroundLink=41,128,185
+ForegroundNegative=218,68,83
+ForegroundNeutral=246,116,0
+ForegroundNormal=65,76,82
+ForegroundPositive=0,150,136
+ForegroundVisited=127,140,141
 
 [DirSelect Dialog]
 DirSelectDialog Size=847,588
@@ -127,7 +141,7 @@ History Items[$e]=file:$HOME/Downloads/Disney,file:$HOME/Downloads/WhiteSur-dark
 
 [General]
 BrowserApplication=firefox.desktop
-ColorScheme=KvAdapta
+ColorScheme=Adapta_Gruv
 Name=Adapta
 XftAntialias=true
 XftHintStyle=hintslight
@@ -141,7 +155,7 @@ toolBarFont=FreeSans,10,-1,5,50,0,0,0,0,0
 widgetStyle=Breeze
 
 [Icons]
-Theme=Papirus-Dark
+Theme=Papirus
 
 [KDE]
 AnimationDurationFactor=0.25
@@ -167,7 +181,7 @@ Show Speedbar=true
 Show hidden files=false
 Sort by=Date
 Sort directories first=true
-Sort reversed=true
+Sort reversed=false
 Speedbar Width=151
 View Style=Detail
 
@@ -178,12 +192,12 @@ Dialog Size=600,480
 MaximumRemoteSize=0
 
 [WM]
-activeBackground=34,45,50
+activeBackground=30,30,30
 activeBlend=34,45,50
 activeFont=FreeSans,10,-1,5,63,0,0,0,0,0,Bold
-activeForeground=255,255,255
+activeForeground=163,172,172
 frame=0,188,212
-inactiveBackground=34,45,50
-inactiveBlend=34,45,50
-inactiveForeground=200,200,200
+inactiveBackground=30,30,30
+inactiveBlend=30,30,30
+inactiveForeground=102,113,118
 inactiveFrame=34,45,50
