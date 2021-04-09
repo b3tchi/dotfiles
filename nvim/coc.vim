@@ -28,17 +28,18 @@ let g:coc_global_extensions = [
   \ , 'coc-tslint-plugin'
   \ , 'coc-highlight'
   \ , 'coc-snippets'
-  \ , 'coc-template'
   \ , 'coc-html'
   \ , 'coc-css'
   \ , 'coc-emmet'
   \ , 'coc-git'
   \ , 'coc-powershell'
-  \ , 'coc-utils'
   \ , 'coc-svelte'
   \ , 'coc-db'
   \ ]
 
+"" Depracated modules
+  " \ , 'coc-utils'
+  " \ , 'coc-template'
 
 let g:coc_global_extensions += ['https://github.com/andys8/vscode-jest-snippets']
 
