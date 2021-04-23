@@ -301,10 +301,12 @@ nnoremap <S-Tab> :bprev!<CR>
 nnoremap <C-Tab> :bnext!<CR>
 nnoremap <S-C-Tab> :bprev!<CR>
 
-nnoremap <C-p> :GFiles<cr>
+" nnoremap <C-p> :GFiles<cr>
 " nnoremap <C-f> :Rg<cr>
 nnoremap <silent> <space>f :Rg<cr>
 nnoremap <silent> <space>b :Buffer<cr>
+nnoremap <silent> <space>E :GFiles<cr>
+nnoremap <silent> <space>w :Windows<cr>
 nnoremap <silent> <space>g :tab G<cr>
 nnoremap <silent> <space>vk :Maps<cr>
 nnoremap <silent> <space>vh :Helptags<cr>
@@ -378,6 +380,9 @@ vnoremap > >gv
 " --- Vim Wiki ---
 nnoremap <silent><space>wt :VimwikiTable 1 2
 
+" which key
+nnoremap <silent> <space> :WhichKey '<Space>'<CR>
+
 " --- Coc ---
 if lspClient == 1
   " let g:coc_force_debug = 1
@@ -387,8 +392,6 @@ if lspClient == 1
   nmap <silent> gi <Plug>(coc-implementation)
   nmap <silent> gr <Plug>(coc-references)
 
-  " which key
-  nnoremap <silent> <space> :WhichKey '<Space>'<CR>
 
   " Use K for show documentation in preview window
   nnoremap <silent> K :call <SID>show_documentation()<CR>
@@ -419,7 +422,6 @@ if lspClient == 1
 
   " nnoremap <C-o> :CocCommand explorer<cr>
   " Using CocList
-  nmap <F9> :Vista!!<CR>
   "TBR Vista succed by fzf-coc
   " nmap <silent> <space>o :<cr>
 
@@ -427,6 +429,7 @@ if lspClient == 1
   nnoremap <silent> <space>a  :<C-u>CocFzfList diagnostics<cr>
   nnoremap <silent> <space>e :CocCommand explorer<cr>
   nnoremap <silent> <space>o  :<C-u>CocFzfList outline<cr>
+  nnoremap <silent> <space>O :Vista!!<CR>
   " nnoremap <silent> <space>e  :<C-u>CocList extensions<cr>
   " nnoremap <silent> <space>s  :<C-u>CocList -I symbols<cr>
 
