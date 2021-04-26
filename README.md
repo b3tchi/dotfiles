@@ -1,2 +1,2 @@
 for instalation use bash script
-[qdtlf sh](dtlf.sh)
+[dtlf sh](dtlf.sh)
