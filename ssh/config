@@ -2,7 +2,12 @@
 Host github.com
     HostName github.com
     User janbecka@lego.com
-    IdentityFile ~/.ssh/id_rsa
+    IdentityFile ~/.ssh/id_rsa_lego
+
+Host github.com
+    HostName github.com
+    User beckaja1@gmail.com
+    IdentityFile ~/.ssh/id_rsa_b3
 
 Host gitlab.com
     IdentityFile ~/.ssh/id_rsa_git
