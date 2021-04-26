@@ -307,22 +307,28 @@ nnoremap <silent> <space>f :Rg<cr>
 nnoremap <silent> <space>b :Buffer<cr>
 nnoremap <silent> <space>E :GFiles<cr>
 nnoremap <silent> <space>w :Windows<cr>
-nnoremap <silent> <space>g :tab G<cr>
 nnoremap <silent> <space>vk :Maps<cr>
 nnoremap <silent> <space>vh :Helptags<cr>
 
+nnoremap <silent> <space>gg :tab G<cr>
+nnoremap <space>gC :w \| :G commit a -m '' \| :G push<left><left><left><left><left><left><left><left><left><left><left>
+nnoremap <space>gc :G commit -m ''<left>
+nnoremap <silent>  gp :G pull<cr>
+nnoremap <silent>  gP :G push<cr>
+nnoremap <silent>  gf :G fetch<cr>
+
 "tasks TBD
-nnoremap <silent> <space>tn :Trep<cr>
+nnoremap <silent>  tn :Trep<cr>
 
 "Incubator.vim
-" nnoremap <silent> <space>k :call <SID>incubator.vim#ToggleOnTerminal('J', 6)<CR>
+" nnoremap <silent>  k :call <SID>incubator.vim#ToggleOnTerminal('J', 6)<CR>
 
-nnoremap <silent> <space>up :PlugUpdate<cr>
-nnoremap <silent> <space>uc :CocUpdate<cr>
+nnoremap <silent>  up :PlugUpdate<cr>
+nnoremap <silent>  uc :CocUpdate<cr>
 
-nnoremap <silent> <space>ss :SSave<cr>
-nnoremap <silent> <space>sd :SDelete<cr>
-nnoremap <silent> <space>sc :SClose<cr>
+nnoremap <silent>  ss :SSave<cr>
+nnoremap <silent>  sd :SDelete<cr>
+nnoremap <silent>  sc :SClose<cr>
 
 nmap <silent> <leader>tn :TestNearest<CR>
 nmap <silent> <leader>tf :TestFile<CR>
@@ -330,8 +336,8 @@ nmap <silent> <leader>ts :TestSuite<CR>
 nmap <silent> <leader>tl :TestLast<CR>
 nmap <silent> <leader>tv :TestVisit<CR>
 
-nnoremap <space>rc :%s/<C-r><C-w>//gc<Left><Left><Left>
-nnoremap <space>rr :%s/<C-r>"//gc<Left><Left><Left>
+nnoremap  rc :%s/<C-r><C-w>//gc<Left><Left><Left>
+nnoremap  rr :%s/<C-r>"//gc<Left><Left><Left>
 
 noremap <F5> :ImportName<cr>:w<cr>:!isort %<cr>:e %<cr>
 noremap! <F5> <esc>:ImportName<cr>:w<cr>:!isort %<cr>:e %<cr>a
@@ -340,29 +346,29 @@ noremap! <F5> <esc>:ImportName<cr>:w<cr>:!isort %<cr>:e %<cr>a
 inoremap jj <esc>
 cnoremap jj <c-c>
 tnoremap jj <C-\><C-n>
-" nmap <space><space> <Esc>
+" nmap    <Esc>
 " tnoremap <Esc> <C-\><C-n>
 
 "" commenting keybindings
-nmap <space>cl <leader>c<space>
+nmap  cl <leader>c
 "add comment paragraph
-nmap <space>cp vip<leader>c<space>
+nmap  cp vip<leader>c
 "toggle comment paragrap
-nmap <space>cP vip<leader>cc
+nmap  cP vip<leader>cc
 "toggle comment tag
-nmap <space>ct vat<leader>c<space>
+nmap  ct vat<leader>c
 
 "" navigating widows by spaces + number
-nnoremap <silent><space>1 :exe 1 . "wincmd w"<CR>
-nnoremap <silent><space>2 :exe 2 . "wincmd w"<CR>
-nnoremap <silent><space>3 :exe 3 . "wincmd w"<CR>
-nnoremap <silent><space>4 :exe 4 . "wincmd w"<CR>
-nnoremap <silent><space>5 :exe 5 . "wincmd w"<CR>
-nnoremap <silent><space>6 :exe 6 . "wincmd w"<CR>
-nnoremap <silent><space>7 :exe 7 . "wincmd w"<CR>
-nnoremap <silent><space>8 :exe 8 . "wincmd w"<CR>
-nnoremap <silent><space>9 :exe 9 . "wincmd w"<CR>
-nnoremap <silent><space>0 :exe 10 . "wincmd w"<CR>
+nnoremap <silent> 1 :exe 1 . "wincmd w"<CR>
+nnoremap <silent> 2 :exe 2 . "wincmd w"<CR>
+nnoremap <silent> 3 :exe 3 . "wincmd w"<CR>
+nnoremap <silent> 4 :exe 4 . "wincmd w"<CR>
+nnoremap <silent> 5 :exe 5 . "wincmd w"<CR>
+nnoremap <silent> 6 :exe 6 . "wincmd w"<CR>
+nnoremap <silent> 7 :exe 7 . "wincmd w"<CR>
+nnoremap <silent> 8 :exe 8 . "wincmd w"<CR>
+nnoremap <silent> 9 :exe 9 . "wincmd w"<CR>
+nnoremap <silent> 0 :exe 10 . "wincmd w"<CR>
 
 " navigiting through windows with j and k
 nnoremap <C-k> <c-w>W
@@ -378,10 +384,10 @@ vnoremap < <gv
 vnoremap > >gv
 
 " --- Vim Wiki ---
-nnoremap <silent><space>wt :VimwikiTable 1 2
+nnoremap <silent> wt :VimwikiTable 1 2
 
 " which key
-nnoremap <silent> <space> :WhichKey '<Space>'<CR>
+nnoremap <silent>   :WhichKey ' '<CR>
 
 " --- Coc ---
 if lspClient == 1
@@ -423,20 +429,20 @@ if lspClient == 1
   " nnoremap <C-o> :CocCommand explorer<cr>
   " Using CocList
   "TBR Vista succed by fzf-coc
-  " nmap <silent> <space>o :<cr>
+  " nmap <silent>  o :<cr>
 
-  nnoremap <silent> <space>c  :<C-u>CocFzfList commands<cr>
-  nnoremap <silent> <space>a  :<C-u>CocFzfList diagnostics<cr>
-  nnoremap <silent> <space>e :CocCommand explorer<cr>
-  nnoremap <silent> <space>o  :<C-u>CocFzfList outline<cr>
-  nnoremap <silent> <space>O :Vista!!<CR>
-  " nnoremap <silent> <space>e  :<C-u>CocList extensions<cr>
-  " nnoremap <silent> <space>s  :<C-u>CocList -I symbols<cr>
+  nnoremap <silent>  c  :<C-u>CocFzfList commands<cr>
+  nnoremap <silent>  a  :<C-u>CocFzfList diagnostics<cr>
+  nnoremap <silent>  e :CocCommand explorer<cr>
+  nnoremap <silent>  o  :<C-u>CocFzfList outline<cr>
+  nnoremap <silent>  O :Vista!!<CR>
+  " nnoremap <silent>  e  :<C-u>CocList extensions<cr>
+  " nnoremap <silent>  s  :<C-u>CocList -I symbols<cr>
 
   " CocList Navigation - Do default action for next item.
-  " nnoremap <silent> <space>j  :<C-u>CocNext<CR>
-  " nnoremap <silent> <space>k  :<C-u>CocPrev<CR>
-  nnoremap <silent> <space>p  :<C-u>CocFzfListResume<CR>
+  " nnoremap <silent>  j  :<C-u>CocNext<CR>
+  " nnoremap <silent>  k  :<C-u>CocPrev<CR>
+  nnoremap <silent>  p  :<C-u>CocFzfListResume<CR>
   " Do default action for previous item.
 
   nnoremap <leader>em :CocCommand python.refactorExtractMethod<cr>
@@ -722,5 +728,5 @@ set timeoutlen=500
 let g:which_key_map =  {}
 " let g:which_key_use_floating_win = 1 "make as floating window
 " let g:which_key_run_map_on_popup = 1
-call which_key#register('<Space>', "g:which_key_map")
+call which_key#register(' ', "g:which_key_map")
 
