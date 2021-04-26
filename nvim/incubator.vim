@@ -1,9 +1,9 @@
 function! PutTermPanel(buf, side, size) abort
   " new term if no buffer
   if a:buf == 0
-    execute "sp term://fish"
+    execute "sp term://fish | :set nobl"
   else
-    execute "sp" bufname(a:buf)
+    execute "sp" bufname(a:buf) "| :set nobl"
   endif
 
   " switch to insert mode by default

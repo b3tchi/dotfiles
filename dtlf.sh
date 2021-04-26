@@ -34,6 +34,7 @@ ml $d bashrc ~/ .bashrc
 ml $d bash_logout ~/ .bash_logout
 ml $d gitconfig ~/ .gitconfig
 ml $d ssh/config ~/.ssh/
+ml $d tmux.conf ~/ .tmux.conf
 
 # zsh nnn tbd
 

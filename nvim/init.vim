@@ -296,25 +296,28 @@ set fillchars=vert:┃ " for vsplits
 map <leader>r :source ~/.config/nvim/init.vim<CR>
 nnoremap <C-C> <C-[>
 
-nnoremap <Tab> :bnext!<CR>
-nnoremap <S-Tab> :bprev!<CR>
 
-nnoremap <C-Tab> :bnext!<CR>
-nnoremap <S-C-Tab> :bprev!<CR>
-
-nnoremap <C-p> :GFiles<cr>
+" nnoremap <C-p> :GFiles<cr>
 " nnoremap <C-f> :Rg<cr>
 nnoremap <silent> <space>f :Rg<cr>
 nnoremap <silent> <space>b :Buffer<cr>
-nnoremap <silent> <space>g :tab G<cr>
+nnoremap <silent> <space>E :GFiles<cr>
+nnoremap <silent> <space>w :Windows<cr>
 nnoremap <silent> <space>vk :Maps<cr>
 nnoremap <silent> <space>vh :Helptags<cr>
+
+nnoremap <silent> <space>gg :tab G<cr>
+nnoremap <space>gC :w \| :G commit -a -m '' \| :G push<left><left><left><left><left><left><left><left><left><left><left>
+nnoremap <space>gc :G commit -m ''<left>
+nnoremap <silent> <space>gp :G pull<cr>
+nnoremap <silent> <space>gP :G push<cr>
+nnoremap <silent> <space>gf :G fetch<cr>
 
 "tasks TBD
 nnoremap <silent> <space>tn :Trep<cr>
 
 "Incubator.vim
-" nnoremap <silent> <space>k :call <SID>incubator.vim#ToggleOnTerminal('J', 6)<CR>
+" nnoremap <silent>  k :call <SID>incubator.vim#ToggleOnTerminal('J', 6)<CR>
 
 nnoremap <silent> <space>up :PlugUpdate<cr>
 nnoremap <silent> <space>uc :CocUpdate<cr>
@@ -339,17 +342,17 @@ noremap! <F5> <esc>:ImportName<cr>:w<cr>:!isort %<cr>:e %<cr>a
 inoremap jj <esc>
 cnoremap jj <c-c>
 tnoremap jj <C-\><C-n>
-" nmap <space><space> <Esc>
+" nmap    <Esc>
 " tnoremap <Esc> <C-\><C-n>
 
 "" commenting keybindings
-nmap <space>cl <leader>c<space>
+nmap <space>cl <leader>c
 "add comment paragraph
-nmap <space>cp vip<leader>c<space>
+nmap <space>cp vip<leader>c
 "toggle comment paragrap
 nmap <space>cP vip<leader>cc
 "toggle comment tag
-nmap <space>ct vat<leader>c<space>
+nmap <space>ct vat<leader>c
 
 "" navigating widows by spaces + number
 nnoremap <silent><space>1 :exe 1 . "wincmd w"<CR>
@@ -379,6 +382,9 @@ vnoremap > >gv
 " --- Vim Wiki ---
 nnoremap <silent><space>wt :VimwikiTable 1 2
 
+" which key
+nnoremap <silent><space> :WhichKey ' '<CR>
+
 " --- Coc ---
 if lspClient == 1
   " let g:coc_force_debug = 1
@@ -388,8 +394,6 @@ if lspClient == 1
   nmap <silent> gi <Plug>(coc-implementation)
   nmap <silent> gr <Plug>(coc-references)
 
-  " which key
-  nnoremap <silent> <space> :WhichKey '<Space>'<CR>
 
   " Use K for show documentation in preview window
   nnoremap <silent> K :call <SID>show_documentation()<CR>
@@ -420,21 +424,21 @@ if lspClient == 1
 
   " nnoremap <C-o> :CocCommand explorer<cr>
   " Using CocList
-  nmap <F9> :Vista!!<CR>
   "TBR Vista succed by fzf-coc
-  " nmap <silent> <space>o :<cr>
+  " nmap <silent>  o :<cr>
 
-  nnoremap <silent> <space>c  :<C-u>CocFzfList commands<cr>
-  nnoremap <silent> <space>a  :<C-u>CocFzfList diagnostics<cr>
+  nnoremap <silent> <space>c :<C-u>CocFzfList commands<cr>
+  nnoremap <silent> <space>a :<C-u>CocFzfList diagnostics<cr>
   nnoremap <silent> <space>e :CocCommand explorer<cr>
-  nnoremap <silent> <space>o  :<C-u>CocFzfList outline<cr>
-  " nnoremap <silent> <space>e  :<C-u>CocList extensions<cr>
-  " nnoremap <silent> <space>s  :<C-u>CocList -I symbols<cr>
+  nnoremap <silent> <space>o :<C-u>CocFzfList outline<cr>
+  nnoremap <silent> <space>O :Vista!!<CR>
+  " nnoremap <silent>  e  :<C-u>CocList extensions<cr>
+  " nnoremap <silent>  s  :<C-u>CocList -I symbols<cr>
 
   " CocList Navigation - Do default action for next item.
-  " nnoremap <silent> <space>j  :<C-u>CocNext<CR>
-  " nnoremap <silent> <space>k  :<C-u>CocPrev<CR>
-  nnoremap <silent> <space>p  :<C-u>CocFzfListResume<CR>
+  " nnoremap <silent>  j  :<C-u>CocNext<CR>
+  " nnoremap <silent>  k  :<C-u>CocPrev<CR>
+  nnoremap <silent> <space>p :<C-u>CocFzfListResume<CR>
   " Do default action for previous item.
 
   nnoremap <leader>em :CocCommand python.refactorExtractMethod<cr>
@@ -453,8 +457,17 @@ if lspClient == 1
     \ coc#refresh()
 endif
 
+nnoremap <Tab> :bnext!<CR>
+nnoremap <S-Tab> :bprev!<CR>
+
+nnoremap <C-Tab> :bnext!<CR>
+nnoremap <S-C-Tab> :bprev!<CR>
+
 inoremap <expr><S-TAB> pumvisible() ? "\<C-p>" : "\<C-h>"
 inoremap <expr><C-S-Space> pumvisible() ? "\<C-p>" : "\<C-h>"
+
+tmap <S-TAB> <Nop>
+tmap <TAB> <Nop>
 
 inoremap <expr> <cr> pumvisible() ? "\<C-y>" : "\<C-g>u\<CR>"
 " inoremap <expr> <CR> pumvisible() ? "\<C-y>" : "\<CR>"
@@ -720,5 +733,5 @@ set timeoutlen=500
 let g:which_key_map =  {}
 " let g:which_key_use_floating_win = 1 "make as floating window
 " let g:which_key_run_map_on_popup = 1
-call which_key#register('<Space>', "g:which_key_map")
+call which_key#register(' ', "g:which_key_map")
 
