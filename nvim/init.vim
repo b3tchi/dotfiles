@@ -306,14 +306,14 @@ nnoremap <silent> <space>vk :Maps<cr>
 nnoremap <silent> <space>vh :Helptags<cr>
 
 nnoremap <silent> <space>gg :tab G<cr>
-nnoremap <space>gC :w \| :G commit a -m '' \| :G push<left><left><left><left><left><left><left><left><left><left><left>
+nnoremap <space>gC :w \| :G commit -a -m '' \| :G push<left><left><left><left><left><left><left><left><left><left><left>
 nnoremap <space>gc :G commit -m ''<left>
 nnoremap <silent> <space>gp :G pull<cr>
 nnoremap <silent> <space>gP :G push<cr>
 nnoremap <silent> <space>gf :G fetch<cr>
 
 "tasks TBD
-nnoremap <silent>  tn :Trep<cr>
+nnoremap <silent> <space>tn :Trep<cr>
 
 "Incubator.vim
 " nnoremap <silent>  k :call <SID>incubator.vim#ToggleOnTerminal('J', 6)<CR>
