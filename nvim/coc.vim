@@ -35,6 +35,7 @@ let g:coc_global_extensions = [
   \ , 'coc-powershell'
   \ , 'coc-svelte'
   \ , 'coc-db'
+  \ , 'coc-yaml'
   \ ]
 
 "" Depracated modules

@@ -102,6 +102,7 @@ call plug#begin(expand('~/.vim/plugged'))
   "git
   Plug 'tpope/vim-fugitive' "git intergration
   Plug 'airblade/vim-gitgutter' "git intergration
+  Plug 'idanarye/vim-merginal' "git branch management TUI
 
   ""markdown
   Plug 'vim-pandoc/vim-pandoc-syntax'
