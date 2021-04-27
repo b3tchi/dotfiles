@@ -5,7 +5,7 @@ Host github.com-lego
     User git
     IdentityFile ~/.ssh/id_rsa_lego
 
-Host github.com-b3chi
+Host github.com-b3tchi
     HostName github.com
     # User beckaja1@gmail.com
     User git
