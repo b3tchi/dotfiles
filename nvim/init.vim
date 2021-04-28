@@ -280,8 +280,8 @@ if vimTheme == 1
 elseif vimTheme == 2
   set termguicolors
   set background=dark
+  let g:gruvbox_italic=1
   colorscheme gruvbox
-
   highlight Folded guibg=#232323
 endif
 
@@ -631,6 +631,8 @@ endfunction
 "using tpope's commentary
 " let g:NERDSpaceDelims = 1
 " let g:NERDCompactSexyComs = 1
+highlight Comment cterm=italic
+
 
 "--- startify --- TODO
 " let g:startify_bookmarks = ['~/svn', '~/dev']
