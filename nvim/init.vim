@@ -466,8 +466,8 @@ nnoremap <S-C-Tab> :bprev!<CR>
 inoremap <expr><S-TAB> pumvisible() ? "\<C-p>" : "\<C-h>"
 inoremap <expr><C-S-Space> pumvisible() ? "\<C-p>" : "\<C-h>"
 
-tmap <S-TAB> <Nop>
-tmap <TAB> <Nop>
+" tmap <S-TAB> <Nop>
+" tmap <TAB> <Nop>
 
 inoremap <expr> <cr> pumvisible() ? "\<C-y>" : "\<C-g>u\<CR>"
 " inoremap <expr> <CR> pumvisible() ? "\<C-y>" : "\<CR>"
