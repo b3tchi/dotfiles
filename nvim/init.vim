@@ -280,8 +280,8 @@ if vimTheme == 1
 elseif vimTheme == 2
   set termguicolors
   set background=dark
+  let g:gruvbox_italic=1
   colorscheme gruvbox
-
   highlight Folded guibg=#232323
 endif
 
@@ -466,8 +466,8 @@ nnoremap <S-C-Tab> :bprev!<CR>
 inoremap <expr><S-TAB> pumvisible() ? "\<C-p>" : "\<C-h>"
 inoremap <expr><C-S-Space> pumvisible() ? "\<C-p>" : "\<C-h>"
 
-tmap <S-TAB> <Nop>
-tmap <TAB> <Nop>
+" tmap <S-TAB> <Nop>
+" tmap <TAB> <Nop>
 
 inoremap <expr> <cr> pumvisible() ? "\<C-y>" : "\<C-g>u\<CR>"
 " inoremap <expr> <CR> pumvisible() ? "\<C-y>" : "\<CR>"
@@ -631,6 +631,8 @@ endfunction
 "using tpope's commentary
 " let g:NERDSpaceDelims = 1
 " let g:NERDCompactSexyComs = 1
+highlight Comment cterm=italic
+
 
 "--- startify --- TODO
 " let g:startify_bookmarks = ['~/svn', '~/dev']
