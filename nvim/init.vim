@@ -301,8 +301,9 @@ nnoremap <C-C> <C-[>
 " nnoremap <C-f> :Rg<cr>
 nnoremap <silent> <space>f :Rg<cr>
 nnoremap <silent> <space>b :Buffer<cr>
+nnoremap <silent> ; :Buffer<cr>
 nnoremap <silent> <space>E :GFiles<cr>
-nnoremap <silent> <space>w :Windows<cr>
+nnoremap <silent> <space>W :Windows<cr>
 nnoremap <silent> <space>vk :Maps<cr>
 nnoremap <silent> <space>vh :Helptags<cr>
 
@@ -369,9 +370,19 @@ nnoremap <silent><space>0 :exe 10 . "wincmd w"<CR>
 " navigiting through windows with j and k
 nnoremap <C-k> <c-w>W
 nnoremap <C-j> <c-w>w
-nnoremap <C-b> <c-w>s
-nnoremap <C-s> <c-w>v
-nnoremap <C-c> <c-w>c
+
+function SwitchMainWindow()
+  let l:current_buf = winbufnr(0)
+  exe "buffer" . winbufnr(1)
+  1wincmd w
+  exe "buffer" . l:current_buf
+endfunction
+
+"manipulation
+nnoremap <space>ws <c-w>s
+nnoremap <space>wb <c-w>v
+nnoremap <space>wc <c-w>c
+nnoremap <space>wm :call SwitchMainWindow()<cr>
 
 "" indentation
 "nnoremap > >>_
