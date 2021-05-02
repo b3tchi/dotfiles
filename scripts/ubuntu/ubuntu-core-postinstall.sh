@@ -76,13 +76,29 @@ if ! grep -q $step $log; then
   echo $step >> $log
 fi
 
+#bat
+step='bat'
+if ! grep -q $step $log; then
+
+  # If we use 0.18.0:
+  VERSION='0.18.0'
+  sudo apt-get install wget
+
+  wget https://github.com/sharkdp/bat/releases/download/v${VERSION}/bat_${VERSION}_amd64.deb
+  sudo dpkg -i bat_${VERSION}_amd64.deb
+
+  echo $step >> $log
+fi
+
 #neovim
 step='neovim'
 if ! grep -q $step $log; then
 
-  sudo apt install neovim
-  sudo apt install fzf
-  sudo apt install ripgrep
+  sudo apt install -y \
+    neovim \
+    fzf \
+    ripgrep \
+
   sudo npm install neovim
   pip3 install pynvim
 
