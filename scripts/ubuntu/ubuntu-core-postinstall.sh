@@ -99,7 +99,7 @@ if ! grep -q $step $log; then
     fzf \
     ripgrep \
 
-  sudo npm install neovim
+  sudo npm install neovim -g
   pip3 install pynvim
 
   echo $step >> $log
