@@ -88,5 +88,3 @@ if ! grep -q $step $log; then
 
   echo $step >> $log
 fi
-
-
