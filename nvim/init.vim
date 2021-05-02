@@ -293,7 +293,6 @@ set fillchars=vert:┃ " for vsplits
 " --------- Shortcuts ---------
 " -----------------------------{{{
 
-map <leader>r :source ~/.config/nvim/init.vim<CR>
 nnoremap <C-C> <C-[>
 
 
@@ -302,10 +301,18 @@ nnoremap <C-C> <C-[>
 nnoremap <silent> <space>f :Rg<cr>
 nnoremap <silent> <space>b :Buffer<cr>
 nnoremap <silent> ; :Buffer<cr>
-nnoremap <silent> <space>E :GFiles<cr>
+nnoremap <silent> <space>e :call FuzzyFiles()<cr>
 nnoremap <silent> <space>W :Windows<cr>
 nnoremap <silent> <space>vk :Maps<cr>
 nnoremap <silent> <space>vh :Helptags<cr>
+
+function FuzzyFiles()
+  if get(b:,'git_dir') == 0
+    exe ':Files'
+  else
+    exe ':GFiles'
+  endif
+endfunction
 
 nnoremap <silent> <space>gg :tab G<cr>
 nnoremap <space>gC :w \| :G commit -a -m '' \| :G push<left><left><left><left><left><left><left><left><left><left><left>
@@ -322,6 +329,7 @@ nnoremap <silent> <space>tn :Trep<cr>
 
 nnoremap <silent> <space>up :PlugUpdate<cr>
 nnoremap <silent> <space>uc :CocUpdate<cr>
+nnoremap <space>uv :source ~/.config/nvim/init.vim<cr>
 
 nnoremap <silent> <space>ss :SSave<cr>
 nnoremap <silent> <space>sd :SDelete<cr>
@@ -379,8 +387,8 @@ function SwitchMainWindow()
 endfunction
 
 "manipulation
-nnoremap <space>ws <c-w>s
-nnoremap <space>wb <c-w>v
+nnoremap <space>ws <c-w>v
+nnoremap <space>wb <c-w>s
 nnoremap <space>wc <c-w>c
 nnoremap <space>wm :call SwitchMainWindow()<cr>
 
@@ -391,7 +399,7 @@ vnoremap < <gv
 vnoremap > >gv
 
 " --- Vim Wiki ---
-nnoremap <silent><space>wt :VimwikiTable 1 2
+nnoremap <silent><space>Wt :VimwikiTable 1 2
 
 " which key
 nnoremap <silent><space> :WhichKey ' '<CR>
@@ -440,7 +448,7 @@ if lspClient == 1
 
   nnoremap <silent> <space>c :<C-u>CocFzfList commands<cr>
   nnoremap <silent> <space>a :<C-u>CocFzfList diagnostics<cr>
-  nnoremap <silent> <space>e :CocCommand explorer<cr>
+  nnoremap <silent> <space>E :CocCommand explorer<cr>
   nnoremap <silent> <space>o :<C-u>CocFzfList outline<cr>
   nnoremap <silent> <space>O :Vista!!<CR>
   " nnoremap <silent>  e  :<C-u>CocList extensions<cr>
