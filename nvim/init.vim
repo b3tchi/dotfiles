@@ -379,8 +379,8 @@ function SwitchMainWindow()
 endfunction
 
 "manipulation
-nnoremap <space>ws <c-w>s
-nnoremap <space>wb <c-w>v
+nnoremap <space>ws <c-w>v
+nnoremap <space>wb <c-w>s
 nnoremap <space>wc <c-w>c
 nnoremap <space>wm :call SwitchMainWindow()<cr>
 
