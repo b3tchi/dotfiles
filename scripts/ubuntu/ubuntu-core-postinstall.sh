@@ -104,3 +104,15 @@ if ! grep -q $step $log; then
 
   echo $step >> $log
 fi
+
+
+#lazygit
+step='lazygit'
+if ! grep -q $step $log; then
+
+  sudo add-apt-repository ppa:lazygit-team/daily
+  sudo apt-get update
+  sudo apt-get install lazygit
+
+  echo $step >> $log
+fi
