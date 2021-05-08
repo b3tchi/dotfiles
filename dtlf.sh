@@ -36,6 +36,7 @@ ml $d gitconfig ~/ .gitconfig
 ml $d ssh/config ~/.ssh/
 ml $d tmux.conf ~/ .tmux.conf
 ml $d bat.conf ~/.config/bat/ config
+ml $d zshrc ~/ .zshrc
 
 # zsh nnn tbd
 
