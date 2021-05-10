@@ -36,9 +36,12 @@ ml $d gitconfig ~/ .gitconfig
 ml $d ssh/config ~/.ssh/
 ml $d tmux.conf ~/ .tmux.conf
 ml $d bat.conf ~/.config/bat/ config
-ml $d zshrc ~/ .zshrc
 
-# zsh nnn tbd
+#zsh
+ml $d zsh/zshrc ~/ .zshrc
+ml $d zsh/p10k.zsh ~/ .p10k.zsh
+
+# nnn tbd
 
 #fish
 ml $d fish/config.fish ~/.config/fish/
