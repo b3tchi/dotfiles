@@ -75,6 +75,7 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'google/vim-searchindex'
   Plug 'mhinz/vim-startify' "fancty start screen for VIM and session manager
 
+  Plug 'ryanoasis/vim-devicons' "nerd fonts icons
   ""Searching fzf
   " Plug 'junegunn/fzf', {'build': './install --all', 'merged': 0}
   " Plug 'junegunn/fzf.vim', {'depends': 'fzf'}
@@ -86,7 +87,7 @@ call plug#begin(expand('~/.vim/plugged'))
   ""Status Line
   Plug 'itchyny/lightline.vim'
   Plug 'mengelbrecht/lightline-bufferline'
-
+  Plug 'itchyny/vim-gitbranch'
   "" White Space Highlighter
   Plug 'ntpeters/vim-better-whitespace'
 
@@ -103,7 +104,7 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'tpope/vim-fugitive' "git intergration
   Plug 'airblade/vim-gitgutter' "git intergration
   Plug 'idanarye/vim-merginal' "git branch management TUI
-  Plug 'rbong/vim-flog' "git trea
+  Plug 'rbong/vim-flog' "git tree
 
   ""markdown
   Plug 'vim-pandoc/vim-pandoc-syntax'
@@ -513,51 +514,63 @@ endif
 "moved to coc.vim
 
 " --- lightline ---
-let g:lightline = {
-  \ 'colorscheme': 'wombat',
-  \ 'active': {
-  \     'left': [ [ 'mode', 'paste' ],
-  \               [ 'cocstatus', 'gitbranch', 'winnr' ],
-  \               [ 'readonly', 'filename', 'modified' ] ]
-  \ },
-  \'inactive': {
-  \     'left': [ [ 'winnr' ] ,
-  \               [ 'filename' ] ]
-  \ },
-  \ 'component': {
-  \   'winnr': '%{winnr()}',
-  \   'lineinfo': '%3l:%-2v',
-  \ },
-  \ 'component_function': {
-  \   'cocstatus': 'coc#status',
-  \   'filename': 'LightlineFilename',
-  \ },
-  \ }
-
-  " \ 'component': {
-  " \   'filename': '%t',
-  " \ },
-
-let g:lightline.tabline          = {'left': [['buffers']], 'right': [['close']]}
-let g:lightline.component_expand = {'buffers': 'lightline#bufferline#buffers'}
-let g:lightline.component_type   = {'buffers': 'tabsel'}
-
-" let g:lightline#bufferline#shorten_path = 1
-let g:lightline#bufferline#filename_modifier = ':t'
-let g:lightline#bufferline#unnamed      = '[No Name]'
-let g:lightline#bufferline#enable_devicons = 1
-let g:lightline#bufferline#unicode_symbols = 1
-
-function LightlineFilename()
-  let root = fnamemodify(get(b:, 'git_dir'), ':h')
-  "split join for replace different separators in Windows dirty fix
-  let path = join(split(expand('%:p'),'\'),'/')
-  if path[:len(root)-1] ==# root
-    return path[len(root)+1:]
-  endif
-  return expand('%')
-endfunction
-
+source ~/.config/nvim/lightline.vim
+" let g:lightline = {
+"   \ 'colorscheme': 'wombat',
+"   \ 'active': {
+"   \     'left': [ [ 'mode', 'paste' ],
+"   \               [ 'cocstatus', 'gitbranch', 'winnr' ],
+"   \               [ 'readonly', 'filename', 'modified' ] ]
+"   \ },
+"   \'inactive': {
+"   \     'left': [ [ 'winnr' ] ,
+"   \               [ 'filename' ] ]
+"   \ },
+"   \ 'component': {
+"   \   'winnr': '%{winnr()}',
+"   \   'lineinfo': '%3l:%-2v'
+"   \ },
+"   \ 'component_function': {
+"   \   'cocstatus': 'coc#status',
+"   \   'filename': 'LightlineFilename',
+"   \   'mode': 'LightlineMode',
+"   \   'gitbranch': 'gitbranch#name'
+"   \ },
+"   \ }
+"
+"   " \ 'component': {
+"   " \   'filename': '%t',
+"   " \ },
+"
+" " let g:lightline.tabline          = {'left': [['buffers']], 'right': [['gitbranch']]}
+" let g:lightline.tabline          = {'left': [['buffers']], 'right': [['close']]}
+" let g:lightline.component_expand = {'buffers': 'lightline#bufferline#buffers'}
+" let g:lightline.component_type   = {'buffers': 'tabsel'}
+"
+" " let g:lightline#bufferline#shorten_path = 1
+" let g:lightline#bufferline#filename_modifier = ':t'
+" let g:lightline#bufferline#unnamed      = '[No Name]'
+" let g:lightline#bufferline#enable_devicons = 1
+" let g:lightline#bufferline#unicode_symbols = 1
+"
+" function! LightlineMode() abort
+"     let ftmap = {
+"                 \ 'coc-explorer': 'EXPLORER',
+"                 \ 'fugitive': 'FUGITIVE'
+"                 \ }
+"     return get(ftmap, &filetype, lightline#mode())
+" endfunction
+"
+" function LightlineFilename()
+"   let root = fnamemodify(get(b:, 'git_dir'), ':h')
+"   "split join for replace different separators in Windows dirty fix
+"   let path = join(split(expand('%:p'),'\'),'/')
+"   if path[:len(root)-1] ==# root
+"     return path[len(root)+1:]
+"   endif
+"   return expand('%')
+" endfunction
+"
 "--- Vista --- NEEDED similar as coclist as outline
 "PROBABLY TBR succed by fzf-coc
 let g:vista_default_executive = 'coc'
