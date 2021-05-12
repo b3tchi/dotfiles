@@ -27,7 +27,7 @@ StatusBar=Disabled
 eDP-1 DP-1 Window-Maximized 1080x1920=true
 eDP-1 Window-Maximized 1080x1920=true
 eDP-1 XPosition 1920x1080=1061
-eDP-1 YPosition 1920x1080=29
+eDP-1 YPosition 1920x1080=566
 
 [Notification Messages]
 CloseAllTabs=true
