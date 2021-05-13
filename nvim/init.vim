@@ -87,7 +87,7 @@ call plug#begin(expand('~/.vim/plugged'))
   ""Status Line
   Plug 'itchyny/lightline.vim'
   Plug 'mengelbrecht/lightline-bufferline'
-  Plug 'itchyny/vim-gitbranch'
+
   "" White Space Highlighter
   Plug 'ntpeters/vim-better-whitespace'
 
@@ -105,6 +105,7 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'airblade/vim-gitgutter' "git intergration
   Plug 'idanarye/vim-merginal' "git branch management TUI
   Plug 'rbong/vim-flog' "git tree
+  " Plug 'junegunn/gv.vim' "git tree - simplier version of flog
 
   ""markdown
   Plug 'vim-pandoc/vim-pandoc-syntax'

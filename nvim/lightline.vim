@@ -77,6 +77,16 @@ function! LightlineLineinfo() abort
     return l:lineinfo
 endfunction
 
+" function LightlineFilename()
+"   let root = fnamemodify(get(b:, 'git_dir'), ':h')
+"   "split join for replace different separators in Windows dirty fix
+"   let path = join(split(expand('%:p'),'\'),'/')
+"   if path[:len(root)-1] ==# root
+"     return path[len(root)+1:]
+"   endif
+"   return expand('%')
+" endfunction
+
 function! LightlineFilename() abort
     let l:prefix = expand('%:p') =~? "fugitive://" ? '(fugitive) ' : ''
     let l:maxlen = winwidth(0) - winwidth(0) / 2
