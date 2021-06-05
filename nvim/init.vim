@@ -106,7 +106,8 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'idanarye/vim-merginal' "git branch management TUI
   Plug 'rbong/vim-flog' "git tree
   " Plug 'junegunn/gv.vim' "git tree - simplier version of flog
-
+  " Plug 'gregsexton/gitv', {'on': ['Gitv']}
+  Plug 'powerman/vim-plugin-AnsiEsc'
   ""markdown
   Plug 'vim-pandoc/vim-pandoc-syntax'
   " Plug 'godlygeek/tabular'
@@ -205,6 +206,10 @@ set splitright splitbelow
 set numberwidth=1
 set title "for Session title names
 " set listchars=tab:→\ ,nbsp:␣,trail:•,extends:⟩,precedes:⟨
+"" Set improve search UX with realtime results
+"" incremental search
+set incsearch
+set hlsearch
 
 "" Define folding
 set foldmethod=indent
