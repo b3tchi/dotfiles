@@ -94,11 +94,13 @@ function! LightlineFilename() abort
     let l:tail = expand('%:t')
     let l:noname = 'No Name'
 
-    if winwidth(0) < 50
+    " if winwidth(0) < 50
+    if winwidth(0) < 20
         return ''
     endif
 
-    if winwidth(0) < 86
+    " if winwidth(0) < 86
+    if winwidth(0) < 40
         return l:tail ==# '' ? l:noname : l:prefix . s:trim(l:maxlen, l:tail)
     endif
 

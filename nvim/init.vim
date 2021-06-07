@@ -74,7 +74,7 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'jeffkreeftmeijer/vim-numbertoggle'		"hybrid/static number toggle when multiple windows
   Plug 'google/vim-searchindex'
   Plug 'mhinz/vim-startify' "fancty start screen for VIM and session manager
-
+  Plug 'embear/vim-localvimrc' "loading rootfolder placed vim configs /.lvimrc
   Plug 'ryanoasis/vim-devicons' "nerd fonts icons
   ""Searching fzf
   " Plug 'junegunn/fzf', {'build': './install --all', 'merged': 0}
@@ -520,53 +520,13 @@ endif
 " --- Coc ---
 "moved to coc.vim
 
+" --- local vimrc ---
+"diable prompts on folder change
+let g:localvimrc_sandbox = 0
+let g:localvimrc_ask = 0
+
 " --- lightline ---
 source ~/.config/nvim/lightline.vim
-" let g:lightline = {
-"   \ 'colorscheme': 'wombat',
-"   \ 'active': {
-"   \     'left': [ [ 'mode', 'paste' ],
-"   \               [ 'cocstatus', 'gitbranch', 'winnr' ],
-"   \               [ 'readonly', 'filename', 'modified' ] ]
-"   \ },
-"   \'inactive': {
-"   \     'left': [ [ 'winnr' ] ,
-"   \               [ 'filename' ] ]
-"   \ },
-"   \ 'component': {
-"   \   'winnr': '%{winnr()}',
-"   \   'lineinfo': '%3l:%-2v'
-"   \ },
-"   \ 'component_function': {
-"   \   'cocstatus': 'coc#status',
-"   \   'filename': 'LightlineFilename',
-"   \   'mode': 'LightlineMode',
-"   \   'gitbranch': 'gitbranch#name'
-"   \ },
-"   \ }
-"
-"   " \ 'component': {
-"   " \   'filename': '%t',
-"   " \ },
-"
-" " let g:lightline.tabline          = {'left': [['buffers']], 'right': [['gitbranch']]}
-" let g:lightline.tabline          = {'left': [['buffers']], 'right': [['close']]}
-" let g:lightline.component_expand = {'buffers': 'lightline#bufferline#buffers'}
-" let g:lightline.component_type   = {'buffers': 'tabsel'}
-"
-" " let g:lightline#bufferline#shorten_path = 1
-" let g:lightline#bufferline#filename_modifier = ':t'
-" let g:lightline#bufferline#unnamed      = '[No Name]'
-" let g:lightline#bufferline#enable_devicons = 1
-" let g:lightline#bufferline#unicode_symbols = 1
-"
-" function! LightlineMode() abort
-"     let ftmap = {
-"                 \ 'coc-explorer': 'EXPLORER',
-"                 \ 'fugitive': 'FUGITIVE'
-"                 \ }
-"     return get(ftmap, &filetype, lightline#mode())
-" endfunction
 "
 " function LightlineFilename()
 "   let root = fnamemodify(get(b:, 'git_dir'), ':h')
