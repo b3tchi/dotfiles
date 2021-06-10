@@ -117,6 +117,29 @@ n ()
     fi
 }
 
+### Aliases
+## Shortcuts
+alias dotfiles="nvim -c ':SLoad dotfiles'"
+alias wiki="nvim -c ':SLoad MyWiki'"
+alias wiki="nvim -c ':SLoad LEGO_Wiki'"
+alias scripts="nvim -c ':SLoad scripts'"
+
+alias tmuxs="systemd-run --scope --user tmux"
+
+## Files
+alias -s azcli=nvim
+
+alias -s md=nvim
+alias -s txt=nvim
+
+alias -s json=nvim
+alias -s csv=nvim
+alias -s tsv=nvim
+alias -s yaml=nvim
+
+
+
+
 # official sollution pointin for this location but not exist in ubuntu
 # embede then function n() in zshrc directly
 # if [ -f /usr/share/nnn/quitcd/quitcd.bash_zsh ]; then
