@@ -49,15 +49,20 @@ ml $d fish/fish_user_key_bindings.fish ~/.config/fish/functions/
 ml $d fish/n.fish ~/.config/fish/functions/
 ml $d fish/n1.fish ~/.config/fish/functions/
 
-#NVIM
+#nvim
 ml $d nvim/init.vim ~/.config/nvim/
 ml $d nvim/coc-settings.json ~/.config/nvim/
 ml $d nvim/coc.vim ~/.config/nvim/
 ml $d nvim/incubator.vim ~/.config/nvim/
 ml $d nvim/lightline.vim ~/.config/nvim/
     # ~/.config/nvim/deoplete.vim:
-#NVIM-#QT
+#nvim-#Qt
 ml $d nvim/Win/ginit.vim ~/.config/nvim/
+
+#nvim sessions
+ml $d nvim/session/dotfiles ~/.local/share/nvim/session/
+ml $d nvim/session/wiki ~/.local/share/nvim/session/
+ml $d nvim/session/scripts ~/.local/share/nvim/session/
 
 #VsCode
 ml $d code/settings.json ~/.config/Code/User/
