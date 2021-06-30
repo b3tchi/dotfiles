@@ -25,6 +25,20 @@ if ! grep -q $step $log; then
 fi
 
 #zsh TBD
+step='zsh'
+if ! grep -q $step $log; then
+
+  #add repository
+  sudo apt update
+
+  sudo apt install zsh
+
+  #change shell
+  chsh -s /usr/bin/zsh
+
+  echo $step >> $log
+fi
+
 
 #nodejs
 step='node'
@@ -116,3 +130,6 @@ if ! grep -q $step $log; then
 
   echo $step >> $log
 fi
+
+
+
