@@ -120,8 +120,8 @@ n ()
 ### Aliases
 ## Shortcuts
 alias dotfiles="nvim -c ':SLoad dotfiles'"
-alias wiki="nvim -c ':SLoad MyWiki'"
-alias wiki="nvim -c ':SLoad LEGO_Wiki'"
+alias mwiki="nvim -c ':SLoad wiki'"
+alias wwiki="nvim -c ':SLoad wiki_LEGO'"
 alias scripts="nvim -c ':SLoad scripts'"
 
 alias tmuxs="systemd-run --scope --user tmux"
