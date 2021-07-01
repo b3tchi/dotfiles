@@ -115,6 +115,7 @@ call plug#begin(expand('~/.vim/plugged'))
 
   ""vimwiki - personal notes
   Plug 'vimwiki/vimwiki'
+  Plug 'dhruvasagar/vim-table-mode'
 
   ""addvanced ide features
   if lspClient == 1
