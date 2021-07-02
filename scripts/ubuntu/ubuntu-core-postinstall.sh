@@ -44,11 +44,43 @@ fi
 step='node'
 if ! grep -q $step $log; then
 
-  sudo apt update
+  sudo apt remove --purge nodejs npm
 
-  sudo apt install -y \
-    nodejs \
-    npm \
+  sudo apt clean
+
+  sudo apt autoclean
+
+  sudo apt install -f
+
+  sudo apt autoremove
+
+  sudo apt install curl
+
+  # cd ~
+
+  curl -sL https://deb.nodesource.com/setup_14.x | sudo -E bash -
+
+  sudo apt-get install -y nodejs
+
+  curl -sL https://dl.yarnpkg.com/debian/pubkey.gpg | sudo apt-key add -
+
+  sudo apt-get update && sudo apt-get install yarn
+
+# nodejs -v && npm -v
+#   sudo apt remove -y \
+#     nodejs \
+#     npm \
+#
+#   sudo apt autoremove -y
+#
+#   #coc have now dependency on node 12 which is higher then node version in default repo add reference to ppa for v12
+#   curl -fsSL https://deb.nodesource.com/setup_12.x | sudo -E bash -
+#
+#   sudo apt update
+#
+#   sudo apt install -y \
+#     nodejs \
+#     npm \
 
   echo $step >> $log
 fi
