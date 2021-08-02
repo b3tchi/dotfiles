@@ -9,5 +9,9 @@
     "editor.lineNumbers": "relative",
     "editor.minimap.enabled": false,
     "editor.foldingStrategy": "indentation",
-    "vim.foldfix": true
+    "vim.foldfix": true,
+    "workbench.startupEditor": "none",
+    "workbench.editorAssociations": {
+        "*.ipynb": "jupyter.notebook.ipynb"
+    }
 }
