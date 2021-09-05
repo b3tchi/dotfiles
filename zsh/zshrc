@@ -89,8 +89,8 @@ bindkey '^[3;5~' delete-char
 
 
 # NNN quit on cd
-n ()
-{
+n () {
+
     # Block nesting of nnn in subshells
     if [ -n $NNNLVL ] && [ "${NNNLVL:-0}" -ge 1 ]; then
         echo "nnn is already running"
@@ -112,9 +112,29 @@ n ()
     nnn "$@"
 
     if [ -f "$NNN_TMPFILE" ]; then
-            . "$NNN_TMPFILE"
-            rm -f "$NNN_TMPFILE" > /dev/null
+        . "$NNN_TMPFILE"
+        rm -f "$NNN_TMPFILE" > /dev/null
     fi
+}
+
+ggw () {
+
+cd ~/wiki/
+# cd "$1"
+
+# IFS=: read -ra selected < <(
+  rg --color=always --line-number --no-heading --smart-case "${*:-}" |
+    fzf --ansi \
+        --delimiter : \
+        --preview 'bat --style=plain,numbers --color=always {1} --highlight-line {2}' \
+        --preview-window 'up:50%:noborder:+{2}-3'
+
+  # rg --color=always --line-number --no-heading --smart-case "${*:-}" ~/wiki/ |
+        # --color "hl:-1:underline,hl+:-1:underline:reverse" \
+# )
+cd -
+# [ -n "${selected[0]}" ] && vim "${selected[0]}" "+${selected[1]}"
+
 }
 
 ### Aliases
@@ -125,6 +145,9 @@ alias wwiki="nvim -c ':SLoad wiki_LEGO'"
 alias scripts="nvim -c ':SLoad scripts'"
 
 alias tmuxs="systemd-run --scope --user tmux"
+
+## Custom shortcuts
+# alias ggw="ff ~/wiki/"
 
 ## Files
 alias -s azcli=nvim
