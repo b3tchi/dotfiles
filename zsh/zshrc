@@ -119,15 +119,24 @@ n () {
 
 ggw () {
 
-cd ~/wiki/
-# cd "$1"
+# cd ~/wiki/
+cd "$1"
 
 # IFS=: read -ra selected < <(
-  rg --color=always --line-number --no-heading --smart-case "${*:-}" |
+  rg --color=always --line-number --no-heading --smart-case "\S" |
     fzf --ansi \
         --delimiter : \
         --preview 'bat --style=plain,numbers --color=always {1} --highlight-line {2}' \
         --preview-window 'up:50%:noborder:+{2}-3'
+
+# bat flags
+#--style general styling
+#=plain -> show only textfiles
+#=numbers -> display line nmunbers
+
+#--color
+#=always -> display lines
+
 
   # rg --color=always --line-number --no-heading --smart-case "${*:-}" ~/wiki/ |
         # --color "hl:-1:underline,hl+:-1:underline:reverse" \
@@ -147,7 +156,7 @@ alias scripts="nvim -c ':SLoad scripts'"
 alias tmuxs="systemd-run --scope --user tmux"
 
 ## Custom shortcuts
-# alias ggw="ff ~/wiki/"
+alias ff="ggw ~/wiki/"
 
 ## Files
 alias -s azcli=nvim
