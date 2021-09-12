@@ -123,13 +123,23 @@ ggw () {
 cd "$1"
 
 # IFS=: read -ra selected < <(
-  rg --color=always --line-number --no-heading --smart-case "\S" |
+  rg --color=always --colors 'match:fg:white' --line-number --no-heading --smart-case "\S" |
     fzf --ansi \
         --delimiter : \
         --preview 'bat --style=plain,numbers --color=always {1} --highlight-line {2}' \
         --preview-window 'up:50%:noborder:+{2}-3'
 
-# bat flags
+## rg flags
+#--colors
+#=always -> general coloring
+#--colors -> more granular color detailsO
+#='match:fx:white' -> specify foregroud color of hilighted text
+
+#--line-number -> display line numbers
+#--no-heading -> dont display header vith file names
+#--smart-case -> be case sensitive only when combine lower and upper case
+
+## bat flags
 #--style general styling
 #=plain -> show only textfiles
 #=numbers -> display line nmunbers
@@ -144,6 +154,10 @@ cd "$1"
 cd -
 # [ -n "${selected[0]}" ] && vim "${selected[0]}" "+${selected[1]}"
 
+}
+
+nvim-appi () {
+    ~/Applications/nvim.appimage "${*:-}"
 }
 
 ### Aliases
