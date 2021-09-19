@@ -119,45 +119,54 @@ n () {
 
 ggw () {
 
-# cd ~/wiki/
-cd "$1"
+    # cd ~/wiki/
+    cd "$1"
 
-# IFS=: read -ra selected < <(
-  rg --color=always --colors 'match:fg:white' --line-number --no-heading --smart-case "\S" |
+    # IFS=: read -ra selected < <(
+    rg --color=always --colors 'match:fg:white' --line-number --no-heading --smart-case "\S" |
     fzf --ansi \
         --delimiter : \
         --preview 'bat --style=plain,numbers --color=always {1} --highlight-line {2}' \
         --preview-window 'up:50%:noborder:+{2}-3'
 
-## rg flags
-#--colors
-#=always -> general coloring
-#--colors -> more granular color detailsO
-#='match:fx:white' -> specify foregroud color of hilighted text
+    ## rg flags
+    #--colors
+    #=always -> general coloring
+    #--colors -> more granular color detailsO
+    #='match:fx:white' -> specify foregroud color of hilighted text
 
-#--line-number -> display line numbers
-#--no-heading -> dont display header vith file names
-#--smart-case -> be case sensitive only when combine lower and upper case
+    #--line-number -> display line numbers
+    #--no-heading -> dont display header vith file names
+    #--smart-case -> be case sensitive only when combine lower and upper case
 
-## bat flags
-#--style general styling
-#=plain -> show only textfiles
-#=numbers -> display line nmunbers
+    ## bat flags
+    #--style general styling
+    #=plain -> show only textfiles
+    #=numbers -> display line nmunbers
 
-#--color
-#=always -> display lines
+    #--color
+    #=always -> display lines
 
 
-  # rg --color=always --line-number --no-heading --smart-case "${*:-}" ~/wiki/ |
-        # --color "hl:-1:underline,hl+:-1:underline:reverse" \
-# )
-cd -
-# [ -n "${selected[0]}" ] && vim "${selected[0]}" "+${selected[1]}"
+    # rg --color=always --line-number --no-heading --smart-case "${*:-}" ~/wiki/ |
+    # --color "hl:-1:underline,hl+:-1:underline:reverse" \
+    # )
+
+    #return back last folder
+    cd -
+
+    #what to do with return items
+    # [ -n "${selected[0]}" ] && vim "${selected[0]}" "+${selected[1]}"
 
 }
 
+#neovim version 0.5
 nvim-appi () {
-    ~/Applications/nvim.appimage "${*:-}"
+    if [[ $# -eq 0 ]] ; then
+        ~/Applications/nvim.appimage
+    else
+        ~/Applications/nvim.appimage "${*:-}"
+    fi
 }
 
 ### Aliases
