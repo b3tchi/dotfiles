@@ -152,6 +152,8 @@ call plug#begin(expand('~/.vim/plugged'))
   "   Plug 'dense-analysis/ale'
   endif
 
+
+
   " Svelte
   Plug 'evanleck/vim-svelte'
   Plug 'mattn/emmet-vim'
@@ -197,6 +199,11 @@ call plug#begin(expand('~/.vim/plugged'))
   endif
 
   " Required:
+
+  "" Neovim 0.5+ with lua
+  " LSP List [https://github.com/neovim/nvim-lspconfig/blob/master/CONFIG.md#svelte]
+  Plug 'neovim/nvim-lspconfig' "offical NeoVim LSP plugin
+
 call plug#end()
 
 " Required:
@@ -758,6 +765,37 @@ let g:which_key_map =  {}
 " let g:which_key_use_floating_win = 1 "make as floating window
 " let g:which_key_run_map_on_popup = 1
 call which_key#register(' ', "g:which_key_map")
+
+" --- LUA LSP 0.5
+"load pyright config
+lua << EOF
+
+-- PYTHON
+-- to install:
+-- npm i -g pyright
+require'lspconfig'.pyright.setup{}
+
+-- SVELTE
+-- to install:
+-- npm i -g svelte-language-server
+require'lspconfig'.svelte.setup{}
+
+-- YAML
+-- to install:
+-- npm i -g yarn
+-- yarn global add yaml-language-server
+require'lspconfig'.yamlls.setup{}
+
+-- BASH
+-- to install:
+-- npm i -g bash-language-server
+require'lspconfig'.bashls.setup{}
+
+
+EOF
+
+
+
 
 
 " --- Lua LSP ---

@@ -19,13 +19,14 @@ Id_3=62d2ae27-e034-4a0b-9467-bef2ea1b997a
 Id_4=c9be6aaf-368b-45a8-8972-366d43d29a0f
 Id_5=82477ce6-bc9e-4ca5-88e7-9205199702be
 Id_6=defd16d7-184a-4320-8c2b-e6d22992cb15
+Id_7=8753d808-5e9f-4749-9868-15a2b4c6a61a
 Name_1=1
 Name_2=2
 Name_3=3
 Name_4=4
 Name_5=5
 Name_6=6
-Number=6
+Number=7
 Rows=1
 
 [DrmOutputs][6c3828befa][6c3828befa]
@@ -42,6 +43,9 @@ TabBoxAlternative=false
 BorderActivate=9
 BorderActivateCylinder=9
 BorderActivateSphere=9
+
+[Effect-DesktopGrid]
+BorderActivate=7
 
 [Effect-FlipSwitch]
 TabBox=false
@@ -81,7 +85,7 @@ blurEnabled=true
 contrastEnabled=false
 desktopchangeosdEnabled=true
 diminactiveEnabled=true
-highlightwindowEnabled=true
+highlightwindowEnabled=false
 krohnkiteEnabled=true
 kwin4_effect_dimscreenEnabled=true
 kwin4_effect_squashEnabled=false
@@ -113,7 +117,6 @@ screenGapTop=5
 tileLayoutGap=5
 
 [Script-toggleparachute]
-BorderActivate=7
 TouchBorderActivate=0
 
 [SubSession: 14d6cfe7-82fe-4bcb-933a-9652b82cfd99]
@@ -125,16 +128,12 @@ ActivitiesMode=0
 ApplicationsMode=0
 BorderActivate=9
 BorderAlternativeActivate=9
-DesktopLayout=org.kde.breeze.desktop
-DesktopListLayout=org.kde.breeze.desktop
 DesktopMode=0
 HighlightWindows=false
 LayoutName=compact
 MinimizedMode=0
 MultiScreenMode=0
-ShowDesktopMode=0
 ShowTabBox=true
-SwitchingMode=0
 TouchBorderActivate=9
 
 [TabBoxAlternative]
@@ -156,9 +155,9 @@ ElectricBorderDelay=150
 ElectricBorderMaximize=true
 ElectricBorderTiling=true
 ElectricBorders=0
+SeparateScreenFocus=true
 
 [org.kde.kdecoration2]
-BorderSizeAuto=false
 BorderlessMaximizedWindows=true
 ButtonsOnLeft=XAI
 ButtonsOnRight=

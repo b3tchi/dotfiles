@@ -119,35 +119,61 @@ n () {
 
 ggw () {
 
-# cd ~/wiki/
-cd "$1"
+    # cd ~/wiki/
+    cd "$1"
 
-# IFS=: read -ra selected < <(
-  rg --color=always --line-number --no-heading --smart-case "\S" |
+    # IFS=: read -ra selected < <(
+    rg --color=always --colors 'match:fg:white' --line-number --no-heading --smart-case "\S" |
     fzf --ansi \
         --delimiter : \
         --preview 'bat --style=plain,numbers --color=always {1} --highlight-line {2}' \
         --preview-window 'up:50%:noborder:+{2}-3'
 
-# bat flags
-#--style general styling
-#=plain -> show only textfiles
-#=numbers -> display line nmunbers
+    ## rg flags
+    #--colors
+    #=always -> general coloring
+    #--colors -> more granular color detailsO
+    #='match:fx:white' -> specify foregroud color of hilighted text
 
-#--color
-#=always -> display lines
+    #--line-number -> display line numbers
+    #--no-heading -> dont display header vith file names
+    #--smart-case -> be case sensitive only when combine lower and upper case
+
+    ## bat flags
+    #--style general styling
+    #=plain -> show only textfiles
+    #=numbers -> display line nmunbers
+
+    #--color
+    #=always -> display lines
 
 
-  # rg --color=always --line-number --no-heading --smart-case "${*:-}" ~/wiki/ |
-        # --color "hl:-1:underline,hl+:-1:underline:reverse" \
-# )
-cd -
-# [ -n "${selected[0]}" ] && vim "${selected[0]}" "+${selected[1]}"
+    # rg --color=always --line-number --no-heading --smart-case "${*:-}" ~/wiki/ |
+    # --color "hl:-1:underline,hl+:-1:underline:reverse" \
+    # )
 
+    #return back last folder
+    cd -
+
+    #what to do with return items
+    # [ -n "${selected[0]}" ] && vim "${selected[0]}" "+${selected[1]}"
+
+}
+
+#neovim version 0.5 from appimage
+nvim-appi () {
+    if [[ $# -eq 0 ]] ; then
+        ~/Applications/nvim.appimage
+    else
+        ~/Applications/nvim.appimage "${*:-}"
+    fi
 }
 
 ### Aliases
 ## Shortcuts
+alias vi="nvim-appi"
+alias nvim="nvim-appi"
+
 alias dotfiles="nvim -c ':SLoad dotfiles'"
 alias mwiki="nvim -c ':SLoad wiki'"
 alias wwiki="nvim -c ':SLoad wiki_LEGO'"
@@ -161,8 +187,8 @@ alias ff="ggw ~/wiki/"
 ## Files
 alias -s azcli=nvim
 
-alias -s md=nvim
-alias -s txt=nvim
+alias -s md=nvim-appi
+alias -s txt=nvim-appi
 
 alias -s json=nvim
 alias -s csv=nvim
