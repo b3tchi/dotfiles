@@ -15,7 +15,7 @@ if !exists("g:os")
     let g:computerName = substitute(g:computerName, '\n', '', '')
   else
     let g:os = substitute(system('uname'), '\n', '', '')
-    let computerName = substitute(system('hostname'), '\n', '', '')
+    let g:computerName = substitute(system('hostname'), '\n', '', '')
     if g:os == 'Linux'
       " uname -o => returns Android on DroidVim, Termux
       if match(system('uname -o'),'Android') == 0
@@ -25,6 +25,22 @@ if !exists("g:os")
     endif
   endif
 endif
+
+function! VimMode()
+  if has("nvim")
+    let vimver = matchstr(execute('version'), 'NVIM v\zs[^\n]*')
+    let verarr = split(vimver,"\\.")
+    if str2float(join([verarr[0],verarr[1]],".")) >= 0.5
+      return 3
+    else
+      return 2
+    endif
+  else
+    return 1
+  endif
+endfunction
+
+let g:vimmode = VimMode()
 
 " let vimplug_exists=expand('~/AppData/Local/nvim-data/site/autoload/plug.vim')
 " let vimplug_exists=expand('~/.vim/autoload/plug.vim') "old path
@@ -176,6 +192,11 @@ call plug#begin(expand('~/.vim/plugged'))
   " Plug 'kaicataldo/material.vim'
   " Plug 'altercation/vim-colors-solarized'
   " Plug 'iCyMind/NeoSolarized'
+
+  " vimmode 3 => nvim 0.5+
+  if g:vimmode == 3
+    Plug 'neovim/nvim-lspconfig'
+  endif
 
   " Required:
 
@@ -776,3 +797,6 @@ EOF
 
 
 
+=======
+
+" --- Lua LSP ---
