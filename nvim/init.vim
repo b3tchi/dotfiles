@@ -193,17 +193,12 @@ call plug#begin(expand('~/.vim/plugged'))
   " Plug 'altercation/vim-colors-solarized'
   " Plug 'iCyMind/NeoSolarized'
 
-  " vimmode 3 => nvim 0.5+
+  " vimmode 3 => Neovim 0.5+ with lua
   if g:vimmode == 3
-    Plug 'neovim/nvim-lspconfig'
+    Plug 'neovim/nvim-lspconfig' "offical NeoVim LSP plugin
     Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'}
+    " LSP List [https://github.com/neovim/nvim-lspconfig/blob/master/CONFIG.md#svelte]
   endif
-
-  " Required:
-
-  "" Neovim 0.5+ with lua
-  " LSP List [https://github.com/neovim/nvim-lspconfig/blob/master/CONFIG.md#svelte]
-  Plug 'neovim/nvim-lspconfig' "offical NeoVim LSP plugin
 
 call plug#end()
 

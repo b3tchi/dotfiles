@@ -1,25 +1,17 @@
 
 "load pyright config
 lua << EOF
+
 -- PYTHON
--- to install:
--- npm i -g pyright
 require'lspconfig'.pyright.setup{}
 
 -- SVELTE
--- to install:
--- npm i -g svelte-language-server
 require'lspconfig'.svelte.setup{}
 
 -- YAML
--- to install:
--- npm i -g yarn
--- yarn global add yaml-language-server
 require'lspconfig'.yamlls.setup{}
 
 -- BASH
--- to install:
--- npm i -g bash-language-server
 require'lspconfig'.bashls.setup{}
 
 --Starting Lsp Config details
@@ -84,6 +76,5 @@ require'nvim-treesitter.configs'.setup {
     additional_vim_regex_highlighting = false,
   },
 }
-
 
 EOF

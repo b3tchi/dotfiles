@@ -88,6 +88,15 @@ bindkey '^[3;5~' delete-char
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
 
 
+# Export Variables
+if [[ -n $(uname -o | grep 'Linux') ]]; then
+  IS_LINUX=1
+fi
+
+if [[ $(uname -o) = 'Android' ]]; then
+  IS_ANDROID=1
+fi
+
 # NNN quit on cd
 n () {
 
@@ -171,9 +180,19 @@ nvim-appi () {
 
 ### Aliases
 ## Shortcuts
-alias vi="nvim-appi"
-alias nvim="nvim-appi"
 
+## Conditional Shortcuts
+if [[ $IS_LINUX -eq 1 ]]; then
+    alias vi="nvim-appi"
+    alias nvim="nvim-appi"
+fi
+
+if [[ $IS_ANDROID -eq 1 ]]; then
+    alias vi="nvim"
+fi
+
+
+## Nvim Shortcuts
 alias dotfiles="nvim -c ':SLoad dotfiles'"
 alias mwiki="nvim -c ':SLoad wiki'"
 alias wwiki="nvim -c ':SLoad wiki_LEGO'"
