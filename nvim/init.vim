@@ -196,6 +196,7 @@ call plug#begin(expand('~/.vim/plugged'))
   " vimmode 3 => nvim 0.5+
   if g:vimmode == 3
     Plug 'neovim/nvim-lspconfig'
+    Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'}
   endif
 
   " Required:
@@ -767,35 +768,6 @@ let g:which_key_map =  {}
 call which_key#register(' ', "g:which_key_map")
 
 " --- LUA LSP 0.5
-"load pyright config
-lua << EOF
-
--- PYTHON
--- to install:
--- npm i -g pyright
-require'lspconfig'.pyright.setup{}
-
--- SVELTE
--- to install:
--- npm i -g svelte-language-server
-require'lspconfig'.svelte.setup{}
-
--- YAML
--- to install:
--- npm i -g yarn
--- yarn global add yaml-language-server
-require'lspconfig'.yamlls.setup{}
-
--- BASH
--- to install:
--- npm i -g bash-language-server
-require'lspconfig'.bashls.setup{}
-
-
-EOF
-
-
-
-
-
-" --- Lua LSP ---
+if g:vimmode == 3
+  source ~/.config/nvim/lualsp.vim
+endif
