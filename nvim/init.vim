@@ -198,6 +198,11 @@ call plug#begin(expand('~/.vim/plugged'))
     Plug 'neovim/nvim-lspconfig' "offical NeoVim LSP plugin
     Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'}
     " LSP List [https://github.com/neovim/nvim-lspconfig/blob/master/CONFIG.md#svelte]
+    Plug 'nvim-lua/plenary.nvim'
+    Plug 'nvim-telescope/telescope.nvim'
+    Plug 'nvim-telescope/telescope-fzf-native.nvim', { 'do': 'make' }
+    Plug 'simrat39/symbols-outline.nvim'
+
   endif
 
 call plug#end()
