@@ -15,7 +15,7 @@ if !exists("g:os")
     let g:computerName = substitute(g:computerName, '\n', '', '')
   else
     let g:os = substitute(system('uname'), '\n', '', '')
-    let computerName = substitute(system('hostname'), '\n', '', '')
+    let g:computerName = substitute(system('hostname'), '\n', '', '')
     if g:os == 'Linux'
       " uname -o => returns Android on DroidVim, Termux
       if match(system('uname -o'),'Android') == 0
@@ -25,6 +25,22 @@ if !exists("g:os")
     endif
   endif
 endif
+
+function! VimMode()
+  if has("nvim")
+    let vimver = matchstr(execute('version'), 'NVIM v\zs[^\n]*')
+    let verarr = split(vimver,"\\.")
+    if str2float(join([verarr[0],verarr[1]],".")) >= 0.5
+      return 3
+    else
+      return 2
+    endif
+  else
+    return 1
+  endif
+endfunction
+
+let g:vimmode = VimMode()
 
 " let vimplug_exists=expand('~/AppData/Local/nvim-data/site/autoload/plug.vim')
 " let vimplug_exists=expand('~/.vim/autoload/plug.vim') "old path
@@ -177,11 +193,12 @@ call plug#begin(expand('~/.vim/plugged'))
   " Plug 'altercation/vim-colors-solarized'
   " Plug 'iCyMind/NeoSolarized'
 
-  " Required:
-
-  "" Neovim 0.5+ with lua
-  " LSP List [https://github.com/neovim/nvim-lspconfig/blob/master/CONFIG.md#svelte]
-  Plug 'neovim/nvim-lspconfig' "offical NeoVim LSP plugin
+  " vimmode 3 => Neovim 0.5+ with lua
+  if g:vimmode == 3
+    Plug 'neovim/nvim-lspconfig' "offical NeoVim LSP plugin
+    Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'}
+    " LSP List [https://github.com/neovim/nvim-lspconfig/blob/master/CONFIG.md#svelte]
+  endif
 
 call plug#end()
 
@@ -746,33 +763,6 @@ let g:which_key_map =  {}
 call which_key#register(' ', "g:which_key_map")
 
 " --- LUA LSP 0.5
-"load pyright config
-lua << EOF
-
--- PYTHON
--- to install:
--- npm i -g pyright
-require'lspconfig'.pyright.setup{}
-
--- SVELTE
--- to install:
--- npm i -g svelte-language-server
-require'lspconfig'.svelte.setup{}
-
--- YAML
--- to install:
--- npm i -g yarn
--- yarn global add yaml-language-server
-require'lspconfig'.yamlls.setup{}
-
--- BASH
--- to install:
--- npm i -g bash-language-server
-require'lspconfig'.bashls.setup{}
-
-
-EOF
-
-
-
-
+if g:vimmode == 3
+  source ~/.config/nvim/lualsp.vim
+endif
