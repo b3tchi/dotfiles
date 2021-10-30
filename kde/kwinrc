@@ -1,5 +1,5 @@
 [$Version]
-update_info=kwin.upd:replace-scalein-with-scale,kwin.upd:port-minimizeanimation-effect-to-js,kwin.upd:port-scale-effect-to-js,kwin.upd:port-dimscreen-effect-to-js,kwin.upd:auto-bordersize,kwin.upd:animation-speed,kwin.upd:desktop-grid-click-behavior,kwin.upd:no-swap-encourage
+update_info=kwin.upd:replace-scalein-with-scale,kwin.upd:port-minimizeanimation-effect-to-js,kwin.upd:port-scale-effect-to-js,kwin.upd:port-dimscreen-effect-to-js,kwin.upd:auto-bordersize,kwin.upd:animation-speed,kwin.upd:desktop-grid-click-behavior,kwin.upd:no-swap-encourage,kwin.upd:make-translucency-effect-disabled-by-default,kwin.upd:remove-flip-switch-effect,kwin.upd:remove-cover-switch-effect,kwin.upd:remove-cubeslide-effect,kwin.upd:remove-xrender-backend
 
 [Compositing]
 Backend=OpenGL
@@ -9,7 +9,6 @@ GLPreferBufferSwap=a
 GLTextureFilter=2
 HiddenPreviews=4
 OpenGLIsUnsafe=false
-WindowsBlockCompositing=true
 XRenderSmoothScale=false
 
 [Desktops]
@@ -31,6 +30,11 @@ Rows=1
 
 [DrmOutputs][6c3828befa][6c3828befa]
 Scale=1
+
+[DrmOutputs][bd455426-91b5-5aa4-b78c-9e21c3c810ab][bd455426-91b5-5aa4-b78c-9e21c3c810ab]
+Mode=1920x1080_60049
+Scale=1
+Transform=normal
 
 [DrmOutputs][df3c771780][df3c771780]
 Scale=1

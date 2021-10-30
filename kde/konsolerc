@@ -4,7 +4,7 @@ State=AAAA/wAAAAD9AAAAAAAAA1EAAAPgAAAABAAAAAQAAAAIAAAACPwAAAABAAAAAgAAAAEAAAAWAG
 StatusBar=Disabled
 
 [Desktop Entry]
-DefaultProfile=Profile 2.profile
+DefaultProfile=Profile 1.profile
 
 [DownloadDialog Settings]
 eDP-1 DP-1 Height 1080=424
@@ -22,13 +22,13 @@ ShowWindowTitleOnTitleBar=true
 
 [MainWindow]
 MenuBar=Disabled
-State=AAAA/wAAAAD9AAAAAAAAA1kAAAQWAAAABAAAAAQAAAAIAAAACPwAAAABAAAAAgAAAAEAAAAWAG0AYQBpAG4AVABvAG8AbABCAGEAcgAAAAAA/////wPvCjMAMoF0
+State=AAAA/wAAAAD9AAAAAAAAB3YAAAQWAAAABAAAAAQAAAAIAAAACPwAAAABAAAAAgAAAAEAAAAWAG0AYQBpAG4AVABvAG8AbABCAGEAcgAAAAAA/////wPvCjMAMoF0
 StatusBar=Disabled
 ToolBarsMovable=Disabled
+eDP XPosition 1920x1080=5
+eDP YPosition 1920x1080=29
 eDP-1 DP-1 Window-Maximized 1080x1920=true
 eDP-1 Window-Maximized 1080x1920=true
-eDP-1 XPosition 1920x1080=5
-eDP-1 YPosition 1920x1080=29
 
 [Notification Messages]
 CloseAllTabs=true
