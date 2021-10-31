@@ -8,11 +8,77 @@ if expand('%') == '' && !&modified && line('$') <= 1 && getline(1) == ''
   let s:wipebuf = bufnr('%')
 endif
 set shortmess=aoO
-badd +7 ubuntu/ubuntu-core-postinstall.sh
+badd +14 ubuntu/ubuntu-core-postinstall.sh
+badd +9 postinstall/run.sh
+badd +64 ubuntu/install-lib.sh
+badd +11 postinstall/ubuntu/nvim-dependencies.sh
+badd +4 postinstall/ubuntu/nvim-python.sh
+badd +17 postinstall/ubuntu/nvim-node.sh
+badd +5 postinstall/termux/nvim-node.sh
+badd +4 postinstall/termux/nvim-dependencies.sh
+badd +2 postinstall/ubuntu/bitwarden.sh
+badd +29 postinstall/ubuntu/nvim-lsp.sh
+badd +8 postinstall/ubuntu/zsh.sh
+badd +4 postinstall/ubuntu/lazygit.sh
+badd +5 postinstall/ubuntu/coreapps.sh
+badd +2 postinstall/ubuntu/bat.sh
+badd +2 postinstall/run.sh.log
+badd +0 ~/scripts/postinstall/termux/coreapps.sh
 argglobal
 %argdel
-edit ubuntu/ubuntu-core-postinstall.sh
+edit ~/scripts/postinstall/termux/coreapps.sh
+let s:save_splitbelow = &splitbelow
+let s:save_splitright = &splitright
+set splitbelow splitright
+wincmd _ | wincmd |
+split
+wincmd _ | wincmd |
+split
+2wincmd k
+wincmd w
+wincmd _ | wincmd |
+vsplit
+1wincmd h
+wincmd w
+wincmd w
+let &splitbelow = s:save_splitbelow
+let &splitright = s:save_splitright
+wincmd t
+let s:save_winminheight = &winminheight
+let s:save_winminwidth = &winminwidth
+set winminheight=0
+set winheight=1
+set winminwidth=0
+set winwidth=1
+exe '1resize ' . ((&lines * 9 + 17) / 34)
+exe '2resize ' . ((&lines * 9 + 17) / 34)
+exe 'vert 2resize ' . ((&columns * 35 + 35) / 70)
+exe '3resize ' . ((&lines * 9 + 17) / 34)
+exe 'vert 3resize ' . ((&columns * 34 + 35) / 70)
+exe '4resize ' . ((&lines * 9 + 17) / 34)
 argglobal
+balt postinstall/run.sh.log
+setlocal fdm=expr
+setlocal fde=GetPotionFold(v:lnum)
+setlocal fmr={{{,}}}
+setlocal fdi=
+setlocal fdl=1
+setlocal fml=1
+setlocal fdn=20
+setlocal fen
+let s:l = 4 - ((3 * winheight(0) + 4) / 9)
+if s:l < 1 | let s:l = 1 | endif
+keepjumps exe s:l
+normal! zt
+keepjumps 4
+normal! 0
+wincmd w
+argglobal
+if bufexists("postinstall/run.sh") | buffer postinstall/run.sh | else | edit postinstall/run.sh | endif
+if &buftype ==# 'terminal'
+  silent file postinstall/run.sh
+endif
+balt postinstall/ubuntu/coreapps.sh
 setlocal fdm=expr
 setlocal fde=GetPotionFold(v:lnum)
 setlocal fmr={{{,}}}
@@ -21,25 +87,88 @@ setlocal fdl=2
 setlocal fml=1
 setlocal fdn=20
 setlocal fen
-let s:l = 7 - ((6 * winheight(0) + 19) / 38)
+29
+normal! zo
+34
+normal! zo
+38
+normal! zo
+42
+normal! zo
+45
+normal! zo
+49
+normal! zo
+let s:l = 16 - ((5 * winheight(0) + 4) / 9)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
-keepjumps 7
-normal! 015|
+keepjumps 16
+normal! 016|
+wincmd w
+argglobal
+if bufexists("postinstall/run.sh.log") | buffer postinstall/run.sh.log | else | edit postinstall/run.sh.log | endif
+if &buftype ==# 'terminal'
+  silent file postinstall/run.sh.log
+endif
+balt postinstall/ubuntu/coreapps.sh
+setlocal fdm=expr
+setlocal fde=GetPotionFold(v:lnum)
+setlocal fmr={{{,}}}
+setlocal fdi=
+setlocal fdl=0
+setlocal fml=1
+setlocal fdn=20
+setlocal fen
+let s:l = 2 - ((1 * winheight(0) + 4) / 9)
+if s:l < 1 | let s:l = 1 | endif
+keepjumps exe s:l
+normal! zt
+keepjumps 2
+normal! 04|
+wincmd w
+argglobal
+if bufexists("term://~/scripts//8423:zsh") | buffer term://~/scripts//8423:zsh | else | edit term://~/scripts//8423:zsh | endif
+if &buftype ==# 'terminal'
+  silent file term://~/scripts//8423:zsh
+endif
+balt postinstall/run.sh
+setlocal fdm=expr
+setlocal fde=GetPotionFold(v:lnum)
+setlocal fmr={{{,}}}
+setlocal fdi=
+setlocal fdl=0
+setlocal fml=1
+setlocal fdn=20
+setlocal fen
+let s:l = 748 - ((6 * winheight(0) + 4) / 9)
+if s:l < 1 | let s:l = 1 | endif
+keepjumps exe s:l
+normal! zt
+keepjumps 748
+normal! 052|
+wincmd w
+4wincmd w
+exe '1resize ' . ((&lines * 9 + 17) / 34)
+exe '2resize ' . ((&lines * 9 + 17) / 34)
+exe 'vert 2resize ' . ((&columns * 35 + 35) / 70)
+exe '3resize ' . ((&lines * 9 + 17) / 34)
+exe 'vert 3resize ' . ((&columns * 34 + 35) / 70)
+exe '4resize ' . ((&lines * 9 + 17) / 34)
 tabnext 1
 if exists('s:wipebuf') && len(win_findbuf(s:wipebuf)) == 0&& getbufvar(s:wipebuf, '&buftype') isnot# 'terminal'
   silent exe 'bwipe ' . s:wipebuf
 endif
 unlet! s:wipebuf
 set winheight=1 winwidth=20 shortmess=filnxtToOFAcsI
+let &winminheight = s:save_winminheight
+let &winminwidth = s:save_winminwidth
 let s:sx = expand("<sfile>:p:r")."x.vim"
 if filereadable(s:sx)
   exe "source " . fnameescape(s:sx)
 endif
 let &g:so = s:so_save | let &g:siso = s:siso_save
 set hlsearch
-nohlsearch
 doautoall SessionLoadPost
 unlet SessionLoad
 " vim: set ft=vim :
