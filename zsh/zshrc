@@ -185,6 +185,7 @@ nvim-appi () {
 if [[ $IS_LINUX -eq 1 ]]; then
     alias vi="nvim-appi"
     alias nvim="nvim-appi"
+    alias fd="fdfind" #
 fi
 
 if [[ $IS_ANDROID -eq 1 ]]; then

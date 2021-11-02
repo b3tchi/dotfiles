@@ -195,13 +195,17 @@ call plug#begin(expand('~/.vim/plugged'))
 
   " vimmode 3 => Neovim 0.5+ with lua
   if g:vimmode == 3
+
     Plug 'neovim/nvim-lspconfig' "offical NeoVim LSP plugin
-    Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'}
+    Plug 'williamboman/nvim-lsp-installer' "automatic installer of LSPs
     " LSP List [https://github.com/neovim/nvim-lspconfig/blob/master/CONFIG.md#svelte]
+
+    Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'} "LSP based highlighting
     Plug 'nvim-lua/plenary.nvim'
     Plug 'nvim-telescope/telescope.nvim'
     Plug 'nvim-telescope/telescope-fzf-native.nvim', { 'do': 'make' }
-    Plug 'simrat39/symbols-outline.nvim'
+
+    Plug 'simrat39/symbols-outline.nvim' "outlines
 
   endif
 
