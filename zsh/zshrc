@@ -185,13 +185,14 @@ nvim-appi () {
 if [[ $IS_LINUX -eq 1 ]]; then
     alias vi="nvim-appi"
     alias nvim="nvim-appi"
+
     alias fd="fdfind" #
+    alias python="python3"
 fi
 
 if [[ $IS_ANDROID -eq 1 ]]; then
     alias vi="nvim"
 fi
-
 
 ## Nvim Shortcuts
 alias dotfiles="nvim -c ':SLoad dotfiles'"
