@@ -207,6 +207,9 @@ call plug#begin(expand('~/.vim/plugged'))
 
     Plug 'simrat39/symbols-outline.nvim' "outlines
 
+    Plug 'hrsh7th/nvim-cmp'
+    Plug 'hrsh7th/cmp-nvim-lsp'
+
   endif
 
 call plug#end()

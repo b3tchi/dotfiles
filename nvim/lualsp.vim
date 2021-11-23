@@ -2,59 +2,6 @@
 "load pyright config
 lua << EOF
 
--- PYTHON
-require'lspconfig'.pyright.setup{}
-
--- SVELTE
-require'lspconfig'.svelte.setup{}
-
--- YAML
-require'lspconfig'.yamlls.setup{}
-
--- BASH
-require'lspconfig'.bashls.setup{}
-
---C
---require'lspconfig'.ccls.setup{}
-
---CSS
-require'lspconfig'.cssls.setup{}
-
---DOCKER
---require'lspconfig'.dockerls.setup{}
-
---HTML
-require'lspconfig'.html.setup{}
-
---JSOM
-require'lspconfig'.jsonls.setup{}
-
---C#,VB.NET
---require'lspconfig'.omnisharp.setup{}
-
---PowerShell
---require'lspconfig'.powershell_es.setup{}
-
---LUA
---require'lspconfig'.sumneko_lua.setup{}
-
---VIML
-require'lspconfig'.vimls.setup{}
-
---TERRAFORM
---require'lspconfig'.terraformls.setup{}
---TYPESCRIPT
---require'lspconfig'.tsserver.setup{}
-
---JAVASCRIPT
-require'lspconfig'.eslint.setup{}
-
---RUST
---require'lspconfig'.rust_analyzer.setup{}
-
---Starting Lsp Config details
-local nvim_lsp = require('lspconfig')
-
 -- Use an on_attach function to only map the following keys
 -- after the language server attaches to the current buffer
 local on_attach = function(client, bufnr)
@@ -87,6 +34,79 @@ local on_attach = function(client, bufnr)
   buf_set_keymap('n', '<space>f', '<cmd>lua vim.lsp.buf.formatting()<CR>', opts)
 
 end
+
+-- PYTHON
+require'lspconfig'.pyright.setup{}
+
+-- SVELTE
+require'lspconfig'.svelte.setup{}
+
+-- YAML
+require'lspconfig'.yamlls.setup{}
+
+-- BASH
+require'lspconfig'.bashls.setup{}
+
+--C
+--require'lspconfig'.ccls.setup{}
+
+--CSS
+require'lspconfig'.cssls.setup{}
+
+--DOCKER
+--require'lspconfig'.dockerls.setup{}
+
+--HTML
+require'lspconfig'.html.setup{}
+
+--JSOM
+require'lspconfig'.jsonls.setup{}
+
+--C#,VB.NET
+local pid = vim.fn.getpid()
+local omnisharp_bin = "/home/jan/.local/share/nvim/lsp_servers/omnisharp/omnisharp/run"
+
+require'lspconfig'.omnisharp.setup{
+  --parameter 1
+  capabilities = require('cmp_nvim_lsp').update_capabilities(vim.lsp.protocol.make_client_capabilities()),
+  --parameter 2
+  on_attach = on_attach ,
+  --parameter 3
+  cmd = { omnisharp_bin , "--languageserver" , "--hostPID" , tostring(pid) }
+}
+
+--PowerShell
+require'lspconfig'.powershell_es.setup{
+  --parameter 1
+  capabilities = require('cmp_nvim_lsp').update_capabilities(vim.lsp.protocol.make_client_capabilities()),
+  --parameter 2
+  on_attach = on_attach ,
+  --parameter 3
+  --bundle_path = '/home/jan/.local/bin/powershell_es',
+  bundle_path = '/home/jan/.config/coc/extensions/node_modules/coc-powershell/PowerShellEditorServices',
+  --bundle_path = '/home/jan/repos/install-pses/PowerShellEditorServices',
+  --cmd = {'pwsh', '-NoLogo', '-NoProfile', '-Command', "/home/jan/.local/bin/powershell_es/PowerShellEditorServices/Start-EditorServices.ps1"},
+}
+--LUA
+--require'lspconfig'.sumneko_lua.setup{}
+
+--VIML
+require'lspconfig'.vimls.setup{}
+
+--TERRAFORM
+--require'lspconfig'.terraformls.setup{}
+--TYPESCRIPT
+--require'lspconfig'.tsserver.setup{}
+
+--JAVASCRIPT
+require'lspconfig'.eslint.setup{}
+
+--RUST
+--require'lspconfig'.rust_analyzer.setup{}
+
+--Starting Lsp Config details
+local nvim_lsp = require('lspconfig')
+
 
 -- Use a loop to conveniently call 'setup' on multiple servers and
 -- map buffer local keybindings when the language server attaches
@@ -132,6 +152,22 @@ require('telescope').setup {
 -- To get fzf loaded and working with telescope, you need to call
 -- load_extension, somewhere after setup function:
 require('telescope').load_extension('fzf')
+
+--CMP - AUTOCOMPLETIONS
+local cmp = require 'cmp'
+cmp.setup {
+  mapping = {
+    ['<Tab>'] = cmp.mapping.select_next_item(),
+    ['<S-Tab>'] = cmp.mapping.select_prev_item(),
+    ['<CR>'] = cmp.mapping.confirm({
+      behavior = cmp.ConfirmBehavior.Replace,
+      select = true,
+    })
+  },
+  sources = {
+    { name = 'nvim_lsp' },
+  }
+}
 
 --
 EOF
