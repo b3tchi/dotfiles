@@ -79,12 +79,6 @@ autocmd VimEnter * if len(filter(values(g:plugs), '!isdirectory(v:val.dir)'))
 call plug#begin(expand('~/.vim/plugged'))
 " call plug#begin()
 
-  ""Indenting lines
-  Plug 'b3tchi/iguides' "improved guides
-  " Plug 'Yggdroot/indentLine'
-  " Plug 'thaerkh/vim-indentguides'
-  " Plug 'lukas-reineke/indent-blankline.nvim'
-  " Plug 'nathanaelkane/vim-indent-guides' "indenting guides
 
   ""General Vim Plugins
   Plug 'jeffkreeftmeijer/vim-numbertoggle'		"hybrid/static number toggle when multiple windows
@@ -207,9 +201,19 @@ call plug#begin(expand('~/.vim/plugged'))
 
     Plug 'simrat39/symbols-outline.nvim' "outlines
 
+    ""completion
     Plug 'hrsh7th/nvim-cmp'
     Plug 'hrsh7th/cmp-nvim-lsp'
+    ""Indent guides
+    Plug 'lukas-reineke/indent-blankline.nvim'
+  else
 
+    ""Indent guides
+    Plug 'b3tchi/iguides' "improved guides
+    " Plug 'Yggdroot/indentLine'
+    " Plug 'thaerkh/vim-indentguides'
+    " Plug 'lukas-reineke/indent-blankline.nvim'
+    " Plug 'nathanaelkane/vim-indent-guides' "indenting guides
   endif
 
 call plug#end()
@@ -611,7 +615,7 @@ function! PreviewIfWide2()
 endfunction
 
 command! -bang -nargs=? -complete=dir FzfFiles
-    \ call fzf#vim#files(<q-args>, PreviewIfWide2()), <bang>0)
+  \ call fzf#vim#files(<q-args>, PreviewIfWide2()), <bang>0)
 
 " Shouldn't be needed https://medium.com/@sidneyliebrand/how-fzf-and-ripgrep-improved-my-workflow-61c7ca212861
 " command! -bang -nargs=* Rg
