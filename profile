@@ -35,3 +35,8 @@ fi
 if [ -d "$HOME/.dotnet/tools" ] ; then
     PATH="$HOME/.dotnet/tools:$PATH"
 fi
+
+# sqlcmd items
+if [ -d "/opt/mssql-tools/bin" ] ; then
+    export PATH="$PATH:/opt/mssql-tools/bin"
+fi
