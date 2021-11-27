@@ -90,11 +90,11 @@ bindkey '^[3;5~' delete-char
 
 # Export Variables
 if [[ -n $(uname -o | grep 'Linux') ]]; then
-  IS_LINUX=1
+  export IS_LINUX=1
 fi
 
 if [[ $(uname -o) = 'Android' ]]; then
-  IS_ANDROID=1
+  export IS_ANDROID=1
 fi
 
 # NNN quit on cd
@@ -185,12 +185,14 @@ nvim-appi () {
 if [[ $IS_LINUX -eq 1 ]]; then
     alias vi="nvim-appi"
     alias nvim="nvim-appi"
+
+    alias fd="fdfind" #
+    alias python="python3"
 fi
 
 if [[ $IS_ANDROID -eq 1 ]]; then
     alias vi="nvim"
 fi
-
 
 ## Nvim Shortcuts
 alias dotfiles="nvim -c ':SLoad dotfiles'"

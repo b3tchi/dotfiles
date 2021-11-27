@@ -32,6 +32,7 @@ d=~/dotfiles/
 # ml $d nvim/init.vim ~/lnk/
 #bash
 ml $d profile ~/ .profile
+ml $d profile ~/ .zprofile
 ml $d bashrc ~/ .bashrc
 ml $d bash_logout ~/ .bash_logout
 ml $d gitconfig ~/ .gitconfig

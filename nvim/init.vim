@@ -79,12 +79,6 @@ autocmd VimEnter * if len(filter(values(g:plugs), '!isdirectory(v:val.dir)'))
 call plug#begin(expand('~/.vim/plugged'))
 " call plug#begin()
 
-  ""Indenting lines
-  Plug 'b3tchi/iguides' "improved guides
-  " Plug 'Yggdroot/indentLine'
-  " Plug 'thaerkh/vim-indentguides'
-  " Plug 'lukas-reineke/indent-blankline.nvim'
-  " Plug 'nathanaelkane/vim-indent-guides' "indenting guides
 
   ""General Vim Plugins
   Plug 'jeffkreeftmeijer/vim-numbertoggle'		"hybrid/static number toggle when multiple windows
@@ -195,9 +189,31 @@ call plug#begin(expand('~/.vim/plugged'))
 
   " vimmode 3 => Neovim 0.5+ with lua
   if g:vimmode == 3
+
     Plug 'neovim/nvim-lspconfig' "offical NeoVim LSP plugin
-    Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'}
+    Plug 'williamboman/nvim-lsp-installer' "automatic installer of LSPs
     " LSP List [https://github.com/neovim/nvim-lspconfig/blob/master/CONFIG.md#svelte]
+
+    Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'} "LSP based highlighting
+    Plug 'nvim-lua/plenary.nvim'
+    Plug 'nvim-telescope/telescope.nvim'
+    Plug 'nvim-telescope/telescope-fzf-native.nvim', { 'do': 'make' }
+
+    Plug 'simrat39/symbols-outline.nvim' "outlines
+
+    ""completion
+    Plug 'hrsh7th/nvim-cmp'
+    Plug 'hrsh7th/cmp-nvim-lsp'
+    ""Indent guides
+    Plug 'lukas-reineke/indent-blankline.nvim'
+  else
+
+    ""Indent guides
+    Plug 'b3tchi/iguides' "improved guides
+    " Plug 'Yggdroot/indentLine'
+    " Plug 'thaerkh/vim-indentguides'
+    " Plug 'lukas-reineke/indent-blankline.nvim'
+    " Plug 'nathanaelkane/vim-indent-guides' "indenting guides
   endif
 
 call plug#end()
@@ -599,7 +615,7 @@ function! PreviewIfWide2()
 endfunction
 
 command! -bang -nargs=? -complete=dir FzfFiles
-    \ call fzf#vim#files(<q-args>, PreviewIfWide2()), <bang>0)
+  \ call fzf#vim#files(<q-args>, PreviewIfWide2()), <bang>0)
 
 " Shouldn't be needed https://medium.com/@sidneyliebrand/how-fzf-and-ripgrep-improved-my-workflow-61c7ca212861
 " command! -bang -nargs=* Rg

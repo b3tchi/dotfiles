@@ -8,31 +8,104 @@ if expand('%') == '' && !&modified && line('$') <= 1 && getline(1) == ''
   let s:wipebuf = bufnr('%')
 endif
 set shortmess=aoO
-badd +7 ubuntu/ubuntu-core-postinstall.sh
+badd +13 postinstall/run.sh
+badd +1 postinstall/install-fxs.sh
+badd +0 term://~/scripts//8423:zsh
+badd +0 ~/scripts/rawscripts/connectwindowsshare.sh
 argglobal
 %argdel
-edit ubuntu/ubuntu-core-postinstall.sh
+edit ~/scripts/rawscripts/connectwindowsshare.sh
+let s:save_splitbelow = &splitbelow
+let s:save_splitright = &splitright
+set splitbelow splitright
+wincmd _ | wincmd |
+split
+wincmd _ | wincmd |
+split
+2wincmd k
+wincmd w
+wincmd w
+let &splitbelow = s:save_splitbelow
+let &splitright = s:save_splitright
+wincmd t
+let s:save_winminheight = &winminheight
+let s:save_winminwidth = &winminwidth
+set winminheight=0
+set winheight=1
+set winminwidth=0
+set winwidth=1
+exe '1resize ' . ((&lines * 15 + 26) / 52)
+exe '2resize ' . ((&lines * 17 + 26) / 52)
+exe '3resize ' . ((&lines * 13 + 26) / 52)
 argglobal
+balt postinstall/run.sh
 setlocal fdm=expr
 setlocal fde=GetPotionFold(v:lnum)
 setlocal fmr={{{,}}}
 setlocal fdi=
-setlocal fdl=2
+setlocal fdl=1
 setlocal fml=1
 setlocal fdn=20
 setlocal fen
-let s:l = 7 - ((6 * winheight(0) + 19) / 38)
+let s:l = 1 - ((0 * winheight(0) + 7) / 15)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
-keepjumps 7
-normal! 015|
+keepjumps 1
+normal! 0
+wincmd w
+argglobal
+if bufexists("postinstall/install-fxs.sh") | buffer postinstall/install-fxs.sh | else | edit postinstall/install-fxs.sh | endif
+if &buftype ==# 'terminal'
+  silent file postinstall/install-fxs.sh
+endif
+balt postinstall/run.sh
+setlocal fdm=expr
+setlocal fde=GetPotionFold(v:lnum)
+setlocal fmr={{{,}}}
+setlocal fdi=
+setlocal fdl=4
+setlocal fml=1
+setlocal fdn=20
+setlocal fen
+let s:l = 51 - ((16 * winheight(0) + 8) / 17)
+if s:l < 1 | let s:l = 1 | endif
+keepjumps exe s:l
+normal! zt
+keepjumps 51
+normal! 0
+wincmd w
+argglobal
+if bufexists("term://~/scripts//8423:zsh") | buffer term://~/scripts//8423:zsh | else | edit term://~/scripts//8423:zsh | endif
+if &buftype ==# 'terminal'
+  silent file term://~/scripts//8423:zsh
+endif
+setlocal fdm=expr
+setlocal fde=GetPotionFold(v:lnum)
+setlocal fmr={{{,}}}
+setlocal fdi=
+setlocal fdl=0
+setlocal fml=1
+setlocal fdn=20
+setlocal fen
+let s:l = 13 - ((12 * winheight(0) + 6) / 13)
+if s:l < 1 | let s:l = 1 | endif
+keepjumps exe s:l
+normal! zt
+keepjumps 13
+normal! 0
+wincmd w
+exe '1resize ' . ((&lines * 15 + 26) / 52)
+exe '2resize ' . ((&lines * 17 + 26) / 52)
+exe '3resize ' . ((&lines * 13 + 26) / 52)
 tabnext 1
 if exists('s:wipebuf') && len(win_findbuf(s:wipebuf)) == 0&& getbufvar(s:wipebuf, '&buftype') isnot# 'terminal'
   silent exe 'bwipe ' . s:wipebuf
 endif
 unlet! s:wipebuf
 set winheight=1 winwidth=20 shortmess=filnxtToOFAcsI
+let &winminheight = s:save_winminheight
+let &winminwidth = s:save_winminwidth
 let s:sx = expand("<sfile>:p:r")."x.vim"
 if filereadable(s:sx)
   exe "source " . fnameescape(s:sx)
