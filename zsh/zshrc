@@ -9,7 +9,7 @@ fi
 if [[ ! -f $HOME/.zinit/bin/zinit.zsh ]]; then
     print -P "%F{33}▓▒░ %F{220}Installing %F{33}DHARMA%F{220} Initiative Plugin Manager (%F{33}zdharma/zinit%F{220})…%f"
     command mkdir -p "$HOME/.zinit" && command chmod g-rwX "$HOME/.zinit"
-    command git clone https://github.com/zdharma/zinit "$HOME/.zinit/bin" && \
+    command git clone https://github.com/zdharma-continuum/zinit "$HOME/.zinit/bin" && \
         print -P "%F{33}▓▒░ %F{34}Installation successful.%f%b" || \
         print -P "%F{160}▓▒░ The clone has failed.%f%b"
 fi
@@ -41,7 +41,7 @@ zstyle ':completion:::::' completer _expand _complete _ignored _approximate # en
 
 # Two regular plugins loaded without tracking.
 zplugin light zsh-users/zsh-autosuggestions
-zplugin light zdharma/fast-syntax-highlighting
+zplugin light zdharma-continuum/fast-syntax-highlighting
 
 zplugin light zsh-users/zsh-history-substring-search
 zplugin light zsh-users/zsh-completions
@@ -54,7 +54,7 @@ zplugin light romkatv/powerlevel10k
 zplugin snippet https://github.com/sainnhe/dotfiles/raw/master/.zsh-theme-gruvbox-material-dark
 
 # Plugin history-search-multi-word loaded with tracking.
-zplugin load zdharma/history-search-multi-word
+zplugin load zdharma-continuum/history-search-multi-word
 
 # Load the pure theme, with zsh-async library that's bundled with it.
 zplugin ice pick"async.zsh" src"pure.zsh"
