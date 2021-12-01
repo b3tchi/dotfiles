@@ -8,6 +8,7 @@ let lspClient = 1 "1 for coc-nvim, 2 for deoplete (WIP), -1 non Lsp Client (TBD)
 let vimTheme = 2 "1 solarized8, 2 gruvbox
 
 " Identify Os and Actual Device - Who is coming home?
+let g:wsl = 0 "default wsl flag to 0
 if !exists("g:os")
   if has("win64") || has("win32") || has("win16")
     let g:os = "Windows"
@@ -22,10 +23,17 @@ if !exists("g:os")
         let g:os = substitute(system('uname -o'), '\n', '', '')
         " let g:os = system('uname -o')
       endif
+
+      " check if running linux in wsl
+      if system('$PATH')=~ '/mnt/c/WINDOWS'
+        let g:wsl = 1
+      endif
+
     endif
   endif
 endif
 
+""decide whot is vim model, 1 vim, pre-0.5 nvim, 0.5+ nvim
 function! VimMode()
   if has("nvim")
     let vimver = matchstr(execute('version'), 'NVIM v\zs[^\n]*')
@@ -295,6 +303,14 @@ let g:netrw_browse_split = 4
 let g:netrw_altv = 1
 let g:netrw_winsize = 25
 
+""cliboard for wsl
+if g:wsl == 1
+  augroup Yank
+    autocmd!
+    autocmd TextYankPost * :call system('/mnt/c/windows/system32/clip.exe ',@")
+  augroup END
+endif
+
 " augroup ProjectDrawer:
 "   autocmd!
 "   autocmd VimEnter * :Vexplore
@@ -481,11 +497,12 @@ if lspClient == 1
   nmap <a-cr>  <Plug>(coc-fix-current)
   " Use <C-d> for select selections ranges, needs server support, like: coc-tsserver, coc-python
   nmap <expr> <silent> <C-d> <SID>select_current_word()
+
   function! s:select_current_word()
-  if !get(g:, 'coc_cursors_activated', 0)
-    return "\<Plug>(coc-cursors-word)"
-  endif
-  return "*\<Plug>(coc-cursors-word):nohlsearch\<CR>"
+    if !get(g:, 'coc_cursors_activated', 0)
+      return "\<Plug>(coc-cursors-word)"
+    endif
+    return "*\<Plug>(coc-cursors-word):nohlsearch\<CR>"
   endfunc
 
   " Use `:Format` for format current buffer
@@ -709,7 +726,6 @@ elseif vimTheme == 2
   autocmd VimEnter,Colorscheme * :hi IndentGuidesEven  guibg=#232323 ctermbg=4
   " autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#3c3836 ctermbg=4
 endif
-
 
 "--- Indent Line ---
 " let g:indentLine_char               = "⎸"
