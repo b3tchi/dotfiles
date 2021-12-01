@@ -388,6 +388,24 @@ nnoremap <silent> <space>gf :G fetch<cr>
 nnoremap <silent> <space>gm :G merge<cr>
 nnoremap <silent> <space>gt :Flog -format=%>\|(65)\ %>(65)\ %<(40,trunc)%s\ %>\|(120%)%ad\ %an%d -date=short<cr>
 
+
+"dadbod UI
+let g:db_ui_disable_mappings = 1
+
+autocmd FileType sql nmap <buffer><silent><space>de <Plug>(DBUI_ExecuteQuery)
+autocmd FileType sql nmap <buffer><silent><space>dw <Plug>(DBUI_SaveQuery)
+
+autocmd FileType dbui nmap <buffer> <S-k> <Plug>(DBUI_GotoFirstSibling)
+autocmd FileType dbui nmap <buffer> <S-j> <Plug>(DBUI_GotoLastSibling)
+autocmd FileType dbui nmap <buffer> k <Plug>(DBUI_GotoPrevSibling)
+autocmd FileType dbui nmap <buffer> j <Plug>(DBUI_GotoNextSibling)
+
+nnoremap <space>dn :call DBUIToggle()<CR>
+" autocmd FileType dbui nmap <buffer> <C-k> <c-w>W
+" autocmd FileType dbui nmap <buffer> <C-j> <c-w>w
+
+" nnoremap <space>de ,S
+" autocmd FileType sql nmap <buffer> <space>de <Plug>(DBUI_ExecuteQuery)
 "tasks TBD
 nnoremap <silent> <space>tn :Trep<cr>
 
@@ -445,6 +463,7 @@ nnoremap <silent><space>0 :exe 10 . "wincmd w"<CR>
 " navigiting through windows with j and k
 nnoremap <C-k> <c-w>W
 nnoremap <C-j> <c-w>w
+
 
 function SwitchMainWindow()
   let l:current_buf = winbufnr(0)
