@@ -208,7 +208,7 @@ call plug#begin(expand('~/.vim/plugged'))
     Plug 'nvim-telescope/telescope-fzf-native.nvim', { 'do': 'make' }
 
     Plug 'simrat39/symbols-outline.nvim' "outlines
-
+    Plug 'nvim-orgmode/orgmode'
     ""completion
     Plug 'hrsh7th/nvim-cmp'
     Plug 'hrsh7th/cmp-nvim-lsp'
@@ -718,14 +718,16 @@ let g:startify_lists = [
 " let g:indent_guides_auto_colors = 0
 " let g:indent_guides_color_change_percent = 3 " for auto options left 5 percent only
 
-"color form solarized8
-if vimTheme == 1
-  autocmd VimEnter,Colorscheme * :hi IndentGuidesOdd  guibg=#002b36 ctermbg=3
-  autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#073642 ctermbg=4
-elseif vimTheme == 2
-  autocmd VimEnter,Colorscheme * :hi IndentGuidesOdd  guibg=#282828 ctermbg=3
-  autocmd VimEnter,Colorscheme * :hi IndentGuidesEven  guibg=#232323 ctermbg=4
-  " autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#3c3836 ctermbg=4
+if g:vimmode != 3
+  "color form solarized8
+  if vimTheme == 1
+    autocmd VimEnter,Colorscheme * :hi IndentGuidesOdd  guibg=#002b36 ctermbg=3
+    autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#073642 ctermbg=4
+  elseif vimTheme == 2
+    autocmd VimEnter,Colorscheme * :hi IndentGuidesOdd  guibg=#282828 ctermbg=3
+    autocmd VimEnter,Colorscheme * :hi IndentGuidesEven  guibg=#232323 ctermbg=4
+    " autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#3c3836 ctermbg=4
+  endif
 endif
 
 "--- Indent Line ---
