@@ -385,6 +385,7 @@ nnoremap <space>gc :G commit -m ''<left>
 nnoremap <silent> <space>gp :G pull<cr>
 nnoremap <silent> <space>gP :G push<cr>
 nnoremap <silent> <space>gf :G fetch<cr>
+nnoremap <silent> <space>gm :G merge<cr>
 nnoremap <silent> <space>gt :Flog -format=%>\|(65)\ %>(65)\ %<(40,trunc)%s\ %>\|(120%)%ad\ %an%d -date=short<cr>
 
 "tasks TBD
