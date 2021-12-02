@@ -9,4 +9,4 @@
 [merge]
 	tool = vimdiff
 # [credential]
-	# helper = /mnt/c/Program\\ Files/Git/mingw64/libexec/git-core/git-credential-manager.exe
+# helper = /mnt/c/Program\\ Files/Git/mingw64/libexec/git-core/git-credential-manager.exe
