@@ -400,7 +400,8 @@ autocmd FileType dbui nmap <buffer> <S-j> <Plug>(DBUI_GotoLastSibling)
 autocmd FileType dbui nmap <buffer> k <Plug>(DBUI_GotoPrevSibling)
 autocmd FileType dbui nmap <buffer> j <Plug>(DBUI_GotoNextSibling)
 
-nnoremap <space>dn :call DBUIToggle()<CR>
+nnoremap <space>dn :DBUIToggle<CR>
+
 " autocmd FileType dbui nmap <buffer> <C-k> <c-w>W
 " autocmd FileType dbui nmap <buffer> <C-j> <c-w>w
 
