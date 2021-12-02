@@ -204,7 +204,7 @@ alias tmuxs="systemd-run --scope --user tmux"
 
 ## Custom shortcuts
 alias ff="ggw ~/wiki/"
-
+alias qr='qrencode -m 2 -t utf8 <<< "$1"'
 ## Files
 alias -s azcli=nvim
 
