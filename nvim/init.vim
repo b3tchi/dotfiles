@@ -8,6 +8,7 @@ let lspClient = 1 "1 for coc-nvim, 2 for deoplete (WIP), -1 non Lsp Client (TBD)
 let vimTheme = 2 "1 solarized8, 2 gruvbox
 
 " Identify Os and Actual Device - Who is coming home?
+let g:wsl = 0 "default wsl flag to 0
 if !exists("g:os")
   if has("win64") || has("win32") || has("win16")
     let g:os = "Windows"
@@ -22,10 +23,17 @@ if !exists("g:os")
         let g:os = substitute(system('uname -o'), '\n', '', '')
         " let g:os = system('uname -o')
       endif
+
+      " check if running linux in wsl
+      if system('$PATH')=~ '/mnt/c/WINDOWS'
+        let g:wsl = 1
+      endif
+
     endif
   endif
 endif
 
+""decide whot is vim model, 1 vim, pre-0.5 nvim, 0.5+ nvim
 function! VimMode()
   if has("nvim")
     let vimver = matchstr(execute('version'), 'NVIM v\zs[^\n]*')
@@ -295,6 +303,14 @@ let g:netrw_browse_split = 4
 let g:netrw_altv = 1
 let g:netrw_winsize = 25
 
+""cliboard for wsl
+if g:wsl == 1
+  augroup Yank
+    autocmd!
+    autocmd TextYankPost * :call system('/mnt/c/windows/system32/clip.exe ',@")
+  augroup END
+endif
+
 " augroup ProjectDrawer:
 "   autocmd!
 "   autocmd VimEnter * :Vexplore
@@ -369,8 +385,27 @@ nnoremap <space>gc :G commit -m ''<left>
 nnoremap <silent> <space>gp :G pull<cr>
 nnoremap <silent> <space>gP :G push<cr>
 nnoremap <silent> <space>gf :G fetch<cr>
+nnoremap <silent> <space>gm :G merge<cr>
 nnoremap <silent> <space>gt :Flog -format=%>\|(65)\ %>(65)\ %<(40,trunc)%s\ %>\|(120%)%ad\ %an%d -date=short<cr>
 
+
+"dadbod UI
+let g:db_ui_disable_mappings = 1
+
+autocmd FileType sql nmap <buffer><silent><space>de <Plug>(DBUI_ExecuteQuery)
+autocmd FileType sql nmap <buffer><silent><space>dw <Plug>(DBUI_SaveQuery)
+
+autocmd FileType dbui nmap <buffer> <S-k> <Plug>(DBUI_GotoFirstSibling)
+autocmd FileType dbui nmap <buffer> <S-j> <Plug>(DBUI_GotoLastSibling)
+autocmd FileType dbui nmap <buffer> k <Plug>(DBUI_GotoPrevSibling)
+autocmd FileType dbui nmap <buffer> j <Plug>(DBUI_GotoNextSibling)
+
+nnoremap <space>dn :call DBUIToggle()<CR>
+" autocmd FileType dbui nmap <buffer> <C-k> <c-w>W
+" autocmd FileType dbui nmap <buffer> <C-j> <c-w>w
+
+" nnoremap <space>de ,S
+" autocmd FileType sql nmap <buffer> <space>de <Plug>(DBUI_ExecuteQuery)
 "tasks TBD
 nnoremap <silent> <space>tn :Trep<cr>
 
@@ -429,6 +464,7 @@ nnoremap <silent><space>0 :exe 10 . "wincmd w"<CR>
 nnoremap <C-k> <c-w>W
 nnoremap <C-j> <c-w>w
 
+
 function SwitchMainWindow()
   let l:current_buf = winbufnr(0)
   exe "buffer" . winbufnr(1)
@@ -481,11 +517,12 @@ if lspClient == 1
   nmap <a-cr>  <Plug>(coc-fix-current)
   " Use <C-d> for select selections ranges, needs server support, like: coc-tsserver, coc-python
   nmap <expr> <silent> <C-d> <SID>select_current_word()
+
   function! s:select_current_word()
-  if !get(g:, 'coc_cursors_activated', 0)
-    return "\<Plug>(coc-cursors-word)"
-  endif
-  return "*\<Plug>(coc-cursors-word):nohlsearch\<CR>"
+    if !get(g:, 'coc_cursors_activated', 0)
+      return "\<Plug>(coc-cursors-word)"
+    endif
+    return "*\<Plug>(coc-cursors-word):nohlsearch\<CR>"
   endfunc
 
   " Use `:Format` for format current buffer
