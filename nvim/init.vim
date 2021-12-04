@@ -504,6 +504,7 @@ nnoremap <space>ws <c-w>v
 nnoremap <space>wb <c-w>s
 nnoremap <space>wc <c-w>c
 nnoremap <space>wm :call SwitchMainWindow()<cr>
+nnoremap <space>wo :only<cr>
 
 "" indentation
 "nnoremap > >>_
