@@ -360,6 +360,9 @@ set fillchars=vert:┃ " for vsplits
 
 nnoremap <C-C> <C-[>
 
+call which_key#register('<Space>', "g:which_key_map")
+let g:which_key_map =  {}
+let g:which_key_map.b = '+some'
 
 " nnoremap <C-p> :GFiles<cr>
 " nnoremap <C-f> :Rg<cr>
@@ -379,28 +382,44 @@ function FuzzyFiles()
   endif
 endfunction
 
+
+let g:which_key_map.g ={'name':'+git'}
+let g:which_key_map.g.g = 'fugitive'
 nnoremap <silent> <space>gg :tab G<cr>
+let g:which_key_map.g.C = 'commit&push'
 nnoremap <space>gC :w \| :G commit -a -m '' \| :G push<left><left><left><left><left><left><left><left><left><left><left>
+let g:which_key_map.g.c = 'commit'
 nnoremap <space>gc :G commit -m ''<left>
+let g:which_key_map.g.p = 'pull'
 nnoremap <silent> <space>gp :G pull<cr>
+let g:which_key_map.g.P = 'push'
 nnoremap <silent> <space>gP :G push<cr>
+let g:which_key_map.g.f = 'fetch'
 nnoremap <silent> <space>gf :G fetch<cr>
+let g:which_key_map.g.m = 'merge'
 nnoremap <silent> <space>gm :G merge<cr>
-nnoremap <silent> <space>gt :Flog -format=%>\|(65)\ %>(65)\ %<(40,trunc)%s\ %>\|(120%)%ad\ %an%d -date=short<cr>
+let g:which_key_map.g.l = 'log'
+nnoremap <silent> <space>gl :Flog -format=%>\|(65)\ %>(65)\ %<(40,trunc)%s\ %>\|(120%)%ad\ %an%d -date=short<cr>
 
 
 "dadbod UI
 let g:db_ui_disable_mappings = 1
-
+let g:which_key_map.d ={'name':'+dadbod-ui'}
 autocmd FileType sql nmap <buffer><silent><space>de <Plug>(DBUI_ExecuteQuery)
+let g:which_key_map.d.e = 'execute query'
 autocmd FileType sql nmap <buffer><silent><space>dw <Plug>(DBUI_SaveQuery)
+let g:which_key_map.d.s = 'save query'
 
 autocmd FileType dbui nmap <buffer> <S-k> <Plug>(DBUI_GotoFirstSibling)
 autocmd FileType dbui nmap <buffer> <S-j> <Plug>(DBUI_GotoLastSibling)
 autocmd FileType dbui nmap <buffer> k <Plug>(DBUI_GotoPrevSibling)
 autocmd FileType dbui nmap <buffer> j <Plug>(DBUI_GotoNextSibling)
 
+
 nnoremap <space>dn :DBUIToggle<CR>
+let g:which_key_map.d.n = 'navpane'
+nnoremap <space>dh :help DBUI<CR>
+let g:which_key_map.d.h = 'help'
 
 " autocmd FileType dbui nmap <buffer> <C-k> <c-w>W
 " autocmd FileType dbui nmap <buffer> <C-j> <c-w>w
@@ -413,9 +432,16 @@ nnoremap <silent> <space>tn :Trep<cr>
 "Incubator.vim
 " nnoremap <silent>  k :call <SID>incubator.vim#ToggleOnTerminal('J', 6)<CR>
 
-nnoremap <silent> <space>up :PlugUpdate<cr>
-nnoremap <silent> <space>uc :CocUpdate<cr>
-nnoremap <space>uv :source ~/.config/nvim/init.vim<cr>
+let g:which_key_map.v ={'name':'+vim'}
+let g:which_key_map.v.p ={'name':'+plug'}
+nnoremap <silent> <space>vpu :PlugUpdate<cr>
+nnoremap <silent> <space>vpi :PlugStatus<cr>
+let g:which_key_map.v.c ={'name':'+coc'}
+nnoremap <silent> <space>vcu :CocUpdate<cr>
+let g:which_key_map.v.i ={'name':'+init.vim'}
+nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>
+let g:which_key_map.v.l ={'name':'+lsp'}
+nnoremap <silent> <space>vli :LspInstallInfo<cr>
 
 nnoremap <silent> <space>ss :SSave<cr>
 nnoremap <silent> <space>sd :SDelete<cr>
@@ -433,7 +459,7 @@ nnoremap <space>rr :%s/<C-r>"//gc<Left><Left><Left>
 noremap <F5> :ImportName<cr>:w<cr>:!isort %<cr>:e %<cr>
 noremap! <F5> <esc>:ImportName<cr>:w<cr>:!isort %<cr>:e %<cr>a
 
-"" various escapes insert mode
+""u various escapes insert mode
 inoremap jj <esc>
 cnoremap jj <c-c>
 tnoremap jj <C-\><C-n>
@@ -805,17 +831,18 @@ endif
 
 let g:vimwiki_markdown_link_ext = 1
 let g:vimwiki_list = wikis
-let g:vimwiki_listsyms = ' ~–x'
+let g:vimwiki_listsyms = ' –x'
 let g:vimwiki_listsym_rejected = 'x'
 let g:viswiki_folding = 'list'
 let g:vimwiki_key_mappings = { 'table_mappings': 0 } "! - to fix/change completion behavior
 
 " --- VimWhichKey ---
 set timeoutlen=500
-let g:which_key_map =  {}
+" moved before bindigs
+" let g:which_key_map =  {}
 " let g:which_key_use_floating_win = 1 "make as floating window
 " let g:which_key_run_map_on_popup = 1
-call which_key#register(' ', "g:which_key_map")
+" call which_key#register(' ', "g:which_key_map")
 
 " --- LUA LSP 0.5
 if g:vimmode == 3
