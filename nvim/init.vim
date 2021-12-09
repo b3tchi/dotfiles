@@ -402,8 +402,6 @@ let g:which_key_map.g.l = 'log'
 nnoremap <silent> <space>gl :Flog -format=%>\|(65)\ %>(65)\ %<(40,trunc)%s\ %>\|(120%)%ad\ %an%d -date=short<cr>
 
 
-<<<<<<< HEAD
-=======
 "dadbod UI
 let g:db_ui_disable_mappings = 1
 let g:which_key_map.d ={'name':'+dadbod-ui'}
@@ -422,7 +420,6 @@ nnoremap <space>dn :DBUIToggle<CR>
 let g:which_key_map.d.n = 'navpane'
 nnoremap <space>dh :help DBUI<CR>
 let g:which_key_map.d.h = 'help'
->>>>>>> refs/remotes/origin/master
 
 " autocmd FileType dbui nmap <buffer> <C-k> <c-w>W
 " autocmd FileType dbui nmap <buffer> <C-j> <c-w>w
