@@ -132,10 +132,17 @@ ggw () {
     cd "$1"
 
     # IFS=: read -ra selected < <(
-    rg --color=always --colors 'match:fg:white' --line-number --no-heading --smart-case "\S" |
-    fzf --ansi \
+    rg --color=always \
+        --colors 'match:fg:white' \
+        --line-number \
+        --no-heading \
+        --smart-case "\S" \
+    | fzf --ansi \
         --delimiter : \
-        --preview 'bat --style=plain,numbers --color=always {1} --highlight-line {2}' \
+        --preview 'bat \
+            --style=plain,numbers \
+            --color=always {1} \
+            --highlight-line {2}' \
         --preview-window 'up:50%:noborder:+{2}-3'
 
     ## rg flags
@@ -156,7 +163,6 @@ ggw () {
     #--color
     #=always -> display lines
 
-
     # rg --color=always --line-number --no-heading --smart-case "${*:-}" ~/wiki/ |
     # --color "hl:-1:underline,hl+:-1:underline:reverse" \
     # )
@@ -169,6 +175,28 @@ ggw () {
 
 }
 
+ggvh() {
+
+    cd ~
+
+    rg \
+        --column \
+        --hidden \
+        --line-number \
+        --no-heading \
+        --glob ".vim/plugged/*/doc/*.txt" \
+        --smart-case '(?:[*])(.*)(?:[*]$)' \
+        --only-matching \
+    | fzf --ansi \
+        --delimiter : \
+        --preview 'bat \
+            --style=plain,numbers \
+            --color=always {1} \
+            --highlight-line {2}' \
+        --preview-window 'up:50%:noborder:+{2}-3'
+
+    cd -
+}
 #neovim version 0.5 from appimage
 nvim-appi () {
     if [[ $# -eq 0 ]] ; then
@@ -204,6 +232,8 @@ alias tmuxs="systemd-run --scope --user tmux"
 
 ## Custom shortcuts
 alias ff="ggw ~/wiki/"
+alias fvh="ggvh"
+
 alias qr='qrencode -m 2 -t utf8 <<< "$1"'
 ## Files
 alias -s azcli=nvim
