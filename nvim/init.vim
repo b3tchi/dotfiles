@@ -371,8 +371,6 @@ nnoremap <silent> <space>b :Buffer<cr>
 nnoremap <silent> ; :Buffer<cr>
 nnoremap <silent> <space>e :call FuzzyFiles()<cr>
 nnoremap <silent> <space>W :Windows<cr>
-nnoremap <silent> <space>vk :Maps<cr>
-nnoremap <silent> <space>vh :Helptags<cr>
 
 function FuzzyFiles()
   if get(b:,'git_dir') == 0
@@ -433,15 +431,22 @@ nnoremap <silent> <space>tn :Trep<cr>
 " nnoremap <silent>  k :call <SID>incubator.vim#ToggleOnTerminal('J', 6)<CR>
 
 let g:which_key_map.v ={'name':'+vim'}
+nnoremap <silent> <space>vk :Maps<cr>
+nnoremap <silent> <space>vh :Helptags<cr>
+
 let g:which_key_map.v.p ={'name':'+plug'}
 nnoremap <silent> <space>vpu :PlugUpdate<cr>
 nnoremap <silent> <space>vpi :PlugStatus<cr>
+
 let g:which_key_map.v.c ={'name':'+coc'}
 nnoremap <silent> <space>vcu :CocUpdate<cr>
+
 let g:which_key_map.v.i ={'name':'+init.vim'}
 nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>
+
 let g:which_key_map.v.l ={'name':'+lsp'}
 nnoremap <silent> <space>vli :LspInstallInfo<cr>
+
 
 nnoremap <silent> <space>ss :SSave<cr>
 nnoremap <silent> <space>sd :SDelete<cr>
