@@ -232,7 +232,6 @@ if lspClient == 1
 endif
 
 source ~/.config/nvim/incubator.vim
-"End dein Scripts-------------------------
 
 let mapleader = "," " leader key is ,
 
@@ -274,6 +273,7 @@ if has('persistent_undo')
   set undoreload=10000
 endif
 set backupcopy=yes " for watchers set noswapfile
+set scrolloff=8
 
 "" Encoding
 set encoding=utf-8
