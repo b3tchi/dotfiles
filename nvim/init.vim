@@ -520,6 +520,8 @@ autocmd FileType sql nmap <buffer><silent><space>dw <Plug>(DBUI_SaveQuery)
 
 autocmd FileType dbui nmap <buffer> <S-k> <Plug>(DBUI_GotoFirstSibling)
 autocmd FileType dbui nmap <buffer> <S-j> <Plug>(DBUI_GotoLastSibling)
+autocmd FileType dbui nmap <buffer> k <up>
+autocmd FileType dbui nmap <buffer> j <down>
 " autocmd FileType dbui nmap <buffer> k <Plug>(DBUI_GotoPrevSibling)
 " autocmd FileType dbui nmap <buffer> j <Plug>(DBUI_GotoNextSibling)
 autocmd FileType dbui nmap <buffer> A <Plug>(DBUI_AddConnection)
