@@ -240,7 +240,6 @@ if lspClient == 1
 endif
 
 source ~/.config/nvim/incubator.vim
-"End dein Scripts-------------------------
 
 let mapleader = "," " leader key is ,
 
@@ -282,6 +281,7 @@ if has('persistent_undo')
   set undoreload=10000
 endif
 set backupcopy=yes " for watchers set noswapfile
+set scrolloff=8
 
 "" Encoding
 set encoding=utf-8
@@ -516,6 +516,31 @@ nnoremap <space>wo :only<cr>
 "nnoremap < <<_
 vnoremap < <gv
 vnoremap > >gv
+
+" --- DadBod UI ---
+let g:db_ui_disable_mappings = 1
+
+autocmd FileType sql nmap <buffer><silent><space>de <Plug>(DBUI_ExecuteQuery)
+autocmd FileType sql nmap <buffer><silent><space>dw <Plug>(DBUI_SaveQuery)
+
+autocmd FileType dbui nmap <buffer> <S-k> <Plug>(DBUI_GotoFirstSibling)
+autocmd FileType dbui nmap <buffer> <S-j> <Plug>(DBUI_GotoLastSibling)
+autocmd FileType dbui nmap <buffer> k <up>
+autocmd FileType dbui nmap <buffer> j <down>
+" autocmd FileType dbui nmap <buffer> k <Plug>(DBUI_GotoPrevSibling)
+" autocmd FileType dbui nmap <buffer> j <Plug>(DBUI_GotoNextSibling)
+autocmd FileType dbui nmap <buffer> A <Plug>(DBUI_AddConnection)
+autocmd FileType dbui nmap <buffer> r <Plug>(DBUI_RenameLine)
+autocmd FileType dbui nmap <buffer> h <Plug>(DBUI_GotoParentNode)
+autocmd FileType dbui nmap <buffer> o <Plug>(DBUI_SelectLine)
+autocmd FileType dbui nmap <buffer> l <Plug>(DBUI_GotoChildNode)
+
+nnoremap <space>dn :DBUIToggle<CR>
+
+" --- Better White Space
+let g:better_whitespace_filetypes_blacklist = [
+  \ 'dbout'
+  \ ]
 
 " --- Vim Wiki ---
 nnoremap <silent><space>Wt :VimwikiTable 1 2
