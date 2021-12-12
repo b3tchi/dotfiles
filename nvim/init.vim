@@ -8,6 +8,7 @@ let lspClient = 1 "1 for coc-nvim, 2 for deoplete (WIP), -1 non Lsp Client (TBD)
 let vimTheme = 2 "1 solarized8, 2 gruvbox
 
 " Identify Os and Actual Device - Who is coming home?
+let g:wsl = 0 "default wsl flag to 0
 if !exists("g:os")
   if has("win64") || has("win32") || has("win16")
     let g:os = "Windows"
@@ -22,10 +23,17 @@ if !exists("g:os")
         let g:os = substitute(system('uname -o'), '\n', '', '')
         " let g:os = system('uname -o')
       endif
+
+      " check if running linux in wsl
+      if system('$PATH')=~ '/mnt/c/WINDOWS'
+        let g:wsl = 1
+      endif
+
     endif
   endif
 endif
 
+""decide whot is vim model, 1 vim, pre-0.5 nvim, 0.5+ nvim
 function! VimMode()
   if has("nvim")
     let vimver = matchstr(execute('version'), 'NVIM v\zs[^\n]*')
@@ -200,7 +208,7 @@ call plug#begin(expand('~/.vim/plugged'))
     Plug 'nvim-telescope/telescope-fzf-native.nvim', { 'do': 'make' }
 
     Plug 'simrat39/symbols-outline.nvim' "outlines
-
+    Plug 'nvim-orgmode/orgmode'
     ""completion
     Plug 'hrsh7th/nvim-cmp'
     Plug 'hrsh7th/cmp-nvim-lsp'
@@ -295,6 +303,14 @@ let g:netrw_browse_split = 4
 let g:netrw_altv = 1
 let g:netrw_winsize = 25
 
+""cliboard for wsl
+if g:wsl == 1
+  augroup Yank
+    autocmd!
+    autocmd TextYankPost * :call system('/mnt/c/windows/system32/clip.exe ',@")
+  augroup END
+endif
+
 " augroup ProjectDrawer:
 "   autocmd!
 "   autocmd VimEnter * :Vexplore
@@ -344,6 +360,9 @@ set fillchars=vert:┃ " for vsplits
 
 nnoremap <C-C> <C-[>
 
+call which_key#register('<Space>', "g:which_key_map")
+let g:which_key_map =  {}
+let g:which_key_map.b = '+some'
 
 " nnoremap <C-p> :GFiles<cr>
 " nnoremap <C-f> :Rg<cr>
@@ -363,23 +382,66 @@ function FuzzyFiles()
   endif
 endfunction
 
-nnoremap <silent> <space>gg :tab G<cr>
-nnoremap <space>gC :w \| :G commit -a -m '' \| :G push<left><left><left><left><left><left><left><left><left><left><left>
-nnoremap <space>gc :G commit -m ''<left>
-nnoremap <silent> <space>gp :G pull<cr>
-nnoremap <silent> <space>gP :G push<cr>
-nnoremap <silent> <space>gf :G fetch<cr>
-nnoremap <silent> <space>gt :Flog -format=%>\|(65)\ %>(65)\ %<(40,trunc)%s\ %>\|(120%)%ad\ %an%d -date=short<cr>
 
+let g:which_key_map.g ={'name':'+git'}
+let g:which_key_map.g.g = 'fugitive'
+nnoremap <silent> <space>gg :tab G<cr>
+let g:which_key_map.g.C = 'commit&push'
+nnoremap <space>gC :w \| :G commit -a -m '' \| :G push<left><left><left><left><left><left><left><left><left><left><left>
+let g:which_key_map.g.c = 'commit'
+nnoremap <space>gc :G commit -m ''<left>
+let g:which_key_map.g.p = 'pull'
+nnoremap <silent> <space>gp :G pull<cr>
+let g:which_key_map.g.P = 'push'
+nnoremap <silent> <space>gP :G push<cr>
+let g:which_key_map.g.f = 'fetch'
+nnoremap <silent> <space>gf :G fetch<cr>
+let g:which_key_map.g.m = 'merge'
+nnoremap <silent> <space>gm :G merge<cr>
+let g:which_key_map.g.l = 'log'
+nnoremap <silent> <space>gl :Flog -format=%>\|(65)\ %>(65)\ %<(40,trunc)%s\ %>\|(120%)%ad\ %an%d -date=short<cr>
+
+
+"dadbod UI
+let g:db_ui_disable_mappings = 1
+let g:which_key_map.d ={'name':'+dadbod-ui'}
+autocmd FileType sql nmap <buffer><silent><space>de <Plug>(DBUI_ExecuteQuery)
+let g:which_key_map.d.e = 'execute query'
+autocmd FileType sql nmap <buffer><silent><space>dw <Plug>(DBUI_SaveQuery)
+let g:which_key_map.d.s = 'save query'
+
+autocmd FileType dbui nmap <buffer> <S-k> <Plug>(DBUI_GotoFirstSibling)
+autocmd FileType dbui nmap <buffer> <S-j> <Plug>(DBUI_GotoLastSibling)
+autocmd FileType dbui nmap <buffer> k <Plug>(DBUI_GotoPrevSibling)
+autocmd FileType dbui nmap <buffer> j <Plug>(DBUI_GotoNextSibling)
+
+
+nnoremap <space>dn :DBUIToggle<CR>
+let g:which_key_map.d.n = 'navpane'
+nnoremap <space>dh :help DBUI<CR>
+let g:which_key_map.d.h = 'help'
+
+" autocmd FileType dbui nmap <buffer> <C-k> <c-w>W
+" autocmd FileType dbui nmap <buffer> <C-j> <c-w>w
+
+" nnoremap <space>de ,S
+" autocmd FileType sql nmap <buffer> <space>de <Plug>(DBUI_ExecuteQuery)
 "tasks TBD
 nnoremap <silent> <space>tn :Trep<cr>
 
 "Incubator.vim
 " nnoremap <silent>  k :call <SID>incubator.vim#ToggleOnTerminal('J', 6)<CR>
 
-nnoremap <silent> <space>up :PlugUpdate<cr>
-nnoremap <silent> <space>uc :CocUpdate<cr>
-nnoremap <space>uv :source ~/.config/nvim/init.vim<cr>
+let g:which_key_map.v ={'name':'+vim'}
+let g:which_key_map.v.p ={'name':'+plug'}
+nnoremap <silent> <space>vpu :PlugUpdate<cr>
+nnoremap <silent> <space>vpi :PlugStatus<cr>
+let g:which_key_map.v.c ={'name':'+coc'}
+nnoremap <silent> <space>vcu :CocUpdate<cr>
+let g:which_key_map.v.i ={'name':'+init.vim'}
+nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>
+let g:which_key_map.v.l ={'name':'+lsp'}
+nnoremap <silent> <space>vli :LspInstallInfo<cr>
 
 nnoremap <silent> <space>ss :SSave<cr>
 nnoremap <silent> <space>sd :SDelete<cr>
@@ -397,7 +459,7 @@ nnoremap <space>rr :%s/<C-r>"//gc<Left><Left><Left>
 noremap <F5> :ImportName<cr>:w<cr>:!isort %<cr>:e %<cr>
 noremap! <F5> <esc>:ImportName<cr>:w<cr>:!isort %<cr>:e %<cr>a
 
-"" various escapes insert mode
+""u various escapes insert mode
 inoremap jj <esc>
 cnoremap jj <c-c>
 tnoremap jj <C-\><C-n>
@@ -429,6 +491,7 @@ nnoremap <silent><space>0 :exe 10 . "wincmd w"<CR>
 nnoremap <C-k> <c-w>W
 nnoremap <C-j> <c-w>w
 
+
 function SwitchMainWindow()
   let l:current_buf = winbufnr(0)
   exe "buffer" . winbufnr(1)
@@ -441,12 +504,36 @@ nnoremap <space>ws <c-w>v
 nnoremap <space>wb <c-w>s
 nnoremap <space>wc <c-w>c
 nnoremap <space>wm :call SwitchMainWindow()<cr>
+nnoremap <space>wo :only<cr>
 
 "" indentation
 "nnoremap > >>_
 "nnoremap < <<_
 vnoremap < <gv
 vnoremap > >gv
+
+" --- DadBod UI ---
+let g:db_ui_disable_mappings = 1
+
+autocmd FileType sql nmap <buffer><silent><space>de <Plug>(DBUI_ExecuteQuery)
+autocmd FileType sql nmap <buffer><silent><space>dw <Plug>(DBUI_SaveQuery)
+
+autocmd FileType dbui nmap <buffer> <S-k> <Plug>(DBUI_GotoFirstSibling)
+autocmd FileType dbui nmap <buffer> <S-j> <Plug>(DBUI_GotoLastSibling)
+" autocmd FileType dbui nmap <buffer> k <Plug>(DBUI_GotoPrevSibling)
+" autocmd FileType dbui nmap <buffer> j <Plug>(DBUI_GotoNextSibling)
+autocmd FileType dbui nmap <buffer> A <Plug>(DBUI_AddConnection)
+autocmd FileType dbui nmap <buffer> r <Plug>(DBUI_RenameLine)
+autocmd FileType dbui nmap <buffer> h <Plug>(DBUI_GotoParentNode)
+autocmd FileType dbui nmap <buffer> o <Plug>(DBUI_SelectLine)
+autocmd FileType dbui nmap <buffer> l <Plug>(DBUI_GotoChildNode)
+
+nnoremap <space>dn :DBUIToggle<CR>
+
+" --- Better White Space
+let g:better_whitespace_filetypes_blacklist = [
+  \ 'dbout'
+  \ ]
 
 " --- Vim Wiki ---
 nnoremap <silent><space>Wt :VimwikiTable 1 2
@@ -481,11 +568,12 @@ if lspClient == 1
   nmap <a-cr>  <Plug>(coc-fix-current)
   " Use <C-d> for select selections ranges, needs server support, like: coc-tsserver, coc-python
   nmap <expr> <silent> <C-d> <SID>select_current_word()
+
   function! s:select_current_word()
-  if !get(g:, 'coc_cursors_activated', 0)
-    return "\<Plug>(coc-cursors-word)"
-  endif
-  return "*\<Plug>(coc-cursors-word):nohlsearch\<CR>"
+    if !get(g:, 'coc_cursors_activated', 0)
+      return "\<Plug>(coc-cursors-word)"
+    endif
+    return "*\<Plug>(coc-cursors-word):nohlsearch\<CR>"
   endfunc
 
   " Use `:Format` for format current buffer
@@ -700,16 +788,17 @@ let g:startify_lists = [
 " let g:indent_guides_auto_colors = 0
 " let g:indent_guides_color_change_percent = 3 " for auto options left 5 percent only
 
-"color form solarized8
-if vimTheme == 1
-  autocmd VimEnter,Colorscheme * :hi IndentGuidesOdd  guibg=#002b36 ctermbg=3
-  autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#073642 ctermbg=4
-elseif vimTheme == 2
-  autocmd VimEnter,Colorscheme * :hi IndentGuidesOdd  guibg=#282828 ctermbg=3
-  autocmd VimEnter,Colorscheme * :hi IndentGuidesEven  guibg=#232323 ctermbg=4
-  " autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#3c3836 ctermbg=4
+if g:vimmode != 3
+  "color form solarized8
+  if vimTheme == 1
+    autocmd VimEnter,Colorscheme * :hi IndentGuidesOdd  guibg=#002b36 ctermbg=3
+    autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#073642 ctermbg=4
+  elseif vimTheme == 2
+    autocmd VimEnter,Colorscheme * :hi IndentGuidesOdd  guibg=#282828 ctermbg=3
+    autocmd VimEnter,Colorscheme * :hi IndentGuidesEven  guibg=#232323 ctermbg=4
+    " autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#3c3836 ctermbg=4
+  endif
 endif
-
 
 "--- Indent Line ---
 " let g:indentLine_char               = "⎸"
@@ -766,17 +855,18 @@ endif
 
 let g:vimwiki_markdown_link_ext = 1
 let g:vimwiki_list = wikis
-let g:vimwiki_listsyms = ' ~–x'
+let g:vimwiki_listsyms = ' –x'
 let g:vimwiki_listsym_rejected = 'x'
 let g:viswiki_folding = 'list'
 let g:vimwiki_key_mappings = { 'table_mappings': 0 } "! - to fix/change completion behavior
 
 " --- VimWhichKey ---
 set timeoutlen=500
-let g:which_key_map =  {}
+" moved before bindigs
+" let g:which_key_map =  {}
 " let g:which_key_use_floating_win = 1 "make as floating window
 " let g:which_key_run_map_on_popup = 1
-call which_key#register(' ', "g:which_key_map")
+" call which_key#register(' ', "g:which_key_map")
 
 " --- LUA LSP 0.5
 if g:vimmode == 3
