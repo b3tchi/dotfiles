@@ -710,7 +710,7 @@ function! PreviewIfWide2()
 endfunction
 
 command! -bang -nargs=? -complete=dir FzfFiles
-  \ call fzf#vim#files(<q-args>, PreviewIfWide2()), <bang>0)
+  \ call fzf#vim#files(<q-args>, PreviewIfWide2(), <bang>0)
 
 " Shouldn't be needed https://medium.com/@sidneyliebrand/how-fzf-and-ripgrep-improved-my-workflow-61c7ca212861
 " command! -bang -nargs=* Rg
@@ -739,6 +739,12 @@ command! -bang -nargs=? -complete=dir GFiles
   \   <q-args>,
   \   fzf#vim#with_preview(),
   \   <bang>0)
+
+command! -bang -nargs=* Hx
+  \ call fzf#vim#grep(
+  \   'rg --column --line-number --no-heading --color=always --glob '**/doc/**.txt' --smart-case , 1,
+  \   PreviewIfWide2(), <bang>0)
+
 
 function! OpenFloatingWin()
   let width = min([&columns - 4, max([80, &columns - 20])])

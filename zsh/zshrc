@@ -184,9 +184,10 @@ ggvh() {
         --hidden \
         --line-number \
         --no-heading \
-        --glob ".vim/plugged/*/doc/*.txt" \
+        --glob '.vim/plugged/*/doc/*.txt' \
         --smart-case '(?:[*])(.*)(?:[*]$)' \
         --only-matching \
+        '.vim/plugged/' \
     | fzf --ansi \
         --delimiter : \
         --preview 'bat \
@@ -197,22 +198,15 @@ ggvh() {
 
     cd -
 }
-#neovim version 0.5 from appimage
-nvim-appi () {
-    if [[ $# -eq 0 ]] ; then
-        ~/Applications/nvim.appimage
-    else
-        ~/Applications/nvim.appimage "${*:-}"
-    fi
-}
 
 ### Aliases
 ## Shortcuts
 
 ## Conditional Shortcuts
 if [[ $IS_LINUX -eq 1 ]]; then
-    alias vi="nvim-appi"
-    alias nvim="nvim-appi"
+    #neovim version 0.5 from appimage
+    alias vi="~/Applications/nvim.appimage"
+    alias nvim="~/Applications/nvim.appimage"
 
     alias fd="fdfind" #
     alias python="python3"
