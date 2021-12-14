@@ -205,8 +205,8 @@ ggvh() {
 ## Conditional Shortcuts
 if [[ $IS_LINUX -eq 1 ]]; then
     #neovim version 0.5 from appimage
-    alias vi="~/Applications/nvim.appimage"
-    alias nvim="~/Applications/nvim.appimage"
+    alias vi="~/Applications/neovim/squashfs-root/AppRun"
+    alias nvim="~/Applications/neovim/squashfs-root/AppRun"
 
     alias fd="fdfind" #
     alias python="python3"

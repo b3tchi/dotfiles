@@ -410,8 +410,8 @@ let g:which_key_map.d.s = 'save query'
 
 autocmd FileType dbui nmap <buffer> <S-k> <Plug>(DBUI_GotoFirstSibling)
 autocmd FileType dbui nmap <buffer> <S-j> <Plug>(DBUI_GotoLastSibling)
-autocmd FileType dbui nmap <buffer> k <Plug>(DBUI_GotoPrevSibling)
-autocmd FileType dbui nmap <buffer> j <Plug>(DBUI_GotoNextSibling)
+" autocmd FileType dbui nmap <buffer> k <Plug>(DBUI_GotoPrevSibling)
+" autocmd FileType dbui nmap <buffer> j <Plug>(DBUI_GotoNextSibling)
 
 
 nnoremap <space>dn :DBUIToggle<CR>
@@ -742,9 +742,9 @@ command! -bang -nargs=? -complete=dir GFiles
 
 command! -bang -nargs=* Hx
   \ call fzf#vim#grep(
-  \   'rg --column --line-number --no-heading --color=always --glob '**/doc/**.txt' --smart-case , 1,
-  \   PreviewIfWide2(), <bang>0)
-
+  \   'rg --column --line-number --hidden --no-heading --color=always --glob "**/plugged/**/doc/**.txt" --smart-case "(?:^.*[*])(.*)(?:[*]$)" "/home/jan/" ', 1,
+  \   PreviewIfWide2(),
+  \   <bang>0)
 
 function! OpenFloatingWin()
   let width = min([&columns - 4, max([80, &columns - 20])])
