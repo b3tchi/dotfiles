@@ -177,17 +177,18 @@ ggw () {
 
 ggvh() {
 
-    cd ~
+    # cd ~
 
     rg \
         --column \
         --hidden \
         --line-number \
         --no-heading \
-        --glob '.vim/plugged/*/doc/*.txt' \
-        --smart-case '(?:[*])(.*)(?:[*]$)' \
         --only-matching \
-        '.vim/plugged/' \
+        --glob '**/doc/**.txt' \
+        --smart-case '(?:[*])(.*)(?:[*]$)' \
+        "/$HOME/.vim/plugged" \
+        "/$HOME/Applications/neovim/squashfs-root/usr/share/nvim" \
     | fzf --ansi \
         --delimiter : \
         --preview 'bat \
@@ -196,7 +197,7 @@ ggvh() {
             --highlight-line {2}' \
         --preview-window 'up:50%:noborder:+{2}-3'
 
-    cd -
+    # cd -
 }
 
 ### Aliases
