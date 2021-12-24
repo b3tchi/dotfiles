@@ -493,9 +493,13 @@ nnoremap <silent><space>9 :exe 9 . "wincmd w"<CR>
 nnoremap <silent><space>0 :exe 10 . "wincmd w"<CR>
 
 " navigiting through windows with j and k
-nnoremap <C-k> <c-w>W
-nnoremap <C-j> <c-w>w
+nnoremap <C-j> <c-w>j
+nnoremap <C-k> <c-w>k
+nnoremap <C-h> <c-w>h
+nnoremap <C-l> <c-w>l
 
+" nnoremap <C-k> <c-w>W
+" nnoremap <C-j> <c-w>w
 
 function SwitchMainWindow()
   let l:current_buf = winbufnr(0)
