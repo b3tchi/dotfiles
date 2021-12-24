@@ -240,7 +240,6 @@ if lspClient == 1
 endif
 
 source ~/.config/nvim/incubator.vim
-"End dein Scripts-------------------------
 
 let mapleader = "," " leader key is ,
 
@@ -282,6 +281,7 @@ if has('persistent_undo')
   set undoreload=10000
 endif
 set backupcopy=yes " for watchers set noswapfile
+set scrolloff=8
 
 "" Encoding
 set encoding=utf-8
@@ -371,8 +371,6 @@ nnoremap <silent> <space>b :Buffer<cr>
 nnoremap <silent> ; :Buffer<cr>
 nnoremap <silent> <space>e :call FuzzyFiles()<cr>
 nnoremap <silent> <space>W :Windows<cr>
-nnoremap <silent> <space>vk :Maps<cr>
-nnoremap <silent> <space>vh :Helptags<cr>
 
 function FuzzyFiles()
   if get(b:,'git_dir') == 0
@@ -412,8 +410,8 @@ let g:which_key_map.d.s = 'save query'
 
 autocmd FileType dbui nmap <buffer> <S-k> <Plug>(DBUI_GotoFirstSibling)
 autocmd FileType dbui nmap <buffer> <S-j> <Plug>(DBUI_GotoLastSibling)
-autocmd FileType dbui nmap <buffer> k <Plug>(DBUI_GotoPrevSibling)
-autocmd FileType dbui nmap <buffer> j <Plug>(DBUI_GotoNextSibling)
+" autocmd FileType dbui nmap <buffer> k <Plug>(DBUI_GotoPrevSibling)
+" autocmd FileType dbui nmap <buffer> j <Plug>(DBUI_GotoNextSibling)
 
 
 nnoremap <space>dn :DBUIToggle<CR>
@@ -433,15 +431,22 @@ nnoremap <silent> <space>tn :Trep<cr>
 " nnoremap <silent>  k :call <SID>incubator.vim#ToggleOnTerminal('J', 6)<CR>
 
 let g:which_key_map.v ={'name':'+vim'}
+nnoremap <silent> <space>vk :Maps<cr>
+nnoremap <silent> <space>vh :Helptags<cr>
+
 let g:which_key_map.v.p ={'name':'+plug'}
 nnoremap <silent> <space>vpu :PlugUpdate<cr>
 nnoremap <silent> <space>vpi :PlugStatus<cr>
+
 let g:which_key_map.v.c ={'name':'+coc'}
 nnoremap <silent> <space>vcu :CocUpdate<cr>
+
 let g:which_key_map.v.i ={'name':'+init.vim'}
 nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>
+
 let g:which_key_map.v.l ={'name':'+lsp'}
 nnoremap <silent> <space>vli :LspInstallInfo<cr>
+
 
 nnoremap <silent> <space>ss :SSave<cr>
 nnoremap <silent> <space>sd :SDelete<cr>
@@ -520,6 +525,8 @@ autocmd FileType sql nmap <buffer><silent><space>dw <Plug>(DBUI_SaveQuery)
 
 autocmd FileType dbui nmap <buffer> <S-k> <Plug>(DBUI_GotoFirstSibling)
 autocmd FileType dbui nmap <buffer> <S-j> <Plug>(DBUI_GotoLastSibling)
+autocmd FileType dbui nmap <buffer> k <up>
+autocmd FileType dbui nmap <buffer> j <down>
 " autocmd FileType dbui nmap <buffer> k <Plug>(DBUI_GotoPrevSibling)
 " autocmd FileType dbui nmap <buffer> j <Plug>(DBUI_GotoNextSibling)
 autocmd FileType dbui nmap <buffer> A <Plug>(DBUI_AddConnection)
@@ -703,7 +710,7 @@ function! PreviewIfWide2()
 endfunction
 
 command! -bang -nargs=? -complete=dir FzfFiles
-  \ call fzf#vim#files(<q-args>, PreviewIfWide2()), <bang>0)
+  \ call fzf#vim#files(<q-args>, PreviewIfWide2(), <bang>0)
 
 " Shouldn't be needed https://medium.com/@sidneyliebrand/how-fzf-and-ripgrep-improved-my-workflow-61c7ca212861
 " command! -bang -nargs=* Rg
@@ -731,6 +738,12 @@ command! -bang -nargs=? -complete=dir GFiles
   \ call fzf#vim#gitfiles(
   \   <q-args>,
   \   fzf#vim#with_preview(),
+  \   <bang>0)
+
+command! -bang -nargs=* Hx
+  \ call fzf#vim#grep(
+  \   'rg --column --line-number --hidden --no-heading --color=always --glob "**/plugged/**/doc/**.txt" --smart-case "(?:^.*[*])(.*)(?:[*]$)" "/home/jan/" ', 1,
+  \   PreviewIfWide2(),
   \   <bang>0)
 
 function! OpenFloatingWin()
