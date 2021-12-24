@@ -189,12 +189,15 @@ ggvh() {
         --smart-case '(?:[*])(.*)(?:[*]$)' \
         "/$HOME/.vim/plugged" \
         "/$HOME/Applications/neovim/squashfs-root/usr/share/nvim" \
-    | fzf --ansi \
+    | fzf \
+        --ansi \
         --delimiter : \
         --preview 'bat \
             --style=plain,numbers \
+            --file-name {O} \
             --color=always {1} \
-            --highlight-line {2}' \
+            --highlight-line {2} \
+            ' \
         --preview-window 'up:50%:noborder:+{2}-3'
 
     # cd -
