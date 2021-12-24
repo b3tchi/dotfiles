@@ -172,6 +172,9 @@ call plug#begin(expand('~/.vim/plugged'))
 
   "Window management SuckLess
   Plug 'fabi1cazenave/suckless.vim'
+  "Tmux
+  Plug 'christoomey/vim-tmux-navigator'
+  Plug 'christoomey/vim-tmux-runner'
 
   "syntax highlighting
   Plug 'sheerun/vim-polyglot'
