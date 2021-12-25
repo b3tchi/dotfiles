@@ -44,6 +44,8 @@ ml $d bat.conf ~/.config/bat/ config
 ml $d zsh/zshrc ~/ .zshrc
 ml $d zsh/p10k.zsh ~/ .p10k.zsh
 
+#bin
+ml $d bin/tat ~/.local/bin/
 # nnn tbd
 
 #fish
