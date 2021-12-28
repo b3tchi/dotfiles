@@ -1,0 +1,22 @@
+#!/bin/sh
+#
+# Attach or create tmux session named the same as current directory.
+
+    cd ~/wiki/
+    # cd "$1"
+
+    # IFS=: read -ra selected < <(
+    rg --color=always \
+        --colors 'match:fg:white' \
+        --line-number \
+        --no-heading \
+        --smart-case "\S" \
+    | fzf --ansi \
+        --delimiter : \
+        --preview 'bat \
+            --style=plain,numbers \
+            --color=always {1} \
+            --highlight-line {2}' \
+        --preview-window 'up:50%:noborder:+{2}-3'
+
+    cd -

@@ -126,54 +126,54 @@ n () {
     fi
 }
 
-ggw () {
-
-    # cd ~/wiki/
-    cd "$1"
-
-    # IFS=: read -ra selected < <(
-    rg --color=always \
-        --colors 'match:fg:white' \
-        --line-number \
-        --no-heading \
-        --smart-case "\S" \
-    | fzf --ansi \
-        --delimiter : \
-        --preview 'bat \
-            --style=plain,numbers \
-            --color=always {1} \
-            --highlight-line {2}' \
-        --preview-window 'up:50%:noborder:+{2}-3'
-
-    ## rg flags
-    #--colors
-    #=always -> general coloring
-    #--colors -> more granular color detailsO
-    #='match:fx:white' -> specify foregroud color of hilighted text
-
-    #--line-number -> display line numbers
-    #--no-heading -> dont display header vith file names
-    #--smart-case -> be case sensitive only when combine lower and upper case
-
-    ## bat flags
-    #--style general styling
-    #=plain -> show only textfiles
-    #=numbers -> display line nmunbers
-
-    #--color
-    #=always -> display lines
-
-    # rg --color=always --line-number --no-heading --smart-case "${*:-}" ~/wiki/ |
-    # --color "hl:-1:underline,hl+:-1:underline:reverse" \
-    # )
-
-    #return back last folder
-    cd -
-
-    #what to do with return items
-    # [ -n "${selected[0]}" ] && vim "${selected[0]}" "+${selected[1]}"
-
-}
+# ggw () {
+#
+#     # cd ~/wiki/
+#     cd "$1"
+#
+#     # IFS=: read -ra selected < <(
+#     rg --color=always \
+#         --colors 'match:fg:white' \
+#         --line-number \
+#         --no-heading \
+#         --smart-case "\S" \
+#     | fzf --ansi \
+#         --delimiter : \
+#         --preview 'bat \
+#             --style=plain,numbers \
+#             --color=always {1} \
+#             --highlight-line {2}' \
+#         --preview-window 'up:50%:noborder:+{2}-3'
+#
+#     ## rg flags
+#     #--colors
+#     #=always -> general coloring
+#     #--colors -> more granular color detailsO
+#     #='match:fx:white' -> specify foregroud color of hilighted text
+#
+#     #--line-number -> display line numbers
+#     #--no-heading -> dont display header vith file names
+#     #--smart-case -> be case sensitive only when combine lower and upper case
+#
+#     ## bat flags
+#     #--style general styling
+#     #=plain -> show only textfiles
+#     #=numbers -> display line nmunbers
+#
+#     #--color
+#     #=always -> display lines
+#
+#     # rg --color=always --line-number --no-heading --smart-case "${*:-}" ~/wiki/ |
+#     # --color "hl:-1:underline,hl+:-1:underline:reverse" \
+#     # )
+#
+#     #return back last folder
+#     cd -
+#
+#     #what to do with return items
+#     # [ -n "${selected[0]}" ] && vim "${selected[0]}" "+${selected[1]}"
+#
+# }
 
 ggvh() {
 
@@ -220,6 +220,12 @@ if [[ $IS_ANDROID -eq 1 ]]; then
     alias vi="nvim"
 fi
 
+#disable CTRL+S for terminal use is as prefix in TMUX
+# if [[ -t 0 && $- = *i* ]]
+# then
+stty -ixon
+# fi
+
 ## Nvim Shortcuts
 alias dotfiles="nvim -c ':SLoad dotfiles'"
 alias mwiki="nvim -c ':SLoad wiki'"
@@ -229,7 +235,7 @@ alias scripts="nvim -c ':SLoad scripts'"
 alias tmuxs="systemd-run --scope --user tmux"
 
 ## Custom shortcuts
-alias ff="ggw ~/wiki/"
+# alias ff="ggw ~/wiki/"
 alias fvh="ggvh"
 
 alias qr='qrencode -m 2 -t utf8 <<< "$1"'
