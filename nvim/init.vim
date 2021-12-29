@@ -173,7 +173,6 @@ call plug#begin(expand('~/.vim/plugged'))
   "Window management SuckLess
   Plug 'fabi1cazenave/suckless.vim'
   "Tmux
-  Plug 'christoomey/vim-tmux-navigator'
   Plug 'christoomey/vim-tmux-runner'
 
   "syntax highlighting
@@ -443,12 +442,23 @@ nnoremap <silent> <space>vpi :PlugStatus<cr>
 
 let g:which_key_map.v.c ={'name':'+coc'}
 nnoremap <silent> <space>vcu :CocUpdate<cr>
+nnoremap <silent> <space>cR :VtrFlushCommand<cr>
+nnoremap <silent> <space>ck :VtrKillRunner<cr>
 
 let g:which_key_map.v.i ={'name':'+init.vim'}
 nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>
+function! VimuxSlime()
+  call VimuxRunCommand(@v)
+  " call VimuxRunCommand(@v, 0)
+  echom @v
+  " echom "some"
+ endfunction
 
 let g:which_key_map.v.l ={'name':'+lsp'}
 nnoremap <silent> <space>vli :LspInstallInfo<cr>
+ " If text is selected, save it in the v buffer and send that buffer it to tmux
+vmap <leader>vs "vy :call VimuxSlime()<CR>
+nnoremap <space>cr vip "vy :call VimuxSlime()<CR>
 
 
 nnoremap <silent> <space>ss :SSave<cr>
@@ -598,7 +608,7 @@ if lspClient == 1
   "TBR Vista succed by fzf-coc
   " nmap <silent>  o :<cr>
 
-  nnoremap <silent> <space>c :<C-u>CocFzfList commands<cr>
+  nnoremap <silent> <space>vfc :<C-u>CocFzfList commands<cr>
   nnoremap <silent> <space>a :<C-u>CocFzfList diagnostics<cr>
   nnoremap <silent> <space>E :CocCommand explorer<cr>
   nnoremap <silent> <space>o :<C-u>CocFzfList outline<cr>
