@@ -174,6 +174,7 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'fabi1cazenave/suckless.vim'
   "Tmux
   Plug 'christoomey/vim-tmux-runner'
+  Plug 'preservim/vimux'
 
   "syntax highlighting
   Plug 'sheerun/vim-polyglot'
@@ -442,23 +443,32 @@ nnoremap <silent> <space>vpi :PlugStatus<cr>
 
 let g:which_key_map.v.c ={'name':'+coc'}
 nnoremap <silent> <space>vcu :CocUpdate<cr>
-nnoremap <silent> <space>cR :VtrFlushCommand<cr>
-nnoremap <silent> <space>ck :VtrKillRunner<cr>
 
 let g:which_key_map.v.i ={'name':'+init.vim'}
 nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>
+
+let g:which_key_map.c ={'name':'+console'}
+
 function! VimuxSlime()
-  call VimuxRunCommand(@v)
-  " call VimuxRunCommand(@v, 0)
+  " call VimuxRunCommand(@v)
+  call VimuxRunCommand(@v, 0)
   echom @v
   " echom "some"
  endfunction
 
+nnoremap <silent> <space>co :VimuxOpenRunner<cr>
+nnoremap <silent> <space>cq :VimuxCloseRunner<cr>
+nnoremap <silent> <space>cl :VimuxRunLastCommand<cr>
+nnoremap <silent> <space>cx :VimuxInteruptRunner<cr>
+nnoremap <silent> <space>ci :VimuxInspectRunner<CR>
+nnoremap <silent> <space>cp :VimuxPromptCommand<CR>
+nnoremap <silent> <space>cr vip "vy :call VimuxSlime()<CR>
+
+vmap <space>cr "vy :call VimuxSlime()<CR>
+
 let g:which_key_map.v.l ={'name':'+lsp'}
 nnoremap <silent> <space>vli :LspInstallInfo<cr>
  " If text is selected, save it in the v buffer and send that buffer it to tmux
-vmap <leader>vs "vy :call VimuxSlime()<CR>
-nnoremap <space>cr vip "vy :call VimuxSlime()<CR>
 
 
 nnoremap <silent> <space>ss :SSave<cr>
