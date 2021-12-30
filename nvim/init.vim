@@ -435,7 +435,8 @@ nnoremap <silent> <space>tn :Trep<cr>
 
 let g:which_key_map.v ={'name':'+vim'}
 nnoremap <silent> <space>vk :Maps<cr>
-nnoremap <silent> <space>vh :Helptags<cr>
+let g:which_key_map.v.h ={'name':'+help'}
+nnoremap <silent> <space>vhf :Helptags<cr>
 
 let g:which_key_map.v.p ={'name':'+plug'}
 nnoremap <silent> <space>vpu :PlugUpdate<cr>
@@ -456,6 +457,13 @@ function! VimuxSlime()
   " echom "some"
  endfunction
 
+function! VimuxMdBlock()
+ let mdblock = Markdown_eval()
+
+ let lines = join(mdblock.code, "\n") . "\n"
+ call VimuxRunCommand(lines)
+endfunction
+
 function! Markdown_eval()
   let view = winsaveview()
   let line = line('.')
@@ -465,7 +473,7 @@ function! Markdown_eval()
   endif
 
   call cursor(start, 1)
-  let [fence, lang] = matchlist(getline(start), '\([`~]\{3,}\)\(\S\+\)\?')[1:2]
+  let [fence, langv] = matchlist(getline(start), '\([`~]\{3,}\)\(\S\+\)\?')[1:2]
   let end = search('^\s*' . fence . '\s*$', 'nW')
   " let langidx = index(map(copy(g:markdown_interp_languages), al, "=")[0]'), lang)
 
@@ -483,8 +491,14 @@ function! Markdown_eval()
   " call writefile(block, tmp)
   " echo system(lang . ' ' . tmp)
   " call winrestview(view)
-  echom lang
-  echom block
+  let resp = {}
+  let resp.code = block"" list2str(block)
+  let resp.lang = langv
+  " echom langv
+  " echom block
+  call cursor(line, 1)
+  echom 'ln:' . line
+  return resp
 endfunction
 
 nnoremap <silent> <space>co :VimuxOpenRunner<cr>
@@ -494,6 +508,7 @@ nnoremap <silent> <space>cx :VimuxInteruptRunner<cr>
 nnoremap <silent> <space>ci :VimuxInspectRunner<CR>
 nnoremap <silent> <space>cp :VimuxPromptCommand<CR>
 nnoremap <silent> <space>cr vip "vy :call VimuxSlime()<CR>
+nnoremap <silent> <space>cb :call VimuxMdBlock()<CR>
 
 vmap <space>cr "vy :call VimuxSlime()<CR>
 
