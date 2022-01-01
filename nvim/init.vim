@@ -217,6 +217,8 @@ call plug#begin(expand('~/.vim/plugged'))
     Plug 'hrsh7th/cmp-nvim-lsp'
     ""Indent guides
     Plug 'lukas-reineke/indent-blankline.nvim'
+
+    Plug 'waylonwalker/Telegraph.nvim'
   else
 
     ""Indent guides
@@ -458,13 +460,13 @@ function! VimuxSlime()
  endfunction
 
 function! VimuxMdBlock()
- let mdblock = Markdown_eval()
+ let mdblock = MarkdownBlock()
 
  let lines = join(mdblock.code, "\n") . "\n"
  call VimuxRunCommand(lines)
 endfunction
 
-function! Markdown_eval()
+function! MarkdownBlock()
   let view = winsaveview()
   let line = line('.')
   let start = search('^\s*[`~]\{3,}\S*\s*$', 'bnW')
@@ -475,29 +477,17 @@ function! Markdown_eval()
   call cursor(start, 1)
   let [fence, langv] = matchlist(getline(start), '\([`~]\{3,}\)\(\S\+\)\?')[1:2]
   let end = search('^\s*' . fence . '\s*$', 'nW')
-  " let langidx = index(map(copy(g:markdown_interp_languages), al, "=")[0]'), lang)
 
   if end < line""|| langidx < 0
     call winrestview(view)
     return
   endif
 
-  " if g:markdown_interp_languages[langidx] !=# lang
-  "   let lang = split(g:markdown_interp_languages[langidx], '=')[1]
-  " endif
-
-  let block = getline(start + 1, end - 1)
-  " let tmp = tempname()
-  " call writefile(block, tmp)
-  " echo system(lang . ' ' . tmp)
-  " call winrestview(view)
   let resp = {}
-  let resp.code = block"" list2str(block)
+  let resp.code = getline(start + 1, end - 1) ""block"" list2str(block)
   let resp.lang = langv
-  " echom langv
-  " echom block
   call cursor(line, 1)
-  echom 'ln:' . line
+  " echom 'ln:' . line
   return resp
 endfunction
 
