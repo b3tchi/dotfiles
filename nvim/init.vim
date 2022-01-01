@@ -774,7 +774,10 @@ function! PreviewIfWide2()
 endfunction
 
 command! -bang -nargs=? -complete=dir FzfFiles
-  \ call fzf#vim#files(<q-args>, PreviewIfWide2(), <bang>0)
+  \ call fzf#vim#files(
+  \ <q-args>,
+  \ PreviewIfWide2(),
+  \ <bang>0)
 
 " Shouldn't be needed https://medium.com/@sidneyliebrand/how-fzf-and-ripgrep-improved-my-workflow-61c7ca212861
 " command! -bang -nargs=* Rg
