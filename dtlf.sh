@@ -4,27 +4,48 @@ function ml(){
   mkdir -p $3
 
   if [ ! -z "$4" ]; then
-      echo "argument supplied"
+      # echo "argument supplied"
       filename=$4
   else
 
     if echo $2 | grep -q "/"; then
-      echo "slash"
+      # echo "slash"
       filename=${2##*/}
     else
-      echo "no slash"
+      # echo "no slash"
       filename=$2
     fi
   fi
 
-
   # filename=$3${2##*/}
 
   target=$3$filename
+  source=$1$2
 
-  rm -rf $target
+
+  #file in path
+  if [[ (-f $target || -d $target ) && ! -L $target ]]; then
+    echo "WW - not yet link placed ... $source"
+    rm -rf $target
+  fi
+
+  #linked before
+  if [[ -L $target ]]; then
+    # echo 'target is link'
+    currlink=$(readlink $target)
+    if [[ $currlink == $source ]]; then
+        echo "II - already linked ... $source"
+        return 0
+      else
+        echo "WW - link not match removed ... $source"
+        rm -rf $target
+      fi
+  fi
+
+  #create link
   ln -sf $1$2 $target
-  echo "linked $2 to $target"
+  echo "OK - linked ... $2 to $target"
+
 }
 
 d=~/dotfiles/
@@ -43,6 +64,13 @@ ml $d bat.conf ~/.config/bat/ config
 #zsh
 ml $d zsh/zshrc ~/ .zshrc
 ml $d zsh/p10k.zsh ~/ .p10k.zsh
+
+#bin
+chmod +x $d/bin/*
+
+ml $d bin/tat ~/.local/bin/
+ml $d bin/ff ~/.local/bin/
+ml $d bin/nvim-sessionizer ~/.local/bin/
 
 # nnn tbd
 

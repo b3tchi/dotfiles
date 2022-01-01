@@ -172,6 +172,9 @@ call plug#begin(expand('~/.vim/plugged'))
 
   "Window management SuckLess
   Plug 'fabi1cazenave/suckless.vim'
+  "Tmux
+  Plug 'christoomey/vim-tmux-runner'
+  Plug 'preservim/vimux'
 
   "syntax highlighting
   Plug 'sheerun/vim-polyglot'
@@ -432,7 +435,8 @@ nnoremap <silent> <space>tn :Trep<cr>
 
 let g:which_key_map.v ={'name':'+vim'}
 nnoremap <silent> <space>vk :Maps<cr>
-nnoremap <silent> <space>vh :Helptags<cr>
+let g:which_key_map.v.h ={'name':'+help'}
+nnoremap <silent> <space>vhf :Helptags<cr>
 
 let g:which_key_map.v.p ={'name':'+plug'}
 nnoremap <silent> <space>vpu :PlugUpdate<cr>
@@ -444,10 +448,76 @@ nnoremap <silent> <space>vcu :CocUpdate<cr>
 let g:which_key_map.v.i ={'name':'+init.vim'}
 nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>
 
+let g:which_key_map.c ={'name':'+console'}
+
+function! VimuxSlime()
+  " call VimuxRunCommand(@v)
+  call VimuxRunCommand(@v, 0)
+  echom @v
+  " echom "some"
+ endfunction
+
+function! VimuxMdBlock()
+ let mdblock = Markdown_eval()
+
+ let lines = join(mdblock.code, "\n") . "\n"
+ call VimuxRunCommand(lines)
+endfunction
+
+function! Markdown_eval()
+  let view = winsaveview()
+  let line = line('.')
+  let start = search('^\s*[`~]\{3,}\S*\s*$', 'bnW')
+  if !start
+    return
+  endif
+
+  call cursor(start, 1)
+  let [fence, langv] = matchlist(getline(start), '\([`~]\{3,}\)\(\S\+\)\?')[1:2]
+  let end = search('^\s*' . fence . '\s*$', 'nW')
+  " let langidx = index(map(copy(g:markdown_interp_languages), al, "=")[0]'), lang)
+
+  if end < line""|| langidx < 0
+    call winrestview(view)
+    return
+  endif
+
+  " if g:markdown_interp_languages[langidx] !=# lang
+  "   let lang = split(g:markdown_interp_languages[langidx], '=')[1]
+  " endif
+
+  let block = getline(start + 1, end - 1)
+  " let tmp = tempname()
+  " call writefile(block, tmp)
+  " echo system(lang . ' ' . tmp)
+  " call winrestview(view)
+  let resp = {}
+  let resp.code = block"" list2str(block)
+  let resp.lang = langv
+  " echom langv
+  " echom block
+  call cursor(line, 1)
+  echom 'ln:' . line
+  return resp
+endfunction
+
+nnoremap <silent> <space>co :VimuxOpenRunner<cr>
+nnoremap <silent> <space>cq :VimuxCloseRunner<cr>
+nnoremap <silent> <space>cl :VimuxRunLastCommand<cr>
+nnoremap <silent> <space>cx :VimuxInteruptRunner<cr>
+nnoremap <silent> <space>ci :VimuxInspectRunner<CR>
+nnoremap <silent> <space>cp :VimuxPromptCommand<CR>
+nnoremap <silent> <space>cr vip "vy :call VimuxSlime()<CR>
+nnoremap <silent> <space>cb :call VimuxMdBlock()<CR>
+
+vmap <space>cr "vy :call VimuxSlime()<CR>
+
 let g:which_key_map.v.l ={'name':'+lsp'}
 nnoremap <silent> <space>vli :LspInstallInfo<cr>
+ " If text is selected, save it in the v buffer and send that buffer it to tmux
 
 
+let g:which_key_map.v.l ={'name':'+sessions'}
 nnoremap <silent> <space>ss :SSave<cr>
 nnoremap <silent> <space>sd :SDelete<cr>
 nnoremap <silent> <space>sc :SClose<cr>
@@ -472,13 +542,13 @@ tnoremap jj <C-\><C-n>
 " tnoremap <Esc> <C-\><C-n>
 
 "" commenting keybindings
-nmap <space>cl <leader>c
-"add comment paragraph
-nmap <space>cp vip<leader>c
-"toggle comment paragrap
-nmap <space>cP vip<leader>cc
-"toggle comment tag
-nmap <space>ct vat<leader>c
+" nmap <space>cl <leader>c
+" "add comment paragraph
+" nmap <space>cp vip<leader>c
+" "toggle comment paragrap
+" nmap <space>cP vip<leader>cc
+" "toggle comment tag
+" nmap <space>ct vat<leader>c
 
 "" navigating widows by spaces + number
 nnoremap <silent><space>1 :exe 1 . "wincmd w"<CR>
@@ -595,7 +665,7 @@ if lspClient == 1
   "TBR Vista succed by fzf-coc
   " nmap <silent>  o :<cr>
 
-  nnoremap <silent> <space>c :<C-u>CocFzfList commands<cr>
+  nnoremap <silent> <space>vfc :<C-u>CocFzfList commands<cr>
   nnoremap <silent> <space>a :<C-u>CocFzfList diagnostics<cr>
   nnoremap <silent> <space>E :CocCommand explorer<cr>
   nnoremap <silent> <space>o :<C-u>CocFzfList outline<cr>
