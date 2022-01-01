@@ -379,7 +379,7 @@ nnoremap <silent> <space>W :Windows<cr>
 
 function FuzzyFiles()
   if get(b:,'git_dir') == 0
-    exe ':Files'
+    exe ':FzfFiles'
   else
     exe ':GFiles'
   endif
@@ -801,7 +801,7 @@ command! -bang -nargs=* Rg
 command! -bang -nargs=? -complete=dir GFiles
   \ call fzf#vim#gitfiles(
   \   <q-args>,
-  \   fzf#vim#with_preview(),
+  \   PreviewIfWide2(),
   \   <bang>0)
 
 command! -bang -nargs=* Hx
