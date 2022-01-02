@@ -9,7 +9,13 @@ echo "something \
 echo something
 ```
 
-```bash
+```sh
 echo anything
 echo anything
+```
+
+```vim
+if index(['a','b'],'c') ==-1
+  echom expand('<cword>')
+endif
 ```

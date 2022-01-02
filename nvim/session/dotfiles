@@ -10,117 +10,43 @@ endif
 set shortmess=aoO
 argglobal
 %argdel
-edit dotfiles/bin/ff
-let s:save_splitbelow = &splitbelow
-let s:save_splitright = &splitright
-set splitbelow splitright
-wincmd _ | wincmd |
-split
-wincmd _ | wincmd |
-split
-2wincmd k
-wincmd w
-wincmd w
-let &splitbelow = s:save_splitbelow
-let &splitright = s:save_splitright
-wincmd t
-let s:save_winminheight = &winminheight
-let s:save_winminwidth = &winminwidth
-set winminheight=0
-set winheight=1
-set winminwidth=0
-set winwidth=1
-exe '1resize ' . ((&lines * 12 + 22) / 44)
-exe '2resize ' . ((&lines * 12 + 22) / 44)
-exe '3resize ' . ((&lines * 13 + 22) / 44)
+edit dotfiles/nvim/lualsp.vim
 argglobal
-balt dotfiles/tmux.conf
 setlocal fdm=indent
 setlocal fde=0
 setlocal fmr={{{,}}}
 setlocal fdi=
-setlocal fdl=6
+setlocal fdl=0
 setlocal fml=1
 setlocal fdn=20
 setlocal fen
-5
-normal! zo
-15
-normal! zo
-let s:l = 22 - ((9 * winheight(0) + 6) / 12)
+let s:l = 201 - ((44 * winheight(0) + 21) / 42)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
-keepjumps 22
+keepjumps 201
 normal! 0
-wincmd w
-argglobal
-if bufexists("dotfiles/nvim/init.vim") | buffer dotfiles/nvim/init.vim | else | edit dotfiles/nvim/init.vim | endif
-if &buftype ==# 'terminal'
-  silent file dotfiles/nvim/init.vim
-endif
-balt dotfiles/README.md
-setlocal fdm=indent
-setlocal fde=GetPotionFold(v:lnum)
-setlocal fmr={{{,}}}
-setlocal fdi=
-setlocal fdl=0
-setlocal fml=1
-setlocal fdn=20
-setlocal fen
-let s:l = 464 - ((5 * winheight(0) + 6) / 12)
-if s:l < 1 | let s:l = 1 | endif
-keepjumps exe s:l
-normal! zt
-keepjumps 464
-normal! 053|
-wincmd w
-argglobal
-if bufexists(".vim/plugged/vim-tmux-runner/doc/vim-tmux-runner.txt") | buffer .vim/plugged/vim-tmux-runner/doc/vim-tmux-runner.txt | else | edit .vim/plugged/vim-tmux-runner/doc/vim-tmux-runner.txt | endif
-if &buftype ==# 'terminal'
-  silent file .vim/plugged/vim-tmux-runner/doc/vim-tmux-runner.txt
-endif
-balt dotfiles/nvim/init.vim
-setlocal fdm=manual
-setlocal fde=0
-setlocal fmr={{{,}}}
-setlocal fdi=
-setlocal fdl=0
-setlocal fml=1
-setlocal fdn=20
-setlocal nofen
-silent! normal! zE
-let &fdl = &fdl
-let s:l = 183 - ((6 * winheight(0) + 6) / 13)
-if s:l < 1 | let s:l = 1 | endif
-keepjumps exe s:l
-normal! zt
-keepjumps 183
-normal! 073|
-wincmd w
-2wincmd w
-exe '1resize ' . ((&lines * 12 + 22) / 44)
-exe '2resize ' . ((&lines * 12 + 22) / 44)
-exe '3resize ' . ((&lines * 13 + 22) / 44)
 if exists(':tcd') == 2 | tcd ~/dotfiles | endif
 tabnext 1
-badd +22 ~/dotfiles/bin/ff
-badd +103 ~/dotfiles/tmux.conf
-badd +464 ~/dotfiles/nvim/init.vim
-badd +2 ~/dotfiles/README.md
+badd +0 ~/dotfiles/README.md
+badd +89 ~/dotfiles/dtlf.sh
+badd +1572 ~/Applications/neovim/squashfs-root/usr/share/nvim/runtime/doc/api.txt
+badd +24 ~/dotfiles/bin/ff
+badd +17 ~/dotfiles/tmux.conf
+badd +184 ~/.vim/plugged/vim-tmux-runner/doc/vim-tmux-runner.txt
+badd +206 ~/dotfiles/nvim/lualsp.vim
 if exists('s:wipebuf') && len(win_findbuf(s:wipebuf)) == 0 && getbufvar(s:wipebuf, '&buftype') isnot# 'terminal'
   silent exe 'bwipe ' . s:wipebuf
 endif
 unlet! s:wipebuf
 set winheight=1 winwidth=20 shortmess=filnxtToOFsIc
-let &winminheight = s:save_winminheight
-let &winminwidth = s:save_winminwidth
 let s:sx = expand("<sfile>:p:r")."x.vim"
 if filereadable(s:sx)
   exe "source " . fnameescape(s:sx)
 endif
 let &g:so = s:so_save | let &g:siso = s:siso_save
 set hlsearch
+nohlsearch
 doautoall SessionLoadPost
 unlet SessionLoad
 " vim: set ft=vim :

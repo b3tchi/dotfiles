@@ -115,8 +115,6 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'tpope/vim-surround' "surrounding words with symbols
   "Plug 'tmsvg/pear-tree' "getting some issues for the function disabled
 
-  "mapping help file TBD to make mappings
-  Plug 'liuchengxu/vim-which-key'
 
   "git
   Plug 'tpope/vim-fugitive' "git intergration
@@ -218,9 +216,14 @@ call plug#begin(expand('~/.vim/plugged'))
     ""Indent guides
     Plug 'lukas-reineke/indent-blankline.nvim'
 
-    Plug 'waylonwalker/Telegraph.nvim'
+    " Plug 'waylonwalker/Telegraph.nvim' "interesting idea simple using vimux nox
+
+    "lua extended version of which key
+    Plug 'folke/which-key.nvim'
   else
 
+  "mapping help file TBD to make mappings
+  Plug 'liuchengxu/vim-which-key'
     ""Indent guides
     Plug 'b3tchi/iguides' "improved guides
     " Plug 'Yggdroot/indentLine'
@@ -365,9 +368,16 @@ set fillchars=vert:┃ " for vsplits
 
 nnoremap <C-C> <C-[>
 
-call which_key#register('<Space>', "g:which_key_map")
+
+if g:vimmode != 3
+  call which_key#register('<Space>', "g:which_key_map")
+
+" which key
+nnoremap <silent><space> :WhichKey ' '<CR>
+endif
+
 let g:which_key_map =  {}
-let g:which_key_map.b = '+some'
+let g:which_key_map.b = '+buffer'
 
 " nnoremap <C-p> :GFiles<cr>
 " nnoremap <C-f> :Rg<cr>
@@ -453,22 +463,29 @@ nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>
 let g:which_key_map.c ={'name':'+console'}
 
 function! VimuxSlime()
-  " call VimuxRunCommand(@v)
   call VimuxRunCommand(@v, 0)
-  echom @v
-  " echom "some"
- endfunction
+  " echom @v
+endfunction
 
 function! VimuxMdBlock()
- let mdblock = MarkdownBlock()
-
- let lines = join(mdblock.code, "\n") . "\n"
- call VimuxRunCommand(lines)
+   let mdblock = MarkdownBlock()
+   "  if mdblock.lang == 'bash'
+   if index(['bash','sh'],mdblock.lang) > -1
+     let lines = join(mdblock.code, "\n") . "\n"
+     call VimuxRunCommand(lines)
+   elseif index(['vim','viml'],mdblock.lang) > -1
+     let lines = mdblock.code
+     let tmp = tempname()
+     call writefile(lines, tmp)
+     exec 'source '.tmp
+     call delete(tmp)
+   endif
 endfunction
 
 function! MarkdownBlock()
   let view = winsaveview()
   let line = line('.')
+  let cpos = getpos('.')
   let start = search('^\s*[`~]\{3,}\S*\s*$', 'bnW')
   if !start
     return
@@ -486,8 +503,7 @@ function! MarkdownBlock()
   let resp = {}
   let resp.code = getline(start + 1, end - 1) ""block"" list2str(block)
   let resp.lang = langv
-  call cursor(line, 1)
-  " echom 'ln:' . line
+  call setpos('.',cpos)
   return resp
 endfunction
 
@@ -499,6 +515,8 @@ nnoremap <silent> <space>ci :VimuxInspectRunner<CR>
 nnoremap <silent> <space>cp :VimuxPromptCommand<CR>
 nnoremap <silent> <space>cr vip "vy :call VimuxSlime()<CR>
 nnoremap <silent> <space>cb :call VimuxMdBlock()<CR>
+
+" nnoremap <space>cz :lua require'telegraph'.telegraph({how='tmux_popup', cmd='man '})<Left><Left><Left>
 
 vmap <space>cr "vy :call VimuxSlime()<CR>
 
@@ -609,8 +627,6 @@ let g:better_whitespace_filetypes_blacklist = [
 " --- Vim Wiki ---
 nnoremap <silent><space>Wt :VimwikiTable 1 2
 
-" which key
-nnoremap <silent><space> :WhichKey ' '<CR>
 
 " --- Coc ---
 if lspClient == 1
@@ -793,13 +809,15 @@ command! -bang -nargs=? -complete=dir FzfFiles
 command! -bang -nargs=* Trep
   \ call fzf#vim#grep(
   \   'rg --column --hidden --line-number --no-heading --color=always --glob "!.git/*" --smart-case ''\- \[ \] ''', 1,
-  \   fzf#vim#with_preview('right:40%:hidden', 'ctrl-/'), <bang>0)
+  \ PreviewIfWide2(),
+  \ <bang>0)
 
 "adjusting ripgrep command TBD project root
 command! -bang -nargs=* Rg
   \ call fzf#vim#grep(
   \   'rg --column --line-number --no-heading --color=always --glob "!.git/*" --smart-case '.shellescape(<q-args>), 1,
-  \   PreviewIfWide2(), <bang>0)
+  \ PreviewIfWide2(),
+  \ <bang>0)
 
 command! -bang -nargs=? -complete=dir GFiles
   \ call fzf#vim#gitfiles(
@@ -952,3 +970,15 @@ set timeoutlen=500
 if g:vimmode == 3
   source ~/.config/nvim/lualsp.vim
 endif
+
+function! RecurseForPath(dict,skey)
+    for key in keys(a:dict)
+        if type(a:dict[key]) == type({})
+            call RecurseForPath(a:dict[key],a:skey.key)
+          else
+            if key != 'name'
+          endif
+        endif
+    endfor
+endfunction
+
