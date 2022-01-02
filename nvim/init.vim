@@ -960,11 +960,14 @@ let g:vimwiki_key_mappings = { 'table_mappings': 0 } "! - to fix/change completi
 
 " --- VimWhichKey ---
 set timeoutlen=500
-" moved before bindigs
-" let g:which_key_map =  {}
-" let g:which_key_use_floating_win = 1 "make as floating window
-" let g:which_key_run_map_on_popup = 1
-" call which_key#register(' ', "g:which_key_map")
+if g:vimmode != 3
+
+  call which_key#register('<Space>', "g:which_key_map")
+  nnoremap <silent><space> :WhichKey ' '<CR>
+  " moved before bindigs
+  " let g:which_key_use_floating_win = 1 "make as floating window
+  " let g:which_key_run_map_on_popup = 1
+endif
 
 " --- LUA LSP 0.5
 if g:vimmode == 3
