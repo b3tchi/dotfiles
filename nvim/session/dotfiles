@@ -1,51 +1,52 @@
 let SessionLoad = 1
-let s:so_save = &so | let s:siso_save = &siso | set so=0 siso=0
+let s:so_save = &g:so | let s:siso_save = &g:siso | setg so=0 siso=0 | setl so=-1 siso=-1
 let v:this_session=expand("<sfile>:p")
 silent only
+silent tabonly
 cd ~/
 if expand('%') == '' && !&modified && line('$') <= 1 && getline(1) == ''
   let s:wipebuf = bufnr('%')
 endif
 set shortmess=aoO
-badd +2 dotfiles/README.md
-badd +469 dotfiles/nvim/init.vim
-badd +33 dotfiles/tmux.conf
 argglobal
 %argdel
-edit dotfiles/nvim/init.vim
-set splitbelow splitright
-wincmd t
-set winminheight=0
-set winheight=1
-set winminwidth=0
-set winwidth=1
+edit dotfiles/nvim/lualsp.vim
 argglobal
-setlocal fdm=expr
-setlocal fde=GetPotionFold(v:lnum)
+setlocal fdm=indent
+setlocal fde=0
 setlocal fmr={{{,}}}
 setlocal fdi=
 setlocal fdl=0
 setlocal fml=1
 setlocal fdn=20
 setlocal fen
-let s:l = 385 - ((17 * winheight(0) + 18) / 37)
+let s:l = 201 - ((44 * winheight(0) + 21) / 42)
 if s:l < 1 | let s:l = 1 | endif
-exe s:l
+keepjumps exe s:l
 normal! zt
-385
+keepjumps 201
 normal! 0
 if exists(':tcd') == 2 | tcd ~/dotfiles | endif
 tabnext 1
-if exists('s:wipebuf') && getbufvar(s:wipebuf, '&buftype') isnot# 'terminal'
+badd +0 ~/dotfiles/README.md
+badd +89 ~/dotfiles/dtlf.sh
+badd +1572 ~/Applications/neovim/squashfs-root/usr/share/nvim/runtime/doc/api.txt
+badd +24 ~/dotfiles/bin/ff
+badd +17 ~/dotfiles/tmux.conf
+badd +184 ~/.vim/plugged/vim-tmux-runner/doc/vim-tmux-runner.txt
+badd +206 ~/dotfiles/nvim/lualsp.vim
+if exists('s:wipebuf') && len(win_findbuf(s:wipebuf)) == 0 && getbufvar(s:wipebuf, '&buftype') isnot# 'terminal'
   silent exe 'bwipe ' . s:wipebuf
 endif
 unlet! s:wipebuf
-set winheight=1 winwidth=20 winminheight=1 winminwidth=1 shortmess=filnxtToOFcsI
+set winheight=1 winwidth=20 shortmess=filnxtToOFsIc
 let s:sx = expand("<sfile>:p:r")."x.vim"
-if file_readable(s:sx)
+if filereadable(s:sx)
   exe "source " . fnameescape(s:sx)
 endif
-let &so = s:so_save | let &siso = s:siso_save
+let &g:so = s:so_save | let &g:siso = s:siso_save
+set hlsearch
+nohlsearch
 doautoall SessionLoadPost
 unlet SessionLoad
 " vim: set ft=vim :

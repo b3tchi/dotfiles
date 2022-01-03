@@ -115,8 +115,6 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'tpope/vim-surround' "surrounding words with symbols
   "Plug 'tmsvg/pear-tree' "getting some issues for the function disabled
 
-  "mapping help file TBD to make mappings
-  Plug 'liuchengxu/vim-which-key'
 
   "git
   Plug 'tpope/vim-fugitive' "git intergration
@@ -170,6 +168,9 @@ call plug#begin(expand('~/.vim/plugged'))
 
   "Window management SuckLess
   Plug 'fabi1cazenave/suckless.vim'
+  "Tmux
+  Plug 'christoomey/vim-tmux-runner'
+  Plug 'preservim/vimux'
 
   "syntax highlighting
   Plug 'sheerun/vim-polyglot'
@@ -216,6 +217,7 @@ call plug#begin(expand('~/.vim/plugged'))
     ""Indent guides
     Plug 'lukas-reineke/indent-blankline.nvim'
 
+<<<<<<< HEAD
     ""Treesitter backed comments
     Plug 'numToStr/Comment.nvim'
   else
@@ -223,6 +225,16 @@ call plug#begin(expand('~/.vim/plugged'))
     " Another Comment Pluging with HTML region support
     Plug 'tomtom/tcomment_vim'
 
+=======
+    " Plug 'waylonwalker/Telegraph.nvim' "interesting idea simple using vimux nox
+
+    "lua extended version of which key
+    Plug 'folke/which-key.nvim'
+  else
+
+  "mapping help file TBD to make mappings
+  Plug 'liuchengxu/vim-which-key'
+>>>>>>> refs/remotes/origin/master
     ""Indent guides
     Plug 'b3tchi/iguides' "improved guides
     " Plug 'Yggdroot/indentLine'
@@ -247,7 +259,6 @@ if lspClient == 1
 endif
 
 source ~/.config/nvim/incubator.vim
-"End dein Scripts-------------------------
 
 let mapleader = "," " leader key is ,
 
@@ -289,6 +300,7 @@ if has('persistent_undo')
   set undoreload=10000
 endif
 set backupcopy=yes " for watchers set noswapfile
+set scrolloff=8
 
 "" Encoding
 set encoding=utf-8
@@ -367,9 +379,16 @@ set fillchars=vert:┃ " for vsplits
 
 nnoremap <C-C> <C-[>
 
-call which_key#register('<Space>', "g:which_key_map")
+
+if g:vimmode != 3
+  call which_key#register('<Space>', "g:which_key_map")
+
+" which key
+nnoremap <silent><space> :WhichKey ' '<CR>
+endif
+
 let g:which_key_map =  {}
-let g:which_key_map.b = '+some'
+let g:which_key_map.b = '+buffer'
 
 " nnoremap <C-p> :GFiles<cr>
 " nnoremap <C-f> :Rg<cr>
@@ -378,8 +397,6 @@ nnoremap <silent> <space>b :Buffer<cr>
 nnoremap <silent> ; :Buffer<cr>
 nnoremap <silent> <space>e :call FuzzyFiles()<cr>
 nnoremap <silent> <space>W :Windows<cr>
-nnoremap <silent> <space>vk :Maps<cr>
-nnoremap <silent> <space>vh :Helptags<cr>
 
 function FuzzyFiles()
   if get(b:,'git_dir') == 0
@@ -419,8 +436,8 @@ let g:which_key_map.d.s = 'save query'
 
 autocmd FileType dbui nmap <buffer> <S-k> <Plug>(DBUI_GotoFirstSibling)
 autocmd FileType dbui nmap <buffer> <S-j> <Plug>(DBUI_GotoLastSibling)
-autocmd FileType dbui nmap <buffer> k <Plug>(DBUI_GotoPrevSibling)
-autocmd FileType dbui nmap <buffer> j <Plug>(DBUI_GotoNextSibling)
+" autocmd FileType dbui nmap <buffer> k <Plug>(DBUI_GotoPrevSibling)
+" autocmd FileType dbui nmap <buffer> j <Plug>(DBUI_GotoNextSibling)
 
 
 nnoremap <space>dn :DBUIToggle<CR>
@@ -440,16 +457,86 @@ nnoremap <silent> <space>tn :Trep<cr>
 " nnoremap <silent>  k :call <SID>incubator.vim#ToggleOnTerminal('J', 6)<CR>
 
 let g:which_key_map.v ={'name':'+vim'}
+nnoremap <silent> <space>vk :Maps<cr>
+let g:which_key_map.v.h ={'name':'+help'}
+nnoremap <silent> <space>vhf :Helptags<cr>
+
 let g:which_key_map.v.p ={'name':'+plug'}
 nnoremap <silent> <space>vpu :PlugUpdate<cr>
 nnoremap <silent> <space>vpi :PlugStatus<cr>
+
 let g:which_key_map.v.c ={'name':'+coc'}
 nnoremap <silent> <space>vcu :CocUpdate<cr>
+
 let g:which_key_map.v.i ={'name':'+init.vim'}
 nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>
+
+let g:which_key_map.c ={'name':'+console'}
+
+function! VimuxSlime()
+  call VimuxRunCommand(@v, 0)
+  " echom @v
+endfunction
+
+function! VimuxMdBlock()
+   let mdblock = MarkdownBlock()
+   "  if mdblock.lang == 'bash'
+   if index(['bash','sh'],mdblock.lang) > -1
+     let lines = join(mdblock.code, "\n") . "\n"
+     call VimuxRunCommand(lines)
+   elseif index(['vim','viml'],mdblock.lang) > -1
+     let lines = mdblock.code
+     let tmp = tempname()
+     call writefile(lines, tmp)
+     exec 'source '.tmp
+     call delete(tmp)
+   endif
+endfunction
+
+function! MarkdownBlock()
+  let view = winsaveview()
+  let line = line('.')
+  let cpos = getpos('.')
+  let start = search('^\s*[`~]\{3,}\S*\s*$', 'bnW')
+  if !start
+    return
+  endif
+
+  call cursor(start, 1)
+  let [fence, langv] = matchlist(getline(start), '\([`~]\{3,}\)\(\S\+\)\?')[1:2]
+  let end = search('^\s*' . fence . '\s*$', 'nW')
+
+  if end < line""|| langidx < 0
+    call winrestview(view)
+    return
+  endif
+
+  let resp = {}
+  let resp.code = getline(start + 1, end - 1) ""block"" list2str(block)
+  let resp.lang = langv
+  call setpos('.',cpos)
+  return resp
+endfunction
+
+nnoremap <silent> <space>co :VimuxOpenRunner<cr>
+nnoremap <silent> <space>cq :VimuxCloseRunner<cr>
+nnoremap <silent> <space>cl :VimuxRunLastCommand<cr>
+nnoremap <silent> <space>cx :VimuxInteruptRunner<cr>
+nnoremap <silent> <space>ci :VimuxInspectRunner<CR>
+nnoremap <silent> <space>cp :VimuxPromptCommand<CR>
+nnoremap <silent> <space>cr vip "vy :call VimuxSlime()<CR>
+nnoremap <silent> <space>cb :call VimuxMdBlock()<CR>
+
+" nnoremap <space>cz :lua require'telegraph'.telegraph({how='tmux_popup', cmd='man '})<Left><Left><Left>
+
+vmap <space>cr "vy :call VimuxSlime()<CR>
+
 let g:which_key_map.v.l ={'name':'+lsp'}
 nnoremap <silent> <space>vli :LspInstallInfo<cr>
+ " If text is selected, save it in the v buffer and send that buffer it to tmux
 
+
+let g:which_key_map.v.l ={'name':'+sessions'}
 nnoremap <silent> <space>ss :SSave<cr>
 nnoremap <silent> <space>sd :SDelete<cr>
 nnoremap <silent> <space>sc :SClose<cr>
@@ -474,13 +561,13 @@ tnoremap jj <C-\><C-n>
 " tnoremap <Esc> <C-\><C-n>
 
 "" commenting keybindings
-nmap <space>cl <leader>c
-"add comment paragraph
-nmap <space>cp vip<leader>c
-"toggle comment paragrap
-nmap <space>cP vip<leader>cc
-"toggle comment tag
-nmap <space>ct vat<leader>c
+" nmap <space>cl <leader>c
+" "add comment paragraph
+" nmap <space>cp vip<leader>c
+" "toggle comment paragrap
+" nmap <space>cP vip<leader>cc
+" "toggle comment tag
+" nmap <space>ct vat<leader>c
 
 "" navigating widows by spaces + number
 nnoremap <silent><space>1 :exe 1 . "wincmd w"<CR>
@@ -495,9 +582,13 @@ nnoremap <silent><space>9 :exe 9 . "wincmd w"<CR>
 nnoremap <silent><space>0 :exe 10 . "wincmd w"<CR>
 
 " navigiting through windows with j and k
-nnoremap <C-k> <c-w>W
-nnoremap <C-j> <c-w>w
+nnoremap <C-j> <c-w>j
+nnoremap <C-k> <c-w>k
+nnoremap <C-h> <c-w>h
+nnoremap <C-l> <c-w>l
 
+" nnoremap <C-k> <c-w>W
+" nnoremap <C-j> <c-w>w
 
 function SwitchMainWindow()
   let l:current_buf = winbufnr(0)
@@ -527,6 +618,8 @@ autocmd FileType sql nmap <buffer><silent><space>dw <Plug>(DBUI_SaveQuery)
 
 autocmd FileType dbui nmap <buffer> <S-k> <Plug>(DBUI_GotoFirstSibling)
 autocmd FileType dbui nmap <buffer> <S-j> <Plug>(DBUI_GotoLastSibling)
+autocmd FileType dbui nmap <buffer> k <up>
+autocmd FileType dbui nmap <buffer> j <down>
 " autocmd FileType dbui nmap <buffer> k <Plug>(DBUI_GotoPrevSibling)
 " autocmd FileType dbui nmap <buffer> j <Plug>(DBUI_GotoNextSibling)
 autocmd FileType dbui nmap <buffer> A <Plug>(DBUI_AddConnection)
@@ -545,8 +638,6 @@ let g:better_whitespace_filetypes_blacklist = [
 " --- Vim Wiki ---
 nnoremap <silent><space>Wt :VimwikiTable 1 2
 
-" which key
-nnoremap <silent><space> :WhichKey ' '<CR>
 
 " --- Coc ---
 if lspClient == 1
@@ -591,7 +682,7 @@ if lspClient == 1
   "TBR Vista succed by fzf-coc
   " nmap <silent>  o :<cr>
 
-  nnoremap <silent> <space>c :<C-u>CocFzfList commands<cr>
+  nnoremap <silent> <space>vfc :<C-u>CocFzfList commands<cr>
   nnoremap <silent> <space>a :<C-u>CocFzfList diagnostics<cr>
   nnoremap <silent> <space>E :CocCommand explorer<cr>
   nnoremap <silent> <space>o :<C-u>CocFzfList outline<cr>
@@ -710,7 +801,10 @@ function! PreviewIfWide2()
 endfunction
 
 command! -bang -nargs=? -complete=dir FzfFiles
-  \ call fzf#vim#files(<q-args>, PreviewIfWide2()), <bang>0)
+  \ call fzf#vim#files(
+  \ <q-args>,
+  \ PreviewIfWide2(),
+  \ <bang>0)
 
 " Shouldn't be needed https://medium.com/@sidneyliebrand/how-fzf-and-ripgrep-improved-my-workflow-61c7ca212861
 " command! -bang -nargs=* Rg
@@ -739,6 +833,12 @@ command! -bang -nargs=* Rg
 command! -bang -nargs=? -complete=dir GFiles
   \ call fzf#vim#gitfiles(
   \   <q-args>,
+  \   PreviewIfWide2(),
+  \   <bang>0)
+
+command! -bang -nargs=* Hx
+  \ call fzf#vim#grep(
+  \   'rg --column --line-number --hidden --no-heading --color=always --glob "**/plugged/**/doc/**.txt" --smart-case "(?:^.*[*])(.*)(?:[*]$)" "/home/jan/" ', 1,
   \   PreviewIfWide2(),
   \   <bang>0)
 
@@ -871,13 +971,28 @@ let g:vimwiki_key_mappings = { 'table_mappings': 0 } "! - to fix/change completi
 
 " --- VimWhichKey ---
 set timeoutlen=500
-" moved before bindigs
-" let g:which_key_map =  {}
-" let g:which_key_use_floating_win = 1 "make as floating window
-" let g:which_key_run_map_on_popup = 1
-" call which_key#register(' ', "g:which_key_map")
+if g:vimmode != 3
+
+  call which_key#register('<Space>', "g:which_key_map")
+  nnoremap <silent><space> :WhichKey ' '<CR>
+  " moved before bindigs
+  " let g:which_key_use_floating_win = 1 "make as floating window
+  " let g:which_key_run_map_on_popup = 1
+endif
 
 " --- LUA LSP 0.5
 if g:vimmode == 3
   source ~/.config/nvim/lualsp.vim
 endif
+
+function! RecurseForPath(dict,skey)
+    for key in keys(a:dict)
+        if type(a:dict[key]) == type({})
+            call RecurseForPath(a:dict[key],a:skey.key)
+          else
+            if key != 'name'
+          endif
+        endif
+    endfor
+endfunction
+
