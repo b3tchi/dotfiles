@@ -160,8 +160,6 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'evanleck/vim-svelte'
   Plug 'mattn/emmet-vim'
 
-  " Another Comment Pluging with HTML region support
-  Plug 'tomtom/tcomment_vim'
 
   " Support for comments symbol by language regions Svelte & Html
   Plug 'Shougo/context_filetype.vim' "language regions in files
@@ -207,14 +205,23 @@ call plug#begin(expand('~/.vim/plugged'))
     Plug 'nvim-telescope/telescope.nvim'
     Plug 'nvim-telescope/telescope-fzf-native.nvim', { 'do': 'make' }
 
+    "outlines
     Plug 'simrat39/symbols-outline.nvim' "outlines
     Plug 'nvim-orgmode/orgmode'
+
     ""completion
     Plug 'hrsh7th/nvim-cmp'
     Plug 'hrsh7th/cmp-nvim-lsp'
+
     ""Indent guides
     Plug 'lukas-reineke/indent-blankline.nvim'
+
+    ""Treesitter backed comments
+    Plug 'numToStr/Comment.nvim'
   else
+
+    " Another Comment Pluging with HTML region support
+    Plug 'tomtom/tcomment_vim'
 
     ""Indent guides
     Plug 'b3tchi/iguides' "improved guides
@@ -376,7 +383,7 @@ nnoremap <silent> <space>vh :Helptags<cr>
 
 function FuzzyFiles()
   if get(b:,'git_dir') == 0
-    exe ':Files'
+    exe ':FzfFiles'
   else
     exe ':GFiles'
   endif
@@ -718,19 +725,21 @@ command! -bang -nargs=? -complete=dir FzfFiles
 
 command! -bang -nargs=* Trep
   \ call fzf#vim#grep(
-  \   'rg --column --hidden --line-number --no-heading --color=always --glob "!.git/*" --smart-case ''\- \[ \] ''', 1,
-  \   fzf#vim#with_preview('right:40%:hidden', 'ctrl-/'), <bang>0)
+  \   'rg --column --hidden --line-number --no-heading --color=always --glob "!.git/*" --smart-case ' - \[ \]"', 1,
+  \   PreviewIfWide2(),
+  \   <bang>0)
 
 "adjusting ripgrep command TBD project root
 command! -bang -nargs=* Rg
   \ call fzf#vim#grep(
   \   'rg --column --line-number --no-heading --color=always --glob "!.git/*" --smart-case '.shellescape(<q-args>), 1,
-  \   PreviewIfWide2(), <bang>0)
+  \   PreviewIfWide2(),
+  \   <bang>0)
 
 command! -bang -nargs=? -complete=dir GFiles
   \ call fzf#vim#gitfiles(
   \   <q-args>,
-  \   fzf#vim#with_preview(),
+  \   PreviewIfWide2(),
   \   <bang>0)
 
 function! OpenFloatingWin()
