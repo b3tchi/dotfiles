@@ -40,7 +40,7 @@
     "explorer.icon.enableNerdfont": true,
     "explorer.width": 40,
     "yaml.schemas": {
-        "https://raw.githubusercontent.com/microsoft/azure-pipelines-vscode/main/service-schema.json": ["*/ci/pipelines/*.yml","*/ci/variables/*.yml"]
+        "https://raw.githubusercontent.com/microsoft/azure-pipelines-vscode/main/service-schema.json": ["*/ci/pipelines/*.yml"]
     },
     "explorer.quitOnOpen": true
 }

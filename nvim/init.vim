@@ -158,8 +158,6 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'evanleck/vim-svelte'
   Plug 'mattn/emmet-vim'
 
-  " Another Comment Pluging with HTML region support
-  Plug 'tomtom/tcomment_vim'
 
   " Support for comments symbol by language regions Svelte & Html
   Plug 'Shougo/context_filetype.vim' "language regions in files
@@ -208,14 +206,26 @@ call plug#begin(expand('~/.vim/plugged'))
     Plug 'nvim-telescope/telescope.nvim'
     Plug 'nvim-telescope/telescope-fzf-native.nvim', { 'do': 'make' }
 
+    "outlines
     Plug 'simrat39/symbols-outline.nvim' "outlines
     Plug 'nvim-orgmode/orgmode'
+
     ""completion
     Plug 'hrsh7th/nvim-cmp'
     Plug 'hrsh7th/cmp-nvim-lsp'
+
     ""Indent guides
     Plug 'lukas-reineke/indent-blankline.nvim'
 
+<<<<<<< HEAD
+    ""Treesitter backed comments
+    Plug 'numToStr/Comment.nvim'
+  else
+
+    " Another Comment Pluging with HTML region support
+    Plug 'tomtom/tcomment_vim'
+
+=======
     " Plug 'waylonwalker/Telegraph.nvim' "interesting idea simple using vimux nox
 
     "lua extended version of which key
@@ -224,6 +234,7 @@ call plug#begin(expand('~/.vim/plugged'))
 
   "mapping help file TBD to make mappings
   Plug 'liuchengxu/vim-which-key'
+>>>>>>> refs/remotes/origin/master
     ""Indent guides
     Plug 'b3tchi/iguides' "improved guides
     " Plug 'Yggdroot/indentLine'
@@ -813,16 +824,16 @@ command! -bang -nargs=? -complete=dir FzfFiles
 
 command! -bang -nargs=* Trep
   \ call fzf#vim#grep(
-  \   'rg --column --hidden --line-number --no-heading --color=always --glob "!.git/*" --smart-case ''\- \[ \] ''', 1,
-  \ PreviewIfWide2(),
-  \ <bang>0)
+  \   'rg --column --hidden --line-number --no-heading --color=always --glob "!.git/*" --smart-case ' - \[ \]"', 1,
+  \   PreviewIfWide2(),
+  \   <bang>0)
 
 "adjusting ripgrep command TBD project root
 command! -bang -nargs=* Rg
   \ call fzf#vim#grep(
   \   'rg --column --line-number --no-heading --color=always --glob "!.git/*" --smart-case '.shellescape(<q-args>), 1,
-  \ PreviewIfWide2(),
-  \ <bang>0)
+  \   PreviewIfWide2(),
+  \   <bang>0)
 
 command! -bang -nargs=? -complete=dir GFiles
   \ call fzf#vim#gitfiles(
