@@ -152,8 +152,6 @@ call plug#begin(expand('~/.vim/plugged'))
   "   Plug 'dense-analysis/ale'
   endif
 
-
-
   " Svelte
   Plug 'evanleck/vim-svelte'
   Plug 'mattn/emmet-vim'
@@ -168,9 +166,11 @@ call plug#begin(expand('~/.vim/plugged'))
 
   "Window management SuckLess
   Plug 'fabi1cazenave/suckless.vim'
+
   "Tmux
-  Plug 'christoomey/vim-tmux-runner'
+  Plug 'christoomey/vim-tmux-navigator'
   Plug 'preservim/vimux'
+  " Plug 'christoomey/vim-tmux-runner' alternative to vimux
 
   "syntax highlighting
   Plug 'sheerun/vim-polyglot'
@@ -217,24 +217,21 @@ call plug#begin(expand('~/.vim/plugged'))
     ""Indent guides
     Plug 'lukas-reineke/indent-blankline.nvim'
 
-<<<<<<< HEAD
     ""Treesitter backed comments
     Plug 'numToStr/Comment.nvim'
-  else
 
-    " Another Comment Pluging with HTML region support
-    Plug 'tomtom/tcomment_vim'
-
-=======
     " Plug 'waylonwalker/Telegraph.nvim' "interesting idea simple using vimux nox
 
     "lua extended version of which key
     Plug 'folke/which-key.nvim'
   else
 
-  "mapping help file TBD to make mappings
-  Plug 'liuchengxu/vim-which-key'
->>>>>>> refs/remotes/origin/master
+    " Another Comment Pluging with HTML region support
+    Plug 'tomtom/tcomment_vim'
+
+    "mapping help file TBD to make mappings
+    Plug 'liuchengxu/vim-which-key'
+
     ""Indent guides
     Plug 'b3tchi/iguides' "improved guides
     " Plug 'Yggdroot/indentLine'
@@ -481,9 +478,20 @@ endfunction
 function! VimuxMdBlock()
    let mdblock = MarkdownBlock()
    "  if mdblock.lang == 'bash'
+
+   "bash command
    if index(['bash','sh'],mdblock.lang) > -1
      let lines = join(mdblock.code, "\n") . "\n"
      call VimuxRunCommand(lines)
+
+   "powershell
+   elseif index(['pwsh','ps','powershell'],mdblock.lang) > -1
+     let tmp = tempname()
+     call writefile(mdblock.code, tmp)
+     call VimuxRunCommand('powershell.exe '.tmp)
+     " call delete(tmp)
+
+   "wimscript
    elseif index(['vim','viml'],mdblock.lang) > -1
      let lines = mdblock.code
      let tmp = tempname()
