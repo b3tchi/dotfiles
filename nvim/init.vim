@@ -217,15 +217,8 @@ call plug#begin(expand('~/.vim/plugged'))
     ""Indent guides
     Plug 'lukas-reineke/indent-blankline.nvim'
 
-<<<<<<< HEAD
     ""Treesitter backed comments
     Plug 'numToStr/Comment.nvim'
-  else
-
-    " Another Comment Pluging with HTML region support
-    Plug 'tomtom/tcomment_vim'
-
-=======
     " Plug 'waylonwalker/Telegraph.nvim' "interesting idea simple using vimux nox
 
     "lua extended version of which key
@@ -233,8 +226,7 @@ call plug#begin(expand('~/.vim/plugged'))
   else
 
   "mapping help file TBD to make mappings
-  Plug 'liuchengxu/vim-which-key'
->>>>>>> refs/remotes/origin/master
+    Plug 'liuchengxu/vim-which-key'
     ""Indent guides
     Plug 'b3tchi/iguides' "improved guides
     " Plug 'Yggdroot/indentLine'
