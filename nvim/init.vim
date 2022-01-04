@@ -223,6 +223,7 @@ call plug#begin(expand('~/.vim/plugged'))
 
     "lua extended version of which key
     Plug 'folke/which-key.nvim'
+
   else
 
     " Another Comment Pluging with HTML region support
@@ -473,7 +474,7 @@ let g:which_key_map.v.i ={'name':'+init.vim'}
 nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>
 
 let g:which_key_map.c ={'name':'+console'}
-let g:VimuxRunnerName = "vimuxout"
+" let g:VimuxRunnerName = "vimuxout"
 let g:VimuxRunnerType = "pane"
 function! VimuxSlime()
   call VimuxRunCommand(@v, 0)
@@ -491,13 +492,33 @@ function! VimuxMdBlock()
 
    "powershell
    elseif index(['pwsh','ps','powershell'],mdblock.lang) > -1
-     let tmp = tempname()
-     call writefile(mdblock.code, tmp)
-     call VimuxRunCommand('powershell.exe '.tmp)
+     " let tmp = tempname()
+     " call writefile(mdblock.code, tmp)
+     " call VimuxRunCommand('powershell.exe '.tmp)
      " call delete(tmp)
 
+     "rand filename
+      let fname = tempname()
+      let fname = substitute(fname,'/','','g') . '.ps1'
+
+      "paths
+      let win_tmpps = trim(system('cd /mnt/c/ && cmd.exe /c echo %TEMP% && cd - | grep C: ')) . '\'
+      let unx_tmpps = substitute(win_tmpps,'\\','/','g')
+      let unx_tmpps = substitute(unx_tmpps,'C:','/mnt/c','g')
+      ""let unx_tmpps = '/mnt/c/Users/czJaBeck/AppData/Local/Temp/' . fname
+      let win_tmpps = win_tmpps . fname
+      let unx_tmpps = unx_tmpps . fname
+      " echom win_tmpps
+      " echom unx_tmpps
+      call writefile(mdblock.code, unx_tmpps)
+
+      let cmd = 'powershell.exe ''' . win_tmpps . ''''
+      call VimuxRunCommand(cmd)
+
+     
+
    "wimscript
-   elseif index(['vim','viml'],mdblock.lang) > -1
+ elseif index(['vim','viml'],mdblock.lang) > -1
      let lines = mdblock.code
      let tmp = tempname()
      call writefile(lines, tmp)
@@ -965,7 +986,9 @@ let g:context_filetype#same_filetypes.svelte = 'html'
 au! BufNewFile,BufRead *.svelte set ft=html
 
 " --- EMMET specific ---
+let g:user_emmet_install_global = 0
 let g:user_emmet_leader_key = ','
+autocmd FileType html,css EmmetInstall
 
 " --- PowerShell specific ---
 " powershell 200831 not regnized set manually
