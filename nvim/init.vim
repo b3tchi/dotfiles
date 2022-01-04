@@ -115,8 +115,6 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'tpope/vim-surround' "surrounding words with symbols
   "Plug 'tmsvg/pear-tree' "getting some issues for the function disabled
 
-  "mapping help file TBD to make mappings
-  Plug 'liuchengxu/vim-which-key'
 
   "git
   Plug 'tpope/vim-fugitive' "git intergration
@@ -160,8 +158,6 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'evanleck/vim-svelte'
   Plug 'mattn/emmet-vim'
 
-  " Another Comment Pluging with HTML region support
-  Plug 'tomtom/tcomment_vim'
 
   " Support for comments symbol by language regions Svelte & Html
   Plug 'Shougo/context_filetype.vim' "language regions in files
@@ -210,15 +206,35 @@ call plug#begin(expand('~/.vim/plugged'))
     Plug 'nvim-telescope/telescope.nvim'
     Plug 'nvim-telescope/telescope-fzf-native.nvim', { 'do': 'make' }
 
+    "outlines
     Plug 'simrat39/symbols-outline.nvim' "outlines
     Plug 'nvim-orgmode/orgmode'
+
     ""completion
     Plug 'hrsh7th/nvim-cmp'
     Plug 'hrsh7th/cmp-nvim-lsp'
+
     ""Indent guides
     Plug 'lukas-reineke/indent-blankline.nvim'
+
+<<<<<<< HEAD
+    ""Treesitter backed comments
+    Plug 'numToStr/Comment.nvim'
   else
 
+    " Another Comment Pluging with HTML region support
+    Plug 'tomtom/tcomment_vim'
+
+=======
+    " Plug 'waylonwalker/Telegraph.nvim' "interesting idea simple using vimux nox
+
+    "lua extended version of which key
+    Plug 'folke/which-key.nvim'
+  else
+
+  "mapping help file TBD to make mappings
+  Plug 'liuchengxu/vim-which-key'
+>>>>>>> refs/remotes/origin/master
     ""Indent guides
     Plug 'b3tchi/iguides' "improved guides
     " Plug 'Yggdroot/indentLine'
@@ -290,6 +306,11 @@ set scrolloff=8
 set encoding=utf-8
 set fileencoding=utf-8
 set fileencodings=utf-8
+
+"spelling
+set spelllang=en
+set spellsuggest=best,9 " Show nine spell checking candidates at most
+hi SpellBad cterm=underline ctermfg=red
 
 " always show signcolumns
 set signcolumn=yes
@@ -363,9 +384,16 @@ set fillchars=vert:┃ " for vsplits
 
 nnoremap <C-C> <C-[>
 
-call which_key#register('<Space>', "g:which_key_map")
+
+if g:vimmode != 3
+  call which_key#register('<Space>', "g:which_key_map")
+
+" which key
+nnoremap <silent><space> :WhichKey ' '<CR>
+endif
+
 let g:which_key_map =  {}
-let g:which_key_map.b = '+some'
+let g:which_key_map.b = '+buffer'
 
 " nnoremap <C-p> :GFiles<cr>
 " nnoremap <C-f> :Rg<cr>
@@ -452,22 +480,29 @@ let g:which_key_map.c ={'name':'+console'}
 let g:VimuxRunnerName = "vimuxout"
 let g:VimuxRunnerType = "pane"
 function! VimuxSlime()
-  " call VimuxRunCommand(@v)
   call VimuxRunCommand(@v, 0)
-  echom @v
-  " echom "some"
- endfunction
-
-function! VimuxMdBlock()
- let mdblock = Markdown_eval()
-
- let lines = join(mdblock.code, "\n") . "\n"
- call VimuxRunCommand(lines)
+  " echom @v
 endfunction
 
-function! Markdown_eval()
+function! VimuxMdBlock()
+   let mdblock = MarkdownBlock()
+   "  if mdblock.lang == 'bash'
+   if index(['bash','sh'],mdblock.lang) > -1
+     let lines = join(mdblock.code, "\n") . "\n"
+     call VimuxRunCommand(lines)
+   elseif index(['vim','viml'],mdblock.lang) > -1
+     let lines = mdblock.code
+     let tmp = tempname()
+     call writefile(lines, tmp)
+     exec 'source '.tmp
+     call delete(tmp)
+   endif
+endfunction
+
+function! MarkdownBlock()
   let view = winsaveview()
   let line = line('.')
+  let cpos = getpos('.')
   let start = search('^\s*[`~]\{3,}\S*\s*$', 'bnW')
   if !start
     return
@@ -476,29 +511,16 @@ function! Markdown_eval()
   call cursor(start, 1)
   let [fence, langv] = matchlist(getline(start), '\([`~]\{3,}\)\(\S\+\)\?')[1:2]
   let end = search('^\s*' . fence . '\s*$', 'nW')
-  " let langidx = index(map(copy(g:markdown_interp_languages), al, "=")[0]'), lang)
 
   if end < line""|| langidx < 0
     call winrestview(view)
     return
   endif
 
-  " if g:markdown_interp_languages[langidx] !=# lang
-  "   let lang = split(g:markdown_interp_languages[langidx], '=')[1]
-  " endif
-
-  let block = getline(start + 1, end - 1)
-  " let tmp = tempname()
-  " call writefile(block, tmp)
-  " echo system(lang . ' ' . tmp)
-  " call winrestview(view)
   let resp = {}
-  let resp.code = block"" list2str(block)
+  let resp.code = getline(start + 1, end - 1) ""block"" list2str(block)
   let resp.lang = langv
-  " echom langv
-  " echom block
-  call cursor(line, 1)
-  echom 'ln:' . line
+  call setpos('.',cpos)
   return resp
 endfunction
 
@@ -510,6 +532,8 @@ nnoremap <silent> <space>ci :VimuxInspectRunner<CR>
 nnoremap <silent> <space>cp :VimuxPromptCommand<CR>
 nnoremap <silent> <space>cr vip "vy :call VimuxSlime()<CR>
 nnoremap <silent> <space>cb :call VimuxMdBlock()<CR>
+
+" nnoremap <space>cz :lua require'telegraph'.telegraph({how='tmux_popup', cmd='man '})<Left><Left><Left>
 
 vmap <space>cr "vy :call VimuxSlime()<CR>
 
@@ -620,8 +644,6 @@ let g:better_whitespace_filetypes_blacklist = [
 " --- Vim Wiki ---
 nnoremap <silent><space>Wt :VimwikiTable 1 2
 
-" which key
-nnoremap <silent><space> :WhichKey ' '<CR>
 
 " --- Coc ---
 if lspClient == 1
@@ -785,7 +807,10 @@ function! PreviewIfWide2()
 endfunction
 
 command! -bang -nargs=? -complete=dir FzfFiles
-  \ call fzf#vim#files(<q-args>, PreviewIfWide2(), <bang>0)
+  \ call fzf#vim#files(
+  \ <q-args>,
+  \ PreviewIfWide2(),
+  \ <bang>0)
 
 " Shouldn't be needed https://medium.com/@sidneyliebrand/how-fzf-and-ripgrep-improved-my-workflow-61c7ca212861
 " command! -bang -nargs=* Rg
@@ -800,14 +825,16 @@ command! -bang -nargs=? -complete=dir FzfFiles
 
 command! -bang -nargs=* Trep
   \ call fzf#vim#grep(
-  \   'rg --column --hidden --line-number --no-heading --color=always --glob "!.git/*" --smart-case ''\- \[ \] ''', 1,
-  \   fzf#vim#with_preview('right:40%:hidden', 'ctrl-/'), <bang>0)
+  \   'rg --column --hidden --line-number --no-heading --color=always --glob "!.git/*" --smart-case ' - \[ \]"', 1,
+  \   PreviewIfWide2(),
+  \   <bang>0)
 
 "adjusting ripgrep command TBD project root
 command! -bang -nargs=* Rg
   \ call fzf#vim#grep(
   \   'rg --column --line-number --no-heading --color=always --glob "!.git/*" --smart-case '.shellescape(<q-args>), 1,
-  \   PreviewIfWide2(), <bang>0)
+  \   PreviewIfWide2(),
+  \   <bang>0)
 
 command! -bang -nargs=? -complete=dir GFiles
   \ call fzf#vim#gitfiles(
@@ -903,8 +930,13 @@ endif
 let g:test#strategy = 'neovim'
 
 " --- Markdown specific ---
+function! Mdftinit()
+  setlocal spell spelllang=en_us
+  set filetype=markdown.pandoc
+  " echom 'loade nmd'
+endfunction
 augroup pandoc_syntax
-  au! BufNewFile,BufFilePre,BufRead *.md set filetype=markdown.pandoc
+  au! BufNewFile,BufFilePre,BufRead *.md call Mdftinit()
   " autocmd! FileType vimwiki set syntax=markdown.pandoc
 augroup END
 
@@ -950,13 +982,28 @@ let g:vimwiki_key_mappings = { 'table_mappings': 0 } "! - to fix/change completi
 
 " --- VimWhichKey ---
 set timeoutlen=500
-" moved before bindigs
-" let g:which_key_map =  {}
-" let g:which_key_use_floating_win = 1 "make as floating window
-" let g:which_key_run_map_on_popup = 1
-" call which_key#register(' ', "g:which_key_map")
+if g:vimmode != 3
+
+  call which_key#register('<Space>', "g:which_key_map")
+  nnoremap <silent><space> :WhichKey ' '<CR>
+  " moved before bindigs
+  " let g:which_key_use_floating_win = 1 "make as floating window
+  " let g:which_key_run_map_on_popup = 1
+endif
 
 " --- LUA LSP 0.5
 if g:vimmode == 3
   source ~/.config/nvim/lualsp.vim
 endif
+
+function! RecurseForPath(dict,skey)
+    for key in keys(a:dict)
+        if type(a:dict[key]) == type({})
+            call RecurseForPath(a:dict[key],a:skey.key)
+          else
+            if key != 'name'
+          endif
+        endif
+    endfor
+endfunction
+

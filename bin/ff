@@ -19,5 +19,6 @@
             --highlight-line {2}' \
         --preview-window 'up:50%:noborder:+{2}-3'
 
-tmux ls -F "#S;#{pane_current_path}"
+# tmux ls -F "#S;#{pane_current_path}"
+
     cd -

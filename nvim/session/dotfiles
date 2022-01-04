@@ -10,15 +10,16 @@ endif
 set shortmess=aoO
 argglobal
 %argdel
-edit dotfiles/bin/ff
+edit dotfiles/README.md
 let s:save_splitbelow = &splitbelow
 let s:save_splitright = &splitright
 set splitbelow splitright
 wincmd _ | wincmd |
 split
+1wincmd k
 wincmd _ | wincmd |
-split
-2wincmd k
+vsplit
+1wincmd h
 wincmd w
 wincmd w
 let &splitbelow = s:save_splitbelow
@@ -30,55 +31,57 @@ set winminheight=0
 set winheight=1
 set winminwidth=0
 set winwidth=1
-exe '1resize ' . ((&lines * 12 + 22) / 44)
-exe '2resize ' . ((&lines * 12 + 22) / 44)
-exe '3resize ' . ((&lines * 13 + 22) / 44)
+exe '1resize ' . ((&lines * 21 + 23) / 47)
+exe 'vert 1resize ' . ((&columns * 48 + 48) / 96)
+exe '2resize ' . ((&lines * 21 + 23) / 47)
+exe 'vert 2resize ' . ((&columns * 47 + 48) / 96)
+exe '3resize ' . ((&lines * 20 + 23) / 47)
 argglobal
-balt dotfiles/tmux.conf
+balt dotfiles/nvim/init.vim
 setlocal fdm=indent
 setlocal fde=0
-setlocal fmr={{{,}}}
-setlocal fdi=
-setlocal fdl=6
-setlocal fml=1
-setlocal fdn=20
-setlocal fen
-5
-normal! zo
-15
-normal! zo
-let s:l = 22 - ((9 * winheight(0) + 6) / 12)
-if s:l < 1 | let s:l = 1 | endif
-keepjumps exe s:l
-normal! zt
-keepjumps 22
-normal! 0
-wincmd w
-argglobal
-if bufexists("dotfiles/nvim/init.vim") | buffer dotfiles/nvim/init.vim | else | edit dotfiles/nvim/init.vim | endif
-if &buftype ==# 'terminal'
-  silent file dotfiles/nvim/init.vim
-endif
-balt dotfiles/README.md
-setlocal fdm=indent
-setlocal fde=GetPotionFold(v:lnum)
 setlocal fmr={{{,}}}
 setlocal fdi=
 setlocal fdl=0
 setlocal fml=1
 setlocal fdn=20
 setlocal fen
-let s:l = 464 - ((5 * winheight(0) + 6) / 12)
+let s:l = 11 - ((10 * winheight(0) + 10) / 21)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
-keepjumps 464
-normal! 053|
+keepjumps 11
+normal! 02|
 wincmd w
 argglobal
-if bufexists(".vim/plugged/vim-tmux-runner/doc/vim-tmux-runner.txt") | buffer .vim/plugged/vim-tmux-runner/doc/vim-tmux-runner.txt | else | edit .vim/plugged/vim-tmux-runner/doc/vim-tmux-runner.txt | endif
+if bufexists("dotfiles/nvim/lualsp.vim") | buffer dotfiles/nvim/lualsp.vim | else | edit dotfiles/nvim/lualsp.vim | endif
 if &buftype ==# 'terminal'
-  silent file .vim/plugged/vim-tmux-runner/doc/vim-tmux-runner.txt
+  silent file dotfiles/nvim/lualsp.vim
+endif
+balt dotfiles/nvim/init.vim
+setlocal fdm=indent
+setlocal fde=0
+setlocal fmr={{{,}}}
+setlocal fdi=
+setlocal fdl=19
+setlocal fml=1
+setlocal fdn=20
+setlocal fen
+197
+normal! zo
+206
+normal! zo
+let s:l = 197 - ((9 * winheight(0) + 10) / 21)
+if s:l < 1 | let s:l = 1 | endif
+keepjumps exe s:l
+normal! zt
+keepjumps 197
+normal! 0
+wincmd w
+argglobal
+if bufexists("Applications/neovim/squashfs-root/usr/share/nvim/runtime/doc/options.txt") | buffer Applications/neovim/squashfs-root/usr/share/nvim/runtime/doc/options.txt | else | edit Applications/neovim/squashfs-root/usr/share/nvim/runtime/doc/options.txt | endif
+if &buftype ==# 'terminal'
+  silent file Applications/neovim/squashfs-root/usr/share/nvim/runtime/doc/options.txt
 endif
 balt dotfiles/nvim/init.vim
 setlocal fdm=manual
@@ -91,23 +94,27 @@ setlocal fdn=20
 setlocal nofen
 silent! normal! zE
 let &fdl = &fdl
-let s:l = 183 - ((6 * winheight(0) + 6) / 13)
+let s:l = 5771 - ((11 * winheight(0) + 10) / 20)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
-keepjumps 183
-normal! 073|
+keepjumps 5771
+normal! 049|
 wincmd w
-2wincmd w
-exe '1resize ' . ((&lines * 12 + 22) / 44)
-exe '2resize ' . ((&lines * 12 + 22) / 44)
-exe '3resize ' . ((&lines * 13 + 22) / 44)
+exe '1resize ' . ((&lines * 21 + 23) / 47)
+exe 'vert 1resize ' . ((&columns * 48 + 48) / 96)
+exe '2resize ' . ((&lines * 21 + 23) / 47)
+exe 'vert 2resize ' . ((&columns * 47 + 48) / 96)
+exe '3resize ' . ((&lines * 20 + 23) / 47)
 if exists(':tcd') == 2 | tcd ~/dotfiles | endif
 tabnext 1
-badd +22 ~/dotfiles/bin/ff
-badd +103 ~/dotfiles/tmux.conf
-badd +464 ~/dotfiles/nvim/init.vim
-badd +2 ~/dotfiles/README.md
+badd +198 ~/dotfiles/nvim/lualsp.vim
+badd +11 ~/dotfiles/README.md
+badd +1572 ~/Applications/neovim/squashfs-root/usr/share/nvim/runtime/doc/api.txt
+badd +24 ~/dotfiles/bin/ff
+badd +17 ~/dotfiles/tmux.conf
+badd +184 ~/.vim/plugged/vim-tmux-runner/doc/vim-tmux-runner.txt
+badd +305 ~/dotfiles/nvim/init.vim
 if exists('s:wipebuf') && len(win_findbuf(s:wipebuf)) == 0 && getbufvar(s:wipebuf, '&buftype') isnot# 'terminal'
   silent exe 'bwipe ' . s:wipebuf
 endif
