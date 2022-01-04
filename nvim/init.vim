@@ -449,7 +449,8 @@ let g:which_key_map.v.i ={'name':'+init.vim'}
 nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>
 
 let g:which_key_map.c ={'name':'+console'}
-
+let g:VimuxRunnerName = "vimuxout"
+let g:VimuxRunnerType = "pane"
 function! VimuxSlime()
   " call VimuxRunCommand(@v)
   call VimuxRunCommand(@v, 0)
