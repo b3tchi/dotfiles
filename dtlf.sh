@@ -17,11 +17,8 @@ function ml(){
     fi
   fi
 
-  # filename=$3${2##*/}
-
   target=$3$filename
   source=$1$2
-
 
   #file in path
   if [[ (-f $target || -d $target ) && ! -L $target ]]; then
@@ -43,7 +40,7 @@ function ml(){
   fi
 
   #create link
-  ln -sf $1$2 $target
+  ln -sf $source $target
   echo "OK - linked ... $2 to $target"
 
 }
