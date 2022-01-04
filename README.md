@@ -1,4 +1,4 @@
-for instalation use bash script
+For installation use bash script
 [dtlf sh](dtlf.sh)
 
 ```bash
@@ -8,7 +8,7 @@ echo "something \
       aggg"
 echo something
 ```
-
+spelling error
 ```sh
 echo anything
 echo anything

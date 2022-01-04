@@ -219,7 +219,6 @@ call plug#begin(expand('~/.vim/plugged'))
 
     ""Treesitter backed comments
     Plug 'numToStr/Comment.nvim'
-
     " Plug 'waylonwalker/Telegraph.nvim' "interesting idea simple using vimux nox
 
     "lua extended version of which key
@@ -303,6 +302,11 @@ set scrolloff=8
 set encoding=utf-8
 set fileencoding=utf-8
 set fileencodings=utf-8
+
+"spelling
+set spelllang=en
+set spellsuggest=best,9 " Show nine spell checking candidates at most
+hi SpellBad cterm=underline ctermfg=red
 
 " always show signcolumns
 set signcolumn=yes
@@ -469,7 +473,8 @@ let g:which_key_map.v.i ={'name':'+init.vim'}
 nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>
 
 let g:which_key_map.c ={'name':'+console'}
-
+let g:VimuxRunnerName = "vimuxout"
+let g:VimuxRunnerType = "pane"
 function! VimuxSlime()
   call VimuxRunCommand(@v, 0)
   " echom @v
@@ -932,8 +937,13 @@ endif
 let g:test#strategy = 'neovim'
 
 " --- Markdown specific ---
+function! Mdftinit()
+  setlocal spell spelllang=en_us
+  set filetype=markdown.pandoc
+  " echom 'loade nmd'
+endfunction
 augroup pandoc_syntax
-  au! BufNewFile,BufFilePre,BufRead *.md set filetype=markdown.pandoc
+  au! BufNewFile,BufFilePre,BufRead *.md call Mdftinit()
   " autocmd! FileType vimwiki set syntax=markdown.pandoc
 augroup END
 
