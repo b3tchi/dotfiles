@@ -1,51 +1,133 @@
 let SessionLoad = 1
-let s:so_save = &so | let s:siso_save = &siso | set so=0 siso=0
+let s:so_save = &g:so | let s:siso_save = &g:siso | setg so=0 siso=0 | setl so=-1 siso=-1
 let v:this_session=expand("<sfile>:p")
 silent only
+silent tabonly
 cd ~/
 if expand('%') == '' && !&modified && line('$') <= 1 && getline(1) == ''
   let s:wipebuf = bufnr('%')
 endif
 set shortmess=aoO
-badd +2 dotfiles/README.md
-badd +469 dotfiles/nvim/init.vim
-badd +33 dotfiles/tmux.conf
 argglobal
 %argdel
-edit dotfiles/nvim/init.vim
+edit dotfiles/README.md
+let s:save_splitbelow = &splitbelow
+let s:save_splitright = &splitright
 set splitbelow splitright
+wincmd _ | wincmd |
+split
+1wincmd k
+wincmd _ | wincmd |
+vsplit
+1wincmd h
+wincmd w
+wincmd w
+let &splitbelow = s:save_splitbelow
+let &splitright = s:save_splitright
 wincmd t
+let s:save_winminheight = &winminheight
+let s:save_winminwidth = &winminwidth
 set winminheight=0
 set winheight=1
 set winminwidth=0
 set winwidth=1
+exe '1resize ' . ((&lines * 21 + 23) / 47)
+exe 'vert 1resize ' . ((&columns * 48 + 48) / 96)
+exe '2resize ' . ((&lines * 21 + 23) / 47)
+exe 'vert 2resize ' . ((&columns * 47 + 48) / 96)
+exe '3resize ' . ((&lines * 20 + 23) / 47)
 argglobal
-setlocal fdm=expr
-setlocal fde=GetPotionFold(v:lnum)
+balt dotfiles/nvim/init.vim
+setlocal fdm=indent
+setlocal fde=0
 setlocal fmr={{{,}}}
 setlocal fdi=
 setlocal fdl=0
 setlocal fml=1
 setlocal fdn=20
 setlocal fen
-let s:l = 385 - ((17 * winheight(0) + 18) / 37)
+let s:l = 11 - ((10 * winheight(0) + 10) / 21)
 if s:l < 1 | let s:l = 1 | endif
-exe s:l
+keepjumps exe s:l
 normal! zt
-385
+keepjumps 11
+normal! 02|
+wincmd w
+argglobal
+if bufexists("dotfiles/nvim/lualsp.vim") | buffer dotfiles/nvim/lualsp.vim | else | edit dotfiles/nvim/lualsp.vim | endif
+if &buftype ==# 'terminal'
+  silent file dotfiles/nvim/lualsp.vim
+endif
+balt dotfiles/nvim/init.vim
+setlocal fdm=indent
+setlocal fde=0
+setlocal fmr={{{,}}}
+setlocal fdi=
+setlocal fdl=19
+setlocal fml=1
+setlocal fdn=20
+setlocal fen
+197
+normal! zo
+206
+normal! zo
+let s:l = 197 - ((9 * winheight(0) + 10) / 21)
+if s:l < 1 | let s:l = 1 | endif
+keepjumps exe s:l
+normal! zt
+keepjumps 197
 normal! 0
+wincmd w
+argglobal
+if bufexists("Applications/neovim/squashfs-root/usr/share/nvim/runtime/doc/options.txt") | buffer Applications/neovim/squashfs-root/usr/share/nvim/runtime/doc/options.txt | else | edit Applications/neovim/squashfs-root/usr/share/nvim/runtime/doc/options.txt | endif
+if &buftype ==# 'terminal'
+  silent file Applications/neovim/squashfs-root/usr/share/nvim/runtime/doc/options.txt
+endif
+balt dotfiles/nvim/init.vim
+setlocal fdm=manual
+setlocal fde=0
+setlocal fmr={{{,}}}
+setlocal fdi=
+setlocal fdl=0
+setlocal fml=1
+setlocal fdn=20
+setlocal nofen
+silent! normal! zE
+let &fdl = &fdl
+let s:l = 5771 - ((11 * winheight(0) + 10) / 20)
+if s:l < 1 | let s:l = 1 | endif
+keepjumps exe s:l
+normal! zt
+keepjumps 5771
+normal! 049|
+wincmd w
+exe '1resize ' . ((&lines * 21 + 23) / 47)
+exe 'vert 1resize ' . ((&columns * 48 + 48) / 96)
+exe '2resize ' . ((&lines * 21 + 23) / 47)
+exe 'vert 2resize ' . ((&columns * 47 + 48) / 96)
+exe '3resize ' . ((&lines * 20 + 23) / 47)
 if exists(':tcd') == 2 | tcd ~/dotfiles | endif
 tabnext 1
-if exists('s:wipebuf') && getbufvar(s:wipebuf, '&buftype') isnot# 'terminal'
+badd +198 ~/dotfiles/nvim/lualsp.vim
+badd +11 ~/dotfiles/README.md
+badd +1572 ~/Applications/neovim/squashfs-root/usr/share/nvim/runtime/doc/api.txt
+badd +24 ~/dotfiles/bin/ff
+badd +17 ~/dotfiles/tmux.conf
+badd +184 ~/.vim/plugged/vim-tmux-runner/doc/vim-tmux-runner.txt
+badd +305 ~/dotfiles/nvim/init.vim
+if exists('s:wipebuf') && len(win_findbuf(s:wipebuf)) == 0 && getbufvar(s:wipebuf, '&buftype') isnot# 'terminal'
   silent exe 'bwipe ' . s:wipebuf
 endif
 unlet! s:wipebuf
-set winheight=1 winwidth=20 winminheight=1 winminwidth=1 shortmess=filnxtToOFcsI
+set winheight=1 winwidth=20 shortmess=filnxtToOFsIc
+let &winminheight = s:save_winminheight
+let &winminwidth = s:save_winminwidth
 let s:sx = expand("<sfile>:p:r")."x.vim"
-if file_readable(s:sx)
+if filereadable(s:sx)
   exe "source " . fnameescape(s:sx)
 endif
-let &so = s:so_save | let &siso = s:siso_save
+let &g:so = s:so_save | let &g:siso = s:siso_save
+set hlsearch
 doautoall SessionLoadPost
 unlet SessionLoad
 " vim: set ft=vim :
