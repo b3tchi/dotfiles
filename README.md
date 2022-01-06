@@ -30,6 +30,13 @@ cd /mnt/c/ && cmd.exe /c echo %TEMP% && cd - | grep C: | sed 's/\xEF\xBB\xBF//g'
 Write-Host 'test2'
 ```
 
+testing startifier
+```bash
+#%% ls ~/.local/share/nvim/session/ 
+testx=$(find ~/.local/share/nvim/session/ -mindepth 1 -maxdepth 1 -printf '%f\n')
+echo $testx
+```
+
 ```vim
 if index(['a','b'],'c') ==-1
   " echom expand('<cword>')
