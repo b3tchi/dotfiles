@@ -44,6 +44,7 @@ exe 'vert 3resize ' . ((&columns * 118 + 118) / 236)
 exe '4resize ' . ((&lines * 20 + 24) / 48)
 exe 'vert 4resize ' . ((&columns * 118 + 118) / 236)
 argglobal
+balt nvim/init.vim
 setlocal fdm=indent
 setlocal fde=0
 setlocal fmr={{{,}}}
@@ -53,14 +54,6 @@ setlocal fml=1
 setlocal fdn=20
 setlocal fen
 91
-normal! zo
-329
-normal! zo
-404
-normal! zo
-480
-normal! zo
-485
 normal! zo
 let s:l = 972 - ((10 * winheight(0) + 11) / 22)
 if s:l < 1 | let s:l = 1 | endif
@@ -83,18 +76,19 @@ setlocal fdl=0
 setlocal fml=1
 setlocal fdn=20
 setlocal fen
-let s:l = 78 - ((12 * winheight(0) + 10) / 20)
+let s:l = 78 - ((11 * winheight(0) + 10) / 20)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
 keepjumps 78
-normal! 073|
+normal! 057|
 wincmd w
 argglobal
 if bufexists("README.md") | buffer README.md | else | edit README.md | endif
 if &buftype ==# 'terminal'
   silent file README.md
 endif
+balt nvim/init.vim
 setlocal fdm=manual
 setlocal fde=0
 setlocal fmr={{{,}}}
@@ -128,7 +122,7 @@ setlocal fdn=20
 setlocal nofen
 silent! normal! zE
 let &fdl = &fdl
-let s:l = 9624 - ((12 * winheight(0) + 10) / 20)
+let s:l = 9624 - ((11 * winheight(0) + 10) / 20)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
@@ -144,14 +138,15 @@ exe 'vert 3resize ' . ((&columns * 118 + 118) / 236)
 exe '4resize ' . ((&lines * 20 + 24) / 48)
 exe 'vert 4resize ' . ((&columns * 118 + 118) / 236)
 tabnext 1
-badd +202 nvim/lualsp.vim
+badd +972 nvim/init.vim
+badd +17 tmux.conf
 badd +36 README.md
+badd +0 ~/Applications/neovim/squashfs-root/usr/share/nvim/runtime/doc/eval.txt
+badd +202 nvim/lualsp.vim
 badd +89 dtlf.sh
 badd +1572 ~/Applications/neovim/squashfs-root/usr/share/nvim/runtime/doc/api.txt
 badd +24 bin/ff
-badd +17 tmux.conf
 badd +184 ~/.vim/plugged/vim-tmux-runner/doc/vim-tmux-runner.txt
-badd +972 nvim/init.vim
 badd +6 bin/nvim-sessionizer
 if exists('s:wipebuf') && len(win_findbuf(s:wipebuf)) == 0 && getbufvar(s:wipebuf, '&buftype') isnot# 'terminal'
   silent exe 'bwipe ' . s:wipebuf
@@ -166,6 +161,7 @@ if filereadable(s:sx)
 endif
 let &g:so = s:so_save | let &g:siso = s:siso_save
 set hlsearch
+nohlsearch
 doautoall SessionLoadPost
 unlet SessionLoad
 " vim: set ft=vim :
