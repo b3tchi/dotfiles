@@ -226,12 +226,13 @@ fi
 stty -ixon
 # fi
 
-## Nvim Shortcuts
+## Nvim Shortcuts - will go to /bin/startifier
 alias dotfiles="nvim -c ':SLoad dotfiles'"
 alias mwiki="nvim -c ':SLoad wiki'"
 alias wwiki="nvim -c ':SLoad wiki_LEGO'"
 alias scripts="nvim -c ':SLoad scripts'"
 
+# keep tmux runing as a service
 alias tmuxs="systemd-run --scope --user tmux"
 
 ## Custom shortcuts
@@ -239,6 +240,7 @@ alias tmuxs="systemd-run --scope --user tmux"
 alias fvh="ggvh"
 
 alias qr='qrencode -m 2 -t utf8 <<< "$1"'
+
 ## Files
 alias -s azcli=nvim
 

@@ -3,23 +3,29 @@
 if [[ $# -eq 1 ]]; then
     selected=$1
 else
-    selected=$((find ~/.local/share/nvim/session/ -mindepth 1 -maxdepth 1 -printf '%f\n') | fzf)
+    selected=$((find ~/.local/share/nvim/session/ -mindepth 1 -maxdepth 1 -printf '%f\n') | grep -v '__LAST__' | grep -v $(tmux display-message -p '#S') | fzf)
 fi
 
 if [[ -z $selected ]]; then
     exit 0
 fi
 
-selected_name=$(basename "$selected" | tr . _)
+# selected_name=$(basename "$selected" | tr . _)
+selected_name=$selected
 tmux_running=$(pgrep tmux)
 
+#session is not exits create tmux
 if [[ -z $TMUX ]] && [[ -z $tmux_running ]]; then
-    tmux new-session -s $selected_name -c $selected
+    tmux new-session -s $selected_name #'-c $selected
+    tmux send-keys -t $selected_name:1 "nvim -c ':SLoad ${selected_name}'" C-m
     exit 0
 fi
 
+#session not exists yet in tmux sessions
 if ! tmux has-session -t $selected_name 2> /dev/null; then
-    tmux new-session -ds $selected_name -c $selected
+    tmux new-session -ds $selected_name #-c $selected # -ds create session deattached
+    tmux send-keys -t $selected_name:1 "nvim -c ':SLoad ${selected_name}'" C-m
 fi
 
+#attach to session
 tmux switch-client -t $selected_name
