@@ -58,3 +58,56 @@ if index(['a','b'],'c') ==-1
 
 endif
 ```
+
+```vim
+  let tpbl = []
+  let tpbl = tabpagebuflist()
+
+  for buf in filter(range(1, bufnr('$')), 'bufexists(bufname(v:val)) && index(tpbl, v:val)>=0')
+  ""  if getbufvar(buf, '&buftype') ==? 'terminal'
+      echom getbufvar(buf, '&filetype')
+
+      echom bufname(buf)
+      if bufname(buf) == ".git/index"
+      set switchbuf=useopen
+      execute "sb" bufname(buf)
+      ""echom getbufvar(buf, '&')
+      ""return
+   endif
+  endfor
+""echom expand('%')
+
+```
+
+```vim
+let tpbl = []
+let tpbl = tabpagebuflist()
+
+for buf in filter(range(1, bufnr('$')), 'bufexists(bufname(v:val)) && index(tpbl, v:val)>=0')
+""  if getbufvar(buf, '&buftype') ==? 'terminal'
+""   echom getbufvar(buf, '&filetype')
+if bufname(buf) == "README.md"
+echom len(win_findbuf(buf))
+endif
+
+echom bufname(buf)
+if bufname(buf) == ".git/index"
+""set switchbuf=useopen
+""execute "sb" bufname(buf)
+echom "main"
+""return
+endif
+fu! StartsWith(longer, shorter) abort
+  return a:longer[0:len(a:shorter)-1] ==# a:shorter
+endfunction
+if StartsWith(bufname(buf),"fugitive://" )
+""set switchbuf=useopen
+""execute "sb" bufname(buf)
+echom "worktree"
+""return
+endif
+
+endfor
+""echom expand('%')
+
+```
