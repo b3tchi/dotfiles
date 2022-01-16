@@ -83,6 +83,11 @@ endif
 let tpbl = []
 let tpbl = tabpagebuflist()
 
+let wttgtbufid = -1
+let wtbufid = -1
+let stagebuf = -1
+let wttgtbufname = ""
+
 for buf in filter(range(1, bufnr('$')), 'bufexists(bufname(v:val)) && index(tpbl, v:val)>=0')
 ""  if getbufvar(buf, '&buftype') ==? 'terminal'
 ""   echom getbufvar(buf, '&filetype')
@@ -96,18 +101,90 @@ if bufname(buf) == ".git/index"
 ""execute "sb" bufname(buf)
 echom "main"
 ""return
+let stagebuf = buf
 endif
+
 fu! StartsWith(longer, shorter) abort
   return a:longer[0:len(a:shorter)-1] ==# a:shorter
 endfunction
+
 if StartsWith(bufname(buf),"fugitive://" )
+""echom expand(bufname(buf):e)
+echom matchstrpos(bufname(buf),'\.git\/\/0\/')
+let posm = matchstrpos(bufname(buf),'\.git\/\/0\/')
+let wttgtbufname = bufname(buf)[posm[2]:]
+let wttgtbufid = bufnr(wtbufname)
+let wtbufid = buf
+echom len(win_findbuf(wttgtbufid))
 ""set switchbuf=useopen
+""echom getbufvar(buf, '&')
+
 ""execute "sb" bufname(buf)
 echom "worktree"
+
+
 ""return
 endif
 
 endfor
 ""echom expand('%')
+set switchbuf=useopen
+execute "sb" bufname(stagebuf)
 
+if wtbufid != -1
+
+execute "bd" wtbufid
+execute "bd" wttgtbufid
+
+endif
+
+echom expand("<cfile>")
+if expand("<cfile>") != wttgtbufname
+echom 'ndiff'
+normal o
+execute "Gdiffsplit"
+""set switchbuf=useopen
+""execute "sb" bufname(stagebuf)
+""normal dd
+set switchbuf=useopen
+execute "sb" bufname(stagebuf)
+else
+echom 'none'
+endif
+
+
+""execute "sp"
+""normal gg
+""normal jj
+
+
+```
+
+```vim
+""execute "wincmd" "K"
+""exe "normal! |<c-w>|s"
+echom expand("<cfile>")
+```
+
+test lua embedded in vim
+```vim
+lua << EOF
+print('abf')
+EOF
+```
+
+list all windows in diff mode
+```vim
+echo filter(range(1, winnr('$')), 'getwinvar(v:val, "&diff") == 1')
+```
+
+```vim
+echom expand('./nvim/init.vim')
+echom filereadable('./nvim/init.vim')
+```
+
+```vim
+source ./nvim/fugidiff.vim
+let r = Cheeckdiff()
+echom r
 ```

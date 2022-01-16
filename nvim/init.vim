@@ -156,7 +156,6 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'evanleck/vim-svelte'
   Plug 'mattn/emmet-vim'
 
-
   " Support for comments symbol by language regions Svelte & Html
   Plug 'Shougo/context_filetype.vim' "language regions in files
   " Plug 'tyru/caw.vim' "comments with context regions
@@ -208,6 +207,9 @@ call plug#begin(expand('~/.vim/plugged'))
     Plug 'nvim-lua/plenary.nvim'
     Plug 'nvim-telescope/telescope.nvim'
     Plug 'nvim-telescope/telescope-fzf-native.nvim', { 'do': 'make' }
+
+    " git
+    Plug 'sindrets/diffview.nvim'
 
     "outlines
     Plug 'simrat39/symbols-outline.nvim' "outlines
@@ -411,6 +413,8 @@ function FuzzyFiles()
   endif
 endfunction
 
+autocmd FileType fugitive nmap <buffer> j )
+autocmd FileType fugitive nmap <buffer> k (
 
 let g:which_key_map.g ={'name':'+git'}
 let g:which_key_map.g.g = 'fugitive'
@@ -474,7 +478,7 @@ let g:which_key_map.v.c ={'name':'+coc'}
 nnoremap <silent> <space>vcu :CocUpdate<cr>
 
 let g:which_key_map.v.i ={'name':'+init.vim'}
-nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>
+nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>:LightlineReload<cr>
 
 let g:which_key_map.c ={'name':'+console'}
 " let g:VimuxRunnerName = "vimuxout"
@@ -518,7 +522,6 @@ function! VimuxMdBlock()
       let cmd = 'powershell.exe ''' . win_tmpps . ''''
       call VimuxRunCommand(cmd)
 
-     
 
    "wimscript
  elseif index(['vim','viml'],mdblock.lang) > -1
@@ -640,6 +643,7 @@ nnoremap <space>wb <c-w>s
 nnoremap <space>wc <c-w>c
 nnoremap <space>wm :call SwitchMainWindow()<cr>
 nnoremap <space>wo :only<cr>
+nnoremap <space>wl <c-w>p
 
 "" indentation
 "nnoremap > >>_
@@ -976,6 +980,7 @@ let g:test#strategy = 'neovim'
 function! Mdftinit()
   setlocal spell spelllang=en_us
   set filetype=markdown.pandoc
+  let g:pandoc#syntax#codeblocks#embeds#langs = ["vim=vim"]
   " echom 'loade nmd'
 endfunction
 augroup pandoc_syntax
