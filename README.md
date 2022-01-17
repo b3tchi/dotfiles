@@ -166,6 +166,14 @@ endif
 echom expand("<cfile>")
 ```
 
+```vim
+
+echom 'paragarph first command'
+echom getline('.')[2:] "command line content current cursor
+echom getline(line("'{")+1) "line content on the beginning of paragraph
+
+```
+
 test lua embedded in vim
 ```vim
 lua << EOF
@@ -183,8 +191,30 @@ echom expand('./nvim/init.vim')
 echom filereadable('./nvim/init.vim')
 ```
 
+buffer status
 ```vim
 source ./nvim/fugidiff.vim
-let r = Cheeckdiff()
+let r = Checkdiff()
 echom r
+```
+
+Current buffer items
+```vim
+source ./nvim/fugidiff.vim
+call DiffTog()
+```
+
+Switch to window do action and do back
+```vim
+let currwin = winnr()
+execute 3 . 'wincmd w'
+normal ]c
+execute currwin . 'wincmd w'
+
+```
+
+switch to next item
+```vim
+source ./nvim/fugidiff.vim
+call NextItem()
 ```

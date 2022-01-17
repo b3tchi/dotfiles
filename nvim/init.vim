@@ -413,6 +413,8 @@ function FuzzyFiles()
   endif
 endfunction
 
+source ~/dotfiles/nvim/fugidiff.vim
+
 autocmd FileType fugitive nmap <buffer> j )
 autocmd FileType fugitive nmap <buffer> k (
 
