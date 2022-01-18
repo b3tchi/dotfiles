@@ -201,7 +201,7 @@ echom r
 Current buffer items
 ```vim
 source ./nvim/fugidiff.vim
-call DiffTog()
+call DiffTog(1)
 ```
 
 Switch to window do action and do back

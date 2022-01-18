@@ -1,4 +1,4 @@
-echom 'fugidiff'
+" echom 'fugidiff'
 fu! Testfu() abort
   echom 'spejbl'
 endfunction
@@ -19,48 +19,35 @@ fu! Checkdiff() abort
   let wttgtbufwincount = 1
 
   for buf in filter(range(1, bufnr('$')), 'bufexists(bufname(v:val)) && index(tpbl, v:val)>=0')
-    ""  if getbufvar(buf, '&buftype') ==? 'terminal'
-    ""   echom getbufvar(buf, '&filetype')
-    if bufname(buf) == "README.md"
-      echom len(win_findbuf(buf))
-    endif
+    " if bufname(buf) == "README.md"
+    "   echom len(win_findbuf(buf))
+    " endif
 
-    echom bufname(buf)
+    " echom bufname(buf)
     if bufname(buf) == ".git/index"
-      ""set switchbuf=useopen
-      ""execute "sb" bufname(buf)
-      echom "main"
-      ""return
+      " echom "main"
       let stagebuf = buf
     endif
 
 
     if StartsWith(bufname(buf),"fugitive://" )
-      ""echom expand(bufname(buf):e)
-      echom matchstrpos(bufname(buf),'\.git\/\/0\/')
+      " echom matchstrpos(bufname(buf),'\.git\/\/0\/')
       let posm = matchstrpos(bufname(buf),'\.git\/\/0\/')
       let wttgtbufname = bufname(buf)[posm[2]:]
 
       for difwin in filter(range(1, winnr('$')), 'getwinvar(v:val, "&diff") == 1')
-        echom 'difwin'. difwin . ' - ' . bufname(winbufnr(difwin))
+        " echom 'difwin'. difwin . ' - ' . bufname(winbufnr(difwin))
         if bufname(winbufnr(difwin)) == wttgtbufname
           let wttgtwinid = difwin
         endif
 
       endfor
+
       let wttgtbufid = bufnr(wttgtbufname)
       let wtbufid = buf
       let wttgtbufwincount = len(win_findbuf(wttgtbufid))
-      ""set switchbuf=useopen
-      ""echom getbufvar(buf, '&')
-
-      ""execute "sb" bufname(buf)
-      echom "worktree"
-
-
-      ""return
+      " echom "worktree"
     endif
-
   endfor
 
 
@@ -81,28 +68,34 @@ fu! Checkdiff() abort
 
 endfunction
 
-fu! DiffTog() abort
+fu! DiffTog(toggleDisabled) abort
 
   let r = Checkdiff()
-  ""echom expand('%')
-  set switchbuf=useopen
-  execute "sb" bufname(r.stage.bufid)
+
+  if bufnr("%") != r.stage.bufid
+    set switchbuf=useopen
+    execute "sb" bufname(r.stage.bufid)
+  endif
 
   let curfname = getline('.')[2:] "command line content current cursor
   let cursection = getline(line("'{")+1) "line content on the beginning of paragraph
 
-  echom curfname
-  echom cursection
+  "repeating
+  if (a:toggleDisabled == 1) && (curfname == r.wt.fname )
+    return
+  endif
+
+  " echom curfname
+  " echom cursection
 
   "cleanup
   if r.wt.bufid != -1
-
     "new item
     if r.wt.tgtwincount == 1
       execute "bd" r.wt.tgtbufid
     else
       if r.wt.tgtwinid != -1 "close window
-        echom 'close window ' . r.wt.tgtwinid
+        " echom 'close window ' . r.wt.tgtwinid
         execute r.wt.tgtwinid . "wincmd q"
       endif
     endif
@@ -111,45 +104,50 @@ fu! DiffTog() abort
 
   endif
 
-  " return
+  "exit when toggling is off and no fugitive buffer
+  if (a:toggleDisabled == 1) && (r.wt.bufid == -1)
+    return
+  endif
 
-  " echom expand("<cfile>")
   if (curfname != r.wt.fname) || (curfname == r.wt.fname && r.wt.tgtwinid == -1)
-    echom 'ndiff'
+    " echom 'ndiff'
     normal o
     normal zR
-    normal gg
     execute "Gdiffsplit"
+    normal gg
     normal ]c
-    ""set switchbuf=useopen
-    ""execute "sb" bufname(stagebuf)
-    ""normal dd
+
     set switchbuf=useopen
     execute "sb" bufname(r.stage.bufid)
   else
-    echom 'none'
+    " echom 'none'
   endif
 
 endfunction
 
-fu! NextItem() abort
+fu! PrevChange() abort
 
   let r = Checkdiff()
-  ""echom expand('%')
-  " set switchbuf=useopen
-  " execute "sb" bufname(r.stage.bufid)
-  "
-  " let curfname = getline('.')[2:] "command line content current cursor
-  " let cursection = getline(line("'{")+1) "line content on the beginning of paragraph
-  "
-  " echom curfname
-  " echom cursection
 
   "new item
   if r.wt.tgtwinid != -1 "close window
     let currwin = winnr()
     execute r.wt.tgtwinid . 'wincmd w'
     normal ]c
+    execute currwin . 'wincmd w'
+  endif
+
+endfunction
+
+fu! NextChange() abort
+
+  let r = Checkdiff()
+
+  "new item
+  if r.wt.tgtwinid != -1 "close window
+    let currwin = winnr()
+    execute r.wt.tgtwinid . 'wincmd w'
+    normal [c
     execute currwin . 'wincmd w'
   endif
 
