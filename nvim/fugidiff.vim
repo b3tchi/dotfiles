@@ -78,7 +78,7 @@ fu! DiffTog(toggleDisabled) abort
   endif
 
   let curfname = getline('.')[2:] "command line content current cursor
-  let cursection = getline(line("'{")+1) "line content on the beginning of paragraph
+  let cursection = getline(line("'{")+1)[:7] "line content on the beginning of paragraph
 
   "repeating
   if (a:toggleDisabled == 1) && (curfname == r.wt.fname )
@@ -104,6 +104,10 @@ fu! DiffTog(toggleDisabled) abort
 
   endif
 
+  "exit while not in Unstaged
+  if cursection != 'Unstaged'
+    return
+  endif
   "exit when toggling is off and no fugitive buffer
   if (a:toggleDisabled == 1) && (r.wt.bufid == -1)
     return
