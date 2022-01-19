@@ -418,8 +418,8 @@ source ~/dotfiles/nvim/fugidiff.vim
 autocmd FileType fugitive nmap <buffer> j ):call DiffTog(1)<cr>
 autocmd FileType fugitive nmap <buffer> k (:call DiffTog(1)<cr>
 autocmd FileType fugitive nmap <buffer><silent> dd :call DiffTog(0)<CR>
-autocmd FileType fugitive nmap <buffer><silent> l :call PrevChange()<CR>
-autocmd FileType fugitive nmap <buffer><silent> h :call NextChange()<CR>
+autocmd FileType fugitive nmap <buffer><silent> l :call NextChange()<CR>
+autocmd FileType fugitive nmap <buffer><silent> h :call PrevChange()<CR>
 
 let g:which_key_map.g ={'name':'+git'}
 let g:which_key_map.g.g = 'fugitive'

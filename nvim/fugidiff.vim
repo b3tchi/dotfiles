@@ -112,10 +112,11 @@ fu! DiffTog(toggleDisabled) abort
   if (curfname != r.wt.fname) || (curfname == r.wt.fname && r.wt.tgtwinid == -1)
     " echom 'ndiff'
     normal o
-    normal zR
-    execute "Gdiffsplit"
+    execute "Gdiffsplit!"
+    " normal zR
     normal gg
-    normal ]c
+    execute "GitGutterNextHunk"
+    " normal ]c
 
     set switchbuf=useopen
     execute "sb" bufname(r.stage.bufid)
@@ -131,10 +132,12 @@ fu! PrevChange() abort
 
   "new item
   if r.wt.tgtwinid != -1 "close window
-    let currwin = winnr()
-    execute r.wt.tgtwinid . 'wincmd w'
-    normal ]c
-    execute currwin . 'wincmd w'
+    echo win_execute(win_getid(r.wt.tgtwinid ),'GitGutterPrevHunk')
+    " let currwin = winnr()
+    " execute r.wt.tgtwinid . 'wincmd w'
+    " " normal ]c
+    " execute "GitGutterPrevHunk"
+    " execute currwin . 'wincmd w'
   endif
 
 endfunction
@@ -145,10 +148,13 @@ fu! NextChange() abort
 
   "new item
   if r.wt.tgtwinid != -1 "close window
-    let currwin = winnr()
-    execute r.wt.tgtwinid . 'wincmd w'
-    normal [c
-    execute currwin . 'wincmd w'
+    " let currwin = winnr()
+    " execute r.wt.tgtwinid . 'wincmd w'
+    " normal [c
+
+    echo win_execute(win_getid(r.wt.tgtwinid ),'GitGutterNextHunk')
+    " execute "GitGutterNextHunk"
+    " execute currwin . 'wincmd w'
   endif
 
 endfunction
