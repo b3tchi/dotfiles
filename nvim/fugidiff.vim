@@ -7,6 +7,10 @@ fu! StartsWith(longer, shorter) abort
   return a:longer[0:len(a:shorter)-1] ==# a:shorter
 endfunction
 
+fu! EndsWith(longer, shorter) abort
+  return a:longer[(len(a:longer)-len(a:shorter)):] ==# a:shorter
+endfunction
+
 fu! Checkdiff() abort
   let tpbl = []
   let tpbl = tabpagebuflist()
@@ -23,21 +27,23 @@ fu! Checkdiff() abort
     "   echom len(win_findbuf(buf))
     " endif
 
-    " echom bufname(buf)
-    if bufname(buf) == ".git/index"
+    let bfname = bufname(buf)
+    " echom bfname
+    if EndsWith(bfname,".git/index")
       " echom "main"
       let stagebuf = buf
     endif
 
 
-    if StartsWith(bufname(buf),"fugitive://" )
+    if StartsWith(bfname,"fugitive://" )
       " echom matchstrpos(bufname(buf),'\.git\/\/0\/')
-      let posm = matchstrpos(bufname(buf),'\.git\/\/0\/')
-      let wttgtbufname = bufname(buf)[posm[2]:]
+      let posm = matchstrpos(bfname,'\.git\/\/0\/')
+      let wttgtbufname = bfname[posm[2]:]
 
       for difwin in filter(range(1, winnr('$')), 'getwinvar(v:val, "&diff") == 1')
-        " echom 'difwin'. difwin . ' - ' . bufname(winbufnr(difwin))
-        if bufname(winbufnr(difwin)) == wttgtbufname
+        let difname = bufname(winbufnr(difwin))
+        " echom 'difwin'. difwin . ' - ' . difname
+        if EndsWith(difname, wttgtbufname) && !StartsWith(difname,"fugitive://" )
           let wttgtwinid = difwin
         endif
 
@@ -72,6 +78,7 @@ fu! DiffTog(toggleDisabled) abort
 
   let r = Checkdiff()
 
+  " echo r
   if bufnr("%") != r.stage.bufid
     set switchbuf=useopen
     execute "sb" bufname(r.stage.bufid)
@@ -124,7 +131,7 @@ fu! DiffTog(toggleDisabled) abort
 
     set switchbuf=useopen
     execute "sb" bufname(r.stage.bufid)
-  else
+  " else
     " echom 'none'
   endif
 
@@ -134,14 +141,8 @@ fu! PrevChange() abort
 
   let r = Checkdiff()
 
-  "new item
   if r.wt.tgtwinid != -1 "close window
     echo win_execute(win_getid(r.wt.tgtwinid ),'GitGutterPrevHunk')
-    " let currwin = winnr()
-    " execute r.wt.tgtwinid . 'wincmd w'
-    " " normal ]c
-    " execute "GitGutterPrevHunk"
-    " execute currwin . 'wincmd w'
   endif
 
 endfunction
@@ -150,15 +151,8 @@ fu! NextChange() abort
 
   let r = Checkdiff()
 
-  "new item
   if r.wt.tgtwinid != -1 "close window
-    " let currwin = winnr()
-    " execute r.wt.tgtwinid . 'wincmd w'
-    " normal [c
-
     echo win_execute(win_getid(r.wt.tgtwinid ),'GitGutterNextHunk')
-    " execute "GitGutterNextHunk"
-    " execute currwin . 'wincmd w'
   endif
 
 endfunction

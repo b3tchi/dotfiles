@@ -218,3 +218,7 @@ switch to next item
 source ./nvim/fugidiff.vim
 call NextItem()
 ```
+```vim
+source ./nvim/fugidiff.vim
+echo EndsWith('abcd','cd')
+```
