@@ -220,5 +220,5 @@ call NextItem()
 ```
 ```vim
 source ./nvim/fugidiff.vim
-echo EndsWith('abcd','cd')
+echo EndsWith('cd','cd')
 ```
