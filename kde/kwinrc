@@ -85,12 +85,13 @@ NightTemperature=4100
 [Plugins]
 ParachuteEnabled=true
 activatelattelaunchermenuEnabled=false
+bismuthEnabled=true
 blurEnabled=true
 contrastEnabled=false
 desktopchangeosdEnabled=true
 diminactiveEnabled=true
 highlightwindowEnabled=false
-krohnkiteEnabled=true
+krohnkiteEnabled=false
 kwin4_effect_dimscreenEnabled=true
 kwin4_effect_squashEnabled=false
 kwin4_effect_translucencyEnabled=false
@@ -111,6 +112,13 @@ showNotificationWindows=false
 
 [Script-activatelattelaunchermenu]
 BorderActivate=9
+
+[Script-bismuth]
+screenGapBottom=4
+screenGapLeft=4
+screenGapRight=4
+screenGapTop=4
+tileLayoutGap=4
 
 [Script-krohnkite]
 monocleMaximize=false
