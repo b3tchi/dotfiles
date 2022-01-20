@@ -165,11 +165,9 @@ command! LightlineReload call LightlineReload()
 
 function! LightlineReload() abort
     call lightline#init()
-    calllightline#colorscheme()
+    call lightline#colorscheme()
     call lightline#update()
 endfunction
 
 let g:lightline#trailing_whitespace#indicator = ''
 " }}}
-
- 

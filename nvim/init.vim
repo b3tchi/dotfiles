@@ -156,7 +156,6 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'evanleck/vim-svelte'
   Plug 'mattn/emmet-vim'
 
-
   " Support for comments symbol by language regions Svelte & Html
   Plug 'Shougo/context_filetype.vim' "language regions in files
   " Plug 'tyru/caw.vim' "comments with context regions
@@ -174,6 +173,9 @@ call plug#begin(expand('~/.vim/plugged'))
 
   "syntax highlighting
   Plug 'sheerun/vim-polyglot'
+
+  "install dap for vim
+  Plug 'puremourning/vimspector'
 
   "" Old Addins TBD
   "Plug 'janko-m/vim-test'
@@ -206,6 +208,9 @@ call plug#begin(expand('~/.vim/plugged'))
     Plug 'nvim-telescope/telescope.nvim'
     Plug 'nvim-telescope/telescope-fzf-native.nvim', { 'do': 'make' }
 
+    " git
+    Plug 'sindrets/diffview.nvim'
+
     "outlines
     Plug 'simrat39/symbols-outline.nvim' "outlines
     Plug 'nvim-orgmode/orgmode'
@@ -223,6 +228,7 @@ call plug#begin(expand('~/.vim/plugged'))
 
     "lua extended version of which key
     Plug 'folke/which-key.nvim'
+
   else
 
     " Another Comment Pluging with HTML region support
@@ -407,6 +413,14 @@ function FuzzyFiles()
   endif
 endfunction
 
+" source ~/dotfiles/nvim/fugidiff.vim
+source ~/.config/nvim/fugidiff.vim
+
+autocmd FileType fugitive nmap <buffer> j ):call DiffTog(1)<cr>
+autocmd FileType fugitive nmap <buffer> k (:call DiffTog(1)<cr>
+autocmd FileType fugitive nmap <buffer><silent> dd :call DiffTog(0)<CR>
+autocmd FileType fugitive nmap <buffer><silent> l :call NextChange()<CR>
+autocmd FileType fugitive nmap <buffer><silent> h :call PrevChange()<CR>
 
 let g:which_key_map.g ={'name':'+git'}
 let g:which_key_map.g.g = 'fugitive'
@@ -470,10 +484,10 @@ let g:which_key_map.v.c ={'name':'+coc'}
 nnoremap <silent> <space>vcu :CocUpdate<cr>
 
 let g:which_key_map.v.i ={'name':'+init.vim'}
-nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>
+nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>:LightlineReload<cr>
 
 let g:which_key_map.c ={'name':'+console'}
-let g:VimuxRunnerName = "vimuxout"
+" let g:VimuxRunnerName = "vimuxout"
 let g:VimuxRunnerType = "pane"
 function! VimuxSlime()
   call VimuxRunCommand(@v, 0)
@@ -491,13 +505,32 @@ function! VimuxMdBlock()
 
    "powershell
    elseif index(['pwsh','ps','powershell'],mdblock.lang) > -1
-     let tmp = tempname()
-     call writefile(mdblock.code, tmp)
-     call VimuxRunCommand('powershell.exe '.tmp)
+     " let tmp = tempname()
+     " call writefile(mdblock.code, tmp)
+     " call VimuxRunCommand('powershell.exe '.tmp)
      " call delete(tmp)
 
+     "rand filename
+      let fname = tempname()
+      let fname = substitute(fname,'/','','g') . '.ps1'
+
+      "paths
+      let win_tmpps = trim(system('cd /mnt/c/ && cmd.exe /c echo %TEMP% && cd - | grep C: ')) . '\'
+      let unx_tmpps = substitute(win_tmpps,'\\','/','g')
+      let unx_tmpps = substitute(unx_tmpps,'C:','/mnt/c','g')
+      ""let unx_tmpps = '/mnt/c/Users/czJaBeck/AppData/Local/Temp/' . fname
+      let win_tmpps = win_tmpps . fname
+      let unx_tmpps = unx_tmpps . fname
+      " echom win_tmpps
+      " echom unx_tmpps
+      call writefile(mdblock.code, unx_tmpps)
+
+      let cmd = 'powershell.exe ''' . win_tmpps . ''''
+      call VimuxRunCommand(cmd)
+
+
    "wimscript
-   elseif index(['vim','viml'],mdblock.lang) > -1
+ elseif index(['vim','viml'],mdblock.lang) > -1
      let lines = mdblock.code
      let tmp = tempname()
      call writefile(lines, tmp)
@@ -616,6 +649,7 @@ nnoremap <space>wb <c-w>s
 nnoremap <space>wc <c-w>c
 nnoremap <space>wm :call SwitchMainWindow()<cr>
 nnoremap <space>wo :only<cr>
+nnoremap <space>wl <c-w>p
 
 "" indentation
 "nnoremap > >>_
@@ -932,6 +966,18 @@ endif
 "--- not used ---
 " let g:indentLine_leadingSpaceEnabled = 1
 " let g:indentLine_leadingSpaceChar   = '·'
+" --- VimSpector ---
+nnoremap <space>ud :call vimspector#Launch()<CR>
+nnoremap <space>uq :call vimspector#Reset()<CR>
+nnoremap <space>uc :call vimspector#Continue()<CR>
+
+nnoremap <space>ut :call vimspector#ToggleBreakpoint()<CR>
+nnoremap <space>uT :call vimspector#ClearBreakpoints()<CR>
+
+nmap <space>uk <Plug>VimspectorRestart
+nmap <space>uh <Plug>VimspectorStepOut
+nmap <space>ul <Plug>VimspectorStepInto
+nmap <space>uj <Plug>VimspectorStepOver
 
 " --- Vim Test ---
 let g:test#strategy = 'neovim'
@@ -940,6 +986,7 @@ let g:test#strategy = 'neovim'
 function! Mdftinit()
   setlocal spell spelllang=en_us
   set filetype=markdown.pandoc
+  let g:pandoc#syntax#codeblocks#embeds#langs = ["vim=vim"]
   " echom 'loade nmd'
 endfunction
 augroup pandoc_syntax
@@ -965,7 +1012,9 @@ let g:context_filetype#same_filetypes.svelte = 'html'
 au! BufNewFile,BufRead *.svelte set ft=html
 
 " --- EMMET specific ---
+let g:user_emmet_install_global = 0
 let g:user_emmet_leader_key = ','
+autocmd FileType html,css EmmetInstall
 
 " --- PowerShell specific ---
 " powershell 200831 not regnized set manually

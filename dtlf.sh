@@ -68,6 +68,7 @@ chmod +x $d/bin/*
 ml $d bin/tat ~/.local/bin/
 ml $d bin/ff ~/.local/bin/
 ml $d bin/nvim-sessionizer ~/.local/bin/
+ml $d bin/nvim-startifier ~/.local/bin/
 
 # nnn tbd
 
@@ -84,6 +85,8 @@ ml $d nvim/coc.vim ~/.config/nvim/
 ml $d nvim/incubator.vim ~/.config/nvim/
 ml $d nvim/lightline.vim ~/.config/nvim/
 ml $d nvim/lualsp.vim ~/.config/nvim/
+ml $d nvim/fugidiff.vim ~/.config/nvim/
+ml $d nvim/vimspector.json ~/.config/nvim/
     # ~/.config/nvim/deoplete.vim:
 #nvim-#Qt
 ml $d nvim/Win/ginit.vim ~/.config/nvim/
