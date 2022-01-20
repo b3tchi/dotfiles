@@ -413,7 +413,8 @@ function FuzzyFiles()
   endif
 endfunction
 
-source ~/dotfiles/nvim/fugidiff.vim
+" source ~/dotfiles/nvim/fugidiff.vim
+source ~/.config/nvim/fugidiff.vim
 
 autocmd FileType fugitive nmap <buffer> j ):call DiffTog(1)<cr>
 autocmd FileType fugitive nmap <buffer> k (:call DiffTog(1)<cr>

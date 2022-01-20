@@ -85,6 +85,7 @@ ml $d nvim/coc.vim ~/.config/nvim/
 ml $d nvim/incubator.vim ~/.config/nvim/
 ml $d nvim/lightline.vim ~/.config/nvim/
 ml $d nvim/lualsp.vim ~/.config/nvim/
+ml $d nvim/fugidiff.vim ~/.config/nvim/
 ml $d nvim/vimspector.json ~/.config/nvim/
     # ~/.config/nvim/deoplete.vim:
 #nvim-#Qt
