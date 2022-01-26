@@ -51,14 +51,14 @@ zplugin light zsh-users/zsh-completions
 zplugin light romkatv/powerlevel10k
 
 # dark version
-zplugin snippet https://github.com/sainnhe/dotfiles/raw/master/.zsh-theme-gruvbox-material-dark
+# zplugin snippet https://github.com/sainnhe/dotfiles/raw/master/.zsh-theme-gruvbox-material-dark
 
 # Plugin history-search-multi-word loaded with tracking.
 zplugin load zdharma-continuum/history-search-multi-word
 
 # Load the pure theme, with zsh-async library that's bundled with it.
-zplugin ice pick"async.zsh" src"pure.zsh"
-zplugin light sindresorhus/pure
+# zplugin ice pick"async.zsh" src"pure.zsh"
+# zplugin light sindresorhus/pure
 
 # Binary release in archive, from GitHub-releases page.
 # After automatic unpacking it provides program "fzf".
