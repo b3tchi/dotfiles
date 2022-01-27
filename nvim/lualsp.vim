@@ -64,6 +64,7 @@ require'lspconfig'.jsonls.setup{}
 
 --C#,VB.NET
 local pid = vim.fn.getpid()
+--Path to coc-omnisharp
 local omnisharp_bin = "/home/jan/.local/share/nvim/lsp_servers/omnisharp/omnisharp/run"
 
 require'lspconfig'.omnisharp.setup{
@@ -100,6 +101,8 @@ require'lspconfig'.vimls.setup{}
 
 --JAVASCRIPT
 require'lspconfig'.eslint.setup{}
+
+--VIMWIKI
 
 --RUST
 --require'lspconfig'.rust_analyzer.setup{}
