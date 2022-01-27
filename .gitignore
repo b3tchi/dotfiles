@@ -1,4 +1,9 @@
+<<<<<<< HEAD
 node_modules/
 .mypy_cache/
 resources/
 *.sh.log
+=======
+raspberry/pi_image/
+nvim/test_*
+>>>>>>> 7770ded10b1bd12090319bea4091c36222da55c6

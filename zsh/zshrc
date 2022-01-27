@@ -51,14 +51,14 @@ zplugin light zsh-users/zsh-completions
 zplugin light romkatv/powerlevel10k
 
 # dark version
-zplugin snippet https://github.com/sainnhe/dotfiles/raw/master/.zsh-theme-gruvbox-material-dark
+# zplugin snippet https://github.com/sainnhe/dotfiles/raw/master/.zsh-theme-gruvbox-material-dark
 
 # Plugin history-search-multi-word loaded with tracking.
 zplugin load zdharma-continuum/history-search-multi-word
 
 # Load the pure theme, with zsh-async library that's bundled with it.
-zplugin ice pick"async.zsh" src"pure.zsh"
-zplugin light sindresorhus/pure
+# zplugin ice pick"async.zsh" src"pure.zsh"
+# zplugin light sindresorhus/pure
 
 # Binary release in archive, from GitHub-releases page.
 # After automatic unpacking it provides program "fzf".
@@ -97,6 +97,11 @@ if [[ $(uname -o) = 'Android' ]]; then
   export IS_ANDROID=1
 fi
 
+# Check wsl
+if [[ -f "/mnt/c/WINDOWS/system32/wsl.exe" ]]; then
+  export IS_WSL=1
+fi
+
 # NNN quit on cd
 n () {
 
@@ -125,55 +130,6 @@ n () {
         rm -f "$NNN_TMPFILE" > /dev/null
     fi
 }
-
-# ggw () {
-#
-#     # cd ~/wiki/
-#     cd "$1"
-#
-#     # IFS=: read -ra selected < <(
-#     rg --color=always \
-#         --colors 'match:fg:white' \
-#         --line-number \
-#         --no-heading \
-#         --smart-case "\S" \
-#     | fzf --ansi \
-#         --delimiter : \
-#         --preview 'bat \
-#             --style=plain,numbers \
-#             --color=always {1} \
-#             --highlight-line {2}' \
-#         --preview-window 'up:50%:noborder:+{2}-3'
-#
-#     ## rg flags
-#     #--colors
-#     #=always -> general coloring
-#     #--colors -> more granular color detailsO
-#     #='match:fx:white' -> specify foregroud color of hilighted text
-#
-#     #--line-number -> display line numbers
-#     #--no-heading -> dont display header vith file names
-#     #--smart-case -> be case sensitive only when combine lower and upper case
-#
-#     ## bat flags
-#     #--style general styling
-#     #=plain -> show only textfiles
-#     #=numbers -> display line nmunbers
-#
-#     #--color
-#     #=always -> display lines
-#
-#     # rg --color=always --line-number --no-heading --smart-case "${*:-}" ~/wiki/ |
-#     # --color "hl:-1:underline,hl+:-1:underline:reverse" \
-#     # )
-#
-#     #return back last folder
-#     cd -
-#
-#     #what to do with return items
-#     # [ -n "${selected[0]}" ] && vim "${selected[0]}" "+${selected[1]}"
-#
-# }
 
 ggvh() {
 
