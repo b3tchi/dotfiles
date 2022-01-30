@@ -10,13 +10,13 @@ echo "something \
 echo something
 ```
 spelling error
-```sh
+```bash
 echo anything
 echo anything
 ```
 
 call powershell
-```sh
+```bash
 #powershell.exe c:\\Users\\czJaBeck\\Dev\\Repositories\\AccessVCS\\tests\\test14.ps1
 powershell.exe 'c:\Users\czJaBeck\Dev\Repositories\AccessVCS\tests\test14.ps1'
 #cat '/mnt/c/Users/czJaBeck/Dev/Repositories/AccessVCS/tests/test14.ps1'
@@ -24,7 +24,6 @@ powershell.exe 'c:\Users\czJaBeck\Dev\Repositories\AccessVCS\tests\test14.ps1'
 
 ```bash
 cd /mnt/c/ && cmd.exe /c echo %TEMP% && cd - | grep C: | sed 's/\xEF\xBB\xBF//g'
-
 ```
 
 ```powershell
@@ -33,7 +32,7 @@ Write-Host 'test2'
 
 testing startifier
 ```bash
-#%% ls ~/.local/share/nvim/session/ 
+#ls ~/.local/share/nvim/session/ 
 testx=$(find ~/.local/share/nvim/session/ -mindepth 1 -maxdepth 1 -printf '%f\n')
 echo $testx
 ```
@@ -58,6 +57,11 @@ if index(['a','b'],'c') ==-1
   call VimuxRunCommand(cmd)
 
 endif
+```
+
+
+```lua
+-- printf('hello')
 ```
 
 ```vim
