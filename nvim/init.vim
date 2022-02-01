@@ -124,13 +124,18 @@ call plug#begin(expand('~/.vim/plugged'))
   " Plug 'junegunn/gv.vim' "git tree - simplier version of flog
   " Plug 'gregsexton/gitv', {'on': ['Gitv']}
   Plug 'powerman/vim-plugin-AnsiEsc'
+
   ""markdown
   Plug 'vim-pandoc/vim-pandoc-syntax'
+  Plug 'tpope/vim-markdown'
+
   " Plug 'godlygeek/tabular'
-  " Plug 'plasticboy/vim-markdown'
 
   ""vimwiki - personal notes
-  Plug 'vimwiki/vimwiki'
+  " Plug 'vimwiki/vimwiki'
+  " Plug 'fcpg/vim-waikiki'
+  Plug 'mmai/vim-markdown-wiki'
+
   Plug 'dhruvasagar/vim-table-mode'
 
   ""addvanced ide features
@@ -206,7 +211,7 @@ call plug#begin(expand('~/.vim/plugged'))
     Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'} "LSP based highlighting
     Plug 'nvim-lua/plenary.nvim'
     Plug 'nvim-telescope/telescope.nvim'
-    Plug 'nvim-telescope/telescope-fzf-native.nvim', { 'do': 'make' }
+    " Plug 'nvim-telescope/telescope-fzf-native.nvim', { 'do': 'make' }
 
     " git
     Plug 'sindrets/diffview.nvim'
@@ -983,9 +988,11 @@ nmap <space>uj <Plug>VimspectorStepOver
 let g:test#strategy = 'neovim'
 
 " --- Markdown specific ---
+let g:markdown_fenced_languages = ['coffee', 'css', 'erb=eruby', 'javascript', 'js=javascript', 'json=javascript', 'ruby', 'sass','sh=bash','bash', 'vim', 'xml']
+
 function! Mdftinit()
   setlocal spell spelllang=en_us
-  set filetype=markdown.pandoc
+  " set filetype=markdown.pandoc
   let g:pandoc#syntax#codeblocks#embeds#langs = ["vim=vim"]
   " echom 'loade nmd'
 endfunction

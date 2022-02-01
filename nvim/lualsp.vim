@@ -64,6 +64,7 @@ require'lspconfig'.jsonls.setup{}
 
 --C#,VB.NET
 local pid = vim.fn.getpid()
+--Path to coc-omnisharp
 local omnisharp_bin = "/home/jan/.local/share/nvim/lsp_servers/omnisharp/omnisharp/run"
 
 require'lspconfig'.omnisharp.setup{
@@ -95,11 +96,15 @@ require'lspconfig'.vimls.setup{}
 
 --TERRAFORM
 --require'lspconfig'.terraformls.setup{}
+
 --TYPESCRIPT
 --require'lspconfig'.tsserver.setup{}
 
 --JAVASCRIPT
 require'lspconfig'.eslint.setup{}
+
+--MARKDOWN
+require'lspconfig'.remark_ls.setup{}
 
 --RUST
 --require'lspconfig'.rust_analyzer.setup{}
@@ -140,19 +145,19 @@ require'nvim-treesitter.configs'.setup {
 -- the loading is important
 require('telescope').setup {
   extensions = {
-    fzf = {
-      fuzzy = true,                    -- false will only do exact matching
-      override_generic_sorter = true,  -- override the generic sorter
-      override_file_sorter = true,     -- override the file sorter
-      case_mode = "smart_case",        -- or "ignore_case" or "respect_case"
-                                       -- the default case_mode is "smart_case"
-    }
+--    fzf = {
+--      fuzzy = true,                    -- false will only do exact matching
+--      override_generic_sorter = true,  -- override the generic sorter
+--      override_file_sorter = true,     -- override the file sorter
+--      case_mode = "smart_case",        -- or "ignore_case" or "respect_case"
+--      -- the default case_mode is "smart_case"
+--      }
   }
 }
 
 -- To get fzf loaded and working with telescope, you need to call
 -- load_extension, somewhere after setup function:
-require('telescope').load_extension('fzf')
+--require('telescope').load_extension('fzf')
 
 --CMP - AUTOCOMPLETIONS
 local cmp = require 'cmp'
