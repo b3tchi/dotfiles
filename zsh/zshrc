@@ -48,17 +48,13 @@ zplugin light zsh-users/zsh-completions
 # zplugin light marzocchi/zsh-notify
 
 #theme
-zplugin light romkatv/powerlevel10k
-
-# dark version
-zplugin snippet https://github.com/sainnhe/dotfiles/raw/master/.zsh-theme-gruvbox-material-dark
 
 # Plugin history-search-multi-word loaded with tracking.
 zplugin load zdharma-continuum/history-search-multi-word
 
 # Load the pure theme, with zsh-async library that's bundled with it.
-zplugin ice pick"async.zsh" src"pure.zsh"
-zplugin light sindresorhus/pure
+# zplugin ice pick"async.zsh" src"pure.zsh"
+# zplugin light sindresorhus/pure
 
 # Binary release in archive, from GitHub-releases page.
 # After automatic unpacking it provides program "fzf".
@@ -85,8 +81,6 @@ bindkey '^[3;5~' delete-char
 
 # Theme
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
-[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
-
 
 # Export Variables
 if [[ -n $(uname -o | grep 'Linux') ]]; then
@@ -95,6 +89,11 @@ fi
 
 if [[ $(uname -o) = 'Android' ]]; then
   export IS_ANDROID=1
+fi
+
+# Check wsl
+if [[ -f "/mnt/c/WINDOWS/system32/wsl.exe" ]]; then
+  export IS_WSL=1
 fi
 
 # NNN quit on cd
@@ -125,55 +124,6 @@ n () {
         rm -f "$NNN_TMPFILE" > /dev/null
     fi
 }
-
-# ggw () {
-#
-#     # cd ~/wiki/
-#     cd "$1"
-#
-#     # IFS=: read -ra selected < <(
-#     rg --color=always \
-#         --colors 'match:fg:white' \
-#         --line-number \
-#         --no-heading \
-#         --smart-case "\S" \
-#     | fzf --ansi \
-#         --delimiter : \
-#         --preview 'bat \
-#             --style=plain,numbers \
-#             --color=always {1} \
-#             --highlight-line {2}' \
-#         --preview-window 'up:50%:noborder:+{2}-3'
-#
-#     ## rg flags
-#     #--colors
-#     #=always -> general coloring
-#     #--colors -> more granular color detailsO
-#     #='match:fx:white' -> specify foregroud color of hilighted text
-#
-#     #--line-number -> display line numbers
-#     #--no-heading -> dont display header vith file names
-#     #--smart-case -> be case sensitive only when combine lower and upper case
-#
-#     ## bat flags
-#     #--style general styling
-#     #=plain -> show only textfiles
-#     #=numbers -> display line nmunbers
-#
-#     #--color
-#     #=always -> display lines
-#
-#     # rg --color=always --line-number --no-heading --smart-case "${*:-}" ~/wiki/ |
-#     # --color "hl:-1:underline,hl+:-1:underline:reverse" \
-#     # )
-#
-#     #return back last folder
-#     cd -
-#
-#     #what to do with return items
-#     # [ -n "${selected[0]}" ] && vim "${selected[0]}" "+${selected[1]}"
-#
-# }
 
 ggvh() {
 
@@ -252,9 +202,6 @@ alias -s csv=nvim
 alias -s tsv=nvim
 alias -s yaml=nvim
 
-
-
-
 # official sollution pointin for this location but not exist in ubuntu
 # embede then function n() in zshrc directly
 # if [ -f /usr/share/nnn/quitcd/quitcd.bash_zsh ]; then
@@ -264,3 +211,22 @@ alias -s yaml=nvim
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+
+# Autoload zsh add-zsh-hook and vcs_info functions (-U autoload w/o substition, -z use zsh style)
+autoload -Uz add-zsh-hook vcs_info
+# Enable substitution in the prompt.
+setopt prompt_subst
+# Run vcs_info just before a prompt is displayed (precmd)
+add-zsh-hook precmd vcs_info
+# add ${vcs_info_msg_0} to the prompt
+# e.g. here we add the Git information in red
+
+NEWLINE=$'\n'
+PROMPT="%f%B%F{240}%~%f%b%F{yellow}%(!.#.$)%f "
+RPROMPT='%F{240}%(?..e%?) ${vcs_info_msg_0_}%*%f'
+
+zstyle ':vcs_info:*' check-for-changes true
+zstyle ':vcs_info:*' unstagedstr '*'
+zstyle ':vcs_info:*' stagedstr '+'
+
+zstyle ':vcs_info:git:*' formats '%u%c%b '

@@ -8,7 +8,7 @@ GLCore=true
 GLPreferBufferSwap=a
 GLTextureFilter=2
 HiddenPreviews=4
-OpenGLIsUnsafe=false
+OpenGLIsUnsafe=true
 XRenderSmoothScale=false
 
 [Desktops]
