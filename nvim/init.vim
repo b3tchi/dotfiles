@@ -209,12 +209,14 @@ call plug#begin(expand('~/.vim/plugged'))
     " LSP List [https://github.com/neovim/nvim-lspconfig/blob/master/CONFIG.md#svelte]
 
     Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'} "LSP based highlighting
+    Plug 'nvim-lua/popup.nvim'
     Plug 'nvim-lua/plenary.nvim'
     Plug 'nvim-telescope/telescope.nvim'
     " Plug 'nvim-telescope/telescope-fzf-native.nvim', { 'do': 'make' }
 
     " git
     Plug 'sindrets/diffview.nvim'
+    Plug 'ThePrimeagen/git-worktree.nvim'
 
     "outlines
     Plug 'simrat39/symbols-outline.nvim' "outlines
