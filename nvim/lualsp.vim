@@ -96,13 +96,15 @@ require'lspconfig'.vimls.setup{}
 
 --TERRAFORM
 --require'lspconfig'.terraformls.setup{}
+
 --TYPESCRIPT
 --require'lspconfig'.tsserver.setup{}
 
 --JAVASCRIPT
 require'lspconfig'.eslint.setup{}
 
---VIMWIKI
+--MARKDOWN
+require'lspconfig'.remark_ls.setup{}
 
 --RUST
 --require'lspconfig'.rust_analyzer.setup{}

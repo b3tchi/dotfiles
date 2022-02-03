@@ -10,18 +10,12 @@ endif
 set shortmess=aoO
 argglobal
 %argdel
+tabnew
+tabrewind
 edit nvim/init.vim
 let s:save_splitbelow = &splitbelow
 let s:save_splitright = &splitright
 set splitbelow splitright
-wincmd _ | wincmd |
-vsplit
-1wincmd h
-wincmd _ | wincmd |
-split
-1wincmd k
-wincmd w
-wincmd w
 wincmd _ | wincmd |
 split
 1wincmd k
@@ -35,14 +29,8 @@ set winminheight=0
 set winheight=1
 set winminwidth=0
 set winwidth=1
-exe '1resize ' . ((&lines * 22 + 24) / 48)
-exe 'vert 1resize ' . ((&columns * 117 + 118) / 236)
-exe '2resize ' . ((&lines * 20 + 24) / 48)
-exe 'vert 2resize ' . ((&columns * 117 + 118) / 236)
-exe '3resize ' . ((&lines * 22 + 24) / 48)
-exe 'vert 3resize ' . ((&columns * 118 + 118) / 236)
-exe '4resize ' . ((&lines * 20 + 24) / 48)
-exe 'vert 4resize ' . ((&columns * 118 + 118) / 236)
+exe '1resize ' . ((&lines * 17 + 20) / 40)
+exe '2resize ' . ((&lines * 17 + 20) / 40)
 argglobal
 balt nvim/init.vim
 setlocal fdm=indent
@@ -55,12 +43,12 @@ setlocal fdn=20
 setlocal fen
 91
 normal! zo
-let s:l = 972 - ((10 * winheight(0) + 11) / 22)
+let s:l = 972 - ((8 * winheight(0) + 8) / 17)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
 keepjumps 972
-normal! 0
+normal! 02|
 wincmd w
 argglobal
 if bufexists("tmux.conf") | buffer tmux.conf | else | edit tmux.conf | endif
@@ -76,20 +64,66 @@ setlocal fdl=0
 setlocal fml=1
 setlocal fdn=20
 setlocal fen
-let s:l = 78 - ((11 * winheight(0) + 10) / 20)
+let s:l = 78 - ((6 * winheight(0) + 8) / 17)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
 keepjumps 78
 normal! 057|
 wincmd w
+exe '1resize ' . ((&lines * 17 + 20) / 40)
+exe '2resize ' . ((&lines * 17 + 20) / 40)
+tabnext
+edit .git/index
+let s:save_splitbelow = &splitbelow
+let s:save_splitright = &splitright
+set splitbelow splitright
+wincmd _ | wincmd |
+split
+1wincmd k
+wincmd w
+wincmd _ | wincmd |
+vsplit
+1wincmd h
+wincmd w
+let &splitbelow = s:save_splitbelow
+let &splitright = s:save_splitright
+wincmd t
+let s:save_winminheight = &winminheight
+let s:save_winminwidth = &winminwidth
+set winminheight=0
+set winheight=1
+set winminwidth=0
+set winwidth=1
+exe '1resize ' . ((&lines * 17 + 20) / 40)
+exe '2resize ' . ((&lines * 17 + 20) / 40)
+exe 'vert 2resize ' . ((&columns * 104 + 104) / 209)
+exe '3resize ' . ((&lines * 17 + 20) / 40)
+exe 'vert 3resize ' . ((&columns * 104 + 104) / 209)
 argglobal
-if bufexists("README.md") | buffer README.md | else | edit README.md | endif
+balt nvim/lualsp.vim
+setlocal fdm=indent
+setlocal fde=0
+setlocal fmr=<<<<<<<<,>>>>>>>>
+setlocal fdi=
+setlocal fdl=0
+setlocal fml=1
+setlocal fdn=20
+setlocal fen
+let s:l = 8 - ((2 * winheight(0) + 8) / 17)
+if s:l < 1 | let s:l = 1 | endif
+keepjumps exe s:l
+normal! zt
+keepjumps 8
+normal! 0
+wincmd w
+argglobal
+if bufexists("fugitive:///home/jan/dotfiles/.git//0/nvim/lualsp.vim") | buffer fugitive:///home/jan/dotfiles/.git//0/nvim/lualsp.vim | else | edit fugitive:///home/jan/dotfiles/.git//0/nvim/lualsp.vim | endif
 if &buftype ==# 'terminal'
-  silent file README.md
+  silent file fugitive:///home/jan/dotfiles/.git//0/nvim/lualsp.vim
 endif
-balt nvim/init.vim
-setlocal fdm=manual
+balt nvim/lualsp.vim
+setlocal fdm=diff
 setlocal fde=0
 setlocal fmr={{{,}}}
 setlocal fdi=
@@ -97,57 +131,52 @@ setlocal fdl=0
 setlocal fml=1
 setlocal fdn=20
 setlocal fen
-silent! normal! zE
-let &fdl = &fdl
-let s:l = 36 - ((10 * winheight(0) + 11) / 22)
+let s:l = 105 - ((104 * winheight(0) + 8) / 17)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
-keepjumps 36
-normal! 029|
+keepjumps 105
+normal! 06|
 wincmd w
 argglobal
-if bufexists("~/Applications/neovim/squashfs-root/usr/share/nvim/runtime/doc/eval.txt") | buffer ~/Applications/neovim/squashfs-root/usr/share/nvim/runtime/doc/eval.txt | else | edit ~/Applications/neovim/squashfs-root/usr/share/nvim/runtime/doc/eval.txt | endif
+if bufexists("nvim/lualsp.vim") | buffer nvim/lualsp.vim | else | edit nvim/lualsp.vim | endif
 if &buftype ==# 'terminal'
-  silent file ~/Applications/neovim/squashfs-root/usr/share/nvim/runtime/doc/eval.txt
+  silent file nvim/lualsp.vim
 endif
-balt README.md
-setlocal fdm=manual
+balt fugitive:///home/jan/dotfiles/.git//0/nvim/lualsp.vim
+setlocal fdm=diff
 setlocal fde=0
 setlocal fmr={{{,}}}
 setlocal fdi=
 setlocal fdl=0
 setlocal fml=1
 setlocal fdn=20
-setlocal nofen
-silent! normal! zE
-let &fdl = &fdl
-let s:l = 9624 - ((11 * winheight(0) + 10) / 20)
+setlocal fen
+let s:l = 106 - ((105 * winheight(0) + 8) / 17)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
-keepjumps 9624
-normal! 057|
+keepjumps 106
+normal! 06|
 wincmd w
-exe '1resize ' . ((&lines * 22 + 24) / 48)
-exe 'vert 1resize ' . ((&columns * 117 + 118) / 236)
-exe '2resize ' . ((&lines * 20 + 24) / 48)
-exe 'vert 2resize ' . ((&columns * 117 + 118) / 236)
-exe '3resize ' . ((&lines * 22 + 24) / 48)
-exe 'vert 3resize ' . ((&columns * 118 + 118) / 236)
-exe '4resize ' . ((&lines * 20 + 24) / 48)
-exe 'vert 4resize ' . ((&columns * 118 + 118) / 236)
+exe '1resize ' . ((&lines * 17 + 20) / 40)
+exe '2resize ' . ((&lines * 17 + 20) / 40)
+exe 'vert 2resize ' . ((&columns * 104 + 104) / 209)
+exe '3resize ' . ((&lines * 17 + 20) / 40)
+exe 'vert 3resize ' . ((&columns * 104 + 104) / 209)
 tabnext 1
 badd +972 nvim/init.vim
 badd +17 tmux.conf
-badd +36 README.md
-badd +0 ~/Applications/neovim/squashfs-root/usr/share/nvim/runtime/doc/eval.txt
-badd +202 nvim/lualsp.vim
+badd +174 README.md
+badd +9621 ~/Applications/neovim/squashfs-root/usr/share/nvim/runtime/doc/eval.txt
+badd +46 nvim/lualsp.vim
 badd +89 dtlf.sh
 badd +1572 ~/Applications/neovim/squashfs-root/usr/share/nvim/runtime/doc/api.txt
 badd +24 bin/ff
 badd +184 ~/.vim/plugged/vim-tmux-runner/doc/vim-tmux-runner.txt
 badd +6 bin/nvim-sessionizer
+badd +8 .git/index
+badd +105 fugitive:///home/jan/dotfiles/.git//0/nvim/lualsp.vim
 if exists('s:wipebuf') && len(win_findbuf(s:wipebuf)) == 0 && getbufvar(s:wipebuf, '&buftype') isnot# 'terminal'
   silent exe 'bwipe ' . s:wipebuf
 endif
