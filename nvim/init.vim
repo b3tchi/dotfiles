@@ -208,10 +208,14 @@ call plug#begin(expand('~/.vim/plugged'))
     Plug 'williamboman/nvim-lsp-installer' "automatic installer of LSPs
     " LSP List [https://github.com/neovim/nvim-lspconfig/blob/master/CONFIG.md#svelte]
 
-    Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'} "LSP based highlighting
+    " Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'} "LSP based highlighting
+    "to fix the iisue with slow markdown
+    "https://github.com/nvim-treesitter/nvim-treesitter/issues/2206
+    Plug 'nvim-treesitter/nvim-treesitter', {'commit': '8ada8faf2fd5a74cc73090ec856fa88f34cd364b', 'do': ':TSUpdate'}
+    Plug 'nvim-lua/popup.nvim'
     Plug 'nvim-lua/plenary.nvim'
     Plug 'nvim-telescope/telescope.nvim'
-    " Plug 'nvim-telescope/telescope-fzf-native.nvim', { 'do': 'make' }
+    Plug 'nvim-telescope/telescope-fzf-native.nvim' "", { 'do': 'make' }
 
     " git
     Plug 'sindrets/diffview.nvim'
