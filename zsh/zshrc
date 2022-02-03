@@ -48,10 +48,6 @@ zplugin light zsh-users/zsh-completions
 # zplugin light marzocchi/zsh-notify
 
 #theme
-zplugin light romkatv/powerlevel10k
-
-# dark version
-# zplugin snippet https://github.com/sainnhe/dotfiles/raw/master/.zsh-theme-gruvbox-material-dark
 
 # Plugin history-search-multi-word loaded with tracking.
 zplugin load zdharma-continuum/history-search-multi-word
@@ -85,8 +81,6 @@ bindkey '^[3;5~' delete-char
 
 # Theme
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
-[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
-
 
 # Export Variables
 if [[ -n $(uname -o | grep 'Linux') ]]; then
@@ -208,9 +202,6 @@ alias -s csv=nvim
 alias -s tsv=nvim
 alias -s yaml=nvim
 
-
-
-
 # official sollution pointin for this location but not exist in ubuntu
 # embede then function n() in zshrc directly
 # if [ -f /usr/share/nnn/quitcd/quitcd.bash_zsh ]; then
@@ -220,3 +211,22 @@ alias -s yaml=nvim
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+
+# Autoload zsh add-zsh-hook and vcs_info functions (-U autoload w/o substition, -z use zsh style)
+autoload -Uz add-zsh-hook vcs_info
+# Enable substitution in the prompt.
+setopt prompt_subst
+# Run vcs_info just before a prompt is displayed (precmd)
+add-zsh-hook precmd vcs_info
+# add ${vcs_info_msg_0} to the prompt
+# e.g. here we add the Git information in red
+
+NEWLINE=$'\n'
+PROMPT="%f%B%F{240}%~%f%b%F{yellow}%(!.#.$)%f "
+RPROMPT='%F{240}%(?..e%?) ${vcs_info_msg_0_}%*%f'
+
+zstyle ':vcs_info:*' check-for-changes true
+zstyle ':vcs_info:*' unstagedstr '*'
+zstyle ':vcs_info:*' stagedstr '+'
+
+zstyle ':vcs_info:git:*' formats '%u%c%b '
