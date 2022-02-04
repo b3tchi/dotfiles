@@ -128,15 +128,12 @@ call plug#begin(expand('~/.vim/plugged'))
   ""markdown
   Plug 'vim-pandoc/vim-pandoc-syntax'
   Plug 'tpope/vim-markdown'
-
-  " Plug 'godlygeek/tabular'
+  Plug 'mmai/vim-markdown-wiki'
+  Plug 'dhruvasagar/vim-table-mode'
 
   ""vimwiki - personal notes
   " Plug 'vimwiki/vimwiki'
   " Plug 'fcpg/vim-waikiki'
-  Plug 'mmai/vim-markdown-wiki'
-
-  Plug 'dhruvasagar/vim-table-mode'
 
   ""addvanced ide features
   if lspClient == 1
@@ -195,8 +192,11 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'skywind3000/asyncrun.vim'
 
   " themes
-  Plug 'lifepillar/vim-solarized8'
-  Plug 'morhetz/gruvbox'
+  " source ~/.config/nvim/plugins/solarized.vim
+  source ~/.config/nvim/plugins/gruvbox.vim
+
+  " Plug 'lifepillar/vim-solarized8'
+  " Plug 'morhetz/gruvbox'
   " Plug 'kaicataldo/material.vim'
   " Plug 'altercation/vim-colors-solarized'
   " Plug 'iCyMind/NeoSolarized'
@@ -215,10 +215,11 @@ call plug#begin(expand('~/.vim/plugged'))
     Plug 'nvim-lua/popup.nvim'
     Plug 'nvim-lua/plenary.nvim'
     Plug 'nvim-telescope/telescope.nvim'
-    Plug 'nvim-telescope/telescope-fzf-native.nvim' "", { 'do': 'make' }
+    Plug 'nvim-telescope/telescope-fzf-native.nvim',  { 'do': 'make' }
 
     " git
-    Plug 'sindrets/diffview.nvim'
+    " Plug 'sindrets/diffview.nvim'
+    Plug 'ThePrimeagen/git-worktree.nvim'
 
     "outlines
     Plug 'simrat39/symbols-outline.nvim' "outlines
@@ -257,6 +258,13 @@ call plug#begin(expand('~/.vim/plugged'))
   endif
 
 call plug#end()
+echom "plugend"
+"event triggering after plug
+doautocmd User PlugLoaded
+echom "plugafterevent"
+
+" Allow gf to open non-existent files
+map gf :edit <cfile><cr>
 
 " Required:
 syntax on
@@ -353,42 +361,6 @@ endif
 "   autocmd VimEnter * :Vexplore
 " augroup END
 
-"" theme material theme
-" set termguicolors
-" let g:material_terminal_italics = 1
-" let g:material_theme_style = 'darker'
-" colorscheme material
-
-"" neosolarized theme
-" set background=dark
-" set termguicolors
-" colorscheme NeoSolarized
-" let g:neosolarized_bold = 1
-" let g:neosolarized_underline = 1
-" let g:neosolarized_italic = 1
-
-"" solarized theme
-" set t_Co=256
-" set background=dark
-" colorscheme solarized
-" let g:solarized_termcolors=256
-
-"" solarized8 theme
-if vimTheme == 1
-  set termguicolors
-  set background=dark
-  colorscheme solarized8
-"" gruvbox theme
-elseif vimTheme == 2
-  set termguicolors
-  set background=dark
-  let g:gruvbox_italic=1
-  colorscheme gruvbox
-  highlight Folded guibg=#232323
-endif
-
-
-" hi Normal guibg=NONE
 set fillchars=vert:┃ " for vsplits
 
 " -----------------------------
@@ -397,12 +369,10 @@ set fillchars=vert:┃ " for vsplits
 
 nnoremap <C-C> <C-[>
 
-
 if g:vimmode != 3
   call which_key#register('<Space>', "g:which_key_map")
-
-" which key
-nnoremap <silent><space> :WhichKey ' '<CR>
+  " which key
+  nnoremap <silent><space> :WhichKey ' '<CR>
 endif
 
 let g:which_key_map =  {}
@@ -412,7 +382,7 @@ let g:which_key_map.b = '+buffer'
 " nnoremap <C-f> :Rg<cr>
 nnoremap <silent> <space>f :Rg<cr>
 nnoremap <silent> <space>b :Buffer<cr>
-nnoremap <silent> ; :Buffer<cr>
+" nnoremap <silent> ;; :Buffer<cr>
 nnoremap <silent> <space>e :call FuzzyFiles()<cr>
 nnoremap <silent> <space>W :Windows<cr>
 
@@ -490,6 +460,7 @@ nnoremap <silent> <space>vhf :Helptags<cr>
 let g:which_key_map.v.p ={'name':'+plug'}
 nnoremap <silent> <space>vpu :PlugUpdate<cr>
 nnoremap <silent> <space>vpi :PlugStatus<cr>
+nnoremap <silent> <space>vpc :PlugClean<cr>
 
 let g:which_key_map.v.c ={'name':'+coc'}
 nnoremap <silent> <space>vcu :CocUpdate<cr>

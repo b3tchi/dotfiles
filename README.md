@@ -1,6 +1,26 @@
 For installation use bash script
 [dtlf sh](dtlf.sh)
+```bash
+./dtlf.sh
+```
 
+# vim locations
+
+~/.config/nvim/* - user config files
+~/.config/coc/* - coc config and items
+
+~/.local/share/nvim/* - vim plug
+~/.vim/plugged/* - vim plug
+
+clean nvim settings
+```bash
+mv ~/.config/nvim ~/.config/nvim_back # - user config files
+mv ~/.config/coc ~/.config/coc_back # - coc config and items
+mv ~/.local/share/nvim ~/.local/share/nvim_back # - vim plug
+mv ~/.vim ~/.vim_back # vim plug
+```
+
+# Scratches
 ```bash
 #comment
 echo something
