@@ -238,6 +238,8 @@ call plug#begin(expand('~/.vim/plugged'))
     "lua extended version of which key
     Plug 'folke/which-key.nvim'
 
+    Plug 'mfussenegger/nvim-dap'
+
   else
 
     " Another Comment Pluging with HTML region support
@@ -245,7 +247,7 @@ call plug#begin(expand('~/.vim/plugged'))
 
     "mapping help file TBD to make mappings
     Plug 'liuchengxu/vim-which-key'
-
+ 
     ""Indent guides
     Plug 'b3tchi/iguides' "improved guides
     " Plug 'Yggdroot/indentLine'
