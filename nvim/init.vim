@@ -139,8 +139,9 @@ call plug#begin(expand('~/.vim/plugged'))
   if lspClient == 1
     " Plug 'neoclide/coc.nvim', {'merge': 0, 'rev': 'release'}
     Plug 'neoclide/coc.nvim', {'branch': 'release'}
-    Plug 'liuchengxu/vista.vim'
     Plug 'antoinemadec/coc-fzf', {'branch': 'release'}
+
+    Plug 'liuchengxu/vista.vim'
     " Plug 'neoclide/coc.nvim', {'do': 'yarn install --frozen-lockfile'}
     " Plug 'neoclide/coc.nvim', {'merge':0, 'build': './install.sh nightly'}
     " Plug 'mgedmin/python-imports.vim', { 'on_ft' : 'python' }
@@ -177,7 +178,8 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'sheerun/vim-polyglot'
 
   "install dap for vim
-  Plug 'puremourning/vimspector'
+  " Plug 'puremourning/vimspector'
+  " source ~/dotfiles/nvim/plugins/vimspector.vim
 
   "" Old Addins TBD
   "Plug 'janko-m/vim-test'
@@ -239,7 +241,8 @@ call plug#begin(expand('~/.vim/plugged'))
     "lua extended version of which key
     Plug 'folke/which-key.nvim'
 
-    Plug 'mfussenegger/nvim-dap'
+
+    source ~/dotfiles/nvim/plugins/nvimdap.vim
 
   else
 
@@ -248,7 +251,7 @@ call plug#begin(expand('~/.vim/plugged'))
 
     "mapping help file TBD to make mappings
     Plug 'liuchengxu/vim-which-key'
- 
+
     ""Indent guides
     Plug 'b3tchi/iguides' "improved guides
     " Plug 'Yggdroot/indentLine'
@@ -470,7 +473,9 @@ nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>:LightlineReload<cr>
 
 let g:which_key_map.c ={'name':'+console'}
 " let g:VimuxRunnerName = "vimuxout"
+
 let g:VimuxRunnerType = "pane"
+
 function! VimuxSlime()
   call VimuxRunCommand(@v, 0)
   " echom @v
@@ -512,7 +517,7 @@ function! VimuxMdBlock()
 
 
    "wimscript
- elseif index(['vim','viml'],mdblock.lang) > -1
+   elseif index(['vim','viml'],mdblock.lang) > -1
      let lines = mdblock.code
      let tmp = tempname()
      call writefile(lines, tmp)
@@ -561,6 +566,7 @@ vmap <space>cr "vy :call VimuxSlime()<CR>
 
 let g:which_key_map.v.l ={'name':'+lsp'}
 nnoremap <silent> <space>vli :LspInstallInfo<cr>
+nnoremap <silent> <space>vlb :LspInfo<cr>
  " If text is selected, save it in the v buffer and send that buffer it to tmux
 
 
@@ -949,17 +955,17 @@ endif
 " let g:indentLine_leadingSpaceEnabled = 1
 " let g:indentLine_leadingSpaceChar   = '·'
 " --- VimSpector ---
-nnoremap <space>ud :call vimspector#Launch()<CR>
-nnoremap <space>uq :call vimspector#Reset()<CR>
-nnoremap <space>uc :call vimspector#Continue()<CR>
-
-nnoremap <space>ut :call vimspector#ToggleBreakpoint()<CR>
-nnoremap <space>uT :call vimspector#ClearBreakpoints()<CR>
-
-nmap <space>uk <Plug>VimspectorRestart
-nmap <space>uh <Plug>VimspectorStepOut
-nmap <space>ul <Plug>VimspectorStepInto
-nmap <space>uj <Plug>VimspectorStepOver
+" nnoremap <space>ud :call vimspector#Launch()<CR>
+" nnoremap <space>uq :call vimspector#Reset()<CR>
+" nnoremap <space>uc :call vimspector#Continue()<CR>
+"
+" nnoremap <space>ut :call vimspector#ToggleBreakpoint()<CR>
+" nnoremap <space>uT :call vimspector#ClearBreakpoints()<CR>
+"
+" nmap <space>uk <Plug>VimspectorRestart
+" nmap <space>uh <Plug>VimspectorStepOut
+" nmap <space>ul <Plug>VimspectorStepInto
+" nmap <space>uj <Plug>VimspectorStepOver
 
 " --- Vim Test ---
 let g:test#strategy = 'neovim'
@@ -1037,13 +1043,13 @@ if g:vimmode == 3
 endif
 
 function! RecurseForPath(dict,skey)
-    for key in keys(a:dict)
-        if type(a:dict[key]) == type({})
-            call RecurseForPath(a:dict[key],a:skey.key)
-          else
-            if key != 'name'
-          endif
-        endif
-    endfor
+  for key in keys(a:dict)
+    if type(a:dict[key]) == type({})
+      call RecurseForPath(a:dict[key],a:skey.key)
+    else
+      if key != 'name'
+      endif
+    endif
+  endfor
 endfunction
 
