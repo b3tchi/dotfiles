@@ -194,8 +194,8 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'skywind3000/asyncrun.vim'
 
   " themes
-  " source ~/.config/nvim/plugins/solarized.vim
-  source ~/.config/nvim/plugins/gruvbox.vim
+  " source ~/dotfiles/nvim/plugins/solarized.vim
+  source ~/dotfiles/nvim/plugins/gruvbox.vim
 
   " Plug 'lifepillar/vim-solarized8'
   " Plug 'morhetz/gruvbox'

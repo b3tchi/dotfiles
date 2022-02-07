@@ -52,12 +52,13 @@ dap.adapters.netcoredbg = {
 }
 
     -- string.format("--engineLogging=%s/netcoredbg.engine.log", XDG_CACHE_HOME),
-    -- string.format("--log=%s/netcoredbg.log", XDG_CACHE_HOME),
-
+   -- string.format("--log=%s/netcoredbg.log", XDG_CACHE_HOME),
+dap.defaults.fallback.focus_terminal = true
+dap.defaults.fallback.terminal_win_cmd = '50vsplit new'
 dap.defaults.fallback.force_external_terminal = true
 dap.defaults.fallback.external_terminal = {
-  command = '/usr/bin/tmux';
-    -- args = {'-e'};
+  command = '/usr/bin/alacritty';
+    args = {'-e'};
 }
 dap.configurations.cs = {
   {
@@ -69,6 +70,20 @@ dap.configurations.cs = {
       return pwd() .. "/" .. dll:lines()()
     end,
     stopAtEntry = false,
+    -- console = "externalTerminal",
+    console = "integratedTerminal",
+  },
+  {
+    type = "netcoredbg",
+    name = "attach - netcoredbg",
+    request = "attach",
+    processId = 171399,
+    -- processId = require'dap.utils'.pick_process,
+    -- program = function()
+    --   local dll = io.popen("find bin/Debug/ -maxdepth 2 -name \"*.dll\"")
+    --   return pwd() .. "/" .. dll:lines()()
+    -- end,
+    -- stopAtEntry = false,
   },
 }
 EOF
