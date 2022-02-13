@@ -1,37 +1,34 @@
 Plug 'mfussenegger/nvim-dap'
 Plug 'Pocco81/DAPInstall.nvim'
+Plug 'rcarriga/nvim-dap-ui'
+Plug 'theHamsta/nvim-dap-virtual-text'
+
+"dap ui dependency
+Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'}
 
 " nnoremap <space>ud :call vimspector#Launch()<CR>
-nmap <space>ud :lua require'dap'.continue()<CR>
-nmap <space>uq :lua require'dap'.terminate()<CR>
-" nnoremap <space>uq :call vimspector#Reset()<CR>
-" nnoremap <space>uc :call vimspector#Continue()<CR>
-nmap <space>utt :lua require'dap'.toggle_breakpoint()<CR>
-nmap <space>utl :lua require'dap'.list_breakpoints()<CR>
-nmap <space>utc :lua require'dap'.clear_breakpoints()<CR>
+nnoremap <space>ud :lua require'dap'.continue()<CR>
+nnoremap <space>uq :lua require'dap'.terminate()<CR>
 
-" nnoremap <space>ut :call vimspector#ToggleBreakpoint()<CR>
-" nnoremap <space>utc :call vimspector#ClearBreakpoints()<CR>
-" nnoremap <space>utl :call vimspector#ClearBreakpoints()<CR>
+nnoremap <space>utt :lua require'dap'.toggle_breakpoint()<CR>
+nnoremap <space>utl :lua require'dap'.list_breakpoints()<CR>
+nnoremap <space>utc :lua require'dap'.clear_breakpoints()<CR>
 
-"- :lua require'dap'.utils.pick_process()
-" nmap <space>uh <Plug>VimspectorStepOut
+nmap <space>ur :lua require'dap'.repl.toggle()<CR>
+
+nmap <space>uj :lua require'dap'.step_over()<CR>
+nmap <space>ul :lua require'dap'.step_into()<CR>
 nmap <space>uh :lua require'dap'.step_out()<CR>
 
-" nmap <space>ul <Plug>VimspectorStepInto
-nmap <space>ul :lua require'dap'.step_into()<CR>
-
-" nmap <space>uj <Plug>VimspectorStepOver
-nmap <space>uj :lua require'dap'.step_over()<CR>
-nmap <space>ur :lua require'dap'.repl.toggle()<CR>
+autocmd FileType dap-repl nmap J :lua require'dap'.step_over()<CR>
+autocmd FileType dap-repl nmap L :lua require'dap'.step_into()<CR>
+autocmd FileType dap-repl nmap H :lua require'dap'.step_out()<CR>
 
 function LoadedDap()
 lua << EOF
-print('daploaded')
+-- print('daploaded')
 local dap = require('dap')
 
-dap.defaults.fallback.focus_terminal = true
-dap.defaults.fallback.terminal_win_cmd = '50vsplit new'
 
 dap.adapters.python = {
   type = 'executable';
@@ -86,6 +83,10 @@ dap.configurations.cs = {
     -- stopAtEntry = false,
   },
 }
+
+require("nvim-dap-virtual-text").setup()
+require("dapui").setup()
+
 EOF
 endfunction
 
