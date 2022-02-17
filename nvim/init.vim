@@ -102,9 +102,11 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'jesseleite/vim-agriculture' "adding option for :RgRaw to run raw commands
   " Plug 'jremmen/vim-ripgrep' "testing ripgrep single addin :Rg in fzf seems broken
 
-  ""Status Line
-  Plug 'itchyny/lightline.vim'
-  Plug 'mengelbrecht/lightline-bufferline'
+  ""Status Line & bufferline
+  " source ~/dotfiles/nvim/plugins/lightline.vim
+  " Plug 'itchyny/lightline.vim'
+  " Plug 'mengelbrecht/lightline-bufferline'
+  source ~/dotfiles/nvim/plugins/lualine.vim
 
   "" White Space Highlighter
   Plug 'ntpeters/vim-better-whitespace'
@@ -261,10 +263,10 @@ call plug#begin(expand('~/.vim/plugged'))
   endif
 
 call plug#end()
-echom "plugend"
+" echom "plugend"
 "event triggering after plug
 doautocmd User PlugLoaded
-echom "plugafterevent"
+" echom "plugafterevent"
 
 " Allow gf to open non-existent files
 map gf :edit <cfile><cr>
@@ -788,7 +790,7 @@ let g:localvimrc_sandbox = 0
 let g:localvimrc_ask = 0
 
 " --- lightline ---
-source ~/.config/nvim/lightline.vim
+" source ~/.config/nvim/lightline.vim
 "
 " function LightlineFilename()
 "   let root = fnamemodify(get(b:, 'git_dir'), ':h')

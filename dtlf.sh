@@ -83,7 +83,6 @@ ml $d nvim/init.vim ~/.config/nvim/
 ml $d nvim/coc-settings.json ~/.config/nvim/
 ml $d nvim/coc.vim ~/.config/nvim/
 ml $d nvim/incubator.vim ~/.config/nvim/
-ml $d nvim/lightline.vim ~/.config/nvim/
 ml $d nvim/lualsp.vim ~/.config/nvim/
 ml $d nvim/fugidiff.vim ~/.config/nvim/
 ml $d nvim/vimspector.json ~/.config/nvim/
