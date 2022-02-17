@@ -102,11 +102,6 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'jesseleite/vim-agriculture' "adding option for :RgRaw to run raw commands
   " Plug 'jremmen/vim-ripgrep' "testing ripgrep single addin :Rg in fzf seems broken
 
-  ""Status Line & bufferline
-  " source ~/dotfiles/nvim/plugins/lightline.vim
-  " Plug 'itchyny/lightline.vim'
-  " Plug 'mengelbrecht/lightline-bufferline'
-  source ~/dotfiles/nvim/plugins/lualine.vim
 
   "" White Space Highlighter
   Plug 'ntpeters/vim-better-whitespace'
@@ -243,7 +238,10 @@ call plug#begin(expand('~/.vim/plugged'))
     "lua extended version of which key
     Plug 'folke/which-key.nvim'
 
+    ""Status Line & bufferline
+    source ~/dotfiles/nvim/plugins/lualine.vim
 
+    "debugger
     source ~/dotfiles/nvim/plugins/nvimdap.vim
 
   else
@@ -260,6 +258,9 @@ call plug#begin(expand('~/.vim/plugged'))
     " Plug 'thaerkh/vim-indentguides'
     " Plug 'lukas-reineke/indent-blankline.nvim'
     " Plug 'nathanaelkane/vim-indent-guides' "indenting guides
+
+    ""Status Line & bufferline
+    source ~/dotfiles/nvim/plugins/lightline.vim
   endif
 
 call plug#end()
