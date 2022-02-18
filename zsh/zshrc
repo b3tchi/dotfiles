@@ -53,8 +53,8 @@ zplugin light zsh-users/zsh-completions
 zplugin load zdharma-continuum/history-search-multi-word
 
 # Load the pure theme, with zsh-async library that's bundled with it.
-# zplugin ice pick"async.zsh" src"pure.zsh"
-# zplugin light sindresorhus/pure
+zplugin ice pick"async.zsh" src"pure.zsh"
+zplugin light sindresorhus/pure
 
 # Binary release in archive, from GitHub-releases page.
 # After automatic unpacking it provides program "fzf".
@@ -212,21 +212,41 @@ export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
 
-# Autoload zsh add-zsh-hook and vcs_info functions (-U autoload w/o substition, -z use zsh style)
-autoload -Uz add-zsh-hook vcs_info
-# Enable substitution in the prompt.
-setopt prompt_subst
-# Run vcs_info just before a prompt is displayed (precmd)
-add-zsh-hook precmd vcs_info
-# add ${vcs_info_msg_0} to the prompt
-# e.g. here we add the Git information in red
 
-NEWLINE=$'\n'
-PROMPT="%f%B%F{240}%~%f%b%F{yellow}%(!.#.$)%f "
-RPROMPT='%F{240}%(?..e%?) ${vcs_info_msg_0_}%*%f'
 
-zstyle ':vcs_info:*' check-for-changes true
-zstyle ':vcs_info:*' unstagedstr '*'
-zstyle ':vcs_info:*' stagedstr '+'
+##OWN PROMPT WITHOUT ADDINS NOT WORK WITH BARE REPOS - switching to pure 
 
-zstyle ':vcs_info:git:*' formats '%u%c%b '
+# # Autoload zsh add-zsh-hook and vcs_info functions (-U autoload w/o substition, -z use zsh style)
+# autoload -Uz add-zsh-hook vcs_info
+# # Enable substitution in the prompt.
+# setopt prompt_subst
+# # Run vcs_info just before a prompt is displayed (precmd)
+# add-zsh-hook precmd vcs_info
+# # add ${vcs_info_msg_0} to the prompt
+# # e.g. here we add the Git information in red
+#
+# # gitbase=$( ${vcs_comm[cmd]} rev-parse --show-toplevel 2> /dev/null )
+# # rrn=${gitbase:t}
+#
+# NEWLINE=$'\n'
+# PROMPT="%f%B%F{240}%~%f%b%F{yellow}%(!.#.$)%f "
+# RPROMPT='%F{240}%(?..e%?) ${vcs_info_msg_0_}%*%f'
+#
+# # zstyle ':vcs_info:*' check-for-changes true
+# zstyle ':vcs_info:*' unstagedstr '*'
+# zstyle ':vcs_info:*' stagedstr '+'
+#
+# zstyle ':vcs_info:git:*' formats "%u%c%b "
+#
+# zstyle -e ':vcs_info:*:*' check-for-changes \
+#     '[[ $(zstat +blocks $PWD) -ne 0 ]] && reply=( true ) || reply=( false )'
+#
+# zstyle ':vcs_info:git*+set-message:*' hooks git-untracked
+#
+# +vi-git-untracked(){
+# [[ $(zstat +blocks $PWD) -ne 0 ]] || return
+# if [[ $(git rev-parse --is-inside-work-tree 2> /dev/null) == 'true' ]] && \
+#     git status --porcelain 2> /dev/null | grep -q '??' ; then
+#     hook_com[staged]+="%{${fg[black]}%}${PRCH[circle]}"
+# fi
+# }

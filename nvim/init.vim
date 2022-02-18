@@ -102,6 +102,8 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'jesseleite/vim-agriculture' "adding option for :RgRaw to run raw commands
   " Plug 'jremmen/vim-ripgrep' "testing ripgrep single addin :Rg in fzf seems broken
 
+  ""Table formatting
+  Plug 'godlygeek/tabular'
   ""Status Line
   Plug 'itchyny/lightline.vim'
   Plug 'mengelbrecht/lightline-bufferline'
@@ -418,6 +420,8 @@ let g:which_key_map.g.m = 'merge'
 nnoremap <silent> <space>gm :G merge<cr>
 let g:which_key_map.g.l = 'log'
 nnoremap <silent> <space>gl :Flog -format=%>\|(65)\ %>(65)\ %<(40,trunc)%s\ %>\|(120%)%ad\ %an%d -date=short<cr>
+" let g:which_key_map.g.w = 'worktree'
+" nnoremap <silent> <space>gw :lua require('telescope').extensions.git_worktree.git_worktrees()<cr>
 
 
 "dadbod UI
