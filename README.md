@@ -59,7 +59,7 @@ Write-Host 'test2'
 
 testing startifier
 ```bash
-#ls ~/.local/share/nvim/session/ 
+#ls ~/.local/share/nvim/session/
 testx=$(find ~/.local/share/nvim/session/ -mindepth 1 -maxdepth 1 -printf '%f\n')
 echo $testx
 ```

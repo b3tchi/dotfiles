@@ -1,4 +1,8 @@
-"forked github.com/pirey/dotfiles thank you
+  Plug 'itchyny/lightline.vim'
+  Plug 'mengelbrecht/lightline-bufferline'
+
+function LoadedLightline()
+
 " itchyny/lightline.vim {{{
 let g:lightline = {
 \   'colorscheme': 'wombat',
@@ -171,3 +175,10 @@ endfunction
 
 let g:lightline#trailing_whitespace#indicator = ''
 " }}}
+endfunction
+
+augroup LoadedLightline
+  autocmd!
+  autocmd User PlugLoaded call LoadedLightline()
+augroup END
+"forked github.com/pirey/dotfiles thank you

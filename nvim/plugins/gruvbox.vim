@@ -7,10 +7,12 @@ highlight Folded guibg=#232323
 
 echom "plugfile"
 
-autocmd User PlugLoaded call s:LoadedSolarized()
-
-function! s:LoadedSolarized()
-  echom "plugfileRun"
+function LoadedSolarized()
+  echom "gruvRun"
   colorscheme gruvbox
-endfunc
+endfunction
 
+augroup LoadedSolarized
+  autocmd!
+  autocmd User PlugLoaded call LoadedSolarized()
+augroup END
