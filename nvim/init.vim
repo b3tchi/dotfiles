@@ -114,10 +114,12 @@ call plug#begin(expand('~/.vim/plugged'))
 
 
   "git
-  Plug 'tpope/vim-fugitive' "git intergration
-  Plug 'airblade/vim-gitgutter' "git intergration
-  Plug 'idanarye/vim-merginal' "git branch management TUI
-  Plug 'rbong/vim-flog' "git tree
+  " Plug 'tpope/vim-fugitive' "git intergration
+  " Plug 'airblade/vim-gitgutter' "git intergration
+  " Plug 'idanarye/vim-merginal' "git branch management TUI
+  " Plug 'rbong/vim-flog' "git tree
+  source ~/dotfiles/nvim/plugins/git.vim
+
   " Plug 'junegunn/gv.vim' "git tree - simplier version of flog
   " Plug 'gregsexton/gitv', {'on': ['Gitv']}
   Plug 'powerman/vim-plugin-AnsiEsc'
@@ -138,7 +140,7 @@ call plug#begin(expand('~/.vim/plugged'))
     Plug 'neoclide/coc.nvim', {'branch': 'release'}
     Plug 'antoinemadec/coc-fzf', {'branch': 'release'}
 
-    Plug 'liuchengxu/vista.vim'
+    " Plug 'liuchengxu/vista.vim'
     " Plug 'neoclide/coc.nvim', {'do': 'yarn install --frozen-lockfile'}
     " Plug 'neoclide/coc.nvim', {'merge':0, 'build': './install.sh nightly'}
     " Plug 'mgedmin/python-imports.vim', { 'on_ft' : 'python' }
@@ -167,8 +169,9 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'fabi1cazenave/suckless.vim'
 
   "Tmux
-  Plug 'christoomey/vim-tmux-navigator'
-  Plug 'preservim/vimux'
+  source ~/dotfiles/nvim/plugins/vimux.vim
+  " Plug 'christoomey/vim-tmux-navigator'
+  " Plug 'preservim/vimux'
   " Plug 'christoomey/vim-tmux-runner' alternative to vimux
 
   "syntax highlighting
@@ -183,9 +186,10 @@ call plug#begin(expand('~/.vim/plugged'))
   "Plug 'neomake/neomake'
 
   " Adding dadbod for databases
-  Plug 'tpope/vim-dadbod'
-  Plug 'kristijanhusak/vim-dadbod-ui'
-  Plug 'kristijanhusak/vim-dadbod-completion'
+  " Plug 'tpope/vim-dadbod'
+  " Plug 'kristijanhusak/vim-dadbod-ui'
+  " Plug 'kristijanhusak/vim-dadbod-completion'
+  source ~/dotfiles/nvim/plugins/dadbod.vim
 
   "Run command async
   Plug 'skywind3000/asyncrun.vim'
@@ -264,6 +268,8 @@ call plug#begin(expand('~/.vim/plugged'))
   endif
 
 call plug#end()
+
+let g:which_key_map =  {}
 " echom "plugend"
 "event triggering after plug
 doautocmd User PlugLoaded
@@ -381,7 +387,6 @@ if g:vimmode != 3
   nnoremap <silent><space> :WhichKey ' '<CR>
 endif
 
-let g:which_key_map =  {}
 let g:which_key_map.b = '+buffer'
 
 " nnoremap <C-p> :GFiles<cr>
@@ -401,56 +406,56 @@ function FuzzyFiles()
 endfunction
 
 " source ~/dotfiles/nvim/fugidiff.vim
-source ~/.config/nvim/fugidiff.vim
-
-autocmd FileType fugitive nmap <buffer> j ):call DiffTog(1)<cr>
-autocmd FileType fugitive nmap <buffer> k (:call DiffTog(1)<cr>
-autocmd FileType fugitive nmap <buffer><silent> dd :call DiffTog(0)<CR>
-autocmd FileType fugitive nmap <buffer><silent> l :call NextChange()<CR>
-autocmd FileType fugitive nmap <buffer><silent> h :call PrevChange()<CR>
-
-let g:which_key_map.g ={'name':'+git'}
-let g:which_key_map.g.g = 'fugitive'
-nnoremap <silent> <space>gg :tab G<cr>
-let g:which_key_map.g.C = 'commit&push'
-nnoremap <space>gC :w \| :G commit -a -m '' \| :G push<left><left><left><left><left><left><left><left><left><left><left>
-let g:which_key_map.g.c = 'commit'
-nnoremap <space>gc :G commit -m ''<left>
-let g:which_key_map.g.p = 'pull'
-nnoremap <silent> <space>gp :G pull<cr>
-let g:which_key_map.g.P = 'push'
-nnoremap <silent> <space>gP :G push<cr>
-let g:which_key_map.g.f = 'fetch'
-nnoremap <silent> <space>gf :G fetch<cr>
-let g:which_key_map.g.m = 'merge'
-nnoremap <silent> <space>gm :G merge<cr>
-let g:which_key_map.g.l = 'log'
-nnoremap <silent> <space>gl :Flog -format=%>\|(65)\ %>(65)\ %<(40,trunc)%s\ %>\|(120%)%ad\ %an%d -date=short<cr>
-" let g:which_key_map.g.w = 'worktree'
-" nnoremap <silent> <space>gw :lua require('telescope').extensions.git_worktree.git_worktrees()<cr>
-
-nnoremap <silent> <space>gj :GitGutterNextHunk<cr>
-nnoremap <silent> <space>gk :GitGutterPrevHunk<cr>
-nnoremap <silent> <space>gi :GitGutterPreviewHunk<cr>
+" source ~/.config/nvim/fugidiff.vim
+"
+" autocmd FileType fugitive nmap <buffer> j ):call DiffTog(1)<cr>
+" autocmd FileType fugitive nmap <buffer> k (:call DiffTog(1)<cr>
+" autocmd FileType fugitive nmap <buffer><silent> dd :call DiffTog(0)<CR>
+" autocmd FileType fugitive nmap <buffer><silent> l :call NextChange()<CR>
+" autocmd FileType fugitive nmap <buffer><silent> h :call PrevChange()<CR>
+"
+" let g:which_key_map.g ={'name':'+git'}
+" let g:which_key_map.g.g = 'fugitive'
+" nnoremap <silent> <space>gg :tab G<cr>
+" let g:which_key_map.g.C = 'commit&push'
+" nnoremap <space>gC :w \| :G commit -a -m '' \| :G push<left><left><left><left><left><left><left><left><left><left><left>
+" let g:which_key_map.g.c = 'commit'
+" nnoremap <space>gc :G commit -m ''<left>
+" let g:which_key_map.g.p = 'pull'
+" nnoremap <silent> <space>gp :G pull<cr>
+" let g:which_key_map.g.P = 'push'
+" nnoremap <silent> <space>gP :G push<cr>
+" let g:which_key_map.g.f = 'fetch'
+" nnoremap <silent> <space>gf :G fetch<cr>
+" let g:which_key_map.g.m = 'merge'
+" nnoremap <silent> <space>gm :G merge<cr>
+" let g:which_key_map.g.l = 'log'
+" nnoremap <silent> <space>gl :Flog -format=%>\|(65)\ %>(65)\ %<(40,trunc)%s\ %>\|(120%)%ad\ %an%d -date=short<cr>
+" " let g:which_key_map.g.w = 'worktree'
+" " nnoremap <silent> <space>gw :lua require('telescope').extensions.git_worktree.git_worktrees()<cr>
+"
+" nnoremap <silent> <space>gj :GitGutterNextHunk<cr>
+" nnoremap <silent> <space>gk :GitGutterPrevHunk<cr>
+" nnoremap <silent> <space>gi :GitGutterPreviewHunk<cr>
 
 "dadbod UI
-let g:db_ui_disable_mappings = 1
-let g:which_key_map.d ={'name':'+dadbod-ui'}
-autocmd FileType sql nmap <buffer><silent><space>de <Plug>(DBUI_ExecuteQuery)
-let g:which_key_map.d.e = 'execute query'
-autocmd FileType sql nmap <buffer><silent><space>dw <Plug>(DBUI_SaveQuery)
-let g:which_key_map.d.s = 'save query'
-
-autocmd FileType dbui nmap <buffer> <S-k> <Plug>(DBUI_GotoFirstSibling)
-autocmd FileType dbui nmap <buffer> <S-j> <Plug>(DBUI_GotoLastSibling)
-" autocmd FileType dbui nmap <buffer> k <Plug>(DBUI_GotoPrevSibling)
-" autocmd FileType dbui nmap <buffer> j <Plug>(DBUI_GotoNextSibling)
-
-
-nnoremap <space>dn :DBUIToggle<CR>
-let g:which_key_map.d.n = 'navpane'
-nnoremap <space>dh :help DBUI<CR>
-let g:which_key_map.d.h = 'help'
+" let g:db_ui_disable_mappings = 1
+" let g:which_key_map.d ={'name':'+dadbod-ui'}
+" autocmd FileType sql nmap <buffer><silent><space>de <Plug>(DBUI_ExecuteQuery)
+" let g:which_key_map.d.e = 'execute query'
+" autocmd FileType sql nmap <buffer><silent><space>dw <Plug>(DBUI_SaveQuery)
+" let g:which_key_map.d.s = 'save query'
+"
+" autocmd FileType dbui nmap <buffer> <S-k> <Plug>(DBUI_GotoFirstSibling)
+" autocmd FileType dbui nmap <buffer> <S-j> <Plug>(DBUI_GotoLastSibling)
+" " autocmd FileType dbui nmap <buffer> k <Plug>(DBUI_GotoPrevSibling)
+" " autocmd FileType dbui nmap <buffer> j <Plug>(DBUI_GotoNextSibling)
+"
+"
+" nnoremap <space>dn :DBUIToggle<CR>
+" let g:which_key_map.d.n = 'navpane'
+" nnoremap <space>dh :help DBUI<CR>
+" let g:which_key_map.d.h = 'help'
 
 " autocmd FileType dbui nmap <buffer> <C-k> <c-w>W
 " autocmd FileType dbui nmap <buffer> <C-j> <c-w>w
@@ -479,98 +484,98 @@ nnoremap <silent> <space>vcu :CocUpdate<cr>
 let g:which_key_map.v.i ={'name':'+init.vim'}
 nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>:LightlineReload<cr>
 
-let g:which_key_map.c ={'name':'+console'}
-" let g:VimuxRunnerName = "vimuxout"
-
-let g:VimuxRunnerType = "pane"
-
-function! VimuxSlime()
-  call VimuxRunCommand(@v, 0)
-  " echom @v
-endfunction
-
-function! VimuxMdBlock()
-   let mdblock = MarkdownBlock()
-   "  if mdblock.lang == 'bash'
-
-   "bash command
-   if index(['bash','sh'],mdblock.lang) > -1
-     let lines = join(mdblock.code, "\n") . "\n"
-     call VimuxRunCommand(lines)
-
-   "powershell
-   elseif index(['pwsh','ps','powershell'],mdblock.lang) > -1
-     " let tmp = tempname()
-     " call writefile(mdblock.code, tmp)
-     " call VimuxRunCommand('powershell.exe '.tmp)
-     " call delete(tmp)
-
-     "rand filename
-      let fname = tempname()
-      let fname = substitute(fname,'/','','g') . '.ps1'
-
-      "paths
-      let win_tmpps = trim(system('cd /mnt/c/ && cmd.exe /c echo %TEMP% && cd - | grep C: ')) . '\'
-      let unx_tmpps = substitute(win_tmpps,'\\','/','g')
-      let unx_tmpps = substitute(unx_tmpps,'C:','/mnt/c','g')
-      ""let unx_tmpps = '/mnt/c/Users/czJaBeck/AppData/Local/Temp/' . fname
-      let win_tmpps = win_tmpps . fname
-      let unx_tmpps = unx_tmpps . fname
-      " echom win_tmpps
-      " echom unx_tmpps
-      call writefile(mdblock.code, unx_tmpps)
-
-      let cmd = 'powershell.exe ''' . win_tmpps . ''''
-      call VimuxRunCommand(cmd)
-
-
-   "wimscript
-   elseif index(['vim','viml'],mdblock.lang) > -1
-     let lines = mdblock.code
-     let tmp = tempname()
-     call writefile(lines, tmp)
-     exec 'source '.tmp
-     call delete(tmp)
-   endif
-endfunction
-
-function! MarkdownBlock()
-  let view = winsaveview()
-  let line = line('.')
-  let cpos = getpos('.')
-  let start = search('^\s*[`~]\{3,}\S*\s*$', 'bnW')
-  if !start
-    return
-  endif
-
-  call cursor(start, 1)
-  let [fence, langv] = matchlist(getline(start), '\([`~]\{3,}\)\(\S\+\)\?')[1:2]
-  let end = search('^\s*' . fence . '\s*$', 'nW')
-
-  if end < line""|| langidx < 0
-    call winrestview(view)
-    return
-  endif
-
-  let resp = {}
-  let resp.code = getline(start + 1, end - 1) ""block"" list2str(block)
-  let resp.lang = langv
-  call setpos('.',cpos)
-  return resp
-endfunction
-
-nnoremap <silent> <space>co :VimuxOpenRunner<cr>
-nnoremap <silent> <space>cq :VimuxCloseRunner<cr>
-nnoremap <silent> <space>cl :VimuxRunLastCommand<cr>
-nnoremap <silent> <space>cx :VimuxInteruptRunner<cr>
-nnoremap <silent> <space>ci :VimuxInspectRunner<CR>
-nnoremap <silent> <space>cp :VimuxPromptCommand<CR>
-nnoremap <silent> <space>cr vip "vy :call VimuxSlime()<CR>
-nnoremap <silent> <space>cb :call VimuxMdBlock()<CR>
-
-" nnoremap <space>cz :lua require'telegraph'.telegraph({how='tmux_popup', cmd='man '})<Left><Left><Left>
-
-vmap <space>cr "vy :call VimuxSlime()<CR>
+" let g:which_key_map.c ={'name':'+console'}
+" " let g:VimuxRunnerName = "vimuxout"
+"
+" let g:VimuxRunnerType = "pane"
+"
+" function! VimuxSlime()
+"   call VimuxRunCommand(@v, 0)
+"   " echom @v
+" endfunction
+"
+" function! VimuxMdBlock()
+"    let mdblock = MarkdownBlock()
+"    "  if mdblock.lang == 'bash'
+"
+"    "bash command
+"    if index(['bash','sh'],mdblock.lang) > -1
+"      let lines = join(mdblock.code, "\n") . "\n"
+"      call VimuxRunCommand(lines)
+"
+"    "powershell
+"    elseif index(['pwsh','ps','powershell'],mdblock.lang) > -1
+"      " let tmp = tempname()
+"      " call writefile(mdblock.code, tmp)
+"      " call VimuxRunCommand('powershell.exe '.tmp)
+"      " call delete(tmp)
+"
+"      "rand filename
+"       let fname = tempname()
+"       let fname = substitute(fname,'/','','g') . '.ps1'
+"
+"       "paths
+"       let win_tmpps = trim(system('cd /mnt/c/ && cmd.exe /c echo %TEMP% && cd - | grep C: ')) . '\'
+"       let unx_tmpps = substitute(win_tmpps,'\\','/','g')
+"       let unx_tmpps = substitute(unx_tmpps,'C:','/mnt/c','g')
+"       ""let unx_tmpps = '/mnt/c/Users/czJaBeck/AppData/Local/Temp/' . fname
+"       let win_tmpps = win_tmpps . fname
+"       let unx_tmpps = unx_tmpps . fname
+"       " echom win_tmpps
+"       " echom unx_tmpps
+"       call writefile(mdblock.code, unx_tmpps)
+"
+"       let cmd = 'powershell.exe ''' . win_tmpps . ''''
+"       call VimuxRunCommand(cmd)
+"
+"
+"    "wimscript
+"    elseif index(['vim','viml'],mdblock.lang) > -1
+"      let lines = mdblock.code
+"      let tmp = tempname()
+"      call writefile(lines, tmp)
+"      exec 'source '.tmp
+"      call delete(tmp)
+"    endif
+" endfunction
+"
+" function! MarkdownBlock()
+"   let view = winsaveview()
+"   let line = line('.')
+"   let cpos = getpos('.')
+"   let start = search('^\s*[`~]\{3,}\S*\s*$', 'bnW')
+"   if !start
+"     return
+"   endif
+"
+"   call cursor(start, 1)
+"   let [fence, langv] = matchlist(getline(start), '\([`~]\{3,}\)\(\S\+\)\?')[1:2]
+"   let end = search('^\s*' . fence . '\s*$', 'nW')
+"
+"   if end < line""|| langidx < 0
+"     call winrestview(view)
+"     return
+"   endif
+"
+"   let resp = {}
+"   let resp.code = getline(start + 1, end - 1) ""block"" list2str(block)
+"   let resp.lang = langv
+"   call setpos('.',cpos)
+"   return resp
+" endfunction
+"
+" nnoremap <silent> <space>co :VimuxOpenRunner<cr>
+" nnoremap <silent> <space>cq :VimuxCloseRunner<cr>
+" nnoremap <silent> <space>cl :VimuxRunLastCommand<cr>
+" nnoremap <silent> <space>cx :VimuxInteruptRunner<cr>
+" nnoremap <silent> <space>ci :VimuxInspectRunner<CR>
+" nnoremap <silent> <space>cp :VimuxPromptCommand<CR>
+" nnoremap <silent> <space>cr vip "vy :call VimuxSlime()<CR>
+" nnoremap <silent> <space>cb :call VimuxMdBlock()<CR>
+"
+" " nnoremap <space>cz :lua require'telegraph'.telegraph({how='tmux_popup', cmd='man '})<Left><Left><Left>
+"
+" vmap <space>cr "vy :call VimuxSlime()<CR>
 
 let g:which_key_map.v.l ={'name':'+lsp'}
 nnoremap <silent> <space>vli :LspInstallInfo<cr>
@@ -654,34 +659,8 @@ nnoremap <space>wl <c-w>p
 vnoremap < <gv
 vnoremap > >gv
 
-" --- DadBod UI ---
-let g:db_ui_disable_mappings = 1
-
-autocmd FileType sql nmap <buffer><silent><space>de <Plug>(DBUI_ExecuteQuery)
-autocmd FileType sql nmap <buffer><silent><space>dw <Plug>(DBUI_SaveQuery)
-
-autocmd FileType dbui nmap <buffer> <S-k> <Plug>(DBUI_GotoFirstSibling)
-autocmd FileType dbui nmap <buffer> <S-j> <Plug>(DBUI_GotoLastSibling)
-autocmd FileType dbui nmap <buffer> k <up>
-autocmd FileType dbui nmap <buffer> j <down>
-" autocmd FileType dbui nmap <buffer> k <Plug>(DBUI_GotoPrevSibling)
-" autocmd FileType dbui nmap <buffer> j <Plug>(DBUI_GotoNextSibling)
-autocmd FileType dbui nmap <buffer> A <Plug>(DBUI_AddConnection)
-autocmd FileType dbui nmap <buffer> r <Plug>(DBUI_RenameLine)
-autocmd FileType dbui nmap <buffer> h <Plug>(DBUI_GotoParentNode)
-autocmd FileType dbui nmap <buffer> o <Plug>(DBUI_SelectLine)
-autocmd FileType dbui nmap <buffer> l <Plug>(DBUI_GotoChildNode)
-
-nnoremap <space>dn :DBUIToggle<CR>
-
-" --- Better White Space
-let g:better_whitespace_filetypes_blacklist = [
-  \ 'dbout'
-  \ ]
-
 " --- Vim Wiki ---
 nnoremap <silent><space>Wt :VimwikiTable 1 2
-
 
 " --- Coc ---
 if lspClient == 1
@@ -730,7 +709,7 @@ if lspClient == 1
   nnoremap <silent> <space>a :<C-u>CocFzfList diagnostics<cr>
   nnoremap <silent> <space>E :CocCommand explorer<cr>
   nnoremap <silent> <space>o :<C-u>CocFzfList outline<cr>
-  nnoremap <silent> <space>O :Vista!!<CR>
+  nnoremap <silent> <space>O :SymbolsOutline<CR>
   " nnoremap <silent>  e  :<C-u>CocList extensions<cr>
   " nnoremap <silent>  s  :<C-u>CocList -I symbols<cr>
 
