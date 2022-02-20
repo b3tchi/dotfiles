@@ -5,11 +5,19 @@ For installation use bash script
 ```
 
 # vim locations
-
+*dofiles configs*
 ~/.config/nvim/* - user config files
+
+*coc files and lsp servers*
 ~/.config/coc/* - coc config and items
 
+*plugins stored*
 ~/.local/share/nvim/* - vim plug
+
+*sessions*
+~/.local/share/nvim/session/* - startify sessions
+
+*plugin manager*
 ~/.vim/plugged/* - vim plug
 
 clean nvim settings
