@@ -5,6 +5,7 @@ Plug 'kyazdani42/nvim-web-devicons' " Recommended (for coloured icons)
 
 function LoadedLualine()
 
+"kept for compatibility with lightline
 command! LightlineReload call LightlineReload()
 
 function! LightlineReload() abort
