@@ -427,6 +427,9 @@ nnoremap <silent> <space>gm :G merge<cr>
 let g:which_key_map.g.l = 'log'
 nnoremap <silent> <space>gl :Flog -format=%>\|(65)\ %>(65)\ %<(40,trunc)%s\ %>\|(120%)%ad\ %an%d -date=short<cr>
 
+nnoremap <silent> <space>gj :GitGutterNextHunk<cr>
+nnoremap <silent> <space>gk :GitGutterPrevHunk<cr>
+nnoremap <silent> <space>gi :GitGutterPreviewHunk<cr>
 
 "dadbod UI
 let g:db_ui_disable_mappings = 1
@@ -572,11 +575,12 @@ nnoremap <silent> <space>vli :LspInstallInfo<cr>
 nnoremap <silent> <space>vlb :LspInfo<cr>
  " If text is selected, save it in the v buffer and send that buffer it to tmux
 
-
+" function! gitrepo
 let g:which_key_map.v.l ={'name':'+sessions'}
 nnoremap <silent> <space>ss :SSave<cr>
 nnoremap <silent> <space>sd :SDelete<cr>
 nnoremap <silent> <space>sc :SClose<cr>
+nnoremap <silent> <space>sw :SSave! dotfiles<cr>:wqa<cr>
 
 nmap <silent> <leader>tn :TestNearest<CR>
 nmap <silent> <leader>tf :TestFile<CR>
