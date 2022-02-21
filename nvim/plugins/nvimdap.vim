@@ -6,7 +6,6 @@ Plug 'theHamsta/nvim-dap-virtual-text'
 "dap ui dependency
 Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'}
 
-" nnoremap <space>ud :call vimspector#Launch()<CR>
 nnoremap <space>ud :lua require'dap'.continue()<CR>
 nnoremap <space>uq :lua require'dap'.terminate()<CR>
 
