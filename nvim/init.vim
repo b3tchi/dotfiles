@@ -112,12 +112,6 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'tpope/vim-surround' "surrounding words with symbols
   "Plug 'tmsvg/pear-tree' "getting some issues for the function disabled
 
-
-  "git
-  " Plug 'tpope/vim-fugitive' "git intergration
-  " Plug 'airblade/vim-gitgutter' "git intergration
-  " Plug 'idanarye/vim-merginal' "git branch management TUI
-  " Plug 'rbong/vim-flog' "git tree
   source ~/dotfiles/nvim/plugins/git.vim
 
   " Plug 'junegunn/gv.vim' "git tree - simplier version of flog
@@ -170,9 +164,6 @@ call plug#begin(expand('~/.vim/plugged'))
 
   "Tmux
   source ~/dotfiles/nvim/plugins/vimux.vim
-  " Plug 'christoomey/vim-tmux-navigator'
-  " Plug 'preservim/vimux'
-  " Plug 'christoomey/vim-tmux-runner' alternative to vimux
 
   "syntax highlighting
   Plug 'sheerun/vim-polyglot'
@@ -186,16 +177,12 @@ call plug#begin(expand('~/.vim/plugged'))
   "Plug 'neomake/neomake'
 
   " Adding dadbod for databases
-  " Plug 'tpope/vim-dadbod'
-  " Plug 'kristijanhusak/vim-dadbod-ui'
-  " Plug 'kristijanhusak/vim-dadbod-completion'
   source ~/dotfiles/nvim/plugins/dadbod.vim
 
   "Run command async
   Plug 'skywind3000/asyncrun.vim'
 
   " themes
-  " source ~/dotfiles/nvim/plugins/solarized.vim
   source ~/dotfiles/nvim/plugins/gruvbox.vim
 
   " Plug 'lifepillar/vim-solarized8'
@@ -405,68 +392,8 @@ function FuzzyFiles()
   endif
 endfunction
 
-" source ~/dotfiles/nvim/fugidiff.vim
-" source ~/.config/nvim/fugidiff.vim
-"
-" autocmd FileType fugitive nmap <buffer> j ):call DiffTog(1)<cr>
-" autocmd FileType fugitive nmap <buffer> k (:call DiffTog(1)<cr>
-" autocmd FileType fugitive nmap <buffer><silent> dd :call DiffTog(0)<CR>
-" autocmd FileType fugitive nmap <buffer><silent> l :call NextChange()<CR>
-" autocmd FileType fugitive nmap <buffer><silent> h :call PrevChange()<CR>
-"
-" let g:which_key_map.g ={'name':'+git'}
-" let g:which_key_map.g.g = 'fugitive'
-" nnoremap <silent> <space>gg :tab G<cr>
-" let g:which_key_map.g.C = 'commit&push'
-" nnoremap <space>gC :w \| :G commit -a -m '' \| :G push<left><left><left><left><left><left><left><left><left><left><left>
-" let g:which_key_map.g.c = 'commit'
-" nnoremap <space>gc :G commit -m ''<left>
-" let g:which_key_map.g.p = 'pull'
-" nnoremap <silent> <space>gp :G pull<cr>
-" let g:which_key_map.g.P = 'push'
-" nnoremap <silent> <space>gP :G push<cr>
-" let g:which_key_map.g.f = 'fetch'
-" nnoremap <silent> <space>gf :G fetch<cr>
-" let g:which_key_map.g.m = 'merge'
-" nnoremap <silent> <space>gm :G merge<cr>
-" let g:which_key_map.g.l = 'log'
-" nnoremap <silent> <space>gl :Flog -format=%>\|(65)\ %>(65)\ %<(40,trunc)%s\ %>\|(120%)%ad\ %an%d -date=short<cr>
-" " let g:which_key_map.g.w = 'worktree'
-" " nnoremap <silent> <space>gw :lua require('telescope').extensions.git_worktree.git_worktrees()<cr>
-"
-" nnoremap <silent> <space>gj :GitGutterNextHunk<cr>
-" nnoremap <silent> <space>gk :GitGutterPrevHunk<cr>
-" nnoremap <silent> <space>gi :GitGutterPreviewHunk<cr>
-
-"dadbod UI
-" let g:db_ui_disable_mappings = 1
-" let g:which_key_map.d ={'name':'+dadbod-ui'}
-" autocmd FileType sql nmap <buffer><silent><space>de <Plug>(DBUI_ExecuteQuery)
-" let g:which_key_map.d.e = 'execute query'
-" autocmd FileType sql nmap <buffer><silent><space>dw <Plug>(DBUI_SaveQuery)
-" let g:which_key_map.d.s = 'save query'
-"
-" autocmd FileType dbui nmap <buffer> <S-k> <Plug>(DBUI_GotoFirstSibling)
-" autocmd FileType dbui nmap <buffer> <S-j> <Plug>(DBUI_GotoLastSibling)
-" " autocmd FileType dbui nmap <buffer> k <Plug>(DBUI_GotoPrevSibling)
-" " autocmd FileType dbui nmap <buffer> j <Plug>(DBUI_GotoNextSibling)
-"
-"
-" nnoremap <space>dn :DBUIToggle<CR>
-" let g:which_key_map.d.n = 'navpane'
-" nnoremap <space>dh :help DBUI<CR>
-" let g:which_key_map.d.h = 'help'
-
-" autocmd FileType dbui nmap <buffer> <C-k> <c-w>W
-" autocmd FileType dbui nmap <buffer> <C-j> <c-w>w
-
-" nnoremap <space>de ,S
-" autocmd FileType sql nmap <buffer> <space>de <Plug>(DBUI_ExecuteQuery)
 "tasks TBD
 nnoremap <silent> <space>tn :Trep<cr>
-
-"Incubator.vim
-" nnoremap <silent>  k :call <SID>incubator.vim#ToggleOnTerminal('J', 6)<CR>
 
 let g:which_key_map.v ={'name':'+vim'}
 nnoremap <silent> <space>vk :Maps<cr>
@@ -483,99 +410,6 @@ nnoremap <silent> <space>vcu :CocUpdate<cr>
 
 let g:which_key_map.v.i ={'name':'+init.vim'}
 nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>:LightlineReload<cr>
-
-" let g:which_key_map.c ={'name':'+console'}
-" " let g:VimuxRunnerName = "vimuxout"
-"
-" let g:VimuxRunnerType = "pane"
-"
-" function! VimuxSlime()
-"   call VimuxRunCommand(@v, 0)
-"   " echom @v
-" endfunction
-"
-" function! VimuxMdBlock()
-"    let mdblock = MarkdownBlock()
-"    "  if mdblock.lang == 'bash'
-"
-"    "bash command
-"    if index(['bash','sh'],mdblock.lang) > -1
-"      let lines = join(mdblock.code, "\n") . "\n"
-"      call VimuxRunCommand(lines)
-"
-"    "powershell
-"    elseif index(['pwsh','ps','powershell'],mdblock.lang) > -1
-"      " let tmp = tempname()
-"      " call writefile(mdblock.code, tmp)
-"      " call VimuxRunCommand('powershell.exe '.tmp)
-"      " call delete(tmp)
-"
-"      "rand filename
-"       let fname = tempname()
-"       let fname = substitute(fname,'/','','g') . '.ps1'
-"
-"       "paths
-"       let win_tmpps = trim(system('cd /mnt/c/ && cmd.exe /c echo %TEMP% && cd - | grep C: ')) . '\'
-"       let unx_tmpps = substitute(win_tmpps,'\\','/','g')
-"       let unx_tmpps = substitute(unx_tmpps,'C:','/mnt/c','g')
-"       ""let unx_tmpps = '/mnt/c/Users/czJaBeck/AppData/Local/Temp/' . fname
-"       let win_tmpps = win_tmpps . fname
-"       let unx_tmpps = unx_tmpps . fname
-"       " echom win_tmpps
-"       " echom unx_tmpps
-"       call writefile(mdblock.code, unx_tmpps)
-"
-"       let cmd = 'powershell.exe ''' . win_tmpps . ''''
-"       call VimuxRunCommand(cmd)
-"
-"
-"    "wimscript
-"    elseif index(['vim','viml'],mdblock.lang) > -1
-"      let lines = mdblock.code
-"      let tmp = tempname()
-"      call writefile(lines, tmp)
-"      exec 'source '.tmp
-"      call delete(tmp)
-"    endif
-" endfunction
-"
-" function! MarkdownBlock()
-"   let view = winsaveview()
-"   let line = line('.')
-"   let cpos = getpos('.')
-"   let start = search('^\s*[`~]\{3,}\S*\s*$', 'bnW')
-"   if !start
-"     return
-"   endif
-"
-"   call cursor(start, 1)
-"   let [fence, langv] = matchlist(getline(start), '\([`~]\{3,}\)\(\S\+\)\?')[1:2]
-"   let end = search('^\s*' . fence . '\s*$', 'nW')
-"
-"   if end < line""|| langidx < 0
-"     call winrestview(view)
-"     return
-"   endif
-"
-"   let resp = {}
-"   let resp.code = getline(start + 1, end - 1) ""block"" list2str(block)
-"   let resp.lang = langv
-"   call setpos('.',cpos)
-"   return resp
-" endfunction
-"
-" nnoremap <silent> <space>co :VimuxOpenRunner<cr>
-" nnoremap <silent> <space>cq :VimuxCloseRunner<cr>
-" nnoremap <silent> <space>cl :VimuxRunLastCommand<cr>
-" nnoremap <silent> <space>cx :VimuxInteruptRunner<cr>
-" nnoremap <silent> <space>ci :VimuxInspectRunner<CR>
-" nnoremap <silent> <space>cp :VimuxPromptCommand<CR>
-" nnoremap <silent> <space>cr vip "vy :call VimuxSlime()<CR>
-" nnoremap <silent> <space>cb :call VimuxMdBlock()<CR>
-"
-" " nnoremap <space>cz :lua require'telegraph'.telegraph({how='tmux_popup', cmd='man '})<Left><Left><Left>
-"
-" vmap <space>cr "vy :call VimuxSlime()<CR>
 
 let g:which_key_map.v.l ={'name':'+lsp'}
 nnoremap <silent> <space>vli :LspInstallInfo<cr>
@@ -775,19 +609,6 @@ endif
 let g:localvimrc_sandbox = 0
 let g:localvimrc_ask = 0
 
-" --- lightline ---
-" source ~/.config/nvim/lightline.vim
-"
-" function LightlineFilename()
-"   let root = fnamemodify(get(b:, 'git_dir'), ':h')
-"   "split join for replace different separators in Windows dirty fix
-"   let path = join(split(expand('%:p'),'\'),'/')
-"   if path[:len(root)-1] ==# root
-"     return path[len(root)+1:]
-"   endif
-"   return expand('%')
-" endfunction
-"
 "--- Vista --- NEEDED similar as coclist as outline
 "PROBABLY TBR succed by fzf-coc
 let g:vista_default_executive = 'coc'
@@ -814,10 +635,6 @@ let g:fzf_layout = { 'window': 'call OpenFloatingWin()' }
 " let g:fzf_layout = { 'window': {'width': 0.95, 'height': 0.95} }
 " let g:fzf_preview_window = ['down:40%:hidden', 'ctrl-/']
 let g:fzf_preview_window = ['right:40%:hidden', 'ctrl-/']
-
-" function! PreviewIfWide(spec)
-"   return &columns < 120 ? fzf#vim#with_preview(a:spec) : a:spec
-" endfunction
 
 function! PreviewIfWide2()
   return &columns < 120 ? fzf#vim#with_preview('up:40%', 'ctrl-/') :fzf#vim#with_preview('right:40%', 'ctrl-/')
@@ -931,29 +748,6 @@ if g:vimmode != 3
     " autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#3c3836 ctermbg=4
   endif
 endif
-
-"--- Indent Line ---
-" let g:indentLine_char               = "⎸"
-" let g:indentLine_faster             = 1
-" let g:indentLine_fileTypeExclude    = ['json',  'startify', '', 'help', 'coc-explorer']
-" let g:indentLine_setConceal = 1
-" set conceallevel=1
-" let g:indentLine_conceallevel=1
-"--- not used ---
-" let g:indentLine_leadingSpaceEnabled = 1
-" let g:indentLine_leadingSpaceChar   = '·'
-" --- VimSpector ---
-" nnoremap <space>ud :call vimspector#Launch()<CR>
-" nnoremap <space>uq :call vimspector#Reset()<CR>
-" nnoremap <space>uc :call vimspector#Continue()<CR>
-"
-" nnoremap <space>ut :call vimspector#ToggleBreakpoint()<CR>
-" nnoremap <space>uT :call vimspector#ClearBreakpoints()<CR>
-"
-" nmap <space>uk <Plug>VimspectorRestart
-" nmap <space>uh <Plug>VimspectorStepOut
-" nmap <space>ul <Plug>VimspectorStepInto
-" nmap <space>uj <Plug>VimspectorStepOver
 
 " --- Vim Test ---
 let g:test#strategy = 'neovim'
