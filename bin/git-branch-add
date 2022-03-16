@@ -1,0 +1,30 @@
+#!/bin/bash
+if [[ $# -eq 1 ]]; then
+    selected=$1
+else
+  # selected=$(git branch -a | sed -e 's/[+,*, ] //' | sed -e 's/remotes\/origin\///' | sort | uniq -u | fzf)
+  selected=$(git branch -a | sed -e 's/[+,*, ] //' | sed -e 's/remotes\/origin\///' | sort | uniq -u | fzf)
+fi
+
+if [[ -z $selected ]]; then
+    exit 0
+fi
+
+echo $selected
+
+if [[ -d "$selected" ]]; then
+
+  cd ../${selected}
+
+else
+  echo create
+  #
+  # mkdir -p ../${selected}
+  #
+  # git worktree add ../${selected} origin/${selected}
+  #
+  # cd ../${selected}
+  #
+  # git checkout ${selected}
+
+fi

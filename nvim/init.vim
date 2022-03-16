@@ -82,6 +82,8 @@ autocmd VimEnter * if len(filter(values(g:plugs), '!isdirectory(v:val.dir)'))
   \| PlugInstall --sync | source $MYVIMRC
 \| endif
 
+" clobal variables
+let g:which_key_map =  {}
 
 " Required
 call plug#begin(expand('~/.vim/plugged'))
@@ -256,7 +258,6 @@ call plug#begin(expand('~/.vim/plugged'))
 
 call plug#end()
 
-let g:which_key_map =  {}
 " echom "plugend"
 "event triggering after plug
 doautocmd User PlugLoaded
@@ -753,7 +754,7 @@ endif
 let g:test#strategy = 'neovim'
 
 " --- Markdown specific ---
-let g:markdown_fenced_languages = ['coffee', 'css', 'erb=eruby', 'javascript', 'js=javascript', 'json=javascript', 'ruby', 'sass','sh=bash','bash', 'vim', 'xml']
+let g:markdown_fenced_languages = ['coffee', 'css', 'erb=eruby', 'javascript', 'js=javascript', 'json=javascript', 'ruby', 'sass','sh=bash','bash', 'vim', 'xml','sql']
 
 function! Mdftinit()
   setlocal spell spelllang=en_us
