@@ -25,7 +25,7 @@ IntensityEffect=0
 
 [Colors:Button]
 BackgroundAlternate=163,212,250
-BackgroundNormal=247,247,247
+BackgroundNormal=252,252,252
 DecorationFocus=61,174,233
 DecorationHover=61,174,233
 ForegroundActive=61,174,233
@@ -142,6 +142,7 @@ History Items[$e]=file:$HOME/vms/ubuntucore,file:$HOME/Downloads/Disney,file:$HO
 [General]
 AccentColor=61,174,233
 BrowserApplication=firefox.desktop
+ColorSchemeHash=0d48a65f7ec21fd6758445108cd2bcfb1ce4deb8
 Name=Breeze Light
 XftAntialias=true
 XftHintStyle=hintslight
@@ -154,13 +155,10 @@ smallestReadableFont=FreeSans,8,-1,5,50,0,0,0,0,0
 toolBarFont=FreeSans,10,-1,5,50,0,0,0,0,0
 widgetStyle=Breeze
 
-[Icons]
-Theme=Papirus
-
 [KDE]
 AnimationDurationFactor=0.25
 ColorScheme=Breeze
-LookAndFeelPackage=org.kde.breeze.desktop
+LookAndFeelPackage=org.kde.breezetwilight.desktop
 ShowDeleteCommand=false
 SingleClick=false
 contrast=4
