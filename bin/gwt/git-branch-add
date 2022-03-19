@@ -1,9 +1,26 @@
 #!/bin/bash
+
 if [[ $# -eq 1 ]]; then
     selected=$1
 else
-  # selected=$(git branch -a | sed -e 's/[+,*, ] //' | sed -e 's/remotes\/origin\///' | sort | uniq -u | fzf)
-  selected=$(git branch -a | sed -e 's/[+,*, ] //' | sed -e 's/remotes\/origin\///' | sort | uniq -u | fzf)
+
+  activeremote=$(git ls-remote --heads origin | sed -e 's/^.*heads\///')
+  activelocal=$(git worktree list | sed -e 's/^.*\[//' | sed -e 's/\]$//')
+
+  #diff only add other from active remote
+  list=$(comm -23 <(tr ' ' $'\n' <<< $activeremote | sort) <(tr ' ' $'\n' <<< $activelocal | sort))
+
+  # echo -----
+  # printf "$list\n"
+  # echo -----
+  echo $list | wc -l
+
+  if [[ -z $list ]]; then
+      echo 'no active branches to add'
+      exit 0
+  fi
+
+  selected=$(printf "$list\n" | fzf)
 fi
 
 if [[ -z $selected ]]; then
@@ -17,14 +34,14 @@ if [[ -d "$selected" ]]; then
   cd ../${selected}
 
 else
-  echo create
-  #
-  # mkdir -p ../${selected}
-  #
-  # git worktree add ../${selected} origin/${selected}
-  #
-  # cd ../${selected}
-  #
-  # git checkout ${selected}
+  # echo create
+
+  mkdir -p ../${selected}
+
+  git worktree add ../${selected} origin/${selected}
+
+  cd ../${selected}
+
+  git checkout ${selected}
 
 fi

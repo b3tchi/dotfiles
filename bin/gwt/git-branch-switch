@@ -2,29 +2,41 @@
 if [[ $# -eq 1 ]]; then
     selected=$1
 else
-  # selected=$(git branch -a | sed -e 's/[+,*, ] //' | sed -e 's/remotes\/origin\///' | sort | uniq -u | fzf)
-  selected=$(git branch -a | sed -e 's/[+,*, ] //' | sed -e 's/remotes\/origin\///' | sort | uniq -u | fzf)
+
+  activelocal=$(git worktree list | sed -e 's/^.*\[//' | sed -e 's/\]$//')
+  # currentbranch=$(git branch | grep "*" | sed -e 's/* //')
+
+  selected=$(printf "$activelocal\n$currentbranch" | sort | uniq -u | fzf)
 fi
 
 if [[ -z $selected ]]; then
     exit 0
 fi
 
-echo $selected
+path=$(git worktree list | grep "$selected" | sed -e 's/ .*$//')
 
-if [[ -d "$selected" ]]; then
+root=${path/${selected}//}
 
-  cd ../${selected}
+echo $path
+echo $root
 
-else
-  echo create
-  #
-  # mkdir -p ../${selected}
-  #
-  # git worktree add ../${selected} origin/${selected}
-  #
-  # cd ../${selected}
-  #
-  # git checkout ${selected}
+exit
+
+if [[ -d $path ]]; then
+  echo cd
+  # cd $path
+  selected_name=$selected
+  tmux_running=$(pgrep tmux)
+
+  if [[ -z $TMUX ]] && [[ -z $tmux_running ]]; then
+    tmux new-session -s $selected_name -c $path
+    exit 0
+  fi
+
+  if ! tmux has-session -t $selected_name 2> /dev/null; then
+    tmux new-session -ds $selected_name -c $path
+  fi
+
+  tmux switch-client -t $selected_name
 
 fi
