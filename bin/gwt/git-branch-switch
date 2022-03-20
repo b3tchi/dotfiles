@@ -14,29 +14,32 @@ if [[ -z $selected ]]; then
 fi
 
 path=$(git worktree list | grep "$selected" | sed -e 's/ .*$//')
+root=${path:0:(($(echo $path | wc --chars)-$(echo $selected | wc --chars)-1))}
+repo=$(basename ${root})
+brname=${selected/\//-}
+sessionname="${repo}@${brname}"
 
-root=${path/${selected}//}
-
-echo $path
-echo $root
-
-exit
+# echo $selected
+# echo $path
+# echo $root
+# echo $repo
+# echo $brname
+# echo $sessionname
+# exit
 
 if [[ -d $path ]]; then
-  echo cd
-  # cd $path
-  selected_name=$selected
+  # sessionname=$selected
   tmux_running=$(pgrep tmux)
 
   if [[ -z $TMUX ]] && [[ -z $tmux_running ]]; then
-    tmux new-session -s $selected_name -c $path
+    tmux new-session -s $sessionname -c $path
     exit 0
   fi
 
-  if ! tmux has-session -t $selected_name 2> /dev/null; then
-    tmux new-session -ds $selected_name -c $path
+  if ! tmux has-session -t $sessionname 2> /dev/null; then
+    tmux new-session -ds $sessionname -c $path
   fi
 
-  tmux switch-client -t $selected_name
+  tmux switch-client -t $sessionname
 
 fi

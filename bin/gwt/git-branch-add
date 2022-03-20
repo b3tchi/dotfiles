@@ -1,47 +1,212 @@
 #!/bin/bash
 
-if [[ $# -eq 1 ]]; then
+
+switch(){
+  if [[ $# -eq 1 ]]; then
     selected=$1
-else
+  else
 
-  activeremote=$(git ls-remote --heads origin | sed -e 's/^.*heads\///')
-  activelocal=$(git worktree list | sed -e 's/^.*\[//' | sed -e 's/\]$//')
+    activelocal=$(git worktree list | sed -e 's/^.*\[//' | sed -e 's/\]$//')
+    selected=$(printf "$activelocal\n$currentbranch" | sort | uniq -u | fzf)
+  fi
 
-  #diff only add other from active remote
-  list=$(comm -23 <(tr ' ' $'\n' <<< $activeremote | sort) <(tr ' ' $'\n' <<< $activelocal | sort))
+  if [[ -z $selected ]]; then
+    exit 0
+  fi
 
-  # echo -----
-  # printf "$list\n"
-  # echo -----
-  echo $list | wc -l
+  path=$(git worktree list | grep "$selected" | sed -e 's/ .*$//')
+  root=${path:0:(($(echo $path | wc --chars)-$(echo $selected | wc --chars)-1))}
+  repo=$(basename ${root})
+  brname=${selected/\//-}
+  sessionname="${repo}@${brname}"
 
-  if [[ -z $list ]]; then
-      echo 'no active branches to add'
+  # echo $selected
+  # echo $path
+  # echo $root
+  # echo $repo
+  # echo $brname
+  # echo $sessionname
+  # exit
+
+  if [[ -d $path ]]; then
+    # sessionname=$selected
+    tmux_running=$(pgrep tmux)
+
+    if [[ -z $TMUX ]] && [[ -z $tmux_running ]]; then
+      tmux new-session -s $sessionname -c $path
+      exit 0
+    fi
+
+    if ! tmux has-session -t $sessionname 2> /dev/null; then
+      tmux new-session -ds $sessionname -c $path
+    fi
+
+    tmux switch-client -t $sessionname
+
+  fi
+
+}
+
+link(){
+
+  if [[ $# -eq 1 ]]; then
+      selected=$1
+  else
+
+    activeremote=$(git ls-remote --heads origin | sed -e 's/^.*heads\///')
+    activelocal=$(git worktree list | sed -e 's/^.*\[//' | sed -e 's/\]$//')
+
+    #diff only add other from active remote
+    list=$(comm -23 <(tr ' ' $'\n' <<< $activeremote | sort) <(tr ' ' $'\n' <<< $activelocal | sort))
+
+    echo $list | wc -l
+
+    if [[ -z $list ]]; then
+        echo 'no active branches to add'
+        exit 0
+    fi
+
+    selected=$(printf "$list\n" | fzf)
+  fi
+
+  if [[ -z $selected ]]; then
       exit 0
   fi
 
-  selected=$(printf "$list\n" | fzf)
-fi
+  echo $selected
 
-if [[ -z $selected ]]; then
+  if [[ ! -d "$selected" ]]; then
+
+    echo "$selected - location already exits!"
+
+  else
+
+    mkdir -p ../${selected}
+
+    git worktree add ../${selected} origin/${selected}
+
+    cd ../${selected}
+
+    git checkout ${selected}
+
+  fi
+}
+
+create(){
+
+  if [[ $# -eq 1 ]]; then
+      selected=$1
+  else
+
+    until [[ $confirmed == 'yes' ]]
+    do
+
+      read -p 'enter branch name: ' brpath
+
+      echo $brpath
+
+      # confirmed='yes'
+
+      read -p "confirm name ($brpath) ? - yes,no,exit [yes]: " confirmed
+
+      confirmed=${confirmed:-yes}
+
+      echo $confirmed
+
+      if [[ $confirmed == 'exit' ]]; then
+        echo exited
+        exit 0
+      fi
+
+    done
+
+  fi
+
+  path=$(git worktree list | head -1  | sed -e 's/ .*$//')
+  activelocal=$(git worktree list | head -1 | sed -e 's/^.*\[//' | sed -e 's/\]$//')
+  root=${path:0:(($(echo $path | wc --chars)-$(echo $activelocal | wc --chars)-1))}
+  repo=$(basename ${root})
+
+  brname=${brpath/\//-}
+  sessionname="${repo}@${brname}"
+
+  echo $brpath
+  echo $sessionname
+  echo $root
+
+
+  brfull=${root}/${brpath}
+
+  if [ -d ${brfull} ]; then
+    echo "folder exists"
     exit 0
-fi
+  else
 
-echo $selected
+    mkdir -p ${brfull}
 
-if [[ -d "$selected" ]]; then
+    git worktree add -b $brname ${brfull}
 
-  cd ../${selected}
+    cd ${brfull}
 
-else
-  # echo create
+    git push -u origin $brname
 
-  mkdir -p ../${selected}
+  fi
 
-  git worktree add ../${selected} origin/${selected}
 
-  cd ../${selected}
+}
 
-  git checkout ${selected}
+remove(){
 
-fi
+  if [[ $# -eq 1 ]]; then
+      selected=$1
+  else
+
+    activelocal=$(git worktree list | sed -e 's/^.*\[//' | sed -e 's/\]$//')
+
+    #diff only add other from active remote
+    list=$(comm -23 <(tr ' ' $'\n' <<< $activeremote | sort) <(tr ' ' $'\n' <<< $activelocal | sort))
+
+    echo $list | wc -l
+
+    if [[ -z $list ]]; then
+        echo 'no active branches to add'
+        exit 0
+    fi
+
+    selected=$(printf "$list\n" | fzf)
+  fi
+
+  if [[ -z $selected ]]; then
+      exit 0
+  fi
+
+  echo $selected
+
+  if [[ ! -d "$selected" ]]; then
+
+    echo "$selected - location not exits!"
+
+  else
+    echo 'abc'
+
+  fi
+}
+
+case "$1" in
+  link)
+    link $2
+    ;;
+  switch)
+    switch $2
+    ;;
+  create)
+    create
+    ;;
+  remove)
+    remove $2
+    ;;
+  *)
+    echo "Usage: $0 {link|switch|new|remove}"
+    echo ""
+    echo "this scripts are for manage github"
+esac
