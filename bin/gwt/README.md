@@ -29,6 +29,12 @@ list all branches with details -vva
 git branch -vva
 ```
 
+get active branch name
+```bash
+git branch | grep "*" | sed -e 's/* //'
+```
+
+
 get all active remote branches without already active
 ```bash
 fx1(){

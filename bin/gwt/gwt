@@ -1,13 +1,15 @@
 #!/bin/bash
 
-
 switch(){
   if [[ $# -eq 1 ]]; then
     selected=$1
   else
 
+    currentbranch=$(git branch | grep "*" | sed -e 's/* //')
     activelocal=$(git worktree list | sed -e 's/^.*\[//' | sed -e 's/\]$//')
+
     selected=$(printf "$activelocal\n$currentbranch" | sort | uniq -u | fzf)
+
   fi
 
   if [[ -z $selected ]]; then
@@ -73,21 +75,27 @@ link(){
       exit 0
   fi
 
-  echo $selected
+  firstpath=$(git worktree list | head -1  | sed -e 's/ .*$//')
+  firstlocal=$(git worktree list | head -1 | sed -e 's/^.*\[//' | sed -e 's/\]$//')
+  root=${firstpath:0:(($(echo $firstpath | wc --chars)-$(echo $firstlocal | wc --chars)-1))}
 
-  if [[ ! -d "$selected" ]]; then
+  brfull=${root}/${selected}
+
+  if [[ -d "$brfull" ]]; then
 
     echo "$selected - location already exits!"
 
   else
 
-    mkdir -p ../${selected}
+    mkdir -p "${brfull}"
 
-    git worktree add ../${selected} origin/${selected}
+    git worktree add ${brfull} origin/${selected}
 
-    cd ../${selected}
+    cd "${brfull}"
 
     git checkout ${selected}
+
+    switch "$selected"
 
   fi
 }
@@ -134,7 +142,6 @@ create(){
   echo $sessionname
   echo $root
 
-
   brfull=${root}/${brpath}
 
   if [ -d ${brfull} ]; then
@@ -162,14 +169,12 @@ remove(){
   else
 
     activelocal=$(git worktree list | sed -e 's/^.*\[//' | sed -e 's/\]$//')
-
-    #diff only add other from active remote
-    list=$(comm -23 <(tr ' ' $'\n' <<< $activeremote | sort) <(tr ' ' $'\n' <<< $activelocal | sort))
+    list=$(printf "$activelocal\nmaster" | sort | uniq -u)
 
     echo $list | wc -l
 
     if [[ -z $list ]]; then
-        echo 'no active branches to add'
+        echo 'no branches to remove'
         exit 0
     fi
 
@@ -180,9 +185,10 @@ remove(){
       exit 0
   fi
 
-  echo $selected
+  # echo $selected
 
-  if [[ ! -d "$selected" ]]; then
+  path=$(git worktree list | grep "$selected" | sed -e 's/ .*$//')
+  if [[ ! -d "$path" ]]; then
 
     echo "$selected - location not exits!"
     exit 0
@@ -190,10 +196,21 @@ remove(){
   fi
 
   currentbranch=$(git branch | grep "*" | sed -e 's/* //')
-
+  #have to swich to another branch
   if [[ $selected == $currentbranch ]]; then
-      
+    echo "can't yet remove current branch"
+    exit 0
   fi
+
+  root=${path:0:(($(echo $path | wc --chars)-$(echo $selected | wc --chars)-1))}
+
+  echo $selected
+  echo $path
+  echo $root
+
+  git worktree remove $selected
+
+  rm -rf $path
 
 }
 
@@ -213,5 +230,5 @@ case "$1" in
   *)
     echo "Usage: $0 {link|switch|new|remove}"
     echo ""
-    echo "this scripts are for manage github"
+    echo "this scripts are for manage git worktrees"
 esac
