@@ -69,6 +69,7 @@ ml $d bin/tat ~/.local/bin/
 ml $d bin/ff ~/.local/bin/
 ml $d bin/nvim-sessionizer ~/.local/bin/
 ml $d bin/nvim-startifier ~/.local/bin/
+ml $d bin/gwt/gwt ~/.local/bin/
 
 # nnn tbd
 
