@@ -1,4 +1,4 @@
-### Main stories
+### My stories
 - I need to add active remote branch to repos *gwt link*
     - list branches fzf
     - create folder
