@@ -126,6 +126,8 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'mmai/vim-markdown-wiki'
   Plug 'dhruvasagar/vim-table-mode'
 
+  source ~/dotfiles/nvim/plugins/mdpreview.vim
+
   ""vimwiki - personal notes
   " Plug 'vimwiki/vimwiki'
   " Plug 'fcpg/vim-waikiki'
