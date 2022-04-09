@@ -8,31 +8,27 @@ if expand('%') == '' && !&modified && line('$') <= 1 && getline(1) == ''
   let s:wipebuf = bufnr('%')
 endif
 set shortmess=aoO
-badd +13 postinstall/run.sh
-badd +51 postinstall/install-fxs.sh
-badd +6 term://~/scripts//8423:zsh
-badd +1 ~/scripts/rawscripts/connectwindowsshare.sh
 argglobal
 %argdel
-edit ~/scripts/rawscripts/connectwindowsshare.sh
+edit ~/scripts/README.md
 argglobal
-balt postinstall/run.sh
-setlocal fdm=expr
-setlocal fde=GetPotionFold(v:lnum)
+setlocal fdm=indent
+setlocal fde=0
 setlocal fmr={{{,}}}
 setlocal fdi=
-setlocal fdl=1
+setlocal fdl=0
 setlocal fml=1
 setlocal fdn=20
 setlocal fen
-let s:l = 1 - ((0 * winheight(0) + 16) / 33)
+let s:l = 1 - ((0 * winheight(0) + 23) / 46)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
 keepjumps 1
 normal! 0
 tabnext 1
-if exists('s:wipebuf') && len(win_findbuf(s:wipebuf)) == 0&& getbufvar(s:wipebuf, '&buftype') isnot# 'terminal'
+badd +1 ~/scripts/README.md
+if exists('s:wipebuf') && len(win_findbuf(s:wipebuf)) == 0 && getbufvar(s:wipebuf, '&buftype') isnot# 'terminal'
   silent exe 'bwipe ' . s:wipebuf
 endif
 unlet! s:wipebuf
