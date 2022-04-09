@@ -39,6 +39,7 @@ setlocal fdl=0
 setlocal fml=1
 setlocal fdn=20
 setlocal fen
+<<<<<<< HEAD
 let s:l = 69 - ((15 * winheight(0) + 21) / 43)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
@@ -74,6 +75,19 @@ tabnext 1
 badd +0 nvim/plugins/lualine.vim
 badd +825 nvim/init.vim
 badd +33 nvim/lualsp.vim
+=======
+let s:l = 165 - ((14 * winheight(0) + 14) / 29)
+if s:l < 1 | let s:l = 1 | endif
+keepjumps exe s:l
+normal! zt
+keepjumps 165
+normal! 011|
+tabnext 1
+badd +165 nvim/plugins/lightline.vim
+badd +31 nvim/plugins/lualine.vim
+badd +129 nvim/init.vim
+badd +99 nvim/lualsp.vim
+>>>>>>> refs/remotes/origin/master
 badd +26 tmux.conf
 badd +175 ~/.config/nvim/lightline.vim
 badd +27 nvim/plugins/nvimdap.vim
@@ -91,8 +105,6 @@ if exists('s:wipebuf') && len(win_findbuf(s:wipebuf)) == 0 && getbufvar(s:wipebu
 endif
 unlet! s:wipebuf
 set winheight=1 winwidth=20 shortmess=filnxtToOFsIc
-let &winminheight = s:save_winminheight
-let &winminwidth = s:save_winminwidth
 let s:sx = expand("<sfile>:p:r")."x.vim"
 if filereadable(s:sx)
   exe "source " . fnameescape(s:sx)
