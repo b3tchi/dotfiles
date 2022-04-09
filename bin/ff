@@ -24,8 +24,13 @@
             --color=always {1} \
             --highlight-line {2}' \
         --preview-window 'up:50%:noborder:+{2}-3' \
-)
+    )
 # tmux ls -F "#S;#{pane_current_path}"
 
-    # echo $selected
+    if [ ! -z "$selected" ]; then
+        nvim-startifier wiki
+    else
+        echo 'cancelled'
+    fi
+
     cd -
