@@ -800,9 +800,9 @@ let wikis = [
   \ {'path': '~/vimwiki/', 'syntax': 'markdown', 'ext': '.md'}
   \]
 
-if g:computerName =='DESKTOP-HSRFLH5' "LEGO desktop
-  add(wikis ,{'path': '~/OneDrive - LEGO/vimwiki_LEGO/', 'syntax': 'markdown', 'ext': '.md'})
-endif
+" if g:computerName =='DESKTOP-HSRFLH5' "LEGO desktop
+"   add(wikis ,{'path': '~/OneDrive - LEGO/vimwiki_LEGO/', 'syntax': 'markdown', 'ext': '.md'})
+" endif
 
 let g:vimwiki_markdown_link_ext = 1
 let g:vimwiki_list = wikis
