@@ -1,4 +1,6 @@
-For installation use bash script
+[toc]
+
+# For installation use bash script
 [dtlf sh](dtlf.sh)
 ```bash
 ./dtlf.sh
@@ -27,6 +29,21 @@ mv ~/.config/coc ~/.config/coc_back # - coc config and items
 mv ~/.local/share/nvim ~/.local/share/nvim_back # - vim plug
 mv ~/.vim ~/.vim_back # vim plug
 ```
+
+# Updating
+## Python
+
+```bash
+python -m pip install pip --upgrade
+for i in $(python -m pip list --outdated --format=columns |tail -n +3|cut -d" " -f1)
+do python -m pip install $i --upgrade
+
+done
+
+
+```
+
+
 
 # Scratches
 ```bash
