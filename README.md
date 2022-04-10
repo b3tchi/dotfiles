@@ -230,6 +230,14 @@ let r = Checkdiff()
 echom r
 ```
 
+```mermaid
+flowchart LR
+
+A --> B
+B --> C
+B --> D
+```
+
 Current buffer items
 ```vim
 source ./nvim/fugidiff.vim

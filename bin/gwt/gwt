@@ -228,7 +228,7 @@ case "$1" in
     remove $2
     ;;
   *)
-    echo "Usage: $0 {link|switch|new|remove}"
+    echo "Usage: $0 {link|switch|create|remove}"
     echo ""
     echo "this scripts are for manage git worktrees"
 esac
