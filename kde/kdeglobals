@@ -142,7 +142,7 @@ History Items[$e]=file:$HOME/vms/ubuntucore,file:$HOME/Downloads/Disney,file:$HO
 [General]
 AccentColor=61,174,233
 BrowserApplication=firefox.desktop
-ColorSchemeHash=0d48a65f7ec21fd6758445108cd2bcfb1ce4deb8
+ColorSchemeHash=dd1942b5e93c3bbb5d5263740caa393b95b49d23
 Name=Breeze Light
 XftAntialias=true
 XftHintStyle=hintslight

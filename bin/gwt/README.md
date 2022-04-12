@@ -1,25 +1,52 @@
-### Main stories
-- I need to add active remote branch to repos *gwt link*
-    - list branches fzf
-    - create folder
-    - clone branch
-    - switch to folder
-    - switch tmux pane
-- I need to switch to another branch in repos *gwt switch*
-    - list local branches fzf
-    - switch to folder
-    - switch tmux pane
-- I need to create new branch *gwt new*
-    - ask for name
-    - create folder
-    - create create remote branch
-    - switch to folder
-    - switch tmux pane
-- I need to archive local active branch *gwt remove*
-    - check if folder archive exists
-    - move branch local folder to branch folder
+### My stories
 
+[toc]
 
+#### I need to add active remote branch to repos
+```bash
+gwt link <linkbranch>
+```
+- list branches fzf
+- create folder
+- clone branch
+- switch to folder
+- switch tmux pane
+
+#### I need to switch to another already linked branch repo *gwt switch*
+```bash
+gwt switch <localbranch>
+```
+- list local branches fzf
+- switch to folder
+- switch tmux pane
+
+#### I need to create new branch from existing branch
+```bash
+gwt create <existingbranch> <newbranchname>
+```
+- ask for name
+- create folder
+- create create remote branch
+- switch to folder
+- switch tmux pane
+
+#### I need to archive local linked branch
+```bash
+gwt remove <localbranch>
+```
+- check if folder archive exists
+- move branch local folder to branch folder
+
+#### I need to merge my branch to another brach
+```bash
+gwt merge <mergetobranch>
+```
+#### I need to pull request my branch to another brach
+#### I need to create new repo
+#### I need to create add new ssh-key
+#### I need to increase latest tag by Maj.Min.Build by flag (Maj|Min|Build)
+
+### Snippets
 get only active remote branches
 ```bash
 git ls-remote --heads origin | sed -e 's/^.*heads\///'

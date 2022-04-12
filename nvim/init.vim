@@ -126,6 +126,8 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'mmai/vim-markdown-wiki'
   Plug 'dhruvasagar/vim-table-mode'
 
+  source ~/dotfiles/nvim/plugins/mdpreview.vim
+
   ""vimwiki - personal notes
   " Plug 'vimwiki/vimwiki'
   " Plug 'fcpg/vim-waikiki'
@@ -798,9 +800,9 @@ let wikis = [
   \ {'path': '~/vimwiki/', 'syntax': 'markdown', 'ext': '.md'}
   \]
 
-if g:computerName =='DESKTOP-HSRFLH5' "LEGO desktop
-  add(wikis ,{'path': '~/OneDrive - LEGO/vimwiki_LEGO/', 'syntax': 'markdown', 'ext': '.md'})
-endif
+" if g:computerName =='DESKTOP-HSRFLH5' "LEGO desktop
+"   add(wikis ,{'path': '~/OneDrive - LEGO/vimwiki_LEGO/', 'syntax': 'markdown', 'ext': '.md'})
+" endif
 
 let g:vimwiki_markdown_link_ext = 1
 let g:vimwiki_list = wikis
