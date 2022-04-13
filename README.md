@@ -1,5 +1,3 @@
-[toc]
-
 # For installation use bash script
 [dtlf sh](dtlf.sh)
 ```bash
@@ -217,7 +215,7 @@ echom expand("<cfile>")
 
 ```vim
 
-echom 'paragarph first command'
+echom 'paragraph first command'
 echom getline('.')[2:] "command line content current cursor
 echom getline(line("'{")+1) "line content on the beginning of paragraph
 

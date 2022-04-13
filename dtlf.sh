@@ -68,10 +68,13 @@ ml $d bin/ff ~/.local/bin/
 ml $d bin/nvim-sessionizer ~/.local/bin/
 ml $d bin/nvim-startifier ~/.local/bin/
 ml $d bin/gwt/gwt ~/.local/bin/
+ml $d bin/azdops/pipeline.sh ~/.local/bin/azdpipes
+ml $d bin/azdops/variables.sh ~/.local/bin/azdvars
 
 #bin
 chmod +x $d/bin/*
-chmod +x $d/bit/gwt/gwt*
+chmod +x $d/bin/gwt/gwt*
+chmod +x $d/bin/azdops/*.sh
 
 #fish
 ml $d fish/config.fish ~/.config/fish/
