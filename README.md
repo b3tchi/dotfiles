@@ -53,8 +53,12 @@ powershell.exe 'c:\Users\czJaBeck\Dev\Repositories\AccessVCS\tests\test14.ps1'
 cd /mnt/c/ && cmd.exe /c echo %TEMP% && cd - | grep C: | sed 's/\xEF\xBB\xBF//g'
 ```
 
-```powershell
+```pwsh
 Write-Host 'test2'
+```
+
+```csharp
+Console.WriteLine("Hello World!2") 
 ```
 
 testing startifier
