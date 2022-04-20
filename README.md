@@ -1,5 +1,3 @@
-[toc]
-
 # For installation use bash script
 [dtlf sh](dtlf.sh)
 ```bash
@@ -70,8 +68,12 @@ powershell.exe 'c:\Users\czJaBeck\Dev\Repositories\AccessVCS\tests\test14.ps1'
 cd /mnt/c/ && cmd.exe /c echo %TEMP% && cd - | grep C: | sed 's/\xEF\xBB\xBF//g'
 ```
 
-```powershell
+```pwsh
 Write-Host 'test2'
+```
+
+```csharp
+Console.WriteLine("Hello World!2") 
 ```
 
 testing startifier
@@ -217,7 +219,7 @@ echom expand("<cfile>")
 
 ```vim
 
-echom 'paragarph first command'
+echom 'paragraph first command'
 echom getline('.')[2:] "command line content current cursor
 echom getline(line("'{")+1) "line content on the beginning of paragraph
 

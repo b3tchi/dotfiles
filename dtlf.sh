@@ -62,16 +62,19 @@ ml $d bat.conf ~/.config/bat/ config
 ml $d zsh/zshrc ~/ .zshrc
 ml $d zsh/p10k.zsh ~/ .p10k.zsh
 
-#bin
-chmod +x $d/bin/*
-
+#scripts
 ml $d bin/tat ~/.local/bin/
 ml $d bin/ff ~/.local/bin/
 ml $d bin/nvim-sessionizer ~/.local/bin/
 ml $d bin/nvim-startifier ~/.local/bin/
 ml $d bin/gwt/gwt ~/.local/bin/
+ml $d bin/azdops/pipeline.sh ~/.local/bin/ azdpipes
+ml $d bin/azdops/variables.sh ~/.local/bin/ azdvars
 
-# nnn tbd
+#bin
+chmod +x $d/bin/*
+chmod +x $d/bin/gwt/gwt*
+chmod +x $d/bin/azdops/*.sh
 
 #fish
 ml $d fish/config.fish ~/.config/fish/
