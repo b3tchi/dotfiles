@@ -1,4 +1,4 @@
-For installation use bash script
+# For installation use bash script
 [dtlf sh](dtlf.sh)
 ```bash
 ./dtlf.sh
@@ -27,6 +27,21 @@ mv ~/.config/coc ~/.config/coc_back # - coc config and items
 mv ~/.local/share/nvim ~/.local/share/nvim_back # - vim plug
 mv ~/.vim ~/.vim_back # vim plug
 ```
+
+# Updating
+## Python
+
+```bash
+python -m pip install pip --upgrade
+for i in $(python -m pip list --outdated --format=columns |tail -n +3|cut -d" " -f1)
+do python -m pip install $i --upgrade
+
+done
+
+
+```
+
+
 
 # Scratches
 ```bash
@@ -204,7 +219,7 @@ echom expand("<cfile>")
 
 ```vim
 
-echom 'paragarph first command'
+echom 'paragraph first command'
 echom getline('.')[2:] "command line content current cursor
 echom getline(line("'{")+1) "line content on the beginning of paragraph
 
@@ -232,6 +247,14 @@ buffer status
 source ./nvim/fugidiff.vim
 let r = Checkdiff()
 echom r
+```
+
+```mermaid
+flowchart LR
+
+A --> B
+B --> C
+B --> D
 ```
 
 Current buffer items

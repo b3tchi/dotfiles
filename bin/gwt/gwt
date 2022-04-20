@@ -46,11 +46,9 @@ switch(){
     tmux switch-client -t $sessionname
 
   fi
-
 }
 
 link(){
-
   if [[ $# -eq 1 ]]; then
       selected=$1
   else
@@ -101,34 +99,42 @@ link(){
 }
 
 create(){
-
+  #pick source branch
   if [[ $# -eq 1 ]]; then
       selected=$1
   else
 
-    until [[ $confirmed == 'yes' ]]
-    do
-
-      read -p 'enter branch name: ' brpath
-
-      echo $brpath
-
-      # confirmed='yes'
-
-      read -p "confirm name ($brpath) ? - yes,no,exit [yes]: " confirmed
-
-      confirmed=${confirmed:-yes}
-
-      echo $confirmed
-
-      if [[ $confirmed == 'exit' ]]; then
-        echo exited
-        exit 0
-      fi
-
-    done
+    activeremote=$(git ls-remote --heads origin | sed -e 's/^.*heads\///')
+    list=$(printf "$activeremote" | sort | uniq -u)
+    selected=$(printf "$list\n" | fzf --prompt "create from branch: > ")
 
   fi
+
+  if [[ -z $selected ]]; then
+      exit 0
+  fi
+
+  until [[ $confirmed == 'yes' ]]
+  do
+
+    read -p 'enter branch name: ' brpath
+
+    echo $brpath
+
+    # confirmed='yes'
+
+    read -p "confirm name ($brpath) ? - yes,no,exit [yes]: " confirmed
+
+    confirmed=${confirmed:-yes}
+
+    echo $confirmed
+
+    if [[ $confirmed == 'exit' ]]; then
+      echo exited
+      exit 0
+    fi
+
+  done
 
   path=$(git worktree list | head -1  | sed -e 's/ .*$//')
   activelocal=$(git worktree list | head -1 | sed -e 's/^.*\[//' | sed -e 's/\]$//')
@@ -151,7 +157,7 @@ create(){
 
     mkdir -p ${brfull}
 
-    git worktree add -b $brpath ${brfull}
+    git worktree add -b $brpath ${brfull} origin/${selected}
 
     cd ${brfull}
 
@@ -159,11 +165,9 @@ create(){
 
     switch "$brpath"
   fi
-
 }
 
 remove(){
-
   if [[ $# -eq 1 ]]; then
       selected=$1
   else
@@ -211,7 +215,6 @@ remove(){
   git worktree remove $selected
 
   rm -rf $path
-
 }
 
 case "$1" in
@@ -228,7 +231,7 @@ case "$1" in
     remove $2
     ;;
   *)
-    echo "Usage: $0 {link|switch|new|remove}"
+    echo "Usage: $0 {link|switch|create|remove}"
     echo ""
     echo "this scripts are for manage git worktrees"
 esac

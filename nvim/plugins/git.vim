@@ -28,6 +28,8 @@ function LoadedGit()
   nnoremap <silent> <space>gf :G fetch<cr>
   let g:which_key_map.g.m = 'merge'
   nnoremap <silent> <space>gm :G merge<cr>
+  let g:which_key_map.g.b = 'blame'
+  nnoremap <silent> <space>gb :G blame<cr>
   let g:which_key_map.g.l = 'log'
   nnoremap <silent> <space>gl :Flog -format=%>\|(65)\ %>(65)\ %<(40,trunc)%s\ %>\|(120%)%ad\ %an%d -date=short<cr>
   " let g:which_key_map.g.w = 'worktree'
