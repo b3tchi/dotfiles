@@ -10,75 +10,8 @@ endif
 set shortmess=aoO
 argglobal
 %argdel
-edit bin/version
-let s:save_splitbelow = &splitbelow
-let s:save_splitright = &splitright
-set splitbelow splitright
-wincmd _ | wincmd |
-vsplit
-wincmd _ | wincmd |
-vsplit
-wincmd _ | wincmd |
-vsplit
-3wincmd h
-wincmd w
-wincmd w
-wincmd w
-let &splitbelow = s:save_splitbelow
-let &splitright = s:save_splitright
-wincmd t
-let s:save_winminheight = &winminheight
-let s:save_winminwidth = &winminwidth
-set winminheight=0
-set winheight=1
-set winminwidth=0
-set winwidth=1
-exe 'vert 1resize ' . ((&columns * 60 + 118) / 236)
-exe 'vert 2resize ' . ((&columns * 54 + 118) / 236)
-exe 'vert 3resize ' . ((&columns * 60 + 118) / 236)
-exe 'vert 4resize ' . ((&columns * 59 + 118) / 236)
+edit nvim/plugins/git.vim
 argglobal
-balt bin/tat
-setlocal fdm=indent
-setlocal fde=0
-setlocal fmr={{{,}}}
-setlocal fdi=
-setlocal fdl=1
-setlocal fml=1
-setlocal fdn=20
-setlocal fen
-let s:l = 17 - ((14 * winheight(0) + 16) / 33)
-if s:l < 1 | let s:l = 1 | endif
-keepjumps exe s:l
-normal! zt
-keepjumps 17
-normal! 019|
-wincmd w
-argglobal
-if bufexists("dtlf.sh") | buffer dtlf.sh | else | edit dtlf.sh | endif
-if &buftype ==# 'terminal'
-  silent file dtlf.sh
-endif
-setlocal fdm=indent
-setlocal fde=0
-setlocal fmr={{{,}}}
-setlocal fdi=
-setlocal fdl=4
-setlocal fml=1
-setlocal fdn=20
-setlocal fen
-let s:l = 43 - ((15 * winheight(0) + 16) / 33)
-if s:l < 1 | let s:l = 1 | endif
-keepjumps exe s:l
-normal! zt
-keepjumps 43
-normal! 024|
-wincmd w
-argglobal
-if bufexists("nvim/plugins/git.vim") | buffer nvim/plugins/git.vim | else | edit nvim/plugins/git.vim | endif
-if &buftype ==# 'terminal'
-  silent file nvim/plugins/git.vim
-endif
 balt bin/gwt/gwt
 setlocal fdm=indent
 setlocal fde=0
@@ -88,17 +21,18 @@ setlocal fdl=1
 setlocal fml=1
 setlocal fdn=20
 setlocal fen
-let s:l = 165 - ((17 * winheight(0) + 17) / 35)
+let s:l = 47 - ((8 * winheight(0) + 13) / 27)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
-keepjumps 165
+keepjumps 47
 normal! 0
-wincmd w
-2wincmd w
-exe 'vert 1resize ' . ((&columns * 118 + 119) / 238)
-exe 'vert 2resize ' . ((&columns * 119 + 119) / 238)
 tabnext 1
+badd +22 bin/version
+badd +0 bin/tat
+badd +47 dtlf.sh
+badd +31 nvim/plugins/git.vim
+badd +0 bin/gwt/gwt
 badd +26 tmux.conf
 badd +99 nvim/lualsp.vim
 badd +165 README.md
@@ -107,33 +41,26 @@ badd +31 nvim/plugins/lualine.vim
 badd +165 nvim/plugins/lightline.vim
 badd +175 ~/.config/nvim/lightline.vim
 badd +27 nvim/plugins/nvimdap.vim
-badd 
-badd +174 README.md
 badd +9621 ~/Applications/neovim/squashfs-root/usr/share/nvim/runtime/doc/eval.txt
-badd +89 dtlf.sh
 badd +1572 ~/Applications/neovim/squashfs-root/usr/share/nvim/runtime/doc/api.txt
 badd +24 bin/ff
 badd +184 ~/.vim/plugged/vim-tmux-runner/doc/vim-tmux-runner.txt
 badd +13 bin/nvim-sessionizer
 badd +21 bin/gwt/README.md
 badd +168 zsh/zshrc
-badd +1 bin/tat
-badd +17 bin/version
-badd +31 nvim/plugins/git.vim
 badd +41 ~/dotfiles/nvim/session/dotfiles
 if exists('s:wipebuf') && len(win_findbuf(s:wipebuf)) == 0 && getbufvar(s:wipebuf, '&buftype') isnot# 'terminal'
   silent exe 'bwipe ' . s:wipebuf
 endif
 unlet! s:wipebuf
 set winheight=1 winwidth=20 shortmess=filnxtToOFsIc
-let &winminheight = s:save_winminheight
-let &winminwidth = s:save_winminwidth
 let s:sx = expand("<sfile>:p:r")."x.vim"
 if filereadable(s:sx)
   exe "source " . fnameescape(s:sx)
 endif
 let &g:so = s:so_save | let &g:siso = s:siso_save
 set hlsearch
+nohlsearch
 doautoall SessionLoadPost
 unlet SessionLoad
 " vim: set ft=vim :
