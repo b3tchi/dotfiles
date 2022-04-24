@@ -1,3 +1,4 @@
+
 # For installation use bash script
 [dtlf sh](dtlf.sh)
 ```bash
@@ -68,14 +69,23 @@ powershell.exe 'c:\Users\czJaBeck\Dev\Repositories\AccessVCS\tests\test14.ps1'
 cd /mnt/c/ && cmd.exe /c echo %TEMP% && cd - | grep C: | sed 's/\xEF\xBB\xBF//g'
 ```
 
+```powershell
+Write-Host 'test2'
+```
+
 ```pwsh
 Write-Host 'test2'
 ```
 
 ```csharp
-Console.WriteLine("Hello World!2") 
+Console.WriteLine("Hello, World!x5");
 ```
 
+```cs
+if( true ){
+  Console.WriteLine("Hello, World!x3");
+}
+```
 testing startifier
 ```bash
 #ls ~/.local/share/nvim/session/
@@ -219,7 +229,7 @@ echom expand("<cfile>")
 
 ```vim
 
-echom 'paragraph first command'
+echom 'paragarph first command'
 echom getline('.')[2:] "command line content current cursor
 echom getline(line("'{")+1) "line content on the beginning of paragraph
 

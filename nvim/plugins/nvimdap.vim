@@ -37,18 +37,18 @@ dap.adapters.python = {
 
 local function pwd() return io.popen("pwd"):lines()() end
 
-dap.adapters.netcoredbg = {
-  type = "executable",
-  command = os.getenv('HOME').. "/.local/share/nvim/dapinstall/dnetcs/netcoredbg/netcoredbg",
-  args = {
-    "--interpreter=vscode",
-    string.format("--engineLogging=%s/netcoredbg.engine.log", XDG_CACHE_HOME),
-    string.format("--log=%s/netcoredbg.log", XDG_CACHE_HOME),
-  },
-}
+-- dap.adapters.netcoredbg = {
+--   type = "executable",
+--   command = os.getenv('HOME').. "/.local/share/nvim/dapinstall/dnetcs/netcoredbg/netcoredbg",
+--   args = {
+--     "--interpreter=vscode",
+--     string.format("--engineLogging=%s/netcoredbg.engine.log", XDG_CACHE_HOME),
+--     string.format("--log=%s/netcoredbg.log", XDG_CACHE_HOME),
+--   },
+-- }
 
-    -- string.format("--engineLogging=%s/netcoredbg.engine.log", XDG_CACHE_HOME),
-   -- string.format("--log=%s/netcoredbg.log", XDG_CACHE_HOME),
+-- string.format("--engineLogging=%s/netcoredbg.engine.log", XDG_CACHE_HOME),
+-- string.format("--log=%s/netcoredbg.log", XDG_CACHE_HOME),
 dap.defaults.fallback.focus_terminal = true
 dap.defaults.fallback.terminal_win_cmd = '50vsplit new'
 dap.defaults.fallback.force_external_terminal = true
@@ -56,32 +56,32 @@ dap.defaults.fallback.external_terminal = {
   command = '/usr/bin/alacritty';
     args = {'-e'};
 }
-dap.configurations.cs = {
-  {
-    type = "netcoredbg",
-    name = "launch - netcoredbg",
-    request = "launch",
-    program = function()
-      local dll = io.popen("find bin/Debug/ -maxdepth 2 -name \"*.dll\"")
-      return pwd() .. "/" .. dll:lines()()
-    end,
-    stopAtEntry = false,
-    -- console = "externalTerminal",
-    console = "integratedTerminal",
-  },
-  {
-    type = "netcoredbg",
-    name = "attach - netcoredbg",
-    request = "attach",
-    processId = 171399,
-    -- processId = require'dap.utils'.pick_process,
-    -- program = function()
-    --   local dll = io.popen("find bin/Debug/ -maxdepth 2 -name \"*.dll\"")
-    --   return pwd() .. "/" .. dll:lines()()
-    -- end,
-    -- stopAtEntry = false,
-  },
-}
+-- dap.configurations.cs = {
+--   {
+--     type = "netcoredbg",
+--     name = "launch - netcoredbg",
+--     request = "launch",
+--     program = function()
+--       local dll = io.popen("find bin/Debug/ -maxdepth 2 -name \"*.dll\"")
+--       return pwd() .. "/" .. dll:lines()()
+--     end,
+--     stopAtEntry = false,
+--     -- console = "externalTerminal",
+--     console = "integratedTerminal",
+--   },
+--   {
+--     type = "netcoredbg",
+--     name = "attach - netcoredbg",
+--     request = "attach",
+--     processId = 171399,
+--     -- processId = require'dap.utils'.pick_process,
+--     -- program = function()
+--     --   local dll = io.popen("find bin/Debug/ -maxdepth 2 -name \"*.dll\"")
+--     --   return pwd() .. "/" .. dll:lines()()
+--     -- end,
+--     -- stopAtEntry = false,
+--   },
+-- }
 
 require("nvim-dap-virtual-text").setup()
 require("dapui").setup()
