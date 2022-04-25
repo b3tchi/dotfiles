@@ -1,27 +1,39 @@
 #!/bin/bash
 
-#script root dir
-sdir=$(dirname "$0")
+#check if embed of from pipelines
+if [ $(basename "$0") = "azdpipes" ]; then
+  echo "system"
 
-if [ $(basename "$0") = "azdops" ]; then
-  echo system
+  #load support fxs
+  source fxs
+
+else
+  echo "embeded"
+
+  #calculated variables
+  root=$(dirname "$0")/../../..
+
+  #load support fxs
+  source ${root}/ci/scripts/fxs.sh
+
+  # scripts variables
+  source ${root}/ci/helpers/azdops/vars
+
 fi
-
-exit
-
-#calculated variables
-root=${sdir}/../../..
-
-#load support fxs
-source ${root}/ci/scripts/fxs.sh
-
-# scripts variables
-source ${sdir}/vars
 
 # name parameters
 load_named_args "$@"
 
-echo ${root}/ci/scripts/fxs.sh
+if [ $(basename "$0") = "azdpipes" ]; then
+  if [ -z $varsfile ]; then
+    echo system need specified path of varsfile
+  else
+    source "$varsfile"
+    root=$(dirname "$varsfile")/../../..
+  fi
+fi
+
+echo "projectName:" $projectName
 
 #select which id to use if not use empty
 [ -z $envid ] && envid='0'
