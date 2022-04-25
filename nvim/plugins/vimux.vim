@@ -22,7 +22,7 @@ function! VimuxMdBlock()
      call VimuxRunCommand(lines)
 
    "powershell
-   elseif index(['pwsh','ps','powershell'],mdblock.lang) > -1
+   elseif index(['ps','powershell'],mdblock.lang) > -1
      " let tmp = tempname()
      " call writefile(mdblock.code, tmp)
      " call VimuxRunCommand('powershell.exe '.tmp)
@@ -47,7 +47,33 @@ function! VimuxMdBlock()
       call VimuxRunCommand(cmd)
 
 
-   "wimscript
+   elseif index(['cs','csharp'],mdblock.lang) > -1
+
+     "rand filename
+     let fname = FolderTemp() . strftime("%Y%m%d_%H%M%S")
+
+     call mkdir(fname,'p')
+call VimuxRunCommand('dotnet new console -o ''' . fname . ''' -f net6.0 --force')
+" call VimuxRunCommand('dotnet new console -o ''' . fname . ''' -f net6.0 --force')
+      let unx_tmpps = fname . '/Program.cs'
+      echo  unx_tmpps
+      echo  mdblock.code
+     call delete(unx_tmpps)
+      echo writefile(mdblock.code, unx_tmpps)
+
+      let cmd = 'dotnet run --project ''' . fname . ''''
+      call VimuxRunCommand(cmd)
+   elseif index(['pwsh'],mdblock.lang) > -1
+
+     "rand filename
+     let fname = FolderTemp() . strftime("%Y%m%d_%H%M%S") . '.ps1'
+
+      let unx_tmpps = fname
+      call writefile(mdblock.code, unx_tmpps)
+
+      let cmd = 'pwsh ''' . unx_tmpps . ''''
+      call VimuxRunCommand(cmd)
+   "vimscript
    elseif index(['vim','viml'],mdblock.lang) > -1
      let lines = mdblock.code
      let tmp = tempname()
@@ -56,7 +82,12 @@ function! VimuxMdBlock()
      call delete(tmp)
    endif
 endfunction
-
+function! FolderTemp()
+  let temppath = '/tmp/nvim_mdblocks/'
+  " !mkdir -p '/tmp/nvim_mdblocks/'
+     call mkdir(temppath,'p')
+  return temppath
+endfunction
 function! MarkdownBlock()
   let view = winsaveview()
   let line = line('.')

@@ -88,60 +88,29 @@ setlocal fdl=1
 setlocal fml=1
 setlocal fdn=20
 setlocal fen
-let s:l = 41 - ((21 * winheight(0) + 16) / 33)
+let s:l = 165 - ((17 * winheight(0) + 17) / 35)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
-keepjumps 41
+keepjumps 165
 normal! 0
 wincmd w
-argglobal
-if bufexists("bin/gwt/gwt") | buffer bin/gwt/gwt | else | edit bin/gwt/gwt | endif
-if &buftype ==# 'terminal'
-  silent file bin/gwt/gwt
-endif
-balt nvim/plugins/lualine.vim
-setlocal fdm=indent
-setlocal fde=0
-setlocal fmr={{{,}}}
-setlocal fdi=
-setlocal fdl=4
-setlocal fml=1
-setlocal fdn=20
-setlocal fen
-102
-normal! zo
-114
-normal! zo
-120
-normal! zo
-221
-normal! zo
-let s:l = 108 - ((11 * winheight(0) + 16) / 33)
-if s:l < 1 | let s:l = 1 | endif
-keepjumps exe s:l
-normal! zt
-keepjumps 108
-normal! 033|
-wincmd w
-4wincmd w
-exe 'vert 1resize ' . ((&columns * 60 + 118) / 236)
-exe 'vert 2resize ' . ((&columns * 54 + 118) / 236)
-exe 'vert 3resize ' . ((&columns * 60 + 118) / 236)
-exe 'vert 4resize ' . ((&columns * 59 + 118) / 236)
+2wincmd w
+exe 'vert 1resize ' . ((&columns * 118 + 119) / 238)
+exe 'vert 2resize ' . ((&columns * 119 + 119) / 238)
 tabnext 1
-badd +43 dtlf.sh
-badd +108 bin/gwt/gwt
-badd +20 nvim/plugins/lualine.vim
-badd +1 nvim/init.vim
-badd +106 nvim/lualsp.vim
-badd +72 tmux.conf
+badd +26 tmux.conf
+badd +99 nvim/lualsp.vim
+badd +165 README.md
+badd +129 nvim/init.vim
+badd +31 nvim/plugins/lualine.vim
+badd +165 nvim/plugins/lightline.vim
 badd +175 ~/.config/nvim/lightline.vim
 badd +27 nvim/plugins/nvimdap.vim
-badd +4 nvim/plugins/gruvbox.vim
-badd +8 nvim/plugins/vimspector.vim
+badd 
 badd +174 README.md
 badd +9621 ~/Applications/neovim/squashfs-root/usr/share/nvim/runtime/doc/eval.txt
+badd +89 dtlf.sh
 badd +1572 ~/Applications/neovim/squashfs-root/usr/share/nvim/runtime/doc/api.txt
 badd +24 bin/ff
 badd +184 ~/.vim/plugged/vim-tmux-runner/doc/vim-tmux-runner.txt
