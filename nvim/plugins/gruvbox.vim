@@ -8,7 +8,7 @@ highlight Folded guibg=#232323
 echom "plugfile"
 
 function LoadedSolarized()
-  echom "gruvRun"
+  " echom "gruvRun"
   colorscheme gruvbox
 endfunction
 

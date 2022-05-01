@@ -54,4 +54,26 @@ require('dap').configurations.cs = {
     -- stopAtEntry = false,
   },
 }
+
+-- function _G.testfx()
+--   print 'abc'
+-- end
+-- if not foo then
+function _G.mdblock_csharp(mdblock)
+      --Prepare Folder
+      local fname = vim.fn.FolderTemp() .. vim.fn.strftime("%Y%m%d_%H%M%S")
+      vim.fn.mkdir(fname,'p')
+      --Create Project
+      os.execute("dotnet new console -o '" .. fname .. "' -f net6.0 --force")
+      --Replace default file
+      local unx_tmpps = fname .. '/Program.cs'
+      vim.fn.delete(unx_tmpps)
+      -- vim.fn.writefile(vim.b.mdcode,unx_tmpps)
+      vim.fn.writefile(mdblock,unx_tmpps)
+      --Run Command
+      local cmd = "dotnet run --project '" .. fname .. "'"
+      vim.fn.VimuxRunCommand(cmd)
+end
+
+
 EOF

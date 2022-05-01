@@ -14,5 +14,11 @@ require'lspconfig'.bashls.setup{
 
 }
 
+function _G.mdblock_bash(mdblock)
+      local lines = vim.fn.join(mdblock, '\n') ..'\n'
+      vim.fn.VimuxRunCommand(lines)
+
+end
+
 EOF
 
