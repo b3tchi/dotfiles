@@ -303,6 +303,10 @@ set hlsearch
 
 "" Define folding
 set foldmethod=indent
+set foldlevelstart=20
+" autocmd FileType * setlocal foldmethod=indent
+" autocmd FileType dbui setlocal foldlevelstart=99
+
 " set foldmethod=syntax
 set foldignore=
 set tabstop=2

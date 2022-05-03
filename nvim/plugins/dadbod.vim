@@ -5,8 +5,10 @@ Plug 'kristijanhusak/vim-dadbod-completion'
 "dadbod UI
 let g:db_ui_disable_mappings = 1
 let g:which_key_map.d ={'name':'+dadbod-ui'}
+
 autocmd FileType sql nmap <buffer><silent><space>de <Plug>(DBUI_ExecuteQuery)
 let g:which_key_map.d.e = 'execute query'
+
 autocmd FileType sql nmap <buffer><silent><space>dw <Plug>(DBUI_SaveQuery)
 let g:which_key_map.d.s = 'save query'
 
@@ -21,6 +23,7 @@ let g:db_ui_disable_mappings = 1
 
 autocmd FileType sql nmap <buffer><silent><space>de <Plug>(DBUI_ExecuteQuery)
 autocmd FileType sql nmap <buffer><silent><space>dw <Plug>(DBUI_SaveQuery)
+autocmd FileType sql nmap <buffer><silent><space>da :DBUIFindBuffer<CR>
 
 " autocmd FileType dbui nmap <buffer> <S-k> <Plug>(DBUI_GotoFirstSibling)
 " autocmd FileType dbui nmap <buffer> <S-j> <Plug>(DBUI_GotoLastSibling)
@@ -36,6 +39,8 @@ autocmd FileType dbui nmap <buffer> r <Plug>(DBUI_RenameLine)
 autocmd FileType dbui nmap <buffer> h <Plug>(DBUI_GotoParentNode)
 autocmd FileType dbui nmap <buffer> o <Plug>(DBUI_SelectLine)
 autocmd FileType dbui nmap <buffer> l <Plug>(DBUI_GotoChildNode)
+autocmd FileType dbui nmap <buffer> R <Plug>(DBUI_Redraw)
+autocmd FileType dbui nmap <buffer> dd <Plug>(DBUI_DeleteLine)
 
 nnoremap <space>dn :DBUIToggle<CR>
 
