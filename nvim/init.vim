@@ -4,8 +4,8 @@ endif
 
 " Required:
 " let useCoc = 1
-let lspClient = 1 "1 for coc-nvim, 2 for deoplete (WIP), -1 non Lsp Client (TBD)
-let vimTheme = 2 "1 solarized8, 2 gruvbox
+let g:lspClient = 1 "1 for coc-nvim, 2 for deoplete (WIP), -1 non Lsp Client (TBD)
+let g:vimTheme = 2 "1 solarized8, 2 gruvbox
 
 " Identify Os and Actual Device - Who is coming home?
 let g:wsl = 0 "default wsl flag to 0
@@ -133,7 +133,7 @@ call plug#begin(expand('~/.vim/plugged'))
   " Plug 'fcpg/vim-waikiki'
 
   ""addvanced ide features
-  if lspClient == 1
+  if g:lspClient == 1
     " Plug 'neoclide/coc.nvim', {'merge': 0, 'rev': 'release'}
     Plug 'neoclide/coc.nvim', {'branch': 'release'}
     Plug 'antoinemadec/coc-fzf', {'branch': 'release'}
@@ -142,7 +142,7 @@ call plug#begin(expand('~/.vim/plugged'))
     " Plug 'neoclide/coc.nvim', {'do': 'yarn install --frozen-lockfile'}
     " Plug 'neoclide/coc.nvim', {'merge':0, 'build': './install.sh nightly'}
     " Plug 'mgedmin/python-imports.vim', { 'on_ft' : 'python' }
-  " elseif lspClient == 2
+  " elseif g:lspClient == 2
   "   Plug 'Shougo/deoplete.nvim'
   "   if !has('nvim')
   "     Plug 'roxma/nvim-yarp'
@@ -260,6 +260,8 @@ call plug#begin(expand('~/.vim/plugged'))
 
 call plug#end()
 
+
+
 " echom "plugend"
 "event triggering after plug
 doautocmd User PlugLoaded
@@ -275,12 +277,17 @@ set noshowmode " INSERT déjà affiché par lightbar
 
 autocmd FileType vista,coc-explorer setlocal signcolumn=no
 
-if lspClient == 1
+"TBD reorganize coc same as other files to plugin folder
+if g:lspClient == 1
   source ~/.config/nvim/coc.vim
-" elseif lspClient == 2
+" elseif g:lspClient == 2
   " source ~/.config/nvim/deoplete.vim
 endif
 
+"languages
+source ~/dotfiles/nvim/languages/bash.vim
+source ~/dotfiles/nvim/languages/powershell.vim
+source ~/dotfiles/nvim/languages/csharp.vim
 source ~/.config/nvim/incubator.vim
 
 let mapleader = "," " leader key is ,
@@ -504,7 +511,7 @@ vnoremap > >gv
 nnoremap <silent><space>Wt :VimwikiTable 1 2
 
 " --- Coc ---
-if lspClient == 1
+if g:lspClient == 1
   " let g:coc_force_debug = 1
   " Remap keys for gotos
   nmap <silent> gd <Plug>(coc-definition)
@@ -746,10 +753,10 @@ let g:startify_lists = [
 
 if g:vimmode != 3
   "color form solarized8
-  if vimTheme == 1
+  if g:vimTheme == 1
     autocmd VimEnter,Colorscheme * :hi IndentGuidesOdd  guibg=#002b36 ctermbg=3
     autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#073642 ctermbg=4
-  elseif vimTheme == 2
+  elseif g:vimTheme == 2
     autocmd VimEnter,Colorscheme * :hi IndentGuidesOdd  guibg=#282828 ctermbg=3
     autocmd VimEnter,Colorscheme * :hi IndentGuidesEven  guibg=#232323 ctermbg=4
     " autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#3c3836 ctermbg=4
@@ -760,7 +767,7 @@ endif
 let g:test#strategy = 'neovim'
 
 " --- Markdown specific ---
-let g:markdown_fenced_languages = ['coffee', 'css', 'erb=eruby', 'javascript', 'js=javascript', 'json=javascript', 'ruby', 'sass','sh=bash','bash', 'vim', 'xml','sql']
+let g:markdown_fenced_languages = ['coffee', 'css', 'erb=eruby', 'javascript', 'js=javascript', 'json=javascript', 'ruby', 'sass','sh=bash','bash', 'vim', 'xml','sql','cs']
 
 function! Mdftinit()
   setlocal spell spelllang=en_us

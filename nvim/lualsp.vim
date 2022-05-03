@@ -2,9 +2,9 @@
 lua << EOF
 --"load pyright config
 
--- Use an on_attach function to only map the following keys
+-- Use an on_attach_default function to only map the following keys
 -- after the language server attaches to the current buffer
-local on_attach = function(client, bufnr)
+on_attach_default = function(client, bufnr)
   local function buf_set_keymap(...) vim.api.nvim_buf_set_keymap(bufnr, ...) end
   local function buf_set_option(...) vim.api.nvim_buf_set_option(bufnr, ...) end
 
@@ -44,8 +44,8 @@ require'lspconfig'.svelte.setup{}
 -- YAML
 require'lspconfig'.yamlls.setup{}
 
--- BASH
-require'lspconfig'.bashls.setup{}
+-- BASH moved to bash.vim
+-- require'lspconfig'.bashls.setup{}
 
 --C
 --require'lspconfig'.ccls.setup{}
@@ -63,31 +63,31 @@ require'lspconfig'.html.setup{}
 require'lspconfig'.jsonls.setup{}
 
 --C#,VB.NET
-local pid = vim.fn.getpid()
---Path to coc-omnisharp
-local omnisharp_bin = "/home/jan/.local/share/nvim/lsp_servers/omnisharp/omnisharp/run"
-
-require'lspconfig'.omnisharp.setup{
-  --parameter 1
-  capabilities = require('cmp_nvim_lsp').update_capabilities(vim.lsp.protocol.make_client_capabilities()),
-  --parameter 2
-  on_attach = on_attach ,
-  --parameter 3
-  cmd = { omnisharp_bin , "--languageserver" , "--hostPID" , tostring(pid) }
-}
+-- local pid = vim.fn.getpid()
+-- --Path to coc-omnisharp
+-- local omnisharp_bin = "/home/jan/.local/share/nvim/lsp_servers/omnisharp/omnisharp/run"
+--
+-- require'lspconfig'.omnisharp.setup{
+--   --parameter 1
+--   capabilities = require('cmp_nvim_lsp').update_capabilities(vim.lsp.protocol.make_client_capabilities()),
+--   --parameter 2
+--   on_attach = on_attach_default ,
+--   --parameter 3
+--   cmd = { omnisharp_bin , "--languageserver" , "--hostPID" , tostring(pid) }
+-- }
 
 --PowerShell
-require'lspconfig'.powershell_es.setup{
-  --parameter 1
-  capabilities = require('cmp_nvim_lsp').update_capabilities(vim.lsp.protocol.make_client_capabilities()),
-  --parameter 2
-  on_attach = on_attach ,
-  --parameter 3
-  --bundle_path = '/home/jan/.local/bin/powershell_es',
-  bundle_path = '/home/jan/.config/coc/extensions/node_modules/coc-powershell/PowerShellEditorServices',
-  --bundle_path = '/home/jan/repos/install-pses/PowerShellEditorServices',
-  --cmd = {'pwsh', '-NoLogo', '-NoProfile', '-Command', "/home/jan/.local/bin/powershell_es/PowerShellEditorServices/Start-EditorServices.ps1"},
-}
+-- require'lspconfig'.powershell_es.setup{
+--   --parameter 1
+--   capabilities = require('cmp_nvim_lsp').update_capabilities(vim.lsp.protocol.make_client_capabilities()),
+--   --parameter 2
+--   on_attach = on_attach_default ,
+--   --parameter 3
+--   --bundle_path = '/home/jan/.local/bin/powershell_es',
+--   bundle_path = '/home/jan/.config/coc/extensions/node_modules/coc-powershell/PowerShellEditorServices',
+--   --bundle_path = '/home/jan/repos/install-pses/PowerShellEditorServices',
+--   --cmd = {'pwsh', '-NoLogo', '-NoProfile', '-Command', "/home/jan/.local/bin/powershell_es/PowerShellEditorServices/Start-EditorServices.ps1"},
+-- }
 --LUA
 --require'lspconfig'.sumneko_lua.setup{}
 
@@ -115,10 +115,10 @@ local nvim_lsp = require('lspconfig')
 
 -- Use a loop to conveniently call 'setup' on multiple servers and
 -- map buffer local keybindings when the language server attaches
-local servers = { 'pyright', 'bashls', 'vimls' }
+local servers = { 'pyright', 'vimls' }
 for _, lsp in ipairs(servers) do
   nvim_lsp[lsp].setup {
-    on_attach = on_attach,
+    on_attach = on_attach_default,
     flags = {
       debounce_text_changes = 150,
     }
@@ -127,7 +127,7 @@ end
 
 --TREESITTER
 require'nvim-treesitter.configs'.setup {
-  ensure_installed = "maintained", -- one of "all", "maintained" (parsers with maintainers), or a list of languages
+  ensure_installed = "all", -- one of "all", "maintained" (parsers with maintainers), or a list of languages
   ignore_install = { "javascript" }, -- List of parsers to ignore installing
   highlight = {
     enable = true,              -- false will disable the whole extension
@@ -211,6 +211,7 @@ wk.setup {
     },
   },
 }
+
 
 function recursemap(mapl, xpath)
   -- print(mapl)

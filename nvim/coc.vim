@@ -32,11 +32,13 @@ let g:coc_global_extensions = [
   \ , 'coc-css'
   \ , 'coc-emmet'
   \ , 'coc-git'
-  \ , 'coc-powershell'
   \ , 'coc-svelte'
   \ , 'coc-db'
   \ , 'coc-yaml'
   \ ]
+
+"" Migrated to seperated file
+  " \ , 'coc-powershell'
 
 "" Depracated modules
   " \ , 'coc-utils'
