@@ -64,16 +64,16 @@ require('lualine').setup{
   },
   sections = {
     lualine_a = {'mode'},
-    lualine_b = {'diff', 'diagnostics'},
-    lualine_c = { repopath },
-    lualine_x = {'encoding', 'filetype'},
+    lualine_b = {repopath, 'diff' },
+    lualine_c = {},
+    lualine_x = {'encoding', 'filetype', 'diagnostics'},
     lualine_y = {'progress'},
     lualine_z = {'location'}
   },
   inactive_sections = {
     lualine_a = {},
-    lualine_b = {},
-    lualine_c = { repopath },
+    lualine_b = { repopath },
+    lualine_c = {},
     lualine_x = {'location'},
     lualine_y = {},
     lualine_z = {}
