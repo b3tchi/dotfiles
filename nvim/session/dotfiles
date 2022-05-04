@@ -10,7 +10,7 @@ endif
 set shortmess=aoO
 argglobal
 %argdel
-edit nvim/init.vim
+edit nvim/plugins/dadbod.vim
 let s:save_splitbelow = &splitbelow
 let s:save_splitright = &splitright
 set splitbelow splitright
@@ -30,10 +30,52 @@ set winminheight=0
 set winheight=1
 set winminwidth=0
 set winwidth=1
-exe 'vert 1resize ' . ((&columns * 113 + 119) / 238)
-exe 'vert 2resize ' . ((&columns * 77 + 119) / 238)
-exe 'vert 3resize ' . ((&columns * 46 + 119) / 238)
+exe 'vert 1resize ' . ((&columns * 80 + 120) / 240)
+exe 'vert 2resize ' . ((&columns * 102 + 120) / 240)
+exe 'vert 3resize ' . ((&columns * 56 + 120) / 240)
 argglobal
+balt nvim/init.vim
+setlocal fdm=indent
+setlocal fde=0
+setlocal fmr={{{,}}}
+setlocal fdi=
+setlocal fdl=20
+setlocal fml=1
+setlocal fdn=20
+setlocal fen
+let s:l = 19 - ((18 * winheight(0) + 22) / 44)
+if s:l < 1 | let s:l = 1 | endif
+keepjumps exe s:l
+normal! zt
+keepjumps 19
+normal! 022|
+wincmd w
+argglobal
+if bufexists("nvim/lualsp.vim") | buffer nvim/lualsp.vim | else | edit nvim/lualsp.vim | endif
+if &buftype ==# 'terminal'
+  silent file nvim/lualsp.vim
+endif
+balt nvim/languages/powershell.vim
+setlocal fdm=indent
+setlocal fde=0
+setlocal fmr={{{,}}}
+setlocal fdi=
+setlocal fdl=20
+setlocal fml=1
+setlocal fdn=20
+setlocal fen
+let s:l = 219 - ((34 * winheight(0) + 22) / 44)
+if s:l < 1 | let s:l = 1 | endif
+keepjumps exe s:l
+normal! zt
+keepjumps 219
+normal! 029|
+wincmd w
+argglobal
+if bufexists("bin/version") | buffer bin/version | else | edit bin/version | endif
+if &buftype ==# 'terminal'
+  silent file bin/version
+endif
 balt bin/version
 setlocal fdm=indent
 setlocal fde=0
@@ -43,73 +85,26 @@ setlocal fdl=0
 setlocal fml=1
 setlocal fdn=20
 setlocal fen
-let s:l = 759 - ((28 * winheight(0) + 17) / 35)
+let s:l = 22 - ((21 * winheight(0) + 22) / 44)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
-keepjumps 759
-normal! 0167|
+keepjumps 22
+normal! 0
 wincmd w
-argglobal
-if bufexists("nvim/plugins/vimux.vim") | buffer nvim/plugins/vimux.vim | else | edit nvim/plugins/vimux.vim | endif
-if &buftype ==# 'terminal'
-  silent file nvim/plugins/vimux.vim
-endif
-balt bin/version
-setlocal fdm=indent
-setlocal fde=0
-setlocal fmr={{{,}}}
-setlocal fdi=
-setlocal fdl=3
-setlocal fml=1
-setlocal fdn=20
-setlocal fen
-16
-normal! zo
-72
-normal! zo
-let s:l = 55 - ((11 * winheight(0) + 17) / 35)
-if s:l < 1 | let s:l = 1 | endif
-keepjumps exe s:l
-normal! zt
-keepjumps 55
-normal! 021|
-wincmd w
-argglobal
-if bufexists("README.md") | buffer README.md | else | edit README.md | endif
-if &buftype ==# 'terminal'
-  silent file README.md
-endif
-balt dtlf.sh
-setlocal fdm=indent
-setlocal fde=0
-setlocal fmr={{{,}}}
-setlocal fdi=
-setlocal fdl=3
-setlocal fml=1
-setlocal fdn=20
-setlocal fen
-let s:l = 81 - ((14 * winheight(0) + 17) / 35)
-if s:l < 1 | let s:l = 1 | endif
-keepjumps exe s:l
-normal! zt
-keepjumps 81
-normal! 034|
-wincmd w
-exe 'vert 1resize ' . ((&columns * 113 + 119) / 238)
-exe 'vert 2resize ' . ((&columns * 77 + 119) / 238)
-exe 'vert 3resize ' . ((&columns * 46 + 119) / 238)
+exe 'vert 1resize ' . ((&columns * 80 + 120) / 240)
+exe 'vert 2resize ' . ((&columns * 102 + 120) / 240)
+exe 'vert 3resize ' . ((&columns * 56 + 120) / 240)
 tabnext 1
-badd +759 nvim/init.vim
-badd +18 bin/version
-badd +55 nvim/plugins/vimux.vim
-badd +81 README.md
-badd +51 dtlf.sh
-badd +1 bin/tat
-badd +47 nvim/plugins/git.vim
-badd +1 bin/gwt/gwt
+badd +22 bin/version
+badd +0 bin/tat
+badd +43 dtlf.sh
+badd +43 nvim/plugins/git.vim
+badd +0 bin/gwt/gwt
 badd +26 tmux.conf
 badd +99 nvim/lualsp.vim
+badd +174 README.md
+badd +336 nvim/init.vim
 badd +31 nvim/plugins/lualine.vim
 badd +165 nvim/plugins/lightline.vim
 badd +175 ~/.config/nvim/lightline.vim
@@ -121,19 +116,23 @@ badd +184 ~/.vim/plugged/vim-tmux-runner/doc/vim-tmux-runner.txt
 badd +13 bin/nvim-sessionizer
 badd +21 bin/gwt/README.md
 badd +168 zsh/zshrc
-badd +41 ~/dotfiles/nvim/session/dotfiles
+badd +41 nvim/session/dotfiles
+badd +19 nvim/plugins/dadbod.vim
+badd +1 nvim/languages/bash.vim
+badd +12 nvim/languages/powershell.vim
 if exists('s:wipebuf') && len(win_findbuf(s:wipebuf)) == 0 && getbufvar(s:wipebuf, '&buftype') isnot# 'terminal'
   silent exe 'bwipe ' . s:wipebuf
 endif
 unlet! s:wipebuf
 set winheight=1 winwidth=20 shortmess=filnxtToOFsIc
+let &winminheight = s:save_winminheight
+let &winminwidth = s:save_winminwidth
 let s:sx = expand("<sfile>:p:r")."x.vim"
 if filereadable(s:sx)
   exe "source " . fnameescape(s:sx)
 endif
 let &g:so = s:so_save | let &g:siso = s:siso_save
 set hlsearch
-nohlsearch
 doautoall SessionLoadPost
 unlet SessionLoad
 " vim: set ft=vim :
