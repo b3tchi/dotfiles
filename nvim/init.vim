@@ -263,7 +263,6 @@ call plug#end()
   " \| PlugInstall --sync | source $MYVIMRC
 " \| endif
 
-
 " Run PlugInstall if there are missing plugins
 if len(filter(values(g:plugs), '!isdirectory(v:val.dir)'))
   PlugInstall --sync ""| source $MYVIMRC
@@ -316,10 +315,6 @@ set hlsearch
 
 "" Define folding
 set foldmethod=indent
-set foldlevelstart=20
-" autocmd FileType * setlocal foldmethod=indent
-" autocmd FileType dbui setlocal foldlevelstart=99
-
 " set foldmethod=syntax
 set foldignore=
 set tabstop=2
