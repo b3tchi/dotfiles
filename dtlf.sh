@@ -70,6 +70,7 @@ ml $d bin/nvim-startifier ~/.local/bin/
 ml $d bin/gwt/gwt ~/.local/bin/
 ml $d bin/azdops/pipeline.sh ~/.local/bin/ azdpipes
 ml $d bin/azdops/variables.sh ~/.local/bin/ azdvars
+ml $d bin/fxs.sh ~/.local/bin/ fxs
 
 #bin
 chmod +x $d/bin/*
