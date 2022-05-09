@@ -293,6 +293,7 @@ endif
 source ~/dotfiles/nvim/languages/bash.vim
 source ~/dotfiles/nvim/languages/powershell.vim
 source ~/dotfiles/nvim/languages/csharp.vim
+source ~/dotfiles/nvim/languages/terraform.vim
 source ~/.config/nvim/incubator.vim
 
 let mapleader = "," " leader key is ,
