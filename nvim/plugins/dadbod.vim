@@ -33,13 +33,8 @@ let g:which_key_map.d.e = 'execute query'
 autocmd FileType sql nmap <buffer><silent><space>dw <Plug>(DBUI_SaveQuery)
 let g:which_key_map.d.s = 'save query'
 
-autocmd FileType sql nmap <buffer><silent><space>dw <Plug>(DBUI_SaveQuery)
 autocmd FileType sql nmap <buffer><silent><space>da :DBUIFindBuffer<CR>
-
-" autocmd FileType dbui nmap <buffer> <S-k> <Plug>(DBUI_GotoFirstSibling)
-" autocmd FileType dbui nmap <buffer> <S-j> <Plug>(DBUI_GotoLastSibling)
-" autocmd FileType dbui nmap <buffer> k <Plug>(DBUI_GotoPrevSibling)
-" autocmd FileType dbui nmap <buffer> j <Plug>(DBUI_GotoNextSibling)
+let g:which_key_map.d.s = 'attach to db'
 
 autocmd FileType dbui nmap <buffer> <S-k> <Plug>(DBUI_GotoFirstSibling)
 autocmd FileType dbui nmap <buffer> <S-j> <Plug>(DBUI_GotoLastSibling)
