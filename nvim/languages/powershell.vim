@@ -3,6 +3,10 @@ let g:coc_global_extensions += ['coc-powershell']
 
 "DAP no debug yet for
 
+" --- PowerShell specific ---
+" powershell 200831 not regnized set manually
+au! BufNewFile,BufRead *.ps1 set ft=ps1
+
 lua << EOF
 -- PowerShell
 require('lspconfig').powershell_es.setup{

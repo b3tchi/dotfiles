@@ -79,6 +79,7 @@ endif
 
 " clobal variables
 let g:which_key_map =  {}
+let g:which_key_map.v ={'name':'+vim'}
 
 " Required
 call plug#begin(expand('~/.vim/plugged'))
@@ -130,14 +131,7 @@ call plug#begin(expand('~/.vim/plugged'))
 
   ""addvanced ide features
   if g:lspClient == 1
-    " Plug 'neoclide/coc.nvim', {'merge': 0, 'rev': 'release'}
-    Plug 'neoclide/coc.nvim', {'branch': 'release'}
-    Plug 'antoinemadec/coc-fzf', {'branch': 'release'}
-
-    " Plug 'liuchengxu/vista.vim'
-    " Plug 'neoclide/coc.nvim', {'do': 'yarn install --frozen-lockfile'}
-    " Plug 'neoclide/coc.nvim', {'merge':0, 'build': './install.sh nightly'}
-    " Plug 'mgedmin/python-imports.vim', { 'on_ft' : 'python' }
+    source ~/dotfiles/nvim/coc.vim
   " elseif g:lspClient == 2
   "   Plug 'Shougo/deoplete.nvim'
   "   if !has('nvim')
@@ -474,7 +468,7 @@ nnoremap <silent> <space>f :Rg<cr>
 " nnoremap <silent> ;; :Buffer<cr>
 nnoremap <silent> <space>ee :call FuzzyFiles()<cr>
 nnoremap <silent> <space>W :Windows<cr>
- 
+
 function FuzzyFiles()
   if get(b:,'git_dir') == 0
     exe ':FzfFiles'
@@ -486,7 +480,6 @@ endfunction
 "tasks TBD
 nnoremap <silent> <space>tn :Trep<cr>
 
-let g:which_key_map.v ={'name':'+vim'}
 nnoremap <silent> <space>vk :Maps<cr>
 let g:which_key_map.v.h ={'name':'+help'}
 nnoremap <silent> <space>vhf :Helptags<cr>
@@ -505,13 +498,6 @@ nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>:LightlineReload<cr>
 let g:which_key_map.v.l ={'name':'+lsp'}
 nnoremap <silent> <space>vli :LspInstallInfo<cr>
  " If text is selected, save it in the v buffer and send that buffer it to tmux
-
-" function! gitrepo
-let g:which_key_map.v.l ={'name':'+sessions'}
-nnoremap <silent> <space>ss :SSave<cr>
-nnoremap <silent> <space>sd :SDelete<cr>
-nnoremap <silent> <space>sc :SClose<cr>
-nnoremap <silent> <space>sw :SSave! dotfiles<cr>:wqa<cr>
 
 nmap <silent> <leader>tn :TestNearest<CR>
 nmap <silent> <leader>tf :TestFile<CR>
@@ -587,77 +573,7 @@ vnoremap > >gv
 nnoremap <silent><space>Wt :VimwikiTable 1 2
 
 " --- Coc ---
-if g:lspClient == 1
-  " let g:coc_force_debug = 1
-  " Remap keys for gotos
-  nmap <silent> gd <Plug>(coc-definition)
-  nmap <silent> gy <Plug>(coc-type-definition)
-  nmap <silent> gi <Plug>(coc-implementation)
-  nmap <silent> gr <Plug>(coc-references)
-
-
-  " Use K for show documentation in preview window
-  nnoremap <silent> K :call <SID>show_documentation()<CR>
-  " Remap for rename current word
-  nmap <leader>rn <Plug>(coc-rename)
-  " Remap for format selected region
-  xmap <leader>f  <Plug>(coc-format-selected)
-  nmap <leader>f  <Plug>(coc-format-selected)
-  " Remap for do codeAction of selected region, ex: `<leader>aap` for current paragraph
-  xmap <leader>a  <Plug>(coc-codeaction-selected)
-  nmap <leader>a  <Plug>(coc-codeaction-selected)
-  " Remap for do codeAction of current line
-  nmap <leader>ac  <Plug>(coc-codeaction)
-  " Fix autofix problem of current line
-  nmap <leader>qf  <Plug>(coc-fix-current)
-  nmap <a-cr>  <Plug>(coc-fix-current)
-  " Use <C-d> for select selections ranges, needs server support, like: coc-tsserver, coc-python
-  nmap <expr> <silent> <C-d> <SID>select_current_word()
-
-  function! s:select_current_word()
-    if !get(g:, 'coc_cursors_activated', 0)
-      return "\<Plug>(coc-cursors-word)"
-    endif
-    return "*\<Plug>(coc-cursors-word):nohlsearch\<CR>"
-  endfunc
-
-  " Use `:Format` for format current buffer
-  command! -nargs=0 Format :call CocAction('format')
-
-  " nnoremap <C-o> :CocCommand explorer<cr>
-  " Using CocList
-  "TBR Vista succed by fzf-coc
-  " nmap <silent>  o :<cr>
-
-  nnoremap <silent> <space>vfc :<C-u>CocFzfList commands<cr>
-  nnoremap <silent> <space>a :<C-u>CocFzfList diagnostics<cr>
-  nnoremap <silent> <space>E :CocCommand explorer<cr>
-  nnoremap <silent> <space>o :<C-u>CocFzfList outline<cr>
-  nnoremap <silent> <space>O :SymbolsOutline<CR>
-  " nnoremap <silent>  e  :<C-u>CocList extensions<cr>
-  " nnoremap <silent>  s  :<C-u>CocList -I symbols<cr>
-
-  " CocList Navigation - Do default action for next item.
-  " nnoremap <silent>  j  :<C-u>CocNext<CR>
-  " nnoremap <silent>  k  :<C-u>CocPrev<CR>
-  nnoremap <silent> <space>p :<C-u>CocFzfListResume<CR>
-  " Do default action for previous item.
-
-  nnoremap <leader>em :CocCommand python.refactorExtractMethod<cr>
-  vnoremap <leader>em :CocCommand python.refactorExtractMethod<cr>
-  nnoremap <leader>ev :CocCommand python.refactorExtractVariable<cr>
-
-  " Use tab for trigger completion with characters ahead and navigate.
-  " Use command ':verbose imap <tab>' to make sure tab is not mapped by other plugin.
-  inoremap <silent><expr> <TAB>
-    \ pumvisible() ? "\<C-n>" :
-    \ <SID>check_back_space() ? "\<TAB>" :
-    \ coc#refresh()
-  inoremap <silent><expr> <C-Space>
-    \ pumvisible() ? "\<C-n>" :
-    \ <SID>check_back_space() ? "\<TAB>" :
-    \ coc#refresh()
-endif
+" moved to coc.vim
 
 nnoremap <Tab> :bnext!<CR>
 nnoremap <S-Tab> :bprev!<CR>
@@ -861,8 +777,7 @@ let g:user_emmet_leader_key = ','
 autocmd FileType html,css EmmetInstall
 
 " --- PowerShell specific ---
-" powershell 200831 not regnized set manually
-au! BufNewFile,BufRead *.ps1 set ft=ps1
+" moved to powershell.vim
 
 " --- vimWiki specific ---
 let wikis = [

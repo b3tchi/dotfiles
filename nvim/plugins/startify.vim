@@ -17,7 +17,15 @@ function LoadedStartify()
   function! SetNeovimTitle()
     let &titlestring = fnamemodify(v:this_session, ':t')
   endfunction
-endfunction
+
+  autocmd VimLeavePre * silent execute v:lua.SaveIfSessionExists()
+
+ " function! gitrepo
+  let g:which_key_map.v.l ={'name':'+sessions'}
+  nnoremap <silent> <space>ss :SSave<cr>
+  nnoremap <silent> <space>sd :SDelete<cr>
+  nnoremap <silent> <space>sc :SClose<cr>
+  nnoremap <silent> <space>sw :SSave! dotfiles<cr>:wqa<cr>
 
 lua << EOF
   function _G.SaveIfSessionExists()
@@ -30,9 +38,11 @@ lua << EOF
   end
 EOF
 
+endfunction
+
+
 augroup LoadedStartify
   autocmd!
   autocmd User PlugLoaded call LoadedStartify()
-  autocmd VimLeavePre * silent execute v:lua.SaveIfSessionExists()
 augroup END
 
