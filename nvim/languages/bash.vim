@@ -15,10 +15,20 @@ require'lspconfig'.bashls.setup{
 }
 
 function _G.mdblock_bash(mdblock)
-      local lines = vim.fn.join(mdblock, '\n') ..'\n'
-      vim.fn.VimuxRunCommand(lines)
-
+  local lines = vim.fn.join(mdblock, '\n') ..'\n'
+  vim.fn.VimuxRunCommand(lines)
 end
 
 EOF
+
+function LoadedBashLang()
+  echom "bashlang"
+  " colorscheme gruvbox
+  autocmd FileType sh nnoremap <buffer> <space>o :Telescope lsp_document_symbols<CR>
+endfunction
+
+augroup LoadedBashLang
+  autocmd!
+  autocmd User PlugLoaded call LoadedBashLang()
+augroup END
 

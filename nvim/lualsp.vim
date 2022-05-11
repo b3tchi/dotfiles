@@ -4,7 +4,7 @@ lua << EOF
 
 -- Use an on_attach_default function to only map the following keys
 -- after the language server attaches to the current buffer
-on_attach_default = function(client, bufnr)
+_G.on_attach_default = function(client, bufnr)
   local function buf_set_keymap(...) vim.api.nvim_buf_set_keymap(bufnr, ...) end
   local function buf_set_option(...) vim.api.nvim_buf_set_option(bufnr, ...) end
 
@@ -29,9 +29,11 @@ on_attach_default = function(client, bufnr)
   buf_set_keymap('n', '[d', '<cmd>lua vim.lsp.diagnostic.goto_prev()<CR>', opts)
   buf_set_keymap('n', ']d', '<cmd>lua vim.lsp.diagnostic.goto_next()<CR>', opts)
   buf_set_keymap('n', '<space>q', '<cmd>lua vim.lsp.diagnostic.set_loclist()<CR>', opts)
+  -- buf_set_keymap('n', '<space>O', '<cmd>lua require('telescope.builtin').builtin.lsp_document_symbols()<CR>', opts)
   -- buf_set_keymap('n', '<C-k>', '<cmd>lua vim.lsp.buf.signature_help()<CR>', opts)
   -- buf_set_keymap('n', '<space>e', '<cmd>lua vim.lsp.diagnostic.show_line_diagnostics()<CR>', opts)
   -- buf_set_keymap('n', '<space>f', '<cmd>lua vim.lsp.buf.formatting()<CR>', opts)
+  -- print('loaded' .. client)
 
 end
 
@@ -39,7 +41,7 @@ end
 -- !!moved to bash.vim -- BASH
 -- !!moved to language file -- PowerShell
 
--- Display Languages
+-- Presenting Languages
 require'lspconfig'.cssls.setup{} -- CSS
 require'lspconfig'.html.setup{} -- HTML
 require'lspconfig'.svelte.setup{} -- SVELTE
@@ -61,7 +63,7 @@ require'lspconfig'.vimls.setup{} -- VIML
 -- Documentation
 require'lspconfig'.remark_ls.setup{} -- MARKDOWN
 
--- All purpose
+-- General purpose
 --?? --GO
 --require'lspconfig'.tsserver.setup{} --TYPESCRIPT
 --require'lspconfig'.rust_analyzer.setup{} --RUST

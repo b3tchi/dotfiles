@@ -88,9 +88,10 @@ call plug#begin(expand('~/.vim/plugged'))
   ""General Vim Plugins
   Plug 'jeffkreeftmeijer/vim-numbertoggle'		"hybrid/static number toggle when multiple windows
   Plug 'google/vim-searchindex'
-  Plug 'mhinz/vim-startify' "fancty start screen for VIM and session manager
   Plug 'embear/vim-localvimrc' "loading rootfolder placed vim configs /.lvimrc
   Plug 'ryanoasis/vim-devicons' "nerd fonts icons
+
+  source ~/dotfiles/nvim/plugins/startify.vim
   ""Searching fzf
   " Plug 'junegunn/fzf', {'build': './install --all', 'merged': 0}
   " Plug 'junegunn/fzf.vim', {'depends': 'fzf'}
@@ -315,13 +316,85 @@ set incsearch
 set hlsearch
 
 "" Define folding
-set foldmethod=indent
-" set foldmethod=syntax
-set foldignore=
-set tabstop=2
-set softtabstop=2
-set expandtab
-set shiftwidth=2
+" set foldmethod=indent
+" set foldlevelstart=20
+" highlight Folded
+"
+" " set foldmethod=syntax
+" set foldignore=
+" set tabstop=2
+" set softtabstop=2
+" set expandtab
+" set shiftwidth=2
+
+set nofoldenable
+set foldlevel=99
+set foldlevelstart=99
+set fillchars=fold:\
+set foldtext=CustomFoldText()
+setlocal foldmethod=expr
+setlocal foldexpr=GetPotionFold(v:lnum)
+highlight Folded
+
+function! GetPotionFold(lnum)
+  if getline(a:lnum) =~? '\v^\s*$'
+    return '-1'
+  endif
+
+  let this_indent = IndentLevel(a:lnum)
+  let next_indent = IndentLevel(NextNonBlankLine(a:lnum))
+
+  if next_indent == this_indent
+    return this_indent
+  elseif next_indent < this_indent
+    return this_indent
+  elseif next_indent > this_indent
+    return '>' . next_indent
+  endif
+endfunction
+
+function! IndentLevel(lnum)
+    return indent(a:lnum) / &shiftwidth
+endfunction
+
+function! NextNonBlankLine(lnum)
+  let numlines = line('$')
+  let current = a:lnum + 1
+
+  while current <= numlines
+      if getline(current) =~? '\v\S'
+          return current
+      endif
+
+      let current += 1
+  endwhile
+
+  return -2
+endfunction
+
+function! CustomFoldText()
+  " get first non-blank line
+  let fs = v:foldstart
+
+  while getline(fs) =~ '^\s*$' | let fs = nextnonblank(fs + 1)
+  endwhile
+
+  if fs > v:foldend
+      let line = getline(v:foldstart)
+  else
+      let line = substitute(getline(fs), '\t', repeat(' ', &tabstop), 'g')
+  endif
+
+  let w = winwidth(0) - &foldcolumn - (&number ? 8 : 0)
+  let foldSize = 1 + v:foldend - v:foldstart
+  let foldSizeStr = " " . foldSize . " lines "
+  let foldLevelStr = repeat("+--", v:foldlevel)
+  let expansionString = repeat(" ", w - strwidth(foldSizeStr.line.foldLevelStr))
+  return line . expansionString . foldSizeStr . foldLevelStr
+endfunction
+
+
+
 " set listchars=tab:\|\
 " set list
 
@@ -391,15 +464,17 @@ if g:vimmode != 3
 endif
 
 let g:which_key_map.b = '+buffer'
+nnoremap <silent> <space>bb :Buffers<cr>
+nnoremap <silent> <space>bs :StripWhitespace<cr>
+nnoremap <silent> <space>bl :LspInfo<cr>
 
 " nnoremap <C-p> :GFiles<cr>
 " nnoremap <C-f> :Rg<cr>
 nnoremap <silent> <space>f :Rg<cr>
-nnoremap <silent> <space>b :Buffer<cr>
 " nnoremap <silent> ;; :Buffer<cr>
-nnoremap <silent> <space>e :call FuzzyFiles()<cr>
+nnoremap <silent> <space>ee :call FuzzyFiles()<cr>
 nnoremap <silent> <space>W :Windows<cr>
-
+ 
 function FuzzyFiles()
   if get(b:,'git_dir') == 0
     exe ':FzfFiles'
@@ -429,7 +504,6 @@ nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>:LightlineReload<cr>
 
 let g:which_key_map.v.l ={'name':'+lsp'}
 nnoremap <silent> <space>vli :LspInstallInfo<cr>
-nnoremap <silent> <space>vlb :LspInfo<cr>
  " If text is selected, save it in the v buffer and send that buffer it to tmux
 
 " function! gitrepo
@@ -730,24 +804,6 @@ highlight Comment cterm=italic
 
 "--- startify --- TODO
 " let g:startify_bookmarks = ['~/svn', '~/dev']
-autocmd User StartifyAllBuffersOpened call SetNeovimTitle()
-autocmd User StartifyBufferOpened call SetNeovimTitle()
-
-" set title - required this option to be on - in general settings above
-function! SetNeovimTitle()
-  let g:test2 = fnamemodify(v:this_session, ':t')
-  let &titlestring = fnamemodify(v:this_session, ':t')
-
-endfunction
-
-let g:startify_lists = [
-  \ { 'type': 'sessions',  'header': ['   Sessions']       },
-  \ { 'type': 'files',     'header': ['   MRU']            },
-  \ { 'type': 'dir',       'header': ['   MRU '. getcwd()] },
-  \ { 'type': 'bookmarks', 'header': ['   Bookmarks']      },
-  \ { 'type': 'commands',  'header': ['   Commands']       },
-  \ ]
-
 "--- Indent Guides ---
 " let g:indent_guides_enable_on_vim_startup = 1
 " let g:indent_guides_auto_colors = 0
