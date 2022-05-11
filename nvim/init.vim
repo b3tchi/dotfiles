@@ -465,7 +465,8 @@ if g:vimmode != 3
 endif
 
 let g:which_key_map.b = '+buffer'
-nnoremap <silent> <space>bb :Buffers<cr>
+" nnoremap <silent> <space>bb :Buffers<cr>
+nnoremap <silent> <space>bb :Telescope buffers<cr>
 nnoremap <silent> <space>bs :StripWhitespace<cr>
 nnoremap <silent> <space>bl :LspInfo<cr>
 
