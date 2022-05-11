@@ -188,16 +188,20 @@ call plug#begin(expand('~/.vim/plugged'))
   " vimmode 3 => Neovim 0.5+ with lua
   if g:vimmode == 3
 
+    "language server implementation
     Plug 'neovim/nvim-lspconfig' "offical NeoVim LSP plugin
     Plug 'williamboman/nvim-lsp-installer' "automatic installer of LSPs
     " LSP List [https://github.com/neovim/nvim-lspconfig/blob/master/CONFIG.md#svelte]
 
+    " syntax and grammatics
     " Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'} "LSP based highlighting
     "to fix the iisue with slow markdown
     "https://github.com/nvim-treesitter/nvim-treesitter/issues/2206
     Plug 'nvim-treesitter/nvim-treesitter', {'commit': '8ada8faf2fd5a74cc73090ec856fa88f34cd364b', 'do': ':TSUpdate'}
     Plug 'nvim-lua/popup.nvim'
     Plug 'nvim-lua/plenary.nvim'
+
+    "telescope search instead of fzf
     Plug 'nvim-telescope/telescope.nvim'
     Plug 'nvim-telescope/telescope-fzf-native.nvim',  { 'do': 'make' }
 
@@ -207,11 +211,16 @@ call plug#begin(expand('~/.vim/plugged'))
 
     "outlines
     Plug 'simrat39/symbols-outline.nvim' "outlines
+
+    "notes taking - NOT USED to be checked
     Plug 'nvim-orgmode/orgmode'
 
     ""completion
     Plug 'hrsh7th/nvim-cmp'
     Plug 'hrsh7th/cmp-nvim-lsp'
+
+    "debugger
+    source ~/dotfiles/nvim/plugins/nvimdap.vim
 
     ""Indent guides
     Plug 'lukas-reineke/indent-blankline.nvim'
@@ -223,14 +232,11 @@ call plug#begin(expand('~/.vim/plugged'))
     "lua extended version of which key
     Plug 'folke/which-key.nvim'
 
-    ""Status Line & bufferline
+    "scrollbar
     source ~/dotfiles/nvim/plugins/scrollbar.vim
 
-    ""Status Line & bufferline
+    "Status Line & bufferline
     source ~/dotfiles/nvim/plugins/lualine.vim
-
-    "debugger
-    source ~/dotfiles/nvim/plugins/nvimdap.vim
 
   else
 
@@ -262,6 +268,7 @@ call plug#end()
 if len(filter(values(g:plugs), '!isdirectory(v:val.dir)'))
   PlugInstall --sync ""| source $MYVIMRC
 endif
+
 " echom "plugend"
 "event triggering after plug
 doautocmd User PlugLoaded

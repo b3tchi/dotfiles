@@ -10,27 +10,8 @@ endif
 set shortmess=aoO
 argglobal
 %argdel
-edit nvim/plugins/startify.vim
-let s:save_splitbelow = &splitbelow
-let s:save_splitright = &splitright
-set splitbelow splitright
-wincmd _ | wincmd |
-vsplit
-1wincmd h
-wincmd w
-let &splitbelow = s:save_splitbelow
-let &splitright = s:save_splitright
-wincmd t
-let s:save_winminheight = &winminheight
-let s:save_winminwidth = &winminwidth
-set winminheight=0
-set winheight=1
-set winminwidth=0
-set winwidth=1
-exe 'vert 1resize ' . ((&columns * 119 + 120) / 240)
-exe 'vert 2resize ' . ((&columns * 120 + 120) / 240)
+edit nvim/init.vim
 argglobal
-balt bin/nvim-startifier
 setlocal fdm=manual
 setlocal fde=0
 setlocal fmr={{{,}}}
@@ -41,83 +22,25 @@ setlocal fdn=20
 setlocal nofen
 silent! normal! zE
 let &fdl = &fdl
-let s:l = 24 - ((17 * winheight(0) + 18) / 37)
+let s:l = 86 - ((14 * winheight(0) + 15) / 30)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
-keepjumps 24
-normal! 07|
-wincmd w
-argglobal
-if bufexists("nvim/init.vim") | buffer nvim/init.vim | else | edit nvim/init.vim | endif
-if &buftype ==# 'terminal'
-  silent file nvim/init.vim
-endif
-balt nvim/plugins/startify.vim
-setlocal fdm=manual
-setlocal fde=0
-setlocal fmr={{{,}}}
-setlocal fdi=#
-setlocal fdl=99
-setlocal fml=1
-setlocal fdn=20
-setlocal nofen
-silent! normal! zE
-let &fdl = &fdl
-let s:l = 80 - ((18 * winheight(0) + 18) / 37)
-if s:l < 1 | let s:l = 1 | endif
-keepjumps exe s:l
-normal! zt
-keepjumps 80
+keepjumps 86
 normal! 0
-wincmd w
-2wincmd w
-exe 'vert 1resize ' . ((&columns * 119 + 120) / 240)
-exe 'vert 2resize ' . ((&columns * 120 + 120) / 240)
 tabnext 1
-badd +24 nvim/plugins/startify.vim
-badd +1 bin/nvim-startifier
-badd +1 nvim/coc.vim
-badd +1 \[coc-explorer]-1
-badd +80 nvim/init.vim
-badd +3 nvim/plugins/gruvbox.vim
-badd +22 bin/version
-badd +132 nvim/plugins/vimux.vim
-badd +174 README.md
-badd +43 dtlf.sh
-badd +1 bin/tat
-badd +16 nvim/plugins/git.vim
-badd +26 tmux.conf
-badd +31 nvim/plugins/lualine.vim
-badd +165 nvim/plugins/lightline.vim
-badd +175 ~/.config/nvim/lightline.vim
-badd +27 nvim/plugins/nvimdap.vim
-badd +9621 ~/Applications/neovim/squashfs-root/usr/share/nvim/runtime/doc/eval.txt
-badd +1572 ~/Applications/neovim/squashfs-root/usr/share/nvim/runtime/doc/api.txt
-badd +24 bin/ff
-badd +184 ~/.vim/plugged/vim-tmux-runner/doc/vim-tmux-runner.txt
-badd +13 bin/nvim-sessionizer
-badd +21 bin/gwt/README.md
-badd +168 zsh/zshrc
-badd +41 nvim/session/dotfiles
-badd +6 nvim/languages/csharp.vim
-badd +7 nvim/languages/powershell.vim
-badd +1 nvim/languages/bash.vim
-badd +8 nvim/plugins/scrollbar.vim
+badd +86 nvim/init.vim
 if exists('s:wipebuf') && len(win_findbuf(s:wipebuf)) == 0 && getbufvar(s:wipebuf, '&buftype') isnot# 'terminal'
   silent exe 'bwipe ' . s:wipebuf
 endif
 unlet! s:wipebuf
 set winheight=1 winwidth=20 shortmess=filnxtToOFsIc
-let &winminheight = s:save_winminheight
-let &winminwidth = s:save_winminwidth
 let s:sx = expand("<sfile>:p:r")."x.vim"
 if filereadable(s:sx)
   exe "source " . fnameescape(s:sx)
 endif
 let &g:so = s:so_save | let &g:siso = s:siso_save
 set hlsearch
-nohlsearch
 doautoall SessionLoadPost
 unlet SessionLoad
 " vim: set ft=vim :
