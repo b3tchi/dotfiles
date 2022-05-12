@@ -25,7 +25,7 @@ nnoremap <silent> <space>ee :call FuzzyFiles()<cr>
 " nnoremap <silent> <space>bb :Buffers<cr>
 nnoremap <silent> <space>ww :Windows<cr>
 nnoremap <silent> <space>tn :Trep<cr>
-nnoremap <silent> <space>f :Rg<cr>
+nnoremap <silent> <space>ff :Rg<cr>
 nnoremap <silent> <space>vk :Maps<cr>
 let g:which_key_map.v.h ={'name':'+help'}
 nnoremap <silent> <space>vhf :Helptags<cr>

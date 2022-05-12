@@ -203,6 +203,8 @@ call plug#begin(expand('~/.vim/plugged'))
     "telescope search instead of fzf
     Plug 'nvim-telescope/telescope.nvim'
     Plug 'nvim-telescope/telescope-fzf-native.nvim',  { 'do': 'make' }
+    source ~/dotfiles/nvim/plugins/telescope.vim
+
 
     " git
     " Plug 'sindrets/diffview.nvim'
