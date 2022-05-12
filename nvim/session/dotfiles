@@ -7,11 +7,62 @@ cd ~/dotfiles
 if expand('%') == '' && !&modified && line('$') <= 1 && getline(1) == ''
   let s:wipebuf = bufnr('%')
 endif
+let s:shortmess_save = &shortmess
 set shortmess=aoO
+badd +98 nvim/init.vim
+badd +1 nvim/plugins/fzf.vim
+badd +0 nvim/plugins/gruvbox.vim
 argglobal
 %argdel
-edit nvim/init.vim
+edit nvim/plugins/fzf.vim
+let s:save_splitbelow = &splitbelow
+let s:save_splitright = &splitright
+set splitbelow splitright
+wincmd _ | wincmd |
+split
+1wincmd k
+wincmd _ | wincmd |
+vsplit
+1wincmd h
+wincmd w
+wincmd w
+let &splitbelow = s:save_splitbelow
+let &splitright = s:save_splitright
+wincmd t
+let s:save_winminheight = &winminheight
+let s:save_winminwidth = &winminwidth
+set winminheight=0
+set winheight=1
+set winminwidth=0
+set winwidth=1
+exe '1resize ' . ((&lines * 20 + 23) / 47)
+exe 'vert 1resize ' . ((&columns * 48 + 48) / 96)
+exe '2resize ' . ((&lines * 20 + 23) / 47)
+exe 'vert 2resize ' . ((&columns * 47 + 48) / 96)
+exe '3resize ' . ((&lines * 21 + 23) / 47)
 argglobal
+balt nvim/init.vim
+setlocal fdm=expr
+setlocal fde=GetPotionFold(v:lnum)
+setlocal fmr={{{,}}}
+setlocal fdi=#
+setlocal fdl=99
+setlocal fml=1
+setlocal fdn=20
+setlocal nofen
+let s:l = 109 - ((7 * winheight(0) + 10) / 20)
+if s:l < 1 | let s:l = 1 | endif
+keepjumps exe s:l
+normal! zt
+keepjumps 109
+normal! 018|
+wincmd w
+argglobal
+if bufexists(fnamemodify("nvim/plugins/gruvbox.vim", ":p")) | buffer nvim/plugins/gruvbox.vim | else | edit nvim/plugins/gruvbox.vim | endif
+if &buftype ==# 'terminal'
+  silent file nvim/plugins/gruvbox.vim
+endif
+balt nvim/plugins/fzf.vim
 setlocal fdm=manual
 setlocal fde=0
 setlocal fmr={{{,}}}
@@ -22,19 +73,49 @@ setlocal fdn=20
 setlocal nofen
 silent! normal! zE
 let &fdl = &fdl
-let s:l = 86 - ((14 * winheight(0) + 15) / 30)
+let s:l = 18 - ((17 * winheight(0) + 10) / 20)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
-keepjumps 86
-normal! 0
+keepjumps 18
+normal! 011|
+wincmd w
+argglobal
+if bufexists(fnamemodify("nvim/init.vim", ":p")) | buffer nvim/init.vim | else | edit nvim/init.vim | endif
+if &buftype ==# 'terminal'
+  silent file nvim/init.vim
+endif
+balt nvim/plugins/fzf.vim
+setlocal fdm=expr
+setlocal fde=GetPotionFold(v:lnum)
+setlocal fmr={{{,}}}
+setlocal fdi=#
+setlocal fdl=99
+setlocal fml=1
+setlocal fdn=20
+setlocal nofen
+let s:l = 98 - ((10 * winheight(0) + 10) / 21)
+if s:l < 1 | let s:l = 1 | endif
+keepjumps exe s:l
+normal! zt
+keepjumps 98
+normal! 040|
+wincmd w
+3wincmd w
+exe '1resize ' . ((&lines * 20 + 23) / 47)
+exe 'vert 1resize ' . ((&columns * 48 + 48) / 96)
+exe '2resize ' . ((&lines * 20 + 23) / 47)
+exe 'vert 2resize ' . ((&columns * 47 + 48) / 96)
+exe '3resize ' . ((&lines * 21 + 23) / 47)
 tabnext 1
-badd +86 nvim/init.vim
 if exists('s:wipebuf') && len(win_findbuf(s:wipebuf)) == 0 && getbufvar(s:wipebuf, '&buftype') isnot# 'terminal'
   silent exe 'bwipe ' . s:wipebuf
 endif
 unlet! s:wipebuf
-set winheight=1 winwidth=20 shortmess=filnxtToOFsIc
+set winheight=1 winwidth=20
+let &shortmess = s:shortmess_save
+let &winminheight = s:save_winminheight
+let &winminwidth = s:save_winminwidth
 let s:sx = expand("<sfile>:p:r")."x.vim"
 if filereadable(s:sx)
   exe "source " . fnameescape(s:sx)
