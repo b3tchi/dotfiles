@@ -4,7 +4,7 @@ lua << EOF
 
 -- Use an on_attach_default function to only map the following keys
 -- after the language server attaches to the current buffer
-on_attach_default = function(client, bufnr)
+_G.on_attach_default = function(client, bufnr)
   local function buf_set_keymap(...) vim.api.nvim_buf_set_keymap(bufnr, ...) end
   local function buf_set_option(...) vim.api.nvim_buf_set_option(bufnr, ...) end
 
@@ -29,89 +29,52 @@ on_attach_default = function(client, bufnr)
   buf_set_keymap('n', '[d', '<cmd>lua vim.lsp.diagnostic.goto_prev()<CR>', opts)
   buf_set_keymap('n', ']d', '<cmd>lua vim.lsp.diagnostic.goto_next()<CR>', opts)
   buf_set_keymap('n', '<space>q', '<cmd>lua vim.lsp.diagnostic.set_loclist()<CR>', opts)
+  -- buf_set_keymap('n', '<space>O', '<cmd>lua require('telescope.builtin').builtin.lsp_document_symbols()<CR>', opts)
   -- buf_set_keymap('n', '<C-k>', '<cmd>lua vim.lsp.buf.signature_help()<CR>', opts)
   -- buf_set_keymap('n', '<space>e', '<cmd>lua vim.lsp.diagnostic.show_line_diagnostics()<CR>', opts)
   -- buf_set_keymap('n', '<space>f', '<cmd>lua vim.lsp.buf.formatting()<CR>', opts)
+  -- print('loaded' .. client)
 
 end
 
--- PYTHON
-require'lspconfig'.pyright.setup{}
+--Scripting
+-- !!moved to bash.vim -- BASH
+-- !!moved to language file -- PowerShell
 
--- SVELTE
-require'lspconfig'.svelte.setup{}
+-- Presenting Languages
+require'lspconfig'.cssls.setup{} -- CSS
+require'lspconfig'.html.setup{} -- HTML
+require'lspconfig'.svelte.setup{} -- SVELTE
 
--- YAML
-require'lspconfig'.yamlls.setup{}
+-- Data Language
+require'lspconfig'.yamlls.setup{} -- YAML
+require'lspconfig'.jsonls.setup{} -- JSOM
+--?? -- XML
+--?? -- SQL
 
--- BASH moved to bash.vim
--- require'lspconfig'.bashls.setup{}
+-- Infrastructure Languages
+--require'lspconfig'.dockerls.setup{} -- DOCKER
+--!!moved to language file --TERRAFORM
 
---C
---require'lspconfig'.ccls.setup{}
+-- Neovim
+--require'lspconfig'.sumneko_lua.setup{} --LUA
+require'lspconfig'.vimls.setup{} -- VIML
 
---CSS
-require'lspconfig'.cssls.setup{}
+-- Documentation
+require'lspconfig'.remark_ls.setup{} -- MARKDOWN
 
---DOCKER
---require'lspconfig'.dockerls.setup{}
+-- General purpose
+--?? --GO
+--require'lspconfig'.tsserver.setup{} --TYPESCRIPT
+--require'lspconfig'.rust_analyzer.setup{} --RUST
+--require'lspconfig'.ccls.setup{} --C
+--!!moved to language file --C#,VB.NET
+require'lspconfig'.eslint.setup{} -- JAVASCRIPT
+require'lspconfig'.pyright.setup{} -- PYTHON
 
---HTML
-require'lspconfig'.html.setup{}
-
---JSOM
-require'lspconfig'.jsonls.setup{}
-
---C#,VB.NET
--- local pid = vim.fn.getpid()
--- --Path to coc-omnisharp
--- local omnisharp_bin = "/home/jan/.local/share/nvim/lsp_servers/omnisharp/omnisharp/run"
---
--- require'lspconfig'.omnisharp.setup{
---   --parameter 1
---   capabilities = require('cmp_nvim_lsp').update_capabilities(vim.lsp.protocol.make_client_capabilities()),
---   --parameter 2
---   on_attach = on_attach_default ,
---   --parameter 3
---   cmd = { omnisharp_bin , "--languageserver" , "--hostPID" , tostring(pid) }
--- }
-
---PowerShell
--- require'lspconfig'.powershell_es.setup{
---   --parameter 1
---   capabilities = require('cmp_nvim_lsp').update_capabilities(vim.lsp.protocol.make_client_capabilities()),
---   --parameter 2
---   on_attach = on_attach_default ,
---   --parameter 3
---   --bundle_path = '/home/jan/.local/bin/powershell_es',
---   bundle_path = '/home/jan/.config/coc/extensions/node_modules/coc-powershell/PowerShellEditorServices',
---   --bundle_path = '/home/jan/repos/install-pses/PowerShellEditorServices',
---   --cmd = {'pwsh', '-NoLogo', '-NoProfile', '-Command', "/home/jan/.local/bin/powershell_es/PowerShellEditorServices/Start-EditorServices.ps1"},
--- }
---LUA
---require'lspconfig'.sumneko_lua.setup{}
-
---VIML
-require'lspconfig'.vimls.setup{}
-
---TERRAFORM
---require'lspconfig'.terraformls.setup{}
-
---TYPESCRIPT
---require'lspconfig'.tsserver.setup{}
-
---JAVASCRIPT
-require'lspconfig'.eslint.setup{}
-
---MARKDOWN
-require'lspconfig'.remark_ls.setup{}
-
---RUST
---require'lspconfig'.rust_analyzer.setup{}
 
 --Starting Lsp Config details
 local nvim_lsp = require('lspconfig')
-
 
 -- Use a loop to conveniently call 'setup' on multiple servers and
 -- map buffer local keybindings when the language server attaches

@@ -215,6 +215,9 @@ remove(){
   git worktree remove $selected
 
   rm -rf $path
+
+  mkdir $root/archive
+
 }
 
 case "$1" in

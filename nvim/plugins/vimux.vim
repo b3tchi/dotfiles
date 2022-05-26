@@ -12,15 +12,27 @@ function LoadedVimux()
     call VimuxRunCommand(@v, 0)
     " echom @v
   endfunction
+
   function! VimuxMdBlock()
     let mdblock = MarkdownBlock()
     "  if mdblock.lang == 'bash'
 
+    let b:mdcode = mdblock.code
+    let b:mdlang = mdblock.lang
     "bash command
     if index(['bash','sh'],mdblock.lang) > -1
-      let lines = join(mdblock.code, "\n") . "\n"
-      call VimuxRunCommand(lines)
+      " let lines = join(mdblock.code, "\n") . "\n"
+      " call VimuxRunCommand(lines)
 
+lua << EOF
+
+if type(mdblock_bash)=='function' then
+  mdblock_bash(vim.b.mdcode)
+else
+  print('not exists')
+end
+
+EOF
       "powershell
     elseif index(['ps','powershell'],mdblock.lang) > -1
       "rand filename
@@ -44,34 +56,28 @@ function LoadedVimux()
 
     elseif index(['cs','csharp'],mdblock.lang) > -1
 
-      let b:mdcode = mdblock.code
 lua << EOF
 
-      --Prepare Folder
-      local fname = vim.fn.FolderTemp() .. vim.fn.strftime("%Y%m%d_%H%M%S")
-      vim.fn.mkdir(fname,'p')
-      --Create Project
-      os.execute("dotnet new console -o '" .. fname .. "' -f net6.0 --force")
-      --Replace default file
-      local unx_tmpps = fname .. '/Program.cs'
-      vim.fn.delete(unx_tmpps)
-      vim.fn.writefile(vim.b.mdcode,unx_tmpps)
-      --Run Command
-      local cmd = "dotnet run --project '" .. fname .. "'"
-      vim.fn.VimuxRunCommand(cmd)
+if type(mdblock_csharp)=='function' then
+  mdblock_csharp(vim.b.mdcode)
+else
+  print('not exists')
+end
 
 EOF
 
-    elseif index(['pwsh'],mdblock.lang) > -1
+elseif index(['pwsh'],mdblock.lang) > -1
 
-      "rand filename
-      let fname = FolderTemp() . strftime("%Y%m%d_%H%M%S") . '.ps1'
+lua << EOF
 
-      let unx_tmpps = fname
-      call writefile(mdblock.code, unx_tmpps)
+if type(mdblock_pwsh)=='function' then
+  mdblock_pwsh(vim.b.mdcode)
+else
+  print('not exists')
+end
 
-      let cmd = 'pwsh ''' . unx_tmpps . ''''
-      call VimuxRunCommand(cmd)
+EOF
+
       "vimscript
     elseif index(['vim','viml'],mdblock.lang) > -1
       let lines = mdblock.code
@@ -81,12 +87,14 @@ EOF
       call delete(tmp)
     endif
   endfunction
+
   function! FolderTemp()
     let temppath = '/tmp/nvim_mdblocks/'
     " !mkdir -p '/tmp/nvim_mdblocks/'
     call mkdir(temppath,'p')
     return temppath
   endfunction
+
   function! MarkdownBlock()
     let view = winsaveview()
     let line = line('.')

@@ -77,13 +77,9 @@ endif
 "     \ https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
 " endif
 
-" Run PlugInstall if there are missing plugins
-autocmd VimEnter * if len(filter(values(g:plugs), '!isdirectory(v:val.dir)'))
-  \| PlugInstall --sync | source $MYVIMRC
-\| endif
-
 " clobal variables
 let g:which_key_map =  {}
+let g:which_key_map.v ={'name':'+vim'}
 
 " Required
 call plug#begin(expand('~/.vim/plugged'))
@@ -93,14 +89,14 @@ call plug#begin(expand('~/.vim/plugged'))
   ""General Vim Plugins
   Plug 'jeffkreeftmeijer/vim-numbertoggle'		"hybrid/static number toggle when multiple windows
   Plug 'google/vim-searchindex'
-  Plug 'mhinz/vim-startify' "fancty start screen for VIM and session manager
   Plug 'embear/vim-localvimrc' "loading rootfolder placed vim configs /.lvimrc
   Plug 'ryanoasis/vim-devicons' "nerd fonts icons
+
+  source ~/dotfiles/nvim/plugins/startify.vim
+
   ""Searching fzf
-  " Plug 'junegunn/fzf', {'build': './install --all', 'merged': 0}
-  " Plug 'junegunn/fzf.vim', {'depends': 'fzf'}
-  Plug 'junegunn/fzf', { 'do': { -> fzf#install() } }
-  Plug 'junegunn/fzf.vim'
+  source ~/dotfiles/nvim/plugins/fzf.vim
+
   Plug 'jesseleite/vim-agriculture' "adding option for :RgRaw to run raw commands
   " Plug 'jremmen/vim-ripgrep' "testing ripgrep single addin :Rg in fzf seems broken
 
@@ -134,14 +130,7 @@ call plug#begin(expand('~/.vim/plugged'))
 
   ""addvanced ide features
   if g:lspClient == 1
-    " Plug 'neoclide/coc.nvim', {'merge': 0, 'rev': 'release'}
-    Plug 'neoclide/coc.nvim', {'branch': 'release'}
-    Plug 'antoinemadec/coc-fzf', {'branch': 'release'}
-
-    " Plug 'liuchengxu/vista.vim'
-    " Plug 'neoclide/coc.nvim', {'do': 'yarn install --frozen-lockfile'}
-    " Plug 'neoclide/coc.nvim', {'merge':0, 'build': './install.sh nightly'}
-    " Plug 'mgedmin/python-imports.vim', { 'on_ft' : 'python' }
+    source ~/dotfiles/nvim/coc.vim
   " elseif g:lspClient == 2
   "   Plug 'Shougo/deoplete.nvim'
   "   if !has('nvim')
@@ -198,18 +187,24 @@ call plug#begin(expand('~/.vim/plugged'))
   " vimmode 3 => Neovim 0.5+ with lua
   if g:vimmode == 3
 
+    "language server implementation
     Plug 'neovim/nvim-lspconfig' "offical NeoVim LSP plugin
     Plug 'williamboman/nvim-lsp-installer' "automatic installer of LSPs
     " LSP List [https://github.com/neovim/nvim-lspconfig/blob/master/CONFIG.md#svelte]
 
+    " syntax and grammatics
     " Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'} "LSP based highlighting
     "to fix the iisue with slow markdown
     "https://github.com/nvim-treesitter/nvim-treesitter/issues/2206
     Plug 'nvim-treesitter/nvim-treesitter', {'commit': '8ada8faf2fd5a74cc73090ec856fa88f34cd364b', 'do': ':TSUpdate'}
     Plug 'nvim-lua/popup.nvim'
     Plug 'nvim-lua/plenary.nvim'
+
+    "telescope search instead of fzf
     Plug 'nvim-telescope/telescope.nvim'
     Plug 'nvim-telescope/telescope-fzf-native.nvim',  { 'do': 'make' }
+    source ~/dotfiles/nvim/plugins/telescope.vim
+
 
     " git
     " Plug 'sindrets/diffview.nvim'
@@ -217,11 +212,16 @@ call plug#begin(expand('~/.vim/plugged'))
 
     "outlines
     Plug 'simrat39/symbols-outline.nvim' "outlines
+
+    "notes taking - NOT USED to be checked
     Plug 'nvim-orgmode/orgmode'
 
     ""completion
     Plug 'hrsh7th/nvim-cmp'
     Plug 'hrsh7th/cmp-nvim-lsp'
+
+    "debugger
+    source ~/dotfiles/nvim/plugins/nvimdap.vim
 
     ""Indent guides
     Plug 'lukas-reineke/indent-blankline.nvim'
@@ -233,11 +233,11 @@ call plug#begin(expand('~/.vim/plugged'))
     "lua extended version of which key
     Plug 'folke/which-key.nvim'
 
-    ""Status Line & bufferline
-    source ~/dotfiles/nvim/plugins/lualine.vim
+    "scrollbar
+    source ~/dotfiles/nvim/plugins/scrollbar.vim
 
-    "debugger
-    source ~/dotfiles/nvim/plugins/nvimdap.vim
+    "Status Line & bufferline
+    source ~/dotfiles/nvim/plugins/lualine.vim
 
   else
 
@@ -260,7 +260,15 @@ call plug#begin(expand('~/.vim/plugged'))
 
 call plug#end()
 
+" Run PlugInstall if there are missing plugins
+" autocmd VimEnter * if len(filter(values(g:plugs), '!isdirectory(v:val.dir)'))
+  " \| PlugInstall --sync | source $MYVIMRC
+" \| endif
 
+" Run PlugInstall if there are missing plugins
+if len(filter(values(g:plugs), '!isdirectory(v:val.dir)'))
+  PlugInstall --sync ""| source $MYVIMRC
+endif
 
 " echom "plugend"
 "event triggering after plug
@@ -288,6 +296,7 @@ endif
 source ~/dotfiles/nvim/languages/bash.vim
 source ~/dotfiles/nvim/languages/powershell.vim
 source ~/dotfiles/nvim/languages/csharp.vim
+source ~/dotfiles/nvim/languages/terraform.vim
 source ~/.config/nvim/incubator.vim
 
 let mapleader = "," " leader key is ,
@@ -309,13 +318,85 @@ set incsearch
 set hlsearch
 
 "" Define folding
-set foldmethod=indent
-" set foldmethod=syntax
-set foldignore=
-set tabstop=2
-set softtabstop=2
-set expandtab
-set shiftwidth=2
+" set foldmethod=indent
+" set foldlevelstart=20
+" highlight Folded
+"
+" " set foldmethod=syntax
+" set foldignore=
+" set tabstop=2
+" set softtabstop=2
+" set expandtab
+" set shiftwidth=2
+
+set nofoldenable
+set foldlevel=99
+set foldlevelstart=99
+set fillchars=fold:\
+set foldtext=CustomFoldText()
+setlocal foldmethod=expr
+setlocal foldexpr=GetPotionFold(v:lnum)
+highlight Folded
+
+function! GetPotionFold(lnum)
+  if getline(a:lnum) =~? '\v^\s*$'
+    return '-1'
+  endif
+
+  let this_indent = IndentLevel(a:lnum)
+  let next_indent = IndentLevel(NextNonBlankLine(a:lnum))
+
+  if next_indent == this_indent
+    return this_indent
+  elseif next_indent < this_indent
+    return this_indent
+  elseif next_indent > this_indent
+    return '>' . next_indent
+  endif
+endfunction
+
+function! IndentLevel(lnum)
+    return indent(a:lnum) / &shiftwidth
+endfunction
+
+function! NextNonBlankLine(lnum)
+  let numlines = line('$')
+  let current = a:lnum + 1
+
+  while current <= numlines
+      if getline(current) =~? '\v\S'
+          return current
+      endif
+
+      let current += 1
+  endwhile
+
+  return -2
+endfunction
+
+function! CustomFoldText()
+  " get first non-blank line
+  let fs = v:foldstart
+
+  while getline(fs) =~ '^\s*$' | let fs = nextnonblank(fs + 1)
+  endwhile
+
+  if fs > v:foldend
+      let line = getline(v:foldstart)
+  else
+      let line = substitute(getline(fs), '\t', repeat(' ', &tabstop), 'g')
+  endif
+
+  let w = winwidth(0) - &foldcolumn - (&number ? 8 : 0)
+  let foldSize = 1 + v:foldend - v:foldstart
+  let foldSizeStr = " " . foldSize . " lines "
+  let foldLevelStr = repeat("+--", v:foldlevel)
+  let expansionString = repeat(" ", w - strwidth(foldSizeStr.line.foldLevelStr))
+  return line . expansionString . foldSizeStr . foldLevelStr
+endfunction
+
+
+
 " set listchars=tab:\|\
 " set list
 
@@ -385,30 +466,32 @@ if g:vimmode != 3
 endif
 
 let g:which_key_map.b = '+buffer'
+" nnoremap <silent> <space>bb :Buffers<cr>
+nnoremap <silent> <space>bb :Telescope buffers<cr>
+nnoremap <silent> <space>bs :StripWhitespace<cr>
+nnoremap <silent> <space>bl :LspInfo<cr>
 
 " nnoremap <C-p> :GFiles<cr>
 " nnoremap <C-f> :Rg<cr>
-nnoremap <silent> <space>f :Rg<cr>
-nnoremap <silent> <space>b :Buffer<cr>
+" nnoremap <silent> <space>f :Rg<cr>
 " nnoremap <silent> ;; :Buffer<cr>
-nnoremap <silent> <space>e :call FuzzyFiles()<cr>
-nnoremap <silent> <space>W :Windows<cr>
+" nnoremap <silent> <space>ee :call FuzzyFiles()<cr>
+" nnoremap <silent> <space>W :Windows<cr>
 
-function FuzzyFiles()
-  if get(b:,'git_dir') == 0
-    exe ':FzfFiles'
-  else
-    exe ':GFiles'
-  endif
-endfunction
+" function FuzzyFiles()
+"   if get(b:,'git_dir') == 0
+"     exe ':FzfFiles'
+"   else
+"     exe ':GFiles'
+"   endif
+" endfunction
 
 "tasks TBD
-nnoremap <silent> <space>tn :Trep<cr>
+" nnoremap <silent> <space>tn :Trep<cr>
 
-let g:which_key_map.v ={'name':'+vim'}
-nnoremap <silent> <space>vk :Maps<cr>
-let g:which_key_map.v.h ={'name':'+help'}
-nnoremap <silent> <space>vhf :Helptags<cr>
+" nnoremap <silent> <space>vk :Maps<cr>
+" let g:which_key_map.v.h ={'name':'+help'}
+" nnoremap <silent> <space>vhf :Helptags<cr>
 
 let g:which_key_map.v.p ={'name':'+plug'}
 nnoremap <silent> <space>vpu :PlugUpdate<cr>
@@ -423,15 +506,7 @@ nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>:LightlineReload<cr>
 
 let g:which_key_map.v.l ={'name':'+lsp'}
 nnoremap <silent> <space>vli :LspInstallInfo<cr>
-nnoremap <silent> <space>vlb :LspInfo<cr>
  " If text is selected, save it in the v buffer and send that buffer it to tmux
-
-" function! gitrepo
-let g:which_key_map.v.l ={'name':'+sessions'}
-nnoremap <silent> <space>ss :SSave<cr>
-nnoremap <silent> <space>sd :SDelete<cr>
-nnoremap <silent> <space>sc :SClose<cr>
-nnoremap <silent> <space>sw :SSave! dotfiles<cr>:wqa<cr>
 
 nmap <silent> <leader>tn :TestNearest<CR>
 nmap <silent> <leader>tf :TestFile<CR>
@@ -507,77 +582,7 @@ vnoremap > >gv
 nnoremap <silent><space>Wt :VimwikiTable 1 2
 
 " --- Coc ---
-if g:lspClient == 1
-  " let g:coc_force_debug = 1
-  " Remap keys for gotos
-  nmap <silent> gd <Plug>(coc-definition)
-  nmap <silent> gy <Plug>(coc-type-definition)
-  nmap <silent> gi <Plug>(coc-implementation)
-  nmap <silent> gr <Plug>(coc-references)
-
-
-  " Use K for show documentation in preview window
-  nnoremap <silent> K :call <SID>show_documentation()<CR>
-  " Remap for rename current word
-  nmap <leader>rn <Plug>(coc-rename)
-  " Remap for format selected region
-  xmap <leader>f  <Plug>(coc-format-selected)
-  nmap <leader>f  <Plug>(coc-format-selected)
-  " Remap for do codeAction of selected region, ex: `<leader>aap` for current paragraph
-  xmap <leader>a  <Plug>(coc-codeaction-selected)
-  nmap <leader>a  <Plug>(coc-codeaction-selected)
-  " Remap for do codeAction of current line
-  nmap <leader>ac  <Plug>(coc-codeaction)
-  " Fix autofix problem of current line
-  nmap <leader>qf  <Plug>(coc-fix-current)
-  nmap <a-cr>  <Plug>(coc-fix-current)
-  " Use <C-d> for select selections ranges, needs server support, like: coc-tsserver, coc-python
-  nmap <expr> <silent> <C-d> <SID>select_current_word()
-
-  function! s:select_current_word()
-    if !get(g:, 'coc_cursors_activated', 0)
-      return "\<Plug>(coc-cursors-word)"
-    endif
-    return "*\<Plug>(coc-cursors-word):nohlsearch\<CR>"
-  endfunc
-
-  " Use `:Format` for format current buffer
-  command! -nargs=0 Format :call CocAction('format')
-
-  " nnoremap <C-o> :CocCommand explorer<cr>
-  " Using CocList
-  "TBR Vista succed by fzf-coc
-  " nmap <silent>  o :<cr>
-
-  nnoremap <silent> <space>vfc :<C-u>CocFzfList commands<cr>
-  nnoremap <silent> <space>a :<C-u>CocFzfList diagnostics<cr>
-  nnoremap <silent> <space>E :CocCommand explorer<cr>
-  nnoremap <silent> <space>o :<C-u>CocFzfList outline<cr>
-  nnoremap <silent> <space>O :SymbolsOutline<CR>
-  " nnoremap <silent>  e  :<C-u>CocList extensions<cr>
-  " nnoremap <silent>  s  :<C-u>CocList -I symbols<cr>
-
-  " CocList Navigation - Do default action for next item.
-  " nnoremap <silent>  j  :<C-u>CocNext<CR>
-  " nnoremap <silent>  k  :<C-u>CocPrev<CR>
-  nnoremap <silent> <space>p :<C-u>CocFzfListResume<CR>
-  " Do default action for previous item.
-
-  nnoremap <leader>em :CocCommand python.refactorExtractMethod<cr>
-  vnoremap <leader>em :CocCommand python.refactorExtractMethod<cr>
-  nnoremap <leader>ev :CocCommand python.refactorExtractVariable<cr>
-
-  " Use tab for trigger completion with characters ahead and navigate.
-  " Use command ':verbose imap <tab>' to make sure tab is not mapped by other plugin.
-  inoremap <silent><expr> <TAB>
-    \ pumvisible() ? "\<C-n>" :
-    \ <SID>check_back_space() ? "\<TAB>" :
-    \ coc#refresh()
-  inoremap <silent><expr> <C-Space>
-    \ pumvisible() ? "\<C-n>" :
-    \ <SID>check_back_space() ? "\<TAB>" :
-    \ coc#refresh()
-endif
+" moved to coc.vim
 
 nnoremap <Tab> :bnext!<CR>
 nnoremap <S-Tab> :bprev!<CR>
@@ -632,88 +637,12 @@ let g:vista_icon_indent = ["", ""] " kept emtpy using iguides
 "g:vista_echo_cursor_strategy = 'both'
 
 " --- fzf ---
-"to fix issue added this to bash
-"export FZF_DEFAULT_COMMAND="rg --files --hidden --follow --glob '!.git'"
+" moved to fzf.vim
 
-let $FZF_DEFAULT_OPTS = '--reverse'
-let $FZF_DEFAULT_COMMAND = 'rg --files --hidden --follow --glob ''!.git'''
 let $BAT_THEME = 'gruvbox' "need bat 16.0 and higher
 " let $BAT_THEME = 'OneHalfDark'
 
 let g:rg_derive_root='true'
-let g:fzf_layout = { 'window': 'call OpenFloatingWin()' }
-" let g:fzf_layout = { 'window': {'width': 0.95, 'height': 0.95} }
-" let g:fzf_preview_window = ['down:40%:hidden', 'ctrl-/']
-let g:fzf_preview_window = ['right:40%:hidden', 'ctrl-/']
-
-function! PreviewIfWide2()
-  return &columns < 120 ? fzf#vim#with_preview('up:40%', 'ctrl-/') :fzf#vim#with_preview('right:40%', 'ctrl-/')
-endfunction
-
-command! -bang -nargs=? -complete=dir FzfFiles
-  \ call fzf#vim#files(
-  \ <q-args>,
-  \ PreviewIfWide2(),
-  \ <bang>0)
-
-" Shouldn't be needed https://medium.com/@sidneyliebrand/how-fzf-and-ripgrep-improved-my-workflow-61c7ca212861
-" command! -bang -nargs=* Rg
-"   \ call fzf#vim#grep(
-"   \   'rg'
-"   \   , 1
-"   \   ,<bang>0 ? fzf#vim#with_preview() : fzf#vim#with_preview()
-"   \   ,<bang>0
-"   \   )
-"   \   'rg --column --line-number --no-heading --fixed-strings --color=always --glob "!.git/*" --smart-case '.shellescape(<q-args>)
-"adjusting ripgrep command TBD project root
-
-command! -bang -nargs=* Trep
-  \ call fzf#vim#grep(
-  \   'rg --column --hidden --line-number --no-heading --color=always --glob "!.git/*" --smart-case ' - \[ \]"', 1,
-  \   PreviewIfWide2(),
-  \   <bang>0)
-
-"adjusting ripgrep command TBD project root
-command! -bang -nargs=* Rg
-  \ call fzf#vim#grep(
-  \   'rg --column --line-number --no-heading --color=always --glob "!.git/*" --smart-case '.shellescape(<q-args>), 1,
-  \   PreviewIfWide2(),
-  \   <bang>0)
-
-command! -bang -nargs=? -complete=dir GFiles
-  \ call fzf#vim#gitfiles(
-  \   <q-args>,
-  \   PreviewIfWide2(),
-  \   <bang>0)
-
-command! -bang -nargs=* Hx
-  \ call fzf#vim#grep(
-  \   'rg --column --line-number --hidden --no-heading --color=always --glob "**/plugged/**/doc/**.txt" --smart-case "(?:^.*[*])(.*)(?:[*]$)" "/home/jan/" ', 1,
-  \   PreviewIfWide2(),
-  \   <bang>0)
-
-function! OpenFloatingWin()
-  let width = min([&columns - 4, max([80, &columns - 20])])
-  let height = min([&lines - 4, max([20, &lines - 10])])
-  let top = ((&lines - height) / 2) - 1
-  let left = (&columns - width) / 2
-  let opts = {'relative': 'editor', 'row': top, 'col': left, 'width': width, 'height': height, 'style': 'minimal'}
-
-  let top = "╭" . repeat("─", width - 2) . "╮"
-  let mid = "│" . repeat(" ", width - 2) . "│"
-  let bot = "╰" . repeat("─", width - 2) . "╯"
-  let lines = [top] + repeat([mid], height - 2) + [bot]
-  let s:buf = nvim_create_buf(v:false, v:true)
-  call nvim_buf_set_lines(s:buf, 0, -1, v:true, lines)
-  call nvim_open_win(s:buf, v:true, opts)
-  set winhl=Normal:Floating
-  let opts.row += 1
-  let opts.height -= 2
-  let opts.col += 2
-  let opts.width -= 4
-  call nvim_open_win(nvim_create_buf(v:false, v:true), v:true, opts)
-  au BufWipeout <buffer> exe 'bw '.s:buf
-endfunction
 
 "--- NERD Commenter ---
 "using tpope's commentary
@@ -724,24 +653,6 @@ highlight Comment cterm=italic
 
 "--- startify --- TODO
 " let g:startify_bookmarks = ['~/svn', '~/dev']
-autocmd User StartifyAllBuffersOpened call SetNeovimTitle()
-autocmd User StartifyBufferOpened call SetNeovimTitle()
-
-" set title - required this option to be on - in general settings above
-function! SetNeovimTitle()
-  let g:test2 = fnamemodify(v:this_session, ':t')
-  let &titlestring = fnamemodify(v:this_session, ':t')
-
-endfunction
-
-let g:startify_lists = [
-  \ { 'type': 'sessions',  'header': ['   Sessions']       },
-  \ { 'type': 'files',     'header': ['   MRU']            },
-  \ { 'type': 'dir',       'header': ['   MRU '. getcwd()] },
-  \ { 'type': 'bookmarks', 'header': ['   Bookmarks']      },
-  \ { 'type': 'commands',  'header': ['   Commands']       },
-  \ ]
-
 "--- Indent Guides ---
 " let g:indent_guides_enable_on_vim_startup = 1
 " let g:indent_guides_auto_colors = 0
@@ -799,8 +710,7 @@ let g:user_emmet_leader_key = ','
 autocmd FileType html,css EmmetInstall
 
 " --- PowerShell specific ---
-" powershell 200831 not regnized set manually
-au! BufNewFile,BufRead *.ps1 set ft=ps1
+" moved to powershell.vim
 
 " --- vimWiki specific ---
 let wikis = [
