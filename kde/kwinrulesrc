@@ -72,6 +72,14 @@ minsizerule=2
 wmclass=workspacesclient
 wmclassmatch=1
 
+[8ee2a05f-710f-41e5-ac53-5c617f29c20c]
+Description=Application settings for org.wezfurlong.wezterm
+clientmachine=localhost
+decocolor=BreezeDark
+decocolorrule=2
+wmclass=org.wezfurlong.wezterm
+wmclassmatch=1
+
 [General]
-count=7
-rules=1,2,3,4,5,6,7
+count=8
+rules=8ee2a05f-710f-41e5-ac53-5c617f29c20c,1,2,3,4,5,6,7
