@@ -18,10 +18,7 @@ let s:save_splitright = &splitright
 set splitbelow splitright
 wincmd _ | wincmd |
 vsplit
-wincmd _ | wincmd |
-vsplit
-2wincmd h
-wincmd w
+1wincmd h
 wincmd w
 let &splitbelow = s:save_splitbelow
 let &splitright = s:save_splitright
@@ -32,22 +29,8 @@ set winminheight=0
 set winheight=1
 set winminwidth=0
 set winwidth=1
-exe 'vert 1resize ' . ((&columns * 40 + 120) / 240)
-exe 'vert 2resize ' . ((&columns * 99 + 120) / 240)
-exe 'vert 3resize ' . ((&columns * 99 + 120) / 240)
-argglobal
-enew
-file \[coc-explorer]-1
-balt nvim/init.vim
-setlocal fdm=manual
-setlocal fde=0
-setlocal fmr={{{,}}}
-setlocal fdi=#
-setlocal fdl=99
-setlocal fml=1
-setlocal fdn=20
-setlocal nofen
-wincmd w
+exe 'vert 1resize ' . ((&columns * 69 + 69) / 138)
+exe 'vert 2resize ' . ((&columns * 68 + 69) / 138)
 argglobal
 balt nvim/init.vim
 setlocal fdm=expr
@@ -58,7 +41,7 @@ setlocal fdl=99
 setlocal fml=1
 setlocal fdn=20
 setlocal nofen
-let s:l = 250 - ((16 * winheight(0) + 17) / 35)
+let s:l = 250 - ((14 * winheight(0) + 15) / 30)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
@@ -79,16 +62,15 @@ setlocal fdl=99
 setlocal fml=1
 setlocal fdn=20
 setlocal nofen
-let s:l = 252 - ((22 * winheight(0) + 17) / 35)
+let s:l = 252 - ((0 * winheight(0) + 15) / 30)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
 keepjumps 252
-normal! 035|
+normal! 0
 wincmd w
-exe 'vert 1resize ' . ((&columns * 40 + 120) / 240)
-exe 'vert 2resize ' . ((&columns * 99 + 120) / 240)
-exe 'vert 3resize ' . ((&columns * 99 + 120) / 240)
+exe 'vert 1resize ' . ((&columns * 69 + 69) / 138)
+exe 'vert 2resize ' . ((&columns * 68 + 69) / 138)
 tabnext
 edit nvim/plugins/telescope.vim
 let s:save_splitbelow = &splitbelow
@@ -111,11 +93,11 @@ set winminheight=0
 set winheight=1
 set winminwidth=0
 set winwidth=1
-exe '1resize ' . ((&lines * 17 + 20) / 40)
-exe 'vert 1resize ' . ((&columns * 119 + 120) / 240)
-exe '2resize ' . ((&lines * 17 + 20) / 40)
-exe 'vert 2resize ' . ((&columns * 119 + 120) / 240)
-exe 'vert 3resize ' . ((&columns * 120 + 120) / 240)
+exe '1resize ' . ((&lines * 15 + 17) / 35)
+exe 'vert 1resize ' . ((&columns * 68 + 69) / 138)
+exe '2resize ' . ((&lines * 14 + 17) / 35)
+exe 'vert 2resize ' . ((&columns * 68 + 69) / 138)
+exe 'vert 3resize ' . ((&columns * 69 + 69) / 138)
 argglobal
 balt nvim/init.vim
 setlocal fdm=expr
@@ -126,11 +108,11 @@ setlocal fdl=99
 setlocal fml=1
 setlocal fdn=20
 setlocal nofen
-let s:l = 12 - ((11 * winheight(0) + 8) / 17)
+let s:l = 5 - ((4 * winheight(0) + 7) / 15)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
-keepjumps 12
+keepjumps 5
 normal! 038|
 wincmd w
 argglobal
@@ -149,7 +131,7 @@ setlocal fdn=20
 setlocal nofen
 silent! normal! zE
 let &fdl = &fdl
-let s:l = 29 - ((8 * winheight(0) + 8) / 17)
+let s:l = 29 - ((7 * winheight(0) + 7) / 14)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
@@ -170,23 +152,24 @@ setlocal fdl=99
 setlocal fml=1
 setlocal fdn=20
 setlocal nofen
-let s:l = 206 - ((19 * winheight(0) + 17) / 35)
+let s:l = 177 - ((21 * winheight(0) + 15) / 30)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
-keepjumps 206
-normal! 06|
+keepjumps 177
+normal! 0
 wincmd w
-exe '1resize ' . ((&lines * 17 + 20) / 40)
-exe 'vert 1resize ' . ((&columns * 119 + 120) / 240)
-exe '2resize ' . ((&lines * 17 + 20) / 40)
-exe 'vert 2resize ' . ((&columns * 119 + 120) / 240)
-exe 'vert 3resize ' . ((&columns * 120 + 120) / 240)
+3wincmd w
+exe '1resize ' . ((&lines * 15 + 17) / 35)
+exe 'vert 1resize ' . ((&columns * 68 + 69) / 138)
+exe '2resize ' . ((&lines * 14 + 17) / 35)
+exe 'vert 2resize ' . ((&columns * 68 + 69) / 138)
+exe 'vert 3resize ' . ((&columns * 69 + 69) / 138)
 tabnext 2
-badd +206 nvim/init.vim
-badd +7 nvim/plugins/telescope.vim
-badd +10 nvim/plugins/gruvbox.vim
+badd +0 nvim/init.vim
+badd +12 nvim/plugins/telescope.vim
 badd +28 nvim/plugins/fzf.vim
+badd +18 nvim/plugins/gruvbox.vim
 if exists('s:wipebuf') && len(win_findbuf(s:wipebuf)) == 0 && getbufvar(s:wipebuf, '&buftype') isnot# 'terminal'
   silent exe 'bwipe ' . s:wipebuf
 endif
@@ -200,6 +183,7 @@ if filereadable(s:sx)
 endif
 let &g:so = s:so_save | let &g:siso = s:siso_save
 set hlsearch
+nohlsearch
 doautoall SessionLoadPost
 unlet SessionLoad
 " vim: set ft=vim :
