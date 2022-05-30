@@ -39,7 +39,6 @@ let g:coc_global_extensions = [
   \ , 'coc-git'
   \ , 'coc-db'
   \ , 'coc-json'
-  \ , 'coc-yaml'
   \ ]
 
 "" Migrated to seperated file
@@ -48,6 +47,7 @@ let g:coc_global_extensions = [
   " \ , 'coc-tslint-plugin'
   " \ , 'coc-svelte'
   " \ , 'coc-powershell'
+  " \ , 'coc-yaml'
 
 "" Depracated modules
   " \ , 'coc-utils'
