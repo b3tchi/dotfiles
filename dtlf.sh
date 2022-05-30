@@ -107,6 +107,9 @@ ml $d nvim/session/scripts ~/.local/share/nvim/session/
 ml $d code/settings.json ~/.config/Code/User/
 ml $d code/keybindings.json ~/.config/Code/User/
 
+#WezTerm
+ml $d wezterm/wezterm.lua ~/.config/wezterm/
+
 #KDE
 ml $d kde/konsoleui.rc ~/.local/share/kxmlgui5/konsole/
 ml $d kde/konsoleui.rc ~/.config/
