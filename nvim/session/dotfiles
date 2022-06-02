@@ -29,8 +29,10 @@ set winminheight=0
 set winheight=1
 set winminwidth=0
 set winwidth=1
-exe 'vert 1resize ' . ((&columns * 69 + 69) / 138)
-exe 'vert 2resize ' . ((&columns * 68 + 69) / 138)
+exe '1resize ' . ((&lines * 46 + 25) / 51)
+exe 'vert 1resize ' . ((&columns * 119 + 119) / 239)
+exe '2resize ' . ((&lines * 46 + 25) / 51)
+exe 'vert 2resize ' . ((&columns * 119 + 119) / 239)
 argglobal
 balt nvim/init.vim
 setlocal fdm=expr
@@ -41,7 +43,7 @@ setlocal fdl=99
 setlocal fml=1
 setlocal fdn=20
 setlocal nofen
-let s:l = 250 - ((14 * winheight(0) + 15) / 30)
+let s:l = 250 - ((21 * winheight(0) + 23) / 46)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
@@ -62,27 +64,25 @@ setlocal fdl=99
 setlocal fml=1
 setlocal fdn=20
 setlocal nofen
-let s:l = 252 - ((0 * winheight(0) + 15) / 30)
+let s:l = 252 - ((0 * winheight(0) + 23) / 46)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
 keepjumps 252
 normal! 0
 wincmd w
-exe 'vert 1resize ' . ((&columns * 69 + 69) / 138)
-exe 'vert 2resize ' . ((&columns * 68 + 69) / 138)
+exe '1resize ' . ((&lines * 46 + 25) / 51)
+exe 'vert 1resize ' . ((&columns * 119 + 119) / 239)
+exe '2resize ' . ((&lines * 46 + 25) / 51)
+exe 'vert 2resize ' . ((&columns * 119 + 119) / 239)
 tabnext
-edit nvim/plugins/telescope.vim
+edit nvim/plugins/fzf.vim
 let s:save_splitbelow = &splitbelow
 let s:save_splitright = &splitright
 set splitbelow splitright
 wincmd _ | wincmd |
 vsplit
 1wincmd h
-wincmd _ | wincmd |
-split
-1wincmd k
-wincmd w
 wincmd w
 let &splitbelow = s:save_splitbelow
 let &splitright = s:save_splitright
@@ -93,33 +93,9 @@ set winminheight=0
 set winheight=1
 set winminwidth=0
 set winwidth=1
-exe '1resize ' . ((&lines * 15 + 17) / 35)
-exe 'vert 1resize ' . ((&columns * 68 + 69) / 138)
-exe '2resize ' . ((&lines * 14 + 17) / 35)
-exe 'vert 2resize ' . ((&columns * 68 + 69) / 138)
-exe 'vert 3resize ' . ((&columns * 69 + 69) / 138)
+exe 'vert 1resize ' . ((&columns * 127 + 119) / 239)
+exe 'vert 2resize ' . ((&columns * 111 + 119) / 239)
 argglobal
-balt nvim/init.vim
-setlocal fdm=expr
-setlocal fde=GetPotionFold(v:lnum)
-setlocal fmr={{{,}}}
-setlocal fdi=#
-setlocal fdl=99
-setlocal fml=1
-setlocal fdn=20
-setlocal nofen
-let s:l = 5 - ((4 * winheight(0) + 7) / 15)
-if s:l < 1 | let s:l = 1 | endif
-keepjumps exe s:l
-normal! zt
-keepjumps 5
-normal! 038|
-wincmd w
-argglobal
-if bufexists("nvim/plugins/fzf.vim") | buffer nvim/plugins/fzf.vim | else | edit nvim/plugins/fzf.vim | endif
-if &buftype ==# 'terminal'
-  silent file nvim/plugins/fzf.vim
-endif
 balt nvim/plugins/gruvbox.vim
 setlocal fdm=manual
 setlocal fde=0
@@ -131,12 +107,12 @@ setlocal fdn=20
 setlocal nofen
 silent! normal! zE
 let &fdl = &fdl
-let s:l = 29 - ((7 * winheight(0) + 7) / 14)
+let s:l = 15 - ((14 * winheight(0) + 24) / 48)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
-keepjumps 29
-normal! 026|
+keepjumps 15
+normal! 021|
 wincmd w
 argglobal
 if bufexists("nvim/init.vim") | buffer nvim/init.vim | else | edit nvim/init.vim | endif
@@ -152,24 +128,22 @@ setlocal fdl=99
 setlocal fml=1
 setlocal fdn=20
 setlocal nofen
-let s:l = 177 - ((21 * winheight(0) + 15) / 30)
+let s:l = 180 - ((37 * winheight(0) + 24) / 48)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
-keepjumps 177
+keepjumps 180
 normal! 0
 wincmd w
-3wincmd w
-exe '1resize ' . ((&lines * 15 + 17) / 35)
-exe 'vert 1resize ' . ((&columns * 68 + 69) / 138)
-exe '2resize ' . ((&lines * 14 + 17) / 35)
-exe 'vert 2resize ' . ((&columns * 68 + 69) / 138)
-exe 'vert 3resize ' . ((&columns * 69 + 69) / 138)
+exe 'vert 1resize ' . ((&columns * 127 + 119) / 239)
+exe 'vert 2resize ' . ((&columns * 111 + 119) / 239)
 tabnext 2
-badd +0 nvim/init.vim
-badd +12 nvim/plugins/telescope.vim
-badd +28 nvim/plugins/fzf.vim
+badd +297 nvim/init.vim
+badd +5 nvim/plugins/telescope.vim
+badd +16 nvim/plugins/fzf.vim
 badd +18 nvim/plugins/gruvbox.vim
+badd +61 bin/azdops/pipeline.sh
+badd +1 nvim/languages/yaml.vim
 if exists('s:wipebuf') && len(win_findbuf(s:wipebuf)) == 0 && getbufvar(s:wipebuf, '&buftype') isnot# 'terminal'
   silent exe 'bwipe ' . s:wipebuf
 endif
