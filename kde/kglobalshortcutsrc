@@ -34,7 +34,7 @@ _k_friendly_name=KDE Daemon
 display=Display\tMeta+P,Display\tMeta+P,Switch Display
 
 [khotkeys]
-_k_friendly_name=konsole_globalaccel
+_k_friendly_name=Custom Shortcuts Service
 {393f089b-3efc-4514-81c6-25782fdb7896}=Meta+S,none,Dotfiles
 {59544632-1079-4fd8-895b-1ab075e06bd5}=Meta+T,none,Nvim
 {7f8eddae-21d1-430e-aef4-2a4be96fc76f}=Meta+E,none,nn
