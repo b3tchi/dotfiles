@@ -10,10 +10,43 @@ endif
 set shortmess=aoO
 argglobal
 %argdel
+<<<<<<< HEAD
 edit ~/scripts/postinstall/ubuntu/anytime/lazygit.sh
 argglobal
 balt ~/scripts/postinstall/ubuntu/onetime/sslfix.sh
 setlocal fdm=manual
+=======
+edit README.md
+let s:save_splitbelow = &splitbelow
+let s:save_splitright = &splitright
+set splitbelow splitright
+wincmd _ | wincmd |
+vsplit
+wincmd _ | wincmd |
+vsplit
+2wincmd h
+wincmd w
+wincmd w
+let &splitbelow = s:save_splitbelow
+let &splitright = s:save_splitright
+wincmd t
+let s:save_winminheight = &winminheight
+let s:save_winminwidth = &winminwidth
+set winminheight=0
+set winheight=1
+set winminwidth=0
+set winwidth=1
+exe 'vert 1resize ' . ((&columns * 79 + 119) / 239)
+exe 'vert 2resize ' . ((&columns * 98 + 119) / 239)
+exe 'vert 3resize ' . ((&columns * 60 + 119) / 239)
+exe '4resize ' . ((&lines * 17 + 25) / 51)
+exe 'vert 4resize ' . ((&columns * 50 + 119) / 239)
+exe '5resize ' . ((&lines * 17 + 25) / 51)
+exe 'vert 5resize ' . ((&columns * 50 + 119) / 239)
+argglobal
+balt README.md
+setlocal fdm=indent
+>>>>>>> 100c08898297daddd51de6aa32b778545ddcc139
 setlocal fde=0
 setlocal fmr={{{,}}}
 setlocal fdi=#
@@ -29,15 +62,86 @@ keepjumps exe s:l
 normal! zt
 keepjumps 1
 normal! 0
+wincmd w
+argglobal
+if bufexists("README.md") | buffer README.md | else | edit README.md | endif
+if &buftype ==# 'terminal'
+  silent file README.md
+endif
+balt README.md
+setlocal fdm=indent
+setlocal fde=0
+setlocal fmr={{{,}}}
+setlocal fdi=
+setlocal fdl=0
+setlocal fml=1
+setlocal fdn=20
+setlocal fen
+let s:l = 9 - ((8 * winheight(0) + 23) / 46)
+if s:l < 1 | let s:l = 1 | endif
+keepjumps exe s:l
+normal! zt
+keepjumps 9
+normal! 0
+wincmd w
+argglobal
+enew
+file OUTLINE
+balt README.md
+setlocal fdm=manual
+setlocal fde=0
+setlocal fmr={{{,}}}
+setlocal fdi=#
+setlocal fdl=0
+setlocal fml=1
+setlocal fdn=20
+setlocal nofen
+wincmd w
+argglobal
+enew
+setlocal fdm=manual
+setlocal fde=0
+setlocal fmr={{{,}}}
+setlocal fdi=#
+setlocal fdl=99
+setlocal fml=1
+setlocal fdn=20
+setlocal nofen
+wincmd w
+argglobal
+enew
+setlocal fdm=manual
+setlocal fde=0
+setlocal fmr={{{,}}}
+setlocal fdi=#
+setlocal fdl=99
+setlocal fml=1
+setlocal fdn=20
+setlocal nofen
+wincmd w
+3wincmd w
+exe 'vert 1resize ' . ((&columns * 79 + 119) / 239)
+exe 'vert 2resize ' . ((&columns * 98 + 119) / 239)
+exe 'vert 3resize ' . ((&columns * 60 + 119) / 239)
+exe '4resize ' . ((&lines * 17 + 25) / 51)
+exe 'vert 4resize ' . ((&columns * 50 + 119) / 239)
+exe '5resize ' . ((&lines * 17 + 25) / 51)
+exe 'vert 5resize ' . ((&columns * 50 + 119) / 239)
 tabnext 1
+<<<<<<< HEAD
 badd +5 ~/scripts/README.md
 badd +34 ~/scripts/postinstall/ubuntu/onetime/sslfix.sh
 badd +0 ~/scripts/postinstall/ubuntu/anytime/lazygit.sh
+=======
+badd +9 README.md
+>>>>>>> 100c08898297daddd51de6aa32b778545ddcc139
 if exists('s:wipebuf') && len(win_findbuf(s:wipebuf)) == 0 && getbufvar(s:wipebuf, '&buftype') isnot# 'terminal'
   silent exe 'bwipe ' . s:wipebuf
 endif
 unlet! s:wipebuf
 set winheight=1 winwidth=20 shortmess=filnxtToOFAcsI
+let &winminheight = s:save_winminheight
+let &winminwidth = s:save_winminwidth
 let s:sx = expand("<sfile>:p:r")."x.vim"
 if filereadable(s:sx)
   exe "source " . fnameescape(s:sx)
