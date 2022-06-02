@@ -103,14 +103,17 @@ ml $d nvim/session/dotfiles ~/.local/share/nvim/session/
 ml $d nvim/session/wiki ~/.local/share/nvim/session/
 ml $d nvim/session/scripts ~/.local/share/nvim/session/
 
-#VsCode
+#code
 ml $d code/settings.json ~/.config/Code/User/
 ml $d code/keybindings.json ~/.config/Code/User/
 
-#WezTerm
+#wezterm
 ml $d wezterm/wezterm.lua ~/.config/wezterm/
 
-#KDE
+#firefox not working yet
+md $d firefox/personal ~/.mozilla/firefox/
+
+#kde
 ml $d kde/konsoleui.rc ~/.local/share/kxmlgui5/konsole/
 ml $d kde/konsoleui.rc ~/.config/
 ml $d kde/sessionui.rc ~/.local/share/kxmlgui5/konsole/
@@ -123,7 +126,7 @@ ml $d kde/konsolerc ~/.config/
 ml $d kde/kwinrulesrc ~/.config/
 ml $d kde/krunnerrc ~/.config/
 
-  #Latte
+  #latte
     # ~/.config/latte/Default.layout.latte:
       # ml $d kde/latte/Default.layout.latte
 
