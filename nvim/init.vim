@@ -294,6 +294,7 @@ endif
 
 "languages
 source ~/dotfiles/nvim/languages/bash.vim
+source ~/dotfiles/nvim/languages/yaml.vim
 source ~/dotfiles/nvim/languages/powershell.vim
 source ~/dotfiles/nvim/languages/csharp.vim
 source ~/dotfiles/nvim/languages/terraform.vim

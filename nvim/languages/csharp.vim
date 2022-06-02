@@ -4,8 +4,9 @@ lua << EOF
 --LSP Installed via nvim-lsp-installer
 --:LspInstall omnisharp
 local pid = vim.fn.getpid()
---Path to coc-omnisharp
-local omnisharp_bin = "/home/jan/.local/share/nvim/lsp_servers/omnisharp/omnisharp/run"
+
+--Path to nvim-lsp-installer
+local omnisharp_bin = "/home/jan/.local/share/nvim/lsp_servers/omnisharp/omnisharp/OmniSharp"
 
 require('lspconfig').omnisharp.setup{
   --parameter 1

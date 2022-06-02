@@ -47,7 +47,7 @@ require'lspconfig'.html.setup{} -- HTML
 require'lspconfig'.svelte.setup{} -- SVELTE
 
 -- Data Language
-require'lspconfig'.yamlls.setup{} -- YAML
+-- !!moved to yaml.vim -- YAML
 require'lspconfig'.jsonls.setup{} -- JSOM
 --?? -- XML
 --?? -- SQL
