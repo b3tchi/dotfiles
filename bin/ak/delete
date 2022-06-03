@@ -1,0 +1,18 @@
+#!/bin/bash
+sbcnname=$KEYVAULT_SUBSCRIPTION_0
+kvname=$KEYVAULT_NAME_0
+
+az keyvault secret delete  \
+  --subscription "$sbcnname" \
+  --vault-name "$kvname" \
+  --name "$name"
+
+az keyvault secret purge  \
+  --subscription "$sbcnname" \
+  --vault-name "$kvname" \
+  --name "$name"
+
+# az keyvault secret purge  \
+#   --subscription "$sbcnname" \
+#   --vault-name "$kvname" \
+#   --name "$name"

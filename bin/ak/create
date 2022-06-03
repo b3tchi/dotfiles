@@ -1,0 +1,9 @@
+#!/bin/bash
+sbcnname=$KEYVAULT_SUBSCRIPTION_0
+kvname=$KEYVAULT_NAME_0
+
+az keyvault secret set \
+  --subscription "$sbcnname" \
+  --vault-name "$kvname" \
+  --value "$value" \
+  --name "$name"

@@ -1,0 +1,13 @@
+#!/bin/bash
+sbcnname=$KEYVAULT_SUBSCRIPTION_0
+kvname=$KEYVAULT_NAME_0
+
+echo $name
+
+az keyvault secret show  \
+  --subscription "$sbcnname" \
+  --vault-name "$kvname" \
+  --name "$name" \
+  --output tsv \
+  --query 'value'
+
