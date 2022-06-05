@@ -298,6 +298,9 @@ source ~/dotfiles/nvim/languages/yaml.vim
 source ~/dotfiles/nvim/languages/powershell.vim
 source ~/dotfiles/nvim/languages/csharp.vim
 source ~/dotfiles/nvim/languages/terraform.vim
+source ~/dotfiles/nvim/languages/typescript.vim
+
+"my scripts
 source ~/.config/nvim/incubator.vim
 
 let mapleader = "," " leader key is ,
