@@ -11,6 +11,7 @@ set shortmess=aoO
 argglobal
 %argdel
 tabnew
+tabnew
 tabrewind
 edit nvim/init.vim
 let s:save_splitbelow = &splitbelow
@@ -18,7 +19,10 @@ let s:save_splitright = &splitright
 set splitbelow splitright
 wincmd _ | wincmd |
 vsplit
-1wincmd h
+wincmd _ | wincmd |
+vsplit
+2wincmd h
+wincmd w
 wincmd w
 let &splitbelow = s:save_splitbelow
 let &splitright = s:save_splitright
@@ -29,10 +33,22 @@ set winminheight=0
 set winheight=1
 set winminwidth=0
 set winwidth=1
-exe '1resize ' . ((&lines * 46 + 25) / 51)
-exe 'vert 1resize ' . ((&columns * 119 + 119) / 239)
-exe '2resize ' . ((&lines * 46 + 25) / 51)
-exe 'vert 2resize ' . ((&columns * 119 + 119) / 239)
+exe 'vert 1resize ' . ((&columns * 79 + 119) / 239)
+exe 'vert 2resize ' . ((&columns * 79 + 119) / 239)
+exe 'vert 3resize ' . ((&columns * 79 + 119) / 239)
+argglobal
+enew
+file \[coc-explorer]-1
+balt nvim/init.vim
+setlocal fdm=manual
+setlocal fde=0
+setlocal fmr={{{,}}}
+setlocal fdi=#
+setlocal fdl=99
+setlocal fml=1
+setlocal fdn=20
+setlocal nofen
+wincmd w
 argglobal
 balt nvim/init.vim
 setlocal fdm=expr
@@ -43,7 +59,7 @@ setlocal fdl=99
 setlocal fml=1
 setlocal fdn=20
 setlocal nofen
-let s:l = 250 - ((21 * winheight(0) + 23) / 46)
+let s:l = 250 - ((0 * winheight(0) + 23) / 46)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
@@ -71,10 +87,9 @@ normal! zt
 keepjumps 252
 normal! 0
 wincmd w
-exe '1resize ' . ((&lines * 46 + 25) / 51)
-exe 'vert 1resize ' . ((&columns * 119 + 119) / 239)
-exe '2resize ' . ((&lines * 46 + 25) / 51)
-exe 'vert 2resize ' . ((&columns * 119 + 119) / 239)
+exe 'vert 1resize ' . ((&columns * 79 + 119) / 239)
+exe 'vert 2resize ' . ((&columns * 79 + 119) / 239)
+exe 'vert 3resize ' . ((&columns * 79 + 119) / 239)
 tabnext
 edit nvim/plugins/fzf.vim
 let s:save_splitbelow = &splitbelow
@@ -93,8 +108,8 @@ set winminheight=0
 set winheight=1
 set winminwidth=0
 set winwidth=1
-exe 'vert 1resize ' . ((&columns * 127 + 119) / 239)
-exe 'vert 2resize ' . ((&columns * 111 + 119) / 239)
+exe 'vert 1resize ' . ((&columns * 119 + 119) / 239)
+exe 'vert 2resize ' . ((&columns * 119 + 119) / 239)
 argglobal
 balt nvim/plugins/gruvbox.vim
 setlocal fdm=manual
@@ -107,12 +122,12 @@ setlocal fdn=20
 setlocal nofen
 silent! normal! zE
 let &fdl = &fdl
-let s:l = 15 - ((14 * winheight(0) + 24) / 48)
+let s:l = 29 - ((17 * winheight(0) + 23) / 46)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
-keepjumps 15
-normal! 021|
+keepjumps 29
+normal! 026|
 wincmd w
 argglobal
 if bufexists("nvim/init.vim") | buffer nvim/init.vim | else | edit nvim/init.vim | endif
@@ -128,22 +143,87 @@ setlocal fdl=99
 setlocal fml=1
 setlocal fdn=20
 setlocal nofen
-let s:l = 180 - ((37 * winheight(0) + 24) / 48)
+let s:l = 206 - ((0 * winheight(0) + 23) / 46)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
-keepjumps 180
+keepjumps 206
+normal! 06|
+wincmd w
+exe 'vert 1resize ' . ((&columns * 119 + 119) / 239)
+exe 'vert 2resize ' . ((&columns * 119 + 119) / 239)
+tabnext
+edit nvim/languages/typescript.vim
+let s:save_splitbelow = &splitbelow
+let s:save_splitright = &splitright
+set splitbelow splitright
+wincmd _ | wincmd |
+vsplit
+1wincmd h
+wincmd w
+let &splitbelow = s:save_splitbelow
+let &splitright = s:save_splitright
+wincmd t
+let s:save_winminheight = &winminheight
+let s:save_winminwidth = &winminwidth
+set winminheight=0
+set winheight=1
+set winminwidth=0
+set winwidth=1
+exe 'vert 1resize ' . ((&columns * 119 + 119) / 239)
+exe 'vert 2resize ' . ((&columns * 119 + 119) / 239)
+argglobal
+balt firefox/home/chrome/userChrome.css
+setlocal fdm=manual
+setlocal fde=0
+setlocal fmr={{{,}}}
+setlocal fdi=#
+setlocal fdl=99
+setlocal fml=1
+setlocal fdn=20
+setlocal nofen
+silent! normal! zE
+let &fdl = &fdl
+let s:l = 34 - ((33 * winheight(0) + 23) / 46)
+if s:l < 1 | let s:l = 1 | endif
+keepjumps exe s:l
+normal! zt
+keepjumps 34
 normal! 0
 wincmd w
-exe 'vert 1resize ' . ((&columns * 127 + 119) / 239)
-exe 'vert 2resize ' . ((&columns * 111 + 119) / 239)
-tabnext 2
-badd +297 nvim/init.vim
-badd +5 nvim/plugins/telescope.vim
-badd +16 nvim/plugins/fzf.vim
-badd +18 nvim/plugins/gruvbox.vim
-badd +61 bin/azdops/pipeline.sh
-badd +1 nvim/languages/yaml.vim
+argglobal
+if bufexists("nvim/init.vim") | buffer nvim/init.vim | else | edit nvim/init.vim | endif
+if &buftype ==# 'terminal'
+  silent file nvim/init.vim
+endif
+balt nvim/lualsp.vim
+setlocal fdm=expr
+setlocal fde=GetPotionFold(v:lnum)
+setlocal fmr={{{,}}}
+setlocal fdi=#
+setlocal fdl=99
+setlocal fml=1
+setlocal fdn=20
+setlocal nofen
+let s:l = 299 - ((26 * winheight(0) + 23) / 46)
+if s:l < 1 | let s:l = 1 | endif
+keepjumps exe s:l
+normal! zt
+keepjumps 299
+normal! 011|
+wincmd w
+2wincmd w
+exe 'vert 1resize ' . ((&columns * 119 + 119) / 239)
+exe 'vert 2resize ' . ((&columns * 119 + 119) / 239)
+tabnext 3
+badd +1 nvim/init.vim
+badd +1 nvim/plugins/fzf.vim
+badd +25 nvim/languages/typescript.vim
+badd +1 nvim/plugins/gruvbox.vim
+badd +1 nvim/plugins/telescope.vim
+badd +1 firefox/home/chrome/userChrome.css
+badd +70 nvim/lualsp.vim
+badd +13 term://~/.local/share/nvim/dapinstall/jsnode//79982:set\ -e\	\	git\ clone\ https://github.com/microsoft/vscode-node-debug2.git\ &&\ cd\ vscode-node-debug2\	\	npm\ install\	\	npm\ run\ build\	
 if exists('s:wipebuf') && len(win_findbuf(s:wipebuf)) == 0 && getbufvar(s:wipebuf, '&buftype') isnot# 'terminal'
   silent exe 'bwipe ' . s:wipebuf
 endif
