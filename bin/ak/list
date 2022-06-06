@@ -1,6 +1,6 @@
 #!/bin/bash
-sbcnname=$KEYVAULT_SUBSCRIPTION_0
-kvname=$KEYVAULT_NAME_0
+sbcnname=$KEYVAULT_0_SUBSCRIPTION
+kvname=$KEYVAULT_0_NAME
 
 az keyvault secret list \
   --subscription "$sbcnname" \
