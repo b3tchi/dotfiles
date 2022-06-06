@@ -43,6 +43,6 @@ else
 
 	git checkout ${selected}
 
-	switch "$selected"
+	gwt switch "$selected"
 
 fi

@@ -2,6 +2,10 @@
 sbcnname=$KEYVAULT_0_SUBSCRIPTION
 kvname=$KEYVAULT_0_NAME
 
+echo 'please enter secrete value:'
+read value
+echo "entered: $value"
+
 az keyvault secret set \
   --subscription "$sbcnname" \
   --vault-name "$kvname" \

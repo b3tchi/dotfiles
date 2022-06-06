@@ -2,7 +2,6 @@
 sbcnname=$KEYVAULT_0_SUBSCRIPTION
 kvname=$KEYVAULT_0_NAME
 
-echo $name
 
 az keyvault secret show  \
   --subscription "$sbcnname" \
