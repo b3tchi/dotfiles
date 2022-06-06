@@ -65,11 +65,12 @@ require'lspconfig'.remark_ls.setup{} -- MARKDOWN
 
 -- General purpose
 --?? --GO
---require'lspconfig'.tsserver.setup{} --TYPESCRIPT
+-- path of where dap is installed
+--!!moved to language file --TYPESCRIPT
+--!!moved to language file --JAVASCRIPT
 --require'lspconfig'.rust_analyzer.setup{} --RUST
 --require'lspconfig'.ccls.setup{} --C
 --!!moved to language file --C#,VB.NET
-require'lspconfig'.eslint.setup{} -- JAVASCRIPT
 require'lspconfig'.pyright.setup{} -- PYTHON
 
 
