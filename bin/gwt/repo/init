@@ -1,0 +1,38 @@
+#!/bin/bash
+#create root with master
+mainbr="main"
+devbr="develop"
+# name="mpo-follow-up-db"
+# acc="github.com-lego"
+if [[ -z  $path ]]; then
+  echo "path is empty"
+  exit 0
+fi
+
+if [[ -z  $name ]]; then
+  echo "name is empty"
+  exit 0
+fi
+
+if [[ -d  "$path/$name" ]]; then
+  echo "already exists"
+  exit 0
+fi
+
+mkdir -p "$path/$name/$mainbr"
+cd "$path/$name/$mainbr"
+git init .
+git checkout -b $mainbr
+touch README.md
+
+brname=$devbr
+mkdir -p ../$brname
+git worktree add -b $brname ../$brname
+cd -
+
+cd "$path/$name/$brname"
+git checkout -b $brname
+
+# git remote add origin "git@${acc}:LEGO/${name}.git"
+# git pull origin $mainbr
+# git pull --set-upstream origin $mainbr
