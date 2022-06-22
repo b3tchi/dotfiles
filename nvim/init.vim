@@ -223,6 +223,8 @@ call plug#begin(expand('~/.vim/plugged'))
     "debugger
     source ~/dotfiles/nvim/plugins/nvimdap.vim
 
+    source ~/dotfiles/nvim/plugins/foldufo.vim
+
     ""Indent guides
     Plug 'lukas-reineke/indent-blankline.nvim'
 

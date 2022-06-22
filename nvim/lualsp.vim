@@ -42,13 +42,26 @@ end
 -- !!moved to language file -- PowerShell
 
 -- Presenting Languages
-require'lspconfig'.cssls.setup{} -- CSS
-require'lspconfig'.html.setup{} -- HTML
-require'lspconfig'.svelte.setup{} -- SVELTE
+ -- CSS
+require'lspconfig'.cssls.setup{
+  capabilities = ufo_capabilities,
+ }
+
+ -- HTML
+require'lspconfig'.html.setup{
+  capabilities = ufo_capabilities,
+}
+
+ -- SVELTE
+require'lspconfig'.svelte.setup{
+  capabilities = ufo_capabilities,
+}
 
 -- Data Language
 -- !!moved to yaml.vim -- YAML
-require'lspconfig'.jsonls.setup{} -- JSOM
+require'lspconfig'.jsonls.setup{
+  capabilities = ufo_capabilities,
+} -- JSOM
 --?? -- XML
 --?? -- SQL
 
@@ -58,7 +71,9 @@ require'lspconfig'.jsonls.setup{} -- JSOM
 
 -- Neovim
 --require'lspconfig'.sumneko_lua.setup{} --LUA
-require'lspconfig'.vimls.setup{} -- VIML
+require'lspconfig'.vimls.setup{
+  capabilities = ufo_capabilities,
+} -- VIML
 
 -- Documentation
 require'lspconfig'.remark_ls.setup{} -- MARKDOWN
