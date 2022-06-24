@@ -2,7 +2,12 @@
 sbcnname=$KEYVAULT_0_SUBSCRIPTION
 kvname=$KEYVAULT_0_NAME
 
-echo 'please enter secrete value:'
+if [[ -z $name ]]; then
+  echo "please enter secret name (--name) it's mandatory parameter"
+  exit 0
+fi
+
+echo 'please enter secret value:'
 read value
 echo "entered: $value"
 
