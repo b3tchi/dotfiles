@@ -3,6 +3,11 @@ lua << EOF
 -- LSP Installed via nvim-lsp-installer
 -- :LspInstall tsserver
 require'lspconfig'.tsserver.setup{
+  on_attach = on_attach_default,
+  capabilities = ufo_capabilities,
+  flags = {
+    debounce_text_changes = 150,
+  },
 }
 
 -- DAP should be working could Installed via dap installer line bellow

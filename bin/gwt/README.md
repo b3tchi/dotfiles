@@ -43,16 +43,19 @@ gwt merge <mergefrombranch>
 ```
 
 #### I need to init new local repo
+- [  ]
 ```bash
 gwt repo init <reponame> <repopath>
 ```
 
 #### I need to push local repo to remote
+- [  ]
 ```bash
 gwt repo create <originname> <isprivate>
 ```
 
 #### I need to clone remote to local
+- [  ]
 ```bash
 gwt repo clone <originname> <repopath>
 ```

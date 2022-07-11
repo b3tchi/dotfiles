@@ -2,6 +2,11 @@
 sbcnname=$KEYVAULT_0_SUBSCRIPTION
 kvname=$KEYVAULT_0_NAME
 
+if [[ -z $name ]]; then
+  echo "please enter secret name (--name) it's mandatory parameter"
+  exit 0
+fi
+
 az keyvault secret delete  \
   --subscription "$sbcnname" \
   --vault-name "$kvname" \
