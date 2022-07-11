@@ -112,6 +112,10 @@ call plug#begin(expand('~/.vim/plugged'))
 
   source ~/dotfiles/nvim/plugins/git.vim
 
+  "dim iniactive panes
+  source ~/dotfiles/nvim/plugins/shadenvim.vim
+  " source ~/dotfiles/nvim/plugins/viminactive.vim
+
   " Plug 'junegunn/gv.vim' "git tree - simplier version of flog
   " Plug 'gregsexton/gitv', {'on': ['Gitv']}
   Plug 'powerman/vim-plugin-AnsiEsc'
@@ -177,6 +181,7 @@ call plug#begin(expand('~/.vim/plugged'))
 
   " themes
   source ~/dotfiles/nvim/plugins/gruvbox.vim
+  " source ~/dotfiles/nvim/plugins/gruvboxnvim.vim
 
   " Plug 'lifepillar/vim-solarized8'
   " Plug 'morhetz/gruvbox'

@@ -97,6 +97,8 @@ if [[ -f "/mnt/c/WINDOWS/system32/wsl.exe" ]]; then
   export IS_WSL=1
 fi
 
+export COLORTERM=truecolor
+
 # NNN quit on cd
 n () {
 
@@ -215,7 +217,7 @@ export NVM_DIR="$HOME/.nvm"
 
 
 
-##OWN PROMPT WITHOUT ADDINS NOT WORK WITH BARE REPOS - switching to pure 
+##OWN PROMPT WITHOUT ADDINS NOT WORK WITH BARE REPOS - switching to pure
 
 # # Autoload zsh add-zsh-hook and vcs_info functions (-U autoload w/o substition, -z use zsh style)
 # autoload -Uz add-zsh-hook vcs_info

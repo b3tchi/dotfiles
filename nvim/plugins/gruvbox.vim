@@ -5,10 +5,7 @@ set background=dark
 let g:gruvbox_italic=1
 highlight Folded guibg=#232323
 
-" echom "plugfile"
-
 function LoadedGruvbox()
-  " echom "gruvRun"
   colorscheme gruvbox
 endfunction
 
