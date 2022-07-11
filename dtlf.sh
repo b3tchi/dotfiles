@@ -101,11 +101,6 @@ ml $d nvim/plugins/solarized.vim ~/.config/nvim/plugins/
 #nvim-#Qt
 ml $d nvim/Win/ginit.vim ~/.config/nvim/
 
-#nvim sessions
-ml $d nvim/session/dotfiles ~/.local/share/nvim/session/
-ml $d nvim/session/wiki ~/.local/share/nvim/session/
-ml $d nvim/session/scripts ~/.local/share/nvim/session/
-
 #code
 ml $d code/settings.json ~/.config/Code/User/
 ml $d code/keybindings.json ~/.config/Code/User/
