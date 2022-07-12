@@ -766,16 +766,16 @@ function! RecurseForPath(dict,skey)
   endfor
 endfunction
 
-"dim inactive
-hi ActiveWindow guibg=#282828
-hi InactiveWindow guibg=#32302f
-" Call method on window enter
-augroup WindowManagement
-  autocmd!
-  autocmd WinEnter * call Handle_Win_Enter()
-augroup END
-
-function! Handle_Win_Enter()
-  setlocal winhighlight=Normal:ActiveWindow,NormalNC:InactiveWindow
-endfunction
-
+" "dim inactive
+" hi ActiveWindow guibg=#282828
+" hi InactiveWindow guibg=#32302f
+" " Call method on window enter
+" augroup WindowManagement
+"   autocmd!
+"   autocmd WinEnter * call Handle_Win_Enter()
+" augroup END
+"
+" function! Handle_Win_Enter()
+"   setlocal winhighlight=Normal:ActiveWindow,NormalNC:InactiveWindow
+" endfunction
+"
