@@ -92,10 +92,10 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'embear/vim-localvimrc' "loading rootfolder placed vim configs /.lvimrc
   Plug 'ryanoasis/vim-devicons' "nerd fonts icons
 
-  source ~/dotfiles/nvim/plugins/startify.vim
+  source ~/dotfiles/nvim/plugins/vim/startify.vim
 
   ""Searching fzf
-  source ~/dotfiles/nvim/plugins/fzf.vim
+  source ~/dotfiles/nvim/plugins/vim/fzf.vim
 
   Plug 'jesseleite/vim-agriculture' "adding option for :RgRaw to run raw commands
   " Plug 'jremmen/vim-ripgrep' "testing ripgrep single addin :Rg in fzf seems broken
@@ -110,11 +110,11 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'tpope/vim-surround' "surrounding words with symbols
   "Plug 'tmsvg/pear-tree' "getting some issues for the function disabled
 
-  source ~/dotfiles/nvim/plugins/git.vim
+  source ~/dotfiles/nvim/plugins/vim/git.vim
 
   "dim iniactive panes
-  " source ~/dotfiles/nvim/plugins/shadenvim.vim
-  " source ~/dotfiles/nvim/plugins/viminactive.vim
+  " source ~/dotfiles/nvim/plugins/nvim/shadenvim.vim
+  " source ~/dotfiles/nvim/plugins/vim/viminactive.vim
 
   " Plug 'junegunn/gv.vim' "git tree - simplier version of flog
   " Plug 'gregsexton/gitv', {'on': ['Gitv']}
@@ -126,7 +126,7 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'mmai/vim-markdown-wiki'
   Plug 'dhruvasagar/vim-table-mode'
 
-  source ~/dotfiles/nvim/plugins/mdpreview.vim
+  source ~/dotfiles/nvim/plugins/nvim/mdpreview.vim
 
   ""vimwiki - personal notes
   " Plug 'vimwiki/vimwiki'
@@ -134,7 +134,7 @@ call plug#begin(expand('~/.vim/plugged'))
 
   ""addvanced ide features
   if g:lspClient == 1
-    source ~/dotfiles/nvim/coc.vim
+    source ~/dotfiles/nvim/plugins/vim/coc.vim
   " elseif g:lspClient == 2
   "   Plug 'Shougo/deoplete.nvim'
   "   if !has('nvim')
@@ -160,28 +160,29 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'fabi1cazenave/suckless.vim'
 
   "Tmux
-  source ~/dotfiles/nvim/plugins/vimux.vim
+  source ~/dotfiles/nvim/plugins/vim/vimux.vim
 
   "syntax highlighting
   Plug 'sheerun/vim-polyglot'
 
   "install dap for vim
-  " Plug 'puremourning/vimspector'
-  " source ~/dotfiles/nvim/plugins/vimspector.vim
+  " source ~/dotfiles/nvim/plugins/vim/vimspector.vim
 
   "" Old Addins TBD
   "Plug 'janko-m/vim-test'
   "Plug 'neomake/neomake'
 
   " Adding dadbod for databases
-  source ~/dotfiles/nvim/plugins/dadbod.vim
+  source ~/dotfiles/nvim/plugins/vim/dadbod.vim
 
   "Run command async
   Plug 'skywind3000/asyncrun.vim'
 
   " themes
-  source ~/dotfiles/nvim/plugins/gruvbox.vim
-  " source ~/dotfiles/nvim/plugins/gruvboxnvim.vim
+  " Plug 'puremourning/vimspector'
+  source ~/dotfiles/nvim/plugins/vim/gruvbox.vim
+  " source ~/dotfiles/nvim/plugins/vim/solarized.vim
+  " source ~/dotfiles/nvim/plugins/nvim/gruvboxnvim.vim
 
   " Plug 'lifepillar/vim-solarized8'
   " Plug 'morhetz/gruvbox'
@@ -206,9 +207,9 @@ call plug#begin(expand('~/.vim/plugged'))
     Plug 'nvim-lua/plenary.nvim'
 
     "telescope search instead of fzf
-    Plug 'nvim-telescope/telescope.nvim'
-    Plug 'nvim-telescope/telescope-fzf-native.nvim',  { 'do': 'make' }
-    source ~/dotfiles/nvim/plugins/telescope.vim
+    " Plug 'nvim-telescope/telescope.nvim'
+    " Plug 'nvim-telescope/telescope-fzf-native.nvim',  { 'do': 'make' }
+    source ~/dotfiles/nvim/plugins/nvim/telescope.vim
 
 
     " git
@@ -226,9 +227,9 @@ call plug#begin(expand('~/.vim/plugged'))
     Plug 'hrsh7th/cmp-nvim-lsp'
 
     "debugger
-    source ~/dotfiles/nvim/plugins/nvimdap.vim
+    source ~/dotfiles/nvim/plugins/nvim/nvimdap.vim
 
-    source ~/dotfiles/nvim/plugins/foldufo.vim
+    source ~/dotfiles/nvim/plugins/nvim/foldufo.vim
 
     ""Indent guides
     Plug 'lukas-reineke/indent-blankline.nvim'
@@ -241,10 +242,10 @@ call plug#begin(expand('~/.vim/plugged'))
     Plug 'folke/which-key.nvim'
 
     "scrollbar
-    source ~/dotfiles/nvim/plugins/scrollbar.vim
+    source ~/dotfiles/nvim/plugins/nvim/scrollbar.vim
 
     "Status Line & bufferline
-    source ~/dotfiles/nvim/plugins/lualine.vim
+    source ~/dotfiles/nvim/plugins/nvim/lualine.vim
 
   else
 
@@ -262,7 +263,7 @@ call plug#begin(expand('~/.vim/plugged'))
     " Plug 'nathanaelkane/vim-indent-guides' "indenting guides
 
     ""Status Line & bufferline
-    source ~/dotfiles/nvim/plugins/lightline.vim
+    source ~/dotfiles/nvim/plugins/vim/lightline.vim
   endif
 
 call plug#end()
@@ -293,11 +294,11 @@ set noshowmode " INSERT déjà affiché par lightbar
 autocmd FileType vista,coc-explorer setlocal signcolumn=no
 
 "TBD reorganize coc same as other files to plugin folder
-if g:lspClient == 1
-  source ~/.config/nvim/coc.vim
-" elseif g:lspClient == 2
-  " source ~/.config/nvim/deoplete.vim
-endif
+" if g:lspClient == 1
+"   source ~/.config/nvim/coc.vim
+" " elseif g:lspClient == 2
+"   " source ~/.config/nvim/plugins/vim/deoplete.vim
+" endif
 
 "languages
 source ~/dotfiles/nvim/languages/bash.vim
@@ -308,7 +309,7 @@ source ~/dotfiles/nvim/languages/terraform.vim
 source ~/dotfiles/nvim/languages/typescript.vim
 
 "my scripts
-source ~/.config/nvim/incubator.vim
+source ~/dotfiles/nvim/incubator.vim
 
 let mapleader = "," " leader key is ,
 
@@ -752,7 +753,7 @@ endif
 
 " --- LUA LSP 0.5
 if g:vimmode == 3
-  source ~/.config/nvim/lualsp.vim
+  source ~/dotfiles/nvim/plugins/nvim/lualsp.vim
 endif
 
 function! RecurseForPath(dict,skey)

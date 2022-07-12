@@ -88,16 +88,8 @@ ml $d fish/n1.fish ~/.config/fish/functions/
 
 #nvim
 ml $d nvim/init.vim ~/.config/nvim/
-ml $d nvim/coc-settings.json ~/.config/nvim/
-ml $d nvim/coc.vim ~/.config/nvim/
-ml $d nvim/incubator.vim ~/.config/nvim/
-ml $d nvim/lualsp.vim ~/.config/nvim/
-ml $d nvim/fugidiff.vim ~/.config/nvim/
-ml $d nvim/vimspector.json ~/.config/nvim/
+ml $d nvim/plugins/vim/coc-settings.json ~/.config/nvim/
 
-ml $d nvim/plugins/gruvbox.vim ~/.config/nvim/plugins/
-ml $d nvim/plugins/solarized.vim ~/.config/nvim/plugins/
-    # ~/.config/nvim/deoplete.vim:
 #nvim-#Qt
 ml $d nvim/Win/ginit.vim ~/.config/nvim/
 
