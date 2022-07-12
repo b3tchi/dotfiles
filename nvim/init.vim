@@ -113,7 +113,7 @@ call plug#begin(expand('~/.vim/plugged'))
   source ~/dotfiles/nvim/plugins/git.vim
 
   "dim iniactive panes
-  source ~/dotfiles/nvim/plugins/shadenvim.vim
+  " source ~/dotfiles/nvim/plugins/shadenvim.vim
   " source ~/dotfiles/nvim/plugins/viminactive.vim
 
   " Plug 'junegunn/gv.vim' "git tree - simplier version of flog
@@ -764,5 +764,18 @@ function! RecurseForPath(dict,skey)
       endif
     endif
   endfor
+endfunction
+
+"dim inactive
+hi ActiveWindow guibg=#282828
+hi InactiveWindow guibg=#32302f
+" Call method on window enter
+augroup WindowManagement
+  autocmd!
+  autocmd WinEnter * call Handle_Win_Enter()
+augroup END
+
+function! Handle_Win_Enter()
+  setlocal winhighlight=Normal:ActiveWindow,NormalNC:InactiveWindow
 endfunction
 
