@@ -23,7 +23,7 @@ end
 EOF
 
 function LoadedBashLang()
-  echom "bashlang"
+  " echom "bashlang"
   " colorscheme gruvbox
   autocmd FileType sh nnoremap <buffer> <space>o :Telescope lsp_document_symbols<CR>
 endfunction
