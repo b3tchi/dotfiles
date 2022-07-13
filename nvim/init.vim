@@ -248,6 +248,8 @@ call plug#begin(expand('~/.vim/plugged'))
     "Status Line & bufferline
     source ~/dotfiles/nvim/plugins/nvim/lualine.vim
 
+    source ~/dotfiles/nvim/plugins/nvim/hydra.vim
+
   else
 
     " Another Comment Pluging with HTML region support
@@ -349,7 +351,7 @@ set fillchars=fold:\
 set foldtext=CustomFoldText()
 setlocal foldmethod=expr
 setlocal foldexpr=GetPotionFold(v:lnum)
-highlight Folded
+" highlight Folded
 
 function! GetPotionFold(lnum)
   if getline(a:lnum) =~? '\v^\s*$'
