@@ -20,9 +20,27 @@ require("gruvbox").setup({
   contrast = "", -- can be "hard", "soft" or empty string
   overrides = {},
 })
-vim.cmd("colorscheme gruvbox")
+  -- vim.cmd("colorscheme gruvbox")
 EOF
+  colorscheme gruvbox
 
+  hi Folded guibg=#232323
+
+  "add event handling for selected pane
+  hi ActiveWindow guibg=none
+  hi InactiveWindow guibg=#32302f
+
+  augroup WindowManagement
+    autocmd!
+    autocmd WinEnter * call Handle_Win_Enter()
+  augroup END
+
+  function! Handle_Win_Enter()
+    setlocal winhighlight=Normal:ActiveWindow,NormalNC:InactiveWindow
+  endfunction
+
+  "by default set backgroud from based on terminal (tmux) bg color
+  hi Normal ctermfg=223 ctermbg=none guifg=#ebdbb2 guibg=none
 endfunction
 
 augroup LoadedGruvboxNvim
