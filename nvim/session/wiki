@@ -10,8 +10,9 @@ endif
 set shortmess=aoO
 argglobal
 %argdel
-edit Dactyl/index.md
+edit README.md
 argglobal
+balt Firefox.md
 setlocal fdm=manual
 setlocal fde=0
 setlocal fmr={{{,}}}
@@ -22,16 +23,18 @@ setlocal fdn=20
 setlocal nofen
 silent! normal! zE
 let &fdl = &fdl
-let s:l = 47 - ((37 * winheight(0) + 23) / 46)
+let s:l = 57 - ((31 * winheight(0) + 23) / 46)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
-keepjumps 47
-normal! 015|
+keepjumps 57
+normal! 011|
 tabnext 1
-badd +58 README.md
-badd +36 Dactyl/index.md
+badd +40 Dactyl/index.md
+badd +3 README.md
 badd +20 3Dprint.md
+badd +1 Admin.md
+badd +6 Firefox.md
 if exists('s:wipebuf') && len(win_findbuf(s:wipebuf)) == 0 && getbufvar(s:wipebuf, '&buftype') isnot# 'terminal'
   silent exe 'bwipe ' . s:wipebuf
 endif

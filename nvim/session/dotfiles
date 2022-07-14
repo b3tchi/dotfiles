@@ -153,10 +153,22 @@ wincmd w
 exe 'vert 1resize ' . ((&columns * 119 + 119) / 239)
 exe 'vert 2resize ' . ((&columns * 119 + 119) / 239)
 tabnext
-edit nvim/languages/typescript.vim
+edit ~/dotfiles/wezterm/wezterm.lua
 let s:save_splitbelow = &splitbelow
 let s:save_splitright = &splitright
 set splitbelow splitright
+wincmd _ | wincmd |
+vsplit
+1wincmd h
+wincmd w
+wincmd _ | wincmd |
+split
+1wincmd k
+wincmd _ | wincmd |
+vsplit
+1wincmd h
+wincmd w
+wincmd w
 wincmd _ | wincmd |
 vsplit
 1wincmd h
@@ -170,10 +182,17 @@ set winminheight=0
 set winheight=1
 set winminwidth=0
 set winwidth=1
-exe 'vert 1resize ' . ((&columns * 119 + 119) / 239)
-exe 'vert 2resize ' . ((&columns * 119 + 119) / 239)
+exe 'vert 1resize ' . ((&columns * 79 + 119) / 239)
+exe '2resize ' . ((&lines * 23 + 25) / 51)
+exe 'vert 2resize ' . ((&columns * 79 + 119) / 239)
+exe '3resize ' . ((&lines * 23 + 25) / 51)
+exe 'vert 3resize ' . ((&columns * 79 + 119) / 239)
+exe '4resize ' . ((&lines * 22 + 25) / 51)
+exe 'vert 4resize ' . ((&columns * 79 + 119) / 239)
+exe '5resize ' . ((&lines * 22 + 25) / 51)
+exe 'vert 5resize ' . ((&columns * 79 + 119) / 239)
 argglobal
-balt firefox/home/chrome/userChrome.css
+balt bin/gwt/gwt
 setlocal fdm=manual
 setlocal fde=0
 setlocal fmr={{{,}}}
@@ -184,46 +203,130 @@ setlocal fdn=20
 setlocal nofen
 silent! normal! zE
 let &fdl = &fdl
-let s:l = 34 - ((33 * winheight(0) + 23) / 46)
+let s:l = 17 - ((16 * winheight(0) + 23) / 46)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
-keepjumps 34
-normal! 0
+keepjumps 17
+normal! 015|
 wincmd w
 argglobal
-if bufexists("nvim/init.vim") | buffer nvim/init.vim | else | edit nvim/init.vim | endif
+if bufexists("bin/gwt/create") | buffer bin/gwt/create | else | edit bin/gwt/create | endif
 if &buftype ==# 'terminal'
-  silent file nvim/init.vim
+  silent file bin/gwt/create
 endif
-balt nvim/lualsp.vim
-setlocal fdm=expr
-setlocal fde=GetPotionFold(v:lnum)
+balt nvim/init.vim
+setlocal fdm=manual
+setlocal fde=0
 setlocal fmr={{{,}}}
 setlocal fdi=#
 setlocal fdl=99
 setlocal fml=1
 setlocal fdn=20
 setlocal nofen
-let s:l = 299 - ((26 * winheight(0) + 23) / 46)
+silent! normal! zE
+let &fdl = &fdl
+let s:l = 67 - ((11 * winheight(0) + 11) / 23)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
-keepjumps 299
-normal! 011|
+keepjumps 67
+normal! 02|
 wincmd w
-2wincmd w
-exe 'vert 1resize ' . ((&columns * 119 + 119) / 239)
-exe 'vert 2resize ' . ((&columns * 119 + 119) / 239)
+argglobal
+if bufexists("bin/gwt/switch") | buffer bin/gwt/switch | else | edit bin/gwt/switch | endif
+if &buftype ==# 'terminal'
+  silent file bin/gwt/switch
+endif
+balt bin/gwt/create
+setlocal fdm=manual
+setlocal fde=0
+setlocal fmr={{{,}}}
+setlocal fdi=#
+setlocal fdl=99
+setlocal fml=1
+setlocal fdn=20
+setlocal nofen
+silent! normal! zE
+let &fdl = &fdl
+let s:l = 19 - ((13 * winheight(0) + 11) / 23)
+if s:l < 1 | let s:l = 1 | endif
+keepjumps exe s:l
+normal! zt
+keepjumps 19
+normal! 013|
+wincmd w
+argglobal
+if bufexists("bin/gwt/remove") | buffer bin/gwt/remove | else | edit bin/gwt/remove | endif
+if &buftype ==# 'terminal'
+  silent file bin/gwt/remove
+endif
+balt nvim/init.vim
+setlocal fdm=manual
+setlocal fde=0
+setlocal fmr={{{,}}}
+setlocal fdi=#
+setlocal fdl=99
+setlocal fml=1
+setlocal fdn=20
+setlocal nofen
+silent! normal! zE
+let &fdl = &fdl
+let s:l = 15 - ((10 * winheight(0) + 11) / 22)
+if s:l < 1 | let s:l = 1 | endif
+keepjumps exe s:l
+normal! zt
+keepjumps 15
+normal! 0
+wincmd w
+argglobal
+if bufexists("bin/gwt/link") | buffer bin/gwt/link | else | edit bin/gwt/link | endif
+if &buftype ==# 'terminal'
+  silent file bin/gwt/link
+endif
+balt nvim/init.vim
+setlocal fdm=manual
+setlocal fde=0
+setlocal fmr={{{,}}}
+setlocal fdi=#
+setlocal fdl=99
+setlocal fml=1
+setlocal fdn=20
+setlocal nofen
+silent! normal! zE
+let &fdl = &fdl
+let s:l = 11 - ((7 * winheight(0) + 11) / 22)
+if s:l < 1 | let s:l = 1 | endif
+keepjumps exe s:l
+normal! zt
+keepjumps 11
+normal! 0
+wincmd w
+5wincmd w
+exe 'vert 1resize ' . ((&columns * 79 + 119) / 239)
+exe '2resize ' . ((&lines * 23 + 25) / 51)
+exe 'vert 2resize ' . ((&columns * 79 + 119) / 239)
+exe '3resize ' . ((&lines * 23 + 25) / 51)
+exe 'vert 3resize ' . ((&columns * 79 + 119) / 239)
+exe '4resize ' . ((&lines * 22 + 25) / 51)
+exe 'vert 4resize ' . ((&columns * 79 + 119) / 239)
+exe '5resize ' . ((&lines * 22 + 25) / 51)
+exe 'vert 5resize ' . ((&columns * 79 + 119) / 239)
 tabnext 3
-badd +1 nvim/init.vim
+badd +299 nvim/init.vim
 badd +1 nvim/plugins/fzf.vim
-badd +25 nvim/languages/typescript.vim
+badd +93 bin/gwt/gwt
 badd +1 nvim/plugins/gruvbox.vim
 badd +1 nvim/plugins/telescope.vim
+badd +34 nvim/languages/typescript.vim
+badd +61 bin/gwt/create
+badd +22 bin/gwt/switch
+badd +2 bin/gwt/remove
+badd +1 bin/gwt/link
 badd +1 firefox/home/chrome/userChrome.css
 badd +70 nvim/lualsp.vim
 badd +13 term://~/.local/share/nvim/dapinstall/jsnode//79982:set\ -e\	\	git\ clone\ https://github.com/microsoft/vscode-node-debug2.git\ &&\ cd\ vscode-node-debug2\	\	npm\ install\	\	npm\ run\ build\	
+badd +0 ~/dotfiles/wezterm/wezterm.lua
 if exists('s:wipebuf') && len(win_findbuf(s:wipebuf)) == 0 && getbufvar(s:wipebuf, '&buftype') isnot# 'terminal'
   silent exe 'bwipe ' . s:wipebuf
 endif

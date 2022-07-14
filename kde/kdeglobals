@@ -144,6 +144,8 @@ AccentColor=61,174,233
 BrowserApplication=firefox.desktop
 ColorSchemeHash=dd1942b5e93c3bbb5d5263740caa393b95b49d23
 Name=Breeze Light
+TerminalApplication=wezterm
+TerminalService=org.wezfurlong.wezterm.desktop
 XftAntialias=true
 XftHintStyle=hintslight
 XftSubPixel=rgb
@@ -154,6 +156,9 @@ shadeSortColumn=true
 smallestReadableFont=FreeSans,8,-1,5,50,0,0,0,0,0
 toolBarFont=FreeSans,10,-1,5,50,0,0,0,0,0
 widgetStyle=Breeze
+
+[Icons]
+Theme=Papirus
 
 [KDE]
 AnimationDurationFactor=0.25
@@ -179,6 +184,7 @@ Show Speedbar=true
 Show hidden files=false
 Sort by=Date
 Sort directories first=true
+Sort hidden files last=false
 Sort reversed=false
 Speedbar Width=151
 View Style=Detail
