@@ -167,6 +167,7 @@ require("indent_blankline").setup {
   filetype_exclude = {
     "coc-explorer"
     ,"help"
+    ,"neo-tree"
     ,"netrw"
     ,"startify"
     ,"which_key"
