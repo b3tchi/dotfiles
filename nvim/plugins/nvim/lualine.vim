@@ -18,6 +18,7 @@ vim.opt.termguicolors = true
     options = {
       offsets = {
         {filetype = "coc-explorer", text = "File Explorer" , text_align = "center"},
+        {filetype = "neo-tree", text = "File Explorer" , text_align = "center"},
         {filetype = "dbui", text = "Db Explorer" , text_align = "center"},
         {filetype = "Outline", text = "Outline" , text_align = "center"},
       },
@@ -113,6 +114,7 @@ end
 --   }
 -- }
 local coc_ext = { sections = { lualine_a = {'filetype'} }, filetypes = {'coc-explorer'} }
+local ntree_ext = { sections = { lualine_a = {'filetype'} }, filetypes = {'neo-tree'} }
 local dbui_ext = { sections = { lualine_a = {'filetype'} }, filetypes = {'dbui'} }
 
 local lualine = require('lualine')
@@ -144,7 +146,7 @@ local config = {
     lualine_z = {}
   },
   tabline = {},
-  extensions = { 'symbols-outline', 'fugitive', coc_ext, dbui_ext }
+  extensions = { 'symbols-outline', ntree_ext, 'fugitive', coc_ext, dbui_ext }
 }
 
 -- Inserts a component in lualine_c at left section

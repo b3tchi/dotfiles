@@ -53,6 +53,9 @@ let g:coc_global_extensions = [
   " \ , 'coc-utils'
   " \ , 'coc-template'
 
+let g:which_key_map.v.c ={'name':'+coc'}
+nnoremap <silent> <space>vcu :CocUpdate<cr>
+
 let g:coc_global_extensions += ['https://github.com/andys8/vscode-jest-snippets']
 
 function! s:show_documentation()
@@ -132,7 +135,7 @@ function LoadedCoc()
 
   nnoremap <silent> <space>vfc :<C-u>CocFzfList commands<cr>
   nnoremap <silent> <space>a :<C-u>CocFzfList diagnostics<cr>
-  nnoremap <silent> <space>E :CocCommand explorer<cr>
+  " nnoremap <silent> <space>E :CocCommand explorer<cr>
   nnoremap <silent> <space>o :<C-u>CocFzfList outline<cr>
   nnoremap <silent> <space>O :SymbolsOutline<CR>
   " nnoremap <silent>  e  :<C-u>CocList extensions<cr>

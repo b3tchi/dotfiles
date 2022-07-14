@@ -5,7 +5,7 @@ endif
 " Required:
 " let useCoc = 1
 let g:lspClient = 1 "1 for coc-nvim, 2 for deoplete (WIP), -1 non Lsp Client (TBD)
-let g:vimTheme = 2 "1 solarized8, 2 gruvbox
+" let g:vimTheme = 2 "1 solarized8, 2 gruvbox
 
 " Identify Os and Actual Device - Who is coming home?
 let g:wsl = 0 "default wsl flag to 0
@@ -178,17 +178,6 @@ call plug#begin(expand('~/.vim/plugged'))
   "Run command async
   Plug 'skywind3000/asyncrun.vim'
 
-  " themes
-  " Plug 'puremourning/vimspector'
-  source ~/dotfiles/nvim/plugins/vim/gruvbox.vim
-  " source ~/dotfiles/nvim/plugins/vim/solarized.vim
-  " source ~/dotfiles/nvim/plugins/nvim/gruvboxnvim.vim
-
-  " Plug 'lifepillar/vim-solarized8'
-  " Plug 'morhetz/gruvbox'
-  " Plug 'kaicataldo/material.vim'
-  " Plug 'altercation/vim-colors-solarized'
-  " Plug 'iCyMind/NeoSolarized'
 
   " vimmode 3 => Neovim 0.5+ with lua
   if g:vimmode == 3
@@ -230,6 +219,7 @@ call plug#begin(expand('~/.vim/plugged'))
     "debugger
     source ~/dotfiles/nvim/plugins/nvim/nvimdap.vim
 
+    "folds
     source ~/dotfiles/nvim/plugins/nvim/foldufo.vim
 
     ""Indent guides
@@ -242,13 +232,20 @@ call plug#begin(expand('~/.vim/plugged'))
     "lua extended version of which key
     Plug 'folke/which-key.nvim'
 
+    " themes have to be before lualine
+    source ~/dotfiles/nvim/plugins/nvim/gruvboxnvim.vim
+
     "scrollbar
     source ~/dotfiles/nvim/plugins/nvim/scrollbar.vim
 
     "Status Line & bufferline
     source ~/dotfiles/nvim/plugins/nvim/lualine.vim
 
+    "custom modes
     source ~/dotfiles/nvim/plugins/nvim/hydra.vim
+
+    "file explorer
+    source ~/dotfiles/nvim/plugins/nvim/neotree.vim
 
   else
 
@@ -267,6 +264,17 @@ call plug#begin(expand('~/.vim/plugged'))
 
     ""Status Line & bufferline
     source ~/dotfiles/nvim/plugins/vim/lightline.vim
+
+    " themes
+    source ~/dotfiles/nvim/plugins/vim/gruvbox.vim
+    " source ~/dotfiles/nvim/plugins/vim/solarized.vim
+    " source ~/dotfiles/nvim/plugins/nvim/gruvboxnvim.vim
+
+    " Plug 'lifepillar/vim-solarized8'
+    " Plug 'morhetz/gruvbox'
+    " Plug 'kaicataldo/material.vim'
+    " Plug 'altercation/vim-colors-solarized'
+    " Plug 'iCyMind/NeoSolarized'
   endif
 
 call plug#end()
@@ -512,9 +520,6 @@ let g:which_key_map.v.p ={'name':'+plug'}
 nnoremap <silent> <space>vpu :PlugUpdate<cr>
 nnoremap <silent> <space>vpi :PlugStatus<cr>
 nnoremap <silent> <space>vpc :PlugClean<cr>
-
-let g:which_key_map.v.c ={'name':'+coc'}
-nnoremap <silent> <space>vcu :CocUpdate<cr>
 
 let g:which_key_map.v.i ={'name':'+init.vim'}
 nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>:LightlineReload<cr>
