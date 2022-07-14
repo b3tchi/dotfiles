@@ -146,7 +146,7 @@ local config = {
     lualine_z = {}
   },
   tabline = {},
-  extensions = { 'symbols-outline', ntree_ext, 'fugitive', coc_ext, dbui_ext }
+  extensions = { 'symbols-outline', 'neo-tree','fugitive', coc_ext, dbui_ext }
 }
 
 -- Inserts a component in lualine_c at left section
