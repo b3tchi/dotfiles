@@ -10,9 +10,10 @@ local omnisharp_bin = "/home/jan/.local/share/nvim/lsp_servers/omnisharp/omnisha
 
 require('lspconfig').omnisharp.setup{
   --parameter 1
-  capabilities = require('cmp_nvim_lsp').update_capabilities(vim.lsp.protocol.make_client_capabilities()),
-  --parameter 2
   on_attach = on_attach_default ,
+  --parameter 2
+  -- capabilities = require('cmp_nvim_lsp').update_capabilities(vim.lsp.protocol.make_client_capabilities()),
+  capabilities = ufo_capabilities,
   --parameter 3
   cmd = { omnisharp_bin , "--languageserver" , "--hostPID" , tostring(pid) }
 }

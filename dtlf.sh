@@ -67,15 +67,18 @@ ml $d bin/tat ~/.local/bin/
 ml $d bin/ff ~/.local/bin/
 ml $d bin/nvim-sessionizer ~/.local/bin/
 ml $d bin/nvim-startifier ~/.local/bin/
-ml $d bin/gwt/gwt ~/.local/bin/
+ml $d bin/gwt/main.sh ~/.local/bin/ gwt
+ml $d bin/ak/main.sh ~/.local/bin/ ak
 ml $d bin/azdops/pipeline.sh ~/.local/bin/ azdpipes
 ml $d bin/azdops/variables.sh ~/.local/bin/ azdvars
 ml $d bin/fxs.sh ~/.local/bin/ fxs
+# ml $d bin/gwt/gwt ~/.local/bin/
 
 #bin
-chmod +x $d/bin/*
-chmod +x $d/bin/gwt/gwt*
-chmod +x $d/bin/azdops/*.sh
+chmod +x ${d}bin/*
+chmod +x ${d}bin/gwt/main.sh
+chmod +x ${d}bin/ak/main.sh
+chmod +x ${d}bin/azdops/*.sh
 
 #fish
 ml $d fish/config.fish ~/.config/fish/
@@ -85,23 +88,10 @@ ml $d fish/n1.fish ~/.config/fish/functions/
 
 #nvim
 ml $d nvim/init.vim ~/.config/nvim/
-ml $d nvim/coc-settings.json ~/.config/nvim/
-ml $d nvim/coc.vim ~/.config/nvim/
-ml $d nvim/incubator.vim ~/.config/nvim/
-ml $d nvim/lualsp.vim ~/.config/nvim/
-ml $d nvim/fugidiff.vim ~/.config/nvim/
-ml $d nvim/vimspector.json ~/.config/nvim/
+ml $d nvim/plugins/vim/coc-settings.json ~/.config/nvim/
 
-ml $d nvim/plugins/gruvbox.vim ~/.config/nvim/plugins/
-ml $d nvim/plugins/solarized.vim ~/.config/nvim/plugins/
-    # ~/.config/nvim/deoplete.vim:
 #nvim-#Qt
 ml $d nvim/Win/ginit.vim ~/.config/nvim/
-
-#nvim sessions
-ml $d nvim/session/dotfiles ~/.local/share/nvim/session/
-ml $d nvim/session/wiki ~/.local/share/nvim/session/
-ml $d nvim/session/scripts ~/.local/share/nvim/session/
 
 #code
 ml $d code/settings.json ~/.config/Code/User/

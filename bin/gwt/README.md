@@ -37,12 +37,30 @@ gwt remove <localbranch>
 - check if folder archive exists
 - move branch local folder to branch folder
 
-#### I need to merge my branch to another brach
+#### I need to merge my branch from another brach
 ```bash
-gwt merge <mergetobranch>
+gwt merge <mergefrombranch>
 ```
+
+#### I need to init new local repo
+- [  ]
+```bash
+gwt repo init <reponame> <repopath>
+```
+
+#### I need to push local repo to remote
+- [  ]
+```bash
+gwt repo create <originname> <isprivate>
+```
+
+#### I need to clone remote to local
+- [  ]
+```bash
+gwt repo clone <originname> <repopath>
+```
+
 #### I need to pull request my branch to another brach
-#### I need to create new repo
 #### I need to create add new ssh-key
 #### I need to increase latest tag by Maj.Min.Build by flag (Maj|Min|Build)
 

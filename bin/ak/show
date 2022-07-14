@@ -1,8 +1,11 @@
 #!/bin/bash
-sbcnname=$KEYVAULT_SUBSCRIPTION_0
-kvname=$KEYVAULT_NAME_0
+sbcnname=$KEYVAULT_0_SUBSCRIPTION
+kvname=$KEYVAULT_0_NAME
 
-echo $name
+if [[ -z $name ]]; then
+  echo "please enter secret name (--name) it's mandatory parameter"
+  exit 0
+fi
 
 az keyvault secret show  \
   --subscription "$sbcnname" \
