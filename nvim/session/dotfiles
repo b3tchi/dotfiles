@@ -12,6 +12,7 @@ argglobal
 %argdel
 tabnew
 tabnew
+tabnew
 tabrewind
 edit nvim/init.vim
 let s:save_splitbelow = &splitbelow
@@ -132,9 +133,9 @@ keepjumps 14
 normal! 020|
 wincmd w
 argglobal
-if bufexists("~/dotfiles/nvim/languages/csharp.vim") | buffer ~/dotfiles/nvim/languages/csharp.vim | else | edit ~/dotfiles/nvim/languages/csharp.vim | endif
+if bufexists("nvim/languages/csharp.vim") | buffer nvim/languages/csharp.vim | else | edit nvim/languages/csharp.vim | endif
 if &buftype ==# 'terminal'
-  silent file ~/dotfiles/nvim/languages/csharp.vim
+  silent file nvim/languages/csharp.vim
 endif
 balt nvim/lualsp.vim
 setlocal fdm=manual
@@ -163,11 +164,11 @@ keepjumps 9
 normal! 049|
 wincmd w
 argglobal
-if bufexists("~/dotfiles/nvim/plugins/foldufo.vim") | buffer ~/dotfiles/nvim/plugins/foldufo.vim | else | edit ~/dotfiles/nvim/plugins/foldufo.vim | endif
+if bufexists("nvim/plugins/foldufo.vim") | buffer nvim/plugins/foldufo.vim | else | edit nvim/plugins/foldufo.vim | endif
 if &buftype ==# 'terminal'
-  silent file ~/dotfiles/nvim/plugins/foldufo.vim
+  silent file nvim/plugins/foldufo.vim
 endif
-balt ~/dotfiles/nvim/languages/bash.vim
+balt nvim/languages/bash.vim
 setlocal fdm=manual
 setlocal fde=0
 setlocal fmr={{{,}}}
@@ -177,29 +178,18 @@ setlocal fml=1
 setlocal fdn=20
 setlocal fen
 silent! normal! zE
-27,29fold
-51,52fold
-59,60fold
-53,62fold
-48,64fold
-42,67fold
-12,67fold
-70,71fold
-68,74fold
-75,77fold
-80,82fold
 let &fdl = &fdl
-let s:l = 35 - ((9 * winheight(0) + 10) / 21)
+let s:l = 1 - ((0 * winheight(0) + 10) / 21)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
-keepjumps 35
-normal! 020|
+keepjumps 1
+normal! 0
 wincmd w
 argglobal
-if bufexists("~/dotfiles/nvim/languages/bash.vim") | buffer ~/dotfiles/nvim/languages/bash.vim | else | edit ~/dotfiles/nvim/languages/bash.vim | endif
+if bufexists("nvim/languages/bash.vim") | buffer nvim/languages/bash.vim | else | edit nvim/languages/bash.vim | endif
 if &buftype ==# 'terminal'
-  silent file ~/dotfiles/nvim/languages/bash.vim
+  silent file nvim/languages/bash.vim
 endif
 balt nvim/init.vim
 setlocal fdm=manual
@@ -215,16 +205,14 @@ silent! normal! zE
 9,14fold
 18,20fold
 25,28fold
-31,33fold
 let &fdl = &fdl
-let s:l = 10 - ((6 * winheight(0) + 10) / 20)
+let s:l = 10 - ((8 * winheight(0) + 10) / 20)
 if s:l < 1 | let s:l = 1 | endif
 keepjumps exe s:l
 normal! zt
 keepjumps 10
 normal! 0
 wincmd w
-2wincmd w
 exe '1resize ' . ((&lines * 21 + 23) / 47)
 exe 'vert 1resize ' . ((&columns * 93 + 93) / 187)
 exe '2resize ' . ((&lines * 20 + 23) / 47)
@@ -233,6 +221,57 @@ exe '3resize ' . ((&lines * 21 + 23) / 47)
 exe 'vert 3resize ' . ((&columns * 93 + 93) / 187)
 exe '4resize ' . ((&lines * 20 + 23) / 47)
 exe 'vert 4resize ' . ((&columns * 93 + 93) / 187)
+tabnext
+edit .git/index
+let s:save_splitbelow = &splitbelow
+let s:save_splitright = &splitright
+set splitbelow splitright
+wincmd _ | wincmd |
+vsplit
+1wincmd h
+wincmd w
+let &splitbelow = s:save_splitbelow
+let &splitright = s:save_splitright
+wincmd t
+let s:save_winminheight = &winminheight
+let s:save_winminwidth = &winminwidth
+set winminheight=0
+set winheight=1
+set winminwidth=0
+set winwidth=1
+exe 'vert 1resize ' . ((&columns * 93 + 93) / 187)
+exe 'vert 2resize ' . ((&columns * 93 + 93) / 187)
+argglobal
+enew
+balt .git/index
+setlocal fdm=manual
+setlocal fde=0
+setlocal fmr={{{,}}}
+setlocal fdi=#
+setlocal fdl=99
+setlocal fml=1
+setlocal fdn=20
+setlocal nofen
+wincmd w
+argglobal
+balt nvim/session/wiki
+setlocal fdm=manual
+setlocal fde=0
+setlocal fmr=<<<<<<<<,>>>>>>>>
+setlocal fdi=#
+setlocal fdl=99
+setlocal fml=1
+setlocal fdn=20
+setlocal nofen
+let s:l = 10 - ((9 * winheight(0) + 21) / 42)
+if s:l < 1 | let s:l = 1 | endif
+keepjumps exe s:l
+normal! zt
+keepjumps 10
+normal! 07|
+wincmd w
+exe 'vert 1resize ' . ((&columns * 93 + 93) / 187)
+exe 'vert 2resize ' . ((&columns * 93 + 93) / 187)
 tabnext
 edit \[coc-explorer]-1
 let s:save_splitbelow = &splitbelow
@@ -290,9 +329,9 @@ keepjumps 1
 normal! 0
 wincmd w
 argglobal
-if bufexists("~/dotfiles/bin/gwt/main.sh") | buffer ~/dotfiles/bin/gwt/main.sh | else | edit ~/dotfiles/bin/gwt/main.sh | endif
+if bufexists("bin/gwt/main.sh") | buffer bin/gwt/main.sh | else | edit bin/gwt/main.sh | endif
 if &buftype ==# 'terminal'
-  silent file ~/dotfiles/bin/gwt/main.sh
+  silent file bin/gwt/main.sh
 endif
 balt nvim/languages/typescript.vim
 setlocal fdm=manual
@@ -313,11 +352,11 @@ keepjumps 49
 normal! 010|
 wincmd w
 argglobal
-if bufexists("~/dotfiles/bin/gwt/repo/clone") | buffer ~/dotfiles/bin/gwt/repo/clone | else | edit ~/dotfiles/bin/gwt/repo/clone | endif
+if bufexists("bin/gwt/repo/clone") | buffer bin/gwt/repo/clone | else | edit bin/gwt/repo/clone | endif
 if &buftype ==# 'terminal'
-  silent file ~/dotfiles/bin/gwt/repo/clone
+  silent file bin/gwt/repo/clone
 endif
-balt ~/dotfiles/bin/gwt/main.sh
+balt bin/gwt/main.sh
 setlocal fdm=manual
 setlocal fde=0
 setlocal fmr={{{,}}}
@@ -336,11 +375,11 @@ keepjumps 1
 normal! 0
 wincmd w
 argglobal
-if bufexists("~/dotfiles/bin/gwt/repo/create") | buffer ~/dotfiles/bin/gwt/repo/create | else | edit ~/dotfiles/bin/gwt/repo/create | endif
+if bufexists("bin/gwt/repo/create") | buffer bin/gwt/repo/create | else | edit bin/gwt/repo/create | endif
 if &buftype ==# 'terminal'
-  silent file ~/dotfiles/bin/gwt/repo/create
+  silent file bin/gwt/repo/create
 endif
-balt ~/dotfiles/bin/gwt/repo/clone
+balt bin/gwt/repo/clone
 setlocal fdm=manual
 setlocal fde=0
 setlocal fmr={{{,}}}
@@ -359,9 +398,9 @@ keepjumps 3
 normal! 010|
 wincmd w
 argglobal
-if bufexists("~/dotfiles/bin/gwt/README.md") | buffer ~/dotfiles/bin/gwt/README.md | else | edit ~/dotfiles/bin/gwt/README.md | endif
+if bufexists("bin/gwt/README.md") | buffer bin/gwt/README.md | else | edit bin/gwt/README.md | endif
 if &buftype ==# 'terminal'
-  silent file ~/dotfiles/bin/gwt/README.md
+  silent file bin/gwt/README.md
 endif
 balt nvim/init.vim
 setlocal fdm=manual
@@ -389,22 +428,26 @@ exe 'vert 3resize ' . ((&columns * 46 + 93) / 187)
 exe '4resize ' . ((&lines * 20 + 23) / 47)
 exe 'vert 4resize ' . ((&columns * 46 + 93) / 187)
 exe 'vert 5resize ' . ((&columns * 46 + 93) / 187)
-tabnext 2
+tabnext 3
 badd +177 nvim/init.vim
 badd +7 nvim/languages/typescript.vim
-badd +66 ~/dotfiles/bin/gwt/main.sh
+badd +1 .git/index
+badd +1 \[coc-explorer]-1
 badd +85 nvim/lualsp.vim
-badd +1 ~/dotfiles/nvim/languages/csharp.vim
-badd +34 ~/dotfiles/nvim/plugins/foldufo.vim
-badd +13 ~/dotfiles/nvim/languages/bash.vim
-badd +0 \[coc-explorer]-1
-badd +1 ~/dotfiles/bin/gwt/repo/clone
-badd +1 ~/dotfiles/bin/gwt/repo/create
-badd +1 ~/dotfiles/bin/gwt/README.md
-badd +102 ~/dotfiles/bin/fxs.sh
-badd +5 ~/dotfiles/nvim/plugins/scrollbar.vim
+badd +9 nvim/languages/csharp.vim
+badd +34 nvim/plugins/foldufo.vim
+badd +13 nvim/languages/bash.vim
+badd +1 \[Plugins]
+badd +4 .git/COMMIT_EDITMSG
+badd +38 nvim/session/wiki
+badd +66 bin/gwt/main.sh
+badd +1 bin/gwt/repo/clone
+badd +1 bin/gwt/repo/create
+badd +1 bin/gwt/README.md
+badd +102 bin/fxs.sh
+badd +5 nvim/plugins/scrollbar.vim
 badd +43 nvim/plugins/fzf.vim
-badd +1 ~/dotfiles/nvim/plugins/mdpreview.vim
+badd +1 nvim/plugins/mdpreview.vim
 badd +1 nvim/plugins/telescope.vim
 badd +1 nvim/plugins/gruvbox.vim
 badd +1 firefox/home/chrome/userChrome.css
