@@ -18,15 +18,78 @@ vim.opt.termguicolors = true
     options = {
       offsets = {
         {filetype = "coc-explorer", text = "File Explorer" , text_align = "center"},
+        {filetype = "neo-tree", text = "File Explorer" , text_align = "center"},
         {filetype = "dbui", text = "Db Explorer" , text_align = "center"},
         {filetype = "Outline", text = "Outline" , text_align = "center"},
       },
     }
   }
 
-  local function repopath()
-    return vim.fn.expand('%:.')
+local function repopath()
+  return vim.fn.expand('%:.')
+end
+
+local colors = {
+  -- bg       = '#202328',
+  -- fg       = '#bbc2cf',
+  -- yellow   = '#ECBE7B',
+  -- cyan     = '#008080',
+  -- darkblue = '#081633',
+  -- violet   = '#a9a1e1',
+  -- magenta  = '#c678dd',
+  green    =  vim.g.terminal_color_10,
+  orange   =  '#fe8019',
+  gray     =  vim.g.terminal_color_8,
+  blue     =  vim.g.terminal_color_12,
+  red      =  vim.g.terminal_color_9,
+}
+
+local modes = {
+  n = {name = 'NORMAL',bg = colors.gray},
+  i = {name = 'INSERT',bg = colors.blue},
+  v = {name = 'VISUAL',bg = colors.yellow},
+  [''] = {name = 'V-Block',bg = colors.yellow},
+  V = {name = 'V-Line',bg = colors.yellow},
+  c = {name = 'COMMAND', bg = colors.green},
+  R = {name = 'REPLACE', bg = colors.red},
+  Rv = {name = 'V-Replace', bg = colors.red},
+  t = {name = 'TERMINAL', bg = colors.green},
+}
+
+local hydracolor = {
+  amaranth = {bg = colors.red},
+  teal = {bg = colors.blue},
+  pink = {bg = colors.red},
+  red = {bg = colors.red},
+  blue = {bg = colors.blue},
+}
+
+local hydrastatus = require('hydra.statusline')
+
+local function hydraname()
+
+  local hname = hydrastatus.get_name()
+
+  if (hname == nil) then
+    return modes[vim.fn.mode()].name
+  else
+    return hydrastatus.get_name()
   end
+
+end
+
+local function hydracolorx()
+
+  local hname = hydrastatus.get_name()
+
+  if (hname == nil) then
+    return modes[vim.fn.mode()].bg
+  else
+    return hydracolor[hydrastatus.get_color()].bg
+  end
+
+end
+
 --- @param trunc_width number trunctates component when screen width is less then trunc_width
 --- @param trunc_len number truncates component to trunc_len number of chars
 --- @param hide_width number hides component when window width is smaller then hide_width
@@ -50,10 +113,14 @@ end
 --     {function() return require'lsp-status'.status() end, fmt=truc(120, 20, 60)}
 --   }
 -- }
-  local coc_ext = { sections = { lualine_a = {'filetype'} }, filetypes = {'coc-explorer'} }
-  local dbui_ext = { sections = { lualine_a = {'filetype'} }, filetypes = {'dbui'} }
+local coc_ext = { sections = { lualine_a = {'filetype'} }, filetypes = {'coc-explorer'} }
+local ntree_ext = { sections = { lualine_a = {'filetype'} }, filetypes = {'neo-tree'} }
+local dbui_ext = { sections = { lualine_a = {'filetype'} }, filetypes = {'dbui'} }
 
-require('lualine').setup{
+local lualine = require('lualine')
+
+local config = {
+-- require('lualine').setup{
   options = {
     icons_enabled = true,
     theme = 'auto',
@@ -63,7 +130,7 @@ require('lualine').setup{
     always_divide_middle = true,
   },
   sections = {
-    lualine_a = {'mode'},
+    lualine_a = {},
     lualine_b = {repopath, 'diff' },
     lualine_c = {},
     lualine_x = {'encoding', 'filetype', 'diagnostics'},
@@ -79,8 +146,26 @@ require('lualine').setup{
     lualine_z = {}
   },
   tabline = {},
-  extensions = { 'symbols-outline', 'fugitive', coc_ext, dbui_ext }
+  extensions = { 'symbols-outline', 'neo-tree','fugitive', coc_ext, dbui_ext }
 }
+
+-- Inserts a component in lualine_c at left section
+local function ins_left(component)
+  table.insert(config.sections.lualine_a, component)
+end
+
+ins_left {
+  -- mode component
+  function()
+    return hydraname()
+  end,
+  color = function()
+    return { bg = hydracolorx(), gui = 'bold' }
+  end,
+  }
+
+lualine.setup(config)
+
 EOF
 endfunction
 

@@ -2,6 +2,16 @@
 update_info=kwinrules.upd:use-virtual-desktop-ids
 
 [1]
+Description=Application settings for org.wezfurlong.wezterm
+clientmachine=localhost
+decocolor=BreezeDark
+decocolorrule=2
+minsize=700,500
+title=Amazon WorkSpaces
+wmclass=org.wezfurlong.wezterm
+wmclassmatch=1
+
+[2]
 Description=Application settings for alacritty
 clientmachine=localhost
 decocolor=BreezeDark
@@ -11,7 +21,7 @@ title=Amazon WorkSpaces
 wmclass=alacritty
 wmclassmatch=1
 
-[2]
+[3]
 Description=Window settings for workspacesclient
 decocolor=BreezeDark
 minsize=700,500
@@ -19,15 +29,8 @@ minsizerule=2
 title=Amazon WorkSpaces
 titlematch=1
 types=1
-wmclass=workspacesclient
-wmclassmatch=1
-
-[3]
-Description=Application settings for konsole
-decocolor=BreezeDark
-decocolorrule=2
 windowrole=toplevel
-wmclass=konsole
+wmclass=workspacesclient
 wmclassmatch=1
 
 [32e688ed-e3b6-46e4-a32a-a92f61d2382d]
@@ -39,7 +42,16 @@ wmclass=alacritty
 wmclassmatch=1
 
 [4]
+Description=Application settings for konsole
+decocolor=BreezeDark
+decocolorrule=2
+windowrole=toplevel
+wmclass=konsole
+wmclassmatch=1
+
+[5]
 Description=Window settings for firefox
+minsize=400,300
 types=1
 windowrole=toplevel
 windowrolematch=1
@@ -47,14 +59,15 @@ wmclass=navigator firefox
 wmclasscomplete=true
 wmclassmatch=1
 
-[5]
+[6]
 Description=Application settings for konsole
+above=true
 minsize=400,300
 wmclass=konsole
 wmclasscomplete=true
 wmclassmatch=1
 
-[6]
+[7]
 Description=Window settings for systemsettings
 above=true
 minsize=400,300
@@ -63,13 +76,21 @@ types=1
 wmclass=systemsettings
 wmclassmatch=1
 
-[7]
+[8]
 Description=Application settings for workspacesclient
 above=true
 aboverule=2
 minsize=700,620
 minsizerule=2
 wmclass=workspacesclient
+wmclassmatch=1
+
+[8aa6ac2d-f0c7-4d9f-bde9-44aa33a0498d]
+Description=Application settings for freecad
+clientmachine=localhost
+decocolor=BreezeDark
+decocolorrule=2
+wmclass=freecad
 wmclassmatch=1
 
 [8ee2a05f-710f-41e5-ac53-5c617f29c20c]
@@ -81,5 +102,11 @@ wmclass=org.wezfurlong.wezterm
 wmclassmatch=1
 
 [General]
-count=8
-rules=8ee2a05f-710f-41e5-ac53-5c617f29c20c,1,2,3,4,5,6,7
+count=9
+rules=8aa6ac2d-f0c7-4d9f-bde9-44aa33a0498d,1,2,3,4,5,6,7,8
+
+[af901649-10e4-4f2b-8c7d-fe5ea866bcf4]
+Description=Application settings for freecad
+clientmachine=localhost
+wmclass=freecad
+wmclassmatch=1

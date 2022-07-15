@@ -1,6 +1,5 @@
 "LSP Installed via nvim-lsp-installer
 " :LSPInstall bashls
-
 "DAP in vimspector only not yet in nvim-Dap only in vimspector
 
 lua << EOF
@@ -12,7 +11,6 @@ require'lspconfig'.bashls.setup{
   flags = {
     debounce_text_changes = 150,
   },
-
 }
 
 function _G.mdblock_bash(mdblock)
@@ -23,8 +21,6 @@ end
 EOF
 
 function LoadedBashLang()
-  echom "bashlang"
-  " colorscheme gruvbox
   autocmd FileType sh nnoremap <buffer> <space>o :Telescope lsp_document_symbols<CR>
 endfunction
 

@@ -5,7 +5,7 @@ endif
 " Required:
 " let useCoc = 1
 let g:lspClient = 1 "1 for coc-nvim, 2 for deoplete (WIP), -1 non Lsp Client (TBD)
-let g:vimTheme = 2 "1 solarized8, 2 gruvbox
+" let g:vimTheme = 2 "1 solarized8, 2 gruvbox
 
 " Identify Os and Actual Device - Who is coming home?
 let g:wsl = 0 "default wsl flag to 0
@@ -92,10 +92,10 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'embear/vim-localvimrc' "loading rootfolder placed vim configs /.lvimrc
   Plug 'ryanoasis/vim-devicons' "nerd fonts icons
 
-  source ~/dotfiles/nvim/plugins/startify.vim
+  source ~/dotfiles/nvim/plugins/vim/startify.vim
 
   ""Searching fzf
-  source ~/dotfiles/nvim/plugins/fzf.vim
+  source ~/dotfiles/nvim/plugins/vim/fzf.vim
 
   Plug 'jesseleite/vim-agriculture' "adding option for :RgRaw to run raw commands
   " Plug 'jremmen/vim-ripgrep' "testing ripgrep single addin :Rg in fzf seems broken
@@ -110,7 +110,11 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'tpope/vim-surround' "surrounding words with symbols
   "Plug 'tmsvg/pear-tree' "getting some issues for the function disabled
 
-  source ~/dotfiles/nvim/plugins/git.vim
+  source ~/dotfiles/nvim/plugins/vim/git.vim
+
+  "dim iniactive panes
+  " source ~/dotfiles/nvim/plugins/nvim/shadenvim.vim
+  " source ~/dotfiles/nvim/plugins/vim/viminactive.vim
 
   " Plug 'junegunn/gv.vim' "git tree - simplier version of flog
   " Plug 'gregsexton/gitv', {'on': ['Gitv']}
@@ -122,7 +126,7 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'mmai/vim-markdown-wiki'
   Plug 'dhruvasagar/vim-table-mode'
 
-  source ~/dotfiles/nvim/plugins/mdpreview.vim
+  source ~/dotfiles/nvim/plugins/nvim/mdpreview.vim
 
   ""vimwiki - personal notes
   " Plug 'vimwiki/vimwiki'
@@ -130,7 +134,7 @@ call plug#begin(expand('~/.vim/plugged'))
 
   ""addvanced ide features
   if g:lspClient == 1
-    source ~/dotfiles/nvim/coc.vim
+    source ~/dotfiles/nvim/plugins/vim/coc.vim
   " elseif g:lspClient == 2
   "   Plug 'Shougo/deoplete.nvim'
   "   if !has('nvim')
@@ -156,33 +160,24 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'fabi1cazenave/suckless.vim'
 
   "Tmux
-  source ~/dotfiles/nvim/plugins/vimux.vim
+  source ~/dotfiles/nvim/plugins/vim/vimux.vim
 
   "syntax highlighting
   Plug 'sheerun/vim-polyglot'
 
   "install dap for vim
-  " Plug 'puremourning/vimspector'
-  " source ~/dotfiles/nvim/plugins/vimspector.vim
+  " source ~/dotfiles/nvim/plugins/vim/vimspector.vim
 
   "" Old Addins TBD
   "Plug 'janko-m/vim-test'
   "Plug 'neomake/neomake'
 
   " Adding dadbod for databases
-  source ~/dotfiles/nvim/plugins/dadbod.vim
+  source ~/dotfiles/nvim/plugins/vim/dadbod.vim
 
   "Run command async
   Plug 'skywind3000/asyncrun.vim'
 
-  " themes
-  source ~/dotfiles/nvim/plugins/gruvbox.vim
-
-  " Plug 'lifepillar/vim-solarized8'
-  " Plug 'morhetz/gruvbox'
-  " Plug 'kaicataldo/material.vim'
-  " Plug 'altercation/vim-colors-solarized'
-  " Plug 'iCyMind/NeoSolarized'
 
   " vimmode 3 => Neovim 0.5+ with lua
   if g:vimmode == 3
@@ -196,14 +191,15 @@ call plug#begin(expand('~/.vim/plugged'))
     " Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'} "LSP based highlighting
     "to fix the iisue with slow markdown
     "https://github.com/nvim-treesitter/nvim-treesitter/issues/2206
-    Plug 'nvim-treesitter/nvim-treesitter', {'commit': '8ada8faf2fd5a74cc73090ec856fa88f34cd364b', 'do': ':TSUpdate'}
+    " Plug 'nvim-treesitter/nvim-treesitter', {'commit': '8ada8faf2fd5a74cc73090ec856fa88f34cd364b', 'do': ':TSUpdate'}
+    Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'}
     Plug 'nvim-lua/popup.nvim'
     Plug 'nvim-lua/plenary.nvim'
 
     "telescope search instead of fzf
-    Plug 'nvim-telescope/telescope.nvim'
-    Plug 'nvim-telescope/telescope-fzf-native.nvim',  { 'do': 'make' }
-    source ~/dotfiles/nvim/plugins/telescope.vim
+    " Plug 'nvim-telescope/telescope.nvim'
+    " Plug 'nvim-telescope/telescope-fzf-native.nvim',  { 'do': 'make' }
+    source ~/dotfiles/nvim/plugins/nvim/telescope.vim
 
 
     " git
@@ -221,9 +217,10 @@ call plug#begin(expand('~/.vim/plugged'))
     Plug 'hrsh7th/cmp-nvim-lsp'
 
     "debugger
-    source ~/dotfiles/nvim/plugins/nvimdap.vim
+    source ~/dotfiles/nvim/plugins/nvim/nvimdap.vim
 
-    source ~/dotfiles/nvim/plugins/foldufo.vim
+    "folds
+    source ~/dotfiles/nvim/plugins/nvim/foldufo.vim
 
     ""Indent guides
     Plug 'lukas-reineke/indent-blankline.nvim'
@@ -235,11 +232,20 @@ call plug#begin(expand('~/.vim/plugged'))
     "lua extended version of which key
     Plug 'folke/which-key.nvim'
 
+    " themes have to be before lualine
+    source ~/dotfiles/nvim/plugins/nvim/gruvboxnvim.vim
+
     "scrollbar
-    source ~/dotfiles/nvim/plugins/scrollbar.vim
+    source ~/dotfiles/nvim/plugins/nvim/scrollbar.vim
 
     "Status Line & bufferline
-    source ~/dotfiles/nvim/plugins/lualine.vim
+    source ~/dotfiles/nvim/plugins/nvim/lualine.vim
+
+    "custom modes
+    source ~/dotfiles/nvim/plugins/nvim/hydra.vim
+
+    "file explorer
+    source ~/dotfiles/nvim/plugins/nvim/neotree.vim
 
   else
 
@@ -257,7 +263,18 @@ call plug#begin(expand('~/.vim/plugged'))
     " Plug 'nathanaelkane/vim-indent-guides' "indenting guides
 
     ""Status Line & bufferline
-    source ~/dotfiles/nvim/plugins/lightline.vim
+    source ~/dotfiles/nvim/plugins/vim/lightline.vim
+
+    " themes
+    source ~/dotfiles/nvim/plugins/vim/gruvbox.vim
+    " source ~/dotfiles/nvim/plugins/vim/solarized.vim
+    " source ~/dotfiles/nvim/plugins/nvim/gruvboxnvim.vim
+
+    " Plug 'lifepillar/vim-solarized8'
+    " Plug 'morhetz/gruvbox'
+    " Plug 'kaicataldo/material.vim'
+    " Plug 'altercation/vim-colors-solarized'
+    " Plug 'iCyMind/NeoSolarized'
   endif
 
 call plug#end()
@@ -288,11 +305,11 @@ set noshowmode " INSERT déjà affiché par lightbar
 autocmd FileType vista,coc-explorer setlocal signcolumn=no
 
 "TBD reorganize coc same as other files to plugin folder
-if g:lspClient == 1
-  source ~/.config/nvim/coc.vim
-" elseif g:lspClient == 2
-  " source ~/.config/nvim/deoplete.vim
-endif
+" if g:lspClient == 1
+"   source ~/.config/nvim/coc.vim
+" " elseif g:lspClient == 2
+"   " source ~/.config/nvim/plugins/vim/deoplete.vim
+" endif
 
 "languages
 source ~/dotfiles/nvim/languages/bash.vim
@@ -302,8 +319,8 @@ source ~/dotfiles/nvim/languages/csharp.vim
 source ~/dotfiles/nvim/languages/terraform.vim
 source ~/dotfiles/nvim/languages/typescript.vim
 
-"my scripts
-source ~/.config/nvim/incubator.vim
+"script for vim terminal
+source ~/dotfiles/nvim/scripts/vim/incubator.vim
 
 let mapleader = "," " leader key is ,
 
@@ -335,74 +352,7 @@ set hlsearch
 " set expandtab
 " set shiftwidth=2
 
-set nofoldenable
-set foldlevel=99
-set foldlevelstart=99
-set fillchars=fold:\
-set foldtext=CustomFoldText()
-setlocal foldmethod=expr
-setlocal foldexpr=GetPotionFold(v:lnum)
-highlight Folded
-
-function! GetPotionFold(lnum)
-  if getline(a:lnum) =~? '\v^\s*$'
-    return '-1'
-  endif
-
-  let this_indent = IndentLevel(a:lnum)
-  let next_indent = IndentLevel(NextNonBlankLine(a:lnum))
-
-  if next_indent == this_indent
-    return this_indent
-  elseif next_indent < this_indent
-    return this_indent
-  elseif next_indent > this_indent
-    return '>' . next_indent
-  endif
-endfunction
-
-function! IndentLevel(lnum)
-    return indent(a:lnum) / &shiftwidth
-endfunction
-
-function! NextNonBlankLine(lnum)
-  let numlines = line('$')
-  let current = a:lnum + 1
-
-  while current <= numlines
-      if getline(current) =~? '\v\S'
-          return current
-      endif
-
-      let current += 1
-  endwhile
-
-  return -2
-endfunction
-
-function! CustomFoldText()
-  " get first non-blank line
-  let fs = v:foldstart
-
-  while getline(fs) =~ '^\s*$' | let fs = nextnonblank(fs + 1)
-  endwhile
-
-  if fs > v:foldend
-      let line = getline(v:foldstart)
-  else
-      let line = substitute(getline(fs), '\t', repeat(' ', &tabstop), 'g')
-  endif
-
-  let w = winwidth(0) - &foldcolumn - (&number ? 8 : 0)
-  let foldSize = 1 + v:foldend - v:foldstart
-  let foldSizeStr = " " . foldSize . " lines "
-  let foldLevelStr = repeat("+--", v:foldlevel)
-  let expansionString = repeat(" ", w - strwidth(foldSizeStr.line.foldLevelStr))
-  return line . expansionString . foldSizeStr . foldLevelStr
-endfunction
-
-
-
+source ~/dotfiles/nvim/scripts/vim/folding.vim
 " set listchars=tab:\|\
 " set list
 
@@ -503,9 +453,6 @@ let g:which_key_map.v.p ={'name':'+plug'}
 nnoremap <silent> <space>vpu :PlugUpdate<cr>
 nnoremap <silent> <space>vpi :PlugStatus<cr>
 nnoremap <silent> <space>vpc :PlugClean<cr>
-
-let g:which_key_map.v.c ={'name':'+coc'}
-nnoremap <silent> <space>vcu :CocUpdate<cr>
 
 let g:which_key_map.v.i ={'name':'+init.vim'}
 nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>:LightlineReload<cr>
@@ -747,7 +694,7 @@ endif
 
 " --- LUA LSP 0.5
 if g:vimmode == 3
-  source ~/.config/nvim/lualsp.vim
+  source ~/dotfiles/nvim/plugins/nvim/lualsp.vim
 endif
 
 function! RecurseForPath(dict,skey)
@@ -761,3 +708,16 @@ function! RecurseForPath(dict,skey)
   endfor
 endfunction
 
+" "dim inactive
+" hi ActiveWindow guibg=#282828
+" hi InactiveWindow guibg=#32302f
+" " Call method on window enter
+" augroup WindowManagement
+"   autocmd!
+"   autocmd WinEnter * call Handle_Win_Enter()
+" augroup END
+"
+" function! Handle_Win_Enter()
+"   setlocal winhighlight=Normal:ActiveWindow,NormalNC:InactiveWindow
+" endfunction
+"

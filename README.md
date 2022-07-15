@@ -238,7 +238,9 @@ echom getline(line("'{")+1) "line content on the beginning of paragraph
 test lua embedded in vim
 ```vim
 lua << EOF
+
 print('abf')
+
 EOF
 ```
 
@@ -290,4 +292,29 @@ call NextItem()
 ```vim
 source ./nvim/fugidiff.vim
 echo EndsWith('cd','cd')
+```
+
+test lua embedded in vim
+```vim
+lua << EOF
+local hydrastatus = require('hydra.statusline')
+
+      local modes = {
+        n = {name = 'NORMAL',bg = 'abc'},
+        i = {name = 'INSERT',bg = 'abc'},
+        v = {name = 'VISUAL',bg = 'abc'},
+        [''] = {name = 'V-Block',bg = 'abc'},
+        V = {name = 'V-Line',bg = 'abc'},
+        c = {name = 'COMMAND', bg = 'abc'},
+        R = {name = 'REPLACE', bg = 'abc'},
+        Rv = {name = 'V-Replace', bg = 'abc'},
+        t = {name = 'TERMINAL', bg = 'abc'},
+      }
+     -- modes.n = 'NORMAL'
+mode = 'n'
+
+--print(modes[vim.fn.mode()].name)
+print(modes[mode].name)
+
+EOF
 ```
