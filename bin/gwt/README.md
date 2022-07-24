@@ -4,25 +4,25 @@
 
 #### I need to add active remote branch to repos
 ```bash
-gwt link <linkbranch>
+gwt branch link <linkbranch>
 ```
-- list branches fzf
+- list remote branches fzf
 - create folder
 - clone branch
 - switch to folder
 - switch tmux pane
 
-#### I need to switch to another already linked branch repo *gwt switch*
+#### I need to switch to another already linked branch repo *gwt branch switch*
 ```bash
-gwt switch <localbranch>
+gwt branch switch <localbranch>
 ```
-- list local branches fzf
+- list local branches fzf (if not set)
 - switch to folder
-- switch tmux pane
+- switch tmux pane (if in tmux)
 
 #### I need to create new branch from existing branch
 ```bash
-gwt create <existingbranch> <newbranchname>
+gwt branch create <existingbranch> <newbranchname>
 ```
 - ask for name
 - create folder
@@ -30,17 +30,41 @@ gwt create <existingbranch> <newbranchname>
 - switch to folder
 - switch tmux pane
 
+#### I need to create new branch from existing branch
+```bash
+gwt branch rename <existingbranch>
+```
+- ask for name
+- rename folder
+- rename remote branch (if exists)
+- switch to folder
+- switch tmux pane (if exist $GWT_TMUX)
+
 #### I need to archive local linked branch
 ```bash
-gwt remove <localbranch>
+gwt branch archive <localbranch>
 ```
 - check if folder archive exists
 - move branch local folder to branch folder
 
 #### I need to merge my branch from another brach
 ```bash
-gwt merge <mergefrombranch>
+gwt branch merge <mergefrombranch>
 ```
+
+#### I need to archive switch to branch
+```bash
+gwt branch switch <localbranch>
+```
+- check if folder archive exists
+- move branch local folder to branch folder
+
+#### I need to archive switch to branch "PRIVATE?"
+```bash
+gwt branch fullname <localbranch>
+```
+- get branch from cwd (if not set localbranch)
+- return branch with repo
 
 #### I need to init new local repo
 - [  ]
@@ -51,13 +75,19 @@ gwt repo init <reponame> <repopath>
 #### I need to push local repo to remote
 - [  ]
 ```bash
-gwt repo create <originname> <isprivate>
+gwt repo push <originname> <isprivate>
 ```
 
 #### I need to clone remote to local
 - [  ]
 ```bash
 gwt repo clone <originname> <repopath>
+```
+
+#### I need to clone get current repo root "PRIVATE?"
+- [  ]
+```bash
+gwt repo rootpath
 ```
 
 #### I need to pull request my branch to another brach

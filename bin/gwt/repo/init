@@ -2,10 +2,14 @@
 #create root with master
 mainbr="main"
 devbr="develop"
+
 # name="mpo-follow-up-db"
 # acc="github.com-lego"
-if [[ -z  $path ]]; then
-  echo "path is empty"
+
+[[ -z $initcommit ]] && initcommit='repo creation commit'
+
+if [[ ! -d  $path ]]; then
+  echo "path is not exists"
   exit 0
 fi
 
@@ -19,19 +23,27 @@ if [[ -d  "$path/$name" ]]; then
   exit 0
 fi
 
+#create main branch
 mkdir -p "$path/$name/$mainbr"
 cd "$path/$name/$mainbr"
 git init .
 git checkout -b $mainbr
+
 touch README.md
+git add README.md
 
+git commit -m "$initcommit"
+
+#clone from mainbr
 brname=$devbr
-mkdir -p ../$brname
-git worktree add -b $brname ../$brname
-cd -
+brfull="$path/$name/$brname"
 
-cd "$path/$name/$brname"
-git checkout -b $brname
+mkdir -p ${brfull}
+git worktree add -b $brname ${brfull}
+
+cd ${brfull}
+
+# git checkout -b $brname
 
 # git remote add origin "git@${acc}:LEGO/${name}.git"
 # git pull origin $mainbr
