@@ -11,6 +11,7 @@ Plug 'nvim-neo-tree/neo-tree.nvim'
 
 let g:which_key_map.e ={'name':'+explorer'}
 nnoremap <silent> <space>E :NeoTreeFocus<cr>
+nnoremap <silent> <space>B :NeoTreeFocus buffers<cr>
 
 function LoadedNeoTree()
 

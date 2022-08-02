@@ -27,8 +27,8 @@ nnoremap <silent> <space>ww :Windows<cr>
 nnoremap <silent> <space>tn :Trep<cr>
 nnoremap <silent> <space>ff :Rg<cr>
 nnoremap <silent> <space>vk :Maps<cr>
-let g:which_key_map.v.h ={'name':'+help'}
-nnoremap <silent> <space>vhf :Helptags<cr>
+
+" nnoremap <silent> <space>vhf :Helptags<cr>
 let g:fzf_layout = { 'window': 'call OpenFloatingWin()' }
 " let g:fzf_layout = { 'window': {'width': 0.95, 'height': 0.95} }
 " let g:fzf_preview_window = ['down:40%:hidden', 'ctrl-/']

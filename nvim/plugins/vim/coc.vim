@@ -133,6 +133,19 @@ function LoadedCoc()
   "TBR Vista succed by fzf-coc
   " nmap <silent>  o :<cr>
 
+  "--- Vista --- NEEDED similar as coclist as outline
+  "PROBABLY TBR succed by fzf-coc
+  let g:vista_default_executive = 'coc'
+  let g:vista#renderer#enable_icon = 1
+  let g:vista#renderer#icons = {
+    \   "function": "\uf794",
+    \   "variable": "\uf71b",
+    \  }
+  " let g:vista_icon_indent = ["▸ ", ""]
+  let g:vista_icon_indent = ["", ""] " kept emtpy using iguides
+  "g:vista_echo_cursor_strategy = 'both'
+
+" --- fzf ---
   nnoremap <silent> <space>vfc :<C-u>CocFzfList commands<cr>
   nnoremap <silent> <space>a :<C-u>CocFzfList diagnostics<cr>
   " nnoremap <silent> <space>E :CocCommand explorer<cr>

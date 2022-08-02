@@ -7,7 +7,7 @@ lua << EOF
 
 require'lspconfig'.bashls.setup{
   on_attach = on_attach_default,
-  capabilities = ufo_capabilities,
+  capabilities = lsp_capabilities,
   flags = {
     debounce_text_changes = 150,
   },

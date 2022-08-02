@@ -8,18 +8,28 @@ devbr="develop"
 
 [[ -z $initcommit ]] && initcommit='repo creation commit'
 
-if [[ ! -d  $path ]]; then
+if [[ -z "$path" ]]; then
+  echo "using current folder no path specified"
+  path=$PWD
+fi
+
+if [[ ! -d "$path" ]]; then
   echo "path is not exists"
   exit 0
 fi
 
-if [[ -z  $name ]]; then
+if [[ "$path"=="$rootpath" ]]; then
+  echo "path cannot be in root please use on of the identity subfolders"
+  exit 0
+fi
+
+if [[ -z $name ]]; then
   echo "name is empty"
   exit 0
 fi
 
-if [[ -d  "$path/$name" ]]; then
-  echo "already exists"
+if [[ -d "$path/$name" ]]; then
+  echo "folder already exists"
   exit 0
 fi
 

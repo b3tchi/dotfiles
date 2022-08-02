@@ -1,7 +1,5 @@
 ### My stories
 
-[toc]
-
 #### I need to add active remote branch to repos
 ```bash
 gwt branch link <linkbranch>

@@ -18,6 +18,9 @@
 *sessions*
 ~/.local/share/nvim/session/* - startify sessions
 
+*mason*
+~/.local/share/nvim/mason/packages/* - lsps servers
+
 *plugin manager*
 ~/.vim/plugged/* - vim plug
 

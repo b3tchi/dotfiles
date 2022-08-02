@@ -1,4 +1,11 @@
 ""Deoplete""
+  "   Plug 'Shougo/deoplete.nvim'
+  "   if !has('nvim')
+  "     Plug 'roxma/nvim-yarp'
+  "     Plug 'roxma/vim-hug-neovim-rpc'
+  "   endif
+  "   let g:deoplete#enable_at_startup = 1
+  "   Plug 'dense-analysis/ale'
 
 let g:deoplete#enable_at_startup = 1
 autocmd InsertLeave,CompleteDone * if pumvisible() == 0 | pclose | endif

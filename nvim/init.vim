@@ -4,7 +4,7 @@ endif
 
 " Required:
 " let useCoc = 1
-let g:lspClient = 1 "1 for coc-nvim, 2 for deoplete (WIP), -1 non Lsp Client (TBD)
+let g:lspClient = 3 "1 for coc-nvim, 2 for deoplete (WIP), 3 neovim native, -1 non Lsp Client (TBD)
 " let g:vimTheme = 2 "1 solarized8, 2 gruvbox
 
 " Identify Os and Actual Device - Who is coming home?
@@ -80,6 +80,7 @@ endif
 " clobal variables
 let g:which_key_map =  {}
 let g:which_key_map.v ={'name':'+vim'}
+let g:which_key_map.v.h ={'name':'+help'}
 
 " Required
 call plug#begin(expand('~/.vim/plugged'))
@@ -92,6 +93,7 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'embear/vim-localvimrc' "loading rootfolder placed vim configs /.lvimrc
   Plug 'ryanoasis/vim-devicons' "nerd fonts icons
 
+  ""Welcome & Session Management
   source ~/dotfiles/nvim/plugins/vim/startify.vim
 
   ""Searching fzf
@@ -99,7 +101,6 @@ call plug#begin(expand('~/.vim/plugged'))
 
   Plug 'jesseleite/vim-agriculture' "adding option for :RgRaw to run raw commands
   " Plug 'jremmen/vim-ripgrep' "testing ripgrep single addin :Rg in fzf seems broken
-
 
   "" White Space Highlighter
   Plug 'ntpeters/vim-better-whitespace'
@@ -110,8 +111,6 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'tpope/vim-surround' "surrounding words with symbols
   "Plug 'tmsvg/pear-tree' "getting some issues for the function disabled
 
-  source ~/dotfiles/nvim/plugins/vim/git.vim
-
   "dim iniactive panes
   " source ~/dotfiles/nvim/plugins/nvim/shadenvim.vim
   " source ~/dotfiles/nvim/plugins/vim/viminactive.vim
@@ -120,9 +119,6 @@ call plug#begin(expand('~/.vim/plugged'))
   " Plug 'gregsexton/gitv', {'on': ['Gitv']}
   Plug 'powerman/vim-plugin-AnsiEsc'
 
-  ""markdown
-  Plug 'vim-pandoc/vim-pandoc-syntax'
-  Plug 'tpope/vim-markdown'
   Plug 'mmai/vim-markdown-wiki'
   Plug 'dhruvasagar/vim-table-mode'
 
@@ -135,22 +131,14 @@ call plug#begin(expand('~/.vim/plugged'))
   ""addvanced ide features
   if g:lspClient == 1
     source ~/dotfiles/nvim/plugins/vim/coc.vim
-  " elseif g:lspClient == 2
-  "   Plug 'Shougo/deoplete.nvim'
-  "   if !has('nvim')
-  "     Plug 'roxma/nvim-yarp'
-  "     Plug 'roxma/vim-hug-neovim-rpc'
-  "   endif
-  "   let g:deoplete#enable_at_startup = 1
-  "   Plug 'dense-analysis/ale'
+  elseif g:lspClient == 2
+    source ~/dotfiles/nvim/plugins/vim/deoplete.vim
   endif
 
   " Svelte
   Plug 'evanleck/vim-svelte'
   Plug 'mattn/emmet-vim'
 
-  " Support for comments symbol by language regions Svelte & Html
-  Plug 'Shougo/context_filetype.vim' "language regions in files
   " Plug 'tyru/caw.vim' "comments with context regions
   " Plug 'b3tchi/caw.vim' "comments with context regions addition for svelte TEST
   " Plug 'scrooloose/nerdcommenter'
@@ -162,8 +150,6 @@ call plug#begin(expand('~/.vim/plugged'))
   "Tmux
   source ~/dotfiles/nvim/plugins/vim/vimux.vim
 
-  "syntax highlighting
-  Plug 'sheerun/vim-polyglot'
 
   "install dap for vim
   " source ~/dotfiles/nvim/plugins/vim/vimspector.vim
@@ -182,39 +168,42 @@ call plug#begin(expand('~/.vim/plugged'))
   " vimmode 3 => Neovim 0.5+ with lua
   if g:vimmode == 3
 
-    "language server implementation
-    Plug 'neovim/nvim-lspconfig' "offical NeoVim LSP plugin
-    Plug 'williamboman/nvim-lsp-installer' "automatic installer of LSPs
-    " LSP List [https://github.com/neovim/nvim-lspconfig/blob/master/CONFIG.md#svelte]
 
     " syntax and grammatics
     " Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'} "LSP based highlighting
     "to fix the iisue with slow markdown
     "https://github.com/nvim-treesitter/nvim-treesitter/issues/2206
     " Plug 'nvim-treesitter/nvim-treesitter', {'commit': '8ada8faf2fd5a74cc73090ec856fa88f34cd364b', 'do': ':TSUpdate'}
-    Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'}
     Plug 'nvim-lua/popup.nvim'
     Plug 'nvim-lua/plenary.nvim'
+
+    "language server implementation
+    source ~/dotfiles/nvim/plugins/nvim/lualsp.vim
+
+    "TBR with mason bellow kept for now
+    Plug 'williamboman/nvim-lsp-installer' "automatic installer of LSPs
+
+    "nvim-lsp-installer mk.2
+    source ~/dotfiles/nvim/plugins/nvim/mason.vim
+
+    " LSP List [https://github.com/neovim/nvim-lspconfig/blob/master/CONFIG.md#svelte]
+
+    "syntax highlight support
+    Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'}
 
     "telescope search instead of fzf
     " Plug 'nvim-telescope/telescope.nvim'
     " Plug 'nvim-telescope/telescope-fzf-native.nvim',  { 'do': 'make' }
     source ~/dotfiles/nvim/plugins/nvim/telescope.vim
 
+    ""nice headlines
+    source ~/dotfiles/nvim/plugins/nvim/headlines.vim
 
-    " git
-    " Plug 'sindrets/diffview.nvim'
-    Plug 'ThePrimeagen/git-worktree.nvim'
+     "orgmode
+    source ~/dotfiles/nvim/plugins/nvim/orgmode.vim
 
-    "outlines
-    Plug 'simrat39/symbols-outline.nvim' "outlines
-
-    "notes taking - NOT USED to be checked
-    Plug 'nvim-orgmode/orgmode'
-
-    ""completion
-    Plug 'hrsh7th/nvim-cmp'
-    Plug 'hrsh7th/cmp-nvim-lsp'
+    " ""completion
+    source ~/dotfiles/nvim/plugins/nvim/nvmcmp.vim
 
     "debugger
     source ~/dotfiles/nvim/plugins/nvim/nvimdap.vim
@@ -222,7 +211,14 @@ call plug#begin(expand('~/.vim/plugged'))
     "folds
     source ~/dotfiles/nvim/plugins/nvim/foldufo.vim
 
-    ""Indent guides
+    "git
+    source ~/dotfiles/nvim/plugins/nvim/git.vim
+    " Plug 'ThePrimeagen/git-worktree.nvim'
+
+    "outlines
+    Plug 'simrat39/symbols-outline.nvim' "outlines
+
+   ""Indent guides
     Plug 'lukas-reineke/indent-blankline.nvim'
 
     ""Treesitter backed comments
@@ -248,6 +244,11 @@ call plug#begin(expand('~/.vim/plugged'))
     source ~/dotfiles/nvim/plugins/nvim/neotree.vim
 
   else
+    " Support for comments symbol by language regions Svelte & Html
+    Plug 'Shougo/context_filetype.vim' "language regions in files
+
+    "" Git
+    source ~/dotfiles/nvim/plugins/vim/git.vim
 
     " Another Comment Pluging with HTML region support
     Plug 'tomtom/tcomment_vim'
@@ -270,11 +271,16 @@ call plug#begin(expand('~/.vim/plugged'))
     " source ~/dotfiles/nvim/plugins/vim/solarized.vim
     " source ~/dotfiles/nvim/plugins/nvim/gruvboxnvim.vim
 
+    "syntax highlighting
+    Plug 'sheerun/vim-polyglot'
+
     " Plug 'lifepillar/vim-solarized8'
     " Plug 'morhetz/gruvbox'
     " Plug 'kaicataldo/material.vim'
     " Plug 'altercation/vim-colors-solarized'
     " Plug 'iCyMind/NeoSolarized'
+
+    source ~/dotfiles/nvim/plugins/vim/markdown.vim
   endif
 
 call plug#end()
@@ -304,17 +310,10 @@ set noshowmode " INSERT déjà affiché par lightbar
 
 autocmd FileType vista,coc-explorer setlocal signcolumn=no
 
-"TBD reorganize coc same as other files to plugin folder
-" if g:lspClient == 1
-"   source ~/.config/nvim/coc.vim
-" " elseif g:lspClient == 2
-"   " source ~/.config/nvim/plugins/vim/deoplete.vim
-" endif
-
 "languages
 source ~/dotfiles/nvim/languages/bash.vim
 source ~/dotfiles/nvim/languages/yaml.vim
-source ~/dotfiles/nvim/languages/powershell.vim
+" source ~/dotfiles/nvim/languages/powershell.vim DISABLED WITH COC GET BACK WITH MASON ?
 source ~/dotfiles/nvim/languages/csharp.vim
 source ~/dotfiles/nvim/languages/terraform.vim
 source ~/dotfiles/nvim/languages/typescript.vim
@@ -340,6 +339,12 @@ set title "for Session title names
 set incsearch
 set hlsearch
 
+"indentations spaces
+set tabstop=2
+set softtabstop=2
+set expandtab
+set shiftwidth=2
+
 "" Define folding
 " set foldmethod=indent
 " set foldlevelstart=20
@@ -347,12 +352,10 @@ set hlsearch
 "
 " " set foldmethod=syntax
 " set foldignore=
-" set tabstop=2
-" set softtabstop=2
-" set expandtab
-" set shiftwidth=2
 
-source ~/dotfiles/nvim/scripts/vim/folding.vim
+if g:vimmode == 1
+	source ~/dotfiles/nvim/scripts/vim/folding.vim
+end
 " set listchars=tab:\|\
 " set list
 
@@ -543,14 +546,15 @@ nnoremap <S-Tab> :bprev!<CR>
 nnoremap <C-Tab> :bnext!<CR>
 nnoremap <S-C-Tab> :bprev!<CR>
 
-inoremap <expr><S-TAB> pumvisible() ? "\<C-p>" : "\<C-h>"
-inoremap <expr><C-S-Space> pumvisible() ? "\<C-p>" : "\<C-h>"
+" inoremap <expr><S-TAB> pumvisible() ? "\<C-p>" : "\<C-h>"
+" inoremap <expr><C-S-Space> pumvisible() ? "\<C-p>" : "\<C-h>"
+
+" inoremap <expr> <cr> pumvisible() ? "\<C-y>" : "\<C-g>u\<CR>"
+" inoremap <expr> <CR> pumvisible() ? "\<C-y>" : "\<CR>"
 
 " tmap <S-TAB> <Nop>
 " tmap <TAB> <Nop>
 
-inoremap <expr> <cr> pumvisible() ? "\<C-y>" : "\<C-g>u\<CR>"
-" inoremap <expr> <CR> pumvisible() ? "\<C-y>" : "\<CR>"
 "}}}
 " ----------------------------------
 " --------- Plugins config ---------
@@ -577,20 +581,8 @@ endif
 let g:localvimrc_sandbox = 0
 let g:localvimrc_ask = 0
 
-"--- Vista --- NEEDED similar as coclist as outline
-"PROBABLY TBR succed by fzf-coc
-let g:vista_default_executive = 'coc'
-let g:vista#renderer#enable_icon = 1
-let g:vista#renderer#icons = {
-  \   "function": "\uf794",
-  \   "variable": "\uf71b",
-  \  }
-" let g:vista_icon_indent = ["▸ ", ""]
-let g:vista_icon_indent = ["", ""] " kept emtpy using iguides
-"g:vista_echo_cursor_strategy = 'both'
-
-" --- fzf ---
-" moved to fzf.vim
+"--- Vista ---
+"moved to coc.vim
 
 let $BAT_THEME = 'gruvbox' "need bat 16.0 and higher
 " let $BAT_THEME = 'OneHalfDark'
@@ -604,8 +596,9 @@ let g:rg_derive_root='true'
 highlight Comment cterm=italic
 
 
-"--- startify --- TODO
-" let g:startify_bookmarks = ['~/svn', '~/dev']
+"--- startify ---
+"moved to startify.vim
+
 "--- Indent Guides ---
 " let g:indent_guides_enable_on_vim_startup = 1
 " let g:indent_guides_auto_colors = 0
@@ -625,20 +618,6 @@ endif
 
 " --- Vim Test ---
 let g:test#strategy = 'neovim'
-
-" --- Markdown specific ---
-let g:markdown_fenced_languages = ['coffee', 'css', 'erb=eruby', 'javascript', 'js=javascript', 'json=javascript', 'ruby', 'sass','sh=bash','bash', 'vim', 'xml','sql','cs']
-
-function! Mdftinit()
-  setlocal spell spelllang=en_us
-  " set filetype=markdown.pandoc
-  let g:pandoc#syntax#codeblocks#embeds#langs = ["vim=vim"]
-  " echom 'loade nmd'
-endfunction
-augroup pandoc_syntax
-  au! BufNewFile,BufFilePre,BufRead *.md call Mdftinit()
-  " autocmd! FileType vimwiki set syntax=markdown.pandoc
-augroup END
 
 " --- Svelte filetypes specific ---
 if !exists('g:context_filetype#filetypes')
@@ -678,7 +657,7 @@ let g:vimwiki_markdown_link_ext = 1
 let g:vimwiki_list = wikis
 let g:vimwiki_listsyms = ' –x'
 let g:vimwiki_listsym_rejected = 'x'
-let g:viswiki_folding = 'list'
+let g:vimwiki_folding = 'list'
 let g:vimwiki_key_mappings = { 'table_mappings': 0 } "! - to fix/change completion behavior
 
 " --- VimWhichKey ---
@@ -690,11 +669,12 @@ if g:vimmode != 3
   " moved before bindigs
   " let g:which_key_use_floating_win = 1 "make as floating window
   " let g:which_key_run_map_on_popup = 1
+
 endif
 
 " --- LUA LSP 0.5
 if g:vimmode == 3
-  source ~/dotfiles/nvim/plugins/nvim/lualsp.vim
+  source ~/dotfiles/nvim/plugins/nvim/lualegacy.vim
 endif
 
 function! RecurseForPath(dict,skey)
@@ -707,17 +687,3 @@ function! RecurseForPath(dict,skey)
     endif
   endfor
 endfunction
-
-" "dim inactive
-" hi ActiveWindow guibg=#282828
-" hi InactiveWindow guibg=#32302f
-" " Call method on window enter
-" augroup WindowManagement
-"   autocmd!
-"   autocmd WinEnter * call Handle_Win_Enter()
-" augroup END
-"
-" function! Handle_Win_Enter()
-"   setlocal winhighlight=Normal:ActiveWindow,NormalNC:InactiveWindow
-" endfunction
-"

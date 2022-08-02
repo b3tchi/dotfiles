@@ -14,22 +14,31 @@ function LoadedGit()
   autocmd FileType fugitive nmap <buffer><silent> h :call PrevChange()<CR>
 
   let g:which_key_map.g ={'name':'+git'}
+
   let g:which_key_map.g.g = 'fugitive'
   nnoremap <silent> <space>gg :tab G<cr>
+
   let g:which_key_map.g.C = 'commit&push'
   nnoremap <space>gC :w \| :G commit -a -m '' \| :G push<left><left><left><left><left><left><left><left><left><left><left>
+
   let g:which_key_map.g.c = 'commit'
   nnoremap <space>gc :G commit -m ''<left>
+
   let g:which_key_map.g.p = 'pull'
   nnoremap <silent> <space>gp :G pull<cr>
+
   let g:which_key_map.g.P = 'push'
   nnoremap <silent> <space>gP :G push<cr>
+
   let g:which_key_map.g.f = 'fetch'
   nnoremap <silent> <space>gf :G fetch<cr>
+
   let g:which_key_map.g.m = 'merge'
   nnoremap <silent> <space>gm :G merge<cr>
+
   let g:which_key_map.g.b = 'blame'
   nnoremap <silent> <space>gb :G blame<cr>
+
   let g:which_key_map.g.l = 'log'
   nnoremap <silent> <space>gl :Flog -format=%>\|(65)\ %>(65)\ %<(40,trunc)%s\ %>\|(120%)%ad\ %an%d -date=short<cr>
   " let g:which_key_map.g.w = 'worktree'
