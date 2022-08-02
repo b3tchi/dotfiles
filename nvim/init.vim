@@ -120,9 +120,6 @@ call plug#begin(expand('~/.vim/plugged'))
   " Plug 'gregsexton/gitv', {'on': ['Gitv']}
   Plug 'powerman/vim-plugin-AnsiEsc'
 
-  ""markdown
-  Plug 'vim-pandoc/vim-pandoc-syntax'
-  Plug 'tpope/vim-markdown'
   Plug 'mmai/vim-markdown-wiki'
   Plug 'dhruvasagar/vim-table-mode'
 
@@ -149,8 +146,6 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'evanleck/vim-svelte'
   Plug 'mattn/emmet-vim'
 
-  " Support for comments symbol by language regions Svelte & Html
-  Plug 'Shougo/context_filetype.vim' "language regions in files
   " Plug 'tyru/caw.vim' "comments with context regions
   " Plug 'b3tchi/caw.vim' "comments with context regions addition for svelte TEST
   " Plug 'scrooloose/nerdcommenter'
@@ -162,8 +157,6 @@ call plug#begin(expand('~/.vim/plugged'))
   "Tmux
   source ~/dotfiles/nvim/plugins/vim/vimux.vim
 
-  "syntax highlighting
-  Plug 'sheerun/vim-polyglot'
 
   "install dap for vim
   " source ~/dotfiles/nvim/plugins/vim/vimspector.vim
@@ -182,25 +175,36 @@ call plug#begin(expand('~/.vim/plugged'))
   " vimmode 3 => Neovim 0.5+ with lua
   if g:vimmode == 3
 
-    "language server implementation
-    Plug 'neovim/nvim-lspconfig' "offical NeoVim LSP plugin
-    Plug 'williamboman/nvim-lsp-installer' "automatic installer of LSPs
-    " LSP List [https://github.com/neovim/nvim-lspconfig/blob/master/CONFIG.md#svelte]
 
     " syntax and grammatics
     " Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'} "LSP based highlighting
     "to fix the iisue with slow markdown
     "https://github.com/nvim-treesitter/nvim-treesitter/issues/2206
     " Plug 'nvim-treesitter/nvim-treesitter', {'commit': '8ada8faf2fd5a74cc73090ec856fa88f34cd364b', 'do': ':TSUpdate'}
-    Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'}
     Plug 'nvim-lua/popup.nvim'
     Plug 'nvim-lua/plenary.nvim'
+
+    "language server implementation
+    Plug 'neovim/nvim-lspconfig' "offical NeoVim LSP plugin
+    Plug 'williamboman/nvim-lsp-installer' "automatic installer of LSPs
+    " LSP List [https://github.com/neovim/nvim-lspconfig/blob/master/CONFIG.md#svelte]
+
+    "syntax highlight support
+    Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'}
 
     "telescope search instead of fzf
     " Plug 'nvim-telescope/telescope.nvim'
     " Plug 'nvim-telescope/telescope-fzf-native.nvim',  { 'do': 'make' }
     source ~/dotfiles/nvim/plugins/nvim/telescope.vim
 
+    ""nice headlines
+    source ~/dotfiles/nvim/plugins/nvim/headlines.vim
+
+    ""Indent guides
+    Plug 'lukas-reineke/indent-blankline.nvim'
+
+    "orgmode
+    source ~/dotfiles/nvim/plugins/nvim/orgmode.vim
 
     " git
     " Plug 'sindrets/diffview.nvim'
@@ -208,9 +212,6 @@ call plug#begin(expand('~/.vim/plugged'))
 
     "outlines
     Plug 'simrat39/symbols-outline.nvim' "outlines
-
-    "notes taking - NOT USED to be checked
-    Plug 'nvim-orgmode/orgmode'
 
     ""completion
     Plug 'hrsh7th/nvim-cmp'
@@ -222,8 +223,6 @@ call plug#begin(expand('~/.vim/plugged'))
     "folds
     source ~/dotfiles/nvim/plugins/nvim/foldufo.vim
 
-    ""Indent guides
-    Plug 'lukas-reineke/indent-blankline.nvim'
 
     ""Treesitter backed comments
     Plug 'numToStr/Comment.nvim'
@@ -248,6 +247,8 @@ call plug#begin(expand('~/.vim/plugged'))
     source ~/dotfiles/nvim/plugins/nvim/neotree.vim
 
   else
+    " Support for comments symbol by language regions Svelte & Html
+    Plug 'Shougo/context_filetype.vim' "language regions in files
 
     " Another Comment Pluging with HTML region support
     Plug 'tomtom/tcomment_vim'
@@ -270,11 +271,16 @@ call plug#begin(expand('~/.vim/plugged'))
     " source ~/dotfiles/nvim/plugins/vim/solarized.vim
     " source ~/dotfiles/nvim/plugins/nvim/gruvboxnvim.vim
 
+    "syntax highlighting
+    Plug 'sheerun/vim-polyglot'
+
     " Plug 'lifepillar/vim-solarized8'
     " Plug 'morhetz/gruvbox'
     " Plug 'kaicataldo/material.vim'
     " Plug 'altercation/vim-colors-solarized'
     " Plug 'iCyMind/NeoSolarized'
+
+    source ~/dotfiles/nvim/plugins/vim/markdown.vim
   endif
 
 call plug#end()
@@ -340,6 +346,12 @@ set title "for Session title names
 set incsearch
 set hlsearch
 
+"indentations spaces
+set tabstop=2
+set softtabstop=2
+set expandtab
+set shiftwidth=2
+
 "" Define folding
 " set foldmethod=indent
 " set foldlevelstart=20
@@ -347,12 +359,10 @@ set hlsearch
 "
 " " set foldmethod=syntax
 " set foldignore=
-" set tabstop=2
-" set softtabstop=2
-" set expandtab
-" set shiftwidth=2
 
-source ~/dotfiles/nvim/scripts/vim/folding.vim
+if g:vimmode == 1
+	source ~/dotfiles/nvim/scripts/vim/folding.vim
+end
 " set listchars=tab:\|\
 " set list
 
@@ -625,20 +635,6 @@ endif
 
 " --- Vim Test ---
 let g:test#strategy = 'neovim'
-
-" --- Markdown specific ---
-let g:markdown_fenced_languages = ['coffee', 'css', 'erb=eruby', 'javascript', 'js=javascript', 'json=javascript', 'ruby', 'sass','sh=bash','bash', 'vim', 'xml','sql','cs']
-
-function! Mdftinit()
-  setlocal spell spelllang=en_us
-  " set filetype=markdown.pandoc
-  let g:pandoc#syntax#codeblocks#embeds#langs = ["vim=vim"]
-  " echom 'loade nmd'
-endfunction
-augroup pandoc_syntax
-  au! BufNewFile,BufFilePre,BufRead *.md call Mdftinit()
-  " autocmd! FileType vimwiki set syntax=markdown.pandoc
-augroup END
 
 " --- Svelte filetypes specific ---
 if !exists('g:context_filetype#filetypes')

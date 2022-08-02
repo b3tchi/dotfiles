@@ -173,6 +173,7 @@ require("indent_blankline").setup {
     ,"which_key"
     ,"vim-plug"
     ,"dbout"
+    ,"org"
   }
 
 }
