@@ -199,6 +199,12 @@ call plug#begin(expand('~/.vim/plugged'))
     ""nice headlines
     source ~/dotfiles/nvim/plugins/nvim/headlines.vim
 
+    ""Indent guides
+    Plug 'lukas-reineke/indent-blankline.nvim'
+
+    "orgmode
+    source ~/dotfiles/nvim/plugins/nvim/orgmode.vim
+
      "orgmode
     source ~/dotfiles/nvim/plugins/nvim/orgmode.vim
 

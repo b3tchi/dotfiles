@@ -20,12 +20,12 @@ lua << EOF
   --
 
   -- option 2: nvim lsp as LSP client
-  -- _G.ufo_capabilities = vim.lsp.protocol.make_client_capabilities()
-
-  -- ufo_capabilities.textDocument.foldingRange = {
-  --   dynamicRegistration = false,
-  --   lineFoldingOnly = true
-  -- }
+--   _G.ufo_capabilities = vim.lsp.protocol.make_client_capabilities()
+--
+--   ufo_capabilities.textDocument.foldingRange = {
+--     dynamicRegistration = false,
+--     lineFoldingOnly = true
+--   }
 --
 --   local handler = function(virtText, lnum, endLnum, width, truncate)
 --     local newVirtText = {}
