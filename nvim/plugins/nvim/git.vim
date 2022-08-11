@@ -8,19 +8,28 @@ Plug 'TimUntersberger/neogit'
 Plug 'nvim-lua/plenary.nvim'
 Plug 'sindrets/diffview.nvim'
 
+Plug  'dinhhuy258/git.nvim'
+
 function LoadedGitNvim()
 
 lua << EOF
 
+--git markers
 require('gitsigns').setup()
 
+--git integration
+require('git').setup()
+
+--diff view
+require('diffview').setup()
+
+--adding diffview
 require('neogit').setup({
   integrations = { -- Requires you to have `sindrets/diffview.nvim` installed.
     diffview = true,
   },
 })
 
-require('diffview').setup()
 
 
 EOF
