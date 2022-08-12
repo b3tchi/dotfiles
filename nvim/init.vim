@@ -158,12 +158,14 @@ call plug#begin(expand('~/.vim/plugged'))
   "Plug 'janko-m/vim-test'
   "Plug 'neomake/neomake'
 
-  " Adding dadbod for databases
+  "Adding dadbod for databases
   source ~/dotfiles/nvim/plugins/vim/dadbod.vim
 
   "Run command async
   Plug 'skywind3000/asyncrun.vim'
 
+  "Git
+  source ~/dotfiles/nvim/plugins/vim/git.vim
 
   " vimmode 3 => Neovim 0.5+ with lua
   if g:vimmode == 3
@@ -217,8 +219,8 @@ call plug#begin(expand('~/.vim/plugged'))
     "folds
     source ~/dotfiles/nvim/plugins/nvim/foldufo.vim
 
-    "git
-    source ~/dotfiles/nvim/plugins/nvim/git.vim
+    "git missing some features
+    " source ~/dotfiles/nvim/plugins/nvim/git.vim
     " Plug 'ThePrimeagen/git-worktree.nvim'
 
     "outlines
@@ -253,8 +255,6 @@ call plug#begin(expand('~/.vim/plugged'))
     " Support for comments symbol by language regions Svelte & Html
     Plug 'Shougo/context_filetype.vim' "language regions in files
 
-    "" Git
-    source ~/dotfiles/nvim/plugins/vim/git.vim
 
     " Another Comment Pluging with HTML region support
     Plug 'tomtom/tcomment_vim'

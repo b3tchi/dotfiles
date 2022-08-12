@@ -40,6 +40,8 @@ do
 
 done
 
+#small change
+
 path=$(git worktree list | head -1  | sed -e 's/ .*$//')
 activelocal=$(git worktree list | head -1 | sed -e 's/^.*\[//' | sed -e 's/\]$//')
 root=${path:0:(($(echo $path | wc --chars)-$(echo $activelocal | wc --chars)-1))}

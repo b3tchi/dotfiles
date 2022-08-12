@@ -11,6 +11,51 @@ fu! EndsWith(longer, shorter) abort
   return a:longer[(len(a:longer)-len(a:shorter)):] ==# a:shorter
 endfunction
 
+lua << EOF
+
+function _G.test()
+  local buffers = {}
+  local len = 0
+  -- local options_listed = options.listed
+  local vim_fn = vim.fn
+  local buflisted = vim_fn.buflisted
+
+  -- current table id
+  local tabid = vim.fn.tabpagebuflist()
+  -- print(tabid)
+
+  -- function string.starts(String,Start)
+  --    return string.sub(String,1,string.len(Start))==Start
+  -- end
+
+
+  -- list all buffers in current tab
+  for buffer = 1, vim_fn.bufnr('$') do
+    if vim.fn.index(tabid, buffer) ~= -1 then
+      -- len = len + 1
+      -- print(vim.fn.bufname(buffer))
+      -- print(vim.fn.index(tabid, buffer))
+      -- buffers[len] = buffer
+
+
+      bufname = tostring(vim.fn.bufname(buffer))
+      print(str)
+
+      endwidth="nvim/scripts$"
+
+      if (bufname:find(endwidth ) ~= nil) then
+        stagebufid = buffer
+
+      -- string.starts(vim.fn.bufname(buffer),'nvim/scripts')
+      end
+
+    end
+  end
+end
+EOF
+
+" call v:lua.test()
+
 fu! Checkdiff() abort
   let tpbl = []
   let tpbl = tabpagebuflist()
@@ -22,37 +67,43 @@ fu! Checkdiff() abort
   let wttgtwinid = -1
   let wttgtbufwincount = 1
 
+  "loop all tables in current buffer
   for buf in filter(range(1, bufnr('$')), 'bufexists(bufname(v:val)) && index(tpbl, v:val)>=0')
-    " if bufname(buf) == "README.md"
-    "   echom len(win_findbuf(buf))
-    " endif
 
-    let bfname = bufname(buf)
-    " echom bfname
-    if EndsWith(bfname,".git/index")
+    " main fugitive buffer
+    if getbufvar(buf, '&filetype') == "fugitive"
       " echom "main"
       let stagebuf = buf
-    endif
 
+    " other fugitive buffers
+    else
 
-    if StartsWith(bfname,"fugitive://" )
-      " echom matchstrpos(bufname(buf),'\.git\/\/0\/')
-      let posm = matchstrpos(bfname,'\.git\/\/0\/')
-      let wttgtbufname = bfname[posm[2]:]
+      let bfname = bufname(buf)
+      "check fugitive buffers
+      if StartsWith(bfname,"fugitive://" )
 
-      for difwin in filter(range(1, winnr('$')), 'getwinvar(v:val, "&diff") == 1')
-        let difname = bufname(winbufnr(difwin))
-        " echom 'difwin'. difwin . ' - ' . difname
-        if EndsWith(difname, wttgtbufname) && !StartsWith(difname,"fugitive://" )
-          let wttgtwinid = difwin
-        endif
+        " extract buffer name from fugitive diff buffer
+        let posm = matchstrpos(bfname,'\.git\/\/0\/')
+        let wttgtbufname = bfname[posm[2]:]
+        " echom posm
 
-      endfor
+        "find window winthin current buffer
+        for difwin in filter(range(1, winnr('$')), 'getwinvar(v:val, "&diff") == 1')
+          let difname = bufname(winbufnr(difwin))
+          " echom 'difwin'. difwin . ' - ' . difname
 
-      let wttgtbufid = bufnr(wttgtbufname)
-      let wtbufid = buf
-      let wttgtbufwincount = len(win_findbuf(wttgtbufid))
-      " echom "worktree"
+          "identify openned diff windows from fugitive Gdiffsplit
+          if EndsWith(difname, wttgtbufname) && !StartsWith(difname,"fugitive://" )
+            let wttgtwinid = difwin
+          endif
+
+        endfor
+
+        let wttgtbufid = bufnr(wttgtbufname)
+        let wtbufid = buf
+        let wttgtbufwincount = len(win_findbuf(wttgtbufid))
+        " echom "worktree"
+      endif
     endif
   endfor
 
@@ -121,18 +172,20 @@ fu! DiffTog(toggleDisabled) abort
   endif
 
   if (curfname != r.wt.fname) || (curfname == r.wt.fname && r.wt.tgtwinid == -1)
-    " echom 'ndiff'
-    normal o
-    execute "Gdiffsplit!"
-    " normal zR
-    normal gg
-    execute "GitGutterNextHunk"
-    " normal ]c
 
+    "open in new window
+    normal o
+    "start split
+    execute "Gdiffsplit!"
+
+    "go on top
+    normal gg
+    "go on first hunk
+    execute "GitGutterNextHunk"
+
+    "switch back to fugitive
     set switchbuf=useopen
     execute "sb" bufname(r.stage.bufid)
-  " else
-    " echom 'none'
   endif
 
 endfunction

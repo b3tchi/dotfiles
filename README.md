@@ -124,23 +124,33 @@ endif
 ```
 
 ```vim
+function! MyBuffprint()
   let tpbl = []
   let tpbl = tabpagebuflist()
 
   for buf in filter(range(1, bufnr('$')), 'bufexists(bufname(v:val)) && index(tpbl, v:val)>=0')
   ""  if getbufvar(buf, '&buftype') ==? 'terminal'
-      echom getbufvar(buf, '&filetype')
 
+      echom "******"
       echom bufname(buf)
-      if bufname(buf) == ".git/index"
-      set switchbuf=useopen
-      execute "sb" bufname(buf)
+      echom getbufvar(buf, '&filetype')
+      echom getbufvar(buf, '&filetype') == "fugitive"
+
+      let bfname = bufname(buf)
+      let posm = matchstrpos(bfname,'\.git\/\/0\/')
+      " if bufname(buf) == ".git/index"
+      echom "----"
+      echom posm
+      echom bfname[posm[2]:]
+      " set switchbuf=useopen
+      " execute "sb" bufname(buf)
       ""echom getbufvar(buf, '&')
       ""return
-   endif
+     " endif
   endfor
 ""echom expand('%')
-
+endfunction
+call MyBuffprint()
 ```
 
 ```vim
@@ -259,7 +269,7 @@ echom filereadable('./nvim/init.vim')
 
 buffer status
 ```vim
-source ./nvim/fugidiff.vim
+source ./nvim/scripts/vim/fugidiff.vim
 let r = Checkdiff()
 echom r
 ```
@@ -274,8 +284,8 @@ B --> D
 
 Current buffer items
 ```vim
-source ./nvim/fugidiff.vim
-call DiffTog(1)
+source ./nvim/scripts/vim/fugidiff.vim
+call DiffTog(0)
 ```
 
 Switch to window do action and do back
