@@ -253,3 +253,5 @@ export NVM_DIR="$HOME/.nvm"
 #     hook_com[staged]+="%{${fg[black]}%}${PRCH[circle]}"
 # fi
 # }
+
+fpath+=~/.zfunc

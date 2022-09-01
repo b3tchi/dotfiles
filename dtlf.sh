@@ -90,6 +90,8 @@ ml $d fish/n1.fish ~/.config/fish/functions/
 ml $d nvim/init.vim ~/.config/nvim/
 ml $d nvim/plugins/vim/coc-settings.json ~/.config/nvim/
 
+##GUI starts here
+
 #nvim-#Qt
 ml $d nvim/Win/ginit.vim ~/.config/nvim/
 
@@ -116,8 +118,3 @@ ml $d kde/konsolerc ~/.config/
 ml $d kde/kwinrulesrc ~/.config/
 ml $d kde/krunnerrc ~/.config/
 
-  #latte
-    # ~/.config/latte/Default.layout.latte:
-      # ml $d kde/latte/Default.layout.latte
-
-# cd -
