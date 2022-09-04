@@ -207,10 +207,7 @@ call plug#begin(expand('~/.vim/plugged'))
     "orgmode
     source ~/dotfiles/nvim/plugins/nvim/orgmode.vim
 
-     "orgmode
-    source ~/dotfiles/nvim/plugins/nvim/orgmode.vim
-
-    " ""completion
+    "completion
     source ~/dotfiles/nvim/plugins/nvim/nvmcmp.vim
 
     "debugger
@@ -242,8 +239,11 @@ call plug#begin(expand('~/.vim/plugged'))
     "scrollbar
     source ~/dotfiles/nvim/plugins/nvim/scrollbar.vim
 
-    "Status Line & bufferline
+    "Status luaLine
     source ~/dotfiles/nvim/plugins/nvim/lualine.vim
+
+    "Status bufferline
+    source ~/dotfiles/nvim/plugins/nvim/bufferline.vim
 
     "custom modes
     source ~/dotfiles/nvim/plugins/nvim/hydra.vim
@@ -305,6 +305,7 @@ endif
 "event triggering after plug
 doautocmd User PlugLoaded
 " echom "plugafterevent"
+
 
 " Allow gf to open non-existent files
 map gf :edit <cfile><cr>
@@ -464,7 +465,8 @@ nnoremap <silent> <space>vpi :PlugStatus<cr>
 nnoremap <silent> <space>vpc :PlugClean<cr>
 
 let g:which_key_map.v.i ={'name':'+init.vim'}
-nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>:LightlineReload<cr>
+" nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>:LightlineReload<cr>
+nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>
 
 let g:which_key_map.v.l ={'name':'+lsp'}
 nnoremap <silent> <space>vli :LspInstallInfo<cr>
@@ -693,3 +695,5 @@ function! RecurseForPath(dict,skey)
     endif
   endfor
 endfunction
+
+call LoadedBufferline()

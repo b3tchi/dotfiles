@@ -1,6 +1,6 @@
 Plug 'neovim/nvim-lspconfig' "offical NeoVim LSP plugin
 
-function LuaLspLoaded()
+function! LuaLspLoaded()
 
 lua << EOF
 --"load pyright config
