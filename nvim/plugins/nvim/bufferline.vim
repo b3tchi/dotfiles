@@ -1,11 +1,12 @@
 Plug 'kyazdani42/nvim-web-devicons' " Recommended (for coloured icons)
-Plug 'akinsho/bufferline.nvim', { 'tag': 'v2.*' }
+" Plug 'akinsho/bufferline.nvim', { 'tag': 'v2.*' }
+Plug 'akinsho/bufferline.nvim'", { 'tag': 'v2.*' }
 
-echom 'file loaded buffer'
+" echo 'file loaded buffer'
 set termguicolors
 
 function! LoadedBufferline()
-echom 'func loaded buffer'
+" echo 'func loaded buffer'
 lua << EOF
 
 -- vim.opt.termguicolors = true

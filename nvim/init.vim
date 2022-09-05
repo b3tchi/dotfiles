@@ -201,6 +201,11 @@ call plug#begin(expand('~/.vim/plugged'))
     ""nice headlines
     source ~/dotfiles/nvim/plugins/nvim/headlines.vim
 
+
+    "Status bufferline
+    source ~/dotfiles/nvim/plugins/nvim/barbar.vim
+    " source ~/dotfiles/nvim/plugins/nvim/bufferline.vim
+
     ""Indent guides
     Plug 'lukas-reineke/indent-blankline.nvim'
 
@@ -242,14 +247,12 @@ call plug#begin(expand('~/.vim/plugged'))
     "Status luaLine
     source ~/dotfiles/nvim/plugins/nvim/lualine.vim
 
-    "Status bufferline
-    source ~/dotfiles/nvim/plugins/nvim/bufferline.vim
-
     "custom modes
     source ~/dotfiles/nvim/plugins/nvim/hydra.vim
 
     "file explorer
     source ~/dotfiles/nvim/plugins/nvim/neotree.vim
+    " source ~/dotfiles/nvim/plugins/nvim/nvimtree.vim
 
   else
     " Support for comments symbol by language regions Svelte & Html
@@ -696,4 +699,3 @@ function! RecurseForPath(dict,skey)
   endfor
 endfunction
 
-call LoadedBufferline()

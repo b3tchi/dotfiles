@@ -38,7 +38,8 @@ fi
 
 # if go is present
 if [ -d "/usr/local/go" ] ; then
-  export PATH="$PATH:/usr/local/go/bin"
+  export GOPATH="$HOME/go"
+  export PATH="$PATH:/usr/local/go/bin:$HOME/bin:$GOPATH/bin"
 fi
 
 # sqlcmd items
