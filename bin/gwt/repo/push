@@ -63,5 +63,6 @@ else
 
 	git push -u origin $brpath
 
-	gwt switch "$brpath"
+	gwt branch switch "$brpath"
+
 fi
