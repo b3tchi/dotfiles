@@ -64,10 +64,16 @@ gwt branch fullname <localbranch>
 - get branch from cwd (if not set localbranch)
 - return branch with repo
 
+### repo
+*local to remote*
+init -> push
+*remote to local*
+clone
+
 #### I need to init new local repo
 - [ ]
 ```bash
-gwt repo init --simple --path <repopath> --name <reponame>
+gwt repo init [--simple] --path <repopath> --name <reponame>
 ```
 
 #### I need to push local repo to new remote
@@ -76,10 +82,16 @@ gwt repo init --simple --path <repopath> --name <reponame>
 gwt repo push --name <originname> --private <isprivate>
 ```
 
-#### I need to clone remote to local
+#### I need to get remote to local
 - [ ]
 ```bash
-gwt repo clone --name <originname> --path <repopath>
+gwt repo get --name <originname> --path <repopath>
+```
+
+#### I need to print all repos available under location
+- [ ]
+```bash
+gwt repo list [--path rootpath]
 ```
 
 #### I need to clone get current repo root "PRIVATE?"
