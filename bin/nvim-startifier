@@ -3,7 +3,7 @@
 if [[ $# -eq 1 ]]; then
     selected=$1
 else
-    selected=$((find ~/.local/share/nvim/session/ -mindepth 1 -maxdepth 1 -printf '%f\n') | grep -v '__LAST__' | grep -v $(tmux display-message -p '#S') | fzf)
+    selected=$((find ~/.local/share/nvim/session/ -mindepth 1 -maxdepth 1 -printf '%f\n') | grep -v '__LAST__' | grep -v $(tmux display-message -p '#S') | sort | fzf)
 fi
 
 if [[ -z $selected ]]; then

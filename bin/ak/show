@@ -1,16 +1,33 @@
 #!/bin/bash
-sbcnname=$KEYVAULT_0_SUBSCRIPTION
-kvname=$KEYVAULT_0_NAME
+description="
+create item in azure keyvault
+"
+declare -A mandatory_args=(
+  [name]="name of item inside keyvault"
+)
+declare -A optional_args=(
+  [public]="look in shared keyvault"
+)
 
-if [[ -z $name ]]; then
-  echo "please enter secret name (--name) it's mandatory parameter"
-  exit 0
-fi
+main(){
 
-az keyvault secret show  \
-  --subscription "$sbcnname" \
-  --vault-name "$kvname" \
-  --name "$name" \
-  --output tsv \
-  --query 'value'
+  if [[ -z $public ]]; then
+    gargs=(
+      --subscription $KEYVAULT_0_SUBSCRIPTION
+      --vault-name $KEYVAULT_0_NAME
+    )
+  else
+    gargs=(
+      --subscription $KEYVAULT_1_SUBSCRIPTION
+      --vault-name $KEYVAULT_1_NAME
+    )
+  fi
 
+  gargs+=(
+    --name "$name" \
+    --output tsv \
+    --query 'value'
+  )
+  az keyvault secret show "${gargs[@]}"
+
+}

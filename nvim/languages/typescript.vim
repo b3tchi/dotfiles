@@ -4,7 +4,7 @@ lua << EOF
 -- :LspInstall tsserver
 require'lspconfig'.tsserver.setup{
   on_attach = on_attach_default,
-  capabilities = ufo_capabilities,
+  capabilities = lsp_capabilities,
   flags = {
     debounce_text_changes = 150,
   },

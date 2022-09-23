@@ -1,29 +1,29 @@
-Plug 'nvim-lualine/lualine.nvim'
-Plug 'akinsho/bufferline.nvim'
 Plug 'kyazdani42/nvim-web-devicons' " Recommended (for coloured icons)
+Plug 'nvim-lualine/lualine.nvim'
+" Plug 'akinsho/bufferline.nvim', { 'tag': 'v1.*' }
 " Plug 'ryanoasis/vim-devicons' Icons without colours
 
-function LoadedLualine()
+function! LoadedLualine()
+  " command! LightlineReload call LightlineReload()
 
-"kept for compatibility with lightline
-command! LightlineReload call LightlineReload()
-function! LightlineReload() abort
-endfunction
+  "just for compatibility
+  " function! LightlineReload() abort
+  " endfunction
 
 "load items
 lua << EOF
-vim.opt.termguicolors = true
-
-  require('bufferline').setup {
-    options = {
-      offsets = {
-        {filetype = "coc-explorer", text = "File Explorer" , text_align = "center"},
-        {filetype = "neo-tree", text = "File Explorer" , text_align = "center"},
-        {filetype = "dbui", text = "Db Explorer" , text_align = "center"},
-        {filetype = "Outline", text = "Outline" , text_align = "center"},
-      },
-    }
-  }
+-- vim.opt.termguicolors = true
+--
+-- require('bufferline').setup {
+--   options = {
+--     offsets = {
+--       {filetype = "coc-explorer", text = "File Explorer" , text_align = "center"},
+--       {filetype = "neo-tree", text = "File Explorer" , text_align = "center"},
+--       {filetype = "dbui", text = "Db Explorer" , text_align = "center"},
+--       {filetype = "Outline", text = "Outline" , text_align = "center"},
+--     },
+--   }
+-- }
 
 local function repopath()
   return vim.fn.expand('%:.')
@@ -154,6 +154,7 @@ local function ins_left(component)
   table.insert(config.sections.lualine_a, component)
 end
 
+-- call function
 ins_left {
   -- mode component
   function()
@@ -162,7 +163,7 @@ ins_left {
   color = function()
     return { bg = hydracolorx(), gui = 'bold' }
   end,
-  }
+}
 
 lualine.setup(config)
 

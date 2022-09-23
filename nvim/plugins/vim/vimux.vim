@@ -126,6 +126,7 @@ EOF
   nnoremap <silent> <space>cx :VimuxInteruptRunner<cr>
   nnoremap <silent> <space>ci :VimuxInspectRunner<CR>
   nnoremap <silent> <space>cp :VimuxPromptCommand<CR>
+  nnoremap <silent> <space>cc :VimuxRunCommand getline(".")<CR>
   nnoremap <silent> <space>cr vip "vy :call VimuxSlime()<CR>
   nnoremap <silent> <space>cb :call VimuxMdBlock()<CR>
 

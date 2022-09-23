@@ -1,0 +1,86 @@
+#!/bin/bash
+#general environ setup clone script
+
+nick=$1
+
+if [[ -z $nick ]]; then
+  echo "nick missing"
+  exit
+fi
+
+email=$2
+
+if [[ -z $email ]]; then
+  echo "email "
+  exit
+fi
+# nick="b3tchi"
+# email="beckaja1@gmail.com"
+
+target="github.com"
+coding="ed25519"
+
+generate_key(){
+  logged_nick="$(gh repo list --limit 1 --json owner --jq ".[0].owner.login")"
+
+  if [[ "$nick" != "$logged_nick" ]]; then
+    echo "nicks not match add looking for $nick logged as $logged_nick "
+    exit 0
+  fi
+
+  #generate key
+  # file="$HOME/.ssh/${target}_${nick}_${coding}"
+  file="$HOME/.ssh/${target}_${nick}_${coding}"
+
+  ssh-keygen -t "$coding" -C "$email" -f "$file" -N ""
+}
+
+push_key(){
+
+  #check lsb_release
+  if [[ -z "$(lsb_release -d)" ]]; then
+    sudo apt install -y lsb_release
+  fi
+
+  #write to gh
+  stamp="$(date +%y%m%d)"
+  host="$(hostname)"
+  os="$(lsb_release -s -i)"
+  version="$(lsb_release -s -r)"
+  user="$(whoami)"
+
+  gh ssh-key add $file.pub --title "${stamp}_${host}_${os}_${version}_${user}"
+}
+
+add_config(){
+  config="
+  Host ${target}-${nick}
+    HostName ${target}
+    User git
+    IdentityFile ${file}"
+
+  config_path="$HOME/.ssh/config"
+
+  if [[ ! -f "$config_path" ]]; then
+    touch "$config_path"
+  fi
+
+  #not containing config
+  if [[ "$(cat "$config_path")" =~ "Host ${target}-${nick}" ]]; then #&& echo 1 || echo 0
+    if [[ ! "$(cat "$config_path")" =~ "$config" ]]; then #&& echo 1 || echo 0
+      old_config="$(cat "$HOME/.ssh/config" | sed -n "/Host ${target}-${nick}/,/IdentityFile /p" | tail -1)"
+      new_config="$(printf "$config" | tail -1)"
+      echo "updating ssh file $old_config to $new_config"
+      sed -i.bak "s/${old_config//\//\\/}/${new_config//\//\\/}/g" "$HOME/.ssh/config"
+    fi
+  else
+
+    # "" >> $config_path
+    echo "#${nick}" >> $config_path
+    echo -e "$config" >> $config_path
+  fi
+}
+
+generate_key
+add_config
+push_key

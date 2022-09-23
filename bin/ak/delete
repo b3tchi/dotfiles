@@ -1,23 +1,41 @@
 #!/bin/bash
-sbcnname=$KEYVAULT_0_SUBSCRIPTION
-kvname=$KEYVAULT_0_NAME
+description="
+delete item in azure keyvault
+"
+declare -A mandatory_args=(
+  [name]="name of item inside keyvault"
+)
+declare -A optional_args=(
+  [public]="delete from shared keyvault"
+)
 
-if [[ -z $name ]]; then
-  echo "please enter secret name (--name) it's mandatory parameter"
-  exit 0
-fi
 
-az keyvault secret delete  \
-  --subscription "$sbcnname" \
-  --vault-name "$kvname" \
-  --name "$name"
+main(){
 
-az keyvault secret purge  \
-  --subscription "$sbcnname" \
-  --vault-name "$kvname" \
-  --name "$name"
 
-# az keyvault secret purge  \
-#   --subscription "$sbcnname" \
-#   --vault-name "$kvname" \
-#   --name "$name"
+  if [[ -z $public ]]; then
+    gargs=(
+      --subscription $KEYVAULT_0_SUBSCRIPTION
+      --vault-name $KEYVAULT_0_NAME
+    )
+  else
+    gargs=(
+      --subscription $KEYVAULT_1_SUBSCRIPTION
+      --vault-name $KEYVAULT_1_NAME
+    )
+  fi
+
+  echo "confirm delete of $name from ${gargs[--vault-name]} by type 'yes'"
+  read value
+
+  if [[ "$value" != "yes" ]]; then
+    exit 0
+  fi
+
+  gargs+=(
+    --name "$name" \
+  )
+
+  az keyvault secret delete "${gargs[@]}"
+  az keyvault secret purge "${gargs[@]}"
+}
