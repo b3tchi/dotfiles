@@ -1,5 +1,6 @@
 "LSP Installed via coc.nvim
-let g:coc_global_extensions += ['coc-powershell']
+" OBSOLETE coc is already disabled
+" let g:coc_global_extensions += ['coc-powershell']
 
 "DAP no debug yet for
 
@@ -8,6 +9,17 @@ let g:coc_global_extensions += ['coc-powershell']
 au! BufNewFile,BufRead *.ps1 set ft=ps1
 
 lua << EOF
+
+-- local parser_config = require("nvim-treesitter.parsers").get_parser_configs()
+-- parser_config.powershell = {
+--   install_info = {
+--     url = "https://github.com/jrsconfitto/tree-sitter-powershell",
+--     files = {"src/parser.c"}
+--   },
+--   filetype = "ps1",
+--   used_by = { "psm1", "psd1", "pssc", "psxml", "cdxml" }
+-- }
+
 -- PowerShell
 require('lspconfig').powershell_es.setup{
   --parameter 1
@@ -22,6 +34,7 @@ require('lspconfig').powershell_es.setup{
   --bundle_path = '/home/jan/repos/install-pses/PowerShellEditorServices',
   --cmd = {'pwsh', '-NoLogo', '-NoProfile', '-Command', "/home/jan/.local/bin/powershell_es/PowerShellEditorServices/Start-EditorServices.ps1"},
 }
+
 
 function _G.mdblock_pwsh(mdblock)
   --Prepare Folder

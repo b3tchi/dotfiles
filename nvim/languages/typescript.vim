@@ -1,13 +1,31 @@
 lua << EOF
 
--- LSP Installed via nvim-lsp-installer
--- :LspInstall tsserver
-require'lspconfig'.tsserver.setup{
-  on_attach = on_attach_default,
-  capabilities = lsp_capabilities,
-  flags = {
-    debounce_text_changes = 150,
-  },
+local status, nvim_lsp = pcall(require, "lspconfig")
+if (not status) then return end
+
+local protocol = require('vim.lsp.protocol')
+
+local on_attach = function(client, bufnr)
+  -- format on save
+
+  -- calling default functions from lualsp.vim
+  on_attach_default(client, bufnr)
+
+  if client.server_capabilities.documentFormattingProvider then
+    vim.api.nvim_create_autocmd("BufWritePre", {
+      group = vim.api.nvim_create_augroup("Format", { clear = true }),
+      buffer = bufnr,
+      callback = function() vim.lsp.buf.formatting_seq_sync() end
+    })
+  end
+
+end
+
+
+require('lspconfig').tsserver.setup{
+  on_attach = on_attach,
+  filetypes = { "typescript", "typescriptreact", "typescript.tsx" },
+  cmd = { "typescript-language-server", "--stdio" }
 }
 
 -- DAP should be working could Installed via dap installer line bellow
