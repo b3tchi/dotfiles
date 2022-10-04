@@ -62,3 +62,12 @@ if [ -n $IS_WSL ]; then
     wsl.exe -d "${WSL_DISTRO_NAME}" -u root -e /usr/sbin/service docker start >/dev/null 2>&1
   fi
 fi
+
+#loop the config made by scripts shared accross shells (export paths)
+if [[ -d $HOME/.shell_config/shared ]]; then
+  if [[ ! -z "$(ls $HOME/.shell_config/shared)" ]]; then
+    for f in $HOME/.shell_config/shared/*; do source $f; done
+  fi
+else
+  mkdir -p $HOME/.shell_config/shared
+fi
