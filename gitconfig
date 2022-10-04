@@ -14,7 +14,7 @@
 	defaultBranch = main
 
 [core]
-    pager = delta
+	pager = delta
 
 [interactive]
     diffFilter = delta --color-only --features=interactive
