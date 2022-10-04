@@ -8,7 +8,7 @@ if [[ -z $nick ]]; then
   exit
 fi
 
-email=$2
+email=$1
 
 if [[ -z $email ]]; then
   echo "email "

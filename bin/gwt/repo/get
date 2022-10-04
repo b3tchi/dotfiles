@@ -2,7 +2,8 @@
 pwd
 echo $rootpath
 
-repo_name="mpo-followup-fe-acs"
+# repo_name="mpo-followup-fe-acs"
+repo_name=$1
 
 if [[ ! "$(pwd)" =~ "$rootpath" ]]; then
   echo "not in repos folder"
@@ -12,7 +13,7 @@ repo_owner=$(basename "$(pwd)")
 
 # $(gh search repos ${repo_owner}/${repo_name} --json defaultBranch --jq ".[].defaultBranch")
 
-default_branch=$(gh search repos ${repo_owner}/${repo_name} --json defaultBranch --jq ".[].defaultBranch")
+default_branch=$(gh search repos ${repo_name} --owner ${repo_owner} --json defaultBranch --jq ".[].defaultBranch")
 
 if [[ -z $default_branch ]]; then
   echo "repository ${repo_owner}/${repo_name} not found cannot continue"
@@ -36,22 +37,37 @@ if [[ ! "$(cat ~/.ssh/config)" =~ "Host ${acc}" ]]; then
   exit
 fi
 
-exit
+# exit
 
 # create folder
-mkdir -p "$(pwd)/${repo_name}/${default_branch}"
+mkdir -p "$(pwd)/${repo_name}/default"
 
-cd "$(pwd)/${repo_name}/${default_branch}"
+cd "$(pwd)/${repo_name}/default"
+
 git init .
 
+git remote add origin "git@${acc}:LEGO/${repo_name}.git"
 
-git remote add origin "git@${acc}:LEGO/${reponame}.git"
+git fetch
 
-git worktree add ${default_branch} origin/${default_branch}
+#have main branch
+rootbr=$([[ ! -z "$(git branch -r --list '*/main')" ]] && echo "main")
 
-git checkout ${selected}
+if [[ -z $rootbr ]]; then
+  rootbr=$([[ ! -z "$(git branch -r --list '*/master')" ]] && echo "master")
 
-# gwt switch "$selected"
+  if [[ -z $rootbr ]]; then
+    rootbr=${default_branch}
+  fi
 
-# git checkout -b ${default_branch}
-# local -p
+fi
+
+git worktree add ${rootbr} origin/${rootbr}
+
+git checkout -b ${rootbr}
+
+git pull --set-upstream origin ${rootbr}
+
+cd -
+
+mv "$(pwd)/${repo_name}/default" "$(pwd)/${repo_name}/${rootbr}"
