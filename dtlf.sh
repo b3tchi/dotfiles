@@ -57,28 +57,29 @@ ml $d gitconfig ~/ .gitconfig
 # ml $d ssh/config ~/.ssh/ # not govern through moved to private repo
 ml $d tmux.conf ~/ .tmux.conf
 ml $d bat.conf ~/.config/bat/ config
+ml $d tigrc ~/ .tigrc
 
 #zsh
 ml $d zsh/zshrc ~/ .zshrc
 ml $d zsh/p10k.zsh ~/ .p10k.zsh
 
-#scripts
-ml $d bin/tat ~/.local/bin/
-ml $d bin/ff ~/.local/bin/
-ml $d bin/nvim-sessionizer ~/.local/bin/
-ml $d bin/nvim-startifier ~/.local/bin/
-ml $d bin/gwt/main.sh ~/.local/bin/ gwt
-ml $d bin/ak/main.sh ~/.local/bin/ ak
-ml $d bin/azdops/pipeline.sh ~/.local/bin/ azdpipes
-ml $d bin/azdops/variables.sh ~/.local/bin/ azdvars
-ml $d bin/fxs.sh ~/.local/bin/ fxs
+#scripts moved to scripts repo
+# ml $d bin/tat ~/.local/bin/
+# ml $d bin/ff ~/.local/bin/
+# ml $d bin/nvim-sessionizer ~/.local/bin/
+# ml $d bin/nvim-startifier ~/.local/bin/
+# ml $d bin/gwt/main.sh ~/.local/bin/ gwt
+# ml $d bin/ak/main.sh ~/.local/bin/ ak
+# ml $d bin/azdops/pipeline.sh ~/.local/bin/ azdpipes
+# ml $d bin/azdops/variables.sh ~/.local/bin/ azdvars
+# ml $d bin/fxs.sh ~/.local/bin/ fxs
 # ml $d bin/gwt/gwt ~/.local/bin/
 
 #bin
-chmod +x ${d}bin/*
-chmod +x ${d}bin/gwt/main.sh
-chmod +x ${d}bin/ak/main.sh
-chmod +x ${d}bin/azdops/*.sh
+# chmod +x ${d}bin/*
+# chmod +x ${d}bin/gwt/main.sh
+# chmod +x ${d}bin/ak/main.sh
+# chmod +x ${d}bin/azdops/*.sh
 
 #fish
 ml $d fish/config.fish ~/.config/fish/
