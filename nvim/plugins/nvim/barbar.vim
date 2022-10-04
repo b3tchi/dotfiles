@@ -78,7 +78,7 @@ vim.api.nvim_create_autocmd('BufWinEnter', {
   pattern = '*',
   callback = function()
     if vim.bo.filetype == 'neo-tree' then
-      require'bufferline.state'.set_offset(vim.fn.winwidth(0), 'FileTree')
+      require'bufferline.api'.set_offset(vim.fn.winwidth(0), 'FileTree')
     end
   end
 })
@@ -88,7 +88,7 @@ vim.api.nvim_create_autocmd('BufUnload', {
   callback = function()
   -- use neo--tree to escape '-' character
     if vim.fn.expand('<afile>'):match('neo--tree') then
-      require'bufferline.state'.set_offset(0)
+      require'bufferline.api'.set_offset(0)
     end
   end
 })
@@ -97,7 +97,7 @@ vim.api.nvim_create_autocmd('WinScrolled', {
   pattern = '*',
   callback = function()
     if vim.bo.filetype == 'neo-tree' then
-      require'bufferline.state'.set_offset(vim.fn.winwidth(0), 'FileTree')
+      require'bufferline.api'.set_offset(vim.fn.winwidth(0), 'FileTree')
     end
   end
 })

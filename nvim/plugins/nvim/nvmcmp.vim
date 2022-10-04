@@ -9,13 +9,14 @@ Plug 'hrsh7th/nvim-cmp'
 
 Plug 'hrsh7th/cmp-vsnip'
 Plug 'hrsh7th/vim-vsnip'
+Plug 'onsails/lspkind-nvim' "vscode like icons
 
-set completeopt=menu,menuone,noselect
+" set completeopt=menu,menuone,noselect
 
 function LoadedCompletions()
 lua << EOF
 --CMP - AUTOCOMPLETIONS
-local cmp = require 'cmp'
+-- local cmp = require 'cmp'
 -- cmp.setup {
   -- mapping = {
   --   window = {
@@ -31,7 +32,10 @@ local cmp = require 'cmp'
   --     select = true,
   --   })
   -- },
+local status, cmp = pcall(require, "cmp")
+if (not status) then return end
 
+local lspkind = require 'lspkind'
 
   cmp.setup({
     snippet = {
@@ -54,7 +58,10 @@ local cmp = require 'cmp'
       ['<Tab>'] = cmp.mapping.select_next_item(),
       ['<S-Tab>'] = cmp.mapping.select_prev_item(),
       ['<C-e>'] = cmp.mapping.abort(),
-      ['<CR>'] = cmp.mapping.confirm({ select = true }), -- Accept currently selected item. Set `select` to `false` to only confirm explicitly selected items.
+      ['<CR>'] = cmp.mapping.confirm({
+        behavior = cmp.ConfirmBehavior.Replace,
+        select = true
+      }), -- Accept currently selected item. Set `select` to `false` to only confirm explicitly selected items.
     }),
     sources = cmp.config.sources({
       { name = 'nvim_lsp' },
@@ -64,7 +71,10 @@ local cmp = require 'cmp'
       -- { name = 'snippy' }, -- For snippy users.
     }, {
       { name = 'buffer' },
-    })
+    }),
+    formatting = {
+      format = lspkind.cmp_format({ with_text = false, maxwidth = 50 })
+    }
   })
 
   -- Use buffer source for `/` (if you enabled `native_menu`, this won't work anymore).
@@ -101,6 +111,11 @@ local cmp = require 'cmp'
   -- }
 
 _G.lsp_capabilities = require('cmp_nvim_lsp').update_capabilities(lsp_capabilities)
+
+vim.cmd [[
+  set completeopt=menuone,noinsert,noselect
+  highlight! default link CmpItemKind CmpItemMenuDefault
+]]
 
 EOF
 endfunction

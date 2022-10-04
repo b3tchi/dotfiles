@@ -1,39 +1,4 @@
 lua << EOF
---TREESITTER
-require'nvim-treesitter.configs'.setup {
-  ensure_installed = "all", -- one of "all", "maintained" (parsers with maintainers), or a list of languages
-  ignore_install = { "javascript" }, -- List of parsers to ignore installing
-  highlight = {
-    enable = true,              -- false will disable the whole extension
-    -- disable = { "c", "rust" },  -- list of language that will be disabled
-    -- Setting this to true will run `:h syntax` and tree-sitter at the same time.
-    -- Set this to `true` if you depend on 'syntax' being enabled (like for indentation).
-    -- Using this option may slow down your editor, and you may see some duplicate highlights.
-    -- Instead of true it can also be a list of languages
-    additional_vim_regex_highlighting = false,
-  },
-}
-
---Telescope
--- You dont need to set any of these options. These are the default ones. Only
--- the loading is important
-require('telescope').setup {
-  extensions = {
-    fzf = {
-      fuzzy = true,                    -- false will only do exact matching
-      override_generic_sorter = true,  -- override the generic sorter
-      override_file_sorter = true,     -- override the file sorter
-      case_mode = "smart_case",        -- or "ignore_case" or "respect_case"
-      -- the default case_mode is "smart_case"
-      }
-  }
-}
-
---require("telescope").load_extension("git_worktree")
-require("telescope").load_extension("fzf")
-
--- To get fzf loaded and working with telescope, you need to call
--- load_extension, somewhere after setup function:
 
 --INDENT GUIDES
 require("indent_blankline").setup {

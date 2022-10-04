@@ -182,8 +182,14 @@ call plug#begin(expand('~/.vim/plugged'))
     "language server implementation
     source ~/dotfiles/nvim/plugins/nvim/lualsp.vim
 
+    "lspsaga WIP issues on loading moved to lualsp
+    " source ~/dotfiles/nvim/plugins/nvim/lspsaga.vim
+
+    "lsp navigation moved to lualsp
+    " source ~/dotfiles/nvim/plugins/nvim/nvimnavic.vim
+
     "TBR with mason bellow kept for now
-    Plug 'williamboman/nvim-lsp-installer' "automatic installer of LSPs
+    " Plug 'williamboman/nvim-lsp-installer' "automatic installer of LSPs
 
     "nvim-lsp-installer mk.2
     source ~/dotfiles/nvim/plugins/nvim/mason.vim
@@ -191,7 +197,8 @@ call plug#begin(expand('~/.vim/plugged'))
     " LSP List [https://github.com/neovim/nvim-lspconfig/blob/master/CONFIG.md#svelte]
 
     "syntax highlight support
-    Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'}
+    " Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'}
+    source ~/dotfiles/nvim/plugins/nvim/treesitter.vim
 
     "telescope search instead of fzf
     " Plug 'nvim-telescope/telescope.nvim'
@@ -323,7 +330,7 @@ autocmd FileType vista,coc-explorer setlocal signcolumn=no
 "languages
 source ~/dotfiles/nvim/languages/bash.vim
 source ~/dotfiles/nvim/languages/yaml.vim
-" source ~/dotfiles/nvim/languages/powershell.vim DISABLED WITH COC GET BACK WITH MASON ?
+source ~/dotfiles/nvim/languages/powershell.vim "ENABLED TESTING mason
 source ~/dotfiles/nvim/languages/csharp.vim
 source ~/dotfiles/nvim/languages/terraform.vim
 source ~/dotfiles/nvim/languages/typescript.vim
