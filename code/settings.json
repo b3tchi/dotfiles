@@ -1,0 +1,18 @@
+{
+    "workbench.colorTheme": "Default Dark+",
+    "python.pythonPath": "/usr/bin/python3.6",
+    "git.confirmSync": false,
+    "explorer.confirmDelete": false,
+    "keyboard.dispatch": "keyCode",
+    "git.autofetch": true,
+    "editor.tabSize": 2,
+    "editor.lineNumbers": "relative",
+    "editor.minimap.enabled": false,
+    "editor.foldingStrategy": "indentation",
+    "vim.foldfix": true,
+    "workbench.startupEditor": "none",
+    "workbench.editorAssociations": {
+        "*.ipynb": "jupyter.notebook.ipynb"
+    },
+    "vscode-neovim.neovimExecutablePaths.linux": "/home/jan/Applications/neovim/squashfs-root/AppRun"
+}

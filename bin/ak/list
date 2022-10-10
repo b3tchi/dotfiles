@@ -1,0 +1,32 @@
+#!/bin/bash
+description="
+  list items in azure keyvault
+  "
+declare -A mandatory_args=(
+)
+declare -A optional_args=(
+  [public]="list from shared keyvault"
+)
+
+main(){
+
+  if [[ -z $public ]]; then
+    gargs=(
+      --subscription $KEYVAULT_0_SUBSCRIPTION
+      --vault-name $KEYVAULT_0_NAME
+    )
+  else
+    gargs=(
+      --subscription $KEYVAULT_1_SUBSCRIPTION
+      --vault-name $KEYVAULT_1_NAME
+    )
+  fi
+
+  gargs+=(
+    --output tsv
+    --query '[].name'
+  )
+
+
+  az keyvault secret list "${gargs[@]}"
+}

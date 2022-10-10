@@ -1,0 +1,76 @@
+#!/bin/bash
+
+# echo "rr create"
+#
+# create(){
+  #pick source branch
+if [[ $# -eq 1 ]]; then
+    selected=$1
+else
+
+  activeremote=$(git ls-remote --heads origin | sed -e 's/^.*heads\///')
+  list=$(printf "$activeremote" | sort | uniq -u)
+  selected=$(printf "$list\n" | fzf --prompt "create from branch: > ")
+
+fi
+
+if [[ -z $selected ]]; then
+    exit 0
+fi
+
+until [[ $confirmed == 'yes' ]]
+do
+
+  read -p 'enter branch name: ' brpath
+
+  echo $brpath
+
+  # confirmed='yes'
+
+  read -p "confirm name ($brpath) ? - yes,no,exit [yes]: " confirmed
+
+  confirmed=${confirmed:-yes}
+
+  echo $confirmed
+
+  if [[ $confirmed == 'exit' ]]; then
+    echo exited
+    exit 0
+  fi
+
+done
+
+#small change
+
+path=$(git worktree list | head -1  | sed -e 's/ .*$//')
+activelocal=$(git worktree list | head -1 | sed -e 's/^.*\[//' | sed -e 's/\]$//')
+root=${path:0:(($(echo $path | wc --chars)-$(echo $activelocal | wc --chars)-1))}
+repo=$(basename ${root})
+
+brname=${brpath/\//-}
+sessionname="${repo}@${brname}"
+
+echo $brpath
+echo $sessionname
+echo $root
+
+brfull=${root}/${brpath}
+
+if [ -d ${brfull} ]; then
+  echo "folder exists"
+  exit 0
+else
+
+  mkdir -p ${brfull}
+
+  git worktree add -b $brpath ${brfull} origin/${selected}
+
+  cd ${brfull}
+
+  git push -u origin $brpath
+
+  gwt branch switch "$brpath"
+fi
+# }
+#
+# cre

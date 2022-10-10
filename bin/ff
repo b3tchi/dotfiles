@@ -1,0 +1,36 @@
+#!/bin/sh
+#
+# Attach or create tmux session named the same as current directory.
+
+    cd ~/wiki/
+    # cd "$1"
+
+    # IFS=: read -ra selected < <(
+
+    selected=$( \
+    rg --color=always \
+        --colors 'match:fg:white' \
+        --line-number \
+        --invert-match \
+            -e '```' \
+            -e '^$' \
+        --no-heading \
+        --smart-case \
+        . \
+    | fzf --ansi \
+        --delimiter : \
+        --preview 'bat \
+            --style=plain,numbers \
+            --color=always {1} \
+            --highlight-line {2}' \
+        --preview-window 'up:50%:noborder:+{2}-3' \
+    )
+# tmux ls -F "#S;#{pane_current_path}"
+
+    if [ ! -z "$selected" ]; then
+        nvim-startifier wiki
+    else
+        echo 'cancelled'
+    fi
+
+    cd -

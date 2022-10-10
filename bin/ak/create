@@ -1,0 +1,37 @@
+#!/bin/bash
+description="
+create item in azure keyvault
+"
+declare -A mandatory_args=(
+  [name]="name of item inside keyvault"
+)
+declare -A optional_args=(
+  [public]="enter to shared keyvault"
+)
+
+main(){
+
+  echo 'please enter secret value:'
+  read value
+  echo "entered: $value"
+
+  if [[ -z $public ]]; then
+    gargs=(
+      --subscription $KEYVAULT_0_SUBSCRIPTION
+      --vault-name $KEYVAULT_0_NAME
+    )
+  else
+    gargs=(
+      --subscription $KEYVAULT_1_SUBSCRIPTION
+      --vault-name $KEYVAULT_1_NAME
+    )
+  fi
+
+  gargs+=(
+    --value "$value"
+    --name "$name"
+  )
+
+  az keyvault secret set "${gargs[@]}"
+
+}

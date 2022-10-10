@@ -1,0 +1,17 @@
+#!/bin/bash
+
+path=$(git worktree list | head -1  | sed -e 's/ .*$//')
+activelocal=$(git worktree list | head -1 | sed -e 's/^.*\[//' | sed -e 's/\]$//')
+root=${path:0:(($(echo $path | wc --chars)-$(echo $activelocal | wc --chars)-1))}
+repo=$(basename ${root})
+
+brname=${brpath/\//-}
+sessionname="${repo}@${brname}"
+
+# echo $brpath
+# echo $sessionname
+# echo $root
+
+brfull=${root}/${brpath}
+
+echo $brfull

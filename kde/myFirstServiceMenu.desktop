@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Service
+Icon=smiley-shape
+X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+MimeType=all/allfiles;
+Actions=helloWorld;
+Encoding=UTF-8
+
+[Desktop Action helloWorld]
+Name=Hello with path information
+Icon=smiley-shape
+Exec=kdialog --msgbox "Path is %f:"

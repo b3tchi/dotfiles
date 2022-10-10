@@ -1,0 +1,21 @@
+
+#LEGO/
+Host github.com-lego
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/id_rsa_lego
+
+#b3tchi/
+Host github.com-b3tchi
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/id_rsa_b3tchi
+
+#jan-becka/
+Host github.com-jan-becka
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/id_ed25519_jan-becka
+
+Host gitlab.com
+    IdentityFile ~/.ssh/id_rsa_git

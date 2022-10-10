@@ -1,0 +1,266 @@
+# Enable Powerlevel10k instant prompt. Should stay close to the top of ~/.zshrc.
+# Initialization code that may require console input (password prompts, [y/n]
+# confirmations, etc.) must go above this block; everything else may go below.
+if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
+  source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
+fi
+
+### Added by Zinit's installer
+if [[ ! -f $HOME/.zinit/bin/zinit.zsh ]]; then
+  print -P "%F{33}▓▒░ %F{220}Installing %F{33}DHARMA%F{220} Initiative Plugin Manager (%F{33}zdharma/zinit%F{220})…%f"
+  command mkdir -p "$HOME/.zinit" && command chmod g-rwX "$HOME/.zinit"
+  command git clone https://github.com/zdharma-continuum/zinit "$HOME/.zinit/bin" && \
+    print -P "%F{33}▓▒░ %F{34}Installation successful.%f%b" || \
+    print -P "%F{160}▓▒░ The clone has failed.%f%b"
+fi
+
+source "$HOME/.zinit/bin/zinit.zsh"
+autoload -Uz _zinit
+(( ${+_comps} )) && _comps[zinit]=_zinit
+### End of Zinit's installer chunk
+
+# Enable autocompletions
+autoload -Uz compinit
+typeset -i updated_at=$(date +'%j' -r ~/.zcompdump 2>/dev/null || stat -f '%Sm' -t '%j' ~/.zcompdump 2>/dev/null)
+if [ $(date +'%j') != $updated_at ]; then
+  compinit -i
+else
+  compinit -C -i
+fi
+zmodload -i zsh/complist
+
+# Save history so we get auto suggestions
+HISTFILE=$HOME/.zsh_history
+HISTSIZE=100000
+SAVEHIST=$HISTSIZE
+
+# Improve autocompletion style
+zstyle ':completion:*' menu select # select completions with arrow keys
+zstyle ':completion:*' group-name '' # group results by category
+zstyle ':completion:::::' completer _expand _complete _ignored _approximate # enable approximate matches for completion
+
+# Two regular plugins loaded without tracking.
+zplugin light zsh-users/zsh-autosuggestions
+zplugin light zdharma-continuum/fast-syntax-highlighting
+
+zplugin light zsh-users/zsh-history-substring-search
+zplugin light zsh-users/zsh-completions
+# zplugin light marzocchi/zsh-notify
+
+#theme
+
+# Plugin history-search-multi-word loaded with tracking.
+zplugin load zdharma-continuum/history-search-multi-word
+
+# Load the pure theme, with zsh-async library that's bundled with it.
+zplugin ice pick"async.zsh" src"pure.zsh"
+zplugin light sindresorhus/pure
+
+# Binary release in archive, from GitHub-releases page.
+# After automatic unpacking it provides program "fzf".
+zplugin ice from"gh-r" as"program"
+zplugin load junegunn/fzf-bin
+
+### Options
+setopt auto_cd # cd by typing directory name if it's not a command
+setopt auto_list # automatically list choices on ambiguous completion
+setopt auto_menu # automatically use menu completion
+setopt always_to_end # move cursor to end if word had one match
+setopt hist_ignore_all_dups # remove older duplicate entries from history
+setopt hist_reduce_blanks # remove superfluous blanks from history items
+setopt inc_append_history # save history entries as soon as they are entered
+setopt share_history # share history between different instances
+setopt correct_all # autocorrect commands
+setopt interactive_comments # allow comments in interactive shells
+
+# Keybindings
+bindkey '^[[A' history-substring-search-up
+bindkey '^[[B' history-substring-search-down
+bindkey '^[[3~' delete-char
+bindkey '^[3;5~' delete-char
+
+# Theme
+# To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
+
+# Export Variables
+if [[ -n $(uname -o | grep 'Linux') ]]; then
+  export IS_LINUX=1
+fi
+
+if [[ $(uname -o) = 'Android' ]]; then
+  export IS_ANDROID=1
+fi
+
+# Check wsl
+if [[ -f "/mnt/c/WINDOWS/system32/wsl.exe" ]]; then
+  export IS_WSL=1
+fi
+
+export COLORTERM=truecolor
+
+# NNN quit on cd
+n () {
+
+    # Block nesting of nnn in subshells
+    if [ -n $NNNLVL ] && [ "${NNNLVL:-0}" -ge 1 ]; then
+        echo "nnn is already running"
+        return
+    fi
+
+    # The default behaviour is to cd on quit (nnn checks if NNN_TMPFILE is set)
+    # To cd on quit only on ^G, remove the "export" as in:
+    #     NNN_TMPFILE="${XDG_CONFIG_HOME:-$HOME/.config}/nnn/.lastd"
+    # NOTE: NNN_TMPFILE is fixed, should not be modified
+    export NNN_TMPFILE="${XDG_CONFIG_HOME:-$HOME/.config}/nnn/.lastd"
+
+    # Unmask ^Q (, ^V etc.) (if required, see `stty -a`) to Quit nnn
+    # stty start undef
+    # stty stop undef
+    # stty lwrap undef
+    # stty lnext undef
+
+    nnn "$@"
+
+    if [ -f "$NNN_TMPFILE" ]; then
+        . "$NNN_TMPFILE"
+        rm -f "$NNN_TMPFILE" > /dev/null
+    fi
+}
+
+ggvh() {
+
+    # cd ~
+
+    rg \
+        --column \
+        --hidden \
+        --line-number \
+        --no-heading \
+        --only-matching \
+        --glob '**/doc/**.txt' \
+        --smart-case '(?:[*])(.*)(?:[*]$)' \
+        "/$HOME/.vim/plugged" \
+        "/$HOME/Applications/neovim/squashfs-root/usr/share/nvim" \
+    | fzf \
+        --ansi \
+        --delimiter : \
+        --preview 'bat \
+            --style=plain,numbers \
+            --file-name {O} \
+            --color=always {1} \
+            --highlight-line {2} \
+            ' \
+        --preview-window 'up:50%:noborder:+{2}-3'
+
+    # cd -
+}
+
+### Aliases
+## Shortcuts
+
+## Conditional Shortcuts
+if [[ $IS_LINUX -eq 1 ]]; then
+    #neovim version 0.5 from appimage
+    alias vi="~/Applications/neovim/squashfs-root/AppRun"
+    alias nvim="~/Applications/neovim/squashfs-root/AppRun"
+
+    alias fd="fdfind" #
+    alias python="python3"
+fi
+
+if [[ $IS_ANDROID -eq 1 ]]; then
+    alias vi="nvim"
+fi
+
+#disable CTRL+S for terminal use is as prefix in TMUX
+# if [[ -t 0 && $- = *i* ]]
+# then
+stty -ixon
+# fi
+
+## Nvim Shortcuts - will go to /bin/startifier
+alias dotfiles="nvim -c ':SLoad dotfiles'"
+alias mwiki="nvim -c ':SLoad wiki'"
+alias wwiki="nvim -c ':SLoad wiki_LEGO'"
+alias scripts="nvim -c ':SLoad scripts'"
+
+# keep tmux runing as a service
+alias tmuxs="systemd-run --scope --user tmux"
+
+## Custom shortcuts
+# alias ff="ggw ~/wiki/"
+alias fvh="ggvh"
+
+alias qr='qrencode -m 2 -t utf8 <<< "$1"'
+
+## Files
+alias -s azcli=nvim
+
+alias -s md=nvim-appi
+alias -s txt=nvim-appi
+
+alias -s json=nvim
+alias -s csv=nvim
+alias -s tsv=nvim
+alias -s yaml=nvim
+
+# official sollution pointin for this location but not exist in ubuntu
+# embede then function n() in zshrc directly
+# if [ -f /usr/share/nnn/quitcd/quitcd.bash_zsh ]; then
+#     source /usr/share/nnn/quitcd/quitcd.bash_zsh
+# fi
+
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
+[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+
+
+
+##OWN PROMPT WITHOUT ADDINS NOT WORK WITH BARE REPOS - switching to pure
+
+# # Autoload zsh add-zsh-hook and vcs_info functions (-U autoload w/o substition, -z use zsh style)
+# autoload -Uz add-zsh-hook vcs_info
+# # Enable substitution in the prompt.
+# setopt prompt_subst
+# # Run vcs_info just before a prompt is displayed (precmd)
+# add-zsh-hook precmd vcs_info
+# # add ${vcs_info_msg_0} to the prompt
+# # e.g. here we add the Git information in red
+#
+# # gitbase=$( ${vcs_comm[cmd]} rev-parse --show-toplevel 2> /dev/null )
+# # rrn=${gitbase:t}
+#
+# NEWLINE=$'\n'
+# PROMPT="%f%B%F{240}%~%f%b%F{yellow}%(!.#.$)%f "
+# RPROMPT='%F{240}%(?..e%?) ${vcs_info_msg_0_}%*%f'
+#
+# # zstyle ':vcs_info:*' check-for-changes true
+# zstyle ':vcs_info:*' unstagedstr '*'
+# zstyle ':vcs_info:*' stagedstr '+'
+#
+# zstyle ':vcs_info:git:*' formats "%u%c%b "
+#
+# zstyle -e ':vcs_info:*:*' check-for-changes \
+#     '[[ $(zstat +blocks $PWD) -ne 0 ]] && reply=( true ) || reply=( false )'
+#
+# zstyle ':vcs_info:git*+set-message:*' hooks git-untracked
+#
+# +vi-git-untracked(){
+# [[ $(zstat +blocks $PWD) -ne 0 ]] || return
+# if [[ $(git rev-parse --is-inside-work-tree 2> /dev/null) == 'true' ]] && \
+#     git status --porcelain 2> /dev/null | grep -q '??' ; then
+#     hook_com[staged]+="%{${fg[black]}%}${PRCH[circle]}"
+# fi
+# }
+
+fpath+=~/.zfunc
+
+#loop the config made by scripts for zsh
+if [[ -d $HOME/.shell_config/zsh ]]; then
+  if [[ ! -z "$(ls $HOME/.shell_config/zsh)" ]]; then
+    for f in $HOME/.shell_config/zsh/*; do source $f; done
+  fi
+else
+  mkdir -p $HOME/.shell_config/zsh
+fi
+
