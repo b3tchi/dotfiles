@@ -1,15 +1,14 @@
 [user]
+	name = Jan Becka
 	email = janbecka@lego.com
-	name = Jan
-	name = Jan
-	name = jan-becka
-	mail = janbecka@lego.com
+
 [diff]
 	tool = vimdiff
+	external = difft
+
 [merge]
 	tool = vimdiff
-# [credential]
-# helper = /mnt/c/Program\\ Files/Git/mingw64/libexec/git-core/git-credential-manager.exe
+
 [init]
 	defaultBranch = main
 
