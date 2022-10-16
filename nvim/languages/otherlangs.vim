@@ -1,4 +1,4 @@
-lua >> EOF
+lua << EOF
 
 --Scripting
 -- !!moved to bash.vim -- BASH
@@ -36,10 +36,11 @@ require'lspconfig'.jsonls.setup{
 --require'lspconfig'.sumneko_lua.setup{} --LUA
 require'lspconfig'.vimls.setup{
   capabilities = lsp_capabilities,
-} -- VIML
+} -- VIML:wikis
 
--- Documentation
-require'lspconfig'.remark_ls.setup{} -- MARKDOWN
+-- Documentationand notetaking
+require'lspconfig'.marksman.setup{
+} -- MARKDOWN
 
 -- General purpose
 --?? --GO
@@ -54,13 +55,38 @@ require'lspconfig'.pyright.setup{} -- PYTHON
 -- Use a loop to conveniently call 'setup' on multiple servers and
 -- map buffer local keybindings when the language server attaches
 local servers = { 'pyright', 'vimls' }
+
 for _, lsp in ipairs(servers) do
-  nvim_lsp[lsp].setup {
+  require'lspconfig'[lsp].setup {
     on_attach = on_attach_default,
     flags = {
       debounce_text_changes = 150,
     }
   }
+end
+
+--  vimscript
+function _G.mdblock_vim(mdblock)
+    local fname = tmp_file('vim')
+    local tmppath = lux_temppath() .. fname
+
+    vim.fn.writefile(mdblock, tmppath)
+    vim.api.nvim_command('source ' .. tmppath)
+    vim.fn.delete(tmp)
+
+end
+
+--  lua
+function _G.mdblock_lua(mdblock)
+
+    local fname = tmp_file('lua')
+    local tmppath = lux_temppath() .. fname
+
+    -- print(tmppath)
+    vim.fn.writefile(mdblock, tmppath)
+    vim.api.nvim_command('source ' .. tmppath)
+    vim.fn.delete(tmp)
+
 end
 
 EOF

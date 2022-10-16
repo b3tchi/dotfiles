@@ -261,10 +261,10 @@ call plug#begin(expand('~/.vim/plugged'))
     source ~/dotfiles/nvim/plugins/nvim/neotree.vim
     " source ~/dotfiles/nvim/plugins/nvim/nvimtree.vim
 
-  else
+  else "pre-neovim
+
     " Support for comments symbol by language regions Svelte & Html
     Plug 'Shougo/context_filetype.vim' "language regions in files
-
 
     " Another Comment Pluging with HTML region support
     Plug 'tomtom/tcomment_vim'
@@ -334,6 +334,7 @@ source ~/dotfiles/nvim/languages/powershell.vim "ENABLED TESTING mason
 source ~/dotfiles/nvim/languages/csharp.vim
 source ~/dotfiles/nvim/languages/terraform.vim
 source ~/dotfiles/nvim/languages/typescript.vim
+source ~/dotfiles/nvim/languages/otherlangs.vim
 
 "script for vim terminal
 source ~/dotfiles/nvim/scripts/vim/incubator.vim
@@ -357,10 +358,12 @@ set incsearch
 set hlsearch
 
 "indentations spaces
-set tabstop=2
-set softtabstop=2
+" 2 indent are easier to complicate code let's take 4
+
+set tabstop=4
+set softtabstop=4
 set expandtab
-set shiftwidth=2
+set shiftwidth=4
 
 "" Define folding
 " set foldmethod=indent

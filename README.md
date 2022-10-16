@@ -35,17 +35,14 @@ mv ~/.vim ~/.vim_back # vim plug
 # Updating
 ## Python
 
+pip install outdated items
 ```bash
 python -m pip install pip --upgrade
 for i in $(python -m pip list --outdated --format=columns |tail -n +3|cut -d" " -f1)
 do python -m pip install $i --upgrade
 
 done
-
-
 ```
-
-
 
 # Scratches
 ```bash
@@ -81,7 +78,7 @@ Write-Host 'test2'
 ```
 
 ```csharp
-Console.WriteLine("Hello, World!x5");
+Console.WriteLine("Hello, World!x4");
 ```
 
 ```cs
@@ -120,7 +117,8 @@ endif
 
 
 ```lua
--- printf('hello')
+-- print('hello')
+print('hello')
 ```
 
 ```vim
@@ -256,6 +254,7 @@ print('abf')
 
 EOF
 ```
+
 
 list all windows in diff mode
 ```vim

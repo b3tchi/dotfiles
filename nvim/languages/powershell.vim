@@ -35,6 +35,18 @@ require('lspconfig').powershell_es.setup{
   --cmd = {'pwsh', '-NoLogo', '-NoProfile', '-Command', "/home/jan/.local/bin/powershell_es/PowerShellEditorServices/Start-EditorServices.ps1"},
 }
 
+function _G.mdblock_powershell(mdblock)
+
+    local fname = tmp_file('ps1')
+    local winpath = win_temppath() .. fname
+
+    vim.fn.writefile(mdblock, winpath_from_wsl(winpath))
+
+    local cmd = 'powershell.exe \'' .. winpath .. '\''
+
+    vim.fn.VimuxRunCommand(cmd)
+            
+end
 
 function _G.mdblock_pwsh(mdblock)
   --Prepare Folder
@@ -46,21 +58,6 @@ function _G.mdblock_pwsh(mdblock)
   local cmd = "pwsh '" .. unx_tmpps .. "'"
   vim.fn.VimuxRunCommand(cmd)
 end
-
--- function _G.mdblock_powershell(mdblock)
---       --Prepare Folder
---       local fname = vim.fn.FolderTemp() .. vim.fn.strftime("%Y%m%d_%H%M%S") .. '.ps1'
---       -- vim.fn.mkdir(fname,'p')
---       --Create Project
---       -- os.execute("dotnet new console -o '" .. fname .. "' -f net6.0 --force")
---       --Replace default file
---       local unx_tmpps = fname
---       -- vim.fn.delete(unx_tmpps)
---       vim.fn.writefile(mdblock,unx_tmpps)
---       --Run Command
---       local cmd = "pwsh '" .. unx_tmpps .. "'"
---       vim.fn.VimuxRunCommand(cmd)
--- end
 
 EOF
 
