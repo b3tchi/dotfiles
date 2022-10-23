@@ -58,6 +58,19 @@ echo anything
 echo anything
 ```
 
+```bash
+echo anything
+# export VAR1='abc'
+ak list --public
+# echo $VAR1
+echo $PROJECT_ROOT
+echo $PROJECT_PATH_TMUX
+echo $NOTES_ROOT
+```
+
+```lua
+vim.fn.writefile({'echo header'}, '/tmp/file_write.txt', 'a')
+```
 call powershell
 ```bash
 #powershell.exe c:\\Users\\czJaBeck\\Dev\\Repositories\\AccessVCS\\tests\\test14.ps1
@@ -114,8 +127,6 @@ if index(['a','b'],'c') ==-1
 
 endif
 ```
-
-
 ```lua
 -- print('hello')
 print('hello')
@@ -238,12 +249,20 @@ endif
 echom expand("<cfile>")
 ```
 
-```vim
+```org
+* Heading
+#+begin_src bash
+#code goes here
+echo bash_comment
 
+#+end_src
+```
+
+
+```vim
 echom 'paragarph first command'
 echom getline('.')[2:] "command line content current cursor
 echom getline(line("'{")+1) "line content on the beginning of paragraph
-
 ```
 
 test lua embedded in vim

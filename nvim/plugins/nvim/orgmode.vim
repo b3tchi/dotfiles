@@ -8,6 +8,10 @@ Plug 'akinsho/org-bullets.nvim'
 function LoadOrgMode()
 
 lua << EOF
+
+vim.opt.conceallevel = 2
+vim.opt.concealcursor = 'nc'
+
 require('orgmode').setup_ts_grammar()
 
 -- Tree-sitter configuration
@@ -21,10 +25,16 @@ require'nvim-treesitter.configs'.setup {
 }
 
 require('orgmode').setup({
-  org_agenda_files = {'~/org/projects/*', '~/org/notes/*'},
+  org_agenda_files = {'~/wiki/org/**/*'},
   org_default_notes_file = '~/org/refile.org',
   org_hide_leading_stars = true,
 })
+
+-- require'cmp'.setup({
+--   sources = {
+--     { name = 'orgmode' }
+--   }
+-- })
 
 require('org-bullets').setup()
 

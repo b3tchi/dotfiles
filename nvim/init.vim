@@ -122,7 +122,6 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'mmai/vim-markdown-wiki'
   Plug 'dhruvasagar/vim-table-mode'
 
-  source ~/dotfiles/nvim/plugins/nvim/mdpreview.vim
 
   ""vimwiki - personal notes
   " Plug 'vimwiki/vimwiki'
@@ -181,6 +180,10 @@ call plug#begin(expand('~/.vim/plugged'))
 
     "language server implementation
     source ~/dotfiles/nvim/plugins/nvim/lualsp.vim
+
+    "markdown files
+    source ~/dotfiles/nvim/plugins/nvim/mdpreview.vim
+    " source ~/dotfiles/nvim/plugins/nvim/telekasten.vim will try orgmode
 
     "lspsaga WIP issues on loading moved to lualsp
     " source ~/dotfiles/nvim/plugins/nvim/lspsaga.vim

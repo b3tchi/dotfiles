@@ -37,12 +37,11 @@ require('lspconfig').powershell_es.setup{
 
 function _G.mdblock_powershell(mdblock)
 
-    local fname = tmp_file('ps1')
-    local winpath = win_temppath() .. fname
+    local winpath = win_temppath() .. tmp_file('ps1')
 
     vim.fn.writefile(mdblock, winpath_from_wsl(winpath))
 
-    local cmd = 'powershell.exe \'' .. winpath .. '\''
+    local cmd = "powershell.exe '" .. winpath .. "'"
 
     vim.fn.VimuxRunCommand(cmd)
             
@@ -50,13 +49,17 @@ end
 
 function _G.mdblock_pwsh(mdblock)
   --Prepare Folder
-  local fname = vim.fn.FolderTemp() .. vim.fn.strftime("%Y%m%d_%H%M%S") .. '.ps1'
+  -- local fname = vim.fn.FolderTemp() .. vim.fn.strftime("%Y%m%d_%H%M%S") .. '.ps1'
   --Replace default file
-  local unx_tmpps = fname
-  vim.fn.writefile(mdblock,unx_tmpps)
+  -- local unx_tmpps = fname
+
+  local temp_path = lux_temppath() .. tmp_file('ps1')
+
+  vim.fn.writefile(mdblock, temp_path)
   --Run Command
   local cmd = "pwsh '" .. unx_tmpps .. "'"
   vim.fn.VimuxRunCommand(cmd)
+
 end
 
 EOF

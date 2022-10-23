@@ -13,10 +13,35 @@ require'lspconfig'.bashls.setup{
   },
 }
 
-function _G.mdblock_bash(mdblock)
-  -- local lines = vim.fn.join(mdblock, '\n') ..'\n'
-  local lines = table.concat(mdblock, '\n') ..'\n'
-  vim.fn.VimuxRunCommand(lines)
+function _G.mdblock_bash(mdblock, mdpath)
+
+    --prepare bash
+    local block_header = {
+        '#!/bin/bash'
+        ,'#get notes root'
+        ,"NOTES_ROOT='" .. mdpath .. "/'"
+        ,'if [[ -f "${NOTES_ROOT}.env" ]]; then'
+        ,'     source "${NOTES_ROOT}.env"'
+        ,'fi'
+        ,'#look for active branch in tmux'
+        ,'ATTACHED_BRANCH="$(tmx attached-branch-path --project-root-path "$PROJECT_ROOT")"'
+        ,'#try to find environment variables'
+        ,'if [[ ! -z ${ATTACHED_BRANCH} ]]; then'
+        ,'     if [[ ! -z ${YAML_VARS} ]]; then'
+        ,'          eval "$(ad pipe var load-to-env --vars-yaml "$PROJECT_ROOT$ATTACHED_BRANCH$YAML_VARS")"'
+        ,'    fi'
+        ,'fi'
+        ,'#----END of automatic header----'
+    }
+    local temp_path = lux_temppath() .. tmp_file('sh')
+
+    vim.fn.writefile(block_header, temp_path)
+    vim.fn.writefile(mdblock, temp_path, 'a')
+
+    local cmd = "bash '" .. temp_path .. "'"
+
+    vim.fn.VimuxRunCommand(cmd)
+
 end
 
 EOF
