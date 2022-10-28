@@ -85,6 +85,7 @@ let g:which_key_map.v.h ={'name':'+help'}
 " Required
 call plug#begin(expand('~/.vim/plugged'))
 " call plug#begin()
+" echom "plugbegin"
 
 
   ""General Vim Plugins
@@ -220,7 +221,7 @@ call plug#begin(expand('~/.vim/plugged'))
     Plug 'lukas-reineke/indent-blankline.nvim'
 
     "orgmode
-    source ~/dotfiles/nvim/plugins/nvim/orgmode.vim
+    source ~/dotfiles/nvim/plugins/nvim/orgmode.lua
 
     "completion
     source ~/dotfiles/nvim/plugins/nvim/nvmcmp.vim
@@ -317,7 +318,7 @@ endif
 " echom "plugend"
 "event triggering after plug
 doautocmd User PlugLoaded
-" echom "plugafterevent"
+" echo "plugafterevent"
 
 
 " Allow gf to open non-existent files

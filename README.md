@@ -274,6 +274,94 @@ print('abf')
 EOF
 ```
 
+```lua
+
+function get_bufnr_by_name(buf_name)
+
+    if (vim.fn.bufexists(buf_name) == 1 )then
+
+        local buf_nr = vim.fn.filter(
+            vim.fn.map(
+                vim.api.nvim_list_bufs()
+                , function(k,v) return {v,vim.api.nvim_buf_get_name(v)} end
+                )
+            , function(k,v) return v[2] == buf_name  end
+            -- , function(k,v) return v[1] > 24 end
+            )[1][1]
+        return buf_nr
+    else
+        return -1
+    end
+
+end
+
+function remove_buf_by_name(buf_name)
+
+    local buf_nr=get_bufnr_by_name(buf_name)
+
+    if (buf_nr ~= -1) then
+        --fully remove buffer
+        print(vim.api.nvim_buf_delete(buf_nr,{force=1}))
+
+        --remove file
+        print('removed - ' .. buf_name)
+        return -1
+    else
+        print('not found - ' .. buf_name)
+        return 0
+    end
+
+end
+
+function add_buf(buf_name)
+
+    local buf_nr=get_bufnr_by_name(buf_name)
+
+    if (buf_nr == -1) then
+
+        -- print(vim.fn.filewritable(buf_name))
+        -- print(vim.fn.filereadable(buf_name))
+        -- print(vim.fn.bufexists(buf_name))
+
+        print('added - ' .. buf_name)
+        return vim.fn.bufadd(buf_name)
+    else
+
+        print('already opened - ' .. buf_name)
+        return buf_nr
+    end
+
+end
+
+
+function vertical_split_win(win_nr)
+    win_nr = win_nr or 0
+
+    vim.api.nvim_set_current_win(win_nr)
+    vim.cmd('split')
+    local win = vim.api.nvim_get_current_win()
+    return win
+
+end
+
+-- pri
+
+local journal_file = vim.fn.expand('~/repos/b3tchi/wiki/org/journals/' .. os.date('%y%m-%d-%w.org') .. '.org')
+
+local win_nr= vertical_split_win(1014)
+
+print(get_bufnr_by_name(journal_file))
+
+local buf_nr = add_buf(journal_file)
+
+print(vim.api.nvim_win_set_buf(win_nr, buf_nr))
+
+-- print(remove_buf_by_name(journal_file))
+
+
+-- print(winnr)
+print(journal_file)
+```
 
 list all windows in diff mode
 ```vim
