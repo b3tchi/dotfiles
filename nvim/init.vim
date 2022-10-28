@@ -194,6 +194,8 @@ call plug#begin(expand('~/.vim/plugged'))
 
     "TBR with mason bellow kept for now
     " Plug 'williamboman/nvim-lsp-installer' "automatic installer of LSPs
+    "lua plugin
+    source ~/dotfiles/nvim/plugins/nvim/luapad.lua
 
     "nvim-lsp-installer mk.2
     source ~/dotfiles/nvim/plugins/nvim/mason.vim
