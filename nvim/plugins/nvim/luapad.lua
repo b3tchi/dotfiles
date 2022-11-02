@@ -4,7 +4,6 @@ local Plug = vim.fn['plug#']
 Plug 'rafcamlet/nvim-luapad'
 
 function Load_luapad()
--- " lua << EOF
 
     require('luapad').setup {
         count_limit = 150000,
@@ -20,8 +19,6 @@ function Load_luapad()
             shout = function(str) return(string.upper(str) .. '!') end
         }
     }
-
--- " EOF
 
 end
 

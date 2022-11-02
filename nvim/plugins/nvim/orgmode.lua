@@ -115,8 +115,7 @@ function Load_orgmode()
     end
 
     function _G.today_journal()
-        local journal_file = vim.fn.expand('~/repos/b3tchi/wiki/org/journals/' .. os.date('%y%m-%d-%w.org') .. '.org')
-
+        local journal_file = vim.fn.expand('~/repos/b3tchi/wiki/org/journals/' .. os.date('%y%m-%d-%w') .. '.org')
         local win_nr= vertical_split_win(0)
 
         print(get_bufnr_by_name(journal_file))
