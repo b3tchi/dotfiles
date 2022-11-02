@@ -186,6 +186,9 @@ call plug#begin(expand('~/.vim/plugged'))
     source ~/dotfiles/nvim/plugins/nvim/mdpreview.vim
     " source ~/dotfiles/nvim/plugins/nvim/telekasten.vim will try orgmode
 
+    " migratting sessions from startify
+    source ~/dotfiles/nvim/plugins/nvim/sessionsmgr.lua
+
     "lspsaga WIP issues on loading moved to lualsp
     " source ~/dotfiles/nvim/plugins/nvim/lspsaga.vim
 
