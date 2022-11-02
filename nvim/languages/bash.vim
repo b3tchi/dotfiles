@@ -24,7 +24,7 @@ function _G.mdblock_bash(mdblock, mdpath)
         ,'     source "${NOTES_ROOT}.env"'
         ,'fi'
         ,'#look for active branch in tmux'
-        ,'ATTACHED_BRANCH="$(tmx attached-branch-path --project-root-path "$PROJECT_ROOT")"'
+        ,'ATTACHED_BRANCH="$(mpxr attached-branch-path --project-root-path "$PROJECT_ROOT")"'
         ,'#try to find environment variables'
         ,'if [[ ! -z ${ATTACHED_BRANCH} ]]; then'
         ,'     if [[ ! -z ${YAML_VARS} ]]; then'
