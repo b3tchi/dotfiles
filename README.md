@@ -346,7 +346,7 @@ end
 
 -- pri
 
-local journal_file = vim.fn.expand('~/repos/b3tchi/wiki/org/journals/' .. os.date('%y%m-%d-%w.org') .. '.org')
+local journal_file = vim.fn.expand('~/wiki/org/journals/' .. os.date('%y%m-%d-%w.org') .. '.org')
 
 local win_nr= vertical_split_win(1014)
 

@@ -71,3 +71,6 @@ if [[ -d $HOME/.shell_config/shared ]]; then
 else
   mkdir -p $HOME/.shell_config/shared
 fi
+
+#repository path
+export REPOS_PATH=$HOME/repos

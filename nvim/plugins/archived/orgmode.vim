@@ -125,7 +125,7 @@ function vertical_split_win(win_nr)
 end
 
 function _G.today_journal()
-    local journal_file = vim.fn.expand('~/repos/b3tchi/wiki/org/journals/' .. os.date('%y%m-%d-%w.org') .. '.org')
+    local journal_file = vim.fn.expand('~/wiki/org/journals/' .. os.date('%y%m-%d-%w.org') .. '.org')
 
     local win_nr= vertical_split_win(0)
 
