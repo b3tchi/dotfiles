@@ -256,7 +256,8 @@ call plug#begin(expand('~/.vim/plugged'))
     Plug 'folke/which-key.nvim'
 
     " themes have to be before lualine
-    source ~/dotfiles/nvim/plugins/nvim/gruvboxnvim.vim
+    " source ~/dotfiles/nvim/plugins/themes/gruvboxnvim.vim
+    source ~/dotfiles/nvim/themes/tokio.lua
 
     "scrollbar
     source ~/dotfiles/nvim/plugins/nvim/scrollbar.vim
