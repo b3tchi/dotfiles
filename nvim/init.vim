@@ -240,6 +240,7 @@ call plug#begin(expand('~/.vim/plugged'))
     "git missing some features
     " source ~/dotfiles/nvim/plugins/nvim/git.vim
     " Plug 'ThePrimeagen/git-worktree.nvim'
+    source ~/dotfiles/nvim/plugins/nvim/diffview.lua
 
     "outlines
     Plug 'simrat39/symbols-outline.nvim' "outlines

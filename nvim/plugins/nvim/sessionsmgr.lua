@@ -22,6 +22,8 @@ function Load_sessionsmgr()
         max_path_length = 80,  -- Shorten the display path if length exceeds this threshold. Use 0 if don't want to shorten the path at all.
     })
 
+    vim.keymap.set('n', '<Space>ss', '<Cmd>SessionManager save_current_session<CR>', {silent = true, desc='save session'})
+
 end
 
 local augr_plugin = vim.api.nvim_create_augroup('AutoGroup_NvimSessions',{clear = true})

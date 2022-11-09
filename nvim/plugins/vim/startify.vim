@@ -11,21 +11,21 @@ let g:startify_lists = [
   \ ]
 
 function LoadedStartify()
-  autocmd User StartifyAllBuffersOpened call SetNeovimTitle()
-  autocmd User StartifyBufferOpened call SetNeovimTitle()
+  " autocmd User StartifyAllBuffersOpened call SetNeovimTitle()
+  " autocmd User StartifyBufferOpened call SetNeovimTitle()
 
   function! SetNeovimTitle()
     let &titlestring = fnamemodify(v:this_session, ':t')
   endfunction
 
-  autocmd VimLeavePre * silent execute v:lua.SaveIfSessionExists()
+  " autocmd VimLeavePre * silent execute v:lua.SaveIfSessionExists()
 
  " function! gitrepo
   let g:which_key_map.v.l ={'name':'+sessions'}
-  nnoremap <silent> <space>ss :SSave<cr>
-  nnoremap <silent> <space>sd :SDelete<cr>
-  nnoremap <silent> <space>sc :SClose<cr>
-  nnoremap <silent> <space>sw :SSave! dotfiles<cr>:wqa<cr>
+  " nnoremap <silent> <space>ss :SSave<cr>
+  " nnoremap <silent> <space>sd :SDelete<cr>
+  " nnoremap <silent> <space>sc :SClose<cr>
+  " nnoremap <silent> <space>sw :SSave! dotfiles<cr>:wqa<cr>
 
 lua << EOF
   function _G.SaveIfSessionExists()

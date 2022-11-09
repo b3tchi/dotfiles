@@ -9,8 +9,6 @@ Plug 'akinsho/org-bullets.nvim'
 
 function Load_orgmode()
 
-    -- lua << EOF
-
     vim.opt.conceallevel = 2
     vim.opt.concealcursor = 'nc'
 
