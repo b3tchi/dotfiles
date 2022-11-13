@@ -74,3 +74,9 @@ fi
 
 #repository path
 export REPOS_PATH=$HOME/repos
+
+#multiplexer path TMUX
+export MPXR_CONFIG_PATH=$HOME/dotfiles/tmux
+
+#color theme TBD
+export THEME=gruvbox

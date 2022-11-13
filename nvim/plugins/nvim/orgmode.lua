@@ -44,7 +44,7 @@ function Load_orgmode()
 
     local function get_bufnr_by_name(buf_name)
 
-        if (vim.fn.bufexists(buf_name) == 1 )then
+        if (vim.fn.bufexists(buf_name) == 1 ) then
 
             local buf_nr = vim.fn.filter(
                 vim.fn.map(

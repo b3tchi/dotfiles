@@ -200,6 +200,9 @@ call plug#begin(expand('~/.vim/plugged'))
     "lua plugin
     source ~/dotfiles/nvim/plugins/nvim/luapad.lua
 
+    "highlight colors in the code
+    source ~/dotfiles/nvim/plugins/nvim/hicolors.lua
+
     "nvim-lsp-installer mk.2
     source ~/dotfiles/nvim/plugins/nvim/mason.vim
 
@@ -256,8 +259,11 @@ call plug#begin(expand('~/.vim/plugged'))
     Plug 'folke/which-key.nvim'
 
     " themes have to be before lualine
-    " source ~/dotfiles/nvim/plugins/themes/gruvboxnvim.vim
-    source ~/dotfiles/nvim/themes/tokio.lua
+    if luaeval('vim.env.THEME') == 'gruvbox'
+        source ~/dotfiles/nvim/themes/gruvbox.lua
+    elseif luaeval('vim.env.THEME') == 'tokio'
+        source ~/dotfiles/nvim/themes/tokio.lua
+    endif
 
     "scrollbar
     source ~/dotfiles/nvim/plugins/nvim/scrollbar.vim

@@ -55,7 +55,7 @@ ml $d bashrc ~/ .bashrc
 ml $d bash_logout ~/ .bash_logout
 ml $d gitconfig ~/ .gitconfig
 # ml $d ssh/config ~/.ssh/ # not govern through moved to private repo
-ml $d tmux.conf ~/ .tmux.conf
+ml $d tmux/tmux.conf ~/ .tmux.conf
 ml $d bat.conf ~/.config/bat/ config
 ml $d tigrc ~/ .tigrc
 

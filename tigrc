@@ -6,3 +6,12 @@ bind generic @ @sh -c "\
   ) \
   || tmux split-window -l 80% 'LESS= DELTA_PAGER=\"less -R\" git show %(commit)'"
 
+# bind generic $ @sh -c "\
+#   ( \
+#     tmux has-session -t '.{last}' \
+#     && tmux respawn-pane -t '.{last}' -k 'LESS= DELTA_PAGER=\"less -R\" git show %(commit)' \
+#   ) \
+#   || tmux split-window -l 80% 'LESS= DELTA_PAGER=\"less -R\" git show %(commit)'"
+
+bind generic $ @sh -c "\
+  tmux split-window -l 80% 'git show %(commit)'"
