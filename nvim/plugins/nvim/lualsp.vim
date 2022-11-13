@@ -65,8 +65,10 @@ _G.on_attach_default = function(client, bufnr)
   -- Mappings.
   local opts = { noremap=true, silent=true }
 
-  vim.keymap.set('n', '<C-j>', '<Cmd>Lspsaga diagnostic_jump_next<CR>', opts)
+  --need to found another shortcut this is needed for navigation
+  -- vim.keymap.set('n', '<C-j>', '<Cmd>Lspsaga diagnostic_jump_next<CR>', opts)
   vim.keymap.set('i', '<C-k>', '<Cmd>Lspsaga signature_help<CR>', opts)
+
   vim.keymap.set('n', 'gp', '<Cmd>Lspsaga preview_definition<CR>', opts)
 
 

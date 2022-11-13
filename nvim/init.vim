@@ -3,7 +3,6 @@ if &compatible
 endif
 
 " Required:
-" let useCoc = 1
 let g:lspClient = 3 "1 for coc-nvim, 2 for deoplete (WIP), 3 neovim native, -1 non Lsp Client (TBD)
 " let g:vimTheme = 2 "1 solarized8, 2 gruvbox
 
@@ -33,7 +32,7 @@ if !exists("g:os")
   endif
 endif
 
-""decide whot is vim model, 1 vim, pre-0.5 nvim, 0.5+ nvim
+""decide what is vim model, 1 vim, pre-0.5 nvim, 0.5+ nvim
 function! VimMode()
   if has("nvim")
     let vimver = matchstr(execute('version'), 'NVIM v\zs[^\n]*')
@@ -84,7 +83,6 @@ let g:which_key_map.v.h ={'name':'+help'}
 
 " Required
 call plug#begin(expand('~/.vim/plugged'))
-" call plug#begin()
 " echom "plugbegin"
 
 
@@ -112,12 +110,6 @@ call plug#begin(expand('~/.vim/plugged'))
   Plug 'tpope/vim-surround' "surrounding words with symbols
   "Plug 'tmsvg/pear-tree' "getting some issues for the function disabled
 
-  "dim iniactive panes
-  " source ~/dotfiles/nvim/plugins/nvim/shadenvim.vim
-  " source ~/dotfiles/nvim/plugins/vim/viminactive.vim
-
-  " Plug 'junegunn/gv.vim' "git tree - simplier version of flog
-  " Plug 'gregsexton/gitv', {'on': ['Gitv']}
   Plug 'powerman/vim-plugin-AnsiEsc'
 
   Plug 'mmai/vim-markdown-wiki'
@@ -125,7 +117,6 @@ call plug#begin(expand('~/.vim/plugged'))
 
 
   ""vimwiki - personal notes
-  " Plug 'vimwiki/vimwiki'
   " Plug 'fcpg/vim-waikiki'
 
   ""addvanced ide features
@@ -170,12 +161,7 @@ call plug#begin(expand('~/.vim/plugged'))
   " vimmode 3 => Neovim 0.5+ with lua
   if g:vimmode == 3
 
-
-    " syntax and grammatics
-    " Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'} "LSP based highlighting
-    "to fix the iisue with slow markdown
-    "https://github.com/nvim-treesitter/nvim-treesitter/issues/2206
-    " Plug 'nvim-treesitter/nvim-treesitter', {'commit': '8ada8faf2fd5a74cc73090ec856fa88f34cd364b', 'do': ':TSUpdate'}
+    " syntax and grammatics TBR should be within modules where it's needed
     Plug 'nvim-lua/popup.nvim'
     Plug 'nvim-lua/plenary.nvim'
 
@@ -189,14 +175,6 @@ call plug#begin(expand('~/.vim/plugged'))
     " migratting sessions from startify
     source ~/dotfiles/nvim/plugins/nvim/sessionsmgr.lua
 
-    "lspsaga WIP issues on loading moved to lualsp
-    " source ~/dotfiles/nvim/plugins/nvim/lspsaga.vim
-
-    "lsp navigation moved to lualsp
-    " source ~/dotfiles/nvim/plugins/nvim/nvimnavic.vim
-
-    "TBR with mason bellow kept for now
-    " Plug 'williamboman/nvim-lsp-installer' "automatic installer of LSPs
     "lua plugin
     source ~/dotfiles/nvim/plugins/nvim/luapad.lua
 
@@ -206,27 +184,18 @@ call plug#begin(expand('~/.vim/plugged'))
     "nvim-lsp-installer mk.2
     source ~/dotfiles/nvim/plugins/nvim/mason.vim
 
-    " LSP List [https://github.com/neovim/nvim-lspconfig/blob/master/CONFIG.md#svelte]
-
     "syntax highlight support
-    " Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'}
     source ~/dotfiles/nvim/plugins/nvim/treesitter.vim
 
     "telescope search instead of fzf
-    " Plug 'nvim-telescope/telescope.nvim'
-    " Plug 'nvim-telescope/telescope-fzf-native.nvim',  { 'do': 'make' }
     source ~/dotfiles/nvim/plugins/nvim/telescope.vim
 
     ""nice headlines
     source ~/dotfiles/nvim/plugins/nvim/headlines.vim
 
-
     "Status bufferline
     source ~/dotfiles/nvim/plugins/nvim/barbar.vim
     " source ~/dotfiles/nvim/plugins/nvim/bufferline.vim
-
-    ""Indent guides
-    Plug 'lukas-reineke/indent-blankline.nvim'
 
     "orgmode
     source ~/dotfiles/nvim/plugins/nvim/orgmode.lua
@@ -244,19 +213,20 @@ call plug#begin(expand('~/.vim/plugged'))
     " source ~/dotfiles/nvim/plugins/nvim/git.vim
     " Plug 'ThePrimeagen/git-worktree.nvim'
     source ~/dotfiles/nvim/plugins/nvim/diffview.lua
+    source ~/dotfiles/nvim/plugins/nvim/gitsigns.lua
 
     "outlines
-    Plug 'simrat39/symbols-outline.nvim' "outlines
+    source ~/dotfiles/nvim/plugins/nvim/symbolsoutline.lua
 
    ""Indent guides
-    Plug 'lukas-reineke/indent-blankline.nvim'
+    source ~/dotfiles/nvim/plugins/nvim/indentblankline.lua
 
     ""Treesitter backed comments
-    Plug 'numToStr/Comment.nvim'
+    source ~/dotfiles/nvim/plugins/nvim/commentnvim.lua
     " Plug 'waylonwalker/Telegraph.nvim' "interesting idea simple using vimux nox
 
     "lua extended version of which key
-    Plug 'folke/which-key.nvim'
+    source ~/dotfiles/nvim/plugins/nvim/whichkey.lua
 
     " themes have to be before lualine
     if luaeval('vim.env.THEME') == 'gruvbox'
@@ -291,37 +261,20 @@ call plug#begin(expand('~/.vim/plugged'))
 
     ""Indent guides
     Plug 'b3tchi/iguides' "improved guides
-    " Plug 'Yggdroot/indentLine'
-    " Plug 'thaerkh/vim-indentguides'
-    " Plug 'lukas-reineke/indent-blankline.nvim'
-    " Plug 'nathanaelkane/vim-indent-guides' "indenting guides
 
     ""Status Line & bufferline
     source ~/dotfiles/nvim/plugins/vim/lightline.vim
 
     " themes
     source ~/dotfiles/nvim/plugins/vim/gruvbox.vim
-    " source ~/dotfiles/nvim/plugins/vim/solarized.vim
-    " source ~/dotfiles/nvim/plugins/nvim/gruvboxnvim.vim
 
     "syntax highlighting
     Plug 'sheerun/vim-polyglot'
-
-    " Plug 'lifepillar/vim-solarized8'
-    " Plug 'morhetz/gruvbox'
-    " Plug 'kaicataldo/material.vim'
-    " Plug 'altercation/vim-colors-solarized'
-    " Plug 'iCyMind/NeoSolarized'
 
     source ~/dotfiles/nvim/plugins/vim/markdown.vim
   endif
 
 call plug#end()
-
-" Run PlugInstall if there are missing plugins
-" autocmd VimEnter * if len(filter(values(g:plugs), '!isdirectory(v:val.dir)'))
-  " \| PlugInstall --sync | source $MYVIMRC
-" \| endif
 
 " Run PlugInstall if there are missing plugins
 if len(filter(values(g:plugs), '!isdirectory(v:val.dir)'))
@@ -333,7 +286,6 @@ endif
 doautocmd User PlugLoaded
 " echo "plugafterevent"
 
-
 " Allow gf to open non-existent files
 map gf :edit <cfile><cr>
 
@@ -342,10 +294,10 @@ syntax on
 " filetype plugin indent on
 set noshowmode " INSERT déjà affiché par lightbar
 
-autocmd FileType vista,coc-explorer setlocal signcolumn=no
 
 "languages
 source ~/dotfiles/nvim/languages/bash.vim
+source ~/dotfiles/nvim/languages/svelte.vim
 source ~/dotfiles/nvim/languages/yaml.vim
 source ~/dotfiles/nvim/languages/powershell.vim "ENABLED TESTING mason
 source ~/dotfiles/nvim/languages/csharp.vim
@@ -442,11 +394,6 @@ if g:wsl == 1
   augroup END
 endif
 
-" augroup ProjectDrawer:
-"   autocmd!
-"   autocmd VimEnter * :Vexplore
-" augroup END
-
 set fillchars=vert:┃ " for vsplits
 
 " -----------------------------
@@ -455,39 +402,10 @@ set fillchars=vert:┃ " for vsplits
 
 nnoremap <C-C> <C-[>
 
-if g:vimmode != 3
-  call which_key#register('<Space>', "g:which_key_map")
-  " which key
-  nnoremap <silent><space> :WhichKey ' '<CR>
-endif
-
 let g:which_key_map.b = '+buffer'
-" nnoremap <silent> <space>bb :Buffers<cr>
 nnoremap <silent> <space>bb :Telescope buffers<cr>
 nnoremap <silent> <space>bs :StripWhitespace<cr>
 nnoremap <silent> <space>bl :LspInfo<cr>
-
-" nnoremap <C-p> :GFiles<cr>
-" nnoremap <C-f> :Rg<cr>
-" nnoremap <silent> <space>f :Rg<cr>
-" nnoremap <silent> ;; :Buffer<cr>
-" nnoremap <silent> <space>ee :call FuzzyFiles()<cr>
-" nnoremap <silent> <space>W :Windows<cr>
-
-" function FuzzyFiles()
-"   if get(b:,'git_dir') == 0
-"     exe ':FzfFiles'
-"   else
-"     exe ':GFiles'
-"   endif
-" endfunction
-
-"tasks TBD
-" nnoremap <silent> <space>tn :Trep<cr>
-
-" nnoremap <silent> <space>vk :Maps<cr>
-" let g:which_key_map.v.h ={'name':'+help'}
-" nnoremap <silent> <space>vhf :Helptags<cr>
 
 let g:which_key_map.v.p ={'name':'+plug'}
 nnoremap <silent> <space>vpu :PlugUpdate<cr>
@@ -495,19 +413,13 @@ nnoremap <silent> <space>vpi :PlugStatus<cr>
 nnoremap <silent> <space>vpc :PlugClean<cr>
 
 let g:which_key_map.v.i ={'name':'+init.vim'}
-" nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>:LightlineReload<cr>
 nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>
 
 let g:which_key_map.v.l ={'name':'+lsp'}
-nnoremap <silent> <space>vli :LspInstallInfo<cr>
  " If text is selected, save it in the v buffer and send that buffer it to tmux
+nnoremap <silent> <space>vli :LspInstallInfo<cr>
 
-nmap <silent> <leader>tn :TestNearest<CR>
-nmap <silent> <leader>tf :TestFile<CR>
-nmap <silent> <leader>ts :TestSuite<CR>
-nmap <silent> <leader>tl :TestLast<CR>
-nmap <silent> <leader>tv :TestVisit<CR>
-
+" replace word
 nnoremap <space>rc :%s/<C-r><C-w>//gc<Left><Left><Left>
 nnoremap <space>rr :%s/<C-r>"//gc<Left><Left><Left>
 
@@ -521,14 +433,6 @@ tnoremap jj <C-\><C-n>
 " nmap    <Esc>
 " tnoremap <Esc> <C-\><C-n>
 
-"" commenting keybindings
-" nmap <space>cl <leader>c
-" "add comment paragraph
-" nmap <space>cp vip<leader>c
-" "toggle comment paragrap
-" nmap <space>cP vip<leader>cc
-" "toggle comment tag
-" nmap <space>ct vat<leader>c
 
 "" navigating widows by spaces + number
 nnoremap <silent><space>1 :exe 1 . "wincmd w"<CR>
@@ -572,26 +476,11 @@ nnoremap <space>wl <c-w>p
 vnoremap < <gv
 vnoremap > >gv
 
-" --- Vim Wiki ---
-nnoremap <silent><space>Wt :VimwikiTable 1 2
-
-" --- Coc ---
-" moved to coc.vim
-
 nnoremap <Tab> :bnext!<CR>
 nnoremap <S-Tab> :bprev!<CR>
 
 nnoremap <C-Tab> :bnext!<CR>
 nnoremap <S-C-Tab> :bprev!<CR>
-
-" inoremap <expr><S-TAB> pumvisible() ? "\<C-p>" : "\<C-h>"
-" inoremap <expr><C-S-Space> pumvisible() ? "\<C-p>" : "\<C-h>"
-
-" inoremap <expr> <cr> pumvisible() ? "\<C-y>" : "\<C-g>u\<CR>"
-" inoremap <expr> <CR> pumvisible() ? "\<C-y>" : "\<CR>"
-
-" tmap <S-TAB> <Nop>
-" tmap <TAB> <Nop>
 
 "}}}
 " ----------------------------------
@@ -611,118 +500,17 @@ if has("autocmd")
     \ endif
 endif
 
-" --- Coc ---
-"moved to coc.vim
-
 " --- local vimrc ---
 "diable prompts on folder change
 let g:localvimrc_sandbox = 0
 let g:localvimrc_ask = 0
 
-"--- Vista ---
-"moved to coc.vim
-
 let $BAT_THEME = 'gruvbox' "need bat 16.0 and higher
-" let $BAT_THEME = 'OneHalfDark'
 
 let g:rg_derive_root='true'
-
-"--- NERD Commenter ---
-"using tpope's commentary
-" let g:NERDSpaceDelims = 1
-" let g:NERDCompactSexyComs = 1
-highlight Comment cterm=italic
-
-
-"--- startify ---
-"moved to startify.vim
-
-"--- Indent Guides ---
-" let g:indent_guides_enable_on_vim_startup = 1
-" let g:indent_guides_auto_colors = 0
-" let g:indent_guides_color_change_percent = 3 " for auto options left 5 percent only
-
-if g:vimmode != 3
-  "color form solarized8
-  if g:vimTheme == 1
-    autocmd VimEnter,Colorscheme * :hi IndentGuidesOdd  guibg=#002b36 ctermbg=3
-    autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#073642 ctermbg=4
-  elseif g:vimTheme == 2
-    autocmd VimEnter,Colorscheme * :hi IndentGuidesOdd  guibg=#282828 ctermbg=3
-    autocmd VimEnter,Colorscheme * :hi IndentGuidesEven  guibg=#232323 ctermbg=4
-    " autocmd VimEnter,Colorscheme * :hi IndentGuidesEven guibg=#3c3836 ctermbg=4
-  endif
-endif
-
-" --- Vim Test ---
-let g:test#strategy = 'neovim'
-
-" --- Svelte filetypes specific ---
-if !exists('g:context_filetype#filetypes')
-  let g:context_filetype#filetypes = {}
-endif
-let g:context_filetype#filetypes.svelte =
-  \ [
-  \ {'filetype' : 'javascript', 'start' : '<script>', 'end' : '</script>'}
-  \ ,{'filetype' : 'css', 'start' : '<style>', 'end' : '</style>'}
-  \ ]
-
-if !exists('g:context_filetype#same_filetypes')
-  let g:context_filetype#same_filetypes = {}
-endif
-let g:context_filetype#same_filetypes.svelte = 'html'
-
-au! BufNewFile,BufRead *.svelte set ft=html
 
 " --- EMMET specific ---
 let g:user_emmet_install_global = 0
 let g:user_emmet_leader_key = ','
 autocmd FileType html,css EmmetInstall
-
-" --- PowerShell specific ---
-" moved to powershell.vim
-
-" --- vimWiki specific ---
-let wikis = [
-  \ {'path': '~/vimwiki/', 'syntax': 'markdown', 'ext': '.md'}
-  \]
-
-" if g:computerName =='DESKTOP-HSRFLH5' "LEGO desktop
-"   add(wikis ,{'path': '~/OneDrive - LEGO/vimwiki_LEGO/', 'syntax': 'markdown', 'ext': '.md'})
-" endif
-
-let g:vimwiki_markdown_link_ext = 1
-let g:vimwiki_list = wikis
-let g:vimwiki_listsyms = ' –x'
-let g:vimwiki_listsym_rejected = 'x'
-let g:vimwiki_folding = 'list'
-let g:vimwiki_key_mappings = { 'table_mappings': 0 } "! - to fix/change completion behavior
-
-" --- VimWhichKey ---
-set timeoutlen=500
-if g:vimmode != 3
-
-  call which_key#register('<Space>', "g:which_key_map")
-  nnoremap <silent><space> :WhichKey ' '<CR>
-  " moved before bindigs
-  " let g:which_key_use_floating_win = 1 "make as floating window
-  " let g:which_key_run_map_on_popup = 1
-
-endif
-
-" --- LUA LSP 0.5
-if g:vimmode == 3
-  source ~/dotfiles/nvim/plugins/nvim/lualegacy.vim
-endif
-
-function! RecurseForPath(dict,skey)
-  for key in keys(a:dict)
-    if type(a:dict[key]) == type({})
-      call RecurseForPath(a:dict[key],a:skey.key)
-    else
-      if key != 'name'
-      endif
-    endif
-  endfor
-endfunction
 

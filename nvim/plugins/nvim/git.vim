@@ -1,12 +1,10 @@
-Plug 'lewis6991/gitsigns.nvim'
-
 "git clone
 Plug 'nvim-lua/plenary.nvim'
 Plug 'TimUntersberger/neogit'
 
 "diffview
-Plug 'nvim-lua/plenary.nvim'
-Plug 'sindrets/diffview.nvim'
+" Plug 'nvim-lua/plenary.nvim'
+" Plug 'sindrets/diffview.nvim'
 
 Plug  'dinhhuy258/git.nvim'
 
@@ -14,14 +12,8 @@ function LoadedGitNvim()
 
 lua << EOF
 
---git markers
-require('gitsigns').setup()
-
 --git integration
 require('git').setup()
-
---diff view
-require('diffview').setup()
 
 --adding diffview
 require('neogit').setup({

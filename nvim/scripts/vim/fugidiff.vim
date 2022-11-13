@@ -182,6 +182,7 @@ fu! DiffTog(toggleDisabled) abort
     normal gg
     "go on first hunk
     execute "GitGutterNextHunk"
+    " execute "Gitsigns next_hunk"
 
     "switch back to fugitive
     set switchbuf=useopen
@@ -196,6 +197,7 @@ fu! PrevChange() abort
 
   if r.wt.tgtwinid != -1 "close window
     echo win_execute(win_getid(r.wt.tgtwinid ),'GitGutterPrevHunk')
+    " echo win_execute(win_getid(r.wt.tgtwinid ),'Gitsigns prev_hunk')
   endif
 
 endfunction
@@ -206,6 +208,7 @@ fu! NextChange() abort
 
   if r.wt.tgtwinid != -1 "close window
     echo win_execute(win_getid(r.wt.tgtwinid ),'GitGutterNextHunk')
+    " echo win_execute(win_getid(r.wt.tgtwinid ),'Gitsigns next_hunk')
   endif
 
 endfunction

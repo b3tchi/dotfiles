@@ -66,6 +66,7 @@ function! s:show_documentation()
   endif
 endfunction
 
+autocmd FileType vista,coc-explorer setlocal signcolumn=no
 
 hi CocHighlightText guibg=#556873 gui=bold
 
