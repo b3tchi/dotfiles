@@ -44,10 +44,8 @@ function LoadedGit()
   " let g:which_key_map.g.w = 'worktree'
   " nnoremap <silent> <space>gw :lua require('telescope').extensions.git_worktree.git_worktrees()<cr>
 
-  " nnoremap <silent> <space>gj :GitGutterNextHunk<cr>
-  " nnoremap <silent> <space>gk :GitGutterPrevHunk<cr>
-  " nnoremap <silent> <space>gi :GitGutterPreviewHunk<cr>
-
+  "disabling in favor of gitsings but still need for fugidiff
+  let g:gitgutter_signs = 0
 endfunction
 
 augroup LoadedGit
