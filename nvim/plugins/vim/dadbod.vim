@@ -27,6 +27,8 @@ EOF
 " --- DadBod UI ---
 let g:db_ui_disable_mappings = 1
 
+autocmd FileType sql,mysql,plsql lua require('cmp').setup.buffer({ sources = {{ name = 'vim-dadbod-completion' }} })
+
 autocmd FileType sql vmap <buffer><silent><space>de <Plug>(DBUI_ExecuteQuery)
 autocmd FileType sql nmap <buffer><silent><space>de <Plug>(DBUI_ExecuteQuery)
 let g:which_key_map.d.e = 'execute query'

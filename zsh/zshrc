@@ -82,22 +82,6 @@ bindkey '^[3;5~' delete-char
 # Theme
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
 
-# Export Variables
-if [[ -n $(uname -o | grep 'Linux') ]]; then
-  export IS_LINUX=1
-fi
-
-if [[ $(uname -o) = 'Android' ]]; then
-  export IS_ANDROID=1
-fi
-
-# Check wsl
-if [[ -f "/mnt/c/WINDOWS/system32/wsl.exe" ]]; then
-  export IS_WSL=1
-fi
-
-export COLORTERM=truecolor
-
 # NNN quit on cd
 n () {
 
@@ -213,8 +197,6 @@ alias -s yaml=nvim
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
-
-
 
 ##OWN PROMPT WITHOUT ADDINS NOT WORK WITH BARE REPOS - switching to pure
 

@@ -214,6 +214,7 @@ call plug#begin(expand('~/.vim/plugged'))
     " Plug 'ThePrimeagen/git-worktree.nvim'
     source ~/dotfiles/nvim/plugins/nvim/diffview.lua
     source ~/dotfiles/nvim/plugins/nvim/gitsigns.lua
+    source ~/dotfiles/nvim/plugins/nvim/octonvim.lua
 
     "outlines
     source ~/dotfiles/nvim/plugins/nvim/symbolsoutline.lua

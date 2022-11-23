@@ -56,6 +56,22 @@ else
   esac
 fi
 
+# Export Variables
+if [[ -n $(uname -o | grep 'Linux') ]]; then
+  export IS_LINUX=1
+fi
+
+if [[ $(uname -o) = 'Android' ]]; then
+  export IS_ANDROID=1
+fi
+
+# Check wsl
+if [[ -f "/mnt/c/WINDOWS/system32/wsl.exe" ]]; then
+  export IS_WSL=1
+fi
+
+export COLORTERM=truecolor
+
 #check if wsl then start docker
 if [ -n $IS_WSL ]; then
   if service docker status 2>&1 | grep -q "is not running"; then

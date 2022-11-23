@@ -1,0 +1,6 @@
+{
+    "language": "tsql",
+    "keywordCase": "upper",
+    "commaPosition": "before",
+    "indentStyle": "tabularRight"
+}

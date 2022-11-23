@@ -16,20 +16,21 @@ ts.setup {
     enable = true,
     disable = {},
   },
-  ensure_installed = "all", -- one of "all", "maintained" (parsers with maintainers), or a list of languages
   ignore_install = { "javascript" }, -- List of parsers to ignore installing
-  -- ensure_installed = {
-  --   "tsx",
+  -- ensure_installed = "all", -- one of "all", "maintained" (parsers with maintainers), or a list of languages
+  ensure_installed = {
+    "tsx",
+    "typescript",
   --   "toml",
   --   "fish",
   --   "php",
-  --   "json",
+    "json",
   --   "yaml",
   --   "swift",
-  --   "css",
-  --   "html",
-  --   "lua"
-  -- },
+    "css",
+    "html",
+    "lua"
+  },
   autotag = {
     enable = true,
   },
