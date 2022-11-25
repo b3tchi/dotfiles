@@ -326,7 +326,7 @@ set title "for Session title names
 "" incremental search
 set incsearch
 set hlsearch
-set fillchars+=diff:╱, vert:┃ " for vsplits
+set fillchars+=diff:╱,vert:┃ " for vsplits
 
 "indentations spaces
 " 2 indent are easier to complicate code let's take 4
