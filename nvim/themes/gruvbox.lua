@@ -25,15 +25,9 @@ function Load_theme_gruvbox()
     vim.cmd('colorscheme gruvbox')
 
     vim.api.nvim_set_hl(0,'Folded',{bg='#232323'})
-    -- hi Folded guibg=#232323
     vim.api.nvim_set_hl(0,'ActiveWindow',{bg=''})
-    -- hi ActiveWindow guibg=none
     vim.api.nvim_set_hl(0,'InactiveWindow',{bg='#32302f'})
-    -- hi InactiveWindow guibg=#32302f
-
-    --by default set backgroud from based on terminal (tmux) bg color
     vim.api.nvim_set_hl(0,'Normal',{bg='',fg='#EBDBB2'})
-    -- hi Normal ctermfg=223 ctermbg=none guifg=#ebdbb2 guibg=none
 
 
     function Handle_Win_Enter()
