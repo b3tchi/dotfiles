@@ -326,6 +326,7 @@ set title "for Session title names
 "" incremental search
 set incsearch
 set hlsearch
+set fillchars+=diff:╱, vert:┃ " for vsplits
 
 "indentations spaces
 " 2 indent are easier to complicate code let's take 4
@@ -395,7 +396,6 @@ if g:wsl == 1
   augroup END
 endif
 
-set fillchars=vert:┃ " for vsplits
 
 " -----------------------------
 " --------- Shortcuts ---------

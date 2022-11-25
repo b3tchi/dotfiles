@@ -28,9 +28,3 @@ vim.api.nvim_create_autocmd(
     {'User'}
     ,{pattern = 'PlugLoaded',group= augr_plugin, callback=Load_luapad}
 )
-
-
--- " augroup LoadLuaPad
--- "   autocmd!
--- "   autocmd User PlugLoaded call LoadLuaPad()
--- " augroup END

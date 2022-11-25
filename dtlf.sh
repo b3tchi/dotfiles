@@ -58,6 +58,7 @@ ml $d gitconfig ~/ .gitconfig
 ml $d tmux/tmux.conf ~/ .tmux.conf
 ml $d bat.conf ~/.config/bat/ config
 ml $d tigrc ~/ .tigrc
+ml $d visidata/visidatarc ~/ .visidatarc
 
 #zsh
 ml $d zsh/zshrc ~/ .zshrc
