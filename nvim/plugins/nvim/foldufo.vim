@@ -3,8 +3,8 @@ Plug 'kevinhwang91/promise-async'
 
 set termguicolors
 set background=dark
-let g:gruvbox_italic=1
-highlight Folded guibg=#232323
+" let g:gruvbox_italic=1
+" highlight Folded guibg=#232323
 
 " echom "plugfile"
 

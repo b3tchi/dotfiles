@@ -25,8 +25,6 @@ function Load_blanklines()
 
     }
 
-    -- vim.keymap.set('n', '<space>bgh', '<Cmd>DiffviewFileHistory %<CR>', {silent = true, desc='buffer git history'})
-
 end
 
 vim.api.nvim_create_autocmd(

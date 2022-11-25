@@ -4,13 +4,14 @@ Plug ('folke/tokyonight.nvim', {branch ='main'})
 
 function Load_theme_tokio()
     vim.cmd[[colorscheme tokyonight-night]]
-    vim.cmd[[set fillchars+=diff:╱]]
 
-    vim.api.nvim_set_hl(0,'Folded',{bg='#222436'})
+    vim.api.nvim_set_hl(0,'Folded',{bg='#222436'}) --fold-ufo
     vim.api.nvim_set_hl(0,'ActiveWindow',{bg=''})
     vim.api.nvim_set_hl(0,'InactiveWindow',{bg='#222436'})
     vim.api.nvim_set_hl(0,'Normal',{fg='#7aa2f7'})
     vim.api.nvim_set_hl(0,'DiffDelete',{bg='#37222c', fg='#222436'})
+
+    vim.cmd[[set fillchars+=diff:╱]]
 
     function Handle_Win_Enter()
         vim.cmd[[ setlocal winhighlight=Normal:ActiveWindow,NormalNC:InactiveWindow ]]
