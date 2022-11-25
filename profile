@@ -95,4 +95,4 @@ export REPOS_PATH=$HOME/repos
 export MPXR_CONFIG_PATH=$HOME/dotfiles/tmux
 
 #color theme TBD
-export THEME=gruvbox
+export THEME=tokionight #gruvbox

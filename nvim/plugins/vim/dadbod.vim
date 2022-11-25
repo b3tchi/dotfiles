@@ -26,6 +26,7 @@ EOF
 
 " --- DadBod UI ---
 let g:db_ui_disable_mappings = 1
+let g:db_ui_use_nerd_fonts = 1
 
 autocmd FileType sql,mysql,plsql lua require('cmp').setup.buffer({ sources = {{ name = 'vim-dadbod-completion' }} })
 

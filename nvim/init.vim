@@ -232,8 +232,8 @@ call plug#begin(expand('~/.vim/plugged'))
     " themes have to be before lualine
     if luaeval('vim.env.THEME') == 'gruvbox'
         source ~/dotfiles/nvim/themes/gruvbox.lua
-    elseif luaeval('vim.env.THEME') == 'tokio'
-        source ~/dotfiles/nvim/themes/tokio.lua
+    elseif luaeval('vim.env.THEME') == 'tokionight'
+        source ~/dotfiles/nvim/themes/tokionight.lua
     endif
 
     "scrollbar

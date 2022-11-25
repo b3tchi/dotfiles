@@ -245,3 +245,4 @@ if [[ -d $HOME/.shell_config/zsh ]]; then
 else
   mkdir -p $HOME/.shell_config/zsh
 fi
+
