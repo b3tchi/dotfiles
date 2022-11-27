@@ -9,7 +9,8 @@ function Load_theme_tokio()
     vim.api.nvim_set_hl(0,'ActiveWindow',{bg=''})
     vim.api.nvim_set_hl(0,'InactiveWindow',{bg='#222436'})
     vim.api.nvim_set_hl(0,'Normal',{fg='#7aa2f7'})
-    vim.api.nvim_set_hl(0,'DiffDelete',{bg='', fg='#222436'})
+    -- vim.api.nvim_set_hl(0,'DiffDelete',{bg='', fg='#222436'})
+    vim.api.nvim_set_hl(0,'DiffDelete',{bg='', fg='#414868'})
 
     function Handle_Win_Enter()
         vim.cmd[[ setlocal winhighlight=Normal:ActiveWindow,NormalNC:InactiveWindow ]]
