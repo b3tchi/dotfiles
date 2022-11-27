@@ -58,8 +58,8 @@ zplugin light sindresorhus/pure
 
 # Binary release in archive, from GitHub-releases page.
 # After automatic unpacking it provides program "fzf".
-zplugin ice from"gh-r" as"program"
-zplugin load junegunn/fzf-bin
+# zplugin ice from"gh-r" as"program" not needed now
+# zplugin load junegunn/fzf-bin #moved to my scripts
 
 ### Options
 setopt auto_cd # cd by typing directory name if it's not a command

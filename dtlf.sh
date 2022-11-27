@@ -50,37 +50,23 @@ d=~/dotfiles/
 # ml $d nvim/init.vim ~/lnk/
 #bash
 ml $d profile ~/ .profile
-ml $d profile ~/ .zprofile
 ml $d bashrc ~/ .bashrc
 ml $d bash_logout ~/ .bash_logout
+#git
 ml $d gitconfig ~/ .gitconfig
 # ml $d ssh/config ~/.ssh/ # not govern through moved to private repo
 ml $d tmux/tmux.conf ~/ .tmux.conf
-ml $d bat.conf ~/.config/bat/ config
 ml $d tigrc ~/ .tigrc
 ml $d visidata/visidatarc ~/ .visidatarc
 
+#bat
+ml $d bat ~/.config/
+ml $d fzf/themes/tokyonight.conf ~/.shell_config/shared/ fzf-theme
+
 #zsh
+ml $d profile ~/ .zprofile
 ml $d zsh/zshrc ~/ .zshrc
 ml $d zsh/p10k.zsh ~/ .p10k.zsh
-
-#scripts moved to scripts repo
-# ml $d bin/tat ~/.local/bin/
-# ml $d bin/ff ~/.local/bin/
-# ml $d bin/nvim-sessionizer ~/.local/bin/
-# ml $d bin/nvim-startifier ~/.local/bin/
-# ml $d bin/gwt/main.sh ~/.local/bin/ gwt
-# ml $d bin/ak/main.sh ~/.local/bin/ ak
-# ml $d bin/azdops/pipeline.sh ~/.local/bin/ azdpipes
-# ml $d bin/azdops/variables.sh ~/.local/bin/ azdvars
-# ml $d bin/fxs.sh ~/.local/bin/ fxs
-# ml $d bin/gwt/gwt ~/.local/bin/
-
-#bin
-# chmod +x ${d}bin/*
-# chmod +x ${d}bin/gwt/main.sh
-# chmod +x ${d}bin/ak/main.sh
-# chmod +x ${d}bin/azdops/*.sh
 
 #fish
 ml $d fish/config.fish ~/.config/fish/
@@ -90,7 +76,7 @@ ml $d fish/n1.fish ~/.config/fish/functions/
 
 #nvim
 ml $d nvim/init.vim ~/.config/nvim/
-ml $d nvim/plugins/vim/coc-settings.json ~/.config/nvim/
+# ml $d nvim/plugins/vim/coc-settings.json ~/.config/nvim/ #not used
 
 ##GUI starts here
 
