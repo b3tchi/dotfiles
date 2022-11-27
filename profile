@@ -96,3 +96,4 @@ export MPXR_CONFIG_PATH=$HOME/dotfiles/tmux
 
 #color theme TBD
 export THEME=tokionight #gruvbox
+
