@@ -1,16 +1,14 @@
--- "notes taking - IN Testing
 local Plug = vim.fn['plug#']
 Plug ('folke/tokyonight.nvim', {branch ='main'})
 
 function Load_theme_tokio()
-    vim.cmd[[colorscheme tokyonight-night]]
+    vim.cmd [[colorscheme tokyonight-night]]
 
-    vim.api.nvim_set_hl(0,'Folded',{bg='#222436'}) --fold-ufo
-    vim.api.nvim_set_hl(0,'ActiveWindow',{bg=''})
-    vim.api.nvim_set_hl(0,'InactiveWindow',{bg='#222436'})
-    vim.api.nvim_set_hl(0,'Normal',{fg='#7aa2f7'})
-    -- vim.api.nvim_set_hl(0,'DiffDelete',{bg='', fg='#222436'})
-    vim.api.nvim_set_hl(0,'DiffDelete',{bg='', fg='#414868'})
+    vim.api.nvim_set_hl(0, 'Folded', { bg = '#222436' }) --fold-ufo
+    vim.api.nvim_set_hl(0, 'ActiveWindow', { bg = '' })
+    vim.api.nvim_set_hl(0, 'InactiveWindow', { bg = '#222436' })
+    vim.api.nvim_set_hl(0, 'Normal', { fg = '#7aa2f7' })
+    vim.api.nvim_set_hl(0,'DiffViewDiffAddAsDelete',{bg='#37222c'})
 
     function Handle_Win_Enter()
         vim.cmd[[ setlocal winhighlight=Normal:ActiveWindow,NormalNC:InactiveWindow ]]

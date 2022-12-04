@@ -1,4 +1,3 @@
--- "notes taking - IN Testing
 local Plug = vim.fn['plug#']
 
 Plug 'nvim-lua/plenary.nvim'
@@ -7,7 +6,9 @@ Plug 'sindrets/diffview.nvim'
 
 function Load_diffview()
 
-    require('diffview').setup()
+    require('diffview').setup({
+        enhanced_diff_hl = true,
+    })
 
     vim.keymap.set('n', '<space>bgh', '<Cmd>DiffviewFileHistory %<CR>', {silent = true, desc='buffer git history'})
 

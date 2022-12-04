@@ -47,6 +47,21 @@ lua << EOF
   }
 
 
+-- diagnostics symbols
+vim.diagnostic.config({
+  virtual_text = true,
+  signs = true,
+  underline = true,
+  update_in_insert = false,
+  severity_sort = false,
+})
+
+local signs = { Error = "", Warn = "", Hint = "", Info = "" }
+for type, icon in pairs(signs) do
+  local hl = "DiagnosticSign" .. type
+  vim.fn.sign_define(hl, { text = icon, texthl = hl, numhl = hl })
+end
+
 -- Use an on_attach_default function to only map the following keys
 -- after the language server attaches to the current buffer
 _G.on_attach_default = function(client, bufnr)

@@ -165,70 +165,21 @@ call plug#begin(expand('~/.vim/plugged'))
     Plug 'nvim-lua/popup.nvim'
     Plug 'nvim-lua/plenary.nvim'
 
+    "LANGUAGE SERVER
     "language server implementation
-    source ~/dotfiles/nvim/plugins/nvim/lualsp.vim
+    source ~/dotfiles/nvim/plugins/nvim/lualsp.vim "general lsp settings
+    source ~/dotfiles/nvim/plugins/nvim/troublenvim.lua "dignostics improvements
+    source ~/dotfiles/nvim/plugins/nvim/mason.vim "nvim-lsp-installer mk.2
 
-    "markdown files
-    source ~/dotfiles/nvim/plugins/nvim/mdpreview.vim
-    " source ~/dotfiles/nvim/plugins/nvim/telekasten.vim will try orgmode
+    "SYNTAX HIGHLIGHT
+    source ~/dotfiles/nvim/plugins/nvim/treesitter.vim "syntax highlight support
+    source ~/dotfiles/nvim/plugins/nvim/hicolors.lua "highlight colors in the code
+    source ~/dotfiles/nvim/plugins/nvim/headlines.vim "nice headlines
 
-    " migratting sessions from startify
-    source ~/dotfiles/nvim/plugins/nvim/sessionsmgr.lua
+    "CODE ACTIONS
+    source ~/dotfiles/nvim/plugins/nvim/commentnvim.lua "code commenting
 
-    "lua plugin
-    source ~/dotfiles/nvim/plugins/nvim/luapad.lua
-
-    "highlight colors in the code
-    source ~/dotfiles/nvim/plugins/nvim/hicolors.lua
-
-    "nvim-lsp-installer mk.2
-    source ~/dotfiles/nvim/plugins/nvim/mason.vim
-
-    "syntax highlight support
-    source ~/dotfiles/nvim/plugins/nvim/treesitter.vim
-
-    "telescope search instead of fzf
-    source ~/dotfiles/nvim/plugins/nvim/telescope.vim
-
-    ""nice headlines
-    source ~/dotfiles/nvim/plugins/nvim/headlines.vim
-
-    "Status bufferline
-    source ~/dotfiles/nvim/plugins/nvim/barbar.vim
-    " source ~/dotfiles/nvim/plugins/nvim/bufferline.vim
-
-    "orgmode
-    source ~/dotfiles/nvim/plugins/nvim/orgmode.lua
-
-    "completion
-    source ~/dotfiles/nvim/plugins/nvim/nvmcmp.vim
-
-    "debugger
-    source ~/dotfiles/nvim/plugins/nvim/nvimdap.vim
-
-    "folds
-    source ~/dotfiles/nvim/plugins/nvim/foldufo.vim
-
-    "git missing some features
-    " source ~/dotfiles/nvim/plugins/nvim/git.vim
-    " Plug 'ThePrimeagen/git-worktree.nvim'
-    source ~/dotfiles/nvim/plugins/nvim/diffview.lua
-    source ~/dotfiles/nvim/plugins/nvim/gitsigns.lua
-    source ~/dotfiles/nvim/plugins/nvim/octonvim.lua
-
-    "outlines
-    source ~/dotfiles/nvim/plugins/nvim/symbolsoutline.lua
-
-   ""Indent guides
-    source ~/dotfiles/nvim/plugins/nvim/indentblankline.lua
-
-    ""Treesitter backed comments
-    source ~/dotfiles/nvim/plugins/nvim/commentnvim.lua
-    " Plug 'waylonwalker/Telegraph.nvim' "interesting idea simple using vimux nox
-
-    "lua extended version of which key
-    source ~/dotfiles/nvim/plugins/nvim/whichkey.lua
-
+    "THEME
     " themes have to be before lualine
     if luaeval('vim.env.THEME') == 'gruvbox'
         source ~/dotfiles/nvim/themes/gruvbox.lua
@@ -236,18 +187,38 @@ call plug#begin(expand('~/.vim/plugged'))
         source ~/dotfiles/nvim/themes/tokionight.lua
     endif
 
-    "scrollbar
-    source ~/dotfiles/nvim/plugins/nvim/scrollbar.vim
+    "USER INTERFACE
+    source ~/dotfiles/nvim/plugins/nvim/telescope.vim "search pop-up window
+    source ~/dotfiles/nvim/plugins/nvim/whichkey.lua "key maps preview
+    source ~/dotfiles/nvim/plugins/nvim/nvmcmp.vim "completion
 
-    "Status luaLine
-    source ~/dotfiles/nvim/plugins/nvim/lualine.vim
+    source ~/dotfiles/nvim/plugins/nvim/foldufo.vim "code folding
+    source ~/dotfiles/nvim/plugins/nvim/indentblankline.lua "indent guides
+    source ~/dotfiles/nvim/plugins/nvim/scrollbar.vim "scrollbar
 
-    "custom modes
-    source ~/dotfiles/nvim/plugins/nvim/hydra.vim
+    source ~/dotfiles/nvim/plugins/nvim/symbolsoutline.lua "outlines panel
+    source ~/dotfiles/nvim/plugins/nvim/neotree.vim "file panel
+    " source ~/dotfiles/nvim/plugins/nvim/nvimtree.vim "file panel
 
-    "file explorer
-    source ~/dotfiles/nvim/plugins/nvim/neotree.vim
-    " source ~/dotfiles/nvim/plugins/nvim/nvimtree.vim
+    source ~/dotfiles/nvim/plugins/nvim/barbar.vim "Status bufferline
+    source ~/dotfiles/nvim/plugins/nvim/lualine.vim "Status luaLine
+    " source ~/dotfiles/nvim/plugins/nvim/bufferline.vim
+
+    "LANGUAGE SPECIFIC
+    source ~/dotfiles/nvim/plugins/nvim/orgmode.lua "orgmode
+    source ~/dotfiles/nvim/plugins/nvim/mdpreview.vim "markdown files
+    " source ~/dotfiles/nvim/plugins/nvim/telekasten.vim will try orgmode
+
+    "VERSION CONTROL
+    source ~/dotfiles/nvim/plugins/nvim/diffview.lua "addvanced diffview
+    source ~/dotfiles/nvim/plugins/nvim/gitsigns.lua "signs for changes
+    source ~/dotfiles/nvim/plugins/nvim/octonvim.lua "gh cli integration
+
+    "OTHER
+    source ~/dotfiles/nvim/plugins/nvim/nvimdap.vim "debugging
+    source ~/dotfiles/nvim/plugins/nvim/hydra.vim "custom modes
+    source ~/dotfiles/nvim/plugins/nvim/sessionsmgr.lua "migratting sessions from startifu
+    source ~/dotfiles/nvim/plugins/nvim/luapad.lua "lua scratchpad
 
   else "pre-neovim
 
@@ -396,7 +367,14 @@ if g:wsl == 1
   augroup END
 endif
 
+function SynStack()
+  if !exists("*synstack")
+    return
+  endif
+  echo map(synstack(line('.'), col('.')), 'synIDattr(v:val, "name")')
+endfunc
 
+nnoremap <silent> <space>bh :call SynStack()<cr>
 " -----------------------------
 " --------- Shortcuts ---------
 " -----------------------------{{{
