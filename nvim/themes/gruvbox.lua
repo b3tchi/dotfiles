@@ -6,6 +6,7 @@ function Load_theme_gruvbox()
 
     vim.opt.termguicolors = true
     vim.opt.background = "dark"
+    vim.env.BAT_THEME='gruvbox'
 
     require("gruvbox").setup({
         undercurl = true,

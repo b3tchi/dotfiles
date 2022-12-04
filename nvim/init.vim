@@ -192,6 +192,7 @@ call plug#begin(expand('~/.vim/plugged'))
     source ~/dotfiles/nvim/plugins/nvim/whichkey.lua "key maps preview
     source ~/dotfiles/nvim/plugins/nvim/nvmcmp.vim "completion
 
+    source ~/dotfiles/nvim/plugins/nvim/noicenvim.lua "notifications and commandline input location
     source ~/dotfiles/nvim/plugins/nvim/foldufo.vim "code folding
     source ~/dotfiles/nvim/plugins/nvim/indentblankline.lua "indent guides
     source ~/dotfiles/nvim/plugins/nvim/scrollbar.vim "scrollbar
@@ -200,8 +201,9 @@ call plug#begin(expand('~/.vim/plugged'))
     source ~/dotfiles/nvim/plugins/nvim/neotree.vim "file panel
     " source ~/dotfiles/nvim/plugins/nvim/nvimtree.vim "file panel
 
+    source ~/dotfiles/nvim/plugins/nvim/heirline.lua "notifications and commandline input location
     source ~/dotfiles/nvim/plugins/nvim/barbar.vim "Status bufferline
-    source ~/dotfiles/nvim/plugins/nvim/lualine.vim "Status luaLine
+    " source ~/dotfiles/nvim/plugins/nvim/lualine.vim "Status luaLine
     " source ~/dotfiles/nvim/plugins/nvim/bufferline.vim
 
     "LANGUAGE SPECIFIC
@@ -344,8 +346,7 @@ set spelllang=en
 set spellsuggest=best,9 " Show nine spell checking candidates at most
 hi SpellBad cterm=underline ctermfg=red
 
-" always show signcolumns
-set signcolumn=yes
+set signcolumn=auto:4 "always show signcolumns up to 4 positions
 set clipboard=unnamedplus
 set showtabline=2
 set laststatus=2
@@ -395,8 +396,6 @@ let g:which_key_map.v.i ={'name':'+init.vim'}
 nnoremap <space>viu :source ~/.config/nvim/init.vim<cr>
 
 let g:which_key_map.v.l ={'name':'+lsp'}
- " If text is selected, save it in the v buffer and send that buffer it to tmux
-nnoremap <silent> <space>vli :LspInstallInfo<cr>
 
 " replace word
 nnoremap <space>rc :%s/<C-r><C-w>//gc<Left><Left><Left>
@@ -483,8 +482,6 @@ endif
 "diable prompts on folder change
 let g:localvimrc_sandbox = 0
 let g:localvimrc_ask = 0
-
-let $BAT_THEME = 'gruvbox' "need bat 16.0 and higher
 
 let g:rg_derive_root='true'
 

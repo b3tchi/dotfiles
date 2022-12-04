@@ -4,7 +4,9 @@ Plug 'lewis6991/gitsigns.nvim'
 
 function Load_gitsigns()
     --git markers
-    require('gitsigns').setup()
+    require('gitsigns').setup({
+        sign_priority=1,
+    })
 
     vim.keymap.set('n', '<space>gj', '<Cmd>Gitsigns next_hunk<CR>', {silent = true, desc='next git hunk'})
     vim.keymap.set('n', '<space>gk', '<Cmd>Gitsigns prev_hunk<CR>', {silent = true, desc='prev git hunk'})

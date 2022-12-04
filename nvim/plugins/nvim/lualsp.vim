@@ -1,5 +1,5 @@
 Plug 'neovim/nvim-lspconfig' "offical NeoVim LSP plugin
-Plug 'SmiteshP/nvim-navic'
+" Plug 'SmiteshP/nvim-navic'
 Plug 'glepnir/lspsaga.nvim', { 'branch': 'main' }
 
 function LuaLspLoaded()
@@ -12,38 +12,38 @@ lua << EOF
   local status_saga, saga = pcall(require, "lspsaga")
 
   navic.setup {
-    icons = {
-      File          = " ",
-      Module        = " ",
-      Namespace     = " ",
-      Package       = " ",
-      Class         = " ",
-      Method        = " ",
-      Property      = " ",
-      Field         = " ",
-      Constructor   = " ",
-      Enum          = "練",
-      Interface     = "練",
-      Function      = " ",
-      Variable      = " ",
-      Constant      = " ",
-      String        = " ",
-      Number        = " ",
-      Boolean       = "◩ ",
-      Array         = " ",
-      Object        = " ",
-      Key           = " ",
-      Null          = "ﳠ ",
-      EnumMember    = " ",
-      Struct        = " ",
-      Event         = " ",
-      Operator      = " ",
-      TypeParameter = " ",
-    },
-    highlight = false,
-    separator = " > ",
-    depth_limit = 0,
-    depth_limit_indicator = "..",
+  --   icons = {
+  --     File          = " ",
+  --     Module        = " ",
+  --     Namespace     = " ",
+  --     Package       = " ",
+  --     Class         = " ",
+  --     Method        = " ",
+  --     Property      = " ",
+  --     Field         = " ",
+  --     Constructor   = " ",
+  --     Enum          = "練",
+  --     Interface     = "練",
+  --     Function      = " ",
+  --     Variable      = " ",
+  --     Constant      = " ",
+  --     String        = " ",
+  --     Number        = " ",
+  --     Boolean       = "◩ ",
+  --     Array         = " ",
+  --     Object        = " ",
+  --     Key           = " ",
+  --     Null          = "ﳠ ",
+  --     EnumMember    = " ",
+  --     Struct        = " ",
+  --     Event         = " ",
+  --     Operator      = " ",
+  --     TypeParameter = " ",
+  --   },
+  --   highlight = false,
+  --   separator = " > ",
+  --   depth_limit = 0,
+  --   depth_limit_indicator = "..",
   }
 
 
