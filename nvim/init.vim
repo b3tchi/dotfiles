@@ -89,7 +89,7 @@ call plug#begin(expand('~/.vim/plugged'))
   ""General Vim Plugins
   Plug 'jeffkreeftmeijer/vim-numbertoggle'		"hybrid/static number toggle when multiple windows
   Plug 'google/vim-searchindex'
-  Plug 'embear/vim-localvimrc' "loading rootfolder placed vim configs /.lvimrc
+  " Plug 'embear/vim-localvimrc' "loading rootfolder placed vim configs /.lvimrc
   Plug 'ryanoasis/vim-devicons' "nerd fonts icons
 
   ""Welcome & Session Management
@@ -106,7 +106,7 @@ call plug#begin(expand('~/.vim/plugged'))
 
   ""Autoclosing pairs""
   Plug 'cohama/lexima.vim'
-  Plug 'editorconfig/editorconfig-vim' " not used to be investigated
+  " Plug 'editorconfig/editorconfig-vim' " not used to be investigated
   Plug 'tpope/vim-surround' "surrounding words with symbols
   "Plug 'tmsvg/pear-tree' "getting some issues for the function disabled
 
@@ -136,11 +136,10 @@ call plug#begin(expand('~/.vim/plugged'))
   " Plug 'tpope/vim-commentary' "comments gcc
 
   "Window management SuckLess
-  Plug 'fabi1cazenave/suckless.vim'
+  " Plug 'fabi1cazenave/suckless.vim'
 
   "Tmux
   source ~/dotfiles/nvim/plugins/vim/vimux.vim
-
 
   "install dap for vim
   " source ~/dotfiles/nvim/plugins/vim/vimspector.vim
@@ -165,6 +164,7 @@ call plug#begin(expand('~/.vim/plugged'))
     Plug 'nvim-lua/popup.nvim'
     Plug 'nvim-lua/plenary.nvim'
 
+    source ~/dotfiles/nvim/plugins/nvim/sessionsmgr.lua "migratting sessions from startifu
     "LANGUAGE SERVER
     "language server implementation
     source ~/dotfiles/nvim/plugins/nvim/lualsp.vim "general lsp settings
@@ -192,7 +192,6 @@ call plug#begin(expand('~/.vim/plugged'))
     source ~/dotfiles/nvim/plugins/nvim/whichkey.lua "key maps preview
     source ~/dotfiles/nvim/plugins/nvim/nvmcmp.vim "completion
 
-    source ~/dotfiles/nvim/plugins/nvim/noicenvim.lua "notifications and commandline input location
     source ~/dotfiles/nvim/plugins/nvim/foldufo.vim "code folding
     source ~/dotfiles/nvim/plugins/nvim/indentblankline.lua "indent guides
     source ~/dotfiles/nvim/plugins/nvim/scrollbar.vim "scrollbar
@@ -201,10 +200,12 @@ call plug#begin(expand('~/.vim/plugged'))
     source ~/dotfiles/nvim/plugins/nvim/neotree.vim "file panel
     " source ~/dotfiles/nvim/plugins/nvim/nvimtree.vim "file panel
 
-    source ~/dotfiles/nvim/plugins/nvim/heirline.lua "notifications and commandline input location
-    source ~/dotfiles/nvim/plugins/nvim/barbar.vim "Status bufferline
-    " source ~/dotfiles/nvim/plugins/nvim/lualine.vim "Status luaLine
+    " source ~/dotfiles/nvim/plugins/nvim/barbar.vim "Status bufferline
+    " source ~/dotfiles/nvim/plugins/nvim/heirline.lua "notifications and commandline input location
+     " source ~/dotfiles/nvim/plugins/nvim/lualine.vim "Status luaLine
     " source ~/dotfiles/nvim/plugins/nvim/bufferline.vim
+    " source ~/dotfiles/nvim/plugins/nvim/heirline.lua "notifications and commandline input location
+    source ~/dotfiles/nvim/plugins/nvim/noicenvim.lua "notifications and commandline input location
 
     "LANGUAGE SPECIFIC
     source ~/dotfiles/nvim/plugins/nvim/orgmode.lua "orgmode
@@ -219,7 +220,6 @@ call plug#begin(expand('~/.vim/plugged'))
     "OTHER
     source ~/dotfiles/nvim/plugins/nvim/nvimdap.vim "debugging
     source ~/dotfiles/nvim/plugins/nvim/hydra.vim "custom modes
-    source ~/dotfiles/nvim/plugins/nvim/sessionsmgr.lua "migratting sessions from startifu
     source ~/dotfiles/nvim/plugins/nvim/luapad.lua "lua scratchpad
 
   else "pre-neovim
