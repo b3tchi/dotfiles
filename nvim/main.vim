@@ -198,8 +198,9 @@ call plug#begin(expand('~/.vim/plugged'))
     "
     source ~/dotfiles/nvim/plugins/nvim/symbolsoutline.lua "outlines panel
     source ~/dotfiles/nvim/plugins/nvim/neotree.vim "file panel
-    source ~/dotfiles/nvim/plugins/nvim/heirline.lua "notifications and commandline input location
+    source ~/dotfiles/nvim/plugins/nvim/heirline.lua "bars setup (statusbar,winbar,tabbar)
     source ~/dotfiles/nvim/plugins/nvim/noicenvim.lua "notifications and commandline input location
+
     " source ~/dotfiles/nvim/plugins/nvim/nvimtree.vim "file panel
     " source ~/dotfiles/nvim/plugins/nvim/lualine.vim "Status luaLine
     " source ~/dotfiles/nvim/plugins/nvim/bufferline.vim
@@ -244,14 +245,14 @@ set noshowmode " INSERT déjà affiché par lightbar
 
 
 "languages
-source ~/dotfiles/nvim/languages/bash.vim
+source ~/dotfiles/nvim/languages/bash.lua
 source ~/dotfiles/nvim/languages/svelte.vim
 source ~/dotfiles/nvim/languages/yaml.lua
 source ~/dotfiles/nvim/languages/powershell.vim "ENABLED TESTING mason
 source ~/dotfiles/nvim/languages/csharp.vim
-source ~/dotfiles/nvim/languages/terraform.vim
+source ~/dotfiles/nvim/languages/terraform.lua
 source ~/dotfiles/nvim/languages/typescript.vim
-source ~/dotfiles/nvim/languages/otherlangs.vim
+source ~/dotfiles/nvim/languages/otherlangs.lua
 
 "script for vim terminal
 source ~/dotfiles/nvim/scripts/vim/incubator.vim

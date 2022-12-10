@@ -8,9 +8,14 @@ function Load_noice()
 
     require("notify").setup({
       background_colour = "#000000",
+      top_down = false,
     })
 
-    require('noice').setup()
+    require('noice').setup({
+        cmdline = {
+            view = "cmdline",
+        }
+    })
 end
 
 vim.api.nvim_create_autocmd(

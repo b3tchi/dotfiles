@@ -18,7 +18,7 @@ function Load_whichkey()
     }
 
 
-    function recursemap(mapl, xpath)
+    local function recursemap(mapl, xpath)
         -- print(mapl)
         -- for key in keys(vim.g.which_key_map)
         for key,value in pairs(mapl) do --actualcode

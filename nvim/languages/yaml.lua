@@ -7,8 +7,8 @@
 -- lua << EOF
  -- YAML
  require'lspconfig'.yamlls.setup{
-  on_attach = on_attach_default,
-  capabilities = lsp_capabilities,
+  on_attach = vim.g.on_attach_default,
+  capabilities = vim.g.lsp_capabilities,
   settings = {
     yaml = {
       schemas = {

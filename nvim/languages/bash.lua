@@ -1,13 +1,13 @@
-"LSP Installed via nvim-lsp-installer
-" :LSPInstall bashls
-"DAP in vimspector only not yet in nvim-Dap only in vimspector
-
-lua << EOF
+-- "LSP Installed via nvim-lsp-installer
+-- " :LSPInstall bashls
+-- "DAP in vimspector only not yet in nvim-Dap only in vimspector
+--
+-- lua << EOF
 -- BASH
 
 require'lspconfig'.bashls.setup{
-  on_attach = on_attach_default,
-  capabilities = lsp_capabilities,
+  on_attach = vim.g.on_attach_default,
+  capabilities = vim.g.lsp_capabilities,
   flags = {
     debounce_text_changes = 150,
   },
@@ -33,7 +33,7 @@ function _G.mdblock_bash(mdblock, mdpath)
         ,'fi'
         ,'#----END of automatic header----'
     }
-    local temp_path = lux_temppath() .. tmp_file('sh')
+    local temp_path = vim.g.lux_temppath() .. vim.g.tmp_file('sh')
 
     vim.fn.writefile(block_header, temp_path)
     vim.fn.writefile(mdblock, temp_path, 'a')
@@ -44,14 +44,14 @@ function _G.mdblock_bash(mdblock, mdpath)
 
 end
 
-EOF
-
-function LoadedBashLang()
-  autocmd FileType sh nnoremap <buffer> <space>o :Telescope lsp_document_symbols<CR>
-endfunction
-
-augroup LoadedBashLang
-  autocmd!
-  autocmd User PlugLoaded call LoadedBashLang()
-augroup END
+-- EOF
+--
+-- function LoadedBashLang()
+--   autocmd FileType sh nnoremap <buffer> <space>o :Telescope lsp_document_symbols<CR>
+-- endfunction
+--
+-- augroup LoadedBashLang
+--   autocmd!
+--   autocmd User PlugLoaded call LoadedBashLang()
+-- augroup END
 

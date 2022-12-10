@@ -110,14 +110,17 @@ _G.on_attach_default = function(client, bufnr)
   -- buf_set_keymap('n', '<C-k>', '<cmd>lua vim.lsp.buf.signature_help()<CR>', opts)
   -- buf_set_keymap('n', '<space>e', '<cmd>lua vim.lsp.diagnostic.show_line_diagnostics()<CR>', opts)
   -- buf_set_keymap('n', '<space>f', '<cmd>lua vim.lsp.buf.formatting()<CR>', opts)
-  -- print('loaded' .. client)
+  -- print('loaded' .. 'client')
 
 end
 
+vim.g.on_attach_default=_G.on_attach_default
 --Starting Lsp Config details
 local nvim_lsp = require('lspconfig')
 
+--moved to cmp overwritten by lsp
 _G.lsp_capabilities = vim.lsp.protocol.make_client_capabilities()
+vim.g.lsp_capabilities = _G.lsp_capabilities
 
 EOF
 endfunction

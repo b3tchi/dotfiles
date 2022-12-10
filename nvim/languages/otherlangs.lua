@@ -1,4 +1,4 @@
-lua << EOF
+-- lua << EOF
 -- https://github.com/neovim/nvim-lspconfig/blob/master/doc/server_configurations.md
 --Scripting
 -- !!moved to bash.vim -- BASH
@@ -7,32 +7,32 @@ lua << EOF
 -- Presenting Languages
  -- CSS
 require'lspconfig'.cssls.setup{
-  on_attach = on_attach_default,
-  capabilities = lsp_capabilities,
+  on_attach = vim.g.on_attach_default,
+  capabilities = vim.g.lsp_capabilities,
  }
 
  -- HTML
 require'lspconfig'.html.setup{
-  on_attach = on_attach_default,
-  capabilities = lsp_capabilities,
+  on_attach = vim.g.on_attach_default,
+  capabilities = vim.g.lsp_capabilities,
 }
 
  -- SVELTE
 require'lspconfig'.svelte.setup{
-  on_attach = on_attach_default,
-  capabilities = lsp_capabilities,
+  on_attach = vim.g.on_attach_default,
+  capabilities = vim.g.lsp_capabilities,
 }
 
 -- Data Language
 -- !!moved to yaml.vim -- YAML
 require'lspconfig'.jsonls.setup{
-  on_attach = on_attach_default,
-  capabilities = lsp_capabilities,
+  on_attach = vim.g.on_attach_default,
+  capabilities = vim.g.lsp_capabilities,
 } -- JSOM
 
 require'lspconfig'.sumneko_lua.setup {
-  on_attach = on_attach_default,
-  capabilities = lsp_capabilities,
+  on_attach = vim.g.on_attach_default,
+  capabilities = vim.g.lsp_capabilities,
   settings = {
     Lua = {
       runtime = {
@@ -57,13 +57,13 @@ require'lspconfig'.sumneko_lua.setup {
 --  lua
 function _G.mdblock_lua(mdblock)
 
-    local fname = tmp_file('lua')
-    local tmppath = lux_temppath() .. fname
+    local fname = vim.gtmp_file('lua')
+    local tmppath = vim.g.lux_temppath() .. fname
 
     -- print(tmppath)
     vim.fn.writefile(mdblock, tmppath)
     vim.api.nvim_command('source ' .. tmppath)
-    vim.fn.delete(tmp)
+    -- vim.fn.delete(tmp)
 
 end
 
@@ -77,26 +77,26 @@ end
 -- Neovim
 --require'lspconfig'.sumneko_lua.setup{} --LUA
 require'lspconfig'.vimls.setup{
-  on_attach = on_attach_default,
-  capabilities = lsp_capabilities,
+  on_attach = vim.g.on_attach_default,
+  capabilities = vim.g.lsp_capabilities,
 } -- VIML:wikis
 
 --  vimscript
 function _G.mdblock_vim(mdblock)
-    local fname = tmp_file('vim')
-    local tmppath = lux_temppath() .. fname
+    local fname = vim.g.tmp_file('vim')
+    local tmppath = vim.g.lux_temppath() .. fname
 
     vim.fn.writefile(mdblock, tmppath)
     vim.api.nvim_command('source ' .. tmppath)
-    vim.fn.delete(tmp)
+    -- vim.fn.delete(tmp)
 
 end
 
 
 -- Documentationand notetaking
 require'lspconfig'.marksman.setup{
-  on_attach = on_attach_default,
-  capabilities = lsp_capabilities,
+  on_attach = vim.g.on_attach_default,
+  capabilities = vim.g.lsp_capabilities,
 } -- MARKDOWN
 
 -- General purpose
@@ -108,24 +108,8 @@ require'lspconfig'.marksman.setup{
 --require'lspconfig'.ccls.setup{} --C
 --!!moved to language file --C#,VB.NET
 require'lspconfig'.pyright.setup{
-  on_attach = on_attach_default,
-  capabilities = lsp_capabilities,
+  on_attach = vim.g.on_attach_default,
+  capabilities = vim.g.lsp_capabilities,
 } -- PYTHON
 
--- Use a loop to conveniently call 'setup' on multiple servers and
--- map buffer local keybindings when the language server attaches
--- local servers = { 'pyright', 'vimls' }
---
--- for _, lsp in ipairs(servers) do
---   require'lspconfig'[lsp].setup {
---     on_attach = on_attach_default,
---   capabilities = lsp_capabilities,
---     flags = {
---       debounce_text_changes = 150,
---     }
---   }
--- end
-
-
-
-EOF
+-- EOF

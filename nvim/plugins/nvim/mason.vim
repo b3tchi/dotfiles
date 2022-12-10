@@ -13,6 +13,13 @@ lua << EOF
   if (not status2) then return end
 
   mason.setup({
+    ui = {
+        icons = {
+            package_installed = "✓",
+            package_pending = "➜",
+            package_uninstalled = "✗"
+        }
+    }
   })
 
   lspconfig.setup {

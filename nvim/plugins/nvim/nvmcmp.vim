@@ -107,6 +107,8 @@ local lspkind = require 'lspkind'
 
 -- used in particular language lsp setup
 _G.lsp_capabilities = require('cmp_nvim_lsp').default_capabilities()
+vim.g.lsp_capabilities = _G.lsp_capabilities
+
   -- Set up lspconfig.
 vim.cmd [[
   set completeopt=menuone,noinsert,noselect

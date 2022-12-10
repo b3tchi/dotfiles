@@ -1,5 +1,5 @@
-"C#,VB.NET
-lua << EOF
+-- "C#,VB.NET
+-- lua << EOF
 
 --LSP Installed via nvim-lsp-installer
 --:LspInstall omnisharp
@@ -10,10 +10,10 @@ local omnisharp_bin = "/home/jan/.local/share/nvim/lsp_servers/omnisharp/omnisha
 
 require('lspconfig').omnisharp.setup{
   --parameter 1
-  on_attach = on_attach_default ,
+  on_attach = vim.g.on_attach_default ,
   --parameter 2
   -- capabilities = require('cmp_nvim_lsp').update_capabilities(vim.lsp.protocol.make_client_capabilities()),
-  capabilities = lsp_capabilities,
+  capabilities = vim.g.lsp_capabilities,
   --parameter 3
   cmd = { omnisharp_bin , "--languageserver" , "--hostPID" , tostring(pid) }
 }
@@ -25,8 +25,8 @@ require('dap').adapters.netcoredbg = {
   command = os.getenv('HOME').. "/.local/share/nvim/dapinstall/dnetcs/netcoredbg/netcoredbg",
   args = {
     "--interpreter=vscode",
-    string.format("--engineLogging=%s/netcoredbg.engine.log", XDG_CACHE_HOME),
-    string.format("--log=%s/netcoredbg.log", XDG_CACHE_HOME),
+    string.format("--engineLogging=%s/netcoredbg.engine.log", vim.env.XDG_CACHE_HOME),
+    string.format("--log=%s/netcoredbg.log", vim.env.XDG_CACHE_HOME),
   },
 }
 
@@ -37,7 +37,7 @@ require('dap').configurations.cs = {
     request = "launch",
     program = function()
       local dll = io.popen("find bin/Debug/ -maxdepth 2 -name \"*.dll\"")
-      return pwd() .. "/" .. dll:lines()()
+      return vim.fn.getcwd() .. "/" .. dll:lines()()
     end,
     stopAtEntry = false,
     -- console = "externalTerminal",
@@ -77,5 +77,4 @@ function _G.mdblock_csharp(mdblock)
   vim.fn.VimuxRunCommand(cmd)
 end
 
-
-EOF
+-- EOF

@@ -82,6 +82,7 @@ lua << EOF
             print('not know code format')
         end
     end
+    vim.g.vimux_md_block=_G.vimux_md_block
 
 
     function _G.tmp_file( extension )
@@ -90,6 +91,7 @@ lua << EOF
 
         return fname
     end
+    vim.g.tmp_file=_G.tmp_file
 
     function _G.winpath_from_wsl( winpath )
 
@@ -99,6 +101,7 @@ lua << EOF
         return unx_tmpps
 
     end
+    vim.g.winpath_from_wsl=_G.winpath_from_wsl
 
     function _G.lux_temppath()
 
@@ -108,6 +111,7 @@ lua << EOF
         return temppath
 
     end
+    vim.g.lux_temppath=_G.lux_temppath
 
     function _G.win_temppath()
 
@@ -119,6 +123,7 @@ lua << EOF
         return win_tmpps
 
     end
+    vim.g.win_temppath=_G.win_temppath
 
     function _G.md_block_get()
 
@@ -135,6 +140,7 @@ lua << EOF
 
 
     end
+    vim.g.md_block_get=_G.md_block_get
 
     function _G.org_block_get()
 
@@ -150,6 +156,7 @@ lua << EOF
         return resp
 
     end
+    vim.g.org_block_get=_G.org_block_get
 
 EOF
 

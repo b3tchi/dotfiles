@@ -1,6 +1,4 @@
 "LSP Installed via coc.nvim
-" OBSOLETE coc is already disabled
-" let g:coc_global_extensions += ['coc-powershell']
 
 "DAP no debug yet for
 
@@ -44,7 +42,7 @@ function _G.mdblock_powershell(mdblock)
     local cmd = "powershell.exe '" .. winpath .. "'"
 
     vim.fn.VimuxRunCommand(cmd)
-            
+
 end
 
 function _G.mdblock_pwsh(mdblock)
