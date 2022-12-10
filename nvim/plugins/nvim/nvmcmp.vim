@@ -104,15 +104,10 @@ local lspkind = require 'lspkind'
   --   })
   -- })
   --
-  -- Setup lspconfig.
-  -- local capabilities = require('cmp_nvim_lsp').update_capabilities(vim.lsp.protocol.make_client_capabilities())
-  -- -- Replace <YOUR_LSP_SERVER> with each lsp server you've enabled.
-  -- require('lspconfig')['<YOUR_LSP_SERVER>'].setup {
-  --   capabilities = capabilities
-  -- }
 
-_G.lsp_capabilities = require('cmp_nvim_lsp').update_capabilities(lsp_capabilities)
-
+-- used in particular language lsp setup
+_G.lsp_capabilities = require('cmp_nvim_lsp').default_capabilities()
+  -- Set up lspconfig.
 vim.cmd [[
   set completeopt=menuone,noinsert,noselect
   highlight! default link CmpItemKind CmpItemMenuDefault

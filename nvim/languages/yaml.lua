@@ -1,14 +1,14 @@
-"LSP Installed via nvim-lsp-installer
-" using newer version terraform-ls there is one more version terraform-lsp not officially supported
-" :LSPInstall yamlls
-
-"DAP in vimspector only not yet in nvim-Dap only in vimspector
-
-lua << EOF
+-- "LSP Installed via nvim-lsp-installer
+-- " using newer version terraform-ls there is one more version terraform-lsp not officially supported
+-- " :LSPInstall yamlls
+--
+-- "DAP in vimspector only not yet in nvim-Dap only in vimspector
+--
+-- lua << EOF
  -- YAML
  require'lspconfig'.yamlls.setup{
   on_attach = on_attach_default,
-  capabilities = require('cmp_nvim_lsp').update_capabilities(vim.lsp.protocol.make_client_capabilities()),
+  capabilities = lsp_capabilities,
   settings = {
     yaml = {
       schemas = {
@@ -26,5 +26,5 @@ lua << EOF
 --
 -- end
 
-EOF
+-- EOF
 

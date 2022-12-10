@@ -7,26 +7,32 @@ lua << EOF
 -- Presenting Languages
  -- CSS
 require'lspconfig'.cssls.setup{
+  on_attach = on_attach_default,
   capabilities = lsp_capabilities,
  }
 
  -- HTML
 require'lspconfig'.html.setup{
+  on_attach = on_attach_default,
   capabilities = lsp_capabilities,
 }
 
  -- SVELTE
 require'lspconfig'.svelte.setup{
+  on_attach = on_attach_default,
   capabilities = lsp_capabilities,
 }
 
 -- Data Language
 -- !!moved to yaml.vim -- YAML
 require'lspconfig'.jsonls.setup{
+  on_attach = on_attach_default,
   capabilities = lsp_capabilities,
 } -- JSOM
 
 require'lspconfig'.sumneko_lua.setup {
+  on_attach = on_attach_default,
+  capabilities = lsp_capabilities,
   settings = {
     Lua = {
       runtime = {
@@ -48,60 +54,6 @@ require'lspconfig'.sumneko_lua.setup {
     },
   },
 }
-
---?? -- XML
---?? -- SQL
-
--- Infrastructure Languages
---require'lspconfig'.dockerls.setup{} -- DOCKER
---!!moved to language file --TERRAFORM
-
--- Neovim
---require'lspconfig'.sumneko_lua.setup{} --LUA
-require'lspconfig'.vimls.setup{
-  capabilities = lsp_capabilities,
-} -- VIML:wikis
-
-
-
--- Documentationand notetaking
-require'lspconfig'.marksman.setup{
-} -- MARKDOWN
-
--- General purpose
---?? --GO
--- path of where dap is installed
---!!moved to language file --TYPESCRIPT
---!!moved to language file --JAVASCRIPT
---require'lspconfig'.rust_analyzer.setup{} --RUST
---require'lspconfig'.ccls.setup{} --C
---!!moved to language file --C#,VB.NET
-require'lspconfig'.pyright.setup{} -- PYTHON
-
--- Use a loop to conveniently call 'setup' on multiple servers and
--- map buffer local keybindings when the language server attaches
-local servers = { 'pyright', 'vimls' }
-
-for _, lsp in ipairs(servers) do
-  require'lspconfig'[lsp].setup {
-    on_attach = on_attach_default,
-    flags = {
-      debounce_text_changes = 150,
-    }
-  }
-end
-
---  vimscript
-function _G.mdblock_vim(mdblock)
-    local fname = tmp_file('vim')
-    local tmppath = lux_temppath() .. fname
-
-    vim.fn.writefile(mdblock, tmppath)
-    vim.api.nvim_command('source ' .. tmppath)
-    vim.fn.delete(tmp)
-
-end
-
 --  lua
 function _G.mdblock_lua(mdblock)
 
@@ -114,5 +66,66 @@ function _G.mdblock_lua(mdblock)
     vim.fn.delete(tmp)
 
 end
+
+--?? -- XML
+--?? -- SQL
+
+-- Infrastructure Languages
+--require'lspconfig'.dockerls.setup{} -- DOCKER
+--!!moved to language file --TERRAFORM
+
+-- Neovim
+--require'lspconfig'.sumneko_lua.setup{} --LUA
+require'lspconfig'.vimls.setup{
+  on_attach = on_attach_default,
+  capabilities = lsp_capabilities,
+} -- VIML:wikis
+
+--  vimscript
+function _G.mdblock_vim(mdblock)
+    local fname = tmp_file('vim')
+    local tmppath = lux_temppath() .. fname
+
+    vim.fn.writefile(mdblock, tmppath)
+    vim.api.nvim_command('source ' .. tmppath)
+    vim.fn.delete(tmp)
+
+end
+
+
+-- Documentationand notetaking
+require'lspconfig'.marksman.setup{
+  on_attach = on_attach_default,
+  capabilities = lsp_capabilities,
+} -- MARKDOWN
+
+-- General purpose
+--?? --GO
+-- path of where dap is installed
+--!!moved to language file --TYPESCRIPT
+--!!moved to language file --JAVASCRIPT
+--require'lspconfig'.rust_analyzer.setup{} --RUST
+--require'lspconfig'.ccls.setup{} --C
+--!!moved to language file --C#,VB.NET
+require'lspconfig'.pyright.setup{
+  on_attach = on_attach_default,
+  capabilities = lsp_capabilities,
+} -- PYTHON
+
+-- Use a loop to conveniently call 'setup' on multiple servers and
+-- map buffer local keybindings when the language server attaches
+-- local servers = { 'pyright', 'vimls' }
+--
+-- for _, lsp in ipairs(servers) do
+--   require'lspconfig'[lsp].setup {
+--     on_attach = on_attach_default,
+--   capabilities = lsp_capabilities,
+--     flags = {
+--       debounce_text_changes = 150,
+--     }
+--   }
+-- end
+
+
 
 EOF

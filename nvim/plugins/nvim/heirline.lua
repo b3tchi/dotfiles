@@ -306,7 +306,7 @@ function Load_heirline()
         -- Or complicate things a bit and get the servers names
         provider  = function()
             local names = {}
-            for i, server in pairs(vim.lsp.buf_get_clients(0)) do
+            for _, server in pairs(vim.lsp.buf_get_clients(0)) do
                 table.insert(names, server.name)
             end
             return " [" .. table.concat(names, " ") .. "]"
@@ -330,106 +330,106 @@ function Load_heirline()
     -- }
 
     -- The easy way.
-    -- local Navic = {
-    --     condition = require("nvim-navic").is_available,
-    --     provider = function()
-    --         require("nvim-navic").get_location({highlight=true})
-    --     end,
-    --     update = 'CursorMoved'
-    -- }
     local Navic = {
         condition = require("nvim-navic").is_available,
-        static = {
-            -- create a type highlight map
-            type_hl = {
-                File          = " ",
-                Module        = " ",
-                Namespace     = " ",
-                Package       = " ",
-                Class         = " ",
-                Method        = " ",
-                Property      = " ",
-                Field         = " ",
-                Constructor   = " ",
-                Enum          = "練",
-                Interface     = "練",
-                Function      = " ",
-                Variable      = " ",
-                Constant      = " ",
-                String        = " ",
-                Number        = " ",
-                Boolean       = "◩ ",
-                Array         = " ",
-                Object        = " ",
-                Key           = " ",
-                Null          = "ﳠ ",
-                EnumMember    = " ",
-                Struct        = " ",
-                Event         = " ",
-                Operator      = " ",
-                TypeParameter = " ",
-            },
-            -- bit operation dark magic, see below...
-            enc = function(line, col, winnr)
-                return bit.bor(bit.lshift(line, 16), bit.lshift(col, 6), winnr)
-            end,
-            -- line: 16 bit (65535); col: 10 bit (1023); winnr: 6 bit (63)
-            dec = function(c)
-                local line = bit.rshift(c, 16)
-                local col = bit.band(bit.rshift(c, 6), 1023)
-                local winnr = bit.band(c,  63)
-                return line, col, winnr
-            end
-        },
-        init = function(self)
-            local data = require("nvim-navic").get_data() or {}
-            local children = {}
-            -- create a child for each level
-            for i, d in ipairs(data) do
-                -- encode line and column numbers into a single integer
-                local pos = self.enc(d.scope.start.line, d.scope.start.character, self.winnr)
-                local child = {
-                    {
-                        provider = d.icon,
-                        hl = self.type_hl[d.type],
-                    },
-                    {
-                        -- escape `%`s (elixir) and buggy default separators
-                        provider = d.name:gsub("%%", "%%%%"):gsub("%s*->%s*", ''),
-                        -- highlight icon only or location name as well
-                        -- hl = self.type_hl[d.type],
-
-                        on_click = {
-                            -- pass the encoded position through minwid
-                            minwid = pos,
-                            callback = function(_, minwid)
-                                -- decode
-                                local line, col, winnr = self.dec(minwid)
-                                vim.api.nvim_win_set_cursor(vim.fn.win_getid(winnr), {line, col})
-                            end,
-                            name = "heirline_navic",
-                        },
-                    },
-                }
-                -- add a separator only if needed
-                if #data > 1 and i < #data then
-                    table.insert(child, {
-                        provider = " > ",
-                        hl = { fg = 'bright_fg' },
-                    })
-                end
-                table.insert(children, child)
-            end
-            -- instantiate the new child, overwriting the previous one
-            self.child = self:new(children, 1)
+        provider = function()
+            return require("nvim-navic").get_location({highlight=true})
         end,
-        -- evaluate the children containing navic components
-        provider = function(self)
-            return self.child:eval()
-        end,
-        hl = { fg = "gray" },
         update = 'CursorMoved'
     }
+    -- local Navic = {
+    --     condition = require("nvim-navic").is_available,
+    --     static = {
+    --         -- create a type highlight map
+    --         type_hl = {
+    --             File          = " ",
+    --             Module        = " ",
+    --             Namespace     = " ",
+    --             Package       = " ",
+    --             Class         = " ",
+    --             Method        = " ",
+    --             Property      = " ",
+    --             Field         = " ",
+    --             Constructor   = " ",
+    --             Enum          = "練",
+    --             Interface     = "練",
+    --             Function      = " ",
+    --             Variable      = " ",
+    --             Constant      = " ",
+    --             String        = " ",
+    --             Number        = " ",
+    --             Boolean       = "◩ ",
+    --             Array         = " ",
+    --             Object        = " ",
+    --             Key           = " ",
+    --             Null          = "ﳠ ",
+    --             EnumMember    = " ",
+    --             Struct        = " ",
+    --             Event         = " ",
+    --             Operator      = " ",
+    --             TypeParameter = " ",
+    --         },
+    --         -- bit operation dark magic, see below...
+    --         enc = function(line, col, winnr)
+    --             return bit.bor(bit.lshift(line, 16), bit.lshift(col, 6), winnr)
+    --         end,
+    --         -- line: 16 bit (65535); col: 10 bit (1023); winnr: 6 bit (63)
+    --         dec = function(c)
+    --             local line = bit.rshift(c, 16)
+    --             local col = bit.band(bit.rshift(c, 6), 1023)
+    --             local winnr = bit.band(c,  63)
+    --             return line, col, winnr
+    --         end
+    --     },
+    --     init = function(self)
+    --         local data = require("nvim-navic").get_data() or {}
+    --         local children = {}
+    --         -- create a child for each level
+    --         for i, d in ipairs(data) do
+    --             -- encode line and column numbers into a single integer
+    --             local pos = self.enc(d.scope.start.line, d.scope.start.character, self.winnr)
+    --             local child = {
+    --                 {
+    --                     provider = d.icon,
+    --                     hl = self.type_hl[d.type],
+    --                 },
+    --                 {
+    --                     -- escape `%`s (elixir) and buggy default separators
+    --                     provider = d.name:gsub("%%", "%%%%"):gsub("%s*->%s*", ''),
+    --                     -- highlight icon only or location name as well
+    --                     -- hl = self.type_hl[d.type],
+    --
+    --                     on_click = {
+    --                         -- pass the encoded position through minwid
+    --                         minwid = pos,
+    --                         callback = function(_, minwid)
+    --                             -- decode
+    --                             local line, col, winnr = self.dec(minwid)
+    --                             vim.api.nvim_win_set_cursor(vim.fn.win_getid(winnr), {line, col})
+    --                         end,
+    --                         name = "heirline_navic",
+    --                     },
+    --                 },
+    --             }
+    --             -- add a separator only if needed
+    --             if #data > 1 and i < #data then
+    --                 table.insert(child, {
+    --                     provider = " > ",
+    --                     hl = { fg = 'bright_fg' },
+    --                 })
+    --             end
+    --             table.insert(children, child)
+    --         end
+    --         -- instantiate the new child, overwriting the previous one
+    --         self.child = self:new(children, 1)
+    --     end,
+    --     -- evaluate the children containing navic components
+    --     provider = function(self)
+    --         return self.child:eval()
+    --     end,
+    --     hl = { fg = "gray" },
+    --     update = 'CursorMoved'
+    -- }
     local Diagnostics = {
 
         condition = conditions.has_diagnostics,
@@ -607,6 +607,7 @@ function Load_heirline()
 
     local Align = { provider = "%=" }
     local Space = { provider = " " }
+    -- local Test = { provider = "test " }
 
     local DefaultStatusline = {
         ViMode, Space,
@@ -672,21 +673,6 @@ function Load_heirline()
         SpecialStatusline, TerminalStatusline, InactiveStatusline, DefaultStatusline,
     }
 
-    vim.api.nvim_create_autocmd("User", {
-        pattern = 'HeirlineInitWinbar',
-        callback = function(args)
-            local buf = args.buf
-            local buftype = vim.tbl_contains(
-                { "prompt", "nofile", "help", "quickfix" },
-                vim.bo[buf].buftype
-            )
-            local filetype = vim.tbl_contains({ "gitcommit", "fugitive" }, vim.bo[buf].filetype)
-            if buftype or filetype then
-                vim.opt_local.winbar = nil
-            end
-        end,
-    })
-
     local WinBars = {
         fallthrough = false,
         {   -- Hide the winbar for special buffers
@@ -707,21 +693,252 @@ function Load_heirline()
             FileType, Space, TerminalName,
         },
         {   -- An inactive winbar for regular files
-            condition = function()
-                return not conditions.is_active()
-            end,
-            FileNameBlock,
+            condition = conditions.is_not_active,
+            FileNameBlock, Space
         },
         -- A winbar for regular files
-        FileNameBlock, Space, Navic ,
+        {FileNameBlock, Space, Navic}
     }
 
-    -- local statusline = {ViMode}
-    -- local winbar = {}
-    local tabline = {}
 
-    require'heirline'.setup(StatusLines, WinBars, tabline)
-    -- vim.keymap.set('n', '<space>bgh', '<Cmd>DiffviewFileHistory %<CR>', {silent = true, desc='buffer git history'})
+    local TablineBufnr = {
+        provider = function(self)
+            return tostring(self.bufnr) .. ". "
+        end,
+        hl = "Comment",
+    }
+
+    -- we redefine the filename component, as we probably only want the tail and not the relative path
+    local TablineFileName = {
+        provider = function(self)
+            -- self.filename will be defined later, just keep looking at the example!
+            local filename = self.filename
+            filename = filename == "" and "[No Name]" or vim.fn.fnamemodify(filename, ":t")
+            return filename
+        end,
+        hl = function(self)
+            return { bold = self.is_active or self.is_visible, italic = true }
+        end,
+    }
+
+    -- this looks exactly like the FileFlags component that we saw in
+    -- #crash-course-part-ii-filename-and-friends, but we are indexing the bufnr explicitly
+    -- also, we are adding a nice icon for terminal buffers.
+    local TablineFileFlags = {
+        {
+            condition = function(self)
+                return vim.api.nvim_buf_get_option(self.bufnr, "modified")
+            end,
+            provider = "[+]",
+            hl = { fg = "green" },
+        },
+        {
+            condition = function(self)
+                return not vim.api.nvim_buf_get_option(self.bufnr, "modifiable")
+                    or vim.api.nvim_buf_get_option(self.bufnr, "readonly")
+            end,
+            provider = function(self)
+                if vim.api.nvim_buf_get_option(self.bufnr, "buftype") == "terminal" then
+                    return "  "
+                else
+                    return ""
+                end
+            end,
+            hl = { fg = "orange" },
+        },
+    }
+
+    -- Here the filename block finally comes together
+    local TablineFileNameBlock = {
+        init = function(self)
+            self.filename = vim.api.nvim_buf_get_name(self.bufnr)
+        end,
+        hl = function(self)
+            if self.is_active then
+                return "TabLineSel"
+            -- why not?
+            -- elseif not vim.api.nvim_buf_is_loaded(self.bufnr) then
+            --     return { fg = "gray" }
+            else
+                return "TabLine"
+            end
+        end,
+        on_click = {
+            callback = function(_, minwid, _, button)
+                if (button == "m") then -- close on mouse middle click
+                    vim.api.nvim_buf_delete(minwid, {force = false})
+                else
+                    vim.api.nvim_win_set_buf(0, minwid)
+                end
+            end,
+            minwid = function(self)
+                return self.bufnr
+            end,
+            name = "heirline_tabline_buffer_callback",
+        },
+        TablineBufnr,
+        FileIcon, -- turns out the version defined in #crash-course-part-ii-filename-and-friends can be reutilized as is here!
+        TablineFileName,
+        TablineFileFlags,
+    }
+
+    -- a nice "x" button to close the buffer
+    local TablineCloseButton = {
+        condition = function(self)
+            return not vim.api.nvim_buf_get_option(self.bufnr, "modified")
+        end,
+        { provider = " " },
+        {
+            provider = "",
+            hl = { fg = "gray" },
+            on_click = {
+                callback = function(_, minwid)
+                    vim.api.nvim_buf_delete(minwid, { force = false })
+                end,
+                minwid = function(self)
+                    return self.bufnr
+                end,
+                name = "heirline_tabline_close_buffer_callback",
+            },
+        },
+    }
+
+
+    -- The final touch!
+    local TablineBufferBlock = utils.surround({ "", "" }, function(self)
+        if self.is_active then
+            return utils.get_highlight("TabLineSel").bg
+        else
+            return utils.get_highlight("TabLine").bg
+        end
+    end, { TablineFileNameBlock, TablineCloseButton })
+    -- local TablinePicker = {
+    --     condition = function(self)
+    --         return self._show_picker
+    --     end,
+    --     init = function(self)
+    --         local bufname = vim.api.nvim_buf_get_name(self.bufnr)
+    --         bufname = vim.fn.fnamemodify(bufname, ":t")
+    --         local label = bufname:sub(1, 1)
+    --         local i = 2
+    --         while self._picker_labels[label] do
+    --             if i > #bufname then
+    --                 break
+    --             end
+    --             label = bufname:sub(i, i)
+    --             i = i + 1
+    --         end
+    --         self._picker_labels[label] = self.bufnr
+    --         self.label = label
+    --     end,
+    --     provider = function(self)
+    --         return self.label
+    --     end,
+    --     hl = { fg = "red", bold = true },
+    -- }
+
+    vim.keymap.set("n", "gbp", function()
+        local tabline = require("heirline").tabline
+        local buflist = tabline._buflist[1]
+        buflist._picker_labels = {}
+        buflist._show_picker = true
+        vim.cmd.redrawtabline()
+        local char = vim.fn.getcharstr()
+        local bufnr = buflist._picker_labels[char]
+        if bufnr then
+            vim.api.nvim_win_set_buf(0, bufnr)
+        end
+        buflist._show_picker = false
+        vim.cmd.redrawtabline()
+    end)
+
+    local Tabpage = {
+        provider = function(self)
+            return "%" .. self.tabnr .. "T " .. self.tabnr .. " %T"
+        end,
+        hl = function(self)
+            if not self.is_active then
+                return "TabLine"
+            else
+                return "TabLineSel"
+            end
+        end,
+    }
+
+    local TabpageClose = {
+        provider = "%999X  %X",
+        hl = "TabLine",
+    }
+
+    local TabPages = {
+        -- only show this component if there's 2 or more tabpages
+        condition = function()
+            return #vim.api.nvim_list_tabpages() >= 2
+        end,
+        { provider = "%=" },
+        utils.make_tablist(Tabpage),
+        TabpageClose,
+    }
+    -- and here we go
+    local BufferLine = utils.make_buflist(
+        TablineBufferBlock,
+        { provider = "", hl = { fg = "gray" } }, -- left truncation, optional (defaults to "<")
+        { provider = "", hl = { fg = "gray" } } -- right trunctation, also optional (defaults to ...... yep, ">")
+        -- by the way, open a lot of buffers and try clicking them ;)
+    )
+    local TabLineOffset = {
+        condition = function(self)
+            local win = vim.api.nvim_tabpage_list_wins(0)[1]
+            local bufnr = vim.api.nvim_win_get_buf(win)
+            self.winid = win
+
+            if vim.bo[bufnr].filetype == "NvimTree" then
+                self.title = "NvimTree"
+                return true
+            elseif vim.bo[bufnr].filetype == "neo-tree" then
+                self.title = "neo-tree"
+                return true
+            -- elseif vim.bo[bufnr].filetype == "TagBar" then
+            --     ...
+            end
+        end,
+
+        provider = function(self)
+            local title = self.title
+            local width = vim.api.nvim_win_get_width(self.winid)
+            local pad = math.ceil((width - #title) / 2)
+            return string.rep(" ", pad) .. title .. string.rep(" ", pad)
+        end,
+
+        hl = function(self)
+            if vim.api.nvim_get_current_win() == self.winid then
+                return "TablineSel"
+            else
+                return "Tabline"
+            end
+        end,
+    }
+    local TabLine = { TabLineOffset, BufferLine, TabPages }
+    -- local TabLine = { TabLineOffset, BufferLine}
+    -- local TabLine = { TablineFileNameBlock }
+    -- local TabLine = {}
+
+    require'heirline'.setup(StatusLines, WinBars, TabLine)
+
+    vim.api.nvim_create_autocmd("User", {
+        pattern = 'HeirlineInitWinbar',
+        callback = function(args)
+            local buf = args.buf
+            local buftype = vim.tbl_contains(
+                { "prompt", "nofile", "help", "quickfix" },
+                vim.bo[buf].buftype
+            )
+            local filetype = vim.tbl_contains({ "gitcommit", "fugitive" }, vim.bo[buf].filetype)
+            if buftype or filetype then
+                vim.opt_local.winbar = nil
+            end
+        end,
+    })
 
 end
 

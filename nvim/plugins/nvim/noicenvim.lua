@@ -1,21 +1,21 @@
 local Plug = vim.fn['plug#']
-    Plug 'MunifTanjim/nui.nvim'
     Plug 'rcarriga/nvim-notify'
     Plug 'folke/noice.nvim'
+    Plug 'MunifTanjim/nui.nvim'
+
 
 function Load_noice()
-    --git markers
-    require('noice').setup()
 
-    -- vim.keymap.set('n', '<space>gj', '<Cmd>Gitsigns next_hunk<CR>', {silent = true, desc='next git hunk'})
-    -- vim.keymap.set('n', '<space>gk', '<Cmd>Gitsigns prev_hunk<CR>', {silent = true, desc='prev git hunk'})
-    -- vim.keymap.set('n', '<space>gi', '<Cmd>Gitsigns preview_hunk_inline<CR>', {silent = true, desc='current git hunk'})
-    -- vim.keymap.set('n', '<space>gb', '<Cmd>Gitsigns toggle_current_line_blame<CR>', {silent = true, desc='current git hunk'})
+    require("notify").setup({
+      background_colour = "#000000",
+    })
+
+    require('noice').setup()
 end
 
 vim.api.nvim_create_autocmd(
-    {'User'} ,{pattern = 'PlugLoaded'
-        ,group= vim.api.nvim_create_augroup('Load_noice',{clear = true})
+    { 'User' }, { pattern = 'PlugLoaded'
+        , group = vim.api.nvim_create_augroup('Load_noice', { clear = true })
         ,callback=Load_noice
     }
 )
