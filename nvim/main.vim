@@ -246,13 +246,13 @@ set noshowmode " INSERT déjà affiché par lightbar
 
 "languages
 source ~/dotfiles/nvim/languages/bash.lua
-source ~/dotfiles/nvim/languages/svelte.vim
 source ~/dotfiles/nvim/languages/yaml.lua
-source ~/dotfiles/nvim/languages/powershell.vim "ENABLED TESTING mason
-source ~/dotfiles/nvim/languages/csharp.vim
+source ~/dotfiles/nvim/languages/csharp.lua
 source ~/dotfiles/nvim/languages/terraform.lua
-source ~/dotfiles/nvim/languages/typescript.vim
+source ~/dotfiles/nvim/languages/typescript.lua
 source ~/dotfiles/nvim/languages/otherlangs.lua
+source ~/dotfiles/nvim/languages/svelte.vim
+source ~/dotfiles/nvim/languages/powershell.vim "ENABLED TESTING mason
 
 "script for vim terminal
 source ~/dotfiles/nvim/scripts/vim/incubator.vim
