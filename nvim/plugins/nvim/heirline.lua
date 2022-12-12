@@ -451,15 +451,10 @@ function Load_heirline()
     }
 
     -- We can now define some children separately and add them later
-
-
-
-
     -- Now, let's say that we want the filename color to change if the buffer is
     -- modified. Of course, we could do that directly using the FileName.hl field,
     -- but we'll see how easy it is to alter existing components using a "modifier"
     -- component
-
 
     -- let's add the children to our FileNameBlock component
     FileNameBlock = utils.insert(fxs.FileNameBlock,
@@ -469,33 +464,6 @@ function Load_heirline()
         { provider = '%<'} -- this means that the statusline is cut here when there's not enough space
     )
 
-
-
-
-    -- We're getting minimalists here!
-
-
-
-    -- local WorkDirFixed = {
-    --     provider = function()
-    --         local icon = (vim.fn.haslocaldir(0) == 1 and "l" or "g") .. " " .. " "
-    --         local cwd = vim.fn.getcwd(0)
-    --         cwd = vim.fn.fnamemodify(cwd, ":~")
-    --         if not conditions.width_percent_below(#cwd, 0.25) then
-    --             cwd = vim.fn.pathshorten(cwd)
-    --         end
-    --         local trail = cwd:sub(-1) == '/' and '' or "/"
-    --         return icon .. cwd  .. trail
-    --     end,
-    --     hl = { fg = "blue", bold = true },
-    -- }
-
-    -- local LSPMessages = {
-    --     provider = require("lsp-status").status,
-    --     hl = { fg = "gray" },
-    -- }
-
-    -- The easy way.
 
     local Align = {
         provider = "%=",
@@ -639,41 +607,6 @@ function Load_heirline()
         fxs.TablineFileFlags,
     }
 
-    -- The final touch!
-    -- local TablineBufferBlock = utils.surround({ "|", "|" }, function(self)
-    --     -- if self.is_active then
-    --         -- return utils.get_highlight("TabLineSel").bg
-    --     -- else
-    --         return utils.get_highlight("TabLine").bg
-    --             -- return { fg = "orange" }
-    --     -- end
-    -- end, { TablineFileNameBlock, fxs.TablineCloseButton })
-
-    -- local TablinePicker = {
-    --     condition = function(self)
-    --         return self._show_picker
-    --     end,
-    --     init = function(self)
-    --         local bufname = vim.api.nvim_buf_get_name(self.bufnr)
-    --         bufname = vim.fn.fnamemodify(bufname, ":t")
-    --         local label = bufname:sub(1, 1)
-    --         local i = 2
-    --         while self._picker_labels[label] do
-    --             if i > #bufname then
-    --                 break
-    --             end
-    --             label = bufname:sub(i, i)
-    --             i = i + 1
-    --         end
-    --         self._picker_labels[label] = self.bufnr
-    --         self.label = label
-    --     end,
-    --     provider = function(self)
-    --         return self.label
-    --     end,
-    --     hl = { fg = "red", bold = true },
-    -- }
-
     vim.keymap.set("n", "gbp", function()
         local tabline = require("heirline").tabline
         local buflist = tabline._buflist[1]
@@ -774,6 +707,41 @@ function Load_heirline()
             end
         end,
     })
+
+    -- The final touch!
+    -- local TablineBufferBlock = utils.surround({ "|", "|" }, function(self)
+    --     -- if self.is_active then
+    --         -- return utils.get_highlight("TabLineSel").bg
+    --     -- else
+    --         return utils.get_highlight("TabLine").bg
+    --             -- return { fg = "orange" }
+    --     -- end
+    -- end, { TablineFileNameBlock, fxs.TablineCloseButton })
+
+    -- local TablinePicker = {
+    --     condition = function(self)
+    --         return self._show_picker
+    --     end,
+    --     init = function(self)
+    --         local bufname = vim.api.nvim_buf_get_name(self.bufnr)
+    --         bufname = vim.fn.fnamemodify(bufname, ":t")
+    --         local label = bufname:sub(1, 1)
+    --         local i = 2
+    --         while self._picker_labels[label] do
+    --             if i > #bufname then
+    --                 break
+    --             end
+    --             label = bufname:sub(i, i)
+    --             i = i + 1
+    --         end
+    --         self._picker_labels[label] = self.bufnr
+    --         self.label = label
+    --     end,
+    --     provider = function(self)
+    --         return self.label
+    --     end,
+    --     hl = { fg = "red", bold = true },
+    -- }
 
     -- local Navic_ext = {
     --     condition = require("nvim-navic").is_available,
@@ -900,6 +868,28 @@ function Load_heirline()
     --         provider = "",
     --     }
     -- }
+
+    -- We're getting minimalists here!
+    -- local WorkDirFixed = {
+    --     provider = function()
+    --         local icon = (vim.fn.haslocaldir(0) == 1 and "l" or "g") .. " " .. " "
+    --         local cwd = vim.fn.getcwd(0)
+    --         cwd = vim.fn.fnamemodify(cwd, ":~")
+    --         if not conditions.width_percent_below(#cwd, 0.25) then
+    --             cwd = vim.fn.pathshorten(cwd)
+    --         end
+    --         local trail = cwd:sub(-1) == '/' and '' or "/"
+    --         return icon .. cwd  .. trail
+    --     end,
+    --     hl = { fg = "blue", bold = true },
+    -- }
+
+    -- local LSPMessages = {
+    --     provider = require("lsp-status").status,
+    --     hl = { fg = "gray" },
+    -- }
+
+    -- The easy way.
 end
 
 vim.api.nvim_create_autocmd(
