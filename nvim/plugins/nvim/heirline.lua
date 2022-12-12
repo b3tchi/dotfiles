@@ -200,14 +200,16 @@ function Load_heirline()
                 local enc = (vim.bo.fenc ~= '' and vim.bo.fenc) or vim.o.enc -- :h 'enc'
                 -- return enc ~= 'utf-8' and enc
                 return enc
-            end
+            end,
+            hi = { fg = "gray" },
         },
         FileFormat = {
             provider = function()
                 local fmt = vim.bo.fileformat
                 -- return fmt ~= 'unix' and fmt
                 return fmt
-            end
+            end,
+            hi = { fg = "gray" },
         },
         LSPActive = {
             condition = conditions.lsp_attached,
@@ -365,7 +367,7 @@ function Load_heirline()
             -- see Click-it! section for clickable actions
         },
 
-            TerminalName = {
+        TerminalName = {
             -- we could add a condition to check that buftype == 'terminal'
             -- or we could do that later (see #conditional-statuslines below)
             provider = function()
@@ -374,13 +376,78 @@ function Load_heirline()
             end,
             hl = { fg = "blue", bold = true },
         },
+
         Ruler = {
             -- %l = current line number
             -- %L = number of lines in the buffer
             -- %c = column number
             -- %P = percentage through file of displayed window
             provider = "%7(%l/%3L%):%2c %P",
+            hl = { fg = "gray" },
         },
+        TablineFileName = {
+            provider = function(self)
+                -- self.filename will be defined later, just keep looking at the example!
+                local filename = self.filename
+                filename = filename == "" and "[No Name]" or vim.fn.fnamemodify(filename, ":t")
+                return filename
+            end,
+            hl = function(self)
+                return { bold = self.is_active or self.is_visible, italic = true }
+            end,
+        },
+        TablineBufnr = {
+            provider = function(self)
+                return tostring(self.bufnr) .. ". "
+            end,
+            hl = "Comment",
+        },
+        TablineFileFlags = {
+            {
+                condition = function(self)
+                    return vim.api.nvim_buf_get_option(self.bufnr, "modified")
+                end,
+                provider = "[+]",
+                hl = { fg = "green" },
+            },
+            {
+                condition = function(self)
+                    return not vim.api.nvim_buf_get_option(self.bufnr, "modifiable")
+                        or vim.api.nvim_buf_get_option(self.bufnr, "readonly")
+                end,
+                provider = function(self)
+                    if vim.api.nvim_buf_get_option(self.bufnr, "buftype") == "terminal" then
+                        return "  "
+                    else
+                        return ""
+                    end
+                end,
+                hl = { fg = "orange" },
+            },
+        },
+
+        -- a nice "x" button to close the buffer
+        TablineCloseButton = {
+            condition = function(self)
+                return not vim.api.nvim_buf_get_option(self.bufnr, "modified")
+            end,
+            { provider = " ", hl = { fg = "gray" }},
+            {
+                provider = "",
+                hl = { fg = "gray" },
+                on_click = {
+                    callback = function(_, minwid)
+                        vim.api.nvim_buf_delete(minwid, { force = false })
+                    end,
+                    minwid = function(self)
+                        return self.bufnr
+                    end,
+                    name = "heirline_tabline_close_buffer_callback",
+                },
+            },
+            { provider = " ", hl = { fg = "gray" }},
+        },
+
     }
 
     -- We can now define some children separately and add them later
@@ -395,7 +462,7 @@ function Load_heirline()
 
 
     -- let's add the children to our FileNameBlock component
-    FileNameBlock = utils.insert(FileNameBlock,
+    FileNameBlock = utils.insert(fxs.FileNameBlock,
         fxs.FileIcon,
         utils.insert(fxs.FileNameModifer, fxs.FileName), -- a new table where FileName is a child of FileNameModifier
         unpack(fxs.FileFlags), -- A small optimisation, since their parent does nothing
@@ -430,8 +497,14 @@ function Load_heirline()
 
     -- The easy way.
 
-    local Align = { provider = "%=" }
-    local Space = { provider = " " }
+    local Align = {
+        provider = "%=",
+        hl = { fg = "gray" },
+    }
+    local Space = {
+        provider = " ",
+        hl = { fg = "gray" },
+    }
 
     local DefaultStatusline = {
         fxs.ViMode, Space,
@@ -486,9 +559,11 @@ function Load_heirline()
 
         hl = function()
             if conditions.is_active() then
-                return "StatusLine"
+                -- return "StatusLine"
+                return { bg = nil }
             else
-                return "StatusLineNC"
+                -- return "StatusLineNC"
+                return "InactiveWindow"
             end
         end,
 
@@ -526,52 +601,12 @@ function Load_heirline()
         {FileNameBlock, Space, fxs.Navic}
     }
 
-    local TablineBufnr = {
-        provider = function(self)
-            return tostring(self.bufnr) .. ". "
-        end,
-        hl = "Comment",
-    }
 
     -- we redefine the filename component, as we probably only want the tail and not the relative path
-    local TablineFileName = {
-        provider = function(self)
-            -- self.filename will be defined later, just keep looking at the example!
-            local filename = self.filename
-            filename = filename == "" and "[No Name]" or vim.fn.fnamemodify(filename, ":t")
-            return filename
-        end,
-        hl = function(self)
-            return { bold = self.is_active or self.is_visible, italic = true }
-        end,
-    }
 
     -- this looks exactly like the FileFlags component that we saw in
     -- #crash-course-part-ii-filename-and-friends, but we are indexing the bufnr explicitly
     -- also, we are adding a nice icon for terminal buffers.
-    local TablineFileFlags = {
-        {
-            condition = function(self)
-                return vim.api.nvim_buf_get_option(self.bufnr, "modified")
-            end,
-            provider = "[+]",
-            hl = { fg = "green" },
-        },
-        {
-            condition = function(self)
-                return not vim.api.nvim_buf_get_option(self.bufnr, "modifiable")
-                    or vim.api.nvim_buf_get_option(self.bufnr, "readonly")
-            end,
-            provider = function(self)
-                if vim.api.nvim_buf_get_option(self.bufnr, "buftype") == "terminal" then
-                    return "  "
-                else
-                    return ""
-                end
-            end,
-            hl = { fg = "orange" },
-        },
-    }
 
     -- Here the filename block finally comes together
     local TablineFileNameBlock = {
@@ -580,12 +615,9 @@ function Load_heirline()
         end,
         hl = function(self)
             if self.is_active then
-                return "TabLineSel"
-            -- why not?
-            -- elseif not vim.api.nvim_buf_is_loaded(self.bufnr) then
-            --     return { fg = "gray" }
+                return { fg = "orange" }
             else
-                return "TabLine"
+                return { fg = "gray" }
             end
         end,
         on_click = {
@@ -601,42 +633,21 @@ function Load_heirline()
             end,
             name = "heirline_tabline_buffer_callback",
         },
-        TablineBufnr,
+        -- fxs.TablineBufnr,
         fxs.FileIcon, -- turns out the version defined in #crash-course-part-ii-filename-and-friends can be reutilized as is here!
-        TablineFileName,
-        TablineFileFlags,
+        fxs.TablineFileName,
+        fxs.TablineFileFlags,
     }
-
-    -- a nice "x" button to close the buffer
-    local TablineCloseButton = {
-        condition = function(self)
-            return not vim.api.nvim_buf_get_option(self.bufnr, "modified")
-        end,
-        { provider = " " },
-        {
-            provider = "",
-            hl = { fg = "gray" },
-            on_click = {
-                callback = function(_, minwid)
-                    vim.api.nvim_buf_delete(minwid, { force = false })
-                end,
-                minwid = function(self)
-                    return self.bufnr
-                end,
-                name = "heirline_tabline_close_buffer_callback",
-            },
-        },
-    }
-
 
     -- The final touch!
-    local TablineBufferBlock = utils.surround({ "|", "|" }, function(self)
-        if self.is_active then
-            return utils.get_highlight("TabLineSel").bg
-        else
-            return utils.get_highlight("TabLine").bg
-        end
-    end, { TablineFileNameBlock, TablineCloseButton })
+    -- local TablineBufferBlock = utils.surround({ "|", "|" }, function(self)
+    --     -- if self.is_active then
+    --         -- return utils.get_highlight("TabLineSel").bg
+    --     -- else
+    --         return utils.get_highlight("TabLine").bg
+    --             -- return { fg = "orange" }
+    --     -- end
+    -- end, { TablineFileNameBlock, fxs.TablineCloseButton })
 
     -- local TablinePicker = {
     --     condition = function(self)
@@ -707,7 +718,8 @@ function Load_heirline()
     }
     -- and here we go
     local BufferLine = utils.make_buflist(
-        TablineBufferBlock,
+        { TablineFileNameBlock, fxs.TablineCloseButton, Space },
+        -- TablineBufferBlock,
         { provider = "", hl = { fg = "gray" } }, -- left truncation, optional (defaults to "<")
         { provider = "", hl = { fg = "gray" } } -- right trunctation, also optional (defaults to ...... yep, ">")
         -- by the way, open a lot of buffers and try clicking them ;)
@@ -745,9 +757,6 @@ function Load_heirline()
         end,
     }
     local TabLine = { TabLineOffset, BufferLine, TabPages }
-    -- local TabLine = { TabLineOffset, BufferLine}
-    -- local TabLine = { TablineFileNameBlock }
-    -- local TabLine = {}
 
     require'heirline'.setup(StatusLines, WinBars, TabLine)
 

@@ -8,7 +8,22 @@ function Load_theme_tokio()
     vim.api.nvim_set_hl(0, 'ActiveWindow', { bg = '' })
     vim.api.nvim_set_hl(0, 'InactiveWindow', { bg = '#222436' })
     vim.api.nvim_set_hl(0, 'Normal', { fg = '#7aa2f7' })
-    vim.api.nvim_set_hl(0,'DiffViewDiffAddAsDelete',{bg='#37222c'})
+    vim.api.nvim_set_hl(0, 'DiffViewDiffAddAsDelete',{bg='#37222c'})
+
+    vim.api.nvim_set_hl(0, 'SignColumnSB', { bg = '#1a1b26' })
+    vim.api.nvim_set_hl(0, 'SignColumn', { bg = '#1a1b26' })
+
+    vim.api.nvim_set_hl(0, 'CursorLineNr', {fg = '#ff9e64', bg = '#1a1b26' })
+    vim.api.nvim_set_hl(0, 'LineNr', { fg ='#3b4261', bg = '#1a1b26' })
+
+    vim.api.nvim_set_hl(0, 'GitSignsAdd', {fg = '#266d6a', bg = '#1a1b26' })
+    vim.api.nvim_set_hl(0, 'GitSignsChange', {fg = '#536c9e', bg = '#1a1b26' })
+    vim.api.nvim_set_hl(0, 'GitSignsDelete', {fg = '#b2555b', bg = '#1a1b26' })
+
+    vim.api.nvim_set_hl(0, 'DiagnosticSignWarn', {fg = '#e0af68', bg = '#1a1b26' })
+    vim.api.nvim_set_hl(0, 'DiagnosticSignInfo', {fg = '#0db9d7', bg = '#1a1b26' })
+    vim.api.nvim_set_hl(0, 'DiagnosticSignHint', {fg = '#1abc9c', bg = '#1a1b26' })
+    vim.api.nvim_set_hl(0, 'DiagnosticSignError', {fg = '#db4b4b', bg = '#1a1b26' })
 
     function Handle_Win_Enter()
         vim.cmd[[ setlocal winhighlight=Normal:ActiveWindow,NormalNC:InactiveWindow ]]
