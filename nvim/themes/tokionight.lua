@@ -25,6 +25,9 @@ function Load_theme_tokio()
     vim.api.nvim_set_hl(0, 'DiagnosticSignHint', {fg = '#1abc9c', bg = '#1a1b26' })
     vim.api.nvim_set_hl(0, 'DiagnosticSignError', {fg = '#db4b4b', bg = '#1a1b26' })
 
+    vim.api.nvim_set_hl(0, 'CodeBlock', { bg = '#222436' })
+    -- vim.api.nvim_set_hl(0, 'Headline1', { fg = '#ff9e64', bg = '#965027' })
+
     function Handle_Win_Enter()
         vim.cmd[[ setlocal winhighlight=Normal:ActiveWindow,NormalNC:InactiveWindow ]]
     end

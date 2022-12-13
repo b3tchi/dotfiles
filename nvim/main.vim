@@ -321,7 +321,7 @@ set spelllang=en
 set spellsuggest=best,9 " Show nine spell checking candidates at most
 hi SpellBad cterm=underline ctermfg=red
 
-set signcolumn=auto:4 "always show signcolumns up to 4 positions
+set signcolumn=auto:2-4 "always show signcolumns min 2 git+first digaiag - up to 4 positions more diag
 set clipboard=unnamedplus
 set showtabline=2
 set laststatus=2

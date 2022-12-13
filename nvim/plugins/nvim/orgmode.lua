@@ -9,7 +9,7 @@ Plug 'akinsho/org-bullets.nvim'
 
 function Load_orgmode()
 
-    vim.opt.conceallevel = 2
+    vim.opt.conceallevel = 0
     vim.opt.concealcursor = 'nc'
 
     require('orgmode').setup_ts_grammar()

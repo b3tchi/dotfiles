@@ -7,6 +7,8 @@ lua << EOF
 require("headlines").setup({
     markdown = {
       headline_highlights = false,
+        -- headline_highlights = {'Headline1'},
+        -- fat_headlines = false,
       },
     org = {
       headline_highlights = false,

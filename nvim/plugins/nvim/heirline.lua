@@ -197,19 +197,22 @@ function Load_heirline()
         },
         FileEncoding = {
             provider = function()
-                local enc = (vim.bo.fenc ~= '' and vim.bo.fenc) or vim.o.enc -- :h 'enc'
+                -- local enc = (vim.bo.fenc ~= '' and vim.bo.fenc) or vim.o.enc -- :h 'enc'
                 -- return enc ~= 'utf-8' and enc
-                return enc
+                -- return enc
+                return (vim.bo.fenc ~= '' and vim.bo.fenc) or vim.o.enc
             end,
-            hi = { fg = "gray" },
+            hi = { fg = colors.gray },
         },
         FileFormat = {
             provider = function()
-                local fmt = vim.bo.fileformat
+                -- local fmt = vim.bo.fileformat
                 -- return fmt ~= 'unix' and fmt
-                return fmt
+                -- return fmt
+                return vim.bo.fileformat
+
             end,
-            hi = { fg = "gray" },
+            hi = { fg = colors.gray },
         },
         LSPActive = {
             condition = conditions.lsp_attached,
@@ -269,23 +272,24 @@ function Load_heirline()
 
             {
                 provider = "![",
+                hl = { fg = colors.gray },
             },
             {
                 provider = function(self)
                     -- 0 is just another output, we can decide to print it or not!
-                    return self.errors > 0 and (self.error_icon .. self.errors .. " ")
+                    return self.errors > 0 and (self.error_icon .. self.errors)
                 end,
                 hl = { fg = "diag_error" },
             },
             {
                 provider = function(self)
-                    return self.warnings > 0 and (self.warn_icon .. self.warnings .. " ")
+                    return self.warnings > 0 and (self.warn_icon .. self.warnings)
                 end,
                 hl = { fg = "diag_warn" },
             },
             {
                 provider = function(self)
-                    return self.info > 0 and (self.info_icon .. self.info .. " ")
+                    return self.info > 0 and (self.info_icon .. self.info)
                 end,
                 hl = { fg = "diag_info" },
             },
@@ -297,6 +301,7 @@ function Load_heirline()
             },
             {
                 provider = "]",
+                hl = { fg = colors.gray },
             },
         },
 
@@ -374,7 +379,7 @@ function Load_heirline()
                 local tname, _ = vim.api.nvim_buf_get_name(0):gsub(".*:", "")
                 return " " .. tname
             end,
-            hl = { fg = "blue", bold = true },
+            hl = { fg = colors.blue, bold = true },
         },
 
         Ruler = {
@@ -383,7 +388,7 @@ function Load_heirline()
             -- %c = column number
             -- %P = percentage through file of displayed window
             provider = "%7(%l/%3L%):%2c %P",
-            hl = { fg = "gray" },
+            hl = { fg = colors.gray },
         },
         TablineFileName = {
             provider = function(self)
@@ -431,7 +436,7 @@ function Load_heirline()
             condition = function(self)
                 return not vim.api.nvim_buf_get_option(self.bufnr, "modified")
             end,
-            { provider = " ", hl = { fg = "gray" }},
+            { provider = " ", hl = { fg = colors.gray }},
             {
                 provider = "",
                 hl = { fg = "gray" },
@@ -445,7 +450,7 @@ function Load_heirline()
                     name = "heirline_tabline_close_buffer_callback",
                 },
             },
-            { provider = " ", hl = { fg = "gray" }},
+            { provider = " ", hl = { fg = colors.gray }},
         },
 
     }
@@ -467,11 +472,11 @@ function Load_heirline()
 
     local Align = {
         provider = "%=",
-        hl = { fg = "gray" },
+        hl = { fg = colors.gray },
     }
     local Space = {
         provider = " ",
-        hl = { fg = "gray" },
+        hl = { fg = colors.gray },
     }
 
     local DefaultStatusline = {

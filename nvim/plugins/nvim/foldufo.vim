@@ -14,7 +14,8 @@ lua << EOF
   vim.wo.foldcolumn = '1'
   vim.wo.foldlevel = 99 -- feel free to decrease the value
   vim.wo.foldenable = true
-
+  vim.o.fillchars = [[eob: ,fold: ,foldopen:,foldsep: ,foldclose:]]
+  vim.o.foldcolumn = '1'
   -- option 1: coc.nvim as LSP client
   -- use {'neoclide/coc.nvim', branch = 'master', run = 'yarn install --frozen-lockfile'}
   --
