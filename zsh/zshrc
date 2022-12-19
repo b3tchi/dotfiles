@@ -47,6 +47,9 @@ zplugin light zsh-users/zsh-history-substring-search
 zplugin light zsh-users/zsh-completions
 # zplugin light marzocchi/zsh-notify
 
+# zsh-fzf-history-search triggered with Ctrl+r
+zinit ice lucid wait'0'
+zinit light joshskidmore/zsh-fzf-history-search
 #theme
 
 # Plugin history-search-multi-word loaded with tracking.

@@ -337,10 +337,10 @@ let g:netrw_winsize = 25
 
 ""cliboard for wsl
 if g:wsl == 1
-  augroup Yank
-    autocmd!
-    autocmd TextYankPost * :call system('/mnt/c/windows/system32/clip.exe ',@")
-  augroup END
+  " augroup Yank
+  "   autocmd!
+  "   autocmd TextYankPost * :call system('/mnt/c/windows/system32/clip.exe ',@")
+  " augroup END
 endif
 
 function SynStack()
