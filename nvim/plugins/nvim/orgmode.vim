@@ -20,6 +20,12 @@ require'nvim-treesitter.configs'.setup {
   ensure_installed = {'org'}, -- Or run :TSUpdate org
 }
 
+require'cmp'.setup({
+  sources = {
+    { name = 'orgmode' }
+  }
+})
+
 require('orgmode').setup({
   org_agenda_files = {'~/org/projects/*', '~/org/notes/*'},
   org_default_notes_file = '~/org/refile.org',
