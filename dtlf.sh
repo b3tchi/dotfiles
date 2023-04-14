@@ -40,7 +40,7 @@ function ml(){
   fi
 
   #create link
-  ln -sf $source $target
+  ln -sf $source "$target"
   echo "OK - linked ... $2 to $target"
 
 }
@@ -106,3 +106,7 @@ ml $d kde/konsolerc ~/.config/
 ml $d kde/kwinrulesrc ~/.config/
 ml $d kde/krunnerrc ~/.config/
 
+#powershell
+ml $d pwsh/Microsoft.PowerShell_profile.ps1 ~/.config/powershell/
+cp -vf "${d}pwsh/Microsoft.PowerShell_profile.ps1" '/mnt/c/Users/czjabeck/Onedrive - LEGO/Documents/PowerShell/'
+cp -vf "${d}pwsh/Microsoft.PowerShell_profile.ps1" '/mnt/c/Users/czjabeck/Onedrive - LEGO/Documents/WindowsPowerShell/'
