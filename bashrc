@@ -125,5 +125,21 @@ export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
 
+#loop the config made by scripts for bash
+if [[ -d $HOME/.shell_config/shared ]]; then
+  if [[ ! -z "$(ls $HOME/.shell_config/shared)" ]]; then
+    for f in $HOME/.shell_config/shared/*; do source $f; done
+  fi
+else
+  mkdir -p $HOME/.shell_config/shared
+fi
 
-source /home/jan/.config/broot/launcher/bash/br
+
+#loop the config made by scripts for bash
+if [[ -d $HOME/.shell_config/bash ]]; then
+  if [[ ! -z "$(ls $HOME/.shell_config/bash)" ]]; then
+    for f in $HOME/.shell_config/bash/*; do source $f; done
+  fi
+else
+  mkdir -p $HOME/.shell_config/bash
+fi

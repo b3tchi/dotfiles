@@ -1,3 +1,0 @@
-```bash
-echo abc
-```

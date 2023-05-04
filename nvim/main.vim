@@ -343,7 +343,7 @@ set spellsuggest=best,9 " Show nine spell checking candidates at most
 hi SpellBad cterm=underline ctermfg=red
 
 set signcolumn=auto:2-4 "always show signcolumns min 2 git+first digaiag - up to 4 positions more diag
-set clipboard=unnamedplus
+set clipboard=unnamedplus "clip to system clipboard
 set showtabline=2
 set laststatus=2
 set shortmess+=c
@@ -357,6 +357,8 @@ let g:netrw_altv = 1
 let g:netrw_winsize = 25
 
 ""cliboard for wsl
+vnoremap <C-c> "+y
+
 if g:wsl == 1
   " augroup Yank
   "   autocmd!
@@ -376,7 +378,7 @@ nnoremap <silent> <space>bh :call SynStack()<cr>
 " --------- Shortcuts ---------
 " -----------------------------{{{
 
-nnoremap <C-C> <C-[>
+" nnoremap <C-C> <C-[>
 
 let g:which_key_map.b = '+buffer'
 nnoremap <silent> <space>bb :Telescope buffers<cr>

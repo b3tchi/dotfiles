@@ -159,41 +159,11 @@ lua << EOF
     vim.g.org_block_get=_G.org_block_get
 
 EOF
+    function! VimuxSlime()
+      call VimuxSendText(@v)
+      call VimuxSendKeys("Enter")
+    endfunction
 
-
-
-    " function! FolderTemp()
-    "     let temppath = '/tmp/nvim_mdblocks/'
-    "     " !mkdir -p '/tmp/nvim_mdblocks/'
-    "     call mkdir(temppath,'p')
-    "     return temppath
-    " endfunction
-
-    " function! MarkdownBlock()
-    "     let view = winsaveview()
-    "     let line = line('.')
-    "     let cpos = getpos('.')
-    "     let start = search('^\s*[`~]\{3,}\S*\s*$', 'bnW')
-    "     if !start
-    "         return
-    "     endif
-    "
-    "     call cursor(start, 1)
-    "     let [fence, langv] = matchlist(getline(start), '\([`~]\{3,}\)\(\S\+\)\?')[1:2]
-    "     let end = search('^\s*' . fence . '\s*$', 'nW')
-    "
-    "     if end < line""|| langidx < 0
-    "         call winrestview(view)
-    "         return
-    "     endif
-    "
-    "     let resp = {}
-    "     let resp.code = getline(start + 1, end - 1) ""block"" list2str(block)
-    "     let resp.lang = langv
-    "     call setpos('.',cpos)
-    "     return resp
-    "
-    " endfunction
 
     nnoremap <silent> <space>co :VimuxOpenRunner<cr>
     nnoremap <silent> <space>cq :VimuxCloseRunner<cr>

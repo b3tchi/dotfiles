@@ -4,8 +4,8 @@ declare -A col_length col_colored;
 apost=$(echo -e "\u0027");
 delim=$(git config alias.delim);
 git_log_cmd=$(git config alias.$1);
-graph_col=${2:-$(git config alias.$1-col)};
-color_list=( $(git config alias.color-list) );
+# graph_col=${2:-$(git config alias.$1-col)};
+# color_list=( $(git config alias.color-list) );
 [[ -z "$graph_col" ]] && graph_col=1;
 [[ -z "$git_log_cmd" ]] && { git $1;exit; };
 

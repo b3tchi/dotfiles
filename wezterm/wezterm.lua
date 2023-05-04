@@ -1,10 +1,36 @@
 local wezterm = require 'wezterm';
 local config = {}
 
+local wsl_domains
+local default_domain
+local font_dirs
+local font_locator
+local font
+
 if wezterm.target_triple == "x86_64-pc-windows-msvc" then
-  print("windows")
+
+    wsl_domains = wezterm.default_wsl_domains()
+
+    wsl_domains = {
+        {
+            name = 'WSL:Ubuntu-20.04',
+            distribution = 'Ubuntu-20.04',
+            -- username = "hunter", -- If omitted, the default user for that distribution will be used.
+            default_cwd = "~",
+            -- default_prog = {"zsh"},
+        },
+    }
+
+    default_domain = "WSL:Ubuntu-20.04"
+
+        --FONTS
+    font_dirs = {"fonts"}
+    font_locator = "ConfigDirsOnly"
+    font = wezterm.font("Iosevka Nerd Font Mono")
 else
-  print("linux")
+    font_dirs = {}
+    font_locator = ""
+
 end
 
 config.font = wezterm.font('Iosevka Term', {stretch="Expanded", weight="Regular"})
@@ -32,4 +58,3 @@ config.colors = {
 }
 
 return config
-
