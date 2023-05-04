@@ -248,3 +248,5 @@ else
   mkdir -p $HOME/.shell_config/zsh
 fi
 
+
+source /home/jan/.config/broot/launcher/bash/br

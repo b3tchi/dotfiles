@@ -30,7 +30,7 @@ require'lspconfig'.jsonls.setup{
   capabilities = vim.g.lsp_capabilities,
 } -- JSOM
 
-require'lspconfig'.sumneko_lua.setup {
+require'lspconfig'.lua_ls.setup {
   on_attach = vim.g.on_attach_default,
   capabilities = vim.g.lsp_capabilities,
   settings = {

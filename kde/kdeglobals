@@ -136,12 +136,13 @@ ForegroundPositive=39,174,96
 ForegroundVisited=155,89,182
 
 [DirSelect Dialog]
-DirSelectDialog Size=842,582
+DirSelectDialog Size=837,586
 History Items[$e]=file:$HOME/vms/ubuntucore,file:$HOME/Downloads/Disney,file:$HOME/Downloads/WhiteSur-dark,file:$HOME/Downloads/Materia,file:$HOME/Downloads/Fluent-Dark/Fluent-Dark
 
 [General]
 AccentColor=61,174,233
 BrowserApplication=firefox.desktop
+ColorScheme=BreezeLight_no_alternate
 ColorSchemeHash=6dda8891e229329028133a8df9cb3467ada88088
 Name=Breeze Light
 TerminalApplication=wezterm
@@ -168,7 +169,7 @@ LookAndFeelPackage=org.kde.breezetwilight.desktop
 ShowDeleteCommand=false
 SingleClick=false
 contrast=4
-widgetStyle=kvantum
+widgetStyle=Breeze
 
 [KFileDialog Settings]
 Allow Expansion=false
