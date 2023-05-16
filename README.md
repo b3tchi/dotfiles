@@ -437,3 +437,7 @@ print(modes[mode].name)
 
 EOF
 ```
+
+```vim
+echo 'abc'
+```
