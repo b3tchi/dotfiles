@@ -19,19 +19,31 @@ eDP-1 Width 1920=700
 [Favorite Profiles]
 Favorites=
 
+[General]
+ConfigVersion=1
+
 [KonsoleWindow]
 RememberWindowSize=false
 ShowMenuBarByDefault=false
 ShowWindowTitleOnTitleBar=true
 
 [MainWindow]
+1920x1080 screen: Height=1072
+1920x1080 screen: Width=952
+1920x1080 screen: XPosition=964
+1920x1080 screen: YPosition=4
 MenuBar=Disabled
 State=AAAA/wAAAAD9AAAAAQAAAAAAAAAAAAAAAPwCAAAAAvsAAAAcAFMAUwBIAE0AYQBuAGEAZwBlAHIARABvAGMAawAAAAAA/////wAAAM0BAAAD+wAAACIAUQB1AGkAYwBrAEMAbwBtAG0AYQBuAGQAcwBEAG8AYwBrAAAAAAD/////AAAAqQEAAAMAAAd4AAAEGAAAAAQAAAAEAAAACAAAAAj8AAAAAQAAAAIAAAACAAAAFgBtAGEAaQBuAFQAbwBvAGwAQgBhAHIAAAAAAP////8D7wozADKBdAAAABwAcwBlAHMAcwBpAG8AbgBUAG8AbwBsAGIAYQByAAAAAAD/////AecBSwAugLg=
 StatusBar=Disabled
+eDP=eDP
 eDP Height 1920x1080=1048
+eDP Height 1920x1080 eDP=352
 eDP Width 1920x1080=1912
+eDP Width 1920x1080 eDP=952
 eDP XPosition 1920x1080=4
+eDP XPosition 1920x1080 eDP=964
 eDP YPosition 1920x1080=28
+eDP YPosition 1920x1080 eDP=724
 eDP-1 DP-1 Window-Maximized 1080x1920=true
 eDP-1 Window-Maximized 1080x1920=true
 

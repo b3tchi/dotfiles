@@ -68,6 +68,23 @@ if !filereadable(vimplug_exists)
   " autocmd VimEnter * PlugInstall "replaced by check further
 endif
 
+" lua << EOF
+"
+" local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
+" if not vim.loop.fs_stat(lazypath) then
+"   vim.fn.system({
+"     "git",
+"     "clone",
+"     "--filter=blob:none",
+"     "https://github.com/folke/lazy.nvim.git",
+"     "--branch=stable", -- latest stable release
+"     lazypath,
+"   })
+" end
+" vim.opt.rtp:prepend(lazypath)
+"
+" EOF
+
 " Install vim-plug if not found suggested way
 " if empty(glob('~/.vim/autoload/plug.vim'))
 "   "silent !curl -fLo ~/.vim/autoload/plug.vim --create-dirs
@@ -154,8 +171,11 @@ call plug#begin(expand('~/.vim/plugged'))
   "Run command async
   " Plug 'skywind3000/asyncrun.vim'
 
-  "Git
+  "GIT
   source ~/dotfiles/nvim/plugins/vim/git.vim
+
+  "AI
+  source ~/dotfiles/nvim/plugins/vim/vimai.vim "chatgpt interfacing
 
   " vimmode 3 => Neovim 0.5+ with lua
   if g:vimmode == 3
@@ -220,6 +240,7 @@ call plug#begin(expand('~/.vim/plugged'))
     source ~/dotfiles/nvim/plugins/nvim/nvimdap.vim "debugging
     source ~/dotfiles/nvim/plugins/nvim/hydra.vim "custom modes
     source ~/dotfiles/nvim/plugins/nvim/luapad.lua "lua scratchpad
+
 
   endif
 

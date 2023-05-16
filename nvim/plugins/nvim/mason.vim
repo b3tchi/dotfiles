@@ -23,7 +23,7 @@ lua << EOF
   })
 
   lspconfig.setup {
-    ensure_installed = { "sumneko_lua", "tailwindcss" ,"marksman"},
+    ensure_installed = { "lua_ls", "tailwindcss" ,"marksman"},
   }
 
 EOF

@@ -1,5 +1,5 @@
 [$Version]
-update_info=kwin.upd:replace-scalein-with-scale,kwin.upd:port-minimizeanimation-effect-to-js,kwin.upd:port-scale-effect-to-js,kwin.upd:port-dimscreen-effect-to-js,kwin.upd:auto-bordersize,kwin.upd:animation-speed,kwin.upd:desktop-grid-click-behavior,kwin.upd:no-swap-encourage,kwin.upd:make-translucency-effect-disabled-by-default,kwin.upd:remove-flip-switch-effect,kwin.upd:remove-cover-switch-effect,kwin.upd:remove-cubeslide-effect,kwin.upd:remove-xrender-backend,kwin.upd:enable-scale-effect-by-default,kwin.upd:overview-group-plugin-id,kwin.upd:animation-speed-cleanup
+update_info=kwin.upd:replace-scalein-with-scale,kwin.upd:port-minimizeanimation-effect-to-js,kwin.upd:port-scale-effect-to-js,kwin.upd:port-dimscreen-effect-to-js,kwin.upd:auto-bordersize,kwin.upd:animation-speed,kwin.upd:desktop-grid-click-behavior,kwin.upd:no-swap-encourage,kwin.upd:make-translucency-effect-disabled-by-default,kwin.upd:remove-flip-switch-effect,kwin.upd:remove-cover-switch-effect,kwin.upd:remove-cubeslide-effect,kwin.upd:remove-xrender-backend,kwin.upd:enable-scale-effect-by-default,kwin.upd:overview-group-plugin-id,kwin.upd:animation-speed-cleanup,bismuth_new_logger.upd:bismuth-new-logger,kwin.upd:replace-cascaded-zerocornered
 
 [Compositing]
 Backend=OpenGL
@@ -18,12 +18,15 @@ Id_3=c9be6aaf-368b-45a8-8972-366d43d29a0f
 Id_4=defd16d7-184a-4320-8c2b-e6d22992cb15
 Id_5=8753d808-5e9f-4749-9868-15a2b4c6a61a
 Id_6=0a4fde91-22a6-43c5-a8ce-592ba382c7b3
+Id_7=05616da3-b3d0-4b49-b39a-20779a076b42
+Id_8=7d741fd7-77e9-4e99-a8f9-f8de9bcccd21
+Id_9=720525ac-3d59-41c8-af71-e170bd778722
 Name_1=2
 Name_2=3
 Name_3=4
 Name_4=6
 Name_5=Desktop 7
-Number=6
+Number=9
 Rows=1
 
 [DrmOutputs][6c3828befa][6c3828befa]
@@ -73,6 +76,9 @@ TouchBorderActivate=0
 BorderActivate=9
 BorderActivateAll=9
 MoveResize=100
+
+[Effect-windowview]
+BorderActivateAll=9
 
 [ElectricBorders]
 Bottom=None
@@ -126,6 +132,7 @@ showNotificationWindows=false
 BorderActivate=9
 
 [Script-bismuth]
+noTileBorder=true
 screenGapBottom=4
 screenGapLeft=4
 screenGapRight=4
@@ -172,6 +179,12 @@ ShowDesktopMode=0
 ShowTabBox=true
 SwitchingMode=0
 
+[Tiling]
+padding=4
+
+[Tiling][4656e9c7-29d2-5198-aef7-e64495a298e9]
+tiles={"layoutDirection":"horizontal","tiles":[{"width":0.25},{"width":0.5},{"width":0.25}]}
+
 [Windows]
 ElectricBorderCooldown=350
 ElectricBorderCornerRatio=0.25
@@ -185,3 +198,5 @@ BorderlessMaximizedWindows=true
 ButtonsOnLeft=XAI
 ButtonsOnRight=
 ShowToolTips=false
+library=org.kde.breeze
+theme=Breeze

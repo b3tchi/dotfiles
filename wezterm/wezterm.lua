@@ -1,4 +1,5 @@
 local wezterm = require 'wezterm';
+local config = {}
 
 local wsl_domains
 local default_domain
@@ -32,45 +33,28 @@ else
 
 end
 
-return {
+config.font = wezterm.font('Iosevka Term', {stretch="Expanded", weight="Regular"})
+config.enable_tab_bar = false
+config.enable_scroll_bar = false
+config.window_padding = {
+    left = 0,
+    right = 0,
+    top = 0,
+    bottom = 0,
+}
 
-    --WSL
-    default_domain = default_domain,
-    wsl_domains = wsl_domains,
+config.colors = {
+    foreground = "#c0caf5",
+    background = "#1a1b26",
+    cursor_bg = "#c0caf5",
+    cursor_border = "#c0caf5",
+    cursor_fg = "#1a1b26",
+    selection_bg = "#33467c",
+    selection_fg = "#c0caf5",
 
-    --WINDOW CONFIG
-    enable_tab_bar = false,
-    enable_scroll_bar = false,
-    window_padding = {
-        left = 0,
-        right = 0,
-        top = 0,
-        bottom = 0,
-    },
-
-    --FONT
-    font_dirs = font_dirs,
-    font_locator = font_locator,
-    font = font,
-
-    --COLORSCHEME
-    --color_scheme = "Gruvbox Dark",
-    color_scheme = "tokionight",
-
-    --KEYS
-    keys = {
-        {
-            key = 'c',
-            mods = 'CTRL',
-            action = wezterm.action_callback(function(window, pane)
-                if pane:is_alt_screen_active() then
-                    window:perform_action(wezterm.action.SendKey{ key='c', mods='CTRL' }, pane)
-                else
-                    window:perform_action(wezterm.action{ CopyTo = 'ClipboardAndPrimarySelection' }, pane)
-                end
-            end),
-        },
-        { key = 'v', mods = 'CTRL', action = wezterm.action{ PasteFrom = 'Clipboard' } },
-    },
+    ansi = {"#15161e", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#bb9af7", "#7dcfff", "#a9b1d6" },
+    brights = {"#414868", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#bb9af7", "#7dcfff", "#c0caf5" },
 
 }
+
+return config

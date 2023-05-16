@@ -143,6 +143,3 @@ if [[ -d $HOME/.shell_config/bash ]]; then
 else
   mkdir -p $HOME/.shell_config/bash
 fi
-
-
-source /home/jan/.config/broot/launcher/bash/br
