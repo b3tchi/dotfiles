@@ -228,6 +228,7 @@ call plug#begin(expand('~/.vim/plugged'))
 
     "LANGUAGE SPECIFIC
     source ~/dotfiles/nvim/plugins/nvim/orgmode.lua "orgmode
+    source ~/dotfiles/nvim/plugins/nvim/zknvim.lua "orgmode
     source ~/dotfiles/nvim/plugins/nvim/mdpreview.vim "markdown files
     " source ~/dotfiles/nvim/plugins/nvim/telekasten.vim will try orgmode
     "
