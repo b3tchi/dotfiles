@@ -9,6 +9,7 @@ lua << EOF
   local status_navic, navic = pcall(require, "nvim-navic")
   local status_saga, saga = pcall(require, "lspsaga")
 
+  --Saga setup
   saga.setup({
   preview = {
       lines_above = 0,
@@ -21,6 +22,7 @@ lua << EOF
   request_timeout = 2000,
   })
 
+  --navic
   navic.setup {
     icons = {
       File          = " ",
