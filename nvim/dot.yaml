@@ -1,0 +1,12 @@
+windows:
+  links:
+    init.lua: ~\AppData\Local\nvim\init.lua
+    config: ~\AppData\Local\nvim\lua\config
+    plugins: ~\AppData\Local\nvim\lua\plugins
+    _myfxs: ~\AppData\Local\nvim-data\myfxs
+    _wzor: ~\AppData\Local\nvim-data\wzor
+
+# linux|darwin:
+#   links:
+#     init.lua: ~/.config/nvim/init.lua
+#     lua: ~/.config/nvim/lua
