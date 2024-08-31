@@ -14,5 +14,9 @@
     "workbench.editorAssociations": {
         "*.ipynb": "jupyter.notebook.ipynb"
     },
-    "vscode-neovim.neovimExecutablePaths.linux": "/home/jan/Applications/neovim/squashfs-root/AppRun"
+    "vscode-neovim.neovimExecutablePaths.linux": "/home/jan/Applications/neovim/squashfs-root/AppRun",
+    "svelte.enable-ts-plugin": true,
+    "extensions.experimental.affinity": {
+        "asvetliakov.vscode-neovim": 1
+    }
 }

@@ -24,21 +24,21 @@ IntensityAmount=0
 IntensityEffect=0
 
 [Colors:Button]
-BackgroundAlternate=118,197,238
-BackgroundNormal=252,252,252
+BackgroundAlternate=57,138,180
+BackgroundNormal=49,54,59
 DecorationFocus=61,174,233
 DecorationHover=61,174,233
 ForegroundActive=61,174,233
-ForegroundInactive=112,125,138
+ForegroundInactive=161,169,177
 ForegroundLink=61,174,233
 ForegroundNegative=218,68,83
 ForegroundNeutral=246,116,0
-ForegroundNormal=35,38,41
+ForegroundNormal=252,252,252
 ForegroundPositive=39,174,96
 ForegroundVisited=155,89,182
 
 [Colors:Complementary]
-BackgroundAlternate=27,30,32
+BackgroundAlternate=30,87,116
 BackgroundNormal=42,46,50
 DecorationFocus=61,174,233
 DecorationHover=61,174,233
@@ -52,36 +52,36 @@ ForegroundPositive=39,174,96
 ForegroundVisited=155,89,182
 
 [Colors:Header]
-BackgroundAlternate=239,240,241
-BackgroundNormal=222,224,226
+BackgroundAlternate=42,46,50
+BackgroundNormal=49,54,59
 DecorationFocus=61,174,233
 DecorationHover=61,174,233
 ForegroundActive=61,174,233
-ForegroundInactive=112,125,138
+ForegroundInactive=161,169,177
 ForegroundLink=61,174,233
 ForegroundNegative=218,68,83
 ForegroundNeutral=246,116,0
-ForegroundNormal=35,38,41
+ForegroundNormal=252,252,252
 ForegroundPositive=39,174,96
 ForegroundVisited=155,89,182
 
 [Colors:Header][Inactive]
-BackgroundAlternate=227,229,231
-BackgroundNormal=239,240,241
+BackgroundAlternate=49,54,59
+BackgroundNormal=42,46,50
 DecorationFocus=61,174,233
 DecorationHover=61,174,233
 ForegroundActive=61,174,233
-ForegroundInactive=112,125,138
-ForegroundLink=41,128,185
+ForegroundInactive=161,169,177
+ForegroundLink=29,153,243
 ForegroundNegative=218,68,83
 ForegroundNeutral=246,116,0
-ForegroundNormal=35,38,41
+ForegroundNormal=252,252,252
 ForegroundPositive=39,174,96
 ForegroundVisited=155,89,182
 
 [Colors:Selection]
-BackgroundAlternate=119,198,239
-BackgroundNormal=119,198,239
+BackgroundAlternate=50,130,172
+BackgroundNormal=50,130,172
 DecorationFocus=61,174,233
 DecorationHover=61,174,233
 ForegroundActive=61,174,233
@@ -94,44 +94,44 @@ ForegroundPositive=23,104,57
 ForegroundVisited=155,89,182
 
 [Colors:Tooltip]
-BackgroundAlternate=239,240,241
-BackgroundNormal=247,247,247
+BackgroundAlternate=42,46,50
+BackgroundNormal=49,54,59
 DecorationFocus=61,174,233
 DecorationHover=61,174,233
 ForegroundActive=61,174,233
-ForegroundInactive=112,125,138
+ForegroundInactive=161,169,177
 ForegroundLink=61,174,233
 ForegroundNegative=218,68,83
 ForegroundNeutral=246,116,0
-ForegroundNormal=35,38,41
+ForegroundNormal=252,252,252
 ForegroundPositive=39,174,96
 ForegroundVisited=155,89,182
 
 [Colors:View]
-BackgroundAlternate=255,255,255
-BackgroundNormal=255,255,255
+BackgroundAlternate=35,38,41
+BackgroundNormal=27,30,32
 DecorationFocus=61,174,233
 DecorationHover=61,174,233
 ForegroundActive=61,174,233
-ForegroundInactive=112,125,138
+ForegroundInactive=161,169,177
 ForegroundLink=61,174,233
 ForegroundNegative=218,68,83
 ForegroundNeutral=246,116,0
-ForegroundNormal=35,38,41
+ForegroundNormal=252,252,252
 ForegroundPositive=39,174,96
 ForegroundVisited=155,89,182
 
 [Colors:Window]
-BackgroundAlternate=227,229,231
-BackgroundNormal=239,240,241
+BackgroundAlternate=49,54,59
+BackgroundNormal=42,46,50
 DecorationFocus=61,174,233
 DecorationHover=61,174,233
 ForegroundActive=61,174,233
-ForegroundInactive=112,125,138
+ForegroundInactive=161,169,177
 ForegroundLink=61,174,233
 ForegroundNegative=218,68,83
 ForegroundNeutral=246,116,0
-ForegroundNormal=35,38,41
+ForegroundNormal=252,252,252
 ForegroundPositive=39,174,96
 ForegroundVisited=155,89,182
 
@@ -142,8 +142,7 @@ History Items[$e]=file:$HOME/vms/ubuntucore,file:$HOME/Downloads/Disney,file:$HO
 [General]
 AccentColor=61,174,233
 BrowserApplication=firefox.desktop
-ColorScheme=BreezeLight_no_alternate
-ColorSchemeHash=6dda8891e229329028133a8df9cb3467ada88088
+ColorSchemeHash=cb4c6ee5cc9a59dbe09fb467a529af1bf5c55c97
 Name=Breeze Light
 TerminalApplication=wezterm
 TerminalService=org.wezfurlong.wezterm.desktop
@@ -159,17 +158,13 @@ smallestReadableFont=FreeSans,8,-1,5,50,0,0,0,0,0
 toolBarFont=FreeSans,10,-1,5,50,0,0,0,0,0
 widgetStyle=Breeze
 
-[Icons]
-Theme=Papirus
-
 [KDE]
 AnimationDurationFactor=0.25
 ColorScheme=Breeze
-LookAndFeelPackage=org.kde.breezetwilight.desktop
+LookAndFeelPackage=org.kde.breezedark.desktop
 ShowDeleteCommand=false
 SingleClick=false
 contrast=4
-widgetStyle=Breeze
 
 [KFileDialog Settings]
 Allow Expansion=false
@@ -198,12 +193,12 @@ Dialog Size=600,480
 MaximumRemoteSize=0
 
 [WM]
-activeBackground=227,229,231
-activeBlend=227,229,231
+activeBackground=49,54,59
+activeBlend=252,252,252
 activeFont=FreeSans,10,-1,5,63,0,0,0,0,0,Bold
-activeForeground=35,38,41
+activeForeground=252,252,252
 frame=0,188,212
-inactiveBackground=239,240,241
-inactiveBlend=239,240,241
-inactiveForeground=112,125,138
+inactiveBackground=42,46,50
+inactiveBlend=161,169,177
+inactiveForeground=161,169,177
 inactiveFrame=34,45,50
