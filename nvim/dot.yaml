@@ -6,7 +6,10 @@ windows:
     _myfxs: ~\AppData\Local\nvim-data\myfxs
     _wzor: ~\AppData\Local\nvim-data\wzor
 
-# linux|darwin:
-#   links:
-#     init.lua: ~/.config/nvim/init.lua
-#     lua: ~/.config/nvim/lua
+linux:
+  links:
+    init.lua: ~\.config\nvim\init.lua
+    config: ~\.config\nvim\lua\config
+    plugins: ~\.config\nvim\lua\plugins
+    _myfxs: ~\.config\nvim-data\myfxs
+    _wzor: ~\.config\nvim-data\wzor
