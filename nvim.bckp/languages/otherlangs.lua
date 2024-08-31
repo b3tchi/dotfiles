@@ -94,10 +94,18 @@ end
 
 
 -- Documentationand notetaking
-require'lspconfig'.marksman.setup{
-  on_attach = vim.g.on_attach_default,
-  capabilities = vim.g.lsp_capabilities,
-} -- MARKDOWN
+-- require'lspconfig'.marksman.setup{
+--   on_attach = vim.g.on_attach_default,
+--   capabilities = vim.g.lsp_capabilities,
+--   -- roo_dir = vim.lsp.buf.list_workspace_folders()
+-- } -- MARKDOWN
+
+-- require'lspconfig'.zk.setup{
+--   on_attach = vim.g.on_attach_default,
+--   capabilities = vim.g.lsp_capabilities,
+--   filetypes = {"markdown"},
+--   -- root_dir = root_pattern(".zk"),
+-- } -- MARKDOWN - ZETTEKASTEN in zknvim
 
 -- General purpose
 --?? --GO

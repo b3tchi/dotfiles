@@ -31,7 +31,7 @@ EOF
 
   nnoremap <silent> <space>ff :Rg<cr>
   nnoremap <silent> <space>fc :Telescope grep_string searches=<C-r><C-w><cr>
-  nnoremap <silent> <space>oo :Telescope lsp_document_symbols<cr>
+  nnoremap <silent> <space>ls :Telescope lsp_document_symbols<cr>
 
 endfunction
 

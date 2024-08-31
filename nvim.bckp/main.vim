@@ -3,7 +3,7 @@ if &compatible
 endif
 
 " Required:
-let g:lspClient = 3 "1 for coc-nvim, 2 for deoplete (WIP), 3 neovim native, -1 non Lsp Client (TBD)
+let g:lspClient = 3 "1 for coc-nvim (TBD), 2 for deoplete (TBD), 3 neovim native, -1 non Lsp Client (TBD)
 " let g:vimTheme = 2 "1 solarized8, 2 gruvbox
 
 " Identify Os and Actual Device - Who is coming home?
@@ -68,22 +68,6 @@ if !filereadable(vimplug_exists)
   " autocmd VimEnter * PlugInstall "replaced by check further
 endif
 
-" lua << EOF
-"
-" local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
-" if not vim.loop.fs_stat(lazypath) then
-"   vim.fn.system({
-"     "git",
-"     "clone",
-"     "--filter=blob:none",
-"     "https://github.com/folke/lazy.nvim.git",
-"     "--branch=stable", -- latest stable release
-"     lazypath,
-"   })
-" end
-" vim.opt.rtp:prepend(lazypath)
-"
-" EOF
 
 " Install vim-plug if not found suggested way
 " if empty(glob('~/.vim/autoload/plug.vim'))
@@ -228,6 +212,7 @@ call plug#begin(expand('~/.vim/plugged'))
 
     "LANGUAGE SPECIFIC
     source ~/dotfiles/nvim/plugins/nvim/orgmode.lua "orgmode
+    source ~/dotfiles/nvim/plugins/nvim/zknvim.lua "orgmode
     source ~/dotfiles/nvim/plugins/nvim/mdpreview.vim "markdown files
     " source ~/dotfiles/nvim/plugins/nvim/telekasten.vim will try orgmode
     "
@@ -240,7 +225,6 @@ call plug#begin(expand('~/.vim/plugged'))
     source ~/dotfiles/nvim/plugins/nvim/nvimdap.vim "debugging
     source ~/dotfiles/nvim/plugins/nvim/hydra.vim "custom modes
     source ~/dotfiles/nvim/plugins/nvim/luapad.lua "lua scratchpad
-
 
   endif
 
@@ -278,7 +262,27 @@ source ~/dotfiles/nvim/languages/powershell.vim "ENABLED TESTING mason
 "script for vim terminal
 source ~/dotfiles/nvim/scripts/vim/incubator.vim
 
-let mapleader = "," " leader key is ,
+" lazynvim seems in default can't sit next to plug now disabled
+" lua << EOF
+"
+" local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
+" if not vim.loop.fs_stat(lazypath) then
+"   vim.fn.system({
+"     "git",
+"     "clone",
+"     "--filter=blob:none",
+"     "https://github.com/folke/lazy.nvim.git",
+"     "--branch=stable", -- latest stable release
+"     lazypath,
+"   })
+" end
+"
+" vim.opt.rtp:prepend(lazypath)
+" vim.g.mapleader = ","
+"
+" require("lazy").setup({})
+"
+" EOF
 
 set number relativenumber ignorecase smartcase undofile lazyredraw
 set cursorline

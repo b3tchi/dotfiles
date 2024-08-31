@@ -1,7 +1,6 @@
 Plug 'neovim/nvim-lspconfig' "offical NeoVim LSP plugin
 Plug 'SmiteshP/nvim-navic'
 Plug 'glepnir/lspsaga.nvim', { 'branch': 'main' }
-
 function LuaLspLoaded()
 
 
@@ -10,6 +9,20 @@ lua << EOF
   local status_navic, navic = pcall(require, "nvim-navic")
   local status_saga, saga = pcall(require, "lspsaga")
 
+  --Saga setup
+  saga.setup({
+  preview = {
+      lines_above = 0,
+      lines_below = 10,
+      },
+  scroll_preview = {
+      scroll_down = "<C-f>",
+      scroll_up = "<C-b>",
+      },
+  request_timeout = 2000,
+  })
+
+  --navic
   navic.setup {
     icons = {
       File          = " ",
@@ -106,7 +119,7 @@ _G.on_attach_default = function(client, bufnr)
   buf_set_keymap('n', '[d', '<cmd>lua vim.lsp.diagnostic.goto_prev()<CR>', opts)
   buf_set_keymap('n', ']d', '<cmd>lua vim.lsp.diagnostic.goto_next()<CR>', opts)
   buf_set_keymap('n', '<space>q', '<cmd>lua vim.lsp.diagnostic.set_loclist()<CR>', opts)
-  -- buf_set_keymap('n', '<space>O', '<cmd>lua require('telescope.builtin').builtin.lsp_document_symbols()<CR>', opts)
+  -- buf_set_keymap('n', 'bd', '<cmd>lua require('telescope.builtin').builtin.lsp_document_symbols()<CR>', opts)
   -- buf_set_keymap('n', '<C-k>', '<cmd>lua vim.lsp.buf.signature_help()<CR>', opts)
   -- buf_set_keymap('n', '<space>e', '<cmd>lua vim.lsp.diagnostic.show_line_diagnostics()<CR>', opts)
   -- buf_set_keymap('n', '<space>f', '<cmd>lua vim.lsp.buf.formatting()<CR>', opts)

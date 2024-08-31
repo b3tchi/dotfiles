@@ -99,5 +99,3 @@ export THEME=tokionight #gruvbox
 
 export OPENAI_KEY=
 export PATH=$PATH:/usr/local/bin
-export OPENAI_KEY=
-export PATH=$PATH:/usr/local/bin

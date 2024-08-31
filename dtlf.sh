@@ -52,21 +52,23 @@ d=~/dotfiles/
 ml $d profile ~/ .profile
 ml $d bashrc ~/ .bashrc
 ml $d bash_logout ~/ .bash_logout
+
 #git
 ml $d gitconfig ~/ .gitconfig
+
 # ml $d ssh/config ~/.ssh/ # not govern through moved to private repo
 ml $d tmux/tmux.conf ~/ .tmux.conf
 ml $d tigrc ~/ .tigrc
 ml $d visidata/visidatarc ~/ .visidatarc
 
 #bat
-ml $d bat ~/.config/
+# ml $d bat ~/.config/ moved to scripts
 ml $d fzf/themes/tokyonight.conf ~/.shell_config/shared/ fzf-theme
 
 #zsh
 ml $d profile ~/ .zprofile
-ml $d zsh/zshrc ~/ .zshrc
-ml $d zsh/p10k.zsh ~/ .p10k.zsh
+# ml $d zsh/zshrc ~/ .zshrc moved to scripts
+# ml $d zsh/p10k.zsh ~/ .p10k.zsh moved to scripts
 
 #fish
 ml $d fish/config.fish ~/.config/fish/
