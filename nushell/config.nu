@@ -2,10 +2,6 @@
 #
 # version = 0.82.1
 
-# For more information on defining custom themes, see
-# https://www.nushell.sh/book/coloring_and_theming.html
-# And here is the theme collection
-# https://github.com/nushell/nu_scripts/tree/main/themes
 let dark_theme = {
     # color for nushell primitives
     separator: white
@@ -385,13 +381,6 @@ $env.config = {
                 ]
             }
         }
-        # {
-        #     name: history_menu
-        #     modifier: control
-        #     keycode: char_r
-        #     mode: [emacs, vi_insert, vi_normal]
-        #     event: { send: menu name: all_history_menu }
-        # }
         {
             name: fuzzy_history
             modifier: control
@@ -455,13 +444,6 @@ $env.config = {
             mode: [emacs, vi_normal, vi_insert]
             event: { send: clearscreen }
         }
-        # {
-        #     name: search_history
-        #     modifier: control
-        #     keycode: char_r
-        #     mode: [emacs, vi_normal, vi_insert]
-        #     event: { send: searchhistory }
-        # }
         {
             name: open_command_editor
             modifier: control
@@ -664,14 +646,3 @@ $env.config = {
         }
     ]
 }
-
-# use ~/.cache/starship/init.nu j
-#$nu.default-config-dir | path join 'plugins/' 
-# echo "" | save ($nu.default-config-dir | path join plugins.nu) --force
-# for $x in (fd \.nu$ ./plugins/ | split row "\n") {
-#     echo $"source ($x)\n" | save ./plugins.nu --append --raw
-# }
-
-# source ($nu.default-config-dir | path join plugins.nu)
-# source ./starship.nu
-# source ./carapace.nu

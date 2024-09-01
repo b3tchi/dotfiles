@@ -1,4 +1,6 @@
 linux:
-  config.nu: ~/.config/nushell/config.nu
-  env.nu: ~/.config/nushell/env.nu
-  scripts: ~/.config/nushell/scripts
+  links:
+    config.nu: ~/.config/nushell/config.nu
+    env.nu: ~/.config/nushell/env.nu
+    scripts: ~/.config/nushell/scripts
+    apps: ~/.config/nushell/apps

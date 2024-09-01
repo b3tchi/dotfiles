@@ -80,9 +80,12 @@ if $nu.os-info.name == "windows" {
 
 
 # Directories to search for scripts when calling source or use
-$env.NU_LIB_DIRS = [
-    ($nu.default-config-dir | path join 'scripts') # add <nushell-config-dir>/scripts
+$env.NU_LIB_DIRS = [ 
+	($nu.default-config-dir | path join 'apps') 
+	($nu.default-config-dir | path join 'scripts') 
 ]
+
+source starship.nu
 
 # Directories to search for plugin binaries when calling register
 $env.NU_PLUGIN_DIRS = [
@@ -91,3 +94,4 @@ $env.NU_PLUGIN_DIRS = [
 
 # To add entries to PATH (on Windows you might use Path), you can use the following pattern:
 # $env.PATH = ($env.PATH | split row (char esep) | prepend '/some/path')
+# use appsx
