@@ -1,0 +1,3 @@
+windows:
+  links:
+    Settings.json: ~\Dev\Scoop\persist\flow-launcher\UserData\Settings\Settings.json
