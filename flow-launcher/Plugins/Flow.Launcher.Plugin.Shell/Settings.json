@@ -1,0 +1,13 @@
+{
+  "Shell": 2,
+  "ReplaceWinR": true,
+  "CloseShellAfterPress": false,
+  "LeaveShellOpen": false,
+  "RunAsAdministrator": false,
+  "ShowOnlyMostUsedCMDs": false,
+  "ShowOnlyMostUsedCMDsNumber": 5,
+  "CommandHistory": {
+    "firefox -p": 1,
+    "explorer.exe": 3
+  }
+}

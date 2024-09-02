@@ -1,0 +1,976 @@
+{
+  "Items": [
+    {
+      "Query": "pm install Window Walker",
+      "ExecutedDateTime": "2024-05-20T11:18:04.813694+02:00"
+    },
+    {
+      "Query": "out",
+      "ExecutedDateTime": "2024-05-20T11:29:36.405454+02:00"
+    },
+    {
+      "Query": "firefox -p",
+      "ExecutedDateTime": "2024-05-20T11:31:21.6519215+02:00"
+    },
+    {
+      "Query": "firefox.exe -p",
+      "ExecutedDateTime": "2024-05-20T11:34:14.1076443+02:00"
+    },
+    {
+      "Query": "\u003E firefox -p",
+      "ExecutedDateTime": "2024-05-20T11:36:04.8626832+02:00"
+    },
+    {
+      "Query": "hyp",
+      "ExecutedDateTime": "2024-05-20T11:42:00.5433619+02:00"
+    },
+    {
+      "Query": "myff",
+      "ExecutedDateTime": "2024-05-20T11:45:51.4421754+02:00"
+    },
+    {
+      "Query": "my",
+      "ExecutedDateTime": "2024-05-20T11:46:47.0440363+02:00"
+    },
+    {
+      "Query": "db",
+      "ExecutedDateTime": "2024-05-20T11:52:26.107375+02:00"
+    },
+    {
+      "Query": "w",
+      "ExecutedDateTime": "2024-05-20T11:53:14.4426623+02:00"
+    },
+    {
+      "Query": "sett",
+      "ExecutedDateTime": "2024-05-20T11:53:27.3260732+02:00"
+    },
+    {
+      "Query": "\u003E explorer.exe",
+      "ExecutedDateTime": "2024-05-20T11:54:23.0384122+02:00"
+    },
+    {
+      "Query": "wiki nushell",
+      "ExecutedDateTime": "2024-05-20T11:54:55.3690083+02:00"
+    },
+    {
+      "Query": "flat-instore-cal",
+      "ExecutedDateTime": "2024-05-20T12:01:41.3002066+02:00"
+    },
+    {
+      "Query": "C:\\Users\\czjabeck\\OneDrive - LEGO\\Projects\\240510-feat-flat-instore-calculation\\",
+      "ExecutedDateTime": "2024-05-20T12:01:44.2556342+02:00"
+    },
+    {
+      "Query": "log",
+      "ExecutedDateTime": "2024-05-20T12:37:24.7326309+02:00"
+    },
+    {
+      "Query": "setti",
+      "ExecutedDateTime": "2024-05-20T16:45:40.8674488+02:00"
+    },
+    {
+      "Query": "24 fup",
+      "ExecutedDateTime": "2024-05-20T16:46:41.5626377+02:00"
+    },
+    {
+      "Query": "C:\\Users\\czjabeck\\OneDrive - LEGO\\Projects\\240515-fix-fup-closed-percentage\\",
+      "ExecutedDateTime": "2024-05-20T16:46:43.9448127+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-05-22T14:02:14.8227366+02:00"
+    },
+    {
+      "Query": "edge",
+      "ExecutedDateTime": "2024-05-22T14:07:19.3516679+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-05-22T17:06:51.0208647+02:00"
+    },
+    {
+      "Query": "we",
+      "ExecutedDateTime": "2024-05-22T20:00:48.833326+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-05-23T08:54:45.8544227+02:00"
+    },
+    {
+      "Query": "out",
+      "ExecutedDateTime": "2024-05-23T12:02:04.7289631+02:00"
+    },
+    {
+      "Query": "231031",
+      "ExecutedDateTime": "2024-05-23T12:27:33.7621773+02:00"
+    },
+    {
+      "Query": "C:\\Users\\czjabeck\\OneDrive - LEGO\\Projects\\231031-adf-prod-plan\\",
+      "ExecutedDateTime": "2024-05-23T12:27:35.5390098+02:00"
+    },
+    {
+      "Query": "sap logo",
+      "ExecutedDateTime": "2024-05-23T13:11:14.6192392+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-05-23T16:59:36.7934112+02:00"
+    },
+    {
+      "Query": "fancy",
+      "ExecutedDateTime": "2024-05-23T20:26:01.9541578+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-05-23T20:26:55.3530417+02:00"
+    },
+    {
+      "Query": "file",
+      "ExecutedDateTime": "2024-05-23T20:27:55.8039976+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-05-23T20:36:37.4750746+02:00"
+    },
+    {
+      "Query": "pru",
+      "ExecutedDateTime": "2024-05-24T00:35:21.241016+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-05-25T08:08:32.2609186+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-05-25T10:20:01.9454393+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-05-25T11:08:23.8458257+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-05-28T19:33:21.4455659+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-05-29T08:58:20.3327498+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-05-29T19:16:02.6734228+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-05-30T08:30:37.1826693+02:00"
+    },
+    {
+      "Query": "log",
+      "ExecutedDateTime": "2024-06-18T10:53:40.0977923+02:00"
+    },
+    {
+      "Query": "fil",
+      "ExecutedDateTime": "2024-06-18T14:31:46.6800392+02:00"
+    },
+    {
+      "Query": "wfire",
+      "ExecutedDateTime": "2024-06-18T14:32:01.656567+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-06-18T21:10:05.2808942+02:00"
+    },
+    {
+      "Query": "ppm to",
+      "ExecutedDateTime": "2024-06-19T13:14:17.7098827+02:00"
+    },
+    {
+      "Query": "note",
+      "ExecutedDateTime": "2024-06-19T16:46:22.4467663+02:00"
+    },
+    {
+      "Query": "ppm",
+      "ExecutedDateTime": "2024-06-20T12:40:53.0950165+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-06-24T00:16:40.3728467+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-06-24T09:39:15.7824223+02:00"
+    },
+    {
+      "Query": "ksn",
+      "ExecutedDateTime": "2024-06-25T10:10:29.8848434+02:00"
+    },
+    {
+      "Query": "wezterm",
+      "ExecutedDateTime": "2024-06-25T11:57:40.4845465+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-06-25T14:16:10.1428326+02:00"
+    },
+    {
+      "Query": "fil",
+      "ExecutedDateTime": "2024-06-26T13:05:26.6322284+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-06-26T13:06:36.5600169+02:00"
+    },
+    {
+      "Query": "file",
+      "ExecutedDateTime": "2024-06-26T14:13:49.6492519+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-06-26T16:09:04.9176173+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-06-28T14:58:12.4031401+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-07-14T12:18:41.4825001+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-07-15T08:52:17.147511+02:00"
+    },
+    {
+      "Query": "fi",
+      "ExecutedDateTime": "2024-07-15T08:52:33.787918+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-07-15T08:54:49.0569472+02:00"
+    },
+    {
+      "Query": "fire",
+      "ExecutedDateTime": "2024-07-16T10:29:05.8868357+02:00"
+    },
+    {
+      "Query": "note",
+      "ExecutedDateTime": "2024-07-16T10:32:28.5016381+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-07-16T18:16:35.5337528+02:00"
+    },
+    {
+      "Query": "fancy",
+      "ExecutedDateTime": "2024-07-17T13:15:19.6338315+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-07-17T13:17:10.0958822+02:00"
+    },
+    {
+      "Query": "teams",
+      "ExecutedDateTime": "2024-07-17T14:03:32.9862752+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-07-17T18:03:14.2254716+02:00"
+    },
+    {
+      "Query": "ppm to",
+      "ExecutedDateTime": "2024-07-18T12:50:07.4382562+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-07-18T21:25:31.6596479+02:00"
+    },
+    {
+      "Query": "log",
+      "ExecutedDateTime": "2024-07-18T22:03:27.8283236+02:00"
+    },
+    {
+      "Query": "note",
+      "ExecutedDateTime": "2024-07-19T11:42:02.3408407+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-07-19T18:22:52.3118766+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-07-22T08:55:46.1035259+02:00"
+    },
+    {
+      "Query": "ex",
+      "ExecutedDateTime": "2024-07-22T11:52:47.7546103+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-07-24T08:03:10.8703241+02:00"
+    },
+    {
+      "Query": "we",
+      "ExecutedDateTime": "2024-07-24T18:33:54.613599+02:00"
+    },
+    {
+      "Query": "fire",
+      "ExecutedDateTime": "2024-07-24T20:23:59.8957326+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-07-25T08:56:32.4326206+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-07-25T13:52:20.0453328+02:00"
+    },
+    {
+      "Query": "log",
+      "ExecutedDateTime": "2024-07-27T18:24:18.7460635+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-07-30T08:19:52.2561776+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-07-30T19:39:20.7810233+02:00"
+    },
+    {
+      "Query": "edge",
+      "ExecutedDateTime": "2024-07-31T09:06:10.7858976+02:00"
+    },
+    {
+      "Query": "ksn",
+      "ExecutedDateTime": "2024-07-31T11:27:33.5926307+02:00"
+    },
+    {
+      "Query": "we",
+      "ExecutedDateTime": "2024-07-31T18:34:17.6849814+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-07-31T18:38:05.5223074+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-08-01T20:42:24.2725861+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-08-01T20:59:40.7445116+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-08-02T08:52:58.4003938+02:00"
+    },
+    {
+      "Query": "ppm",
+      "ExecutedDateTime": "2024-08-02T09:22:43.4903536+02:00"
+    },
+    {
+      "Query": "ksn",
+      "ExecutedDateTime": "2024-08-02T10:42:55.8012145+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-04T06:09:07.0563559+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-08-04T06:15:56.7611593+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-04T09:01:38.6251708+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-08-04T10:09:46.4304755+02:00"
+    },
+    {
+      "Query": "powershl",
+      "ExecutedDateTime": "2024-08-04T19:37:19.7095096+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-04T19:41:39.1736812+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-08-04T20:45:52.814134+02:00"
+    },
+    {
+      "Query": "pru",
+      "ExecutedDateTime": "2024-08-04T22:18:28.5352817+02:00"
+    },
+    {
+      "Query": "fil",
+      "ExecutedDateTime": "2024-08-04T22:22:09.6805477+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-05T00:25:26.4160966+02:00"
+    },
+    {
+      "Query": "sli",
+      "ExecutedDateTime": "2024-08-05T00:43:32.8662042+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-08-05T08:38:17.8757984+02:00"
+    },
+    {
+      "Query": "file",
+      "ExecutedDateTime": "2024-08-05T13:34:06.258849+02:00"
+    },
+    {
+      "Query": "azure",
+      "ExecutedDateTime": "2024-08-05T13:59:52.8657651+02:00"
+    },
+    {
+      "Query": "log",
+      "ExecutedDateTime": "2024-08-05T17:01:54.4548556+02:00"
+    },
+    {
+      "Query": "ppm adm",
+      "ExecutedDateTime": "2024-08-06T09:18:39.5194886+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-06T11:24:33.3750459+02:00"
+    },
+    {
+      "Query": "ppm",
+      "ExecutedDateTime": "2024-08-06T18:11:33.0628427+02:00"
+    },
+    {
+      "Query": "pwsh",
+      "ExecutedDateTime": "2024-08-07T08:50:34.3242299+02:00"
+    },
+    {
+      "Query": "wt",
+      "ExecutedDateTime": "2024-08-07T08:50:47.9351965+02:00"
+    },
+    {
+      "Query": "wfi",
+      "ExecutedDateTime": "2024-08-07T09:00:54.3928677+02:00"
+    },
+    {
+      "Query": "fire",
+      "ExecutedDateTime": "2024-08-08T00:52:45.9482672+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-08T09:44:29.0445543+02:00"
+    },
+    {
+      "Query": "ou",
+      "ExecutedDateTime": "2024-08-08T10:30:26.7406174+02:00"
+    },
+    {
+      "Query": "file",
+      "ExecutedDateTime": "2024-08-08T11:08:41.8378108+02:00"
+    },
+    {
+      "Query": "fil",
+      "ExecutedDateTime": "2024-08-08T11:34:44.3196335+02:00"
+    },
+    {
+      "Query": "code",
+      "ExecutedDateTime": "2024-08-08T12:37:36.5457202+02:00"
+    },
+    {
+      "Query": "we",
+      "ExecutedDateTime": "2024-08-08T12:38:21.5558892+02:00"
+    },
+    {
+      "Query": "flow",
+      "ExecutedDateTime": "2024-08-08T14:12:13.48743+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-08T14:12:18.7372715+02:00"
+    },
+    {
+      "Query": "powersh",
+      "ExecutedDateTime": "2024-08-08T14:13:07.2808114+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-08-08T14:20:21.4707254+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-08-08T14:20:43.6074791+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-08T14:32:22.4454014+02:00"
+    },
+    {
+      "Query": "we",
+      "ExecutedDateTime": "2024-08-08T14:37:28.3851628+02:00"
+    },
+    {
+      "Query": "p",
+      "ExecutedDateTime": "2024-08-08T14:37:41.8713475+02:00"
+    },
+    {
+      "Query": "pwsh",
+      "ExecutedDateTime": "2024-08-08T14:40:54.9449008+02:00"
+    },
+    {
+      "Query": "code .",
+      "ExecutedDateTime": "2024-08-08T15:12:22.2053443+02:00"
+    },
+    {
+      "Query": "azu",
+      "ExecutedDateTime": "2024-08-08T15:55:14.2024666+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-08T21:19:32.0097447+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-08-08T21:30:06.3848881+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-09T06:52:02.8087103+02:00"
+    },
+    {
+      "Query": "wfi",
+      "ExecutedDateTime": "2024-08-09T07:03:53.808393+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-09T12:23:27.1384619+02:00"
+    },
+    {
+      "Query": "azure",
+      "ExecutedDateTime": "2024-08-09T14:52:28.1161058+02:00"
+    },
+    {
+      "Query": "pfirefox",
+      "ExecutedDateTime": "2024-08-09T15:20:46.2199159+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-08-10T17:27:36.4276092+02:00"
+    },
+    {
+      "Query": "edge",
+      "ExecutedDateTime": "2024-08-10T17:54:19.8541582+02:00"
+    },
+    {
+      "Query": "file",
+      "ExecutedDateTime": "2024-08-10T19:13:16.1136452+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-08-11T12:04:08.1736523+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-08-11T12:37:32.7854258+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-12T16:07:26.1884161+02:00"
+    },
+    {
+      "Query": "pws",
+      "ExecutedDateTime": "2024-08-12T16:27:00.1955321+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-12T16:48:35.1992063+02:00"
+    },
+    {
+      "Query": "pws",
+      "ExecutedDateTime": "2024-08-12T16:48:46.8667544+02:00"
+    },
+    {
+      "Query": "firefox",
+      "ExecutedDateTime": "2024-08-12T17:59:19.3932063+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-12T18:09:46.0532094+02:00"
+    },
+    {
+      "Query": "we",
+      "ExecutedDateTime": "2024-08-12T18:31:58.6648806+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-12T18:50:50.6299024+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-08-12T19:01:22.126158+02:00"
+    },
+    {
+      "Query": "power",
+      "ExecutedDateTime": "2024-08-12T19:32:53.6474979+02:00"
+    },
+    {
+      "Query": "logseq",
+      "ExecutedDateTime": "2024-08-12T20:07:52.2307434+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-12T23:14:39.9833644+02:00"
+    },
+    {
+      "Query": "excel",
+      "ExecutedDateTime": "2024-08-13T08:47:48.4506436+02:00"
+    },
+    {
+      "Query": "teams",
+      "ExecutedDateTime": "2024-08-13T09:00:28.1594763+02:00"
+    },
+    {
+      "Query": "fire",
+      "ExecutedDateTime": "2024-08-13T10:29:31.3340843+02:00"
+    },
+    {
+      "Query": "ppm adm",
+      "ExecutedDateTime": "2024-08-13T11:47:32.6491222+02:00"
+    },
+    {
+      "Query": "code",
+      "ExecutedDateTime": "2024-08-13T11:57:31.6259273+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-08-13T14:11:38.1753038+02:00"
+    },
+    {
+      "Query": "code",
+      "ExecutedDateTime": "2024-08-13T14:37:46.7284955+02:00"
+    },
+    {
+      "Query": "fa",
+      "ExecutedDateTime": "2024-08-13T20:14:23.430745+02:00"
+    },
+    {
+      "Query": "code",
+      "ExecutedDateTime": "2024-08-13T21:02:56.3165499+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-13T21:47:08.7373767+02:00"
+    },
+    {
+      "Query": "we",
+      "ExecutedDateTime": "2024-08-13T22:11:21.2702111+02:00"
+    },
+    {
+      "Query": "dockerd",
+      "ExecutedDateTime": "2024-08-13T22:17:02.5445175+02:00"
+    },
+    {
+      "Query": "we",
+      "ExecutedDateTime": "2024-08-13T23:26:00.4413622+02:00"
+    },
+    {
+      "Query": "\u003E",
+      "ExecutedDateTime": "2024-08-14T08:36:30.827082+02:00"
+    },
+    {
+      "Query": "fancywm",
+      "ExecutedDateTime": "2024-08-14T10:54:20.0121383+02:00"
+    },
+    {
+      "Query": "wezt",
+      "ExecutedDateTime": "2024-08-15T08:18:12.3298062+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-08-15T08:37:53.8661552+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-08-15T09:13:44.5301831+02:00"
+    },
+    {
+      "Query": "file",
+      "ExecutedDateTime": "2024-08-15T09:52:15.7373426+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-15T11:55:33.4987439+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-08-15T12:10:26.216552+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-08-15T20:21:13.2631433+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-16T08:03:47.7533757+02:00"
+    },
+    {
+      "Query": "out",
+      "ExecutedDateTime": "2024-08-16T08:04:54.8871034+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-08-16T08:11:27.7764948+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-08-16T08:50:30.329513+02:00"
+    },
+    {
+      "Query": "fan",
+      "ExecutedDateTime": "2024-08-16T08:51:13.7673275+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-16T09:51:53.4020336+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-08-16T14:24:56.9326605+02:00"
+    },
+    {
+      "Query": "note",
+      "ExecutedDateTime": "2024-08-18T22:14:44.8482287+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-08-19T00:02:55.1338402+02:00"
+    },
+    {
+      "Query": "wfire",
+      "ExecutedDateTime": "2024-08-19T13:08:22.4943979+02:00"
+    },
+    {
+      "Query": "ppm tool-uat",
+      "ExecutedDateTime": "2024-08-19T15:01:27.5955581+02:00"
+    },
+    {
+      "Query": "ppm tool",
+      "ExecutedDateTime": "2024-08-19T15:10:41.0456052+02:00"
+    },
+    {
+      "Query": "file",
+      "ExecutedDateTime": "2024-08-19T15:16:00.4719845+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-19T17:21:23.2964704+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-08-20T07:19:03.428225+02:00"
+    },
+    {
+      "Query": "explore",
+      "ExecutedDateTime": "2024-08-21T03:48:23.0169532+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-21T09:30:11.4085381+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-08-21T09:41:19.4634612+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-08-21T09:55:09.4812845+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-08-22T06:00:20.9080363+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-08-22T07:23:47.2560603+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-08-22T09:22:19.1481978+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-22T18:02:47.8296391+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-08-22T18:07:44.3882371+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-22T18:52:57.5151391+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-08-22T18:53:37.2922258+02:00"
+    },
+    {
+      "Query": "pws",
+      "ExecutedDateTime": "2024-08-23T05:24:06.341634+02:00"
+    },
+    {
+      "Query": "pwsh",
+      "ExecutedDateTime": "2024-08-23T05:24:34.2713889+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-08-23T05:49:58.0414301+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-08-23T08:53:41.4971873+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-23T21:40:07.7937973+02:00"
+    },
+    {
+      "Query": "wt",
+      "ExecutedDateTime": "2024-08-23T21:41:45.9305247+02:00"
+    },
+    {
+      "Query": "log",
+      "ExecutedDateTime": "2024-08-23T21:42:13.0728275+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-23T22:55:13.2093125+02:00"
+    },
+    {
+      "Query": "wz",
+      "ExecutedDateTime": "2024-08-23T23:23:32.6513623+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-25T13:44:07.5359096+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-08-25T13:49:18.025741+02:00"
+    },
+    {
+      "Query": "loge",
+      "ExecutedDateTime": "2024-08-25T14:08:05.7060117+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-08-26T07:53:40.7205735+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-08-26T07:59:51.2413128+02:00"
+    },
+    {
+      "Query": "ou",
+      "ExecutedDateTime": "2024-08-26T09:41:07.3501514+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-27T08:09:32.8409991+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-08-27T08:14:11.1155228+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-27T08:46:54.2329131+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-08-27T08:56:46.0863596+02:00"
+    },
+    {
+      "Query": "we",
+      "ExecutedDateTime": "2024-08-27T09:51:31.2225123+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-08-27T10:22:29.6147304+02:00"
+    },
+    {
+      "Query": "ppm ad",
+      "ExecutedDateTime": "2024-08-27T11:27:08.1788401+02:00"
+    },
+    {
+      "Query": "ppm",
+      "ExecutedDateTime": "2024-08-27T11:33:49.989738+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-08-27T15:17:07.802922+02:00"
+    },
+    {
+      "Query": "we",
+      "ExecutedDateTime": "2024-08-27T17:00:38.3691081+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-08-29T10:53:08.7214402+02:00"
+    },
+    {
+      "Query": "p",
+      "ExecutedDateTime": "2024-08-29T11:06:05.134307+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-08-29T11:48:10.7007151+02:00"
+    },
+    {
+      "Query": "loge",
+      "ExecutedDateTime": "2024-08-29T16:19:44.9523881+02:00"
+    },
+    {
+      "Query": "note",
+      "ExecutedDateTime": "2024-08-30T12:32:22.5531216+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-08-30T13:44:44.786183+02:00"
+    },
+    {
+      "Query": "ou",
+      "ExecutedDateTime": "2024-08-30T17:30:43.1803367+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-09-02T08:35:16.9657463+02:00"
+    },
+    {
+      "Query": "out",
+      "ExecutedDateTime": "2024-09-02T08:42:41.5992266+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-09-02T08:54:48.3594645+02:00"
+    },
+    {
+      "Query": "pf",
+      "ExecutedDateTime": "2024-09-02T08:56:21.2556552+02:00"
+    },
+    {
+      "Query": "wf",
+      "ExecutedDateTime": "2024-09-02T08:56:29.0223843+02:00"
+    },
+    {
+      "Query": "wez",
+      "ExecutedDateTime": "2024-09-02T09:07:38.4370995+02:00"
+    },
+    {
+      "Query": "fanc",
+      "ExecutedDateTime": "2024-09-02T09:54:25.501413+02:00"
+    }
+  ]
+}

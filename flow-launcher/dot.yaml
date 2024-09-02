@@ -1,3 +1,7 @@
 windows:
   links:
     Settings.json: ~\Dev\Scoop\persist\flow-launcher\UserData\Settings\Settings.json
+    History.json: ~\Dev\Scoop\persist\flow-launcher\UserData\Settings\History.json
+    TopMostRecord.json: ~\Dev\Scoop\persist\flow-launcher\UserData\Settings\TopMostRecord.json
+    UserSelectedRecord.json: ~\Dev\Scoop\persist\flow-launcher\UserData\Settings\UserSelectedRecord.json
+    Plugins: ~\Dev\Scoop\persist\flow-launcher\UserData\Settings\Plugins
