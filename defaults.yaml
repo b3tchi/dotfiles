@@ -1,0 +1,7 @@
+windows:
+  installs:
+{{ #if (eq whoami.username 'lego\\czjabeck') }}
+    cmd: echo x {{ config.variables.testvar1 }} x
+{{ else }}
+    cmd: echo y{{ to_upper_case config.variables.testvar2 }}y
+{{ /if }}

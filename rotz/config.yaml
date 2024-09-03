@@ -1,0 +1,3 @@
+variables:
+  testvar1: test1
+  testvar2: test2
