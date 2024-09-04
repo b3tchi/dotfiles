@@ -5,3 +5,4 @@ resources/
 raspberry/pi_image/
 nvim/test_*
 flow-launcher/Plugins/*/*.json.bak
+power-toys/**/Logs
