@@ -3,7 +3,7 @@ windows:
     config.nu: ~/AppData/Roaming/nushell/config.nu
     env.nu: ~/AppData/Roaming/nushell/env.nu
     scripts: ~/AppData/Roaming/nushell/scripts
-    # apps: ~/AppData/Roaming/nushell/apps
+    apps: ~/AppData/Roaming/nushell/apps
   
   installs: winget install nushell
 
@@ -12,4 +12,4 @@ linux:
     config.nu: ~/.config/nushell/config.nu
     env.nu: ~/.config/nushell/env.nu
     scripts: ~/.config/nushell/scripts
-    # apps: ~/.config/nushell/apps
+    apps: ~/.config/nushell/apps

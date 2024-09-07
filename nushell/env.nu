@@ -69,23 +69,22 @@ $env.ENV_CONVERSIONS = {
 }
 
 #filter out native paths
-if $nu.os-info.name == "windows" {
-    $env.Path = ($env.Path | split row (char esep) | sort | uniq 
-    | filter {|x| $x !~ '\\Program Files\\PowerShell\\7' }
-    | filter {|x| $x !~ '\\Program Files\\Microsoft VS Code' }
-    | filter {|x| $x !~ '\\Program Files\\nodejs' }
-    | filter {|x| $x !~ '\\Program Files\\dotnet' }
-    )
-}
+# if $nu.os-info.name == "windows" {
+#     $env.Path = ($env.Path | split row (char esep) | sort | uniq 
+#     | filter {|x| $x !~ '\\Program Files\\PowerShell\\7' }
+#     | filter {|x| $x !~ '\\Program Files\\Microsoft VS Code' }
+#     | filter {|x| $x !~ '\\Program Files\\nodejs' }
+#     | filter {|x| $x !~ '\\Program Files\\dotnet' }
+#     )
+# }
 
 
 # Directories to search for scripts when calling source or use
 $env.NU_LIB_DIRS = [ 
-	($nu.default-config-dir | path join 'apps') 
-	($nu.default-config-dir | path join 'scripts') 
-]
+    ($nu.default-config-dir | path join 'apps') 
+    ($nu.default-config-dir | path join 'scripts') 
+    ]
 
-source starship.nu
 
 # Directories to search for plugin binaries when calling register
 $env.NU_PLUGIN_DIRS = [

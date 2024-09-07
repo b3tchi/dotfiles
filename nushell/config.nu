@@ -280,7 +280,7 @@ $env.config = {
     bracketed_paste: true # enable bracketed paste, currently useless on windows
     edit_mode: vi # emacs, vi
     # shell_integration: false # enables terminal shell integration. Off by default, as some terminals have issues with this.
-    render_right_prompt_on_last_line: false # true or false to enable or disable right prompt to be rendered on last line of the prompt.
+    render_right_prompt_on_last_line: true # true or false to enable or disable right prompt to be rendered on last line of the prompt.
 
     hooks: {
         pre_prompt: [{ null }] # run before the prompt is shown
@@ -645,4 +645,24 @@ $env.config = {
             event: {edit: moveleft}
         }
     ]
+}
+
+if ( which startship | is-not-empty ) {
+	source starship.nu
+}
+if ( which lazygit | is-not-empty ) {
+	alias lg = lazygit
+}
+if ( which lf | is-not-empty ) {
+	def --env --wrapped lfcd [...args:string] {
+		cd (lf -print-last-dir ...$args)
+	}
+}
+if ( which carapace | is-not-empty ) {
+	source carapace.nu
+}
+if ( which vifm | is-not-empty ) {
+	def --env --wrapped lfcd [...args:string] {
+		cd (lf -print-last-dir ...$args)
+	}
 }
