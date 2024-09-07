@@ -36,7 +36,7 @@
     "alwaysShowTabs": false,
     "copyFormatting": "none",
     "copyOnSelect": true,
-    "defaultProfile": "{2d118518-d5df-4273-be77-bddbdf3785bd}",
+    "defaultProfile": "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
     "disableAnimations": true,
     "experimental.rendering.software": true,
     "newTabMenu": 
@@ -78,40 +78,11 @@
                 "source": "Windows.Terminal.Azure"
             },
             {
-                "colorScheme": "Campbell",
-                "font": 
-                {
-                    "face": "IosevkaTerm Nerd Font Mono",
-                    "size": 12.0,
-                    "weight": "normal"
-                },
-                "guid": "{07b52e3e-de2c-5db4-bd2d-ba144ed6c273}",
-                "hidden": false,
-                "name": "Ubuntu-20.04",
-                "opacity": 68,
-                "padding": "0",
-                "scrollbarState": "hidden",
-                "source": "Windows.Terminal.Wsl",
-                "startingDirectory": "~",
-                "useAcrylic": true
-            },
-            {
+                "commandline": "%UserProfile%\\scoop\\shims\\pwsh.exe",
                 "guid": "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
                 "hidden": false,
-                "name": "PowerShell-7",
+                "name": "pwsh-scoop",
                 "source": "Windows.Terminal.PowershellCore"
-            },
-            {
-                "guid": "{4dd1e689-b517-5f39-947d-78e8a8bdf958}",
-                "hidden": false,
-                "name": "Ubuntu 20.04.6 LTS",
-                "source": "CanonicalGroupLimited.Ubuntu20.04LTS_79rhkp1fndgsc"
-            },
-            {
-                "guid": "{58ad8b0c-3ef8-5f4d-bc6f-13e4c00f2530}",
-                "hidden": false,
-                "name": "Debian",
-                "source": "Windows.Terminal.Wsl"
             },
             {
                 "guid": "{51855cb2-8cce-5362-8f54-464b92b32386}",
@@ -120,33 +91,11 @@
                 "source": "CanonicalGroupLimited.Ubuntu_79rhkp1fndgsc"
             },
             {
-                "colorScheme": "One Half Dark",
-                "commandline": "C:\\Users\\czjabeck\\Dev\\Scoop\\apps\\pwsh\\current\\pwsh.exe",
-                "experimental.retroTerminalEffect": false,
-                "guid": "{2d118518-d5df-4273-be77-bddbdf3785bd}",
-                "hidden": false,
-                "icon": "C:\\Users\\czjabeck\\Dev\\Scoop\\apps\\pwsh\\current\\pwsh.exe",
-                "name": "pwsh-scoop",
-                "startingDirectory": "%USERPROFILE%"
-            },
-            {
-                "commandline": "C:\\Users\\czjabeck\\Dev\\Scoop\\apps\\nu\\current\\nu.exe",
+                "commandline": "%UserProfile%\\scoop\\apps\\nu\\current\\nu.exe",
                 "guid": "{ed98cd0f-1b45-4e3f-b84a-d0cf0d8f13a4}",
                 "hidden": false,
-                "icon": "C:\\Users\\czjabeck\\Dev\\Scoop\\apps\\nu\\current\\nu.exe",
+                "icon": "%UserProfile%\\scoop\\apps\\nu\\current\\nu.exe",
                 "name": "nushell"
-            },
-            {
-                "guid": "{9918e48a-ed5d-5262-850c-e1c3962739ee}",
-                "hidden": false,
-                "name": "Ubuntu-mssql",
-                "source": "Windows.Terminal.Wsl"
-            },
-            {
-                "guid": "{64b4dcff-1d2b-5dfe-93c3-da6ff1ab026f}",
-                "hidden": false,
-                "name": "Ubuntu-zmk",
-                "source": "Windows.Terminal.Wsl"
             }
         ]
     },

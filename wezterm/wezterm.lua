@@ -1,4 +1,4 @@
-local wezterm = require 'wezterm';
+local wezterm = require("wezterm")
 local mux = wezterm.mux
 
 local wsl_domains
@@ -8,36 +8,31 @@ local font_locator
 local font
 
 if wezterm.target_triple == "x86_64-pc-windows-msvc" then
+	wsl_domains = wezterm.default_wsl_domains()
 
-    wsl_domains = wezterm.default_wsl_domains()
-
---    wsl_domains = {
---        {
---            name = 'wsl',
---            distribution = 'Ubuntu-20.04',
---            default_cwd = "~",
---        }
---    }
-
+	--    wsl_domains = {
+	--        {
+	--            name = 'wsl',
+	--            distribution = 'Ubuntu-20.04',
+	--            default_cwd = "~",
+	--        }
+	--    }
 
 	for idx, dom in ipairs(wsl_domains) do
-	  if dom.name == 'WSL:Ubuntu-20.04' then
-	    dom.default_prog = { 'nu' }
-	  end
+		if dom.name == "WSL:Ubuntu-20.04" then
+			dom.default_prog = { "nu" }
+		end
 	end
 
---    default_domain = "WSL:Ubuntu-20.04"
-    default_domain = "local"
+	--    default_domain = "WSL:Ubuntu-20.04"
+	default_domain = "local"
 
-        --FONTS
-    font_dirs = {"fonts"}
-    font_locator = "ConfigDirsOnly"
-    font = wezterm.font("Iosevka Nerd Font Mono")
-
+	--FONTS
+	font_dirs = { "fonts" }
+	font = wezterm.font("Iosevka Nerd Font Mono")
 else
-    font_dirs = {}
-    font_locator = ""
-
+	font_dirs = {}
+	font_locator = ""
 end
 
 -- wezterm.on('gui-startup', function(cmd)
@@ -46,7 +41,7 @@ end
 --     if cmd then
 --       args = cmd.args
 --     end
-  
+
 --     -- Set a workspace for coding on a current project
 --     -- Top pane is for the editor, bottom pane is for the build tool
 --     -- local project_dir = wezterm.home_dir .. '/wezterm'
@@ -67,35 +62,35 @@ end
 -- end)
 
 return {
-    --WSL
-    -- default_domain = default_domain,
-    -- wsl_domains = wsl_domains,
+	--WSL
+	-- default_domain = default_domain,
+	-- wsl_domains = wsl_domains,
 
-    --WINDOW CONFIG
-    enable_tab_bar = false,
-    enable_scroll_bar = false,
-    window_padding = {
-        left = 0,
-        right = 0,
-        top = 0,
-        bottom = 0,
-    },
+	--WINDOW CONFIG
+	enable_tab_bar = false,
+	enable_scroll_bar = false,
+	window_padding = {
+		left = 0,
+		right = 0,
+		top = 0,
+		bottom = 0,
+	},
 
-    --FONT
-    font_dirs = font_dirs,
-    font_locator = font_locator,
-    font = font,
+	--FONT
+	font_dirs = font_dirs,
+	font_locator = font_locator,
+	font = font,
 
-    --COLORSCHEME
-    --color_scheme = "Gruvbox Dark",
-    color_scheme = "tokionight",
+	--COLORSCHEME
+	--color_scheme = "Gruvbox Dark",
+	color_scheme = "tokionight",
 
-    --MUX Testing
-    -- exit_behavior= "Hold",
-    -- default_prog = { 'nu' }
-    default_prog = { 'nu' }
-    --KEYS
-    --[[keys = {
+	--MUX Testing
+	-- exit_behavior= "Hold",
+	-- default_prog = { 'nu' }
+	default_prog = { "nu" },
+	--KEYS
+	--[[keys = {
         {
             key = 'c',
             mods = 'CTRL',
