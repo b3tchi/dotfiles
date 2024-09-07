@@ -7,7 +7,7 @@ windows:
       - ~/Documents/WindowsPowershell/powershell.config.json
       - ~/Documents/Powershell/powershell.config.json
 
-  # installs: winget install Microsoft.PowerShell
+  installs: winget install Microsoft.PowerShell
 
 # linux|darwin:
 #   links:

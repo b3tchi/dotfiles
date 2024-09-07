@@ -4,10 +4,6 @@
     "actions": 
     [
         {
-            "command": "find",
-            "keys": "ctrl+shift+f"
-        },
-        {
             "command": 
             {
                 "action": "splitPane",
@@ -17,16 +13,20 @@
             "keys": "alt+shift+d"
         },
         {
+            "command": "find",
+            "keys": "ctrl+shift+f"
+        },
+        {
+            "command": "unbound",
+            "keys": "ctrl+v"
+        },
+        {
             "command": 
             {
                 "action": "copy",
                 "singleLine": false
             },
             "keys": "ctrl+c"
-        },
-        {
-            "command": "unbound",
-            "keys": "ctrl+v"
         },
         {
             "command": "paste"
@@ -78,24 +78,23 @@
                 "source": "Windows.Terminal.Azure"
             },
             {
-                "commandline": "%UserProfile%\\scoop\\shims\\pwsh.exe",
-                "guid": "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
-                "hidden": false,
-                "name": "pwsh-scoop",
-                "source": "Windows.Terminal.PowershellCore"
-            },
-            {
                 "guid": "{51855cb2-8cce-5362-8f54-464b92b32386}",
                 "hidden": false,
                 "name": "Ubuntu",
                 "source": "CanonicalGroupLimited.Ubuntu_79rhkp1fndgsc"
             },
             {
-                "commandline": "%UserProfile%\\scoop\\apps\\nu\\current\\nu.exe",
-                "guid": "{ed98cd0f-1b45-4e3f-b84a-d0cf0d8f13a4}",
+                "commandline": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+                "guid": "{d1f305b7-0bd9-40a1-80bc-ee50609463c6}",
                 "hidden": false,
-                "icon": "%UserProfile%\\scoop\\apps\\nu\\current\\nu.exe",
-                "name": "nushell"
+                "icon": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+                "name": "pwsh"
+            },
+            {
+                "guid": "{47302f9c-1ac4-566c-aa3e-8cf29889d6ab}",
+                "hidden": false,
+                "name": "Nushell",
+                "source": "nu"
             }
         ]
     },
