@@ -6,6 +6,8 @@ windows:
     _myfxs: ~\AppData\Local\nvim-data\myfxs
     _wzor: ~\AppData\Local\nvim-data\wzor
 
+  installs: winget install Neovim.Neovim
+
 linux:
   links:
     init.lua: ~\.config\nvim\init.lua

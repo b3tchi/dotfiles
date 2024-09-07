@@ -1,2 +1,5 @@
-links:
-  wezterm.lua: ~\.config\wezterm\wezterm.lua
+windows:
+  links:
+    wezterm.lua: ~\.config\wezterm\wezterm.lua
+
+  installs: winget install wez.wezterm
