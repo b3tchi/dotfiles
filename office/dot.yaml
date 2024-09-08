@@ -1,0 +1,13 @@
+windows:
+  links:
+    Access.officeUI: ~/AppData/Local/Microsoft/Office/Access.officeUI
+    Excel.officeUI: ~/AppData/Local/Microsoft/Office/Excel.officeUI
+    PowerPoint.officeUI: ~/AppData/Local/Microsoft/Office/PowerPoint.officeUI
+    Word.officeUI: ~/AppData/Local/Microsoft/Office/Word.officeUI
+    olkapptitem.officeUI: ~/AppData/Local/Microsoft/Office/olkapptitem.officeUI
+    olkexplorer.officeUI: ~/AppData/Local/Microsoft/Office/olkexplorer.officeUI
+    olkmailitem.officeUI: ~/AppData/Local/Microsoft/Office/olkmailitem.officeUI
+    olktaskitem.officeUI: ~/AppData/Local/Microsoft/Office/olktaskitem.officeUI
+  
+  installs: winget install Microsoft.Office
+
