@@ -171,9 +171,9 @@ let light_theme = {
 }
 
 # External completer example
-let carapace_completer = {|spans|
-    carapace $spans.0 nushell $spans | from json
-}
+# let carapace_completer = {|spans|
+    # carapace $spans.0 nushell $spans | from json
+# }
 
 
 # The default config record. This is where much of your global configuration is setup.
@@ -646,23 +646,18 @@ $env.config = {
         }
     ]
 }
+#Applications parts
 
-if ( which startship | is-not-empty ) {
-	source starship.nu
-}
-if ( which lazygit | is-not-empty ) {
-	alias lg = lazygit
-}
-if ( which lf | is-not-empty ) {
-	def --env --wrapped lfcd [...args:string] {
-		cd (lf -print-last-dir ...$args)
-	}
-}
-if ( which carapace | is-not-empty ) {
-	source carapace.nu
-}
-if ( which vifm | is-not-empty ) {
-	def --env --wrapped lfcd [...args:string] {
-		cd (lf -print-last-dir ...$args)
-	}
+# starship
+source starship.nu
+
+# carapace
+source carapace.nu
+
+# lazygit
+alias lg = lazygit
+
+# lf
+def --env --wrapped lfcd [...args:string] {
+	cd (lf -print-last-dir ...$args)
 }
