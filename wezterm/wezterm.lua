@@ -28,13 +28,15 @@ if wezterm.target_triple == "x86_64-pc-windows-msvc" then
 	default_domain = "local"
 
 	--FONTS
-	font_dirs = { "fonts" }
-	font = wezterm.font("Iosevka Nerd Font Mono")
-else
-	font_dirs = {}
-	font_locator = ""
+	-- font_dirs = { "fonts" }
+	-- else
+	-- font_dirs = {}
+	-- font_locator = ""
 end
 
+-- font_dirs = {}
+-- font_locator = ""
+font = wezterm.font("Iosevka Nerd Font Mono")
 -- wezterm.on('gui-startup', function(cmd)
 
 --     local args = {}
@@ -77,8 +79,8 @@ return {
 	},
 
 	--FONT
-	font_dirs = font_dirs,
-	font_locator = font_locator,
+	-- font_dirs = font_dirs,
+	-- font_locator = font_locator,
 	font = font,
 
 	--COLORSCHEME

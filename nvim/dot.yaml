@@ -10,8 +10,8 @@ windows:
 
 linux:
   links:
-    init.lua: ~\.config\nvim\init.lua
-    config: ~\.config\nvim\lua\config
-    plugins: ~\.config\nvim\lua\plugins
-    _myfxs: ~\.config\nvim-data\myfxs
-    _wzor: ~\.config\nvim-data\wzor
+    init.lua: ~/.config/nvim/init.lua
+    config: ~/.config/nvim/lua/config
+    plugins: ~/.config/nvim/lua/plugins
+    _myfxs: ~/.config/nvim-data/myfxs
+    _wzor: ~/.config/nvim-data/wzor

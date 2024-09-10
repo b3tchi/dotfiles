@@ -3,3 +3,7 @@ windows:
     wezterm.lua: ~\.config\wezterm\wezterm.lua
 
   installs: winget install wez.wezterm
+
+linux:
+  links:
+    wezterm.lua: ~/.config/wezterm/wezterm.lua
