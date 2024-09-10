@@ -7,11 +7,6 @@ module gwt {
         email: beckaja1@gmail.com
         domain: github.com
       }
-      ,lego: {
-        user: jan-becka
-        email: janbecka@lego.com
-        domain: github.com
-      }
     }
   }
 
