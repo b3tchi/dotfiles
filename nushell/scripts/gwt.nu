@@ -170,6 +170,7 @@ module gwt {
   # register user ssh token
   export def 'user register' [
       profile:string@profiles # select which profile to register
+      --ssh-path:string #already existing registered git registered key
     ] {
 
     let domain = (vars $profile domain)
@@ -183,19 +184,28 @@ module gwt {
     }
 
     let stamp = date now | format date %y%m%d
-    let os = (sys).host.name
-    let host = (sys).host.hostname
+    let os = (sys host).name
+    let host = (sys host).hostname
     let coding = 'ed25519'
 
     let uniq_name = [$stamp $user $host $os $coding ] | str join '_'
 
     let root_path = ( if $nu.os-info.name == "windows" { $env.USERPROFILE } else { $env.HOME } )
-    let file = $root_path | path join .ssh $uniq_name
+    let file = (if ( $ssh_path | is-empty ) { $root_path | path join .ssh $uniq_name } else { $ssh_path | path expand })
+    print $file
+    
+    if ($ssh_path | is-empty) {
+      ssh-keygen -t $coding -C $email -f $file -N ''
+      gh ssh-key add $"($file).pub" --title $uniq_name
+    }
 
-    ssh-keygen -t $coding -C $email -f $file -N ''
-    gh ssh-key add $"($file).pub" --title $uniq_name
+    #saving global
+    "Include config.d/*" | save --force ($root_path | path join .ssh config)
 
+    #saving local file
     let config_dir = $root_path | path join .ssh config.d
+    mkdir $config_dir
+
     let config_file = $config_dir | path join ( [$domain $user] | str join '-' )
     let config = $"Host ($domain)-($user)
       HostName ($domain)
@@ -205,80 +215,80 @@ module gwt {
     $config | save --force $config_file
   }
 
-  def origin_branches [ 
-    ] {
-    git ls-remote --heads origin | from tsv --noheaders | get column2 | each { |it| ($it | str replace 'refs/heads/' '')}
-  }
+	def origin_branches [ 
+		] {
+		git ls-remote --heads origin | from tsv --noheaders | get column2 | each { |it| ($it | str replace 'refs/heads/' '')}
+	}
   # create new branch
-  export def 'branch create' [
-      name:string #new branch name
-      from:string@origin_branches #select from branch
-      --path:string #repository root path
-    ] {
+	export def 'branch create' [
+			name:string #new branch name
+			from:string@origin_branches #select from branch
+			--path:string #repository root path
+		] {
 
-    let path = (if $path == null { $env.PWD })
-    let git_dir = git worktree list 
-      | split row -r '\n' 
-        | where $it =~ '(bare)' 
-        | str replace -r default.* ''
+		let path = (if $path == null { $env.PWD })
+		let git_dir = git worktree list 
+			| split row -r '\n' 
+			| where $it =~ '(bare)' 
+			| str replace -r default.* ''
 
-    if (($git_dir | path exists) == false) {
-      print "this in working from only from branch directory"
-      return
-    }
-    let confirmation = ( [ok cancel] | input list $"create new branch ($name) from branch ($from)?" ) 
+		if (($git_dir | path exists) == false) {
+			print "this in working from only from branch directory"
+			return
+		}
+		let confirmation = ( [ok cancel] | input list $"create new branch ($name) from branch ($from)?" ) 
 
-    if $confirmation == cancel { 
-      return
-    }
+		if $confirmation == cancel { 
+			return
+		}
 
-    # git worktree list | from tsv --noheaders | get column2 | each { |it| ($it | str replace 'refs/heads/' '')}
+# git worktree list | from tsv --noheaders | get column2 | each { |it| ($it | str replace 'refs/heads/' '')}
 
-    let repo_path = $path | path dirname
-    let branch_path =  $repo_path | path join $name
+		let repo_path = $path | path dirname
+		let branch_path =  $repo_path | path join $name
 
-    if ($branch_path | path exists) == true {
-      print $"location with branch exists ($branch_path)"
-      return
-    }
+		if ($branch_path | path exists) == true {
+			print $"location with branch exists ($branch_path)"
+			return
+		}
 
-    mkdir $branch_path
+		mkdir $branch_path
 
-    git worktree add -b $name $branch_path $"origin/($from)"
-    cd $branch_path
-    git push -u origin $name
-    # git branch switch --name $name
-  }
+		git worktree add -b $name $branch_path $"origin/($from)"
+		cd $branch_path
+		git push -u origin $name
+# git branch switch --name $name
+	}
 
-  def local_branches [ 
-    ] {
-    # git worktree list | from tsv --noheaders | get column2 | each { |it| ($it | str replace 'refs/heads/' '')}
-    git worktree list | split row -r '\n' | where $it !~ '(bare)' | str replace -r '.*\[' '' | str replace  -r '\]' ''
-  }
+	def local_branches [ 
+		] {
+# git worktree list | from tsv --noheaders | get column2 | each { |it| ($it | str replace 'refs/heads/' '')}
+		git worktree list | split row -r '\n' | where $it !~ '(bare)' | str replace -r '.*\[' '' | str replace  -r '\]' ''
+	}
 
-  export def 'branch remove' [
-      name:string@local_branches #select from branch
-    ] {
+	export def 'branch remove' [
+			name:string@local_branches #select from branch
+		] {
 
-    # let git_dir = ($path | path join .. default)
-    let git_dir = git worktree list 
-      | split row -r '\n' 
-        | where $it =~ '(bare)' 
-        | str replace -r default.* ''
+# let git_dir = ($path | path join .. default)
+		let git_dir = git worktree list 
+			| split row -r '\n' 
+			| where $it =~ '(bare)' 
+			| str replace -r default.* ''
 
-    if ($git_dir | path exists) == false {
-      print "this in working from only from branch directory"
-      return
-    }
+		if ($git_dir | path exists) == false {
+			print "this in working from only from branch directory"
+			return
+		}
 
-    let confirmation = ( [ok cancel] | input list $"remove local branch ($name) from repository?" )
+		let confirmation = ( [ok cancel] | input list $"remove local branch ($name) from repository?" )
 
-    if $confirmation == cancel { 
-      return
-    }
+		if $confirmation == cancel { 
+			return
+		}
 
-    git worktree remove --force $name
-  }
+		git worktree remove --force $name
+	}
 
   #link branch from origin
   export def 'branch link' [
