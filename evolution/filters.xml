@@ -119,6 +119,22 @@
       </actionset>
     </rule>
     <rule enabled="true" grouping="all" source="incoming" account-uid="363b33e0d5ddbbe3bb6c38476bfb3dd24e102135">
+      <title>News By Contacts Group</title>
+      <partset>
+        <part name="addressbook">
+          <value name="book" type="option" value="4772121022282fb39f28b2ddeb63e65e895c3e79"/>
+          <value name="compare-type" type="option" value="contains-sender"/>
+        </part>
+      </partset>
+      <actionset>
+        <part name="move-to-folder">
+          <value name="folder" type="folder">
+            <folder uri="folder://363b33e0d5ddbbe3bb6c38476bfb3dd24e102135/News"/>
+          </value>
+        </part>
+      </actionset>
+    </rule>
+    <rule enabled="true" grouping="all" source="incoming" account-uid="363b33e0d5ddbbe3bb6c38476bfb3dd24e102135">
       <title>News By Subject is Recommended for CZ</title>
       <partset>
         <part name="subject">
@@ -136,12 +152,50 @@
         </part>
       </actionset>
     </rule>
-    <rule enabled="true" grouping="all" source="incoming" account-uid="363b33e0d5ddbbe3bb6c38476bfb3dd24e102135">
-      <title>News By Contacts Group</title>
+    <rule enabled="true" grouping="all" source="incoming">
+      <title>News By from LEGO&#xAE; News</title>
       <partset>
-        <part name="addressbook">
-          <value name="book" type="option" value="4772121022282fb39f28b2ddeb63e65e895c3e79"/>
-          <value name="compare-type" type="option" value="contains-sender"/>
+        <part name="sender">
+          <value name="sender-type" type="option" value="contains"/>
+          <value name="sender" type="string" allow-empty="false">
+            <string>Noreply@e.crm.lego.com</string>
+          </value>
+        </part>
+      </partset>
+      <actionset>
+        <part name="move-to-folder">
+          <value name="folder" type="folder">
+            <folder uri="folder://363b33e0d5ddbbe3bb6c38476bfb3dd24e102135/News"/>
+          </value>
+        </part>
+      </actionset>
+    </rule>
+    <rule enabled="true" grouping="any" source="incoming">
+      <title>News By Microsoft</title>
+      <partset>
+        <part name="sender">
+          <value name="sender-type" type="option" value="contains"/>
+          <value name="sender" type="string" allow-empty="false">
+            <string>Azure@promomail.microsoft.com</string>
+          </value>
+        </part>
+        <part name="sender">
+          <value name="sender-type" type="option" value="contains"/>
+          <value name="sender" type="string" allow-empty="false">
+            <string>Azure@mails.microsoft.com</string>
+          </value>
+        </part>
+        <part name="sender">
+          <value name="sender-type" type="option" value="contains"/>
+          <value name="sender" type="string" allow-empty="false">
+            <string>MicrosoftTechCommunity@us.khoros-mail.com</string>
+          </value>
+        </part>
+        <part name="sender">
+          <value name="sender-type" type="option" value="contains"/>
+          <value name="sender" type="string" allow-empty="false">
+            <string>PowerPlat-noreply@microsoft.com</string>
+          </value>
         </part>
       </partset>
       <actionset>

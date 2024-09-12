@@ -1,0 +1,31 @@
+[Data Source]
+DisplayName=skola-sofi
+Enabled=true
+Parent=7c4a8a6f2423a67fd0e140446cd5823ef65dd7ff
+
+[Mail Account]
+BackendName=ews
+IdentityUid=4ac4619504424948c98f6f11a9aa61bc20c4544c
+ArchiveFolder=
+NeedsInitialSetup=false
+MarkSeen=inconsistent
+MarkSeenTimeout=1500
+Builtin=false
+
+[Refresh]
+Enabled=true
+EnabledOnMeteredNetwork=true
+IntervalMinutes=60
+
+[Exchange Web Services Folder]
+ChangeKey=
+Id=
+Foreign=false
+ForeignSubfolders=false
+ForeignMail=
+FreebusyWeeksBefore=1
+FreebusyWeeksAfter=5
+Name=
+Public=false
+UsePrimaryAddress=false
+FetchGalPhotos=true

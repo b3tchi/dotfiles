@@ -1,0 +1,42 @@
+[Data Source]
+DisplayName=skola-sofi
+Enabled=true
+Parent=7c4a8a6f2423a67fd0e140446cd5823ef65dd7ff
+
+[Mail Submission]
+SentFolder=folder://6861fe67d0e7a6d8d994ac559db2caf193504f8a/Sent%20Items
+TransportUid=0875bbf12fd7fb1b59e5d6e8430758c5685fece0
+RepliesToOriginFolder=false
+UseSentFolder=true
+
+[Mail Composition]
+Bcc=
+Cc=
+DraftsFolder=folder://6861fe67d0e7a6d8d994ac559db2caf193504f8a/Drafts
+ReplyStyle=default
+SignImip=true
+TemplatesFolder=folder://local/Templates
+StartBottom=inconsistent
+TopSignature=inconsistent
+Language=
+
+[Mail Identity]
+Address=r23302b@rodic-zs-ns2.cz
+Aliases=
+Name=Jan Becka
+Organization=
+ReplyTo=
+SignatureUid=none
+
+[Exchange Web Services Folder]
+ChangeKey=
+Id=
+Foreign=false
+ForeignSubfolders=false
+ForeignMail=
+FreebusyWeeksBefore=1
+FreebusyWeeksAfter=5
+Name=
+Public=false
+UsePrimaryAddress=false
+FetchGalPhotos=true
