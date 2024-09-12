@@ -1,0 +1,42 @@
+[Data Source]
+DisplayName=beckaja1@outlook.com
+Enabled=true
+Parent=739b74b3e159183d806716a404ed9ecddf4b0c21
+
+[Mail Submission]
+SentFolder=folder://363b33e0d5ddbbe3bb6c38476bfb3dd24e102135/Sent%20Items
+TransportUid=2ec4f9e99891bc7592ab0c20180f3ddf9a8f0bfc
+RepliesToOriginFolder=false
+UseSentFolder=true
+
+[Mail Composition]
+Bcc=
+Cc=
+DraftsFolder=folder://363b33e0d5ddbbe3bb6c38476bfb3dd24e102135/Drafts
+ReplyStyle=default
+SignImip=true
+TemplatesFolder=folder://local/Templates
+StartBottom=inconsistent
+TopSignature=inconsistent
+Language=
+
+[Mail Identity]
+Address=beckaja1@outlook.com
+Aliases=
+Name=Jan Becka
+Organization=
+ReplyTo=
+SignatureUid=none
+
+[Exchange Web Services Folder]
+ChangeKey=
+Id=
+Foreign=false
+ForeignSubfolders=false
+ForeignMail=
+FreebusyWeeksBefore=1
+FreebusyWeeksAfter=5
+Name=
+Public=false
+UsePrimaryAddress=false
+FetchGalPhotos=true

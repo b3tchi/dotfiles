@@ -1,6 +1,6 @@
 [Data Source]
 DisplayName=News and Blogs
-Enabled=false
+Enabled=true
 Parent=
 
 [Mail Account]

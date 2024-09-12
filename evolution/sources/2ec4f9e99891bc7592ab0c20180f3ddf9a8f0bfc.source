@@ -1,0 +1,7 @@
+[Data Source]
+DisplayName=beckaja1@outlook.com
+Enabled=true
+Parent=739b74b3e159183d806716a404ed9ecddf4b0c21
+
+[Mail Transport]
+BackendName=ews
