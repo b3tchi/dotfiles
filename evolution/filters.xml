@@ -1,23 +1,23 @@
 <?xml version="1.0"?>
 <filteroptions>
   <ruleset>
-    <rule enabled="true" grouping="all" source="incoming">
+    <rule enabled="true" grouping="all" source="incoming" account-uid="363b33e0d5ddbbe3bb6c38476bfb3dd24e102135">
       <title>Uctenky by Contacts Group</title>
       <partset>
         <part name="addressbook">
-          <value name="book" type="option" value="f2a4af7b3fead38785fc8d0bf144cafdbd24d0d6"/>
+          <value name="book" type="option" value="9431a1cc472c9c7002aca1c1cf3e144fa4fcc91c"/>
           <value name="compare-type" type="option" value="contains-sender"/>
         </part>
       </partset>
       <actionset>
         <part name="move-to-folder">
           <value name="folder" type="folder">
-            <folder uri="folder://93f7d10f32bfa55aff7abb6b867792b16d2c34d3/Archive/Uctenky"/>
+            <folder uri="folder://363b33e0d5ddbbe3bb6c38476bfb3dd24e102135/Archive/Uctenky"/>
           </value>
         </part>
       </actionset>
     </rule>
-    <rule enabled="true" grouping="all" source="incoming">
+    <rule enabled="true" grouping="all" source="incoming" account-uid="363b33e0d5ddbbe3bb6c38476bfb3dd24e102135">
       <title>Uctenky Rohlik Archivace</title>
       <partset>
         <part name="sender">
@@ -36,12 +36,12 @@
       <actionset>
         <part name="move-to-folder">
           <value name="folder" type="folder">
-            <folder uri="folder://93f7d10f32bfa55aff7abb6b867792b16d2c34d3/Archive/Uctenky"/>
+            <folder uri="folder://363b33e0d5ddbbe3bb6c38476bfb3dd24e102135/Archive/Uctenky"/>
           </value>
         </part>
       </actionset>
     </rule>
-    <rule enabled="true" grouping="all" source="incoming">
+    <rule enabled="true" grouping="all" source="incoming" account-uid="363b33e0d5ddbbe3bb6c38476bfb3dd24e102135">
       <title>Uctenky Office365 Archivace</title>
       <partset>
         <part name="subject">
@@ -54,7 +54,7 @@
       <actionset>
         <part name="move-to-folder">
           <value name="folder" type="folder">
-            <folder uri="folder://93f7d10f32bfa55aff7abb6b867792b16d2c34d3/Archive/Uctenky"/>
+            <folder uri="folder://363b33e0d5ddbbe3bb6c38476bfb3dd24e102135/Archive/Uctenky"/>
           </value>
         </part>
         <part name="set-status">
@@ -62,7 +62,7 @@
         </part>
       </actionset>
     </rule>
-    <rule enabled="true" grouping="all" source="incoming">
+    <rule enabled="true" grouping="all" source="incoming" account-uid="363b33e0d5ddbbe3bb6c38476bfb3dd24e102135">
       <title>Uctenky Apple</title>
       <partset>
         <part name="subject">
@@ -81,44 +81,44 @@
       <actionset>
         <part name="move-to-folder">
           <value name="folder" type="folder">
-            <folder uri="folder://93f7d10f32bfa55aff7abb6b867792b16d2c34d3/Archive/Uctenky"/>
+            <folder uri="folder://363b33e0d5ddbbe3bb6c38476bfb3dd24e102135/Archive/Uctenky"/>
           </value>
         </part>
       </actionset>
     </rule>
-    <rule enabled="true" grouping="all" source="incoming">
+    <rule enabled="true" grouping="all" source="incoming" account-uid="363b33e0d5ddbbe3bb6c38476bfb3dd24e102135">
       <title>Security By Contacts Group</title>
       <partset>
         <part name="addressbook">
-          <value name="book" type="option" value="749ac05b2705abd3ba51b6be0a70bc1af0f3c60c"/>
+          <value name="book" type="option" value="4b3afd70c02b8a7934515bbce767a3b1be149b3b"/>
           <value name="compare-type" type="option" value="contains-sender"/>
         </part>
       </partset>
       <actionset>
         <part name="move-to-folder">
           <value name="folder" type="folder">
-            <folder uri="folder://93f7d10f32bfa55aff7abb6b867792b16d2c34d3/Archive/Security"/>
+            <folder uri="folder://363b33e0d5ddbbe3bb6c38476bfb3dd24e102135/Archive/Security"/>
           </value>
         </part>
       </actionset>
     </rule>
-    <rule enabled="true" grouping="all" source="incoming" account-uid="93f7d10f32bfa55aff7abb6b867792b16d2c34d3">
+    <rule enabled="true" grouping="all" source="incoming" account-uid="363b33e0d5ddbbe3bb6c38476bfb3dd24e102135">
       <title>Personal</title>
       <partset>
         <part name="addressbook">
-          <value name="book" type="option" value="626cbd9c469e6861534f6c03a144c3bc041a49fd"/>
+          <value name="book" type="option" value="7a1e314f4517123d14980cf6c79301e4ce9ebd9b"/>
           <value name="compare-type" type="option" value="contains-sender"/>
         </part>
       </partset>
       <actionset>
         <part name="move-to-folder">
           <value name="folder" type="folder">
-            <folder uri="folder://93f7d10f32bfa55aff7abb6b867792b16d2c34d3/Personal"/>
+            <folder uri="folder://363b33e0d5ddbbe3bb6c38476bfb3dd24e102135/Personal"/>
           </value>
         </part>
       </actionset>
     </rule>
-    <rule enabled="true" grouping="all" source="incoming">
+    <rule enabled="true" grouping="all" source="incoming" account-uid="363b33e0d5ddbbe3bb6c38476bfb3dd24e102135">
       <title>News By Subject is Recommended for CZ</title>
       <partset>
         <part name="subject">
@@ -131,23 +131,23 @@
       <actionset>
         <part name="move-to-folder">
           <value name="folder" type="folder">
-            <folder uri="folder://93f7d10f32bfa55aff7abb6b867792b16d2c34d3/News"/>
+            <folder uri="folder://363b33e0d5ddbbe3bb6c38476bfb3dd24e102135/News"/>
           </value>
         </part>
       </actionset>
     </rule>
-    <rule enabled="true" grouping="all" source="incoming" account-uid="93f7d10f32bfa55aff7abb6b867792b16d2c34d3">
+    <rule enabled="true" grouping="all" source="incoming" account-uid="363b33e0d5ddbbe3bb6c38476bfb3dd24e102135">
       <title>News By Contacts Group</title>
       <partset>
         <part name="addressbook">
-          <value name="book" type="option" value="03351f33939a1d304769914d8112dda93175c2e5"/>
+          <value name="book" type="option" value="4772121022282fb39f28b2ddeb63e65e895c3e79"/>
           <value name="compare-type" type="option" value="contains-sender"/>
         </part>
       </partset>
       <actionset>
         <part name="move-to-folder">
           <value name="folder" type="folder">
-            <folder uri="folder://93f7d10f32bfa55aff7abb6b867792b16d2c34d3/News"/>
+            <folder uri="folder://363b33e0d5ddbbe3bb6c38476bfb3dd24e102135/News"/>
           </value>
         </part>
       </actionset>
