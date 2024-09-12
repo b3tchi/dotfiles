@@ -1,0 +1,31 @@
+[Data Source]
+DisplayName=beckaja1@outlook.com
+Enabled=false
+Parent=164e51e2db6efe2486e52eaabd29fbb2a9cf8c8d
+
+[Mail Account]
+BackendName=ews
+IdentityUid=e46f561c3c0f1d8d62c530242caf415006143a5a
+ArchiveFolder=
+NeedsInitialSetup=false
+MarkSeen=inconsistent
+MarkSeenTimeout=1500
+Builtin=false
+
+[Refresh]
+Enabled=true
+EnabledOnMeteredNetwork=true
+IntervalMinutes=60
+
+[Exchange Web Services Folder]
+ChangeKey=
+Id=
+Foreign=false
+ForeignSubfolders=false
+ForeignMail=
+FreebusyWeeksBefore=1
+FreebusyWeeksAfter=5
+Name=
+Public=false
+UsePrimaryAddress=false
+FetchGalPhotos=true

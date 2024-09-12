@@ -1,0 +1,156 @@
+<?xml version="1.0"?>
+<filteroptions>
+  <ruleset>
+    <rule enabled="true" grouping="all" source="incoming">
+      <title>Uctenky by Contacts Group</title>
+      <partset>
+        <part name="addressbook">
+          <value name="book" type="option" value="f2a4af7b3fead38785fc8d0bf144cafdbd24d0d6"/>
+          <value name="compare-type" type="option" value="contains-sender"/>
+        </part>
+      </partset>
+      <actionset>
+        <part name="move-to-folder">
+          <value name="folder" type="folder">
+            <folder uri="folder://93f7d10f32bfa55aff7abb6b867792b16d2c34d3/Archive/Uctenky"/>
+          </value>
+        </part>
+      </actionset>
+    </rule>
+    <rule enabled="true" grouping="all" source="incoming">
+      <title>Uctenky Rohlik Archivace</title>
+      <partset>
+        <part name="sender">
+          <value name="sender-type" type="option" value="contains"/>
+          <value name="sender" type="string" allow-empty="false">
+            <string>zakaznici@rohlik.cz</string>
+          </value>
+        </part>
+        <part name="subject">
+          <value name="subject-type" type="option" value="contains"/>
+          <value name="subject" type="string" allow-empty="true">
+            <string>D&#x11B;kujeme za objedn&#xE1;vku</string>
+          </value>
+        </part>
+      </partset>
+      <actionset>
+        <part name="move-to-folder">
+          <value name="folder" type="folder">
+            <folder uri="folder://93f7d10f32bfa55aff7abb6b867792b16d2c34d3/Archive/Uctenky"/>
+          </value>
+        </part>
+      </actionset>
+    </rule>
+    <rule enabled="true" grouping="all" source="incoming">
+      <title>Uctenky Office365 Archivace</title>
+      <partset>
+        <part name="subject">
+          <value name="subject-type" type="option" value="contains"/>
+          <value name="subject" type="string" allow-empty="true">
+            <string>View your Office 365 E3 Developer invoice</string>
+          </value>
+        </part>
+      </partset>
+      <actionset>
+        <part name="move-to-folder">
+          <value name="folder" type="folder">
+            <folder uri="folder://93f7d10f32bfa55aff7abb6b867792b16d2c34d3/Archive/Uctenky"/>
+          </value>
+        </part>
+        <part name="set-status">
+          <value name="flag" type="option" value="Seen"/>
+        </part>
+      </actionset>
+    </rule>
+    <rule enabled="true" grouping="all" source="incoming">
+      <title>Uctenky Apple</title>
+      <partset>
+        <part name="subject">
+          <value name="subject-type" type="option" value="contains"/>
+          <value name="subject" type="string" allow-empty="true">
+            <string>Your invoice from Apple.</string>
+          </value>
+        </part>
+        <part name="sender">
+          <value name="sender-type" type="option" value="is"/>
+          <value name="sender" type="string" allow-empty="false">
+            <string>no_reply@email.apple.com</string>
+          </value>
+        </part>
+      </partset>
+      <actionset>
+        <part name="move-to-folder">
+          <value name="folder" type="folder">
+            <folder uri="folder://93f7d10f32bfa55aff7abb6b867792b16d2c34d3/Archive/Uctenky"/>
+          </value>
+        </part>
+      </actionset>
+    </rule>
+    <rule enabled="true" grouping="all" source="incoming">
+      <title>Security By Contacts Group</title>
+      <partset>
+        <part name="addressbook">
+          <value name="book" type="option" value="749ac05b2705abd3ba51b6be0a70bc1af0f3c60c"/>
+          <value name="compare-type" type="option" value="contains-sender"/>
+        </part>
+      </partset>
+      <actionset>
+        <part name="move-to-folder">
+          <value name="folder" type="folder">
+            <folder uri="folder://93f7d10f32bfa55aff7abb6b867792b16d2c34d3/Archive/Security"/>
+          </value>
+        </part>
+      </actionset>
+    </rule>
+    <rule enabled="true" grouping="all" source="incoming" account-uid="93f7d10f32bfa55aff7abb6b867792b16d2c34d3">
+      <title>Personal</title>
+      <partset>
+        <part name="addressbook">
+          <value name="book" type="option" value="626cbd9c469e6861534f6c03a144c3bc041a49fd"/>
+          <value name="compare-type" type="option" value="contains-sender"/>
+        </part>
+      </partset>
+      <actionset>
+        <part name="move-to-folder">
+          <value name="folder" type="folder">
+            <folder uri="folder://93f7d10f32bfa55aff7abb6b867792b16d2c34d3/Personal"/>
+          </value>
+        </part>
+      </actionset>
+    </rule>
+    <rule enabled="true" grouping="all" source="incoming">
+      <title>News By Subject is Recommended for CZ</title>
+      <partset>
+        <part name="subject">
+          <value name="subject-type" type="option" value="contains"/>
+          <value name="subject" type="string" allow-empty="true">
+            <string>Recommended for CZ</string>
+          </value>
+        </part>
+      </partset>
+      <actionset>
+        <part name="move-to-folder">
+          <value name="folder" type="folder">
+            <folder uri="folder://93f7d10f32bfa55aff7abb6b867792b16d2c34d3/News"/>
+          </value>
+        </part>
+      </actionset>
+    </rule>
+    <rule enabled="true" grouping="all" source="incoming" account-uid="93f7d10f32bfa55aff7abb6b867792b16d2c34d3">
+      <title>News By Contacts Group</title>
+      <partset>
+        <part name="addressbook">
+          <value name="book" type="option" value="03351f33939a1d304769914d8112dda93175c2e5"/>
+          <value name="compare-type" type="option" value="contains-sender"/>
+        </part>
+      </partset>
+      <actionset>
+        <part name="move-to-folder">
+          <value name="folder" type="folder">
+            <folder uri="folder://93f7d10f32bfa55aff7abb6b867792b16d2c34d3/News"/>
+          </value>
+        </part>
+      </actionset>
+    </rule>
+  </ruleset>
+</filteroptions>

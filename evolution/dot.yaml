@@ -1,0 +1,5 @@
+linux:
+  links:
+    filters.xml: ~/.config/evolution/mail/filters.xml
+    vfolders.xml: ~/.config/evolution/mail/vfolders.xml
+    accels: ~/.config/evolution/accels

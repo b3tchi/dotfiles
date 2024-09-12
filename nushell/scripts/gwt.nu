@@ -192,7 +192,7 @@ module gwt {
 
     let root_path = ( if $nu.os-info.name == "windows" { $env.USERPROFILE } else { $env.HOME } )
     let file = (if ( $ssh_path | is-empty ) { $root_path | path join .ssh $uniq_name } else { $ssh_path | path expand })
-    print $file
+    # print $file
     
     if ($ssh_path | is-empty) {
       ssh-keygen -t $coding -C $email -f $file -N ''

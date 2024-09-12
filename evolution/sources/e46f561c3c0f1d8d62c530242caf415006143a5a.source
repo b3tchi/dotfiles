@@ -1,0 +1,66 @@
+[Data Source]
+DisplayName=beckaja1@outlook.com
+Enabled=false
+Parent=164e51e2db6efe2486e52eaabd29fbb2a9cf8c8d
+
+[Mail Submission]
+SentFolder=folder://7851c205c28deb651959dac2c53f916b81197b48/Sent%20Items
+TransportUid=1281537bdcee433adc154a3ab18a334dffca2249
+RepliesToOriginFolder=false
+UseSentFolder=true
+
+[Mail Composition]
+Bcc=
+Cc=
+DraftsFolder=folder://7851c205c28deb651959dac2c53f916b81197b48/Drafts
+ReplyStyle=default
+SignImip=true
+TemplatesFolder=folder://local/Templates
+StartBottom=inconsistent
+TopSignature=inconsistent
+Language=
+
+[Mail Identity]
+Address=beckaja1@outlook.com
+Aliases=
+Name=Jan Becka
+Organization=
+ReplyTo=
+SignatureUid=none
+
+[Pretty Good Privacy (OpenPGP)]
+AlwaysTrust=false
+EncryptToSelf=true
+KeyId=
+SigningAlgorithm=
+SignByDefault=false
+EncryptByDefault=false
+PreferInline=false
+LocateKeys=true
+SendPublicKey=true
+SendPreferEncrypt=true
+AskSendPublicKey=true
+
+[Message Disposition Notifications]
+ResponsePolicy=ask
+
+[Secure MIME (S/MIME)]
+EncryptionCertificate=
+EncryptByDefault=false
+EncryptToSelf=true
+SigningAlgorithm=
+SigningCertificate=
+SignByDefault=false
+
+[Exchange Web Services Folder]
+ChangeKey=
+Id=
+Foreign=false
+ForeignSubfolders=false
+ForeignMail=
+FreebusyWeeksBefore=1
+FreebusyWeeksAfter=5
+Name=
+Public=false
+UsePrimaryAddress=false
+FetchGalPhotos=true

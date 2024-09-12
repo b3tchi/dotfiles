@@ -1,0 +1,12 @@
+[Data Source]
+DisplayName=outlook
+Enabled=true
+Parent=9e498922d2eb661a73276bd554aafa047eb07ced
+
+[Mail Transport]
+BackendName=microsoft365
+
+[Microsoft365 Folder]
+Id=
+IsDefault=false
+GroupId=

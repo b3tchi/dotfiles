@@ -1,0 +1,47 @@
+<?xml version="1.0"?>
+<filteroptions>
+  <ruleset>
+    <rule enabled="true" grouping="any" threading="all" source="incoming">
+      <title>Inbox</title>
+      <partset>
+        <part name="location">
+          <value name="msglocation-type" type="option" value="is"/>
+          <value name="folder" type="folder">
+            <folder uri="folder://93f7d10f32bfa55aff7abb6b867792b16d2c34d3/Inbox"/>
+          </value>
+        </part>
+        <part name="location">
+          <value name="msglocation-type" type="option" value="is"/>
+          <value name="folder" type="folder">
+            <folder uri="folder://f4bed3ec5abc49da9402dd96e6c414e12b2fb01f/Inbox"/>
+          </value>
+        </part>
+        <part name="location">
+          <value name="msglocation-type" type="option" value="is"/>
+          <value name="folder" type="folder">
+            <folder uri="folder://d7c63bf61b6263108afe4d4190d591591ee259d2/Inbox"/>
+          </value>
+        </part>
+        <part name="location">
+          <value name="msglocation-type" type="option" value="is"/>
+          <value name="folder" type="folder">
+            <folder uri="folder://93f7d10f32bfa55aff7abb6b867792b16d2c34d3/Personal"/>
+          </value>
+        </part>
+        <part name="location">
+          <value name="msglocation-type" type="option" value="is"/>
+          <value name="folder" type="folder">
+            <folder uri="folder://93f7d10f32bfa55aff7abb6b867792b16d2c34d3/Archive/Security"/>
+          </value>
+        </part>
+      </partset>
+      <sources with="specific" autoupdate="true">
+        <folder uri="folder://f4bed3ec5abc49da9402dd96e6c414e12b2fb01f/Inbox" include-subfolders="false"/>
+        <folder uri="folder://d7c63bf61b6263108afe4d4190d591591ee259d2/Inbox" include-subfolders="false"/>
+        <folder uri="folder://93f7d10f32bfa55aff7abb6b867792b16d2c34d3/Archive/Security" include-subfolders="false"/>
+        <folder uri="folder://93f7d10f32bfa55aff7abb6b867792b16d2c34d3/Inbox" include-subfolders="false"/>
+        <folder uri="folder://93f7d10f32bfa55aff7abb6b867792b16d2c34d3/Personal" include-subfolders="false"/>
+      </sources>
+    </rule>
+  </ruleset>
+</filteroptions>

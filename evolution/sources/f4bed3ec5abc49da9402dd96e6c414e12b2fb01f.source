@@ -1,0 +1,31 @@
+[Data Source]
+DisplayName=sofi-zs
+Enabled=true
+Parent=cee43af2646cd9c6cf77ec48131ab314feaaebfc
+
+[Mail Account]
+BackendName=ews
+IdentityUid=1eb28beb5ea6ec26c25a6d58df6992b85a65dd7d
+ArchiveFolder=
+NeedsInitialSetup=false
+MarkSeen=inconsistent
+MarkSeenTimeout=1500
+Builtin=false
+
+[Refresh]
+Enabled=true
+EnabledOnMeteredNetwork=true
+IntervalMinutes=60
+
+[Exchange Web Services Folder]
+ChangeKey=
+Id=
+Foreign=false
+ForeignSubfolders=false
+ForeignMail=
+FreebusyWeeksBefore=1
+FreebusyWeeksAfter=5
+Name=
+Public=false
+UsePrimaryAddress=false
+FetchGalPhotos=true

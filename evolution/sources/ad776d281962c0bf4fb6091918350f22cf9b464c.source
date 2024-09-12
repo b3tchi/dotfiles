@@ -1,0 +1,20 @@
+[Data Source]
+DisplayName=sofi-zs
+Enabled=true
+Parent=cee43af2646cd9c6cf77ec48131ab314feaaebfc
+
+[Mail Transport]
+BackendName=ews
+
+[Exchange Web Services Folder]
+ChangeKey=
+Id=
+Foreign=false
+ForeignSubfolders=false
+ForeignMail=
+FreebusyWeeksBefore=1
+FreebusyWeeksAfter=5
+Name=
+Public=false
+UsePrimaryAddress=false
+FetchGalPhotos=true
