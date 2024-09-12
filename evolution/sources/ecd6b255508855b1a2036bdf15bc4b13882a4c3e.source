@@ -1,0 +1,42 @@
+[Data Source]
+DisplayName=s0s1hd
+Enabled=true
+Parent=98d9fd2aee7fa89824d68ce7cee7900c5abd153c
+
+[Mail Submission]
+SentFolder=folder://15e9d5e81c759d0116359ac49daf7cf778e3cf8a/Sent%20Items
+TransportUid=4f30916f53b71e6d725f4b97fcb11d8b8deb3aad
+RepliesToOriginFolder=false
+UseSentFolder=true
+
+[Mail Composition]
+Bcc=
+Cc=
+DraftsFolder=folder://15e9d5e81c759d0116359ac49daf7cf778e3cf8a/Drafts
+ReplyStyle=default
+SignImip=true
+TemplatesFolder=folder://local/Templates
+StartBottom=inconsistent
+TopSignature=inconsistent
+Language=
+
+[Mail Identity]
+Address=s0s1hd@outlook.com
+Aliases=
+Name=Jan Becka
+Organization=
+ReplyTo=
+SignatureUid=none
+
+[Exchange Web Services Folder]
+ChangeKey=
+Id=
+Foreign=false
+ForeignSubfolders=false
+ForeignMail=
+FreebusyWeeksBefore=1
+FreebusyWeeksAfter=5
+Name=
+Public=false
+UsePrimaryAddress=false
+FetchGalPhotos=true

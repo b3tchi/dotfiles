@@ -1,11 +1,11 @@
 [Data Source]
-DisplayName=beckaja1@outlook.com
-Enabled=false
-Parent=164e51e2db6efe2486e52eaabd29fbb2a9cf8c8d
+DisplayName=s0s1hd
+Enabled=true
+Parent=98d9fd2aee7fa89824d68ce7cee7900c5abd153c
 
 [Mail Account]
 BackendName=ews
-IdentityUid=e46f561c3c0f1d8d62c530242caf415006143a5a
+IdentityUid=ecd6b255508855b1a2036bdf15bc4b13882a4c3e
 ArchiveFolder=
 NeedsInitialSetup=false
 MarkSeen=inconsistent

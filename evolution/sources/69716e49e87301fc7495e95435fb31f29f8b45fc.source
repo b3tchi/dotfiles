@@ -1,5 +1,5 @@
 [Data Source]
-DisplayName=beckaja1@outlook.com
+DisplayName=outlook
 Enabled=true
 Parent=739b74b3e159183d806716a404ed9ecddf4b0c21
 
@@ -40,3 +40,27 @@ Name=
 Public=false
 UsePrimaryAddress=false
 FetchGalPhotos=true
+
+[Pretty Good Privacy (OpenPGP)]
+AlwaysTrust=false
+EncryptToSelf=true
+KeyId=
+SigningAlgorithm=
+SignByDefault=false
+EncryptByDefault=false
+PreferInline=false
+LocateKeys=true
+SendPublicKey=true
+SendPreferEncrypt=true
+AskSendPublicKey=true
+
+[Message Disposition Notifications]
+ResponsePolicy=ask
+
+[Secure MIME (S/MIME)]
+EncryptionCertificate=
+EncryptByDefault=false
+EncryptToSelf=true
+SigningAlgorithm=
+SigningCertificate=
+SignByDefault=false

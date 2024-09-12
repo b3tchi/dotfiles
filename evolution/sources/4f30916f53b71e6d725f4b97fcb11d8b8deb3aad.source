@@ -1,0 +1,7 @@
+[Data Source]
+DisplayName=s0s1hd
+Enabled=true
+Parent=98d9fd2aee7fa89824d68ce7cee7900c5abd153c
+
+[Mail Transport]
+BackendName=ews
