@@ -137,7 +137,7 @@ module gwt {
     let domain = (vars $profile domain)
     let email = (vars $profile email)
     let user = (vars $profile user)
-    let os = (sys).host.name
+    # let os = (sys host).name
 
     let repos_root = ( if $nu.os-info.name == "windows" { $env.USERPROFILE | path join Dev Repositories } else { $env.HOME | path join repos } )
 
