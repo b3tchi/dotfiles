@@ -3,3 +3,5 @@ linux:
     FreeCAD.conf: ~/.config/FreeCAD/FreeCAD.conf
     system.cfg: ~/.config/FreeCAD/system.cfg
     user.cfg: ~/.config/FreeCAD/user.cfg
+    link.system.cfg: ~/.config/FreeCAD/link.system.cfg
+    link.user.cfg: ~/.config/FreeCAD/link.user.cfg
