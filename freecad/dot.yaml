@@ -1,0 +1,5 @@
+linux:
+  links:
+    FreeCAD.conf: ~/.config/FreeCAD/FreeCAD.conf
+    system.cfg: ~/.config/FreeCAD/system.cfg
+    user.cfg: ~/.config/FreeCAD/user.cfg
