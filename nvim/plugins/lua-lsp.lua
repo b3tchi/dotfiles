@@ -32,13 +32,13 @@ return {
 				},
 			},
 			-- using lazy offical extra lang.nushell
-			nushell = {
-				default_config = {
-					cmd = { "nu", "--lsp" },
-					filetypes = { "nu" },
-					root_dir = function(fname) end,
-				},
-			},
+			-- nushell = {
+			-- 	default_config = {
+			-- 		cmd = { "nu", "--lsp" },
+			-- 		filetypes = { "nu" },
+			-- 		root_dir = function(fname) end,
+			-- 	},
+			-- },
 		},
 	},
 }

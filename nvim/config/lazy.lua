@@ -14,7 +14,10 @@ require("lazy").setup({
 		{ import = "lazyvim.plugins.extras.lang.typescript" },
 		{ import = "lazyvim.plugins.extras.lang.json" },
 		{ import = "lazyvim.plugins.extras.lang.go" },
-		-- { import = "lazyvim.plugins.extras.ui.mini-animate" },
+		{ import = "lazyvim.plugins.extras.lang.nushell" },
+		{ import = "lazyvim.plugins.extras.lang.markdown" },
+		{ import = "lazyvim.plugins.extras.lang.yaml" },
+
 		{ import = "lazyvim.plugins.extras.dap.core" },
 		{ import = "lazyvim.plugins.extras.dap.nlua" },
 		-- import/override with your plugins
@@ -51,4 +54,3 @@ require("lazy").setup({
 --myfxs path
 -- local myfxspath = vim.fn.stdpath("data") .. "/myfxs"
 -- vim.opt.rtp:prepend(myfxspath)
-
