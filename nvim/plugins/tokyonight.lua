@@ -7,7 +7,7 @@ return {
 			-- your configuration comes here
 			-- or leave it empty to use the default settings
 			-- style = "storm", -- The theme comes in three styles, `storm`, `moon`, a darker variant `night` and `day`
-			style = "storm", -- The theme comes in three styles, `storm`, `moon`, a darker variant `night` and `day`
+			style = "night", -- The theme comes in three styles, `storm`, `moon`, a darker variant `night` and `day`
 			light_style = "day", -- The theme is used when the background is set to light
 			transparent = false, -- Enable this to disable setting the background color
 			terminal_colors = true, -- Configure the colors used when opening a `:terminal` in [Neovim](https://github.com/neovim/neovim)
@@ -26,7 +26,7 @@ return {
 			sidebars = { "qf", "help" }, -- Set a darker background on sidebar-like windows. For example: `["qf", "vista_kind", "terminal", "packer"]`
 			day_brightness = 0.3, -- Adjusts the brightness of the colors of the **Day** style. Number between 0 and 1, from dull to vibrant colors
 			hide_inactive_statusline = false, -- Enabling this option, will hide inactive statuslines and replace them with a thin border instead. Should work with the standard **StatusLine** and **LuaLine**.
-			dim_inactive = false, -- dims inactive windows
+			dim_inactive = true, -- dims inactive windows
 			lualine_bold = false, -- When `true`, section headers in the lualine theme will be bold
 
 			--- You can override specific color groups to use other groups or a hex color
@@ -50,33 +50,34 @@ return {
 				hl.TelescopeResultsTitle = { bg = c.bg_dark, fg = c.bg_dark }
 
 				--transparent background
-				hl.Normal = { fg = "#7aa2f7" }
+				-- hl.Normal = { fg = "#7aa2f7" }
 				hl.NeoTreeNormal = { fg = "#7aa2f7" }
 
 				--column line with numbers
 				local lineNr = "#1a1b26"
-				hl.CursorLineNr = { fg = "#ff9e64", bg = lineNr }
-				hl.LineNr = { fg = "#3b4261", bg = lineNr }
-				hl.SignColumnSB = { bg = lineNr }
-				hl.SignColumn = { bg = lineNr }
-				hl.UfoCursorFoldedLine = { fg = "#3b4261", bg = lineNr }
-				hl.CursorLineFold = { fg = "#3b4261", bg = lineNr }
-				hl.FoldColumn = { fg = "#3b4261", bg = lineNr }
-
-				hl.GitSignsAdd = { fg = "#266d6a", bg = lineNr }
-				hl.GitSignsChange = { fg = "#536c9e", bg = lineNr }
-				hl.GitSignsDelete = { fg = "#b2555b", bg = lineNr }
-
-				hl.DiagnosticSignWarn = { fg = "#e0af68", bg = lineNr }
-				hl.DiagnosticSignInfo = { fg = "#0db9d7", bg = lineNr }
-				hl.DiagnosticSignHint = { fg = "#1abc9c", bg = lineNr }
-				hl.DiagnosticSignError = { fg = "#db4b4b", bg = lineNr }
-
-				--separator between panes same as LineNr
+				-- hl.CursorLineNr = { fg = "#ff9e64", bg = lineNr }
+				hl.LineNr = { fg = "#3b4261" }
+				hl.SignColumn = {}
+				-- hl.SignColumnSB = { bg = lineNr }
+				-- hl.SignColumn = { bg = lineNr }
+				-- hl.UfoCursorFoldedLine = { fg = "#3b4261", bg = lineNr }
+				-- hl.CursorLineFold = { fg = "#3b4261", bg = lineNr }
+				-- hl.FoldColumn = { fg = "#3b4261", bg = lineNr }
+				--
+				-- hl.GitSignsAdd = { fg = "#266d6a", bg = lineNr }
+				-- hl.GitSignsChange = { fg = "#536c9e", bg = lineNr }
+				-- hl.GitSignsDelete = { fg = "#b2555b", bg = lineNr }
+				--
+				-- hl.DiagnosticSignWarn = { fg = "#e0af68", bg = lineNr }
+				-- hl.DiagnosticSignInfo = { fg = "#0db9d7", bg = lineNr }
+				-- hl.DiagnosticSignHint = { fg = "#1abc9c", bg = lineNr }
+				-- hl.DiagnosticSignError = { fg = "#db4b4b", bg = lineNr }
+				--
+				-- --separator between panes same as LineNr
 				hl.WinSeparator = { fg = lineNr, bg = lineNr }
-
-				--foldes
-				hl.Folded = { bg = "#222436" } --fold-ufo
+				--
+				-- --foldes
+				-- hl.Folded = { bg = "#222436" } --fold-ufo
 			end,
 		})
 
