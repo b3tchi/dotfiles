@@ -84,8 +84,8 @@ return {
 	font = font,
 
 	--COLORSCHEME
-	--color_scheme = "Gruvbox Dark",
-	color_scheme = "tokionight",
+	-- color_scheme = "Gruvbox Dark",
+	color_scheme = "tokyonight_night",
 
 	--MUX Testing
 	-- exit_behavior= "Hold",
