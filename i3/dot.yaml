@@ -1,3 +1,4 @@
 linux:
   links:
     config: ~/.i3/config
+    picom.conf: ~/.config/picom.conf
