@@ -27,7 +27,7 @@ XTerm*faceSize: 12
 !! black dark/light
 *color0:                          #222D31
 *color8:                          #585858
-
+!
 !! red dark/light
 *color1:                          #ab4642
 *color9:                          #ab4642

@@ -326,6 +326,8 @@ set_from_resource $term_color14    color14
 set_from_resource $term_color15    color15
 
 # Start i3bar to display a workspace bar (plus the system information i3status if available)
+set $transp       #00000000
+
 bar {
 	i3bar_command i3bar
 	status_command i3status
@@ -346,36 +348,34 @@ bar {
         separator  #454947
 
 #                      border  backgr. text
-        focused_workspace  #F9FAF9 #16a085 #292F34
-        active_workspace   #595B5B #353836 #FDF6E3
-        inactive_workspace #595B5B #222D31 #EEE8D5
-        binding_mode       #16a085 #2C2C2C #F9FAF9
-        urgent_workspace   #16a085 #FDF6E3 #E5201D
+        focused_workspace  #16a085 #16a085 #292F34
+        active_workspace   #353836 #353836 #FDF6E3
+        inactive_workspace #222D31 #222D31 #EEE8D5
+        binding_mode       #2C2C2C #2C2C2C #F9FAF9
+        urgent_workspace   #FDF6E3 #FDF6E3 #CB4B16
     }
 }
 
 # hide/unhide i3status bar
 # bindsym $mod+m bar mode toggle
 
-set $transp       #00000000
-
 # Theme colors
 # class                   border  backgr. text    indic.   child_border
-  client.focused          #556064 #556064 #80FFF9 #FDF6E3
-  client.focused_inactive #2F3D44 #2F3D44 #1ABC9C #454948
-  client.unfocused        #2F3D44 #2F3D44 #1ABC9C #454948
+  client.focused          #16a085 #16a085 #292F34 #FDF6E3
+  client.focused_inactive #454948 #454948 #FDF6E3 #454948
+  client.unfocused        #454948 #454948 #FDF6E3 #454948
   client.urgent           #CB4B16 #FDF6E3 #1ABC9C #268BD2
   client.placeholder      #000000 #0c0c0c #ffffff #000000
 
-  client.background       $transp 
+  client.background       $transp
 
 #############################
 ### settings for i3-gaps: ###
 #############################
 
 # Set inner/outer gaps
-gaps inner 10 
-gaps outer -2
+gaps inner 10
+gaps outer -3
 
 # Additionally, you can issue commands with the following syntax. This is useful to bind keys to changing the gap size.
 # gaps inner|outer current|all set|plus|minus <px>
