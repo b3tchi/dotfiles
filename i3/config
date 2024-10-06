@@ -40,7 +40,11 @@ bindsym $mod+Return exec wezterm
 bindsym $mod+Shift+q kill
 
 # start program launcher
-bindsym $mod+d exec --no-startup-id dmenu_recency
+# bindsym $mod+d exec --no-startup-id dmenu_recency
+bindsym $mod+d exec --no-startup-id rofi -show run
+
+
+
 
 # launch categorized menu
 bindsym $mod+m exec --no-startup-id morc_menu

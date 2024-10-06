@@ -17,6 +17,7 @@ return {
 			"vim",
 			"yaml",
 			"nu",
+			"rasi",
 		},
 	},
 	--
