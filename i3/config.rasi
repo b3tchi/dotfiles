@@ -175,7 +175,7 @@ configuration {
     fg0:     #FDF6E3;
 
     accent-color:     #16a085;
-    selected-color:   #353836;
+    selected-color:   #454948;
     urgent-color:     #CB4B16;
 
     background-color:   transparent;
@@ -203,8 +203,14 @@ prompt, entry, element-icon, element-text {
     vertical-align: 0.5;
 }
 
+entry {
+	placeholder:"run";
+	placeholder-color: @selected-color;
+}
+
 prompt {
     text-color: @accent-color;
+	enabled: false;
 }
 
 textbox {
@@ -247,6 +253,8 @@ element selected {
 
 element selected normal, element selected active {
     background-color:   @selected-color;
+	border: 0px 0px 0px 4px;
+	border-color: @accent-color;
 }
 
 element selected urgent {
