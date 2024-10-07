@@ -1,11 +1,11 @@
 [Data Source]
-DisplayName=s0s1hd
-Enabled=false
-Parent=98d9fd2aee7fa89824d68ce7cee7900c5abd153c
+DisplayName=r23302b@rodic-zs-ns2.cz
+Enabled=true
+Parent=a1b13c8d0890a9a5e4fe610befff3d6dd2cbb2bd
 
 [Mail Account]
 BackendName=ews
-IdentityUid=ecd6b255508855b1a2036bdf15bc4b13882a4c3e
+IdentityUid=f9282b9eb6ad6b4c11335accddc12dc9d3618ace
 ArchiveFolder=
 NeedsInitialSetup=false
 MarkSeen=inconsistent

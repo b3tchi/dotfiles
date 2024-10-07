@@ -1,6 +1,6 @@
 [Data Source]
 DisplayName=skola-sofi
-Enabled=true
+Enabled=false
 Parent=7c4a8a6f2423a67fd0e140446cd5823ef65dd7ff
 
 [Mail Submission]

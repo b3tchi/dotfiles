@@ -1,0 +1,53 @@
+[Data Source]
+DisplayName=outlook-imap
+Enabled=true
+Parent=d58123ce37b98c953ed8828e9b691fbb590ebd35
+
+[Mail Submission]
+SentFolder=folder://d58123ce37b98c953ed8828e9b691fbb590ebd35/Sent
+TransportUid=e1b08468967199865dc040bab0d366d1aabf8b8e
+RepliesToOriginFolder=false
+UseSentFolder=true
+
+[Mail Composition]
+Bcc=
+Cc=
+DraftsFolder=folder://d58123ce37b98c953ed8828e9b691fbb590ebd35/Drafts
+ReplyStyle=default
+SignImip=true
+TemplatesFolder=folder://local/Templates
+StartBottom=inconsistent
+TopSignature=inconsistent
+Language=
+
+[Mail Identity]
+Address=beckaja1@outlook.com
+Aliases=
+Name=Jan Becka
+Organization=
+ReplyTo=
+SignatureUid=none
+
+[Pretty Good Privacy (OpenPGP)]
+AlwaysTrust=false
+EncryptToSelf=true
+KeyId=
+SigningAlgorithm=
+SignByDefault=false
+EncryptByDefault=false
+PreferInline=false
+LocateKeys=true
+SendPublicKey=true
+SendPreferEncrypt=true
+AskSendPublicKey=false
+
+[Message Disposition Notifications]
+ResponsePolicy=ask
+
+[Secure MIME (S/MIME)]
+EncryptionCertificate=
+EncryptByDefault=false
+EncryptToSelf=true
+SigningAlgorithm=
+SigningCertificate=
+SignByDefault=false

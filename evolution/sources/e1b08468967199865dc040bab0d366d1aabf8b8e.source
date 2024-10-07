@@ -1,0 +1,27 @@
+[Data Source]
+DisplayName=outlook-imap
+Enabled=true
+Parent=d58123ce37b98c953ed8828e9b691fbb590ebd35
+
+[Authentication]
+Host=smtp.office365.com
+Method=Outlook
+Port=587
+ProxyUid=system-proxy
+RememberPassword=true
+User=beckaja1@outlook.com
+CredentialName=
+IsExternal=false
+
+[Security]
+Method=starttls-on-standard-port
+
+[Mail Transport]
+BackendName=smtp
+
+[Smtp Backend]
+ReencodeData=false
+DsnRetFull=false
+DsnNotifySuccess=true
+DsnNotifyFailure=true
+DsnNotifyDelay=true

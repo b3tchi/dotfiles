@@ -1,6 +1,6 @@
 [Data Source]
 DisplayName=skola-sofi
-Enabled=true
+Enabled=false
 Parent=
 
 [Authentication]

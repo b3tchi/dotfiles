@@ -1,18 +1,18 @@
 [Data Source]
-DisplayName=s0s1hd
-Enabled=false
-Parent=98d9fd2aee7fa89824d68ce7cee7900c5abd153c
+DisplayName=r23302b@rodic-zs-ns2.cz
+Enabled=true
+Parent=a1b13c8d0890a9a5e4fe610befff3d6dd2cbb2bd
 
 [Mail Submission]
-SentFolder=folder://15e9d5e81c759d0116359ac49daf7cf778e3cf8a/Sent%20Items
-TransportUid=4f30916f53b71e6d725f4b97fcb11d8b8deb3aad
+SentFolder=folder://4adbcc1c44be9ff2cc8ecc8fcf4e5737b48b4289/Sent%20Items
+TransportUid=a79bf728b9431715b831128c8e781d464aea81a9
 RepliesToOriginFolder=false
 UseSentFolder=true
 
 [Mail Composition]
 Bcc=
 Cc=
-DraftsFolder=folder://15e9d5e81c759d0116359ac49daf7cf778e3cf8a/Drafts
+DraftsFolder=folder://4adbcc1c44be9ff2cc8ecc8fcf4e5737b48b4289/Drafts
 ReplyStyle=default
 SignImip=true
 TemplatesFolder=folder://local/Templates
@@ -21,7 +21,7 @@ TopSignature=inconsistent
 Language=
 
 [Mail Identity]
-Address=s0s1hd@outlook.com
+Address=r23302b@rodic-zs-ns2.cz
 Aliases=
 Name=Jan Becka
 Organization=

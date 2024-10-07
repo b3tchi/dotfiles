@@ -1,0 +1,27 @@
+[Data Source]
+DisplayName=s0s1hd-imap
+Enabled=true
+Parent=697c75cd287deedc2eedc97c30b3c247c6f70370
+
+[Authentication]
+Host=smtp.office365.com
+Method=Outlook
+Port=587
+ProxyUid=system-proxy
+RememberPassword=true
+User=s0s1hd@outlook.com
+CredentialName=
+IsExternal=false
+
+[Security]
+Method=starttls-on-standard-port
+
+[Mail Transport]
+BackendName=smtp
+
+[Smtp Backend]
+ReencodeData=false
+DsnRetFull=false
+DsnNotifySuccess=true
+DsnNotifyFailure=true
+DsnNotifyDelay=true

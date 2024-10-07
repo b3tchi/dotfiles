@@ -1,0 +1,43 @@
+[Data Source]
+DisplayName=Contacts
+Enabled=true
+Parent=carddav-stub
+
+[Authentication]
+Host=use07.thegood.cloud
+Method=plain/password
+Port=443
+ProxyUid=system-proxy
+RememberPassword=true
+User=beckaja1@outlook.com
+CredentialName=
+IsExternal=false
+
+[Contacts Backend]
+IncludeMe=false
+
+[WebDAV Backend]
+AvoidIfmatch=false
+CalendarAutoSchedule=false
+Color=
+DisplayName=Contacts
+EmailAddress=
+ResourcePath=/remote.php/dav/addressbooks/users/beckaja1@outlook.com/contacts/
+ResourceQuery=
+SslTrust=
+Order=4294967295
+
+[Security]
+Method=tls
+
+[Refresh]
+Enabled=true
+EnabledOnMeteredNetwork=true
+IntervalMinutes=60
+
+[Address Book]
+BackendName=carddav
+Order=0
+
+[Autocomplete]
+IncludeMe=true

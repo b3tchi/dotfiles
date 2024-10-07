@@ -1,0 +1,7 @@
+[Data Source]
+DisplayName=r23302b@rodic-zs-ns2.cz
+Enabled=true
+Parent=a1b13c8d0890a9a5e4fe610befff3d6dd2cbb2bd
+
+[Mail Transport]
+BackendName=ews

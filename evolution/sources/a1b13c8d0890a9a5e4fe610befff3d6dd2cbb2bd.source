@@ -1,15 +1,15 @@
 [Data Source]
-DisplayName=s0s1hd
-Enabled=false
+DisplayName=r23302b@rodic-zs-ns2.cz
+Enabled=true
 Parent=
 
 [Authentication]
 Host=outlook.office365.com
-Method=PLAIN
+Method=Office365
 Port=443
 ProxyUid=system-proxy
 RememberPassword=true
-User=s0s1hd@outlook.com
+User=r23302b@rodic-zs-ns2.cz
 CredentialName=
 IsExternal=false
 
@@ -17,7 +17,7 @@ IsExternal=false
 BackendName=ews
 CalendarEnabled=true
 ContactsEnabled=true
-Identity=s0s1hd@outlook.com
+Identity=r23302b@rodic-zs-ns2.cz
 MailEnabled=true
 AllowSourcesRename=true
 CalendarUrl=
@@ -31,12 +31,12 @@ LimitUnit=years
 LimitValue=1
 CheckAll=false
 ListenNotifications=true
-Email=s0s1hd@outlook.com
+Email=r23302b@rodic-zs-ns2.cz
 FilterJunk=false
 FilterJunkInbox=false
-GalUid=d51b20c0367b88f13c4f1c08ae1bd416ff7ee558
+GalUid=657142315130150114ceae7cb44b28eb68384267
 Hosturl=https://outlook.office365.com/EWS/Exchange.asmx
-Oaburl=https://outlook.office365.com/OAB/e9f05585-ab02-4e1a-88e2-36a7e8fcb267/00030000-425e-c12a-0000-000000000000/oab.xml
+Oaburl=
 OabOffline=false
 OalSelected=
 Timeout=120

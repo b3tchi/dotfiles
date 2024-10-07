@@ -1,0 +1,53 @@
+[Data Source]
+DisplayName=s0s1hd-imap
+Enabled=true
+Parent=697c75cd287deedc2eedc97c30b3c247c6f70370
+
+[Mail Submission]
+SentFolder=folder://697c75cd287deedc2eedc97c30b3c247c6f70370/Sent
+TransportUid=427f5f9b52bb2e1d7563535847f0cb4e047cd65a
+RepliesToOriginFolder=false
+UseSentFolder=true
+
+[Mail Composition]
+Bcc=
+Cc=
+DraftsFolder=folder://697c75cd287deedc2eedc97c30b3c247c6f70370/Drafts
+ReplyStyle=default
+SignImip=true
+TemplatesFolder=folder://local/Templates
+StartBottom=inconsistent
+TopSignature=inconsistent
+Language=
+
+[Mail Identity]
+Address=s0s1hd@outlook.com
+Aliases=
+Name=Jan Becka
+Organization=
+ReplyTo=
+SignatureUid=none
+
+[Pretty Good Privacy (OpenPGP)]
+AlwaysTrust=false
+EncryptToSelf=true
+KeyId=
+SigningAlgorithm=
+SignByDefault=false
+EncryptByDefault=false
+PreferInline=false
+LocateKeys=true
+SendPublicKey=true
+SendPreferEncrypt=true
+AskSendPublicKey=true
+
+[Message Disposition Notifications]
+ResponsePolicy=ask
+
+[Secure MIME (S/MIME)]
+EncryptionCertificate=
+EncryptByDefault=false
+EncryptToSelf=true
+SigningAlgorithm=
+SigningCertificate=
+SignByDefault=false
