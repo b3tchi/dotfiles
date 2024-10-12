@@ -1,0 +1,3 @@
+linux:
+  links:
+    doom: ~/.config/doom
