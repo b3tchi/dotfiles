@@ -63,4 +63,5 @@
 ;;   :quelpa (org-yt :fetcher github :repo "TobiasZawada/org-yt"))
 ;; (require 'org-yt)
 
-(package! dap-mode)
+;; should not be need part of doom emacs packages
+;; (package! dap-mode)
