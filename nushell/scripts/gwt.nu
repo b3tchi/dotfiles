@@ -70,8 +70,10 @@ module gwt {
       return
     }
 
+    let home_path = ( if $nu.os-info.name == "windows" { $env.USERPROFILE } else { $env.HOME } )
+
     let acc = $"github.com-($user)"
-    if ((($env.USERPROFILE | path join .ssh config.d $acc) | path exists) == false) {
+    if ((($home_path | path join .ssh config.d $acc) | path exists) == false) {
       print "cannot find user ssh key"
       return
     }
@@ -85,7 +87,7 @@ module gwt {
     let owner = (if $owner == null {$user} else {$owner})
     let name = (if $name == null {$path | path basename} else {$name})
 
-    let repos_root = $env.USERPROFILE | path join Dev Repositories
+    let repos_root = ( if $nu.os-info.name == "windows" { $env.USERPROFILE | path join Dev Repositories } else { $env.HOME | path join repos } )
     let repo_path = $repos_root | path join $owner $name
     # mkdir -p 
     print {
