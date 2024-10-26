@@ -40,7 +40,7 @@ bindsym $mod+Return exec wezterm
 bindsym $mod+Shift+q kill
 
 # start program launcher
-# bindsym $mod+d exec --no-startup-id dmenu_recency
+bindsym $mod+Shift+d exec --no-startup-id dmenu_recency
 bindsym $mod+d exec --no-startup-id rofi -show run
 
 #using placeholed issue with placing semicolon
