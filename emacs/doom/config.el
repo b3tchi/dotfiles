@@ -55,8 +55,8 @@
 
 (setq org-journal-date-prefix "#+TITLE: "
       org-journal-time-prefix "* "
-      org-journal-date-format "%a %Y-%m-%d"
-      org-journal-file-format "%Y-%m-%d.org")
+      org-journal-date-format "%Y-%m-%d %A"
+      org-journal-file-format "%Y_%m_%d.org")
 
 ;; org-roam v1 & v2
 (use-package org-roam
@@ -81,7 +81,7 @@
   (org-roam-db-autosync-mode))
 
 ;; relative to org-roam-directory must exists
-(setq org-roam-dailies-directory "journal/")
+(setq org-roam-dailies-directory "journals/")
 
 ;; download images from remote source
 (setq org-display-remote-inline-images 'download)
