@@ -1,0 +1,17 @@
+links:
+  conf-test.json: |
+    {{#if (eq os "windows")}}
+    ~/conf-test.json
+    {{else}}
+    ~/conf-testB.json
+    {{/if}}
+
+installs:
+  cmd: |
+    {{#if (eq os "linux")}}
+    echo {{ whoami.username }}
+    echo {{ os }}
+    echo {{ whoami.distro }}
+    {{else}}
+    echo {{ whoami.lang }}
+    {{/if}}
