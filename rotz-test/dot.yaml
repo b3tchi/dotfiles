@@ -8,10 +8,18 @@ links:
 
 installs:
   cmd: |
-    {{#if (eq os "linux")}}
+    {{#if (eq os "windows")}}
     echo {{ whoami.username }}
     echo {{ os }}
     echo {{ whoami.distro }}
     {{else}}
+    echo {{ whoami.desktop_env }}
+    echo {{ whoami.devicename }}
+    echo {{ whoami.distro }}
+    echo {{ whoami.hostname }}
     echo {{ whoami.lang }}
+    echo {{ whoami.plaform }}
+    echo {{ whoami.realname }}
+    echo {{ whoami.username }}
+    echo {{ whoami.arch }}
     {{/if}}
