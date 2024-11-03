@@ -22,4 +22,5 @@ installs:
     echo {{ whoami.realname }}
     echo {{ whoami.username }}
     echo {{ whoami.arch }}
+    echo {{ env.HOME }}
     {{/if}}
