@@ -1,26 +1,28 @@
-links:
-  conf-test.json: |
-    {{#if (eq os "windows")}}
-    ~/conf-test.json
-    {{else}}
-    ~/conf-testB.json
-    {{/if}}
+global:
+  links:
+    conf-test.json: |
+      {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
+      ~/conf-test.json
+      {{else}}
+      ~/conf-testB.json
+      {{/if}}
 
-installs:
-  cmd: |
-    {{#if (eq os "windows")}}
-    echo {{ whoami.username }}
-    echo {{ os }}
-    echo {{ whoami.distro }}
-    {{else}}
-    echo {{ whoami.desktop_env }}
-    echo {{ whoami.devicename }}
-    echo {{ whoami.distro }}
-    echo {{ whoami.hostname }}
-    echo {{ whoami.lang }}
-    echo {{ whoami.plaform }}
-    echo {{ whoami.realname }}
-    echo {{ whoami.username }}
-    echo {{ whoami.arch }}
-    echo {{ env.HOME }}
-    {{/if}}
+linux:
+  installs:
+    cmd: |
+      {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
+      echo termux
+      {{else}}
+      echo std_linux1
+      {{/if}}
+      echo {{ whoami.desktop_env }}
+      echo {{ whoami.devicename }}
+      echo {{ whoami.distro }}
+      echo {{ whoami.hostname }}
+      echo {{ whoami.lang }}
+      echo {{ whoami.plaform }}
+      echo {{ whoami.realname }}
+      echo {{ whoami.username }}
+      echo {{ whoami.arch }}
+      echo {{ env.HOME }}
+      echo {{ (len "test") }}
