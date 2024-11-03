@@ -1,3 +1,8 @@
 linux:
   links:
-    doom: ~/.config/doom
+    doom: |
+      {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
+      /data/data/org.gnu.emacs/files/.config/doom
+      {{else}}
+      ~/.config/doom
+      {{/if}}
