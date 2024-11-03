@@ -1,4 +1,13 @@
-;;; init.el -*- lexical-binding: t; -*-
+;;for android emacs run append termx path
+(when (string-equal system-type "android")
+  ;; Add Termux binaries to PATH environment
+  ;; It is important that termuxpath is prepended, not appended.
+  ;; Otherwise we will get Androids incompatible diff executable, instead of the one in Termux.
+  (let ((termuxpath "/data/data/com.termux/files/usr/bin"))
+    (setenv "PATH" (format "%s:%s" termuxpath
+		       (getenv "PATH")))
+    (push termuxpath exec-path)
+    (push "~/.config/emacs/bin" exec-path)));;; init.el -*- lexical-binding: t; -*-
 
 ;; This file controls what Doom modules are enabled and what order they load
 ;; in. Remember to run 'doom sync' after modifying it!
