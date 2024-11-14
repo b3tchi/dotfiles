@@ -66,16 +66,16 @@
   :custom
   (org-roam-directory "~/org-roam")
   (org-roam-completion-everywhere t)
-  ;; :bind (("C-c n l" . org-roam-buffer-toggle)
-  ;;        ("C-c n f" . org-roam-node-find)
-  ;;        ("C-c n i" . org-roam-node-insert)
-  ;;        :map org-mode-map
-  ;;        ("C-M-i" . completion-at-point)
-  ;;        :map org-roam-dailies-map
-  ;;        ("Y" . org-roam-dailies-capture-yesterday)
-  ;;        ("T" . org-roam-dailies-capture-tomorrow))
-  ;; :bind-keymap
-  ;; ("C-c n d" . org-roam-dailies-map)
+  :bind (("C-c n l" . org-roam-buffer-toggle)
+         ("C-c n f" . org-roam-node-find)
+         ("C-c n i" . org-roam-node-insert)
+         :map org-mode-map
+         ("C-M-i" . completion-at-point)
+         :map org-roam-dailies-map
+         ("Y" . org-roam-dailies-capture-yesterday)
+         ("T" . org-roam-dailies-capture-tomorrow))
+  :bind-keymap
+  ("C-c n d" . org-roam-dailies-map)
   :config
   (require 'org-roam-dailies) ;; Ensure the keymap is available
   (org-roam-db-autosync-mode))
@@ -92,10 +92,14 @@
 
 (defun my-commit-settings ()
   (setq gac-automatically-add-new-files-p t)
+  (setq gac-automatically-push-p t)
   )
 
-(add-hook 'org-mode-hook 'my-commit-settings)
-
+;; (add-hook 'org-mode-hook 'my-commit-settings)
+(add-hook 'org-mode-hook
+  (lambda () (when (s-prefix? (expand-file-name "~/org-roam/")
+                      (buffer-file-name (current-buffer)))
+                (my-commit-settings))))
 ;; ;; Plan B for images
 ;; ;; we look to doom emacs for an example how to get remote images also working
 ;; ;; for normal http / https links
@@ -155,6 +159,7 @@
 ;; You can also try 'gd' (or 'C-c c d') to jump to their definition and see how
 ;; they are implemented.
 
+;; debuging of python
 (use-package! dap-mode)
 
 ;; (require 'dap-python)
@@ -196,3 +201,42 @@
       :desc "dap breakpoint hit count"   "h" #'dap-breakpoint-hit-condition
       :desc "dap breakpoint log message" "l" #'dap-breakpoint-log-message
       )
+
+;; adding ob-tmux
+(use-package ob-tmux
+  ;; Install package automatically (optional)
+  :ensure t
+  :custom
+  (org-babel-default-header-args:tmux
+   '((:results . "silent")	;
+     (:session . "default")	; The default tmux session to send code to
+     (:socket  . nil)))		; The default tmux socket to communicate with
+  ;; The tmux sessions are prefixed with the following string.
+  ;; You can customize this if you like.
+  (org-babel-tmux-session-prefix "ob-")
+  ;; The terminal that will be used.
+  ;; You can also customize the options passed to the terminal.
+  ;; The default terminal is "gnome-terminal" with options "--".
+  ;; ORIGINAL
+  ;; (org-babel-tmux-terminal "xterm")
+  ;; (org-babel-tmux-terminal-opts '("-T" "ob-tmux" "-e"))
+  ;; CHANGED
+  (org-babel-tmux-terminal "~/.local/bin/org-tmux.sh")
+  (org-babel-tmux-terminal-opts nil)
+  ;
+  ;; Finally, if your tmux is not in your $PATH for whatever reason, you
+  ;; may set the path to the tmux binary as follows:
+  (org-babel-tmux-location "/usr/bin/tmux"))
+
+;;lsp sqls
+(add-hook 'sql-mode-hook 'lsp)
+(setq lsp-sqls-workspace-config-path nil)
+(setq lsp-sqls-connections
+      '(
+        ((driver . "mssql") (dataSourceName . "sqlserver://sa:4dm1n1-str4t0r@localhost:1433?database=hr_db&encrypt=true&trustServerCertificate=true"))
+        ))
+
+;;enable lsp in zoomed [C-c '](tangled) sql source block
+(defun org-babel-edit-prep:sql (babel-info)
+  (setq-local buffer-file-name (->> babel-info caddr (alist-get :tangle)))
+  (lsp))

@@ -1,16 +1,15 @@
-;;for android emacs run append termx path
+;;; init.el -*- lexical-binding: t; -*-
+;; This file controls what Doom modules are enabled and what order they load
+;; in. Remember to run 'doom sync' after modifying it!
+
 (when (string-equal system-type "android")
   ;; Add Termux binaries to PATH environment
   ;; It is important that termuxpath is prepended, not appended.
   ;; Otherwise we will get Androids incompatible diff executable, instead of the one in Termux.
   (let ((termuxpath "/data/data/com.termux/files/usr/bin"))
-    (setenv "PATH" (format "%s:%s" termuxpath
-		       (getenv "PATH")))
+    (setenv "PATH" (format "%s:%s" termuxpath (getenv "PATH")))
     (push termuxpath exec-path)
-    (push "~/.config/emacs/bin" exec-path)));;; init.el -*- lexical-binding: t; -*-
-
-;; This file controls what Doom modules are enabled and what order they load
-;; in. Remember to run 'doom sync' after modifying it!
+    (push "~/.config/emacs/bin" exec-path)))
 
 ;; NOTE Press 'SPC h d h' (or 'C-h d h' for non-vim users) to access Doom's
 ;;      documentation. There you'll find a link to Doom's Module Index where all
@@ -31,11 +30,11 @@
 
        :completion
        (company +childframe) ; the ultimate code completion backend
-       (corfu +orderless)  ; complete with cap(f), cape and a flying feather!
+       ;; (corfu +orderless)  ; complete with cap(f), cape and a flying feather!
        ;;helm              ; the *other* search engine for love and life
        ;;ido               ; the other *other* search engine...
        ;;ivy               ; a search engine for love and life
-       vertico           ; the search engine of the future
+       (vertico +icons)    ; the search engine of the future
 
        :ui
        ;;deft              ; notational velocity for Emacs
@@ -44,7 +43,7 @@
        ;;doom-quit         ; DOOM quit-message prompts when you quit Emacs
        ;;(emoji +unicode)  ; 🙂
        hl-todo           ; highlight TODO/FIXME/NOTE/DEPRECATED/HACK/REVIEW
-       ;;indent-guides     ; highlighted indent columns
+       indent-guides     ; highlighted indent columns
        ;;ligatures         ; ligatures and symbols to make your code pretty again
        ;;minimap           ; show a map of the code on the side
        modeline          ; snazzy, Atom-inspired modeline, plus API
@@ -53,8 +52,8 @@
        ophints           ; highlight the region an operation acts on
        (popup +defaults)   ; tame sudden yet inevitable temporary windows
        ;;tabs              ; a tab bar for Emacs
-       ;;treemacs          ; a project drawer, like neotree but cooler
-       ;;unicode           ; extended unicode support for various languages
+       (treemacs +lsp)          ; a project drawer, like neotree but cooler
+       unicode           ; extended unicode support for various languages
        (vc-gutter +pretty) ; vcs diff in the fringe
        vi-tilde-fringe   ; fringe tildes to mark beyond EOB
        ;;window-select     ; visually switch windows
@@ -87,7 +86,7 @@
        ;;eshell            ; the elisp shell that works everywhere
        ;;shell             ; simple shell REPL for Emacs
        ;;term              ; basic terminal emulator for Emacs
-       ;;vterm             ; the best terminal emulation in Emacs
+       vterm             ; the best terminal emulation in Emacs
 
        :checkers
        syntax              ; tasing you for every semicolon you forget
@@ -208,3 +207,23 @@
        :config
        ;;literate
        (default +bindings +smartparens))
+
+;; (require 'ob-tmux)
+;; (setq org-babel-default-header-args:tmux
+;;       '((:results . "silent")	;
+;;         (:session . "default")	; The default tmux session to send code to
+;;         (:socket  . nil)))      ; The default tmux socket to communicate with
+
+;; ;; The tmux sessions are prefixed with the following string.
+;; ;; You can customize this if you like.
+;; (setq org-babel-tmux-session-prefix "ob-")
+
+;; ;; The terminal that will be used.
+;; ;; You can also customize the options passed to the terminal.
+;; (setq org-babel-tmux-terminal "xterm")
+;; (setq org-babel-tmux-terminal-opts '("-T" "ob-tmux" "-e"))
+;; ; The default terminal is "gnome-terminal" with options "--".
+
+;; ;; Finally, if your tmux is not in your $PATH for whatever reason, you
+;; ;; may set the path to the tmux binary as follows:
+;; (setq org-babel-tmux-location "/usr/bin/tmux")
