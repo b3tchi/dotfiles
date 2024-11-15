@@ -202,7 +202,7 @@
       :desc "dap breakpoint log message" "l" #'dap-breakpoint-log-message
       )
 
-;; adding ob-tmux
+;;TMUX SUPPORT - adding ob-tmux
 (use-package ob-tmux
   ;; Install package automatically (optional)
   :ensure t
@@ -228,7 +228,7 @@
   ;; may set the path to the tmux binary as follows:
   (org-babel-tmux-location "/usr/bin/tmux"))
 
-;;lsp sqls
+;;SQL SUPPORT - sqls
 (add-hook 'sql-mode-hook 'lsp)
 (setq lsp-sqls-workspace-config-path nil)
 (setq lsp-sqls-connections
@@ -240,3 +240,26 @@
 (defun org-babel-edit-prep:sql (babel-info)
   (setq-local buffer-file-name (->> babel-info caddr (alist-get :tangle)))
   (lsp))
+
+;;MERMAID SUPPORT - adding support for mermaid in org-mode
+;;install package mermaid-ts-mode, ob-mermaid
+(setq ob-mermaid-cli-path "/usr/bin/mmdc")
+
+(org-babel-do-load-languages 'org-babel-load-languages
+        (append org-babel-load-languages '((mermaid     . t))))
+
+;; Add mermaid language to `org-src-lang-modes`
+(require 'mermaid-ts-mode)
+(add-to-list 'auto-mode-alist '("\\.mermaid\\'" . mermaid-ts-mode))
+(add-to-list 'org-src-lang-modes '("mermaid" . mermaid-ts))
+
+;;NUSHELL SUPPORT
+;;install package nushell-ts-mode
+(require 'nushell-ts-mode)
+(org-babel-do-load-languages 'org-babel-load-languages
+        (append org-babel-load-languages '((nushell     . t))))
+
+;; Add mermaid language to `org-src-lang-modes`
+(require 'mermaid-ts-mode)
+(add-to-list 'auto-mode-alist '("\\.nu\\'" . nushell-ts-mode))
+(add-to-list 'org-src-lang-modes '("nu" . nushell-ts))
