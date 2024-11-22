@@ -253,13 +253,137 @@
 (add-to-list 'auto-mode-alist '("\\.mermaid\\'" . mermaid-ts-mode))
 (add-to-list 'org-src-lang-modes '("mermaid" . mermaid-ts))
 
+;;PLANT UML SUPPORT
+(setq plantuml-default-exec-mode 'executable)
+(setq plantuml-executable-path "/usr/bin/plantuml")
+
+(setq org-plantuml-exec-mode 'plantuml)
+(setq org-plantuml-executable-path "/usr/bin/plantuml")
+
+(org-babel-do-load-languages 'org-babel-load-languages
+        (append org-babel-load-languages '((plantuml . t))))
+
+;; Enable plantuml-mode for PlantUML files
+(require 'plantuml-mode)
+(add-to-list 'auto-mode-alist '("\\.plantuml\\'" . plantuml-mode))
+
+(add-to-list
+  'org-src-lang-modes '("plantuml" . plantuml))
+
 ;;NUSHELL SUPPORT
 ;;install package nushell-ts-mode
 (require 'nushell-ts-mode)
 (org-babel-do-load-languages 'org-babel-load-languages
         (append org-babel-load-languages '((nushell     . t))))
 
-;; Add mermaid language to `org-src-lang-modes`
-(require 'mermaid-ts-mode)
+;; Add nushell language to `org-src-lang-modes`
 (add-to-list 'auto-mode-alist '("\\.nu\\'" . nushell-ts-mode))
 (add-to-list 'org-src-lang-modes '("nu" . nushell-ts))
+
+;;enable lsp mode for nushell
+(use-package lsp-mode
+  :hook
+  (nushell-ts-mode . lsp))
+
+;; ob-nushell.el --- org-babel functions for Nushell shell
+;; ob-elvish author: Diego Zamboni <diego@zzamboni.org>
+;;; Code:
+;;; Code:
+(require 'ob)
+(require 'ob-ref)
+(require 'ob-comint)
+(require 'ob-eval)
+;; possibly require modes required for your language
+
+;; set the language mode to be used for Nushell blocks
+(add-to-list 'org-src-lang-modes '("nushell" . nushell))
+
+;; optionally define a file extension for this language
+(add-to-list 'org-babel-tangle-lang-exts '("nushell" . "nu"))
+
+;; optionally declare default header arguments for this language
+(defvar org-babel-default-header-args:nu '())
+
+(defcustom org-babel-nushell-command "nu"
+  "Command to use for executing Nushell code."
+  :group 'org-babel
+  :type 'string)
+
+(defcustom ob-nushell-command-options ""
+  "Option string that should be passed to nushell."
+  :group 'org-babel
+  :type 'string)
+
+;; Format a variable passed with :var for assignment to an Nushell variable.
+(defun ob-nushell-var-to-nushell (var)
+  "Convert an elisp VAR into a string of Nushell source code."
+  (format "'%S'" var))
+
+;; This function expands the body of a source code block by prepending
+;; module load statements and argument definitions to the body.
+(defun org-babel-expand-body:nu (body params &optional processed-params)
+  "Expand BODY according to PARAMS, return the expanded body.
+Optional argument PROCESSED-PARAMS may contain PARAMS preprocessed by ‘org-babel-process-params’."
+  (let* ((pparams (or processed-params (org-babel-process-params params)))
+         (vars (org-babel--get-vars pparams))
+         (use (assq :use pparams))
+         (uses (if use (split-string (cdr use) ", *") '())))
+    (when (assq :debug params)
+      (message "pparams=%s" pparams)
+      (message "vars=%s" vars)
+      (message "uses=%s" uses))
+    (concat
+     (mapconcat ;; use modules
+      (apply-partially 'concat "use ") uses "\n")
+     "\n"
+     (mapconcat ;; define any variables
+      (lambda (pair)
+        (format "let %s = %s"
+                (car pair) (ob-nushell-var-to-nushell (cdr pair))))
+      vars "\n") "\n" body "\n" )))
+
+;; This is the main function which is called to evaluate a code
+;; block.
+;;
+;; This function will evaluate the body of the source code and return
+;; its output. For Nushell the :results header argument has no effect,
+;; the full output of the executed code is always returned.
+;;
+;; In addition to the standard header arguments, you can specify :use
+;; to indicate modules which should be loaded with the `use' statement
+;; before executing the code. You can specify multiple modules
+;; separated by commas.
+(defun org-babel-execute:nu (body params)
+  "Execute a BODY of Nushell code with org-babel with the given PARAMS.
+This function is called by `org-babel-execute-src-block'"
+  (message "executing Nushell source code block")
+  (let* ((processed-params (org-babel-process-params params))
+         ;; variables assigned for use in the block
+         (vars (assoc :vars processed-params))
+         ;; expand the body with `org-babel-expand-body:nu'
+         (full-body (org-babel-expand-body:nu
+                     body params processed-params)))
+    (when (assq :debug params)
+      (message "full-body=%s" full-body))
+    (let* ((temporary-file-directory ".")
+           (log (cdr (assoc :log params)))
+           (tempfile (make-temp-file "nushell-")))
+      (with-temp-file tempfile
+        (insert full-body))
+      (unwind-protect
+          (shell-command-to-string
+           (concat
+            org-babel-nushell-command
+            " "
+            (when log (concat "--log " log ))
+            " "
+            ob-nushell-command-options
+            " "
+            (shell-quote-argument tempfile)))
+        (delete-file tempfile)))
+    ))
+
+(provide 'ob-nushell)
+;; ob-nushell.el ends here
+
+(require 'ob-nushell)
