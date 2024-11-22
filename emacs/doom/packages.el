@@ -65,3 +65,10 @@
 
 ;; should not be need part of doom emacs packages
 ;; (package! dap-mode)
+
+(package! flycheck-aspell)
+(package! imenu-list)
+
+;; not using github for now keeping in config
+;; (package! ob-nushell
+;;   :recipe (:host github :repo "b3tchi/ob-nushell"))
