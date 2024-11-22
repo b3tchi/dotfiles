@@ -36,7 +36,7 @@ return {
 	end,
 	opts = {
 		defaults = {
-			lazy == false,
+			lazy = false,
 		},
 	},
 }

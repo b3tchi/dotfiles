@@ -40,7 +40,7 @@ require("lazy").setup({
 			disabled_plugins = {
 				"gzip",
 				-- "matchit",
-				-- "matchparen",
+				-- "matchsitterparen",
 				-- "netrwPlugin",
 				"tarPlugin",
 				"tohtml",
@@ -49,6 +49,9 @@ require("lazy").setup({
 			},
 		},
 	},
+	-- dev = {
+	-- 	path = vim.fn.stdpath("data"),
+	-- },
 })
 
 --myfxs path

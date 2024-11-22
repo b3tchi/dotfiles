@@ -5,6 +5,7 @@ windows:
     plugins: ~\AppData\Local\nvim\lua\plugins
     _myfxs: ~\AppData\Local\nvim-data\myfxs
     _wzor: ~\AppData\Local\nvim-data\wzor
+    _nunav: ~\AppData\Local\nvim-data\nunav
 
   installs: winget install Neovim.Neovim
 
@@ -13,5 +14,6 @@ linux:
     init.lua: ~/.config/nvim/init.lua
     config: ~/.config/nvim/lua/config
     plugins: ~/.config/nvim/lua/plugins
-    _myfxs: ~/.config/nvim-data/myfxs
-    _wzor: ~/.config/nvim-data/wzor
+    _myfxs: ~/.local/share/nvim/myfxs
+    _wzor: ~/.local/share/nvim/wzor
+    _nunav: ~/.local/share/nvim/nunav
