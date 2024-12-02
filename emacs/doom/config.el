@@ -411,7 +411,6 @@ This function is called by `org-babel-execute-src-block'"
 
 ;; ;; Add to desired mode hooks, for example, for programming modes:
 ;; (add-hook 'nushell-ts-mode-hook 'my-customize-imenu)
-
 (require 'hydra)
 (defhydra hydra-window (:color red :hint nil)
   "
