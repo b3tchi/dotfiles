@@ -418,7 +418,7 @@ This function is called by `org-babel-execute-src-block'"
  Focus: _h__j__k__l_
   Move: _H__J__K__L_
  Split: _b_ellow _s_ide by
-Delete: _o_thers win_d_ow
+Delete: _o_thers _c_urrent
   Misc: _m_ark _u_ndo _r_edo _q_uit
 "
   ("h" windmove-left)
@@ -439,7 +439,7 @@ Delete: _o_thers win_d_ow
   ("r" winner-redo) ;;Fixme, not working?
 
   ("o" delete-other-windows :exit t)
-  ("d" delete-window)
+  ("c" delete-window)
 
   ("a" ace-window :exit t)
   ("q" nil)
@@ -450,7 +450,3 @@ Delete: _o_thers win_d_ow
   ("m" headlong-bookmark-jump))
 
 (map! :leader :desc "window hydra" "w" #'hydra-window/body)
-;; :leader
-;; (define-key Buffer-menu-mode-map "C-w" 'hydra-window/body)
-
-;; (global-set-key (kbd "C-w") 'hydra-window/body)
