@@ -40,6 +40,11 @@
 ;; numbers are disabled. For relative line numbers, set this to `relative'.
 (setq display-line-numbers-type t)
 
+;; set indetation mod
+(setq-default indent-tabs-mode nil)
+(setq-default tab-width 4)
+(setq indent-line-function 'insert-tab)
+
 ;; If you use `org' and don't want your org files in the default location below,
 ;; change `org-directory'. It must be set before org loads!
 (setq org-directory "~/org/")
@@ -47,8 +52,8 @@
 (use-package! org-super-agenda
   :init
   (setq org-super-agenda-groups '((:name "Today"
-                                        :time-grid t
-                                        :scheduled today)))
+                                   :time-grid t
+                                   :scheduled today)))
   :config
   (org-super-agenda-mode))
 
@@ -88,7 +93,7 @@
 
 ;; auto commit messages
 (use-package! git-auto-commit-mode
-    :ensure t)
+  :ensure t)
 
 (defun my-commit-settings ()
   (setq gac-automatically-add-new-files-p t)
@@ -97,9 +102,9 @@
 
 ;; (add-hook 'org-mode-hook 'my-commit-settings)
 (add-hook 'org-mode-hook
-  (lambda () (when (s-prefix? (expand-file-name "~/org-roam/")
-                      (buffer-file-name (current-buffer)))
-                (my-commit-settings))))
+          (lambda () (when (s-prefix? (expand-file-name "~/org-roam/")
+                                      (buffer-file-name (current-buffer)))
+                       (my-commit-settings))))
 ;; ;; Plan B for images
 ;; ;; we look to doom emacs for an example how to get remote images also working
 ;; ;; for normal http / https links
@@ -223,7 +228,7 @@
   ;; CHANGED
   (org-babel-tmux-terminal "~/.local/bin/org-tmux.sh")
   (org-babel-tmux-terminal-opts nil)
-  ;
+                                        ;
   ;; Finally, if your tmux is not in your $PATH for whatever reason, you
   ;; may set the path to the tmux binary as follows:
   (org-babel-tmux-location "/usr/bin/tmux"))
@@ -246,7 +251,7 @@
 (setq ob-mermaid-cli-path "/usr/bin/mmdc")
 
 (org-babel-do-load-languages 'org-babel-load-languages
-        (append org-babel-load-languages '((mermaid     . t))))
+                             (append org-babel-load-languages '((mermaid     . t))))
 
 ;; Add mermaid language to `org-src-lang-modes`
 (require 'mermaid-ts-mode)
@@ -261,20 +266,20 @@
 (setq org-plantuml-executable-path "/usr/bin/plantuml")
 
 (org-babel-do-load-languages 'org-babel-load-languages
-        (append org-babel-load-languages '((plantuml . t))))
+                             (append org-babel-load-languages '((plantuml . t))))
 
 ;; Enable plantuml-mode for PlantUML files
 (require 'plantuml-mode)
 (add-to-list 'auto-mode-alist '("\\.plantuml\\'" . plantuml-mode))
 
 (add-to-list
-  'org-src-lang-modes '("plantuml" . plantuml))
+ 'org-src-lang-modes '("plantuml" . plantuml))
 
 ;;NUSHELL SUPPORT
 ;;install package nushell-ts-mode
 (require 'nushell-ts-mode)
 (org-babel-do-load-languages 'org-babel-load-languages
-        (append org-babel-load-languages '((nushell     . t))))
+                             (append org-babel-load-languages '((nushell     . t))))
 
 ;; Add nushell language to `org-src-lang-modes`
 (add-to-list 'auto-mode-alist '("\\.nu\\'" . nushell-ts-mode))
@@ -387,3 +392,65 @@ This function is called by `org-babel-execute-src-block'"
 ;; ob-nushell.el ends here
 
 (require 'ob-nushell)
+
+;; TBD filter-out variables from imenu
+;; (defun my-remove-variables-from-imenu-index (index)
+;;   "Remove 'Variables' category entries from imenu INDEX."
+;;   (seq-filter
+;;    (lambda (item)
+;;      (let ((name (car item)))
+;;        (not (and (stringp name) (string-equal name "Variables")))))
+;;    index))
+
+;; (defun my-customize-imenu ()
+;;   "Customize imenu to exclude 'Variables' entries."
+;;   ;; Set custom index function that includes post-processing
+;;   (setq imenu-create-index-function
+;;         (lambda ()
+;;           (my-remove-variables-from-imenu-index (imenu-default-create-index-function)))))
+
+;; ;; Add to desired mode hooks, for example, for programming modes:
+;; (add-hook 'nushell-ts-mode-hook 'my-customize-imenu)
+
+(require 'hydra)
+(defhydra hydra-window (:color red :hint nil)
+  "
+ Focus: _h__j__k__l_
+  Move: _H__J__K__L_
+ Split: _b_ellow _s_ide by
+Delete: _o_thers win_d_ow
+  Misc: _m_ark _u_ndo _r_edo _q_uit
+"
+  ("h" windmove-left)
+  ("j" windmove-down)
+  ("k" windmove-up)
+  ("l" windmove-right)
+
+  ("H" +evil/window-move-left nil)
+  ("J" +evil/window-move-down nil)
+  ("K" +evil/window-move-up nil)
+  ("L" +evil/window-move-right nil)
+
+  ("s" split-window-right)
+  ("b" split-window-below)
+
+  ;; winner-mode must be enabled
+  ("u" winner-undo)
+  ("r" winner-redo) ;;Fixme, not working?
+
+  ("o" delete-other-windows :exit t)
+  ("d" delete-window)
+
+  ("a" ace-window :exit t)
+  ("q" nil)
+
+  ;; ("z" ace-maximize-window "ace-one" :color blue)
+  ;; ("B" ido-switch-buffer "buf")
+
+  ("m" headlong-bookmark-jump))
+
+(map! :leader :desc "window hydra" "w" #'hydra-window/body)
+;; :leader
+;; (define-key Buffer-menu-mode-map "C-w" 'hydra-window/body)
+
+;; (global-set-key (kbd "C-w") 'hydra-window/body)

@@ -44,7 +44,7 @@
        ;;(emoji +unicode)  ; 🙂
        hl-todo           ; highlight TODO/FIXME/NOTE/DEPRECATED/HACK/REVIEW
        indent-guides     ; highlighted indent columns
-       ;;ligatures         ; ligatures and symbols to make your code pretty again
+       ligatures         ; ligatures and symbols to make your code pretty again
        ;;minimap           ; show a map of the code on the side
        modeline          ; snazzy, Atom-inspired modeline, plus API
        ;;nav-flash         ; blink cursor line after big motions
@@ -64,7 +64,7 @@
        (evil +everywhere); come to the dark side, we have cookies
        file-templates    ; auto-snippets for empty files
        fold              ; (nigh) universal code folding
-       ;;(format +onsave)  ; automated prettiness
+       (format +onsave)  ; automated prettiness
        ;;god               ; run Emacs commands without modifier keys
        ;;lispy             ; vim for lisp, for people who don't like vim
        ;;multiple-cursors  ; editing in many places at once
@@ -90,7 +90,7 @@
 
        :checkers
        syntax              ; tasing you for every semicolon you forget
-       ;;(spell +flyspell) ; tasing you for misspelling mispelling
+       (spell +flyspell) ; tasing you for misspelling mispelling
        grammar           ; tasing grammar mistake every you make
 
        :tools
@@ -167,7 +167,7 @@
         +present
         )
        ;;php               ; perl's insecure younger brother
-       ;;plantuml          ; diagrams for confusing people more
+       ;; plantuml          ; diagrams for confusing people more
        ;;graphviz          ; diagrams for confusing yourself even more
        ;;purescript        ; javascript, but functional
        (python
@@ -207,23 +207,3 @@
        :config
        ;;literate
        (default +bindings +smartparens))
-
-;; (require 'ob-tmux)
-;; (setq org-babel-default-header-args:tmux
-;;       '((:results . "silent")	;
-;;         (:session . "default")	; The default tmux session to send code to
-;;         (:socket  . nil)))      ; The default tmux socket to communicate with
-
-;; ;; The tmux sessions are prefixed with the following string.
-;; ;; You can customize this if you like.
-;; (setq org-babel-tmux-session-prefix "ob-")
-
-;; ;; The terminal that will be used.
-;; ;; You can also customize the options passed to the terminal.
-;; (setq org-babel-tmux-terminal "xterm")
-;; (setq org-babel-tmux-terminal-opts '("-T" "ob-tmux" "-e"))
-;; ; The default terminal is "gnome-terminal" with options "--".
-
-;; ;; Finally, if your tmux is not in your $PATH for whatever reason, you
-;; ;; may set the path to the tmux binary as follows:
-;; (setq org-babel-tmux-location "/usr/bin/tmux")
