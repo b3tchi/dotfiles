@@ -449,3 +449,5 @@ Delete: _o_thers _c_urrent
   ("m" headlong-bookmark-jump))
 
 (map! :leader :desc "window hydra" "w" #'hydra-window/body)
+
+;; (setq ispell-program-name (executable-find "hunspell"))
