@@ -409,7 +409,8 @@ This function is called by `org-babel-execute-src-block'"
 ;;         (lambda ()
 ;;           (my-remove-variables-from-imenu-index (imenu-default-create-index-function)))))
 
-;; ;; Add to desired mode hooks, for example, for programming modes:
+;; HYDRA WINDOWS MANAGEMENT
+;; Add to desired mode hooks, for example, for programming modes:
 ;; (add-hook 'nushell-ts-mode-hook 'my-customize-imenu)
 (require 'hydra)
 (defhydra hydra-window (:color red :hint nil)
@@ -418,6 +419,7 @@ This function is called by `org-babel-execute-src-block'"
   Move: _H__J__K__L_
  Split: _b_ellow _s_ide by
 Delete: _o_thers _c_urrent
+Resize: _<_/_>_width _+_/_-_height
   Misc: _m_ark _u_ndo _r_edo _q_uit
 "
   ("h" windmove-left)
@@ -436,6 +438,11 @@ Delete: _o_thers _c_urrent
   ;; winner-mode must be enabled
   ("u" winner-undo)
   ("r" winner-redo) ;;Fixme, not working?
+
+  ("<" evil-window-increase-width) ;;Fixme, not working?
+  (">" evil-window-decrease-width) ;;Fixme, not working?
+  ("+" evil-window-increase-height) ;;Fixme, not working?
+  ("-" evil-window-decrease-height) ;;Fixme, not working?
 
   ("o" delete-other-windows :exit t)
   ("c" delete-window)
