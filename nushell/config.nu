@@ -682,6 +682,9 @@ source starship.nu
 # carapace
 source carapace.nu
 
+# yazi
+source yazi.nu
+
 # lazygit
 alias lg = lazygit
 
