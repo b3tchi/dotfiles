@@ -47,6 +47,23 @@
 (setq-default tab-width 4)
 (setq indent-line-function 'insert-tab)
 
+;; Highlight indent level for whitespace-sensitive languages
+(use-package highlight-indent-guides
+  :commands highlight-indent-guides-mode
+  :custom
+  (highlight-indent-guides-method 'character)
+  ;; (highlight-indent-guides-auto-character-face-perc 7)
+  ;; (highlight-indent-guides-responsive 'stack)
+  (highlight-indent-guides-responsive 'top)
+  (highlight-indent-guides-auto-character-face-perc 30)
+  (highlight-indent-guides-auto-top-character-face-perc 130)
+  (highlight-indent-guides-auto-stack-character-face-perc 30)
+)
+
+;; (require 'highlight-indent-guides)
+(add-hook 'prog-mode-hook 'highlight-indent-guides-mode)
+;; (setq highlight-indent-guides-method 'character)
+
 ;; If you use `org' and don't want your org files in the default location below,
 ;; change `org-directory'. It must be set before org loads!
 (setq org-directory "~/org/")
