@@ -1,19 +1,19 @@
 return {
 	"anuvyklack/hydra.nvim",
-	dependencies = { 
-    "mrjones2014/smart-splits.nvim" ,
-    "sindrets/winshift.nvim",
-    "mfussenegger/nvim-dap",
-    "anuvyklack/windows.nvim",
-    "anuvyklack/middleclass"
-  },
+	dependencies = {
+		"mrjones2014/smart-splits.nvim",
+		"sindrets/winshift.nvim",
+		"mfussenegger/nvim-dap",
+		"anuvyklack/windows.nvim",
+		"anuvyklack/middleclass",
+	},
 	config = function()
 		local hydra = require("hydra")
 		local splits = require("smart-splits")
 		local cmd = require("hydra.keymap-util").cmd
 		local pcmd = require("hydra.keymap-util").pcmd
 
-    require('windows').setup()
+		require("windows").setup()
 
 		-- local buffer_hydra = Hydra({
 		--    name = 'Barbar',
@@ -182,37 +182,36 @@ return {
 			},
 		})
 
--- vim.g.ps_terminal_jobid = 0
---     local function llconsole(text)
---       vim.fn.chansend(vim.g.ps_terminal_jobid ,text)
---     end
---
---      hydra({
---     name = "DebugPwshHack",
---     hint = hint,
---     config = {
---       color = "pink",
---       invoke_on_body = true,
---       hint = {
---         type = "window",
---       },
---     },
---     mode = { "n" },
---     body = "<leader>dh",
---     heads = {
---       -- { "H", dap.step_out, { desc = "step out" } },
---       { "J", llconsole("v\r"), { desc = "step over" } },
---       -- { "K", dap.step_back, { desc = "step back" } },
---       -- { "L", dap.step_into, { desc = "step into" } },
---       -- { "t", dap.toggle_breakpoint, { desc = "toggle breakpoint" } },
---       -- { "T", dap.clear_breakpoints, { desc = "clear breakpoints" } },
---       { "c", llconsole("c\r"), { desc = "continue" } },
---       -- { "x", dap.terminate, { desc = "terminate" } },
---       -- { "r", dap.repl.open, { exit = true, desc = "open repl" } },
---       { "q", nil, { exit = true, nowait = true, desc = "exit" } },
---     },
---   })
---
-
+		-- vim.g.ps_terminal_jobid = 0
+		--     local function llconsole(text)
+		--       vim.fn.chansend(vim.g.ps_terminal_jobid ,text)
+		--     end
+		--
+		--      hydra({
+		--     name = "DebugPwshHack",
+		--     hint = hint,
+		--     config = {
+		--       color = "pink",
+		--       invoke_on_body = true,
+		--       hint = {
+		--         type = "window",
+		--       },
+		--     },
+		--     mode = { "n" },
+		--     body = "<leader>dh",
+		--     heads = {
+		--       -- { "H", dap.step_out, { desc = "step out" } },
+		--       { "J", llconsole("v\r"), { desc = "step over" } },
+		--       -- { "K", dap.step_back, { desc = "step back" } },
+		--       -- { "L", dap.step_into, { desc = "step into" } },
+		--       -- { "t", dap.toggle_breakpoint, { desc = "toggle breakpoint" } },
+		--       -- { "T", dap.clear_breakpoints, { desc = "clear breakpoints" } },
+		--       { "c", llconsole("c\r"), { desc = "continue" } },
+		--       -- { "x", dap.terminate, { desc = "terminate" } },
+		--       -- { "r", dap.repl.open, { exit = true, desc = "open repl" } },
+		--       { "q", nil, { exit = true, nowait = true, desc = "exit" } },
+		--     },
+		--   })
+		--
 	end,
 }
