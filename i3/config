@@ -200,6 +200,13 @@ bindsym $mod+Shift+8 move container to workspace $ws8; workspace $ws8
 # assign [class="Skype"] $ws5
 
 # Open specific applications in floating mode
+for_window [all] title_window_icon on
+for_window [all] title_window_icon padding 4px
+
+for_window [all] title_format "<b>%class</b> %title"
+for_window [class="org.wezfurlong.wezterm"] title_format "<b>wezterm</b> %title"
+for_window [class="org.gnome.Nautilus"] title_format "<b>nautilus</b> %title"
+
 for_window [title="alsamixer"] floating enable border pixel 1
 for_window [class="calamares"] floating enable border normal
 for_window [class="Clipgrab"] floating enable
@@ -300,7 +307,7 @@ exec --no-startup-id xautolock -time 10 -locker blurlock
 exec_always --no-startup-id ff-theme-util
 exec_always --no-startup-id fix_xcursor
 
-exec_always alttab -font xft:Iosevka-11 -mk Super_L -vertical -s 4 -t 300x30 -bg "#222d31" -bw 4 -bc "#222d31" -inact "#222d31" -frame "#16a085"
+exec_always alttab -font xft:Iosevka-11 -mk Super_L -vertical -s 1 -t 300x30 -bg "#222d31" -bw 4 -bc "#222d31" -inact "#222d31" -frame "#16a085"
 # Color palette used for the terminal ( ~/.Xresources file )
 # Colors are gathered based on the documentation:
 # https://i3wm.org/docs/userguide.html#xresources
