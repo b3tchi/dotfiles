@@ -22,6 +22,7 @@ require("lazy").setup({
 
 		-- editor
 		{ import = "lazyvim.plugins.extras.editor.aerial" },
+		{ import = "lazyvim.plugins.extras.editor.snacks_picker" },
 
 		-- ui
 		{ import = "lazyvim.plugins.extras.ui.treesitter-context" },
