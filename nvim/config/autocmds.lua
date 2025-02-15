@@ -6,3 +6,13 @@ vim.api.nvim_create_autocmd({ "BufEnter", "WinEnter" }, {
 		vim.b.last_focused_time = vim.loop.hrtime() / 1e6
 	end,
 })
+
+--fix terraform and hcl comment string
+vim.api.nvim_create_autocmd("FileType", {
+  group = vim.api.nvim_create_augroup("FixNushellCommentString", { clear = true }),
+  callback = function(ev)
+    vim.bo[ev.buf].commentstring = "# %s"
+  end,
+  pattern = { "nushell", "nu" },
+})
+
