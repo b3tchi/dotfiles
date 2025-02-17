@@ -11,6 +11,7 @@ require("lazy").setup({
 		-- add LazyVim and import its plugins
 		{ "LazyVim/LazyVim", import = "lazyvim.plugins" },
 		-- import any extras
+
 		-- lags
 		{ import = "lazyvim.plugins.extras.lang.typescript" },
 		{ import = "lazyvim.plugins.extras.lang.json" },
@@ -23,6 +24,9 @@ require("lazy").setup({
 		-- editor
 		{ import = "lazyvim.plugins.extras.editor.aerial" },
 		{ import = "lazyvim.plugins.extras.editor.snacks_picker" },
+
+		--coding
+		{ import = "lazyvim.plugins.extras.coding.luasnip" },
 
 		-- ui
 		{ import = "lazyvim.plugins.extras.ui.treesitter-context" },

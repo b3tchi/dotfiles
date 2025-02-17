@@ -1,0 +1,11 @@
+windows:
+  installs: scoop install logseq
+
+linux:
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+        gh release download --repo logseq/logseq --pattern '*.AppImage' --output logseq
+        chmod +x logseq
+        sudo mv -f logseq /usr/local/share/
+      {{/if}}
