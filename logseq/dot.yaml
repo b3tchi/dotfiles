@@ -7,5 +7,5 @@ linux:
       {{#if (eq whoami.distro "Manjaro Linux")}}
         gh release download --repo logseq/logseq --pattern '*.AppImage' --output logseq
         chmod +x logseq
-        sudo mv -f logseq /usr/local/share/
+        sudo mv -f logseq ~/.local/bin/
       {{/if}}

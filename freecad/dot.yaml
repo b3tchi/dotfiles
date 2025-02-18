@@ -11,5 +11,5 @@ linux:
         sudo pacman -Syu freecad
         gh release download --repo realthunder/FreeCAD --pattern '*.AppImage' --output freecad-linkstage3
         chmod +x freecad-linkstage3
-        sudo mv -f freecad-linkstage3 /usr/local/share/
+        mv -f freecad-linkstage3 ~/.local/bin/
       {{/if}}
