@@ -3,3 +3,4 @@ linux:
     config: ~/.i3/config
     picom.conf: ~/.config/picom.conf
     config.rasi: ~/.config/rofi/config.rasi
+    i3status.conf: ~/.config/i3status/config
