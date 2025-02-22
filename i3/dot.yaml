@@ -4,3 +4,4 @@ linux:
     picom.conf: ~/.config/picom.conf
     config.rasi: ~/.config/rofi/config.rasi
     i3status.conf: ~/.config/i3status/config
+    i3blocks.conf: ~/.config/i3blocks/config

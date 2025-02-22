@@ -345,6 +345,7 @@ set $transp       #00000000
 bar {
 	i3bar_command i3bar
 	status_command i3status
+	# status_command i3blocks #alternative status bar
 	position bottom
 
 	## please set your primary output first. Example: 'xrandr --output eDP1 --primary'
