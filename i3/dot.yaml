@@ -5,12 +5,11 @@ linux:
     config.rasi: ~/.config/rofi/config.rasi
     i3status.conf: ~/.config/i3status/config
     i3blocks.conf: ~/.config/i3blocks/config
-    # wintab: ~/.local/bin/wintab
+    config.ini: ~/.config/polybar/config.ini
+    launch.sh: ~/.local/polybar/lanuch.sh
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
         sudo pamac install alttab
       {{/if}}
-    # chmod +x ~/.dotfiles/i3/wintab
-
-    
+      chmod +x ~/.dotfiles/polybar/launch.sh
