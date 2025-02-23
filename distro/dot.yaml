@@ -21,5 +21,8 @@ linux:
           wezterm \
           ttf-iosevka-nerd ttf-iosevkaterm-nerd ttc-iosevka \
           xfce-theme-greybird
+
+        sudo sd '#EnableAUR' 'EnableAUR' /etc/pamac.conf
+        sudo pamac update
         sudo pamac upgrade
       {{/if}}

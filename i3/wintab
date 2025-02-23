@@ -1,0 +1,8 @@
+#/bin/bash
+	rofi -modi window -show window -hide-scrollbar -padding 50 -line-padding 4 -auto-select \
+			-kb-cancel "Super+Escape,Escape" \
+			-kb-accept-entry "!Super-Tab,!Super+Super_L,Return"\
+			-kb-row-down "Super+Tab,Super+Down" \
+			-kb-row-up "Super+ISO_Left_Tab,Super+Up" &
+	xdotool search --sync --class Rofi keyup --delay 0 Tab & 
+	xdotool key --delay 0 Tab &

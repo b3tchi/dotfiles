@@ -128,10 +128,10 @@ bindsym $mod+t layout tabbed
 bindsym $mod+e layout toggle split
 
 # toggle tiling / floating
-bindsym $mod+Shift+space floating toggle
+# bindsym $mod+Shift+space floating toggle
 
 # change focus between tiling / floating windows
-bindsym $mod+space focus mode_toggle
+# bindsym $mod+space focus mode_toggle
 
 # toggle sticky
 bindsym $mod+Shift+s sticky toggle
@@ -307,9 +307,14 @@ exec --no-startup-id xautolock -time 10 -locker blurlock
 exec_always --no-startup-id ff-theme-util
 exec_always --no-startup-id fix_xcursor
 
-exec_always alttab -font xft:Iosevka-11 -mk Super_L -vertical -s 1 -t 300x30 -bg "#222d31" -bw 4 -bc "#222d31" -inact "#222d31" -frame "#16a085"
+exec_always alttab -font xft:Iosevka-11 -mk Super_L -vertical -s 1 -t 300x24 -i 20x20 -bg "#222d31" -bw 2 -bc "#222d31" -inact "#222d31" -frame "#16a085"
+# bindsym $mod+Tab exec --no-startup-id "rofi -show-icons -modi windowcd,window,drun -show window"-selected-row 1
+# bindsym $mod+Tab exec --no-startup-id "rofi -timeout-delay 5 -timeout-action 'kb-accept-entry' -selected-row 1 -kb-accept-entry '!Super-Tab' -show-icons -show window -kb-row-down Super-Tab"
+# bindsym $mod+Tab exec --no-startup-id "rofi -timeout-delay 5 -timeout-action 'kb-accept-entry' -selected-row 1 -kb-accept-entry '!Super-Tab' -show-icons -show window -kb-row-down Super-Tab"
+# bindsym $mod+Tab exec --no-startup-id "wintab -m alttab"
+
 # Color palette used for the terminal ( ~/.Xresources file )
-# Colors are gathered based on the documentation:
+# Colors are gathered based on the documentation::
 # https://i3wm.org/docs/userguide.html#xresources
 # Change the variable name at the place you want to match the color
 # of your terminal like this:
@@ -351,16 +356,18 @@ bar {
 	## please set your primary output first. Example: 'xrandr --output eDP1 --primary'
 	#tray_output primary
 	#tray_output eDP1
+	tray_padding 5 
 
 	bindsym button4 nop
 	bindsym button5 nop
 	#   font xft:URWGothic-Book 11
 	strip_workspace_numbers yes
+	# separator_symbol ''
 
     colors {
         background #222D31
         statusline #F9FAF9
-        separator  #454947
+        separator  #222D31 ##454948
 		#                  border  backgr. text
         focused_workspace  #16a085 #16a085 #292F34
         active_workspace   #353836 #353836 #FDF6E3

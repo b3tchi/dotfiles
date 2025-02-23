@@ -5,3 +5,12 @@ linux:
     config.rasi: ~/.config/rofi/config.rasi
     i3status.conf: ~/.config/i3status/config
     i3blocks.conf: ~/.config/i3blocks/config
+    # wintab: ~/.local/bin/wintab
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+        sudo pamac install alttab
+      {{/if}}
+    # chmod +x ~/.dotfiles/i3/wintab
+
+    
