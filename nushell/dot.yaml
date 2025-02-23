@@ -16,7 +16,7 @@ linux:
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
-        sudo pacman -Syu --needed --noconfirm \
-          nushell starship
+      sudo pacman -Syu --needed --noconfirm \
+        nushell starship
       {{/if}}
-    # pamac install carapace-bin
+      pamac install carapace-bin

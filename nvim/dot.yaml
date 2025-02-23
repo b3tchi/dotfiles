@@ -20,5 +20,5 @@ linux:
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
-        sudo pacman -Syu neovim
+      sudo pacman -Syu neovim
       {{/if}}
