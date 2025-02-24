@@ -1,0 +1,28 @@
+# global:
+#   links:
+#     conf-test.json: |
+#       {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
+#       ~/conf-test.json
+#       {{else}}
+#       ~/conf-testB.json
+#       {{/if}}
+
+linux:
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+        sudo pacman -Syu --needed --noconfirm \
+          yazi \
+          bottom \
+          git github-cli lazygit \
+          bat \
+          fd ripgrep fzf sd \
+          go rust nodejs \
+          wezterm \
+          ttf-iosevka-nerd ttf-iosevkaterm-nerd ttc-iosevka \
+          xfce-theme-greybird
+
+        sudo sd '#EnableAUR' 'EnableAUR' /etc/pamac.conf
+        sudo pamac update
+        sudo pamac upgrade
+      {{/if}}

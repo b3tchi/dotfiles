@@ -128,10 +128,10 @@ bindsym $mod+t layout tabbed
 bindsym $mod+e layout toggle split
 
 # toggle tiling / floating
-bindsym $mod+Shift+space floating toggle
+# bindsym $mod+Shift+space floating toggle
 
 # change focus between tiling / floating windows
-bindsym $mod+space focus mode_toggle
+# bindsym $mod+space focus mode_toggle
 
 # toggle sticky
 bindsym $mod+Shift+s sticky toggle
@@ -200,6 +200,13 @@ bindsym $mod+Shift+8 move container to workspace $ws8; workspace $ws8
 # assign [class="Skype"] $ws5
 
 # Open specific applications in floating mode
+for_window [all] title_window_icon on
+for_window [all] title_window_icon padding 4px
+
+for_window [all] title_format "<b>%class</b> %title"
+for_window [class="org.wezfurlong.wezterm"] title_format "<b>wezterm</b> %title"
+for_window [class="org.gnome.Nautilus"] title_format "<b>nautilus</b> %title"
+
 for_window [title="alsamixer"] floating enable border pixel 1
 for_window [class="calamares"] floating enable border normal
 for_window [class="Clipgrab"] floating enable
@@ -284,25 +291,45 @@ mode "resize" {
 # Lock screen
 bindsym $mod+9 exec --no-startup-id blurlock
 
+#polybar
+exec_always --no-startup-id $HOME/.config/polybar/launch.sh
 # Autostart applications
-exec --no-startup-id /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1
+# authentication for gnome based apps
+# exec --no-startup-id /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1
+
+#wallpaper + compozitor
 exec --no-startup-id nitrogen --restore; sleep 1; picom -b
+
 #exec --no-startup-id manjaro-hello
 exec --no-startup-id nm-applet
-exec --no-startup-id xfce4-power-manager
+exec --no-startup-id xfce4-power-manage
 exec --no-startup-id pamac-tray
 exec --no-startup-id clipit
 # exec --no-startup-id blueman-applet
 # exec_always --no-startup-id sbxkb
-exec --no-startup-id start_conky_maia
-# exec --no-startup-id start_conky_green
-exec --no-startup-id xautolock -time 10 -locker blurlock
-exec_always --no-startup-id ff-theme-util
-exec_always --no-startup-id fix_xcursor
 
-exec_always alttab -font xft:Iosevka-11 -mk Super_L -vertical -s 4 -t 300x30 -bg "#222d31" -bw 4 -bc "#222d31" -inact "#222d31" -frame "#16a085"
+# information on desktop
+# exec --no-startup-id start_conky_maia
+# exec --no-startup-id start_conky_green
+
+#lockscreen
+exec --no-startup-id xautolock -time 10 -locker blurlock
+
+#firefox fix?
+# exec_always --no-startup-id ff-theme-util
+
+#mouse cursor
+# exec_always --no-startup-id fix_xcursor
+
+#task switcher
+exec_always alttab -font xft:Iosevka-11 -mk Super_L -vertical -s 1 -t 300x24 -i 20x20 -bg "#222d31" -bw 2 -bc "#222d31" -inact "#222d31" -frame "#16a085"
+# bindsym $mod+Tab exec --no-startup-id "rofi -show-icons -modi windowcd,window,drun -show window"-selected-row 1
+# bindsym $mod+Tab exec --no-startup-id "rofi -timeout-delay 5 -timeout-action 'kb-accept-entry' -selected-row 1 -kb-accept-entry '!Super-Tab' -show-icons -show window -kb-row-down Super-Tab"
+# bindsym $mod+Tab exec --no-startup-id "rofi -timeout-delay 5 -timeout-action 'kb-accept-entry' -selected-row 1 -kb-accept-entry '!Super-Tab' -show-icons -show window -kb-row-down Super-Tab"
+# bindsym $mod+Tab exec --no-startup-id "wintab -m alttab" #!!Issue script hangs in memory not exitting
+
 # Color palette used for the terminal ( ~/.Xresources file )
-# Colors are gathered based on the documentation:
+# Colors are gathered based on the documentation::
 # https://i3wm.org/docs/userguide.html#xresources
 # Change the variable name at the place you want to match the color
 # of your terminal like this:
@@ -335,32 +362,35 @@ set_from_resource $term_color15    color15
 # Start i3bar to display a workspace bar (plus the system information i3status if available)
 set $transp       #00000000
 
-bar {
-	i3bar_command i3bar
-	status_command i3status
-	position bottom
-
-	## please set your primary output first. Example: 'xrandr --output eDP1 --primary'
-	#tray_output primary
-	#tray_output eDP1
-
-	bindsym button4 nop
-	bindsym button5 nop
-	#   font xft:URWGothic-Book 11
-	strip_workspace_numbers yes
-
-    colors {
-        background #222D31
-        statusline #F9FAF9
-        separator  #454947
-		#                  border  backgr. text
-        focused_workspace  #16a085 #16a085 #292F34
-        active_workspace   #353836 #353836 #FDF6E3
-        inactive_workspace #222D31 #222D31 #EEE8D5
-        binding_mode       #2C2C2C #2C2C2C #F9FAF9
-        urgent_workspace   #FDF6E3 #FDF6E3 #CB4B16
-    }
-}
+# bar {
+# 	i3bar_command i3bar
+# 	status_command i3status
+# 	# status_command i3blocks #alternative status bar
+# 	position bottom
+#
+# 	## please set your primary output first. Example: 'xrandr --output eDP1 --primary'
+# 	#tray_output primary
+# 	#tray_output eDP1
+# 	tray_padding 5 
+#
+# 	bindsym button4 nop
+# 	bindsym button5 nop
+# 	#   font xft:URWGothic-Book 11
+# 	strip_workspace_numbers yes
+# 	# separator_symbol ''
+#
+#     colors {
+#         background #222D31
+#         statusline #F9FAF9
+#         separator  #222D31 ##454948
+# 		#                  border  backgr. text
+#         focused_workspace  #16a085 #16a085 #292F34
+#         active_workspace   #353836 #353836 #FDF6E3
+#         inactive_workspace #222D31 #222D31 #EEE8D5
+#         binding_mode       #2C2C2C #2C2C2C #F9FAF9
+#         urgent_workspace   #FDF6E3 #FDF6E3 #CB4B16
+#     }
+# }
 
 # hide/unhide i3status bar
 # bindsym $mod+m bar mode toggle

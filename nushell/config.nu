@@ -260,15 +260,15 @@ $env.config = {
         }
     }
 
-    filesize: {
-        metric: true # true => KB, MB, GB (ISO standard), false => KiB, MiB, GiB (Windows standard)
-        format: "auto" # b, kb, kib, mb, mib, gb, gib, tb, tib, pb, pib, eb, eib, auto
-    }
+	#filesize: {
+    #    metric: true # true => KB, MB, GB (ISO standard), false => KiB, MiB, GiB (Windows standard)
+    #    format: "auto" # b, kb, kib, mb, mib, gb, gib, tb, tib, pb, pib, eb, eib, auto
+    #}
 
     cursor_shape: {
         emacs: line # block, underscore, line, blink_block, blink_underscore, blink_line (line is the default)
-        vi_insert: block # block, underscore, line , blink_block, blink_underscore, blink_line (block is the default)
-        vi_normal: underscore # block, underscore, line, blink_block, blink_underscore, blink_line (underscore is the default)
+        vi_insert: line # block, underscore, line , blink_block, blink_underscore, blink_line (block is the default)
+        vi_normal: block # block, underscore, line, blink_block, blink_underscore, blink_line (underscore is the default)
     }
 
     color_config: {} # if you want a more interesting theme, you can replace the empty record with `$dark_theme`, `$light_theme` or another custom record

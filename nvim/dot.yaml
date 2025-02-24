@@ -17,3 +17,8 @@ linux:
     _myfxs: ~/.local/share/nvim/myfxs
     _wzor: ~/.local/share/nvim/wzor
     _nunav: ~/.local/share/nvim/nunav
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -Syu neovim
+      {{/if}}

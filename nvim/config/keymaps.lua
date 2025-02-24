@@ -21,6 +21,9 @@ vim.keymap.set(
   { noremap = true, silent = true, desc = "replace word from clipboard" }
 )
 
+
+--keep clipboard same when pasting over content
+vim.keymap.set("x", "p", function() return 'pgv"' .. vim.v.register .. "y" end, { remap = false, expr = true })
 -- vim.keymap.set("n", "<leader>dH", "<leader>dh", { noremap = true, silent = true, desc = "triggerDh" })
 -- nnoremap <space>rc :%s/<C-r><C-w>//gc<Left><Left><Left>
 -- nnoremap <space>rr :%s/<C-r>"//gc<Left><Left><Left>

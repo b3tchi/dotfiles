@@ -13,3 +13,10 @@ linux:
     env.nu: ~/.config/nushell/env.nu
     scripts: ~/.config/nushell/scripts
     apps: ~/.config/nushell/apps
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -Syu --needed --noconfirm \
+        nushell starship
+      {{/if}}
+      pamac install carapace-bin

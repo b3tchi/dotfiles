@@ -5,3 +5,11 @@ linux:
     user.cfg: ~/.config/FreeCAD/user.cfg
     link.system.cfg: ~/.config/FreeCAD/link.system.cfg
     link.user.cfg: ~/.config/FreeCAD/link.user.cfg
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+        sudo pacman -Syu freecad
+        gh release download --repo realthunder/FreeCAD --pattern '*.AppImage' --output freecad-linkstage3
+        chmod +x freecad-linkstage3
+        mv -f freecad-linkstage3 ~/.local/bin/
+      {{/if}}
