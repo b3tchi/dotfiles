@@ -94,4 +94,6 @@ $env.NU_PLUGIN_DIRS = [
 
 # To add entries to PATH (on Windows you might use Path), you can use the following pattern:
 # $env.PATH = ($env.PATH | split row (char esep) | prepend '/some/path')
-$env.GPG_TTY = (tty)
+if $nu.os-info.name != "windows" {
+	$env.GPG_TTY = (tty)
+}
