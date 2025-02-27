@@ -23,25 +23,25 @@ export def 'repo init' [
 	--init-commit: string = 'repo creation commit' #initial commit message
 ] {
 
-	let $current_path = (if $path == null {$env.PWD} else {$path}) 
+	let $current_path = (if $path == null {$env.PWD} else {$path}) #I/0
 
 	let main_path = $current_path | path join main
 	let bare_path = $current_path | path join default
 
-	#create ne repository
-	git init --bare $bare_path --initial-branch=main
-	git $"--git-dir=($bare_path)" worktree add $main_path
+	#create bare repository
+	git init --bare $bare_path --initial-branch=main #I/O
+	git $"--git-dir=($bare_path)" worktree add $main_path #I/O
 
 	#copy data
-	touch ( $main_path | path join README.md )
+	touch ( $main_path | path join README.md ) #I/O
 	ls -a $current_path | where name !~ main | where name !~ default | each { |item|
 		print $"move ($item.name)"
-		mv -fv $item.name $main_path
+		mv -fv $item.name $main_path #I/O
 	}
 
 	#add all items
-	git $"--git-dir=($bare_path)" $"--work-tree=($main_path)" add '*'
-	git $"--git-dir=($bare_path)" $"--work-tree=($main_path)" commit -m $init_commit
+	git $"--git-dir=($bare_path)" $"--work-tree=($main_path)" add '*' #I/O
+	git $"--git-dir=($bare_path)" $"--work-tree=($main_path)" commit -m $init_commit #I/O
 }
 
 def scopes [] { ["private", "internal", "public"] }
