@@ -97,3 +97,8 @@ $env.NU_PLUGIN_DIRS = [
 if $nu.os-info.name != "windows" {
 	$env.GPG_TTY = (tty)
 }
+
+# carapace
+$env.CARAPACE_BRIDGES = 'zsh,fish,bash,inshellisense' # optional
+mkdir ~/.cache/carapace
+carapace _carapace nushell | save --force ~/.cache/carapace/init.nu
