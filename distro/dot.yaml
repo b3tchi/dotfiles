@@ -6,6 +6,16 @@
 #       {{else}}
 #       ~/conf-testB.json
 #       {{/if}}
+windows:
+  installs:
+    cmd: |
+      scoop install yazi
+      scoop install bottom
+      scoop install gh lazygit
+      scoop install bat
+      scoop install ripgrep fd
+      scoop install wezterm
+      scoop install iosevka-nf iosevka-nf-mono
 
 linux:
   installs:
