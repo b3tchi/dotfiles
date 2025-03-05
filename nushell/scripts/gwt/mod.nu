@@ -8,6 +8,12 @@ def data [] {
 	}
 }
 
+def profile [
+	profiles:any
+	profile:string@profiles
+] {
+	$profiles | get $profile
+}
 def profiles [] { (data | columns ) }
 
 def vars [
@@ -169,15 +175,17 @@ export def 'repo get' [
 
 # register user ssh token
 export def 'user register' [
-	profile:string@profiles # select which profile to register
+	profile_name:string@profiles # select which profile to register
 	--ssh-path:string #already existing registered git registered key
 ] {
 
-	let domain = (vars $profile domain)
-	let email = (vars $profile email)
-	let user = (vars $profile user)
+	let profiles = data
+	let profile = (profile $profiles $profile)
+	let domain = (vars $profile_name domain)
+	let email = (vars $profile_name email)
+	let user = (vars $profile_name user)
 
-	let gh_user = (gh api user | from json | get login)
+	let gh_user = (gh api user | from json | get login) #I/O
 	if ($user != $gh_user) {
 		print "gh currently log as diffrent user"
 		return
