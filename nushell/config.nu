@@ -696,6 +696,9 @@ alias pu = pueue
 # lazygit
 alias lg = lazygit
 
+# bottom as top
+alias top = btm -b
+
 # lf
 def --env --wrapped lfcd [...args:string] {
 	cd (lf -print-last-dir ...$args)
