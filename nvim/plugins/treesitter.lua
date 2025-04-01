@@ -20,6 +20,7 @@ return {
 			"rasi",
 			"nu",
 		},
+		ignore_install = { "org" },
 		playground = {
 			enable = true,
 			updatetime = 25, -- Debounced time for highlighting nodes in the playground from source code
