@@ -321,7 +321,7 @@ $env.config = {
         env_change: {
             PWD: [{|before, after| null }] # run if the PWD environment is different since the last repl input
         }
-        display_output: { table } # run before the output of a command is drawn, example: `{ if (term size).columns >= 100 { table -e } else { table } }`
+        display_output: { $env.LAST = $in | table;  $in | if (term size).columns >= 100 { table -e } else { table }  } # run before the output of a command is drawn, example: `{ if (term size).columns >= 100 { table -e } else { table } }`
         command_not_found: { null } # return an error message when a command is not found
     }
 
@@ -679,6 +679,9 @@ $env.config = {
         }
     ]
 }
+#last command
+alias _ = echo $env.LAST
+
 #Applications parts
 
 # starship
@@ -697,7 +700,7 @@ alias pu = pueue
 alias lg = lazygit
 
 # bottom as top
-alias top = btm -b
+alias top = lazygit
 
 # lf
 def --env --wrapped lfcd [...args:string] {
