@@ -8,6 +8,12 @@ def data [] {
 	}
 }
 
+def profile [
+	profiles:any
+	profile:string@profiles
+] {
+	$profiles | get $profile
+}
 def profiles [] { (data | columns ) }
 
 def vars [
@@ -169,16 +175,18 @@ export def 'repo get' [
 
 # register user ssh token
 export def 'user register' [
-	profile:string@profiles # select which profile to register
+	profile_name:string@profiles # select which profile to register
 	--ssh-path:string #already existing registered git registered key
 ] {
 
-	let domain = (vars $profile domain)
-	let email = (vars $profile email)
-	let user = (vars $profile user)
+	let profiles = data #I/O
+	let p = (profile $profiles $profile)
+	# let domain = (vars $profile_name domain)
+	# let email = (vars $profile_name email)
+	# let user = (vars $profile_name user)
 
-	let gh_user = (gh api user | from json | get login)
-	if ($user != $gh_user) {
+	let gh_user = (gh api user | from json | get login) #I/O
+	if ($p.user != $gh_user) {
 		print "gh currently log as diffrent user"
 		return
 	}
@@ -186,16 +194,18 @@ export def 'user register' [
 	let stamp = date now | format date %y%m%d
 	let os = (sys host).name
 	let host = (sys host).hostname
+
 	let coding = 'ed25519'
 
-	let uniq_name = [$stamp $user $host $os $coding ] | str join '_'
+
+	let uniq_name = [$stamp $p.user $host $os $coding ] | str join '_'
 
 	let root_path = ( if $nu.os-info.name == "windows" { $env.USERPROFILE } else { $env.HOME } )
 	let file = (if ( $ssh_path | is-empty ) { $root_path | path join .ssh $uniq_name } else { $ssh_path | path expand })
 	# print $file
 
 	if ($ssh_path | is-empty) {
-		ssh-keygen -t $coding -C $email -f $file -N ''
+		ssh-keygen -t $coding -C $p.email -f $file -N ''
 		gh ssh-key add $"($file).pub" --title $uniq_name
 	}
 
@@ -206,9 +216,9 @@ export def 'user register' [
 	let config_dir = $root_path | path join .ssh config.d
 	mkdir $config_dir
 
-	let config_file = $config_dir | path join ( [$domain $user] | str join '-' )
-	let config = $"Host ($domain)-($user)
-	HostName ($domain)
+	let config_file = $config_dir | path join ( [$p.domain $p.user] | str join '-' )
+	let config = $"Host ($p.domain)-($p.user)
+	HostName ($p.domain)
 	User git
 	IdentityFile ($file)"
 
