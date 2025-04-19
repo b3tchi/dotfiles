@@ -1,0 +1,6 @@
+global:
+  installs:
+linux:
+  links:
+    config: ~/.config/sway/config
+    config.d: ~/.config/sway/config.d
