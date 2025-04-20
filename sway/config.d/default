@@ -53,6 +53,19 @@ input * {
 	xkb_variant "dvorak"
 }
 
+### Gnome settings
+set $gnome-schema org.gnome.desktop.interface
+exec_always {
+    gsettings set $gnome-schema gtk-theme 'Adwaita-dark'
+    gsettings set $gnome-schema icon-theme 'elementary'
+    gsettings set $gnome-schema font-name 'Iosevka 10'
+    gsettings set $gnome-schema monospace-font-name 'Iosevka 10'
+    gsettings set $gnome-schema document-font-name 'Iosevka 10'
+    gsettings set org.gnome.desktop.wm.preferences titlebar-font 'Iosevka 10'
+    gsettings set org.gnome.desktop.wm.preferences button-layout ''
+    gsettings set org.gnome.desktop.default-applications.terminal exec $term
+    gsettings set org.gnome.desktop.default-applications.terminal exec-arg ''
+}
 #
 # Example configuration:
 #
@@ -91,7 +104,7 @@ font pango:Iosevka 11
     bindsym $mod+Shift+c reload
 
     # Exit sway (logs you out of your Wayland session)
-    bindsym $mod+Shift+e exec swaynag -t warning -m 'You pressed the exit shortcut. Do you really want to exit sway? This will end your Wayland session.' -B 'Yes, exit sway' 'swaymsg exit'
+    bindsym $mod+Shift+e exec swaynag --font 'Iosevka 11' -t warning -m 'You pressed the exit shortcut. Do you really want to exit sway? This will end your Wayland session.' -B 'Yes, exit sway' 'swaymsg exit'
 #
 # Moving around:
 #
