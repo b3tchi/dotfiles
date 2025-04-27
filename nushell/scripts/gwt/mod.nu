@@ -180,7 +180,7 @@ export def 'user register' [
 ] {
 
 	let profiles = data #I/O
-	let p = (profile $profiles $profile)
+	let p = (profile $profiles $profile_name)
 	# let domain = (vars $profile_name domain)
 	# let email = (vars $profile_name email)
 	# let user = (vars $profile_name user)
