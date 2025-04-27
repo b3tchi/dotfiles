@@ -1,5 +1,5 @@
 return {
-	"anuvyklack/hydra.nvim",
+	"nvimtools/hydra.nvim",
 	dependencies = {
 		"mrjones2014/smart-splits.nvim",
 		"sindrets/winshift.nvim",
