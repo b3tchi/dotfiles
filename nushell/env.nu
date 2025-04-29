@@ -84,13 +84,14 @@ $env.ENV_CONVERSIONS = {
 $env.NU_LIB_DIRS = [ 
     ($nu.default-config-dir | path join 'apps') 
     ($nu.default-config-dir | path join 'scripts') 
-    ]
+]
 
 
 # Directories to search for plugin binaries when calling register
 $env.NU_PLUGIN_DIRS = [
-    # ($nu.default-config-dir | path join 'plugins') # add <nushell-config-dir>/plugins
+	($nu.current-exe | path dirname)	
 ]
+ #   # ($nu.default-config-dir | path join 'plugins') # add <nushell-config-dir>/plugins
 
 # To add entries to PATH (on Windows you might use Path), you can use the following pattern:
 # $env.PATH = ($env.PATH | split row (char esep) | prepend '/some/path')
