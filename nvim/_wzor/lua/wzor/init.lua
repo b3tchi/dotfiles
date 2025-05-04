@@ -59,8 +59,14 @@ local function run_command(block_header)
 			tmp_file,
 			vim.g.multiplexer_id
 		)
+	else
+		command = string.format(
+			"nu -c 'open %s | lines | each {|r| wezterm cli send-text --pane-id %d --no-paste $\"($r)\\r\"}'",
+			tmp_file,
+			vim.g.multiplexer_id
+		)
 	end
-	-- print(command)
+	print(command)
 
 	vim.fn.system(command)
 end
