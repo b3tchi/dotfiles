@@ -20,6 +20,10 @@ return {
 			"rasi",
 			"nu",
 		},
+		-- highlight = {
+		-- 	enable = true,
+		-- 	additional_vim_regex_highlighting = { "org" },
+		-- },
 		ignore_install = { "org" },
 		playground = {
 			enable = true,
