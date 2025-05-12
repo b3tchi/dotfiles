@@ -69,6 +69,7 @@ $env.ENV_CONVERSIONS = {
     }
 }
 
+$env.TEMP = $nu.temp-path
 #filter out native paths
 # if $nu.os-info.name == "windows" {
 #     $env.Path = ($env.Path | split row (char esep) | sort | uniq 

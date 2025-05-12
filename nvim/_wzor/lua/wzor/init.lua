@@ -29,16 +29,22 @@ local function org_block_get()
 	return resp
 end
 
-local function getLine()
-	local cur_position = vim.fn.getcurpos()[2]
-
-	local cur_text = vim.api.nvim_buf_get_lines(0, cur_position - 1, cur_position, true)
-	return cur_text[1]
-end
+-- local function getLine()
+-- 	local cur_position = vim.fn.getcurpos()[2]
+--
+-- 	local cur_text = vim.api.nvim_buf_get_lines(0, cur_position - 1, cur_position, true)
+-- 	return cur_text[1]
+-- end
 
 local function temp_path()
 	local fname = os.date("%Y%m%d_%H%M%S")
-	local tmp_path = os.getenv("TEMP") .. "\\nvim\\md_blocks\\"
+	local tmp_path
+
+	if vim.loop.os_uname().sysname == "Windows_NT" then
+		tmp_path = os.getenv("TEMP") .. "\\nvim\\md_blocks\\"
+	else
+		tmp_path = os.getenv("TEMP") .. "/nvim/md_blocks/"
+	end
 
 	vim.fn.mkdir(tmp_path, "p")
 
