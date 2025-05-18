@@ -81,9 +81,9 @@
   <property name="touchDrawing" value="false"/>
   <property name="gtkTouchInertialScrolling" value="true"/>
   <property name="pressureGuessing" value="false"/>
-  <property name="selectionBorderColor" value="4280722025"/>
+  <property name="selectionBorderColor" value="4279672965"/>
   <property name="backgroundColor" value="4280821800"/>
-  <property name="selectionMarkerColor" value="4287623332"/>
+  <property name="selectionMarkerColor" value="4279672965"/>
   <property name="touchZoomStartThreshold" value="0"/>
   <property name="pageRerenderThreshold" value="0"/>
   <!--The count of rendered PDF pages which will be cached.-->
