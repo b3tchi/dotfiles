@@ -16,10 +16,10 @@
   <property name="displayDpi" value="72"/>
   <property name="mainWndWidth" value="1489"/>
   <property name="mainWndHeight" value="1012"/>
-  <property name="maximized" value="false"/>
+  <property name="maximized" value="true"/>
   <property name="showToolbar" value="true"/>
   <property name="showSidebar" value="true"/>
-  <property name="sidebarWidth" value="109"/>
+  <property name="sidebarWidth" value="175"/>
   <property name="sidebarNumberingStyle" value="1"/>
   <property name="sidebarOnRight" value="true"/>
   <property name="scrollbarOnLeft" value="false"/>
@@ -226,10 +226,10 @@
       <attribute name="drawingType" type="string" value="default"/>
     </data>
     <data name="pen">
-      <attribute name="color" type="hex" value="ffffffff"/>
+      <attribute name="color" type="hex" value="ff222d31"/>
       <attribute name="drawingType" type="string" value="default"/>
-      <attribute name="fill" type="int" value="0"/>
-      <attribute name="fillAlpha" type="int" value="165"/>
+      <attribute name="fill" type="int" value="1"/>
+      <attribute name="fillAlpha" type="int" value="99"/>
       <attribute name="size" type="string" value="THIN"/>
       <attribute name="style" type="string" value="plain"/>
     </data>
