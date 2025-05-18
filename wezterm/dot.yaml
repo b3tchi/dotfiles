@@ -7,3 +7,10 @@ windows:
 linux:
   links:
     wezterm.lua: ~/.config/wezterm/wezterm.lua
+
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+        sudo pacman -Syu wezterm
+      {{/if}}
+        git clone https://github.com/danielcopper/wezterm-session-manager.git ~/.config/wezterm/wezterm-session-manager
