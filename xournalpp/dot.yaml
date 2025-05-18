@@ -1,0 +1,5 @@
+linux:
+  links:
+    palette.gpl: ~/.config/xournalpp/palette.gpl
+    settings.xml: ~/.config/xournalpp/settings.xml
+    toolbar.ini: ~/.config/xournalpp/toolbar.ini

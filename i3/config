@@ -205,6 +205,7 @@ for_window [all] title_window_icon padding 4px
 
 for_window [all] title_format "<b>%class</b> %title"
 for_window [class="org.wezfurlong.wezterm"] title_format "<b>wezterm</b> %title"
+for_window [class="Com.github.xournalpp.xournalpp"] title_format "<b>xournal</b> %title"
 for_window [class="org.gnome.Nautilus"] title_format "<b>nautilus</b> %title"
 for_window [class="FreeCAD Link Branch"] title_format "<b>freecad-rt</b> %title"
 for_window [class="FreeCAD"] title_format "<b>freecad</b> %title"
