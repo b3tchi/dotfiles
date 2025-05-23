@@ -20,7 +20,6 @@ if wezterm.target_triple == "x86_64-pc-windows-msvc" then
 
 	for idx, dom in ipairs(wsl_domains) do
 		if dom.name == "WSL:Ubuntu-20.04" then
-			-- dom.default_prog = { "C:\\Users\\jbecka\\scoop\\apps\\git\\2.49.0\\usr\\bin\\bash.exe" }
 			dom.default_prog = { "nu" }
 		end
 	end
@@ -78,10 +77,6 @@ return {
 		top = 0,
 		bottom = 0,
 	},
-
-	--FIX for avoid glitches in terminal
-	front_end = "WebGpu",
-	webgpu_power_preference = "HighPerformance",
 
 	--FONT
 	-- font_dirs = font_dirs,

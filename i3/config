@@ -34,7 +34,8 @@ floating_modifier $mod
 tiling_drag modifier titlebar
 
 # start a terminal
-bindsym $mod+Return exec wezterm
+bindsym $mod+Return exec wezterm-gui start --always-new-process
+# bindsym $mod+Return exec wezterm
 
 # kill focused window
 bindsym $mod+Shift+q kill
@@ -205,6 +206,7 @@ for_window [all] title_window_icon padding 4px
 
 for_window [all] title_format "<b>%class</b> %title"
 for_window [class="org.wezfurlong.wezterm"] title_format "<b>wezterm</b> %title"
+for_window [class="Com.github.xournalpp.xournalpp"] title_format "<b>xournal</b> %title"
 for_window [class="org.gnome.Nautilus"] title_format "<b>nautilus</b> %title"
 for_window [class="FreeCAD Link Branch"] title_format "<b>freecad-rt</b> %title"
 for_window [class="FreeCAD"] title_format "<b>freecad</b> %title"
@@ -399,11 +401,11 @@ set $transp       #00000000
 
 # Theme colors
 # class                   border  backgr. text    indic.   child_border
-client.focused            #16a085 #16a085 #292F34 #FDF6E3
-client.focused_inactive   #454948 #454948 #FDF6E3 #454948
-client.unfocused          #454948 #454948 #FDF6E3 #454948
+client.focused            #16a085 #16a085 #000000 #FDF6E3
+client.focused_inactive   #222D31 #222D31 #FDF6E3 #222D31
+client.unfocused          #222D31 #222D31 #FDF6E3 #222D31
 client.urgent             #CB4B16 #FDF6E3 #1ABC9C #268BD2
-client.placeholder        #000000 #0c0c0c #ffffff #000000
+client.placeholder        #152024 #152024 #ffffff #152024
 
 client.background       $transp
 

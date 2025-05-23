@@ -170,12 +170,12 @@ configuration {
 
 	highlight: bold #16a085;
 
-    bg0:     #292F34;
-    bg1:     #292F34;
+    bg0:     #222D31;
+    bg1:     #222D31;
     fg0:     #FDF6E3;
 
     accent-color:     #16a085;
-    selected-color:   #454948;
+    selected-color:   #152024;
     urgent-color:     #CB4B16;
 
     background-color:   transparent;
@@ -205,7 +205,7 @@ prompt, entry, element-icon, element-text {
 
 entry {
 	placeholder:"run";
-	placeholder-color: @selected-color;
+	placeholder-color: #FDF6E3;
 }
 
 prompt {

@@ -5,4 +5,13 @@ return {
 	init = function()
 		vim.opt.termguicolors = true
 	end,
+	keys = {
+      -- add a keymap to browse plugin files
+      -- stylua: ignore
+      {
+        "<leader>uH",
+        function() require("nvim-highlight-colors").toggle() end,
+        desc = "highlight colors",
+      },
+	},
 }
