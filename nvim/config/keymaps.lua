@@ -33,9 +33,9 @@ vim.keymap.set("n", "<leader>ws", "<C-w>v", { noremap = true, silent = true, des
 vim.keymap.set("n", "<leader>wb", "<C-w>s", { noremap = true, silent = true, desc = "split window bellow" })
 -- nnoremap <space>ws <c-w>v
 -- nnoremap <space>wb <c-w>s
-vim.cmd([[highlight @markup.heading.1.markdown guifg=#bb9af7 gui=bold]])
-vim.cmd([[highlight @markup.heading.2.markdown guifg=#bb9af7 gui=bold]])
-vim.cmd([[highlight @markup.heading.3.markdown guifg=#bb9af7 gui=bold]])
-vim.cmd([[highlight @markup.heading.4.markdown guifg=#bb9af7 gui=bold]])
-vim.cmd([[highlight @markup.heading.5.markdown guifg=#bb9af7 gui=bold]])
-vim.cmd([[highlight @markup.heading.6.markdown guifg=#bb9af7 gui=bold]])
+vim.cmd([[highlight @markup.heading.1.markdown guifg=#c0caf5 gui=bold]])
+vim.cmd([[highlight @markup.heading.2.markdown guifg=#c0caf5 gui=bold]])
+vim.cmd([[highlight @markup.heading.3.markdown guifg=#c0caf5 gui=bold]])
+vim.cmd([[highlight @markup.heading.4.markdown guifg=#c0caf5 gui=bold]])
+vim.cmd([[highlight @markup.heading.5.markdown guifg=#c0caf5 gui=bold]])
+vim.cmd([[highlight @markup.heading.6.markdown guifg=#c0caf5 gui=bold]])

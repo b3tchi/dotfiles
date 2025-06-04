@@ -6,7 +6,7 @@ return {
 			atx = true, --icons
 			setext = false, --icons
 			width = "block",
-			icons = { "✦ ", "✦✦ ", "✦✦✦ ", "✦✦✦✦ ", "✦✦✦✦✦ ", "✦✦✦✦✦✦ " },
+			icons = { "✶ ", "✶✶ ", "✶✶✶ ", "✶✶✶✶ ", "✶✶✶✶✶ ", "✶✶✶✶✶✶ " },
 			backgrounds = {
 				false,
 				false,
@@ -16,12 +16,12 @@ return {
 				false,
 			},
 			foregrounds = {
-				"DiagnosticError",
-				"DiagnosticError",
-				"DiagnosticError",
-				"DiagnosticError",
-				"DiagnosticError",
-				"DiagnosticError",
+				"Statement",
+				"Statement",
+				"Statement",
+				"Statement",
+				"Statement",
+				"Statement",
 			},
 		},
 		code = {
