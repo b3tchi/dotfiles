@@ -61,7 +61,7 @@ local function run_command(block_header)
 	local command
 	if vim.loop.os_uname().sysname == "Windows_NT" then
 		command = string.format(
-			"powershell -c \"Get-Content '%s' | wezterm cli send-text --pane-id %d --no-paste \"",
+			"nu -c 'open %s | lines | each {|r| wezterm cli send-text --pane-id %d --no-paste $\"($r)\\r\"}'",
 			tmp_file,
 			vim.g.multiplexer_id
 		)
