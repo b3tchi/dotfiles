@@ -1,11 +1,14 @@
 
 # For installation use bash script
+
 [dtlf sh](dtlf.sh)
+
 ```bash
 ./dtlf.sh
 ```
 
-# vim locations
+## vim locations
+
 *dofiles configs*
 ~/.config/nvim/* - user config files
 
@@ -25,6 +28,7 @@
 ~/.vim/plugged/* - vim plug
 
 clean nvim settings
+
 ```bash
 mv ~/.config/nvim ~/.config/nvim_back # - user config files
 mv ~/.config/coc ~/.config/coc_back # - coc config and items
@@ -32,10 +36,12 @@ mv ~/.local/share/nvim ~/.local/share/nvim_back # - vim plug
 mv ~/.vim ~/.vim_back # vim plug
 ```
 
-# Updating
+## Updating
+
 ## Python
 
 pip install outdated items
+
 ```bash
 python -m pip install pip --upgrade
 for i in $(python -m pip list --outdated --format=columns |tail -n +3|cut -d" " -f1)
@@ -44,7 +50,8 @@ do python -m pip install $i --upgrade
 done
 ```
 
-# Scratches
+## Scratches
+
 ```bash
 #comment
 echo something
@@ -52,7 +59,9 @@ echo "something \
       aggg"
 echo something
 ```
+
 spelling error
+
 ```bash
 echo anything
 echo anything
@@ -71,7 +80,9 @@ echo $NOTES_ROOT
 ```lua
 vim.fn.writefile({'echo header'}, '/tmp/file_write.txt', 'a')
 ```
+
 call powershell
+
 ```bash
 #powershell.exe c:\\Users\\czJaBeck\\Dev\\Repositories\\AccessVCS\\tests\\test14.ps1
 powershell.exe 'c:\Users\czJaBeck\Dev\Repositories\AccessVCS\tests\test14.ps1'
@@ -99,7 +110,9 @@ if( true ){
   Console.WriteLine("Hello, World!x3");
 }
 ```
+
 testing startifier
+
 ```bash
 #ls ~/.local/share/nvim/session/
 testx=$(find ~/.local/share/nvim/session/ -mindepth 1 -maxdepth 1 -printf '%f\n')
@@ -127,6 +140,7 @@ if index(['a','b'],'c') ==-1
 
 endif
 ```
+
 ```lua
 -- print('hello')
 print('hello')
@@ -258,7 +272,6 @@ echo bash_comment
 #+end_src
 ```
 
-
 ```vim
 echom 'paragarph first command'
 echom getline('.')[2:] "command line content current cursor
@@ -266,6 +279,7 @@ echom getline(line("'{")+1) "line content on the beginning of paragraph
 ```
 
 test lua embedded in vim
+
 ```vim
 lua << EOF
 
@@ -364,6 +378,7 @@ print(journal_file)
 ```
 
 list all windows in diff mode
+
 ```vim
 echo filter(range(1, winnr('$')), 'getwinvar(v:val, "&diff") == 1')
 ```
@@ -374,6 +389,7 @@ echom filereadable('./nvim/init.vim')
 ```
 
 buffer status
+
 ```vim
 source ./nvim/scripts/vim/fugidiff.vim
 let r = Checkdiff()
@@ -389,12 +405,14 @@ B --> D
 ```
 
 Current buffer items
+
 ```vim
 source ./nvim/scripts/vim/fugidiff.vim
 call DiffTog(0)
 ```
 
 Switch to window do action and do back
+
 ```vim
 let currwin = winnr()
 execute 3 . 'wincmd w'
@@ -404,16 +422,19 @@ execute currwin . 'wincmd w'
 ```
 
 switch to next item
+
 ```vim
 source ./nvim/fugidiff.vim
 call NextItem()
 ```
+
 ```vim
 source ./nvim/fugidiff.vim
 echo EndsWith('cd','cd')
 ```
 
 test lua embedded in vim
+
 ```vim
 lua << EOF
 local hydrastatus = require('hydra.statusline')
