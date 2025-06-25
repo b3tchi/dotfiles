@@ -1,0 +1,16 @@
+windows:
+  links:
+    config.yml: ~/AppData/local/lazygit/config.yml
+
+  installs:
+    cmd: |
+      scoop install lazygit
+
+linux:
+  links:
+    config.yml: ~/.config/lazygit/config.yml
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -Syu --needed --noconfirm lazygit
+      {{/if}}
