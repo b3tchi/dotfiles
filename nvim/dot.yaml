@@ -22,3 +22,6 @@ linux:
       {{#if (eq whoami.distro "Manjaro Linux")}}
       sudo pacman -Syu neovim
       {{/if}}
+      {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
+      nala install neovim
+      {{/if}}

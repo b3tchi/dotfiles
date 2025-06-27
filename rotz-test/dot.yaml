@@ -24,7 +24,7 @@ global:
 windows:
   installs:
     cmd: |
-      # WINDOWS tested with nushell
+      # WINDOWS test with nushell
       # ===========================
       # whoami.desktop_env: {{ whoami.desktop_env }}
       # whoami.devicename: {{ whoami.devicename }}
@@ -41,7 +41,7 @@ windows:
 linux:
   installs:
     cmd: |
-      # LINUX tested with nushell
+      # LINUX test with nushell
       # ===========================
       # whoami.desktop_env: {{ whoami.desktop_env }}
       # whoami.devicename: {{ whoami.devicename }}
