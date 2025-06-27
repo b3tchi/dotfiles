@@ -23,5 +23,5 @@ linux:
       sudo pacman -Syu neovim
       {{/if}}
       {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
-      nala install neovim
+      nala install neovim gcc
       {{/if}}
