@@ -62,3 +62,10 @@ vim.opt.shellquote = ""
 -- NOTE: `ansi strip` removes all ansi coloring from nushell errors
 vim.opt.shellpipe =
 	"| complete | update stderr { ansi strip } | tee { get stderr | save --force --raw %s } | into record"
+
+--WINDOWS PYTHON WORKAROUND
+if vim.fn.has("win32") then
+	-- vim.g.loaded_python_provider = 1 -- not needed to install
+	local user_profile = vim.fn.getenv("USERPROFILE")
+	vim.g.python3_host_prog = user_profile .. "\\AppData\\Local\\Programs\\Python\\Python313\\python.exe"
+end
