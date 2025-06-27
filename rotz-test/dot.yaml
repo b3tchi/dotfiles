@@ -1,4 +1,18 @@
 global:
+  installs: |
+    # tested with nushell
+    # whoami.desktop_env: {{ whoami.desktop_env }}
+    # whoami.devicename: {{ whoami.devicename }}
+    # whoami.distro: {{ whoami.distro }}
+    # whoami.hostname: {{ whoami.hostname }}
+    # whoami.lang: {{ whoami.lang }}
+    # whoami.plaform: {{ whoami.plaform }}
+    # whoami.realname: {{ whoami.realname }}
+    # whoami.username: {{ whoami.username }}
+    # whoami.arch: {{ whoami.arch }}
+    # env.HOME: {{ env.HOME }}
+    # (len "test"): {{ (len "test") }}
+
   links:
     conf-test.json: |
       {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
@@ -7,22 +21,42 @@ global:
       ~/conf-testB.json
       {{/if}}
 
+windows:
+  installs:
+    cmd: |
+      # WINDOWS tested with nushell
+      # ===========================
+      # whoami.desktop_env: {{ whoami.desktop_env }}
+      # whoami.devicename: {{ whoami.devicename }}
+      # whoami.distro: {{ whoami.distro }}
+      # whoami.hostname: {{ whoami.hostname }}
+      # whoami.lang: {{ whoami.lang }}
+      # whoami.plaform: {{ whoami.plaform }}
+      # whoami.realname: {{ whoami.realname }}
+      # whoami.username: {{ whoami.username }}
+      # whoami.arch: {{ whoami.arch }}
+      # env.HOME: {{ env.HOME }}
+      # (len "test"): {{ (len "test") }}
+
 linux:
   installs:
     cmd: |
+      # LINUX tested with nushell
+      # ===========================
+      # whoami.desktop_env: {{ whoami.desktop_env }}
+      # whoami.devicename: {{ whoami.devicename }}
+      # whoami.distro: {{ whoami.distro }}
+      # whoami.hostname: {{ whoami.hostname }}
+      # whoami.lang: {{ whoami.lang }}
+      # whoami.plaform: {{ whoami.plaform }}
+      # whoami.realname: {{ whoami.realname }}
+      # whoami.username: {{ whoami.username }}
+      # whoami.arch: {{ whoami.arch }}
+      # env.HOME: {{ env.HOME }}
+      # (len "test"): {{ (len "test") }}
+
       {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
       echo termux
       {{else}}
       echo std_linux1
       {{/if}}
-      echo {{ whoami.desktop_env }}
-      echo {{ whoami.devicename }}
-      echo {{ whoami.distro }}
-      echo {{ whoami.hostname }}
-      echo {{ whoami.lang }}
-      echo {{ whoami.plaform }}
-      echo {{ whoami.realname }}
-      echo {{ whoami.username }}
-      echo {{ whoami.arch }}
-      echo {{ env.HOME }}
-      echo {{ (len "test") }}
