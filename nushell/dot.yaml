@@ -23,5 +23,5 @@ linux:
       {{#if (eq whoami.distro "Manjaro Linux")}}
       sudo pacman -Syu --needed --noconfirm \
         nushell starship
-      {{/if}}
       pamac install carapace-bin
+      {{/if}}
