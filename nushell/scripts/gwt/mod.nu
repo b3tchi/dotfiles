@@ -1,3 +1,6 @@
+def main [] {
+
+}
 def data [] {
 	{
 		b3tchi: {
