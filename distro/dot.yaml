@@ -18,6 +18,9 @@ windows:
       scoop install iosevka-nf iosevka-nf-mono
 
 linux:
+  links:
+    bashrc: ~/.bashrc
+
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
@@ -35,4 +38,21 @@ linux:
         sudo sd '#EnableAUR' 'EnableAUR' /etc/pamac.conf
         sudo pamac update
         sudo pamac upgrade
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+        sudo pacman -Syu --needed --noconfirm \
+          yazi \
+          bottom \
+          git github-cli lazygit \
+          bat \
+          fd ripgrep fzf sd \
+          go rust nodejs \
+          wezterm \
+          ttf-iosevka-nerd ttf-iosevkaterm-nerd ttc-iosevka \
+
+        sudo pacman -S --needed git base-devel
+        git clone https://aur.archlinux.org/yay.git ~/yay
+        cd ~/yay
+        makepkg -si
+        cd -
       {{/if}}

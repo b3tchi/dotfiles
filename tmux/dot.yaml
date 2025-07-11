@@ -1,0 +1,10 @@
+linux:
+  links:
+    tmux.conf: ~/.tmux.conf
+
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+        sudo pacman -Syu tmux
+      {{/if}}
+        sudo pacman -Syu tmux
