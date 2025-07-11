@@ -19,14 +19,14 @@ if wezterm.target_triple == "x86_64-pc-windows-msvc" then
 	--    }
 
 	for idx, dom in ipairs(wsl_domains) do
-		if dom.name == "WSL:Ubuntu-20.04" then
+		if dom.name == "WSL:arch" then
 			-- dom.default_prog = { "C:\\Users\\jbecka\\scoop\\apps\\git\\2.49.0\\usr\\bin\\bash.exe" }
-			dom.default_prog = { "nu" }
+			dom.default_prog = "nu"
+			dom.default_cwd = "~"
 		end
 	end
 
-	--    default_domain = "WSL:Ubuntu-20.04"
-	default_domain = "local"
+	-- default_domain = "local" --windows
 
 	--FONTS
 	-- font_dirs = { "fonts" }
@@ -91,6 +91,8 @@ return {
 	--COLORSCHEME
 	-- color_scheme = "Gruvbox Dark",
 	color_scheme = "tokyonight_night",
+
+	default_domain = "WSL:arch",
 
 	--MUX Testing
 	-- exit_behavior= "Hold",
