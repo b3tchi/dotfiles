@@ -46,7 +46,6 @@ local function temp_path()
 		tmp_path = os.getenv("TEMP") .. "/nvim/md_blocks/"
 	end
 
-	vim.fn.mkdir(tmp_path, "p")
 
 	return tmp_path .. fname
 end
@@ -54,28 +53,32 @@ end
 --TODO add check for if pane with id exists
 
 local function run_command(block_header)
-	local tmp_file = temp_path()
+	-- local tmp_file = temp_path()
+	local tmp_file = os.tmpname()
 
 	vim.fn.writefile(block_header, tmp_file)
 
 	local command
 	if vim.loop.os_uname().sysname == "Windows_NT" then
 		command = string.format(
-			"nu -c 'open %s | lines | each {|r| wezterm cli send-text --pane-id %d --no-paste $\"($r)\\r\"}'",
+		-- "nu -c 'open %s | lines | each {|r| wezterm cli send-text --pane-id %d --no-paste $\"($r)\\r\"}'",
+			"nu -c 'open %s | lines | each {|r| tmux send-keys -t \"neovim:%d\" $\"($r)\" Enter}'",
 			tmp_file,
-			vim.g.multiplexer_id
+			0 --vim.g.multiplexer_id
 		)
 	else
 		command = string.format(
-			"nu -c 'open %s | lines | each {|r| wezterm cli send-text --pane-id %d --no-paste $\"($r)\\r\"}'",
+		-- "nu -c 'open %s | lines | each {|r| wezterm cli send-text --pane-id %d --no-paste $\"($r)\\r\"}'",
+			"nu -c 'open %s | lines | each {|r| tmux send-keys -t \"neovim:%d\" $\"($r)\" Enter}'",
 			tmp_file,
-			vim.g.multiplexer_id
+			0 --vim.g.multiplexer_id
 		)
 	end
 	print(command)
 
 	vim.fn.system(command)
 end
+
 M.spawnMultiplexerWindow = function(domain_name)
 	local command = string.format("wezterm cli spawn --domain-name %s --new-window --cwd .", domain_name)
 	vim.g.multiplexer_id = vim.fn.system(command)
