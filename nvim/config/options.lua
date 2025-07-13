@@ -66,6 +66,6 @@ vim.opt.shellpipe =
 --WINDOWS PYTHON WORKAROUND
 if vim.fn.has("win32") then
 	-- vim.g.loaded_python_provider = 1 -- not needed to install
-	local user_profile = vim.fn.getenv("USERPROFILE")
-	vim.g.python3_host_prog = user_profile .. "\\AppData\\Local\\Programs\\Python\\Python313\\python.exe"
+	-- vim.g.python3_host_prog = vim.fn.getenv("USERPROFILE")
+	vim.g.python3_host_prog = "C:\\Users\\jbecka" .. "\\AppData\\Local\\Programs\\Python\\Python313\\python.exe"
 end
