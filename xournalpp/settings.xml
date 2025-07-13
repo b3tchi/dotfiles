@@ -16,10 +16,10 @@
   <property name="displayDpi" value="72"/>
   <property name="mainWndWidth" value="1489"/>
   <property name="mainWndHeight" value="1012"/>
-  <property name="maximized" value="true"/>
+  <property name="maximized" value="false"/>
   <property name="showToolbar" value="true"/>
   <property name="showSidebar" value="true"/>
-  <property name="sidebarWidth" value="175"/>
+  <property name="sidebarWidth" value="109"/>
   <property name="sidebarNumberingStyle" value="1"/>
   <property name="sidebarOnRight" value="true"/>
   <property name="scrollbarOnLeft" value="false"/>
