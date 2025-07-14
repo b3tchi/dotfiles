@@ -22,7 +22,7 @@ local config = {
 	-- color_scheme = "Gruvbox Dark",
 	color_scheme = "tokyonight_night",
 
-	--MUX Disbald - testing in wezterm-with-mux
+	--MUX Disabled - testing in wezterm-with-mux
 	--using tmux
 	-- default_prog = { "nu" },
 }
