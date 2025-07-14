@@ -23,7 +23,7 @@ local config = {
 	color_scheme = "tokyonight_night",
 
 	--MUX Disabled - testing in wezterm-with-mux
-	--using tmux
+	--moving default shell under tmux
 	-- default_prog = { "nu" },
 }
 
