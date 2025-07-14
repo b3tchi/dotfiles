@@ -28,18 +28,18 @@ local config = {
 }
 
 if wezterm.target_triple == "x86_64-pc-windows-msvc" then
-	local wsl_domains = wezterm.default_wsl_domains()
-
-	for idx, dom in ipairs(wsl_domains) do
-		if dom.name == "WSL:arch" then
-			-- dom.default_prog = { "C:\\Users\\jbecka\\scoop\\apps\\git\\2.49.0\\usr\\bin\\bash.exe" }
-			dom.default_prog = "nu"
-			dom.default_cwd = "~"
-		end
-	end
-
-	--FONTS
-	config.wsl_domains = wsl_domains
+	-- local domains = wezterm.default_wsl_domains()
+	--
+	-- for idx, dom in ipairs(domains) do
+	-- 	if dom.name == "WSL:arch" then
+	-- 		-- dom.default_prog = { "C:\\Users\\jbecka\\scoop\\apps\\git\\2.49.0\\usr\\bin\\bash.exe" }
+	-- 		dom.default_prog = "nu"
+	-- 		dom.default_cwd = "~"
+	-- 	end
+	-- end
+	--
+	-- --FONTS
+	-- config.wsl_domains = domains
 	config.default_domain = "WSL:arch"
 end
 
