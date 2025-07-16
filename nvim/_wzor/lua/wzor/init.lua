@@ -52,31 +52,106 @@ end
 
 --TODO add check for if pane with id exists
 
-local function run_command(block_header)
+local function run_command_win(block_header)
 	-- local tmp_file = temp_path()
 	local tmp_file = os.tmpname()
 
 	vim.fn.writefile(block_header, tmp_file)
 
-	local command
-	if vim.loop.os_uname().sysname == "Windows_NT" then
-		command = string.format(
-		-- "nu -c 'open %s | lines | each {|r| wezterm cli send-text --pane-id %d --no-paste $\"($r)\\r\"}'",
-			"nu -c 'open %s | lines | each {|r| tmux send-keys -t \"neovim:%d\" $\"($r)\" Enter}'",
-			tmp_file,
-			0 --vim.g.multiplexer_id
-		)
-	else
-		command = string.format(
-		-- "nu -c 'open %s | lines | each {|r| wezterm cli send-text --pane-id %d --no-paste $\"($r)\\r\"}'",
-			"nu -c 'open %s | lines | each {|r| tmux send-keys -t \"neovim:%d\" $\"($r)\" Enter}'",
-			tmp_file,
-			0 --vim.g.multiplexer_id
-		)
-	end
+	local command = string.format(
+	-- "nu -c 'open %s | lines | each {|r| wezterm cli send-text --pane-id %d --no-paste $\"($r)\\r\"}'",
+	-- "nu -c 'open %s | lines | each {|r| tmux send-keys -t \"neovim:%d\" $\"($r)\" Enter}'",
+	-- "tmux send-keys -t \"neovim:%d\" $\"($r)\" Enter",
+		tmp_file,
+		0 --vim.g.multiplexer_id
+	)
 	print(command)
 
 	vim.fn.system(command)
+end
+local function wait_for_prompt(pane, timeout)
+	-- pane = pane or "0" -- default to current pane
+	timeout = timeout or 60000
+
+	local start_time = vim.loop.hrtime()
+
+	print(tmp_file)
+	local tmp_file = os.tmpname()
+	local log = {}
+	local iteration = 0
+	local response = -1
+
+	while true do
+		vim.wait(150) -- wait 300ms before next check
+
+		local output = vim.fn.system("tmux capture-pane -t " .. pane .. " -p")
+		output = output:gsub("\n+", "\n")           -- Replace multiple newlines with single newlines
+		output = output:gsub("^%s*", ""):gsub("%s*$", "") -- Trim start and end
+
+		local lines = vim.split(output, "\n")
+		local last_line = lines[#lines] or ""
+
+
+		-- Check if prompt is back (completed) - match at beginning of line
+		if last_line:match("^❯") then
+			print(last_line .. 'completed')
+			response = 1 -- completed
+		end
+
+		-- Check if it's multiline (new line prompt) - match at beginning of line
+		if response == -1 then
+			for _, line in ipairs(lines) do
+				if line:match("^∙") then
+					response = 2
+					-- return 2 -- multiline/new line
+				end
+			end
+		end
+
+		-- Check timeout
+		if response == -1 then
+			local elapsed = (vim.loop.hrtime() - start_time) / 1000000 -- convert to ms
+			if elapsed > timeout then
+				response = 0
+				return 0 -- timeout
+			end
+		end
+
+		log[iteration] = {
+			last_line = last_line,
+			lines = lines,
+			output = output,
+			response = response
+		}
+
+		-- print(vim.json.encode(log))
+		vim.fn.writefile({ vim.json.encode(log) }, tmp_file)
+
+		if response ~= -1 then
+			return response
+		end
+	end
+end
+
+local function run_command(block_header)
+	local multiplexer_id = 0 -- vim.g.multiplexer_id
+
+	for i, value in ipairs(block_header) do
+		-- print(i, value)
+
+		local command = string.format("tmux send-keys -t \"neovim:%d\" \"%s\" Enter", multiplexer_id, value)
+
+		vim.fn.system(command)
+
+		local response = wait_for_prompt(string.format("neovim:%d", 0))
+
+		print(i .. response .. ' ' .. command .. ' multiline')
+
+		if response == 0 then
+			print('command timeout')
+			return
+		end
+	end
 end
 
 M.spawnMultiplexerWindow = function(domain_name)
@@ -98,19 +173,19 @@ M.sendLineToMultiplexerWindow = function()
 end
 
 M.sendBlockToMultiplexerWindow = function()
-	local mdblock = {}
+	local codeblock = {}
 
 	if vim.bo.filetype == "markdown" then
-		mdblock = md_block_get()
+		codeblock = md_block_get()
 	elseif vim.bo.filetype == "org" then
-		mdblock = org_block_get()
+		codeblock = org_block_get()
 	else
 		print("covered are only .org or .md code blocks")
 		return
 	end
 
-	print(vim.inspect(mdblock.code))
-	run_command(mdblock.code)
+	print(vim.inspect(codeblock.code))
+	run_command(codeblock.code)
 end
 
 -- TODO run last command
