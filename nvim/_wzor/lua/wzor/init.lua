@@ -133,19 +133,46 @@ local function wait_for_prompt(pane, timeout)
 	end
 end
 
+local function send_keys_via_buffer(pane, text)
+	--
+	if text == '' then
+		return
+	end
+	-- Create temporary file
+	local temp_file = "/tmp/tmux_buffer_" .. os.time()
+
+	-- Write text to file
+	local file = io.open(temp_file, "w")
+	if file then
+		file:write(text)
+		file:close()
+
+		-- Load into tmux buffer and paste
+		vim.fn.system("tmux load-buffer " .. temp_file)
+		vim.fn.system("tmux paste-buffer -t " .. pane)
+		vim.fn.system("tmux send-keys -t " .. pane .. " Enter")
+
+		-- Clean up
+		os.remove(temp_file)
+	end
+end
+
 local function run_command(block_header)
 	local multiplexer_id = 0 -- vim.g.multiplexer_id
 
 	for i, value in ipairs(block_header) do
 		-- print(i, value)
 
-		local command = string.format("tmux send-keys -t \"neovim:%d\" \"%s\" Enter", multiplexer_id, value)
+		-- local command = string.format("tmux send-keys -t \"neovim:%d\" \"%s\" Enter", multiplexer_id, value)
+		--
+		-- vim.fn.system(command)
+		--
 
-		vim.fn.system(command)
+		send_keys_via_buffer(string.format("neovim:%d", 0), value)
 
 		local response = wait_for_prompt(string.format("neovim:%d", 0))
 
-		print(i .. response .. ' ' .. command .. ' multiline')
+		print(i .. response .. ' ' .. value)
 
 		if response == 0 then
 			print('command timeout')
