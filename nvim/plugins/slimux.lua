@@ -1,4 +1,4 @@
-return false
+if true then return {} end
 -- return {
 -- 	'EvWilson/slimux.nvim',
 -- 	config = function()
