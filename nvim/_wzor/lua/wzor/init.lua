@@ -82,7 +82,7 @@ local function wait_for_prompt(pane, timeout)
 	local response = -1
 
 	while true do
-		vim.wait(150) -- wait 300ms before next check
+		vim.wait(250) -- wait 300ms before next check
 
 		local output = vim.fn.system("tmux capture-pane -t " .. pane .. " -p")
 		output = output:gsub("\n+", "\n")           -- Replace multiple newlines with single newlines
