@@ -17,6 +17,7 @@ linux:
     _myfxs: ~/.local/share/nvim/myfxs
     _wzor: ~/.local/share/nvim/wzor
     _nunav: ~/.local/share/nvim/nunav
+    global.markdownlint-cli2.yaml: ~/.config/nvim/global.markdownlint-cli2.yaml
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
