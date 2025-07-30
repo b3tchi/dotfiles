@@ -5,7 +5,13 @@ return {
 		dependencies = "nvim-treesitter/nvim-treesitter",
 		config = function()
 			require("headlines").setup({
-				markdown = false,
+				markdown = {
+					headline_highlights = false,
+					codeblock_highlight = false,
+					dash_highlight = false,
+					quote_highlight = false,
+					fat_headlines = false,
+				},
 				org = {
 					query = vim.treesitter.query.parse(
 						"org",
