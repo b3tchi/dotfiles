@@ -3,11 +3,6 @@ return {
 	opts = function()
 		local defaults = require("outline.config").defaults
 
-		-- local opts = {
-		-- 	keymaps = {
-		-- 		goto_location = { "<CR>", "<LeftRelease>" },
-		-- 	},
-		-- }
 		local opts = {
 			symbols = {
 				icons = {},
