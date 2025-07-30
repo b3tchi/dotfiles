@@ -1,0 +1,9 @@
+#https://github.com/DavidAnson/markdownlint/blob/main/schema/.markdownlint.yaml
+config:
+  #line width
+  MD013: false
+  #codeblocks 1indent hardtabs
+  MD010: false
+  # code_blocks: true
+  # ignore_code_blocks: []
+  # spaces_per_tab: 4

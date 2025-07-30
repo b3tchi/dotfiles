@@ -39,6 +39,16 @@ linux:
         sudo pamac update
         sudo pamac upgrade
       {{/if}}
+      {{#if (eq whoami.distro "Arch Linux ARM")}}
+        sudo pacman -Syu --needed --noconfirm \
+          yazi \
+          bottom \
+          git github-cli lazygit \
+          bat \
+          fd ripgrep fzf sd \
+          go rust nodejs \
+          ttf-iosevka-nerd ttf-iosevkaterm-nerd ttc-iosevka
+      {{/if}}
       {{#if (eq whoami.distro "Arch Linux")}}
         sudo pacman -Syu --needed --noconfirm \
           yazi \
