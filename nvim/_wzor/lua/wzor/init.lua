@@ -46,7 +46,6 @@ local function temp_path()
 		tmp_path = os.getenv("TEMP") .. "/nvim/md_blocks/"
 	end
 
-
 	return tmp_path .. fname
 end
 
@@ -59,9 +58,9 @@ local function run_command_win(block_header)
 	vim.fn.writefile(block_header, tmp_file)
 
 	local command = string.format(
-	-- "nu -c 'open %s | lines | each {|r| wezterm cli send-text --pane-id %d --no-paste $\"($r)\\r\"}'",
-	-- "nu -c 'open %s | lines | each {|r| tmux send-keys -t \"neovim:%d\" $\"($r)\" Enter}'",
-	-- "tmux send-keys -t \"neovim:%d\" $\"($r)\" Enter",
+		-- "nu -c 'open %s | lines | each {|r| wezterm cli send-text --pane-id %d --no-paste $\"($r)\\r\"}'",
+		-- "nu -c 'open %s | lines | each {|r| tmux send-keys -t \"neovim:%d\" $\"($r)\" Enter}'",
+		-- "tmux send-keys -t \"neovim:%d\" $\"($r)\" Enter",
 		tmp_file,
 		0 --vim.g.multiplexer_id
 	)
@@ -85,16 +84,16 @@ local function wait_for_prompt(pane, timeout)
 		vim.wait(150) -- wait 300ms before next check
 
 		local output = vim.fn.system("tmux capture-pane -t " .. pane .. " -p")
-		output = output:gsub("\n+", "\n")           -- Replace multiple newlines with single newlines
+		output = output:gsub("\n+", "\n") -- Replace multiple newlines with single newlines
+		output = output:gsub("\t", " ") -- Replace tabs with spaces
 		output = output:gsub("^%s*", ""):gsub("%s*$", "") -- Trim start and end
 
 		local lines = vim.split(output, "\n")
 		local last_line = lines[#lines] or ""
 
-
 		-- Check if prompt is back (completed) - match at beginning of line
 		if last_line:match("^❯") then
-			print(last_line .. 'completed')
+			print(last_line .. "completed")
 			response = 1 -- completed
 		end
 
@@ -121,7 +120,7 @@ local function wait_for_prompt(pane, timeout)
 			last_line = last_line,
 			lines = lines,
 			output = output,
-			response = response
+			response = response,
 		}
 
 		-- print(vim.json.encode(log))
@@ -135,9 +134,12 @@ end
 
 local function send_keys_via_buffer(pane, text)
 	--
-	if text == '' then
+	if text == "" then
 		return
 	end
+
+	text = text:gsub("\t", "    ") -- Replace tabs with spaces
+
 	-- Create temporary file
 	local temp_file = "/tmp/tmux_buffer_" .. os.time()
 
@@ -172,10 +174,10 @@ local function run_command(block_header)
 
 		local response = wait_for_prompt(string.format("neovim:%d", 0))
 
-		print(i .. response .. ' ' .. value)
+		print(i .. response .. " " .. value)
 
 		if response == 0 then
-			print('command timeout')
+			print("command timeout")
 			return
 		end
 	end
