@@ -80,12 +80,14 @@ local function wait_for_prompt(pane, timeout)
 	local iteration = 0
 	local response = -1
 
-	while true do
-		vim.wait(150) -- wait 300ms before next check
+	local wait_ms = 100
 
+	vim.wait(wait_ms) -- wait check
+
+	while true do
 		local output = vim.fn.system("tmux capture-pane -t " .. pane .. " -p")
 		output = output:gsub("\n+", "\n") -- Replace multiple newlines with single newlines
-		output = output:gsub("\t", " ") -- Replace tabs with spaces
+		output = output:gsub("\t", "    ") -- Replace tabs with spaces
 		output = output:gsub("^%s*", ""):gsub("%s*$", "") -- Trim start and end
 
 		local lines = vim.split(output, "\n")
@@ -98,11 +100,14 @@ local function wait_for_prompt(pane, timeout)
 		end
 
 		-- Check if it's multiline (new line prompt) - match at beginning of line
+		-- return 2 -- multiline/new line
 		if response == -1 then
 			for _, line in ipairs(lines) do
 				if line:match("^∙") then
 					response = 2
-					-- return 2 -- multiline/new line
+					wait_ms = 50
+				else
+					wait_ms = 150
 				end
 			end
 		end
@@ -126,6 +131,8 @@ local function wait_for_prompt(pane, timeout)
 		-- print(vim.json.encode(log))
 		vim.fn.writefile({ vim.json.encode(log) }, tmp_file)
 
+		vim.wait(wait_ms) -- wait 300ms before next check
+
 		if response ~= -1 then
 			return response
 		end
@@ -141,6 +148,7 @@ local function send_keys_via_buffer(pane, text)
 	text = text:gsub("\t", "    ") -- Replace tabs with spaces
 
 	-- Create temporary file
+	-- local lines = -1
 	local temp_file = "/tmp/tmux_buffer_" .. os.time()
 
 	-- Write text to file
@@ -153,14 +161,20 @@ local function send_keys_via_buffer(pane, text)
 		vim.fn.system("tmux load-buffer " .. temp_file)
 		vim.fn.system("tmux paste-buffer -t " .. pane)
 		vim.fn.system("tmux send-keys -t " .. pane .. " Enter")
+		-- lines = vim.fn.system("tmux display-message -t " .. pane .. " -p '#{history_size}'")
+		-- print(vim.fn.system("tmux display-message -t " .. pane .. " -p '{#history_size}'"))
 
 		-- Clean up
 		os.remove(temp_file)
 	end
+	-- return lines
 end
 
 local function run_command(block_header)
 	local multiplexer_id = 0 -- vim.g.multiplexer_id
+
+	local log = {}
+	local pane_id = string.format("neovim:%d", 0)
 
 	for i, value in ipairs(block_header) do
 		-- print(i, value)
@@ -168,19 +182,38 @@ local function run_command(block_header)
 		-- local command = string.format("tmux send-keys -t \"neovim:%d\" \"%s\" Enter", multiplexer_id, value)
 		--
 		-- vim.fn.system(command)
-		--
 
-		send_keys_via_buffer(string.format("neovim:%d", 0), value)
+		local before_lines = vim.fn.system("tmux display-message -t " .. pane_id .. " -p '#{history_size}'")
 
-		local response = wait_for_prompt(string.format("neovim:%d", 0))
+		send_keys_via_buffer(pane_id, value)
 
-		print(i .. response .. " " .. value)
+		local after_lines = vim.fn.system("tmux display-message -t " .. pane_id .. " -p '#{history_size}'")
+
+		local response = wait_for_prompt(pane_id)
+
+		local finished_lines = vim.fn.system("tmux display-message -t " .. pane_id .. " -p '#{history_size}'")
+
+		table.insert(
+			log,
+			i
+				.. response
+				.. " value: "
+				.. value
+				.. " lines: "
+				.. before_lines
+				.. "_"
+				.. after_lines
+				.. "_"
+				.. finished_lines
+		)
 
 		if response == 0 then
-			print("command timeout")
+			table.insert(log, "command timeout")
 			return
 		end
 	end
+
+	print(table.concat(log, "\n"))
 end
 
 M.spawnMultiplexerWindow = function(domain_name)

@@ -12,7 +12,21 @@ let x = '
 test
 ain
 uuu'
-let b = (input 'abec')
+let b = (input 'interactive input:')
 
 echo $b
+```
+
+```nu
+let x = '
+test
+ain
+uuu'
+
+echo $x
+```
+
+```nu
+sleep 3sec
+echo 1
 ```
