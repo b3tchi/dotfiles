@@ -103,4 +103,4 @@ if $nu.os-info.name != "windows" {
 # carapace
 $env.CARAPACE_BRIDGES = 'zsh,fish,bash,inshellisense' # optional
 mkdir ~/.cache/carapace
-carapace _carapace nushell | save --force ~/.cache/carapace/init.nu
+carapace _carapace nushell | str replace --all 'get -i' 'get -o'   | save --force ~/.cache/carapace/init.nu
