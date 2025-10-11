@@ -2,19 +2,93 @@
 # ~/.bashrc
 #
 
-#function for tmux to kill session and log
+#function for tmux to kill unpinned unattached panes and log
 kill_local_unattached() {
-	# tmux list-sessions -F "#{session_name}" 2>/dev/null | grep "^local_" | while read session; do
-	tmux list-windows -F "#{session_name} #{window_index} #{window_active_clients}" 2>/dev/null |
-		grep "^local_" |
-		while read session window_index active_clients; do
-			if [[ -n "$window_index" ]] && [[ $active_clients -eq 0 ]]; then
-				echo "Killing unattached window: $session:$window_index" >>"$HOME/.tmux.log"
-				tmux kill-window -t "$session:$window_index" 2>/dev/null
+	# Find unattached windows
+	tmux list-windows -a -F "#{window_id} #{window_active_clients}" | sort | uniq 2>/dev/null |
+		while read window active_clients; do
+			if [[ $active_clients -eq 0 ]]; then
+				# Check if window has any pinned panes
+				local has_pinned=$(tmux list-panes -t "$window" -F "#{@pinned}" 2>/dev/null | grep -c "^1$")
+
+				if [[ $has_pinned -eq 0 ]]; then
+					# No pinned panes, kill entire window
+					echo "Killing unattached window (no pinned panes): $window" >>"$HOME/.tmux.log"
+					tmux kill-window -t "$window" 2>/dev/null
+				else
+					# Has pinned panes, kill only unpinned panes
+					tmux list-panes -t "$window" -F "#{pane_id} #{@pinned}" 2>/dev/null |
+						while read pane_id pinned; do
+							if [[ "$pinned" != "1" ]]; then
+								echo "Killing unpinned pane in window with pinned panes: $pane_id ($window)" >>"$HOME/.tmux.log"
+								tmux kill-pane -t "$pane_id" 2>/dev/null
+							fi
+						done
+				fi
 			fi
 		done
 }
 export -f kill_local_unattached
+#
+# Function to handle tmux session
+start_local_session() {
+	local pinned=${1:-0}           # Default to unpinned (0)
+	local session_name=${2:-local} # Default session name is 'local'
+	local unique_id=${3:-}         # Optional unique identifier for pane
+
+	if command -v tmux >/dev/null 2>&1; then
+
+		# If unique_id provided, search for existing pane with that UID
+		if [[ -n "$unique_id" ]]; then
+			existing_pane=$(tmux list-panes -a -F "#{pane_id} #{@uid}" 2>/dev/null | grep " ${unique_id}$" | cut -d' ' -f1)
+			if [[ -n "$existing_pane" ]]; then
+				# Get the session name of the existing pane
+				local existing_session=$(tmux list-panes -a -F "#{session_name} #{pane_id}" 2>/dev/null | grep "$existing_pane" | cut -d' ' -f1)
+
+				# Create new window in a new linked session pointing to the same group
+				view_nr=$(tmux ls | grep -o "${session_name}_[0-9]*:" | grep -o '[0-9]*' | sort -n | tail -1)
+				new_view_nr=$((${view_nr:-0} + 1))
+
+				tmux new-session -d -t "$existing_session" -s "${session_name}_${new_view_nr}"
+				window_index=$(tmux new-window -d -P -F "#{window_index}" -t "${session_name}_${new_view_nr}")
+
+				echo "${session_name}_${new_view_nr}:${window_index}"
+
+				return
+			fi
+		fi
+
+		# Check if 'local' session exists
+		view_nr=$(tmux ls | grep -o "${session_name}_[0-9]*:" | grep -o '[0-9]*' | sort -n | tail -1)
+
+		if [[ -z $view_nr ]]; then
+			new_view_nr=0
+			tmux new-session -d -t $session_name -s "${session_name}_${new_view_nr}"
+
+			# Set pinned flag and optional UID on the pane
+			window_index=0
+			pane_target="${session_name}_${new_view_nr}:${window_index}"
+
+			tmux set-option -p -t "$pane_target" @pinned $pinned
+			[[ -n "$unique_id" ]] && tmux set-option -p -t "$pane_target" @uid "$unique_id"
+		else
+			new_view_nr=$((($view_nr + 1)))
+			tmux new-session -d -t $session_name -s "${session_name}_${new_view_nr}"
+
+			# Set pinned flag and optional UID on the new pane
+			window_index=$(tmux new-window -d -P -F "#{window_index}" -t "${session_name}_${new_view_nr}")
+
+			pane_target="${session_name}_${new_view_nr}:${window_index}"
+			tmux set-option -p -t "$pane_target" @pinned $pinned
+			[[ -n "$unique_id" ]] && tmux set-option -p -t "$pane_target" @uid "$unique_id"
+		fi
+
+		#return value
+		echo "${session_name}_${new_view_nr}:${window_index}"
+
+	fi
+}
+export -f start_local_session
 
 # If not running interactively, don't do anything
 [[ $- != *i* ]] && return
@@ -25,26 +99,21 @@ alias ls='ls --color=auto'
 alias grep='grep --color=auto'
 PS1='[\u@\h \W]\$ '
 
-# Function to handle tmux session
-start_local_session() {
-	if command -v tmux >/dev/null 2>&1 && [[ -z "$TMUX" ]]; then
-		# Check if 'local' session exists
+get_or_create_session() {
+	local pinned=${1:-0}           # Default to unpinned (0)
+	local session_name=${2:-local} # Default session name is 'local'
+	local unique_id=${3:-}         # Optional unique identifier for pane
 
-		view_nr=$(tmux ls | grep -o 'local_[0-9]*:' | grep -o '[0-9]*' | sort -n | tail -1)
+	if [[ -z "$TMUX" ]]; then
 
-		print $view_nr
-		if [[ -z $view_nr ]]; then
-			tmux new-session -d -t local -s local_0
-			new_view_nr=0
-			window_index=0
-		else
-			new_view_nr=$((($view_nr + 1)))
-			tmux new-session -d -t local -s "local_$new_view_nr"
-			window_index=$(tmux new-window -d -P -F "#{window_index}" -t "local_$new_view_nr")
+		# Call start_local_session and capture the return value (session:window)
+		local target=$(start_local_session $pinned $session_name $unique_id)
+
+		if [[ -n "$target" ]]; then
+			tmux attach-session -t "$target" \; set destroy-unattached
 		fi
-
-		tmux attach-session -t "local_$new_view_nr:$window_index" \; set destroy-unattached
 	fi
 }
 
-start_local_session
+export -f get_or_create_session
+get_or_create_session 0 local
