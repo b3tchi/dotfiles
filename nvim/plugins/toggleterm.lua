@@ -17,7 +17,7 @@ return {
 			target = vim.trim(target) -- Remove trailing newline
 
 			local neovim_tmux = Terminal:new({
-				cmd = "tmux attach-session -t '" .. target .. "'",
+				cmd = "tmux attach-session -t " .. target,
 				direction = "horizontal",
 				close_on_exit = false,
 				count = 99,
