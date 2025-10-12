@@ -174,7 +174,26 @@ local function run_command(block_header)
 	local multiplexer_id = 0 -- vim.g.multiplexer_id
 
 	local log = {}
-	local pane_id = string.format("neovim:%d", 0)
+
+	-- Get current pane ID to use as UID
+	-- local current_pane = vim.fn.system("tmux display-message -p '#{pane_id}'"):gsub("%s+", "")
+	local pane_uid = "nvim_term"
+
+	-- Search for existing pane with this UID
+	local target_pane = vim.fn
+		.system("tmux list-panes -a -F '#{pane_id} #{@uid}' | grep ' " .. pane_uid .. "$' | head -1 | cut -d' ' -f1")
+		:gsub("%s+", "")
+
+	print(target_pane)
+	-- If no pane found with this UID, create one
+	if target_pane == "" then
+		local target = vim.fn
+			.system("bash -c 'source ~/.bashrc && start_local_session 1 neovim " .. pane_uid .. "'")
+			:gsub("%s+", "")
+		target_pane = target
+	end
+
+	local pane_id = target_pane
 
 	for i, value in ipairs(block_header) do
 		-- print(i, value)

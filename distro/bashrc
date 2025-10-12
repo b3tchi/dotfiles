@@ -40,19 +40,19 @@ start_local_session() {
 
 		# If unique_id provided, search for existing pane with that UID
 		if [[ -n "$unique_id" ]]; then
-			existing_pane=$(tmux list-panes -a -F "#{pane_id} #{@uid}" 2>/dev/null | grep " ${unique_id}$" | cut -d' ' -f1)
+			existing_pane=$(tmux list-panes -a -F "#{pane_id} #{@uid}" 2>/dev/null | grep " ${unique_id}$" | head -1 | cut -d' ' -f1)
 			if [[ -n "$existing_pane" ]]; then
-				# Get the session name of the existing pane
-				local existing_session=$(tmux list-panes -a -F "#{session_name} #{pane_id}" 2>/dev/null | grep "$existing_pane" | cut -d' ' -f1)
+				# Get the window index of the existing pane
+				local existing_window=$(tmux list-panes -a -F "#{window_index} #{pane_id}" 2>/dev/null | grep "$existing_pane" | head -1 | cut -d' ' -f1)
 
-				# Create new window in a new linked session pointing to the same group
+				# Create new linked session pointing to the same group
 				view_nr=$(tmux ls | grep -o "${session_name}_[0-9]*:" | grep -o '[0-9]*' | sort -n | tail -1)
 				new_view_nr=$((${view_nr:-0} + 1))
 
-				tmux new-session -d -t "$existing_session" -s "${session_name}_${new_view_nr}"
-				window_index=$(tmux new-window -d -P -F "#{window_index}" -t "${session_name}_${new_view_nr}")
+				tmux new-session -d -t $session_name -s "${session_name}_${new_view_nr}"
 
-				echo "${session_name}_${new_view_nr}:${window_index}"
+				# Return the new session with the existing window index
+				echo "${session_name}_${new_view_nr}:${existing_window}"
 
 				return
 			fi
