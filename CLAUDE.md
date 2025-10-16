@@ -222,8 +222,11 @@ This dotfiles repo encourages a bare repo + worktree workflow:
 
 - `nvim.bckp/` - Backup of old Neovim config
 - `nix-config.bckp/` - Backup of Nix configuration
-- `archive/` - Archived configurations
 - `rotz-test/` - Testing area for rotz configurations
+
+## Directories to Ignore
+
+- `archive/` - Archived/deprecated configurations. **Do not reference, modify, or include in searches unless explicitly mentioned by the user.**
 
 ## Adding New Configurations
 

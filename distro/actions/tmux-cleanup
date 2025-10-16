@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# Kill unattached tmux sessions and cleanup unpinned panes
+# Bash equivalent of nushell/actions/tmux-cleanup
+
+kill_local_unattached() {
+	# Clean up unattached sessions in session groups
+	# Keep one session per group if it has pinned panes
+	for group in $(tmux list-sessions -F "#{session_group}" 2>/dev/null | sort -u); do
+		# Skip sessions not in a group
+		[[ -z "$group" ]] && continue
+
+		# Get all sessions in this group
+		local sessions=($(tmux list-sessions -F "#{session_name} #{session_group}" 2>/dev/null |
+			grep " $group$" |
+			awk '{print $1}'))
+
+		# Check if all sessions in group are unattached
+		local all_unattached=true
+		for session in "${sessions[@]}"; do
+			local attached=$(tmux list-sessions -F "#{session_name} #{session_attached}" 2>/dev/null | grep "^$session " | awk '{print $2}')
+			if [[ $attached -gt 0 ]]; then
+				all_unattached=false
+				break
+			fi
+		done
+
+		# Process based on whether all sessions are unattached
+		if [[ $all_unattached == true ]]; then
+			# All sessions unattached: check if any window has pinned panes
+			local has_pinned=false
+			for window in $(tmux list-windows -t "${sessions[0]}" -F "#{window_id}" 2>/dev/null); do
+				local window_pinned=$(tmux list-panes -t "$window" -F "#{@pinned}" 2>/dev/null | grep -c "^1$")
+				if [[ $window_pinned -gt 0 ]]; then
+					has_pinned=true
+					break
+				fi
+			done
+
+			if [[ $has_pinned == true ]]; then
+				# Keep the last session (highest numbered), kill the rest
+				local sorted_sessions=($(printf '%s\n' "${sessions[@]}" | sort -V))
+				local keep_session="${sorted_sessions[-1]}"
+
+				for session in "${sorted_sessions[@]}"; do
+					if [[ "$session" != "$keep_session" ]]; then
+						echo "Killing extra unattached session in group $group (keeping $keep_session): $session" >>"$HOME/.tmux.log"
+						tmux kill-session -t "$session" 2>/dev/null
+					fi
+				done
+			fi
+		else
+			# At least one session is attached: kill all unattached sessions in group
+			for session in "${sessions[@]}"; do
+				local attached=$(tmux list-sessions -F "#{session_name} #{session_attached}" 2>/dev/null | grep "^$session " | awk '{print $2}')
+				if [[ $attached -eq 0 ]]; then
+					echo "Killing unattached session in group $group (group has attached session): $session" >>"$HOME/.tmux.log"
+					tmux kill-session -t "$session" 2>/dev/null
+				fi
+			done
+		fi
+	done
+
+	# Find unattached windows
+	tmux list-windows -a -F "#{window_id} #{window_active_clients}" | sort | uniq 2>/dev/null |
+		while read window active_clients; do
+			if [[ $active_clients -eq 0 ]]; then
+				# Check if window has any pinned panes
+				local has_pinned=$(tmux list-panes -t "$window" -F "#{@pinned}" 2>/dev/null | grep -c "^1$")
+
+				if [[ $has_pinned -eq 0 ]]; then
+					# No pinned panes, kill entire window
+					echo "Killing unattached window (no pinned panes): $window" >>"$HOME/.tmux.log"
+					tmux kill-window -t "$window" 2>/dev/null
+				else
+					# Has pinned panes, kill only unpinned panes
+					tmux list-panes -t "$window" -F "#{pane_id} #{@pinned}" 2>/dev/null |
+						while read pane_id pinned; do
+							if [[ "$pinned" != "1" ]]; then
+								echo "Killing unpinned pane in window with pinned panes: $pane_id ($window)" >>"$HOME/.tmux.log"
+								tmux kill-pane -t "$pane_id" 2>/dev/null
+							fi
+						done
+				fi
+			fi
+		done
+}
+
+# Run the cleanup if called directly
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+	kill_local_unattached
+fi

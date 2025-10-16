@@ -4,8 +4,8 @@ windows:
     env.nu: ~/AppData/Roaming/nushell/env.nu
     scripts: ~/AppData/Roaming/nushell/scripts
     apps: ~/AppData/Roaming/nushell/apps
-    functions/tmux-cleanup: ~/.local/bin/tmux-cleanup
-    functions/tmux-start: ~/.local/bin/tmux-start
+    actions/tmux-cleanup: ~/.local/bin/tmux-cleanup
+    actions/tmux-start: ~/.local/bin/tmux-start
 
   installs:
     cmd: |
@@ -20,8 +20,8 @@ linux:
     env.nu: ~/.config/nushell/env.nu
     scripts: ~/.config/nushell/scripts
     apps: ~/.config/nushell/apps
-    functions/tmux-cleanup: ~/.local/bin/tmux-cleanup
-    functions/tmux-start: ~/.local/bin/tmux-start
+    actions/tmux-cleanup: ~/.local/bin/tmux-cleanup
+    actions/tmux-start: ~/.local/bin/tmux-start
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
@@ -29,5 +29,5 @@ linux:
         nushell starship
       pamac install carapace-bin
       {{/if}}
-      chmod +x ~/.dotfiles/nushell/functions/tmux-cleanup
-      chmod +x ~/.dotfiles/nushell/functions/tmux-start
+      chmod +x ~/.dotfiles/nushell/actions/tmux-cleanup
+      chmod +x ~/.dotfiles/nushell/actions/tmux-start
