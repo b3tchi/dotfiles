@@ -2,30 +2,19 @@
 # ~/.bashrc
 #
 
-# Source tmux action scripts (bash fallback for nushell equivalents)
-DOTFILES_DIR="${HOME}/.dotfiles"
-
-# Source tmux-cleanup script
-if [[ -f "${DOTFILES_DIR}/distro/actions/tmux-cleanup" ]]; then
-	source "${DOTFILES_DIR}/distro/actions/tmux-cleanup"
-	export -f kill_local_unattached
-fi
-
-# Source tmux-start script
-if [[ -f "${DOTFILES_DIR}/distro/actions/tmux-start" ]]; then
-	source "${DOTFILES_DIR}/distro/actions/tmux-start"
-	export -f start_local_session
-	export -f get_or_create_session
-fi
-
 # If not running interactively, don't do anything
 [[ $- != *i* ]] && return
 
-PATH=$PATH:~/.local/bin
+# Add ~/.local/bin to PATH if it exists
+if [ -d "$HOME/.local/bin" ]; then
+	export PATH="$HOME/.local/bin:$PATH"
+fi
 
 alias ls='ls --color=auto'
 alias grep='grep --color=auto'
 PS1='[\u@\h \W]\$ '
 
-# Auto-start tmux session
-get_or_create_session 0 local
+# Auto-start tmux session (script symlinked to ~/.local/bin via rotz)
+if command -v tmux-start &>/dev/null; then
+	tmux-start attach 0 local
+fi
