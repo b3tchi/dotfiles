@@ -75,14 +75,14 @@ def main [] {
                 let keep = ($sorted | last)
 
                 for sess in ($sorted | where $it != $keep) {
-                    log $"Killing extra unattached session in group ($group) (keeping ($keep)): ($sess)"
+                    log $"Killing extra unattached session in group ($group) - keeping ($keep): ($sess)"
                     tmux kill-session -t $sess
                 }
             }
         } else {
             # Some sessions attached - kill unattached ones
             for sess in ($group_sessions | where attached == 0) {
-                log $"Killing unattached session in group ($group) (group has attached session): ($sess.name)"
+                log $"Killing unattached session in group ($group) - group has attached session: ($sess.name)"
                 tmux kill-session -t $sess.name
             }
         }
@@ -97,12 +97,12 @@ def main [] {
 
         if $pinned_count == 0 {
             # No pinned panes - kill entire window
-            log $"Killing unattached window (no pinned panes): ($window.id)"
+            log $"Killing unattached window - no pinned panes: ($window.id)"
             tmux kill-window -t $window.id
         } else {
             # Has pinned panes - kill only unpinned panes
             for pane in ($panes | where pinned != "1") {
-                log $"Killing unpinned pane in window with pinned panes: ($pane.id) (($window.id))"
+                log $"Killing unpinned pane in window with pinned panes: ($pane.id) - window: ($window.id)"
                 tmux kill-pane -t $pane.id
             }
         }
