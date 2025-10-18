@@ -1,0 +1,17 @@
+#!/usr/bin/env nu
+# Display styled tmux message with consistent formatting
+# Usage: tmux-message "Your message here"
+#        tmux-message "" (displays just the status prefix)
+
+def main [message?: string] {
+    # Prefix format matches the reload config style:
+    # Shows window name (orange if pinned) @ session group
+    let prefix = "#{?#{==:#{@pinned},1},#[fg=colour208],#[default]}#W#[default]@#{session_group}"
+
+    # Display with styled prefix, optionally with message
+    if ($message | is-empty) {
+        tmux display-message $prefix
+    } else {
+        tmux display-message $"($prefix) #[fg=colour240]... ($message)#[default]"
+    }
+}

@@ -6,6 +6,7 @@ windows:
     apps: ~/AppData/Roaming/nushell/apps
     actions/tmux-cleanup: ~/.local/bin/tmux-cleanup
     actions/tmux-start: ~/.local/bin/tmux-start
+    actions/tmux-message: ~/.local/bin/tmux-message
 
   installs:
     cmd: |
@@ -22,6 +23,7 @@ linux:
     apps: ~/.config/nushell/apps
     actions/tmux-cleanup: ~/.local/bin/tmux-cleanup
     actions/tmux-start: ~/.local/bin/tmux-start
+    actions/tmux-message: ~/.local/bin/tmux-message
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
@@ -31,3 +33,4 @@ linux:
       {{/if}}
       chmod +x ~/.dotfiles/nushell/actions/tmux-cleanup
       chmod +x ~/.dotfiles/nushell/actions/tmux-start
+      chmod +x ~/.dotfiles/nushell/actions/tmux-message
