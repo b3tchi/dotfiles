@@ -471,11 +471,14 @@ print '2'
 ```nu
 print '
 1
+1
+1
+1
 2
 '
 ```
 
 ```nu
-sleep 2sec
+sleep 5sec
 print 'x'
 ```
