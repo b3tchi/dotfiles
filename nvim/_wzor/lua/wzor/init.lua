@@ -7,7 +7,7 @@ local M = {}
 local empty_prompt = "❯ :"
 local multiline_prompt = "∙"
 local pane_uid = "nvim_term"
-local timeout_ms = 60000 -- Default timeout: 60 seconds
+local timeout_ms = 300000 -- Default timeout: 300 seconds (5 minutes)
 local wait_check_ms = 50 -- Wait time between checks
 local wait_multiline_ms = 25 -- Wait time when multiline detected
 local log_iterations = true -- Log every iteration
@@ -86,7 +86,7 @@ local function md_block_get()
 					end_row = end_row,
 					total_lines = #all_lines,
 					first_line = all_lines[1],
-					last_line = all_lines[#all_lines]
+					last_line = all_lines[#all_lines],
 				}, "DEBUG:md_block_range")
 
 				-- Skip first line (opening ```) and last line (closing ```)
@@ -211,7 +211,8 @@ local function wait_for_prompt(pane, timeout, callback, start_line)
 
 	-- Get starting line if not provided
 	if not start_line then
-		local start_line_str = vim.fn.system("tmux display-message -t " .. pane .. " -p '#{history_size}'"):gsub("%s+", "")
+		local start_line_str =
+			vim.fn.system("tmux display-message -t " .. pane .. " -p '#{history_size}'"):gsub("%s+", "")
 		start_line = tonumber(start_line_str) or 0
 	end
 
@@ -282,7 +283,10 @@ local function wait_for_prompt(pane, timeout, callback, start_line)
 
 	-- If already completed, return immediately
 	if result.response ~= -1 then
-		log_to_file({ pane = pane, response = result.response, iterations = iteration + 1, last_line = result.last_line }, "SUCCESS:wait_for_prompt")
+		log_to_file(
+			{ pane = pane, response = result.response, iterations = iteration + 1, last_line = result.last_line },
+			"SUCCESS:wait_for_prompt"
+		)
 		if callback then
 			callback(result.response)
 		end
@@ -340,7 +344,12 @@ local function wait_for_prompt(pane, timeout, callback, start_line)
 			iteration = iteration + 1
 
 			if check_result.response ~= -1 then
-				log_to_file({ pane = pane, response = check_result.response, iterations = iteration, last_line = check_result.last_line }, "SUCCESS:wait_for_prompt")
+				log_to_file({
+					pane = pane,
+					response = check_result.response,
+					iterations = iteration,
+					last_line = check_result.last_line,
+				}, "SUCCESS:wait_for_prompt")
 				close_timer()
 				if callback then
 					print(check_result.last_line .. " completed")
@@ -419,23 +428,26 @@ local function run_command(block_header)
 			return
 		end
 
-		local before_lines_str = vim.fn.system("tmux display-message -t " .. pane_id .. " -p '#{history_size}'"):gsub("%s+", "")
+		local before_lines_str =
+			vim.fn.system("tmux display-message -t " .. pane_id .. " -p '#{history_size}'"):gsub("%s+", "")
 		local before_lines = tonumber(before_lines_str) or 0
 
 		log_to_file({
 			index = command_index,
 			command = value,
-			before_lines = before_lines
+			before_lines = before_lines,
 		}, "DEBUG:sending_command")
 
 		send_keys_via_buffer(pane_id, value)
 
-		local after_lines_str = vim.fn.system("tmux display-message -t " .. pane_id .. " -p '#{history_size}'"):gsub("%s+", "")
+		local after_lines_str =
+			vim.fn.system("tmux display-message -t " .. pane_id .. " -p '#{history_size}'"):gsub("%s+", "")
 		local after_lines = tonumber(after_lines_str) or 0
 
 		-- Pass the history line number before the command was sent
 		wait_for_prompt(pane_id, nil, function(response)
-			local finished_lines_str = vim.fn.system("tmux display-message -t " .. pane_id .. " -p '#{history_size}'"):gsub("%s+", "")
+			local finished_lines_str =
+				vim.fn.system("tmux display-message -t " .. pane_id .. " -p '#{history_size}'"):gsub("%s+", "")
 			local finished_lines = tonumber(finished_lines_str) or 0
 
 			table.insert(log, {
@@ -482,8 +494,8 @@ end
 M.sendSelectionToMultiplexerWindow = function()
 	-- Get visual selection using API (works with current selection)
 	local bufnr = vim.api.nvim_get_current_buf()
-	local start_pos = vim.api.nvim_buf_get_mark(bufnr, '<')
-	local end_pos = vim.api.nvim_buf_get_mark(bufnr, '>')
+	local start_pos = vim.api.nvim_buf_get_mark(bufnr, "<")
+	local end_pos = vim.api.nvim_buf_get_mark(bufnr, ">")
 	local start_line = start_pos[1]
 	local end_line = end_pos[1]
 
@@ -562,7 +574,7 @@ M.sendChapterBlocksToMultiplexerWindow = function()
 	log_to_file({
 		start_row = start_row,
 		end_row = end_row,
-		filetype = filetype
+		filetype = filetype,
 	}, "DEBUG:chapter_range")
 
 	-- Find all code blocks within this section
@@ -570,9 +582,12 @@ M.sendChapterBlocksToMultiplexerWindow = function()
 
 	if filetype == "markdown" then
 		-- Find all fenced_code_block nodes
-		local query = vim.treesitter.query.parse("markdown", [[
+		local query = vim.treesitter.query.parse(
+			"markdown",
+			[[
 			(fenced_code_block) @block
-		]])
+		]]
+		)
 
 		local tree = vim.treesitter.get_parser(0, "markdown"):parse()[1]
 
@@ -617,7 +632,7 @@ M.sendChapterBlocksToMultiplexerWindow = function()
 
 	log_to_file({
 		blocks_found = #all_commands,
-		commands = all_commands
+		commands = all_commands,
 	}, "DEBUG:chapter_blocks")
 
 	print("Sending " .. #all_commands .. " lines from chapter code blocks")
@@ -626,9 +641,8 @@ end
 
 M.startTmuxSession = function()
 	-- Use the start_local_session from bash to create a new tmux session
-	local result = vim.fn
-		.system("bash -c 'source ~/.bashrc && start_local_session 1 neovim " .. pane_uid .. "'")
-		:gsub("%s+", "")
+	local result =
+		vim.fn.system("bash -c 'source ~/.bashrc && start_local_session 1 neovim " .. pane_uid .. "'"):gsub("%s+", "")
 
 	if result ~= "" then
 		vim.notify("Started tmux session: " .. result, vim.log.levels.INFO)
