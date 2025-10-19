@@ -4,7 +4,7 @@
 return {
 	"akinsho/toggleterm.nvim",
 	keys = {
-		{ "<leader>tn", desc = "Neovim Tmux Terminal" },
+		{ "<leader>mn", desc = "Neovim Tmux Terminal" },
 	},
 	config = function()
 		require("toggleterm").setup()
@@ -26,6 +26,6 @@ return {
 			neovim_tmux:toggle()
 		end
 
-		vim.keymap.set("n", "<leader>tn", _neovim_tmux_toggle, { desc = "Toggle Neovim Tmux Terminal" })
+		vim.keymap.set("n", "<leader>mn", _neovim_tmux_toggle, { desc = "Toggle Neovim Tmux Terminal" })
 	end,
 }

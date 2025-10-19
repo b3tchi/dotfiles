@@ -19,6 +19,7 @@ return {
 			-- { "<leader>mo", "<cmd>VimuxOpenRunner<cr>", silent = true, remap = false, desc = "open" },
 			{ "<leader>mo", "<cmd>lua require('wzor').spawnMultiplexerWindow('local')<CR>", silent = true, remap = false, desc = "open" },
 			{ "<leader>mO", "<cmd>lua require('wzor').spawnMultiplexerWindow('WSL:Ubuntu-20.04')<CR>", silent = true, remap = false, desc = "open" },
+			{ "<leader>ms", "<cmd>lua require('wzor').startTmuxSession()<CR>", silent = true, remap = false, desc = "start tmux session" },
 			{ "<leader>mq", "<cmd>lua require('wzor').killMultiplexerWindow()<CR>", silent = true, remap = false, desc = "close" },
 			-- { "<leader>ml", "<cmd>VimuxRunLastCommand<cr>", silent = true, remap = false, desc = "last command" },
 			-- { "<leader>mx", "<cmd>VimuxInteruptRunner<cr>", silent = true, remap = false, desc = "interupt" },
