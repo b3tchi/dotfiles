@@ -462,3 +462,20 @@ EOF
 ```vim
 echo 'abc'
 ```
+
+```nu
+print '1'
+print '2'
+```
+
+```nu
+print '
+1
+2
+'
+```
+
+```nu
+sleep 2sec
+print 'x'
+```

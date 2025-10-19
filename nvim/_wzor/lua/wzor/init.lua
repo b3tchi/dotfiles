@@ -3,6 +3,50 @@
 
 local M = {}
 
+-- Module-level configuration
+local empty_prompt = "❯ :"
+local multiline_prompt = "∙"
+local pane_uid = "nvim_term"
+
+-- Get temp directory for logs
+local function get_log_dir()
+	local log_dir
+	if vim.loop.os_uname().sysname == "Windows_NT" then
+		log_dir = os.getenv("TEMP") .. "\\nvim\\wzor\\"
+	else
+		log_dir = "/tmp/nvim/wzor/"
+	end
+
+	-- Ensure directory exists
+	vim.fn.mkdir(log_dir, "p")
+	return log_dir
+end
+
+-- Clear log file
+local function clear_log()
+	local log_path = get_log_dir() .. "wzor.log"
+	local file = io.open(log_path, "w")
+	if file then
+		file:close()
+	end
+end
+
+-- Log to temp file (stream mode - appends to single file)
+local function log_to_file(data, log_type)
+	local log_path = get_log_dir() .. "wzor.log"
+	local timestamp = os.date("%Y-%m-%d %H:%M:%S")
+	local content = type(data) == "string" and data or vim.json.encode(data)
+	local log_entry = string.format("[%s] [%s] %s\n", timestamp, log_type or "INFO", content)
+
+	-- Append to log file
+	local file = io.open(log_path, "a")
+	if file then
+		file:write(log_entry)
+		file:close()
+	end
+	return log_path
+end
+
 local function md_block_get()
 	local block_line_begin = vim.fn.search("^```[a-z0-9]*$", "bnW")
 	local block_line_end = vim.fn.search("^```$", "nW")
@@ -74,8 +118,6 @@ local function wait_for_prompt(pane, timeout)
 
 	local start_time = vim.loop.hrtime()
 
-	print(tmp_file)
-	local tmp_file = os.tmpname()
 	local log = {}
 	local iteration = 0
 	local response = -1
@@ -93,17 +135,21 @@ local function wait_for_prompt(pane, timeout)
 		local lines = vim.split(output, "\n")
 		local last_line = lines[#lines] or ""
 
+		-- Detect prompt patterns
+		local has_main_prompt = last_line == empty_prompt
+		local has_multiline_prompt = false
+
 		-- Check if prompt is back (completed) - match at beginning of line
-		if last_line:match("^❯") then
-			print(last_line .. "completed")
+		if has_main_prompt then
+			print(last_line .. " completed")
 			response = 1 -- completed
 		end
 
 		-- Check if it's multiline (new line prompt) - match at beginning of line
-		-- return 2 -- multiline/new line
 		if response == -1 then
 			for _, line in ipairs(lines) do
-				if line:match("^∙") then
+				if line:match("^" .. multiline_prompt) then
+					has_multiline_prompt = true
 					response = 2
 					wait_ms = 50
 				else
@@ -112,44 +158,47 @@ local function wait_for_prompt(pane, timeout)
 			end
 		end
 
+		-- Log each iteration
+		log_to_file({
+			iteration = iteration,
+			pane = pane,
+			last_line = last_line,
+			has_main_prompt = has_main_prompt,
+			has_multiline_prompt = has_multiline_prompt,
+			response = response,
+			wait_ms = wait_ms,
+		}, "ITER:wait_for_prompt")
+
 		-- Check timeout
 		if response == -1 then
 			local elapsed = (vim.loop.hrtime() - start_time) / 1000000 -- convert to ms
 			if elapsed > timeout then
 				response = 0
+				log_to_file({ pane = pane, timeout = timeout, iterations = iteration }, "TIMEOUT:wait_for_prompt")
 				return 0 -- timeout
 			end
 		end
 
-		log[iteration] = {
-			last_line = last_line,
-			lines = lines,
-			output = output,
-			response = response,
-		}
+		iteration = iteration + 1
 
-		-- print(vim.json.encode(log))
-		vim.fn.writefile({ vim.json.encode(log) }, tmp_file)
-
-		vim.wait(wait_ms) -- wait 300ms before next check
+		vim.wait(wait_ms) -- wait before next check
 
 		if response ~= -1 then
+			log_to_file({ pane = pane, response = response, iterations = iteration }, "SUCCESS:wait_for_prompt")
 			return response
 		end
 	end
 end
 
 local function send_keys_via_buffer(pane, text)
-	--
 	if text == "" then
 		return
 	end
 
 	text = text:gsub("\t", "    ") -- Replace tabs with spaces
 
-	-- Create temporary file
-	-- local lines = -1
-	local temp_file = "/tmp/tmux_buffer_" .. os.time()
+	-- Create temporary file in wzor temp directory
+	local temp_file = get_log_dir() .. "tmux_buffer_" .. os.time()
 
 	-- Write text to file
 	local file = io.open(temp_file, "w")
@@ -161,23 +210,19 @@ local function send_keys_via_buffer(pane, text)
 		vim.fn.system("tmux load-buffer " .. temp_file)
 		vim.fn.system("tmux paste-buffer -t " .. pane)
 		vim.fn.system("tmux send-keys -t " .. pane .. " Enter")
-		-- lines = vim.fn.system("tmux display-message -t " .. pane .. " -p '#{history_size}'")
-		-- print(vim.fn.system("tmux display-message -t " .. pane .. " -p '{#history_size}'"))
 
 		-- Clean up
 		os.remove(temp_file)
 	end
-	-- return lines
 end
 
 local function run_command(block_header)
+	-- Clear log at start of each run
+	clear_log()
+
 	local multiplexer_id = 0 -- vim.g.multiplexer_id
 
 	local log = {}
-
-	-- Get current pane ID to use as UID
-	-- local current_pane = vim.fn.system("tmux display-message -p '#{pane_id}'"):gsub("%s+", "")
-	local pane_uid = "nvim_term"
 
 	-- Search for existing pane with this UID
 	local target_pane = vim.fn
@@ -196,12 +241,6 @@ local function run_command(block_header)
 	local pane_id = target_pane
 
 	for i, value in ipairs(block_header) do
-		-- print(i, value)
-
-		-- local command = string.format("tmux send-keys -t \"neovim:%d\" \"%s\" Enter", multiplexer_id, value)
-		--
-		-- vim.fn.system(command)
-
 		local before_lines = vim.fn.system("tmux display-message -t " .. pane_id .. " -p '#{history_size}'")
 
 		send_keys_via_buffer(pane_id, value)
@@ -212,27 +251,23 @@ local function run_command(block_header)
 
 		local finished_lines = vim.fn.system("tmux display-message -t " .. pane_id .. " -p '#{history_size}'")
 
-		table.insert(
-			log,
-			i
-				.. response
-				.. " value: "
-				.. value
-				.. " lines: "
-				.. before_lines
-				.. "_"
-				.. after_lines
-				.. "_"
-				.. finished_lines
-		)
+		table.insert(log, {
+			index = i,
+			command = value,
+			response = response,
+			lines_before = before_lines:gsub("%s+", ""),
+			lines_after = after_lines:gsub("%s+", ""),
+			lines_finished = finished_lines:gsub("%s+", ""),
+		})
 
 		if response == 0 then
-			table.insert(log, "command timeout")
+			table.insert(log, { error = "command timeout", at_index = i })
+			log_to_file({ pane_id = pane_id, commands = log }, "TIMEOUT:run_command")
 			return
 		end
 	end
 
-	print(table.concat(log, "\n"))
+	log_to_file({ pane_id = pane_id, commands = log }, "SUCCESS:run_command")
 end
 
 M.spawnMultiplexerWindow = function(domain_name)
