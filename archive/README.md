@@ -463,6 +463,8 @@ EOF
 echo 'abc'
 ```
 
+### Chapter scope
+
 ```nu
 print '1'
 print '2'
@@ -477,8 +479,32 @@ print '
 2
 '
 ```
-
+### texts
 ```nu
 sleep 5sec
 print 'x'
+```
+
+```nu
+print '1'
+print '2'
+print '3'
+print '4'
+```
+### input
+```nu
+let _input = (input "enter text") 
+print $_input
+```
+
+```nu
+print '1'
+print '2'
+print '3'
+print '4'
+```
+
+```csv
+test, bec,ubcue
+1,3,3
 ```

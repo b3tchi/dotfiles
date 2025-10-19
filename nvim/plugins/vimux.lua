@@ -20,6 +20,7 @@ return {
 			{ "<leader>mo", "<cmd>lua require('wzor').spawnMultiplexerWindow('local')<CR>", silent = true, remap = false, desc = "open" },
 			{ "<leader>mO", "<cmd>lua require('wzor').spawnMultiplexerWindow('WSL:Ubuntu-20.04')<CR>", silent = true, remap = false, desc = "open" },
 			{ "<leader>ms", "<cmd>lua require('wzor').startTmuxSession()<CR>", silent = true, remap = false, desc = "start tmux session" },
+			{ "<leader>mv", "<cmd>lua require('wzor').sendSelectionToMultiplexerWindow()<CR>", mode = "v", silent = true, remap = false, desc = "send selection" },
 			{ "<leader>mq", "<cmd>lua require('wzor').killMultiplexerWindow()<CR>", silent = true, remap = false, desc = "close" },
 			-- { "<leader>ml", "<cmd>VimuxRunLastCommand<cr>", silent = true, remap = false, desc = "last command" },
 			-- { "<leader>mx", "<cmd>VimuxInteruptRunner<cr>", silent = true, remap = false, desc = "interupt" },
@@ -35,6 +36,7 @@ return {
 			{ "<leader>mc", "<cmd>lua require('wzor').sendLineToMultiplexerWindow()<CR>", silent = true, remap = false, desc = "send line" },
 			{ "<leader>mq", "<cmd>lua require('wzor').killMultiplexerWindow()<CR>", silent = true, remap = false, desc = "close" },
 			{ "<leader>mb", "<cmd>lua require('wzor').sendBlockToMultiplexerWindow()<CR>", silent = true, remap = false, desc = "send block" },
+			{ "<leader>mh", "<cmd>lua require('wzor').sendChapterBlocksToMultiplexerWindow()<CR>", silent = true, remap = false, desc = "send chapter blocks" },
 			-- { "<leader>mb", ":lua vimux_md_block()<CR>", silent = false, remap = false, desc = "block run" },
 		},
 		init = function()

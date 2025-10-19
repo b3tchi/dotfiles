@@ -11,6 +11,7 @@ local timeout_ms = 60000 -- Default timeout: 60 seconds
 local wait_check_ms = 50 -- Wait time between checks
 local wait_multiline_ms = 25 -- Wait time when multiline detected
 local log_iterations = true -- Log every iteration
+local debug_mode = false -- Enable debug logging
 
 -- Get temp directory for logs
 local function get_log_dir()
@@ -37,6 +38,11 @@ end
 
 -- Log to temp file (stream mode - appends to single file)
 local function log_to_file(data, log_type)
+	-- Skip debug logs if debug_mode is false
+	if not debug_mode and log_type and log_type:match("^DEBUG:") then
+		return
+	end
+
 	local log_path = get_log_dir() .. "wzor.log"
 	local timestamp = os.date("%Y-%m-%d %H:%M:%S")
 	local content = type(data) == "string" and data or vim.json.encode(data)
@@ -52,10 +58,57 @@ local function log_to_file(data, log_type)
 end
 
 local function md_block_get()
+	local resp = {}
+	local cursor_node = vim.treesitter.get_node()
+
+	-- Try treesitter first
+	if cursor_node then
+		-- Walk up the tree to find a fenced_code_block node
+		local current = cursor_node
+		while current do
+			if current:type() == "fenced_code_block" then
+				local start_row, _, end_row, _ = current:range()
+
+				-- Get the info_string (language) from the first child
+				local info_node = current:child(0)
+				if info_node and info_node:type() == "info_string" then
+					resp.lang = vim.treesitter.get_node_text(info_node, 0)
+				else
+					resp.lang = ""
+				end
+
+				-- Get all lines from the block
+				local all_lines = vim.api.nvim_buf_get_lines(0, start_row, end_row, false)
+
+				log_to_file({
+					method = "treesitter",
+					start_row = start_row,
+					end_row = end_row,
+					total_lines = #all_lines,
+					first_line = all_lines[1],
+					last_line = all_lines[#all_lines]
+				}, "DEBUG:md_block_range")
+
+				-- Skip first line (opening ```) and last line (closing ```)
+				local code_lines = {}
+				for i = 2, #all_lines - 1 do
+					table.insert(code_lines, all_lines[i])
+				end
+
+				resp.code = code_lines
+				resp.path = vim.fn.expand("%:p:h")
+
+				log_to_file({ method = "treesitter", lang = resp.lang, lines = #resp.code }, "DEBUG:md_block_get")
+				return resp
+			end
+			current = current:parent()
+		end
+	end
+
+	-- Fallback to regex
+	log_to_file({ method = "regex_fallback" }, "DEBUG:md_block_get")
 	local block_line_begin = vim.fn.search("^```[a-z0-9]*$", "bnW")
 	local block_line_end = vim.fn.search("^```$", "nW")
-
-	local resp = {}
 
 	resp.lang = vim.fn.getline(block_line_begin):sub(4)
 	resp.code = vim.fn.getline(block_line_begin + 1, block_line_end - 1)
@@ -65,10 +118,46 @@ local function md_block_get()
 end
 
 local function org_block_get()
+	local resp = {}
+	local cursor_node = vim.treesitter.get_node()
+
+	-- Try treesitter first
+	if cursor_node then
+		-- Walk up the tree to find a block node
+		local current = cursor_node
+		while current do
+			local node_type = current:type()
+			-- Org mode uses different node types: src_block, example_block, etc.
+			if node_type == "block" or node_type:match("^src") then
+				local start_row, _, end_row, _ = current:range()
+
+				-- Get all lines from the block
+				local all_lines = vim.api.nvim_buf_get_lines(0, start_row, end_row, false)
+
+				-- Try to find language parameter in first line
+				local lang_match = all_lines[1] and all_lines[1]:match("#+begin_src%s+(%S+)")
+				resp.lang = lang_match or ""
+
+				-- Skip first line (#+begin_src) and last line (#+end_src)
+				local code_lines = {}
+				for i = 2, #all_lines - 1 do
+					table.insert(code_lines, all_lines[i])
+				end
+
+				resp.code = code_lines
+				resp.path = vim.fn.expand("%:p:h")
+
+				log_to_file({ method = "treesitter", lang = resp.lang, lines = #resp.code }, "DEBUG:org_block_get")
+				return resp
+			end
+			current = current:parent()
+		end
+	end
+
+	-- Fallback to regex
+	log_to_file({ method = "regex_fallback" }, "DEBUG:org_block_get")
 	local block_line_begin = vim.fn.search("#+begin_src [a-z0-9]*$", "bnW")
 	local block_line_end = vim.fn.search("#+end_src$", "nW")
-
-	local resp = {}
 
 	resp.lang = vim.fn.matchlist(vim.fn.getline(block_line_begin), "\\(#+begin_src \\)\\(.*\\)\\?")[3]
 	resp.code = vim.fn.getline(block_line_begin + 1, block_line_end - 1)
@@ -132,20 +221,19 @@ local function wait_for_prompt(pane, timeout, callback, start_line)
 
 	-- Helper function to check prompt state
 	local function check_output()
-		-- Get current history size
-		local current_line_str = vim.fn.system("tmux display-message -t " .. pane .. " -p '#{history_size}'"):gsub("%s+", "")
-		local current_line = tonumber(current_line_str) or 0
-		local lines_to_check = math.max(1, current_line - start_line)
-
-		-- Capture only the specific line range from start_line to current (recent output only)
-		-- -S start_line: start from history line where command was sent
-		-- -E -1: end at last line (current)
-		local output = vim.fn.system("tmux capture-pane -t " .. pane .. " -p -S " .. start_line .. " -E -1")
-		output = output:gsub("\n+", "\n")
+		-- Capture the last 20 lines of the pane (simpler and more reliable)
+		-- -S -20: start from 20 lines back
+		-- -p: print to stdout
+		local output = vim.fn.system("tmux capture-pane -t " .. pane .. " -p -S -20")
 		output = output:gsub("\t", "    ")
-		output = output:gsub("^%s*", ""):gsub("%s*$", "")
 
 		local lines = vim.split(output, "\n")
+
+		-- Remove empty trailing lines
+		while #lines > 0 and lines[#lines]:match("^%s*$") do
+			table.remove(lines)
+		end
+
 		local last_line = lines[#lines] or ""
 
 		local has_main_prompt = last_line == empty_prompt
@@ -156,9 +244,9 @@ local function wait_for_prompt(pane, timeout, callback, start_line)
 		end
 
 		if response == -1 then
-			-- Only check recent lines for multiline prompt
-			for _, line in ipairs(lines) do
-				if line:match("^" .. multiline_prompt) then
+			-- Check last few lines for multiline prompt
+			for i = math.max(1, #lines - 5), #lines do
+				if lines[i] and lines[i]:match("^" .. multiline_prompt) then
 					has_multiline_prompt = true
 					response = 2
 					break
@@ -171,8 +259,7 @@ local function wait_for_prompt(pane, timeout, callback, start_line)
 			last_line = last_line,
 			has_main_prompt = has_main_prompt,
 			has_multiline_prompt = has_multiline_prompt,
-			lines_checked = lines_to_check,
-			current_history = current_line,
+			lines_checked = #lines,
 		}
 	end
 
@@ -189,8 +276,6 @@ local function wait_for_prompt(pane, timeout, callback, start_line)
 			has_multiline_prompt = result.has_multiline_prompt,
 			response = result.response,
 			lines_checked = result.lines_checked,
-			start_line = start_line,
-			current_history = result.current_history,
 			mode = "sync",
 		}, "ITER:wait_for_prompt")
 	end
@@ -235,8 +320,6 @@ local function wait_for_prompt(pane, timeout, callback, start_line)
 					has_multiline_prompt = check_result.has_multiline_prompt,
 					response = check_result.response,
 					lines_checked = check_result.lines_checked,
-					start_line = start_line,
-					current_history = check_result.current_history,
 					mode = "async",
 				}, "ITER:wait_for_prompt")
 			end
@@ -327,8 +410,23 @@ local function run_command(block_header)
 		end
 
 		local value = block_header[command_index]
+
+		-- Skip empty lines
+		if value == "" or value:match("^%s*$") then
+			log_to_file({ index = command_index, skipped = "empty line" }, "DEBUG:skip_command")
+			command_index = command_index + 1
+			process_next_command()
+			return
+		end
+
 		local before_lines_str = vim.fn.system("tmux display-message -t " .. pane_id .. " -p '#{history_size}'"):gsub("%s+", "")
 		local before_lines = tonumber(before_lines_str) or 0
+
+		log_to_file({
+			index = command_index,
+			command = value,
+			before_lines = before_lines
+		}, "DEBUG:sending_command")
 
 		send_keys_via_buffer(pane_id, value)
 
@@ -381,6 +479,24 @@ M.sendLineToMultiplexerWindow = function()
 	run_command(block_header)
 end
 
+M.sendSelectionToMultiplexerWindow = function()
+	-- Get visual selection using API (works with current selection)
+	local bufnr = vim.api.nvim_get_current_buf()
+	local start_pos = vim.api.nvim_buf_get_mark(bufnr, '<')
+	local end_pos = vim.api.nvim_buf_get_mark(bufnr, '>')
+	local start_line = start_pos[1]
+	local end_line = end_pos[1]
+
+	log_to_file({ start_line = start_line, end_line = end_line }, "DEBUG:selection_range")
+
+	-- Get the selected lines
+	local lines = vim.api.nvim_buf_get_lines(bufnr, start_line - 1, end_line, false)
+
+	log_to_file({ lines = lines, count = #lines }, "DEBUG:lines_captured")
+	print("Sending " .. #lines .. " selected lines")
+	run_command(lines)
+end
+
 M.sendBlockToMultiplexerWindow = function()
 	local codeblock = {}
 
@@ -395,6 +511,117 @@ M.sendBlockToMultiplexerWindow = function()
 
 	print(vim.inspect(codeblock.code))
 	run_command(codeblock.code)
+end
+
+M.sendChapterBlocksToMultiplexerWindow = function()
+	local filetype = vim.bo.filetype
+	if filetype ~= "markdown" and filetype ~= "org" then
+		print("covered are only .org or .md files")
+		return
+	end
+
+	-- Get cursor position
+	local cursor_node = vim.treesitter.get_node()
+	if not cursor_node then
+		print("Treesitter not available")
+		return
+	end
+
+	-- Find the current heading/section
+	local heading_node = nil
+	local current = cursor_node
+
+	if filetype == "markdown" then
+		-- Walk up to find a section (which contains heading + content)
+		while current do
+			if current:type() == "section" then
+				heading_node = current
+				break
+			end
+			current = current:parent()
+		end
+	elseif filetype == "org" then
+		-- Walk up to find a headline
+		while current do
+			if current:type() == "headline" or current:type() == "section" then
+				heading_node = current
+				break
+			end
+			current = current:parent()
+		end
+	end
+
+	if not heading_node then
+		print("Could not find current heading/section")
+		return
+	end
+
+	-- Get the range of the heading section
+	local start_row, _, end_row, _ = heading_node:range()
+
+	log_to_file({
+		start_row = start_row,
+		end_row = end_row,
+		filetype = filetype
+	}, "DEBUG:chapter_range")
+
+	-- Find all code blocks within this section
+	local all_commands = {}
+
+	if filetype == "markdown" then
+		-- Find all fenced_code_block nodes
+		local query = vim.treesitter.query.parse("markdown", [[
+			(fenced_code_block) @block
+		]])
+
+		local tree = vim.treesitter.get_parser(0, "markdown"):parse()[1]
+
+		for _, node in query:iter_captures(tree:root(), 0, start_row, end_row) do
+			local node_start, _, node_end, _ = node:range()
+
+			-- Get all lines in the block
+			local all_lines = vim.api.nvim_buf_get_lines(0, node_start, node_end, false)
+
+			-- Skip first line (opening ```) and last line (closing ```)
+			-- The block structure is: [opening fence, code lines..., closing fence]
+			for i = 2, #all_lines - 1 do
+				table.insert(all_commands, all_lines[i])
+			end
+		end
+	elseif filetype == "org" then
+		-- For org files, manually traverse children looking for blocks
+		local function find_blocks(node)
+			for child in node:iter_children() do
+				local node_type = child:type()
+				if node_type == "block" or node_type:match("^src") then
+					local node_start, _, node_end, _ = child:range()
+
+					-- Get all lines in the block
+					local all_lines = vim.api.nvim_buf_get_lines(0, node_start, node_end, false)
+
+					-- Skip first line (#+begin_src) and last line (#+end_src)
+					for i = 2, #all_lines - 1 do
+						table.insert(all_commands, all_lines[i])
+					end
+				end
+				find_blocks(child)
+			end
+		end
+		find_blocks(heading_node)
+	end
+
+	if #all_commands == 0 then
+		print("No code blocks found in current section")
+		return
+	end
+
+	log_to_file({
+		blocks_found = #all_commands,
+		commands = all_commands
+	}, "DEBUG:chapter_blocks")
+
+	print("Sending " .. #all_commands .. " lines from chapter code blocks")
+	run_command(all_commands)
 end
 
 M.startTmuxSession = function()
