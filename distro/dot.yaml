@@ -36,6 +36,7 @@ linux:
           fd ripgrep fzf sd \
           go rust nodejs \
           wezterm \
+          go-yq dasel \
           ttf-iosevka-nerd ttf-iosevkaterm-nerd ttc-iosevka \
           xfce-theme-greybird
 
@@ -51,6 +52,7 @@ linux:
           bat \
           fd ripgrep fzf sd \
           go rust nodejs \
+          go-yq dasel \
           ttf-iosevka-nerd ttf-iosevkaterm-nerd ttc-iosevka
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux")}}
@@ -62,6 +64,7 @@ linux:
           fd ripgrep fzf sd \
           go rust nodejs \
           wezterm \
+          go-yq dasel \
           ttf-iosevka-nerd ttf-iosevkaterm-nerd ttc-iosevka \
 
         sudo pacman -S --needed git base-devel
