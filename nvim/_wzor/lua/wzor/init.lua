@@ -7,6 +7,10 @@ local M = {}
 local empty_prompt = "❯ :"
 local multiline_prompt = "∙"
 local pane_uid = "nvim_term"
+local timeout_ms = 60000 -- Default timeout: 60 seconds
+local wait_check_ms = 50 -- Wait time between checks
+local wait_multiline_ms = 25 -- Wait time when multiline detected
+local log_iterations = true -- Log every iteration
 
 -- Get temp directory for logs
 local function get_log_dir()
@@ -38,7 +42,7 @@ local function log_to_file(data, log_type)
 	local content = type(data) == "string" and data or vim.json.encode(data)
 	local log_entry = string.format("[%s] [%s] %s\n", timestamp, log_type or "INFO", content)
 
-	-- Append to log file
+	-- Direct write to file
 	local file = io.open(log_path, "a")
 	if file then
 		file:write(log_entry)
@@ -112,82 +116,159 @@ local function run_command_win(block_header)
 
 	vim.fn.system(command)
 end
-local function wait_for_prompt(pane, timeout)
-	-- pane = pane or "0" -- default to current pane
-	timeout = timeout or 60000
+local function wait_for_prompt(pane, timeout, callback, start_line)
+	-- Use module-level timeout if not specified
+	timeout = timeout or timeout_ms
+
+	-- Get starting line if not provided
+	if not start_line then
+		local start_line_str = vim.fn.system("tmux display-message -t " .. pane .. " -p '#{history_size}'"):gsub("%s+", "")
+		start_line = tonumber(start_line_str) or 0
+	end
 
 	local start_time = vim.loop.hrtime()
-
-	local log = {}
 	local iteration = 0
 	local response = -1
 
-	local wait_ms = 100
+	-- Helper function to check prompt state
+	local function check_output()
+		-- Get current history size
+		local current_line_str = vim.fn.system("tmux display-message -t " .. pane .. " -p '#{history_size}'"):gsub("%s+", "")
+		local current_line = tonumber(current_line_str) or 0
+		local lines_to_check = math.max(1, current_line - start_line)
 
-	vim.wait(wait_ms) -- wait check
-
-	while true do
-		local output = vim.fn.system("tmux capture-pane -t " .. pane .. " -p")
-		output = output:gsub("\n+", "\n") -- Replace multiple newlines with single newlines
-		output = output:gsub("\t", "    ") -- Replace tabs with spaces
-		output = output:gsub("^%s*", ""):gsub("%s*$", "") -- Trim start and end
+		-- Capture only the specific line range from start_line to current (recent output only)
+		-- -S start_line: start from history line where command was sent
+		-- -E -1: end at last line (current)
+		local output = vim.fn.system("tmux capture-pane -t " .. pane .. " -p -S " .. start_line .. " -E -1")
+		output = output:gsub("\n+", "\n")
+		output = output:gsub("\t", "    ")
+		output = output:gsub("^%s*", ""):gsub("%s*$", "")
 
 		local lines = vim.split(output, "\n")
 		local last_line = lines[#lines] or ""
 
-		-- Detect prompt patterns
 		local has_main_prompt = last_line == empty_prompt
 		local has_multiline_prompt = false
 
-		-- Check if prompt is back (completed) - match at beginning of line
 		if has_main_prompt then
-			print(last_line .. " completed")
-			response = 1 -- completed
+			response = 1
 		end
 
-		-- Check if it's multiline (new line prompt) - match at beginning of line
 		if response == -1 then
+			-- Only check recent lines for multiline prompt
 			for _, line in ipairs(lines) do
 				if line:match("^" .. multiline_prompt) then
 					has_multiline_prompt = true
 					response = 2
-					wait_ms = 50
-				else
-					wait_ms = 150
+					break
 				end
 			end
 		end
 
-		-- Log each iteration
-		log_to_file({
-			iteration = iteration,
-			pane = pane,
+		return {
+			response = response,
 			last_line = last_line,
 			has_main_prompt = has_main_prompt,
 			has_multiline_prompt = has_multiline_prompt,
-			response = response,
-			wait_ms = wait_ms,
+			lines_checked = lines_to_check,
+			current_history = current_line,
+		}
+	end
+
+	-- Synchronous initial check
+	vim.wait(wait_check_ms)
+	local result = check_output()
+
+	if log_iterations then
+		log_to_file({
+			iteration = iteration,
+			pane = pane,
+			last_line = result.last_line,
+			has_main_prompt = result.has_main_prompt,
+			has_multiline_prompt = result.has_multiline_prompt,
+			response = result.response,
+			lines_checked = result.lines_checked,
+			start_line = start_line,
+			current_history = result.current_history,
+			mode = "sync",
 		}, "ITER:wait_for_prompt")
+	end
 
-		-- Check timeout
-		if response == -1 then
-			local elapsed = (vim.loop.hrtime() - start_time) / 1000000 -- convert to ms
-			if elapsed > timeout then
-				response = 0
-				log_to_file({ pane = pane, timeout = timeout, iterations = iteration }, "TIMEOUT:wait_for_prompt")
-				return 0 -- timeout
-			end
+	-- If already completed, return immediately
+	if result.response ~= -1 then
+		log_to_file({ pane = pane, response = result.response, iterations = iteration + 1, last_line = result.last_line }, "SUCCESS:wait_for_prompt")
+		if callback then
+			callback(result.response)
 		end
+		return
+	end
 
-		iteration = iteration + 1
+	-- Command is still pending, go async with slower polling
+	iteration = iteration + 1
+	local timer = vim.uv.new_timer()
+	local timer_closed = false
+	local async_wait_ms = 500 -- Slower async polling
 
-		vim.wait(wait_ms) -- wait before next check
-
-		if response ~= -1 then
-			log_to_file({ pane = pane, response = response, iterations = iteration }, "SUCCESS:wait_for_prompt")
-			return response
+	local function close_timer()
+		if not timer_closed then
+			timer:stop()
+			timer:close()
+			timer_closed = true
 		end
 	end
+
+	local function check_prompt_async()
+		vim.schedule(function()
+			if timer_closed then
+				return
+			end
+
+			local check_result = check_output()
+
+			if log_iterations then
+				log_to_file({
+					iteration = iteration,
+					pane = pane,
+					last_line = check_result.last_line,
+					has_main_prompt = check_result.has_main_prompt,
+					has_multiline_prompt = check_result.has_multiline_prompt,
+					response = check_result.response,
+					lines_checked = check_result.lines_checked,
+					start_line = start_line,
+					current_history = check_result.current_history,
+					mode = "async",
+				}, "ITER:wait_for_prompt")
+			end
+
+			-- Check timeout
+			if check_result.response == -1 then
+				local elapsed = (vim.loop.hrtime() - start_time) / 1000000
+				if elapsed > timeout then
+					log_to_file({ pane = pane, timeout = timeout, iterations = iteration }, "TIMEOUT:wait_for_prompt")
+					close_timer()
+					if callback then
+						callback(0)
+					end
+					return
+				end
+			end
+
+			iteration = iteration + 1
+
+			if check_result.response ~= -1 then
+				log_to_file({ pane = pane, response = check_result.response, iterations = iteration, last_line = check_result.last_line }, "SUCCESS:wait_for_prompt")
+				close_timer()
+				if callback then
+					print(check_result.last_line .. " completed")
+					callback(check_result.response)
+				end
+			end
+		end)
+	end
+
+	-- Start async timer with 500ms interval
+	timer:start(async_wait_ms, async_wait_ms, check_prompt_async)
 end
 
 local function send_keys_via_buffer(pane, text)
@@ -220,8 +301,6 @@ local function run_command(block_header)
 	-- Clear log at start of each run
 	clear_log()
 
-	local multiplexer_id = 0 -- vim.g.multiplexer_id
-
 	local log = {}
 
 	-- Search for existing pane with this UID
@@ -239,35 +318,49 @@ local function run_command(block_header)
 	end
 
 	local pane_id = target_pane
+	local command_index = 1
 
-	for i, value in ipairs(block_header) do
-		local before_lines = vim.fn.system("tmux display-message -t " .. pane_id .. " -p '#{history_size}'")
+	local function process_next_command()
+		if command_index > #block_header then
+			log_to_file({ pane_id = pane_id, commands = log }, "SUCCESS:run_command")
+			return
+		end
+
+		local value = block_header[command_index]
+		local before_lines_str = vim.fn.system("tmux display-message -t " .. pane_id .. " -p '#{history_size}'"):gsub("%s+", "")
+		local before_lines = tonumber(before_lines_str) or 0
 
 		send_keys_via_buffer(pane_id, value)
 
-		local after_lines = vim.fn.system("tmux display-message -t " .. pane_id .. " -p '#{history_size}'")
+		local after_lines_str = vim.fn.system("tmux display-message -t " .. pane_id .. " -p '#{history_size}'"):gsub("%s+", "")
+		local after_lines = tonumber(after_lines_str) or 0
 
-		local response = wait_for_prompt(pane_id)
+		-- Pass the history line number before the command was sent
+		wait_for_prompt(pane_id, nil, function(response)
+			local finished_lines_str = vim.fn.system("tmux display-message -t " .. pane_id .. " -p '#{history_size}'"):gsub("%s+", "")
+			local finished_lines = tonumber(finished_lines_str) or 0
 
-		local finished_lines = vim.fn.system("tmux display-message -t " .. pane_id .. " -p '#{history_size}'")
+			table.insert(log, {
+				index = command_index,
+				command = value,
+				response = response,
+				lines_before = before_lines,
+				lines_after = after_lines,
+				lines_finished = finished_lines,
+			})
 
-		table.insert(log, {
-			index = i,
-			command = value,
-			response = response,
-			lines_before = before_lines:gsub("%s+", ""),
-			lines_after = after_lines:gsub("%s+", ""),
-			lines_finished = finished_lines:gsub("%s+", ""),
-		})
+			if response == 0 then
+				table.insert(log, { error = "command timeout", at_index = command_index })
+				log_to_file({ pane_id = pane_id, commands = log }, "TIMEOUT:run_command")
+				return
+			end
 
-		if response == 0 then
-			table.insert(log, { error = "command timeout", at_index = i })
-			log_to_file({ pane_id = pane_id, commands = log }, "TIMEOUT:run_command")
-			return
-		end
+			command_index = command_index + 1
+			process_next_command()
+		end, before_lines)
 	end
 
-	log_to_file({ pane_id = pane_id, commands = log }, "SUCCESS:run_command")
+	process_next_command()
 end
 
 M.spawnMultiplexerWindow = function(domain_name)
@@ -302,6 +395,21 @@ M.sendBlockToMultiplexerWindow = function()
 
 	print(vim.inspect(codeblock.code))
 	run_command(codeblock.code)
+end
+
+M.startTmuxSession = function()
+	-- Use the start_local_session from bash to create a new tmux session
+	local result = vim.fn
+		.system("bash -c 'source ~/.bashrc && start_local_session 1 neovim " .. pane_uid .. "'")
+		:gsub("%s+", "")
+
+	if result ~= "" then
+		vim.notify("Started tmux session: " .. result, vim.log.levels.INFO)
+		log_to_file({ pane_id = result, action = "session_started" }, "INFO:start_session")
+	else
+		vim.notify("Failed to start tmux session", vim.log.levels.ERROR)
+		log_to_file({ error = "failed to start session" }, "ERROR:start_session")
+	end
 end
 
 -- TODO run last command
