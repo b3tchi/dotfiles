@@ -196,8 +196,6 @@ local function run_command_win(block_header)
 
 	local command = string.format(
 		-- "nu -c 'open %s | lines | each {|r| wezterm cli send-text --pane-id %d --no-paste $\"($r)\\r\"}'",
-		-- "nu -c 'open %s | lines | each {|r| tmux send-keys -t \"neovim:%d\" $\"($r)\" Enter}'",
-		-- "tmux send-keys -t \"neovim:%d\" $\"($r)\" Enter",
 		tmp_file,
 		0 --vim.g.multiplexer_id
 	)
