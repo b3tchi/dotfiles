@@ -19,7 +19,9 @@ local function get_log_dir()
 	if vim.loop.os_uname().sysname == "Windows_NT" then
 		log_dir = os.getenv("TEMP") .. "\\nvim\\wzor\\"
 	else
-		log_dir = "/tmp/nvim/wzor/"
+		-- Use TMPDIR if available (Termux/Android), otherwise fall back to /tmp
+		local tmpdir = os.getenv("TMPDIR") or "/tmp"
+		log_dir = tmpdir .. "/nvim/wzor/"
 	end
 
 	-- Ensure directory exists
