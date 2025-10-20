@@ -319,6 +319,9 @@ exec --no-startup-id clipit
 #lockscreen
 exec --no-startup-id xautolock -time 10 -locker blurlock
 
+#dvorak default layout 
+exec --no-startup-id setxkbmap -device $(xinput list --id-only 'keyboard:AT Translated Set 2 keyboard') -layout us -variant dvorak
+
 #firefox fix?
 # exec_always --no-startup-id ff-theme-util
 

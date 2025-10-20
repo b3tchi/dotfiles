@@ -369,7 +369,7 @@ export def increment_version [
 		$patch = ($patch + 1)
 	}
 	_ => { # fallback in case of an unexpected type
-		error $"Unexpected version increment type: ($type)" 
+		error make {msg: $"Unexpected version increment type: ($type)"} 
 		exit
 	}
 }

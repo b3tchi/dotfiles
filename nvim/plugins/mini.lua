@@ -1,4 +1,4 @@
 return {
 	-- add gruvbox
-	{ "echasnovski/mini.align" },
+	{ "nvim-mini/mini.align" },
 }

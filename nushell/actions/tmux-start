@@ -1,0 +1,125 @@
+#!/usr/bin/env nu
+# Start or attach to tmux session
+# Replaces start_local_session() from bashrc
+
+def main [
+    mode: string = "start"      # Mode: "start" or "attach"
+    pinned: int = 0             # Whether pane should be pinned (default 0)
+    session: string = "local"   # Session name (default "local")
+    uid?: string                # Optional unique identifier for pane
+] {
+    # Check if tmux is available
+    if (which tmux | is-empty) {
+        return
+    }
+
+    # If mode is "attach", check if already in tmux
+    if $mode == "attach" {
+        if ($env | get -o TMUX | is-not-empty) {
+            return
+        }
+    }
+
+    # If UID provided, search for existing pane
+    if ($uid | is-not-empty) and (($uid | str length) > 0) {
+        let existing = (tmux list-panes -a -F "#{pane_id} #{@uid}"
+            | lines
+            | where $it != ""
+            | parse "{pane_id} {pane_uid}"
+            | where pane_uid == $uid)
+
+        if ($existing | length) > 0 {
+            let existing_pane = ($existing | first)
+
+            # Get window index of existing pane
+            let window_info = (tmux list-panes -a -F "#{window_index} #{pane_id}"
+                | lines
+                | where $it =~ $existing_pane.pane_id
+                | parse "{window_index} {pane_id}")
+
+            if ($window_info | length) > 0 {
+                let window_idx = ($window_info | first | get window_index)
+
+                # Create new linked session
+                let sessions = (tmux list-sessions -F "#{session_name}"
+                    | lines
+                    | where $it =~ $"^($session)_")
+
+                let view_nr = if ($sessions | is-empty) {
+                    0
+                } else {
+                    $sessions
+                    | parse $"($session)_{number}"
+                    | get number
+                    | into int
+                    | math max
+                    | $in + 1
+                }
+
+                let new_session = $"($session)_($view_nr)"
+                tmux new-session -d -t $session -s $new_session
+
+                print $"($new_session):($window_idx)"
+                return
+            }
+        }
+    }
+
+    # Get existing session numbers
+    let sessions = (tmux list-sessions -F "#{session_name}"
+        | lines
+        | where $it =~ $"^($session)_")
+
+    let view_nr = if ($sessions | is-empty) {
+        0
+    } else {
+        $sessions
+        | parse $"($session)_{number}"
+        | get number
+        | into int
+        | math max
+        | $in + 1
+    }
+
+    let new_session = $"($session)_($view_nr)"
+
+    let pane_target = if $view_nr == 0 {
+        # Create first session
+        tmux new-session -d -t $session -s $new_session
+
+        let window_idx = 0
+        let target = $"($new_session):($window_idx)"
+
+        tmux set-option -p -t $target "@pinned" $pinned
+
+        if ($uid | is-not-empty) and (($uid | str length) > 0) {
+            tmux set-option -p -t $target "@uid" $uid
+        }
+
+        $target
+    } else {
+        # Create new session with new window
+        tmux new-session -d -t $session -s $new_session
+
+        let window_idx = (tmux new-window -d -P -F "#{window_index}" -t $new_session
+            | str trim)
+
+        let target = $"($new_session):($window_idx)"
+
+        tmux set-option -p -t $target "@pinned" $pinned
+
+        if ($uid | is-not-empty) and (($uid | str length) > 0) {
+            tmux set-option -p -t $target "@uid" $uid
+        }
+
+        $target
+    }
+
+    # If mode is "attach", attach to the session
+    if $mode == "attach" {
+        tmux attach-session -t $pane_target
+        tmux set destroy-unattached
+    } else {
+        print $pane_target
+    }
+}

@@ -1,0 +1,110 @@
+#!/usr/bin/env nu
+# Kill unattached tmux sessions and cleanup unpinned panes
+# Replaces kill_local_unattached() from bashrc
+
+# Get all tmux sessions with their metadata
+def get_sessions [] {
+    tmux list-sessions -F "#{session_name} #{session_group} #{session_attached}"
+    | lines
+    | where $it != ""
+    | parse "{name} {group} {attached}"
+    | update attached { |row| $row.attached | into int }
+}
+
+# Get all windows with their metadata
+def get_windows [] {
+    tmux list-windows -a -F "#{window_id} #{window_active_clients}"
+    | lines
+    | where $it != ""
+    | parse "{id} {clients}"
+    | update clients { |row| $row.clients | into int }
+}
+
+# Get all panes for a specific window
+def get_panes [window_id: string] {
+    tmux list-panes -t $window_id -F "#{pane_id} #{@pinned}"
+    | lines
+    | where $it != ""
+    | parse "{id} {pinned}"
+}
+
+# Check if any window has pinned panes
+def has_pinned_panes [session_name: string] {
+    let windows = (tmux list-windows -t $session_name -F "#{window_id}"
+        | lines
+        | where $it != "")
+
+    for window in $windows {
+        let pinned_count = (get_panes $window
+            | where pinned == "1"
+            | length)
+
+        if $pinned_count > 0 {
+            return true
+        }
+    }
+
+    return false
+}
+
+# Log to tmux log file
+def log [message: string] {
+    let log_file = $"($env.HOME)/.tmux.log"
+    $"(date now | format date '%Y-%m-%d %H:%M:%S') - ($message)\n"
+    | save --append $log_file
+}
+
+# Main cleanup logic
+def main [] {
+    let sessions = (get_sessions)
+
+    # Process session groups
+    let groups = ($sessions | where group != "" | get group | uniq)
+
+    for group in $groups {
+        let group_sessions = ($sessions | where group == $group)
+        let all_unattached = ($group_sessions | where attached > 0 | length) == 0
+
+        if $all_unattached {
+            # All sessions unattached - check for pinned panes
+            let first_session = ($group_sessions | first | get name)
+
+            if (has_pinned_panes $first_session) {
+                # Keep last session (highest number), kill rest
+                let sorted = ($group_sessions | get name | sort --natural)
+                let keep = ($sorted | last)
+
+                for sess in ($sorted | where $it != $keep) {
+                    log $"Killing extra unattached session in group ($group) - keeping ($keep): ($sess)"
+                    tmux kill-session -t $sess
+                }
+            }
+        } else {
+            # Some sessions attached - kill unattached ones
+            for sess in ($group_sessions | where attached == 0) {
+                log $"Killing unattached session in group ($group) - group has attached session: ($sess.name)"
+                tmux kill-session -t $sess.name
+            }
+        }
+    }
+
+    # Process unattached windows
+    let windows = (get_windows | where clients == 0)
+
+    for window in $windows {
+        let panes = (get_panes $window.id)
+        let pinned_count = ($panes | where pinned == "1" | length)
+
+        if $pinned_count == 0 {
+            # No pinned panes - kill entire window
+            log $"Killing unattached window - no pinned panes: ($window.id)"
+            tmux kill-window -t $window.id
+        } else {
+            # Has pinned panes - kill only unpinned panes
+            for pane in ($panes | where pinned != "1") {
+                log $"Killing unpinned pane in window with pinned panes: ($pane.id) - window: ($window.id)"
+                tmux kill-pane -t $pane.id
+            }
+        }
+    }
+}

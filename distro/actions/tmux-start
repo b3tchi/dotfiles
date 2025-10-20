@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# Start or attach to tmux session
+# Bash equivalent of nushell/actions/tmux-start
+
+start_local_session() {
+	local pinned=${1:-0}           # Default to unpinned (0)
+	local session_name=${2:-local} # Default session name is 'local'
+	local unique_id=${3:-}         # Optional unique identifier for pane
+
+	if command -v tmux >/dev/null 2>&1; then
+
+		# If unique_id provided, search for existing pane with that UID
+		if [[ -n "$unique_id" ]]; then
+			existing_pane=$(tmux list-panes -a -F "#{pane_id} #{@uid}" 2>/dev/null | grep " ${unique_id}$" | head -1 | cut -d' ' -f1)
+			if [[ -n "$existing_pane" ]]; then
+				# Get the window index of the existing pane
+				local existing_window=$(tmux list-panes -a -F "#{window_index} #{pane_id}" 2>/dev/null | grep "$existing_pane" | head -1 | cut -d' ' -f1)
+
+				# Create new linked session pointing to the same group
+				view_nr=$(tmux ls | grep -o "${session_name}_[0-9]*:" | grep -o '[0-9]*' | sort -n | tail -1)
+				new_view_nr=$((${view_nr:-0} + 1))
+
+				tmux new-session -d -t $session_name -s "${session_name}_${new_view_nr}"
+
+				# Return the new session with the existing window index
+				echo "${session_name}_${new_view_nr}:${existing_window}"
+
+				return
+			fi
+		fi
+
+		# Check if 'local' session exists
+		view_nr=$(tmux ls | grep -o "${session_name}_[0-9]*:" | grep -o '[0-9]*' | sort -n | tail -1)
+
+		if [[ -z $view_nr ]]; then
+			new_view_nr=0
+			tmux new-session -d -t $session_name -s "${session_name}_${new_view_nr}"
+
+			# Set pinned flag and optional UID on the pane
+			window_index=0
+			pane_target="${session_name}_${new_view_nr}:${window_index}"
+
+			tmux set-option -p -t "$pane_target" @pinned $pinned
+			[[ -n "$unique_id" ]] && tmux set-option -p -t "$pane_target" @uid "$unique_id"
+		else
+			new_view_nr=$((($view_nr + 1)))
+			tmux new-session -d -t $session_name -s "${session_name}_${new_view_nr}"
+
+			# Set pinned flag and optional UID on the new pane
+			window_index=$(tmux new-window -d -P -F "#{window_index}" -t "${session_name}_${new_view_nr}")
+
+			pane_target="${session_name}_${new_view_nr}:${window_index}"
+			tmux set-option -p -t "$pane_target" @pinned $pinned
+			[[ -n "$unique_id" ]] && tmux set-option -p -t "$pane_target" @uid "$unique_id"
+		fi
+
+		#return value
+		echo "${session_name}_${new_view_nr}:${window_index}"
+
+	fi
+}
+
+get_or_create_session() {
+	local pinned=${1:-0}           # Default to unpinned (0)
+	local session_name=${2:-local} # Default session name is 'local'
+	local unique_id=${3:-}         # Optional unique identifier for pane
+
+	if [[ -z "$TMUX" ]]; then
+
+		# Call start_local_session and capture the return value (session:window)
+		local target=$(start_local_session $pinned $session_name $unique_id)
+
+		if [[ -n "$target" ]]; then
+			tmux attach-session -t "$target" \; set destroy-unattached
+		fi
+	fi
+}
+
+# Run based on command
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+	# Called as script
+	case "${1:-start}" in
+		start)
+			start_local_session "${2:-0}" "${3:-local}" "${4:-}"
+			;;
+		attach)
+			get_or_create_session "${2:-0}" "${3:-local}" "${4:-}"
+			;;
+		*)
+			echo "Usage: $0 {start|attach} [pinned] [session_name] [unique_id]"
+			exit 1
+			;;
+	esac
+fi
