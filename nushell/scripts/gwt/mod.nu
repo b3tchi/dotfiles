@@ -1,14 +1,13 @@
 def main [] {
 
 }
+
+export-env {
+	$env.GWT_CONFIG_PATH = ($env.CURRENT_FILE | path dirname | path join config profiles.yaml)
+}
+
 def data [] {
-	{
-		b3tchi: {
-			user: b3tchi
-			email: beckaja1@gmail.com
-			domain: github.com
-		}
-	}
+	open $env.GWT_CONFIG_PATH | get profiles
 }
 
 def profile [
@@ -26,8 +25,61 @@ def vars [
 	data | get $profile | get $property
 }
 
+# create new user profile
+export def 'profile create' [
+	name: string           # profile name
+	user: string          # GitHub username
+	email: string         # GitHub email
+	--domain: string = 'github.com'  # Git domain (default: github.com)
+	--root: string = '~/repos/'      # Repos root path (default: ~/repos/)
+] {
+	# Read existing profiles
+	mut config = open $env.GWT_CONFIG_PATH
+
+	# Check if profile already exists
+	if ($name in ($config.profiles | columns)) {
+		print $"Profile '($name)' already exists"
+		return
+	}
+
+	# Add new profile
+	$config.profiles = ($config.profiles | insert $name {
+		user: $user
+		email: $email
+		domain: $domain
+		root: $root
+	})
+
+	# Save updated config
+	$config | to yaml | save --force $env.GWT_CONFIG_PATH
+
+	print $"Profile '($name)' created successfully"
+}
+
+# remove user profile
+export def 'profile remove' [
+	name: string@profiles  # profile name to remove
+] {
+	# Read existing profiles
+	mut config = open $env.GWT_CONFIG_PATH
+
+	# Check if profile exists
+	if not ($name in ($config.profiles | columns)) {
+		print $"Profile '($name)' does not exist"
+		return
+	}
+
+	# Remove profile
+	$config.profiles = ($config.profiles | reject $name)
+
+	# Save updated config
+	$config | to yaml | save --force $env.GWT_CONFIG_PATH
+
+	print $"Profile '($name)' removed successfully"
+}
+
 # init local bare repo from defiend path
-export def 'repo init' [
+export def 'repo create' [
 	path?: string #define root location of repository default PWD 
 	--init-commit: string = 'repo creation commit' #initial commit message
 ] {
@@ -176,17 +228,36 @@ export def 'repo get' [
 	git pull --set-upstream origin $default_branch
 }
 
-# register user ssh token
-export def 'user register' [
+# private helper: save SSH config in config.d with proper naming
+def save_ssh_config [
+	profile: record # profile record with domain and user
+	key_file: string # path to SSH private key file
+] {
+	let root_path = ( if $nu.os-info.name == "windows" { $env.USERPROFILE } else { $env.HOME } )
+
+	#saving global config with Include directive
+	"Include config.d/*" | save --force ($root_path | path join .ssh config)
+
+	#saving local file in config.d
+	let config_dir = $root_path | path join .ssh config.d
+	mkdir $config_dir
+
+	let config_file = $config_dir | path join ( [$profile.domain $profile.user] | str join '-' )
+	let config = $"Host ($profile.domain)-($profile.user)
+	HostName ($profile.domain)
+	User git
+	IdentityFile ($key_file)"
+
+	$config | save --force $config_file
+}
+
+# register new SSH key and upload to GitHub
+export def 'ssh register' [
 	profile_name:string@profiles # select which profile to register
-	--ssh-path:string #already existing registered git registered key
 ] {
 
 	let profiles = data #I/O
 	let p = (profile $profiles $profile_name)
-	# let domain = (vars $profile_name domain)
-	# let email = (vars $profile_name email)
-	# let user = (vars $profile_name user)
 
 	let gh_user = (gh api user | from json | get login) #I/O
 	if ($p.user != $gh_user) {
@@ -197,35 +268,52 @@ export def 'user register' [
 	let stamp = date now | format date %y%m%d
 	let os = (sys host).name
 	let host = (sys host).hostname
-
 	let coding = 'ed25519'
-
 
 	let uniq_name = [$stamp $p.user $host $os $coding ] | str join '_'
 
 	let root_path = ( if $nu.os-info.name == "windows" { $env.USERPROFILE } else { $env.HOME } )
-	let file = (if ( $ssh_path | is-empty ) { $root_path | path join .ssh $uniq_name } else { $ssh_path | path expand })
-	# print $file
+	let file = $root_path | path join .ssh $uniq_name
 
-	if ($ssh_path | is-empty) {
-		ssh-keygen -t $coding -C $p.email -f $file -N ''
-		gh ssh-key add $"($file).pub" --title $uniq_name
+	# Generate new SSH key
+	ssh-keygen -t $coding -C $p.email -f $file -N ''
+
+	# Upload to GitHub
+	gh ssh-key add $"($file).pub" --title $uniq_name
+
+	# Save SSH config
+	save_ssh_config $p $file
+
+	print $"SSH key registered: ($uniq_name)"
+}
+
+# link existing SSH key to profile
+export def 'ssh link' [
+	profile_name:string@profiles # select which profile to link
+	ssh_path:string # path to existing SSH private key
+] {
+
+	let profiles = data #I/O
+	let p = (profile $profiles $profile_name)
+
+	let gh_user = (gh api user | from json | get login) #I/O
+	if ($p.user != $gh_user) {
+		print "gh currently log as diffrent user"
+		return
 	}
 
-	#saving global
-	"Include config.d/*" | save --force ($root_path | path join .ssh config)
+	let file = $ssh_path | path expand
 
-	#saving local file
-	let config_dir = $root_path | path join .ssh config.d
-	mkdir $config_dir
+	# Verify key file exists
+	if not ($file | path exists) {
+		print $"SSH key file not found: ($file)"
+		return
+	}
 
-	let config_file = $config_dir | path join ( [$p.domain $p.user] | str join '-' )
-	let config = $"Host ($p.domain)-($p.user)
-	HostName ($p.domain)
-	User git
-	IdentityFile ($file)"
+	# Save SSH config
+	save_ssh_config $p $file
 
-	$config | save --force $config_file
+	print $"SSH key linked to profile ($profile_name): ($file)"
 }
 
 def origin_branches [ 
