@@ -26,6 +26,7 @@ def get_panes [window_id: string] {
     | lines
     | where $it != ""
     | parse "{id} {pinned}"
+    | update pinned { |row| if $row.pinned == "" { "0" } else { $row.pinned } }
 }
 
 # Check if any window has pinned panes
@@ -56,6 +57,11 @@ def log [message: string] {
 
 # Main cleanup logic
 def main [] {
+    # Add small delay to avoid race condition during session switching
+    # When switching sessions with C-b s, there's a brief moment where both
+    # the old and new session might appear unattached
+    sleep 200ms
+
     let sessions = (get_sessions)
 
     # Process session groups
@@ -70,17 +76,21 @@ def main [] {
             let first_session = ($group_sessions | first | get name)
 
             if (has_pinned_panes $first_session) {
-                # Keep last session (highest number), kill rest
+                # Has pinned panes - don't kill any sessions, just log
+                log $"Skipping cleanup for group ($group) - has pinned panes and all sessions unattached"
+            } else {
+                # No pinned panes and all unattached - safe to kill all but one
                 let sorted = ($group_sessions | get name | sort --natural)
                 let keep = ($sorted | last)
 
                 for sess in ($sorted | where $it != $keep) {
-                    log $"Killing extra unattached session in group ($group) - keeping ($keep): ($sess)"
+                    log $"Killing extra unattached session in group ($group) - no pinned panes, keeping ($keep): ($sess)"
                     tmux kill-session -t $sess
                 }
             }
         } else {
             # Some sessions attached - kill unattached ones
+            # BUT preserve sessions that might be in the process of being attached
             for sess in ($group_sessions | where attached == 0) {
                 log $"Killing unattached session in group ($group) - group has attached session: ($sess.name)"
                 tmux kill-session -t $sess.name

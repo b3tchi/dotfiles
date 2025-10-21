@@ -3,6 +3,11 @@
 # Bash equivalent of nushell/actions/tmux-cleanup
 
 kill_local_unattached() {
+	# Add small delay to avoid race condition during session switching
+	# When switching sessions with C-b s, there's a brief moment where both
+	# the old and new session might appear unattached
+	sleep 0.2
+
 	# Clean up unattached sessions in session groups
 	# Keep one session per group if it has pinned panes
 	for group in $(tmux list-sessions -F "#{session_group}" 2>/dev/null | sort -u); do
@@ -37,19 +42,23 @@ kill_local_unattached() {
 			done
 
 			if [[ $has_pinned == true ]]; then
-				# Keep the last session (highest numbered), kill the rest
+				# Has pinned panes - don't kill any sessions, just log
+				echo "Skipping cleanup for group $group - has pinned panes and all sessions unattached" >>"$HOME/.tmux.log"
+			else
+				# No pinned panes and all unattached - safe to kill all but one
 				local sorted_sessions=($(printf '%s\n' "${sessions[@]}" | sort -V))
 				local keep_session="${sorted_sessions[-1]}"
 
 				for session in "${sorted_sessions[@]}"; do
 					if [[ "$session" != "$keep_session" ]]; then
-						echo "Killing extra unattached session in group $group (keeping $keep_session): $session" >>"$HOME/.tmux.log"
+						echo "Killing extra unattached session in group $group (no pinned panes, keeping $keep_session): $session" >>"$HOME/.tmux.log"
 						tmux kill-session -t "$session" 2>/dev/null
 					fi
 				done
 			fi
 		else
 			# At least one session is attached: kill all unattached sessions in group
+			# BUT preserve sessions that might be in the process of being attached
 			for session in "${sessions[@]}"; do
 				local attached=$(tmux list-sessions -F "#{session_name} #{session_attached}" 2>/dev/null | grep "^$session " | awk '{print $2}')
 				if [[ $attached -eq 0 ]]; then
