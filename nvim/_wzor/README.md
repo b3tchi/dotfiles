@@ -7,14 +7,32 @@ can should wait until code new command line is entered
 for some long interactive stuff this could maybe will not work need to be tested
 whole logic is capturing-pane input
 
-```nu
-let x = '
-test
-ain
-uuu'
-let b = (input 'interactive input:')
+## Chapter scope
 
-echo $b
+### mulitple commands
+
+```nu
+print '1'
+print '2'
+```
+
+```nu
+print '
+4
+1
+1
+1
+2
+'
+```
+
+### texts
+
+```nu
+print '1'
+print '2'
+print '3'
+print '4'
 ```
 
 ```nu
@@ -26,7 +44,19 @@ uuu'
 echo $x
 ```
 
+### waiting for long commands
+
 ```nu
-sleep 3sec
-echo 1
+sleep 5sec
+print 'x'
+```
+
+### input
+
+> [!NOTE]
+> TBD not yet implemented
+
+```nu
+let _input = (input "enter text")
+print $_input
 ```
