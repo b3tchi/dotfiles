@@ -19,7 +19,9 @@ local function get_log_dir()
 	if vim.loop.os_uname().sysname == "Windows_NT" then
 		log_dir = os.getenv("TEMP") .. "\\nvim\\wzor\\"
 	else
-		log_dir = "/tmp/nvim/wzor/"
+		-- Use TMPDIR if available (Termux/Android), otherwise fall back to /tmp
+		local tmpdir = os.getenv("TMPDIR") or "/tmp"
+		log_dir = tmpdir .. "/nvim/wzor/"
 	end
 
 	-- Ensure directory exists
@@ -210,8 +212,6 @@ local function run_command_win(block_header)
 
 	local command = string.format(
 		-- "nu -c 'open %s | lines | each {|r| wezterm cli send-text --pane-id %d --no-paste $\"($r)\\r\"}'",
-		-- "nu -c 'open %s | lines | each {|r| tmux send-keys -t \"neovim:%d\" $\"($r)\" Enter}'",
-		-- "tmux send-keys -t \"neovim:%d\" $\"($r)\" Enter",
 		tmp_file,
 		0 --vim.g.multiplexer_id
 	)
