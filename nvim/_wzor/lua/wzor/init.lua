@@ -89,9 +89,16 @@ local function md_block_get()
 					last_line = all_lines[#all_lines],
 				}, "DEBUG:md_block_range")
 
-				-- Skip first line (opening ```) and last line (closing ```)
+				-- Skip first line (opening ```) and last line (closing ```) if present
 				local code_lines = {}
-				for i = 2, #all_lines - 1 do
+				local last_index = #all_lines
+
+				-- Check if last line is closing fence
+				if all_lines[last_index] and all_lines[last_index]:match("^```%s*$") then
+					last_index = last_index - 1
+				end
+
+				for i = 2, last_index do
 					table.insert(code_lines, all_lines[i])
 				end
 
@@ -138,9 +145,16 @@ local function org_block_get()
 				local lang_match = all_lines[1] and all_lines[1]:match("#+begin_src%s+(%S+)")
 				resp.lang = lang_match or ""
 
-				-- Skip first line (#+begin_src) and last line (#+end_src)
+				-- Skip first line (#+begin_src) and last line (#+end_src) if present
 				local code_lines = {}
-				for i = 2, #all_lines - 1 do
+				local last_index = #all_lines
+
+				-- Check if last line is closing tag
+				if all_lines[last_index] and all_lines[last_index]:match("^%s*#%+end") then
+					last_index = last_index - 1
+				end
+
+				for i = 2, last_index do
 					table.insert(code_lines, all_lines[i])
 				end
 
@@ -597,9 +611,16 @@ M.sendChapterBlocksToMultiplexerWindow = function()
 			-- Get all lines in the block
 			local all_lines = vim.api.nvim_buf_get_lines(0, node_start, node_end, false)
 
-			-- Skip first line (opening ```) and last line (closing ```)
+			-- Skip first line (opening ```) and last line (closing ```) if present
 			-- The block structure is: [opening fence, code lines..., closing fence]
-			for i = 2, #all_lines - 1 do
+			local last_index = #all_lines
+
+			-- Check if last line is closing fence
+			if all_lines[last_index] and all_lines[last_index]:match("^```%s*$") then
+				last_index = last_index - 1
+			end
+
+			for i = 2, last_index do
 				table.insert(all_commands, all_lines[i])
 			end
 		end
@@ -614,8 +635,15 @@ M.sendChapterBlocksToMultiplexerWindow = function()
 					-- Get all lines in the block
 					local all_lines = vim.api.nvim_buf_get_lines(0, node_start, node_end, false)
 
-					-- Skip first line (#+begin_src) and last line (#+end_src)
-					for i = 2, #all_lines - 1 do
+					-- Skip first line (#+begin_src) and last line (#+end_src) if present
+					local last_index = #all_lines
+
+					-- Check if last line is closing tag
+					if all_lines[last_index] and all_lines[last_index]:match("^%s*#%+end") then
+						last_index = last_index - 1
+					end
+
+					for i = 2, last_index do
 						table.insert(all_commands, all_lines[i])
 					end
 				end
