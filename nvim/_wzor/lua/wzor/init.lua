@@ -4,14 +4,14 @@
 local M = {}
 
 -- Module-level configuration
-local empty_prompt = "❯ :"
-local multiline_prompt = "∙"
+local empty_prompt = "❯ : "  -- Starship prompt indicator (note the trailing space)
+local multiline_prompt = "∙"  -- Multiline continuation indicator
 local pane_uid = "nvim_term"
 local timeout_ms = 300000 -- Default timeout: 300 seconds (5 minutes)
 local wait_check_ms = 50 -- Wait time between checks
 local wait_multiline_ms = 25 -- Wait time when multiline detected
-local log_iterations = true -- Log every iteration
-local debug_mode = false -- Enable debug logging
+local log_iterations = false -- Log every iteration (set to true for debugging)
+local debug_mode = false -- Enable debug logging (set to true for debugging)
 
 -- Get temp directory for logs
 local function get_log_dir()
@@ -236,13 +236,30 @@ local function wait_for_prompt(pane, timeout, callback, start_line)
 
 	-- Helper function to check prompt state
 	local function check_output()
-		-- Capture the last 20 lines of the pane (simpler and more reliable)
-		-- -S -20: start from 20 lines back
-		-- -p: print to stdout
-		local output = vim.fn.system("tmux capture-pane -t " .. pane .. " -p -S -20")
+		-- Get current history size to know where we are
+		local current_history = vim.fn.system("tmux display-message -t " .. pane .. " -p '#{history_size}'"):gsub("%s+", "")
+		local current_lines = tonumber(current_history) or 0
+
+		-- Calculate how many lines to capture from start_line
+		local lines_to_capture = 200  -- default
+		if start_line and start_line > 0 and current_lines > start_line then
+			-- Capture from start_line to current position
+			lines_to_capture = current_lines - start_line + 10  -- +10 for safety margin
+		end
+
+		-- Capture from -lines_to_capture back
+		local output = vim.fn.system("tmux capture-pane -t " .. pane .. " -p -S -" .. lines_to_capture)
 		output = output:gsub("\t", "    ")
 
 		local lines = vim.split(output, "\n")
+
+		-- Log the capture details
+		log_to_file({
+			start_line = start_line,
+			current_lines = current_lines,
+			lines_to_capture = lines_to_capture,
+			total_lines_captured = #lines,
+		}, "DEBUG:capture_details")
 
 		-- Remove empty trailing lines
 		while #lines > 0 and lines[#lines]:match("^%s*$") do
@@ -251,7 +268,8 @@ local function wait_for_prompt(pane, timeout, callback, start_line)
 
 		local last_line = lines[#lines] or ""
 
-		local has_main_prompt = last_line == empty_prompt
+		-- Check if last line ends with the prompt (allowing for trailing space variations)
+		local has_main_prompt = last_line:match("❯ :$") ~= nil
 		local has_multiline_prompt = false
 
 		if has_main_prompt then
@@ -259,14 +277,27 @@ local function wait_for_prompt(pane, timeout, callback, start_line)
 		end
 
 		if response == -1 then
-			-- Check last few lines for multiline prompt
-			for i = math.max(1, #lines - 5), #lines do
+			-- Check all captured lines for multiline prompt
+			-- The ∙ prompt appears after the first line of input, so we need to check the full range
+			for i = 1, #lines do
 				if lines[i] and lines[i]:match("^" .. multiline_prompt) then
 					has_multiline_prompt = true
 					response = 2
+					log_to_file({ found_at_line = i, line_content = lines[i] }, "DEBUG:multiline_detected")
 					break
 				end
 			end
+		end
+
+		-- Capture first and last 5 lines for debugging
+		local debug_first_lines = {}
+		for i = 1, math.min(5, #lines) do
+			table.insert(debug_first_lines, lines[i] or "")
+		end
+
+		local debug_last_lines = {}
+		for i = math.max(1, #lines - 4), #lines do
+			table.insert(debug_last_lines, lines[i] or "")
 		end
 
 		return {
@@ -275,6 +306,8 @@ local function wait_for_prompt(pane, timeout, callback, start_line)
 			has_main_prompt = has_main_prompt,
 			has_multiline_prompt = has_multiline_prompt,
 			lines_checked = #lines,
+			debug_first_lines = debug_first_lines,
+			debug_last_lines = debug_last_lines,
 		}
 	end
 
@@ -291,6 +324,8 @@ local function wait_for_prompt(pane, timeout, callback, start_line)
 			has_multiline_prompt = result.has_multiline_prompt,
 			response = result.response,
 			lines_checked = result.lines_checked,
+			debug_first_lines = result.debug_first_lines,
+			debug_last_lines = result.debug_last_lines,
 			mode = "sync",
 		}, "ITER:wait_for_prompt")
 	end
@@ -338,6 +373,8 @@ local function wait_for_prompt(pane, timeout, callback, start_line)
 					has_multiline_prompt = check_result.has_multiline_prompt,
 					response = check_result.response,
 					lines_checked = check_result.lines_checked,
+					debug_first_lines = check_result.debug_first_lines,
+					debug_last_lines = check_result.debug_last_lines,
 					mode = "async",
 				}, "ITER:wait_for_prompt")
 			end
