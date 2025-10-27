@@ -38,6 +38,62 @@ local function clear_log()
 	end
 end
 
+-- Convert table to YAML string (simple implementation)
+local function to_yaml(data, indent)
+	indent = indent or 0
+	local indent_str = string.rep("  ", indent)
+	local result = {}
+
+	if type(data) == "table" then
+		-- Check if it's an array (all keys are sequential numbers starting from 1)
+		local is_array = true
+		local max_index = 0
+		for k, _ in pairs(data) do
+			if type(k) ~= "number" then
+				is_array = false
+				break
+			end
+			if k > max_index then
+				max_index = k
+			end
+		end
+
+		if is_array and max_index > 0 then
+			-- Handle as YAML array
+			for i = 1, max_index do
+				local v = data[i]
+				if type(v) == "table" then
+					table.insert(result, indent_str .. "-")
+					table.insert(result, to_yaml(v, indent + 1))
+				else
+					local value_str = tostring(v)
+					if type(v) == "string" then
+						value_str = '"' .. value_str:gsub('"', '\\"') .. '"'
+					end
+					table.insert(result, indent_str .. "- " .. value_str)
+				end
+			end
+		else
+			-- Handle as YAML object
+			for k, v in pairs(data) do
+				if type(v) == "table" then
+					table.insert(result, indent_str .. k .. ":")
+					table.insert(result, to_yaml(v, indent + 1))
+				else
+					local value_str = tostring(v)
+					if type(v) == "string" then
+						value_str = '"' .. value_str:gsub('"', '\\"') .. '"'
+					end
+					table.insert(result, indent_str .. k .. ": " .. value_str)
+				end
+			end
+		end
+		return table.concat(result, "\n")
+	else
+		return indent_str .. tostring(data)
+	end
+end
+
 -- Log to temp file (stream mode - appends to single file)
 local function log_to_file(data, log_type)
 	-- Skip debug logs if debug_mode is false
@@ -47,8 +103,15 @@ local function log_to_file(data, log_type)
 
 	local log_path = get_log_dir() .. "wzor.log"
 	local timestamp = os.date("%Y-%m-%d %H:%M:%S")
-	local content = type(data) == "string" and data or vim.json.encode(data)
-	local log_entry = string.format("[%s] [%s] %s\n", timestamp, log_type or "INFO", content)
+
+	local content
+	if type(data) == "string" then
+		content = data
+	else
+		content = "\n" .. to_yaml(data, 1)
+	end
+
+	local log_entry = string.format("- header: [%s, %s]%s\n", timestamp, log_type or "INFO", content)
 
 	-- Direct write to file
 	local file = io.open(log_path, "a")
