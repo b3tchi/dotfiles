@@ -263,7 +263,7 @@ mode "$mode_system" {
     bindsym Escape mode "default"
 }
 # Rename workspace
-bindsym $mod+Shift+n exec i3-input -f "Iosevka" -F 'name workspace to "%s"' -P 'New name: '
+bindsym $mod+Shift+n exec i3-input -f "xft:Iosevka" -F 'name workspace to "%s"' -P 'Workspace name: '
 
 # Resize window (you can also use the mouse for that)
 bindsym $mod+r mode "resize"
