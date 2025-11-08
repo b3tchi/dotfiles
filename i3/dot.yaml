@@ -15,6 +15,7 @@ linux:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
       sudo pamac install alttab
+      sudo pamac install xborder-git
       {{/if}}
       chmod +x ~/.dotfiles/i3/launch.sh
       chmod +x ~/.dotfiles/i3/scripts/*.nu
