@@ -9,8 +9,8 @@ set $mod Mod4
 workspace_layout stacking
 
 # Configure border style <normal|1pixel|pixel xx|none|pixel>
-default_border normal 2
-default_floating_border normal 2
+default_border normal 4
+default_floating_border normal 4
 
 # Hide borders
 hide_edge_borders none
@@ -203,10 +203,10 @@ bindsym $mod+Shift+8 move container to workspace $ws8; workspace $ws8
 
 # Open specific applications in floating mode
 for_window [all] title_window_icon on
-for_window [all] title_window_icon padding 2px
+for_window [all] title_window_icon padding 4px
 
 for_window [all] title_format "%title"
-for_window [all] border normal 2
+for_window [all] border normal 4
 
 for_window [title="alsamixer"] floating enable border pixel 1
 for_window [class="calamares"] floating enable border normal
@@ -329,7 +329,8 @@ exec --no-startup-id setxkbmap -device $(xinput list --id-only 'keyboard:AT Tran
 
 #task switcher
 exec_always alttab -font xft:Iosevka-11 -mk Super_L -vertical -s 1 -t 300x24 -i 20x20 -bg "#222d31" -bw 2 -bc "#222d31" -inact "#222d31" -frame "#16a085"
-exec_always killall xborders;xborders --border-radius 0 --border-width 3 --border-rgba '#16a085' --negative-y-offset -1
+# exec_always killall xborders;xborders --border-radius 0 --border-width 3 --border-rgba '#16a085' --negative-y-offset -1
+#
 # bindsym $mod+Tab exec --no-startup-id "rofi -show-icons -modi windowcd,window,drun -show window"-selected-row 1
 # bindsym $mod+Tab exec --no-startup-id "rofi -timeout-delay 5 -timeout-action 'kb-accept-entry' -selected-row 1 -kb-accept-entry '!Super-Tab' -show-icons -show window -kb-row-down Super-Tab"
 # bindsym $mod+Tab exec --no-startup-id "rofi -timeout-delay 5 -timeout-action 'kb-accept-entry' -selected-row 1 -kb-accept-entry '!Super-Tab' -show-icons -show window -kb-row-down Super-Tab"
@@ -404,7 +405,7 @@ set $transp       #00000000
 
 # Theme colors
 # class                   border  backgr. text    indic.   child_border
-client.focused            #152024 #152024 #FDF6E3 #FDF6E3
+client.focused            #16a085 #16a085 #000000 #FDF6E3
 client.focused_inactive   #152024 #152024 #FDF6E3 #222D31
 client.unfocused          #222D31 #222D31 #707880 #222D31
 client.urgent             #CB4B16 #FDF6E3 #1ABC9C #268BD2
