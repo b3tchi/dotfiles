@@ -48,8 +48,6 @@ bindsym $mod+d exec --no-startup-id rofi -show run
 #using placeholed issue with placing semicolon
 # bindsym $mod+d exec --no-startup-id rofi -show run -theme-str 'entry {placeholder:"run";}' 
 
-
-
 # launch categorized menu
 bindsym $mod+m exec --no-startup-id morc_menu
 
