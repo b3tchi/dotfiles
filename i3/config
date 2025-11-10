@@ -328,7 +328,7 @@ exec --no-startup-id setxkbmap -device $(xinput list --id-only 'keyboard:AT Tran
 
 #task switcher
 exec_always alttab -font xft:Iosevka-11 -mk Super_L -vertical -s 1 -t 300x24 -i 20x20 -bg "#222d31" -bw 2 -bc "#222d31" -inact "#222d31" -frame "#16a085"
-exec_always killall xborders;xborders --border-radius 4 --border-width 4 --border-rgba '#16a085' --positive-x-offset 0 --negative-y-offset 24 --positive-y-offset 0 --negative-x-offset 0
+exec_always killall xborders;xborders --border-radius 4 --border-width 2 --smart-hide-border --border-rgba '#16a085' --positive-x-offset 1 --negative-y-offset 24 --positive-y-offset 1 --negative-x-offset 1
 #
 # bindsym $mod+Tab exec --no-startup-id "rofi -show-icons -modi windowcd,window,drun -show window"-selected-row 1
 # bindsym $mod+Tab exec --no-startup-id "rofi -timeout-delay 5 -timeout-action 'kb-accept-entry' -selected-row 1 -kb-accept-entry '!Super-Tab' -show-icons -show window -kb-row-down Super-Tab"
