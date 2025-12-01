@@ -182,6 +182,49 @@ return {
 			},
 		})
 
+		-- Helper function to preview fold in split pane
+		local function preview_fold_in_split()
+			local ufo = require("ufo")
+			local bufnr = vim.api.nvim_get_current_buf()
+			local lnum = vim.fn.line(".")
+
+			-- Get fold range
+			local fold_start = vim.fn.foldclosed(lnum)
+			if fold_start == -1 then
+				vim.notify("No fold under cursor", vim.log.levels.WARN)
+				return
+			end
+
+			local fold_end = vim.fn.foldclosedend(lnum)
+
+			-- Create or reuse preview split
+			if not vim.g.ufo_split_preview_winid or not vim.api.nvim_win_is_valid(vim.g.ufo_split_preview_winid) then
+				-- Create split below current window
+				vim.cmd("below split")
+				vim.g.ufo_split_preview_winid = vim.api.nvim_get_current_win()
+				vim.g.ufo_split_preview_bufnr = vim.api.nvim_create_buf(false, true)
+				vim.api.nvim_win_set_buf(vim.g.ufo_split_preview_winid, vim.g.ufo_split_preview_bufnr)
+				-- Set height to 50% of screen
+				local screen_height = vim.o.lines
+				vim.api.nvim_win_set_height(vim.g.ufo_split_preview_winid, math.floor(screen_height * 0.5))
+				vim.bo[vim.g.ufo_split_preview_bufnr].bufhidden = "wipe"
+				vim.bo[vim.g.ufo_split_preview_bufnr].buftype = "nofile"
+				vim.wo[vim.g.ufo_split_preview_winid].wrap = false
+				vim.wo[vim.g.ufo_split_preview_winid].number = true
+				vim.wo[vim.g.ufo_split_preview_winid].relativenumber = false
+				-- Go back to original window
+				vim.cmd("wincmd p")
+			end
+
+			-- Get fold content
+			local lines = vim.api.nvim_buf_get_lines(bufnr, fold_start - 1, fold_end, false)
+
+			-- Update preview buffer
+			vim.api.nvim_buf_set_lines(vim.g.ufo_split_preview_bufnr, 0, -1, false, lines)
+			vim.api.nvim_buf_set_option(vim.g.ufo_split_preview_bufnr, "filetype", vim.bo[bufnr].filetype)
+			vim.api.nvim_buf_set_name(vim.g.ufo_split_preview_bufnr, "Fold Preview (lines " .. fold_start .. "-" .. fold_end .. ")")
+		end
+
 		hydra({
 			name = "Fold",
 			hint = "_z_toggle _o_pen _c_lose | All: _O_ open _C_ close | Level: _m_ dec _r_ inc | Nav: _j_ next _k_ prev | _p_eek _P_ pane _q_uit",
@@ -191,6 +234,15 @@ return {
 				hint = {
 					type = "window",
 				},
+				on_exit = function()
+					-- Clean up preview pane when exiting hydra
+					if vim.g.ufo_split_preview_winid and vim.api.nvim_win_is_valid(vim.g.ufo_split_preview_winid) then
+						vim.api.nvim_win_close(vim.g.ufo_split_preview_winid, true)
+						vim.g.ufo_split_preview_winid = nil
+						vim.g.ufo_split_preview_bufnr = nil
+					end
+					vim.g.ufo_preview_persistent = false
+				end,
 			},
 			mode = "n",
 			body = "zM",
@@ -216,19 +268,19 @@ return {
 				{ "j", function()
 					vim.cmd("normal! zj")
 					if vim.g.ufo_preview_persistent then
-						vim.g.ufo_preview_winid = require("ufo").peekFoldedLinesUnderCursor()
+						preview_fold_in_split()
 					end
 				end, { desc = "next fold" } },
 				{ "k", function()
 					vim.cmd("normal! zk")
 					if vim.g.ufo_preview_persistent then
-						vim.g.ufo_preview_winid = require("ufo").peekFoldedLinesUnderCursor()
+						preview_fold_in_split()
 					end
 				end, { desc = "previous fold" } },
 
 				-- UFO-specific: Peek folded lines
 				{ "p", function()
-					require("ufo").peekFoldedLinesUnderCursor()
+					preview_fold_in_split()
 				end, { desc = "peek folded lines" } },
 
 				-- Persistent preview in split pane
@@ -236,13 +288,14 @@ return {
 					-- Toggle persistent preview mode
 					if vim.g.ufo_preview_persistent then
 						vim.g.ufo_preview_persistent = false
-						if vim.g.ufo_preview_winid and vim.api.nvim_win_is_valid(vim.g.ufo_preview_winid) then
-							vim.api.nvim_win_close(vim.g.ufo_preview_winid, true)
+						if vim.g.ufo_split_preview_winid and vim.api.nvim_win_is_valid(vim.g.ufo_split_preview_winid) then
+							vim.api.nvim_win_close(vim.g.ufo_split_preview_winid, true)
+							vim.g.ufo_split_preview_winid = nil
+							vim.g.ufo_split_preview_bufnr = nil
 						end
 					else
 						vim.g.ufo_preview_persistent = true
-						local winid = require("ufo").peekFoldedLinesUnderCursor()
-						vim.g.ufo_preview_winid = winid
+						preview_fold_in_split()
 					end
 				end, { desc = "toggle persistent preview" } },
 

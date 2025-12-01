@@ -20,6 +20,19 @@ return {
 					winhighlight = "Normal:Folded",
 					winblend = 0,
 				},
+				get_config = function(winid)
+					local win_height = vim.api.nvim_win_get_height(winid)
+					local win_width = vim.api.nvim_win_get_width(winid)
+					return {
+						relative = "win",
+						anchor = "NW",
+						win = winid,
+						row = win_height,
+						col = 0,
+						width = win_width,
+						height = math.min(10, vim.api.nvim_buf_line_count(vim.api.nvim_win_get_buf(winid))),
+					}
+				end,
 				mappings = {
 					scrollU = "<C-u>",
 					scrollD = "<C-d>",
