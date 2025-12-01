@@ -4,6 +4,8 @@ config:
   MD013: false
   #codeblocks 1indent hardtabs
   MD010: false
+  # Disable code block indentation rules
+  MD046: false
   # code_blocks: true
   # ignore_code_blocks: []
   # spaces_per_tab: 4

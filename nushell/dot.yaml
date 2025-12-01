@@ -29,7 +29,7 @@ linux:
       {{#if (eq whoami.distro "Manjaro Linux")}}
       sudo pacman -Syu --needed --noconfirm \
         nushell starship
-      pamac install carapace-bin
+      pamac install carapace-bin --no-confirm
       {{/if}}
       chmod +x ~/.dotfiles/nushell/actions/tmux-cleanup
       chmod +x ~/.dotfiles/nushell/actions/tmux-start

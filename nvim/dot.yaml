@@ -21,8 +21,8 @@ linux:
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
-      sudo pacman -Syu neovim
+      sudo pacman -Syu neovim --noconfirm
       {{/if}}
       {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
-      nala install neovim gcc
+      nala install neovim gcc -y
       {{/if}}

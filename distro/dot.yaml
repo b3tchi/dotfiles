@@ -36,13 +36,14 @@ linux:
           fd ripgrep fzf sd \
           go rust nodejs \
           wezterm \
-          go-yq dasel \
+          go-yq \
           ttf-iosevka-nerd ttf-iosevkaterm-nerd ttc-iosevka \
           xfce-theme-greybird
 
         sudo sd '#EnableAUR' 'EnableAUR' /etc/pamac.conf
         sudo pamac update
         sudo pamac upgrade
+        sudo pamac install dasel-bin --no-confirm
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux ARM")}}
         sudo pacman -Syu --needed --noconfirm \

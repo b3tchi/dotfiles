@@ -44,6 +44,45 @@ uuu'
 echo $x
 ```
 
+### function
+
+```nu
+let lang_merge = {
+	| lng:string|
+	let file = (open $"./temp/_cleared/($lng).xlsx")
+	let tr = ($file
+		| get translation
+		| skip
+		| reduce --fold {} {|i,a|
+			$a | merge {$i.column0:$i.column1}
+		})
+
+	(open ./solution/mentoring/src/data/translation.yaml
+		| merge deep {translation:{$lng:$tr}}
+	)
+	| to yaml
+	| save ./solution/mentoring/src/data/translation.yaml --force
+
+	let email = ($file
+		| get email
+		| skip
+		| reduce --fold {} {|i,a|
+			$a | merge {$i.column0:{
+				subject:$i.column1
+				body:($i.column2 | str replace --all (char crlf) (char lf))
+			} }
+		})
+
+	{emails:{$lng:$email}}
+	| do {|t|
+		open ./solution/mentoring/src/data/email.yaml
+		| merge deep $t
+	} $in
+	| to yaml
+	| save ./solution/mentoring/src/data/email.yaml  --force
+}
+```
+
 ### waiting for long commands
 
 ```nu
