@@ -182,6 +182,76 @@ return {
 			},
 		})
 
+		hydra({
+			name = "Fold",
+			hint = "_z_toggle _o_pen _c_lose | All: _O_ open _C_ close | Level: _m_ dec _r_ inc | Nav: _j_ next _k_ prev | _p_eek _P_ pane _q_uit",
+			config = {
+				color = "pink",
+				invoke_on_body = true,
+				hint = {
+					type = "window",
+				},
+			},
+			mode = "n",
+			body = "zM",
+			heads = {
+				-- Basic operations
+				{ "z", "za", { desc = "toggle fold" } },
+				{ "o", "zo", { desc = "open fold" } },
+				{ "c", "zc", { desc = "close fold" } },
+
+				-- All folds
+				{ "O", function()
+					require("ufo").openAllFolds()
+				end, { desc = "open all folds" } },
+				{ "C", function()
+					require("ufo").closeAllFolds()
+				end, { desc = "close all folds" } },
+
+				-- Foldlevel adjustment
+				{ "m", "zm", { desc = "decrease foldlevel" } },
+				{ "r", "zr", { desc = "increase foldlevel" } },
+
+				-- Navigation
+				{ "j", function()
+					vim.cmd("normal! zj")
+					if vim.g.ufo_preview_persistent then
+						vim.g.ufo_preview_winid = require("ufo").peekFoldedLinesUnderCursor()
+					end
+				end, { desc = "next fold" } },
+				{ "k", function()
+					vim.cmd("normal! zk")
+					if vim.g.ufo_preview_persistent then
+						vim.g.ufo_preview_winid = require("ufo").peekFoldedLinesUnderCursor()
+					end
+				end, { desc = "previous fold" } },
+
+				-- UFO-specific: Peek folded lines
+				{ "p", function()
+					require("ufo").peekFoldedLinesUnderCursor()
+				end, { desc = "peek folded lines" } },
+
+				-- Persistent preview in split pane
+				{ "P", function()
+					-- Toggle persistent preview mode
+					if vim.g.ufo_preview_persistent then
+						vim.g.ufo_preview_persistent = false
+						if vim.g.ufo_preview_winid and vim.api.nvim_win_is_valid(vim.g.ufo_preview_winid) then
+							vim.api.nvim_win_close(vim.g.ufo_preview_winid, true)
+						end
+					else
+						vim.g.ufo_preview_persistent = true
+						local winid = require("ufo").peekFoldedLinesUnderCursor()
+						vim.g.ufo_preview_winid = winid
+					end
+				end, { desc = "toggle persistent preview" } },
+
+				-- Exit
+				{ "q", nil, { exit = true, nowait = true, desc = "exit" } },
+				{ "<Esc>", nil, { exit = true, desc = false } },
+			},
+		})
+
 		-- vim.g.ps_terminal_jobid = 0
 		--     local function llconsole(text)
 		--       vim.fn.chansend(vim.g.ps_terminal_jobid ,text)
