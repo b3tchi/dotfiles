@@ -1,0 +1,42 @@
+# Starship prompt configuration
+
+# Add a new line before the prompt
+add_newline = true
+
+# Format string
+format = """
+$username\
+$hostname\
+$directory\
+$git_branch\
+$git_status\
+$env_var\
+$line_break\
+$character"""
+
+# Show SHLVL environment variable
+[env_var.SHLVL]
+variable = "SHLVL"
+format = "[$env_value]($style) "
+style = "bold yellow"
+disabled = false
+
+# Directory configuration
+[directory]
+truncation_length = 3
+truncate_to_repo = true
+format = "[$path]($style)[$read_only]($read_only_style) "
+
+# Git branch
+[git_branch]
+format = "[$symbol$branch]($style) "
+
+# Git status
+[git_status]
+format = '([\[$all_status$ahead_behind\]]($style) )'
+
+# Character (prompt symbol)
+[character]
+success_symbol = "[❯](bold green)"
+error_symbol = "[❯](bold red)"
+vimcmd_symbol = "[❮](bold green)"

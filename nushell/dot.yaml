@@ -4,6 +4,7 @@ windows:
     env.nu: ~/AppData/Roaming/nushell/env.nu
     scripts: ~/AppData/Roaming/nushell/scripts
     apps: ~/AppData/Roaming/nushell/apps
+    starship.toml: ~/.config/starship.toml
     actions/tmux-cleanup: ~/.local/bin/tmux-cleanup
     actions/tmux-start: ~/.local/bin/tmux-start
     actions/tmux-message: ~/.local/bin/tmux-message
@@ -21,6 +22,7 @@ linux:
     env.nu: ~/.config/nushell/env.nu
     scripts: ~/.config/nushell/scripts
     apps: ~/.config/nushell/apps
+    starship.toml: ~/.config/starship.toml
     actions/tmux-cleanup: ~/.local/bin/tmux-cleanup
     actions/tmux-start: ~/.local/bin/tmux-start
     actions/tmux-message: ~/.local/bin/tmux-message
