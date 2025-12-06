@@ -19,7 +19,7 @@
   <property name="maximized" value="false"/>
   <property name="showToolbar" value="true"/>
   <property name="showSidebar" value="true"/>
-  <property name="sidebarWidth" value="109"/>
+  <property name="sidebarWidth" value="130"/>
   <property name="sidebarNumberingStyle" value="1"/>
   <property name="sidebarOnRight" value="true"/>
   <property name="scrollbarOnLeft" value="false"/>
