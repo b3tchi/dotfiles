@@ -84,14 +84,6 @@ if $nu.os-info.kernel_version =~ 'microsoft-standard-WSL' {
 )
 }
 
-#     # | where $it !~ '\\Program Files\\PowerShell\\7'
-#     # | where $it !~ '\\Program Files\\Microsoft VS Code'
-#     # | where $it !~ '\\Program Files\\nodejs'
-#     # | where $it !~ '\\Program Files\\dotnet'
-#     # # | where {|x| $x =~ '/mnt/c/WINDOWS' and $x !~ '/Powershell/'}
-#     # | where $it !~ '/scoop/apps/nodejs/'
-#     # | where $it !~ '/scoop/apps/dotnet-sdk/'
-
 # Directories to search for scripts when calling source or use
 $env.NU_LIB_DIRS = [ 
     ($nu.default-config-dir | path join 'apps') 
