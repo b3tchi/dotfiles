@@ -71,15 +71,26 @@ $env.ENV_CONVERSIONS = {
 
 $env.TEMP = $nu.temp-path
 #filter out native paths
-# if $nu.os-info.name == "windows" {
-#     $env.Path = ($env.Path | split row (char esep) | sort | uniq 
-#     | filter {|x| $x !~ '\\Program Files\\PowerShell\\7' }
-#     | filter {|x| $x !~ '\\Program Files\\Microsoft VS Code' }
-#     | filter {|x| $x !~ '\\Program Files\\nodejs' }
-#     | filter {|x| $x !~ '\\Program Files\\dotnet' }
-#     )
-# }
+if $nu.os-info.kernel_version =~ 'microsoft-standard-WSL' {
+    $env.PATH = ($env.PATH | split row (char esep) | sort | uniq 
+    | do {|x| ($x | where $it !~ '/mnt/c')
+			| append ($x | where $it =~ '/mnt/c' and ( 
+				$it =~ 'PowerShell'
+				or $it =~ '/scoop/shims'
+				or $it =~ '/scoop/apps/vscode'
+				)
+			)
+	} $in
+)
+}
 
+#     # | where $it !~ '\\Program Files\\PowerShell\\7'
+#     # | where $it !~ '\\Program Files\\Microsoft VS Code'
+#     # | where $it !~ '\\Program Files\\nodejs'
+#     # | where $it !~ '\\Program Files\\dotnet'
+#     # # | where {|x| $x =~ '/mnt/c/WINDOWS' and $x !~ '/Powershell/'}
+#     # | where $it !~ '/scoop/apps/nodejs/'
+#     # | where $it !~ '/scoop/apps/dotnet-sdk/'
 
 # Directories to search for scripts when calling source or use
 $env.NU_LIB_DIRS = [ 
