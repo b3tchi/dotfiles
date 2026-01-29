@@ -69,7 +69,7 @@ $env.ENV_CONVERSIONS = {
     }
 }
 
-$env.TEMP = $nu.temp-path
+$env.TEMP = $nu.temp-dir
 #filter out native paths
 if $nu.os-info.kernel_version =~ 'microsoft-standard-WSL' {
     $env.PATH = ($env.PATH | split row (char esep) | sort | uniq 
