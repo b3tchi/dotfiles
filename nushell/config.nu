@@ -694,6 +694,9 @@ source ~/.cache/carapace/init.nu
 # yazi
 source yazi.nu
 
+# project
+use project *
+
 # pueue
 alias pu = pueue
 

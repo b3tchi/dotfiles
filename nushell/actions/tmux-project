@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# Tmux project picker with fzf
+# Shows registered projects, indicates active sessions, creates/switches on select
+
+CONFIG_FILE="$HOME/.config/project/projects.yaml"
+
+# Check dependencies
+if ! command -v fzf >/dev/null 2>&1; then
+	echo "fzf not found"
+	exit 1
+fi
+
+# Read project names and paths from YAML (lightweight parsing, no yq dependency)
+# Format: projects.<name>.path: <value>
+get_projects() {
+	if [[ ! -f "$CONFIG_FILE" ]]; then
+		return
+	fi
+
+	# Simple YAML parser: extract project names and paths
+	# Expects structure:
+	# projects:
+	#   name:
+	#     path: /some/path
+	local current_name=""
+	local in_projects=false
+
+	while IFS= read -r line; do
+		# Skip empty lines and comments
+		[[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+
+		# Detect projects: section
+		if [[ "$line" =~ ^projects: ]]; then
+			in_projects=true
+			continue
+		fi
+
+		# If not in projects section, skip
+		[[ "$in_projects" != true ]] && continue
+
+		# Detect end of projects section (non-indented line)
+		if [[ ! "$line" =~ ^[[:space:]] ]]; then
+			in_projects=false
+			continue
+		fi
+
+		# Project name (2-space indented, no further indent)
+		if [[ "$line" =~ ^[[:space:]]{2}([a-zA-Z0-9_.-]+):$ ]]; then
+			current_name="${BASH_REMATCH[1]}"
+			continue
+		fi
+
+		# Path value (4-space indented under project name)
+		if [[ -n "$current_name" && "$line" =~ ^[[:space:]]{4}path:[[:space:]]*(.+)$ ]]; then
+			local path="${BASH_REMATCH[1]}"
+			echo "${current_name}|${path}"
+			current_name=""
+		fi
+	done <"$CONFIG_FILE"
+}
+
+# Get active tmux session groups
+get_active_groups() {
+	tmux list-sessions -F "#{session_group}" 2>/dev/null | sort -u
+}
+
+# Build fzf list: [*] name  path (where * indicates active session)
+build_list() {
+	local active_groups
+	active_groups=$(get_active_groups)
+
+	get_projects | while IFS='|' read -r name path; do
+		if echo "$active_groups" | grep -qx "$name"; then
+			echo "[*] ${name}|${path}"
+		else
+			echo "[ ] ${name}|${path}"
+		fi
+	done
+}
+
+# Main
+main() {
+	local list
+	list=$(build_list)
+
+	if [[ -z "$list" ]]; then
+		echo "No projects registered. Use 'project add <name>' in nushell."
+		sleep 2
+		exit 0
+	fi
+
+	# Run fzf picker
+	local selected
+	selected=$(echo "$list" | fzf \
+		--delimiter='|' \
+		--with-nth=1 \
+		--preview='echo {2}' \
+		--preview-window=down:1:border-top \
+		--header="Projects (* = active session)" \
+		--no-info \
+		--reverse)
+
+	if [[ -z "$selected" ]]; then
+		exit 0
+	fi
+
+	# Extract name and path
+	local marker_and_name path
+	marker_and_name=$(echo "$selected" | cut -d'|' -f1)
+	path=$(echo "$selected" | cut -d'|' -f2)
+
+	# Extract just the name (remove [*] or [ ] prefix)
+	local name
+	name=$(echo "$marker_and_name" | sed 's/^\[.\] //')
+
+	# Check if session group already exists
+	local existing_session
+	existing_session=$(tmux list-sessions -F "#{session_name} #{session_group}" 2>/dev/null |
+		grep " ${name}$" | head -1 | cut -d' ' -f1)
+
+	if [[ -n "$existing_session" ]]; then
+		# Switch to existing session
+		tmux switch-client -t "$existing_session"
+	else
+		# Create new session with project name, starting in project path
+		tmux-start start 0 "$name" | read -r target
+		if [[ -n "$target" ]]; then
+			# Send cd command to the new pane and switch
+			local pane_id
+			pane_id=$(tmux list-panes -t "$target" -F "#{pane_id}" | head -1)
+			tmux send-keys -t "$pane_id" "cd ${path}" Enter
+			tmux switch-client -t "$target"
+		fi
+	fi
+}
+
+main
