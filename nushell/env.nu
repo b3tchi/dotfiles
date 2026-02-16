@@ -82,6 +82,10 @@ if $nu.os-info.kernel_version =~ 'microsoft-standard-WSL' {
 			)
 	} $in
 )
+    # Prepend ~/.local/bin so custom xdg-open wrapper is found first
+    $env.PATH = ($env.PATH | split row (char esep) | prepend ($env.HOME | path join '.local' 'bin'))
+    # Set browser for CLI tools (pac, dotnet, etc.)
+    $env.BROWSER = '/home/jan/.local/bin/xdg-open'
 }
 
 # Directories to search for scripts when calling source or use
