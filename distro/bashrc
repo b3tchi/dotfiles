@@ -16,5 +16,29 @@ PS1='[\u@\h \W]\$ '
 
 # Auto-start tmux session (script symlinked to ~/.local/bin via rotz)
 if command -v tmux-start &>/dev/null; then
-	tmux-start attach 0 local
+	# Detect i3 project workspace to align tmux session group with project
+	PROJECT=""
+	if command -v i3-msg &>/dev/null; then
+		ws_name=$(i3-msg -t get_workspaces 2>/dev/null \
+			| grep -o '"name":"[^"]*","visible":true,"focused":true' \
+			| grep -o '"name":"[^"]*"' \
+			| sed 's/"name":"//;s/"//')
+		# Match numbered project workspace: <name>_<digits>
+		if [[ "$ws_name" =~ ^(.+)_[0-9]+$ ]]; then
+			PROJECT="${BASH_REMATCH[1]}"
+		# Match bare project name (non-numeric, check against projects.yaml)
+		elif [[ -n "$ws_name" && ! "$ws_name" =~ ^[0-9]+$ ]]; then
+			config="$HOME/.config/project/projects.yaml"
+			if [[ -f "$config" ]] && grep -q "^  ${ws_name}:" "$config" 2>/dev/null; then
+				PROJECT="$ws_name"
+			fi
+		fi
+	fi
+
+	if [[ -n "$PROJECT" ]]; then
+		export PROJECT
+		tmux-start attach 0 "$PROJECT"
+	else
+		tmux-start attach 0 local
+	fi
 fi

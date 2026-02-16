@@ -694,6 +694,9 @@ source ~/.cache/carapace/init.nu
 # yazi
 source yazi.nu
 
+# project
+use project *
+
 # pueue
 alias pu = pueue
 
@@ -701,7 +704,7 @@ alias pu = pueue
 alias lg = lazygit
 
 # bottom as top
-alias top = lazygit
+alias top = btm -b
 
 # lf
 def --env --wrapped lfcd [...args:string] {
