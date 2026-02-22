@@ -1,0 +1,5 @@
+{
+  "env": {
+    "TMPDIR": "/data/data/com.termux/files/usr/tmp"
+  }
+}

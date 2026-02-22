@@ -1,0 +1,2 @@
+#!/bin/bash
+exec proot -b /data/data/com.termux/files/usr/tmp:/tmp node /data/data/com.termux/files/usr/lib/node_modules/@anthropic-ai/claude-code/cli.js "$@"
