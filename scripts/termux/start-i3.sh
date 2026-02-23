@@ -40,8 +40,8 @@ proot-distro login "$DISTRO" \
   export MESA_GL_VERSION_OVERRIDE=4.3
   export MESA_GLES_VERSION_OVERRIDE=3.2
 
-  # Remap Alt to Mod4 (Super) for i3 keybindings
-  xmodmap -e "remove mod1 = Alt_L" -e "add mod4 = Alt_L"
+  # Remap Alt to Mod4 (Super) after i3 starts
+  (sleep 3 && xmodmap -e "remove mod1 = Alt_L" -e "add mod4 = Alt_L") &
 
   dbus-launch --exit-with-session i3
 '
