@@ -6,6 +6,7 @@
 #           mesa-vulkan-icd-freedreno, termux-x11-nightly, pulseaudio
 
 DISTRO="archlinux"
+USER="jan"
 
 # Kill previous sessions
 pkill -f termux-x11 2>/dev/null
@@ -29,10 +30,11 @@ pulseaudio --start \
 termux-x11 :1 &
 sleep 2
 
-# Launch i3 inside proot Arch
+# Launch i3 inside proot Arch as user jan
 proot-distro login "$DISTRO" \
+  --user "$USER" \
   --shared-tmp \
-  --bind "$HOME/.dotfiles:/root/.dotfiles" \
+  --bind "$HOME/.dotfiles:/home/$USER/.dotfiles" \
   -- bash -c '
   export DISPLAY=:1
   export PULSE_SERVER=tcp:127.0.0.1:4713

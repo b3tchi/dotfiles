@@ -10,6 +10,7 @@ set -e
 
 DISTRO="archlinux"
 DOTFILES="$HOME/.dotfiles"
+PROOT_USER="jan"
 
 # --- Guard: must run from Termux, not proot ---
 if [ -f /etc/arch-release ] || [ "$(whoami)" = "root" ]; then
@@ -26,7 +27,7 @@ pkg update -y
 pkg install -y x11-repo tur-repo
 pkg install -y termux-x11-nightly pulseaudio proot-distro
 pkg install -y mesa-zink virglrenderer-mesa-zink \
-  mesa-vulkan-icd-freedreno vulkan-loader-android
+  mesa-vulkan-icd-freedreno
 
 # Install Arch if not present
 if ! proot-distro login "$DISTRO" -- true &>/dev/null; then
@@ -35,7 +36,7 @@ if ! proot-distro login "$DISTRO" -- true &>/dev/null; then
 fi
 
 # =========================================================
-# PROOT ARCH SIDE
+# PROOT ARCH SIDE (as root)
 # =========================================================
 echo "=== Setting up i3 inside proot Arch ==="
 
@@ -43,6 +44,8 @@ proot-distro login "$DISTRO" \
   --shared-tmp \
   --bind "$DOTFILES:/root/.dotfiles" \
   -- bash -c '
+  PROOT_USER="'"$PROOT_USER"'"
+
   # Refresh package DB and update
   pacman -Syy --noconfirm
   pacman -Syu --noconfirm
@@ -51,7 +54,7 @@ proot-distro login "$DISTRO" \
   pacman -S --needed --noconfirm \
     i3-wm i3status i3lock \
     xorg-server xorg-xinit xorg-xrandr xorg-xsetroot xorg-xmodmap \
-    mesa \
+    mesa sudo \
     kitty \
     polybar \
     rofi dmenu \
@@ -72,16 +75,49 @@ proot-distro login "$DISTRO" \
   fi
   echo "rotz $(rotz --version)"
 
-  # Link i3 config via rotz
-  rotz -d /root/.dotfiles link -f i3
+  # --- Create user ---
+  if ! id "$PROOT_USER" &>/dev/null; then
+    echo "Creating user $PROOT_USER..."
+    useradd -m -G wheel -s /bin/bash "$PROOT_USER"
+  fi
 
-  # Remove default i3 config if it exists
-  rm -f ~/.config/i3/config
+  # Set passwords (required for sudo to work in proot)
+  printf "%s\n%s\n" "$PROOT_USER" "$PROOT_USER" | passwd "$PROOT_USER"
+  printf "%s\n%s\n" "$PROOT_USER" "$PROOT_USER" | passwd root
+
+  # Fix sudo for proot (setuid bit + explicit sudoers entry)
+  chmod u+s /usr/sbin/sudo
+  sed -i "s/# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/" /etc/sudoers
+  echo "$PROOT_USER ALL=(ALL:ALL) ALL" > /etc/sudoers.d/$PROOT_USER
+  chmod 440 /etc/sudoers.d/$PROOT_USER
+
+  # --- Link dotfiles for user ---
+  USER_HOME="/home/$PROOT_USER"
+
+  # i3
+  mkdir -p "$USER_HOME/.i3"
+  ln -sf "$USER_HOME/.dotfiles/i3/config" "$USER_HOME/.i3/config"
+  rm -f "$USER_HOME/.config/i3/config"
+
+  # kitty
+  mkdir -p "$USER_HOME/.config/kitty"
+  ln -sf "$USER_HOME/.dotfiles/kitty/kitty.conf" "$USER_HOME/.config/kitty/kitty.conf"
+  ln -sf "$USER_HOME/.dotfiles/kitty/tokyonight_night.conf" "$USER_HOME/.config/kitty/tokyonight_night.conf"
+
+  # polybar
+  mkdir -p "$USER_HOME/.config/polybar"
+  ln -sf "$USER_HOME/.dotfiles/i3/config.ini" "$USER_HOME/.config/polybar/config.ini"
+  ln -sf "$USER_HOME/.dotfiles/i3/launch.sh" "$USER_HOME/.config/polybar/launch.sh"
+  ln -sf "$USER_HOME/.dotfiles/i3/scripts" "$USER_HOME/.config/polybar/scripts"
+
+  # Fix ownership
+  chown -R "$PROOT_USER:$PROOT_USER" "$USER_HOME"
 
   # Rebuild font cache
   fc-cache -fv > /dev/null 2>&1
 
   echo "=== proot Arch setup complete ==="
+  echo "User: $PROOT_USER  Password: $PROOT_USER"
 '
 
 echo ""
