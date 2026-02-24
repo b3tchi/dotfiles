@@ -42,6 +42,11 @@ proot-distro login "$DISTRO" \
   export MESA_GL_VERSION_OVERRIDE=4.3
   export MESA_GLES_VERSION_OVERRIDE=3.2
 
+  # Disable picom in proot (GPU compositor not needed)
+  mkdir -p /usr/local/bin
+  echo "#!/bin/sh" > /usr/local/bin/picom
+  chmod +x /usr/local/bin/picom
+
   # Remap Alt to Mod4 (Super) after i3 starts
   (sleep 3 && xmodmap -e "remove mod1 = Alt_L" -e "add mod4 = Alt_L") &
 
