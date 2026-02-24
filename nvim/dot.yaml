@@ -23,6 +23,6 @@ linux:
       {{#if (eq whoami.distro "Manjaro Linux")}}
       sudo pacman -Syu neovim --noconfirm
       {{/if}}
-      {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
-      nala install neovim build-essential -y
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -S --needed --noconfirm neovim gcc nodejs npm ripgrep fd lazygit make unzip wget
       {{/if}}
