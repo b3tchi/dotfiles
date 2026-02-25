@@ -62,8 +62,30 @@ proot-distro login "$DISTRO" \
     dunst \
     feh \
     xterm \
+    tmux \
     ttf-iosevka-nerd ttc-iosevka \
     dbus git unzip curl
+
+  # neovim + development tools
+  pacman -S --needed --noconfirm \
+    neovim gcc nodejs npm ripgrep fd lazygit \
+    make wget base-devel automake autoconf python
+
+  # Build alttab from source (not in official repos)
+  if ! command -v alttab &>/dev/null; then
+    echo "Building alttab..."
+    pacman -S --needed --noconfirm libpng libxft uthash libxpm
+    cd /tmp
+    rm -rf alttab
+    git clone https://github.com/sagb/alttab.git
+    cd alttab
+    autoreconf -fi
+    ./configure
+    make -j4
+    make install
+    cd /
+    rm -rf /tmp/alttab
+  fi
 
   # Install rotz (dotfile manager)
   if ! command -v rotz &>/dev/null; then
@@ -109,6 +131,22 @@ proot-distro login "$DISTRO" \
   ln -sf "$USER_HOME/.dotfiles/i3/config.ini" "$USER_HOME/.config/polybar/config.ini"
   ln -sf "$USER_HOME/.dotfiles/i3/launch.sh" "$USER_HOME/.config/polybar/launch.sh"
   ln -sf "$USER_HOME/.dotfiles/i3/scripts" "$USER_HOME/.config/polybar/scripts"
+
+  # neovim
+  mkdir -p "$USER_HOME/.config/nvim/lua" "$USER_HOME/.local/share/nvim"
+  ln -sf "$USER_HOME/.dotfiles/nvim/init.lua" "$USER_HOME/.config/nvim/init.lua"
+  ln -sf "$USER_HOME/.dotfiles/nvim/global.markdownlint-cli2.yaml" "$USER_HOME/.config/nvim/global.markdownlint-cli2.yaml"
+  ln -sf "$USER_HOME/.dotfiles/nvim/config" "$USER_HOME/.config/nvim/lua/config"
+  ln -sf "$USER_HOME/.dotfiles/nvim/plugins" "$USER_HOME/.config/nvim/lua/plugins"
+
+  # Install opencode
+  if [ ! -f "$USER_HOME/.opencode/bin/opencode" ]; then
+    su - "$PROOT_USER" -c "curl -fsSL https://opencode.ai/install | bash"
+  fi
+  # Add opencode to PATH in bashrc
+  if ! grep -q opencode "$USER_HOME/.bashrc" 2>/dev/null; then
+    echo "export PATH=\$HOME/.opencode/bin:\$PATH" >> "$USER_HOME/.bashrc"
+  fi
 
   # Fix ownership
   chown -R "$PROOT_USER:$PROOT_USER" "$USER_HOME"
