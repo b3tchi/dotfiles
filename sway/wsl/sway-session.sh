@@ -77,7 +77,7 @@ watch_outputs() {
 # Detect Windows monitor resolutions via PowerShell
 detect_monitors() {
   local ps="/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
-  "$ps" -Command '
+  /init "$ps" -Command '
     Add-Type -AssemblyName System.Windows.Forms
     [System.Windows.Forms.Screen]::AllScreens | ForEach-Object {
       [string]$_.Bounds.Width + "x" + [string]$_.Bounds.Height
@@ -112,7 +112,7 @@ apply_monitor_config() {
 # Move all WSLg RAIL windows to 0,0 on the Windows desktop
 position_windows() {
   local ps="/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
-  "$ps" -Command '
+  /init "$ps" -Command '
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
