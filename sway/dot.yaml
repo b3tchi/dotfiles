@@ -4,3 +4,26 @@ linux:
   links:
     config: ~/.config/sway/config
     config.d: ~/.config/sway/config.d
+    wsl/sway-session.sh: |
+      {{#if env.WSL_DISTRO_NAME}}
+      ~/.local/bin/sway-session
+      {{/if}}
+    wsl/sway-session.service: |
+      {{#if env.WSL_DISTRO_NAME}}
+      /etc/systemd/system/sway-session.service
+      {{/if}}
+
+  installs:
+    cmd: |
+      {{#if env.WSL_DISTRO_NAME}}
+        {{#if (eq whoami.distro "Arch Linux")}}
+          sudo pacman -Syu --needed --noconfirm \
+            sway \
+            foot \
+            swaybg \
+            xorg-xwayland \
+            wl-clipboard
+          sudo systemctl daemon-reload
+          sudo systemctl enable sway-session
+        {{/if}}
+      {{/if}}
