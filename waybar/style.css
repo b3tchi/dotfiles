@@ -1,0 +1,107 @@
+/* Sway waybar - dark teal palette matching rofi */
+
+* {
+    font-family: "Iosevka Nerd Font";
+    font-size: 13px;
+    min-height: 0;
+}
+
+window#waybar {
+    background-color: #222D31;
+    color: #FDF6E3;
+    border: none;
+}
+
+/* Reset all modules */
+#workspaces,
+#mode,
+#clock,
+#cpu,
+#memory,
+#network,
+#pulseaudio,
+#battery,
+#tray {
+    padding: 0 10px;
+    margin: 4px 2px;
+}
+
+/* Workspaces */
+#workspaces button {
+    padding: 0 6px;
+    color: #5c5c5c;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+}
+
+#workspaces button.focused {
+    color: #FDF6E3;
+    background-color: #222D31;
+}
+
+#workspaces button.urgent {
+    color: #FDF6E3;
+    background-color: #CB4B16;
+}
+
+#workspaces button:hover {
+    background-color: #152024;
+    color: #FDF6E3;
+}
+
+/* Mode (resize, etc.) */
+#mode {
+    color: #222D31;
+    background-color: #16a085;
+    border-radius: 4px;
+    font-weight: bold;
+}
+
+/* Right-side modules */
+#cpu,
+#memory,
+#network,
+#pulseaudio,
+#battery {
+    color: #FDF6E3;
+    background-color: #152024;
+    border-radius: 4px;
+}
+
+#clock {
+    color: #16a085;
+    font-weight: bold;
+}
+
+/* Battery states */
+#battery.warning {
+    color: #e5c07b;
+}
+
+#battery.critical {
+    color: #CB4B16;
+}
+
+/* Pulseaudio muted */
+#pulseaudio.muted {
+    color: #5c5c5c;
+}
+
+/* Network disconnected */
+#network.disconnected {
+    color: #5c5c5c;
+}
+
+/* Tray */
+#tray {
+    margin-right: 4px;
+}
+
+#tray > .passive {
+    -gtk-icon-effect: dim;
+}
+
+#tray > .needs-attention {
+    -gtk-icon-effect: highlight;
+}

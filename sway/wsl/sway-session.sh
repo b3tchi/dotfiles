@@ -2,7 +2,8 @@
 export HOME=/home/jan
 export XDG_SESSION_DESKTOP=sway
 export XDG_SESSION_TYPE=wayland
-export XDG_RUNTIME_DIR=/run/user/0/
+UID_NUM=$(id -u)
+export XDG_RUNTIME_DIR="/run/user/${UID_NUM}"
 export WAYLAND_DISPLAY=wayland-0
 export LANG=en_US.UTF-8
 
@@ -13,24 +14,16 @@ log() {
   echo "$(date): $*" | tee -a "$LOG"
 }
 
-if [[ ! -e /run/user/0/bus ]]; then
-  while ! systemctl restart user@0; do
-    :
-  done
-  while [[ ! -e /run/user/0/bus ]]; do
-    log "Waiting for systemd..."
-    sleep 1
-  done
-fi
+# Wait for D-Bus session bus (should already exist for user services)
+while [[ ! -e "${XDG_RUNTIME_DIR}/bus" ]]; do
+  log "Waiting for D-Bus session bus..."
+  sleep 1
+done
 
 setup_wslg() {
-  umount /tmp/.X11-unix 2>/dev/null
-  rm -rf /tmp/.X11-unix
-  chmod 700 /run/user/0/
-  mkdir -p /tmp/.X11-unix
-  chmod 01777 /tmp/.X11-unix
-  ln -sf /mnt/wslg/runtime-dir/wayland-0 /run/user/0/wayland-0
-  ln -sf /mnt/wslg/runtime-dir/wayland-0.lock /run/user/0/wayland-0.lock
+  # Link WSLg Wayland socket into user runtime dir
+  ln -sf /mnt/wslg/runtime-dir/wayland-0 "${XDG_RUNTIME_DIR}/wayland-0"
+  ln -sf /mnt/wslg/runtime-dir/wayland-0.lock "${XDG_RUNTIME_DIR}/wayland-0.lock"
 }
 
 # Count active sway outputs
@@ -45,7 +38,7 @@ count_outputs() {
 # We immediately create a replacement to keep sway alive and connected.
 watch_outputs() {
   local sway_pid="$1"
-  local swaysock="/run/user/0/sway-ipc.0.${sway_pid}.sock"
+  local swaysock="${XDG_RUNTIME_DIR}/sway-ipc.${UID_NUM}.${sway_pid}.sock"
 
   sleep 5
 
@@ -154,7 +147,7 @@ SWAY_PID=$!
 log "Sway started (PID: $SWAY_PID)"
 
 sleep 2
-SWAYSOCK="/run/user/0/sway-ipc.0.${SWAY_PID}.sock"
+SWAYSOCK="${XDG_RUNTIME_DIR}/sway-ipc.${UID_NUM}.${SWAY_PID}.sock"
 
 # Apply detected monitor resolutions
 apply_monitor_config "$SWAYSOCK"
