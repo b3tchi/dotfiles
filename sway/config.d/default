@@ -28,14 +28,21 @@ smart_gaps off
 smart_borders no_gaps
 
 # Borders with title bars
-default_border pixel 0
-default_floating_border pixel 0
+default_border normal 4
+default_floating_border normal 4
+hide_edge_borders none
+for_window [all] border normal 4
+
+# Change borders
+bindsym $mod+u border none
+bindsym $mod+y border pixel 4
+bindsym $mod+n border normal 4
 
 # Window colors         border    background  text      indicator   child_border
-client.focused          #222D31   #222D31     #FDF6E3   #222D31     #222D31
-client.focused_inactive #222D31   #222D31     #5c5c5c   #222D31     #222D31
-client.unfocused        #222D31   #222D31     #5c5c5c   #222D31     #222D31
-client.urgent           #222D31   #222D31     #FDF6E3   #222D31     #222D31
+client.focused          #152024   #152024     #FDF6E3   #222D31     #152024
+client.focused_inactive #152024   #152024     #707880   #222D31     #152024
+client.unfocused        #222D31   #222D31     #707880   #222D31     #222D31
+client.urgent           #CB4B16   #FDF6E3     #16a085   #268BD2     #CB4B16
 
 # No borders for rofi and waybar
 for_window [app_id="rofi"] border none
