@@ -1,0 +1,6 @@
+global:
+  installs:
+linux:
+  links:
+    sway-session.sh: ~/.local/bin/sway-session
+    sway-session.service: /etc/systemd/system/sway-session.service
