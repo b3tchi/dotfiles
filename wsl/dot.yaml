@@ -4,3 +4,16 @@ linux:
   links:
     sway-session.sh: ~/.local/bin/sway-session
     sway-session.service: /etc/systemd/system/sway-session.service
+
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Arch Linux")}}
+        sudo pacman -Syu --needed --noconfirm \
+          sway \
+          foot \
+          swaybg \
+          xorg-xwayland \
+          wl-clipboard
+        sudo systemctl daemon-reload
+        sudo systemctl enable sway-session
+      {{/if}}
