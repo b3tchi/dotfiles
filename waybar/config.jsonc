@@ -5,7 +5,7 @@
 
     "modules-left": ["sway/workspaces", "sway/mode"],
     "modules-center": [],
-    "modules-right": ["tray", "network", "cpu", "memory", "pulseaudio", "battery", "clock"],
+    "modules-right": ["tray", "network", "cpu", "memory", "pulseaudio", "battery", "custom/clock"],
 
     "sway/workspaces": {
         "disable-scroll": false,
@@ -17,9 +17,11 @@
         "format": "{}"
     },
 
-    "clock": {
-        "format": "<span color='#707880'>{:%H:%M}</span> {:%Y-%m-%d}",
-        "tooltip-format": "{:%A, %B %d, %Y}"
+    "custom/clock": {
+        "exec": "date +'<span color=\"#707880\">%H:%M</span> %Y-%m-%d'",
+        "interval": 5,
+        "return-type": "",
+        "tooltip": false
     },
 
     "cpu": {
