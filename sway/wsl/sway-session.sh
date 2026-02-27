@@ -89,10 +89,18 @@ detect_monitors() {
 apply_monitor_config() {
   local swaysock="$1"
   local resolutions
-  mapfile -t resolutions < <(detect_monitors)
+  local attempts=0
+
+  while [[ $attempts -lt 5 ]]; do
+    mapfile -t resolutions < <(detect_monitors)
+    [[ ${#resolutions[@]} -gt 0 ]] && break
+    attempts=$((attempts + 1))
+    log "Monitor detection attempt $attempts failed, retrying..."
+    sleep 2
+  done
 
   if [[ ${#resolutions[@]} -eq 0 ]]; then
-    log "Could not detect Windows monitors"
+    log "Could not detect Windows monitors after $attempts attempts"
     return
   fi
 
