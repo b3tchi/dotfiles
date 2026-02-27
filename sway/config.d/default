@@ -22,8 +22,10 @@ set $menu rofi -show run
 ### Appearance
 #
 # Gaps
-gaps inner 6
-gaps outer 10
+gaps inner 4
+gaps outer 2
+smart_gaps off
+smart_borders no_gaps
 
 # Borders with title bars
 default_border pixel 0

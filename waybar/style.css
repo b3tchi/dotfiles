@@ -1,8 +1,8 @@
-/* Sway waybar - dark teal palette matching rofi */
+/* Waybar - matching polybar i3 style */
 
 * {
-    font-family: "Iosevka Nerd Font";
-    font-size: 13px;
+    font-family: "IosevkaTerm Nerd Font";
+    font-size: 11pt;
     min-height: 0;
 }
 
@@ -22,22 +22,27 @@ window#waybar {
 #pulseaudio,
 #battery,
 #tray {
-    padding: 0 10px;
-    margin: 4px 2px;
+    padding: 0 8px;
+}
+
+/* Separator between modules */
+#cpu, #memory, #network, #pulseaudio, #battery, #clock {
+    padding: 0 4px;
 }
 
 /* Workspaces */
 #workspaces button {
     padding: 0 6px;
-    color: #5c5c5c;
+    color: #FDF6E3;
     background: transparent;
     border: none;
-    border-radius: 4px;
+    border-radius: 0;
 }
 
 #workspaces button.focused {
     color: #FDF6E3;
-    background-color: #222D31;
+    background-color: #152024;
+    border-bottom: 3px solid #16a085;
 }
 
 #workspaces button.urgent {
@@ -52,26 +57,14 @@ window#waybar {
 
 /* Mode (resize, etc.) */
 #mode {
-    color: #222D31;
-    background-color: #16a085;
-    border-radius: 4px;
-    font-weight: bold;
-}
-
-/* Right-side modules */
-#cpu,
-#memory,
-#network,
-#pulseaudio,
-#battery {
     color: #FDF6E3;
     background-color: #152024;
-    border-radius: 4px;
+    border-bottom: 3px solid #CB4B16;
 }
 
+/* Clock - dimmed time, normal date */
 #clock {
-    color: #16a085;
-    font-weight: bold;
+    color: #FDF6E3;
 }
 
 /* Battery states */
@@ -85,12 +78,12 @@ window#waybar {
 
 /* Pulseaudio muted */
 #pulseaudio.muted {
-    color: #5c5c5c;
+    color: #CB4B16;
 }
 
 /* Network disconnected */
 #network.disconnected {
-    color: #5c5c5c;
+    color: #707880;
 }
 
 /* Tray */
