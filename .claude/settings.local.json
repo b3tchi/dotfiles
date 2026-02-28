@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(TMPDIR=/data/data/com.termux/files/usr/tmp gh release view --repo volllly/rotz --json assets --jq '.assets[].name')",
+      "Bash(TMPDIR=$HOME/.cache bash /data/data/com.termux/files/home/.dotfiles/install-rotz.sh)",
+      "Bash(proot-distro list:*)",
+      "Bash(tmux send-keys:*)",
+      "Bash(sleep 2:*)",
+      "Bash(tmux capture-pane:*)",
+      "Bash(bash /data/data/com.termux/files/home/.dotfiles/scripts/termux/start-i3.sh 2>&)",
+      "Bash(tmux list-windows:*)"
+    ]
+  }
+}
