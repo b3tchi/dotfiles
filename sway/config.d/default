@@ -14,10 +14,39 @@ set $down j
 set $up k
 set $right l
 # Your preferred terminal emulator
-set $term wezterm
+set $term foot
 # Your preferred application launcher
 # set $menu wmenu-run
 set $menu rofi -show run 
+
+### Appearance
+#
+# Gaps
+gaps inner 4
+gaps outer 2
+smart_gaps off
+smart_borders no_gaps
+
+# Borders with title bars
+default_border normal 4
+default_floating_border normal 4
+hide_edge_borders none
+for_window [all] border normal 4
+
+# Change borders
+bindsym $mod+u border none
+bindsym $mod+y border pixel 4
+bindsym $mod+n border normal 4
+
+# Window colors         border    background  text      indicator   child_border
+client.focused          #152024   #152024     #FDF6E3   #222D31     #152024
+client.focused_inactive #152024   #152024     #707880   #222D31     #152024
+client.unfocused        #222D31   #222D31     #707880   #222D31     #222D31
+client.urgent           #CB4B16   #FDF6E3     #16a085   #268BD2     #CB4B16
+
+# No borders for rofi and waybar
+for_window [app_id="rofi"] border none
+for_window [app_id="waybar"] border none
 
 ### Output configuration
 #
@@ -228,24 +257,17 @@ bindsym $mod+r mode "resize"
     # Special keys to adjust brightness via brightnessctl
     bindsym --locked XF86MonBrightnessDown exec brightnessctl set 5%-
     bindsym --locked XF86MonBrightnessUp exec brightnessctl set 5%+
-    # Special key to take a screenshot with grim
-    bindsym Print exec grim
+    # Screenshots: Print = full, Shift+Print = region, Alt+Print = 3s delay
+    bindsym Print exec grim ~/Screenshots/$(date +%Y-%m-%d_%H-%M-%S).png
+    bindsym Shift+Print exec grim -g "$(slurp)" ~/Screenshots/$(date +%Y-%m-%d_%H-%M-%S).png
+    bindsym $mod+Print exec 'sleep 3 && grim ~/Screenshots/$(date +%Y-%m-%d_%H-%M-%S).png'
+
+# No borders on rofi and waybar
+for_window [app_id="rofi"] border none
+for_window [app_id="waybar"] border none
 
 #
 # Status Bar:
 #
-# Read `man 5 sway-bar` for more information about this section.
-bar {
-    position top
-
-    # When the status_command prints a new line to stdout, swaybar updates.
-    # The default just shows the current date and time.
-    status_command while date +'%Y-%m-%d %X'; do sleep 1; done
-
-    colors {
-        statusline #ffffff
-        background #323232
-        inactive_workspace #32323200 #32323200 #5c5c5c
-    }
-}
+exec waybar
 

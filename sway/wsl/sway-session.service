@@ -1,0 +1,20 @@
+[Unit]
+Description=Sway Wayland Compositor (WSL)
+After=basic.target
+
+[Service]
+Type=simple
+ExecStart=/home/jan/.local/bin/sway-session
+Restart=on-failure
+RestartSec=2
+Environment=XDG_SESSION_DESKTOP=sway
+Environment=XDG_SESSION_TYPE=wayland
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+Environment=WAYLAND_DISPLAY=wayland-0
+Environment=LANG=en_US.UTF-8
+Environment=HOME=/home/jan
+
+KillMode=control-group
+
+[Install]
+WantedBy=default.target

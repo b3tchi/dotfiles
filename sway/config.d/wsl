@@ -1,14 +1,17 @@
+# TODO: clipboard sync tools not yet set up on arch
 # When wayland clipboard changes, run clipboard-to-win
-exec wl-paste --watch clipboard-to-win
+# exec wl-paste --watch clipboard-to-win
 # Run win to clipboard service to sync windows clipboard to wayland
-exec systemctl --user restart win-to-clipboard
+# exec systemctl --user restart win-to-clipboard
 
-# Create window(s) for additional monitors
-# Comment out to only have one display, repeat n times for additional displays
-# First display is WL-1, each one after increments by 1
-# TODO: detect number of windows displays dynamically
-exec swaymsg create_output
+# Disable Xwayland (WSLg mounts /tmp/.X11-unix read-only, no sticky bit)
+xwayland disable
+
+# Extra outputs are managed by sway-session.sh (keepalive pattern)
 # exec swaymsg create_output
+
+# Move current workspace to next output (works with dynamic WL-* names)
+bindsym Alt+Shift+o move workspace to output right
 
 # Assign workspaces to output
 # If output doesn't exist, defaults to WL-1

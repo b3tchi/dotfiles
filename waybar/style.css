@@ -1,0 +1,100 @@
+/* Waybar - matching polybar i3 style */
+
+* {
+    font-family: "IosevkaTerm Nerd Font";
+    font-size: 11pt;
+    min-height: 0;
+}
+
+window#waybar {
+    background-color: #222D31;
+    color: #FDF6E3;
+    border: none;
+}
+
+/* Reset all modules */
+#workspaces,
+#mode,
+#clock,
+#cpu,
+#memory,
+#network,
+#pulseaudio,
+#battery,
+#tray {
+    padding: 0 8px;
+}
+
+/* Separator between modules */
+#cpu, #memory, #network, #pulseaudio, #battery, #clock {
+    padding: 0 4px;
+}
+
+/* Workspaces */
+#workspaces button {
+    padding: 0 6px;
+    color: #FDF6E3;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+}
+
+#workspaces button.focused {
+    color: #FDF6E3;
+    background-color: #152024;
+    border-bottom: 3px solid #16a085;
+}
+
+#workspaces button.urgent {
+    color: #FDF6E3;
+    background-color: #CB4B16;
+}
+
+#workspaces button:hover {
+    background-color: #152024;
+    color: #FDF6E3;
+}
+
+/* Mode (resize, etc.) */
+#mode {
+    color: #FDF6E3;
+    background-color: #152024;
+    border-bottom: 3px solid #CB4B16;
+}
+
+/* Clock - dimmed time, normal date */
+#clock {
+    color: #FDF6E3;
+}
+
+/* Battery states */
+#battery.warning {
+    color: #e5c07b;
+}
+
+#battery.critical {
+    color: #CB4B16;
+}
+
+/* Pulseaudio muted */
+#pulseaudio.muted {
+    color: #CB4B16;
+}
+
+/* Network disconnected */
+#network.disconnected {
+    color: #707880;
+}
+
+/* Tray */
+#tray {
+    margin-right: 4px;
+}
+
+#tray > .passive {
+    -gtk-icon-effect: dim;
+}
+
+#tray > .needs-attention {
+    -gtk-icon-effect: highlight;
+}

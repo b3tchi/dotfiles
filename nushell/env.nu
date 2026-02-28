@@ -72,18 +72,20 @@ $env.ENV_CONVERSIONS = {
 $env.TEMP = $nu.temp-dir
 #filter out native paths
 if $nu.os-info.kernel_version =~ 'microsoft-standard-WSL' {
-    $env.PATH = ($env.PATH | split row (char esep) | sort | uniq 
-    | do {|x| ($x | where $it !~ '/mnt/c')
-			| append ($x | where $it =~ '/mnt/c' and ( 
-				$it =~ 'PowerShell'
-				or $it =~ '/scoop/shims'
-				or $it =~ '/scoop/apps/vscode'
-				)
-			)
-	} $in
-)
+	# scoop and powerhsell
+	$env.PATH = ($env.PATH | split row (char esep) | sort | uniq 
+	| do {|x| ($x | where $it !~ '/mnt/c')
+	 		| append ($x | where $it =~ '/mnt/c' and ( 
+	 			$it =~ 'PowerShell'
+	 			or $it =~ '/scoop/shims'
+	 			or $it =~ '/scoop/apps/vscode'
+	 			)
+	 		)
+	 } $in
+	 )
+	
     # Prepend ~/.local/bin so custom xdg-open wrapper is found first
-    $env.PATH = ($env.PATH | split row (char esep) | prepend ($env.HOME | path join '.local' 'bin'))
+    # $env.PATH = ($env.PATH | split row (char esep) | prepend ($env.HOME | path join '.local' 'bin'))
     # Set browser for CLI tools (pac, dotnet, etc.)
     $env.BROWSER = '/home/jan/.local/bin/xdg-open'
 }
