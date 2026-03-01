@@ -4,3 +4,5 @@ profiles:
     email: beckaja1@gmail.com
     domain: github.com
     root: ~/repos/
+    default: true
+    protocol: ssh

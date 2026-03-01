@@ -34,9 +34,14 @@ All commands are implemented as Nushell functions in `gwt/mod.nu`. Run from with
 ## Architecture
 
 ### Profile System
-- User profiles are defined in the `data` function (gwt/mod.nu:4-12)
-- Currently hardcoded profile: `b3tchi` with email and GitHub domain
-- Profiles determine GitHub user, email, and SSH configuration
+- User profiles are defined in `config/profiles.yaml` and loaded via the `data` function
+- Profiles determine GitHub user, email, SSH configuration, and remote URL format
+- Each profile has a `default` flag:
+  - `default: true` — uses standard SSH format `git@domain:owner/repo.git` (no user suffix)
+  - `default: false` — uses suffixed SSH format `git@domain-user:owner/repo.git` (for multi-account setups)
+- Each profile has a `protocol` field:
+  - `protocol: ssh` — uses SSH remote format (default)
+  - `protocol: https` — uses HTTPS remote format `https://domain/owner/repo.git` (skips SSH config checks)
 
 ### Git Worktree Workflow
 The tool operates on the principle that:
