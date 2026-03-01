@@ -1,5 +1,3 @@
-global:
-  installs:
 linux:
   links:
     config: ~/.i3/config
@@ -14,9 +12,19 @@ linux:
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
-      sudo pacman -Syu i3 --noconfirm
+      sudo pacman -Syu --needed --noconfirm i3
       sudo pamac install alttab --no-confirm
       sudo pamac install xborder-git --no-confirm
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -Syu --needed --noconfirm \
+        i3-wm i3status i3blocks \
+        rofi dunst picom polybar
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux ARM")}}
+      sudo pacman -Syu --needed --noconfirm \
+        i3-wm i3status i3blocks \
+        rofi dunst picom polybar
       {{/if}}
       chmod +x ~/.dotfiles/i3/launch.sh
       chmod +x ~/.dotfiles/i3/scripts/*.nu

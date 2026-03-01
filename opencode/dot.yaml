@@ -5,5 +5,15 @@ linux:
     package.json: ~/.config/opencode/package.json
   installs:
     cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
       bun install -g opencode-ai
       cd ~/.config/opencode && bun install
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+      bun install -g opencode-ai
+      cd ~/.config/opencode && bun install
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux ARM")}}
+      bun install -g opencode-ai
+      cd ~/.config/opencode && bun install
+      {{/if}}

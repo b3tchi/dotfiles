@@ -1,0 +1,20 @@
+# Meta-package: Personal Linux (native)
+# Arch / Manjaro with i3 (X11)
+# Usage: rotz install meta-linux
+depends:
+  - distro
+  - nushell
+  - tmux
+  - nvim
+  - lazygit
+  - claude
+  - opencode
+  - wezterm
+  - kitty
+  - i3
+  - xterm
+  - emacs
+  - logseq
+  - freecad
+  - evolution
+  - xournalpp

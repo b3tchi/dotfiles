@@ -5,6 +5,14 @@ linux:
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
-        sudo pacman -Syu tmux
+      sudo pacman -Syu --needed --noconfirm tmux
       {{/if}}
-        sudo pacman -Syu tmux
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -Syu --needed --noconfirm tmux
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux ARM")}}
+      sudo pacman -Syu --needed --noconfirm tmux
+      {{/if}}
+      {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
+      pkg install -y tmux
+      {{/if}}

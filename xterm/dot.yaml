@@ -1,3 +1,11 @@
 linux:
   links:
     .Xresources: ~/.Xresources
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -Syu --needed --noconfirm xterm
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -Syu --needed --noconfirm xterm
+      {{/if}}

@@ -11,6 +11,14 @@ linux:
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
-        sudo pacman -Syu wezterm
+      sudo pacman -Syu --needed --noconfirm wezterm
       {{/if}}
-        git clone https://github.com/danielcopper/wezterm-session-manager.git ~/.config/wezterm/wezterm-session-manager
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -Syu --needed --noconfirm wezterm
+      {{/if}}
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      test -d ~/.config/wezterm/wezterm-session-manager || git clone https://github.com/danielcopper/wezterm-session-manager.git ~/.config/wezterm/wezterm-session-manager
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+      test -d ~/.config/wezterm/wezterm-session-manager || git clone https://github.com/danielcopper/wezterm-session-manager.git ~/.config/wezterm/wezterm-session-manager
+      {{/if}}

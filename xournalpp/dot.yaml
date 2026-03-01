@@ -3,3 +3,11 @@ linux:
     palette.gpl: ~/.config/xournalpp/palette.gpl
     settings.xml: ~/.config/xournalpp/settings.xml
     toolbar.ini: ~/.config/xournalpp/toolbar.ini
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -Syu --needed --noconfirm xournalpp
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -Syu --needed --noconfirm xournalpp
+      {{/if}}

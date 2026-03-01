@@ -66,11 +66,11 @@ linux:
           go rust nodejs \
           wezterm \
           go-yq dasel \
-          ttf-iosevka-nerd ttf-iosevkaterm-nerd ttc-iosevka \
+          ttf-iosevka-nerd ttf-iosevkaterm-nerd ttc-iosevka
 
-        sudo pacman -S --needed git base-devel
-        git clone https://aur.archlinux.org/yay.git ~/yay
-        cd ~/yay
-        makepkg -si
-        cd -
+        sudo pacman -S --needed --noconfirm git base-devel
+        if [ ! -d ~/yay ]; then
+          git clone https://aur.archlinux.org/yay.git ~/yay
+        fi
+        cd ~/yay && makepkg -si --noconfirm && cd -
       {{/if}}

@@ -1,5 +1,3 @@
-global:
-  installs:
 linux:
   links:
     config: ~/.config/sway/config

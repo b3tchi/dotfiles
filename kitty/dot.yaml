@@ -2,3 +2,11 @@ linux:
   links:
     kitty.conf: ~/.config/kitty/kitty.conf
     tokyonight_night.conf: ~/.config/kitty/tokyonight_night.conf
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -Syu --needed --noconfirm kitty
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -Syu --needed --noconfirm kitty
+      {{/if}}

@@ -1,0 +1,12 @@
+# Meta-package: proot Arch (nested in Termux)
+# Arch Linux ARM with i3 (Termux:X11)
+# Usage: rotz install meta-proot
+depends:
+  - distro
+  - nushell
+  - tmux
+  - nvim
+  - lazygit
+  - claude
+  - opencode
+  - i3

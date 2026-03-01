@@ -1,0 +1,11 @@
+# Meta-package: Windows host (bridge for WSL)
+# Windows-native tools that complement the nested WSL environment
+# Usage: rotz install meta-windows
+depends:
+  - wezterm
+  - winterm
+  - pwsh
+  - powertoys
+  - fancywm
+  - flow-launcher
+  - office

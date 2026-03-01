@@ -1,0 +1,10 @@
+# Meta-package: Termux (direct on Android)
+# No WM, terminal-only (tmux as session manager)
+# Usage: rotz install meta-termux
+depends:
+  - nushell
+  - tmux
+  - nvim
+  - lazygit
+  - claude
+  - opencode

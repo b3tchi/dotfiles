@@ -4,3 +4,11 @@ linux:
     vfolders.xml: ~/.config/evolution/mail/vfolders.xml
     accels: ~/.config/evolution/accels
     sources: ~/.config/evolution/sources
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -Syu --needed --noconfirm evolution
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -Syu --needed --noconfirm evolution
+      {{/if}}

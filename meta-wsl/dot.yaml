@@ -1,0 +1,12 @@
+# Meta-package: WSL (nested in Windows)
+# Arch Linux with Sway (WSLg)
+# Usage: rotz install meta-wsl
+depends:
+  - distro
+  - nushell
+  - tmux
+  - nvim
+  - lazygit
+  - claude
+  - opencode
+  - sway

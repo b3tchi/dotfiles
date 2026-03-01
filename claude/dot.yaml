@@ -1,9 +1,6 @@
-global:
-  links:
-    settings.json: ~/.claude/settings.json
-
 linux:
   links:
+    settings.json: ~/.claude/settings.json
     {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
     claude-wrapper: /data/data/com.termux/files/usr/bin/claude
     {{/if}}
@@ -21,3 +18,7 @@ linux:
       # Native Linux install
       curl -fsSL https://claude.ai/install.sh | sh
       {{/if}}
+
+windows:
+  links:
+    settings.json: ~/.claude/settings.json

@@ -6,39 +6,112 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a cross-platform dotfiles repository for managing configuration files across Linux (including Termux/Android), WSL, and Windows environments. The repository uses a multi-tool approach for dotfile management and supports various shells, editors, and development tools.
 
-## Dotfile Management Systems
+## Platform Model
 
-This repository uses multiple dotfile management approaches:
+The goal is a **single unified TUI/CLI experience** across all devices, with i3/sway as the WM layer where a graphical session is available.
 
-### 1. Legacy Bash Script (`dtlf.sh`)
-- Manual symlink creation script located at `dtlf.sh`
-- Uses the `ml` function to create symlinks from `~/dotfiles/` to target locations
-- **Do not use this approach for new configurations** - it's being phased out
+### Architecture: Host + Nested Environments
 
-### 2. Rotz (Primary System)
-- Modern dotfile manager using YAML configuration files
-- Each application directory contains a `dot.yaml` file defining:
-  - Platform-specific configurations (`global`, `windows`, `linux`)
-  - Symlinks to create
-  - Installation commands to run
-  - Templating support with Handlebars syntax for conditional logic
-- Supports environment detection: `whoami.distro`, `whoami.platform`, `env.HOME`, etc.
-- Configuration files:
-  - `rotz/config.yaml` - Main rotz configuration
-  - `rotz-test/dot.yaml` - Testing configuration
-  - `distro/dot.yaml` - Distribution-specific package installations
+Three device types follow a consistent pattern — a host platform with an optional nested Linux environment where the actual work happens:
 
-### 3. Rotz Template Examples
+```
+Linux (native)      →  [Core UX runs directly]
+Windows (host)      →  WSL Arch (nested)    →  [Core UX runs here]
+Android (host)      →  Termux / proot Arch  →  [Core UX runs here]
+```
+
+### Layers
+
+| Layer | What | Applies To |
+|---|---|---|
+| **Core UX** | bash → tmux → nushell (starship + carapace), neovim, yazi, lazygit, bat, ripgrep, fzf, fd, bottom | All Linux environments (native, WSL, proot Arch, Termux) |
+| **WM** | i3 or Sway — provides graphical session when available | See table below |
+| **Host bridge** | Configs for the host OS that wraps a nested Linux env | Windows-native tools (WezTerm, pwsh, powertoys), Termux bootstrap, xdg-open/auth bridge |
+| **Distro packages** | Package manager differences (pacman vs pamac vs pkg) | Minor variations between Arch, Manjaro, Arch ARM, Termux |
+
+### WM per Platform
+
+| Platform | Display Server | WM | Notes |
+|---|---|---|---|
+| Native Linux | X11 | i3 | Primary personal setup |
+| WSL | WSLg (Wayland) | Sway | Wayland is what WSLg provides |
+| Android + proot | Termux:X11 | i3 | X11 via Termux:X11 app |
+| Android (terminal) | none | — | tmux only, no WM |
+
+### Platform Inventory
+
+| Platform | Role | Distro | Core UX | WM | Host Bridge |
+|---|---|---|---|---|---|
+| **Personal Linux** | native | Arch / Manjaro | yes | i3 (X11) | — |
+| **WSL** | nested in Windows | Arch | yes | Sway (WSLg) | Windows-side: WezTerm, pwsh, powertoys, xdg-open bridge, auth/browser |
+| **proot Arch** | nested in Termux | Arch | yes | i3 (Termux:X11) | Termux bootstrap scripts |
+| **Termux** | direct on Android | — (pkg) | yes | — | Termux-specific paths, pkg installs |
+
+### Detection Methods (Current State)
+
+Platform detection is currently **inconsistent** across layers. Each config layer uses its own mechanism:
+
+| Layer | Mechanism | Variables |
+|---|---|---|
+| Bash (`profile`) | `uname`, file existence checks | `IS_LINUX`, `IS_ANDROID`, `IS_WSL` |
+| Rotz (`dot.yaml`) | Handlebars templates | `whoami.distro`, `whoami.platform`, `env.HOME`, `env.WSL_DISTRO_NAME` |
+| Nushell | `$nu.os-info` | `.name`, `.kernel_version` |
+| Tmux | shell conditionals | `$TERMUX_VERSION` |
+| WezTerm (Lua) | `wezterm.target_triple` | — |
+
+### Known Issues
+
+1. **`profile`**: `[ -n $IS_WSL ]` missing quotes — Docker start runs on all platforms, not just WSL
+2. **`dtlf.sh`**: Firefox linking uses `md` instead of `ml` (typo, broken)
+3. **Termux detection**: 5 different methods across files (`env.HOME` check, `$TERMUX_VERSION`, dir check, `system-type`, `uname -o`)
+4. **WSL detection**: 4 different methods (`wsl.exe` file check, kernel version regex, `WSL_DISTRO_NAME`, `wezterm.target_triple`)
+5. **dtlf.sh ↔ Rotz overlap**: Some apps managed by both systems (wezterm, etc.)
+6. **Missing rotz coverage**: Ubuntu has no dot.yaml integration
+
+## Rotz — OS Setup Engine
+
+Rotz is the **core mechanism** that bootstraps and configures the entire environment. It is the entry point on any fresh system: install rotz (`install-rotz.sh`), clone dotfiles, run `rotz install` / `rotz link` — and the platform model above is realized.
+
+### How It Works
+
+Each application directory contains a `dot.yaml` file that declares:
+- **Links** — symlinks from the dotfiles repo to their target locations
+- **Installs** — shell commands to install the application
+- **Platform sections** — `global:`, `windows:`, `linux:` top-level keys handled natively by Rotz
+- **Handlebars templates** — conditional logic within sections for distro/environment branching
+
+### Platform Branching in Rotz
+
+Rotz handles the platform model at two levels:
+
+1. **Native platform sections** (`windows:` / `linux:`) — separates host-bridge configs (Windows-side tools) from Core UX configs (Linux-side)
+2. **Handlebars conditionals** within `linux:` — handles distro and environment variations:
+   - `{{#if (eq whoami.distro "Manjaro Linux")}}` — Manjaro-specific packages (pamac/AUR)
+   - `{{#if (eq whoami.distro "Arch Linux")}}` — Arch-specific packages (pacman/yay)
+   - `{{#if (eq whoami.distro "Arch Linux ARM")}}` — ARM-specific packages
+   - `{{#if (eq env.HOME "/data/data/com.termux/files/home")}}` — Termux-specific paths
+   - `{{#if env.WSL_DISTRO_NAME}}` — WSL-specific configs
+
+### Available Template Variables
+
+| Variable | Example Values | Use For |
+|---|---|---|
+| `whoami.distro` | `"Manjaro Linux"`, `"Arch Linux"`, `"Arch Linux ARM"` | Distro-specific package managers |
+| `whoami.platform` | `"Linux"`, `"Windows"` | OS-level branching (rarely needed, use sections instead) |
+| `env.HOME` | `/home/jan`, `/data/data/com.termux/files/home` | Termux detection |
+| `env.WSL_DISTRO_NAME` | `"arch"`, unset | WSL detection |
+| `whoami.username` | `"jan"` | User-specific paths |
+| `whoami.arch` | `"x86_64"`, `"aarch64"` | Architecture-specific installs |
+
+### Key Files
+
+- `rotz/config.yaml` — Main rotz configuration
+- `install-rotz.sh` — Bootstrap script (downloads rotz binary, handles arch/OS detection)
+- `distro/dot.yaml` — Core distro-level package installations
+- `rotz-test/dot.yaml` — Testing configuration
+
+### Rotz Template Examples
 ```yaml
-# Conditional linking based on environment
-links:
-  config.fish: |
-    {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
-    ~/.config/fish/config.fish
-    {{else}}
-    ~/.config/fish/config.fish
-    {{/if}}
-
 # Platform-specific installations
 windows:
   installs:
@@ -50,7 +123,40 @@ linux:
       {{#if (eq whoami.distro "Arch Linux")}}
       sudo pacman -Syu --needed --noconfirm yazi bottom git
       {{/if}}
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -Syu --needed --noconfirm yazi bottom git
+      pamac install lazygit-bin
+      {{/if}}
+
+# Conditional linking for Termux vs standard Linux
+links:
+  config.nu: |
+    {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
+    ~/.config/nushell/config.nu
+    {{else}}
+    ~/.config/nushell/config.nu
+    {{/if}}
 ```
+
+### Meta-Packages
+
+Environment-level meta-packages use rotz `depends` to pull in the right set of apps per target environment. Each is a `dot.yaml` with only `depends:` — no links or installs of its own.
+
+| Meta-Package | Target | Depends On |
+|---|---|---|
+| `meta-linux` | Personal Linux (native, i3/X11) | distro, nushell, tmux, nvim, lazygit, claude, opencode, wezterm, kitty, i3, xterm, emacs, logseq, freecad, evolution, xournalpp |
+| `meta-wsl` | WSL (nested in Windows, Sway/WSLg) | distro, nushell, tmux, nvim, lazygit, claude, opencode, sway |
+| `meta-proot` | proot Arch (nested in Termux, i3/Termux:X11) | distro, nushell, tmux, nvim, lazygit, claude, opencode, i3 |
+| `meta-termux` | Termux (direct on Android, no WM) | nushell, tmux, nvim, lazygit, claude, opencode |
+| `meta-windows` | Windows host (bridge for WSL) | wezterm, winterm, pwsh, powertoys, fancywm, flow-launcher, office |
+
+Usage: `rotz install meta-linux`, `rotz install meta-wsl`, etc.
+
+Note: On a Windows + WSL setup, run `rotz install meta-windows` on the Windows side and `rotz install meta-wsl` inside WSL.
+
+### Legacy: `dtlf.sh`
+
+Manual symlink script being phased out. Some apps (gitconfig, tigrc, fish, code, kde) are still only managed here. **Do not use for new configurations** — migrate to `dot.yaml` instead.
 
 ## Shell Configurations
 

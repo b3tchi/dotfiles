@@ -5,3 +5,4 @@ windows:
     TopMostRecord.json: ~\Dev\Scoop\persist\flow-launcher\UserData\Settings\TopMostRecord.json
     UserSelectedRecord.json: ~\Dev\Scoop\persist\flow-launcher\UserData\Settings\UserSelectedRecord.json
     Plugins: ~\Dev\Scoop\persist\flow-launcher\UserData\Settings\Plugins
+  installs: scoop install flow-launcher

@@ -38,6 +38,16 @@ linux:
         nushell starship
       pamac install carapace-bin --no-confirm
       {{/if}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -Syu --needed --noconfirm \
+        nushell starship
+      yay -S --needed --noconfirm carapace-bin
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux ARM")}}
+      sudo pacman -Syu --needed --noconfirm \
+        nushell starship
+      yay -S --needed --noconfirm carapace-bin
+      {{/if}}
       chmod +x ~/.dotfiles/nushell/actions/tmux-cleanup
       chmod +x ~/.dotfiles/nushell/actions/tmux-start
       chmod +x ~/.dotfiles/nushell/actions/tmux-message

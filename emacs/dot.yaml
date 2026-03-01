@@ -1,6 +1,14 @@
 linux:
   links:
     doom: ~/.config/doom
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -Syu --needed --noconfirm emacs
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -Syu --needed --noconfirm emacs
+      {{/if}}
 windows:
   links:
     doom: ~/AppData/Roaming/.doom.d
