@@ -18,7 +18,6 @@ return {
 			"yaml",
 			"nu",
 			"rasi",
-			"nu",
 		},
 		-- highlight = {
 		-- 	enable = true,

@@ -24,5 +24,8 @@ linux:
       sudo pacman -Syu neovim --noconfirm
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux")}}
-      sudo pacman -S --needed --noconfirm neovim gcc nodejs npm ripgrep fd lazygit make unzip wget
+      sudo pacman -S --needed --noconfirm neovim gcc nodejs npm ripgrep fd lazygit make unzip wget tree-sitter-cli
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux ARM")}}
+      sudo pacman -S --needed --noconfirm neovim gcc nodejs npm ripgrep fd lazygit make unzip wget tree-sitter-cli
       {{/if}}
