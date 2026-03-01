@@ -4,3 +4,30 @@ linux:
   links:
     config: ~/.config/sway/config
     config.d: ~/.config/sway/config.d
+    ../i3/config.rasi: ~/.config/rofi/config.rasi
+    ../waybar/config.jsonc: ~/.config/waybar/config.jsonc
+    ../waybar/style.css: ~/.config/waybar/style.css
+    wsl/sway-session.sh: |
+      {{#if env.WSL_DISTRO_NAME}}
+      ~/.local/bin/sway-session
+      {{/if}}
+    wsl/sway-session.service: |
+      {{#if env.WSL_DISTRO_NAME}}
+      ~/.config/systemd/user/sway-session.service
+      {{/if}}
+
+  installs:
+    cmd: |
+      {{#if env.WSL_DISTRO_NAME}}
+        {{#if (eq whoami.distro "Arch Linux")}}
+          sudo pacman -Syu --needed --noconfirm \
+            sway \
+            foot \
+            swaybg \
+            xorg-xwayland \
+            wl-clipboard \
+            waybar
+          systemctl --user daemon-reload
+          systemctl --user enable sway-session
+        {{/if}}
+      {{/if}}

@@ -30,6 +30,9 @@ linux:
     actions/tmux-project: ~/.local/bin/tmux-project
   installs:
     cmd: |
+      {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
+      pkg install -y nushell starship carapace
+      {{/if}}
       {{#if (eq whoami.distro "Manjaro Linux")}}
       sudo pacman -Syu --needed --noconfirm \
         nushell starship

@@ -1,0 +1,9 @@
+linux:
+  links:
+    opencode.json: ~/.config/opencode/opencode.json
+    tui.json: ~/.config/opencode/tui.json
+    package.json: ~/.config/opencode/package.json
+  installs:
+    cmd: |
+      bun install -g opencode-ai
+      cd ~/.config/opencode && bun install

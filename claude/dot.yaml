@@ -1,0 +1,23 @@
+global:
+  links:
+    settings.json: ~/.claude/settings.json
+
+linux:
+  links:
+    {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
+    claude-wrapper: /data/data/com.termux/files/usr/bin/claude
+    {{/if}}
+
+  installs:
+    cmd: |
+      {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
+      # Termux install
+      npm install -g @anthropic-ai/claude-code
+
+      # Ensure TMPDIR is set for Claude on Termux
+      mkdir -p /data/data/com.termux/files/usr/tmp
+      chmod +x ~/.dotfiles/claude/claude-wrapper
+      {{else}}
+      # Native Linux install
+      curl -fsSL https://claude.ai/install.sh | sh
+      {{/if}}

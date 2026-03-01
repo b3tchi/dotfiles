@@ -25,6 +25,31 @@ def vars [
 	data | get $profile | get $property
 }
 
+# build SSH host alias: domain for default profiles, domain-user for others
+def ssh_host [
+	profile_name:string
+] {
+	let p = (data | get $profile_name)
+	let is_default = ($p | get -o default | default false)
+	if $is_default { $p.domain } else { $"($p.domain)-($p.user)" }
+}
+
+# build git remote origin URL based on profile protocol
+def remote_url [
+	profile_name:string
+	owner:string
+	name:string
+] {
+	let p = (data | get $profile_name)
+	let protocol = ($p | get -o protocol | default 'ssh')
+	if $protocol == 'https' {
+		$"https://($p.domain)/($owner)/($name).git"
+	} else {
+		let host = (ssh_host $profile_name)
+		$"git@($host):($owner)/($name).git"
+	}
+}
+
 # create new user profile
 export def 'profile create' [
 	name: string           # profile name
@@ -32,6 +57,8 @@ export def 'profile create' [
 	email: string         # GitHub email
 	--domain: string = 'github.com'  # Git domain (default: github.com)
 	--root: string = '~/repos/'      # Repos root path (default: ~/repos/)
+	--default              # use standard git@domain:... format (no user suffix in SSH host)
+	--protocol: string = 'ssh' # remote protocol: ssh or https
 ] {
 	# Read existing profiles
 	mut config = open $env.GWT_CONFIG_PATH
@@ -42,12 +69,19 @@ export def 'profile create' [
 		return
 	}
 
+	if $protocol not-in ['ssh' 'https'] {
+		print $"Invalid protocol '($protocol)'. Must be 'ssh' or 'https'"
+		return
+	}
+
 	# Add new profile
 	$config.profiles = ($config.profiles | insert $name {
 		user: $user
 		email: $email
 		domain: $domain
 		root: $root
+		default: $default
+		protocol: $protocol
 	})
 
 	# Save updated config
@@ -129,12 +163,14 @@ export def 'repo push' [
 		return
 	}
 
-	let home_path = ( if $nu.os-info.name == "windows" { $env.USERPROFILE } else { $env.HOME } )
-
-	let acc = $"github.com-($user)"
-	if ((($home_path | path join .ssh config.d $acc) | path exists) == false) {
-		print "cannot find user ssh key"
-		return
+	let protocol = (vars $profile protocol | default 'ssh')
+	if $protocol == 'ssh' {
+		let home_path = ( if $nu.os-info.name == "windows" { $env.USERPROFILE } else { $env.HOME } )
+		let acc = (ssh_host $profile)
+		if ((($home_path | path join .ssh config.d $acc) | path exists) == false) {
+			print "cannot find user ssh key"
+			return
+		}
 	}
 
 	let gh_user = (gh api user | from json | get login)
@@ -219,7 +255,7 @@ export def 'repo get' [
 	git $"--git-dir=($bare_path)" config user.name $user
 	git $"--git-dir=($bare_path)" config user.email $email
 
-	git $"--git-dir=($bare_path)" remote add origin $"git@($domain)-($user):($owner)/($name).git"
+	git $"--git-dir=($bare_path)" remote add origin (remote_url $profile $owner $name)
 	git $"--git-dir=($bare_path)" fetch
 
 	git $"--git-dir=($bare_path)" worktree add $branch_path $"origin/($default_branch)"
@@ -242,8 +278,11 @@ def save_ssh_config [
 	let config_dir = $root_path | path join .ssh config.d
 	mkdir $config_dir
 
-	let config_file = $config_dir | path join ( [$profile.domain $profile.user] | str join '-' )
-	let config = $"Host ($profile.domain)-($profile.user)
+	let is_default = ($profile | get -o default | default false)
+	let host_alias = if $is_default { $profile.domain } else { $"($profile.domain)-($profile.user)" }
+
+	let config_file = $config_dir | path join $host_alias
+	let config = $"Host ($host_alias)
 	HostName ($profile.domain)
 	User git
 	IdentityFile ($key_file)"
