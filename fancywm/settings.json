@@ -437,7 +437,8 @@
   ],
   "ClassIgnoreList": [
     "OperationStatusWindow",
-    "WindowsForms10.Window.8.app.0.1475d71_r74_ad1"
+    "WindowsForms10.Window.8.app.0.1475d71_r74_ad1",
+    "RAIL_WINDOW"
   ],
   "RemindToRateReview": false,
   "ShowContextHints": true,

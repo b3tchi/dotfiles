@@ -79,7 +79,6 @@ for_window [app_id="waybar"] border none
 
 input * {
 	xkb_layout "us"
-	xkb_variant "dvorak"
 }
 
 ### Gnome settings
