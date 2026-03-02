@@ -7,9 +7,32 @@ const config_path = '~/.config/project/projects.yaml'
 export-env {
 	$env.PROJECT_CONFIG_PATH = ($config_path | path expand)
 
-	# Auto-cd to project directory when PROJECT env var is set (by i3 workspace detection in bashrc)
-	if ($env | get -o PROJECT | is-not-empty) {
-		let project_name = $env.PROJECT
+	# Auto-cd to project directory by detecting WM workspace name
+	# Uses wm-ipc.nu to query i3/sway for the focused workspace,
+	# then looks up the project path in projects.yaml
+	let wm_ipc_path = ('~/.local/bin/wm-ipc.nu' | path expand)
+	let project_name = if ($wm_ipc_path | path exists) {
+		try {
+			const wm_ipc = '~/.local/bin/wm-ipc.nu'
+			use $wm_ipc *
+			let ws_name = (ipc "-t get_workspaces" | from json | where focused == true | first | get name)
+			# Extract project name: "dotfiles_1" -> "dotfiles", "3" -> null
+			if ($ws_name =~ '^.+_\d+$') {
+				$ws_name | parse --regex '^(?P<project>.+)_\d+$' | first | get project
+			} else if ($ws_name =~ '^\d+$') {
+				null
+			} else {
+				$ws_name
+			}
+		} catch {
+			null
+		}
+	} else {
+		# Fallback: check $env.PROJECT (set by bashrc)
+		$env | get -o PROJECT | default null
+	}
+
+	if ($project_name != null) {
 		let path = ($config_path | path expand)
 		if ($path | path exists) {
 			let projects = (open $path | get -o projects | default {})
