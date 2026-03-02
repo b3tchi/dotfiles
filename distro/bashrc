@@ -18,18 +18,9 @@ PS1='[\u@\h \W]\$ '
 if command -v tmux-start &>/dev/null; then
 	# Detect WM project workspace to align tmux session group with project
 	PROJECT=""
-	WM_MSG=""
-	if command -v swaymsg &>/dev/null && pgrep -x sway &>/dev/null; then
-		WM_MSG="swaymsg"
-	elif command -v i3-msg &>/dev/null && pgrep -x i3 &>/dev/null; then
-		WM_MSG="i3-msg"
-	fi
-
-	if [ -n "$WM_MSG" ]; then
-		ws_name=$($WM_MSG -t get_workspaces 2>/dev/null \
-			| grep -o '"name":"[^"]*","visible":true,"focused":true' \
-			| grep -o '"name":"[^"]*"' \
-			| sed 's/"name":"//;s/"//')
+	ws_name=""
+	if command -v wm-ipc.nu &>/dev/null; then
+		ws_name=$(nu -c 'use ~/.local/bin/wm-ipc.nu *; ipc "-t get_workspaces" | from json | where focused == true | first | get name' 2>/dev/null)
 		# Match numbered project workspace: <name>_<digits>
 		if [[ "$ws_name" =~ ^(.+)_[0-9]+$ ]]; then
 			PROJECT="${BASH_REMATCH[1]}"
