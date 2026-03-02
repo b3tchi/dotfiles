@@ -8,7 +8,9 @@
       "Bash(sleep 2:*)",
       "Bash(tmux capture-pane:*)",
       "Bash(bash /data/data/com.termux/files/home/.dotfiles/scripts/termux/start-i3.sh 2>&)",
-      "Bash(tmux list-windows:*)"
+      "Bash(tmux list-windows:*)",
+      "Bash(sleep:*)",
+      "Bash(printf hello-clip:*)"
     ]
   }
 }

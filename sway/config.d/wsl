@@ -1,8 +1,8 @@
-# TODO: clipboard sync tools not yet set up on arch
+# Clipboard sync: Wayland <-> Windows (text + images)
 # When wayland clipboard changes, run clipboard-to-win
-# exec wl-paste --watch clipboard-to-win
+exec wl-paste --watch clipboard-to-win
 # Run win to clipboard service to sync windows clipboard to wayland
-# exec systemctl --user restart win-to-clipboard
+exec systemctl --user restart win-to-clipboard
 
 # Disable Xwayland (WSLg mounts /tmp/.X11-unix read-only, no sticky bit)
 xwayland disable

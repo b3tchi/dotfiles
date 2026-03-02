@@ -21,6 +21,26 @@ linux:
       {{#if env.WSL_DISTRO_NAME}}
       ~/.local/bin/sway-profile
       {{/if}}
+    scripts/clipboard-to-win.nu: |
+      {{#if env.WSL_DISTRO_NAME}}
+      ~/.local/bin/clipboard-to-win
+      {{/if}}
+    scripts/clipboard-to-win-image.ps1: |
+      {{#if env.WSL_DISTRO_NAME}}
+      ~/.local/bin/clipboard-to-win-image.ps1
+      {{/if}}
+    scripts/win-to-clipboard.nu: |
+      {{#if env.WSL_DISTRO_NAME}}
+      ~/.local/bin/win-to-clipboard
+      {{/if}}
+    scripts/win-clipboard-monitor.ps1: |
+      {{#if env.WSL_DISTRO_NAME}}
+      ~/.local/bin/win-clipboard-monitor.ps1
+      {{/if}}
+    wsl/win-to-clipboard.service: |
+      {{#if env.WSL_DISTRO_NAME}}
+      ~/.config/systemd/user/win-to-clipboard.service
+      {{/if}}
 
   installs:
     cmd: |
