@@ -16,8 +16,12 @@ def main [command?: string] {
 
 # Detect which WM is running and return the IPC command name
 export def ipc-cmd [] {
-	# Check sway first (if both are somehow running, prefer the Wayland session)
-	if (^pgrep -x sway | complete | get exit_code) == 0 {
+	if (which pgrep | is-empty) {
+		return null
+	}
+	# Check sway first — require SWAYSOCK to avoid errors in terminals
+	# without a sway connection (e.g. WezTerm -> WSL where sway runs separately)
+	if ($env | get -o SWAYSOCK | is-not-empty) and (^pgrep -x sway | complete | get exit_code) == 0 {
 		"swaymsg"
 	} else if (^pgrep -x i3 | complete | get exit_code) == 0 {
 		"i3-msg"
