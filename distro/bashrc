@@ -16,10 +16,17 @@ PS1='[\u@\h \W]\$ '
 
 # Auto-start tmux session (script symlinked to ~/.local/bin via rotz)
 if command -v tmux-start &>/dev/null; then
-	# Detect i3 project workspace to align tmux session group with project
+	# Detect WM project workspace to align tmux session group with project
 	PROJECT=""
-	if command -v i3-msg &>/dev/null; then
-		ws_name=$(i3-msg -t get_workspaces 2>/dev/null \
+	WM_MSG=""
+	if command -v swaymsg &>/dev/null && pgrep -x sway &>/dev/null; then
+		WM_MSG="swaymsg"
+	elif command -v i3-msg &>/dev/null && pgrep -x i3 &>/dev/null; then
+		WM_MSG="i3-msg"
+	fi
+
+	if [ -n "$WM_MSG" ]; then
+		ws_name=$($WM_MSG -t get_workspaces 2>/dev/null \
 			| grep -o '"name":"[^"]*","visible":true,"focused":true' \
 			| grep -o '"name":"[^"]*"' \
 			| sed 's/"name":"//;s/"//')

@@ -28,6 +28,10 @@ linux:
     actions/tmux-start: ~/.local/bin/tmux-start
     actions/tmux-message: ~/.local/bin/tmux-message
     actions/tmux-project: ~/.local/bin/tmux-project
+    actions/wm-ipc.nu: ~/.local/bin/wm-ipc.nu
+    actions/ws-list.nu: ~/.local/bin/ws-list.nu
+    actions/ws-switch.nu: ~/.local/bin/ws-switch.nu
+    actions/project-picker: ~/.local/bin/project-picker
   installs:
     cmd: |
       {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
@@ -52,3 +56,7 @@ linux:
       chmod +x ~/.dotfiles/nushell/actions/tmux-start
       chmod +x ~/.dotfiles/nushell/actions/tmux-message
       chmod +x ~/.dotfiles/nushell/actions/tmux-project
+      chmod +x ~/.dotfiles/nushell/actions/wm-ipc.nu
+      chmod +x ~/.dotfiles/nushell/actions/ws-list.nu
+      chmod +x ~/.dotfiles/nushell/actions/ws-switch.nu
+      chmod +x ~/.dotfiles/nushell/actions/project-picker

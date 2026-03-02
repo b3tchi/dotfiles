@@ -1,12 +1,15 @@
 #!/usr/bin/env nu
 
-# Switch to workspace by display order (matching Polybar i3 module with index-sort)
+# Switch to workspace by display order (matching bar module with index-sort)
 # Usage: ws-switch.nu <index>         — switch to Nth workspace (1-based)
 # Usage: ws-switch.nu <index> move    — move container to Nth workspace
 # Usage: ws-switch.nu <index> follow  — move container to Nth workspace and follow
 
-const ws_list = '~/.config/polybar/scripts/ws-list.nu'
+const ws_list = '~/.local/bin/ws-list.nu'
 use $ws_list *
+
+const wm_ipc = '~/.local/bin/wm-ipc.nu'
+use $wm_ipc *
 
 const config_path = '~/.config/project/projects.yaml'
 
@@ -24,7 +27,7 @@ def normalize-all [] {
 }
 
 def main [
-	index: int       # 1-based position in Polybar display order
+	index: int       # 1-based position in bar display order
 	action?: string  # "move" to move container, "follow" to move and follow
 ] {
 	# normalize orphaned _N names before resolving index
@@ -40,16 +43,16 @@ def main [
 
 	match $action {
 		"move" => {
-			i3-msg $"move container to workspace ($target.name)" | ignore
+			ipc $"move container to workspace ($target.name)" | ignore
 			normalize-all
 		},
 		"follow" => {
-			i3-msg $"move container to workspace ($target.name); workspace ($target.name)" | ignore
+			ipc $"move container to workspace ($target.name); workspace ($target.name)" | ignore
 			normalize-all
 		},
 		_ => {
 			if not $target.focused {
-				i3-msg $"workspace ($target.name)" | ignore
+				ipc $"workspace ($target.name)" | ignore
 			}
 		}
 	}

@@ -152,7 +152,7 @@ bindsym $mod+Ctrl+Right workspace next
 bindsym $mod+Ctrl+Left workspace prev
 
 # Workspace switching by Polybar display order (supports named project workspaces)
-set $ws_switch ~/.config/polybar/scripts/ws-switch.nu
+set $ws_switch ~/.local/bin/ws-switch.nu
 
 # switch to workspace by display position
 bindsym $mod+1 exec --no-startup-id $ws_switch 1
@@ -257,8 +257,8 @@ mode "$mode_system" {
 bindsym $mod+Shift+n exec i3-input -f "xft:Iosevka" -F 'name workspace to "%s"' -P 'Workspace name: '
 
 # Project workspace picker (rofi)
-bindsym $mod+p exec --no-startup-id ~/.config/polybar/scripts/project-picker.nu
-bindsym $mod+Shift+p exec --no-startup-id ~/.config/polybar/scripts/project-picker.nu --new
+bindsym $mod+p exec --no-startup-id ~/.local/bin/project-picker
+bindsym $mod+Shift+p exec --no-startup-id ~/.local/bin/project-picker --new
 
 # Resize window (you can also use the mouse for that)
 bindsym $mod+r mode "resize"
