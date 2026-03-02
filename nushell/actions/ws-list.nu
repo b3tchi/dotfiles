@@ -12,7 +12,7 @@ use $wm_ipc *
 
 # Get all workspaces sorted in display order (by num ascending)
 export def sorted [] {
-	ipc -t get_workspaces | from json | sort-by num
+	ipc "-t get_workspaces" | from json | sort-by num
 }
 
 # Get the focused workspace

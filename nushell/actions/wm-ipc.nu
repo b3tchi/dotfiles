@@ -16,9 +16,12 @@ export def ipc-cmd [] {
 }
 
 # Run a WM IPC command with the given arguments
+# Pass the full command as a single string, e.g.: ipc "workspace dotfiles"
 # Returns null if no WM detected
-export def ipc [...args: string] {
+export def ipc [command: string] {
 	let cmd = ipc-cmd
 	if $cmd == null { return null }
-	^$cmd ...$args
+	# Split command string into args to pass to the binary
+	let parts = ($command | split row " ")
+	^$cmd ...$parts
 }
