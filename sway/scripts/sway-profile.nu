@@ -6,6 +6,15 @@
 
 const PROFILES_PATH = "~/.config/sway/profiles.yaml"
 
+# Find active sway IPC socket (SWAYSOCK may not be set in all shells)
+def find-swaysock [] {
+  if ($env.SWAYSOCK? | is-not-empty) { return $env.SWAYSOCK }
+
+  glob $"/run/user/(id -u)/sway-ipc.*.sock"
+    | where { |s| (do { $env.SWAYSOCK = $s; swaymsg -t get_version } | complete).exit_code == 0 }
+    | first
+}
+
 def get-profiles [] {
   open ($PROFILES_PATH | path expand)
 }
@@ -28,6 +37,7 @@ def "main --list" [] {
 def main [
   profile?: string  # Profile name (office, laptop, home-office). Omit to list profiles.
 ] {
+  $env.SWAYSOCK = (find-swaysock)
   let profiles = get-profiles
 
   if ($profile == null) {
