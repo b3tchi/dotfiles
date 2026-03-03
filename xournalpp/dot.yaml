@@ -11,3 +11,4 @@ linux:
       {{#if (eq whoami.distro "Arch Linux")}}
       sudo pacman -Syu --needed --noconfirm xournalpp
       {{/if}}
+      rotz link xournalpp --force

@@ -57,3 +57,4 @@ linux:
           systemctl --user enable sway-session
         {{/if}}
       {{/if}}
+      rotz link sway --force

@@ -10,3 +10,4 @@ linux:
       {{#if (eq whoami.distro "Arch Linux")}}
       sudo pacman -Syu --needed --noconfirm kitty
       {{/if}}
+      rotz link kitty --force

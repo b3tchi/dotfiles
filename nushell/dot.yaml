@@ -60,3 +60,4 @@ linux:
       chmod +x ~/.dotfiles/nushell/actions/ws-list.nu
       chmod +x ~/.dotfiles/nushell/actions/ws-switch.nu
       chmod +x ~/.dotfiles/nushell/actions/project-picker
+      rotz link nushell --force

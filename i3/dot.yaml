@@ -28,3 +28,4 @@ linux:
       {{/if}}
       chmod +x ~/.dotfiles/i3/launch.sh
       chmod +x ~/.dotfiles/i3/scripts/*.nu
+      rotz link i3 --force
