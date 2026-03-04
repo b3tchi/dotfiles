@@ -1,0 +1,21 @@
+windows:
+  installs:
+    cmd: |
+      scoop install main/d2
+
+linux:
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -Syu --needed --noconfirm d2
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -Syu --needed --noconfirm d2
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux ARM")}}
+      sudo pacman -Syu --needed --noconfirm d2
+      {{/if}}
+      {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
+      curl -fsSL https://d2lang.com/install.sh | sh -s --
+      {{/if}}
+      rotz link d2 --force
