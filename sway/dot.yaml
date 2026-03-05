@@ -21,6 +21,14 @@ linux:
       {{#if env.WSL_DISTRO_NAME}}
       ~/.local/bin/sway-profile
       {{/if}}
+    ../nushell/actions/sway-save-state: |
+      {{#if env.WSL_DISTRO_NAME}}
+      ~/.local/bin/sway-save-state
+      {{/if}}
+    ../nushell/actions/sway-restore: |
+      {{#if env.WSL_DISTRO_NAME}}
+      ~/.local/bin/sway-restore
+      {{/if}}
     scripts/clipboard-to-win.nu: |
       {{#if env.WSL_DISTRO_NAME}}
       ~/.local/bin/clipboard-to-win

@@ -1,0 +1,3 @@
+linux:
+  links:
+    foot.ini: ~/.config/foot/foot.ini

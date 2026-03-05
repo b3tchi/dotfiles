@@ -1,0 +1,96 @@
+#!/usr/bin/env nu
+# Restore sway workspaces + terminals from saved state after sway restart
+# Each terminal auto-attaches to the correct tmux session via bashrc
+# Then switches each terminal to its saved tmux window
+
+def main [] {
+    let state_file = ("~/.cache/sway-state.json" | path expand)
+    if not ($state_file | path exists) {
+        print "No saved state found"
+        return
+    }
+
+    let state = (open $state_file)
+    let workspaces = ($state | get -o workspaces | default [])
+
+    if ($workspaces | is-empty) {
+        print "No workspaces to restore"
+        return
+    }
+
+    # Check if tmux is running (sessions must survive for restore to be useful)
+    if (tmux list-sessions | complete | get exit_code) != 0 {
+        print "No tmux sessions running, skipping restore"
+        return
+    }
+
+    # Disable cleanup hooks during restore to prevent race conditions
+    tmux set-hook -gu client-detached
+    tmux set-hook -gu after-select-window
+
+    for ws in $workspaces {
+        let ws_name = ($ws | get -o name | default "")
+        if ($ws_name | is-empty) { continue }
+
+        let terminals = ($ws | get -o terminals | default [])
+
+        print $"Restoring workspace: ($ws_name)"
+        ^swaymsg $"workspace ($ws_name)"
+
+        if ($terminals | is-empty) {
+            ^swaymsg exec foot
+            sleep 1sec
+            continue
+        }
+
+        # Snapshot session names before launching terminals
+        let sessions_before = (tmux list-sessions -F "#{session_name}" | lines | where $it != "")
+
+        # Launch one foot terminal per saved terminal
+        for term in $terminals {
+            ^swaymsg exec foot
+            sleep 1sec
+        }
+
+        # Wait for all terminals to attach to tmux
+        sleep 2sec
+
+        # Find newly created session views
+        let sessions_after = (tmux list-sessions -F "#{session_name}" | lines | where $it != "")
+        mut new_sessions = ($sessions_after | where { |s| $s not-in $sessions_before })
+
+        # Match new sessions to terminals and switch windows
+        for term in $terminals {
+            let session = ($term | get -o session | default "")
+            let window = ($term | get -o window | default null)
+            if ($session | is-empty) or $window == null { continue }
+
+            # Find new sessions belonging to this group
+            let new_in_group = ($new_sessions | where { |s|
+                let group = ($s | parse -r '^(?P<group>.+)_\d+$'
+                    | get -o 0 | get -o group | default $s)
+                $group == $session
+            })
+
+            if ($new_in_group | is-not-empty) {
+                let target = ($new_in_group | first)
+                print $"  Switching ($target) to window ($window)"
+                tmux select-window -t $"($target):($window)"
+                # Remove consumed session so next terminal gets a different one
+                $new_sessions = ($new_sessions | where { |s| $s != $target })
+            }
+        }
+    }
+
+    # Re-enable cleanup hooks
+    tmux set-hook -g client-detached 'run-shell "~/.local/bin/tmux-cleanup"'
+    tmux set-hook -g after-select-window 'run-shell "~/.local/bin/tmux-cleanup"'
+
+    # Switch back to first workspace
+    let first_name = ($workspaces | first | get -o name | default "")
+    if ($first_name | is-not-empty) {
+        ^swaymsg $"workspace ($first_name)"
+    }
+
+    print "Restore complete"
+}

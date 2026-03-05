@@ -10,7 +10,10 @@
       "Bash(bash /data/data/com.termux/files/home/.dotfiles/scripts/termux/start-i3.sh 2>&)",
       "Bash(tmux list-windows:*)",
       "Bash(sleep:*)",
-      "Bash(printf hello-clip:*)"
+      "Bash(printf hello-clip:*)",
+      "Bash(systemctl:*)",
+      "Bash(SWAYSOCK=/run/user/1000/sway-ipc.1000.333813.sock swaymsg:*)",
+      "Bash(tmux list-sessions:*)"
     ]
   }
 }

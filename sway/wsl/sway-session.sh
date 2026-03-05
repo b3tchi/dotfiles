@@ -8,7 +8,8 @@ export WAYLAND_DISPLAY=wayland-0
 export LANG=en_US.UTF-8
 
 LOG="/tmp/sway-session.log"
-DESIRED_OUTPUTS=2  # 1 for user + 1 hidden keepalive
+DESIRED_OUTPUTS=1
+export PATH="$HOME/.local/bin:$PATH"
 
 log() {
   echo "$(date): $*" | tee -a "$LOG"
@@ -132,15 +133,33 @@ watch_profile() {
   done
 }
 
+# Save workspace state periodically for restore after crash
+watch_state() {
+  local sway_pid="$1"
+  local swaysock="${XDG_RUNTIME_DIR}/sway-ipc.${UID_NUM}.${sway_pid}.sock"
+
+  while kill -0 "$sway_pid" 2>/dev/null; do
+    SWAYSOCK="$swaysock" sway-save-state 2>/dev/null
+    sleep 5
+  done
+}
+
+# Restore previous session if state exists
+SWAYSOCK="$SWAYSOCK" sway-restore 2>/dev/null &
+wait $!
+
 watch_outputs "$SWAY_PID" &
 WATCH_PID=$!
 
 watch_profile "$SWAY_PID" &
 PROFILE_PID=$!
 
+watch_state "$SWAY_PID" &
+STATE_PID=$!
+
 wait $SWAY_PID
 SWAY_EXIT=$?
-kill "$WATCH_PID" "$PROFILE_PID" 2>/dev/null
-wait "$WATCH_PID" "$PROFILE_PID" 2>/dev/null
+kill "$WATCH_PID" "$PROFILE_PID" "$STATE_PID" 2>/dev/null
+wait "$WATCH_PID" "$PROFILE_PID" "$STATE_PID" 2>/dev/null
 log "Sway exited (code: $SWAY_EXIT)."
 exit $SWAY_EXIT
