@@ -7,6 +7,7 @@ export-env {
 }
 
 def data [] {
+	if not ($env.GWT_CONFIG_PATH | path exists) { return {} }
 	open $env.GWT_CONFIG_PATH | get profiles
 }
 
@@ -60,7 +61,11 @@ export def 'profile create' [
 	--default              # use standard git@domain:... format (no user suffix in SSH host)
 	--protocol: string = 'ssh' # remote protocol: ssh or https
 ] {
-	# Read existing profiles
+	# Read existing profiles or initialize empty config
+	if not ($env.GWT_CONFIG_PATH | path exists) {
+		mkdir ($env.GWT_CONFIG_PATH | path dirname)
+		{profiles: {}} | to yaml | save $env.GWT_CONFIG_PATH
+	}
 	mut config = open $env.GWT_CONFIG_PATH
 
 	# Check if profile already exists
@@ -245,12 +250,14 @@ export def 'repo get' [
 	}
 
 	let owner = (if $owner == null { $user } else {$owner})
-	let default_branch = (gh repo view $"($owner)/($name)" --json defaultBranchRef | from json | get defaultBranchRef.name)
+	let repo_info = (gh repo view $"($owner)/($name)" --json defaultBranchRef | from json)
+	let raw_branch = ($repo_info | get -o defaultBranchRef.name | default '')
+	let default_branch = (if $raw_branch == '' { 'main' } else { $raw_branch })
 	let current_path =  $repos_root | path join $owner $name
 	let branch_path = $current_path | path join $default_branch
 	let bare_path = $current_path | path join default
 
-	# create ne repository
+	# create bare repository
 	git init --bare $bare_path $"--initial-branch=($default_branch)"
 	git $"--git-dir=($bare_path)" config user.name $user
 	git $"--git-dir=($bare_path)" config user.email $email
@@ -258,10 +265,24 @@ export def 'repo get' [
 	git $"--git-dir=($bare_path)" remote add origin (remote_url $profile $owner $name)
 	git $"--git-dir=($bare_path)" fetch
 
-	git $"--git-dir=($bare_path)" worktree add $branch_path $"origin/($default_branch)"
-	cd $branch_path # for some reason i can't use --work-tree=... checkout will not attach to branch
-	git checkout -b $default_branch
-	git pull --set-upstream origin $default_branch
+	# check if remote has the default branch (empty repo won't)
+	let remote_refs = (git $"--git-dir=($bare_path)" branch -r | str trim | lines | str trim)
+	let has_remote_branch = ($remote_refs | any {|r| $r =~ $"origin/($default_branch)"})
+
+	if $has_remote_branch {
+		git $"--git-dir=($bare_path)" worktree add $branch_path $"origin/($default_branch)"
+		cd $branch_path # for some reason i can't use --work-tree=... checkout will not attach to branch
+		git checkout -b $default_branch
+		git pull --set-upstream origin $default_branch
+	} else {
+		# empty remote repo — create initial branch with a commit
+		git $"--git-dir=($bare_path)" worktree add $branch_path
+		cd $branch_path
+		touch ($branch_path | path join README.md)
+		git add README.md
+		git commit -m "initial commit"
+		git push --set-upstream origin $default_branch
+	}
 }
 
 # private helper: save SSH config in config.d with proper naming
