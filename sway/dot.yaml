@@ -13,6 +13,42 @@ linux:
       {{#if env.WSL_DISTRO_NAME}}
       ~/.config/systemd/user/sway-session.service
       {{/if}}
+    profiles.yaml: |
+      {{#if env.WSL_DISTRO_NAME}}
+      ~/.config/sway/profiles.yaml
+      {{/if}}
+    scripts/sway-profile.nu: |
+      {{#if env.WSL_DISTRO_NAME}}
+      ~/.local/bin/sway-profile
+      {{/if}}
+    ../nushell/actions/sway-save-state: |
+      {{#if env.WSL_DISTRO_NAME}}
+      ~/.local/bin/sway-save-state
+      {{/if}}
+    ../nushell/actions/sway-restore: |
+      {{#if env.WSL_DISTRO_NAME}}
+      ~/.local/bin/sway-restore
+      {{/if}}
+    scripts/clipboard-to-win.nu: |
+      {{#if env.WSL_DISTRO_NAME}}
+      ~/.local/bin/clipboard-to-win
+      {{/if}}
+    scripts/clipboard-to-win-image.ps1: |
+      {{#if env.WSL_DISTRO_NAME}}
+      ~/.local/bin/clipboard-to-win-image.ps1
+      {{/if}}
+    scripts/win-to-clipboard.nu: |
+      {{#if env.WSL_DISTRO_NAME}}
+      ~/.local/bin/win-to-clipboard
+      {{/if}}
+    scripts/win-clipboard-monitor.ps1: |
+      {{#if env.WSL_DISTRO_NAME}}
+      ~/.local/bin/win-clipboard-monitor.ps1
+      {{/if}}
+    wsl/win-to-clipboard.service: |
+      {{#if env.WSL_DISTRO_NAME}}
+      ~/.config/systemd/user/win-to-clipboard.service
+      {{/if}}
 
   installs:
     cmd: |
@@ -29,3 +65,4 @@ linux:
           systemctl --user enable sway-session
         {{/if}}
       {{/if}}
+      rotz link sway --force

@@ -32,3 +32,4 @@ linux:
       {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
       pkg install -y neovim nodejs
       {{/if}}
+      rotz link nvim --force

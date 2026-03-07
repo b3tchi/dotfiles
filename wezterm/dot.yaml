@@ -22,3 +22,4 @@ linux:
       {{#if (eq whoami.distro "Arch Linux")}}
       test -d ~/.config/wezterm/wezterm-session-manager || git clone https://github.com/danielcopper/wezterm-session-manager.git ~/.config/wezterm/wezterm-session-manager
       {{/if}}
+      rotz link wezterm --force

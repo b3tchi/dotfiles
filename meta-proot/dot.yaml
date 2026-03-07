@@ -7,6 +7,5 @@ depends:
   - tmux
   - nvim
   - lazygit
-  - claude
   - opencode
   - i3

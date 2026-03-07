@@ -9,6 +9,7 @@ linux:
       {{#if (eq whoami.distro "Arch Linux")}}
       sudo pacman -Syu --needed --noconfirm emacs
       {{/if}}
+      rotz link emacs --force
 windows:
   links:
     doom: ~/AppData/Roaming/.doom.d

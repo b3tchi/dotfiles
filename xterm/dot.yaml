@@ -9,3 +9,4 @@ linux:
       {{#if (eq whoami.distro "Arch Linux")}}
       sudo pacman -Syu --needed --noconfirm xterm
       {{/if}}
+      rotz link xterm --force

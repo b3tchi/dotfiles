@@ -1,16 +1,18 @@
 #!/usr/bin/env nu
 
-# Shared i3 workspace utilities
-# Used by ws-switch.nu and project-picker.nu
+# Shared WM workspace utilities (works with i3 and sway)
+# Used by ws-switch.nu and project-picker
 #
 # Workspace naming convention:
 #   Single workspace:   "projectname"  (no suffix)
 #   Multiple:           "projectname_1", "projectname_2", ...
 
-# Get all i3 workspaces sorted in Polybar display order
-# Polybar index-sort sorts by num ascending, preserving i3 order for equal num
+const wm_ipc = '~/.local/bin/wm-ipc.nu'
+use $wm_ipc *
+
+# Get all workspaces sorted in display order (by num ascending)
 export def sorted [] {
-	i3-msg -t get_workspaces | from json | sort-by num
+	ipc "-t get_workspaces" | from json | sort-by num
 }
 
 # Get the focused workspace
@@ -18,7 +20,7 @@ export def focused [] {
 	sorted | where focused == true | first
 }
 
-# Find existing i3 workspaces for a project
+# Find existing workspaces for a project
 # Matches both "name" (single) and "name_N" (multiple) patterns
 export def for-project [name: string] {
 	sorted | where { |ws| $ws.name == $name or $ws.name =~ $"^($name)_\\d+$" }
@@ -31,7 +33,7 @@ export def normalize [name: string] {
 	if ($existing | length) == 1 {
 		let ws = ($existing | first | get name)
 		if $ws != $name {
-			i3-msg $"rename workspace \"($ws)\" to \"($name)\""
+			ipc $"rename workspace \"($ws)\" to \"($name)\""
 		}
 	}
 }

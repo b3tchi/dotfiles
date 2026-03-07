@@ -44,6 +44,9 @@ linux:
         sudo pamac update
         sudo pamac upgrade
         sudo pamac install dasel-bin --no-confirm
+
+        curl -fsSL https://bun.sh/install | bash
+        ln -sf ~/.bun/bin/bun ~/.local/bin/bun
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux ARM")}}
         sudo pacman -Syu --needed --noconfirm \
@@ -53,8 +56,17 @@ linux:
           bat \
           fd ripgrep fzf sd \
           go rust nodejs \
-          go-yq dasel \
+          go-yq \
           ttf-iosevka-nerd ttf-iosevkaterm-nerd ttc-iosevka
+
+        sudo pacman -S --needed --noconfirm git base-devel
+        if [ ! -d ~/yay ]; then
+          git clone https://aur.archlinux.org/yay.git ~/yay
+        fi
+        cd ~/yay && makepkg -si --noconfirm && cd -
+
+        curl -fsSL https://bun.sh/install | bash
+        ln -sf ~/.bun/bin/bun ~/.local/bin/bun
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux")}}
         sudo pacman -Syu --needed --noconfirm \
@@ -73,4 +85,8 @@ linux:
           git clone https://aur.archlinux.org/yay.git ~/yay
         fi
         cd ~/yay && makepkg -si --noconfirm && cd -
+
+        curl -fsSL https://bun.sh/install | bash
+        ln -sf ~/.bun/bin/bun ~/.local/bin/bun
       {{/if}}
+      rotz link distro --force

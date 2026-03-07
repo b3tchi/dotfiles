@@ -12,3 +12,4 @@ linux:
       {{#if (eq whoami.distro "Arch Linux")}}
       sudo pacman -Syu --needed --noconfirm evolution
       {{/if}}
+      rotz link evolution --force

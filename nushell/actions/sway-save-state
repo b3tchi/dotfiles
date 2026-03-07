@@ -1,0 +1,96 @@
+#!/usr/bin/env nu
+# Save current sway workspace state to cache for restore after crash
+# Captures workspace names and each foot terminal's active tmux window
+
+const wm_ipc = '~/.local/bin/wm-ipc.nu'
+use $wm_ipc *
+
+# Recursively collect foot terminal PIDs from a sway tree node
+def collect-foot-pids [node: record] {
+    mut pids = []
+
+    if ($node | get -o app_id | default "") == "foot" {
+        let pid = ($node | get -o pid | default 0)
+        if $pid > 0 {
+            $pids = ($pids | append $pid)
+        }
+    }
+
+    for child in ($node | get -o nodes | default []) {
+        $pids = ($pids | append (collect-foot-pids $child))
+    }
+    for child in ($node | get -o floating_nodes | default []) {
+        $pids = ($pids | append (collect-foot-pids $child))
+    }
+
+    $pids
+}
+
+# Check if candidate_pid is a descendant of ancestor_pid via /proc
+def is-descendant [ancestor_pid: int, candidate_pid: int] {
+    mut pid = $candidate_pid
+    loop {
+        if $pid == $ancestor_pid { return true }
+        if $pid <= 1 { return false }
+        let ppid_file = $"/proc/($pid)/stat"
+        if not ($ppid_file | path exists) { return false }
+        let stat = (open $ppid_file --raw)
+        let after_comm = ($stat | str index-of ")" | $in + 2)
+        let fields = ($stat | str substring $after_comm.. | str trim | split row -r '\s+')
+        $pid = ($fields | get 1 | into int)
+    }
+}
+
+# Find tmux client info for a single foot PID
+def find-tmux-client [foot_pid: int, clients: list<record>] {
+    for client in $clients {
+        if (is-descendant $foot_pid $client.pid) {
+            let group = ($client.session | parse -r '^(?P<group>.+)_\d+$'
+                | get -o 0 | get -o group | default $client.session)
+            return { session: $group, window: $client.window }
+        }
+    }
+    return {}
+}
+
+def main [] {
+    let tree = (ipc "-t get_tree" | from json)
+
+    # Extract workspace → foot PIDs from sway tree
+    let ws_terminals = ($tree | get -o nodes | default [] | each { |output|
+        $output | get -o nodes | default [] | where { |ws|
+            ($ws | get -o type) == "workspace" and ($ws | get -o name | default "") != "__i3_scratch"
+        } | each { |ws|
+            let pids = (collect-foot-pids $ws)
+            if ($pids | is-not-empty) {
+                { workspace: ($ws | get name), pids: $pids }
+            }
+        }
+    } | flatten | where { |r| $r != null })
+
+    # Get tmux clients: pid, session, window
+    let tmux_result = (do { tmux list-clients -F "#{client_pid} #{session_name} #{window_index}" } | complete)
+    if $tmux_result.exit_code != 0 {
+        let workspaces = ($ws_terminals | each { |wt| { name: $wt.workspace, terminals: [] } })
+        { workspaces: $workspaces } | to json | save -f ("~/.cache/sway-state.json" | path expand)
+        return
+    }
+
+    let clients = ($tmux_result.stdout | lines | where $it != "" | each { |line|
+        let parts = ($line | split row " ")
+        { pid: ($parts.0 | into int), session: $parts.1, window: ($parts.2 | into int) }
+    })
+
+    let workspaces = ($ws_terminals | each { |wt|
+        let terminals = ($wt.pids | each { |foot_pid|
+            let match = (find-tmux-client $foot_pid $clients)
+            if ($match | is-not-empty) {
+                { session: $match.session, window: $match.window }
+            }
+        } | where { |t| $t != null })
+
+        { name: $wt.workspace, terminals: $terminals }
+    })
+
+    { workspaces: $workspaces } | to json | save -f ("~/.cache/sway-state.json" | path expand)
+}

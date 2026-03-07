@@ -8,7 +8,8 @@ export WAYLAND_DISPLAY=wayland-0
 export LANG=en_US.UTF-8
 
 LOG="/tmp/sway-session.log"
-DESIRED_OUTPUTS=2  # 1 for user + 1 hidden keepalive
+DESIRED_OUTPUTS=1
+export PATH="$HOME/.local/bin:$PATH"
 
 log() {
   echo "$(date): $*" | tee -a "$LOG"
@@ -26,11 +27,11 @@ setup_wslg() {
   ln -sf /mnt/wslg/runtime-dir/wayland-0.lock "${XDG_RUNTIME_DIR}/wayland-0.lock"
 }
 
-# Count active sway outputs
+# Count active sway outputs (only counts outputs with "active": true)
 count_outputs() {
   local swaysock="$1"
   SWAYSOCK="$swaysock" swaymsg -t get_outputs 2>/dev/null \
-    | grep -c '"name"'
+    | grep -c '"active": true'
 }
 
 # Monitor outputs and maintain the desired count.
@@ -53,100 +54,47 @@ watch_outputs() {
     current=$(count_outputs "$swaysock")
 
     if [[ -z "$current" || "$current" -eq 0 ]]; then
-      # All outputs gone - WSLg fully disconnected, nothing we can do
-      log "All outputs lost. Sway will exit on its own."
-      return
-    fi
-
-    if [[ "$current" -lt "$DESIRED_OUTPUTS" ]]; then
+      # All outputs gone - WSLg disconnected, but may reconnect
+      log "All outputs lost. Waiting for WSLg to reconnect..."
+      sleep 5
+    elif [[ "$current" -lt "$DESIRED_OUTPUTS" ]]; then
       local missing=$(( DESIRED_OUTPUTS - current ))
       log "Output lost (have $current, want $DESIRED_OUTPUTS). Creating $missing replacement(s)..."
       for ((i = 0; i < missing; i++)); do
         SWAYSOCK="$swaysock" swaymsg create_output 2>/dev/null
       done
-      # Match new output size and reposition all windows
-      sleep 1
-      SWAYSOCK="$swaysock" swaymsg output '*' resolution "$(detect_monitors | head -1)" 2>/dev/null
-      position_windows
+      sleep 2
+    else
+      sleep 2
     fi
-
-    sleep 2
   done
 }
 
-# Detect Windows monitor resolutions via PowerShell
-detect_monitors() {
-  local ps="/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
-  /init "$ps" -Command '
-    Add-Type -AssemblyName System.Windows.Forms
-    [System.Windows.Forms.Screen]::AllScreens | ForEach-Object {
-      [string]$_.Bounds.Width + "x" + [string]$_.Bounds.Height
-    }
-  ' 2>/dev/null | tr -d '\r' | grep -v '^$'
-}
+# Profile-based resolution: reads from ~/.config/sway/profile
+# Profiles: laptop (1920x1200), office (2560x1440), home-office (3840x2160)
+get_profile_resolution() {
+  local profile_file="${HOME}/.config/sway/profile"
+  local profile="laptop"
 
-# Set sway output resolutions to match Windows monitors
-apply_monitor_config() {
-  local swaysock="$1"
-  local resolutions
-  local attempts=0
-
-  while [[ $attempts -lt 5 ]]; do
-    mapfile -t resolutions < <(detect_monitors)
-    [[ ${#resolutions[@]} -gt 0 ]] && break
-    attempts=$((attempts + 1))
-    log "Monitor detection attempt $attempts failed, retrying..."
-    sleep 2
-  done
-
-  if [[ ${#resolutions[@]} -eq 0 ]]; then
-    log "Could not detect Windows monitors after $attempts attempts"
-    return
+  if [[ -f "$profile_file" ]]; then
+    profile=$(cat "$profile_file" | tr -d '[:space:]')
   fi
 
-  # Set all outputs to primary monitor resolution
-  log "Setting all outputs to ${resolutions[0]}"
-  SWAYSOCK="$swaysock" swaymsg output '*' resolution "${resolutions[0]}" 2>/dev/null
+  case "$profile" in
+    laptop)      echo "1920x1200" ;;
+    office)      echo "2560x1440" ;;
+    home-office) echo "3840x2160" ;;
+    *)           log "Unknown profile '$profile', defaulting to laptop"
+                 echo "1920x1200" ;;
+  esac
 }
 
-# Move all WSLg RAIL windows to 0,0 on the Windows desktop
-position_windows() {
-  local ps="/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
-  /init "$ps" -Command '
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-using System.Text;
-public class WinPos {
-    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
-    [DllImport("user32.dll")] public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
-    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
-    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
-    [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
-    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
-    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
-    [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
-}
-"@
-$msrdcPids = @((Get-Process -Name msrdc -ErrorAction SilentlyContinue).Id)
-[WinPos]::EnumWindows({param($hWnd, $lParam)
-    $procId = [uint32]0
-    [WinPos]::GetWindowThreadProcessId($hWnd, [ref]$procId)
-    if ($msrdcPids -contains $procId -and [WinPos]::IsWindowVisible($hWnd)) {
-        $sb = New-Object System.Text.StringBuilder(256)
-        [WinPos]::GetClassName($hWnd, $sb, 256)
-        if ($sb.ToString() -eq "RAIL_WINDOW") {
-            $rect = New-Object WinPos+RECT
-            [WinPos]::GetWindowRect($hWnd, [ref]$rect)
-            $w = $rect.Right - $rect.Left
-            $h = $rect.Bottom - $rect.Top
-            [WinPos]::MoveWindow($hWnd, 0, 0, $w, $h, $true)
-        }
-    }
-    return $true
-}, [IntPtr]::Zero) | Out-Null
-' 2>/dev/null
-  log "Positioned WSLg windows to 0,0"
+apply_monitor_config() {
+  local swaysock="$1"
+  local res
+  res=$(get_profile_resolution)
+  log "Profile '$(cat "${HOME}/.config/sway/profile" 2>/dev/null || echo laptop)': setting all outputs to ${res}"
+  SWAYSOCK="$swaysock" swaymsg output '*' resolution "${res}" 2>/dev/null
 }
 
 setup_wslg
@@ -165,14 +113,53 @@ for ((i = 1; i < DESIRED_OUTPUTS; i++)); do
   SWAYSOCK="$SWAYSOCK" swaymsg create_output 2>/dev/null
 done
 
-# Position WSLg windows at top-left of screen
-sleep 1
-position_windows
+# Watch profile file for changes and apply resolution immediately
+watch_profile() {
+  local sway_pid="$1"
+  local swaysock="${XDG_RUNTIME_DIR}/sway-ipc.${UID_NUM}.${sway_pid}.sock"
+  local profile_file="${HOME}/.config/sway/profile"
+  local last_res
+  last_res=$(get_profile_resolution)
+
+  while kill -0 "$sway_pid" 2>/dev/null; do
+    local current_res
+    current_res=$(get_profile_resolution)
+    if [[ "$current_res" != "$last_res" ]]; then
+      log "Profile changed: applying ${current_res}"
+      SWAYSOCK="$swaysock" swaymsg output '*' resolution "${current_res}" 2>/dev/null
+      last_res="$current_res"
+    fi
+    sleep 2
+  done
+}
+
+# Save workspace state periodically for restore after crash
+watch_state() {
+  local sway_pid="$1"
+  local swaysock="${XDG_RUNTIME_DIR}/sway-ipc.${UID_NUM}.${sway_pid}.sock"
+
+  while kill -0 "$sway_pid" 2>/dev/null; do
+    SWAYSOCK="$swaysock" sway-save-state 2>/dev/null
+    sleep 5
+  done
+}
+
+# Restore previous session if state exists
+SWAYSOCK="$SWAYSOCK" sway-restore 2>/dev/null &
+wait $!
 
 watch_outputs "$SWAY_PID" &
 WATCH_PID=$!
 
+watch_profile "$SWAY_PID" &
+PROFILE_PID=$!
+
+watch_state "$SWAY_PID" &
+STATE_PID=$!
+
 wait $SWAY_PID
-kill "$WATCH_PID" 2>/dev/null
-wait "$WATCH_PID" 2>/dev/null
-log "Sway exited."
+SWAY_EXIT=$?
+kill "$WATCH_PID" "$PROFILE_PID" "$STATE_PID" 2>/dev/null
+wait "$WATCH_PID" "$PROFILE_PID" "$STATE_PID" 2>/dev/null
+log "Sway exited (code: $SWAY_EXIT)."
+exit $SWAY_EXIT

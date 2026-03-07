@@ -18,6 +18,7 @@ linux:
       # Native Linux install
       curl -fsSL https://claude.ai/install.sh | sh
       {{/if}}
+      rotz link claude --force
 
 windows:
   links:

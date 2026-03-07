@@ -1,20 +1,20 @@
 # Project Workspace System
 
-A stateless project management system that spans two layers: the **WM layer** (i3 workspaces) and the **tmux layer** (session groups). Projects are registered in a single YAML file (`~/.config/project/projects.yaml`) containing only name-to-path mappings. All workspace and session state is derived at runtime.
+A stateless project management system that spans two layers: the **WM layer** (i3 or sway workspaces) and the **tmux layer** (session groups). Projects are registered in a single YAML file (`~/.config/project/projects.yaml`) containing only name-to-path mappings. All workspace and session state is derived at runtime.
 
 ## Architecture
 
 ```
- WM Layer (i3)                    Terminal Layer (bash + tmux + nushell)
- ─────────────                    ─────────────────────────────────────
+ WM Layer (i3 / sway)              Terminal Layer (bash + tmux + nushell)
+ ─────────────────────              ─────────────────────────────────────
 
  $mod+p / $mod+Shift+p            Terminal opens on project workspace
         │                                    │
- project-picker.nu                    bashrc detects workspace name
+ project-picker                       bashrc detects workspace name
         │                                    │
- rofi ── select project             i3-msg -t get_workspaces + grep/sed
+ rofi ── select project             WM IPC -t get_workspaces + grep/sed
         │                                    │
- i3-msg workspace <name>            Matches project pattern? ─── no ──> tmux-start attach 0 local
+ WM IPC workspace <name>            Matches project pattern? ─── no ──> tmux-start attach 0 local
                                              │ yes
                                      export PROJECT=<name>
                                              │
@@ -42,16 +42,22 @@ projects:
 
 No workspace assignments, no session state. Just name and path.
 
-## WM Layer (i3)
+## WM Layer (i3 + sway)
+
+### WM Detection
+
+The `wm-ipc.nu` module auto-detects whether i3 or sway is running and provides a unified `ipc` command. All workspace scripts use this abstraction, so the same scripts work on both window managers.
 
 ### Files
 
 | File | Location (symlinked) | Purpose |
 |------|---------------------|---------|
-| `i3/scripts/ws-list.nu` | `~/.config/polybar/scripts/ws-list.nu` | Shared workspace utilities (sort, find, normalize) |
-| `i3/scripts/ws-switch.nu` | `~/.config/polybar/scripts/ws-switch.nu` | Switch/move by Polybar display index |
-| `i3/scripts/project-picker.nu` | `~/.config/polybar/scripts/project-picker.nu` | Rofi project picker |
-| `i3/config` | `~/.i3/config` | Keybindings |
+| `nushell/actions/wm-ipc.nu` | `~/.local/bin/wm-ipc.nu` | WM detection (i3/sway) + unified IPC |
+| `nushell/actions/ws-list.nu` | `~/.local/bin/ws-list.nu` | Shared workspace utilities (sort, find, normalize) |
+| `nushell/actions/ws-switch.nu` | `~/.local/bin/ws-switch.nu` | Switch/move by display index |
+| `nushell/actions/project-picker` | `~/.local/bin/project-picker` | Rofi project picker |
+| `i3/config` | `~/.i3/config` | i3 keybindings |
+| `sway/config.d/default` | `~/.config/sway/config.d/default` | Sway keybindings |
 | `i3/config.ini` | `~/.config/polybar/config.ini` | Polybar bar config (i3 module with `%name%`) |
 
 ### Workspace Naming Convention
@@ -64,19 +70,28 @@ When a second workspace is created for a project, the bare name is renamed to `_
 
 ### Keybindings
 
+Same on both i3 and sway:
+
 | Keybinding | Action |
 |---|---|
 | `$mod+p` | Rofi picker: switch to project workspace (excludes current project) |
 | `$mod+Shift+p` | Rofi picker: create new workspace for project (includes current) |
-| `$mod+1` .. `$mod+8` | Switch to Nth workspace by Polybar display order |
+| `$mod+1` .. `$mod+8` | Switch to Nth workspace by display order |
 | `$mod+Ctrl+1` .. `$mod+Ctrl+8` | Move focused container to Nth workspace |
 | `$mod+Shift+1` .. `$mod+Shift+8` | Move container to Nth workspace and follow |
 
+### wm-ipc.nu
+
+Detects which WM is running (checks sway first, then i3) and provides:
+
+- **`ipc-cmd`** - Returns `"swaymsg"` or `"i3-msg"` depending on running WM
+- **`ipc`** - Runs the detected IPC command with given arguments
+
 ### ws-list.nu (shared module)
 
-Provides workspace utilities used by `ws-switch.nu` and `project-picker.nu`:
+Provides workspace utilities used by `ws-switch.nu` and `project-picker`:
 
-- **`sorted`** - All i3 workspaces sorted in Polybar display order (by `num` ascending, preserving i3 creation order for equal `num`)
+- **`sorted`** - All workspaces sorted in display order (by `num` ascending)
 - **`focused`** - The currently focused workspace
 - **`for-project <name>`** - Find workspaces matching `<name>` or `<name>_N`
 - **`normalize <name>`** - If only one numbered workspace exists for a project, rename it to bare name
@@ -84,12 +99,12 @@ Provides workspace utilities used by `ws-switch.nu` and `project-picker.nu`:
 
 ### ws-switch.nu
 
-Switches workspaces by Polybar display position (1-based index). Runs `normalize` for all registered projects before resolving the index, and again after move/follow actions.
+Switches workspaces by display position (1-based index). Runs `normalize` for all registered projects before resolving the index, and again after move/follow actions.
 
 - If already on the target workspace, does nothing (no back-and-forth toggle)
 - After moving a container, normalizes to clean up orphaned `_N` names
 
-### project-picker.nu
+### project-picker
 
 Rofi-based project picker. Two modes:
 
@@ -103,9 +118,12 @@ Rofi-based project picker. Two modes:
 2. Shows all projects including current
 3. On selection: renames bare name to `_1` if needed, creates next `_N`
 
-### Polybar Integration
+### Bar Integration
 
-The Polybar `internal/i3` module displays workspace names with `%name%` tokens. The `index-sort = true` setting sorts by `num` (matching `ws-list.nu`'s sort). Project workspaces show their name (`dotfiles`), numeric ones show their number (`1`).
+- **Polybar** (i3): `internal/i3` module displays workspace names with `%name%` tokens. `index-sort = true` sorts by `num`.
+- **Waybar** (sway): `sway/workspaces` module displays workspace names with `{name}` format.
+
+Both show project workspace names (`dotfiles`) and numeric ones (`1`).
 
 ## Tmux Layer
 
@@ -125,7 +143,8 @@ Terminal opens
     │
     v
 bash (bashrc)
-    │── Detects i3 workspace name via i3-msg
+    │── Detects WM (sway or i3) via pgrep
+    │── Gets workspace name via WM IPC
     │── Matches against project patterns:
     │     "dotfiles_1" -> PROJECT=dotfiles
     │     "dotfiles"   -> PROJECT=dotfiles (verified against projects.yaml)
@@ -189,7 +208,7 @@ When the `PROJECT` environment variable is set (by bashrc), nushell's `export-en
 
 1. Press `$mod+p`
 2. Select project from rofi list
-3. i3 switches to (or creates) the project workspace
+3. WM switches to (or creates) the project workspace
 4. Open a terminal (`$mod+Return`)
 5. Terminal auto-detects workspace, tmux session group = project name, nushell cd's to project dir
 
@@ -204,8 +223,8 @@ When the `PROJECT` environment variable is set (by bashrc), nushell's `export-en
 
 1. Press `$mod+p` (current project is hidden from list)
 2. Select another project
-3. i3 switches to that project's workspace
-4. Or use `$mod+1`..`$mod+8` to switch by Polybar position
+3. WM switches to that project's workspace
+4. Or use `$mod+1`..`$mod+8` to switch by bar position
 
 ### 4. Move a window to another workspace
 
@@ -238,12 +257,13 @@ project add my-new-project ~/repos/my-new-project
 project remove old-project
 ```
 
-Tmux sessions and i3 workspaces for the removed project are not affected (they continue to exist until closed manually).
+Tmux sessions and workspaces for the removed project are not affected (they continue to exist until closed manually).
 
 ## Design Principles
 
 - **Stateless**: No workspace assignments or session mappings stored. Everything is derived from workspace names and the project registry.
 - **Convention over configuration**: Workspace naming (`<project>`, `<project>_N`) encodes all relationship info.
 - **Normalize automatically**: Orphaned `_N` names are cleaned up on every workspace operation.
-- **Layers are independent**: The WM layer and tmux layer work together but don't depend on each other. You can use `project go` without i3, or i3 workspaces without tmux.
+- **Layers are independent**: The WM layer and tmux layer work together but don't depend on each other. You can use `project go` without a WM, or WM workspaces without tmux.
+- **WM agnostic**: Same scripts work on i3 and sway via `wm-ipc.nu` abstraction.
 - **No schema bloat**: `projects.yaml` only stores `name -> path`. Everything else is runtime state.
