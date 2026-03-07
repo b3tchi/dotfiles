@@ -35,6 +35,8 @@ proot-distro login "$DISTRO" \
   --user "$USER" \
   --shared-tmp \
   --bind "$HOME/.dotfiles:/home/$USER/.dotfiles" \
+  --bind "$HOME/storage:/home/$USER/storage" \
+  --bind "$HOME/.ssh:/home/$USER/.ssh" \
   -- bash -c '
   export DISPLAY=:1
   export PULSE_SERVER=tcp:127.0.0.1:4713
