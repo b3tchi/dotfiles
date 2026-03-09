@@ -35,24 +35,35 @@ def main [
 
 	let workspaces = sorted
 
-	if $index < 1 or $index > ($workspaces | length) {
+	if $index < 1 {
 		return
 	}
 
-	let target = ($workspaces | get ($index - 1))
+	# If index exceeds existing workspaces, create a numbered one
+	let target_name = if $index > ($workspaces | length) {
+		$"($index)"
+	} else {
+		($workspaces | get ($index - 1) | get name)
+	}
+
+	let is_focused = if $index <= ($workspaces | length) {
+		($workspaces | get ($index - 1) | get focused)
+	} else {
+		false
+	}
 
 	match $action {
 		"move" => {
-			ipc $"move container to workspace ($target.name)" | ignore
+			ipc $"move container to workspace ($target_name)" | ignore
 			normalize-all
 		},
 		"follow" => {
-			ipc $"move container to workspace ($target.name); workspace ($target.name)" | ignore
+			ipc $"move container to workspace ($target_name); workspace ($target_name)" | ignore
 			normalize-all
 		},
 		_ => {
-			if not $target.focused {
-				ipc $"workspace ($target.name)" | ignore
+			if not $is_focused {
+				ipc $"workspace ($target_name)" | ignore
 			}
 		}
 	}
