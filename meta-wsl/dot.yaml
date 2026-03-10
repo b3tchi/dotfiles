@@ -10,3 +10,4 @@ depends:
   - claude
   - opencode
   - sway
+  - docker
