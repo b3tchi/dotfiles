@@ -1,0 +1,16 @@
+windows:
+  installs:
+    cmd: scoop install glab
+
+linux:
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -Syu --needed --noconfirm glab
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux ARM")}}
+      sudo pacman -Syu --needed --noconfirm glab
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -Syu --needed --noconfirm glab
+      {{/if}}
