@@ -1,0 +1,18 @@
+linux:
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -S --needed --noconfirm docker docker-compose lazydocker
+      sudo systemctl enable docker
+      sudo usermod -aG docker {{ whoami.username }}
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux ARM")}}
+      sudo pacman -S --needed --noconfirm docker docker-compose lazydocker
+      sudo systemctl enable docker
+      sudo usermod -aG docker {{ whoami.username }}
+      {{/if}}
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -S --needed --noconfirm docker docker-compose lazydocker
+      sudo systemctl enable docker
+      sudo usermod -aG docker {{ whoami.username }}
+      {{/if}}

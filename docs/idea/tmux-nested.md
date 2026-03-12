@@ -63,6 +63,21 @@ for unmanaged remotes.
 - (-) More moving parts — bash detection, tmux config, conditional logic
 - (-) Higher complexity for marginal gain over approach 1 alone
 
+## Phase 1: Remote Hostname in Title (Approved)
+
+**Goal:** When tmux runs inside an SSH session, append `[hostname]` to the
+status bar and terminal window title.
+
+**Behavior:**
+- Local: `#W@#{session_group}` (unchanged)
+- Remote/SSH: `#W@#{session_group}[hostname]`
+- Applies to both tmux status-left and terminal window title (set-titles-string)
+
+**Detection:** `if-shell` checking `$SSH_CLIENT` — already set by the system
+on SSH connections. No dependency on `SESSION_TYPE` from `profile`.
+
+**Scope:** Pure `tmux.conf` change. No changes to tmux-start, bashrc, or profile.
+
 ## Current State (for reference)
 
 - `profile:50-57` — detects SSH via `SSH_CLIENT`/`SSH_TTY`, sets `SESSION_TYPE=remote/ssh` (unused)
