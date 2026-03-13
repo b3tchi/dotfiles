@@ -164,7 +164,7 @@ for_window [title="megapixels"] inhibit_idle open
 for_window [title="ep[yr].*"] inhibit_idle visible
 
 # CUSTOM: Colors matching i3/sway desktop theme
-output DSI-1 bg "#222D31" solid_color
+output DSI-1 bg "#0d1214" solid_color
 
 client.focused          #152024 #152024 #FDF6E3 #222D31
 client.focused_inactive #152024 #152024 #707880 #222D31

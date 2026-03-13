@@ -17,5 +17,8 @@ linux:
       ~/.local/bin/bun install -g opencode-ai
       cd ~/.config/opencode && ~/.local/bin/bun install
       {{/if}}
-      ln -sf ~/.bun/bin/opencode ~/.local/bin/opencode
+      {{#if (eq whoami.distro "postmarketOS edge")}}
+      ~/.local/bin/bun install -g opencode-ai
+      ln -sf ~/.cache/.bun/install/global/node_modules/opencode-linux-arm64-musl/bin/opencode ~/.local/bin/opencode
+      {{/if}}
       rotz link opencode --force

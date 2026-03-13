@@ -2,6 +2,7 @@ linux:
   links:
     profile: ~/.config/sxmo/profile
     sway: ~/.config/sxmo/sway
+    conky.conf: ~/.config/sxmo/conky.conf
     hooks/sxmo_hook_unlock.sh: ~/.config/sxmo/hooks/sxmo_hook_unlock.sh
 
   installs:
