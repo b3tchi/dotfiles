@@ -32,6 +32,27 @@ export SXMO_DEFAULT_DRAFT="Enter new message here."
 export SXMO_STATES="unlock"
 export SXMO_SUSPENDABLE_STATES=""
 
+# Menu styling (bemenu)
+export BEMENU_OPTS="\
+--fn 'Iosevka Nerd Font 16' \
+--center \
+--width-factor 0.8 \
+--list 10 \
+--border 2 \
+--border-radius 15 \
+--line-height 35 \
+--scrollbar autohide \
+--tb '#222D31' --tf '#16a085' \
+--fb '#222D31' --ff '#FDF6E3' \
+--cb '#16a085' --cf '#222D31' \
+--nb '#222D31' --nf '#FDF6E3' \
+--hb '#152024' --hf '#16a085' \
+--sb '#16a085' --sf '#222D31' \
+--ab '#222D31' --af '#FDF6E3' \
+--scb '#222D31' --scf '#16a085' \
+--bdr '#16a085' \
+"
+
 # Wallpaper
 export SXMO_BG_IMG="$HOME/.config/sxmo/wallpaper.jpg"
 

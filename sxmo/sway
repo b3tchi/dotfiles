@@ -139,24 +139,14 @@ mode "resize" {
 }
 bindsym $mod+r mode "resize"
 
-# CUSTOM: Bar configured for phone display at scale 2
-# height 35 for touch-friendly targets, side gaps 10 for aesthetics
+# CUSTOM: Disable built-in swaybar, use waybar instead for rounded corners
 bar {
-    height 35
-    gaps 0 10
-    position top
+    mode invisible
     status_command sxmo_status_watch.sh -o pango
-    pango_markup enabled
-    colors {
-        statusline #FDF6E3
-        background #222D31
-        focused_workspace #16a085 #152024 #FDF6E3
-        active_workspace #152024 #152024 #707880
-        inactive_workspace #222D31 #222D31 #707880
-        urgent_workspace #CB4B16 #FDF6E3 #16a085
-        font "Sxmo 11"
-    }
 }
+
+# Launch waybar
+exec_always sh -c 'killall waybar 2>/dev/null; waybar &'
 
 for_window [app_id="pinentry-.*"] floating true
 for_window [app_id="foot" title=".*sxmo/modem/.*/draft.txt.*"] resize set height 25
