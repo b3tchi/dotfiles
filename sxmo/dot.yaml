@@ -8,6 +8,11 @@ linux:
   installs:
     cmd: |
       touch ~/.cache/sxmo/sxmo.noidle
+      if [ ! -f /usr/bin/sxmo_migrate.sh.orig ]; then
+        doas cp /usr/bin/sxmo_migrate.sh /usr/bin/sxmo_migrate.sh.orig
+      fi
+      doas cp ~/.dotfiles/sxmo/sxmo_migrate_noop.sh /usr/bin/sxmo_migrate.sh
+      doas chmod +x /usr/bin/sxmo_migrate.sh
       mkdir -p ~/.local/share/fonts
       if ! fc-list | grep -qi "Iosevka Nerd"; then
         curl -sL "https://github.com/ryanoasis/nerd-fonts/releases/download/v3.4.0/Iosevka.tar.xz" -o /tmp/iosevka-nerd.tar.xz
