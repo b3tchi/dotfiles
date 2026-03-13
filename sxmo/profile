@@ -38,8 +38,8 @@ export BEMENU_OPTS="\
 --center \
 --width-factor 0.8 \
 --list 10 \
---border 2 \
---border-radius 5 \
+--border 0 \
+--border-radius 0 \
 --line-height 35 \
 --scrollbar autohide \
 --tb '#222D31' --tf '#707880' \
