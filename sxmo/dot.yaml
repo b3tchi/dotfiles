@@ -8,4 +8,11 @@ linux:
   installs:
     cmd: |
       touch ~/.cache/sxmo/sxmo.noidle
+      mkdir -p ~/.local/share/fonts
+      if ! fc-list | grep -qi "Iosevka Nerd"; then
+        curl -sL "https://github.com/ryanoasis/nerd-fonts/releases/download/v3.4.0/Iosevka.tar.xz" -o /tmp/iosevka-nerd.tar.xz
+        tar xf /tmp/iosevka-nerd.tar.xz -C ~/.local/share/fonts/
+        rm /tmp/iosevka-nerd.tar.xz
+        fc-cache -f
+      fi
       rotz link sxmo --force
