@@ -9,6 +9,7 @@ windows:
     actions/tmux-start: ~/.local/bin/tmux-start
     actions/tmux-message: ~/.local/bin/tmux-message
     actions/tmux-project: ~/.local/bin/tmux-project
+    actions/tmux-ssh: ~/.local/bin/tmux-ssh
 
   installs:
     cmd: |
@@ -28,6 +29,7 @@ linux:
     actions/tmux-start: ~/.local/bin/tmux-start
     actions/tmux-message: ~/.local/bin/tmux-message
     actions/tmux-project: ~/.local/bin/tmux-project
+    actions/tmux-ssh: ~/.local/bin/tmux-ssh
     actions/wm-ipc.nu: ~/.local/bin/wm-ipc.nu
     actions/ws-list.nu: ~/.local/bin/ws-list.nu
     actions/ws-switch.nu: ~/.local/bin/ws-switch.nu
@@ -56,6 +58,7 @@ linux:
       chmod +x ~/.dotfiles/nushell/actions/tmux-start
       chmod +x ~/.dotfiles/nushell/actions/tmux-message
       chmod +x ~/.dotfiles/nushell/actions/tmux-project
+      chmod +x ~/.dotfiles/nushell/actions/tmux-ssh
       chmod +x ~/.dotfiles/nushell/actions/wm-ipc.nu
       chmod +x ~/.dotfiles/nushell/actions/ws-list.nu
       chmod +x ~/.dotfiles/nushell/actions/ws-switch.nu
