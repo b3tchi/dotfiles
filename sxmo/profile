@@ -34,20 +34,20 @@ export SXMO_SUSPENDABLE_STATES=""
 
 # Menu styling (bemenu)
 export BEMENU_OPTS="\
---fn 'Iosevka Nerd Font 16' \
+--fn 'Iosevka Nerd Font 14' \
 --center \
 --width-factor 0.8 \
 --list 10 \
 --border 2 \
---border-radius 15 \
+--border-radius 5 \
 --line-height 35 \
 --scrollbar autohide \
---tb '#222D31' --tf '#16a085' \
+--tb '#222D31' --tf '#707880' \
 --fb '#222D31' --ff '#FDF6E3' \
 --cb '#16a085' --cf '#222D31' \
 --nb '#222D31' --nf '#FDF6E3' \
---hb '#152024' --hf '#16a085' \
---sb '#16a085' --sf '#222D31' \
+--hb '#152024' --hf '#FDF6E3' \
+--sb '#16a085' --sf '#FDF6E3' \
 --ab '#222D31' --af '#FDF6E3' \
 --scb '#222D31' --scf '#16a085' \
 --bdr '#16a085' \
