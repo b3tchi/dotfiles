@@ -1,0 +1,10 @@
+linux:
+  links:
+    profile: ~/.config/sxmo/profile
+    sway: ~/.config/sxmo/sway
+    hooks/sxmo_hook_unlock.sh: ~/.config/sxmo/hooks/sxmo_hook_unlock.sh
+
+  installs:
+    cmd: |
+      touch ~/.cache/sxmo/sxmo.noidle
+      rotz link sxmo --force

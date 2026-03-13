@@ -1,0 +1,10 @@
+linux:
+  installs:
+    cmd: |
+      doas cp ~/.dotfiles/clicks/50-usb-host-mode.start /etc/local.d/50-usb-host-mode.start
+      doas chmod +x /etc/local.d/50-usb-host-mode.start
+      doas cp ~/.dotfiles/clicks/clicks-keyboard.conf /etc/sway/config.d/clicks-keyboard.conf
+      doas cp ~/.dotfiles/clicks/clicks-reset /usr/local/bin/clicks-reset
+      doas chmod +x /usr/local/bin/clicks-reset
+      doas cp ~/.dotfiles/clicks/60-clicks.conf /etc/doas.d/60-clicks.conf
+      doas chmod 600 /etc/doas.d/60-clicks.conf

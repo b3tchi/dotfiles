@@ -1,0 +1,21 @@
+#!/bin/sh
+# Reset Clicks keyboard by cycling USB role (device -> host)
+# 
+# NOTE: This does NOT fix the keyboard after a USB cable was plugged
+# into the Clicks passthrough port. That crashes the XHCI controller
+# and only a reboot recovers it. This script only helps if the keyboard
+# stopped responding for other reasons (e.g. software glitch).
+#
+# Requires doas nopass rule: /etc/doas.d/60-clicks.conf
+
+echo "Resetting USB host mode..."
+echo device > /sys/class/usb_role/a600000.usb-role-switch/role
+sleep 2
+echo host > /sys/class/usb_role/a600000.usb-role-switch/role
+echo "Waiting for keyboard enumeration..."
+sleep 3
+if lsusb | grep -q "Clicks"; then
+    echo "Clicks keyboard detected."
+else
+    echo "WARNING: Clicks keyboard not found. Reboot may be required."
+fi
