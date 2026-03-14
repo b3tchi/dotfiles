@@ -286,7 +286,8 @@ $env.config = {
     edit_mode: vi # emacs, vi
 	shell_integration: {
         # osc2 abbreviates the path if in the home_dir, sets the tab/window title, shows the running command in the tab/window title
-        osc2: true
+        # Disabled: let tmux own terminal title via set-titles-string (nushell osc2 overwrites nested tmux titles)
+        osc2: false
         # osc7 is a way to communicate the path to the terminal, this is helpful for spawning new tabs in the same directory
         osc7: true
         # osc8 is also implemented as the deprecated setting ls.show_clickable_links, it shows clickable links in ls output if your terminal supports it. show_clickable_links is deprecated in favor of osc8
