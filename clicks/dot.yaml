@@ -1,6 +1,7 @@
 linux:
   installs:
     cmd: |
+      doas apk add keyd
       doas cp ~/.dotfiles/clicks/50-usb-host-mode.start /etc/local.d/50-usb-host-mode.start
       doas chmod +x /etc/local.d/50-usb-host-mode.start
       doas cp ~/.dotfiles/clicks/clicks-keyboard.conf /etc/sway/config.d/clicks-keyboard.conf
@@ -8,3 +9,10 @@ linux:
       doas chmod +x /usr/local/bin/clicks-reset
       doas cp ~/.dotfiles/clicks/60-clicks.conf /etc/doas.d/60-clicks.conf
       doas chmod 600 /etc/doas.d/60-clicks.conf
+      doas mkdir -p /etc/udev/hwdb.d
+      doas cp ~/.dotfiles/clicks/90-clicks-keyboard.hwdb /etc/udev/hwdb.d/90-clicks-keyboard.hwdb
+      doas udevadm hwdb --update
+      doas mkdir -p /etc/keyd
+      doas cp ~/.dotfiles/clicks/keyd-clicks.conf /etc/keyd/clicks.conf
+      doas rc-update add keyd default
+      doas rc-service keyd restart
