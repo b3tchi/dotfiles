@@ -145,8 +145,10 @@ bar {
     status_command sxmo_status_watch.sh -o pango
 }
 
-# Launch waybar
-exec_always sh -c 'killall waybar 2>/dev/null; waybar &'
+# Launch quickshell (replaces waybar)
+# To revert to waybar: comment the quickshell line, uncomment the waybar line
+exec_always sh -c 'killall quickshell 2>/dev/null; quickshell &'
+#exec_always sh -c 'killall waybar 2>/dev/null; waybar &'
 
 for_window [app_id="pinentry-.*"] floating true
 for_window [app_id="foot" title=".*sxmo/modem/.*/draft.txt.*"] resize set height 25
@@ -186,6 +188,14 @@ bindswitch lid:on exec sxmo_wm.sh display off
 bindswitch lid:off exec sxmo_wm.sh display on
 
 include /etc/sway/config.d/*
+
+# CUSTOM: Gaps
+smart_gaps off
+gaps inner 2
+gaps top 40
+gaps left 2
+gaps right 2
+gaps bottom 2
 
 exec 'printf %s "$SWAYSOCK" > "$XDG_RUNTIME_DIR"/sxmo.swaysock'
 
