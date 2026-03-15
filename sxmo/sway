@@ -14,7 +14,7 @@ set $down j
 set $up k
 set $right l
 set $term sxmo_terminal.sh
-set $menu bemenu-run
+set $menu qs ipc call launcher toggle
 
 font "Sxmo 11"
 
@@ -57,6 +57,7 @@ mode "N900" {
     bindsym $mod+i exec sxmo_wmmenu.sh windowswitcher
     bindsym $mod+Shift+q kill
     bindsym $mod+d exec $menu
+    bindsym --release Super_L exec qs ipc call launcher tap
     floating_modifier $mod normal
     bindsym $mod+Shift+c reload
     bindsym $mod+Shift+e exec swaynag -t warning -m 'You pressed the exit shortcut. Do you really want to exit sway? This will end your Wayland session.' -b 'Yes, exit sway' 'sxmo_power.sh logout'
@@ -189,13 +190,8 @@ bindswitch lid:off exec sxmo_wm.sh display on
 
 include /etc/sway/config.d/*
 
-# CUSTOM: Gaps
-smart_gaps off
-gaps inner 2
-gaps top 40
-gaps left 2
-gaps right 2
-gaps bottom 2
+# CUSTOM: Gaps (use runtime swaymsg to ensure they apply after includes)
+exec_always swaymsg 'gaps inner all set 4, gaps outer all set 4, gaps top all set 50'
 
 exec 'printf %s "$SWAYSOCK" > "$XDG_RUNTIME_DIR"/sxmo.swaysock'
 
