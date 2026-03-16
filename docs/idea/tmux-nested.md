@@ -63,24 +63,47 @@ for unmanaged remotes.
 - (-) More moving parts — bash detection, tmux config, conditional logic
 - (-) Higher complexity for marginal gain over approach 1 alone
 
-## Phase 1: Remote Hostname in Title (Approved)
+## Phase 1: Remote Hostname in Title (Implemented)
 
-**Goal:** When tmux runs inside an SSH session, append `[hostname]` to the
-status bar and terminal window title.
+**Approach:** `txs` (tmux-ssh) wrapper handles host-side awareness.
 
-**Behavior:**
-- Local: `#W@#{session_group}` (unchanged)
-- Remote/SSH: `#W@#{session_group}[hostname]`
-- Applies to both tmux status-left and terminal window title (set-titles-string)
+**Components:**
+- `nushell/actions/tmux-ssh` — SSH wrapper that sets tmux pane option `@ssh_host`,
+  renames window, cleans up on disconnect. Aliased as `txs` in nushell config.
+- `tmux.conf` `set-titles-string` — uses `#{pane_current_path}@#{session_group}` for
+  local, `[#{pane_title}]#{@ssh_host}@#{session_group}` for SSH panes (via `@ssh_host` conditional).
+- `nushell/config.nu` `osc2: false` — nushell no longer sets terminal title, letting
+  tmux's `set-titles` be the sole title setter for reliable nested propagation.
 
-**Detection:** `if-shell` checking `$SSH_CLIENT` — already set by the system
-on SSH connections. No dependency on `SESSION_TYPE` from `profile`.
+**Title format:**
+- Local: `~/.dotfiles@dotfiles`
+- SSH: `[~/.dotfiles@local]home@dotfiles` — [remote_path@remote_group]host@local_group
 
-**Scope:** Pure `tmux.conf` change. No changes to tmux-start, bashrc, or profile.
+## Idea: WM Dynamic Title Stripping
+
+When on a project workspace (e.g. `dotfiles_1`), the `@dotfiles` suffix in the
+terminal title is redundant. A WM-level daemon could strip it dynamically.
+
+**Mechanism:** Both i3 and sway support:
+- IPC event subscription: `i3msg -t subscribe -m '["window"]'` — streams
+  window title change events in real-time
+- Per-window title rewriting: `i3msg '[con_id=X]' title_format "..."` — dynamically
+  rewrites what the WM displays (using `%title` as placeholder for original title)
+
+**Approach:** Background daemon (nushell script) that:
+1. Subscribes to `window::title` events via `wm-ipc.nu` (WM-agnostic)
+2. On title change, checks if window is on a project workspace
+3. If `@project` suffix matches workspace project name, strips it via `title_format`
+
+**Notes:**
+- `wm-ipc.nu` already abstracts i3/sway IPC
+- i3 config already uses `title_format`: `for_window [all] title_format "%title"` (line 197)
+- Would run as part of i3/sway session startup
 
 ## Current State (for reference)
 
 - `profile:50-57` — detects SSH via `SSH_CLIENT`/`SSH_TTY`, sets `SESSION_TYPE=remote/ssh` (unused)
 - `distro/bashrc:18-41` — auto-starts tmux via `tmux-start` on every interactive shell
-- `tmux/tmux.conf` — no nested/SSH handling, no key-table switching
+- `tmux/tmux.conf` — title passthrough via `pane_current_path`, `@ssh_host` conditional
 - `nushell/actions/tmux-start` — session group management, no SSH awareness
+- `nushell/actions/tmux-ssh` — SSH wrapper with tmux pane tagging
