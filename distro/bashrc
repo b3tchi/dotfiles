@@ -14,6 +14,13 @@ alias ls='ls --color=auto'
 alias grep='grep --color=auto'
 PS1='[\u@\h \W]\$ '
 
+# Tag tmux server as SSH when connecting via SSH (before tmux-start creates session)
+if [ -n "$SSH_CLIENT" ] || [ -n "$SSH_CONNECTION" ]; then
+	if command -v tmux &>/dev/null; then
+		tmux set-environment -g SSH_SESSION 1 2>/dev/null
+	fi
+fi
+
 # Auto-start tmux session (script symlinked to ~/.local/bin via rotz)
 if command -v tmux-start &>/dev/null; then
 	# Detect WM project workspace to align tmux session group with project
