@@ -6,12 +6,14 @@ linux:
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
-      ~/.local/bin/bun install -g opencode-ai
-      cd ~/.config/opencode && ~/.local/bin/bun install
+      bun install -g opencode-ai
+      cd ~/.config/opencode && bun install
+      ln -sf ~/.bun/bin/opencode ~/.local/bin/opencode
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux")}}
-      ~/.local/bin/bun install -g opencode-ai
-      cd ~/.config/opencode && ~/.local/bin/bun install
+      bun install -g opencode-ai
+      cd ~/.config/opencode && bun install
+      ln -sf ~/.bun/bin/opencode ~/.local/bin/opencode
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux ARM")}}
       ~/.local/bin/bun install -g opencode-ai
@@ -19,6 +21,7 @@ linux:
       {{/if}}
       {{#if (eq whoami.distro "postmarketOS edge")}}
       ~/.local/bin/bun install -g opencode-ai
+      cd ~/.config/opencode && ~/.local/bin/bun install
       ln -sf ~/.cache/.bun/install/global/node_modules/opencode-linux-arm64-musl/bin/opencode ~/.local/bin/opencode
       {{/if}}
       rotz link opencode --force

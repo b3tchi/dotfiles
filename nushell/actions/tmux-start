@@ -22,8 +22,8 @@ def main [
 
     # If UID provided, search for existing pane
     if ($uid | is-not-empty) and (($uid | str length) > 0) {
-        let existing = (tmux list-panes -a -F "#{pane_id} #{@uid}"
-            | lines
+        let existing = (do { tmux list-panes -a -F "#{pane_id} #{@uid}" } | complete
+            | if $in.exit_code == 0 { $in.stdout | lines } else { [] }
             | where $it != ""
             | parse "{pane_id} {pane_uid}"
             | where pane_uid == $uid)
@@ -65,9 +65,9 @@ def main [
         }
     }
 
-    # Get existing session numbers
-    let sessions = (tmux list-sessions -F "#{session_name}"
-        | lines
+    # Get existing session numbers (server may not be running yet)
+    let sessions = (do { tmux list-sessions -F "#{session_name}" } | complete
+        | if $in.exit_code == 0 { $in.stdout | lines } else { [] }
         | where $it =~ $"^($session)_")
 
     let view_nr = if ($sessions | is-empty) {
