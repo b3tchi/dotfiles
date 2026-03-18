@@ -1,0 +1,58 @@
+#!/bin/sh
+# configversion: e7cdaa3a889d251bed8a89ce8c622995
+# sxmo profile for Nothing Phone 1 (spacewar)
+# Deployed to: ~/.config/sxmo/profile
+
+# shellcheck source=scripts/core/sxmo_common.sh
+. sxmo_common.sh
+
+# Browser
+command -v firefox >/dev/null && export BROWSER=firefox
+
+# Terminal
+export TERMCMD="sxmo_terminal.sh"
+
+# Display scale (device profile defaults to 3, we override to 2)
+# 1080x2400 / 2 = 540x1200 effective
+export SXMO_SWAY_SCALE=2
+
+# Ringtone / notifications
+export SXMO_RINGTONE="$(xdg_data_path sxmo/ring.ogg)"
+export SXMO_TEXTSOUND="$(xdg_data_path sxmo/notify.ogg)"
+export SXMO_RINGTIME=20
+export SXMO_RINGNUMBER=10
+
+# Default SMS draft text
+export SXMO_DEFAULT_DRAFT="Enter new message here."
+
+# WORKAROUND: Disable lock/screenoff states
+# Power button lock cycle breaks Clicks Creator Keyboard (USB HID 13614:8966).
+# After locking and unlocking, the keyboard stops responding entirely.
+# Only use unlock state (no lock, no screenoff).
+export SXMO_STATES="unlock"
+export SXMO_SUSPENDABLE_STATES=""
+
+# Menu styling (bemenu)
+export BEMENU_OPTS="\
+--fn 'Iosevka Nerd Font 14' \
+--center \
+--width-factor 0.8 \
+--list 10 \
+--border 0 \
+--border-radius 0 \
+--line-height 35 \
+--scrollbar autohide \
+--tb '#222D31' --tf '#707880' \
+--fb '#222D31' --ff '#FDF6E3' \
+--cb '#16a085' --cf '#222D31' \
+--nb '#222D31' --nf '#FDF6E3' \
+--hb '#152024' --hf '#FDF6E3' \
+--sb '#16a085' --sf '#FDF6E3' \
+--ab '#222D31' --af '#FDF6E3' \
+--scb '#222D31' --scf '#16a085' \
+--bdr '#16a085' \
+"
+
+# Wallpaper
+export SXMO_BG_IMG="$HOME/.config/sxmo/wallpaper.jpg"
+

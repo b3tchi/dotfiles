@@ -1,0 +1,70 @@
+#!/usr/bin/env nu
+# SSH wrapper that tags tmux pane with remote host info
+# Symlinked to ~/.local/bin/txs via rotz
+
+def main [...args: string] {
+    if ($args | is-empty) {
+        # No args — just show usage
+        print "Usage: txs [ssh-args...] <host>"
+        print "SSH wrapper that sets tmux pane metadata for remote host"
+        return
+    }
+
+    # Extract hostname from args: first arg that doesn't start with - and isn't a flag value
+    let hostname = ($args
+        | reduce --fold { skip: false, host: null } {|arg, acc|
+            if $acc.skip {
+                # Previous arg was a flag that takes a value, skip this
+                { skip: false, host: $acc.host }
+            } else if ($arg | str starts-with "-") {
+                # Flags that take a value argument
+                let value_flags = ["-p" "-l" "-i" "-o" "-F" "-J" "-L" "-R" "-D" "-W" "-E" "-S" "-b" "-c" "-e" "-m" "-O" "-Q" "-w" "-B"]
+                if ($arg in $value_flags) {
+                    { skip: true, host: $acc.host }
+                } else {
+                    { skip: false, host: $acc.host }
+                }
+            } else if ($acc.host == null) {
+                # First non-flag arg is the destination
+                { skip: false, host: $arg }
+            } else {
+                $acc
+            }
+        }
+        | get host)
+
+    if ($hostname == null) {
+        print "Error: could not determine hostname from args"
+        /usr/bin/ssh ...$args
+        return
+    }
+
+    # Strip user@ prefix if present to get clean hostname
+    let display_host = if ($hostname | str contains "@") {
+        $hostname | split row "@" | last
+    } else {
+        $hostname
+    }
+
+    let in_tmux = ($env | get -o TMUX | is-not-empty)
+
+    if $in_tmux {
+        # Tag pane with remote host
+        tmux set-option -p @ssh_host $display_host
+
+        # Rename window to remote host
+        tmux rename-window $display_host
+
+        # Set env var
+        $env.SSH_REMOTE = $display_host
+    }
+
+    # Run actual ssh
+    /usr/bin/ssh ...$args
+
+    # Cleanup after disconnect
+    if $in_tmux {
+        tmux set-option -pu @ssh_host
+        tmux set-option -wu automatic-rename on
+    }
+}

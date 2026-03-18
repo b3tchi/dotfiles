@@ -1,0 +1,23 @@
+linux:
+  links:
+    profile: ~/.config/sxmo/profile
+    sway: ~/.config/sxmo/sway
+    conky.conf: ~/.config/sxmo/conky.conf
+    hooks/sxmo_hook_unlock.sh: ~/.config/sxmo/hooks/sxmo_hook_unlock.sh
+
+  installs:
+    cmd: |
+      touch ~/.cache/sxmo/sxmo.noidle
+      if [ ! -f /usr/bin/sxmo_migrate.sh.orig ]; then
+        doas cp /usr/bin/sxmo_migrate.sh /usr/bin/sxmo_migrate.sh.orig
+      fi
+      doas cp ~/.dotfiles/sxmo/sxmo_migrate_noop.sh /usr/bin/sxmo_migrate.sh
+      doas chmod +x /usr/bin/sxmo_migrate.sh
+      mkdir -p ~/.local/share/fonts
+      if ! fc-list | grep -qi "Iosevka Nerd"; then
+        curl -sL "https://github.com/ryanoasis/nerd-fonts/releases/download/v3.4.0/Iosevka.tar.xz" -o /tmp/iosevka-nerd.tar.xz
+        tar xf /tmp/iosevka-nerd.tar.xz -C ~/.local/share/fonts/
+        rm /tmp/iosevka-nerd.tar.xz
+        fc-cache -f
+      fi
+      rotz link sxmo --force

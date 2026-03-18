@@ -1,0 +1,6 @@
+#!/bin/sh
+# Switch USB to host mode for USB accessories (keyboard, etc.)
+# Auto role-switch (UCSI) is broken on Nothing Phone 1, so we force host mode at boot.
+# To switch back to device mode (USB networking):
+#   echo device > /sys/class/usb_role/a600000.usb-role-switch/role
+echo host > /sys/class/usb_role/a600000.usb-role-switch/role
