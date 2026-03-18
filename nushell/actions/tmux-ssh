@@ -2,25 +2,13 @@
 # SSH wrapper that tags tmux pane with remote host info
 # Symlinked to ~/.local/bin/txs via rotz
 
-def main [
-    --port (-p): int      # SSH port
-    ...args: string
-] {
-    if ($args | is-empty) {
-        # No args — just show usage
-        print "Usage: txs [ssh-args...] <host>"
-        print "SSH wrapper that sets tmux pane metadata for remote host"
-        return
-    }
-
-    # Extract hostname from args: first arg that doesn't start with - and isn't a flag value
-    let hostname = ($args
+# Extract hostname from SSH args
+def parse-hostname [args: list<string>]: nothing -> string {
+    $args
         | reduce --fold { skip: false, host: null } {|arg, acc|
             if $acc.skip {
-                # Previous arg was a flag that takes a value, skip this
                 { skip: false, host: $acc.host }
             } else if ($arg | str starts-with "-") {
-                # Flags that take a value argument
                 let value_flags = ["-p" "-l" "-i" "-o" "-F" "-J" "-L" "-R" "-D" "-W" "-E" "-S" "-b" "-c" "-e" "-m" "-O" "-Q" "-w" "-B"]
                 if ($arg in $value_flags) {
                     { skip: true, host: $acc.host }
@@ -28,13 +16,60 @@ def main [
                     { skip: false, host: $acc.host }
                 }
             } else if ($acc.host == null) {
-                # First non-flag arg is the destination
                 { skip: false, host: $arg }
             } else {
                 $acc
             }
         }
-        | get host)
+        | get host
+}
+
+def "main cleanup" [
+    --port (-p): int      # SSH port
+    ...args: string       # SSH args including host
+] {
+    let hostname = if ($args | is-empty) { null } else { parse-hostname $args }
+
+    if ($hostname == null) {
+        print "Usage: txs cleanup [ssh-args...] <host>"
+        print "Kill all unattached remote tmux sessions on a host"
+        return
+    }
+
+    let ssh_args = if ($port != null) {
+        [-p $"($port)" ...$args]
+    } else {
+        $args
+    }
+
+    # List sessions on remote socket, kill those with 0 attached clients
+    let sessions = (^ssh ...$ssh_args "tmux -L remote list-sessions -F '#{session_name}:#{session_attached}'" | lines)
+
+    let unattached = ($sessions | where {|s| ($s | str ends-with ":0")} | each {|s| $s | split row ":" | first})
+
+    if ($unattached | is-empty) {
+        print "No unattached remote sessions"
+        return
+    }
+
+    for session in $unattached {
+        ^ssh ...$ssh_args $"tmux -L remote kill-session -t ($session)"
+        print $"Killed remote session: ($session)"
+    }
+}
+
+def main [
+    --port (-p): int      # SSH port
+    ...args: string
+] {
+    if ($args | is-empty) {
+        print "Usage: txs [ssh-args...] <host>"
+        print "       txs cleanup [ssh-args...] <host>"
+        print "SSH wrapper that sets tmux pane metadata for remote host"
+        return
+    }
+
+    let hostname = parse-hostname $args
 
     if ($hostname == null) {
         print "Error: could not determine hostname from args"
@@ -61,15 +96,32 @@ def main [
         $args
     }
 
-    # Copy tmux-remote config to remote, then attach/create session on separate socket
+    if not $in_tmux {
+        print "Error: txs must be run inside a tmux session"
+        return
+    }
+
+    # Copy tmux-remote config to remote
     let config_path = ($env.HOME | path join ".dotfiles/tmux/tmux-remote.conf")
     ^scp ...(if $port != null { [-P $"($port)"] } else { [] }) $config_path $"($hostname):/tmp/tmux-remote.conf"
 
-    if $in_tmux {
-        let session_group = (tmux display-message -p '#{session_group}' | str trim)
-        let reattach = $"tmux-start attach 0 ($session_group)"
-        tmux detach-client -E $"ssh -t ($ssh_args | str join ' ') 'tmux -L remote -f /tmp/tmux-remote.conf new-session -A -s ($display_host)'; ($reattach)"
-    } else {
-        ^ssh -t ...$ssh_args $"tmux -L remote -f /tmp/tmux-remote.conf new-session -A -s ($display_host)"
+    # Unique remote session name: hostname_windowindex
+    let window_index = (tmux display-message -p '#{window_index}' | str trim)
+    let remote_session = $"($display_host)_($window_index)"
+
+    # Store remote connection info per-pane for keybind-driven detach/kill
+    tmux set-option -p @ssh_remote_host $hostname
+    tmux set-option -p @ssh_remote_session $remote_session
+    tmux set-option -p @ssh_remote_port (if $port != null { $"($port)" } else { "" })
+
+    try {
+        ^ssh -t ...$ssh_args $"tmux -L remote -f /tmp/tmux-remote.conf new-session -A -s ($remote_session)"
+    } catch {
+        print $"Error: failed to connect to ($hostname)"
     }
+
+    # Cleanup pane options after SSH disconnects or fails
+    tmux set-option -pu @ssh_remote_host
+    tmux set-option -pu @ssh_remote_session
+    tmux set-option -pu @ssh_remote_port
 }
