@@ -13,7 +13,11 @@
       "Bash(printf hello-clip:*)",
       "Bash(systemctl:*)",
       "Bash(SWAYSOCK=/run/user/1000/sway-ipc.1000.333813.sock swaymsg:*)",
-      "Bash(tmux list-sessions:*)"
+      "Bash(tmux list-sessions:*)",
+      "Bash(command -v tmux-ssh)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ]
   }
 }
