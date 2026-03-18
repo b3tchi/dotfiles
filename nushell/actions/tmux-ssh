@@ -2,7 +2,10 @@
 # SSH wrapper that tags tmux pane with remote host info
 # Symlinked to ~/.local/bin/txs via rotz
 
-def main [...args: string] {
+def main [
+    --port (-p): int      # SSH port
+    ...args: string
+] {
     if ($args | is-empty) {
         # No args — just show usage
         print "Usage: txs [ssh-args...] <host>"
@@ -35,7 +38,11 @@ def main [...args: string] {
 
     if ($hostname == null) {
         print "Error: could not determine hostname from args"
-        /usr/bin/ssh ...$args
+        if ($port != null) {
+            ^ssh -p $port ...$args
+        } else {
+            ^ssh ...$args
+        }
         return
     }
 
@@ -48,23 +55,21 @@ def main [...args: string] {
 
     let in_tmux = ($env | get -o TMUX | is-not-empty)
 
-    if $in_tmux {
-        # Tag pane with remote host
-        tmux set-option -p @ssh_host $display_host
-
-        # Rename window to remote host
-        tmux rename-window $display_host
-
-        # Set env var
-        $env.SSH_REMOTE = $display_host
+    let ssh_args = if ($port != null) {
+        [-p $"($port)" ...$args]
+    } else {
+        $args
     }
 
-    # Run actual ssh
-    /usr/bin/ssh ...$args
+    # Copy tmux-remote config to remote, then attach/create session on separate socket
+    let config_path = ($env.HOME | path join ".dotfiles/tmux/tmux-remote.conf")
+    ^scp ...(if $port != null { [-P $"($port)"] } else { [] }) $config_path $"($hostname):/tmp/tmux-remote.conf"
 
-    # Cleanup after disconnect
     if $in_tmux {
-        tmux set-option -pu @ssh_host
-        tmux set-option -wu automatic-rename on
+        let session_group = (tmux display-message -p '#{session_group}' | str trim)
+        let reattach = $"tmux-start attach 0 ($session_group)"
+        tmux detach-client -E $"ssh -t ($ssh_args | str join ' ') 'tmux -L remote -f /tmp/tmux-remote.conf new-session -A -s ($display_host)'; ($reattach)"
+    } else {
+        ^ssh -t ...$ssh_args $"tmux -L remote -f /tmp/tmux-remote.conf new-session -A -s ($display_host)"
     }
 }
