@@ -1,5 +1,6 @@
 {
-  "env": {
-    "TMPDIR": "/data/data/com.termux/files/usr/tmp"
+  "statusLine": {
+    "type": "command",
+    "command": "bash ~/.claude/statusline.sh"
   }
 }

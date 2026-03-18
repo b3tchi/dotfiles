@@ -1,6 +1,7 @@
 linux:
   links:
     settings.json: ~/.claude/settings.json
+    statusline.sh: ~/.claude/statusline.sh
     {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
     claude-wrapper: /data/data/com.termux/files/usr/bin/claude
     {{/if}}
