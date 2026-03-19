@@ -1,6 +1,8 @@
 #!/usr/bin/env nu
 # SSH wrapper that tags tmux pane with remote host info
 # Symlinked to ~/.local/bin/txs via rotz
+#
+# Aliases: tsc (connect), tsx (cleanup), tsl (list), tsr (reconnect)
 
 # Extract hostname from SSH args
 def parse-hostname [args: list<string>]: nothing -> string {
@@ -24,48 +26,27 @@ def parse-hostname [args: list<string>]: nothing -> string {
         | get host
 }
 
-def "main cleanup" [
-    --port (-p): int      # SSH port
-    ...args: string       # SSH args including host
-] {
-    let hostname = if ($args | is-empty) { null } else { parse-hostname $args }
-
-    if ($hostname == null) {
-        print "Usage: txs cleanup [ssh-args...] <host>"
-        print "Kill all unattached remote tmux sessions on a host"
-        return
-    }
-
-    let ssh_args = if ($port != null) {
-        [-p $"($port)" ...$args]
-    } else {
-        $args
-    }
-
-    # List sessions on remote socket, kill those with 0 attached clients
-    let sessions = (^ssh ...$ssh_args "tmux -L remote list-sessions -F '#{session_name}:#{session_attached}'" | lines)
-
-    let unattached = ($sessions | where {|s| ($s | str ends-with ":0")} | each {|s| $s | split row ":" | first})
-
-    if ($unattached | is-empty) {
-        print "No unattached remote sessions"
-        return
-    }
-
-    for session in $unattached {
-        ^ssh ...$ssh_args $"tmux -L remote kill-session -t ($session)"
-        print $"Killed remote session: ($session)"
-    }
+# Extract scp port args from ssh args
+def scp-port-args [args: list<string>]: nothing -> list<string> {
+    if ($args | any {|a| $a == "-p"}) {
+        let port_idx = ($args | enumerate | where {|e| $e.item == "-p"} | first | get index)
+        [-P ($args | get ($port_idx + 1))]
+    } else { [] }
 }
 
-def main [
-    --port (-p): int      # SSH port
-    ...args: string
+# Extract port value from ssh args
+def get-port [args: list<string>]: nothing -> string {
+    if ($args | any {|a| $a == "-p"}) {
+        let port_idx = ($args | enumerate | where {|e| $e.item == "-p"} | first | get index)
+        $args | get ($port_idx + 1)
+    } else { "" }
+}
+
+def --wrapped "main connect" [
+    ...args: string       # SSH args (e.g. -p 8022 user@host)
 ] {
     if ($args | is-empty) {
-        print "Usage: txs [ssh-args...] <host>"
-        print "       txs cleanup [ssh-args...] <host>"
-        print "SSH wrapper that sets tmux pane metadata for remote host"
+        main
         return
     }
 
@@ -73,11 +54,7 @@ def main [
 
     if ($hostname == null) {
         print "Error: could not determine hostname from args"
-        if ($port != null) {
-            ^ssh -p $port ...$args
-        } else {
-            ^ssh ...$args
-        }
+        ^ssh ...$args
         return
     }
 
@@ -90,20 +67,14 @@ def main [
 
     let in_tmux = ($env | get -o TMUX | is-not-empty)
 
-    let ssh_args = if ($port != null) {
-        [-p $"($port)" ...$args]
-    } else {
-        $args
-    }
-
     if not $in_tmux {
         print "Error: txs must be run inside a tmux session"
         return
     }
 
-    # Copy tmux-remote config to remote
+    # Copy tmux-remote config to remote (silent)
     let config_path = ($env.HOME | path join ".dotfiles/tmux/tmux-remote.conf")
-    ^scp ...(if $port != null { [-P $"($port)"] } else { [] }) $config_path $"($hostname):/tmp/tmux-remote.conf"
+    ^scp -q ...(scp-port-args $args) $config_path $"($hostname):/tmp/tmux-remote.conf"
 
     # Unique remote session name: hostname_windowindex
     let window_index = (tmux display-message -p '#{window_index}' | str trim)
@@ -112,16 +83,195 @@ def main [
     # Store remote connection info per-pane for keybind-driven detach/kill
     tmux set-option -p @ssh_remote_host $hostname
     tmux set-option -p @ssh_remote_session $remote_session
-    tmux set-option -p @ssh_remote_port (if $port != null { $"($port)" } else { "" })
+    tmux set-option -p @ssh_remote_port (get-port $args)
 
     try {
-        ^ssh -t ...$ssh_args $"tmux -L remote -f /tmp/tmux-remote.conf new-session -A -s ($remote_session)"
+        ^ssh -t ...$args $"bash -l -c 'tmux -L remote -f /tmp/tmux-remote.conf new-session -A -s ($remote_session)'"
     } catch {
         print $"Error: failed to connect to ($hostname)"
     }
+
+    # Check if session still exists after disconnect
+    let session_alive = (^ssh ...$args $"tmux -L remote has-session -t ($remote_session) 2>/dev/null; echo $?" | str trim) == "0"
+
+    # Move up two lines, clear them, print status
+    print $"\e[2A\e[2K\e[1B\e[2K\e[1A($remote_session) (if $session_alive { "detached" } else { "killed" })"
 
     # Cleanup pane options after SSH disconnects or fails
     tmux set-option -pu @ssh_remote_host
     tmux set-option -pu @ssh_remote_session
     tmux set-option -pu @ssh_remote_port
+}
+
+def --wrapped "main list" [
+    ...args: string       # SSH args (e.g. -p 8022 user@host)
+] {
+    if ($args | is-empty) {
+        print "Usage: tsl -- [ssh-args...] <host>"
+        print "List remote tmux sessions"
+        return
+    }
+
+    let sessions = try {
+        ^ssh ...$args "tmux -L remote list-sessions -F '#{session_name}:#{session_attached}:#{session_created}'" | lines
+    } catch {
+        print "No remote tmux server running"
+        return
+    }
+
+    if ($sessions | is-empty) {
+        print "No remote sessions"
+        return
+    }
+
+    $sessions | each {|s|
+        let parts = ($s | split row ":")
+        let name = ($parts | get 0)
+        let attached = if ($parts | get 1) == "1" { "attached" } else { "detached" }
+        $"($name) \(($attached)\)"
+    } | str join "\n" | print
+}
+
+def --wrapped "main reconnect" [
+    ...args: string       # SSH args (e.g. -p 8022 user@host) or (-s session_name -p 8022 user@host)
+] {
+    if ($args | is-empty) {
+        print "Usage: tsr [-s session] [ssh-args...] <host>"
+        print "Reconnect to a detached remote session"
+        return
+    }
+
+    # Extract optional -s session_name from args
+    let target_session = if ($args | any {|a| $a == "-s"}) {
+        let idx = ($args | enumerate | where {|e| $e.item == "-s"} | first | get index)
+        $args | get ($idx + 1)
+    } else { null }
+
+    # Remove -s and its value from args to get clean ssh args
+    let ssh_args = if ($target_session != null) {
+        let idx = ($args | enumerate | where {|e| $e.item == "-s"} | first | get index)
+        $args | enumerate | where {|e| $e.index != $idx and $e.index != ($idx + 1)} | get item
+    } else { $args }
+
+    let hostname = parse-hostname $ssh_args
+
+    if ($hostname == null) {
+        print "Error: could not determine hostname from args"
+        return
+    }
+
+    let in_tmux = ($env | get -o TMUX | is-not-empty)
+
+    if not $in_tmux {
+        print "Error: must be run inside a tmux session"
+        return
+    }
+
+    # Get detached sessions
+    let sessions = try {
+        ^ssh ...$ssh_args "tmux -L remote list-sessions -F '#{session_name}:#{session_attached}'" | lines
+    } catch {
+        print "No remote tmux server running"
+        return
+    }
+
+    let all_sessions = ($sessions | each {|s| $s | split row ":" | first})
+
+    if ($all_sessions | is-empty) {
+        print "No remote sessions"
+        return
+    }
+
+    # Use target session if specified, otherwise pick
+    let session = if ($target_session != null) {
+        if ($target_session in $all_sessions) {
+            $target_session
+        } else {
+            print $"Session ($target_session) not found"
+            print $"Available: ($all_sessions | str join ', ')"
+            return
+        }
+    } else if ($all_sessions | length) == 1 {
+        $all_sessions | first
+    } else {
+        $sessions | each {|s|
+            let parts = ($s | split row ":")
+            let status = if ($parts | get 1) == "1" { "attached" } else { "detached" }
+            $"($parts | get 0) \(($status)\)"
+        } | str join "\n" | fzf --prompt "Select session: " | str replace ' (attached)' '' | str replace ' (detached)' '' | str trim
+    }
+
+    if ($session | is-empty) {
+        return
+    }
+
+    # Store remote connection info per-pane
+    tmux set-option -p @ssh_remote_host $hostname
+    tmux set-option -p @ssh_remote_session $session
+    tmux set-option -p @ssh_remote_port (get-port $ssh_args)
+
+    # Copy config and attach
+    let config_path = ($env.HOME | path join ".dotfiles/tmux/tmux-remote.conf")
+    ^scp -q ...(scp-port-args $ssh_args) $config_path $"($hostname):/tmp/tmux-remote.conf"
+
+    try {
+        ^ssh -t ...$ssh_args $"bash -l -c 'tmux -L remote -f /tmp/tmux-remote.conf attach-session -t ($session)'"
+    } catch {
+        print $"Error: failed to reconnect to ($hostname)"
+    }
+
+    # Check if session still exists after disconnect
+    let session_alive = (^ssh ...$ssh_args $"tmux -L remote has-session -t ($session) 2>/dev/null; echo $?" | str trim) == "0"
+
+    print $"\e[2A\e[2K\e[1B\e[2K\e[1A($session) (if $session_alive { "detached" } else { "killed" })"
+
+    # Cleanup pane options
+    tmux set-option -pu @ssh_remote_host
+    tmux set-option -pu @ssh_remote_session
+    tmux set-option -pu @ssh_remote_port
+}
+
+def --wrapped "main cleanup" [
+    ...args: string       # SSH args (e.g. -p 8022 user@host)
+] {
+    if ($args | is-empty) {
+        print "Usage: tsx -- [ssh-args...] <host>"
+        print "Kill all unattached remote tmux sessions"
+        return
+    }
+
+    # List sessions on remote socket, kill those with 0 attached clients
+    let sessions = try {
+        ^ssh ...$args "tmux -L remote list-sessions -F '#{session_name}:#{session_attached}'" | lines
+    } catch {
+        print "No remote tmux server running"
+        return
+    }
+
+    let unattached = ($sessions | where {|s| ($s | str ends-with ":0")} | each {|s| $s | split row ":" | first})
+
+    if ($unattached | is-empty) {
+        print "No unattached remote sessions"
+        return
+    }
+
+    for session in $unattached {
+        ^ssh ...$args $"tmux -L remote kill-session -t ($session)"
+        print $"Killed remote session: ($session)"
+    }
+}
+
+def main [] {
+    print "txs - tmux SSH session manager"
+    print ""
+    print "Commands:"
+    print "  tsc -- [ssh-args] <host>   Connect to remote host"
+    print "  tsr -- [ssh-args] <host>   Reconnect to detached session"
+    print "  tsl -- [ssh-args] <host>   List remote sessions"
+    print "  tsx -- [ssh-args] <host>   Cleanup unattached sessions"
+    print ""
+    print "Keybinds (inside tmux):"
+    print "  prefix e   Detach from remote (keep alive)"
+    print "  prefix E   Kill remote session"
+    print "  prefix X   Kill all unattached remote sessions"
 }
