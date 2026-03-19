@@ -68,10 +68,12 @@ def --wrapped "main connect" [
     let in_tmux = ($env | get -o TMUX | is-not-empty)
 
     if not $in_tmux {
-        print "Error: txs must be run inside a tmux session"
+        # Outside tmux: SSH with login shell, let remote bashrc handle tmux
+        ^ssh -t ...$args "bash -l"
         return
     }
 
+    # Inside tmux: create remote session on separate socket
     # Copy tmux-remote config to remote (silent)
     let config_path = ($env.HOME | path join ".dotfiles/tmux/tmux-remote.conf")
     ^scp -q ...(scp-port-args $args) $config_path $"($hostname):/tmp/tmux-remote.conf"
