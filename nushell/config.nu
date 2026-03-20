@@ -708,7 +708,10 @@ alias lg = lazygit
 alias top = btm -b
 
 # tmux-ssh
-alias txs = tmux-ssh
+alias tsc = tmux-ssh connect
+alias tsr = tmux-ssh reconnect
+alias tsl = tmux-ssh list
+alias tsx = tmux-ssh cleanup
 
 # lf
 def --env --wrapped lfcd [...args:string] {

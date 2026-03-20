@@ -2,13 +2,11 @@
 # ~/.bashrc
 #
 
+# Always ensure ~/.local/bin is in PATH (non-interactive shells too)
+export PATH="$HOME/.local/bin:$PATH"
+
 # If not running interactively, don't do anything
 [[ $- != *i* ]] && return
-
-# Add ~/.local/bin to PATH if it exists
-if [ -d "$HOME/.local/bin" ]; then
-	export PATH="$HOME/.local/bin:$PATH"
-fi
 
 alias ls='ls --color=auto'
 alias grep='grep --color=auto'
