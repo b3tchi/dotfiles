@@ -1,0 +1,3 @@
+linux:
+  links:
+    xdg-open: ~/.local/bin/xdg-open
