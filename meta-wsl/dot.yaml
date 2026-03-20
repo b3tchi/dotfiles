@@ -2,6 +2,7 @@
 # Arch Linux with Sway (WSLg)
 # Usage: rotz install meta-wsl
 depends:
+  - wsl
   - distro
   - nushell
   - tmux
