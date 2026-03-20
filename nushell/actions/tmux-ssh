@@ -67,9 +67,12 @@ def --wrapped "main connect" [
 
     let in_tmux = ($env | get -o TMUX | is-not-empty)
 
+    # Determine session/project name
+    let session = (tmux-session-name | str trim)
+
     if not $in_tmux {
         # Outside tmux: create session headless on remote, then attach via TMUX_TARGET
-        let target = (^ssh ...$args "~/.local/bin/tmux-start start 0 local" | str trim)
+        let target = (^ssh ...$args $"~/.local/bin/tmux-start start 0 ($session)" | str trim)
         if ($target | is-empty) {
             # Fallback: plain login shell if tmux-start not available on remote
             ^ssh -t ...$args "bash -li"

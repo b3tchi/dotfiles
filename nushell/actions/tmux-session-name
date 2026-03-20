@@ -1,0 +1,38 @@
+#!/usr/bin/env nu
+# Detect tmux session name from WM workspace or tmux session group
+# Outputs session name to stdout (default: "local")
+
+def main [] {
+    # If inside tmux, use session group name
+    if ($env | get -o TMUX | is-not-empty) {
+        let group = (tmux display-message -p '#{session_group}' | str trim)
+        if ($group | is-not-empty) {
+            print $group
+            return
+        }
+    }
+
+    # Try WM workspace detection
+    if (which wm-ipc.nu | is-not-empty) {
+        let ws_name = (do { nu -c 'use ~/.local/bin/wm-ipc.nu *; ipc "-t get_workspaces" | from json | where focused == true | first | get name' } | complete
+            | if $in.exit_code == 0 { $in.stdout | str trim } else { "" })
+
+        if ($ws_name | is-not-empty) and not ($ws_name =~ '^\d+$') {
+            if ($ws_name =~ '^(.+)_\d+$') {
+                print ($ws_name | parse --regex '^(?P<project>.+)_\d+$' | first | get project)
+                return
+            }
+
+            let config = ($env.HOME | path join ".config/project/projects.yaml")
+            if ($config | path exists) {
+                let projects = (open $config | get -o projects | default {})
+                if ($ws_name in ($projects | columns)) {
+                    print $ws_name
+                    return
+                }
+            }
+        }
+    }
+
+    print "local"
+}
