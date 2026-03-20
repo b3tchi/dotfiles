@@ -25,6 +25,7 @@ linux:
 
   installs:
     cmd: |
+      mkdir -p ~/.local/bin
       chmod +x ~/.dotfiles/distro/actions/tmux-cleanup
       chmod +x ~/.dotfiles/distro/actions/tmux-start
       {{#if (eq whoami.distro "Manjaro Linux")}}

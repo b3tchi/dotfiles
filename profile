@@ -20,10 +20,8 @@ if [ -d "$HOME/bin" ] ; then
   export PATH="$HOME/bin:$PATH"
 fi
 
-# set PATH so it includes user's private bin if it exists
-if [ -d "$HOME/.local/bin" ] ; then
-  export PATH="$HOME/.local/bin:$PATH"
-fi
+# set PATH so it includes user's private bin (~/.local/bin created by rotz distro install)
+export PATH="$HOME/.local/bin:$PATH"
 
 # if rust is installed then added runtime to path
 if [ -f "$HOME/.cargo/env" ] ; then
