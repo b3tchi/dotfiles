@@ -1,24 +1,27 @@
 {
-	"permissions": {
-		"allow": [
-			"Bash(TMPDIR=/data/data/com.termux/files/usr/tmp gh release view --repo volllly/rotz --json assets --jq '.assets[].name')",
-			"Bash(TMPDIR=$HOME/.cache bash /data/data/com.termux/files/home/.dotfiles/install-rotz.sh)",
-			"Bash(proot-distro list:*)",
-			"Bash(tmux send-keys:*)",
-			"Bash(sleep 2:*)",
-			"Bash(tmux capture-pane:*)",
-			"Bash(bash /data/data/com.termux/files/home/.dotfiles/scripts/termux/start-i3.sh 2>&)",
-			"Bash(tmux list-windows:*)",
-			"Bash(sleep:*)",
-			"Bash(printf hello-clip:*)",
-			"Bash(systemctl:*)",
-			"Bash(SWAYSOCK=/run/user/1000/sway-ipc.1000.333813.sock swaymsg:*)",
-			"Bash(tmux list-sessions:*)",
-			"Bash(rotz -r:*)",
-			"Bash(command -v tmux-ssh)",
-			"Bash(git add:*)",
-			"Bash(git commit:*)",
-			"Bash(git push:*)"
-		]
-	}
+  "permissions": {
+    "allow": [
+      "Bash(TMPDIR=/data/data/com.termux/files/usr/tmp gh release view --repo volllly/rotz --json assets --jq '.assets[].name')",
+      "Bash(TMPDIR=$HOME/.cache bash /data/data/com.termux/files/home/.dotfiles/install-rotz.sh)",
+      "Bash(proot-distro list:*)",
+      "Bash(tmux send-keys:*)",
+      "Bash(sleep 2:*)",
+      "Bash(tmux capture-pane:*)",
+      "Bash(bash /data/data/com.termux/files/home/.dotfiles/scripts/termux/start-i3.sh 2>&)",
+      "Bash(tmux list-windows:*)",
+      "Bash(sleep:*)",
+      "Bash(printf hello-clip:*)",
+      "Bash(systemctl:*)",
+      "Bash(SWAYSOCK=/run/user/1000/sway-ipc.1000.333813.sock swaymsg:*)",
+      "Bash(tmux list-sessions:*)",
+      "Bash(rotz -r:*)",
+      "Bash(command -v tmux-ssh)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git pull:*)",
+      "Bash(tmux has-session:*)",
+      "Bash(~/.local/bin/tmux-start start:*)"
+    ]
+  }
 }
