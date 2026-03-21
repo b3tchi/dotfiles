@@ -68,7 +68,7 @@ def --wrapped "main connect" [
     let in_tmux = ($env | get -o TMUX | is-not-empty)
 
     # Determine session/project name
-    let session = (tmux-session-name | str trim)
+    let session = (wm-current-workspace | str trim)
 
     if not $in_tmux {
         # Outside tmux: create session headless on remote, then attach via TMUX_TARGET
