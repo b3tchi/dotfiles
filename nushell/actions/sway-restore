@@ -1,7 +1,6 @@
 #!/usr/bin/env nu
 # Restore sway workspaces + terminals from saved state after sway restart
-# Each terminal auto-attaches to the correct tmux session via bashrc
-# Then switches each terminal to its saved tmux window
+# Uses TMUX_TARGET to pre-create sessions and attach terminals to the right window
 
 def main [] {
     let state_file = ("~/.cache/sway-state.json" | path expand)
@@ -24,10 +23,6 @@ def main [] {
         return
     }
 
-    # Disable cleanup hooks during restore to prevent race conditions
-    tmux set-hook -gu client-detached
-    tmux set-hook -gu after-select-window
-
     for ws in $workspaces {
         let ws_name = ($ws | get -o name | default "")
         if ($ws_name | is-empty) { continue }
@@ -39,52 +34,25 @@ def main [] {
 
         if ($terminals | is-empty) {
             ^swaymsg exec foot
-            sleep 1sec
             continue
         }
 
-        # Snapshot session names before launching terminals
-        let sessions_before = (tmux list-sessions -F "#{session_name}" | lines | where $it != "")
-
-        # Launch one foot terminal per saved terminal
         for term in $terminals {
-            ^swaymsg exec foot
-            sleep 1sec
-        }
-
-        # Wait for all terminals to attach to tmux
-        sleep 2sec
-
-        # Find newly created session views
-        let sessions_after = (tmux list-sessions -F "#{session_name}" | lines | where $it != "")
-        mut new_sessions = ($sessions_after | where { |s| $s not-in $sessions_before })
-
-        # Match new sessions to terminals and switch windows
-        for term in $terminals {
-            let session = ($term | get -o session | default "")
+            let session = ($term | get -o session | default "local")
             let window = ($term | get -o window | default null)
-            if ($session | is-empty) or $window == null { continue }
 
-            # Find new sessions belonging to this group
-            let new_in_group = ($new_sessions | where { |s|
-                let group = ($s | parse -r '^(?P<group>.+)_\d+$'
-                    | get -o 0 | get -o group | default $s)
-                $group == $session
-            })
+            # Create headless tmux session+window for this terminal
+            let target = (tmux-start start 0 $session | str trim)
 
-            if ($new_in_group | is-not-empty) {
-                let target = ($new_in_group | first)
-                print $"  Switching ($target) to window ($window)"
-                tmux select-window -t $"($target):($window)"
-                # Remove consumed session so next terminal gets a different one
-                $new_sessions = ($new_sessions | where { |s| $s != $target })
+            if $window != null {
+                # Parse session name from target (e.g. "local_3:5" -> "local_3")
+                let target_session = ($target | split row ":" | first)
+                tmux select-window -t $"($target_session):($window)"
             }
+
+            ^swaymsg $"exec env TMUX_TARGET=($target) foot"
         }
     }
-
-    # Re-enable cleanup hooks
-    tmux set-hook -g client-detached 'run-shell "~/.local/bin/tmux-cleanup"'
-    tmux set-hook -g after-select-window 'run-shell "~/.local/bin/tmux-cleanup"'
 
     # Switch back to first workspace
     let first_name = ($workspaces | first | get -o name | default "")
