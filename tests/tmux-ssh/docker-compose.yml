@@ -23,6 +23,10 @@ services:
     hostname: remote-machine
     volumes:
       - ssh-keys:/shared-keys
+      # Remote needs tmux-start, tmux.conf, bashrc for to-workstation flow
+      - ../../distro/actions/tmux-start:/home/testuser/.local/bin/tmux-start
+      - ../../tmux/tmux.conf:/home/testuser/.tmux.conf:ro
+      - ../../distro/bashrc:/home/testuser/.bashrc:ro
 
 volumes:
   ssh-keys:

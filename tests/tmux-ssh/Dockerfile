@@ -2,7 +2,7 @@ FROM archlinux:latest
 
 # Install nushell, tmux, openssh
 RUN pacman -Syu --noconfirm && \
-    pacman -S --noconfirm nushell tmux openssh && \
+    pacman -S --noconfirm nushell tmux openssh fzf && \
     pacman -Scc --noconfirm
 
 # Configure SSH server
