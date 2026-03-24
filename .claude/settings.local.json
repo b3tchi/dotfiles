@@ -21,7 +21,29 @@
       "Bash(git push:*)",
       "Bash(git pull:*)",
       "Bash(tmux has-session:*)",
-      "Bash(~/.local/bin/tmux-start start:*)"
+      "Bash(~/.local/bin/tmux-start start:*)",
+      "Bash(bd --help)",
+      "Bash(bd create:*)",
+      "Bash(bd init:*)",
+      "Bash(bd sync:*)",
+      "Bash(git mv:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:hub.docker.com)",
+      "Bash(chmod:*)",
+      "Bash(keyctl --version)",
+      "Bash(nu /home/jan/.dotfiles/nushell/actions/tmux-from-workstation)",
+      "Bash(nu /home/jan/.dotfiles/nushell/actions/tmux-to-workstation)",
+      "Bash(ln -sf /home/jan/.dotfiles/nushell/actions/tmux-to-workstation /home/jan/.local/bin/tmux-to-workstation)",
+      "Bash(ln -sf /home/jan/.dotfiles/nushell/actions/tmux-from-workstation /home/jan/.local/bin/tmux-from-workstation)",
+      "Bash(tmux -L test123 -f /home/jan/.dotfiles/tmux/tmux-thin-local.conf new-session -d -s test -n testwin)",
+      "Bash(tmux -L test123 set-option -w -t testwin @remote_name \"myhost\")",
+      "Bash(tmux -L test123 display-message -t test -p '#{@remote_name}')",
+      "Bash(tmux -L test123 kill-server)",
+      "Bash(docker compose:*)",
+      "Bash(bash -x test-connect.sh)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(SKIP_BD_HOOK=1 git -c core.hooksPath=/dev/null commit -m \"$\\(cat <<'EOF'\nfix: tmux-to-workstation isolated sessions — each connect gets own thin + remote session\n\n- Remove fzf session picker, always use \"local\" group\n- Fix SSH env var passing \\(TMUX_TARGET as bare prefix, not inside quotes\\)\n- Use independent thin sessions \\(thin_0, thin_1\\) instead of linked sessions\n- Mount tmux-cleanup and tmux-start in docker test containers\n- Keep bash session alive after tmux detach \\(remove exit\\)\n- Add test-connect.sh for manual docker testing\n\nCo-Authored-By: Claude Opus 4.6 \\(1M context\\) <noreply@anthropic.com>\nEOF\n\\)\")"
     ]
   }
 }

@@ -109,6 +109,16 @@ if $nu.os-info.name != "windows" {
 	$env.GPG_TTY = (tty)
 }
 
+# gopass age auto-unlock from passphrase file
+let gopass_pw_file = if $nu.os-info.kernel_version =~ 'microsoft-standard-WSL' {
+	'/mnt/c/Users/jbecka/.gopass-age-password'
+} else {
+	$'($env.HOME)/.gopass-age-password'
+}
+if ($gopass_pw_file | path exists) {
+	$env.GOPASS_AGE_PASSWORD = (open $gopass_pw_file | str trim)
+}
+
 # carapace
 $env.CARAPACE_BRIDGES = 'zsh,fish,bash,inshellisense' # optional
 mkdir ~/.cache/carapace

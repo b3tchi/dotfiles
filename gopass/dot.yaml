@@ -1,0 +1,33 @@
+linux:
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -S --needed --noconfirm gopass age openssh
+      {{/if}}
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -S --needed --noconfirm gopass age openssh
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux ARM")}}
+      sudo pacman -S --needed --noconfirm gopass age openssh
+      {{/if}}
+      {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
+      pkg install gopass age openssh
+      {{/if}}
+
+      # create gopass age passphrase file if missing
+      {{#if env.WSL_DISTRO_NAME}}
+      GOPASS_PW_FILE="/mnt/c/Users/jbecka/.gopass-age-password"
+      {{else}}
+      GOPASS_PW_FILE="$HOME/.gopass-age-password"
+      {{/if}}
+
+      if [ ! -f "$GOPASS_PW_FILE" ]; then
+        printf "Enter gopass age passphrase: "
+        read -s GOPASS_PW
+        echo
+        printf "%s" "$GOPASS_PW" > "$GOPASS_PW_FILE"
+        {{#unless env.WSL_DISTRO_NAME}}
+        chmod 600 "$GOPASS_PW_FILE"
+        {{/unless}}
+        echo "Passphrase saved to $GOPASS_PW_FILE"
+      fi
