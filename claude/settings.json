@@ -3,6 +3,9 @@
     "type": "command",
     "command": "bash ~/.claude/statusline.sh"
   },
+  "enabledPlugins": {
+    "infinifu@infinifu-dev": true
+  },
   "extraKnownMarketplaces": {
     "infinifu-dev": {
       "source": {
@@ -11,7 +14,5 @@
       }
     }
   },
-  "enabledPlugins": {
-    "infinifu@infinifu-dev": true
-  }
+  "model": "sonnet"
 }
