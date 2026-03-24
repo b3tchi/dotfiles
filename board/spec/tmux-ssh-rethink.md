@@ -711,55 +711,65 @@ git commit -m "feat: wire up tmux-to/from-workstation linking and aliases"
 
 ---
 
-### Task 6: Manual smoke test
+### Task 6: Docker integration tests
 
-No automated tests — these are interactive SSH+tmux scripts. Verify manually.
+Automated tests using docker-compose with two containers (local + remote) connected via SSH. Tests orchestrate via `docker exec` from outside.
 
-**Done when:** All scenarios below verified, existing `tmux-ssh` still works.
+**Files:**
+- Already created: `tests/tmux-ssh/Dockerfile`, `tests/tmux-ssh/docker-compose.yml`, `tests/tmux-ssh/run-tests.sh`
 
-**Step 1: Test `tmux-from-workstation` (requires a remote server with tmux)**
+**Done when:** `./tests/tmux-ssh/run-tests.sh` passes all assertions.
+
+**What the tests cover:**
+- Script help output (both tools parse without errors)
+- `from-workstation connect` creates thin session on remote
+- `from-workstation list` shows remote thin sessions
+- `from-workstation cleanup` kills unattached remote thin sessions
+- `to-workstation connect` creates local thin session with correct window name and metadata
+- `to-workstation list` shows local thin windows with status
+- `to-workstation cleanup` finds and kills dead windows (tests `remain-on-exit`)
+- Socket isolation (`-L thin` vs `-L remote` vs default don't collide)
+- `tmux-ssh` regression (help still works)
+
+**Step 1: Run the tests**
+
+```bash
+cd tests/tmux-ssh && ./run-tests.sh
+```
+
+Expected: All assertions pass, containers are torn down.
+
+**Step 2: Fix any failures, re-run until green**
+
+**Step 3: Commit any test fixes**
+
+---
+
+### Task 7: Manual smoke test
+
+After docker tests pass, verify on real hardware for scenarios docker can't cover (WM title propagation, terminal emulator behavior, fzf interactive picker).
+
+**Done when:** Real SSH connection works in both modes.
+
+**Step 1: Test `from-workstation` on real remote**
 
 ```bash
 # From inside local fat tmux:
-tmux-from-workstation connect <server-host>
-# Expected: SSHs to remote, opens thin tmux session
-# Ctrl-D or exit to disconnect
-# Expected: prints "session_name detached" or "session_name killed"
-
-tmux-from-workstation list -- <server-host>
-# Expected: lists remote thin sessions with attached/detached status
-
-tmux-from-workstation cleanup -- <server-host>
-# Expected: kills unattached sessions, prints each killed name
+tfw -- <server-host>
+# Expected: SSHs to remote, opens thin session, status bar shows [session_name]
 ```
 
-**Step 2: Test `tmux-to-workstation` (requires a second machine with tmux)**
+**Step 2: Test `to-workstation` on real remote**
 
 ```bash
 # From any machine:
-tmux-to-workstation connect <workstation-host>
-# Expected: picks remote session (fzf if multiple), detaches from local fat, starts thin, SSHs to remote fat
-# Expected: WM title bar shows [workstation-host]
-
-# Detach from thin (Ctrl-B d won't work — no prefix; close terminal instead)
-tmux-to-workstation list
-# Expected: lists thin windows with (connected)/(dead) status
-
-tmux-to-workstation reconnect
-# Expected: reattaches to thin tmux
-
-# Kill SSH (e.g., unplug network), then:
-tmux-to-workstation list
-# Expected: window shows (dead)
-
-tmux-to-workstation cleanup
-# Expected: kills dead windows
+ttw -- <workstation-host>
+# Expected: fzf picker (if multiple sessions), detach from fat, thin starts, WM title shows [hostname]
 ```
 
-**Step 3: Verify existing `tmux-ssh` still works (no regression)**
+**Step 3: Verify `tmux-ssh` unchanged**
 
 ```bash
 tsc -- <any-host>
-tsl -- <any-host>
-# Expected: no change in behavior — tmux-ssh uses -L remote, new tools use -L thin
+# Expected: no change in behavior
 ```
