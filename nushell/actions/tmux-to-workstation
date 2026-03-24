@@ -56,69 +56,46 @@ def --wrapped "main connect" [
 
     let port = get-port $args
 
-    # Pick remote session group BEFORE detaching from fat tmux (fzf needs a terminal)
-    # List session groups (not linked sessions) to avoid clutter
-    let remote_groups = try {
-        ^ssh ...$args "tmux list-sessions -F '#{session_group}' | sort -u" | lines | where {|s| ($s | str trim | is-not-empty)}
-    } catch {
-        []
-    }
-
-    let remote_session = if ($remote_groups | is-empty) {
-        # No remote sessions — auto-create "local"
-        "local"
-    } else {
-        let picker_items = ($remote_groups | uniq) | append "+ new session"
-
-        let picked = ($picker_items | str join "\n" | fzf --prompt "Remote session: " | str trim)
-        if ($picked == "+ new session") {
-            let name = (input "Session name (default: local): " | str trim)
-            if ($name | is-empty) { "local" } else { $name }
-        } else {
-            $picked
-        }
-    }
-
-    if ($remote_session | is-empty) {
-        return
-    }
+    let remote_session = "local"
 
     # Thin window name encodes connection info
     let thin_window = $"($display_host)_($remote_session)"
 
-    # Create linked session via tmux-start, pass full target (session:window) as TMUX_TARGET
-    # bashrc does: tmux attach-session -t $TMUX_TARGET which attaches to session AND selects window
-    let part1 = 'export TMUX_TARGET=$(~/.local/bin/tmux-start start 0 '
-    let part2 = ') && exec bash -li'
-    let ssh_cmd = $"ssh -t ($args | str join ' ') bash -c '($part1)($remote_session)($part2)'"
-
-    # Start or extend thin tmux (always detached first)
-    let config_path = ($env.HOME | path join ".dotfiles/tmux/tmux-thin-local.conf")
-    let thin_running = (do { tmux -L thin list-sessions } | complete | get exit_code) == 0
-
-    # Create thin window and capture its pane ID for reliable targeting
-    let pane_id = if $thin_running {
-        tmux -L thin new-window -d -P -F '#{pane_id}' -n $thin_window $ssh_cmd | str trim
-    } else {
-        tmux -L thin -f $config_path new-session -d -P -F '#{pane_id}' -s thin -n $thin_window $ssh_cmd | str trim
+    # Create linked session on remote via SSH (headless)
+    let target = (^ssh ...$args $"~/.local/bin/tmux-start start 0 ($remote_session)" 2>/dev/null | str trim)
+    if ($target | is-empty) {
+        print $"Error: tmux-start failed on ($display_host)"
+        return
     }
 
-    # Store connection metadata on the thin pane (using pane ID, not window name)
+    # SSH command for the thin pane
+    let ssh_cmd = $"ssh -t ($args | str join ' ') TMUX_TARGET=($target) bash -li"
+
+    # Each connection gets its own independent session on the thin socket
+    let config_path = ($env.HOME | path join ".dotfiles/tmux/tmux-thin-local.conf")
+
+    # Find next thin_N number
+    let existing = try {
+        tmux -L thin list-sessions -F '#{session_name}' | lines | where {|s| $s =~ '^thin_\d+$'} | each {|s| $s | str replace 'thin_' '' | into int}
+    } catch { [] }
+    let nr = if ($existing | is-empty) { 0 } else { ($existing | math max) + 1 }
+    let session_name = $"thin_($nr)"
+
+    # Create independent session (not linked)
+    let pane_id = (tmux -L thin -f $config_path new-session -d -P -F '#{pane_id}' -s $session_name $ssh_cmd | str trim)
+
+    # Store metadata
     tmux -L thin set-option -p -t $pane_id @remote_name $display_host
     tmux -L thin set-option -p -t $pane_id @remote_host $hostname
     tmux -L thin set-option -p -t $pane_id @remote_session $remote_session
     tmux -L thin set-option -p -t $pane_id @remote_port $port
     tmux -L thin set-option -p -t $pane_id @ssh_args ($args | str join " ")
 
-    # Detach from fat tmux if inside one, then attach to thin
-    # Must be last — detach kills this script's tmux context
+    # Attach
     if ($env | get -o TMUX | is-not-empty) {
-        # Detach fat and attach thin in one shot via bash
-        # detach-client exits the fat client; the && runs in the underlying shell
-        let attach_cmd = $"tmux -L thin attach-session -t thin"
-        tmux detach-client -E $attach_cmd
+        tmux detach-client -E $"tmux -L thin attach-session -t ($session_name)"
     } else {
-        tmux -L thin attach-session -t thin
+        tmux -L thin attach-session -t $session_name
     }
 }
 

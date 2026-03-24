@@ -8,6 +8,8 @@ services:
       - ../../nushell/actions/tmux-from-workstation:/home/testuser/.local/bin/tmux-from-workstation
       - ../../nushell/actions/tmux-to-workstation:/home/testuser/.local/bin/tmux-to-workstation
       - ../../nushell/actions/tmux-ssh:/home/testuser/.local/bin/tmux-ssh
+      - ../../distro/actions/tmux-cleanup:/home/testuser/.local/bin/tmux-cleanup
+      - ../../distro/actions/tmux-start:/home/testuser/.local/bin/tmux-start
       - ../../tmux/tmux.conf:/home/testuser/.tmux.conf:ro
       - ../../tmux/tmux-thin-local.conf:/home/testuser/.dotfiles/tmux/tmux-thin-local.conf:ro
       - ../../tmux/tmux-thin-remote.conf:/home/testuser/.dotfiles/tmux/tmux-thin-remote.conf:ro
@@ -23,8 +25,9 @@ services:
     hostname: remote-machine
     volumes:
       - ssh-keys:/shared-keys
-      # Remote needs tmux-start, tmux.conf, bashrc for to-workstation flow
+      # Remote needs tmux-start, tmux-cleanup, tmux.conf, bashrc for to-workstation flow
       - ../../distro/actions/tmux-start:/home/testuser/.local/bin/tmux-start
+      - ../../distro/actions/tmux-cleanup:/home/testuser/.local/bin/tmux-cleanup
       - ../../tmux/tmux.conf:/home/testuser/.tmux.conf:ro
       - ../../distro/bashrc:/home/testuser/.bashrc:ro
 

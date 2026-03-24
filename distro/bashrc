@@ -15,7 +15,7 @@ PS1='[\u@\h \W]\$ '
 # Auto-start tmux session (script symlinked to ~/.local/bin via rotz)
 if command -v tmux-start &>/dev/null; then
 	if [[ -n "$TMUX_TARGET" ]]; then
-		# Pre-created session:window from tmux-ssh — just attach
+		# Pre-created session:window — attach, drop to bash on detach
 		tmux attach-session -t "$TMUX_TARGET"
 	else
 		# Detect WM project workspace to align tmux session group with project
