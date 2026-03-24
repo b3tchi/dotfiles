@@ -5,15 +5,15 @@ services:
     hostname: local-machine
     volumes:
       # Mount dotfiles scripts into the container
-      - ../../nushell/actions/tmux-from-workstation:/home/testuser/.local/bin/tmux-from-workstation:ro
-      - ../../nushell/actions/tmux-to-workstation:/home/testuser/.local/bin/tmux-to-workstation:ro
-      - ../../nushell/actions/tmux-ssh:/home/testuser/.local/bin/tmux-ssh:ro
+      - ../../nushell/actions/tmux-from-workstation:/home/testuser/.local/bin/tmux-from-workstation
+      - ../../nushell/actions/tmux-to-workstation:/home/testuser/.local/bin/tmux-to-workstation
+      - ../../nushell/actions/tmux-ssh:/home/testuser/.local/bin/tmux-ssh
       - ../../tmux/tmux.conf:/home/testuser/.tmux.conf:ro
       - ../../tmux/tmux-thin-local.conf:/home/testuser/.dotfiles/tmux/tmux-thin-local.conf:ro
       - ../../tmux/tmux-thin-remote.conf:/home/testuser/.dotfiles/tmux/tmux-thin-remote.conf:ro
       - ../../tmux/tmux-remote.conf:/home/testuser/.dotfiles/tmux/tmux-remote.conf:ro
-      # Share SSH keys between containers
-      - ssh-keys:/home/testuser/.ssh
+      # Shared SSH keys
+      - ssh-keys:/shared-keys
     depends_on:
       - remote
 
@@ -22,8 +22,7 @@ services:
     build: .
     hostname: remote-machine
     volumes:
-      # Share SSH keys so local can SSH to remote
-      - ssh-keys:/home/testuser/.ssh
+      - ssh-keys:/shared-keys
 
 volumes:
   ssh-keys:

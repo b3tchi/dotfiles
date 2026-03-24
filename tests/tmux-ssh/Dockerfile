@@ -11,7 +11,7 @@ RUN ssh-keygen -A && \
     echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config && \
     echo 'root:test' | chpasswd
 
-# Create test user with SSH key auth
+# Create test user
 RUN useradd -m -s /bin/bash testuser && \
     echo 'testuser:test' | chpasswd && \
     mkdir -p /home/testuser/.ssh && \
@@ -19,16 +19,18 @@ RUN useradd -m -s /bin/bash testuser && \
     mkdir -p /home/testuser/.dotfiles/tmux && \
     mkdir -p /home/testuser/.config/nushell
 
-# Generate SSH keypair (shared across containers via volume)
-RUN ssh-keygen -t ed25519 -f /home/testuser/.ssh/id_ed25519 -N '' && \
-    cp /home/testuser/.ssh/id_ed25519.pub /home/testuser/.ssh/authorized_keys && \
-    chown -R testuser:testuser /home/testuser
+# Generate SSH keypair at build time (will be copied by entrypoint)
+RUN ssh-keygen -t ed25519 -f /tmp/id_ed25519 -N ''
 
 # Disable strict host checking for test convenience
-RUN echo 'Host *\n  StrictHostKeyChecking no\n  UserKnownHostsFile /dev/null' > /home/testuser/.ssh/config && \
+RUN printf 'Host *\n  StrictHostKeyChecking no\n  UserKnownHostsFile /dev/null\n' > /home/testuser/.ssh/config && \
+    chmod 700 /home/testuser/.ssh && \
     chmod 600 /home/testuser/.ssh/config && \
-    chown testuser:testuser /home/testuser/.ssh/config
+    chown -R testuser:testuser /home/testuser
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 EXPOSE 22
 
-CMD ["/usr/sbin/sshd", "-D"]
+ENTRYPOINT ["/entrypoint.sh"]
