@@ -17,7 +17,6 @@ if command -v tmux-start &>/dev/null; then
 	if [[ -n "$TMUX_TARGET" ]]; then
 		# Pre-created session:window from tmux-ssh — just attach
 		tmux attach-session -t "$TMUX_TARGET"
-		tmux set destroy-unattached
 	else
 		# Detect WM project workspace to align tmux session group with project
 		PROJECT=""

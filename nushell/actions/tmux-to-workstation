@@ -56,29 +56,26 @@ def --wrapped "main connect" [
 
     let port = get-port $args
 
-    # Pick remote session BEFORE detaching from fat tmux (fzf needs a terminal)
-    let remote_sessions = try {
-        ^ssh ...$args "tmux list-sessions -F '#{session_name}:#{session_attached}'" | lines
+    # Pick remote session group BEFORE detaching from fat tmux (fzf needs a terminal)
+    # List session groups (not linked sessions) to avoid clutter
+    let remote_groups = try {
+        ^ssh ...$args "tmux list-sessions -F '#{session_group}' | sort -u" | lines | where {|s| ($s | str trim | is-not-empty)}
     } catch {
         []
     }
 
-    let remote_session = if ($remote_sessions | is-empty) {
+    let remote_session = if ($remote_groups | is-empty) {
         # No remote sessions — auto-create "local"
         "local"
     } else {
-        # Build picker list: existing sessions + "create new" option
-        let picker_items = ($remote_sessions | each {|s|
-            let parts = ($s | split row ":")
-            let status = if ($parts | get 1) == "1" { "attached" } else { "detached" }
-            $"($parts | get 0) \(($status)\)"
-        }) | append "+ new session"
+        let picker_items = ($remote_groups | uniq) | append "+ new session"
 
         let picked = ($picker_items | str join "\n" | fzf --prompt "Remote session: " | str trim)
         if ($picked == "+ new session") {
-            "local"
+            let name = (input "Session name (default: local): " | str trim)
+            if ($name | is-empty) { "local" } else { $name }
         } else {
-            $picked | str replace ' (attached)' '' | str replace ' (detached)' ''
+            $picked
         }
     }
 
@@ -89,11 +86,11 @@ def --wrapped "main connect" [
     # Thin window name encodes connection info
     let thin_window = $"($display_host)_($remote_session)"
 
-    # Build the SSH command that will be the window's process
-    # Uses tmux-start on remote to create session with proper session groups
-    # Sets TMUX_TARGET so remote bashrc takes the pre-created attach path
-    # When SSH exits (disconnect/drop), pane stays alive due to remain-on-exit
-    let ssh_cmd = $"ssh -t ($args | str join ' ') 'export TMUX_TARGET=$(~/.local/bin/tmux-start start 0 ($remote_session)); bash -li'"
+    # Create linked session via tmux-start, pass full target (session:window) as TMUX_TARGET
+    # bashrc does: tmux attach-session -t $TMUX_TARGET which attaches to session AND selects window
+    let part1 = 'export TMUX_TARGET=$(~/.local/bin/tmux-start start 0 '
+    let part2 = ') && exec bash -li'
+    let ssh_cmd = $"ssh -t ($args | str join ' ') bash -c '($part1)($remote_session)($part2)'"
 
     # Start or extend thin tmux (always detached first)
     let config_path = ($env.HOME | path join ".dotfiles/tmux/tmux-thin-local.conf")
