@@ -142,7 +142,7 @@ export def 'remove' [
 }
 
 # open the projects config file in $EDITOR
-export def 'config edit' [] {
+export def 'config' [] {
 	let path = ($config_path | path expand)
 	let dir = ($path | path dirname)
 	if not ($dir | path exists) {
