@@ -47,7 +47,10 @@
       "Bash(journalctl:*)",
       "Read(//mnt/wslg/runtime-dir/**)",
       "Bash(echo $DISPLAY)",
-      "Read(//home/jan/.dotfiles/$XDG_RUNTIME_DIR/**)"
+      "Read(//home/jan/.dotfiles/$XDG_RUNTIME_DIR/**)",
+      "Bash(bd list:*)",
+      "Bash(bd dolt:*)",
+      "Bash(git:*)"
     ]
   }
 }
