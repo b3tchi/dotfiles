@@ -141,6 +141,19 @@ export def 'remove' [
 	print $"Project '($name)' removed"
 }
 
+# open the projects config file in $EDITOR
+export def 'config edit' [] {
+	let path = ($config_path | path expand)
+	let dir = ($path | path dirname)
+	if not ($dir | path exists) {
+		mkdir $dir
+	}
+	if not ($path | path exists) {
+		{ projects: {} } | to yaml | save $path
+	}
+	^$env.EDITOR $path
+}
+
 # navigate to project and create/attach tmux session
 export def --env 'go' [
 	name: string@project_names # project to navigate to
