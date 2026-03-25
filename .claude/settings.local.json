@@ -43,7 +43,11 @@
       "Bash(docker compose:*)",
       "Bash(bash -x test-connect.sh)",
       "Bash(echo \"EXIT: $?\")",
-      "Bash(SKIP_BD_HOOK=1 git -c core.hooksPath=/dev/null commit -m \"$\\(cat <<'EOF'\nfix: tmux-to-workstation isolated sessions — each connect gets own thin + remote session\n\n- Remove fzf session picker, always use \"local\" group\n- Fix SSH env var passing \\(TMUX_TARGET as bare prefix, not inside quotes\\)\n- Use independent thin sessions \\(thin_0, thin_1\\) instead of linked sessions\n- Mount tmux-cleanup and tmux-start in docker test containers\n- Keep bash session alive after tmux detach \\(remove exit\\)\n- Add test-connect.sh for manual docker testing\n\nCo-Authored-By: Claude Opus 4.6 \\(1M context\\) <noreply@anthropic.com>\nEOF\n\\)\")"
+      "Bash(SKIP_BD_HOOK=1 git -c core.hooksPath=/dev/null commit -m \"$\\(cat <<'EOF'\nfix: tmux-to-workstation isolated sessions — each connect gets own thin + remote session\n\n- Remove fzf session picker, always use \"local\" group\n- Fix SSH env var passing \\(TMUX_TARGET as bare prefix, not inside quotes\\)\n- Use independent thin sessions \\(thin_0, thin_1\\) instead of linked sessions\n- Mount tmux-cleanup and tmux-start in docker test containers\n- Keep bash session alive after tmux detach \\(remove exit\\)\n- Add test-connect.sh for manual docker testing\n\nCo-Authored-By: Claude Opus 4.6 \\(1M context\\) <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(journalctl:*)",
+      "Read(//mnt/wslg/runtime-dir/**)",
+      "Bash(echo $DISPLAY)",
+      "Read(//home/jan/.dotfiles/$XDG_RUNTIME_DIR/**)"
     ]
   }
 }

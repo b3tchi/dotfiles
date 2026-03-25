@@ -7,3 +7,8 @@ nvim/test_*
 flow-launcher/Plugins/*/*.json.bak
 power-toys/**/Logs
 nushell/scripts/gwt/config/profiles.yaml
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
