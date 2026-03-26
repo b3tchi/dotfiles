@@ -34,6 +34,7 @@ def get-port [args: list<string>]: nothing -> string {
 }
 
 def --wrapped "main connect" [
+    --group (-g): string  # Remote session group name (default: "local")
     ...args: string       # SSH args (e.g. -p 8022 user@host)
 ] {
     if ($args | is-empty) {
@@ -56,7 +57,14 @@ def --wrapped "main connect" [
 
     let port = get-port $args
 
-    let remote_session = "local"
+    # Pick group from current tmux session if not specified
+    let remote_session = if ($group | is-not-empty) {
+        $group
+    } else if ($env | get -o TMUX | is-not-empty) {
+        tmux display-message -p '#{session_group}' | str trim
+    } else {
+        "local"
+    }
 
     # Thin window name encodes connection info
     let thin_window = $"($display_host)_($remote_session)"
@@ -218,7 +226,7 @@ def main [] {
     print "tmux-to-workstation - local thin, remote fat"
     print ""
     print "Commands:"
-    print "  connect -- [ssh-args] <host>   Connect to remote fat session"
+    print "  connect [-g group] -- [ssh-args] <host>   Connect to remote fat session"
     print "  list                           List local thin windows"
     print "  reconnect [session]            Reattach to local thin tmux"
     print "  cleanup                        Kill dead thin windows"
