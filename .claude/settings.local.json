@@ -50,7 +50,11 @@
       "Read(//home/jan/.dotfiles/$XDG_RUNTIME_DIR/**)",
       "Bash(bd list:*)",
       "Bash(bd dolt:*)",
-      "Bash(git:*)"
+      "Bash(git:*)",
+      "Bash(swaymsg -t get_tree)",
+      "Bash(tmux:*)",
+      "Bash(env)",
+      "Bash(tmux display-message:*)"
     ]
   }
 }
