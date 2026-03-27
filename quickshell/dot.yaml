@@ -1,0 +1,15 @@
+linux:
+  links:
+    config: ~/.config/quickshell
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -S --needed --noconfirm quickshell
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -S --needed --noconfirm quickshell
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux ARM")}}
+      sudo pacman -S --needed --noconfirm quickshell
+      {{/if}}
+      rotz link quickshell --force
