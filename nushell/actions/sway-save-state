@@ -41,13 +41,33 @@ def is-descendant [ancestor_pid: int, candidate_pid: int] {
     }
 }
 
-# Find tmux client info for a single foot PID
+# Find tmux client info for a single foot PID against local (fat) clients
 def find-tmux-client [foot_pid: int, clients: list<record>] {
     for client in $clients {
         if (is-descendant $foot_pid $client.pid) {
             let group = ($client.session | parse -r '^(?P<group>.+)_\d+$'
                 | get -o 0 | get -o group | default $client.session)
-            return { session: $group, window: $client.window }
+            return { type: "local", session: $group, window: $client.window }
+        }
+    }
+    return {}
+}
+
+# Find thin tmux client info for a foot PID, including remote metadata
+def find-thin-client [foot_pid: int, thin_clients: list<record>] {
+    for client in $thin_clients {
+        if (is-descendant $foot_pid $client.pid) {
+            # Read remote connection metadata from thin pane options
+            let ssh_args = (do { tmux -L thin show-options -pv -t $client.session @ssh_args } | complete)
+            let remote_session = (do { tmux -L thin show-options -pv -t $client.session @remote_session } | complete)
+
+            if $ssh_args.exit_code == 0 and $remote_session.exit_code == 0 {
+                return {
+                    type: "thin"
+                    ssh_args: ($ssh_args.stdout | str trim)
+                    remote_session: ($remote_session.stdout | str trim)
+                }
+            }
         }
     }
     return {}
@@ -68,24 +88,35 @@ def main [] {
         }
     } | flatten | where { |r| $r != null })
 
-    # Get tmux clients: pid, session, window
-    let tmux_result = (do { tmux list-clients -F "#{client_pid} #{session_name} #{window_index}" } | complete)
-    if $tmux_result.exit_code != 0 {
-        let workspaces = ($ws_terminals | each { |wt| { name: $wt.workspace, terminals: [] } })
-        { workspaces: $workspaces } | to json | save -f ("~/.cache/sway-state.json" | path expand)
-        return
-    }
+    # Get local (fat) tmux clients: pid, session, window
+    let clients = (do { tmux list-clients -F "#{client_pid} #{session_name} #{window_index}" } | complete)
+    let local_clients = if $clients.exit_code == 0 {
+        $clients.stdout | lines | where $it != "" | each { |line|
+            let parts = ($line | split row " ")
+            { pid: ($parts.0 | into int), session: $parts.1, window: ($parts.2 | into int) }
+        }
+    } else { [] }
 
-    let clients = ($tmux_result.stdout | lines | where $it != "" | each { |line|
-        let parts = ($line | split row " ")
-        { pid: ($parts.0 | into int), session: $parts.1, window: ($parts.2 | into int) }
-    })
+    # Get thin tmux clients: pid, session
+    let thin_result = (do { tmux -L thin list-clients -F "#{client_pid} #{session_name}" } | complete)
+    let thin_clients = if $thin_result.exit_code == 0 {
+        $thin_result.stdout | lines | where $it != "" | each { |line|
+            let parts = ($line | split row " ")
+            { pid: ($parts.0 | into int), session: $parts.1 }
+        }
+    } else { [] }
 
     let workspaces = ($ws_terminals | each { |wt|
         let terminals = ($wt.pids | each { |foot_pid|
-            let match = (find-tmux-client $foot_pid $clients)
-            if ($match | is-not-empty) {
-                { session: $match.session, window: $match.window }
+            # Try local (fat) tmux first
+            let local_match = (find-tmux-client $foot_pid $local_clients)
+            if ($local_match | is-not-empty) {
+                return $local_match
+            }
+            # Try thin tmux
+            let thin_match = (find-thin-client $foot_pid $thin_clients)
+            if ($thin_match | is-not-empty) {
+                return $thin_match
             }
         } | where { |t| $t != null })
 

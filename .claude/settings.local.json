@@ -54,7 +54,20 @@
       "Bash(swaymsg -t get_tree)",
       "Bash(tmux:*)",
       "Bash(env)",
-      "Bash(tmux display-message:*)"
+      "Bash(tmux display-message:*)",
+      "Bash(python3 -m json.tool)",
+      "Bash(tmux -L thin display-message -t thin_10:0.0 -p '#{pane_start_command}')",
+      "Bash(tmux -L thin display-message -t thin_42:0.0 -p '#{pane_start_command}')",
+      "Bash(tmux -L thin display-message -t thin_42:0.0 -p '#{pane_dead}')",
+      "Bash(tmux -L thin display-message -t thin_5:0.0 -p '#{pane_dead}')",
+      "Bash(xargs -I{} tmux -L thin kill-session -t {})",
+      "Bash(tmux -L thin display-message -t thin_42:0.0 -p '#{T:#{l:#{S:,#{s}}}}')",
+      "Bash(tmux -L thin display-message -t thin_39:0.0 -p '#{pane_dead}')",
+      "Bash(tmux -L thin display-message -t thin_40:0.0 -p '#{pane_dead}')",
+      "Bash(SEP='||')",
+      "Bash(bash ~/.dotfiles/tmux/scripts/tmux-session-picker)",
+      "Bash(bash -c '\nSEP=\"||\"\nCURRENT_WIN=$\\(tmux display-message -p \"#{window_id}\"\\)\ntmux list-windows -a -F \"#{session_name}:#{window_id}${SEP}#{?@ssh_host,[#{pane_title}]#{@ssh_host} @#{session_group},#{?#{==:#{pane_current_command},claude},#{s/^. //:pane_title} - #{pane_current_command}@#{session_group},#{s|#{HOME}|~|:pane_current_path} - #{pane_current_command}@#{session_group}}}\" \\\\\n  | grep -v \"^thin\" \\\\\n  | grep -vF \":${CURRENT_WIN}||\" \\\\\n  | awk -F\"[|][|]\" \"!seen[\\\\$2]++\"\n')",
+      "Bash(rotz link:*)"
     ]
   }
 }

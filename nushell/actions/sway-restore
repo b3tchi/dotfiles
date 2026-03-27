@@ -38,19 +38,37 @@ def main [] {
         }
 
         for term in $terminals {
-            let session = ($term | get -o session | default "local")
-            let window = ($term | get -o window | default null)
+            let term_type = ($term | get -o type | default "local")
 
-            # Create headless tmux session+window for this terminal
-            let target = (tmux-start start 0 $session | str trim)
+            if $term_type == "thin" {
+                # Remote thin terminal: reconnect via tmux-to-workstation
+                let ssh_args = ($term | get -o ssh_args | default "")
+                let remote_session = ($term | get -o remote_session | default "")
 
-            if $window != null {
-                # Parse session name from target (e.g. "local_3:5" -> "local_3")
-                let target_session = ($target | split row ":" | first)
-                tmux select-window -t $"($target_session):($window)"
+                if ($ssh_args | is-empty) or ($remote_session | is-empty) {
+                    print $"  Skipping thin terminal: missing ssh_args or remote_session"
+                    continue
+                }
+
+                # Launch foot that will run tmux-to-workstation connect
+                let cmd = $"tmux-to-workstation connect -g ($remote_session) -- ($ssh_args)"
+                ^swaymsg $"exec foot -e nu -c '($cmd)'"
+            } else {
+                # Local fat terminal
+                let session = ($term | get -o session | default "local")
+                let window = ($term | get -o window | default null)
+
+                # Create headless tmux session+window for this terminal
+                let target = (tmux-start start 0 $session | str trim)
+
+                if $window != null {
+                    # Parse session name from target (e.g. "local_3:5" -> "local_3")
+                    let target_session = ($target | split row ":" | first)
+                    tmux select-window -t $"($target_session):($window)"
+                }
+
+                ^swaymsg $"exec env TMUX_TARGET=($target) foot"
             }
-
-            ^swaymsg $"exec env TMUX_TARGET=($target) foot"
         }
     }
 

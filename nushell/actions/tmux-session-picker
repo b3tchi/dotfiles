@@ -1,0 +1,55 @@
+#!/usr/bin/env nu
+# Window/session picker for tmux
+# Usage: tmux-session-picker windows  (C-b w: current session windows)
+#        tmux-session-picker sessions (C-b s: all windows across sessions)
+
+def main [mode: string = "sessions"] {
+    let sep = "||"
+    let gray = (ansi { fg: "#808080" })
+    let rst = (ansi reset)
+    let current_win = (tmux display-message -p '#{window_id}' | str trim)
+
+    let fmt = [
+        '#{session_name}:#{window_id}'
+        $sep
+        '#{?@ssh_host,[#{pane_title}]#{@ssh_host} @#{session_group},#{?#{==:#{pane_current_command},claude},#{s/^. //:pane_title} - #{pane_current_command}@#{session_group},#{s|#{HOME}|~|:pane_current_path} - #{pane_current_command}@#{session_group}}}'
+    ] | str join
+
+    let raw = if $mode == "windows" {
+        tmux list-windows -F $fmt | lines
+    } else {
+        tmux list-windows -a -F $fmt | lines
+            | where { |l| not ($l | str starts-with "thin") }
+            | each { |l| { raw: $l, title: ($l | split row "||" | get 1) } }
+            | uniq-by title
+            | get raw
+    }
+
+    let windows = ($raw
+        | where { |l| not ($l | str contains $":($current_win)||") }
+        | each { |l|
+            let parts = ($l | split row "||")
+            let id = ($parts | get 0)
+            let title = ($parts | get 1)
+            let colored = ($title | str replace --regex ' - ([^-]*@[^ ]*)$' $"($gray) - $1($rst)")
+            $"($id)||($colored)"
+        }
+    )
+
+    if ($windows | is-empty) {
+        exit 0
+    }
+
+    let selected = ($windows | str join "\n" | fzf --ansi --color='hl:#cc0000,hl+:#cc0000' --preview='tmux capture-pane -ep -t {1}' --preview-window=top:70%:border-bottom --delimiter='\|\|' --with-nth=2 | str trim)
+
+    if ($selected | is-empty) {
+        exit 0
+    }
+
+    let target = ($selected | split row "||" | get 0)
+    if $mode == "windows" {
+        tmux select-window -t $target
+    } else {
+        tmux switch-client -t $target
+    }
+}

@@ -35,6 +35,7 @@ linux:
     actions/ws-list.nu: ~/.local/bin/ws-list.nu
     actions/ws-switch.nu: ~/.local/bin/ws-switch.nu
     actions/project-picker: ~/.local/bin/project-picker
+    actions/tmux-session-picker: ~/.local/bin/tmux-session-picker
   installs:
     cmd: |
       {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
@@ -65,4 +66,5 @@ linux:
       chmod +x ~/.dotfiles/nushell/actions/ws-list.nu
       chmod +x ~/.dotfiles/nushell/actions/ws-switch.nu
       chmod +x ~/.dotfiles/nushell/actions/project-picker
+      chmod +x ~/.dotfiles/nushell/actions/tmux-session-picker
       rotz link nushell --force
