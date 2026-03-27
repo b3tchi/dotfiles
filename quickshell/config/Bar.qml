@@ -1,5 +1,6 @@
 import Quickshell
 import Quickshell.I3
+import Quickshell.Io
 import QtQuick
 import QtQuick.Layouts
 
@@ -26,8 +27,28 @@ PanelWindow {
     }
 
     color: "#222d31"
-    // Rounded corners on phone, square on desktop
-    // (border-radius not directly on PanelWindow; handled via inner Rectangle if needed)
+
+    // Track i3/sway binding mode (e.g. "resize", "menu")
+    property string currentMode: "default"
+
+    // Subscribe to mode events — process stays open, no polling needed
+    Process {
+        id: modeSubscribe
+        command: ["i3-msg", "-t", "subscribe", "-m", '["mode"]']
+        running: true
+
+        stdout: SplitParser {
+            onRead: data => {
+                try {
+                    var e = JSON.parse(data)
+                    if (e.change !== undefined) root.currentMode = e.change
+                } catch(err) {}
+            }
+        }
+
+        // Reconnect if i3 restarts
+        onExited: running = true
+    }
 
     RowLayout {
         anchors {
@@ -68,6 +89,26 @@ PanelWindow {
                         onClicked: I3.dispatch("workspace " + modelData.name)
                     }
                 }
+            }
+        }
+
+        // Mode indicator — visible only when not in default mode
+        Rectangle {
+            visible: root.currentMode !== "default"
+            implicitWidth: modeText.implicitWidth + 16
+            implicitHeight: 26
+            radius: 4
+            color: "#152024"
+            border.color: "#cb4b16"
+            border.width: 2
+
+            Text {
+                id: modeText
+                anchors.centerIn: parent
+                text: root.currentMode
+                color: "#fdf6e3"
+                font.family: "Iosevka Nerd Font"
+                font.pixelSize: 13
             }
         }
 
