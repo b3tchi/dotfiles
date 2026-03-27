@@ -33,6 +33,26 @@ def get-port [args: list<string>]: nothing -> string {
     } else { "" }
 }
 
+# Create a new independent thin session with metadata
+def create-thin-session [cmd: string, meta: record]: nothing -> string {
+    let config_path = ($env.HOME | path join ".dotfiles/tmux/tmux-thin-local.conf")
+
+    # Find next thin_N number
+    let existing = try {
+        tmux -L thin list-sessions -F '#{session_name}' | lines | where {|s| $s =~ '^thin_\d+$'} | each {|s| $s | str replace 'thin_' '' | into int}
+    } catch { [] }
+    let nr = if ($existing | is-empty) { 0 } else { ($existing | math max) + 1 }
+    let session_name = $"thin_($nr)"
+
+    # Create independent session (not linked)
+    let pane_id = (tmux -L thin -f $config_path new-session -d -P -F '#{pane_id}' -s $session_name $cmd | str trim)
+
+    # Store metadata
+    $meta | items {|key, val| tmux -L thin set-option -p -t $pane_id $"@($key)" $val }
+
+    $session_name
+}
+
 def --wrapped "main connect" [
     --group (-g): string  # Remote session group name (default: "local")
     ...args: string       # SSH args (e.g. -p 8022 user@host)
@@ -79,25 +99,14 @@ def --wrapped "main connect" [
     # SSH command for the thin pane
     let ssh_cmd = $"ssh -t ($args | str join ' ') TMUX_TARGET=($target) bash -li"
 
-    # Each connection gets its own independent session on the thin socket
-    let config_path = ($env.HOME | path join ".dotfiles/tmux/tmux-thin-local.conf")
-
-    # Find next thin_N number
-    let existing = try {
-        tmux -L thin list-sessions -F '#{session_name}' | lines | where {|s| $s =~ '^thin_\d+$'} | each {|s| $s | str replace 'thin_' '' | into int}
-    } catch { [] }
-    let nr = if ($existing | is-empty) { 0 } else { ($existing | math max) + 1 }
-    let session_name = $"thin_($nr)"
-
-    # Create independent session (not linked)
-    let pane_id = (tmux -L thin -f $config_path new-session -d -P -F '#{pane_id}' -s $session_name $ssh_cmd | str trim)
-
-    # Store metadata
-    tmux -L thin set-option -p -t $pane_id @remote_name $display_host
-    tmux -L thin set-option -p -t $pane_id @remote_host $hostname
-    tmux -L thin set-option -p -t $pane_id @remote_session $remote_session
-    tmux -L thin set-option -p -t $pane_id @remote_port $port
-    tmux -L thin set-option -p -t $pane_id @ssh_args ($args | str join " ")
+    let session_name = create-thin-session $ssh_cmd {
+        remote_name: $display_host
+        remote_host: $hostname
+        remote_session: $remote_session
+        remote_port: $port
+        remote_target: $target
+        ssh_args: ($args | str join " ")
+    }
 
     # Attach
     if ($env | get -o TMUX | is-not-empty) {
@@ -107,31 +116,62 @@ def --wrapped "main connect" [
     }
 }
 
-def "main list" [] {
-    # List local thin windows — no SSH needed
-    # Use -t thin to be explicit about which session, and -a is not needed
-    let windows = try {
-        tmux -L thin list-windows -t thin -F '#{window_name}:#{window_active}:#{pane_dead}' | lines
+def "main list" [
+    --output (-o): string  # Output format: "table" for tabular, default is yaml
+    --check (-c)           # Check if remote connections are live via SSH ping
+] {
+    # List all thin sessions with metadata
+    let panes = try {
+        tmux -L thin list-panes -a -F '#{session_name}|#{pane_dead}|#{pane_pid}|#{@remote_name}|#{@remote_host}|#{@remote_session}|#{@remote_port}|#{@remote_target}|#{@ssh_args}' | lines
     } catch {
         print "No local thin tmux running"
         return
     }
 
-    if ($windows | is-empty) {
-        print "No thin windows"
+    if ($panes | is-empty) {
+        print "No thin sessions"
         return
     }
 
-    $windows | each {|w|
-        let parts = ($w | split row ":")
-        let name = ($parts | get 0)
-        let active = if ($parts | get 1) == "1" { "*" } else { "" }
-        let dead = if ($parts | get 2) == "1" { "(dead)" } else { "(connected)" }
-        $"($name) ($dead) ($active)" | str trim
-    } | str join "\n" | print
+    let sessions = $panes | each {|l|
+        let parts = ($l | split row "|")
+        let ssh_args = ($parts | get 8)
+        let remote_target = ($parts | get 7)
+        let remote_live = if $check and ($ssh_args | is-not-empty) and ($remote_target | is-not-empty) {
+            let ssh_parts = ($ssh_args | split row " ")
+            let result = (do { ^ssh -o ConnectTimeout=3 -o BatchMode=yes ...$ssh_parts $"tmux has-session -t ($remote_target)" } | complete)
+            $result.exit_code == 0
+        } else {
+            null
+        }
+        let base = {
+            session: ($parts | get 0)
+            status: (if ($parts | get 1) == "1" { "dead" } else { "connected" })
+            pid: ($parts | get 2)
+            remote_name: ($parts | get 3)
+            remote_host: ($parts | get 4)
+            remote_session: ($parts | get 5)
+            remote_port: ($parts | get 6)
+            remote_target: ($parts | get 7)
+            ssh_args: $ssh_args
+        }
+        if $check {
+            $base | merge { remote_live: $remote_live }
+        } else {
+            $base
+        }
+    }
+
+    if $output == "table" {
+        $sessions | table
+    } else {
+        $sessions | to yaml
+    }
 }
 
-def "main reconnect" [] {
+def "main reconnect" [
+    --all (-a)  # Reconnect all dead sessions (skip picker)
+] {
     # Check thin tmux is running
     let thin_running = (do { tmux -L thin list-sessions } | complete | get exit_code) == 0
 
@@ -140,47 +180,59 @@ def "main reconnect" [] {
         return
     }
 
-    # List thin windows for picker
-    let windows = try {
-        tmux -L thin list-windows -t thin -F '#{window_name}:#{window_id}:#{pane_dead}' | lines
-    } catch {
-        print "No thin windows"
+    # List dead thin sessions with metadata
+    let dead = try {
+        tmux -L thin list-panes -a -F '#{session_name}|#{pane_dead}|#{@ssh_args}|#{@remote_session}|#{pane_title}' | lines
+        | where {|l| ($l | split row "|" | get 1) == "1" }
+        | each {|l|
+            let parts = ($l | split row "|")
+            {
+                session: ($parts | get 0)
+                ssh_args: ($parts | get 2)
+                remote_session: ($parts | get 3)
+                title: ($parts | get 4)
+            }
+        }
+        | where {|d| ($d.ssh_args | is-not-empty) and ($d.remote_session | is-not-empty) }
+    } catch { [] }
+
+    if ($dead | is-empty) {
+        print "No dead thin sessions with metadata to reconnect"
         return
     }
 
-    if ($windows | is-empty) {
-        print "No thin windows"
-        return
-    }
-
-    # Build picker with status
-    let items = $windows | each {|w|
-        let parts = ($w | split row ":")
-        let name = ($parts | get 0)
-        let id = ($parts | get 1)
-        let status = if ($parts | get 2) == "1" { "(dead)" } else { "(connected)" }
-        $"($id)\t($name) ($status)"
-    }
-
-    # Pick which window to switch to (skip picker if only one)
-    let selected = if ($items | length) == 1 {
-        $items | first
+    # Pick which to reconnect
+    let selected = if $all {
+        $dead
     } else {
-        $items | str join "\n" | fzf --prompt "Reconnect to: " --with-nth=2.. | str trim
+        let items = $dead | each {|d| $"($d.session)\t($d.title) [($d.remote_session)]" }
+        let picked = ($items | str join "\n" | fzf --multi --prompt "Reconnect (tab=select): " --with-nth=2.. | lines)
+        if ($picked | is-empty) { return }
+        $picked | each {|p|
+            let session = ($p | split row "\t" | first)
+            $dead | where {|d| $d.session == $session } | first
+        }
     }
 
-    if ($selected | is-empty) {
-        return
-    }
+    for entry in $selected {
+        let ssh_args = ($entry.ssh_args | split row " ")
 
-    let id = ($selected | split row "\t" | first)
-    tmux -L thin select-window -t $id
+        # Get fresh remote target
+        let target = (^ssh ...$ssh_args $"~/.local/bin/tmux-start start 0 ($entry.remote_session)" 2>/dev/null | str trim)
+        if ($target | is-empty) {
+            print $"Error: tmux-start failed for ($entry.session) -> ($entry.remote_session)"
+            continue
+        }
 
-    # Detach from fat and attach to thin in one shot
-    if ($env | get -o TMUX | is-not-empty) {
-        tmux detach-client -E $"tmux -L thin attach-session -t thin"
-    } else {
-        tmux -L thin attach-session -t thin
+        let ssh_cmd = $"ssh -t ($entry.ssh_args) TMUX_TARGET=($target) bash -li"
+
+        # Respawn the dead pane
+        tmux -L thin respawn-pane -k -t $"($entry.session):0.0" $ssh_cmd
+
+        # Update metadata
+        tmux -L thin set-option -p -t $"($entry.session):0.0" @remote_target $target
+
+        print $"Reconnected: ($entry.session) -> ($entry.remote_session) [($target)]"
     }
 }
 
