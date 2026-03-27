@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Session picker for C-b s: all windows across all sessions, deduped for linked sessions
+SEP='||'
+GRAY=$'\033[38;5;242m'
+RST=$'\033[0m'
+CURRENT_WIN=$(tmux display-message -p '#{window_id}')
+
+tmux list-windows -a -F "#{session_name}:#{window_id}${SEP}#{?@ssh_host,[#{pane_title}]#{@ssh_host} @#{session_group},#{?#{==:#{pane_current_command},claude},#{s/^. //:pane_title} - #{pane_current_command}@#{session_group},#{s|#{HOME}|~|:pane_current_path} - #{pane_current_command}@#{session_group}}}" \
+  | grep -v '^thin' \
+  | grep -v ":${CURRENT_WIN}||" \
+  | awk -F'\\|\\|' '!seen[$2]++' \
+  | perl -pe "s/ - ([^-]*@[^ ]*)\$/ - ${GRAY}\$1${RST}/" \
+  | fzf --ansi --preview='tmux capture-pane -ep -t {1}' --preview-window=top:70%:border-bottom --delimiter='\|\|' --with-nth=2 \
+  | cut -d'|' -f1 \
+  | xargs -r tmux switch-client -t
