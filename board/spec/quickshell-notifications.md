@@ -4,20 +4,30 @@
 
 **Goal:** Replace dunst with QuickShell's native `Quickshell.Services.Notifications` module — popup display + bar count indicator.
 
-**Architecture:** NotificationServer lives in shell.qml as a singleton owning the D-Bus `org.freedesktop.Notifications` service. It tracks incoming notifications and exposes them to two consumers: Bar.qml (count indicator) and NotificationPopup.qml (visual popup stack). The server sets `notification.tracked = true` on arrival, starts auto-dismiss timers, and removes notifications on click or timeout.
+**Architecture:** NotificationServer lives in shell.qml as a singleton owning the D-Bus `org.freedesktop.Notifications` service. It tracks incoming notifications and exposes them to two consumers: Bar.qml (count indicator) and NotificationPopup.qml (visual popup stack). The server sets `notification.tracked = true` on arrival, starts auto-dismiss timers, and removes notifications on click or timeout. Max 5 visible popups — oldest auto-expire when limit exceeded.
 
 **Tech Stack:** QML, Quickshell 0.2.1, Quickshell.Services.Notifications module
+
+**Key API reference (Quickshell.Services.Notifications):**
+- `NotificationServer.trackedNotifications` — `ObjectModel<Notification>` (readonly)
+- `NotificationServer.onNotification: notification => {}` — signal on arrival; set `notification.tracked = true` to retain
+- `Notification.summary`, `.body`, `.appName`, `.urgency`, `.expireTimeout`
+- `Notification.dismiss()` — close with "user dismissed" reason
+- `Notification.expire()` — close with "timed out" reason
+- `NotificationUrgency.Low`, `.Normal`, `.Critical`
+- `NotificationServer.keepOnReload` — survive quickshell reload
+- `NotificationServer.bodyMarkupSupported`, `.imageSupported`, `.actionsSupported` — capability flags
 
 ---
 
 ### Task 1: Create NotificationPopup.qml
 
-The popup overlay window. Renders a vertical stack of notifications in the top-right corner.
+The popup overlay window. Renders a vertical stack of up to 5 notifications in the top-right corner.
 
 **Files:**
 - Create: `quickshell/config/NotificationPopup.qml`
 
-**Done when:** File exists, quickshell loads without errors (even if no notifications are shown yet — the server isn't wired up until Task 2).
+**Done when:** File exists with valid QML syntax (won't render yet — wired in Task 2).
 
 **Step 1: Write the popup component**
 
@@ -64,16 +74,17 @@ PanelWindow {
         spacing: 4
 
         Repeater {
-            // Show max 5, newest first (last in model = newest)
             model: server.trackedNotifications
 
             Rectangle {
-                id: notifRect
                 required property var modelData
                 required property int index
 
+                // Hide beyond 5th notification (oldest at index 0)
+                visible: index >= (server.trackedNotifications.count - 5)
+
                 width: notifColumn.width
-                height: notifContent.implicitHeight + 16
+                height: visible ? notifContent.implicitHeight + 16 : 0
                 radius: popup.cornerRadius
 
                 color: modelData.urgency === NotificationUrgency.Critical ? "#152024"
@@ -88,7 +99,7 @@ PanelWindow {
                     }
                     spacing: 2
 
-                    // App name + summary on one line
+                    // Summary (title)
                     Text {
                         width: parent.width
                         text: modelData.summary
@@ -149,18 +160,22 @@ PanelWindow {
 
 **Key decisions:**
 - `visible` bound to `trackedNotifications.count > 0` — PanelWindow hides when empty
-- `modelData.dismiss()` sends "user dismissed" to the sending app
-- `modelData.expire()` sends "timed out" to the sending app
+- Max 5 visible: `visible: index >= (count - 5)` hides oldest when >5 tracked
+- `modelData.dismiss()` sends "user dismissed" to the sending app via D-Bus
+- `modelData.expire()` sends "timed out" to the sending app via D-Bus
 - Auto-dismiss Timer per notification: 10s for low/normal, none for critical
 - `implicitHeight` tracks column height — window resizes dynamically
 - `renderType: Text.NativeRendering` on all Text (required for X11 color fix)
+- No `id:` on Repeater delegate children (avoids collision across instances)
 
-**Step 2: Verify file is valid QML**
+**Edge cases:**
+- If >5 notifications arrive, only newest 5 are visible; older ones stay tracked (count in bar reflects all)
+- When a notification is dismissed/expired, the Repeater model updates automatically
+- Critical notifications never auto-expire — user must click to dismiss
+- Empty body: body Text hidden via `visible: modelData.body !== ""`
+- Empty appName: app name Text hidden similarly
 
-Run: `killall quickshell 2>/dev/null; sleep 1; quickshell &`
-Expected: quickshell starts without errors (popup won't show yet — not wired in shell.qml)
-
-**Step 3: Commit**
+**Step 2: Commit**
 
 ```bash
 git add quickshell/config/NotificationPopup.qml
@@ -169,29 +184,19 @@ git commit -m "feat(quickshell): add NotificationPopup component"
 
 ---
 
-### Task 2: Wire NotificationServer in shell.qml
+### Task 2: Wire NotificationServer in shell.qml and update Bar.qml
 
-Add the NotificationServer singleton and connect it to both Bar and NotificationPopup.
+Add NotificationServer singleton and update both consumers (Bar + Popup) in one step to avoid broken intermediate state.
 
 **Files:**
 - Modify: `quickshell/config/shell.qml`
+- Modify: `quickshell/config/Bar.qml`
 
-**Current content of shell.qml:**
-```qml
-import Quickshell
+**Done when:** `killall dunst; killall quickshell; sleep 1; quickshell &` followed by `notify-send "Test" "body"` shows a popup top-right AND bar shows `NOT:1`.
 
-ShellRoot {
-    Variants {
-        model: Quickshell.screens
-        Bar {
-            required property var modelData
-            screen: modelData
-        }
-    }
-}
-```
+**Step 1: Rewrite shell.qml**
 
-**Step 1: Rewrite shell.qml with NotificationServer**
+Replace entire contents of `quickshell/config/shell.qml` with:
 
 ```qml
 import Quickshell
@@ -227,60 +232,44 @@ ShellRoot {
 ```
 
 **Key decisions:**
-- `onNotification: notification.tracked = true` — all notifications are tracked (displayed)
+- `onNotification: notification.tracked = true` — all notifications are tracked
 - `keepOnReload: true` — notifications survive quickshell reload
-- `imageSupported: false` — keeping it simple, no image rendering
-- `actionsSupported: false` — out of scope per design
+- `imageSupported: false`, `actionsSupported: false` — out of scope
 - Bar receives `notifServer` as a property to read count
-- Single NotificationPopup instance (not per-screen — notifications go to primary)
+- Single NotificationPopup instance (not per-screen)
 
-**Step 2: Verify quickshell loads**
+**Step 2: Update Bar.qml**
 
-Run: `killall quickshell 2>/dev/null; sleep 1; quickshell &`
-Expected: quickshell starts. Bar may error because it doesn't have `notifServer` property yet — that's fixed in Task 3.
-
-**Step 3: Commit**
-
-```bash
-git add quickshell/config/shell.qml
-git commit -m "feat(quickshell): add NotificationServer to shell.qml"
-```
-
----
-
-### Task 3: Update Bar.qml to use native notification count
-
-Replace the dunstctl Process+Timer polling with a direct binding to the NotificationServer.
-
-**Files:**
-- Modify: `quickshell/config/Bar.qml`
-
-**Step 1: Add notifServer property**
-
-At the top of PanelWindow (after `id: root`), add:
-
-```qml
-    // Notification server passed from shell.qml
-    required property NotificationServer notifServer
-```
-
-Add the import at the top of the file:
+2a. Add import at top of file (after existing imports):
 
 ```qml
 import Quickshell.Services.Notifications
 ```
 
-**Step 2: Remove dunstctl polling**
+2b. Add required property after `id: root` (line 8):
 
-Delete these lines from Bar.qml:
+```qml
+    required property NotificationServer notifServer
+```
 
+2c. Delete these lines:
 - `property string notifVal: "0"` (line 80)
-- The `notifProc` Process block (lines 131-137)
-- The `notifTimer` Timer (line 138)
+- The `notifProc` Process block (lines 131-137):
+  ```qml
+  Process {
+      id: notifProc
+      running: true
+      command: ["dunstctl", "count", "waiting"]
+      stdout: SplitParser { onRead: data => root.notifVal = data.trim() }
+      onExited: notifTimer.restart()
+  }
+  ```
+- The `notifTimer` Timer (line 138):
+  ```qml
+  Timer { id: notifTimer; interval: 3000; onTriggered: notifProc.running = true }
+  ```
 
-**Step 3: Update notification display in the right-side stats**
-
-Replace the notification section (lines 286-289) that references `notifVal` with:
+2d. Replace the notification display section (3 lines referencing `notifVal`) with:
 
 ```qml
             // Notifications
@@ -289,30 +278,40 @@ Replace the notification section (lines 286-289) that references `notifVal` with
             Text { visible: root.notifServer.trackedNotifications.count > 0; text: "" + root.notifServer.trackedNotifications.count; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
 ```
 
-**Step 4: Verify everything works together**
-
-Run: `killall dunst 2>/dev/null; killall quickshell 2>/dev/null; sleep 1; quickshell &`
-Then: `notify-send "Test" "Hello from quickshell"`
-Expected:
-- Popup appears top-right with "Test" summary and "Hello from quickshell" body
-- Bar shows `NOT:1`
-- Click popup to dismiss — both popup and bar count update
-- After 10s, notification auto-dismisses if not clicked
-
-**Step 5: Commit**
+**Step 3: Verify**
 
 ```bash
-git add quickshell/config/Bar.qml
-git commit -m "feat(quickshell): replace dunstctl polling with native notification count"
+killall dunst 2>/dev/null; killall quickshell 2>/dev/null; sleep 1; quickshell &
+```
+
+Wait 2 seconds for quickshell to start, then:
+
+```bash
+notify-send "Test" "Hello from quickshell"
+```
+
+Expected:
+- Popup appears top-right: "Test" bold white, "Hello from quickshell" below, app name subtle
+- Bar shows `NOT:1` in orange
+- Click popup → it disappears, bar count hides
+- If not clicked, auto-dismisses after 10s
+
+**Step 4: Commit**
+
+```bash
+git add quickshell/config/shell.qml quickshell/config/Bar.qml
+git commit -m "feat(quickshell): wire NotificationServer, replace dunstctl with native count"
 ```
 
 ---
 
-### Task 4: Test all urgency levels
+### Task 3: Test all urgency levels and edge cases
 
-Verify the three urgency levels render correctly.
+Verify the three urgency levels render correctly and edge cases are handled.
 
-**Files:** None (testing only)
+**Files:** None (testing only, fix-and-commit if visual tweaks needed)
+
+**Done when:** All urgency levels render with correct colors, dismiss works, auto-expire works, >5 notifications handled.
 
 **Step 1: Kill dunst and start quickshell**
 
@@ -320,12 +319,12 @@ Verify the three urgency levels render correctly.
 killall dunst 2>/dev/null; killall quickshell 2>/dev/null; sleep 1; quickshell &
 ```
 
-**Step 2: Send test notifications**
+**Step 2: Test urgency levels**
 
 ```bash
-notify-send --urgency=low "Low Priority" "This should be muted gray"
-notify-send --urgency=normal "Normal" "This should be white on dark"
-notify-send --urgency=critical "Critical" "This should be orange on darker bg"
+notify-send --urgency=low "Low Priority" "This should be muted gray (#707880)"
+notify-send --urgency=normal "Normal" "This should be white (#FDF6E3) on dark (#222D31)"
+notify-send --urgency=critical "Critical" "This should be orange (#CB4B16) on darker (#152024)"
 ```
 
 Expected:
@@ -333,7 +332,6 @@ Expected:
 - Normal: `#FDF6E3` text on `#222D31` bg, auto-dismisses in 10s
 - Critical: `#CB4B16` text on `#152024` bg, stays until clicked
 - Bar shows `NOT:3`, decreases as notifications dismiss
-- Notifications stack vertically with 4px gap
 
 **Step 3: Test dismiss behavior**
 
@@ -341,9 +339,35 @@ Expected:
 - Bar count should decrement with each dismiss
 - When all dismissed, bar `NOT:` label should hide
 
-**Step 4: Commit test results to spec**
+**Step 4: Test >5 notifications**
 
-If any visual tweaks are needed, fix them and commit:
+```bash
+for i in $(seq 1 8); do notify-send "Test $i" "Notification body $i"; done
+```
+
+Expected:
+- Only 5 newest visible in popup
+- Bar shows `NOT:8`
+- As notifications expire (10s), older ones become visible
+- After all expire, bar count hides
+
+**Step 5: Test edge cases**
+
+```bash
+# Empty body
+notify-send "No Body"
+
+# Long summary (should elide)
+notify-send "This is a very long notification summary that should be truncated with ellipsis at the edge"
+
+# Long body (should wrap, max 3 lines)
+notify-send "Long Body" "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation."
+
+# Empty summary
+notify-send "" "Body only, no summary"
+```
+
+**Step 6: Fix and commit if needed**
 
 ```bash
 git add quickshell/config/
@@ -352,67 +376,87 @@ git commit -m "fix(quickshell): notification popup visual adjustments"
 
 ---
 
-### Task 5: Update i3 config to stop dunst on quickshell start
+### Task 4: Update i3 config for quickshell notifications
 
-Ensure dunst doesn't conflict with quickshell's notification server.
+Ensure dunst doesn't conflict. Start quickshell on login. Repurpose dunst keybinding.
 
 **Files:**
-- Modify: `i3/config:80` — update the dunst restart keybinding
+- Modify: `i3/config`
 
-**Step 1: Update i3 config**
+**Done when:** After i3 reload, `notify-send "test"` goes to quickshell not dunst. Quickshell starts on login.
 
-Change line 80 from:
+**Step 1: Add quickshell startup**
+
+Find the `exec --no-startup-id` section in `i3/config` and add:
+
+```
+exec --no-startup-id killall dunst 2>/dev/null; quickshell &
+```
+
+This runs once on login: kills dunst if running, starts quickshell.
+
+**Step 2: Update dunst restart keybinding (line 80)**
+
+Change:
 ```
 bindsym $mod+Shift+d --release exec "killall dunst; exec notify-send 'restart dunst'"
 ```
 
 To:
 ```
-bindsym $mod+Shift+d --release exec "killall quickshell; sleep 1; quickshell &"
+bindsym $mod+Shift+d --release exec "killall quickshell; sleep 1; exec quickshell"
 ```
 
-This repurposes the keybinding to restart quickshell (which owns notifications now).
-
-**Step 2: Add exec_always to kill dunst on i3 reload**
-
-Add after the existing exec lines (search for `exec --no-startup-id` section):
-
-```
-exec_always --no-startup-id killall dunst 2>/dev/null
-```
+This repurposes `$mod+Shift+d` to restart quickshell.
 
 **Step 3: Verify**
 
-Reload i3 (`$mod+Shift+r`), then `notify-send "test"` — should go to quickshell, not dunst.
+Reload i3 (`$mod+Shift+r`), then:
+
+```bash
+notify-send "test" "should go to quickshell"
+```
+
+Expected: quickshell popup appears, not dunst.
 
 **Step 4: Commit**
 
 ```bash
 git add i3/config
-git commit -m "feat(i3): replace dunst with quickshell for notifications"
+git commit -m "feat(i3): start quickshell on login, replace dunst keybinding"
 ```
 
 ---
 
-### Task 6: Update quickshell-bar spec
+### Task 5: Update quickshell-bar spec
 
-Update the spec to reflect completed notification work.
+Update the main bar spec to reflect completed notification work.
 
 **Files:**
 - Modify: `board/spec/quickshell-bar.md`
 
+**Done when:** Spec accurately reflects current state.
+
 **Step 1: Update feature table**
 
-Add/update in the features table:
-- `Notification popup | Working | Native NotificationServer, replaces dunst`
-- `Notification count (bar) | Working | Native binding, no polling`
+Add to the features table:
+```
+| Notification popup | Working | Native NotificationServer, replaces dunst |
+| Notification count (bar) | Working | Native binding to trackedNotifications.count |
+```
 
-Remove or mark as done:
-- The dunstctl-based notification count entry
+Update existing entry:
+```
+| Notification count | Working | dunstctl polling (interim, replacing with native) |
+```
+Change to:
+```
+| Notification count (bar) | Working | Native binding, no polling |
+```
 
 **Step 2: Update next steps**
 
-Remove "Notification system" from next steps, add any discovered follow-up items.
+Remove "Notification system" from next steps. Add follow-ups if discovered during testing.
 
 **Step 3: Commit**
 
