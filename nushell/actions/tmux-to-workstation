@@ -300,7 +300,7 @@ def "main revive" [
         # Update metadata
         tmux -L thin set-option -p -t $"($entry.session):0.0" @remote_target $"($entry.remote_session):($entry.wid)"
 
-        print $"Reconnected: ($entry.session) -> ($new_target)"
+        print $"Revived: ($entry.session) -> ($entry.remote_session):($entry.wid)"
     }
 }
 
