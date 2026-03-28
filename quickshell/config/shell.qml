@@ -27,6 +27,8 @@ ShellRoot {
         }
     }
 
+    // NotificationPopup disabled — X11 proot rendering crashes with second window
+    // TODO: re-enable on Wayland or after quickshell X11 fix
     //NotificationPopup {
     //    server: notifSrv
     //}
