@@ -214,8 +214,8 @@ def "main list" [
     }
 }
 
-def "main reconnect" [
-    --all (-a)  # Reconnect all dead sessions (skip picker)
+def "main revive" [
+    --all (-a)  # Revive all dead sessions (skip picker)
 ] {
     # Check thin tmux is running
     let thin_running = (do { tmux -L thin list-sessions } | complete | get exit_code) == 0
@@ -227,15 +227,22 @@ def "main reconnect" [
 
     # List dead thin sessions with metadata
     let dead = try {
-        tmux -L thin list-panes -a -F '#{session_name}|#{pane_dead}|#{@ssh_args}|#{@remote_session}|#{pane_title}' | lines
+        tmux -L thin list-panes -a -F '#{session_name}|#{pane_dead}|#{@ssh_args}|#{@remote_session}|#{@remote_target}|#{pane_title}' | lines
         | where {|l| ($l | split row "|" | get 1) == "1" }
         | each {|l|
             let parts = ($l | split row "|")
+            let remote_target = ($parts | get 4)
+            # Extract window_id from remote_target (e.g. "auctions:@5" -> "@5")
+            let wid = if ($remote_target | str contains ":@") {
+                $remote_target | split row ":" | last
+            } else { "" }
             {
                 session: ($parts | get 0)
                 ssh_args: ($parts | get 2)
                 remote_session: ($parts | get 3)
-                title: ($parts | get 4)
+                remote_target: $remote_target
+                wid: $wid
+                title: ($parts | get 5)
             }
         }
         | where {|d| ($d.ssh_args | is-not-empty) and ($d.remote_session | is-not-empty) }
@@ -250,7 +257,7 @@ def "main reconnect" [
     let selected = if $all {
         $dead
     } else {
-        let items = $dead | each {|d| $"($d.session)\t($d.title) [($d.remote_session)]" }
+        let items = $dead | each {|d| $"($d.session)\t($d.title) [($d.remote_target)]" }
         let picked = ($items | str join "\n" | fzf --multi --prompt "Reconnect (tab=select): " --with-nth=2.. | lines)
         if ($picked | is-empty) { return }
         $picked | each {|p|
@@ -262,22 +269,38 @@ def "main reconnect" [
     for entry in $selected {
         let ssh_args = ($entry.ssh_args | split row " ")
 
-        # Get fresh remote target
+        # Create fresh linked session on remote
         let target = (^ssh ...$ssh_args $"~/.local/bin/tmux-start start 0 ($entry.remote_session)" 2>/dev/null | str trim)
         if ($target | is-empty) {
             print $"Error: tmux-start failed for ($entry.session) -> ($entry.remote_session)"
             continue
         }
 
-        let ssh_cmd = $"ssh -t ($entry.ssh_args) TMUX_TARGET=($target) bash -li"
+        # Extract just the session name for TMUX_TARGET (e.g. "auctions_5:7" -> "auctions_5")
+        let target_session = ($target | split row ":" | first)
+
+        let ssh_cmd = $"ssh -t ($entry.ssh_args) TMUX_TARGET=($target_session) bash -li"
 
         # Respawn the dead pane
         tmux -L thin respawn-pane -k -t $"($entry.session):0.0" $ssh_cmd
 
-        # Update metadata
-        tmux -L thin set-option -p -t $"($entry.session):0.0" @remote_target $target
+        # Select the correct window on the remote via the thin pane's SSH connection
+        if ($entry.wid | is-not-empty) {
+            # Wait for pane to be alive then send select-window through it
+            mut attempts = 0
+            while $attempts < 10 {
+                let dead = (tmux -L thin list-panes -t $"($entry.session):0.0" -F '#{pane_dead}' | str trim)
+                if $dead == "0" { break }
+                sleep 200ms
+                $attempts += 1
+            }
+            tmux -L thin send-keys -t $"($entry.session):0.0" $"tmux select-window -t ($entry.wid)" Enter
+        }
 
-        print $"Reconnected: ($entry.session) -> ($entry.remote_session) [($target)]"
+        # Update metadata
+        tmux -L thin set-option -p -t $"($entry.session):0.0" @remote_target $"($entry.remote_session):($entry.wid)"
+
+        print $"Reconnected: ($entry.session) -> ($new_target)"
     }
 }
 
@@ -325,6 +348,6 @@ def main [] {
     print "Commands:"
     print "  connect [-g group] -- [ssh-args] <host>   Connect to remote fat session"
     print "  list                           List local thin windows"
-    print "  reconnect [session]            Reattach to local thin tmux"
+    print "  revive [-a]                    Revive dead thin sessions"
     print "  cleanup                        Kill dead thin windows"
 }

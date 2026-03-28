@@ -67,7 +67,11 @@
       "Bash(SEP='||')",
       "Bash(bash ~/.dotfiles/tmux/scripts/tmux-session-picker)",
       "Bash(bash -c '\nSEP=\"||\"\nCURRENT_WIN=$\\(tmux display-message -p \"#{window_id}\"\\)\ntmux list-windows -a -F \"#{session_name}:#{window_id}${SEP}#{?@ssh_host,[#{pane_title}]#{@ssh_host} @#{session_group},#{?#{==:#{pane_current_command},claude},#{s/^. //:pane_title} - #{pane_current_command}@#{session_group},#{s|#{HOME}|~|:pane_current_path} - #{pane_current_command}@#{session_group}}}\" \\\\\n  | grep -v \"^thin\" \\\\\n  | grep -vF \":${CURRENT_WIN}||\" \\\\\n  | awk -F\"[|][|]\" \"!seen[\\\\$2]++\"\n')",
-      "Bash(rotz link:*)"
+      "Bash(rotz link:*)",
+      "Bash(~/.local/bin/tmux-session-picker)",
+      "Bash(ssh:*)",
+      "Bash(tmux -L thin list-panes -t thin_54 -F '#{pane_dead}')",
+      "Bash(tmux -L thin list-panes -t thin_55 -F '#{pane_dead}')"
     ]
   }
 }
