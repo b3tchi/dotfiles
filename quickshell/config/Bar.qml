@@ -7,19 +7,17 @@ import QtQuick.Layouts
 PanelWindow {
     id: root
 
-    // X11 (i3, desktop): top full-width bar
-    // Wayland (sway, phone): bottom floating bar
-    readonly property bool isWayland: Qt.platform.pluginName.startsWith("wayland")
-
+    // Both polybar and waybar use bottom position
     anchors {
         left: true
         right: true
-        top: !isWayland
-        bottom: isWayland
+        bottom: true
     }
 
-    implicitHeight: 35
+    implicitHeight: 27
 
+    // Phone (Wayland): floating with margins; desktop (X11): full-width
+    readonly property bool isWayland: Qt.platform.pluginName.startsWith("wayland")
     margins {
         bottom: isWayland ? 20 : 0
         left:   isWayland ? 40 : 0
@@ -29,13 +27,6 @@ PanelWindow {
     color: "#222d31"
 
     readonly property string fontFamily: "Iosevka Nerd Font"
-    readonly property int fontSize: 13
-
-    // Render LABEL:value with colored label
-    function stat(label, value) {
-        return "<font color='#16a085'>" + label + ":</font>"
-             + "<font color='#fdf6e3'>" + value + "</font>"
-    }
 
     // --- Mode tracking ---
     property string currentMode: "default"
@@ -110,140 +101,122 @@ PanelWindow {
     }
     Timer { id: volTimer; interval: 5000; onTriggered: volProc.running = true }
 
-    // --- Layout ---
-    RowLayout {
-        anchors {
-            fill: parent
-            leftMargin: 10
-            rightMargin: 10
-        }
-        spacing: 0
+    // --- Layout (using Row, not RowLayout — RowLayout leaks Text.color) ---
+    Item {
+        anchors.fill: parent
 
-        // Workspaces
-        RowLayout {
-            spacing: 2
+        // Left: workspaces + mode
+        Row {
+            id: leftSide
+            anchors { left: parent.left; top: parent.top; bottom: parent.bottom; leftMargin: 4 }
+            spacing: 0
+
             Repeater {
                 model: I3.workspaces
+
                 Rectangle {
                     required property var modelData
-                    implicitWidth: wsText.implicitWidth + 16
-                    implicitHeight: 26
-                    radius: 4
-                    color: modelData.focused ? "#152024" : "transparent"
-                    border.color: modelData.urgent ? "#cb4b16" : "transparent"
-                    border.width: 2
+                    width: wsText.implicitWidth + 14
+                    height: leftSide.height
+                    color: modelData.urgent  ? "#cb4b16"
+                         : modelData.focused ? "#152024"
+                         : "transparent"
+
                     Text {
                         id: wsText
                         anchors.centerIn: parent
                         text: modelData.name
-                        color: modelData.focused ? "#fdf6e3" : "#707880"
+                        color: "#fdf6e3"
                         font.family: root.fontFamily
-                        font.pixelSize: root.fontSize
+                        font.pixelSize: 14
                     }
+
+                    Rectangle {
+                        anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
+                        height: 3
+                        color: modelData.focused                    ? "#16a085"
+                             : (modelData.active && !modelData.focused) ? "#454948"
+                             : "transparent"
+                    }
+
                     MouseArea {
                         anchors.fill: parent
                         onClicked: I3.dispatch("workspace " + modelData.name)
                     }
                 }
             }
+
+            // Mode indicator
+            Rectangle {
+                visible: root.currentMode !== "default"
+                width: modeText.implicitWidth + 14
+                height: leftSide.height
+                color: "#152024"
+
+                Text {
+                    id: modeText
+                    anchors.centerIn: parent
+                    text: root.currentMode
+                    color: "#fdf6e3"
+                    font.family: root.fontFamily
+                    font.pixelSize: 14
+                }
+
+                Rectangle {
+                    anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
+                    height: 3
+                    color: "#cb4b16"
+                }
+            }
         }
 
-        // Mode indicator
-        Rectangle {
-            visible: root.currentMode !== "default"
-            implicitWidth: modeText.implicitWidth + 16
-            implicitHeight: 26
-            radius: 4
-            color: "#152024"
-            border.color: "#cb4b16"
-            border.width: 2
+        // Right: stats
+        Row {
+            anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: 4 }
+            spacing: 0
+
+            // Network
+            Text { visible: root.netVal !== ""; text: "NET:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14 }
+            Text { visible: root.netVal !== ""; text: root.netVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14 }
+            Text { visible: root.netVal !== ""; text: "  "; font.pixelSize: 14 }
+
+            // CPU
+            Text { text: "CPU:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14 }
+            Text { text: root.cpuVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14 }
+            Text { text: "  "; font.pixelSize: 14 }
+
+            // RAM
+            Text { text: "RAM:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14 }
+            Text { text: root.ramVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14 }
+            Text { text: "  "; font.pixelSize: 14 }
+
+            // Disk
+            Text { text: "HDD:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14 }
+            Text { text: root.diskVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14 }
+
+            // Volume
+            Text { visible: root.volVal !== ""; text: "  "; font.pixelSize: 14 }
+            Text { visible: root.volVal !== ""; text: "VOL:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14 }
+            Text { visible: root.volVal !== ""; text: root.volVal + "%"; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14 }
+
+            Text { text: "  "; font.pixelSize: 14 }
+
+            // Date
             Text {
-                id: modeText
-                anchors.centerIn: parent
-                text: root.currentMode
+                text: Qt.formatDateTime(new Date(), "HH:mm")
+                color: "#707880"
+                font.family: root.fontFamily
+                font.pixelSize: 14
+                Timer { interval: 1000; running: true; repeat: true; onTriggered: parent.text = Qt.formatDateTime(new Date(), "HH:mm") }
+            }
+            Text { text: " "; font.pixelSize: 14 }
+            Text {
+                text: Qt.formatDateTime(new Date(), "yyyy-MM-dd")
                 color: "#fdf6e3"
                 font.family: root.fontFamily
-                font.pixelSize: root.fontSize
+                font.pixelSize: 14
+                Timer { interval: 60000; running: true; repeat: true; onTriggered: parent.text = Qt.formatDateTime(new Date(), "yyyy-MM-dd") }
             }
         }
-
-        Item { Layout.fillWidth: true }
-
-        // Network
-        Text {
-            visible: root.netVal !== ""
-            textFormat: Text.RichText
-            text: root.stat("NET", root.netVal)
-            font.family: root.fontFamily
-            font.pixelSize: root.fontSize
-        }
-        Text { visible: root.netVal !== ""; text: "  "; color: "#707880"; font.pixelSize: root.fontSize }
-
-        // CPU
-        Text {
-            textFormat: Text.RichText
-            text: root.stat("CPU", root.cpuVal)
-            font.family: root.fontFamily
-            font.pixelSize: root.fontSize
-        }
-        Text { text: "  "; color: "#707880"; font.pixelSize: root.fontSize }
-
-        // RAM
-        Text {
-            textFormat: Text.RichText
-            text: root.stat("RAM", root.ramVal)
-            font.family: root.fontFamily
-            font.pixelSize: root.fontSize
-        }
-        Text { text: "  "; color: "#707880"; font.pixelSize: root.fontSize }
-
-        // Disk
-        Text {
-            textFormat: Text.RichText
-            text: root.stat("HDD", root.diskVal)
-            font.family: root.fontFamily
-            font.pixelSize: root.fontSize
-        }
-
-        // Volume
-        Text {
-            visible: root.volVal !== ""
-            text: "  "
-            color: "#707880"
-            font.pixelSize: root.fontSize
-        }
-        Text {
-            visible: root.volVal !== ""
-            textFormat: Text.RichText
-            text: root.stat("VOL", root.volVal + "%")
-            font.family: root.fontFamily
-            font.pixelSize: root.fontSize
-        }
-
-        Text { text: "  "; color: "#707880"; font.pixelSize: root.fontSize }
-
-        // Date
-        Text {
-            id: dateClock
-            textFormat: Text.RichText
-            font.family: root.fontFamily
-            font.pixelSize: root.fontSize
-
-            function update() {
-                var now = new Date()
-                text = "<font color='#707880'>" + Qt.formatDateTime(now, "HH:mm") + "</font>"
-                    + " <font color='#fdf6e3'>" + Qt.formatDateTime(now, "yyyy-MM-dd") + "</font>"
-            }
-
-            Component.onCompleted: update()
-            Timer {
-                interval: 1000
-                running: true
-                repeat: true
-                onTriggered: dateClock.update()
-            }
-        }
-
-        Item { width: 4 }
     }
 }
