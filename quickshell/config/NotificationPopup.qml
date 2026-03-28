@@ -14,6 +14,7 @@ PanelWindow {
     }
 
     exclusiveZone: 0
+    exclusionMode: ExclusionMode.Ignore
 
     implicitHeight: 200
 
@@ -28,7 +29,8 @@ PanelWindow {
 
     Column {
         id: notifColumn
-        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+        anchors { right: parent.right; bottom: parent.bottom }
+        width: 300
         spacing: 4
 
         Repeater {
