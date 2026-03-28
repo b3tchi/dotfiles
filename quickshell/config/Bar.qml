@@ -27,6 +27,7 @@ PanelWindow {
     color: "#222d31"
 
     readonly property string fontFamily: "Iosevka Nerd Font"
+    readonly property int nativeRender: Text.NativeRendering
 
     // --- Mode tracking ---
     property string currentMode: "default"
@@ -129,6 +130,7 @@ PanelWindow {
                         color: "#fdf6e3"
                         font.family: root.fontFamily
                         font.pixelSize: 14
+                        renderType: root.nativeRender
                     }
 
                     Rectangle {
@@ -160,6 +162,7 @@ PanelWindow {
                     color: "#fdf6e3"
                     font.family: root.fontFamily
                     font.pixelSize: 14
+                    renderType: root.nativeRender
                 }
 
                 Rectangle {
@@ -176,45 +179,49 @@ PanelWindow {
             spacing: 0
 
             // Network
-            Text { visible: root.netVal !== ""; text: "NET:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14 }
-            Text { visible: root.netVal !== ""; text: root.netVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14 }
-            Text { visible: root.netVal !== ""; text: "  "; font.pixelSize: 14 }
+            Text { visible: root.netVal !== ""; text: "NET:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: root.netVal !== ""; text: root.netVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: root.netVal !== ""; text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
 
             // CPU
-            Text { text: "CPU:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14 }
-            Text { text: root.cpuVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14 }
-            Text { text: "  "; font.pixelSize: 14 }
+            Text { text: "CPU:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { text: root.cpuVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
 
             // RAM
-            Text { text: "RAM:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14 }
-            Text { text: root.ramVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14 }
-            Text { text: "  "; font.pixelSize: 14 }
+            Text { text: "RAM:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { text: root.ramVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
 
             // Disk
-            Text { text: "HDD:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14 }
-            Text { text: root.diskVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14 }
+            Text { text: "HDD:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { text: root.diskVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
 
             // Volume
-            Text { visible: root.volVal !== ""; text: "  "; font.pixelSize: 14 }
-            Text { visible: root.volVal !== ""; text: "VOL:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14 }
-            Text { visible: root.volVal !== ""; text: root.volVal + "%"; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14 }
+            Text { visible: root.volVal !== ""; text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: root.volVal !== ""; text: "VOL:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: root.volVal !== ""; text: root.volVal + "%"; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
 
-            Text { text: "  "; font.pixelSize: 14 }
+            Text { text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
 
             // Date
             Text {
-                text: Qt.formatDateTime(new Date(), "HH:mm")
+                property bool showSeconds: false
+                text: Qt.formatDateTime(new Date(), showSeconds ? "HH:mm:ss" : "HH:mm")
                 color: "#707880"
                 font.family: root.fontFamily
                 font.pixelSize: 14
-                Timer { interval: 1000; running: true; repeat: true; onTriggered: parent.text = Qt.formatDateTime(new Date(), "HH:mm") }
+                renderType: root.nativeRender
+                Timer { interval: showSeconds ? 1000 : 60000; running: true; repeat: true; onTriggered: parent.text = Qt.formatDateTime(new Date(), parent.showSeconds ? "HH:mm:ss" : "HH:mm") }
+                MouseArea { anchors.fill: parent; onClicked: parent.showSeconds = !parent.showSeconds }
             }
-            Text { text: " "; font.pixelSize: 14 }
+            Text { text: " "; font.pixelSize: 14; renderType: root.nativeRender }
             Text {
                 text: Qt.formatDateTime(new Date(), "yyyy-MM-dd")
                 color: "#fdf6e3"
                 font.family: root.fontFamily
                 font.pixelSize: 14
+                renderType: root.nativeRender
                 Timer { interval: 60000; running: true; repeat: true; onTriggered: parent.text = Qt.formatDateTime(new Date(), "yyyy-MM-dd") }
             }
         }
