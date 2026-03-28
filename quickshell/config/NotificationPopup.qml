@@ -9,18 +9,17 @@ PanelWindow {
 
     anchors {
         top: true
+        left: true
         right: true
     }
 
     exclusiveZone: 0
 
-    implicitWidth: 300
     implicitHeight: 200
 
     color: "transparent"
 
-    // Always visible — toggling visibility crashes X11 rendering
-    visible: true
+    visible: server.trackedNotifications.values.length > 0
 
     readonly property bool isWayland: Qt.platform.pluginName.startsWith("wayland")
     readonly property int cornerRadius: isWayland ? 8 : 0
@@ -29,7 +28,7 @@ PanelWindow {
 
     Column {
         id: notifColumn
-        anchors { left: parent.left; right: parent.right }
+        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
         spacing: 4
 
         Repeater {
@@ -42,7 +41,7 @@ PanelWindow {
                 visible: index >= (server.trackedNotifications.values.length - 5)
 
                 width: notifColumn.width
-                height: visible ? Math.max(notifContent.implicitHeight + 16, 30) : 0
+                height: visible ? Math.max(notifContent.implicitHeight + 16, 40) : 0
                 radius: popup.cornerRadius
 
                 color: modelData.urgency === NotificationUrgency.Critical ? "#152024"
@@ -71,9 +70,8 @@ PanelWindow {
                     }
 
                     Text {
-                        visible: (modelData.body ?? "") !== ""
                         width: parent.width
-                        text: modelData.body ?? ""
+                        text: (modelData.body ?? "") !== "" ? modelData.body : " "
                         color: modelData.urgency === NotificationUrgency.Critical ? "#CB4B16"
                              : modelData.urgency === NotificationUrgency.Low ? "#707880"
                              : "#FDF6E3"

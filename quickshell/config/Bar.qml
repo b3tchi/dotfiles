@@ -78,7 +78,7 @@ PanelWindow {
     property string diskVal: "?"
     property string netVal:  ""
     property string volVal:  ""
-    property string notifVal: "0"
+    property int notifCount: 0
 
     Process {
         id: cpuProc
@@ -128,15 +128,6 @@ PanelWindow {
         onExited: volTimer.restart()
     }
     Timer { id: volTimer; interval: 5000; onTriggered: volProc.running = true }
-
-    Process {
-        id: notifProc
-        running: true
-        command: ["dunstctl", "count", "waiting"]
-        stdout: SplitParser { onRead: data => root.notifVal = data.trim() }
-        onExited: notifTimer.restart()
-    }
-    Timer { id: notifTimer; interval: 3000; onTriggered: notifProc.running = true }
 
     // --- Layout (using Row, not RowLayout — RowLayout leaks Text.color) ---
     Item {
@@ -285,9 +276,9 @@ PanelWindow {
             Text { visible: root.volVal !== ""; text: root.volVal + "%"; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
 
             // Notifications
-            Text { visible: root.notifVal !== "0" && root.notifVal !== ""; text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
-            Text { visible: root.notifVal !== "0" && root.notifVal !== ""; text: "NOT:"; color: "#cb4b16"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
-            Text { visible: root.notifVal !== "0" && root.notifVal !== ""; text: root.notifVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: root.notifCount > 0; text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: root.notifCount > 0; text: "NOT:"; color: "#cb4b16"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: root.notifCount > 0; text: "" + root.notifCount; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
 
             Text { text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
 
