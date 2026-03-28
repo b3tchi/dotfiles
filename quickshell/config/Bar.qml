@@ -24,13 +24,38 @@ PanelWindow {
         right:  isWayland ? 40 : 0
     }
 
-    color: "#222d31"
+    color: currentMode !== "default" ? "#152024" : "#222d31"
 
     readonly property string fontFamily: "Iosevka Nerd Font"
     readonly property int nativeRender: Text.NativeRendering
 
     // --- Mode tracking ---
     property string currentMode: "default"
+
+    // Mode hint definitions: [{key, label}]
+    function modeHints(mode) {
+        if (mode === "resize")
+            return [
+                {key: "j", label: "←"},
+                {key: "k", label: "↓"},
+                {key: "l", label: "↑"},
+                {key: ";", label: "→"},
+                {key: "←↓↑→", label: "arrows"},
+                {key: "Esc", label: "exit"}
+            ]
+        if (mode.indexOf("(l)ock") !== -1)
+            return [
+                {key: "l", label: "lock"},
+                {key: "e", label: "exit"},
+                {key: "u", label: "switch user"},
+                {key: "s", label: "suspend"},
+                {key: "h", label: "hibernate"},
+                {key: "r", label: "reboot"},
+                {key: "S-s", label: "shutdown"},
+                {key: "Esc", label: "cancel"}
+            ]
+        return [{key: "", label: mode}]
+    }
 
     Process {
         command: ["i3-msg", "-t", "subscribe", "-m", '["mode"]']
@@ -52,6 +77,7 @@ PanelWindow {
     property string diskVal: "?"
     property string netVal:  ""
     property string volVal:  ""
+    property string notifVal: "0"
 
     Process {
         id: cpuProc
@@ -102,6 +128,15 @@ PanelWindow {
     }
     Timer { id: volTimer; interval: 5000; onTriggered: volProc.running = true }
 
+    Process {
+        id: notifProc
+        running: true
+        command: ["dunstctl", "count", "waiting"]
+        stdout: SplitParser { onRead: data => root.notifVal = data.trim() }
+        onExited: notifTimer.restart()
+    }
+    Timer { id: notifTimer; interval: 3000; onTriggered: notifProc.running = true }
+
     // --- Layout (using Row, not RowLayout — RowLayout leaks Text.color) ---
     Item {
         anchors.fill: parent
@@ -109,6 +144,7 @@ PanelWindow {
         // Left: workspaces + mode
         Row {
             id: leftSide
+            visible: root.currentMode === "default"
             anchors { left: parent.left; top: parent.top; bottom: parent.bottom; leftMargin: 4 }
             spacing: 0
 
@@ -173,8 +209,53 @@ PanelWindow {
             }
         }
 
+        // Mode hints overlay (whole bar, left-aligned)
+        Row {
+            visible: root.currentMode !== "default"
+            anchors { left: parent.left; top: parent.top; bottom: parent.bottom; leftMargin: 4 }
+            spacing: 0
+
+            Rectangle {
+                width: modeNameText.implicitWidth + 14
+                height: 27
+                color: "#152024"
+
+                Text {
+                    id: modeNameText
+                    anchors.centerIn: parent
+                    text: root.currentMode === "resize" ? "resize" : "system"
+                    color: "#fdf6e3"
+                    font.family: root.fontFamily
+                    font.pixelSize: 14
+                    renderType: root.nativeRender
+                }
+
+                Rectangle {
+                    anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
+                    height: 3
+                    color: "#cb4b16"
+                }
+            }
+            Item { width: 4; height: parent.height }
+
+            Repeater {
+                model: root.currentMode !== "default" ? root.modeHints(root.currentMode) : []
+
+                Row {
+                    required property var modelData
+                    required property int index
+                    anchors.verticalCenter: parent ? parent.verticalCenter : undefined
+                    Text { text: index > 0 ? "  " : ""; font.pixelSize: 14; renderType: root.nativeRender }
+                    Text { text: modelData.key; color: "#cb4b16"; font.family: root.fontFamily; font.pixelSize: 14; font.bold: true; renderType: root.nativeRender; Rectangle { anchors.fill: parent; color: "#152024"; z: -1 } }
+                    Text { text: " "; font.pixelSize: 14; renderType: root.nativeRender }
+                    Text { text: modelData.label; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+                }
+            }
+        }
+
         // Right: stats
         Row {
+            visible: root.currentMode === "default"
             anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: 4 }
             spacing: 0
 
@@ -202,6 +283,11 @@ PanelWindow {
             Text { visible: root.volVal !== ""; text: "VOL:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
             Text { visible: root.volVal !== ""; text: root.volVal + "%"; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
 
+            // Notifications
+            Text { visible: root.notifVal !== "0" && root.notifVal !== ""; text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: root.notifVal !== "0" && root.notifVal !== ""; text: "NOT:"; color: "#cb4b16"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: root.notifVal !== "0" && root.notifVal !== ""; text: root.notifVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+
             Text { text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
 
             // Date
@@ -213,7 +299,7 @@ PanelWindow {
                 font.pixelSize: 14
                 renderType: root.nativeRender
                 Timer { interval: showSeconds ? 1000 : 60000; running: true; repeat: true; onTriggered: parent.text = Qt.formatDateTime(new Date(), parent.showSeconds ? "HH:mm:ss" : "HH:mm") }
-                MouseArea { anchors.fill: parent; onClicked: parent.showSeconds = !parent.showSeconds }
+                MouseArea { anchors.fill: parent; onClicked: { parent.showSeconds = !parent.showSeconds; parent.text = Qt.formatDateTime(new Date(), parent.showSeconds ? "HH:mm:ss" : "HH:mm") } }
             }
             Text { text: " "; font.pixelSize: 14; renderType: root.nativeRender }
             Text {
