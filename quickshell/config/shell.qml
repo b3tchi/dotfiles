@@ -1,9 +1,12 @@
 import Quickshell
 import Quickshell.Services.Notifications
+import QtQuick
 
 ShellRoot {
+    property int globalNotifCount: notifSrv.trackedNotifications.values.length
+
     NotificationServer {
-        id: notifServer
+        id: notifSrv
         keepOnReload: true
         bodyMarkupSupported: true
         imageSupported: false
@@ -20,11 +23,11 @@ ShellRoot {
         Bar {
             required property var modelData
             screen: modelData
-            notifServer: notifServer
+            notifCount: globalNotifCount
         }
     }
 
-    NotificationPopup {
-        server: notifServer
-    }
+    //NotificationPopup {
+    //    server: notifSrv
+    //}
 }

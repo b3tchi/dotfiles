@@ -1,15 +1,14 @@
 import Quickshell
 import Quickshell.I3
 import Quickshell.Io
-import Quickshell.Services.Notifications
 import QtQuick
 import QtQuick.Layouts
 
 PanelWindow {
     id: root
 
-    // Notification server passed from shell.qml
-    required property NotificationServer notifServer
+    // Notification count from shell.qml
+    property int notifCount: 0
 
     // Both polybar and waybar use bottom position
     anchors {
@@ -278,9 +277,9 @@ PanelWindow {
             Text { visible: root.volVal !== ""; text: root.volVal + "%"; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
 
             // Notifications
-            Text { visible: root.notifServer.trackedNotifications.count > 0; text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
-            Text { visible: root.notifServer.trackedNotifications.count > 0; text: "NOT:"; color: "#cb4b16"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
-            Text { visible: root.notifServer.trackedNotifications.count > 0; text: "" + root.notifServer.trackedNotifications.count; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: root.notifCount > 0; text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: root.notifCount > 0; text: "NOT:"; color: "#cb4b16"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: root.notifCount > 0; text: "" + root.notifCount; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
 
             Text { text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
 
@@ -292,7 +291,7 @@ PanelWindow {
                 font.family: root.fontFamily
                 font.pixelSize: 14
                 renderType: root.nativeRender
-                Timer { interval: showSeconds ? 1000 : 60000; running: true; repeat: true; onTriggered: parent.text = Qt.formatDateTime(new Date(), parent.showSeconds ? "HH:mm:ss" : "HH:mm") }
+                Timer { interval: parent.showSeconds ? 1000 : 60000; running: true; repeat: true; onTriggered: parent.text = Qt.formatDateTime(new Date(), parent.showSeconds ? "HH:mm:ss" : "HH:mm") }
                 MouseArea { anchors.fill: parent; onClicked: { parent.showSeconds = !parent.showSeconds; parent.text = Qt.formatDateTime(new Date(), parent.showSeconds ? "HH:mm:ss" : "HH:mm") } }
             }
             Text { text: " "; font.pixelSize: 14; renderType: root.nativeRender }

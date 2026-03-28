@@ -5,7 +5,6 @@ import QtQuick
 PanelWindow {
     id: popup
 
-    // Required: notification server instance from shell.qml
     required property NotificationServer server
 
     anchors {
@@ -13,21 +12,14 @@ PanelWindow {
         right: true
     }
 
-    // Offset from screen edge (matches dunst: origin top-right, offset 20x60)
-    margins {
-        top: 60
-        right: 20
-    }
+    exclusiveZone: 0
 
-    // Size: fixed width, dynamic height based on notification count
     implicitWidth: 300
-    implicitHeight: notifColumn.implicitHeight
+    implicitHeight: notifColumn.implicitHeight > 0 ? notifColumn.implicitHeight : 1
 
-    // Transparent background — each notification draws its own bg
     color: "transparent"
 
-    // Hide when no notifications
-    visible: server.trackedNotifications.count > 0
+    visible: server.trackedNotifications.values.length > 0
 
     readonly property bool isWayland: Qt.platform.pluginName.startsWith("wayland")
     readonly property int cornerRadius: isWayland ? 8 : 0
@@ -46,8 +38,7 @@ PanelWindow {
                 required property var modelData
                 required property int index
 
-                // Hide beyond 5th notification (oldest at index 0)
-                visible: index >= (server.trackedNotifications.count - 5)
+                visible: index >= (server.trackedNotifications.values.length - 5)
 
                 width: notifColumn.width
                 height: visible ? notifContent.implicitHeight + 16 : 0
@@ -65,10 +56,9 @@ PanelWindow {
                     }
                     spacing: 2
 
-                    // Summary (title)
                     Text {
                         width: parent.width
-                        text: modelData.summary
+                        text: modelData.summary ?? ""
                         color: modelData.urgency === NotificationUrgency.Critical ? "#CB4B16"
                              : modelData.urgency === NotificationUrgency.Low ? "#707880"
                              : "#FDF6E3"
@@ -79,11 +69,10 @@ PanelWindow {
                         renderType: popup.nativeRender
                     }
 
-                    // Body text
                     Text {
-                        visible: modelData.body !== ""
+                        visible: (modelData.body ?? "") !== ""
                         width: parent.width
-                        text: modelData.body
+                        text: modelData.body ?? ""
                         color: modelData.urgency === NotificationUrgency.Critical ? "#CB4B16"
                              : modelData.urgency === NotificationUrgency.Low ? "#707880"
                              : "#FDF6E3"
@@ -95,10 +84,9 @@ PanelWindow {
                         renderType: popup.nativeRender
                     }
 
-                    // App name (subtle)
                     Text {
-                        visible: modelData.appName !== ""
-                        text: modelData.appName
+                        visible: (modelData.appName ?? "") !== ""
+                        text: modelData.appName ?? ""
                         color: "#707880"
                         font.family: popup.fontFamily
                         font.pixelSize: 10
@@ -106,13 +94,11 @@ PanelWindow {
                     }
                 }
 
-                // Click to dismiss
                 MouseArea {
                     anchors.fill: parent
                     onClicked: modelData.dismiss()
                 }
 
-                // Auto-dismiss timer (critical: no auto-dismiss)
                 Timer {
                     running: modelData.urgency !== NotificationUrgency.Critical
                     interval: 10000
