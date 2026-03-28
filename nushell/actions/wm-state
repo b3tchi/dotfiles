@@ -1,0 +1,249 @@
+#!/usr/bin/env nu
+# wm-state: list, save, and restore workspace ↔ tmux session mappings
+
+const wm_ipc = '~/.local/bin/wm-ipc.nu'
+use $wm_ipc *
+
+# Check if candidate_pid is a descendant of ancestor_pid via /proc
+def is-descendant [ancestor_pid: int, candidate_pid: int] {
+    mut pid = $candidate_pid
+    loop {
+        if $pid == $ancestor_pid { return true }
+        if $pid <= 1 { return false }
+        let ppid_file = $"/proc/($pid)/stat"
+        if not ($ppid_file | path exists) { return false }
+        let stat = (open $ppid_file --raw)
+        let after_comm = ($stat | str index-of ")" | $in + 2)
+        let fields = ($stat | str substring $after_comm.. | str trim | split row -r '\s+')
+        $pid = ($fields | get 1 | into int)
+    }
+}
+
+# Recursively collect foot terminal PIDs from a sway tree node
+def collect-foot-pids [node: record] {
+    mut pids = []
+    if ($node | get -o app_id | default "") == "foot" {
+        let pid = ($node | get -o pid | default 0)
+        if $pid > 0 { $pids = ($pids | append $pid) }
+    }
+    for child in ($node | get -o nodes | default []) {
+        $pids = ($pids | append (collect-foot-pids $child))
+    }
+    for child in ($node | get -o floating_nodes | default []) {
+        $pids = ($pids | append (collect-foot-pids $child))
+    }
+    $pids
+}
+
+# Get workspace → foot PIDs mapping from sway tree
+def get-sway-workspaces [] {
+    let tree_json = (ipc "-t get_tree")
+    if $tree_json == null { return [] }
+    let tree = ($tree_json | from json)
+    $tree | get -o nodes | default [] | each { |output|
+        $output | get -o nodes | default [] | where { |ws|
+            ($ws | get -o type) == "workspace" and ($ws | get -o name | default "") != "__i3_scratch"
+        } | each { |ws|
+            let pids = (collect-foot-pids $ws)
+            if ($pids | is-not-empty) {
+                { workspace: ($ws | get name), pids: $pids }
+            }
+        }
+    } | flatten | where { |r| $r != null }
+}
+
+# Find tmux client info for a foot PID against local (fat) clients
+def find-tmux-client [foot_pid: int, clients: list<record>] {
+    for client in $clients {
+        if (is-descendant $foot_pid $client.pid) {
+            return { type: "local", session: $client.session }
+        }
+    }
+    return {}
+}
+
+# Find thin tmux client info for a foot PID
+def find-thin-client [foot_pid: int, thin_clients: list<record>] {
+    for client in $thin_clients {
+        if (is-descendant $foot_pid $client.pid) {
+            return { type: "thin", session: $client.session }
+        }
+    }
+    return {}
+}
+
+# List current sway workspaces with their tmux session mappings
+def "main list" [
+    --output (-o): string  # Output format: "table" for tabular, default is yaml
+] {
+    let ws_terminals = get-sway-workspaces
+
+    if ($ws_terminals | is-empty) {
+        print "No sway workspaces with terminals"
+        return
+    }
+
+    # Get local (fat) tmux clients
+    let clients_result = (do { tmux list-clients -F "#{client_pid} #{session_name} #{window_index}" } | complete)
+    let local_clients = if $clients_result.exit_code == 0 {
+        $clients_result.stdout | lines | where $it != "" | each { |line|
+            let parts = ($line | split row " ")
+            { pid: ($parts.0 | into int), session: $parts.1, window: ($parts.2 | into int) }
+        }
+    } else { [] }
+
+    # Get thin tmux clients
+    let thin_result = (do { tmux -L thin list-clients -F "#{client_pid} #{session_name}" } | complete)
+    let thin_clients = if $thin_result.exit_code == 0 {
+        $thin_result.stdout | lines | where $it != "" | each { |line|
+            let parts = ($line | split row " ")
+            { pid: ($parts.0 | into int), session: $parts.1 }
+        }
+    } else { [] }
+
+    let workspaces = ($ws_terminals | each { |wt|
+        let terminals = ($wt.pids | each { |foot_pid|
+            let local_match = (find-tmux-client $foot_pid $local_clients)
+            if ($local_match | is-not-empty) {
+                return $local_match
+            }
+            let thin_match = (find-thin-client $foot_pid $thin_clients)
+            if ($thin_match | is-not-empty) {
+                return $thin_match
+            }
+        } | where { |t| $t != null })
+
+        { workspace: $wt.workspace, terminals: $terminals }
+    })
+
+    if $output == "table" {
+        $workspaces | each { |ws|
+            $ws.terminals | each { |t|
+                { workspace: $ws.workspace } | merge $t
+            }
+        } | flatten | table
+    } else {
+        $workspaces | to yaml
+    }
+}
+
+# Save current sway state to cache
+def "main save" [] {
+    let ws_terminals = get-sway-workspaces
+
+    let clients_result = (do { tmux list-clients -F "#{client_pid} #{session_name} #{window_index}" } | complete)
+    let local_clients = if $clients_result.exit_code == 0 {
+        $clients_result.stdout | lines | where $it != "" | each { |line|
+            let parts = ($line | split row " ")
+            { pid: ($parts.0 | into int), session: $parts.1, window: ($parts.2 | into int) }
+        }
+    } else { [] }
+
+    let thin_result = (do { tmux -L thin list-clients -F "#{client_pid} #{session_name}" } | complete)
+    let thin_clients = if $thin_result.exit_code == 0 {
+        $thin_result.stdout | lines | where $it != "" | each { |line|
+            let parts = ($line | split row " ")
+            { pid: ($parts.0 | into int), session: $parts.1 }
+        }
+    } else { [] }
+
+    let workspaces = ($ws_terminals | each { |wt|
+        let terminals = ($wt.pids | each { |foot_pid|
+            let local_match = (find-tmux-client $foot_pid $local_clients)
+            if ($local_match | is-not-empty) {
+                return $local_match
+            }
+            let thin_match = (find-thin-client $foot_pid $thin_clients)
+            if ($thin_match | is-not-empty) {
+                return $thin_match
+            }
+        } | where { |t| $t != null })
+
+        { name: $wt.workspace, terminals: $terminals }
+    })
+
+    { workspaces: $workspaces } | to json | save -f ("~/.cache/sway-state.json" | path expand)
+    print $"Saved ($workspaces | length) workspaces"
+}
+
+# Restore sway workspaces + terminals from saved state
+def "main restore" [] {
+    let state_file = ("~/.cache/sway-state.json" | path expand)
+    if not ($state_file | path exists) {
+        print "No saved state found"
+        return
+    }
+
+    let state = (open $state_file)
+    let workspaces = ($state | get -o workspaces | default [])
+
+    if ($workspaces | is-empty) {
+        print "No workspaces to restore"
+        return
+    }
+
+    if (tmux list-sessions | complete | get exit_code) != 0 {
+        print "No tmux sessions running, skipping restore"
+        return
+    }
+
+    for ws in $workspaces {
+        let ws_name = ($ws | get -o name | default "")
+        if ($ws_name | is-empty) { continue }
+
+        let terminals = ($ws | get -o terminals | default [])
+
+        print $"Restoring workspace: ($ws_name)"
+        ^swaymsg $"workspace ($ws_name)"
+
+        if ($terminals | is-empty) {
+            ^swaymsg exec foot
+            continue
+        }
+
+        for term in $terminals {
+            let term_type = ($term | get -o type | default "local")
+
+            if $term_type == "thin" {
+                let ssh_args = ($term | get -o ssh_args | default "")
+                let remote_session = ($term | get -o remote_session | default "")
+
+                if ($ssh_args | is-empty) or ($remote_session | is-empty) {
+                    print $"  Skipping thin terminal: missing ssh_args or remote_session"
+                    continue
+                }
+
+                let cmd = $"tmux-to-workstation connect -g ($remote_session) -- ($ssh_args)"
+                ^swaymsg $"exec foot -e nu -c '($cmd)'"
+            } else {
+                let session = ($term | get -o session | default "local")
+                let window = ($term | get -o window | default null)
+
+                let target = (tmux-start start 0 $session | str trim)
+
+                if $window != null {
+                    let target_session = ($target | split row ":" | first)
+                    tmux select-window -t $"($target_session):($window)"
+                }
+
+                ^swaymsg $"exec env TMUX_TARGET=($target) foot"
+            }
+        }
+    }
+
+    let first_name = ($workspaces | first | get -o name | default "")
+    if ($first_name | is-not-empty) {
+        ^swaymsg $"workspace ($first_name)"
+    }
+
+    print "Restore complete"
+}
+
+def main [] {
+    print "sway-session - workspace ↔ tmux session management"
+    print ""
+    print "Commands:"
+    print "  list [-o table]   List current workspace → tmux mappings"
+    print "  save              Save current state to cache"
+    print "  restore           Restore workspaces from saved state"
+}

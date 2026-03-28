@@ -11,8 +11,6 @@ linux:
     wsl/sway-session.service: ~/.config/systemd/user/sway-session.service
     profiles.yaml: ~/.config/sway/profiles.yaml
     scripts/sway-profile.nu: ~/.local/bin/sway-profile
-    ../nushell/actions/sway-save-state: ~/.local/bin/sway-save-state
-    ../nushell/actions/sway-restore: ~/.local/bin/sway-restore
     scripts/clipboard-to-win.nu: ~/.local/bin/clipboard-to-win
     scripts/clipboard-to-win-image.ps1: ~/.local/bin/clipboard-to-win-image.ps1
     scripts/win-to-clipboard.nu: ~/.local/bin/win-to-clipboard

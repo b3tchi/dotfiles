@@ -139,13 +139,15 @@ watch_state() {
   local swaysock="${XDG_RUNTIME_DIR}/sway-ipc.${UID_NUM}.${sway_pid}.sock"
 
   while kill -0 "$sway_pid" 2>/dev/null; do
-    SWAYSOCK="$swaysock" sway-save-state 2>/dev/null
+    # TODO: test wm-state before enabling
+    # SWAYSOCK="$swaysock" wm-state save 2>/dev/null
     sleep 5
   done
 }
 
 # Restore previous session if state exists
-SWAYSOCK="$SWAYSOCK" sway-restore 2>/dev/null &
+# TODO: test wm-state before enabling
+# SWAYSOCK="$SWAYSOCK" wm-state restore 2>/dev/null &
 wait $!
 
 watch_outputs "$SWAY_PID" &
