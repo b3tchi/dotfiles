@@ -1,0 +1,41 @@
+#!/usr/bin/env nu
+# cleanup-thins: remove thin sessions not attached to any sway workspace
+# Uses wm-state list and tmux-to-workstation list, joins on session
+
+def main [
+    --dry-run (-n)  # Show what would be killed without doing it
+] {
+    # Get thin sessions from wm-state (those on a sway workspace)
+    let wm = (do { wm-state list } | complete)
+    let attached_sessions = if $wm.exit_code == 0 and ($wm.stdout | is-not-empty) {
+        $wm.stdout | from yaml
+        | each {|ws| $ws.terminals | where type == "thin" | get session }
+        | flatten
+    } else { [] }
+
+    # Get all thin sessions from tmux-to-workstation
+    let all_thins = (do { tmux-to-workstation list } | complete)
+    let thin_sessions = if $all_thins.exit_code == 0 and ($all_thins.stdout | is-not-empty) {
+        $all_thins.stdout | from yaml | get session
+    } else {
+        print "No thin sessions"
+        return
+    }
+
+    # Thin sessions not on any workspace
+    let orphans = $thin_sessions | where {|s| $s not-in $attached_sessions }
+
+    if ($orphans | is-empty) {
+        print "No orphaned thin sessions"
+        return
+    }
+
+    for orphan in $orphans {
+        if $dry_run {
+            print $"Would kill: ($orphan)"
+        } else {
+            tmux -L thin kill-session -t $orphan
+            print $"Killed: ($orphan)"
+        }
+    }
+}
