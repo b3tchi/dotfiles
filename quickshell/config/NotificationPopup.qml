@@ -2,21 +2,15 @@ import Quickshell
 import Quickshell.Services.Notifications
 import QtQuick
 
-PanelWindow {
+FloatingWindow {
     id: popup
 
     required property NotificationServer server
 
-    anchors {
-        top: true
-        left: true
-        right: true
-    }
+    title: "quickshell-notifications"
 
-    exclusiveZone: 0
-    exclusionMode: ExclusionMode.Ignore
-
-    implicitHeight: 200
+    implicitWidth: 300
+    implicitHeight: Math.max(notifColumn.implicitHeight, 40)
 
     color: "transparent"
 
@@ -29,8 +23,7 @@ PanelWindow {
 
     Column {
         id: notifColumn
-        anchors { right: parent.right; bottom: parent.bottom }
-        width: 300
+        anchors { right: parent.right; top: parent.top; left: parent.left }
         spacing: 4
 
         Repeater {
