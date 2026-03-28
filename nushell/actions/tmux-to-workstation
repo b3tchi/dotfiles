@@ -96,6 +96,10 @@ def --wrapped "main connect" [
         return
     }
 
+    # Resolve stable remote_target as session_group:window_id
+    let remote_target = (^ssh ...$args $"tmux display-message -t '($target)' -p '#{session_group}:#{window_id}'" 2>/dev/null | str trim)
+    let remote_target = if ($remote_target | is-empty) { $target } else { $remote_target }
+
     # SSH command for the thin pane
     let ssh_cmd = $"ssh -t ($args | str join ' ') TMUX_TARGET=($target) bash -li"
 
@@ -104,7 +108,7 @@ def --wrapped "main connect" [
         remote_host: $hostname
         remote_session: $remote_session
         remote_port: $port
-        remote_target: $target
+        remote_target: $remote_target
         ssh_args: ($args | str join " ")
     }
 
@@ -133,14 +137,57 @@ def "main list" [
         return
     }
 
+    # When --check, query each unique remote host once for all windows
+    let remote_windows_map = if $check {
+        let hosts = $panes | each {|l|
+            let parts = ($l | split row "|")
+            { host: ($parts | get 4), ssh_args: ($parts | get 8) }
+        } | where { |h| $h.ssh_args | is-not-empty } | uniq-by host
+
+        $hosts | each {|h|
+            let ssh_parts = ($h.ssh_args | split row " ")
+            let result = (do { ^ssh -o ConnectTimeout=3 -o BatchMode=yes ...$ssh_parts "tmux list-windows -a -F '#{session_group}:#{window_id}||#{pane_title} - #{pane_current_command}@#{session_group}'" } | complete)
+            let windows = if $result.exit_code == 0 {
+                $result.stdout | lines | where { |s| $s | is-not-empty }
+                | each {|l|
+                    let parts = ($l | split row "||")
+                    let id_parts = ($parts | get 0 | split row ":")
+                    { group: ($id_parts | get 0), window_id: ($id_parts | get 1), title: ($parts | get 1) }
+                }
+                | uniq-by window_id
+            } else { [] }
+            { host: $h.host, windows: $windows }
+        }
+    } else { [] }
+
     let sessions = $panes | each {|l|
         let parts = ($l | split row "|")
         let ssh_args = ($parts | get 8)
+        let remote_host = ($parts | get 4)
         let remote_target = ($parts | get 7)
-        let remote_live = if $check and ($ssh_args | is-not-empty) and ($remote_target | is-not-empty) {
-            let ssh_parts = ($ssh_args | split row " ")
-            let result = (do { ^ssh -o ConnectTimeout=3 -o BatchMode=yes ...$ssh_parts $"tmux has-session -t ($remote_target)" } | complete)
-            $result.exit_code == 0
+        let remote_session = ($parts | get 5)
+        # Extract window_id from remote_target (e.g. "auctions_0:@5" -> "@5")
+        let remote_wid = if ($remote_target | str contains ":@") {
+            $remote_target | split row ":" | last
+        } else { "" }
+        let check_result = if $check and ($ssh_args | is-not-empty) {
+            let host_entry = ($remote_windows_map | where host == $remote_host)
+            if ($host_entry | is-not-empty) {
+                let windows = ($host_entry | first | get windows)
+                let group_live = ($windows | any {|w| $w.group == $remote_session })
+                # Match by session_group + window_id
+                let matched = if ($remote_wid | is-not-empty) {
+                    let m = ($windows | where group == $remote_session and window_id == $remote_wid)
+                    if ($m | is-not-empty) { $m | first } else { null }
+                } else { null }
+                {
+                    remote_live: $group_live
+                    remote_wid: (if $matched != null { $matched.window_id } else { null })
+                    remote_window: (if $matched != null { $matched.title } else { null })
+                }
+            } else {
+                { remote_live: false, remote_wid: null, remote_window: null }
+            }
         } else {
             null
         }
@@ -149,13 +196,15 @@ def "main list" [
             status: (if ($parts | get 1) == "1" { "dead" } else { "connected" })
             pid: ($parts | get 2)
             remote_name: ($parts | get 3)
-            remote_host: ($parts | get 4)
+            remote_host: $remote_host
             remote_session: ($parts | get 5)
             remote_port: ($parts | get 6)
-            remote_target: ($parts | get 7)
+            remote_target: $remote_target
             ssh_args: $ssh_args
         }
-        if $check { $base | merge { remote_live: $remote_live } } else { $base }
+        if $check and $check_result != null {
+            $base | merge $check_result
+        } else { $base }
     }
 
     if $output == "table" {
