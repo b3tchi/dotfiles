@@ -173,6 +173,7 @@ ShellRoot {
     }
 
 
+
     function switcherShow() {
         switcherIndex = 0
         windowScanner.running = true
@@ -360,27 +361,29 @@ ShellRoot {
             visible: root.mode === "switcher"
             focus: root.mode === "switcher"
 
+            Keys.onPressed: event => {
+                if (event.key === Qt.Key_Tab || event.key === Qt.Key_Down) {
+                    root.switcherIndex = root.switcherIndex < root.switcherWindows.length - 1
+                        ? root.switcherIndex + 1 : 0
+                    event.accepted = true
+                } else if (event.key === Qt.Key_Backtab || event.key === Qt.Key_Up) {
+                    root.switcherIndex = root.switcherIndex > 0
+                        ? root.switcherIndex - 1 : root.switcherWindows.length - 1
+                    event.accepted = true
+                } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                    root.switcherFocus()
+                    event.accepted = true
+                } else if (event.key === Qt.Key_Escape) {
+                    root.hide()
+                    event.accepted = true
+                }
+            }
+
             Keys.onReleased: event => {
                 if (event.key === Qt.Key_Super_L || event.key === Qt.Key_Super_R ||
                     event.key === Qt.Key_Alt || event.key === Qt.Key_Meta) {
                     root.switcherFocus()
                 }
-            }
-
-            Keys.onEscapePressed: root.hide()
-            Keys.onReturnPressed: root.switcherFocus()
-            Keys.onEnterPressed: root.switcherFocus()
-            Keys.onDownPressed: {
-                root.switcherIndex = root.switcherIndex < root.switcherWindows.length - 1
-                    ? root.switcherIndex + 1 : 0
-            }
-            Keys.onUpPressed: {
-                root.switcherIndex = root.switcherIndex > 0
-                    ? root.switcherIndex - 1 : root.switcherWindows.length - 1
-            }
-            Keys.onTabPressed: {
-                root.switcherIndex = root.switcherIndex < root.switcherWindows.length - 1
-                    ? root.switcherIndex + 1 : 0
             }
 
             ListView {
