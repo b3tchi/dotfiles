@@ -157,7 +157,7 @@ ShellRoot {
                     verticalAlignment: TextInput.AlignVCenter
                     color: "#FDF6E3"
                     font.family: "Iosevka Nerd Font"
-                    font.pixelSize: 14
+                    font.pixelSize: 16
                     clip: true
 
                     onTextChanged: {
@@ -186,7 +186,7 @@ ShellRoot {
                     text: "run"
                     color: "#707880"
                     font.family: "Iosevka Nerd Font"
-                    font.pixelSize: 14
+                    font.pixelSize: 16
                     renderType: Text.NativeRendering
                     visible: !searchInput.text
                 }
@@ -224,7 +224,7 @@ ShellRoot {
                         textFormat: Text.RichText
                         color: "#FDF6E3"
                         font.family: "Iosevka Nerd Font"
-                        font.pixelSize: 14
+                        font.pixelSize: 16
                         renderType: Text.NativeRendering
                     }
 

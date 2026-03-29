@@ -45,6 +45,7 @@ PanelWindow {
     color: currentMode !== "default" ? "#152024" : "#222d31"
 
     readonly property string fontFamily: "Iosevka Nerd Font"
+    readonly property int fontSize: 16
     readonly property int nativeRender: Text.NativeRendering
 
     // --- Mode tracking ---
@@ -174,7 +175,7 @@ PanelWindow {
                         text: modelData.name
                         color: "#fdf6e3"
                         font.family: root.fontFamily
-                        font.pixelSize: 14
+                        font.pixelSize: root.fontSize
                         renderType: root.nativeRender
                     }
 
@@ -206,7 +207,7 @@ PanelWindow {
                     text: root.currentMode
                     color: "#fdf6e3"
                     font.family: root.fontFamily
-                    font.pixelSize: 14
+                    font.pixelSize: root.fontSize
                     renderType: root.nativeRender
                 }
 
@@ -235,7 +236,7 @@ PanelWindow {
                     text: root.currentMode === "resize" ? "resize" : "system"
                     color: "#fdf6e3"
                     font.family: root.fontFamily
-                    font.pixelSize: 14
+                    font.pixelSize: root.fontSize
                     renderType: root.nativeRender
                 }
 
@@ -254,10 +255,10 @@ PanelWindow {
                     required property var modelData
                     required property int index
                     anchors.verticalCenter: parent ? parent.verticalCenter : undefined
-                    Text { text: index > 0 ? "  " : ""; font.pixelSize: 14; renderType: root.nativeRender }
-                    Text { text: modelData.key; color: "#cb4b16"; font.family: root.fontFamily; font.pixelSize: 14; font.bold: true; renderType: root.nativeRender; Rectangle { anchors.fill: parent; color: "#152024"; z: -1 } }
-                    Text { text: " "; font.pixelSize: 14; renderType: root.nativeRender }
-                    Text { text: modelData.label; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+                    Text { text: index > 0 ? "  " : ""; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+                    Text { text: modelData.key; color: "#cb4b16"; font.family: root.fontFamily; font.pixelSize: root.fontSize; font.bold: true; renderType: root.nativeRender; Rectangle { anchors.fill: parent; color: "#152024"; z: -1 } }
+                    Text { text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+                    Text { text: modelData.label; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
                 }
             }
         }
@@ -276,7 +277,7 @@ PanelWindow {
                 text: root.notifText
                 color: "#fdf6e3"
                 font.family: root.fontFamily
-                font.pixelSize: 14
+                font.pixelSize: root.fontSize
                 renderType: root.nativeRender
                 y: (parent.height - height) / 2
             }
@@ -300,26 +301,26 @@ PanelWindow {
             spacing: 0
 
             // Stats (hidden during ticker)
-            Text { visible: !root.tickerActive && root.netVal !== ""; text: "NET:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
-            Text { visible: !root.tickerActive && root.netVal !== ""; text: root.netVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
-            Text { visible: !root.tickerActive && root.netVal !== ""; text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive && root.netVal !== ""; text: "NET:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive && root.netVal !== ""; text: root.netVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive && root.netVal !== ""; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
-            Text { visible: !root.tickerActive; text: "CPU:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
-            Text { visible: !root.tickerActive; text: root.cpuVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
-            Text { visible: !root.tickerActive; text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive; text: "CPU:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive; text: root.cpuVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
-            Text { visible: !root.tickerActive; text: "RAM:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
-            Text { visible: !root.tickerActive; text: root.ramVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
-            Text { visible: !root.tickerActive; text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive; text: "RAM:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive; text: root.ramVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
-            Text { visible: !root.tickerActive; text: "HDD:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
-            Text { visible: !root.tickerActive; text: root.diskVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive; text: "HDD:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive; text: root.diskVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
-            Text { visible: !root.tickerActive && root.volVal !== ""; text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
-            Text { visible: !root.tickerActive && root.volVal !== ""; text: "VOL:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
-            Text { visible: !root.tickerActive && root.volVal !== ""; text: root.volVal + "%"; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive && root.volVal !== ""; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive && root.volVal !== ""; text: "VOL:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive && root.volVal !== ""; text: root.volVal + "%"; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
-            Text { text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
             // Bell — always visible, click to replay ticker
             Item {
@@ -335,14 +336,14 @@ PanelWindow {
                         '<path d="M12 2C10.9 2 10 2.9 10 4V4.3C7.7 5.1 6 7.3 6 10V16L4 18V19H20V18L18 16V10C18 7.3 16.3 5.1 14 4.3V4C14 2.9 13.1 2 12 2ZM10 20C10 21.1 10.9 22 12 22S14 21.1 14 20H10Z"/>' +
                         '</svg>')
                 }
-                Text { id: bellCount; visible: root.notifCount > 0; anchors.left: bellIcon.right; text: root.notifCount; color: root.hasCritical ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; font.bold: true; renderType: root.nativeRender }
+                Text { id: bellCount; visible: root.notifCount > 0; anchors.left: bellIcon.right; text: root.notifCount; color: root.hasCritical ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; font.bold: true; renderType: root.nativeRender }
                 MouseArea {
                     anchors.fill: parent
                     onClicked: root.dismissNotif()
                 }
             }
 
-            Text { text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
             // Date
             Text {
@@ -350,17 +351,17 @@ PanelWindow {
                 text: Qt.formatDateTime(new Date(), showSeconds ? "HH:mm:ss" : "HH:mm")
                 color: "#707880"
                 font.family: root.fontFamily
-                font.pixelSize: 14
+                font.pixelSize: root.fontSize
                 renderType: root.nativeRender
                 Timer { interval: parent.showSeconds ? 1000 : 60000; running: true; repeat: true; onTriggered: parent.text = Qt.formatDateTime(new Date(), parent.showSeconds ? "HH:mm:ss" : "HH:mm") }
                 MouseArea { anchors.fill: parent; onClicked: { parent.showSeconds = !parent.showSeconds; parent.text = Qt.formatDateTime(new Date(), parent.showSeconds ? "HH:mm:ss" : "HH:mm") } }
             }
-            Text { text: " "; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text {
                 text: Qt.formatDateTime(new Date(), "yyyy-MM-dd")
                 color: "#fdf6e3"
                 font.family: root.fontFamily
-                font.pixelSize: 14
+                font.pixelSize: root.fontSize
                 renderType: root.nativeRender
                 Timer { interval: 60000; running: true; repeat: true; onTriggered: parent.text = Qt.formatDateTime(new Date(), "yyyy-MM-dd") }
             }

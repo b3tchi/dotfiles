@@ -290,8 +290,11 @@ mode "resize" {
 # Lock screen
 bindsym $mod+9 exec --no-startup-id blurlock
 
-#polybar
-exec_always --no-startup-id $HOME/.config/polybar/launch.sh
+# polybar (replaced by quickshell)
+# exec_always --no-startup-id $HOME/.config/polybar/launch.sh
+
+# quickshell bar
+exec --no-startup-id ~/.dotfiles/quickshell/qs-bar.sh
 # Autostart applications
 # authentication for gnome based apps
 # exec --no-startup-id /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1

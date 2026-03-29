@@ -1,18 +1,21 @@
 #!/bin/sh
-# Toggle quickshell launcher via IPC
-# Platform-aware: works on proot, native Linux, Wayland
+# Quickshell launcher — platform-aware startup and toggle
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 mkdir -p "$XDG_RUNTIME_DIR" 2>/dev/null
 
+# Resolve I3SOCK if available and not set
+if [ -z "$I3SOCK" ] && command -v i3 >/dev/null 2>&1; then
+    export I3SOCK="$(i3 --get-socketpath 2>/dev/null)"
+fi
+
 if [ "$1" = "start" ]; then
-    # Start the resident launcher process (for X11 two-process mode)
+    # Start the resident launcher process (X11 two-process mode)
     exec quickshell -p ~/.dotfiles/quickshell/launcher
 fi
 
-# Check if running on Wayland (launcher embedded in bar process)
+# Toggle launcher
 if [ -n "$WAYLAND_DISPLAY" ]; then
     quickshell msg launcher toggle
 else
-    # X11: separate launcher process
     quickshell -p ~/.dotfiles/quickshell/launcher msg launcher toggle
 fi
