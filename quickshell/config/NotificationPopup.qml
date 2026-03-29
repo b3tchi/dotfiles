@@ -10,95 +10,63 @@ FloatingWindow {
     title: "quickshell-notifications"
 
     implicitWidth: 300
-    implicitHeight: Math.max(notifColumn.implicitHeight, 40)
+    implicitHeight: 80
 
-    color: "transparent"
+    color: "#222D31"
 
     visible: server.trackedNotifications.values.length > 0
 
-    readonly property bool isWayland: Qt.platform.pluginName.startsWith("wayland")
-    readonly property int cornerRadius: isWayland ? 8 : 0
+    property var latest: server.trackedNotifications.values.length > 0
+        ? server.trackedNotifications.values[server.trackedNotifications.values.length - 1]
+        : null
+
     readonly property string fontFamily: "Iosevka Nerd Font"
     readonly property int nativeRender: Text.NativeRendering
 
     Column {
-        id: notifColumn
-        anchors { right: parent.right; top: parent.top; left: parent.left }
-        spacing: 4
+        anchors { left: parent.left; right: parent.right; top: parent.top; margins: 8 }
+        spacing: 2
 
-        Repeater {
-            model: server.trackedNotifications
-
-            Rectangle {
-                required property var modelData
-                required property int index
-
-                visible: index >= (server.trackedNotifications.values.length - 5)
-
-                width: notifColumn.width
-                height: visible ? Math.max(notifContent.implicitHeight + 16, 40) : 0
-                radius: popup.cornerRadius
-
-                color: modelData.urgency === NotificationUrgency.Critical ? "#152024"
-                     : "#222D31"
-
-                Column {
-                    id: notifContent
-                    anchors {
-                        left: parent.left; right: parent.right
-                        top: parent.top
-                        margins: 8
-                    }
-                    spacing: 2
-
-                    Text {
-                        width: parent.width
-                        text: modelData.summary ?? ""
-                        color: modelData.urgency === NotificationUrgency.Critical ? "#CB4B16"
-                             : modelData.urgency === NotificationUrgency.Low ? "#707880"
-                             : "#FDF6E3"
-                        font.family: popup.fontFamily
-                        font.pixelSize: 14
-                        font.bold: true
-                        elide: Text.ElideRight
-                        renderType: popup.nativeRender
-                    }
-
-                    Text {
-                        width: parent.width
-                        text: (modelData.body ?? "") !== "" ? modelData.body : " "
-                        color: modelData.urgency === NotificationUrgency.Critical ? "#CB4B16"
-                             : modelData.urgency === NotificationUrgency.Low ? "#707880"
-                             : "#FDF6E3"
-                        font.family: popup.fontFamily
-                        font.pixelSize: 11
-                        wrapMode: Text.WordWrap
-                        maximumLineCount: 3
-                        elide: Text.ElideRight
-                        renderType: popup.nativeRender
-                    }
-
-                    Text {
-                        visible: (modelData.appName ?? "") !== ""
-                        text: modelData.appName ?? ""
-                        color: "#707880"
-                        font.family: popup.fontFamily
-                        font.pixelSize: 10
-                        renderType: popup.nativeRender
-                    }
-                }
-
-                MouseArea {
-                    anchors.fill: parent
-                    onClicked: modelData.dismiss()
-                }
-
-                Timer {
-                    running: modelData.urgency !== NotificationUrgency.Critical
-                    interval: 10000
-                    onTriggered: modelData.expire()
-                }
-            }
+        Text {
+            width: parent.width
+            text: popup.latest ? (popup.latest.summary ?? "") : ""
+            color: "#FDF6E3"
+            font.family: popup.fontFamily
+            font.pixelSize: 14
+            font.bold: true
+            elide: Text.ElideRight
+            renderType: popup.nativeRender
         }
+
+        Text {
+            width: parent.width
+            text: popup.latest ? ((popup.latest.body ?? "") !== "" ? popup.latest.body : " ") : " "
+            color: "#FDF6E3"
+            font.family: popup.fontFamily
+            font.pixelSize: 11
+            wrapMode: Text.WordWrap
+            maximumLineCount: 3
+            elide: Text.ElideRight
+            renderType: popup.nativeRender
+        }
+
+        Text {
+            text: popup.latest && (popup.latest.appName ?? "") !== "" ? popup.latest.appName : " "
+            color: "#707880"
+            font.family: popup.fontFamily
+            font.pixelSize: 10
+            renderType: popup.nativeRender
+        }
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        onClicked: { if (popup.latest) popup.latest.dismiss() }
+    }
+
+    Timer {
+        running: popup.latest !== null && popup.latest.urgency !== NotificationUrgency.Critical
+        interval: 10000
+        onTriggered: { if (popup.latest) popup.latest.expire() }
     }
 }
