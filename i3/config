@@ -43,7 +43,7 @@ bindsym $mod+Shift+q kill
 
 # start program launcher
 bindsym $mod+Shift+d exec --no-startup-id dmenu_recency
-bindsym $mod+d exec ~/.dotfiles/quickshell/qs-launcher.sh
+bindsym $mod+d exec ~/.dotfiles/quickshell/qs-overlay.sh launcher
 
 # old rofi launcher (replaced by quickshell AppLauncher)
 # bindsym $mod+d exec --no-startup-id rofi -show run
@@ -198,7 +198,8 @@ for_window [all] title_window_icon padding 4px
 for_window [all] title_format "%title"
 for_window [all] border normal 4
 
-for_window [title="qs-launcher"] floating enable border none
+for_window [title="qs-launcher"] floating enable, border none, move position center
+for_window [title="qs-switcher"] floating enable, border none, move position center
 for_window [title="alsamixer"] floating enable border pixel 1
 for_window [class="calamares"] floating enable border normal
 for_window [class="Clipgrab"] floating enable
@@ -302,8 +303,8 @@ exec --no-startup-id ~/.dotfiles/quickshell/qs-bar.sh
 #wallpaper + compozitor
 exec --no-startup-id nitrogen --restore; sleep 1; picom -b
 
-# quickshell launcher (resident, toggled via IPC)
-exec --no-startup-id ~/.dotfiles/quickshell/qs-launcher.sh start
+# quickshell overlay: launcher + switcher (single resident process)
+exec --no-startup-id ~/.dotfiles/quickshell/qs-overlay.sh start
 
 #exec --no-startup-id manjaro-hello
 exec --no-startup-id nm-applet
@@ -329,15 +330,12 @@ exec --no-startup-id setxkbmap -device $(xinput list --id-only 'keyboard:AT Tran
 #mouse cursor
 # exec_always --no-startup-id fix_xcursor
 
-#task switcher
-exec_always alttab -font xft:Iosevka-11 -mk Super_L -vertical -s 1 -t 300x24 -i 20x20 -bg "#222d31" -bw 2 -bc "#222d31" -inact "#222d31" -frame "#16a085"
+# task switcher (quickshell)
+bindsym $mod+Tab exec ~/.dotfiles/quickshell/qs-overlay.sh switcher
 exec_always killall xborders;xborders --border-radius 4 --border-width 2 --border-rgba '#16a085' --positive-x-offset 1 --negative-y-offset 24 --positive-y-offset 1 --negative-x-offset 1
-# exec_always killall xborders;xborders --border-radius 4 --border-width 2 --smart-hide-border --border-rgba '#16a085' --positive-x-offset 1 --negative-y-offset 24 --positive-y-offset 1 --negative-x-offset 1
-#
-# bindsym $mod+Tab exec --no-startup-id "rofi -show-icons -modi windowcd,window,drun -show window"-selected-row 1
-# bindsym $mod+Tab exec --no-startup-id "rofi -timeout-delay 5 -timeout-action 'kb-accept-entry' -selected-row 1 -kb-accept-entry '!Super-Tab' -show-icons -show window -kb-row-down Super-Tab"
-# bindsym $mod+Tab exec --no-startup-id "rofi -timeout-delay 5 -timeout-action 'kb-accept-entry' -selected-row 1 -kb-accept-entry '!Super-Tab' -show-icons -show window -kb-row-down Super-Tab"
-# bindsym $mod+Tab exec --no-startup-id "wintab -m alttab" #!!Issue script hangs in memory not exitting
+
+# alttab (replaced by quickshell switcher)
+# exec_always alttab -font xft:Iosevka-11 -mk Super_L -vertical -s 1 -t 300x24 -i 20x20 -bg "#222d31" -bw 2 -bc "#222d31" -inact "#222d31" -frame "#16a085"
 
 # Color palette used for the terminal ( ~/.Xresources file )
 # Colors are gathered based on the documentation::
