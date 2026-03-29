@@ -38,7 +38,6 @@ ShellRoot {
         title: "quickshell-notifications"
 
         implicitWidth: 300
-        // Fixed height — X11 crashes on window resize
         implicitHeight: 400
 
         color: "transparent"
