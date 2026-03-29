@@ -68,6 +68,12 @@ if [[ -f "/mnt/c/WINDOWS/system32/wsl.exe" ]]; then
   export IS_WSL=1
 fi
 
+# Set XDG_RUNTIME_DIR if not already set (needed in proot)
+if [ -z "$XDG_RUNTIME_DIR" ]; then
+  export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+  mkdir -p "$XDG_RUNTIME_DIR"
+fi
+
 export COLORTERM=truecolor
 
 #check if wsl then start docker

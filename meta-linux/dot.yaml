@@ -12,6 +12,7 @@ depends:
   - wezterm
   - kitty
   - i3
+  - quickshell
   - xterm
   - emacs
   - logseq

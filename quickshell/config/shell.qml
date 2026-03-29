@@ -16,7 +16,6 @@ ShellRoot {
     function dismissLatest() {
         var vals = notifSrv.trackedNotifications.values
         if (vals.length > 0) {
-            // Show the notification being dismissed in ticker
             var n = vals[vals.length - 1]
             var text = n.summary ?? ""
             if ((n.body ?? "") !== "") text += " — " + n.body

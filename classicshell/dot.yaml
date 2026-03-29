@@ -1,0 +1,24 @@
+# Classic i3 stack: rofi (launcher) + dunst (notifications) + polybar (bar)
+# Alternative to quickshell — use one or the other, not both
+# Requires: i3 (WM)
+linux:
+  links:
+    config.rasi: ~/.config/rofi/config.rasi
+    dunstrc: ~/.config/dunst/dunstrc
+    config.ini: ~/.config/polybar/config.ini
+    launch.sh: ~/.config/polybar/launch.sh
+    scripts: ~/.config/polybar/scripts
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -Syu --needed --noconfirm rofi dunst polybar
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -Syu --needed --noconfirm rofi dunst polybar
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux ARM")}}
+      sudo pacman -Syu --needed --noconfirm rofi dunst polybar
+      {{/if}}
+      chmod +x ~/.dotfiles/classicshell/launch.sh
+      chmod +x ~/.dotfiles/classicshell/scripts/*.nu
+      rotz link classicshell --force

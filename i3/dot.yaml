@@ -1,14 +1,11 @@
+# i3 window manager — core WM + compositor
+# Pair with quickshell or i3-classic for bar/launcher/notifications
 linux:
   links:
     config: ~/.i3/config
     picom.conf: ~/.config/picom.conf
-    config.rasi: ~/.config/rofi/config.rasi
     i3status.conf: ~/.config/i3status/config
     i3blocks.conf: ~/.config/i3blocks/config
-    dunstrc: ~/.config/dunst/dunstrc
-    scripts: ~/.config/polybar/scripts
-    config.ini: ~/.config/polybar/config.ini
-    launch.sh: ~/.config/polybar/launch.sh
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
@@ -19,13 +16,11 @@ linux:
       {{#if (eq whoami.distro "Arch Linux")}}
       sudo pacman -Syu --needed --noconfirm \
         i3-wm i3status i3blocks \
-        rofi dunst picom polybar
+        picom xdotool
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux ARM")}}
       sudo pacman -Syu --needed --noconfirm \
         i3-wm i3status i3blocks \
-        rofi dunst picom polybar
+        picom xdotool
       {{/if}}
-      chmod +x ~/.dotfiles/i3/launch.sh
-      chmod +x ~/.dotfiles/i3/scripts/*.nu
       rotz link i3 --force

@@ -1,3 +1,5 @@
+# Replaces: rofi (launcher), dunst (notifications), polybar (bar)
+# Requires: i3 or sway (WM), picom (compositor, X11 only)
 linux:
   links:
     config: ~/.config/quickshell

@@ -43,10 +43,11 @@ bindsym $mod+Shift+q kill
 
 # start program launcher
 bindsym $mod+Shift+d exec --no-startup-id dmenu_recency
-bindsym $mod+d exec --no-startup-id rofi -show run
+bindsym $mod+d exec ~/.dotfiles/quickshell/qs-launcher.sh
 
-#using placeholed issue with placing semicolon
-# bindsym $mod+d exec --no-startup-id rofi -show run -theme-str 'entry {placeholder:"run";}' 
+# old rofi launcher (replaced by quickshell AppLauncher)
+# bindsym $mod+d exec --no-startup-id rofi -show run
+# bindsym $mod+d exec --no-startup-id rofi -show run -theme-str 'entry {placeholder:"run";}'
 
 
 # launch categorized menu
@@ -197,6 +198,7 @@ for_window [all] title_window_icon padding 4px
 for_window [all] title_format "%title"
 for_window [all] border normal 4
 
+for_window [title="qs-launcher"] floating enable border none
 for_window [title="alsamixer"] floating enable border pixel 1
 for_window [class="calamares"] floating enable border normal
 for_window [class="Clipgrab"] floating enable
@@ -296,6 +298,9 @@ exec_always --no-startup-id $HOME/.config/polybar/launch.sh
 
 #wallpaper + compozitor
 exec --no-startup-id nitrogen --restore; sleep 1; picom -b
+
+# quickshell launcher (resident, toggled via IPC)
+exec --no-startup-id ~/.dotfiles/quickshell/qs-launcher.sh start
 
 #exec --no-startup-id manjaro-hello
 exec --no-startup-id nm-applet

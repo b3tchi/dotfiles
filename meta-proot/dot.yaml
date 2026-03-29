@@ -9,3 +9,4 @@ depends:
   - lazygit
   - opencode
   - i3
+  - quickshell
