@@ -7,6 +7,18 @@ import QtQuick.Layouts
 PanelWindow {
     id: root
 
+    property int notifCount: 0
+    property string notifText: ""
+
+    // Ticker state
+    property bool tickerActive: false
+
+    onNotifTextChanged: {
+        if (notifText !== "") {
+            tickerActive = true
+            tickerAnim.restart()
+        }
+    }
 
     // Both polybar and waybar use bottom position
     anchors {
@@ -78,7 +90,6 @@ PanelWindow {
     property string diskVal: "?"
     property string netVal:  ""
     property string volVal:  ""
-    property int notifCount: 0
 
     Process {
         id: cpuProc
@@ -246,40 +257,80 @@ PanelWindow {
             }
         }
 
-        // Right: stats
+        // Notification ticker (scrolls between workspaces and right side)
+        Item {
+            visible: root.currentMode === "default" && root.tickerActive
+            anchors { left: leftSide.right; right: rightSide.left; verticalCenter: parent.verticalCenter; leftMargin: 8; rightMargin: 8 }
+            clip: true
+            height: parent.height
+
+            Text {
+                id: tickerText
+                text: root.notifText
+                color: "#fdf6e3"
+                font.family: root.fontFamily
+                font.pixelSize: 14
+                renderType: root.nativeRender
+                y: (parent.height - height) / 2
+            }
+
+            NumberAnimation {
+                id: tickerAnim
+                target: tickerText
+                property: "x"
+                from: tickerText.parent.width
+                to: -tickerText.implicitWidth
+                duration: Math.max((tickerText.parent.width + tickerText.implicitWidth) * 12, 3000)
+                onFinished: root.tickerActive = false
+            }
+        }
+
+        // Right side: stats + bell + date
         Row {
+            id: rightSide
             visible: root.currentMode === "default"
             anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: 4 }
             spacing: 0
 
-            // Network
-            Text { visible: root.netVal !== ""; text: "NET:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
-            Text { visible: root.netVal !== ""; text: root.netVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
-            Text { visible: root.netVal !== ""; text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
+            // Stats (hidden during ticker)
+            Text { visible: !root.tickerActive && root.netVal !== ""; text: "NET:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive && root.netVal !== ""; text: root.netVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive && root.netVal !== ""; text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
 
-            // CPU
-            Text { text: "CPU:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
-            Text { text: root.cpuVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive; text: "CPU:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive; text: root.cpuVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive; text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
+
+            Text { visible: !root.tickerActive; text: "RAM:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive; text: root.ramVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive; text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
+
+            Text { visible: !root.tickerActive; text: "HDD:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive; text: root.diskVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+
+            Text { visible: !root.tickerActive && root.volVal !== ""; text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive && root.volVal !== ""; text: "VOL:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive && root.volVal !== ""; text: root.volVal + "%"; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+
             Text { text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
 
-            // RAM
-            Text { text: "RAM:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
-            Text { text: root.ramVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
-            Text { text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
-
-            // Disk
-            Text { text: "HDD:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
-            Text { text: root.diskVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
-
-            // Volume
-            Text { visible: root.volVal !== ""; text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
-            Text { visible: root.volVal !== ""; text: "VOL:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
-            Text { visible: root.volVal !== ""; text: root.volVal + "%"; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
-
-            // Notifications
-            Text { visible: root.notifCount > 0; text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
-            Text { visible: root.notifCount > 0; text: "NOT:"; color: "#cb4b16"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
-            Text { visible: root.notifCount > 0; text: "" + root.notifCount; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            // Bell — always visible, click to replay ticker
+            Item {
+                width: bellIcon.width + (root.notifCount > 0 ? bellCount.implicitWidth : 0)
+                height: 14
+                Image {
+                    id: bellIcon
+                    width: 14; height: 14
+                    y: 2
+                    sourceSize: Qt.size(14, 14)
+                    source: "data:image/svg+xml," + encodeURIComponent(
+                        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="' + (root.notifCount > 0 ? '#cb4b16' : '#707880') + '">' +
+                        '<path d="M12 2C10.9 2 10 2.9 10 4V4.3C7.7 5.1 6 7.3 6 10V16L4 18V19H20V18L18 16V10C18 7.3 16.3 5.1 14 4.3V4C14 2.9 13.1 2 12 2ZM10 20C10 21.1 10.9 22 12 22S14 21.1 14 20H10Z"/>' +
+                        '</svg>')
+                }
+                Text { id: bellCount; visible: root.notifCount > 0; anchors.left: bellIcon.right; text: root.notifCount; color: "#cb4b16"; font.family: root.fontFamily; font.pixelSize: 14; font.bold: true; renderType: root.nativeRender }
+                MouseArea { anchors.fill: parent; onClicked: { if (root.notifText !== "") { root.tickerActive = true; tickerAnim.restart() } } }
+            }
 
             Text { text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
 

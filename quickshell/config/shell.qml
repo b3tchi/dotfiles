@@ -1,13 +1,23 @@
 import Quickshell
-import Quickshell.Io
+import Quickshell.Services.Notifications
 
 ShellRoot {
-    property int globalNotifCount: 0
+    property int globalNotifCount: notifSrv.trackedNotifications.values.length
+    property string lastNotifText: ""
 
-    IpcHandler {
-        target: "notif"
-        function setCount(count: string): void {
-            globalNotifCount = parseInt(count) || 0
+    NotificationServer {
+        id: notifSrv
+        keepOnReload: true
+        bodyMarkupSupported: true
+        imageSupported: false
+        actionsSupported: false
+        persistenceSupported: false
+
+        onNotification: notification => {
+            notification.tracked = true
+            var text = notification.summary ?? ""
+            if ((notification.body ?? "") !== "") text += " — " + notification.body
+            lastNotifText = text
         }
     }
 
@@ -17,6 +27,7 @@ ShellRoot {
             required property var modelData
             screen: modelData
             notifCount: globalNotifCount
+            notifText: lastNotifText
         }
     }
 }
