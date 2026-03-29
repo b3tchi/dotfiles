@@ -9,12 +9,17 @@ PanelWindow {
 
     property int notifCount: 0
     property string notifText: ""
+    property int notifSeq: 0
+    property bool hasCritical: false
+    signal dismissNotif()
 
     // Ticker state
     property bool tickerActive: false
 
-    onNotifTextChanged: {
+    onNotifSeqChanged: {
         if (notifText !== "") {
+            tickerAnim.stop()
+            tickerText.x = tickerArea.width > 0 ? tickerArea.width : 500
             tickerActive = true
             tickerAnim.restart()
         }
@@ -257,12 +262,14 @@ PanelWindow {
             }
         }
 
-        // Notification ticker (scrolls between workspaces and right side)
+        // Notification ticker — between workspaces and bell/date
         Item {
+            id: tickerArea
             visible: root.currentMode === "default" && root.tickerActive
-            anchors { left: leftSide.right; right: rightSide.left; verticalCenter: parent.verticalCenter; leftMargin: 8; rightMargin: 8 }
+            anchors { left: leftSide.right; right: rightSide.left; verticalCenter: parent.verticalCenter; leftMargin: 8; rightMargin: 4 }
             clip: true
             height: parent.height
+            z: -1
 
             Text {
                 id: tickerText
@@ -278,9 +285,9 @@ PanelWindow {
                 id: tickerAnim
                 target: tickerText
                 property: "x"
-                from: tickerText.parent.width
+                from: tickerArea.width > 0 ? tickerArea.width : 500
                 to: -tickerText.implicitWidth
-                duration: Math.max((tickerText.parent.width + tickerText.implicitWidth) * 12, 3000)
+                duration: Math.max(((tickerArea.width > 0 ? tickerArea.width : 500) + tickerText.implicitWidth) * 12, 3000)
                 onFinished: root.tickerActive = false
             }
         }
@@ -324,12 +331,15 @@ PanelWindow {
                     y: 2
                     sourceSize: Qt.size(14, 14)
                     source: "data:image/svg+xml," + encodeURIComponent(
-                        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="' + (root.notifCount > 0 ? '#cb4b16' : '#707880') + '">' +
+                        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="' + (root.hasCritical ? '#cb4b16' : root.notifCount > 0 ? '#fdf6e3' : '#707880') + '">' +
                         '<path d="M12 2C10.9 2 10 2.9 10 4V4.3C7.7 5.1 6 7.3 6 10V16L4 18V19H20V18L18 16V10C18 7.3 16.3 5.1 14 4.3V4C14 2.9 13.1 2 12 2ZM10 20C10 21.1 10.9 22 12 22S14 21.1 14 20H10Z"/>' +
                         '</svg>')
                 }
-                Text { id: bellCount; visible: root.notifCount > 0; anchors.left: bellIcon.right; text: root.notifCount; color: "#cb4b16"; font.family: root.fontFamily; font.pixelSize: 14; font.bold: true; renderType: root.nativeRender }
-                MouseArea { anchors.fill: parent; onClicked: { if (root.notifText !== "") { root.tickerActive = true; tickerAnim.restart() } } }
+                Text { id: bellCount; visible: root.notifCount > 0; anchors.left: bellIcon.right; text: root.notifCount; color: root.hasCritical ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; font.bold: true; renderType: root.nativeRender }
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: root.dismissNotif()
+                }
             }
 
             Text { text: "  "; font.pixelSize: 14; renderType: root.nativeRender }

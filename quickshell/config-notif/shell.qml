@@ -24,7 +24,7 @@ ShellRoot {
         command: ["quickshell", "ipc", "call", "notif", "setCount", "" + notifSrv.trackedNotifications.values.length]
     }
 
-    // Also update on expire/dismiss (poll since no direct signal)
+    // Update count on expire/dismiss
     Timer {
         interval: 1000
         running: true
@@ -40,7 +40,7 @@ ShellRoot {
         implicitWidth: 300
         implicitHeight: 400
 
-        color: "transparent"
+        color: "#222D31"
 
         visible: notifSrv.trackedNotifications.values.length > 0
 
@@ -64,8 +64,9 @@ ShellRoot {
                     width: notifColumn.width
                     height: visible ? Math.max(notifContent.implicitHeight + 16, 40) : 0
 
+                    // Slightly lighter than window bg so notifications are distinct
                     color: modelData.urgency === NotificationUrgency.Critical ? "#152024"
-                         : "#222D31"
+                         : "#2a363b"
 
                     Column {
                         id: notifContent
