@@ -172,7 +172,43 @@ ShellRoot {
         running: false
     }
 
+    // ── Global key monitor via xinput ──
 
+    property bool modHeld: false
+
+    Process {
+        id: keyMonitor
+        running: true
+        command: ["sh", "-c", "xinput test-xi2 3 2>/dev/null | awk -f $HOME/.dotfiles/quickshell/qs-keymon.sh"]
+        stdout: SplitParser {
+            onRead: data => {
+                var parts = data.trim().split(" ")
+                if (parts.length !== 2) return
+                var action = parts[0]  // "press" or "release"
+                var code = parseInt(parts[1])
+
+                // 64=Alt_L, 108=Alt_R, 133=Super_L, 134=Super_R
+                var isMod = (code === 64 || code === 108 || code === 133 || code === 134)
+                // 23=Tab
+                var isTab = (code === 23)
+
+                if (isMod && action === "press") {
+                    root.modHeld = true
+                } else if (isMod && action === "release") {
+                    root.modHeld = false
+                    if (root.mode === "switcher" && overlay.visible)
+                        root.switcherFocus()
+                } else if (isTab && action === "press" && root.modHeld) {
+                    if (root.mode === "switcher") {
+                        root.switcherNext()
+                    } else {
+                        root.switcherShow()
+                    }
+                }
+            }
+        }
+        onExited: running = true  // restart if it dies
+    }
 
     function switcherShow() {
         switcherIndex = 0

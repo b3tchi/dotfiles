@@ -330,8 +330,8 @@ exec --no-startup-id setxkbmap -device $(xinput list --id-only 'keyboard:AT Tran
 #mouse cursor
 # exec_always --no-startup-id fix_xcursor
 
-# task switcher (quickshell)
-bindsym $mod+Tab exec ~/.dotfiles/quickshell/qs-overlay.sh switcher
+# task switcher — handled directly by quickshell via xinput key monitor
+# bindsym $mod+Tab exec ~/.dotfiles/quickshell/qs-overlay.sh switcher
 exec_always killall xborders;xborders --border-radius 4 --border-width 2 --border-rgba '#16a085' --positive-x-offset 1 --negative-y-offset 24 --positive-y-offset 1 --negative-x-offset 1
 
 # alttab (replaced by quickshell switcher)
