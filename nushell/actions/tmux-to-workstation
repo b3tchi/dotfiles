@@ -215,62 +215,67 @@ def "main list" [
 }
 
 def "main revive" [
-    --all (-a)  # Revive all dead sessions (skip picker)
+    --all (-a)    # Revive all dead/broken sessions (skip picker)
+    --force (-f)  # Revive all sessions including connected ones
 ] {
-    # Check thin tmux is running
-    let thin_running = (do { tmux -L thin list-sessions } | complete | get exit_code) == 0
-
-    if not $thin_running {
-        print "No local thin tmux running"
+    # Get all thin sessions from list (returns yaml by default)
+    let yaml_output = (main list)
+    if ($yaml_output | is-empty) or ($yaml_output | str starts-with "No") {
+        print "No thin sessions"
         return
     }
+    let sessions = ($yaml_output | from yaml)
 
-    # List dead thin sessions with metadata
-    let dead = try {
-        tmux -L thin list-panes -a -F '#{session_name}|#{pane_dead}|#{@ssh_args}|#{@remote_session}|#{@remote_target}|#{pane_title}' | lines
-        | where {|l| ($l | split row "|" | get 1) == "1" }
-        | each {|l|
-            let parts = ($l | split row "|")
-            let remote_target = ($parts | get 4)
-            # Extract window_id from remote_target (e.g. "auctions:@5" -> "@5")
-            let wid = if ($remote_target | str contains ":@") {
-                $remote_target | split row ":" | last
+    # Enrich with revive status
+    let candidates = $sessions
+        | where {|s| ($s.ssh_args | is-not-empty) and ($s.remote_session | is-not-empty) }
+        | each {|s|
+            let wid = if ($s.remote_target | str contains ":@") {
+                $s.remote_target | split row ":" | last
             } else { "" }
-            {
-                session: ($parts | get 0)
-                ssh_args: ($parts | get 2)
-                remote_session: ($parts | get 3)
-                remote_target: $remote_target
+            let is_dead = $s.status == "dead"
+            let ssh_broken = if not $is_dead and ($s.pid | into int) > 0 {
+                let result = (do { ^kill -0 ($s.pid | into int) } | complete)
+                $result.exit_code != 0
+            } else { false }
+            $s | merge {
                 wid: $wid
-                title: ($parts | get 5)
+                dead: $is_dead
+                broken: $ssh_broken
+                needs_revive: ($is_dead or $ssh_broken)
             }
         }
-        | where {|d| ($d.ssh_args | is-not-empty) and ($d.remote_session | is-not-empty) }
-    } catch { [] }
+        | where {|d| $force or $d.needs_revive }
 
-    if ($dead | is-empty) {
-        print "No dead thin sessions with metadata to reconnect"
+    if ($candidates | is-empty) {
+        print "No thin sessions need reviving"
         return
     }
 
-    # Pick which to reconnect
+    # Pick which to revive
     let selected = if $all {
-        $dead
+        $candidates
     } else {
-        let items = $dead | each {|d| $"($d.session)\t($d.title) [($d.remote_target)]" }
-        let picked = ($items | str join "\n" | fzf --multi --prompt "Reconnect (tab=select): " --with-nth=2.. | lines)
+        let items = $candidates | each {|d|
+            let status = if $d.dead { "dead" } else if $d.broken { "broken" } else { "ok" }
+            $"($d.session)\t($d.remote_name) [($d.remote_target)] (($status))"
+        }
+        let picked = ($items | str join "\n" | fzf --multi --prompt "Revive (tab=select): " --with-nth=2.. | lines)
         if ($picked | is-empty) { return }
         $picked | each {|p|
             let session = ($p | split row "\t" | first)
-            $dead | where {|d| $d.session == $session } | first
+            $candidates | where {|d| $d.session == $session } | first
         }
     }
 
     for entry in $selected {
         let ssh_args = ($entry.ssh_args | split row " ")
 
-        # Create fresh linked session on remote
-        let target = (^ssh ...$ssh_args $"~/.local/bin/tmux-start start 0 ($entry.remote_session)" 2>/dev/null | str trim)
+        # Create fresh linked session on remote and select window in one call
+        let wid_part = if ($entry.wid | is-not-empty) {
+            $" && tmux select-window -t \\$\(echo \\$T | cut -d: -f1\):($entry.wid)"
+        } else { "" }
+        let target = (^ssh ...$ssh_args $"T=\\$\(~/.local/bin/tmux-start start 1 ($entry.remote_session)\)($wid_part); echo \\$T" 2>/dev/null | str trim)
         if ($target | is-empty) {
             print $"Error: tmux-start failed for ($entry.session) -> ($entry.remote_session)"
             continue
@@ -280,27 +285,12 @@ def "main revive" [
         let target_session = ($target | split row ":" | first)
 
         let ssh_cmd = $"ssh -t ($entry.ssh_args) TMUX_TARGET=($target_session) bash -li"
+        let remote_target = $"($entry.remote_session):($entry.wid)"
 
-        # Respawn the dead pane
+        # Respawn pane in-place (works for dead, broken, and force)
         tmux -L thin respawn-pane -k -t $"($entry.session):0.0" $ssh_cmd
-
-        # Select the correct window on the remote via the thin pane's SSH connection
-        if ($entry.wid | is-not-empty) {
-            # Wait for pane to be alive then send select-window through it
-            mut attempts = 0
-            while $attempts < 10 {
-                let dead = (tmux -L thin list-panes -t $"($entry.session):0.0" -F '#{pane_dead}' | str trim)
-                if $dead == "0" { break }
-                sleep 200ms
-                $attempts += 1
-            }
-            tmux -L thin send-keys -t $"($entry.session):0.0" $"tmux select-window -t ($entry.wid)" Enter
-        }
-
-        # Update metadata
-        tmux -L thin set-option -p -t $"($entry.session):0.0" @remote_target $"($entry.remote_session):($entry.wid)"
-
-        print $"Revived: ($entry.session) -> ($entry.remote_session):($entry.wid)"
+        tmux -L thin set-option -p -t $"($entry.session):0.0" @remote_target $remote_target
+        print $"Revived: ($entry.session) -> ($remote_target)"
     }
 }
 
