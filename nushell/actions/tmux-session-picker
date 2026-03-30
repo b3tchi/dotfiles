@@ -8,6 +8,10 @@ def main [mode: string = "sessions"] {
     let gray = (ansi { fg: "#808080" })
     let rst = (ansi reset)
     let current_win = (tmux display-message -p '#{window_id}' | str trim)
+    # Get window_ids that have an attached client viewing them
+    let attached_wids = (try {
+        tmux list-clients -F '#{window_id}' | lines | uniq
+    } catch { [] })
 
     let fmt = [
         '#{session_name}:#{window_id}'
@@ -31,8 +35,10 @@ def main [mode: string = "sessions"] {
             let parts = ($l | split row "||")
             let id = ($parts | get 0)
             let title = ($parts | get 1)
+            let wid = ($id | split row ":" | get 1)
+            let attached = if ($wid in $attached_wids) { $" ($gray)\(attached\)($rst)" } else { "" }
             let colored = ($title | str replace --regex ' - ([^-]*@[^ ]*)$' $"($gray) - $1($rst)")
-            $"($id)||($colored)"
+            $"($id)||($colored)($attached)"
         }
     )
 
@@ -47,9 +53,11 @@ def main [mode: string = "sessions"] {
     }
 
     let target = ($selected | split row "||" | get 0)
-    if $mode == "windows" {
-        tmux select-window -t $target
-    } else {
-        tmux switch-client -t $target
-    }
+    # Extract session group and window_id from target (e.g. "auctions_0:@5")
+    let parts = ($target | split row ":")
+    let session_group = (tmux display-message -t ($parts | get 0) -p '#{session_group}' | str trim)
+    let wid = ($parts | get 1)
+    # Create new linked session so we don't disrupt other terminals
+    let new_session = (tmux-start start 0 $session_group | str trim | split row ":" | first)
+    tmux switch-client -t $"($new_session):($wid)"
 }
