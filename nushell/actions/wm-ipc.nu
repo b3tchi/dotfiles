@@ -14,15 +14,26 @@ def main [command?: string] {
 	}
 }
 
+# Find a valid sway socket, handling stale SWAYSOCK after restarts
+def find-sway-socket [] {
+	let sock = ($env | get -o SWAYSOCK | default "")
+	if ($sock | is-not-empty) and ($sock | path exists) {
+		return $sock
+	}
+	let uid = (id -u | str trim)
+	let socks = (glob $"/run/user/($uid)/sway-ipc.*.sock")
+	if ($socks | is-empty) { return null }
+	let found = ($socks | each {|s| ls $s | first } | sort-by -r modified | get name)
+	if ($found | is-empty) { null } else { $found | first }
+}
+
 # Detect which WM is running and return the IPC command name
 export def ipc-cmd [] {
 	if (which pgrep | is-empty) {
 		return null
 	}
-	# Check sway first — require SWAYSOCK to avoid errors in terminals
-	# without a sway connection (e.g. WezTerm -> WSL where sway runs separately)
-	if ($env | get -o SWAYSOCK | is-not-empty) and (^pgrep -x sway | complete | get exit_code) == 0 {
-		"swaymsg"
+	if (^pgrep -x sway | complete | get exit_code) == 0 {
+		if (find-sway-socket) != null { "swaymsg" } else { null }
 	} else if (^pgrep -x i3 | complete | get exit_code) == 0 {
 		"i3-msg"
 	} else {
@@ -36,7 +47,11 @@ export def ipc-cmd [] {
 export def ipc [command: string] {
 	let cmd = ipc-cmd
 	if $cmd == null { return null }
-	# Split command string into args to pass to the binary
 	let parts = ($command | split row " ")
-	^$cmd ...$parts
+	if $cmd == "swaymsg" {
+		let sock = (find-sway-socket)
+		^swaymsg --socket $sock ...$parts
+	} else {
+		^$cmd ...$parts
+	}
 }

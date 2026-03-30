@@ -271,20 +271,22 @@ def "main revive" [
     for entry in $selected {
         let ssh_args = ($entry.ssh_args | split row " ")
 
-        # Create fresh linked session on remote and select window in one call
-        let wid_part = if ($entry.wid | is-not-empty) {
-            $" && tmux select-window -t \\$\(echo \\$T | cut -d: -f1\):($entry.wid)"
-        } else { "" }
-        let target = (^ssh ...$ssh_args $"T=\\$\(~/.local/bin/tmux-start start 1 ($entry.remote_session)\)($wid_part); echo \\$T" 2>/dev/null | str trim)
+        # Create unattached linked session on remote (pinned=0)
+        let target = (^ssh ...$ssh_args $"~/.local/bin/tmux-start start 0 ($entry.remote_session)" 2>/dev/null | str trim)
         if ($target | is-empty) {
             print $"Error: tmux-start failed for ($entry.session) -> ($entry.remote_session)"
             continue
         }
 
-        # Extract just the session name for TMUX_TARGET (e.g. "auctions_5:7" -> "auctions_5")
+        # Build TMUX_TARGET as session:window_id so attach lands on the right window
         let target_session = ($target | split row ":" | first)
+        let tmux_target = if ($entry.wid | is-not-empty) {
+            $"($target_session):($entry.wid)"
+        } else {
+            $target_session
+        }
 
-        let ssh_cmd = $"ssh -t ($entry.ssh_args) TMUX_TARGET=($target_session) bash -li"
+        let ssh_cmd = $"ssh -t ($entry.ssh_args) TMUX_TARGET=($tmux_target) bash -li"
         let remote_target = $"($entry.remote_session):($entry.wid)"
 
         # Respawn pane in-place (works for dead, broken, and force)
