@@ -1,0 +1,369 @@
+import Quickshell
+import Quickshell.I3
+import Quickshell.Io
+import QtQuick
+import QtQuick.Layouts
+
+PanelWindow {
+    id: root
+
+    property int notifCount: 0
+    property string notifText: ""
+    property int notifSeq: 0
+    property bool hasCritical: false
+    signal dismissNotif()
+
+    // Ticker state
+    property bool tickerActive: false
+
+    onNotifSeqChanged: {
+        if (notifText !== "") {
+            tickerAnim.stop()
+            tickerText.x = tickerArea.width > 0 ? tickerArea.width : 500
+            tickerActive = true
+            tickerAnim.restart()
+        }
+    }
+
+    // Both polybar and waybar use bottom position
+    anchors {
+        left: true
+        right: true
+        bottom: true
+    }
+
+    implicitHeight: 27
+
+    // Phone (Wayland): floating with margins; desktop (X11): full-width
+    readonly property bool isWayland: Qt.platform.pluginName.startsWith("wayland")
+    margins {
+        bottom: isWayland ? 20 : 0
+        left:   isWayland ? 40 : 0
+        right:  isWayland ? 40 : 0
+    }
+
+    color: currentMode !== "default" ? "#152024" : "#222d31"
+
+    readonly property string fontFamily: "Iosevka Nerd Font"
+    readonly property int nativeRender: Text.NativeRendering
+
+    // --- Mode tracking ---
+    property string currentMode: "default"
+
+    // Mode hint definitions: [{key, label}]
+    function modeHints(mode) {
+        if (mode === "resize")
+            return [
+                {key: "j", label: "←"},
+                {key: "k", label: "↓"},
+                {key: "l", label: "↑"},
+                {key: ";", label: "→"},
+                {key: "←↓↑→", label: "arrows"},
+                {key: "Esc", label: "exit"}
+            ]
+        if (mode.indexOf("(l)ock") !== -1)
+            return [
+                {key: "l", label: "lock"},
+                {key: "e", label: "exit"},
+                {key: "u", label: "switch user"},
+                {key: "s", label: "suspend"},
+                {key: "h", label: "hibernate"},
+                {key: "r", label: "reboot"},
+                {key: "S-s", label: "shutdown"},
+                {key: "Esc", label: "cancel"}
+            ]
+        return [{key: "", label: mode}]
+    }
+
+    Process {
+        command: ["i3-msg", "-t", "subscribe", "-m", '["mode"]']
+        running: true
+        stdout: SplitParser {
+            onRead: data => {
+                try {
+                    var e = JSON.parse(data)
+                    if (e.change !== undefined) root.currentMode = e.change
+                } catch(err) {}
+            }
+        }
+        onExited: running = true
+    }
+
+    // --- System stats ---
+    property string cpuVal:  "?"
+    property string ramVal:  "?"
+    property string diskVal: "?"
+    property string netVal:  ""
+    property string volVal:  ""
+
+    Process {
+        id: cpuProc
+        running: true
+        command: ["sh", "-c",
+            "awk 'NR==1{t=$2+$3+$4+$5+$6+$7+$8+$9; idle=$5+$6; printf \"%.0f%%\", (1-idle/t)*100}' /proc/stat"]
+        stdout: SplitParser { onRead: data => root.cpuVal = data.trim() }
+        onExited: cpuTimer.restart()
+    }
+    Timer { id: cpuTimer; interval: 3000; onTriggered: cpuProc.running = true }
+
+    Process {
+        id: ramProc
+        running: true
+        command: ["sh", "-c",
+            "awk '/MemTotal/{t=$2} /MemAvailable/{a=$2} END{printf \"%.0f%%\", (t-a)/t*100}' /proc/meminfo"]
+        stdout: SplitParser { onRead: data => root.ramVal = data.trim() }
+        onExited: ramTimer.restart()
+    }
+    Timer { id: ramTimer; interval: 5000; onTriggered: ramProc.running = true }
+
+    Process {
+        id: diskProc
+        running: true
+        command: ["sh", "-c", "df / | awk 'NR==2{print $5}'"]
+        stdout: SplitParser { onRead: data => root.diskVal = data.trim() }
+        onExited: diskTimer.restart()
+    }
+    Timer { id: diskTimer; interval: 30000; onTriggered: diskProc.running = true }
+
+    Process {
+        id: netProc
+        running: true
+        command: ["sh", "-c",
+            "iwgetid -r 2>/dev/null && exit; ip -brief addr | awk '!/^lo /{if($2==\"UP\") print $1; exit}'"]
+        stdout: SplitParser { onRead: data => root.netVal = data.trim() }
+        onExited: netTimer.restart()
+    }
+    Timer { id: netTimer; interval: 10000; onTriggered: netProc.running = true }
+
+    Process {
+        id: volProc
+        running: true
+        command: ["sh", "-c",
+            "pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | grep -oP '\\d+(?=%)' | head -1"]
+        stdout: SplitParser { onRead: data => root.volVal = data.trim() }
+        onExited: volTimer.restart()
+    }
+    Timer { id: volTimer; interval: 5000; onTriggered: volProc.running = true }
+
+
+    // --- Layout (using Row, not RowLayout — RowLayout leaks Text.color) ---
+    Item {
+        anchors.fill: parent
+
+        // Left: workspaces + mode
+        Row {
+            id: leftSide
+            visible: root.currentMode === "default"
+            anchors { left: parent.left; top: parent.top; bottom: parent.bottom; leftMargin: 4 }
+            spacing: 0
+
+            Repeater {
+                model: I3.workspaces
+
+                Rectangle {
+                    required property var modelData
+                    width: wsText.implicitWidth + 14
+                    height: leftSide.height
+                    color: modelData.urgent  ? "#cb4b16"
+                         : modelData.focused ? "#152024"
+                         : "transparent"
+
+                    Text {
+                        id: wsText
+                        anchors.centerIn: parent
+                        text: modelData.name
+                        color: "#fdf6e3"
+                        font.family: root.fontFamily
+                        font.pixelSize: 14
+                        renderType: root.nativeRender
+                    }
+
+                    Rectangle {
+                        anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
+                        height: 3
+                        color: modelData.focused                    ? "#16a085"
+                             : (modelData.active && !modelData.focused) ? "#454948"
+                             : "transparent"
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: I3.dispatch("workspace " + modelData.name)
+                    }
+                }
+            }
+
+            // Mode indicator
+            Rectangle {
+                visible: root.currentMode !== "default"
+                width: modeText.implicitWidth + 14
+                height: leftSide.height
+                color: "#152024"
+
+                Text {
+                    id: modeText
+                    anchors.centerIn: parent
+                    text: root.currentMode
+                    color: "#fdf6e3"
+                    font.family: root.fontFamily
+                    font.pixelSize: 14
+                    renderType: root.nativeRender
+                }
+
+                Rectangle {
+                    anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
+                    height: 3
+                    color: "#cb4b16"
+                }
+            }
+        }
+
+        // Mode hints overlay (whole bar, left-aligned)
+        Row {
+            visible: root.currentMode !== "default"
+            anchors { left: parent.left; top: parent.top; bottom: parent.bottom; leftMargin: 4 }
+            spacing: 0
+
+            Rectangle {
+                width: modeNameText.implicitWidth + 14
+                height: 27
+                color: "#152024"
+
+                Text {
+                    id: modeNameText
+                    anchors.centerIn: parent
+                    text: root.currentMode === "resize" ? "resize" : "system"
+                    color: "#fdf6e3"
+                    font.family: root.fontFamily
+                    font.pixelSize: 14
+                    renderType: root.nativeRender
+                }
+
+                Rectangle {
+                    anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
+                    height: 3
+                    color: "#cb4b16"
+                }
+            }
+            Item { width: 4; height: parent.height }
+
+            Repeater {
+                model: root.currentMode !== "default" ? root.modeHints(root.currentMode) : []
+
+                Row {
+                    required property var modelData
+                    required property int index
+                    anchors.verticalCenter: parent ? parent.verticalCenter : undefined
+                    Text { text: index > 0 ? "  " : ""; font.pixelSize: 14; renderType: root.nativeRender }
+                    Text { text: modelData.key; color: "#cb4b16"; font.family: root.fontFamily; font.pixelSize: 14; font.bold: true; renderType: root.nativeRender; Rectangle { anchors.fill: parent; color: "#152024"; z: -1 } }
+                    Text { text: " "; font.pixelSize: 14; renderType: root.nativeRender }
+                    Text { text: modelData.label; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+                }
+            }
+        }
+
+        // Notification ticker — between workspaces and bell/date
+        Item {
+            id: tickerArea
+            visible: root.currentMode === "default" && root.tickerActive
+            anchors { left: leftSide.right; right: rightSide.left; verticalCenter: parent.verticalCenter; leftMargin: 8; rightMargin: 4 }
+            clip: true
+            height: parent.height
+            z: -1
+
+            Text {
+                id: tickerText
+                text: root.notifText
+                color: "#fdf6e3"
+                font.family: root.fontFamily
+                font.pixelSize: 14
+                renderType: root.nativeRender
+                y: (parent.height - height) / 2
+            }
+
+            NumberAnimation {
+                id: tickerAnim
+                target: tickerText
+                property: "x"
+                from: tickerArea.width > 0 ? tickerArea.width : 500
+                to: -tickerText.implicitWidth
+                duration: Math.max(((tickerArea.width > 0 ? tickerArea.width : 500) + tickerText.implicitWidth) * 12, 3000)
+                onFinished: root.tickerActive = false
+            }
+        }
+
+        // Right side: stats + bell + date
+        Row {
+            id: rightSide
+            visible: root.currentMode === "default"
+            anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: 4 }
+            spacing: 0
+
+            // Stats (hidden during ticker)
+            Text { visible: !root.tickerActive && root.netVal !== ""; text: "NET:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive && root.netVal !== ""; text: root.netVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive && root.netVal !== ""; text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
+
+            Text { visible: !root.tickerActive; text: "CPU:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive; text: root.cpuVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive; text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
+
+            Text { visible: !root.tickerActive; text: "RAM:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive; text: root.ramVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive; text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
+
+            Text { visible: !root.tickerActive; text: "HDD:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive; text: root.diskVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+
+            Text { visible: !root.tickerActive && root.volVal !== ""; text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive && root.volVal !== ""; text: "VOL:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive && root.volVal !== ""; text: root.volVal + "%"; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; renderType: root.nativeRender }
+
+            Text { text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
+
+            // Bell — always visible, click to replay ticker
+            Item {
+                width: bellIcon.width + (root.notifCount > 0 ? bellCount.implicitWidth : 0)
+                height: 14
+                Image {
+                    id: bellIcon
+                    width: 14; height: 14
+                    y: 2
+                    sourceSize: Qt.size(14, 14)
+                    source: "data:image/svg+xml," + encodeURIComponent(
+                        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="' + (root.hasCritical ? '#cb4b16' : root.notifCount > 0 ? '#fdf6e3' : '#707880') + '">' +
+                        '<path d="M12 2C10.9 2 10 2.9 10 4V4.3C7.7 5.1 6 7.3 6 10V16L4 18V19H20V18L18 16V10C18 7.3 16.3 5.1 14 4.3V4C14 2.9 13.1 2 12 2ZM10 20C10 21.1 10.9 22 12 22S14 21.1 14 20H10Z"/>' +
+                        '</svg>')
+                }
+                Text { id: bellCount; visible: root.notifCount > 0; anchors.left: bellIcon.right; text: root.notifCount; color: root.hasCritical ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: 14; font.bold: true; renderType: root.nativeRender }
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: root.dismissNotif()
+                }
+            }
+
+            Text { text: "  "; font.pixelSize: 14; renderType: root.nativeRender }
+
+            // Date
+            Text {
+                property bool showSeconds: false
+                text: Qt.formatDateTime(new Date(), showSeconds ? "HH:mm:ss" : "HH:mm")
+                color: "#707880"
+                font.family: root.fontFamily
+                font.pixelSize: 14
+                renderType: root.nativeRender
+                Timer { interval: parent.showSeconds ? 1000 : 60000; running: true; repeat: true; onTriggered: parent.text = Qt.formatDateTime(new Date(), parent.showSeconds ? "HH:mm:ss" : "HH:mm") }
+                MouseArea { anchors.fill: parent; onClicked: { parent.showSeconds = !parent.showSeconds; parent.text = Qt.formatDateTime(new Date(), parent.showSeconds ? "HH:mm:ss" : "HH:mm") } }
+            }
+            Text { text: " "; font.pixelSize: 14; renderType: root.nativeRender }
+            Text {
+                text: Qt.formatDateTime(new Date(), "yyyy-MM-dd")
+                color: "#fdf6e3"
+                font.family: root.fontFamily
+                font.pixelSize: 14
+                renderType: root.nativeRender
+                Timer { interval: 60000; running: true; repeat: true; onTriggered: parent.text = Qt.formatDateTime(new Date(), "yyyy-MM-dd") }
+            }
+        }
+    }
+}
