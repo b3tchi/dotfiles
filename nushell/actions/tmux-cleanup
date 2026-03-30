@@ -89,11 +89,14 @@ def main [] {
                 }
             }
         } else {
-            # Some sessions attached - kill unattached ones
-            # BUT preserve sessions that might be in the process of being attached
+            # Some sessions attached - kill unattached ones unless pinned
             for sess in ($group_sessions | where attached == 0) {
-                log $"Killing unattached session in group ($group) - group has attached session: ($sess.name)"
-                tmux kill-session -t $sess.name
+                if (has_pinned_panes $sess.name) {
+                    log $"Skipping unattached session ($sess.name) in group ($group) - has pinned panes"
+                } else {
+                    log $"Killing unattached session in group ($group) - group has attached session: ($sess.name)"
+                    tmux kill-session -t $sess.name
+                }
             }
         }
     }
