@@ -16,5 +16,6 @@ case "$1" in
     switcher-prev)    quickshell -p "$OVERLAY" msg switcher prev ;;
     switcher-confirm) quickshell -p "$OVERLAY" msg switcher confirm ;;
     switcher-cancel)  quickshell -p "$OVERLAY" msg switcher cancel ;;
-    *)                echo "Usage: qs-overlay.sh {start|launcher|switcher|switcher-prev|switcher-confirm|switcher-cancel}" ;;
+    projects)         quickshell -p "$OVERLAY" msg projects toggle ;;
+    *)                echo "Usage: qs-overlay.sh {start|launcher|switcher|switcher-prev|switcher-confirm|switcher-cancel|projects}" ;;
 esac

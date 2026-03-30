@@ -11,7 +11,7 @@ ShellRoot {
     readonly property string fontFamily: "Iosevka Nerd Font"
     readonly property int fontSize: 16
 
-    property string mode: "" // "launcher" or "switcher"
+    property string mode: "" // "launcher", "switcher", or "projects"
 
     Process {
         id: execProc
@@ -131,39 +131,47 @@ ShellRoot {
     property int switcherIndex: 0
     property var switcherWindows: []
 
+    // Window scanner — collects JSON then parses
+    property string _scanBuffer: ""
+
     Process {
         id: windowScanner
         running: false
-        command: ["i3-msg", "-t", "get_tree"]
+        command: ["sh", "-c", "i3-msg -s $(i3 --get-socketpath) -t get_tree"]
         stdout: SplitParser {
-            splitMarker: ""
-            onRead: data => {
-                try {
-                    var tree = JSON.parse(data)
-                    var wins = []
-                    function walk(node) {
-                        if (node.window && node.name && node.type === "con") {
-                            wins.push({
-                                id: node.id,
-                                name: node.name,
-                                focused: node.focused,
-                                urgent: node.urgent || false,
-                                cls: (node.window_properties || {})["class"] || ""
-                            })
-                        }
-                        var children = (node.nodes || []).concat(node.floating_nodes || [])
-                        for (var i = 0; i < children.length; i++) walk(children[i])
+            onRead: data => { root._scanBuffer += data }
+        }
+        onExited: {
+            try {
+                var tree = JSON.parse(root._scanBuffer)
+                var wins = []
+                function walk(node) {
+                    if (node.window && node.name && node.type === "con" &&
+                        node.name !== "quickshell" && node.name !== "qs-switcher" && node.name !== "qs-launcher" && node.name !== "qs-projects") {
+                        wins.push({
+                            id: node.id,
+                            name: node.name,
+                            focused: node.focused,
+                            urgent: node.urgent || false,
+                            cls: (node.window_properties || {})["class"] || ""
+                        })
                     }
-                    walk(tree)
-                    root.switcherWindows = wins
-                    for (var j = 0; j < wins.length; j++) {
-                        if (wins[j].focused) {
-                            root.switcherIndex = (j + 1) % wins.length
-                            break
-                        }
+                    var children = (node.nodes || []).concat(node.floating_nodes || [])
+                    for (var i = 0; i < children.length; i++) walk(children[i])
+                }
+                walk(tree)
+                root.switcherWindows = wins
+                // Select next window after focused
+                for (var j = 0; j < wins.length; j++) {
+                    if (wins[j].focused) {
+                        root.switcherIndex = (j + 1) % wins.length
+                        break
                     }
-                } catch(e) {}
-            }
+                }
+                // Now show
+                overlay.visible = true
+            } catch(e) {}
+            root._scanBuffer = ""
         }
     }
 
@@ -172,50 +180,13 @@ ShellRoot {
         running: false
     }
 
-    // ── Global key monitor via xinput ──
-
-    property bool modHeld: false
-
-    Process {
-        id: keyMonitor
-        running: true
-        command: ["sh", "-c", "xinput test-xi2 3 2>/dev/null | awk -f $HOME/.dotfiles/quickshell/qs-keymon.sh"]
-        stdout: SplitParser {
-            onRead: data => {
-                var parts = data.trim().split(" ")
-                if (parts.length !== 2) return
-                var action = parts[0]  // "press" or "release"
-                var code = parseInt(parts[1])
-
-                // 64=Alt_L, 108=Alt_R, 133=Super_L, 134=Super_R
-                var isMod = (code === 64 || code === 108 || code === 133 || code === 134)
-                // 23=Tab
-                var isTab = (code === 23)
-
-                if (isMod && action === "press") {
-                    root.modHeld = true
-                } else if (isMod && action === "release") {
-                    root.modHeld = false
-                    if (root.mode === "switcher" && overlay.visible)
-                        root.switcherFocus()
-                } else if (isTab && action === "press" && root.modHeld) {
-                    if (root.mode === "switcher") {
-                        root.switcherNext()
-                    } else {
-                        root.switcherShow()
-                    }
-                }
-            }
-        }
-        onExited: running = true  // restart if it dies
-    }
 
     function switcherShow() {
-        switcherIndex = 0
-        windowScanner.running = true
+        _scanBuffer = ""
         mode = "switcher"
         overlay.width = 400
-        overlay.visible = true
+        windowScanner.running = true
+        // overlay.visible set in windowScanner.onExited after windows load
     }
 
     function switcherNext() {
@@ -233,8 +204,135 @@ ShellRoot {
     function switcherFocus() {
         if (switcherWindows.length > 0 && switcherIndex < switcherWindows.length) {
             var win = switcherWindows[switcherIndex]
-            focusProc.command = ["i3-msg", "[con_id=" + win.id + "]", "focus"]
+            focusProc.command = ["sh", "-c", "i3-msg -s $(i3 --get-socketpath) '[con_id=" + win.id + "]' focus"]
             focusProc.running = true
+        }
+        hide()
+    }
+
+    // ── Projects state ──
+
+    property int projectsIndex: 0
+    property string projectsSearch: ""
+    property var projectsAll: []      // [{name, workspaces: ["dotfiles", "dotfiles_1"]}]
+    property var _projectsBuffer: ""
+
+    property var projectsFiltered: {
+        var result = []
+        var search = projectsSearch
+        for (var i = 0; i < projectsAll.length; i++) {
+            var p = projectsAll[i]
+            var m = fuzzyMatch(p.name, search)
+            if (m.matched)
+                result.push({ name: p.name, workspaces: p.workspaces, score: m.score, indices: m.indices })
+        }
+        result.sort(function(a, b) {
+            if (search) {
+                if (b.score !== a.score) return b.score - a.score
+            }
+            return a.name.localeCompare(b.name)
+        })
+        return result
+    }
+
+    // Scans projects.yaml + current workspaces, outputs JSON
+    Process {
+        id: projectsScanner
+        running: false
+        command: ["sh", "-c",
+            "PROJECTS=$(grep -E '^  [a-zA-Z]' ~/.config/project/projects.yaml 2>/dev/null | sed 's/^ *//;s/:.*//' | tr '\\n' ' '); " +
+            "WS_JSON=$(i3-msg -t get_workspaces 2>/dev/null || echo '[]'); " +
+            "FOCUSED=$(echo \"$WS_JSON\" | sed 's/},{/}\\n{/g' | grep '\"focused\":true' | sed 's/.*\"name\":\"\\([^\"]*\\)\".*/\\1/'); " +
+            "WS_NAMES=$(echo \"$WS_JSON\" | sed 's/},{/}\\n{/g' | sed -n 's/.*\"name\":\"\\([^\"]*\\)\".*/\\1/p'); " +
+            "printf '{\"projects\":['; SEP=''; " +
+            "for p in $PROJECTS; do " +
+            "  MATCHED=$(echo \"$WS_NAMES\" | grep -E \"^${p}$|^${p}_[0-9]+$\" | sed 's/.*/\"&\"/' | tr '\\n' ',' | sed 's/,$//'); " +
+            "  printf '%s{\"name\":\"%s\",\"workspaces\":[%s]}' \"$SEP\" \"$p\" \"$MATCHED\"; SEP=','; " +
+            "done; " +
+            "printf '],\"focused\":\"%s\"}' \"$FOCUSED\""
+        ]
+        stdout: SplitParser {
+            onRead: data => { root._projectsBuffer += data }
+        }
+        onExited: {
+            try {
+                var data = JSON.parse(root._projectsBuffer)
+                // Determine focused project to filter out
+                var focused = data.focused || ""
+                var focusedProject = ""
+                for (var i = 0; i < data.projects.length; i++) {
+                    var p = data.projects[i]
+                    if (focused === p.name) { focusedProject = p.name; break }
+                    for (var j = 0; j < p.workspaces.length; j++) {
+                        if (p.workspaces[j] === focused) { focusedProject = p.name; break }
+                    }
+                    if (focusedProject) break
+                }
+                // Filter out current project
+                var filtered = []
+                for (var k = 0; k < data.projects.length; k++) {
+                    if (data.projects[k].name !== focusedProject)
+                        filtered.push(data.projects[k])
+                }
+                root.projectsAll = filtered
+            } catch(e) {
+                root.projectsAll = []
+            }
+            root._projectsBuffer = ""
+            overlay.visible = true
+            projectsInput.forceActiveFocus()
+        }
+    }
+
+    Process {
+        id: projectsWmProc
+        running: false
+    }
+
+    function projectsShow() {
+        _projectsBuffer = ""
+        projectsIndex = 0
+        projectsSearch = ""
+        projectsInput.text = ""
+        mode = "projects"
+        overlay.width = 480
+        projectsScanner.running = true
+    }
+
+    function projectsSwitch() {
+        if (projectsFiltered.length > 0 && projectsIndex < projectsFiltered.length) {
+            var p = projectsFiltered[projectsIndex]
+            var wsName = p.workspaces.length > 0 ? p.workspaces[0] : p.name
+            projectsWmProc.command = ["i3-msg", "workspace", wsName]
+            projectsWmProc.running = true
+        }
+        hide()
+    }
+
+    function projectsNew() {
+        if (projectsFiltered.length > 0 && projectsIndex < projectsFiltered.length) {
+            var p = projectsFiltered[projectsIndex]
+            if (p.workspaces.length === 0) {
+                projectsWmProc.command = ["i3-msg", "workspace", p.name]
+            } else {
+                // Rename bare name to _1 if needed, then create next index
+                var cmds = []
+                var hasBare = false
+                var maxIdx = 0
+                for (var i = 0; i < p.workspaces.length; i++) {
+                    if (p.workspaces[i] === p.name) hasBare = true
+                    var m = p.workspaces[i].match(new RegExp("^" + p.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "_(\\d+)$"))
+                    if (m) { var n = parseInt(m[1]); if (n > maxIdx) maxIdx = n }
+                }
+                if (hasBare) {
+                    cmds.push("i3-msg rename workspace \\\"" + p.name + "\\\" to \\\"" + p.name + "_1\\\"")
+                    if (maxIdx < 1) maxIdx = 1
+                }
+                var next = maxIdx + 1
+                cmds.push("i3-msg workspace " + p.name + "_" + next)
+                projectsWmProc.command = ["sh", "-c", cmds.join(" && ")]
+            }
+            projectsWmProc.running = true
         }
         hide()
     }
@@ -277,6 +375,14 @@ ShellRoot {
         }
     }
 
+    IpcHandler {
+        target: "projects"
+        function toggle() {
+            if (overlay.visible && root.mode === "projects") root.hide()
+            else root.projectsShow()
+        }
+    }
+
     // ── Single window ──
 
     ApplicationWindow {
@@ -288,14 +394,16 @@ ShellRoot {
                 return 32 + Math.min(root.launcherFiltered.length, 8) * 32 + 8
             if (root.mode === "switcher")
                 return Math.max(root.switcherWindows.length, 1) * 32 + 8
+            if (root.mode === "projects")
+                return 32 + Math.min(root.projectsFiltered.length, 8) * 32 + 8
             return 100
         }
         flags: Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
         color: "#222D31"
-        title: root.mode === "switcher" ? "qs-switcher" : "qs-launcher"
+        title: root.mode === "switcher" ? "qs-switcher" : root.mode === "projects" ? "qs-projects" : "qs-launcher"
 
         onActiveChanged: {
-            if (!active && visible) root.hide()
+            if (!active && visible && (root.mode === "launcher" || root.mode === "projects")) root.hide()
         }
 
         // ── Launcher UI ──
@@ -399,12 +507,10 @@ ShellRoot {
 
             Keys.onPressed: event => {
                 if (event.key === Qt.Key_Tab || event.key === Qt.Key_Down) {
-                    root.switcherIndex = root.switcherIndex < root.switcherWindows.length - 1
-                        ? root.switcherIndex + 1 : 0
+                    root.switcherNext()
                     event.accepted = true
                 } else if (event.key === Qt.Key_Backtab || event.key === Qt.Key_Up) {
-                    root.switcherIndex = root.switcherIndex > 0
-                        ? root.switcherIndex - 1 : root.switcherWindows.length - 1
+                    root.switcherPrev()
                     event.accepted = true
                 } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                     root.switcherFocus()
@@ -478,6 +584,123 @@ ShellRoot {
                     MouseArea {
                         anchors.fill: parent
                         onClicked: { root.switcherIndex = index; root.switcherFocus() }
+                    }
+                }
+            }
+        }
+
+        // ── Projects UI ──
+        Column {
+            anchors.fill: parent
+            visible: root.mode === "projects"
+
+            Rectangle {
+                width: parent.width
+                height: 32
+                color: "#152024"
+
+                TextInput {
+                    id: projectsInput
+                    anchors.fill: parent
+                    anchors.leftMargin: 12
+                    anchors.rightMargin: 12
+                    verticalAlignment: TextInput.AlignVCenter
+                    color: "#FDF6E3"
+                    font.family: root.fontFamily
+                    font.pixelSize: root.fontSize
+                    clip: true
+
+                    onTextChanged: {
+                        root.projectsSearch = text
+                        root.projectsIndex = 0
+                    }
+
+                    Keys.onEscapePressed: root.hide()
+                    Keys.onPressed: event => {
+                        if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) &&
+                            (event.modifiers & Qt.ShiftModifier)) {
+                            root.projectsNew()
+                            event.accepted = true
+                        } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                            root.projectsSwitch()
+                            event.accepted = true
+                        } else if (event.key === Qt.Key_Down) {
+                            if (root.projectsIndex < root.projectsFiltered.length - 1)
+                                root.projectsIndex++
+                            event.accepted = true
+                        } else if (event.key === Qt.Key_Up) {
+                            if (root.projectsIndex > 0)
+                                root.projectsIndex--
+                            event.accepted = true
+                        }
+                    }
+                }
+
+                Text {
+                    anchors.fill: projectsInput
+                    verticalAlignment: Text.AlignVCenter
+                    text: "project"
+                    color: "#707880"
+                    font.family: root.fontFamily
+                    font.pixelSize: root.fontSize
+                    renderType: Text.NativeRendering
+                    visible: !projectsInput.text
+                }
+            }
+
+            ListView {
+                width: parent.width
+                height: Math.min(root.projectsFiltered.length, 8) * 32 + 8
+                model: root.projectsFiltered.length
+                clip: true
+                currentIndex: root.projectsIndex
+
+                delegate: Rectangle {
+                    required property int index
+                    property var item: root.projectsFiltered[index]
+                    property bool isSelected: index === root.projectsIndex
+
+                    width: parent ? parent.width : 0
+                    height: 32
+                    color: isSelected ? "#152024" : "transparent"
+
+                    Rectangle {
+                        visible: isSelected
+                        width: 4; height: parent.height
+                        color: "#16a085"
+                    }
+
+                    Row {
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.left: parent.left
+                        anchors.leftMargin: 12
+                        anchors.right: parent.right
+                        anchors.rightMargin: 8
+                        spacing: 8
+
+                        Text {
+                            text: root.highlightMatch(item.name, item.indices)
+                            textFormat: Text.RichText
+                            color: "#FDF6E3"
+                            font.family: root.fontFamily
+                            font.pixelSize: root.fontSize
+                            font.bold: true
+                            renderType: Text.NativeRendering
+                        }
+
+                        Text {
+                            text: item.workspaces.length > 0 ? "[" + item.workspaces.join(", ") + "]" : ""
+                            color: "#707880"
+                            font.family: root.fontFamily
+                            font.pixelSize: root.fontSize
+                            renderType: Text.NativeRendering
+                            elide: Text.ElideRight
+                        }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: { root.projectsIndex = index; root.projectsSwitch() }
                     }
                 }
             }

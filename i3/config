@@ -200,6 +200,7 @@ for_window [all] border normal 4
 
 for_window [title="qs-launcher"] floating enable, border none, move position center
 for_window [title="qs-switcher"] floating enable, border none, move position center
+for_window [title="qs-projects"] floating enable, border none, move position center
 for_window [title="alsamixer"] floating enable border pixel 1
 for_window [class="calamares"] floating enable border normal
 for_window [class="Clipgrab"] floating enable
@@ -260,9 +261,8 @@ mode "$mode_system" {
 # Rename workspace
 bindsym $mod+Shift+n exec i3-input -f "xft:Iosevka" -F 'name workspace to "%s"' -P 'Workspace name: '
 
-# Project workspace picker (rofi)
-bindsym $mod+p exec --no-startup-id ~/.local/bin/project-picker
-bindsym $mod+Shift+p exec --no-startup-id ~/.local/bin/project-picker --new
+# Project workspace picker (quickshell overlay)
+bindsym $mod+p exec --no-startup-id ~/.dotfiles/quickshell/qs-overlay.sh projects
 
 # Resize window (you can also use the mouse for that)
 bindsym $mod+r mode "resize"
@@ -330,8 +330,8 @@ exec --no-startup-id setxkbmap -device $(xinput list --id-only 'keyboard:AT Tran
 #mouse cursor
 # exec_always --no-startup-id fix_xcursor
 
-# task switcher — handled directly by quickshell via xinput key monitor
-# bindsym $mod+Tab exec ~/.dotfiles/quickshell/qs-overlay.sh switcher
+# task switcher via quickshell IPC
+bindsym $mod+Tab exec ~/.dotfiles/quickshell/qs-overlay.sh switcher
 exec_always killall xborders;xborders --border-radius 4 --border-width 2 --border-rgba '#16a085' --positive-x-offset 1 --negative-y-offset 24 --positive-y-offset 1 --negative-x-offset 1
 
 # alttab (replaced by quickshell switcher)
