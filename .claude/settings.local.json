@@ -103,7 +103,11 @@
       "Bash(killall dunst:*)",
       "Bash(dbus-send:*)",
       "Bash(xdotool search:*)",
-      "Bash(killall -9 dunst)"
+      "Bash(killall -9 dunst)",
+      "Bash(bd ready:*)",
+      "Bash(swaymsg --help)",
+      "Bash(nu:*)",
+      "Bash(SWAYSOCK=/tmp/bogus.sock nu -c '/home/jan/.local/bin/wm-state list --output table' 2>&1)"
     ]
   }
 }
