@@ -3,7 +3,7 @@
 # Usage: tmux-session-picker windows  (C-b w: current session windows)
 #        tmux-session-picker sessions (C-b s: all windows across sessions)
 
-def main [mode: string = "sessions"] {
+def main [mode: string = "sessions", client_tty?: string] {
     let sep = "||"
     let gray = (ansi { fg: "#808080" })
     let rst = (ansi reset)
@@ -59,5 +59,9 @@ def main [mode: string = "sessions"] {
     let wid = ($parts | get 1)
     # Create new linked session so we don't disrupt other terminals
     let new_session = (tmux-start start 0 $session_group | str trim | split row ":" | first)
-    tmux switch-client -t $"($new_session):($wid)"
+    if ($client_tty | is-not-empty) {
+        tmux switch-client -c $client_tty -t $"($new_session):($wid)"
+    } else {
+        tmux switch-client -t $"($new_session):($wid)"
+    }
 }
