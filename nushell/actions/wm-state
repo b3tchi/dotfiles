@@ -116,14 +116,16 @@ def "main list" [
         { workspace: $wt.workspace, terminals: $terminals }
     })
 
+    let flat = ($workspaces | each { |ws|
+        $ws.terminals | each { |t|
+            { workspace: $ws.workspace } | merge $t
+        }
+    } | flatten)
+
     if $output == "table" {
-        $workspaces | each { |ws|
-            $ws.terminals | each { |t|
-                { workspace: $ws.workspace } | merge $t
-            }
-        } | flatten | table
+        $flat | table
     } else {
-        $workspaces | to yaml
+        $flat | to yaml
     }
 }
 

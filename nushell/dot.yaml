@@ -38,6 +38,7 @@ linux:
     actions/tmux-session-picker: ~/.local/bin/tmux-session-picker
     actions/wm-state: ~/.local/bin/wm-state
     actions/cleanup-thins: ~/.local/bin/cleanup-thins
+    actions/tmux-to-workstation: ~/.local/bin/tmux-to-workstation
   installs:
     cmd: |
       {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
@@ -71,4 +72,5 @@ linux:
       chmod +x ~/.dotfiles/nushell/actions/tmux-session-picker
       chmod +x ~/.dotfiles/nushell/actions/wm-state
       chmod +x ~/.dotfiles/nushell/actions/cleanup-thins
+      chmod +x ~/.dotfiles/nushell/actions/tmux-to-workstation
       rotz link nushell --force

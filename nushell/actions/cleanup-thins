@@ -9,8 +9,7 @@ def main [
     let wm = (do { wm-state list } | complete)
     let attached_sessions = if $wm.exit_code == 0 and ($wm.stdout | is-not-empty) {
         $wm.stdout | from yaml
-        | each {|ws| $ws.terminals | where type == "thin" | get session }
-        | flatten
+        | where type == "thin" | get session
     } else { [] }
 
     # Get all thin sessions from tmux-to-workstation

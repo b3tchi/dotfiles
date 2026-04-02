@@ -89,8 +89,8 @@ def --wrapped "main connect" [
     # Thin window name encodes connection info
     let thin_window = $"($display_host)_($remote_session)"
 
-    # Create linked session on remote via SSH (headless)
-    let target = (^ssh ...$args $"~/.local/bin/tmux-start start 0 ($remote_session)" 2>/dev/null | str trim)
+    # Create linked session on remote via SSH (headless, pinned by default)
+    let target = (^ssh ...$args $"~/.local/bin/tmux-start start 1 ($remote_session)" 2>/dev/null | str trim)
     if ($target | is-empty) {
         print $"Error: tmux-start failed on ($display_host)"
         return
@@ -271,8 +271,8 @@ def "main revive" [
     for entry in $selected {
         let ssh_args = ($entry.ssh_args | split row " ")
 
-        # Create unattached linked session on remote (pinned=0)
-        let target = (^ssh ...$ssh_args $"~/.local/bin/tmux-start start 0 ($entry.remote_session)" 2>/dev/null | str trim)
+        # Create unattached linked session on remote (pinned by default)
+        let target = (^ssh ...$ssh_args $"~/.local/bin/tmux-start start 1 ($entry.remote_session)" 2>/dev/null | str trim)
         if ($target | is-empty) {
             print $"Error: tmux-start failed for ($entry.session) -> ($entry.remote_session)"
             continue
