@@ -2,6 +2,9 @@ linux:
   links:
     settings.json: ~/.claude/settings.json
     statusline.sh: ~/.claude/statusline.sh
+    hooks/tmux-waiting.sh: ~/.claude/hooks/tmux-waiting.sh
+    hooks/tmux-waiting-simple.sh: ~/.claude/hooks/tmux-waiting-simple.sh
+    hooks/tmux-responding.sh: ~/.claude/hooks/tmux-responding.sh
     {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
     claude-wrapper: /data/data/com.termux/files/usr/bin/claude
     {{/if}}
