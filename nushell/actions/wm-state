@@ -164,13 +164,23 @@ def "main save" [] {
         { name: $wt.workspace, terminals: $terminals }
     })
 
-    { workspaces: $workspaces } | to json | save -f ("~/.cache/sway-state.json" | path expand)
+    { workspaces: $workspaces } | to yaml | save -f ("~/.cache/sway-state.yaml" | path expand)
     print $"Saved ($workspaces | length) workspaces"
+}
+
+# Open saved state file in $EDITOR
+def "main edit" [] {
+    let state_file = ("~/.cache/sway-state.yaml" | path expand)
+    if not ($state_file | path exists) {
+        print "No saved state found"
+        return
+    }
+    ^($env.EDITOR) $state_file
 }
 
 # Restore sway workspaces + terminals from saved state
 def "main restore" [] {
-    let state_file = ("~/.cache/sway-state.json" | path expand)
+    let state_file = ("~/.cache/sway-state.yaml" | path expand)
     if not ($state_file | path exists) {
         print "No saved state found"
         return
@@ -247,5 +257,6 @@ def main [] {
     print "Commands:"
     print "  list [-o table]   List current workspace → tmux mappings"
     print "  save              Save current state to cache"
+    print "  edit              Open state file in $EDITOR"
     print "  restore           Restore workspaces from saved state"
 }
