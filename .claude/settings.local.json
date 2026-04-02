@@ -166,7 +166,8 @@
       "Bash(pkill -f \"quickshell -p.*overlay\")",
       "Bash(pkill -f \"quickshell -c.*overlay\")",
       "Bash(python3:*)",
-      "Read(//run/user/10533/quickshell/by-id/**)"
+      "Read(//run/user/10533/quickshell/by-id/**)",
+      "Bash(echo \"exit: $?\")"
     ]
   }
 }
