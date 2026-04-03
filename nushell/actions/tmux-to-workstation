@@ -126,7 +126,7 @@ def "main list" [
 ] {
     # List all thin sessions with metadata
     let panes = try {
-        tmux -L thin list-panes -a -F '#{session_name}|#{pane_dead}|#{pane_pid}|#{@remote_name}|#{@remote_host}|#{@remote_session}|#{@remote_port}|#{@remote_target}|#{@ssh_args}' | lines
+        tmux -L thin list-panes -a -F '#{session_name}|#{pane_dead}|#{pane_pid}|#{@remote_name}|#{@remote_host}|#{@remote_session}|#{@remote_port}|#{@remote_target}|#{@ssh_args}|#{pane_title}' | lines
     } catch {
         print "No local thin tmux running"
         return
@@ -191,6 +191,7 @@ def "main list" [
         } else {
             null
         }
+        let pane_title = ($parts | get 9)
         let base = {
             session: ($parts | get 0)
             status: (if ($parts | get 1) == "1" { "dead" } else { "connected" })
@@ -200,6 +201,7 @@ def "main list" [
             remote_session: ($parts | get 5)
             remote_port: ($parts | get 6)
             remote_target: $remote_target
+            pane_title: $pane_title
             ssh_args: $ssh_args
         }
         if $check and $check_result != null {

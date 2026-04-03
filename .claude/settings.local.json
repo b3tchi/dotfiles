@@ -167,7 +167,8 @@
       "Bash(pkill -f \"quickshell -c.*overlay\")",
       "Bash(python3:*)",
       "Read(//run/user/10533/quickshell/by-id/**)",
-      "Bash(echo \"exit: $?\")"
+      "Bash(echo \"exit: $?\")",
+      "Bash(tmux-to-workstation list:*)"
     ]
   }
 }

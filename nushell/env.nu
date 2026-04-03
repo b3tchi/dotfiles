@@ -109,6 +109,10 @@ if $nu.os-info.name != "windows" {
 	$env.GPG_TTY = (tty)
 }
 
+# Claude Code - fullscreen rendering to reduce flicker and memory usage
+$env.CLAUDE_CODE_NO_FLICKER = '1'
+$env.CLAUDE_CODE_SCROLL_SPEED = '3'
+
 # gopass age auto-unlock from passphrase file
 let gopass_pw_file = if $nu.os-info.kernel_version =~ 'microsoft-standard-WSL' {
 	'/mnt/c/Users/jbecka/.gopass-age-password'
