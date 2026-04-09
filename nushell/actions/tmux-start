@@ -49,9 +49,10 @@ def main [
                     0
                 } else {
                     $sessions
-                    | parse $"($session)_{number}"
+                    | parse --regex $"^($session)_(?P<number>\\d+)$"
                     | get number
                     | into int
+                    | append 0
                     | math max
                     | $in + 1
                 }
@@ -74,9 +75,10 @@ def main [
         0
     } else {
         $sessions
-        | parse $"($session)_{number}"
+        | parse --regex ('^' + $session + '_(?P<number>\d+)$')
         | get number
         | into int
+        | append 0
         | math max
         | $in + 1
     }

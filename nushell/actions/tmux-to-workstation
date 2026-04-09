@@ -166,41 +166,56 @@ def "main list" [
         let remote_host = ($parts | get 4)
         let remote_target = ($parts | get 7)
         let remote_session = ($parts | get 5)
+        let pane_title = ($parts | get 9)
         # Extract window_id from remote_target (e.g. "auctions_0:@5" -> "@5")
-        let remote_wid = if ($remote_target | str contains ":@") {
+        let target_wid = if ($remote_target | str contains ":@") {
             $remote_target | split row ":" | last
         } else { "" }
+        # Latest wid: trailing number on pane_title (set by remote tmux set-titles-string)
+        # Format ends in " <N>" where N is window_id with @ stripped
+        let latest_wid = (
+            $pane_title
+            | parse --regex '.*\s(?P<n>\d+)$'
+            | get -o n.0
+            | default ""
+            | if ($in | is-empty) { "" } else { $"@($in)" }
+        )
+        let switched = ($latest_wid | is-not-empty) and ($target_wid | is-not-empty) and ($latest_wid != $target_wid)
+        # Window to check liveness against: prefer latest_wid (current user position),
+        # fall back to target_wid. If that window no longer exists on remote, the
+        # connection is effectively broken (faster signal than pane_dead).
+        let probe_wid = if ($latest_wid | is-not-empty) { $latest_wid } else { $target_wid }
         let check_result = if $check and ($ssh_args | is-not-empty) {
             let host_entry = ($remote_windows_map | where host == $remote_host)
             if ($host_entry | is-not-empty) {
                 let windows = ($host_entry | first | get windows)
                 let group_live = ($windows | any {|w| $w.group == $remote_session })
-                # Match by session_group + window_id
-                let matched = if ($remote_wid | is-not-empty) {
-                    let m = ($windows | where group == $remote_session and window_id == $remote_wid)
+                let matched = if ($probe_wid | is-not-empty) {
+                    let m = ($windows | where group == $remote_session and window_id == $probe_wid)
                     if ($m | is-not-empty) { $m | first } else { null }
                 } else { null }
                 {
-                    remote_live: $group_live
-                    remote_wid: (if $matched != null { $matched.window_id } else { null })
+                    remote_live: ($group_live and $matched != null)
                     remote_window: (if $matched != null { $matched.title } else { null })
                 }
             } else {
-                { remote_live: false, remote_wid: null, remote_window: null }
+                { remote_live: false, remote_window: null }
             }
         } else {
             null
         }
-        let pane_title = ($parts | get 9)
         let base = {
             session: ($parts | get 0)
             status: (if ($parts | get 1) == "1" { "dead" } else { "connected" })
             pid: ($parts | get 2)
             remote_name: ($parts | get 3)
             remote_host: $remote_host
-            remote_session: ($parts | get 5)
+            remote_session: $remote_session
             remote_port: ($parts | get 6)
             remote_target: $remote_target
+            target_wid: $target_wid
+            latest_wid: $latest_wid
+            switched: $switched
             pane_title: $pane_title
             ssh_args: $ssh_args
         }
@@ -228,13 +243,16 @@ def "main revive" [
     }
     let sessions = ($yaml_output | from yaml)
 
-    # Enrich with revive status
+    # Enrich with revive status. Prefer latest_wid (where the user actually was);
+    # fall back to target_wid (original connect target) only if latest is missing.
     let candidates = $sessions
         | where {|s| ($s.ssh_args | is-not-empty) and ($s.remote_session | is-not-empty) }
         | each {|s|
-            let wid = if ($s.remote_target | str contains ":@") {
-                $s.remote_target | split row ":" | last
-            } else { "" }
+            let wid = if ($s.latest_wid | is-not-empty) {
+                $s.latest_wid
+            } else {
+                $s.target_wid
+            }
             let is_dead = $s.status == "dead"
             let ssh_broken = if not $is_dead and ($s.pid | into int) > 0 {
                 let result = (do { ^kill -0 ($s.pid | into int) } | complete)
@@ -260,7 +278,14 @@ def "main revive" [
     } else {
         let items = $candidates | each {|d|
             let status = if $d.dead { "dead" } else if $d.broken { "broken" } else { "ok" }
-            $"($d.session)\t($d.remote_name) [($d.remote_target)] (($status))"
+            let wid_label = if $d.switched {
+                $"($d.target_wid)→($d.latest_wid)"
+            } else if ($d.latest_wid | is-not-empty) {
+                $d.latest_wid
+            } else {
+                $d.target_wid
+            }
+            $"($d.session)\t($d.remote_name) [($d.remote_session) ($wid_label)] (($status))"
         }
         let picked = ($items | str join "\n" | fzf --multi --prompt "Revive (tab=select): " --with-nth=2.. | lines)
         if ($picked | is-empty) { return }
