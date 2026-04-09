@@ -10,6 +10,7 @@ windows:
     actions/tmux-message: ~/.local/bin/tmux-message
     actions/tmux-project: ~/.local/bin/tmux-project
     actions/tmux-ssh: ~/.local/bin/tmux-ssh
+    actions/tmux-session-cleaner: ~/.local/bin/tmux-session-cleaner
 
   installs:
     cmd: |
@@ -39,6 +40,7 @@ linux:
     actions/wm-state: ~/.local/bin/wm-state
     actions/cleanup-thins: ~/.local/bin/cleanup-thins
     actions/tmux-to-workstation: ~/.local/bin/tmux-to-workstation
+    actions/tmux-session-cleaner: ~/.local/bin/tmux-session-cleaner
   installs:
     cmd: |
       {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
@@ -73,4 +75,5 @@ linux:
       chmod +x ~/.dotfiles/nushell/actions/wm-state
       chmod +x ~/.dotfiles/nushell/actions/cleanup-thins
       chmod +x ~/.dotfiles/nushell/actions/tmux-to-workstation
+      chmod +x ~/.dotfiles/nushell/actions/tmux-session-cleaner
       rotz link nushell --force

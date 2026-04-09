@@ -1,0 +1,85 @@
+#!/usr/bin/env nu
+# Interactive tmux session cleaner with fzf multiselect + preview
+# Usage: tmux-session-cleaner
+
+def main [] {
+    let sep = "||"
+    let gray = (ansi { fg: "#808080" })
+    let red = (ansi { fg: "#cc0000" })
+    let green = (ansi { fg: "#00cc00" })
+    let rst = (ansi reset)
+
+    let fmt = [
+        '#{session_name}:#{window_id}'
+        $sep
+        '#{window_id}'
+        $sep
+        '#{session_group}'
+        $sep
+        '#{session_attached}'
+        $sep
+        '#{?@ssh_host,[#{pane_title}]#{@ssh_host} @#{session_group},#{?#{==:#{pane_current_command},claude},#{s/^. //:pane_title} - #{pane_current_command}@#{session_group},#{s|#{HOME}|~|:pane_current_path} - #{pane_current_command}@#{session_group}}}'
+    ] | str join
+
+    let windows = (
+        tmux list-windows -a -F $fmt
+        | lines
+        | where $it != ""
+        | each { |l|
+            let parts = ($l | split row $sep)
+            let target = ($parts | get 0)
+            let wid = ($parts | get 1)
+            let group = ($parts | get 2)
+            let attached = ($parts | get 3 | into int)
+            let title = ($parts | get 4)
+            let status = if $attached > 0 {
+                $"($green)attached($rst)"
+            } else {
+                $"($red)detached($rst)"
+            }
+            let display = $"($title)($gray) | ($wid) | grp:($group) | ($rst)($status)"
+            { wid: $wid, line: $"($target)||($display)" }
+        }
+        | uniq-by wid
+        | get line
+    )
+
+    if ($windows | is-empty) {
+        print "No tmux windows found."
+        exit 0
+    }
+
+    let selected = (
+        $windows
+        | str join "\n"
+        | fzf --ansi
+            --multi
+            --color='hl:#cc0000,hl+:#cc0000'
+            --header='TAB to select, ENTER to kill selected windows'
+            --preview='tmux capture-pane -ep -t {1}'
+            --preview-window=top:70%:border-bottom
+            --delimiter='\|\|'
+            --with-nth=2
+        | str trim
+    )
+
+    if ($selected | is-empty) {
+        exit 0
+    }
+
+    let targets = ($selected | lines | each { |l|
+        let target = ($l | split row "||" | get 0)
+        # Extract window_id (e.g. "@5" from "session_0:@5")
+        $target | split row ":" | get 1
+    })
+
+    let count = ($targets | length)
+    print $"Killing ($count) window(if $count > 1 { 's' } else { '' })..."
+
+    for wid in $targets {
+        print $"  Killing: ($wid)"
+        tmux kill-window -t $wid
+    }
+
+    print "Done."
+}
