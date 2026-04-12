@@ -91,7 +91,8 @@ PanelWindow {
         onExited: running = true
     }
 
-    // --- System stats ---
+    // --- System stats (read from Termux-side helper: qs-stats-helper.sh) ---
+    readonly property string statsFile: "/tmp/qs-stats"
     property string cpuVal:  "?"
     property string ramVal:  "?"
     property string diskVal: "?"
@@ -99,33 +100,23 @@ PanelWindow {
     property string volVal:  ""
 
     Process {
-        id: cpuProc
+        id: statsProc
         running: true
-        command: ["sh", "-c",
-            "awk 'NR==1{t=$2+$3+$4+$5+$6+$7+$8+$9; idle=$5+$6; printf \"%.0f%%\", (1-idle/t)*100}' /proc/stat"]
-        stdout: SplitParser { onRead: data => root.cpuVal = data.trim() }
-        onExited: cpuTimer.restart()
+        command: ["sh", "-c", "cat " + root.statsFile + " 2>/dev/null || echo '?\\n?\\n?\\n?'"]
+        stdout: SplitParser {
+            property int lineNum: 0
+            onRead: data => {
+                var v = data.trim()
+                if (lineNum === 0) root.cpuVal = v + "%"
+                else if (lineNum === 1) root.ramVal = v + "%"
+                else if (lineNum === 2) root.diskVal = v + "%"
+                // line 3 = load (available but unused)
+                lineNum++
+            }
+        }
+        onExited: { statsProc.stdout.lineNum = 0; statsTimer.restart() }
     }
-    Timer { id: cpuTimer; interval: 3000; onTriggered: cpuProc.running = true }
-
-    Process {
-        id: ramProc
-        running: true
-        command: ["sh", "-c",
-            "awk '/MemTotal/{t=$2} /MemAvailable/{a=$2} END{printf \"%.0f%%\", (t-a)/t*100}' /proc/meminfo"]
-        stdout: SplitParser { onRead: data => root.ramVal = data.trim() }
-        onExited: ramTimer.restart()
-    }
-    Timer { id: ramTimer; interval: 5000; onTriggered: ramProc.running = true }
-
-    Process {
-        id: diskProc
-        running: true
-        command: ["sh", "-c", "df / | awk 'NR==2{print $5}'"]
-        stdout: SplitParser { onRead: data => root.diskVal = data.trim() }
-        onExited: diskTimer.restart()
-    }
-    Timer { id: diskTimer; interval: 30000; onTriggered: diskProc.running = true }
+    Timer { id: statsTimer; interval: 3000; onTriggered: statsProc.running = true }
 
     Process {
         id: netProc
