@@ -49,6 +49,61 @@ PanelWindow {
     readonly property int fontSize: 16
     readonly property int nativeRender: Text.NativeRendering
 
+    // Workspaces sorted: numbered first (by number), then named (alphabetical)
+    // I3.workspaces is an ObjectModel; .values gives a JS array snapshot.
+    // Bind on .count so the property re-evaluates when workspaces change.
+    // Workspaces in display order from i3 IPC (matches ws-switch.nu)
+    // I3.workspaces is used for reactive properties (focused/urgent),
+    // but the canonical order comes from i3-msg sorted by num.
+    property var wsOrder: []   // ordered workspace names from i3
+    readonly property int _wsCount: I3.workspaces.count
+
+    property var sortedWorkspaces: {
+        void root._wsCount
+        void root.wsOrder
+        // Build a rank map from wsOrder
+        var rank = {}
+        for (var r = 0; r < wsOrder.length; r++)
+            rank[wsOrder[r]] = r
+        var list = []
+        var vals = I3.workspaces.values
+        if (!vals) return list
+        for (var i = 0; i < vals.length; i++) {
+            var w = vals[i]
+            list.push({name: w.name, number: w.number, focused: w.focused, active: w.active, urgent: w.urgent, wsId: w.id})
+        }
+        list.sort(function(a, b) {
+            var ra = rank[a.name] !== undefined ? rank[a.name] : 99999
+            var rb = rank[b.name] !== undefined ? rank[b.name] : 99999
+            return ra - rb
+        })
+        return list
+    }
+
+    // Fetch workspace order from i3 IPC (stable sort by num)
+    Process {
+        id: wsOrderProc
+        running: true
+        command: ["sh", "-c", "i3-msg -t get_workspaces | python3 -c \"import json,sys; ws=json.load(sys.stdin); ws.sort(key=lambda w:w['num']); [print(w['name']) for w in ws]\""]
+        stdout: SplitParser {
+            property var buf: []
+            onRead: data => { var v = data.trim(); if (v) buf.push(v) }
+        }
+        onExited: { root.wsOrder = wsOrderProc.stdout.buf; wsOrderProc.stdout.buf = []; wsOrderTimer.restart() }
+    }
+    Timer { id: wsOrderTimer; interval: 2000; onTriggered: wsOrderProc.running = true }
+
+    // Also refresh on workspace events
+    Process {
+        id: wsEventSub
+        running: true
+        command: ["i3-msg", "-t", "subscribe", "-m", '["workspace"]']
+        stdout: SplitParser {
+            onRead: data => wsOrderProc.running = true
+        }
+        onExited: running = true
+    }
+
     // --- Mode tracking ---
     property string currentMode: "default"
 
@@ -191,7 +246,7 @@ PanelWindow {
             spacing: 0
 
             Repeater {
-                model: I3.workspaces
+                model: root.sortedWorkspaces
 
                 Rectangle {
                     required property var modelData

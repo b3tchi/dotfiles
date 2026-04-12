@@ -96,10 +96,18 @@ def handle_event(data):
         e = json.loads(data)
     except Exception:
         return
+    change = e.get('change')
+    # Workspace events — hide border on empty workspace
+    if change == 'focus' and 'current' in e and 'container' not in e:
+        # Workspace focus event: check if new workspace has any windows
+        cur = e.get('current', {})
+        nodes = cur.get('nodes', []) + cur.get('floating_nodes', [])
+        if not nodes:
+            border.hide()
+        return
     c = e.get('container')
     if not c:
         return
-    change = e.get('change')
     if change == 'close':
         border.hide()
     elif change in ('focus', 'move', 'floating'):
@@ -119,7 +127,7 @@ def subscribe():
     while True:
         try:
             proc = subprocess.Popen(
-                ['i3-msg', '-t', 'subscribe', '-m', '["window"]'],
+                ['i3-msg', '-t', 'subscribe', '-m', '["window","workspace"]'],
                 stdout=subprocess.PIPE, text=True
             )
             for line in proc.stdout:
