@@ -1,6 +1,7 @@
 import Quickshell
 import Quickshell.I3
 import Quickshell.Io
+import Quickshell.Services.SystemTray
 import QtQuick
 import QtQuick.Layouts
 
@@ -321,6 +322,42 @@ PanelWindow {
             Text { visible: !root.tickerActive && root.volVal !== ""; text: root.volVal + "%"; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
             Text { text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+
+            // System tray (StatusNotifierItem / SNI). Legacy XEmbed apps
+            // (nm-applet, pamac-tray) will not appear without an XEmbed→SNI
+            // bridge like xembedsniproxy. Modern apps (Firefox, Telegram,
+            // Element, Steam, KeePassXC, …) show up automatically.
+            Repeater {
+                model: SystemTray.items
+                delegate: Item {
+                    required property var modelData
+                    visible: !root.tickerActive
+                    width: visible ? 18 : 0
+                    height: parent.height
+                    Image {
+                        anchors.centerIn: parent
+                        width: 14; height: 14
+                        sourceSize: Qt.size(14, 14)
+                        source: modelData.icon
+                        smooth: false
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+                        onClicked: mouse => {
+                            if (mouse.button === Qt.LeftButton) modelData.activate(0, 0)
+                            else if (mouse.button === Qt.MiddleButton) modelData.secondaryActivate(0, 0)
+                        }
+                    }
+                }
+            }
+
+            Text {
+                visible: !root.tickerActive && SystemTray.items.length > 0
+                text: "  "
+                font.pixelSize: root.fontSize
+                renderType: root.nativeRender
+            }
 
             // Bell — always visible, click to replay ticker
             Item {
