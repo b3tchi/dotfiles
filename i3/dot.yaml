@@ -1,5 +1,8 @@
 # i3 window manager — core WM + compositor
 # Pair with quickshell or i3-classic for bar/launcher/notifications
+# Note: alttab and xborder-git were previously installed here but are no
+# longer used — alttab replaced by quickshell overlay switcher, xborders
+# replaced by quickshell/xborders-patched (a local fork).
 linux:
   links:
     config: ~/.i3/config
@@ -10,8 +13,6 @@ linux:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
       sudo pacman -Syu --needed --noconfirm i3
-      sudo pamac install alttab --no-confirm
-      sudo pamac install xborder-git --no-confirm
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux")}}
       sudo pacman -Syu --needed --noconfirm \

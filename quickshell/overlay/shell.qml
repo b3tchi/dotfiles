@@ -2,6 +2,7 @@ import Quickshell
 import Quickshell.Io
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Window
 
 ShellRoot {
     id: root
@@ -131,6 +132,41 @@ ShellRoot {
     property int switcherIndex: 0
     property var switcherWindows: []
 
+    // MRU focus history — list of i3 container ids, most-recent first.
+    // Maintained by windowSubscriber from live i3 window::focus events.
+    property var focusHistory: []
+
+    Process {
+        id: windowSubscriber
+        running: true
+        command: ["i3-msg", "-t", "subscribe", "-m", '["window"]']
+        stdout: SplitParser {
+            onRead: data => {
+                try {
+                    var e = JSON.parse(data)
+                    if (!e.change || !e.container) return
+                    var id = e.container.id
+                    if (e.change === "focus") {
+                        var h = root.focusHistory.slice()
+                        var idx = h.indexOf(id)
+                        if (idx >= 0) h.splice(idx, 1)
+                        h.unshift(id)
+                        if (h.length > 50) h.length = 50
+                        root.focusHistory = h
+                    } else if (e.change === "close") {
+                        var h2 = root.focusHistory.slice()
+                        var idx2 = h2.indexOf(id)
+                        if (idx2 >= 0) {
+                            h2.splice(idx2, 1)
+                            root.focusHistory = h2
+                        }
+                    }
+                } catch(err) {}
+            }
+        }
+        onExited: running = true
+    }
+
     // Window scanner — collects JSON then parses
     property string _scanBuffer: ""
 
@@ -160,14 +196,21 @@ ShellRoot {
                     for (var i = 0; i < children.length; i++) walk(children[i])
                 }
                 walk(tree)
+                // Sort by MRU: currently focused always first, then focusHistory
+                // order, then any windows we haven't seen focused yet (rank 9999).
+                var rank = {}
+                for (var r = 0; r < root.focusHistory.length; r++)
+                    rank[root.focusHistory[r]] = r
+                wins.sort(function(a, b) {
+                    if (a.focused) return -1
+                    if (b.focused) return 1
+                    var ra = rank[a.id] !== undefined ? rank[a.id] : 9999
+                    var rb = rank[b.id] !== undefined ? rank[b.id] : 9999
+                    return ra - rb
+                })
                 root.switcherWindows = wins
-                // Select next window after focused
-                for (var j = 0; j < wins.length; j++) {
-                    if (wins[j].focused) {
-                        root.switcherIndex = (j + 1) % wins.length
-                        break
-                    }
-                }
+                // Pre-select the previous MRU window (classic alt-tab toggle).
+                root.switcherIndex = wins.length > 1 ? 1 : 0
                 // Now show
                 overlay.visible = true
             } catch(e) {}
@@ -180,6 +223,50 @@ ShellRoot {
         running: false
     }
 
+    // ── Global key monitor via XI2 raw events ──
+    // Tracks Super/Alt/Tab press+release from the X server directly, bypassing
+    // Qt focus — necessary because when i3 fires the switcher the overlay window
+    // doesn't exist yet, so its Keys.onReleased never sees the Super release.
+    // Uses a Python helper with python-xlib that calls XISelectEvents on the
+    // root window for XI_RawKeyPress/Release; does NOT create a client window
+    // (the earlier `xinput test-xi2` approach did, leaving a 1115x1013 empty
+    // frame in the i3 tree).
+
+    property bool modHeld: false
+
+    Process {
+        id: keyMonitor
+        running: true
+        command: ["sh", "-c", "exec python3 -u $HOME/.dotfiles/quickshell/qs-keymon.py"]
+        stdout: SplitParser {
+            onRead: data => {
+                var parts = data.trim().split(" ")
+                if (parts.length !== 2) return
+                var action = parts[0]  // "press" or "release"
+                var code = parseInt(parts[1])
+
+                // 64=Alt_L, 108=Alt_R, 133=Super_L, 134=Super_R
+                var isMod = (code === 64 || code === 108 || code === 133 || code === 134)
+                // 23=Tab
+                var isTab = (code === 23)
+
+                if (isMod && action === "press") {
+                    root.modHeld = true
+                } else if (isMod && action === "release") {
+                    root.modHeld = false
+                    if (root.mode === "switcher" && overlay.visible)
+                        root.switcherFocus()
+                } else if (isTab && action === "press" && root.modHeld) {
+                    if (root.mode === "switcher") {
+                        root.switcherNext()
+                    } else {
+                        root.switcherShow()
+                    }
+                }
+            }
+        }
+        onExited: running = true  // restart if it dies
+    }
 
     function switcherShow() {
         _scanBuffer = ""
@@ -385,7 +472,7 @@ ShellRoot {
 
     // ── Single window ──
 
-    ApplicationWindow {
+    Window {
         id: overlay
         visible: false
         width: 480
@@ -401,6 +488,17 @@ ShellRoot {
         flags: Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
         color: "#222D31"
         title: root.mode === "switcher" ? "qs-switcher" : root.mode === "projects" ? "qs-projects" : "qs-launcher"
+
+        // Explicit opaque background. Qt.Window has a `color` property but on
+        // quickshell under X11 with FramelessWindowHint it isn't always honored
+        // as the opaque clear color, leaving the ListView topMargin/bottomMargin
+        // as transparent strips above/below the rows. A full-fill Rectangle is
+        // cheap and removes the ambiguity.
+        Rectangle {
+            anchors.fill: parent
+            color: "#222D31"
+            z: -1
+        }
 
         onActiveChanged: {
             if (!active && visible && (root.mode === "launcher" || root.mode === "projects")) root.hide()
@@ -505,11 +603,14 @@ ShellRoot {
             visible: root.mode === "switcher"
             focus: root.mode === "switcher"
 
+            // Tab navigation and mod-release are handled by the global xinput
+            // keymon outside Qt focus — do NOT also handle them here or every
+            // Tab press after the overlay gains focus fires twice.
             Keys.onPressed: event => {
-                if (event.key === Qt.Key_Tab || event.key === Qt.Key_Down) {
+                if (event.key === Qt.Key_Down) {
                     root.switcherNext()
                     event.accepted = true
-                } else if (event.key === Qt.Key_Backtab || event.key === Qt.Key_Up) {
+                } else if (event.key === Qt.Key_Up) {
                     root.switcherPrev()
                     event.accepted = true
                 } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
@@ -518,13 +619,6 @@ ShellRoot {
                 } else if (event.key === Qt.Key_Escape) {
                     root.hide()
                     event.accepted = true
-                }
-            }
-
-            Keys.onReleased: event => {
-                if (event.key === Qt.Key_Super_L || event.key === Qt.Key_Super_R ||
-                    event.key === Qt.Key_Alt || event.key === Qt.Key_Meta) {
-                    root.switcherFocus()
                 }
             }
 

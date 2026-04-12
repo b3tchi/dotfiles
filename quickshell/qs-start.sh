@@ -8,6 +8,12 @@ if [ -z "$I3SOCK" ] && command -v i3 >/dev/null 2>&1; then
 fi
 
 killall quickshell 2>/dev/null
+# The overlay spawns a detached keymon helper via setsid; clean it up too so
+# $mod+Shift+d reloads don't leak helper processes across restarts. We sweep
+# both the current python helper and the legacy xinput+awk pipeline so a
+# partial upgrade or an orphan from an older quickshell version is cleaned up.
+pkill -f 'qs-keymon.py' 2>/dev/null
+pkill -f 'xinput test-xi2' 2>/dev/null
 sleep 0.5
 
 setsid quickshell &

@@ -1,17 +1,31 @@
 # Replaces: rofi (launcher), dunst (notifications), polybar (bar)
 # Requires: i3 or sway (WM), picom (compositor, X11 only)
+# Extras:
+#   python-xlib      — overlay/qs-keymon.py (XI2 raw-event listener for the
+#                      alt-tab switcher)
+#   xorg-xinput      — dvorak keyboard lookup at i3 startup
+#   python-cairo,
+#   python-gobject,
+#   libwnck3, gtk3   — dependencies of quickshell/xborders-patched, our
+#                      local fork of xborders that skips frameless windows
 linux:
   links:
     config: ~/.config/quickshell
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
-      sudo pacman -S --needed --noconfirm quickshell
+      sudo pacman -S --needed --noconfirm \
+        quickshell python-xlib xorg-xinput \
+        python-cairo python-gobject libwnck3 gtk3
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux")}}
-      sudo pacman -S --needed --noconfirm quickshell
+      sudo pacman -S --needed --noconfirm \
+        quickshell python-xlib xorg-xinput \
+        python-cairo python-gobject libwnck3 gtk3
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux ARM")}}
-      sudo pacman -S --needed --noconfirm quickshell
+      sudo pacman -S --needed --noconfirm \
+        quickshell python-xlib xorg-xinput \
+        python-cairo python-gobject libwnck3 gtk3
       {{/if}}
       rotz link quickshell --force
