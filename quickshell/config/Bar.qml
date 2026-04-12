@@ -91,18 +91,30 @@ PanelWindow {
         onExited: running = true
     }
 
-    // --- System stats (read from Termux-side helper: qs-stats-helper.sh) ---
+    // --- System stats ---
+    // proot/Termux: qs-stats-helper.sh writes /tmp/qs-stats; native Linux: read /proc directly
     readonly property string statsFile: "/tmp/qs-stats"
     property string cpuVal:  "?"
     property string ramVal:  "?"
     property string diskVal: "?"
     property string netVal:  ""
     property string volVal:  ""
+    property bool volMuted: false
+    property string batVal:  ""
+    property string batStatus: ""
 
     Process {
         id: statsProc
         running: true
-        command: ["sh", "-c", "cat " + root.statsFile + " 2>/dev/null || echo '?\\n?\\n?\\n?'"]
+        command: ["sh", "-c",
+            "if [ -f " + root.statsFile + " ]; then cat " + root.statsFile + "; else " +
+            "read _ a1 b1 c1 d1 e1 f1 g1 _ < /proc/stat; sleep 1; " +
+            "read _ a2 b2 c2 d2 e2 f2 g2 _ < /proc/stat; " +
+            "t1=$((a1+b1+c1+d1+e1+f1+g1)); t2=$((a2+b2+c2+d2+e2+f2+g2)); " +
+            "dt=$((t2-t1)); di=$((d2-d1)); " +
+            "echo $(( dt > 0 ? (dt-di)*100/dt : 0 )); " +
+            "awk '/MemTotal/{t=$2} /MemAvailable/{a=$2} END{printf \"%.0f\\n\", (t-a)/t*100}' /proc/meminfo; " +
+            "df / | awk 'NR==2{gsub(/%/,\"\",$5); print $5}'; fi"]
         stdout: SplitParser {
             property int lineNum: 0
             onRead: data => {
@@ -110,7 +122,6 @@ PanelWindow {
                 if (lineNum === 0) root.cpuVal = v + "%"
                 else if (lineNum === 1) root.ramVal = v + "%"
                 else if (lineNum === 2) root.diskVal = v + "%"
-                // line 3 = load (available but unused)
                 lineNum++
             }
         }
@@ -132,11 +143,40 @@ PanelWindow {
         id: volProc
         running: true
         command: ["sh", "-c",
-            "pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | grep -oP '\\d+(?=%)' | head -1"]
-        stdout: SplitParser { onRead: data => root.volVal = data.trim() }
-        onExited: volTimer.restart()
+            "pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | grep -oP '\\d+(?=%)' | head -1; " +
+            "pactl get-sink-mute @DEFAULT_SINK@ 2>/dev/null | grep -oP '(yes|no)'"]
+        stdout: SplitParser {
+            property int lineNum: 0
+            onRead: data => {
+                if (lineNum === 0) root.volVal = data.trim()
+                else if (lineNum === 1) root.volMuted = (data.trim() === "yes")
+                lineNum++
+            }
+        }
+        onExited: { volProc.stdout.lineNum = 0; volTimer.restart() }
     }
     Timer { id: volTimer; interval: 5000; onTriggered: volProc.running = true }
+
+    Process { id: volToggleMute; command: ["pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"]; onExited: volProc.running = true }
+    Process { id: volUp; command: ["sh", "-c", "cur=$(pactl get-sink-volume @DEFAULT_SINK@ | grep -oP '\\d+(?=%)' | head -1); [ \"$cur\" -lt 100 ] && pactl set-sink-volume @DEFAULT_SINK@ +5%"]; onExited: volProc.running = true }
+    Process { id: volDown; command: ["pactl", "set-sink-volume", "@DEFAULT_SINK@", "-5%"]; onExited: volProc.running = true }
+
+    Process {
+        id: batProc
+        running: true
+        command: ["sh", "-c",
+            "cat /sys/class/power_supply/BAT0/capacity 2>/dev/null; cat /sys/class/power_supply/BAT0/status 2>/dev/null"]
+        stdout: SplitParser {
+            property int lineNum: 0
+            onRead: data => {
+                if (lineNum === 0) root.batVal = data.trim()
+                else if (lineNum === 1) root.batStatus = data.trim()
+                lineNum++
+            }
+        }
+        onExited: { batProc.stdout.lineNum = 0; batTimer.restart() }
+    }
+    Timer { id: batTimer; interval: 10000; onTriggered: batProc.running = true }
 
 
     // --- Layout (using Row, not RowLayout — RowLayout leaks Text.color) ---
@@ -309,8 +349,24 @@ PanelWindow {
             Text { visible: !root.tickerActive; text: root.diskVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
             Text { visible: !root.tickerActive && root.volVal !== ""; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { visible: !root.tickerActive && root.volVal !== ""; text: "VOL:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { visible: !root.tickerActive && root.volVal !== ""; text: root.volVal + "%"; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Item {
+                visible: !root.tickerActive && root.volVal !== ""
+                width: volLabel.implicitWidth + volValue.implicitWidth
+                height: parent.height
+                Text { id: volLabel; text: (root.volMuted || root.volVal === "0") ? "" : "VOL:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender; anchors.verticalCenter: parent.verticalCenter }
+                Text { id: volValue; anchors.left: volLabel.right; text: (root.volMuted || root.volVal === "0") ? "MUTED" : root.volVal + "%"; color: (root.volMuted || root.volVal === "0") ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender; anchors.verticalCenter: parent.verticalCenter }
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton
+                    onClicked: volToggleMute.running = true
+                    onWheel: wheel => { if (wheel.angleDelta.y > 0) volUp.running = true; else volDown.running = true }
+                }
+            }
+
+            Text { visible: !root.tickerActive && root.batVal !== ""; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive && root.batVal !== "" && root.batVal !== "100"; text: (root.batStatus === "Charging" ? "CHR:" : "BAT:"); color: "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive && root.batVal !== "" && root.batVal !== "100"; text: root.batVal + "%"; color: root.batStatus === "Discharging" && parseInt(root.batVal) <= 20 ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive && root.batVal === "100"; text: "CHARGED"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
             Text { text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
