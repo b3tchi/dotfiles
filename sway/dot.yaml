@@ -2,9 +2,6 @@ linux:
   links:
     config: ~/.config/sway/config
     config.d: ~/.config/sway/config.d
-    ../i3/config.rasi: ~/.config/rofi/config.rasi
-    ../waybar/config.jsonc: ~/.config/waybar/config.jsonc
-    ../waybar/style.css: ~/.config/waybar/style.css
     # WSL-specific links (wrapped as full key-value pairs)
     {{#if env.WSL_DISTRO_NAME}}
     wsl/sway-session.sh: ~/.local/bin/sway-session
@@ -27,8 +24,7 @@ linux:
         foot \
         swaybg \
         xorg-xwayland \
-        wl-clipboard \
-        waybar
+        wl-clipboard
       systemctl --user daemon-reload
       systemctl --user enable sway-session
       {{/if}}

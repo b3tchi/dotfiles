@@ -6,10 +6,14 @@ import QtQuick.Controls
 ShellRoot {
     id: root
 
+    // WM detection
+    readonly property bool isSway: Quickshell.env("SWAYSOCK") !== null
+    readonly property string wmMsg: isSway ? "swaymsg" : "i3-msg"
+
     // ── Shared ──
 
     readonly property string fontFamily: "Iosevka Nerd Font"
-    readonly property int fontSize: 16
+    readonly property int fontSize: isSway ? 11 : 16
 
     property string mode: "" // "launcher", "switcher", or "projects"
 
@@ -137,7 +141,7 @@ ShellRoot {
     Process {
         id: windowScanner
         running: false
-        command: ["sh", "-c", "i3-msg -s $(i3 --get-socketpath) -t get_tree"]
+        command: ["sh", "-c", root.wmMsg + " -t get_tree"]
         stdout: SplitParser {
             onRead: data => { root._scanBuffer += data }
         }
@@ -153,7 +157,7 @@ ShellRoot {
                             name: node.name,
                             focused: node.focused,
                             urgent: node.urgent || false,
-                            cls: (node.window_properties || {})["class"] || ""
+                            cls: node.app_id || (node.window_properties || {})["class"] || ""
                         })
                     }
                     var children = (node.nodes || []).concat(node.floating_nodes || [])
@@ -204,7 +208,7 @@ ShellRoot {
     function switcherFocus() {
         if (switcherWindows.length > 0 && switcherIndex < switcherWindows.length) {
             var win = switcherWindows[switcherIndex]
-            focusProc.command = ["sh", "-c", "i3-msg -s $(i3 --get-socketpath) '[con_id=" + win.id + "]' focus"]
+            focusProc.command = [root.wmMsg, "[con_id=" + win.id + "]", "focus"]
             focusProc.running = true
         }
         hide()
@@ -241,7 +245,7 @@ ShellRoot {
         running: false
         command: ["sh", "-c",
             "PROJECTS=$(grep -E '^  [a-zA-Z]' ~/.config/project/projects.yaml 2>/dev/null | sed 's/^ *//;s/:.*//' | tr '\\n' ' '); " +
-            "WS_JSON=$(i3-msg -t get_workspaces 2>/dev/null || echo '[]'); " +
+            "WS_JSON=$(" + root.wmMsg + " -t get_workspaces 2>/dev/null || echo '[]'); " +
             "FOCUSED=$(echo \"$WS_JSON\" | sed 's/},{/}\\n{/g' | grep '\"focused\":true' | sed 's/.*\"name\":\"\\([^\"]*\\)\".*/\\1/'); " +
             "WS_NAMES=$(echo \"$WS_JSON\" | sed 's/},{/}\\n{/g' | sed -n 's/.*\"name\":\"\\([^\"]*\\)\".*/\\1/p'); " +
             "printf '{\"projects\":['; SEP=''; " +
@@ -303,7 +307,7 @@ ShellRoot {
         if (projectsFiltered.length > 0 && projectsIndex < projectsFiltered.length) {
             var p = projectsFiltered[projectsIndex]
             var wsName = p.workspaces.length > 0 ? p.workspaces[0] : p.name
-            projectsWmProc.command = ["i3-msg", "workspace", wsName]
+            projectsWmProc.command = [root.wmMsg, "workspace", wsName]
             projectsWmProc.running = true
         }
         hide()
@@ -313,7 +317,7 @@ ShellRoot {
         if (projectsFiltered.length > 0 && projectsIndex < projectsFiltered.length) {
             var p = projectsFiltered[projectsIndex]
             if (p.workspaces.length === 0) {
-                projectsWmProc.command = ["i3-msg", "workspace", p.name]
+                projectsWmProc.command = [root.wmMsg, "workspace", p.name]
             } else {
                 // Rename bare name to _1 if needed, then create next index
                 var cmds = []
@@ -325,11 +329,12 @@ ShellRoot {
                     if (m) { var n = parseInt(m[1]); if (n > maxIdx) maxIdx = n }
                 }
                 if (hasBare) {
-                    cmds.push("i3-msg rename workspace \\\"" + p.name + "\\\" to \\\"" + p.name + "_1\\\"")
+                    cmds.push(root.wmMsg + " rename workspace \\\"" + p.name + "\\\" to \\\"" + p.name + "_1\\\"")
+
                     if (maxIdx < 1) maxIdx = 1
                 }
                 var next = maxIdx + 1
-                cmds.push("i3-msg workspace " + p.name + "_" + next)
+                cmds.push(root.wmMsg + " workspace " + p.name + "_" + next)
                 projectsWmProc.command = ["sh", "-c", cmds.join(" && ")]
             }
             projectsWmProc.running = true

@@ -1,8 +1,9 @@
-# Replaces: rofi (launcher), dunst (notifications), polybar (bar)
-# Requires: i3 or sway (WM), picom (compositor, X11 only)
+# Replaces: rofi (launcher), dunst (notifications), polybar/waybar (bar)
+# Requires: i3 or sway (WM)
 linux:
   links:
     config: ~/.config/quickshell
+    overlay: ~/.config/quickshell-overlay
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}

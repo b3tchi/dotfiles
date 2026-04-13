@@ -13,6 +13,10 @@ PanelWindow {
     property bool hasCritical: false
     signal dismissNotif()
 
+    // WM detection — sway uses same IPC as i3
+    readonly property bool isSway: Quickshell.env("SWAYSOCK") !== null
+    readonly property string wmMsg: isSway ? "swaymsg" : "i3-msg"
+
     // Ticker state
     property bool tickerActive: false
 
@@ -32,20 +36,20 @@ PanelWindow {
         bottom: true
     }
 
-    implicitHeight: 27
+    implicitHeight: isSway ? 24 : 27
 
-    // Phone (Wayland): floating with margins; desktop (X11): full-width
-    readonly property bool isWayland: Qt.platform.pluginName.startsWith("wayland")
+    // Phone (sxmo): floating pill; desktop (i3/sway): full-width
+    readonly property bool isPhone: Quickshell.env("QS_PHONE") === "1"
     margins {
-        bottom: isWayland ? 20 : 0
-        left:   isWayland ? 40 : 0
-        right:  isWayland ? 40 : 0
+        bottom: isPhone ? 20 : 0
+        left:   isPhone ? 40 : 0
+        right:  isPhone ? 40 : 0
     }
 
     color: currentMode !== "default" ? "#152024" : "#222d31"
 
     readonly property string fontFamily: "Iosevka Nerd Font"
-    readonly property int fontSize: 16
+    readonly property int fontSize: isSway ? 14 : 16
     readonly property int nativeRender: Text.NativeRendering
 
     // --- Mode tracking ---
@@ -77,7 +81,7 @@ PanelWindow {
     }
 
     Process {
-        command: ["i3-msg", "-t", "subscribe", "-m", '["mode"]']
+        command: [root.wmMsg, "-t", "subscribe", "-m", '["mode"]']
         running: true
         stdout: SplitParser {
             onRead: data => {

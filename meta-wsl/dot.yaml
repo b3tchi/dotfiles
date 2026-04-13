@@ -13,4 +13,5 @@ depends:
   - claude
   - opencode
   - sway
+  - quickshell
   - docker

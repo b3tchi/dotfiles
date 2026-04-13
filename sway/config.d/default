@@ -17,7 +17,7 @@ set $right l
 set $term foot
 # Your preferred application launcher
 # set $menu wmenu-run
-set $menu rofi -show run 
+set $menu ~/.dotfiles/quickshell/qs-overlay.sh launcher
 
 ### Appearance
 #
@@ -44,9 +44,11 @@ client.focused_inactive #152024   #152024     #707880   #222D31     #152024
 client.unfocused        #222D31   #222D31     #707880   #222D31     #222D31
 client.urgent           #CB4B16   #FDF6E3     #16a085   #268BD2     #CB4B16
 
-# No borders for rofi and waybar
-for_window [app_id="rofi"] border none
-for_window [app_id="waybar"] border none
+# Quickshell overlay windows
+for_window [title="qs-launcher"] floating enable, border none, move position center
+for_window [title="qs-switcher"] floating enable, border none, move position center
+for_window [title="qs-projects"] floating enable, border none, move position center
+for_window [title="quickshell-notifications"] floating enable, border none, sticky enable
 
 ### Output configuration
 #
@@ -197,9 +199,11 @@ font pango:Iosevka 11
     bindsym $mod+Shift+7 exec $ws_switch 7 follow
     bindsym $mod+Shift+8 exec $ws_switch 8 follow
 
-    # Project workspace picker (rofi)
-    bindsym $mod+p exec ~/.local/bin/project-picker
-    bindsym $mod+Shift+p exec ~/.local/bin/project-picker --new
+    # Project workspace picker (quickshell overlay)
+    bindsym $mod+p exec ~/.dotfiles/quickshell/qs-overlay.sh projects
+
+    # Task switcher (quickshell overlay)
+    bindsym $mod+Tab exec ~/.dotfiles/quickshell/qs-overlay.sh switcher
 #
 # Layout stuff:
 #
@@ -277,12 +281,6 @@ bindsym $mod+r mode "resize"
     bindsym Shift+Print exec grim -g "$(slurp)" ~/Screenshots/$(date +%Y-%m-%d_%H-%M-%S).png
     bindsym $mod+Print exec 'sleep 3 && grim ~/Screenshots/$(date +%Y-%m-%d_%H-%M-%S).png'
 
-# No borders on rofi and waybar
-for_window [app_id="rofi"] border none
-for_window [app_id="waybar"] border none
-
-#
-# Status Bar:
-#
-exec waybar
+# Quickshell bar + overlay
+exec_always ~/.dotfiles/quickshell/qs-start.sh
 
