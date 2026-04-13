@@ -3,9 +3,9 @@ import Quickshell.Io
 import QtQuick
 
 Item {
-    // X11/i3 only — python script uses GTK3/cairo overlay (no Wayland equivalent)
     readonly property bool isSway: Quickshell.env("SWAYSOCK") !== null
 
+    // X11/i3: python GTK3/cairo overlay
     Process {
         id: borderProc
         running: !isSway
@@ -13,4 +13,10 @@ Item {
         onExited: restartTimer.restart()
     }
     Timer { id: restartTimer; interval: 2000; onTriggered: { if (!isSway) borderProc.running = true } }
+
+    // Wayland/sway: pure QML layer-shell overlay
+    Loader {
+        active: isSway
+        source: "FocusBorderWayland.qml"
+    }
 }

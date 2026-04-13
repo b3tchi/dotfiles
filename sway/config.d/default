@@ -39,7 +39,7 @@ bindsym $mod+y border pixel 4
 bindsym $mod+n border normal 4
 
 # Window colors         border    background  text      indicator   child_border
-client.focused          #16a085   #152024     #FDF6E3   #16a085     #16a085
+client.focused          #152024   #152024     #FDF6E3   #222D31     #152024
 client.focused_inactive #152024   #152024     #707880   #222D31     #152024
 client.unfocused        #222D31   #222D31     #707880   #222D31     #222D31
 client.urgent           #CB4B16   #FDF6E3     #16a085   #268BD2     #CB4B16
