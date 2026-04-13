@@ -78,7 +78,7 @@ bindsym $mod+Shift+F3 exec pcmanfm_pkexec
 bindsym $mod+F5 exec terminal -e 'mocp'
 # bindsym $mod+t exec --no-startup-id pkill picom
 bindsym $mod+Ctrl+t exec --no-startup-id picom -b
-bindsym $mod+Shift+d --release exec "killall dunst; exec notify-send 'restart dunst'"
+bindsym $mod+Shift+d --release exec --no-startup-id ~/.dotfiles/quickshell/qs-start.sh
 bindsym Print exec --no-startup-id i3-scrot
 bindsym $mod+Print --release exec --no-startup-id i3-scrot -w
 bindsym $mod+Shift+Print --release exec --no-startup-id i3-scrot -s
@@ -329,9 +329,19 @@ exec --no-startup-id setxkbmap -device $(xinput list --id-only 'keyboard:AT Tran
 #mouse cursor
 # exec_always --no-startup-id fix_xcursor
 
-# task switcher via quickshell IPC
-bindsym $mod+Tab exec ~/.dotfiles/quickshell/qs-overlay.sh switcher
-exec_always killall xborders;xborders --border-radius 4 --border-width 2 --border-rgba '#16a085' --positive-x-offset 1 --negative-y-offset 24 --positive-y-offset 1 --negative-x-offset 1
+# task switcher — action handled by quickshell via xinput key monitor
+# (needs to track Super release for confirm; i3 bindsym fires on press only).
+# i3 still grabs the combo via `nop` so the Tab key doesn't leak through to
+# the focused window (the raw XI2 events used by the keymon are delivered
+# below the grab layer and are unaffected).
+bindsym $mod+Tab nop
+# Also grab Alt+Tab — the keymon listens to both Super and Alt modifiers, so
+# if kmonad (or the user) sends Alt+Tab instead of Super+Tab, i3 must grab it
+# too or the raw Tab keystroke leaks through to the focused application.
+bindsym Mod1+Tab nop
+# Focus border now handled by quickshell (config/FocusBorder.qml)
+# Previously: xborders-patched Python script (kept in repo as fallback)
+exec_always pkill -f xborders-patched; pkill -x xborders
 
 # alttab (replaced by quickshell switcher)
 # exec_always alttab -font xft:Iosevka-11 -mk Super_L -vertical -s 1 -t 300x24 -i 20x20 -bg "#222d31" -bw 2 -bc "#222d31" -inact "#222d31" -frame "#16a085"

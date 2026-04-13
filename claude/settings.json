@@ -1,8 +1,4 @@
 {
-  "statusLine": {
-    "type": "command",
-    "command": "bash ~/.claude/statusline.sh"
-  },
   "hooks": {
     "Stop": [
       {
@@ -55,6 +51,10 @@
         ]
       }
     ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "bash ~/.claude/statusline.sh"
   },
   "enabledPlugins": {
     "infinifu@infinifu-dev": true

@@ -42,6 +42,8 @@ ShellRoot {
         }
     }
 
+    FocusBorder {}
+
     Variants {
         model: Quickshell.screens
         Bar {
