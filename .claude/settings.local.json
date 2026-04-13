@@ -168,7 +168,10 @@
       "Bash(python3:*)",
       "Read(//run/user/10533/quickshell/by-id/**)",
       "Bash(echo \"exit: $?\")",
-      "Bash(tmux-to-workstation list:*)"
+      "Bash(tmux-to-workstation list:*)",
+      "Bash(rotz link:*)",
+      "Read(//home/jan/.config/**)",
+      "Bash(killall waybar:*)"
     ]
   }
 }
