@@ -13,7 +13,7 @@ ShellRoot {
     // ── Shared ──
 
     readonly property string fontFamily: "Iosevka Nerd Font"
-    readonly property int fontSize: isSway ? 11 : 16
+    readonly property int fontSize: isSway ? 14 : 16
 
     property string mode: "" // "launcher", "switcher", or "projects"
 
