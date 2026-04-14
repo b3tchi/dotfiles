@@ -488,16 +488,29 @@ PanelWindow {
 
             Text { text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
-            // Date
+            // Date — sync to second/minute boundary so updates aren't delayed
             Text {
+                id: clockText
                 property bool showSeconds: false
                 text: Qt.formatDateTime(new Date(), showSeconds ? "HH:mm:ss" : "HH:mm")
                 color: "#707880"
                 font.family: root.fontFamily
                 font.pixelSize: root.fontSize
                 renderType: root.nativeRender
-                Timer { interval: parent.showSeconds ? 1000 : 60000; running: true; repeat: true; onTriggered: parent.text = Qt.formatDateTime(new Date(), parent.showSeconds ? "HH:mm:ss" : "HH:mm") }
-                MouseArea { anchors.fill: parent; onClicked: { parent.showSeconds = !parent.showSeconds; parent.text = Qt.formatDateTime(new Date(), parent.showSeconds ? "HH:mm:ss" : "HH:mm") } }
+                function refresh() { text = Qt.formatDateTime(new Date(), showSeconds ? "HH:mm:ss" : "HH:mm") }
+                Timer {
+                    id: clockTimer
+                    running: true; repeat: true
+                    interval: clockText.showSeconds ? 1000 : 1000
+                    onTriggered: {
+                        clockText.refresh()
+                        if (!clockText.showSeconds) {
+                            var ms = 60000 - (Date.now() % 60000)
+                            interval = ms < 1000 ? ms + 60000 : ms
+                        }
+                    }
+                }
+                MouseArea { anchors.fill: parent; onClicked: { parent.showSeconds = !parent.showSeconds; parent.refresh(); clockTimer.restart() } }
             }
             Text { text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text {
