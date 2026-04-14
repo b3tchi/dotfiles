@@ -38,31 +38,20 @@ Variants {
         property int fh: 0
         property bool borderVisible: false
 
-        // Rounded border drawn as a single stroked path
+        // Border via Rectangle with rounded corners — immediate rendering
+        // (Canvas defers to next paint cycle, adding visible delay)
         // Offset inward by 2px to overlay sway's native border
         property int inset: 2
-        Canvas {
+        Rectangle {
             visible: borderOverlay.borderVisible
             x: borderOverlay.fx - borderOverlay.bw + borderOverlay.inset
             y: borderOverlay.fy - borderOverlay.bw + borderOverlay.inset
             width: borderOverlay.fw + 2 * borderOverlay.bw - 2 * borderOverlay.inset
             height: borderOverlay.fh + 2 * borderOverlay.bw - 2 * borderOverlay.inset
-
-            onXChanged: requestPaint()
-            onYChanged: requestPaint()
-            onWidthChanged: requestPaint()
-            onHeightChanged: requestPaint()
-
-            onPaint: {
-                var ctx = getContext("2d")
-                ctx.clearRect(0, 0, width, height)
-                ctx.strokeStyle = borderOverlay.bc
-                ctx.lineWidth = borderOverlay.bw
-                var hw = borderOverlay.bw / 2
-                ctx.beginPath()
-                ctx.roundedRect(hw, hw, width - borderOverlay.bw, height - borderOverlay.bw, borderOverlay.br, borderOverlay.br)
-                ctx.stroke()
-            }
+            color: "transparent"
+            border.color: borderOverlay.bc
+            border.width: borderOverlay.bw
+            radius: borderOverlay.br
         }
 
         // Subscribe to sway window/workspace events
@@ -93,6 +82,67 @@ Variants {
                 }
             }
             onExited: running = true
+        }
+
+        // Track sway resize/move mode to poll geometry during interactive ops
+        Process {
+            id: modeSubscribe
+            running: true
+            command: ["swaymsg", "-t", "subscribe", "-m", "[\"mode\"]"]
+            stdout: SplitParser {
+                onRead: data => {
+                    try {
+                        var e = JSON.parse(data)
+                        if (e.change === "resize")
+                            resizePoller.running = true
+                        else
+                            resizePoller.running = false
+                    } catch(err) {}
+                }
+            }
+            onExited: running = true
+        }
+
+        // Poll during keyboard resize mode
+        Timer {
+            id: resizePoller
+            interval: 20
+            repeat: true
+            onTriggered: focusScan.running = true
+        }
+
+        // Continuous light poll to catch mouse drag/resize (no sway events during these)
+        // Only runs while border is visible; stops when geometry is stable for 1s
+        property int lastFx: 0
+        property int lastFy: 0
+        property int lastFw: 0
+        property int lastFh: 0
+        property int stableCount: 0
+
+        Timer {
+            id: dragPoller
+            interval: 100
+            repeat: true
+            running: borderOverlay.borderVisible
+            onTriggered: {
+                if (borderOverlay.fx === borderOverlay.lastFx &&
+                    borderOverlay.fy === borderOverlay.lastFy &&
+                    borderOverlay.fw === borderOverlay.lastFw &&
+                    borderOverlay.fh === borderOverlay.lastFh) {
+                    borderOverlay.stableCount++
+                    // Geometry stable for 1s — slow down to save resources
+                    if (borderOverlay.stableCount > 10)
+                        dragPoller.interval = 1000
+                } else {
+                    borderOverlay.stableCount = 0
+                    dragPoller.interval = 100
+                    borderOverlay.lastFx = borderOverlay.fx
+                    borderOverlay.lastFy = borderOverlay.fy
+                    borderOverlay.lastFw = borderOverlay.fw
+                    borderOverlay.lastFh = borderOverlay.fh
+                }
+                focusScan.running = true
+            }
         }
 
 
