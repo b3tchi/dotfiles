@@ -27,7 +27,7 @@ Variants {
 
         mask: Region {}   // empty = fully click-through
 
-        property int bw: 2    // border width
+        property int bw: 2    // border width (matches xborders)
         property int br: 4    // border radius
         property color bc: "#16a085"
 
@@ -38,43 +38,31 @@ Variants {
         property int fh: 0
         property bool borderVisible: false
 
-        // Top border
-        Rectangle {
+        // Rounded border drawn as a single stroked path
+        // Offset inward by 2px to overlay sway's native border
+        property int inset: 2
+        Canvas {
             visible: borderOverlay.borderVisible
-            x: borderOverlay.fx - borderOverlay.bw
-            y: borderOverlay.fy - borderOverlay.bw
-            width: borderOverlay.fw + 2 * borderOverlay.bw
-            height: borderOverlay.bw
-            color: borderOverlay.bc
-            radius: borderOverlay.br
-        }
-        // Bottom border
-        Rectangle {
-            visible: borderOverlay.borderVisible
-            x: borderOverlay.fx - borderOverlay.bw
-            y: borderOverlay.fy + borderOverlay.fh
-            width: borderOverlay.fw + 2 * borderOverlay.bw
-            height: borderOverlay.bw
-            color: borderOverlay.bc
-            radius: borderOverlay.br
-        }
-        // Left border
-        Rectangle {
-            visible: borderOverlay.borderVisible
-            x: borderOverlay.fx - borderOverlay.bw
-            y: borderOverlay.fy
-            width: borderOverlay.bw
-            height: borderOverlay.fh
-            color: borderOverlay.bc
-        }
-        // Right border
-        Rectangle {
-            visible: borderOverlay.borderVisible
-            x: borderOverlay.fx + borderOverlay.fw
-            y: borderOverlay.fy
-            width: borderOverlay.bw
-            height: borderOverlay.fh
-            color: borderOverlay.bc
+            x: borderOverlay.fx - borderOverlay.bw + borderOverlay.inset
+            y: borderOverlay.fy - borderOverlay.bw + borderOverlay.inset
+            width: borderOverlay.fw + 2 * borderOverlay.bw - 2 * borderOverlay.inset
+            height: borderOverlay.fh + 2 * borderOverlay.bw - 2 * borderOverlay.inset
+
+            onXChanged: requestPaint()
+            onYChanged: requestPaint()
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
+
+            onPaint: {
+                var ctx = getContext("2d")
+                ctx.clearRect(0, 0, width, height)
+                ctx.strokeStyle = borderOverlay.bc
+                ctx.lineWidth = borderOverlay.bw
+                var hw = borderOverlay.bw / 2
+                ctx.beginPath()
+                ctx.roundedRect(hw, hw, width - borderOverlay.bw, height - borderOverlay.bw, borderOverlay.br, borderOverlay.br)
+                ctx.stroke()
+            }
         }
 
         // Subscribe to sway window/workspace events
@@ -89,19 +77,16 @@ Variants {
                         var change = e.change
                         if (change === "close") {
                             borderOverlay.borderVisible = false
-                        } else if (change === "focus" && e.container) {
-                            borderOverlay.applyContainer(e.container)
-                        } else if (change === "move" && e.container) {
-                            if (e.container.focused) borderOverlay.applyContainer(e.container)
-                        } else if (change === "floating" && e.container) {
-                            if (e.container.focused) borderOverlay.applyContainer(e.container)
                         } else if (change === "fullscreen_mode" && e.container) {
                             if (e.container.fullscreen_mode > 0)
                                 borderOverlay.borderVisible = false
                             else if (e.container.focused)
                                 borderOverlay.applyContainer(e.container)
-                        } else if (change === "focus" && e.current && !e.container) {
-                            // Workspace focus — re-scan for focused window
+                        } else if (e.container && e.container.focused) {
+                            // Instant update from event data (focus, move, floating)
+                            borderOverlay.applyContainer(e.container)
+                        } else {
+                            // Workspace switch or event without container — rescan
                             focusScan.running = true
                         }
                     } catch(err) {}
@@ -109,6 +94,7 @@ Variants {
             }
             onExited: running = true
         }
+
 
         // Scan tree for currently focused window (startup + workspace switch)
         Process {

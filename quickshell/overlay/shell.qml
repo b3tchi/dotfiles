@@ -240,7 +240,7 @@ ShellRoot {
 
     Process {
         id: keyMonitor
-        running: true
+        running: !root.isSway  // X11 only — python-xlib XI2 events
         command: ["sh", "-c", "exec python3 -u $HOME/.dotfiles/quickshell/qs-keymon.py"]
         stdout: SplitParser {
             onRead: data => {
