@@ -339,6 +339,11 @@ bindsym $mod+Tab nop
 # if kmonad (or the user) sends Alt+Tab instead of Super+Tab, i3 must grab it
 # too or the raw Tab keystroke leaks through to the focused application.
 bindsym Mod1+Tab nop
+# Also grab $mod+W / Alt+W — parallel trigger for the quickshell switcher
+# (same rationale as Mod1+Tab above: grab so W doesn't leak through to
+# the focused window as a typed character).
+bindsym $mod+w nop
+bindsym Mod1+w nop
 # Focus border now handled by quickshell (config/FocusBorder.qml)
 # Previously: xborders-patched Python script (kept in repo as fallback)
 exec_always pkill -f xborders-patched; pkill -x xborders
