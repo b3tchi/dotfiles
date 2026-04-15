@@ -251,8 +251,8 @@ ShellRoot {
 
                 // 64=Alt_L, 108=Alt_R, 133=Super_L, 134=Super_R
                 var isMod = (code === 64 || code === 108 || code === 133 || code === 134)
-                // 23=Tab
-                var isTab = (code === 23)
+                // 23=Tab, 25=W — both trigger the switcher
+                var isSwitcherKey = (code === 23 || code === 25)
 
                 if (isMod && action === "press") {
                     root.modHeld = true
@@ -260,7 +260,7 @@ ShellRoot {
                     root.modHeld = false
                     if (root.mode === "switcher" && overlay.visible)
                         root.switcherFocus()
-                } else if (isTab && action === "press" && root.modHeld) {
+                } else if (isSwitcherKey && action === "press" && root.modHeld) {
                     if (root.mode === "switcher") {
                         root.switcherNext()
                     } else {
