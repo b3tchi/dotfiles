@@ -97,13 +97,13 @@ def handle_event(data):
     except Exception:
         return
     change = e.get('change')
-    # Workspace events — hide border on empty workspace
+    # Workspace events
     if change == 'focus' and 'current' in e and 'container' not in e:
-        # Workspace focus event: check if new workspace has any windows
+        border.hide()
         cur = e.get('current', {})
         nodes = cur.get('nodes', []) + cur.get('floating_nodes', [])
-        if not nodes:
-            border.hide()
+        if nodes:
+            refresh_focused()
         return
     c = e.get('container')
     if not c:
@@ -111,20 +111,18 @@ def handle_event(data):
     if change == 'close':
         border.hide()
     elif change == 'focus':
+        border.hide()
         if c.get('fullscreen_mode', 0) > 0:
-            border.hide()
+            pass
         else:
-            border.hide()
-            apply_geom(c)
+            refresh_focused()
     elif change in ('move', 'floating'):
-        # Always refresh from tree — event data may have stale geometry
-        # and the focused window may not be the one emitting the event
         refresh_focused()
     elif change == 'fullscreen_mode':
         if c.get('fullscreen_mode', 0) > 0:
             border.hide()
         else:
-            apply_geom(c)
+            refresh_focused()
 
 
 def subscribe():
@@ -146,25 +144,39 @@ def subscribe():
         time.sleep(1)
 
 
+_refresh_lock = threading.Lock()
+
+
 def refresh_focused():
-    """Re-read focused window geometry from i3 tree."""
-    try:
-        tree = json.loads(
-            subprocess.check_output(['i3-msg', '-t', 'get_tree']).decode()
-        )
+    """Re-read focused window geometry from i3 tree (runs in background thread)."""
+    def _do_refresh():
+        if not _refresh_lock.acquire(blocking=False):
+            return  # skip if already refreshing
+        try:
+            tree = json.loads(
+                subprocess.check_output(['i3-msg', '-t', 'get_tree']).decode()
+            )
 
-        def walk(node):
-            if node.get('focused') and node.get('window'):
-                apply_geom(node)
-                return True
-            for child in node.get('nodes', []) + node.get('floating_nodes', []):
-                if walk(child):
-                    return True
-            return False
+            def walk(node):
+                if node.get('focused') and node.get('window'):
+                    return node
+                for child in node.get('nodes', []) + node.get('floating_nodes', []):
+                    result = walk(child)
+                    if result:
+                        return result
+                return None
 
-        walk(tree)
-    except Exception:
-        pass
+            found = walk(tree)
+            if found:
+                GLib.idle_add(apply_geom, found)
+            else:
+                GLib.idle_add(border.hide)
+        except Exception:
+            pass
+        finally:
+            _refresh_lock.release()
+
+    threading.Thread(target=_do_refresh, daemon=True).start()
 
 
 _orig_handle_event = handle_event
