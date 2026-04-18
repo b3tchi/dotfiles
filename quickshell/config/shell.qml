@@ -17,8 +17,9 @@ ShellRoot {
         var vals = notifSrv.trackedNotifications.values
         if (vals.length > 0) {
             var n = vals[vals.length - 1]
-            var text = n.summary ?? ""
-            if ((n.body ?? "") !== "") text += " — " + n.body
+            var text = (n.summary ?? "").replace(/\n/g, " ")
+            var body = (n.body ?? "").replace(/\n/g, " ").replace(/<[^>]*>/g, "")
+            if (body !== "") text += " — " + body
             lastNotifText = text
             globalNotifSeq++
             n.dismiss()
@@ -35,8 +36,9 @@ ShellRoot {
 
         onNotification: notification => {
             notification.tracked = true
-            var text = notification.summary ?? ""
-            if ((notification.body ?? "") !== "") text += " — " + notification.body
+            var text = (notification.summary ?? "").replace(/\n/g, " ")
+            var body = (notification.body ?? "").replace(/\n/g, " ").replace(/<[^>]*>/g, "")
+            if (body !== "") text += " — " + body
             lastNotifText = text
             globalNotifSeq++
         }
