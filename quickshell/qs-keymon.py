@@ -18,9 +18,9 @@ from Xlib import display
 from Xlib.ext import xinput
 
 # X11 keycodes (not scancodes): 64=Alt_L, 108=Alt_R, 133=Super_L,
-# 134=Super_R, 23=Tab, 25=W, 50=Shift_L, 62=Shift_R.
+# 134=Super_R, 23=Tab, 25=W, 50=Shift_L, 62=Shift_R, 65=Space.
 # Must stay in sync with the keyMonitor handler in quickshell/overlay/shell.qml.
-INTERESTING = {64, 108, 133, 134, 23, 25, 50, 62}
+INTERESTING = {64, 108, 133, 134, 23, 25, 50, 62, 65}
 
 # python-xlib 0.33 does not register a parser for XI2 raw events, so they
 # arrive as bare GenericEvent with only `evtype` filled in — the rest of the

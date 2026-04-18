@@ -135,6 +135,28 @@ ShellRoot {
 
     property int switcherIndex: 0
     property var switcherWindows: []
+    property string switcherSearch: ""
+
+    property var switcherFiltered: {
+        if (switcherSearch === "") return switcherWindows
+        var result = []
+        for (var i = 0; i < switcherWindows.length; i++) {
+            var w = switcherWindows[i]
+            var nameMatch = fuzzyMatch(w.name, switcherSearch)
+            var wsMatch = fuzzyMatch(w.ws, switcherSearch)
+            var best = nameMatch.score >= wsMatch.score ? nameMatch : wsMatch
+            if (nameMatch.matched || wsMatch.matched)
+                result.push({
+                    id: w.id, name: w.name, focused: w.focused,
+                    urgent: w.urgent, cls: w.cls, ws: w.ws,
+                    score: best.score,
+                    nameIndices: nameMatch.matched ? nameMatch.indices : [],
+                    wsIndices: wsMatch.matched ? wsMatch.indices : []
+                })
+        }
+        result.sort(function(a, b) { return b.score - a.score })
+        return result
+    }
 
     // MRU focus history — list of i3 container ids, most-recent first.
     // Maintained by windowSubscriber from live i3 window::focus events.
@@ -259,6 +281,9 @@ ShellRoot {
                 // 50=Shift_L, 62=Shift_R
                 var isShift = (code === 50 || code === 62)
 
+                // 65=Space
+                var isSpace = (code === 65)
+
                 if (isShift) {
                     root.shiftHeld = (action === "press")
                 } else if (isMod && action === "press") {
@@ -267,8 +292,10 @@ ShellRoot {
                     root.modHeld = false
                     if (root.mode === "switcher" && overlay.visible)
                         root.switcherFocus()
+                } else if (isSpace && action === "press" && root.modHeld && root.mode === "switcher") {
+                    root.switcherSearchMode()
                 } else if (isSwitcherKey && action === "press" && root.modHeld) {
-                    if (root.mode === "switcher") {
+                    if (root.mode === "switcher" || root.mode === "switcher-search") {
                         if (root.shiftHeld) root.switcherPrev()
                         else root.switcherNext()
                     } else {
@@ -282,27 +309,41 @@ ShellRoot {
 
     function switcherShow() {
         _scanBuffer = ""
+        switcherSearch = ""
         mode = "switcher"
         overlay.width = 640
         windowScanner.running = true
         // overlay.visible set in windowScanner.onExited after windows load
     }
 
+    function switcherSearchMode() {
+        mode = "switcher-search"
+        switcherSearch = ""
+        switcherIndex = 0
+        switcherSearchInput.text = ""
+        switcherSearchInput.forceActiveFocus()
+        // Clear the space that triggered search mode (arrives after focus)
+        Qt.callLater(function() { switcherSearchInput.text = ""; switcherSearch = "" })
+    }
+
     function switcherNext() {
         if (!overlay.visible) overlay.visible = true
-        switcherIndex = switcherIndex < switcherWindows.length - 1
+        var list = switcherFiltered
+        switcherIndex = switcherIndex < list.length - 1
             ? switcherIndex + 1 : 0
     }
 
     function switcherPrev() {
         if (!overlay.visible) overlay.visible = true
+        var list = switcherFiltered
         switcherIndex = switcherIndex > 0
-            ? switcherIndex - 1 : switcherWindows.length - 1
+            ? switcherIndex - 1 : list.length - 1
     }
 
     function switcherFocus() {
-        if (switcherWindows.length > 0 && switcherIndex < switcherWindows.length) {
-            var win = switcherWindows[switcherIndex]
+        var list = switcherFiltered
+        if (list.length > 0 && switcherIndex < list.length) {
+            var win = list[switcherIndex]
             focusProc.command = [root.wmMsg, "[con_id=" + win.id + "]", "focus"]
             focusProc.running = true
         }
@@ -493,7 +534,9 @@ ShellRoot {
             if (root.mode === "launcher")
                 return 32 + Math.min(root.launcherFiltered.length, 8) * 32 + 8
             if (root.mode === "switcher")
-                return Math.max(root.switcherWindows.length, 1) * 32 + 8
+                return Math.max(root.switcherFiltered.length, 1) * 32 + 8
+            if (root.mode === "switcher-search")
+                return 32 + Math.min(root.switcherFiltered.length, 8) * 32 + 8
             if (root.mode === "projects")
                 return 32 + Math.min(root.projectsFiltered.length, 8) * 32 + 8
             return 100
@@ -610,83 +653,130 @@ ShellRoot {
             }
         }
 
-        // ── Switcher UI ──
-        Item {
+        // ── Switcher UI (also used for switcher-search) ──
+        Column {
             anchors.fill: parent
-            visible: root.mode === "switcher"
-            focus: root.mode === "switcher"
+            visible: root.mode === "switcher" || root.mode === "switcher-search"
 
-            // Tab navigation and mod-release are handled by the global xinput
-            // keymon outside Qt focus — do NOT also handle them here or every
-            // Tab press after the overlay gains focus fires twice.
-            Keys.onPressed: event => {
-                if (event.key === Qt.Key_Down) {
-                    root.switcherNext()
-                    event.accepted = true
-                } else if (event.key === Qt.Key_Up) {
-                    root.switcherPrev()
-                    event.accepted = true
-                } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                    root.switcherFocus()
-                    event.accepted = true
-                } else if (event.key === Qt.Key_Escape) {
-                    root.hide()
-                    event.accepted = true
+            // Search bar (only in search mode)
+            Rectangle {
+                visible: root.mode === "switcher-search"
+                width: parent.width
+                height: 32
+                color: "#152024"
+
+                TextInput {
+                    id: switcherSearchInput
+                    anchors.fill: parent
+                    anchors.leftMargin: 12
+                    anchors.rightMargin: 12
+                    verticalAlignment: TextInput.AlignVCenter
+                    color: "#FDF6E3"
+                    font.family: root.fontFamily
+                    font.pixelSize: root.fontSize
+                    clip: true
+
+                    onTextChanged: {
+                        root.switcherSearch = text
+                        root.switcherIndex = 0
+                    }
+
+                    Keys.onEscapePressed: root.hide()
+                    Keys.onReturnPressed: root.switcherFocus()
+                    Keys.onEnterPressed: root.switcherFocus()
+                    Keys.onDownPressed: root.switcherNext()
+                    Keys.onUpPressed: root.switcherPrev()
+                }
+
+                Text {
+                    anchors.fill: switcherSearchInput
+                    verticalAlignment: Text.AlignVCenter
+                    text: "search windows"
+                    color: "#707880"
+                    font.family: root.fontFamily
+                    font.pixelSize: root.fontSize
+                    renderType: Text.NativeRendering
+                    visible: !switcherSearchInput.text
                 }
             }
 
-            ListView {
-                anchors.fill: parent
-                anchors.topMargin: 4
-                anchors.bottomMargin: 4
-                model: root.switcherWindows.length
-                clip: true
-                currentIndex: root.switcherIndex
+            // Window list
+            Item {
+                width: parent.width
+                height: parent.height - (root.mode === "switcher-search" ? 32 : 0)
+                focus: root.mode === "switcher"
 
-                delegate: Rectangle {
-                    required property int index
-                    property var item: root.switcherWindows[index]
-                    property bool isSelected: index === root.switcherIndex
-
-                    width: parent ? parent.width : 0
-                    height: 32
-                    color: isSelected ? "#152024" : "transparent"
-
-                    Rectangle {
-                        visible: isSelected
-                        width: 4; height: parent.height
-                        color: item.urgent ? "#CB4B16" : "#16a085"
+                Keys.onPressed: event => {
+                    if (event.key === Qt.Key_Down) {
+                        root.switcherNext()
+                        event.accepted = true
+                    } else if (event.key === Qt.Key_Up) {
+                        root.switcherPrev()
+                        event.accepted = true
+                    } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                        root.switcherFocus()
+                        event.accepted = true
+                    } else if (event.key === Qt.Key_Escape) {
+                        root.hide()
+                        event.accepted = true
                     }
+                }
 
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.left: parent.left
-                        anchors.leftMargin: 12
-                        anchors.right: clsText.left
-                        anchors.rightMargin: 8
-                        text: item.name
-                        color: item.focused ? "#707880" : "#FDF6E3"
-                        font.family: root.fontFamily
-                        font.pixelSize: root.fontSize
-                        renderType: Text.NativeRendering
-                        elide: Text.ElideRight
-                    }
+                ListView {
+                    anchors.fill: parent
+                    anchors.topMargin: 4
+                    anchors.bottomMargin: 4
+                    model: root.switcherFiltered.length
+                    clip: true
+                    currentIndex: root.switcherIndex
 
-                    Text {
-                        id: clsText
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.right: parent.right
-                        anchors.rightMargin: 8
-                        text: item.ws
-                        color: "#707880"
-                        font.family: root.fontFamily
-                        font.pixelSize: root.fontSize
-                        renderType: Text.NativeRendering
-                    }
+                    delegate: Rectangle {
+                        required property int index
+                        property var item: root.switcherFiltered[index]
+                        property bool isSelected: index === root.switcherIndex
 
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: { root.switcherIndex = index; root.switcherFocus() }
+                        width: parent ? parent.width : 0
+                        height: 32
+                        color: isSelected ? "#152024" : "transparent"
+
+                        Rectangle {
+                            visible: isSelected
+                            width: 4; height: parent.height
+                            color: item.urgent ? "#CB4B16" : "#16a085"
+                        }
+
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.left: parent.left
+                            anchors.leftMargin: 12
+                            anchors.right: clsText.left
+                            anchors.rightMargin: 8
+                            text: (root.mode === "switcher-search" && item.nameIndices && item.nameIndices.length > 0) ? root.highlightMatch(item.name, item.nameIndices) : item.name
+                            textFormat: root.mode === "switcher-search" ? Text.RichText : Text.PlainText
+                            color: item.focused ? "#707880" : "#FDF6E3"
+                            font.family: root.fontFamily
+                            font.pixelSize: root.fontSize
+                            renderType: Text.NativeRendering
+                            elide: Text.ElideRight
+                        }
+
+                        Text {
+                            id: clsText
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.right: parent.right
+                            anchors.rightMargin: 8
+                            text: (root.mode === "switcher-search" && item.wsIndices && item.wsIndices.length > 0) ? root.highlightMatch(item.ws, item.wsIndices) : item.ws
+                            textFormat: root.mode === "switcher-search" ? Text.RichText : Text.PlainText
+                            color: "#707880"
+                            font.family: root.fontFamily
+                            font.pixelSize: root.fontSize
+                            renderType: Text.NativeRendering
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: { root.switcherIndex = index; root.switcherFocus() }
+                        }
                     }
                 }
             }
