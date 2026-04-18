@@ -185,7 +185,8 @@ ShellRoot {
             try {
                 var tree = JSON.parse(root._scanBuffer)
                 var wins = []
-                function walk(node) {
+                function walk(node, wsName) {
+                    if (node.type === "workspace") wsName = node.name || wsName
                     if (node.window && node.name && node.type === "con" &&
                         node.name !== "quickshell" && node.name !== "qs-switcher" && node.name !== "qs-launcher" && node.name !== "qs-projects") {
                         wins.push({
@@ -193,11 +194,12 @@ ShellRoot {
                             name: node.name,
                             focused: node.focused,
                             urgent: node.urgent || false,
-                            cls: node.app_id || (node.window_properties || {})["class"] || ""
+                            cls: node.app_id || (node.window_properties || {})["class"] || "",
+                            ws: wsName || ""
                         })
                     }
                     var children = (node.nodes || []).concat(node.floating_nodes || [])
-                    for (var i = 0; i < children.length; i++) walk(children[i])
+                    for (var i = 0; i < children.length; i++) walk(children[i], wsName)
                 }
                 walk(tree)
                 // Sort by MRU: currently focused always first, then focusHistory
@@ -237,6 +239,7 @@ ShellRoot {
     // frame in the i3 tree).
 
     property bool modHeld: false
+    property bool shiftHeld: false
 
     Process {
         id: keyMonitor
@@ -253,8 +256,12 @@ ShellRoot {
                 var isMod = (code === 64 || code === 108 || code === 133 || code === 134)
                 // 23=Tab, 25=W — both trigger the switcher
                 var isSwitcherKey = (code === 23 || code === 25)
+                // 50=Shift_L, 62=Shift_R
+                var isShift = (code === 50 || code === 62)
 
-                if (isMod && action === "press") {
+                if (isShift) {
+                    root.shiftHeld = (action === "press")
+                } else if (isMod && action === "press") {
                     root.modHeld = true
                 } else if (isMod && action === "release") {
                     root.modHeld = false
@@ -262,7 +269,8 @@ ShellRoot {
                         root.switcherFocus()
                 } else if (isSwitcherKey && action === "press" && root.modHeld) {
                     if (root.mode === "switcher") {
-                        root.switcherNext()
+                        if (root.shiftHeld) root.switcherPrev()
+                        else root.switcherNext()
                     } else {
                         root.switcherShow()
                     }
@@ -275,7 +283,7 @@ ShellRoot {
     function switcherShow() {
         _scanBuffer = ""
         mode = "switcher"
-        overlay.width = 400
+        overlay.width = 640
         windowScanner.running = true
         // overlay.visible set in windowScanner.onExited after windows load
     }
@@ -650,34 +658,30 @@ ShellRoot {
                         color: item.urgent ? "#CB4B16" : "#16a085"
                     }
 
-                    Row {
+                    Text {
                         anchors.verticalCenter: parent.verticalCenter
                         anchors.left: parent.left
                         anchors.leftMargin: 12
+                        anchors.right: clsText.left
+                        anchors.rightMargin: 8
+                        text: item.name
+                        color: item.focused ? "#707880" : "#FDF6E3"
+                        font.family: root.fontFamily
+                        font.pixelSize: root.fontSize
+                        renderType: Text.NativeRendering
+                        elide: Text.ElideRight
+                    }
+
+                    Text {
+                        id: clsText
+                        anchors.verticalCenter: parent.verticalCenter
                         anchors.right: parent.right
                         anchors.rightMargin: 8
-                        spacing: 8
-
-                        Text {
-                            text: item.cls
-                            color: "#16a085"
-                            font.family: root.fontFamily
-                            font.pixelSize: root.fontSize
-                            font.bold: true
-                            renderType: Text.NativeRendering
-                            width: 80
-                            elide: Text.ElideRight
-                        }
-
-                        Text {
-                            text: item.name
-                            color: item.focused ? "#707880" : "#FDF6E3"
-                            font.family: root.fontFamily
-                            font.pixelSize: root.fontSize
-                            renderType: Text.NativeRendering
-                            width: parent.width - 100
-                            elide: Text.ElideRight
-                        }
+                        text: item.ws
+                        color: "#707880"
+                        font.family: root.fontFamily
+                        font.pixelSize: root.fontSize
+                        renderType: Text.NativeRendering
                     }
 
                     MouseArea {
