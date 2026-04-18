@@ -114,6 +114,7 @@ def handle_event(data):
         if c.get('fullscreen_mode', 0) > 0:
             border.hide()
         else:
+            border.hide()
             apply_geom(c)
     elif change in ('move', 'floating'):
         # Always refresh from tree — event data may have stale geometry
