@@ -13,7 +13,7 @@ def main [] {
     }
 
     # Try WM workspace detection
-    if (which wm-ipc.nu | is-not-empty) {
+    if ("~/.local/bin/wm-ipc.nu" | path expand | path exists) {
         let ws_name = (do { nu -c 'use ~/.local/bin/wm-ipc.nu *; ipc "-t get_workspaces" | from json | where focused == true | first | get name' } | complete
             | if $in.exit_code == 0 { $in.stdout | str trim } else { "" })
 
