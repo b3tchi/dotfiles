@@ -126,16 +126,12 @@ def handle_event(data):
             apply_geom(c)
 
 
-in_resize_mode = False
-resize_poll_id = None
-
-
 def subscribe():
-    """Subscribe to i3 window/workspace/mode events; reconnects on failure."""
+    """Subscribe to i3 window/workspace/binding events; reconnects on failure."""
     while True:
         try:
             proc = subprocess.Popen(
-                ['i3-msg', '-t', 'subscribe', '-m', '["window","workspace","mode","binding"]'],
+                ['i3-msg', '-t', 'subscribe', '-m', '["window","workspace","binding"]'],
                 stdout=subprocess.PIPE, text=True
             )
             for line in proc.stdout:
@@ -170,47 +166,15 @@ def refresh_focused():
         pass
 
 
-def resize_poll():
-    """Poll geometry while in resize mode."""
-    global in_resize_mode, resize_poll_id
-    if not in_resize_mode:
-        resize_poll_id = None
-        return False  # stop timer
-    refresh_focused()
-    return True  # keep polling
-
-
-def handle_mode(data):
-    """Handle mode change events — start/stop resize polling."""
-    global in_resize_mode, resize_poll_id
-    try:
-        e = json.loads(data)
-    except Exception:
-        return
-    change = e.get('change', '')
-    if change == 'resize':
-        in_resize_mode = True
-        if resize_poll_id is None:
-            resize_poll_id = GLib.timeout_add(100, resize_poll)
-    elif in_resize_mode:
-        in_resize_mode = False
-        refresh_focused()
-
-
-# Wrap original handle_event to also check for mode events
 _orig_handle_event = handle_event
 
 
 def handle_event(data):
     try:
         e = json.loads(data)
-        # Binding events — refresh after any keybinding (catches move/resize/layout changes)
+        # Binding events — refresh after any keybinding (catches move/resize/layout)
         if 'binding' in e:
             refresh_focused()
-            return
-        # Mode events have 'change' but no 'container' and no 'current'
-        if 'change' in e and 'container' not in e and 'current' not in e:
-            handle_mode(data)
             return
     except Exception:
         pass
