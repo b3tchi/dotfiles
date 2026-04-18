@@ -39,7 +39,8 @@ def main() -> int:
     root = d.screen().root
     root.xinput_select_events([
         (xinput.AllMasterDevices,
-         xinput.RawKeyPressMask | xinput.RawKeyReleaseMask),
+         xinput.RawKeyPressMask | xinput.RawKeyReleaseMask |
+         xinput.RawButtonPressMask | xinput.RawButtonReleaseMask),
     ])
     d.sync()
 
@@ -51,6 +52,10 @@ def main() -> int:
             action = "press"
         elif evtype == xinput.RawKeyRelease:
             action = "release"
+        elif evtype == xinput.RawButtonPress:
+            action = "btnpress"
+        elif evtype == xinput.RawButtonRelease:
+            action = "btnrelease"
         else:
             continue
 
@@ -58,6 +63,16 @@ def main() -> int:
         if not isinstance(data, (bytes, bytearray)) or len(data) < _RAW_HEADER.size:
             continue
         _, _, code = _RAW_HEADER.unpack_from(data, 0)
+
+        # Mouse buttons: 1=left, 2=middle, 3=right
+        if action.startswith("btn"):
+            if code in (1, 2, 3):
+                msg = f"{action} {code}"
+                if msg != last:
+                    print(msg, flush=True)
+                    last = msg
+            continue
+
         if code not in INTERESTING:
             continue
 

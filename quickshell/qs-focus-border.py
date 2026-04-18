@@ -110,11 +110,15 @@ def handle_event(data):
         return
     if change == 'close':
         border.hide()
-    elif change in ('focus', 'move', 'floating'):
+    elif change == 'focus':
         if c.get('fullscreen_mode', 0) > 0:
             border.hide()
         else:
             apply_geom(c)
+    elif change in ('move', 'floating'):
+        # Always refresh from tree — event data may have stale geometry
+        # and the focused window may not be the one emitting the event
+        refresh_focused()
     elif change == 'fullscreen_mode':
         if c.get('fullscreen_mode', 0) > 0:
             border.hide()
@@ -122,12 +126,16 @@ def handle_event(data):
             apply_geom(c)
 
 
+in_resize_mode = False
+resize_poll_id = None
+
+
 def subscribe():
-    """Subscribe to i3 window events; reconnects on failure."""
+    """Subscribe to i3 window/workspace/mode events; reconnects on failure."""
     while True:
         try:
             proc = subprocess.Popen(
-                ['i3-msg', '-t', 'subscribe', '-m', '["window","workspace"]'],
+                ['i3-msg', '-t', 'subscribe', '-m', '["window","workspace","mode","binding"]'],
                 stdout=subprocess.PIPE, text=True
             )
             for line in proc.stdout:
@@ -141,8 +149,8 @@ def subscribe():
         time.sleep(1)
 
 
-def init_focused():
-    """Find currently focused window on startup."""
+def refresh_focused():
+    """Re-read focused window geometry from i3 tree."""
     try:
         tree = json.loads(
             subprocess.check_output(['i3-msg', '-t', 'get_tree']).decode()
@@ -162,10 +170,111 @@ def init_focused():
         pass
 
 
+def resize_poll():
+    """Poll geometry while in resize mode."""
+    global in_resize_mode, resize_poll_id
+    if not in_resize_mode:
+        resize_poll_id = None
+        return False  # stop timer
+    refresh_focused()
+    return True  # keep polling
+
+
+def handle_mode(data):
+    """Handle mode change events — start/stop resize polling."""
+    global in_resize_mode, resize_poll_id
+    try:
+        e = json.loads(data)
+    except Exception:
+        return
+    change = e.get('change', '')
+    if change == 'resize':
+        in_resize_mode = True
+        if resize_poll_id is None:
+            resize_poll_id = GLib.timeout_add(100, resize_poll)
+    elif in_resize_mode:
+        in_resize_mode = False
+        refresh_focused()
+
+
+# Wrap original handle_event to also check for mode events
+_orig_handle_event = handle_event
+
+
+def handle_event(data):
+    try:
+        e = json.loads(data)
+        # Binding events — refresh after any keybinding (catches move/resize/layout changes)
+        if 'binding' in e:
+            refresh_focused()
+            return
+        # Mode events have 'change' but no 'container' and no 'current'
+        if 'change' in e and 'container' not in e and 'current' not in e:
+            handle_mode(data)
+            return
+    except Exception:
+        pass
+    _orig_handle_event(data)
+
+
+mouse_held = False
+mouse_poll_id = None
+
+
+def mouse_poll():
+    """Poll geometry while mouse button is held (drag resize/move)."""
+    global mouse_held, mouse_poll_id
+    if not mouse_held:
+        mouse_poll_id = None
+        refresh_focused()  # final refresh on release
+        return False
+    refresh_focused()
+    return True
+
+
+def mouse_monitor():
+    """Track mouse button press/release via XI2 raw events."""
+    global mouse_held, mouse_poll_id
+    import struct
+    from Xlib import display as xdisplay
+    from Xlib.ext import xinput
+
+    d = xdisplay.Display()
+    if not d.has_extension("XInputExtension"):
+        return
+
+    root = d.screen().root
+    root.xinput_select_events([
+        (xinput.AllMasterDevices,
+         xinput.RawButtonPressMask | xinput.RawButtonReleaseMask),
+    ])
+    d.sync()
+
+    hdr = struct.Struct("<HII")
+    while True:
+        event = d.next_event()
+        evtype = getattr(event, "evtype", None)
+        data = getattr(event, "data", None)
+        if not isinstance(data, (bytes, bytearray)) or len(data) < hdr.size:
+            continue
+        _, _, button = hdr.unpack_from(data, 0)
+        # Only track left button (1) for drag operations
+        if button != 1:
+            continue
+        if evtype == xinput.RawButtonPress:
+            mouse_held = True
+            if mouse_poll_id is None:
+                mouse_poll_id = GLib.timeout_add(100, mouse_poll)
+        elif evtype == xinput.RawButtonRelease:
+            mouse_held = False
+
+
 signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))
 signal.signal(signal.SIGINT, lambda *a: sys.exit(0))
 
-GLib.idle_add(init_focused)
+GLib.idle_add(refresh_focused)
 t = threading.Thread(target=subscribe, daemon=True)
 t.start()
+t_mouse = threading.Thread(target=mouse_monitor, daemon=True)
+t_mouse.start()
 Gtk.main()
