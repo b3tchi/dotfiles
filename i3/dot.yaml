@@ -9,6 +9,7 @@ linux:
     picom.conf: ~/.config/picom.conf
     i3status.conf: ~/.config/i3status/config
     i3blocks.conf: ~/.config/i3blocks/config
+    scripts/qs-title-trim.sh: ~/.i3/scripts/qs-title-trim.sh
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}

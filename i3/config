@@ -197,7 +197,7 @@ for_window [all] title_window_icon padding 4px
 
 for_window [all] title_format "%title"
 # PrusaSlicer: trim version from title ("*file - PrusaSlicer-2.8.1 based on Slic3r" → "*file - PrusaSlicer")
-exec_always --no-startup-id pkill -f qs-title-trim; ~/.dotfiles/i3/scripts/qs-title-trim.sh &
+exec_always --no-startup-id pkill -f qs-title-trim; ~/.i3/scripts/qs-title-trim.sh &
 for_window [all] border normal 4
 
 for_window [title="qs-launcher"] floating enable, border none, move position center
