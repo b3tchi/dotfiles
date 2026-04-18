@@ -13,6 +13,8 @@ PanelWindow {
     property int notifSeq: 0
     property bool hasCritical: false
     signal dismissNotif()
+    signal dismissNotifSilent()
+    signal tickerFinished()
 
     // WM detection — sway uses same IPC as i3
     readonly property bool isSway: Quickshell.env("SWAYSOCK") !== null
@@ -24,8 +26,15 @@ PanelWindow {
     onNotifSeqChanged: {
         if (notifText !== "") {
             tickerAnim.stop()
-            tickerText.x = tickerArea.width > 0 ? tickerArea.width : 500
             tickerActive = true
+            tickerStartDelay.restart()
+        }
+    }
+    Timer {
+        id: tickerStartDelay
+        interval: 0
+        onTriggered: {
+            tickerText.x = tickerArea.width
             tickerAnim.restart()
         }
     }
@@ -355,13 +364,14 @@ PanelWindow {
         }
 
         // Notification ticker — between workspaces and bell/date
-        Item {
+        Rectangle {
             id: tickerArea
             visible: root.currentMode === "default" && root.tickerActive
             anchors { left: leftSide.right; right: rightSide.left; verticalCenter: parent.verticalCenter; leftMargin: 8; rightMargin: 4 }
             clip: true
             height: parent.height
             z: -1
+            color: "#152024"
 
             Text {
                 id: tickerText
@@ -373,14 +383,23 @@ PanelWindow {
                 y: (parent.height - height) / 2
             }
 
+            MouseArea {
+                anchors.fill: parent
+                onClicked: {
+                    tickerAnim.stop()
+                    root.tickerActive = false
+                    root.dismissNotifSilent()
+                }
+            }
+
             NumberAnimation {
                 id: tickerAnim
                 target: tickerText
                 property: "x"
-                from: tickerArea.width > 0 ? tickerArea.width : 500
+                from: tickerArea.width
                 to: -tickerText.implicitWidth
-                duration: Math.max(((tickerArea.width > 0 ? tickerArea.width : 500) + tickerText.implicitWidth) * 12, 3000)
-                onFinished: root.tickerActive = false
+                duration: Math.max((tickerArea.width + tickerText.implicitWidth) * 12, 3000)
+                onFinished: { root.tickerActive = false; root.tickerFinished() }
             }
         }
 
@@ -482,7 +501,14 @@ PanelWindow {
                 Text { id: bellCount; visible: root.notifCount > 0; anchors.left: bellIcon.right; text: root.notifCount; color: root.hasCritical ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; font.bold: true; renderType: root.nativeRender }
                 MouseArea {
                     anchors.fill: parent
-                    onClicked: root.dismissNotif()
+                    onClicked: {
+                        if (root.tickerActive && root.notifCount === 0) {
+                            tickerAnim.stop()
+                            root.tickerActive = false
+                        } else {
+                            root.dismissNotif()
+                        }
+                    }
                 }
             }
 
@@ -510,7 +536,7 @@ PanelWindow {
                         }
                     }
                 }
-                MouseArea { anchors.fill: parent; onClicked: { parent.showSeconds = !parent.showSeconds; parent.refresh(); clockTimer.restart() } }
+                MouseArea { anchors.fill: parent; onClicked: { parent.showSeconds = !parent.showSeconds; parent.refresh(); clockTimer.interval = 1000; clockTimer.restart() } }
             }
             Text { text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text {
