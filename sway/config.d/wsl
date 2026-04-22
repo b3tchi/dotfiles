@@ -1,9 +1,9 @@
 # Clipboard sync: Wayland <-> Windows, fully automatic.
-# Push: wl-paste --watch fires clipboard-to-win on every Wayland change.
-# Pull: win-clipboard-sync runs a PowerShell poller and mirrors Windows changes back.
-# Echo loops are prevented by 2s timestamp sentinels in /tmp/clipboard-last-{push,pull}.
-exec wl-paste --watch clipboard-to-win
-exec win-clipboard-sync
+# Both sides poll every 500ms and dedupe via md5 hash at /tmp/clipboard-last-hash.
+# Polling (rather than wl-paste --watch) because --watch can silently lose its
+# compositor subscription after long uptime — process alive, events dead.
+exec flock -n /tmp/clipboard-to-win.lock clipboard-to-win
+exec flock -n /tmp/win-clipboard-sync.lock win-clipboard-sync
 
 # Disable Xwayland (WSLg mounts /tmp/.X11-unix read-only, no sticky bit)
 xwayland disable
