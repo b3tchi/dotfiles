@@ -10,9 +10,8 @@ linux:
     scripts/sway-profile.nu: ~/.local/bin/sway-profile
     scripts/clipboard-to-win.nu: ~/.local/bin/clipboard-to-win
     scripts/clipboard-to-win-image.ps1: ~/.local/bin/clipboard-to-win-image.ps1
-    scripts/win-to-clipboard.nu: ~/.local/bin/win-to-clipboard
-    scripts/win-clipboard-monitor.ps1: ~/.local/bin/win-clipboard-monitor.ps1
-    wsl/win-to-clipboard.service: ~/.config/systemd/user/win-to-clipboard.service
+    scripts/win-clipboard-sync.nu: ~/.local/bin/win-clipboard-sync
+    scripts/win-clipboard-watch.ps1: ~/.local/bin/win-clipboard-watch.ps1
     {{/if}}
 
   installs:

@@ -1,9 +1,9 @@
-# Clipboard sync: Wayland <-> Windows (text + images)
-# DISABLED: clipboard integration causing issues with WSL
-# # When wayland clipboard changes, run clipboard-to-win
-# exec wl-paste --watch clipboard-to-win
-# # Run win to clipboard service to sync windows clipboard to wayland
-# exec systemctl --user restart win-to-clipboard
+# Clipboard sync: Wayland <-> Windows, fully automatic.
+# Push: wl-paste --watch fires clipboard-to-win on every Wayland change.
+# Pull: win-clipboard-sync runs a PowerShell poller and mirrors Windows changes back.
+# Echo loops are prevented by 2s timestamp sentinels in /tmp/clipboard-last-{push,pull}.
+exec wl-paste --watch clipboard-to-win
+exec win-clipboard-sync
 
 # Disable Xwayland (WSLg mounts /tmp/.X11-unix read-only, no sticky bit)
 xwayland disable
