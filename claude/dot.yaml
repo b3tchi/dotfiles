@@ -24,6 +24,10 @@ linux:
       {{/if}}
       rotz link claude --force
 
+      # Plugins
+      claude plugin marketplace add JuliusBrussee/caveman
+      claude plugin install caveman@caveman
+
 windows:
   links:
     settings.json: ~/.claude/settings.json

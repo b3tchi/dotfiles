@@ -57,13 +57,20 @@
     "command": "bash ~/.claude/statusline.sh"
   },
   "enabledPlugins": {
-    "infinifu@infinifu-dev": true
+    "infinifu@infinifu-dev": true,
+    "caveman@caveman": true
   },
   "extraKnownMarketplaces": {
     "infinifu-dev": {
       "source": {
         "source": "directory",
         "path": "/home/jan/repos/b3tchi/acag/main/infinifu"
+      }
+    },
+    "caveman": {
+      "source": {
+        "source": "github",
+        "repo": "JuliusBrussee/caveman"
       }
     }
   }
