@@ -6,6 +6,7 @@ linux:
     hooks/tmux-waiting-simple.sh: ~/.claude/hooks/tmux-waiting-simple.sh
     hooks/tmux-responding.sh: ~/.claude/hooks/tmux-responding.sh
     perles/config.yaml: ~/.config/perles/config.yaml
+
     {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
     claude-wrapper: /data/data/com.termux/files/usr/bin/claude
     {{/if}}
@@ -59,6 +60,9 @@ linux:
           ln -sf "$HOME/go/bin/perles" "$HOME/.local/bin/perles"
         fi
       fi
+      # Plugins
+      claude plugin marketplace add JuliusBrussee/caveman
+      claude plugin install caveman@caveman
 
 windows:
   links:
