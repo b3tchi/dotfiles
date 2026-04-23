@@ -256,7 +256,12 @@
       "Read(//usr/lib/modules/**)",
       "Bash(du -sh /usr/lib/modules/*)",
       "Bash(pacman -Ql pacman-contrib)",
-      "Bash(pacman -Qs paccache)"
+      "Bash(pacman -Qs paccache)",
+      "Bash(git push *)",
+      "Read(//home/jan/.ssh/**)",
+      "Bash(timeout 3 ssh -o StrictHostKeyChecking=no -o ConnectTimeout=2 -o BatchMode=yes localhost echo ok)",
+      "Bash(find / -path \"*/acag/infinifu/install.sh\")",
+      "Read(//home/jan/**)"
     ]
   }
 }

@@ -113,6 +113,11 @@ if $nu.os-info.name != "windows" {
 $env.CLAUDE_CODE_NO_FLICKER = '1'
 $env.CLAUDE_CODE_SCROLL_SPEED = '3'
 
+# bd (beads) - shared dolt sql-server across all repos (one server, port 3308)
+# instead of the default per-repo random-port server. State: ~/.beads/shared-server/
+$env.BEADS_DOLT_SERVER_MODE = '1'
+$env.BEADS_DOLT_SHARED_SERVER = '1'
+
 # gopass age auto-unlock from passphrase file
 let gopass_pw_file = if $nu.os-info.kernel_version =~ 'microsoft-standard-WSL' {
 	'/mnt/c/Users/jbecka/.gopass-age-password'

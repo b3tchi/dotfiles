@@ -5,6 +5,7 @@ linux:
     hooks/tmux-waiting.sh: ~/.claude/hooks/tmux-waiting.sh
     hooks/tmux-waiting-simple.sh: ~/.claude/hooks/tmux-waiting-simple.sh
     hooks/tmux-responding.sh: ~/.claude/hooks/tmux-responding.sh
+    perles/config.yaml: ~/.config/perles/config.yaml
     {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
     claude-wrapper: /data/data/com.termux/files/usr/bin/claude
     {{/if}}
@@ -23,6 +24,41 @@ linux:
       curl -fsSL https://claude.ai/install.sh | sh
       {{/if}}
       rotz link claude --force
+
+      # dolt — storage backend for bd (server-mode fallback when bd lacks CGO)
+      if ! command -v dolt >/dev/null 2>&1; then
+        DOLT_VERSION=$(curl -fsSL https://api.github.com/repos/dolthub/dolt/releases/latest 2>/dev/null | grep '"tag_name"' | sed 's/.*"v\(.*\)".*/\1/')
+        if [ -n "$DOLT_VERSION" ]; then
+          DOLT_ARCH="amd64"
+          case "$(uname -m)" in
+            aarch64|arm64) DOLT_ARCH="arm64" ;;
+          esac
+          if curl -fsSL "https://github.com/dolthub/dolt/releases/download/v${DOLT_VERSION}/dolt-linux-${DOLT_ARCH}.tar.gz" -o /tmp/dolt.tar.gz \
+             && tar xzf /tmp/dolt.tar.gz -C /tmp/; then
+            mkdir -p "$HOME/.local/bin"
+            cp "/tmp/dolt-linux-${DOLT_ARCH}/bin/dolt" "$HOME/.local/bin/dolt"
+            rm -rf /tmp/dolt.tar.gz /tmp/dolt-linux-*
+          fi
+        fi
+      fi
+
+      # bd (beads) — task tracker used by infinifu skills
+      if ! command -v bd >/dev/null 2>&1; then
+        curl -fsSL https://raw.githubusercontent.com/gastownhall/beads/main/scripts/install.sh | bash
+        if ! command -v bd >/dev/null 2>&1 && [ -x "$HOME/go/bin/bd" ]; then
+          mkdir -p "$HOME/.local/bin"
+          ln -sf "$HOME/go/bin/bd" "$HOME/.local/bin/bd"
+        fi
+      fi
+
+      # perles — beads TUI
+      if ! command -v perles >/dev/null 2>&1; then
+        curl -sSL https://raw.githubusercontent.com/zjrosen/perles/main/install.sh | bash
+        if ! command -v perles >/dev/null 2>&1 && [ -x "$HOME/go/bin/perles" ]; then
+          mkdir -p "$HOME/.local/bin"
+          ln -sf "$HOME/go/bin/perles" "$HOME/.local/bin/perles"
+        fi
+      fi
 
 windows:
   links:
