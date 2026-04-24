@@ -192,7 +192,10 @@
       "WebFetch(domain:quickshell.outfoxxed.me)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:www.tonybtw.com)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(git stash *)",
+      "Bash(git checkout *)",
+      "Bash(git restore *)"
     ]
   }
 }

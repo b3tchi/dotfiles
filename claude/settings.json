@@ -73,5 +73,7 @@
         "repo": "JuliusBrussee/caveman"
       }
     }
-  }
+  },
+  "remoteControlAtStartup": false,
+  "agentPushNotifEnabled": true
 }
