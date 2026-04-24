@@ -195,7 +195,11 @@
       "WebSearch",
       "Bash(nu -c 'use /home/jan/.local/bin/wm-ipc.nu *; ipc \"-t get_version\"')",
       "Bash(nu -c 'use /home/jan/.local/bin/wm-ipc.nu *; ipc \"-t get_tree\"')",
-      "Bash(nu *)"
+      "Bash(nu *)",
+      "Bash(git stash *)",
+      "Bash(git checkout *)",
+      "Bash(git restore *)",
+      "Bash(git fetch *)"
     ]
   }
 }
