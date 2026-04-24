@@ -27,6 +27,18 @@ def find-sway-socket [] {
 	if ($found | is-empty) { null } else { $found | first }
 }
 
+# Find a valid i3 socket, handling stale I3SOCK after restarts
+def find-i3-socket [] {
+	let sock = ($env | get -o I3SOCK | default "")
+	if ($sock | is-not-empty) and ($sock | path exists) {
+		return $sock
+	}
+	let result = (^i3 --get-socketpath | complete)
+	if $result.exit_code != 0 { return null }
+	let found = ($result.stdout | str trim)
+	if ($found | is-empty) { null } else { $found }
+}
+
 # Detect which WM is running and return the IPC command name
 export def ipc-cmd [] {
 	if (which pgrep | is-empty) {
@@ -35,7 +47,7 @@ export def ipc-cmd [] {
 	if (^pgrep -x sway | complete | get exit_code) == 0 {
 		if (find-sway-socket) != null { "swaymsg" } else { null }
 	} else if (^pgrep -x i3 | complete | get exit_code) == 0 {
-		"i3-msg"
+		if (find-i3-socket) != null { "i3-msg" } else { null }
 	} else {
 		null
 	}
@@ -43,6 +55,7 @@ export def ipc-cmd [] {
 
 # Run a WM IPC command with the given arguments
 # Pass the full command as a single string, e.g.: ipc "workspace dotfiles"
+# Splits on space — do NOT use for exec with quoted args; use ipc-raw instead.
 # Returns null if no WM detected
 export def ipc [command: string] {
 	let cmd = ipc-cmd
@@ -52,6 +65,35 @@ export def ipc [command: string] {
 		let sock = (find-sway-socket)
 		^swaymsg --socket $sock ...$parts
 	} else {
-		^$cmd ...$parts
+		let sock = (find-i3-socket)
+		if $sock == null {
+			^$cmd ...$parts
+		} else {
+			^i3-msg -s $sock ...$parts
+		}
 	}
+}
+
+# Like ipc but passes the command as one argument (no split).
+# Use this for `exec` with quoted args, or any command containing spaces inside quotes.
+export def ipc-raw [command: string] {
+	let cmd = ipc-cmd
+	if $cmd == null { return null }
+	if $cmd == "swaymsg" {
+		let sock = (find-sway-socket)
+		^swaymsg --socket $sock $command
+	} else {
+		let sock = (find-i3-socket)
+		if $sock == null {
+			^$cmd $command
+		} else {
+			^i3-msg -s $sock $command
+		}
+	}
+}
+
+# Return detected WM name: "sway", "i3", or null
+export def wm-name [] {
+	let c = ipc-cmd
+	if $c == "swaymsg" { "sway" } else if $c == "i3-msg" { "i3" } else { null }
 }
