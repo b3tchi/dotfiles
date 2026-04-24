@@ -193,9 +193,9 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:www.tonybtw.com)",
       "WebSearch",
-      "Bash(git stash *)",
-      "Bash(git checkout *)",
-      "Bash(git restore *)"
+      "Bash(nu -c 'use /home/jan/.local/bin/wm-ipc.nu *; ipc \"-t get_version\"')",
+      "Bash(nu -c 'use /home/jan/.local/bin/wm-ipc.nu *; ipc \"-t get_tree\"')",
+      "Bash(nu *)"
     ]
   }
 }
