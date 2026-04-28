@@ -238,7 +238,19 @@
       "Bash(cp -a /home/jan/.claude.json /home/jan/.claude-work/.claude.json)",
       "Bash(rm /home/jan/.claude.json)",
       "Bash(python3 -m json.tool)",
-      "Bash(bash /home/jan/.dotfiles/claude/statusline.sh)"
+      "Bash(bash /home/jan/.dotfiles/claude/statusline.sh)",
+      "Bash(ldd /usr/bin/yay)",
+      "Bash(pacman -Si yay)",
+      "Bash(pacman -Ss '^yay$')",
+      "Bash(checkupdates)",
+      "Bash(pacman *)",
+      "Bash(command -v dolt)",
+      "Bash(dolt version *)",
+      "Bash(ps -p 2115961 -o pid,cmd=)",
+      "Bash(ps -p 2114216 -o pid,cmd=)",
+      "Bash(BEADS_DOLT_SERVER_MODE=1 BEADS_DOLT_SHARED_SERVER=1 bd list --status open)",
+      "Bash(BEADS_DOLT_SERVER_MODE=1 BEADS_DOLT_SHARED_SERVER=1 bd init --from-jsonl)",
+      "Bash(BEADS_DOLT_SERVER_MODE=1 BEADS_DOLT_SHARED_SERVER=1 bd init --from-jsonl --force --non-interactive)"
     ]
   }
 }
