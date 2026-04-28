@@ -236,7 +236,10 @@
       "Bash(claude --version)",
       "Bash(rm /home/jan/.claude-work/.claude.json)",
       "Bash(cp -a /home/jan/.claude.json /home/jan/.claude-work/.claude.json)",
-      "Bash(rm /home/jan/.claude.json)"
+      "Bash(rm /home/jan/.claude.json)",
+      "Bash(bd close *)",
+      "Bash(bd update *)",
+      "Bash(bd delete *)"
     ]
   }
 }
