@@ -3,7 +3,7 @@
 # Reads JSON from stdin and outputs a formatted status line
 
 python3 -c "
-import sys, json, os, re
+import sys, json, os
 
 data = json.load(sys.stdin)
 
@@ -54,35 +54,6 @@ else:
 acct_color = BLUE if acct == 'work' else MAGENTA if acct == 'personal' else CYAN
 acct_s = f'{acct_color}{acct}{R}'
 
-# Permission mode — parse latest from transcript jsonl (not in statusline JSON)
-mode = ''
-tx = data.get('transcript_path')
-if tx and os.path.exists(tx):
-    try:
-        with open(tx, 'rb') as f:
-            f.seek(0, 2)
-            size = f.tell()
-            chunk = min(size, 131072)
-            f.seek(-chunk, 2)
-            tail = f.read().decode('utf-8', errors='ignore')
-        matches = re.findall(r'\"permissionMode\":\"([^\"]+)\"', tail)
-        if matches:
-            mode = matches[-1]
-    except Exception:
-        pass
-mode_map = {
-    'plan': (CYAN, 'plan'),
-    'acceptEdits': (YELLOW, 'edit'),
-    'auto': (GREEN, 'auto'),
-    'bypassPermissions': (RED, 'yolo'),
-    'dontAsk': (YELLOW, 'noask'),
-}
-if mode in mode_map:
-    mc, ml = mode_map[mode]
-    mode_s = f' {mc}{ml}{R}'
-else:
-    mode_s = ''
-
 size_s = f' ({ctx_label})' if ctx_label else ''
-print(f' {acct_s}{mode_s} {model_s}{D}{size_s}{R} {ctx_s} ')
+print(f' {acct_s} {model_s}{D}{size_s}{R} {ctx_s} ')
 "
