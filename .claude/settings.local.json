@@ -117,6 +117,7 @@
       "Bash(timeout 0.5 xinput test-xi2:*)",
       "Bash(timeout 1 xinput test-xi2:*)",
       "Bash(timeout 3 ssh -o StrictHostKeyChecking=no -o ConnectTimeout=2 -o BatchMode=yes localhost echo ok)",
+<<<<<<< HEAD
       "Bash(timeout 3 xev -root -event keyboard)",
       "Bash(timeout 3 xinput test-xi2:*)",
       "Bash(timeout 3 xinput test:*)",
@@ -216,7 +217,10 @@
       "Bash(curl -fsSL https://api.github.com/repos/zjrosen/perles/releases/latest)",
       "Bash(curl -sSL https://raw.githubusercontent.com/zjrosen/perles/main/install.sh)",
       "Bash(bash)",
-      "Bash(repos-health.nu)"
+      "Bash(repos-health.nu)",
+      "Bash(find / -path \"*/acag/infinifu/install.sh\")",
+      "Bash(swaymsg exit *)",
+      "Bash(pkill -x sway)"
     ]
   }
 }
