@@ -236,7 +236,9 @@
       "Bash(claude --version)",
       "Bash(rm /home/jan/.claude-work/.claude.json)",
       "Bash(cp -a /home/jan/.claude.json /home/jan/.claude-work/.claude.json)",
-      "Bash(rm /home/jan/.claude.json)"
+      "Bash(rm /home/jan/.claude.json)",
+      "Bash(python3 -m json.tool)",
+      "Bash(bash /home/jan/.dotfiles/claude/statusline.sh)"
     ]
   }
 }
