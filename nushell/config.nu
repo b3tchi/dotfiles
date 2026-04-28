@@ -713,6 +713,75 @@ alias tsr = tmux-ssh reconnect
 alias tsl = tmux-ssh list
 alias tsx = tmux-ssh cleanup
 
+# claude code accounts (parallel-capable)
+# layout: ~/.claude-work/ and ~/.claude-personal/ are real dirs
+#         ~/.claude → symlink to whichever is default (claude-setup default <work|personal>)
+# shared config (agents/commands/hooks/plugins/skills/settings) symlinked from work into personal
+def claude-setup [] {
+	print "claude-setup commands:"
+	print "  claude-setup init               migrate ~/.claude → ~/.claude-work, scaffold ~/.claude-personal"
+	print "  claude-setup default <account>  point ~/.claude symlink at work or personal"
+	print "  claude-setup status             show current layout"
+	print ""
+	print "runners (set CLAUDE_CONFIG_DIR per call):"
+	print "  claude-work [args]              run claude with work account"
+	print "  claude-personal [args]          run claude with personal account"
+	print "  claude [args]                   run claude with default (follows ~/.claude symlink)"
+}
+def "claude-setup init" [] {
+	let main = ($env.HOME | path join ".claude")
+	let work = ($env.HOME | path join ".claude-work")
+	let personal = ($env.HOME | path join ".claude-personal")
+	# migrate existing ~/.claude (real dir) → ~/.claude-work, replace with symlink
+	if (($main | path type) == "dir") {
+		^mv $main $work
+		^ln -s $work $main
+		print $"migrated ($main) → ($work); ~/.claude now symlink to work"
+	}
+	# init personal with shared config symlinks pointing at work dir
+	let shared = [agents commands hooks plugins skills settings.json settings.local.json statusline.sh]
+	if not ($personal | path exists) { mkdir $personal }
+	for item in $shared {
+		let src = ($work | path join $item)
+		let dst = ($personal | path join $item)
+		if ($src | path exists) and not ($dst | path exists) {
+			^ln -s $src $dst
+		}
+	}
+	print $"initialized ($personal) — run `claude-personal` and /login"
+}
+def "claude-setup default" [account: string] {
+	if $account not-in [work personal] { error make { msg: "account must be 'work' or 'personal'" } }
+	let main = ($env.HOME | path join ".claude")
+	let target = ($env.HOME | path join $".claude-($account)")
+	if (($main | path type) == "symlink") { ^rm $main } else if ($main | path exists) {
+		error make { msg: $"($main) is not a symlink — run `claude-setup init` first" }
+	}
+	^ln -s $target $main
+	print $"default `claude` → ($account)"
+}
+def "claude-setup status" [] {
+	let main = ($env.HOME | path join ".claude")
+	let work = ($env.HOME | path join ".claude-work")
+	let personal = ($env.HOME | path join ".claude-personal")
+	print $"~/.claude          : (if ($main | path exists) { $main | path type } else { 'missing' })"
+	print $"~/.claude-work     : (if ($work | path exists) { 'present' } else { 'missing' })"
+	print $"~/.claude-personal : (if ($personal | path exists) { 'present' } else { 'missing' })"
+	if (($main | path type) == "symlink") {
+		print $"default target     : (^readlink $main)"
+	}
+}
+def --wrapped claude-work [...args] {
+	with-env { CLAUDE_CONFIG_DIR: ($env.HOME | path join ".claude-work") } {
+		^claude ...$args
+	}
+}
+def --wrapped claude-personal [...args] {
+	with-env { CLAUDE_CONFIG_DIR: ($env.HOME | path join ".claude-personal") } {
+		^claude ...$args
+	}
+}
+
 # lf
 def --env --wrapped lfcd [...args:string] {
 	cd (lf -print-last-dir ...$args)

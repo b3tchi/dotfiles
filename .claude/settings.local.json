@@ -117,7 +117,6 @@
       "Bash(timeout 0.5 xinput test-xi2:*)",
       "Bash(timeout 1 xinput test-xi2:*)",
       "Bash(timeout 3 ssh -o StrictHostKeyChecking=no -o ConnectTimeout=2 -o BatchMode=yes localhost echo ok)",
-<<<<<<< HEAD
       "Bash(timeout 3 xev -root -event keyboard)",
       "Bash(timeout 3 xinput test-xi2:*)",
       "Bash(timeout 3 xinput test:*)",

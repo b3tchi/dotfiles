@@ -3,7 +3,7 @@
 # Reads JSON from stdin and outputs a formatted status line
 
 python3 -c "
-import sys, json
+import sys, json, os
 
 data = json.load(sys.stdin)
 
@@ -17,6 +17,8 @@ R = '\033[0m'
 B = '\033[1m'
 D = '\033[2m'
 CYAN = '\033[36m'
+BLUE = '\033[34m'
+MAGENTA = '\033[35m'
 GREEN = '\033[32m'
 YELLOW = '\033[33m'
 RED = '\033[31m'
@@ -42,6 +44,16 @@ if used_pct is not None:
 else:
     ctx_s = f'{D}--{R}'
 
+# Account: explicit via CLAUDE_CONFIG_DIR, else resolve ~/.claude symlink
+cfg = os.environ.get('CLAUDE_CONFIG_DIR') or os.path.realpath(os.path.expanduser('~/.claude'))
+base = os.path.basename(cfg.rstrip('/'))
+if base.startswith('.claude-'):
+    acct = base[len('.claude-'):]
+else:
+    acct = base
+acct_color = BLUE if acct == 'work' else MAGENTA if acct == 'personal' else CYAN
+acct_s = f'{acct_color}{acct}{R}'
+
 size_s = f' ({ctx_label})' if ctx_label else ''
-print(f' {model_s}{D}{size_s}{R} {ctx_s} ')
+print(f' {acct_s} {model_s}{D}{size_s}{R} {ctx_s} ')
 "
