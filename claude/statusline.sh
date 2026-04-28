@@ -44,16 +44,17 @@ if used_pct is not None:
 else:
     ctx_s = f'{D}--{R}'
 
-# Account: explicit via CLAUDE_CONFIG_DIR, else resolve ~/.claude symlink
+# Account: only show work / personal
 cfg = os.environ.get('CLAUDE_CONFIG_DIR') or os.path.realpath(os.path.expanduser('~/.claude'))
 base = os.path.basename(cfg.rstrip('/'))
-if base.startswith('.claude-'):
-    acct = base[len('.claude-'):]
+acct = base[len('.claude-'):] if base.startswith('.claude-') else ''
+if acct == 'work':
+    acct_s = f'{BLUE}work{R} '
+elif acct == 'personal':
+    acct_s = f'{MAGENTA}personal{R} '
 else:
-    acct = base
-acct_color = BLUE if acct == 'work' else MAGENTA if acct == 'personal' else CYAN
-acct_s = f'{acct_color}{acct}{R}'
+    acct_s = ''
 
 size_s = f' ({ctx_label})' if ctx_label else ''
-print(f' {acct_s} {model_s}{D}{size_s}{R} {ctx_s} ')
+print(f' {acct_s}{model_s}{D}{size_s}{R} {ctx_s} ')
 "

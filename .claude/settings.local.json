@@ -239,7 +239,9 @@
       "Bash(rm /home/jan/.claude.json)",
       "Bash(bd close *)",
       "Bash(bd update *)",
-      "Bash(bd delete *)"
+      "Bash(bd delete *)",
+      "Bash(python3 -m json.tool)",
+      "Bash(bash /home/jan/.dotfiles/claude/statusline.sh)"
     ]
   }
 }
