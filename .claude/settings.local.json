@@ -219,7 +219,24 @@
       "Bash(repos-health.nu)",
       "Bash(find / -path \"*/acag/infinifu/install.sh\")",
       "Bash(swaymsg exit *)",
-      "Bash(pkill -x sway)"
+      "Bash(pkill -x sway)",
+      "Bash(python3 -m json.tool /home/jan/.dotfiles/.claude/settings.local.json)",
+      "Bash(python3 -m json.tool /home/jan/.dotfiles/claude/settings.json)",
+      "Bash(yay -Si carapace-bin)",
+      "Bash(pacman -Qi carapace-bin)",
+      "Bash(pacman -Qi carapace)",
+      "Read(//usr/lib/**)",
+      "Bash(pacman -Q pacman)",
+      "Bash(pacman -Q yay)",
+      "Bash(yay --version)",
+      "Bash(pacman -Q yay yay-debug yay-bin yay-bin-debug)",
+      "Bash(awk '{print $NF}')",
+      "Bash(claude doctor *)",
+      "Bash(CLAUDE_CONFIG_DIR=/home/jan/.claude-work timeout 3 claude -p \"say hi\")",
+      "Bash(claude --version)",
+      "Bash(rm /home/jan/.claude-work/.claude.json)",
+      "Bash(cp -a /home/jan/.claude.json /home/jan/.claude-work/.claude.json)",
+      "Bash(rm /home/jan/.claude.json)"
     ]
   }
 }

@@ -7,6 +7,7 @@ linux:
     hooks/tmux-responding.sh: ~/.claude/hooks/tmux-responding.sh
     perles/config.yaml: ~/.config/perles/config.yaml
     repos-health.nu: ~/.local/bin/repos-health.nu
+    epic.nu: ~/.local/bin/epic
 
     {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
     claude-wrapper: /data/data/com.termux/files/usr/bin/claude
@@ -25,6 +26,7 @@ linux:
       # Native Linux install
       curl -fsSL https://claude.ai/install.sh | sh
       {{/if}}
+      chmod +x ~/.dotfiles/claude/epic.nu
       rotz link claude --force
 
       # dolt — storage backend for bd (server-mode fallback when bd lacks CGO)
