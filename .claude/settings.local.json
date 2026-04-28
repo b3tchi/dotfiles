@@ -196,10 +196,26 @@
       "Bash(nu -c 'use /home/jan/.local/bin/wm-ipc.nu *; ipc \"-t get_version\"')",
       "Bash(nu -c 'use /home/jan/.local/bin/wm-ipc.nu *; ipc \"-t get_tree\"')",
       "Bash(nu *)",
+      "Bash(bd show *)",
       "Bash(git stash *)",
       "Bash(git checkout *)",
       "Bash(git restore *)",
-      "Bash(git fetch *)"
+      "Bash(git fetch *)",
+      "Bash(git pull *)",
+      "Bash(git push *)",
+      "Bash(git *)",
+      "Bash(rotz install *)",
+      "Bash(bd bootstrap *)",
+      "Bash(dolt sql *)",
+      "Bash(mysql -h 127.0.0.1 -P 3308 -u root -e \"SHOW DATABASES\")",
+      "Bash(cp *)",
+      "Bash(perles --version)",
+      "Bash(bd migrate *)",
+      "Bash(bd --version)",
+      "Bash(bd config *)",
+      "Bash(curl -fsSL https://api.github.com/repos/zjrosen/perles/releases/latest)",
+      "Bash(curl -sSL https://raw.githubusercontent.com/zjrosen/perles/main/install.sh)",
+      "Bash(bash)"
     ]
   }
 }
