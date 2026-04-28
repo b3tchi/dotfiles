@@ -215,7 +215,8 @@
       "Bash(bd config *)",
       "Bash(curl -fsSL https://api.github.com/repos/zjrosen/perles/releases/latest)",
       "Bash(curl -sSL https://raw.githubusercontent.com/zjrosen/perles/main/install.sh)",
-      "Bash(bash)"
+      "Bash(bash)",
+      "Bash(repos-health.nu)"
     ]
   }
 }

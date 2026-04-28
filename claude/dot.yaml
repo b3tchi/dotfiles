@@ -6,6 +6,7 @@ linux:
     hooks/tmux-waiting-simple.sh: ~/.claude/hooks/tmux-waiting-simple.sh
     hooks/tmux-responding.sh: ~/.claude/hooks/tmux-responding.sh
     perles/config.yaml: ~/.config/perles/config.yaml
+    repos-health.nu: ~/.local/bin/repos-health.nu
 
     {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
     claude-wrapper: /data/data/com.termux/files/usr/bin/claude
@@ -43,26 +44,32 @@ linux:
         fi
       fi
 
-      # bd (beads) — task tracker used by infinifu skills
-      if ! command -v bd >/dev/null 2>&1; then
-        curl -fsSL https://raw.githubusercontent.com/gastownhall/beads/main/scripts/install.sh | bash
-        if ! command -v bd >/dev/null 2>&1 && [ -x "$HOME/go/bin/bd" ]; then
-          mkdir -p "$HOME/.local/bin"
-          ln -sf "$HOME/go/bin/bd" "$HOME/.local/bin/bd"
-        fi
+      # bd (beads) — always reinstall to track upstream version
+      curl -fsSL https://raw.githubusercontent.com/gastownhall/beads/main/scripts/install.sh | bash
+      if ! command -v bd >/dev/null 2>&1 && [ -x "$HOME/go/bin/bd" ]; then
+        mkdir -p "$HOME/.local/bin"
+        ln -sf "$HOME/go/bin/bd" "$HOME/.local/bin/bd"
       fi
 
-      # perles — beads TUI
-      if ! command -v perles >/dev/null 2>&1; then
-        curl -sSL https://raw.githubusercontent.com/zjrosen/perles/main/install.sh | bash
-        if ! command -v perles >/dev/null 2>&1 && [ -x "$HOME/go/bin/perles" ]; then
-          mkdir -p "$HOME/.local/bin"
-          ln -sf "$HOME/go/bin/perles" "$HOME/.local/bin/perles"
-        fi
+      # perles — always reinstall to track upstream (catches schema bumps)
+      curl -sSL https://raw.githubusercontent.com/zjrosen/perles/main/install.sh | bash
+      if ! command -v perles >/dev/null 2>&1 && [ -x "$HOME/go/bin/perles" ]; then
+        mkdir -p "$HOME/.local/bin"
+        ln -sf "$HOME/go/bin/perles" "$HOME/.local/bin/perles"
       fi
+
       # Plugins
       claude plugin marketplace add JuliusBrussee/caveman
       claude plugin install caveman@caveman
+
+      # bd repo hygiene — only run if invoked from a repo with .beads/
+      if [ -d ".beads" ]; then
+        bd doctor --fix 2>/dev/null || true
+        if [ -z "$(git config beads.role 2>/dev/null)" ]; then
+          git config beads.role maintainer
+        fi
+        bd hooks install 2>/dev/null || true
+      fi
 
 windows:
   links:
