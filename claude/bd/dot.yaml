@@ -13,6 +13,8 @@ linux:
         ln -sf "$HOME/go/bin/bd" "$HOME/.local/bin/bd"
       fi
 
+      rotz link claude/bd --force
+
       # bd repo hygiene — only run if invoked from a repo with .beads/
       if [ -d ".beads" ]; then
         bd doctor --fix 2>/dev/null || true

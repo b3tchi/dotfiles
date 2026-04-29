@@ -10,3 +10,5 @@ linux:
         mkdir -p "$HOME/.local/bin"
         ln -sf "$HOME/go/bin/perles" "$HOME/.local/bin/perles"
       fi
+
+      rotz link claude/perles --force
