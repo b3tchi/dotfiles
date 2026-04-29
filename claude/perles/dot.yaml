@@ -1,0 +1,12 @@
+linux:
+  links:
+    config.yaml: ~/.config/perles/config.yaml
+
+  installs:
+    cmd: |
+      # perles — always reinstall to track upstream (catches schema bumps)
+      curl -sSL https://raw.githubusercontent.com/zjrosen/perles/main/install.sh | bash
+      if ! command -v perles >/dev/null 2>&1 && [ -x "$HOME/go/bin/perles" ]; then
+        mkdir -p "$HOME/.local/bin"
+        ln -sf "$HOME/go/bin/perles" "$HOME/.local/bin/perles"
+      fi

@@ -1,0 +1,18 @@
+linux:
+  installs:
+    cmd: |
+      # bd (beads) — always reinstall to track upstream version
+      curl -fsSL https://raw.githubusercontent.com/gastownhall/beads/main/scripts/install.sh | bash
+      if ! command -v bd >/dev/null 2>&1 && [ -x "$HOME/go/bin/bd" ]; then
+        mkdir -p "$HOME/.local/bin"
+        ln -sf "$HOME/go/bin/bd" "$HOME/.local/bin/bd"
+      fi
+
+      # bd repo hygiene — only run if invoked from a repo with .beads/
+      if [ -d ".beads" ]; then
+        bd doctor --fix 2>/dev/null || true
+        if [ -z "$(git config beads.role 2>/dev/null)" ]; then
+          git config beads.role maintainer
+        fi
+        bd hooks install 2>/dev/null || true
+      fi

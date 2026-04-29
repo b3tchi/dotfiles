@@ -1,3 +1,9 @@
+global:
+  depends:
+    - claude/dolt
+    - claude/bd
+    - claude/perles
+
 linux:
   links:
     settings.json: ~/.claude/settings.json
@@ -5,7 +11,6 @@ linux:
     hooks/tmux-waiting.sh: ~/.claude/hooks/tmux-waiting.sh
     hooks/tmux-waiting-simple.sh: ~/.claude/hooks/tmux-waiting-simple.sh
     hooks/tmux-responding.sh: ~/.claude/hooks/tmux-responding.sh
-    perles/config.yaml: ~/.config/perles/config.yaml
     repos-health.nu: ~/.local/bin/repos-health.nu
     epic.nu: ~/.local/bin/epic
 
@@ -23,63 +28,17 @@ linux:
       mkdir -p /data/data/com.termux/files/usr/tmp
       chmod +x ~/.dotfiles/claude/claude-wrapper
       {{else}}
-      # Native Linux install — install.sh is silent; on proot Arch it takes
-      # ~2-5 min during the post-download "claude install" subcommand
+      # Native Linux install — install.sh runs silently; on proot Arch the
+      # post-download "claude install" subcommand takes a couple minutes
       # (binary transform via Bun, high proot syscall overhead).
-      echo "[claude] running install.sh (silent; proot ~2-5 min)..."
       curl -fsSL https://claude.ai/install.sh | sh
-      echo "[claude] install.sh done"
       {{/if}}
       chmod +x ~/.dotfiles/claude/epic.nu
       rotz link claude --force
 
-      # dolt — storage backend for bd (server-mode fallback when bd lacks CGO)
-      if ! command -v dolt >/dev/null 2>&1; then
-        echo "[dolt] not found, downloading..."
-        DOLT_VERSION=$(curl -fsSL https://api.github.com/repos/dolthub/dolt/releases/latest 2>/dev/null | grep '"tag_name"' | sed 's/.*"v\(.*\)".*/\1/')
-        if [ -n "$DOLT_VERSION" ]; then
-          DOLT_ARCH="amd64"
-          case "$(uname -m)" in
-            aarch64|arm64) DOLT_ARCH="arm64" ;;
-          esac
-          if curl -fsSL "https://github.com/dolthub/dolt/releases/download/v${DOLT_VERSION}/dolt-linux-${DOLT_ARCH}.tar.gz" -o /tmp/dolt.tar.gz \
-             && tar xzf /tmp/dolt.tar.gz -C /tmp/; then
-            mkdir -p "$HOME/.local/bin"
-            cp "/tmp/dolt-linux-${DOLT_ARCH}/bin/dolt" "$HOME/.local/bin/dolt"
-            rm -rf /tmp/dolt.tar.gz /tmp/dolt-linux-*
-          fi
-        fi
-      fi
-
-      # bd (beads) — always reinstall to track upstream version
-      echo "[bd] installing/updating..."
-      curl -fsSL https://raw.githubusercontent.com/gastownhall/beads/main/scripts/install.sh | bash
-      if ! command -v bd >/dev/null 2>&1 && [ -x "$HOME/go/bin/bd" ]; then
-        mkdir -p "$HOME/.local/bin"
-        ln -sf "$HOME/go/bin/bd" "$HOME/.local/bin/bd"
-      fi
-
-      # perles — always reinstall to track upstream (catches schema bumps)
-      echo "[perles] installing/updating..."
-      curl -sSL https://raw.githubusercontent.com/zjrosen/perles/main/install.sh | bash
-      if ! command -v perles >/dev/null 2>&1 && [ -x "$HOME/go/bin/perles" ]; then
-        mkdir -p "$HOME/.local/bin"
-        ln -sf "$HOME/go/bin/perles" "$HOME/.local/bin/perles"
-      fi
-
       # Plugins
-      echo "[plugins] adding marketplace + installing caveman..."
       claude plugin marketplace add JuliusBrussee/caveman
       claude plugin install caveman@caveman
-
-      # bd repo hygiene — only run if invoked from a repo with .beads/
-      if [ -d ".beads" ]; then
-        bd doctor --fix 2>/dev/null || true
-        if [ -z "$(git config beads.role 2>/dev/null)" ]; then
-          git config beads.role maintainer
-        fi
-        bd hooks install 2>/dev/null || true
-      fi
 
 windows:
   links:
