@@ -15,20 +15,7 @@ linux:
 
   installs:
     cmd: |
-      {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
-      # Termux install
-      npm install -g @anthropic-ai/claude-code
-
       # Ensure TMPDIR is set for Claude on Termux
-      mkdir -p /data/data/com.termux/files/usr/tmp
-      chmod +x ~/.dotfiles/claude/claude-wrapper
-      {{else}}
-      # Native Linux install
-      curl -fsSL https://claude.ai/install.sh | sh
-      {{/if}}
-      chmod +x ~/.dotfiles/claude/epic.nu
-      rotz link claude --force
-
       # dolt — storage backend for bd (server-mode fallback when bd lacks CGO)
       if ! command -v dolt >/dev/null 2>&1; then
         DOLT_VERSION=$(curl -fsSL https://api.github.com/repos/dolthub/dolt/releases/latest 2>/dev/null | grep '"tag_name"' | sed 's/.*"v\(.*\)".*/\1/')
@@ -60,10 +47,6 @@ linux:
         ln -sf "$HOME/go/bin/perles" "$HOME/.local/bin/perles"
       fi
 
-      # Plugins
-      claude plugin marketplace add JuliusBrussee/caveman
-      claude plugin install caveman@caveman
-
       # bd repo hygiene — only run if invoked from a repo with .beads/
       if [ -d ".beads" ]; then
         bd doctor --fix 2>/dev/null || true
@@ -73,6 +56,14 @@ linux:
         bd hooks install 2>/dev/null || true
       fi
 
+      curl -fsSL https://claude.ai/install.sh | sh
+      chmod +x ~/.dotfiles/claude/epic.nu
+
+      # Plugins
+      claude plugin marketplace add JuliusBrussee/caveman
+      claude plugin install caveman@caveman
+
+      rotz link claude --force
 windows:
   links:
     settings.json: ~/.claude/settings.json

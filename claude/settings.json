@@ -77,7 +77,6 @@
       }
     }
   },
-  "autoUpdatesChannel": "stable",
   "skipAutoPermissionPrompt": true,
   "theme": "dark",
   "remoteControlAtStartup": false,
