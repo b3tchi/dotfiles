@@ -35,6 +35,7 @@ linux:
 
       # dolt — storage backend for bd (server-mode fallback when bd lacks CGO)
       if ! command -v dolt >/dev/null 2>&1; then
+        echo "[dolt] not found, downloading..."
         DOLT_VERSION=$(curl -fsSL https://api.github.com/repos/dolthub/dolt/releases/latest 2>/dev/null | grep '"tag_name"' | sed 's/.*"v\(.*\)".*/\1/')
         if [ -n "$DOLT_VERSION" ]; then
           DOLT_ARCH="amd64"
@@ -51,6 +52,7 @@ linux:
       fi
 
       # bd (beads) — always reinstall to track upstream version
+      echo "[bd] installing/updating..."
       curl -fsSL https://raw.githubusercontent.com/gastownhall/beads/main/scripts/install.sh | bash
       if ! command -v bd >/dev/null 2>&1 && [ -x "$HOME/go/bin/bd" ]; then
         mkdir -p "$HOME/.local/bin"
@@ -58,6 +60,7 @@ linux:
       fi
 
       # perles — always reinstall to track upstream (catches schema bumps)
+      echo "[perles] installing/updating..."
       curl -sSL https://raw.githubusercontent.com/zjrosen/perles/main/install.sh | bash
       if ! command -v perles >/dev/null 2>&1 && [ -x "$HOME/go/bin/perles" ]; then
         mkdir -p "$HOME/.local/bin"
@@ -65,6 +68,7 @@ linux:
       fi
 
       # Plugins
+      echo "[plugins] adding marketplace + installing caveman..."
       claude plugin marketplace add JuliusBrussee/caveman
       claude plugin install caveman@caveman
 
