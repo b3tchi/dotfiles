@@ -1,3 +1,7 @@
+global:
+  depends:
+    - /claude/dolt
+
 linux:
   links:
     epic.nu: ~/.local/bin/epic
