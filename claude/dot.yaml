@@ -1,7 +1,5 @@
 global:
   depends:
-    - /claude/perles
-    - /claude/bd
     - /claude/dolt
 
 linux:

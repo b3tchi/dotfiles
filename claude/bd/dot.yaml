@@ -1,3 +1,7 @@
+global:
+  depends:
+    - /claude/perles
+
 linux:
   links:
     epic.nu: ~/.local/bin/epic
