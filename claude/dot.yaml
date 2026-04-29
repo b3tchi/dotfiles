@@ -1,8 +1,8 @@
 global:
   depends:
-    - /claude/dolt
-    - /claude/bd
     - /claude/perles
+    - /claude/bd
+    - /claude/dolt
 
 linux:
   links:
