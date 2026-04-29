@@ -1,7 +1,3 @@
-global:
-  depends:
-    - claude/perles
-
 linux:
   links:
     settings.json: ~/.claude/settings.json

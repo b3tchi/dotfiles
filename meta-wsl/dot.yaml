@@ -10,7 +10,7 @@ depends:
   - lazygit
   - glab
   - azcli
-  - claude
+  - claude/perles
   - opencode
   - sway
   - quickshell

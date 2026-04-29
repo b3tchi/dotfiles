@@ -1,3 +1,7 @@
+global:
+  depends:
+    - /claude
+
 linux:
   installs:
     cmd: |
