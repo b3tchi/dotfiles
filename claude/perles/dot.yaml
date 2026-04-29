@@ -1,7 +1,3 @@
-global:
-  depends:
-    - /claude/bd
-
 linux:
   links:
     config.yaml: ~/.config/perles/config.yaml

@@ -77,8 +77,9 @@
       }
     }
   },
+  "autoUpdatesChannel": "stable",
+  "skipAutoPermissionPrompt": true,
   "theme": "dark",
   "remoteControlAtStartup": false,
-  "agentPushNotifEnabled": true,
-  "skipAutoPermissionPrompt": true
+  "agentPushNotifEnabled": true
 }

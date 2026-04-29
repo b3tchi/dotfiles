@@ -7,7 +7,7 @@ depends:
   - tmux
   - nvim
   - lazygit
-  - claude/perles
+  - claude
   - opencode
   - wezterm
   - kitty

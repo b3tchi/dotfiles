@@ -1,3 +1,9 @@
+global:
+  depends:
+    - /claude/dolt
+    - /claude/bd
+    - /claude/perles
+
 linux:
   links:
     settings.json: ~/.claude/settings.json
