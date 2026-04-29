@@ -23,8 +23,12 @@ linux:
       mkdir -p /data/data/com.termux/files/usr/tmp
       chmod +x ~/.dotfiles/claude/claude-wrapper
       {{else}}
-      # Native Linux install
+      # Native Linux install — install.sh is silent; on proot Arch it takes
+      # ~2-5 min during the post-download "claude install" subcommand
+      # (binary transform via Bun, high proot syscall overhead).
+      echo "[claude] running install.sh (silent; proot ~2-5 min)..."
       curl -fsSL https://claude.ai/install.sh | sh
+      echo "[claude] install.sh done"
       {{/if}}
       chmod +x ~/.dotfiles/claude/epic.nu
       rotz link claude --force
