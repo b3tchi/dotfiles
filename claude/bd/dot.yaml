@@ -1,6 +1,11 @@
 linux:
+  links:
+    epic.nu: ~/.local/bin/epic
+
   installs:
     cmd: |
+      chmod +x ~/.dotfiles/claude/bd/epic.nu
+
       # bd (beads) — always reinstall to track upstream version
       curl -fsSL https://raw.githubusercontent.com/gastownhall/beads/main/scripts/install.sh | bash
       if ! command -v bd >/dev/null 2>&1 && [ -x "$HOME/go/bin/bd" ]; then

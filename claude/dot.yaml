@@ -12,7 +12,6 @@ linux:
     hooks/tmux-waiting-simple.sh: ~/.claude/hooks/tmux-waiting-simple.sh
     hooks/tmux-responding.sh: ~/.claude/hooks/tmux-responding.sh
     repos-health.nu: ~/.local/bin/repos-health.nu
-    epic.nu: ~/.local/bin/epic
 
     {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
     claude-wrapper: /data/data/com.termux/files/usr/bin/claude
@@ -33,7 +32,6 @@ linux:
       # (binary transform via Bun, high proot syscall overhead).
       curl -fsSL https://claude.ai/install.sh | sh
       {{/if}}
-      chmod +x ~/.dotfiles/claude/epic.nu
       rotz link claude --force
 
       # Plugins
