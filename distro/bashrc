@@ -5,6 +5,11 @@
 # Always ensure ~/.local/bin is in PATH (non-interactive shells too)
 export PATH="$HOME/.local/bin:$PATH"
 
+# bd (beads) - shared dolt sql-server across all repos (one server, port 3308)
+# instead of default per-repo random-port server. State: ~/.beads/shared-server/
+export BEADS_DOLT_SERVER_MODE=1
+export BEADS_DOLT_SHARED_SERVER=1
+
 # If not running interactively, don't do anything
 [[ $- != *i* ]] && return
 

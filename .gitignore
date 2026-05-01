@@ -12,3 +12,6 @@ nushell/scripts/gwt/config/profiles.yaml
 .dolt/
 *.db
 .beads-credential-key
+
+# Perles per-project config (use global ~/.config/perles/config.yaml)
+.perles/

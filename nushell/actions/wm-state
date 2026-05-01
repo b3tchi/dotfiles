@@ -1,8 +1,15 @@
 #!/usr/bin/env nu
 # wm-state: list, save, and restore workspace ↔ tmux session mappings
+# Works under sway (Wayland) and i3 (X11).
 
 const wm_ipc = '~/.local/bin/wm-ipc.nu'
 use $wm_ipc *
+
+# Terminal identifiers to match (sway app_id or i3 window_properties.class).
+const terminal_ids = ["foot", "kitty", "wezterm", "WezTerm", "Alacritty", "alacritty", "xterm"]
+
+# Default terminal to launch per WM on restore.
+const default_term_by_wm = { sway: "foot", i3: "kitty" }
 
 # Check if candidate_pid is a descendant of ancestor_pid via /proc
 def is-descendant [ancestor_pid: int, candidate_pid: int] {
@@ -19,37 +26,166 @@ def is-descendant [ancestor_pid: int, candidate_pid: int] {
     }
 }
 
-# Recursively collect foot terminal PIDs from a sway tree node
-def collect-foot-pids [node: record] {
+# Resolve pid for an i3 window via xprop _NET_WM_PID.
+# i3 tree does not include pid on window nodes; sway does.
+def resolve-i3-pid [window_id: int] {
+    if $window_id <= 0 { return 0 }
+    let r = (do { ^xprop -id $window_id _NET_WM_PID } | complete)
+    if $r.exit_code != 0 { return 0 }
+    let line = ($r.stdout | str trim)
+    # Format: "_NET_WM_PID(CARDINAL) = 12345"
+    let parts = ($line | split row "=")
+    if ($parts | length) < 2 { return 0 }
+    try { $parts | last | str trim | into int } catch { 0 }
+}
+
+# Identify whether a tree node is a recognized terminal, returning its pid (or 0).
+def node-terminal-pid [node: record] {
+    let app_id = ($node | get -o app_id | default "")
+    let cls = ($node | get -o window_properties.class | default "")
+    let matches = ($terminal_ids | any {|t| $t == $app_id or $t == $cls })
+    if not $matches { return 0 }
+    let pid = ($node | get -o pid | default 0)
+    if $pid > 0 { return $pid }
+    # i3 path: resolve via xprop on the X11 window id
+    let win = ($node | get -o window | default 0)
+    resolve-i3-pid $win
+}
+
+# Recursively collect terminal PIDs from a WM tree node (sway or i3)
+def collect-term-pids [node: record] {
     mut pids = []
-    if ($node | get -o app_id | default "") == "foot" {
-        let pid = ($node | get -o pid | default 0)
-        if $pid > 0 { $pids = ($pids | append $pid) }
-    }
+    let pid = (node-terminal-pid $node)
+    if $pid > 0 { $pids = ($pids | append $pid) }
     for child in ($node | get -o nodes | default []) {
-        $pids = ($pids | append (collect-foot-pids $child))
+        $pids = ($pids | append (collect-term-pids $child))
     }
     for child in ($node | get -o floating_nodes | default []) {
-        $pids = ($pids | append (collect-foot-pids $child))
+        $pids = ($pids | append (collect-term-pids $child))
     }
     $pids
 }
 
-# Get workspace → foot PIDs mapping from sway tree
-def get-sway-workspaces [] {
+# Resolve a window node's class / app_id identifier (leaf label).
+def node-class [node: record] {
+    let aid = ($node | get -o app_id | default "")
+    if ($aid | is-not-empty) { return $aid }
+    ($node | get -o window_properties.class | default "")
+}
+
+# Allocate a unique child-key in a container body. Numeric strings are leaf ids;
+# string keys are layout types — if duplicate, uniquify by appending -2, -3, ...
+def uniq-container-key [base: string, body: record] {
+    if not ($base in ($body | columns)) { return $base }
+    mut n = 2
+    loop {
+        let cand = $"($base)-($n)"
+        if not ($cand in ($body | columns)) { return $cand }
+        $n = $n + 1
+    }
+}
+
+# Recursive layout + state builder for a single tree node.
+# Returns:
+#   { kind: "leaf", id: int, class: string, state: { "<id>": {...} }, next_id: int } OR
+#   { kind: "container", layout_type: string, body: record, state: record, next_id: int } OR
+#   { kind: "empty", next_id: int }
+def build-layout-state [node: record, id_start: int] {
+    let children = ($node | get -o nodes | default [])
+    let wid = ($node | get -o window | default 0)
+
+    if ($children | is-empty) {
+        if $wid <= 0 {
+            return { kind: "empty", next_id: $id_start }
+        }
+        let id = $id_start
+        let cls = (node-class $node)
+        let pid_raw = ($node | get -o pid | default 0)
+        let pid = if $pid_raw > 0 { $pid_raw } else { resolve-i3-pid $wid }
+        let key = ($id | into string)
+        return {
+            kind: "leaf",
+            id: $id,
+            class: $cls,
+            state: { $key: { wid: $wid, pid: $pid, class: $cls } },
+            next_id: ($id + 1),
+        }
+    }
+
+    # Container
+    let layout_type = ($node | get -o layout | default "splith")
+    mut body = {}
+    mut state = {}
+    mut id = $id_start
+    for c in $children {
+        let r = (build-layout-state $c $id)
+        $id = $r.next_id
+        if $r.kind == "empty" { continue }
+        if $r.kind == "leaf" {
+            $state = ($state | merge $r.state)
+            $body = ($body | upsert ($r.id | into string) $r.class)
+        } else {
+            # Nested container
+            $state = ($state | merge $r.state)
+            let key = (uniq-container-key $r.layout_type $body)
+            $body = ($body | upsert $key $r.body)
+        }
+    }
+    { kind: "container", layout_type: $layout_type, body: $body, state: $state, next_id: $id }
+}
+
+# Build layout record + state record for a workspace node. IDs are 1..N across the
+# workspace in traversal order.
+def build-workspace-layout [ws: record] {
+    let layout_type = ($ws | get -o layout | default "splith")
+    let children = ($ws | get -o nodes | default [])
+    mut body = {}
+    mut state = {}
+    mut id = 1
+    for c in $children {
+        let r = (build-layout-state $c $id)
+        $id = $r.next_id
+        if $r.kind == "empty" { continue }
+        if $r.kind == "leaf" {
+            $state = ($state | merge $r.state)
+            $body = ($body | upsert ($r.id | into string) $r.class)
+        } else {
+            $state = ($state | merge $r.state)
+            let key = (uniq-container-key $r.layout_type $body)
+            $body = ($body | upsert $key $r.body)
+        }
+    }
+    { layout: { $layout_type: $body }, state: $state }
+}
+
+# Recursively find all workspace nodes in the WM tree.
+# Sway: output -> workspace. i3: output -> "content" con -> workspace.
+def find-workspaces [node: record] {
+    mut out = []
+    if ($node | get -o type | default "") == "workspace" {
+        let name = ($node | get -o name | default "")
+        if $name != "__i3_scratch" {
+            $out = ($out | append $node)
+        }
+    }
+    for child in ($node | get -o nodes | default []) {
+        $out = ($out | append (find-workspaces $child))
+    }
+    for child in ($node | get -o floating_nodes | default []) {
+        $out = ($out | append (find-workspaces $child))
+    }
+    $out
+}
+
+# Get workspace records with layout tree + state record (WM-agnostic).
+def get-wm-workspaces [] {
     let tree_json = (ipc "-t get_tree")
     if $tree_json == null { return [] }
     let tree = ($tree_json | from json)
-    $tree | get -o nodes | default [] | each { |output|
-        $output | get -o nodes | default [] | where { |ws|
-            ($ws | get -o type) == "workspace" and ($ws | get -o name | default "") != "__i3_scratch"
-        } | each { |ws|
-            let pids = (collect-foot-pids $ws)
-            if ($pids | is-not-empty) {
-                { workspace: ($ws | get name), pids: $pids }
-            }
-        }
-    } | flatten | where { |r| $r != null }
+    find-workspaces $tree | each { |ws|
+        let ls = (build-workspace-layout $ws)
+        { workspace: ($ws | get name), layout: $ls.layout, state: $ls.state }
+    } | where { |r| (($r.state | columns) | length) > 0 }
 }
 
 # Find tmux client info for a foot PID against local (fat) clients
@@ -72,18 +208,132 @@ def find-thin-client [foot_pid: int, thin_clients: list<record>] {
     return {}
 }
 
-# List current sway workspaces with their tmux session mappings
-def "main list" [
-    --output (-o): string  # Output format: "table" for tabular, default is yaml
-] {
-    let ws_terminals = get-sway-workspaces
+# Recursively enumerate window leaves under a WM tree node.
+# Walks both nodes and floating_nodes so floating windows are visible to matching.
+# Returns: [{wid, class, pid, path, floating}, ...]
+def collect-ws-windows [node: record, path_prefix: string] {
+    let children = ($node | get -o nodes | default [])
+    let floats = ($node | get -o floating_nodes | default [])
+    if ($children | is-empty) and ($floats | is-empty) {
+        let wid = ($node | get -o window | default 0)
+        if $wid > 0 {
+            let cls = (node-class $node)
+            let pid_raw = ($node | get -o pid | default 0)
+            let pid = if $pid_raw > 0 { $pid_raw } else { resolve-i3-pid $wid }
+            return [{ wid: $wid, class: $cls, pid: $pid, path: $path_prefix, floating: false }]
+        }
+        return []
+    }
+    mut out = []
+    for i in 0..<($children | length) {
+        let c = ($children | get $i)
+        let sub = if ($path_prefix | is-empty) { $"($i)" } else { $"($path_prefix).($i)" }
+        $out = ($out | append (collect-ws-windows $c $sub))
+    }
+    # Floating descendants — mark floating=true for all leaves found through this branch.
+    for i in 0..<($floats | length) {
+        let c = ($floats | get $i)
+        let sub = if ($path_prefix | is-empty) { $"f($i)" } else { $"($path_prefix).f($i)" }
+        let leaves = (collect-ws-windows $c $sub)
+        $out = ($out | append ($leaves | each {|l| $l | upsert floating true }))
+    }
+    $out
+}
 
-    if ($ws_terminals | is-empty) {
-        print "No sway workspaces with terminals"
+# Find the workspace tree node by name (null if none).
+def find-workspace-by-name [tree: record, name: string] {
+    let all_ws = (find-workspaces $tree)
+    let m = ($all_ws | where name == $name)
+    if ($m | is-empty) { null } else { $m | first }
+}
+
+# Find which workspace name a given wid currently belongs to, or null.
+def find-wid-workspace [tree: record, target_wid: int] {
+    let all_ws = (find-workspaces $tree)
+    for ws in $all_ws {
+        let leaves = (collect-ws-windows $ws "")
+        if ($leaves | where wid == $target_wid | is-not-empty) {
+            return ($ws | get name)
+        }
+    }
+    null
+}
+
+# Resolve the requested workspace scope to a list of names.
+# Empty list means "all workspaces" (default behavior).
+# Errors on mutually exclusive flags.
+def resolve-target-ws [workspace: string, current: bool] {
+    if ($workspace | is-not-empty) and $current {
+        error make { msg: "Pass only one of --workspace or --current" }
+    }
+    if ($workspace | is-not-empty) { return [$workspace] }
+    if $current {
+        let r = (do { ipc "-t get_workspaces" } | complete)
+        if $r.exit_code != 0 or ($r.stdout | str trim | is-empty) {
+            error make { msg: "Could not query focused workspace" }
+        }
+        let focused = ($r.stdout | from json | where focused == true)
+        if ($focused | is-empty) {
+            error make { msg: "No focused workspace found" }
+        }
+        return [($focused | first | get name)]
+    }
+    []
+}
+
+# Pick the best live window match for a saved state entry.
+# Priority: wid -> pid -> terminal tmux session -> class. Returns null if no match.
+def pick-live-match [saved: record, available: list<record>, local_clients: list<record>, thin_clients: list<record>] {
+    let saved_wid = ($saved | get -o wid | default 0)
+    let saved_pid = ($saved | get -o pid | default 0)
+    let saved_class = ($saved | get -o class | default "")
+    let saved_session = ($saved | get -o session | default "")
+    let saved_stype = ($saved | get -o session_type | default "")
+
+    if $saved_wid > 0 {
+        let m = ($available | where wid == $saved_wid)
+        if not ($m | is-empty) { return ($m | first) }
+    }
+    if $saved_pid > 0 {
+        let m = ($available | where pid == $saved_pid)
+        if not ($m | is-empty) { return ($m | first) }
+    }
+    if ($saved_session | is-not-empty) {
+        let clients = if $saved_stype == "thin" { $thin_clients } else { $local_clients }
+        let tgt = ($clients | where session == $saved_session)
+        if not ($tgt | is-empty) {
+            let client_pid = ($tgt | first | get pid)
+            for l in $available {
+                if $l.pid > 0 and (is-descendant $client_pid $l.pid) { return $l }
+            }
+        }
+    }
+    if ($saved_class | is-not-empty) {
+        let m = ($available | where class == $saved_class)
+        if not ($m | is-empty) { return ($m | first) }
+    }
+    null
+}
+
+# List current workspaces with layout tree + state entries.
+def "main list" [
+    --output (-o): string    # Output format: "table" for flat rows, default is yaml tree
+    --workspace: string = "" # Only this workspace
+    --current                # Only the focused workspace
+] {
+    let targets = (resolve-target-ws $workspace $current)
+    let workspaces_all = get-wm-workspaces
+    let workspaces_raw = if ($targets | is-empty) {
+        $workspaces_all
+    } else {
+        $workspaces_all | where workspace in $targets
+    }
+
+    if ($workspaces_raw | is-empty) {
+        print "No workspaces with windows"
         return
     }
 
-    # Get local (fat) tmux clients
     let clients_result = (do { tmux list-clients -F "#{client_pid} #{session_name} #{window_index}" } | complete)
     let local_clients = if $clients_result.exit_code == 0 {
         $clients_result.stdout | lines | where $it != "" | each { |line|
@@ -92,7 +342,6 @@ def "main list" [
         }
     } else { [] }
 
-    # Get thin tmux clients
     let thin_result = (do { tmux -L thin list-clients -F "#{client_pid} #{session_name}" } | complete)
     let thin_clients = if $thin_result.exit_code == 0 {
         $thin_result.stdout | lines | where $it != "" | each { |line|
@@ -101,37 +350,50 @@ def "main list" [
         }
     } else { [] }
 
-    let workspaces = ($ws_terminals | each { |wt|
-        let terminals = ($wt.pids | each { |foot_pid|
-            let local_match = (find-tmux-client $foot_pid $local_clients)
-            if ($local_match | is-not-empty) {
-                return $local_match
-            }
-            let thin_match = (find-thin-client $foot_pid $thin_clients)
-            if ($thin_match | is-not-empty) {
-                return $thin_match
-            }
-        } | where { |t| $t != null })
-
-        { workspace: $wt.workspace, terminals: $terminals }
+    let workspaces = ($workspaces_raw | each { |ws|
+        let enriched = ($ws.state | transpose k v
+            | each { |it| { k: $it.k, v: (enrich-state-entry $it.v $local_clients $thin_clients) } }
+            | reduce -f {} { |it, acc| $acc | upsert $it.k $it.v })
+        { name: $ws.workspace, layout: $ws.layout, state: $enriched }
     })
 
-    let flat = ($workspaces | each { |ws|
-        $ws.terminals | each { |t|
-            { workspace: $ws.workspace } | merge $t
-        }
-    } | flatten)
-
     if $output == "table" {
-        $flat | table
+        $workspaces | each { |ws|
+            $ws.state | transpose id entry | each { |it|
+                { workspace: $ws.name, id: $it.id } | merge $it.entry
+            }
+        } | flatten | table
     } else {
-        $flat | to yaml
+        { workspaces: $workspaces } | to yaml
     }
 }
 
-# Save current sway state to cache
-def "main save" [] {
-    let ws_terminals = get-sway-workspaces
+# Enrich a state entry with tmux session info if its pid descends from a tmux client.
+def enrich-state-entry [entry: record, local_clients: list<record>, thin_clients: list<record>] {
+    let pid = ($entry | get -o pid | default 0)
+    if $pid <= 0 { return $entry }
+    for c in $local_clients {
+        if (is-descendant $pid $c.pid) {
+            return ($entry | upsert session_type "local" | upsert session $c.session)
+        }
+    }
+    for c in $thin_clients {
+        if (is-descendant $pid $c.pid) {
+            return ($entry | upsert session_type "thin" | upsert session $c.session)
+        }
+    }
+    $entry
+}
+
+# Save current WM state (layout tree + state list) to cache.
+# Without flags: capture all workspaces, overwrite cache.
+# With --workspace <name> or --current: merge that single workspace into existing cache.
+def "main save" [
+    --workspace: string = ""  # Save only this workspace, merge into cache
+    --current                 # Save only the focused workspace, merge into cache
+] {
+    let targets = (resolve-target-ws $workspace $current)
+    let workspaces_raw = get-wm-workspaces
 
     let clients_result = (do { tmux list-clients -F "#{client_pid} #{session_name} #{window_index}" } | complete)
     let local_clients = if $clients_result.exit_code == 0 {
@@ -149,23 +411,54 @@ def "main save" [] {
         }
     } else { [] }
 
-    let workspaces = ($ws_terminals | each { |wt|
-        let terminals = ($wt.pids | each { |foot_pid|
-            let local_match = (find-tmux-client $foot_pid $local_clients)
-            if ($local_match | is-not-empty) {
-                return $local_match
-            }
-            let thin_match = (find-thin-client $foot_pid $thin_clients)
-            if ($thin_match | is-not-empty) {
-                return $thin_match
-            }
-        } | where { |t| $t != null })
-
-        { name: $wt.workspace, terminals: $terminals }
+    let fresh = ($workspaces_raw | each { |ws|
+        # state is a record keyed by id; enrich each value
+        let enriched = ($ws.state | transpose k v
+            | each { |it| { k: $it.k, v: (enrich-state-entry $it.v $local_clients $thin_clients) } }
+            | reduce -f {} { |it, acc| $acc | upsert $it.k $it.v })
+        { name: $ws.workspace, layout: $ws.layout, state: $enriched }
     })
 
-    { workspaces: $workspaces } | to yaml | save -f ("~/.cache/sway-state.yaml" | path expand)
-    print $"Saved ($workspaces | length) workspaces"
+    let cache_path = ("~/.cache/sway-state.yaml" | path expand)
+
+    if ($targets | is-empty) {
+        # Default: overwrite cache with all captured workspaces.
+        { workspaces: $fresh } | to yaml | save -f $cache_path
+        print $"Saved ($fresh | length) workspaces"
+        return
+    }
+
+    # Merge into existing cache.
+    let existing = if ($cache_path | path exists) {
+        (open $cache_path | get -o workspaces | default [])
+    } else { [] }
+
+    let target_name = ($targets | first)
+    let target_matches = ($fresh | where name == $target_name)
+    let target_new = if ($target_matches | is-empty) { null } else { $target_matches | first }
+
+    if $target_new == null {
+        # Target currently has no windows → remove from cache if present.
+        let before_len = ($existing | length)
+        let remaining = ($existing | where name != $target_name)
+        { workspaces: $remaining } | to yaml | save -f $cache_path
+        if ($before_len != ($remaining | length)) {
+            print $"Removed empty workspace ($target_name) from cache"
+        } else {
+            print $"Workspace ($target_name) empty; nothing to save"
+        }
+        return
+    }
+
+    # Replace in place if present, else append.
+    let has_existing = (not ($existing | where name == $target_name | is-empty))
+    let merged = if $has_existing {
+        $existing | each { |w| if $w.name == $target_name { $target_new } else { $w } }
+    } else {
+        $existing | append $target_new
+    }
+    { workspaces: $merged } | to yaml | save -f $cache_path
+    print $"Saved workspace ($target_name)"
 }
 
 # Open saved state file in $EDITOR
@@ -178,8 +471,123 @@ def "main edit" [] {
     ^($env.EDITOR) $state_file
 }
 
-# Restore sway workspaces + terminals from saved state
-def "main restore" [] {
+# Restore WM workspaces + terminals from saved state
+# Place a single leaf onto the target workspace. Moves matched wid or spawns fresh.
+# After placement the leaf is focused (needed for subsequent split/layout wrap).
+# Criteria-chain form (comma) keeps all ops scoped to the same wid and avoids a
+# standalone `focus` that would switch workspaces before the move.
+def place-leaf-tree [
+    id: string,
+    state: record,
+    matches: record,
+    ws_name: string,
+    term: string,
+    tree_ref: record,
+    dry_run: bool,
+] {
+    let wid = ($matches | get -o $id | default 0)
+    if $wid > 0 {
+        let current_ws = (find-wid-workspace $tree_ref $wid)
+        let cmd = if $current_ws == $ws_name {
+            # Already on target — just focus + clear floating.
+            $"[id=($wid)] floating disable, focus"
+        } else {
+            # Move into target ws, then focus (all criteria-chained).
+            $"[id=($wid)] floating disable, move --no-auto-back-and-forth container to workspace ($ws_name), focus"
+        }
+        if $dry_run {
+            print $"  DRY: ($cmd)"
+        } else {
+            ipc-raw $cmd
+            sleep 60ms
+        }
+    } else {
+        let s = ($state | get $id)
+        let cmd = (spawn-for $s $term $id)
+        if ($cmd | is-empty) {
+            print $"  Skipping id ($id): nothing to spawn"
+            return
+        }
+        if $dry_run {
+            print $"  DRY: workspace ($ws_name); exec ($cmd)"
+        } else {
+            ipc-raw $"workspace --no-auto-back-and-forth ($ws_name)"
+            ipc-raw $"exec ($cmd)"
+            sleep 500ms
+        }
+    }
+}
+
+# Recursive: build a container's contents from `body` on target workspace.
+# Caller ensures workspace is target and empty (or tolerate existing wrapping).
+# After a non-root call: the current focus is moved up one level via `focus parent` so
+# the parent's next sibling lands outside this container.
+def restore-container-tree [
+    body: record,
+    container_type: string,
+    is_root: bool,
+    state: record,
+    matches: record,
+    ws_name: string,
+    term: string,
+    tree_ref: record,
+    dry_run: bool,
+] {
+    let keys = ($body | columns)
+    if ($keys | is-empty) { return }
+
+    # Place first entry
+    let first_key = ($keys | first)
+    let first_val = ($body | get $first_key)
+    if (is-leaf-key $first_key) {
+        place-leaf-tree $first_key $state $matches $ws_name $term $tree_ref $dry_run
+    } else {
+        let nested_type = ($first_key | split row "-" | first)
+        restore-container-tree $first_val $nested_type false $state $matches $ws_name $term $tree_ref $dry_run
+    }
+
+    # Wrap first-placed (or nested wrapper) with this container's layout.
+    # Skip at root: `[workspace=X] layout Y` rewrites the workspace's first child
+    # container layout, which would clobber any nested container we just built.
+    if not $is_root {
+        if $dry_run {
+            print $"  DRY: split v; layout ($container_type)"
+        } else {
+            try { ipc-raw $"split v; layout ($container_type)" }
+            sleep 50ms
+        }
+    }
+
+    # Place remaining entries; each lands as sibling inside current container.
+    for key in ($keys | skip 1) {
+        let val = ($body | get $key)
+        if (is-leaf-key $key) {
+            place-leaf-tree $key $state $matches $ws_name $term $tree_ref $dry_run
+        } else {
+            let nested_type = ($key | split row "-" | first)
+            restore-container-tree $val $nested_type false $state $matches $ws_name $term $tree_ref $dry_run
+        }
+    }
+
+    # Exit this container scope so outer recursion's next sibling lands at its own level.
+    # Tolerate failure (focus parent can error if already at root).
+    if not $is_root {
+        if $dry_run {
+            print "  DRY: focus parent"
+        } else {
+            try { ipc-raw "focus parent" }
+            sleep 50ms
+        }
+    }
+}
+
+def "main restore" [
+    --dry-run                # Print actions without executing IPC commands
+    --workspace: string = "" # Restore only this workspace from cache
+    --current                # Restore only the focused workspace from cache
+    --rebuild                # Experimental: rebuild nested containers via imperative walk (flaky)
+] {
+    let targets = (resolve-target-ws $workspace $current)
     let state_file = ("~/.cache/sway-state.yaml" | path expand)
     if not ($state_file | path exists) {
         print "No saved state found"
@@ -187,10 +595,19 @@ def "main restore" [] {
     }
 
     let state = (open $state_file)
-    let workspaces = ($state | get -o workspaces | default [])
+    let all_workspaces = ($state | get -o workspaces | default [])
+    let workspaces = if ($targets | is-empty) {
+        $all_workspaces
+    } else {
+        $all_workspaces | where name in $targets
+    }
 
     if ($workspaces | is-empty) {
-        print "No workspaces to restore"
+        if ($targets | is-empty) {
+            print "No workspaces to restore"
+        } else {
+            print $"No matching workspace in cache: ($targets | str join ',')"
+        }
         return
     }
 
@@ -199,64 +616,444 @@ def "main restore" [] {
         return
     }
 
+    let wm = (wm-name)
+    if $wm == null {
+        print "No supported WM detected"
+        return
+    }
+    let term = ($default_term_by_wm | get -o $wm | default "kitty")
+
+    # Remember the workspace the user is currently on so we can return at the end.
+    let start_ws = (do {
+        let r = (do { ipc "-t get_workspaces" } | complete)
+        if $r.exit_code != 0 { null } else {
+            let f = ($r.stdout | from json | where focused == true)
+            if ($f | is-empty) { null } else { $f | first | get name }
+        }
+    })
+
+    # Pull tmux client lists once for matching live windows to saved sessions.
+    let lc_res = (do { tmux list-clients -F "#{client_pid} #{session_name} #{window_index}" } | complete)
+    let local_clients = if $lc_res.exit_code == 0 {
+        $lc_res.stdout | lines | where $it != "" | each { |line|
+            let parts = ($line | split row " ")
+            { pid: ($parts.0 | into int), session: $parts.1, window: ($parts.2 | into int) }
+        }
+    } else { [] }
+    let tc_res = (do { tmux -L thin list-clients -F "#{client_pid} #{session_name}" } | complete)
+    let thin_clients = if $tc_res.exit_code == 0 {
+        $tc_res.stdout | lines | where $it != "" | each { |line|
+            let parts = ($line | split row " ")
+            { pid: ($parts.0 | into int), session: $parts.1 }
+        }
+    } else { [] }
+
     for ws in $workspaces {
         let ws_name = ($ws | get -o name | default "")
         if ($ws_name | is-empty) { continue }
 
-        let terminals = ($ws | get -o terminals | default [])
+        let layout_tree = ($ws | get -o layout | default null)
+        let state = ($ws | get -o state | default {})
 
         print $"Restoring workspace: ($ws_name)"
-        ^swaymsg $"workspace ($ws_name)"
 
-        if ($terminals | is-empty) {
-            ^swaymsg exec foot
+        if $layout_tree == null or (($state | columns) | is-empty) {
             continue
         }
 
-        for term in $terminals {
-            let term_type = ($term | get -o type | default "local")
+        # Enumerate all windows in the tree (matching may pull from any workspace).
+        let tree_json = (ipc "-t get_tree")
+        let tree = ($tree_json | from json)
+        let live_all = (find-workspaces $tree | each {|w| collect-ws-windows $w "" } | flatten)
 
-            if $term_type == "thin" {
-                let ssh_args = ($term | get -o ssh_args | default "")
-                let remote_session = ($term | get -o remote_session | default "")
+        # Match each saved entry (keyed by id) to a live window from the global pool.
+        let saved_ids = ($state | columns | sort-by { |k| $k | into int })
+        mut matches = {}
+        mut available = $live_all
+        for id in $saved_ids {
+            let s = ($state | get $id)
+            let m = (pick-live-match $s $available $local_clients $thin_clients)
+            if $m == null { continue }
+            $matches = ($matches | upsert $id $m.wid)
+            $available = ($available | where wid != $m.wid)
+        }
 
-                if ($ssh_args | is-empty) or ($remote_session | is-empty) {
-                    print $"  Skipping thin terminal: missing ssh_args or remote_session"
+        # Default: flat — place wids + apply top-level dominant layout. Headless + reliable.
+        # --rebuild: experimental nested container rebuild (flaky due to i3 timing/state).
+        if not $rebuild {
+            for id in $saved_ids {
+                let wid = ($matches | get -o $id | default 0)
+                if $wid <= 0 { continue }
+                let current_ws = (find-wid-workspace $tree $wid)
+                if $current_ws == $ws_name {
+                    if $dry_run { print $"  DRY: wid=($wid) already on ($ws_name), skip" }
                     continue
                 }
+                # Criteria-only move: no focus switch (avoids flicker). Works when
+                # target ws differs from current ws (same-ws would trigger back_and_forth).
+                let cmd = $"[id=($wid)] floating disable, move --no-auto-back-and-forth container to workspace ($ws_name)"
+                if $dry_run { print $"  DRY: ipc-raw ($cmd)" } else { ipc-raw $cmd; sleep 60ms }
+            }
 
-                let cmd = $"tmux-to-workstation connect -g ($remote_session) -- ($ssh_args)"
-                ^swaymsg $"exec foot -e nu -c '($cmd)'"
-            } else {
-                let session = ($term | get -o session | default "local")
-                let window = ($term | get -o window | default null)
-
-                let target = (tmux-start start 0 $session | str trim)
-
-                if $window != null {
-                    let target_session = ($target | split row ":" | first)
-                    tmux select-window -t $"($target_session):($window)"
+            let unmatched_ids = ($saved_ids | where { |id| ($matches | get -o $id | default 0) == 0 })
+            if not ($unmatched_ids | is-empty) {
+                if $dry_run {
+                    print $"  DRY: workspace --no-auto-back-and-forth ($ws_name)"
+                } else {
+                    ipc-raw $"workspace --no-auto-back-and-forth ($ws_name)"
                 }
+                for id in $unmatched_ids {
+                    let s = ($state | get $id)
+                    let cmd = (spawn-for $s $term $id)
+                    if ($cmd | is-empty) { print $"  Skipping id ($id): nothing to spawn"; continue }
+                    if $dry_run { print $"  DRY: exec ($cmd)" } else { ipc-raw $"exec ($cmd)" }
+                }
+            }
 
-                ^swaymsg $"exec env TMUX_TARGET=($target) foot"
+            let dominant = (compute-dominant-layout $layout_tree)
+            if $dry_run {
+                print $"  DRY: [workspace=($ws_name)] layout ($dominant)"
+            } else {
+                sleep 100ms
+                ipc-raw $"[workspace=($ws_name)] layout ($dominant)"
+            }
+            continue
+        }
+
+        # Rebuild path (--rebuild): use append_layout to build marked container skeleton,
+        # then move each live wid into its parent container by mark. Avoids swallow timing
+        # issues (swallow fires only on new map events, not on move-from-scratchpad).
+        let ws_node = (find-workspace-by-name $tree $ws_name)
+        let current_layout = if $ws_node == null { null } else {
+            (build-workspace-layout $ws_node | get layout)
+        }
+        if $current_layout == $layout_tree {
+            if $dry_run { print $"  DRY: already matches, skip" } else { print "  already matches, skip" }
+            continue
+        }
+
+        let plan = (build-rebuild-plan $layout_tree)
+
+        # Clean stale anchor placeholders from prior attempts (wm-anchor-* only —
+        # never touch other marks which could be on real containers with windows).
+        if not $dry_run {
+            let marks_result = (do { ipc "-t get_marks" } | complete)
+            if $marks_result.exit_code == 0 {
+                let stale_anchors = ($marks_result.stdout | from json | where { |m| $m | str starts-with "wm-anchor-" })
+                for m in $stale_anchors {
+                    try { ipc-raw $"[con_mark=($m)] kill" }
+                    sleep 30ms
+                }
+            }
+        }
+
+        # Park all matched wids + any other on-ws windows to a temp ws to clear target.
+        let live_on_ws = if $ws_node == null { [] } else { (collect-ws-windows $ws_node "") }
+        let matched_wids = ($matches | values)
+        let to_park = (($live_on_ws | get wid) | append $matched_wids | uniq)
+        let park_ws = $"wm_state_park_($ws_name)"
+        for wid in $to_park {
+            let cmd = $"[id=($wid)] floating disable, move --no-auto-back-and-forth container to workspace ($park_ws)"
+            if $dry_run { print $"  DRY: ($cmd)" } else { ipc-raw $cmd; sleep 100ms }
+        }
+        if not $dry_run { sleep 150ms }
+
+        # Write + apply append_layout JSON on now-empty target ws.
+        let tmpfile = $"/tmp/wm-restore-($ws_name).json"
+        $plan.json | to json -r | save -f $tmpfile
+        if $dry_run {
+            print $"  DRY: wrote ($tmpfile)"
+            print $"  DRY: workspace --no-auto-back-and-forth ($ws_name)"
+            print $"  DRY: append_layout ($tmpfile)"
+        } else {
+            ipc-raw $"workspace --no-auto-back-and-forth ($ws_name)"
+            sleep 80ms
+            ipc-raw $"append_layout ($tmpfile)"
+            sleep 100ms
+        }
+
+        # Set root workspace layout if non-default (splith is workspace default).
+        if $plan.root_type != "splith" {
+            if $dry_run {
+                print $"  DRY: [workspace=($ws_name)] layout ($plan.root_type)"
+            } else {
+                ipc-raw $"[workspace=($ws_name)] layout ($plan.root_type)"
+                sleep 50ms
+            }
+        }
+
+        # All leaves (root and nested) now use anchor-based placement. `move to mark`
+        # inserts IMMEDIATELY AFTER the mark, pushing previously-moved siblings right.
+        # Iterate each container's leaves in REVERSE save order so they land in saved
+        # order after the anchor is killed.
+        let all_moves = ($saved_ids
+            | where { |id| ($matches | get -o $id | default 0) > 0 and ($plan.leaf_parents | get -o $id | default "") != "" })
+        let grouped = ($all_moves | group-by { |id| $plan.leaf_parents | get $id })
+        for mark in ($grouped | columns) {
+            let ids_reversed = ($grouped | get $mark | reverse)
+            for id in $ids_reversed {
+                let wid = ($matches | get -o $id | default 0)
+                let cmd = $"[id=($wid)] floating disable, move container to mark ($mark)"
+                if $dry_run { print $"  DRY: ($cmd)" } else { ipc-raw $cmd; sleep 100ms }
+            }
+        }
+
+        # Spawn unmatched ids → route via class spawn + move next to parent anchor.
+        let unmatched_ids = ($saved_ids | where { |id| ($matches | get -o $id | default 0) == 0 })
+        for id in $unmatched_ids {
+            let s = ($state | get $id)
+            let cmd = (spawn-for $s $term $id)
+            if ($cmd | is-empty) { continue }
+            if $dry_run {
+                print $"  DRY: exec ($cmd)"
+            } else {
+                ipc-raw $"exec ($cmd)"
+                sleep 500ms
+                let parent_mark = ($plan.leaf_parents | get -o $id | default "")
+                let cls = ($s | get -o class | default "")
+                if ($parent_mark | is-not-empty) and ($cls | is-not-empty) {
+                    ipc-raw $"[class=^($cls)$] move container to mark ($parent_mark)"
+                    sleep 60ms
+                }
+            }
+        }
+
+        # Kill all anchor placeholders (they have marks starting with `wm-anchor-`).
+        let all_anchors = ($plan.leaf_parents | values | where { |m| ($m | str starts-with "wm-anchor-") } | uniq)
+        for anchor in $all_anchors {
+            if $dry_run {
+                print $"  DRY: [con_mark=($anchor)] kill"
+            } else {
+                try { ipc-raw $"[con_mark=($anchor)] kill" }
+                sleep 40ms
             }
         }
     }
 
-    let first_name = ($workspaces | first | get -o name | default "")
-    if ($first_name | is-not-empty) {
-        ^swaymsg $"workspace ($first_name)"
+    # Return to the workspace the user started on (headless finish).
+    if ($start_ws | is-not-empty) and (not $dry_run) {
+        ipc-raw $"workspace --no-auto-back-and-forth ($start_ws)"
+    } else if $dry_run and ($start_ws | is-not-empty) {
+        print $"  DRY: return to starting workspace --no-auto-back-and-forth ($start_ws)"
     }
 
-    print "Restore complete"
+    if $dry_run { print "Dry run complete" } else { print "Restore complete" }
+}
+
+# Unique per-slot identifier derived from leaf id (for class/app_id swallow).
+def slot-id-for [id: string] {
+    $"wm-slot-($id)"
+}
+
+# Is the given key a leaf id (numeric string)?
+def is-leaf-key [k: string] {
+    try { $k | into int; true } catch { false }
+}
+
+# Terminal class/app_id flag tokens (separate flag + value so they survive quoting).
+def term-class-flag [term: string, slot_id: string] {
+    if $term in ["kitty", "alacritty", "Alacritty"] {
+        $"--class ($slot_id)"
+    } else if $term == "foot" {
+        $"--app-id ($slot_id)"
+    } else if $term == "xterm" {
+        $"-class ($slot_id)"
+    } else {
+        ""
+    }
+}
+
+# Whether the given terminal supports a class/app_id override on launch.
+def term-supports-slot [term: string] {
+    $term in ["kitty", "alacritty", "Alacritty", "foot", "xterm"]
+}
+
+# Build swallow criterion for a leaf id. If override_class given (reuse of a live window),
+# swallow by real class/app_id. Else for terminals use slot class, else natural class.
+def swallow-for [entry: record, term: string, wm: string, id: string, override_class: string] {
+    if ($override_class | is-not-empty) {
+        if $wm == "sway" {
+            return { app_id: $"^($override_class)$" }
+        } else {
+            return { class: $"^($override_class)$" }
+        }
+    }
+    let cls = ($entry | get -o class | default "")
+    let is_term = ($terminal_ids | any {|t| $t == $cls })
+    if $is_term and (term-supports-slot $term) {
+        let slot = (slot-id-for $id)
+        if $wm == "sway" {
+            { app_id: $"^($slot)$" }
+        } else {
+            { class: $"^($slot)$" }
+        }
+    } else if ($cls | is-not-empty) {
+        { class: $"^($cls)$" }
+    } else {
+        { class: "^.*$" }
+    }
+}
+
+# Convert a container body (record of key → leaf-class or nested body) into a list of
+# i3 append_layout child nodes.
+def body-to-i3-children [body: record, state: record, term: string, wm: string, overrides: record] {
+    $body | columns | each {|k|
+        let v = ($body | get $k)
+        if (is-leaf-key $k) {
+            let entry = ($state | get -o $k | default {})
+            let ovr = ($overrides | get -o $k | default "")
+            let swallow = (swallow-for $entry $term $wm $k $ovr)
+            { swallows: [$swallow], type: "con" }
+        } else {
+            # Container entry. Key may be derived (splith-2); strip suffix.
+            let layout_type = ($k | split row "-" | first)
+            let child_nodes = (body-to-i3-children $v $state $term $wm $overrides)
+            { layout: $layout_type, type: "con", nodes: $child_nodes }
+        }
+    }
+}
+
+# Build full append_layout JSON from a workspace layout record { <type>: body }.
+# (Kept for reference / potential future swallow-driven restore. Main restore currently
+# rebuilds imperatively because i3 placeholder swallows don't fire on move-from-scratchpad.)
+def layout-to-i3-json [layout_tree: record, state: record, term: string, wm: string, overrides: record, ws_name: string] {
+    let key = ($layout_tree | columns | first)
+    let body = ($layout_tree | get $key)
+    let layout_type = ($key | split row "-" | first)
+    let child_nodes = (body-to-i3-children $body $state $term $wm $overrides)
+    { layout: $layout_type, type: "con", nodes: $child_nodes }
+}
+
+# Build an append_layout plan for a workspace layout tree.
+# Produces JSON with marked empty containers (no placeholders) + a parent-mark
+# map for each leaf id so we can `move to mark` the real windows after append.
+# Returns: { json: record, leaf_parents: { "<leaf_id>": "<mark-or-empty>" } }
+def build-rebuild-plan [layout_tree: record] {
+    let root_key = ($layout_tree | columns | first)
+    let root_body = ($layout_tree | get $root_key)
+    let root_type = ($root_key | split row "-" | first)
+    let res = (build-container-plan $root_body "")
+    {
+        json: { layout: $root_type, type: "con", nodes: $res.nodes },
+        leaf_parents: $res.leaf_parents,
+        root_type: $root_type,
+    }
+}
+
+# Recursive: produce child nodes for a container body + leaf→anchor-mark map.
+# Every container (INCLUDING the root) gets an anchor placeholder if it has direct
+# leaf children. `move container to mark <anchor>` places the moved window as
+# sibling of the anchor, i.e. inside the anchor's parent. Root-level leaves use
+# the root anchor so they land inside the top-level splith/etc con — bypasses
+# i3's `workspace_layout tabbed` default which would otherwise wrap them.
+def build-container-plan [body: record, path_prefix: string] {
+    mut nodes = []
+    mut leaf_parents = {}
+    mut this_anchor = ""
+    let keys = ($body | columns)
+    let anchor_suffix = if ($path_prefix | is-empty) { "root" } else { ($path_prefix | str replace -a '.' '-') }
+    let anchor_mark = $"wm-anchor-($anchor_suffix)"
+    for i in 0..<($keys | length) {
+        let key = ($keys | get $i)
+        let val = ($body | get $key)
+        if (is-leaf-key $key) {
+            if ($this_anchor | is-empty) {
+                $this_anchor = $anchor_mark
+                $nodes = ($nodes | append {
+                    type: "con",
+                    marks: [$this_anchor],
+                    swallows: [{ class: "^wm-state-never-match$" }],
+                })
+            }
+            $leaf_parents = ($leaf_parents | upsert $key $this_anchor)
+        } else {
+            let nested_type = ($key | split row "-" | first)
+            let sub_path = if ($path_prefix | is-empty) { $"($i)" } else { $"($path_prefix).($i)" }
+            let sub = (build-container-plan $val $sub_path)
+            $nodes = ($nodes | append {
+                layout: $nested_type,
+                type: "con",
+                nodes: $sub.nodes,
+            })
+            $leaf_parents = ($leaf_parents | merge $sub.leaf_parents)
+        }
+    }
+    { nodes: $nodes, leaf_parents: $leaf_parents }
+}
+
+# Descend single-child-container wrappers to find the effective layout type.
+# {splith: {tabbed: {1: a, 2: b}}} → "tabbed" (since outer splith has one child).
+def compute-dominant-layout [layout_tree: record] {
+    let key = ($layout_tree | columns | first)
+    let body = ($layout_tree | get $key)
+    let keys = ($body | columns)
+    if ($keys | length) == 1 {
+        let k = ($keys | first)
+        if not (is-leaf-key $k) {
+            return (compute-dominant-layout { ($k): ($body | get $k) })
+        }
+    }
+    ($key | split row "-" | first)
+}
+
+# Compose a shell exec string to launch the given terminal with a slot id.
+# extra_env: env vars prefix (e.g. "TMUX_TARGET=foo"). trailing: command inside term.
+def build-term-spawn [term: string, slot_id: string, extra_env: string, trailing: string] {
+    let class_flag = (term-class-flag $term $slot_id)
+    let base = if $term == "kitty" {
+        # kitty <flags> [cmd args...]
+        if ($trailing | is-empty) { $"($term) ($class_flag)" } else { $"($term) ($class_flag) ($trailing)" }
+    } else {
+        # foot / alacritty / xterm: <term> <flags> [-e cmd]
+        if ($trailing | is-empty) { $"($term) ($class_flag)" } else { $"($term) ($class_flag) -e ($trailing)" }
+    }
+    if ($extra_env | is-empty) { $base } else { $"env ($extra_env) ($base)" }
+}
+
+# Compose the exec command string for a single state entry on restore.
+def spawn-for [entry: record, term: string, id: string] {
+    let cls = ($entry | get -o class | default "")
+    let session = ($entry | get -o session | default "")
+    let session_type = ($entry | get -o session_type | default "")
+    let is_term = ($terminal_ids | any {|t| $t == $cls })
+    let slot = (slot-id-for $id)
+
+    if $is_term {
+        if $session_type == "thin" {
+            let ssh_args = ($entry | get -o ssh_args | default "")
+            let remote_session = ($entry | get -o remote_session | default "")
+            if ($ssh_args | is-empty) or ($remote_session | is-empty) {
+                return (build-term-spawn $term $slot "" "")
+            }
+            let inner = $"tmux-to-workstation connect -g ($remote_session) -- ($ssh_args)"
+            return (build-term-spawn $term $slot "" $"nu -c '($inner)'")
+        }
+        if ($session | is-not-empty) {
+            let target = (do { tmux-start start 0 $session } | complete | get stdout | str trim)
+            return (build-term-spawn $term $slot $"TMUX_TARGET=($target)" "")
+        }
+        return (build-term-spawn $term $slot "" "")
+    }
+
+    # Non-terminal: exec by natural class as a best-effort launcher.
+    if ($cls | is-not-empty) { $cls } else { "" }
+}
+
+# Old helper: build exec command with terminal in simple form. Retained for callers.
+def term-exec-line [term: string, cmd: string] {
+    if $term == "kitty" {
+        $"($term) ($cmd)"
+    } else {
+        $"($term) -e ($cmd)"
+    }
 }
 
 def main [] {
-    print "sway-session - workspace ↔ tmux session management"
+    print "wm-state - workspace layout + tmux session capture / restore"
     print ""
     print "Commands:"
-    print "  list [-o table]   List current workspace → tmux mappings"
-    print "  save              Save current state to cache"
-    print "  edit              Open state file in $EDITOR"
-    print "  restore           Restore workspaces from saved state"
+    print "  list [-o table] [--workspace <name>|--current]   List workspace layout + state"
+    print "  save [--workspace <name>|--current]              Save to cache (merge when scoped)"
+    print "  edit                                             Open state file in \$EDITOR"
+    print "  restore [--dry-run] [--workspace <name>|--current]  Restore from saved state"
 }

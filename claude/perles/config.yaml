@@ -1,0 +1,170 @@
+# Perles global config — linked to ~/.config/perles/config.yaml via rotz (claude module)
+# Docs: https://github.com/zjrosen/perles/blob/main/docs/configuration/index.md
+# Precedence: --config flag > .perles/config.yaml (per-project) > this file
+
+# beads_dir: Path to beads database directory.
+# Omitted globally — perles defaults to the current working directory.
+# Override per-project in <repo>/.perles/config.yaml.
+
+# UI settings
+ui:
+  show_counts: true # Show issue counts in column headers
+  show_status_bar: true # Show status bar at bottom
+  # markdown_style: dark  # Markdown rendering style: "dark" (default) or "light"
+  vim_mode: true # Vim keybindings in text input areas (orchestration mode)
+
+  # Keybinding overrides (optional)
+  # keybindings:
+  #   search: "ctrl+space"    # Default: ctrl+space
+  #   dashboard: "ctrl+o"     # Default: ctrl+o
+
+  # User actions — keys 0-9 only; fire-and-forget shell commands with issue context.
+  # Template vars: {{.ID}} (raw), {{.TitleText}} (shell-escaped).
+  # Commands run via the shell; inside tmux panes the shell is nushell
+  # (see tmux/tmux.conf default-shell) — use `input` not bash's `read`.
+  actions:
+    issue_action:
+      open-claude:
+        key: "1"
+        command: 'tmux split-window -h "claude ''Work on {{.ID}}: {{.TitleText}}''"'
+        description: "Open Claude to work on issue"
+      show-issue:
+        key: "2"
+        command: 'tmux split-window -v "bd show {{.ID}}; input ''Press enter to close''"'
+        description: "Show issue details in new pane"
+      start-work:
+        key: "3"
+        command: "bd update {{.ID}} --status in_progress"
+        description: "Mark in_progress"
+      close-issue:
+        key: "4"
+        command: "bd close {{.ID}}"
+        description: "Close issue"
+
+# Theme configuration — use a preset or customize individual colors
+theme:
+  # Use a preset (run 'perles themes' to see available presets):
+  # preset: catppuccin-mocha
+  #
+  # Available presets:
+  #   default           - Default perles theme
+  #   catppuccin-mocha  - Warm, cozy dark theme
+  #   catppuccin-latte  - Warm, cozy light theme
+  #   dracula           - Dark theme with vibrant colors
+  #   nord              - Arctic, north-bluish palette
+  #   high-contrast     - High contrast for accessibility
+  #
+  # Override specific colors (works with or without preset):
+  # colors:
+  #   text.primary: "#FFFFFF"
+  #   status.error: "#FF0000"
+  #   priority.critical: "#FF5555"
+
+# Board views — each view is a named collection of columns.
+# Cycle through views with Shift+J (next) and Shift+K (previous).
+views:
+  - name: Default
+    columns:
+      - name: Backlog
+        type: bql
+        query: "status = open and priority > 2 and type = epic order by priority"
+        color: "#7D56F4"
+
+      - name: Ready
+        type: bql
+        query: "status = open and priority = 2 and (type = epic or type = bug) order by type"
+        color: "#FF9F43"
+
+      - name: In Progress
+        type: bql
+        query: "status = in_progress and type = epic"
+        color: "#73F59F"
+
+# View options:
+#   name: Display name for the view (required)
+#   columns: List of columns for this view (required)
+#
+# Column options:
+#   name: Display name (required)
+#   type: bql or tree
+#   query: BQL query (required when type is bql) - see BQL syntax below
+#   issue_id: Issue Id (required when type is tree)
+#   tree_mode: deps or child (optional when type is tree)
+#   color: Hex color for column header
+#
+# BQL Query Syntax:
+#   Fields: type, priority, status, blocked, ready, label, title, id, created, updated
+#   Operators: = != < > <= >= ~ (contains) in not-in
+#   Examples:
+#     status = open
+#     type = bug and priority = P0
+#     blocked = true
+#     label in (urgent, critical)
+#     title ~ auth
+
+# Orchestration mode settings — which AI client to use when entering orchestration mode
+orchestration:
+  # AI client for coordinator: "claude" (default), "amp", "codex", "gemini", "opencode", "cursor"
+  coordinator_client: claude
+
+  # AI client for workers: "claude" (default), "amp", "codex", "gemini", "opencode", "cursor"
+  worker_client: claude
+
+  # Claude-specific settings (only used when client: claude)
+  claude:
+    model: claude-opus-4-6
+
+  # Codex-specific settings
+  # codex:
+  #   model: gpt-5.4
+
+  # Amp-specific settings
+  # amp:
+  #   model: opus    # opus (default) or sonnet
+  #   mode: smart    # free, rush, or smart (default)
+
+  # OpenCode-specific settings
+  # opencode:
+  #   model: anthropic/claude-opus-4-6
+
+  # Cursor-specific settings
+  # cursor:
+  #   model: composer-1  # empty = Cursor default
+
+  # Workflow templates (Ctrl+P to open picker in orchestration mode).
+  # User workflows are loaded from ~/.perles/workflows/*.md
+  # workflows:
+  #   - name: "Code Review"
+  #     description: "Multi-perspective code review"
+  #     file: "code_review.md"
+  #   - name: "Debate"
+  #     enabled: false
+
+  # Timeouts for orchestration initialization phases (Go duration format)
+  # timeouts:
+  #   worktree_creation: 30s
+  #   coordinator_start: 60s
+  #   workspace_setup: 30s
+  #   max_total: 120s
+
+# Sound notifications — TOP-LEVEL key (not nested under orchestration).
+# Custom sounds must be WAV files in ~/.perles/sounds/
+sound:
+  events:
+    workflow_complete:
+      enabled: true
+    review_verdict_approve:
+      enabled: true
+    review_verdict_deny:
+      enabled: true
+    worker_out_of_context:
+      enabled: true
+    coordinator_out_of_context:
+      enabled: true
+    user_notification:
+      enabled: true
+
+# Feature flags
+# flags:
+#   session-resume: false       # Enable ctrl+r session resume in orchestration mode
+#   session-persistence: false  # Persist workflow sessions to SQLite
