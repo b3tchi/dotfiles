@@ -683,6 +683,101 @@ def restore-container-tree [
     }
 }
 
+# Pre-clean a target workspace before a restore run.
+#
+# Strategy:
+#   1. If <name> is absent → no-op (rc 0, no IPC).
+#   2. If <name>-old already exists (leftover from a prior restore):
+#        a. Kill every terminal in <name>-old (scoped by [id=<wid>] kill — never by class
+#           alone, which would clobber terminals on other workspaces).
+#        b. Rename the leftover <name>-old → <name>-old-<unix_ts> so the next rename
+#           step (3) can land without a name collision. Non-terminal windows ride
+#           along into the timestamped name and stay there for the user.
+#   3. Rename <name> → <name>-old via [workspace=<name>] rename workspace to <name>-old.
+#   4. Walk the renamed <name>-old tree (nodes + floating_nodes). For every leaf whose
+#      class/app_id is in terminal_ids, issue [id=<wid>] kill. WM auto-deletes the
+#      workspace if it ends up empty.
+#
+# --dry-run prints every IPC call and skips execution.
+def pre-clean-target [name: string, --dry-run] {
+    let tree_json = (do { ipc "-t get_tree" } | complete)
+    if $tree_json.exit_code != 0 {
+        print -e $"warn: get_tree failed for pre-clean-target ($name)"
+        return
+    }
+    let tree = ($tree_json.stdout | from json)
+    let target = (find-workspace-by-name $tree $name)
+    if $target == null { return }
+
+    let old_name = $"($name)-old"
+
+    # Step 2: handle <name>-old collision before the rename step.
+    let leftover = (find-workspace-by-name $tree $old_name)
+    if $leftover != null {
+        let leftover_leaves = (collect-ws-windows $leftover "")
+        for leaf in $leftover_leaves {
+            let is_terminal = ($terminal_ids | any {|t| $t == $leaf.class })
+            if not $is_terminal { continue }
+            let cmd = $"[id=($leaf.wid)] kill"
+            if $dry_run {
+                print $"  DRY: ipc-raw ($cmd)"
+            } else {
+                ipc-raw $cmd
+            }
+        }
+        let ts = (date now | format date "%s")
+        let stamped = $"($old_name)-($ts)"
+        # Use the canonical `rename workspace OLD to NEW` form. The criteria
+        # variant `[workspace=OLD] rename workspace to NEW` exists in i3 but
+        # behaves inconsistently: it can leave the original workspace's windows
+        # in place under the OLD name and create an empty workspace under NEW.
+        let rename_cmd = $"rename workspace ($old_name) to ($stamped)"
+        if $dry_run {
+            print $"  DRY: ipc-raw ($rename_cmd)"
+        } else {
+            ipc-raw $rename_cmd
+        }
+    }
+
+    # Step 3: rename target ws → <name>-old. WM rename preserves output binding.
+    # NOTE: do NOT skip this step under "ws is empty" — focused ws auto-recreates
+    # on later commands; the rename forces displacement.
+    #
+    # Capture the target's leaves BEFORE the rename so that --dry-run can produce a
+    # complete plan (after the rename step is dry-skipped, the renamed ws would not
+    # exist in a re-query). Wid identity is unaffected by the rename, so this list
+    # is still the right kill set for live mode too.
+    let target_leaves = (collect-ws-windows $target "")
+    let rename_target = $"rename workspace ($name) to ($old_name)"
+    if $dry_run {
+        print $"  DRY: ipc-raw ($rename_target)"
+    } else {
+        ipc-raw $rename_target
+    }
+
+    # Step 4: walk the target's captured leaves and kill each terminal by wid.
+    # WM auto-deletes the workspace if it ends up empty; non-terminals remain in
+    # <name>-old for the user to inspect.
+    for leaf in $target_leaves {
+        let is_terminal = ($terminal_ids | any {|t| $t == $leaf.class })
+        if not $is_terminal { continue }
+        let cmd = $"[id=($leaf.wid)] kill"
+        if $dry_run {
+            print $"  DRY: ipc-raw ($cmd)"
+        } else {
+            ipc-raw $cmd
+        }
+    }
+}
+
+# CLI wrapper for pre-clean-target so it's callable as `wm-state pre-clean-target <name>`.
+def "main pre-clean-target" [
+    name: string             # Target workspace name to pre-clean
+    --dry-run                # Print IPC calls without executing
+] {
+    pre-clean-target $name --dry-run=$dry_run
+}
+
 def "main restore" [
     --dry-run                # Print actions without executing IPC commands
     --workspace: string = "" # Restore only this workspace from cache
@@ -1158,4 +1253,5 @@ def main [] {
     print "  save [--workspace <name>|--current]              Save to cache (merge when scoped)"
     print "  edit                                             Open state file in \$EDITOR"
     print "  restore [--dry-run] [--workspace <name>|--current]  Restore from saved state"
+    print "  pre-clean-target <name> [--dry-run]              Rename <name>→<name>-old, kill terminals there"
 }
