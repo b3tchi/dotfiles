@@ -71,7 +71,7 @@ Extend the leaf builder so every terminal entry records the full WM window title
 
 **Tests:**
 - Manual smoke test: capture a 2-workspace state with 3 kitty + 1 firefox windows. Inspect yaml. Assert kitty entries have title + tmux_window_id, firefox entry has skip_restore: true.
-- Regression: `nu --check nushell/actions/wm-state` parses cleanly.
+- Regression: `nu --ide-check 0 nushell/actions/wm-state` parses cleanly.
 
 ---
 
@@ -235,14 +235,14 @@ Remove helpers no longer reachable after Task 4 lands.
 1. After Task 4 lands, grep each function name across the file to confirm zero remaining callers.
 2. Delete unreferenced helpers.
 3. Re-grep; iterate until stable.
-4. `nu --check nushell/actions/wm-state` to confirm parse succeeds.
+4. `nu --ide-check 0 nushell/actions/wm-state` to confirm parse succeeds.
 5. `wm-state list` and `wm-state save --current` smoke pass.
 
 **Effort estimate:** 1–2 hours.
 
 **Success criteria:**
 - [ ] Grep across `nushell/actions/wm-state` for each removed function name returns zero matches outside its (now deleted) own definition.
-- [ ] `nu --check nushell/actions/wm-state` exits 0.
+- [ ] `nu --ide-check 0 nushell/actions/wm-state` exits 0.
 - [ ] `wm-state list` produces the same yaml shape as before this task.
 - [ ] `wm-state save --current` produces a yaml entry for the current workspace with the field set defined in Task 1.
 - [ ] Line count of `nushell/actions/wm-state` decreased by at least 200 lines (sanity check that purge actually happened).
