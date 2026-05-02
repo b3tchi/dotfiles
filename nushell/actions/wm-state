@@ -543,10 +543,18 @@ def "main edit" [] {
 #      workspace if it ends up empty.
 #
 # --dry-run prints every IPC call and skips execution.
-def pre-clean-target [name: string, --dry-run] {
+def isolate-target [name: string, --dry-run] {
+    # Phase 1 of the two-phase restore cleanup. Rename target ws -> <name>-old
+    # so the old terminals (and their tmux clients) stay ALIVE on <name>-old
+    # while restore spawns new terminals on a fresh <name>. Killing the old
+    # terminals here would detach their tmux clients; with destroy-unattached
+    # on plus the tmux-cleanup hook, this destroys the tmux sessions and the
+    # subsequent `tmux attach -t <session>` from the new terminals fails.
+    # Phase 2 (`kill-old-terminals`) runs at the end of restore once the new
+    # clients are attached.
     let tree_json = (do { ipc "-t get_tree" } | complete)
     if $tree_json.exit_code != 0 {
-        print -e $"warn: get_tree failed for pre-clean-target ($name)"
+        print -e $"warn: get_tree failed for isolate-target ($name)"
         return
     }
     let tree = ($tree_json.stdout | from json)
@@ -555,7 +563,11 @@ def pre-clean-target [name: string, --dry-run] {
 
     let old_name = $"($name)-old"
 
-    # Step 2: handle <name>-old collision before the rename step.
+    # Handle <name>-old collision before the rename step. Any terminals already
+    # on <name>-old are leftovers from a PRIOR restore — their tmux clients are
+    # not part of this restore's recovery set, so killing them is fine. (If we
+    # left them attached, multiple stale clients would pile up and the user's
+    # -old workspace would grow without bound across restores.)
     let leftover = (find-workspace-by-name $tree $old_name)
     if $leftover != null {
         let leftover_leaves = (collect-ws-windows $leftover "")
@@ -572,9 +584,8 @@ def pre-clean-target [name: string, --dry-run] {
         let ts = (date now | format date "%s")
         let stamped = $"($old_name)-($ts)"
         # Use the canonical `rename workspace OLD to NEW` form. The criteria
-        # variant `[workspace=OLD] rename workspace to NEW` exists in i3 but
-        # behaves inconsistently: it can leave the original workspace's windows
-        # in place under the OLD name and create an empty workspace under NEW.
+        # variant `[workspace=OLD] rename workspace to NEW` behaves
+        # inconsistently in i3 — it can rename the focused workspace instead.
         let rename_cmd = $"rename workspace ($old_name) to ($stamped)"
         if $dry_run {
             print $"  DRY: ipc-raw ($rename_cmd)"
@@ -583,26 +594,33 @@ def pre-clean-target [name: string, --dry-run] {
         }
     }
 
-    # Step 3: rename target ws → <name>-old. WM rename preserves output binding.
-    # NOTE: do NOT skip this step under "ws is empty" — focused ws auto-recreates
-    # on later commands; the rename forces displacement.
-    #
-    # Capture the target's leaves BEFORE the rename so that --dry-run can produce a
-    # complete plan (after the rename step is dry-skipped, the renamed ws would not
-    # exist in a re-query). Wid identity is unaffected by the rename, so this list
-    # is still the right kill set for live mode too.
-    let target_leaves = (collect-ws-windows $target "")
+    # Rename target ws -> <name>-old. WM rename preserves output binding.
+    # No kill here: terminals stay alive on <name>-old so their tmux sessions
+    # remain attached for the new respawn flow to reuse.
     let rename_target = $"rename workspace ($name) to ($old_name)"
     if $dry_run {
         print $"  DRY: ipc-raw ($rename_target)"
     } else {
         ipc-raw $rename_target
     }
+}
 
-    # Step 4: walk the target's captured leaves and kill each terminal by wid.
-    # WM auto-deletes the workspace if it ends up empty; non-terminals remain in
-    # <name>-old for the user to inspect.
-    for leaf in $target_leaves {
+def kill-old-terminals [old_name: string, --dry-run] {
+    # Phase 2 of the two-phase restore cleanup. Walk <name>-old's leaves and
+    # kill every terminal by wid. Run AFTER the new respawn flow has spawned
+    # its terminals and they have attached to the saved tmux sessions, so each
+    # session has the new client and destroy-unattached does not fire.
+    # Non-terminals on <name>-old remain in place for the user to inspect.
+    let tree_json = (do { ipc "-t get_tree" } | complete)
+    if $tree_json.exit_code != 0 {
+        print -e $"warn: get_tree failed for kill-old-terminals ($old_name)"
+        return
+    }
+    let tree = ($tree_json.stdout | from json)
+    let target = (find-workspace-by-name $tree $old_name)
+    if $target == null { return }
+    let leaves = (collect-ws-windows $target "")
+    for leaf in $leaves {
         let is_terminal = ($terminal_ids | any {|t| $t == $leaf.class })
         if not $is_terminal { continue }
         let cmd = $"[id=($leaf.wid)] kill"
@@ -614,12 +632,19 @@ def pre-clean-target [name: string, --dry-run] {
     }
 }
 
-# CLI wrapper for pre-clean-target so it's callable as `wm-state pre-clean-target <name>`.
-def "main pre-clean-target" [
-    name: string             # Target workspace name to pre-clean
+# CLI wrappers so the two-phase cleanup primitives are callable directly.
+def "main isolate-target" [
+    name: string             # Target workspace name to isolate (rename only)
     --dry-run                # Print IPC calls without executing
 ] {
-    pre-clean-target $name --dry-run=$dry_run
+    isolate-target $name --dry-run=$dry_run
+}
+
+def "main kill-old-terminals" [
+    old_name: string         # The <name>-old workspace whose terminals to kill
+    --dry-run                # Print IPC calls without executing
+] {
+    kill-old-terminals $old_name --dry-run=$dry_run
 }
 
 def "main restore" [
@@ -676,6 +701,17 @@ def "main restore" [
         }
     })
 
+    # Two-phase cleanup:
+    #   Phase 1 (this loop): isolate-target renames each ws -> <name>-old.
+    #                        Old terminals stay alive on <name>-old, tmux
+    #                        clients stay attached, sessions stay alive.
+    #   Phase 2 (after spawn): kill-old-terminals walks <name>-old and kills
+    #                        terminals only after the new respawn flow has
+    #                        attached new clients to the saved tmux sessions.
+    #
+    # Track which ws had a real respawn so phase 2 only touches those.
+    mut respawned_ws = []
+
     for ws in $workspaces {
         let ws_name = ($ws | get -o name | default "")
         if ($ws_name | is-empty) { continue }
@@ -689,11 +725,12 @@ def "main restore" [
             continue
         }
 
-        # Step 1: pre-clean — rename target ws to <name>-old, kill terminals there.
-        # Non-terminal windows survive on <name>-old for the user's inspection.
-        pre-clean-target $ws_name --dry-run=$dry_run
+        # Phase 1: rename target -> <name>-old. NO kill. Old terminals + their
+        # tmux clients survive while we reattach new clients to the same
+        # sessions on the fresh <name>.
+        isolate-target $ws_name --dry-run=$dry_run
 
-        # Step 2: focus the (now empty) target workspace before append_layout.
+        # Focus the (now empty) target workspace before append_layout.
         let focus_cmd = $"workspace --no-auto-back-and-forth ($ws_name)"
         if $dry_run {
             print $"  DRY: ipc-raw ($focus_cmd)"
@@ -701,19 +738,21 @@ def "main restore" [
             ipc-raw $focus_cmd
         }
 
-        # Step 3: build the respawn plan (append_layout JSON + spawn specs).
+        # Build the respawn plan (append_layout JSON + spawn specs).
         let plan = (build-respawn-plan $layout_tree $ws_state $term $wm)
 
         let json_nodes = ($plan.json | get -o nodes | default [])
         let non_skipped = ($plan.leaf_specs | where { |s| ($s | get -o skipped | default false) == false })
 
-        # Step 4: if every leaf is skip_restore, leave the empty workspace alone.
+        # If every leaf is skip_restore, leave the empty workspace alone and
+        # do NOT schedule phase 2 — there's no new client to take over the old
+        # terminals, so leaving them where they are is correct.
         if ($json_nodes | is-empty) and ($non_skipped | is-empty) {
             print $"  Workspace ($ws_name): skipped — all entries non-terminal"
             continue
         }
 
-        # Step 5: write append_layout JSON + apply.
+        # Write append_layout JSON + apply.
         if not ($json_nodes | is-empty) {
             let tmpfile = $"/tmp/wm-restore-($ws_name).json"
             let append_cmd = $"append_layout ($tmpfile)"
@@ -730,7 +769,7 @@ def "main restore" [
             }
         }
 
-        # Step 6: spawn each non-skipped leaf. Title swallow (carrying the tmux
+        # Spawn each non-skipped leaf. Title swallow (carrying the tmux
         # window_id) routes the new window into the correct slot. No mark moves,
         # no parking, no inter-spawn sleeps — terminals spawn in parallel.
         for spec in $non_skipped {
@@ -742,6 +781,22 @@ def "main restore" [
             } else {
                 ipc-raw $cmd
             }
+        }
+        $respawned_ws = ($respawned_ws | append $ws_name)
+    }
+
+    # Phase 2: wait for new terminals to map + tmux-attach, then kill old
+    # terminals on each -old workspace. The new clients now hold those
+    # sessions open, so destroy-unattached + tmux-cleanup will not destroy
+    # them when the old clients detach.
+    if not ($respawned_ws | is-empty) {
+        if $dry_run {
+            print "  DRY: sleep 600ms (let new terminals attach)"
+        } else {
+            sleep 600ms
+        }
+        for ws_name in $respawned_ws {
+            kill-old-terminals $"($ws_name)-old" --dry-run=$dry_run
         }
     }
 
@@ -936,5 +991,6 @@ def main [] {
     print "  save [--workspace <name>|--current]              Save to cache (merge when scoped)"
     print "  edit                                             Open state file in \$EDITOR"
     print "  restore [--dry-run] [--workspace <name>|--current]  Restore from saved state"
-    print "  pre-clean-target <name> [--dry-run]              Rename <name>→<name>-old, kill terminals there"
+    print "  isolate-target <name> [--dry-run]                Rename <name>→<name>-old (no kill)"
+    print "  kill-old-terminals <name>-old [--dry-run]        Kill terminals on <name>-old workspace"
 }
