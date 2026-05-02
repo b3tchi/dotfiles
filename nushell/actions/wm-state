@@ -102,12 +102,15 @@ def build-layout-state [node: record, id_start: int] {
         let cls = (node-class $node)
         let pid_raw = ($node | get -o pid | default 0)
         let pid = if $pid_raw > 0 { $pid_raw } else { resolve-i3-pid $wid }
+        # Capture the WM window title verbatim. Restore-side will escape regex
+        # metacharacters when building swallow patterns; saved value is raw.
+        let title = ($node | get -o name | default "")
         let key = ($id | into string)
         return {
             kind: "leaf",
             id: $id,
             class: $cls,
-            state: { $key: { wid: $wid, pid: $pid, class: $cls } },
+            state: { $key: { wid: $wid, pid: $pid, class: $cls, title: $title } },
             next_id: ($id + 1),
         }
     }
@@ -350,9 +353,11 @@ def "main list" [
         }
     } else { [] }
 
+    let tmux_cache = (build-tmux-window-cache $local_clients $thin_clients)
+
     let workspaces = ($workspaces_raw | each { |ws|
         let enriched = ($ws.state | transpose k v
-            | each { |it| { k: $it.k, v: (enrich-state-entry $it.v $local_clients $thin_clients) } }
+            | each { |it| { k: $it.k, v: (enrich-state-entry $it.v $local_clients $thin_clients $tmux_cache) } }
             | reduce -f {} { |it, acc| $acc | upsert $it.k $it.v })
         { name: $ws.workspace, layout: $ws.layout, state: $enriched }
     })
@@ -368,21 +373,116 @@ def "main list" [
     }
 }
 
-# Enrich a state entry with tmux session info if its pid descends from a tmux client.
-def enrich-state-entry [entry: record, local_clients: list<record>, thin_clients: list<record>] {
-    let pid = ($entry | get -o pid | default 0)
-    if $pid <= 0 { return $entry }
+# Query tmux for the active window_id of a session on a given server.
+# server_type: "local" (default tmux socket) or "thin" (-L thin socket).
+# Returns numeric string with leading '@' stripped, or "" on any failure.
+# NOTE: Same session attached by two terminals will yield the same window_id
+# for both saved entries — restore-side swallow regex will fire ambiguously.
+# Documented as a known limitation in the script header.
+def query-tmux-window-id [server_type: string, session: string] {
+    if ($session | is-empty) { return "" }
+    let r = if $server_type == "thin" {
+        do { ^tmux -L thin display-message -t $"($session):" -p '#{window_id}' } | complete
+    } else {
+        do { ^tmux display-message -t $"($session):" -p '#{window_id}' } | complete
+    }
+    if $r.exit_code != 0 {
+        print -e $"warn: tmux query failed for ($server_type):($session): ($r.stderr | str trim)"
+        return ""
+    }
+    let raw = ($r.stdout | str trim)
+    if ($raw | is-empty) {
+        print -e $"warn: tmux query returned empty for ($server_type):($session)"
+        return ""
+    }
+    # Strip leading '@' from window_id (tmux always prefixes with @).
+    if ($raw | str starts-with "@") {
+        $raw | str substring 1..
+    } else {
+        $raw
+    }
+}
+
+# Build a per-save cache of (server_type, session) -> window_id by querying tmux
+# once per unique pair from the merged client lists. Failures log to stderr and
+# are absent from the cache (caller treats absence as "omit field").
+def build-tmux-window-cache [local_clients: list<record>, thin_clients: list<record>] {
+    mut cache = {}
     for c in $local_clients {
-        if (is-descendant $pid $c.pid) {
-            return ($entry | upsert session_type "local" | upsert session $c.session)
+        let key = $"local:($c.session)"
+        if not ($key in ($cache | columns)) {
+            let wid = (query-tmux-window-id "local" $c.session)
+            if ($wid | is-not-empty) {
+                $cache = ($cache | upsert $key $wid)
+            }
         }
     }
     for c in $thin_clients {
-        if (is-descendant $pid $c.pid) {
-            return ($entry | upsert session_type "thin" | upsert session $c.session)
+        let key = $"thin:($c.session)"
+        if not ($key in ($cache | columns)) {
+            let wid = (query-tmux-window-id "thin" $c.session)
+            if ($wid | is-not-empty) {
+                $cache = ($cache | upsert $key $wid)
+            }
         }
     }
-    $entry
+    $cache
+}
+
+# Enrich a state entry with tmux session info if its pid descends from a tmux client.
+# Adds:
+#   - session_type + session  (existing behavior, only if a tmux client matches)
+#   - tmux_window_id          (when entry is a recognized terminal AND a session
+#                              is attached AND the cache has a value for it)
+#   - skip_restore: true      (when entry's class is NOT in terminal_ids — these
+#                              are GUI apps tracked but not respawned by restore)
+# Failures to query tmux degrade gracefully: omit tmux_window_id, never abort.
+def enrich-state-entry [entry: record, local_clients: list<record>, thin_clients: list<record>, tmux_cache: record] {
+    let cls = ($entry | get -o class | default "")
+    let is_terminal = ($terminal_ids | any {|t| $t == $cls })
+
+    # Non-terminal entries: tag skip_restore: true and short-circuit before any
+    # tmux query work. Preserve all existing fields (wid/pid/class/title).
+    if not $is_terminal {
+        return ($entry | upsert skip_restore true)
+    }
+
+    # Terminal entry: existing session-discovery logic.
+    let pid = ($entry | get -o pid | default 0)
+    if $pid <= 0 { return $entry }
+
+    mut found = $entry
+    mut server_type = ""
+    mut session = ""
+    for c in $local_clients {
+        if (is-descendant $pid $c.pid) {
+            $found = ($entry | upsert session_type "local" | upsert session $c.session)
+            $server_type = "local"
+            $session = $c.session
+            break
+        }
+    }
+    if ($server_type | is-empty) {
+        for c in $thin_clients {
+            if (is-descendant $pid $c.pid) {
+                $found = ($entry | upsert session_type "thin" | upsert session $c.session)
+                $server_type = "thin"
+                $session = $c.session
+                break
+            }
+        }
+    }
+
+    # No tmux client owns this terminal -> return enriched-or-unchanged entry; no
+    # tmux_window_id (terminal isn't running tmux).
+    if ($server_type | is-empty) or ($session | is-empty) { return $found }
+
+    # Look up cached window_id; absence (failed query at cache build time) means
+    # we skip the field. Saved value is digits only (already stripped of '@').
+    let cache_key = $"($server_type):($session)"
+    let wid = ($tmux_cache | get -o $cache_key | default "")
+    if ($wid | is-empty) { return $found }
+    $found | upsert tmux_window_id $wid
 }
 
 # Save current WM state (layout tree + state list) to cache.
@@ -411,10 +511,12 @@ def "main save" [
         }
     } else { [] }
 
+    let tmux_cache = (build-tmux-window-cache $local_clients $thin_clients)
+
     let fresh = ($workspaces_raw | each { |ws|
         # state is a record keyed by id; enrich each value
         let enriched = ($ws.state | transpose k v
-            | each { |it| { k: $it.k, v: (enrich-state-entry $it.v $local_clients $thin_clients) } }
+            | each { |it| { k: $it.k, v: (enrich-state-entry $it.v $local_clients $thin_clients $tmux_cache) } }
             | reduce -f {} { |it, acc| $acc | upsert $it.k $it.v })
         { name: $ws.workspace, layout: $ws.layout, state: $enriched }
     })
