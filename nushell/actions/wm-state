@@ -782,8 +782,16 @@ def "main restore" [
     --dry-run                # Print actions without executing IPC commands
     --workspace: string = "" # Restore only this workspace from cache
     --current                # Restore only the focused workspace from cache
-    --rebuild                # Experimental: rebuild nested containers via imperative walk (flaky)
 ] {
+    # Precondition: tmux server must be reachable. The respawn flow relies on
+    # `tmux attach -t <session>` per terminal, so a dead server makes restore
+    # meaningless. Abort hard rather than continue in a degraded mode.
+    let tmux_check = (do { tmux list-sessions } | complete)
+    if $tmux_check.exit_code != 0 {
+        print -e "tmux server unreachable, aborting restore"
+        exit 1
+    }
+
     let targets = (resolve-target-ws $workspace $current)
     let state_file = ("~/.cache/sway-state.yaml" | path expand)
     if not ($state_file | path exists) {
@@ -808,15 +816,10 @@ def "main restore" [
         return
     }
 
-    if (tmux list-sessions | complete | get exit_code) != 0 {
-        print "No tmux sessions running, skipping restore"
-        return
-    }
-
     let wm = (wm-name)
     if $wm == null {
-        print "No supported WM detected"
-        return
+        print -e "No supported WM detected"
+        exit 1
     }
     let term = ($default_term_by_wm | get -o $wm | default "kitty")
 
@@ -829,209 +832,83 @@ def "main restore" [
         }
     })
 
-    # Pull tmux client lists once for matching live windows to saved sessions.
-    let lc_res = (do { tmux list-clients -F "#{client_pid} #{session_name} #{window_index}" } | complete)
-    let local_clients = if $lc_res.exit_code == 0 {
-        $lc_res.stdout | lines | where $it != "" | each { |line|
-            let parts = ($line | split row " ")
-            { pid: ($parts.0 | into int), session: $parts.1, window: ($parts.2 | into int) }
-        }
-    } else { [] }
-    let tc_res = (do { tmux -L thin list-clients -F "#{client_pid} #{session_name}" } | complete)
-    let thin_clients = if $tc_res.exit_code == 0 {
-        $tc_res.stdout | lines | where $it != "" | each { |line|
-            let parts = ($line | split row " ")
-            { pid: ($parts.0 | into int), session: $parts.1 }
-        }
-    } else { [] }
-
     for ws in $workspaces {
         let ws_name = ($ws | get -o name | default "")
         if ($ws_name | is-empty) { continue }
 
         let layout_tree = ($ws | get -o layout | default null)
-        let state = ($ws | get -o state | default {})
+        let ws_state = ($ws | get -o state | default {})
 
         print $"Restoring workspace: ($ws_name)"
 
-        if $layout_tree == null or (($state | columns) | is-empty) {
+        if $layout_tree == null or (($ws_state | columns) | is-empty) {
             continue
         }
 
-        # Enumerate all windows in the tree (matching may pull from any workspace).
-        let tree_json = (ipc "-t get_tree")
-        let tree = ($tree_json | from json)
-        let live_all = (find-workspaces $tree | each {|w| collect-ws-windows $w "" } | flatten)
+        # Step 1: pre-clean — rename target ws to <name>-old, kill terminals there.
+        # Non-terminal windows survive on <name>-old for the user's inspection.
+        pre-clean-target $ws_name --dry-run=$dry_run
 
-        # Match each saved entry (keyed by id) to a live window from the global pool.
-        let saved_ids = ($state | columns | sort-by { |k| $k | into int })
-        mut matches = {}
-        mut available = $live_all
-        for id in $saved_ids {
-            let s = ($state | get $id)
-            let m = (pick-live-match $s $available $local_clients $thin_clients)
-            if $m == null { continue }
-            $matches = ($matches | upsert $id $m.wid)
-            $available = ($available | where wid != $m.wid)
-        }
-
-        # Default: flat — place wids + apply top-level dominant layout. Headless + reliable.
-        # --rebuild: experimental nested container rebuild (flaky due to i3 timing/state).
-        if not $rebuild {
-            for id in $saved_ids {
-                let wid = ($matches | get -o $id | default 0)
-                if $wid <= 0 { continue }
-                let current_ws = (find-wid-workspace $tree $wid)
-                if $current_ws == $ws_name {
-                    if $dry_run { print $"  DRY: wid=($wid) already on ($ws_name), skip" }
-                    continue
-                }
-                # Criteria-only move: no focus switch (avoids flicker). Works when
-                # target ws differs from current ws (same-ws would trigger back_and_forth).
-                let cmd = $"[id=($wid)] floating disable, move --no-auto-back-and-forth container to workspace ($ws_name)"
-                if $dry_run { print $"  DRY: ipc-raw ($cmd)" } else { ipc-raw $cmd; sleep 60ms }
-            }
-
-            let unmatched_ids = ($saved_ids | where { |id| ($matches | get -o $id | default 0) == 0 })
-            if not ($unmatched_ids | is-empty) {
-                if $dry_run {
-                    print $"  DRY: workspace --no-auto-back-and-forth ($ws_name)"
-                } else {
-                    ipc-raw $"workspace --no-auto-back-and-forth ($ws_name)"
-                }
-                for id in $unmatched_ids {
-                    let s = ($state | get $id)
-                    let cmd = (spawn-for $s $term $id)
-                    if ($cmd | is-empty) { print $"  Skipping id ($id): nothing to spawn"; continue }
-                    if $dry_run { print $"  DRY: exec ($cmd)" } else { ipc-raw $"exec ($cmd)" }
-                }
-            }
-
-            let dominant = (compute-dominant-layout $layout_tree)
-            if $dry_run {
-                print $"  DRY: [workspace=($ws_name)] layout ($dominant)"
-            } else {
-                sleep 100ms
-                ipc-raw $"[workspace=($ws_name)] layout ($dominant)"
-            }
-            continue
-        }
-
-        # Rebuild path (--rebuild): use append_layout to build marked container skeleton,
-        # then move each live wid into its parent container by mark. Avoids swallow timing
-        # issues (swallow fires only on new map events, not on move-from-scratchpad).
-        let ws_node = (find-workspace-by-name $tree $ws_name)
-        let current_layout = if $ws_node == null { null } else {
-            (build-workspace-layout $ws_node | get layout)
-        }
-        if $current_layout == $layout_tree {
-            if $dry_run { print $"  DRY: already matches, skip" } else { print "  already matches, skip" }
-            continue
-        }
-
-        let plan = (build-rebuild-plan $layout_tree)
-
-        # Clean stale anchor placeholders from prior attempts (wm-anchor-* only —
-        # never touch other marks which could be on real containers with windows).
-        if not $dry_run {
-            let marks_result = (do { ipc "-t get_marks" } | complete)
-            if $marks_result.exit_code == 0 {
-                let stale_anchors = ($marks_result.stdout | from json | where { |m| $m | str starts-with "wm-anchor-" })
-                for m in $stale_anchors {
-                    try { ipc-raw $"[con_mark=($m)] kill" }
-                    sleep 30ms
-                }
-            }
-        }
-
-        # Park all matched wids + any other on-ws windows to a temp ws to clear target.
-        let live_on_ws = if $ws_node == null { [] } else { (collect-ws-windows $ws_node "") }
-        let matched_wids = ($matches | values)
-        let to_park = (($live_on_ws | get wid) | append $matched_wids | uniq)
-        let park_ws = $"wm_state_park_($ws_name)"
-        for wid in $to_park {
-            let cmd = $"[id=($wid)] floating disable, move --no-auto-back-and-forth container to workspace ($park_ws)"
-            if $dry_run { print $"  DRY: ($cmd)" } else { ipc-raw $cmd; sleep 100ms }
-        }
-        if not $dry_run { sleep 150ms }
-
-        # Write + apply append_layout JSON on now-empty target ws.
-        let tmpfile = $"/tmp/wm-restore-($ws_name).json"
-        $plan.json | to json -r | save -f $tmpfile
+        # Step 2: focus the (now empty) target workspace before append_layout.
+        let focus_cmd = $"workspace --no-auto-back-and-forth ($ws_name)"
         if $dry_run {
-            print $"  DRY: wrote ($tmpfile)"
-            print $"  DRY: workspace --no-auto-back-and-forth ($ws_name)"
-            print $"  DRY: append_layout ($tmpfile)"
+            print $"  DRY: ipc-raw ($focus_cmd)"
         } else {
-            ipc-raw $"workspace --no-auto-back-and-forth ($ws_name)"
-            sleep 80ms
-            ipc-raw $"append_layout ($tmpfile)"
-            sleep 100ms
+            ipc-raw $focus_cmd
         }
 
-        # Set root workspace layout if non-default (splith is workspace default).
-        if $plan.root_type != "splith" {
+        # Step 3: build the respawn plan (append_layout JSON + spawn specs).
+        let plan = (build-respawn-plan $layout_tree $ws_state $term $wm)
+
+        let json_nodes = ($plan.json | get -o nodes | default [])
+        let non_skipped = ($plan.leaf_specs | where { |s| ($s | get -o skipped | default false) == false })
+
+        # Step 4: if every leaf is skip_restore, leave the empty workspace alone.
+        if ($json_nodes | is-empty) and ($non_skipped | is-empty) {
+            print $"  Workspace ($ws_name): skipped — all entries non-terminal"
+            continue
+        }
+
+        # Step 5: write append_layout JSON + apply.
+        if not ($json_nodes | is-empty) {
+            let tmpfile = $"/tmp/wm-restore-($ws_name).json"
+            let append_cmd = $"append_layout ($tmpfile)"
             if $dry_run {
-                print $"  DRY: [workspace=($ws_name)] layout ($plan.root_type)"
+                print $"  DRY: write ($tmpfile)"
+                print $"  DRY: ipc-raw ($append_cmd)"
             } else {
-                ipc-raw $"[workspace=($ws_name)] layout ($plan.root_type)"
-                sleep 50ms
+                $plan.json | to json -r | save -f $tmpfile
+                ipc-raw $append_cmd
+                # Cushion only — correctness comes from the WM swallow firing on
+                # window map. 80ms gives append_layout time to publish the
+                # placeholder cons before we start spawning their occupants.
+                sleep 80ms
             }
         }
 
-        # All leaves (root and nested) now use anchor-based placement. `move to mark`
-        # inserts IMMEDIATELY AFTER the mark, pushing previously-moved siblings right.
-        # Iterate each container's leaves in REVERSE save order so they land in saved
-        # order after the anchor is killed.
-        let all_moves = ($saved_ids
-            | where { |id| ($matches | get -o $id | default 0) > 0 and ($plan.leaf_parents | get -o $id | default "") != "" })
-        let grouped = ($all_moves | group-by { |id| $plan.leaf_parents | get $id })
-        for mark in ($grouped | columns) {
-            let ids_reversed = ($grouped | get $mark | reverse)
-            for id in $ids_reversed {
-                let wid = ($matches | get -o $id | default 0)
-                let cmd = $"[id=($wid)] floating disable, move container to mark ($mark)"
-                if $dry_run { print $"  DRY: ($cmd)" } else { ipc-raw $cmd; sleep 100ms }
-            }
-        }
-
-        # Spawn unmatched ids → route via class spawn + move next to parent anchor.
-        let unmatched_ids = ($saved_ids | where { |id| ($matches | get -o $id | default 0) == 0 })
-        for id in $unmatched_ids {
-            let s = ($state | get $id)
-            let cmd = (spawn-for $s $term $id)
-            if ($cmd | is-empty) { continue }
+        # Step 6: spawn each non-skipped leaf. Title swallow (carrying the tmux
+        # window_id) routes the new window into the correct slot. No mark moves,
+        # no parking, no inter-spawn sleeps — terminals spawn in parallel.
+        for spec in $non_skipped {
+            let exec_cmd = ($spec | get -o exec_cmd | default "")
+            if ($exec_cmd | is-empty) { continue }
+            let cmd = $"exec ($exec_cmd)"
             if $dry_run {
-                print $"  DRY: exec ($cmd)"
+                print $"  DRY: ipc-raw ($cmd)"
             } else {
-                ipc-raw $"exec ($cmd)"
-                sleep 500ms
-                let parent_mark = ($plan.leaf_parents | get -o $id | default "")
-                let cls = ($s | get -o class | default "")
-                if ($parent_mark | is-not-empty) and ($cls | is-not-empty) {
-                    ipc-raw $"[class=^($cls)$] move container to mark ($parent_mark)"
-                    sleep 60ms
-                }
-            }
-        }
-
-        # Kill all anchor placeholders (they have marks starting with `wm-anchor-`).
-        let all_anchors = ($plan.leaf_parents | values | where { |m| ($m | str starts-with "wm-anchor-") } | uniq)
-        for anchor in $all_anchors {
-            if $dry_run {
-                print $"  DRY: [con_mark=($anchor)] kill"
-            } else {
-                try { ipc-raw $"[con_mark=($anchor)] kill" }
-                sleep 40ms
+                ipc-raw $cmd
             }
         }
     }
 
-    # Return to the workspace the user started on (headless finish).
-    if ($start_ws | is-not-empty) and (not $dry_run) {
-        ipc-raw $"workspace --no-auto-back-and-forth ($start_ws)"
-    } else if $dry_run and ($start_ws | is-not-empty) {
-        print $"  DRY: return to starting workspace --no-auto-back-and-forth ($start_ws)"
+    # Return user to their starting workspace (headless finish).
+    if ($start_ws | is-not-empty) {
+        let return_cmd = $"workspace --no-auto-back-and-forth ($start_ws)"
+        if $dry_run {
+            print $"  DRY: ipc-raw ($return_cmd)"
+        } else {
+            ipc-raw $return_cmd
+        }
     }
 
     if $dry_run { print "Dry run complete" } else { print "Restore complete" }
