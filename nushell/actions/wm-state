@@ -1178,6 +1178,110 @@ def build-container-plan [body: record, path_prefix: string] {
     { nodes: $nodes, leaf_parents: $leaf_parents }
 }
 
+# Recursive helper for build-respawn-plan. Produces { nodes, leaf_specs } for the
+# given container body. A skipped leaf contributes only to leaf_specs (no JSON
+# node). A nested container with no resulting child nodes is omitted entirely.
+def build-respawn-container [body: record, state: record, term: string, wm: string] {
+    mut nodes = []
+    mut leaf_specs = []
+    let keys = ($body | columns)
+    for key in $keys {
+        let val = ($body | get $key)
+        if (is-leaf-key $key) {
+            let entry = ($state | get -o $key | default {})
+            let cls = ($entry | get -o class | default "")
+            let skip = ($entry | get -o skip_restore | default false)
+            let wid = ($entry | get -o tmux_window_id | default "")
+            let session = ($entry | get -o session | default "")
+            let is_term = ($terminal_ids | any {|t| $t == $cls })
+
+            if $skip {
+                # Skip: only leaf_specs entry, no JSON node. Saved state still
+                # carries the id so caller can decide whether to spawn elsewhere.
+                $leaf_specs = ($leaf_specs | append { id: $key, skipped: true })
+                continue
+            }
+
+            if $is_term and ($wid | is-not-empty) and ($session | is-not-empty) {
+                # Happy path: tmux-attached terminal. Match by title which
+                # carries the tmux window_id at the end (set by tmux-start).
+                # window_id is always digits (we strip the leading '@' at save
+                # time) so no regex escaping is required for $wid here — the
+                # only regex metacharacters in the pattern come from the literal
+                # `.*` and `$` we add ourselves.
+                $nodes = ($nodes | append { swallows: [{ title: $".* ($wid)$" }], type: "con" })
+                $leaf_specs = ($leaf_specs | append {
+                    id: $key,
+                    swallow_kind: "title",
+                    exec_cmd: $"($term) -e tmux attach -t ($session)",
+                })
+            } else if $is_term {
+                # Best-effort fallback: terminal entry without a usable
+                # tmux_window_id (legacy save, tmux query failed at save time,
+                # or saved title was empty). Class swallow is shared across all
+                # instances of the same terminal — placement is non-deterministic
+                # if multiple new terminals appear concurrently. Acceptable for
+                # the rare degraded path; happy path uses title above.
+                # Use `class` for both i3 and sway: i3's append_layout honors
+                # `class`; sway honors it via the X11 compat path. Avoid
+                # `app_id` here to keep this fallback uniform across WMs.
+                $nodes = ($nodes | append { swallows: [{ class: $"^($cls)$" }], type: "con" })
+                $leaf_specs = ($leaf_specs | append {
+                    id: $key,
+                    swallow_kind: "class",
+                    exec_cmd: $term,
+                })
+            } else {
+                # Non-terminal entry without skip_restore: nothing for the new
+                # respawn flow to do. Do not emit a JSON node; record skipped
+                # in leaf_specs so the caller has full visibility.
+                $leaf_specs = ($leaf_specs | append { id: $key, skipped: true })
+            }
+        } else {
+            # Container key. Strip uniqueness suffix (-2, -3, ...) before emit.
+            let layout_type = ($key | split row "-" | first)
+            let sub = (build-respawn-container $val $state $term $wm)
+            $leaf_specs = ($leaf_specs | append $sub.leaf_specs)
+            # Empty container body after skip filtering -> omit the entire
+            # container so we don't append an empty con (which would render
+            # as a stray empty pane).
+            if (($sub.nodes | length) > 0) {
+                $nodes = ($nodes | append {
+                    layout: $layout_type,
+                    type: "con",
+                    nodes: $sub.nodes,
+                })
+            }
+        }
+    }
+    { nodes: $nodes, leaf_specs: $leaf_specs }
+}
+
+# Build append_layout JSON + spawn specs for a workspace layout tree.
+# Returns: { json: <append_layout-record>, leaf_specs: [...] }
+#   json       — feed to append_layout via tmpfile. Top-level shape:
+#                  { layout: <root_type>, type: "con", nodes: [...] }
+#                Empty `nodes` means "every leaf was skip_restore"; caller
+#                should elide the append_layout call entirely.
+#   leaf_specs — list of `{ id, swallow_kind, exec_cmd, skipped? }`. Skipped
+#                entries have only `{ id, skipped: true }`; non-skipped entries
+#                carry the exec_cmd to issue (`<term> -e tmux attach -t <ses>`
+#                for the title path, bare `<term>` for the class fallback).
+#
+# Drives the new respawn flow: append_layout publishes placeholders with title
+# or class swallows; spawn loop issues `exec` commands and the WM swallow fires
+# on map. No live-window matching or move-by-mark involved.
+def build-respawn-plan [layout_tree: record, state: record, term: string, wm: string] {
+    let root_key = ($layout_tree | columns | first)
+    let root_body = ($layout_tree | get $root_key)
+    let root_type = ($root_key | split row "-" | first)
+    let res = (build-respawn-container $root_body $state $term $wm)
+    {
+        json: { layout: $root_type, type: "con", nodes: $res.nodes },
+        leaf_specs: $res.leaf_specs,
+    }
+}
+
 # Descend single-child-container wrappers to find the effective layout type.
 # {splith: {tabbed: {1: a, 2: b}}} → "tabbed" (since outer splith has one child).
 def compute-dominant-layout [layout_tree: record] {
