@@ -250,18 +250,6 @@ def find-workspace-by-name [tree: record, name: string] {
     if ($m | is-empty) { null } else { $m | first }
 }
 
-# Find which workspace name a given wid currently belongs to, or null.
-def find-wid-workspace [tree: record, target_wid: int] {
-    let all_ws = (find-workspaces $tree)
-    for ws in $all_ws {
-        let leaves = (collect-ws-windows $ws "")
-        if ($leaves | where wid == $target_wid | is-not-empty) {
-            return ($ws | get name)
-        }
-    }
-    null
-}
-
 # Resolve the requested workspace scope to a list of names.
 # Empty list means "all workspaces" (default behavior).
 # Errors on mutually exclusive flags.
@@ -282,40 +270,6 @@ def resolve-target-ws [workspace: string, current: bool] {
         return [($focused | first | get name)]
     }
     []
-}
-
-# Pick the best live window match for a saved state entry.
-# Priority: wid -> pid -> terminal tmux session -> class. Returns null if no match.
-def pick-live-match [saved: record, available: list<record>, local_clients: list<record>, thin_clients: list<record>] {
-    let saved_wid = ($saved | get -o wid | default 0)
-    let saved_pid = ($saved | get -o pid | default 0)
-    let saved_class = ($saved | get -o class | default "")
-    let saved_session = ($saved | get -o session | default "")
-    let saved_stype = ($saved | get -o session_type | default "")
-
-    if $saved_wid > 0 {
-        let m = ($available | where wid == $saved_wid)
-        if not ($m | is-empty) { return ($m | first) }
-    }
-    if $saved_pid > 0 {
-        let m = ($available | where pid == $saved_pid)
-        if not ($m | is-empty) { return ($m | first) }
-    }
-    if ($saved_session | is-not-empty) {
-        let clients = if $saved_stype == "thin" { $thin_clients } else { $local_clients }
-        let tgt = ($clients | where session == $saved_session)
-        if not ($tgt | is-empty) {
-            let client_pid = ($tgt | first | get pid)
-            for l in $available {
-                if $l.pid > 0 and (is-descendant $client_pid $l.pid) { return $l }
-            }
-        }
-    }
-    if ($saved_class | is-not-empty) {
-        let m = ($available | where class == $saved_class)
-        if not ($m | is-empty) { return ($m | first) }
-    }
-    null
 }
 
 # List current workspaces with layout tree + state entries.
@@ -573,116 +527,6 @@ def "main edit" [] {
     ^($env.EDITOR) $state_file
 }
 
-# Restore WM workspaces + terminals from saved state
-# Place a single leaf onto the target workspace. Moves matched wid or spawns fresh.
-# After placement the leaf is focused (needed for subsequent split/layout wrap).
-# Criteria-chain form (comma) keeps all ops scoped to the same wid and avoids a
-# standalone `focus` that would switch workspaces before the move.
-def place-leaf-tree [
-    id: string,
-    state: record,
-    matches: record,
-    ws_name: string,
-    term: string,
-    tree_ref: record,
-    dry_run: bool,
-] {
-    let wid = ($matches | get -o $id | default 0)
-    if $wid > 0 {
-        let current_ws = (find-wid-workspace $tree_ref $wid)
-        let cmd = if $current_ws == $ws_name {
-            # Already on target — just focus + clear floating.
-            $"[id=($wid)] floating disable, focus"
-        } else {
-            # Move into target ws, then focus (all criteria-chained).
-            $"[id=($wid)] floating disable, move --no-auto-back-and-forth container to workspace ($ws_name), focus"
-        }
-        if $dry_run {
-            print $"  DRY: ($cmd)"
-        } else {
-            ipc-raw $cmd
-            sleep 60ms
-        }
-    } else {
-        let s = ($state | get $id)
-        let cmd = (spawn-for $s $term $id)
-        if ($cmd | is-empty) {
-            print $"  Skipping id ($id): nothing to spawn"
-            return
-        }
-        if $dry_run {
-            print $"  DRY: workspace ($ws_name); exec ($cmd)"
-        } else {
-            ipc-raw $"workspace --no-auto-back-and-forth ($ws_name)"
-            ipc-raw $"exec ($cmd)"
-            sleep 500ms
-        }
-    }
-}
-
-# Recursive: build a container's contents from `body` on target workspace.
-# Caller ensures workspace is target and empty (or tolerate existing wrapping).
-# After a non-root call: the current focus is moved up one level via `focus parent` so
-# the parent's next sibling lands outside this container.
-def restore-container-tree [
-    body: record,
-    container_type: string,
-    is_root: bool,
-    state: record,
-    matches: record,
-    ws_name: string,
-    term: string,
-    tree_ref: record,
-    dry_run: bool,
-] {
-    let keys = ($body | columns)
-    if ($keys | is-empty) { return }
-
-    # Place first entry
-    let first_key = ($keys | first)
-    let first_val = ($body | get $first_key)
-    if (is-leaf-key $first_key) {
-        place-leaf-tree $first_key $state $matches $ws_name $term $tree_ref $dry_run
-    } else {
-        let nested_type = ($first_key | split row "-" | first)
-        restore-container-tree $first_val $nested_type false $state $matches $ws_name $term $tree_ref $dry_run
-    }
-
-    # Wrap first-placed (or nested wrapper) with this container's layout.
-    # Skip at root: `[workspace=X] layout Y` rewrites the workspace's first child
-    # container layout, which would clobber any nested container we just built.
-    if not $is_root {
-        if $dry_run {
-            print $"  DRY: split v; layout ($container_type)"
-        } else {
-            try { ipc-raw $"split v; layout ($container_type)" }
-            sleep 50ms
-        }
-    }
-
-    # Place remaining entries; each lands as sibling inside current container.
-    for key in ($keys | skip 1) {
-        let val = ($body | get $key)
-        if (is-leaf-key $key) {
-            place-leaf-tree $key $state $matches $ws_name $term $tree_ref $dry_run
-        } else {
-            let nested_type = ($key | split row "-" | first)
-            restore-container-tree $val $nested_type false $state $matches $ws_name $term $tree_ref $dry_run
-        }
-    }
-
-    # Exit this container scope so outer recursion's next sibling lands at its own level.
-    # Tolerate failure (focus parent can error if already at root).
-    if not $is_root {
-        if $dry_run {
-            print "  DRY: focus parent"
-        } else {
-            try { ipc-raw "focus parent" }
-            sleep 50ms
-        }
-    }
-}
-
 # Pre-clean a target workspace before a restore run.
 #
 # Strategy:
@@ -937,124 +781,6 @@ def term-class-flag [term: string, slot_id: string] {
     }
 }
 
-# Whether the given terminal supports a class/app_id override on launch.
-def term-supports-slot [term: string] {
-    $term in ["kitty", "alacritty", "Alacritty", "foot", "xterm"]
-}
-
-# Build swallow criterion for a leaf id. If override_class given (reuse of a live window),
-# swallow by real class/app_id. Else for terminals use slot class, else natural class.
-def swallow-for [entry: record, term: string, wm: string, id: string, override_class: string] {
-    if ($override_class | is-not-empty) {
-        if $wm == "sway" {
-            return { app_id: $"^($override_class)$" }
-        } else {
-            return { class: $"^($override_class)$" }
-        }
-    }
-    let cls = ($entry | get -o class | default "")
-    let is_term = ($terminal_ids | any {|t| $t == $cls })
-    if $is_term and (term-supports-slot $term) {
-        let slot = (slot-id-for $id)
-        if $wm == "sway" {
-            { app_id: $"^($slot)$" }
-        } else {
-            { class: $"^($slot)$" }
-        }
-    } else if ($cls | is-not-empty) {
-        { class: $"^($cls)$" }
-    } else {
-        { class: "^.*$" }
-    }
-}
-
-# Convert a container body (record of key → leaf-class or nested body) into a list of
-# i3 append_layout child nodes.
-def body-to-i3-children [body: record, state: record, term: string, wm: string, overrides: record] {
-    $body | columns | each {|k|
-        let v = ($body | get $k)
-        if (is-leaf-key $k) {
-            let entry = ($state | get -o $k | default {})
-            let ovr = ($overrides | get -o $k | default "")
-            let swallow = (swallow-for $entry $term $wm $k $ovr)
-            { swallows: [$swallow], type: "con" }
-        } else {
-            # Container entry. Key may be derived (splith-2); strip suffix.
-            let layout_type = ($k | split row "-" | first)
-            let child_nodes = (body-to-i3-children $v $state $term $wm $overrides)
-            { layout: $layout_type, type: "con", nodes: $child_nodes }
-        }
-    }
-}
-
-# Build full append_layout JSON from a workspace layout record { <type>: body }.
-# (Kept for reference / potential future swallow-driven restore. Main restore currently
-# rebuilds imperatively because i3 placeholder swallows don't fire on move-from-scratchpad.)
-def layout-to-i3-json [layout_tree: record, state: record, term: string, wm: string, overrides: record, ws_name: string] {
-    let key = ($layout_tree | columns | first)
-    let body = ($layout_tree | get $key)
-    let layout_type = ($key | split row "-" | first)
-    let child_nodes = (body-to-i3-children $body $state $term $wm $overrides)
-    { layout: $layout_type, type: "con", nodes: $child_nodes }
-}
-
-# Build an append_layout plan for a workspace layout tree.
-# Produces JSON with marked empty containers (no placeholders) + a parent-mark
-# map for each leaf id so we can `move to mark` the real windows after append.
-# Returns: { json: record, leaf_parents: { "<leaf_id>": "<mark-or-empty>" } }
-def build-rebuild-plan [layout_tree: record] {
-    let root_key = ($layout_tree | columns | first)
-    let root_body = ($layout_tree | get $root_key)
-    let root_type = ($root_key | split row "-" | first)
-    let res = (build-container-plan $root_body "")
-    {
-        json: { layout: $root_type, type: "con", nodes: $res.nodes },
-        leaf_parents: $res.leaf_parents,
-        root_type: $root_type,
-    }
-}
-
-# Recursive: produce child nodes for a container body + leaf→anchor-mark map.
-# Every container (INCLUDING the root) gets an anchor placeholder if it has direct
-# leaf children. `move container to mark <anchor>` places the moved window as
-# sibling of the anchor, i.e. inside the anchor's parent. Root-level leaves use
-# the root anchor so they land inside the top-level splith/etc con — bypasses
-# i3's `workspace_layout tabbed` default which would otherwise wrap them.
-def build-container-plan [body: record, path_prefix: string] {
-    mut nodes = []
-    mut leaf_parents = {}
-    mut this_anchor = ""
-    let keys = ($body | columns)
-    let anchor_suffix = if ($path_prefix | is-empty) { "root" } else { ($path_prefix | str replace -a '.' '-') }
-    let anchor_mark = $"wm-anchor-($anchor_suffix)"
-    for i in 0..<($keys | length) {
-        let key = ($keys | get $i)
-        let val = ($body | get $key)
-        if (is-leaf-key $key) {
-            if ($this_anchor | is-empty) {
-                $this_anchor = $anchor_mark
-                $nodes = ($nodes | append {
-                    type: "con",
-                    marks: [$this_anchor],
-                    swallows: [{ class: "^wm-state-never-match$" }],
-                })
-            }
-            $leaf_parents = ($leaf_parents | upsert $key $this_anchor)
-        } else {
-            let nested_type = ($key | split row "-" | first)
-            let sub_path = if ($path_prefix | is-empty) { $"($i)" } else { $"($path_prefix).($i)" }
-            let sub = (build-container-plan $val $sub_path)
-            $nodes = ($nodes | append {
-                layout: $nested_type,
-                type: "con",
-                nodes: $sub.nodes,
-            })
-            $leaf_parents = ($leaf_parents | merge $sub.leaf_parents)
-        }
-    }
-    { nodes: $nodes, leaf_parents: $leaf_parents }
-}
-
 # Recursive helper for build-respawn-plan. Produces { nodes, leaf_specs } for the
 # given container body. A skipped leaf contributes only to leaf_specs (no JSON
 # node). A nested container with no resulting child nodes is omitted entirely.
@@ -1159,21 +885,6 @@ def build-respawn-plan [layout_tree: record, state: record, term: string, wm: st
     }
 }
 
-# Descend single-child-container wrappers to find the effective layout type.
-# {splith: {tabbed: {1: a, 2: b}}} → "tabbed" (since outer splith has one child).
-def compute-dominant-layout [layout_tree: record] {
-    let key = ($layout_tree | columns | first)
-    let body = ($layout_tree | get $key)
-    let keys = ($body | columns)
-    if ($keys | length) == 1 {
-        let k = ($keys | first)
-        if not (is-leaf-key $k) {
-            return (compute-dominant-layout { ($k): ($body | get $k) })
-        }
-    }
-    ($key | split row "-" | first)
-}
-
 # Compose a shell exec string to launch the given terminal with a slot id.
 # extra_env: env vars prefix (e.g. "TMUX_TARGET=foo"). trailing: command inside term.
 def build-term-spawn [term: string, slot_id: string, extra_env: string, trailing: string] {
@@ -1215,15 +926,6 @@ def spawn-for [entry: record, term: string, id: string] {
 
     # Non-terminal: exec by natural class as a best-effort launcher.
     if ($cls | is-not-empty) { $cls } else { "" }
-}
-
-# Old helper: build exec command with terminal in simple form. Retained for callers.
-def term-exec-line [term: string, cmd: string] {
-    if $term == "kitty" {
-        $"($term) ($cmd)"
-    } else {
-        $"($term) -e ($cmd)"
-    }
 }
 
 def main [] {
