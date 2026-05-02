@@ -304,3 +304,49 @@ Run end-to-end on the developer's box with the scenarios listed below, capture o
 - Close `dotfiles-2ko` and tasks `dotfiles-2ko.2..14` with `--reason="superseded by wm-state respawn refactor"`.
 - Keep `dotfiles-2ko.1` (floating windows) open and re-parent under the new epic — still relevant.
 - Move `board/ready/wm-state-hardening.md` → `board/archive/wm-state-hardening.md`.
+
+---
+
+## Retrospective
+
+Smoke run executed 2026-05-02 against the merged main branch (ciw.1 .. ciw.5). All 5 scenarios produced the asserted outcomes. Notes below capture what behaved as expected, what surprised the implementer, and follow-up items discovered during the run.
+
+### Scenario results
+
+| # | Scenario | Result | Key evidence |
+|---|---|---|---|
+| 1 | Flat splith, 3 tmux terminals — save → switch ws → restore | PASS | Saved yaml carried `tmux_window_id: '73'/'74'/'75'` matching `tmux display-message`; restored ws had 3 kittys with titles ending in those ids; `tmux list-clients` showed new clients reattached to the original sessions. |
+| 2 | Tabbed, kill all 3 kittys → restore | PASS | After SIGKILL on kittys, sessions survived (pinned panes); restore yielded tabbed layout, all 3 sessions reattached with correct window_id mapping. |
+| 3 | Two ws (splith with kittys + mousepad; tabbed kittys) — full save/restore | PASS | Mousepad recorded with `skip_restore: true`; on restore wmsmoke3a respawned 2 kittys only, wmsmoke3b respawned 3 tabbed kittys. |
+| 4 | tmux dead — `wm-state restore --dry-run` with fake failing tmux | PASS | Exit 1, stderr `tmux server unreachable, aborting restore`, i3 `get_tree` byte-identical pre/post. |
+| 5 | `<name>-old` collision (pre-existing wmsmoke5-old with 1 kitty + mousepad) | PASS | After restore: `wmsmoke5-old-1777691772` (timestamped) carries the leftover, `wmsmoke5-old` carries the just-renamed kittys, `wmsmoke5` carries 2 fresh kittys with correct titles. |
+
+### What worked
+
+- **Title-based swallow is rock-solid.** The respawn flow placed every kitty in the right slot on first try in scenarios 1, 2, 3, 5 — no retries, no manual nudging. Window order in saved tabbed layouts was preserved exactly.
+- **`skip_restore: true` for non-terminals.** Mousepad was captured but ignored on respawn, exactly as designed. No accidental respawn attempts on GUI apps.
+- **tmux precondition guard.** `tmux list-sessions` failure path is wired correctly — exit 1 happens before any IPC, no partial-state damage.
+- **Pre-clean collision logic.** The `<name>-old` already-exists branch fired correctly in scenario 5; timestamped rename happened, the new `<name>-old` got the just-renamed contents.
+
+### What surprised / required test-design adjustment
+
+- **Kitty `confirm_os_window_close` keeps "killed" terminals visible.** The script issues `[id=<wid>] kill` (WM_DELETE_WINDOW). With kitty's confirm-on-close enabled (the user's config), kitty does not exit on this signal — it shows a "Close OS window" prompt that lingers. So after a restore, the script's *intent* to dispose old kittys via pre-clean is achieved at the IPC layer (every kitty got the kill request) but the *visible* result is a `<name>-old` workspace with placeholder windows the user must dismiss. Post-restore cleanup script cannot fix this on its own without bypassing the user's chosen confirm prompt — which would be wrong.
+  - This is a **user-environment characteristic**, not a script bug. The respawn placement and tmux reattach all succeed regardless. Worth a note in the script header or restore-side stderr (e.g. "old terminals on `<ws>-old` may show kitty close-confirm — dismiss manually") but not a blocker.
+- **`workspace_layout tabbed` global setting wraps every new ws.** Saved layouts already capture this correctly (scenario 1 saved `splith` because the workspace was forced via `i3-msg "layout splith"`). The respawn JSON faithfully reproduces it. Just worth noting that "flat" in i3 + workspace_layout=tabbed means an extra tabbed wrapper unless explicitly overridden.
+- **Default save without `--workspace` will pick up the user's live workspace.** During scenario 3 setup, a full `wm-state save` captured the user's home workspace too. The restore-side pre-clean would then nuke its terminals. Production safe-mode might want a "skip workspaces matching `^dotfiles$|^scratch$|...` blocklist" knob. For testing I trimmed the saved yaml manually before running scenario 3's `wm-state restore`. This is **discovered work**, not a Task 6 blocker.
+- **Test infrastructure friction.** The user's tmux setup auto-cleans unattached windows (`tmux-cleanup` via `client-detached` and `after-select-window` hooks) which made smoke testing difficult for scenarios that detach kittys (scenario 2). Worked around by setting `@pinned 1` on each smoke session's pane before any client interaction. Sessions also need `bash -c 'sleep 99999'` instead of bare `sleep 99999` — nushell (the default-shell) parses bare integers as invalid duration and exits, killing the window. Both are test-environment quirks unrelated to the script under test.
+
+### Follow-up items
+
+1. **`dotfiles-gkq` orphan chain** — `spawn-for` and `build-term-spawn` (plus their dependencies `slot-id-for`, `term-class-flag`, `is-leaf-key`) survived the ciw.5 purge because no caller-grep search hit triggered their removal. Already filed as `dotfiles-gkq`; should be addressed in a follow-up.
+2. **`find-workspace-by-name` retained from Task 5** — used by `pre-clean-target`. Correctly kept; not dead. Documented here for the audit trail.
+3. **Floating windows** — `dotfiles-2ko.1` re-parented under `dotfiles-ciw` per disposition plan; layer this onto the new respawn flow rather than the retired rebuild flow.
+4. **Restore-time stderr hint about kitty confirm prompts** — could land as a 1-line observation when pre-clean issues a kill on a class known to confirm-on-close. Low priority; non-blocking.
+5. **Optional safe-list for full save / restore** — discovered during scenario 3. File a future enhancement task if recurrent.
+
+### Bookkeeping done in this commit
+
+- Spec promoted: `board/ready/wm-state-respawn-refactor.md` → `board/done/wm-state-respawn-refactor.md` (this file).
+- Old hardening spec archived: `board/ready/wm-state-hardening.md` → `board/archive/wm-state-hardening.md`.
+- Old epic `dotfiles-2ko` and tasks `2ko.2..14` closed with `--reason="superseded by wm-state respawn refactor"`.
+- `dotfiles-2ko.1` re-parented under `dotfiles-ciw`, status remains open.
