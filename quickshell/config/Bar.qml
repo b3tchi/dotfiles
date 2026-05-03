@@ -62,57 +62,55 @@ PanelWindow {
     readonly property int fontSize: isSway ? 14 : 16
     readonly property int nativeRender: Text.NativeRendering
 
-    // Workspaces sorted: numbered first (by number), then named (alphabetical)
-    // I3.workspaces is an ObjectModel; .values gives a JS array snapshot.
-    // Bind on .count so the property re-evaluates when workspaces change.
-    // Workspaces in display order from i3 IPC (matches ws-switch.nu)
-    // I3.workspaces is used for reactive properties (focused/urgent),
-    // but the canonical order comes from i3-msg sorted by num.
-    property var wsOrder: []   // ordered workspace names from i3
-    readonly property int _wsCount: I3.workspaces.count
+    // Workspaces sourced directly from i3 IPC (authoritative). Quickshell's
+    // I3.workspaces ObjectModel was previously used as the data source, but it
+    // does not always track `rename`/`empty`/`init` events fired by wm-state
+    // restore — leaving stale entries (e.g. ghost `dotfiles-old`) in the bar
+    // until quickshell restarts. Reading get_workspaces directly via i3-msg on
+    // every workspace event matches what i3 actually has.
+    property var sortedWorkspaces: []
 
-    property var sortedWorkspaces: {
-        void root._wsCount
-        void root.wsOrder
-        // Build a rank map from wsOrder
-        var rank = {}
-        for (var r = 0; r < wsOrder.length; r++)
-            rank[wsOrder[r]] = r
-        var list = []
-        var vals = I3.workspaces.values
-        if (!vals) return list
-        for (var i = 0; i < vals.length; i++) {
-            var w = vals[i]
-            list.push({name: w.name, number: w.number, focused: w.focused, active: w.active, urgent: w.urgent, wsId: w.id})
-        }
-        list.sort(function(a, b) {
-            var ra = rank[a.name] !== undefined ? rank[a.name] : 99999
-            var rb = rank[b.name] !== undefined ? rank[b.name] : 99999
-            return ra - rb
-        })
-        return list
-    }
-
-    // Fetch workspace order from i3 IPC (stable sort by num)
+    // Fetch full workspace records from i3 IPC. Re-runs on every workspace
+    // event (subscribe stream below) plus a 2s safety-net timer.
     Process {
-        id: wsOrderProc
+        id: wsListProc
         running: true
-        command: ["sh", "-c", root.wmMsg + " -t get_workspaces | python3 -c \"import json,sys; ws=json.load(sys.stdin); ws.sort(key=lambda w:w['num']); [print(w['name']) for w in ws]\""]
+        command: ["sh", "-c", root.wmMsg + " -t get_workspaces"]
         stdout: SplitParser {
-            property var buf: []
-            onRead: data => { var v = data.trim(); if (v) buf.push(v) }
+            property string buf: ""
+            onRead: data => { wsListProc.stdout.buf += data }
         }
-        onExited: { root.wsOrder = wsOrderProc.stdout.buf; wsOrderProc.stdout.buf = []; wsOrderTimer.restart() }
+        onExited: {
+            try {
+                var arr = JSON.parse(wsListProc.stdout.buf)
+                arr.sort(function(a, b) { return a.num - b.num })
+                var out = []
+                for (var i = 0; i < arr.length; i++) {
+                    var w = arr[i]
+                    out.push({
+                        name: w.name,
+                        number: w.num,
+                        focused: w.focused,
+                        active: w.visible,
+                        urgent: w.urgent,
+                        wsId: w.id
+                    })
+                }
+                root.sortedWorkspaces = out
+            } catch (err) {}
+            wsListProc.stdout.buf = ""
+            wsListTimer.restart()
+        }
     }
-    Timer { id: wsOrderTimer; interval: 2000; onTriggered: wsOrderProc.running = true }
+    Timer { id: wsListTimer; interval: 2000; onTriggered: wsListProc.running = true }
 
-    // Also refresh on workspace events
+    // Refresh on every workspace event (init, focus, empty, urgent, rename, move, restored, reload)
     Process {
         id: wsEventSub
         running: true
         command: [root.wmMsg, "-t", "subscribe", "-m", '["workspace"]']
         stdout: SplitParser {
-            onRead: data => wsOrderProc.running = true
+            onRead: data => wsListProc.running = true
         }
         onExited: running = true
     }
