@@ -605,73 +605,25 @@ def isolate-target [name: string, --dry-run] {
     }
 }
 
-# Find a live window matching a saved GUI leaf. Match priority:
-#   1. saved wid still alive in the tree (same i3 session).
-#   2. exact title match within saved class.
-#   3. title prefix match (longest common prefix wins) within saved class.
-#   4. first window of saved class.
+# Find a live window matching a saved GUI leaf. wid-only match: saved_wid
+# alive in the tree (same i3 session) AND its class still matches saved.
 # Returns wid or 0 if no match.
+#
+# After logout/login all wids are fresh and this always returns 0 — that's by
+# design. GUI windows can't be relaunched cleanly from a wm-state save
+# (killing them kills application state); after a fresh login the user
+# relaunches their GUI apps manually and the class swallow on the placeholder
+# con consumes them into the saved slot when they map.
 def find-live-gui-wid [tree: record, saved: record] {
     let saved_cls = ($saved | get -o class | default "")
-    let saved_title = ($saved | get -o title | default "")
     let saved_wid = ($saved | get -o saved_wid | default 0)
-
-    if ($saved_cls | is-empty) { return 0 }
-
+    if $saved_wid <= 0 or ($saved_cls | is-empty) { return 0 }
     let all_leaves = (find-workspaces $tree | each {|w| collect-ws-windows $w "" } | flatten)
-
-    # 1. saved wid still alive
-    if $saved_wid > 0 {
-        let m = ($all_leaves | where wid == $saved_wid)
-        if not ($m | is-empty) {
-            let pick = ($m | first)
-            if $pick.class == $saved_cls { return $saved_wid }
-        }
-    }
-
-    let candidates = ($all_leaves | where class == $saved_cls)
-    if ($candidates | is-empty) { return 0 }
-
-    # 2 + 3. title match — collect window names from tree leaves. collect-ws-windows
-    # records wid/class/pid/path but not title; query tree directly here.
-    let all_ws = (find-workspaces $tree)
-    let titled = ($all_ws | each {|w| collect-titled-leaves $w } | flatten)
-    if ($saved_title | is-not-empty) {
-        let exact = ($titled | where { |l| $l.class == $saved_cls and $l.title == $saved_title })
-        if not ($exact | is-empty) { return ($exact | first | get wid) }
-        # Prefix match: longest shared prefix wins. Coarse but cheap.
-        let prefix_len = ($saved_title | str length)
-        let prefixed = ($titled
-            | where { |l| $l.class == $saved_cls and (($l.title | default "") | str starts-with ($saved_title | str substring 0..($prefix_len / 2 | math floor))) })
-        if not ($prefixed | is-empty) { return ($prefixed | first | get wid) }
-    }
-
-    # 4. first of class
-    return ($candidates | first | get wid)
-}
-
-# Collect leaves with title (name) field. Mirror of collect-ws-windows but
-# includes title — used only by GUI matcher to keep the hot save path light.
-def collect-titled-leaves [node: record] {
-    let children = ($node | get -o nodes | default [])
-    let floats = ($node | get -o floating_nodes | default [])
-    if ($children | is-empty) and ($floats | is-empty) {
-        let wid = ($node | get -o window | default 0)
-        if $wid > 0 {
-            let cls = (node-class $node)
-            let title = ($node | get -o name | default "")
-            return [{ wid: $wid, class: $cls, title: $title }]
-        }
-        return []
-    }
-    mut out = []
-    for c in $children {
-        $out = ($out | append (collect-titled-leaves $c))
-    }
-    for c in $floats {
-        $out = ($out | append (collect-titled-leaves $c))
-    }
-    $out
+    let m = ($all_leaves | where wid == $saved_wid)
+    if ($m | is-empty) { return 0 }
+    let pick = ($m | first)
+    if $pick.class != $saved_cls { return 0 }
+    $saved_wid
 }
 
 # Kill any stale wm-gui-* mark anchors left from a prior failed restore.
