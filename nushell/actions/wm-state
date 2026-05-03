@@ -1041,13 +1041,39 @@ def build-respawn-container [body: record, state: record, term: string, wm: stri
 # Drives the new respawn flow: append_layout publishes placeholders with title
 # or class swallows; spawn loop issues `exec` commands and the WM swallow fires
 # on map. No live-window matching or move-by-mark involved.
-def build-respawn-plan [layout_tree: record, state: record, term: string, wm: string, ws_name: string] {
+# Collapse `{splith: {splith: ...}}` style redundant wrappers introduced by
+# old save+restore iterations (where append_layout added a wrapper con whose
+# layout matched the workspace, then save re-captured it as a nested splith).
+# Walks the tree top-down: while the body has exactly one child whose key is
+# a container of the same type as the parent, descend.
+def collapse-single-wrappers [layout_tree: record] {
     let root_key = ($layout_tree | columns | first)
     let root_body = ($layout_tree | get $root_key)
     let root_type = ($root_key | split row "-" | first)
+    let body_keys = ($root_body | columns)
+    if ($body_keys | length) != 1 { return $layout_tree }
+    let only_key = ($body_keys | first)
+    if (is-leaf-key $only_key) { return $layout_tree }
+    let child_type = ($only_key | split row "-" | first)
+    if $child_type != $root_type { return $layout_tree }
+    # Same-type single-child wrapper detected. Hoist the child's body up and
+    # re-check (multiple wrappers may have stacked).
+    let child_body = ($root_body | get $only_key)
+    collapse-single-wrappers { ($root_type): $child_body }
+}
+
+def build-respawn-plan [layout_tree: record, state: record, term: string, wm: string, ws_name: string] {
+    let normalized = (collapse-single-wrappers $layout_tree)
+    let root_key = ($normalized | columns | first)
+    let root_body = ($normalized | get $root_key)
+    let root_type = ($root_key | split row "-" | first)
     let res = (build-respawn-container $root_body $state $term $wm $ws_name)
+    # type:"workspace" at root — same shape i3-save-tree emits. append_layout
+    # merges the children into the existing workspace and sets the workspace
+    # layout, instead of wrapping them in an extra splith con (which would
+    # accumulate one extra layer per save+restore iteration).
     {
-        json: { layout: $root_type, type: "con", nodes: $res.nodes },
+        json: { type: "workspace", layout: $root_type, nodes: $res.nodes },
         leaf_specs: $res.leaf_specs,
     }
 }
