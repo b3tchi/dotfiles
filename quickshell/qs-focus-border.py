@@ -1,10 +1,24 @@
 #!/usr/bin/env python3
 """Minimal i3 focus border — replaces xborders-patched.
 Started and managed by quickshell (config/FocusBorder.qml)."""
-import gi, json, subprocess, sys, math, signal, threading
+import gi, json, subprocess, sys, math, signal, threading, fcntl, os
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GLib
 import cairo
+
+# Single-instance lock. Orphaned instances (parent quickshell crashed) keep
+# drawing stale borders, producing the union of multiple frames at different
+# sizes — looks like the frame wraps a parent container.
+_lock_path = os.path.join(
+    os.environ.get('XDG_RUNTIME_DIR', '/tmp'), 'qs-focus-border.lock'
+)
+_lock_fp = open(_lock_path, 'w')
+try:
+    fcntl.flock(_lock_fp.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+except OSError:
+    sys.exit(0)
+_lock_fp.write(str(os.getpid()))
+_lock_fp.flush()
 
 BW, BR = 2, 4
 BC = (0x16/255, 0xa0/255, 0x85/255)
@@ -76,13 +90,21 @@ def should_ignore(c):
     return False
 
 
-def apply_geom(c):
+def apply_geom(c, parents):
     if should_ignore(c):
         border.hide()
         return
     r = c.get('rect', {})
     deco_h = c.get('deco_rect', {}).get('height', 0)
-    # rect starts below title bar — extend upward to include it
+    # rect starts below title bar — extend upward to include it.
+    # Skip the extension when leaf is inside splith/splitv that is itself
+    # inside tabbed/stacked: i3 reports deco_h=24 for the leaf even though
+    # no per-leaf title is actually rendered (the tab strip belongs to the
+    # splith intermediate, not this leaf).
+    in_tabbed = any(p.get('layout') in ('tabbed', 'stacked') for p in parents)
+    direct_in_tabbed = parents and parents[-1].get('layout') in ('tabbed', 'stacked')
+    if in_tabbed and not direct_in_tabbed:
+        deco_h = 0
     x = r.get('x', 0)
     y = r.get('y', 0) - deco_h
     w = r.get('width', 0)
@@ -157,18 +179,19 @@ def refresh_focused():
                 subprocess.check_output(['i3-msg', '-t', 'get_tree']).decode()
             )
 
-            def walk(node):
+            def walk(node, parents):
                 if node.get('focused') and node.get('window'):
-                    return node
+                    return node, parents
                 for child in node.get('nodes', []) + node.get('floating_nodes', []):
-                    result = walk(child)
+                    result = walk(child, parents + [node])
                     if result:
                         return result
                 return None
 
-            found = walk(tree)
-            if found:
-                GLib.idle_add(apply_geom, found)
+            result = walk(tree, [])
+            if result:
+                leaf, parents = result
+                GLib.idle_add(apply_geom, leaf, parents)
             else:
                 GLib.idle_add(border.hide)
         except Exception:
