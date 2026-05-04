@@ -1,0 +1,17 @@
+{
+  "name": "yaml-lsp",
+  "description": "YAML LSP integration via yaml-language-server",
+  "author": {
+    "name": "jan"
+  },
+  "lspServers": {
+    "yaml": {
+      "command": "yaml-language-server",
+      "args": ["--stdio"],
+      "extensionToLanguage": {
+        ".yaml": "yaml",
+        ".yml": "yaml"
+      }
+    }
+  }
+}

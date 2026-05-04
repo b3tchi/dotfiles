@@ -1,0 +1,16 @@
+{
+  "name": "nushell-lsp",
+  "description": "Nushell LSP integration via nu --lsp",
+  "author": {
+    "name": "jan"
+  },
+  "lspServers": {
+    "nu": {
+      "command": "nu",
+      "args": ["--lsp"],
+      "extensionToLanguage": {
+        ".nu": "nu"
+      }
+    }
+  }
+}

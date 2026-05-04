@@ -1,0 +1,30 @@
+{
+  "name": "dotfiles",
+  "description": "Local marketplace for jan dotfiles plugins",
+  "owner": {
+    "name": "jan",
+    "email": "beckaja1@outlook.com"
+  },
+  "plugins": [
+    {
+      "name": "svelte-lsp",
+      "source": "./plugins/svelte-lsp",
+      "description": "Svelte LSP integration via svelte-language-server"
+    },
+    {
+      "name": "nushell-lsp",
+      "source": "./plugins/nushell-lsp",
+      "description": "Nushell LSP integration via nu --lsp"
+    },
+    {
+      "name": "json-lsp",
+      "source": "./plugins/json-lsp",
+      "description": "JSON LSP integration via vscode-json-language-server"
+    },
+    {
+      "name": "yaml-lsp",
+      "source": "./plugins/yaml-lsp",
+      "description": "YAML LSP integration via yaml-language-server"
+    }
+  ]
+}

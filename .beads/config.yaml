@@ -67,3 +67,5 @@
 # - github.repo
 
 dolt.shared-server: true
+
+sync.remote: "git+ssh://git@github.com-b3tchi/b3tchi/dotfiles.git"

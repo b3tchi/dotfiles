@@ -61,7 +61,13 @@
   },
   "enabledPlugins": {
     "infinifu@infinifu-dev": true,
-    "caveman@caveman": true
+    "caveman@caveman": true,
+    "skill-creator@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true,
+    "svelte-lsp@dotfiles": true,
+    "nushell-lsp@dotfiles": true,
+    "json-lsp@dotfiles": true,
+    "yaml-lsp@dotfiles": true
   },
   "extraKnownMarketplaces": {
     "infinifu-dev": {
@@ -75,10 +81,22 @@
         "source": "github",
         "repo": "JuliusBrussee/caveman"
       }
+    },
+    "claude-plugins-official": {
+      "source": {
+        "source": "github",
+        "repo": "anthropics/claude-plugins-official"
+      }
+    },
+    "dotfiles": {
+      "source": {
+        "source": "directory",
+        "path": "/home/jan/.dotfiles/claude/marketplace"
+      }
     }
   },
-  "skipAutoPermissionPrompt": true,
   "theme": "dark",
   "remoteControlAtStartup": false,
-  "agentPushNotifEnabled": true
+  "agentPushNotifEnabled": true,
+  "skipAutoPermissionPrompt": true
 }

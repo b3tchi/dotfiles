@@ -1,0 +1,51 @@
+{
+	"layout": "splith",
+	"percent": 0.4,
+	"type": "con",
+	"nodes": [
+		{
+			"layout": "tabbed",
+			"percent": 0.4,
+			"type": "con",
+			"nodes": [
+				{
+					"name": "irssi",
+					"percent": 0.5,
+					"type": "con",
+					"swallows": [
+						{
+							"title": "dotfiles 39"
+						}
+					]
+				},
+				{
+					"name": "notmuch",
+					"percent": 0.5,
+					"type": "con",
+					"swallows": [
+						{
+							"class": "^Emacs$",
+							"instance": "^notmuch$"
+						}
+					]
+				}
+			]
+		},
+		{
+			"layout": "splitv",
+			"percent": 0.6,
+			"type": "con",
+			"nodes": [
+				{
+					"name": "chrome",
+					"type": "con",
+					"swallows": [
+						{
+							"class": "^Mozilla Firefox$"
+						}
+					]
+				}
+			]
+		}
+	]
+}

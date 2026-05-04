@@ -59,9 +59,21 @@ linux:
       curl -fsSL https://claude.ai/install.sh | sh
       chmod +x ~/.dotfiles/claude/epic.nu
 
+      # LSP servers (binaries) — required by code intelligence plugins
+      # nu provides --lsp natively, no extra binary needed
+      sudo npm install -g typescript typescript-language-server svelte-language-server vscode-langservers-extracted yaml-language-server
+
       # Plugins
       claude plugin marketplace add JuliusBrussee/caveman
       claude plugin install caveman@caveman
+      claude plugin marketplace add anthropics/claude-plugins-official
+      claude plugin install skill-creator@claude-plugins-official
+      claude plugin install typescript-lsp@claude-plugins-official
+      claude plugin marketplace add ~/.dotfiles/claude/marketplace
+      claude plugin install svelte-lsp@dotfiles
+      claude plugin install nushell-lsp@dotfiles
+      claude plugin install json-lsp@dotfiles
+      claude plugin install yaml-lsp@dotfiles
 
       rotz link claude --force
 windows:

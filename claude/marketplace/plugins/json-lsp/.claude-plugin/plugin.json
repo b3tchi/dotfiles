@@ -1,0 +1,17 @@
+{
+  "name": "json-lsp",
+  "description": "JSON LSP integration via vscode-json-language-server",
+  "author": {
+    "name": "jan"
+  },
+  "lspServers": {
+    "json": {
+      "command": "vscode-json-language-server",
+      "args": ["--stdio"],
+      "extensionToLanguage": {
+        ".json": "json",
+        ".jsonc": "jsonc"
+      }
+    }
+  }
+}

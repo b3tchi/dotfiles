@@ -1,0 +1,16 @@
+{
+  "name": "svelte-lsp",
+  "description": "Svelte LSP integration for Claude Code code intelligence",
+  "author": {
+    "name": "jan"
+  },
+  "lspServers": {
+    "svelte": {
+      "command": "svelteserver",
+      "args": ["--stdio"],
+      "extensionToLanguage": {
+        ".svelte": "svelte"
+      }
+    }
+  }
+}

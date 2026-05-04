@@ -1,0 +1,21 @@
+// splith root: left terminal, right tabbed group (firefox/thunderbird/slack)
+// Apply: i3-msg 'workspace 3; append_layout ~/.config/i3/layouts/splith-tabbed.json'
+{
+    "layout": "splith",
+    "type": "workspace",
+    "nodes": [
+        {
+            "type": "con",
+            "swallows": [{"class": "^Alacritty$"}]
+        },
+        {
+            "type": "con",
+            "layout": "tabbed",
+            "nodes": [
+                {"type": "con", "swallows": [{"class": "^firefox$"}]},
+                {"type": "con", "swallows": [{"class": "^Thunderbird$"}]},
+                {"type": "con", "swallows": [{"class": "^Slack$"}]}
+            ]
+        }
+    ]
+}

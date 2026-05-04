@@ -1,0 +1,30 @@
+// splith root: left terminal, right splitv (editor top, logs bottom)
+// Apply: i3-msg 'workspace 2; append_layout ~/.config/i3/layouts/splith-nested-splitv.json'
+{
+    "layout": "splith",
+    "type": "workspace",
+    "nodes": [
+        {
+            "type": "con",
+            "percent": 0.5,
+            "swallows": [{"class": "^Alacritty$"}]
+        },
+        {
+            "type": "con",
+            "layout": "splitv",
+            "percent": 0.5,
+            "nodes": [
+                {
+                    "type": "con",
+                    "percent": 0.6,
+                    "swallows": [{"class": "^code-oss$|^Code$"}]
+                },
+                {
+                    "type": "con",
+                    "percent": 0.4,
+                    "swallows": [{"class": "^Alacritty$", "title": "^logs"}]
+                }
+            ]
+        }
+    ]
+}
