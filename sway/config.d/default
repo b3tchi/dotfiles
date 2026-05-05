@@ -80,7 +80,8 @@ for_window [title="quickshell-notifications"] floating enable, border none, stic
 ### Input configuration
 
 input * {
-	xkb_layout "us"
+	xkb_layout "us,us"
+	xkb_variant ",dvorak"
 }
 
 ### Gnome settings

@@ -244,6 +244,36 @@ PanelWindow {
     }
     Timer { id: batTimer; interval: 10000; onTriggered: batProc.running = true }
 
+    // --- Keyboard layout (sway only — no per-input IPC on i3) ---
+    property string kbdLayout: "us"
+
+    Process {
+        id: kbdQueryProc
+        running: root.isSway
+        command: ["sh", "-c",
+            "swaymsg -t get_inputs 2>/dev/null | " +
+            "awk -F'\"' '/xkb_active_layout_name/{print $4; exit}'"]
+        stdout: SplitParser {
+            onRead: data => {
+                var s = data.trim().toLowerCase()
+                root.kbdLayout = s.indexOf("dvorak") >= 0 ? "dvorak" : "us"
+            }
+        }
+    }
+
+    // Sway emits "input" events when active layout changes — re-query on any
+    Process {
+        id: kbdEventSub
+        running: root.isSway
+        command: ["swaymsg", "-m", "-t", "subscribe", '["input"]']
+        stdout: SplitParser {
+            onRead: _ => kbdQueryProc.running = true
+        }
+        onExited: if (root.isSway) running = true
+    }
+
+    Process { id: kbdToggleProc; command: ["swaymsg", "input", "*", "xkb_switch_layout", "next"] }
+
 
     // --- Layout (using Row, not RowLayout — RowLayout leaks Text.color) ---
     Item {
@@ -443,6 +473,25 @@ PanelWindow {
             Text { visible: !root.tickerActive && root.batVal !== "" && root.batVal !== "100"; text: (root.batStatus === "Charging" ? "CHR:" : "BAT:"); color: "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text { visible: !root.tickerActive && root.batVal !== "" && root.batVal !== "100"; text: root.batVal + "%"; color: root.batStatus === "Discharging" && parseInt(root.batVal) <= 20 ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text { visible: !root.tickerActive && root.batVal === "100"; text: "CHARGED"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+
+            // Keyboard layout indicator (sway only). Click cycles us↔dvorak.
+            Text { visible: root.isSway && !root.tickerActive; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Item {
+                visible: root.isSway && !root.tickerActive
+                width: visible ? kbdLabel.implicitWidth + kbdValue.implicitWidth : 0
+                height: parent.height
+                Text { id: kbdLabel; text: "KBL:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender; anchors.verticalCenter: parent.verticalCenter }
+                Text { id: kbdValue; anchors.left: kbdLabel.right; text: root.kbdLayout === "dvorak" ? "DVK" : "QWT"; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender; anchors.verticalCenter: parent.verticalCenter }
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        kbdToggleProc.running = false
+                        kbdToggleProc.running = true
+                    }
+                }
+            }
 
             Text { text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
