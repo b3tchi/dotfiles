@@ -92,10 +92,18 @@ def uniq-container-key [base: string, body: record] {
 #   { kind: "empty", next_id: int }
 def build-layout-state [node: record, id_start: int] {
     let children = ($node | get -o nodes | default [])
-    let wid = ($node | get -o window | default 0)
+    # On i3/X11 leaves carry `window` (X11 xid). On Sway/Wayland native
+    # surfaces it's null; fall back to sway `id` (con_id) so save covers
+    # Wayland leaves too.
+    let wid_x = ($node | get -o window | default 0)
+    let con_id = ($node | get -o id | default 0)
+    let wid = if $wid_x > 0 { $wid_x } else { $con_id }
 
     if ($children | is-empty) {
-        if $wid <= 0 {
+        let app_id = ($node | get -o app_id | default "")
+        let cls_prop = ($node | get -o window_properties.class | default "")
+        let is_real_leaf = $wid_x > 0 or ($app_id | is-not-empty) or ($cls_prop | is-not-empty)
+        if not $is_real_leaf {
             return { kind: "empty", next_id: $id_start }
         }
         let id = $id_start

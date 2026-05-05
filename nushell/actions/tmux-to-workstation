@@ -326,7 +326,7 @@ def "main revive" [
 def "main cleanup" [] {
     # Multi-select picker to kill local thin windows
     let windows = try {
-        tmux -L thin list-windows -t thin -F '#{window_name}:#{window_id}:#{pane_dead}' | lines
+        tmux -L thin list-windows -a -F '#{session_name}|#{window_name}|#{window_id}|#{pane_dead}' | lines
     } catch {
         print "No local thin tmux running"
         return
@@ -339,11 +339,12 @@ def "main cleanup" [] {
 
     # Build picker list with status
     let items = $windows | each {|w|
-        let parts = ($w | split row ":")
-        let name = ($parts | get 0)
-        let id = ($parts | get 1)
-        let status = if ($parts | get 2) == "1" { "(dead)" } else { "(connected)" }
-        $"($id)\t($name) ($status)"
+        let parts = ($w | split row "|")
+        let session = ($parts | get 0)
+        let name = ($parts | get 1)
+        let id = ($parts | get 2)
+        let status = if ($parts | get 3) == "1" { "(dead)" } else { "(connected)" }
+        $"($id)\t($session) ($name) ($status)"
     }
 
     # fzf multi-select: tab to select, enter to confirm

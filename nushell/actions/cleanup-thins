@@ -7,9 +7,15 @@ def main [
 ] {
     # Get thin sessions from wm-state (those on a sway workspace)
     let wm = (do { wm-state list } | complete)
-    let attached_sessions = if $wm.exit_code == 0 and ($wm.stdout | is-not-empty) {
-        $wm.stdout | from yaml
-        | where type == "thin" | get session
+    let parsed = if $wm.exit_code == 0 and ($wm.stdout | is-not-empty) {
+        try { $wm.stdout | from yaml } catch { null }
+    } else { null }
+    let attached_sessions = if ($parsed != null) and (($parsed | describe) | str starts-with "record") {
+        $parsed.workspaces? | default [] | each {|ws|
+            $ws.state | transpose _ entry | get entry
+            | where {|e| ($e | get -o session_type | default "") == "thin" }
+            | get -o session
+        } | flatten | compact
     } else { [] }
 
     # Get all thin sessions from tmux-to-workstation
