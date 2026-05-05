@@ -209,7 +209,13 @@ ShellRoot {
                 var wins = []
                 function walk(node, wsName) {
                     if (node.type === "workspace") wsName = node.name || wsName
-                    if (node.window && node.name && node.type === "con" &&
+                    // i3 / Xwayland clients carry an X11 window id in `window`;
+                    // sway's native Wayland clients leave it null and expose
+                    // `app_id` instead. Accept either so the switcher works on
+                    // both compositors.
+                    var isWindow = (node.type === "con" || node.type === "floating_con") &&
+                                   (node.window || node.app_id) && node.name
+                    if (isWindow &&
                         node.name !== "quickshell" && node.name !== "qs-switcher" && node.name !== "qs-launcher" && node.name !== "qs-projects") {
                         wins.push({
                             id: node.id,
@@ -514,6 +520,18 @@ ShellRoot {
         function cancel() {
             root.hide()
         }
+        function search() {
+            // Sway path: Alt+Space is captured by the Windows host on WSLg
+            // before sway sees it, so we expose a separate IPC entry that
+            // a different bindsym (e.g. $mod+slash) can invoke to drop into
+            // switcher-search.
+            if (root.mode === "switcher" || root.mode === "switcher-search") {
+                root.switcherSearchMode()
+            } else {
+                root.switcherShow()
+                root.switcherSearchMode()
+            }
+        }
     }
 
     IpcHandler {
@@ -718,6 +736,26 @@ ShellRoot {
                         event.accepted = true
                     } else if (event.key === Qt.Key_Escape) {
                         root.hide()
+                        event.accepted = true
+                    } else if (event.key === Qt.Key_Space) {
+                        // Mirror X11 keyMonitor behaviour: while modifier is
+                        // held in switcher mode, Space drops into search.
+                        root.switcherSearchMode()
+                        event.accepted = true
+                    }
+                }
+                // Sway path: when the user releases the modifier (Alt, the sway
+                // $mod) while the switcher is up, commit the selection. On X11
+                // the keyMonitor (XI2 raw events) handles this globally; under
+                // Wayland the compositor delivers the modifier release to the
+                // focused surface, so Qt's Keys.onReleased fires here directly.
+                Keys.onReleased: event => {
+                    if (!root.isSway) return
+                    if (event.key === Qt.Key_Alt || event.key === Qt.Key_AltGr ||
+                        event.key === Qt.Key_Meta ||
+                        event.key === Qt.Key_Super_L || event.key === Qt.Key_Super_R) {
+                        if (root.mode === "switcher" && overlay.visible)
+                            root.switcherFocus()
                         event.accepted = true
                     }
                 }
