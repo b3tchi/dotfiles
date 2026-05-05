@@ -65,7 +65,20 @@ Variants {
                         var e = JSON.parse(data)
                         var change = e.change
                         if (change === "close") {
-                            borderOverlay.borderVisible = false
+                            // Switcher close races against the focus event for
+                            // the newly-focused target (switcherFocus runs
+                            // swaymsg focus then hide()). If we unconditionally
+                            // hide on every close we kill the border that was
+                            // just drawn for the target. Skip overlays/qs-*.
+                            var cc = e.container || {}
+                            var ccApp = cc.app_id || ""
+                            var ccTitle = cc.name || ""
+                            if (borderOverlay.ignoreAppIds.indexOf(ccApp) >= 0 || ccTitle.startsWith("qs-")) {
+                                // Re-scan in case focus moved without a focus event
+                                focusScan.running = true
+                            } else {
+                                borderOverlay.borderVisible = false
+                            }
                         } else if (change === "fullscreen_mode" && e.container) {
                             if (e.container.fullscreen_mode > 0)
                                 borderOverlay.borderVisible = false
