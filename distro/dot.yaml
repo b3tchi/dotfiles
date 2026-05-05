@@ -38,6 +38,7 @@ linux:
           go rust nodejs \
           wezterm \
           go-yq \
+          chafa \
           ttf-iosevka-nerd ttf-iosevkaterm-nerd ttc-iosevka \
           xfce-theme-greybird
 
@@ -58,6 +59,7 @@ linux:
           fd ripgrep fzf sd \
           go rust nodejs \
           go-yq \
+          chafa \
           ttf-iosevka-nerd ttf-iosevkaterm-nerd ttc-iosevka
 
         sudo pacman -S --needed --noconfirm git base-devel
@@ -79,6 +81,7 @@ linux:
           go rust nodejs \
           wezterm \
           go-yq dasel \
+          chafa \
           ttf-iosevka-nerd ttf-iosevkaterm-nerd ttc-iosevka
 
         sudo pacman -S --needed --noconfirm git base-devel
