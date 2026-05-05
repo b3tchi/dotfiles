@@ -113,6 +113,11 @@ if $nu.os-info.name != "windows" {
 $env.CLAUDE_CODE_NO_FLICKER = '1'
 $env.CLAUDE_CODE_SCROLL_SPEED = '3'
 
+# Yazi - force sixel image preview under foot (foot has no kitty graphics protocol)
+if ($env.TERM? | default '') =~ 'foot' {
+	$env.YAZI_IMAGE_PROTOCOL = 'sixel'
+}
+
 # bd (beads) - shared dolt sql-server across all repos (one server, port 3308)
 # instead of the default per-repo random-port server. State: ~/.beads/shared-server/
 $env.BEADS_DOLT_SERVER_MODE = '1'
