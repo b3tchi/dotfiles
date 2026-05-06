@@ -277,8 +277,26 @@ PanelWindow {
         }
     }
 
-    // Sway emits one "input" event per change. React only to xkb_layout on a
-    // real keyboard; ignore added/removed/xkb_keymap and virtual keyboards.
+    // Pair-cancel debounce. WSLg/RDP keyboards emit a paired xkb_layout
+    // event on every Shift press AND release (the host re-syncs the active
+    // group when the modifier state changes), so a single Shift produces
+    // index 1→0→1 in <50ms. A real user toggle (click on indicator,
+    // swaymsg xkb_switch_layout next) emits exactly one event. So:
+    //   - first event: arm a 250ms timer with the pending layout
+    //   - second event arriving while timer running: cancel — paired noise
+    //   - timer fires unmolested: commit (single, legit event)
+    property string _kbdPending: ""
+    Timer {
+        id: kbdCommitTimer
+        interval: 250
+        repeat: false
+        onTriggered: {
+            if (root._kbdPending !== "")
+                root._setKbdFromName(root._kbdPending)
+            root._kbdPending = ""
+        }
+    }
+
     Process {
         id: kbdEventSub
         running: root.isSway
@@ -290,7 +308,13 @@ PanelWindow {
                     if (e.change !== "xkb_layout") return
                     var inp = e.input || {}
                     if (inp.type !== "keyboard") return
-                    root._setKbdFromName(inp.xkb_active_layout_name)
+                    if (kbdCommitTimer.running) {
+                        kbdCommitTimer.stop()
+                        root._kbdPending = ""
+                    } else {
+                        root._kbdPending = inp.xkb_active_layout_name || ""
+                        kbdCommitTimer.start()
+                    }
                 } catch(err) {}
             }
         }
