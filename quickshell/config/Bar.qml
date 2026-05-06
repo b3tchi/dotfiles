@@ -245,29 +245,54 @@ PanelWindow {
     Timer { id: batTimer; interval: 10000; onTriggered: batProc.running = true }
 
     // --- Keyboard layout (sway only — no per-input IPC on i3) ---
+    // Track only real keyboards. Virtual keyboards (browsers, foot, etc.)
+    // appear and disappear constantly and start with the default layout, so
+    // taking the first input from get_inputs or reacting to every input event
+    // makes the indicator flicker back to QWT unpredictably.
     property string kbdLayout: "us"
+
+    function _setKbdFromName(name) {
+        var s = (name || "").toLowerCase()
+        root.kbdLayout = s.indexOf("dvorak") >= 0 ? "dvorak" : "us"
+    }
 
     Process {
         id: kbdQueryProc
         running: root.isSway
-        command: ["sh", "-c",
-            "swaymsg -t get_inputs 2>/dev/null | " +
-            "awk -F'\"' '/xkb_active_layout_name/{print $4; exit}'"]
-        stdout: SplitParser {
-            onRead: data => {
-                var s = data.trim().toLowerCase()
-                root.kbdLayout = s.indexOf("dvorak") >= 0 ? "dvorak" : "us"
-            }
+        command: ["swaymsg", "-t", "get_inputs"]
+        property string buf: ""
+        stdout: SplitParser { onRead: data => { kbdQueryProc.buf += data } }
+        onExited: {
+            try {
+                var arr = JSON.parse(kbdQueryProc.buf)
+                for (var i = 0; i < arr.length; i++) {
+                    var inp = arr[i]
+                    if (inp.type === "keyboard" && inp.xkb_active_layout_name) {
+                        root._setKbdFromName(inp.xkb_active_layout_name)
+                        break
+                    }
+                }
+            } catch(err) {}
+            kbdQueryProc.buf = ""
         }
     }
 
-    // Sway emits "input" events when active layout changes — re-query on any
+    // Sway emits one "input" event per change. React only to xkb_layout on a
+    // real keyboard; ignore added/removed/xkb_keymap and virtual keyboards.
     Process {
         id: kbdEventSub
         running: root.isSway
         command: ["swaymsg", "-m", "-t", "subscribe", '["input"]']
         stdout: SplitParser {
-            onRead: _ => kbdQueryProc.running = true
+            onRead: data => {
+                try {
+                    var e = JSON.parse(data)
+                    if (e.change !== "xkb_layout") return
+                    var inp = e.input || {}
+                    if (inp.type !== "keyboard") return
+                    root._setKbdFromName(inp.xkb_active_layout_name)
+                } catch(err) {}
+            }
         }
         onExited: if (root.isSway) running = true
     }
