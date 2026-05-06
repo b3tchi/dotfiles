@@ -277,50 +277,9 @@ PanelWindow {
         }
     }
 
-    // Pair-cancel debounce. WSLg/RDP keyboards emit a paired xkb_layout
-    // event on every Shift press AND release (the host re-syncs the active
-    // group when the modifier state changes), so a single Shift produces
-    // index 1→0→1 in <50ms. A real user toggle (click on indicator,
-    // swaymsg xkb_switch_layout next) emits exactly one event. So:
-    //   - first event: arm a 250ms timer with the pending layout
-    //   - second event arriving while timer running: cancel — paired noise
-    //   - timer fires unmolested: commit (single, legit event)
-    property string _kbdPending: ""
-    Timer {
-        id: kbdCommitTimer
-        interval: 250
-        repeat: false
-        onTriggered: {
-            if (root._kbdPending !== "")
-                root._setKbdFromName(root._kbdPending)
-            root._kbdPending = ""
-        }
-    }
-
-    Process {
-        id: kbdEventSub
-        running: root.isSway
-        command: ["swaymsg", "-m", "-t", "subscribe", '["input"]']
-        stdout: SplitParser {
-            onRead: data => {
-                try {
-                    var e = JSON.parse(data)
-                    if (e.change !== "xkb_layout") return
-                    var inp = e.input || {}
-                    if (inp.type !== "keyboard") return
-                    if (kbdCommitTimer.running) {
-                        kbdCommitTimer.stop()
-                        root._kbdPending = ""
-                    } else {
-                        root._kbdPending = inp.xkb_active_layout_name || ""
-                        kbdCommitTimer.start()
-                    }
-                } catch(err) {}
-            }
-        }
-        onExited: if (root.isSway) running = true
-    }
-
+    // No event subscription — WSLg/RDP fires xkb_layout on every Shift
+    // press/release, which would flicker the indicator. Indicator is owned
+    // by user click only: we predict locally and trust kbdToggleProc.
     Process { id: kbdToggleProc; command: ["swaymsg", "input", "*", "xkb_switch_layout", "next"] }
 
 
@@ -536,6 +495,8 @@ PanelWindow {
                     acceptedButtons: Qt.LeftButton
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
+                        // Predict locally — sway events are unreliable on WSLg
+                        root.kbdLayout = root.kbdLayout === "dvorak" ? "us" : "dvorak"
                         kbdToggleProc.running = false
                         kbdToggleProc.running = true
                     }
