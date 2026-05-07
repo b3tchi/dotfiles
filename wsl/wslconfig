@@ -1,0 +1,6 @@
+[wsl2]
+memory=24GB
+networkingMode=mirrored
+firewall=true
+dnsTunneling=true
+autoProxy=true

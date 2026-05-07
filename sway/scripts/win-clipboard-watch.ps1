@@ -12,7 +12,8 @@ public static extern uint GetClipboardSequenceNumber();
 Add-Type -NameSpace WinApi -Name ClipboardSeq -MemberDefinition $seqDef
 
 # Force unbuffered stdout so each emission reaches the Linux reader immediately.
-[Console]::Out.AutoFlush = $true
+# Windows PowerShell 5.1's [Console]::Out is a SyncTextWriter without a settable
+# AutoFlush; rely on explicit [Console]::Out.Flush() after each Write-Output below.
 
 # Start at 0 so the current clipboard content is emitted on first tick
 # (otherwise a restart silently drops whatever is already on the clipboard).
