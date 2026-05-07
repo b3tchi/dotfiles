@@ -289,7 +289,7 @@
  * original version that predates the version that reads the image from a .png file.
  * https://st.suckless.org/patches/netwmicon/
  */
-#define NETWMICON_LEGACY_PATCH 0
+#define NETWMICON_LEGACY_PATCH 1
 
 /* This patch allows you to spawn a new st terminal using Ctrl-Shift-Return. It will have the
  * same CWD (current working directory) as the original st instance.
