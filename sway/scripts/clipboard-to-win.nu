@@ -13,6 +13,9 @@
 
 const CLIPBOARD_IMG = "/tmp/clipboard-sync.png"
 const HASH_FILE = "/tmp/clipboard-last-hash"
+# /init is WSL's interop launcher — see win-clipboard-sync.nu for the
+# Wine/binfmt rationale.
+const WSL_INTEROP = '/init'
 const POWERSHELL = '/mnt/c/windows/System32/WindowsPowerShell/v1.0/powershell.exe'
 
 def stored_hash [] {
@@ -30,14 +33,16 @@ loop {
                 $h | save -f $HASH_FILE
                 let win_img = (^wslpath -w $CLIPBOARD_IMG | str trim)
                 let win_ps1 = (^wslpath -w $"($env.HOME)/.local/bin/clipboard-to-win-image.ps1" | str trim)
-                ^$POWERSHELL -noprofile -executionpolicy bypass -file $win_ps1 $win_img
+                ^$WSL_INTEROP $POWERSHELL -noprofile -executionpolicy bypass -file $win_ps1 $win_img
             }
         } else if ("text/plain" in $types or "TEXT" in $types or "STRING" in $types or "UTF8_STRING" in $types) {
             let text = (wl-paste)
             let h = ($text | hash md5)
             if $h != (stored_hash) {
                 $h | save -f $HASH_FILE
-                $text | ^/mnt/c/windows/system32/clip.exe
+                # clip.exe fails (exit 1) when invoked through /init from a
+                # non-interactive context, so use Set-Clipboard via PowerShell.
+                $text | ^$WSL_INTEROP $POWERSHELL -NoProfile -STA -Command 'Set-Clipboard -Value ([Console]::In.ReadToEnd())'
             }
         }
     }

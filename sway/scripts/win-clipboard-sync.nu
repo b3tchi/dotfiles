@@ -6,6 +6,11 @@
 # GetClipboardSequenceNumber() and emits TEXT:<base64>/IMAGE:<base64> on change.
 # Echo-loop prevention: see clipboard-to-win.nu — shared /tmp/clipboard-last-hash.
 
+# /init is WSL's interop launcher — calling it directly bypasses
+# binfmt_misc, which can be hijacked by Wine's DOSWin entry on systems
+# where the wine package is installed (Wine's PE handler runs before
+# WSLInterop and tries to execute powershell.exe under Wine, which dies).
+const WSL_INTEROP = '/init'
 const POWERSHELL = '/mnt/c/windows/System32/WindowsPowerShell/v1.0/powershell.exe'
 const HASH_FILE = "/tmp/clipboard-last-hash"
 const CLIPBOARD_IMG = "/tmp/win-clipboard-sync.png"
@@ -18,7 +23,7 @@ let win_ps1 = (^wslpath -w $"($env.HOME)/.local/bin/win-clipboard-watch.ps1" | s
 
 loop {
     try {
-        ^$POWERSHELL -NoProfile -ExecutionPolicy Bypass -STA -File $win_ps1
+        ^$WSL_INTEROP $POWERSHELL -NoProfile -ExecutionPolicy Bypass -STA -File $win_ps1
         | lines
         | each {|line|
             if ($line | str starts-with "IMAGE:") {
