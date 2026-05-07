@@ -1,6 +1,22 @@
 linux:
   links:
     xdg-open: ~/.local/bin/xdg-open
+  installs:
+    cmd: |
+      {{#if env.WSL_DISTRO_NAME}}
+      # WSL is primary for PE (.exe) execution. Mask Wine's
+      # /usr/lib/binfmt.d/wine.conf so its DOSWin entry (magic 4d5a)
+      # cannot outrank WSLInterop in binfmt resolution. Wine remains
+      # callable via explicit `wine foo.exe`.
+      if [ -e /usr/lib/binfmt.d/wine.conf ] && [ ! -L /etc/binfmt.d/wine.conf ]; then
+        sudo ln -sf /dev/null /etc/binfmt.d/wine.conf
+      fi
+      if [ -e /proc/sys/fs/binfmt_misc/DOSWin ]; then
+        if grep -q '^enabled' /proc/sys/fs/binfmt_misc/DOSWin; then
+          echo 0 | sudo tee /proc/sys/fs/binfmt_misc/DOSWin > /dev/null
+        fi
+      fi
+      {{/if}}
 
 windows:
   links:
