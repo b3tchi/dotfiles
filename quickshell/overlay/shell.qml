@@ -121,6 +121,11 @@ ShellRoot {
         overlay.width = 480
         overlay.visible = true
         launcherInput.forceActiveFocus()
+        // Rescan $PATH executables so newly installed bins appear without quickshell restart.
+        if (!pathScanner.running) {
+            root._appBuffer = []
+            pathScanner.running = true
+        }
     }
 
     function launcherLaunch() {
