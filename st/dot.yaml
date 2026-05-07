@@ -1,0 +1,48 @@
+linux:
+  links:
+    config.h: ~/repos/suckless/st/config.h
+    patches.h: ~/repos/suckless/st/patches.h
+    config.mk: ~/repos/suckless/st/config.mk
+
+  installs:
+    cmd: |
+      mkdir -p ~/repos/suckless ~/.local/bin
+
+      # Build deps (harfbuzz, imlib2 for sixel, libxft, headers)
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -Syu --needed --noconfirm \
+        base-devel git pkgconf \
+        libx11 libxft libxext fontconfig freetype2 \
+        harfbuzz imlib2
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux ARM")}}
+      sudo pacman -Syu --needed --noconfirm \
+        base-devel git pkgconf \
+        libx11 libxft libxext fontconfig freetype2 \
+        harfbuzz imlib2
+      {{/if}}
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -Syu --needed --noconfirm \
+        base-devel git pkgconf \
+        libx11 libxft libxext fontconfig freetype2 \
+        harfbuzz imlib2
+      {{/if}}
+
+      # Clone st-flexipatch (skip if already there)
+      [ -d ~/repos/suckless/st/.git ] \
+        || git clone https://github.com/bakkeby/st-flexipatch.git ~/repos/suckless/st
+
+      # Clone suckless scroll (TTY buffer for throughput)
+      [ -d ~/repos/suckless/scroll/.git ] \
+        || git clone https://git.suckless.org/scroll ~/repos/suckless/scroll
+
+      # Symlink our config.h / patches.h / config.mk into build dir
+      rotz link st --force
+
+      # Build + install st to ~/.local
+      make -C ~/repos/suckless/st clean
+      make -C ~/repos/suckless/st PREFIX="$HOME/.local" install
+
+      # Build + install scroll to ~/.local
+      make -C ~/repos/suckless/scroll clean
+      make -C ~/repos/suckless/scroll PREFIX="$HOME/.local" install

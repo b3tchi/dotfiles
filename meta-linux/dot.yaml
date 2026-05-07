@@ -11,6 +11,7 @@ depends:
   - opencode
   - wezterm
   - kitty
+  - st
   - i3
   - quickshell
   - xterm

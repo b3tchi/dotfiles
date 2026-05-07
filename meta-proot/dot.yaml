@@ -10,3 +10,4 @@ depends:
   - opencode
   - i3
   - quickshell
+  - st
