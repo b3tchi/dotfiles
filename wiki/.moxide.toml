@@ -1,0 +1,19 @@
+# markdown-oxide vault config
+dailynote = "%Y-%m-%d"
+daily_notes_folder = "daily"
+new_file_folder_path = "notes"
+
+heading_completions = true
+title_headings = true
+unresolved_diagnostics = true
+semantic_tokens = true
+inlay_hints = true
+block_transclusion = true
+heading_slug = false
+
+# wikilinks without .md extension
+include_md_extension_wikilink = false
+# markdown links keep .md
+include_md_extension_md_link = true
+
+case_matching = "Smart"
