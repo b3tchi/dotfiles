@@ -67,7 +67,8 @@
     "svelte-lsp@dotfiles": true,
     "nushell-lsp@dotfiles": true,
     "json-lsp@dotfiles": true,
-    "yaml-lsp@dotfiles": true
+    "yaml-lsp@dotfiles": true,
+    "clangd-lsp@claude-plugins-official": true
   },
   "extraKnownMarketplaces": {
     "infinifu-dev": {
