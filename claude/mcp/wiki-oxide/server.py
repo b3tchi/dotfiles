@@ -284,9 +284,14 @@ def wiki_tags(prefix: str = "") -> list[str]:
 
     safe_prefix = re.escape(prefix)
     # PCRE2 lookbehind: require non-word context before the `#`.
-    # Pattern: a `#`, then the user's prefix, then one or more
-    # tag-name characters. The lookbehind keeps URL fragments out.
-    pattern = rf"(?<![\w])#{safe_prefix}[A-Za-z][A-Za-z0-9_-]*"
+    # When a prefix is supplied, the prefix itself counts as the first
+    # character so the rest may be empty (so #auth matches even when
+    # prefix="auth"). When no prefix, require at least one letter to
+    # avoid matching a bare `#`.
+    if prefix:
+        pattern = rf"(?<![\w])#{safe_prefix}[A-Za-z0-9_-]*"
+    else:
+        pattern = r"(?<![\w])#[A-Za-z][A-Za-z0-9_-]*"
     res = subprocess.run(
         [
             "rg",
