@@ -2,6 +2,9 @@
 
 > **For Claude:** Use infinifu:plan-scrum-master (automated) or infinifu:plan-supervised (user reviews each batch) to implement this plan.
 
+**Epic:** `dotfiles-0xd`
+**Tasks:** `dotfiles-0xd.1` … `dotfiles-0xd.9` (one per Task section below)
+
 **Goal:** Add a 30%-black dim overlay covering everything outside the focused window, mirroring the lifecycle of the existing focus border, on both X11/i3 and Wayland/sway.
 
 **Architecture:** Sibling component to `FocusBorder`. `FocusDim.qml` dispatcher detects platform → spawns `qs-focus-dim.py` (X11 GTK3 cairo overlay) or loads `FocusDimWayland.qml` (Quickshell PanelWindow layer-shell). Both implementations subscribe to the same IPC stream as the border, compute the focused-window rectangle, and paint 4 rectangles outside it at `rgba(0,0,0,0.3)`. Bar/quickshell overlays sit at a higher layer and stay bright.
