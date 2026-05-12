@@ -169,9 +169,61 @@ if display is None:
 overlays = [DimOverlay(display.get_monitor(i))
             for i in range(display.get_n_monitors())]
 
+mouse_held = False
+mouse_poll_id = None
+
+
+def mouse_poll():
+    global mouse_held, mouse_poll_id
+    if not mouse_held:
+        mouse_poll_id = None
+        refresh_focused()
+        return False
+    refresh_focused()
+    return True
+
+
+def mouse_monitor():
+    import struct
+    try:
+        from Xlib import display as xdisplay
+        from Xlib.ext import xinput
+    except ImportError:
+        print("qs-focus-dim: python-xlib not installed; "
+              "mouse-drag polling disabled", file=sys.stderr, flush=True)
+        return
+    d = xdisplay.Display()
+    if not d.has_extension("XInputExtension"):
+        return
+    root = d.screen().root
+    root.xinput_select_events([
+        (xinput.AllMasterDevices,
+         xinput.RawButtonPressMask | xinput.RawButtonReleaseMask),
+    ])
+    d.sync()
+    hdr = struct.Struct("<HII")
+    global mouse_held, mouse_poll_id
+    while True:
+        event = d.next_event()
+        evtype = getattr(event, "evtype", None)
+        data = getattr(event, "data", None)
+        if not isinstance(data, (bytes, bytearray)) or len(data) < hdr.size:
+            continue
+        _, _, button = hdr.unpack_from(data, 0)
+        if button != 1:
+            continue
+        if evtype == xinput.RawButtonPress:
+            mouse_held = True
+            if mouse_poll_id is None:
+                mouse_poll_id = GLib.timeout_add(100, mouse_poll)
+        elif evtype == xinput.RawButtonRelease:
+            mouse_held = False
+
+
 signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))
 signal.signal(signal.SIGINT, lambda *a: sys.exit(0))
 
 GLib.idle_add(refresh_focused)
 threading.Thread(target=subscribe, daemon=True).start()
+threading.Thread(target=mouse_monitor, daemon=True).start()
 Gtk.main()
