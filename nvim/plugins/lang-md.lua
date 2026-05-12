@@ -1,5 +1,23 @@
 return {
 	{
+		"neovim/nvim-lspconfig",
+		opts = {
+			servers = {
+				markdown_oxide = {
+					mason = false,
+					cmd = { "markdown-oxide" },
+					filetypes = { "markdown" },
+					root_markers = { ".moxide.toml", ".obsidian" },
+					capabilities = {
+						workspace = {
+							didChangeWatchedFiles = { dynamicRegistration = true },
+						},
+					},
+				},
+			},
+		},
+	},
+	{
 		"MeanderingProgrammer/render-markdown.nvim",
 		opts = {
 			heading = {
