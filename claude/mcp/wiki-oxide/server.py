@@ -12,10 +12,14 @@ query string (Claude Code limitation — markdown-oxide returns nothing
 for the empty query it sends).
 
 Tools:
-  - wiki_search(query)       — workspaceSymbol query (notes, headings, tags)
-  - wiki_tags()              — all #tags in vault
-  - wiki_grep(pattern, ...)  — ripgrep within vault
+  - wiki_root()              — vault root path
   - wiki_list()              — list all .md files in vault
+  - wiki_search(query)       — workspaceSymbol query (notes, headings, tags)
+  - wiki_tags(prefix="")     — all #tags in vault
+  - wiki_grep(pattern, ...)  — ripgrep within vault
+  - wiki_read(name)          — full text of a note
+  - wiki_preview(name)       — first ~1200 chars + backlinks
+  - wiki_references(name)    — backlinks via ripgrep
 
 Configure vault root via env var WIKI_ROOT (default ~/.dotfiles/wiki).
 """
@@ -43,9 +47,11 @@ class LspClient:
         self.cwd = cwd
         self.proc: subprocess.Popen | None = None
         self.lock = threading.Lock()
+        self.id_lock = threading.Lock()
         self.next_id = 1
         self.responses: dict[int, dict] = {}
-        self.response_event = threading.Event()
+        self.events: dict[int, threading.Event] = {}
+        self.events_lock = threading.Lock()
         self.reader_thread: threading.Thread | None = None
         self.start()
 
@@ -101,7 +107,10 @@ class LspClient:
             rid = msg.get("id")
             if rid is not None and "method" not in msg:
                 self.responses[rid] = msg
-                self.response_event.set()
+                with self.events_lock:
+                    ev = self.events.get(rid)
+                if ev is not None:
+                    ev.set()
 
     def _send_raw(self, msg: dict):
         assert self.proc and self.proc.stdin
@@ -112,17 +121,21 @@ class LspClient:
             self.proc.stdin.flush()
 
     def _request(self, method: str, params: dict, timeout: float = 8.0) -> dict:
-        rid = self.next_id
-        self.next_id += 1
-        self.response_event.clear()
-        self._send_raw({"jsonrpc": "2.0", "id": rid, "method": method, "params": params})
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            if rid in self.responses:
-                return self.responses.pop(rid)
-            self.response_event.wait(timeout=0.2)
-            self.response_event.clear()
-        raise TimeoutError(f"{method} timed out after {timeout}s")
+        with self.id_lock:
+            rid = self.next_id
+            self.next_id += 1
+        ev = threading.Event()
+        with self.events_lock:
+            self.events[rid] = ev
+        try:
+            self._send_raw({"jsonrpc": "2.0", "id": rid, "method": method, "params": params})
+            if not ev.wait(timeout=timeout):
+                raise TimeoutError(f"{method} timed out after {timeout}s")
+            return self.responses.pop(rid)
+        finally:
+            with self.events_lock:
+                self.events.pop(rid, None)
+            self.responses.pop(rid, None)
 
     def _notify(self, method: str, params: dict):
         self._send_raw({"jsonrpc": "2.0", "method": method, "params": params})
@@ -144,65 +157,6 @@ class LspClient:
     def workspace_symbol(self, query: str) -> list[dict]:
         resp = self._request("workspace/symbol", {"query": query})
         return resp.get("result") or []
-
-    def references_at(
-        self, uri: str, text: str, line: int, character: int, include_declaration: bool = False
-    ) -> list[dict]:
-        """Open a synthetic doc and request references at the given position."""
-        self._notify(
-            "textDocument/didOpen",
-            {
-                "textDocument": {
-                    "uri": uri,
-                    "languageId": "markdown",
-                    "version": 1,
-                    "text": text,
-                }
-            },
-        )
-        try:
-            resp = self._request(
-                "textDocument/references",
-                {
-                    "textDocument": {"uri": uri},
-                    "position": {"line": line, "character": character},
-                    "context": {"includeDeclaration": include_declaration},
-                },
-            )
-            return resp.get("result") or []
-        finally:
-            self._notify(
-                "textDocument/didClose",
-                {"textDocument": {"uri": uri}},
-            )
-
-    def hover_at(self, uri: str, text: str, line: int, character: int) -> dict | None:
-        """Open a synthetic document and request hover at the given position."""
-        self._notify(
-            "textDocument/didOpen",
-            {
-                "textDocument": {
-                    "uri": uri,
-                    "languageId": "markdown",
-                    "version": 1,
-                    "text": text,
-                }
-            },
-        )
-        try:
-            resp = self._request(
-                "textDocument/hover",
-                {
-                    "textDocument": {"uri": uri},
-                    "position": {"line": line, "character": character},
-                },
-            )
-            return resp.get("result")
-        finally:
-            self._notify(
-                "textDocument/didClose",
-                {"textDocument": {"uri": uri}},
-            )
 
 
 _client: LspClient | None = None
@@ -353,81 +307,30 @@ def wiki_read(name: str) -> dict:
     }
 
 
+_PREVIEW_MAX_CHARS = 1200
+
+
 @mcp.tool()
 def wiki_preview(name: str) -> dict:
-    """Compact file preview + backlinks via markdown-oxide hover.
+    """Compact file preview + backlinks for a wiki note.
 
-    Synthesizes a wikilink `[[name]]`, hovers it, returns the rendered
-    preview. Truncated to the first few sections — for full text use
-    `wiki_read`.
+    Returns the first ~1200 chars of the note plus any backlinks found
+    via ripgrep. For full text use `wiki_read`; for backlinks only use
+    `wiki_references`. Built directly from the filesystem — no LSP
+    hover involved (markdown-oxide hover wedges after a few calls).
     """
     target = Path(name).stem
-    probe_uri = f"file://{VAULT}/.wiki-mcp-probe.md"
-    probe_text = f"[[{target}]]\n"
+    p = _resolve_note(name)
+    if p is None:
+        return {"error": f"note not found: {target}"}
     try:
-        result = get_client().hover_at(probe_uri, probe_text, line=0, character=3)
-    except TimeoutError as e:
-        return {"error": str(e)}
-    if not result:
-        return {"error": f"no hover info for [[{target}]]"}
-    contents = result.get("contents")
-    if isinstance(contents, dict):
-        text = contents.get("value", "")
-    elif isinstance(contents, str):
-        text = contents
-    elif isinstance(contents, list):
-        text = "\n".join(
-            c.get("value", "") if isinstance(c, dict) else str(c) for c in contents
-        )
-    else:
-        text = str(contents)
-    return {"name": target, "preview": text}
+        text = p.read_text(errors="replace")
+    except Exception as e:
+        return {"error": f"read failed: {e}", "path": str(p)}
+    truncated = len(text) > _PREVIEW_MAX_CHARS
+    preview = text[:_PREVIEW_MAX_CHARS] + ("\n…" if truncated else "")
 
-
-@mcp.tool()
-def wiki_references(name: str) -> list[dict]:
-    """Find backlinks to a wiki note via markdown-oxide LSP references.
-
-    Synthesizes a `[[name]]` probe and asks the language server for all
-    references — picks up wikilinks across the vault. Falls back to a
-    ripgrep regex if the LSP call returns nothing.
-    """
-    target = Path(name).stem
-    probe_uri = f"file://{VAULT}/.wiki-mcp-probe.md"
-    probe_text = f"[[{target}]]\n"
-    locs = []
-    try:
-        locs = get_client().references_at(probe_uri, probe_text, line=0, character=3)
-    except TimeoutError as e:
-        locs = []
-        lsp_err = str(e)
-    else:
-        lsp_err = None
-
-    out: list[dict] = []
-    self_path = str(VAULT / ".wiki-mcp-probe.md")
-    for loc in locs:
-        uri = loc.get("uri", "")
-        path = uri[len("file://") :] if uri.startswith("file://") else uri
-        if path == self_path:
-            continue  # skip the synthetic probe
-        rng = loc.get("range") or {}
-        start = rng.get("start") or {}
-        lineno = (start.get("line") or 0) + 1  # convert 0-based to 1-based
-        text = ""
-        try:
-            with open(path, "r", errors="replace") as f:
-                lines = f.readlines()
-                if 1 <= lineno <= len(lines):
-                    text = lines[lineno - 1].rstrip("\n")
-        except Exception:
-            pass
-        out.append({"path": path, "line": lineno, "text": text})
-
-    if out:
-        return out
-
-    # LSP returned nothing — try ripgrep as a safety net
+    backlinks: list[dict] = []
     if shutil.which("rg"):
         pattern = (
             rf"\[\[{re.escape(target)}(?:#[^\]]*)?(?:\|[^\]]*)?\]\]"
@@ -439,20 +342,61 @@ def wiki_references(name: str) -> list[dict]:
             text=True,
             check=False,
         )
-        p = _resolve_note(name)
-        self_real = str(p) if p else None
+        self_real = str(p)
         for line in res.stdout.splitlines():
             path, _, rest = line.partition(":")
             if path == self_real:
                 continue
-            lineno_s, _, text = rest.partition(":")
-            out.append(
-                {"path": path, "line": int(lineno_s) if lineno_s.isdigit() else None,
-                 "text": text}
+            lineno_s, _, line_text = rest.partition(":")
+            backlinks.append(
+                {
+                    "path": path,
+                    "line": int(lineno_s) if lineno_s.isdigit() else None,
+                    "text": line_text,
+                }
             )
+    return {
+        "name": target,
+        "path": str(p),
+        "preview": preview,
+        "truncated": truncated,
+        "backlinks": backlinks,
+    }
 
-    if not out and lsp_err:
-        return [{"error": lsp_err}]
+
+@mcp.tool()
+def wiki_references(name: str) -> list[dict]:
+    """Find backlinks to a wiki note via ripgrep.
+
+    Matches wikilink forms `[[name]]`, `[[name#heading]]`, `[[name|alias]]`
+    and markdown links `](name.md)` / `](name#heading)`. Skips the target
+    note itself.
+    """
+    target = Path(name).stem
+    if not shutil.which("rg"):
+        return [{"error": "ripgrep not installed"}]
+    pattern = (
+        rf"\[\[{re.escape(target)}(?:#[^\]]*)?(?:\|[^\]]*)?\]\]"
+        rf"|\]\([^)]*?{re.escape(target)}(?:\.md)?(?:#[^)]*)?\)"
+    )
+    res = subprocess.run(
+        ["rg", "-n", "--no-heading", "--color=never", pattern, str(VAULT)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    p = _resolve_note(name)
+    self_real = str(p) if p else None
+    out: list[dict] = []
+    for line in res.stdout.splitlines():
+        path, _, rest = line.partition(":")
+        if path == self_real:
+            continue
+        lineno_s, _, text = rest.partition(":")
+        out.append(
+            {"path": path, "line": int(lineno_s) if lineno_s.isdigit() else None,
+             "text": text}
+        )
     return out
 
 
