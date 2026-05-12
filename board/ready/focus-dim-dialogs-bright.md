@@ -427,15 +427,17 @@ pkill -x quickshell; sleep 1; $HOME/.dotfiles/quickshell/qs-start.sh &
 
 | Trigger | Platform | Expected | Result |
 |---|---|---|---|
-| `$mod+p` opens qs-overlay | X11/i3 | Cut-out around overlay; rest dimmed |  |
-| `$mod+p` opens qs-overlay | Wayland/sway | Cut-out around overlay; rest dimmed |  |
-| `$mod+d` opens rofi | X11/i3 | Cut-out around rofi; rest dimmed |  |
-| `$mod+d` opens rofi | Wayland/sway | Cut-out around rofi; rest dimmed |  |
-| Focus a normal tiled window | both | Cut-out around it (regression) |  |
-| Toggle floating (`$mod+shift+space`) on a tiled window | both | Cut-out follows new geometry |  |
-| Click on quickshell bar | both | Bar bright; full screen dim (regression) |  |
-| Fullscreen toggle (`$mod+f`) | both | Full dim while fullscreen (regression) |  |
-| Multi-monitor: dialog on monitor 0 | X11 | Cut-out on monitor 0; monitor 1 full dim |  |
+| `$mod+p` opens qs-overlay | X11/i3 | Cut-out around overlay; rest dimmed | ~ |
+| `$mod+p` opens qs-overlay | Wayland/sway | Cut-out around overlay; rest dimmed | ~ |
+| `$mod+d` opens rofi | X11/i3 | Cut-out around rofi; rest dimmed | ~ |
+| `$mod+d` opens rofi | Wayland/sway | Cut-out around rofi; rest dimmed | ~ |
+| Focus a normal tiled window | both | Cut-out around it (regression) | ~ |
+| Toggle floating (`$mod+shift+space`) on a tiled window | both | Cut-out follows new geometry | ~ |
+| Click on quickshell bar | both | Bar bright; full screen dim (regression) | ~ |
+| Fullscreen toggle (`$mod+f`) | both | Full dim while fullscreen (regression) | ~ |
+| Multi-monitor: dialog on monitor 0 | X11 | Cut-out on monitor 0; monitor 1 full dim | ~ |
+
+**Verification status as of T3 closure:** all behavioral cells deferred to user (agent has no interactive display). All mechanical checks pass — see bd notes for evidence.
 
 **Step 3: For each `✗` cell**
 
