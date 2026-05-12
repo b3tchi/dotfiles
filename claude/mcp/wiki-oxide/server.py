@@ -6,20 +6,26 @@
 """
 wiki-oxide MCP server.
 
-Exposes markdown-oxide's workspace search to Claude Code as MCP tools,
-because the built-in `LSP` tool's `workspaceSymbol` op cannot pass a
-query string (Claude Code limitation — markdown-oxide returns nothing
-for the empty query it sends).
+Provides vault search + read primitives to Claude Code as MCP tools.
+All search/listing tools are ripgrep-backed (no LSP cache) because
+markdown-oxide's workspaceSymbol index is stale on file change and
+catalogues only headings/files/symbol-tags (not inline #tag body
+markers).
 
 Tools:
   - wiki_root()              — vault root path
   - wiki_list()              — list all .md files in vault
-  - wiki_search(query)       — workspaceSymbol query (notes, headings, tags)
-  - wiki_tags(prefix="")     — all #tags in vault
-  - wiki_grep(pattern, ...)  — ripgrep within vault
+  - wiki_search(query)       — search filenames, headings, tags (ripgrep)
+  - wiki_tags(prefix="")     — all #tags in vault, inline-aware (ripgrep)
+  - wiki_grep(pattern, ...)  — generic ripgrep within vault
   - wiki_read(name)          — full text of a note
   - wiki_preview(name)       — first ~1200 chars + backlinks
   - wiki_references(name)    — backlinks via ripgrep
+
+The LspClient (markdown-oxide stdio bridge) is retained for future
+LSP-based features (e.g. hover, completion) but is no longer used by
+the search tools. It will not be started unless something explicitly
+calls get_client().
 
 Configure vault root via env var WIKI_ROOT (default ~/.dotfiles/wiki).
 """
@@ -177,51 +183,126 @@ mcp = FastMCP("wiki-oxide")
 
 @mcp.tool()
 def wiki_search(query: str) -> list[dict]:
-    """Search vault for notes, headings, and tags matching the query.
+    """Search vault for filenames, headings, and tags matching the query.
 
-    Uses markdown-oxide workspaceSymbol. Examples:
-      - "ovpn"   → matches files, headings, and tags containing 'ovpn'
-      - "#vpn"   → matches tag entries
-      - "Inbox"  → matches headings
+    Backed by ripgrep — no LSP workspaceSymbol cache to go stale.
+    Returns matches with `kind` set to `"file"`, `"heading"`, or `"tag"`.
+    Results from each category are concatenated in that order. Total
+    capped at 50.
+
+    Examples:
+      - "ovpn"   → filename + heading + tag substring matches
+      - "#vpn"   → tag matches only (treats query as a tag)
+      - "Inbox"  → heading + filename matches
     """
-    if not query.strip():
+    q = query.strip()
+    if not q:
         return []
-    syms = get_client().workspace_symbol(query)
-    out = []
-    for s in syms[:50]:
-        loc = s.get("location") or {}
-        uri = loc.get("uri", "")
-        path = uri[len("file://") :] if uri.startswith("file://") else uri
+    if not shutil.which("rg"):
+        return [{"error": "ripgrep not installed"}]
+
+    out: list[dict] = []
+
+    # 1. Filename matches (case-insensitive substring on the stem).
+    q_lower = q.lstrip("#").lower()
+    if q_lower:
+        for p in sorted(VAULT.rglob("*.md")):
+            if q_lower in p.stem.lower():
+                out.append(
+                    {
+                        "name": p.stem,
+                        "kind": "file",
+                        "path": str(p),
+                        "match_field": "filename",
+                    }
+                )
+
+    # 2. Heading matches — any line that's an H1-H6 containing the query.
+    if not q.startswith("#"):
+        # Escape regex meta in user query, build a heading-only pattern
+        heading_pattern = rf"^#{{1,6}}\s+.*{re.escape(q)}"
+        res = subprocess.run(
+            ["rg", "-n", "--no-heading", "--color=never", "-i", "-e", heading_pattern, str(VAULT)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        for line in res.stdout.splitlines():
+            path, _, rest = line.partition(":")
+            lineno_s, _, text = rest.partition(":")
+            out.append(
+                {
+                    "name": text.strip().lstrip("#").strip(),
+                    "kind": "heading",
+                    "path": path,
+                    "line": int(lineno_s) if lineno_s.isdigit() else None,
+                    "match_field": "heading",
+                }
+            )
+
+    # 3. Tag matches. Build a #tag pattern from the query.
+    tag_token = q if q.startswith("#") else "#" + q
+    # Match exactly that tag — bounded so #auth doesn't match #authentication.
+    # PCRE2 needed for the trailing lookahead.
+    tag_pattern = rf"(?:^|\s){re.escape(tag_token)}(?=[\s.,;:!?)\]\}}]|$)"
+    res = subprocess.run(
+        ["rg", "-P", "-n", "--no-heading", "--color=never", "-e", tag_pattern, str(VAULT)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    for line in res.stdout.splitlines():
+        path, _, rest = line.partition(":")
+        lineno_s, _, text = rest.partition(":")
         out.append(
             {
-                "name": s.get("name"),
-                "kind": s.get("kind"),
+                "name": tag_token,
+                "kind": "tag",
                 "path": path,
-                "range": loc.get("range"),
+                "line": int(lineno_s) if lineno_s.isdigit() else None,
+                "match_field": "tag",
             }
         )
-    return out
 
-
-_TAG_SYMBOL_KIND = 14  # markdown-oxide marks tag entries with LSP SymbolKind.Constant
+    return out[:50]
 
 
 @mcp.tool()
 def wiki_tags(prefix: str = "") -> list[str]:
-    """List distinct #tags in the vault via markdown-oxide workspaceSymbol.
+    """List distinct #tags in the vault via ripgrep.
 
     `prefix` narrows by leading characters after `#` (e.g. "v" → tags
     starting with #v). Empty prefix returns all tags.
+
+    Backed by ripgrep — surfaces inline `#tag` body markers, not just
+    LSP workspace symbols. Tags are tokenised as `#` followed by
+    `[a-zA-Z0-9_-]+` and must be preceded by whitespace or line start
+    (so URL fragments and code-block `#include` do not over-match).
     """
-    query = "#" + prefix
-    try:
-        syms = get_client().workspace_symbol(query)
-    except TimeoutError as e:
-        return [f"error: {e}"]
-    tags = sorted({
-        s.get("name") for s in syms
-        if s.get("kind") == _TAG_SYMBOL_KIND and (s.get("name") or "").startswith("#")
-    })
+    if not shutil.which("rg"):
+        return ["error: ripgrep not installed"]
+
+    safe_prefix = re.escape(prefix)
+    # PCRE2 lookbehind: require non-word context before the `#`.
+    # Pattern: a `#`, then the user's prefix, then one or more
+    # tag-name characters. The lookbehind keeps URL fragments out.
+    pattern = rf"(?<![\w])#{safe_prefix}[A-Za-z][A-Za-z0-9_-]*"
+    res = subprocess.run(
+        [
+            "rg",
+            "-P",
+            "--no-heading",
+            "--no-filename",
+            "--only-matching",
+            "-e",
+            pattern,
+            str(VAULT),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    tags = sorted({line for line in res.stdout.splitlines() if line.startswith("#")})
     return tags
 
 
