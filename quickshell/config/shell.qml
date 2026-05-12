@@ -79,6 +79,7 @@ ShellRoot {
     }
 
     FocusBorder {}
+    FocusDim {}
 
     Variants {
         model: Quickshell.screens
