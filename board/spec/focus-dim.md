@@ -19,6 +19,23 @@
 - Follow the existing style in `qs-focus-border.py` (single-instance lockfile, RGBA visual, click-through via empty input shape region, GLib.idle_add for cross-thread UI updates).
 - `IGNORE_CLASSES` and `ignoreAppIds` must match the border's set: `quickshell`, `Rofi` / `rofi`, plus titles starting with `qs-`.
 
+## Anti-patterns
+
+- ❌ Do **not** swallow exceptions silently in `qs-focus-dim.py`. The border script does this and it hides crashes in production. New code in this spec must `print(..., file=sys.stderr, flush=True)` inside the `except Exception` branches before falling through.
+- ❌ Do **not** import `Xlib` at module top-level — keep it inside `mouse_monitor` so the script still runs (without drag polling) when `python-xlib` is absent.
+- ❌ Do **not** assume `Gdk.Display.get_default()` returns non-`None`. If `None`, log to stderr and `sys.exit(1)` — never construct overlays with no display.
+- ❌ Do **not** add a `--no-verify` to any commit. Pre-commit hooks must pass.
+- ❌ Do **not** ship a `TODO` without a follow-up bd task referenced in the same commit message.
+- ❌ Do **not** copy-paste from `FocusBorderWayland.qml` without removing the border-only properties (`bw`, `br`, `bc`, `inset`) — leaving them in is dead code.
+- ❌ Do **not** introduce a `Component.onCompleted` that hardcodes focus state without removing it in the same task's final step.
+
+## Known limitations (inherited from focus border)
+
+The existing `qs-focus-border.py` and `FocusBorderWayland.qml` have two unaddressed limitations. The dim overlay inherits both and **does not fix them in this epic**. File follow-up bd issues if either matters on the target host:
+
+1. **HiDPI / fractional scaling.** i3 and sway report rects in root coords without DPI normalization; GTK/QML render in logical pixels. On non-100% scale outputs the focused-window cut-out may be off by a few pixels. Verify on the actual target host; file a follow-up if visible.
+2. **Wayland multi-monitor coords.** `FocusBorderWayland.qml` uses sway-reported root coords directly inside a per-output `PanelWindow`. With monitors at different x/y offsets the cut-out positions are wrong on every output except the primary. WSL is single-output today so this is latent.
+
 ## File tree
 
 ```
@@ -110,6 +127,10 @@ signal.signal(signal.SIGINT, lambda *a: sys.exit(0))
 Gtk.main()
 ```
 
+Notes:
+- `Gdk.Display.get_default()` may return `None` if no DISPLAY is set. Add an explicit check after the `display = ...` line: `if display is None: print("qs-focus-dim: no display", file=sys.stderr); sys.exit(1)`.
+- The `except OSError` on the flock falls through to `sys.exit(0)` silently — that path is fine (a second instance is meant to be a no-op).
+
 **Step 2: Make it executable + run standalone**
 
 ```bash
@@ -118,7 +139,12 @@ python3 -u $HOME/.dotfiles/quickshell/qs-focus-dim.py &
 DIMPID=$!
 ```
 
-Expected: screen looks ~30% darker on every monitor. Clicks still pass to windows underneath. No flicker.
+**Success criteria (must all pass):**
+- [ ] Every monitor visibly ~30% darker (compare with monitor unaffected by toggling kill / restart)
+- [ ] Click on a window underneath still focuses it (no input capture)
+- [ ] No flicker, tearing, or scanline artefacts during 5 seconds of idle observation
+- [ ] `pgrep -af qs-focus-dim.py` shows exactly one process
+- [ ] Starting a second instance: it exits immediately (flock works); first instance unaffected
 
 **Step 3: Kill it**
 
@@ -126,7 +152,7 @@ Expected: screen looks ~30% darker on every monitor. Clicks still pass to window
 kill $DIMPID
 ```
 
-Expected: dim disappears immediately.
+Expected: dim disappears within 1 frame (≤16 ms). Lockfile released — re-running the script succeeds.
 
 **Step 4: Commit**
 
@@ -191,7 +217,14 @@ Replace `_draw` method body with:
 python3 -u $HOME/.dotfiles/quickshell/qs-focus-dim.py
 ```
 
-Expected: a bright rectangular hole at screen coords (400, 200) sized 800×600. Everything else dimmed at 30%. Ctrl+C to stop.
+**Success criteria (must all pass):**
+- [ ] Bright rectangular hole at screen coords (400, 200) sized exactly 800×600
+- [ ] Pixels at the focus rect's corners (e.g. (400,200), (1199,799)) are at full brightness (not dimmed by ~1px overlap)
+- [ ] Pixels just outside the focus rect (e.g. (399,200), (1200,799)) are dimmed
+- [ ] Multi-monitor: if the test rect lies entirely on monitor 0, monitor 1 (if present) is **fully** dimmed (no partial cut-out)
+- [ ] No double-painted edges (would look like a darker ring around the cut-out)
+
+Ctrl+C to stop.
 
 **Step 3: Commit**
 
@@ -245,7 +278,9 @@ def refresh_focused():
     def _do():
         try:
             tree = json.loads(
-                subprocess.check_output(['i3-msg', '-t', 'get_tree']).decode()
+                subprocess.check_output(
+                    ['i3-msg', '-t', 'get_tree'], timeout=2
+                ).decode()
             )
 
             def walk(node, parents):
@@ -279,8 +314,9 @@ def refresh_focused():
                         r.get('height', 0) + deco_h,
                     )
             GLib.idle_add(_redraw_all)
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"qs-focus-dim: refresh_focused: {exc}",
+                  file=sys.stderr, flush=True)
     threading.Thread(target=_do, daemon=True).start()
 
 
@@ -291,6 +327,7 @@ def _redraw_all():
 
 
 def subscribe():
+    import time
     while True:
         try:
             proc = subprocess.Popen(
@@ -301,9 +338,9 @@ def subscribe():
             for _ in proc.stdout:
                 refresh_focused()
             proc.wait()
-        except Exception:
-            pass
-        import time
+        except Exception as exc:
+            print(f"qs-focus-dim: subscribe: {exc}",
+                  file=sys.stderr, flush=True)
         time.sleep(1)
 ```
 
@@ -367,6 +404,15 @@ Kill the process when done:
 pkill -f qs-focus-dim.py
 ```
 
+**Success criteria (must all pass):**
+- [ ] Focus a different window with `$mod+j/k` → cut-out moves to it within ~100 ms
+- [ ] Move window with `$mod+Shift+arrow` → cut-out follows
+- [ ] Workspace switch (`$mod+2`) → cut-out repositions around the new workspace's focused window
+- [ ] Fullscreen toggle (`$mod+f`) → cut-out disappears (whole monitor dimmed); exit fullscreen → cut-out returns
+- [ ] Open rofi (`$mod+d`) → cut-out hidden while rofi visible; close rofi → cut-out returns on previously focused window
+- [ ] `i3-msg` errors visible in stderr (artificially break: `chmod -x $(which i3-msg)` briefly) — no silent failure
+- [ ] Tabbed/stacked container leaf — cut-out covers leaf body only, not the parent strip's title bar area
+
 **Step 6: Commit**
 
 ```bash
@@ -404,8 +450,13 @@ def mouse_poll():
 
 def mouse_monitor():
     import struct
-    from Xlib import display as xdisplay
-    from Xlib.ext import xinput
+    try:
+        from Xlib import display as xdisplay
+        from Xlib.ext import xinput
+    except ImportError:
+        print("qs-focus-dim: python-xlib not installed; "
+              "mouse-drag polling disabled", file=sys.stderr, flush=True)
+        return
     d = xdisplay.Display()
     if not d.has_extension("XInputExtension"):
         return
@@ -446,7 +497,14 @@ threading.Thread(target=mouse_monitor, daemon=True).start()
 python3 -u $HOME/.dotfiles/quickshell/qs-focus-dim.py &
 ```
 
-Expected: drag-resize a floating window with the mouse — the cut-out follows the window's new size at ~10 fps during the drag, then snaps cleanly on release.
+**Success criteria (must all pass):**
+- [ ] Drag-resize a floating window with the mouse → cut-out follows at ~10 fps during the drag
+- [ ] On mouse release the cut-out snaps to the final geometry within one frame
+- [ ] Right-click and middle-click drags do **not** trigger polling (only button 1)
+- [ ] Verified: `pip uninstall python-xlib` (or temporarily rename the module) → script continues to run with i3-IPC tracking; stderr shows the warning; no crash
+- [ ] Verified `pkill -f qs-focus-dim.py` cleanly terminates (no zombie threads — `pgrep` returns nothing after 1 s)
+
+Restore python-xlib if you uninstalled it. Kill the test process:
 
 ```bash
 pkill -f qs-focus-dim.py
@@ -542,7 +600,12 @@ FocusDim {}
 pkill -x quickshell; sleep 1; $HOME/.dotfiles/quickshell/qs-start.sh &
 ```
 
-Expected: every monitor 30% darker, bar/notifications still bright, clicks still pass through to windows. (Cut-out comes in Task 6.)
+**Success criteria (must all pass):**
+- [ ] Every monitor uniformly ~30% darker
+- [ ] **Bar stays at full brightness** — this is the critical z-order check. If the bar appears dimmed, the dim PanelWindow is on the same/higher layer as the bar. To fix: ensure `FocusDim {}` is mounted in `shell.qml` **before** the bar's `Variants { ... Bar {} }`, so the bar's surface is committed after dim and stays on top within the same layer. If that still doesn't work, demote dim to a lower layer (Quickshell exposes `aboveWindows` as boolean only — workaround is to drop `aboveWindows: true` so the surface goes to the default `top` minus one step, or render dim above wallpaper only).
+- [ ] Notifications, tray icons, ticker still readable
+- [ ] Clicks pass through to windows under the dim (test: open a terminal, click a button on a webpage in another window)
+- [ ] (No cut-out yet — Task 6 adds it.)
 
 **Step 5: Commit**
 
@@ -622,9 +685,13 @@ Restart:
 pkill -x quickshell; sleep 1; $HOME/.dotfiles/quickshell/qs-start.sh &
 ```
 
-Expected: bright rectangle at (200, 100) size 800×500; everything else dimmed.
+**Success criteria (must all pass):**
+- [ ] Bright rectangle visible at (200, 100) size 800×500
+- [ ] Outside the rectangle: 30% black dim
+- [ ] The four `Rectangle` siblings touch with no visible gap and no double-overlap (gap = bright line; overlap = darker line)
+- [ ] Bar still bright (re-verify the z-order check from Task 5)
 
-Remove the `Component.onCompleted` line before continuing.
+Remove the `Component.onCompleted` line before continuing — leaving it in is a Task-5 anti-pattern (hardcoded focus state).
 
 **Step 3: Commit**
 
@@ -687,11 +754,15 @@ The `focusScan.onExited` `walk` function should call `dimOverlay.applyContainer(
 pkill -x quickshell; sleep 1; $HOME/.dotfiles/quickshell/qs-start.sh &
 ```
 
-Expected (on WSL/sway):
-- Cut-out follows the focused window through focus changes (`$mod+arrow`)
-- Tracks moves and floating drags
-- Hides on fullscreen (`$mod+f`) — entire screen dimmed
-- Hides when focusing rofi or quickshell windows
+**Success criteria (must all pass, on WSL/sway):**
+- [ ] Cut-out follows focused window through `$mod+arrow` focus changes within ~100 ms
+- [ ] Cut-out tracks `$mod+Shift+arrow` window moves
+- [ ] Cut-out tracks floating window drag with the mouse (uses `dragPoller`)
+- [ ] Keyboard resize mode (`$mod+r` then arrow keys) → cut-out updates continuously (uses `resizePoller`)
+- [ ] Fullscreen (`$mod+f`) → cut-out hides; exit fullscreen → cut-out returns
+- [ ] Open rofi → cut-out hides; close rofi → cut-out returns
+- [ ] Close the focused window → cut-out repositions to sway's newly focused window (no orphaned cut-out at the closed window's old position)
+- [ ] No console errors in `pkill -x quickshell; quickshell 2>&1 | tee /tmp/qs.log` during 30 s of normal use
 
 **Step 4: Commit**
 
@@ -751,7 +822,12 @@ pkill -x quickshell; sleep 1; $HOME/.dotfiles/quickshell/qs-start.sh &
 pgrep -af qs-focus-dim.py
 ```
 
-Expected: exactly one `qs-focus-dim.py` process running; dim visible; tracks focus.
+**Success criteria (must all pass):**
+- [ ] On X11/i3 native: exactly one `qs-focus-dim.py` process running (`pgrep -af qs-focus-dim.py | wc -l` = 1); dim visible; tracks focus
+- [ ] On proot/Termux: **zero** `qs-focus-dim.py` processes (`probeProc` detects proot and gates spawn); no overlay rendered
+- [ ] On Wayland/sway: zero `qs-focus-dim.py` processes (Wayland branch via `Loader`); dim still visible via QML overlay
+- [ ] Kill the dim helper manually (`pkill -f qs-focus-dim.py`) → `restartTimer` respawns it within 2 s; only one process after respawn
+- [ ] No leaked `restartTimer` if the helper exits cleanly (Quickshell `Process.onExited` fires exactly once per exit)
 
 **Step 3: Commit**
 
@@ -776,13 +852,15 @@ pkill -x quickshell; sleep 1; $HOME/.dotfiles/quickshell/qs-start.sh &
 
 **Step 2: Verify the matrix**
 
-| Platform | Border + dim both on focus change | Hide on fullscreen | Hide on rofi | Multi-monitor: dim on non-focused monitors | Click-through |
-|---|---|---|---|---|---|
-| X11 / native i3 | | | | | |
-| Wayland / WSL sway | | | | | |
-| proot / Termux i3 | n/a (skipped) | n/a | n/a | n/a | n/a |
+Fill each cell with `✓` (passes), `✗` (fails, file follow-up bd issue), or `~` (host doesn't have this platform — leave verification to whoever does).
 
-For any row that fails: append a "Known issues" section to this spec with the failure description, commit the docs change, do not patch the failure in this same epic.
+| Platform | Border + dim both on focus change | Hide on fullscreen | Hide on rofi | Multi-monitor: dim on non-focused monitors | Click-through | Bar stays bright |
+|---|---|---|---|---|---|---|
+| X11 / native i3 | | | | | | |
+| Wayland / WSL sway | | | | | | |
+| proot / Termux i3 | n/a (skipped) | n/a | n/a | n/a | n/a | n/a |
+
+For any cell marked `✗`: append a "Known issues" section to this spec with the failure description **and** file a follow-up bd task (`bd create --title "focus-dim: <failure>" --type bug --priority 2`). Do not patch the failure in this same epic.
 
 **Step 3: Commit verification notes (only if anything failed)**
 
