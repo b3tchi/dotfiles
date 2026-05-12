@@ -25,11 +25,6 @@
       "name": "yaml-lsp",
       "source": "./plugins/yaml-lsp",
       "description": "YAML LSP integration via yaml-language-server"
-    },
-    {
-      "name": "markdown-lsp",
-      "source": "./plugins/markdown-lsp",
-      "description": "Markdown LSP integration via markdown-oxide"
     }
   ]
 }
