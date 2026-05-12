@@ -20,6 +20,9 @@ _lock_fp.flush()
 
 DIM_ALPHA = 0.3
 
+# Test geometry — replaced by i3 IPC in Task 3
+TEST_FOCUS = (400, 200, 800, 600)  # x, y, w, h
+
 
 class DimOverlay:
     def __init__(self, monitor):
@@ -51,8 +54,26 @@ class DimOverlay:
         cr.paint()
         cr.set_operator(cairo.OPERATOR_OVER)
         a = widget.get_allocation()
+        fx, fy, fw, fh = TEST_FOCUS
+        # Translate focus rect into this monitor's local coords
+        g = self.monitor.get_geometry()
+        fx -= g.x
+        fy -= g.y
         cr.set_source_rgba(0, 0, 0, DIM_ALPHA)
-        cr.rectangle(0, 0, a.width, a.height)
+        # If focus rect doesn't intersect this monitor, dim entire monitor
+        if fx + fw <= 0 or fy + fh <= 0 or fx >= a.width or fy >= a.height:
+            cr.rectangle(0, 0, a.width, a.height)
+            cr.fill()
+            return
+        # Clip to monitor bounds
+        cx = max(0, fx); cy = max(0, fy)
+        cw = min(a.width, fx + fw) - cx
+        ch = min(a.height, fy + fh) - cy
+        # 4 rects outside focus
+        cr.rectangle(0, 0, a.width, cy)                          # top
+        cr.rectangle(0, cy + ch, a.width, a.height - (cy + ch))  # bottom
+        cr.rectangle(0, cy, cx, ch)                              # left
+        cr.rectangle(cx + cw, cy, a.width - (cx + cw), ch)       # right
         cr.fill()
 
 
