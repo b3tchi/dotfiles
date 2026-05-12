@@ -90,11 +90,14 @@ Variants {
                         } else if (change === "fullscreen_mode" && e.container) {
                             if (e.container.fullscreen_mode > 0)
                                 dimOverlay.hasFocus = false
-                            else if (e.container.focused)
-                                dimOverlay.applyContainer(e.container)
+                            else
+                                focusScan.running = true
+                        } else if (change === "floating") {
+                            // Tiled↔floating toggle — re-walk tree to propagate in_floating
+                            focusScan.running = true
                         } else if (e.container && e.container.focused) {
-                            // Instant update from event data (focus, move, floating)
-                            dimOverlay.applyContainer(e.container)
+                            // Re-walk tree so in_floating is correctly propagated
+                            focusScan.running = true
                         } else {
                             // Workspace switch or event without container — rescan
                             focusScan.running = true
@@ -180,35 +183,42 @@ Variants {
                 try {
                     var tree = JSON.parse(focusScan.buf)
                     var found = false
-                    function walk(node) {
+                    function walk(node, in_floating) {
                         if (found) return
                         if (node.focused && node.pid) {
-                            dimOverlay.applyContainer(node)
+                            dimOverlay.applyContainer(node, in_floating)
                             found = true
                             return
                         }
-                        var children = (node.nodes || []).concat(node.floating_nodes || [])
-                        for (var i = 0; i < children.length; i++) walk(children[i])
+                        var tiled = node.nodes || []
+                        for (var i = 0; i < tiled.length; i++) walk(tiled[i], in_floating)
+                        var floating = node.floating_nodes || []
+                        for (var j = 0; j < floating.length; j++) walk(floating[j], true)
                     }
-                    walk(tree)
+                    walk(tree, false)
                     if (!found) dimOverlay.hasFocus = false
                 } catch(err) {}
                 focusScan.buf = ""
             }
         }
 
-        readonly property var ignoreAppIds: ["quickshell", "rofi"]
+        readonly property var ignoreAppIds: ["quickshell"]
 
-        function applyContainer(c) {
+        function applyContainer(c, in_floating) {
             var appId = c.app_id || ""
+            var cls = (c.window_properties || {}).class || ""
             var title = c.name || ""
-            if (ignoreAppIds.indexOf(appId) >= 0 || title.startsWith("qs-")) {
-                hasFocus = false
-                return
-            }
+
             if (c.fullscreen_mode > 0) {
                 hasFocus = false
                 return
+            }
+            // Floating windows and qs- titled windows bypass class-based ignore
+            if (!in_floating && !title.startsWith("qs-")) {
+                if (ignoreAppIds.indexOf(appId) >= 0 || ignoreAppIds.indexOf(cls) >= 0) {
+                    hasFocus = false
+                    return
+                }
             }
             var r = c.rect || {}
             var decoH = (c.deco_rect || {}).height || 0
