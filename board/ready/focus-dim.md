@@ -859,11 +859,13 @@ Fill each cell with `✓` (passes), `✗` (fails, file follow-up bd issue), or `
 
 | Platform | Border + dim both on focus change | Hide on fullscreen | Hide on rofi | Multi-monitor: dim on non-focused monitors | Click-through | Bar stays bright |
 |---|---|---|---|---|---|---|
-| X11 / native i3 | | | | | | |
-| Wayland / WSL sway | | | | | | |
+| X11 / native i3 | ~ | ~ | ~ | ~ | ~ | ~ |
+| Wayland / WSL sway | ~ | ~ | ~ | ~ | ~ | ~ |
 | proot / Termux i3 | n/a (skipped) | n/a | n/a | n/a | n/a | n/a |
 
 For any cell marked `✗`: append a "Known issues" section to this spec with the failure description **and** file a follow-up bd task (`bd create --title "focus-dim: <failure>" --type bug --priority 2`). Do not patch the failure in this same epic.
+
+**Verification status as of T9 closure:** all behavioral cells deferred to user (agent has no interactive display). Mechanical checks (file existence, syntax, mount order, anti-pattern absence) all pass — see bd notes for evidence.
 
 **Step 3: Commit verification notes (only if anything failed)**
 
