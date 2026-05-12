@@ -11,23 +11,38 @@ vim.o.tabstop = 4
 vim.o.shiftwidth = 4
 vim.o.expandtab = false
 
-if vim.fn.has("wsl") == 1 then
-	vim.g.clipboard = {
-		name = "WslClipboard",
-		copy = {
-			["+"] = "/mnt/c/Windows/System32/clip.exe",
-			["*"] = "/mnt/c/Windows/System32/clip.exe",
-
-			-- ["+"] = "clip.exe",
-			-- ["*"] = "clip.exe",
-		},
-		paste = {
-			["+"] = 'powershell.exe -c [Console]::Out.Write($(Get-Clipboard -Raw).tostring().replace("`r", ""))',
-			["*"] = 'powershell.exe -c [Console]::Out.Write($(Get-Clipboard -Raw).tostring().replace("`r", ""))',
-		},
-		cache_enabled = 0,
-	}
+-- WSL clipboard: SSH sessions strip WAYLAND_DISPLAY/XDG_RUNTIME_DIR but the
+-- socket at /run/user/$UID/wayland-0 is still reachable. Inject env and call
+-- wl-copy/wl-paste directly. The Wayland↔Win sync daemons (see
+-- sway/scripts/clipboard-to-win.nu) handle propagation to Windows.
+local uid = tostring(vim.uv.getuid())
+local env_prefix = {
+	"env",
+	"WAYLAND_DISPLAY=wayland-0",
+	"XDG_RUNTIME_DIR=/run/user/" .. uid,
+}
+local function with_env(cmd)
+	local out = {}
+	for _, v in ipairs(env_prefix) do table.insert(out, v) end
+	for _, v in ipairs(cmd) do table.insert(out, v) end
+	return out
 end
+vim.g.clipboard = {
+	name = "WaylandSSH",
+	copy = {
+		["+"] = with_env({ "wl-copy" }),
+		["*"] = with_env({ "wl-copy", "--primary" }),
+	},
+	paste = {
+		["+"] = with_env({ "wl-paste", "--no-newline" }),
+		["*"] = with_env({ "wl-paste", "--no-newline", "--primary" }),
+	},
+	cache_enabled = 0,
+}
+-- LazyVim sets clipboard="" when SSH_CONNECTION is set (it expects OSC 52).
+-- We have a working Wayland provider above, so re-enable unnamedplus so
+-- plain y/p reach the + register instead of dying in the unnamed register.
+vim.opt.clipboard = "unnamedplus"
 -- --
 -- path to the Nushell executable
 vim.opt.sh = "nu"
