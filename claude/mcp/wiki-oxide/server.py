@@ -43,7 +43,52 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-VAULT = Path(os.environ.get("WIKI_ROOT", str(Path.home() / ".dotfiles/wiki"))).resolve()
+_VAULT_MARKERS = (".moxide.toml", ".obsidian")
+_VAULT_FALLBACK = Path.home() / ".dotfiles/wiki"
+_DESCEND_MAX_DEPTH = 4
+
+
+def _has_marker(d: Path) -> bool:
+    return any((d / m).exists() for m in _VAULT_MARKERS)
+
+
+def _walk_up(start: Path) -> Path | None:
+    for d in (start, *start.parents):
+        if _has_marker(d):
+            return d
+    return None
+
+
+def _walk_down(start: Path) -> Path | None:
+    # BFS bounded by depth so we don't scan huge trees.
+    queue = [(start, 0)]
+    while queue:
+        d, depth = queue.pop(0)
+        if _has_marker(d):
+            return d
+        if depth >= _DESCEND_MAX_DEPTH:
+            continue
+        try:
+            for child in d.iterdir():
+                if child.is_dir() and not child.name.startswith("."):
+                    queue.append((child, depth + 1))
+        except (PermissionError, OSError):
+            pass
+    return None
+
+
+def _detect_vault() -> Path:
+    env = os.environ.get("WIKI_ROOT")
+    if env:
+        return Path(env).resolve()
+    cwd = Path.cwd()
+    found = _walk_up(cwd) or _walk_down(cwd)
+    if found is not None:
+        return found.resolve()
+    return _VAULT_FALLBACK.resolve()
+
+
+VAULT = _detect_vault()
 
 
 class LspClient:
