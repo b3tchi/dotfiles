@@ -63,6 +63,22 @@ linux:
       # nu provides --lsp natively, no extra binary needed
       sudo npm install -g typescript typescript-language-server svelte-language-server vscode-langservers-extracted yaml-language-server
 
+      # markdown-oxide — LSP for wiki vault (used by nvim md plugin + wiki-oxide MCP)
+      if ! command -v markdown-oxide >/dev/null 2>&1; then
+        if command -v cargo >/dev/null 2>&1; then
+          cargo install --locked markdown-oxide
+        else
+          echo "skip markdown-oxide: cargo not available" >&2
+        fi
+      fi
+
+      # wiki-oxide MCP — register at user scope, idempotent
+      if command -v claude >/dev/null 2>&1; then
+        if ! claude mcp list 2>/dev/null | grep -q "^wiki-oxide:"; then
+          claude mcp add wiki-oxide -s user -- uv run --quiet --script ~/.dotfiles/claude/mcp/wiki-oxide/server.py
+        fi
+      fi
+
       # Plugins
       claude plugin marketplace add JuliusBrussee/caveman
       claude plugin install caveman@caveman
