@@ -1,0 +1,16 @@
+{
+  "name": "markdown-lsp",
+  "description": "Markdown LSP integration via markdown-oxide",
+  "author": {
+    "name": "jan"
+  },
+  "lspServers": {
+    "markdown": {
+      "command": "markdown-oxide",
+      "extensionToLanguage": {
+        ".md": "markdown",
+        ".markdown": "markdown"
+      }
+    }
+  }
+}

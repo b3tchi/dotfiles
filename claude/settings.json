@@ -68,8 +68,7 @@
     "nushell-lsp@dotfiles": true,
     "json-lsp@dotfiles": true,
     "yaml-lsp@dotfiles": true,
-    "markdown-oxide-lsp@dotfiles": true,
-    "clangd-lsp@claude-plugins-official": true
+    "markdown-lsp@dotfiles": true
   },
   "extraKnownMarketplaces": {
     "infinifu-dev": {
