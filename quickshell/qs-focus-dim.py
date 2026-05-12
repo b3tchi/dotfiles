@@ -21,22 +21,62 @@ _lock_fp.flush()
 
 DIM_ALPHA = 0.3
 
-IGNORE_CLASSES = {'quickshell', 'Rofi', 'rofi'}
+IGNORE_CLASSES = {'quickshell'}  # rofi removed — caught by floating rule
 
 # Current focused-window rect in root (screen) coords; None means hide cut-out
 focus_rect = None
 
 
-def should_ignore(c):
+def should_ignore(c, in_floating):
+    """Return True if c should be treated as 'no focused window' (full dim)."""
+    if in_floating:
+        return False
     props = c.get('window_properties', {})
     cls = props.get('class', '')
     instance = props.get('instance', '')
     title = c.get('name', '')
-    if cls in IGNORE_CLASSES or instance in IGNORE_CLASSES:
-        return True
     if title.startswith('qs-'):
-        return True
-    return False
+        return False
+    return cls in IGNORE_CLASSES or instance in IGNORE_CLASSES
+
+
+def walk(node, parents, in_floating):
+    if node.get('focused') and node.get('window'):
+        return node, parents, in_floating
+    for child in node.get('nodes', []):
+        r = walk(child, parents + [node], in_floating)
+        if r:
+            return r
+    for child in node.get('floating_nodes', []):
+        r = walk(child, parents + [node], True)
+        if r:
+            return r
+    return None
+
+
+def _compute_focus_rect(tree):
+    """Update module-level focus_rect from an i3 tree dict. Pure function (no GTK)."""
+    global focus_rect
+    result = walk(tree, [], False)
+    if not result:
+        focus_rect = None
+        return
+    leaf, parents, in_floating = result
+    if should_ignore(leaf, in_floating) or leaf.get('fullscreen_mode', 0) > 0:
+        focus_rect = None
+        return
+    r = leaf.get('rect', {})
+    deco_h = leaf.get('deco_rect', {}).get('height', 0)
+    in_tabbed = any(p.get('layout') in ('tabbed', 'stacked') for p in parents)
+    direct_in_tabbed = parents and parents[-1].get('layout') in ('tabbed', 'stacked')
+    if in_tabbed and not direct_in_tabbed:
+        deco_h = 0
+    focus_rect = (
+        r.get('x', 0),
+        r.get('y', 0) - deco_h,
+        r.get('width', 0),
+        r.get('height', 0) + deco_h,
+    )
 
 
 def refresh_focused():
@@ -47,37 +87,7 @@ def refresh_focused():
                     ['i3-msg', '-t', 'get_tree'], timeout=2
                 ).decode()
             )
-
-            def walk(node, parents):
-                if node.get('focused') and node.get('window'):
-                    return node, parents
-                for child in node.get('nodes', []) + node.get('floating_nodes', []):
-                    r = walk(child, parents + [node])
-                    if r:
-                        return r
-                return None
-
-            result = walk(tree, [])
-            global focus_rect
-            if not result:
-                focus_rect = None
-            else:
-                leaf, parents = result
-                if should_ignore(leaf) or leaf.get('fullscreen_mode', 0) > 0:
-                    focus_rect = None
-                else:
-                    r = leaf.get('rect', {})
-                    deco_h = leaf.get('deco_rect', {}).get('height', 0)
-                    in_tabbed = any(p.get('layout') in ('tabbed', 'stacked') for p in parents)
-                    direct_in_tabbed = parents and parents[-1].get('layout') in ('tabbed', 'stacked')
-                    if in_tabbed and not direct_in_tabbed:
-                        deco_h = 0
-                    focus_rect = (
-                        r.get('x', 0),
-                        r.get('y', 0) - deco_h,
-                        r.get('width', 0),
-                        r.get('height', 0) + deco_h,
-                    )
+            _compute_focus_rect(tree)
             GLib.idle_add(_redraw_all)
         except Exception as exc:
             print(f"qs-focus-dim: refresh_focused: {exc}",
