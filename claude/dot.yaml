@@ -72,11 +72,20 @@ linux:
         fi
       fi
 
-      # wiki-oxide MCP — register at user scope, idempotent
+      # uv — Python script runner required by wiki-oxide MCP server shebang
+      if ! command -v uv >/dev/null 2>&1; then
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+      fi
+
+      # wiki-oxide MCP — register at user scope in every CLAUDE_CONFIG_DIR we maintain.
+      # Two configs: ~/.claude (work) and ~/.claude-personal (personal). Idempotent.
       if command -v claude >/dev/null 2>&1; then
-        if ! claude mcp list 2>/dev/null | grep -q "^wiki-oxide:"; then
-          claude mcp add wiki-oxide -s user -- uv run --quiet --script ~/.dotfiles/claude/mcp/wiki-oxide/server.py
-        fi
+        for cfg in "$HOME/.claude" "$HOME/.claude-personal"; do
+          [ -d "$cfg" ] || continue
+          if ! CLAUDE_CONFIG_DIR="$cfg" claude mcp list 2>/dev/null | grep -q "^wiki-oxide:"; then
+            CLAUDE_CONFIG_DIR="$cfg" claude mcp add wiki-oxide -s user -- uv run --quiet --script ~/.dotfiles/claude/mcp/wiki-oxide/server.py
+          fi
+        done
       fi
 
       # Plugins
