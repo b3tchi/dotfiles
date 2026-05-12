@@ -3,11 +3,12 @@ return {
 		"neovim/nvim-lspconfig",
 		opts = {
 			servers = {
+				marksman = { enabled = false },
 				markdown_oxide = {
 					mason = false,
 					cmd = { "markdown-oxide" },
 					filetypes = { "markdown" },
-					root_markers = { ".moxide.toml", ".obsidian" },
+					root_markers = { ".moxide.toml", ".obsidian", ".git" },
 					capabilities = {
 						workspace = {
 							didChangeWatchedFiles = { dynamicRegistration = true },
