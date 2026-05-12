@@ -25,6 +25,11 @@
       "name": "yaml-lsp",
       "source": "./plugins/yaml-lsp",
       "description": "YAML LSP integration via yaml-language-server"
+    },
+    {
+      "name": "markdown-oxide-lsp",
+      "source": "./plugins/markdown-oxide-lsp",
+      "description": "Markdown LSP integration via markdown-oxide (PKM-aware: Obsidian/Zettelkasten/PARA)"
     }
   ]
 }

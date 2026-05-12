@@ -2,6 +2,9 @@ import Quickshell
 import Quickshell.Io
 import QtQuick
 
+// Full-screen transparent overlay that dims everything outside the focused
+// window on sway/Wayland.  Uses layer-shell (PanelWindow) on the overlay
+// layer, fully click-through.  Position comes from sway IPC.
 Variants {
     model: Quickshell.screens
 
@@ -64,6 +67,156 @@ Variants {
             y: dimOverlay.fy
             width: Math.max(0, parent.width - (dimOverlay.fx + dimOverlay.fw))
             height: dimOverlay.fh
+        }
+
+        // Subscribe to sway window/workspace events
+        Process {
+            id: swaySubscribe
+            running: true
+            command: ["swaymsg", "-t", "subscribe", "-m", "[\"window\",\"workspace\"]"]
+            stdout: SplitParser {
+                onRead: data => {
+                    try {
+                        var e = JSON.parse(data)
+                        var change = e.change
+                        if (change === "close") {
+                            // Always recalc on close. The closed window may
+                            // not be the one the dim is drawn around, and
+                            // even if it is, sway moves focus to the next
+                            // window — focusScan finds it. Unconditional hide
+                            // killed the dim on switcher-close races and
+                            // left a dead dim between focus events here.
+                            focusScan.running = true
+                        } else if (change === "fullscreen_mode" && e.container) {
+                            if (e.container.fullscreen_mode > 0)
+                                dimOverlay.hasFocus = false
+                            else if (e.container.focused)
+                                dimOverlay.applyContainer(e.container)
+                        } else if (e.container && e.container.focused) {
+                            // Instant update from event data (focus, move, floating)
+                            dimOverlay.applyContainer(e.container)
+                        } else {
+                            // Workspace switch or event without container — rescan
+                            focusScan.running = true
+                        }
+                    } catch(err) {}
+                }
+            }
+            onExited: running = true
+        }
+
+        // Track sway resize/move mode to poll geometry during interactive ops
+        Process {
+            id: modeSubscribe
+            running: true
+            command: ["swaymsg", "-t", "subscribe", "-m", "[\"mode\"]"]
+            stdout: SplitParser {
+                onRead: data => {
+                    try {
+                        var e = JSON.parse(data)
+                        if (e.change === "resize")
+                            resizePoller.running = true
+                        else
+                            resizePoller.running = false
+                    } catch(err) {}
+                }
+            }
+            onExited: running = true
+        }
+
+        // Poll during keyboard resize mode
+        Timer {
+            id: resizePoller
+            interval: 20
+            repeat: true
+            onTriggered: focusScan.running = true
+        }
+
+        // Continuous light poll to catch mouse drag/resize (no sway events during these)
+        // Only runs while dim is visible; stops when geometry is stable for 1s
+        property int lastFx: 0
+        property int lastFy: 0
+        property int lastFw: 0
+        property int lastFh: 0
+        property int stableCount: 0
+
+        Timer {
+            id: dragPoller
+            interval: 100
+            repeat: true
+            running: dimOverlay.hasFocus
+            onTriggered: {
+                if (dimOverlay.fx === dimOverlay.lastFx &&
+                    dimOverlay.fy === dimOverlay.lastFy &&
+                    dimOverlay.fw === dimOverlay.lastFw &&
+                    dimOverlay.fh === dimOverlay.lastFh) {
+                    dimOverlay.stableCount++
+                    // Geometry stable for 1s — slow down to save resources
+                    if (dimOverlay.stableCount > 10)
+                        dragPoller.interval = 1000
+                } else {
+                    dimOverlay.stableCount = 0
+                    dragPoller.interval = 100
+                    dimOverlay.lastFx = dimOverlay.fx
+                    dimOverlay.lastFy = dimOverlay.fy
+                    dimOverlay.lastFw = dimOverlay.fw
+                    dimOverlay.lastFh = dimOverlay.fh
+                }
+                focusScan.running = true
+            }
+        }
+
+
+        // Scan tree for currently focused window (startup + workspace switch)
+        Process {
+            id: focusScan
+            running: true
+            property string buf: ""
+            command: ["swaymsg", "-t", "get_tree"]
+            stdout: SplitParser {
+                onRead: data => { focusScan.buf += data }
+            }
+            onExited: {
+                try {
+                    var tree = JSON.parse(focusScan.buf)
+                    var found = false
+                    function walk(node) {
+                        if (found) return
+                        if (node.focused && node.pid) {
+                            dimOverlay.applyContainer(node)
+                            found = true
+                            return
+                        }
+                        var children = (node.nodes || []).concat(node.floating_nodes || [])
+                        for (var i = 0; i < children.length; i++) walk(children[i])
+                    }
+                    walk(tree)
+                    if (!found) dimOverlay.hasFocus = false
+                } catch(err) {}
+                focusScan.buf = ""
+            }
+        }
+
+        readonly property var ignoreAppIds: ["quickshell", "rofi"]
+
+        function applyContainer(c) {
+            var appId = c.app_id || ""
+            var title = c.name || ""
+            if (ignoreAppIds.indexOf(appId) >= 0 || title.startsWith("qs-")) {
+                hasFocus = false
+                return
+            }
+            if (c.fullscreen_mode > 0) {
+                hasFocus = false
+                return
+            }
+            var r = c.rect || {}
+            var decoH = (c.deco_rect || {}).height || 0
+            fx = r.x || 0
+            fy = (r.y || 0) - decoH
+            fw = r.width || 0
+            fh = (r.height || 0) + decoH
+            hasFocus = (fw > 0 && fh > 0)
         }
     }
 }

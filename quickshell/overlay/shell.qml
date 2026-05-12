@@ -130,7 +130,7 @@ ShellRoot {
 
     function launcherLaunch() {
         if (launcherFiltered.length > 0 && launcherIndex < launcherFiltered.length) {
-            execProc.command = ["sh", "-c", launcherFiltered[launcherIndex].name + " &"]
+            execProc.command = ["sh", "-c", "setsid -f " + launcherFiltered[launcherIndex].name + " >/dev/null 2>&1 </dev/null"]
             execProc.running = true
         }
         hide()
