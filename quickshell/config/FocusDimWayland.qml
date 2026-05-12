@@ -24,10 +24,46 @@ Variants {
 
         mask: Region {}   // empty = fully click-through
 
-        // Fullscreen dim — Task 6 replaces this with 4-rect cut-out
+        property int fx: 0
+        property int fy: 0
+        property int fw: 0
+        property int fh: 0
+        property bool hasFocus: false
+        readonly property string dimColor: "#4D000000"   // 30% black
+
+        // Top — full width; collapses to zero when hasFocus and fy==0
         Rectangle {
-            anchors.fill: parent
-            color: "#4D000000"   // 30% black
+            color: dimOverlay.dimColor
+            x: 0; y: 0
+            width: parent.width
+            height: dimOverlay.hasFocus ? Math.max(0, dimOverlay.fy) : parent.height
+        }
+        // Bottom — hidden when no focused window
+        Rectangle {
+            visible: dimOverlay.hasFocus
+            color: dimOverlay.dimColor
+            x: 0
+            y: dimOverlay.fy + dimOverlay.fh
+            width: parent.width
+            height: Math.max(0, parent.height - (dimOverlay.fy + dimOverlay.fh))
+        }
+        // Left — hidden when no focused window
+        Rectangle {
+            visible: dimOverlay.hasFocus
+            color: dimOverlay.dimColor
+            x: 0
+            y: dimOverlay.fy
+            width: Math.max(0, dimOverlay.fx)
+            height: dimOverlay.fh
+        }
+        // Right — hidden when no focused window
+        Rectangle {
+            visible: dimOverlay.hasFocus
+            color: dimOverlay.dimColor
+            x: dimOverlay.fx + dimOverlay.fw
+            y: dimOverlay.fy
+            width: Math.max(0, parent.width - (dimOverlay.fx + dimOverlay.fw))
+            height: dimOverlay.fh
         }
     }
 }
