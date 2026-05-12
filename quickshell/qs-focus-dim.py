@@ -3,8 +3,9 @@
 Draws a 30% black overlay covering everything outside the focused window.
 Started and managed by quickshell (config/FocusDim.qml)."""
 import gi, signal, sys, fcntl, os
+import json, subprocess, threading
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, Gdk
+from gi.repository import Gtk, Gdk, GLib
 import cairo
 
 _lock_path = os.path.join(
@@ -20,8 +21,92 @@ _lock_fp.flush()
 
 DIM_ALPHA = 0.3
 
-# Test geometry — replaced by i3 IPC in Task 3
-TEST_FOCUS = (400, 200, 800, 600)  # x, y, w, h
+IGNORE_CLASSES = {'quickshell', 'Rofi', 'rofi'}
+
+# Current focused-window rect in root (screen) coords; None means hide cut-out
+focus_rect = None
+
+
+def should_ignore(c):
+    props = c.get('window_properties', {})
+    cls = props.get('class', '')
+    instance = props.get('instance', '')
+    title = c.get('name', '')
+    if cls in IGNORE_CLASSES or instance in IGNORE_CLASSES:
+        return True
+    if title.startswith('qs-'):
+        return True
+    return False
+
+
+def refresh_focused():
+    def _do():
+        try:
+            tree = json.loads(
+                subprocess.check_output(
+                    ['i3-msg', '-t', 'get_tree'], timeout=2
+                ).decode()
+            )
+
+            def walk(node, parents):
+                if node.get('focused') and node.get('window'):
+                    return node, parents
+                for child in node.get('nodes', []) + node.get('floating_nodes', []):
+                    r = walk(child, parents + [node])
+                    if r:
+                        return r
+                return None
+
+            result = walk(tree, [])
+            global focus_rect
+            if not result:
+                focus_rect = None
+            else:
+                leaf, parents = result
+                if should_ignore(leaf) or leaf.get('fullscreen_mode', 0) > 0:
+                    focus_rect = None
+                else:
+                    r = leaf.get('rect', {})
+                    deco_h = leaf.get('deco_rect', {}).get('height', 0)
+                    in_tabbed = any(p.get('layout') in ('tabbed', 'stacked') for p in parents)
+                    direct_in_tabbed = parents and parents[-1].get('layout') in ('tabbed', 'stacked')
+                    if in_tabbed and not direct_in_tabbed:
+                        deco_h = 0
+                    focus_rect = (
+                        r.get('x', 0),
+                        r.get('y', 0) - deco_h,
+                        r.get('width', 0),
+                        r.get('height', 0) + deco_h,
+                    )
+            GLib.idle_add(_redraw_all)
+        except Exception as exc:
+            print(f"qs-focus-dim: refresh_focused: {exc}",
+                  file=sys.stderr, flush=True)
+    threading.Thread(target=_do, daemon=True).start()
+
+
+def _redraw_all():
+    for o in overlays:
+        o.win.queue_draw()
+    return False
+
+
+def subscribe():
+    import time
+    while True:
+        try:
+            proc = subprocess.Popen(
+                ['i3-msg', '-t', 'subscribe', '-m',
+                 '["window","workspace","binding"]'],
+                stdout=subprocess.PIPE, text=True
+            )
+            for _ in proc.stdout:
+                refresh_focused()
+            proc.wait()
+        except Exception as exc:
+            print(f"qs-focus-dim: subscribe: {exc}",
+                  file=sys.stderr, flush=True)
+        time.sleep(1)
 
 
 class DimOverlay:
@@ -54,26 +139,25 @@ class DimOverlay:
         cr.paint()
         cr.set_operator(cairo.OPERATOR_OVER)
         a = widget.get_allocation()
-        fx, fy, fw, fh = TEST_FOCUS
-        # Translate focus rect into this monitor's local coords
-        g = self.monitor.get_geometry()
-        fx -= g.x
-        fy -= g.y
         cr.set_source_rgba(0, 0, 0, DIM_ALPHA)
-        # If focus rect doesn't intersect this monitor, dim entire monitor
+        if focus_rect is None:
+            cr.rectangle(0, 0, a.width, a.height)
+            cr.fill()
+            return
+        fx, fy, fw, fh = focus_rect
+        g = self.monitor.get_geometry()
+        fx -= g.x; fy -= g.y
         if fx + fw <= 0 or fy + fh <= 0 or fx >= a.width or fy >= a.height:
             cr.rectangle(0, 0, a.width, a.height)
             cr.fill()
             return
-        # Clip to monitor bounds
         cx = max(0, fx); cy = max(0, fy)
         cw = min(a.width, fx + fw) - cx
         ch = min(a.height, fy + fh) - cy
-        # 4 rects outside focus
-        cr.rectangle(0, 0, a.width, cy)                          # top
-        cr.rectangle(0, cy + ch, a.width, a.height - (cy + ch))  # bottom
-        cr.rectangle(0, cy, cx, ch)                              # left
-        cr.rectangle(cx + cw, cy, a.width - (cx + cw), ch)       # right
+        cr.rectangle(0, 0, a.width, cy)
+        cr.rectangle(0, cy + ch, a.width, a.height - (cy + ch))
+        cr.rectangle(0, cy, cx, ch)
+        cr.rectangle(cx + cw, cy, a.width - (cx + cw), ch)
         cr.fill()
 
 
@@ -88,4 +172,6 @@ overlays = [DimOverlay(display.get_monitor(i))
 signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))
 signal.signal(signal.SIGINT, lambda *a: sys.exit(0))
 
+GLib.idle_add(refresh_focused)
+threading.Thread(target=subscribe, daemon=True).start()
 Gtk.main()
