@@ -74,7 +74,11 @@ linux:
 
       # uv — Python script runner required by wiki-oxide MCP server shebang
       if ! command -v uv >/dev/null 2>&1; then
-        curl -LsSf https://astral.sh/uv/install.sh | sh
+        if command -v pacman >/dev/null 2>&1; then
+          sudo pacman -S --needed --noconfirm uv
+        else
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+        fi
       fi
 
       # wiki-oxide MCP — register at user scope in every CLAUDE_CONFIG_DIR we maintain.
