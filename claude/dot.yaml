@@ -16,7 +16,7 @@ linux:
   installs:
     depends:
       - claude/beads
-      - claude/wiki-oxide
+      - claude/marketplace/plugins/wiki-oxide
     cmd: |
       # Rotz buffers cmd output. Redirect to log file; tail in another pane:
       #   tail -f /tmp/rotz-claude.log
