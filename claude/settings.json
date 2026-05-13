@@ -67,7 +67,8 @@
     "svelte-lsp@dotfiles": true,
     "nushell-lsp@dotfiles": true,
     "json-lsp@dotfiles": true,
-    "yaml-lsp@dotfiles": true
+    "yaml-lsp@dotfiles": true,
+    "wiki-oxide@dotfiles": true
   },
   "extraKnownMarketplaces": {
     "infinifu-dev": {
