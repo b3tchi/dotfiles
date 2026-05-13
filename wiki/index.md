@@ -5,7 +5,6 @@ Entry point for personal knowledge base.
 ## Sections
 
 - [[inbox]] — quick captures
-- [[2026-05-11]] — today's note
 
 ## Notes
 
