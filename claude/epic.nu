@@ -117,10 +117,18 @@ def "main init" [] {
 
 def "main create" [
     name: string
-    --no-launch  # skip `exec claude`; just create/resume metadata and print resume cmd
+    --no-launch              # skip `exec claude`; just create/resume metadata and print resume cmd
+    --profile: string = ""   # claude account: personal | work (default: current $CLAUDE_CONFIG_DIR)
 ] {
     if not ($name =~ '^[a-zA-Z0-9_-]+$') {
         error make { msg: "Name must contain only alphanumeric characters, dashes, and underscores" }
+    }
+
+    let profile_dir = match $profile {
+        "" => ""
+        "personal" => $"($env.HOME)/.claude-personal"
+        "work" => $"($env.HOME)/.claude-work"
+        _ => { error make { msg: $"--profile must be 'personal' or 'work', got: ($profile)" } }
     }
 
     preflight
@@ -161,18 +169,25 @@ def "main create" [
 
     let label = $"($name).($meta.short)"
 
+    let env_prefix = if ($profile_dir == "") { "" } else { $"CLAUDE_CONFIG_DIR=($profile_dir) " }
+
     if $no_launch {
         print -e ""
         print -e $"Label:    ($label)"
         print -e $"Idea:     ($meta.idea_file)"
         print -e $"BD epic:  ($meta.bd_id)"
+        if ($profile_dir != "") { print -e $"Profile:  ($profile) → ($profile_dir)" }
         print -e ""
         if $meta.resume {
-            print -e $"Resume in a terminal pane:  claude --resume ($meta.session_id) -n ($label)"
+            print -e $"Resume in a terminal pane:  ($env_prefix)claude --resume ($meta.session_id) -n ($label)"
         } else {
-            print -e $"Start in a terminal pane:   claude -n ($label) --session-id ($meta.session_id)"
+            print -e $"Start in a terminal pane:   ($env_prefix)claude -n ($label) --session-id ($meta.session_id)"
         }
         return
+    }
+
+    if ($profile_dir != "") {
+        $env.CLAUDE_CONFIG_DIR = $profile_dir
     }
 
     if $meta.resume {
