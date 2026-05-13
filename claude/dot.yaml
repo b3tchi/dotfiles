@@ -5,7 +5,7 @@ linux:
     hooks/tmux-waiting.sh: ~/.claude/hooks/tmux-waiting.sh
     hooks/tmux-waiting-simple.sh: ~/.claude/hooks/tmux-waiting-simple.sh
     hooks/tmux-responding.sh: ~/.claude/hooks/tmux-responding.sh
-    perles/config.yaml: ~/.config/perles/config.yaml
+    beads/perles-config.yaml: ~/.config/perles/config.yaml
     repos-health.nu: ~/.local/bin/repos-health.nu
     epic.nu: ~/.local/bin/epic
 
