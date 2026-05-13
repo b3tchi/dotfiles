@@ -1,0 +1,27 @@
+linux:
+  installs:
+    cmd: |
+      # wiki-oxide prerequisites: markdown-oxide LSP + uv Python runner.
+      # MCP registration itself stays in claude/dot.yaml — needs claude CLI present.
+
+      # markdown-oxide — LSP for wiki vault (used by nvim md plugin + wiki-oxide MCP)
+      # Arch extra repo ships prebuilt; cargo fallback for non-Arch.
+      if ! command -v markdown-oxide >/dev/null 2>&1; then
+        if command -v pacman >/dev/null 2>&1; then
+          sudo pacman -Sy --needed --noconfirm markdown-oxide
+        elif command -v cargo >/dev/null 2>&1; then
+          cargo install --locked --git https://github.com/Feel-ix-343/markdown-oxide.git markdown-oxide
+        else
+          echo "skip markdown-oxide: no pacman or cargo" >&2
+        fi
+      fi
+
+      # uv — Python script runner required by wiki-oxide MCP server shebang
+      # -Sy refreshes db inline; stale mirrors 404 on cached version pins
+      if ! command -v uv >/dev/null 2>&1; then
+        if command -v pacman >/dev/null 2>&1; then
+          sudo pacman -Sy --needed --noconfirm uv
+        else
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+        fi
+      fi
