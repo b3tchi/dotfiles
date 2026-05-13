@@ -1,3 +1,13 @@
+-- Let blink continue completion through `#` and `[` so wikilink/tag triggers
+-- don't break the word boundary mid-typing. Without this, blink's keyword
+-- match stops at `#`/`[` and aborts the popup as soon as you type the trigger.
+vim.api.nvim_create_autocmd("FileType", {
+	pattern = "markdown",
+	callback = function()
+		vim.opt_local.iskeyword:append({ "#", "[" })
+	end,
+})
+
 return {
 	{
 		"neovim/nvim-lspconfig",
