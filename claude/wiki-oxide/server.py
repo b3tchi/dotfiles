@@ -7,25 +7,24 @@
 wiki-oxide MCP server.
 
 Provides vault search + read primitives to Claude Code as MCP tools.
-All search/listing tools are ripgrep-backed (no LSP cache) because
-markdown-oxide's workspaceSymbol index is stale on file change and
-catalogues only headings/files/symbol-tags (not inline #tag body
-markers).
+wiki_search is LSP-backed via markdown-oxide workspaceSymbol. All other
+search/listing tools are ripgrep-backed for inline #tag body markers and
+raw text lookup that the LSP index does not cover.
 
 Tools:
   - wiki_root()              — vault root path
   - wiki_list()              — list all .md files in vault
-  - wiki_search(query)       — search filenames, headings, tags (ripgrep)
+  - wiki_search(query)       — search filenames, headings, tags (LSP workspaceSymbol)
   - wiki_tags(prefix="")     — all #tags in vault, inline-aware (ripgrep)
   - wiki_grep(pattern, ...)  — generic ripgrep within vault
   - wiki_read(name)          — full text of a note
   - wiki_preview(name)       — first ~1200 chars + backlinks
   - wiki_references(name)    — backlinks via ripgrep
 
-The LspClient (markdown-oxide stdio bridge) is retained for future
-LSP-based features (e.g. hover, completion) but is no longer used by
-the search tools. It will not be started unless something explicitly
-calls get_client().
+wiki_search result shape (as of wq0.5): {"name", "kind" (LSP SymbolKind
+name string), "path"}. Breaking change from pre-wq0.5: "kind" values
+changed from "file"/"heading"/"tag" to LSP SymbolKind names (e.g. "File",
+"String"); "line" and "match_field" fields removed.
 
 Configure vault root via env var WIKI_ROOT (default ~/.dotfiles/wiki).
 """
@@ -44,7 +43,6 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 _VAULT_MARKERS = (".moxide.toml", ".obsidian")
-_VAULT_FALLBACK = Path.home() / ".dotfiles/wiki"
 _DESCEND_MAX_DEPTH = 4
 
 
@@ -77,18 +75,47 @@ def _walk_down(start: Path) -> Path | None:
     return None
 
 
-def _detect_vault() -> Path:
+def _detect_vault(cwd: Path) -> Path | None:
+    """Detect the vault root from `cwd`.
+
+    Search strategy:
+    1. If WIKI_ROOT env var is set, use it — but return None if the path does
+       not exist on disk (behavior change from old code which returned it
+       unconditionally, producing silent failures downstream).
+    2. Walk up from `cwd` looking for a vault marker (.moxide.toml, .obsidian).
+    3. If no marker found upward, BFS downward up to _DESCEND_MAX_DEPTH levels.
+    4. Return None if no vault is detected.
+    """
     env = os.environ.get("WIKI_ROOT")
     if env:
-        return Path(env).resolve()
-    cwd = Path.cwd()
+        p = Path(env).resolve()
+        return p if p.exists() else None
     found = _walk_up(cwd) or _walk_down(cwd)
     if found is not None:
         return found.resolve()
-    return _VAULT_FALLBACK.resolve()
+    return None
 
 
-VAULT = _detect_vault()
+def _resolve_call_vault(cwd: str | None) -> Path | None:
+    """Resolve the vault for a single MCP tool call."""
+    start = Path(cwd).resolve() if cwd else Path.cwd()
+    return _detect_vault(start)
+
+
+_SYMBOL_KIND_NAMES = {
+    1: "File", 2: "Module", 3: "Namespace", 4: "Package", 5: "Class",
+    6: "Method", 7: "Property", 8: "Field", 9: "Constructor", 10: "Enum",
+    11: "Interface", 12: "Function", 13: "Variable", 14: "Constant",
+    15: "String", 16: "Number", 17: "Boolean", 18: "Array", 19: "Object",
+    20: "Key", 21: "Null", 22: "EnumMember", 23: "Struct", 24: "Event",
+    25: "Operator", 26: "TypeParameter",
+}
+
+# LSP SymbolKind values markdown-oxide uses for tag-like workspace symbols.
+# Update this set rather than the filter expression if a new release adds kinds.
+# Note: markdown-oxide uses Constant (14) for inline body `#tag` markers.
+# Frontmatter `tags: [...]` entries are NOT indexed as workspace symbols.
+_TAG_SYMBOL_KINDS = frozenset({14})  # SymbolKind.Constant
 
 
 class LspClient:
@@ -209,17 +236,58 @@ class LspClient:
         resp = self._request("workspace/symbol", {"query": query})
         return resp.get("result") or []
 
+    def references(self, uri: str, path: Path, line: int = 1, character: int = 0) -> list[dict]:
+        """LSP textDocument/references — backlinks to the note at `uri`.
 
-_client: LspClient | None = None
-_client_lock = threading.Lock()
+        Sends `didOpen` with the actual file content so markdown-oxide's
+        document store matches disk. Position (line=1, character=0) is the
+        first body line after the heading — markdown-oxide returns all
+        document backlinks from any body position. The heading line (line=0)
+        returns empty because markdown-oxide does not resolve the heading
+        token as a wikilink target.
+
+        Note: `didClose` is intentionally omitted. Sending didClose causes
+        the server to enter a state where subsequent textDocument/references
+        calls on the same URI time out. Re-sending didOpen on each call is
+        idempotent in markdown-oxide and keeps the server state coherent.
+        """
+        try:
+            text = path.read_text(errors="replace")
+        except Exception:
+            text = ""
+        self._notify("textDocument/didOpen", {
+            "textDocument": {"uri": uri, "languageId": "markdown",
+                              "version": 1, "text": text},
+        })
+        resp = self._request("textDocument/references", {
+            "textDocument": {"uri": uri},
+            "position": {"line": line, "character": character},
+            "context": {"includeDeclaration": False},
+        })
+        return resp.get("result") or []
 
 
-def get_client() -> LspClient:
-    global _client
-    with _client_lock:
-        if _client is None or (_client.proc and _client.proc.poll() is not None):
-            _client = LspClient(VAULT)
-        return _client
+class LspPool:
+    """Map of vault-path → LspClient. Lazy spawn, self-heal on process death."""
+
+    def __init__(self):
+        self._clients: dict[Path, LspClient] = {}
+        self._lock = threading.Lock()
+
+    def get(self, vault: Path) -> LspClient:
+        vault = vault.resolve()
+        with self._lock:
+            client = self._clients.get(vault)
+            if client is not None and client.proc is not None and client.proc.poll() is None:
+                return client
+            if client is not None:
+                self._clients.pop(vault, None)
+            client = LspClient(vault)
+            self._clients[vault] = client
+            return client
+
+
+_pool = LspPool()
 
 
 # ---------- MCP server ----------
@@ -227,137 +295,70 @@ mcp = FastMCP("wiki-oxide")
 
 
 @mcp.tool()
-def wiki_search(query: str) -> list[dict]:
-    """Search vault for filenames, headings, and tags matching the query.
+def wiki_search(query: str, cwd: str | None = None) -> list[dict]:
+    """Search vault notes via markdown-oxide LSP workspaceSymbol.
 
-    Backed by ripgrep — no LSP workspaceSymbol cache to go stale.
-    Returns matches with `kind` set to `"file"`, `"heading"`, or `"tag"`.
-    Results from each category are concatenated in that order. Total
-    capped at 50.
-
-    Examples:
-      - "ovpn"   → filename + heading + tag substring matches
-      - "#vpn"   → tag matches only (treats query as a tag)
-      - "Inbox"  → heading + filename matches
+    Returns up to 50 symbols matching `query` substring (case-insensitive).
+    Each result includes `name`, `kind` (LSP SymbolKind name), and `path`.
+    LSP-backed — note headings, filenames, and frontmatter/heading tags
+    surface here. Inline #tag body markers are not indexed by
+    markdown-oxide; use wiki_grep for raw text lookup.
     """
+    vault = _resolve_call_vault(cwd)
+    if vault is None:
+        return [{"error": f"no vault marker above {cwd or Path.cwd()}"}]
     q = query.strip()
     if not q:
         return []
-    if not shutil.which("rg"):
-        return [{"error": "ripgrep not installed"}]
-
+    client = _pool.get(vault)
+    try:
+        symbols = client.workspace_symbol(q)
+    except TimeoutError as e:
+        return [{"error": f"lsp timeout: {e}"}]
     out: list[dict] = []
-
-    # 1. Filename matches (case-insensitive substring on the stem).
-    q_lower = q.lstrip("#").lower()
-    if q_lower:
-        for p in sorted(VAULT.rglob("*.md")):
-            if q_lower in p.stem.lower():
-                out.append(
-                    {
-                        "name": p.stem,
-                        "kind": "file",
-                        "path": str(p),
-                        "match_field": "filename",
-                    }
-                )
-
-    # 2. Heading matches — any line that's an H1-H6 containing the query.
-    if not q.startswith("#"):
-        # Escape regex meta in user query, build a heading-only pattern
-        heading_pattern = rf"^#{{1,6}}\s+.*{re.escape(q)}"
-        res = subprocess.run(
-            ["rg", "-n", "--no-heading", "--color=never", "-i", "-e", heading_pattern, str(VAULT)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        for line in res.stdout.splitlines():
-            path, _, rest = line.partition(":")
-            lineno_s, _, text = rest.partition(":")
-            out.append(
-                {
-                    "name": text.strip().lstrip("#").strip(),
-                    "kind": "heading",
-                    "path": path,
-                    "line": int(lineno_s) if lineno_s.isdigit() else None,
-                    "match_field": "heading",
-                }
-            )
-
-    # 3. Tag matches. Build a #tag pattern from the query.
-    tag_token = q if q.startswith("#") else "#" + q
-    # Match exactly that tag — bounded so #auth doesn't match #authentication.
-    # PCRE2 needed for the trailing lookahead.
-    tag_pattern = rf"(?:^|\s){re.escape(tag_token)}(?=[\s.,;:!?)\]\}}]|$)"
-    res = subprocess.run(
-        ["rg", "-P", "-n", "--no-heading", "--color=never", "-e", tag_pattern, str(VAULT)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    for line in res.stdout.splitlines():
-        path, _, rest = line.partition(":")
-        lineno_s, _, text = rest.partition(":")
-        out.append(
-            {
-                "name": tag_token,
-                "kind": "tag",
-                "path": path,
-                "line": int(lineno_s) if lineno_s.isdigit() else None,
-                "match_field": "tag",
-            }
-        )
-
-    return out[:50]
+    for sym in symbols[:50]:
+        loc = sym.get("location") or {}
+        uri = loc.get("uri", "")
+        path = uri.removeprefix("file://") if uri.startswith("file://") else uri
+        out.append({
+            "name": sym.get("name", ""),
+            "kind": _SYMBOL_KIND_NAMES.get(sym.get("kind"), str(sym.get("kind"))),
+            "path": path,
+        })
+    return out
 
 
 @mcp.tool()
-def wiki_tags(prefix: str = "") -> list[str]:
-    """List distinct #tags in the vault via ripgrep.
+def wiki_tags(prefix: str = "", cwd: str | None = None) -> list[str]:
+    """List vault tags via markdown-oxide LSP workspaceSymbol.
+
+    Returns inline body `#tag` markers (markdown-oxide indexes them as
+    SymbolKind.Constant). Limitation: frontmatter `tags: [...]` entries
+    are NOT surfaced — markdown-oxide does not index them as workspace
+    symbols. For frontmatter tag lookup use `wiki_grep("tags:")` instead.
 
     `prefix` narrows by leading characters after `#` (e.g. "v" → tags
     starting with #v). Empty prefix returns all tags.
-
-    Backed by ripgrep — surfaces inline `#tag` body markers, not just
-    LSP workspace symbols. Tags are tokenised as `#` followed by
-    `[a-zA-Z0-9_-]+` and must be preceded by whitespace or line start
-    (so URL fragments and code-block `#include` do not over-match).
     """
-    if not shutil.which("rg"):
-        return ["error: ripgrep not installed"]
-
-    safe_prefix = re.escape(prefix)
-    # PCRE2 lookbehind: require non-word context before the `#`.
-    # When a prefix is supplied, the prefix itself counts as the first
-    # character so the rest may be empty (so #auth matches even when
-    # prefix="auth"). When no prefix, require at least one letter to
-    # avoid matching a bare `#`.
-    if prefix:
-        pattern = rf"(?<![\w])#{safe_prefix}[A-Za-z0-9_-]*"
-    else:
-        pattern = r"(?<![\w])#[A-Za-z][A-Za-z0-9_-]*"
-    res = subprocess.run(
-        [
-            "rg",
-            "-P",
-            "--no-heading",
-            "--no-filename",
-            "--only-matching",
-            "-e",
-            pattern,
-            str(VAULT),
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    tags = sorted({line for line in res.stdout.splitlines() if line.startswith("#")})
+    vault = _resolve_call_vault(cwd)
+    if vault is None:
+        return [f"error: no vault marker above {cwd or Path.cwd()}"]
+    client = _pool.get(vault)
+    try:
+        symbols = client.workspace_symbol("#" + prefix if prefix else "#")
+    except TimeoutError as e:
+        return [f"error: lsp timeout: {e}"]
+    tags = sorted({
+        sym.get("name", "")
+        for sym in symbols
+        if sym.get("kind") in _TAG_SYMBOL_KINDS
+        and sym.get("name", "").startswith("#" + prefix)
+    })
     return tags
 
 
 @mcp.tool()
-def wiki_grep(pattern: str, max_results: int = 100) -> list[dict]:
+def wiki_grep(pattern: str, max_results: int = 100, cwd: str | None = None) -> list[dict]:
     """Search vault file contents via ripgrep. Returns matching lines with paths.
 
     Pattern is treated as a regex by ripgrep. Examples:
@@ -365,10 +366,13 @@ def wiki_grep(pattern: str, max_results: int = 100) -> list[dict]:
       - "^#\\s"              (top-level headings)
       - "\\[\\[.+?\\]\\]"    (any wikilink)
     """
+    vault = _resolve_call_vault(cwd)
+    if vault is None:
+        return [{"error": "no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"}]
     if not shutil.which("rg"):
         return [{"error": "ripgrep not installed"}]
     res = subprocess.run(
-        ["rg", "-n", "--no-heading", "--color=never", pattern, str(VAULT)],
+        ["rg", "-n", "--no-heading", "--color=never", pattern, str(vault)],
         capture_output=True,
         text=True,
         check=False,
@@ -383,47 +387,56 @@ def wiki_grep(pattern: str, max_results: int = 100) -> list[dict]:
 
 
 @mcp.tool()
-def wiki_list() -> list[str]:
+def wiki_list(cwd: str | None = None) -> list[str]:
     """List all markdown files in the vault, relative to the vault root."""
-    return sorted(str(p.relative_to(VAULT)) for p in VAULT.rglob("*.md"))
+    vault = _resolve_call_vault(cwd)
+    if vault is None:
+        return ["error: no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"]
+    return sorted(str(p.relative_to(vault)) for p in vault.rglob("*.md"))
 
 
 @mcp.tool()
-def wiki_root() -> str:
+def wiki_root(cwd: str | None = None) -> str:
     """Return the configured vault root path."""
-    return str(VAULT)
+    vault = _resolve_call_vault(cwd)
+    if vault is None:
+        return "error: no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"
+    return str(vault)
 
 
-def _resolve_note(name: str) -> Path | None:
+def _resolve_note(vault: Path, name: str) -> Path | None:
     """Resolve a wikilink-style name or relative path to an absolute Path."""
     p = Path(name)
-    if p.is_absolute() and p.exists() and str(p).startswith(str(VAULT)):
+    if p.is_absolute() and p.exists() and str(p).startswith(str(vault)):
         return p
-    candidate = (VAULT / name).with_suffix("") if name.endswith(".md") else VAULT / f"{name}.md"
+    candidate = (vault / name).with_suffix("") if name.endswith(".md") else vault / f"{name}.md"
     # Try as-given (with or without .md)
     for cand in (
-        VAULT / name,
-        VAULT / f"{name}.md",
+        vault / name,
+        vault / f"{name}.md",
         candidate.with_suffix(".md"),
     ):
         if cand.is_file():
             return cand
     # Search by basename across vault
     base = Path(name).stem
-    matches = list(VAULT.rglob(f"{base}.md"))
+    matches = list(vault.rglob(f"{base}.md"))
     if len(matches) == 1:
         return matches[0]
     return None
 
 
 @mcp.tool()
-def wiki_read(name: str) -> dict:
+def wiki_read(name: str, cwd: str | None = None) -> dict:
     """Read full content of a wiki note.
 
     `name` accepts wikilink-style names ("ovpn-home"), relative paths
     ("notes/ovpn-home.md"), or absolute paths within the vault.
     """
-    p = _resolve_note(name)
+    vault = _resolve_call_vault(cwd)
+    if vault is None:
+        return {"error": "no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"}
+    p = _resolve_note(vault, name)
     if p is None:
         return {"error": f"note not found: {name}"}
     try:
@@ -432,7 +445,7 @@ def wiki_read(name: str) -> dict:
         return {"error": f"read failed: {e}", "path": str(p)}
     return {
         "path": str(p),
-        "relative": str(p.relative_to(VAULT)),
+        "relative": str(p.relative_to(vault)),
         "content": text,
         "lines": text.count("\n") + 1,
     }
@@ -442,7 +455,7 @@ _PREVIEW_MAX_CHARS = 1200
 
 
 @mcp.tool()
-def wiki_preview(name: str) -> dict:
+def wiki_preview(name: str, cwd: str | None = None) -> dict:
     """Compact file preview + backlinks for a wiki note.
 
     Returns the first ~1200 chars of the note plus any backlinks found
@@ -450,8 +463,11 @@ def wiki_preview(name: str) -> dict:
     `wiki_references`. Built directly from the filesystem — no LSP
     hover involved (markdown-oxide hover wedges after a few calls).
     """
+    vault = _resolve_call_vault(cwd)
+    if vault is None:
+        return {"error": "no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"}
     target = Path(name).stem
-    p = _resolve_note(name)
+    p = _resolve_note(vault, name)
     if p is None:
         return {"error": f"note not found: {target}"}
     try:
@@ -468,7 +484,7 @@ def wiki_preview(name: str) -> dict:
             rf"|\]\([^)]*?{re.escape(target)}(?:\.md)?(?:#[^)]*)?\)"
         )
         res = subprocess.run(
-            ["rg", "-n", "--no-heading", "--color=never", pattern, str(VAULT)],
+            ["rg", "-n", "--no-heading", "--color=never", pattern, str(vault)],
             capture_output=True,
             text=True,
             check=False,
@@ -496,43 +512,50 @@ def wiki_preview(name: str) -> dict:
 
 
 @mcp.tool()
-def wiki_references(name: str) -> list[dict]:
-    """Find backlinks to a wiki note via ripgrep.
+def wiki_references(name: str, cwd: str | None = None) -> list[dict]:
+    """Find backlinks to a wiki note via markdown-oxide LSP references.
 
-    Matches wikilink forms `[[name]]`, `[[name#heading]]`, `[[name|alias]]`
-    and markdown links `](name.md)` / `](name#heading)`. Skips the target
-    note itself.
+    Backed by `textDocument/references` against the resolved note URI.
+    Wikilink forms `[[name]]`, `[[name#heading]]`, `[[name|alias]]` and
+    markdown `](name.md)` style links all surface here, depending on
+    markdown-oxide's reference resolution.
     """
-    target = Path(name).stem
-    if not shutil.which("rg"):
-        return [{"error": "ripgrep not installed"}]
-    pattern = (
-        rf"\[\[{re.escape(target)}(?:#[^\]]*)?(?:\|[^\]]*)?\]\]"
-        rf"|\]\([^)]*?{re.escape(target)}(?:\.md)?(?:#[^)]*)?\)"
-    )
-    res = subprocess.run(
-        ["rg", "-n", "--no-heading", "--color=never", pattern, str(VAULT)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    p = _resolve_note(name)
-    self_real = str(p) if p else None
+    vault = _resolve_call_vault(cwd)
+    if vault is None:
+        return [{"error": f"no vault marker above {cwd or Path.cwd()}"}]
+    p = _resolve_note(vault, name)
+    if p is None:
+        return [{"error": f"note not found: {name}"}]
+    client = _pool.get(vault)
+    uri = f"file://{p}"
+    try:
+        locations = client.references(uri, p)
+    except TimeoutError as e:
+        return [{"error": f"lsp timeout: {e}"}]
+    self_real = str(p)
     out: list[dict] = []
-    for line in res.stdout.splitlines():
-        path, _, rest = line.partition(":")
-        if path == self_real:
+    for loc in locations:
+        loc_uri = loc.get("uri", "")
+        loc_path = loc_uri.removeprefix("file://") if loc_uri.startswith("file://") else loc_uri
+        if loc_path == self_real:
             continue
-        lineno_s, _, text = rest.partition(":")
-        out.append(
-            {"path": path, "line": int(lineno_s) if lineno_s.isdigit() else None,
-             "text": text}
-        )
+        rng = loc.get("range", {}).get("start", {})
+        out.append({
+            "path": loc_path,
+            "line": rng.get("line"),
+            "character": rng.get("character"),
+        })
     return out
 
 
 if __name__ == "__main__":
-    if not VAULT.exists():
-        print(f"WIKI_ROOT does not exist: {VAULT}", file=sys.stderr)
+    _startup_vault = _detect_vault(Path.cwd())
+    if _startup_vault is None:
+        print(
+            "wiki-oxide: no vault detected.\n"
+            "Run from a directory containing a vault marker (.moxide.toml or .obsidian),\n"
+            "or set the WIKI_ROOT environment variable to an existing vault path.",
+            file=sys.stderr,
+        )
         sys.exit(1)
     mcp.run()
