@@ -266,6 +266,19 @@ class LspClient:
         })
         return resp.get("result") or []
 
+    def did_change_watched_files(self, vault: Path):
+        """Nudge the server to re-scan — sends Changed events for every .md in vault.
+
+        Includes a brief sleep after notification to allow markdown-oxide time to
+        re-index the vault before the next query is issued.
+        """
+        changes = []
+        for p in vault.rglob("*.md"):
+            changes.append({"uri": f"file://{p}", "type": 2})  # 2 = Changed
+        if changes:
+            self._notify("workspace/didChangeWatchedFiles", {"changes": changes})
+            time.sleep(0.5)  # allow server to re-index before next query
+
 
 class LspPool:
     """Map of vault-path → LspClient. Lazy spawn, self-heal on process death."""
@@ -286,8 +299,33 @@ class LspPool:
             self._clients[vault] = client
             return client
 
+    def evict(self, vault: Path) -> None:
+        """Force-remove and terminate the client for `vault`. Safe if absent."""
+        vault = vault.resolve()
+        with self._lock:
+            client = self._clients.pop(vault, None)
+        if client is not None and client.proc is not None:
+            try:
+                client.proc.terminate()
+            except Exception:
+                pass
+
 
 _pool = LspPool()
+
+
+def _stale_retry(vault: Path, fn, max_retries: int = 1):
+    """Run `fn(client)` with up to `max_retries` fresh-client retries."""
+    last_exc: Exception | None = None
+    for _attempt in range(max_retries + 1):
+        client = _pool.get(vault)
+        try:
+            return fn(client)
+        except (TimeoutError, BrokenPipeError, ConnectionResetError) as e:
+            last_exc = e
+            _pool.evict(vault)
+            continue
+    raise last_exc  # type: ignore[misc]
 
 
 # ---------- MCP server ----------
@@ -311,8 +349,9 @@ def wiki_search(query: str, cwd: str | None = None) -> list[dict]:
     if not q:
         return []
     client = _pool.get(vault)
+    client.did_change_watched_files(vault)
     try:
-        symbols = client.workspace_symbol(q)
+        symbols = _stale_retry(vault, lambda c: c.workspace_symbol(q))
     except TimeoutError as e:
         return [{"error": f"lsp timeout: {e}"}]
     out: list[dict] = []
@@ -344,8 +383,10 @@ def wiki_tags(prefix: str = "", cwd: str | None = None) -> list[str]:
     if vault is None:
         return [f"error: no vault marker above {cwd or Path.cwd()}"]
     client = _pool.get(vault)
+    client.did_change_watched_files(vault)
+    tag_query = "#" + prefix if prefix else "#"
     try:
-        symbols = client.workspace_symbol("#" + prefix if prefix else "#")
+        symbols = _stale_retry(vault, lambda c: c.workspace_symbol(tag_query))
     except TimeoutError as e:
         return [f"error: lsp timeout: {e}"]
     tags = sorted({
@@ -527,9 +568,10 @@ def wiki_references(name: str, cwd: str | None = None) -> list[dict]:
     if p is None:
         return [{"error": f"note not found: {name}"}]
     client = _pool.get(vault)
+    client.did_change_watched_files(vault)
     uri = f"file://{p}"
     try:
-        locations = client.references(uri, p)
+        locations = _stale_retry(vault, lambda c: c.references(uri, p))
     except TimeoutError as e:
         return [{"error": f"lsp timeout: {e}"}]
     self_real = str(p)
