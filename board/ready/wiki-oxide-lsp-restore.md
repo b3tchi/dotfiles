@@ -3,11 +3,11 @@
 > **For Claude:** Use infinifu:plan-scrum-master (automated) or infinifu:plan-supervised (user reviews each batch) to implement this plan.
 
 **Epic:** `dotfiles-wq0` (P2 — committed)
-**Tasks:** `dotfiles-wq0.1` … `dotfiles-wq0.13` (created by `spec-ready` on 2026-05-13)
+**Tasks:** `dotfiles-wq0.1` … `dotfiles-wq0.13` (created by `spec-ready` on 2026-05-13). Tasks 11 (nvim autocmd) and 13 (marketplace plugin) descoped same day — refile separately if editor-side pain appears.
 
 **Goal:** Restore `markdown-oxide` LSP as the single indexing platform for the `wiki-oxide` MCP (no ripgrep in semantic search / tags / references paths), and fix per-MCP-tool-call vault detection so an agent crossing sub-projects in a monorepo always queries the correct `.moxide.toml`-marked vault.
 
-**Architecture:** The MCP server (`claude/mcp/wiki-oxide/server.py`) becomes a thin LSP-client adapter. Every tool gains an optional `cwd: str | None = None` argument and walks up from that `cwd` to find the nearest vault marker (`.moxide.toml`, `.obsidian`). An `LspPool` keyed by vault path lazy-spawns one persistent `markdown-oxide` subprocess per vault, with timeout/retry/self-heal on death. `wiki_grep` stays as an explicit, separately-named ripgrep tool — it does not back the LSP-semantic tools. Neovim already wires `markdown-oxide` via `lspconfig` per buffer; the spec verifies that path and adds a save-time `didChangeWatchedFiles` autocmd if the server doesn't pick it up automatically.
+**Architecture:** The MCP server (`claude/mcp/wiki-oxide/server.py`) becomes a thin LSP-client adapter. Every tool gains an optional `cwd: str | None = None` argument and walks up from that `cwd` to find the nearest vault marker (`.moxide.toml`, `.obsidian`). An `LspPool` keyed by vault path lazy-spawns one persistent `markdown-oxide` subprocess per vault, with timeout/retry/self-heal on death. `wiki_grep` stays as an explicit, separately-named ripgrep tool — it does not back the LSP-semantic tools. Neovim already wires `markdown-oxide` via `lspconfig` per buffer and is **out of scope for this epic** — the editor surface has no observed pain; only the MCP side (Claude-agent surface) is being fixed.
 
 **Tech Stack:** Python 3.10+, `mcp[cli]` FastMCP server, `markdown-oxide` LSP (Rust binary, installed via `cargo install --locked` in `claude/dot.yaml`), `pytest` for tests, Neovim `lspconfig` for the editor surface.
 
@@ -53,9 +53,8 @@ claude/mcp/wiki-oxide/
     ├── test_multi_vault.py
     └── test_regression.py          (cache staleness + hover wedge)
 
-nvim/plugins/lang-md.lua            (small additive change — save-time notify)
-
-claude/marketplace/plugins/markdown-lsp/   (optional — restore plugin)
+(nvim/plugins/lang-md.lua            — DESCOPED, not touched in this epic)
+(claude/marketplace/plugins/markdown-lsp/  — DESCOPED, not touched in this epic)
 ```
 
 ---
@@ -1042,54 +1041,9 @@ git commit -m "docs(claude/mcp/wiki-oxide): describe LSP-backed architecture in 
 
 ---
 
-## Task 11: Neovim save-time `didChangeWatchedFiles` autocmd
+## Task 11: ~~Neovim save-time `didChangeWatchedFiles` autocmd~~ — DESCOPED
 
-Make the editor surface immune to the same cache-staleness symptom we fixed in the MCP — `BufWritePost` for `*.md` sends an explicit `didChangeWatchedFiles` notification to any attached `markdown_oxide` client.
-
-**Prerequisite:** `vim.lsp.get_clients` is the Neovim ≥ 0.10 API (it replaced the deprecated `vim.lsp.get_active_clients`). Confirm with `:echo nvim --version` (or `:lua print(vim.version().major, vim.version().minor)`) before merging. If the host nvim is older, switch to `vim.lsp.get_active_clients({ name = "markdown_oxide", bufnr = args.buf })` — same call shape, different name.
-
-**Files:**
-- Modify: `nvim/plugins/lang-md.lua` — add an autocmd inside the existing plugin spec.
-
-**Step 1: Add the autocmd**
-
-Inside `nvim/plugins/lang-md.lua`, alongside the existing `nvim-lspconfig` entry, register:
-
-```lua
-{
-  "neovim/nvim-lspconfig",
-  init = function()
-    vim.api.nvim_create_autocmd("BufWritePost", {
-      pattern = "*.md",
-      callback = function(args)
-        local clients = vim.lsp.get_clients({ name = "markdown_oxide", bufnr = args.buf })
-        for _, client in ipairs(clients) do
-          client.notify("workspace/didChangeWatchedFiles", {
-            changes = {
-              { uri = vim.uri_from_bufnr(args.buf), type = 2 }, -- 2 = Changed
-            },
-          })
-        end
-      end,
-    })
-  end,
-},
-```
-
-**Step 2: Manual smoke**
-
-```bash
-nvim /home/jan/.dotfiles/wiki/<some-note>.md
-```
-
-`:LspInfo` confirms `markdown_oxide` attaches. Save a buffer, then open another note in the same vault, confirm wikilink completion / backlinks see the change.
-
-**Step 3: Commit**
-
-```bash
-git add nvim/plugins/lang-md.lua
-git commit -m "feat(nvim/lang-md): notify markdown-oxide of save events via didChangeWatchedFiles"
-```
+**Closed before implementation** (bd `dotfiles-wq0.11`, closed 2026-05-13). Reason: nvim editor surface has no observed cache-staleness pain today; this task was future-proofing parity with the MCP-side fix. Refile as a separate bd issue if the editor symptom shows up.
 
 ---
 
@@ -1116,9 +1070,9 @@ wiki_search("2605", cwd="/home/jan/.dotfiles")          # → dotfiles wiki entr
 
 Expected: results never cross. `_pool._clients` holds 2 entries.
 
-**Step 3: nvim verification**
+**Step 3: nvim sanity check (optional)**
 
-Open a note in `.dotfiles/wiki/`, complete on `[[`, `gd` on a wikilink, `gr` for refs. Then open a note in `acag/docs/wiki/` in the same nvim session, repeat. `:LspInfo` shows each buffer's `markdown_oxide` rooted at its own vault.
+Out of strict scope, but worth a 30-second confirm that the nvim side is unchanged: open a note in any vault, confirm `markdown_oxide` still attaches via `:LspInfo`. No new behaviour expected — Task 11 (the active-notify autocmd) was descoped.
 
 **Step 4: Run full test suite**
 
@@ -1134,45 +1088,9 @@ If everything passes, no commit needed beyond what previous tasks produced. If a
 
 ---
 
-## Task 13: Restore `markdown-lsp` marketplace plugin (optional parity)
+## Task 13: ~~Restore `markdown-lsp` marketplace plugin~~ — DESCOPED
 
-`svelte-lsp`, `nushell-lsp`, `json-lsp`, `yaml-lsp` all ship as marketplace plugins for consistency. Restoring `markdown-lsp` mirrors that pattern. This task is **optional** — skip if there is no concrete pain from the asymmetry; document the decision either way in the closing commit message.
-
-**Files:**
-- Create: `claude/marketplace/plugins/markdown-lsp/` (directory + manifest mirroring `nushell-lsp`)
-- Modify: `claude/marketplace/.claude-plugin/marketplace.json` — re-add the `markdown-lsp` entry.
-
-**Step 1: Mirror an existing LSP plugin**
-
-Copy `claude/marketplace/plugins/nushell-lsp/` to `claude/marketplace/plugins/markdown-lsp/` and edit the manifest description for `markdown-oxide`. Confirm `cmd = ["markdown-oxide"]`, `filetypes = ["markdown"]`, and `root_markers` match what `lang-md.lua` already passes.
-
-**Step 2: Re-register in `marketplace.json`**
-
-Add to the `plugins` array:
-
-```json
-{
-  "name": "markdown-lsp",
-  "source": "./plugins/markdown-lsp",
-  "description": "Markdown LSP integration via markdown-oxide"
-}
-```
-
-**Step 3: Smoke**
-
-```bash
-claude plugin marketplace add ~/.dotfiles/claude/marketplace
-claude plugin install markdown-lsp@dotfiles
-```
-
-Expected: plugin installs cleanly; `markdown-oxide` attaches to a `.md` buffer.
-
-**Step 4: Commit**
-
-```bash
-git add claude/marketplace/plugins/markdown-lsp/ claude/marketplace/.claude-plugin/marketplace.json
-git commit -m "feat(claude/marketplace): restore markdown-lsp plugin for parity with other LSPs"
-```
+**Closed before implementation** (bd `dotfiles-wq0.13`, closed 2026-05-13). Reason: editor-side marketplace-plugin parity is not part of the MCP LSP restore that addresses F+G. nvim already wires `markdown-oxide` via `lspconfig` directly. Refile if the asymmetry with `svelte-lsp`/`nushell-lsp`/etc. becomes a real annoyance.
 
 ---
 
@@ -1186,12 +1104,13 @@ git commit -m "feat(claude/marketplace): restore markdown-lsp plugin for parity 
 6. Cache-staleness regression test passes (file written between two queries visible in the second).
 7. Hover-wedge regression test passes (50 sequential previews complete without hang).
 8. Multi-vault round-trip test passes (`pool._clients` length ≥ 2 after two-vault session).
-9. Neovim still works — multi-vault per buffer, save triggers `didChangeWatchedFiles`.
-10. Module + tool docstrings describe LSP-backed reality; inline-tag limitation in `wiki_tags` is explicit.
-11. Manual smoke against `.dotfiles/wiki` and `acag/docs/wiki` shows no cross-leak.
+9. Module + tool docstrings describe LSP-backed reality; inline-tag limitation in `wiki_tags` is explicit.
+10. Manual smoke against `.dotfiles/wiki` and `acag/docs/wiki` shows no cross-leak.
 
 ## Out-of-scope follow-ups (file separately as bd issues if pursued)
 
+- nvim save-time `didChangeWatchedFiles` autocmd (was Task 11; refile if editor cache staleness appears).
+- `markdown-lsp` marketplace plugin parity with other LSPs (was Task 13; refile on real asymmetry pain).
 - Upstream PR to `markdown-oxide` to honor watcher events automatically (would let us drop the explicit `did_change_watched_files` nudge).
 - Inline `#tag` indexing — only if tags become a priority.
 - Cross-vault wikilink resolution.
