@@ -117,7 +117,8 @@ def "main init" [] {
 
 def "main create" [
     name: string
-    --no-launch  # skip `exec claude`; just create/resume metadata and print resume cmd
+    --no-launch    # skip `exec claude`; just create/resume metadata and print resume cmd
+    --new-window   # spawn `claude` in a new tmux window instead of exec-replacing current process
 ] {
     if not ($name =~ '^[a-zA-Z0-9_-]+$') {
         error make { msg: "Name must contain only alphanumeric characters, dashes, and underscores" }
@@ -161,25 +162,38 @@ def "main create" [
 
     let label = $"($name).($meta.short)"
 
+    let claude_args = if $meta.resume {
+        ["--resume" $meta.session_id "-n" $label]
+    } else {
+        ["-n" $label "--session-id" $meta.session_id]
+    }
+
+    if $new_window {
+        if ("TMUX" not-in $env) {
+            error make { msg: "--new-window requires TMUX env (run from inside tmux)" }
+        }
+        let cmd = (["claude"] ++ $claude_args | str join " ")
+        ^tmux new-window -n $label $cmd
+        print -e $"Spawned tmux window '($label)' running: ($cmd)"
+        return
+    }
+
     if $no_launch {
         print -e ""
         print -e $"Label:    ($label)"
         print -e $"Idea:     ($meta.idea_file)"
         print -e $"BD epic:  ($meta.bd_id)"
         print -e ""
+        let cmd = (["claude"] ++ $claude_args | str join " ")
         if $meta.resume {
-            print -e $"Resume in a terminal pane:  claude --resume ($meta.session_id) -n ($label)"
+            print -e $"Resume in a terminal pane:  ($cmd)"
         } else {
-            print -e $"Start in a terminal pane:   claude -n ($label) --session-id ($meta.session_id)"
+            print -e $"Start in a terminal pane:   ($cmd)"
         }
         return
     }
 
-    if $meta.resume {
-        exec claude --resume $meta.session_id -n $label
-    } else {
-        exec claude -n $label --session-id $meta.session_id
-    }
+    exec claude ...$claude_args
 }
 
 def "main delete" [

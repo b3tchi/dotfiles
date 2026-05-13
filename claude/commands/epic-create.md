@@ -1,15 +1,13 @@
 ---
-description: Create or resume a brainstorm epic (bd epic + idea file + claude session metadata)
+description: Create or resume a brainstorm epic and open it in a new tmux window
 argument-hint: <name>
 allowed-tools: Bash(epic create:*)
 ---
 
 Create or resume the brainstorm epic named `$ARGUMENTS`.
 
-This writes the bd epic and `board/idea/<name>.<short>.md`, but does **not** launch a nested `claude` session — that has to happen from a terminal/tmux pane outside this session. The script prints the exact `claude --resume` / `claude --session-id` command to use.
+Writes the bd epic and `board/idea/<name>.<short>.md`, then spawns a new tmux window running the dedicated `claude` session for this epic. Requires running from inside tmux.
 
-!`epic create $ARGUMENTS --no-launch`
+!`epic create $ARGUMENTS --new-window`
 
-After running:
-- Confirm in one line which epic was created or resumed (name, bd id).
-- Surface the `claude ... -n <label>` invocation so the user can copy-paste it into a fresh tmux pane.
+After running, confirm in one line: epic name, bd id, and the tmux window label the new claude session opened in.
