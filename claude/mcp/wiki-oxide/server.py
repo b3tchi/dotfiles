@@ -44,7 +44,6 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 _VAULT_MARKERS = (".moxide.toml", ".obsidian")
-_VAULT_FALLBACK = Path.home() / ".dotfiles/wiki"
 _DESCEND_MAX_DEPTH = 4
 
 
@@ -77,18 +76,25 @@ def _walk_down(start: Path) -> Path | None:
     return None
 
 
-def _detect_vault() -> Path:
+def _detect_vault(cwd: Path) -> Path | None:
+    """Detect the vault root from `cwd`.
+
+    Search strategy:
+    1. If WIKI_ROOT env var is set, use it — but return None if the path does
+       not exist on disk (behavior change from old code which returned it
+       unconditionally, producing silent failures downstream).
+    2. Walk up from `cwd` looking for a vault marker (.moxide.toml, .obsidian).
+    3. If no marker found upward, BFS downward up to _DESCEND_MAX_DEPTH levels.
+    4. Return None if no vault is detected.
+    """
     env = os.environ.get("WIKI_ROOT")
     if env:
-        return Path(env).resolve()
-    cwd = Path.cwd()
+        p = Path(env).resolve()
+        return p if p.exists() else None
     found = _walk_up(cwd) or _walk_down(cwd)
     if found is not None:
         return found.resolve()
-    return _VAULT_FALLBACK.resolve()
-
-
-VAULT = _detect_vault()
+    return None
 
 
 class LspClient:
@@ -214,11 +220,17 @@ _client: LspClient | None = None
 _client_lock = threading.Lock()
 
 
-def get_client() -> LspClient:
+def get_client(vault: Path) -> LspClient:
+    """Return (or create) the singleton LspClient for `vault`.
+
+    Note: This shim is replaced entirely in Task 3 (LspPool).
+    The `vault` parameter is accepted here to keep the interface
+    consistent with that upcoming refactor.
+    """
     global _client
     with _client_lock:
         if _client is None or (_client.proc and _client.proc.poll() is not None):
-            _client = LspClient(VAULT)
+            _client = LspClient(vault)
         return _client
 
 
@@ -240,6 +252,9 @@ def wiki_search(query: str) -> list[dict]:
       - "#vpn"   → tag matches only (treats query as a tag)
       - "Inbox"  → heading + filename matches
     """
+    vault = _detect_vault(Path.cwd())
+    if vault is None:
+        return [{"error": "no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"}]
     q = query.strip()
     if not q:
         return []
@@ -251,7 +266,7 @@ def wiki_search(query: str) -> list[dict]:
     # 1. Filename matches (case-insensitive substring on the stem).
     q_lower = q.lstrip("#").lower()
     if q_lower:
-        for p in sorted(VAULT.rglob("*.md")):
+        for p in sorted(vault.rglob("*.md")):
             if q_lower in p.stem.lower():
                 out.append(
                     {
@@ -267,7 +282,7 @@ def wiki_search(query: str) -> list[dict]:
         # Escape regex meta in user query, build a heading-only pattern
         heading_pattern = rf"^#{{1,6}}\s+.*{re.escape(q)}"
         res = subprocess.run(
-            ["rg", "-n", "--no-heading", "--color=never", "-i", "-e", heading_pattern, str(VAULT)],
+            ["rg", "-n", "--no-heading", "--color=never", "-i", "-e", heading_pattern, str(vault)],
             capture_output=True,
             text=True,
             check=False,
@@ -291,7 +306,7 @@ def wiki_search(query: str) -> list[dict]:
     # PCRE2 needed for the trailing lookahead.
     tag_pattern = rf"(?:^|\s){re.escape(tag_token)}(?=[\s.,;:!?)\]\}}]|$)"
     res = subprocess.run(
-        ["rg", "-P", "-n", "--no-heading", "--color=never", "-e", tag_pattern, str(VAULT)],
+        ["rg", "-P", "-n", "--no-heading", "--color=never", "-e", tag_pattern, str(vault)],
         capture_output=True,
         text=True,
         check=False,
@@ -324,6 +339,9 @@ def wiki_tags(prefix: str = "") -> list[str]:
     `[a-zA-Z0-9_-]+` and must be preceded by whitespace or line start
     (so URL fragments and code-block `#include` do not over-match).
     """
+    vault = _detect_vault(Path.cwd())
+    if vault is None:
+        return ["error: no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"]
     if not shutil.which("rg"):
         return ["error: ripgrep not installed"]
 
@@ -346,7 +364,7 @@ def wiki_tags(prefix: str = "") -> list[str]:
             "--only-matching",
             "-e",
             pattern,
-            str(VAULT),
+            str(vault),
         ],
         capture_output=True,
         text=True,
@@ -365,10 +383,13 @@ def wiki_grep(pattern: str, max_results: int = 100) -> list[dict]:
       - "^#\\s"              (top-level headings)
       - "\\[\\[.+?\\]\\]"    (any wikilink)
     """
+    vault = _detect_vault(Path.cwd())
+    if vault is None:
+        return [{"error": "no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"}]
     if not shutil.which("rg"):
         return [{"error": "ripgrep not installed"}]
     res = subprocess.run(
-        ["rg", "-n", "--no-heading", "--color=never", pattern, str(VAULT)],
+        ["rg", "-n", "--no-heading", "--color=never", pattern, str(vault)],
         capture_output=True,
         text=True,
         check=False,
@@ -385,32 +406,41 @@ def wiki_grep(pattern: str, max_results: int = 100) -> list[dict]:
 @mcp.tool()
 def wiki_list() -> list[str]:
     """List all markdown files in the vault, relative to the vault root."""
-    return sorted(str(p.relative_to(VAULT)) for p in VAULT.rglob("*.md"))
+    vault = _detect_vault(Path.cwd())
+    if vault is None:
+        return ["error: no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"]
+    return sorted(str(p.relative_to(vault)) for p in vault.rglob("*.md"))
 
 
 @mcp.tool()
 def wiki_root() -> str:
     """Return the configured vault root path."""
-    return str(VAULT)
+    vault = _detect_vault(Path.cwd())
+    if vault is None:
+        return "error: no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"
+    return str(vault)
 
 
 def _resolve_note(name: str) -> Path | None:
     """Resolve a wikilink-style name or relative path to an absolute Path."""
+    vault = _detect_vault(Path.cwd())
+    if vault is None:
+        return None
     p = Path(name)
-    if p.is_absolute() and p.exists() and str(p).startswith(str(VAULT)):
+    if p.is_absolute() and p.exists() and str(p).startswith(str(vault)):
         return p
-    candidate = (VAULT / name).with_suffix("") if name.endswith(".md") else VAULT / f"{name}.md"
+    candidate = (vault / name).with_suffix("") if name.endswith(".md") else vault / f"{name}.md"
     # Try as-given (with or without .md)
     for cand in (
-        VAULT / name,
-        VAULT / f"{name}.md",
+        vault / name,
+        vault / f"{name}.md",
         candidate.with_suffix(".md"),
     ):
         if cand.is_file():
             return cand
     # Search by basename across vault
     base = Path(name).stem
-    matches = list(VAULT.rglob(f"{base}.md"))
+    matches = list(vault.rglob(f"{base}.md"))
     if len(matches) == 1:
         return matches[0]
     return None
@@ -423,6 +453,9 @@ def wiki_read(name: str) -> dict:
     `name` accepts wikilink-style names ("ovpn-home"), relative paths
     ("notes/ovpn-home.md"), or absolute paths within the vault.
     """
+    vault = _detect_vault(Path.cwd())
+    if vault is None:
+        return {"error": "no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"}
     p = _resolve_note(name)
     if p is None:
         return {"error": f"note not found: {name}"}
@@ -432,7 +465,7 @@ def wiki_read(name: str) -> dict:
         return {"error": f"read failed: {e}", "path": str(p)}
     return {
         "path": str(p),
-        "relative": str(p.relative_to(VAULT)),
+        "relative": str(p.relative_to(vault)),
         "content": text,
         "lines": text.count("\n") + 1,
     }
@@ -450,6 +483,9 @@ def wiki_preview(name: str) -> dict:
     `wiki_references`. Built directly from the filesystem — no LSP
     hover involved (markdown-oxide hover wedges after a few calls).
     """
+    vault = _detect_vault(Path.cwd())
+    if vault is None:
+        return {"error": "no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"}
     target = Path(name).stem
     p = _resolve_note(name)
     if p is None:
@@ -468,7 +504,7 @@ def wiki_preview(name: str) -> dict:
             rf"|\]\([^)]*?{re.escape(target)}(?:\.md)?(?:#[^)]*)?\)"
         )
         res = subprocess.run(
-            ["rg", "-n", "--no-heading", "--color=never", pattern, str(VAULT)],
+            ["rg", "-n", "--no-heading", "--color=never", pattern, str(vault)],
             capture_output=True,
             text=True,
             check=False,
@@ -503,6 +539,9 @@ def wiki_references(name: str) -> list[dict]:
     and markdown links `](name.md)` / `](name#heading)`. Skips the target
     note itself.
     """
+    vault = _detect_vault(Path.cwd())
+    if vault is None:
+        return [{"error": "no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"}]
     target = Path(name).stem
     if not shutil.which("rg"):
         return [{"error": "ripgrep not installed"}]
@@ -511,7 +550,7 @@ def wiki_references(name: str) -> list[dict]:
         rf"|\]\([^)]*?{re.escape(target)}(?:\.md)?(?:#[^)]*)?\)"
     )
     res = subprocess.run(
-        ["rg", "-n", "--no-heading", "--color=never", pattern, str(VAULT)],
+        ["rg", "-n", "--no-heading", "--color=never", pattern, str(vault)],
         capture_output=True,
         text=True,
         check=False,
@@ -532,7 +571,13 @@ def wiki_references(name: str) -> list[dict]:
 
 
 if __name__ == "__main__":
-    if not VAULT.exists():
-        print(f"WIKI_ROOT does not exist: {VAULT}", file=sys.stderr)
+    _startup_vault = _detect_vault(Path.cwd())
+    if _startup_vault is None:
+        print(
+            "wiki-oxide: no vault detected.\n"
+            "Run from a directory containing a vault marker (.moxide.toml or .obsidian),\n"
+            "or set the WIKI_ROOT environment variable to an existing vault path.",
+            file=sys.stderr,
+        )
         sys.exit(1)
     mcp.run()
