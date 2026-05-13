@@ -1,8 +1,11 @@
 linux:
   installs:
     cmd: |
-      # wiki-oxide prerequisites: markdown-oxide LSP + uv Python runner.
-      # MCP registration itself stays in claude/dot.yaml — needs claude CLI present.
+      # wiki-oxide: markdown-oxide LSP + uv runner + MCP registration.
+      # NOTE: MCP register requires claude CLI. On a fresh machine the first
+      # `rotz install claude` runs this dot BEFORE claude is installed, so the
+      # guarded block below skips. Rerun `rotz install claude` once claude is
+      # present (or run `rotz install claude/wiki-oxide` after) to register.
 
       # markdown-oxide — LSP for wiki vault (used by nvim md plugin + wiki-oxide MCP)
       # Arch extra repo ships prebuilt; cargo fallback for non-Arch.
@@ -24,4 +27,17 @@ linux:
         else
           curl -LsSf https://astral.sh/uv/install.sh | sh
         fi
+      fi
+
+      # wiki-oxide MCP — register at user scope in every CLAUDE_CONFIG_DIR.
+      # Skipped silently if claude CLI not yet present (first-run on fresh box).
+      if command -v claude >/dev/null 2>&1; then
+        for cfg in "$HOME/.claude" "$HOME/.claude-personal"; do
+          [ -d "$cfg" ] || continue
+          if ! CLAUDE_CONFIG_DIR="$cfg" claude mcp list 2>/dev/null | grep -q "^wiki-oxide:"; then
+            CLAUDE_CONFIG_DIR="$cfg" claude mcp add wiki-oxide -s user -- uv run --quiet --script ~/.dotfiles/claude/mcp/wiki-oxide/server.py
+          fi
+        done
+      else
+        echo "skip wiki-oxide MCP register: claude CLI not yet present; rerun after claude install"
       fi

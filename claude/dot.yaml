@@ -47,18 +47,7 @@ linux:
       install_lsp vscode-json-language-server vscode-langservers-extracted
       install_lsp yaml-language-server yaml-language-server
 
-      # markdown-oxide + uv installed via installs.depends → ./wiki-oxide/dot.yaml
-
-      # wiki-oxide MCP — register at user scope in every CLAUDE_CONFIG_DIR we maintain.
-      # Two configs: ~/.claude (work) and ~/.claude-personal (personal). Idempotent.
-      if command -v claude >/dev/null 2>&1; then
-        for cfg in "$HOME/.claude" "$HOME/.claude-personal"; do
-          [ -d "$cfg" ] || continue
-          if ! CLAUDE_CONFIG_DIR="$cfg" claude mcp list 2>/dev/null | grep -q "^wiki-oxide:"; then
-            CLAUDE_CONFIG_DIR="$cfg" claude mcp add wiki-oxide -s user -- uv run --quiet --script ~/.dotfiles/claude/mcp/wiki-oxide/server.py
-          fi
-        done
-      fi
+      # markdown-oxide + uv + wiki-oxide MCP register handled by ./wiki-oxide/dot.yaml
 
       # Plugins + marketplaces — apply to every CLAUDE_CONFIG_DIR we maintain.
       # Each config dir keeps its own plugin/marketplace registry; loop both.
@@ -93,6 +82,10 @@ linux:
           install_plugin yaml-lsp@dotfiles
         done
       fi
+
+      # Re-trigger wiki-oxide dot now that claude CLI is installed.
+      # First pass (via installs.depends) skipped MCP register; this pass picks it up.
+      rotz install claude/wiki-oxide -a || true
 
       rotz link claude --force
 windows:
