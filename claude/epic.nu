@@ -68,8 +68,7 @@ def preflight [] {
 }
 
 def short_id [full_id: string] {
-    let dash = ($full_id | str index-of "-")
-    $full_id | str substring ($dash + 1)..
+    $full_id | split row "-" | last
 }
 
 def frontmatter [content: string] {
