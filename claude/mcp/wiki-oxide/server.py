@@ -230,6 +230,36 @@ class LspClient:
         resp = self._request("workspace/symbol", {"query": query})
         return resp.get("result") or []
 
+    def references(self, uri: str, path: Path, line: int = 1, character: int = 0) -> list[dict]:
+        """LSP textDocument/references — backlinks to the note at `uri`.
+
+        Sends `didOpen` with the actual file content so markdown-oxide's
+        document store matches disk. Position (line=1, character=0) is the
+        first body line after the heading — markdown-oxide returns all
+        document backlinks from any body position. The heading line (line=0)
+        returns empty because markdown-oxide does not resolve the heading
+        token as a wikilink target.
+
+        Note: `didClose` is intentionally omitted. Sending didClose causes
+        the server to enter a state where subsequent textDocument/references
+        calls on the same URI time out. Re-sending didOpen on each call is
+        idempotent in markdown-oxide and keeps the server state coherent.
+        """
+        try:
+            text = path.read_text(errors="replace")
+        except Exception:
+            text = ""
+        self._notify("textDocument/didOpen", {
+            "textDocument": {"uri": uri, "languageId": "markdown",
+                              "version": 1, "text": text},
+        })
+        resp = self._request("textDocument/references", {
+            "textDocument": {"uri": uri},
+            "position": {"line": line, "character": character},
+            "context": {"includeDeclaration": False},
+        })
+        return resp.get("result") or []
+
 
 class LspPool:
     """Map of vault-path → LspClient. Lazy spawn, self-heal on process death."""
@@ -495,40 +525,38 @@ def wiki_preview(name: str, cwd: str | None = None) -> dict:
 
 @mcp.tool()
 def wiki_references(name: str, cwd: str | None = None) -> list[dict]:
-    """Find backlinks to a wiki note via ripgrep.
+    """Find backlinks to a wiki note via markdown-oxide LSP references.
 
-    Matches wikilink forms `[[name]]`, `[[name#heading]]`, `[[name|alias]]`
-    and markdown links `](name.md)` / `](name#heading)`. Skips the target
-    note itself.
+    Backed by `textDocument/references` against the resolved note URI.
+    Wikilink forms `[[name]]`, `[[name#heading]]`, `[[name|alias]]` and
+    markdown `](name.md)` style links all surface here, depending on
+    markdown-oxide's reference resolution.
     """
     vault = _resolve_call_vault(cwd)
     if vault is None:
-        return [{"error": "no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"}]
-    target = Path(name).stem
-    if not shutil.which("rg"):
-        return [{"error": "ripgrep not installed"}]
-    pattern = (
-        rf"\[\[{re.escape(target)}(?:#[^\]]*)?(?:\|[^\]]*)?\]\]"
-        rf"|\]\([^)]*?{re.escape(target)}(?:\.md)?(?:#[^)]*)?\)"
-    )
-    res = subprocess.run(
-        ["rg", "-n", "--no-heading", "--color=never", pattern, str(vault)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+        return [{"error": f"no vault marker above {cwd or Path.cwd()}"}]
     p = _resolve_note(vault, name)
-    self_real = str(p) if p else None
+    if p is None:
+        return [{"error": f"note not found: {name}"}]
+    client = _pool.get(vault)
+    uri = f"file://{p}"
+    try:
+        locations = client.references(uri, p)
+    except TimeoutError as e:
+        return [{"error": f"lsp timeout: {e}"}]
+    self_real = str(p)
     out: list[dict] = []
-    for line in res.stdout.splitlines():
-        path, _, rest = line.partition(":")
-        if path == self_real:
+    for loc in locations:
+        loc_uri = loc.get("uri", "")
+        loc_path = loc_uri.removeprefix("file://") if loc_uri.startswith("file://") else loc_uri
+        if loc_path == self_real:
             continue
-        lineno_s, _, text = rest.partition(":")
-        out.append(
-            {"path": path, "line": int(lineno_s) if lineno_s.isdigit() else None,
-             "text": text}
-        )
+        rng = loc.get("range", {}).get("start", {})
+        out.append({
+            "path": loc_path,
+            "line": rng.get("line"),
+            "character": rng.get("character"),
+        })
     return out
 
 
