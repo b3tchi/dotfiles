@@ -4,11 +4,11 @@ argument-hint: <name>
 allowed-tools: Bash(epic create:*)
 ---
 
-Create or resume the brainstorm epic named `$1`.
+Create or resume the brainstorm epic named `$ARGUMENTS`.
 
 This writes the bd epic and `board/idea/<name>.<short>.md`, but does **not** launch a nested `claude` session — that has to happen from a terminal/tmux pane outside this session. The script prints the exact `claude --resume` / `claude --session-id` command to use.
 
-!`epic create $1 --no-launch`
+!`epic create $ARGUMENTS --no-launch`
 
 After running:
 - Confirm in one line which epic was created or resumed (name, bd id).
