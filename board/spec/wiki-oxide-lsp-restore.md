@@ -205,7 +205,7 @@ Expected: collection errors or failures because the current `_detect_vault()` ta
 
 **Step 3: Refactor `server.py`**
 
-- Change `_detect_vault` (line 80) to `def _detect_vault(cwd: Path) -> Path | None:`. Drop the internal `Path.cwd()` call. Return `None` (not `_VAULT_FALLBACK`) when no marker is found. Keep the `WIKI_ROOT` env override but only when the env-provided path exists; return `None` otherwise.
+- Change `_detect_vault` (line 80) to `def _detect_vault(cwd: Path) -> Path | None:`. Drop the internal `Path.cwd()` call. Return `None` (not `_VAULT_FALLBACK`) when no marker is found. **Behavior change** for the `WIKI_ROOT` env override: keep it, but return `None` when the env-provided path does not exist on disk (the old code returned the path unconditionally, which produced silent failures downstream). Document this in the function docstring and add a test case `test_wiki_root_env_missing_returns_none` that sets `monkeypatch.setenv("WIKI_ROOT", str(tmp_path / "nope"))` and asserts the result is `None`.
 - Delete `_VAULT_FALLBACK` (line 47) and the module-level `VAULT = _detect_vault()` (line 91).
 - For each occurrence of `VAULT` in tool bodies (`wiki_search`, `wiki_tags`, `wiki_grep`, `wiki_list`, `wiki_root`, `_resolve_note`, `wiki_read`, `wiki_preview`, `wiki_references`): prepend `vault = _detect_vault(Path.cwd())` and rename `VAULT` → `vault` in the body. If `vault is None`, return the error shape appropriate to the tool's return type (`{"error": "..."}` for dict-returning, `[{"error": "..."}]` for list-of-dict, `[f"error: ..."]` for list-of-str, `f"error: ..."` for `wiki_root`).
 - Update the `__main__` guard at line 535: call `_detect_vault(Path.cwd())` once and, if it's `None`, print a clearer error mentioning `.moxide.toml` / `.obsidian` markers and `sys.exit(1)`.
@@ -231,6 +231,8 @@ git commit -m "refactor(claude/mcp/wiki-oxide): per-call vault detection, drop V
 ## Task 3: Introduce `LspPool` — one persistent LSP client per vault
 
 Replace the `_client` / `get_client()` pair with a class that maps vault path → `LspClient`. Lazy spawn on miss; reap on process death.
+
+**Explicitly deferred (out of scope for this task):** idle-timeout reaping (clients sitting unused for ≥ 10 min). The pool grows monotonically per session and only reclaims entries when the underlying process dies. Acceptable because (a) `markdown-oxide` is small (~30 MB RSS), (b) a session rarely crosses more than a handful of vaults, (c) Claude Code restarts the MCP at session boundaries. File a follow-up bd issue only if memory becomes a real concern.
 
 **Files:**
 - Test: `claude/mcp/wiki-oxide/tests/test_lsp_pool.py` (new)
@@ -412,6 +414,19 @@ git commit -m "feat(claude/mcp/wiki-oxide): tools accept cwd arg, route each cal
 
 Replace the ripgrep filename + heading + tag fan-out with a single `workspace/symbol` request via the pool.
 
+**Breaking change to result shape** (intentional, documented):
+
+| Field | Before (ripgrep) | After (LSP) |
+|---|---|---|
+| `name` | filename stem / heading text / `#tag` literal | LSP symbol name (whatever markdown-oxide emits) |
+| `kind` | one of `"file"` / `"heading"` / `"tag"` | LSP SymbolKind name (e.g. `"Constant"`, `"String"`, `"File"`) |
+| `path` | absolute string | absolute string (extracted from `file://` URI) |
+| `line` / `match_field` | present | **removed** — LSP `WorkspaceSymbol` carries `location.range` if a consumer needs line/col, but the simple dict shape drops it |
+
+External consumers of `wiki_search` (agent skills, prompts) that depended on `kind == "file"` discrimination will need to switch to LSP `SymbolKind` names. Search the repo for `wiki_search` callers before committing this task; update or annotate any that rely on the old shape.
+
+**LSP timeout** is the `LspClient._request` default of 8s (defined in the existing class at `server.py:174`). Do not override per-call. If timeouts become a real problem, raise the default in one place — do not sprinkle ad-hoc timeouts across tool bodies.
+
 **Files:**
 - Test: `claude/mcp/wiki-oxide/tests/test_wiki_search.py` (new)
 - Modify: `claude/mcp/wiki-oxide/server.py` — body of `wiki_search` (current lines 229-312)
@@ -590,19 +605,39 @@ Expected: the `no_rg` test fails.
 Add to `LspClient` (after `workspace_symbol`):
 
 ```python
-def references(self, uri: str, line: int = 0, character: int = 0) -> list[dict]:
-    """LSP textDocument/references — backlinks to the note at `uri`."""
+def references(self, uri: str, path: Path, line: int = 0, character: int = 0) -> list[dict]:
+    """LSP textDocument/references — backlinks to the note at `uri`.
+
+    Sends `didOpen` with the actual file content so markdown-oxide's
+    document store matches disk. Position (line=0, character=0) refers
+    to the very start of the note, which markdown-oxide treats as a
+    request for references to *this document as a wikilink target* —
+    confirmed against markdown-oxide's wikilink reference implementation.
+    If a future markdown-oxide release requires a position inside an
+    actual `[[link]]` token, this method will need a position-resolution
+    pass; flag that with a regression test failure first.
+    """
+    try:
+        text = path.read_text(errors="replace")
+    except Exception:
+        text = ""
     self._notify("textDocument/didOpen", {
         "textDocument": {"uri": uri, "languageId": "markdown",
-                          "version": 1, "text": ""},
+                          "version": 1, "text": text},
     })
-    resp = self._request("textDocument/references", {
-        "textDocument": {"uri": uri},
-        "position": {"line": line, "character": character},
-        "context": {"includeDeclaration": False},
-    })
-    return resp.get("result") or []
+    try:
+        resp = self._request("textDocument/references", {
+            "textDocument": {"uri": uri},
+            "position": {"line": line, "character": character},
+            "context": {"includeDeclaration": False},
+        })
+        return resp.get("result") or []
+    finally:
+        # Always close the document so the server's state doesn't grow.
+        self._notify("textDocument/didClose", {"textDocument": {"uri": uri}})
 ```
+
+Update the caller in `wiki_references` to pass `p` (the resolved Path) into `client.references(uri, p)` alongside the URI.
 
 Replace `wiki_references` (lines 498-531):
 
@@ -625,7 +660,7 @@ def wiki_references(name: str, cwd: str | None = None) -> list[dict]:
     client = _pool.get(vault)
     uri = f"file://{p}"
     try:
-        locations = client.references(uri)
+        locations = client.references(uri, p)
     except TimeoutError as e:
         return [{"error": f"lsp timeout: {e}"}]
     self_real = str(p)
@@ -680,9 +715,29 @@ import pytest
 from server import wiki_tags
 
 
-def test_wiki_tags_returns_list(require_markdown_oxide, fixture_vault: Path):
-    tags = wiki_tags(cwd=str(fixture_vault))
+def test_wiki_tags_returns_frontmatter_tags(require_markdown_oxide, tmp_path: Path):
+    # Frontmatter tags ARE indexed as workspace symbols by markdown-oxide.
+    vault = tmp_path / "wiki"
+    vault.mkdir()
+    (vault / ".moxide.toml").write_text("")
+    (vault / "tagged.md").write_text(
+        "---\ntags: [planned, urgent]\n---\n# Tagged\n"
+    )
+    tags = wiki_tags(cwd=str(vault))
     assert isinstance(tags, list)
+    # If markdown-oxide returns frontmatter tags, they appear as "#planned" / "#urgent".
+    # If a future markdown-oxide release stops indexing frontmatter, this test
+    # fails — that's the right signal (catastrophic regression in tag visibility).
+    assert any(t in ("#planned", "#urgent") for t in tags), (
+        f"frontmatter tags not surfaced; got {tags}"
+    )
+
+
+def test_wiki_tags_empty_vault_returns_empty_list(require_markdown_oxide, tmp_path: Path):
+    vault = tmp_path / "empty"
+    vault.mkdir()
+    (vault / ".moxide.toml").write_text("")
+    assert wiki_tags(cwd=str(vault)) == []
 
 
 def test_wiki_tags_no_rg(monkeypatch, require_markdown_oxide, fixture_vault: Path):
@@ -741,10 +796,18 @@ def wiki_tags(prefix: str = "", cwd: str | None = None) -> list[str]:
     tags = sorted({
         sym.get("name", "")
         for sym in symbols
-        if sym.get("kind") == 14  # SymbolKind.Constant — markdown-oxide tags
+        if sym.get("kind") in _TAG_SYMBOL_KINDS
         and sym.get("name", "").startswith("#" + prefix)
     })
     return tags
+```
+
+The kind filter is an assumption about how `markdown-oxide` classifies tags. Code current as of this spec uses `SymbolKind.Constant` (`14`) for frontmatter tags. Define a small explicit set at module level so it's easy to extend if a future markdown-oxide release adds new kinds:
+
+```python
+# LSP SymbolKind values markdown-oxide uses for tag-like workspace symbols.
+# Update this set rather than the filter expression if a new release adds kinds.
+_TAG_SYMBOL_KINDS = frozenset({14})  # SymbolKind.Constant
 ```
 
 **Step 4: Run the tests, confirm they pass**
@@ -826,6 +889,21 @@ def did_change_watched_files(self, vault: Path):
         self._notify("workspace/didChangeWatchedFiles", {"changes": changes})
 ```
 
+Add an `evict` method on `LspPool` (keep its mutable state encapsulated — no private-attribute access from the outside):
+
+```python
+def evict(self, vault: Path) -> None:
+    """Force-remove and terminate the client for `vault`. Safe if absent."""
+    vault = vault.resolve()
+    with self._lock:
+        client = self._clients.pop(vault, None)
+    if client is not None and client.proc is not None:
+        try:
+            client.proc.terminate()
+        except Exception:
+            pass
+```
+
 Add module-level helper:
 
 ```python
@@ -838,12 +916,7 @@ def _stale_retry(vault: Path, fn, max_retries: int = 1):
             return fn(client)
         except (TimeoutError, BrokenPipeError, ConnectionResetError) as e:
             last_exc = e
-            _pool._clients.pop(vault.resolve(), None)
-            if client.proc is not None:
-                try:
-                    client.proc.terminate()
-                except Exception:
-                    pass
+            _pool.evict(vault)
             continue
     raise last_exc  # type: ignore[misc]
 ```
@@ -972,6 +1045,8 @@ git commit -m "docs(claude/mcp/wiki-oxide): describe LSP-backed architecture in 
 ## Task 11: Neovim save-time `didChangeWatchedFiles` autocmd
 
 Make the editor surface immune to the same cache-staleness symptom we fixed in the MCP — `BufWritePost` for `*.md` sends an explicit `didChangeWatchedFiles` notification to any attached `markdown_oxide` client.
+
+**Prerequisite:** `vim.lsp.get_clients` is the Neovim ≥ 0.10 API (it replaced the deprecated `vim.lsp.get_active_clients`). Confirm with `:echo nvim --version` (or `:lua print(vim.version().major, vim.version().minor)`) before merging. If the host nvim is older, switch to `vim.lsp.get_active_clients({ name = "markdown_oxide", bufnr = args.buf })` — same call shape, different name.
 
 **Files:**
 - Modify: `nvim/plugins/lang-md.lua` — add an autocmd inside the existing plugin spec.
