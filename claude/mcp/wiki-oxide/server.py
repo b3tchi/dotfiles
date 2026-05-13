@@ -97,6 +97,12 @@ def _detect_vault(cwd: Path) -> Path | None:
     return None
 
 
+def _resolve_call_vault(cwd: str | None) -> Path | None:
+    """Resolve the vault for a single MCP tool call."""
+    start = Path(cwd).resolve() if cwd else Path.cwd()
+    return _detect_vault(start)
+
+
 class LspClient:
     """Thin LSP client over markdown-oxide stdio, holds one persistent server."""
 
@@ -244,7 +250,7 @@ mcp = FastMCP("wiki-oxide")
 
 
 @mcp.tool()
-def wiki_search(query: str) -> list[dict]:
+def wiki_search(query: str, cwd: str | None = None) -> list[dict]:
     """Search vault for filenames, headings, and tags matching the query.
 
     Backed by ripgrep — no LSP workspaceSymbol cache to go stale.
@@ -257,7 +263,7 @@ def wiki_search(query: str) -> list[dict]:
       - "#vpn"   → tag matches only (treats query as a tag)
       - "Inbox"  → heading + filename matches
     """
-    vault = _detect_vault(Path.cwd())
+    vault = _resolve_call_vault(cwd)
     if vault is None:
         return [{"error": "no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"}]
     q = query.strip()
@@ -333,7 +339,7 @@ def wiki_search(query: str) -> list[dict]:
 
 
 @mcp.tool()
-def wiki_tags(prefix: str = "") -> list[str]:
+def wiki_tags(prefix: str = "", cwd: str | None = None) -> list[str]:
     """List distinct #tags in the vault via ripgrep.
 
     `prefix` narrows by leading characters after `#` (e.g. "v" → tags
@@ -344,7 +350,7 @@ def wiki_tags(prefix: str = "") -> list[str]:
     `[a-zA-Z0-9_-]+` and must be preceded by whitespace or line start
     (so URL fragments and code-block `#include` do not over-match).
     """
-    vault = _detect_vault(Path.cwd())
+    vault = _resolve_call_vault(cwd)
     if vault is None:
         return ["error: no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"]
     if not shutil.which("rg"):
@@ -380,7 +386,7 @@ def wiki_tags(prefix: str = "") -> list[str]:
 
 
 @mcp.tool()
-def wiki_grep(pattern: str, max_results: int = 100) -> list[dict]:
+def wiki_grep(pattern: str, max_results: int = 100, cwd: str | None = None) -> list[dict]:
     """Search vault file contents via ripgrep. Returns matching lines with paths.
 
     Pattern is treated as a regex by ripgrep. Examples:
@@ -388,7 +394,7 @@ def wiki_grep(pattern: str, max_results: int = 100) -> list[dict]:
       - "^#\\s"              (top-level headings)
       - "\\[\\[.+?\\]\\]"    (any wikilink)
     """
-    vault = _detect_vault(Path.cwd())
+    vault = _resolve_call_vault(cwd)
     if vault is None:
         return [{"error": "no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"}]
     if not shutil.which("rg"):
@@ -409,28 +415,25 @@ def wiki_grep(pattern: str, max_results: int = 100) -> list[dict]:
 
 
 @mcp.tool()
-def wiki_list() -> list[str]:
+def wiki_list(cwd: str | None = None) -> list[str]:
     """List all markdown files in the vault, relative to the vault root."""
-    vault = _detect_vault(Path.cwd())
+    vault = _resolve_call_vault(cwd)
     if vault is None:
         return ["error: no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"]
     return sorted(str(p.relative_to(vault)) for p in vault.rglob("*.md"))
 
 
 @mcp.tool()
-def wiki_root() -> str:
+def wiki_root(cwd: str | None = None) -> str:
     """Return the configured vault root path."""
-    vault = _detect_vault(Path.cwd())
+    vault = _resolve_call_vault(cwd)
     if vault is None:
         return "error: no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"
     return str(vault)
 
 
-def _resolve_note(name: str) -> Path | None:
+def _resolve_note(vault: Path, name: str) -> Path | None:
     """Resolve a wikilink-style name or relative path to an absolute Path."""
-    vault = _detect_vault(Path.cwd())
-    if vault is None:
-        return None
     p = Path(name)
     if p.is_absolute() and p.exists() and str(p).startswith(str(vault)):
         return p
@@ -452,16 +455,16 @@ def _resolve_note(name: str) -> Path | None:
 
 
 @mcp.tool()
-def wiki_read(name: str) -> dict:
+def wiki_read(name: str, cwd: str | None = None) -> dict:
     """Read full content of a wiki note.
 
     `name` accepts wikilink-style names ("ovpn-home"), relative paths
     ("notes/ovpn-home.md"), or absolute paths within the vault.
     """
-    vault = _detect_vault(Path.cwd())
+    vault = _resolve_call_vault(cwd)
     if vault is None:
         return {"error": "no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"}
-    p = _resolve_note(name)
+    p = _resolve_note(vault, name)
     if p is None:
         return {"error": f"note not found: {name}"}
     try:
@@ -480,7 +483,7 @@ _PREVIEW_MAX_CHARS = 1200
 
 
 @mcp.tool()
-def wiki_preview(name: str) -> dict:
+def wiki_preview(name: str, cwd: str | None = None) -> dict:
     """Compact file preview + backlinks for a wiki note.
 
     Returns the first ~1200 chars of the note plus any backlinks found
@@ -488,11 +491,11 @@ def wiki_preview(name: str) -> dict:
     `wiki_references`. Built directly from the filesystem — no LSP
     hover involved (markdown-oxide hover wedges after a few calls).
     """
-    vault = _detect_vault(Path.cwd())
+    vault = _resolve_call_vault(cwd)
     if vault is None:
         return {"error": "no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"}
     target = Path(name).stem
-    p = _resolve_note(name)
+    p = _resolve_note(vault, name)
     if p is None:
         return {"error": f"note not found: {target}"}
     try:
@@ -537,14 +540,14 @@ def wiki_preview(name: str) -> dict:
 
 
 @mcp.tool()
-def wiki_references(name: str) -> list[dict]:
+def wiki_references(name: str, cwd: str | None = None) -> list[dict]:
     """Find backlinks to a wiki note via ripgrep.
 
     Matches wikilink forms `[[name]]`, `[[name#heading]]`, `[[name|alias]]`
     and markdown links `](name.md)` / `](name#heading)`. Skips the target
     note itself.
     """
-    vault = _detect_vault(Path.cwd())
+    vault = _resolve_call_vault(cwd)
     if vault is None:
         return [{"error": "no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"}]
     target = Path(name).stem
@@ -560,7 +563,7 @@ def wiki_references(name: str) -> list[dict]:
         text=True,
         check=False,
     )
-    p = _resolve_note(name)
+    p = _resolve_note(vault, name)
     self_real = str(p) if p else None
     out: list[dict] = []
     for line in res.stdout.splitlines():
