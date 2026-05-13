@@ -14,68 +14,55 @@ linux:
     {{/if}}
 
   installs:
+    depends:
+      - beads
     cmd: |
-      # Ensure TMPDIR is set for Claude on Termux
-      # dolt — storage backend for bd (server-mode fallback when bd lacks CGO)
-      if ! command -v dolt >/dev/null 2>&1; then
-        DOLT_VERSION=$(curl -fsSL https://api.github.com/repos/dolthub/dolt/releases/latest 2>/dev/null | grep '"tag_name"' | sed 's/.*"v\(.*\)".*/\1/')
-        if [ -n "$DOLT_VERSION" ]; then
-          DOLT_ARCH="amd64"
-          case "$(uname -m)" in
-            aarch64|arm64) DOLT_ARCH="arm64" ;;
-          esac
-          if curl -fsSL "https://github.com/dolthub/dolt/releases/download/v${DOLT_VERSION}/dolt-linux-${DOLT_ARCH}.tar.gz" -o /tmp/dolt.tar.gz \
-             && tar xzf /tmp/dolt.tar.gz -C /tmp/; then
-            mkdir -p "$HOME/.local/bin"
-            cp "/tmp/dolt-linux-${DOLT_ARCH}/bin/dolt" "$HOME/.local/bin/dolt"
-            rm -rf /tmp/dolt.tar.gz /tmp/dolt-linux-*
-          fi
-        fi
-      fi
-
-      # bd (beads) — always reinstall to track upstream version
-      curl -fsSL https://raw.githubusercontent.com/gastownhall/beads/main/scripts/install.sh | bash
-      if ! command -v bd >/dev/null 2>&1 && [ -x "$HOME/go/bin/bd" ]; then
-        mkdir -p "$HOME/.local/bin"
-        ln -sf "$HOME/go/bin/bd" "$HOME/.local/bin/bd"
-      fi
-
-      # perles — always reinstall to track upstream (catches schema bumps)
-      curl -sSL https://raw.githubusercontent.com/zjrosen/perles/main/install.sh | bash
-      if ! command -v perles >/dev/null 2>&1 && [ -x "$HOME/go/bin/perles" ]; then
-        mkdir -p "$HOME/.local/bin"
-        ln -sf "$HOME/go/bin/perles" "$HOME/.local/bin/perles"
-      fi
-
-      # bd repo hygiene — only run if invoked from a repo with .beads/
-      if [ -d ".beads" ]; then
-        bd doctor --fix 2>/dev/null || true
-        if [ -z "$(git config beads.role 2>/dev/null)" ]; then
-          git config beads.role maintainer
-        fi
-        bd hooks install 2>/dev/null || true
-      fi
+      # Rotz buffers cmd output. Redirect to log file; tail in another pane:
+      #   tail -f /tmp/rotz-claude.log
+      [ -w /dev/tty ] && echo "rotz claude: tail -f /tmp/rotz-claude.log" >/dev/tty
+      exec >>/tmp/rotz-claude.log 2>&1
+      set -x
+      echo "=== rotz install claude started: $(date) ==="
+      # dolt + bd + perles installed via installs.depends → ../beads/dot.yaml
 
       curl -fsSL https://claude.ai/install.sh | sh
       chmod +x ~/.dotfiles/claude/epic.nu
 
-      # LSP servers (binaries) — required by code intelligence plugins
-      # nu provides --lsp natively, no extra binary needed
-      sudo npm install -g typescript typescript-language-server svelte-language-server vscode-langservers-extracted yaml-language-server
+      # LSP servers (binaries) — required by code intelligence plugins.
+      # nu provides --lsp natively, no extra binary needed.
+      # Install one-by-one, skip if binary already present.
+      # bin → npm pkg map. vscode-langservers-extracted provides 4 binaries; probe one.
+      install_lsp() {
+        bin="$1"; pkg="$2"
+        if command -v "$bin" >/dev/null 2>&1; then
+          echo "skip $pkg: $bin present"
+        else
+          sudo npm install -g "$pkg"
+        fi
+      }
+      install_lsp tsc typescript
+      install_lsp typescript-language-server typescript-language-server
+      install_lsp svelteserver svelte-language-server
+      install_lsp vscode-json-language-server vscode-langservers-extracted
+      install_lsp yaml-language-server yaml-language-server
 
       # markdown-oxide — LSP for wiki vault (used by nvim md plugin + wiki-oxide MCP)
+      # Arch extra repo ships prebuilt; cargo fallback for non-Arch.
       if ! command -v markdown-oxide >/dev/null 2>&1; then
-        if command -v cargo >/dev/null 2>&1; then
-          cargo install --locked markdown-oxide
+        if command -v pacman >/dev/null 2>&1; then
+          sudo pacman -Sy --needed --noconfirm markdown-oxide
+        elif command -v cargo >/dev/null 2>&1; then
+          cargo install --locked --git https://github.com/Feel-ix-343/markdown-oxide.git markdown-oxide
         else
-          echo "skip markdown-oxide: cargo not available" >&2
+          echo "skip markdown-oxide: no pacman or cargo" >&2
         fi
       fi
 
       # uv — Python script runner required by wiki-oxide MCP server shebang
+      # -Sy refreshes db inline; stale mirrors 404 on cached version pins
       if ! command -v uv >/dev/null 2>&1; then
         if command -v pacman >/dev/null 2>&1; then
-          sudo pacman -S --needed --noconfirm uv
+          sudo pacman -Sy --needed --noconfirm uv
         else
           curl -LsSf https://astral.sh/uv/install.sh | sh
         fi
@@ -92,17 +79,39 @@ linux:
         done
       fi
 
-      # Plugins
-      claude plugin marketplace add JuliusBrussee/caveman
-      claude plugin install caveman@caveman
-      claude plugin marketplace add anthropics/claude-plugins-official
-      claude plugin install skill-creator@claude-plugins-official
-      claude plugin install typescript-lsp@claude-plugins-official
-      claude plugin marketplace add ~/.dotfiles/claude/marketplace
-      claude plugin install svelte-lsp@dotfiles
-      claude plugin install nushell-lsp@dotfiles
-      claude plugin install json-lsp@dotfiles
-      claude plugin install yaml-lsp@dotfiles
+      # Plugins + marketplaces — apply to every CLAUDE_CONFIG_DIR we maintain.
+      # Each config dir keeps its own plugin/marketplace registry; loop both.
+      add_marketplace() {
+        name="$1"; source="$2"
+        if CLAUDE_CONFIG_DIR="$cfg" claude plugin marketplace list 2>/dev/null | grep -q "❯ ${name}$"; then
+          echo "skip marketplace ${name} (${cfg}): present"
+        else
+          CLAUDE_CONFIG_DIR="$cfg" claude plugin marketplace add "$source"
+        fi
+      }
+      install_plugin() {
+        spec="$1"  # name@marketplace
+        if CLAUDE_CONFIG_DIR="$cfg" claude plugin list 2>/dev/null | grep -q "❯ ${spec}$"; then
+          echo "skip plugin ${spec} (${cfg}): present"
+        else
+          CLAUDE_CONFIG_DIR="$cfg" claude plugin install "$spec"
+        fi
+      }
+      if command -v claude >/dev/null 2>&1; then
+        for cfg in "$HOME/.claude" "$HOME/.claude-personal"; do
+          [ -d "$cfg" ] || continue
+          add_marketplace caveman JuliusBrussee/caveman
+          install_plugin caveman@caveman
+          add_marketplace claude-plugins-official anthropics/claude-plugins-official
+          install_plugin skill-creator@claude-plugins-official
+          install_plugin typescript-lsp@claude-plugins-official
+          add_marketplace dotfiles ~/.dotfiles/claude/marketplace
+          install_plugin svelte-lsp@dotfiles
+          install_plugin nushell-lsp@dotfiles
+          install_plugin json-lsp@dotfiles
+          install_plugin yaml-lsp@dotfiles
+        done
+      fi
 
       rotz link claude --force
 windows:
