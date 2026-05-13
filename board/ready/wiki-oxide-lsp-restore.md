@@ -2,8 +2,8 @@
 
 > **For Claude:** Use infinifu:plan-scrum-master (automated) or infinifu:plan-supervised (user reviews each batch) to implement this plan.
 
-**Epic:** `dotfiles-wq0`
-**Tasks:** `dotfiles-wq0.1` … `dotfiles-wq0.N` (created by `spec-ready` from the Task sections below)
+**Epic:** `dotfiles-wq0` (P2 — committed)
+**Tasks:** `dotfiles-wq0.1` … `dotfiles-wq0.13` (created by `spec-ready` on 2026-05-13)
 
 **Goal:** Restore `markdown-oxide` LSP as the single indexing platform for the `wiki-oxide` MCP (no ripgrep in semantic search / tags / references paths), and fix per-MCP-tool-call vault detection so an agent crossing sub-projects in a monorepo always queries the correct `.moxide.toml`-marked vault.
 
