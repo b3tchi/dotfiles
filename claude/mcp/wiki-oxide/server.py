@@ -25,7 +25,7 @@ Tools:
 The LspClient (markdown-oxide stdio bridge) is retained for future
 LSP-based features (e.g. hover, completion) but is no longer used by
 the search tools. It will not be started unless something explicitly
-calls get_client().
+calls _pool.get(vault).
 
 Configure vault root via env var WIKI_ROOT (default ~/.dotfiles/wiki).
 """
@@ -216,22 +216,27 @@ class LspClient:
         return resp.get("result") or []
 
 
-_client: LspClient | None = None
-_client_lock = threading.Lock()
+class LspPool:
+    """Map of vault-path → LspClient. Lazy spawn, self-heal on process death."""
+
+    def __init__(self):
+        self._clients: dict[Path, LspClient] = {}
+        self._lock = threading.Lock()
+
+    def get(self, vault: Path) -> LspClient:
+        vault = vault.resolve()
+        with self._lock:
+            client = self._clients.get(vault)
+            if client is not None and client.proc is not None and client.proc.poll() is None:
+                return client
+            if client is not None:
+                self._clients.pop(vault, None)
+            client = LspClient(vault)
+            self._clients[vault] = client
+            return client
 
 
-def get_client(vault: Path) -> LspClient:
-    """Return (or create) the singleton LspClient for `vault`.
-
-    Note: This shim is replaced entirely in Task 3 (LspPool).
-    The `vault` parameter is accepted here to keep the interface
-    consistent with that upcoming refactor.
-    """
-    global _client
-    with _client_lock:
-        if _client is None or (_client.proc and _client.proc.poll() is not None):
-            _client = LspClient(vault)
-        return _client
+_pool = LspPool()
 
 
 # ---------- MCP server ----------
