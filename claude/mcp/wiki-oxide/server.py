@@ -111,6 +111,12 @@ _SYMBOL_KIND_NAMES = {
     25: "Operator", 26: "TypeParameter",
 }
 
+# LSP SymbolKind values markdown-oxide uses for tag-like workspace symbols.
+# Update this set rather than the filter expression if a new release adds kinds.
+# Note: markdown-oxide uses Constant (14) for inline body `#tag` markers.
+# Frontmatter `tags: [...]` entries are NOT indexed as workspace symbols.
+_TAG_SYMBOL_KINDS = frozenset({14})  # SymbolKind.Constant
+
 
 class LspClient:
     """Thin LSP client over markdown-oxide stdio, holds one persistent server."""
@@ -324,48 +330,30 @@ def wiki_search(query: str, cwd: str | None = None) -> list[dict]:
 
 @mcp.tool()
 def wiki_tags(prefix: str = "", cwd: str | None = None) -> list[str]:
-    """List distinct #tags in the vault via ripgrep.
+    """List vault tags via markdown-oxide LSP workspaceSymbol.
+
+    Returns inline body `#tag` markers (markdown-oxide indexes them as
+    SymbolKind.Constant). Limitation: frontmatter `tags: [...]` entries
+    are NOT surfaced — markdown-oxide does not index them as workspace
+    symbols. For frontmatter tag lookup use `wiki_grep("tags:")` instead.
 
     `prefix` narrows by leading characters after `#` (e.g. "v" → tags
     starting with #v). Empty prefix returns all tags.
-
-    Backed by ripgrep — surfaces inline `#tag` body markers, not just
-    LSP workspace symbols. Tags are tokenised as `#` followed by
-    `[a-zA-Z0-9_-]+` and must be preceded by whitespace or line start
-    (so URL fragments and code-block `#include` do not over-match).
     """
     vault = _resolve_call_vault(cwd)
     if vault is None:
-        return ["error: no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"]
-    if not shutil.which("rg"):
-        return ["error: ripgrep not installed"]
-
-    safe_prefix = re.escape(prefix)
-    # PCRE2 lookbehind: require non-word context before the `#`.
-    # When a prefix is supplied, the prefix itself counts as the first
-    # character so the rest may be empty (so #auth matches even when
-    # prefix="auth"). When no prefix, require at least one letter to
-    # avoid matching a bare `#`.
-    if prefix:
-        pattern = rf"(?<![\w])#{safe_prefix}[A-Za-z0-9_-]*"
-    else:
-        pattern = r"(?<![\w])#[A-Za-z][A-Za-z0-9_-]*"
-    res = subprocess.run(
-        [
-            "rg",
-            "-P",
-            "--no-heading",
-            "--no-filename",
-            "--only-matching",
-            "-e",
-            pattern,
-            str(vault),
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    tags = sorted({line for line in res.stdout.splitlines() if line.startswith("#")})
+        return [f"error: no vault marker above {cwd or Path.cwd()}"]
+    client = _pool.get(vault)
+    try:
+        symbols = client.workspace_symbol("#" + prefix if prefix else "#")
+    except TimeoutError as e:
+        return [f"error: lsp timeout: {e}"]
+    tags = sorted({
+        sym.get("name", "")
+        for sym in symbols
+        if sym.get("kind") in _TAG_SYMBOL_KINDS
+        and sym.get("name", "").startswith("#" + prefix)
+    })
     return tags
 
 
