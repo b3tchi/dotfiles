@@ -25,6 +25,11 @@
       "name": "yaml-lsp",
       "source": "./plugins/yaml-lsp",
       "description": "YAML LSP integration via yaml-language-server"
+    },
+    {
+      "name": "wiki-oxide",
+      "source": "./plugins/wiki-oxide",
+      "description": "Wiki vault MCP server — wraps markdown-oxide LSP for Obsidian-style notes"
     }
   ]
 }

@@ -80,21 +80,13 @@ linux:
           install_plugin nushell-lsp@dotfiles
           install_plugin json-lsp@dotfiles
           install_plugin yaml-lsp@dotfiles
+          install_plugin wiki-oxide@dotfiles
         done
       fi
 
-      # wiki-oxide MCP — register at user scope in every CLAUDE_CONFIG_DIR.
-      # Runs here (end of claude install) because claude CLI is now present.
-      # Probe with `mcp get` (structured, no health check) and check Args line for
-      # the current server path; re-register if missing or stale.
-      expected_path="$HOME/.dotfiles/claude/wiki-oxide/server.py"
-      for cfg in "$HOME/.claude" "$HOME/.claude-personal"; do
-        [ -d "$cfg" ] || continue
-        if ! CLAUDE_CONFIG_DIR="$cfg" claude mcp get wiki-oxide 2>/dev/null | grep -qF "$expected_path"; then
-          CLAUDE_CONFIG_DIR="$cfg" claude mcp remove wiki-oxide -s user 2>/dev/null || true
-          CLAUDE_CONFIG_DIR="$cfg" claude mcp add wiki-oxide -s user -- uv run --quiet --script "$expected_path"
-        fi
-      done
+      # wiki-oxide MCP register is now declared in the wiki-oxide plugin manifest
+      # (claude/marketplace/plugins/wiki-oxide/.claude-plugin/plugin.json). Plugin
+      # install above handles registration via mcpServers declarative config.
 
       rotz link claude --force
 windows:

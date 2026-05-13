@@ -1,0 +1,13 @@
+{
+  "name": "wiki-oxide",
+  "description": "Wiki vault MCP server — wraps markdown-oxide LSP for Obsidian-style notes",
+  "author": {
+    "name": "jan"
+  },
+  "mcpServers": {
+    "wiki-oxide": {
+      "command": "uv",
+      "args": ["run", "--quiet", "--script", "${CLAUDE_PLUGIN_ROOT}/server.py"]
+    }
+  }
+}
