@@ -15,7 +15,7 @@ linux:
 
   installs:
     depends:
-      - beads
+      - claude/beads
     cmd: |
       # Rotz buffers cmd output. Redirect to log file; tail in another pane:
       #   tail -f /tmp/rotz-claude.log
@@ -23,7 +23,7 @@ linux:
       exec >>/tmp/rotz-claude.log 2>&1
       set -x
       echo "=== rotz install claude started: $(date) ==="
-      # dolt + bd + perles installed via installs.depends → ../beads/dot.yaml
+      # dolt + bd + perles installed via installs.depends → ./beads/dot.yaml
 
       curl -fsSL https://claude.ai/install.sh | sh
       chmod +x ~/.dotfiles/claude/epic.nu
