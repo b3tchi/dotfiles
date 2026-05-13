@@ -1,9 +1,13 @@
 #!/usr/bin/env nu
-# epic.nu — manage brainstorm epics (bd epic + idea file + claude session)
+# epic — manage brainstorm epics (bd epic + idea file + claude session)
+# Installed as `epic` via rotz symlink: ~/.local/bin/epic → claude/epic.nu
 # Usage:
-#   nu epic.nu create <name>   — create or resume; execs claude in current pane
-#   nu epic.nu delete <name>   — remove bd epic + idea file
-#   nu epic.nu list            — show all epics
+#   epic create <name>   — create or resume; execs claude in current pane
+#   epic delete <name>   — remove bd epic + idea file
+#   epic list            — show all epics
+#   epic init            — prepare repo (bd hooks, board/* dirs)
+#   epic archive create  — snapshot + prune old closed issues
+#   epic archive apply   — apply prune-list on other machines
 
 def project_root [] {
     mut cur = $env.PWD
@@ -98,7 +102,10 @@ def read_meta [file: string] {
 }
 
 def main [] {
-    print "Usage: nu epic.nu <init|create|delete|list|archive> [args...]"
+    print "Usage: epic <init|create|delete|list|archive> [args...]"
+    print "  create <name>   — create or resume epic; execs claude in current pane"
+    print "  delete <name>   — remove bd epic + idea file"
+    print "  list            — show all epics"
     print "  init            — prepare repo: install bd hooks, create board/* dirs"
     print "  archive create  — snapshot + prune closed issues older than cutoff"
     print "  archive apply   — apply cumulative prune-list to local bd (for other machines)"
@@ -109,7 +116,10 @@ def "main init" [] {
     print -e "Repo ready: bd hooks installed, board/{idea,spec,ready,done,archive}/ present."
 }
 
-def "main create" [name: string] {
+def "main create" [
+    name: string
+    --no-launch  # skip `exec claude`; just create/resume metadata and print resume cmd
+] {
     if not ($name =~ '^[a-zA-Z0-9_-]+$') {
         error make { msg: "Name must contain only alphanumeric characters, dashes, and underscores" }
     }
@@ -141,16 +151,30 @@ def "main create" [name: string] {
         print -e $"Created ($idea_file)"
         print -e $"BD epic:  ($full_id)"
 
-        { session_id: $session_id, short: $short, resume: false }
+        { session_id: $session_id, short: $short, resume: false, idea_file: $idea_file, bd_id: $full_id }
     } else {
         let idea_file = ($existing | first)
         let m = (read_meta $idea_file)
         let short = (short_id $m.bd_id)
         print -e $"Resuming ($idea_file) — ($m.bd_id)"
-        { session_id: $m.session_id, short: $short, resume: true }
+        { session_id: $m.session_id, short: $short, resume: true, idea_file: $idea_file, bd_id: $m.bd_id }
     }
 
     let label = $"($name).($meta.short)"
+
+    if $no_launch {
+        print -e ""
+        print -e $"Label:    ($label)"
+        print -e $"Idea:     ($meta.idea_file)"
+        print -e $"BD epic:  ($meta.bd_id)"
+        print -e ""
+        if $meta.resume {
+            print -e $"Resume in a terminal pane:  claude --resume ($meta.session_id) -n ($label)"
+        } else {
+            print -e $"Start in a terminal pane:   claude -n ($label) --session-id ($meta.session_id)"
+        }
+        return
+    }
 
     if $meta.resume {
         exec claude --resume $meta.session_id -n $label
