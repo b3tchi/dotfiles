@@ -6,27 +6,30 @@
 """
 wiki-oxide MCP server.
 
-Provides vault search + read primitives to Claude Code as MCP tools.
-wiki_search is LSP-backed via markdown-oxide workspaceSymbol. All other
-search/listing tools are ripgrep-backed for inline #tag body markers and
-raw text lookup that the LSP index does not cover.
+Thin LSP-client adapter around markdown-oxide. Provides per-vault
+PKMS primitives (search, references, tags) to Claude Code agents.
+
+Vault is resolved per tool call via walk-up from an optional `cwd`
+argument (falling back to the server's launch cwd). One persistent
+markdown-oxide subprocess per distinct vault, pooled by vault path.
+Cache staleness is mitigated with `workspace/didChangeWatchedFiles`
+before each LSP query, and TimeoutError/BrokenPipeError trigger a
+single fresh-client retry via `_stale_retry`.
 
 Tools:
-  - wiki_root()              — vault root path
-  - wiki_list()              — list all .md files in vault
-  - wiki_search(query)       — search filenames, headings, tags (LSP workspaceSymbol)
-  - wiki_tags(prefix="")     — all #tags in vault, inline-aware (ripgrep)
-  - wiki_grep(pattern, ...)  — generic ripgrep within vault
-  - wiki_read(name)          — full text of a note
-  - wiki_preview(name)       — first ~1200 chars + backlinks
-  - wiki_references(name)    — backlinks via ripgrep
+  - wiki_root(cwd)              — vault root path
+  - wiki_list(cwd)              — list all .md files in vault
+  - wiki_search(query, cwd)     — LSP workspaceSymbol
+  - wiki_tags(prefix, cwd)      — LSP workspaceSymbol filtered to SymbolKind.Constant
+                                  (inline body `#tag` markers; see limitation)
+  - wiki_grep(pattern, cwd)     — explicit ripgrep over the vault (orthogonal to LSP)
+  - wiki_read(name, cwd)        — filesystem read
+  - wiki_preview(name, cwd)     — first ~1200 chars + ripgrep-derived backlinks
+  - wiki_references(name, cwd)  — LSP textDocument/references
 
-wiki_search result shape (as of wq0.5): {"name", "kind" (LSP SymbolKind
-name string), "path"}. Breaking change from pre-wq0.5: "kind" values
-changed from "file"/"heading"/"tag" to LSP SymbolKind names (e.g. "File",
-"String"); "line" and "match_field" fields removed.
-
-Configure vault root via env var WIKI_ROOT (default ~/.dotfiles/wiki).
+Known limitation: markdown-oxide does not index frontmatter `tags: [...]`
+entries as workspace symbols. wiki_tags surfaces only inline body `#tag`
+markers. For frontmatter tag lookup, use wiki_grep("tags:") or similar.
 """
 from __future__ import annotations
 
