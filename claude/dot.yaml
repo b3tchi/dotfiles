@@ -83,9 +83,9 @@ linux:
         done
       fi
 
-      # Re-trigger wiki-oxide dot now that claude CLI is installed.
-      # First pass (via installs.depends) skipped MCP register; this pass picks it up.
-      rotz install claude/wiki-oxide -a || true
+      # NOTE: on fresh box, wiki-oxide MCP register was skipped (claude CLI not
+      # yet present when claude/wiki-oxide ran as a dependency). Run again after
+      # this completes to pick it up:  rotz install claude/wiki-oxide
 
       rotz link claude --force
 windows:
