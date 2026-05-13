@@ -7,25 +7,24 @@
 wiki-oxide MCP server.
 
 Provides vault search + read primitives to Claude Code as MCP tools.
-All search/listing tools are ripgrep-backed (no LSP cache) because
-markdown-oxide's workspaceSymbol index is stale on file change and
-catalogues only headings/files/symbol-tags (not inline #tag body
-markers).
+wiki_search is LSP-backed via markdown-oxide workspaceSymbol. All other
+search/listing tools are ripgrep-backed for inline #tag body markers and
+raw text lookup that the LSP index does not cover.
 
 Tools:
   - wiki_root()              — vault root path
   - wiki_list()              — list all .md files in vault
-  - wiki_search(query)       — search filenames, headings, tags (ripgrep)
+  - wiki_search(query)       — search filenames, headings, tags (LSP workspaceSymbol)
   - wiki_tags(prefix="")     — all #tags in vault, inline-aware (ripgrep)
   - wiki_grep(pattern, ...)  — generic ripgrep within vault
   - wiki_read(name)          — full text of a note
   - wiki_preview(name)       — first ~1200 chars + backlinks
   - wiki_references(name)    — backlinks via ripgrep
 
-The LspClient (markdown-oxide stdio bridge) is retained for future
-LSP-based features (e.g. hover, completion) but is no longer used by
-the search tools. It will not be started unless something explicitly
-calls _pool.get(vault).
+wiki_search result shape (as of wq0.5): {"name", "kind" (LSP SymbolKind
+name string), "path"}. Breaking change from pre-wq0.5: "kind" values
+changed from "file"/"heading"/"tag" to LSP SymbolKind names (e.g. "File",
+"String"); "line" and "match_field" fields removed.
 
 Configure vault root via env var WIKI_ROOT (default ~/.dotfiles/wiki).
 """
@@ -101,6 +100,16 @@ def _resolve_call_vault(cwd: str | None) -> Path | None:
     """Resolve the vault for a single MCP tool call."""
     start = Path(cwd).resolve() if cwd else Path.cwd()
     return _detect_vault(start)
+
+
+_SYMBOL_KIND_NAMES = {
+    1: "File", 2: "Module", 3: "Namespace", 4: "Package", 5: "Class",
+    6: "Method", 7: "Property", 8: "Field", 9: "Constructor", 10: "Enum",
+    11: "Interface", 12: "Function", 13: "Variable", 14: "Constant",
+    15: "String", 16: "Number", 17: "Boolean", 18: "Array", 19: "Object",
+    20: "Key", 21: "Null", 22: "EnumMember", 23: "Struct", 24: "Event",
+    25: "Operator", 26: "TypeParameter",
+}
 
 
 class LspClient:
@@ -251,91 +260,36 @@ mcp = FastMCP("wiki-oxide")
 
 @mcp.tool()
 def wiki_search(query: str, cwd: str | None = None) -> list[dict]:
-    """Search vault for filenames, headings, and tags matching the query.
+    """Search vault notes via markdown-oxide LSP workspaceSymbol.
 
-    Backed by ripgrep — no LSP workspaceSymbol cache to go stale.
-    Returns matches with `kind` set to `"file"`, `"heading"`, or `"tag"`.
-    Results from each category are concatenated in that order. Total
-    capped at 50.
-
-    Examples:
-      - "ovpn"   → filename + heading + tag substring matches
-      - "#vpn"   → tag matches only (treats query as a tag)
-      - "Inbox"  → heading + filename matches
+    Returns up to 50 symbols matching `query` substring (case-insensitive).
+    Each result includes `name`, `kind` (LSP SymbolKind name), and `path`.
+    LSP-backed — note headings, filenames, and frontmatter/heading tags
+    surface here. Inline #tag body markers are not indexed by
+    markdown-oxide; use wiki_grep for raw text lookup.
     """
     vault = _resolve_call_vault(cwd)
     if vault is None:
-        return [{"error": "no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"}]
+        return [{"error": f"no vault marker above {cwd or Path.cwd()}"}]
     q = query.strip()
     if not q:
         return []
-    if not shutil.which("rg"):
-        return [{"error": "ripgrep not installed"}]
-
+    client = _pool.get(vault)
+    try:
+        symbols = client.workspace_symbol(q)
+    except TimeoutError as e:
+        return [{"error": f"lsp timeout: {e}"}]
     out: list[dict] = []
-
-    # 1. Filename matches (case-insensitive substring on the stem).
-    q_lower = q.lstrip("#").lower()
-    if q_lower:
-        for p in sorted(vault.rglob("*.md")):
-            if q_lower in p.stem.lower():
-                out.append(
-                    {
-                        "name": p.stem,
-                        "kind": "file",
-                        "path": str(p),
-                        "match_field": "filename",
-                    }
-                )
-
-    # 2. Heading matches — any line that's an H1-H6 containing the query.
-    if not q.startswith("#"):
-        # Escape regex meta in user query, build a heading-only pattern
-        heading_pattern = rf"^#{{1,6}}\s+.*{re.escape(q)}"
-        res = subprocess.run(
-            ["rg", "-n", "--no-heading", "--color=never", "-i", "-e", heading_pattern, str(vault)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        for line in res.stdout.splitlines():
-            path, _, rest = line.partition(":")
-            lineno_s, _, text = rest.partition(":")
-            out.append(
-                {
-                    "name": text.strip().lstrip("#").strip(),
-                    "kind": "heading",
-                    "path": path,
-                    "line": int(lineno_s) if lineno_s.isdigit() else None,
-                    "match_field": "heading",
-                }
-            )
-
-    # 3. Tag matches. Build a #tag pattern from the query.
-    tag_token = q if q.startswith("#") else "#" + q
-    # Match exactly that tag — bounded so #auth doesn't match #authentication.
-    # PCRE2 needed for the trailing lookahead.
-    tag_pattern = rf"(?:^|\s){re.escape(tag_token)}(?=[\s.,;:!?)\]\}}]|$)"
-    res = subprocess.run(
-        ["rg", "-P", "-n", "--no-heading", "--color=never", "-e", tag_pattern, str(vault)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    for line in res.stdout.splitlines():
-        path, _, rest = line.partition(":")
-        lineno_s, _, text = rest.partition(":")
-        out.append(
-            {
-                "name": tag_token,
-                "kind": "tag",
-                "path": path,
-                "line": int(lineno_s) if lineno_s.isdigit() else None,
-                "match_field": "tag",
-            }
-        )
-
-    return out[:50]
+    for sym in symbols[:50]:
+        loc = sym.get("location") or {}
+        uri = loc.get("uri", "")
+        path = uri.removeprefix("file://") if uri.startswith("file://") else uri
+        out.append({
+            "name": sym.get("name", ""),
+            "kind": _SYMBOL_KIND_NAMES.get(sym.get("kind"), str(sym.get("kind"))),
+            "path": path,
+        })
+    return out
 
 
 @mcp.tool()
