@@ -38,9 +38,13 @@ sleep 2
 QS_DAEMON="$PREFIX/bin/qs-stats-daemon"
 QS_FIFO="$PREFIX/tmp/qs-stats.pipe"
 QS_SRC="$HOME/.dotfiles/quickshell/qs-stats-daemon.c"
-if [ ! -x "$QS_DAEMON" ] && [ -f "$QS_SRC" ] && command -v clang >/dev/null 2>&1; then
-    echo "Building qs-stats-daemon..."
-    clang -O2 -Wall -o "$QS_DAEMON" "$QS_SRC" && chmod +x "$QS_DAEMON"
+# Rebuild when binary missing or source is newer than binary. Cheap (<1s)
+# and avoids stale binaries after a dotfiles pull.
+if [ -f "$QS_SRC" ] && command -v clang >/dev/null 2>&1; then
+    if [ ! -x "$QS_DAEMON" ] || [ "$QS_SRC" -nt "$QS_DAEMON" ]; then
+        echo "Building qs-stats-daemon..."
+        clang -O2 -Wall -o "$QS_DAEMON" "$QS_SRC" && chmod +x "$QS_DAEMON"
+    fi
 fi
 if [ -x "$QS_DAEMON" ]; then
     rm -f "$QS_FIFO"

@@ -127,21 +127,27 @@ static void poll_ram(void) {
 
 static void poll_disk(void) {
     /* Prefer the user-data partition over the root mount. On Android/Termux,
-     * "/" is the small PREFIX rootfs (often near full); /data is the real
-     * user partition. Honor QS_DISK_PATH override for non-default layouts. */
+     * "/" is the small PREFIX rootfs (often near full) and /data is not
+     * readable to unprivileged statvfs — so fall through to $HOME / $PREFIX,
+     * which Termux maps onto the user-data partition and which the daemon
+     * can always stat. Honor QS_DISK_PATH override for non-default layouts. */
     const char *override = getenv("QS_DISK_PATH");
+    const char *home = getenv("HOME");
+    const char *prefix = getenv("PREFIX");
     const char *candidates[] = {
-        override,         /* may be NULL — skipped */
-        "/data",          /* Android user partition */
+        override,                  /* explicit override wins */
+        "/data",                   /* Android user partition (rooted/native) */
+        home,                      /* Termux: /data/data/com.termux/files/home */
+        prefix,                    /* Termux: /data/data/com.termux/files/usr */
         "/storage/emulated/0",
         "/sdcard",
-        "/home",          /* desktop Linux */
-        "/",
+        "/home",                   /* desktop Linux */
+        "/",                       /* last resort */
         NULL,
     };
     struct statvfs s;
     for (int i = 0; candidates[i]; i++) {
-        if (!candidates[i]) continue;
+        if (!candidates[i] || !candidates[i][0]) continue;
         if (statvfs(candidates[i], &s) == 0 && s.f_blocks > 0) {
             unsigned long long used =
                 (unsigned long long)(s.f_blocks - s.f_bavail);
