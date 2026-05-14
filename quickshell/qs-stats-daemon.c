@@ -126,12 +126,30 @@ static void poll_ram(void) {
 }
 
 static void poll_disk(void) {
+    /* Prefer the user-data partition over the root mount. On Android/Termux,
+     * "/" is the small PREFIX rootfs (often near full); /data is the real
+     * user partition. Honor QS_DISK_PATH override for non-default layouts. */
+    const char *override = getenv("QS_DISK_PATH");
+    const char *candidates[] = {
+        override,         /* may be NULL — skipped */
+        "/data",          /* Android user partition */
+        "/storage/emulated/0",
+        "/sdcard",
+        "/home",          /* desktop Linux */
+        "/",
+        NULL,
+    };
     struct statvfs s;
-    if (statvfs("/", &s) != 0) return;
-    if (s.f_blocks == 0) return;
-    unsigned long long used = (unsigned long long)(s.f_blocks - s.f_bavail);
-    int pct = (int)((used * 100) / s.f_blocks);
-    emit("disk %d", pct);
+    for (int i = 0; candidates[i]; i++) {
+        if (!candidates[i]) continue;
+        if (statvfs(candidates[i], &s) == 0 && s.f_blocks > 0) {
+            unsigned long long used =
+                (unsigned long long)(s.f_blocks - s.f_bavail);
+            int pct = (int)((used * 100) / s.f_blocks);
+            emit("disk %d", pct);
+            return;
+        }
+    }
 }
 
 /* ----------------------------- battery ----------------------------- */
