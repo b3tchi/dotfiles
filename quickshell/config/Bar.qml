@@ -158,8 +158,18 @@ PanelWindow {
     }
 
     // --- System stats ---
-    // proot/Termux: qs-stats-helper.sh writes /tmp/qs-stats; native Linux: read /proc directly
+    // Two modes:
+    //   1. fifoMode (Termux/proot, native Linux with daemon): single long-running
+    //      process reads qs-stats-daemon FIFO at /tmp/qs-stats.pipe. Lines are
+    //      `cpu N`, `ram N`, `disk N`, `bat N STATUS`, `net IFACE [SSID]`,
+    //      `vol N MUTE`. One fork total, no polling timers.
+    //   2. fallback: existing per-widget Process+Timer polling chain.
+    // fifoMode is decided once at startup by fifoProbe; the four polling
+    // chains are gated on !fifoMode to silence them when the daemon is up.
     readonly property string statsFile: "/tmp/qs-stats"
+    readonly property string statsFifo: "/tmp/qs-stats.pipe"
+    property bool fifoMode: false
+    property bool fifoProbed: false
     property string cpuVal:  "?"
     property string ramVal:  "?"
     property string diskVal: "?"
@@ -170,8 +180,57 @@ PanelWindow {
     property string batStatus: ""
 
     Process {
-        id: statsProc
+        id: fifoProbe
         running: true
+        command: ["sh", "-c", "[ -p " + root.statsFifo + " ] && echo yes || echo no"]
+        stdout: SplitParser {
+            onRead: data => {
+                root.fifoMode = (data.trim() === "yes")
+                root.fifoProbed = true
+            }
+        }
+    }
+
+    Process {
+        id: feedProc
+        running: root.fifoMode
+        command: ["sh", "-c", "exec cat " + root.statsFifo]
+        stdout: SplitParser {
+            onRead: data => {
+                var line = data.trim()
+                var sp = line.indexOf(" ")
+                if (sp < 0) return
+                var key = line.substring(0, sp)
+                var rest = line.substring(sp + 1)
+                if (key === "cpu") {
+                    root.cpuVal = rest + "%"
+                } else if (key === "ram") {
+                    root.ramVal = rest + "%"
+                } else if (key === "disk") {
+                    root.diskVal = rest + "%"
+                } else if (key === "bat") {
+                    var bs = rest.indexOf(" ")
+                    if (bs < 0) { root.batVal = rest; root.batStatus = "" }
+                    else { root.batVal = rest.substring(0, bs); root.batStatus = rest.substring(bs + 1) }
+                } else if (key === "net") {
+                    root.netVal = (rest === "none") ? "" : rest
+                } else if (key === "vol") {
+                    var vs = rest.indexOf(" ")
+                    if (vs < 0) { root.volVal = rest; root.volMuted = false }
+                    else {
+                        root.volVal = rest.substring(0, vs)
+                        root.volMuted = (rest.substring(vs + 1).trim() === "yes")
+                    }
+                }
+            }
+        }
+        onExited: { if (root.fifoMode) feedRestart.restart() }
+    }
+    Timer { id: feedRestart; interval: 2000; onTriggered: feedProc.running = root.fifoMode }
+
+    Process {
+        id: statsProc
+        running: !root.fifoMode
         command: ["sh", "-c",
             "if [ -f " + root.statsFile + " ]; then cat " + root.statsFile + "; else " +
             "read _ a1 b1 c1 d1 e1 f1 g1 _ < /proc/stat; sleep 1; " +
@@ -191,23 +250,23 @@ PanelWindow {
                 lineNum++
             }
         }
-        onExited: { statsProc.stdout.lineNum = 0; statsTimer.restart() }
+        onExited: { statsProc.stdout.lineNum = 0; if (!root.fifoMode) statsTimer.restart() }
     }
-    Timer { id: statsTimer; interval: 3000; onTriggered: statsProc.running = true }
+    Timer { id: statsTimer; interval: 3000; onTriggered: if (!root.fifoMode) statsProc.running = true }
 
     Process {
         id: netProc
-        running: true
+        running: !root.fifoMode
         command: ["sh", "-c",
             "iwgetid -r 2>/dev/null && exit; ip -brief addr | awk '!/^lo /{if($2==\"UP\") print $1; exit}'"]
         stdout: SplitParser { onRead: data => root.netVal = data.trim() }
-        onExited: netTimer.restart()
+        onExited: { if (!root.fifoMode) netTimer.restart() }
     }
-    Timer { id: netTimer; interval: 10000; onTriggered: netProc.running = true }
+    Timer { id: netTimer; interval: 10000; onTriggered: if (!root.fifoMode) netProc.running = true }
 
     Process {
         id: volProc
-        running: true
+        running: !root.fifoMode
         command: ["sh", "-c",
             "pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | grep -oP '\\d+(?=%)' | head -1; " +
             "pactl get-sink-mute @DEFAULT_SINK@ 2>/dev/null | grep -oP '(yes|no)'"]
@@ -219,17 +278,19 @@ PanelWindow {
                 lineNum++
             }
         }
-        onExited: { volProc.stdout.lineNum = 0; volTimer.restart() }
+        onExited: { volProc.stdout.lineNum = 0; if (!root.fifoMode) volTimer.restart() }
     }
-    Timer { id: volTimer; interval: 5000; onTriggered: volProc.running = true }
+    Timer { id: volTimer; interval: 5000; onTriggered: if (!root.fifoMode) volProc.running = true }
 
-    Process { id: volToggleMute; command: ["pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"]; onExited: volProc.running = true }
-    Process { id: volUp; command: ["sh", "-c", "cur=$(pactl get-sink-volume @DEFAULT_SINK@ | grep -oP '\\d+(?=%)' | head -1); [ \"$cur\" -lt 100 ] && pactl set-sink-volume @DEFAULT_SINK@ +5%"]; onExited: volProc.running = true }
-    Process { id: volDown; command: ["pactl", "set-sink-volume", "@DEFAULT_SINK@", "-5%"]; onExited: volProc.running = true }
+    // Click-driven controls — kept regardless of mode. The daemon will pick
+    // up the state change via pactl subscribe and emit a fresh `vol` line.
+    Process { id: volToggleMute; command: ["pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"]; onExited: { if (!root.fifoMode) volProc.running = true } }
+    Process { id: volUp; command: ["sh", "-c", "cur=$(pactl get-sink-volume @DEFAULT_SINK@ | grep -oP '\\d+(?=%)' | head -1); [ \"$cur\" -lt 100 ] && pactl set-sink-volume @DEFAULT_SINK@ +5%"]; onExited: { if (!root.fifoMode) volProc.running = true } }
+    Process { id: volDown; command: ["pactl", "set-sink-volume", "@DEFAULT_SINK@", "-5%"]; onExited: { if (!root.fifoMode) volProc.running = true } }
 
     Process {
         id: batProc
-        running: true
+        running: !root.fifoMode
         command: ["sh", "-c",
             "cat /sys/class/power_supply/BAT0/capacity 2>/dev/null; cat /sys/class/power_supply/BAT0/status 2>/dev/null"]
         stdout: SplitParser {
@@ -240,9 +301,9 @@ PanelWindow {
                 lineNum++
             }
         }
-        onExited: { batProc.stdout.lineNum = 0; batTimer.restart() }
+        onExited: { batProc.stdout.lineNum = 0; if (!root.fifoMode) batTimer.restart() }
     }
-    Timer { id: batTimer; interval: 10000; onTriggered: batProc.running = true }
+    Timer { id: batTimer; interval: 10000; onTriggered: if (!root.fifoMode) batProc.running = true }
 
     // --- Keyboard layout (sway only — no per-input IPC on i3) ---
     // Track only real keyboards. Virtual keyboards (browsers, foot, etc.)

@@ -12,6 +12,7 @@ USER="jan"
 pkill -f termux-x11 2>/dev/null
 pkill -f virgl_test_server 2>/dev/null
 pkill -f pulseaudio 2>/dev/null
+pkill -f qs-stats-daemon 2>/dev/null
 sleep 1
 
 # GPU acceleration (zink-backed virgl for GL 4.3 support)
@@ -29,6 +30,22 @@ pulseaudio --start \
 # X11 server
 termux-x11 :1 &
 sleep 2
+
+# Event-driven stats daemon for quickshell Bar.qml.
+# Runs on Termux side so it has access to real /sys (battery), netlink uevent,
+# and the local pulseaudio socket. FIFO at /tmp/qs-stats.pipe is shared into
+# proot via --shared-tmp below; Bar.qml reads it as /tmp/qs-stats.pipe.
+QS_DAEMON="$PREFIX/bin/qs-stats-daemon"
+QS_FIFO="$PREFIX/tmp/qs-stats.pipe"
+QS_SRC="$HOME/.dotfiles/quickshell/qs-stats-daemon.c"
+if [ ! -x "$QS_DAEMON" ] && [ -f "$QS_SRC" ] && command -v clang >/dev/null 2>&1; then
+    echo "Building qs-stats-daemon..."
+    clang -O2 -Wall -o "$QS_DAEMON" "$QS_SRC" && chmod +x "$QS_DAEMON"
+fi
+if [ -x "$QS_DAEMON" ]; then
+    rm -f "$QS_FIFO"
+    "$QS_DAEMON" "$QS_FIFO" >/dev/null 2>"$PREFIX/tmp/qs-stats.log" &
+fi
 
 # Launch i3 inside proot Arch as user jan
 proot-distro login "$DISTRO" \
