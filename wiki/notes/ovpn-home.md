@@ -1,6 +1,6 @@
 # OVPN — Home LAN access
 
-#ssh #vpn #ovpn
+# ssh #vpn #ovpn
 
 Per-connection VPN: SSH to home LAN triggers OpenVPN tunnel, last SSH closes → tunnel down.
 
