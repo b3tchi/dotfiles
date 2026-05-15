@@ -1,0 +1,1325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eval Review</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600&family=Lora:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" integrity="sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT" crossorigin="anonymous"></script>
+  <style>
+    :root {
+      --bg: #faf9f5;
+      --surface: #ffffff;
+      --border: #e8e6dc;
+      --text: #141413;
+      --text-muted: #b0aea5;
+      --accent: #d97757;
+      --accent-hover: #c4613f;
+      --green: #788c5d;
+      --green-bg: #eef2e8;
+      --red: #c44;
+      --red-bg: #fceaea;
+      --header-bg: #141413;
+      --header-text: #faf9f5;
+      --radius: 6px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Lora', Georgia, serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ---- Header ---- */
+    .header {
+      background: var(--header-bg);
+      color: var(--header-text);
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .header h1 {
+      font-family: 'Poppins', sans-serif;
+      font-size: 1.25rem;
+      font-weight: 600;
+    }
+    .header .instructions {
+      font-size: 0.8rem;
+      opacity: 0.7;
+      margin-top: 0.25rem;
+    }
+    .header .progress {
+      font-size: 0.875rem;
+      opacity: 0.8;
+      text-align: right;
+    }
+
+    /* ---- Main content ---- */
+    .main {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1.5rem 2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    /* ---- Sections ---- */
+    .section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      flex-shrink: 0;
+    }
+    .section-header {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.75rem 1rem;
+      font-size: 0.75rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .section-body {
+      padding: 1rem;
+    }
+
+    /* ---- Config badge ---- */
+    .config-badge {
+      display: inline-block;
+      padding: 0.2rem 0.625rem;
+      border-radius: 9999px;
+      font-family: 'Poppins', sans-serif;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      margin-left: 0.75rem;
+      vertical-align: middle;
+    }
+    .config-badge.config-primary {
+      background: rgba(33, 150, 243, 0.12);
+      color: #1976d2;
+    }
+    .config-badge.config-baseline {
+      background: rgba(255, 193, 7, 0.15);
+      color: #f57f17;
+    }
+
+    /* ---- Prompt ---- */
+    .prompt-text {
+      white-space: pre-wrap;
+      font-size: 0.9375rem;
+      line-height: 1.6;
+    }
+
+    /* ---- Outputs ---- */
+    .output-file {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .output-file + .output-file {
+      margin-top: 1rem;
+    }
+    .output-file-header {
+      padding: 0.5rem 0.75rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .output-file-header .dl-btn {
+      font-size: 0.7rem;
+      color: var(--accent);
+      text-decoration: none;
+      cursor: pointer;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-weight: 500;
+      opacity: 0.8;
+    }
+    .output-file-header .dl-btn:hover {
+      opacity: 1;
+      text-decoration: underline;
+    }
+    .output-file-content {
+      padding: 0.75rem;
+      overflow-x: auto;
+    }
+    .output-file-content pre {
+      font-size: 0.8125rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+    }
+    .output-file-content img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 4px;
+    }
+    .output-file-content iframe {
+      width: 100%;
+      height: 600px;
+      border: none;
+    }
+    .output-file-content table {
+      border-collapse: collapse;
+      font-size: 0.8125rem;
+      width: 100%;
+    }
+    .output-file-content table td,
+    .output-file-content table th {
+      border: 1px solid var(--border);
+      padding: 0.375rem 0.5rem;
+      text-align: left;
+    }
+    .output-file-content table th {
+      background: var(--bg);
+      font-weight: 600;
+    }
+    .output-file-content .download-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.875rem;
+      cursor: pointer;
+    }
+    .output-file-content .download-link:hover {
+      background: var(--border);
+    }
+    .empty-state {
+      color: var(--text-muted);
+      font-style: italic;
+      padding: 2rem;
+      text-align: center;
+    }
+
+    /* ---- Feedback ---- */
+    .prev-feedback {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.625rem 0.75rem;
+      margin-top: 0.75rem;
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+    .prev-feedback-label {
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 0.25rem;
+      color: var(--text-muted);
+    }
+    .feedback-textarea {
+      width: 100%;
+      min-height: 100px;
+      padding: 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 0.9375rem;
+      line-height: 1.5;
+      resize: vertical;
+      color: var(--text);
+    }
+    .feedback-textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+    .feedback-status {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.5rem;
+      min-height: 1.1em;
+    }
+
+    /* ---- Grades (collapsible) ---- */
+    .grades-toggle {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      user-select: none;
+    }
+    .grades-toggle:hover {
+      color: var(--accent);
+    }
+    .grades-toggle .arrow {
+      margin-right: 0.5rem;
+      transition: transform 0.15s;
+      font-size: 0.75rem;
+    }
+    .grades-toggle .arrow.open {
+      transform: rotate(90deg);
+    }
+    .grades-content {
+      display: none;
+      margin-top: 0.75rem;
+    }
+    .grades-content.open {
+      display: block;
+    }
+    .grades-summary {
+      font-size: 0.875rem;
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .grade-badge {
+      display: inline-block;
+      padding: 0.125rem 0.5rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .grade-pass { background: var(--green-bg); color: var(--green); }
+    .grade-fail { background: var(--red-bg); color: var(--red); }
+    .assertion-list {
+      list-style: none;
+    }
+    .assertion-item {
+      padding: 0.625rem 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.8125rem;
+    }
+    .assertion-item:last-child { border-bottom: none; }
+    .assertion-status {
+      font-weight: 600;
+      margin-right: 0.5rem;
+    }
+    .assertion-status.pass { color: var(--green); }
+    .assertion-status.fail { color: var(--red); }
+    .assertion-evidence {
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      margin-top: 0.25rem;
+      padding-left: 1.5rem;
+    }
+
+    /* ---- View tabs ---- */
+    .view-tabs {
+      display: flex;
+      gap: 0;
+      padding: 0 2rem;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .view-tab {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.625rem 1.25rem;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      background: none;
+      color: var(--text-muted);
+      border-bottom: 2px solid transparent;
+      transition: all 0.15s;
+    }
+    .view-tab:hover { color: var(--text); }
+    .view-tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+    .view-panel { display: none; }
+    .view-panel.active { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+
+    /* ---- Benchmark view ---- */
+    .benchmark-view {
+      padding: 1.5rem 2rem;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .benchmark-table {
+      border-collapse: collapse;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 0.8125rem;
+      width: 100%;
+      margin-bottom: 1.5rem;
+    }
+    .benchmark-table th, .benchmark-table td {
+      padding: 0.625rem 0.75rem;
+      text-align: left;
+      border: 1px solid var(--border);
+    }
+    .benchmark-table th {
+      font-family: 'Poppins', sans-serif;
+      background: var(--header-bg);
+      color: var(--header-text);
+      font-weight: 500;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .benchmark-table tr:hover { background: var(--bg); }
+    .benchmark-table tr.benchmark-row-with { background: rgba(33, 150, 243, 0.06); }
+    .benchmark-table tr.benchmark-row-without { background: rgba(255, 193, 7, 0.06); }
+    .benchmark-table tr.benchmark-row-with:hover { background: rgba(33, 150, 243, 0.12); }
+    .benchmark-table tr.benchmark-row-without:hover { background: rgba(255, 193, 7, 0.12); }
+    .benchmark-table tr.benchmark-row-avg { font-weight: 600; border-top: 2px solid var(--border); }
+    .benchmark-table tr.benchmark-row-avg.benchmark-row-with { background: rgba(33, 150, 243, 0.12); }
+    .benchmark-table tr.benchmark-row-avg.benchmark-row-without { background: rgba(255, 193, 7, 0.12); }
+    .benchmark-delta-positive { color: var(--green); font-weight: 600; }
+    .benchmark-delta-negative { color: var(--red); font-weight: 600; }
+    .benchmark-notes {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem;
+    }
+    .benchmark-notes h3 {
+      font-family: 'Poppins', sans-serif;
+      font-size: 0.875rem;
+      margin-bottom: 0.75rem;
+    }
+    .benchmark-notes ul {
+      list-style: disc;
+      padding-left: 1.25rem;
+    }
+    .benchmark-notes li {
+      font-size: 0.8125rem;
+      line-height: 1.6;
+      margin-bottom: 0.375rem;
+    }
+    .benchmark-empty {
+      color: var(--text-muted);
+      font-style: italic;
+      text-align: center;
+      padding: 3rem;
+    }
+
+    /* ---- Navigation ---- */
+    .nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 2rem;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+    .nav-btn {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.5rem 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--text);
+      transition: all 0.15s;
+    }
+    .nav-btn:hover:not(:disabled) {
+      background: var(--bg);
+      border-color: var(--text-muted);
+    }
+    .nav-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .done-btn {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.5rem 1.5rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    .done-btn:hover {
+      background: var(--bg);
+      border-color: var(--text-muted);
+    }
+    .done-btn.ready {
+      border: none;
+      background: var(--accent);
+      color: white;
+      font-weight: 600;
+    }
+    .done-btn.ready:hover {
+      background: var(--accent-hover);
+    }
+    /* ---- Done overlay ---- */
+    .done-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 100;
+      justify-content: center;
+      align-items: center;
+    }
+    .done-overlay.visible {
+      display: flex;
+    }
+    .done-card {
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 2rem 3rem;
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      max-width: 500px;
+    }
+    .done-card h2 {
+      font-size: 1.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .done-card p {
+      color: var(--text-muted);
+      margin-bottom: 1.5rem;
+      line-height: 1.5;
+    }
+    .done-card .btn-row {
+      display: flex;
+      gap: 0.5rem;
+      justify-content: center;
+    }
+    .done-card button {
+      padding: 0.5rem 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      cursor: pointer;
+      font-size: 0.875rem;
+    }
+    .done-card button:hover {
+      background: var(--bg);
+    }
+    /* ---- Toast ---- */
+    .toast {
+      position: fixed;
+      bottom: 5rem;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--header-bg);
+      color: var(--header-text);
+      padding: 0.625rem 1.25rem;
+      border-radius: var(--radius);
+      font-size: 0.875rem;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+      z-index: 200;
+    }
+    .toast.visible {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="app" style="height:100vh; display:flex; flex-direction:column;">
+    <div class="header">
+      <div>
+        <h1>Eval Review: <span id="skill-name"></span></h1>
+        <div class="instructions">Review each output and leave feedback below. Navigate with arrow keys or buttons. When done, copy feedback and paste into Claude Code.</div>
+      </div>
+      <div class="progress" id="progress"></div>
+    </div>
+
+    <!-- View tabs (only shown when benchmark data exists) -->
+    <div class="view-tabs" id="view-tabs" style="display:none;">
+      <button class="view-tab active" onclick="switchView('outputs')">Outputs</button>
+      <button class="view-tab" onclick="switchView('benchmark')">Benchmark</button>
+    </div>
+
+    <!-- Outputs panel (qualitative review) -->
+    <div class="view-panel active" id="panel-outputs">
+    <div class="main">
+      <!-- Prompt -->
+      <div class="section">
+        <div class="section-header">Prompt <span class="config-badge" id="config-badge" style="display:none;"></span></div>
+        <div class="section-body">
+          <div class="prompt-text" id="prompt-text"></div>
+        </div>
+      </div>
+
+      <!-- Outputs -->
+      <div class="section">
+        <div class="section-header">Output</div>
+        <div class="section-body" id="outputs-body">
+          <div class="empty-state">No output files found</div>
+        </div>
+      </div>
+
+      <!-- Previous Output (collapsible) -->
+      <div class="section" id="prev-outputs-section" style="display:none;">
+        <div class="section-header">
+          <div class="grades-toggle" onclick="togglePrevOutputs()">
+            <span class="arrow" id="prev-outputs-arrow">&#9654;</span>
+            Previous Output
+          </div>
+        </div>
+        <div class="grades-content" id="prev-outputs-content"></div>
+      </div>
+
+      <!-- Grades (collapsible) -->
+      <div class="section" id="grades-section" style="display:none;">
+        <div class="section-header">
+          <div class="grades-toggle" onclick="toggleGrades()">
+            <span class="arrow" id="grades-arrow">&#9654;</span>
+            Formal Grades
+          </div>
+        </div>
+        <div class="grades-content" id="grades-content"></div>
+      </div>
+
+      <!-- Feedback -->
+      <div class="section">
+        <div class="section-header">Your Feedback</div>
+        <div class="section-body">
+          <textarea
+            class="feedback-textarea"
+            id="feedback"
+            placeholder="What do you think of this output? Any issues, suggestions, or things that look great?"
+          ></textarea>
+          <div class="feedback-status" id="feedback-status"></div>
+          <div class="prev-feedback" id="prev-feedback" style="display:none;">
+            <div class="prev-feedback-label">Previous feedback</div>
+            <div id="prev-feedback-text"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="nav" id="outputs-nav">
+      <button class="nav-btn" id="prev-btn" onclick="navigate(-1)">&#8592; Previous</button>
+      <button class="done-btn" id="done-btn" onclick="showDoneDialog()">Submit All Reviews</button>
+      <button class="nav-btn" id="next-btn" onclick="navigate(1)">Next &#8594;</button>
+    </div>
+    </div><!-- end panel-outputs -->
+
+    <!-- Benchmark panel (quantitative stats) -->
+    <div class="view-panel" id="panel-benchmark">
+      <div class="benchmark-view" id="benchmark-content">
+        <div class="benchmark-empty">No benchmark data available. Run a benchmark to see quantitative results here.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Done overlay -->
+  <div class="done-overlay" id="done-overlay">
+    <div class="done-card">
+      <h2>Review Complete</h2>
+      <p>Your feedback has been saved. Go back to your Claude Code session and tell Claude you're done reviewing.</p>
+      <div class="btn-row">
+        <button onclick="closeDoneDialog()">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // ---- Embedded data (injected by generate_review.py) ----
+    const EMBEDDED_DATA = {"skill_name": "zettel-write", "runs": [{"id": "eval-1-atomic-single-concept-with_skill", "prompt": "ok let me write down something I want to remember: a deadlock is when two threads each hold a resource the other one needs. came up in our incident last week on the payment queue. should connect to our circuit-breaker note from before and maybe to the on-call rotation card.", "eval_id": 1, "outputs": [{"name": "deadlock.md", "type": "text", "content": "---\naliases:\n  - deadlock \u2014 mutual resource-hold between threads\ncreated: 2026-05-15\n---\n# Deadlock [[product]]\n\nA deadlock is the state where two or more threads each hold a resource the other one needs and none will release until they get the other's resource \u2014 so none ever progresses. Break the cycle by enforcing a global lock ordering, using timeouts on acquisition, or designing locks out of the hot path entirely. Surfaced in the payment-queue incident as a worker holding the queue lock while waiting on the DB connection pool that other workers held while waiting on the queue lock.\n\n## see also\n- [[circuit-breaker]]\n- [[on-call-rotation]]\n\n---\n\nIndex: [[product]]\n"}, {"name": "decision-log.md", "type": "text", "content": "# Decision log \u2014 eval-1 (atomic single concept, with_skill)\n\n## Decisions made without user confirmation\n\n### 1. Atomicity gate \u2014 passed without split\n**Restated claim:** \"Deadlock is the state where two or more threads each hold a resource the other needs and none will release until they get the other's, so none progresses.\"\n\n**Hidden-compound check.** The request mentions (a) the definition, (b) provenance (\"came up in our incident last week on the payment queue\"), and (c) two requested links (`[[circuit-breaker]]`, `[[on-call-rotation]]`). Per skill guidance, \"X, the kind we ran into during the Y incident\" is usually still just X with provenance \u2014 and the user explicitly framed the incident as where it \"came up\", not as a separate idea to persist. The incident detail is folded into the body as a concrete example, not as a second claim. The links are wikilinks, not separate cards. Single card. \u2713\n\nSkill says \"When in doubt, propose the split \u2014 the user can tell you to merge.\" Per the no-clarifying-questions directive, I made the reasonable call: not in doubt. Atomic.\n\n### 2. Type routing \u2014 generic named-slug card\nNot a story (no persona/want/because), not an ADR (no decision being recorded), not a feature/implementation/persona/category. It is a free-form computer-science / concurrency concept the user wants to remember. Routes to `docs/notes/<slug>.md` per the skill's generic card path.\n\n### 3. Slug choice \u2014 `deadlock`\nReads cleanly as `[[deadlock]]`. Single word, lowercase, no date/owner/incident-context baked into the filename (per skill: \"context goes in aliases or body\").\n\n### 4. Body shape \u2014 one paragraph\nSkill says: \"If a section starts feeling necessary, the card is already two ideas.\" Definition + escape hatches (lock ordering, timeouts, design-out) + the incident as concrete instantiation all fit in one paragraph. No `## context` / `## mitigations` headings \u2014 those would be the seam of a future split.\n\n### 5. Provenance handling\nThe payment-queue incident is referenced as a *concrete instantiation* in the last sentence (\"Surfaced in the payment-queue incident as \u2026\") rather than as a separate `## incident` section. This keeps the card atomic \u2014 the example is in service of the claim, not a second claim. If the user later wants the incident itself as a card, that's a separate `payment-queue-deadlock-incident-2026-05` zettel that would link back to `[[deadlock]]`.\n\n### 6. Outbound links \u2014 kept to the two the user asked for\nBoth `[[circuit-breaker]]` and `[[on-call-rotation]]` exist in the vault (verified by reading them). They are the user's requested connections \u2014 both are reasonable: circuit-breaker is the canonical pattern for \"fail fast instead of waiting forever on a held resource\", and on-call-rotation is the human-side counterpart (who pages when deadlocks deadlock production). No fabricated extra links.\n"}, {"name": "summary.md", "type": "text", "content": "# Summary \u2014 eval-1 (atomic, with_skill)\n\n## Card written\n`outputs/deadlock.md` \u2014 one card.\n\n**Claim:** A deadlock is the state where two+ threads each hold a resource the other needs, so none progresses.\n\n## Outbound links\n- `[[circuit-breaker]]` \u2014 fail-fast counterpart pattern (exists).\n- `[[on-call-rotation]]` \u2014 human-side incident response (exists).\n- `[[product]]` \u2014 required AKM hub link (H1 + `Index:` footer).\n\n## Skill checks run\n- **Atomicity gate.** Single claim. Incident reference is provenance, folded into body as concrete instantiation, not split into a second card. No compound markers.\n- **Type detection.** Free-form CS concept \u2014 no AKM type fits. Routed to generic named-slug card.\n- **Slug.** `deadlock` reads cleanly in `[[brackets]]`; no date/owner baked in.\n- **Body length.** ~85 words, one paragraph, well under 300-word cap.\n- **Outbound wikilinks.** Two beyond `[[product]]`/`Index:`, both verified to exist in vault.\n- **AKM invariants.** `[[product]]` in H1, `Index:` footer, no `status` field (generic concept).\n- **No questions asked.** Per directive, made the atomic-single-card call without proposing a split.\n"}], "grading": null}, {"id": "eval-1-atomic-single-concept-without_skill", "prompt": "ok let me write down something I want to remember: a deadlock is when two threads each hold a resource the other one needs. came up in our incident last week on the payment queue. should connect to our circuit-breaker note from before and maybe to the on-call rotation card.", "eval_id": 1, "outputs": [{"name": "deadlock.md", "type": "text", "content": "---\naliases:\n  - deadlock \u2014 two threads each holding a resource the other needs\ncreated: 2026-05-15\n---\n# Deadlock [[product]]\n\nTwo threads each hold a resource the other one needs, so neither can proceed.\n\nSurfaced in last week's payment queue incident.\n\n## see also\n- [[circuit-breaker]]\n- [[on-call-rotation]]\n\n---\n\nIndex: [[product]]\n"}, {"name": "summary.md", "type": "text", "content": "# Summary\n\nCaptured a single-concept zettel note for \"deadlock\" based on the user's spoken-style request.\n\n## Artifact\n- `deadlock.md` \u2014 atomic note containing the definition (two threads each holding a resource the other needs), the incident context (payment queue, last week), and wiki-style links to the two referenced notes.\n\n## Decisions\n- **Filename**: `deadlock.md` \u2014 matches the existing kebab-case slug convention (`circuit-breaker.md`, `on-call-rotation.md`).\n- **Frontmatter**: mirrored the existing notes' shape \u2014 `aliases` (one descriptive line) and `created` (today, 2026-05-15).\n- **H1**: `Deadlock [[product]]` \u2014 follows the pattern of linking back to the product index from the heading.\n- **Body**: kept it atomic \u2014 the core definition as the lead sentence, then a single line of incident context. No prose bloat.\n- **Links**: added `[[circuit-breaker]]` and `[[on-call-rotation]]` under a `## see also` section as the existing notes do. Did not edit those notes to back-link, since the vault is marked read-only.\n- **Footer**: `Index: [[product]]` to match house style.\n\n## Not done\n- Reciprocal back-links from `circuit-breaker.md` / `on-call-rotation.md` to `deadlock.md` \u2014 vault is read-only per instructions.\n"}], "grading": null}, {"id": "eval-2-compound-split-prompt-with_skill", "prompt": "capture today's learnings from the kanban workshop: WIP limits prevent overload by capping in-flight work, and pull-based systems generally beat push-based because they self-regulate to capacity. both fit our team but the WIP limit one is the one I keep coming back to.", "eval_id": 2, "outputs": [{"name": "decision-log.md", "type": "text", "content": "# Decision log \u2014 eval-2 compound split\n\n## Input\n> capture today's learnings from the kanban workshop: WIP limits prevent overload by capping in-flight work, and pull-based systems generally beat push-based because they self-regulate to capacity. both fit our team but the WIP limit one is the one I keep coming back to.\n\n## Atomicity gate\n\nSurface-compound signal: explicit \"and\" joining two distinct claims with distinct subjects (\"WIP limits\" vs \"pull-based systems\") and distinct verbs (\"prevent overload\" vs \"beat push-based\"). Not a comparison hidden in one claim \u2014 two independent kanban principles that happen to reinforce each other.\n\n**Decision: split into 2 zettels.** Did not ask for confirmation per the no-clarifying-questions instruction; the compound is unambiguous.\n\n| Claim | One-sentence restatement | Card |\n|-------|--------------------------|------|\n| A | WIP limits cap in-flight work so overload becomes a visible stall instead of hidden queueing. | `wip-limits.md` |\n| B | Pull-based flow lets downstream capacity drive upstream work, so the system self-regulates to actual throughput. | `pull-based-flow.md` |\n\nThe user's emphasis (\"the WIP limit one is the one I keep coming back to\") is provenance / preference, not a third claim \u2014 recorded here, not promoted to a card.\n\n## Type routing\n\nNeither claim is a story (`us`), persona (`pn`), feature (`ft`), implementation (`im`), ADR (`adr`), or category (`cat`). Both are reusable principle cards / external-knowledge concepts \u2192 generic named-slug cards per `zettel-write` Step 3.\n\n## Slug choices\n\n- `wip-limits` \u2014 reads cleanly as `[[wip-limits]]`; matches how the concept is named in practice (lowercase initialism is conventional).\n- `pull-based-flow` \u2014 preferred over `pull-vs-push` (which would imply a comparison card) and over `pull-system` (less specific). Reads well as `[[pull-based-flow]]`.\n\n## Wikilinks chosen\n\nEach card carries `[[product]]` in H1 + `Index: [[product]]` footer (AKM invariant) plus at least one outbound link beyond those:\n\n- `wip-limits.md` \u2192 `[[pull-based-flow]]` (sibling principle, written in same batch) and `[[on-call-rotation]]` (existing vault zettel \u2014 capacity / overload framing applies to rotations).\n- `pull-based-flow.md` \u2192 `[[wip-limits]]` (sibling) and `[[circuit-breaker]]` (existing vault zettel \u2014 fail-fast / capacity-protection sibling).\n\nMutual link between the two new cards is the canonical compound-split scaffolding (split, then connect with wikilinks, not section headings).\n\n## Post-write audit\n\n| Check | wip-limits | pull-based-flow |\n|-------|------------|-----------------|\n| Single idea (1-sentence restate, no \"and\") | pass | pass |\n| Body \u2264 300 words / ~30 lines | pass (~80 words) | pass (~95 words) |\n| \u2265 1 outbound link beyond `[[product]]` + Index | pass (2) | pass (2) |\n| `[[product]]` in H1 + `Index: [[product]]` footer | pass | pass |\n| Filename = stable kebab slug, no date/owner | pass | pass |\n| `## see also` present (generic card requirement) | pass | pass |\n\nBoth pass. No rejection or rewrite.\n"}, {"name": "pull-based-flow.md", "type": "text", "content": "---\naliases:\n  - pull-based flow \u2014 downstream demand drives upstream work\ncreated: 2026-05-15\n---\n# Pull-based flow [[product]]\n\nIn a pull-based system, work moves only when the downstream stage has capacity to take it; in a push-based system, upstream stages dispatch whenever they finish. Pull self-regulates to actual throughput because idle capacity is the signal, so queues stay short and overload surfaces as an upstream stall rather than a hidden backlog. Push tends to optimise local utilisation at the cost of end-to-end lead time. Pull pairs naturally with a [[wip-limits|WIP cap]] \u2014 the cap is what makes \"downstream has capacity\" a binary signal instead of a judgement call.\n\n## see also\n- [[wip-limits]]\n- [[circuit-breaker]]\n\n---\n\nIndex: [[product]]\n"}, {"name": "summary.md", "type": "text", "content": "# Summary\n\nCompound input from a kanban workshop joined two distinct principles with \"and\": (A) WIP limits prevent overload by capping in-flight work, and (B) pull-based systems beat push-based because they self-regulate to capacity. The atomicity gate split this into two generic named-slug zettels rather than packing both into one card \u2014 the user's \"I keep coming back to\" remark is provenance, not a third claim.\n\n## Files\n\n- `wip-limits.md` \u2014 WIP limits as a visible-stall cap on in-flight work.\n- `pull-based-flow.md` \u2014 pull-based flow as self-regulation via downstream capacity signal.\n- `decision-log.md` \u2014 split rationale, slug choices, link choices, post-write audit.\n\n## Routing\n\nNeither claim matches a typed AKM bucket (`us`/`pn`/`ft`/`im`/`adr`/`cat`) \u2014 both are reusable principle cards, so generic named-slug cards under `docs/notes/` per `zettel-write` Step 3.\n\n## Wikilinks\n\nEach card carries `[[product]]` H1 + `Index: [[product]]` footer plus two outbound links: the new cards link to each other (mutual scaffolding for the split) and each links to one existing vault zettel (`on-call-rotation`, `circuit-breaker`) where the capacity / overload framing already applies.\n\nPost-write audit passed for both cards on all checks (single idea, length, links, AKM invariants, generic `## see also` section).\n"}, {"name": "wip-limits.md", "type": "text", "content": "---\naliases:\n  - WIP limits \u2014 cap in-flight work to prevent overload\ncreated: 2026-05-15\n---\n# WIP limits [[product]]\n\nA work-in-progress limit caps how many items can be active in a stage (or system) at one time. The cap is the lever: once it is hit, no new work pulls in until something finishes, which exposes bottlenecks instead of letting them hide as queues. Treat the limit as a design constraint, not a target \u2014 set it just tight enough that overload shows up as a visible stall rather than as silent latency and context-switching.\n\n## see also\n- [[pull-based-flow]]\n- [[on-call-rotation]]\n\n---\n\nIndex: [[product]]\n"}], "grading": null}, {"id": "eval-2-compound-split-prompt-without_skill", "prompt": "capture today's learnings from the kanban workshop: WIP limits prevent overload by capping in-flight work, and pull-based systems generally beat push-based because they self-regulate to capacity. both fit our team but the WIP limit one is the one I keep coming back to.", "eval_id": 2, "outputs": [{"name": "pull-based-systems.md", "type": "text", "content": "---\naliases:\n  - pull-based systems \u2014 self-regulating to capacity\ncreated: 2026-05-15\n---\n# Pull-based systems [[product]]\n\nWorkers pull next item when ready, vs. push assigning work upstream.\nSelf-regulates to actual capacity, prevents queue overflow downstream.\nGenerally beats push-based for knowledge work. Source: kanban\nworkshop, 2026-05-15.\n\n## see also\n- [[wip-limits]]\n\n---\n\nIndex: [[product]]\n"}, {"name": "summary.md", "type": "text", "content": "# Summary \u2014 kanban workshop capture (2026-05-15)\n\nCaptured two learnings from today's kanban workshop as zettels in the\nexisting vault style (matching `circuit-breaker.md` /\n`on-call-rotation.md`):\n\n- **`wip-limits.md`** \u2014 caps in-flight work per stage to prevent\n  overload; forces finishing over starting and surfaces bottlenecks.\n  Flagged as the one you keep coming back to for our team.\n- **`pull-based-systems.md`** \u2014 workers pull when ready instead of\n  being pushed work; self-regulates to capacity and generally beats\n  push-based for knowledge work.\n\nThe two notes cross-link via `## see also` since they reinforce each\nother (pull-based + WIP limits are the kanban core). Both carry the\n`[[product]]` H1 link and `Index: [[product]]` footer per AKM schema.\nFrontmatter uses `aliases` + `created: 2026-05-15`; no `status` field\n(matching the lightweight knowledge-note style of the existing\nneighbours rather than a typed Story/Feature/ADR).\n\nEmphasis on WIP limits is captured in the body line \"the lever I keep\ncoming back to for our team\" so the personal weighting isn't lost.\n\nFiles written under `outputs/`:\n- `wip-limits.md`\n- `pull-based-systems.md`\n- `summary.md`\n"}, {"name": "wip-limits.md", "type": "text", "content": "---\naliases:\n  - WIP limits \u2014 cap in-flight work to prevent overload\ncreated: 2026-05-15\n---\n# WIP limits [[product]]\n\nCap concurrent in-flight work per column/stage. Forces finishing over\nstarting; surfaces bottlenecks where the queue piles up. Source: kanban\nworkshop, 2026-05-15. The lever I keep coming back to for our team.\n\n## see also\n- [[pull-based-systems]]\n\n---\n\nIndex: [[product]]\n"}], "grading": null}, {"id": "eval-3-route-to-story-write-with_skill", "prompt": "I need to capture a backlog item \u2014 our field reps want bulk csv contact upload so they don't waste evenings typing entries in the office one at a time. priority is medium-ish, not urgent.", "eval_id": 3, "outputs": [{"name": "decision-log.md", "type": "text", "content": "# Decision Log \u2014 eval-3 (route to story-write)\n\n## Atomicity gate\nSingle claim restated: \"Field reps want to bulk-upload contacts via CSV so they don't spend evenings retyping entries from the day's fieldwork.\" No \"and\"/\"also\"/hidden compound. PASS.\n\n## Type detection\nRequest shape: Connextra-style backlog item \u2014 persona (field reps), want (bulk csv contact upload), because (avoid evening re-typing). Matches `us###` row in routing table. Route \u2192 `infinifu:story-write`.\n\n## ID generation\n`ls docs/notes/us*.md` \u2192 no existing story files. Next id = `us001`. Matches the pre-seeded `[[us001|bulk csv contact upload]]` reference in `product.md` \u2014 the hub anticipated this id.\n\n## Persona\nHub pre-seeds `[[pn001|field-rep]]` under `## Stories`. Used `[[pn001|field-rep]]` in `## role`. Note: `pn001.md` does not yet exist in the vault, so the link will dangle until the persona zettel is written. Acceptable per AKM (moxide diagnostics will flag, but the hub already establishes the convention).\n\n## H1 tags\nNo flow/area/theme zettels exist in the vault (only `circuit-breaker`, `on-call-rotation`, `akm`, plus the categories `cat001`/`cat002` which are not story-relevant). Per skill rule \"never fabricate a tag wikilink just because the type's schema allows it\", H1 carries only `[[product]]`.\n\n## Status\n`draft` \u2014 new capture, acceptance criteria derived (not user-supplied).\n\n## Acceptance criteria\nUser supplied zero criteria. Non-interactive mode (instructions say \"decide without asking\"). Derived 4 baseline criteria from want+because covering: entry point (csv upload from contacts screen), validation (preview + row-level errors), partial-failure handling (commit valid, reject bad without aborting), parity (imported rows look like manual ones). Flagged as derived in summary.md.\n\n## Priority\nUser said \"medium-ish, not urgent.\" AKM story schema has no `priority` field. Noted here only; not persisted in the zettel. If priority tracking is needed later, that's a bd-board concern (epic/task), not a story-zettel concern.\n\n## Hub update\n`docs/product.md` is read-only per task instructions (vault state). The hub already lists `[[us001|bulk csv contact upload]]` so no update is required \u2014 the pre-seeded entry now resolves.\n\n## Post-write audit\n- Single idea: yes (one Connextra sentence: \"As a field-rep, I want to upload a csv of contacts in bulk instead of entering them one by one, because field reps lose evenings re-typing entries at the office that they already collected during the day.\")\n- Body length: ~10 lines body, well under 30.\n- Outbound wikilinks beyond `[[product]]`: yes \u2014 `[[pn001|field-rep]]` in `## role`.\n- AKM invariants: `[[product]]` in H1 \u2713, `Index: [[product]]` footer \u2713, filename `us001.md` \u2713.\n- Schema: matches `akm.md` Story schema exactly (aliases/status/created frontmatter; role/want/because/acceptance_criteria sections).\n\nPASS.\n"}, {"name": "summary.md", "type": "text", "content": "# Summary \u2014 eval-3\n\n**Routing:** zettel-write atomicity gate passed (single Connextra-shaped ask) \u2192 routed to `infinifu:story-write` for emission as a `us###` zettel.\n\n**Emitted:** `outputs/us001.md` \u2014 id matches the pre-seeded `[[us001|bulk csv contact upload]]` reference already present in `docs/product.md`.\n\n**Connextra sentence:** As a `field-rep`, I want `to upload a csv of contacts in bulk instead of entering them one by one`, because `field reps lose evenings re-typing entries at the office that they already collected during the day`.\n\n**Persona:** `[[pn001|field-rep]]` \u2014 references the hub's existing persona alias. The `pn001.md` zettel itself does not yet exist; link will dangle until written.\n\n**H1 tags:** none beyond `[[product]]`. No flow/theme tag zettels exist in this vault, and the skill forbids fabricating dangling tag links.\n\n**Acceptance criteria:** user supplied none. Derived 4 baseline criteria (upload entry point, preview + per-row errors, partial commit, post-import parity). Flagged here as DERIVED \u2014 confirm or revise.\n\n**Priority:** \"medium-ish, not urgent\" noted but not persisted; AKM story schema has no priority field.\n\n**Status:** `draft`. Post-write audit (atomicity, length, link scaffolding, AKM invariants, schema match) \u2014 PASS.\n\nSee `decision-log.md` for the full reasoning trace.\n"}, {"name": "us001.md", "type": "text", "content": "---\naliases:\n  - bulk csv contact upload\nstatus: draft\ncreated: 2026-05-15\n---\n# Story [[product]]\n\n## role\n[[pn001|field-rep]]\n\n## want\nupload a csv of contacts in bulk instead of entering them one by one\n\n## because\nfield reps lose evenings re-typing entries at the office that they already collected during the day\n\n## acceptance_criteria\n- accept a .csv upload from the contacts screen\n- preview parsed rows before commit, with row-level error messages for bad rows\n- commit only the valid rows; reject the bad ones without aborting the whole upload\n- imported contacts appear in the contact list with the same fields as manually-created ones\n\n---\n\nIndex: [[product]]\n"}], "grading": null}, {"id": "eval-3-route-to-story-write-without_skill", "prompt": "I need to capture a backlog item \u2014 our field reps want bulk csv contact upload so they don't waste evenings typing entries in the office one at a time. priority is medium-ish, not urgent.", "eval_id": 3, "outputs": [{"name": "summary.md", "type": "text", "content": "# Summary\n\nCaptured the backlog item as a user story zettel following the AKM schema for `us###.md`.\n\n## Artifact\n\n- `docs/notes/us001.md` \u2014 Story zettel\n\n## Decisions\n\n- Chose `us001` because `product.md` already lists `[[us001|bulk csv contact upload]]` under the `[[pn001|field-rep]]` persona, so id and persona link are pre-allocated.\n- `status: draft` \u2014 captured but not refined / sized.\n- `created: 2026-05-15` per current date.\n- Connextra body: role = field rep, want = bulk csv contact upload, because = evening data-entry waste.\n- Acceptance criteria cover file selection, parse + validate, partial success with error rows, post-upload summary, plus a \"medium\" priority note inline (schema has no priority field).\n- H1 carries only `[[product]]`; no flow/theme tags invented since no matching `[[cat###]]` or flow zettel exists yet for contacts/import.\n- `Index: [[product]]` footer included per schema invariant.\n\n## Not done\n\n- `product.md` not edited \u2014 vault is read-only and the story is already listed.\n- No `pn001.md` persona file created \u2014 out of scope.\n"}], "grading": null}, {"id": "eval-4-hidden-compound-comparison-with_skill", "prompt": "write a quick note on optimistic locking \u2014 specifically how it differs from pessimistic locking for our database access layer. came up when we were reviewing the inventory service and trying to decide which one fits the contention profile.", "eval_id": 4, "outputs": [{"name": "decision-log.md", "type": "text", "content": "# Decision log \u2014 eval-4-hidden-compound-comparison (with_skill)\n\n## Request\n> \"write a quick note on optimistic locking \u2014 specifically how it differs from pessimistic locking for our database access layer. came up when we were reviewing the inventory service and trying to decide which one fits the contention profile.\"\n\n## Atomicity gate\n\nRestated as a single declarative sentence: **fails.** The request matches the skill's hidden-compound pattern *\"X \u2014 how it differs from Y\"* (SKILL.md, Step 1). Two distinct claims are bundled:\n\n1. Definition / shape of **optimistic locking**.\n2. Definition / shape of **pessimistic locking** (necessarily co-defined when describing the contrast).\n\nThe comparison itself is a *relationship between the two cards*, not a third atomic claim \u2014 it lives in the mutual `see also` wikilinks plus a one-clause framing inside each body (\"when conflict rate climbs\u2026compare against [[pessimistic-locking]]\"). Adding a third `locking-strategy-tradeoffs` card would have been gold-plating: with only two endpoints, the edge between them carries the comparison.\n\n**Verdict:** split into TWO cards. No third comparison card.\n\n## Provenance (\"inventory service\" / \"contention profile\") \u2014 where does it go?\n\nThe eval framing (\"came up when we were reviewing the inventory service\") is *context for why the user asked*, not a persisted claim. Per SKILL.md examples (\"`X, the kind we ran into during the Y incident` \u2014 usually just X with provenance\"), this stays as implicit framing \u2014 the *contention profile* concept is folded into each body as the deciding axis (conflict rate / hot-row workload) rather than spawned into a separate card. No `inventory-service` zettel is created (no backing context, would dangle without value).\n\n## Type routing\n\nNeither concept matches a typed AKM bucket:\n\n- Not a user story (no persona/want/because).\n- Not an ADR (no decision was made \u2014 the team was still *evaluating*).\n- Not a Feature (not a system capability we provide).\n- Not an Implementation (not tied to a specific `us###`).\n- Not a Category (taxonomy bucket) or Persona.\n\n**Route:** generic named-slug cards under `docs/notes/` (per SKILL.md `<quick_reference>` last row: \"Free-form concept / glossary / external knowledge\"). Slugs `optimistic-locking` and `pessimistic-locking` \u2014 read naturally inside `[[brackets]]`.\n\nIf/when the team decides which one wins for the inventory service, *that* is an ADR (`adr####`) under `[[cat001|infrastructure]]` that links to both of these cards as references. Out of scope for this capture.\n\n## Outbound wikilinks (mandatory \u2265 1 beyond `[[product]]`)\n\n| Card | Outbound links | Rationale |\n|------|----------------|-----------|\n| `optimistic-locking` | `[[pessimistic-locking]]`, `[[circuit-breaker]]` | Mutual link to its counterpart; secondary link to `[[circuit-breaker]]` because retry storms under high conflict rate are exactly what a circuit breaker mitigates \u2014 same failure-protection family. |\n| `pessimistic-locking` | `[[optimistic-locking]]`, `[[on-call-rotation]]` | Mutual link to its counterpart; secondary link to `[[on-call-rotation]]` because deadlock tail-latency events are typical paging triggers \u2014 operationally adjacent. |\n\nBoth secondary links target existing zettels in the vault (`circuit-breaker.md`, `on-call-rotation.md`) \u2014 no dangling links introduced.\n\n## Body length\n\nBoth cards are one paragraph, \u2264 100 words body each \u2014 well under the 300-word / ~30-line gate. No section padding.\n\n## AKM invariants verified\n\n- `[[product]]` in H1: yes (both).\n- `Index: [[product]]` footer: yes (both).\n- `## see also` with \u2265 1 entry: yes (both).\n- Filenames are stable kebab slugs (no dates, owners, ids): yes.\n- Generic cards carry `aliases:` + `created:` only \u2014 no `status:` (lifecycle states are for typed AKM zettels per SKILL.md `<critical_rules>`).\n\n## Skill checks run (per `<verification_checklist>`)\n\n- [x] Each card's claim restates in one sentence with no \"and\" / \"also\".\n- [x] Body \u2264 300 words each.\n- [x] \u2265 1 outbound wikilink beyond `[[product]]` and `Index:` on each card.\n- [x] `[[product]]` in H1, `Index: [[product]]` footer present on both.\n- [x] Filenames are stable kebab slugs.\n- [x] Generic cards (not typed) \u2014 `## see also` present with \u2265 1 entry on both.\n- [x] All wikilink targets exist in vault (`product`, `pessimistic-locking` / `optimistic-locking`, `circuit-breaker`, `on-call-rotation`) \u2014 no unresolved diagnostics.\n"}, {"name": "optimistic-locking.md", "type": "text", "content": "---\naliases:\n  - optimistic locking \u2014 detect-on-commit concurrency control\ncreated: 2026-05-15\n---\n# Optimistic locking [[product]]\n\nLet concurrent transactions read freely; detect conflict at commit time via a version column or row-hash, and force the loser to retry. No row-level locks are held during the read-modify-write window, so contention cost only shows up when conflicts actually occur. Fits workloads where conflicts are rare relative to read volume \u2014 the common case is cheap, the rare collision pays a retry. When conflict rate climbs toward double-digit percent of writes, retries dominate and the pattern inverts; that's the signal to compare against [[pessimistic-locking]] for the same access path.\n\n## see also\n- [[pessimistic-locking]]\n- [[circuit-breaker]]\n\n---\n\nIndex: [[product]]\n"}, {"name": "pessimistic-locking.md", "type": "text", "content": "---\naliases:\n  - pessimistic locking \u2014 hold-the-row concurrency control\ncreated: 2026-05-15\n---\n# Pessimistic locking [[product]]\n\nAcquire a row or range lock at read time (e.g. `SELECT ... FOR UPDATE`) and hold it until commit, so any other writer for the same row blocks until the holder finishes. Conflict cost is paid up front and predictably \u2014 no retry storms \u2014 but every reader-writer pays the serialization tax whether or not a real conflict would have occurred. Fits hot-row workloads where contention is high enough that [[optimistic-locking]] retries would dominate. The trade is throughput for determinism: lower peak throughput, but write latency tail stays bounded and deadlock risk rises with transaction scope.\n\n## see also\n- [[optimistic-locking]]\n- [[on-call-rotation]]\n\n---\n\nIndex: [[product]]\n"}, {"name": "summary.md", "type": "text", "content": "# Summary \u2014 eval-4-hidden-compound-comparison (with_skill)\n\n## Cards written\n\n**`optimistic-locking.md`**\nClaim: optimistic locking lets concurrent reads proceed and detects conflict at commit via version/row-hash, forcing the loser to retry \u2014 cheap when conflicts are rare, inverts when conflict rate climbs into double-digit percent of writes.\nOutbound links: `[[pessimistic-locking]]`, `[[circuit-breaker]]`.\n\n**`pessimistic-locking.md`**\nClaim: pessimistic locking acquires a row/range lock at read time and holds it until commit, paying conflict cost up front for bounded write-latency tails at the cost of peak throughput \u2014 fits hot-row workloads.\nOutbound links: `[[optimistic-locking]]`, `[[on-call-rotation]]`.\n\n## Atomicity decision\n\nHidden compound *\"X \u2014 how it differs from Y\"* detected. Split into two generic concept cards with mutual `see also` links; comparison lives on the edge, not in a third card. Inventory-service framing stays implicit (provenance, not a claim). See `decision-log.md`.\n\n## Skill checks run\n\nAtomicity gate, body length (\u2264300 words each), \u22651 outbound link beyond `[[product]]`, `[[product]]` H1 + `Index:` footer, stable kebab slugs, no `status:` on generic cards, all wikilink targets resolve in vault.\n\n## Routing\n\nNeither concept matches a typed AKM bucket \u2014 routed to generic named-slug cards under `docs/notes/`.\n"}], "grading": null}, {"id": "eval-4-hidden-compound-comparison-without_skill", "prompt": "write a quick note on optimistic locking \u2014 specifically how it differs from pessimistic locking for our database access layer. came up when we were reviewing the inventory service and trying to decide which one fits the contention profile.", "eval_id": 4, "outputs": [{"name": "optimistic-locking.md", "type": "text", "content": "---\naliases:\n  - optimistic locking \u2014 version-check on write, retry on conflict\ncreated: 2026-05-15\n---\n# Optimistic locking [[product]]\n\nRead row + version; on update assert version unchanged; bump version. Conflict \u2192 caller retries. No DB-side lock held between read and write.\n\n## vs pessimistic locking\n\n- **Pessimistic**: `SELECT ... FOR UPDATE` holds a row lock for the txn duration. Writers serialize, readers may block. Safe under heavy contention but throttles throughput and risks deadlock.\n- **Optimistic**: no lock held; conflict detected at commit via version/timestamp column. Cheap on the happy path, expensive when conflicts are frequent (retry storm).\n\n## fit for inventory service\n\n- Most SKUs are touched by one writer at a time \u2192 low contention \u2192 optimistic wins (no lock overhead, better throughput).\n- Hot SKUs (flash sale, single popular item) \u2192 contention spikes \u2192 optimistic degrades into retry loops \u2192 pessimistic or a queue in front is safer for those rows.\n- Rule of thumb: optimistic if conflict rate < ~10%, pessimistic above that.\n\n## see also\n- [[circuit-breaker]]\n\n---\n\nIndex: [[product]]\n"}, {"name": "summary.md", "type": "text", "content": "# Summary\n\nCaptured a quick knowledge note on optimistic vs pessimistic locking, framed by the inventory service review that prompted it.\n\n## Artifact\n\n- `outputs/optimistic-locking.md` \u2014 zettel-style note matching the vault's existing convention (frontmatter with `aliases` + `created`, H1 with `[[product]]` backlink, short body, `see also` section, `Index: [[product]]` footer).\n\n## Note content\n\n- Defined optimistic locking as version-check-on-write with caller-side retry, no held lock.\n- Contrasted with pessimistic locking (`SELECT ... FOR UPDATE`, serialized writers, deadlock risk).\n- Applied to the inventory service contention profile: optimistic fits most SKUs (low contention, high throughput); pessimistic or a queue is safer for hot SKUs (flash sales) where retry storms would dominate.\n- Gave a rough decision threshold (~10% conflict rate) for concrete guidance.\n\n## Linking\n\n- Linked back to `[[product]]` as the index, matching `circuit-breaker.md` and `on-call-rotation.md`.\n- Added `see also` to `[[circuit-breaker]]` as the closest reliability/db-layer neighbor.\n"}], "grading": null}], "previous_feedback": {}, "previous_outputs": {"eval-1-atomic-single-concept-with_skill": [{"name": "deadlock.md", "type": "text", "content": "---\naliases:\n  - deadlock \u2014 mutual hold-and-wait between threads\ncreated: 2026-05-15\n---\n# Deadlock [[product]]\n\nA state where two or more threads each hold a resource the other needs and none can proceed. Distinct from livelock (threads keep moving but make no progress) and from simple contention (one waiter, one holder, eventually drains). Detection at runtime is expensive, so the usual cure is prevention: a global lock order, try-lock with timeout, or removing shared mutable state on the hot path. Surfaced for us during the payment-queue incident, where two workers each held one half of a paired resource.\n\n## see also\n- [[circuit-breaker]]\n- [[on-call-rotation]]\n\n---\n\nIndex: [[product]]\n"}, {"name": "decision-log.md", "type": "text", "content": "# Decision log \u2014 deadlock capture\n\n## Atomicity gate\nRestated claim: \"A deadlock is a state where two or more threads each hold a resource the other needs, halting all of them.\"\n\nThe phrase \"came up in our incident last week on the payment queue\" is **capture context**, not a second claim \u2014 it explains *why* the user wants the card now, and earns one sentence in the body as provenance. It is not a separate idea about incident response or payment-queue architecture. Single idea \u2014 proceeded without splitting.\n\nIf the user had wanted the incident itself captured (timeline, blast radius, remediation), that would be a separate `im###` implementation zettel or an ADR, linked from this card. I did not write that card because the user did not ask for it.\n\n## Type detection\nA definition of a concurrency concept with no persona, decision, capability, or story shape. No AKM type matches \u2192 generic named-slug card under `docs/notes/`.\n\n## Slug choice\n`deadlock` \u2014 reads cleanly as `[[deadlock]]`, single noun, no qualifier needed (no naming collision with existing zettels in the vault).\n\n## Link choices\n- `[[circuit-breaker]]` \u2014 user explicitly requested. Justified: circuit breakers are a *response* pattern to the kind of cascading wedge a deadlock produces downstream.\n- `[[on-call-rotation]]` \u2014 user said \"maybe\". Kept it: deadlocks are an incident-page driver, so the link is real, not decorative.\n\n## No-confirmation calls made\n- Did not ask the user to confirm the split (would have been a no-op \u2014 single idea).\n- Did not ask the user to confirm slug `deadlock` vs alternatives like `deadlock-concurrency`.\n- Did not propose a separate `payment-queue-incident` card; the user did not request it and inventing one would have padded the graph.\n"}, {"name": "summary.md", "type": "text", "content": "# Summary (captured from agent inline report)\n\n## One-sentence claim\n**deadlock** \u2014 A deadlock is a state where two or more threads each hold a resource the other needs and none can proceed.\n\n## Outbound links (beyond `[[product]]` / `Index:`)\n- `[[circuit-breaker]]` (user-requested)\n- `[[on-call-rotation]]` (user-requested, hedged with \"maybe\" \u2014 kept; deadlocks page the rotation, so the link is semantically real)\n\n## Routing\nGeneric named-slug card under `docs/notes/`. Concurrency concept definition matches no AKM type.\n\n## Skill checks run\n- **Atomicity gate** \u2014 PASS. Single claim, restatable in one sentence. The payment-queue incident is provenance context inside the body, not a second card. No split.\n- **Body length** \u2014 PASS. ~95 words, well under the 300-word cap.\n- **Outbound wikilinks** \u2014 PASS. 2 links beyond `[[product]]` and the `Index:` footer.\n- **AKM invariants** \u2014 PASS. `[[product]]` in H1, `Index: [[product]]` footer, stable `deadlock` slug as filename.\n- **Generic schema** \u2014 PASS. `aliases`, `created`, H1, single-paragraph body, `## see also`, footer. No `status` field (correct \u2014 only typed AKM zettels carry lifecycle).\n- **Slug shape** \u2014 PASS. `[[deadlock]]` reads cleanly aloud, no date/owner/context noise.\n\n## Key call\nDid not invent a separate `payment-queue-incident` card. The user supplied the incident as the trigger for capture, not as a second concept to persist.\n"}], "eval-1-atomic-single-concept-without_skill": [{"name": "summary.md", "type": "text", "content": "# Summary\n\n## What I wrote\n\n- `docs/notes/deadlock.md` \u2014 a new atomic zettel capturing the deadlock concept.\n\n## Why\n\nThe user asked to \"write down\" a definition of deadlock and connect it to two existing notes. I mirrored the shape of the existing cards (`circuit-breaker.md`, `on-call-rotation.md`):\n\n- Same frontmatter keys: `aliases`, `created` (set to today, 2026-05-15).\n- Same H1 pattern with the `[[product]]` index wikilink.\n- A short, single-sentence definition as the body \u2014 keeping the note atomic, matching the terseness of the neighbours.\n- A `## see also` section with wikilinks to `[[circuit-breaker]]` and `[[on-call-rotation]]`, as the user explicitly asked.\n- Trailing `Index: [[product]]` footer to match the vault convention.\n\nI added a brief `## context` line noting the payment-queue incident, since the user mentioned it as the reason for capturing the note \u2014 useful provenance without bloating the atomic concept.\n\nI did not modify the existing notes (read-only per instructions), so the back-links from `circuit-breaker` / `on-call-rotation` to `deadlock` are not added; that would be a follow-up edit if the user wants reciprocal links.\n"}], "eval-2-compound-split-prompt-with_skill": [{"name": "decision-log.md", "type": "text", "content": "# Decision log \u2014 eval-2 compound-split prompt\n\n## Input\n\nUser asked to capture two learnings from a kanban workshop:\n1. WIP limits prevent overload by capping in-flight work.\n2. Pull-based systems beat push-based because they self-regulate.\n\nThe user added a preference signal: \"the WIP limit one is the one I keep coming back to.\"\n\n## Atomicity gate\n\nThe request contains \"and\" plus two distinct subjects (WIP limits / pull-based systems) with two distinct verbs (cap in-flight work / self-regulate to capacity). It cannot be restated as a single declarative sentence without losing one claim. **Verdict: compound \u2014 must split.**\n\nOutput rule #2 says decide without asking. Decision: write both as separate atomic cards with mutual `[[\u2026]]` links. Rationale:\n\n- Both ideas have independent re-use value (WIP limits show up outside pull systems \u2014 e.g. as a guardrail on push pipelines; pull-based flow is a broader pattern than just kanban WIP caps).\n- The user's preference for the WIP-limit idea is a *salience* signal, not a *scope* signal \u2014 collapsing the pull-flow card would lose a legitimate atomic concept that may anchor future cards (queue theory, Little's Law, Toyota production system, etc.).\n- Mutual `## see also` linking preserves the \"they go together\" intuition the user expressed, without breaking atomicity.\n\n## Type detection\n\nNeither claim matches a typed AKM bucket:\n\n- Not a Story (no persona / want / because shape, no Connextra phrasing).\n- Not an ADR (no \"we chose X over Y for this product\" decision \u2014 these are general concepts learned at a workshop, not commitments for this codebase).\n- Not a Feature / Implementation / Persona / Category.\n\n**Route: generic named-slug cards** at `docs/notes/<slug>.md` per skill Step 3.\n\n## Slug choices\n\n- `wip-limits.md` \u2014 reads as `[[wip-limits]]`. Considered `[[work-in-progress-limits]]` (too long) and `[[wip-cap]]` (less standard vocabulary).\n- `pull-based-flow.md` \u2014 reads as `[[pull-based-flow]]`. Considered `[[pull-systems]]` (ambiguous with electrical/UI pull patterns) and `[[kanban-pull]]` (over-narrows; the concept is broader than kanban).\n\n## Outbound link choices\n\nExisting vault zettels available: `circuit-breaker`, `on-call-rotation`, plus the typed singletons (`product`, `akm`).\n\n- `wip-limits` \u2192 `[[pull-based-flow]]` (the sibling card; conceptual pair) + `[[on-call-rotation]]` (WIP caps and on-call load both speak to operator overload).\n- `pull-based-flow` \u2192 `[[wip-limits]]` (mutual; sibling card) + `[[circuit-breaker]]` (both are downstream-protection mechanisms \u2014 circuit breaker as the runtime analogue of refusing to pull).\n\nEach card therefore satisfies the \u2265 1 outbound link rule with two real links beyond `[[product]]` / `Index:`.\n\n## Post-write audit\n\n| Check | wip-limits | pull-based-flow |\n|---|---|---|\n| Single-sentence restatement, no compound | pass | pass |\n| Body \u2264 300 words / ~30 lines | pass (~85 words) | pass (~80 words) |\n| \u2265 1 outbound wikilink beyond `[[product]]`/`Index:` | pass (2) | pass (2) |\n| `[[product]]` in H1 + `Index: [[product]]` footer | pass | pass |\n| Filename = stable kebab slug, no date/owner | pass | pass |\n| Generic schema (aliases + created, no status, `## see also`) | pass | pass |\n\nBoth files pass \u2014 no rejection/rewrite cycle needed.\n"}, {"name": "pull-based-flow.md", "type": "text", "content": "---\naliases:\n  - pull-based flow \u2014 downstream signals capacity, upstream never pushes\ncreated: 2026-05-15\n---\n# Pull-based flow [[product]]\n\nIn a pull system, downstream stages signal readiness and upstream only releases work in response; in a push system, upstream releases on its own schedule and downstream absorbs whatever arrives. Pull self-regulates to actual capacity because the slowest stage governs intake \u2014 there is no way to accumulate hidden queues without someone refusing to pull. Push optimises local throughput at the cost of system-wide queueing, latency, and rework.\n\n## see also\n- [[wip-limits]]\n- [[circuit-breaker]]\n\n---\n\nIndex: [[product]]\n"}, {"name": "summary.md", "type": "text", "content": "# Summary\n\nCompound request (kanban-workshop learnings) split into two atomic generic concept cards with mutual links. Decision made without asking per output rule #2; rationale in `decision-log.md`.\n\n## Cards written\n\n**`wip-limits.md`**\n- Claim: A WIP limit caps in-flight work, forcing finishing over starting and exposing bottlenecks the moment the cap is hit.\n- Outbound links (beyond `[[product]]`/`Index:`): `[[pull-based-flow]]`, `[[on-call-rotation]]`.\n\n**`pull-based-flow.md`**\n- Claim: Pull systems self-regulate because downstream signals capacity and upstream cannot release without it; push hides queues and trades latency for local throughput.\n- Outbound links: `[[wip-limits]]`, `[[circuit-breaker]]`.\n\n## Skill checks run\n\nAtomicity gate: detected compound (two subjects, two verbs, \"and\") \u2192 split into two drafts. Type detection: neither claim matches `us`/`pn`/`ft`/`im`/`adr`/`cat` \u2192 routed both to generic named-slug card per Step 3. Post-write audit (Step 4): both pass single-idea restatement, body \u2264 300 words (~80\u201385 each), \u2265 1 outbound wikilink beyond `[[product]]`/`Index:` (each has 2), AKM invariants (`[[product]]` in H1, `Index:` footer), and generic schema (aliases + created, no status, `## see also`). User's \"I keep coming back to WIP limits\" read as salience, not scope reduction \u2014 both cards stay independently reusable.\n"}, {"name": "wip-limits.md", "type": "text", "content": "---\naliases:\n  - WIP limits \u2014 cap in-flight work to prevent overload\ncreated: 2026-05-15\n---\n# WIP limits [[product]]\n\nA work-in-progress limit caps how many items a team (or column) may have in flight at once. New work cannot start until existing work moves out, which forces finishing over starting and exposes bottlenecks the moment the cap is hit. The cap is the lever; the visible queue is the diagnostic. Set it too high and overload returns; set it too low and the team starves \u2014 tune by observation, not by headcount.\n\n## see also\n- [[pull-based-flow]]\n- [[on-call-rotation]]\n\n---\n\nIndex: [[product]]\n"}], "eval-2-compound-split-prompt-without_skill": [{"name": "pull-based-flow.md", "type": "text", "content": "---\naliases:\n  - pull-based flow \u2014 downstream pulls work when capacity frees\ncreated: 2026-05-15\n---\n# Pull-based flow [[product]]\n\nWork moves when the next stage has capacity, not when the prior stage pushes. Self-regulates to actual throughput instead of accumulating queues. Beats push-based scheduling for our team; pairs naturally with [[wip-limits]].\n\n## see also\n- [[wip-limits]]\n\n---\n\nIndex: [[product]]\n"}, {"name": "summary.md", "type": "text", "content": "# Summary (captured from agent inline report \u2014 baseline, no skill)\n\nI split the prompt's two distinct concepts into two atomic notes rather than one combined file \u2014 each captures a single idea so they can be linked and reused later. They cross-reference via `see also` since the user explicitly tied them together (\"both fit our team\").\n\nMirrored the style from `circuit-breaker.md` and `on-call-rotation.md`:\n- YAML frontmatter with `aliases` + `created: 2026-05-15`\n- H1 title with `[[product]]` backlink\n- One terse paragraph\n- `see also` with wikilinks\n- `Index: [[product]]` footer\n\nThe `wip-limits.md` note preserves the user's emphasis (\"strongest lever for our team's overload problem\") since they explicitly flagged it as the concept they keep returning to.\n\nNOTE: split decision was inferred from vault style + prompt structure, NOT from any explicit zettelkasten/atomicity rule.\n"}, {"name": "wip-limits.md", "type": "text", "content": "---\naliases:\n  - WIP limits \u2014 cap in-flight work to prevent overload\ncreated: 2026-05-15\n---\n# WIP limits [[product]]\n\nCap the number of items in progress per column. Forces finishing over starting; surfaces bottlenecks when the cap blocks new pulls. Workshop takeaway I keep returning to \u2014 strongest lever for our team's overload problem.\n\n## see also\n- [[pull-based-flow]]\n\n---\n\nIndex: [[product]]\n"}], "eval-3-route-to-story-write-with_skill": [{"name": "decision-log.md", "type": "text", "content": "# Decision Log \u2014 eval-3 (route-to-story-write)\n\nDecisions made without asking the user, per the eval prompt instruction to proceed with best judgment.\n\n## 1. Routing \u2014 zettel-write \u2192 story-write\n\nThe request was Connextra-shaped: named persona (\"field reps\"), want (\"bulk csv contact upload\"), because (\"don't waste evenings typing entries one at a time\"). Per the `zettel-write` routing table this matches the `us###` story type and routes to `infinifu:story-write`. Single atomic claim, so the atomicity gate passes without needing a split.\n\n## 2. ID \u2014 `us001`\n\n`docs/product.md` already lists `[[us001|bulk csv contact upload]]` under the `[[pn001|field-rep]]` persona heading, but no `us001.md` file exists in `docs/notes/`. The hub was clearly pre-seeded for this exact capture. Using `us001` aligns the new zettel with the existing hub wikilink rather than burning `us002` and leaving `us001` dangling.\n\n## 3. Persona \u2014 `[[pn001|field-rep]]`\n\n`product.md` groups the (not-yet-written) story under `[[pn001|field-rep]]`. The user said \"field reps\", which is a substring match for the `field-rep` alias. Reused `pn001` as the persona id even though `pn001.md` does not exist on disk \u2014 the wikilink may dangle in moxide until the persona zettel is created. Did not inline a `pn001.md` write because story-write notes that inlining a missing persona is optional and outside scope; the eval is scoped to the story capture.\n\n## 4. Acceptance criteria \u2014 derived (user gave zero)\n\nThe user provided no acceptance criteria. Per `story-write` \"When the User Gives Zero Acceptance Criteria\" \u2192 since this is a non-interactive eval, I derived 4 baseline criteria covering: entry point (CSV upload), success path (preview before commit, one contact per valid row), error case (row-level errors on malformed rows). Flagged in `summary.md` so the user knows these came from me.\n\n## 5. Status \u2014 `draft`\n\nUser said priority is \"medium-ish, not urgent\" and gave no acceptance criteria themselves. That matches `draft` per the AKM lifecycle (\"captured, not refined \u2014 acceptance criteria may be incomplete\"). Not `ready` because the criteria came from me, not the user.\n\n## 6. Tags \u2014 none in H1 (just `[[product]]`)\n\nThe vault has only two categories (`cat001|infrastructure`, `cat002|reliability`); neither fits a CSV-upload product story. story-write explicitly allows `# Story [[product]]` with no flow/theme tag wikilinks for cross-cutting or one-off stories. Did not invoke `tag-manage` because the taxonomy in this sandbox does not yet have a tag that fits \u2014 fabricating one (`[[bulk-import]]`, `[[contacts]]`) would create dangling links with no chance of being resolved by anything else in the vault.\n\n## 7. Hub (`product.md`) update \u2014 skipped\n\n`product.md` already contains the `[[us001|bulk csv contact upload]]` bullet under `[[pn001|field-rep]]`. No edit needed \u2014 it was pre-seeded. If it were not, story-write would have me append it.\n"}, {"name": "summary.md", "type": "text", "content": "# Summary \u2014 eval-3 (route-to-story-write)\n\n**Routing decision.** `zettel-write` -> `story-write`. The request was Connextra-shaped (persona \"field reps\" + want \"bulk csv contact upload\" + because \"don't waste evenings typing entries one at a time\"). Single atomic claim, so the atomicity gate passed without a split, and the routing table maps this shape directly to `us###`.\n\n**What was written.** `outputs/us001.md` \u2014 a new AKM Story zettel in `draft` status. Schema per `akm.md`: frontmatter (aliases, status, created), H1 `# Story [[product]]`, body sections `## role` -> `[[pn001|field-rep]]`, `## want`, `## because`, `## acceptance_criteria` (4 bullets), `Index: [[product]]` footer. ID `us001` was chosen to align with the pre-seeded `[[us001|bulk csv contact upload]]` wikilink already in `docs/product.md`.\n\n**Why.** Routing was unambiguous. Acceptance criteria were derived (the user gave none) and flagged as such \u2014 they cover entry point, preview-before-commit, row-level error handling, and the success path. Tags were intentionally omitted because the existing vault taxonomy (`cat001|infrastructure`, `cat002|reliability`) does not fit a CSV-upload product story, and inventing dangling tags would be noise. Status is `draft` because criteria are model-derived rather than user-confirmed.\n\nSee `decision-log.md` for the per-decision rationale.\n"}, {"name": "us001.md", "type": "text", "content": "---\naliases:\n  - bulk csv contact upload\nstatus: draft\ncreated: 2026-05-15\n---\n# Story [[product]]\n\n## role\n[[pn001|field-rep]]\n\n## want\nbulk-upload contacts from a CSV file in one operation\n\n## because\ntyping entries one at a time in the office wastes evenings that should be field time\n\n## acceptance_criteria\n- accept a CSV file upload as the entry point for many contacts at once\n- preview parsed rows before commit so the rep can spot mistakes early\n- reject malformed rows with row-level error messages instead of failing the whole batch\n- successful import creates one contact per valid row in a single operation\n\n---\n\nIndex: [[product]]\n"}], "eval-3-route-to-story-write-without_skill": [{"name": "bulk-csv-contact-upload.md", "type": "text", "content": "# Bulk CSV Contact Upload\n\n**Type:** User story / backlog item\n**Priority:** Medium\n**Status:** Backlog (not started)\n**Captured:** 2026-05-15\n\n## Story\n\n**As a** field rep\n**I want to** upload contacts in bulk via a CSV file\n**So that** I don't have to spend evenings in the office typing entries one at a time.\n\n## Context / problem\n\nField reps currently enter contacts one-by-one through the standard\ncontact form. After a day of meetings they come back with a stack of\nbusiness cards / lead lists and lose evening hours on manual data\nentry. They've asked for a way to drop in a CSV and have the system\nimport the rows.\n\n## Proposed scope (rough)\n\n- Upload control on the contacts screen that accepts a `.csv` file.\n- Server-side parse + validate rows before insert.\n- Map common columns: name, company, email, phone, notes (column\n  mapping UI is nice-to-have, not required for v1).\n- Per-row error report so the rep knows which lines failed and why\n  (bad email, duplicate, missing required field, etc.).\n- Successful rows land in the rep's own contact list (same ownership\n  rules as manually-created contacts).\n\n## Acceptance criteria (draft)\n\n- [ ] A field rep can select a CSV file from the contacts page and\n      start an import.\n- [ ] Valid rows are created as contacts owned by the uploading rep.\n- [ ] Invalid rows are reported back with row number + reason; valid\n      rows are not blocked by invalid ones (partial success is OK).\n- [ ] Duplicate detection (by email) \u2014 duplicates are flagged, not\n      silently overwritten.\n- [ ] Reasonable file-size limit enforced (e.g. up to a few thousand\n      rows) with a clear message above that.\n\n## Open questions\n\n- What's the canonical column set / required vs optional fields?\n- Duplicate policy: skip, merge, or let the rep choose?\n- Do we need a downloadable CSV template?\n- Async (background job + notification) or synchronous on upload?\n  Depends on expected row counts.\n\n## Priority rationale\n\nUser flagged this as **medium-ish, not urgent**. It's a recurring\nquality-of-life pain (evening hours lost) rather than a blocker, so\nit belongs in the next-few-sprints bucket rather than the immediate\nqueue.\n"}, {"name": "summary.md", "type": "text", "content": "# Summary (captured from agent inline report \u2014 baseline, no skill)\n\nCaptured the backlog item as a single user-story file.\n\n**File written:** `bulk-csv-contact-upload.md`\n\n## Shape and rationale\n- Generic backlog/user-story format (As a / I want / So that + context, scope, draft acceptance criteria, open questions, priority note). Task said \"general knowledge only \u2014 no AKM context\", so deliberately did not mirror the `us###.md` zettel schema from the sandbox vault.\n- Priority recorded as \"Medium\" with the user's verbatim \"medium-ish, not urgent\" wording kept in the rationale section.\n- Acceptance criteria left as a draft checklist; open questions listed explicitly.\n- Filename uses kebab-slug `bulk-csv-contact-upload.md`, NOT the AKM `us001.md` convention.\n\nNOTE: did not pre-emptively create `us001.md` because doing so would require applying AKM conventions, which the task scope explicitly excluded.\n"}]}, "benchmark": {"metadata": {"skill_name": "zettel-write", "skill_path": "<path/to/skill>", "executor_model": "<model-name>", "analyzer_model": "<model-name>", "timestamp": "2026-05-15T14:19:31Z", "evals_run": [1, 2, 3, 4], "runs_per_configuration": 3}, "runs": [{"eval_id": 1, "configuration": "with_skill", "run_number": 1, "result": {"pass_rate": 1.0, "passed": 10, "failed": 0, "total": 10, "time_seconds": 80.2, "tokens": 46075, "tool_calls": 0, "errors": 0}, "expectations": [{"text": "Exactly one new zettel .md file produced", "passed": true, "evidence": "outputs/deadlock.md only"}, {"text": "Filename is a kebab-slug concept name", "passed": true, "evidence": "deadlock.md"}, {"text": "H1 contains [[product]]", "passed": true, "evidence": "# Deadlock [[product]]"}, {"text": "Index: [[product]] footer present", "passed": true, "evidence": "footer present"}, {"text": "\u22651 outbound wikilink beyond [[product]] and Index", "passed": true, "evidence": "[[circuit-breaker]] + [[on-call-rotation]]"}, {"text": "Links to circuit-breaker or on-call-rotation", "passed": true, "evidence": "both linked"}, {"text": "Body under 300 words", "passed": true, "evidence": "~110 words"}, {"text": "Frontmatter has aliases + created", "passed": true, "evidence": "both present"}, {"text": "No status field on generic card", "passed": true, "evidence": "no status: key"}, {"text": "Single claim restatable in one sentence", "passed": true, "evidence": "deadlock def + provenance"}], "notes": []}, {"eval_id": 2, "configuration": "with_skill", "run_number": 1, "result": {"pass_rate": 1.0, "passed": 8, "failed": 0, "total": 8, "time_seconds": 72.8, "tokens": 45723, "tool_calls": 0, "errors": 0}, "expectations": [{"text": "Compound input detected", "passed": true, "evidence": "atomicity gate cited in summary"}, {"text": "Split plan documented (\u22652 files or written plan)", "passed": true, "evidence": "2 files + decision-log"}, {"text": "No single file conflates both claims", "passed": true, "evidence": "separated by file"}, {"text": "Every emitted card has [[product]] in H1", "passed": true, "evidence": "both"}, {"text": "Every card has Index: [[product]] footer", "passed": true, "evidence": "both"}, {"text": "Each card has \u22651 outbound wikilink", "passed": true, "evidence": "mutual + extras"}, {"text": "Filenames are meaningful kebab-slugs", "passed": true, "evidence": "wip-limits.md, pull-based-flow.md"}, {"text": "Summary acknowledges atomicity gate explicitly per skill", "passed": true, "evidence": "decision-log enumerates Step 1-4 audit"}], "notes": []}, {"eval_id": 3, "configuration": "with_skill", "run_number": 1, "result": {"pass_rate": 1.0, "passed": 10, "failed": 0, "total": 10, "time_seconds": 98.6, "tokens": 52115, "tool_calls": 0, "errors": 0}, "expectations": [{"text": "Routed to story-write (not improvised)", "passed": true, "evidence": "decision-log: zettel-write\u2192story-write per skill"}, {"text": "Filename matches us\\d{3}\\.md", "passed": true, "evidence": "us001.md"}, {"text": "Body has ## role with persona link", "passed": true, "evidence": "## role [[pn001|field-rep]]"}, {"text": "Body has ## want", "passed": true, "evidence": "present"}, {"text": "Body has ## because", "passed": true, "evidence": "present"}, {"text": "Body has ## acceptance_criteria with \u22651 bullet", "passed": true, "evidence": "4 criteria"}, {"text": "Frontmatter status: draft", "passed": true, "evidence": "status: draft"}, {"text": "H1 contains [[product]]", "passed": true, "evidence": "# Story [[product]]"}, {"text": "Index: [[product]] footer present", "passed": true, "evidence": "footer present"}, {"text": "Did not also write generic named-slug card", "passed": true, "evidence": "only us001.md"}], "notes": []}, {"eval_id": 4, "configuration": "with_skill", "run_number": 1, "result": {"pass_rate": 1.0, "passed": 8, "failed": 0, "total": 8, "time_seconds": 91.7, "tokens": 52691, "tool_calls": 0, "errors": 0}, "expectations": [{"text": "Hidden compound detected \u2014 TWO claims hiding behind X-how-it-differs-from-Y", "passed": true, "evidence": "summary cites SKILL.md Step 1 hidden-compound pattern explicitly"}, {"text": "At least 2 distinct zettel .md files", "passed": true, "evidence": "optimistic-locking.md + pessimistic-locking.md"}, {"text": "No comparison H2 section crammed inside single card", "passed": true, "evidence": "comparison via wikilink"}, {"text": "Every emitted card has [[product]] in H1", "passed": true, "evidence": "both"}, {"text": "Every card has Index: [[product]] footer", "passed": true, "evidence": "both"}, {"text": "Cards mutually link each other", "passed": true, "evidence": "mutual see-also"}, {"text": "Filenames are meaningful kebab-slugs", "passed": true, "evidence": "optimistic-locking.md, pessimistic-locking.md"}, {"text": "No status field on generic cards", "passed": true, "evidence": "aliases + created only"}], "notes": []}, {"eval_id": 1, "configuration": "without_skill", "run_number": 1, "result": {"pass_rate": 1.0, "passed": 10, "failed": 0, "total": 10, "time_seconds": 26.0, "tokens": 25346, "tool_calls": 0, "errors": 0}, "expectations": [{"text": "Exactly one new zettel .md file produced", "passed": true, "evidence": "outputs/deadlock.md"}, {"text": "Filename is a kebab-slug concept name", "passed": true, "evidence": "deadlock.md"}, {"text": "H1 contains [[product]]", "passed": true, "evidence": "# Deadlock [[product]]"}, {"text": "Index: [[product]] footer present", "passed": true, "evidence": "footer present"}, {"text": "\u22651 outbound wikilink beyond [[product]] and Index", "passed": true, "evidence": "circuit-breaker + on-call-rotation"}, {"text": "Links to circuit-breaker or on-call-rotation", "passed": true, "evidence": "both linked"}, {"text": "Body under 300 words", "passed": true, "evidence": "~30 words"}, {"text": "Frontmatter has aliases + created", "passed": true, "evidence": "both"}, {"text": "No status field on generic card", "passed": true, "evidence": "no status"}, {"text": "Single claim restatable in one sentence", "passed": true, "evidence": "tight definition"}], "notes": []}, {"eval_id": 2, "configuration": "without_skill", "run_number": 1, "result": {"pass_rate": 0.875, "passed": 7, "failed": 1, "total": 8, "time_seconds": 49.3, "tokens": 36882, "tool_calls": 0, "errors": 0}, "expectations": [{"text": "Compound input detected", "passed": true, "evidence": "summary acknowledges split"}, {"text": "Split plan documented (\u22652 files or written plan)", "passed": true, "evidence": "2 files + summary"}, {"text": "No single file conflates both claims", "passed": true, "evidence": "separated"}, {"text": "Every emitted card has [[product]] in H1", "passed": true, "evidence": "both"}, {"text": "Every card has Index: [[product]] footer", "passed": true, "evidence": "both"}, {"text": "Each card has \u22651 outbound wikilink", "passed": true, "evidence": "mutual see-also"}, {"text": "Filenames are meaningful kebab-slugs", "passed": true, "evidence": "wip-limits.md, pull-based-systems.md"}, {"text": "Summary acknowledges atomicity gate explicitly per skill", "passed": false, "evidence": "summary admits 'no skill, just pattern-matching the vault'"}], "notes": []}, {"eval_id": 3, "configuration": "without_skill", "run_number": 1, "result": {"pass_rate": 1.0, "passed": 10, "failed": 0, "total": 10, "time_seconds": 54.6, "tokens": 36831, "tool_calls": 0, "errors": 0}, "expectations": [{"text": "Routed to story-write (not improvised)", "passed": true, "evidence": "Followed AKM Story schema (discovered akm.md autonomously) \u2014 not improvised"}, {"text": "Filename matches us\\d{3}\\.md", "passed": true, "evidence": "us001.md"}, {"text": "Body has ## role with persona link", "passed": true, "evidence": "## role [[pn001|field-rep]]"}, {"text": "Body has ## want", "passed": true, "evidence": "present"}, {"text": "Body has ## because", "passed": true, "evidence": "present"}, {"text": "Body has ## acceptance_criteria with \u22651 bullet", "passed": true, "evidence": "5 criteria"}, {"text": "Frontmatter status: draft", "passed": true, "evidence": "status: draft"}, {"text": "H1 contains [[product]]", "passed": true, "evidence": "# Story [[product]]"}, {"text": "Index: [[product]] footer present", "passed": true, "evidence": "footer present"}, {"text": "Did not also write generic named-slug card", "passed": true, "evidence": "only us001.md"}], "notes": []}, {"eval_id": 4, "configuration": "without_skill", "run_number": 1, "result": {"pass_rate": 0.5, "passed": 4, "failed": 4, "total": 8, "time_seconds": 49.0, "tokens": 26786, "tool_calls": 0, "errors": 0}, "expectations": [{"text": "Hidden compound detected \u2014 TWO claims hiding behind X-how-it-differs-from-Y", "passed": false, "evidence": "single card written; no split"}, {"text": "At least 2 distinct zettel .md files", "passed": false, "evidence": "only optimistic-locking.md"}, {"text": "No comparison H2 section crammed inside single card", "passed": false, "evidence": "## vs pessimistic locking H2 inside the one card"}, {"text": "Every emitted card has [[product]] in H1", "passed": true, "evidence": "the one card has it"}, {"text": "Every card has Index: [[product]] footer", "passed": true, "evidence": "footer present"}, {"text": "Cards mutually link each other", "passed": false, "evidence": "only one card; no mutual link"}, {"text": "Filenames are meaningful kebab-slugs", "passed": true, "evidence": "optimistic-locking.md"}, {"text": "No status field on generic cards", "passed": true, "evidence": "no status"}], "notes": []}], "run_summary": {"with_skill": {"pass_rate": {"mean": 1.0, "stddev": 0.0, "min": 1.0, "max": 1.0}, "time_seconds": {"mean": 85.825, "stddev": 11.5327, "min": 72.8, "max": 98.6}, "tokens": {"mean": 49151.0, "stddev": 3765.1851, "min": 45723, "max": 52691}}, "without_skill": {"pass_rate": {"mean": 0.8438, "stddev": 0.2366, "min": 0.5, "max": 1.0}, "time_seconds": {"mean": 44.725, "stddev": 12.7456, "min": 26.0, "max": 54.6}, "tokens": {"mean": 31461.25, "stddev": 6257.6085, "min": 25346, "max": 36882}}, "delta": {"pass_rate": "+0.16", "time_seconds": "+41.1", "tokens": "+17690"}}, "notes": []}};
+
+    // ---- State ----
+    let feedbackMap = {};  // run_id -> feedback text
+    let currentIndex = 0;
+    let visitedRuns = new Set();
+
+    // ---- Init ----
+    async function init() {
+      // Load saved feedback from server — but only if this isn't a fresh
+      // iteration (indicated by previous_feedback being present). When
+      // previous feedback exists, the feedback.json on disk is stale from
+      // the prior iteration and should not pre-fill the textareas.
+      const hasPrevious = Object.keys(EMBEDDED_DATA.previous_feedback || {}).length > 0
+        || Object.keys(EMBEDDED_DATA.previous_outputs || {}).length > 0;
+      if (!hasPrevious) {
+        try {
+          const resp = await fetch("/api/feedback");
+          const data = await resp.json();
+          if (data.reviews) {
+            for (const r of data.reviews) feedbackMap[r.run_id] = r.feedback;
+          }
+        } catch { /* first run, no feedback yet */ }
+      }
+
+      document.getElementById("skill-name").textContent = EMBEDDED_DATA.skill_name;
+      showRun(0);
+
+      // Wire up feedback auto-save
+      const textarea = document.getElementById("feedback");
+      let saveTimeout = null;
+      textarea.addEventListener("input", () => {
+        clearTimeout(saveTimeout);
+        document.getElementById("feedback-status").textContent = "";
+        saveTimeout = setTimeout(() => saveCurrentFeedback(), 800);
+      });
+    }
+
+    // ---- Navigation ----
+    function navigate(delta) {
+      const newIndex = currentIndex + delta;
+      if (newIndex >= 0 && newIndex < EMBEDDED_DATA.runs.length) {
+        saveCurrentFeedback();
+        showRun(newIndex);
+      }
+    }
+
+    function updateNavButtons() {
+      document.getElementById("prev-btn").disabled = currentIndex === 0;
+      document.getElementById("next-btn").disabled =
+        currentIndex === EMBEDDED_DATA.runs.length - 1;
+    }
+
+    // ---- Show a run ----
+    function showRun(index) {
+      currentIndex = index;
+      const run = EMBEDDED_DATA.runs[index];
+
+      // Progress
+      document.getElementById("progress").textContent =
+        `${index + 1} of ${EMBEDDED_DATA.runs.length}`;
+
+      // Prompt
+      document.getElementById("prompt-text").textContent = run.prompt;
+
+      // Config badge
+      const badge = document.getElementById("config-badge");
+      const configMatch = run.id.match(/(with_skill|without_skill|new_skill|old_skill)/);
+      if (configMatch) {
+        const config = configMatch[1];
+        const isBaseline = config === "without_skill" || config === "old_skill";
+        badge.textContent = config.replace(/_/g, " ");
+        badge.className = "config-badge " + (isBaseline ? "config-baseline" : "config-primary");
+        badge.style.display = "inline-block";
+      } else {
+        badge.style.display = "none";
+      }
+
+      // Outputs
+      renderOutputs(run);
+
+      // Previous outputs
+      renderPrevOutputs(run);
+
+      // Grades
+      renderGrades(run);
+
+      // Previous feedback
+      const prevFb = (EMBEDDED_DATA.previous_feedback || {})[run.id];
+      const prevEl = document.getElementById("prev-feedback");
+      if (prevFb) {
+        document.getElementById("prev-feedback-text").textContent = prevFb;
+        prevEl.style.display = "block";
+      } else {
+        prevEl.style.display = "none";
+      }
+
+      // Feedback
+      document.getElementById("feedback").value = feedbackMap[run.id] || "";
+      document.getElementById("feedback-status").textContent = "";
+
+      updateNavButtons();
+
+      // Track visited runs and promote done button when all visited
+      visitedRuns.add(index);
+      const doneBtn = document.getElementById("done-btn");
+      if (visitedRuns.size >= EMBEDDED_DATA.runs.length) {
+        doneBtn.classList.add("ready");
+      }
+
+      // Scroll main content to top
+      document.querySelector(".main").scrollTop = 0;
+    }
+
+    // ---- Render outputs ----
+    function renderOutputs(run) {
+      const container = document.getElementById("outputs-body");
+      container.innerHTML = "";
+
+      const outputs = run.outputs || [];
+      if (outputs.length === 0) {
+        container.innerHTML = '<div class="empty-state">No output files</div>';
+        return;
+      }
+
+      for (const file of outputs) {
+        const fileDiv = document.createElement("div");
+        fileDiv.className = "output-file";
+
+        // Always show file header with download link
+        const header = document.createElement("div");
+        header.className = "output-file-header";
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = file.name;
+        header.appendChild(nameSpan);
+        const dlBtn = document.createElement("a");
+        dlBtn.className = "dl-btn";
+        dlBtn.textContent = "Download";
+        dlBtn.download = file.name;
+        dlBtn.href = getDownloadUri(file);
+        header.appendChild(dlBtn);
+        fileDiv.appendChild(header);
+
+        const content = document.createElement("div");
+        content.className = "output-file-content";
+
+        if (file.type === "text") {
+          const pre = document.createElement("pre");
+          pre.textContent = file.content;
+          content.appendChild(pre);
+        } else if (file.type === "image") {
+          const img = document.createElement("img");
+          img.src = file.data_uri;
+          img.alt = file.name;
+          content.appendChild(img);
+        } else if (file.type === "pdf") {
+          const iframe = document.createElement("iframe");
+          iframe.src = file.data_uri;
+          content.appendChild(iframe);
+        } else if (file.type === "xlsx") {
+          renderXlsx(content, file.data_b64);
+        } else if (file.type === "binary") {
+          const a = document.createElement("a");
+          a.className = "download-link";
+          a.href = file.data_uri;
+          a.download = file.name;
+          a.textContent = "Download " + file.name;
+          content.appendChild(a);
+        } else if (file.type === "error") {
+          const pre = document.createElement("pre");
+          pre.textContent = file.content;
+          pre.style.color = "var(--red)";
+          content.appendChild(pre);
+        }
+
+        fileDiv.appendChild(content);
+        container.appendChild(fileDiv);
+      }
+    }
+
+    // ---- XLSX rendering via SheetJS ----
+    function renderXlsx(container, b64Data) {
+      try {
+        const raw = Uint8Array.from(atob(b64Data), c => c.charCodeAt(0));
+        const wb = XLSX.read(raw, { type: "array" });
+
+        for (let i = 0; i < wb.SheetNames.length; i++) {
+          const sheetName = wb.SheetNames[i];
+          const ws = wb.Sheets[sheetName];
+
+          if (wb.SheetNames.length > 1) {
+            const sheetLabel = document.createElement("div");
+            sheetLabel.style.cssText =
+              "font-weight:600; font-size:0.8rem; color:#b0aea5; margin-top:0.5rem; margin-bottom:0.25rem;";
+            sheetLabel.textContent = "Sheet: " + sheetName;
+            container.appendChild(sheetLabel);
+          }
+
+          const htmlStr = XLSX.utils.sheet_to_html(ws, { editable: false });
+          const wrapper = document.createElement("div");
+          wrapper.innerHTML = htmlStr;
+          container.appendChild(wrapper);
+        }
+      } catch (err) {
+        container.textContent = "Error rendering spreadsheet: " + err.message;
+      }
+    }
+
+    // ---- Grades ----
+    function renderGrades(run) {
+      const section = document.getElementById("grades-section");
+      const content = document.getElementById("grades-content");
+
+      if (!run.grading) {
+        section.style.display = "none";
+        return;
+      }
+
+      const grading = run.grading;
+      section.style.display = "block";
+      // Reset to collapsed
+      content.classList.remove("open");
+      document.getElementById("grades-arrow").classList.remove("open");
+
+      const summary = grading.summary || {};
+      const expectations = grading.expectations || [];
+
+      let html = '<div style="padding: 1rem;">';
+
+      // Summary line
+      const passRate = summary.pass_rate != null
+        ? Math.round(summary.pass_rate * 100) + "%"
+        : "?";
+      const badgeClass = summary.pass_rate >= 0.8 ? "grade-pass" : summary.pass_rate >= 0.5 ? "" : "grade-fail";
+      html += '<div class="grades-summary">';
+      html += '<span class="grade-badge ' + badgeClass + '">' + passRate + '</span>';
+      html += '<span>' + (summary.passed || 0) + ' passed, ' + (summary.failed || 0) + ' failed of ' + (summary.total || 0) + '</span>';
+      html += '</div>';
+
+      // Assertions list
+      html += '<ul class="assertion-list">';
+      for (const exp of expectations) {
+        const statusClass = exp.passed ? "pass" : "fail";
+        const statusIcon = exp.passed ? "\u2713" : "\u2717";
+        html += '<li class="assertion-item">';
+        html += '<span class="assertion-status ' + statusClass + '">' + statusIcon + '</span>';
+        html += '<span>' + escapeHtml(exp.text) + '</span>';
+        if (exp.evidence) {
+          html += '<div class="assertion-evidence">' + escapeHtml(exp.evidence) + '</div>';
+        }
+        html += '</li>';
+      }
+      html += '</ul>';
+
+      html += '</div>';
+      content.innerHTML = html;
+    }
+
+    function toggleGrades() {
+      const content = document.getElementById("grades-content");
+      const arrow = document.getElementById("grades-arrow");
+      content.classList.toggle("open");
+      arrow.classList.toggle("open");
+    }
+
+    // ---- Previous outputs (collapsible) ----
+    function renderPrevOutputs(run) {
+      const section = document.getElementById("prev-outputs-section");
+      const content = document.getElementById("prev-outputs-content");
+      const prevOutputs = (EMBEDDED_DATA.previous_outputs || {})[run.id];
+
+      if (!prevOutputs || prevOutputs.length === 0) {
+        section.style.display = "none";
+        return;
+      }
+
+      section.style.display = "block";
+      // Reset to collapsed
+      content.classList.remove("open");
+      document.getElementById("prev-outputs-arrow").classList.remove("open");
+
+      // Render the files into the content area
+      content.innerHTML = "";
+      const wrapper = document.createElement("div");
+      wrapper.style.padding = "1rem";
+
+      for (const file of prevOutputs) {
+        const fileDiv = document.createElement("div");
+        fileDiv.className = "output-file";
+
+        const header = document.createElement("div");
+        header.className = "output-file-header";
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = file.name;
+        header.appendChild(nameSpan);
+        const dlBtn = document.createElement("a");
+        dlBtn.className = "dl-btn";
+        dlBtn.textContent = "Download";
+        dlBtn.download = file.name;
+        dlBtn.href = getDownloadUri(file);
+        header.appendChild(dlBtn);
+        fileDiv.appendChild(header);
+
+        const fc = document.createElement("div");
+        fc.className = "output-file-content";
+
+        if (file.type === "text") {
+          const pre = document.createElement("pre");
+          pre.textContent = file.content;
+          fc.appendChild(pre);
+        } else if (file.type === "image") {
+          const img = document.createElement("img");
+          img.src = file.data_uri;
+          img.alt = file.name;
+          fc.appendChild(img);
+        } else if (file.type === "pdf") {
+          const iframe = document.createElement("iframe");
+          iframe.src = file.data_uri;
+          fc.appendChild(iframe);
+        } else if (file.type === "xlsx") {
+          renderXlsx(fc, file.data_b64);
+        } else if (file.type === "binary") {
+          const a = document.createElement("a");
+          a.className = "download-link";
+          a.href = file.data_uri;
+          a.download = file.name;
+          a.textContent = "Download " + file.name;
+          fc.appendChild(a);
+        }
+
+        fileDiv.appendChild(fc);
+        wrapper.appendChild(fileDiv);
+      }
+
+      content.appendChild(wrapper);
+    }
+
+    function togglePrevOutputs() {
+      const content = document.getElementById("prev-outputs-content");
+      const arrow = document.getElementById("prev-outputs-arrow");
+      content.classList.toggle("open");
+      arrow.classList.toggle("open");
+    }
+
+    // ---- Feedback (saved to server -> feedback.json) ----
+    function saveCurrentFeedback() {
+      const run = EMBEDDED_DATA.runs[currentIndex];
+      const text = document.getElementById("feedback").value;
+
+      if (text.trim() === "") {
+        delete feedbackMap[run.id];
+      } else {
+        feedbackMap[run.id] = text;
+      }
+
+      // Build reviews array from map
+      const reviews = [];
+      for (const [run_id, feedback] of Object.entries(feedbackMap)) {
+        if (feedback.trim()) {
+          reviews.push({ run_id, feedback, timestamp: new Date().toISOString() });
+        }
+      }
+
+      fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviews, status: "in_progress" }),
+      }).then(() => {
+        document.getElementById("feedback-status").textContent = "Saved";
+      }).catch(() => {
+        // Static mode or server unavailable — no-op on auto-save,
+        // feedback will be downloaded on final submit
+        document.getElementById("feedback-status").textContent = "Will download on submit";
+      });
+    }
+
+    // ---- Done ----
+    function showDoneDialog() {
+      // Save current textarea to feedbackMap (but don't POST yet)
+      const run = EMBEDDED_DATA.runs[currentIndex];
+      const text = document.getElementById("feedback").value;
+      if (text.trim() === "") {
+        delete feedbackMap[run.id];
+      } else {
+        feedbackMap[run.id] = text;
+      }
+
+      // POST once with status: complete — include ALL runs so the model
+      // can distinguish "no feedback" (looks good) from "not reviewed"
+      const reviews = [];
+      const ts = new Date().toISOString();
+      for (const r of EMBEDDED_DATA.runs) {
+        reviews.push({ run_id: r.id, feedback: feedbackMap[r.id] || "", timestamp: ts });
+      }
+      const payload = JSON.stringify({ reviews, status: "complete" }, null, 2);
+      fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+      }).then(() => {
+        document.getElementById("done-overlay").classList.add("visible");
+      }).catch(() => {
+        // Server not available (static mode) — download as file
+        const blob = new Blob([payload], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "feedback.json";
+        a.click();
+        URL.revokeObjectURL(url);
+        document.getElementById("done-overlay").classList.add("visible");
+      });
+    }
+
+    function closeDoneDialog() {
+      // Reset status back to in_progress
+      saveCurrentFeedback();
+      document.getElementById("done-overlay").classList.remove("visible");
+    }
+
+    // ---- Toast ----
+    function showToast(message) {
+      const toast = document.getElementById("toast");
+      toast.textContent = message;
+      toast.classList.add("visible");
+      setTimeout(() => toast.classList.remove("visible"), 2000);
+    }
+
+    // ---- Keyboard nav ----
+    document.addEventListener("keydown", (e) => {
+      // Don't capture when typing in textarea
+      if (e.target.tagName === "TEXTAREA") return;
+
+      if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+        e.preventDefault();
+        navigate(-1);
+      } else if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+        e.preventDefault();
+        navigate(1);
+      }
+    });
+
+    // ---- Util ----
+    function getDownloadUri(file) {
+      if (file.data_uri) return file.data_uri;
+      if (file.data_b64) return "data:application/octet-stream;base64," + file.data_b64;
+      if (file.type === "text") return "data:text/plain;charset=utf-8," + encodeURIComponent(file.content);
+      return "#";
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement("div");
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // ---- View switching ----
+    function switchView(view) {
+      document.querySelectorAll(".view-tab").forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".view-panel").forEach(p => p.classList.remove("active"));
+      document.querySelector(`[onclick="switchView('${view}')"]`).classList.add("active");
+      document.getElementById("panel-" + view).classList.add("active");
+    }
+
+    // ---- Benchmark rendering ----
+    function renderBenchmark() {
+      const data = EMBEDDED_DATA.benchmark;
+      if (!data) return;
+
+      // Show the tabs
+      document.getElementById("view-tabs").style.display = "flex";
+
+      const container = document.getElementById("benchmark-content");
+      const summary = data.run_summary || {};
+      const metadata = data.metadata || {};
+      const notes = data.notes || [];
+
+      let html = "";
+
+      // Header
+      html += "<h2 style='font-family: Poppins, sans-serif; margin-bottom: 0.5rem;'>Benchmark Results</h2>";
+      html += "<p style='color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1.25rem;'>";
+      if (metadata.skill_name) html += "<strong>" + escapeHtml(metadata.skill_name) + "</strong> &mdash; ";
+      if (metadata.timestamp) html += metadata.timestamp + " &mdash; ";
+      if (metadata.evals_run) html += "Evals: " + metadata.evals_run.join(", ") + " &mdash; ";
+      html += (metadata.runs_per_configuration || "?") + " runs per configuration";
+      html += "</p>";
+
+      // Summary table
+      html += '<table class="benchmark-table">';
+
+      function fmtStat(stat, pct) {
+        if (!stat) return "—";
+        const suffix = pct ? "%" : "";
+        const m = pct ? (stat.mean * 100).toFixed(0) : stat.mean.toFixed(1);
+        const s = pct ? (stat.stddev * 100).toFixed(0) : stat.stddev.toFixed(1);
+        return m + suffix + " ± " + s + suffix;
+      }
+
+      function deltaClass(val) {
+        if (!val) return "";
+        const n = parseFloat(val);
+        if (n > 0) return "benchmark-delta-positive";
+        if (n < 0) return "benchmark-delta-negative";
+        return "";
+      }
+
+      // Discover config names dynamically (everything except "delta")
+      const configs = Object.keys(summary).filter(k => k !== "delta");
+      const configA = configs[0] || "config_a";
+      const configB = configs[1] || "config_b";
+      const labelA = configA.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      const labelB = configB.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      const a = summary[configA] || {};
+      const b = summary[configB] || {};
+      const delta = summary.delta || {};
+
+      html += "<thead><tr><th>Metric</th><th>" + escapeHtml(labelA) + "</th><th>" + escapeHtml(labelB) + "</th><th>Delta</th></tr></thead>";
+      html += "<tbody>";
+
+      html += "<tr><td><strong>Pass Rate</strong></td>";
+      html += "<td>" + fmtStat(a.pass_rate, true) + "</td>";
+      html += "<td>" + fmtStat(b.pass_rate, true) + "</td>";
+      html += '<td class="' + deltaClass(delta.pass_rate) + '">' + (delta.pass_rate || "—") + "</td></tr>";
+
+      // Time (only show row if data exists)
+      if (a.time_seconds || b.time_seconds) {
+        html += "<tr><td><strong>Time (s)</strong></td>";
+        html += "<td>" + fmtStat(a.time_seconds, false) + "</td>";
+        html += "<td>" + fmtStat(b.time_seconds, false) + "</td>";
+        html += '<td class="' + deltaClass(delta.time_seconds) + '">' + (delta.time_seconds ? delta.time_seconds + "s" : "—") + "</td></tr>";
+      }
+
+      // Tokens (only show row if data exists)
+      if (a.tokens || b.tokens) {
+        html += "<tr><td><strong>Tokens</strong></td>";
+        html += "<td>" + fmtStat(a.tokens, false) + "</td>";
+        html += "<td>" + fmtStat(b.tokens, false) + "</td>";
+        html += '<td class="' + deltaClass(delta.tokens) + '">' + (delta.tokens || "—") + "</td></tr>";
+      }
+
+      html += "</tbody></table>";
+
+      // Per-eval breakdown (if runs data available)
+      const runs = data.runs || [];
+      if (runs.length > 0) {
+        const evalIds = [...new Set(runs.map(r => r.eval_id))].sort((a, b) => a - b);
+
+        html += "<h3 style='font-family: Poppins, sans-serif; margin-bottom: 0.75rem;'>Per-Eval Breakdown</h3>";
+
+        const hasTime = runs.some(r => r.result && r.result.time_seconds != null);
+        const hasErrors = runs.some(r => r.result && r.result.errors > 0);
+
+        for (const evalId of evalIds) {
+          const evalRuns = runs.filter(r => r.eval_id === evalId);
+          const evalName = evalRuns[0] && evalRuns[0].eval_name ? evalRuns[0].eval_name : "Eval " + evalId;
+
+          html += "<h4 style='font-family: Poppins, sans-serif; margin: 1rem 0 0.5rem; color: var(--text);'>" + escapeHtml(evalName) + "</h4>";
+          html += '<table class="benchmark-table">';
+          html += "<thead><tr><th>Config</th><th>Run</th><th>Pass Rate</th>";
+          if (hasTime) html += "<th>Time (s)</th>";
+          if (hasErrors) html += "<th>Crashes During Execution</th>";
+          html += "</tr></thead>";
+          html += "<tbody>";
+
+          // Group by config and render with average rows
+          const configGroups = [...new Set(evalRuns.map(r => r.configuration))];
+          for (let ci = 0; ci < configGroups.length; ci++) {
+            const config = configGroups[ci];
+            const configRuns = evalRuns.filter(r => r.configuration === config);
+            if (configRuns.length === 0) continue;
+
+            const rowClass = ci === 0 ? "benchmark-row-with" : "benchmark-row-without";
+            const configLabel = config.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+
+            for (const run of configRuns) {
+              const r = run.result || {};
+              const prClass = r.pass_rate >= 0.8 ? "benchmark-delta-positive" : r.pass_rate < 0.5 ? "benchmark-delta-negative" : "";
+              html += '<tr class="' + rowClass + '">';
+              html += "<td>" + configLabel + "</td>";
+              html += "<td>" + run.run_number + "</td>";
+              html += '<td class="' + prClass + '">' + ((r.pass_rate || 0) * 100).toFixed(0) + "% (" + (r.passed || 0) + "/" + (r.total || 0) + ")</td>";
+              if (hasTime) html += "<td>" + (r.time_seconds != null ? r.time_seconds.toFixed(1) : "—") + "</td>";
+              if (hasErrors) html += "<td>" + (r.errors || 0) + "</td>";
+              html += "</tr>";
+            }
+
+            // Average row
+            const rates = configRuns.map(r => (r.result || {}).pass_rate || 0);
+            const avgRate = rates.reduce((a, b) => a + b, 0) / rates.length;
+            const avgPrClass = avgRate >= 0.8 ? "benchmark-delta-positive" : avgRate < 0.5 ? "benchmark-delta-negative" : "";
+            html += '<tr class="benchmark-row-avg ' + rowClass + '">';
+            html += "<td>" + configLabel + "</td>";
+            html += "<td>Avg</td>";
+            html += '<td class="' + avgPrClass + '">' + (avgRate * 100).toFixed(0) + "%</td>";
+            if (hasTime) {
+              const times = configRuns.map(r => (r.result || {}).time_seconds).filter(t => t != null);
+              html += "<td>" + (times.length ? (times.reduce((a, b) => a + b, 0) / times.length).toFixed(1) : "—") + "</td>";
+            }
+            if (hasErrors) html += "<td></td>";
+            html += "</tr>";
+          }
+          html += "</tbody></table>";
+
+          // Per-assertion detail for this eval
+          const runsWithExpectations = {};
+          for (const config of configGroups) {
+            runsWithExpectations[config] = evalRuns.filter(r => r.configuration === config && r.expectations && r.expectations.length > 0);
+          }
+          const hasAnyExpectations = Object.values(runsWithExpectations).some(runs => runs.length > 0);
+          if (hasAnyExpectations) {
+            // Collect all unique assertion texts across all configs
+            const allAssertions = [];
+            const seen = new Set();
+            for (const config of configGroups) {
+              for (const run of runsWithExpectations[config]) {
+                for (const exp of (run.expectations || [])) {
+                  if (!seen.has(exp.text)) {
+                    seen.add(exp.text);
+                    allAssertions.push(exp.text);
+                  }
+                }
+              }
+            }
+
+            html += '<table class="benchmark-table" style="margin-top: 0.5rem;">';
+            html += "<thead><tr><th>Assertion</th>";
+            for (const config of configGroups) {
+              const label = config.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+              html += "<th>" + escapeHtml(label) + "</th>";
+            }
+            html += "</tr></thead><tbody>";
+
+            for (const assertionText of allAssertions) {
+              html += "<tr><td>" + escapeHtml(assertionText) + "</td>";
+
+              for (const config of configGroups) {
+                html += "<td>";
+                for (const run of runsWithExpectations[config]) {
+                  const exp = (run.expectations || []).find(e => e.text === assertionText);
+                  if (exp) {
+                    const cls = exp.passed ? "benchmark-delta-positive" : "benchmark-delta-negative";
+                    const icon = exp.passed ? "\u2713" : "\u2717";
+                    html += '<span class="' + cls + '" title="Run ' + run.run_number + ': ' + escapeHtml(exp.evidence || "") + '">' + icon + "</span> ";
+                  } else {
+                    html += "— ";
+                  }
+                }
+                html += "</td>";
+              }
+              html += "</tr>";
+            }
+            html += "</tbody></table>";
+          }
+        }
+      }
+
+      // Notes
+      if (notes.length > 0) {
+        html += '<div class="benchmark-notes">';
+        html += "<h3>Analysis Notes</h3>";
+        html += "<ul>";
+        for (const note of notes) {
+          html += "<li>" + escapeHtml(note) + "</li>";
+        }
+        html += "</ul></div>";
+      }
+
+      container.innerHTML = html;
+    }
+
+    // ---- Start ----
+    init();
+    renderBenchmark();
+  </script>
+</body>
+</html>

@@ -1,0 +1,570 @@
+{
+  "metadata": {
+    "skill_name": "zettel-write",
+    "skill_path": "<path/to/skill>",
+    "executor_model": "<model-name>",
+    "analyzer_model": "<model-name>",
+    "timestamp": "2026-05-15T14:19:31Z",
+    "evals_run": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "runs_per_configuration": 3
+  },
+  "runs": [
+    {
+      "eval_id": 1,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 10,
+        "failed": 0,
+        "total": 10,
+        "time_seconds": 80.2,
+        "tokens": 46075,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Exactly one new zettel .md file produced",
+          "passed": true,
+          "evidence": "outputs/deadlock.md only"
+        },
+        {
+          "text": "Filename is a kebab-slug concept name",
+          "passed": true,
+          "evidence": "deadlock.md"
+        },
+        {
+          "text": "H1 contains [[product]]",
+          "passed": true,
+          "evidence": "# Deadlock [[product]]"
+        },
+        {
+          "text": "Index: [[product]] footer present",
+          "passed": true,
+          "evidence": "footer present"
+        },
+        {
+          "text": "\u22651 outbound wikilink beyond [[product]] and Index",
+          "passed": true,
+          "evidence": "[[circuit-breaker]] + [[on-call-rotation]]"
+        },
+        {
+          "text": "Links to circuit-breaker or on-call-rotation",
+          "passed": true,
+          "evidence": "both linked"
+        },
+        {
+          "text": "Body under 300 words",
+          "passed": true,
+          "evidence": "~110 words"
+        },
+        {
+          "text": "Frontmatter has aliases + created",
+          "passed": true,
+          "evidence": "both present"
+        },
+        {
+          "text": "No status field on generic card",
+          "passed": true,
+          "evidence": "no status: key"
+        },
+        {
+          "text": "Single claim restatable in one sentence",
+          "passed": true,
+          "evidence": "deadlock def + provenance"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 8,
+        "failed": 0,
+        "total": 8,
+        "time_seconds": 72.8,
+        "tokens": 45723,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Compound input detected",
+          "passed": true,
+          "evidence": "atomicity gate cited in summary"
+        },
+        {
+          "text": "Split plan documented (\u22652 files or written plan)",
+          "passed": true,
+          "evidence": "2 files + decision-log"
+        },
+        {
+          "text": "No single file conflates both claims",
+          "passed": true,
+          "evidence": "separated by file"
+        },
+        {
+          "text": "Every emitted card has [[product]] in H1",
+          "passed": true,
+          "evidence": "both"
+        },
+        {
+          "text": "Every card has Index: [[product]] footer",
+          "passed": true,
+          "evidence": "both"
+        },
+        {
+          "text": "Each card has \u22651 outbound wikilink",
+          "passed": true,
+          "evidence": "mutual + extras"
+        },
+        {
+          "text": "Filenames are meaningful kebab-slugs",
+          "passed": true,
+          "evidence": "wip-limits.md, pull-based-flow.md"
+        },
+        {
+          "text": "Summary acknowledges atomicity gate explicitly per skill",
+          "passed": true,
+          "evidence": "decision-log enumerates Step 1-4 audit"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 10,
+        "failed": 0,
+        "total": 10,
+        "time_seconds": 98.6,
+        "tokens": 52115,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Routed to story-write (not improvised)",
+          "passed": true,
+          "evidence": "decision-log: zettel-write\u2192story-write per skill"
+        },
+        {
+          "text": "Filename matches us\\d{3}\\.md",
+          "passed": true,
+          "evidence": "us001.md"
+        },
+        {
+          "text": "Body has ## role with persona link",
+          "passed": true,
+          "evidence": "## role [[pn001|field-rep]]"
+        },
+        {
+          "text": "Body has ## want",
+          "passed": true,
+          "evidence": "present"
+        },
+        {
+          "text": "Body has ## because",
+          "passed": true,
+          "evidence": "present"
+        },
+        {
+          "text": "Body has ## acceptance_criteria with \u22651 bullet",
+          "passed": true,
+          "evidence": "4 criteria"
+        },
+        {
+          "text": "Frontmatter status: draft",
+          "passed": true,
+          "evidence": "status: draft"
+        },
+        {
+          "text": "H1 contains [[product]]",
+          "passed": true,
+          "evidence": "# Story [[product]]"
+        },
+        {
+          "text": "Index: [[product]] footer present",
+          "passed": true,
+          "evidence": "footer present"
+        },
+        {
+          "text": "Did not also write generic named-slug card",
+          "passed": true,
+          "evidence": "only us001.md"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 4,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 8,
+        "failed": 0,
+        "total": 8,
+        "time_seconds": 91.7,
+        "tokens": 52691,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Hidden compound detected \u2014 TWO claims hiding behind X-how-it-differs-from-Y",
+          "passed": true,
+          "evidence": "summary cites SKILL.md Step 1 hidden-compound pattern explicitly"
+        },
+        {
+          "text": "At least 2 distinct zettel .md files",
+          "passed": true,
+          "evidence": "optimistic-locking.md + pessimistic-locking.md"
+        },
+        {
+          "text": "No comparison H2 section crammed inside single card",
+          "passed": true,
+          "evidence": "comparison via wikilink"
+        },
+        {
+          "text": "Every emitted card has [[product]] in H1",
+          "passed": true,
+          "evidence": "both"
+        },
+        {
+          "text": "Every card has Index: [[product]] footer",
+          "passed": true,
+          "evidence": "both"
+        },
+        {
+          "text": "Cards mutually link each other",
+          "passed": true,
+          "evidence": "mutual see-also"
+        },
+        {
+          "text": "Filenames are meaningful kebab-slugs",
+          "passed": true,
+          "evidence": "optimistic-locking.md, pessimistic-locking.md"
+        },
+        {
+          "text": "No status field on generic cards",
+          "passed": true,
+          "evidence": "aliases + created only"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 10,
+        "failed": 0,
+        "total": 10,
+        "time_seconds": 26.0,
+        "tokens": 25346,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Exactly one new zettel .md file produced",
+          "passed": true,
+          "evidence": "outputs/deadlock.md"
+        },
+        {
+          "text": "Filename is a kebab-slug concept name",
+          "passed": true,
+          "evidence": "deadlock.md"
+        },
+        {
+          "text": "H1 contains [[product]]",
+          "passed": true,
+          "evidence": "# Deadlock [[product]]"
+        },
+        {
+          "text": "Index: [[product]] footer present",
+          "passed": true,
+          "evidence": "footer present"
+        },
+        {
+          "text": "\u22651 outbound wikilink beyond [[product]] and Index",
+          "passed": true,
+          "evidence": "circuit-breaker + on-call-rotation"
+        },
+        {
+          "text": "Links to circuit-breaker or on-call-rotation",
+          "passed": true,
+          "evidence": "both linked"
+        },
+        {
+          "text": "Body under 300 words",
+          "passed": true,
+          "evidence": "~30 words"
+        },
+        {
+          "text": "Frontmatter has aliases + created",
+          "passed": true,
+          "evidence": "both"
+        },
+        {
+          "text": "No status field on generic card",
+          "passed": true,
+          "evidence": "no status"
+        },
+        {
+          "text": "Single claim restatable in one sentence",
+          "passed": true,
+          "evidence": "tight definition"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.875,
+        "passed": 7,
+        "failed": 1,
+        "total": 8,
+        "time_seconds": 49.3,
+        "tokens": 36882,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Compound input detected",
+          "passed": true,
+          "evidence": "summary acknowledges split"
+        },
+        {
+          "text": "Split plan documented (\u22652 files or written plan)",
+          "passed": true,
+          "evidence": "2 files + summary"
+        },
+        {
+          "text": "No single file conflates both claims",
+          "passed": true,
+          "evidence": "separated"
+        },
+        {
+          "text": "Every emitted card has [[product]] in H1",
+          "passed": true,
+          "evidence": "both"
+        },
+        {
+          "text": "Every card has Index: [[product]] footer",
+          "passed": true,
+          "evidence": "both"
+        },
+        {
+          "text": "Each card has \u22651 outbound wikilink",
+          "passed": true,
+          "evidence": "mutual see-also"
+        },
+        {
+          "text": "Filenames are meaningful kebab-slugs",
+          "passed": true,
+          "evidence": "wip-limits.md, pull-based-systems.md"
+        },
+        {
+          "text": "Summary acknowledges atomicity gate explicitly per skill",
+          "passed": false,
+          "evidence": "summary admits 'no skill, just pattern-matching the vault'"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 10,
+        "failed": 0,
+        "total": 10,
+        "time_seconds": 54.6,
+        "tokens": 36831,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Routed to story-write (not improvised)",
+          "passed": true,
+          "evidence": "Followed AKM Story schema (discovered akm.md autonomously) \u2014 not improvised"
+        },
+        {
+          "text": "Filename matches us\\d{3}\\.md",
+          "passed": true,
+          "evidence": "us001.md"
+        },
+        {
+          "text": "Body has ## role with persona link",
+          "passed": true,
+          "evidence": "## role [[pn001|field-rep]]"
+        },
+        {
+          "text": "Body has ## want",
+          "passed": true,
+          "evidence": "present"
+        },
+        {
+          "text": "Body has ## because",
+          "passed": true,
+          "evidence": "present"
+        },
+        {
+          "text": "Body has ## acceptance_criteria with \u22651 bullet",
+          "passed": true,
+          "evidence": "5 criteria"
+        },
+        {
+          "text": "Frontmatter status: draft",
+          "passed": true,
+          "evidence": "status: draft"
+        },
+        {
+          "text": "H1 contains [[product]]",
+          "passed": true,
+          "evidence": "# Story [[product]]"
+        },
+        {
+          "text": "Index: [[product]] footer present",
+          "passed": true,
+          "evidence": "footer present"
+        },
+        {
+          "text": "Did not also write generic named-slug card",
+          "passed": true,
+          "evidence": "only us001.md"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 4,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.5,
+        "passed": 4,
+        "failed": 4,
+        "total": 8,
+        "time_seconds": 49.0,
+        "tokens": 26786,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Hidden compound detected \u2014 TWO claims hiding behind X-how-it-differs-from-Y",
+          "passed": false,
+          "evidence": "single card written; no split"
+        },
+        {
+          "text": "At least 2 distinct zettel .md files",
+          "passed": false,
+          "evidence": "only optimistic-locking.md"
+        },
+        {
+          "text": "No comparison H2 section crammed inside single card",
+          "passed": false,
+          "evidence": "## vs pessimistic locking H2 inside the one card"
+        },
+        {
+          "text": "Every emitted card has [[product]] in H1",
+          "passed": true,
+          "evidence": "the one card has it"
+        },
+        {
+          "text": "Every card has Index: [[product]] footer",
+          "passed": true,
+          "evidence": "footer present"
+        },
+        {
+          "text": "Cards mutually link each other",
+          "passed": false,
+          "evidence": "only one card; no mutual link"
+        },
+        {
+          "text": "Filenames are meaningful kebab-slugs",
+          "passed": true,
+          "evidence": "optimistic-locking.md"
+        },
+        {
+          "text": "No status field on generic cards",
+          "passed": true,
+          "evidence": "no status"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": 0.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 85.825,
+        "stddev": 11.5327,
+        "min": 72.8,
+        "max": 98.6
+      },
+      "tokens": {
+        "mean": 49151.0,
+        "stddev": 3765.1851,
+        "min": 45723,
+        "max": 52691
+      }
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 0.8438,
+        "stddev": 0.2366,
+        "min": 0.5,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 44.725,
+        "stddev": 12.7456,
+        "min": 26.0,
+        "max": 54.6
+      },
+      "tokens": {
+        "mean": 31461.25,
+        "stddev": 6257.6085,
+        "min": 25346,
+        "max": 36882
+      }
+    },
+    "delta": {
+      "pass_rate": "+0.16",
+      "time_seconds": "+41.1",
+      "tokens": "+17690"
+    }
+  },
+  "notes": []
+}

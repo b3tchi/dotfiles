@@ -1,0 +1,52 @@
+{
+  "eval_id": 4,
+  "config": "without_skill",
+  "expectations": [
+    {
+      "text": "Hidden compound detected \u2014 TWO claims hiding behind X-how-it-differs-from-Y",
+      "passed": false,
+      "evidence": "single card written; no split"
+    },
+    {
+      "text": "At least 2 distinct zettel .md files",
+      "passed": false,
+      "evidence": "only optimistic-locking.md"
+    },
+    {
+      "text": "No comparison H2 section crammed inside single card",
+      "passed": false,
+      "evidence": "## vs pessimistic locking H2 inside the one card"
+    },
+    {
+      "text": "Every emitted card has [[product]] in H1",
+      "passed": true,
+      "evidence": "the one card has it"
+    },
+    {
+      "text": "Every card has Index: [[product]] footer",
+      "passed": true,
+      "evidence": "footer present"
+    },
+    {
+      "text": "Cards mutually link each other",
+      "passed": false,
+      "evidence": "only one card; no mutual link"
+    },
+    {
+      "text": "Filenames are meaningful kebab-slugs",
+      "passed": true,
+      "evidence": "optimistic-locking.md"
+    },
+    {
+      "text": "No status field on generic cards",
+      "passed": true,
+      "evidence": "no status"
+    }
+  ],
+  "summary": {
+    "passed": 4,
+    "failed": 4,
+    "total": 8,
+    "pass_rate": 0.5
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "eval_id": 3,
+  "config": "with_skill",
+  "expectations": [
+    {
+      "text": "Routed to story-write (not improvised)",
+      "passed": true,
+      "evidence": "decision-log: zettel-write\u2192story-write per skill"
+    },
+    {
+      "text": "Filename matches us\\d{3}\\.md",
+      "passed": true,
+      "evidence": "us001.md"
+    },
+    {
+      "text": "Body has ## role with persona link",
+      "passed": true,
+      "evidence": "## role [[pn001|field-rep]]"
+    },
+    {
+      "text": "Body has ## want",
+      "passed": true,
+      "evidence": "present"
+    },
+    {
+      "text": "Body has ## because",
+      "passed": true,
+      "evidence": "present"
+    },
+    {
+      "text": "Body has ## acceptance_criteria with \u22651 bullet",
+      "passed": true,
+      "evidence": "4 criteria"
+    },
+    {
+      "text": "Frontmatter status: draft",
+      "passed": true,
+      "evidence": "status: draft"
+    },
+    {
+      "text": "H1 contains [[product]]",
+      "passed": true,
+      "evidence": "# Story [[product]]"
+    },
+    {
+      "text": "Index: [[product]] footer present",
+      "passed": true,
+      "evidence": "footer present"
+    },
+    {
+      "text": "Did not also write generic named-slug card",
+      "passed": true,
+      "evidence": "only us001.md"
+    }
+  ],
+  "summary": {
+    "passed": 10,
+    "failed": 0,
+    "total": 10,
+    "pass_rate": 1.0
+  }
+}

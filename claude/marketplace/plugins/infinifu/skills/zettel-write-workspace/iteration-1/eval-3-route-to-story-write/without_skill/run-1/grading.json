@@ -1,0 +1,62 @@
+{
+  "eval_id": 3,
+  "config": "without_skill",
+  "expectations": [
+    {
+      "text": "Routed to story-write (not improvised)",
+      "passed": false,
+      "evidence": "wrote generic backlog format (As a/I want/So that) \u2014 not AKM story schema; summary admits AKM conventions skipped"
+    },
+    {
+      "text": "Filename matches us\\d{3}\\.md",
+      "passed": false,
+      "evidence": "bulk-csv-contact-upload.md \u2014 kebab-slug, not us### id"
+    },
+    {
+      "text": "Body has ## role with persona link",
+      "passed": false,
+      "evidence": "no ## role H2; uses inline **As a** field rep with no persona wikilink"
+    },
+    {
+      "text": "Body has ## want",
+      "passed": false,
+      "evidence": "no ## want H2; uses inline **I want to**"
+    },
+    {
+      "text": "Body has ## because",
+      "passed": false,
+      "evidence": "no ## because H2; uses inline **So that**"
+    },
+    {
+      "text": "Body has ## acceptance_criteria with \u22651 bullet",
+      "passed": false,
+      "evidence": "## Acceptance criteria (draft) section exists but section name spelling differs from AKM schema (`acceptance_criteria` snake_case)"
+    },
+    {
+      "text": "Frontmatter status: draft",
+      "passed": false,
+      "evidence": "no YAML frontmatter at all"
+    },
+    {
+      "text": "H1 contains [[product]]",
+      "passed": false,
+      "evidence": "# Bulk CSV Contact Upload \u2014 no [[product]] wikilink"
+    },
+    {
+      "text": "Index: [[product]] footer present",
+      "passed": false,
+      "evidence": "no footer"
+    },
+    {
+      "text": "Did not also write generic named-slug card",
+      "passed": true,
+      "evidence": "only one file, didn't double-write \u2014 but the single file IS the wrong shape"
+    }
+  ],
+  "summary": {
+    "passed": 1,
+    "failed": 9,
+    "total": 10,
+    "pass_rate": 0.1
+  }
+}
