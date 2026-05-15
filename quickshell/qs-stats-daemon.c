@@ -423,10 +423,10 @@ int main(int argc, char **argv) {
     int tfd_fallback = -1;
     struct itimerspec fast = {0};
     fast.it_value.tv_sec = 1;       /* first fire in 1s */
-    fast.it_interval.tv_sec = 10;   /* repeat every 10s */
+    fast.it_interval.tv_sec = 5;    /* cpu + ram every 5s */
     struct itimerspec slow = {0};
     slow.it_value.tv_sec = 2;
-    slow.it_interval.tv_sec = 60;
+    slow.it_interval.tv_sec = 30;   /* disk every 30s — changes rarely */
     timerfd_settime(tfd_fast, 0, &fast, NULL);
     timerfd_settime(tfd_slow, 0, &slow, NULL);
     if (nl_fd < 0) {
