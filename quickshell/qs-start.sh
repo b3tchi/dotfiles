@@ -16,7 +16,37 @@ killall quickshell 2>/dev/null
 # partial upgrade or an orphan from an older quickshell version is cleaned up.
 pkill -f 'qs-keymon.py' 2>/dev/null
 pkill -f 'xinput test-xi2' 2>/dev/null
+pkill -f 'qs-stats-daemon' 2>/dev/null
 sleep 0.5
+
+# Event-driven stats source for Bar.qml. Runs alongside quickshell so it
+# shares lifecycle (kill/restart together) and writes to a local FIFO
+# inside proot. Hash-check the source so a `git pull` triggers a rebuild
+# even though git does not bump file mtimes.
+QS_DAEMON="$HOME/.local/bin/qs-stats-daemon"
+QS_FIFO="/tmp/qs-stats.pipe"
+QS_SRC="$HOME/.dotfiles/quickshell/qs-stats-daemon.c"
+QS_HASH_FILE="$HOME/.cache/qs-stats-daemon.sha"
+QS_CC=""
+for cc in clang gcc cc; do
+    if command -v "$cc" >/dev/null 2>&1; then QS_CC="$cc"; break; fi
+done
+if [ -f "$QS_SRC" ] && [ -n "$QS_CC" ]; then
+    mkdir -p "$(dirname "$QS_DAEMON")" "$(dirname "$QS_HASH_FILE")"
+    QS_HASH_NEW="$(sha1sum "$QS_SRC" | awk '{print $1}')"
+    QS_HASH_OLD="$(cat "$QS_HASH_FILE" 2>/dev/null || echo none)"
+    if [ ! -x "$QS_DAEMON" ] || [ "$QS_HASH_NEW" != "$QS_HASH_OLD" ]; then
+        echo "Building qs-stats-daemon ($QS_CC)..."
+        if "$QS_CC" -O2 -Wall -o "$QS_DAEMON" "$QS_SRC"; then
+            chmod +x "$QS_DAEMON"
+            echo "$QS_HASH_NEW" > "$QS_HASH_FILE"
+        fi
+    fi
+fi
+if [ -x "$QS_DAEMON" ]; then
+    rm -f "$QS_FIFO"
+    "$QS_DAEMON" "$QS_FIFO" >/dev/null 2>"$XDG_RUNTIME_DIR/qs-stats.log" &
+fi
 
 setsid quickshell &
 setsid quickshell -p "$HOME/.dotfiles/quickshell/overlay" &

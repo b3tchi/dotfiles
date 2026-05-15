@@ -12,7 +12,6 @@ USER="jan"
 pkill -f termux-x11 2>/dev/null
 pkill -f virgl_test_server 2>/dev/null
 pkill -f pulseaudio 2>/dev/null
-pkill -f qs-stats-daemon 2>/dev/null
 sleep 1
 
 # GPU acceleration (zink-backed virgl for GL 4.3 support)
@@ -31,32 +30,8 @@ pulseaudio --start \
 termux-x11 :1 &
 sleep 2
 
-# Event-driven stats daemon for quickshell Bar.qml.
-# Runs on Termux side so it has access to real /sys (battery), netlink uevent,
-# and the local pulseaudio socket. FIFO at /tmp/qs-stats.pipe is shared into
-# proot via --shared-tmp below; Bar.qml reads it as /tmp/qs-stats.pipe.
-QS_DAEMON="$PREFIX/bin/qs-stats-daemon"
-QS_FIFO="$PREFIX/tmp/qs-stats.pipe"
-QS_SRC="$HOME/.dotfiles/quickshell/qs-stats-daemon.c"
-# Rebuild when binary missing or source content changed. mtime check is
-# unreliable across `git pull` (mtimes are not preserved/updated to commit
-# time), so compare a content hash instead. clang rebuild is <1s, cheap.
-if [ -f "$QS_SRC" ] && command -v clang >/dev/null 2>&1; then
-    QS_HASH_FILE="$PREFIX/tmp/qs-stats-daemon.sha"
-    QS_HASH_NEW="$(sha1sum "$QS_SRC" | awk '{print $1}')"
-    QS_HASH_OLD="$(cat "$QS_HASH_FILE" 2>/dev/null || echo none)"
-    if [ ! -x "$QS_DAEMON" ] || [ "$QS_HASH_NEW" != "$QS_HASH_OLD" ]; then
-        echo "Building qs-stats-daemon..."
-        if clang -O2 -Wall -o "$QS_DAEMON" "$QS_SRC"; then
-            chmod +x "$QS_DAEMON"
-            echo "$QS_HASH_NEW" > "$QS_HASH_FILE"
-        fi
-    fi
-fi
-if [ -x "$QS_DAEMON" ]; then
-    rm -f "$QS_FIFO"
-    "$QS_DAEMON" "$QS_FIFO" >/dev/null 2>"$PREFIX/tmp/qs-stats.log" &
-fi
+# qs-stats-daemon runs inside proot now (spawned by qs-start.sh) so the
+# binary lives on the proot side and shares quickshell's lifecycle.
 
 # Launch i3 inside proot Arch as user jan
 proot-distro login "$DISTRO" \
