@@ -384,6 +384,11 @@ static void handle_pactl(void) {
 static void on_sig(int s) { (void)s; want_exit = 1; }
 
 int main(int argc, char **argv) {
+    /* Force stderr to line-buffered so probe traces flush as they happen.
+     * Default is fully-buffered when stderr is redirected to a file, which
+     * hid all but the last log line until the daemon was killed. */
+    setvbuf(stderr, NULL, _IOLBF, 0);
+
     const char *tmp = getenv("TMPDIR");
     if (!tmp || !*tmp) tmp = "/tmp";
     if (argc >= 2) {
