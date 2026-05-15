@@ -89,6 +89,7 @@ linux:
           install_plugin json-lsp@dotfiles
           install_plugin yaml-lsp@dotfiles
           install_plugin wiki-oxide@dotfiles
+          install_plugin infinifu@dotfiles
         done
       fi
 

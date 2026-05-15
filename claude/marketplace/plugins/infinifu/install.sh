@@ -436,9 +436,12 @@ echo "Shell scripts:"
 link_scripts
 echo ""
 
-# --- Claude Code (plugin-based) ---
+# --- Claude Code (plugin install handled by ~/.dotfiles/claude/dot.yaml via rotz) ---
+# This script only handles legacy-symlink cleanup; the plugin install/update lives
+# in the dotfiles rotz config (install_plugin infinifu@dotfiles) so it stays in
+# sync with the other dotfiles plugins.
 if [ -d "$CLAUDE_DIR" ]; then
-    echo "Claude Code ($CLAUDE_DIR):"
+    echo "Claude Code ($CLAUDE_DIR): legacy cleanup only — plugin install handled by rotz."
 
     # Remove conflicting superpowers plugin
     if command -v claude &>/dev/null && claude plugin list 2>&1 | grep -q "superpowers"; then
@@ -448,11 +451,8 @@ if [ -d "$CLAUDE_DIR" ]; then
     [ -e "$CLAUDE_DIR/plugins/superpowers.js" ] && rm -f "$CLAUDE_DIR/plugins/superpowers.js"
     [ -L "$CLAUDE_DIR/skills/superpowers" ] && rm -f "$CLAUDE_DIR/skills/superpowers"
 
-    # Clean up legacy symlink-based installation
+    # Clean up legacy symlink-based installation (pre-plugin era)
     claude_code_clean_legacy
-
-    # Install as proper Claude Code plugin
-    claude_code_install_plugin
 
     installed=1
     echo ""
