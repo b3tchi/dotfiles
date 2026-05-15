@@ -38,12 +38,19 @@ sleep 2
 QS_DAEMON="$PREFIX/bin/qs-stats-daemon"
 QS_FIFO="$PREFIX/tmp/qs-stats.pipe"
 QS_SRC="$HOME/.dotfiles/quickshell/qs-stats-daemon.c"
-# Rebuild when binary missing or source is newer than binary. Cheap (<1s)
-# and avoids stale binaries after a dotfiles pull.
+# Rebuild when binary missing or source content changed. mtime check is
+# unreliable across `git pull` (mtimes are not preserved/updated to commit
+# time), so compare a content hash instead. clang rebuild is <1s, cheap.
 if [ -f "$QS_SRC" ] && command -v clang >/dev/null 2>&1; then
-    if [ ! -x "$QS_DAEMON" ] || [ "$QS_SRC" -nt "$QS_DAEMON" ]; then
+    QS_HASH_FILE="$PREFIX/tmp/qs-stats-daemon.sha"
+    QS_HASH_NEW="$(sha1sum "$QS_SRC" | awk '{print $1}')"
+    QS_HASH_OLD="$(cat "$QS_HASH_FILE" 2>/dev/null || echo none)"
+    if [ ! -x "$QS_DAEMON" ] || [ "$QS_HASH_NEW" != "$QS_HASH_OLD" ]; then
         echo "Building qs-stats-daemon..."
-        clang -O2 -Wall -o "$QS_DAEMON" "$QS_SRC" && chmod +x "$QS_DAEMON"
+        if clang -O2 -Wall -o "$QS_DAEMON" "$QS_SRC"; then
+            chmod +x "$QS_DAEMON"
+            echo "$QS_HASH_NEW" > "$QS_HASH_FILE"
+        fi
     fi
 fi
 if [ -x "$QS_DAEMON" ]; then
