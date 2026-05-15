@@ -145,17 +145,30 @@ static void poll_disk(void) {
         "/",                       /* last resort */
         NULL,
     };
+    static int logged_once = 0;
     struct statvfs s;
     for (int i = 0; candidates[i]; i++) {
         if (!candidates[i] || !candidates[i][0]) continue;
-        if (statvfs(candidates[i], &s) == 0 && s.f_blocks > 0) {
+        int rc = statvfs(candidates[i], &s);
+        if (!logged_once) {
+            fprintf(stderr, "qs-stats-daemon: disk probe %s: rc=%d blocks=%lu avail=%lu\n",
+                    candidates[i], rc,
+                    (unsigned long)s.f_blocks, (unsigned long)s.f_bavail);
+        }
+        if (rc == 0 && s.f_blocks > 0) {
             unsigned long long used =
                 (unsigned long long)(s.f_blocks - s.f_bavail);
             int pct = (int)((used * 100) / s.f_blocks);
             emit("disk %d", pct);
+            logged_once = 1;
             return;
         }
     }
+    logged_once = 1;
+    /* All candidates failed — keep the widget hidden rather than emit a
+     * misleading 100% from the rootfs. The probe trace above tells the user
+     * why; QS_DISK_PATH=<path> can override once a working mount is known. */
+    fprintf(stderr, "qs-stats-daemon: disk: no usable mount found\n");
 }
 
 /* ----------------------------- battery ----------------------------- */
