@@ -147,7 +147,11 @@ static void poll_disk(void) {
     };
     static int logged_once = 0;
     struct statvfs s;
-    for (int i = 0; candidates[i]; i++) {
+    /* Iterate by array size so a NULL element (e.g. unset QS_DISK_PATH at
+     * index 0) does not short-circuit the loop. The terminating NULL is
+     * still skipped by the per-element guard below. */
+    int n = (int)(sizeof(candidates) / sizeof(candidates[0]));
+    for (int i = 0; i < n; i++) {
         if (!candidates[i] || !candidates[i][0]) continue;
         int rc = statvfs(candidates[i], &s);
         if (!logged_once) {
