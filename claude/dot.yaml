@@ -8,6 +8,7 @@ linux:
     beads/perles-config.yaml: ~/.config/perles/config.yaml
     repos-health.nu: ~/.local/bin/repos-health.nu
     epic.nu: ~/.local/bin/epic
+    akm/akm: ~/.local/bin/akm
     commands/epic-create.md: ~/.claude/commands/epic-create.md
 
     {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
