@@ -31,11 +31,11 @@ Type detection (which AKM writer to call) is flexible — guess from context, co
 | Request shape | Route to |
 |---------------|----------|
 | "as a … I want …" / backlog item / requirement | `infinifu:story-write` (`us###`) |
-| Decision / "we chose X over Y" / architectural commitment | `adr-write` (`adr####`) when available; else write raw following `akm.md#adr--adr-md` |
-| Reusable capability / shared service / building block | `feature-write` (`ft###`) when available; else raw `ft` |
-| Story-specific solution shape / "how we build us###" | `implementation-write` (`im###`) when available; else raw `im` |
-| User role / "for whom" | `persona-write` (`pn###`) when available; else raw `pn` |
-| Taxonomy bucket / category label | `category-write` (`cat###`) when available; else raw `cat` |
+| Decision / "we chose X over Y" / architectural commitment | `infinifu:adr-write` (`adr####`) |
+| Reusable capability / shared service / building block | `infinifu:feature-write` (`ft###`) |
+| Story-specific solution shape / "how we build us###" | `infinifu:implementation-write` (`im###`) |
+| User role / "for whom" | `infinifu:persona-write` (`pn###`) |
+| Taxonomy bucket / category label | `infinifu:category-write` (`cat###`) |
 | Free-form concept / glossary / external knowledge | generic named-slug card at `docs/notes/<slug>.md` (no numeric id, no schema beyond H1 + Index) |
 
 </quick_reference>
@@ -120,7 +120,7 @@ Use the routing table in `<quick_reference>`. Match by the *shape* of the reques
 
 When a request matches an AKM type **and** a typed writer skill exists, call that skill — it owns the schema, the id sequence, and the type-specific lifecycle. This skill never duplicates an AKM body schema; the canonical schema is in `docs/notes/akm.md` and the typed writers reference it.
 
-When no typed writer exists yet (e.g., `adr-write`, `feature-write`, … are not built yet) and the request matches a typed AKM bucket: write the card raw following `akm.md` directly. State the type and the schema source in the announce line: *"Writing `adr0012` per `akm.md#adr--adr-md` (no typed writer yet)."*
+All six AKM types now have typed writers (`infinifu:story-write`, `infinifu:adr-write`, `infinifu:feature-write`, `infinifu:implementation-write`, `infinifu:persona-write`, `infinifu:category-write`). Always delegate; never duplicate the schema here. If a request matches a typed AKM bucket but the typed writer is somehow unreachable, fall back to writing the card raw per `akm.md` and flag the broken delegation.
 
 **H1 tag wikilinks on typed zettels.** Many AKM types allow optional taxonomy tags in the H1 (`# Story [[flow-or-area]] [[theme]] [[product]]`). Add a tag only when a backing zettel for it already exists in `docs/notes/`, or when the user has explicitly named one to create. Never fabricate a tag wikilink just because the type's schema "allows" it — a dangling tag adds noise to the moxide diagnostics without adding any graph value. The required `[[product]]` link is non-negotiable; everything else is opt-in.
 
@@ -267,7 +267,11 @@ Before reporting the capture complete:
 **Calls:**
 
 - `infinifu:story-write` — when the request matches a `us###` user story
-- `adr-write`, `feature-write`, `implementation-write`, `persona-write`, `category-write` — when those typed writers exist (they will land as part of the AKM micro-skill split, currently tracked in `bd dotfiles-4by`)
+- `infinifu:adr-write` — `adr####` decisions
+- `infinifu:feature-write` — `ft###` reusable capabilities
+- `infinifu:implementation-write` — `im###` solution shape per story
+- `infinifu:persona-write` — `pn###` user roles
+- `infinifu:category-write` — `cat###` taxonomy buckets
 - `infinifu:tag-manage` — after the card is written, when the user wants to attach H1 tag wikilinks
 - `infinifu:story-map` — after an implementation card lands, to attach code paths
 
