@@ -1,0 +1,14 @@
+stories:
+  - id: 2605-001
+    title: Reset password via 'forgot password' link
+    role: logged-in user
+    want: to reset my password from a 'forgot password' link
+    so_that: I don't get locked out of my account
+    acceptance_criteria:
+      - "'Forgot password' link is visible on the login page and triggers a reset email to the account's registered address"
+      - Reset link opens a password-entry form and successfully updates the account password when submitted with a valid new password
+      - Reset link expires after a defined window (e.g. 1 hour) and shows an explicit "link expired" message if used afterward
+      - Submitting the reset form with an invalid or already-used token shows an error and does not change the password
+    tags: [auth, account]
+    status: draft
+    created: 2026-05-09

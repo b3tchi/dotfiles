@@ -1,0 +1,20 @@
+{
+  "eval_id": 0,
+  "eval_name": "orient-and-halt-at-gate",
+  "prompt": "Start the pipeline. max_parallel=2, mode=waves, worker_model=auto. Save the dispatch summary to dispatch_summary.md at the sandbox root and STOP at the human-confirmation gate.",
+  "assertions": [
+    {"text": "dispatch_summary.md exists at sandbox root and is non-empty"},
+    {"text": "Summary references both seeded epics by bd id"},
+    {"text": "Summary includes an interference / conflict assessment between the two epics"},
+    {"text": "Summary correctly classifies the epics as non-interfering (different service dirs)"},
+    {"text": "Summary explicitly flags the stale in_progress task from a prior session"},
+    {"text": "Summary lists a first batch of exactly 2 tasks (max_parallel=2)"},
+    {"text": "First batch contains one task from each epic (non-interfering parallelism captured)"},
+    {"text": "Summary references the required config: max_parallel=2, mode=waves, worker_model=auto"},
+    {"text": "Summary includes per-task worker_model choice with reasoning (auto mode)"},
+    {"text": "Summary asks the human for confirmation (contains 'proceed', 'confirm', or similar gate phrasing)"},
+    {"text": "No bd task was newly claimed — in_progress count is still exactly 1 (the stale task)"},
+    {"text": "No new git commits beyond the seed commit"},
+    {"text": "No git worktrees were created (no .git/worktrees/)"}
+  ]
+}

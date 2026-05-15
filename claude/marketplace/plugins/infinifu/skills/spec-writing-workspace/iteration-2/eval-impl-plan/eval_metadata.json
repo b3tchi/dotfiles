@@ -1,0 +1,20 @@
+{
+  "eval_id": 0,
+  "eval_name": "impl-plan-from-approved-design",
+  "prompt": "The URL shortener design at board/spec/url-shortener.md was brainstormed (and approved) and moved from board/idea/. Apply the infinifu:spec-writing skill to replace that file's design content with a concrete implementation spec for a junior engineer who doesn't know our codebase. After saving the spec, STOP — do not invoke spec-refinement, do not create bd tasks, do not write any source/test files. I just want to inspect the spec file.",
+  "assertions": [
+    {"text": "board/spec/url-shortener.md still exists and was modified (content differs from seed design)"},
+    {"text": "Spec starts with '# <Feature> Implementation Plan' header pattern"},
+    {"text": "Spec contains the 'For Claude:' handoff line referencing plan-scrum-master or plan-supervised"},
+    {"text": "Spec header includes all three fields: Goal:, Architecture:, Tech Stack:"},
+    {"text": "Spec contains at least 3 tasks (## or ### Task N: headings)"},
+    {"text": "At least one task contains a failing-test code block (pytest assertion)"},
+    {"text": "At least one task contains an implementation code block (Python code)"},
+    {"text": "At least one task specifies exact file paths (src/services/shortener/... with a concrete filename)"},
+    {"text": "At least one task includes a git commit command"},
+    {"text": "At least one task includes a run-the-test command with expected outcome (FAIL or PASS)"},
+    {"text": "No bd tasks created (no .beads/ dir)"},
+    {"text": "No implementation files created in src/ or tests/ (no new .py files beyond seed)"},
+    {"text": "No new git commits after the seed (agent saved spec but did not commit)"}
+  ]
+}

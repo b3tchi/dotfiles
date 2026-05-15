@@ -1,0 +1,31 @@
+{
+  "eval_name": "eval-reverse-lookup",
+  "expectations": [
+    {
+      "text": "Output lists src/auth/login.ts",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output lists src/auth/password-reset.ts",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output lists src/email/templates/reset.html",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output shows exactly 3 paths",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output includes story title",
+      "passed": true,
+      "evidence": ""
+    }
+  ],
+  "summary": "5/5 passed"
+}

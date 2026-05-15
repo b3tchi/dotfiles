@@ -1,0 +1,18 @@
+{
+  "run_id": "eval-0-with_skill",
+  "expectations": [
+    {"text": "A new file docs/notes/us###.md was created in the sandbox", "passed": true, "evidence": "us015.md created at docs/notes/us015.md"},
+    {"text": "Filename slug matches us<NNN>.md with three-digit zero-padded sequential id", "passed": true, "evidence": "us015.md — 3 digits, zero-padded"},
+    {"text": "ID does not collide with existing us001/us002/us003/us013/us014 (so id is us015 or higher)", "passed": true, "evidence": "us015 = max(existing)+1"},
+    {"text": "YAML frontmatter contains aliases (list), status, created keys", "passed": true, "evidence": "Lines 1-6 of zettel.md contain all three keys"},
+    {"text": "status frontmatter value is 'draft'", "passed": true, "evidence": "Line 4: 'status: draft'"},
+    {"text": "created frontmatter value matches ISO date YYYY-MM-DD", "passed": true, "evidence": "Line 5: 'created: 2026-05-14'"},
+    {"text": "H1 includes [[product]] wikilink", "passed": true, "evidence": "Line 7: '# Story [[requestor-flow]] [[product]]'"},
+    {"text": "## role section contains wikilink [[pn001|requestor]] referencing the existing persona", "passed": true, "evidence": "Lines 9-10: '## role\\n[[pn001|requestor]]'"},
+    {"text": "## want section describes cancelling a submitted request", "passed": true, "evidence": "Line 13: 'cancel a submitted request before it has been approved'"},
+    {"text": "## because section explains realizing wrong samples / ordered incorrectly", "passed": true, "evidence": "Line 16: 'I sometimes realize I ordered the wrong samples after submitting'"},
+    {"text": "## acceptance_criteria has exactly 3 bullets matching the user's input", "passed": true, "evidence": "Lines 19-21 list 3 bullets verbatim from prompt"},
+    {"text": "Footer contains 'Index: [[product]]'", "passed": true, "evidence": "Line 25: 'Index: [[product]]'"}
+  ],
+  "summary": {"pass_rate": 1.0, "passed": 12, "failed": 0, "total": 12}
+}

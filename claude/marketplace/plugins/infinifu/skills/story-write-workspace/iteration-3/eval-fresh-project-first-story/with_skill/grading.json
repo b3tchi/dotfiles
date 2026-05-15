@@ -1,0 +1,56 @@
+{
+  "eval_name": "eval-fresh-project-first-story",
+  "expectations": [
+    {
+      "text": "product/ directory was created",
+      "passed": true,
+      "evidence": "path=/home/jan/repos/b3tchi/acag/infinifu/skills/story-create-workspace/iteration-3/eval-fresh-project-first-story/with_skill/sandbox/product, exists=True"
+    },
+    {
+      "text": "product/stories.yaml was created (did not exist before)",
+      "passed": true,
+      "evidence": "exists=True"
+    },
+    {
+      "text": "Exactly one story entry exists",
+      "passed": true,
+      "evidence": "count=1"
+    },
+    {
+      "text": "id ends with '-001' (first story of the month)",
+      "passed": true,
+      "evidence": "id='2605-001'"
+    },
+    {
+      "text": "role contains 'user' or 'logged-in user'",
+      "passed": true,
+      "evidence": "role='logged-in user'"
+    },
+    {
+      "text": "want describes password reset",
+      "passed": true,
+      "evidence": "want=\"to reset my password from a 'forgot password' link\""
+    },
+    {
+      "text": "so_that mentions account access / lockout",
+      "passed": true,
+      "evidence": "so_that=\"i don't get locked out of my account\""
+    },
+    {
+      "text": "acceptance_criteria has at least 1 testable item",
+      "passed": true,
+      "evidence": "ac_count=4"
+    },
+    {
+      "text": "tags field is a non-empty list",
+      "passed": true,
+      "evidence": "tags=['auth', 'account']"
+    },
+    {
+      "text": "tags include 'auth' or 'account'",
+      "passed": true,
+      "evidence": "tags=['auth', 'account']"
+    }
+  ],
+  "summary": "10/10 passed"
+}

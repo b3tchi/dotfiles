@@ -1,0 +1,15 @@
+{
+  "run_id": "eval-2-old_skill",
+  "expectations": [
+    {"text": "A new file docs/notes/us001.md was created (first story of empty workspace)", "passed": false, "evidence": "Wrote product/stories.yaml, not docs/notes/us001.md"},
+    {"text": "Filename is exactly us001.md, not us<larger>.md", "passed": false, "evidence": "No us###.md file"},
+    {"text": "Frontmatter contains aliases (with at least one entry), status: draft, created: ISO date", "passed": false, "evidence": "No zettel frontmatter"},
+    {"text": "H1 ends with [[product]] wikilink", "passed": false, "evidence": "No markdown H1"},
+    {"text": "## role section references a persona via wikilink (existing or newly created pn###)", "passed": false, "evidence": "Role plain string 'guest', no wikilink"},
+    {"text": "## want describes browsing the public catalog without auth", "passed": false, "evidence": "Captured in YAML want field, not body"},
+    {"text": "## because mentions evaluation / pre-account browsing", "passed": false, "evidence": "Captured in YAML so_that/because field"},
+    {"text": "## acceptance_criteria has at least 1 testable bullet", "passed": false, "evidence": "YAML list, not markdown bullets"},
+    {"text": "Footer contains 'Index: [[product]]'", "passed": false, "evidence": "No markdown footer"}
+  ],
+  "summary": {"pass_rate": 0.0, "passed": 0, "failed": 9, "total": 9}
+}

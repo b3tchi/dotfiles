@@ -1,0 +1,41 @@
+{
+  "eval_name": "eval-list-taxonomy",
+  "expectations": [
+    {
+      "text": "Output is a markdown table or list of tags with usage counts",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output includes tag 'auth' with count 2",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output includes tag 'export' with count 2",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output includes tag 'admin' with count 2",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output includes tag 'reports' with count 2",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output mentions example story ids per tag",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output includes a summary line stating distinct tag count",
+      "passed": true,
+      "evidence": ""
+    }
+  ],
+  "summary": "7/7 passed"
+}

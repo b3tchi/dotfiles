@@ -1,0 +1,116 @@
+{
+  "metadata": {
+    "skill_name": "work-do",
+    "skill_path": "<path/to/skill>",
+    "executor_model": "<model-name>",
+    "analyzer_model": "<model-name>",
+    "timestamp": "2026-04-19T17:33:37Z",
+    "evals_run": [
+      0
+    ],
+    "runs_per_configuration": 3
+  },
+  "runs": [
+    {
+      "eval_id": 0,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 11,
+        "failed": 0,
+        "total": 11,
+        "time_seconds": 209.3,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Task status is in_progress (claimed) and NOT closed",
+          "passed": true,
+          "evidence": "status=in_progress"
+        },
+        {
+          "text": "src/slugs.py exists and defines slugify(...)",
+          "passed": true,
+          "evidence": "exists=True; has_slugify_def=True"
+        },
+        {
+          "text": "tests/test_slugs.py exists and contains at least 4 pytest tests",
+          "passed": true,
+          "evidence": "exists=True; test_fn_count=6"
+        },
+        {
+          "text": "pytest tests/test_slugs.py -v passes cleanly (rc=0, \u22654 tests passed)",
+          "passed": true,
+          "evidence": "rc=0; passed=6; tail=============================== 6 passed in 0.01s ==============================="
+        },
+        {
+          "text": "slugify('Hello World') == 'hello-world'",
+          "passed": true,
+          "evidence": "got='hello-world'"
+        },
+        {
+          "text": "slugify('  Multi   space!!! ') == 'multi-space'",
+          "passed": true,
+          "evidence": "got='multi-space'"
+        },
+        {
+          "text": "slugify('---foo---') == 'foo'",
+          "passed": true,
+          "evidence": "got='foo'"
+        },
+        {
+          "text": "Task has at least one note/comment containing 'IMPLEMENTED' or 'Evidence'",
+          "passed": true,
+          "evidence": "comment_count=0; has_evidence_marker=True"
+        },
+        {
+          "text": "Agent made at least one git commit beyond the seed (seed=1)",
+          "passed": true,
+          "evidence": "commit_count=2"
+        },
+        {
+          "text": "Did not silently implement unicode (no non-ASCII in code) OR a discovery task was filed",
+          "passed": true,
+          "evidence": "non_ascii_in_code=False; discovery_tasks=[]"
+        },
+        {
+          "text": "A report.md or run_notes.md was written to outputs/ describing the work",
+          "passed": true,
+          "evidence": "report_exists=True; run_notes_exists=False"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": 0.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 209.3,
+        "stddev": 0.0,
+        "min": 209.3,
+        "max": 209.3
+      },
+      "tokens": {
+        "mean": 0.0,
+        "stddev": 0.0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "delta": {
+      "pass_rate": "+1.00",
+      "time_seconds": "+209.3",
+      "tokens": "+0"
+    }
+  },
+  "notes": []
+}

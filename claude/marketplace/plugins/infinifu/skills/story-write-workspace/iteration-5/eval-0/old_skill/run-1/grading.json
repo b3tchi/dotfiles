@@ -1,0 +1,18 @@
+{
+  "run_id": "eval-0-old_skill",
+  "expectations": [
+    {"text": "A new file docs/notes/us###.md was created in the sandbox", "passed": false, "evidence": "Old skill wrote product/stories.yaml — no docs/notes/us*.md created"},
+    {"text": "Filename slug matches us<NNN>.md with three-digit zero-padded sequential id", "passed": false, "evidence": "Wrote stories.yaml with id 2605-001 (yymm-NNN), not us###"},
+    {"text": "ID does not collide with existing us001/us002/us003/us013/us014 (so id is us015 or higher)", "passed": false, "evidence": "Did not use us### scheme"},
+    {"text": "YAML frontmatter contains aliases (list), status, created keys", "passed": false, "evidence": "No zettel written; old skill emits a YAML list entry, not zettel frontmatter"},
+    {"text": "status frontmatter value is 'draft'", "passed": false, "evidence": "Status field exists in YAML entry, but not in zettel frontmatter"},
+    {"text": "created frontmatter value matches ISO date YYYY-MM-DD", "passed": false, "evidence": "No zettel frontmatter"},
+    {"text": "H1 includes [[product]] wikilink", "passed": false, "evidence": "No markdown file written"},
+    {"text": "## role section contains wikilink [[pn001|requestor]] referencing the existing persona", "passed": false, "evidence": "Role recorded as plain string 'requestor', no wikilink"},
+    {"text": "## want section describes cancelling a submitted request", "passed": false, "evidence": "No body section — just YAML want: field"},
+    {"text": "## because section explains realizing wrong samples / ordered incorrectly", "passed": false, "evidence": "Recorded under so_that/because YAML field, not a body section"},
+    {"text": "## acceptance_criteria has exactly 3 bullets matching the user's input", "passed": false, "evidence": "Criteria captured in YAML list, not as markdown body bullets"},
+    {"text": "Footer contains 'Index: [[product]]'", "passed": false, "evidence": "No markdown footer"}
+  ],
+  "summary": {"pass_rate": 0.0, "passed": 0, "failed": 12, "total": 12}
+}

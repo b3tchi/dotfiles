@@ -1,0 +1,106 @@
+{
+  "metadata": {
+    "skill_name": "spec-refinement",
+    "skill_path": "<path/to/skill>",
+    "executor_model": "<model-name>",
+    "analyzer_model": "<model-name>",
+    "timestamp": "2026-04-19T13:18:11Z",
+    "evals_run": [
+      0
+    ],
+    "runs_per_configuration": 3
+  },
+  "runs": [
+    {
+      "eval_id": 0,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 9,
+        "failed": 0,
+        "total": 9,
+        "time_seconds": 423.1,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "review_summary.md exists at sandbox root and references all 4 seeded task IDs",
+          "passed": true,
+          "evidence": "exists=True; seeded_ids_referenced=4/4; size=8001 chars"
+        },
+        {
+          "text": "Task A: placeholder text ([detailed above], [as specified], [will be added]) removed",
+          "passed": true,
+          "evidence": "design_len=4922; placeholder_hits=[]"
+        },
+        {
+          "text": "Task A: at least one concrete / verifiable success criterion present",
+          "passed": true,
+          "evidence": "concrete_criterion_heuristic=pass; design_excerpt='## Goal\\nImplement a VIN (Vehicle Identification Number, ISO 3779) detection scanner that finds and validates 17-character VINs embedded in customer-uploaded document text. Detected VINs must be flagge'"
+        },
+        {
+          "text": "Task B (40h oversized): broken down into >=3 child subtasks",
+          "passed": true,
+          "evidence": "children=5: ['eval-z2i.5', 'eval-z2i.4', 'eval-z2i.3', 'eval-z2i.2', 'eval-z2i.1']"
+        },
+        {
+          "text": "Task B: parent design updated to coordinator-style summary",
+          "passed": true,
+          "evidence": "coordinator_terms_found=['coordinator', 'subtask', 'child']"
+        },
+        {
+          "text": "Task C: design now mentions >=2 edge-case terms {unicode, empty, concurrent, malformed, edge case, backtrack}",
+          "passed": true,
+          "evidence": "edge_terms_found=['unicode', 'empty', 'concurrent', 'concurrency']"
+        },
+        {
+          "text": "Task D (tautological tests): design rewritten with real tests, OR flagged REJECT/REVISION in review_summary",
+          "passed": true,
+          "evidence": "still_tautological=True; review_verdict_in_section=True; section_excerpt='eval-3ka` blocking edge so the data model lands first.\\n\\n## Task D \u2014 Define ScanResult data model (eval-3ka)\\n\\nVerdict: REJECT as specified (all tests t'"
+        },
+        {
+          "text": "No seeded task was marked in_progress or closed",
+          "passed": true,
+          "evidence": "active_seeded=[]"
+        },
+        {
+          "text": "Epic still has >=4 direct children (original 4 tasks, subtasks allowed deeper)",
+          "passed": true,
+          "evidence": "epic_children=4: ['eval-3ka', 'eval-sm2', 'eval-z2i', 'eval-ksj']"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": 0.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 423.1,
+        "stddev": 0.0,
+        "min": 423.1,
+        "max": 423.1
+      },
+      "tokens": {
+        "mean": 0.0,
+        "stddev": 0.0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "delta": {
+      "pass_rate": "+1.00",
+      "time_seconds": "+423.1",
+      "tokens": "+0"
+    }
+  },
+  "notes": []
+}

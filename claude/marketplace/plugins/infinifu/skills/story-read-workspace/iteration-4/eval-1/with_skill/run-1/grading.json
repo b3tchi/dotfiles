@@ -1,0 +1,51 @@
+{
+  "run_id": "eval-1-with_skill",
+  "expectations": [
+    {
+      "text": "Output is a markdown table or table-like structured listing",
+      "passed": true,
+      "evidence": "Lines 3-6 form a markdown table with pipe delimiters"
+    },
+    {
+      "text": "Table includes us013 (draft)",
+      "passed": true,
+      "evidence": "Line 5: '| us013 | draft | requestor | resubmit ... |'"
+    },
+    {
+      "text": "Table includes us014 (draft)",
+      "passed": true,
+      "evidence": "Line 6: '| us014 | draft | requestor | bulk import ... |'"
+    },
+    {
+      "text": "Table excludes us001 (status=done)",
+      "passed": true,
+      "evidence": "us001 not in the table"
+    },
+    {
+      "text": "Table excludes us002 (status=done)",
+      "passed": true,
+      "evidence": "us002 not in the table"
+    },
+    {
+      "text": "Table excludes us003 (status=ready)",
+      "passed": true,
+      "evidence": "us003 not in the table"
+    },
+    {
+      "text": "Table columns include id, status, role, and title",
+      "passed": true,
+      "evidence": "Header row: '| id | status | role | title |'"
+    },
+    {
+      "text": "Output includes a count summary line (e.g. '2 stories matched')",
+      "passed": true,
+      "evidence": "Line 8: '2 stories matched (2 draft).'"
+    }
+  ],
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 8,
+    "failed": 0,
+    "total": 8
+  }
+}

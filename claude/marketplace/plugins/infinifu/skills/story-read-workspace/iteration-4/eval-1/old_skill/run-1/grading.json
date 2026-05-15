@@ -1,0 +1,51 @@
+{
+  "run_id": "eval-1-old_skill",
+  "expectations": [
+    {
+      "text": "Output is a markdown table or table-like structured listing",
+      "passed": false,
+      "evidence": "Output is 'No stories found.' message"
+    },
+    {
+      "text": "Table includes us013 (draft)",
+      "passed": false,
+      "evidence": "No table rendered"
+    },
+    {
+      "text": "Table includes us014 (draft)",
+      "passed": false,
+      "evidence": "No table rendered"
+    },
+    {
+      "text": "Table excludes us001 (status=done)",
+      "passed": true,
+      "evidence": "Trivially true \u2014 nothing rendered"
+    },
+    {
+      "text": "Table excludes us002 (status=done)",
+      "passed": true,
+      "evidence": "Trivially true \u2014 nothing rendered"
+    },
+    {
+      "text": "Table excludes us003 (status=ready)",
+      "passed": true,
+      "evidence": "Trivially true \u2014 nothing rendered"
+    },
+    {
+      "text": "Table columns include id, status, role, and title",
+      "passed": false,
+      "evidence": "No table"
+    },
+    {
+      "text": "Output includes a count summary line (e.g. '2 stories matched')",
+      "passed": false,
+      "evidence": "No count line"
+    }
+  ],
+  "summary": {
+    "pass_rate": 0.375,
+    "passed": 3,
+    "failed": 5,
+    "total": 8
+  }
+}

@@ -1,0 +1,12 @@
+stories:
+  - id: 2605-001
+    title: Export query results as CSV
+    role: data analyst
+    want: to export query results as CSV
+    so_that: I can share them with non-technical stakeholders
+    acceptance_criteria:
+      - CSV includes all visible columns in the same order as the table
+      - Empty result set returns a CSV with only the header row
+      - Download triggers within 2 seconds for up to 10k rows
+    status: draft
+    created: 2026-05-09

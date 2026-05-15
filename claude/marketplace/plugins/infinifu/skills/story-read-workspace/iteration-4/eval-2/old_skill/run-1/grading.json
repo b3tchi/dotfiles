@@ -1,0 +1,41 @@
+{
+  "run_id": "eval-2-old_skill",
+  "expectations": [
+    {
+      "text": "Output includes all 5 stories from the fixture (us001, us002, us003, us013, us014)",
+      "passed": false,
+      "evidence": "No stories rendered \u2014 'No stories found.'"
+    },
+    {
+      "text": "Stories are grouped by status (Draft / Ready / Done at minimum)",
+      "passed": false,
+      "evidence": "No grouping"
+    },
+    {
+      "text": "Each story shows a Connextra-style one-liner with role/want/because",
+      "passed": false,
+      "evidence": "No stories"
+    },
+    {
+      "text": "Each story shows its acceptance criteria as bullets",
+      "passed": false,
+      "evidence": "No criteria"
+    },
+    {
+      "text": "Output ends with a total count summary",
+      "passed": false,
+      "evidence": "No count"
+    },
+    {
+      "text": "Persona aliases are rendered as readable labels ('requestor', 'approver'), not raw [[pn001|...]] wikilinks",
+      "passed": false,
+      "evidence": "No personas rendered at all"
+    }
+  ],
+  "summary": {
+    "pass_rate": 0.0,
+    "passed": 0,
+    "failed": 6,
+    "total": 6
+  }
+}

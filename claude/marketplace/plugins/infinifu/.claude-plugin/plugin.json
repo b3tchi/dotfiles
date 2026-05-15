@@ -1,0 +1,8 @@
+{
+  "name": "infinifu",
+  "description": "Lifecycle skills framework with bd (beads) task tracking — idea, spec, plan, work, ship workflows",
+  "version": "2.7.0",
+  "author": {
+    "name": "b3tchi"
+  }
+}

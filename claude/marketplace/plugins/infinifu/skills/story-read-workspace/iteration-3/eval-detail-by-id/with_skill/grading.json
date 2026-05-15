@@ -1,0 +1,36 @@
+{
+  "eval_name": "eval-detail-by-id",
+  "expectations": [
+    {
+      "text": "Output contains the id 2605-001",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output renders the Connextra one-liner",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output lists all acceptance criteria for that story (3 bullets)",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output shows status field",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output is in detail mode (single story), not table or render mode",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output does not include unrelated stories",
+      "passed": true,
+      "evidence": ""
+    }
+  ],
+  "summary": "6/6 passed"
+}

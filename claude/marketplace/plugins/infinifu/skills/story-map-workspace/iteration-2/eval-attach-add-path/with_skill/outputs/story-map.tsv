@@ -1,0 +1,9 @@
+2605-001	src/components/ExportButton.svelte
+2605-001	src/export/csv.test.ts
+2605-001	src/export/csv.ts
+2605-001	src/payments/checkout.ts
+2605-002	src/auth/login.ts
+2605-002	src/auth/password-reset.ts
+2605-002	src/email/templates/reset.html
+2605-005	src/auth/2fa/**
+2605-005	src/auth/login.ts

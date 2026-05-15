@@ -1,0 +1,46 @@
+{
+  "run_id": "eval-0-old_skill",
+  "expectations": [
+    {
+      "text": "Output contains the id us001",
+      "passed": false,
+      "evidence": "Output is 'No stories found. Use story-write to add one.' \u2014 old skill checked product/stories.yaml which does not exist in AKM sandbox"
+    },
+    {
+      "text": "Output renders the Connextra one-liner: 'As a ... I want ... because ...'",
+      "passed": false,
+      "evidence": "No story rendered"
+    },
+    {
+      "text": "Output renders persona alias 'requestor' (not the raw wikilink [[pn001|requestor]])",
+      "passed": false,
+      "evidence": "No story rendered"
+    },
+    {
+      "text": "Output lists all 3 acceptance criteria for us001 (browse catalog, add items, submit request)",
+      "passed": false,
+      "evidence": "No acceptance criteria rendered"
+    },
+    {
+      "text": "Output shows status field (done)",
+      "passed": false,
+      "evidence": "No story rendered"
+    },
+    {
+      "text": "Output is in detail mode (single story), not table or render mode",
+      "passed": false,
+      "evidence": "Output is an error message, not any of the three modes"
+    },
+    {
+      "text": "Output does not include any other story (us002, us003, us013, us014)",
+      "passed": true,
+      "evidence": "Trivially true \u2014 no stories rendered at all"
+    }
+  ],
+  "summary": {
+    "pass_rate": 0.14285714285714285,
+    "passed": 1,
+    "failed": 6,
+    "total": 7
+  }
+}

@@ -1,0 +1,14 @@
+stories:
+  - id: 2605-001
+    title: View public catalog as a guest without signing in
+    role: guest
+    want: to view the public catalog without signing in
+    because: I want to evaluate the products before creating an account
+    acceptance_criteria:
+      - Catalog index page is reachable without an authenticated session
+      - Product listing shows name, image, price, and short description for each item
+      - Product detail pages are viewable by guests with the same content shown to signed-in users (excluding personalized sections)
+      - Actions that require an account (e.g., checkout, save-for-later) prompt sign-in instead of failing silently
+    tags: [catalog, public-access]
+    status: draft
+    created: 2026-05-14

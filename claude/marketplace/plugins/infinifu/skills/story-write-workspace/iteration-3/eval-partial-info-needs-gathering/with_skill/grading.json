@@ -1,0 +1,51 @@
+{
+  "eval_name": "eval-partial-info-needs-gathering",
+  "expectations": [
+    {
+      "text": "product/stories.yaml exists with one story added",
+      "passed": true,
+      "evidence": "exists=True, count=1"
+    },
+    {
+      "text": "role mentions 'admin'",
+      "passed": true,
+      "evidence": "role='admin'"
+    },
+    {
+      "text": "want describes bulk-archive of old reports",
+      "passed": true,
+      "evidence": "want='to bulk-archive reports older than 90 days'"
+    },
+    {
+      "text": "so_that field is non-empty and provides a motivation (not 'TBD' or empty)",
+      "passed": true,
+      "evidence": "so_that='stale reports are removed from active views and storage stays manageable'"
+    },
+    {
+      "text": "acceptance_criteria has at least 1 item",
+      "passed": true,
+      "evidence": "ac_count=4"
+    },
+    {
+      "text": "status equals 'draft'",
+      "passed": true,
+      "evidence": "status='draft'"
+    },
+    {
+      "text": "id matches yymm-NNN pattern",
+      "passed": true,
+      "evidence": "id='2605-001'"
+    },
+    {
+      "text": "tags field is a non-empty list",
+      "passed": true,
+      "evidence": "tags=['admin', 'reports']"
+    },
+    {
+      "text": "tags include 'admin' or 'reports'",
+      "passed": true,
+      "evidence": "tags=['admin', 'reports']"
+    }
+  ],
+  "summary": "9/9 passed"
+}

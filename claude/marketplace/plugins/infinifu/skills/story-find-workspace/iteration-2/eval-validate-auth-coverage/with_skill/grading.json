@@ -1,0 +1,41 @@
+{
+  "eval_name": "eval-validate-auth-coverage",
+  "expectations": [
+    {
+      "text": "Output identifies story 2605-005 (two-factor auth) as a match",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output identifies story 2605-002 (password reset) as a match",
+      "passed": false,
+      "evidence": ""
+    },
+    {
+      "text": "Output does NOT include story 2605-003 (archive reports)",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Each matched story shows status field",
+      "passed": false,
+      "evidence": ""
+    },
+    {
+      "text": "Each matched story renders acceptance criteria as checklist with [ ] or [x]",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "For each story, output indicates whether it is validated/done or unverified",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output ends with a coverage summary",
+      "passed": true,
+      "evidence": ""
+    }
+  ],
+  "summary": "5/7 passed"
+}

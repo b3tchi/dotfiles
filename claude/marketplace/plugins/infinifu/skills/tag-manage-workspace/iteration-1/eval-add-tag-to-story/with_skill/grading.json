@@ -1,0 +1,31 @@
+{
+  "eval_name": "eval-add-tag-to-story",
+  "expectations": [
+    {
+      "text": "stories.yaml was modified \u2014 story 2605-001's tags now contains 'billing'",
+      "passed": true,
+      "evidence": "2605-001 tags=['export', 'data', 'billing']"
+    },
+    {
+      "text": "Original tags ('export', 'data') are preserved on 2605-001",
+      "passed": true,
+      "evidence": "tags=['export', 'data', 'billing']"
+    },
+    {
+      "text": "No other story's tags were modified",
+      "passed": true,
+      "evidence": "2605-002 tags=['auth', 'account']"
+    },
+    {
+      "text": "Response notes that 'billing' is a new tag (not previously in taxonomy)",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Response shows the resulting tags line for 2605-001",
+      "passed": true,
+      "evidence": ""
+    }
+  ],
+  "summary": "5/5 passed"
+}

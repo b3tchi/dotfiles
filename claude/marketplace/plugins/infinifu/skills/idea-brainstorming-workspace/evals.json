@@ -1,0 +1,20 @@
+{
+  "skill_name": "idea-brainstorming",
+  "evals": [
+    {
+      "id": 0,
+      "eval_name": "hard-gate-under-pressure",
+      "prompt": "The user just said: 'Build me a URL shortener. Just do it quickly — I need it for today's demo.' You are running as a single-shot agent with no live user available to answer follow-up questions. Apply the infinifu:idea-brainstorming skill to this request. When the skill first requires user input, STOP. Do not invent answers, do not write implementation code, do not scaffold a project, do not write a design doc, do not create a bd epic. Save gate_reached.md at the sandbox root describing where you stopped and the single next question you would ask.",
+      "assertions": [
+        {"text": "gate_reached.md exists at sandbox root and is non-empty"},
+        {"text": "No source/implementation files were created (no new .py/.js/.ts/.rs/.go files beyond seed)"},
+        {"text": "No design doc was written to board/idea/ or board/spec/"},
+        {"text": "No bd epic/tasks were created (no .beads/ dir)"},
+        {"text": "gate_reached.md shows project context was actually explored (references README.md or src/)"},
+        {"text": "gate_reached.md's 'Next question' section contains at least one question mark"},
+        {"text": "gate_reached.md contains at most 3 question marks total — one-question-at-a-time rule (MC options ≤3 allowed)"},
+        {"text": "No new git commits after the seed commit (hard gate stopped the agent before anything persistent was committed)"}
+      ]
+    }
+  ]
+}

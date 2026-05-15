@@ -1,0 +1,126 @@
+{
+  "metadata": {
+    "skill_name": "spec-writing",
+    "skill_path": "<path/to/skill>",
+    "executor_model": "<model-name>",
+    "analyzer_model": "<model-name>",
+    "timestamp": "2026-04-19T16:52:56Z",
+    "evals_run": [
+      0
+    ],
+    "runs_per_configuration": 3
+  },
+  "runs": [
+    {
+      "eval_id": 0,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 13,
+        "failed": 0,
+        "total": 13,
+        "time_seconds": 154.5,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "board/spec/url-shortener.md still exists and was modified from seed",
+          "passed": true,
+          "evidence": "exists=True; size=28736; changed=True"
+        },
+        {
+          "text": "Spec starts with '# <Feature> Implementation Plan' header",
+          "passed": true,
+          "evidence": "matched=True; first_line='# URL Shortener Implementation Plan'"
+        },
+        {
+          "text": "Spec contains 'For Claude:' handoff line referencing plan-scrum-master or plan-supervised",
+          "passed": true,
+          "evidence": "matched=True"
+        },
+        {
+          "text": "Header includes Goal:, Architecture:, Tech Stack: fields (all three)",
+          "passed": true,
+          "evidence": "goal=True; architecture=True; tech_stack=True"
+        },
+        {
+          "text": "Spec contains at least 3 tasks (## or ### Task N: headings)",
+          "passed": true,
+          "evidence": "task_headings=8"
+        },
+        {
+          "text": "At least one task contains a failing-test code block (pytest def test_ or assert)",
+          "passed": true,
+          "evidence": "matched=True"
+        },
+        {
+          "text": "At least one task contains an implementation code block (non-test Python code)",
+          "passed": true,
+          "evidence": "impl_blocks_with_def=9"
+        },
+        {
+          "text": "At least one task specifies exact shortener path (src/services/shortener/<file>.py)",
+          "passed": true,
+          "evidence": "paths_matched=['src/services/shortener/__init__.py', 'src/services/shortener/app.py', 'src/services/shortener/config.py', 'src/services/shortener/deps.py', 'src/services/shortener/migrations/env.py', 'src/services/shortener/migrations/versions/0001_create_short_links.py', 'src/services/shortener/repository.py', 'src/services/shortener/schemas.py', 'src/services/shortener/slugs.py', 'src/services/shortener/validation.py']"
+        },
+        {
+          "text": "At least one task includes a git commit command",
+          "passed": true,
+          "evidence": "matched=True"
+        },
+        {
+          "text": "At least one task includes a run-the-test command with Expected: FAIL or PASS annotation",
+          "passed": true,
+          "evidence": "matched=True"
+        },
+        {
+          "text": "No bd tasks created (no .beads/ dir)",
+          "passed": true,
+          "evidence": ".beads_exists=False"
+        },
+        {
+          "text": "No new .py source or test files (agent wrote spec only, no implementation)",
+          "passed": true,
+          "evidence": "new_py_files=[]"
+        },
+        {
+          "text": "No new git commits after the seed (seed had 1 commit, still 1 now)",
+          "passed": true,
+          "evidence": "commit_count=1"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": 0.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 154.5,
+        "stddev": 0.0,
+        "min": 154.5,
+        "max": 154.5
+      },
+      "tokens": {
+        "mean": 0.0,
+        "stddev": 0.0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "delta": {
+      "pass_rate": "+1.00",
+      "time_seconds": "+154.5",
+      "tokens": "+0"
+    }
+  },
+  "notes": []
+}

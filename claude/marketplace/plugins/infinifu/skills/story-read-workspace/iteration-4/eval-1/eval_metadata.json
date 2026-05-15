@@ -1,0 +1,6 @@
+{
+  "eval_id": 1,
+  "eval_name": "filter-by-status-draft",
+  "prompt": "List all draft stories.",
+  "assertions": []
+}

@@ -1,0 +1,41 @@
+{
+  "run_id": "eval-2-with_skill",
+  "expectations": [
+    {
+      "text": "Output includes all 5 stories from the fixture (us001, us002, us003, us013, us014)",
+      "passed": true,
+      "evidence": "All five ids appear under their status sections"
+    },
+    {
+      "text": "Stories are grouped by status (Draft / Ready / Done at minimum)",
+      "passed": true,
+      "evidence": "Three H2 sections: ## Draft, ## Ready, ## Done"
+    },
+    {
+      "text": "Each story shows a Connextra-style one-liner with role/want/because",
+      "passed": true,
+      "evidence": "Each story has 'As a ... I want ... because ...' line"
+    },
+    {
+      "text": "Each story shows its acceptance criteria as bullets",
+      "passed": true,
+      "evidence": "Each story has its bullet list of criteria"
+    },
+    {
+      "text": "Output ends with a total count summary",
+      "passed": true,
+      "evidence": "Line 46: 'Total: 5 stories (2 draft, 1 ready, 2 done).'"
+    },
+    {
+      "text": "Persona aliases are rendered as readable labels ('requestor', 'approver'), not raw [[pn001|...]] wikilinks",
+      "passed": true,
+      "evidence": "'requestor' and 'approver' rendered bare; no wikilink syntax in the output"
+    }
+  ],
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 6,
+    "failed": 0,
+    "total": 6
+  }
+}

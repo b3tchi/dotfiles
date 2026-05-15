@@ -1,0 +1,80 @@
+{
+  "summary": {
+    "passed": 13,
+    "failed": 0,
+    "total": 13,
+    "pass_rate": 1.0
+  },
+  "expectations": [
+    {
+      "text": "board/spec/url-shortener.md still exists and was modified from seed",
+      "passed": true,
+      "evidence": "exists=True; size=28736; changed=True"
+    },
+    {
+      "text": "Spec starts with '# <Feature> Implementation Plan' header",
+      "passed": true,
+      "evidence": "matched=True; first_line='# URL Shortener Implementation Plan'"
+    },
+    {
+      "text": "Spec contains 'For Claude:' handoff line referencing plan-scrum-master or plan-supervised",
+      "passed": true,
+      "evidence": "matched=True"
+    },
+    {
+      "text": "Header includes Goal:, Architecture:, Tech Stack: fields (all three)",
+      "passed": true,
+      "evidence": "goal=True; architecture=True; tech_stack=True"
+    },
+    {
+      "text": "Spec contains at least 3 tasks (## or ### Task N: headings)",
+      "passed": true,
+      "evidence": "task_headings=8"
+    },
+    {
+      "text": "At least one task contains a failing-test code block (pytest def test_ or assert)",
+      "passed": true,
+      "evidence": "matched=True"
+    },
+    {
+      "text": "At least one task contains an implementation code block (non-test Python code)",
+      "passed": true,
+      "evidence": "impl_blocks_with_def=9"
+    },
+    {
+      "text": "At least one task specifies exact shortener path (src/services/shortener/<file>.py)",
+      "passed": true,
+      "evidence": "paths_matched=['src/services/shortener/__init__.py', 'src/services/shortener/app.py', 'src/services/shortener/config.py', 'src/services/shortener/deps.py', 'src/services/shortener/migrations/env.py', 'src/services/shortener/migrations/versions/0001_create_short_links.py', 'src/services/shortener/repository.py', 'src/services/shortener/schemas.py', 'src/services/shortener/slugs.py', 'src/services/shortener/validation.py']"
+    },
+    {
+      "text": "At least one task includes a git commit command",
+      "passed": true,
+      "evidence": "matched=True"
+    },
+    {
+      "text": "At least one task includes a run-the-test command with Expected: FAIL or PASS annotation",
+      "passed": true,
+      "evidence": "matched=True"
+    },
+    {
+      "text": "No bd tasks created (no .beads/ dir)",
+      "passed": true,
+      "evidence": ".beads_exists=False"
+    },
+    {
+      "text": "No new .py source or test files (agent wrote spec only, no implementation)",
+      "passed": true,
+      "evidence": "new_py_files=[]"
+    },
+    {
+      "text": "No new git commits after the seed (seed had 1 commit, still 1 now)",
+      "passed": true,
+      "evidence": "commit_count=1"
+    }
+  ],
+  "timing": {
+    "total_tokens": 39559,
+    "duration_ms": 154546,
+    "total_duration_seconds": 154.5
+  }
+}

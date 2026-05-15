@@ -1,0 +1,54 @@
+{
+  "skill_name": "story-map",
+  "evals": [
+    {
+      "id": 0,
+      "eval_name": "forward-lookup-exact-path",
+      "prompt": "Which stories cover src/auth/login.ts?",
+      "assertions": [
+        {"text": "Output identifies story 2605-002 (password reset) as a match (exact path)"},
+        {"text": "Output identifies story 2605-005 (2FA) as a match (covered by glob src/auth/2fa/** OR src/auth/login.ts)"},
+        {"text": "Output excludes 2605-001 (CSV export, different path)"},
+        {"text": "Output excludes 2605-003 (no paths field)"},
+        {"text": "Output is a table or structured listing"},
+        {"text": "Output includes a count summary"}
+      ]
+    },
+    {
+      "id": 1,
+      "eval_name": "forward-lookup-prefix",
+      "prompt": "Stories touching src/auth/?",
+      "assertions": [
+        {"text": "Output identifies story 2605-002 (has src/auth/login.ts and src/auth/password-reset.ts)"},
+        {"text": "Output identifies story 2605-005 (has src/auth/2fa/** and src/auth/login.ts)"},
+        {"text": "Output excludes 2605-001 (src/export/...)"},
+        {"text": "Output excludes 2605-004 (no paths field)"},
+        {"text": "Output is a table or structured listing"}
+      ]
+    },
+    {
+      "id": 2,
+      "eval_name": "reverse-lookup",
+      "prompt": "Where is story 2605-002 implemented?",
+      "assertions": [
+        {"text": "Output lists src/auth/login.ts"},
+        {"text": "Output lists src/auth/password-reset.ts"},
+        {"text": "Output lists src/email/templates/reset.html"},
+        {"text": "Output shows exactly 3 paths"},
+        {"text": "Output includes story title (Reset password via email link)"}
+      ]
+    },
+    {
+      "id": 3,
+      "eval_name": "attach-add-path",
+      "prompt": "Add src/payments/checkout.ts to story 2605-001.",
+      "assertions": [
+        {"text": "stories.yaml was modified — story 2605-001's paths now contains src/payments/checkout.ts"},
+        {"text": "Original paths (src/export/csv.ts, src/export/csv.test.ts, src/components/ExportButton.svelte) are preserved"},
+        {"text": "No other story's paths were modified"},
+        {"text": "Response shows the resulting paths list for 2605-001"},
+        {"text": "If the path doesn't exist in the working tree, response notes the warning"}
+      ]
+    }
+  ]
+}

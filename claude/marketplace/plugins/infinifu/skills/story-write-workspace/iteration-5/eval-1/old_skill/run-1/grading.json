@@ -1,0 +1,15 @@
+{
+  "run_id": "eval-1-old_skill",
+  "expectations": [
+    {"text": "A new file docs/notes/us###.md was created", "passed": false, "evidence": "Wrote product/stories.yaml instead"},
+    {"text": "Filename slug is us<NNN>.md with three-digit zero-padded id", "passed": false, "evidence": "No us### file"},
+    {"text": "Frontmatter aliases entry is a human-readable title describing the pick action", "passed": false, "evidence": "Title field in YAML entry only; no frontmatter aliases"},
+    {"text": "status frontmatter is 'draft'", "passed": false, "evidence": "Status in YAML entry, not zettel frontmatter"},
+    {"text": "## role wikilink either references an existing persona alias (e.g. requestor, approver) OR a newly-created pn### that matches 'picker' or 'warehouse'", "passed": false, "evidence": "Role recorded as plain string 'warehouse picker', no wikilink, no pn### zettel created"},
+    {"text": "## want describes marking the request as picked", "passed": false, "evidence": "No body section"},
+    {"text": "## because gives a non-empty motivation (mentions handoff or ready-for-pickup)", "passed": false, "evidence": "Captured in YAML field, not body"},
+    {"text": "## acceptance_criteria has at least 1 bullet (derived if user did not specify, with disclosure)", "passed": false, "evidence": "Captured in YAML list, not body bullets"},
+    {"text": "Footer contains 'Index: [[product]]'", "passed": false, "evidence": "No markdown footer"}
+  ],
+  "summary": {"pass_rate": 0.0, "passed": 0, "failed": 9, "total": 9}
+}

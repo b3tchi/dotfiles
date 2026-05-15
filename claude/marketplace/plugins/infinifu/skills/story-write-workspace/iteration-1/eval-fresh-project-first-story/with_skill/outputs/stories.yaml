@@ -1,0 +1,13 @@
+stories:
+  - id: 2605-001
+    title: Reset password via 'forgot password' link
+    role: logged-in user
+    want: to reset my password from a 'forgot password' link
+    so_that: I don't get locked out of my account
+    acceptance_criteria:
+      - "'Forgot password' link is visible on the login screen and initiates the reset flow"
+      - Submitting a registered email address sends a password reset email containing a unique reset link
+      - Clicking the reset link opens a form that accepts a new password and confirms the change on submit
+      - Reset link expires after a single successful use or after 24 hours, whichever comes first
+    status: draft
+    created: 2026-05-09

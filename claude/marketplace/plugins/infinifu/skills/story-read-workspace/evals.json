@@ -1,0 +1,58 @@
+{
+  "skill_name": "story-read",
+  "evals": [
+    {
+      "id": 0,
+      "eval_name": "detail-by-id",
+      "prompt": "Show me story us001.",
+      "assertions": [
+        {"text": "Output contains the id us001"},
+        {"text": "Output renders the Connextra one-liner: 'As a ... I want ... because ...'"},
+        {"text": "Output renders persona alias 'requestor' (not the raw wikilink [[pn001|requestor]])"},
+        {"text": "Output lists all 3 acceptance criteria for us001 (browse catalog, add items, submit request)"},
+        {"text": "Output shows status field (done)"},
+        {"text": "Output is in detail mode (single story), not table or render mode"},
+        {"text": "Output does not include any other story (us002, us003, us013, us014)"}
+      ]
+    },
+    {
+      "id": 1,
+      "eval_name": "filter-by-status-draft",
+      "prompt": "List all draft stories.",
+      "assertions": [
+        {"text": "Output is a markdown table or table-like structured listing"},
+        {"text": "Table includes us013 (draft)"},
+        {"text": "Table includes us014 (draft)"},
+        {"text": "Table excludes us001 (status=done)"},
+        {"text": "Table excludes us002 (status=done)"},
+        {"text": "Table excludes us003 (status=ready)"},
+        {"text": "Table columns include id, status, role, and title"},
+        {"text": "Output includes a count summary line (e.g. '2 stories matched')"}
+      ]
+    },
+    {
+      "id": 2,
+      "eval_name": "render-full-backlog",
+      "prompt": "What's in the product backlog?",
+      "assertions": [
+        {"text": "Output includes all 5 stories from the fixture (us001, us002, us003, us013, us014)"},
+        {"text": "Stories are grouped by status (Draft / Ready / Done at minimum)"},
+        {"text": "Each story shows a Connextra-style one-liner with role/want/because"},
+        {"text": "Each story shows its acceptance criteria as bullets"},
+        {"text": "Output ends with a total count summary"},
+        {"text": "Persona aliases are rendered as readable labels ('requestor', 'approver'), not raw [[pn001|...]] wikilinks"}
+      ]
+    },
+    {
+      "id": 3,
+      "eval_name": "keyword-search",
+      "prompt": "Find stories about resubmission or import.",
+      "assertions": [
+        {"text": "Output is a table or filtered list (not a single-story detail)"},
+        {"text": "Result includes us013 (resubmit) — matches 'resubmission'"},
+        {"text": "Result includes us014 (bulk import) — matches 'import'"},
+        {"text": "Result excludes unrelated stories (us001, us002, us003)"}
+      ]
+    }
+  ]
+}

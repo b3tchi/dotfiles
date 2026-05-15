@@ -1,0 +1,14 @@
+{
+  "eval_id": 0,
+  "eval_name": "discovery-required",
+  "prompt": "You have a bd task (ID in seeded_ids.json). Apply infinifu:work-do. Note: the task references src/dates.py which does NOT exist, and the task's Out-of-scope section explicitly requires you to file a discovery instead of implementing it.",
+  "assertions": [
+    {"text": "A NEW bd task was created (beyond the seeded one)"},
+    {"text": "New task's title contains 'Discovered' or references dates/date formatter"},
+    {"text": "New task is linked to the original task via a 'discovered-from' dependency"},
+    {"text": "src/dates.py was NOT created (out-of-scope respected)"},
+    {"text": "Original task was claimed (status = in_progress OR blocked)"},
+    {"text": "Original task was NOT closed"},
+    {"text": "Original task has at least one note referencing the missing dates module / discovery"}
+  ]
+}

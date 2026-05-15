@@ -1,0 +1,15 @@
+{
+  "run_id": "eval-2-with_skill",
+  "expectations": [
+    {"text": "A new file docs/notes/us001.md was created (first story of empty workspace)", "passed": true, "evidence": "us001.md created"},
+    {"text": "Filename is exactly us001.md, not us<larger>.md", "passed": true, "evidence": "Filename us001.md"},
+    {"text": "Frontmatter contains aliases (with at least one entry), status: draft, created: ISO date", "passed": true, "evidence": "Lines 1-6: aliases entry, status: draft, created: 2026-05-14"},
+    {"text": "H1 ends with [[product]] wikilink", "passed": true, "evidence": "Line 7: '# Story [[guest-flow]] [[catalog]] [[product]]'"},
+    {"text": "## role section references a persona via wikilink (existing or newly created pn###)", "passed": true, "evidence": "Line 10: '[[pn001|guest]]' — agent created new persona pn001"},
+    {"text": "## want describes browsing the public catalog without auth", "passed": true, "evidence": "Line 13: 'view the public catalog without signing in'"},
+    {"text": "## because mentions evaluation / pre-account browsing", "passed": true, "evidence": "Line 16: 'I want to evaluate the products before creating an account'"},
+    {"text": "## acceptance_criteria has at least 1 testable bullet", "passed": true, "evidence": "Lines 19-21 list 3 derived testable criteria; derivation flagged in response.md"},
+    {"text": "Footer contains 'Index: [[product]]'", "passed": true, "evidence": "Line 25: 'Index: [[product]]'"}
+  ],
+  "summary": {"pass_rate": 1.0, "passed": 9, "failed": 0, "total": 9}
+}

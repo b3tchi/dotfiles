@@ -1,0 +1,31 @@
+{
+  "eval_name": "eval-filter-by-status",
+  "expectations": [
+    {
+      "text": "Output is a markdown table or table-like structured listing",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Table includes only stories whose status is 'draft' (3 stories in fixture)",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Table excludes stories with status 'ready' or 'done'",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Table includes columns: id, status, role, title (or equivalent)",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output includes a count summary line at the end (e.g. '3 stories matched')",
+      "passed": true,
+      "evidence": ""
+    }
+  ],
+  "summary": "5/5 passed"
+}
