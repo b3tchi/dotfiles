@@ -60,7 +60,6 @@
     "command": "bash ~/.claude/statusline.sh"
   },
   "enabledPlugins": {
-    "infinifu@infinifu-dev": true,
     "caveman@caveman": true,
     "skill-creator@claude-plugins-official": true,
     "typescript-lsp@claude-plugins-official": true,
@@ -68,15 +67,10 @@
     "nushell-lsp@dotfiles": true,
     "json-lsp@dotfiles": true,
     "yaml-lsp@dotfiles": true,
-    "wiki-oxide@dotfiles": true
+    "wiki-oxide@dotfiles": true,
+    "infinifu@dotfiles": true
   },
   "extraKnownMarketplaces": {
-    "infinifu-dev": {
-      "source": {
-        "source": "directory",
-        "path": "/home/jan/repos/b3tchi/acag/main/infinifu"
-      }
-    },
     "caveman": {
       "source": {
         "source": "github",
