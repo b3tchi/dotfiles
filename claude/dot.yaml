@@ -75,9 +75,29 @@ linux:
           CLAUDE_CONFIG_DIR="$cfg" claude plugin install "$spec"
         fi
       }
+      uninstall_plugin() {
+        spec="$1"  # name@marketplace
+        if CLAUDE_CONFIG_DIR="$cfg" claude plugin list 2>/dev/null | grep -q "❯ ${spec}$"; then
+          CLAUDE_CONFIG_DIR="$cfg" claude plugin uninstall "$spec"
+        else
+          echo "skip uninstall plugin ${spec} (${cfg}): not present"
+        fi
+      }
+      remove_marketplace() {
+        name="$1"
+        if CLAUDE_CONFIG_DIR="$cfg" claude plugin marketplace list 2>/dev/null | grep -q "❯ ${name}$"; then
+          CLAUDE_CONFIG_DIR="$cfg" claude plugin marketplace remove "$name"
+        else
+          echo "skip remove marketplace ${name} (${cfg}): not present"
+        fi
+      }
       if command -v claude >/dev/null 2>&1; then
         for cfg in "$HOME/.claude" "$HOME/.claude-personal"; do
           [ -d "$cfg" ] || continue
+          # Obsolete registrations — clean up before installing canonical versions.
+          uninstall_plugin infinifu@infinifu-dev
+          remove_marketplace infinifu-dev
+
           add_marketplace caveman JuliusBrussee/caveman
           install_plugin caveman@caveman
           add_marketplace claude-plugins-official anthropics/claude-plugins-official
