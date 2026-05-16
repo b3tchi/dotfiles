@@ -19,12 +19,16 @@ docs/
 ├── .markdownlint.json   ← lint relaxations (MD022, MD032)
 ├── .moxide.toml         ← markdown-oxide LSP workspace config
 ├── product.md           ← singleton hub (workspace landing)
+├── board.md             ← singleton hub (active sp###: idea/spec/ready)
+├── archive.md           ← singleton hub (shipped sp###: done)
 ├── assets/              ← images / diagrams / attachments
 │   └── .gitkeep             (moxide-excluded; not indexed)
 └── notes/               ← every zettel lives here
     ├── .gitkeep
     ├── akm.md               ← this knowledge model
     ├── daily/               ← daily journal (YYYY-MM-DD.md)
+    ├── spec/                ← board-citizen specs
+    │   └── sp###.md             Specs
     ├── us###.md             ← Stories
     ├── pn###.md             ← Personas
     ├── ft###.md             ← Features
@@ -553,7 +557,10 @@ one shippable unit. Persistent counterpart to ad-hoc `board/*.md`
 files: same lifecycle (idea→spec→ready→done), now an addressable
 zettel with stable id.
 
-**Location.** `docs/notes/sp###.md` (three-digit zero-padded).
+**Location.** `docs/notes/spec/sp###.md` (three-digit zero-padded).
+Lives in its own subfolder under `notes/` to keep board-citizen zettel
+visually separated from product zettel. Wikilinks still resolve flat
+(`[[sp001]]`) thanks to moxide `link_filenames_only = true`.
 
 **Relationship to other objects.**
 
