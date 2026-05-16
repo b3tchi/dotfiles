@@ -9,6 +9,20 @@ The closing act of the lifecycle. Not just housekeeping — a structured retrosp
 
 **Announce at start:** "I'm using the spec-retro skill to run the delivery retrospective."
 
+## AKM hooks
+
+Stage 8 of the AKM lifecycle — see `claude/akm/akm-lifecycle.md` for the full map and `claude/akm/akm.md` for typed-zettel schemas. Update the PKM from shipped reality and harvest discovered scope.
+
+**Reads:** shipped diff, `im###`, `ft###`, `adr####`.
+
+**Writes:**
+
+- `im###` body — rewrite `## approach` / `## components` / `## data_model` / `## api_surface` to match what actually shipped. The `accepted` card is now the source of truth.
+- `ft###` — update widened constraints; supersede via `## superseded_by` when a contract genuinely changed (features are append-only in spirit).
+- `adr####` — mint a *new* ADR for each decision that shifted during execution (ADRs are immutable; the retro produces new entries, not edits).
+- `us###` — file fresh drafts for newly-discovered scope. The retro is the cheapest moment to capture them.
+- Close the beads epic.
+
 ## When to Use
 
 - After `work-merge` completes with Option 1 (merge) or Option 2 (PR)

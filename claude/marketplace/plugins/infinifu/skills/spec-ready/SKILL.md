@@ -27,6 +27,20 @@ This skill calls `bd update` (bump existing epic to P2), `bd create` (tasks, wit
 
 **Epic already exists:** the epic was created at P4 by `idea-brainstorming` and bumped to P3 by `spec-writing`. This skill bumps it to P2 and attaches child tasks — it does NOT create a new epic. If no epic exists (spec came in without going through brainstorming/spec-writing), create one directly at P2 as a fallback.
 
+## AKM hooks
+
+Stage 4 of the AKM lifecycle — see `claude/akm/akm-lifecycle.md` for the full map and `claude/akm/akm.md` for typed-zettel schemas. Mint beads from the `sp###.tasks` breakdown and promote the spec to ready.
+
+**Reads:** `sp###` (status `spec`, with `## plan` and `## tasks` populated by spec-refinement).
+
+**Writes:**
+
+- `sp###.tasks` — annotate each `### Task N` block with `#### bd <id>` once the bd issue is minted. Use the `#### depends` H4 to drive `bd dep add`.
+- `sp###` frontmatter — flip `status: spec` → `ready` once every task carries a bd id.
+- `board.md` — move `[[sp###]]` from `## spec` → `## ready`.
+
+The bd epic title should reference the `sp###` slug (and the `us###` it solves) for traceability.
+
 ## Plan-Prepare: Dependency Analysis and Parallelism
 
 When creating tasks from a spec (the plan-prepare phase), analyze the work for:

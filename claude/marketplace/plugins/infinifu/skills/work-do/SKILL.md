@@ -19,6 +19,18 @@ Execute one bd task end-to-end: read the spec, do the work, verify, close with e
 - You are executing a batch task under `plan-supervised`
 - You picked up an unblocked task from `bd ready` and want the standard protocol
 
+## AKM hooks
+
+Stage 5 of the AKM lifecycle — see `claude/akm/akm-lifecycle.md` for the full map and `claude/akm/akm.md` for typed-zettel schemas. Read-only on the PKM.
+
+**Reads:**
+
+- `us###.acceptance_criteria` — the ground-truth contract. When the bd task body is ambiguous, the story AC wins.
+- `im###` (`approach`, `components`, `api_surface`, `data_model`) — solution shape for orientation.
+- `sp###.tasks` block matching `#### bd <task-id>` — the structured task definition (effort, files_touched, edge_cases, test_plan) that informs execution.
+
+**Writes:** none. All execution state lives in beads task notes; no zettel mutation in this stage.
+
 ## Prerequisites
 
 Before starting:

@@ -19,6 +19,24 @@ Do NOT invoke any implementation skill, write any code, scaffold any project, or
 
 Every project goes through this process. A todo list, a single-function utility, a config change — all of them. "Simple" projects are where unexamined assumptions cause the most wasted work. The design can be short (a few sentences for truly simple projects), but you MUST present it and get approval.
 
+## AKM hooks
+
+Stage 1 of the AKM lifecycle — see `claude/akm/akm-lifecycle.md` for the full map and `claude/akm/akm.md` for typed-zettel schemas. Capture the request as an addressable `sp###` zettel during brainstorming.
+
+**Entry type drives the read set:**
+
+- *new story (us implement)* — read `pn###`, `us###`
+- *us changed / adjust implementation* — read `pn###`, `us###`, `im###`, `adr####`
+- *feature add* — read `ft###`, `us###`, `im###`, `adr####`
+- *hotfix on implementation or feature* — read `ft###`, `us###`, `im###`, `adr####`
+
+**Writes:**
+
+- `sp###` — mint at `docs/notes/spec/sp###.md` with `## problem` populated, frontmatter `status: idea`, `Index: [[board]]` footer.
+- `board.md` — add `[[sp###]]` under the `## idea` section.
+
+If a new persona surfaces, invoke `persona-write` first to mint `pn###`. The legacy `board/idea/<topic>.md` flat file is being replaced by `sp###` + `board.md`; new work should land in the AKM model.
+
 ## Checklist
 
 Create a task for each of these items and complete them in order. The order matters: persona context flows into design, not the other way around.

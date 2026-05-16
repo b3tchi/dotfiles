@@ -51,6 +51,22 @@ Don't use when:
 
 ---
 
+## AKM hooks
+
+Stage 3 of the AKM lifecycle — see `claude/akm/akm-lifecycle.md` for the full map and `claude/akm/akm.md` for typed-zettel schemas. This is the heaviest `sp###` writer; the SRE 8-category pass below shapes both `## plan` and `## tasks`.
+
+**Reads:** `sp###`, `adr####`, `ft###`.
+
+**Writes:**
+
+- `sp###.plan` — file tree, conventions, anti-patterns, known limitations.
+- `sp###.tasks` — structured breakdown using `### Task N: <name>` per task with H4 properties (`#### type`, `#### effort`, `#### depends`, `#### files_touched`, `#### success_criteria`, `#### edge_cases`, `#### test_plan`). No `#### bd` ids yet — stage 4 (`spec-ready`) attaches those.
+- `im###.specs` — finalize the back-link to this spec.
+
+The 8-category checklist below is what validates that `sp###.tasks` shape. Apply each category to every `### Task N` block; reject if any auto-reject row trips.
+
+---
+
 ## Review Checklist (Apply to Every Task)
 
 ### 1. Task Granularity

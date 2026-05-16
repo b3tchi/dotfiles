@@ -17,6 +17,19 @@ Assume they are a skilled developer, but know almost nothing about our toolset o
 
 **Save plans to:** `board/spec/<feature-name>.md` — this is the same file that was moved from `board/idea/` by the brainstorming skill. Replace its design content with the implementation spec.
 
+## AKM hooks
+
+Stage 2 of the AKM lifecycle — see `claude/akm/akm-lifecycle.md` for the full map and `claude/akm/akm.md` for typed-zettel schemas. Choose and document the solution shape.
+
+**Reads:** `us###.acceptance_criteria`, `cat###`, `ft###`, `adr####`.
+
+**Writes:**
+
+- `sp###` — populate `## solution` (approach, ADR refs, consumed features); flip frontmatter `status: idea` → `spec`.
+- `board.md` — move `[[sp###]]` from `## idea` → `## spec`.
+
+**Gate:** a backing `im###` should exist before specifying. If missing, invoke `implementation-write` first to mint the solution-shape card; the spec is the execution plan against that implementation.
+
 ## Epic lifecycle — bump to P3
 
 Before writing the spec body, find the epic that `idea-brainstorming` created for this topic and bump its priority to P3 (designing):

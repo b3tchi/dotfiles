@@ -67,6 +67,17 @@ Findings below 0.8 must be investigated until ≥0.8 or marked UNCERTAIN in the 
 
 **Announce:** "I'm using infinifu:work-audit to verify task `<id>` against its design."
 
+## AKM hooks
+
+Stage 6 of the AKM lifecycle — see `claude/akm/akm-lifecycle.md` for the full map and `claude/akm/akm.md` for typed-zettel schemas. Read-only on the PKM.
+
+**Reads:**
+
+- `us###.acceptance_criteria` — the binding contract. Audit against this, not just the bd task body. A task can be technically "done" against the bd description but still fail the story AC; that is a rejection.
+- `sp###.tasks` block matching `#### bd <task-id>` — `#### success_criteria`, `#### edge_cases`, and `#### test_plan` are the assertions the implementation must satisfy.
+
+**Writes:** none. Audit evidence belongs in the bd task notes; `bd close` (approval) or gap notes (rejection) is the only state transition this skill owns.
+
 ## Step 1 — Load the task
 
 ```bash

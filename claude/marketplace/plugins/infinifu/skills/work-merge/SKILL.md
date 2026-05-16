@@ -13,6 +13,21 @@ Guide completion of development work by presenting clear options and handling ch
 
 **Announce at start:** "I'm using the work-merge skill to complete this work."
 
+## AKM hooks
+
+Stage 7 of the AKM lifecycle — see `claude/akm/akm-lifecycle.md` for the full map and `claude/akm/akm.md` for typed-zettel schemas. Status flips and archive move.
+
+**Reads:** `sp###`, `us###`, `im###`.
+
+**Writes:**
+
+- `us###.status` → `done`.
+- `im###.status` → `accepted`. (The body narrative may still reflect `proposed`; stage 8 `spec-retro` rewrites it to shipped reality.)
+- `sp###.status` → `done`. Flip the footer `Index: [[board]]` → `Index: [[archive]]`.
+- `board.md` — remove `[[sp###]]` from `## ready`.
+- `archive.md` — add `[[sp###]]` under `## done`.
+- Close the beads task / bug.
+
 ## The Process
 
 ### Step 1: Verify Tests
