@@ -356,8 +356,8 @@ created: YYYY-MM-DD
 - <story-specific glue: module / file / path>
 
 ## specs
-- [[<spec-topic>|<spec-title>]]
-- [[<spec-topic>|<spec-title>]]
+- [[sp###|<spec-title>]]
+- [[sp###|<spec-title>]]
 
 ## superseded_by
 [[im###|<replacement>]]        # only when status = superseded
@@ -533,6 +533,193 @@ Index: [[product]]
 - `draft` — captured but `open_questions` still populated.
 - `validated` — `open_questions` empty (or moved to ADR/decision log).
 - `retired` — role no longer served. Keep file; add `## retired` section.
+
+---
+
+## Board zettel types
+
+Specs are board citizens: transient deliverables that move idea → spec →
+ready → done across the workflow. They use `[[board]]` as Index while
+active, `[[archive]]` once shipped. Distinct from product zettel (us,
+pn, ft, im, adr, cat) which point at `[[product]]`.
+
+---
+
+## Spec — `sp###.md`
+
+**Purpose.** Single deliverable workstream. Carries the problem,
+chosen solution, execution plan, and structured task breakdown for
+one shippable unit. Persistent counterpart to ad-hoc `board/*.md`
+files: same lifecycle (idea→spec→ready→done), now an addressable
+zettel with stable id.
+
+**Location.** `docs/notes/sp###.md` (three-digit zero-padded).
+
+**Relationship to other objects.**
+
+- `solves` — back-link to the [[us###]] story (or stories) this spec
+  delivers.
+- `implements` — [[im###]] solution shape this spec executes.
+- `features` — [[ft###]] capabilities the plan touches.
+- `adrs` — [[adr####]] decisions the spec leans on.
+- H1 categories — one or more [[cat###]] taxonomy buckets.
+
+**Frontmatter.**
+
+```yaml
+aliases:
+  - <spec one-liner>
+status: <idea|spec|ready|done>
+created: YYYY-MM-DD
+```
+
+**Body schema.** Sections grow with lifecycle. `## problem` lands at
+`idea`; `## solution` at `spec`; `## plan` + `## tasks` at `ready`;
+`bd` ids attach to each task at `ready` (by spec-ready). Lifecycle
+owner column shows which infinifu skill writes each section.
+
+```markdown
+# Spec [[cat###]] [[board]]
+
+## solves
+[[us###|<story-alias>]]
+
+## implements
+[[im###|<solution-alias>]]
+
+## problem
+<goal + motivation; written at idea stage>
+
+## solution
+<approach, ADR references, consumed features; written at spec stage>
+
+## plan
+<file tree, conventions, anti-patterns, known limitations; written at refinement>
+
+## tasks
+
+### Task 1: <name>
+
+#### type
+task | feature | bug
+
+#### effort
+<Xh, ≤8h ideal — break down if larger>
+
+#### depends
+- <task-id or — none>
+
+#### files_touched
+- <path>
+
+#### success_criteria
+- <verifiable criterion>
+
+#### edge_cases
+- <failure mode>
+
+#### test_plan
+- <test name + what it catches>
+
+#### bd
+<id>   ← attached by spec-ready
+
+### Task 2: <name>
+...
+
+## superseded_by
+[[sp###|<replacement>]]        # only when status = done and a follow-up spec replaces it
+
+---
+
+Index: [[board]]      # while status ∈ {idea, spec, ready}
+Index: [[archive]]    # once status = done
+```
+
+**Required wikilinks.** `[[board]]` or `[[archive]]` in H1 + footer
+(state-driven), at least one `[[cat###]]` in H1, `solves` to a
+`[[us###]]`, `implements` to an `[[im###]]`.
+
+**Lifecycle.**
+
+- `idea` — captured via idea-brainstorming. `## problem` populated.
+  Listed under `## idea` in [[board]].
+- `spec` — solution chosen via spec-writing. `## solution` populated.
+  Listed under `## spec` in [[board]].
+- `ready` — refined via spec-refinement (SRE 8-category pass); bd ids
+  attached via spec-ready. `## plan` + `## tasks` populated. Listed
+  under `## ready` in [[board]].
+- `done` — merged via work-merge. Footer flipped to `[[archive]]`.
+  Removed from [[board]], added to [[archive]].
+
+---
+
+## Board — `board.md` *(singleton hub)*
+
+**Purpose.** Active-work index. Lists every `sp###` whose status is
+`idea`, `spec`, or `ready`, grouped under section headings matching
+those states. Replaces the legacy `board/idea/` / `board/spec/` /
+`board/ready/` directory layout: one hub file, sections instead of
+subdirs.
+
+**Location.** `docs/board.md` (workspace root, not under
+`docs/notes/`).
+
+**Frontmatter.** None required.
+
+**Body schema.**
+
+```markdown
+# Board
+
+<one-paragraph what's in flight right now>
+
+## idea
+
+- [[sp###|<spec-title>]]
+- [[sp###|<spec-title>]]
+
+## spec
+
+- [[sp###|<spec-title>]]
+
+## ready
+
+- [[sp###|<spec-title>]]
+```
+
+**Required wikilinks.** Every `sp###` whose status ∈ {idea, spec,
+ready} should appear under exactly one section heading matching its
+status. Move between sections when `sp###.status` flips.
+
+**Lifecycle.** Living. No `Index:` footer — Board is its own index.
+
+---
+
+## Archive — `archive.md` *(singleton hub)*
+
+**Purpose.** Done-work index. Lists every `sp###` whose status is
+`done`. Mirror of [[board]] for shipped work.
+
+**Location.** `docs/archive.md` (workspace root).
+
+**Frontmatter.** None required.
+
+**Body schema.**
+
+```markdown
+# Archive
+
+<one-paragraph what shipped, optionally grouped by quarter / theme>
+
+## done
+
+- [[sp###|<spec-title>]]
+- [[sp###|<spec-title>]]
+```
+
+**Lifecycle.** Append-only. `sp###` enters here on work-merge; never
+removed. No `Index:` footer — Archive is its own index.
 
 ---
 
