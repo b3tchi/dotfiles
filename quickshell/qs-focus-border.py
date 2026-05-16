@@ -24,6 +24,7 @@ BW, BR = 2, 4
 BC = (0x16/255, 0xa0/255, 0x85/255)
 # Windows to never border (quickshell overlays, rofi, etc.)
 IGNORE_CLASSES = {'quickshell', 'Rofi', 'rofi'}
+IGNORE_TITLES = {'qs-focus-border', 'qs-focus-dim'}
 
 
 class Border:
@@ -85,7 +86,7 @@ def should_ignore(c):
     title = c.get('name', '')
     if cls in IGNORE_CLASSES or instance in IGNORE_CLASSES:
         return True
-    if title.startswith('qs-'):
+    if title in IGNORE_TITLES:
         return True
     return False
 
