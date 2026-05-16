@@ -1,94 +1,115 @@
 ---
 name: idea-brainstorming
-description: "You MUST use this before any creative work — creating features, building components, adding functionality, modifying behavior, or hot-fixing production. Routes to one of 4 specialized brainstorming skills (idea-implement, idea-extend, idea-feature, idea-hotfix) based on the entry type, then guides design to user approval before any implementation begins."
+description: "Shared brainstorming basics referenced by `infinifu:idea-implement` / `idea-extend` / `idea-feature` / `idea-hotfix` — the project-context exploration, hard-gate enforcement, one-question-at-a-time cadence, and design-approval flow that every entry type follows. Not a direct entry point; the four entry-type skills above are what triggers on user requests. Load this when an entry skill says 'see idea-brainstorming for shared basics'. If a request genuinely fits none of the four entry skills, ask one MC question to identify the type and route there — never run this skill standalone."
 ---
 
-# Brainstorming Ideas Into Designs
+# Brainstorming Basics (shared)
 
 ## Overview
 
-Router for the 4 idea entry types of the AKM lifecycle. Identify which entry type fits the request, then hand off to the specialized brainstorming skill that owns the matching read/write set on the AKM zettel graph.
+Shared process content for the four AKM entry-type brainstormers. Each entry skill (`idea-implement`, `idea-extend`, `idea-feature`, `idea-hotfix`) triggers directly on user phrasing per its own description. They share the process below — the hard gate, the context exploration, the question cadence, the design-approval rhythm — so the four don't drift.
+
+This skill is **not a router** and not a direct entry point. It's the shared-content vault the four entry skills load.
+
+## The Hard Gate (every entry type)
 
 <HARD-GATE>
-Do NOT invoke any implementation skill, write any code, scaffold any project, or take any implementation action until you have presented a design and the user has approved it. This gate is non-negotiable for every entry type, every project, regardless of perceived simplicity. The specialized skill enforces this gate; this router only routes.
+Do NOT invoke any implementation skill, write any code, scaffold any project, create bd issues, or take any implementation action until you have presented a design and the user has approved it. This applies to every entry type, every project, regardless of perceived simplicity. The gate is what makes the lifecycle worth the cost — skipping it builds undocumented behavior and the next outage.
 </HARD-GATE>
 
-## Anti-Pattern: "This Is Too Simple To Need A Design"
+## Anti-Pattern: "This Is Too Simple"
 
-Every request goes through the entry-type router. A todo list, a one-line config change, a typo fix — all of them. "Simple" requests are where unexamined assumptions cause the most wasted work. The downstream design can be short for truly simple cases, but the entry type must be picked and the specialized skill must present a design before any implementation step.
+Every request goes through the lifecycle. A todo list, a one-line config change, a typo fix — all of them. "Simple" requests are where unexamined assumptions cause the most wasted work. The downstream design can be short for truly simple cases, but the entry type must be picked and a design must be presented.
 
-## Entry-type routing
+## Process (every entry type)
 
-Four entry types per the [AKM lifecycle](../../../../akm/akm-lifecycle.md). Pick the one that fits; when ambiguous, ask the user one multiple-choice question to disambiguate.
+### 1. Explore project context
 
-| Entry type | Skill | Trigger phrasing |
-|---|---|---|
-| New story — system gains behavior it doesn't have yet | `idea-implement` | "add X", "build Y", "users should be able to Z", "we need a feature where the analyst can …" |
-| Existing story changes — shipped behavior needs adjustment | `idea-extend` | "us007 should also do X", "us005 is wrong", "extend Y to support Z" |
-| New reusable capability — horizontal building block | `idea-feature` | "we need an audit-log service", "add a shared rate-limit feature", "register a notifications building block" |
-| Production hotfix — bug in a shipped feature/implementation | `idea-hotfix` | "production is broken", "ft003 drops emails", "us005 fails when …", "rollback X" |
+- Read README, recent commits, and the directly-affected paths (e.g. `src/services/<x>/` for a service-level change).
+- Read what's needed to ground the proposal — not everything.
 
-## Routing flow
+### 2. Survey AKM context (entry-specific)
+
+Each entry skill's `## AKM hooks` block lists the read set. Survey concretely via the read skills (`category-read`, `adr-read`, `feature-read`, `story-read`, `persona-read`, `implementation-read`) — never invent zettel ids that don't exist.
+
+**Grounding rule.** Every "we could use X" mentioned in the proposal is anchored to a real zettel id surfaced by a read skill. If a candidate doesn't exist yet, say so explicitly ("no existing ft### covers this; we'd mint one at spec-writing").
+
+### 3. Ask clarifying questions
+
+- **One question per message.** Don't overwhelm.
+- **Multiple-choice preferred.** Three options or fewer.
+- Cover the entry-specific essentials (persona / want / because / AC for `idea-implement`; AC delta and migration story for `idea-extend`; capability boundary and consumers for `idea-feature`; severity / blast radius / rollback for `idea-hotfix`).
+
+### 4. Propose 2-3 design approaches
+
+- Lead with your recommended option.
+- Each option carries trade-offs.
+- Anchor every option in the surveyed AKM context (which categories, which ADRs constrain, which features are candidates).
+
+### 5. Present the design, get approval
+
+- Section by section, scaled to complexity (a few sentences for simple, up to 200-300 words for nuanced).
+- Confirm after each section before continuing.
+- Be ready to revise.
+
+### 6. Mint the zettel(s)
+
+Per the entry skill's `## AKM hooks` write set. The common write across all four:
+
+- `sp###` at `docs/notes/spec/sp###.md` — frontmatter `status: idea`, `Index: [[board]]`, body has `## problem` populated, H1 carries the proposed `[[cat###]]` picks.
+- `docs/board.md` — append `[[sp###|<title>]]` under `## idea`.
+
+Entry-specific writes (new `us###`, new `pn###`, severity annotation, etc.) live in the entry skill.
+
+### 7. Hand off to spec-writing
+
+The only next step. Do **not** invoke any implementation skill (`work-do`, `domain-bug-fixing`, etc.) directly from any entry-type brainstormer.
+
+## Key Principles
+
+- **One question at a time.**
+- **Multiple-choice preferred.**
+- **Survey before proposing.** Never invent category / ADR / feature / story ids.
+- **YAGNI ruthlessly.** Trim non-essential scope.
+- **Incremental validation.** Approval per section.
+- **The hard gate is non-negotiable.** No exception for "simple", no exception for hotfix urgency.
+
+## Process flow
 
 ```dot
-digraph route {
-    "User request" [shape=oval];
-    "Type detectable?" [shape=diamond];
-    "Ask MC clarifier" [shape=box];
-    "Type identified" [shape=box];
-    "Invoke specialized skill" [shape=doublecircle];
+digraph brainstorm_basics {
+    "Explore project context" [shape=box];
+    "Survey AKM context (entry-specific)" [shape=box];
+    "Ask one clarifying question" [shape=box];
+    "Have enough?" [shape=diamond];
+    "Propose 2-3 approaches" [shape=box];
+    "Present design sections" [shape=box];
+    "User approves?" [shape=diamond];
+    "Mint sp### + entry-specific writes" [shape=box];
+    "Hand off to spec-writing" [shape=doublecircle];
 
-    "User request" -> "Type detectable?";
-    "Type detectable?" -> "Type identified" [label="yes (one type matches)"];
-    "Type detectable?" -> "Ask MC clarifier" [label="ambiguous"];
-    "Ask MC clarifier" -> "Type identified";
-    "Type identified" -> "Invoke specialized skill";
+    "Explore project context" -> "Survey AKM context (entry-specific)";
+    "Survey AKM context (entry-specific)" -> "Ask one clarifying question";
+    "Ask one clarifying question" -> "Have enough?";
+    "Have enough?" -> "Ask one clarifying question" [label="no"];
+    "Have enough?" -> "Propose 2-3 approaches" [label="yes"];
+    "Propose 2-3 approaches" -> "Present design sections";
+    "Present design sections" -> "User approves?";
+    "User approves?" -> "Present design sections" [label="no, revise"];
+    "User approves?" -> "Mint sp### + entry-specific writes" [label="yes"];
+    "Mint sp### + entry-specific writes" -> "Hand off to spec-writing";
 }
 ```
 
-## Disambiguation rules
-
-When more than one type seems to fit, pick by this order:
-
-1. **Production urgency wins** — any "it's broken in prod" framing → `idea-hotfix`, even if the fix happens to extend a story.
-2. **Existing story present** — if an existing `us###` covers the area, prefer `idea-extend` over `idea-implement`.
-3. **No specific story drives the request** — capability-shaped requests with multiple potential consumers → `idea-feature`.
-4. **Else** — fresh user-facing behavior with a clear persona → `idea-implement`.
-
-## AKM hooks (router)
-
-Stage 1 of the AKM lifecycle — see `claude/akm/akm-lifecycle.md` for the full map and `claude/akm/akm.md` for typed-zettel schemas. Each specialized skill carries its own `## AKM hooks` block with the entry-type-specific read set.
-
-All four entry types ultimately:
-
-- **Write** `sp###` — a new spec zettel at `docs/notes/spec/sp###.md` with `## problem` populated, frontmatter `status: idea`, `Index: [[board]]` footer.
-- **Update** `docs/board.md` — append `[[sp###|<title>]]` under `## idea`.
-
-The differences live in **what gets read** before the design conversation begins. Categories, ADRs, and features must be surveyed concretely (`category-read`, `adr-read`, `feature-read`) so the proposal is grounded in what already exists — never invented.
-
-## When to Defer
-
-After identifying the type, hand the conversation to the specialized skill. Do not duplicate its work in this router. If a request truly spans two types (e.g. a hotfix that also extends a story), pick the one with the more rigid gate (hotfix > extend > implement > feature in urgency order) and note the secondary aspect in the brainstorming notes.
-
 ## Integration
 
-**Called by:** `infinifu:meta-bootstrap` (router) — when creative work is detected.
+**Loaded by (not invoked from):**
 
-**Calls (one of):**
 - `infinifu:idea-implement`
 - `infinifu:idea-extend`
 - `infinifu:idea-feature`
 - `infinifu:idea-hotfix`
 
-**Call chain:**
+**Not a direct entry point.** If a user request truly doesn't fit any of the four entry types, ask one MC question to identify the type before routing — never run this skill standalone.
 
-```
-meta-bootstrap
-  → idea-brainstorming (route)
-    → idea-{implement|extend|feature|hotfix}
-      → spec-writing
-        → spec-refinement
-          → spec-ready
-            → work-do / work-audit / work-merge
-              → spec-retro
-```
+**Next skill in chain (every entry type):** `infinifu:spec-writing`.
