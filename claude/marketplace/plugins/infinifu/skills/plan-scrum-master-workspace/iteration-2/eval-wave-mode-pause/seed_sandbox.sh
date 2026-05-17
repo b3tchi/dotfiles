@@ -61,7 +61,7 @@ EOF
 git add . >/dev/null
 git commit -q -m "seed: 2 non-interfering epics x 2 ready tasks"
 
-bd init --prefix eval --stealth >/dev/null
+bd init --prefix eval --stealth --database "eval-wave-mode-pause-$$" >/dev/null
 
 # Epic A — 2FA, 2 independent ready tasks
 EPIC_A=$(bd q "Epic: Auth 2FA")

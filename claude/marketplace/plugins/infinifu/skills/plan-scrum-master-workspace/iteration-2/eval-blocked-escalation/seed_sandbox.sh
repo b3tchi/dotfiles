@@ -48,7 +48,7 @@ EOF
 git add . >/dev/null
 git commit -q -m "seed: one ready task with TBD design"
 
-bd init --prefix eval --stealth >/dev/null
+bd init --prefix eval --stealth --database "eval-blocked-escalation-$$" >/dev/null
 
 EPIC=$(bd q "Epic: Thing feature")
 bd update "$EPIC" --type epic --design "$(cat <<'EOF'

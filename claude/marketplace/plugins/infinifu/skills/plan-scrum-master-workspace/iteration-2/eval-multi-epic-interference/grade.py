@@ -12,6 +12,31 @@ import sys
 from pathlib import Path
 
 
+def _extract_first_batch_section(text: str) -> str:
+    """See orient-and-halt/grade.py for the design rationale.
+
+    Pulls the section starting from the LAST occurrence of 'first batch'
+    until 'Proceed?'/'Confirm?'/'Abort?' or an H2 heading or end of text.
+    Robust against markdown tables, earlier prose mentions, and tight
+    lookaheads.
+    """
+    lines = text.splitlines()
+    header_indices = [i for i, ln in enumerate(lines) if re.search(r"first\s+batch", ln, re.IGNORECASE)]
+    if not header_indices:
+        return ""
+    start = header_indices[-1]
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        ln = lines[j].strip().lower()
+        if ln.startswith("proceed?") or ln.startswith("confirm?") or ln.startswith("abort?"):
+            end = j
+            break
+        if ln.startswith("## "):
+            end = j
+            break
+    return "\n".join(lines[start:end])
+
+
 def find_sandbox() -> Path:
     here = Path.cwd()
     for candidate in (here / "sandbox", here.parent / "sandbox", here / "with_skill" / "sandbox"):
@@ -99,8 +124,7 @@ def grade():
     })
 
     # First batch must list exactly 1 task (serialized) even though max_parallel=2.
-    batch_match = re.search(r"first batch.*?(?=\n\n|\Z)", text, re.IGNORECASE | re.DOTALL)
-    batch_text = batch_match.group(0) if batch_match else ""
+    batch_text = _extract_first_batch_section(text)
     task_ids_in_batch = re.findall(r"eval-\w+", batch_text)
     # filter to ready task ids
     ready_ids = {ids["a1_ready"], ids["b1_ready"]}
@@ -108,7 +132,7 @@ def grade():
     results.append({
         "text": "First batch lists exactly 1 task (serialized despite max_parallel=2)",
         "passed": len(in_batch) == 1,
-        "evidence": f"batch_ids={in_batch}",
+        "evidence": f"batch_ids={in_batch}; batch_region_len={len(batch_text)}",
     })
 
     has_config = all(k in tl for k in ["max_parallel", "waves", "auto"])

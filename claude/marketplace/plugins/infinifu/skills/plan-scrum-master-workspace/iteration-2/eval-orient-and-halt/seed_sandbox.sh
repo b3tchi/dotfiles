@@ -70,7 +70,7 @@ EOF
 git add -A
 git commit -q -m "seed: Acme platform + two ready epics"
 
-bd init --prefix eval --stealth >/dev/null
+bd init --prefix eval --stealth --database "eval-orient-and-halt-$$" >/dev/null
 
 # Epic A — auth 2FA
 EPIC_A=$(bd q "Epic: Auth 2FA")

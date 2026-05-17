@@ -81,7 +81,7 @@ git worktree add "$ORPHAN_PATH" stale/token-issuer-bd-XXXX 2>/dev/null
 # should NOT silently prune, it should ask.
 rm -rf "$ORPHAN_PATH"
 
-bd init --prefix eval --stealth >/dev/null
+bd init --prefix eval --stealth --database "eval-stale-in-progress-resume-$$" >/dev/null
 
 # Epic 1 — rotate credentials (partial)
 EPIC_STALE=$(bd q "Epic: rotate credentials")

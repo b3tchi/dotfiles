@@ -95,7 +95,7 @@ chmod +x review_shim.sh
 git add . >/dev/null
 git commit -q -m "seed: one ready task + reviewer shim that flips on attempt 2"
 
-bd init --prefix eval --stealth >/dev/null
+bd init --prefix eval --stealth --database "eval-rejection-retry-$$" >/dev/null
 
 EPIC=$(bd q "Epic: invoice rounding")
 bd update "$EPIC" --type epic --design "Round invoice line items to 2dp using banker's rounding."

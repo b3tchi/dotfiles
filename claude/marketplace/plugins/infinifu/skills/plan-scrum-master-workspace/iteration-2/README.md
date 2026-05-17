@@ -52,6 +52,23 @@ Note: the skill-creator workflow also wants a baseline configuration. For an orc
 3. **Multi-epic 4-task fixture** — `eval-wave-mode-pause/seed_sandbox.sh` seeds 2 non-interfering epics (auth + billing) × 2 independent ready tasks each. Targets explicitly non-overlapping files within each epic.
 4. **Insufficient-design task** — `eval-blocked-escalation/seed_sandbox.sh` seeds one task with `design: "Implement the thing. TBD."` — too vague for an implementer to act on, should produce a blocked status.
 
+## Shared-dolt-server constraints (learned from iteration-2 run)
+
+The bd backend is a shared Dolt server (`~/.beads/shared-server/dolt/`) — concurrent eval runs collide unless each gets its own database. Hardening applied:
+
+- **Seed scripts use unique DB names:** every `seed_sandbox.sh` now passes `--database "eval-<eval-name>-$$"` to `bd init`. The `$$` PID suffix isolates parallel runs and the eval-name prefix is human-readable when listing databases.
+- **`bd update --notes` is last-writer-wins:** it overwrites rather than appends. Fixtures and graders that need multiple keywords in `--notes` must consolidate them into one final write. Don't expect to call `--notes` repeatedly and have them accumulate.
+- **After each `bd close` on the shared server, run `bd export --output .beads/issues.jsonl`** to force the auto-export. Without this, the next `bd` command may re-import a stale jsonl and silently revert the close.
+- **`bd init --stealth` PROJECT IDENTITY MISMATCH:** if the shared server already has a database named `eval`, an unqualified `bd init --prefix eval` collides. Always pass `--database` with a unique name.
+
+## Grader regex robustness
+
+The original `re.search(r"first batch.*?(?=\n\n|\Z)", ...)` pattern broke on two cases:
+- Markdown table pipes confused the non-greedy match
+- An earlier prose mention of "first batch" got matched instead of the actual section listing
+
+Both `eval-orient-and-halt/grade.py` and `eval-multi-epic-interference/grade.py` now use `_extract_first_batch_section()`: split into lines, find the LAST line containing "first batch" (case-insensitive), capture until `Proceed?` / `Confirm?` / `Abort?` / an H2 heading / EOF. New graders should follow this pattern when extracting bounded summary sections.
+
 ## Telemetry note
 
 iteration-1 benchmark.md showed `Config B: 0 ± 0 runs` because no baseline was actually run. `timing.json` in `with_skill/run-1/` did get captured (36955 tokens / 77.7s) so the per-run mechanism works — the bug was at the aggregation step (no baseline subagent ever spawned). When running iteration-2, dispatch **both** with-skill AND baseline subagents in the same turn per the skill-creator playbook so both branches have timing data.

@@ -10,6 +10,40 @@ import subprocess
 from pathlib import Path
 
 
+def _extract_first_batch_section(text: str) -> str:
+    """Pull out the 'first batch' section from a dispatch summary.
+
+    Robust against three failure modes the original regex hit:
+      1. Markdown tables (pipe chars) confusing the lookahead
+      2. Earlier prose mentions of 'first batch' landing first (we want the
+         LAST occurrence — the actual batch listing usually appears near the
+         bottom, right before 'Proceed?')
+      3. Non-greedy match collapsing to empty against a tight lookahead.
+
+    Strategy: split text into lines, find every line that contains 'first
+    batch' (case-insensitive), pick the LAST one as the section header, then
+    collect that line plus subsequent lines until we hit either:
+      - a 'Proceed?' / 'Confirm?' / 'Abort?' prompt
+      - a blank line followed by an H2 ('## ') heading
+      - end of text
+    """
+    lines = text.splitlines()
+    header_indices = [i for i, ln in enumerate(lines) if re.search(r"first\s+batch", ln, re.IGNORECASE)]
+    if not header_indices:
+        return ""
+    start = header_indices[-1]
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        ln = lines[j].strip().lower()
+        if ln.startswith("proceed?") or ln.startswith("confirm?") or ln.startswith("abort?"):
+            end = j
+            break
+        if ln.startswith("## "):
+            end = j
+            break
+    return "\n".join(lines[start:end])
+
+
 def find_sandbox() -> Path:
     here = Path.cwd()
     for candidate in (here / "sandbox", here.parent / "sandbox", here / "with_skill" / "sandbox"):
@@ -84,14 +118,13 @@ def grade():
         "evidence": f"stale_id_in_summary={stale_in_summary}; flagged_language={flagged_lang}",
     })
 
-    batch_match = re.search(r"first batch.*?(?=\n\n|\Z)", text, re.IGNORECASE | re.DOTALL)
-    batch_text = batch_match.group(0) if batch_match else ""
+    batch_text = _extract_first_batch_section(text)
     ready_ids = {ids["a1_ready"], ids["b1_ready"]}
     task_ids_in_batch = [t for t in re.findall(r"eval-\w+", batch_text) if t in ready_ids]
     results.append({
         "text": "First batch lists exactly 2 tasks (max_parallel=2)",
         "passed": len(task_ids_in_batch) == 2,
-        "evidence": f"task_ids_in_batch={task_ids_in_batch}",
+        "evidence": f"task_ids_in_batch={task_ids_in_batch}; batch_region_len={len(batch_text)}",
     })
 
     a1_in_batch = ids["a1_ready"] in batch_text

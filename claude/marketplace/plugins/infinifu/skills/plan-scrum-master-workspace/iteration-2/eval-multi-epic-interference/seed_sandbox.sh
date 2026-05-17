@@ -69,7 +69,7 @@ EOF
 git add . >/dev/null
 git commit -q -m "seed: two interfering ready epics on src/services/auth/"
 
-bd init --prefix eval --stealth >/dev/null
+bd init --prefix eval --stealth --database "eval-multi-epic-interference-$$" >/dev/null
 
 # Epic A — auth 2FA
 EPIC_A=$(bd q "Epic: Auth 2FA")
