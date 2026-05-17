@@ -1,0 +1,48 @@
+{
+  "eval_id": 3,
+  "eval_name": "granularity-decompose-observability",
+  "config": "with_skill",
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 7,
+    "failed": 0,
+    "total": 7
+  },
+  "expectations": [
+    {
+      "text": "Agent identified at least 3 distinct capabilities (metrics/logging/tracing/alerting/dashboards)",
+      "passed": true,
+      "evidence": "capabilities found: ['metrics', 'logging', 'tracing', 'alerting', 'dashboards']"
+    },
+    {
+      "text": "Agent explicitly flagged the granularity problem",
+      "passed": true,
+      "evidence": "phrases: \\bsplit\\b, \\bdecompose\\b, \\bgranular(?:ity)?\\b, \\bone feature\\b"
+    },
+    {
+      "text": "Agent surveyed real categories \u2014 cat003 or cat004",
+      "passed": true,
+      "evidence": "cat003, cat004"
+    },
+    {
+      "text": "If sp###.md emitted: ## problem names multiple sub-capabilities (non-monolithic)",
+      "passed": true,
+      "evidence": "caps in sp body: ['metrics', 'logging', 'tracing', 'alerting', 'dashboards']"
+    },
+    {
+      "text": "Agent did NOT silently mint a new ft###.md spanning all capabilities",
+      "passed": true,
+      "evidence": "new ft: []"
+    },
+    {
+      "text": "Agent proposes splitting into multiple sp###/features OR surfaces split-question",
+      "passed": true,
+      "evidence": "split/decompose language present"
+    },
+    {
+      "text": "sp### body carries wikilink references to surveyed ids \u2014 at least 2 kinds present",
+      "passed": true,
+      "evidence": "link kinds present: ['cat', 'adr']"
+    }
+  ]
+}

@@ -1,0 +1,224 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..ff6808b
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,31 @@
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/spec/sp001.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/notes/us004.md
++./docs/notes/us005.md
++./docs/product.md
++./.gitignore
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
+diff --git a/docs/board.md b/docs/board.md
+index f5eb479..b62aa35 100644
+--- a/docs/board.md
++++ b/docs/board.md
+@@ -1,11 +1,11 @@
+ # Board
+ 
+-One spec in flight at idea stage.
++One spec refined and ready for bd planning.
+ 
+ ## idea
+ 
+-- [[sp001|rotate service credentials without downtime]]
+-
+ ## spec
+ 
+ ## ready
++
++- [[sp001|rotate service credentials without downtime]]
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+index da12309..89271fb 100644
+--- a/docs/notes/spec/sp001.md
++++ b/docs/notes/spec/sp001.md
+@@ -1,7 +1,7 @@
+ ---
+ aliases:
+   - rotate service credentials without downtime
+-status: idea
++status: ready
+ created: 2026-04-28
+ ---
+ # Spec [[cat001]] [[cat003]] [[board]]
+@@ -14,6 +14,154 @@ The platform-engineer [[pn002]] needs to rotate service credentials without
+ downtime. Story [[us003]] asks for live rotation with a 5-minute overlap and
+ zero 5xx during the rotation window.
+ 
++## solution
++Lean on the existing [[ft002|vault-secrets]] feature: every service already
++reads credentials at runtime via `secret(name)`. Extend the vault client with
++a short-lived in-process cache that re-reads on a configurable TTL (default
++60s) and accepts dual-valued secrets so the old value stays acceptable for a
++5-minute overlap window. Rotation is performed by a small CLI
++(`rotate-secret`) that writes both `<name>` (new) and `<name>.prev` (old) to
++Vault, waits for cache TTL × 2 propagation, then clears `<name>.prev`. No
++service restart required.
++
++ADRs the plan leans on:
++- [[adr0001]] — basic-auth stays as the authentication mechanism; rotation
++  applies to all secret types but does not change the auth shape.
++
++Features consumed:
++- [[ft002|vault-secrets]] — extended (additive: TTL cache + dual-value
++  read) without breaking the existing `secret(name)` API.
++
++## plan
++
++### File tree
++
++```
++src/lib/vault.py                    ← extend with TTL cache + dual-value read
++src/lib/rotate_secret.py            ← new CLI entry point
++src/services/auth/main.py           ← no code change; verify cache picks up
++src/services/metrics/main.py        ← no code change; verify cache picks up
++src/services/reports/main.py        ← no code change; verify cache picks up
++tests/lib/test_vault.py             ← cache + dual-value unit tests
++tests/integration/test_rotation.py  ← end-to-end rotation, synthetic 5xx
++```
++
++### Conventions
++
++- Vault keys remain flat strings; dual-value uses suffix `.prev` convention.
++- Cache TTL defaults read from env `VAULT_CACHE_TTL` (seconds, default 60).
++- All new code lives under `src/lib/` to keep the feature reusable across
++  services (consistent with [[ft002]] component boundary).
++- CLI is a single-file script using `argparse`; no new framework.
++
++### Anti-patterns to avoid
++
++- Do not introduce a new Feature zettel for the cache — it is an additive
++  extension of [[ft002]] within its existing api_surface.
++- Do not require service restarts; the whole point is no downtime.
++- Do not push out cache TTL > 5 minutes — would defeat the overlap window.
++
++### Known limitations
++
++- Initial implementation polls Vault on TTL expiry; a push-based invalidation
++  is out of scope for this spec.
++- The rotation CLI runs interactively; full automation lives in a follow-up.
++
++## tasks
++
++### Task 1: Extend vault client with TTL cache and dual-value read
++
++#### type
++feature
++
++#### effort
++4h
++
++#### depends
++- none
++
++#### files_touched
++- src/lib/vault.py
++- tests/lib/test_vault.py
++
++#### success_criteria
++- `secret(name)` returns cached value within TTL window
++- After TTL expiry, next call refreshes from Vault
++- When both `<name>` and `<name>.prev` are present, `secret(name)` returns
++  the current value but `secret_accepts(name, value)` returns True for either
++- Existing callers see no behavior change when no `.prev` key exists
++
++#### edge_cases
++- Vault unreachable during refresh → return stale cached value, log warning
++- Cache TTL = 0 → behave as today (always read through)
++- `.prev` written without `<name>` → treat as missing (do not promote)
++
++#### test_plan
++- Unit: TTL boundary (read at t=59s cached, t=61s refreshed)
++- Unit: dual-value `secret_accepts` returns True for old + new
++- Unit: Vault error returns cached value + emits warning log
++
++### Task 2: Implement `rotate-secret` CLI
++
++#### type
++feature
++
++#### effort
++3h
++
++#### depends
++- Task 1
++
++#### files_touched
++- src/lib/rotate_secret.py
++
++#### success_criteria
++- `rotate-secret <name> <new-value>` writes new value to `<name>` and moves
++  prior value to `<name>.prev`
++- After `2 × VAULT_CACHE_TTL` it clears `<name>.prev`
++- Exit code non-zero on Vault write failure with reason printed to stderr
++
++#### edge_cases
++- Pre-existing `<name>.prev` → overwrite and warn (caller may have aborted
++  a prior rotation)
++- Vault write of new value succeeds but `.prev` write fails → roll back the
++  new value to keep state consistent
++
++#### test_plan
++- Integration: rotation against a vault test double, assert key state at
++  each stage (pre, mid, post)
++- Integration: simulate failed `.prev` write, assert rollback
++
++### Task 3: End-to-end rotation under load
++
++#### type
++task
++
++#### effort
++3h
++
++#### depends
++- Task 1
++- Task 2
++
++#### files_touched
++- tests/integration/test_rotation.py
++
++#### success_criteria
++- Synthetic check fires 10 req/s at all three services while rotation runs
++- Zero 5xx during the rotation window
++- Old credential stays valid for ≥ 5 minutes after rotation
++
++#### edge_cases
++- Service mid-request when secret changes → request completes with the
++  resolved-at-entry credential
++- Two rotations in quick succession (< TTL window) → second rotation waits
++  or errors cleanly, never strands a `.prev` of a `.prev`
++
++#### test_plan
++- Integration: synthetic load + rotation, assert request log has no 5xx
++- Integration: time-warp the cache TTL, assert overlap window is honoured
++
+ ---
+ 
+ Index: [[board]]

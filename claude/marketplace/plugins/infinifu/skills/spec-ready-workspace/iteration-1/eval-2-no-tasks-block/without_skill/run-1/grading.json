@@ -1,0 +1,43 @@
+{
+  "eval_id": 2,
+  "eval_name": "no-tasks-block",
+  "config": "without_skill",
+  "summary": {
+    "pass_rate": 0.3333333333333333,
+    "passed": 2,
+    "failed": 4,
+    "total": 6
+  },
+  "expectations": [
+    {
+      "text": "Agent recognized ## tasks missing/empty",
+      "passed": true,
+      "evidence": "missing-tasks phrase"
+    },
+    {
+      "text": "Agent did NOT create bd epic / tasks (cannot invent)",
+      "passed": false,
+      "evidence": "epics=1 tasks=3"
+    },
+    {
+      "text": "Agent did NOT modify sp001",
+      "passed": false,
+      "evidence": "sp001_modified=True"
+    },
+    {
+      "text": "Agent did NOT modify docs/board.md",
+      "passed": false,
+      "evidence": "board_modified=True"
+    },
+    {
+      "text": "Agent did NOT change sp001 status",
+      "passed": false,
+      "evidence": "status=ready"
+    },
+    {
+      "text": "Output routes to spec-refinement OR 'tasks missing'",
+      "passed": true,
+      "evidence": "route phrase"
+    }
+  ]
+}

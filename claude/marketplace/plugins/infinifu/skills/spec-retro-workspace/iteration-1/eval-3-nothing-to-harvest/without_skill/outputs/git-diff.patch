@@ -1,0 +1,94 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..15283b6
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,55 @@
++./AGENTS.md
++./.beads/config.yaml
++./.beads/dolt-server.port
++./.beads/export-state.json
++./.beads/.gitignore
++./.beads/hooks/post-checkout
++./.beads/hooks/post-merge
++./.beads/hooks/pre-commit
++./.beads/hooks/prepare-commit-msg
++./.beads/hooks/pre-push
++./.beads/interactions.jsonl
++./.beads/issues.jsonl
++./.beads/last-touched
++./.beads/.local_version
++./.beads/metadata.json
++./.beads/README.md
++./CLAUDE.md
++./.claude/settings.json
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/im002.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/spec/sp001.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/notes/us004.md
++./docs/notes/us005.md
++./docs/product.md
++./.gitignore
++./pyproject.toml
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/lib/vault.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
++./tests/lib/__init__.py
++./tests/lib/test_vault.py
++./.work-do-task-ids.json
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+index 8c0ab84..7c4f409 100644
+--- a/docs/notes/spec/sp001.md
++++ b/docs/notes/spec/sp001.md
+@@ -147,6 +147,28 @@ task
+ - `test_no_5xx_during_window` — catches the core AC
+ - `test_single_blip_tolerated` — catches over-eager alerting
+ 
++## retro
++
++Conducted 2026-05-17 after merge of commit 0f36495.
++
++**Shipped:**
++- Task 1: `vault.rotate_secret(name, new_value)` — per-name lock, versioned alias, empty input rejection. 5 unit tests pass.
++
++**Gaps (filed as follow-ups, not in this spec):**
++- Task 2 deliverable missing: `src/lib/vault_rotate.py` was never written despite bd task being closed as APPROVED. → wd3-269652-eom (P1)
++- Task 3 deliverable missing: `tests/integration/test_rotate_synthetic.py` was never written despite bd task being closed as APPROVED. → wd3-269652-l16 (P1)
++- Plan listed `test_vault_unreachable_raises` for Task 1; not implemented. → wd3-269652-g11 (P2)
++- Stray TODO comment about `set_timeout(timeout_ms)` left in `src/lib/vault.py` — unrelated to sp001. → wd3-269652-qxc (P3)
++
++**Acceptance-criteria status (vs [[us003]]):**
++- "Rotation script can swap secrets while services run" — partial: helper exists, no orchestration module to drive end-to-end rotation
++- "Old secret stays valid for 5 minutes after rotation" — NOT MET: no expiry scheduler shipped
++- "No 5xx during rotation window in synthetic check" — NOT MET: no synthetic check shipped
++
++**Process finding:** the work-audit step approved Tasks 2 and 3 without verifying the files existed. Cause unknown from inside this retro — flagging for the auditor workflow.
++
++**Spec status retained as `done`** because it represents a closed workstream; new work continues under the follow-up tasks above and a future spec if scoped.
++
+ ---
+ 
+ Index: [[archive]]

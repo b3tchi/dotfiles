@@ -1,0 +1,121 @@
+[
+  {
+    "id": "wd3-6834-82l.3",
+    "title": "Task 3: Synthetic-check hook for rotation window",
+    "design": "Hook a synthetic check that runs every 30s during rotation window; assert zero 5xx. Files: src/lib/vault_rotate.py, tests/integration/test_rotate_synthetic.py.",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:31:45Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:31:45Z",
+    "dependencies": [
+      {
+        "issue_id": "wd3-6834-82l.3",
+        "depends_on_id": "wd3-6834-82l",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:31:45Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd3-6834-82l.3",
+        "depends_on_id": "wd3-6834-82l.1",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:31:47Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd3-6834-82l.3",
+        "depends_on_id": "wd3-6834-82l.2",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:31:48Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 2,
+    "dependent_count": 0,
+    "comment_count": 0,
+    "parent": "wd3-6834-82l"
+  },
+  {
+    "id": "wd3-6834-82l.2",
+    "title": "Task 2: Add vault_rotate orchestration module",
+    "design": "Create src/lib/vault_rotate.py with rotate(name, new_value) that calls vault.rotate_secret + schedules T+5min expiry. Files: src/lib/vault_rotate.py, tests/lib/test_vault_rotate.py.",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:31:44Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:31:44Z",
+    "dependencies": [
+      {
+        "issue_id": "wd3-6834-82l.2",
+        "depends_on_id": "wd3-6834-82l",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:31:44Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd3-6834-82l.2",
+        "depends_on_id": "wd3-6834-82l.1",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:31:46Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 1,
+    "dependent_count": 1,
+    "comment_count": 0,
+    "parent": "wd3-6834-82l"
+  },
+  {
+    "id": "wd3-6834-82l.1",
+    "title": "Task 1: Add rotate_secret helper to vault.py",
+    "design": "Extend src/lib/vault.py with rotate_secret(name, new_value) helper that stages a new versioned alias. Files: src/lib/vault.py, tests/lib/test_vault.py. Edge cases: concurrent calls serialize, vault unreachable raises VaultError, empty value rejected.",
+    "notes": "AUDIT: REJECT — leave in_progress, return to implementer.\n\nFindings (compared to sp001 Task 1 success_criteria + test_plan + edge_cases):\n\n1. SILENT TEST-PLAN DEVIATION (primary issue)\n   - sp001 test_plan lists FIVE specific tests; implementer shipped 5 tests but swapped one:\n     - Required: test_vault_unreachable_raises  (catches partial-write bug)\n     - Shipped:  test_empty_name_rejected       (not in spec)\n   - Implementer reported \"Deviations: none\". This is the silent-deviation smell.\n\n2. SUCCESS CRITERION \"vault unreachable raises VaultError, no partial write\" is NOT verified\n   - The try/except in rotate_secret wraps only dict.setdefault + list.append,\n     which cannot realistically raise. There is no transport / no failure\n     injection seam, so the VaultError path is unreachable dead code.\n   - Either add a fake transport / monkeypatchable seam and the required test,\n     OR explicitly declare this edge case deferred in spec + downgrade success criterion.\n\n3. OUT-OF-SCOPE TODO added in src/lib/vault.py\n   - \"TODO: set_timeout(timeout_ms) ...\" comment landed in this task's diff but\n     is unrelated to rotate_secret. Should be moved to its own bd task and\n     dropped from this commit.\n\n4. test_concurrent_rotate_serializes asserts on private _ALIASES\n   - Functional but couples tests to internal state. Prefer asserting via the\n     public secret() read path (last write wins) plus a count via repeated secret()\n     calls or a public versions() accessor.\n\nTests run locally: 5 passed in 0.03s — but coverage gap above stands.\n\nACTION: implementer to (a) add test_vault_unreachable_raises with a real failure\nseam (or amend the spec), (b) drop the unrelated set_timeout TODO, (c) optionally\nre-express concurrency test against the public API. Re-submit for audit.",
+    "status": "in_progress",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:31:43Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:35:00Z",
+    "started_at": "2026-05-16T16:31:49Z",
+    "dependencies": [
+      {
+        "issue_id": "wd3-6834-82l.1",
+        "depends_on_id": "wd3-6834-82l",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:31:43Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 0,
+    "dependent_count": 2,
+    "comment_count": 0,
+    "parent": "wd3-6834-82l"
+  },
+  {
+    "id": "wd3-6834-82l",
+    "title": "Epic: rotate service credentials without downtime [sp001]",
+    "design": "Spec: docs/notes/spec/sp001.md",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "epic",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:31:42Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:31:42Z",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  }
+]

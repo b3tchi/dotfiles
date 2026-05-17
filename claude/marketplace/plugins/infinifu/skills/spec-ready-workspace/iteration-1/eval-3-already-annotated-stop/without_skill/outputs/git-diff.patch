@@ -1,0 +1,112 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..e1772ab
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,47 @@
++./AGENTS.md
++./.beads/config.yaml
++./.beads/dolt-server.port
++./.beads/.gitignore
++./.beads/hooks/post-checkout
++./.beads/hooks/post-merge
++./.beads/hooks/pre-commit
++./.beads/hooks/prepare-commit-msg
++./.beads/hooks/pre-push
++./.beads/interactions.jsonl
++./.beads/.local_version
++./.beads/metadata.json
++./.beads/README.md
++./CLAUDE.md
++./.claude/settings.json
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/im002.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/spec/sp001.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/notes/us004.md
++./docs/notes/us005.md
++./docs/product.md
++./.gitignore
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
+diff --git a/docs/board.md b/docs/board.md
+index 6e24907..af77479 100644
+--- a/docs/board.md
++++ b/docs/board.md
+@@ -1,11 +1,11 @@
+ # Board
+ 
+-One spec in flight at spec stage.
++One spec in flight, refined and ready for execution.
+ 
+ ## idea
+ 
+ ## spec
+ 
+-- [[sp001|rotate service credentials without downtime]]
+-
+ ## ready
++
++- [[sp001|rotate service credentials without downtime]]
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+index 5c88179..d4a2d56 100644
+--- a/docs/notes/spec/sp001.md
++++ b/docs/notes/spec/sp001.md
+@@ -1,7 +1,7 @@
+ ---
+ aliases:
+   - rotate service credentials without downtime
+-status: spec
++status: ready
+ created: 2026-04-28
+ ---
+ # Spec [[cat001]] [[cat003]] [[board]]
+@@ -47,7 +47,7 @@ Binds [[adr0001]] and [[adr0002]]. Categories [[cat001]] and [[cat003]].
+ ### Task 1: Add rotate_secret helper to vault.py
+ 
+ #### bd
+-bd-001
++sandbox-nt2.1
+ 
+ #### type
+ task
+@@ -82,7 +82,7 @@ task
+ ### Task 2: Add vault_rotate orchestration module
+ 
+ #### bd
+-bd-002
++sandbox-nt2.2
+ 
+ #### type
+ task
+@@ -116,7 +116,7 @@ task
+ ### Task 3: Synthetic-check hook for rotation window
+ 
+ #### bd
+-bd-003
++sandbox-nt2.3
+ 
+ #### type
+ task

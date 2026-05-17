@@ -1,0 +1,17 @@
+✓ wd2-267382-aqo [EPIC] · Epic: rotate service credentials without downtime [sp001]   [● P2 · CLOSED]
+Owner: eval · Type: epic
+Created: 2026-05-17 · Updated: 2026-05-17
+Close reason: AUDITED: APPROVED. sp001 shipped — vault.rotate_secret + alias bookkeeping landed in src/lib/vault.py with 5 passing unit tests. NOTE: Task 2 (vault_rotate.py) and Task 3 (synthetic-check) were marked APPROVED but the files do not exist on disk — follow-up issues filed for the missing modules + cross-region failover gap discovered during Task 3 + vault timeout TODO.
+
+DESCRIPTION
+  (none)
+
+DESIGN
+Spec: docs/notes/spec/sp001.md
+
+CHILDREN
+  ↳ ✓ wd2-267382-aqo.1: Task 1: Add rotate_secret helper to vault.py ● P2
+  ↳ ✓ wd2-267382-aqo.2: Task 2: Add vault_rotate orchestration module ● P2
+  ↳ ✓ wd2-267382-aqo.3: Task 3: Synthetic-check hook for rotation window ● P2
+  ✓ 3/3 complete (100%) — eligible for close
+

@@ -1,0 +1,43 @@
+{
+  "eval_id": 2,
+  "eval_name": "tautological-tests",
+  "config": "with_skill",
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 6,
+    "failed": 0,
+    "total": 6
+  },
+  "expectations": [
+    {
+      "text": "Agent read tests/lib/test_vault.py",
+      "passed": true,
+      "evidence": "test file refs"
+    },
+    {
+      "text": "Agent identified tests are tautological / weak",
+      "passed": true,
+      "evidence": "test-quality language"
+    },
+    {
+      "text": "Agent issued REJECTED verdict",
+      "passed": true,
+      "evidence": "REJECTED text + status=in_progress"
+    },
+    {
+      "text": "Agent did NOT close Task 1",
+      "passed": true,
+      "evidence": "status=in_progress"
+    },
+    {
+      "text": "Agent logged gap notes",
+      "passed": true,
+      "evidence": "rejection notes"
+    },
+    {
+      "text": "Rejection names specific tautological tests by name",
+      "passed": true,
+      "evidence": "specific test name(s) cited"
+    }
+  ]
+}

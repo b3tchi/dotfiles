@@ -1,0 +1,87 @@
+# Route Decision — dedup check failed (existing feature covers request)
+
+**Skill invoked:** `infinifu:idea-feature`
+**Verdict:** RE-ROUTE — do NOT mint a new `sp###` / `ft###` via this skill.
+**Re-route to:** `infinifu:idea-extend` framed against [[ft002]].
+
+## Duplicate identified
+
+The request — "a single library every service calls instead of pasting
+vault shell-outs everywhere" for DB creds + API tokens at startup — is
+already covered surface-for-surface by:
+
+- **[[ft002]] — `vault-secrets`** (`docs/notes/ft002.md`, `status: stable`, created 2026-03-20)
+  - **providing:** "Vault-backed secret retrieval. Every service calls
+    `secret(name)` to read credentials at runtime."
+  - **api_surface:** `from acme.lib.vault import secret; db_url = secret("reports/db_url")`
+  - **components:** `src/lib/vault.py`
+  - **category:** `[[cat001|security]]`
+
+The library exists, the API is `secret(name)`, the canonical component
+ships at `src/lib/vault.py`. There is no horizontal-capability gap to
+mint — the gap is **adoption**: services are still shelling out to the
+vault CLI ad-hoc instead of importing `acme.lib.vault.secret`.
+
+## Why this is `idea-extend`, not `idea-feature`
+
+Per `idea-feature` Disambiguation: *"Modification to an existing feature
+→ re-route to `idea-extend` framed against the `ft###`."* The work
+needed here is one of:
+
+1. **Pure migration** — no `ft002` change. Each service's ad-hoc
+   shell-out path is replaced with `secret(name)`. That's
+   `idea-extend`-style scope against the consuming `im###`
+   implementations (story-level adjustments to drop ad-hoc code),
+   tracked under a single sp### that lists the migration targets.
+2. **`ft002` contract extension** — if `secret()` today doesn't cover
+   API tokens (only DB creds), or doesn't expose startup-time bulk
+   fetch, the Feature contract widens. That is exactly what
+   `idea-extend` against [[ft002]] is for: AC delta + migration story
+   captured as `sp###.problem` referencing the existing `ft###`.
+
+Either way the entry type is `idea-extend`, not `idea-feature`. Minting
+a fresh `ft###` here would create a duplicate of `ft002` in the
+registry and split the secret-retrieval contract across two zettel —
+the exact failure mode the dedup check exists to prevent.
+
+## Surveyed zettel ids
+
+Done via direct reads of `docs/notes/` (the read skills are unavailable
+in this sandbox; survey performed by file inspection):
+
+| Type | Id | Why surveyed |
+|---|---|---|
+| Feature | [[ft001]] basic-auth | Other shared horizontal lib; not a match |
+| Feature | [[ft002]] vault-secrets | **Exact match** — dedup hit |
+| Story | [[us001]] reports dashboard | No vault touchpoint |
+| Story | [[us002]] filter reports by date range | No vault touchpoint |
+| Story | [[us003]] rotate service credentials without downtime | Closest consumer — secret rotation is *the* canonical ft002 use case; adoption path matters here |
+| Implementation | [[im001]] reports dashboard | Uses ft001, not vault; no ad-hoc secret pattern visible |
+| Category | [[cat001]] security | Where ft002 lives; binding category for any extension |
+| Category | [[cat002]] data | Not primary for this capability |
+| Category | [[cat003]] infrastructure | Not primary for this capability |
+| Category | [[cat004]] observability | Not relevant |
+| ADR | [[adr0001]] All services authenticate via ft001 | Adjacent (auth not secrets); not binding |
+| ADR | [[adr0002]] Reports written to Postgres, 90d retention | Not relevant |
+| ADR | [[adr0003]] No external SMTP relay — smtplib direct | Not relevant; informative on the "ad-hoc copy/paste" anti-pattern this dedup avoids |
+
+## Code-level confirmation
+
+- `src/lib/__init__.py` comment: *"Shared libs (vault, db helpers)."*
+  — the vault lib slot exists.
+- `src/services/{auth,metrics,reports}/__init__.py` stubs do not
+  surface any ad-hoc vault shell-out today (the README/stubs predate
+  the shell-out pattern the user describes). The stubs reference *email*
+  ad-hoc, which is a separate dedup conversation (see adr0003).
+
+## Recommended next action
+
+Invoke `infinifu:idea-extend` with the framing: *"extend ft002
+adoption: replace ad-hoc vault CLI shell-outs in auth / metrics /
+reports services with `acme.lib.vault.secret(name)`; widen ft002
+`api_surface` only if API-token retrieval is not already in scope."*
+The extend skill will capture the AC delta + migration story as
+`sp###.problem` against the existing `[[ft002]]`.
+
+Stopping here per the `idea-feature` Disambiguation rule. No `sp###`
+minted, no `ft###` minted, no `docs/board.md` edit.

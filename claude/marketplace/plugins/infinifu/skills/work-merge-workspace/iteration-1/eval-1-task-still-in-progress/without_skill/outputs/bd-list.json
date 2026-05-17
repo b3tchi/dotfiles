@@ -1,0 +1,52 @@
+[
+  {
+    "id": "wd1-244530-sah.2",
+    "title": "Task 2: Add vault_rotate orchestration module",
+    "design": "Create src/lib/vault_rotate.py with rotate(name, new_value) that calls vault.rotate_secret + schedules T+5min expiry. Files: src/lib/vault_rotate.py, tests/lib/test_vault_rotate.py.",
+    "status": "in_progress",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-17T08:25:33Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-17T08:25:42Z",
+    "started_at": "2026-05-17T08:25:42Z",
+    "dependencies": [
+      {
+        "issue_id": "wd1-244530-sah.2",
+        "depends_on_id": "wd1-244530-sah",
+        "type": "parent-child",
+        "created_at": "2026-05-17T10:25:32Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd1-244530-sah.2",
+        "depends_on_id": "wd1-244530-sah.1",
+        "type": "blocks",
+        "created_at": "2026-05-17T10:25:34Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 1,
+    "dependent_count": 1,
+    "comment_count": 0,
+    "parent": "wd1-244530-sah"
+  },
+  {
+    "id": "wd1-244530-sah",
+    "title": "Epic: rotate service credentials without downtime [sp001]",
+    "design": "Spec: docs/notes/spec/sp001.md",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "epic",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-17T08:25:31Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-17T08:25:31Z",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  }
+]

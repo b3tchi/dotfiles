@@ -1,0 +1,221 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..15283b6
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,55 @@
++./AGENTS.md
++./.beads/config.yaml
++./.beads/dolt-server.port
++./.beads/export-state.json
++./.beads/.gitignore
++./.beads/hooks/post-checkout
++./.beads/hooks/post-merge
++./.beads/hooks/pre-commit
++./.beads/hooks/prepare-commit-msg
++./.beads/hooks/pre-push
++./.beads/interactions.jsonl
++./.beads/issues.jsonl
++./.beads/last-touched
++./.beads/.local_version
++./.beads/metadata.json
++./.beads/README.md
++./CLAUDE.md
++./.claude/settings.json
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/im002.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/spec/sp001.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/notes/us004.md
++./docs/notes/us005.md
++./docs/product.md
++./.gitignore
++./pyproject.toml
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/lib/vault.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
++./tests/lib/__init__.py
++./tests/lib/test_vault.py
++./.work-do-task-ids.json
+diff --git a/docs/notes/im002.md b/docs/notes/im002.md
+index 12abdc8..0f5c89f 100644
+--- a/docs/notes/im002.md
++++ b/docs/notes/im002.md
+@@ -11,8 +11,11 @@ created: 2026-04-26
+ 
+ ## approach
+ Adopt the vault-rotate-policy pattern via [[ft002]]: writers stage the
+-new credential under a versioned alias; readers fall back to the prior
+-version for up to 5 minutes; alias flips at the end of the window.
++new credential under a versioned alias via `vault.rotate_secret`;
++readers via `vault.secret` always see the most recent staged version.
++Orchestration (5-minute overlap timer, expiry, synthetic-check hook)
++was scoped in [[sp001]] but not implemented in this card — see retro
++follow-ups for the deferred work.
+ 
+ ## features
+ - [[ft002|vault-secrets]]
+@@ -22,11 +25,12 @@ No schema change. Vault holds versioned aliases.
+ 
+ ## api_surface
+ `acme.lib.vault.secret(name)` continues to be the only read path; writes
+-use a new internal `rotate_secret(name)` helper that lands in the same lib.
++use a new internal `rotate_secret(name, new_value)` helper in the same
++lib (per-name lock, rejects empty input, raises `VaultError` on backend
++failure).
+ 
+ ## components
+ - `src/lib/vault.py`
+-- `src/lib/vault_rotate.py`
+ 
+ ## specs
+ - [[sp001|rotate service credentials without downtime]]
+diff --git a/docs/notes/us006.md b/docs/notes/us006.md
+new file mode 100644
+index 0000000..103d510
+--- /dev/null
++++ b/docs/notes/us006.md
+@@ -0,0 +1,30 @@
++---
++aliases:
++  - verify credential rotation across regions
++status: draft
++created: 2026-05-17
++---
++# Story [[platform-flow]] [[product]]
++
++## role
++[[pn002|platform-engineer]]
++
++## want
++verify a credential rotation propagates correctly across all regions
++before the 5-minute overlap window expires
++
++## because
++the synthetic check shipped with [[sp001]] is single-region; a
++multi-region service could see stale credentials in one region while
++another already flipped, defeating the zero-5xx guarantee
++
++## acceptance_criteria
++- Synthetic check runs in every region the service is deployed to
++- Cross-region read of a rotated secret returns the new value within
++  the overlap window
++- Integration test exercises a two-region simulated rotation and
++  asserts no 5xx in either region
++
++---
++
++Index: [[product]]
+diff --git a/docs/notes/us007.md b/docs/notes/us007.md
+new file mode 100644
+index 0000000..32711d6
+--- /dev/null
++++ b/docs/notes/us007.md
+@@ -0,0 +1,28 @@
++---
++aliases:
++  - configurable vault client timeout
++status: draft
++created: 2026-05-17
++---
++# Story [[platform-flow]] [[product]]
++
++## role
++[[pn002|platform-engineer]]
++
++## want
++configure the vault client timeout per region instead of the hardcoded
++5000ms default
++
++## because
++the European region routinely sees vault round-trips above 5s during
++peak, causing spurious `VaultError`s; the TODO in `src/lib/vault.py`
++captures this gap left out of [[sp001]]
++
++## acceptance_criteria
++- Vault client exposes a `set_timeout(timeout_ms)` configuration entry
++- Per-region overrides resolved at process start
++- Unit test covers timeout-applied and default-fallback behavior
++
++---
++
++Index: [[product]]
+diff --git a/docs/notes/us008.md b/docs/notes/us008.md
+new file mode 100644
+index 0000000..b9c8b47
+--- /dev/null
++++ b/docs/notes/us008.md
+@@ -0,0 +1,35 @@
++---
++aliases:
++  - automated overlap window + expiry for credential rotation
++status: draft
++created: 2026-05-17
++---
++# Story [[platform-flow]] [[product]]
++
++## role
++[[pn002|platform-engineer]]
++
++## want
++the 5-minute overlap timer, automatic expiry of the prior credential,
++and the synthetic-check hook for the rotation window all run without
++manual operator intervention
++
++## because
++[[sp001]] shipped the `vault.rotate_secret` write path only — the
++orchestration module (`vault_rotate.py`) and the integration synthetic
++check that [[us003]] acceptance criteria assume were scoped as Tasks
++2 and 3 of the spec but no code landed for them; without this the
++"no 5xx during the rotation window" guarantee is unverified in
++production
++
++## acceptance_criteria
++- An orchestration entry point schedules expiry of the prior credential
++  at T+5min using a monotonic clock
++- Pending expiries resume on scheduler restart
++- A synthetic check runs every 30s during the rotation window and
++  fails the rotation if a 5xx is observed (tolerating a single
++  transient blip)
++
++---
++
++Index: [[product]]
+diff --git a/docs/product.md b/docs/product.md
+index fdfa212..0ee85dc 100644
+--- a/docs/product.md
++++ b/docs/product.md
+@@ -12,7 +12,10 @@ operations analyst and the platform-engineer personas.
+ 
+ ### [[pn002|platform-engineer]]
+ 
+-- [[us003|rotate service credentials without downtime]]
++- [[us003|rotate service credentials without downtime]] >> [[im002]]
++- [[us006|verify credential rotation across regions]]
++- [[us007|configurable vault client timeout]]
++- [[us008|automated overlap window + expiry for credential rotation]]
+ 
+ ## Features
+ 

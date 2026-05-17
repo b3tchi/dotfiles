@@ -1,0 +1,162 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..c3c4ac2
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,32 @@
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/im002.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/spec/sp001.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/notes/us004.md
++./docs/notes/us005.md
++./docs/product.md
++./.gitignore
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
+diff --git a/docs/board.md b/docs/board.md
+index f5eb479..6e24907 100644
+--- a/docs/board.md
++++ b/docs/board.md
+@@ -1,11 +1,11 @@
+ # Board
+ 
+-One spec in flight at idea stage.
++One spec in flight at spec stage.
+ 
+ ## idea
+ 
+-- [[sp001|rotate service credentials without downtime]]
+-
+ ## spec
+ 
++- [[sp001|rotate service credentials without downtime]]
++
+ ## ready
+diff --git a/docs/notes/im002.md b/docs/notes/im002.md
+index ea0a2d4..a5e5bc1 100644
+--- a/docs/notes/im002.md
++++ b/docs/notes/im002.md
+@@ -28,7 +28,7 @@ use a new internal `rotate_secret(name)` helper that lands in the same lib.
+ - `src/lib/vault.py`
+ 
+ ## specs
+-- (no spec yet — this im### was minted ahead of sp###)
++- [[sp001|rotate service credentials without downtime]]
+ 
+ ---
+ 
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+index fa70d5d..36a0b71 100644
+--- a/docs/notes/spec/sp001.md
++++ b/docs/notes/spec/sp001.md
+@@ -1,7 +1,7 @@
+ ---
+ aliases:
+   - rotate service credentials without downtime
+-status: idea
++status: spec
+ created: 2026-04-28
+ ---
+ # Spec [[cat001]] [[cat003]] [[board]]
+@@ -9,6 +9,9 @@ created: 2026-04-28
+ ## solves
+ [[us003|rotate service credentials without downtime]]
+ 
++## implements
++[[im002|vault-policy credential rotation for live services]]
++
+ ## problem
+ The platform-engineer [[pn002|platform-engineer]] needs to rotate service
+ credentials without downtime. Today this is a maintenance-window task; the
+@@ -24,6 +27,68 @@ Out of scope at idea stage: the actual rotation script, the synthetic-check
+ hook, the secret-overlap window mechanism. spec-writing chooses the shape
+ across vault-rotate-policy vs zero-downtime-swap vs blue-green-cred patterns.
+ 
++## solution
++
++This spec executes [[im002]], which already chose the **vault-rotate-policy**
++shape and is `accepted`. We do not mint a new implementation card — the
++solution shape is fixed by im002. This spec is the execution plan against
++that shape.
++
++**Approach (per [[im002]]).** Writers stage the new credential under a
++versioned alias in [[ft002|vault-secrets]]; readers fall back to the prior
++version for up to 5 minutes; the vault alias flips at the end of the window.
++Service code keeps reading via `acme.lib.vault.secret(name)` unchanged; the
++overlap is invisible to call sites.
++
++**Surface added by this spec (delta on top of [[ft002]]).**
++
++- New internal helper `acme.lib.vault.rotate_secret(name)` in `src/lib/vault.py`
++  that stages a new version, holds the prior version live for the overlap
++  window, then flips the alias.
++- A CLI / runbook hook so the platform-engineer can drive rotation per
++  service or across a service set.
++- A synthetic-check hook that probes the affected services across the
++  5-minute overlap and fails fast if any 5xx surfaces.
++
++**Inherited constraints.**
++
++- From [[ft002]]: vault is the source of truth; no local state owned by
++  this rotation flow.
++- From [[adr0001]]: rotation must not disturb the basic-auth session layer
++  (sessions in Redis, 24h TTL).
++- From [[adr0002]]: report data retention is unaffected — no Postgres
++  schema or retention change in scope.
++
++**Consumed features.**
++
++- [[ft002|vault-secrets]] — the only read surface; `rotate_secret` lives
++  next to `secret` in the same lib.
++
++**Categories.** [[cat001]] security (credential handling, overlap window
++correctness) and [[cat003]] infrastructure (cross-service plumbing,
++rotation operability).
++
++**Out of scope for this spec.**
++
++- Replacing `smtplib` per [[adr0003]] — orthogonal.
++- SSO / external identity per [[adr0001]] consequences — orthogonal.
++- Vault HA / DR topology changes — `ft002` carries that contract.
++- Rotating long-lived TOTP seeds (covered by [[ft001]] separately).
++
++**Acceptance maps to [[us003]] criteria.**
++
++- *Rotation script can swap secrets while services run* → `rotate_secret`
++  exposed via a small CLI wrapper; a service stays up across the call.
++- *Old secret stays valid for 5 minutes after rotation* → vault holds the
++  prior version through the overlap window; reads succeed during it.
++- *No 5xx during rotation window in synthetic check* → synthetic probe
++  driven through the auth surface ([[ft001]]) sees zero 5xx across the
++  window.
++
++The execution plan, file tree, and per-task breakdown (with bd ids) will
++be filled in by spec-refinement and spec-ready under `## plan` and
++`## tasks`.
++
+ ---
+ 
+ Index: [[board]]

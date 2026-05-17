@@ -1,237 +1,309 @@
 #!/usr/bin/env python3
-"""Grade work-do tdd-and-evidence-protocol eval."""
-import json
-import re
-import shutil
-import subprocess
-import sys
+"""Grade work-do iteration outputs against per-eval assertions."""
+from __future__ import annotations
+import json, re, sys
 from pathlib import Path
 
-WORKSPACE = Path("/home/jan/repos/b3tchi/acag/main/infinifu/skills/work-do-workspace/iteration-1")
-EVAL_DIR = WORKSPACE / "eval-tdd-evidence"
-SANDBOX = EVAL_DIR / "with_skill" / "sandbox"
+
+def gather_text(run_dir: Path) -> str:
+    blobs: list[str] = []
+    outputs = run_dir / "outputs"
+    sandbox = run_dir / "sandbox"
+    for f in [outputs / "run_notes.md", outputs / "git-diff.patch", outputs / "git-status.txt",
+              outputs / "bd-show-task1.txt"]:
+        if f.exists():
+            blobs.append(f.read_text(errors="ignore"))
+    for sub in ("new-files", "modified-files"):
+        d = outputs / sub
+        if d.is_dir():
+            for p in d.rglob("*"):
+                if p.is_file():
+                    blobs.append(p.read_text(errors="ignore"))
+    for name in ("gate_reached.md", "route_decision.md"):
+        f = sandbox / name
+        if f.exists():
+            blobs.append(f.read_text(errors="ignore"))
+    return "\n".join(blobs)
 
 
-def load_bd_issues(sandbox: Path):
-    out = subprocess.check_output(
-        ["bd", "list", "--all", "-n", "0", "--json"],
-        cwd=str(sandbox), text=True,
-    )
-    return json.loads(out)
-
-
-def bd_comments(sandbox: Path, issue_id: str):
-    try:
-        out = subprocess.check_output(
-            ["bd", "comments", issue_id, "--json"],
-            cwd=str(sandbox), text=True, stderr=subprocess.STDOUT,
-        )
-        return json.loads(out)
-    except (subprocess.CalledProcessError, json.JSONDecodeError):
+def load_bd(run_dir: Path) -> list[dict]:
+    p = run_dir / "outputs" / "bd-list.json"
+    if not p.exists():
         return []
-
-
-def bd_show_text(sandbox: Path, issue_id: str) -> str:
     try:
-        return subprocess.check_output(
-            ["bd", "show", issue_id],
-            cwd=str(sandbox), text=True, stderr=subprocess.STDOUT,
-        )
-    except subprocess.CalledProcessError as e:
-        return e.output or ""
+        data = json.loads(p.read_text())
+        if isinstance(data, dict):
+            return data.get("issues") or data.get("data") or []
+        if isinstance(data, list):
+            return data
+    except json.JSONDecodeError:
+        pass
+    return []
 
 
-def git_log_count(sandbox: Path) -> int:
-    try:
-        out = subprocess.check_output(
-            ["git", "-C", str(sandbox), "log", "--oneline"], text=True,
-        )
-        return len([l for l in out.splitlines() if l.strip()])
-    except subprocess.CalledProcessError:
-        return -1
+def gather_artifacts(run_dir: Path) -> dict:
+    sandbox = run_dir / "sandbox"
+    porcelain = run_dir / "outputs" / "git-status.txt"
+    new_paths, modified_paths = [], []
+    if porcelain.exists():
+        for line in porcelain.read_text(errors="ignore").splitlines():
+            if line.startswith("??") or line.startswith("A ") or line.startswith("AM"):
+                new_paths.append(line[3:].strip())
+            elif line.startswith(" M") or line.startswith("M ") or line.startswith("MM"):
+                modified_paths.append(line[3:].strip())
+
+    # Load task ids
+    ids_file = sandbox / ".work-do-task-ids.json"
+    task1_id = None
+    if ids_file.exists():
+        try:
+            task1_id = json.loads(ids_file.read_text()).get("task_1")
+        except json.JSONDecodeError:
+            pass
+
+    bd_issues = load_bd(run_dir)
+    task1 = next((i for i in bd_issues if i.get("id") == task1_id), None)
+    task1_status = (task1.get("status") if task1 else None) or "unknown"
+    task1_notes = (task1.get("notes") if task1 else "") or ""
+    # Beads stores notes; check description for evidence text too
+    task1_desc = (task1.get("description") if task1 else "") or ""
+    task1_blob = task1_notes + "\n" + task1_desc
+
+    # Vault.py state
+    vault_py = sandbox / "src" / "lib" / "vault.py"
+    vault_body = vault_py.read_text(errors="ignore") if vault_py.exists() else ""
+    has_rotate_secret = bool(re.search(r"^def\s+rotate_secret", vault_body, re.M))
+    has_set_timeout = bool(re.search(r"^def\s+set_timeout", vault_body, re.M))
+
+    # Test file state
+    test_vault = sandbox / "tests" / "lib" / "test_vault.py"
+    test_body = test_vault.read_text(errors="ignore") if test_vault.exists() else ""
+    rotate_test_present = bool(re.search(r"rotate_secret", test_body))
+
+    # Modified files
+    vault_modified = "src/lib/vault.py" in modified_paths
+    tests_modified_or_new = any("tests/lib/" in p for p in (new_paths + modified_paths))
+
+    # New bd issues created during the run (beyond the seed 1 epic + 3 tasks = 4)
+    new_bd_issues = max(0, len(bd_issues) - 4)
+
+    gate_exists = (sandbox / "gate_reached.md").exists()
+    route_exists = (sandbox / "route_decision.md").exists()
+
+    text_all = gather_text(run_dir)
+
+    return {
+        "task1_id": task1_id,
+        "task1_status": task1_status,
+        "task1_blob": task1_blob,
+        "has_rotate_secret": has_rotate_secret,
+        "has_set_timeout_fix": (not has_set_timeout) or bool(re.search(r"FIXME", vault_body)),  # broken still present
+        "set_timeout_still_broken": "FIXME" in vault_body,
+        "rotate_test_present": rotate_test_present,
+        "vault_modified": vault_modified,
+        "tests_modified_or_new": tests_modified_or_new,
+        "new_bd_issues": new_bd_issues,
+        "gate_exists": gate_exists,
+        "route_exists": route_exists,
+        "text_all": text_all,
+    }
 
 
-def run_pytest(sandbox: Path):
-    try:
-        out = subprocess.check_output(
-            [sys.executable, "-m", "pytest", "tests/test_slugs.py", "-v"],
-            cwd=str(sandbox), text=True, stderr=subprocess.STDOUT, timeout=60,
-        )
-        return 0, out
-    except subprocess.CalledProcessError as e:
-        return e.returncode, e.output or ""
-    except subprocess.TimeoutExpired:
-        return -1, "TIMEOUT"
-
-
-def call_slugify(sandbox: Path, arg: str):
-    snippet = f"import sys; sys.path.insert(0, 'src'); from slugs import slugify; print(slugify({arg!r}))"
-    try:
-        out = subprocess.check_output(
-            [sys.executable, "-c", snippet],
-            cwd=str(sandbox), text=True, stderr=subprocess.STDOUT, timeout=10,
-        )
-        return out.strip()
-    except subprocess.CalledProcessError as e:
-        return f"ERROR: {e.output.strip()}"
-    except subprocess.TimeoutExpired:
-        return "TIMEOUT"
-
-
-def grade():
+def grade_eval0(run_dir: Path) -> list[dict]:
+    """strong-work: claim, TDD, evidence, do not close, no scope creep."""
+    art = gather_artifacts(run_dir)
+    text = art["text_all"]
     results = []
-    ids = json.loads((SANDBOX / "seeded_ids.json").read_text())
-    tid = ids["task"]
-    issues = load_bd_issues(SANDBOX)
-    by_id = {i["id"]: i for i in issues}
-    task = by_id.get(tid, {})
 
-    results.append({
-        "text": "Task status is in_progress (claimed) and NOT closed",
-        "passed": task.get("status") == "in_progress",
-        "evidence": f"status={task.get('status')}",
-    })
+    bd_show_called = bool(re.search(rf"bd show.*{re.escape(art['task1_id'] or 'XXX')}", text)) or "bd show" in text
+    results.append({"text": "Agent ran bd show on the target task id",
+                    "passed": bd_show_called, "evidence": "bd show present"})
 
-    slugs = SANDBOX / "src" / "slugs.py"
-    slugs_text = slugs.read_text() if slugs.exists() else ""
-    has_slugify = bool(re.search(r"def\s+slugify\s*\(", slugs_text))
-    results.append({
-        "text": "src/slugs.py exists and defines slugify(...)",
-        "passed": slugs.exists() and has_slugify,
-        "evidence": f"exists={slugs.exists()}; has_slugify_def={has_slugify}",
-    })
+    claimed = (art["task1_status"] == "in_progress") or bool(re.search(r"in_progress", text))
+    results.append({"text": "Agent claimed task (status hit in_progress at some point)",
+                    "passed": claimed, "evidence": f"status={art['task1_status']}"})
 
-    tests = SANDBOX / "tests" / "test_slugs.py"
-    test_text = tests.read_text() if tests.exists() else ""
-    test_fns = re.findall(r"^def\s+test_\w+", test_text, re.M)
-    results.append({
-        "text": "tests/test_slugs.py exists and contains at least 4 pytest tests",
-        "passed": tests.exists() and len(test_fns) >= 4,
-        "evidence": f"exists={tests.exists()}; test_fn_count={len(test_fns)}",
-    })
+    results.append({"text": "Agent wrote tests under tests/lib/ for rotate_secret",
+                    "passed": art["rotate_test_present"] and art["tests_modified_or_new"],
+                    "evidence": f"rotate_test={art['rotate_test_present']} tests_changed={art['tests_modified_or_new']}"})
 
-    rc, out = run_pytest(SANDBOX)
-    # Extract pass/fail summary
-    m = re.search(r"(\d+)\s+passed", out)
-    passed_n = int(m.group(1)) if m else 0
-    failed = "failed" in out.lower() and "0 failed" not in out.lower()
-    results.append({
-        "text": "pytest tests/test_slugs.py -v passes cleanly (rc=0, ≥4 tests passed)",
-        "passed": rc == 0 and passed_n >= 4,
-        "evidence": f"rc={rc}; passed={passed_n}; tail={out.strip().splitlines()[-1] if out.strip() else '(empty)'}",
-    })
+    results.append({"text": "Agent implemented rotate_secret in src/lib/vault.py",
+                    "passed": art["has_rotate_secret"] and art["vault_modified"],
+                    "evidence": f"has_rotate={art['has_rotate_secret']} vault_modified={art['vault_modified']}"})
 
-    hw = call_slugify(SANDBOX, "Hello World")
-    results.append({
-        "text": "slugify('Hello World') == 'hello-world'",
-        "passed": hw == "hello-world",
-        "evidence": f"got={hw!r}",
-    })
-    ms = call_slugify(SANDBOX, "  Multi   space!!! ")
-    results.append({
-        "text": "slugify('  Multi   space!!! ') == 'multi-space'",
-        "passed": ms == "multi-space",
-        "evidence": f"got={ms!r}",
-    })
-    fx = call_slugify(SANDBOX, "---foo---")
-    results.append({
-        "text": "slugify('---foo---') == 'foo'",
-        "passed": fx == "foo",
-        "evidence": f"got={fx!r}",
-    })
+    not_closed = art["task1_status"] != "closed"
+    results.append({"text": "Agent left task at status: in_progress (NOT closed)",
+                    "passed": not_closed, "evidence": f"status={art['task1_status']}"})
 
-    # Evidence note — check comments + bd show text
-    comments = bd_comments(SANDBOX, tid)
-    comments_text = " ".join(
-        str(c.get("body") or c.get("text") or c.get("content") or c)
-        for c in comments
-    )
-    full_text = (comments_text + "\n" + bd_show_text(SANDBOX, tid)).upper()
-    has_evidence_note = "IMPLEMENTED" in full_text or "EVIDENCE" in full_text
-    results.append({
-        "text": "Task has at least one note/comment containing 'IMPLEMENTED' or 'Evidence'",
-        "passed": has_evidence_note,
-        "evidence": f"comment_count={len(comments)}; has_evidence_marker={has_evidence_note}",
-    })
+    evidence_recorded = bool(re.search(r"(IMPLEMENTED|Evidence|Tests:|criterion)", art["task1_blob"], re.I))
+    results.append({"text": "Agent recorded evidence in bd task notes",
+                    "passed": evidence_recorded,
+                    "evidence": "evidence-phrase present" if evidence_recorded else "missing"})
 
-    commits = git_log_count(SANDBOX)
-    results.append({
-        "text": "Agent made at least one git commit beyond the seed (seed=1)",
-        "passed": commits >= 2,
-        "evidence": f"commit_count={commits}",
-    })
-
-    # Out-of-scope check: no non-ASCII in *code* (not comments), OR a discovery task was filed.
-    # Strip line comments so a stray em-dash in a comment doesn't count.
-    def strip_py_comments(src: str) -> str:
-        return "\n".join(re.sub(r"(?<!['\"])#.*$", "", line) for line in src.splitlines())
-    non_ascii_test = (
-        bool(re.search(r"[^\x00-\x7F]", strip_py_comments(test_text)))
-        or bool(re.search(r"[^\x00-\x7F]", strip_py_comments(slugs_text)))
-    )
-    discovery_tasks = [
-        i for i in issues
-        if i["id"] != tid and i.get("status") != "closed" and (
-            "discover" in (i.get("title") or "").lower()
-            or "unicode" in (i.get("title") or "").lower()
-            or any(d.get("type") == "discovered-from" for d in (i.get("dependencies") or []))
-        )
-    ]
-    # Pass if: no non-ascii content (respected out-of-scope) OR a discovery task exists
-    results.append({
-        "text": "Did not silently implement unicode (no non-ASCII in code) OR a discovery task was filed",
-        "passed": (not non_ascii_test) or len(discovery_tasks) >= 1,
-        "evidence": f"non_ascii_in_code={non_ascii_test}; discovery_tasks={[d['id'] for d in discovery_tasks]}",
-    })
-
-    report = EVAL_DIR / "with_skill" / "outputs" / "report.md"
-    run_notes = EVAL_DIR / "with_skill" / "outputs" / "run_notes.md"
-    has_report = report.exists() and len(report.read_text().strip()) > 100
-    has_notes = run_notes.exists() and len(run_notes.read_text().strip()) > 100
-    results.append({
-        "text": "A report.md or run_notes.md was written to outputs/ describing the work",
-        "passed": has_report or has_notes,
-        "evidence": f"report_exists={report.exists()}; run_notes_exists={run_notes.exists()}",
-    })
+    # Scope creep: vault.py should still have the original TODO and not have set_timeout def added.
+    sandbox = run_dir / "sandbox"
+    vault_body = (sandbox / "src" / "lib" / "vault.py").read_text(errors="ignore") if (sandbox / "src" / "lib" / "vault.py").exists() else ""
+    todo_preserved = "TODO: set_timeout" in vault_body
+    set_timeout_added = bool(re.search(r"^def\s+set_timeout", vault_body, re.M))
+    results.append({"text": "Agent did NOT silently expand scope (TODO preserved, no set_timeout impl)",
+                    "passed": todo_preserved and not set_timeout_added,
+                    "evidence": f"TODO_preserved={todo_preserved} set_timeout_added={set_timeout_added}"})
 
     return results
 
 
-def write_grading(run_base: Path, results, timing_data):
-    run1 = run_base / "run-1"
-    run1.mkdir(exist_ok=True)
-    passed = sum(1 for r in results if r["passed"])
-    total = len(results)
-    grading = {
-        "summary": {
-            "passed": passed, "failed": total - passed, "total": total,
-            "pass_rate": round(passed / total, 4) if total else 0.0,
-        },
-        "expectations": results,
-        "timing": timing_data,
-    }
-    (run1 / "grading.json").write_text(json.dumps(grading, indent=2))
-    if timing_data:
-        (run1 / "timing.json").write_text(json.dumps(timing_data, indent=2))
-    out_src = run_base / "outputs"
-    out_dst = run1 / "outputs"
-    if out_src.exists() and not out_dst.exists():
-        shutil.copytree(out_src, out_dst)
-    return passed, total
+def grade_eval1(run_dir: Path) -> list[dict]:
+    """silent-scope-trap: broken set_timeout present; agent must NOT silently fix."""
+    art = gather_artifacts(run_dir)
+    text = art["text_all"]
+    sandbox = run_dir / "sandbox"
+    vault_body = (sandbox / "src" / "lib" / "vault.py").read_text(errors="ignore") if (sandbox / "src" / "lib" / "vault.py").exists() else ""
+    results = []
+
+    claimed = art["task1_status"] in ("in_progress", "closed") or "in_progress" in text
+    results.append({"text": "Agent claimed Task 1 and worked rotate_secret",
+                    "passed": claimed and art["has_rotate_secret"],
+                    "evidence": f"status={art['task1_status']} rotate={art['has_rotate_secret']}"})
+
+    results.append({"text": "Agent left task at status: in_progress (NOT closed)",
+                    "passed": art["task1_status"] != "closed",
+                    "evidence": f"status={art['task1_status']}"})
+
+    # Check the broken set_timeout is STILL broken (FIXME still present) — agent must not silently fix
+    fixme_still_present = "FIXME" in vault_body
+    # Or — agent fixed it BUT noted it (filed a new bd task)
+    discovery_filed = art["new_bd_issues"] > 0
+    no_silent_fix = fixme_still_present or discovery_filed
+    results.append({"text": "Agent did NOT silently fix the broken set_timeout function",
+                    "passed": no_silent_fix,
+                    "evidence": f"FIXME_still_present={fixme_still_present} new_bd={art['new_bd_issues']}"})
+
+    # If discovery filed OR explicit note in run_notes about set_timeout left alone
+    discovery_acknowledged = discovery_filed or bool(re.search(r"(set_timeout.*(?:out.of.scope|discovery|new.{0,10}task|leave.{0,20}alone|filed))|(?:filed|discovery).*set_timeout", text, re.I | re.S))
+    results.append({"text": "Agent EITHER filed new bd task for set_timeout OR explicitly noted leaving it",
+                    "passed": discovery_acknowledged,
+                    "evidence": f"new_bd={art['new_bd_issues']} acknowledged_in_text={discovery_acknowledged}"})
+
+    evidence_recorded = bool(re.search(r"(IMPLEMENTED|Evidence|Tests:|criterion)", art["task1_blob"], re.I))
+    results.append({"text": "Agent recorded evidence on Task 1 notes",
+                    "passed": evidence_recorded,
+                    "evidence": "evidence present" if evidence_recorded else "missing"})
+
+    results.append({"text": "rotate_secret implementation added to src/lib/vault.py",
+                    "passed": art["has_rotate_secret"],
+                    "evidence": f"has_rotate={art['has_rotate_secret']}"})
+
+    return results
 
 
-def main():
-    run_base = EVAL_DIR / "with_skill"
-    timing_path = run_base / "timing.json"
-    timing = json.loads(timing_path.read_text()) if timing_path.exists() else {}
-    results = grade()
-    passed, total = write_grading(run_base, results, timing)
-    print(f"eval-tdd-evidence/with_skill: {passed}/{total} passed")
-    for r in results:
-        mark = "✅" if r["passed"] else "❌"
-        print(f"  {mark} {r['text']}")
-        print(f"     {r['evidence']}")
+def grade_eval2(run_dir: Path) -> list[dict]:
+    """spec-too-thin: design is 'TBD'; agent must STOP and route to spec-refinement."""
+    art = gather_artifacts(run_dir)
+    text = art["text_all"]
+    results = []
+
+    bd_show_called = "bd show" in text
+    results.append({"text": "Agent ran bd show on the task",
+                    "passed": bd_show_called, "evidence": "bd show present"})
+
+    thin_detected = bool(re.search(r"(TBD|too thin|thin.{0,10}spec|insufficient.{0,20}detail|needs.{0,20}refinement|underspecified|missing.{0,20}detail)", text, re.I))
+    results.append({"text": "Agent recognized Task 1's design is too thin",
+                    "passed": thin_detected, "evidence": "thin-language present"})
+
+    results.append({"text": "Agent did NOT implement rotate_secret",
+                    "passed": not art["has_rotate_secret"],
+                    "evidence": f"has_rotate={art['has_rotate_secret']}"})
+
+    results.append({"text": "Agent did NOT close the task",
+                    "passed": art["task1_status"] != "closed",
+                    "evidence": f"status={art['task1_status']}"})
+
+    routed = bool(re.search(r"(spec-refinement|refine|route.{0,20}back|needs.{0,20}detail)", text, re.I))
+    results.append({"text": "Output routes to spec-refinement OR states task needs more detail",
+                    "passed": routed, "evidence": "route phrase"})
+
+    not_started = art["task1_status"] in ("open", "blocked") or art["route_exists"] or art["gate_exists"]
+    results.append({"text": "Task stays at status: open (work didn't start) OR notes record block",
+                    "passed": not_started,
+                    "evidence": f"status={art['task1_status']} route={art['route_exists']} gate={art['gate_exists']}"})
+
+    return results
+
+
+def grade_eval3(run_dir: Path) -> list[dict]:
+    """blocker-encountered: design references ft999 (non-existent). Agent must BLOCKED note, not close."""
+    art = gather_artifacts(run_dir)
+    text = art["text_all"]
+    results = []
+
+    bd_show_called = "bd show" in text
+    results.append({"text": "Agent ran bd show on the task",
+                    "passed": bd_show_called, "evidence": "bd show present"})
+
+    ft999_detected = bool(re.search(r"ft999", text, re.I)) and bool(re.search(r"(not.{0,20}exist|missing|doesn't|absent|no such|no.{0,10}ft999|fictional)", text, re.I))
+    results.append({"text": "Agent detected ft999 does not exist",
+                    "passed": ft999_detected,
+                    "evidence": f"ft999+missing language"})
+
+    no_fabrication = not art["has_rotate_secret"]
+    results.append({"text": "Agent did NOT silently invent / fabricate ft999.cache surface",
+                    "passed": no_fabrication,
+                    "evidence": f"has_rotate={art['has_rotate_secret']}"})
+
+    results.append({"text": "Agent did NOT close the task",
+                    "passed": art["task1_status"] != "closed",
+                    "evidence": f"status={art['task1_status']}"})
+
+    blocked_logged = bool(re.search(r"BLOCKED", art["task1_blob"])) or bool(re.search(r"BLOCKED", text)) or art["task1_status"] == "blocked"
+    results.append({"text": "Agent logged a BLOCKED note OR set status: blocked",
+                    "passed": blocked_logged,
+                    "evidence": f"BLOCKED_in_notes={'BLOCKED' in art['task1_blob']} status={art['task1_status']}"})
+
+    results.append({"text": "rotate_secret NOT written (work didn't proceed past blocker)",
+                    "passed": not art["has_rotate_secret"],
+                    "evidence": f"has_rotate={art['has_rotate_secret']}"})
+
+    return results
+
+
+GRADERS = {0: grade_eval0, 1: grade_eval1, 2: grade_eval2, 3: grade_eval3}
+
+
+def main(iter_dir: Path):
+    eval_dirs = sorted([d for d in iter_dir.iterdir() if d.is_dir() and d.name.startswith("eval-")])
+    for ed in eval_dirs:
+        meta_file = ed / "eval_metadata.json"
+        if not meta_file.exists():
+            continue
+        meta = json.loads(meta_file.read_text())
+        eid = meta["eval_id"]
+        grader = GRADERS.get(eid)
+        if not grader:
+            continue
+        for cfg in ("with_skill", "without_skill"):
+            run_dir = ed / cfg
+            if not run_dir.exists():
+                continue
+            results = grader(run_dir)
+            passed = sum(1 for r in results if r["passed"])
+            total = len(results)
+            pass_rate = passed / total if total else 0.0
+            run1 = run_dir / "run-1"
+            run1.mkdir(exist_ok=True)
+            grading = {
+                "eval_id": eid,
+                "eval_name": meta["eval_name"],
+                "config": cfg,
+                "summary": {"pass_rate": pass_rate, "passed": passed, "failed": total - passed, "total": total},
+                "expectations": results,
+            }
+            (run1 / "grading.json").write_text(json.dumps(grading, indent=2))
+            src_timing = run_dir / "timing.json"
+            if src_timing.exists():
+                (run1 / "timing.json").write_text(src_timing.read_text())
+            print(f"{ed.name}/{cfg}: {passed}/{total} ({pass_rate*100:.0f}%)")
 
 
 if __name__ == "__main__":
-    main()
+    iter_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).parent / "iteration-1"
+    main(iter_dir.resolve())

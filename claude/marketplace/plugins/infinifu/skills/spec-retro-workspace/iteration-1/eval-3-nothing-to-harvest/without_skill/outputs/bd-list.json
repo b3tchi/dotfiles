@@ -1,0 +1,62 @@
+[
+  {
+    "id": "wd3-269652-l16",
+    "title": "sp001 gap: synthetic-check integration test missing (Task 3 closed without deliverable)",
+    "description": "Audit of sp001 found Task wd3-269652-cdv.3 was closed APPROVED but tests/integration/test_rotate_synthetic.py does not exist. Need integration test asserting zero 5xx during rotation window + the 3 specific test cases listed in sp001 plan.",
+    "status": "open",
+    "priority": 1,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-17T08:51:57Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-17T08:51:57Z",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  },
+  {
+    "id": "wd3-269652-eom",
+    "title": "sp001 gap: vault_rotate.py module missing (Task 2 closed without deliverable)",
+    "description": "Audit of sp001 found Task wd3-269652-cdv.2 was closed APPROVED but src/lib/vault_rotate.py does not exist. Need to implement rotate(name, new_value) wrapping vault.rotate_secret with T+5min expiry scheduler + the 4 unit tests listed in sp001 plan.",
+    "status": "open",
+    "priority": 1,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-17T08:51:55Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-17T08:51:55Z",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  },
+  {
+    "id": "wd3-269652-g11",
+    "title": "sp001 gap: missing test_vault_unreachable_raises in test_vault.py",
+    "description": "sp001 plan listed 5 tests for Task 1; only 4 of the named cases shipped. test_vault_unreachable_raises (catches partial-write bug) is missing. Backend simulation needed.",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-17T08:52:00Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-17T08:52:00Z",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  },
+  {
+    "id": "wd3-269652-qxc",
+    "title": "Remove stray set_timeout TODO from src/lib/vault.py",
+    "description": "TODO comment about set_timeout(timeout_ms) was left in vault.py during sp001 work. Out of scope for sp001 — track as a separate item or delete.",
+    "status": "open",
+    "priority": 3,
+    "issue_type": "chore",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-17T08:52:02Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-17T08:52:02Z",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  }
+]

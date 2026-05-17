@@ -1,0 +1,53 @@
+{
+  "eval_id": 0,
+  "eval_name": "strong-retro",
+  "config": "without_skill",
+  "summary": {
+    "pass_rate": 0.75,
+    "passed": 6,
+    "failed": 2,
+    "total": 8
+  },
+  "expectations": [
+    {
+      "text": "Agent ran git log / git diff for shipped reality",
+      "passed": false,
+      "evidence": "git command in text"
+    },
+    {
+      "text": "Agent read im002 + ft002 + adr + bd notes",
+      "passed": true,
+      "evidence": "context-survey present"
+    },
+    {
+      "text": "Agent rewrote im002 body",
+      "passed": true,
+      "evidence": "im002_modified=True"
+    },
+    {
+      "text": "Agent updated ft002 (widen api_surface)",
+      "passed": false,
+      "evidence": "ft002_modified=False"
+    },
+    {
+      "text": "Agent drafted new us### at status: draft for follow-up",
+      "passed": true,
+      "evidence": "new_us_drafts=['docs/notes/us006.md', 'docs/notes/us007.md', 'docs/notes/us008.md']"
+    },
+    {
+      "text": "Agent closed the bd epic",
+      "passed": true,
+      "evidence": "epic_status=closed"
+    },
+    {
+      "text": "Agent did NOT touch docs/board.md or docs/archive.md",
+      "passed": true,
+      "evidence": "board_mod=False archive_mod=False"
+    },
+    {
+      "text": "Agent did NOT change sp001/us003/im002 frontmatter status",
+      "passed": true,
+      "evidence": "sp=done us=done im=accepted"
+    }
+  ]
+}

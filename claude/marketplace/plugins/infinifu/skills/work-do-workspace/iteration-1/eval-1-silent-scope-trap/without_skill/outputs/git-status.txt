@@ -1,0 +1,3 @@
+A  .seed_manifest.txt
+M  src/lib/vault.py
+M  tests/lib/test_vault.py

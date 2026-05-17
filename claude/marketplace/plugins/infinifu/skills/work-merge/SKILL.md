@@ -1,224 +1,162 @@
 ---
 name: work-merge
-description: Use when implementation is complete, work-audit has approved it, and you need to land the branch — guides the final integration step by presenting structured options for merge, PR, or cleanup. The "merge" here covers the whole landing phase: quality gates, commit, push, and handoff, not just the git merge command. Called after work-audit and before spec-retro.
+description: "You MUST use this when all of a spec's bd tasks are closed by work-audit and the work needs to land — 'merge sp007', 'land the rotate-credentials work', 'sp001 is approved, merge it', 'all tasks closed, time to merge', or any phrasing that names a `sp###` whose child bd tasks are all `closed` and now needs the AKM lifecycle flip + git landing. Stage 7 of the AKM lifecycle (work-merge). Verifies tests pass, closes the bd epic, flips `us###.status: ready → done`, flips `im###.status: proposed → accepted`, flips `sp###.status: ready → done` plus footer `Index: [[board]] → [[archive]]`, removes `[[sp###]]` from `docs/board.md`, adds it to `docs/archive.md ## done`, then guides the git landing (merge/PR/keep/discard). Does NOT rewrite `im###` body, NOT mint new ADRs, NOT mint new draft stories — those are `spec-retro` scope."
 ---
 
-# Merge / Land the Branch
+# Work Merge (sp### ready → done + archive)
 
 ## Overview
 
-Guide completion of development work by presenting clear options and handling chosen workflow.
+Stage 7 of the AKM lifecycle. Every child bd task of the spec has been closed by `work-audit`, the implementation is on a feature branch (or worktree), and the user wants the work to land. Two things happen here — and only here — atomically:
 
-**Core principle:** Verify tests → Present options → Execute choice → Clean up.
+1. **AKM status flip + archive move:** `us###.status` → `done`, `im###.status` → `accepted`, `sp###.status` → `done` + footer flip `Index: [[board]] → [[archive]]`. Remove `[[sp###]]` from `docs/board.md`. Add to `docs/archive.md` under `## done`. Close the bd epic.
+2. **Git landing:** verify tests pass, then present 4 options (merge locally / PR / keep / discard) and execute the chosen one. Cleanup worktree where appropriate.
 
-**Announce at start:** "I'm using the work-merge skill to complete this work."
+**Out of scope (deliberately deferred to `spec-retro`):**
+
+- Rewriting `im###.approach` / `## components` / `## data_model` / `## api_surface` to reflect shipped reality (proposed → accepted narrative refresh).
+- Filing new ADRs for decisions that shifted during execution.
+- Updating `ft###` zettels for features whose surface or constraints changed.
+- Drafting new `us###` for follow-up work discovered during implementation.
+
+That's the AKM knowledge-graph maintenance pass and it happens *after* merge.
+
+**Announce at start:** "Using work-merge skill to land sp### and flip the lifecycle."
 
 ## AKM hooks
 
-Stage 7 of the AKM lifecycle — see `claude/akm/akm-lifecycle.md` for the full map and `claude/akm/akm.md` for typed-zettel schemas. Status flips and archive move.
+Stage 7 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Status flips and archive move are the lifecycle-mandated writes; the git landing layer is the operational vehicle that gets the code into the base branch.
 
-**Reads:** `sp###`, `us###`, `im###`.
+**Reads:**
+
+- `sp###` — target spec at `status: ready`. Read frontmatter + the `## tasks` block so every `#### bd <id>` annotation can be verified closed.
+- `us###` — the story this spec solves. Will flip `status: ready → done`.
+- `im###` — the implementation this spec executes. Will flip `status: proposed → accepted`.
+- bd state — every task under the spec's epic must be `closed`. If any is `open` / `in_progress` / `blocked`, block.
 
 **Writes:**
 
-- `us###.status` → `done`.
-- `im###.status` → `accepted`. (The body narrative may still reflect `proposed`; stage 8 `spec-retro` rewrites it to shipped reality.)
-- `sp###.status` → `done`. Flip the footer `Index: [[board]]` → `Index: [[archive]]`.
-- `board.md` — remove `[[sp###]]` from `## ready`.
-- `archive.md` — add `[[sp###]]` under `## done`.
-- Close the beads task / bug.
+- `sp###` — flip frontmatter `status: ready → done`. Flip footer line `Index: [[board]]` → `Index: [[archive]]`.
+- `us###` — flip frontmatter `status: ready → done`.
+- `im###` — flip frontmatter `status: proposed → accepted`. Body narrative left alone (spec-retro owns the refresh).
+- `docs/board.md` — remove the `[[sp###]]` line from `## ready`.
+- `docs/archive.md` — add `[[sp###]]` under `## done` (chronological at the bottom).
+- bd epic — close with summary reason (e.g., "Merged via sp###").
 
-## The Process
+## Entry-specific checklist
 
-### Step 1: Verify Tests
+1. **Identify target spec.** User names a `sp###`. Verify `docs/notes/spec/sp###.md` exists.
+2. **Verify status.** Must be `status: ready`. Apply Disambiguation if not.
+3. **Verify bd children all closed.** `bd list --parent <epic-id>` or `bd dep tree <epic-id>` should show every child task `closed`. Any non-closed child blocks — work-audit didn't approve everything yet.
+4. **Read the spec body** — `## solves [[us###]]`, `## implements [[im###]]`, `## tasks` (for bd id list).
+5. **Run tests** in the feature branch / worktree. All green is the precondition for any of the subsequent writes. Failing tests block; route the user back to fix.
+6. **AKM writes (atomic):**
+   - Flip `us###.status: ready → done`.
+   - Flip `im###.status: proposed → accepted`. Leave body alone.
+   - Flip `sp###.status: ready → done`. Flip footer `Index: [[board]] → [[archive]]`.
+   - Remove `[[sp###|<title>]]` from `docs/board.md ## ready`.
+   - Add `[[sp###|<title>]]` under `docs/archive.md ## done`.
+   - Close the bd epic via `bd close <epic-id> --reason "Merged via sp###. All N tasks closed by work-audit."`
+7. **Git landing (operational vehicle):** present the 4-option menu to the user (Merge / PR / Keep / Discard). Execute the chosen path.
+8. **Worktree cleanup** where appropriate (Options 1 + 4).
+9. **Hand off to `spec-retro`** with a one-line pointer — the user runs spec-retro next to refresh `im###` narrative + file any new ADRs / `ft###` updates / draft `us###`.
 
-**Before presenting options, verify tests pass:**
+## Disambiguation
 
-```bash
-# Run project's test suite
-npm test / cargo test / pytest / go test ./...
+- **`sp###` does not exist** → block; nothing to merge.
+- **`sp###` at `status: idea`** → route to `spec-writing` (no solution yet).
+- **`sp###` at `status: spec`** → route to `spec-refinement` (no plan/tasks yet).
+- **`sp###` at `status: done`** → already merged; nothing to do here. If the user wants narrative refresh, route to `spec-retro`.
+- **bd children not all closed** → block; report which tasks are still `open` / `in_progress` / `blocked`. Route to `work-do` (for blocked or open) or `work-audit` (for in_progress with implementer evidence).
+- **Tests failing on the feature branch** → block; route the user to fix before any AKM write. Do NOT do partial writes (status flip without tests passing leaves the system inconsistent).
+
+## Key Principles (entry-specific)
+
+- **AKM writes BEFORE git landing.** If you push first and the AKM writes fail later, the board lies about what's shipped. Status flip + archive move come first, in the same logical commit; git landing follows.
+- **No partial state.** All AKM writes happen as one logical operation. If any step fails (file write, bd close), roll back rather than leave half-flipped state.
+- **Spec-retro handles narrative, not status.** This skill flips statuses and moves entries; spec-retro rewrites the `im###` story to match shipped reality and files any new ADRs / `ft###` updates. Keep the two passes separate so neither slows the other.
+- **Tests are a hard precondition.** Failing tests on the feature branch is a block — do not perform any AKM write against broken code. The board claims "done" should mean "shipped and green".
+- **Don't mint zettels here.** New ADRs / new `us###` drafts / `ft###` revisions belong to spec-retro. work-merge is purely status + archive + landing.
+
+## Process — git landing options
+
+After AKM writes complete, present exactly these 4 options:
+
 ```
-
-**If tests fail:**
-```
-Tests failing (<N> failures). Must fix before completing:
-
-[Show failures]
-
-Cannot proceed with merge/PR until tests pass.
-```
-
-Stop. Don't proceed to Step 2.
-
-**If tests pass:** Continue to Step 2.
-
-### Step 2: Determine Base Branch
-
-```bash
-# Try common base branches
-git merge-base HEAD main 2>/dev/null || git merge-base HEAD master 2>/dev/null
-```
-
-Or ask: "This branch split from main - is that correct?"
-
-### Step 3: Present Options
-
-Present exactly these 4 options:
-
-```
-Implementation complete. What would you like to do?
+Implementation complete. AKM lifecycle flipped (sp### → done, board → archive).
+How do you want the code to land?
 
 1. Merge back to <base-branch> locally
 2. Push and create a Pull Request
-3. Keep the branch as-is (I'll handle it later)
-4. Discard this work
+3. Keep the branch as-is (handle later)
+4. Discard this work (rolls back the AKM writes too)
 
 Which option?
 ```
 
-**Don't add explanation** - keep options concise.
-
-### Step 4: Execute Choice
-
-#### Option 1: Merge Locally
+### Option 1 — Merge locally
 
 ```bash
-# Switch to base branch
 git checkout <base-branch>
-
-# Pull latest
 git pull
-
-# Merge feature branch
 git merge <feature-branch>
-
-# Verify tests on merged result
-<test command>
-
-# If tests pass
+<test command>     # verify tests on merged result
 git branch -d <feature-branch>
 ```
 
-Then: Cleanup worktree (Step 5)
+Cleanup worktree if applicable.
 
-#### Option 2: Push and Create PR
+### Option 2 — Push + PR
 
 ```bash
-# Push branch
 git push -u origin <feature-branch>
-
-# Create PR
 gh pr create --title "<title>" --body "$(cat <<'EOF'
 ## Summary
-<2-3 bullets of what changed>
+<2-3 bullets>
 
-## Test Plan
-- [ ] <verification steps>
+Spec: docs/notes/spec/sp###.md
 EOF
 )"
 ```
 
-Then: Cleanup worktree (Step 5)
+Cleanup worktree if applicable.
 
-#### Option 3: Keep As-Is
+### Option 3 — Keep as-is
 
-Report: "Keeping branch <name>. Worktree preserved at <path>."
+Report: "Keeping branch <name>. Worktree preserved at <path>. AKM lifecycle has flipped to done — if the work isn't actually shipping, run Option 4 instead."
 
-**Don't cleanup worktree.**
+### Option 4 — Discard
 
-#### Option 4: Discard
+**Requires typed "discard" confirmation.** Then:
 
-**Confirm first:**
-```
-This will permanently delete:
-- Branch <name>
-- All commits: <commit-list>
-- Worktree at <path>
-
-Type 'discard' to confirm.
-```
-
-Wait for exact confirmation.
-
-If confirmed:
 ```bash
 git checkout <base-branch>
 git branch -D <feature-branch>
 ```
 
-Then: Cleanup worktree (Step 5)
-
-### Step 5: Cleanup Worktree
-
-**For Options 1, 2, 4:**
-
-Check if in worktree:
-```bash
-git worktree list | grep $(git branch --show-current)
-```
-
-If yes:
-```bash
-git worktree remove <worktree-path>
-```
-
-**For Option 3:** Keep worktree.
-
-### Step 6: Close Epic and Archive Board Document
-
-**For Options 1 and 2 (merge or PR):**
-
-Use `infinifu:spec-retro` — closes the bd epic and moves the spec from `board/ready/` to `board/done/`.
-
-**For Options 3 and 4:** Skip — work is not complete (kept as-is or discarded).
-
-## Quick Reference
-
-| Option | Merge | Push | Keep Worktree | Cleanup Branch | Archive Board |
-|--------|-------|------|---------------|----------------|---------------|
-| 1. Merge locally | ✓ | - | - | ✓ | spec-retro |
-| 2. Create PR | - | ✓ | ✓ | - | spec-retro |
-| 3. Keep as-is | - | - | ✓ | - | - |
-| 4. Discard | - | - | - | ✓ (force) | - |
-
-## Common Mistakes
-
-**Skipping test verification**
-- **Problem:** Merge broken code, create failing PR
-- **Fix:** Always verify tests before offering options
-
-**Open-ended questions**
-- **Problem:** "What should I do next?" → ambiguous
-- **Fix:** Present exactly 4 structured options
-
-**Automatic worktree cleanup**
-- **Problem:** Remove worktree when might need it (Option 2, 3)
-- **Fix:** Only cleanup for Options 1 and 4
-
-**No confirmation for discard**
-- **Problem:** Accidentally delete work
-- **Fix:** Require typed "discard" confirmation
-
-## Red Flags
-
-**Never:**
-- Proceed with failing tests
-- Merge without verifying tests on result
-- Delete work without confirmation
-- Force-push without explicit request
-
-**Always:**
-- Verify tests before offering options
-- Present exactly 4 options
-- Get typed confirmation for Option 4
-- Clean up worktree for Options 1 & 4 only
+**Rollback the AKM writes** (status flips, archive move, bd epic close) — discard means the work isn't shipping, so the board must reflect that. Confirm with the user which sp### status to restore (`ready` if the breakdown still applies, `spec` if the solution shape is wrong, etc).
 
 ## Integration
 
+**Calls:**
+
+- `bd list --parent <epic-id>` / `bd dep tree` — verify every child is closed.
+- `bd close <epic-id> --reason "..."` — close the epic.
+- `test-runner` agent — quality gate for tests before AKM writes.
+
 **Called by:**
-- **plan-scrum-master** - After all pipeline tasks complete
-- **plan-supervised** - After all batches complete
+
+- `infinifu:plan-scrum-master` — after all pipeline tasks pass `work-audit`.
+- `infinifu:plan-supervised` — after the final batch completes.
+- Solo developer landing their own work after manual `work-audit`.
 
 **Pairs with:**
-- **domain-git-worktrees** - Cleans up worktree created by that skill
-- **spec-retro** - Called after Options 1 & 2 to close epic and archive spec
+
+- `infinifu:domain-git-worktrees` — for worktree cleanup.
+- `infinifu:spec-retro` — the next step after Options 1 or 2; refreshes `im###` narrative + files new ADRs / `us###` drafts / `ft###` updates.
+
+**Out of scope (do NOT call from here):**
+
+- `spec-retro` for the archive move — work-merge owns the archive move per lifecycle.
+- `implementation-write` / `adr-write` / `story-write` — narrative refresh belongs to spec-retro.
+- Source code changes — work-merge does not edit `src/`.

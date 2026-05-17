@@ -1,0 +1,17 @@
+○ wd2-4178385-4pd.1 · Task 1: Add rotate_secret helper to vault.py   [● P2 · OPEN]
+Owner: eval · Type: task
+Created: 2026-05-16 · Updated: 2026-05-16
+
+DESCRIPTION
+  (none)
+
+DESIGN
+TBD — needs refinement.
+
+PARENT
+  ↑ ○ wd2-4178385-4pd: (EPIC) Epic: rotate service credentials without downtime [sp001] ● P2
+
+BLOCKS
+  ← ○ wd2-4178385-4pd.2: Task 2: Add vault_rotate orchestration module ● P2
+  ← ○ wd2-4178385-4pd.3: Task 3: Synthetic-check hook for rotation window ● P2
+

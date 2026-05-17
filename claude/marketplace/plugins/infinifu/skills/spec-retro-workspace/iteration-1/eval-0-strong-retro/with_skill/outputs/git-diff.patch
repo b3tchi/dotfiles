@@ -1,0 +1,256 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..15283b6
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,55 @@
++./AGENTS.md
++./.beads/config.yaml
++./.beads/dolt-server.port
++./.beads/export-state.json
++./.beads/.gitignore
++./.beads/hooks/post-checkout
++./.beads/hooks/post-merge
++./.beads/hooks/pre-commit
++./.beads/hooks/prepare-commit-msg
++./.beads/hooks/pre-push
++./.beads/interactions.jsonl
++./.beads/issues.jsonl
++./.beads/last-touched
++./.beads/.local_version
++./.beads/metadata.json
++./.beads/README.md
++./CLAUDE.md
++./.claude/settings.json
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/im002.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/spec/sp001.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/notes/us004.md
++./docs/notes/us005.md
++./docs/product.md
++./.gitignore
++./pyproject.toml
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/lib/vault.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
++./tests/lib/__init__.py
++./tests/lib/test_vault.py
++./.work-do-task-ids.json
+diff --git a/docs/notes/adr0004.md b/docs/notes/adr0004.md
+new file mode 100644
+index 0000000..054a2b9
+--- /dev/null
++++ b/docs/notes/adr0004.md
+@@ -0,0 +1,49 @@
++---
++aliases:
++  - Credential rotation lives in vault.py — no separate orchestration module
++status: Accepted
++created: 2026-05-17
++---
++# ADR [[cat001]] [[product]]
++
++## title
++Credential rotation lives in vault.py — no separate orchestration module
++
++## context
++[[sp001]] / [[im002]] originally planned a split: `vault.py` would hold
++the `rotate_secret` write helper, and a new `vault_rotate.py` would own
++the 5-minute overlap timer, expiry scheduling, restart-resume logic,
++and a synthetic-check hook. During execution two facts emerged: (1)
++versioned-alias retention is already managed by the backend vault, so
++an in-process expiry timer was redundant; (2) concurrent serialization
++naturally belongs next to the alias state, not in a sibling module
++calling back into it. Splitting would have created a thin shim that
++forwarded everything to `vault.py`.
++
++## decision
++Keep credential rotation in `src/lib/vault.py` — one module owns
++`secret`, `rotate_secret`, per-name locks, alias bookkeeping, and
++`VaultError`. Do not ship `vault_rotate.py`. Do not ship an in-process
++expiry scheduler or a synthetic-check hook as part of [[sp001]];
++backend-managed retention plus the per-name lock cover the
++zero-downtime acceptance criterion for single-region rotation. See
++[[im002]] for the resulting solution shape.
++
++## consequences
++- Smaller surface: one module, one import, no scheduler lifecycle to
++  reason about.
++- The 5-minute overlap is a vault-backend contract, not an in-process
++  guarantee — if the backend ever stops honouring versioned aliases,
++  the overlap silently disappears and rotations become
++  read-during-overlap-unsafe.
++- No synthetic-check hook ships with this spec — observability for
++  rotation windows is deferred and surfaces as follow-up scope (see
++  [[us006]] for the cross-region case where in-process verification
++  becomes necessary).
++- Future multi-step orchestration (e.g. cross-region staging) cannot
++  be added by editing `vault.py` without bloating it — that work
++  should ship a new module and likely supersede this ADR.
++
++---
++
++Index: [[product]]
+diff --git a/docs/notes/ft002.md b/docs/notes/ft002.md
+index 595d78a..e9eeaba 100644
+--- a/docs/notes/ft002.md
++++ b/docs/notes/ft002.md
+@@ -7,20 +7,33 @@ created: 2026-03-20
+ # Feature [[cat001]] [[product]]
+ 
+ ## providing
+-Vault-backed secret retrieval. Every service calls `secret(name)` to
+-read credentials at runtime.
++Vault-backed secret retrieval and live rotation. Every service calls
++`secret(name)` to read credentials at runtime; operators call
++`rotate_secret(name, new_value)` to stage a new versioned alias without
++downtime — readers continue to call `secret(name)` and transparently
++get the latest staged version.
+ 
+ ## api_surface
+ ```python
+-from acme.lib.vault import secret
++from acme.lib.vault import secret, rotate_secret, VaultError
++
++# Read
+ db_url = secret("reports/db_url")
++
++# Rotate (per-name serialized; raises ValueError on empty input,
++# VaultError on backend failure)
++rotate_secret("reports/db_url", "<new-value>")
+ ```
+ 
+ ## data_model
+-None local. Vault is the source of truth.
++None local in the contract. The current implementation keeps an
++in-memory `_ALIASES` map of staged versions per name plus a per-name
++lock map; backend vault remains the source of truth for storage and
++version retention.
+ 
+ ## sample
+-`src/lib/vault.py` ships the canonical client.
++`src/lib/vault.py` ships the canonical client (read + rotate live in
++the same module — see [[im002]] and [[adr0004]]).
+ 
+ ## components
+ - `src/lib/vault.py`
+diff --git a/docs/notes/im002.md b/docs/notes/im002.md
+index 12abdc8..c84806f 100644
+--- a/docs/notes/im002.md
++++ b/docs/notes/im002.md
+@@ -10,23 +10,42 @@ created: 2026-04-26
+ [[us003|rotate service credentials without downtime]]
+ 
+ ## approach
+-Adopt the vault-rotate-policy pattern via [[ft002]]: writers stage the
+-new credential under a versioned alias; readers fall back to the prior
+-version for up to 5 minutes; alias flips at the end of the window.
++Rotation is implemented entirely inside the vault client module — writers
++call `rotate_secret(name, new_value)` which stages a new versioned alias
++under a per-name `threading.Lock`; readers continue to call `secret(name)`
++and transparently get the latest staged version. The originally-planned
++split into a separate `vault_rotate.py` orchestration module (with an
++explicit T+5min scheduler and a synthetic-check hook) was collapsed:
++versioned-alias retention is now backend-managed at the vault layer, so
++no in-process scheduler / expiry timer / synthetic-check ships in this
++spec. See [[adr0004]] for the rationale. Binds [[adr0001]] and
++[[adr0002]].
+ 
+ ## features
+ - [[ft002|vault-secrets]]
+ 
+ ## data_model
+-No schema change. Vault holds versioned aliases.
++No schema change. The module keeps an in-memory `_ALIASES: dict[str,
++list[str]]` of staged versions per name and a per-name lock map
++(`_LOCKS`) guarded by a single module-level mutex (`_LOCKS_GUARD`).
++`secret(name)` returns the most recently staged version. Vault remains
++the source of truth for actual storage and version retention.
+ 
+ ## api_surface
+-`acme.lib.vault.secret(name)` continues to be the only read path; writes
+-use a new internal `rotate_secret(name)` helper that lands in the same lib.
++- `acme.lib.vault.secret(name) -> str` — unchanged read path.
++- `acme.lib.vault.rotate_secret(name: str, new_value: str) -> None` —
++  stages a new versioned alias; per-name serialization via lock.
++  Raises `ValueError` on empty `name` or empty / `None` `new_value`;
++  raises `VaultError` if the backend rejects.
++- `acme.lib.vault.VaultError(RuntimeError)` — error class for backend
++  failures during rotation.
+ 
+ ## components
+-- `src/lib/vault.py`
+-- `src/lib/vault_rotate.py`
++- `src/lib/vault.py` — single module: read path, rotate path, locks,
++  alias bookkeeping, and `VaultError`.
++- `tests/lib/test_vault.py` — 5 unit tests covering stage, flip,
++  concurrent serialization, empty value rejection, empty name
++  rejection.
+ 
+ ## specs
+ - [[sp001|rotate service credentials without downtime]]
+diff --git a/docs/notes/us006.md b/docs/notes/us006.md
+new file mode 100644
+index 0000000..d90af66
+--- /dev/null
++++ b/docs/notes/us006.md
+@@ -0,0 +1,36 @@
++---
++aliases:
++  - verify credential rotation across regions
++status: draft
++created: 2026-05-17
++---
++# Story [[platform-flow]] [[product]]
++
++## role
++[[pn002|platform-engineer]]
++
++## want
++verify that credential rotation succeeds and stays consistent across
++all regions, not just the region the rotate call originates from
++
++## because
++[[sp001]] shipped rotation with a single-region synthetic check (in
++fact, the synthetic check was deferred entirely — see [[adr0004]]).
++During implementation it surfaced that cross-region rotation
++correctness is unverified — replicas in other regions could lag, serve
++stale credentials, or fail to flip alias versions, and we'd have no
++signal until a service started 5xx-ing in production.
++
++## acceptance_criteria
++- Rotation triggered in region A is observable as live in all other
++  regions within an explicit, documented bound (target: <60s)
++- A synthetic check runs in every region during the rotation window and
++  asserts zero 5xx in each region independently
++- A rotation that fails to propagate to any region raises an alert
++  without auto-rolling-back the successful regions
++- Integration test simulates region lag and asserts the propagation
++  bound is enforced
++
++---
++
++Index: [[product]]

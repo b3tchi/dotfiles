@@ -1,0 +1,43 @@
+{
+  "eval_id": 1,
+  "eval_name": "wrong-status-idea",
+  "config": "with_skill",
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 6,
+    "failed": 0,
+    "total": 6
+  },
+  "expectations": [
+    {
+      "text": "Agent read sp001 and recognized status: idea",
+      "passed": true,
+      "evidence": "sp001 + idea"
+    },
+    {
+      "text": "Agent recognized ## solution missing",
+      "passed": true,
+      "evidence": "missing-solution phrase"
+    },
+    {
+      "text": "Agent did NOT append ## plan or ## tasks",
+      "passed": true,
+      "evidence": "has_plan=False has_tasks=False"
+    },
+    {
+      "text": "Agent did NOT modify sp001 frontmatter",
+      "passed": true,
+      "evidence": "status=idea"
+    },
+    {
+      "text": "Agent did NOT modify docs/board.md",
+      "passed": true,
+      "evidence": "board_modified=False"
+    },
+    {
+      "text": "Output routes to spec-writing OR 'solution missing'",
+      "passed": true,
+      "evidence": "route phrase"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+✓ wd3-268484-3ts [EPIC] · Epic: rotate service credentials without downtime [sp001]   [● P2 · CLOSED]
+Owner: eval · Type: epic
+Created: 2026-05-17 · Updated: 2026-05-17
+Close reason: Shipped: vault.rotate_secret + alias bookkeeping for live credential rotation (us003). Stories: us003 already marked done. Retro: clean ship — all 3 tasks AUDITED:APPROVED with no deviations; one out-of-scope TODO filed as wd3-268484-gqj (configurable vault timeout).
+
+DESCRIPTION
+  (none)
+
+DESIGN
+Spec: docs/notes/spec/sp001.md
+
+CHILDREN
+  ↳ ✓ wd3-268484-3ts.1: Task 1: Add rotate_secret helper to vault.py ● P2
+  ↳ ✓ wd3-268484-3ts.2: Task 2: Add vault_rotate orchestration module ● P2
+  ↳ ✓ wd3-268484-3ts.3: Task 3: Synthetic-check hook for rotation window ● P2
+  ✓ 3/3 complete (100%) — eligible for close
+

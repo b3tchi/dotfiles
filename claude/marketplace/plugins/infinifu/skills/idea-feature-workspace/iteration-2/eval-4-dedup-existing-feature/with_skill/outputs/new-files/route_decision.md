@@ -1,0 +1,106 @@
+# Route decision — dedup hit on existing feature
+
+## Verdict
+
+**Do not mint a new `ft###`.** The requested capability ("a shared
+secrets-retrieval library every service calls instead of pasting vault
+shell-outs everywhere") is already covered by **`ft002` — vault-secrets**
+(status: `stable`, created 2026-03-20).
+
+## Evidence
+
+`ft002` body (verbatim, abridged):
+
+- **providing:** "Vault-backed secret retrieval. Every service calls
+  `secret(name)` to read credentials at runtime."
+- **api_surface:** `from acme.lib.vault import secret; db_url =
+  secret("reports/db_url")`
+- **components:** `src/lib/vault.py`
+- **status:** `stable` (already shipped, ready to consume).
+
+The user's framing — "single library every service calls instead of
+pasting vault shell-outs everywhere" — describes the exact `providing`
+contract of `ft002`. The capability boundary, API shape, and consumer
+model are identical.
+
+## What the user is actually describing
+
+A **migration / adoption** problem, not a new-feature problem:
+
+- The shared library (`ft002`) already exists.
+- The services (auth / metrics / reports under `src/services/`) are
+  currently bypassing it by shelling out to the vault CLI ad-hoc.
+- The work is to *use the existing feature*, not to register a new one.
+
+This is the classic "ad-hoc `im###` glue that pre-dates a registered
+`ft###`" case the AKM model is designed to surface. Each service that
+shells out ad-hoc is an `im###` migration candidate that should switch
+to `[[ft002]]` in its `## features` list.
+
+## Re-routing
+
+Per `idea-feature` SKILL disambiguation ("Modification to an existing
+feature → re-route to `idea-extend` framed against the `ft###`"), the
+correct next entry skill is:
+
+**`infinifu:idea-extend`** against `ft002`.
+
+`idea-extend`'s remit covers "us changed adjust implementation" — i.e.
+the existing capability is fine but the *consumption pattern* (which
+services use it, with what enforcement, with what migration path) needs
+adjustment. The framing for that skill:
+
+- Affected feature: `[[ft002|vault-secrets]]`.
+- Problem: services bypass `ft002` and shell out to vault CLI directly.
+- Likely outcomes (for `idea-extend` to scope, not this skill):
+  - A migration spec that ports each ad-hoc consumer onto
+    `acme.lib.vault.secret()`.
+  - Possibly a refresh of `ft002.body` (sample / components) once
+    migration lands, *or* a new ADR under `[[cat001|security]]`
+    mandating `ft002` as the only sanctioned path (no CLI shell-outs).
+  - Per-service `im###` cards updated to list `[[ft002]]` in
+    `## features`.
+
+## What might still warrant a new `ft###` (rejected here)
+
+Plausible "second feature" framings considered and dismissed:
+
+1. **Secret rotation as a separate `ft###`** — `[[us003]]` already
+   exists ("rotate service credentials without downtime"); rotation is
+   story-level user-visible behavior, not a horizontal capability
+   distinct from `ft002`. Routes to `idea-implement` on `us003` when
+   that work starts, not here.
+2. **Startup-time secret loading vs. runtime `secret()`** — `ft002`'s
+   `providing` already says "at runtime"; tightening to also cover
+   startup-load is a contract *refinement* of `ft002`, which is exactly
+   what `idea-extend` handles. No new feature.
+3. **CLI-vs-library boundary** — that's a policy / ADR question
+   (`[[cat001|security]]`), not a new capability. If consensus during
+   `idea-extend` says "no CLI shell-outs allowed", that lands as an
+   ADR, not a new `ft###`.
+
+No granularity case (skill checklist step 3) produces N capabilities
+here — the entire ask collapses onto one already-existing `ft002`.
+
+## Sibling skill to invoke next
+
+```
+infinifu:idea-extend
+```
+
+Framed against:
+
+- `[[ft002|vault-secrets]]` — the feature being re-adopted / its
+  consumption pattern extended.
+- Migration targets: services under `src/services/{auth,metrics,reports}`
+  (currently empty stubs in the sandbox; in the real codebase these
+  would be the ad-hoc consumers).
+- Likely artifacts produced downstream: one `sp###` capturing the
+  migration workstream, possibly one new `adr####` mandating `ft002`
+  as the sanctioned path.
+
+## Stop
+
+Per the skill's checklist step 1 ("Close match → re-route to
+`idea-extend` on that `ft###` and stop"), this skill execution stops
+here. No `sp###` minted, no `board.md` mutated, no new `ft###` drafted.

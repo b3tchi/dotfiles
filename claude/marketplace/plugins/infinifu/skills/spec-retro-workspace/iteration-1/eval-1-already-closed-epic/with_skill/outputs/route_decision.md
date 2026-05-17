@@ -1,0 +1,108 @@
+# Route decision — spec-retro on sp001
+
+**Decision: NO-OP.** The retro has already run; nothing to do.
+
+## Trigger
+
+User asked: "Run spec-retro on sp001."
+
+## Disambiguation rule applied
+
+From the `spec-retro` skill (Step 5 / close epic context — closed-epic
+handling is implicit in `bd close`):
+
+> bd epic already closed → either retro already ran or someone closed
+> out-of-process. Verify with `bd show`; proceed if reason was
+> retro-shaped.
+
+## Evidence collected
+
+### bd epic state
+
+`bd show wd1-263993-ijm` returns:
+
+- Status: **CLOSED**
+- Close reason: **"Retro: prior run. im002 rewritten. Closed by previous spec-retro."**
+- Children: 3/3 closed (100%)
+- `bd list --parent wd1-263993-ijm --status open` → no children at all
+  (all closed)
+
+The close reason is **retro-shaped** — it explicitly names the prior
+retro run and identifies the artifact it touched (`im002 rewritten`).
+This satisfies the "proceed if reason was retro-shaped" branch as
+"already complete", not "needs re-running".
+
+### Spec state
+
+`docs/notes/spec/sp001.md`:
+
+- Frontmatter `status: done` (line 4)
+- Footer `Index: [[archive]]` (line 152) — already flipped per AKM
+  Spec lifecycle (`Index: [[archive]]` once `status = done`)
+
+### Hub state
+
+- `docs/board.md` — empty under `## idea` / `## spec` / `## ready`. sp001
+  correctly absent.
+- `docs/archive.md` — `## done` lists `[[sp001|rotate service
+  credentials without downtime]]`. sp001 correctly present.
+
+### Story state
+
+`docs/notes/us003.md` frontmatter `status: done` — story already
+reconciled.
+
+### Implementation state
+
+`docs/notes/im002.md` frontmatter `status: accepted`. Close reason says
+"im002 rewritten" — body has already been updated to match shipped
+reality per AKM Stage 8 retro.
+
+### Codebase
+
+`git log --oneline` shows the single ship commit (`764bf36 ship sp001:
+rotate_secret + alias bookkeeping`). No drift, no pending TODOs surface
+in a quick scan.
+
+## Why no-op (not restore)
+
+Restore would mean:
+1. Re-open the epic with `bd update ... --status open` → destructive,
+   loses the audit trail of the original retro.
+2. Re-run Steps 1-7 → all idempotent targets are already in their
+   post-retro state. Re-running would produce zero net change to
+   files, hubs, or zettels.
+3. The close reason explicitly identifies the prior actor
+   (`previous spec-retro`) — this is not an out-of-process close that
+   bypassed the workflow; it is the workflow's own terminal state.
+
+Restore would be appropriate only if the close reason did not match
+retro shape (e.g. "wontfix", "dup", "stale") — that is the path the
+disambiguation rule guards against. Not the case here.
+
+## Action taken
+
+None on the sandbox.
+
+- No bd state mutation (epic stays CLOSED).
+- No edits to `im002`, `ft001`, `ft002`, `adr0001`, `adr0002`,
+  `adr0003`, `us003`, or any other zettel.
+- No file moves (sp001 already lives at `docs/notes/spec/sp001.md` with
+  archive footer; AKM model keeps board-citizen specs in this folder
+  regardless of lifecycle stage, lifecycle is carried by frontmatter
+  `status` and the hub membership — both already correct).
+- No commit, per task instructions.
+
+## Per-task capture (separate from this decision)
+
+The task asks me to additionally:
+
+- `git add -A && git status --porcelain` → captured to
+  `outputs/git-status.txt`
+- `git diff --cached` → captured to `outputs/git-diff.patch` (expected
+  empty since no edits were made; the only untracked file
+  `.seed_manifest.txt` will appear staged after `git add -A` but that
+  is sandbox seeding metadata, not retro output)
+- `bd list --json` → captured to `outputs/bd-list.json`
+- `bd show wd1-263993-ijm` → captured to `outputs/bd-show-epic.txt`
+- Run notes → `outputs/run_notes.md`

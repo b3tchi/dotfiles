@@ -1,0 +1,430 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..ff6808b
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,31 @@
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/spec/sp001.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/notes/us004.md
++./docs/notes/us005.md
++./docs/product.md
++./.gitignore
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
+diff --git a/docs/board.md b/docs/board.md
+index 6e24907..7aa369a 100644
+--- a/docs/board.md
++++ b/docs/board.md
+@@ -1,11 +1,11 @@
+ # Board
+ 
+-One spec in flight at spec stage.
++One spec in flight, refined and ready for bd planning.
+ 
+ ## idea
+ 
+ ## spec
+ 
+-- [[sp001|rotate service credentials without downtime]]
+-
+ ## ready
++
++- [[sp001|rotate service credentials without downtime]]
+diff --git a/docs/notes/im002.md b/docs/notes/im002.md
+new file mode 100644
+index 0000000..ec8d169
+--- /dev/null
++++ b/docs/notes/im002.md
+@@ -0,0 +1,53 @@
++---
++aliases:
++  - vault-policy credential rotation for live services
++status: proposed
++created: 2026-05-16
++---
++# Implementation [[cat001]] [[cat003]]
++
++## solves
++[[us003|rotate service credentials without downtime]]
++
++## approach
++Rotate service credentials in place using [[ft002|vault-secrets]] with
++a dual-secret overlap window. Vault issues `current` and `previous`
++versions of each secret name (e.g. `reports/db_url`); writers always
++publish the new version as `current` and demote the prior to
++`previous`. Consumers accept either version for a 5-minute overlap,
++then drop `previous`. No protocol change, no new CA, no impact on
++[[ft001|basic-auth]] for user-facing endpoints — [[adr0001]] is
++untouched. [[adr0003]] (smtplib direct) is unaffected.
++
++## features
++- [[ft002|vault-secrets]]
++
++## data_model
++No schema change. Vault holds the dual-version state; service-side
++code keeps an in-process cache keyed by secret name with a 5-minute
++TTL so overlap is enforced even if a service starts mid-rotation.
++
++## api_surface
++- `acme.lib.vault.secret(name)` — extended to return the active
++  value; gains an internal `secret_versions(name)` that returns
++  `(current, previous)` for handshake-style consumers (e.g. DB
++  reconnect on auth failure → retry with `previous`).
++- New CLI: `acme-rotate <name>` — issues a new version in Vault,
++  records rotation timestamp, exits 0 on success.
++- New synthetic check: `/healthz/rotation` — emits 200 only when
++  no 5xx observed for the trailing 5 minutes spanning the rotation
++  window.
++
++## components
++- `src/lib/vault.py` — add version-aware lookup + cache.
++- `src/lib/rotation.py` — rotation CLI entrypoint.
++- `src/services/reports/` — adopt the new lookup for DB URL.
++- `src/services/auth/` — adopt the new lookup for its DB URL.
++- `src/services/metrics/` — adopt the new lookup for its scrape token.
++
++## specs
++- [[sp001|rotate service credentials without downtime]]
++
++---
++
++Index: [[product]]
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+index 1caaa8b..8a6faa9 100644
+--- a/docs/notes/spec/sp001.md
++++ b/docs/notes/spec/sp001.md
+@@ -1,7 +1,7 @@
+ ---
+ aliases:
+   - rotate service credentials without downtime
+-status: spec
++status: ready
+ created: 2026-04-28
+ ---
+ # Spec [[cat001]] [[cat003]] [[board]]
+@@ -13,20 +13,279 @@ created: 2026-04-28
+ [[im002|vault-policy credential rotation for live services]]
+ 
+ ## problem
+-The platform-engineer [[pn002]] needs to rotate service credentials without
+-downtime. Story [[us003]] asks for live rotation with a 5-minute overlap and
+-zero 5xx during the rotation window.
++The platform-engineer [[pn002]] needs to rotate service credentials
++without downtime. Story [[us003]] asks for live rotation with a
++5-minute overlap and zero 5xx during the rotation window. Today
++secret rotation is a maintenance-window task because every service
++reads its secret once at startup and never re-reads.
+ 
+ ## solution
+-Replace the credential model entirely: every service swaps its
+-password+TOTP path for a mutual-TLS handshake against a new internal CA.
+-Rotation happens by re-issuing certificates; no shared-secret rotation
+-needed. [[ft001|basic-auth]] is bypassed for service-to-service traffic;
+-[[adr0001]] is implicitly superseded by this approach. The CA is hosted
+-on the existing platform but doesn't use [[ft002]] at all.
++Use [[ft002|vault-secrets]] with a dual-secret overlap window. Vault
++keeps `current` and `previous` versions of each rotated secret;
++writers publish the new value as `current` and demote the prior to
++`previous`. Consumers accept either version for a 5-minute overlap,
++then drop `previous`. Scope is deliberately the **secrets that
++actually need rotation in production today** — DB URLs and the
++metrics scrape token. User-facing authentication ([[ft001]],
++[[adr0001]]) is **out of scope** and untouched: that decision is
++about service↔user auth, which is orthogonal to the
++service↔dependency credentials this spec rotates. No new CA, no
++mTLS, no protocol change.
+ 
+ Binds [[cat001]] security and [[cat003]] infrastructure.
+ 
++## plan
++
++**File tree (new and touched):**
++
++```text
++src/
++├── lib/
++│   ├── vault.py             ← extend: version-aware lookup
++│   └── rotation.py          ← new: `acme-rotate <name>` CLI
++└── services/
++    ├── auth/                ← adopt version-aware vault.secret
++    ├── metrics/             ← adopt version-aware vault.secret
++    └── reports/             ← adopt version-aware vault.secret
++tests/
++├── lib/
++│   ├── test_vault_versions.py
++│   └── test_rotation_cli.py
++└── synthetic/
++    └── test_rotation_window.py   ← 5xx-free synthetic check
++```
++
++**Conventions.**
++
++- All three services consume secrets through `acme.lib.vault.secret`
++  — no service reads Vault directly. The dual-version logic lives
++  in one place.
++- In-process secret cache TTL = 5 minutes; matches the overlap
++  window so a service that boots mid-rotation cannot get stuck on
++  `previous` longer than the contract allows.
++- Rotation CLI is idempotent on the Vault side: re-running
++  `acme-rotate reports/db_url` within the overlap window is a no-op
++  (returns the already-staged `current`).
++- Synthetic check polls `/healthz` across all three services every
++  10s during a rotation and fails the test if any non-2xx appears
++  within the 5-minute window.
++
++**Anti-patterns to avoid.**
++
++- Do **not** add a hot-reload signal handler; the 5-minute cache TTL
++  is the rotation contract — a signal path would let one service
++  diverge from the contract.
++- Do **not** thread the previous secret through every call site
++  manually; the retry-with-previous logic stays inside `vault.py`
++  via the `secret_versions(name)` helper, used only by clients
++  that authenticate on connect (DB drivers).
++- Do **not** widen scope to user-facing auth credentials
++  ([[ft001]]) — that would touch [[adr0001]] and is not what
++  [[us003]] asks for. If user-auth rotation is needed, file a
++  fresh story.
++- Do **not** introduce a new CA or mTLS in this spec — out of
++  scope; if the platform later wants service-to-service identity
++  beyond shared secrets, that is a separate Feature and ADR.
++
++**Known limitations.**
++
++- Only DB URLs and the metrics scrape token participate. Other
++  secrets (e.g. SMTP creds — see [[adr0003]]) still rotate on the
++  old maintenance-window path; that is acceptable because they are
++  not on the hot path of any user-visible request today.
++- Vault must support versioned KV (kv-v2) — already deployed.
++- A rotation that spans a service restart still requires that the
++  service can fetch from Vault during boot; this spec does not add
++  offline-bootstrap resilience.
++
++## tasks
++
++### Task 1: Extend `acme.lib.vault` for versioned reads
++
++#### type
++feature
++
++#### effort
++3h
++
++#### depends
++- — none
++
++#### files_touched
++- `src/lib/vault.py`
++- `tests/lib/test_vault_versions.py`
++
++#### success_criteria
++- `secret(name)` returns the current version transparently.
++- `secret_versions(name)` returns `(current, previous_or_None)`.
++- In-process cache honors a 5-minute TTL; cache hit measured by
++  test, not just by reading the code.
++
++#### edge_cases
++- First read after rotation but before TTL expiry on another
++  process — returns the old `current` (which is now `previous`).
++  Test asserts the DB-retry path picks up the new value via
++  `secret_versions`.
++- Vault transient 5xx during read — surface as
++  `VaultUnavailable`, do not poison the cache with `None`.
++
++#### test_plan
++- `test_vault_versions.py::test_returns_current` — fresh read.
++- `test_vault_versions.py::test_returns_previous_after_rotation`.
++- `test_vault_versions.py::test_cache_ttl_5min`.
++- `test_vault_versions.py::test_transient_5xx_does_not_poison`.
++
++#### bd
++<id>   ← attached by spec-ready
++
++### Task 2: Implement `acme-rotate` CLI
++
++#### type
++feature
++
++#### effort
++2h
++
++#### depends
++- Task 1
++
++#### files_touched
++- `src/lib/rotation.py`
++- `tests/lib/test_rotation_cli.py`
++
++#### success_criteria
++- `acme-rotate <name> --value <v>` writes a new version to Vault,
++  demotes the prior to `previous`, records a rotation timestamp,
++  exits 0.
++- Re-running within the 5-minute window is a no-op (exits 0,
++  prints "already rotated at <ts>").
++- Exits non-zero with a clear message on Vault failure.
++
++#### edge_cases
++- Secret does not exist yet — rotation creates v1, no `previous`.
++- Vault rejects write (policy) — propagate error, do not partially
++  rotate.
++
++#### test_plan
++- `test_rotation_cli.py::test_first_rotation_creates_v1`.
++- `test_rotation_cli.py::test_second_rotation_demotes_to_previous`.
++- `test_rotation_cli.py::test_idempotent_within_window`.
++- `test_rotation_cli.py::test_vault_failure_nonzero_exit`.
++
++#### bd
++<id>   ← attached by spec-ready
++
++### Task 3: Adopt versioned vault lookup in reports / auth / metrics
++
++#### type
++task
++
++#### effort
++3h
++
++#### depends
++- Task 1
++
++#### files_touched
++- `src/services/reports/` (db url consumer)
++- `src/services/auth/` (db url consumer)
++- `src/services/metrics/` (scrape token consumer)
++
++#### success_criteria
++- All three services route DB / token reads through
++  `acme.lib.vault.secret`.
++- DB drivers retry once with `secret_versions(...)[1]` on auth
++  failure during the overlap window; no manual config reload.
++- No service caches the secret independently of the lib.
++
++#### edge_cases
++- DB connection pool already has open connections holding the old
++  secret — they remain valid because Postgres holds the session;
++  new connections during the window may transparently retry.
++- Metrics scraper using a token in a header — header rebuilt per
++  scrape, not per process start.
++
++#### test_plan
++- Per-service integration test: start service, rotate secret via
++  CLI, assert next request succeeds with new secret and old
++  in-flight requests do not 5xx.
++
++#### bd
++<id>   ← attached by spec-ready
++
++### Task 4: Synthetic rotation-window check + `/healthz/rotation`
++
++#### type
++feature
++
++#### effort
++2h
++
++#### depends
++- Task 3
++
++#### files_touched
++- `src/lib/rotation.py` (expose status endpoint helper)
++- `src/services/{auth,metrics,reports}/` (mount `/healthz/rotation`)
++- `tests/synthetic/test_rotation_window.py`
++
++#### success_criteria
++- During a live rotation against staging, the synthetic check
++  records zero 5xx across all three services for the 5-minute
++  overlap window.
++- The synthetic test is repeatable in CI against an ephemeral
++  Vault + service stack.
++
++#### edge_cases
++- Service restarts mid-window — the synthetic should still pass
++  (acceptance criterion explicitly forbids 5xx, restarts are not
++  in scope of this story).
++- Vault unavailable during the window — the synthetic must
++  distinguish *5xx caused by rotation* from *5xx caused by Vault
++  outage*; the latter fails the test loudly with a different
++  message so we don't silently green a broken rotation.
++
++#### test_plan
++- `test_rotation_window.py::test_no_5xx_during_rotation`.
++- `test_rotation_window.py::test_vault_outage_fails_loudly`.
++
++#### bd
++<id>   ← attached by spec-ready
++
++### Task 5: Document the rotation runbook in repo
++
++#### type
++task
++
++#### effort
++1h
++
++#### depends
++- Task 4
++
++#### files_touched
++- `docs/notes/im002.md` (update `## components` if reality drifts)
++- `README.md` (add "Rotating a secret" section)
++
++#### success_criteria
++- A platform-engineer can run `acme-rotate <name> --value <v>`,
++  confirm the synthetic check stays green, and close the rotation
++  without consulting any other doc.
++- README links to [[im002]] and [[us003]] for the design rationale.
++
++#### edge_cases
++- Runbook step "what to do if synthetic fails" — must say
++  "rollback by re-running `acme-rotate` with the old value before
++  the 5-minute TTL expires"; this is the actual recovery path,
++  not "restart everything".
++
++#### test_plan
++- Doc review only; verified by a second engineer dry-running the
++  steps against staging.
++
++#### bd
++<id>   ← attached by spec-ready
++
+ ---
+ 
+ Index: [[board]]
+diff --git a/docs/product.md b/docs/product.md
+index fdfa212..5f76320 100644
+--- a/docs/product.md
++++ b/docs/product.md
+@@ -12,7 +12,7 @@ operations analyst and the platform-engineer personas.
+ 
+ ### [[pn002|platform-engineer]]
+ 
+-- [[us003|rotate service credentials without downtime]]
++- [[us003|rotate service credentials without downtime]] >> [[im002]]
+ 
+ ## Features
+ 

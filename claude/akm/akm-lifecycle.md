@@ -6,28 +6,34 @@ created: 2026-05-16
 ---
 # AKM Lifecycle [[product]]
 
-## idea-brainstorming (router)
+## idea (stage 1 — four entry types)
 
-Picks one of four specialized brainstormers based on entry type. Each sub-skill below carries its own AKM hook block in `claude/marketplace/plugins/infinifu/skills/<skill>/SKILL.md`.
+- help user to clearly identify and formulate problem
+- also mitigate any duplications in context of the project
 
 ### idea-implement
 - read: `pn###`, `us###`, `cat###`, `adr###`, `ft###`
-- write: `us###` draft → ready, `sp###.Problem`, `board.md` (reference `## Idea`)
+- write: `sp###.Problem` mentioning ft im cat adr with references
+- write: `us###` draft → ready
+- write: `sp###.Problem`, `board.md` (reference `## Idea`)
 ### idea-extend
 - read: `pn###`, `us###`, `im###`, `cat###`, `adr###`, `ft###`
+- write: `sp###.Problem` mentioning ft im cat adr with references
 - write: `sp###.Problem`, `board.md` (reference `## Idea`)
 ### idea-feature
-- read: `ft###`, `us###`, `im###`, `cat###`, `adr###`
-- write: `sp###.Problem`, `board.md` (reference `## Idea`)  *(ft### itself minted at spec-writing)*
+- read: `ft###`, `im###`, `cat###`, `adr###`
+- write: `sp###.Problem` mentioning ft im cat adr with references
+- write: `board.md` (reference `## Idea`)  *(ft### itself minted at spec-writing)*
 ### idea-hotfix
 - read: `ft###`, `us###`, `im###`, `cat###`, `adr###`
+- write: `sp###.Problem` mentioning ft im cat adr with references
 - write: `sp###.Problem` (severity / blast radius / rollback / minimal-fix shape), `board.md` (reference `## Idea` with urgency annotation)
-
-definition of the problem (grounded in surveyed categories / ADRs / features — never invented)
 
 ## spec-writing
 
-ensure solution with adrs and using features
+- propose solution for the problem high level
+- ensure solution is in line with features and adrs
+- ensure no duplication or propose posible made solution
 
 - read: `us###.AC`, `cat###`, `ft###`, `adr###`
 - write: `sp###.Solution` proposed
@@ -40,7 +46,7 @@ ensure deliverable workable — SRE 8-category pass
 - read: `sp###`, `adr###`, `ft###`
 - write: `sp###.Plan` (file tree, conventions, anti-patterns)
 - write: `sp###.Tasks` structured breakdown (H3 per task, H4 per property; no bd ids yet)
-- write: `im###.Specs` finalize implementation file
+- write: `im###` finalize implementation file
 
 ## spec-ready
 
@@ -69,6 +75,7 @@ ensure deliverable workable — SRE 8-category pass
 
 - read: diff, `im###`, `ft###`, `adr###`
 - write: rewrite `im###`; new `adr###`; update `ft###`; new `us###` drafts
+- write `product.md` `us###` >> `im###`
 - close beads epic
 
 ---

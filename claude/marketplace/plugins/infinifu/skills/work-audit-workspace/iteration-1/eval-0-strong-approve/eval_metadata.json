@@ -1,0 +1,14 @@
+{
+  "eval_id": 0,
+  "eval_name": "strong-approve",
+  "prompt": "Audit Task 1 (rotate_secret helper) via work-audit. Task id is in .work-do-task-ids.json. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent ran bd show on the target task id"},
+    {"text": "Agent ran the test suite (pytest) and verified it passes"},
+    {"text": "Agent read src/lib/vault.py via Read (not just diff)"},
+    {"text": "Agent verified each success criterion with evidence (mentions specific tests OR file:line for each)"},
+    {"text": "Agent issued APPROVED verdict"},
+    {"text": "Agent called bd close on Task 1 (status: closed in bd state)"},
+    {"text": "Close reason includes AUDITED / APPROVED phrasing with criteria evidence"}
+  ]
+}

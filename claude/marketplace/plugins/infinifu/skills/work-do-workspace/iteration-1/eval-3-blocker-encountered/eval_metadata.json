@@ -1,0 +1,13 @@
+{
+  "eval_id": 3,
+  "eval_name": "blocker-encountered",
+  "prompt": "Run work-do on Task 1 — bd task id is in .work-do-task-ids.json. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent ran bd show on the task"},
+    {"text": "Agent detected the task design references ft999 which does not exist"},
+    {"text": "Agent did NOT silently invent a workaround / fabricate ft999 cache surface"},
+    {"text": "Agent did NOT close the task (closing requires reviewer)"},
+    {"text": "Agent logged a BLOCKED note to bd OR returned a 'blocked' report"},
+    {"text": "rotate_secret implementation NOT written (work didn't proceed past blocker)"}
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "eval_id": 2,
+  "eval_name": "done-story-reject",
+  "config": "with_skill",
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 5,
+    "failed": 0,
+    "total": 5
+  },
+  "expectations": [
+    {
+      "text": "Agent read us001 and recognized status: done",
+      "passed": true,
+      "evidence": "us001 + done mentioned"
+    },
+    {
+      "text": "Agent did NOT re-promote / re-emit us001",
+      "passed": true,
+      "evidence": "us001_modified=False status=done"
+    },
+    {
+      "text": "Agent did NOT mint a new sp###.md",
+      "passed": true,
+      "evidence": "sp_count=0"
+    },
+    {
+      "text": "docs/board.md NOT modified",
+      "passed": true,
+      "evidence": "board_changed=False"
+    },
+    {
+      "text": "Output routes to idea-extend OR explicitly states done story can't be promoted",
+      "passed": true,
+      "evidence": "matching phrase present"
+    }
+  ]
+}

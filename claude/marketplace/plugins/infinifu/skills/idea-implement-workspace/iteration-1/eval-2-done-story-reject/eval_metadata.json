@@ -1,0 +1,12 @@
+{
+  "eval_id": 2,
+  "eval_name": "done-story-reject",
+  "prompt": "Run idea-implement on us001 (view dashboard of recent reports). Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent read us001 and recognized status: done"},
+    {"text": "Agent did NOT re-promote / re-emit us001"},
+    {"text": "Agent did NOT mint a new sp###.md under docs/notes/spec/"},
+    {"text": "docs/board.md NOT modified"},
+    {"text": "Output routes to idea-extend OR explicitly states 'cannot promote done story' / 'use idea-extend for changes'"}
+  ]
+}

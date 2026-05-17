@@ -1,0 +1,126 @@
+# Route decision: idea-feature → idea-implement
+
+**Announced:** "Using idea-feature skill to scope a new horizontal capability."
+
+**Outcome:** Disambiguation rule fires — re-route to `infinifu:idea-implement`.
+No `sp###` minted, no board update, no hard gate reached.
+
+## Request
+
+> Add a quarterly retention purge tool — only the platform-engineer persona
+> uses it, and only once a quarter when legal asks for the deletion proof.
+
+## Rule that fired
+
+From `idea-feature` `## Disambiguation`:
+
+> **Capability that serves exactly one story** → re-route to `idea-implement`
+> (it's `im###` glue, not `ft###`).
+
+Reinforced by `## Key Principles`:
+
+> **A feature with one consumer is not a feature.** Features are reusable by
+> definition. One-consumer "features" are `im###` glue in disguise.
+
+## Evidence (surveyed zettels)
+
+### Personas — one consumer
+
+- `[[pn001|analyst]]` — operations analyst. No interest in retention proofs;
+  cares about report dashboards / filtering (`us001`, `us002`).
+- `[[pn002|platform-engineer]]` — owns the platform; quarterly legal-proof
+  task is squarely their responsibility. **Only this persona consumes the
+  ask.**
+
+The request explicitly says "only the platform-engineer persona uses it".
+That is one consumer by construction.
+
+### Stories — no existing one covers it; one new story would
+
+- `[[us001|view dashboard of recent reports]]` — analyst-facing, unrelated.
+- `[[us002|filter reports by date range]]` — analyst-facing, unrelated.
+- `[[us003|rotate service credentials without downtime]]` — platform-engineer,
+  but about secret rotation, not retention proofs.
+
+No existing `us###` covers "produce quarterly proof of deletion for legal".
+This is a fresh story from `pn002`'s perspective — exactly the shape
+`idea-implement` is for.
+
+### Features — dedup check, no overlap (and no candidate to extend)
+
+- `[[ft001|basic-auth (password+TOTP)]]` — auth, unrelated.
+- `[[ft002|vault-secrets]]` — secret retrieval, unrelated.
+
+No existing feature covers retention purge or deletion-proof generation,
+so `idea-extend` does not apply either. The asker also did not frame this
+as a horizontal building block — they said "tool".
+
+### ADRs — retention is already decided; this is glue on top
+
+- `[[adr0001]]` — auth via ft001 (unrelated).
+- `[[adr0002|Reports written to Postgres, retained 90 days]]` — **directly
+  relevant.** The actual purge already exists per this ADR ("Hard delete
+  after 90 days via nightly job"). The ask is for a *report on top of*
+  that existing purge — a one-off ergonomic tool for `pn002`, not a new
+  shared capability.
+- `[[adr0003]]` — SMTP, unrelated.
+
+This is decisive: the retention *capability* already exists (nightly job
+per adr0002). What's being asked for is the proof-of-deletion artifact —
+which is per-story glue, not a new horizontal building block.
+
+### Implementations — no ad-hoc copies to migrate
+
+- `[[im001|reports dashboard via reports-service UI]]` — dashboard glue,
+  unrelated.
+
+There is no ad-hoc retention-purge code scattered across services to
+consolidate. The "feature pays for itself by migration" argument from
+`idea-feature` `## Key Principles` cannot be made here.
+
+### Categories — would apply at `im###` level anyway
+
+- `[[cat002|data]]` — retention, schema, query patterns. Primary fit.
+- `[[cat001|security]]` — audit trails belong here too.
+
+These will live on the eventual `im###` H1, not justify a new `ft###`.
+
+## Why not `idea-feature` (granularity check)
+
+`idea-feature` step 3 (Granularity check) and Key Principles say:
+
+> Atomic feature, atomic `ft###`. One `## providing` paragraph, one
+> `## api_surface`, one lifecycle per `ft###`.
+
+A "tool" with one persona, one trigger (quarterly), one consumer story,
+and no reuse intent does not need (and would actively harm) the
+`ft###` registry:
+
+- It has no second consumer to inherit constraints.
+- The capability boundary collapses to "what pn002 needs once a quarter".
+- The `## api_surface` would be a single CLI call invoked four times a
+  year — not a contract that other implementations bind against.
+
+Promoting it to `ft###` would be the exact failure mode the skill warns
+against: `im###` glue in disguise.
+
+## Recommended next action
+
+Invoke `infinifu:idea-implement` with the request reframed as a story:
+
+- **Persona:** `[[pn002|platform-engineer]]`
+- **Want:** "produce a quarterly proof-of-deletion report so legal
+  requests can be served on demand"
+- **Because:** legal asks once a quarter; pulling it by hand each time
+  is error-prone and slow
+- **Likely binding:** `[[adr0002]]` (the 90-day retention contract this
+  proves compliance with), categories `[[cat002|data]]` and
+  `[[cat001|security]]`.
+
+That skill will mint a fresh `us###`, capture `## problem` in a new
+`sp###`, and walk the shared brainstorming process from there.
+
+## Hard gate status
+
+Not reached. No design was presented because routing exited the skill
+before step 4 (Propose 2-3 design approaches) of `idea-brainstorming`.

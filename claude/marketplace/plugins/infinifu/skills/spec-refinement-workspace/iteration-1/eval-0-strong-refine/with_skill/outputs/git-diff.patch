@@ -1,0 +1,401 @@
+diff --git a/docs/notes/im002.md b/docs/notes/im002.md
+index 85fc005..a5e5bc1 100644
+--- a/docs/notes/im002.md
++++ b/docs/notes/im002.md
+@@ -28,7 +28,7 @@ use a new internal `rotate_secret(name)` helper that lands in the same lib.
+ - `src/lib/vault.py`
+ 
+ ## specs
+-- (none yet — spec-refinement should finalize the back-link)
++- [[sp001|rotate service credentials without downtime]]
+ 
+ ---
+ 
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+index 8234b38..cb5b727 100644
+--- a/docs/notes/spec/sp001.md
++++ b/docs/notes/spec/sp001.md
+@@ -29,6 +29,383 @@ Binds [[adr0001]] (services stay on ft001 basic-auth — no new auth path)
+ and [[adr0002]] (Postgres retention is unaffected). Categories [[cat001]]
+ security and [[cat003]] infrastructure both apply.
+ 
++## plan
++
++**File tree (touched/added).**
++
++```text
++src/lib/
++├── vault.py               # MODIFIED — add rotate_secret() helper + version-aware secret()
++└── tests/
++    ├── test_vault_rotate.py     # NEW — unit + contract tests
++    └── test_vault_concurrency.py# NEW — overlap-window read/write race tests
++
++scripts/
++└── rotate_secret.py       # NEW — operator-facing CLI wrapping rotate_secret()
++
++docs/
++└── runbooks/
++    └── secret-rotation.md # NEW — rollback + monitoring runbook
++```
++
++**Conventions.**
++- Module under `src/lib/` keeps the existing `acme.lib.vault` import path
++  exposed by [[ft002]] — readers must continue to call `secret(name)`
++  unchanged. No new public read API.
++- The writer helper is internal: `rotate_secret(name, new_value)` lives
++  in the same module but is not re-exported from `acme.lib.vault.__init__`
++  package surface used by services.
++- Vault versioned alias scheme: `prior:<name>` for the previous value,
++  `current:<name>` for the new one, with a TTL boundary stored as
++  `prior_expires:<name>` (ISO-8601 UTC).
++- Time source: a single `vault._now()` function returns `datetime.now(UTC)`
++  — tests monkeypatch it; production code never calls `datetime.now()`
++  directly. This is the only seam tests use to advance the clock.
++- The overlap window is exactly **5 minutes (300 seconds)** to match
++  us003 AC; this constant lives in `vault.OVERLAP_SECONDS` so the runbook
++  and the test fixture stay in lock-step.
++- Logging: every read that falls back to `prior:<name>` emits a structured
++  `vault.fallback` log line (name, prior_age_seconds). Every rotation
++  emits `vault.rotate.start` and `vault.rotate.flip`. No PII / secret
++  values in logs ever.
++
++**Anti-patterns (apply to every task).**
++- No bare `except:` — always `except SpecificError as e`. Don't swallow
++  vault errors during a rotation; raise and let the caller decide.
++- No `time.sleep()` inside production code. Tests use the `_now` seam, not
++  real sleeps.
++- No `assert` for control flow in production code — use explicit `raise
++  ValueError(...)`. `assert` is fine in tests.
++- No "best-effort" silent failure: if writing the new version fails after
++  the staging step, the helper MUST roll back the staging key and raise.
++- No `TODO` / `FIXME` strings without an `sp###` or `us###` reference —
++  the diff reviewer will reject them.
++- No stub returns (`pass` / `return None`) standing in for unimplemented
++  branches. Either implement or `raise NotImplementedError("explain why")`.
++- No tests that only assert "function returns a value" or "key exists in
++  vault" — tests MUST assert the *value* the reader sees at a specific
++  moment in the overlap window.
++
++**Known limitations.**
++- The current `acme.lib.vault.secret()` implementation may cache values
++  in-process. Task 1 audits this; if a cache exists with TTL > overlap
++  window, readers will not pick up the new value until restart. Mitigation
++  is captured in Task 1's edge cases — either lower the cache TTL below
++  300 s, or invalidate on `rotate_secret` flip, or document a hard
++  requirement that consumers re-read on every request (existing reports
++  service already does this).
++- Vault server-side ACLs are out of scope; this spec assumes the rotating
++  identity has write access to the alias path. If it doesn't, the script
++  fails fast with a clear error — covered in Task 1 edge cases.
++- The synthetic check used in Task 3 exercises the `reports` service
++  reader path only. `auth` and `metrics` are assumed to read via the same
++  `secret()` API and therefore inherit the behaviour — Task 3 verifies
++  this assumption explicitly via a grep / import-graph check rather than
++  by running all three services.
++- Multi-region / multi-vault failover is out of scope. One vault instance.
++
++## tasks
++
++### Task 1: Add `rotate_secret` helper and version-aware `secret()` read
++
++#### type
++task
++
++#### effort
++6h
++
++#### depends
++- none
++
++#### files_touched
++- `src/lib/vault.py`
++- `src/lib/tests/test_vault_rotate.py`
++
++#### success_criteria
++- `rotate_secret(name, new_value)` is added to `src/lib/vault.py` and is
++  callable as `from acme.lib.vault import rotate_secret` from a script,
++  but is NOT re-exported by `acme.lib.vault.__init__` to the service
++  packages (verified by `grep -R "rotate_secret" src/services/` returning
++  zero hits at end of task).
++- `secret(name)` returns the value at `current:<name>` whenever a current
++  version exists; falls back to `prior:<name>` only when
++  `current:<name>` read raises a defined "missing" error AND
++  `prior_expires:<name>` is in the future. Past-expiry prior values are
++  treated as missing (raise `KeyError`).
++- A constant `OVERLAP_SECONDS = 300` lives in `vault.py`; both production
++  code and tests import it (no magic numbers duplicated).
++- A `vault._now()` time seam exists; no other call to `datetime.now()`
++  remains in `vault.py` (verified by `grep -nE 'datetime\.now|time\.time'
++  src/lib/vault.py` returning only the body of `_now`).
++- Unit tests in `test_vault_rotate.py` pass and include the eight specific
++  test cases listed under `#### test_plan` (name match, not just count).
++- `pytest src/lib/tests/test_vault_rotate.py -q` exits 0.
++- No `unwrap`-equivalent (`except: pass`, bare `except`, swallowed
++  exceptions) in the new code; reviewer grep `grep -nE 'except[ ]*:'
++  src/lib/vault.py` returns 0 results.
++
++#### edge_cases
++- **Existing read-path cache.** Audit `secret()` before changing it:
++  if it caches values in-process, the cache MUST be invalidated by
++  `rotate_secret` (or proven to have TTL < 60s). If neither is true,
++  document the gap and add a `vault.invalidate(name)` helper called at
++  the end of `rotate_secret` flip. Don't ship without resolving this —
++  it's the most likely cause of "rotation looks fine but services kept
++  the old value".
++- **Missing prior on first rotation.** First-ever rotation of a name
++  has no `prior:<name>`. `secret()` MUST still work; only the fallback
++  path is unreachable. Test: `test_first_rotation_no_prior_read_succeeds`.
++- **Expired prior, read after window.** At `prior_expires + 1s`, a read
++  of `current:<name>` succeeds and returns the new value. A read that
++  somehow falls through to `prior:<name>` MUST raise `KeyError`, NOT
++  silently serve a stale secret. Test:
++  `test_prior_read_after_expiry_raises`.
++- **Concurrent rotate during rotate.** Two operators run the script
++  simultaneously. The helper MUST be idempotent at the alias-write level
++  or detect the conflict (compare-and-set on `current:<name>` version
++  marker) and raise. Don't allow two staging values to overwrite each
++  other.
++- **Write failure mid-rotation.** If staging `current:<name>` succeeds
++  but writing `prior_expires:<name>` fails, the helper rolls back the
++  staging key. State after failure == state before. Test:
++  `test_rotate_failure_rolls_back_staging`.
++- **Empty / None / wrong-type `new_value`.** `rotate_secret(name, "")`,
++  `rotate_secret(name, None)`, `rotate_secret(name, 123)` all raise
++  `ValueError` BEFORE touching vault. Don't store empty strings.
++- **Unauthorised write.** Vault returns 403 on the staging write — the
++  helper raises a typed `VaultPermissionError` with the alias path in
++  the message, NOT a generic `Exception`.
++- **Clock skew.** `prior_expires` is written by the rotator's clock and
++  read by the reader's clock. Operators on different hosts can disagree
++  by a few seconds. Document that `OVERLAP_SECONDS = 300` gives ~5 min
++  *minus* worst-case skew; if NTP drift is >30 s, the effective overlap
++  shrinks. Note in runbook (Task 4).
++
++#### test_plan
++- `test_secret_returns_current_when_current_exists` — happy path; sets
++  `current:foo=A`, asserts `secret("foo") == "A"`. Catches: regression
++  where the read path always falls back to prior.
++- `test_secret_falls_back_to_prior_within_window` — sets `current:foo`
++  unreadable + `prior:foo=B` + `prior_expires` 100s in future; asserts
++  `secret("foo") == "B"`. Catches: fallback logic missing or inverted.
++- `test_prior_read_after_expiry_raises` — sets `prior_expires` 1s in the
++  past; asserts `secret("foo")` raises `KeyError`. Catches: stale-secret
++  bug where expired prior is silently served.
++- `test_rotate_secret_stages_then_flips` — asserts the sequence of vault
++  writes via a recording fake: staging key → expiry key → flip. Catches:
++  out-of-order writes that would leave a window where readers see neither
++  value.
++- `test_rotate_failure_rolls_back_staging` — vault double raises on the
++  expiry write; asserts the staging key is deleted before the exception
++  propagates. Catches: half-rotated state left in vault.
++- `test_rotate_rejects_empty_value` — `rotate_secret("foo", "")` raises
++  `ValueError`, vault is not touched. Catches: silent storage of empty
++  secrets, which would brick the service.
++- `test_rotate_rejects_none_and_non_string` — covers `None` and `int`.
++  Catches: type-coercion bugs where `str(None) == "None"` ends up in
++  vault.
++- `test_first_rotation_no_prior_read_succeeds` — fresh name with no
++  `prior:` key; assert `secret(name)` after `rotate_secret` returns the
++  new value and does not raise on the missing prior. Catches: read path
++  assuming prior always exists.
++
++### Task 2: Operator CLI `scripts/rotate_secret.py`
++
++#### type
++task
++
++#### effort
++3h
++
++#### depends
++- Task 1
++
++#### files_touched
++- `scripts/rotate_secret.py`
++- `src/lib/tests/test_rotate_secret_cli.py`
++
++#### success_criteria
++- `python scripts/rotate_secret.py --name <n> --value-from-stdin` reads
++  the new value from stdin (never argv — secrets MUST NOT appear in
++  process listings), calls `rotate_secret`, prints
++  `rotated <name> at <iso-timestamp>; prior expires <iso-timestamp>`
++  to stdout, exits 0.
++- Exit codes are explicit: 0 success, 2 invalid args, 3
++  `VaultPermissionError`, 4 any other vault error, 5 empty/missing stdin.
++  Tested via subprocess in `test_rotate_secret_cli.py`.
++- `--dry-run` flag prints "would rotate <name>" and exits 0 without
++  calling `rotate_secret`. Catches: operator typo-protection.
++- `--name` is validated against `^[a-zA-Z0-9_/-]+$` before any vault
++  call; injection-style names raise exit 2.
++- Script has a module-level docstring naming the runbook
++  (`docs/runbooks/secret-rotation.md`) and the spec (`sp001`).
++
++#### edge_cases
++- **Secret on argv.** If anyone passes `--value foo`, the script MUST
++  refuse (exit 2) with a message pointing at `--value-from-stdin`.
++  Catches: secrets in shell history / `ps` output.
++- **Empty stdin.** Stdin closed with zero bytes → exit 5, vault not
++  touched.
++- **Stdin with trailing newline.** A bare `echo "secret" | ...` will
++  feed a trailing `\n`. Strip exactly one trailing newline; preserve
++  any internal newlines (some secrets are multi-line, e.g. PEM keys).
++  Test: `test_cli_strips_only_trailing_newline`.
++- **CTRL-C mid-rotation.** Signal handling: SIGINT during the vault
++  call surfaces as a non-zero exit and the operator sees a clear
++  "rotation may be partial — see runbook" message. Don't swallow.
++
++#### test_plan
++- `test_cli_happy_path_via_subprocess` — pipes a value to stdin, asserts
++  exit 0 and stdout pattern. Catches: argv leak, missing output.
++- `test_cli_refuses_value_on_argv` — passes `--value` flag; expects
++  exit 2 and stderr mentioning `--value-from-stdin`. Catches:
++  regressions that re-introduce CLI value flag.
++- `test_cli_empty_stdin_exits_5` — empty input; vault double records
++  zero calls. Catches: empty-string secrets being stored.
++- `test_cli_strips_only_trailing_newline` — input `b"line1\nline2\n"`
++  results in `rotate_secret` called with `"line1\nline2"`. Catches:
++  over-eager `.strip()` that breaks multi-line secrets.
++- `test_cli_invalid_name_exits_2` — name `"foo;rm -rf /"` rejected
++  pre-vault. Catches: injection in vault path.
++- `test_cli_permission_error_exits_3` — vault double raises
++  `VaultPermissionError`; script exits 3 with operator-facing message.
++
++### Task 3: Integration test — zero 5xx during rotation window
++
++#### type
++task
++
++#### effort
++5h
++
++#### depends
++- Task 1
++
++#### files_touched
++- `src/lib/tests/test_vault_concurrency.py`
++- (read-only audit) `src/services/reports/__init__.py`,
++  `src/services/auth/__init__.py`, `src/services/metrics/__init__.py`
++
++#### success_criteria
++- Test starts a synthetic reader loop calling `secret("reports/db_url")`
++  at ~50 req/s for 6 minutes of *simulated* time (via the `_now` seam,
++  NOT real wall-clock 6 minutes — entire test completes in < 10s).
++- During the 6 simulated minutes, the test calls `rotate_secret` at
++  T=60s and asserts:
++  - Zero reader calls raise an unhandled exception.
++  - Every reader call between T=60s and T=360s returns either the prior
++    value `A` or the new value `B` (no `None`, no `""`, no `KeyError`).
++  - The set of values observed by readers includes BOTH `A` and `B`
++    during T=60s..T=360s (proves the overlap is actually overlapping,
++    not flipping instantly).
++  - After T=360s+1, readers see only `B`. Catches: prior-key not
++    expiring on schedule.
++- An import-graph audit asserts that `reports`, `auth`, and `metrics`
++  all import `secret` (not `rotate_secret` or any other write helper)
++  from `acme.lib.vault`. Verified by AST parse, not regex. Catches:
++  any service that opens its own vault client and bypasses the
++  rotation policy.
++- `pytest src/lib/tests/test_vault_concurrency.py -q` exits 0 in under
++  15 seconds. Catches: test that secretly uses real `time.sleep` and
++  takes 6 real minutes in CI.
++
++#### edge_cases
++- **Reader scheduled exactly at flip boundary.** A reader call landing
++  at simulated T=360.000s — define behaviour: gets `B` (new value).
++  Test: `test_reader_at_flip_boundary_sees_new_value`.
++- **Reader scheduled at expiry boundary +1ns.** Reader at T=360.001s
++  with `current` momentarily unreadable falls through to `prior`,
++  which is now expired → KeyError. This is the "tiny window" that
++  would surface as a 5xx in production. The test MUST construct this
++  scenario explicitly and the implementation MUST handle it (single
++  retry on `current` read before falling back, or treat expired prior
++  as "try current once more"). Don't let this slip — it's exactly the
++  bug the AC was written to catch.
++- **Reader cache TTL.** If Task 1 added `vault.invalidate(name)` on
++  flip, assert that a reader holding a cached prior value gets the new
++  value on next call after flip. If not (cache fully avoided), assert
++  there is no module-level cache by inspecting `vault._cache` does not
++  exist.
++- **Service that imports vault under a different name.** AST check
++  must catch `from acme.lib import vault as v` and `v.secret(...)`
++  usage, not just `from acme.lib.vault import secret`.
++
++#### test_plan
++- `test_zero_unhandled_exceptions_during_rotation_window` — 6 simulated
++  minutes, ~18,000 reader calls, zero exceptions. Catches: any code
++  path during overlap that raises (the literal us003 AC).
++- `test_both_values_observed_during_overlap` — set of returned values
++  during the overlap window is `{"A", "B"}`. Catches: rotation that
++  flips atomically (no overlap) — which would still pass "zero 5xx"
++  but violates the spirit of the 5-minute overlap requirement.
++- `test_only_new_value_observed_after_window` — readers at
++  T=360s+1..T=400s see only `B`. Catches: prior key not expiring.
++- `test_reader_at_flip_boundary_sees_new_value` — single reader at
++  exactly T=360s. Catches: off-by-one in expiry comparison
++  (`<` vs `<=`).
++- `test_reader_at_expiry_plus_epsilon_does_not_5xx` — explicitly
++  schedules a reader at T=360s+1ns during a flake where `current` read
++  fails once. Catches: the "tiny race window" 5xx bug.
++- `test_all_services_use_secret_only` — AST audit of three service
++  packages. Catches: a service quietly using `rotate_secret` or
++  bypassing the lib.
++
++### Task 4: Operator runbook `docs/runbooks/secret-rotation.md`
++
++#### type
++task
++
++#### effort
++3h
++
++#### depends
++- Task 1
++- Task 2
++
++#### files_touched
++- `docs/runbooks/secret-rotation.md`
++
++#### success_criteria
++- Runbook contains, in this order, the following sections (verified by
++  H2 grep): `## Pre-flight`, `## Procedure`, `## Verification`,
++  `## Rollback`, `## Monitoring`, `## Known limitations`.
++- `## Procedure` lists the exact `scripts/rotate_secret.py` invocation
++  including `--value-from-stdin` and explicitly forbids `--value` on
++  argv (mirrors Task 2 success criterion).
++- `## Rollback` describes the exact vault state to inspect when a
++  rotation half-fails (presence of `current:<name>` vs `prior:<name>`
++  vs `prior_expires:<name>`) and the recovery action for each
++  combination. At least three named recovery scenarios.
++- `## Monitoring` names the two log lines (`vault.rotate.start`,
++  `vault.rotate.flip`) and the metric to watch (5xx rate on reader
++  services) during the 5-minute window.
++- `## Known limitations` mentions clock-skew shrinkage of overlap and
++  the cache-TTL caveat from Task 1.
++- Document opens with a one-line link back to `sp001` and `us003`.
++- `markdownlint docs/runbooks/secret-rotation.md` reports no errors
++  beyond those globally disabled in `.markdownlint.json`.
++
++#### edge_cases
++- **Operator runs procedure on a stale checkout.** Runbook explicitly
++  pins which git tag / commit the procedure was validated against.
++  Stale runbook is the #1 cause of operator confusion at 3am.
++- **Two operators try to rotate at once.** Document the lock /
++  coordination story — even if it's "ping #platform before rotating",
++  it MUST be written down.
++- **Rotation happens during a deploy.** Note that mid-deploy rotation
++  is unsupported until a follow-up story; if a deploy is in flight,
++  wait or abort the rotation.
++
++#### test_plan
++- Runbook itself isn't unit-tested. Verification is:
++  - Manual: a teammate who didn't write the spec runs the runbook on
++    staging end-to-end and reports back. Owner notes whose dry-run
++    confirmed the procedure works.
++  - Automated: `pytest docs/runbooks/test_secret_rotation_runbook.py`
++    (a thin doc-test that greps for the required H2 sections and the
++    `--value-from-stdin` snippet). Catches: runbook drift where someone
++    deletes a required section.
++
+ ---
+ 
+ Index: [[board]]

@@ -1,0 +1,15 @@
+{
+  "eval_id": 1,
+  "eval_name": "saml-genuine-feature-via-adr",
+  "prompt": "We need to add SAML SSO to our auth — basic-auth (ft001) only does password+TOTP today and the new external partner integration needs SAML. Use the infinifu:idea-feature skill. Working dir is the seeded Acme sandbox.",
+  "eval_intent_note": "Original intent was 'should re-route to idea-extend' but the seeded adr0001 explicitly states 'External SSO would require a new feature, not extending ft001' — the ADR directs the agent to treat this as a genuine new-feature ask. Assertions updated to reward the correct path: read adr0001, decide *new feature*, hit gate.",
+  "assertions": [
+    {"text": "Agent surveyed ft001 (basic-auth) — output references ft001 by id"},
+    {"text": "Agent surveyed adr0001 — output references adr0001 by id"},
+    {"text": "Agent used adr0001's content to drive the routing decision (recognizes the ADR pre-decides this is new-feature territory, not extend)"},
+    {"text": "Agent identified a real category — output references cat001 (security) or cat003 (infrastructure)"},
+    {"text": "Agent stopped at the design-approval gate — gate_reached.md exists OR no sp###.md was emitted"},
+    {"text": "Agent did NOT mint a new ft###.md (skill rule — ft### only minted at spec-writing)"},
+    {"text": "If sp###.md was emitted: lives under docs/notes/spec/, frontmatter status: idea, body has ## problem"}
+  ]
+}

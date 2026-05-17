@@ -1,0 +1,151 @@
+[
+  {
+    "id": "sandbox-bxk",
+    "title": "Task 1: Add rotate_secret helper to vault.py",
+    "description": "Extend src/lib/vault.py with rotate_secret(name, new_value) helper plus versioned-alias bookkeeping. Part of sp001 (rotate service credentials without downtime).\n\nEffort: 3h\nFiles: src/lib/vault.py, tests/lib/test_vault.py\n\nEdge cases:\n- Concurrent calls to rotate_secret for the same name must serialize\n- Vault unreachable: raise VaultError, do not partial-write\n- Empty / None new_value: reject at the API boundary",
+    "acceptance_criteria": "vault.rotate_secret(name, new_value) writes a new versioned alias without touching the old one; vault.secret(name) returns the new value after the alias flip; 5 unit tests pass covering write-staging, read-during-overlap, post-expiry behavior",
+    "notes": "Test plan:\n- test_rotate_stages_new_alias — catches missing alias-write bug\n- test_secret_returns_new_after_flip — catches stale-read bug\n- test_concurrent_rotate_serializes — catches race condition\n- test_vault_unreachable_raises — catches partial-write bug\n- test_empty_value_rejected — catches input-validation bug",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:01:12Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:01:12Z",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  },
+  {
+    "id": "sandbox-nt2.3",
+    "title": "Synthetic-check hook for rotation window",
+    "design": "#### type\ntask\n\n#### effort\n4h\n\n#### files_touched\n- src/lib/vault_rotate.py\n- tests/integration/test_rotate_synthetic.py\n\n#### success_criteria\n- Synthetic check runs every 30s during rotation window\n- Zero 5xx observed in the synthetic check for a successful rotation\n- Integration test simulates rotation + synthetic load + asserts no 5xx\n\n#### edge_cases\n- Synthetic check fails mid-window: alert, do not roll back automatically\n- Network blip causes one 5xx: tolerate single transient, not two consecutive\n- Window ends with synthetic still in flight: drain before flipping\n\n#### test_plan\n- test_synthetic_runs_every_30s — catches scheduler miss bug\n- test_no_5xx_during_window — catches the core AC\n- test_single_blip_tolerated — catches over-eager alerting",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:01:04Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:01:04Z",
+    "dependencies": [
+      {
+        "issue_id": "sandbox-nt2.3",
+        "depends_on_id": "sandbox-nt2",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:01:03Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "sandbox-nt2.3",
+        "depends_on_id": "sandbox-nt2.1",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:01:12Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "sandbox-nt2.3",
+        "depends_on_id": "sandbox-nt2.2",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:01:13Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 2,
+    "dependent_count": 0,
+    "comment_count": 0,
+    "parent": "sandbox-nt2"
+  },
+  {
+    "id": "sandbox-33d",
+    "title": "Spec sp001: rotate service credentials without downtime",
+    "description": "Epic for sp001 — rotate service credentials without downtime. Solves us003 via im002 using ft002 (vault-secrets). See docs/notes/spec/sp001.md for full plan, conventions, anti-patterns, and task breakdown. Binds adr0001 and adr0002. Categories cat001 (security) and cat003.",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "feature",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:01:03Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:01:03Z",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  },
+  {
+    "id": "sandbox-nt2.2",
+    "title": "Add vault_rotate orchestration module",
+    "design": "#### type\ntask\n\n#### effort\n5h\n\n#### files_touched\n- src/lib/vault_rotate.py\n- tests/lib/test_vault_rotate.py\n\n#### success_criteria\n- rotate(name, new_value) calls vault.rotate_secret then schedules expiry at T+5min\n- Old alias is removed at T+5min (verified via vault.secret after window)\n- 4 unit tests pass covering schedule, expiry, early-failure rollback, and reschedule-on-restart\n\n#### edge_cases\n- Scheduler crash between rotate and expiry: on restart, finish pending expiries\n- Clock skew \u003e30s: still expire correctly using monotonic clock\n- Rotate called twice for same name within window: queue second, do not overlap windows\n\n#### test_plan\n- test_rotate_schedules_expiry — catches missing scheduler hook\n- test_expiry_removes_old_alias — catches leak bug\n- test_restart_completes_pending — catches state-loss bug\n- test_double_rotate_queues — catches overlap-window bug",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:00:56Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:00:56Z",
+    "dependencies": [
+      {
+        "issue_id": "sandbox-nt2.2",
+        "depends_on_id": "sandbox-nt2",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:00:56Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "sandbox-nt2.2",
+        "depends_on_id": "sandbox-nt2.1",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:01:11Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 1,
+    "dependent_count": 1,
+    "comment_count": 0,
+    "parent": "sandbox-nt2"
+  },
+  {
+    "id": "sandbox-nt2.1",
+    "title": "Add rotate_secret helper to vault.py",
+    "design": "#### type\ntask\n\n#### effort\n3h\n\n#### files_touched\n- src/lib/vault.py\n- tests/lib/test_vault.py\n\n#### success_criteria\n- vault.rotate_secret(name, new_value) writes a new versioned alias without touching the old one\n- vault.secret(name) returns the new value after the alias flip\n- 5 unit tests pass covering write-staging, read-during-overlap, post-expiry behavior\n\n#### edge_cases\n- Concurrent calls to rotate_secret for the same name should serialize\n- Vault unreachable: raise VaultError, do not partial-write\n- Empty / None new_value: reject at the API boundary\n\n#### test_plan\n- test_rotate_stages_new_alias — catches missing alias-write bug\n- test_secret_returns_new_after_flip — catches stale-read bug\n- test_concurrent_rotate_serializes — catches race condition\n- test_vault_unreachable_raises — catches partial-write bug\n- test_empty_value_rejected — catches input-validation bug",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:00:47Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:00:47Z",
+    "dependencies": [
+      {
+        "issue_id": "sandbox-nt2.1",
+        "depends_on_id": "sandbox-nt2",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:00:47Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 0,
+    "dependent_count": 2,
+    "comment_count": 0,
+    "parent": "sandbox-nt2"
+  },
+  {
+    "id": "sandbox-nt2",
+    "title": "Epic: rotate service credentials without downtime [sp001]",
+    "design": "## Goal\nDeliver live vault credential rotation with a 5-minute overlap and zero 5xx during the rotation window for us003.\n\n## Spec\ndocs/notes/spec/sp001.md",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "epic",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:00:39Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:00:39Z",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  }
+]

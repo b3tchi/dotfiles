@@ -1,0 +1,227 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..d686d2d
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,28 @@
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/product.md
++./.gitignore
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
+diff --git a/docs/board.md b/docs/board.md
+index e500c4e..f8eb645 100644
+--- a/docs/board.md
++++ b/docs/board.md
+@@ -1,9 +1,11 @@
+ # Board
+ 
+-Nothing in flight right now.
++One observability workstream just landed at idea stage.
+ 
+ ## idea
+ 
++- [[sp001|unified observability stack]]
++
+ ## spec
+ 
+ ## ready
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+new file mode 100644
+index 0000000..47ba28f
+--- /dev/null
++++ b/docs/notes/spec/sp001.md
+@@ -0,0 +1,170 @@
++---
++aliases:
++  - unified observability stack
++status: idea
++created: 2026-05-16
++---
++# Spec [[cat004]] [[cat003]] [[board]]
++
++## solves
++(no `us###` yet — this idea is driven by a platform-engineer
++[[pn002|platform-engineer]] pain point about operating the system,
++not by a user-visible behavior request. A backing `us###` will be
++written at spec stage if any of the slices warrants persona-facing
++acceptance criteria; otherwise this stays a pure infra feature
++workstream.)
++
++## implements
++(no `im###` yet — created at spec stage once feature decomposition
++is decided)
++
++## problem
++
++### one-liner
++
++Replace the current ad-hoc observability mess (stdout logs scattered
++per service, hand-rolled prometheus calls in `metrics`, zero
++distributed tracing, alerts printed to stdout) with a coherent
++in-house observability capability so the platform engineer can
++actually diagnose production issues without ssh-tailing three logs.
++
++### current state (what we have today)
++
++Three running services and zero coherent telemetry:
++
++- `src/services/auth/` — prints to stdout. No structured fields.
++- `src/services/metrics/` — calls `prometheus_client` directly,
++  exposes `/metrics`, but each service had to roll its own scraper
++  config. "Alerts via stdout" per `README.md`.
++- `src/services/reports/` — stdout logs again. Long report runs are
++  black boxes once they leave the dashboard.
++- No trace context propagated between services (auth → reports → db).
++- No central dashboard. No on-call story. Alert = grep + Slack DM.
++
++### pain that triggered this
++
++- Last week's report-stuck-in-queued incident: 40 minutes to find the
++  failing worker because logs were on three boxes, unstructured.
++- ADR0003 (smtplib direct) means we don't even know when alert mails
++  fail to send.
++- Quarterly secret rotation (us003) is risky partly because we can't
++  *see* what's happening during the rotation window — only synthetic
++  green/red after the fact.
++
++### goal
++
++A single, coherent observability *capability* the platform exposes,
++so any service can:
++
++- Emit a structured log line in one call (level, trace_id, fields).
++- Record a metric (counter / gauge / histogram) without rolling its
++  own prometheus registry.
++- Start / propagate a trace span across the auth → reports → db
++  chain.
++- Fire an alert through a real channel (not stdout).
++- Show all of the above on a dashboard the platform engineer can
++  point at during an incident.
++
++### scope of *this* spec
++
++Idea stage. The user request asks for "one feature" but at AKM
++granularity that is almost certainly **multiple `ft###`** plus a
++thin glue/dashboard layer. Spec stage will decide the decomposition.
++Candidate shapes to evaluate at spec stage:
++
++| candidate `ft###` | provides | likely components |
++|---|---|---|
++| `ft-logs` (structured logging) | one-call structured log helper, trace-id injection, json-to-stdout sink + collector hand-off | `src/lib/obs/log.py`, log-collector config |
++| `ft-metrics` (metrics) | shared prometheus registry, counter/gauge/histogram helpers, `/metrics` endpoint mount helper | `src/lib/obs/metrics.py` |
++| `ft-tracing` (distributed tracing) | OTel tracer factory, span context propagation across http + db calls | `src/lib/obs/tracing.py` |
++| `ft-alerts` (alerting) | alert-rule registry, sink that fans out to email / Slack (depends on the eventually-written `ft-notifications` — see also adr0003 smell) | `src/lib/obs/alerts.py` |
++| (no `ft###`) dashboards | a deployment artifact — Grafana JSON files committed under `ops/dashboards/`, consumes `ft-logs` + `ft-metrics` + `ft-tracing` outputs | `ops/dashboards/*.json` |
++
++That decomposition is the **headline question for spec stage**:
++- Is "unified observability" really one `ft###` (monolithic), or
++  three building blocks (logs / metrics / tracing) plus an alerts
++  card on top? AKM bias is the latter — features are stable reusable
++  blocks, and logging vs tracing have different consumers, retention,
++  and lifecycles.
++- Do we mint a *new* `ft###` for alerts now, or block on an
++  `ft-notifications` card (adr0003 already smells — three smtplib
++  copies — and observability alerts will be its first real
++  consumer)?
++
++### inherited constraints / non-goals
++
++- **In-house, not SaaS.** Acme is VPN-only internal traffic
++  (README.md). No Datadog, no Honeycomb. Self-host Loki / Prometheus
++  / Tempo / Grafana or equivalent.
++- **Python + Go.** Whatever client libs we pick must have both
++  language SDKs (eliminates a few niche tracers).
++- **Existing prometheus surface stays.** `metrics` service's
++  `/metrics` endpoint must keep working during migration — services
++  consume it.
++- **Backward-compatible logging.** Stdout logs must still be
++  human-readable when a dev is `tail -f`-ing — structured JSON in
++  prod, pretty in dev (one of the spec-stage decisions).
++- **No new persona work.** This serves [[pn002|platform-engineer]].
++  Analysts don't see observability output. If a future analyst
++  feature ("show me my report's trace") emerges, it gets its own
++  `us###`.
++
++### related work / categories
++
++- H1 categories: [[cat004|observability]] (primary) and
++  [[cat003|infrastructure]] (cross-service plumbing).
++- No existing `ft###` to extend — `ft001` (basic-auth) and `ft002`
++  (vault-secrets) are unrelated capabilities. Net-new feature
++  family.
++- ADRs to revisit at spec stage:
++  - [[adr0003]] (smtplib direct) — alert routing inherits this
++    smell; spec-stage may file a new ADR mandating an
++    `ft-notifications` capability before `ft-alerts` lands.
++- No existing `im###` is affected. Future implementations (e.g. a
++  refactor of `src/services/metrics/`) will consume the new `ft###`
++  family.
++
++### open questions for spec stage
++
++1. **Decomposition.** One `ft###` or three (logs / metrics / tracing)
++   + one (alerts) + dashboards-as-artifacts? Argued above the latter
++   is right; spec stage confirms or overrides.
++2. **Wire protocols.** OpenTelemetry for all three pillars, or
++   prom-native for metrics + OTel only for traces + plain JSON for
++   logs? OTel-everywhere is simpler conceptually but adds a
++   collector hop.
++3. **Storage / backend.** Self-hosted Loki + Prometheus + Tempo +
++   Grafana? Or a single Grafana-Agent-style swiss army? Affects
++   platform-engineer ops burden.
++4. **Alert channel.** Inherits adr0003 smell — direct SMTP, or wait
++   for `ft-notifications`? If wait: this spec blocks; if not: we
++   add to the smtplib-copy debt.
++5. **Trace propagation.** HTTP only first pass, or also DB query
++   spans + outbound email spans? Affects how much we instrument in
++   the auth → reports → db chain.
++6. **Migration sequencing.** Three services, three ports of call.
++   Order: metrics first (mostly already there), logs next (touches
++   every line of stdout), tracing last (cross-service, hardest)?
++
++### success criteria (provisional, will harden at spec stage)
++
++- Platform engineer can answer "why is report X stuck?" from a
++  single Grafana dashboard, without ssh.
++- Every log line in prod carries `service`, `trace_id`, `level`,
++  `ts` as structured fields.
++- Every cross-service request gets a single `trace_id` propagated
++  from auth ingress through reports and metrics calls.
++- An alert fires through a real channel (not stdout) within 60s of
++  its triggering condition.
++- The existing `prometheus_client` surface in `metrics` service
++  keeps working — no breakage during cutover.
++
++### next step
++
++Move to spec stage: pick decomposition (likely 3–4 `ft###` cards),
++write `im###` per consumed slice, draft execution plan, then
++spec-refinement before bd epic.
++
++---
++
++Index: [[board]]

@@ -1,0 +1,112 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..ff6808b
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,31 @@
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/spec/sp001.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/notes/us004.md
++./docs/notes/us005.md
++./docs/product.md
++./.gitignore
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
+diff --git a/docs/board.md b/docs/board.md
+index f5eb479..2d2f8be 100644
+--- a/docs/board.md
++++ b/docs/board.md
+@@ -4,8 +4,8 @@ One spec in flight at idea stage.
+ 
+ ## idea
+ 
+-- [[sp001|rotate service credentials without downtime]]
+-
+ ## spec
+ 
++- [[sp001|rotate service credentials without downtime]]
++
+ ## ready
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+index fa70d5d..45f02b9 100644
+--- a/docs/notes/spec/sp001.md
++++ b/docs/notes/spec/sp001.md
+@@ -1,7 +1,7 @@
+ ---
+ aliases:
+   - rotate service credentials without downtime
+-status: idea
++status: spec
+ created: 2026-04-28
+ ---
+ # Spec [[cat001]] [[cat003]] [[board]]
+@@ -24,6 +24,46 @@ Out of scope at idea stage: the actual rotation script, the synthetic-check
+ hook, the secret-overlap window mechanism. spec-writing chooses the shape
+ across vault-rotate-policy vs zero-downtime-swap vs blue-green-cred patterns.
+ 
++## solution
++
++Adopt a **dual-secret overlap-window** rotation pattern layered on
++[[ft002|vault-secrets]]. A new credential is written to vault alongside the
++current one (versioned key), services continue resolving via the existing
++`secret(name)` surface so no service-side code changes are required, and the
++old value is revoked after a 5-minute overlap. This is a [[cat001|security]] +
++[[cat003|infrastructure]] change — consumers stay untouched, only the rotation
++choreography lives outside the request path.
++
++Bound features:
++- [[ft002|vault-secrets]] — the rotation flow writes-then-revokes through this
++  surface; AC "rotation script can swap secrets while services run" maps
++  directly onto vault versioning + lazy `secret(name)` resolution.
++
++Binding ADRs:
++- [[adr0001]] (cat001) — unaffected. Services still authenticate via
++  [[ft001|basic-auth]]; the rotation only changes the value of the secret
++  basic-auth reads, not the auth mechanism itself.
++- [[adr0003]] (cat003) — unaffected. No new cross-service plumbing added; the
++  rotation is an out-of-band operator script plus a vault interaction.
++
++Trade-offs taken:
++- Picked vault-versioning + overlap over **blue-green credential cycling**
++  (new service instances brought up with new secrets, old drained). Blue-green
++  satisfies AC but costs deploy churn per rotation, would need a new ADR for
++  deployment topology, and bypasses the existing `secret(name)` lazy-cache
++  indirection that already exists in [[ft002]]. Overlap is cheaper and reuses
++  the bound feature.
++- Picked vault-versioning over **app-coordinated reload** (each service exposes
++  a `/reload-secrets` endpoint). That would require touching every consumer
++  and introduce a new auth-cred surface — both out of scope for a story whose
++  intent is operational, not architectural.
++- The 5-minute overlap is honored by configuring vault to keep version N
++  readable for 5 minutes after version N+1 is written; revocation is the
++  explicit end-of-overlap step.
++
++No existing [[im###]] solves [[us003]] — clean mint downstream at
++spec-refinement. No supersession candidates against [[adr0001]] or [[adr0003]].
++
+ ---
+ 
+ Index: [[board]]

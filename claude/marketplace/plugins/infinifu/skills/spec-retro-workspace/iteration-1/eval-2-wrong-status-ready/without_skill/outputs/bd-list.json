@@ -1,0 +1,62 @@
+[
+  {
+    "id": "wd2-267382-rbn",
+    "title": "Synthetic-check hook not implemented (sp001 Task 3 false-closed)",
+    "description": "RETRO finding from sp001: Task wd2-267382-aqo.3 was closed as APPROVED but tests/integration/test_rotate_synthetic.py + the synthetic-check hook in src/lib/vault_rotate.py do not exist. The core us003 AC — zero 5xx during rotation window — has no test coverage.",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-17T08:52:49Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-17T08:52:49Z",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  },
+  {
+    "id": "wd2-267382-4bu",
+    "title": "vault_rotate.py orchestration module not implemented (sp001 Task 2 false-closed)",
+    "description": "RETRO finding from sp001: Task wd2-267382-aqo.2 was closed as APPROVED but src/lib/vault_rotate.py + tests/lib/test_vault_rotate.py do not exist on disk. Story us003 acceptance — 5-minute overlap window, alias expiry at T+5min, restart-completes-pending — is not met by the current shipped code. Needs a new sp### to actually deliver the orchestration module per the original plan.",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-17T08:52:46Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-17T08:52:46Z",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  },
+  {
+    "id": "wd2-267382-8j9",
+    "title": "Make vault timeout configurable (TODO in vault.py)",
+    "description": "RETRO finding from sp001: src/lib/vault.py lines 49-51 carry a TODO — set_timeout(timeout_ms) currently hardcoded to 5000ms which is too short for the European region. Needs to become configurable. Out of scope for the rotation work but tracked here.",
+    "status": "open",
+    "priority": 3,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-17T08:52:54Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-17T08:52:54Z",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  },
+  {
+    "id": "wd2-267382-ta9",
+    "title": "Cross-region failover for credential rotation (discovered during sp001)",
+    "description": "RETRO finding from sp001 Task 3 notes: rotation correctness across regions is unverified. Current synthetic check is single-region. Likely needs a new us### for cross-region failover behavior and an sp### to deliver it.",
+    "status": "open",
+    "priority": 3,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-17T08:52:51Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-17T08:52:51Z",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  }
+]

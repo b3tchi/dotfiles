@@ -1,0 +1,20 @@
+{
+  "eval_id": 0,
+  "eval_name": "strong-refine",
+  "prompt": "sp001 is at spec stage with solution chosen — run spec-refinement to produce the plan + tasks breakdown. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent read sp001 and confirmed status: spec"},
+    {"text": "Agent read us003 acceptance_criteria (re-reads the source story)"},
+    {"text": "Agent read im002 (the consumed implementation)"},
+    {"text": "Agent surveyed adr0001 / adr0002 (binding ADRs)"},
+    {"text": "Agent surveyed ft002 (consumed feature) including api_surface"},
+    {"text": "Agent appended ## plan to sp001 (file tree / conventions / anti-patterns)"},
+    {"text": "Agent appended ## tasks to sp001 with H3 task headers (### Task N: ...)"},
+    {"text": "Tasks include H4 properties (#### type, effort, depends, files_touched, success_criteria, edge_cases, test_plan)"},
+    {"text": "Tasks do NOT include #### bd id annotations (deferred to spec-ready)"},
+    {"text": "Agent did NOT use bd commands (no bd create / bd update / bd dep)"},
+    {"text": "Agent did NOT change sp001 status from spec"},
+    {"text": "Agent did NOT modify docs/board.md (board move is spec-ready scope)"},
+    {"text": "Agent finalized ## specs back-link on im002 (im002 modified, now references sp001)"}
+  ]
+}

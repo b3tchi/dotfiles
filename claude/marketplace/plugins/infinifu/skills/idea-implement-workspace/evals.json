@@ -1,0 +1,34 @@
+{
+  "skill_name": "idea-implement",
+  "skill_path": "/home/jan/.dotfiles/claude/marketplace/plugins/infinifu/skills/idea-implement/SKILL.md",
+  "evals": [
+    {
+      "id": 0,
+      "name": "strong-implement-on-draft",
+      "prompt": "us003 (rotate service credentials without downtime) is in draft — let's run idea-implement to get it ready for spec-writing. Working dir is the seeded Acme sandbox.",
+      "expectation": "Should read us003 (draft), survey pn002/cat/adr/ft, promote us003 to status: ready (AC are already testable), mint sp001.md with ## solves [[us003]] + ## problem citing surveyed ids as wikilinks, append [[sp001]] to docs/board.md under ## idea.",
+      "files": []
+    },
+    {
+      "id": 1,
+      "name": "already-ready-stop",
+      "prompt": "Run idea-implement on us002 (filter reports by date). Working dir is the seeded Acme sandbox.",
+      "expectation": "Should detect us002 is already at status: ready and STOP. Either routes to spec-writing or explicitly halts. Must not re-promote, must not mint sp###, must not edit board.md.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "done-story-reject",
+      "prompt": "Run idea-implement on us001 (view dashboard of recent reports). Working dir is the seeded Acme sandbox.",
+      "expectation": "Should detect us001 is at status: done and route to idea-extend (for changes to shipped behavior). Must not promote or re-emit. Must not mint sp###. Must not edit board.md.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "missing-story-reject",
+      "prompt": "Run idea-implement on us042 (something about analyst exports). Working dir is the seeded Acme sandbox.",
+      "expectation": "Should detect us042 does not exist in docs/notes/ and route to story-write first. Must not invent the story. Must not mint sp###. Must not edit board.md.",
+      "files": []
+    }
+  ]
+}

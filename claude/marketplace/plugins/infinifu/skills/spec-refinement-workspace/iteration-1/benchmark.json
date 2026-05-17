@@ -4,9 +4,12 @@
     "skill_path": "<path/to/skill>",
     "executor_model": "<model-name>",
     "analyzer_model": "<model-name>",
-    "timestamp": "2026-04-19T13:18:11Z",
+    "timestamp": "2026-05-16T15:47:14Z",
     "evals_run": [
-      0
+      0,
+      1,
+      2,
+      3
     ],
     "runs_per_configuration": 3
   },
@@ -17,59 +20,440 @@
       "run_number": 1,
       "result": {
         "pass_rate": 1.0,
-        "passed": 9,
+        "passed": 13,
         "failed": 0,
-        "total": 9,
-        "time_seconds": 423.1,
-        "tokens": 0,
+        "total": 13,
+        "time_seconds": 291.0,
+        "tokens": 78033,
         "tool_calls": 0,
         "errors": 0
       },
       "expectations": [
         {
-          "text": "review_summary.md exists at sandbox root and references all 4 seeded task IDs",
+          "text": "Agent read sp001 and confirmed status: spec",
           "passed": true,
-          "evidence": "exists=True; seeded_ids_referenced=4/4; size=8001 chars"
+          "evidence": "sp001 + spec"
         },
         {
-          "text": "Task A: placeholder text ([detailed above], [as specified], [will be added]) removed",
+          "text": "Agent re-read us003 AC",
           "passed": true,
-          "evidence": "design_len=4922; placeholder_hits=[]"
+          "evidence": "us003 + AC ref"
         },
         {
-          "text": "Task A: at least one concrete / verifiable success criterion present",
+          "text": "Agent read im002",
           "passed": true,
-          "evidence": "concrete_criterion_heuristic=pass; design_excerpt='## Goal\\nImplement a VIN (Vehicle Identification Number, ISO 3779) detection scanner that finds and validates 17-character VINs embedded in customer-uploaded document text. Detected VINs must be flagge'"
+          "evidence": "im002 mentioned"
         },
         {
-          "text": "Task B (40h oversized): broken down into >=3 child subtasks",
+          "text": "Agent surveyed adr0001 / adr0002",
           "passed": true,
-          "evidence": "children=5: ['eval-z2i.5', 'eval-z2i.4', 'eval-z2i.3', 'eval-z2i.2', 'eval-z2i.1']"
+          "evidence": "adrs: ['adr0001', 'adr0002']"
         },
         {
-          "text": "Task B: parent design updated to coordinator-style summary",
+          "text": "Agent surveyed ft002 including api_surface",
           "passed": true,
-          "evidence": "coordinator_terms_found=['coordinator', 'subtask', 'child']"
+          "evidence": "ft002 + api_surface"
         },
         {
-          "text": "Task C: design now mentions >=2 edge-case terms {unicode, empty, concurrent, malformed, edge case, backtrack}",
+          "text": "Agent appended ## plan to sp001",
           "passed": true,
-          "evidence": "edge_terms_found=['unicode', 'empty', 'concurrent', 'concurrency']"
+          "evidence": "has_plan=True"
         },
         {
-          "text": "Task D (tautological tests): design rewritten with real tests, OR flagged REJECT/REVISION in review_summary",
+          "text": "Agent appended ## tasks with H3 headers",
           "passed": true,
-          "evidence": "still_tautological=True; review_verdict_in_section=True; section_excerpt='eval-3ka` blocking edge so the data model lands first.\\n\\n## Task D \u2014 Define ScanResult data model (eval-3ka)\\n\\nVerdict: REJECT as specified (all tests t'"
+          "evidence": "has_tasks=True task_headers=['### Task 1', '### Task 2', '### Task 3', '### Task 4']"
         },
         {
-          "text": "No seeded task was marked in_progress or closed",
+          "text": "Tasks include >=4 H4 properties",
           "passed": true,
-          "evidence": "active_seeded=[]"
+          "evidence": "h4 present: ['type', 'effort', 'depends', 'files_touched', 'success_criteria', 'edge_cases', 'test_plan']"
         },
         {
-          "text": "Epic still has >=4 direct children (original 4 tasks, subtasks allowed deeper)",
+          "text": "Tasks do NOT include #### bd id annotations",
           "passed": true,
-          "evidence": "epic_children=4: ['eval-3ka', 'eval-sm2', 'eval-z2i', 'eval-ksj']"
+          "evidence": "bd_annotations=False"
+        },
+        {
+          "text": "Agent did NOT use bd commands",
+          "passed": true,
+          "evidence": "bd_called=False"
+        },
+        {
+          "text": "Agent did NOT change sp001 status",
+          "passed": true,
+          "evidence": "status=spec"
+        },
+        {
+          "text": "Agent did NOT modify docs/board.md",
+          "passed": true,
+          "evidence": "board_modified=False"
+        },
+        {
+          "text": "Agent finalized im002 ## specs back-link",
+          "passed": true,
+          "evidence": "im002_modified=True has_sp001=True"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 98.6,
+        "tokens": 52888,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent read sp001 and recognized status: idea",
+          "passed": true,
+          "evidence": "sp001 + idea"
+        },
+        {
+          "text": "Agent recognized ## solution missing",
+          "passed": true,
+          "evidence": "missing-solution phrase"
+        },
+        {
+          "text": "Agent did NOT append ## plan or ## tasks",
+          "passed": true,
+          "evidence": "has_plan=False has_tasks=False"
+        },
+        {
+          "text": "Agent did NOT modify sp001 frontmatter",
+          "passed": true,
+          "evidence": "status=idea"
+        },
+        {
+          "text": "Agent did NOT modify docs/board.md",
+          "passed": true,
+          "evidence": "board_modified=False"
+        },
+        {
+          "text": "Output routes to spec-writing OR 'solution missing'",
+          "passed": true,
+          "evidence": "route phrase"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 214.8,
+        "tokens": 63282,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent surveyed adr0001",
+          "passed": true,
+          "evidence": "adr0001 referenced"
+        },
+        {
+          "text": "Agent detected conflict between solution and adr0001",
+          "passed": true,
+          "evidence": "adr0001 + conflict-language"
+        },
+        {
+          "text": "Output flags conflict (adr0001 + conflict/violate/supersede nearby)",
+          "passed": true,
+          "evidence": "proximity match"
+        },
+        {
+          "text": "Either supersession task in breakdown OR skill stops",
+          "passed": true,
+          "evidence": "gate=False route=True"
+        },
+        {
+          "text": "Did NOT silently implement conflicting solution",
+          "passed": true,
+          "evidence": "conflict acknowledged"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 242.1,
+        "tokens": 70059,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent surveyed ft002 and read api_surface / providing",
+          "passed": true,
+          "evidence": "ft002 + api_surface/providing"
+        },
+        {
+          "text": "Agent detected vault.set_default_ttl() not in ft002.api_surface",
+          "passed": true,
+          "evidence": "set_default_ttl + extension/not-in"
+        },
+        {
+          "text": "Agent detected audit-log behavior not in ft002.providing",
+          "passed": true,
+          "evidence": "audit + extension/not-in"
+        },
+        {
+          "text": "Output flags feature-extension",
+          "passed": true,
+          "evidence": "ft002 + extension phrase"
+        },
+        {
+          "text": "Either breakdown routes to idea-extend on ft002 OR skill stops",
+          "passed": true,
+          "evidence": "gate=False route=True"
+        },
+        {
+          "text": "Did NOT silently call non-existent ft002 surface",
+          "passed": true,
+          "evidence": "extension acknowledged"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 0,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.6153846153846154,
+        "passed": 8,
+        "failed": 5,
+        "total": 13,
+        "time_seconds": 263.8,
+        "tokens": 57616,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent read sp001 and confirmed status: spec",
+          "passed": true,
+          "evidence": "sp001 + spec"
+        },
+        {
+          "text": "Agent re-read us003 AC",
+          "passed": true,
+          "evidence": "us003 + AC ref"
+        },
+        {
+          "text": "Agent read im002",
+          "passed": true,
+          "evidence": "im002 mentioned"
+        },
+        {
+          "text": "Agent surveyed adr0001 / adr0002",
+          "passed": true,
+          "evidence": "adrs: ['adr0001', 'adr0002']"
+        },
+        {
+          "text": "Agent surveyed ft002 including api_surface",
+          "passed": false,
+          "evidence": "ft002 + api_surface"
+        },
+        {
+          "text": "Agent appended ## plan to sp001",
+          "passed": true,
+          "evidence": "has_plan=True"
+        },
+        {
+          "text": "Agent appended ## tasks with H3 headers",
+          "passed": true,
+          "evidence": "has_tasks=True task_headers=['### Task 1', '### Task 2', '### Task 3', '### Task 4', '### Task 5']"
+        },
+        {
+          "text": "Tasks include >=4 H4 properties",
+          "passed": true,
+          "evidence": "h4 present: ['type', 'effort', 'depends', 'files_touched', 'success_criteria', 'edge_cases', 'test_plan']"
+        },
+        {
+          "text": "Tasks do NOT include #### bd id annotations",
+          "passed": false,
+          "evidence": "bd_annotations=True"
+        },
+        {
+          "text": "Agent did NOT use bd commands",
+          "passed": true,
+          "evidence": "bd_called=False"
+        },
+        {
+          "text": "Agent did NOT change sp001 status",
+          "passed": false,
+          "evidence": "status=ready"
+        },
+        {
+          "text": "Agent did NOT modify docs/board.md",
+          "passed": false,
+          "evidence": "board_modified=True"
+        },
+        {
+          "text": "Agent finalized im002 ## specs back-link",
+          "passed": false,
+          "evidence": "im002_modified=False has_sp001=False"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.3333333333333333,
+        "passed": 2,
+        "failed": 4,
+        "total": 6,
+        "time_seconds": 140.9,
+        "tokens": 55473,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent read sp001 and recognized status: idea",
+          "passed": true,
+          "evidence": "sp001 + idea"
+        },
+        {
+          "text": "Agent recognized ## solution missing",
+          "passed": false,
+          "evidence": "missing-solution phrase"
+        },
+        {
+          "text": "Agent did NOT append ## plan or ## tasks",
+          "passed": false,
+          "evidence": "has_plan=True has_tasks=True"
+        },
+        {
+          "text": "Agent did NOT modify sp001 frontmatter",
+          "passed": false,
+          "evidence": "status=ready"
+        },
+        {
+          "text": "Agent did NOT modify docs/board.md",
+          "passed": false,
+          "evidence": "board_modified=True"
+        },
+        {
+          "text": "Output routes to spec-writing OR 'solution missing'",
+          "passed": true,
+          "evidence": "route phrase"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 198.7,
+        "tokens": 58651,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent surveyed adr0001",
+          "passed": true,
+          "evidence": "adr0001 referenced"
+        },
+        {
+          "text": "Agent detected conflict between solution and adr0001",
+          "passed": true,
+          "evidence": "adr0001 + conflict-language"
+        },
+        {
+          "text": "Output flags conflict (adr0001 + conflict/violate/supersede nearby)",
+          "passed": true,
+          "evidence": "proximity match"
+        },
+        {
+          "text": "Either supersession task in breakdown OR skill stops",
+          "passed": true,
+          "evidence": "gate=False route=False"
+        },
+        {
+          "text": "Did NOT silently implement conflicting solution",
+          "passed": true,
+          "evidence": "conflict acknowledged"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.8333333333333334,
+        "passed": 5,
+        "failed": 1,
+        "total": 6,
+        "time_seconds": 207.7,
+        "tokens": 61379,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent surveyed ft002 and read api_surface / providing",
+          "passed": true,
+          "evidence": "ft002 + api_surface/providing"
+        },
+        {
+          "text": "Agent detected vault.set_default_ttl() not in ft002.api_surface",
+          "passed": true,
+          "evidence": "set_default_ttl + extension/not-in"
+        },
+        {
+          "text": "Agent detected audit-log behavior not in ft002.providing",
+          "passed": true,
+          "evidence": "audit + extension/not-in"
+        },
+        {
+          "text": "Output flags feature-extension",
+          "passed": true,
+          "evidence": "ft002 + extension phrase"
+        },
+        {
+          "text": "Either breakdown routes to idea-extend on ft002 OR skill stops",
+          "passed": false,
+          "evidence": "gate=False route=False"
+        },
+        {
+          "text": "Did NOT silently call non-existent ft002 surface",
+          "passed": true,
+          "evidence": "extension acknowledged"
         }
       ],
       "notes": []
@@ -84,22 +468,42 @@
         "max": 1.0
       },
       "time_seconds": {
-        "mean": 423.1,
-        "stddev": 0.0,
-        "min": 423.1,
-        "max": 423.1
+        "mean": 211.625,
+        "stddev": 81.6779,
+        "min": 98.6,
+        "max": 291.0
       },
       "tokens": {
-        "mean": 0.0,
-        "stddev": 0.0,
-        "min": 0,
-        "max": 0
+        "mean": 66065.5,
+        "stddev": 10654.6309,
+        "min": 52888,
+        "max": 78033
+      }
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 0.6955,
+        "stddev": 0.2883,
+        "min": 0.3333,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 202.775,
+        "stddev": 50.3105,
+        "min": 140.9,
+        "max": 263.8
+      },
+      "tokens": {
+        "mean": 58279.75,
+        "stddev": 2453.6766,
+        "min": 55473,
+        "max": 61379
       }
     },
     "delta": {
-      "pass_rate": "+1.00",
-      "time_seconds": "+423.1",
-      "tokens": "+0"
+      "pass_rate": "+0.30",
+      "time_seconds": "+8.8",
+      "tokens": "+7786"
     }
   },
   "notes": []

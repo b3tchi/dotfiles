@@ -1,0 +1,26 @@
+◐ wd3-6039-0cw.1 · Task 1: Add rotate_secret helper to vault.py   [● P2 · IN_PROGRESS]
+Owner: eval · Type: task
+Created: 2026-05-16 · Started: 2026-05-16 · Updated: 2026-05-16
+
+DESCRIPTION
+  (none)
+
+DESIGN
+Extend src/lib/vault.py with rotate_secret(name, new_value) helper that stages a new versioned alias. Files: src/lib/vault.py, tests/lib/test_vault.py. Edge cases: concurrent calls serialize, vault unreachable raises VaultError, empty value rejected.
+
+NOTES
+IMPLEMENTED: rotate_secret helper added to vault.py.
+
+Evidence:
+- vault.rotate_secret stages versioned alias: src/lib/vault.py
+- Concurrent serialization via lock
+- Tests: 5 passed
+Deviations: none
+
+PARENT
+  ↑ ○ wd3-6039-0cw: (EPIC) Epic: rotate service credentials without downtime [sp001] ● P2
+
+BLOCKS
+  ← ○ wd3-6039-0cw.2: Task 2: Add vault_rotate orchestration module ● P2
+  ← ○ wd3-6039-0cw.3: Task 3: Synthetic-check hook for rotation window ● P2
+

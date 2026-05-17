@@ -1,0 +1,97 @@
+diff --git a/docs/board.md b/docs/board.md
+index e500c4e..66fa2ef 100644
+--- a/docs/board.md
++++ b/docs/board.md
+@@ -1,9 +1,11 @@
+ # Board
+ 
+-Nothing in flight right now.
++One spec in the idea stage: a new SAML SSO Feature, sibling to ft001.
+ 
+ ## idea
+ 
++- [[sp001|SAML SSO as a new shared auth feature]]
++
+ ## spec
+ 
+ ## ready
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+new file mode 100644
+index 0000000..eaec646
+--- /dev/null
++++ b/docs/notes/spec/sp001.md
+@@ -0,0 +1,74 @@
++---
++aliases:
++  - SAML SSO as a new shared auth feature
++status: idea
++created: 2026-05-16
++---
++# Spec [[cat001]] [[cat003]] [[board]]
++
++## problem
++
++We need to authenticate users coming in via an external partner
++integration using SAML SSO. Today the only shared auth capability is
++[[ft001|basic-auth (password+TOTP)]], whose `## providing` section
++explicitly scopes it to password+TOTP and lists *"No SSO, no SAML, no
++OAuth"* as non-goals.
++
++[[adr0001|All services authenticate via ft001 basic-auth]] anticipated
++this exact case: *"External SSO would require a new feature, not
++extending ft001."* Extending `ft001` to also speak SAML would widen
++its contract from "internal humans with a password" to "any external
++IdP federation," conflating two different trust domains and breaking
++the existing contract its current consumers rely on.
++
++So the right shape is a **new sibling [[cat001|security]] Feature**
++(`ft###` to be minted at the `spec` stage) providing SAML SP
++functionality, sitting next to `ft001` rather than replacing or
++subsuming it. Services that need SAML opt in; services that don't
++keep using `ft001` unchanged.
++
++**Concrete drivers.**
++
++- A new external partner integration needs to federate identity from
++  their IdP — they cannot provision per-user passwords in our `users`
++  table, and they require SAML specifically (not OIDC).
++- The partner-facing surface will live in the `auth` service (see
++  `src/services/auth/`), which already owns `ft001`'s session
++  bridging — same service, new code path.
++- `ft001`'s consumers (auth, reports, metrics) should be untouched by
++  this work; the new feature must coexist, not refactor existing
++  callers.
++
++**Out of scope for this spec.**
++
++- Choosing the SAML library / IdP-side configuration — defer to
++  `## solution` at the spec stage.
++- Designing the cross-feature session bridge (does a SAML-authenticated
++  user share `ft001`'s Redis sessions, or get its own?) — flagged here
++  but resolved at spec stage with an ADR if the answer constrains
++  future Implementations.
++- Any UI work in the `reports` service — partner traffic terminates at
++  the `auth` service for this milestone.
++
++**Open questions to resolve at `spec` stage.**
++
++- Is one Feature sufficient, or do we need a generic `federated-auth`
++  Feature with SAML as the first protocol and OIDC as a planned
++  successor? (Cheapest now: SAML-only Feature; widen later via a new
++  Feature if OIDC arrives.)
++- Does this trigger a *new* ADR superseding or extending [[adr0001]]
++  to read "services authenticate via ft001 *or* ft### (SAML)"? Likely
++  yes — capture during spec-writing.
++- Where does the SP metadata / IdP trust config live — Vault
++  ([[ft002|vault-secrets]]) or a new config surface? Vault is the
++  obvious answer; confirm at spec stage.
++
++## consumers (provisional)
++
++- `src/services/auth/` — primary consumer; partner SSO terminates here.
++- (future) any service that the partner needs to reach directly —
++  none planned in this milestone; will go via the auth service first.
++
++---
++
++Index: [[board]]

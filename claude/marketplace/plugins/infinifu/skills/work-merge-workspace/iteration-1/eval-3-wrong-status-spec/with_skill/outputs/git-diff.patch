@@ -1,0 +1,145 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..15283b6
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,55 @@
++./AGENTS.md
++./.beads/config.yaml
++./.beads/dolt-server.port
++./.beads/export-state.json
++./.beads/.gitignore
++./.beads/hooks/post-checkout
++./.beads/hooks/post-merge
++./.beads/hooks/pre-commit
++./.beads/hooks/prepare-commit-msg
++./.beads/hooks/pre-push
++./.beads/interactions.jsonl
++./.beads/issues.jsonl
++./.beads/last-touched
++./.beads/.local_version
++./.beads/metadata.json
++./.beads/README.md
++./CLAUDE.md
++./.claude/settings.json
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/im002.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/spec/sp001.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/notes/us004.md
++./docs/notes/us005.md
++./docs/product.md
++./.gitignore
++./pyproject.toml
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/lib/vault.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
++./tests/lib/__init__.py
++./tests/lib/test_vault.py
++./.work-do-task-ids.json
+diff --git a/route_decision.md b/route_decision.md
+new file mode 100644
+index 0000000..c850818
+--- /dev/null
++++ b/route_decision.md
+@@ -0,0 +1,78 @@
++# work-merge route decision — sp001
++
++## Disambiguation outcome: BLOCK — wrong status, route elsewhere
++
++work-merge was invoked on `docs/notes/spec/sp001.md`. Per the skill's
++"Entry-specific checklist" step 2 ("Verify status. Must be `status: ready`.
++Apply Disambiguation if not.") and the explicit Disambiguation table,
++inspection of the spec frontmatter shows:
++
++```
++---
++aliases:
++  - rotate service credentials without downtime
++status: spec
++created: 2026-04-28
++---
++```
++
++`status: spec` is not `ready`. work-merge therefore does NOT perform any of
++its lifecycle writes (no flip of us003 → done, no flip of im002 → accepted,
++no flip of sp001 → done, no edits to `docs/board.md`, no edits to
++`docs/archive.md`, no `bd close` of the epic, no git landing menu).
++
++## Route
++
++Per the Disambiguation table:
++
++> **`sp###` at `status: spec`** → route to `spec-refinement` (no plan/tasks yet).
++
++**Primary route: `infinifu:spec-refinement`** — the spec needs refinement
++before promotion to `ready`. The spec body already contains a `## plan` and
++`## tasks` block populated with three task stubs (`wd3-247277-bsz.1`,
++`wd3-247277-bsz.2`, `wd3-247277-bsz.3` per `.work-do-task-ids.json`), but
++the bd epic `wd3-247277-bsz` currently has zero child tasks
++(`dependency_count: 0` in `bd list --json`). The spec is still at
++`status: spec` precisely because the refinement → ready promotion has not
++been done.
++
++**Follow-up route: `infinifu:spec-ready`** — once spec-refinement confirms
++the plan and tasks are actionable, `spec-ready` creates the bd tasks with
++dependencies from the `## tasks` block and atomically promotes the spec
++from `board/spec/ → board/ready/` (status: spec → ready). Only then is
++work-do / work-audit / work-merge applicable.
++
++## What was deliberately NOT done
++
++- No write to `docs/notes/spec/sp001.md` (status stays `spec`, footer
++  `Index: [[board]]` stays).
++- No write to `docs/notes/us003.md` (status stays as-is).
++- No write to `docs/notes/im002.md` (status stays `proposed`).
++- No edit to `docs/board.md` (sp001 stays under `## spec`).
++- No edit to `docs/archive.md`.
++- No `bd close wd3-247277-bsz`.
++- No git branch / merge / PR operations.
++- No test run — tests are gated behind the status check; running them
++  before the status precondition is met would be wasted work.
++
++## Evidence
++
++- Spec file:
++  `/home/jan/.dotfiles/claude/marketplace/plugins/infinifu/skills/work-merge-workspace/iteration-1/eval-3-wrong-status-spec/with_skill/sandbox/docs/notes/spec/sp001.md`
++  line 4: `status: spec`.
++- Board:
++  `/home/jan/.dotfiles/claude/marketplace/plugins/infinifu/skills/work-merge-workspace/iteration-1/eval-3-wrong-status-spec/with_skill/sandbox/docs/board.md`
++  — sp001 is listed under `## spec`, not `## ready`.
++- bd state: epic `wd3-247277-bsz` exists with no child tasks
++  (`dependency_count: 0`); task ids in `.work-do-task-ids.json` are
++  reserved but not yet materialized in bd.
++
++## Handoff message to user
++
++> sp001 is at `status: spec`, not `ready`. work-merge cannot run — there is
++> nothing to merge yet because the spec has not been promoted through
++> refinement to ready and the bd tasks have not been created. Run
++> `infinifu:spec-refinement` to validate the plan/tasks, then
++> `infinifu:spec-ready` to create the bd children with dependencies and
++> flip the status to `ready`. After that the normal work-do → work-audit →
++> work-merge pipeline applies.

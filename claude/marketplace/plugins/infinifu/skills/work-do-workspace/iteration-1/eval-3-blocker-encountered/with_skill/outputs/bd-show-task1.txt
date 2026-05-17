@@ -1,0 +1,20 @@
+○ wd3-4179770-fqd.1 · Task 1: Add rotate_secret helper to vault.py   [● P2 · OPEN]
+Owner: eval · Type: task
+Created: 2026-05-16 · Updated: 2026-05-16
+
+DESCRIPTION
+  (none)
+
+DESIGN
+Add rotate_secret helper via the ft999.cache(name) primitive. Files: src/lib/vault.py, tests/lib/test_vault.py. See [[ft999]] for the cache surface.
+
+NOTES
+BLOCKED: design references [[ft999]] and ft999.cache(name) as the primitive backing rotate_secret, but ft999 does not exist in docs/notes/. Only ft001 (basic-auth) and ft002 (vault-secrets) are defined; no cache feature is registered anywhere in the AKM. Tried: (1) ls docs/notes/ — only ft001.md, ft002.md present; (2) grep -r ft999 docs/ src/ tests/ — zero hits outside the bd task design; (3) inspected sp001.md — spec body talks about a 'versioned-alias bookkeeping' helper on vault but never names ft999 or a cache primitive, so the task design is the only place ft999 appears; (4) read existing src/lib/vault.py — has secret()/_read_alias() but no cache layer to extend. Needs: either (a) write ft999 as a new Feature zettel defining the cache(name) surface (data model, API, components) before this task can be implemented, or (b) refine the bd task design to drop the ft999.cache dependency and specify the rotation mechanism directly against ft002's vault surface. Routing back for spec-refinement. Leaving status=in_progress per work-do BLOCKED protocol — not closing.
+
+PARENT
+  ↑ ○ wd3-4179770-fqd: (EPIC) Epic: rotate service credentials without downtime [sp001] ● P2
+
+BLOCKS
+  ← ○ wd3-4179770-fqd.2: Task 2: Add vault_rotate orchestration module ● P2
+  ← ○ wd3-4179770-fqd.3: Task 3: Synthetic-check hook for rotation window ● P2
+

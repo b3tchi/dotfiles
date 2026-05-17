@@ -1,176 +1,88 @@
 ---
 name: spec-writing
-description: Use after idea-brainstorming produces a design, before any code is written — turns loose requirements into a concrete implementation plan document that spec-refinement can then review and plan-bd can turn into tracked tasks. Invoke this whenever a multi-step task needs a written plan before anyone starts coding.
+description: "You MUST use this when the user wants to choose how to solve a problem that's already captured on the board — 'sp007 has a problem, let's pick a solution', 'work out the approach for the rotate-credentials spec', 'propose the solution shape for sp012', or any phrasing that names an existing `sp###` at `status: idea` whose `## problem` is populated and now needs a high-level `## solution`. Stage 2 of the AKM lifecycle (spec-writing). Reads the story's `## acceptance_criteria`, surveys binding `cat`/`ft`/`adr` for the categories the spec touches, then writes `## solution` proposing the approach (ADR refs, consumed features) and flips the spec's `status: idea → spec` (board entry moves `## idea → ## spec`). Does NOT write tasks / file trees / bd ids — those belong to `spec-refinement` and `spec-ready`. The spec must already exist at `status: idea`."
 ---
 
-# Spec Writing
+# Spec Writing (idea → spec)
 
 ## Overview
 
-Write comprehensive implementation plans assuming the engineer has zero context for our codebase and questionable taste. Document everything they need to know: which files to touch for each task, code, testing, docs they might need to check, how to test it. Give them the whole plan as bite-sized tasks. DRY. YAGNI. TDD. Frequent commits.
+Stage 2 of the AKM lifecycle. A spec is already on the board at `status: idea` with `## problem` populated (placed there by one of the idea-* skills). The user is asking you to choose **how** to solve that problem at a high level — which ADRs constrain the approach, which features will be consumed, which trade-offs to take — and to write that choice into the spec as `## solution`. The spec then flips `idea → spec` and its board listing moves with it.
 
-Assume they are a skilled developer, but know almost nothing about our toolset or problem domain. Assume they don't know good test design very well.
+**This skill does NOT write tasks, file trees, bd ids, or step-by-step plans.** Those are deliberately downstream:
+- File tree / conventions / anti-patterns / task breakdown → `spec-refinement`
+- bd epic + task ids → `spec-ready`
 
-**Announce at start:** "I'm using the spec-writing skill to create the implementation spec."
+Keeping spec-writing narrow lets the solution shape stay revisable until the user approves it. Locking task structure here is what creates churn when the approach shifts.
 
-**Context:** This should be run in a dedicated worktree (created by idea-brainstorming skill).
-
-**Save plans to:** `board/spec/<feature-name>.md` — this is the same file that was moved from `board/idea/` by the brainstorming skill. Replace its design content with the implementation spec.
+**Announce at start:** "Using spec-writing skill to propose the solution shape."
 
 ## AKM hooks
 
-Stage 2 of the AKM lifecycle — see `claude/akm/akm-lifecycle.md` for the full map and `claude/akm/akm.md` for typed-zettel schemas. Choose and document the solution shape.
+Stage 2 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Lifecycle goals: propose solution for the problem at high level, ensure solution is in line with features and ADRs, ensure no duplication or propose possible made solution.
 
-**Reads:** `us###.acceptance_criteria`, `cat###`, `ft###`, `adr####`.
+**Reads** (per lifecycle contract):
+
+- `sp###` — the target spec at `status: idea`. Read `## solves [[us###]]` + `## problem` to know what's being solved.
+- `us###.acceptance_criteria` — the testable criteria the solution must satisfy. The spec's solution shape is constrained by these AC.
+- `cat###` (`category-read`) — taxonomy buckets the spec lives under (read from the spec's H1 wikilinks).
+- `ft###` (`feature-read`) — capabilities the solution might consume. Bind concretely here (not just candidates as in idea-*).
+- `adr####` (`adr-read --category <picks>`) — decisions binding the chosen categories. Solution must align with `Accepted` ADRs in scope; if it conflicts, surface as a supersession candidate, do not silently violate.
 
 **Writes:**
 
-- `sp###` — populate `## solution` (approach, ADR refs, consumed features); flip frontmatter `status: idea` → `spec`.
-- `board.md` — move `[[sp###]]` from `## idea` → `## spec`.
+- `sp###` — same file. Append `## solution` body section. **Reference discipline:** every relevant id appears as a wikilink in `## solution` — `[[ft###]]` for consumed features, `[[adr####]]` for binding decisions, `[[cat###]]` for taxonomy alignment. Prose-only solutions break the graph for spec-refinement downstream.
+- `sp###` — flip frontmatter `status: idea → spec`.
+- `docs/board.md` — move the `[[sp###]]` entry from `## idea` to `## spec`.
 
-**Gate:** a backing `im###` should exist before specifying. If missing, invoke `implementation-write` first to mint the solution-shape card; the spec is the execution plan against that implementation.
+## Entry-specific checklist
 
-## Epic lifecycle — bump to P3
+1. **Identify target spec.** User must name a `sp###` (by id or alias). Verify `docs/notes/spec/sp###.md` exists.
+2. **Verify status.** Read frontmatter `status`. Must be `idea`. Apply Disambiguation if not.
+3. **Read the spec.** Confirm `## solves [[us###]]` and `## problem` are populated. If `## problem` is missing or empty, block — route back to the originating idea-* skill.
+4. **Re-read source us###.AC.** Fetch the story this spec solves; re-read `## acceptance_criteria`. If AC are vague or empty, block — route back to `idea-implement` (or `idea-extend`) for AC refinement. The solution shape is meaningless against shifting criteria.
+5. **Survey categories** named in the spec's H1 — `category-read` on each.
+6. **Survey binding ADRs** under those categories via `adr-read`. Identify which ones constrain the approach; flag any conflict between the natural solution and an `Accepted` ADR.
+7. **Survey features** the solution will consume via `feature-read`. Where the problem mentioned candidate `[[ft###]]` ids, decide which actually bind; identify any new ones.
+8. **Dedup check.** Does an existing `im###` already solve this story (or an adjacent one) in a way the new spec is about to duplicate? If yes, surface the duplicate and ask whether to extend the existing solution shape rather than mint a new one. Lifecycle goal: "ensure no duplication or propose possible made solution".
+9. **Propose `## solution`.** One paragraph naming the approach + ADR refs + bound `[[ft###]]` consumed + the trade-offs taken. Surface this as the design-approval question — the user owns whether the proposed shape is the right one.
+10. **On approval:** append `## solution` to the spec file with the wikilink reference discipline. Flip frontmatter `status: idea → spec`.
+11. **Update `docs/board.md`** — remove the `[[sp###]]` entry from `## idea`, add it to `## spec` (same wikilink, same label).
 
-Before writing the spec body, find the epic that `idea-brainstorming` created for this topic and bump its priority to P3 (designing):
+Walk the shared process around this checklist (load `idea-brainstorming` for cadence + hard-gate basics — same conventions apply at every lifecycle stage).
 
-```bash
-bd list --type epic --priority 4                    # Find the P4 idea epic for this topic
-bd update <epic-id> --priority 3                    # Bump to P3 (spec stage)
-bd update <epic-id> --design "<updated design with spec doc path: board/spec/<feature-name>.md>"
-```
+## Disambiguation
 
-**Why P3:** the idea is now being designed into an implementation spec — a stronger commitment than the raw idea but still pre-task-creation. If no P4 epic exists (e.g., someone skipped brainstorming and went straight to spec), create one now directly at P3: `bd create "Epic: <topic>" --type epic --priority 3 --design "..."`. Keep the epic ID handy — `spec-ready` will bump it to P2 and attach child tasks to it.
+- **`sp###` does not exist (file missing)** → block; the user is asking about a spec that hasn't been captured. Route to an idea-* skill to capture the problem first.
+- **`sp###` at `status: spec`** → solution already chosen. Route to `spec-refinement` to add `## plan` + `## tasks`.
+- **`sp###` at `status: ready`** → already refined and queued. Route to `work-do`.
+- **`sp###` at `status: done`** → shipped; nothing to write.
+- **`sp###` at `status: idea` but `## problem` is empty / missing** → block; route back to the originating idea-* skill to populate the problem first.
+- **Source `us###.acceptance_criteria` is empty / vague** → block; route back to `idea-implement` (or `idea-extend`) to refine AC. Spec-writing cannot bind a solution to shifting criteria.
+- **Existing `im###` already solves the same `us###`** → surface the duplicate; if the user wants a new approach, file the existing `im###` as a supersession candidate and continue; if not, stop.
 
-## Bite-Sized Task Granularity
+## Key Principles (entry-specific)
 
-**Each step is one action (2-5 minutes):**
-- "Write the failing test" - step
-- "Run it to make sure it fails" - step
-- "Implement the minimal code to make the test pass" - step
-- "Run the tests and make sure they pass" - step
-- "Commit" - step
+- **Solution shape only — no task plumbing.** The output is `## solution`. File trees, task lists, bd ids belong downstream. Putting them here means the user has to approve them along with the solution, which conflates two decisions and slows iteration.
+- **AC bind the solution.** A solution proposed against vague AC is a guess. The skill blocks at step 4 for exactly this reason.
+- **ADRs constrain, don't reinvent.** An `Accepted` ADR under the picked categories binds the approach. If the natural solution conflicts, name it as a supersession candidate; never silently violate.
+- **Feature consumption commits here.** Idea-* listed candidates; spec-writing picks the actual `[[ft###]]` set the solution will consume. Spec-refinement will design tasks against that set.
+- **Dedup before mint.** If an existing `im###` already solves the same story, the new spec needs to either supersede it (named decision) or stop (don't duplicate). The lifecycle explicitly carries this goal at stage 2.
+- **Reference discipline.** Every consumed `ft###`, binding `adr####`, and category `cat###` appears as a wikilink in `## solution`. The moxide LSP and downstream skills traverse the graph through those wikilinks.
 
-## Document Skeleton
+## Integration
 
-Write the whole spec from this skeleton end-to-end. The title is H1; every
-sibling section — header fields, optional context, and each task — is H2.
-Nothing below a task should go deeper than H3 (and most steps use **bold**
-step markers, not headings, so the outline stays flat and scannable).
+**Calls:**
 
-````markdown
-# [Feature Name] Implementation Plan
+- `infinifu:spec-read` — fetch target sp### + verify status/body.
+- `infinifu:story-read` — fetch source us### + re-read AC.
+- `infinifu:category-read` / `adr-read` / `feature-read` — context survey.
+- `infinifu:implementation-read` — dedup check against existing im### that solves the same us###.
+- `infinifu:idea-brainstorming` — shared process basics (reference, not invoked as router).
+- `infinifu:spec-refinement` — the only next step after solution approval; it adds `## plan` + `## tasks`.
 
-> **For Claude:** Use infinifu:plan-scrum-master (automated) or infinifu:plan-supervised (user reviews each batch) to implement this plan.
+**Out of scope (do NOT call from here):**
 
-**Goal:** [One sentence describing what this builds]
-
-**User stories:** [List ids from `product/stories.yaml` this spec satisfies, e.g. `2605-001`, `2605-003`. Omit field if no user-facing story applies.]
-
-**Architecture:** [2-3 sentences about approach]
-
-**Tech Stack:** [Key technologies/libraries]
-
----
-
-## Conventions (optional, include when repo has non-obvious rules)
-- [e.g. Services live under `src/services/<name>/`]
-- [e.g. Tests mirror source tree under `tests/`]
-- [Anything the junior would otherwise have to guess]
-
-## File tree (optional, helpful for specs touching 5+ files)
-```
-src/services/<name>/
-├── __init__.py
-├── app.py
-├── ...
-tests/services/<name>/
-├── test_...py
-```
-
-## Task 1: [Component Name]
-
-**Files:**
-- Create: `exact/path/to/file.py`
-- Modify: `exact/path/to/existing.py:123-145`
-- Test: `tests/exact/path/to/test.py`
-
-**Step 1: Write the failing test**
-
-```python
-def test_specific_behavior():
-    result = function(input)
-    assert result == expected
-```
-
-**Step 2: Run test to verify it fails**
-
-Run: `pytest tests/path/test.py::test_name -v`
-Expected: FAIL with "function not defined"
-
-**Step 3: Write minimal implementation**
-
-```python
-def function(input):
-    return expected
-```
-
-**Step 4: Run test to verify it passes**
-
-Run: `pytest tests/path/test.py::test_name -v`
-Expected: PASS
-
-**Step 5: Commit**
-
-```bash
-git add tests/path/test.py src/path/file.py
-git commit -m "feat: add specific feature"
-```
-
-## Task 2: [Next Component]
-[... same 5-step structure ...]
-
-## Task N: [Last Component]
-[... same 5-step structure ...]
-````
-
-Tasks run in dependency order — if Task 3 imports from Task 2's module,
-Task 2 must come first. Call that out explicitly when the order isn't
-obvious from names alone.
-
-## Remember
-- Exact file paths always
-- Complete code in plan (not "add validation")
-- Exact commands with expected output
-- Reference relevant skills with @ syntax
-- DRY, YAGNI, TDD, frequent commits
-
-## Next Steps
-
-After saving the spec document:
-
-1. **Spec refinement** (mandatory for non-trivial specs):
-   - Use infinifu:spec-refinement — SRE 8-category checklist
-   - Re-reviews until APPROVED
-   - Skippable only for single-task fixes
-
-2. **⛔ MANDATORY GATE — User approves spec:**
-   - Present the spec to the user
-   - **STOP and wait for explicit user approval**
-   - Do NOT create bd tasks until the user approves
-   - The user may revise scope, approach, or priorities
-
-3. **Spec ready** (spec-ready creates tasks + promotes to ready):
-   - Use infinifu:spec-ready — creates bd epic + tasks with dependencies, moves spec to `board/ready/`
-   - This is one atomic operation: tasks created + file promoted in the same commit
-
-4. **⛔ MANDATORY GATE — User approves bd tasks:**
-   - Present the bd task list to the user
-   - **STOP and wait for explicit user approval**
-   - Do NOT start execution until the user approves
-   - The user may reorder, edit, add, or remove tasks
-
-5. **Plan-dispatch** (execution):
-   - User chooses: plan-scrum-master (automated) or plan-supervised (user reviews batches)
-
-**Self-contained rule:** Each task in the spec must be implementable with ONLY the spec and codebase access. If someone can't do the task without asking questions, the spec is incomplete.
+- `bd` — task creation belongs to `spec-ready`.
+- `implementation-write` minting a new `im###` — happens at `spec-refinement` once tasks are concrete enough to anchor an implementation card.
+- File-tree / convention drafting — `spec-refinement`'s `## plan` section.

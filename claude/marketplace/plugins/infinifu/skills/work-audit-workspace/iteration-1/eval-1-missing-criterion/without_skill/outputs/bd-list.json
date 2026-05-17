@@ -1,0 +1,121 @@
+[
+  {
+    "id": "wd1-3780-8i4.3",
+    "title": "Task 3: Synthetic-check hook for rotation window",
+    "design": "Hook a synthetic check that runs every 30s during rotation window; assert zero 5xx. Files: src/lib/vault_rotate.py, tests/integration/test_rotate_synthetic.py.",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:30:52Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:30:52Z",
+    "dependencies": [
+      {
+        "issue_id": "wd1-3780-8i4.3",
+        "depends_on_id": "wd1-3780-8i4",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:30:52Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd1-3780-8i4.3",
+        "depends_on_id": "wd1-3780-8i4.1",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:30:54Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd1-3780-8i4.3",
+        "depends_on_id": "wd1-3780-8i4.2",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:30:55Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 2,
+    "dependent_count": 0,
+    "comment_count": 0,
+    "parent": "wd1-3780-8i4"
+  },
+  {
+    "id": "wd1-3780-8i4.2",
+    "title": "Task 2: Add vault_rotate orchestration module",
+    "design": "Create src/lib/vault_rotate.py with rotate(name, new_value) that calls vault.rotate_secret + schedules T+5min expiry. Files: src/lib/vault_rotate.py, tests/lib/test_vault_rotate.py.",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:30:51Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:30:51Z",
+    "dependencies": [
+      {
+        "issue_id": "wd1-3780-8i4.2",
+        "depends_on_id": "wd1-3780-8i4",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:30:51Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd1-3780-8i4.2",
+        "depends_on_id": "wd1-3780-8i4.1",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:30:53Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 1,
+    "dependent_count": 1,
+    "comment_count": 0,
+    "parent": "wd1-3780-8i4"
+  },
+  {
+    "id": "wd1-3780-8i4.1",
+    "title": "Task 1: Add rotate_secret helper to vault.py",
+    "design": "Extend src/lib/vault.py with rotate_secret(name, new_value) helper that stages a new versioned alias. Files: src/lib/vault.py, tests/lib/test_vault.py. Edge cases: concurrent calls serialize, vault unreachable raises VaultError, empty value rejected.",
+    "notes": "AUDIT: REJECTED — gaps found vs sp001 success_criteria + test_plan + edge_cases:\n\n1. AC3 requires 5 unit tests; only 3 exist in tests/lib/test_vault.py (pytest confirmed: 3 passed).\n2. test_plan lists 5 specific tests — MISSING: test_vault_unreachable_raises, test_empty_value_rejected.\n3. edge_case 'empty/None new_value: reject at API boundary' NOT implemented — src/lib/vault.py:38 has comment '(input validation skipped — bug)'; rotate_secret accepts empty strings without raising ValueError.\n4. Implementer evidence is incorrect: notes cite 'test_empty_value_rejected' and 'Tests: 5 passed' but neither the test nor the validation code exists.\n5. Minor: stray TODO at src/lib/vault.py:48 about set_timeout — unrelated dead/parking comment, out of scope for this task per its own admission, suggest moving to a follow-up issue.\n\nREMEDIATION REQUIRED before close:\n- Add empty/None validation in rotate_secret raising ValueError.\n- Add test_empty_value_rejected covering that path.\n- Add test_vault_unreachable_raises (per test_plan) — simulate backend exception, assert VaultError, assert no partial write.\n- Task remains in_progress for implementer retry.",
+    "status": "in_progress",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:30:50Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:34:05Z",
+    "started_at": "2026-05-16T16:30:57Z",
+    "dependencies": [
+      {
+        "issue_id": "wd1-3780-8i4.1",
+        "depends_on_id": "wd1-3780-8i4",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:30:50Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 0,
+    "dependent_count": 2,
+    "comment_count": 0,
+    "parent": "wd1-3780-8i4"
+  },
+  {
+    "id": "wd1-3780-8i4",
+    "title": "Epic: rotate service credentials without downtime [sp001]",
+    "design": "Spec: docs/notes/spec/sp001.md",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "epic",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:30:49Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:30:49Z",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  }
+]

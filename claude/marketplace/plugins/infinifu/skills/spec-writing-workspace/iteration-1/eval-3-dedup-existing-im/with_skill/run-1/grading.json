@@ -1,0 +1,48 @@
+{
+  "eval_id": 3,
+  "eval_name": "dedup-existing-im",
+  "config": "with_skill",
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 7,
+    "failed": 0,
+    "total": 7
+  },
+  "expectations": [
+    {
+      "text": "Agent found im002 already solves us003",
+      "passed": true,
+      "evidence": "im002 mentioned"
+    },
+    {
+      "text": "Agent surfaced duplicate (im002 + dedup language)",
+      "passed": true,
+      "evidence": "im002 + dedup-language"
+    },
+    {
+      "text": "Did NOT silently write duplicate solution",
+      "passed": true,
+      "evidence": "solution_references_im002=True"
+    },
+    {
+      "text": "Explicit supersession decision OR stop / user-decision route",
+      "passed": true,
+      "evidence": "gate=False route=False"
+    },
+    {
+      "text": "If ## solution written, references [[im002]] as supersession candidate",
+      "passed": true,
+      "evidence": "im002 in body"
+    },
+    {
+      "text": "Agent did NOT mint a duplicate im###.md (no new im### files)",
+      "passed": true,
+      "evidence": "new_im=[]"
+    },
+    {
+      "text": "Agent did NOT modify docs/product.md (out of scope)",
+      "passed": true,
+      "evidence": "product_modified=False"
+    }
+  ]
+}

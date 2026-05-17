@@ -1,0 +1,141 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..d686d2d
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,28 @@
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/product.md
++./.gitignore
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
+diff --git a/docs/board.md b/docs/board.md
+index e500c4e..a51614f 100644
+--- a/docs/board.md
++++ b/docs/board.md
+@@ -1,9 +1,11 @@
+ # Board
+ 
+-Nothing in flight right now.
++One spec in flight: zero-downtime credential rotation.
+ 
+ ## idea
+ 
++- [[sp001|rotate service credentials without downtime]]
++
+ ## spec
+ 
+ ## ready
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+new file mode 100644
+index 0000000..47701a5
+--- /dev/null
++++ b/docs/notes/spec/sp001.md
+@@ -0,0 +1,71 @@
++---
++aliases:
++  - rotate service credentials without downtime
++status: idea
++created: 2026-05-16
++---
++# Spec [[cat001]] [[cat003]] [[board]]
++
++## solves
++[[us003|rotate service credentials without downtime]]
++
++## problem
++
++The platform-engineer persona ([[pn002]]) needs to perform quarterly
++secret rotation against the running fleet without a maintenance window.
++Today rotation is a maintenance-window task — services are stopped,
++secrets swapped at rest, services restarted — which costs availability
++and ops time every quarter.
++
++The story [[us003]] sits under the security category [[cat001]] (secret
++handling) and the infrastructure category [[cat003]] (cross-service
++plumbing). The acceptance criteria are:
++
++- the rotation script can swap secrets while services run,
++- the old secret stays valid for a 5-minute overlap window after rotation,
++- a synthetic check shows zero 5xx during the rotation window.
++
++**Surveyed AKM context (candidates, not commitments — binding happens at
++spec-writing).**
++
++- Persona: [[pn002|platform-engineer]] is the actor; their primary goal
++  "rotate credentials cleanly" maps directly to this story.
++- Category bindings: [[cat001|security]] (secret handling, auth surface)
++  and [[cat003|infrastructure]] (cross-service rotation plumbing) are
++  the buckets the solution will live under. [[cat002|data]] and
++  [[cat004|observability]] are touched peripherally (the synthetic
++  check is an observability hook) but not primary.
++- Candidate consumers: [[ft002|vault-secrets]] is the obvious one — the
++  runtime `secret(name)` read path needs to become rotation-aware (e.g.
++  short-TTL caching, dual-credential overlap, or a refresh hook).
++  [[ft001|basic-auth]] owns `totp_secrets` and Redis sessions and is a
++  downstream consumer if rotation extends to auth-tier credentials; its
++  involvement is not certain at the idea stage.
++- Binding ADRs:
++  - [[adr0001]] (cat001) constrains all services to authenticate via
++    [[ft001]] — rotation must not break that auth surface, so any
++    credential-swap path crosses ft001 territory by construction.
++  - [[adr0002]] (cat002, data retention) is not directly relevant —
++    no schema change is expected for the rotation flow itself.
++  - [[adr0003]] (cat003, smtplib direct) is not directly relevant —
++    notification of rotation events, if needed, would inherit that
++    constraint but is not in scope of this story's AC.
++- Related stories: [[us001]] and [[us002]] (analyst-flow) are not
++  touched; rotation is internal to the platform tier.
++
++**Open questions for spec-writing** (not the design gate — captured so
++spec-writing can resolve before committing to a solution shape):
++
++- How does [[ft002]]'s `secret(name)` API surface need to change to
++  support a dual-credential overlap? (refresh hook vs short-TTL cache
++  vs explicit `secret_with_grace(name)` variant)
++- Is the 5-minute overlap enforced by Vault (lease TTL on the prior
++  version) or by the rotation script issuing both secrets and waiting
++  before invalidating?
++- Which synthetic-check harness owns the "no 5xx during rotation
++  window" assertion, and how does it interleave with the rotation
++  script's timing?
++
++---
++
++Index: [[board]]
+diff --git a/docs/notes/us003.md b/docs/notes/us003.md
+index f167a13..6145838 100644
+--- a/docs/notes/us003.md
++++ b/docs/notes/us003.md
+@@ -1,7 +1,7 @@
+ ---
+ aliases:
+   - rotate service credentials without downtime
+-status: draft
++status: ready
+ created: 2026-04-15
+ ---
+ # Story [[platform-flow]] [[product]]

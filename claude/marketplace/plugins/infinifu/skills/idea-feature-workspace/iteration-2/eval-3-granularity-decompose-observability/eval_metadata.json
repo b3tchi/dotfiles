@@ -1,0 +1,13 @@
+{
+  "eval_id": 3,
+  "eval_name": "granularity-decompose-observability",
+  "prompt": "We need a unified observability stack — metrics scraping, structured logging, distributed tracing, alerting, and dashboards. One feature to replace our current mess (stdout logs, ad-hoc prometheus calls, zero tracing). Use the infinifu:idea-feature skill. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent identified at least 3 distinct capabilities in the ask (e.g., metrics + logging + tracing + alerting + dashboards)"},
+    {"text": "Agent explicitly flagged the granularity problem — output discusses splitting / multiple features / decomposition / atomic features"},
+    {"text": "Agent surveyed real categories — output references cat004 (observability) and/or cat003 (infrastructure)"},
+    {"text": "If sp###.md was emitted: ## problem section names the multiple sub-capabilities explicitly, does NOT scope a single monolithic notif/observability feature"},
+    {"text": "Agent did NOT silently mint a new ft###.md spanning all capabilities"},
+    {"text": "Output proposes either splitting into multiple sp### or surfaces the split-question as the next clarifying question"}
+  ]
+}

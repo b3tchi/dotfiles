@@ -1,0 +1,208 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..bb5cf32
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,30 @@
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/notes/us004.md
++./docs/notes/us005.md
++./docs/product.md
++./.gitignore
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
+diff --git a/docs/board.md b/docs/board.md
+index e500c4e..b64c0de 100644
+--- a/docs/board.md
++++ b/docs/board.md
+@@ -1,9 +1,12 @@
+ # Board
+ 
+-Nothing in flight right now.
++One spec in flight at idea stage: report search on the analyst
++dashboard ([[us004]] / [[im002]]).
+ 
+ ## idea
+ 
++- [[sp001|report search on dashboard]]
++
+ ## spec
+ 
+ ## ready
+diff --git a/docs/notes/im002.md b/docs/notes/im002.md
+new file mode 100644
+index 0000000..6c3e791
+--- /dev/null
++++ b/docs/notes/im002.md
+@@ -0,0 +1,49 @@
++---
++aliases:
++  - server-side report search via /dashboard?q=&from=&to=
++status: proposed
++created: 2026-05-16
++---
++# Implementation [[cat002]] [[cat003]]
++
++## solves
++[[us004|search reports by title and date]]
++
++## approach
++Extend the existing reports-service `/dashboard` route (see [[im001]])
++with optional `q`, `from`, `to` query params. Translate to a single
++SQL query against `report_runs` using `ILIKE` on `title` and a
++`run_at` range. No new tables, no new service — same auth path
++([[ft001]]) and same retention envelope as [[adr0002]] (90 days).
++Server-side filtering replaces the current client-side filter for
++this code path, so reports older than the dashboard's last-20 window
++become reachable. Add a B-tree index on `report_runs(run_at)` and a
++trigram index on `report_runs(title)` to keep p95 under 500 ms across
++the full 90-day window.
++
++## features
++- [[ft001|basic-auth]]
++
++## data_model
++No schema change. Two new indexes on the existing `report_runs`
++table:
++- `idx_report_runs_run_at` (B-tree on `run_at`)
++- `idx_report_runs_title_trgm` (GIN, `pg_trgm` extension on `title`)
++
++## api_surface
++- `GET /dashboard?q=<text>&from=<YYYY-MM-DD>&to=<YYYY-MM-DD>` → HTML
++  page; empty params = current behavior
++- `GET /dashboard/data.json?q=&from=&to=` → JSON same shape as today
++  (search params optional)
++
++## components
++- `src/services/reports/dashboard.py` (extend query builder)
++- `src/services/reports/templates/dashboard.html` (search form)
++- `src/services/reports/migrations/00X_search_indexes.sql` (new)
++
++## specs
++- [[sp001|report search on dashboard]]
++
++---
++
++Index: [[product]]
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+new file mode 100644
+index 0000000..c961a2e
+--- /dev/null
++++ b/docs/notes/spec/sp001.md
+@@ -0,0 +1,33 @@
++---
++aliases:
++  - report search on dashboard
++status: idea
++created: 2026-05-16
++---
++# Spec [[cat002]] [[board]]
++
++## solves
++[[us004|search reports by title and date]]
++
++## implements
++[[im002|server-side report search via /dashboard?q=&from=&to=]]
++
++## problem
++Analysts ([[pn001]]) can see the last 20 reports on `/dashboard`
++([[im001]]) but cannot find older runs — reports persist for 90 days
++([[adr0002]]) yet only the most recent slice is reachable from the
++UI. Today re-finding a report means digging through email
++notifications or asking engineering to run SQL. The story
++([[us004]]) asks for a search box plus optional date range that
++operates server-side against the full 90-day window with p95 latency
++≤ 500 ms, authenticated through [[ft001]].
++
++Goal: keep the dashboard's existing layout and auth, add `q` / `from`
++/ `to` query params that translate into a single indexed SQL query,
++return the same row shape as today. Out of scope: full-text ranking,
++saved searches, search across columns other than title, exposing
++search to non-analysts.
++
++---
++
++Index: [[board]]
+diff --git a/docs/notes/us004.md b/docs/notes/us004.md
+index dbaf2f7..8e02318 100644
+--- a/docs/notes/us004.md
++++ b/docs/notes/us004.md
+@@ -1,7 +1,7 @@
+ ---
+ aliases:
+-  - search reports somehow
+-status: draft
++  - search reports by title and date
++status: ready
+ created: 2026-04-22
+ ---
+ # Story [[reports-flow]] [[product]]
+@@ -10,14 +10,29 @@ created: 2026-04-22
+ [[pn001|analyst]]
+ 
+ ## want
+-search reports somehow
++search past reports by title substring and (optionally) restrict to a date range
+ 
+ ## because
+-finding old reports is hard
++finding an old report by scrolling the 20-row dashboard is slow once
++results age out of the recent list; analysts already know roughly what
++they ran and when
+ 
+ ## acceptance_criteria
+-- it works
+-- fast enough
++- A search box on `/dashboard` accepts a free-text query and matches
++  the report title case-insensitively (substring match)
++- An optional date range narrows results to reports whose `run_at`
++  falls within the window (inclusive both ends)
++- Results show the same columns as the dashboard rows (title, status,
++  run_at, CSV link) and respect the 90-day retention window
++- Empty query + empty date range returns the unfiltered last-20 view
++  (no change to current behavior)
++- Search executes server-side against `report_runs` (not client-side
++  over the 20 visible rows) so reports older than the dashboard window
++  are reachable
++- p95 latency ≤ 500 ms for a query over the full 90-day retention set
++  on the current Postgres instance
++- Only authenticated analysts (ft001) can search; unauthenticated
++  requests return 401
+ 
+ ---
+ 
+diff --git a/docs/product.md b/docs/product.md
+index fdfa212..893a882 100644
+--- a/docs/product.md
++++ b/docs/product.md
+@@ -9,6 +9,7 @@ operations analyst and the platform-engineer personas.
+ 
+ - [[us001|view dashboard of recent reports]] >> [[im001]]
+ - [[us002|filter reports by date range]]
++- [[us004|search reports by title and date]] >> [[im002]]
+ 
+ ### [[pn002|platform-engineer]]
+ 

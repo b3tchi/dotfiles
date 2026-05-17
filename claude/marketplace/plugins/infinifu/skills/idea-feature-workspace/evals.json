@@ -1,0 +1,34 @@
+{
+  "skill_name": "idea-feature",
+  "skill_path": "/home/jan/.dotfiles/claude/marketplace/plugins/infinifu/skills/idea-feature/SKILL.md",
+  "evals": [
+    {
+      "id": 0,
+      "name": "strong-feature-notifications",
+      "prompt": "We keep pasting smtplib snippets into auth, metrics, and reports — every service has its own ad-hoc email helper and now we want slack alerts too. Plus the metrics team wants pager-style SMS for after-hours alerts. Use the infinifu:idea-feature skill to scope a shared notifications capability — email + slack now, SMS plausible later. Working dir is the seeded Acme sandbox; survey docs/notes/ for real ids.",
+      "expectation": "Should mint sp###.md with ## problem describing capability + consumers (auth/metrics/reports) + migration of adr0003 ad-hoc smtplib. board.md ## idea appended. NO new ft###.md. Should raise the granularity question (one notif feature vs router+transports).",
+      "files": []
+    },
+    {
+      "id": 1,
+      "name": "route-to-extend-saml",
+      "prompt": "We need to add SAML SSO to our auth — basic-auth (ft001) only does password+TOTP today and the new external partner integration needs SAML. Use the infinifu:idea-feature skill. Working dir is the seeded Acme sandbox.",
+      "expectation": "Skill should detect ft001 already exists in the same surface area and re-route to idea-extend on ft001. No new sp### emitted under docs/notes/spec/. board.md unchanged.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "route-to-implement-single-consumer",
+      "prompt": "Add a quarterly retention purge tool — only the platform-engineer persona uses it, and only once a quarter when legal asks for the deletion proof. Use the infinifu:idea-feature skill. Working dir is the seeded Acme sandbox.",
+      "expectation": "Skill should detect single consumer (pn002, no other plausible consumers) and re-route to idea-implement as im### glue. No new sp### emitted under docs/notes/spec/. board.md unchanged.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "granularity-decompose-observability",
+      "prompt": "We need a unified observability stack — metrics scraping, structured logging, distributed tracing, alerting, and dashboards. One feature to replace our current mess (stdout logs, ad-hoc prometheus calls, zero tracing). Use the infinifu:idea-feature skill. Working dir is the seeded Acme sandbox.",
+      "expectation": "Skill should flag the ask is too coarse — 3-5 distinct capabilities. Either splits into multiple sp### proposals or surfaces the granularity question explicitly in ## problem. Should NOT silently scope one monolithic ft### shape.",
+      "files": []
+    }
+  ]
+}

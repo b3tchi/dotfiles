@@ -1,0 +1,182 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..d686d2d
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,28 @@
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/product.md
++./.gitignore
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
+diff --git a/docs/board.md b/docs/board.md
+index e500c4e..25e5a66 100644
+--- a/docs/board.md
++++ b/docs/board.md
+@@ -1,9 +1,12 @@
+ # Board
+ 
+-Nothing in flight right now.
++One idea-stage spec in flight: a shared notifications capability to
++replace per-service smtplib snippets.
+ 
+ ## idea
+ 
++- [[sp001|shared notifications capability (router + email + slack)]]
++
+ ## spec
+ 
+ ## ready
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+new file mode 100644
+index 0000000..e21ab4d
+--- /dev/null
++++ b/docs/notes/spec/sp001.md
+@@ -0,0 +1,124 @@
++---
++aliases:
++  - shared notifications capability (router + email + slack)
++status: idea
++created: 2026-05-16
++---
++# Spec [[cat003]] [[board]]
++
++## problem
++
++Three internal services (`auth`, `metrics`, `reports`) each maintain
++their own ad-hoc notification path: smtplib snippets in `metrics` and
++`reports`, and a `mail` shell-out in `auth`. There is no shared
++notifications building block today — `feature-read` surfaced only
++[[ft001]] (basic-auth) and [[ft002]] (vault-secrets), so the dedup
++check passes and a fresh `ft###` is warranted. Slack alerts are now
++also requested, and the metrics team flags pager-style SMS as
++plausible after-hours work. The status quo of pasting transport
++snippets per service will compound with every new channel.
++
++**Capability boundary.** The proposal is a horizontal notifications
++capability with **three atomic `ft###` candidates** (granularity
++check, per the `ft###` single-`providing` / single-`api_surface` /
++single-`status` schema). All three are minted at spec-writing time;
++none are pre-minted by this idea card:
++
++- **ft-notifications-router** — typed-message dispatch surface. One
++  `send(notification)` API that fan-outs to one or more channel
++  adapters; carries the templating, retry, and dedup policy that
++  channels inherit.
++- **ft-email-send** — email channel adapter (internal MTA via
++  smtplib, no external relay). Replaces today's three copy/paste
++  smtplib paths.
++- **ft-slack-send** — slack channel adapter (webhook-based). Net-new
++  consumer for metrics-team alerts.
++
++**Plausible-later (NOT in this spec):** `ft-sms-send` — captured as
++intent, deliberately deferred. SMS has no committed consumer beyond
++"metrics team wants pager-style after-hours" and adds a paid-vendor
++dependency. Mint when a real consumer story lands; YAGNI ruthlessly.
++
++**Sizing rationale (one `sp###`, three `ft###`).** Per the idea-feature
++sizing rule (step 8): three capabilities, small scaffolding of
++well-understood shapes (smtplib wrapper, slack webhook POST, dispatcher
++with a channel registry), three small internal-service consumers, no
++independent ship windows demanded. Splitting at task level during
++`spec-refinement` is cheaper than splitting at `sp###` level here. If
++spec-writing discovers any of the three is non-trivial (e.g. retry
++semantics need their own ADR), promote that one to its own sp### at
++that point.
++
++**Consumers (via `implementation-read` survey).** No existing
++`im###` carries notification logic today — [[im001]] (reports
++dashboard) consumes [[ft001]] only, and `auth` / `metrics` have no
++`im###` cards yet. The three ad-hoc paths live directly in service
++code:
++
++- `src/services/auth/` — welcome-email path, currently shells out
++  to `mail`. Migration target.
++- `src/services/metrics/` — alert path, currently stdout +
++  ad-hoc smtplib. Migration target; will gain slack as a
++  net-new channel.
++- `src/services/reports/` — report-ready email, currently
++  smtplib. Migration target.
++
++Each migration is a thin call-site swap once the router is in place.
++
++**Category.** [[cat003|infrastructure]] — cross-service plumbing.
++The feature itself is transport plumbing; observability ([[cat004]])
++applies to the metrics consumer but is not where the capability
++lives. [[cat001|security]] is reachable via secret retrieval but
++that's already covered by [[ft002|vault-secrets]] — the router
++consumes vault, no security category needed on the feature itself.
++[[cat002|data]] does not apply (no persistent state intended; see
++constraints below).
++
++**Binding / conflicting ADRs.**
++
++- [[adr0003]] *(No external SMTP relay — services use smtplib
++  directly)* — **conflicts directly with this proposal**. The ADR
++  consequence "three copy/paste smtplib snippets across services" is
++  exactly the smell driving this spec. Resolution path at
++  spec-writing: file a new ADR superseding [[adr0003]] with
++  decision "email transport consolidated behind
++  `ft-notifications-router` + `ft-email-send`; smtplib stays the
++  on-host SMTP client, but call-sites move behind the router."
++  Flagging here so spec-writing does not silently violate the
++  existing decision.
++- [[adr0001]] *(All services authenticate via ft001 basic-auth)* —
++  out of scope; notification surfaces are internal callers, no
++  auth-decision delta.
++- [[adr0002]] *(Reports written to Postgres, retained 90 days)* —
++  out of scope; this capability does not persist message bodies.
++
++**Constraints inherited.** From [[cat003]]: cross-service plumbing
++must be reusable and not service-specific. From the
++non-application of [[cat002]]: this capability is intentionally
++stateless (no message store, no audit trail in v1) — if audit/log of
++sent notifications becomes a requirement, it's a follow-up `ft###`,
++not a widening of these three.
++
++**Migration sketch (one line per ad-hoc path).**
++
++- `auth` welcome email — replace `mail` shell-out with
++  `router.send(WelcomeEmail(user))`. Net deletion of ~20 lines.
++- `metrics` alert path — replace stdout + smtplib with
++  `router.send(MetricsAlert(...))`; gains slack target via channel
++  config without code change in metrics. Net deletion of ~30 lines.
++- `reports` ready-email — replace smtplib with
++  `router.send(ReportReady(run_id))`. Net deletion of ~25 lines.
++
++**Open questions deferred to spec-writing.**
++
++- Retry / dedup policy: at router level or per-channel?
++- Template registry: in-tree YAML vs Python dataclass per
++  notification type?
++- Slack channel mapping (per-notification-type → channel name) —
++  configuration source?
++
++These are spec-stage decisions, not idea-stage.
++
++---
++
++Index: [[board]]

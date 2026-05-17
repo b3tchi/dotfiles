@@ -1,0 +1,158 @@
+# Route Decision — spec-refinement on sp001 BLOCKED
+
+Using spec-refinement skill — SRE 8-category pass + ADR/Feature sanity.
+
+**Outcome:** BLOCKED. Cannot proceed to `## plan` + `## tasks` until the
+user resolves two issues surfaced by the sanity passes. Spec file
+`docs/notes/spec/sp001.md` left unchanged.
+
+---
+
+## Issue 1 — ADR conflict (sanity pass)
+
+`sp001.## solution` proposes:
+
+> every service swaps its password+TOTP path for a mutual-TLS handshake
+> against a new internal CA … `[[ft001|basic-auth]]` is bypassed for
+> service-to-service traffic; `[[adr0001]]` is implicitly superseded by
+> this approach.
+
+This directly contradicts an `Accepted` ADR under the spec's `[[cat001]]`
+security category:
+
+- **[[adr0001]]** (`status: Accepted`) — `## decision`:
+  > Every service uses ft001 (password+TOTP). SSO/SAML deferred until a
+  > real external-identity story shows up.
+- **`## consequences`**: "External SSO would require a new feature, not
+  extending ft001."
+
+**Per skill rule (ADR sanity, SKILL.md §"ADR / Feature sanity"):**
+
+> If the spec genuinely needs to overturn an ADR, the breakdown must
+> include a Task: "File new ADR superseding [[adr####]]" before any task
+> that depends on the new direction. **Silent violation = ship-blocker.**
+
+The phrase "implicitly superseded" in `## solution` is exactly the silent
+violation the skill is designed to catch. ADRs are append-only — there is
+no implicit supersession. A new ADR must be filed and `[[adr0001]]`
+explicitly flipped to `status: Superseded` with `## superseded_by`
+back-link.
+
+**Compounding issue (Feature sanity):**
+
+- `## solution` removes `[[ft001]]` from service-to-service traffic
+  entirely. ft001 is `status: stable` with three production consumers
+  (`[[im001]]` already in the graph; the other two services per ADR
+  context). Bypassing it isn't an api_surface mismatch — it's a
+  cross-cutting architecture change that strands a stable Feature. This
+  is bigger than spec-refinement scope; it needs an explicit Feature
+  lifecycle decision (deprecate? supersede via new ft###?).
+
+- `[[ft002|vault-secrets]]` is listed as "not used at all" — but the
+  story's AC (rotation script, secret swap) is exactly what ft002 is
+  for. Walking away from ft002 here is the opposite of the obvious
+  solution and warrants a written rationale in `## solution`, not a
+  one-liner aside.
+
+---
+
+## Issue 2 — `## implements` points at a non-existent zettel
+
+`sp001.## implements` references `[[im002|vault-policy credential
+rotation for live services]]`.
+
+**Disambiguation rule (SKILL.md §"Disambiguation"):**
+
+> **No `[[im###]]` referenced in `## solution`** → block. Spec-writing
+> should have either named the consumed `im###` or marked dedup against
+> an existing one; either way the back-link can't be finalized here
+> without it.
+
+`im002` does not exist in `docs/notes/`. Only `im001` is on disk. The
+skill's deliverable (4) requires *finalizing the `## specs` back-link on
+the consumed `[[im###]]`* — there is no `im###` file to back-link to.
+
+Additional inconsistency: the named `im002` alias is
+"vault-policy credential rotation" — that is a *vault-based* solution
+shape that would consume `[[ft002]]`. But `## solution` describes the
+*opposite* approach (mutual-TLS, vault not used). Either the
+`## implements` link is stale (the solution was rewritten without
+updating the back-reference) or the `## solution` body is stale (the
+mutual-TLS direction was tried then abandoned in favor of vault-policy).
+Both are upstream-of-refinement problems.
+
+---
+
+## What the user must decide before refinement can run
+
+Pick ONE of three routes. (The skill cannot pick on the user's behalf —
+each route changes the system architecture or supersedes prior
+decisions.)
+
+### Route A — Keep mutual-TLS direction (overturn adr0001)
+
+1. Route back to `infinifu:idea-implement` (or `idea-extend`) to scope
+   the architecture change properly.
+2. File a new ADR (`adr0004`) superseding `[[adr0001]]`. Body must
+   document context, decision (mTLS for service-to-service), and
+   consequences (basic-auth ft001 lifecycle, CA ownership, cert renewal).
+3. Flip `adr0001.status: Accepted → Superseded` and add `##
+   superseded_by [[adr0004]]` body section.
+4. Decide ft001 fate: `status: deprecated` (consumers still allowed,
+   migration optional) vs `status: superseded` by a new `ft###` for
+   mTLS. Update `ft001` accordingly.
+5. Mint the real `im002` zettel describing the mTLS solution shape;
+   update `sp001.## implements` to point at it.
+6. Re-run `infinifu:spec-writing` if `## solution` shape changes during
+   ADR drafting, then re-invoke `spec-refinement`.
+
+### Route B — Honor adr0001, use the vault-policy approach the alias hints at
+
+1. Route back to `infinifu:spec-writing` to rewrite `sp001.## solution`.
+2. New `## solution` keeps `[[ft001|basic-auth]]` for human auth,
+   consumes `[[ft002|vault-secrets]]` for the rotation primitive,
+   describes how a vault dynamic-secret policy + sidecar refresher
+   delivers the 5-minute overlap from `[[us003]]` AC.
+3. Mint `im002` for the vault-policy approach; update `sp001.##
+   implements`.
+4. Re-invoke `spec-refinement`.
+
+### Route C — Drop sp001
+
+If the deeper question is "do we even want mTLS / dynamic secrets right
+now", drop the spec:
+
+1. Flip `sp001.status: spec → dropped` (or delete the file if the team
+   prefers — AKM keeps `dropped` for history).
+2. Remove `sp001` from `docs/board.md ## spec`.
+3. Leave `us003` at `status: ready` for a future iteration.
+
+---
+
+## What was NOT done (per skill scope and block)
+
+- ❌ No `## plan` written.
+- ❌ No `## tasks` written.
+- ❌ No `## specs` back-link appended to any `im###` (target file
+  doesn't exist).
+- ❌ No `bd` calls (out of scope for `spec-refinement` regardless).
+- ❌ No status promotion (out of scope; `spec-refinement` never
+  promotes).
+- ❌ No `board.md` mutation (out of scope).
+
+The spec file `docs/notes/spec/sp001.md` is left **unchanged** at
+`status: spec`. Re-invoke `spec-refinement` after the user picks a route
+and the upstream gaps are closed.
+
+---
+
+## SRE pass — not run
+
+The 8-category SRE pass is skipped: it operates on a draft task
+breakdown, and no breakdown can be drafted while the foundation
+(`## implements` target, ADR sanity) is broken. Running SRE on a list
+built atop a silent ADR violation would just polish a ship-blocker.
+
+---
+
+Index: (not a zettel; ephemeral routing artifact)

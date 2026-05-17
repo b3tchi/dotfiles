@@ -1,0 +1,48 @@
+{
+  "eval_id": 0,
+  "eval_name": "strong-feature-notifications",
+  "config": "without_skill",
+  "expectations": [
+    {
+      "text": "Agent surveyed existing features \u2014 output references ft001 and/or ft002 explicitly",
+      "passed": true,
+      "evidence": "matches: ft001, ft002"
+    },
+    {
+      "text": "Agent picked a real existing category \u2014 references cat003 or cat004",
+      "passed": true,
+      "evidence": "matches: cat003, cat004"
+    },
+    {
+      "text": "Agent identified concrete consumers \u2014 names at least 2 of auth/metrics/reports",
+      "passed": true,
+      "evidence": "consumers found: ['auth', 'metrics', 'reports']"
+    },
+    {
+      "text": "Agent surfaced migration target adr0003 (ad-hoc smtplib decision)",
+      "passed": true,
+      "evidence": "matches: adr0003"
+    },
+    {
+      "text": "Agent did NOT mint a new ft###.md (skill rule \u2014 ft### only at spec-writing)",
+      "passed": true,
+      "evidence": "new ft files: []"
+    },
+    {
+      "text": "If sp###.md was emitted: docs/notes/spec/, status: idea, body has ## problem",
+      "passed": true,
+      "evidence": "path=docs/notes/spec/sp001.md status_idea=True problem=True"
+    },
+    {
+      "text": "docs/board.md updated with [[sp###]] reference under ## idea",
+      "passed": true,
+      "evidence": "sp_id=sp001 found_under_idea=True"
+    },
+    {
+      "text": "Agent raised the granularity question (one notif feature vs router+transport split)",
+      "passed": false,
+      "evidence": "phrases: (no match)"
+    }
+  ],
+  "pass_rate": 0.875
+}

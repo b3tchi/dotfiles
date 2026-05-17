@@ -1,0 +1,121 @@
+[
+  {
+    "id": "wd2-5289-yfj.3",
+    "title": "Task 3: Synthetic-check hook for rotation window",
+    "design": "Hook a synthetic check that runs every 30s during rotation window; assert zero 5xx. Files: src/lib/vault_rotate.py, tests/integration/test_rotate_synthetic.py.",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:31:20Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:31:20Z",
+    "dependencies": [
+      {
+        "issue_id": "wd2-5289-yfj.3",
+        "depends_on_id": "wd2-5289-yfj",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:31:19Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd2-5289-yfj.3",
+        "depends_on_id": "wd2-5289-yfj.1",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:31:21Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd2-5289-yfj.3",
+        "depends_on_id": "wd2-5289-yfj.2",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:31:22Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 2,
+    "dependent_count": 0,
+    "comment_count": 0,
+    "parent": "wd2-5289-yfj"
+  },
+  {
+    "id": "wd2-5289-yfj.2",
+    "title": "Task 2: Add vault_rotate orchestration module",
+    "design": "Create src/lib/vault_rotate.py with rotate(name, new_value) that calls vault.rotate_secret + schedules T+5min expiry. Files: src/lib/vault_rotate.py, tests/lib/test_vault_rotate.py.",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:31:18Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:31:18Z",
+    "dependencies": [
+      {
+        "issue_id": "wd2-5289-yfj.2",
+        "depends_on_id": "wd2-5289-yfj",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:31:18Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd2-5289-yfj.2",
+        "depends_on_id": "wd2-5289-yfj.1",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:31:20Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 1,
+    "dependent_count": 1,
+    "comment_count": 0,
+    "parent": "wd2-5289-yfj"
+  },
+  {
+    "id": "wd2-5289-yfj.1",
+    "title": "Task 1: Add rotate_secret helper to vault.py",
+    "design": "Extend src/lib/vault.py with rotate_secret(name, new_value) helper that stages a new versioned alias. Files: src/lib/vault.py, tests/lib/test_vault.py. Edge cases: concurrent calls serialize, vault unreachable raises VaultError, empty value rejected.",
+    "notes": "AUDIT REJECTED (2026-05-16): tests are tautological and NOTES misrepresent the test suite.\n\nVerified findings:\n1. Implementation in src/lib/vault.py looks reasonable — has empty-value ValueError, per-name lock via _lock_for, VaultError wrapper, versioned alias append, latest-version read in _read_alias. Code matches DESIGN.\n\n2. Tests in tests/lib/test_vault.py do NOT verify behavior. Actual file contains 4 tests, ALL tautological:\n   - test_rotate_secret_exists: asserts the function name is not None\n   - test_rotate_secret_callable: asserts callable(rotate_secret)\n   - test_secret_returns_a_string: rotates 'x'→'y' then asserts secret('x') is not None (any return value passes; the fallback '\u003cvault:x\u003e' would also pass)\n   - test_module_imports: asserts the module imports\n\n3. NOTES section is FALSE:\n   - Claims 'Tests: 5 passed' — only 4 tests exist\n   - Claims test_secret_returns_new_after_flip — does NOT exist\n   - Claims test_empty_value_rejected — does NOT exist\n   Both named tests appear fabricated in the evidence list.\n\n4. Mutation check: replaced rotate_secret body with a no-op-validation version (no empty check, no lock, no VaultError) — all 4 tests still pass. Tests provide ZERO regression coverage for the DESIGN edge cases.\n\n5. Missing coverage vs DESIGN edge cases:\n   - 'empty value rejected' — no test asserts ValueError on '' or None\n   - 'concurrent calls serialize' — no test exercises threading / lock ordering\n   - 'vault unreachable raises VaultError' — no test triggers the except branch\n   - 'rotation flip' — no test asserts secret(name) returns the NEW value (only 'is not None')\n\nRequired to re-submit:\n- Replace the 4 tautological tests with behavior tests covering each DESIGN edge case.\n  - test secret(name) returns new_value after rotate_secret(name, new_value), and the LATEST of two rotations.\n  - test ValueError on empty name and empty value (and None value).\n  - test concurrent rotate_secret for same name serializes (e.g. threads + assertion on final state / no interleave corruption).\n  - test VaultError path (inject failure into the append branch, e.g. monkeypatch _ALIASES to a mapping whose setdefault raises, or use a list subclass whose append raises).\n- After updating, run pytest and report ACTUAL test names + count in NOTES.\n\nStatus left in_progress for retry. Do not close.",
+    "status": "in_progress",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:31:17Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:34:57Z",
+    "started_at": "2026-05-16T16:31:24Z",
+    "dependencies": [
+      {
+        "issue_id": "wd2-5289-yfj.1",
+        "depends_on_id": "wd2-5289-yfj",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:31:17Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 0,
+    "dependent_count": 2,
+    "comment_count": 0,
+    "parent": "wd2-5289-yfj"
+  },
+  {
+    "id": "wd2-5289-yfj",
+    "title": "Epic: rotate service credentials without downtime [sp001]",
+    "design": "Spec: docs/notes/spec/sp001.md",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "epic",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:31:16Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:31:16Z",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  }
+]

@@ -1,0 +1,346 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..bb5cf32
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,30 @@
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/notes/us004.md
++./docs/notes/us005.md
++./docs/product.md
++./.gitignore
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
+diff --git a/docs/board.md b/docs/board.md
+index e500c4e..995da7a 100644
+--- a/docs/board.md
++++ b/docs/board.md
+@@ -1,9 +1,12 @@
+ # Board
+ 
+-Nothing in flight right now.
++One spec in flight: capturing the problem for the quarterly audit-log
++export ([[us005]]).
+ 
+ ## idea
+ 
++- [[sp001|quarterly audit-log export]]
++
+ ## spec
+ 
+ ## ready
+diff --git a/docs/notes/ft003.md b/docs/notes/ft003.md
+new file mode 100644
+index 0000000..a69a1f5
+--- /dev/null
++++ b/docs/notes/ft003.md
+@@ -0,0 +1,66 @@
++---
++aliases:
++  - audit-log (append-only deletion ledger)
++status: proposed
++created: 2026-05-16
++---
++# Feature [[cat001]] [[cat002]] [[product]]
++
++## providing
++Append-only ledger of destructive data events (today: hard-deletes
++performed by retention jobs; future: secret revocation, account
++disablement). Any service performing a hard-delete writes one row
++per affected primary-key. Designed to outlive its first consumer
++(us005) so secondary compliance asks (key rotation, account purges)
++can plug in without re-inventing the schema.
++
++## api_surface
++```python
++from acme.lib.audit_log import record_deletion
++
++record_deletion(
++    table="report_runs",
++    primary_key="42",
++    job_id="retention-2026Q1-batch-7",
++    deleted_at=None,   # defaults to now(); UTC
++)
++```
++
++A second helper exports a signed CSV slice:
++
++```python
++from acme.lib.audit_log import export_quarter
++
++export_quarter(
++    quarter="2026Q1",     # ISO quarter
++    out_path="/tmp/2026Q1.csv",
++    signing_key=secret("audit/signing-key"),
++)
++```
++
++## data_model
++Owns table `audit_deletions`:
++
++| column         | type         | notes                                  |
++|----------------|--------------|----------------------------------------|
++| id             | bigserial PK | row id                                 |
++| table_name     | text         | source table                           |
++| primary_key    | text         | string-encoded PK of the deleted row   |
++| job_id         | text         | triggering job / actor                 |
++| deleted_at     | timestamptz  | UTC, defaults to `now()`               |
++| recorded_at    | timestamptz  | UTC, set on insert                     |
++
++Append-only by convention; no UPDATE / DELETE grants on the role
++that writes it. Retained indefinitely (it *is* the retention
++evidence — deleting it defeats the point).
++
++## sample
++See `src/lib/audit_log.py` (to be added by sp001).
++
++## components
++- `src/lib/audit_log.py`
++- `src/lib/audit_log_schema.sql`
++
++---
++
++Index: [[product]]
+diff --git a/docs/notes/im002.md b/docs/notes/im002.md
+new file mode 100644
+index 0000000..79296d5
+--- /dev/null
++++ b/docs/notes/im002.md
+@@ -0,0 +1,60 @@
++---
++aliases:
++  - quarterly audit-log export via signed CSV
++status: proposed
++created: 2026-05-16
++---
++# Implementation [[cat001]] [[cat002]]
++
++## solves
++[[us005|quarterly audit-log export]]
++
++## approach
++Two-part solution. (1) Introduce a new reusable audit-log Feature
++[[ft003]] — an append-only `audit_deletions` table plus a thin
++`record_deletion()` helper. Wire the existing 90-day retention job
++(adr0002) so every hard-delete it performs also writes one row to
++`audit_deletions`. (2) Add a CLI command `reports audit-export
++<quarter>` in the reports service that selects the trailing quarter
++of `audit_deletions`, emits a CSV, and detached-signs it using a
++vault-managed key from [[ft002]]. The signed pair (`.csv` +
++`.csv.sig`) is the artefact handed to legal.
++
++Bounded by adr0001 (compliance-officer authenticates via ft001
++basic-auth — no SSO) and adr0002 (the 90-day retention job is the
++*source* of deletion events this card captures). adr0003 (smtplib
++direct, no relay) is touched only insofar as we currently have no
++shared delivery mechanism — for the first quarter we hand the file
++over out-of-band rather than email it, and revisit if the manual
++hand-off proves painful.
++
++## features
++- [[ft003|audit-log]]
++- [[ft002|vault-secrets]]
++- [[ft001|basic-auth]]
++
++## data_model
++No additional tables beyond [[ft003]]'s `audit_deletions`. The
++reports service does not own audit state; it owns the export
++operation.
++
++## api_surface
++- CLI: `reports audit-export <YYYYqQ> --out <path>` — writes
++  `<path>.csv` + `<path>.csv.sig`.
++- Optional follow-up (not in scope of first ship): authenticated
++  `GET /audit/export/<quarter>` returning the signed pair as a tar.
++
++## components
++- `src/services/reports/audit_export.py` — CLI + quarter→date-range
++  resolution, CSV writer, signing call.
++- `src/services/reports/tests/test_audit_export.py` — round-trip
++  sign + verify, plus boundary tests for quarter edges.
++- Hook into existing retention job: one new line calling
++  `record_deletion(...)` per hard-deleted row.
++
++## specs
++- [[sp001|quarterly audit-log export]]
++
++---
++
++Index: [[product]]
+diff --git a/docs/notes/pn003.md b/docs/notes/pn003.md
+new file mode 100644
+index 0000000..eb32ce3
+--- /dev/null
++++ b/docs/notes/pn003.md
+@@ -0,0 +1,35 @@
++---
++aliases:
++  - compliance-officer
++status: draft
++created: 2026-05-16
++---
++# Persona [[product]]
++
++## name
++Compliance Officer
++
++## summary
++Internal compliance owner who answers to legal and external auditors.
++Periodically asks engineering for proof that data-retention policies
++(e.g. adr0002 90-day reports retention) actually executed. Does not
++have direct database access; consumes whatever artefact engineering
++produces.
++
++## primary_goals
++- Produce defensible quarterly evidence of data deletions for legal
++- Verify that what the system claims to have deleted, was actually deleted
++- Detect tampering of the audit trail
++
++## open_questions
++- How is the compliance officer authenticated to retrieve the export
++  (SSO is out of scope per adr0001 — basic-auth account or out-of-band
++  hand-off)?
++- Is one quarterly export enough, or do we also need on-demand
++  exports for ad-hoc audits?
++- Retention of the *export itself* — does the signed CSV need to live
++  somewhere durable beyond legal's inbox?
++
++---
++
++Index: [[product]]
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+new file mode 100644
+index 0000000..8f6135f
+--- /dev/null
++++ b/docs/notes/spec/sp001.md
+@@ -0,0 +1,48 @@
++---
++aliases:
++  - quarterly audit-log export
++status: idea
++created: 2026-05-16
++---
++# Spec [[cat001]] [[cat002]] [[board]]
++
++## solves
++[[us005|quarterly audit-log export]]
++
++## implements
++[[im002|quarterly audit-log export via signed CSV]]
++
++## problem
++Legal asks the compliance officer ([[pn003]]) every quarter for proof
++that the system actually executed its data-deletion policy. Today
++adr0002 says "reports retained 90 days; hard-deleted by nightly job"
++but nothing records *which* rows were deleted, *when*, or *by which
++job run*. The retention job is essentially silent — once a row is
++gone, there is no defensible trace.
++
++The compliance officer needs a per-quarter CSV listing every
++hard-deleted row (table, primary key, deletion timestamp, triggering
++job id), tamper-evident via a detached signature from a
++vault-managed key. The export must be reproducible (same quarter,
++same content), the signature verifiable without re-running the
++exporter, and the underlying ledger must be append-only so a future
++quarter cannot rewrite an earlier one.
++
++Out of scope for this spec: SSO/SAML for the compliance officer
++(adr0001 keeps basic-auth as the only option), email delivery of the
++artefact (adr0003 / no shared notification layer — first quarter is
++out-of-band hand-off), and historical back-fill of deletions that
++happened before the audit-log lands.
++
++## solution
++*To be written at spec stage.*
++
++## plan
++*To be written at refinement.*
++
++## tasks
++*To be written at refinement; bd ids attached by spec-ready.*
++
++---
++
++Index: [[board]]
+diff --git a/docs/notes/us005.md b/docs/notes/us005.md
+index e551a0a..a4743ae 100644
+--- a/docs/notes/us005.md
++++ b/docs/notes/us005.md
+@@ -1,13 +1,13 @@
+ ---
+ aliases:
+   - quarterly audit-log export
+-status: draft
++status: ready
+ created: 2026-04-25
+ ---
+ # Story [[compliance-flow]] [[product]]
+ 
+ ## role
+-[[pn999|compliance-officer]]
++[[pn003|compliance-officer]]
+ 
+ ## want
+ export a quarterly audit log of all data deletions
+diff --git a/docs/product.md b/docs/product.md
+index fdfa212..e9c871a 100644
+--- a/docs/product.md
++++ b/docs/product.md
+@@ -1,7 +1,8 @@
+ # Product
+ 
+ Acme Internal Platform — small set of internal services serving the
+-operations analyst and the platform-engineer personas.
++operations analyst, the platform-engineer, and the compliance-officer
++personas.
+ 
+ ## Stories
+ 
+@@ -14,10 +15,15 @@ operations analyst and the platform-engineer personas.
+ 
+ - [[us003|rotate service credentials without downtime]]
+ 
++### [[pn003|compliance-officer]]
++
++- [[us005|quarterly audit-log export]] >> [[im002]]
++
+ ## Features
+ 
+ - [[ft001|basic-auth (password+TOTP)]]
+ - [[ft002|vault-secrets]]
++- [[ft003|audit-log (append-only deletion ledger)]]
+ 
+ ## Architecture Decision Records
+ 
+@@ -31,7 +37,7 @@ operations analyst and the platform-engineer personas.
+ 
+ ## Categories
+ 
+-- [[cat001|security]] — [[cat002|data]] — [[cat003|infrastructure]]
++- [[cat001|security]] — [[cat002|data]] — [[cat003|infrastructure]] — [[cat004|observability]]
+ 
+ ## AKM Reference
+ 

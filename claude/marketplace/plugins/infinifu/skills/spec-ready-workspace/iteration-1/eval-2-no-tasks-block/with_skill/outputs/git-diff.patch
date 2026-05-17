@@ -1,0 +1,124 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..e1772ab
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,47 @@
++./AGENTS.md
++./.beads/config.yaml
++./.beads/dolt-server.port
++./.beads/.gitignore
++./.beads/hooks/post-checkout
++./.beads/hooks/post-merge
++./.beads/hooks/pre-commit
++./.beads/hooks/prepare-commit-msg
++./.beads/hooks/pre-push
++./.beads/interactions.jsonl
++./.beads/.local_version
++./.beads/metadata.json
++./.beads/README.md
++./CLAUDE.md
++./.claude/settings.json
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/im002.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/spec/sp001.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/notes/us004.md
++./docs/notes/us005.md
++./docs/product.md
++./.gitignore
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
+diff --git a/route_decision.md b/route_decision.md
+new file mode 100644
+index 0000000..e011330
+--- /dev/null
++++ b/route_decision.md
+@@ -0,0 +1,65 @@
++# spec-ready route decision — sp001
++
++## Verdict
++
++**BLOCK. Route to `infinifu:spec-refinement`.**
++
++`spec-ready` cannot proceed on `sp001`. Per the skill's Disambiguation
++rule (SKILL.md line 69):
++
++> `sp###` at `status: spec` but `## tasks` missing or incomplete →
++> route to `spec-refinement`. spec-ready cannot invent tasks.
++
++## Evidence
++
++Read of `docs/notes/spec/sp001.md`:
++
++- Frontmatter: `status: spec` (correct stage for spec-ready *if* tasks
++  existed).
++- Body sections present: `## solves`, `## implements`, `## problem`,
++  `## solution`.
++- Body sections **absent**: `## plan`, `## tasks`.
++- Number of `### Task N` blocks: **0**.
++- Number of `#### bd <id>` annotations: **0** (vacuously — no tasks to
++  carry them).
++
++The AKM schema (`docs/notes/akm.md` Spec section) is explicit that
++`## plan` lands at refinement and `## tasks` is populated with the
++H3/H4 breakdown *before* spec-ready attaches bd ids. Neither has been
++written, so the precondition spec-ready depends on — "an
++already-written task breakdown" (SKILL.md Overview, Key Principles) —
++is not met.
++
++## What was NOT done (deliberately)
++
++Per the skill's own Key Principles ("Tasks come from `## tasks`, not
++from invention") and Out-of-scope contract ("Writing or revising
++`## tasks` content — that's `spec-refinement`"):
++
++- No `bd init` re-run, no `bd create` (epic or task) issued.
++- No edits to `docs/notes/spec/sp001.md` — frontmatter status stayed
++  `spec`, body untouched.
++- No edits to `docs/board.md` — `[[sp001]]` stayed under `## spec`,
++  not moved to `## ready`.
++- No `#### bd` annotations invented.
++- No dependency wiring attempted.
++
++Rolling forward with invented tasks would violate the atomicity
++principle (SKILL.md Key Principles: "Atomic operation … If any step
++fails midway, roll back rather than leaving partial state.") and
++would produce a fabricated task list with no design rationale behind
++it — the exact failure mode `spec-refinement` exists to prevent.
++
++## Required next step
++
++Invoke `infinifu:spec-refinement` against `sp001`. That skill will:
++
++1. Read `## problem` + `## solution` already present.
++2. Run the SRE 8-category pass to produce `## plan` (file tree,
++   conventions, anti-patterns, known limitations).
++3. Decompose into `### Task N` blocks with the full H4 property set
++   (`#### type`, `#### effort`, `#### depends`, `#### files_touched`,
++   `#### success_criteria`, `#### edge_cases`, `#### test_plan`).
++4. Hand back to the user for approval.
++
++Only after that lands does `spec-ready` have something to bd-ify.

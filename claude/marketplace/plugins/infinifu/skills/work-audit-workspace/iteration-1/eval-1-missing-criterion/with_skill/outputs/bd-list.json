@@ -1,0 +1,121 @@
+[
+  {
+    "id": "wd1-3003-vjg.3",
+    "title": "Task 3: Synthetic-check hook for rotation window",
+    "design": "Hook a synthetic check that runs every 30s during rotation window; assert zero 5xx. Files: src/lib/vault_rotate.py, tests/integration/test_rotate_synthetic.py.",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:30:39Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:30:39Z",
+    "dependencies": [
+      {
+        "issue_id": "wd1-3003-vjg.3",
+        "depends_on_id": "wd1-3003-vjg",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:30:38Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd1-3003-vjg.3",
+        "depends_on_id": "wd1-3003-vjg.1",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:30:40Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd1-3003-vjg.3",
+        "depends_on_id": "wd1-3003-vjg.2",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:30:41Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 2,
+    "dependent_count": 0,
+    "comment_count": 0,
+    "parent": "wd1-3003-vjg"
+  },
+  {
+    "id": "wd1-3003-vjg.2",
+    "title": "Task 2: Add vault_rotate orchestration module",
+    "design": "Create src/lib/vault_rotate.py with rotate(name, new_value) that calls vault.rotate_secret + schedules T+5min expiry. Files: src/lib/vault_rotate.py, tests/lib/test_vault_rotate.py.",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:30:38Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:30:38Z",
+    "dependencies": [
+      {
+        "issue_id": "wd1-3003-vjg.2",
+        "depends_on_id": "wd1-3003-vjg",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:30:37Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd1-3003-vjg.2",
+        "depends_on_id": "wd1-3003-vjg.1",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:30:39Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 1,
+    "dependent_count": 1,
+    "comment_count": 0,
+    "parent": "wd1-3003-vjg"
+  },
+  {
+    "id": "wd1-3003-vjg.1",
+    "title": "Task 1: Add rotate_secret helper to vault.py",
+    "design": "Extend src/lib/vault.py with rotate_secret(name, new_value) helper that stages a new versioned alias. Files: src/lib/vault.py, tests/lib/test_vault.py. Edge cases: concurrent calls serialize, vault unreachable raises VaultError, empty value rejected.",
+    "notes": "AUDITED: REJECTED\n\nGaps:\n- success_criterion 'vault.rotate_secret writes new versioned alias': MET (src/lib/vault.py:33-45 stages alias; test_rotate_stages_new_alias PASSED)\n- success_criterion 'secret(name) returns new after flip': MET (test_secret_returns_new_after_flip PASSED)\n- success_criterion '5 unit tests pass covering write-staging, read-during-overlap, post-expiry behavior': UNMET — pytest collected only 3 tests, not 5. Missing: test_vault_unreachable_raises, test_empty_value_rejected. Output: '3 passed' (pytest tests/lib/test_vault.py)\n- edge_case 'Empty / None new_value: reject at the API boundary': UNMET — src/lib/vault.py:38 contains literal comment '(input validation skipped — bug)'. rotate_secret('x', '') and rotate_secret('x', None) both append the value to _ALIASES without raising. Implementer notes claim 'Empty value rejected with ValueError: tests/lib/test_vault.py::test_empty_value_rejected' — that test does not exist in the file (grep test_empty returns no matches). False evidence in implementer notes is a discipline failure on top of the missing implementation.\n- edge_case 'Vault unreachable: raise VaultError, do not partial-write': UNVERIFIED — test_vault_unreachable_raises missing from tests/lib/test_vault.py; no error-injection path covered.\n- automated check (TODO scan): HIT — src/lib/vault.py:48 has 'TODO: set_timeout(timeout_ms)...'. Even if scoped out per the comment, it must be filed as a bd task and removed from the source, not left inline.\n\nRequested action:\n1. Add input validation at top of rotate_secret in src/lib/vault.py: 'if not new_value: raise ValueError(...)'. Remove the '(input validation skipped — bug)' comment.\n2. Add test_empty_value_rejected in tests/lib/test_vault.py asserting pytest.raises(ValueError) for both '' and None.\n3. Add test_vault_unreachable_raises in tests/lib/test_vault.py simulating backend failure (monkeypatch _ALIASES setdefault or similar) and asserting VaultError, plus that _ALIASES is unchanged (no partial write).\n4. Reach the success_criteria-stated 5 tests total.\n5. File a separate bd task for the set_timeout work and delete the TODO comment from src/lib/vault.py:48.\n6. Stop logging fabricated evidence — every note must be re-verifiable.",
+    "status": "in_progress",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:30:36Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:34:15Z",
+    "started_at": "2026-05-16T16:30:43Z",
+    "dependencies": [
+      {
+        "issue_id": "wd1-3003-vjg.1",
+        "depends_on_id": "wd1-3003-vjg",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:30:36Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 0,
+    "dependent_count": 2,
+    "comment_count": 0,
+    "parent": "wd1-3003-vjg"
+  },
+  {
+    "id": "wd1-3003-vjg",
+    "title": "Epic: rotate service credentials without downtime [sp001]",
+    "design": "Spec: docs/notes/spec/sp001.md",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "epic",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:30:35Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:30:35Z",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  }
+]

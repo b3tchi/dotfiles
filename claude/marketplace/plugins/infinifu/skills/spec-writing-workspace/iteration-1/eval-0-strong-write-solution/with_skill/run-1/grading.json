@@ -1,0 +1,78 @@
+{
+  "eval_id": 0,
+  "eval_name": "strong-write-solution",
+  "config": "with_skill",
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 13,
+    "failed": 0,
+    "total": 13
+  },
+  "expectations": [
+    {
+      "text": "Agent read sp001 and confirmed status: idea",
+      "passed": true,
+      "evidence": "sp001 + idea mentioned"
+    },
+    {
+      "text": "Agent re-read us003 acceptance_criteria",
+      "passed": true,
+      "evidence": "AC reference present"
+    },
+    {
+      "text": "Agent surveyed ft002 as binding feature candidate",
+      "passed": true,
+      "evidence": "ft002 mentioned"
+    },
+    {
+      "text": "Agent surveyed adr0001 and/or adr0002",
+      "passed": true,
+      "evidence": "adrs: ['adr0001', 'adr0002']"
+    },
+    {
+      "text": "Agent appended ## solution section to sp001",
+      "passed": true,
+      "evidence": "has_solution=True"
+    },
+    {
+      "text": "## solution carries wikilinks (at least 2 of ft/adr/cat)",
+      "passed": true,
+      "evidence": "link kinds: ['ft', 'adr', 'cat']"
+    },
+    {
+      "text": "sp001 flipped from status: idea to status: spec",
+      "passed": true,
+      "evidence": "status=spec"
+    },
+    {
+      "text": "board.md moved [[sp001]] from ## idea to ## spec",
+      "passed": true,
+      "evidence": "under_idea=False under_spec=True"
+    },
+    {
+      "text": "Agent did NOT write ## plan / ## tasks",
+      "passed": true,
+      "evidence": "absent=True"
+    },
+    {
+      "text": "Agent did NOT use bd",
+      "passed": true,
+      "evidence": "bd_called=False"
+    },
+    {
+      "text": "Agent did NOT mint a new im###.md (deferred to spec-refinement)",
+      "passed": true,
+      "evidence": "new_im=[]"
+    },
+    {
+      "text": "Agent did NOT modify docs/product.md (out of scope)",
+      "passed": true,
+      "evidence": "product_modified=False"
+    },
+    {
+      "text": "Agent did NOT modify us003 (out of scope at this stage)",
+      "passed": true,
+      "evidence": "us003_modified=False"
+    }
+  ]
+}

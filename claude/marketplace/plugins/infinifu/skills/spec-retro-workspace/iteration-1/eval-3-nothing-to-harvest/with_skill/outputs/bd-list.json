@@ -1,0 +1,17 @@
+[
+  {
+    "id": "wd3-268484-gqj",
+    "title": "Discovered: make vault timeout configurable (set_timeout)",
+    "description": "TODO in src/lib/vault.py:49 — default 5000ms is too short for the European region. Out of scope for sp001 rotation work; needs its own spec/decision. Caller can set per-region timeout via set_timeout(timeout_ms).",
+    "status": "open",
+    "priority": 3,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-17T08:53:00Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-17T08:53:00Z",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  }
+]

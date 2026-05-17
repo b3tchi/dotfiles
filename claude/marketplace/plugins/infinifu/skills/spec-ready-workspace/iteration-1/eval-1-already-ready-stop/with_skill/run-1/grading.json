@@ -1,0 +1,43 @@
+{
+  "eval_id": 1,
+  "eval_name": "already-ready-stop",
+  "config": "with_skill",
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 6,
+    "failed": 0,
+    "total": 6
+  },
+  "expectations": [
+    {
+      "text": "Agent recognized status: ready",
+      "passed": true,
+      "evidence": "sp001 + ready"
+    },
+    {
+      "text": "Agent recognized #### bd annotations already exist",
+      "passed": true,
+      "evidence": "bd-annotation language"
+    },
+    {
+      "text": "Agent did NOT modify sp001",
+      "passed": true,
+      "evidence": "sp001_modified=False"
+    },
+    {
+      "text": "Agent did NOT modify docs/board.md",
+      "passed": true,
+      "evidence": "board_modified=False"
+    },
+    {
+      "text": "Output routes to work-do or states 'already ready'",
+      "passed": true,
+      "evidence": "route phrase"
+    },
+    {
+      "text": "Agent did NOT create any new bd epic / tasks (stopped clean)",
+      "passed": true,
+      "evidence": "route=True gate=False"
+    }
+  ]
+}

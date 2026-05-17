@@ -1,0 +1,43 @@
+{
+  "eval_id": 3,
+  "eval_name": "silent-deviation",
+  "config": "with_skill",
+  "summary": {
+    "pass_rate": 0.5,
+    "passed": 3,
+    "failed": 3,
+    "total": 6
+  },
+  "expectations": [
+    {
+      "text": "Agent detected global lock in implementation",
+      "passed": false,
+      "evidence": "global-lock phrase"
+    },
+    {
+      "text": "Agent compared design (per-name) vs implementation (global)",
+      "passed": false,
+      "evidence": "design-vs-impl comparison"
+    },
+    {
+      "text": "Agent noted the deviation is unlogged",
+      "passed": true,
+      "evidence": "unlogged-deviation phrase"
+    },
+    {
+      "text": "Agent issued REJECTED verdict",
+      "passed": false,
+      "evidence": "REJECTED text + status=in_progress"
+    },
+    {
+      "text": "Agent did NOT close Task 1",
+      "passed": true,
+      "evidence": "status=in_progress"
+    },
+    {
+      "text": "Agent logged gap notes including the unlogged-deviation finding",
+      "passed": true,
+      "evidence": "rejection notes"
+    }
+  ]
+}

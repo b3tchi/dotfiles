@@ -1,0 +1,40 @@
+◐ wd1-4177092-t8l.1 · Task 1: Add rotate_secret helper to vault.py   [● P2 · IN_PROGRESS]
+Owner: eval · Type: task
+Created: 2026-05-16 · Started: 2026-05-16 · Updated: 2026-05-16
+
+DESCRIPTION
+  (none)
+
+DESIGN
+Extend src/lib/vault.py with rotate_secret(name, new_value) helper that stages a new versioned alias. Files: src/lib/vault.py, tests/lib/test_vault.py. Edge cases: concurrent calls serialize, vault unreachable raises VaultError, empty value rejected.
+
+NOTES
+IMPLEMENTED: rotate_secret(name, new_value) added to src/lib/vault.py with versioned-alias bookkeeping and per-name locking.
+
+Evidence:
+- SC1 (writes new versioned alias without touching old): src/lib/vault.py:37-38 (_stage_alias appends, never overwrites); test_rotate_stages_new_alias asserts both old and new versions are present.
+- SC2 (secret returns new value after flip): src/lib/vault.py:48-52 (secret returns versions[-1]); test_secret_returns_new_after_flip.
+- SC3 (5 unit tests pass write-staging / read-during-overlap / post-expiry): 5 new test functions in tests/lib/test_vault.py — test_rotate_stages_new_alias, test_secret_returns_new_after_flip, test_concurrent_rotate_serializes, test_vault_unreachable_raises, test_empty_value_rejected (None + ''). Post-expiry behavior is intentionally Task 2's scope (vault_rotate orchestration owns expiry timing); this task's overlap test asserts the prior version is still readable after staging.
+- Edge case (concurrent serialize): _lock_for + per-name threading.Lock in rotate_secret; test_concurrent_rotate_serializes runs 4 parallel rotations and asserts the final version list has exactly 5 entries (1 base + 4 staged).
+- Edge case (vault unreachable, no partial-write): try/except wraps _stage_alias raises into VaultError; test_vault_unreachable_raises asserts only the base alias remains after a failing stage.
+- Edge case (empty/None rejected): explicit guard at the top of rotate_secret; test_empty_value_rejected parametrized over None and ''.
+- Tests: pytest -v -> 7 passed in 0.05s (1 baseline smoke + 6 new test cases from 5 functions).
+
+Deviations:
+- Spec convention says 'exceptions inherit acme.errors.VaultError', but no acme.errors module exists in the sandbox. Task 1 files_touched is scoped to vault.py + test_vault.py, so creating acme.errors would expand scope. Used the existing vault.VaultError class. Flagged earlier in this notes thread.
+
+Discoveries filed:
+- wd1-4177092-pdh: set_timeout in vault.py never persists timeout (FIXME left in source, out of Task 1 scope). Linked via discovered-from dependency.
+
+Status: in_progress (leaving for reviewer per work-do skill — close transition is the reviewer's via work-audit).
+
+PARENT
+  ↑ ○ wd1-4177092-t8l: (EPIC) Epic: rotate service credentials without downtime [sp001] ● P2
+
+BLOCKS
+  ← ○ wd1-4177092-t8l.2: Task 2: Add vault_rotate orchestration module ● P2
+  ← ○ wd1-4177092-t8l.3: Task 3: Synthetic-check hook for rotation window ● P2
+
+DISCOVERED
+  ◊ ○ wd1-4177092-pdh: Discovered: set_timeout in vault.py never persists timeout ● P2
+

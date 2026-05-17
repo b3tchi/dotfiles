@@ -1,0 +1,13 @@
+{
+  "eval_id": 3,
+  "eval_name": "already-annotated-stop",
+  "prompt": "Run spec-ready on sp001. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent read sp001 — status is still spec but #### bd ids already present"},
+    {"text": "Agent recognized the spec has already been processed (bd annotations present)"},
+    {"text": "Agent did NOT create duplicate bd epic / tasks"},
+    {"text": "Agent did NOT modify sp001 file (no duplicate annotations)"},
+    {"text": "Agent did NOT modify docs/board.md"},
+    {"text": "Output explicitly states 'already processed' / 'bd ids exist' / routes the user accordingly"}
+  ]
+}

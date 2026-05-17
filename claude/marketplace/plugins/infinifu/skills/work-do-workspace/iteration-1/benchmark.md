@@ -1,13 +1,13 @@
 # Skill Benchmark: work-do
 
 **Model**: <model-name>
-**Date**: 2026-04-19T17:33:37Z
-**Evals**: 0 (3 runs each per configuration)
+**Date**: 2026-05-16T16:23:32Z
+**Evals**: 0, 1, 2, 3 (3 runs each per configuration)
 
 ## Summary
 
-| Metric | With Skill | Config B | Delta |
+| Metric | With Skill | Without Skill | Delta |
 |--------|------------|---------------|-------|
-| Pass Rate | 100% ± 0% | 0% ± 0% | +1.00 |
-| Time | 209.3s ± 0.0s | 0.0s ± 0.0s | +209.3s |
-| Tokens | 0 ± 0 | 0 ± 0 | +0 |
+| Pass Rate | 100% ± 0% | 71% ± 28% | +0.29 |
+| Time | 191.1s ± 64.1s | 176.1s ± 50.5s | +15.0s |
+| Tokens | 49950 ± 6322 | 50916 ± 5711 | -966 |

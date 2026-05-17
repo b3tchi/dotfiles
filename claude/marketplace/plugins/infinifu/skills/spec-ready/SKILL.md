@@ -1,240 +1,151 @@
 ---
 name: spec-ready
-description: Use when a spec is written and refined — creates bd epic and tasks with dependencies, then promotes spec from board/spec/ to board/ready/ as one atomic operation
+description: "You MUST use this when an existing spec has plan + tasks written and the user wants to attach beads ids and queue it for execution — 'mark sp007 ready', 'attach bd ids to sp012', 'sp001 is refined, get it ready for work-do', 'plan-prepare on sp004', or any phrasing that names a `sp###` at `status: spec` whose `## tasks` block is populated (H3 per task, H4 per property, no #### bd yet). Stage 4 of the AKM lifecycle (spec-ready). Mints a bd epic + child tasks from the existing task breakdown, annotates each `### Task N` block in the spec with `#### bd <id>`, flips spec status `spec → ready`, and moves the board entry from `## spec` to `## ready`. Does NOT write tasks (those came from spec-refinement), NOT execute work, NOT close issues — execution is `work-do` scope."
 ---
 
-# Spec Ready
+# Spec Ready (## tasks → bd + status ready)
 
-Gate between spec-writing and development. Takes a finished, refined spec and makes it ready for development: creates bd epic + tasks with dependency analysis, then moves the spec to `board/ready/`.
+## Overview
 
-**Announce at start:** "I'm using the spec-ready skill to plan tasks and promote the spec to ready."
+Stage 4 of the AKM lifecycle. A spec is at `status: spec` with `## plan` + `## tasks` populated by `spec-refinement`. The user wants the task breakdown to become actionable beads — one bd epic for the whole spec, one bd task per `### Task N` block — and the spec to flip onto the ready queue.
 
-## When to Use
+**Three deliverables, all atomic:**
 
-- After infinifu:spec-writing + infinifu:spec-refinement are complete and user has approved the spec
-- When a spec exists in `board/spec/` and needs bd tasks created
-- Any time you would use `update_plan` for tracking work items from a spec
+1. **bd epic** for the spec (title references the spec id + the `us###` it solves).
+2. **bd tasks** one per `### Task N` block, with `--parent <epic>` for child linking and `bd dep add` for blocking deps (read from `#### depends`).
+3. **Annotate `#### bd <id>`** on every `### Task N` block in the spec file.
+4. **Flip frontmatter** `status: spec → ready`.
+5. **Move board entry** `[[sp###]]` from `## spec` to `## ready` in `docs/board.md`.
 
-## Core Principle
+**Out of scope (deliberately):**
 
-**bd is your persistent memory.** Unlike flat plans that vanish between sessions, bd issues survive context resets. Always use bd for tracking work.
+- Writing or revising `## tasks` content — that's `spec-refinement`. If `## tasks` is missing or incomplete, block.
+- Executing the tasks — that's `work-do`. This skill mints ids; it does NOT call `bd update --status in_progress`, NOT call `bd close`, NOT touch source code.
+- User-approval gates on the task list itself — that's the gate at the end of `spec-refinement`. By the time we land here, the breakdown is committed.
 
-## bd Command Reference
-
-For the full command catalogue — reading, creating, updating, inspecting, dependencies — see `infinifu:meta-patterns` (`bd-commands.md`). Load it when you need a specific invocation. Valid statuses: `open`, `in_progress`, `blocked`, `closed`.
-
-This skill calls `bd update` (bump existing epic to P2), `bd create` (tasks, with `--parent` for child links), `bd dep add` (blocking dependencies), `bd list --parent` / `bd ready` (verification), and `git mv` + commit (promote to ready). bd 1.0 auto-exports `.beads/issues.jsonl` after every mutation, so there is no separate `bd sync` step. Patterns specific to those steps appear inline below; everything else lives in the shared reference.
-
-**Epic already exists:** the epic was created at P4 by `idea-brainstorming` and bumped to P3 by `spec-writing`. This skill bumps it to P2 and attaches child tasks — it does NOT create a new epic. If no epic exists (spec came in without going through brainstorming/spec-writing), create one directly at P2 as a fallback.
+**Announce at start:** "Using spec-ready skill to mint beads and queue the spec."
 
 ## AKM hooks
 
-Stage 4 of the AKM lifecycle — see `claude/akm/akm-lifecycle.md` for the full map and `claude/akm/akm.md` for typed-zettel schemas. Mint beads from the `sp###.tasks` breakdown and promote the spec to ready.
+Stage 4 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Lifecycle: read `sp###`, write `sp###.tasks` bd-id annotations, write `board.md` (`## spec → ## ready`), produce beads with dependencies as the artifact.
 
-**Reads:** `sp###` (status `spec`, with `## plan` and `## tasks` populated by spec-refinement).
+**Reads:**
+
+- `sp###` — target spec at `status: spec`. Read `## plan` and `## tasks`. Every `### Task N` block must already carry `#### type`, `#### effort`, `#### depends`, `#### files_touched`, `#### success_criteria`, `#### edge_cases`, `#### test_plan`. None should already carry `#### bd <id>`.
+- Source `us###` and consumed `[[im###]]` — only for the epic design text (one-line summary).
 
 **Writes:**
 
-- `sp###.tasks` — annotate each `### Task N` block with `#### bd <id>` once the bd issue is minted. Use the `#### depends` H4 to drive `bd dep add`.
-- `sp###` frontmatter — flip `status: spec` → `ready` once every task carries a bd id.
-- `board.md` — move `[[sp###]]` from `## spec` → `## ready`.
+- `sp###` — same file. For each `### Task N`, append a `#### bd <task-id>` line. Flip frontmatter `status: spec → ready`.
+- `docs/board.md` — remove `[[sp###]]` from `## spec`, add to `## ready`.
 
-The bd epic title should reference the `sp###` slug (and the `us###` it solves) for traceability.
+**bd state:**
 
-## Plan-Prepare: Dependency Analysis and Parallelism
+- One epic minted (title references the spec). Description carries a one-line summary + `Spec: docs/notes/spec/sp###.md`.
+- One child task per `### Task N` block. Parent link via `bd create ... --parent <epic-id>`.
+- Blocking deps from each task's `#### depends` H4 property — `bd dep add <later-task> <earlier-task>` per dependency edge.
 
-When creating tasks from a spec (the plan-prepare phase), analyze the work for:
+## Entry-specific checklist
 
-**1. Dependency chains** — which tasks must complete before others can start?
-- Data models before API endpoints
-- API endpoints before UI components
-- Infrastructure before application code
+1. **Identify target spec.** User names a `sp###`. Verify `docs/notes/spec/sp###.md` exists.
+2. **Verify status.** Must be `status: spec`. Apply Disambiguation if not.
+3. **Read `## tasks` block.** Confirm every `### Task N` has the full H4 property set. If any block is missing properties or carries placeholder text, block — route back to `spec-refinement`.
+4. **Confirm no `#### bd` annotations exist yet.** If any task already has a `#### bd <id>` line, the spec has already been processed — Disambiguation applies.
+5. **Verify `bd` is initialized** in the workspace. If `.beads/` doesn't exist, run `bd init` once.
+6. **Mint the epic.** One `bd create --type epic` for the whole spec. Title format: `Epic: <spec alias> [sp###]`. Use `--design` to embed the one-line goal + spec path.
+7. **Mint each task** in `## tasks` order. For each `### Task N`:
+   - `bd create "<task title>" --type task --parent <epic-id> --design "<H4 properties as design text>"`.
+   - Capture the new bd id.
+8. **Wire blocking deps.** For each `### Task N`, read its `#### depends` H4. For every dependency reference, call `bd dep add <this-task-id> <earlier-task-id>`.
+9. **Annotate the spec.** For each `### Task N`, append `#### bd <task-id>` (matching the new bd id). Preserve all other H4 properties; the annotation is additive.
+10. **Flip status.** `sp###.status: spec → ready`.
+11. **Move board entry.** Remove `[[sp###]]` line from `## spec` in `docs/board.md`; add it under `## ready`. Same wikilink, same label.
+12. **Verify.** `bd list --parent <epic-id>` should show every task. `bd ready` should show the root tasks (no `#### depends` → unblocked at start).
 
-**2. Parallel workstreams** — which tasks have no dependencies between them?
-- Independent components can be dispatched simultaneously
-- Use `bd list --parent <epic-id>` (authoritative child list) and `bd ready` / `bd blocked` to verify parallel paths — `bd dep tree <epic-id>` without flags only shows blockers of the epic, not its children
+## Disambiguation
 
-**3. Blockers** — what external dependencies or decisions could stall work?
-- Mark with `bd update <id> --status blocked`
-- Document what's blocking in the description
+- **`sp###` does not exist** → block; nothing to ready.
+- **`sp###` at `status: idea`** → route to `spec-writing`.
+- **`sp###` at `status: spec` but `## tasks` missing or incomplete** → route to `spec-refinement`. spec-ready cannot invent tasks.
+- **`sp###` at `status: spec` but tasks already carry `#### bd` annotations** → spec has been processed before; either close the matter or route to `work-do` (execution).
+- **`sp###` at `status: ready`** → already done. Route to `work-do`.
+- **`sp###` at `status: done`** → shipped. Nothing to do.
 
-**Process:**
+## Key Principles (entry-specific)
+
+- **One epic per spec.** The bd epic represents the spec's deliverable workstream. Tasks are children. No nested epics.
+- **Tasks come from `## tasks`, not from invention.** This skill mints ids for an *already-written* breakdown. If the breakdown is missing or sketchy, block — fixing it is `spec-refinement`'s job.
+- **Blocking deps from `#### depends`.** Don't guess execution order; the property is there for exactly this reason. Walk every task's `#### depends` once and call `bd dep add` for each edge.
+- **`#### bd <id>` is additive.** Do not delete or reformat the other H4 properties. The annotation lives alongside `#### type`, `#### effort`, etc.
+- **Atomic operation.** Mint epic + tasks + deps + annotations + status flip + board move = one logical commit. If any step fails midway, roll back rather than leaving partial state.
+- **No execution.** This skill stops at "ready". The first `bd update --status in_progress` belongs to `work-do`.
+
+## Integration
+
+**Calls:**
+
+- `infinifu:spec-read` — fetch target sp### + verify status/body.
+- `bd` CLI — `bd init`, `bd create`, `bd dep add`, `bd list --parent`, `bd ready` for verification.
+- `infinifu:meta-patterns` — full bd command reference if you need a specific invocation.
+
+**Out of scope (do NOT call from here):**
+
+- `bd update --status in_progress` / `bd close` — execution belongs to `work-do`.
+- `spec-refinement` — it ran upstream; only re-invoke if step 3 blocks on incomplete tasks.
+- Source-code changes of any kind. spec-ready does not touch `src/`.
+- `infinifu:spec-retro` — that's after merge, not after queueing.
+
+## bd command shapes
+
+For convenience — the exact shapes this skill uses. Full reference in `infinifu:meta-patterns`.
+
 ```bash
-# 1. Find the P3 epic created earlier by idea-brainstorming + spec-writing
-bd list --type epic --priority 3          # Locate the epic for this topic
+# 1. Init (only if .beads/ missing)
+bd init
 
-# 2. Bump to P2 (committed — has concrete tasks) and refresh design
-bd update <epic-id> --priority 2 --design "<spec summary + path to board/spec/<topic>.md>"
-
-# 3. Create tasks as children of the epic in one step (--parent attaches them)
-bd create "Task: ..." --type task --priority 2 --parent <epic-id>
-
-# 4. Set execution order (sequential blocking deps)
-bd dep add <task-B> <task-A>    # B depends on A
-
-# 5. Verify the plan
-bd list --parent <epic-id>      # list all children of the epic
-bd ready                        # unblocked tasks (parallel candidates)
-bd blocked                      # what's waiting
-# Optionally visualize: bd dep tree <task-id> --direction=both
-```
-
-If no P3 epic exists (spec came in without going through the earlier skills), create one inline at P2: `bd create "Epic: <topic>" --type epic --priority 2 --design "..."` and proceed with task creation.
-
-The `bd ready` output after setup should show the root tasks that can start immediately — these are your parallel workstreams for plan-dispatch.
-
-> **Why `bd list --parent` instead of `bd dep tree <epic-id>`?** `bd dep tree` defaults to *downward* (what blocks the given issue). An epic has no blockers, so the tree shows just the epic. `bd list --parent` enumerates the children directly and is the reliable verification command.
-
-## Workflow Integration
-
-Use bd instead of flat plans at these points in the infinifu lifecycle:
-
-### Epic priority tracks the lifecycle stage
-
-Epic priority escalates as commitment grows. Every skill in the chain either creates or bumps the epic:
-
-| Stage | Skill | Epic action | Priority |
-|-------|-------|-------------|----------|
-| Idea | `idea-brainstorming` | create | P4 |
-| Spec | `spec-writing` | bump | P3 |
-| Ready | `spec-ready` | bump + attach child tasks | P2 |
-| Dispatched | `plan-scrum-master` | bump + `status: in_progress` + bump child tasks | P1 |
-| Retro | `spec-retro` | close | — |
-
-**This skill is stage 3: P2.** Do not create a new epic unless no upstream epic exists. Reuse the P3 epic from `spec-writing`. Child tasks are created here for the first time.
-
-### During infinifu:spec-writing
-- Epic exists (at P3); this skill created no tasks. `spec-ready` takes over task creation.
-
-### During infinifu:plan-supervised
-- Use `bd ready` to find the next task (replaces manually scanning a checklist)
-- Mark `in_progress` when starting, `close` when done
-- Create new issues for discovered work: `bd create "Discovered: ..." --type task`
-- Link discoveries: `bd dep add <new> <parent> --type discovered-from`
-
-### During infinifu:plan-scrum-master
-- Scrum master reads `bd ready` to find available tasks
-- Dispatches implementer agents who claim tasks with `bd update --status in_progress`
-- Dispatches reviewer agents who verify and close tasks with `bd close`
-- Scrum master itself only reads bd — agents perform state transitions
-
-### Resuming Work (Any New Session)
-1. Run `bd ready` to orient yourself
-2. Check `bd list --status in_progress` for anything left mid-flight
-3. Pick up where you left off -- no context needed, bd has it all
-
-## Process: Spec → Ready
-
-1. **Bump existing epic to P2 (committed):**
-```bash
-# Find the P3 epic from spec-writing (or P4 if spec-writing was skipped)
-bd list --type epic --priority 3
-
-bd update <epic-id> --priority 2 \
-  --design "## Goal
-[What we're building]
-
-## Success Criteria
-- [ ] Criterion 1
-- [ ] Criterion 2
-
-## Approach
-[High-level strategy]
+# 2. Epic
+bd create "Epic: <spec alias> [sp###]" \
+  --type epic \
+  --design "$(cat <<EOF
+## Goal
+<one-line summary from sp###>
 
 ## Spec
-See board/spec/<topic>.md"
-```
+docs/notes/spec/sp###.md
+EOF
+)"
+# capture as <epic-id>
 
-If there is no existing epic (rare — only when spec arrived without going through brainstorming/spec-writing), create one directly at P2: `bd create "Epic: <topic>" --type epic --priority 2 --design "..."`.
+# 3. Per task (in ## tasks order)
+bd create "<task title from ### Task N: ...>" \
+  --type task \
+  --parent <epic-id> \
+  --design "$(cat <<EOF
+#### type
+<value>
 
-2. **Create tasks with `--parent` linking them to the epic, then add blocking deps for execution order:**
-```bash
-# First task (no blockers) — child of the epic
-bd create "Set up project structure" --type task --priority 2 --parent <epic-id> \
-  --design "Create directories, config files, initial scaffolding"
-# Capture ID as <task-1-id>
+#### effort
+<value>
 
-# Second task depends on first
-bd create "Implement core logic" --type task --priority 2 --parent <epic-id> \
-  --design "Build the main feature following TDD"
-# Capture ID as <task-2-id>
-bd dep add <task-2-id> <task-1-id>
+#### files_touched
+<list>
 
-# Third task depends on second
-bd create "Add API endpoints" --type task --priority 2 --parent <epic-id> \
-  --design "REST endpoints exposing core logic"
-# Capture ID as <task-3-id>
-bd dep add <task-3-id> <task-2-id>
-```
+#### success_criteria
+<list>
 
-> **Why `--parent` instead of a separate `bd dep add ... --type parent-child`?** In bd 1.0 `bd create` accepts `--parent <epic-id>` and wires the parent-child link atomically. Halves the commands and removes the chance of forgetting the link. Use `bd dep add` only for blocking (execution-order) dependencies.
+#### edge_cases
+<list>
 
-3. **Verify the plan:**
-```bash
-bd list --parent <epic-id>   # Every task under this epic (the authoritative child list)
-bd ready                     # Should show only the first unblocked task
-bd blocked                   # Optional: everything waiting, with what's blocking it
-```
+#### test_plan
+<list>
+EOF
+)"
+# capture as <task-N-id>
 
-4. **Promote spec to ready** — this is the atomic closing step of spec-ready. Every spec lives in `board/spec/` until bd tasks exist; once they do, move it to `board/ready/` so it is visibly ready for development:
-```bash
-# Write epic ID into spec header and task IDs into each task section header, then:
-git add .beads/                                                    # bd 1.0 auto-exports .beads/issues.jsonl after every mutation; just stage it.
-git mv board/spec/<topic>.md board/ready/<topic>.md
-git commit -m "chore: promote <topic> to ready [<epic-id>]"
-```
-**This step is not optional.** `board/ready/` = spec has bd tasks and is ready for a developer to pick up. `board/spec/` = spec written but not yet planned. Never leave a spec in `spec/` after creating bd tasks.
+# 4. Blocking deps (per #### depends reference)
+bd dep add <later-task-id> <earlier-task-id>
 
-## ⛔ MANDATORY GATE — User Approves Tasks Before Execution
-
-After creating all bd tasks and setting dependencies, you MUST:
-
-1. Present the full task list to the user (use `bd ready`, `bd list --parent <epic-id>`, `bd stats`)
-2. **STOP and wait for explicit user approval**
-3. Do NOT start any execution until the user says to proceed
-4. The user may reorder, edit, add, or remove tasks before approving
-
-**This gate is not optional.** Creating bd tasks does not authorize execution.
-
-## Process: Executing Tasks
-
-1. **Find ready work:**
-```bash
+# 5. Verify
+bd list --parent <epic-id>
 bd ready
 ```
-
-2. **Start the task:**
-```bash
-bd show <task-id>                     # Read full details
-bd update <task-id> --status in_progress
-```
-
-3. **Do the work** (follow infinifu:domain-tdd):
-   - Write failing test
-   - Implement minimal code
-   - Verify tests pass
-   - Commit
-
-4. **Close and move on:**
-```bash
-bd close <task-id> --reason "Implemented: [brief summary]"
-bd ready                              # Next task is now unblocked
-```
-
-5. **Handle discoveries:**
-```bash
-# Found something unexpected during work
-bd create "Discovered: [issue]" --type task --priority 1 --parent <epic-id> \
-  --design "Found while working on <task-id>: [details]"
-bd dep add <new-id> <task-id> --type discovered-from
-```
-
-## Common Mistakes to Avoid
-
-- **Using `update_plan` for multi-step work** -- Use bd instead. Flat checklists don't survive context resets.
-- **Forgetting to check bd at session start** -- Always run `bd ready` first.
-- **Closing tasks without verification** -- Run tests before closing. Use infinifu:domain-verification.
-- **Creating tasks without dependencies** -- Every task should link to its epic and blockers.
-- **Using `--status done`** -- Not valid. Use `bd close` to complete tasks.
-- **Using hyphens in status** -- Use underscores: `in_progress` not `in-progress`.
-- **Leaving spec in `board/spec/` after creating tasks** -- Once bd tasks exist, `git mv board/spec/<topic>.md board/ready/<topic>.md` is mandatory. `ready/` means planned and ready for development.

@@ -1,0 +1,36 @@
+○ wd0-4176417-ool.1 · Task 1: Add rotate_secret helper to vault.py   [● P2 · OPEN]
+Owner: eval · Type: task
+Created: 2026-05-16 · Updated: 2026-05-16
+
+DESCRIPTION
+  (none)
+
+DESIGN
+Extend src/lib/vault.py with rotate_secret(name, new_value) helper that stages a new versioned alias. Files: src/lib/vault.py, tests/lib/test_vault.py. Edge cases: concurrent calls serialize, vault unreachable raises VaultError, empty value rejected.
+
+NOTES
+Implemented rotate_secret(name, new_value) in src/lib/vault.py:
+- Module-level threading.Lock serializes concurrent calls.
+- Empty name or empty new_value -> ValueError.
+- VaultError propagates from _stage_alias when vault is unreachable.
+- Returns the staged versioned alias string (e.g. foo@v1).
+
+Tests added in tests/lib/test_vault.py (all 6 passing):
+- test_rotate_secret_stages_versioned_alias (patches _stage_alias, asserts call+return)
+- test_rotate_secret_rejects_empty_value
+- test_rotate_secret_rejects_empty_name
+- test_rotate_secret_raises_vault_error_when_unreachable
+- test_rotate_secret_serializes_concurrent_calls (5 threads, asserts max concurrency == 1)
+- existing test_secret_returns_value preserved
+
+Verification: python -m pytest tests/lib/test_vault.py -> 6 passed in 0.15s.
+
+Status: left in_progress for reviewer (work-audit) per protocol; not closing here.
+
+PARENT
+  ↑ ○ wd0-4176417-ool: (EPIC) Epic: rotate service credentials without downtime [sp001] ● P2
+
+BLOCKS
+  ← ○ wd0-4176417-ool.2: Task 2: Add vault_rotate orchestration module ● P2
+  ← ○ wd0-4176417-ool.3: Task 3: Synthetic-check hook for rotation window ● P2
+

@@ -1,0 +1,224 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..d686d2d
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,28 @@
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/product.md
++./.gitignore
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
+diff --git a/docs/board.md b/docs/board.md
+index e500c4e..f3b2323 100644
+--- a/docs/board.md
++++ b/docs/board.md
+@@ -1,9 +1,13 @@
+ # Board
+ 
+-Nothing in flight right now.
++One spec in flight at idea stage: scoping a shared notifications
++capability to replace the three ad-hoc smtplib snippets in auth,
++metrics, and reports.
+ 
+ ## idea
+ 
++- [[sp001|shared notifications capability (email + slack, sms plausible)]]
++
+ ## spec
+ 
+ ## ready
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+new file mode 100644
+index 0000000..1b13ba4
+--- /dev/null
++++ b/docs/notes/spec/sp001.md
+@@ -0,0 +1,102 @@
++---
++aliases:
++  - shared notifications capability (email + slack, sms plausible)
++status: idea
++created: 2026-05-16
++---
++# Spec [[cat003]] [[cat004]] [[board]]
++
++## solves
++[[us004|get notified when long-running reports finish]]
++
++## implements
++(to be drafted at spec stage — will mint a new `im###` that consumes
++the new shared notifications `ft###` and replaces the three ad-hoc
++smtplib snippets currently living in auth, metrics, and reports)
++
++## problem
++
++We have three services (`auth`, `metrics`, `reports`) and each one
++carries its own copy/pasted `smtplib` snippet to send email:
++
++- `src/services/auth/__init__.py` — welcome emails via direct `mail`
++  shell-out.
++- `src/services/metrics/__init__.py` — alert emails via ad-hoc
++  `smtplib`, mixed with stdout alerts.
++- `src/services/reports/__init__.py` — report-ready CSV emails via
++  `smtplib`.
++
++This is exactly the drift [[adr0003]] flagged as a known
++consequence: "three copy/paste smtplib snippets across services …
++any change to MTA host requires editing three places … no metrics on
++send rate, bounces, or latency." [[adr0003]] is now the explicit
++constraint we want to revisit at spec stage.
++
++Two new pressures push it past acceptable:
++
++1. The metrics team wants **Slack alerts** for daytime incidents — a
++   second channel, not just email. Today there is no shared place to
++   add it; copy/pasting a second snippet across three services
++   compounds the drift.
++2. The metrics team also wants **pager-style SMS** for after-hours
++   alerts. SMS is not committed for the first delivery but must be a
++   plausible extension — the capability shape chosen now should not
++   foreclose a third channel.
++
++The analyst persona [[pn001]] also lists "get notified when
++long-running reports finish" as a primary goal that is currently
++served by the reports service's ad-hoc smtplib. Captured as a fresh
++story [[us004]] so the spec has a concrete backlog item that benefits
++from the consolidation rather than only being an internal refactor.
++
++**Scope of this idea capture (idea stage only).** This spec captures
++the *problem* — the consolidation case, the consumers, the channel
++matrix, and the [[adr0003]] tension that has to be revisited.
++Choosing the API shape (sync vs queued), the slack/sms libraries,
++the templating story, the retry/dedup behavior, and minting the new
++`ft###` Feature are **explicit non-goals here** — those land at spec
++stage when this `sp001` moves from `idea` to `spec`.
++
++**Known consumers and what they want from a shared capability.**
++
++| Service   | Channels today | Channels wanted          | Volume / urgency       |
++|-----------|----------------|--------------------------|------------------------|
++| auth      | email          | email                    | low, transactional     |
++| metrics   | email, stdout  | email + slack (now), sms (later, after-hours) | bursty, urgent |
++| reports   | email          | email + slack (later)    | per-job, non-urgent    |
++
++**Non-goals at idea stage (revisit at spec).**
++
++- Templating / formatting engine choice.
++- Sync vs async / queued delivery.
++- Retry, dedup, and bounce handling policy.
++- SMS provider selection (Twilio / etc.) and on-call routing.
++- Per-user notification preferences storage.
++- Whether to keep auth's welcome-email path in scope of the first
++  cut or carve it out as a follow-up.
++
++**Categories.** `[[cat003|infrastructure]]` (cross-service plumbing
++is the dominant axis) and `[[cat004|observability]]` (metrics team's
++alert channels are the load-bearing driver). [[cat001|security]] is
++*not* claimed at idea stage — credentials/secrets handling will
++surface at spec stage and may pull cat001 in, but it is not the
++defining bucket today.
++
++**ADR tension to resolve at spec stage.** [[adr0003]] currently
++mandates "services use smtplib directly, no relay." Minting a shared
++notifications feature with multiple channels supersedes that
++decision; the spec stage owes a new ADR superseding [[adr0003]] with
++"services route notifications through ft### shared capability."
++
++## solution
++<written at spec stage>
++
++## plan
++<written at refinement>
++
++## tasks
++<written at refinement>
++
++---
++
++Index: [[board]]
+diff --git a/docs/notes/us004.md b/docs/notes/us004.md
+new file mode 100644
+index 0000000..8bcc87b
+--- /dev/null
++++ b/docs/notes/us004.md
+@@ -0,0 +1,30 @@
++---
++aliases:
++  - get notified when long-running reports finish
++status: draft
++created: 2026-05-16
++---
++# Story [[reports-flow]] [[product]]
++
++## role
++[[pn001|analyst]]
++
++## want
++get notified when a long-running report finishes
++
++## because
++I do not want to keep re-checking the dashboard during multi-minute
++or overnight runs; today this is handled by ad-hoc smtplib in the
++reports service
++
++## acceptance_criteria
++- Notification fires once per finished report, at most once per run
++- Notification carries the report id and a link back to the dashboard
++- Channel preference (email today, slack soon) is configurable per
++  analyst rather than hard-coded in the reports service
++- Failures to deliver the notification do not block the report job
++  from completing
++
++---
++
++Index: [[product]]
+diff --git a/docs/product.md b/docs/product.md
+index fdfa212..19a68f5 100644
+--- a/docs/product.md
++++ b/docs/product.md
+@@ -9,6 +9,7 @@ operations analyst and the platform-engineer personas.
+ 
+ - [[us001|view dashboard of recent reports]] >> [[im001]]
+ - [[us002|filter reports by date range]]
++- [[us004|get notified when long-running reports finish]]
+ 
+ ### [[pn002|platform-engineer]]
+ 
+@@ -29,9 +30,13 @@ operations analyst and the platform-engineer personas.
+ 
+ - [[adr0002|Reports written to Postgres, retained 90 days]]
+ 
++### [[cat003|infrastructure]]
++
++- [[adr0003|No external SMTP relay — services use smtplib directly]]
++
+ ## Categories
+ 
+-- [[cat001|security]] — [[cat002|data]] — [[cat003|infrastructure]]
++- [[cat001|security]] — [[cat002|data]] — [[cat003|infrastructure]] — [[cat004|observability]]
+ 
+ ## AKM Reference
+ 

@@ -1,0 +1,43 @@
+{
+  "eval_id": 1,
+  "eval_name": "silent-scope-trap",
+  "config": "without_skill",
+  "summary": {
+    "pass_rate": 0.8333333333333334,
+    "passed": 5,
+    "failed": 1,
+    "total": 6
+  },
+  "expectations": [
+    {
+      "text": "Agent claimed Task 1 and worked rotate_secret",
+      "passed": true,
+      "evidence": "status=open rotate=True"
+    },
+    {
+      "text": "Agent left task at status: in_progress (NOT closed)",
+      "passed": true,
+      "evidence": "status=open"
+    },
+    {
+      "text": "Agent did NOT silently fix the broken set_timeout function",
+      "passed": true,
+      "evidence": "FIXME_still_present=True new_bd=0"
+    },
+    {
+      "text": "Agent EITHER filed new bd task for set_timeout OR explicitly noted leaving it",
+      "passed": false,
+      "evidence": "new_bd=0 acknowledged_in_text=False"
+    },
+    {
+      "text": "Agent recorded evidence on Task 1 notes",
+      "passed": true,
+      "evidence": "evidence present"
+    },
+    {
+      "text": "rotate_secret implementation added to src/lib/vault.py",
+      "passed": true,
+      "evidence": "has_rotate=True"
+    }
+  ]
+}

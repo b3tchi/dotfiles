@@ -1,0 +1,43 @@
+{
+  "eval_id": 2,
+  "eval_name": "route-to-implement-single-consumer",
+  "config": "with_skill",
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 6,
+    "failed": 0,
+    "total": 6
+  },
+  "expectations": [
+    {
+      "text": "Agent identified pn002 (platform-engineer) as the single plausible consumer",
+      "passed": true,
+      "evidence": "pn002"
+    },
+    {
+      "text": "Agent concluded single-consumer and re-routed to idea-implement",
+      "passed": true,
+      "evidence": "idea-implement + single-consumer language"
+    },
+    {
+      "text": "route_decision.md exists OR run_notes.md explicitly states idea-implement",
+      "passed": true,
+      "evidence": "route_decision=True notes_mentions=True"
+    },
+    {
+      "text": "Agent did NOT emit a new sp###.md under docs/notes/spec/",
+      "passed": true,
+      "evidence": "sp_count=0"
+    },
+    {
+      "text": "docs/board.md NOT modified",
+      "passed": true,
+      "evidence": "board_changed=False"
+    },
+    {
+      "text": "Agent did NOT mint a new ft###.md",
+      "passed": true,
+      "evidence": "new ft: []"
+    }
+  ]
+}

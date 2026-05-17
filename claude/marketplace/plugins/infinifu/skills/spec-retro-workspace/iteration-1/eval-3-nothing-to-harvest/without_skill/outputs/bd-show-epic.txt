@@ -1,0 +1,17 @@
+✓ wd3-269652-cdv [EPIC] · Epic: rotate service credentials without downtime [sp001]   [● P2 · CLOSED]
+Owner: eval · Type: epic
+Created: 2026-05-17 · Updated: 2026-05-17
+Close reason: Retro on sp001: child tasks all closed but Tasks 2 and 3 deliverables (src/lib/vault_rotate.py, tests/integration/test_rotate_synthetic.py) were not actually shipped — closing audits were incorrect. Filed follow-up issues wd3-269652-eom (P1), wd3-269652-l16 (P1), wd3-269652-g11 (P2), wd3-269652-qxc (P3). Task 1 (rotate_secret helper) did ship and tests pass.
+
+DESCRIPTION
+  (none)
+
+DESIGN
+Spec: docs/notes/spec/sp001.md
+
+CHILDREN
+  ↳ ✓ wd3-269652-cdv.1: Task 1: Add rotate_secret helper to vault.py ● P2
+  ↳ ✓ wd3-269652-cdv.2: Task 2: Add vault_rotate orchestration module ● P2
+  ↳ ✓ wd3-269652-cdv.3: Task 3: Synthetic-check hook for rotation window ● P2
+  ✓ 3/3 complete (100%) — eligible for close
+

@@ -1,0 +1,15 @@
+{
+  "eval_id": 0,
+  "eval_name": "strong-feature-notifications",
+  "prompt": "We keep pasting smtplib snippets into auth, metrics, and reports — every service has its own ad-hoc email helper and now we want slack alerts too. Plus the metrics team wants pager-style SMS for after-hours alerts. Use the infinifu:idea-feature skill to scope a shared notifications capability — email + slack now, SMS plausible later. Working dir is the seeded Acme sandbox; survey docs/notes/ for real ids.",
+  "assertions": [
+    {"text": "Agent surveyed existing features — output (gate_reached.md OR run_notes.md OR sp###.md) references ft001 and/or ft002 explicitly"},
+    {"text": "Agent picked a real existing category — output references cat003 (infrastructure) or cat004 (observability)"},
+    {"text": "Agent identified concrete consumers — output names at least 2 of: auth, metrics, reports"},
+    {"text": "Agent surfaced migration target adr0003 (ad-hoc smtplib decision) as something to revisit"},
+    {"text": "Agent did NOT mint a new ft###.md under docs/notes/ — only sp### emission is allowed per skill rule"},
+    {"text": "If sp###.md was emitted: lives under docs/notes/spec/, frontmatter has status: idea, body contains non-empty ## problem section"},
+    {"text": "If sp###.md was emitted: docs/board.md was updated to append a [[sp###]] reference under ## idea"},
+    {"text": "Agent raised the granularity question — output discusses whether notifications is one feature vs router+transport split (mentions split / decompose / multiple features / atomic / granular)"}
+  ]
+}

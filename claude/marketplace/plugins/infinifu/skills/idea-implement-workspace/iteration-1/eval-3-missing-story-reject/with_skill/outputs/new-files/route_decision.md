@@ -1,0 +1,86 @@
+# Route Decision: idea-implement on us042
+
+## Outcome
+
+**REJECTED — routed to `infinifu:story-write`.**
+
+No zettels were written. No `us###` was promoted. No `sp###` was minted.
+The board, product hub, and existing notes are untouched.
+
+## Why
+
+`idea-implement` consumes an existing draft story. The first checklist
+step of the skill — *Identify target story. Verify `docs/notes/us###.md`
+exists* — fails for `us042`.
+
+Inventory check in the sandbox:
+
+```
+docs/notes/us001.md  — analyst, view dashboard (status: done)
+docs/notes/us002.md  — analyst, filter reports by date
+docs/notes/us003.md  — platform-engineer, rotate credentials
+```
+
+`docs/notes/us042.md` is absent. A `grep -ri "export"` across `docs/`
+returns only an unrelated hit in `adr0002.md`. There is no draft or
+ready story about analyst exports under any other id either.
+
+## Disambiguation rule applied
+
+From `idea-implement` SKILL.md, `## Disambiguation`:
+
+> **`us###` does not exist (file missing)** → route to
+> `infinifu:story-write` first; resume here once draft is in place.
+
+The user described the story as "something about analyst exports", which
+is a fresh ask backed by no `us###`. The same Disambiguation block also
+covers this with a second rule:
+
+> **User describes a fresh ask with no `us###` named** → route to
+> `infinifu:story-write` first.
+
+Both rules point at the same next step.
+
+## What the next skill should produce
+
+`infinifu:story-write` should mint a fresh `us004.md` (the next free id
+in this sandbox) with:
+
+- `aliases:` containing a clear analyst-export want clause
+- `status: draft`
+- `## role: [[pn001|analyst]]` — persona already exists, no `persona-write` sub-loop needed
+- `## want:` a concrete export capability (CSV download? scheduled
+  email? bulk export of selected reports?) — the user owes us the
+  detail before drafting; that is `story-write`'s clarifying-question
+  job, not `idea-implement`'s
+- `## because:` analyst's motivation for exporting (offline analysis,
+  finance hand-off, etc. — to be confirmed)
+- `## acceptance_criteria:` initially `- TBD` is acceptable at `draft`;
+  testable AC is exactly the gate `idea-implement` will enforce when
+  resumed
+
+Once `us004` exists at `status: draft`, the user can return to
+`idea-implement` with that real id and the full skill will run.
+
+## What idea-implement explicitly does NOT do here
+
+- Does not invent a `us042.md` (or any other id) to satisfy the user's
+  reference.
+- Does not skip ahead to mint an `sp###` against a non-existent story
+  — the spec's mandatory `## solves [[us###]]` back-link would dangle
+  and fail moxide's `unresolved_diagnostics`.
+- Does not append anything to `docs/board.md` — there is no spec to
+  list.
+- Does not modify `docs/product.md` — there is no story to register.
+
+The hard gate (no implementation action until a design is approved) is
+trivially satisfied because no design was proposed: the precondition
+for design — a real story — was not met.
+
+## Suggested user-facing message
+
+> us042 doesn't exist in this workspace (only us001–us003 are
+> present, none of them about exports). Per the AKM lifecycle, fresh
+> story ideas go through `story-write` first. Want me to draft a new
+> `us004` for the analyst-export ask? Once it's in `status: draft`
+> we'll come straight back to `idea-implement`.

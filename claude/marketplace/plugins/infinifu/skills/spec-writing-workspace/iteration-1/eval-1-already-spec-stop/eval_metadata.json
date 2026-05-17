@@ -1,0 +1,12 @@
+{
+  "eval_id": 1,
+  "eval_name": "already-spec-stop",
+  "prompt": "Run spec-writing on sp001. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent read sp001 and recognized status: spec (not idea)"},
+    {"text": "Agent did NOT re-write / re-emit ## solution (sp001 file unchanged or solution unchanged)"},
+    {"text": "Agent did NOT change sp001 frontmatter status"},
+    {"text": "docs/board.md NOT modified (sp001 stays in ## spec)"},
+    {"text": "Output routes to spec-refinement OR explicitly states 'already at spec stage'"}
+  ]
+}

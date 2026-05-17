@@ -1,188 +1,105 @@
 ---
 name: spec-retro
-description: Use when development work is merged or PR created — runs a delivery retrospective, validates documentation, identifies skill improvements, closes bd epic, and archives spec to board/done/
+description: "You MUST use this after work-merge completes — 'retro sp007', 'run the retrospective for the rotate-credentials spec', 'sp001 just merged, refresh the AKM graph', or any phrasing that asks for the post-merge knowledge-graph pass on a `sp###` whose status flipped to `done`. Stage 8 (final) of the AKM lifecycle. Reads the shipped diff plus the touched `im###` / `ft###` / `adr####`, then rewrites `im###` body to match shipped reality (the `accepted` card becomes source of truth), mints new `adr####` for decisions that shifted during execution (ADRs are immutable — supersede via new entry, never edit), updates `ft###` whose surface or constraints widened (or supersede via `## superseded_by`), drafts new `us###` for follow-up scope discovered, and closes the bd epic. Does NOT flip statuses (work-merge did that), NOT touch board.md / archive.md (work-merge did that), NOT run tests (work-merge did that)."
 ---
 
-# Spec Retro
+# Spec Retro (post-merge knowledge-graph refresh)
 
-The closing act of the lifecycle. Not just housekeeping — a structured retrospective that extracts learnings, improves docs and skills, and leaves the codebase better than it was found.
+## Overview
 
-**Announce at start:** "I'm using the spec-retro skill to run the delivery retrospective."
+Stage 8 of the AKM lifecycle — the final pass. The work has shipped (`sp###.status: done`, sp### moved from `docs/board.md` to `docs/archive.md`, all child bd tasks closed by `work-audit`, branch landed by `work-merge`). The job here is to update the persistent knowledge graph so future zettels reference shipped reality, not the proposed-stage narrative.
+
+**Four lifecycle writes:**
+
+1. **Rewrite `im###` body** — `## approach`, `## components`, `## data_model`, `## api_surface` get rewritten to describe what shipped. The `accepted` card is the persistent solution record; the `proposed`-stage narrative was a sketch.
+2. **Mint new `adr####`** for each decision that shifted during execution. ADRs are append-only in spirit — if you discover a decision was made (or unmade), file a *new* ADR rather than editing an existing one. If the new ADR overturns an `Accepted` one, set the old ADR `status: Superseded` and add a `## superseded_by` back-link to the new id.
+3. **Update `ft###`** where the consumed feature's surface or constraints actually widened during execution. Wider `## api_surface` or `## providing` → update in place if the feature already covers it; if the contract genuinely changed (incompatible signature, removed behavior), supersede via `## superseded_by` chain instead.
+4. **Draft new `us###`** for any follow-up scope discovered during execution — bugs the team chose to defer, capabilities the implementation made tractable, edge cases that became visible. These land at `status: draft` so the next `idea-implement` cycle can pick them up.
+
+Then close the bd epic.
+
+**Out of scope (already done upstream):**
+
+- Status flips on `us###` / `im###` / `sp###` — `work-merge` did those.
+- `docs/board.md` `## ready → removed` + `docs/archive.md ## done` append — `work-merge` did those.
+- Branch landing / PR / worktree cleanup — `work-merge` did those.
+- Running tests — `work-merge`'s precondition was green tests; if you arrived here, they passed.
+
+**Announce at start:** "Using spec-retro skill to refresh the AKM graph post-merge."
 
 ## AKM hooks
 
-Stage 8 of the AKM lifecycle — see `claude/akm/akm-lifecycle.md` for the full map and `claude/akm/akm.md` for typed-zettel schemas. Update the PKM from shipped reality and harvest discovered scope.
+Stage 8 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Read shipped reality, write back into the persistent graph.
 
-**Reads:** shipped diff, `im###`, `ft###`, `adr####`.
+**Reads:**
+
+- **Shipped diff** — `git log` and `git diff <merge-base>..HEAD` for the merge commit. The actual code change is the source of truth for the rewrite.
+- `sp###` — the just-archived spec (now at `status: done`). Read `## solution`, `## plan`, `## tasks` to compare against what shipped.
+- `im###` — the implementation card whose body needs refreshing. Currently at `status: accepted` per work-merge.
+- `ft###` — every feature consumed by the spec. Read `## api_surface`, `## providing`, `## data_model` to know what may need updating.
+- `adr####` — every Accepted ADR under the spec's categories. Decisions may have shifted; surface candidates for new ADRs.
+- bd epic + closed tasks — task notes carry the implementer's deviations and the auditor's findings, both of which feed the retro.
 
 **Writes:**
 
-- `im###` body — rewrite `## approach` / `## components` / `## data_model` / `## api_surface` to match what actually shipped. The `accepted` card is now the source of truth.
-- `ft###` — update widened constraints; supersede via `## superseded_by` when a contract genuinely changed (features are append-only in spirit).
-- `adr####` — mint a *new* ADR for each decision that shifted during execution (ADRs are immutable; the retro produces new entries, not edits).
-- `us###` — file fresh drafts for newly-discovered scope. The retro is the cheapest moment to capture them.
-- Close the beads epic.
+- `im###` — rewrite `## approach` / `## components` / `## data_model` / `## api_surface` body sections. Keep the frontmatter (`status: accepted`); only the narrative changes. **Reference discipline:** every consumed `ft###`, binding `adr####`, and source `us###` continues to appear as wikilinks.
+- `adr####` — mint a *new* ADR file (`docs/notes/adr####.md`, four-digit zero-padded next id) per decision that shifted. If the new ADR supersedes an Accepted one, flip the old ADR's `status: Accepted → Superseded` and append `## superseded_by` with the new wikilink.
+- `ft###` — update body sections in place when the feature's surface widened compatibly. If incompatible, mint a new `ft###` and supersede the old one via `## superseded_by`.
+- `us###` — draft new stories (`status: draft`) for follow-up scope. Use `story-write` to ensure the schema is right (frontmatter aliases / status / created, body role / want / because / acceptance_criteria).
+- bd epic — `bd close <epic-id> --reason "Retro: <one-line summary>. Im rewritten. N new ADRs / M ft updates / K us drafts."`
 
-## When to Use
+## Entry-specific checklist
 
-- After `work-merge` completes with Option 1 (merge) or Option 2 (PR)
-- NOT for Option 3 (keep as-is) or Option 4 (discard) — work is not complete
+1. **Identify target sp###.** Verify `sp###.status: done` and it lives under `docs/archive.md ## done` (work-merge precondition). If status is anything else, route back to `work-merge`.
+2. **Read the shipped diff.** `git log <merge-base>..HEAD --oneline` and `git diff <merge-base>..HEAD` for files under `src/` plus any moved AKM zettels. The diff is the ground truth.
+3. **Compare diff vs spec.** Walk the `sp###.## tasks` blocks against the actual code change. For each task, note the file/function it landed in vs what the design predicted. Discrepancies feed the rewrite.
+4. **Re-read `im###`.** Confirm the `## approach` / `## components` / `## data_model` / `## api_surface` reflect shipped reality. List the sections that need rewriting.
+5. **Re-read each consumed `ft###`.** For each, check whether its `## api_surface` or `## providing` matches what the implementation actually called / consumed. List the features needing update.
+6. **Re-read every Accepted `adr####` under the spec's categories.** For each, check whether the implementation respected the decision. If a decision shifted, draft a new ADR.
+7. **Mine bd notes for discovered scope.** `bd show <epic-id>` and `bd list --parent <epic-id>`. Walk each closed task's notes for "Discovered:" entries, deviation logs, and BLOCKED-then-resolved sequences. Each unique discovery becomes either a new `us###` draft or a follow-up task (filed at this stage if not already).
+8. **Write the rewrites + new entries** in this order: ADRs first (decisions bind the rest), `ft###` updates next, `im###` rewrite next, `us###` drafts last.
+9. **Close the bd epic** with a one-line reason summarizing what shipped + the count of zettels touched (e.g., "Retro: rotate_secret + scheduler + synthetic-check shipped. Rewrote im002, minted adr0004 (lock granularity), updated ft002 (rotate_secret surface), drafted us004 (cross-region failover)").
 
-## The Process
+## Disambiguation
 
-### Step 1: Validate Delivery
+- **`sp###` does not exist** → block.
+- **`sp###` at `status: idea` / `spec` / `ready`** → route back to the appropriate stage; spec-retro is post-merge only.
+- **`sp###` at `status: done` but board entry still on `docs/board.md ## ready`** → work-merge didn't finish its archive move; route back to `work-merge`.
+- **Branch not actually merged** (no merge commit visible from `git log <base>..HEAD`) → block; nothing shipped to retro on.
+- **bd epic already closed** → either retro already ran (idempotent re-run is fine if you just want to verify) or someone closed the epic out-of-process. Verify with `bd show <epic-id> --reason` and either proceed (if reason was retro-shaped) or restore.
 
-Verify the work is actually complete — not just merged, but correct.
+## Key Principles (entry-specific)
 
-- [ ] All bd tasks under the epic are closed (`bd list --parent <epic-id>`)
-- [ ] Tests pass on the base branch
-- [ ] No TODOs or known issues left untracked — if found, file `bd create "Discovered: ..."` before closing
-
-```bash
-bd list --parent <epic-id> --status open   # Should return nothing
-```
-
-If open tasks remain: close them or file follow-up issues before proceeding.
-
-### Step 2: Retrospective — What Happened
-
-First, pull the evidence from bd — don't rely on memory:
-
-```bash
-bd show <epic-id>                          # Epic notes and description
-bd list --parent <epic-id> --status closed # All completed tasks
-bd list --parent <epic-id>                 # Any with notes, blockers, discoveries
-```
-
-For each task, check for recorded signals:
-```bash
-bd show <task-id>   # Notes, reason, blockers, discoveries filed during work
-```
-
-Look for:
-- Tasks that were reopened or had `--status blocked`
-- Issues created as `Discovered:` during execution
-- Rejection notes from reviewers
-- Tasks whose `--reason` on close mentions a workaround or deviation
-
-**From this evidence, answer:**
-
-**What went wrong or was harder than expected?**
-- Did the spec miss anything? (missing steps, wrong file paths, bad assumptions)
-- Did tests fail unexpectedly? Why?
-- Did the implementation deviate from the spec? Was the spec wrong or the implementation?
-- Were there blockers or surprises not anticipated in the plan?
-
-**What went well?**
-- What in the spec was especially useful?
-- What patterns or approaches worked cleanly?
-
-**What should be prevented next time?**
-- Was there a class of mistake that a skill or doc update could prevent?
-- Was there a missing check, validation, or gate that would have caught the issue earlier?
-
-### Step 3: Act on Findings
-
-For each finding from Step 2, take one of these actions:
-
-| Finding type | Action |
-|---|---|
-| Spec had wrong file path / bad assumption | Update the spec before archiving (it's the historical record) |
-| A skill was missing or incomplete | Update the skill, or file `bd create "Improve skill: ..."` |
-| A doc (AGENTS.md, CLAUDE.md, recipe) was out of date | Update it now |
-| A pattern worth preserving | Add to relevant docs or skills |
-| A follow-up task discovered | `bd create "Follow-up: ..." --type task` |
-
-**Do not defer doc and skill updates** — this is the moment with the most context. Defer = forget.
-
-### Step 4: Reconcile Product Stories
-
-Do this **before** closing the epic — the close reason should reflect any partial-met or revised stories.
-
-If `product/stories.yaml` does not exist, skip this step entirely. Don't create one just to mark something done.
-
-If it does exist, the shipped epic may satisfy one or more user stories. Walking the stories now (while context is fresh) is far cheaper than reconciling drift weeks later from a stale backlog.
-
-1. **Identify candidate stories** — check the bd epic description and any `board/idea|spec/<topic>.md` doc for referenced story ids. If none referenced, invoke `story-find` against the topic area to surface plausible matches.
-2. **Verify against acceptance criteria** — for each candidate, check whether every criterion is met. Use the same evidence (bd notes, test results, the merged diff) you collected for the retrospective.
-3. **Classify each candidate:**
-   - **Fully met** → set `status: done` on that story id in `product/stories.yaml`.
-   - **Partially met** → leave status as-is. Note the gap in the retro summary so the remaining work stays visible.
-   - **Exceeded scope** (delivery added behavior the story never described) → invoke `story-write` to capture the new capability as a separate story, or update the existing story's acceptance criteria. Don't silently expand what the original story claimed.
-4. **Capture the decisions** so Step 6's summary can list them.
-
-### Step 5: Close the Epic
-
-```bash
-bd close <epic-id> --reason "Shipped: <one-line summary>. Stories: <ids closed or 'n/a'>. Retro: <one-line on key learning>"
-# bd 1.0 auto-exports .beads/issues.jsonl; proceed straight to the archive commit below.
-```
-
-### Step 6: Archive the Spec
-
-```bash
-git mv <board>/ready/<topic>.md <board>/done/<topic>.md
-git add .beads/
-git commit -m "chore: retro and archive <topic> [<epic-id>]"
-git push
-```
-
-### Step 7: Retro Summary
-
-Output a short summary:
-
-```
-## Retro: <topic>
-
-**Delivered:** <what shipped>
-**What went wrong:** <key issues>
-**What was improved:** <docs/skills updated>
-**Stories closed:** <story ids marked done, or "none">
-**Stories partial / revised:** <ids + gap, or "none">
-**Follow-up filed:** <bd IDs if any>
-**Epic closed:** <epic-id>
-```
-
-## Quick Reference
-
-| Trigger | Action |
-|---------|--------|
-| Merge or PR created | Full retro → reconcile stories → close epic → `git mv ready/ → done/` |
-| Open tasks remain | File follow-ups, then close |
-| Doc is stale | Update it now, not later |
-| Skill has a gap | Update skill or file improvement issue |
-| Story fully met | Set `status: done` in `product/stories.yaml` |
-| Story partially met | Leave as-is, note gap in retro summary |
-| Delivery exceeded story | `story-write` a new story or revise criteria — don't expand silently |
-| Work kept as-is | Skip — not done yet |
-| Work discarded | Skip — nothing to archive |
-
-## Common Mistakes
-
-**Skipping the retrospective and just doing the file move**
-- Retro is the point. The file move is a side effect.
-
-**Deferring doc/skill updates**
-- "I'll update it later" = never. Do it now while context is fresh.
-
-**Closing the epic before all tasks are verified**
-- Check `bd list --parent <epic-id> --status open` first.
+- **Diff is ground truth, spec is history.** When the shipped code differs from the spec, the retro updates the `im###` body to match shipped — not the other way around. The spec is the historical record of what was planned; the implementation is what runs.
+- **ADRs are immutable.** New decisions = new ADRs (next sequential id, four-digit). Decisions that overturn old ones = new ADR + supersede the old one via the body section. Never edit an Accepted ADR's `## decision`.
+- **Feature widening: update in place; feature changing: supersede.** If the feature's `## providing` covers the new use, just widen the `## api_surface`. If the consumer needed something the feature genuinely didn't offer, that's a supersession candidate (new `ft###` + `## superseded_by` chain on the old one).
+- **Discovered scope becomes drafts, not silent edits.** New `us###` at `status: draft` is the cheapest moment to capture follow-up work. The next `idea-implement` cycle picks them up. Don't expand silently into the closing epic.
+- **Bd epic close carries the retro signal.** The `--reason` text is the one-line summary the team will see when they search history later. Make it specific: counts, names, what shifted.
+- **Out of scope: status flips.** work-merge did them. Don't re-flip anything; if a status is wrong, route back to work-merge instead.
 
 ## Integration
 
+**Calls:**
+
+- `git log <merge-base>..HEAD` / `git diff` — shipped reality.
+- `infinifu:spec-read` — fetch the archived sp###.
+- `infinifu:implementation-read` — re-read im### body to identify rewrite targets.
+- `infinifu:feature-read` — survey consumed ft### surfaces.
+- `infinifu:adr-read` — survey binding ADRs.
+- `infinifu:story-write` — emit new `us###` drafts for discovered scope.
+- `infinifu:adr-write` — mint new ADRs.
+- `infinifu:feature-write` — update ft### bodies or supersede.
+- `infinifu:implementation-write` — re-emit im### (same id, refreshed body).
+- `bd show <epic-id>` / `bd list --parent <epic-id>` — mine task notes for discoveries.
+- `bd close <epic-id> --reason "..."` — close the epic.
+
 **Called after:**
-- `work-merge` Option 1 or 2
 
-**May update:**
-- Skills in `~/.config/Claude/skills/` or equivalent
-- `AGENTS.md`, `CLAUDE.md`, recipe docs
-- The spec itself (as historical record) before archiving
-- `product/stories.yaml` — bump matching story status to `done`, or revise criteria when delivery exceeded scope (Step 4)
+- `infinifu:work-merge` Option 1 (local merge) or Option 2 (PR). Options 3 / 4 skip spec-retro because nothing shipped.
 
-**May invoke:**
-- `story-find` — to locate stories that might be satisfied by the shipped epic
-- `story-write` — when delivery exceeded what any existing story described, to capture the new capability
+**Out of scope (do NOT call from here):**
 
-**Pairs with:**
-- `spec-ready` — the opening act
-- `work-merge` — branch integration just before this
+- Status flips on `us###` / `im###` / `sp###` — work-merge did those.
+- `docs/board.md` / `docs/archive.md` edits — work-merge did those.
+- Branch / worktree / PR operations — work-merge did those.
+- Running tests — work-merge already gated.
