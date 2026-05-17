@@ -1,0 +1,70 @@
+{
+  "summary": {
+    "passed": 11,
+    "failed": 1,
+    "total": 12,
+    "pass_rate": 0.9166666666666666
+  },
+  "expectations": [
+    {
+      "text": "dispatch_summary.md exists at sandbox root and is non-empty",
+      "passed": true,
+      "evidence": "exists=True; size=4008"
+    },
+    {
+      "text": "Summary references both seeded epic IDs",
+      "passed": true,
+      "evidence": "epic_2fa=True; epic_ratelimit=True"
+    },
+    {
+      "text": "Summary includes an interference / conflict assessment",
+      "passed": true,
+      "evidence": "interference_kw_in_summary=True"
+    },
+    {
+      "text": "Summary classifies the epics as INTERFERING (shared file detected)",
+      "passed": true,
+      "evidence": "conflicting=True; non=False"
+    },
+    {
+      "text": "Summary mentions the shared file path or directory",
+      "passed": true,
+      "evidence": "shared_file_in_summary=True; middleware_keyword=True"
+    },
+    {
+      "text": "Summary states epics will be serialized",
+      "passed": true,
+      "evidence": "serialize_kw=True"
+    },
+    {
+      "text": "First batch lists exactly 1 task (serialized despite max_parallel=2)",
+      "passed": true,
+      "evidence": "batch_ids=['eval-ctz']"
+    },
+    {
+      "text": "Summary references required config",
+      "passed": true,
+      "evidence": "has_required_config=True"
+    },
+    {
+      "text": "Summary asks human for confirmation",
+      "passed": true,
+      "evidence": "proceed_gate=True"
+    },
+    {
+      "text": "No bd task was newly claimed (no in_progress)",
+      "passed": false,
+      "evidence": "in_progress_ids=['eval-w6v']"
+    },
+    {
+      "text": "No new git commits beyond the seed commit",
+      "passed": true,
+      "evidence": "commit_count=1"
+    },
+    {
+      "text": "No git worktrees were created",
+      "passed": true,
+      "evidence": "worktrees_dir_exists=False"
+    }
+  ]
+}

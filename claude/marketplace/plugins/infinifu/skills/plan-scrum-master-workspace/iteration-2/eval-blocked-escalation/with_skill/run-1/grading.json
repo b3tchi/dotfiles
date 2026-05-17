@@ -1,0 +1,50 @@
+{
+  "summary": {
+    "passed": 8,
+    "failed": 0,
+    "total": 8,
+    "pass_rate": 1.0
+  },
+  "expectations": [
+    {
+      "text": "chronicle.md exists and records dispatch + blocked report",
+      "passed": true,
+      "evidence": "exists=True; size=3133"
+    },
+    {
+      "text": "bd task transitioned to 'blocked' by implementer",
+      "passed": true,
+      "evidence": "t1.status=blocked"
+    },
+    {
+      "text": "Orchestrator emitted an AGENT ALERT formatted message",
+      "passed": true,
+      "evidence": "alert_format_present=True"
+    },
+    {
+      "text": "Alert emitted immediately, not deferred to next batch report",
+      "passed": true,
+      "evidence": "has_alert=True; deferred_keyword_found=False"
+    },
+    {
+      "text": "Alert summarizes the agent's reported reason",
+      "passed": true,
+      "evidence": "reason_keywords_found=True"
+    },
+    {
+      "text": "Pipeline halted \u2014 no further tasks dispatched after blocked report",
+      "passed": true,
+      "evidence": "closed=0; in_progress=0"
+    },
+    {
+      "text": "Orchestrator does NOT retry / reassign without human input",
+      "passed": true,
+      "evidence": "retry_indicator=False; notes_len=85"
+    },
+    {
+      "text": "Orchestrator does NOT close the blocked task",
+      "passed": true,
+      "evidence": "t1.status=blocked"
+    }
+  ]
+}
