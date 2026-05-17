@@ -1,0 +1,60 @@
+{
+  "summary": {
+    "passed": 10,
+    "failed": 0,
+    "total": 10,
+    "pass_rate": 1.0
+  },
+  "expectations": [
+    {
+      "text": "chronicle.md exists and records both attempts",
+      "passed": true,
+      "evidence": "exists=True; size=5768"
+    },
+    {
+      "text": "Reviewer was called exactly twice (attempt counter = 2)",
+      "passed": true,
+      "evidence": "counter_file=/tmp/eval2-rejection-retry/with_skill/sandbox/.review_attempts/eval-plq; attempts=2"
+    },
+    {
+      "text": "Implementer claimed once \u2014 no fresh re-dispatch on first rejection",
+      "passed": true,
+      "evidence": "notes_dispatch_mentions=1; fresh_dispatches=0"
+    },
+    {
+      "text": "SendMessage used to resume the original implementer agent",
+      "passed": true,
+      "evidence": "sendmessage_evidence=True"
+    },
+    {
+      "text": "Agent session metadata logged to bd notes",
+      "passed": true,
+      "evidence": "metadata_keywords_in_notes=True"
+    },
+    {
+      "text": "Rejection reason relayed verbatim to resumed implementer",
+      "passed": true,
+      "evidence": "reason_keywords_in_chronicle=True"
+    },
+    {
+      "text": "Task closed by reviewer after second attempt",
+      "passed": true,
+      "evidence": "t1.status=closed"
+    },
+    {
+      "text": "No escalation raised (rejection count = 1, not 2)",
+      "passed": true,
+      "evidence": "escalation_kw_present=False"
+    },
+    {
+      "text": "Retry attempt 2 upgraded worker model from sonnet to opus",
+      "passed": true,
+      "evidence": "upgrade_evidence=True"
+    },
+    {
+      "text": "Model upgrade logged in bd notes for the retried task",
+      "passed": true,
+      "evidence": "notes_upgrade_logged=True"
+    }
+  ]
+}
