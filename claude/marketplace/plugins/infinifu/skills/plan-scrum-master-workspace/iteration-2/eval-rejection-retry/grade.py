@@ -110,6 +110,32 @@ def grade():
         "evidence": f"escalation_kw_present={escalation_kw}",
     })
 
+    # Failure-escalation rule: retry should upgrade sonnet → opus.
+    chronicle_lower = chronicle.lower()
+    upgrade_evidence = (
+        re.search(r"upgrad\w*.*opus", chronicle_lower)
+        or re.search(r"sonnet\s*[-→>]+\s*opus", chronicle_lower)
+        or re.search(r"retry.*opus", chronicle_lower)
+        or "model: opus" in chronicle_lower and "attempt 2" in chronicle_lower
+    )
+    results.append({
+        "text": "Retry attempt 2 upgraded worker model from sonnet to opus",
+        "passed": bool(upgrade_evidence),
+        "evidence": f"upgrade_evidence={bool(upgrade_evidence)}",
+    })
+
+    notes_lower = t1_notes.lower() if t1_notes else ""
+    notes_upgrade = (
+        "upgraded" in notes_lower
+        or "opus" in notes_lower and "retry" in notes_lower
+        or re.search(r"sonnet\s*[-→>]+\s*opus", notes_lower)
+    )
+    results.append({
+        "text": "Model upgrade logged in bd notes for the retried task",
+        "passed": bool(notes_upgrade),
+        "evidence": f"notes_upgrade_logged={bool(notes_upgrade)}",
+    })
+
     passed = sum(1 for r in results if r["passed"])
     total = len(results)
     summary_block = {

@@ -34,15 +34,21 @@ Additionally:
 
 ## Configuration
 
-Three settings, provided by the human at start. If any are missing, **ask** — do not assume defaults silently. The table values are *fallbacks* the user can pick by saying "use defaults".
+Three settings, provided by the human at start. If any are missing, **ask** — but offer the defaults below as the "use defaults" option. The defaults are tuned for a typical session: moderate parallelism, only halt on real problems, cheap model first with automatic escalation on failure.
 
 | Setting | Default | Options |
 |---------|---------|---------|
-| `max_parallel` | 1 | 1, 2, 3, ... N, or `all` |
-| `mode` | auto | `auto`, `waves`, `only-blockers` — see `references/modes.md` |
-| `worker_model` | auto | `opus`, `sonnet`, `haiku`, `auto` — see `references/worker-models.md` |
+| `max_parallel` | **2** | 1, 2, 3, ... N, or `all` |
+| `mode` | **only-blockers** | `auto`, `waves`, `only-blockers` — see `references/modes.md` |
+| `worker_model` | **sonnet** | `opus`, `sonnet`, `haiku`, `auto` — see `references/worker-models.md` |
 
-Always echo the chosen settings in the dispatch summary so the human can override before confirming.
+### Failure-escalation rule (always on)
+
+When `worker_model` is `sonnet` or `haiku`, the scrum-master **upgrades the model on retry** after any of: implementer error/timeout, first reviewer rejection, or implementer `blocked` status. The retry uses `opus` regardless of the configured `worker_model`. Rationale: the cheap model gets one fair attempt; if it fails, throwing more capability at the problem is usually faster than the human debugging why it stumbled.
+
+The upgrade applies only to the *retry* dispatch — subsequent tasks return to the configured `worker_model`. If `worker_model` is already `opus` or `auto`, no upgrade is needed.
+
+Always echo the chosen settings (and the escalation rule) in the dispatch summary so the human can override before confirming.
 
 ## Multi-Epic Parallelism
 
@@ -186,13 +192,13 @@ Dependencies:
    and `bd dep tree <task-id> --direction=both` for per-task view]
 
 Config:
-  max_parallel:   N
-  mode:           [auto|waves|only-blockers]
-  worker_model:   [auto|opus|sonnet|haiku]
+  max_parallel:   N                  (default 2)
+  mode:           only-blockers      (default — pause on failures only)
+  worker_model:   sonnet             (default; opus on retry after any failure)
 
 First batch (up to max_parallel):
-  → bd-XXXX: [title]  (epic bd-AAAA)  model: sonnet  [medium — single-domain, clear spec]
-  → bd-ZZZZ: [title]  (epic bd-BBBB)  model: opus    [high — cross-domain integration]
+  → bd-XXXX: [title]  (epic bd-AAAA)  model: sonnet  [default — retry will upgrade to opus]
+  → bd-ZZZZ: [title]  (epic bd-BBBB)  model: sonnet  [default — retry will upgrade to opus]
 
 Proceed? (yes / adjust config / abort)
 ```
@@ -268,15 +274,19 @@ You do not interpret the report. You relay it. Do NOT wait for the reviewer — 
   - Logging feedback: `bd update <id> --notes "Rejected: [reason]. [what needs to change]"`
   - Reporting specific rejection details to scrum master
 
-## Step 5: Handle Rejections
+## Step 5: Handle Rejections and Failures
 
-If a reviewer rejects a task:
+The retry rule covers three failure modes: reviewer rejection, implementer error/timeout, and implementer-reported `blocked`. All three follow the same escalation pattern.
 
-1. **First rejection:**
-   - Reviewer updates bd with `--design` (new conditions) and `--notes` (rejection reason).
-   - **Resume the original implementer** via `SendMessage` (with `run_in_background: true`) using the saved agent ID — pass the rejection details. The agent retains its full context and is already in the worktree. Only dispatch a fresh agent if the original cannot be resumed.
+1. **First failure (rejection / error / blocked):**
+   - If a reviewer rejection: reviewer updates bd with `--design` (new conditions) and `--notes` (rejection reason).
+   - If an implementer error or `blocked`: log the implementer's reason to `--notes`.
+   - **Model upgrade:** if the original `worker_model` was `sonnet` or `haiku`, the retry uses `opus` (see "Failure-escalation rule" in Configuration). If it was already `opus` or `auto`, keep the same model.
+   - **Resume the original implementer** via `SendMessage` (with `run_in_background: true`) using the saved agent ID — pass the failure details. The agent retains its full context and is already in the worktree. Resume preserves cheap context; only dispatch a fresh agent if the original session cannot be resumed (e.g., expired) or if the model is being upgraded across providers and a session swap is required.
    - When notified of completion, dispatch reviewer again (also in background).
-2. **Second rejection:** Escalate to human — the task needs human attention.
+2. **Second failure on the same task:** Escalate to human — the task needs human attention. Do not retry a third time silently.
+
+Log the retry decision in the bd notes so a later auditor can see why the model jumped (`bd update <id> --notes "Retry attempt 2: upgraded sonnet → opus after reviewer rejection"`).
 
 ## Step 6: Report
 

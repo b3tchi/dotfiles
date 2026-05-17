@@ -18,6 +18,8 @@
     {"text": "Rejection reason was relayed verbatim to the resumed implementer"},
     {"text": "Task was closed by the reviewer after second attempt"},
     {"text": "No escalation alert was raised (rejection count = 1, not 2)"},
-    {"text": "If a third attempt would be needed, orchestrator escalates rather than retrying"}
+    {"text": "If a third attempt would be needed, orchestrator escalates rather than retrying"},
+    {"text": "Retry attempt 2 upgraded the worker model from sonnet to opus (failure-escalation rule)"},
+    {"text": "Model upgrade is logged in bd notes for the retried task"}
   ]
 }
