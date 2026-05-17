@@ -4,12 +4,12 @@
 
 | # | Eval | Tests | Status |
 |---|------|-------|--------|
-| 0 | `eval-orient-and-halt` | Orient → dispatch summary → halt at human-confirmation gate | **ready** (carried over from iteration-1, seed + grader) |
-| 1 | `eval-multi-epic-interference` | Two epics touching a shared file must serialize, not parallelize | **ready** (seed + grader written this iteration) |
-| 2 | `eval-rejection-retry` | First reviewer rejection → resume same implementer via `SendMessage`, not fresh dispatch | **stub** (assertions drafted, fixture not yet wired) |
-| 3 | `eval-blocked-escalation` | Implementer reports blocked → immediate AGENT ALERT, pipeline halts | **stub** (assertions drafted) |
-| 4 | `eval-wave-mode-pause` | mode=waves → halt after batch 1, do not auto-continue | **stub** (assertions drafted) |
-| 5 | `eval-stale-in-progress-resume` | Detect orphan in_progress + orphan worktree, ask human before doing anything | **stub** (assertions drafted) |
+| 0 | `eval-orient-and-halt` | Orient → dispatch summary → halt at human-confirmation gate | **ready** (seed + grader, smoke-tested) |
+| 1 | `eval-multi-epic-interference` | Two epics touching a shared file must serialize, not parallelize | **ready** (seed + grader, smoke-tested) |
+| 2 | `eval-rejection-retry` | First reviewer rejection → resume same implementer via `SendMessage`, not fresh dispatch | **ready** (seed + reviewer shim + grader, shim flips reject→approve on attempt counter) |
+| 3 | `eval-blocked-escalation` | Implementer reports blocked → immediate AGENT ALERT, pipeline halts | **ready** (seed + grader, smoke-tested) |
+| 4 | `eval-wave-mode-pause` | mode=waves → halt after batch 1, do not auto-continue | **ready** (seed + grader, smoke-tested) |
+| 5 | `eval-stale-in-progress-resume` | Detect orphan in_progress + orphan worktree, ask human before doing anything | **ready** (seed creates real orphan worktree metadata + dead branch, grader) |
 
 ## Why these six
 
@@ -45,14 +45,12 @@ python -m scripts.aggregate_benchmark <workspace>/iteration-2 --skill-name plan-
 
 Note: the skill-creator workflow also wants a baseline configuration. For an orchestrator skill the "no skill" baseline is meaningless (the model would not know how to dispatch). The realistic baseline is **iteration-1's SKILL.md** — the pre-refactor version. Snapshot it into `<workspace>/skill-snapshot/` before running and point the baseline subagent at the snapshot.
 
-## Stubs — what's needed to flesh them out
+## Fixture infrastructure (all built)
 
-Each stub's `eval_metadata.json` documents what the fixture needs. Common shared infra to build:
-
-1. **Controllable reviewer shim** — a wrapper around `infinifu:code-reviewer` that flips approval based on a counter file in the sandbox. Needed for `eval-rejection-retry`.
-2. **Worktree orphan generator** — script that fakes a `.git/worktrees/stale-<id>` directory pointing at a dead branch. Needed for `eval-stale-in-progress-resume`.
-3. **Multi-epic 4-task fixture** — extend the iteration-1 seeder. Needed for `eval-wave-mode-pause`.
-4. **Insufficient-design task** — seed with `design = "TBD"`. Needed for `eval-blocked-escalation`.
+1. **Controllable reviewer shim** — `eval-rejection-retry/seed_sandbox.sh` writes `review_shim.sh` in the sandbox. Tracks per-task attempts in `.review_attempts/<task-id>`. Attempt 1 → JSON `verdict: reject` with a specific reason (tie-breaking tests missing). Attempt 2 → `verdict: approve`. Reviewer agent should call the shim and parse the JSON.
+2. **Orphan worktree generator** — `eval-stale-in-progress-resume/seed_sandbox.sh` creates a real branch + worktree, then deletes the worktree directory on disk while leaving `.git/worktrees/<name>/` metadata. This is the canonical "dangling worktree" state that `git worktree prune` would clean — orchestrator must NOT silently prune.
+3. **Multi-epic 4-task fixture** — `eval-wave-mode-pause/seed_sandbox.sh` seeds 2 non-interfering epics (auth + billing) × 2 independent ready tasks each. Targets explicitly non-overlapping files within each epic.
+4. **Insufficient-design task** — `eval-blocked-escalation/seed_sandbox.sh` seeds one task with `design: "Implement the thing. TBD."` — too vague for an implementer to act on, should produce a blocked status.
 
 ## Telemetry note
 
