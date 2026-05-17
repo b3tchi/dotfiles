@@ -479,8 +479,10 @@ int main(int argc, char **argv) {
                 poll_disk();
                 /* Kernel emits power_supply uevent on status changes
                  * (plug/unplug), not on every capacity tick — bar would
-                 * otherwise freeze at the last status-change reading. */
-                poll_battery();
+                 * otherwise freeze at the last status-change reading.
+                 * Skip when tfd_fallback is active (no netlink): it
+                 * already polls battery on the same 30s cadence. */
+                if (tfd_fallback < 0) poll_battery();
             } else if (fd == tfd_fallback) {
                 uint64_t exp; (void)read(tfd_fallback, &exp, sizeof(exp));
                 poll_battery();
