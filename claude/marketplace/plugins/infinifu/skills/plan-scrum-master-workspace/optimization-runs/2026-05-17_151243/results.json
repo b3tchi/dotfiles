@@ -1,0 +1,290 @@
+{
+  "exit_reason": "max_iterations (1)",
+  "original_description": "Use to run, dispatch, orchestrate, kick off, or execute multi-agent work on a bd task queue \u2014 spawns implementer + reviewer subagents in parallel background worktrees, relays reports, retries failures (sonnet\u2192opus upgrade on rejection/error/blocked), respects a concurrency cap, and supports modes like auto / waves / only-blockers plus worker_model selection (sonnet/opus/haiku/auto). Trigger on any phrasing that asks for automated agent execution of bd tasks or an epic's children: \"dispatch the agents\", \"kick off the queue\", \"run the pipeline\", \"execute the spec / epic\", \"process bd ready\", \"orchestrate the implementation\", \"start the scrum master\", \"/plan-dispatch-fnf\", or requests mentioning max_parallel, waves mode, worker_model, isolated worktrees per agent, reviewer hand-off, or background execution. Pick this over `plan-supervised` for fully-automated orchestration with an automated reviewer; pick `plan-supervised` for human-in-the-loop batches. Do NOT use for creating bd tasks, writing specs, single-task work, brainstorming, or test audits.",
+  "best_description": "Use to run, dispatch, orchestrate, kick off, or execute multi-agent work on a bd task queue \u2014 spawns implementer + reviewer subagents in parallel background worktrees, relays reports, retries failures (sonnet\u2192opus upgrade on rejection/error/blocked), respects a concurrency cap, and supports modes like auto / waves / only-blockers plus worker_model selection (sonnet/opus/haiku/auto). Trigger on any phrasing that asks for automated agent execution of bd tasks or an epic's children: \"dispatch the agents\", \"kick off the queue\", \"run the pipeline\", \"execute the spec / epic\", \"process bd ready\", \"orchestrate the implementation\", \"start the scrum master\", \"/plan-dispatch-fnf\", or requests mentioning max_parallel, waves mode, worker_model, isolated worktrees per agent, reviewer hand-off, or background execution. Pick this over `plan-supervised` for fully-automated orchestration with an automated reviewer; pick `plan-supervised` for human-in-the-loop batches. Do NOT use for creating bd tasks, writing specs, single-task work, brainstorming, or test audits.",
+  "best_score": "4/8",
+  "best_train_score": "6/12",
+  "best_test_score": "4/8",
+  "final_description": "Use to run, dispatch, orchestrate, kick off, or execute multi-agent work on a bd task queue \u2014 spawns implementer + reviewer subagents in parallel background worktrees, relays reports, retries failures (sonnet\u2192opus upgrade on rejection/error/blocked), respects a concurrency cap, and supports modes like auto / waves / only-blockers plus worker_model selection (sonnet/opus/haiku/auto). Trigger on any phrasing that asks for automated agent execution of bd tasks or an epic's children: \"dispatch the agents\", \"kick off the queue\", \"run the pipeline\", \"execute the spec / epic\", \"process bd ready\", \"orchestrate the implementation\", \"start the scrum master\", \"/plan-dispatch-fnf\", or requests mentioning max_parallel, waves mode, worker_model, isolated worktrees per agent, reviewer hand-off, or background execution. Pick this over `plan-supervised` for fully-automated orchestration with an automated reviewer; pick `plan-supervised` for human-in-the-loop batches. Do NOT use for creating bd tasks, writing specs, single-task work, brainstorming, or test audits.",
+  "iterations_run": 1,
+  "holdout": 0.4,
+  "train_size": 12,
+  "test_size": 8,
+  "history": [
+    {
+      "iteration": 1,
+      "description": "Use to run, dispatch, orchestrate, kick off, or execute multi-agent work on a bd task queue \u2014 spawns implementer + reviewer subagents in parallel background worktrees, relays reports, retries failures (sonnet\u2192opus upgrade on rejection/error/blocked), respects a concurrency cap, and supports modes like auto / waves / only-blockers plus worker_model selection (sonnet/opus/haiku/auto). Trigger on any phrasing that asks for automated agent execution of bd tasks or an epic's children: \"dispatch the agents\", \"kick off the queue\", \"run the pipeline\", \"execute the spec / epic\", \"process bd ready\", \"orchestrate the implementation\", \"start the scrum master\", \"/plan-dispatch-fnf\", or requests mentioning max_parallel, waves mode, worker_model, isolated worktrees per agent, reviewer hand-off, or background execution. Pick this over `plan-supervised` for fully-automated orchestration with an automated reviewer; pick `plan-supervised` for human-in-the-loop batches. Do NOT use for creating bd tasks, writing specs, single-task work, brainstorming, or test audits.",
+      "train_passed": 6,
+      "train_failed": 6,
+      "train_total": 12,
+      "train_results": [
+        {
+          "query": "the bd ready queue has 12 tasks across 4 epics, please orchestrate the implementation with max_parallel=3, surface any agent that gets stuck",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "execute all the open child tasks under bd-eee (the analyst share-link epic), wave mode so I can sanity check between batches, opus only because the spec mixes domains",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "kick off the agents on the queue. only-blockers mode. i'll be in a meeting for the next hour",
+          "should_trigger": true,
+          "trigger_rate": 0.3333333333333333,
+          "triggers": 1,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "process the bd ready queue with isolated worktrees per agent, hand each implementer report to a reviewer agent, do it all in the background",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "ok the spec for the rotate-credentials epic is approved and the bd tasks are reviewed \u2014 start dispatching. max_parallel=2, mode=waves, worker_model=auto. I want a confirmation summary before any agent kicks off.",
+          "should_trigger": true,
+          "trigger_rate": 0.3333333333333333,
+          "triggers": 1,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "/plan-dispatch-fnf max_parallel=3 mode=auto",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "the bd tasks under bd-aaa don't exist yet, sp005 just got its solution accepted \u2014 break it down into the executable plan and attach bd ids",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "draft the spec for sp012: the solution shape, which features it consumes, which ADRs constrain it. don't write tasks yet",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "the auth middleware has been getting hot \u2014 diagnose what's smelly, decide refactor vs rewrite, write up the direction",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "i want to work through these bd tasks one by one myself with you reviewing my work between batches \u2014 supervised mode, no autonomous agents",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "we keep getting prod bugs even though tests pass at 90% \u2014 audit the test suite under src/auth/ and find the tautological ones",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "we have a new story idea: as an analyst i want to share a read-only dashboard link without seat licenses \u2014 capture this as a draft user story",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        }
+      ],
+      "test_passed": 4,
+      "test_failed": 4,
+      "test_total": 8,
+      "test_results": [
+        {
+          "query": "start the scrum-master pipeline on sp007",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "i have 3 ready epics in the queue and the file targets don't overlap \u2014 fire up the scrum master, 4 agents in parallel, auto mode, don't ask me again unless something rejects twice",
+          "should_trigger": true,
+          "trigger_rate": 0.3333333333333333,
+          "triggers": 1,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "spec sp012 is ready (all bd tasks at P2 / open under epic bd-9xx). run the pipeline end-to-end, sonnet for everything, only stop on blockers",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "i want claude to dispatch implementers to all the ready tasks in bd and have a reviewer merge each one when done, with no babysitting",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "i'm picking up bd-x1 manually to work on it locally \u2014 please pull the design from bd show, claim it, and walk me through TDD",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "all the child bd tasks of sp007 are closed and merged \u2014 run the retro: flip statuses, mint any new ADRs that came up, archive the spec",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "show me what bd ready returns and which epics are active. don't dispatch anything, just orient me on the state of the queue",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "the implementer just reported bd-77 ready for review \u2014 audit it against the spec and either close or reject with gap notes",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        }
+      ],
+      "passed": 6,
+      "failed": 6,
+      "total": 12,
+      "results": [
+        {
+          "query": "the bd ready queue has 12 tasks across 4 epics, please orchestrate the implementation with max_parallel=3, surface any agent that gets stuck",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "execute all the open child tasks under bd-eee (the analyst share-link epic), wave mode so I can sanity check between batches, opus only because the spec mixes domains",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "kick off the agents on the queue. only-blockers mode. i'll be in a meeting for the next hour",
+          "should_trigger": true,
+          "trigger_rate": 0.3333333333333333,
+          "triggers": 1,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "process the bd ready queue with isolated worktrees per agent, hand each implementer report to a reviewer agent, do it all in the background",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "ok the spec for the rotate-credentials epic is approved and the bd tasks are reviewed \u2014 start dispatching. max_parallel=2, mode=waves, worker_model=auto. I want a confirmation summary before any agent kicks off.",
+          "should_trigger": true,
+          "trigger_rate": 0.3333333333333333,
+          "triggers": 1,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "/plan-dispatch-fnf max_parallel=3 mode=auto",
+          "should_trigger": true,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": false
+        },
+        {
+          "query": "the bd tasks under bd-aaa don't exist yet, sp005 just got its solution accepted \u2014 break it down into the executable plan and attach bd ids",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "draft the spec for sp012: the solution shape, which features it consumes, which ADRs constrain it. don't write tasks yet",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "the auth middleware has been getting hot \u2014 diagnose what's smelly, decide refactor vs rewrite, write up the direction",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "i want to work through these bd tasks one by one myself with you reviewing my work between batches \u2014 supervised mode, no autonomous agents",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "we keep getting prod bugs even though tests pass at 90% \u2014 audit the test suite under src/auth/ and find the tautological ones",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        },
+        {
+          "query": "we have a new story idea: as an analyst i want to share a read-only dashboard link without seat licenses \u2014 capture this as a draft user story",
+          "should_trigger": false,
+          "trigger_rate": 0.0,
+          "triggers": 0,
+          "runs": 3,
+          "pass": true
+        }
+      ]
+    }
+  ]
+}
