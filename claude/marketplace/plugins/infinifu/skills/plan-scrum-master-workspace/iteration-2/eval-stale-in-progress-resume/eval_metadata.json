@@ -1,0 +1,17 @@
+{
+  "eval_id": 5,
+  "eval_name": "stale-in-progress-resume",
+  "prompt": "Start the pipeline. max_parallel=1, mode=auto, worker_model=sonnet. A previous session left a task in 'in_progress' status with an orphan worktree. Detect this during orient (Step 1), STOP, and ask the human whether to resume or reset. Do NOT auto-recover. Save dispatch_summary.md plus the orient log.",
+  "fixture_design": "Seed bd with ONE stale in_progress task (no live agent), an orphan worktree under .git/worktrees/stale-<id>, and 2 fresh ready tasks behind it. Orchestrator must NOT dispatch ready tasks until the human decides what to do with the stale one.",
+  "assertions": [
+    {"text": "dispatch_summary.md exists at sandbox root"},
+    {"text": "Summary references the stale task by bd id"},
+    {"text": "Summary flags the stale task with an explicit label (STALE / orphan / from previous session)"},
+    {"text": "Summary mentions the orphan worktree path under .git/worktrees/"},
+    {"text": "Summary asks the human to choose: resume / reset / abandon"},
+    {"text": "No new implementer was dispatched — the fresh ready tasks are still untouched (status=open)"},
+    {"text": "No new worktree was created beyond the orphan one"},
+    {"text": "Orient log (bd ready + bd list --status in_progress + bd stats) was captured"},
+    {"text": "Orchestrator does NOT silently mark the stale task as blocked or open"}
+  ]
+}

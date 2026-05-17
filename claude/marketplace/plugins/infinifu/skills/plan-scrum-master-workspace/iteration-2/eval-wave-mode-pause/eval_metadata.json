@@ -1,0 +1,16 @@
+{
+  "eval_id": 4,
+  "eval_name": "wave-mode-pause",
+  "prompt": "Start the pipeline. max_parallel=2, mode=waves, worker_model=sonnet. Two epics ready, 4 ready tasks total. Dispatch the first batch of 2, wait for them to complete, report progress, and STOP for human feedback. Do NOT dispatch the next batch. Save chronicle.md.",
+  "fixture_design": "Seed bd with 2 non-interfering epics × 2 ready tasks each (4 total ready). First batch should drain to 2 closed tasks; orchestrator must then pause and say 'Ready for feedback.' instead of proceeding.",
+  "assertions": [
+    {"text": "chronicle.md exists"},
+    {"text": "Exactly 2 tasks were dispatched in the first batch"},
+    {"text": "Both batch tasks reached 'closed' status via reviewer approval"},
+    {"text": "Orchestrator emitted a progress report after batch 1 (Pipeline: 2/4 done style)"},
+    {"text": "Orchestrator said 'Ready for feedback' or equivalent wave-mode prompt"},
+    {"text": "No further implementer was dispatched after batch 1 — the remaining 2 ready tasks are still 'open' / 'ready'"},
+    {"text": "Orchestrator is in a waiting state at end of run (did not silently continue)"},
+    {"text": "Batch task count would have been 2 in auto mode too — wave-mode behavior tested by the PAUSE, not by batch size"}
+  ]
+}

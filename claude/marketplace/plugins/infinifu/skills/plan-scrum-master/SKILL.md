@@ -1,6 +1,6 @@
 ---
 name: plan-scrum-master
-description: Use when bd tasks are ready and you need to orchestrate implementation — reads the ready queue, dispatches implementer and reviewer agents, relays information between them, respects a concurrency cap
+description: Use when bd tasks are ready and the user wants to dispatch agents to work them — orchestrates the pipeline by reading bd ready, dispatching implementer + reviewer subagents in the background with isolated worktrees, relaying their reports, and respecting a concurrency cap. Trigger on "dispatch the agents", "run the pipeline", "start the scrum master", "execute the spec", "process bd ready", "/plan-dispatch-fnf", or any phrasing that asks for automated multi-agent execution of an already-ready bd queue. Pick this over `plan-supervised` when the user wants fully-automated orchestration (with an automated reviewer); pick `plan-supervised` when they want human-in-the-loop batches.
 ---
 
 # Scrum Master — Pipeline Orchestrator
@@ -15,90 +15,40 @@ Orchestrate bd-driven development by reading the ready queue, dispatching implem
 
 ## Execution Model
 
-The **main Claude session is the scrum-master**. The user invokes the skill directly (`/plan-dispatch-fnf` or equivalent) and talks to the orchestrator as themselves. No wrapper agent.
+The main Claude session is the scrum-master — the user invokes the skill directly (`/plan-dispatch-fnf` or equivalent) and talks to the orchestrator as themselves. Workers (implementers + reviewers) are dispatched as background subagents via the `Agent` tool with `run_in_background: true` and `isolation: "worktree"`. Main Claude reacts to completion notifications; it does not poll or sleep.
 
-- Main Claude holds the dispatch loop, shows summaries, asks confirmations, handles waves feedback, reports progress — all in the live conversation
-- **Workers (implementers + reviewers) are dispatched as background subagents** via the `Agent` tool with `run_in_background: true` and `isolation: "worktree"`
-- Main Claude receives completion notifications from each worker and reacts (relay to reviewer, handle rejection, report batch)
-- While workers run, the user can still interrupt, ask questions, adjust config — the main session stays responsive because the workers are in the background
-
-**Why inline only:** Claude Code's harness does not allow sub-agents to dispatch further sub-agents (no nested-agent recursion). That means the scrum-master must run at the top level — the session that holds the dispatch loop must also be the session that has Agent-tool access to workers. A wrapper `infinifu:scrum-master` agent cannot dispatch implementers from inside its own context; structural block confirmed in testing. If you see the deprecated wrapper agent referenced anywhere, use Pattern A (this skill in main Claude) instead.
-
-### Worker dispatch
-
-Workers are dispatched as **background subagents** of main Claude:
-
-- `isolation: "worktree"` — Claude Code auto-creates an isolated worktree for each agent
-- `run_in_background: true` — orchestrator stays free to handle other notifications, talk to user, dispatch more work
-- `subagent_type` — `general-purpose` for implementers, `infinifu:code-reviewer` for reviewers
-
-The orchestrator does **not** poll or sleep — it reacts to completion notifications.
+For the rationale (why a wrapper agent cannot do this) and the full dispatch contract, see `references/architecture.md`.
 
 ## Prerequisites
 
-Before using this skill, TWO mandatory gates must have been passed:
+Two mandatory gates must have been passed:
 
-1. **⛔ Spec approved by user** — the spec/plan document was reviewed and explicitly approved
-2. **⛔ bd tasks approved by user** — the bd task list was reviewed and explicitly approved
+1. **⛔ Spec approved by user** — the spec/plan document was reviewed and explicitly approved.
+2. **⛔ bd tasks approved by user** — the bd task list was reviewed and explicitly approved.
 
-If either gate was not passed, STOP and go back. Do NOT start execution without both approvals.
+If either gate was not passed, STOP and go back. Starting execution before both approvals means the agents will burn tokens on work the human has not yet sanctioned.
 
 Additionally:
-- bd tasks are created with designs and dependencies
-- `bd ready` returns at least one task
+- bd tasks are created with designs and dependencies.
+- `bd ready` returns at least one task.
 
 ## Configuration
 
-Two settings, provided by the human at start:
+Three settings, provided by the human at start. If any are missing, **ask** — do not assume defaults silently. The table values are *fallbacks* the user can pick by saying "use defaults".
 
 | Setting | Default | Options |
 |---------|---------|---------|
 | `max_parallel` | 1 | 1, 2, 3, ... N, or `all` |
-| `mode` | auto | `auto`, `waves`, `only-blockers` |
-| `worker_model` | auto | `opus`, `sonnet`, `haiku`, `auto` |
+| `mode` | auto | `auto`, `waves`, `only-blockers` — see `references/modes.md` |
+| `worker_model` | auto | `opus`, `sonnet`, `haiku`, `auto` — see `references/worker-models.md` |
 
-### Worker Model Selection
-
-When `worker_model` is set to a specific model, ALL agents (implementers and reviewers) use that model.
-
-When `worker_model = auto`, the scrum master picks per-task based on complexity:
-
-| Complexity | Model | Signals |
-|------------|-------|---------|
-| **High** | `opus` | Multiple files across domains, new architecture, complex logic, integration points, ambiguous requirements |
-| **Medium** | `sonnet` | Single-domain changes, clear requirements, moderate logic, well-defined interfaces |
-| **Low** | `haiku` | Boilerplate, config changes, simple CRUD, renaming, straightforward tests |
-
-**Reviewers always use the same or higher model than the implementer** — never downgrade for review.
-
-Include the chosen model and reasoning in the dispatch summary so the human can override per-task before confirming.
-
-If not specified, **ask the user** before starting. Do not assume defaults silently.
+Always echo the chosen settings in the dispatch summary so the human can override before confirming.
 
 ## Multi-Epic Parallelism
 
-When multiple epics exist in `board/ready/`, the scrum master can dispatch tasks from different epics in parallel — provided they don't interfere.
+When multiple epics have ready tasks, tasks from different epics can run in parallel **only if they don't touch overlapping files or directories**. Run an interference check: read each epic's spec, compare file paths, and group non-interfering epics for parallel dispatch. If unsure, ask the human — guessing here causes merge conflicts in worktrees.
 
-### Interference Check
-
-Two epics **interfere** if their tasks touch overlapping files or directories. To assess:
-
-1. Read the spec/design for each ready epic
-2. Compare the file paths and domains mentioned
-3. Epics are **non-interfering** if they target completely separate areas of the codebase
-
-**Examples:**
-- `epic-A` touches `app/auth/` and `epic-B` touches `app/billing/` → **non-interfering**, can parallel
-- `epic-A` touches `app/auth/` and `epic-B` touches `app/auth/middleware.ts` → **interfering**, must serialize
-- Shared infrastructure files (e.g., `package.json`, `schema.prisma`, config files) count as overlap
-
-### Dispatch Rules
-
-- Non-interfering epics: dispatch tasks from all of them, up to `max_parallel` total
-- Interfering epics: serialize — finish one epic's tasks before starting the other
-- If unsure about interference: **ask the human** — do not guess
-
-Present the interference assessment in the dispatch summary for human approval.
+For the full rule set + examples, see `references/multi-epic.md`. Present the interference assessment in every dispatch summary (write `n/a — single epic` when only one is active).
 
 ## State Machine
 
@@ -119,7 +69,7 @@ in_progress → closed  spec-retro skill (after merge / PR)
 
 **Priority also escalates on dispatch:** epic and all child tasks go from P2 → P1 (actively in flight). See "Activate the epic" in Step 3 for commands.
 
-**Why scrum-master owns both transitions:** dispatch is the moment work starts — the state flips from "planned and waiting" to "in flight." Status `in_progress` and priority `P1` both encode that. Nobody else is watching for this moment: `spec-ready` sets up the P2/open snapshot and walks away, `work-do` only touches its own task, `work-audit` closes individual tasks, and `spec-retro` runs much later at delivery time. The scrum-master is the first actor that "knows" the epic is alive.
+**Why scrum-master owns the activation:** dispatch is the moment work starts — the state flips from "planned and waiting" to "in flight." Status `in_progress` and priority `P1` both encode that. Nobody else is watching for this moment: `spec-ready` sets up the P2/open snapshot and walks away, `work-do` only touches its own task, `work-audit` closes individual tasks, and `spec-retro` runs much later at delivery time. The scrum-master is the first actor that "knows" the epic is alive.
 
 **When to transition:** right before dispatching the first implementer for a task whose parent epic is still `open` / P2. Run the `bd update` commands before the `Agent` call. If the epic is already `in_progress` / P1 from a previous session, leave it alone.
 
@@ -197,9 +147,9 @@ bd list --status in_progress          # Anything mid-flight from previous sessio
 bd stats                              # Overall picture
 ```
 
-If `in_progress` tasks exist from a previous session, escalate to human — ask whether to resume or reset them.
+If `in_progress` tasks exist from a previous session, escalate to human — ask whether to resume or reset them. Do not silently retry; a stale `in_progress` may mean the previous agent crashed mid-merge and the worktree is in an unknown state.
 
-**Multiple epics:** If more than one epic has ready tasks, read each epic's spec/design and perform the interference check (see Multi-Epic Parallelism). Group non-interfering epics for parallel dispatch.
+**Multiple epics:** If more than one epic has ready tasks, perform the interference check (`references/multi-epic.md`). Group non-interfering epics for parallel dispatch.
 
 ## Step 2: Dispatch Summary
 
@@ -224,6 +174,7 @@ Active epics:
 Interference:
   bd-AAAA ↔ bd-BBBB: NONE — can parallel
   (or: CONFLICT on app/shared/config.ts — must serialize)
+  (or: n/a — single epic)
 
 Ready queue:
   [bd-AAAA] bd-XXXX: [title]
@@ -271,14 +222,12 @@ Skip this if the epic is already `in_progress` / P1 (e.g., resumed session). Do 
 
 ### Dispatch the task
 
-For each task, run `bd show <id>` and dispatch an Agent tool call with `isolation: "worktree"` and `run_in_background: true` containing:
+For each task, run `bd show <id>` and dispatch an `Agent` tool call with `isolation: "worktree"` and `run_in_background: true` containing:
 
 1. **Task ID and title**
 2. **Full design text** from `bd show` (paste it — don't make agent query bd)
 3. **Context** — what tasks were recently completed, what else is in the pipeline
 4. **Mandatory rule:** "NEVER use `cd path && command` in bash — always use absolute paths. `cd &&` triggers user confirmation prompts that block background agents."
-
-**Dispatch with `isolation: "worktree"` and `run_in_background: true`** — Claude Code auto-creates a worktree for each agent. All agents run in the background. The dispatcher stays on main and is notified when each agent completes.
 
 **The implementer is responsible for:**
 - Claiming the task: `bd update <id> --status in_progress`
@@ -291,7 +240,7 @@ For each task, run `bd show <id>` and dispatch an Agent tool call with `isolatio
 
 **Dispatch up to `max_parallel` agents in a single message**, all with `run_in_background: true`. Do NOT poll or sleep — you will be automatically notified when each agent completes. While waiting, you may report status or respond to the human.
 
-**Save agent session metadata** after each Agent call returns:
+**Save agent session metadata** after each `Agent` call returns:
 - **Agent ID / session ID** — for resuming the agent via `SendMessage`
 - **Worktree path** — for reviewers to inspect the code
 - **Branch name** — for reviewers to merge
@@ -324,10 +273,10 @@ You do not interpret the report. You relay it. Do NOT wait for the reviewer — 
 If a reviewer rejects a task:
 
 1. **First rejection:**
-   - Reviewer updates bd with `--design` (new conditions) and `--notes` (rejection reason)
+   - Reviewer updates bd with `--design` (new conditions) and `--notes` (rejection reason).
    - **Resume the original implementer** via `SendMessage` (with `run_in_background: true`) using the saved agent ID — pass the rejection details. The agent retains its full context and is already in the worktree. Only dispatch a fresh agent if the original cannot be resumed.
-   - When notified of completion, dispatch reviewer again (also in background)
-2. **Second rejection:** Escalate to human — the task needs human attention
+   - When notified of completion, dispatch reviewer again (also in background).
+2. **Second rejection:** Escalate to human — the task needs human attention.
 
 ## Step 6: Report
 
@@ -345,6 +294,8 @@ Pipeline: X/Y tasks done | Z ready | W blocked
 **If mode = `waves`:** Say "Ready for feedback." and wait for human input.
 **If mode = `auto` or `only-blockers`:** Continue to next batch.
 
+See `references/modes.md` for the full mode semantics.
+
 ## Step 7: Loop or Finish
 
 - **`bd ready` returns tasks** → go to Step 3
@@ -353,33 +304,9 @@ Pipeline: X/Y tasks done | Z ready | W blocked
 
 ## Agent Health Monitoring
 
-**Alert the user immediately** when any agent shows signs of struggling. Do not wait for the agent to finish or fail — early warning saves time and money.
+Alert the user immediately when any agent shows signs of struggling — long runtime vs peers, verbose / partial reports, self-reported uncertainty, or a `blocked` marker. Do not defer alerts to the next batch report; a stuck agent burns tokens until killed.
 
-### Signals to Watch
-
-| Signal | Detection | Action |
-|--------|-----------|--------|
-| **Long runtime** | Agent has been running significantly longer than peers on similar-sized tasks | Alert user with elapsed time and task ID |
-| **Large report** | Implementer returns an unusually verbose report (sign of thrashing/rework) | Flag to user before dispatching reviewer |
-| **Partial progress** | Agent reports it completed some but not all of the task | Alert user — may need task split or help |
-| **Self-reported difficulty** | Agent mentions uncertainty, workarounds, or "best effort" in its report | Flag verbatim quotes to user immediately |
-| **Blocked marker** | Agent sets task to `blocked` | Alert user instantly — do not batch this into a progress report |
-
-### Alert Format
-
-Alerts go to the user **as soon as detected** — do not defer to the next batch report.
-
-```
-⚠️  AGENT ALERT: bd-XXXX "[task title]"
-Status:     [long-running | struggling | partial | blocked]
-Elapsed:    [time if relevant]
-Detail:     [what was observed — agent quotes if available]
-Suggestion: [kill and reassign | wait longer | split task | human intervention]
-```
-
-### Comparing Agents
-
-When multiple agents are running in parallel, compare their progress. If one agent finishes while another on a comparable task is still running, that's a signal the slow agent may be struggling — alert the user.
+See `references/agent-health.md` for the full signal list and the alert template.
 
 ## Escalation Protocol
 
@@ -388,7 +315,7 @@ When multiple agents are running in parallel, compare their progress. If one age
 - Reviewer rejects the same task twice
 - Task has no design or vague design in bd
 - Implementer marks task as blocked
-- Agent shows signs of struggling (see Agent Health Monitoring)
+- Agent shows signs of struggling (see `references/agent-health.md`)
 - `bd ready` is empty but open tasks remain
 - Any unexpected agent behavior
 
@@ -400,23 +327,6 @@ Attempts: [what was tried]
 Options: [suggested next steps]
 Need your decision to continue.
 ```
-
-## Operating Modes Detail
-
-### `auto` (default)
-- Dispatches continuously — finish one batch, start next
-- Only stops for escalation-worthy events
-- Reports progress after each batch but does not wait
-
-### `waves`
-- Dispatches one batch, reports, waits for human feedback
-- Human can: approve next batch, adjust `max_parallel`, give guidance, stop
-- Good for initial runs and tuning
-
-### `only-blockers`
-- Like `auto` but halts on: agent failures, double rejections, blocked tasks
-- Does not halt between normal batches
-- Good for semi-supervised runs
 
 ## What You Do Touch vs. What You Don't
 

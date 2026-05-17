@@ -12,7 +12,8 @@ Before doing anything else, print this phase banner exactly:
 
 Then invoke the infinifu:plan-scrum-master skill and follow it exactly as presented to you.
 
-If the user provided arguments (e.g., `/dispatch-fnf max_parallel=3 mode=waves`), use them as configuration. Otherwise, ask the user before starting:
+If the user provided arguments (e.g., `/plan-dispatch-fnf max_parallel=3 mode=waves worker_model=sonnet`), use them as configuration. Otherwise, ask the user before starting:
 
 1. **max_parallel** — how many agents to run simultaneously? (1, 2, 3, ... or all)
 2. **mode** — `auto` (continuous), `waves` (pause between batches), or `only-blockers` (pause on failures only)
+3. **worker_model** — `auto` (pick per task complexity), `opus`, `sonnet`, or `haiku` (fixed for every agent)

@@ -1,0 +1,22 @@
+[
+  {"query": "ok the spec for the rotate-credentials epic is approved and the bd tasks are reviewed — start dispatching. max_parallel=2, mode=waves, worker_model=auto. I want a confirmation summary before any agent kicks off.", "should_trigger": true},
+  {"query": "/plan-dispatch-fnf max_parallel=3 mode=auto", "should_trigger": true},
+  {"query": "spec sp012 is ready (all bd tasks at P2 / open under epic bd-9xx). run the pipeline end-to-end, sonnet for everything, only stop on blockers", "should_trigger": true},
+  {"query": "i have 3 ready epics in the queue and the file targets don't overlap — fire up the scrum master, 4 agents in parallel, auto mode, don't ask me again unless something rejects twice", "should_trigger": true},
+  {"query": "process the bd ready queue with isolated worktrees per agent, hand each implementer report to a reviewer agent, do it all in the background", "should_trigger": true},
+  {"query": "execute all the open child tasks under bd-eee (the analyst share-link epic), wave mode so I can sanity check between batches, opus only because the spec mixes domains", "should_trigger": true},
+  {"query": "kick off the agents on the queue. only-blockers mode. i'll be in a meeting for the next hour", "should_trigger": true},
+  {"query": "start the scrum-master pipeline on sp007", "should_trigger": true},
+  {"query": "i want claude to dispatch implementers to all the ready tasks in bd and have a reviewer merge each one when done, with no babysitting", "should_trigger": true},
+  {"query": "the bd ready queue has 12 tasks across 4 epics, please orchestrate the implementation with max_parallel=3, surface any agent that gets stuck", "should_trigger": true},
+  {"query": "i want to work through these bd tasks one by one myself with you reviewing my work between batches — supervised mode, no autonomous agents", "should_trigger": false},
+  {"query": "the bd tasks under bd-aaa don't exist yet, sp005 just got its solution accepted — break it down into the executable plan and attach bd ids", "should_trigger": false},
+  {"query": "show me what bd ready returns and which epics are active. don't dispatch anything, just orient me on the state of the queue", "should_trigger": false},
+  {"query": "i'm picking up bd-x1 manually to work on it locally — please pull the design from bd show, claim it, and walk me through TDD", "should_trigger": false},
+  {"query": "the implementer just reported bd-77 ready for review — audit it against the spec and either close or reject with gap notes", "should_trigger": false},
+  {"query": "all the child bd tasks of sp007 are closed and merged — run the retro: flip statuses, mint any new ADRs that came up, archive the spec", "should_trigger": false},
+  {"query": "we keep getting prod bugs even though tests pass at 90% — audit the test suite under src/auth/ and find the tautological ones", "should_trigger": false},
+  {"query": "the auth middleware has been getting hot — diagnose what's smelly, decide refactor vs rewrite, write up the direction", "should_trigger": false},
+  {"query": "draft the spec for sp012: the solution shape, which features it consumes, which ADRs constrain it. don't write tasks yet", "should_trigger": false},
+  {"query": "we have a new story idea: as an analyst i want to share a read-only dashboard link without seat licenses — capture this as a draft user story", "should_trigger": false}
+]
