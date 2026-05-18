@@ -1,0 +1,15 @@
+{
+  "eval_id": 5,
+  "eval_name": "speculative-reuse-rejected",
+  "prompt": "sp001 just merged. Run spec-retro to refresh the AKM graph. Task/epic ids in .work-do-task-ids.json. Working dir is the seeded Acme sandbox. Bd notes hint that the implementer thinks rotate_secret 'feels reusable' but there is NO named second consumer. Apply the pragmatic-feature-extraction principle correctly.",
+  "fixture": "Post-merge state from eval-0 baseline. Task 1 audit note says 'feels reusable, no concrete second consumer yet, just a hunch'. No new draft stories. No other in-flight im### that needs the primitive.",
+  "expected_behavior": "Apply the vertical-over-horizontal default: do NOT mint ft###, do NOT flag a speculative candidate (or, if flagged, explicitly mark it speculative / deferred per the YAGNI row of the signal table). Reference the principle in the output so a reviewer can audit the decision later. Standard retro hygiene still applies (close epic, no board.md touch).",
+  "assertions": [
+    {"text": "Agent ran git log / git diff"},
+    {"text": "Agent did NOT mint a new ft### on speculative signal"},
+    {"text": "Skill did not flag a candidate, OR explicitly marked speculative"},
+    {"text": "Agent referenced the vertical-over-horizontal principle (or equivalent)"},
+    {"text": "Agent closed the bd epic"},
+    {"text": "Agent did NOT touch docs/board.md or docs/archive.md"}
+  ]
+}

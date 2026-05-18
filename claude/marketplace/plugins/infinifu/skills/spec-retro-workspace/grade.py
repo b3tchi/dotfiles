@@ -81,6 +81,7 @@ def gather_artifacts(run_dir: Path) -> dict:
 
     new_us_files = [p for p in new_paths if re.search(r"docs/notes/us\d{3}\.md", p)]
     new_adr_files = [p for p in new_paths if re.search(r"docs/notes/adr\d{4}\.md", p)]
+    new_ft_files = [p for p in new_paths if re.search(r"docs/notes/ft\d{3}\.md", p)]
 
     # Check newly drafted us### has status: draft
     new_us_drafts = []
@@ -117,6 +118,7 @@ def gather_artifacts(run_dir: Path) -> dict:
         "new_us_files": new_us_files,
         "new_us_drafts": new_us_drafts,
         "new_adr_files": new_adr_files,
+        "new_ft_files": new_ft_files,
         "epic_status": epic_status,
         "text_all": text_all,
     }
@@ -261,7 +263,147 @@ def grade_eval3(run_dir: Path) -> list[dict]:
     return results
 
 
-GRADERS = {0: grade_eval0, 1: grade_eval1, 2: grade_eval2, 3: grade_eval3}
+def grade_eval4(run_dir: Path) -> list[dict]:
+    """feature-extraction-candidate: us006 named draft would reuse rotate_secret.
+
+    Skill MUST surface candidate without minting silently — vertical-bias default.
+    """
+    art = gather_artifacts(run_dir)
+    text = art["text_all"]
+    results = []
+
+    git_used = bool(re.search(r"(git log|git diff|merge-base|HEAD)", text, re.I))
+    results.append({"text": "Agent ran git log / git diff",
+                    "passed": git_used, "evidence": "git evidence"})
+
+    # Must surface a Candidate Features block (or equivalent phrasing)
+    candidate_phrase = bool(re.search(
+        r"(candidate.{0,15}feature|ft.extract|feature.{0,15}extraction|possible ft|extract.{0,20}ft\b)",
+        text, re.I))
+    results.append({"text": "Agent surfaced Feature-extraction candidate in output",
+                    "passed": candidate_phrase, "evidence": "candidate-feature phrase"})
+
+    # Must reference the named second consumer (us006) for the candidate to be concrete
+    cites_consumer = bool(re.search(r"us006|oauth.{0,30}(key|rotate|client)", text, re.I))
+    results.append({"text": "Candidate references concrete second consumer (us006)",
+                    "passed": cites_consumer, "evidence": "us006 reference"})
+
+    # MUST NOT silently mint ft### — no new ft file
+    results.append({"text": "Agent did NOT silently mint a new ft### file",
+                    "passed": len(art["new_ft_files"]) == 0 if "new_ft_files" in art else True,
+                    "evidence": f"new_ft={art.get('new_ft_files', 'n/a — gather_artifacts may not track ft creation')}"})
+
+    # im002 should still own the components (vault.py + vault_rotate.py) — not stripped
+    cites_im_kept = ("vault.py" in text or "im002" in text) and not bool(re.search(
+        r"moved.{0,15}to ft|extracted.{0,15}to ft|mint(ed)? ft", text, re.I))
+    results.append({"text": "im### still owns the code (no silent extraction)",
+                    "passed": cites_im_kept, "evidence": "im-still-owns evidence"})
+
+    results.append({"text": "Agent closed the bd epic",
+                    "passed": art["epic_status"] in ("closed", "done"),
+                    "evidence": f"epic_status={art['epic_status']}"})
+
+    # Epic close reason should mention the candidate (so future searches surface it)
+    epic_text = (run_dir / "outputs" / "bd-show-epic.txt").read_text(errors="ignore") if (run_dir / "outputs" / "bd-show-epic.txt").exists() else ""
+    reason_mentions_candidate = bool(re.search(r"candidate|ft.extract|extraction", epic_text, re.I))
+    results.append({"text": "Epic close reason mentions the candidate for traceability",
+                    "passed": reason_mentions_candidate, "evidence": "reason mentions candidate"})
+
+    return results
+
+
+def grade_eval5(run_dir: Path) -> list[dict]:
+    """speculative-reuse-rejected: 'feels reusable' but no named consumer.
+
+    Skill MUST apply vertical-over-horizontal default — leave it in im###.
+    """
+    art = gather_artifacts(run_dir)
+    text = art["text_all"]
+    results = []
+
+    git_used = bool(re.search(r"(git log|git diff|merge-base|HEAD)", text, re.I))
+    results.append({"text": "Agent ran git log / git diff",
+                    "passed": git_used, "evidence": "git evidence"})
+
+    # MUST NOT mint a new ft### — speculative reuse is YAGNI
+    results.append({"text": "Agent did NOT mint a new ft### on speculative signal",
+                    "passed": len(art.get("new_ft_files", [])) == 0,
+                    "evidence": f"new_ft={art.get('new_ft_files', [])}"})
+
+    # MUST NOT surface a flagged candidate (or, if surfaced, must explicitly mark deferred / speculative)
+    candidate_block = bool(re.search(r"(candidate.{0,15}feature|ft.extract|feature.{0,15}extraction|possible ft)", text, re.I))
+    speculative_marker = bool(re.search(
+        r"(speculat|yagni|no concrete consumer|no named.{0,20}consumer|defer.{0,20}extraction|vertical.{0,20}over.{0,20}horizontal|leave in im)",
+        text, re.I))
+    # Pass if EITHER no candidate block OR the candidate is explicitly marked speculative/deferred
+    results.append({"text": "Skill did not flag a candidate, OR explicitly marked speculative",
+                    "passed": (not candidate_block) or speculative_marker,
+                    "evidence": f"candidate_block={candidate_block} speculative_marker={speculative_marker}"})
+
+    # Agent should explicitly reference the vertical-bias principle (theory-of-mind check)
+    cites_principle = bool(re.search(r"vertical.{0,20}horizontal|pragmatic.{0,20}extract|abstraction tax|wrong api surface", text, re.I))
+    results.append({"text": "Agent referenced the vertical-over-horizontal principle (or equivalent)",
+                    "passed": cites_principle, "evidence": "principle invoked"})
+
+    # Standard hygiene
+    results.append({"text": "Agent closed the bd epic",
+                    "passed": art["epic_status"] in ("closed", "done"),
+                    "evidence": f"epic_status={art['epic_status']}"})
+
+    results.append({"text": "Agent did NOT touch docs/board.md or docs/archive.md",
+                    "passed": not (art["board_modified"] or art["archive_modified"]),
+                    "evidence": f"board={art['board_modified']} archive={art['archive_modified']}"})
+
+    return results
+
+
+def grade_eval6(run_dir: Path) -> list[dict]:
+    """adr-and-feature-both: vendor decision + reusable wrapper surface.
+
+    Skill MUST mint one new adr#### AND update / mint a ft### — both-at-once row.
+    """
+    art = gather_artifacts(run_dir)
+    text = art["text_all"]
+    results = []
+
+    git_used = bool(re.search(r"(git log|git diff|merge-base|HEAD)", text, re.I))
+    results.append({"text": "Agent ran git log / git diff",
+                    "passed": git_used, "evidence": "git evidence"})
+
+    # NEW adr#### file minted (the Vault Transit vs KV decision)
+    new_adr = len(art["new_adr_files"]) >= 1
+    results.append({"text": "Agent minted a new adr#### for the vendor/paradigm decision",
+                    "passed": new_adr, "evidence": f"new_adr={art['new_adr_files']}"})
+
+    # ADR content references Vault Transit decision
+    adr_topic = bool(re.search(r"vault transit|transit.{0,15}engine|transit.{0,15}vs.{0,15}kv|transit.{0,15}secrets", text, re.I))
+    results.append({"text": "New ADR captures the Vault Transit decision",
+                    "passed": adr_topic, "evidence": "transit-decision phrase"})
+
+    # A ft### was either widened (ft002 modified) OR a new ft### minted for vault_transit
+    ft_handled = art["ft002_modified"] or len(art.get("new_ft_files", [])) >= 1
+    results.append({"text": "Agent widened existing ft### OR minted new ft### for the wrapper surface",
+                    "passed": ft_handled,
+                    "evidence": f"ft002_modified={art['ft002_modified']} new_ft={art.get('new_ft_files', [])}"})
+
+    # Feature content references vault_transit / Transit wrapper
+    ft_topic = bool(re.search(r"vault_transit|transit.{0,15}wrapper|encrypt.{0,15}decrypt|rotate_key", text, re.I))
+    results.append({"text": "Feature update captures the vault_transit wrapper surface",
+                    "passed": ft_topic, "evidence": "transit-wrapper phrase"})
+
+    # im002 still rewritten to reference the decision
+    results.append({"text": "im002 body rewritten to reference shipped reality",
+                    "passed": art["im002_modified"], "evidence": f"im002_modified={art['im002_modified']}"})
+
+    results.append({"text": "Agent closed the bd epic",
+                    "passed": art["epic_status"] in ("closed", "done"),
+                    "evidence": f"epic_status={art['epic_status']}"})
+
+    return results
+
+
+GRADERS = {0: grade_eval0, 1: grade_eval1, 2: grade_eval2, 3: grade_eval3,
+           4: grade_eval4, 5: grade_eval5, 6: grade_eval6}
 
 
 def main(iter_dir: Path):

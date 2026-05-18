@@ -1,0 +1,16 @@
+{
+  "eval_id": 4,
+  "eval_name": "feature-extraction-candidate",
+  "prompt": "sp001 just merged. Run spec-retro to refresh the AKM graph. Task/epic ids in .work-do-task-ids.json. Working dir is the seeded Acme sandbox. A draft story (us006) lives in docs/notes/ that would obviously reuse code shipped in im002 — the bd task notes hint at this. Apply the pragmatic-feature-extraction principle correctly.",
+  "fixture": "Post-merge state from eval-0 baseline PLUS a draft us006 'rotate OAuth client api-keys' that explicitly needs the same per-name versioned-alias rotation primitive shipped in im002. Task 1 bd notes spell out the reuse signal.",
+  "expected_behavior": "Surface a Candidate Features block flagging the rotate_secret / versioned-alias primitive as a possible ft### extraction — cite us006 as the named second consumer. Do NOT mint ft### silently. Leave the components list in im002 unchanged (vertical-first). Mention the candidate in the epic close --reason for future traceability.",
+  "assertions": [
+    {"text": "Agent ran git log / git diff"},
+    {"text": "Agent surfaced Feature-extraction candidate in output"},
+    {"text": "Candidate references concrete second consumer (us006)"},
+    {"text": "Agent did NOT silently mint a new ft### file"},
+    {"text": "im### still owns the code (no silent extraction)"},
+    {"text": "Agent closed the bd epic"},
+    {"text": "Epic close reason mentions the candidate for traceability"}
+  ]
+}
