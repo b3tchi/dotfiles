@@ -32,18 +32,18 @@ return {
 		"MeanderingProgrammer/render-markdown.nvim",
 		opts = {
 			heading = {
-				enabled = true,
+				enabled = false, -- headings handled by headlines.nvim (see orgmode.lua)
 				atx = true, --icons
 				setext = false, --icons
 				width = "block",
 				icons = { "✶ ", "✶✶ ", "✶✶✶ ", "✶✶✶✶ ", "✶✶✶✶✶ ", "✶✶✶✶✶✶ " },
 				backgrounds = {
-					false,
-					false,
-					false,
-					false,
-					false,
-					false,
+					"Statement",
+					"Statement",
+					"Statement",
+					"Statement",
+					"Statement",
+					"Statement",
 				},
 				foregrounds = {
 					"Statement",

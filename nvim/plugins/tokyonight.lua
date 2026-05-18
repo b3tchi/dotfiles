@@ -84,6 +84,56 @@ return {
 				-- --foldes
 				hl.Folded = { bg = "#16161e", fg = "#ff9e64" } --fold-ufo (orange line when folded)
 				hl.UfoFoldedEllipsis = { bg = "#16161e", fg = "#ff9e64" }
+
+				-- markdown: whiter heading TEXT (icons stay purple via Statement in render-markdown opts)
+				local white = "#e6ebf5"
+				hl["@markup.heading"] = { fg = white, bold = true }
+				hl["@markup.heading.1"] = { fg = white, bold = true }
+				hl["@markup.heading.2"] = { fg = white, bold = true }
+				hl["@markup.heading.3"] = { fg = white, bold = true }
+				hl["@markup.heading.4"] = { fg = white, bold = true }
+				hl["@markup.heading.5"] = { fg = white, bold = true }
+				hl["@markup.heading.6"] = { fg = white, bold = true }
+				hl["@markup.heading.1.markdown"] = { fg = white, bold = true }
+				hl["@markup.heading.2.markdown"] = { fg = white, bold = true }
+				hl["@markup.heading.3.markdown"] = { fg = white, bold = true }
+				hl["@markup.heading.4.markdown"] = { fg = white, bold = true }
+				hl["@markup.heading.5.markdown"] = { fg = white, bold = true }
+				hl["@markup.heading.6.markdown"] = { fg = white, bold = true }
+				hl.markdownH1 = { fg = white, bold = true }
+				hl.markdownH2 = { fg = white, bold = true }
+				hl.markdownH3 = { fg = white, bold = true }
+				hl.markdownH4 = { fg = white, bold = true }
+				hl.markdownH5 = { fg = white, bold = true }
+				hl.markdownH6 = { fg = white, bold = true }
+				-- heading TEXT (extmark line region) painted white via custom hl set in foregrounds
+				hl.MdHeadingText = { fg = white, bold = true }
+				-- heading icons (✶) stay purple — virt_text uses RenderMarkdownH* hl
+				local purple = "#bb9af7"
+				hl.RenderMarkdownH1 = { fg = purple, bold = true }
+				hl.RenderMarkdownH2 = { fg = purple, bold = true }
+				hl.RenderMarkdownH3 = { fg = purple, bold = true }
+				hl.RenderMarkdownH4 = { fg = purple, bold = true }
+				hl.RenderMarkdownH5 = { fg = purple, bold = true }
+				hl.RenderMarkdownH6 = { fg = purple, bold = true }
+				-- markdown table: header + frame orange
+				local orange = "#ff9e64"
+				hl.RenderMarkdownTableHead = { fg = orange, bold = true }
+				hl.RenderMarkdownTableRow = { fg = orange }
+				hl.RenderMarkdownTableFill = { fg = orange }
+				-- bold text
+				hl["@markup.strong"] = { fg = "#e6ebf5", bold = true }
+				hl["@markup.strong.markdown_inline"] = { fg = "#e6ebf5", bold = true }
+
+				-- diagnostics: colored undercurls (sp = special color)
+				hl.DiagnosticUnderlineError = { undercurl = true, sp = "#db4b4b" }
+				hl.DiagnosticUnderlineWarn = { undercurl = true, sp = "#e0af68" }
+				hl.DiagnosticUnderlineInfo = { undercurl = true, sp = "#0db9d7" }
+				hl.DiagnosticUnderlineHint = { undercurl = true, sp = "#1abc9c" }
+				hl.SpellBad = { undercurl = true, sp = "#db4b4b" }
+				hl.SpellCap = { undercurl = true, sp = "#e0af68" }
+				hl.SpellLocal = { undercurl = true, sp = "#0db9d7" }
+				hl.SpellRare = { undercurl = true, sp = "#1abc9c" }
 			end,
 		})
 
