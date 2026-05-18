@@ -140,9 +140,13 @@ return {
 				local tag_color = "#565f89"
 				hl.MdTagFallback = { fg = tag_color }
 
-				-- code block language label (e.g. ```lua) green
-				hl.RenderMarkdownLanguage = { fg = "#9ece6a", bold = true }
-				hl.RenderMarkdownCodeLanguage = { fg = "#9ece6a", bold = true }
+				-- code block language label (e.g. ```lua) green — treesitter paints the
+				-- in-source word, render-markdown paints the right-border virt_text label
+				hl.RenderMarkdownLanguage = { link = "Comment" }
+				hl.RenderMarkdownCodeLanguage = { link = "Comment" }
+				hl["@label.markdown"] = { link = "Comment" }
+				hl["@string.special.markdown"] = { link = "Comment" }
+				hl["@property.markdown"] = { link = "Comment" }
 
 				-- unchecked todo `- [ ]` orange, regular weight
 				local orange2 = "#ff9e64"
