@@ -76,17 +76,18 @@ Stage 8 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Read shipped r
 4. **Compare diff vs spec.** Walk the `sp###.## tasks` blocks against the actual code change. For each task, note the file/function it landed in vs what the design predicted. Discrepancies feed the rewrite.
 5. **Re-read `$AKM_ROOT/docs/notes/im###.md`.** Confirm the `## approach` / `## components` / `## data_model` / `## api_surface` reflect shipped reality. List the sections that need rewriting.
 6. **Re-read each consumed `$AKM_ROOT/docs/notes/ft###.md`.** For each, check whether its `## api_surface` or `## providing` matches what the implementation actually called / consumed. List the features needing update.
-7. **Re-read every Accepted `$AKM_ROOT/docs/notes/adr####.md` under the spec's categories.** For each, check whether the implementation respected the decision. If a decision shifted, draft a new ADR.
-8. **Mine bd notes for discovered scope.** `bd show <epic-id>` and `bd list --parent <epic-id>`. Walk each closed task's notes for "Discovered:" entries, deviation logs, and BLOCKED-then-resolved sequences. Each unique discovery becomes either a new `us###` draft or a follow-up task (filed at this stage if not already).
-9. **Write the rewrites + new entries on main**, every path under `$AKM_ROOT`, in this order: ADRs first (decisions bind the rest), `ft###` updates next, `im###` rewrite next, `us###` drafts last, then `$AKM_ROOT/docs/product.md` to attach `>> [[im###]]` to the shipped story bullet.
-10. **Commit on main.** Stage every retro-touched file together and commit as one retrospective:
+7. **Scan `im###` body for Feature-extraction candidates** (pragmatic, not aggressive — see Key Principles). Walk the `## components` list and the `## approach` narrative looking for code that *named* existing or in-flight `im###` would also consume. Apply the signal table: two+ real consumers → propose extraction; one real + one named draft → flag for human; speculative reuse → leave in `im###`. Output a `Candidate Features:` block in the final summary so the human decides whether to mint each `ft###` now or defer. **Do not extract silently** — vertical over horizontal stays the default.
+8. **Re-read every Accepted `$AKM_ROOT/docs/notes/adr####.md` under the spec's categories.** For each, check whether the implementation respected the decision. If a decision shifted, draft a new ADR.
+9. **Mine bd notes for discovered scope.** `bd show <epic-id>` and `bd list --parent <epic-id>`. Walk each closed task's notes for "Discovered:" entries, deviation logs, and BLOCKED-then-resolved sequences. Each unique discovery becomes either a new `us###` draft or a follow-up task (filed at this stage if not already).
+10. **Write the rewrites + new entries on main**, every path under `$AKM_ROOT`, in this order: ADRs first (decisions bind the rest), `ft###` updates next, `im###` rewrite next, `us###` drafts last, then `$AKM_ROOT/docs/product.md` to attach `>> [[im###]]` to the shipped story bullet. Feature-extraction candidates flagged in step 7 stay as a summary block for the human — do NOT mint `ft###` from a candidate without confirmation.
+11. **Commit on main.** Stage every retro-touched file together and commit as one retrospective:
     ```bash
     git -C "$AKM_ROOT" add docs/notes/im<NNN>.md docs/notes/adr<NNNN>.md docs/notes/ft<NNN>.md docs/notes/us<NNN>.md docs/product.md
     git -C "$AKM_ROOT" commit -m "feat(akm): retro sp<NNN>"
     ```
     Extend the subject with new ids in brackets when the retro mints them, e.g. `feat(akm): retro sp012 [+ adr0014, ft007, us023]`. Only stage files that actually changed; a minimal retro may be `im<NNN>.md` alone.
-11. **Close the bd epic** with a one-line reason summarizing what shipped + the count of zettels touched (e.g., "Retro: rotate_secret + scheduler + synthetic-check shipped. Rewrote im002, minted adr0004 (lock granularity), updated ft002 (rotate_secret surface), drafted us004 (cross-region failover)").
-12. **Verify.** Commit landed on main (`git -C "$AKM_ROOT" log -1 --oneline` matches the convention); every file path under `$AKM_ROOT`; bd epic shows `closed` with retro-shaped reason.
+12. **Close the bd epic** with a one-line reason summarizing what shipped + the count of zettels touched (e.g., "Retro: rotate_secret + scheduler + synthetic-check shipped. Rewrote im002, minted adr0004 (lock granularity), updated ft002 (rotate_secret surface), drafted us004 (cross-region failover). Candidates flagged: ft-extract `retry_with_jitter` from im002 — would also serve us005").
+13. **Verify.** Commit landed on main (`git -C "$AKM_ROOT" log -1 --oneline` matches the convention); every file path under `$AKM_ROOT`; bd epic shows `closed` with retro-shaped reason.
 
 ## Disambiguation
 
@@ -114,6 +115,18 @@ Stage 8 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Read shipped r
   | Both a strategic choice *and* the capability it produced | **one of each** — ADR records the decision, Feature records the surface |
 
   Test: "Could a future engineer choose this differently?" Yes → ADR (it's a commitment). "Could a future engineer reuse this?" Yes → Feature (it's a building block). Both → both.
+
+- **Feature extraction is pragmatic, not aggressive — vertical over horizontal.** Scan the rewritten `im###` body for code or surfaces that one or two *existing or planned* Implementations would also consume. Surface those as **candidate Features** for the human ("Possible ft### extraction: <module> — would also serve us<XYZ>"). Default bias is to leave glue in `im###` (vertical solution). Extract to `ft###` only when the reuse is concrete and named:
+
+  | Signal | Action |
+  |---|---|
+  | Two+ shipped or in-flight `im###` already need this code | extract to `ft###` (real reuse) |
+  | One shipped `im###` + one named draft `us###` that will obviously need it | flag as candidate, decide with human |
+  | "Feels reusable" / "someone might want this later" | leave in `im###` — speculative reuse is YAGNI |
+  | Internal helper used only by this `im###` | leave in `im###` — not a Feature |
+  | Domain-specific wrapper around a shared `ft###` | leave in `im###` — that's the vertical layer the Feature exists to serve |
+
+  Why pragmatic: premature Feature extraction freezes the wrong API surface. The cost of a wrong `ft###` is *higher* than the cost of duplicated glue — `ft###` enters the append-only-contract regime and every consumer pays the abstraction tax. When in doubt, file a candidate for the human to decide; don't extract silently.
 
 - **Discovered scope becomes drafts, not silent edits.** New `us###` at `status: draft` is the cheapest moment to capture follow-up work. The next `idea-implement` cycle picks them up. Don't expand silently into the closing epic.
 - **Bd epic close carries the retro signal.** The `--reason` text is the one-line summary the team will see when they search history later. Make it specific: counts, names, what shifted.
