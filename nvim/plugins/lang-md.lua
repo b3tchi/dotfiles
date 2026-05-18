@@ -62,6 +62,9 @@ return {
 				position = "right",
 				language_icon = false,
 			},
+			bullet = {
+				icons = { "•", "•", "•", "•" },
+			},
 		},
 	},
 	{

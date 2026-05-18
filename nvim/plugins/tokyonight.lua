@@ -77,9 +77,13 @@ return {
 				--
 				-- --separator between panes same as LineNr
 				hl.WinSeparator = { fg = lineNr, bg = lineNr }
+
+				-- inline `code` in markdown: dark bg + light green fg, mirror fenced block style
+				hl.RenderMarkdownCodeInline = { bg = "#1a1b26", fg = "#9ece6a" }
 				--
 				-- --foldes
-				-- hl.Folded = { bg = "#222436" } --fold-ufo
+				hl.Folded = { bg = "#16161e", fg = "#ff9e64" } --fold-ufo (orange line when folded)
+				hl.UfoFoldedEllipsis = { bg = "#16161e", fg = "#ff9e64" }
 			end,
 		})
 
