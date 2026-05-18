@@ -86,6 +86,52 @@ section headings; this catalog defines their schemas:
 
 ---
 
+## Workspace Resolution — main worktree is the AKM home
+
+AKM zettels (`us###`, `pn###`, `ft###`, `im###`, `adr####`, `cat###`)
+plus the singleton hubs (`product.md`, `board.md`, `archive.md`) describe
+shared product knowledge. They live on **main**, never on feature branches.
+
+When code work happens in a git worktree on a feature branch, AKM writes
+must still target the main worktree's `docs/notes/` — otherwise the
+knowledge model fractures across branches and wikilinks dangle on merge.
+
+**Rule for skills that read or write AKM files:** resolve the AKM root via
+the `akm-root` helper, then anchor every path to `<akm-root>/docs/...`.
+
+```bash
+AKM_ROOT="$(akm-root)"
+# write a story: $AKM_ROOT/docs/notes/us015.md
+# read a feature: $AKM_ROOT/docs/notes/ft003.md
+```
+
+`akm-root` returns the absolute path of the worktree on the project's
+default branch (origin/HEAD → init.defaultBranch → main → master). If
+no worktree is checked out on the default branch, it errors with a hint
+to create one. Outside a git repo it falls back to the current directory,
+which keeps non-git AKM workspaces working.
+
+**Commit policy.** Writes during exploratory or draft phases stay
+*unstaged or staged-only* — the lifecycle commits AKM on stage transitions
+that mark a stable artifact:
+
+| Stage transition                          | Commit on main |
+|-------------------------------------------|----------------|
+| story `draft` born (story-write)          | stage only     |
+| story `draft → ready` (spec-writing)      | commit         |
+| spec `idea → spec → ready` (spec-ready)   | commit         |
+| spec `done` and archived (work-merge)     | commit         |
+| ADR added or superseded (adr-write)       | commit         |
+| im### / ft### finalize (spec-refinement)  | commit         |
+
+Skills outside those transitions write through to main's working tree and
+stage the file (`git -C "$AKM_ROOT" add <path>`); the next stage skill
+commits the accumulated AKM mutations together. This keeps the main-branch
+history readable (one commit per lifecycle event) while still landing every
+write on main from any worktree.
+
+---
+
 ## Product — `product.md` *(singleton hub)*
 
 **Purpose.** Central navigation hub for the workspace. Lists every

@@ -27,6 +27,25 @@ Then close the bd epic.
 
 **Announce at start:** "Using spec-retro skill to refresh the AKM graph post-merge."
 
+## AKM Workspace Resolution
+
+The implementation card, new ADRs, updated features, new story drafts, and the product hub are shared knowledge — they live on **main**, even though the diff being analyzed shipped on a feature branch. Resolve before any read or write:
+
+```bash
+AKM_ROOT="$(akm-root)"
+```
+
+`akm-root` returns the main-worktree path (default branch); outside git, cwd. Anchor every AKM path on `$AKM_ROOT` (`$AKM_ROOT/docs/notes/im<NNN>.md`, `$AKM_ROOT/docs/notes/adr<NNNN>.md`, `$AKM_ROOT/docs/notes/ft<NNN>.md`, `$AKM_ROOT/docs/notes/us<NNN>.md`, `$AKM_ROOT/docs/product.md`, `$AKM_ROOT/docs/notes/spec/sp<NNN>.md`). The diff itself (`git log` / `git diff`) is read from whichever worktree merged the work; only the AKM writes have to land under `$AKM_ROOT`. If `akm-root` errors, surface its stderr and abort — never silently land retro mutations on the feature branch.
+
+spec-retro is a **transition skill that commits on main** per the AKM commit policy. The post-merge knowledge-graph refresh is multi-file and lands as one retrospective commit covering every zettel touched:
+
+```bash
+git -C "$AKM_ROOT" add docs/notes/im<NNN>.md docs/notes/adr<NNNN>.md docs/notes/ft<NNN>.md docs/notes/us<NNN>.md docs/product.md
+git -C "$AKM_ROOT" commit -m "feat(akm): retro sp<NNN>"
+```
+
+Commit-message convention: `feat(akm): retro sp<NNN>` — base form. When the retro mints additional zettels, extend the subject with the new ids in brackets, e.g. `feat(akm): retro sp012 [+ adr0014, ft007, us023]`. Stage every file actually changed (some retros touch only `im###`; others touch all five categories). See the per-stage commit table in `docs/notes/akm.md#workspace-resolution`.
+
 ## AKM hooks
 
 Stage 8 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Read shipped reality, write back into the persistent graph.
@@ -42,29 +61,38 @@ Stage 8 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Read shipped r
 
 **Writes:**
 
-- `im###` — rewrite `## approach` / `## components` / `## data_model` / `## api_surface` body sections. Keep the frontmatter (`status: accepted`); only the narrative changes. **Reference discipline:** every consumed `ft###`, binding `adr####`, and source `us###` continues to appear as wikilinks.
-- `adr####` — mint a *new* ADR file (`docs/notes/adr####.md`, four-digit zero-padded next id) per decision that shifted. If the new ADR supersedes an Accepted one, flip the old ADR's `status: Accepted → Superseded` and append `## superseded_by` with the new wikilink.
-- `ft###` — update body sections in place when the feature's surface widened compatibly. If incompatible, mint a new `ft###` and supersede the old one via `## superseded_by`.
-- `us###` — draft new stories (`status: draft`) for follow-up scope. Use `story-write` to ensure the schema is right (frontmatter aliases / status / created, body role / want / because / acceptance_criteria).
+- `$AKM_ROOT/docs/notes/im###.md` — rewrite `## approach` / `## components` / `## data_model` / `## api_surface` body sections. Keep the frontmatter (`status: accepted`); only the narrative changes. **Reference discipline:** every consumed `ft###`, binding `adr####`, and source `us###` continues to appear as wikilinks.
+- `$AKM_ROOT/docs/notes/adr####.md` — mint a *new* ADR file (four-digit zero-padded next id) per decision that shifted. If the new ADR supersedes an Accepted one, flip the old ADR's `status: Accepted → Superseded` (in its own `$AKM_ROOT/docs/notes/adr####.md`) and append `## superseded_by` with the new wikilink.
+- `$AKM_ROOT/docs/notes/ft###.md` — update body sections in place when the feature's surface widened compatibly. If incompatible, mint a new `ft###` and supersede the old one via `## superseded_by`.
+- `$AKM_ROOT/docs/notes/us###.md` — draft new stories (`status: draft`) for follow-up scope. Use `story-write` to ensure the schema is right (frontmatter aliases / status / created, body role / want / because / acceptance_criteria).
+- `$AKM_ROOT/docs/product.md` — add `>> [[im<NNN>]]` annotation to the source story bullet under `## Stories` (lifecycle hook: shipped story gets its implementation link).
 - bd epic — `bd close <epic-id> --reason "Retro: <one-line summary>. Im rewritten. N new ADRs / M ft updates / K us drafts."`
 
 ## Entry-specific checklist
 
-1. **Identify target sp###.** Verify `sp###.status: done` and it lives under `docs/archive.md ## done` (work-merge precondition). If status is anything else, route back to `work-merge`.
-2. **Read the shipped diff.** `git log <merge-base>..HEAD --oneline` and `git diff <merge-base>..HEAD` for files under `src/` plus any moved AKM zettels. The diff is the ground truth.
-3. **Compare diff vs spec.** Walk the `sp###.## tasks` blocks against the actual code change. For each task, note the file/function it landed in vs what the design predicted. Discrepancies feed the rewrite.
-4. **Re-read `im###`.** Confirm the `## approach` / `## components` / `## data_model` / `## api_surface` reflect shipped reality. List the sections that need rewriting.
-5. **Re-read each consumed `ft###`.** For each, check whether its `## api_surface` or `## providing` matches what the implementation actually called / consumed. List the features needing update.
-6. **Re-read every Accepted `adr####` under the spec's categories.** For each, check whether the implementation respected the decision. If a decision shifted, draft a new ADR.
-7. **Mine bd notes for discovered scope.** `bd show <epic-id>` and `bd list --parent <epic-id>`. Walk each closed task's notes for "Discovered:" entries, deviation logs, and BLOCKED-then-resolved sequences. Each unique discovery becomes either a new `us###` draft or a follow-up task (filed at this stage if not already).
-8. **Write the rewrites + new entries** in this order: ADRs first (decisions bind the rest), `ft###` updates next, `im###` rewrite next, `us###` drafts last.
-9. **Close the bd epic** with a one-line reason summarizing what shipped + the count of zettels touched (e.g., "Retro: rotate_secret + scheduler + synthetic-check shipped. Rewrote im002, minted adr0004 (lock granularity), updated ft002 (rotate_secret surface), drafted us004 (cross-region failover)").
+1. **Resolve AKM root.** `AKM_ROOT="$(akm-root)"` — every AKM path anchors on it. Abort with the helper's stderr if it errors.
+2. **Identify target sp###.** Verify `$AKM_ROOT/docs/notes/spec/sp###.md` shows `status: done` and the spec lives under `$AKM_ROOT/docs/archive.md ## done` (work-merge precondition). If status is anything else, route back to `work-merge`.
+3. **Read the shipped diff.** `git log <merge-base>..HEAD --oneline` and `git diff <merge-base>..HEAD` for files under `src/` plus any moved AKM zettels. The diff is the ground truth.
+4. **Compare diff vs spec.** Walk the `sp###.## tasks` blocks against the actual code change. For each task, note the file/function it landed in vs what the design predicted. Discrepancies feed the rewrite.
+5. **Re-read `$AKM_ROOT/docs/notes/im###.md`.** Confirm the `## approach` / `## components` / `## data_model` / `## api_surface` reflect shipped reality. List the sections that need rewriting.
+6. **Re-read each consumed `$AKM_ROOT/docs/notes/ft###.md`.** For each, check whether its `## api_surface` or `## providing` matches what the implementation actually called / consumed. List the features needing update.
+7. **Re-read every Accepted `$AKM_ROOT/docs/notes/adr####.md` under the spec's categories.** For each, check whether the implementation respected the decision. If a decision shifted, draft a new ADR.
+8. **Mine bd notes for discovered scope.** `bd show <epic-id>` and `bd list --parent <epic-id>`. Walk each closed task's notes for "Discovered:" entries, deviation logs, and BLOCKED-then-resolved sequences. Each unique discovery becomes either a new `us###` draft or a follow-up task (filed at this stage if not already).
+9. **Write the rewrites + new entries on main**, every path under `$AKM_ROOT`, in this order: ADRs first (decisions bind the rest), `ft###` updates next, `im###` rewrite next, `us###` drafts last, then `$AKM_ROOT/docs/product.md` to attach `>> [[im###]]` to the shipped story bullet.
+10. **Commit on main.** Stage every retro-touched file together and commit as one retrospective:
+    ```bash
+    git -C "$AKM_ROOT" add docs/notes/im<NNN>.md docs/notes/adr<NNNN>.md docs/notes/ft<NNN>.md docs/notes/us<NNN>.md docs/product.md
+    git -C "$AKM_ROOT" commit -m "feat(akm): retro sp<NNN>"
+    ```
+    Extend the subject with new ids in brackets when the retro mints them, e.g. `feat(akm): retro sp012 [+ adr0014, ft007, us023]`. Only stage files that actually changed; a minimal retro may be `im<NNN>.md` alone.
+11. **Close the bd epic** with a one-line reason summarizing what shipped + the count of zettels touched (e.g., "Retro: rotate_secret + scheduler + synthetic-check shipped. Rewrote im002, minted adr0004 (lock granularity), updated ft002 (rotate_secret surface), drafted us004 (cross-region failover)").
+12. **Verify.** Commit landed on main (`git -C "$AKM_ROOT" log -1 --oneline` matches the convention); every file path under `$AKM_ROOT`; bd epic shows `closed` with retro-shaped reason.
 
 ## Disambiguation
 
 - **`sp###` does not exist** → block.
 - **`sp###` at `status: idea` / `spec` / `ready`** → route back to the appropriate stage; spec-retro is post-merge only.
-- **`sp###` at `status: done` but board entry still on `docs/board.md ## ready`** → work-merge didn't finish its archive move; route back to `work-merge`.
+- **`sp###` at `status: done` but board entry still on `$AKM_ROOT/docs/board.md ## ready`** → work-merge didn't finish its archive move; route back to `work-merge`.
 - **Branch not actually merged** (no merge commit visible from `git log <base>..HEAD`) → block; nothing shipped to retro on.
 - **bd epic already closed** → either retro already ran (idempotent re-run is fine if you just want to verify) or someone closed the epic out-of-process. Verify with `bd show <epic-id> --reason` and either proceed (if reason was retro-shaped) or restore.
 

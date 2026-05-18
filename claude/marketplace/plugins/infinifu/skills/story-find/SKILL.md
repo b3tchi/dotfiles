@@ -16,11 +16,26 @@ It is read-only. It does not modify any AKM zettel, does not flip statuses, and 
 
 **Announce at start:** "Using story-find skill to surface stories touching this area + their validation state."
 
+## AKM Workspace Resolution
+
+Readers always anchor on the main worktree's view of the AKM, never the
+feature worktree's local copy (which may be stale or branch-divergent).
+Resolve first:
+
+```bash
+AKM_ROOT="$(akm-root)"
+```
+
+All lookups anchor on `$AKM_ROOT/docs/notes/...`. If `akm-root` errors,
+surface its stderr and fall back to cwd with the warning *"reading from
+cwd worktree — may be stale; check out the default branch for canonical
+view"*.
+
 ## Storage
 
-**Backend:** AKM. Stories live as individual markdown zettels in `docs/notes/us###.md`. The schema is documented in `docs/notes/akm.md`; the slice this skill needs is the same as in `story-read`.
+**Backend:** AKM. Stories live as individual markdown zettels in `$AKM_ROOT/docs/notes/us###.md`. The schema is documented in `docs/notes/akm.md`; the slice this skill needs is the same as in `story-read`.
 
-If `docs/notes/` does not contain any `us*.md` files: tell the user "No stories found under docs/notes/ — nothing to search." Do not fabricate matches.
+If `$AKM_ROOT/docs/notes/` does not contain any `us*.md` files: tell the user "No stories found — nothing to search." Do not fabricate matches.
 
 ### Zettel slice this skill reads
 
@@ -126,13 +141,13 @@ The synonym map is a hint, not a hard rule — if the user query is already spec
 
 A story matches if `score >= 1`. Lower scores indicate weaker relevance.
 
-**Reading shortcuts.** AKM tag wikilinks live in the H1; `head -10` on each `docs/notes/us*.md` is usually enough to capture frontmatter + H1. For body-field matches you need a fuller read. A reasonable strategy:
+**Reading shortcuts.** AKM tag wikilinks live in the H1; `head -10` on each `$AKM_ROOT/docs/notes/us*.md` is usually enough to capture frontmatter + H1. For body-field matches you need a fuller read. A reasonable strategy:
 
 1. Read the H1 of every story via `head -10`; score against tag wikilinks.
 2. For stories that scored on tags, do a full read to render the checklist.
-3. For stories that scored 0 on tags, do a body grep across all `docs/notes/us*.md` files for the remaining tokens and add body-field scores.
+3. For stories that scored 0 on tags, do a body grep across all `$AKM_ROOT/docs/notes/us*.md` files for the remaining tokens and add body-field scores.
 
-`grep -l '\[\[<token>\]\]' docs/notes/us*.md` finds tag matches cheaply. For substring matches across body fields, `grep -i '<token>' docs/notes/us*.md` returns hits with paths.
+`grep -l '\[\[<token>\]\]' "$AKM_ROOT/docs/notes/"us*.md` finds tag matches cheaply. For substring matches across body fields, `grep -i '<token>' "$AKM_ROOT/docs/notes/"us*.md` returns hits with paths.
 
 ## Step 3: Rank and Cap
 
@@ -197,7 +212,7 @@ If any matches scored below 2 (weak): mention them as "weak matches" so the user
 
 ## What This Skill Does NOT Do
 
-- It does not modify any zettel under `docs/notes/`.
+- It does not modify any zettel under `$AKM_ROOT/docs/notes/`.
 - It does not flip statuses, even if all criteria appear met.
 - It does not run tests, scan code, or verify acceptance criteria against the actual system. Validation here means *what the zettel claims*, not what the running system proves.
 - It does not invent acceptance criteria or relationships not present in the zettels.

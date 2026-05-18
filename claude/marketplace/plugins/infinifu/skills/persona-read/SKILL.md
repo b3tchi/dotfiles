@@ -11,11 +11,26 @@ Read persona zettels under `docs/notes/pn###.md` and present them in the format 
 
 **Announce at start:** "Using persona-read skill to surface roles."
 
+## AKM Workspace Resolution
+
+Readers always anchor on the main worktree's view of the AKM, never the
+feature worktree's local copy (which may be stale or branch-divergent).
+Resolve first:
+
+```bash
+AKM_ROOT="$(akm-root)"
+```
+
+All lookups anchor on `$AKM_ROOT/docs/notes/...`. If `akm-root` errors,
+surface its stderr and fall back to cwd with the warning *"reading from
+cwd worktree — may be stale; check out the default branch for canonical
+view"*.
+
 ## Storage
 
-**Backend:** AKM (Agentic Knowledge Model). Personas live as individual markdown zettels in `docs/notes/pn###.md`. Schema is documented in `docs/notes/akm.md`; this skill only needs the slice below.
+**Backend:** AKM (Agentic Knowledge Model). Personas live as individual markdown zettels in `$AKM_ROOT/docs/notes/pn###.md`. Schema is documented in `docs/notes/akm.md`; this skill only needs the slice below.
 
-If `docs/notes/` does not contain any `pn*.md` files: tell the user "No personas found under docs/notes/. Use persona-write to add one." Don't fabricate.
+If `$AKM_ROOT/docs/notes/` does not contain any `pn*.md` files: tell the user "No personas found. Use persona-write to add one." Don't fabricate.
 
 ### Zettel slice this skill needs
 
@@ -90,7 +105,7 @@ Ambiguous between table and render → prefer table.
 
 ## Reading the zettels
 
-1. **List ids.** `ls docs/notes/pn*.md`.
+1. **List ids.** `ls "$AKM_ROOT/docs/notes/"pn*.md`.
 2. **Read per mode:**
    - **Detail** — read only the matching file.
    - **Table** — `head -25` is usually enough (frontmatter + `## name` + first line of `## summary`).

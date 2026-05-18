@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# akm-root — print absolute path to AKM workspace root.
+#
+# Resolution rule:
+#   1. If cwd is inside a git repo, locate the worktree whose branch is the
+#      project's default (origin/HEAD, falling back to local 'main' or 'master').
+#      Return that worktree's absolute path. This is the AKM root.
+#   2. If no such worktree exists, exit 1 with a hint.
+#   3. If cwd is not in a git repo, print cwd (so non-git AKM workspaces still work).
+#
+# Why: AKM zettels (docs/notes/us###.md, pn###.md, etc.) describe shared product
+# knowledge and must live on main. Code work in a feature worktree should not
+# scatter AKM artifacts across branches. Writer/reader skills delegate path
+# resolution here so the rule is consistent.
+#
+# Usage:
+#   akm-root                     # print path, exit 0 on success
+#   AKM_ROOT_OVERRIDE=/p akm-root  # force a path (testing / non-standard layouts)
+
+set -euo pipefail
+
+if [ -n "${AKM_ROOT_OVERRIDE:-}" ]; then
+    printf '%s\n' "$AKM_ROOT_OVERRIDE"
+    exit 0
+fi
+
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    pwd
+    exit 0
+fi
+
+# Resolve default branch: origin/HEAD → init.defaultBranch → main → master.
+default_branch=""
+if remote_head="$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)"; then
+    default_branch="${remote_head#origin/}"
+fi
+if [ -z "$default_branch" ]; then
+    default_branch="$(git config --get init.defaultBranch 2>/dev/null || true)"
+fi
+if [ -z "$default_branch" ]; then
+    for cand in main master; do
+        if git show-ref --verify --quiet "refs/heads/$cand"; then
+            default_branch="$cand"
+            break
+        fi
+    done
+fi
+if [ -z "$default_branch" ]; then
+    echo "akm-root: cannot determine default branch (no origin/HEAD, no init.defaultBranch, no main/master)" >&2
+    exit 1
+fi
+
+# Find worktree on default branch.
+main_path="$(git worktree list --porcelain | awk -v b="refs/heads/$default_branch" '
+    /^worktree / { wt = substr($0, 10) }
+    /^branch /   { if ($2 == b) { print wt; exit } }
+')"
+
+if [ -z "$main_path" ]; then
+    echo "akm-root: no worktree on branch '$default_branch' found. Create one with 'git worktree add ../main $default_branch' or check out '$default_branch' directly." >&2
+    exit 1
+fi
+
+printf '%s\n' "$main_path"

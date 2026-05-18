@@ -11,11 +11,26 @@ Read user-story zettels under `docs/notes/us###.md` and present them in the form
 
 **Announce at start:** "Using story-read skill to surface the backlog."
 
+## AKM Workspace Resolution
+
+Readers always anchor on the main worktree's view of the AKM, never the
+feature worktree's local copy (which may be stale or branch-divergent).
+Resolve first:
+
+```bash
+AKM_ROOT="$(akm-root)"
+```
+
+All lookups anchor on `$AKM_ROOT/docs/notes/...`. If `akm-root` errors,
+surface its stderr and fall back to cwd with the warning *"reading from
+cwd worktree — may be stale; check out the default branch for canonical
+view"*.
+
 ## Storage
 
-**Backend:** AKM (Agentic Knowledge Model). Stories live as individual markdown zettels in `docs/notes/us###.md`. The schema is documented in `docs/notes/akm.md`; this skill only needs the slice below.
+**Backend:** AKM (Agentic Knowledge Model). Stories live as individual markdown zettels in `$AKM_ROOT/docs/notes/us###.md`. The schema is documented in `docs/notes/akm.md`; this skill only needs the slice below.
 
-If `docs/notes/` does not contain any `us*.md` files: tell the user "No stories found under docs/notes/. Use story-write to add one." Don't fabricate a backlog.
+If `$AKM_ROOT/docs/notes/` does not contain any `us*.md` files: tell the user "No stories found. Use story-write to add one." Don't fabricate a backlog.
 
 ### Zettel slice this skill needs
 
@@ -96,7 +111,7 @@ If the query is ambiguous between table and render, prefer **table** — it's mo
 
 Two-step pattern: list files cheaply, parse only what you need.
 
-1. **List ids.** `ls docs/notes/us*.md` (or in-process equivalent). The filename slug is the id.
+1. **List ids.** `ls "$AKM_ROOT/docs/notes/"us*.md` (or in-process equivalent). The filename slug is the id.
 2. **Read per mode:**
    - **Detail mode** — read only the one matching file.
    - **Table mode** — read all `us*.md` to extract frontmatter + role + title; you can skip body sections after `## want` is found if your tooling supports it, but a full read per file is fine (these are small).
@@ -196,7 +211,7 @@ Translate natural-language filters into structured matches:
 
 Multiple filters compose with AND. Example: "draft stories about catalog" → `status == draft AND any-text-field-or-tag contains 'catalog'`.
 
-For role filtering, remember the role field is `[[pn###|alias]]` — match against the alias label, not the persona id. If you need the alias and only have the id, read `docs/notes/pn###.md` and pick the first `aliases:` entry. Cache that lookup if you read more than one story.
+For role filtering, remember the role field is `[[pn###|alias]]` — match against the alias label, not the persona id. If you need the alias and only have the id, read `$AKM_ROOT/docs/notes/pn###.md` and pick the first `aliases:` entry. Cache that lookup if you read more than one story.
 
 ## What This Skill Does NOT Do
 

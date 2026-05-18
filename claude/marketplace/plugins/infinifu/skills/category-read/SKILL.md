@@ -13,13 +13,28 @@ Three output modes — pick one, don't combine.
 
 **Announce at start:** "Using category-read skill to surface the taxonomy."
 
+## AKM Workspace Resolution
+
+Readers always anchor on the main worktree's view of the AKM, never the
+feature worktree's local copy (which may be stale or branch-divergent).
+Resolve first:
+
+```bash
+AKM_ROOT="$(akm-root)"
+```
+
+All lookups anchor on `$AKM_ROOT/docs/notes/...`. If `akm-root` errors,
+surface its stderr and fall back to cwd with the warning *"reading from
+cwd worktree — may be stale; check out the default branch for canonical
+view"*.
+
 ## Storage
 
-**Backend:** AKM. Categories live in `docs/notes/cat###.md`. Schema in `docs/notes/akm.md`; this skill only needs the slice below.
+**Backend:** AKM. Categories live in `$AKM_ROOT/docs/notes/cat###.md`. Schema in `docs/notes/akm.md`; this skill only needs the slice below.
 
 Categories are append-only and `status` is always `stable`. There is no draft/superseded lifecycle for categories — renaming is a wikilink-graph operation.
 
-If no `cat*.md` files: tell the user "No categories found under docs/notes/. Use category-write to add one."
+If no `cat*.md` files under `$AKM_ROOT/docs/notes/`: tell the user "No categories found. Use category-write to add one."
 
 ### Zettel slice this skill needs
 
@@ -53,7 +68,7 @@ Categories are taxonomy buckets — their value is in the zettels that reference
 - **Features in this category** — `ft###` zettels whose H1 contains the `[[cat###]]` link.
 - **Implementations in this category** — `im###` zettels whose H1 contains the `[[cat###]]` link.
 
-This is a cheap grep: `grep -l '\[\[cat003\]\]' docs/notes/{adr,ft,im}*.md`. Cache the count; render up to 3 example ids per type in detail mode.
+This is a cheap grep: `grep -l '\[\[cat003\]\]' "$AKM_ROOT/docs/notes/"{adr,ft,im}*.md`. Cache the count; render up to 3 example ids per type in detail mode.
 
 For table mode, count-only (no list) keeps the table scannable.
 
@@ -91,7 +106,7 @@ digraph mode_select {
 
 ## Reading the zettels
 
-1. List ids: `ls docs/notes/cat*.md`.
+1. List ids: `ls "$AKM_ROOT/docs/notes/"cat*.md`.
 2. Per mode:
    - **Detail** — single file + usage cross-reference.
    - **Table** — `head -15` (frontmatter + `## name` + `## summary` first line). Usage counts via grep per category.

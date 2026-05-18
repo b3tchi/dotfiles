@@ -11,13 +11,28 @@ Read ADR zettels under `docs/notes/adr####.md` and present them in the format th
 
 **Announce at start:** "Using adr-read skill to surface decisions."
 
+## AKM Workspace Resolution
+
+Readers always anchor on the main worktree's view of the AKM, never the
+feature worktree's local copy (which may be stale or branch-divergent).
+Resolve first:
+
+```bash
+AKM_ROOT="$(akm-root)"
+```
+
+All lookups anchor on `$AKM_ROOT/docs/notes/...`. If `akm-root` errors,
+surface its stderr and fall back to cwd with the warning *"reading from
+cwd worktree — may be stale; check out the default branch for canonical
+view"*.
+
 ## Storage
 
-**Backend:** AKM. ADRs live in `docs/notes/adr####.md` (four-digit zero-padded id, e.g. `adr0007`). Schema in `docs/notes/akm.md`; this skill only needs the slice below.
+**Backend:** AKM. ADRs live in `$AKM_ROOT/docs/notes/adr####.md` (four-digit zero-padded id, e.g. `adr0007`). Schema in `docs/notes/akm.md`; this skill only needs the slice below.
 
 ADRs are immutable in spirit: never edited in place, only superseded by a new ADR. The status field captures lifecycle stages.
 
-If no `adr*.md` files: tell the user "No ADRs found under docs/notes/. Use adr-write to add one."
+If no `adr*.md` files under `$AKM_ROOT/docs/notes/`: tell the user "No ADRs found. Use adr-write to add one."
 
 ### Zettel slice this skill needs
 
@@ -89,7 +104,7 @@ digraph mode_select {
 
 ## Reading the zettels
 
-1. List ids: `ls docs/notes/adr*.md`. Filenames are `adr0001.md` … `adr9999.md`.
+1. List ids: `ls "$AKM_ROOT/docs/notes/"adr*.md`. Filenames are `adr0001.md` … `adr9999.md`.
 2. Per mode:
    - **Detail** — single file.
    - **Table** — `head -25` is usually enough (frontmatter + H1 + `## title`).

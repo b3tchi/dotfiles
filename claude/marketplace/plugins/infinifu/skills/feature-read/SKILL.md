@@ -11,11 +11,26 @@ Read feature zettels under `docs/notes/ft###.md` and present them in the format 
 
 **Announce at start:** "Using feature-read skill to surface capabilities."
 
+## AKM Workspace Resolution
+
+Readers always anchor on the main worktree's view of the AKM, never the
+feature worktree's local copy (which may be stale or branch-divergent).
+Resolve first:
+
+```bash
+AKM_ROOT="$(akm-root)"
+```
+
+All lookups anchor on `$AKM_ROOT/docs/notes/...`. If `akm-root` errors,
+surface its stderr and fall back to cwd with the warning *"reading from
+cwd worktree — may be stale; check out the default branch for canonical
+view"*.
+
 ## Storage
 
-**Backend:** AKM. Features live as individual markdown zettels in `docs/notes/ft###.md`. Schema is documented in `docs/notes/akm.md`; this skill only needs the slice below.
+**Backend:** AKM. Features live as individual markdown zettels in `$AKM_ROOT/docs/notes/ft###.md`. Schema is documented in `docs/notes/akm.md`; this skill only needs the slice below.
 
-If `docs/notes/` has no `ft*.md` files: tell the user "No features found under docs/notes/. Use feature-write to add one."
+If `$AKM_ROOT/docs/notes/` has no `ft*.md` files: tell the user "No features found. Use feature-write to add one."
 
 ### Zettel slice this skill needs
 
@@ -95,7 +110,7 @@ digraph mode_select {
 
 ## Reading the zettels
 
-1. List ids: `ls docs/notes/ft*.md`.
+1. List ids: `ls "$AKM_ROOT/docs/notes/"ft*.md`.
 2. Per mode:
    - **Detail** — single file.
    - **Table** — `head -30` is enough (frontmatter + H1 + `## providing` first line).

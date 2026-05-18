@@ -11,11 +11,26 @@ Read implementation zettels under `docs/notes/im###.md` and present them in the 
 
 **Announce at start:** "Using implementation-read skill to surface solution records."
 
+## AKM Workspace Resolution
+
+Readers always anchor on the main worktree's view of the AKM, never the
+feature worktree's local copy (which may be stale or branch-divergent).
+Resolve first:
+
+```bash
+AKM_ROOT="$(akm-root)"
+```
+
+All lookups anchor on `$AKM_ROOT/docs/notes/...`. If `akm-root` errors,
+surface its stderr and fall back to cwd with the warning *"reading from
+cwd worktree — may be stale; check out the default branch for canonical
+view"*.
+
 ## Storage
 
-**Backend:** AKM. Implementations live in `docs/notes/im###.md`. Schema in `docs/notes/akm.md`; this skill only needs the slice below.
+**Backend:** AKM. Implementations live in `$AKM_ROOT/docs/notes/im###.md`. Schema in `docs/notes/akm.md`; this skill only needs the slice below.
 
-If no `im*.md` files: tell the user "No implementations found under docs/notes/. Use implementation-write to add one."
+If no `im*.md` files in `$AKM_ROOT/docs/notes/`: tell the user "No implementations found. Use implementation-write to add one."
 
 ### Zettel slice this skill needs
 
@@ -102,7 +117,7 @@ digraph mode_select {
 
 ## Reading the zettels
 
-1. List ids: `ls docs/notes/im*.md`.
+1. List ids: `ls "$AKM_ROOT/docs/notes/"im*.md`.
 2. Per mode:
    - **Detail** — single file.
    - **Table** — full read is cheap; you need `solves`, `features`, and `approach`.

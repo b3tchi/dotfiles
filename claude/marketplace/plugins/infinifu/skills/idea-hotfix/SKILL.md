@@ -17,6 +17,23 @@ Direct entry point for the "hotfix implementation or feature" entry type. A ship
 Do NOT fix the bug here. No code, no patch, no PR, no `bd update` to close anything. The hotfix urgency is real, but skipping the lifecycle creates undocumented behavior, leaves no ADR/feature trail, and makes the next regression worse. The fix lands via `spec-writing → spec-refinement → spec-ready → work-do`. This skill ends at `sp###.problem`. The shared `idea-brainstorming` hard gate applies in full; the urgency-bypass temptation is the reason this skill needs its own explicit reminder.
 </HARD-GATE>
 
+## AKM Workspace Resolution
+
+Specs and the board live on **main**, even from a feature-branch worktree.
+Hotfix urgency does not change this — landing the problem capture on a
+feature branch fractures the knowledge model. Resolve before any file op:
+
+```bash
+AKM_ROOT="$(akm-root)"
+```
+
+Anchor every path on `$AKM_ROOT` (`$AKM_ROOT/docs/notes/spec/sp<NNN>.md`,
+`$AKM_ROOT/docs/board.md`, and all `$AKM_ROOT/docs/notes/...` reads). If
+`akm-root` errors, surface stderr and abort — never silently land an idea
+on the feature branch.
+
+**Commit policy:** stage only. `git -C "$AKM_ROOT" add docs/notes/spec/sp<NNN>.md docs/board.md`. No commit at idea phase even for hotfixes — the downstream `spec-writing` skill commits when the idea graduates to a spec. See the per-stage table in `docs/notes/akm.md#workspace-resolution` and the fuller treatment in `infinifu:idea-brainstorming`.
+
 ## AKM hooks
 
 Stage 1 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Entry type: **hotfix implementation or feature**.
@@ -31,13 +48,14 @@ Stage 1 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Entry type: **
 
 **Writes:**
 
-- `sp###` — new zettel at `docs/notes/spec/sp###.md`. Frontmatter `status: idea`, `Index: [[board]]`. Body: `## problem` documents symptom, severity, blast radius, rollback availability, and a one-paragraph minimal-fix shape (no patch — just shape).
-- `docs/board.md` — append `[[sp###|<title>]]` under `## idea`. Annotate with a 🔥 marker or `"hotfix"` prefix so the board surfaces urgency.
+- `sp###` — new zettel at `$AKM_ROOT/docs/notes/spec/sp<NNN>.md`. Frontmatter `status: idea`, `Index: [[board]]`. Body: `## problem` documents symptom, severity, blast radius, rollback availability, and a one-paragraph minimal-fix shape (no patch — just shape).
+- `$AKM_ROOT/docs/board.md` — append `[[sp###|<title>]]` under `## idea`. Annotate with a 🔥 marker or `"hotfix"` prefix so the board surfaces urgency.
 
 Urgency is raised on the **bd epic** created downstream (P1/P0), not on the zettel. The zettel records the problem; bd records the schedule.
 
 ## Entry-specific checklist
 
+0. **Resolve `AKM_ROOT="$(akm-root)"`** before any file op.
 1. **Capture the symptom verbatim.** Reproduction steps, log lines, error messages. Don't fix; capture only.
 2. **Identify affected `ft###` / `im###` / `us###`** via the read skills. No match → fix is touching un-tracked behavior; file as new `us###` draft after the fact.
 3. **Severity.** Pick: P0 (data loss / outage), P1 (significant customer impact), P2 (visible bug, workaround exists), P3 (cosmetic / edge case).
@@ -46,8 +64,10 @@ Urgency is raised on the **bd epic** created downstream (P1/P0), not on the zett
 6. **Survey binding ADRs.** `adr-read --category <picks>`. Natural-fix conflicts with an accepted ADR → flag for spec-retro to file a new ADR.
 7. **Minimal-fix shape.** One paragraph in `sp###.problem`. Describe smallest change that restores AC. No code; just shape.
 8. **Confirm captured problem with user** before minting the zettel.
-9. **Mint `sp###`** with all of the above in `## problem`.
-10. **Update `docs/board.md`** under `## idea` with the urgency annotation.
+9. **Mint `sp###`** at `$AKM_ROOT/docs/notes/spec/sp<NNN>.md` with all of the above in `## problem`.
+10. **Update `$AKM_ROOT/docs/board.md`** under `## idea` with the urgency annotation.
+11. **Stage on main.** `git -C "$AKM_ROOT" add docs/notes/spec/sp<NNN>.md docs/board.md`. Do **not** commit — spec-writing handles the first commit when the idea graduates. Urgency does not bypass the per-stage policy.
+12. **Confirm.** Surface the absolute `$AKM_ROOT/docs/notes/spec/sp<NNN>.md` path; confirm `git status` on main shows `A docs/notes/spec/sp<NNN>.md` and `M docs/board.md` with no commit created.
 
 Walk the shared process around this checklist.
 

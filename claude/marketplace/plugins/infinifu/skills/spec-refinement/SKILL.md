@@ -25,6 +25,26 @@ Stage 3 of the AKM lifecycle. A spec is at `status: spec` with `## solution` pop
 
 **Announce at start:** "Using spec-refinement skill — SRE 8-category pass + ADR/Feature sanity."
 
+## AKM Workspace Resolution
+
+Specs, implementations, and features live on **main**, even from a feature-branch worktree. Resolve before any file op:
+
+```bash
+AKM_ROOT="$(akm-root)"
+```
+
+`akm-root` returns the main-worktree path (default branch); outside git, cwd. Anchor every path on `$AKM_ROOT` (`$AKM_ROOT/docs/notes/spec/sp###.md`, `$AKM_ROOT/docs/notes/im###.md`, `$AKM_ROOT/docs/notes/ft###.md`, `$AKM_ROOT/docs/notes/us###.md`). If `akm-root` errors, surface its stderr and abort — never silently land refinement mutations on the feature branch.
+
+**Commit policy: commit on transition.** Spec-refinement finalizes the implementation card and (occasionally) mints a new feature — both are stable artifacts. The idea-then-spec lineage was already committed by spec-writing, so this commit covers **only this skill's writes**:
+
+```bash
+git -C "$AKM_ROOT" add docs/notes/spec/sp<NNN>.md docs/notes/im<NNN>.md
+# add docs/notes/ft<NNN>.md too if a Feature was minted/widened during refinement
+git -C "$AKM_ROOT" commit -m "feat(akm): refine sp<NNN> with im<NNN>"
+```
+
+Append ` + ft<NNN>` to the message when a Feature is part of the commit. See the per-stage commit table in `docs/notes/akm.md#workspace-resolution`.
+
 ## AKM hooks
 
 Stage 3 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Lifecycle goal: ensure deliverable workable — SRE 8-category pass.
@@ -37,10 +57,11 @@ Stage 3 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Lifecycle goal
 - `adr####` (`adr-read --category <picks>`) — every `Accepted` ADR under the spec's categories. The task list must not violate any `## decision`; if it does, name a supersession candidate (do not silently violate).
 - `ft###` (`feature-read`) — every `[[ft###]]` listed in the spec's `## solution`. Each task that consumes a feature must call its `## api_surface` exactly; document any deviation as a Feature-extension request.
 
-**Writes:**
+**Writes** (all paths anchored on `$AKM_ROOT`):
 
-- `sp###` — same file. Append `## plan` + `## tasks`. **Reference discipline:** every consumed feature, binding ADR, category, and source us appears as a wikilink in `## plan` or in the relevant task's H4 properties.
-- `im###` — same file. Append the back-link `## specs - [[sp###]]` so the graph closes.
+- `$AKM_ROOT/docs/notes/spec/sp###.md` — append `## plan` + `## tasks`. **Reference discipline:** every consumed feature, binding ADR, category, and source us appears as a wikilink in `## plan` or in the relevant task's H4 properties.
+- `$AKM_ROOT/docs/notes/im###.md` — append the back-link `## specs - [[sp###]]` so the graph closes. May also widen `## components` / `## data_model` / `## api_surface` if the SRE pass revealed concrete deltas.
+- `$AKM_ROOT/docs/notes/ft###.md` — optional. Only if the Feature-sanity pass surfaced a genuine extension that the user approved minting (or widening an existing `ft###`) here rather than routing through `idea-extend`.
 
 ## SRE 8-category checklist (applied to every `### Task N`)
 
@@ -77,22 +98,76 @@ For every `[[ft###]]` consumed (per the spec's `## solution`):
 - Re-read the Feature's `## providing` paragraph. If the spec uses the feature in a way that isn't in `## providing`, that's a *Feature extension* — call it out as a separate task that goes through `idea-extend` on that `ft###` first.
 - Re-read `## data_model`. Tasks that mutate the feature's owned state need explicit coordination (lock, transaction, idempotency); flag if missing.
 
+## Flow
+
+```dot
+digraph spec_refinement {
+    "Resolve AKM root" [shape=box];
+    "Identify sp### + verify status" [shape=box];
+    "Read sp + us.AC + im + adr + ft" [shape=box];
+    "Draft ## plan + ## tasks" [shape=box];
+    "SRE 8-category pass" [shape=box];
+    "ADR + Feature sanity" [shape=box];
+    "Approval gate" [shape=diamond];
+    "Write plan/tasks + im back-link [+ ft]" [shape=box];
+    "Commit on main" [shape=box];
+    "Confirm with user" [shape=doublecircle];
+
+    "Resolve AKM root" -> "Identify sp### + verify status";
+    "Identify sp### + verify status" -> "Read sp + us.AC + im + adr + ft";
+    "Read sp + us.AC + im + adr + ft" -> "Draft ## plan + ## tasks";
+    "Draft ## plan + ## tasks" -> "SRE 8-category pass";
+    "SRE 8-category pass" -> "Draft ## plan + ## tasks" [label="auto-reject"];
+    "SRE 8-category pass" -> "ADR + Feature sanity" [label="clean"];
+    "ADR + Feature sanity" -> "Approval gate";
+    "Approval gate" -> "Write plan/tasks + im back-link [+ ft]" [label="approved"];
+    "Approval gate" -> "Draft ## plan + ## tasks" [label="revise"];
+    "Write plan/tasks + im back-link [+ ft]" -> "Commit on main";
+    "Commit on main" -> "Confirm with user";
+}
+```
+
 ## Entry-specific checklist
 
-1. **Identify target spec.** User names a `sp###`. Verify `docs/notes/spec/sp###.md` exists.
-2. **Verify status.** Must be `status: spec`. Apply Disambiguation if not.
-3. **Read the spec body** — `## solves`, `## solution`, H1 categories.
-4. **Re-read source `us###.acceptance_criteria`.** Every task's success criteria will map here.
-5. **Read consumed `[[im###]]`** — `## approach`, `## features`, `## components` constrain the breakdown.
-6. **Survey ADRs** under the spec's categories. Note `Accepted` decisions that bind.
-7. **Survey Features** in `## solution`. Note `## api_surface` + `## providing` per feature.
-8. **Draft `## plan`** — file tree, conventions, anti-patterns, known limitations.
-9. **Draft `## tasks`** — H3 per task with the H4 property set (`type`, `effort`, `depends`, `files_touched`, `success_criteria`, `edge_cases`, `test_plan`). No bd ids.
-10. **Apply SRE 8-category pass** to every task. Reject and rewrite if any auto-reject row trips.
-11. **ADR sanity pass.** Flag any conflict; add supersession task if needed.
-12. **Feature sanity pass.** Flag api-surface mismatches; route Feature extensions through `idea-extend`.
-13. **Surface as design-approval gate** to the user — the breakdown is a commitment, not a proposal. User approves before continuing.
-14. **On approval:** write `## plan` + `## tasks` into the spec file; append `## specs - [[sp###]]` to the consumed `im###`.
+1. **Resolve AKM root.** `AKM_ROOT="$(akm-root)"` — every subsequent path anchors on it. Abort with the helper's stderr if it errors.
+2. **Identify target spec.** User names a `sp###`. Verify `$AKM_ROOT/docs/notes/spec/sp###.md` exists.
+3. **Verify status.** Must be `status: spec`. Apply Disambiguation if not.
+4. **Read the spec body** — `## solves`, `## solution`, H1 categories.
+5. **Re-read source `us###.acceptance_criteria`** from `$AKM_ROOT/docs/notes/us<NNN>.md`. Every task's success criteria will map here.
+6. **Read consumed `[[im###]]`** from `$AKM_ROOT/docs/notes/im<NNN>.md` — `## approach`, `## features`, `## components` constrain the breakdown.
+7. **Survey ADRs** under the spec's categories (`$AKM_ROOT/docs/notes/adr*.md`). Note `Accepted` decisions that bind.
+8. **Survey Features** in `## solution` (`$AKM_ROOT/docs/notes/ft*.md`). Note `## api_surface` + `## providing` per feature.
+9. **Draft `## plan`** — file tree, conventions, anti-patterns, known limitations.
+10. **Draft `## tasks`** — H3 per task with the H4 property set (`type`, `effort`, `depends`, `files_touched`, `success_criteria`, `edge_cases`, `test_plan`). No bd ids.
+11. **Apply SRE 8-category pass** to every task. Reject and rewrite if any auto-reject row trips.
+12. **ADR sanity pass.** Flag any conflict; add supersession task if needed.
+13. **Feature sanity pass.** Flag api-surface mismatches; route Feature extensions through `idea-extend` (or, if minor and user-approved, widen the `ft###` in place and include it in the commit).
+14. **Surface as design-approval gate** to the user — the breakdown is a commitment, not a proposal. User approves before continuing.
+15. **On approval:** write `## plan` + `## tasks` into `$AKM_ROOT/docs/notes/spec/sp<NNN>.md`; append `## specs - [[sp###]]` to `$AKM_ROOT/docs/notes/im<NNN>.md`; if Feature widening happened, write the updated `$AKM_ROOT/docs/notes/ft<NNN>.md` too.
+16. **Commit on main.** Only this skill's writes are in scope — the idea-then-spec lineage was already committed by spec-writing:
+    ```bash
+    git -C "$AKM_ROOT" add docs/notes/spec/sp<NNN>.md docs/notes/im<NNN>.md
+    # add docs/notes/ft<NNN>.md too if a Feature was minted/widened
+    git -C "$AKM_ROOT" commit -m "feat(akm): refine sp<NNN> with im<NNN>"
+    ```
+    Append ` + ft<NNN>` to the message when a Feature is in the commit.
+17. **Confirm.** Show: spec id + absolute path under `$AKM_ROOT`, im### back-link landed, any ft### touched, commit sha on main. Ask once: "Anything to revise?"
+
+## Verification
+
+Before reporting complete:
+
+- [ ] Every file path written/read is under `$AKM_ROOT` (resolved via `akm-root`, not the current cwd)
+- [ ] `sp###.md` has `## plan` + `## tasks` populated; every task's H4 properties present (`type`, `effort`, `depends`, `files_touched`, `success_criteria`, `edge_cases`, `test_plan`); no `#### bd` ids
+- [ ] SRE 8-category pass clean on every task; no auto-reject row trips
+- [ ] ADR sanity: no task silently violates an `Accepted` `[[adr####]]`; supersession task filed if conflict named
+- [ ] Feature sanity: every consumed `[[ft###]]` matches its `## api_surface`; extensions routed via `idea-extend` or widened in-commit
+- [ ] `im###.md` has `## specs - [[sp###]]` back-link appended
+- [ ] If a Feature was widened in-place, `ft###.md` updated and included in the commit
+- [ ] `sp###.status` still `spec` (status promotion belongs to spec-ready)
+- [ ] `board.md` untouched (board move belongs to spec-ready)
+- [ ] `git log -1` on main shows a new commit titled `feat(akm): refine sp<NNN> with im<NNN>` (with `+ ft<NNN>` if applicable)
+- [ ] Confirmation surfaces the absolute `$AKM_ROOT/docs/notes/spec/sp<NNN>.md` path so the user sees where it landed from a worktree
 
 ## Disambiguation
 

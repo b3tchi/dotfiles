@@ -15,6 +15,23 @@ Direct entry point for the "us implement" entry type. An existing `us###` is in 
 
 **Shared basics.** Process (context exploration, hard gate, question cadence, design approval, spec-writing handoff) lives in `infinifu:idea-brainstorming`. Load it before walking the checklist below.
 
+## AKM Workspace Resolution
+
+Specs, the board, and the target `us###` all live on **main**, even from
+a feature-branch worktree. Resolve before any file op:
+
+```bash
+AKM_ROOT="$(akm-root)"
+```
+
+Anchor every path on `$AKM_ROOT` (`$AKM_ROOT/docs/notes/spec/sp<NNN>.md`,
+`$AKM_ROOT/docs/board.md`, and all `$AKM_ROOT/docs/notes/...` reads
+including `$AKM_ROOT/docs/notes/us<NNN>.md`). If `akm-root` errors,
+surface stderr and abort — never silently land an idea on the feature
+branch.
+
+**Commit policy:** stage only. `git -C "$AKM_ROOT" add docs/notes/spec/sp<NNN>.md docs/board.md docs/notes/us<NNN>.md`. No commit at idea phase — the downstream `spec-writing` skill commits when the idea graduates to a spec (which is also when the `us### draft → ready` flip is durably recorded on main). The `story-write` re-emit used to flip the story status also stages without committing, so this stays a single uncommitted batch. See the per-stage table in `docs/notes/akm.md#workspace-resolution` and the fuller treatment in `infinifu:idea-brainstorming`.
+
 ## AKM hooks
 
 Stage 1 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Entry type: **us implement**.
@@ -29,13 +46,14 @@ Stage 1 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Entry type: **
 
 **Writes:**
 
-- `us###` — same file, `status: draft → ready`. Fill `## acceptance_criteria` only if you have testable criteria from the user; otherwise hold the gate.
-- `sp###` — new zettel at `docs/notes/spec/sp###.md`. Frontmatter `status: idea`, `Index: [[board]]`. Body: `## solves [[us###]]` + `## problem` populated. **Every surveyed id that's relevant must appear in `## problem` as a wikilink** — `[[us###]]` for the source story, `[[pn###]]` for the persona, `[[cat###]]` for category picks, `[[ft###]]` for candidate consumers, `[[adr####]]` for binding decisions. Narrative without ids fails the lifecycle contract.
-- `docs/board.md` — append `[[sp###|<title>]]` under `## idea`.
+- `us###` — same file at `$AKM_ROOT/docs/notes/us<NNN>.md`, `status: draft → ready`. Fill `## acceptance_criteria` only if you have testable criteria from the user; otherwise hold the gate.
+- `sp###` — new zettel at `$AKM_ROOT/docs/notes/spec/sp<NNN>.md`. Frontmatter `status: idea`, `Index: [[board]]`. Body: `## solves [[us###]]` + `## problem` populated. **Every surveyed id that's relevant must appear in `## problem` as a wikilink** — `[[us###]]` for the source story, `[[pn###]]` for the persona, `[[cat###]]` for category picks, `[[ft###]]` for candidate consumers, `[[adr####]]` for binding decisions. Narrative without ids fails the lifecycle contract.
+- `$AKM_ROOT/docs/board.md` — append `[[sp###|<title>]]` under `## idea`.
 
 ## Entry-specific checklist
 
-1. **Identify target story.** User must name a `us###` (by id or alias). If not named, ask. Verify `docs/notes/us###.md` exists.
+0. **Resolve `AKM_ROOT="$(akm-root)"`** before any file op.
+1. **Identify target story.** User must name a `us###` (by id or alias). If not named, ask. Verify `$AKM_ROOT/docs/notes/us<NNN>.md` exists.
 2. **Verify status.** Read frontmatter `status`. Apply Disambiguation if it isn't `draft`.
 3. **Read the story.** Confirm `## role`, `## want`, `## because` are populated. Missing pieces surface as clarifying questions; do not invent answers.
 4. **Persona check.** Resolve `## role: [[pn###]]` to the persona file. If missing, mint via `persona-write` before continuing (sub-loop).
@@ -43,9 +61,11 @@ Stage 1 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Entry type: **
 6. **Categorize.** Survey via `category-read`. Pick the buckets the story touches.
 7. **Survey ADRs** under those categories via `adr-read`. Capture binding decisions.
 8. **Survey features** via `feature-read`. List candidate consumers without committing to consumption.
-9. **Promote `us###`** `draft → ready` once AC are testable. Re-emit via `story-write` (same id; story content lives in the same file).
-10. **Mint `sp###`** at `docs/notes/spec/sp###.md` with `## solves [[us###]]` + `## problem`. **Reference discipline:** every relevant surveyed id lands in `## problem` as a wikilink — `[[us###]]` source, `[[pn###]]` persona, `[[cat###]]` picks, `[[ft###]]` candidates, `[[adr####]]` binders. Prose without ids does not satisfy.
-11. **Update `docs/board.md`** under `## idea` with the new `[[sp###]]`.
+9. **Promote `us###`** `draft → ready` once AC are testable. Re-emit via `story-write` (same id; story content lives in the same file at `$AKM_ROOT/docs/notes/us<NNN>.md`).
+10. **Mint `sp###`** at `$AKM_ROOT/docs/notes/spec/sp<NNN>.md` with `## solves [[us###]]` + `## problem`. **Reference discipline:** every relevant surveyed id lands in `## problem` as a wikilink — `[[us###]]` source, `[[pn###]]` persona, `[[cat###]]` picks, `[[ft###]]` candidates, `[[adr####]]` binders. Prose without ids does not satisfy.
+11. **Update `$AKM_ROOT/docs/board.md`** under `## idea` with the new `[[sp###]]`.
+12. **Stage on main.** `git -C "$AKM_ROOT" add docs/notes/spec/sp<NNN>.md docs/board.md docs/notes/us<NNN>.md`. Do **not** commit — spec-writing handles the first commit when the idea graduates to a spec (carrying both the sp### and the us### `draft → ready` flip into the same lifecycle commit).
+13. **Confirm.** Surface the absolute `$AKM_ROOT/docs/notes/spec/sp<NNN>.md` path; confirm `git status` on main shows `A docs/notes/spec/sp<NNN>.md`, `M docs/board.md`, and `M docs/notes/us<NNN>.md` with no commit created.
 
 Walk the shared process around this checklist (load `idea-brainstorming` for cadence + gate basics).
 

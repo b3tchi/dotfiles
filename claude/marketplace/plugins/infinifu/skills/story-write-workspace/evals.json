@@ -51,6 +51,23 @@
         {"text": "## acceptance_criteria has at least 1 testable bullet"},
         {"text": "Footer contains 'Index: [[product]]'"}
       ]
+    },
+    {
+      "id": 3,
+      "eval_name": "worktree-writes-to-main",
+      "prompt": "Add a user story: as a requestor I want to clone a previous request as a starting point for a new one, because most of my orders look almost identical to past ones. Acceptance criteria: clone button visible on closed requests; clone copies line items but leaves notes blank; cloned request starts in Draft status.",
+      "sandbox": {"mode": "worktree", "cwd": "feat"},
+      "assertions": [
+        {"text": "A new file us###.md was created under <sandbox>/main/docs/notes/ (the main worktree's AKM dir)"},
+        {"text": "NO new us*.md was created under <sandbox>/feat/docs/notes/ (the feature worktree's tree is untouched)"},
+        {"text": "Filename slug matches us<NNN>.md with three-digit zero-padded id and is us015 or higher (does not collide with seeded ids us001-us014)"},
+        {"text": "The new file is staged in the main worktree's git index (git -C <sandbox>/main status --porcelain shows the file as 'A ' or 'AM ')"},
+        {"text": "No commit was created on main for this story (git -C <sandbox>/main log --oneline shows only the seed commit, not a new story commit) — story-write only stages, the next lifecycle stage commits"},
+        {"text": "## role section contains [[pn001|requestor]] referencing the existing seeded persona"},
+        {"text": "## acceptance_criteria has exactly 3 bullets matching the user's input"},
+        {"text": "Footer contains 'Index: [[product]]'"},
+        {"text": "Skill confirmation surfaces the absolute AKM path so the user sees the write landed in <sandbox>/main, not <sandbox>/feat"}
+      ]
     }
   ]
 }

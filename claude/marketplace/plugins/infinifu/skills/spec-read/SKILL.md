@@ -13,11 +13,27 @@ Note: specs are the board-citizen AKM type. Active ones (`idea` / `spec` / `read
 
 **Announce at start:** "Using spec-read skill to surface board state."
 
+## AKM Workspace Resolution
+
+Readers always anchor on the main worktree's view of the AKM, never the
+feature worktree's local copy (which may be stale or branch-divergent).
+Resolve first:
+
+```bash
+AKM_ROOT="$(akm-root)"
+```
+
+All lookups — `$AKM_ROOT/docs/notes/spec/sp###.md`, `$AKM_ROOT/docs/board.md`,
+and `$AKM_ROOT/docs/archive.md` — anchor on `$AKM_ROOT`. If `akm-root`
+errors, surface its stderr and fall back to cwd with the warning
+*"reading from cwd worktree — may be stale; check out the default branch
+for canonical view"*.
+
 ## Storage
 
-**Backend:** AKM. Specs live in `docs/notes/spec/sp###.md` (the `spec/` subfolder under `notes/`). Schema in `docs/notes/akm.md`; this skill only needs the slice below.
+**Backend:** AKM. Specs live in `$AKM_ROOT/docs/notes/spec/sp###.md` (the `spec/` subfolder under `notes/`). Schema in `docs/notes/akm.md`; this skill only needs the slice below.
 
-If `docs/notes/spec/` does not exist or has no `sp*.md` files: tell the user "No specs found under docs/notes/spec/. Use spec-writing (via idea-brainstorming → spec-writing) to create one."
+If `$AKM_ROOT/docs/notes/spec/` does not exist or has no `sp*.md` files: tell the user "No specs found. Use spec-writing (via idea-brainstorming → spec-writing) to create one."
 
 ### Zettel slice this skill needs
 
@@ -126,7 +142,7 @@ digraph mode_select {
 
 ## Reading the zettels
 
-1. List ids: `ls docs/notes/spec/sp*.md`.
+1. List ids: `ls "$AKM_ROOT/docs/notes/spec/"sp*.md`.
 2. Per mode:
    - **Detail** — single file.
    - **Table** — `head -40` is enough (frontmatter + H1 + `## solves` + `## implements` + count of `### Task` lines).
@@ -155,7 +171,7 @@ For task counts under table mode, `grep -c '^### Task' <file>` is the cheapest m
 | 1 | <task-name> | 4h | bd-123 | open |
 | 2 | <task-name> | 6h | (none) | — |
 
-To see a single task block in full (success_criteria / edge_cases / test_plan), open `docs/notes/spec/[id].md` directly.
+To see a single task block in full (success_criteria / edge_cases / test_plan), open `$AKM_ROOT/docs/notes/spec/[id].md` directly.
 
 **Lifecycle signal:** sections present = [problem, solution, plan, tasks] → status should be `ready`. If sections and status disagree, flag it.
 ```
@@ -225,10 +241,10 @@ Multiple filters compose with AND.
 
 The board and archive hubs are also valid entry points:
 
-- "what's on the board" → equivalent to render with filter `status ∈ {idea, spec, ready}`. You can also literally read `docs/board.md` to get the curated list — but the source of truth is `sp*.md` frontmatter.
-- "what's in the archive" / "what shipped" → render with `status: done`. Source of truth is `sp*.md`; `docs/archive.md` is the curated hub.
+- "what's on the board" → equivalent to render with filter `status ∈ {idea, spec, ready}`. You can also literally read `$AKM_ROOT/docs/board.md` to get the curated list — but the source of truth is `sp*.md` frontmatter.
+- "what's in the archive" / "what shipped" → render with `status: done`. Source of truth is `sp*.md`; `$AKM_ROOT/docs/archive.md` is the curated hub.
 
-When `docs/board.md` or `docs/archive.md` disagrees with `sp*.md` status, trust the zettels and surface the drift in a one-line note.
+When `$AKM_ROOT/docs/board.md` or `$AKM_ROOT/docs/archive.md` disagrees with `sp*.md` status, trust the zettels and surface the drift in a one-line note.
 
 ## What This Skill Does NOT Do
 

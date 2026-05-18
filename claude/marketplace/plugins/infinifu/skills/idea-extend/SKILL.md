@@ -13,6 +13,22 @@ Direct entry point for the "us changed adjust implementation" entry type. A ship
 
 **Shared basics.** Process (context exploration, hard gate, question cadence, design approval, spec-writing handoff) lives in `infinifu:idea-brainstorming`. Load it before walking the checklist below.
 
+## AKM Workspace Resolution
+
+Specs and the board live on **main**, even from a feature-branch worktree.
+Resolve before any file op:
+
+```bash
+AKM_ROOT="$(akm-root)"
+```
+
+Anchor every path on `$AKM_ROOT` (`$AKM_ROOT/docs/notes/spec/sp<NNN>.md`,
+`$AKM_ROOT/docs/board.md`, and all `$AKM_ROOT/docs/notes/...` reads). If
+`akm-root` errors, surface stderr and abort — never silently land an idea
+on the feature branch.
+
+**Commit policy:** stage only. `git -C "$AKM_ROOT" add docs/notes/spec/sp<NNN>.md docs/board.md`. No commit at idea phase — the downstream `spec-writing` skill commits when the idea graduates to a spec. See the per-stage table in `docs/notes/akm.md#workspace-resolution` and the fuller treatment in `infinifu:idea-brainstorming`.
+
 ## AKM hooks
 
 Stage 1 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Entry type: **us changed adjust implementation**.
@@ -28,21 +44,24 @@ Stage 1 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Entry type: **
 
 **Writes:**
 
-- `sp###` — new zettel at `docs/notes/spec/sp###.md`. Frontmatter `status: idea`, `Index: [[board]]`. Body: `## solves [[us###]]`, `## problem` describing the delta clearly (AC change, what stays, migration story for already-shipped data, supersession-or-refresh decision).
-- `docs/board.md` — append `[[sp###|<title>]]` under `## idea`.
+- `sp###` — new zettel at `$AKM_ROOT/docs/notes/spec/sp<NNN>.md`. Frontmatter `status: idea`, `Index: [[board]]`. Body: `## solves [[us###]]`, `## problem` describing the delta clearly (AC change, what stays, migration story for already-shipped data, supersession-or-refresh decision).
+- `$AKM_ROOT/docs/board.md` — append `[[sp###|<title>]]` under `## idea`.
 
 The `us###` is **not** mutated yet (AC may shift, but that lands at `spec-writing` / `spec-refinement`). The `im###` is **not** flipped yet (status changes at `work-merge`; body rewrite at `spec-retro`).
 
 ## Entry-specific checklist
 
-1. **Identify affected `us###`.** Confirm via `story-read` if ambiguous. Read in full.
-2. **Find the implementing `im###`.** `implementation-read --solves us###`. No match → flag and either re-route or salvage.
-3. **Read the implementation** — `## approach`, `## components`, `## api_surface`, `## data_model`.
-4. **Survey binding ADRs** via `adr-read --category <im###'s categories>`. Flag overturns.
-5. **Survey consumed features** via `feature-read`. Flag widened contracts.
-6. **Frame supersession vs body refresh.** Capture the decision in `sp###.problem`.
-7. **Mint `sp###`** with the delta narrative.
-8. **Update `docs/board.md`** under `## idea`.
+1. **Resolve `AKM_ROOT="$(akm-root)"`** before any file op.
+2. **Identify affected `us###`.** Confirm via `story-read` if ambiguous. Read in full.
+3. **Find the implementing `im###`.** `implementation-read --solves us###`. No match → flag and either re-route or salvage.
+4. **Read the implementation** — `## approach`, `## components`, `## api_surface`, `## data_model`.
+5. **Survey binding ADRs** via `adr-read --category <im###'s categories>`. Flag overturns.
+6. **Survey consumed features** via `feature-read`. Flag widened contracts.
+7. **Frame supersession vs body refresh.** Capture the decision in `sp###.problem`.
+8. **Mint `sp###`** at `$AKM_ROOT/docs/notes/spec/sp<NNN>.md` with the delta narrative.
+9. **Update `$AKM_ROOT/docs/board.md`** under `## idea`.
+10. **Stage on main.** `git -C "$AKM_ROOT" add docs/notes/spec/sp<NNN>.md docs/board.md`. Do **not** commit — spec-writing handles the first commit when the idea graduates.
+11. **Confirm.** Surface the absolute `$AKM_ROOT/docs/notes/spec/sp<NNN>.md` path; confirm `git status` on main shows `A docs/notes/spec/sp<NNN>.md` and `M docs/board.md` with no commit created.
 
 Walk the shared process around this checklist.
 

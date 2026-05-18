@@ -41,10 +41,23 @@ LOW FREEDOM on the structural rules (one decision per file, four-digit id, exact
 - Mapping code paths to a decision → use `infinifu:story-map` on the `im###` zettel (ADRs don't carry component lists)
 </when_to_use>
 
+<workspace_resolution>
+ADRs are shared product knowledge — they live on **main**, even from a feature-branch worktree. Resolve before any file op:
+
+```bash
+AKM_ROOT="$(akm-root)"
+```
+
+`akm-root` returns the main-worktree path (default branch); outside git, cwd. Anchor every path on `$AKM_ROOT` (`$AKM_ROOT/docs/notes/adr####.md`, `$AKM_ROOT/docs/notes/cat*.md`, `$AKM_ROOT/docs/notes/adr*.md`, `$AKM_ROOT/docs/product.md`). If `akm-root` errors, surface its stderr and abort — never silently land an ADR on the feature branch.
+
+ADRs are immutable stable artifacts: this writer **commits on creation** on main. For a fresh ADR, stage and commit in one shot: `git -C "$AKM_ROOT" add docs/notes/adr<NNNN>.md docs/product.md && git -C "$AKM_ROOT" commit -m "feat(akm): add adr<NNNN> <title>"`. For supersession, stage the new ADR **and** the old ADR's status-flip + `## superseded_by` patch together, then a single commit: `git -C "$AKM_ROOT" add docs/notes/adr<new>.md docs/notes/adr<old>.md docs/product.md && git -C "$AKM_ROOT" commit -m "feat(akm): supersede adr<old> with adr<new> <title>"`. See the per-stage commit table in `docs/notes/akm.md#workspace-resolution`.
+</workspace_resolution>
+
 <the_process>
 
 ```dot
 digraph adr_create {
+    "Resolve AKM root" [shape=box];
     "Storage exists?" [shape=diamond];
     "Bootstrap docs/notes/" [shape=box];
     "Supersession?" [shape=diamond];
@@ -54,8 +67,10 @@ digraph adr_create {
     "Generate id (adr####)" [shape=box];
     "Write adr####.md zettel" [shape=box];
     "Flip prior to Superseded" [shape=box];
+    "Commit on main" [shape=box];
     "Confirm with user" [shape=doublecircle];
 
+    "Resolve AKM root" -> "Storage exists?";
     "Storage exists?" -> "Bootstrap docs/notes/" [label="no"];
     "Storage exists?" -> "Supersession?" [label="yes"];
     "Bootstrap docs/notes/" -> "Supersession?";
@@ -66,20 +81,32 @@ digraph adr_create {
     "Pick category (exactly one)" -> "Generate id (adr####)";
     "Generate id (adr####)" -> "Write adr####.md zettel";
     "Write adr####.md zettel" -> "Flip prior to Superseded" [label="supersession"];
-    "Write adr####.md zettel" -> "Confirm with user" [label="fresh"];
-    "Flip prior to Superseded" -> "Confirm with user";
+    "Write adr####.md zettel" -> "Commit on main" [label="fresh"];
+    "Flip prior to Superseded" -> "Commit on main";
+    "Commit on main" -> "Confirm with user";
 }
 ```
 
-1. **Check storage.** If `docs/notes/` is missing, create it. If `docs/product.md` is missing, warn the user the AKM workspace isn't initialized and either proceed (zettel will reference a non-existent `[[product]]`) or abort per their preference.
-2. **Supersession?** If the user is overturning a prior ADR, identify and read it; confirm its `status` is `Accepted`. If already `Superseded`, ask whether to chain or point at the head.
-3. **Gather decision fields.** Title (one declarative sentence), context (forces + constraints + options surveyed), decision (active voice), consequences (positive + *honest* negative). Don't over-interview — if the design hasn't been discussed yet, redirect to `infinifu:idea-brainstorming`. If everything was provided upfront, write it; otherwise ask only for missing fields.
-4. **Pick category — exactly one.** Match against existing `cat###` aliases (case-insensitive). If none match, ask once with the existing list or create a new `cat###.md` inline (minimal: `## name`, `## summary`, `status: stable`). If two categories tempt, pick the one where a future engineer would look first.
-5. **Generate id.** List `docs/notes/adr*.md`, extract numerics, take max + 1, zero-pad to 4 digits. Start at `0001` if none exist.
-6. **Write the zettel** per the schema in `docs/notes/akm.md` § *ADR — `adr####.md`*. See `references/examples.md` for a fully worked fresh ADR and a supersession pair.
-7. **On supersession**, patch the prior ADR: flip frontmatter `status: Accepted` → `Superseded` and append a `## superseded_by` body section with `[[adr<new-id>|<new-title>]]`. Do **not** edit the prior ADR's `## title` / `## context` / `## decision` / `## consequences`.
-8. **Update `docs/product.md`** (the hub): append `[[adr####|<title>]]` under the matching category H3 inside `## Architecture Decision Records`. Add the category subheading if it doesn't yet exist. If the hub doesn't exist, skip and tell the user.
-9. **Confirm with the user.** Show id + path, decision one-liner, category, status, supersession info (if any), and whether the hub was updated. Ask once: "Anything to revise?" — but push back on edits to an `Accepted` ADR's content.
+1. **Resolve AKM root.** `AKM_ROOT="$(akm-root)"`. Every subsequent path anchors on it. Abort with the helper's stderr if it errors — don't fall back to cwd silently when on a feature-branch worktree.
+2. **Check storage.** If `$AKM_ROOT/docs/notes/` is missing, create it. If `$AKM_ROOT/docs/product.md` is missing, warn the user the AKM workspace isn't initialized and either proceed (zettel will reference a non-existent `[[product]]`) or abort per their preference.
+3. **Supersession?** If the user is overturning a prior ADR, identify and read `$AKM_ROOT/docs/notes/adr<old>.md`; confirm its `status` is `Accepted`. If already `Superseded`, ask whether to chain or point at the head.
+4. **Gather decision fields.** Title (one declarative sentence), context (forces + constraints + options surveyed), decision (active voice), consequences (positive + *honest* negative). Don't over-interview — if the design hasn't been discussed yet, redirect to `infinifu:idea-brainstorming`. If everything was provided upfront, write it; otherwise ask only for missing fields.
+5. **Pick category — exactly one.** Match against existing `cat###` aliases (case-insensitive) via `ls "$AKM_ROOT/docs/notes/"cat*.md`. If none match, ask once with the existing list or create a new `$AKM_ROOT/docs/notes/cat###.md` inline (minimal: `## name`, `## summary`, `status: stable`). If two categories tempt, pick the one where a future engineer would look first.
+6. **Generate id.** List `$AKM_ROOT/docs/notes/adr*.md`, extract numerics, take max + 1, zero-pad to 4 digits. Start at `0001` if none exist.
+7. **Write the zettel** to `$AKM_ROOT/docs/notes/adr<NNNN>.md` per the schema in `docs/notes/akm.md` § *ADR — `adr####.md`*. See `references/examples.md` for a fully worked fresh ADR and a supersession pair.
+8. **On supersession**, patch the prior ADR at `$AKM_ROOT/docs/notes/adr<old>.md`: flip frontmatter `status: Accepted` → `Superseded` and append a `## superseded_by` body section with `[[adr<new-id>|<new-title>]]`. Do **not** edit the prior ADR's `## title` / `## context` / `## decision` / `## consequences`.
+9. **Update `$AKM_ROOT/docs/product.md`** (the hub): append `[[adr####|<title>]]` under the matching category H3 inside `## Architecture Decision Records`. Add the category subheading if it doesn't yet exist. If the hub doesn't exist, skip and tell the user.
+10. **Commit on main.** ADRs are stable, immutable artifacts — stage and commit in one shot from the AKM root:
+    ```bash
+    # Fresh ADR
+    git -C "$AKM_ROOT" add docs/notes/adr<NNNN>.md docs/product.md
+    git -C "$AKM_ROOT" commit -m "feat(akm): add adr<NNNN> <title>"
+
+    # Supersession (both files in one commit)
+    git -C "$AKM_ROOT" add docs/notes/adr<new>.md docs/notes/adr<old>.md docs/product.md
+    git -C "$AKM_ROOT" commit -m "feat(akm): supersede adr<old> with adr<new> <title>"
+    ```
+11. **Confirm with the user.** Show id + absolute path under `$AKM_ROOT`, decision one-liner, category, status, supersession info (if any), whether the hub was updated, and commit sha on main. Ask once: "Anything to revise?" — but push back on edits to an `Accepted` ADR's content.
 
 For schema details (exact frontmatter shape, lifecycle status semantics, superseded_by invariants) load `docs/notes/akm.md`. For worked examples (fresh ADR markdown, supersession patch, good vs bad consequences), load `references/examples.md`.
 
@@ -102,6 +129,23 @@ For schema details (exact frontmatter shape, lifecycle status semantics, superse
 - **Never delete an ADR.** `Deprecated` and `Superseded` are the retirement states.
 
 </critical_rules>
+
+<verification_checklist>
+
+Before reporting the ADR written:
+
+- [ ] File path is `$AKM_ROOT/docs/notes/adr####.md` (resolved via `akm-root`, not the current cwd)
+- [ ] Id is `max(existing) + 1`, zero-padded to 4
+- [ ] Frontmatter has `aliases:` (matches `## title`), `status:` (capitalized), `created:` ISO date
+- [ ] H1 has `# ADR` plus exactly one `[[cat###]]` plus `[[product]]`
+- [ ] Body sections in order: `## title`, `## context`, `## decision`, `## consequences` (+ `## superseded_by` iff `Superseded`)
+- [ ] `Index: [[product]]` footer after a `---` rule
+- [ ] Hub annotated in `$AKM_ROOT/docs/product.md` under the matching category H3 (or skipped with note if hub missing)
+- [ ] On supersession: prior ADR has `status: Superseded` + `## superseded_by` appended; its `## title` / `## context` / `## decision` / `## consequences` are untouched
+- [ ] Single commit landed on main covering the new ADR + hub diff (+ the old ADR's patch when superseding) — verify with `git -C "$AKM_ROOT" log -1`
+- [ ] Confirmation surfaces the absolute `$AKM_ROOT/docs/notes/adr<NNNN>.md` path so the user sees where it landed from a worktree
+
+</verification_checklist>
 
 <integration>
 

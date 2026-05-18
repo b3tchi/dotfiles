@@ -56,6 +56,23 @@ Type detection (which AKM writer to call) is flexible — guess from context, co
 - Bulk imports — process them in series, one card at a time, so the atomicity gate fires per card
 </when_to_use>
 
+<workspace_resolution>
+Zettels are shared knowledge — they live on **main**, even when the agent's cwd is a feature-branch worktree. Resolve before any file op:
+
+```bash
+AKM_ROOT="$(akm-root)"
+```
+
+`akm-root` returns the main-worktree path (default branch); outside git, cwd. Anchor every path on `$AKM_ROOT` (`$AKM_ROOT/docs/notes/<slug>.md`, `$AKM_ROOT/docs/product.md`). If `akm-root` errors, surface its stderr and abort — never silently land a card on the feature branch.
+
+**Two-mode commit policy:**
+
+- **Delegating to a typed writer** (story-write, adr-write, feature-write, implementation-write, persona-write, category-write) → the called skill owns its own resolution and commit policy. This skill stops at routing; do **not** stage or commit on its behalf.
+- **Generic named-slug card** (no AKM type matched) → this skill **stages on main without committing**: `git -C "$AKM_ROOT" add docs/notes/<slug>.md`. Generic cards are draft-ish concept notes; they ride along with the next lifecycle commit from a typed write or get committed manually when the workspace is tidied.
+
+See the per-stage commit table in `docs/notes/akm.md#workspace-resolution`.
+</workspace_resolution>
+
 <the_process>
 
 ## Flow
@@ -63,6 +80,7 @@ Type detection (which AKM writer to call) is flexible — guess from context, co
 ```dot
 digraph zettel_write {
     "Capture request" [shape=doublecircle];
+    "Resolve AKM root" [shape=box];
     "AKM workspace exists?" [shape=diamond];
     "Bootstrap docs/notes/" [shape=box];
     "Atomicity gate" [shape=diamond];
@@ -70,11 +88,13 @@ digraph zettel_write {
     "Detect AKM type" [shape=diamond];
     "Delegate to typed writer" [shape=box];
     "Write generic named-slug card" [shape=box];
+    "Stage generic card on main" [shape=box];
     "Post-write audit" [shape=diamond];
     "Confirm + show file" [shape=doublecircle];
     "Reject + rewrite" [shape=box];
 
-    "Capture request" -> "AKM workspace exists?";
+    "Capture request" -> "Resolve AKM root";
+    "Resolve AKM root" -> "AKM workspace exists?";
     "AKM workspace exists?" -> "Bootstrap docs/notes/" [label="no"];
     "AKM workspace exists?" -> "Atomicity gate" [label="yes"];
     "Bootstrap docs/notes/" -> "Atomicity gate";
@@ -84,7 +104,8 @@ digraph zettel_write {
     "Detect AKM type" -> "Delegate to typed writer" [label="match"];
     "Detect AKM type" -> "Write generic named-slug card" [label="no match"];
     "Delegate to typed writer" -> "Post-write audit";
-    "Write generic named-slug card" -> "Post-write audit";
+    "Write generic named-slug card" -> "Stage generic card on main";
+    "Stage generic card on main" -> "Post-write audit";
     "Post-write audit" -> "Reject + rewrite" [label="violation"];
     "Post-write audit" -> "Confirm + show file" [label="pass"];
     "Reject + rewrite" -> "Atomicity gate";
@@ -118,11 +139,11 @@ When single: proceed to type detection.
 
 Use the routing table in `<quick_reference>`. Match by the *shape* of the request, not by surface keywords — "I want…" inside a description of an architectural decision is still an ADR, not a story.
 
-When a request matches an AKM type **and** a typed writer skill exists, call that skill — it owns the schema, the id sequence, and the type-specific lifecycle. This skill never duplicates an AKM body schema; the canonical schema is in `docs/notes/akm.md` and the typed writers reference it.
+When a request matches an AKM type **and** a typed writer skill exists, call that skill — it owns the schema, the id sequence, the type-specific lifecycle, **and its own workspace resolution + commit/stage call**. This skill stops at the handoff; do not stage or commit on the typed writer's behalf, it has already done so per its policy.
 
-All six AKM types now have typed writers (`infinifu:story-write`, `infinifu:adr-write`, `infinifu:feature-write`, `infinifu:implementation-write`, `infinifu:persona-write`, `infinifu:category-write`). Always delegate; never duplicate the schema here. If a request matches a typed AKM bucket but the typed writer is somehow unreachable, fall back to writing the card raw per `akm.md` and flag the broken delegation.
+All six AKM types now have typed writers (`infinifu:story-write`, `infinifu:adr-write`, `infinifu:feature-write`, `infinifu:implementation-write`, `infinifu:persona-write`, `infinifu:category-write`). Always delegate; never duplicate the schema here. If a request matches a typed AKM bucket but the typed writer is somehow unreachable, fall back to writing the card raw under `$AKM_ROOT/docs/notes/` per `akm.md` (and stage it like a generic card) and flag the broken delegation.
 
-**H1 tag wikilinks on typed zettels.** Many AKM types allow optional taxonomy tags in the H1 (`# Story [[flow-or-area]] [[theme]] [[product]]`). Add a tag only when a backing zettel for it already exists in `docs/notes/`, or when the user has explicitly named one to create. Never fabricate a tag wikilink just because the type's schema "allows" it — a dangling tag adds noise to the moxide diagnostics without adding any graph value. The required `[[product]]` link is non-negotiable; everything else is opt-in.
+**H1 tag wikilinks on typed zettels.** Many AKM types allow optional taxonomy tags in the H1 (`# Story [[flow-or-area]] [[theme]] [[product]]`). Add a tag only when a backing zettel for it already exists in `$AKM_ROOT/docs/notes/`, or when the user has explicitly named one to create. Never fabricate a tag wikilink just because the type's schema "allows" it — a dangling tag adds noise to the moxide diagnostics without adding any graph value. The required `[[product]]` link is non-negotiable; everything else is opt-in.
 
 When the request fits no AKM type, write a generic named-slug card (next step).
 
@@ -130,7 +151,13 @@ When the request fits no AKM type, write a generic named-slug card (next step).
 
 Free-form concept notes, glossary entries, distilled external knowledge, principle cards. These have no numeric id, no rigid schema, no lifecycle status — just one idea, short, linked.
 
-**Location:** `docs/notes/<kebab-slug>.md`. The slug *is* the wikilink target — pick it to read well inside `[[brackets]]` (e.g. `[[cap-theorem]]`, `[[bus-factor]]`, `[[atomic-commits]]`).
+**Location:** `$AKM_ROOT/docs/notes/<kebab-slug>.md`. The slug *is* the wikilink target — pick it to read well inside `[[brackets]]` (e.g. `[[cap-theorem]]`, `[[bus-factor]]`, `[[atomic-commits]]`).
+
+**Stage after writing** (do **not** commit — generic cards are draft-ish, the next typed-write lifecycle commit picks them up, or the user tidies the workspace later):
+
+```bash
+git -C "$AKM_ROOT" add "docs/notes/<slug>.md"
+```
 
 **Minimal schema:**
 
@@ -176,7 +203,9 @@ Quote violations back to the user — don't silently fix and pretend the card wa
 
 ## Step 5 — Confirm
 
-Show the file path, the one-sentence restatement of the claim, and the outbound links. End with: *"Wrote `<path>` — one claim, N outbound links. Anything to refine?"*
+Show the absolute file path under `$AKM_ROOT` (so the user sees where it landed when invoked from a worktree), the one-sentence restatement of the claim, the outbound links, and — for generic cards — that the file was **staged** on main without a commit. End with: *"Wrote `$AKM_ROOT/docs/notes/<slug>.md` — one claim, N outbound links, staged on main. Anything to refine?"*
+
+For delegated typed writes, the called skill owns its own confirmation; this skill just reports the handoff.
 
 </the_process>
 
@@ -190,7 +219,7 @@ After atomicity gate: one idea (definition of bus factor as a metric, with one u
 
 Type detection: not a story, not an ADR, not a feature → generic named-slug card.
 
-File: `docs/notes/bus-factor.md`
+File: `$AKM_ROOT/docs/notes/bus-factor.md`
 
 ```markdown
 ---
@@ -254,8 +283,10 @@ Before reporting the capture complete:
 - [ ] ≥ 1 outbound wikilink beyond `[[product]]` and `Index:` footer
 - [ ] `[[product]]` present in H1, `Index: [[product]]` footer present
 - [ ] Filename is stable (`us###` / `im###` / … for typed; `<kebab-slug>` for generic) — not date-stamped, not owner-stamped
-- [ ] If typed: schema matches `akm.md` exactly (sections, frontmatter keys)
-- [ ] If generic: `## see also` present with at least one entry
+- [ ] File lives under `$AKM_ROOT/docs/notes/` (resolved via `akm-root`), not under the feature-branch worktree's cwd
+- [ ] If typed: schema matches `akm.md` exactly (sections, frontmatter keys); commit/stage on main was handled by the typed writer
+- [ ] If generic: `## see also` present with at least one entry; file was **staged** on main (`git -C "$AKM_ROOT" add docs/notes/<slug>.md`) and **no commit** was created
+- [ ] Confirmation surfaces the absolute `$AKM_ROOT/docs/notes/...` path so the user sees where it landed
 - [ ] moxide LSP shows no unresolved diagnostics for the new wikilinks (or the dangles are deliberate and noted)
 
 </verification_checklist>

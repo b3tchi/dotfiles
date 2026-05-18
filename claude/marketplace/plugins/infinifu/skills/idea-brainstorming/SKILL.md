@@ -21,49 +21,92 @@ Do NOT invoke any implementation skill, write any code, scaffold any project, cr
 
 Every request goes through the lifecycle. A todo list, a one-line config change, a typo fix — all of them. "Simple" requests are where unexamined assumptions cause the most wasted work. The downstream design can be short for truly simple cases, but the entry type must be picked and a design must be presented.
 
+## AKM Workspace Resolution
+
+Specs (`sp###`) and the board live on **main**, even when the agent's cwd
+is a feature-branch worktree. Before any file operation in stage 1,
+resolve the AKM root:
+
+```bash
+AKM_ROOT="$(akm-root)"
+```
+
+`akm-root` returns the absolute path of the worktree on the project's
+default branch (origin/HEAD → `main` → `master`). Outside a git repo it
+falls back to cwd. Every path in this skill and the four entry skills
+anchors on `$AKM_ROOT`:
+
+- Spec zettel: `$AKM_ROOT/docs/notes/spec/sp<NNN>.md`
+- Board hub:   `$AKM_ROOT/docs/board.md`
+- AKM reads:   `$AKM_ROOT/docs/notes/...` (us / pn / ft / im / adr / cat)
+
+If `akm-root` errors (no default-branch worktree), surface the helper's
+stderr and abort — never silently land an idea on the feature branch.
+
+**Commit policy: stage only at the idea stage.** Per the per-stage
+table in `docs/notes/akm.md#workspace-resolution`, writes during
+exploratory or draft phases stay staged-only. The first commit on main
+for the idea→spec lineage happens at `spec-writing` when the idea
+graduates to a spec. At idea time:
+
+```bash
+git -C "$AKM_ROOT" add docs/notes/spec/sp<NNN>.md docs/board.md
+# DO NOT commit — spec-writing carries the first commit
+```
+
 ## Process (every entry type)
 
-### 1. Explore project context
+### 1. Resolve AKM root
+
+Run `AKM_ROOT="$(akm-root)"` once at the top of the session. Anchor every
+subsequent path on `$AKM_ROOT`. If the helper errors, surface stderr and
+abort — see `## AKM Workspace Resolution` above.
+
+### 2. Explore project context
 
 - Read README, recent commits, and the directly-affected paths (e.g. `src/services/<x>/` for a service-level change).
 - Read what's needed to ground the proposal — not everything.
 
-### 2. Survey AKM context (entry-specific)
+### 3. Survey AKM context (entry-specific)
 
-Each entry skill's `## AKM hooks` block lists the read set. Survey concretely via the read skills (`category-read`, `adr-read`, `feature-read`, `story-read`, `persona-read`, `implementation-read`) — never invent zettel ids that don't exist.
+Each entry skill's `## AKM hooks` block lists the read set. Survey concretely via the read skills (`category-read`, `adr-read`, `feature-read`, `story-read`, `persona-read`, `implementation-read`) — never invent zettel ids that don't exist. All read skills resolve `$AKM_ROOT/docs/notes/...` themselves; you don't need to pass paths.
 
 **Grounding rule.** Every "we could use X" mentioned in the proposal is anchored to a real zettel id surfaced by a read skill. If a candidate doesn't exist yet, say so explicitly ("no existing ft### covers this; we'd mint one at spec-writing").
 
-### 3. Ask clarifying questions
+### 4. Ask clarifying questions
 
 - **One question per message.** Don't overwhelm.
 - **Multiple-choice preferred.** Three options or fewer.
 - Cover the entry-specific essentials (persona / want / because / AC for `idea-implement`; AC delta and migration story for `idea-extend`; capability boundary and consumers for `idea-feature`; severity / blast radius / rollback for `idea-hotfix`).
 
-### 4. Propose 2-3 design approaches
+### 5. Propose 2-3 design approaches
 
 - Lead with your recommended option.
 - Each option carries trade-offs.
 - Anchor every option in the surveyed AKM context (which categories, which ADRs constrain, which features are candidates).
 
-### 5. Present the design, get approval
+### 6. Present the design, get approval
 
 - Section by section, scaled to complexity (a few sentences for simple, up to 200-300 words for nuanced).
 - Confirm after each section before continuing.
 - Be ready to revise.
 
-### 6. Mint the zettel(s)
+### 7. Mint the zettel(s)
 
 Per the entry skill's `## AKM hooks` write set. The common write across all four:
 
-- `sp###` at `docs/notes/spec/sp###.md` — frontmatter `status: idea`, `Index: [[board]]`, body has `## problem` populated, H1 carries the proposed `[[cat###]]` picks.
-- `docs/board.md` — append `[[sp###|<title>]]` under `## idea`.
+- `sp###` at `$AKM_ROOT/docs/notes/spec/sp<NNN>.md` — frontmatter `status: idea`, `Index: [[board]]`, body has `## problem` populated, H1 carries the proposed `[[cat###]]` picks.
+- `$AKM_ROOT/docs/board.md` — append `[[sp###|<title>]]` under `## idea`.
 
 Entry-specific writes (new `us###`, new `pn###`, severity annotation, etc.) live in the entry skill.
 
-### 7. Hand off to spec-writing
+### 8. Stage on main
 
-The only next step. Do **not** invoke any implementation skill (`work-do`, `domain-bug-fixing`, etc.) directly from any entry-type brainstormer.
+`git -C "$AKM_ROOT" add docs/notes/spec/sp<NNN>.md docs/board.md` (plus any entry-specific paths the entry skill wrote on main). Do **not** commit — `spec-writing` handles the first commit when the idea graduates to a spec. See the per-stage table in `docs/notes/akm.md#workspace-resolution`.
+
+### 9. Hand off to spec-writing
+
+The only next step. Do **not** invoke any implementation skill (`work-do`, `domain-bug-fixing`, etc.) directly from any entry-type brainstormer. Confirmation to the user should surface the absolute path under `$AKM_ROOT` so the user sees where the spec landed when invoked from a worktree.
 
 ## Key Principles
 
@@ -78,6 +121,7 @@ The only next step. Do **not** invoke any implementation skill (`work-do`, `doma
 
 ```dot
 digraph brainstorm_basics {
+    "Resolve AKM root" [shape=box];
     "Explore project context" [shape=box];
     "Survey AKM context (entry-specific)" [shape=box];
     "Ask one clarifying question" [shape=box];
@@ -86,8 +130,10 @@ digraph brainstorm_basics {
     "Present design sections" [shape=box];
     "User approves?" [shape=diamond];
     "Mint sp### + entry-specific writes" [shape=box];
+    "Stage on main (no commit)" [shape=box];
     "Hand off to spec-writing" [shape=doublecircle];
 
+    "Resolve AKM root" -> "Explore project context";
     "Explore project context" -> "Survey AKM context (entry-specific)";
     "Survey AKM context (entry-specific)" -> "Ask one clarifying question";
     "Ask one clarifying question" -> "Have enough?";
@@ -97,7 +143,8 @@ digraph brainstorm_basics {
     "Present design sections" -> "User approves?";
     "User approves?" -> "Present design sections" [label="no, revise"];
     "User approves?" -> "Mint sp### + entry-specific writes" [label="yes"];
-    "Mint sp### + entry-specific writes" -> "Hand off to spec-writing";
+    "Mint sp### + entry-specific writes" -> "Stage on main (no commit)";
+    "Stage on main (no commit)" -> "Hand off to spec-writing";
 }
 ```
 

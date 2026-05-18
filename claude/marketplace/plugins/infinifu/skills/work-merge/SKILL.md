@@ -23,6 +23,27 @@ That's the AKM knowledge-graph maintenance pass and it happens *after* merge.
 
 **Announce at start:** "Using work-merge skill to land sp### and flip the lifecycle."
 
+## AKM Workspace Resolution
+
+Specs, board, archive, and the touched `us###` / `im###` are shared product knowledge — they live on **main**, even though work-merge usually runs from the feature-branch worktree. Resolve before any read or write:
+
+```bash
+AKM_ROOT="$(akm-root)"
+```
+
+`akm-root` returns the main-worktree path (default branch); outside git, cwd. Anchor every AKM path on `$AKM_ROOT` (`$AKM_ROOT/docs/notes/spec/sp<NNN>.md`, `$AKM_ROOT/docs/notes/us<NNN>.md`, `$AKM_ROOT/docs/notes/im<NNN>.md`, `$AKM_ROOT/docs/board.md`, `$AKM_ROOT/docs/archive.md`). If `akm-root` errors, surface its stderr and abort — never silently flip the AKM lifecycle on the feature branch.
+
+work-merge is a **transition skill that commits on main** per the AKM commit policy. The lifecycle archive flip (statuses + board → archive move) lands as one **AKM admin commit on main**:
+
+```bash
+git -C "$AKM_ROOT" add docs/notes/spec/sp<NNN>.md docs/notes/us<NNN>.md docs/notes/im<NNN>.md docs/board.md docs/archive.md
+git -C "$AKM_ROOT" commit -m "feat(akm): archive sp<NNN>"
+```
+
+**This is NOT the code-merge.** work-merge does not merge code — the actual source code lands separately on the feature worktree via the chosen git landing option (local merge, PR, etc., see "Process — git landing options" below). The AKM admin commit above only flips AKM state and closes the bd epic; subsequent `git merge` / `git push` / `gh pr create` operate on the feature worktree's branch, not `$AKM_ROOT`.
+
+Commit-message convention: `feat(akm): archive sp<NNN>`. See the per-stage commit table in `docs/notes/akm.md#workspace-resolution`.
+
 ## AKM hooks
 
 Stage 7 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Status flips and archive move are the lifecycle-mandated writes; the git landing layer is the operational vehicle that gets the code into the base branch.
@@ -36,30 +57,36 @@ Stage 7 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Status flips a
 
 **Writes:**
 
-- `sp###` — flip frontmatter `status: ready → done`. Flip footer line `Index: [[board]]` → `Index: [[archive]]`.
-- `us###` — flip frontmatter `status: ready → done`.
-- `im###` — flip frontmatter `status: proposed → accepted`. Body narrative left alone (spec-retro owns the refresh).
-- `docs/board.md` — remove the `[[sp###]]` line from `## ready`.
-- `docs/archive.md` — add `[[sp###]]` under `## done` (chronological at the bottom).
+- `$AKM_ROOT/docs/notes/spec/sp###.md` — flip frontmatter `status: ready → done`. Flip footer line `Index: [[board]]` → `Index: [[archive]]`.
+- `$AKM_ROOT/docs/notes/us###.md` — flip frontmatter `status: ready → done`.
+- `$AKM_ROOT/docs/notes/im###.md` — flip frontmatter `status: proposed → accepted`. Body narrative left alone (spec-retro owns the refresh).
+- `$AKM_ROOT/docs/board.md` — remove the `[[sp###]]` line from `## ready`.
+- `$AKM_ROOT/docs/archive.md` — add `[[sp###]]` under `## done` (chronological at the bottom).
 - bd epic — close with summary reason (e.g., "Merged via sp###").
 
 ## Entry-specific checklist
 
-1. **Identify target spec.** User names a `sp###`. Verify `docs/notes/spec/sp###.md` exists.
-2. **Verify status.** Must be `status: ready`. Apply Disambiguation if not.
-3. **Verify bd children all closed.** `bd list --parent <epic-id>` or `bd dep tree <epic-id>` should show every child task `closed`. Any non-closed child blocks — work-audit didn't approve everything yet.
-4. **Read the spec body** — `## solves [[us###]]`, `## implements [[im###]]`, `## tasks` (for bd id list).
-5. **Run tests** in the feature branch / worktree. All green is the precondition for any of the subsequent writes. Failing tests block; route the user back to fix.
-6. **AKM writes (atomic):**
-   - Flip `us###.status: ready → done`.
-   - Flip `im###.status: proposed → accepted`. Leave body alone.
-   - Flip `sp###.status: ready → done`. Flip footer `Index: [[board]] → [[archive]]`.
-   - Remove `[[sp###|<title>]]` from `docs/board.md ## ready`.
-   - Add `[[sp###|<title>]]` under `docs/archive.md ## done`.
+1. **Resolve AKM root.** `AKM_ROOT="$(akm-root)"` — every AKM path anchors on it. Abort with the helper's stderr if it errors.
+2. **Identify target spec.** User names a `sp###`. Verify `$AKM_ROOT/docs/notes/spec/sp###.md` exists.
+3. **Verify status.** Must be `status: ready`. Apply Disambiguation if not.
+4. **Verify bd children all closed.** `bd list --parent <epic-id>` or `bd dep tree <epic-id>` should show every child task `closed`. Any non-closed child blocks — work-audit didn't approve everything yet.
+5. **Read the spec body** — `## solves [[us###]]`, `## implements [[im###]]`, `## tasks` (for bd id list).
+6. **Run tests** in the feature branch / worktree. All green is the precondition for any of the subsequent writes. Failing tests block; route the user back to fix.
+7. **AKM writes (atomic, on main):**
+   - Flip `$AKM_ROOT/docs/notes/us###.md` frontmatter `status: ready → done`.
+   - Flip `$AKM_ROOT/docs/notes/im###.md` frontmatter `status: proposed → accepted`. Leave body alone.
+   - Flip `$AKM_ROOT/docs/notes/spec/sp###.md` frontmatter `status: ready → done`. Flip footer `Index: [[board]] → [[archive]]`.
+   - Remove `[[sp###|<title>]]` from `$AKM_ROOT/docs/board.md ## ready`.
+   - Add `[[sp###|<title>]]` under `$AKM_ROOT/docs/archive.md ## done`.
    - Close the bd epic via `bd close <epic-id> --reason "Merged via sp###. All N tasks closed by work-audit."`
-7. **Git landing (operational vehicle):** present the 4-option menu to the user (Merge / PR / Keep / Discard). Execute the chosen path.
-8. **Worktree cleanup** where appropriate (Options 1 + 4).
-9. **Hand off to `spec-retro`** with a one-line pointer — the user runs spec-retro next to refresh `im###` narrative + file any new ADRs / `ft###` updates / draft `us###`.
+8. **Commit on main (AKM admin commit).** Stage and commit the five touched AKM files in one shot — this is the lifecycle commit for the archive flip. Code merge happens separately in step 9.
+   ```bash
+   git -C "$AKM_ROOT" add docs/notes/spec/sp<NNN>.md docs/notes/us<NNN>.md docs/notes/im<NNN>.md docs/board.md docs/archive.md
+   git -C "$AKM_ROOT" commit -m "feat(akm): archive sp<NNN>"
+   ```
+9. **Git landing (operational vehicle, on the feature worktree — NOT `$AKM_ROOT`):** present the 4-option menu to the user (Merge / PR / Keep / Discard). Execute the chosen path. This is where the actual code lands; the AKM admin commit in step 8 is separate.
+10. **Worktree cleanup** where appropriate (Options 1 + 4).
+11. **Hand off to `spec-retro`** with a one-line pointer — the user runs spec-retro next to refresh `im###` narrative + file any new ADRs / `ft###` updates / draft `us###`.
 
 ## Disambiguation
 
@@ -114,7 +141,7 @@ gh pr create --title "<title>" --body "$(cat <<'EOF'
 ## Summary
 <2-3 bullets>
 
-Spec: docs/notes/spec/sp###.md
+Spec: $AKM_ROOT/docs/notes/spec/sp###.md
 EOF
 )"
 ```
@@ -134,7 +161,13 @@ git checkout <base-branch>
 git branch -D <feature-branch>
 ```
 
-**Rollback the AKM writes** (status flips, archive move, bd epic close) — discard means the work isn't shipping, so the board must reflect that. Confirm with the user which sp### status to restore (`ready` if the breakdown still applies, `spec` if the solution shape is wrong, etc).
+**Rollback the AKM writes** (status flips, archive move, bd epic close) — discard means the work isn't shipping, so the board must reflect that. Confirm with the user which sp### status to restore (`ready` if the breakdown still applies, `spec` if the solution shape is wrong, etc). Revert the AKM admin commit on main:
+
+```bash
+git -C "$AKM_ROOT" revert HEAD   # reverts the feat(akm): archive sp<NNN> commit
+```
+
+Or edit the five files back to pre-flip state and `git -C "$AKM_ROOT" commit -m "feat(akm): unarchive sp<NNN>"` if a clean reverse is preferable to a revert.
 
 ## Integration
 

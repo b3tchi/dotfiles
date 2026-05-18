@@ -1,32 +1,53 @@
 #!/usr/bin/env bash
 # Seed an AKM sandbox for story-write evals.
 #
-# Default mode: existing workspace with personas + 5 stories (us001-us014).
-#   Next story will be us015 or higher.
-# --fresh mode: empty docs/notes/ (no us*.md, no pn*.md).
-#   Tests first-story-of-workspace path. Hub + akm.md still present.
+# Modes:
+#   (default)    existing workspace at <sandbox>/ with personas + 5 stories
+#                (us001-us014). Next story will be us015 or higher.
+#   --fresh      empty docs/notes/ at <sandbox>/ (no us*.md, no pn*.md).
+#                Tests first-story-of-workspace path. Hub + akm.md still present.
+#   --worktree   git-initialized layout:
+#                  <sandbox>/main/  ← AKM workspace on default branch
+#                  <sandbox>/feat/  ← sibling worktree on feature branch (empty)
+#                Tests the main-worktree resolution rule: agent invoked from
+#                <sandbox>/feat/ must still write into <sandbox>/main/docs/notes/.
+#                Combine with --fresh for an empty AKM on main.
 #
 # Schema source of truth: docs/notes/akm.md (Agentic Knowledge Model).
 #
 # Usage:
 #   seed_sandbox.sh <sandbox-dir>
 #   seed_sandbox.sh --fresh <sandbox-dir>
+#   seed_sandbox.sh --worktree <sandbox-dir>
+#   seed_sandbox.sh --worktree --fresh <sandbox-dir>
 set -euo pipefail
 
 FRESH=0
-if [ "${1:-}" = "--fresh" ]; then
-  FRESH=1
-  shift
-fi
+WORKTREE=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --fresh)    FRESH=1; shift ;;
+    --worktree) WORKTREE=1; shift ;;
+    --)         shift; break ;;
+    -*)         echo "unknown flag: $1" >&2; exit 2 ;;
+    *)          break ;;
+  esac
+done
 
 SANDBOX="${1:?sandbox dir required}"
 rm -rf "$SANDBOX"
-mkdir -p "$SANDBOX/docs/notes"
-cd "$SANDBOX"
+
+if [ "$WORKTREE" = "1" ]; then
+  AKM_ROOT="$SANDBOX/main"
+else
+  AKM_ROOT="$SANDBOX"
+fi
+
+mkdir -p "$AKM_ROOT/docs/notes"
 
 # Product hub — always present
 if [ "$FRESH" = "1" ]; then
-  cat > docs/product.md <<'EOF'
+  cat > "$AKM_ROOT/docs/product.md" <<'EOF'
 # Product
 
 Sample-ordering workflow.
@@ -38,7 +59,7 @@ Sample-ordering workflow.
 - [[akm]] — knowledge model: every zettel type, its schema and life-cycle
 EOF
 else
-  cat > docs/product.md <<'EOF'
+  cat > "$AKM_ROOT/docs/product.md" <<'EOF'
 # Product
 
 Sample-ordering workflow.
@@ -63,7 +84,7 @@ EOF
 fi
 
 # Minimal akm.md so skills can reference the schema
-cat > docs/notes/akm.md <<'EOF'
+cat > "$AKM_ROOT/docs/notes/akm.md" <<'EOF'
 ---
 aliases:
   - agentic knowledge model
@@ -80,18 +101,21 @@ role, 'Index: [[product]]' footer.
 ID format: us### (3-digit zero-padded sequential). Status values:
 draft, ready, in_progress, done, dropped.
 
+## Workspace Resolution
+
+Stories live on main. From a worktree, resolve via `akm-root` and anchor
+all paths on `$AKM_ROOT/docs/...`. Stage on main without committing for
+draft artifacts; commit at stage transitions (spec-writing, spec-ready,
+work-merge).
+
 ---
 
 Index: [[product]]
 EOF
 
-if [ "$FRESH" = "1" ]; then
-  echo "Seeded fresh AKM sandbox at $SANDBOX (empty docs/notes/, no personas, no stories)."
-  exit 0
-fi
-
-# Personas
-cat > docs/notes/pn001.md <<'EOF'
+if [ "$FRESH" = "0" ]; then
+  # Personas
+  cat > "$AKM_ROOT/docs/notes/pn001.md" <<'EOF'
 ---
 aliases:
   - requestor
@@ -111,7 +135,7 @@ Front-line salesperson who pulls samples for client meetings.
 Index: [[product]]
 EOF
 
-cat > docs/notes/pn002.md <<'EOF'
+  cat > "$AKM_ROOT/docs/notes/pn002.md" <<'EOF'
 ---
 aliases:
   - approver
@@ -131,8 +155,8 @@ Manager who reviews and approves requestor submissions.
 Index: [[product]]
 EOF
 
-# Stories spanning the lifecycle
-cat > docs/notes/us001.md <<'EOF'
+  # Stories spanning the lifecycle
+  cat > "$AKM_ROOT/docs/notes/us001.md" <<'EOF'
 ---
 aliases:
   - order samples for upcoming client work
@@ -160,7 +184,7 @@ I need product in hand for client tasting / presentation
 Index: [[product]]
 EOF
 
-cat > docs/notes/us002.md <<'EOF'
+  cat > "$AKM_ROOT/docs/notes/us002.md" <<'EOF'
 ---
 aliases:
   - approve or reject a request
@@ -188,7 +212,7 @@ the warehouse should only pick approved orders
 Index: [[product]]
 EOF
 
-cat > docs/notes/us003.md <<'EOF'
+  cat > "$AKM_ROOT/docs/notes/us003.md" <<'EOF'
 ---
 aliases:
   - track the status of my open requests
@@ -216,7 +240,7 @@ I want to know when I can pick up product without chasing the approver
 Index: [[product]]
 EOF
 
-cat > docs/notes/us013.md <<'EOF'
+  cat > "$AKM_ROOT/docs/notes/us013.md" <<'EOF'
 ---
 aliases:
   - resubmit a Rejected or Blocked request after revising it
@@ -244,7 +268,7 @@ recreating the whole request from scratch is wasteful
 Index: [[product]]
 EOF
 
-cat > docs/notes/us014.md <<'EOF'
+  cat > "$AKM_ROOT/docs/notes/us014.md" <<'EOF'
 ---
 aliases:
   - bulk import requests from spreadsheet
@@ -271,5 +295,37 @@ event prep means submitting dozens of similar requests and the per-row UI is slo
 
 Index: [[product]]
 EOF
+fi
 
-echo "Seeded AKM sandbox at $SANDBOX (2 personas, 5 stories — next id is us015)."
+# Initialize git layout if --worktree
+if [ "$WORKTREE" = "1" ]; then
+  (
+    cd "$AKM_ROOT"
+    git init -q -b main
+    git config user.email "seed@akm.local"
+    git config user.name "akm-seed"
+    git add .
+    git commit -qm "seed AKM workspace"
+    git worktree add -q -b feat "$SANDBOX/feat"
+  )
+  # In the feature worktree, drop a placeholder so the agent has somewhere to land
+  mkdir -p "$SANDBOX/feat/src"
+  echo "// feature work goes here" > "$SANDBOX/feat/src/.gitkeep"
+fi
+
+# Summary
+if [ "$WORKTREE" = "1" ]; then
+  if [ "$FRESH" = "1" ]; then
+    echo "Seeded WORKTREE sandbox at $SANDBOX:"
+    echo "  main worktree (AKM, empty notes): $SANDBOX/main"
+    echo "  feat worktree (code cwd):         $SANDBOX/feat"
+  else
+    echo "Seeded WORKTREE sandbox at $SANDBOX (2 personas, 5 stories — next id is us015):"
+    echo "  main worktree (AKM): $SANDBOX/main"
+    echo "  feat worktree (cwd): $SANDBOX/feat"
+  fi
+elif [ "$FRESH" = "1" ]; then
+  echo "Seeded fresh AKM sandbox at $SANDBOX (empty docs/notes/, no personas, no stories)."
+else
+  echo "Seeded AKM sandbox at $SANDBOX (2 personas, 5 stories — next id is us015)."
+fi

@@ -9,6 +9,7 @@ linux:
     repos-health.nu: ~/.local/bin/repos-health.nu
     epic.nu: ~/.local/bin/epic
     akm/akm: ~/.local/bin/akm
+    akm/akm-root: ~/.local/bin/akm-root
     commands/epic-create.md: ~/.claude/commands/epic-create.md
 
     {{#if (eq env.HOME "/data/data/com.termux/files/home")}}

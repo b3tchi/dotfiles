@@ -59,12 +59,35 @@ Index: [[product]]
 
 The two body sections this skill cares about are `## solves` (one wikilink to a story) and `## components` (a bullet list of repo-relative paths or globs).
 
+## AKM Workspace Resolution
+
+Readers always anchor on the main worktree's view of the AKM, never the
+feature worktree's local copy (which may be stale or branch-divergent).
+Resolve first:
+
+```bash
+AKM_ROOT="$(akm-root)"
+```
+
+All AKM zettel lookups (`us###`, `im###`) anchor on `$AKM_ROOT/docs/notes/...`.
+If `akm-root` errors, surface its stderr and fall back to cwd with the
+warning *"reading from cwd worktree — may be stale; check out the default
+branch for canonical view"*.
+
+**Code paths are different.** The paths inside `## components` (e.g.
+`src/auth/login.ts`) refer to the source tree the user is actually
+working in — typically the current worktree, possibly a feature branch.
+**Do not rewrite code paths to be anchored on `$AKM_ROOT`.** Existence
+checks like `git ls-files` and `ls` run in the user's cwd, not the AKM
+root. Only the `us###` / `im###` / `docs/notes/` reads anchor on
+`$AKM_ROOT`; component path strings stay as-written.
+
 ## Storage
 
-- **Stories:** `docs/notes/us###.md` (read-only here — to add stories, see `story-write`).
-- **Implementations:** `docs/notes/im###.md` (this is what we read and edit).
+- **Stories:** `$AKM_ROOT/docs/notes/us###.md` (read-only here — to add stories, see `story-write`).
+- **Implementations:** `$AKM_ROOT/docs/notes/im###.md` (this is what we read and edit).
 
-If `docs/notes/` has no `im*.md` files: the map is empty.
+If `$AKM_ROOT/docs/notes/` has no `im*.md` files: the map is empty.
 - Forward / reverse lookup → "No implementations indexed yet. Stories with shipped code typically have an `im###` zettel; create one before mapping."
 - Attach → tell the user "No `im###` zettel exists for story `<id>`. Create one via `spec-writing` or by hand following the AKM Implementation schema, then re-run attach."
 
@@ -101,7 +124,7 @@ Treat the user input as a path if it contains `/`, ends in a known extension (`.
 
 **Process:**
 
-1. Search `docs/notes/im*.md` for the path. `grep -l '<query-path>' docs/notes/im*.md` returns the implementation files that list it under `## components`. Also handles glob expansion: if an im### has `src/auth/**` in components and the query is `src/auth/login.ts`, that should match — accept either *exact*, *prefix*, or *glob-style* coverage.
+1. Search `$AKM_ROOT/docs/notes/im*.md` for the path. `grep -l '<query-path>' "$AKM_ROOT/docs/notes/"im*.md` returns the implementation files that list it under `## components`. Also handles glob expansion: if an im### has `src/auth/**` in components and the query is `src/auth/login.ts`, that should match — accept either *exact*, *prefix*, or *glob-style* coverage.
 2. For each matching `im###.md`, read `## solves` to extract the back-linked `us###`.
 3. Read the story's title (frontmatter `aliases[0]`) and status — that's what you'll render.
 
@@ -126,8 +149,8 @@ If zero matched: "No implementations list `<query>` under `## components`. The p
 
 **Process:**
 
-1. Confirm the story exists in `docs/notes/us<id>.md`. If not → "Story `us<id>` not found." and stop.
-2. Find the `im###.md` whose `## solves` section contains `[[us<id>]]`. Cheap: `grep -l '\[\[us<id>' docs/notes/im*.md` (the wikilink form may be `[[us013]]` or `[[us013|<alias>]]`, both should match the prefix). If multiple match, list them all — a story may have a superseded chain.
+1. Confirm the story exists in `$AKM_ROOT/docs/notes/us<id>.md`. If not → "Story `us<id>` not found." and stop.
+2. Find the `im###.md` whose `## solves` section contains `[[us<id>]]`. Cheap: `grep -l '\[\[us<id>' "$AKM_ROOT/docs/notes/"im*.md` (the wikilink form may be `[[us013]]` or `[[us013|<alias>]]`, both should match the prefix). If multiple match, list them all — a story may have a superseded chain.
 3. Read the title from the story zettel and the `## components` bullets from the implementation. Also surface the implementation's `status` (proposed / accepted / superseded) so the user knows if the mapping is current.
 
 **Output template:**
@@ -156,14 +179,14 @@ If no `im###.md` solves the story: "Story `us<id>` has no Implementation zettel 
 **Process:**
 
 1. Parse story id, path(s), and the verb (add / remove).
-2. Validate story id exists in `docs/notes/us<id>.md`. If not → error with closest matches.
+2. Validate story id exists in `$AKM_ROOT/docs/notes/us<id>.md`. If not → error with closest matches.
 3. Find the `im###.md` that solves the story (Reverse-lookup step 2). If zero or multiple:
    - **Zero:** error "No Implementation zettel solves `us<id>`. Create one first." Do not invent an im### here — Implementation creation is `spec-writing`'s job (or a manual hand-write per the AKM schema).
    - **Multiple:** ask the user "Stories `us<id>` is solved by multiple implementations (im004, im007). Which should the path attach to?" (Usually only one is `accepted`; supersededs are historical.)
 4. **For add:**
    - Normalize the path (strip leading `/`, `./`, trim whitespace).
    - **Sanity check:** if the path contains no `/` and no extension, ask "Is `<path>` really a code path? It looks like a topic word." — one confirmation, then proceed.
-   - **Existence check (optional but recommended):** if a working tree is available, run `git ls-files <path>` or `ls`. If the path doesn't exist, warn: "Path `<X>` doesn't exist in the working tree. Add anyway?" Proceed under auto mode and note the warning in the response.
+   - **Existence check (optional but recommended):** if a working tree is available, run `git ls-files <path>` or `ls` **in the user's cwd** (not `$AKM_ROOT` — code paths reference the user's source tree, which may be a feature worktree). If the path doesn't exist, warn: "Path `<X>` doesn't exist in the working tree. Add anyway?" Proceed under auto mode and note the warning in the response.
    - Locate the `## components` body section in the `im###.md`.
    - Check whether the path is already a bullet. If yes → "Already listed, nothing to do."
    - Append a new bullet `- <path>` to the section. Preserve other body sections untouched.
@@ -180,8 +203,8 @@ If no `im###.md` solves the story: "Story `us<id>` has no Implementation zettel 
 
 **Process:**
 
-1. List all `us*.md` ids + titles + statuses from `docs/notes/`.
-2. List all `im*.md` ids. For each, read `## solves` and `## components`.
+1. List all `us*.md` ids + titles + statuses from `$AKM_ROOT/docs/notes/`.
+2. List all `im*.md` ids from `$AKM_ROOT/docs/notes/`. For each, read `## solves` and `## components`.
 3. Build the (us### → im### → components) mapping in memory.
 4. Compute the **unmapped set**: story ids that no `im###.md` solves.
 

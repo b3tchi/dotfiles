@@ -17,11 +17,46 @@ This skill is used directly by users and is also called by `story-write` wheneve
 
 **Announce at start:** "Using tag-manage skill to <list / add / remove / suggest> tags."
 
+## AKM Workspace Resolution
+
+Story zettels are shared product knowledge and live on **main**, even when
+the agent's cwd is a feature-branch worktree. Tag-manage **mutates the H1
+of an existing zettel in place** — if it reads/writes the wrong worktree,
+the H1 edit lands on a feature branch and the main copy stays unchanged.
+Resolve before any read or write:
+
+```bash
+AKM_ROOT="$(akm-root)"
+```
+
+`akm-root` returns the absolute path of the worktree on the project's
+default branch (origin/HEAD → `main` → `master`); outside git, cwd.
+Anchor every path on `$AKM_ROOT`:
+
+- Scan: `$AKM_ROOT/docs/notes/us*.md`
+- Read + write back: `$AKM_ROOT/docs/notes/us<id>.md`
+
+If `akm-root` exits non-zero, surface its stderr and abort — never read
+from one tree and write to another, and never silently mutate the feature
+worktree's copy of a story.
+
+**Commit policy:** this skill **stages on main without committing**.
+Tag edits are micro-mutations that ride along with the caller's lifecycle
+commit (story-write → draft, spec-writing → ready, etc.), so the post-edit
+step is:
+
+```bash
+git -C "$AKM_ROOT" add docs/notes/us<id>.md
+```
+
+The next lifecycle skill that commits AKM picks the staged H1 change up.
+See the per-stage commit table in `docs/notes/akm.md#workspace-resolution`.
+
 ## Storage
 
 **Backend:** AKM (Agentic Knowledge Model).
 
-- Story zettels: `docs/notes/us###.md`.
+- Story zettels: `$AKM_ROOT/docs/notes/us###.md`.
 - Tags: wikilinks in the H1 of each story, **excluding `[[product]]`**. The `[[product]]` wikilink is structural (links to the workspace hub), not a tag.
 
 **Example H1 carrying two tags:**
@@ -38,27 +73,31 @@ Tags here: `requestor-flow`, `catalog`. (Drop `product`.)
 - They may **dangle** — `[[requestor-flow]]` is valid even without a backing `requestor-flow.md`. The moxide LSP flags dangling links as diagnostics, but users tolerate them when the tag is a conceptual grouping.
 - Categories (`[[cat###]]`) used in Feature / Implementation / ADR zettels are a *separate* taxonomy — this skill operates only on story H1 tags, not category links. Use the same naming convention (lowercase kebab-case slugs), but don't conflate the two layers.
 
-If `docs/notes/` does not exist or has no `us*.md` files: list returns an empty taxonomy, add/remove fail with "no story <id> found", suggest falls back to the bootstrap rules below.
+If `$AKM_ROOT/docs/notes/` does not exist or has no `us*.md` files: list returns an empty taxonomy, add/remove fail with "no story <id> found", suggest falls back to the bootstrap rules below.
 
 ## Mode Selection
 
 ```dot
 digraph mode_select {
     "User intent" [shape=oval];
+    "Resolve AKM root" [shape=box];
     "Mentions specific story id?" [shape=diamond];
     "Verb add/remove/tag?" [shape=diamond];
     "Asking for new tags?" [shape=diamond];
     "List mode" [shape=box];
     "Add/Remove mode" [shape=box];
+    "Stage on main" [shape=box];
     "Suggest mode" [shape=box];
 
-    "User intent" -> "Mentions specific story id?";
+    "User intent" -> "Resolve AKM root";
+    "Resolve AKM root" -> "Mentions specific story id?";
     "Mentions specific story id?" -> "Verb add/remove/tag?" [label="yes"];
     "Mentions specific story id?" -> "Asking for new tags?" [label="no"];
     "Verb add/remove/tag?" -> "Add/Remove mode" [label="yes"];
     "Verb add/remove/tag?" -> "Suggest mode" [label="no — describing draft"];
     "Asking for new tags?" -> "Suggest mode" [label="yes (no id, but proposing)"];
     "Asking for new tags?" -> "List mode" [label="no (just inspecting)"];
+    "Add/Remove mode" -> "Stage on main";
 }
 ```
 
@@ -73,9 +112,9 @@ These conventions apply across all modes:
 
 ## Mode 1: List
 
-Scan every `docs/notes/us*.md`, read the H1, count occurrences of each wikilink slug (excluding `[[product]]`).
+Scan every `$AKM_ROOT/docs/notes/us*.md`, read the H1, count occurrences of each wikilink slug (excluding `[[product]]`).
 
-A reliable way: `grep -h '^# Story' docs/notes/us*.md`, then extract `[[...]]` slugs from each line. Or read each H1 with `head -10`.
+A reliable way: `grep -h '^# Story' "$AKM_ROOT/docs/notes/"us*.md`, then extract `[[...]]` slugs from each line. Or read each H1 with `head -10`.
 
 **Output template:**
 
@@ -106,7 +145,7 @@ User says "add tag X to story Y" or "remove tag X from Y" (variations: "tag us01
 **Process:**
 
 1. Parse story id (`us###`) and tag slug(s).
-2. Read `docs/notes/us<id>.md`. If not found: error out — "Story `us<id>` not found. Closest: us..., us..." (do not guess; let user pick).
+2. Read `$AKM_ROOT/docs/notes/us<id>.md`. If not found: error out — "Story `us<id>` not found in `$AKM_ROOT`. Closest: us..., us..." (do not guess; let user pick).
 3. **For add:**
    - Normalize tag to lowercase kebab-case.
    - Locate the H1 line (`# Story ...`).
@@ -116,7 +155,14 @@ User says "add tag X to story Y" or "remove tag X from Y" (variations: "tag us01
 4. **For remove:**
    - If `[[<tag>]]` not in H1: "Tag `<X>` not on story `us<id>`."
    - Otherwise remove that wikilink (and the surrounding whitespace) from the H1.
-5. Write the file back. Touch only the H1 line — preserve all frontmatter and body content.
+5. Write the file back to `$AKM_ROOT/docs/notes/us<id>.md` — **not** the cwd. Touch only the H1 line — preserve all frontmatter and body content.
+6. **Stage on main** so the caller's next lifecycle commit picks the edit up:
+
+   ```bash
+   git -C "$AKM_ROOT" add docs/notes/us<id>.md
+   ```
+
+   Do **not** commit — tag edits are micro-mutations that ride along with the story's draft/ready/done lifecycle commit.
 
 **H1 manipulation rules:**
 
@@ -126,10 +172,12 @@ User says "add tag X to story Y" or "remove tag X from Y" (variations: "tag us01
 - `[[product]]` always stays last.
 - One space between wikilinks. No trailing whitespace.
 
-**Output:** show the story's id, title (frontmatter `aliases[0]`), and the resulting H1 line, plus what was changed.
+**Output:** show the story's id, the absolute path under `$AKM_ROOT` (so the user sees where the edit landed when invoked from a worktree), title (frontmatter `aliases[0]`), and the resulting H1 line, plus what was changed and that the file is staged on main.
 
 ```markdown
 ## us013 — resubmit a Rejected or Blocked request after revising it
+
+**File:** `$AKM_ROOT/docs/notes/us013.md` (staged on main, not committed)
 
 **H1:** `# Story [[requestor-flow]] [[tracking]] [[product]]`
 

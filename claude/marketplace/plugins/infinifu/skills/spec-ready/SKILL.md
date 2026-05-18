@@ -25,6 +25,25 @@ Stage 4 of the AKM lifecycle. A spec is at `status: spec` with `## plan` + `## t
 
 **Announce at start:** "Using spec-ready skill to mint beads and queue the spec."
 
+## AKM Workspace Resolution
+
+Specs, board, and archive are shared product knowledge — they live on **main**, even from a feature-branch worktree. Resolve before any read or write:
+
+```bash
+AKM_ROOT="$(akm-root)"
+```
+
+`akm-root` returns the main-worktree path (default branch); outside git, cwd. Anchor every path on `$AKM_ROOT` (`$AKM_ROOT/docs/notes/spec/sp<NNN>.md`, `$AKM_ROOT/docs/board.md`). If `akm-root` errors, surface its stderr and abort — never silently land the ready flip on the feature branch.
+
+spec-ready is a **transition skill that commits on main** per the AKM commit policy. The `spec → ready` flip is a stable lifecycle event; bd ids in the spec plus the board-section move land as one commit:
+
+```bash
+git -C "$AKM_ROOT" add docs/notes/spec/sp<NNN>.md docs/board.md
+git -C "$AKM_ROOT" commit -m "feat(akm): ready sp<NNN> with N bd tasks"
+```
+
+Commit-message convention: `feat(akm): ready sp<NNN> with <N> bd tasks` — N = total tasks the epic now carries. See the per-stage commit table in `docs/notes/akm.md#workspace-resolution`.
+
 ## AKM hooks
 
 Stage 4 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Lifecycle: read `sp###`, write `sp###.tasks` bd-id annotations, write `board.md` (`## spec → ## ready`), produce beads with dependencies as the artifact.
@@ -36,8 +55,8 @@ Stage 4 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Lifecycle: rea
 
 **Writes:**
 
-- `sp###` — same file. For each `### Task N`, append a `#### bd <task-id>` line. Flip frontmatter `status: spec → ready`.
-- `docs/board.md` — remove `[[sp###]]` from `## spec`, add to `## ready`.
+- `$AKM_ROOT/docs/notes/spec/sp###.md` — same file. For each `### Task N`, append a `#### bd <task-id>` line. Flip frontmatter `status: spec → ready`.
+- `$AKM_ROOT/docs/board.md` — remove `[[sp###]]` from `## spec`, add to `## ready`.
 
 **bd state:**
 
@@ -47,20 +66,27 @@ Stage 4 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Lifecycle: rea
 
 ## Entry-specific checklist
 
-1. **Identify target spec.** User names a `sp###`. Verify `docs/notes/spec/sp###.md` exists.
-2. **Verify status.** Must be `status: spec`. Apply Disambiguation if not.
-3. **Read `## tasks` block.** Confirm every `### Task N` has the full H4 property set. If any block is missing properties or carries placeholder text, block — route back to `spec-refinement`.
-4. **Confirm no `#### bd` annotations exist yet.** If any task already has a `#### bd <id>` line, the spec has already been processed — Disambiguation applies.
-5. **Verify `bd` is initialized** in the workspace. If `.beads/` doesn't exist, run `bd init` once.
-6. **Mint the epic.** One `bd create --type epic` for the whole spec. Title format: `Epic: <spec alias> [sp###]`. Use `--design` to embed the one-line goal + spec path.
-7. **Mint each task** in `## tasks` order. For each `### Task N`:
+1. **Resolve AKM root.** `AKM_ROOT="$(akm-root)"` — every subsequent path anchors on it. Abort with the helper's stderr if it errors.
+2. **Identify target spec.** User names a `sp###`. Verify `$AKM_ROOT/docs/notes/spec/sp###.md` exists.
+3. **Verify status.** Must be `status: spec`. Apply Disambiguation if not.
+4. **Read `## tasks` block.** Confirm every `### Task N` has the full H4 property set. If any block is missing properties or carries placeholder text, block — route back to `spec-refinement`.
+5. **Confirm no `#### bd` annotations exist yet.** If any task already has a `#### bd <id>` line, the spec has already been processed — Disambiguation applies.
+6. **Verify `bd` is initialized** in the workspace. If `.beads/` doesn't exist, run `bd init` once.
+7. **Mint the epic.** One `bd create --type epic` for the whole spec. Title format: `Epic: <spec alias> [sp###]`. Use `--design` to embed the one-line goal + spec path.
+8. **Mint each task** in `## tasks` order. For each `### Task N`:
    - `bd create "<task title>" --type task --parent <epic-id> --design "<H4 properties as design text>"`.
    - Capture the new bd id.
-8. **Wire blocking deps.** For each `### Task N`, read its `#### depends` H4. For every dependency reference, call `bd dep add <this-task-id> <earlier-task-id>`.
-9. **Annotate the spec.** For each `### Task N`, append `#### bd <task-id>` (matching the new bd id). Preserve all other H4 properties; the annotation is additive.
-10. **Flip status.** `sp###.status: spec → ready`.
-11. **Move board entry.** Remove `[[sp###]]` line from `## spec` in `docs/board.md`; add it under `## ready`. Same wikilink, same label.
-12. **Verify.** `bd list --parent <epic-id>` should show every task. `bd ready` should show the root tasks (no `#### depends` → unblocked at start).
+9. **Wire blocking deps.** For each `### Task N`, read its `#### depends` H4. For every dependency reference, call `bd dep add <this-task-id> <earlier-task-id>`.
+10. **Annotate the spec.** For each `### Task N` in `$AKM_ROOT/docs/notes/spec/sp###.md`, append `#### bd <task-id>` (matching the new bd id). Preserve all other H4 properties; the annotation is additive.
+11. **Flip status.** `sp###.status: spec → ready` (in the same `$AKM_ROOT/docs/notes/spec/sp###.md` file).
+12. **Move board entry.** Remove `[[sp###]]` line from `## spec` in `$AKM_ROOT/docs/board.md`; add it under `## ready`. Same wikilink, same label.
+13. **Commit on main.** Stage and commit both touched files together — this is the lifecycle commit for the `spec → ready` transition:
+    ```bash
+    git -C "$AKM_ROOT" add docs/notes/spec/sp<NNN>.md docs/board.md
+    git -C "$AKM_ROOT" commit -m "feat(akm): ready sp<NNN> with <N> bd tasks"
+    ```
+    `<N>` is the total task count just minted under the epic.
+14. **Verify.** `bd list --parent <epic-id>` shows every task; `bd ready` shows root tasks (no `#### depends` → unblocked at start); commit landed on main (`git -C "$AKM_ROOT" log -1 --oneline` matches the convention above); file paths confirmed under `$AKM_ROOT`.
 
 ## Disambiguation
 
@@ -111,7 +137,7 @@ bd create "Epic: <spec alias> [sp###]" \
 <one-line summary from sp###>
 
 ## Spec
-docs/notes/spec/sp###.md
+$AKM_ROOT/docs/notes/spec/sp###.md
 EOF
 )"
 # capture as <epic-id>

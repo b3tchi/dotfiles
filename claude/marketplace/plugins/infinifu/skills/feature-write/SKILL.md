@@ -43,12 +43,25 @@ MEDIUM FREEDOM — the AKM schema is fixed (filename, sections, required wikilin
 - New taxonomy bucket itself → `infinifu:category-write` (`cat###`)
 </when_to_use>
 
+<workspace_resolution>
+Features are shared product knowledge — they live on **main**, even from a feature-branch worktree. Resolve before any file op:
+
+```bash
+AKM_ROOT="$(akm-root)"
+```
+
+`akm-root` returns the main-worktree path (default branch); outside git, cwd. Anchor every path on `$AKM_ROOT` (`$AKM_ROOT/docs/notes/ft###.md`, `$AKM_ROOT/docs/product.md`, `$AKM_ROOT/docs/notes/cat*.md`, `$AKM_ROOT/docs/notes/ft*.md`). If `akm-root` errors, surface its stderr and abort — never silently land a Feature on the feature branch.
+
+Features are a stable artifact: this writer **commits on creation** on main with the new file plus any hub update in one commit: `git -C "$AKM_ROOT" add docs/notes/ft<NNN>.md docs/product.md && git -C "$AKM_ROOT" commit -m "feat(akm): add ft<NNN> <alias>"`. For supersession edits (new `ft###` + old one flipped to `superseded`), stage both files together then commit once. See the per-stage commit table in `docs/notes/akm.md#workspace-resolution`.
+</workspace_resolution>
+
 <the_process>
 
 ## Flow
 
 ```dot
 digraph feature_write {
+    "Resolve AKM root" [shape=box];
     "AKM workspace exists?" [shape=diamond];
     "Bootstrap docs/notes/" [shape=box];
     "Existing ft### update?" [shape=diamond];
@@ -59,8 +72,10 @@ digraph feature_write {
     "Generate id (ft###)" [shape=box];
     "Write ft###.md zettel" [shape=box];
     "Update product.md hub" [shape=box];
+    "Commit on main" [shape=box];
     "Confirm with user" [shape=doublecircle];
 
+    "Resolve AKM root" -> "AKM workspace exists?";
     "AKM workspace exists?" -> "Bootstrap docs/notes/" [label="no"];
     "AKM workspace exists?" -> "Existing ft### update?" [label="yes"];
     "Bootstrap docs/notes/" -> "Existing ft### update?";
@@ -72,21 +87,29 @@ digraph feature_write {
     "Resolve dependencies" -> "Generate id (ft###)";
     "Generate id (ft###)" -> "Write ft###.md zettel";
     "Write ft###.md zettel" -> "Update product.md hub";
-    "Update product.md hub" -> "Confirm with user";
+    "Update product.md hub" -> "Commit on main";
+    "Commit on main" -> "Confirm with user";
 }
 ```
 
 ## Steps
 
-1. **Bootstrap storage.** Ensure `docs/notes/` exists; if `docs/product.md` is missing, warn the user the `[[product]]` link will dangle and either proceed or abort per their call.
-2. **Edit vs. new.** Existing `ft###` update → re-emit the same file with the same id. New capability → continue.
-3. **Gather the capability shape.** Elicit any missing piece: `providing` (what + who consumes), `api_surface` (concrete signature/endpoint/contract — not "you call it somehow"), `data_model` ("stateless" is OK; otherwise schema + retention + ownership), `sample` (snippet or path to sample file), `components` (modules/paths implementing it). If ≥2 pieces stay vague after one round, send the user to `infinifu:idea-brainstorming` first.
-4. **Pick H1 categories (≥1).** `ls docs/notes/cat*.md`, read frontmatter `aliases:` for canonical labels, match user-named buckets. No match and a new bucket genuinely needed → route to `infinifu:category-write`; never fabricate dangling `[[cat###]]`.
-5. **Resolve dependencies.** If this Feature layers on others (notifications → templating, audit-log → database-access), record `## depends_on` with upstream `[[ft###]]` wikilinks. Omit the heading entirely when empty.
-6. **Generate id.** `ls docs/notes/ft*.md` → max numeric portion + 1, zero-padded to 3. None yet → start at `001`. Gaps stay gaps; superseded ids are never reused.
-7. **Write the zettel.** Compose `docs/notes/ft<NNN>.md` per the schema in `docs/notes/akm.md` § Feature (frontmatter + H1 with `[[cat###]]`+`[[product]]` + body sections in order + `Index: [[product]]` footer after `---`). For full schema + worked example, see `references/examples.md`.
-8. **Update the hub.** Append `[[ft###|<alias>]]` (first alias as label) under `## Features` in `docs/product.md`. For supersede chains, swap entries; old file stays on disk. Hub missing → skip and note "Feature on disk but not linked from hub."
-9. **Confirm.** Show: Feature id + path, `providing` restatement, H1 categories + `depends_on`, `components` paths, hub status. Ask once: "Anything to revise?" Yes → edit in place (same id).
+1. **Resolve AKM root.** `AKM_ROOT="$(akm-root)"` — every subsequent path anchors on it. Abort with the helper's stderr if it errors.
+2. **Bootstrap storage.** Ensure `$AKM_ROOT/docs/notes/` exists; if `$AKM_ROOT/docs/product.md` is missing, warn the user the `[[product]]` link will dangle and either proceed or abort per their call.
+3. **Edit vs. new.** Existing `ft###` update → re-emit the same file with the same id. New capability → continue.
+4. **Gather the capability shape.** Elicit any missing piece: `providing` (what + who consumes), `api_surface` (concrete signature/endpoint/contract — not "you call it somehow"), `data_model` ("stateless" is OK; otherwise schema + retention + ownership), `sample` (snippet or path to sample file), `components` (modules/paths implementing it). If ≥2 pieces stay vague after one round, send the user to `infinifu:idea-brainstorming` first.
+5. **Pick H1 categories (≥1).** `ls "$AKM_ROOT/docs/notes/"cat*.md`, read frontmatter `aliases:` for canonical labels, match user-named buckets. No match and a new bucket genuinely needed → route to `infinifu:category-write`; never fabricate dangling `[[cat###]]`.
+6. **Resolve dependencies.** If this Feature layers on others (notifications → templating, audit-log → database-access), record `## depends_on` with upstream `[[ft###]]` wikilinks. Omit the heading entirely when empty.
+7. **Generate id.** `ls "$AKM_ROOT/docs/notes/"ft*.md` → max numeric portion + 1, zero-padded to 3. None yet → start at `001`. Gaps stay gaps; superseded ids are never reused.
+8. **Write the zettel.** Compose `$AKM_ROOT/docs/notes/ft<NNN>.md` per the schema in `docs/notes/akm.md` § Feature (frontmatter + H1 with `[[cat###]]`+`[[product]]` + body sections in order + `Index: [[product]]` footer after `---`). For full schema + worked example, see `references/examples.md`.
+9. **Update the hub.** Append `[[ft###|<alias>]]` (first alias as label) under `## Features` in `$AKM_ROOT/docs/product.md`. For supersede chains, swap entries; old file stays on disk. Hub missing → skip and note "Feature on disk but not linked from hub."
+10. **Commit on main.** Features are stable artifacts — stage and commit in one shot from the AKM root:
+    ```bash
+    git -C "$AKM_ROOT" add docs/notes/ft<NNN>.md docs/product.md
+    git -C "$AKM_ROOT" commit -m "feat(akm): add ft<NNN> <alias>"
+    ```
+    For supersession, also stage the old `ft###.md` (status flip + `## superseded_by` append) in the same commit. Commit message: `feat(akm): supersede ft<old> with ft<new> <alias>`.
+11. **Confirm.** Show: Feature id + absolute path under `$AKM_ROOT`, `providing` restatement, H1 categories + `depends_on`, `components` paths, hub status, commit sha on main. Ask once: "Anything to revise?" Yes → edit in place (same id) and amend or new commit per the situation.
 
 ## Editing / superseding / deprecating
 
@@ -117,7 +140,8 @@ Promote `proposed` → `stable` once a real Implementation lists this Feature in
 
 Before reporting the Feature written:
 
-- [ ] Filename matches `docs/notes/ft###.md`, id is `max(existing) + 1`, zero-padded to 3
+- [ ] File path is `$AKM_ROOT/docs/notes/ft###.md` (resolved via `akm-root`, not the current cwd)
+- [ ] Id is `max(existing) + 1`, zero-padded to 3
 - [ ] Frontmatter has `aliases:` (≥1), `status:` (lowercase from the four allowed values), `created:` ISO date
 - [ ] H1 has `# Feature` plus ≥1 `[[cat###]]` (resolving to existing files) plus `[[product]]`
 - [ ] Body sections in order: `## providing`, `## api_surface`, `## data_model`, `## sample`, `## components`
@@ -125,7 +149,9 @@ Before reporting the Feature written:
 - [ ] `## superseded_by` present iff `status: superseded`, with `[[ft###]]` to the replacement
 - [ ] `Index: [[product]]` footer present after a `---` rule
 - [ ] No `solves: [[us###]]` link anywhere in the body
-- [ ] `## Features` hub bullet added (or skipped with note if `product.md` missing)
+- [ ] `## Features` hub bullet added in `$AKM_ROOT/docs/product.md` (or skipped with note if hub missing)
+- [ ] Single commit landed on main via `git -C "$AKM_ROOT" commit` covering the new file (+ hub diff, + old `ft###.md` if superseding)
+- [ ] Confirmation surfaces the absolute `$AKM_ROOT/docs/notes/ft<NNN>.md` path so the user sees where it landed from a worktree
 
 </verification_checklist>
 

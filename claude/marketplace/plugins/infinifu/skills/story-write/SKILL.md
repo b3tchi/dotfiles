@@ -17,6 +17,7 @@ Capture a single user story in Connextra format and write it as a new AKM zettel
 
 ```dot
 digraph story_create {
+    "Resolve AKM root" [shape=box];
     "Storage exists?" [shape=diamond];
     "Bootstrap docs/notes/" [shape=box];
     "Gather Connextra fields" [shape=box];
@@ -25,8 +26,10 @@ digraph story_create {
     "Gather H1 tags (optional)" [shape=box];
     "Generate id (us###)" [shape=box];
     "Write us###.md zettel" [shape=box];
+    "Stage on main" [shape=box];
     "Confirm with user" [shape=doublecircle];
 
+    "Resolve AKM root" -> "Storage exists?";
     "Storage exists?" -> "Bootstrap docs/notes/" [label="no"];
     "Storage exists?" -> "Gather Connextra fields" [label="yes"];
     "Bootstrap docs/notes/" -> "Gather Connextra fields";
@@ -35,15 +38,54 @@ digraph story_create {
     "Pick persona" -> "Gather H1 tags (optional)";
     "Gather H1 tags (optional)" -> "Generate id (us###)";
     "Generate id (us###)" -> "Write us###.md zettel";
-    "Write us###.md zettel" -> "Confirm with user";
+    "Write us###.md zettel" -> "Stage on main";
+    "Stage on main" -> "Confirm with user";
 }
 ```
 
+## AKM Workspace Resolution
+
+Stories are shared product knowledge and live on **main**, even when the
+agent's cwd is a feature-branch worktree. Before any file operation, resolve
+the AKM root:
+
+```bash
+AKM_ROOT="$(akm-root)"
+```
+
+`akm-root` returns the absolute path of the worktree on the project's
+default branch (origin/HEAD → `main` → `master`). Outside a git repo it
+falls back to the current directory.
+
+Every path in this skill anchors on `$AKM_ROOT`:
+
+- Zettel file: `$AKM_ROOT/docs/notes/us<NNN>.md`
+- Hub file:    `$AKM_ROOT/docs/product.md`
+- Persona list scan: `$AKM_ROOT/docs/notes/pn*.md`
+
+If `akm-root` exits non-zero (no default-branch worktree), surface the
+helper's stderr to the user and abort — don't silently write into the
+feature worktree. The fix is for the user to either check out the default
+branch or create a worktree (`git worktree add ../main main`).
+
+**Why this matters.** Story-write is a `draft` artifact at this stage, so we
+do not commit on main — we only **stage** the new file (`git -C "$AKM_ROOT"
+add ...`). The commit happens later when `spec-writing` flips the story
+`draft → ready`. Reading the story between draft and ready works because
+the file is on disk in main's working tree; the staging entry just keeps it
+visible in `git status` so it's not forgotten.
+
 ## Storage
 
-**File:** one zettel per story at `docs/notes/us###.md` (three-digit zero-padded id).
+**File:** one zettel per story at `$AKM_ROOT/docs/notes/us###.md` (three-digit
+zero-padded id), resolved via the rule above.
 
-If `docs/notes/` does not exist: create it. If `docs/product.md` does not exist, the project is not AKM-set-up — warn the user "No `docs/product.md` found; AKM workspace not initialized. Create the hub manually or via the project's `epic-create` skill first." then either proceed (zettel will reference a non-existent `[[product]]`) or abort if the user prefers.
+If `$AKM_ROOT/docs/notes/` does not exist: create it. If `$AKM_ROOT/docs/product.md`
+does not exist, the project is not AKM-set-up — warn the user "No
+`docs/product.md` found in `$AKM_ROOT`; AKM workspace not initialized.
+Create the hub manually or via the project's `epic-create` skill first."
+then either proceed (zettel will reference a non-existent `[[product]]`)
+or abort if the user prefers.
 
 ## Zettel Schema
 
@@ -99,7 +141,7 @@ New stories default to `draft`.
 
 IDs are `us` + three-digit zero-padded sequential (`us001`, `us002`, …). Not date-bucketed — the AKM model uses pure sequential ids so wikilinks like `[[us001]]` stay stable forever.
 
-1. List existing story zettels: `ls docs/notes/us*.md` (or in-process equivalent).
+1. List existing story zettels: `ls "$AKM_ROOT/docs/notes/"us*.md` (or in-process equivalent).
 2. Extract the numeric portion of each filename. Find max, add 1.
 3. Zero-pad to 3 digits. If no existing stories, start at `001`.
 
@@ -132,11 +174,11 @@ Bad (vague persona):
 
 ## Picking the Persona
 
-The `## role` field is a wikilink `[[pn###|<persona-alias>]]` to a persona zettel under `docs/notes/pn###.md`.
+The `## role` field is a wikilink `[[pn###|<persona-alias>]]` to a persona zettel under `$AKM_ROOT/docs/notes/pn###.md`.
 
 **Lookup workflow:**
 
-1. List existing personas: `ls docs/notes/pn*.md` (or in-process equivalent).
+1. List existing personas: `ls "$AKM_ROOT/docs/notes/"pn*.md` (or in-process equivalent).
 2. For each, read the frontmatter `aliases:` — the first alias is the canonical short label (e.g. `requestor`, `approver`).
 3. **If the user named a persona that matches an existing alias** (case-insensitive substring or exact), use that `pn###` id.
 4. **If no persona matches**, ask the user: "No existing persona matches `<name>`. Pick from: <list of existing aliases>, or describe a new one (I'll create the `pn###` zettel)."
@@ -194,11 +236,24 @@ These are **optional** and **may dangle** — `[[requestor-flow]]` is fine even 
 
 ## Writing the Zettel
 
-Compose the full markdown file per the schema above. Write to `docs/notes/us<NNN>.md` using the generated id.
+Compose the full markdown file per the schema above. Write to `$AKM_ROOT/docs/notes/us<NNN>.md` using the generated id.
+
+After the file is on disk, stage it on main so it shows up in `git status`
+and isn't lost between worktrees:
+
+```bash
+git -C "$AKM_ROOT" add "docs/notes/us<NNN>.md"
+# If the hub was updated (see below), also: docs/product.md
+```
+
+Do **not** commit at this stage — `story-write` produces a `draft` artifact.
+`spec-writing` (the next lifecycle skill) commits the accumulated AKM changes
+when the story flips `draft → ready`. See "Workspace Resolution" in
+`docs/notes/akm.md` for the full per-stage commit policy.
 
 **Example output for a fresh story:**
 
-`docs/notes/us014.md`:
+`$AKM_ROOT/docs/notes/us014.md`:
 
 ```markdown
 ---
@@ -237,7 +292,7 @@ Index: [[product]]
 - Body sections must be `## role`, `## want`, `## because`, `## acceptance_criteria` exactly — `story-read` parses on these headings.
 - Footer is a `---` rule then `Index: [[product]]` on its own line.
 
-## Updating `docs/product.md` (the hub)
+## Updating `$AKM_ROOT/docs/product.md` (the hub)
 
 The hub groups stories under `## Stories` by persona. After writing the new story, append a wikilink to it under the right persona heading. If the persona section doesn't yet exist in the hub, add it. Example diff:
 
@@ -252,13 +307,13 @@ The hub groups stories under `## Stories` by persona. After writing the new stor
 
 The hub wikilink form is `[[us###|<title>]]` — pipe-separated, with the alias/title as the label for readability.
 
-If `docs/product.md` doesn't exist, skip the hub update and tell the user "Hub `docs/product.md` not found; new story is on disk but not linked from the hub. Create the hub when ready."
+If `$AKM_ROOT/docs/product.md` doesn't exist, skip the hub update and tell the user "Hub `docs/product.md` not found in `$AKM_ROOT`; new story is on disk but not linked from the hub. Create the hub when ready."
 
 ## Confirmation
 
 After writing, show the user:
 
-1. The story id and the file path (`docs/notes/us<NNN>.md`).
+1. The story id and the absolute file path (`$AKM_ROOT/docs/notes/us<NNN>.md`) — surface the resolved AKM root so the user sees where the file landed when invoked from a worktree.
 2. The full Connextra sentence: "As a `<persona-alias>`, I want `<want>`, because `<because>`."
 3. Acceptance criteria as a bulleted list.
 4. Tags rendered in the H1 (and a note if any came from the suggester).

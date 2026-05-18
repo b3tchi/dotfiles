@@ -52,20 +52,35 @@ Everything else (how many categories, which Features to list, depth of `## compo
 
 </when_to_use>
 
+<workspace_resolution>
+Implementations are shared product knowledge — they live on **main**, even from a feature-branch worktree. Resolve before any file op:
+
+```bash
+AKM_ROOT="$(akm-root)"
+```
+
+`akm-root` returns the main-worktree path (default branch); outside git, cwd. Anchor every path on `$AKM_ROOT` (`$AKM_ROOT/docs/notes/im###.md`, `$AKM_ROOT/docs/notes/us###.md`, `$AKM_ROOT/docs/notes/cat*.md`, `$AKM_ROOT/docs/product.md`). If `akm-root` errors, surface its stderr and abort — never silently land an Implementation on the feature branch.
+
+Implementations evolve through their lifecycle (`proposed → accepted → superseded`), so this writer **stages on main without committing**: `git -C "$AKM_ROOT" add docs/notes/im<NNN>.md docs/product.md`. The lifecycle commit happens later in `spec-refinement` when the surrounding spec finalizes Features/im### together. See the per-stage commit table in `docs/notes/akm.md#workspace-resolution`.
+</workspace_resolution>
+
 <the_process>
 
 ## Flow
 
 ```dot
 digraph implementation_write {
+    "Resolve AKM root" [shape=box];
     "Target story given?" [shape=diamond];
     "Story status: ready?" [shape=diamond];
     "Refine story first" [shape=box];
     "Pick categories + survey ADRs/Features" [shape=box];
     "Draft approach + body sections" [shape=box];
     "Write im###.md + annotate hub" [shape=box];
+    "Stage on main" [shape=box];
     "Confirm with user" [shape=doublecircle];
 
+    "Resolve AKM root" -> "Target story given?";
     "Target story given?" -> "Refine story first" [label="no"];
     "Refine story first" -> "Target story given?";
     "Target story given?" -> "Story status: ready?" [label="yes"];
@@ -73,23 +88,27 @@ digraph implementation_write {
     "Story status: ready?" -> "Pick categories + survey ADRs/Features" [label="ready"];
     "Pick categories + survey ADRs/Features" -> "Draft approach + body sections";
     "Draft approach + body sections" -> "Write im###.md + annotate hub";
-    "Write im###.md + annotate hub" -> "Confirm with user";
+    "Write im###.md + annotate hub" -> "Stage on main";
+    "Stage on main" -> "Confirm with user";
 }
 ```
 
 **Announce at start:** *"Using implementation-write skill to draft the im### card for `<story-id>`."*
 
+### Step 0 — Resolve AKM root
+`AKM_ROOT="$(akm-root)"`. Every subsequent path anchors on it. Abort with the helper's stderr if it errors — don't fall back to cwd silently when on a feature-branch worktree.
+
 ### Step 1 — Anchor the story
-Read `docs/notes/us###.md`. Pull first alias for `[[us###|<alias>]]`. If `status: draft`, push back once: *"Story `usNNN` is still `draft`. Implementations should anchor on a `ready` story so acceptance criteria are stable. Refine first via `infinifu:story-write`, or proceed if you accept the approach may need revisiting."* No story → stop, route to `infinifu:story-write`.
+Read `$AKM_ROOT/docs/notes/us###.md`. Pull first alias for `[[us###|<alias>]]`. If `status: draft`, push back once: *"Story `usNNN` is still `draft`. Implementations should anchor on a `ready` story so acceptance criteria are stable. Refine first via `infinifu:story-write`, or proceed if you accept the approach may need revisiting."* No story → stop, route to `infinifu:story-write`.
 
 ### Step 2 — Pick categories for the H1
-`ls docs/notes/cat*.md`; read frontmatter `aliases` for labels. Pick 1–3 that the solution actually touches; >3 is a smell. Missing category → route to `category-write` (or inline-create per the AKM Category schema). H1 reads `# Implementation [[cat###]] [[cat###]] [[product]]` — categories first, `[[product]]` last.
+`ls "$AKM_ROOT/docs/notes/"cat*.md`; read frontmatter `aliases` for labels. Pick 1–3 that the solution actually touches; >3 is a smell. Missing category → route to `category-write` (or inline-create per the AKM Category schema). H1 reads `# Implementation [[cat###]] [[cat###]] [[product]]` — categories first, `[[product]]` last.
 
 ### Step 3 — Survey ADRs under those categories
-Open `docs/product.md` → `## Architecture Decision Records`. For the chosen categories, scan listed `[[adr####]]`s and note any `Accepted` decisions that constrain the solution. Bind them inside `## approach` prose (e.g. *"per [[adr0007]], persistence layer is event-sourced"*). Do **not** add a body section listing ADRs — category linkage is the index.
+Open `$AKM_ROOT/docs/product.md` → `## Architecture Decision Records`. For the chosen categories, scan listed `[[adr####]]`s and note any `Accepted` decisions that constrain the solution. Bind them inside `## approach` prose (e.g. *"per [[adr0007]], persistence layer is event-sourced"*). Do **not** add a body section listing ADRs — category linkage is the index.
 
 ### Step 4 — Survey reusable Features
-Open `docs/product.md` → `## Features`. For each `[[ft###]]` the approach would consume:
+Open `$AKM_ROOT/docs/product.md` → `## Features`. For each `[[ft###]]` the approach would consume:
 
 1. Read its frontmatter `status`. `stable` → safe. `proposed` → consume but call out in `## approach`. `deprecated`/`superseded` → use the replacement chain.
 2. Add `- [[ft###|<alias>]]` to `## features`.
@@ -112,19 +131,26 @@ In `proposed` status, these can be educated guesses; the spec-retro pass updates
 Transient board spec(s) that touched or delivered this card. Empty for a fresh `proposed`. While active: `[[<topic>|<title>]]` → `board/spec/<topic>.md`. Once archived: same wikilink, file moves to `board/done/<topic>.md`. Add as specs land; don't pre-populate.
 
 ### Step 8 — Generate the id, write the zettel
-IDs are `im` + 3-digit zero-padded sequential. `ls docs/notes/im*.md`, take max + 1 (never reuse gaps), zero-pad. Compose per the schema (see `references/examples.md` for the full template + worked examples). Write to `docs/notes/im<NNN>.md`. ISO date for `created`. Section ordering matches `akm.md` — moxide LSP parses on these headings.
+IDs are `im` + 3-digit zero-padded sequential. `ls "$AKM_ROOT/docs/notes/"im*.md`, take max + 1 (never reuse gaps), zero-pad. Compose per the schema (see `references/examples.md` for the full template + worked examples). Write to `$AKM_ROOT/docs/notes/im<NNN>.md`. ISO date for `created`. Section ordering matches `akm.md` — moxide LSP parses on these headings.
 
-### Step 9 — Update `docs/product.md`
+### Step 9 — Update `$AKM_ROOT/docs/product.md`
 Annotate the story bullet in `## Stories`:
 
 ```markdown
 - [[us014|bulk import requests from spreadsheet]] >> [[im007]]
 ```
 
-Hub missing → skip and tell the user: *"Hub `docs/product.md` not found; im### is on disk but not annotated."*
+Hub missing → skip and tell the user: *"Hub `docs/product.md` not found in `$AKM_ROOT`; im### is on disk but not annotated."*
 
-### Step 10 — Confirm
-Show: id + path, story solved, H1 categories, Features consumed (with status), one-line approach summary, hub annotation status. Ask once: *"Anything to revise?"* If yes, edit in place. If no/no-response, done.
+### Step 10 — Stage on main
+Implementations evolve through their lifecycle; this writer does **not** commit. Stage from the AKM root so the file shows in `git status` on main and the next lifecycle skill (`spec-refinement`) picks it up in its commit:
+
+```bash
+git -C "$AKM_ROOT" add docs/notes/im<NNN>.md docs/product.md
+```
+
+### Step 11 — Confirm
+Show: id + absolute path under `$AKM_ROOT`, story solved, H1 categories, Features consumed (with status), one-line approach summary, hub annotation status, staging state on main (no commit). Ask once: *"Anything to revise?"* If yes, edit in place. If no/no-response, done.
 
 **Next step prompt:** *"`im###` is `proposed`. Next: `infinifu:spec-writing` produces `board/spec/<topic>.md` against this card. The card flips to `accepted` after the spec ships (via `spec-retro`)."*
 
@@ -141,6 +167,21 @@ Show: id + path, story solved, H1 categories, Features consumed (with status), o
 - **No `## features` re-implementation.** User lists a Feature then describes its internals → push back; either the Feature contract is wrong or the card is duplicating known state.
 
 </critical_rules>
+
+<verification_checklist>
+
+Before reporting the Implementation written:
+
+- [ ] File path is `$AKM_ROOT/docs/notes/im###.md` (resolved via `akm-root`, not the current cwd)
+- [ ] Id is `max(existing) + 1`, zero-padded to 3
+- [ ] Exactly one `## solves [[us###]]` back-link, resolving to an existing story file under `$AKM_ROOT/docs/notes/`
+- [ ] H1 has `# Implementation` plus ≥1 `[[cat###]]` plus `[[product]]`
+- [ ] Body sections in order: `## solves`, `## approach`, `## features`, `## data_model`, `## api_surface`, `## components`, `## specs` (+ `## superseded_by` only when `superseded`)
+- [ ] Hub annotated in `$AKM_ROOT/docs/product.md` (or skipped with note if hub missing)
+- [ ] File staged on main (`git -C "$AKM_ROOT" add docs/notes/im<NNN>.md`) and **no commit created** — spec-refinement commits the lifecycle batch
+- [ ] Confirmation surfaces the absolute `$AKM_ROOT/docs/notes/im<NNN>.md` path so the user sees where it landed from a worktree
+
+</verification_checklist>
 
 <integration>
 

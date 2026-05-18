@@ -13,6 +13,22 @@ Direct entry point for the "feature add" entry type. A new horizontal capability
 
 **Shared basics.** Process (context exploration, hard gate, question cadence, design approval, spec-writing handoff) lives in `infinifu:idea-brainstorming`. Load it before walking the checklist below.
 
+## AKM Workspace Resolution
+
+Specs and the board live on **main**, even from a feature-branch worktree.
+Resolve before any file op:
+
+```bash
+AKM_ROOT="$(akm-root)"
+```
+
+Anchor every path on `$AKM_ROOT` (`$AKM_ROOT/docs/notes/spec/sp<NNN>.md`,
+`$AKM_ROOT/docs/board.md`, and all `$AKM_ROOT/docs/notes/...` reads). If
+`akm-root` errors, surface stderr and abort — never silently land an idea
+on the feature branch.
+
+**Commit policy:** stage only. `git -C "$AKM_ROOT" add docs/notes/spec/sp<NNN>.md docs/board.md` (for each emitted sp###). No commit at idea phase — the downstream `spec-writing` skill commits when the idea graduates to a spec and mints the actual `ft###`. See the per-stage table in `docs/notes/akm.md#workspace-resolution` and the fuller treatment in `infinifu:idea-brainstorming`.
+
 ## AKM hooks
 
 Stage 1 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Entry type: **feature add**.
@@ -26,13 +42,14 @@ Stage 1 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Entry type: **
 
 **Writes:**
 
-- `sp###` — new zettel at `docs/notes/spec/sp###.md`. Frontmatter `status: idea`, `Index: [[board]]`. Body: `## problem` describes capability boundary, consumers, constraints, and the intent to mint a new `ft###` at spec-writing time. **Every surveyed id that is relevant must appear in `## problem` as a wikilink** — `[[ft###]]` for dedup-considered features, `[[im###]]` for consumer/migration targets, `[[cat###]]` for category picks, `[[adr####]]` for binding or conflicting decisions. Narrative alone does not satisfy the lifecycle contract.
-- `docs/board.md` — append `[[sp###|<title>]]` under `## idea`.
+- `sp###` — new zettel at `$AKM_ROOT/docs/notes/spec/sp<NNN>.md`. Frontmatter `status: idea`, `Index: [[board]]`. Body: `## problem` describes capability boundary, consumers, constraints, and the intent to mint a new `ft###` at spec-writing time. **Every surveyed id that is relevant must appear in `## problem` as a wikilink** — `[[ft###]]` for dedup-considered features, `[[im###]]` for consumer/migration targets, `[[cat###]]` for category picks, `[[adr####]]` for binding or conflicting decisions. Narrative alone does not satisfy the lifecycle contract.
+- `$AKM_ROOT/docs/board.md` — append `[[sp###|<title>]]` under `## idea`.
 
 The `ft###` is **not** minted by this skill — the capability boundary is still under discussion. Minting at `spec-writing` time avoids a half-formed feature ending up in the registry.
 
 ## Entry-specific checklist
 
+0. **Resolve `AKM_ROOT="$(akm-root)"`** before any file op.
 1. **Dedup check.** `feature-read` filtered by keyword. Close match → re-route to `idea-extend` on that `ft###` and stop.
 2. **Identify consumers via `im###`.** `implementation-read` filtered by keyword. Each `im###`'s `solves` link surfaces the consumer story transitively. Zero or one plausible consumer is a red flag — features are reusable by definition. Do not direct-search `us###` at this stage; the lifecycle contract reads `im###` here.
 3. **Granularity check (ft### level).** Does the ask pack multiple distinct capabilities into "one feature"? Each capability with its own `## providing` paragraph, its own `## api_surface`, its own consumer set, or its own lifecycle is a separate `ft###`. The `ft###` schema is single-`providing` / single-`api_surface` / single-`status` — if the ask cannot coherently fit that shape, it is N capabilities, not one. Surface that count explicitly; never let a monolithic "platform" / "stack" / "system" feature slip through as a single `ft###`.
@@ -44,8 +61,10 @@ The `ft###` is **not** minted by this skill — the capability boundary is still
    - **N capabilities, small scaffolding of well-understood shapes** → one sp###. List all N `ft###` candidates in the `## problem`; the split happens at task level during `spec-refinement` / `spec-ready`.
    - **N capabilities, independent non-trivial work each** → N sp###, one per `ft###`. Each gets its own board lifecycle so they can ship independently.
    - **Default when unsure** → one sp###; splitting at task level is cheaper than splitting at sp### level. Promote to N sp### only when scope makes it obvious.
-9. **Mint `sp###`(s)** with `## problem` covering capability + consumers + constraints + migration intent. List every `ft###` candidate explicitly. **Reference discipline:** every surveyed id that bears on the proposal lands in `## problem` as a wikilink — `[[ft###]]` for dedup-considered features, `[[im###]]` for consumer/migration targets, `[[cat###]]` for category picks, `[[adr####]]` for binding or conflicting decisions. Bare prose without ids fails the lifecycle contract.
-10. **Update `docs/board.md`** under `## idea` — one entry per emitted sp###.
+9. **Mint `sp###`(s)** at `$AKM_ROOT/docs/notes/spec/sp<NNN>.md` with `## problem` covering capability + consumers + constraints + migration intent. List every `ft###` candidate explicitly. **Reference discipline:** every surveyed id that bears on the proposal lands in `## problem` as a wikilink — `[[ft###]]` for dedup-considered features, `[[im###]]` for consumer/migration targets, `[[cat###]]` for category picks, `[[adr####]]` for binding or conflicting decisions. Bare prose without ids fails the lifecycle contract.
+10. **Update `$AKM_ROOT/docs/board.md`** under `## idea` — one entry per emitted sp###.
+11. **Stage on main.** `git -C "$AKM_ROOT" add docs/notes/spec/sp<NNN>.md docs/board.md` (repeat for each emitted sp###). Do **not** commit — spec-writing handles the first commit when the idea graduates and mints the `ft###`.
+12. **Confirm.** Surface each absolute `$AKM_ROOT/docs/notes/spec/sp<NNN>.md` path; confirm `git status` on main shows `A docs/notes/spec/sp<NNN>.md` and `M docs/board.md` with no commit created.
 
 Walk the shared process around this checklist.
 

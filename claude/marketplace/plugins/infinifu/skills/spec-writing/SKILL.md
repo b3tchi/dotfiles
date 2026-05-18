@@ -17,6 +17,25 @@ Keeping spec-writing narrow lets the solution shape stay revisable until the use
 
 **Announce at start:** "Using spec-writing skill to propose the solution shape."
 
+## AKM Workspace Resolution
+
+Specs and the board live on **main**, even from a feature-branch worktree. Resolve before any file op:
+
+```bash
+AKM_ROOT="$(akm-root)"
+```
+
+`akm-root` returns the main-worktree path (default branch); outside git, cwd. Anchor every path on `$AKM_ROOT` (`$AKM_ROOT/docs/notes/spec/sp###.md`, `$AKM_ROOT/docs/board.md`, `$AKM_ROOT/docs/notes/us###.md`). If `akm-root` errors, surface its stderr and abort — never silently land spec mutations on the feature branch.
+
+**Commit policy: commit on transition.** spec-writing is the **first transition that commits** on main — it batches the idea-phase staged files (the `sp###.Problem` written by an `idea-*` skill, plus any draft stories newly referenced) together with this skill's writes (`## solution` appended, `status: idea → spec` flipped, story `draft → ready` flipped, `board.md` `## idea → ## spec` moved). One commit covers the whole lineage:
+
+```bash
+git -C "$AKM_ROOT" add docs/notes/spec/sp<NNN>.md docs/board.md docs/notes/us<NNN>.md
+git -C "$AKM_ROOT" commit -m "feat(akm): spec sp<NNN> <title>"
+```
+
+See the per-stage commit table in `docs/notes/akm.md#workspace-resolution`.
+
 ## AKM hooks
 
 Stage 2 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Lifecycle goals: propose solution for the problem at high level, ensure solution is in line with features and ADRs, ensure no duplication or propose possible made solution.
@@ -29,27 +48,73 @@ Stage 2 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Lifecycle goal
 - `ft###` (`feature-read`) — capabilities the solution might consume. Bind concretely here (not just candidates as in idea-*).
 - `adr####` (`adr-read --category <picks>`) — decisions binding the chosen categories. Solution must align with `Accepted` ADRs in scope; if it conflicts, surface as a supersession candidate, do not silently violate.
 
-**Writes:**
+**Writes** (all paths anchored on `$AKM_ROOT`):
 
-- `sp###` — same file. Append `## solution` body section. **Reference discipline:** every relevant id appears as a wikilink in `## solution` — `[[ft###]]` for consumed features, `[[adr####]]` for binding decisions, `[[cat###]]` for taxonomy alignment. Prose-only solutions break the graph for spec-refinement downstream.
-- `sp###` — flip frontmatter `status: idea → spec`.
-- `docs/board.md` — move the `[[sp###]]` entry from `## idea` to `## spec`.
+- `$AKM_ROOT/docs/notes/spec/sp###.md` — append `## solution` body section. **Reference discipline:** every relevant id appears as a wikilink in `## solution` — `[[ft###]]` for consumed features, `[[adr####]]` for binding decisions, `[[cat###]]` for taxonomy alignment. Prose-only solutions break the graph for spec-refinement downstream. Also flip frontmatter `status: idea → spec`.
+- `$AKM_ROOT/docs/notes/us###.md` — flip the source story's frontmatter `status: draft → ready` (the spec being written *is* the act of readying that story).
+- `$AKM_ROOT/docs/board.md` — move the `[[sp###]]` entry from `## idea` to `## spec`.
+
+## Flow
+
+```dot
+digraph spec_writing {
+    "Resolve AKM root" [shape=box];
+    "Identify sp### + verify status" [shape=box];
+    "Re-read AC + survey cat/adr/ft" [shape=box];
+    "Dedup im### check" [shape=box];
+    "Propose ## solution" [shape=box];
+    "Approval gate" [shape=diamond];
+    "Write solution + flip statuses + board" [shape=box];
+    "Commit on main" [shape=box];
+    "Confirm with user" [shape=doublecircle];
+
+    "Resolve AKM root" -> "Identify sp### + verify status";
+    "Identify sp### + verify status" -> "Re-read AC + survey cat/adr/ft";
+    "Re-read AC + survey cat/adr/ft" -> "Dedup im### check";
+    "Dedup im### check" -> "Propose ## solution";
+    "Propose ## solution" -> "Approval gate";
+    "Approval gate" -> "Write solution + flip statuses + board" [label="approved"];
+    "Approval gate" -> "Propose ## solution" [label="revise"];
+    "Write solution + flip statuses + board" -> "Commit on main";
+    "Commit on main" -> "Confirm with user";
+}
+```
 
 ## Entry-specific checklist
 
-1. **Identify target spec.** User must name a `sp###` (by id or alias). Verify `docs/notes/spec/sp###.md` exists.
-2. **Verify status.** Read frontmatter `status`. Must be `idea`. Apply Disambiguation if not.
-3. **Read the spec.** Confirm `## solves [[us###]]` and `## problem` are populated. If `## problem` is missing or empty, block — route back to the originating idea-* skill.
-4. **Re-read source us###.AC.** Fetch the story this spec solves; re-read `## acceptance_criteria`. If AC are vague or empty, block — route back to `idea-implement` (or `idea-extend`) for AC refinement. The solution shape is meaningless against shifting criteria.
-5. **Survey categories** named in the spec's H1 — `category-read` on each.
-6. **Survey binding ADRs** under those categories via `adr-read`. Identify which ones constrain the approach; flag any conflict between the natural solution and an `Accepted` ADR.
-7. **Survey features** the solution will consume via `feature-read`. Where the problem mentioned candidate `[[ft###]]` ids, decide which actually bind; identify any new ones.
-8. **Dedup check.** Does an existing `im###` already solve this story (or an adjacent one) in a way the new spec is about to duplicate? If yes, surface the duplicate and ask whether to extend the existing solution shape rather than mint a new one. Lifecycle goal: "ensure no duplication or propose possible made solution".
-9. **Propose `## solution`.** One paragraph naming the approach + ADR refs + bound `[[ft###]]` consumed + the trade-offs taken. Surface this as the design-approval question — the user owns whether the proposed shape is the right one.
-10. **On approval:** append `## solution` to the spec file with the wikilink reference discipline. Flip frontmatter `status: idea → spec`.
-11. **Update `docs/board.md`** — remove the `[[sp###]]` entry from `## idea`, add it to `## spec` (same wikilink, same label).
+1. **Resolve AKM root.** `AKM_ROOT="$(akm-root)"` — every subsequent path anchors on it. Abort with the helper's stderr if it errors.
+2. **Identify target spec.** User must name a `sp###` (by id or alias). Verify `$AKM_ROOT/docs/notes/spec/sp###.md` exists.
+3. **Verify status.** Read frontmatter `status`. Must be `idea`. Apply Disambiguation if not.
+4. **Read the spec.** Confirm `## solves [[us###]]` and `## problem` are populated. If `## problem` is missing or empty, block — route back to the originating idea-* skill.
+5. **Re-read source us###.AC.** Fetch `$AKM_ROOT/docs/notes/us<NNN>.md`; re-read `## acceptance_criteria`. If AC are vague or empty, block — route back to `idea-implement` (or `idea-extend`) for AC refinement. The solution shape is meaningless against shifting criteria.
+6. **Survey categories** named in the spec's H1 — `category-read` on each (resolved under `$AKM_ROOT/docs/notes/cat*.md`).
+7. **Survey binding ADRs** under those categories via `adr-read`. Identify which ones constrain the approach; flag any conflict between the natural solution and an `Accepted` ADR.
+8. **Survey features** the solution will consume via `feature-read`. Where the problem mentioned candidate `[[ft###]]` ids, decide which actually bind; identify any new ones.
+9. **Dedup check.** Does an existing `im###` already solve this story (or an adjacent one) in a way the new spec is about to duplicate? If yes, surface the duplicate and ask whether to extend the existing solution shape rather than mint a new one. Lifecycle goal: "ensure no duplication or propose possible made solution".
+10. **Propose `## solution`.** One paragraph naming the approach + ADR refs + bound `[[ft###]]` consumed + the trade-offs taken. Surface this as the design-approval question — the user owns whether the proposed shape is the right one.
+11. **On approval:** append `## solution` to `$AKM_ROOT/docs/notes/spec/sp<NNN>.md` with the wikilink reference discipline; flip its frontmatter `status: idea → spec`; flip the source story `$AKM_ROOT/docs/notes/us<NNN>.md` `status: draft → ready`; move the `[[sp###]]` entry in `$AKM_ROOT/docs/board.md` from `## idea` to `## spec`.
+12. **Commit on main.** spec-writing is the first lifecycle transition that commits — it picks up the idea-phase staged files (the originating `sp###.Problem`, any newly-referenced draft stories) and bundles them with this skill's writes into a single commit on main:
+    ```bash
+    git -C "$AKM_ROOT" add docs/notes/spec/sp<NNN>.md docs/board.md docs/notes/us<NNN>.md
+    git -C "$AKM_ROOT" commit -m "feat(akm): spec sp<NNN> <title>"
+    ```
+    `<title>` is the spec's `aliases[0]` (kebab-case acceptable). If additional draft stories were referenced in the spec, stage their files too — the commit captures the full idea-then-spec lineage as one atomic transition.
+13. **Confirm.** Show: spec id + absolute path under `$AKM_ROOT`, status flips (`sp###: idea→spec`, `us###: draft→ready`), board move, commit sha on main. Ask once: "Anything to revise?"
 
 Walk the shared process around this checklist (load `idea-brainstorming` for cadence + hard-gate basics — same conventions apply at every lifecycle stage).
+
+## Verification
+
+Before reporting complete:
+
+- [ ] Every file path written/read is under `$AKM_ROOT` (resolved via `akm-root`, not the current cwd)
+- [ ] `sp###.md` `## solution` populated with `[[ft###]]` / `[[adr####]]` / `[[cat###]]` wikilinks (no prose-only solutions)
+- [ ] `sp###.md` frontmatter flipped `status: idea → spec`
+- [ ] `us###.md` source story flipped `status: draft → ready`
+- [ ] `board.md` entry moved from `## idea` to `## spec`
+- [ ] `git log -1` on main shows a new commit titled `feat(akm): spec sp<NNN> <title>`
+- [ ] Commit covers the spec file, the story file, and `board.md` (plus any idea-phase staged files)
+- [ ] Confirmation surfaces the absolute `$AKM_ROOT/docs/notes/spec/sp<NNN>.md` path so the user sees where it landed from a worktree
 
 ## Disambiguation
 
