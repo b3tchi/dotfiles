@@ -101,6 +101,20 @@ Stage 8 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Read shipped r
 - **Diff is ground truth, spec is history.** When the shipped code differs from the spec, the retro updates the `im###` body to match shipped — not the other way around. The spec is the historical record of what was planned; the implementation is what runs.
 - **ADRs are immutable.** New decisions = new ADRs (next sequential id, four-digit). Decisions that overturn old ones = new ADR + supersede the old one via the body section. Never edit an Accepted ADR's `## decision`.
 - **Feature widening: update in place; feature changing: supersede.** If the feature's `## providing` covers the new use, just widen the `## api_surface`. If the consumer needed something the feature genuinely didn't offer, that's a supersession candidate (new `ft###` + `## superseded_by` chain on the old one).
+- **ADR vs Feature — where does the finding go?** When execution surfaces something new, classify before writing. ADRs sit at the *strategic* level (vendor / paradigm / security stance / language-stack / cross-cutting policy — commitments that close off alternatives and are expensive to reverse). Features sit at the *implementation-near reusable* level (a concrete capability with `## api_surface`, `## data_model`, `## sample`, `## components` — building blocks many Implementations consume). Use this discriminator:
+
+  | Finding | Goes into |
+  |---|---|
+  | "We decided X over Y" (vendor, library, paradigm, encoding, protocol) | new `adr####` |
+  | Cross-cutting policy locked in (auth strategy, retry semantics, data residency, isolation level) | new `adr####` |
+  | An option was foreclosed during shipping (e.g. "no more SQLite — Postgres only from now") | new `adr####` (often superseding an old one) |
+  | New endpoint / API signature / schema / message contract any consumer can call | `ft###` widening (or new `ft###` if the contract shifted incompatibly) |
+  | New module / file / sample showing how to consume an existing capability | `ft###` update (`## components` + `## sample`) |
+  | Behavior or constraint of an existing service genuinely changed | `ft###` supersession chain |
+  | Both a strategic choice *and* the capability it produced | **one of each** — ADR records the decision, Feature records the surface |
+
+  Test: "Could a future engineer choose this differently?" Yes → ADR (it's a commitment). "Could a future engineer reuse this?" Yes → Feature (it's a building block). Both → both.
+
 - **Discovered scope becomes drafts, not silent edits.** New `us###` at `status: draft` is the cheapest moment to capture follow-up work. The next `idea-implement` cycle picks them up. Don't expand silently into the closing epic.
 - **Bd epic close carries the retro signal.** The `--reason` text is the one-line summary the team will see when they search history later. Make it specific: counts, names, what shifted.
 - **Out of scope: status flips.** work-merge did them. Don't re-flip anything; if a status is wrong, route back to work-merge instead.
