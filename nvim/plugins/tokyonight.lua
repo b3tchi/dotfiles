@@ -134,6 +134,22 @@ return {
 				hl.SpellCap = { undercurl = true, sp = "#e0af68" }
 				hl.SpellLocal = { undercurl = true, sp = "#0db9d7" }
 				hl.SpellRare = { undercurl = true, sp = "#1abc9c" }
+
+				-- markdown inline html/xml tags: MdTagFallback (matchadd) handles BOL tags only,
+				-- so we don't override @tag.html globally — inline tags keep tokyonight html colors.
+				local tag_color = "#565f89"
+				hl.MdTagFallback = { fg = tag_color }
+
+				-- code block language label (e.g. ```lua) green
+				hl.RenderMarkdownLanguage = { fg = "#9ece6a", bold = true }
+				hl.RenderMarkdownCodeLanguage = { fg = "#9ece6a", bold = true }
+
+				-- unchecked todo `- [ ]` orange, regular weight
+				local orange2 = "#ff9e64"
+				hl.RenderMarkdownUnchecked = { fg = orange2 }
+				hl.RenderMarkdownTodo = { fg = orange2 }
+				hl["@markup.list.unchecked"] = { fg = orange2 }
+				hl["@markup.list.unchecked.markdown"] = { fg = orange2 }
 			end,
 		})
 
