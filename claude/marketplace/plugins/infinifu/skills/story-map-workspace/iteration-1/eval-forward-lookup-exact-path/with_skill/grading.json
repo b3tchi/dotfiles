@@ -1,0 +1,36 @@
+{
+  "eval_name": "eval-forward-lookup-exact-path",
+  "expectations": [
+    {
+      "text": "Output identifies story 2605-002 as a match",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output identifies story 2605-005 as a match",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output excludes 2605-001",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output excludes 2605-003",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output is a table or structured listing",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output includes a count summary",
+      "passed": true,
+      "evidence": ""
+    }
+  ],
+  "summary": "6/6 passed"
+}

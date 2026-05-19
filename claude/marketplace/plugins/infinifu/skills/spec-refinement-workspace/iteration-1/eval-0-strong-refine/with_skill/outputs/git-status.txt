@@ -1,0 +1,3 @@
+M  docs/notes/im002.md
+M  docs/notes/spec/sp001.md
+?? .seed_manifest.txt

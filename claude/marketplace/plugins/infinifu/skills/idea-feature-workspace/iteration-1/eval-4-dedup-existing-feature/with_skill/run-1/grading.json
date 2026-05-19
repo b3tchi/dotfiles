@@ -1,0 +1,43 @@
+{
+  "eval_id": 4,
+  "eval_name": "dedup-existing-feature",
+  "config": "with_skill",
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 6,
+    "failed": 0,
+    "total": 6
+  },
+  "expectations": [
+    {
+      "text": "Agent ran the dedup check \u2014 references ft002 (vault-secrets) by id",
+      "passed": true,
+      "evidence": "ft002"
+    },
+    {
+      "text": "Agent recognized ft002 already provides this capability",
+      "passed": true,
+      "evidence": "ft002 + dedup-language match"
+    },
+    {
+      "text": "Agent re-routed to idea-extend on ft002",
+      "passed": true,
+      "evidence": "idea-extend+ft002 in text=True route_decision=True"
+    },
+    {
+      "text": "Agent did NOT emit a new sp###.md under docs/notes/spec/",
+      "passed": true,
+      "evidence": "sp_count=0"
+    },
+    {
+      "text": "docs/board.md NOT modified",
+      "passed": true,
+      "evidence": "board_changed=False"
+    },
+    {
+      "text": "Agent did NOT mint a new ft###.md",
+      "passed": true,
+      "evidence": "new ft: []"
+    }
+  ]
+}

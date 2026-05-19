@@ -1,0 +1,111 @@
+{
+  "metadata": {
+    "skill_name": "idea-brainstorming",
+    "skill_path": "<path/to/skill>",
+    "executor_model": "<model-name>",
+    "analyzer_model": "<model-name>",
+    "timestamp": "2026-04-19T16:43:20Z",
+    "evals_run": [
+      0
+    ],
+    "runs_per_configuration": 3
+  },
+  "runs": [
+    {
+      "eval_id": 0,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 10,
+        "failed": 0,
+        "total": 10,
+        "time_seconds": 63.9,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "gate_reached.md exists at sandbox root and is non-empty",
+          "passed": true,
+          "evidence": "exists=True; size=3140 chars"
+        },
+        {
+          "text": "board/idea/url-shortener.md still exists",
+          "passed": true,
+          "evidence": "exists=True"
+        },
+        {
+          "text": "board/idea/url-shortener.md unchanged OR agent explicitly recorded it was not rewritten",
+          "passed": true,
+          "evidence": "unchanged=True; noted_not_rewritten=True"
+        },
+        {
+          "text": "No bd epic/tasks created (no .beads/ dir)",
+          "passed": true,
+          "evidence": ".beads_exists=False"
+        },
+        {
+          "text": "No new source/implementation files (no .py/.js/.ts/.rs/.go beyond seed)",
+          "passed": true,
+          "evidence": "new_source_files=[]"
+        },
+        {
+          "text": "No new git commits after the seed (seed had 2 commits, still 2 now)",
+          "passed": true,
+          "evidence": "commit_count=2"
+        },
+        {
+          "text": "gate_reached.md references the pre-existing idea doc and identifies it as insufficient",
+          "passed": true,
+          "evidence": "refs_doc=True; calls_insufficient=True"
+        },
+        {
+          "text": "gate_reached.md 'Next question' section contains at least one question mark",
+          "passed": true,
+          "evidence": "next_question_len=375; excerpt='Who are the users and what is the primary purpose of this URL shortener? Pick one (or describe):\\n  (a) Internal-only link aliasing for Acme employees on the VPN (e.g., `go/<slug>` style)\\n  (b) A one-o'"
+        },
+        {
+          "text": "gate_reached.md contains at most 3 question marks total",
+          "passed": true,
+          "evidence": "total_question_marks=1"
+        },
+        {
+          "text": "gate_reached.md indicates the agent did NOT invoke spec-writing",
+          "passed": true,
+          "evidence": "not_invoked_signal=True; has_section=True"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": 0.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 63.9,
+        "stddev": 0.0,
+        "min": 63.9,
+        "max": 63.9
+      },
+      "tokens": {
+        "mean": 0.0,
+        "stddev": 0.0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "delta": {
+      "pass_rate": "+1.00",
+      "time_seconds": "+63.9",
+      "tokens": "+0"
+    }
+  },
+  "notes": []
+}

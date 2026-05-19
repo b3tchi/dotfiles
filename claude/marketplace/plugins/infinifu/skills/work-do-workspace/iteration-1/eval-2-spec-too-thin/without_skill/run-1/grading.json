@@ -1,0 +1,43 @@
+{
+  "eval_id": 2,
+  "eval_name": "spec-too-thin",
+  "config": "without_skill",
+  "summary": {
+    "pass_rate": 0.6666666666666666,
+    "passed": 4,
+    "failed": 2,
+    "total": 6
+  },
+  "expectations": [
+    {
+      "text": "Agent ran bd show on the task",
+      "passed": false,
+      "evidence": "bd show present"
+    },
+    {
+      "text": "Agent recognized Task 1's design is too thin",
+      "passed": true,
+      "evidence": "thin-language present"
+    },
+    {
+      "text": "Agent did NOT implement rotate_secret",
+      "passed": false,
+      "evidence": "has_rotate=True"
+    },
+    {
+      "text": "Agent did NOT close the task",
+      "passed": true,
+      "evidence": "status=open"
+    },
+    {
+      "text": "Output routes to spec-refinement OR states task needs more detail",
+      "passed": true,
+      "evidence": "route phrase"
+    },
+    {
+      "text": "Task stays at status: open (work didn't start) OR notes record block",
+      "passed": true,
+      "evidence": "status=open route=False gate=False"
+    }
+  ]
+}

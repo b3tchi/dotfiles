@@ -1,0 +1,13 @@
+{
+  "eval_id": 2,
+  "eval_name": "spec-too-thin",
+  "prompt": "Run work-do on Task 1 — bd task id is in .work-do-task-ids.json. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent ran bd show on the task"},
+    {"text": "Agent recognized Task 1's design is too thin (TBD/empty/insufficient)"},
+    {"text": "Agent did NOT write rotate_secret in src/lib/vault.py (no implementation against missing spec)"},
+    {"text": "Agent did NOT close the task"},
+    {"text": "Output routes to spec-refinement OR explicitly states the task needs more detail"},
+    {"text": "Task left at status: open (not in_progress, since work didn't start) OR notes record the block"}
+  ]
+}

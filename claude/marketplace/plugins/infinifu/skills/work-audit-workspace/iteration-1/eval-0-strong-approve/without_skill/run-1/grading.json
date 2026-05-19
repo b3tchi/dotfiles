@@ -1,0 +1,48 @@
+{
+  "eval_id": 0,
+  "eval_name": "strong-approve",
+  "config": "without_skill",
+  "summary": {
+    "pass_rate": 0.7142857142857143,
+    "passed": 5,
+    "failed": 2,
+    "total": 7
+  },
+  "expectations": [
+    {
+      "text": "Agent ran bd show on task id",
+      "passed": false,
+      "evidence": "bd show in text"
+    },
+    {
+      "text": "Agent ran the test suite",
+      "passed": true,
+      "evidence": "pytest evidence"
+    },
+    {
+      "text": "Agent read src/lib/vault.py (not just diff)",
+      "passed": true,
+      "evidence": "vault.py refs"
+    },
+    {
+      "text": "Agent verified criteria with file:line / test-name evidence",
+      "passed": true,
+      "evidence": "file:line OR test::name present"
+    },
+    {
+      "text": "Agent issued APPROVED verdict",
+      "passed": true,
+      "evidence": "APPROVED text OR status=closed"
+    },
+    {
+      "text": "Agent called bd close (Task 1 status: closed)",
+      "passed": true,
+      "evidence": "status=closed"
+    },
+    {
+      "text": "Close reason includes AUDITED / APPROVED with criteria evidence",
+      "passed": false,
+      "evidence": "audit-approved phrase in close text"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "eval_id": 3,
+  "eval_name": "blocked-task-escalation",
+  "prompt": "Start the pipeline. max_parallel=1, mode=auto, worker_model=sonnet. The first task has insufficient design (the implementer will mark it blocked). When the implementer reports blocked, surface the escalation immediately to the human and STOP dispatching. Save chronicle.md.",
+  "fixture_design": "Seed bd with ONE ready task whose design says only 'TBD' or 'Implement the thing'. Real implementer agent should set the task to blocked. Orchestrator must alert and stop, not silently move to the next task.",
+  "assertions": [
+    {"text": "chronicle.md exists and records the dispatch + blocked report"},
+    {"text": "bd task status was transitioned to 'blocked' by the implementer (visible in bd list)"},
+    {"text": "Orchestrator emitted an alert with the AGENT ALERT format from references/agent-health.md"},
+    {"text": "Alert was emitted immediately — not batched into a later progress report"},
+    {"text": "Alert quotes (or summarizes) the agent's reported reason"},
+    {"text": "Pipeline halted — no further bd ready tasks were dispatched"},
+    {"text": "Orchestrator does NOT attempt to retry the same task or reassign without human input"},
+    {"text": "Orchestrator does NOT close the blocked task"}
+  ]
+}

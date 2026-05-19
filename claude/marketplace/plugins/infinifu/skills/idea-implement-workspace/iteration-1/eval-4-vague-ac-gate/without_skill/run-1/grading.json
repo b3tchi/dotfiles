@@ -1,0 +1,43 @@
+{
+  "eval_id": 4,
+  "eval_name": "vague-ac-gate",
+  "config": "without_skill",
+  "summary": {
+    "pass_rate": 0.5,
+    "passed": 3,
+    "failed": 3,
+    "total": 6
+  },
+  "expectations": [
+    {
+      "text": "Agent read us004 and confirmed status: draft",
+      "passed": true,
+      "evidence": "us004 + draft mentioned"
+    },
+    {
+      "text": "Agent recognized AC are vague / not testable",
+      "passed": true,
+      "evidence": "vague-language phrase present"
+    },
+    {
+      "text": "Agent did NOT promote us004 to status: ready",
+      "passed": false,
+      "evidence": "us004_modified=True status=ready"
+    },
+    {
+      "text": "Agent did NOT mint a new sp###.md",
+      "passed": false,
+      "evidence": "sp_files=['docs/notes/spec/sp001.md']"
+    },
+    {
+      "text": "docs/board.md NOT modified",
+      "passed": false,
+      "evidence": "board_changed=True"
+    },
+    {
+      "text": "Agent hit the gate (gate_reached.md OR explicit gate-language)",
+      "passed": true,
+      "evidence": "gate_reached=False gate-language=True"
+    }
+  ]
+}

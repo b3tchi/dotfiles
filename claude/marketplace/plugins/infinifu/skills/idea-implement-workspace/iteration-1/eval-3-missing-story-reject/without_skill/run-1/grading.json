@@ -1,0 +1,38 @@
+{
+  "eval_id": 3,
+  "eval_name": "missing-story-reject",
+  "config": "without_skill",
+  "summary": {
+    "pass_rate": 0.6,
+    "passed": 3,
+    "failed": 2,
+    "total": 5
+  },
+  "expectations": [
+    {
+      "text": "Agent verified us042 does not exist",
+      "passed": false,
+      "evidence": "weak"
+    },
+    {
+      "text": "Agent did NOT invent / write a new us042.md",
+      "passed": true,
+      "evidence": "us042_created=False"
+    },
+    {
+      "text": "Agent did NOT mint a new sp###.md",
+      "passed": true,
+      "evidence": "sp_count=0"
+    },
+    {
+      "text": "docs/board.md NOT modified",
+      "passed": true,
+      "evidence": "board_changed=False"
+    },
+    {
+      "text": "Output routes to story-write OR states 'create story first'",
+      "passed": false,
+      "evidence": "missing"
+    }
+  ]
+}

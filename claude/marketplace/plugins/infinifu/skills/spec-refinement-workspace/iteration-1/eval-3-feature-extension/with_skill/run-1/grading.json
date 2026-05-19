@@ -1,0 +1,43 @@
+{
+  "eval_id": 3,
+  "eval_name": "feature-extension",
+  "config": "with_skill",
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 6,
+    "failed": 0,
+    "total": 6
+  },
+  "expectations": [
+    {
+      "text": "Agent surveyed ft002 and read api_surface / providing",
+      "passed": true,
+      "evidence": "ft002 + api_surface/providing"
+    },
+    {
+      "text": "Agent detected vault.set_default_ttl() not in ft002.api_surface",
+      "passed": true,
+      "evidence": "set_default_ttl + extension/not-in"
+    },
+    {
+      "text": "Agent detected audit-log behavior not in ft002.providing",
+      "passed": true,
+      "evidence": "audit + extension/not-in"
+    },
+    {
+      "text": "Output flags feature-extension",
+      "passed": true,
+      "evidence": "ft002 + extension phrase"
+    },
+    {
+      "text": "Either breakdown routes to idea-extend on ft002 OR skill stops",
+      "passed": true,
+      "evidence": "gate=False route=True"
+    },
+    {
+      "text": "Did NOT silently call non-existent ft002 surface",
+      "passed": true,
+      "evidence": "extension acknowledged"
+    }
+  ]
+}

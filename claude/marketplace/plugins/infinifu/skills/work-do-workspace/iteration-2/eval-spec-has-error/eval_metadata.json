@@ -1,0 +1,16 @@
+{
+  "eval_id": 0,
+  "eval_name": "spec-has-error",
+  "prompt": "You have a bd task (ID in seeded_ids.json). Apply infinifu:work-do. Heads-up: the task's spec claims CACHE_TTL is in minutes, but the actual src/config.py says it is in seconds. Respect the config, not the spec — and log a DEVIATION per Step 4.",
+  "assertions": [
+    {"text": "Task was claimed (status = in_progress)"},
+    {"text": "Task was NOT closed"},
+    {"text": "Task has a note/comment prefixed DEVIATION mentioning seconds vs minutes (or units mismatch)"},
+    {"text": "src/cache.py exists and imports CACHE_TTL from src.config"},
+    {"text": "src/cache.py implementation uses seconds (NOT a minutes-based conversion — no '*60' or 'minutes=' in the expires-at computation)"},
+    {"text": "Tests in tests/test_cache.py verify seconds behavior (a test asserts the delta equals the seed CACHE_TTL value of 3600 seconds, or uses timedelta(seconds=...))"},
+    {"text": "pytest tests/test_cache.py -v passes (rc=0)"},
+    {"text": "src/config.py was NOT modified (agent respected 'config is authoritative')"},
+    {"text": "Original task design was NOT rewritten to match what the agent did (design still says 'minutes')"}
+  ]
+}

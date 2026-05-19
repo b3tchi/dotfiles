@@ -3,9 +3,52 @@ return {
 	dependencies = {
 		"b3tchi/headlines.nvim", --strip other langueages then org
 		dependencies = "nvim-treesitter/nvim-treesitter",
-		ft = { "org" },
+		ft = { "org", "markdown" },
 		config = function()
 			require("headlines").setup({
+				markdown = {
+					query = vim.treesitter.query.parse(
+						"markdown",
+						[[
+						(atx_heading [
+							(atx_h1_marker)
+							(atx_h2_marker)
+							(atx_h3_marker)
+							(atx_h4_marker)
+							(atx_h5_marker)
+							(atx_h6_marker)
+						] @headline)
+						(thematic_break) @dash
+						(fenced_code_block) @codeblock
+						(block_quote_marker) @quote
+						(block_quote (paragraph (inline (block_continuation) @quote)))
+						(block_quote (paragraph (block_continuation) @quote))
+					]]
+					),
+					headline_highlights = {
+						"MdHeadline1",
+						"MdHeadline2",
+						"MdHeadline3",
+						"MdHeadline4",
+						"MdHeadline5",
+						"MdHeadline6",
+					},
+					bullet_highlights = {
+						"MdHeadline1Bullet",
+						"MdHeadline2Bullet",
+						"MdHeadline3Bullet",
+						"MdHeadline4Bullet",
+						"MdHeadline5Bullet",
+						"MdHeadline6Bullet",
+					},
+					bullets = { "✶", "✶✶", "✶✶✶", "✶✶✶✶", "✶✶✶✶✶", "✶✶✶✶✶✶" },
+					codeblock_highlight = false,
+					dash_highlight = "Dash",
+					dash_string = "-",
+					quote_highlight = "Quote",
+					quote_string = "┃",
+					fat_headlines = false,
+				},
 				org = {
 					query = vim.treesitter.query.parse(
 						"org",
@@ -59,7 +102,7 @@ return {
 				},
 			})
 
-			-- vim.cmd([[highlight OrgHeadline1 guibg=#211e2d guifg=#bb9af7 gui=bold]])
+			-- vim.cmd([[highlight OrgHeadline1 guibg=#211e2d guifg=#ff9e64 gui=bold]])
 			vim.cmd([[highlight OrgHeadline1 guifg=#bb9af7 gui=bold]])
 			vim.cmd([[highlight OrgHeadline2 guifg=#bb9af7 gui=bold]])
 			vim.cmd([[highlight OrgHeadline3 guifg=#bb9af7 gui=bold]])
@@ -73,6 +116,21 @@ return {
 			vim.cmd([[highlight OrgHeadline4Bullet guifg=#ff7577 gui=bold]])
 			vim.cmd([[highlight OrgHeadline5Bullet guifg=#ff7577 gui=bold]])
 			vim.cmd([[highlight OrgHeadline6Bullet guifg=#ff7577 gui=bold]])
+
+			-- markdown headlines: text white (matches bold), bullets purple
+			vim.cmd([[highlight MdHeadline1 guifg=#e6ebf5 gui=bold]])
+			vim.cmd([[highlight MdHeadline2 guifg=#e6ebf5 gui=bold]])
+			vim.cmd([[highlight MdHeadline3 guifg=#e6ebf5 gui=bold]])
+			vim.cmd([[highlight MdHeadline4 guifg=#e6ebf5 gui=bold]])
+			vim.cmd([[highlight MdHeadline5 guifg=#e6ebf5 gui=bold]])
+			vim.cmd([[highlight MdHeadline6 guifg=#e6ebf5 gui=bold]])
+
+			vim.cmd([[highlight MdHeadline1Bullet guifg=#ff9e64 gui=bold]])
+			vim.cmd([[highlight MdHeadline2Bullet guifg=#ff9e64 gui=bold]])
+			vim.cmd([[highlight MdHeadline3Bullet guifg=#ff9e64 gui=bold]])
+			vim.cmd([[highlight MdHeadline4Bullet guifg=#ff9e64 gui=bold]])
+			vim.cmd([[highlight MdHeadline5Bullet guifg=#ff9e64 gui=bold]])
+			vim.cmd([[highlight MdHeadline6Bullet guifg=#ff9e64 gui=bold]])
 		end,
 	},
 	event = "VeryLazy",

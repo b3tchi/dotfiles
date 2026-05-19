@@ -1,0 +1,13 @@
+{
+  "eval_id": 2,
+  "eval_name": "vague-ac-block",
+  "prompt": "Run spec-writing on sp001. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent read sp001 + us003 acceptance_criteria"},
+    {"text": "Agent recognized us003 AC are vague / not testable ('it should work', 'be fast enough')"},
+    {"text": "Agent did NOT write ## solution (sp001 unchanged or no solution section)"},
+    {"text": "Agent did NOT flip sp001 status to spec"},
+    {"text": "docs/board.md NOT modified"},
+    {"text": "Output routes back to idea-implement / idea-extend for AC refinement OR explicitly blocks on vague AC"}
+  ]
+}

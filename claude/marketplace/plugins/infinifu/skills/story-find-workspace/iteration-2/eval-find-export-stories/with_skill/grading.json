@@ -1,0 +1,46 @@
+{
+  "eval_name": "eval-find-export-stories",
+  "expectations": [
+    {
+      "text": "Output identifies story 2605-001 (CSV export) as a match",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output identifies story 2605-004 (PDF export) as a match",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output does NOT include story 2605-002 (password reset)",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output does NOT include story 2605-005 (2FA)",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Each matched story renders acceptance criteria as a checklist",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "2605-001 (status=done) shows checkboxes as [x] for all criteria",
+      "passed": true,
+      "evidence": "[x] count=3"
+    },
+    {
+      "text": "2605-004 (status=draft) shows checkboxes as [ ] for all criteria",
+      "passed": true,
+      "evidence": "[ ] count=3"
+    },
+    {
+      "text": "Output includes a coverage summary line at the end",
+      "passed": true,
+      "evidence": ""
+    }
+  ],
+  "summary": "8/8 passed"
+}

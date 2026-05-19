@@ -1,0 +1,21 @@
+[
+  {
+    "id": "wd2-245485-qnw",
+    "title": "Epic: rotate service credentials without downtime [sp001]",
+    "design": "Spec: docs/notes/spec/sp001.md",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "epic",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-17T08:25:46Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-17T08:25:46Z",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  }
+]
+Warning: auto-export: git add failed: exit status 1: The following paths are ignored by one of your .gitignore files:
+.beads
+hint: Use -f if you really want to add them.
+hint: Disable this message with "git config set advice.addIgnoredFile false"

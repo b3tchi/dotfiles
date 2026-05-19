@@ -11,37 +11,57 @@ vim.o.tabstop = 4
 vim.o.shiftwidth = 4
 vim.o.expandtab = false
 
--- WSL clipboard: SSH sessions strip WAYLAND_DISPLAY/XDG_RUNTIME_DIR but the
--- socket at /run/user/$UID/wayland-0 is still reachable. Inject env and call
--- wl-copy/wl-paste directly. The Wayland↔Win sync daemons (see
--- sway/scripts/clipboard-to-win.nu) handle propagation to Windows.
+-- Clipboard provider — picks based on what's actually available, so the same
+-- config works on WSL/Sway (Wayland), Manjaro/i3 (X11), and Termux:X11.
+-- WSL note: SSH sessions strip WAYLAND_DISPLAY/XDG_RUNTIME_DIR but the socket
+-- at /run/user/$UID/wayland-0 is still reachable, so we detect by socket and
+-- inject env when calling wl-copy/wl-paste. The Wayland↔Win sync daemons
+-- (see sway/scripts/clipboard-to-win.nu) handle propagation to Windows.
 local uid = tostring(vim.uv.getuid())
-local env_prefix = {
-	"env",
-	"WAYLAND_DISPLAY=wayland-0",
-	"XDG_RUNTIME_DIR=/run/user/" .. uid,
-}
-local function with_env(cmd)
-	local out = {}
-	for _, v in ipairs(env_prefix) do table.insert(out, v) end
-	for _, v in ipairs(cmd) do table.insert(out, v) end
-	return out
+local wl_sock = "/run/user/" .. uid .. "/wayland-0"
+local has_wayland = (vim.uv.fs_stat(wl_sock) ~= nil) or (os.getenv("WAYLAND_DISPLAY") ~= nil)
+
+if has_wayland and vim.fn.executable("wl-copy") == 1 then
+	local env_prefix = {
+		"env",
+		"WAYLAND_DISPLAY=wayland-0",
+		"XDG_RUNTIME_DIR=/run/user/" .. uid,
+	}
+	local function with_env(cmd)
+		local out = {}
+		for _, v in ipairs(env_prefix) do table.insert(out, v) end
+		for _, v in ipairs(cmd) do table.insert(out, v) end
+		return out
+	end
+	vim.g.clipboard = {
+		name = "WaylandSSH",
+		copy = {
+			["+"] = with_env({ "wl-copy" }),
+			["*"] = with_env({ "wl-copy", "--primary" }),
+		},
+		paste = {
+			["+"] = with_env({ "wl-paste", "--no-newline" }),
+			["*"] = with_env({ "wl-paste", "--no-newline", "--primary" }),
+		},
+		cache_enabled = 0,
+	}
+elseif vim.fn.executable("xclip") == 1 then
+	vim.g.clipboard = {
+		name = "xclip-x11",
+		copy = {
+			["+"] = { "xclip", "-selection", "clipboard", "-i" },
+			["*"] = { "xclip", "-selection", "primary", "-i" },
+		},
+		paste = {
+			["+"] = { "xclip", "-selection", "clipboard", "-o" },
+			["*"] = { "xclip", "-selection", "primary", "-o" },
+		},
+		cache_enabled = 0,
+	}
 end
-vim.g.clipboard = {
-	name = "WaylandSSH",
-	copy = {
-		["+"] = with_env({ "wl-copy" }),
-		["*"] = with_env({ "wl-copy", "--primary" }),
-	},
-	paste = {
-		["+"] = with_env({ "wl-paste", "--no-newline" }),
-		["*"] = with_env({ "wl-paste", "--no-newline", "--primary" }),
-	},
-	cache_enabled = 0,
-}
 -- LazyVim sets clipboard="" when SSH_CONNECTION is set (it expects OSC 52).
--- We have a working Wayland provider above, so re-enable unnamedplus so
--- plain y/p reach the + register instead of dying in the unnamed register.
+-- We have a working provider above (where supported), so re-enable unnamedplus
+-- so plain y/p reach the + register instead of dying in the unnamed register.
 vim.opt.clipboard = "unnamedplus"
 -- --
 -- path to the Nushell executable

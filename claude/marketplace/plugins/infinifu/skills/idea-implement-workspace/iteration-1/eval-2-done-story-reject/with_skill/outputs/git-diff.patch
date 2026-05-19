@@ -1,0 +1,71 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..d686d2d
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,28 @@
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/product.md
++./.gitignore
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
+diff --git a/route_decision.md b/route_decision.md
+new file mode 100644
+index 0000000..75f81c8
+--- /dev/null
++++ b/route_decision.md
+@@ -0,0 +1,31 @@
++# Route decision — idea-implement on us001
++
++**Verdict:** REJECT. Do not run `idea-implement`. Re-route required.
++
++## Target
++
++- Story: `[[us001|view dashboard of recent reports]]`
++- File: `docs/notes/us001.md`
++- Frontmatter `status:` **`done`**
++- Persona: `[[pn001|analyst]]`
++- Implementation already shipped: `[[im001|reports dashboard via reports-service UI]]` (`status: accepted`)
++
++## Why idea-implement is wrong here
++
++`idea-implement` consumes drafts and promotes them `draft → ready`. From the skill's Disambiguation table:
++
++> **`us###` exists at `status: done`** → can't promote shipped story; if user wants a change, route to `infinifu:idea-extend` against that story.
++
++`us001` is already shipped — there is nothing to promote. Forcing a `draft → ready` re-emit would corrupt a `done` story (status regression), violate AKM append-only spirit on the linked `accepted` `im001`, and skip the entry-type gate the lifecycle relies on.
++
++The Entry-specific checklist step 2 ("Verify status") trips the gate at the first read.
++
++## Re-route
++
++- **If the user actually wants to change behavior of the shipped feature** → `infinifu:idea-extend` against `us001`. That entry type frames the problem as `sp###.problem`, surfaces the existing `im001`, and decides whether `im001` needs supersession or just a body refresh after the next ship.
++- **If the user wants a brand-new related story** (e.g. a different dashboard for a different persona) → `infinifu:story-write` first, then come back to `idea-implement` once a fresh `us###` exists at `status: draft`.
++- **If the user just wanted to see the story** → `infinifu:story-read us001`.
++
++## Actions taken in the sandbox
++
++None. No `us###`, `sp###`, `board.md`, `product.md`, or `im###` files modified. This file (`route_decision.md`) is the only artifact written, recording the reject + re-route rationale.

@@ -1,0 +1,52 @@
+{
+  "eval_id": 2,
+  "config": "with_skill",
+  "expectations": [
+    {
+      "text": "Compound input detected",
+      "passed": true,
+      "evidence": "decision-log + summary explicitly cite atomicity gate detected 2 claims"
+    },
+    {
+      "text": "Split plan documented (\u22652 files or written plan)",
+      "passed": true,
+      "evidence": "wip-limits.md + pull-based-flow.md + decision-log.md"
+    },
+    {
+      "text": "No single file conflates both claims",
+      "passed": true,
+      "evidence": "claims separated by file"
+    },
+    {
+      "text": "Every emitted card has [[product]] in H1",
+      "passed": true,
+      "evidence": "both cards confirmed"
+    },
+    {
+      "text": "Every card has Index: [[product]] footer",
+      "passed": true,
+      "evidence": "both confirmed"
+    },
+    {
+      "text": "Each card has \u22651 outbound wikilink",
+      "passed": true,
+      "evidence": "wip-limits\u2192pull-based-flow+on-call-rotation; pull-based-flow\u2192wip-limits+circuit-breaker"
+    },
+    {
+      "text": "Filenames are meaningful kebab-slugs",
+      "passed": true,
+      "evidence": "wip-limits.md, pull-based-flow.md"
+    },
+    {
+      "text": "Summary acknowledges atomicity gate explicitly per skill",
+      "passed": true,
+      "evidence": "summary cites zettel-write atomicity gate by name; decision-log enumerates Step 1-4 checks"
+    }
+  ],
+  "summary": {
+    "passed": 8,
+    "failed": 0,
+    "total": 8,
+    "pass_rate": 1.0
+  }
+}

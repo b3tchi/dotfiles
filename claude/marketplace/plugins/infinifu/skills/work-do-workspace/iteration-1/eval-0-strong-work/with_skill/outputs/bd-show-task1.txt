@@ -1,0 +1,31 @@
+◐ wd0-4175748-2g2.1 · Task 1: Add rotate_secret helper to vault.py   [● P2 · IN_PROGRESS]
+Owner: eval · Type: task
+Created: 2026-05-16 · Started: 2026-05-16 · Updated: 2026-05-16
+
+DESCRIPTION
+  (none)
+
+DESIGN
+Extend src/lib/vault.py with rotate_secret(name, new_value) helper that stages a new versioned alias. Files: src/lib/vault.py, tests/lib/test_vault.py. Edge cases: concurrent calls serialize, vault unreachable raises VaultError, empty value rejected.
+
+NOTES
+IMPLEMENTED: rotate_secret(name, new_value) helper added to src/lib/vault.py with versioned-alias bookkeeping, thread-lock serialization, input validation, and VaultError wrapping.
+
+Evidence:
+- Criterion 1 (new versioned alias without touching old): src/lib/vault.py:60-66 _stage_new_alias appends next_version into _STATE[name]; verified by tests/lib/test_vault.py::test_rotate_stages_new_alias (prior alias map preserved byte-for-byte after second rotation).
+- Criterion 2 (secret returns new value after flip): src/lib/vault.py:21-29 secret() returns max(version) entry; verified by test_secret_returns_new_after_flip.
+- Criterion 3 (5 unit tests pass write-staging/read-during-overlap/post-expiry): tests/lib/test_vault.py — test_rotate_stages_new_alias, test_secret_returns_new_after_flip, test_concurrent_rotate_serializes, test_vault_unreachable_raises, test_empty_value_rejected. Pytest: 6 passed (5 new + 1 pre-existing smoke).
+- Edge: concurrent rotations serialize via _LOCK (src/lib/vault.py:43); verified by test_concurrent_rotate_serializes (5 parallel threads → exactly 5 versions, no lost writes).
+- Edge: vault unreachable raises VaultError without partial write (src/lib/vault.py:46-52); verified by test_vault_unreachable_raises (_STATE snapshot byte-identical before/after).
+- Edge: empty/None new_value rejected at API boundary (src/lib/vault.py:38-39); verified by test_empty_value_rejected.
+- Tests: tests/lib/test_vault.py — 6 passed in 0.31s.
+- Deviations: none. Note: pre-existing set_timeout TODO in src/lib/vault.py left untouched (out of scope per spec).
+- Discoveries filed: none.
+
+PARENT
+  ↑ ○ wd0-4175748-2g2: (EPIC) Epic: rotate service credentials without downtime [sp001] ● P2
+
+BLOCKS
+  ← ○ wd0-4175748-2g2.2: Task 2: Add vault_rotate orchestration module ● P2
+  ← ○ wd0-4175748-2g2.3: Task 3: Synthetic-check hook for rotation window ● P2
+

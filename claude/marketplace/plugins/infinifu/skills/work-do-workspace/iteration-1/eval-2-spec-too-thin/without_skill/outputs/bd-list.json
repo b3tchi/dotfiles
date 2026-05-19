@@ -1,0 +1,120 @@
+[
+  {
+    "id": "wd2-4179068-rmh.3",
+    "title": "Task 3: Synthetic-check hook for rotation window",
+    "design": "Hook a synthetic check that runs every 30s during rotation window; assert zero 5xx. Files: src/lib/vault_rotate.py, tests/integration/test_rotate_synthetic.py.",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:15:15Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:15:15Z",
+    "dependencies": [
+      {
+        "issue_id": "wd2-4179068-rmh.3",
+        "depends_on_id": "wd2-4179068-rmh",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:15:14Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd2-4179068-rmh.3",
+        "depends_on_id": "wd2-4179068-rmh.1",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:15:16Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd2-4179068-rmh.3",
+        "depends_on_id": "wd2-4179068-rmh.2",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:15:17Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 2,
+    "dependent_count": 0,
+    "comment_count": 0,
+    "parent": "wd2-4179068-rmh"
+  },
+  {
+    "id": "wd2-4179068-rmh.2",
+    "title": "Task 2: Add vault_rotate orchestration module",
+    "design": "Create src/lib/vault_rotate.py with rotate(name, new_value) that calls vault.rotate_secret + schedules T+5min expiry. Files: src/lib/vault_rotate.py, tests/lib/test_vault_rotate.py.",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:15:13Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:15:13Z",
+    "dependencies": [
+      {
+        "issue_id": "wd2-4179068-rmh.2",
+        "depends_on_id": "wd2-4179068-rmh",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:15:13Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd2-4179068-rmh.2",
+        "depends_on_id": "wd2-4179068-rmh.1",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:15:15Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 1,
+    "dependent_count": 1,
+    "comment_count": 0,
+    "parent": "wd2-4179068-rmh"
+  },
+  {
+    "id": "wd2-4179068-rmh.1",
+    "title": "Task 1: Add rotate_secret helper to vault.py",
+    "design": "TBD — needs refinement.",
+    "notes": "Implementation complete. Awaiting audit.\n\nFiles changed:\n- src/lib/vault.py: added rotate_secret(name, new_value) + per-name locking + module-level _aliases store. _write_alias placeholder is monkeypatchable for unreachable simulation.\n- tests/lib/test_vault.py: 8 new tests (spec required 5; added empty-name + parallel-different-names for coverage).\n\nTest results: 9/9 pass (pytest tests/).\n\nSpec deviations:\n- Spec mentions 'acme.errors.VaultError' but no acme.errors module exists in the repo; VaultError already lived in vault.py so I kept it there. Suggest spec-refinement clarify or create acme.errors.\n- Empty/None new_value raises ValueError (not VaultError) — input-validation is a caller bug, not a vault failure. Re-classify if spec intends VaultError.\n\nEdge cases covered: same-name serialization, different-name parallelism, unreachable backend (no partial write), empty/None value rejection, empty name rejection.",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:15:12Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:20:02Z",
+    "dependencies": [
+      {
+        "issue_id": "wd2-4179068-rmh.1",
+        "depends_on_id": "wd2-4179068-rmh",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:15:12Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 0,
+    "dependent_count": 2,
+    "comment_count": 0,
+    "parent": "wd2-4179068-rmh"
+  },
+  {
+    "id": "wd2-4179068-rmh",
+    "title": "Epic: rotate service credentials without downtime [sp001]",
+    "design": "Spec: docs/notes/spec/sp001.md",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "epic",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:15:11Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:15:11Z",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  }
+]

@@ -1,0 +1,371 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..d686d2d
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,28 @@
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/product.md
++./.gitignore
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
+diff --git a/docs/board.md b/docs/board.md
+index e500c4e..4551607 100644
+--- a/docs/board.md
++++ b/docs/board.md
+@@ -1,9 +1,15 @@
+ # Board
+ 
+-Nothing in flight right now.
++Five observability features under proposal — one sp### per atomic ft###.
+ 
+ ## idea
+ 
++- [[sp001|metrics-scraping feature]]
++- [[sp002|structured-logging feature]]
++- [[sp003|distributed-tracing feature]]
++- [[sp004|alerting feature]]
++- [[sp005|dashboards feature]]
++
+ ## spec
+ 
+ ## ready
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+new file mode 100644
+index 0000000..5a01557
+--- /dev/null
++++ b/docs/notes/spec/sp001.md
+@@ -0,0 +1,59 @@
++---
++aliases:
++  - metrics-scraping feature
++status: idea
++created: 2026-05-16
++---
++# Spec [[cat004]] [[board]]
++
++## problem
++
++We need a shared **metrics scraping** capability — a horizontal building
++block that every service uses to expose counters, gauges, and histograms
++in a Prometheus-compatible format and to scrape them on a shared
++schedule. Today this is ad-hoc: only `src/services/metrics/` runs any
++Prometheus calls, and there is no shared client library — every other
++service emits no metrics at all.
++
++**No existing `ft###` covers this.** Surveyed features: [[ft001]]
++(basic-auth) and [[ft002]] (vault-secrets) — both [[cat001]] security,
++unrelated to observability. We'd mint a new `ft###` at spec-writing time
++once the api_surface is locked.
++
++**Granularity.** This sp### scopes **one** ft### — the metrics-scraping
++capability. The wider observability ask was decomposed into 5 atomic
++features (metrics, logging, tracing, alerting, dashboards) so each can
++ship independently with its own `## providing` / `## api_surface` /
++lifecycle, per the AKM feature schema's singletons. The other four
++features ride in [[sp002]] (logging), [[sp003]] (tracing), [[sp004]]
++(alerting), [[sp005]] (dashboards).
++
++**Consumers (via existing `im###`).** Surveyed [[im001]] (reports
++dashboard) — no metrics today, candidate consumer. The three running
++services (`auth`, `metrics`, `reports`) are migration targets:
++
++- `src/services/metrics/` — already scrapes Prometheus ad-hoc; would
++  migrate to providing instead of bespoke calls.
++- `src/services/reports/` — currently emits no metrics; would consume
++  the shared client to publish job durations and success counters.
++- `src/services/auth/` — currently emits no metrics; would consume the
++  shared client to publish login attempt counters.
++
++**Category.** [[cat004]] (observability) is the primary; [[cat003]]
++(infrastructure) covers cross-service scrape topology if the new feature
++introduces a central scraper.
++
++**Binding ADRs.** No accepted ADR under [[cat004]] yet; the new feature
++will likely produce one (retention budget, label cardinality cap). No
++conflict with [[adr0001]] (auth), [[adr0002]] (reports retention), or
++[[adr0003]] (smtplib alerts — alerting is a different sp###).
++
++**Migration intent.** At spec-writing time, mint `ft###` for the shared
++metrics client; replace the ad-hoc Prometheus calls in
++`src/services/metrics/` with the client; add metric publication to
++`src/services/auth/` and `src/services/reports/` as a follow-up
++implementation per service.
++
++---
++
++Index: [[board]]
+diff --git a/docs/notes/spec/sp002.md b/docs/notes/spec/sp002.md
+new file mode 100644
+index 0000000..a5e95ac
+--- /dev/null
++++ b/docs/notes/spec/sp002.md
+@@ -0,0 +1,53 @@
++---
++aliases:
++  - structured-logging feature
++status: idea
++created: 2026-05-16
++---
++# Spec [[cat004]] [[board]]
++
++## problem
++
++We need a shared **structured logging** capability — a horizontal
++building block that every service uses to emit JSON log records with a
++consistent schema (timestamp, level, service, trace_id, message,
++attributes) and ship them to a central sink. Today every service writes
++free-form text to stdout, which is mentioned explicitly in
++`src/services/metrics/__init__.py` ("Alert path currently writes to
++stdout") and is the same pattern in `auth` and `reports`.
++
++**No existing `ft###` covers this.** Surveyed features: [[ft001]]
++(basic-auth) and [[ft002]] (vault-secrets) — both [[cat001]] security,
++unrelated. We'd mint a new `ft###` at spec-writing time.
++
++**Granularity.** This sp### scopes **one** ft### — the structured-logger
++client. Companion observability features ride in [[sp001]] (metrics),
++[[sp003]] (tracing), [[sp004]] (alerting), [[sp005]] (dashboards). Each
++is its own atomic ft### so the JSON schema and the ship target (Loki?
++Elasticsearch? local file?) can be locked independently of metrics or
++tracing decisions.
++
++**Consumers (via existing `im###`).** Surveyed [[im001]] (reports
++dashboard) — currently uses no shared logger, candidate consumer. The
++three running services are all migration targets — every `print(...)`
++or `stdout` write across `src/services/auth/`, `src/services/metrics/`,
++`src/services/reports/` becomes a `log.info(...)` call once the feature
++exists.
++
++**Category.** [[cat004]] (observability) is the primary; the structured
++schema also touches [[cat002]] (data) if retention and indexing become a
++concern.
++
++**Binding ADRs.** No accepted ADR under [[cat004]] yet. [[adr0002]]
++(reports retention = 90 days) suggests a similar bounded-retention
++policy on log storage — the new feature should declare a retention
++constraint up front to inherit the same operating mindset.
++
++**Migration intent.** At spec-writing time, mint `ft###` for the
++structured logger; replace ad-hoc stdout writes in all three services
++with the shared logger; back-fill log calls where today's code emits
++nothing.
++
++---
++
++Index: [[board]]
+diff --git a/docs/notes/spec/sp003.md b/docs/notes/spec/sp003.md
+new file mode 100644
+index 0000000..14e2b32
+--- /dev/null
++++ b/docs/notes/spec/sp003.md
+@@ -0,0 +1,53 @@
++---
++aliases:
++  - distributed-tracing feature
++status: idea
++created: 2026-05-16
++---
++# Spec [[cat004]] [[board]]
++
++## problem
++
++We need a shared **distributed tracing** capability — a horizontal
++building block that every service uses to emit spans (with a propagated
++trace_id) and ship them to a central collector so cross-service request
++flows are observable end-to-end. Today there is **zero tracing** across
++the platform per the user's framing; no service starts a trace, no
++service propagates a trace context across the wire.
++
++**No existing `ft###` covers this.** Surveyed features: [[ft001]]
++(basic-auth) and [[ft002]] (vault-secrets) — both [[cat001]] security,
++unrelated. We'd mint a new `ft###` at spec-writing time.
++
++**Granularity.** This sp### scopes **one** ft### — the tracing client
++plus its trace-context propagation contract. Companion observability
++features ride in [[sp001]] (metrics), [[sp002]] (logging), [[sp004]]
++(alerting), [[sp005]] (dashboards). Tracing is split out because the
++api_surface is fundamentally different (spans vs log records vs metric
++samples) and the wire-level propagation header is a contract every
++service must respect — pulling that into a unified "stack" would mask
++the cross-service coupling the trace context actually introduces.
++
++**Consumers (via existing `im###`).** Surveyed [[im001]] (reports
++dashboard) — candidate consumer; the report-run path crosses services
++(analyst hits reports → reports calls metrics for scrape data → reports
++emails CSV) and is the obvious first trace target. All three services
++(`auth`, `metrics`, `reports`) are migration targets — each needs the
++tracing client wired into its request entry point and its outbound
++calls.
++
++**Category.** [[cat004]] (observability) is the primary; [[cat003]]
++(infrastructure) covers the propagation-header contract and the central
++collector deployment.
++
++**Binding ADRs.** No accepted ADR under [[cat004]] or [[cat003]]
++constrains tracing today. The new feature will probably produce an ADR
++choosing OpenTelemetry over a bespoke wire format.
++
++**Migration intent.** At spec-writing time, mint `ft###` for the tracing
++client; wire it into all three services as a first migration; pick the
++W3C `traceparent` header (or equivalent) as the propagation contract.
++
++---
++
++Index: [[board]]
+diff --git a/docs/notes/spec/sp004.md b/docs/notes/spec/sp004.md
+new file mode 100644
+index 0000000..62d03fd
+--- /dev/null
++++ b/docs/notes/spec/sp004.md
+@@ -0,0 +1,60 @@
++---
++aliases:
++  - alerting feature
++status: idea
++created: 2026-05-16
++---
++# Spec [[cat004]] [[board]]
++
++## problem
++
++We need a shared **alerting** capability — a horizontal building block
++that evaluates rules against the metrics signal (from [[sp001]]) and
++routes notifications to operators (email today, additional channels
++later). Today the alert path is ad-hoc and broken: `metrics`
++("alerts via stdout for now", `src/services/metrics/__init__.py`)
++prints alerts to stdout where nobody sees them.
++
++**No existing `ft###` covers this.** Surveyed features: [[ft001]]
++(basic-auth) and [[ft002]] (vault-secrets) — both [[cat001]], no overlap
++with alerting. We'd mint a new `ft###` at spec-writing time.
++
++**Granularity.** This sp### scopes **one** ft### — the alerting engine
++(rule evaluation + notification routing). Companion observability
++features ride in [[sp001]] (metrics — the signal source), [[sp002]]
++(logging — the audit trail for fired alerts), [[sp003]] (tracing),
++[[sp005]] (dashboards — the silencing UI). Alerting is its own ft###
++because the api_surface (declare rule, route notification) and
++data_model (rules, silences, fired-alert history) are fundamentally
++different from a metrics scraper or a log shipper.
++
++**Consumers (via existing `im###`).** Surveyed [[im001]] (reports
++dashboard) — not a direct consumer; alerting consumers are operations
++roles, not analyst features. The migration target is
++`src/services/metrics/` — its stdout alert prints become declared rules
++in the new feature, with notification routing to the right channel.
++
++**Category.** [[cat004]] (observability) is the primary; [[cat001]]
++(security) is secondary because alert routing carries sensitive content
++(who, when, what failed) and the notification channel must respect
++auth/audit norms.
++
++**Binding ADRs.** [[adr0003]] **constrains this feature directly**: "No
++external SMTP relay — services use smtplib directly." The alerting
++feature's notification path inherits that ADR — its email channel must
++call `smtplib` against the internal MTA, not introduce a relay. Whether
++[[adr0003]] should be revisited (its own `## consequences` list "no
++metrics on send rate, bounces, or latency" as a known pain) is a
++question for spec-writing, not this idea-stage zettel. [[adr0001]]
++(basic-auth) is binding for the silencing/acknowledge UI — alert
++management must go through `ft001`.
++
++**Migration intent.** At spec-writing time, mint `ft###` for the
++alerting engine; replace `src/services/metrics/`'s stdout alerts with
++declared rules; route notifications via the smtplib path (per
++`adr0003`) or a follow-up notification feature if one is later
++proposed.
++
++---
++
++Index: [[board]]
+diff --git a/docs/notes/spec/sp005.md b/docs/notes/spec/sp005.md
+new file mode 100644
+index 0000000..5a02806
+--- /dev/null
++++ b/docs/notes/spec/sp005.md
+@@ -0,0 +1,61 @@
++---
++aliases:
++  - dashboards feature
++status: idea
++created: 2026-05-16
++---
++# Spec [[cat004]] [[board]]
++
++## problem
++
++We need a shared **dashboards** capability — a horizontal building
++block that renders the metrics, logs, and traces signals from
++[[sp001]], [[sp002]], [[sp003]] into operator-facing visualizations
++(panels, drill-downs, time-range controls, saved views). Today nobody
++has a dashboard for platform health: the `auth`, `metrics`, and
++`reports` services all run blind apart from `metrics`'s ad-hoc stdout
++alert path.
++
++**No existing `ft###` covers this.** Surveyed features: [[ft001]]
++(basic-auth) and [[ft002]] (vault-secrets) — both [[cat001]],
++unrelated. [[im001]] (reports dashboard) is an *analyst-facing* report
++dashboard, **not** an observability dashboard — different
++consumer/purpose, different data source — so it is **not** a dedup
++match. We'd mint a new `ft###` at spec-writing time.
++
++**Granularity.** This sp### scopes **one** ft### — the dashboard
++provisioning + rendering capability for observability signals.
++Companion observability features ride in [[sp001]] (metrics),
++[[sp002]] (logging), [[sp003]] (tracing), [[sp004]] (alerting).
++Dashboards are split out because the api_surface (declare panel, query
++signal, render) and data_model (saved-view definitions, query
++templates) are fundamentally different from a signal-producing feature.
++[[im001]]'s analyst dashboard could later be re-skinned on top of this
++feature, but that's a separate migration question.
++
++**Consumers (via existing `im###`).** Surveyed [[im001]] (reports
++dashboard) — partial precedent but *not* a current consumer of this
++feature (it is its own bespoke HTML page). The real consumers will be
++operations roles wanting a "platform health" view across all three
++services. No `im###` exists yet that this feature serves directly; that
++gap is real and expected for a brand-new horizontal capability — the
++first consuming `im###` will be authored at spec-writing time alongside
++the `ft###`.
++
++**Category.** [[cat004]] (observability) is the primary; [[cat001]]
++(security) is secondary because dashboard access must go through
++`ft001` (only authenticated operators see internal panels).
++
++**Binding ADRs.** [[adr0001]] (basic-auth) binds the auth gate on
++dashboard access. No accepted ADR under [[cat004]] yet. The new feature
++may produce an ADR choosing Grafana over a bespoke front-end.
++
++**Migration intent.** At spec-writing time, mint `ft###` for the
++dashboards feature; ship a starter "platform health" panel set covering
++[[sp001]] metrics, [[sp002]] logs, [[sp003]] traces, [[sp004]] fired
++alerts; consider whether [[im001]]'s analyst dashboard should later
++migrate onto this feature (separate sp###).
++
++---
++
++Index: [[board]]

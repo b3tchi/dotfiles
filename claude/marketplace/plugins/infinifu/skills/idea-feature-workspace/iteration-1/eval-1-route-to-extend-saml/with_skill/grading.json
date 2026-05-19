@@ -1,0 +1,43 @@
+{
+  "eval_id": 1,
+  "eval_name": "saml-genuine-feature-via-adr",
+  "config": "with_skill",
+  "expectations": [
+    {
+      "text": "Agent surveyed ft001 (basic-auth)",
+      "passed": true,
+      "evidence": "ft001"
+    },
+    {
+      "text": "Agent surveyed adr0001",
+      "passed": true,
+      "evidence": "adr0001"
+    },
+    {
+      "text": "Agent used adr0001 to drive the routing decision (genuine new-feature ask, not extend)",
+      "passed": true,
+      "evidence": "adr0001 + new-feature phrase match"
+    },
+    {
+      "text": "Agent identified a real category \u2014 cat001 or cat003",
+      "passed": true,
+      "evidence": "cat001, cat003"
+    },
+    {
+      "text": "Agent stopped at design-approval gate (gate_reached.md exists OR no sp###.md)",
+      "passed": true,
+      "evidence": "gate_reached=True sp_count=0"
+    },
+    {
+      "text": "Agent did NOT mint a new ft###.md",
+      "passed": true,
+      "evidence": "new ft: []"
+    },
+    {
+      "text": "If sp###.md was emitted: docs/notes/spec/, status: idea, has ## problem",
+      "passed": true,
+      "evidence": "no sp### emitted"
+    }
+  ],
+  "pass_rate": 1.0
+}

@@ -1,0 +1,52 @@
+{
+  "eval_id": 2,
+  "config": "with_skill",
+  "expectations": [
+    {
+      "text": "Compound input detected",
+      "passed": true,
+      "evidence": "atomicity gate cited in summary"
+    },
+    {
+      "text": "Split plan documented (\u22652 files or written plan)",
+      "passed": true,
+      "evidence": "2 files + decision-log"
+    },
+    {
+      "text": "No single file conflates both claims",
+      "passed": true,
+      "evidence": "separated by file"
+    },
+    {
+      "text": "Every emitted card has [[product]] in H1",
+      "passed": true,
+      "evidence": "both"
+    },
+    {
+      "text": "Every card has Index: [[product]] footer",
+      "passed": true,
+      "evidence": "both"
+    },
+    {
+      "text": "Each card has \u22651 outbound wikilink",
+      "passed": true,
+      "evidence": "mutual + extras"
+    },
+    {
+      "text": "Filenames are meaningful kebab-slugs",
+      "passed": true,
+      "evidence": "wip-limits.md, pull-based-flow.md"
+    },
+    {
+      "text": "Summary acknowledges atomicity gate explicitly per skill",
+      "passed": true,
+      "evidence": "decision-log enumerates Step 1-4 audit"
+    }
+  ],
+  "summary": {
+    "passed": 8,
+    "failed": 0,
+    "total": 8,
+    "pass_rate": 1.0
+  }
+}

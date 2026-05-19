@@ -1,0 +1,5 @@
+A  .seed_manifest.txt
+M  docs/archive.md
+M  docs/board.md
+M  docs/notes/spec/sp001.md
+M  docs/notes/us003.md

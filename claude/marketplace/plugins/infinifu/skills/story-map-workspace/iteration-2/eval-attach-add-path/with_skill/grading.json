@@ -1,0 +1,36 @@
+{
+  "eval_name": "eval-attach-add-path",
+  "expectations": [
+    {
+      "text": "story-map.tsv modified \u2014 line for (2605-001, src/payments/checkout.ts) added",
+      "passed": true,
+      "evidence": "2605-001 paths=['src/components/ExportButton.svelte', 'src/export/csv.test.ts', 'src/export/csv.ts', 'src/payments/checkout.ts']"
+    },
+    {
+      "text": "Original 2605-001 edges preserved",
+      "passed": true,
+      "evidence": "2605-001 paths=['src/components/ExportButton.svelte', 'src/export/csv.test.ts', 'src/export/csv.ts', 'src/payments/checkout.ts']"
+    },
+    {
+      "text": "No other story's edges were modified (2605-002 unchanged)",
+      "passed": true,
+      "evidence": "2605-002 paths=['src/auth/login.ts', 'src/auth/password-reset.ts', 'src/email/templates/reset.html']"
+    },
+    {
+      "text": "File is sorted by (id, path)",
+      "passed": true,
+      "evidence": "sorted_ok=True"
+    },
+    {
+      "text": "Response shows the resulting state for 2605-001",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Response notes the missing-from-tree warning",
+      "passed": true,
+      "evidence": ""
+    }
+  ],
+  "summary": "6/6 passed"
+}

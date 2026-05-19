@@ -1,0 +1,460 @@
+{
+  "metadata": {
+    "skill_name": "work-audit",
+    "skill_path": "<path/to/skill>",
+    "executor_model": "<model-name>",
+    "analyzer_model": "<model-name>",
+    "timestamp": "2026-05-17T08:00:18Z",
+    "evals_run": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "runs_per_configuration": 3
+  },
+  "runs": [
+    {
+      "eval_id": 0,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 7,
+        "failed": 0,
+        "total": 7,
+        "time_seconds": 0.0,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent ran bd show on task id",
+          "passed": true,
+          "evidence": "bd show in text"
+        },
+        {
+          "text": "Agent ran the test suite",
+          "passed": true,
+          "evidence": "pytest evidence"
+        },
+        {
+          "text": "Agent read src/lib/vault.py (not just diff)",
+          "passed": true,
+          "evidence": "vault.py refs"
+        },
+        {
+          "text": "Agent verified criteria with file:line / test-name evidence",
+          "passed": true,
+          "evidence": "file:line OR test::name present"
+        },
+        {
+          "text": "Agent issued APPROVED verdict",
+          "passed": true,
+          "evidence": "APPROVED text OR status=closed"
+        },
+        {
+          "text": "Agent called bd close (Task 1 status: closed)",
+          "passed": true,
+          "evidence": "status=closed"
+        },
+        {
+          "text": "Close reason includes AUDITED / APPROVED with criteria evidence",
+          "passed": true,
+          "evidence": "audit-approved phrase in close text"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 0.0,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent noticed input validation is missing",
+          "passed": true,
+          "evidence": "missing-validation phrase"
+        },
+        {
+          "text": "Agent identified the missing AC (empty/None value rejection)",
+          "passed": true,
+          "evidence": "AC phrase"
+        },
+        {
+          "text": "Agent issued REJECTED verdict",
+          "passed": true,
+          "evidence": "REJECTED text + status=in_progress"
+        },
+        {
+          "text": "Agent did NOT close Task 1",
+          "passed": true,
+          "evidence": "status=in_progress"
+        },
+        {
+          "text": "Agent logged gap notes via bd update --notes",
+          "passed": true,
+          "evidence": "rejection notes in bd"
+        },
+        {
+          "text": "Rejection includes file:line OR command-output evidence",
+          "passed": true,
+          "evidence": "file:line / command evidence"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 0.0,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent read tests/lib/test_vault.py",
+          "passed": true,
+          "evidence": "test file refs"
+        },
+        {
+          "text": "Agent identified tests are tautological / weak",
+          "passed": true,
+          "evidence": "test-quality language"
+        },
+        {
+          "text": "Agent issued REJECTED verdict",
+          "passed": true,
+          "evidence": "REJECTED text + status=in_progress"
+        },
+        {
+          "text": "Agent did NOT close Task 1",
+          "passed": true,
+          "evidence": "status=in_progress"
+        },
+        {
+          "text": "Agent logged gap notes",
+          "passed": true,
+          "evidence": "rejection notes"
+        },
+        {
+          "text": "Rejection names specific tautological tests by name",
+          "passed": true,
+          "evidence": "specific test name(s) cited"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.5,
+        "passed": 3,
+        "failed": 3,
+        "total": 6,
+        "time_seconds": 0.0,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent detected global lock in implementation",
+          "passed": false,
+          "evidence": "global-lock phrase"
+        },
+        {
+          "text": "Agent compared design (per-name) vs implementation (global)",
+          "passed": false,
+          "evidence": "design-vs-impl comparison"
+        },
+        {
+          "text": "Agent noted the deviation is unlogged",
+          "passed": true,
+          "evidence": "unlogged-deviation phrase"
+        },
+        {
+          "text": "Agent issued REJECTED verdict",
+          "passed": false,
+          "evidence": "REJECTED text + status=in_progress"
+        },
+        {
+          "text": "Agent did NOT close Task 1",
+          "passed": true,
+          "evidence": "status=in_progress"
+        },
+        {
+          "text": "Agent logged gap notes including the unlogged-deviation finding",
+          "passed": true,
+          "evidence": "rejection notes"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 0,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.7142857142857143,
+        "passed": 5,
+        "failed": 2,
+        "total": 7,
+        "time_seconds": 115.0,
+        "tokens": 45313,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent ran bd show on task id",
+          "passed": false,
+          "evidence": "bd show in text"
+        },
+        {
+          "text": "Agent ran the test suite",
+          "passed": true,
+          "evidence": "pytest evidence"
+        },
+        {
+          "text": "Agent read src/lib/vault.py (not just diff)",
+          "passed": true,
+          "evidence": "vault.py refs"
+        },
+        {
+          "text": "Agent verified criteria with file:line / test-name evidence",
+          "passed": true,
+          "evidence": "file:line OR test::name present"
+        },
+        {
+          "text": "Agent issued APPROVED verdict",
+          "passed": true,
+          "evidence": "APPROVED text OR status=closed"
+        },
+        {
+          "text": "Agent called bd close (Task 1 status: closed)",
+          "passed": true,
+          "evidence": "status=closed"
+        },
+        {
+          "text": "Close reason includes AUDITED / APPROVED with criteria evidence",
+          "passed": false,
+          "evidence": "audit-approved phrase in close text"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 95.8,
+        "tokens": 43234,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent noticed input validation is missing",
+          "passed": true,
+          "evidence": "missing-validation phrase"
+        },
+        {
+          "text": "Agent identified the missing AC (empty/None value rejection)",
+          "passed": true,
+          "evidence": "AC phrase"
+        },
+        {
+          "text": "Agent issued REJECTED verdict",
+          "passed": true,
+          "evidence": "REJECTED text + status=in_progress"
+        },
+        {
+          "text": "Agent did NOT close Task 1",
+          "passed": true,
+          "evidence": "status=in_progress"
+        },
+        {
+          "text": "Agent logged gap notes via bd update --notes",
+          "passed": true,
+          "evidence": "rejection notes in bd"
+        },
+        {
+          "text": "Rejection includes file:line OR command-output evidence",
+          "passed": true,
+          "evidence": "file:line / command evidence"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 0.0,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent read tests/lib/test_vault.py",
+          "passed": true,
+          "evidence": "test file refs"
+        },
+        {
+          "text": "Agent identified tests are tautological / weak",
+          "passed": true,
+          "evidence": "test-quality language"
+        },
+        {
+          "text": "Agent issued REJECTED verdict",
+          "passed": true,
+          "evidence": "REJECTED text + status=in_progress"
+        },
+        {
+          "text": "Agent did NOT close Task 1",
+          "passed": true,
+          "evidence": "status=in_progress"
+        },
+        {
+          "text": "Agent logged gap notes",
+          "passed": true,
+          "evidence": "rejection notes"
+        },
+        {
+          "text": "Rejection names specific tautological tests by name",
+          "passed": true,
+          "evidence": "specific test name(s) cited"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.6666666666666666,
+        "passed": 4,
+        "failed": 2,
+        "total": 6,
+        "time_seconds": 0.0,
+        "tokens": 0,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent detected global lock in implementation",
+          "passed": false,
+          "evidence": "global-lock phrase"
+        },
+        {
+          "text": "Agent compared design (per-name) vs implementation (global)",
+          "passed": true,
+          "evidence": "design-vs-impl comparison"
+        },
+        {
+          "text": "Agent noted the deviation is unlogged",
+          "passed": true,
+          "evidence": "unlogged-deviation phrase"
+        },
+        {
+          "text": "Agent issued REJECTED verdict",
+          "passed": false,
+          "evidence": "REJECTED text + status=in_progress"
+        },
+        {
+          "text": "Agent did NOT close Task 1",
+          "passed": true,
+          "evidence": "status=in_progress"
+        },
+        {
+          "text": "Agent logged gap notes including the unlogged-deviation finding",
+          "passed": true,
+          "evidence": "rejection notes"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 0.875,
+        "stddev": 0.25,
+        "min": 0.5,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 0.0,
+        "stddev": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      },
+      "tokens": {
+        "mean": 0.0,
+        "stddev": 0.0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 0.8452,
+        "stddev": 0.1798,
+        "min": 0.6667,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 52.7,
+        "stddev": 61.3555,
+        "min": 0.0,
+        "max": 115.0
+      },
+      "tokens": {
+        "mean": 22136.75,
+        "stddev": 25575.4043,
+        "min": 0,
+        "max": 45313
+      }
+    },
+    "delta": {
+      "pass_rate": "+0.03",
+      "time_seconds": "-52.7",
+      "tokens": "-22137"
+    }
+  },
+  "notes": []
+}

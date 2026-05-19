@@ -1,0 +1,51 @@
+◐ wd3-6834-82l.1 · Task 1: Add rotate_secret helper to vault.py   [● P2 · IN_PROGRESS]
+Owner: eval · Type: task
+Created: 2026-05-16 · Started: 2026-05-16 · Updated: 2026-05-16
+
+DESCRIPTION
+  (none)
+
+DESIGN
+Extend src/lib/vault.py with rotate_secret(name, new_value) helper that stages a new versioned alias. Files: src/lib/vault.py, tests/lib/test_vault.py. Edge cases: concurrent calls serialize, vault unreachable raises VaultError, empty value rejected.
+
+NOTES
+AUDIT: REJECT — leave in_progress, return to implementer.
+
+Findings (compared to sp001 Task 1 success_criteria + test_plan + edge_cases):
+
+1. SILENT TEST-PLAN DEVIATION (primary issue)
+   - sp001 test_plan lists FIVE specific tests; implementer shipped 5 tests but swapped one:
+     - Required: test_vault_unreachable_raises  (catches partial-write bug)
+     - Shipped:  test_empty_name_rejected       (not in spec)
+   - Implementer reported "Deviations: none". This is the silent-deviation smell.
+
+2. SUCCESS CRITERION "vault unreachable raises VaultError, no partial write" is NOT verified
+   - The try/except in rotate_secret wraps only dict.setdefault + list.append,
+     which cannot realistically raise. There is no transport / no failure
+     injection seam, so the VaultError path is unreachable dead code.
+   - Either add a fake transport / monkeypatchable seam and the required test,
+     OR explicitly declare this edge case deferred in spec + downgrade success criterion.
+
+3. OUT-OF-SCOPE TODO added in src/lib/vault.py
+   - "TODO: set_timeout(timeout_ms) ..." comment landed in this task's diff but
+     is unrelated to rotate_secret. Should be moved to its own bd task and
+     dropped from this commit.
+
+4. test_concurrent_rotate_serializes asserts on private _ALIASES
+   - Functional but couples tests to internal state. Prefer asserting via the
+     public secret() read path (last write wins) plus a count via repeated secret()
+     calls or a public versions() accessor.
+
+Tests run locally: 5 passed in 0.03s — but coverage gap above stands.
+
+ACTION: implementer to (a) add test_vault_unreachable_raises with a real failure
+seam (or amend the spec), (b) drop the unrelated set_timeout TODO, (c) optionally
+re-express concurrency test against the public API. Re-submit for audit.
+
+PARENT
+  ↑ ○ wd3-6834-82l: (EPIC) Epic: rotate service credentials without downtime [sp001] ● P2
+
+BLOCKS
+  ← ○ wd3-6834-82l.2: Task 2: Add vault_rotate orchestration module ● P2
+  ← ○ wd3-6834-82l.3: Task 3: Synthetic-check hook for rotation window ● P2
+

@@ -1,0 +1,62 @@
+{
+  "eval_id": 1,
+  "config": "without_skill",
+  "expectations": [
+    {
+      "text": "Exactly one new zettel .md file produced",
+      "passed": true,
+      "evidence": "outputs/deadlock.md"
+    },
+    {
+      "text": "Filename is a kebab-slug concept name",
+      "passed": true,
+      "evidence": "deadlock.md"
+    },
+    {
+      "text": "H1 contains [[product]]",
+      "passed": true,
+      "evidence": "# Deadlock [[product]]"
+    },
+    {
+      "text": "Index: [[product]] footer present",
+      "passed": true,
+      "evidence": "footer present"
+    },
+    {
+      "text": "\u22651 outbound wikilink beyond [[product]] and Index",
+      "passed": true,
+      "evidence": "circuit-breaker + on-call-rotation"
+    },
+    {
+      "text": "Links to circuit-breaker or on-call-rotation",
+      "passed": true,
+      "evidence": "both linked"
+    },
+    {
+      "text": "Body under 300 words",
+      "passed": true,
+      "evidence": "~30 words"
+    },
+    {
+      "text": "Frontmatter has aliases + created",
+      "passed": true,
+      "evidence": "both"
+    },
+    {
+      "text": "No status field on generic card",
+      "passed": true,
+      "evidence": "no status"
+    },
+    {
+      "text": "Single claim restatable in one sentence",
+      "passed": true,
+      "evidence": "tight definition"
+    }
+  ],
+  "summary": {
+    "passed": 10,
+    "failed": 0,
+    "total": 10,
+    "pass_rate": 1.0
+  }
+}

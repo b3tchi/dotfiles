@@ -1,0 +1,14 @@
+stories:
+  - id: 2605-001
+    title: Bulk-archive reports older than 90 days
+    role: admin
+    want: to bulk-archive reports older than 90 days
+    so_that: stale reports are removed from active views and storage stays manageable
+    acceptance_criteria:
+      - Admin can trigger a bulk-archive action that selects all reports with last-modified date older than 90 days
+      - A confirmation step shows the count of reports to be archived before the action proceeds
+      - Archived reports are moved out of active views but remain retrievable from an archive store
+      - Reports newer than 90 days are never included in the bulk-archive selection
+    tags: [admin, reports]
+    status: draft
+    created: 2026-05-09

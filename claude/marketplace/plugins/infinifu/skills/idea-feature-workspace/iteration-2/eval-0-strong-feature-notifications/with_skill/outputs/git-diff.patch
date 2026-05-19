@@ -1,0 +1,163 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..d686d2d
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,28 @@
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/product.md
++./.gitignore
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
+diff --git a/docs/board.md b/docs/board.md
+index e500c4e..b4745cb 100644
+--- a/docs/board.md
++++ b/docs/board.md
+@@ -1,9 +1,11 @@
+ # Board
+ 
+-Nothing in flight right now.
++Notifications capability under design — email + Slack adapters being scoped.
+ 
+ ## idea
+ 
++- [[sp001|shared notifications capability (email + slack)]]
++
+ ## spec
+ 
+ ## ready
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+new file mode 100644
+index 0000000..c424f27
+--- /dev/null
++++ b/docs/notes/spec/sp001.md
+@@ -0,0 +1,106 @@
++---
++aliases:
++  - shared notifications capability (email + slack)
++status: idea
++created: 2026-05-16
++---
++# Spec [[cat003]] [[cat004]] [[board]]
++
++## problem
++
++Every service (`auth`, `metrics`, `reports`) currently carries its own
++ad-hoc email helper — `auth` shells out to `mail`, `metrics` mixes
++stdout with inline `smtplib`, `reports` pastes another `smtplib`
++snippet. This drift is exactly what `[[adr0003]]` warned about: three
++copy/paste call sites, no retries, no metrics, MTA host changes
++require editing three places. Now the metrics team wants Slack alerts
++and is asking about pager-style SMS for after-hours — adding two more
++channels with the current pattern means six-to-nine copy/paste
++helpers, which is unacceptable.
++
++We want one shared notifications capability the platform provides
++once and many implementations consume — replacing the ad-hoc smtplib
++snippets and adding Slack as a first-class channel.
++
++**Capability boundary.** A small set of horizontal send-channel
++features, each atomic per the AKM `ft###` schema (single `providing`,
++single `api_surface`, single lifecycle). The notifications "platform"
++is **not** one ft### — that would pack three distinct API surfaces
++(SMTP, Slack webhook, SMS gateway) into a single feature with three
++lifecycles. Granularity decision: **2 ft### candidates now, 1
++plausible later** (to be minted at spec-writing time):
++
++- **ft-email-send** — wrap MTA delivery behind one helper
++  (`send_email(to, subject, body)`), inheriting `[[ft002]]` vault for
++  MTA credentials. Replaces the three ad-hoc smtplib snippets.
++  Supersedes the constraint in `[[adr0003]]` (a new ADR overturning
++  adr0003 will be needed at spec stage).
++- **ft-slack-send** — wrap Slack webhook delivery behind one helper
++  (`send_slack(channel, text)`), webhook URL via `[[ft002]]`. New
++  capability; first consumer is the metrics alert path.
++- **ft-sms-send** *(plausible later, not in scope)* — pager-style SMS
++  for after-hours metrics alerts. Mentioned by the metrics team but
++  not committed; deferred until a real on-call rotation story exists
++  (YAGNI). Surfacing it here so future readers see the deliberate
++  cut.
++
++**Why no notifications-router ft###.** A central router (priority,
++retry, multi-channel fan-out) is tempting but premature. With only
++three consumers and two channels, direct adapters compose cleanly.
++A router becomes a separate ft### only when fan-out / templating /
++dedup patterns surface from real usage — not now.
++
++**Plausible consumers (concrete `us###` / service today).**
++
++- `auth` welcome-email path (today: shells to `mail`) → ft-email-send.
++- `reports` CSV-ready notification (today: ad-hoc smtplib, serves
++  `[[pn001]]` "get notified when long-running reports finish", a goal
++  on the analyst persona; would unblock a future `us###` formalizing
++  the notification AC) → ft-email-send.
++- `metrics` alert path (today: stdout + ad-hoc smtplib) → both
++  ft-email-send and ft-slack-send, channel chosen by alert
++  severity/route.
++- `[[us003]]` rotate-credentials platform story — a plausible
++  consumer for ops alerts during rotation windows. Not committed.
++
++**Migration targets (ad-hoc → feature).**
++
++- `src/services/auth/__init__.py` — welcome-email shell-out →
++  ft-email-send. Comment in code already flags this migration.
++- `src/services/metrics/__init__.py` — alert smtplib + stdout →
++  ft-email-send + ft-slack-send.
++- `src/services/reports/__init__.py` — CSV-email smtplib →
++  ft-email-send.
++
++Migration cost is small per site (one-call swap) but requires a new
++ADR superseding `[[adr0003]]` — that ADR explicitly forbids a relay /
++shared helper, so the constraint has to flip before the features
++ship.
++
++**Constraints inherited from categories.**
++
++- `[[cat003]]` (infrastructure) — `[[adr0003]]` binds the current
++  smtplib-direct policy; new ADR needed to overturn before
++  ft-email-send can supersede the snippets.
++- `[[cat004]]` (observability) — no binding ADR today; alert routing
++  policy will likely produce a new ADR during spec-writing.
++- `[[ft002]]` (vault-secrets) — MTA creds, Slack webhook URL, future
++  SMS gateway token all retrieved via `secret()`. Each new ft###
++  inherits ft002's constraints automatically.
++
++**Out of scope for this sp###.** Templating, dedup, rate-limiting,
++priority routing, fan-out, retry policy beyond a single retry,
++delivery receipts, opt-out lists. These are router-level concerns
++and explicitly deferred until usage patterns demand them.
++
++**Intent at spec-writing stage.** Mint two new `ft###` (email-send,
++slack-send), write the new ADR superseding `[[adr0003]]`, draft
++migration tasks for the three services. The split between
++ft-email-send and ft-slack-send work lands at task level during
++`spec-refinement` / `spec-ready` — keeping it in one sp### avoids
++fragmenting a small, coherent scaffolding effort across two board
++lifecycles.
++
++---
++
++Index: [[board]]

@@ -1,0 +1,13 @@
+stories:
+  - id: 2605-001
+    title: Cancel a submitted request before approval
+    role: requestor
+    want: to cancel a submitted request before it has been approved
+    because: I sometimes realize I ordered the wrong samples after submitting
+    acceptance_criteria:
+      - Cancel button is only shown for requests with status=Submitted
+      - Cancelling a request sets its status to Cancelled
+      - Cancelled requests cannot be re-edited
+    tags: [requests, lifecycle, cancellation]
+    status: draft
+    created: 2026-05-14

@@ -1,0 +1,63 @@
+{
+  "eval_id": 0,
+  "eval_name": "strong-implement-on-draft",
+  "config": "without_skill",
+  "summary": {
+    "pass_rate": 0.9,
+    "passed": 9,
+    "failed": 1,
+    "total": 10
+  },
+  "expectations": [
+    {
+      "text": "Agent read us003 and confirmed status: draft",
+      "passed": true,
+      "evidence": "draft + us003 mentioned together"
+    },
+    {
+      "text": "Agent surveyed pn002 (persona referenced by us003.role)",
+      "passed": true,
+      "evidence": "pn002 referenced"
+    },
+    {
+      "text": "Agent surveyed at least one cat###",
+      "passed": true,
+      "evidence": "cats found: ['cat001', 'cat002', 'cat003', 'cat004']"
+    },
+    {
+      "text": "Agent surveyed at least one adr####",
+      "passed": true,
+      "evidence": "adrs found: ['adr0001', 'adr0002', 'adr0003']"
+    },
+    {
+      "text": "Agent surveyed at least one ft###",
+      "passed": true,
+      "evidence": "ft found: ['ft001', 'ft002']"
+    },
+    {
+      "text": "Agent promoted us003 from draft to ready (file modified, status: ready)",
+      "passed": true,
+      "evidence": "us003_modified=True status=ready"
+    },
+    {
+      "text": "Agent emitted a new sp###.md under docs/notes/spec/ with status: idea",
+      "passed": true,
+      "evidence": "sp_files=['docs/notes/spec/sp001.md'] status_idea=True"
+    },
+    {
+      "text": "sp###.md body contains ## solves [[us003]] back-link",
+      "passed": true,
+      "evidence": "solves_us003=True"
+    },
+    {
+      "text": "sp### ## problem carries wikilinks to at least 3 of: us, pn, cat, ft, adr",
+      "passed": false,
+      "evidence": "link kinds present: ['us', 'cat']"
+    },
+    {
+      "text": "docs/board.md updated with [[sp###]] under ## idea",
+      "passed": true,
+      "evidence": "sp_id=sp001 found_under_idea=True"
+    }
+  ]
+}

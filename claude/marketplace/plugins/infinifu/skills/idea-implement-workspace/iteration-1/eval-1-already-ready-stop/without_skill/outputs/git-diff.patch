@@ -1,0 +1,154 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..d686d2d
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,28 @@
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/product.md
++./.gitignore
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
+diff --git a/docs/board.md b/docs/board.md
+index e500c4e..56217f1 100644
+--- a/docs/board.md
++++ b/docs/board.md
+@@ -1,9 +1,12 @@
+ # Board
+ 
+-Nothing in flight right now.
++One spec captured at idea stage: client-side date-range filter on the
++reports dashboard.
+ 
+ ## idea
+ 
++- [[sp001|filter reports dashboard by date range]]
++
+ ## spec
+ 
+ ## ready
+diff --git a/docs/notes/im002.md b/docs/notes/im002.md
+new file mode 100644
+index 0000000..6e9bfd2
+--- /dev/null
++++ b/docs/notes/im002.md
+@@ -0,0 +1,40 @@
++---
++aliases:
++  - client-side date-range filter on the reports dashboard
++status: proposed
++created: 2026-05-16
++---
++# Implementation [[cat002]]
++
++## solves
++[[us002|filter reports by date range]]
++
++## approach
++Extend the existing `/dashboard` page (shipped by [[im001]]) with a
++date-range picker. Filtering is client-side over the same 20 rows the
++dashboard already loads via `GET /dashboard/data.json`, so no new
++backend route, schema change, or query path is introduced. Honours
++[[adr0002]] retention (90 days) implicitly by reusing the existing
++data feed. Auth continues via [[ft001]] inherited from the dashboard
++page.
++
++## features
++- [[ft001|basic-auth]]
++
++## data_model
++No schema change. Reads the same `report_runs` rows already exposed
++through `/dashboard/data.json`.
++
++## api_surface
++No new endpoints. Existing `GET /dashboard/data.json` is consumed as-is.
++
++## components
++- `src/services/reports/templates/dashboard.html` (add picker markup)
++- `src/services/reports/static/dashboard.js` (client-side filter logic)
++
++## specs
++- [[sp001|filter reports dashboard by date range]]
++
++---
++
++Index: [[product]]
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+new file mode 100644
+index 0000000..3feabe1
+--- /dev/null
++++ b/docs/notes/spec/sp001.md
+@@ -0,0 +1,37 @@
++---
++aliases:
++  - filter reports dashboard by date range
++status: idea
++created: 2026-05-16
++---
++# Spec [[cat002]] [[board]]
++
++## solves
++[[us002|filter reports by date range]]
++
++## implements
++[[im002|client-side date-range filter on the reports dashboard]]
++
++## problem
++[[pn001|analyst]] users currently land on `/dashboard` (shipped by
++[[im001]]) and see the last 20 reports they ran — but at quarter-end
++they need to narrow that list to a specific window (e.g. only runs
++from the last week of Q1). Today they have to eyeball the timestamp
++column and scroll, which is slow and error-prone when reviewing many
++reports in a tight window.
++
++Acceptance criteria from [[us002]]:
++
++- Date picker on the dashboard.
++- Filter applied client-side over the last 20 rows.
++- Clearing the filter restores the full list.
++
++Out of scope:
++
++- Server-side pagination or filtering beyond the existing 20-row feed.
++- Persisting the filter across sessions.
++- Filter UI for other report-related pages.
++
++---
++
++Index: [[board]]
+diff --git a/docs/product.md b/docs/product.md
+index fdfa212..efe9edb 100644
+--- a/docs/product.md
++++ b/docs/product.md
+@@ -8,7 +8,7 @@ operations analyst and the platform-engineer personas.
+ ### [[pn001|analyst]]
+ 
+ - [[us001|view dashboard of recent reports]] >> [[im001]]
+-- [[us002|filter reports by date range]]
++- [[us002|filter reports by date range]] >> [[im002]]
+ 
+ ### [[pn002|platform-engineer]]
+ 

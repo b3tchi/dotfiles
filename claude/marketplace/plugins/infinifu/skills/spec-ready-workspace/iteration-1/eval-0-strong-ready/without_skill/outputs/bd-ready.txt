@@ -1,0 +1,7 @@
+○ sandbox-nt2.1 ● P2 Add rotate_secret helper to vault.py ← Epic: rotate service credentials without downtime [sp001]
+○ sandbox-nt2 ● P2 [epic] Epic: rotate service credentials without downtime [sp001]
+
+--------------------------------------------------------------------------------
+Ready: 2 issues with no active blockers
+
+Status: ○ open  ◐ in_progress  ● blocked  ✓ closed  ❄ deferred

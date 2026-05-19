@@ -1,0 +1,48 @@
+{
+  "eval_id": 0,
+  "eval_name": "strong-work",
+  "config": "with_skill",
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 7,
+    "failed": 0,
+    "total": 7
+  },
+  "expectations": [
+    {
+      "text": "Agent ran bd show on the target task id",
+      "passed": true,
+      "evidence": "bd show present"
+    },
+    {
+      "text": "Agent claimed task (status hit in_progress at some point)",
+      "passed": true,
+      "evidence": "status=in_progress"
+    },
+    {
+      "text": "Agent wrote tests under tests/lib/ for rotate_secret",
+      "passed": true,
+      "evidence": "rotate_test=True tests_changed=True"
+    },
+    {
+      "text": "Agent implemented rotate_secret in src/lib/vault.py",
+      "passed": true,
+      "evidence": "has_rotate=True vault_modified=True"
+    },
+    {
+      "text": "Agent left task at status: in_progress (NOT closed)",
+      "passed": true,
+      "evidence": "status=in_progress"
+    },
+    {
+      "text": "Agent recorded evidence in bd task notes",
+      "passed": true,
+      "evidence": "evidence-phrase present"
+    },
+    {
+      "text": "Agent did NOT silently expand scope (TODO preserved, no set_timeout impl)",
+      "passed": true,
+      "evidence": "TODO_preserved=True set_timeout_added=False"
+    }
+  ]
+}

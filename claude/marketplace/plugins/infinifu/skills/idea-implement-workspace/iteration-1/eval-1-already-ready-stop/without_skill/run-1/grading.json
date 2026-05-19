@@ -1,0 +1,38 @@
+{
+  "eval_id": 1,
+  "eval_name": "already-ready-stop",
+  "config": "without_skill",
+  "summary": {
+    "pass_rate": 0.6,
+    "passed": 3,
+    "failed": 2,
+    "total": 5
+  },
+  "expectations": [
+    {
+      "text": "Agent read us002 and recognized status: ready",
+      "passed": true,
+      "evidence": "us002 + ready mentioned"
+    },
+    {
+      "text": "Agent did NOT re-promote / re-emit us002",
+      "passed": true,
+      "evidence": "us002_modified=False status=ready"
+    },
+    {
+      "text": "Agent did NOT mint a new sp###.md",
+      "passed": false,
+      "evidence": "sp_count=1"
+    },
+    {
+      "text": "docs/board.md NOT modified",
+      "passed": false,
+      "evidence": "board_changed=True"
+    },
+    {
+      "text": "Output explicitly states us002 is already ready (or routes to spec-writing)",
+      "passed": true,
+      "evidence": "matching phrase present"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "eval_id": 1,
+  "eval_name": "multi-epic-interference",
+  "prompt": "Start the pipeline. max_parallel=2, mode=waves, worker_model=auto. Save the dispatch summary to dispatch_summary.md at the sandbox root and STOP at the human-confirmation gate.",
+  "fixture": "Two ready epics that both modify src/services/auth/middleware/__init__.py — they interfere and must be serialized.",
+  "assertions": [
+    {"text": "dispatch_summary.md exists at sandbox root and is non-empty"},
+    {"text": "Summary references both seeded epic IDs (epic_2fa and epic_ratelimit)"},
+    {"text": "Summary includes an interference / conflict assessment between the two epics"},
+    {"text": "Summary correctly classifies the epics as INTERFERING (shared file detected)"},
+    {"text": "Summary mentions the shared file path src/services/auth/middleware/__init__.py (or the directory)"},
+    {"text": "Summary states the epics will be serialized — not parallelized"},
+    {"text": "First batch lists exactly 1 task from a single epic (serialized despite max_parallel=2)"},
+    {"text": "Summary references required config: max_parallel=2, mode=waves, worker_model=auto"},
+    {"text": "Summary asks the human for confirmation (proceed / confirm / abort)"},
+    {"text": "No bd task was newly claimed — no implementers were dispatched"},
+    {"text": "No new git commits beyond the seed commit"},
+    {"text": "No git worktrees were created"}
+  ]
+}

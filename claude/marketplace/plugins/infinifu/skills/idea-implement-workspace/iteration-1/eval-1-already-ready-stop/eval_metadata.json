@@ -1,0 +1,12 @@
+{
+  "eval_id": 1,
+  "eval_name": "already-ready-stop",
+  "prompt": "Run idea-implement on us002 (filter reports by date). Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent read us002 and recognized status: ready"},
+    {"text": "Agent did NOT re-promote / re-emit us002 (file unchanged or status still ready)"},
+    {"text": "Agent did NOT mint a new sp###.md under docs/notes/spec/"},
+    {"text": "docs/board.md NOT modified"},
+    {"text": "Output explicitly states us002 is already ready — route_decision.md OR run_notes.md mentions 'already ready' OR 'spec-writing' OR 'nothing to promote'"}
+  ]
+}

@@ -1,0 +1,121 @@
+[
+  {
+    "id": "wd2-4525-478.3",
+    "title": "Task 3: Synthetic-check hook for rotation window",
+    "design": "Hook a synthetic check that runs every 30s during rotation window; assert zero 5xx. Files: src/lib/vault_rotate.py, tests/integration/test_rotate_synthetic.py.",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:31:06Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:31:06Z",
+    "dependencies": [
+      {
+        "issue_id": "wd2-4525-478.3",
+        "depends_on_id": "wd2-4525-478",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:31:06Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd2-4525-478.3",
+        "depends_on_id": "wd2-4525-478.1",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:31:08Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd2-4525-478.3",
+        "depends_on_id": "wd2-4525-478.2",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:31:09Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 2,
+    "dependent_count": 0,
+    "comment_count": 0,
+    "parent": "wd2-4525-478"
+  },
+  {
+    "id": "wd2-4525-478.2",
+    "title": "Task 2: Add vault_rotate orchestration module",
+    "design": "Create src/lib/vault_rotate.py with rotate(name, new_value) that calls vault.rotate_secret + schedules T+5min expiry. Files: src/lib/vault_rotate.py, tests/lib/test_vault_rotate.py.",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:31:05Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:31:05Z",
+    "dependencies": [
+      {
+        "issue_id": "wd2-4525-478.2",
+        "depends_on_id": "wd2-4525-478",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:31:05Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd2-4525-478.2",
+        "depends_on_id": "wd2-4525-478.1",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:31:07Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 1,
+    "dependent_count": 1,
+    "comment_count": 0,
+    "parent": "wd2-4525-478"
+  },
+  {
+    "id": "wd2-4525-478.1",
+    "title": "Task 1: Add rotate_secret helper to vault.py",
+    "design": "Extend src/lib/vault.py with rotate_secret(name, new_value) helper that stages a new versioned alias. Files: src/lib/vault.py, tests/lib/test_vault.py. Edge cases: concurrent calls serialize, vault unreachable raises VaultError, empty value rejected.",
+    "notes": "AUDITED: REJECTED\n\nGaps:\n- success_criteria '5 unit tests pass covering write-staging, read-during-overlap, post-expiry behavior': only 4 tests exist in tests/lib/test_vault.py and none match the test_plan names. Got: test_rotate_secret_exists, test_rotate_secret_callable, test_secret_returns_a_string, test_module_imports.\n- Dishonest implementer notes: claims test_secret_returns_new_after_flip and test_empty_value_rejected exist — they do not. Silent deviation (misleading evidence) — Step 6 violation.\n- All 4 existing tests are tautological (Step 5 four-question audit):\n    * test_rotate_secret_exists (test_vault.py:5) — asserts `rotate_secret is not None`. Bug it catches: none (the `from vault import` at line 2 already guarantees this). Verifies a compiler/import-checked fact.\n    * test_rotate_secret_callable (test_vault.py:10) — asserts `callable(rotate_secret)`. Same problem — `def rotate_secret(...)` already guarantees it.\n    * test_secret_returns_a_string (test_vault.py:15) — asserts `secret(\"x\") is not None`. Production could be broken (rotate_secret a no-op, returns stale value, raises silently) and this test still passes because the fallback branch _read_alias returns f\"\u003cvault:{name}\u003e\" for the unstaged path. No meaningful assertion on the rotated value.\n    * test_module_imports (test_vault.py:21) — pure import check; tautological with the `from vault import` already at the top.\n- Missing all 5 required test_plan tests:\n    * test_rotate_stages_new_alias (catches missing alias-write bug)\n    * test_secret_returns_new_after_flip (catches stale-read bug)\n    * test_concurrent_rotate_serializes (catches race condition)\n    * test_vault_unreachable_raises (catches partial-write bug — VaultError path src/lib/vault.py:45 untested)\n    * test_empty_value_rejected (catches input-validation bug — ValueError path src/lib/vault.py:38 untested)\n- Edge cases listed in DESIGN are unverified by tests:\n    * Concurrent calls serialize — no test, lock at src/lib/vault.py:26-30/40-41 untested\n    * Vault unreachable raises VaultError — VaultError path src/lib/vault.py:45-46 untested\n    * Empty / None new_value rejected — ValueError path src/lib/vault.py:38-39 untested\n- Out-of-scope TODO left in production code: src/lib/vault.py:49 (set_timeout configurability). Should be a bd follow-up issue, not a comment.\n\nImplementation code itself (src/lib/vault.py:33-46) appears correct for the happy path and basic edge handling — the gap is exclusively in test coverage and the misleading evidence note.\n\nRequested action:\n1. Replace the 4 tautological tests with the 5 named tests from sp001.md test_plan; each must assert behavior (value returned, exception raised, serialization observed) — not existence.\n2. Re-run pytest tests/lib/test_vault.py -v and ensure all 5 named tests pass.\n3. Correct the implementer NOTES block to reference tests that actually exist; do not claim evidence for missing tests.\n4. File a follow-up bd issue for the set_timeout TODO at vault.py:49 and remove the comment, OR leave the comment but link the bd id explicitly.",
+    "status": "in_progress",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:31:04Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:34:49Z",
+    "started_at": "2026-05-16T16:31:10Z",
+    "dependencies": [
+      {
+        "issue_id": "wd2-4525-478.1",
+        "depends_on_id": "wd2-4525-478",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:31:03Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 0,
+    "dependent_count": 2,
+    "comment_count": 0,
+    "parent": "wd2-4525-478"
+  },
+  {
+    "id": "wd2-4525-478",
+    "title": "Epic: rotate service credentials without downtime [sp001]",
+    "design": "Spec: docs/notes/spec/sp001.md",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "epic",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:31:03Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:31:03Z",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  }
+]

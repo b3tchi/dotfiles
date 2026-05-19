@@ -1,0 +1,223 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..d686d2d
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,28 @@
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/product.md
++./.gitignore
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
+diff --git a/docs/board.md b/docs/board.md
+index e500c4e..7db66fe 100644
+--- a/docs/board.md
++++ b/docs/board.md
+@@ -1,9 +1,12 @@
+ # Board
+ 
+-Nothing in flight right now.
++One spec captured at idea stage: zero-downtime secret rotation for the
++platform-engineer.
+ 
+ ## idea
+ 
++- [[sp001|zero-downtime secret rotation]]
++
+ ## spec
+ 
+ ## ready
+diff --git a/docs/notes/im002.md b/docs/notes/im002.md
+new file mode 100644
+index 0000000..0118254
+--- /dev/null
++++ b/docs/notes/im002.md
+@@ -0,0 +1,61 @@
++---
++aliases:
++  - zero-downtime secret rotation via ft002 dual-version cache
++status: proposed
++created: 2026-05-16
++---
++# Implementation [[cat001]] [[cat003]]
++
++## solves
++[[us003|rotate service credentials without downtime]]
++
++## approach
++Extend the existing ft002 vault-secrets client to support
++*dual-version reads* with a short overlap. A rotation command writes a
++new version to Vault, then signals consumers (via a lightweight
++file-mtime poll on `/etc/acme/secrets.rev` or an in-process TTL cache,
++TBD in spec) to refresh. The `secret(name)` API keeps returning the
++*previous* value for a configurable overlap window (default 5 minutes)
++so in-flight callers do not break. A new `rotate-secret` CLI under
++`src/lib/vault_rotate.py` performs the swap, prints `old_version` and
++`new_version`, and emits a structured audit log line. No service code
++changes — services keep calling `secret(name)` as today. This keeps
++the rotation primitive horizontal (sits inside ft002) rather than
++duplicated per service.
++
++## features
++- [[ft002|vault-secrets]]
++
++## data_model
++No new tables. Adds an in-memory overlap cache inside the ft002 client
++keyed by `(name, version)` with a TTL equal to the overlap window. The
++audit log line is structured-stdout, not persisted by this story
++(observability lives in cat004 and is out of scope here).
++
++## api_surface
++- `acme.lib.vault.secret(name)` — unchanged consumer signature; now
++  returns the current version transparently and serves the previous
++  version for `OVERLAP_SECONDS` after a rotation event.
++- `acme.lib.vault_rotate.rotate(name, *, overlap_seconds=300)` —
++  programmatic entry point.
++- `python -m acme.lib.vault_rotate <name> [--overlap 300]` — CLI for
++  operators. Exit 0 on success; non-zero with a clear stderr message
++  on Vault errors. Stdout carries `{"name", "old_version",
++  "new_version", "overlap_seconds"}` as JSON.
++- New audit log line on stdout: `event=secret.rotated name=<n>
++  old_version=<v1> new_version=<v2> actor=<user>`.
++
++## components
++- `src/lib/vault.py` — extend with dual-version cache + refresh hook.
++- `src/lib/vault_rotate.py` — new module: rotate + CLI entry point.
++- `src/services/auth/` `src/services/metrics/` `src/services/reports/`
++  — no source changes; verified by synthetic check during rotation.
++- `tests/lib/test_vault_rotate.py` — covers dual-version read,
++  overlap window expiry, audit log shape, error paths.
++
++## specs
++- [[sp001|zero-downtime secret rotation]]
++
++---
++
++Index: [[product]]
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+new file mode 100644
+index 0000000..2372b9c
+--- /dev/null
++++ b/docs/notes/spec/sp001.md
+@@ -0,0 +1,45 @@
++---
++aliases:
++  - zero-downtime secret rotation
++status: idea
++created: 2026-05-16
++---
++# Spec [[cat001]] [[cat003]] [[board]]
++
++## solves
++[[us003|rotate service credentials without downtime]]
++
++## implements
++[[im002|zero-downtime secret rotation via ft002 dual-version cache]]
++
++## problem
++Quarterly secret rotation on the Acme internal platform is currently a
++maintenance-window task: the platform-engineer takes the three services
++(auth, metrics, reports) offline, swaps the Vault secret, and brings
++them back up. The rotation itself takes seconds; the outage window is
++the actual cost — it forces off-hours work and burns the team's SLA
++budget for something that should be routine.
++
++The blocker is that every service reads its secrets at process start
++via `acme.lib.vault.secret(name)` and caches the value for the
++lifetime of the worker. When Vault flips to a new version, in-flight
++requests using the old cached value continue to authenticate against
++the *new* downstream credential and fail with 5xx until the workers
++are restarted. So the safe play today is: drain, rotate, restart, un-drain.
++
++Goal: make a single-secret rotation a runtime operation — the operator
++runs one command, both old and new secret values stay valid for a
++short overlap window (default 5 minutes), the workers pick up the new
++value asynchronously, and the synthetic check observes zero 5xx for
++the duration. Scope is bounded to the three current services and the
++existing ft002 vault-secrets client; SSO/SAML, external KMS, and
++multi-region replication are explicit non-goals.
++
++This spec executes [[im002]] which proposes solving the problem by
++extending ft002 itself (dual-version read with a TTL overlap cache)
++plus a new `rotate-secret` CLI, rather than duplicating rotation
++glue per service.
++
++---
++
++Index: [[board]]
+diff --git a/docs/notes/us003.md b/docs/notes/us003.md
+index f167a13..24a80ed 100644
+--- a/docs/notes/us003.md
++++ b/docs/notes/us003.md
+@@ -1,7 +1,7 @@
+ ---
+ aliases:
+   - rotate service credentials without downtime
+-status: draft
++status: ready
+ created: 2026-04-15
+ ---
+ # Story [[platform-flow]] [[product]]
+@@ -13,12 +13,22 @@ created: 2026-04-15
+ rotate service credentials without downtime
+ 
+ ## because
+-quarterly secret-rotation is currently a maintenance-window task
++quarterly secret-rotation is currently a maintenance-window task, and
++scheduling outages for every credential rotation blocks our SLA and
++forces off-hours work on the platform team
+ 
+ ## acceptance_criteria
+-- Rotation script can swap secrets while services run
+-- Old secret stays valid for 5 minutes after rotation
+-- No 5xx during rotation window in synthetic check
++- A rotation command can swap a named secret in Vault while the
++  consuming services (auth, metrics, reports) remain serving traffic.
++- The previous secret value stays valid for a 5-minute overlap window
++  after rotation completes, so in-flight callers using the cached old
++  value succeed.
++- Synthetic check covering all three services observes zero 5xx
++  responses during a rotation event.
++- Operator can rotate a single secret by name (not all-or-nothing) and
++  observes a clear success/failure result with the new version id.
++- Rotation is auditable: each rotation emits a structured log line
++  carrying secret name, old version, new version, actor, timestamp.
+ 
+ ---
+ 
+diff --git a/docs/product.md b/docs/product.md
+index fdfa212..5f76320 100644
+--- a/docs/product.md
++++ b/docs/product.md
+@@ -12,7 +12,7 @@ operations analyst and the platform-engineer personas.
+ 
+ ### [[pn002|platform-engineer]]
+ 
+-- [[us003|rotate service credentials without downtime]]
++- [[us003|rotate service credentials without downtime]] >> [[im002]]
+ 
+ ## Features
+ 

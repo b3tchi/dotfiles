@@ -1,0 +1,13 @@
+{
+  "eval_id": 3,
+  "eval_name": "silent-deviation",
+  "prompt": "Audit Task 1 (rotate_secret helper) via work-audit. Task id is in .work-do-task-ids.json. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent read src/lib/vault.py and detected global lock (not per-name as design said)"},
+    {"text": "Agent compared design (#### edge_cases mentions 'Concurrent calls to rotate_secret for the same name must serialize') vs implementation"},
+    {"text": "Agent noted the implementer's note says 'Deviations: none' but actual deviation exists (unlogged)"},
+    {"text": "Agent issued REJECTED verdict"},
+    {"text": "Agent did NOT close Task 1"},
+    {"text": "Agent logged gap notes including the unlogged-deviation finding"}
+  ]
+}

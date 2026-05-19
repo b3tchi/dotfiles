@@ -1,0 +1,17 @@
+{
+  "eval_id": 0,
+  "eval_name": "strong-merge",
+  "prompt": "All bd tasks for sp001 are closed by work-audit. Run work-merge on sp001. Task ids in .work-do-task-ids.json. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent ran tests (pytest) and verified pass"},
+    {"text": "Agent verified all bd children of the epic are closed"},
+    {"text": "Agent flipped sp001 status from ready to done"},
+    {"text": "Agent flipped sp001 footer Index from [[board]] to [[archive]]"},
+    {"text": "Agent flipped us003 status from ready to done"},
+    {"text": "Agent flipped im002 status from proposed to accepted"},
+    {"text": "Agent removed [[sp001]] from docs/board.md ## ready"},
+    {"text": "Agent added [[sp001]] to docs/archive.md ## done"},
+    {"text": "Agent closed the bd epic"},
+    {"text": "Agent presented the 4 git-landing options (or executed one)"}
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "eval_id": 2,
+  "eval_name": "rejection-retry-loop",
+  "prompt": "Start the pipeline. max_parallel=1, mode=auto, worker_model=sonnet. Dispatch the first task. When the reviewer rejects (the fixture is rigged so the reviewer always rejects the first attempt and approves the second), resume the implementer with the rejection details. Save a chronicle of every action to chronicle.md.",
+  "fixture_design": "Seed bd with ONE ready task. Provide a fake reviewer agent / wrapper that always rejects attempt #1 with a specific reason and approves attempt #2. The orchestrator must (a) save agent session metadata, (b) on rejection resume the original implementer via SendMessage (not dispatch fresh), (c) escalate only after a second rejection.",
+  "status": "stub — fixture not yet implemented",
+  "implementation_notes": [
+    "Hard to mock without a controllable reviewer. Options:",
+    "  1. Wrap the reviewer agent in a shim that flips approval based on a counter file in the sandbox.",
+    "  2. Run the implementer for real but seed a deliberately broken task spec so the real reviewer rejects, then have the human-in-the-loop force-approve attempt #2.",
+    "  3. Skip live agents — run a scripted dialog where the orchestrator's responses are graded for the right sequence of bd updates + SendMessage."
+  ],
+  "assertions": [
+    {"text": "chronicle.md exists and records both attempts"},
+    {"text": "Implementer was claimed exactly once (no fresh re-dispatch on first rejection)"},
+    {"text": "SendMessage was used to resume the same agent session on rejection"},
+    {"text": "Agent session metadata was logged to bd notes after first dispatch"},
+    {"text": "Rejection reason was relayed verbatim to the resumed implementer"},
+    {"text": "Task was closed by the reviewer after second attempt"},
+    {"text": "No escalation alert was raised (rejection count = 1, not 2)"},
+    {"text": "If a third attempt would be needed, orchestrator escalates rather than retrying"},
+    {"text": "Retry attempt 2 upgraded the worker model from sonnet to opus (failure-escalation rule)"},
+    {"text": "Model upgrade is logged in bd notes for the retried task"}
+  ]
+}

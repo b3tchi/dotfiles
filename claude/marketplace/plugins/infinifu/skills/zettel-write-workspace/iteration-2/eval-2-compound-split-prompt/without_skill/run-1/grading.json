@@ -1,0 +1,52 @@
+{
+  "eval_id": 2,
+  "config": "without_skill",
+  "expectations": [
+    {
+      "text": "Compound input detected",
+      "passed": true,
+      "evidence": "summary acknowledges split"
+    },
+    {
+      "text": "Split plan documented (\u22652 files or written plan)",
+      "passed": true,
+      "evidence": "2 files + summary"
+    },
+    {
+      "text": "No single file conflates both claims",
+      "passed": true,
+      "evidence": "separated"
+    },
+    {
+      "text": "Every emitted card has [[product]] in H1",
+      "passed": true,
+      "evidence": "both"
+    },
+    {
+      "text": "Every card has Index: [[product]] footer",
+      "passed": true,
+      "evidence": "both"
+    },
+    {
+      "text": "Each card has \u22651 outbound wikilink",
+      "passed": true,
+      "evidence": "mutual see-also"
+    },
+    {
+      "text": "Filenames are meaningful kebab-slugs",
+      "passed": true,
+      "evidence": "wip-limits.md, pull-based-systems.md"
+    },
+    {
+      "text": "Summary acknowledges atomicity gate explicitly per skill",
+      "passed": false,
+      "evidence": "summary admits 'no skill, just pattern-matching the vault'"
+    }
+  ],
+  "summary": {
+    "passed": 7,
+    "failed": 1,
+    "total": 8,
+    "pass_rate": 0.875
+  }
+}

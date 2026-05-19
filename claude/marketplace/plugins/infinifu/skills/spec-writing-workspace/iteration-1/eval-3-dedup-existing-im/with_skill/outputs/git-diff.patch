@@ -1,0 +1,112 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..c3c4ac2
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,32 @@
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/im002.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/spec/sp001.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/notes/us004.md
++./docs/notes/us005.md
++./docs/product.md
++./.gitignore
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
+diff --git a/docs/board.md b/docs/board.md
+index f5eb479..6e24907 100644
+--- a/docs/board.md
++++ b/docs/board.md
+@@ -1,11 +1,11 @@
+ # Board
+ 
+-One spec in flight at idea stage.
++One spec in flight at spec stage.
+ 
+ ## idea
+ 
+-- [[sp001|rotate service credentials without downtime]]
+-
+ ## spec
+ 
++- [[sp001|rotate service credentials without downtime]]
++
+ ## ready
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+index fa70d5d..f145e38 100644
+--- a/docs/notes/spec/sp001.md
++++ b/docs/notes/spec/sp001.md
+@@ -1,7 +1,7 @@
+ ---
+ aliases:
+   - rotate service credentials without downtime
+-status: idea
++status: spec
+ created: 2026-04-28
+ ---
+ # Spec [[cat001]] [[cat003]] [[board]]
+@@ -9,6 +9,9 @@ created: 2026-04-28
+ ## solves
+ [[us003|rotate service credentials without downtime]]
+ 
++## implements
++[[im002|vault-policy credential rotation for live services]]
++
+ ## problem
+ The platform-engineer [[pn002|platform-engineer]] needs to rotate service
+ credentials without downtime. Today this is a maintenance-window task; the
+@@ -24,6 +27,31 @@ Out of scope at idea stage: the actual rotation script, the synthetic-check
+ hook, the secret-overlap window mechanism. spec-writing chooses the shape
+ across vault-rotate-policy vs zero-downtime-swap vs blue-green-cred patterns.
+ 
++## solution
++**Dedup decision: adopt the existing [[im002|vault-policy credential
++rotation]] — do not mint a new implementation card.** A survey of
++`docs/notes/im*.md` shows [[im002]] (status: `accepted`) already `solves
++[[us003]]` with the vault-rotate-policy pattern: writers stage a new
++credential under a versioned alias, readers fall back to the prior version
++for up to 5 minutes, the alias flips at the end of the window. That shape
++satisfies every acceptance criterion on [[us003]] (live swap, 5-minute
++old-secret overlap, zero 5xx during rotation in synthetic check) and aligns
++with the two binding ADRs under categories [[cat001]] and [[cat003]] —
++[[adr0001]] (auth via [[ft001]] is untouched by rotation) and [[adr0002]]
++(Postgres retention is orthogonal). No `Accepted` ADR conflicts with the
++chosen shape, so no supersession candidate is filed. The single consumed
++feature is [[ft002|vault-secrets]] (the existing `secret(name)` read path
++plus the new internal `rotate_secret(name)` helper that [[im002]] already
++specifies in `src/lib/vault.py`). The trade-off taken: bind to the
++vault-policy approach over the zero-downtime-swap or blue-green-cred
++patterns — vault-policy keeps all rotation logic inside the existing vault
++client and avoids per-service swap orchestration, at the cost of requiring
++vault to hold both old and new versions for the 5-minute overlap (already
++supported by [[ft002]]). This spec therefore executes [[im002]] as-written;
++spec-refinement will add `## plan` + `## tasks` (rotation script,
++synthetic-check hook, secret-overlap-window verification) against the
++components [[im002]] already lists.
++
+ ---
+ 
+ Index: [[board]]

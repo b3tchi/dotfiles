@@ -1,0 +1,13 @@
+{
+  "eval_id": 1,
+  "eval_name": "missing-criterion",
+  "prompt": "Audit Task 1 (rotate_secret helper) via work-audit. Task id is in .work-do-task-ids.json. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent read src/lib/vault.py and noticed input validation is missing"},
+    {"text": "Agent identified the missing AC: 'Empty / None new_value: reject at API boundary'"},
+    {"text": "Agent issued REJECTED verdict"},
+    {"text": "Agent did NOT close Task 1 (status stays in_progress)"},
+    {"text": "Agent logged gap notes to bd via bd update --notes including the missing criterion"},
+    {"text": "Rejection report references file:line OR command output as evidence"}
+  ]
+}

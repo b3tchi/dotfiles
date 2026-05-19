@@ -1,0 +1,18 @@
+{
+  "eval_id": 0,
+  "eval_name": "strong-ready",
+  "prompt": "sp001 is at spec stage with plan + tasks refined — run spec-ready to mint bd ids and queue it. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent read sp001 and confirmed status: spec"},
+    {"text": "Agent created exactly one bd epic for sp001"},
+    {"text": "Agent created at least 3 bd tasks (one per ### Task N block)"},
+    {"text": "All bd tasks have --parent linking to the epic"},
+    {"text": "Agent added blocking deps per #### depends (at least 2 deps: Task 2 depends on Task 1, Task 3 depends on Task 1 and/or Task 2)"},
+    {"text": "Agent annotated each ### Task N block in sp001 with a #### bd <id> line"},
+    {"text": "Agent flipped sp001 status from spec to ready"},
+    {"text": "Agent moved docs/board.md [[sp001]] from ## spec to ## ready"},
+    {"text": "Agent did NOT use bd update --status in_progress (execution out of scope)"},
+    {"text": "Agent did NOT use bd close (execution out of scope)"},
+    {"text": "Agent did NOT touch source code (src/ unchanged)"}
+  ]
+}

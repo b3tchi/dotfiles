@@ -24,6 +24,12 @@ BW, BR = 2, 4
 BC = (0x16/255, 0xa0/255, 0x85/255)
 # Windows to never border (quickshell overlays, rofi, etc.)
 IGNORE_CLASSES = {'quickshell', 'Rofi', 'rofi'}
+IGNORE_TITLES = {'qs-focus-border', 'qs-focus-dim'}
+# When any of these overlays are mapped, suppress the border entirely —
+# focus may still report the underlying window during the brief window
+# between binding event and overlay grabbing focus, leaving a frame
+# visible around whatever was focused before mod+d / mod+p / mod+tab.
+SUPPRESS_WHEN_PRESENT_TITLES = {'qs-launcher', 'qs-projects', 'qs-switcher'}
 
 
 class Border:
@@ -85,7 +91,7 @@ def should_ignore(c):
     title = c.get('name', '')
     if cls in IGNORE_CLASSES or instance in IGNORE_CLASSES:
         return True
-    if title.startswith('qs-'):
+    if title in IGNORE_TITLES:
         return True
     return False
 
@@ -169,6 +175,15 @@ def subscribe():
 _refresh_lock = threading.Lock()
 
 
+def _has_overlay_present(node):
+    if node.get('name', '') in SUPPRESS_WHEN_PRESENT_TITLES:
+        return True
+    for child in node.get('nodes', []) + node.get('floating_nodes', []):
+        if _has_overlay_present(child):
+            return True
+    return False
+
+
 def refresh_focused():
     """Re-read focused window geometry from i3 tree (runs in background thread)."""
     def _do_refresh():
@@ -178,6 +193,10 @@ def refresh_focused():
             tree = json.loads(
                 subprocess.check_output(['i3-msg', '-t', 'get_tree']).decode()
             )
+
+            if _has_overlay_present(tree):
+                GLib.idle_add(border.hide)
+                return
 
             def walk(node, parents):
                 if node.get('focused') and node.get('window'):

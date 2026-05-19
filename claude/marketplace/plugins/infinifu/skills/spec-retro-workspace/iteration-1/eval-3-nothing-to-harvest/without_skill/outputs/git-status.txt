@@ -1,0 +1,2 @@
+A  .seed_manifest.txt
+M  docs/notes/spec/sp001.md

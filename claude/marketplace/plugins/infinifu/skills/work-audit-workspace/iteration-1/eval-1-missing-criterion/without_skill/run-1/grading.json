@@ -1,0 +1,43 @@
+{
+  "eval_id": 1,
+  "eval_name": "missing-criterion",
+  "config": "without_skill",
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 6,
+    "failed": 0,
+    "total": 6
+  },
+  "expectations": [
+    {
+      "text": "Agent noticed input validation is missing",
+      "passed": true,
+      "evidence": "missing-validation phrase"
+    },
+    {
+      "text": "Agent identified the missing AC (empty/None value rejection)",
+      "passed": true,
+      "evidence": "AC phrase"
+    },
+    {
+      "text": "Agent issued REJECTED verdict",
+      "passed": true,
+      "evidence": "REJECTED text + status=in_progress"
+    },
+    {
+      "text": "Agent did NOT close Task 1",
+      "passed": true,
+      "evidence": "status=in_progress"
+    },
+    {
+      "text": "Agent logged gap notes via bd update --notes",
+      "passed": true,
+      "evidence": "rejection notes in bd"
+    },
+    {
+      "text": "Rejection includes file:line OR command-output evidence",
+      "passed": true,
+      "evidence": "file:line / command evidence"
+    }
+  ]
+}

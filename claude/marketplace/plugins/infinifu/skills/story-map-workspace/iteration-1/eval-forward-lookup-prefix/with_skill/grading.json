@@ -1,0 +1,31 @@
+{
+  "eval_name": "eval-forward-lookup-prefix",
+  "expectations": [
+    {
+      "text": "Output identifies story 2605-002",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output identifies story 2605-005",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output excludes 2605-001",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output excludes 2605-004",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output is a table or structured listing",
+      "passed": true,
+      "evidence": ""
+    }
+  ],
+  "summary": "5/5 passed"
+}

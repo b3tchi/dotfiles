@@ -30,6 +30,11 @@
       "name": "wiki-oxide",
       "source": "./plugins/wiki-oxide",
       "description": "Wiki vault MCP server — wraps markdown-oxide LSP for Obsidian-style notes"
+    },
+    {
+      "name": "infinifu",
+      "source": "./plugins/infinifu",
+      "description": "Lifecycle skills framework with bd (beads) task tracking — idea, spec, plan, work, ship workflows"
     }
   ]
 }

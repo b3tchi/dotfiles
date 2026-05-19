@@ -1,0 +1,23 @@
+◐ wd3-4180500-h3h.1 · Task 1: Add rotate_secret helper to vault.py   [● P2 · IN_PROGRESS]
+Owner: eval · Type: task
+Created: 2026-05-16 · Started: 2026-05-16 · Updated: 2026-05-16
+
+DESCRIPTION
+  (none)
+
+DESIGN
+Add rotate_secret helper via the ft999.cache(name) primitive. Files: src/lib/vault.py, tests/lib/test_vault.py. See [[ft999]] for the cache surface.
+
+PARENT
+  ↑ ○ wd3-4180500-h3h: (EPIC) Epic: rotate service credentials without downtime [sp001] ● P2
+
+BLOCKS
+  ← ○ wd3-4180500-h3h.2: Task 2: Add vault_rotate orchestration module ● P2
+  ← ○ wd3-4180500-h3h.3: Task 3: Synthetic-check hook for rotation window ● P2
+
+COMMENTS
+  2026-05-16 16:19 eval
+    Blocker noted: task DESIGN references ft999.cache(name) but no ft999 exists in docs/notes/ (only ft001, ft002). The authoritative sp001 spec uses vault.rotate_secret(name) via ft002 with versioned aliases, which matches im002. Proceeding per sp001 + im002.
+  2026-05-16 16:20 eval
+    Implementation ready for review. Files: src/lib/vault.py (added rotate_secret + _flip_alias + per-name lock + _aliases_for/_reset_for_tests test inspectors), tests/lib/test_vault.py (5 new tests + retained baseline). All 6 tests pass. Success criteria: rotate_secret stages a versioned alias without touching old (test_rotate_stages_new_alias); secret returns new value after flip (test_secret_returns_new_after_flip); concurrent rotations serialize per-name (test_concurrent_rotate_serializes); vault unreachable raises VaultError with no partial write (test_vault_unreachable_raises); empty/None rejected (test_empty_value_rejected). NOTE: did not follow the bd DESIGN's ft999.cache(name) path because ft999 does not exist in docs/notes/ — followed sp001 + im002 (rotate_secret via ft002 versioned aliases) which is consistent with the rest of the AKM. Leaving task in_progress for reviewer to close per work-do convention.
+

@@ -1,0 +1,13 @@
+{
+  "eval_id": 3,
+  "eval_name": "wrong-status-spec",
+  "prompt": "Run work-merge on sp001. Task ids in .work-do-task-ids.json. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent recognized sp001 is at status: spec (not ready)"},
+    {"text": "Agent did NOT flip any status to done"},
+    {"text": "Agent did NOT modify docs/board.md"},
+    {"text": "Agent did NOT modify docs/archive.md"},
+    {"text": "Agent did NOT close the bd epic"},
+    {"text": "Output routes to spec-refinement or spec-ready OR explicitly states status not ready"}
+  ]
+}

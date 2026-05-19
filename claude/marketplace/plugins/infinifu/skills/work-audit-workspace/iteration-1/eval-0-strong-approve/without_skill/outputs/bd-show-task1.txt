@@ -1,0 +1,29 @@
+✓ wd0-2218-opi.1 · Task 1: Add rotate_secret helper to vault.py   [● P2 · CLOSED]
+Owner: eval · Type: task
+Created: 2026-05-16 · Started: 2026-05-16 · Updated: 2026-05-16
+Close reason: Closed
+
+DESCRIPTION
+  (none)
+
+DESIGN
+Extend src/lib/vault.py with rotate_secret(name, new_value) helper that stages a new versioned alias. Files: src/lib/vault.py, tests/lib/test_vault.py. Edge cases: concurrent calls serialize, vault unreachable raises VaultError, empty value rejected.
+
+NOTES
+IMPLEMENTED: rotate_secret helper added to vault.py.
+
+Evidence:
+- vault.rotate_secret(name, new_value) stages versioned alias: src/lib/vault.py:36
+- secret(name) returns latest after flip: tests/lib/test_vault.py::test_secret_returns_new_after_flip
+- Concurrent serialization via per-name lock: src/lib/vault.py:24
+- Empty value rejected with ValueError: tests/lib/test_vault.py::test_empty_value_rejected
+- Tests: 5 passed (test_vault.py)
+Deviations: none
+
+PARENT
+  ↑ ○ wd0-2218-opi: (EPIC) Epic: rotate service credentials without downtime [sp001] ● P2
+
+BLOCKS
+  ← ○ wd0-2218-opi.2: Task 2: Add vault_rotate orchestration module ● P2
+  ← ○ wd0-2218-opi.3: Task 3: Synthetic-check hook for rotation window ● P2
+

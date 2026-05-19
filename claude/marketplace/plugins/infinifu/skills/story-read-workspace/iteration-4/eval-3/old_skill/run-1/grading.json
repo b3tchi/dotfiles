@@ -1,0 +1,31 @@
+{
+  "run_id": "eval-3-old_skill",
+  "expectations": [
+    {
+      "text": "Output is a table or filtered list (not a single-story detail)",
+      "passed": false,
+      "evidence": "'No stories found.' message"
+    },
+    {
+      "text": "Result includes us013 (resubmit) \u2014 matches 'resubmission'",
+      "passed": false,
+      "evidence": "No results"
+    },
+    {
+      "text": "Result includes us014 (bulk import) \u2014 matches 'import'",
+      "passed": false,
+      "evidence": "No results"
+    },
+    {
+      "text": "Result excludes unrelated stories (us001, us002, us003)",
+      "passed": true,
+      "evidence": "Trivially true"
+    }
+  ],
+  "summary": {
+    "pass_rate": 0.25,
+    "passed": 1,
+    "failed": 3,
+    "total": 4
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "eval_id": 3,
+  "eval_name": "missing-story-reject",
+  "prompt": "Run idea-implement on us042 (something about analyst exports). Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent verified docs/notes/us042.md does not exist"},
+    {"text": "Agent did NOT invent / write a new us042.md"},
+    {"text": "Agent did NOT mint a new sp###.md under docs/notes/spec/"},
+    {"text": "docs/board.md NOT modified"},
+    {"text": "Output routes to story-write OR explicitly states 'us042 does not exist, create via story-write first'"}
+  ]
+}

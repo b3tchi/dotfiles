@@ -1,0 +1,39 @@
+{
+  "eval_id": 4,
+  "eval_name": "hidden-compound-comparison",
+  "prompt": "write a quick note on optimistic locking — specifically how it differs from pessimistic locking for our database access layer. came up when we were reviewing the inventory service and trying to decide which one fits the contention profile.",
+  "assertions": [
+    {
+      "id": "hidden_compound_detected",
+      "description": "Summary or decision-log explicitly identifies the prompt as a hidden compound — TWO claims (optimistic-locking definition + comparison-with-pessimistic) hiding behind the `X — how it differs from Y` pattern, with NO explicit `and`/`also` conjunction"
+    },
+    {
+      "id": "at_least_two_zettel_files",
+      "description": "At least 2 distinct zettel .md files written (typically optimistic-locking.md + pessimistic-locking.md; optionally a third comparison card)"
+    },
+    {
+      "id": "no_comparison_section_in_single_card",
+      "description": "No single .md file contains both the optimistic-locking definition AND a `## comparison`/`## vs pessimistic` H2 section that crams the pessimistic-locking concept inside it. The comparison should be expressed as a wikilink, not a section heading."
+    },
+    {
+      "id": "each_card_has_product_h1",
+      "description": "Every emitted zettel file has [[product]] in H1"
+    },
+    {
+      "id": "each_card_has_index_footer",
+      "description": "Every emitted zettel file ends with `Index: [[product]]` footer"
+    },
+    {
+      "id": "cards_link_each_other",
+      "description": "The two locking cards mutually wikilink each other (e.g. optimistic-locking.md ## see also contains [[pessimistic-locking]] and vice versa)"
+    },
+    {
+      "id": "filenames_meaningful_slugs",
+      "description": "Output filenames are meaningful kebab-slugs (e.g. optimistic-locking.md, pessimistic-locking.md), not generic"
+    },
+    {
+      "id": "no_status_field_on_generic",
+      "description": "Generic concept cards do NOT carry a `status:` frontmatter key"
+    }
+  ]
+}

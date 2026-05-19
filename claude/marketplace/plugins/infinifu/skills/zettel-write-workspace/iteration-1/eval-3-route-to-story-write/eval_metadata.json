@@ -1,0 +1,47 @@
+{
+  "eval_id": 3,
+  "eval_name": "route-to-story-write",
+  "prompt": "I need to capture a backlog item — our field reps want bulk csv contact upload so they don't waste evenings typing entries in the office one at a time. priority is medium-ish, not urgent.",
+  "assertions": [
+    {
+      "id": "routed_to_story_write",
+      "description": "Summary or decision-log explicitly says zettel-write detected a story shape and delegated to / followed story-write — not improvised a custom format"
+    },
+    {
+      "id": "filename_is_us_NNN",
+      "description": "Output filename matches `us\\d{3}\\.md` pattern (e.g. us001.md, us002.md)"
+    },
+    {
+      "id": "has_role_section",
+      "description": "Body contains `## role` H2 section with a [[pn###|…]] persona link"
+    },
+    {
+      "id": "has_want_section",
+      "description": "Body contains `## want` H2 section with the want clause"
+    },
+    {
+      "id": "has_because_section",
+      "description": "Body contains `## because` H2 section with motivation"
+    },
+    {
+      "id": "has_acceptance_criteria_section",
+      "description": "Body contains `## acceptance_criteria` H2 with at least one criterion bullet"
+    },
+    {
+      "id": "frontmatter_status_is_draft",
+      "description": "Frontmatter has `status: draft` (per akm.md default for new stories)"
+    },
+    {
+      "id": "h1_contains_product_link",
+      "description": "H1 line contains [[product]] wikilink"
+    },
+    {
+      "id": "index_footer_present",
+      "description": "File ends with `Index: [[product]]` footer"
+    },
+    {
+      "id": "did_not_invent_generic_card",
+      "description": "Skill did NOT also write a parallel generic named-slug card for the same request — must route, not duplicate"
+    }
+  ]
+}

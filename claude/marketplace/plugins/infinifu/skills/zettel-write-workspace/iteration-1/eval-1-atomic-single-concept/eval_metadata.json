@@ -1,0 +1,47 @@
+{
+  "eval_id": 1,
+  "eval_name": "atomic-single-concept",
+  "prompt": "ok let me write down something I want to remember: a deadlock is when two threads each hold a resource the other one needs. came up in our incident last week on the payment queue. should connect to our circuit-breaker note from before and maybe to the on-call rotation card.",
+  "assertions": [
+    {
+      "id": "one_zettel_file",
+      "description": "Exactly one new zettel .md file produced (excluding summary.md and decision-log.md)"
+    },
+    {
+      "id": "filename_is_concept_slug",
+      "description": "Output filename is a kebab-slug like deadlock.md — not date-stamped, not numbered, not stripped of meaning"
+    },
+    {
+      "id": "h1_contains_product_link",
+      "description": "H1 line contains [[product]] wikilink"
+    },
+    {
+      "id": "index_footer_present",
+      "description": "File ends with `Index: [[product]]` footer line"
+    },
+    {
+      "id": "outbound_link_beyond_product",
+      "description": "At least one [[…]] wikilink in the body beyond [[product]] and the Index footer"
+    },
+    {
+      "id": "links_to_circuit_breaker_or_on_call",
+      "description": "Body links to either [[circuit-breaker]] or [[on-call-rotation]] — user explicitly named both as related"
+    },
+    {
+      "id": "body_under_300_words",
+      "description": "Body content (excluding frontmatter + footer) is under 300 words"
+    },
+    {
+      "id": "has_aliases_and_created",
+      "description": "Frontmatter contains both `aliases:` (≥1 entry) and `created:` (ISO date)"
+    },
+    {
+      "id": "no_status_field",
+      "description": "Frontmatter does NOT contain `status:` — generic concept cards skip lifecycle"
+    },
+    {
+      "id": "single_claim_restatable",
+      "description": "Subjective: the card makes one coherent claim about deadlocks, not multiple unrelated ideas"
+    }
+  ]
+}

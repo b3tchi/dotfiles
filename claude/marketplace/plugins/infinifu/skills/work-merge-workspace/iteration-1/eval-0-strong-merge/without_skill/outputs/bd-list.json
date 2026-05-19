@@ -1,0 +1,32 @@
+[
+  {
+    "id": "wd0-242628-p0j",
+    "title": "Ship vault_rotate orchestration + synthetic-check (sp001 follow-up)",
+    "description": "sp001 closed with only task-1 deliverable (rotate_secret helper). Tasks wd0-242628-hcu.2 (vault_rotate.py orchestration with T+5min expiry) and wd0-242628-hcu.3 (synthetic-check hook asserting zero 5xx during rotation window) were audit-approved but their files (src/lib/vault_rotate.py, tests/lib/test_vault_rotate.py, tests/integration/test_rotate_synthetic.py) do not exist on disk. Acceptance criteria #2 (5-min overlap) and #3 (no 5xx in synthetic) of us003 are therefore not actually met in code. Either ship the missing orchestration + synthetic check as a follow-up, or supersede im002 with a new im### that records the reduced scope and reopen us003.",
+    "status": "open",
+    "priority": 1,
+    "issue_type": "bug",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-17T08:31:48Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-17T08:31:48Z",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  },
+  {
+    "id": "wd0-242628-tcw",
+    "title": "Make vault read timeout configurable (currently hardcoded 5000ms)",
+    "description": "TODO surfaced during sp001 retro in src/lib/vault.py: set_timeout(timeout_ms) needs to become configurable — current default 5000ms is too short for the European region. Out of scope for the rotation work but worth tracking.",
+    "status": "open",
+    "priority": 3,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-17T08:31:50Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-17T08:31:50Z",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  }
+]

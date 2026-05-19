@@ -1,0 +1,13 @@
+{
+  "eval_id": 2,
+  "eval_name": "route-to-implement-single-consumer",
+  "prompt": "Add a quarterly retention purge tool — only the platform-engineer persona uses it, and only once a quarter when legal asks for the deletion proof. Use the infinifu:idea-feature skill. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent identified pn002 (platform-engineer) as the single plausible consumer"},
+    {"text": "Agent concluded the request has only one consumer and re-routed to idea-implement (im### glue)"},
+    {"text": "A route_decision.md OR run_notes.md explicitly states 'idea-implement' as the correct path (not idea-feature)"},
+    {"text": "Agent did NOT emit a new sp###.md under docs/notes/spec/"},
+    {"text": "docs/board.md was NOT modified (no append under ## idea)"},
+    {"text": "Agent did NOT mint a new ft###.md"}
+  ]
+}

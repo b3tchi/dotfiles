@@ -1,0 +1,3 @@
+# Sandbox dirs are regenerable from seed_sandbox.sh — don't commit
+iteration-*/eval-*/with_skill/sandbox/
+iteration-*/eval-*/without_skill/sandbox/

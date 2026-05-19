@@ -1,0 +1,48 @@
+{
+  "eval_id": 3,
+  "eval_name": "nothing-to-harvest",
+  "config": "without_skill",
+  "summary": {
+    "pass_rate": 0.8571428571428571,
+    "passed": 6,
+    "failed": 1,
+    "total": 7
+  },
+  "expectations": [
+    {
+      "text": "Agent ran git log / git diff",
+      "passed": false,
+      "evidence": "git evidence"
+    },
+    {
+      "text": "Agent read im002 / ft002 / bd notes",
+      "passed": true,
+      "evidence": "survey evidence"
+    },
+    {
+      "text": "Agent may have rewritten im002 body OR left as-is",
+      "passed": true,
+      "evidence": "im002_modified=False (acceptable either way)"
+    },
+    {
+      "text": "Agent did NOT draft new us###",
+      "passed": true,
+      "evidence": "new_us=[]"
+    },
+    {
+      "text": "Agent did NOT mint new adr####",
+      "passed": true,
+      "evidence": "new_adr=[]"
+    },
+    {
+      "text": "Agent closed the bd epic",
+      "passed": true,
+      "evidence": "epic_status=closed"
+    },
+    {
+      "text": "Agent did NOT touch docs/board.md or docs/archive.md",
+      "passed": true,
+      "evidence": "board=False archive=False"
+    }
+  ]
+}

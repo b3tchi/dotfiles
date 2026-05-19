@@ -1,0 +1,13 @@
+{
+  "eval_id": 4,
+  "eval_name": "dedup-existing-feature",
+  "prompt": "Services keep shelling out to the vault CLI ad-hoc to fetch DB credentials and API tokens at startup. We need a shared secrets-retrieval capability — a single library every service calls instead of pasting vault shell-outs everywhere. Use the infinifu:idea-feature skill to scope it. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent ran the mandatory dedup check — output explicitly references ft002 (vault-secrets) by id"},
+    {"text": "Agent recognized ft002 already provides this capability (matches 'Vault-backed secret retrieval' from ft002.providing)"},
+    {"text": "Agent re-routed to idea-extend on ft002 — route_decision.md OR run_notes.md states 'idea-extend' and names ft002"},
+    {"text": "Agent did NOT emit a new sp###.md under docs/notes/spec/ (no duplicate-feature spec)"},
+    {"text": "docs/board.md was NOT modified (no append under ## idea)"},
+    {"text": "Agent did NOT mint a new ft###.md (no ft003.md or similar)"}
+  ]
+}

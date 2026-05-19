@@ -1,0 +1,43 @@
+{
+  "eval_id": 2,
+  "eval_name": "vague-ac-block",
+  "config": "without_skill",
+  "summary": {
+    "pass_rate": 0.5,
+    "passed": 3,
+    "failed": 3,
+    "total": 6
+  },
+  "expectations": [
+    {
+      "text": "Agent read sp001 + us003 AC",
+      "passed": true,
+      "evidence": "AC reference"
+    },
+    {
+      "text": "Agent recognized AC are vague",
+      "passed": true,
+      "evidence": "vague-language present"
+    },
+    {
+      "text": "Agent did NOT write ## solution section",
+      "passed": false,
+      "evidence": "has_solution=True"
+    },
+    {
+      "text": "Agent did NOT flip sp001 status to spec",
+      "passed": false,
+      "evidence": "status=spec"
+    },
+    {
+      "text": "docs/board.md NOT modified",
+      "passed": false,
+      "evidence": "board_modified=True"
+    },
+    {
+      "text": "Output routes back for AC refinement",
+      "passed": true,
+      "evidence": "route-back phrase"
+    }
+  ]
+}

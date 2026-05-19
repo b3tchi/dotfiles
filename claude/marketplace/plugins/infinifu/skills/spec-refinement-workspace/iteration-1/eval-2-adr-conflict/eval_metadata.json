@@ -1,0 +1,12 @@
+{
+  "eval_id": 2,
+  "eval_name": "adr-conflict",
+  "prompt": "Run spec-refinement on sp001. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent surveyed adr0001 and recognized it as Accepted"},
+    {"text": "Agent detected the sp001 solution conflicts with adr0001 (mutual-TLS bypasses ft001 basic-auth)"},
+    {"text": "Output explicitly flags the conflict (mentions adr0001 + conflict/violate/supersede)"},
+    {"text": "Either (a) breakdown includes a Task to file a new ADR superseding adr0001 BEFORE other dependent tasks, OR (b) skill stops and routes the user to decide"},
+    {"text": "Agent did NOT silently write tasks that implement the conflicting solution without flagging"}
+  ]
+}

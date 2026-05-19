@@ -1,0 +1,137 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..e1772ab
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,47 @@
++./AGENTS.md
++./.beads/config.yaml
++./.beads/dolt-server.port
++./.beads/.gitignore
++./.beads/hooks/post-checkout
++./.beads/hooks/post-merge
++./.beads/hooks/pre-commit
++./.beads/hooks/prepare-commit-msg
++./.beads/hooks/pre-push
++./.beads/interactions.jsonl
++./.beads/.local_version
++./.beads/metadata.json
++./.beads/README.md
++./CLAUDE.md
++./.claude/settings.json
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/im002.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/spec/sp001.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/notes/us004.md
++./docs/notes/us005.md
++./docs/product.md
++./.gitignore
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
+diff --git a/route_decision.md b/route_decision.md
+new file mode 100644
+index 0000000..2774367
+--- /dev/null
++++ b/route_decision.md
+@@ -0,0 +1,78 @@
++# Route Decision — spec-ready on sp001
++
++## Decision: STOP — do not run spec-ready. Route to `work-do`.
++
++## Skill invoked
++`infinifu:spec-ready` — "Using spec-ready skill to mint beads and queue the spec."
++
++## Target
++`docs/notes/spec/sp001.md` — "rotate service credentials without downtime"
++
++## Status check (entry-specific checklist steps 2 + 4)
++
++The skill's checklist requires:
++
++- Step 2: spec frontmatter `status` MUST be `spec`.
++- Step 4: no `### Task N` block may already carry a `#### bd <id>` line.
++
++Inspection of `docs/notes/spec/sp001.md`:
++
++| Check | Required | Observed | Pass? |
++|---|---|---|---|
++| Frontmatter `status` | `spec` | `ready` | NO |
++| `### Task 1` `#### bd` line | absent | `bd-001` | NO |
++| `### Task 2` `#### bd` line | absent | `bd-002` | NO |
++| `### Task 3` `#### bd` line | absent | `bd-003` | NO |
++
++Both gating conditions fail.
++
++## Disambiguation (skill section "Disambiguation")
++
++Two rows in the disambiguation table apply simultaneously:
++
++1. **`sp###` at `status: ready`** → "already done. Route to `work-do`."
++2. **`sp###` at `status: spec` but tasks already carry `#### bd` annotations** → "spec has been processed before; either close the matter or route to `work-do` (execution)."
++
++Both rows converge on the same routing: `work-do`. The spec has *already been readied* in a prior run — the frontmatter flip and the `#### bd` annotations are the evidence trail.
++
++## Why this is a STOP, not a re-run
++
++The skill's Key Principles include:
++
++- *"Atomic operation. Mint epic + tasks + deps + annotations + status flip + board move = one logical commit."*
++- *"No execution. This skill stops at 'ready'."*
++
++Re-running spec-ready on an already-ready spec would:
++
++- Double-mint a bd epic + tasks (no idempotency in `bd create`).
++- Overwrite or duplicate the `#### bd` annotations.
++- Touch a frontmatter field that's already at the target value (no-op writes are noise).
++- Touch `docs/board.md` to "move" an entry that's already under `## ready`.
++
++None of those steps are reversible safely; the skill explicitly says "If any step fails midway, roll back rather than leaving partial state." The right call is to not start.
++
++## Observed sandbox state — confirming the prior run
++
++`bd list --json` shows:
++
++- `sandbox-nt2` — epic, title `"Epic: rotate service credentials without downtime [sp001]"`, design references `docs/notes/spec/sp001.md`.
++- `sandbox-nt2.1` — child task with parent `sandbox-nt2`, title `"Add rotate_secret helper to vault.py"` (matches Task 1).
++
++So a prior spec-ready run minted at least the epic + Task 1 in bd. Tasks 2 and 3 are missing from bd — but that is a *gap from the prior run*, not work spec-ready should fix now. Re-invoking spec-ready cannot patch a half-applied run; it can only mint a *fresh* epic + 3 tasks, which would create a duplicate `sandbox-nt2`-style chain rather than backfilling the missing two.
++
++(Note: the spec file's `#### bd bd-001/002/003` annotations also don't match the actual bd ids `sandbox-nt2.1`/etc — that is a stale-id smell from the prior partial run. Reconciling that is out of scope for spec-ready per the "Out of scope" section: "Writing or revising `## tasks` content — that's `spec-refinement`.")
++
++## Action taken
++
++- No files written to `docs/notes/spec/sp001.md` (no annotations added, no frontmatter flipped).
++- No edits to `docs/board.md`.
++- No `bd create` / `bd dep add` calls.
++- This `route_decision.md` is the only artifact produced.
++
++## Recommended next steps for the user
++
++1. If the prior partial run needs to be reconciled (Tasks 2 + 3 missing in bd, spec annotations carry stale `bd-00X` placeholders), that is *not* spec-ready's job — it requires either:
++   - A manual cleanup commit aligning the spec annotations with reality, or
++   - A `spec-refinement` revision if the task breakdown itself is being reshaped.
++2. To actually execute the work, invoke `infinifu:work-do` on `sandbox-nt2.1` (and on Tasks 2 + 3 once they are minted).
++3. There is no scenario in which spec-ready should be re-invoked on this spec without first reverting status to `spec` and stripping the `#### bd` lines — and even then, the cleaner path is to fix the partial run by hand rather than re-running an idempotent-unaware skill.

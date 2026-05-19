@@ -1,0 +1,460 @@
+{
+  "metadata": {
+    "skill_name": "work-do",
+    "skill_path": "<path/to/skill>",
+    "executor_model": "<model-name>",
+    "analyzer_model": "<model-name>",
+    "timestamp": "2026-05-16T16:23:32Z",
+    "evals_run": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "runs_per_configuration": 3
+  },
+  "runs": [
+    {
+      "eval_id": 0,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 7,
+        "failed": 0,
+        "total": 7,
+        "time_seconds": 228.6,
+        "tokens": 54057,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent ran bd show on the target task id",
+          "passed": true,
+          "evidence": "bd show present"
+        },
+        {
+          "text": "Agent claimed task (status hit in_progress at some point)",
+          "passed": true,
+          "evidence": "status=in_progress"
+        },
+        {
+          "text": "Agent wrote tests under tests/lib/ for rotate_secret",
+          "passed": true,
+          "evidence": "rotate_test=True tests_changed=True"
+        },
+        {
+          "text": "Agent implemented rotate_secret in src/lib/vault.py",
+          "passed": true,
+          "evidence": "has_rotate=True vault_modified=True"
+        },
+        {
+          "text": "Agent left task at status: in_progress (NOT closed)",
+          "passed": true,
+          "evidence": "status=in_progress"
+        },
+        {
+          "text": "Agent recorded evidence in bd task notes",
+          "passed": true,
+          "evidence": "evidence-phrase present"
+        },
+        {
+          "text": "Agent did NOT silently expand scope (TODO preserved, no set_timeout impl)",
+          "passed": true,
+          "evidence": "TODO_preserved=True set_timeout_added=False"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 262.1,
+        "tokens": 56539,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent claimed Task 1 and worked rotate_secret",
+          "passed": true,
+          "evidence": "status=in_progress rotate=True"
+        },
+        {
+          "text": "Agent left task at status: in_progress (NOT closed)",
+          "passed": true,
+          "evidence": "status=in_progress"
+        },
+        {
+          "text": "Agent did NOT silently fix the broken set_timeout function",
+          "passed": true,
+          "evidence": "FIXME_still_present=True new_bd=1"
+        },
+        {
+          "text": "Agent EITHER filed new bd task for set_timeout OR explicitly noted leaving it",
+          "passed": true,
+          "evidence": "new_bd=1 acknowledged_in_text=True"
+        },
+        {
+          "text": "Agent recorded evidence on Task 1 notes",
+          "passed": true,
+          "evidence": "evidence present"
+        },
+        {
+          "text": "rotate_secret implementation added to src/lib/vault.py",
+          "passed": true,
+          "evidence": "has_rotate=True"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 138.1,
+        "tokens": 45708,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent ran bd show on the task",
+          "passed": true,
+          "evidence": "bd show present"
+        },
+        {
+          "text": "Agent recognized Task 1's design is too thin",
+          "passed": true,
+          "evidence": "thin-language present"
+        },
+        {
+          "text": "Agent did NOT implement rotate_secret",
+          "passed": true,
+          "evidence": "has_rotate=False"
+        },
+        {
+          "text": "Agent did NOT close the task",
+          "passed": true,
+          "evidence": "status=open"
+        },
+        {
+          "text": "Output routes to spec-refinement OR states task needs more detail",
+          "passed": true,
+          "evidence": "route phrase"
+        },
+        {
+          "text": "Task stays at status: open (work didn't start) OR notes record block",
+          "passed": true,
+          "evidence": "status=open route=True gate=False"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 135.6,
+        "tokens": 43498,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent ran bd show on the task",
+          "passed": true,
+          "evidence": "bd show present"
+        },
+        {
+          "text": "Agent detected ft999 does not exist",
+          "passed": true,
+          "evidence": "ft999+missing language"
+        },
+        {
+          "text": "Agent did NOT silently invent / fabricate ft999.cache surface",
+          "passed": true,
+          "evidence": "has_rotate=False"
+        },
+        {
+          "text": "Agent did NOT close the task",
+          "passed": true,
+          "evidence": "status=open"
+        },
+        {
+          "text": "Agent logged a BLOCKED note OR set status: blocked",
+          "passed": true,
+          "evidence": "BLOCKED_in_notes=True status=open"
+        },
+        {
+          "text": "rotate_secret NOT written (work didn't proceed past blocker)",
+          "passed": true,
+          "evidence": "has_rotate=False"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 0,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 7,
+        "failed": 0,
+        "total": 7,
+        "time_seconds": 133.1,
+        "tokens": 44936,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent ran bd show on the target task id",
+          "passed": true,
+          "evidence": "bd show present"
+        },
+        {
+          "text": "Agent claimed task (status hit in_progress at some point)",
+          "passed": true,
+          "evidence": "status=open"
+        },
+        {
+          "text": "Agent wrote tests under tests/lib/ for rotate_secret",
+          "passed": true,
+          "evidence": "rotate_test=True tests_changed=True"
+        },
+        {
+          "text": "Agent implemented rotate_secret in src/lib/vault.py",
+          "passed": true,
+          "evidence": "has_rotate=True vault_modified=True"
+        },
+        {
+          "text": "Agent left task at status: in_progress (NOT closed)",
+          "passed": true,
+          "evidence": "status=open"
+        },
+        {
+          "text": "Agent recorded evidence in bd task notes",
+          "passed": true,
+          "evidence": "evidence-phrase present"
+        },
+        {
+          "text": "Agent did NOT silently expand scope (TODO preserved, no set_timeout impl)",
+          "passed": true,
+          "evidence": "TODO_preserved=True set_timeout_added=False"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.8333333333333334,
+        "passed": 5,
+        "failed": 1,
+        "total": 6,
+        "time_seconds": 144.0,
+        "tokens": 47834,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent claimed Task 1 and worked rotate_secret",
+          "passed": true,
+          "evidence": "status=open rotate=True"
+        },
+        {
+          "text": "Agent left task at status: in_progress (NOT closed)",
+          "passed": true,
+          "evidence": "status=open"
+        },
+        {
+          "text": "Agent did NOT silently fix the broken set_timeout function",
+          "passed": true,
+          "evidence": "FIXME_still_present=True new_bd=0"
+        },
+        {
+          "text": "Agent EITHER filed new bd task for set_timeout OR explicitly noted leaving it",
+          "passed": false,
+          "evidence": "new_bd=0 acknowledged_in_text=False"
+        },
+        {
+          "text": "Agent recorded evidence on Task 1 notes",
+          "passed": true,
+          "evidence": "evidence present"
+        },
+        {
+          "text": "rotate_secret implementation added to src/lib/vault.py",
+          "passed": true,
+          "evidence": "has_rotate=True"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.6666666666666666,
+        "passed": 4,
+        "failed": 2,
+        "total": 6,
+        "time_seconds": 182.5,
+        "tokens": 53045,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent ran bd show on the task",
+          "passed": false,
+          "evidence": "bd show present"
+        },
+        {
+          "text": "Agent recognized Task 1's design is too thin",
+          "passed": true,
+          "evidence": "thin-language present"
+        },
+        {
+          "text": "Agent did NOT implement rotate_secret",
+          "passed": false,
+          "evidence": "has_rotate=True"
+        },
+        {
+          "text": "Agent did NOT close the task",
+          "passed": true,
+          "evidence": "status=open"
+        },
+        {
+          "text": "Output routes to spec-refinement OR states task needs more detail",
+          "passed": true,
+          "evidence": "route phrase"
+        },
+        {
+          "text": "Task stays at status: open (work didn't start) OR notes record block",
+          "passed": true,
+          "evidence": "status=open route=False gate=False"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.3333333333333333,
+        "passed": 2,
+        "failed": 4,
+        "total": 6,
+        "time_seconds": 244.8,
+        "tokens": 57849,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent ran bd show on the task",
+          "passed": false,
+          "evidence": "bd show present"
+        },
+        {
+          "text": "Agent detected ft999 does not exist",
+          "passed": true,
+          "evidence": "ft999+missing language"
+        },
+        {
+          "text": "Agent did NOT silently invent / fabricate ft999.cache surface",
+          "passed": false,
+          "evidence": "has_rotate=True"
+        },
+        {
+          "text": "Agent did NOT close the task",
+          "passed": true,
+          "evidence": "status=in_progress"
+        },
+        {
+          "text": "Agent logged a BLOCKED note OR set status: blocked",
+          "passed": false,
+          "evidence": "BLOCKED_in_notes=False status=in_progress"
+        },
+        {
+          "text": "rotate_secret NOT written (work didn't proceed past blocker)",
+          "passed": false,
+          "evidence": "has_rotate=True"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": 0.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 191.1,
+        "stddev": 64.1262,
+        "min": 135.6,
+        "max": 262.1
+      },
+      "tokens": {
+        "mean": 49950.5,
+        "stddev": 6322.0576,
+        "min": 43498,
+        "max": 56539
+      }
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 0.7083,
+        "stddev": 0.2846,
+        "min": 0.3333,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 176.1,
+        "stddev": 50.4647,
+        "min": 133.1,
+        "max": 244.8
+      },
+      "tokens": {
+        "mean": 50916.0,
+        "stddev": 5711.3412,
+        "min": 44936,
+        "max": 57849
+      }
+    },
+    "delta": {
+      "pass_rate": "+0.29",
+      "time_seconds": "+15.0",
+      "tokens": "-966"
+    }
+  },
+  "notes": []
+}

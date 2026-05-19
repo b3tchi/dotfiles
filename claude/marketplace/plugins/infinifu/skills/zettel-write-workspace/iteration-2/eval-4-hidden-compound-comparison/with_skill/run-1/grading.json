@@ -1,0 +1,52 @@
+{
+  "eval_id": 4,
+  "config": "with_skill",
+  "expectations": [
+    {
+      "text": "Hidden compound detected \u2014 TWO claims hiding behind X-how-it-differs-from-Y",
+      "passed": true,
+      "evidence": "summary cites SKILL.md Step 1 hidden-compound pattern explicitly"
+    },
+    {
+      "text": "At least 2 distinct zettel .md files",
+      "passed": true,
+      "evidence": "optimistic-locking.md + pessimistic-locking.md"
+    },
+    {
+      "text": "No comparison H2 section crammed inside single card",
+      "passed": true,
+      "evidence": "comparison via wikilink"
+    },
+    {
+      "text": "Every emitted card has [[product]] in H1",
+      "passed": true,
+      "evidence": "both"
+    },
+    {
+      "text": "Every card has Index: [[product]] footer",
+      "passed": true,
+      "evidence": "both"
+    },
+    {
+      "text": "Cards mutually link each other",
+      "passed": true,
+      "evidence": "mutual see-also"
+    },
+    {
+      "text": "Filenames are meaningful kebab-slugs",
+      "passed": true,
+      "evidence": "optimistic-locking.md, pessimistic-locking.md"
+    },
+    {
+      "text": "No status field on generic cards",
+      "passed": true,
+      "evidence": "aliases + created only"
+    }
+  ],
+  "summary": {
+    "passed": 8,
+    "failed": 0,
+    "total": 8,
+    "pass_rate": 1.0
+  }
+}

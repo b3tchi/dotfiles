@@ -1,0 +1,460 @@
+{
+  "metadata": {
+    "skill_name": "story-read",
+    "skill_path": "<path/to/skill>",
+    "executor_model": "<model-name>",
+    "analyzer_model": "<model-name>",
+    "timestamp": "2026-05-14T12:46:47Z",
+    "evals_run": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "runs_per_configuration": 3
+  },
+  "runs": [
+    {
+      "eval_id": 0,
+      "configuration": "old_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.14285714285714285,
+        "passed": 1,
+        "failed": 6,
+        "total": 7,
+        "time_seconds": 35.0,
+        "tokens": 20466,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Output contains the id us001",
+          "passed": false,
+          "evidence": "Output is 'No stories found. Use story-write to add one.' \u2014 old skill checked product/stories.yaml which does not exist in AKM sandbox"
+        },
+        {
+          "text": "Output renders the Connextra one-liner: 'As a ... I want ... because ...'",
+          "passed": false,
+          "evidence": "No story rendered"
+        },
+        {
+          "text": "Output renders persona alias 'requestor' (not the raw wikilink [[pn001|requestor]])",
+          "passed": false,
+          "evidence": "No story rendered"
+        },
+        {
+          "text": "Output lists all 3 acceptance criteria for us001 (browse catalog, add items, submit request)",
+          "passed": false,
+          "evidence": "No acceptance criteria rendered"
+        },
+        {
+          "text": "Output shows status field (done)",
+          "passed": false,
+          "evidence": "No story rendered"
+        },
+        {
+          "text": "Output is in detail mode (single story), not table or render mode",
+          "passed": false,
+          "evidence": "Output is an error message, not any of the three modes"
+        },
+        {
+          "text": "Output does not include any other story (us002, us003, us013, us014)",
+          "passed": true,
+          "evidence": "Trivially true \u2014 no stories rendered at all"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "old_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.375,
+        "passed": 3,
+        "failed": 5,
+        "total": 8,
+        "time_seconds": 34.4,
+        "tokens": 20450,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Output is a markdown table or table-like structured listing",
+          "passed": false,
+          "evidence": "Output is 'No stories found.' message"
+        },
+        {
+          "text": "Table includes us013 (draft)",
+          "passed": false,
+          "evidence": "No table rendered"
+        },
+        {
+          "text": "Table includes us014 (draft)",
+          "passed": false,
+          "evidence": "No table rendered"
+        },
+        {
+          "text": "Table excludes us001 (status=done)",
+          "passed": true,
+          "evidence": "Trivially true \u2014 nothing rendered"
+        },
+        {
+          "text": "Table excludes us002 (status=done)",
+          "passed": true,
+          "evidence": "Trivially true \u2014 nothing rendered"
+        },
+        {
+          "text": "Table excludes us003 (status=ready)",
+          "passed": true,
+          "evidence": "Trivially true \u2014 nothing rendered"
+        },
+        {
+          "text": "Table columns include id, status, role, and title",
+          "passed": false,
+          "evidence": "No table"
+        },
+        {
+          "text": "Output includes a count summary line (e.g. '2 stories matched')",
+          "passed": false,
+          "evidence": "No count line"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "old_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.0,
+        "passed": 0,
+        "failed": 6,
+        "total": 6,
+        "time_seconds": 30.8,
+        "tokens": 20325,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Output includes all 5 stories from the fixture (us001, us002, us003, us013, us014)",
+          "passed": false,
+          "evidence": "No stories rendered \u2014 'No stories found.'"
+        },
+        {
+          "text": "Stories are grouped by status (Draft / Ready / Done at minimum)",
+          "passed": false,
+          "evidence": "No grouping"
+        },
+        {
+          "text": "Each story shows a Connextra-style one-liner with role/want/because",
+          "passed": false,
+          "evidence": "No stories"
+        },
+        {
+          "text": "Each story shows its acceptance criteria as bullets",
+          "passed": false,
+          "evidence": "No criteria"
+        },
+        {
+          "text": "Output ends with a total count summary",
+          "passed": false,
+          "evidence": "No count"
+        },
+        {
+          "text": "Persona aliases are rendered as readable labels ('requestor', 'approver'), not raw [[pn001|...]] wikilinks",
+          "passed": false,
+          "evidence": "No personas rendered at all"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "old_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.25,
+        "passed": 1,
+        "failed": 3,
+        "total": 4,
+        "time_seconds": 40.8,
+        "tokens": 20418,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Output is a table or filtered list (not a single-story detail)",
+          "passed": false,
+          "evidence": "'No stories found.' message"
+        },
+        {
+          "text": "Result includes us013 (resubmit) \u2014 matches 'resubmission'",
+          "passed": false,
+          "evidence": "No results"
+        },
+        {
+          "text": "Result includes us014 (bulk import) \u2014 matches 'import'",
+          "passed": false,
+          "evidence": "No results"
+        },
+        {
+          "text": "Result excludes unrelated stories (us001, us002, us003)",
+          "passed": true,
+          "evidence": "Trivially true"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 0,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 7,
+        "failed": 0,
+        "total": 7,
+        "time_seconds": 30.1,
+        "tokens": 21454,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Output contains the id us001",
+          "passed": true,
+          "evidence": "Line 1: '## us001 \u2014 order samples for upcoming client work'"
+        },
+        {
+          "text": "Output renders the Connextra one-liner: 'As a ... I want ... because ...'",
+          "passed": true,
+          "evidence": "Line 3: '**As a** requestor, **I want** order samples..., **because** I need product in hand...'"
+        },
+        {
+          "text": "Output renders persona alias 'requestor' (not the raw wikilink [[pn001|requestor]])",
+          "passed": true,
+          "evidence": "Line 3 uses 'requestor' bare, no [[pn001|...]] wikilink in output"
+        },
+        {
+          "text": "Output lists all 3 acceptance criteria for us001 (browse catalog, add items, submit request)",
+          "passed": true,
+          "evidence": "Lines 8-10 list browse / add / submit bullets"
+        },
+        {
+          "text": "Output shows status field (done)",
+          "passed": true,
+          "evidence": "Line 5: 'Status: done'"
+        },
+        {
+          "text": "Output is in detail mode (single story), not table or render mode",
+          "passed": true,
+          "evidence": "Single H2 header, no markdown table, no grouped sections"
+        },
+        {
+          "text": "Output does not include any other story (us002, us003, us013, us014)",
+          "passed": true,
+          "evidence": "Only us001 appears in the response"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 8,
+        "failed": 0,
+        "total": 8,
+        "time_seconds": 39.0,
+        "tokens": 23388,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Output is a markdown table or table-like structured listing",
+          "passed": true,
+          "evidence": "Lines 3-6 form a markdown table with pipe delimiters"
+        },
+        {
+          "text": "Table includes us013 (draft)",
+          "passed": true,
+          "evidence": "Line 5: '| us013 | draft | requestor | resubmit ... |'"
+        },
+        {
+          "text": "Table includes us014 (draft)",
+          "passed": true,
+          "evidence": "Line 6: '| us014 | draft | requestor | bulk import ... |'"
+        },
+        {
+          "text": "Table excludes us001 (status=done)",
+          "passed": true,
+          "evidence": "us001 not in the table"
+        },
+        {
+          "text": "Table excludes us002 (status=done)",
+          "passed": true,
+          "evidence": "us002 not in the table"
+        },
+        {
+          "text": "Table excludes us003 (status=ready)",
+          "passed": true,
+          "evidence": "us003 not in the table"
+        },
+        {
+          "text": "Table columns include id, status, role, and title",
+          "passed": true,
+          "evidence": "Header row: '| id | status | role | title |'"
+        },
+        {
+          "text": "Output includes a count summary line (e.g. '2 stories matched')",
+          "passed": true,
+          "evidence": "Line 8: '2 stories matched (2 draft).'"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 47.5,
+        "tokens": 23831,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Output includes all 5 stories from the fixture (us001, us002, us003, us013, us014)",
+          "passed": true,
+          "evidence": "All five ids appear under their status sections"
+        },
+        {
+          "text": "Stories are grouped by status (Draft / Ready / Done at minimum)",
+          "passed": true,
+          "evidence": "Three H2 sections: ## Draft, ## Ready, ## Done"
+        },
+        {
+          "text": "Each story shows a Connextra-style one-liner with role/want/because",
+          "passed": true,
+          "evidence": "Each story has 'As a ... I want ... because ...' line"
+        },
+        {
+          "text": "Each story shows its acceptance criteria as bullets",
+          "passed": true,
+          "evidence": "Each story has its bullet list of criteria"
+        },
+        {
+          "text": "Output ends with a total count summary",
+          "passed": true,
+          "evidence": "Line 46: 'Total: 5 stories (2 draft, 1 ready, 2 done).'"
+        },
+        {
+          "text": "Persona aliases are rendered as readable labels ('requestor', 'approver'), not raw [[pn001|...]] wikilinks",
+          "passed": true,
+          "evidence": "'requestor' and 'approver' rendered bare; no wikilink syntax in the output"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 4,
+        "failed": 0,
+        "total": 4,
+        "time_seconds": 31.1,
+        "tokens": 22549,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Output is a table or filtered list (not a single-story detail)",
+          "passed": true,
+          "evidence": "Markdown table with 2 rows, not a single ## detail header"
+        },
+        {
+          "text": "Result includes us013 (resubmit) \u2014 matches 'resubmission'",
+          "passed": true,
+          "evidence": "Row 1: us013 resubmit"
+        },
+        {
+          "text": "Result includes us014 (bulk import) \u2014 matches 'import'",
+          "passed": true,
+          "evidence": "Row 2: us014 bulk import"
+        },
+        {
+          "text": "Result excludes unrelated stories (us001, us002, us003)",
+          "passed": true,
+          "evidence": "Table has only us013 and us014"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "old_skill": {
+      "pass_rate": {
+        "mean": 0.192,
+        "stddev": 0.1593,
+        "min": 0.0,
+        "max": 0.375
+      },
+      "time_seconds": {
+        "mean": 35.25,
+        "stddev": 4.1388,
+        "min": 30.8,
+        "max": 40.8
+      },
+      "tokens": {
+        "mean": 20414.75,
+        "stddev": 63.0734,
+        "min": 20325,
+        "max": 20466
+      }
+    },
+    "with_skill": {
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": 0.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 36.925,
+        "stddev": 8.0962,
+        "min": 30.1,
+        "max": 47.5
+      },
+      "tokens": {
+        "mean": 22805.5,
+        "stddev": 1046.1518,
+        "min": 21454,
+        "max": 23831
+      }
+    },
+    "delta": {
+      "pass_rate": "-0.81",
+      "time_seconds": "-1.7",
+      "tokens": "-2391"
+    }
+  },
+  "notes": []
+}

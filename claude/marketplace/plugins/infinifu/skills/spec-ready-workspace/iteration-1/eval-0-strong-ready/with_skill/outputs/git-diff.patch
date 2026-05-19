@@ -1,0 +1,109 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..e1772ab
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,47 @@
++./AGENTS.md
++./.beads/config.yaml
++./.beads/dolt-server.port
++./.beads/.gitignore
++./.beads/hooks/post-checkout
++./.beads/hooks/post-merge
++./.beads/hooks/pre-commit
++./.beads/hooks/prepare-commit-msg
++./.beads/hooks/pre-push
++./.beads/interactions.jsonl
++./.beads/.local_version
++./.beads/metadata.json
++./.beads/README.md
++./CLAUDE.md
++./.claude/settings.json
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/im002.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/spec/sp001.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/notes/us004.md
++./docs/notes/us005.md
++./docs/product.md
++./.gitignore
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
+diff --git a/docs/board.md b/docs/board.md
+index 6e24907..3904318 100644
+--- a/docs/board.md
++++ b/docs/board.md
+@@ -6,6 +6,6 @@ One spec in flight at spec stage.
+ 
+ ## spec
+ 
+-- [[sp001|rotate service credentials without downtime]]
+-
+ ## ready
++
++- [[sp001|rotate service credentials without downtime]]
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+index 03956f4..d17618e 100644
+--- a/docs/notes/spec/sp001.md
++++ b/docs/notes/spec/sp001.md
+@@ -1,7 +1,7 @@
+ ---
+ aliases:
+   - rotate service credentials without downtime
+-status: spec
++status: ready
+ created: 2026-04-28
+ ---
+ # Spec [[cat001]] [[cat003]] [[board]]
+@@ -76,6 +76,9 @@ task
+ - `test_vault_unreachable_raises` — catches partial-write bug
+ - `test_empty_value_rejected` — catches input-validation bug
+ 
++#### bd
++sandbox-nt2.1
++
+ ### Task 2: Add vault_rotate orchestration module
+ 
+ #### type
+@@ -107,6 +110,9 @@ task
+ - `test_restart_completes_pending` — catches state-loss bug
+ - `test_double_rotate_queues` — catches overlap-window bug
+ 
++#### bd
++sandbox-nt2.2
++
+ ### Task 3: Synthetic-check hook for rotation window
+ 
+ #### type
+@@ -138,6 +144,9 @@ task
+ - `test_no_5xx_during_window` — catches the core AC
+ - `test_single_blip_tolerated` — catches over-eager alerting
+ 
++#### bd
++sandbox-nt2.3
++
+ ---
+ 
+ Index: [[board]]

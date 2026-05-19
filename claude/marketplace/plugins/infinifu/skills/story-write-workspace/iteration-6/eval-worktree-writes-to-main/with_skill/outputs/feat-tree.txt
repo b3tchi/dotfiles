@@ -1,0 +1,5 @@
+/tmp/sw-iter6-new/feat/docs/notes/us001.md
+/tmp/sw-iter6-new/feat/docs/notes/us002.md
+/tmp/sw-iter6-new/feat/docs/notes/us003.md
+/tmp/sw-iter6-new/feat/docs/notes/us013.md
+/tmp/sw-iter6-new/feat/docs/notes/us014.md

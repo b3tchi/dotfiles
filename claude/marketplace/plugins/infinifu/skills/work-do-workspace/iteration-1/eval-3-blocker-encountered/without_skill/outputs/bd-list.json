@@ -1,0 +1,120 @@
+[
+  {
+    "id": "wd3-4180500-h3h.3",
+    "title": "Task 3: Synthetic-check hook for rotation window",
+    "design": "Hook a synthetic check that runs every 30s during rotation window; assert zero 5xx. Files: src/lib/vault_rotate.py, tests/integration/test_rotate_synthetic.py.",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:15:39Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:15:39Z",
+    "dependencies": [
+      {
+        "issue_id": "wd3-4180500-h3h.3",
+        "depends_on_id": "wd3-4180500-h3h",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:15:38Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd3-4180500-h3h.3",
+        "depends_on_id": "wd3-4180500-h3h.1",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:15:40Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd3-4180500-h3h.3",
+        "depends_on_id": "wd3-4180500-h3h.2",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:15:41Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 2,
+    "dependent_count": 0,
+    "comment_count": 0,
+    "parent": "wd3-4180500-h3h"
+  },
+  {
+    "id": "wd3-4180500-h3h.2",
+    "title": "Task 2: Add vault_rotate orchestration module",
+    "design": "Create src/lib/vault_rotate.py with rotate(name, new_value) that calls vault.rotate_secret + schedules T+5min expiry. Files: src/lib/vault_rotate.py, tests/lib/test_vault_rotate.py.",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:15:37Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:15:37Z",
+    "dependencies": [
+      {
+        "issue_id": "wd3-4180500-h3h.2",
+        "depends_on_id": "wd3-4180500-h3h",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:15:37Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd3-4180500-h3h.2",
+        "depends_on_id": "wd3-4180500-h3h.1",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:15:39Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 1,
+    "dependent_count": 1,
+    "comment_count": 0,
+    "parent": "wd3-4180500-h3h"
+  },
+  {
+    "id": "wd3-4180500-h3h.1",
+    "title": "Task 1: Add rotate_secret helper to vault.py",
+    "design": "Add rotate_secret helper via the ft999.cache(name) primitive. Files: src/lib/vault.py, tests/lib/test_vault.py. See [[ft999]] for the cache surface.",
+    "status": "in_progress",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:15:36Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:21:13Z",
+    "started_at": "2026-05-16T16:21:13Z",
+    "dependencies": [
+      {
+        "issue_id": "wd3-4180500-h3h.1",
+        "depends_on_id": "wd3-4180500-h3h",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:15:36Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 0,
+    "dependent_count": 2,
+    "comment_count": 2,
+    "parent": "wd3-4180500-h3h"
+  },
+  {
+    "id": "wd3-4180500-h3h",
+    "title": "Epic: rotate service credentials without downtime [sp001]",
+    "design": "Spec: docs/notes/spec/sp001.md",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "epic",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:15:35Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:15:35Z",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  }
+]

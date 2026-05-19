@@ -1,0 +1,85 @@
+# Route decision: re-route from `idea-feature` to `idea-implement`
+
+**Request.** "Add a quarterly retention purge tool — only the platform-engineer
+persona uses it, and only once a quarter when legal asks for the deletion
+proof."
+
+**Skill loaded.** `infinifu:idea-feature` (announced: "Using idea-feature skill
+to scope a new horizontal capability.")
+
+**Disambiguation rule fired.** From `idea-feature` §Disambiguation:
+
+> Capability that serves exactly one story → re-route to `idea-implement` (it's
+> `im###` glue, not `ft###`).
+
+And from §Key Principles:
+
+> A feature with one consumer is not a feature. Features are reusable by
+> definition. One-consumer "features" are `im###` glue in disguise.
+
+The request explicitly names a **single persona** ([[pn002]]
+platform-engineer) and a **single trigger** (quarterly, on legal request).
+Nothing in the ask suggests other services or other personas will consume the
+purge tool. It is a deliverable for one user need — the textbook shape of an
+`im###` solving a `us###`, not a horizontal `ft###`.
+
+## Surveyed AKM context (grounding the decision)
+
+**Features** ([[ft001]], [[ft002]]) — both are genuinely horizontal: every
+service consumes `[[ft001]]` basic-auth (per `[[adr0001]]`) and `[[ft002]]`
+vault-secrets at runtime. They illustrate the bar a `ft###` must clear:
+*many* consumers, decoupled from any single story. The proposed purge tool
+clears neither half of that bar.
+
+**Implementations** ([[im001]]) — `[[im001]]` solves `[[us001]]` (analyst
+dashboard) by composing `[[ft001]]`. No existing `im###` covers retention
+purges. There is no ad-hoc purge logic anywhere in the surveyed
+implementations to "promote" into a feature — another tell that this is a
+fresh `im###`, not a feature extraction.
+
+**Stories** — surveyed transitively via [[product]] §Stories. The
+platform-engineer ([[pn002]]) currently has exactly one story,
+[[us003|rotate service credentials without downtime]], which is a different
+topic (credential rotation vs. data deletion). **No existing `us###` covers
+"produce quarterly deletion proof for legal."** The natural shape of this
+work is a *new* user story owned by [[pn002]], implemented as a new `im###`.
+
+**Categories** — [[cat002|data]] (retention is a data concern) and arguably
+[[cat001|security]] (legal/audit trail). Both are real, no new category
+needed.
+
+**Binding ADRs** — [[adr0002]] is the live constraint: "Reports written to
+Postgres, retained 90 days; hard delete after 90 days via nightly job." The
+proposed purge tool either *replaces* that nightly job with an on-demand
+quarterly variant, *augments* it with a deletion-proof artifact, or layers
+audit/proof on top. Whichever shape lands, [[adr0002]] is the binding
+decision and `[[cat002]]` is the home category. This belongs in the `## problem`
+section of the eventual `sp###` minted by `idea-implement`.
+
+## What `idea-implement` should capture
+
+When the user re-invokes with `idea-implement`, the entry-specific work is:
+
+- Mint a new `us###` under [[pn002]] platform-engineer:
+  - **want:** produce deletion-proof artifact when legal requests, on a
+    quarterly cadence
+  - **because:** legal needs auditable evidence that 90-day retention
+    ([[adr0002]]) is enforced
+- `## problem` in the new `sp###` cites [[us###|new story]], [[pn002]],
+  [[adr0002]], and [[cat002]] (and likely [[cat001]] for the audit angle).
+- No `ft###` is minted — the work consumes existing features ([[ft002]]
+  vault-secrets for any DB credentials needed) and adds new story-specific
+  glue.
+
+## Stop
+
+Per the Disambiguation rule, `idea-feature` halts here without minting any
+`sp###`, without modifying [[board]], and without proposing a design. The
+re-route to `idea-implement` is the action.
+
+---
+
+**Surveyed ids (wikilink discipline):** [[ft001]] [[ft002]] [[im001]]
+[[us001]] [[us002]] [[us003]] [[pn001]] [[pn002]] [[cat001]] [[cat002]]
+[[cat003]] [[cat004]] [[adr0001]] [[adr0002]] [[adr0003]] [[product]]
+[[board]]

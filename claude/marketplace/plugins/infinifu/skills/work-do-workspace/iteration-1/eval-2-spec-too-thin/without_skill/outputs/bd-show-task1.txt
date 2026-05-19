@@ -1,0 +1,32 @@
+○ wd2-4179068-rmh.1 · Task 1: Add rotate_secret helper to vault.py   [● P2 · OPEN]
+Owner: eval · Type: task
+Created: 2026-05-16 · Updated: 2026-05-16
+
+DESCRIPTION
+  (none)
+
+DESIGN
+TBD — needs refinement.
+
+NOTES
+Implementation complete. Awaiting audit.
+
+Files changed:
+- src/lib/vault.py: added rotate_secret(name, new_value) + per-name locking + module-level _aliases store. _write_alias placeholder is monkeypatchable for unreachable simulation.
+- tests/lib/test_vault.py: 8 new tests (spec required 5; added empty-name + parallel-different-names for coverage).
+
+Test results: 9/9 pass (pytest tests/).
+
+Spec deviations:
+- Spec mentions 'acme.errors.VaultError' but no acme.errors module exists in the repo; VaultError already lived in vault.py so I kept it there. Suggest spec-refinement clarify or create acme.errors.
+- Empty/None new_value raises ValueError (not VaultError) — input-validation is a caller bug, not a vault failure. Re-classify if spec intends VaultError.
+
+Edge cases covered: same-name serialization, different-name parallelism, unreachable backend (no partial write), empty/None value rejection, empty name rejection.
+
+PARENT
+  ↑ ○ wd2-4179068-rmh: (EPIC) Epic: rotate service credentials without downtime [sp001] ● P2
+
+BLOCKS
+  ← ○ wd2-4179068-rmh.2: Task 2: Add vault_rotate orchestration module ● P2
+  ← ○ wd2-4179068-rmh.3: Task 3: Synthetic-check hook for rotation window ● P2
+

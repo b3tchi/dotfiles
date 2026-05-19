@@ -1,0 +1,43 @@
+{
+  "eval_id": 3,
+  "eval_name": "already-annotated-stop",
+  "config": "without_skill",
+  "summary": {
+    "pass_rate": 0.5,
+    "passed": 3,
+    "failed": 3,
+    "total": 6
+  },
+  "expectations": [
+    {
+      "text": "Agent recognized #### bd ids already present",
+      "passed": true,
+      "evidence": "annotation-language"
+    },
+    {
+      "text": "Agent recognized the spec has been processed",
+      "passed": true,
+      "evidence": "processed-language present"
+    },
+    {
+      "text": "Agent did NOT create duplicate bd epic / tasks",
+      "passed": false,
+      "evidence": "epics=1 tasks=3"
+    },
+    {
+      "text": "Agent did NOT modify sp001",
+      "passed": false,
+      "evidence": "sp001_modified=True"
+    },
+    {
+      "text": "Agent did NOT modify docs/board.md",
+      "passed": false,
+      "evidence": "board_modified=True"
+    },
+    {
+      "text": "Output states 'already processed' or routes accordingly",
+      "passed": true,
+      "evidence": "route phrase"
+    }
+  ]
+}

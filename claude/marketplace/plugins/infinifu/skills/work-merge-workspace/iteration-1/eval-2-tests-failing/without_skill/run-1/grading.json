@@ -1,0 +1,43 @@
+{
+  "eval_id": 2,
+  "eval_name": "tests-failing",
+  "config": "without_skill",
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 6,
+    "failed": 0,
+    "total": 6
+  },
+  "expectations": [
+    {
+      "text": "Agent detected test failures",
+      "passed": true,
+      "evidence": "test-fail signal"
+    },
+    {
+      "text": "Agent did NOT modify sp001 / us003 / im002 zettels",
+      "passed": true,
+      "evidence": "sp_mod=False us_mod=False im_mod=False"
+    },
+    {
+      "text": "Agent did NOT modify docs/board.md",
+      "passed": true,
+      "evidence": "board_modified=False"
+    },
+    {
+      "text": "Agent did NOT modify docs/archive.md (sp001 NOT added to ## done)",
+      "passed": true,
+      "evidence": "sp001_under_done=False"
+    },
+    {
+      "text": "Agent did NOT close the bd epic",
+      "passed": true,
+      "evidence": "epic_closed=False"
+    },
+    {
+      "text": "Output routes back appropriately ((fix.{0,20}test|test.{0,20}fail|blocked.{0,20}test|cannot.{0,20}proceed|pytest.{0,30}fail))",
+      "passed": true,
+      "evidence": "routing phrase present"
+    }
+  ]
+}

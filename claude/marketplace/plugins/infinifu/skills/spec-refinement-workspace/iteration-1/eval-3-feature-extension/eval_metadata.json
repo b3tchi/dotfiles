@@ -1,0 +1,13 @@
+{
+  "eval_id": 3,
+  "eval_name": "feature-extension",
+  "prompt": "Run spec-refinement on sp001. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent surveyed ft002 and read its api_surface and providing sections"},
+    {"text": "Agent detected that sp001 solution calls vault.set_default_ttl() which is NOT in ft002.api_surface"},
+    {"text": "Agent detected that audit-log behavior is NOT in ft002.providing"},
+    {"text": "Output explicitly flags the feature-extension (mentions ft002 + extension/extend/not in api_surface)"},
+    {"text": "Either (a) breakdown includes a Task routing to idea-extend on ft002 before downstream tasks, OR (b) skill stops and asks user to scope the extension"},
+    {"text": "Agent did NOT silently write tasks that call the non-existent ft002 surface without flagging"}
+  ]
+}

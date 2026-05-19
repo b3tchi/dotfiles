@@ -1,0 +1,123 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..d686d2d
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,28 @@
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/product.md
++./.gitignore
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
+diff --git a/docs/board.md b/docs/board.md
+index e500c4e..d844037 100644
+--- a/docs/board.md
++++ b/docs/board.md
+@@ -1,9 +1,11 @@
+ # Board
+ 
+-Nothing in flight right now.
++One spec in flight at the idea stage — scoping a unified observability stack.
+ 
+ ## idea
+ 
++- [[sp001|unified observability stack (metrics, logs, traces, alerts, dashboards)]]
++
+ ## spec
+ 
+ ## ready
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+new file mode 100644
+index 0000000..45f2413
+--- /dev/null
++++ b/docs/notes/spec/sp001.md
+@@ -0,0 +1,47 @@
++---
++aliases:
++  - unified observability stack (metrics, logs, traces, alerts, dashboards)
++status: idea
++created: 2026-05-16
++---
++# Spec [[cat004]] [[cat003]] [[board]]
++
++## problem
++
++Acme's three services (`auth`, `metrics`, `reports`) currently observe themselves through three uncoordinated mechanisms: stdout for application logs, an ad-hoc Prometheus scraper bolted into the `metrics` service, and no distributed tracing at all. Alerts are printed to stdout and read by no one. There is no shared library for any of this — every service reinvents whatever it needs at the moment.
++
++The ask is a unified observability story for the platform, replacing the current mess with reusable horizontal capabilities. Because the ask packs five distinct observability concerns into "one feature," and the `ft###` schema is single-`providing` / single-`api_surface` / single-`status`, this proposal will mint **five separate Features** at spec-writing time, not one monolithic "observability" feature:
++
++- **`ft###` candidate 1 — metrics-emission.** Shared client for declaring counters / gauges / histograms and exposing a Prometheus scrape endpoint per service. Consumers: all three services. Replaces the ad-hoc scraper currently embedded in the `metrics` service. `api_surface` is the metric-declaration API (`Counter("foo_total").inc()`).
++- **`ft###` candidate 2 — structured-logging.** JSON log formatter with levels, correlation-id propagation, and a uniform schema. Consumers: all three services. Replaces stdout `print` calls. `api_surface` is a `get_logger(__name__)` factory returning a configured logger.
++- **`ft###` candidate 3 — distributed-tracing.** OpenTelemetry SDK wrapper that emits spans, propagates trace-ids across in-process and HTTP boundaries, and exports to a collector. Consumers: all three services. New capability — nothing replaces. `api_surface` is span-start / span-attribute helpers (`with tracer.start_span("name"):`).
++- **`ft###` candidate 4 — alerting-rules.** Alert-rule authoring contract (where rules live, how they bind to metrics, how they fire), plus a router that delivers fired alerts to a target channel. Consumers: every service that wants to be alerted on. Replaces "alerts via stdout" from the `metrics` service. `api_surface` is the rule YAML schema + the configured router endpoint.
++- **`ft###` candidate 5 — dashboards.** Dashboard-as-code provisioning so each service can register its panels. Consumers: every service. New capability. `api_surface` is the dashboard JSON schema + the provisioning command.
++
++Each of the five has its own `## providing`, its own `## api_surface`, its own consumer ergonomics, and could plausibly carry its own lifecycle — that is the granularity test the skill enforces, and these five each pass it. They are not one feature.
++
++**Sizing call — one `sp###`, not five.** The skill's default is one `sp###` unless per-feature work is independent and non-trivial in a way that demands separate board lifecycles. Reading against the rule, the per-feature work is non-trivial, but:
++
++1. The user explicitly framed this as a unified roll-out replacing today's mess, not five independent product bets.
++2. No backlog story is currently blocked on any one of the five — there is no urgency that would make ship-time skew (tracing in Q3 vs alerting in Q1) more valuable than a coherent design pass.
++3. Two of the five (dashboards, alerting) functionally depend on the metrics pipeline shipping first, so a single coherent plan keeps the sequencing legible.
++4. The skill explicitly says "merging later is harder than splitting later" — splitting at task level during `spec-refinement` is cheap; reuniting five independent specs after the fact is not.
++
++The single `sp001` will list all five `ft###` candidates in `## solution` at spec-writing, then break into per-feature tasks at `spec-refinement`. If during refinement any one of the five turns out large enough to warrant its own board lifecycle, it can be peeled off into its own `sp###` then — at task granularity that decision is cheap.
++
++**Consumers (concrete).** All three services consume all five features. No feature has only one consumer.
++
++**Migration intent.** Two ad-hoc sites get replaced rather than augmented:
++
++- The Prometheus scraper currently embedded in `src/services/metrics/` migrates to consume `ft###` metrics-emission like every other service. The `metrics` service stops being the metrics-collection special-case and becomes a normal consumer.
++- The stdout alert path in `src/services/metrics/` gets routed through `ft###` alerting-rules.
++
++No existing `im###` card describes these ad-hoc sites today (im001 is the reports dashboard only), so the migration writeups will land at spec-writing alongside the new feature drafts. Once those ad-hoc sites are removed, the platform has a single observability story.
++
++**Binding ADRs.** None yet in `[[cat004]]`. Decisions that will likely fall out of design (collector backend choice, retention windows for traces and logs, alert routing target) should be filed as ADRs during `spec-writing`. `[[adr0003]]` (no SMTP relay — services use smtplib directly) sits in `[[cat003]]` and is adjacent; it constrains how alerts can be delivered today (direct smtplib only), which the alerting-rules feature will need to either inherit or supersede.
++
++**Categories.** `[[cat004]]` (observability) is the primary home. `[[cat003]]` (infrastructure) appears in the H1 because alerting routing and dashboard provisioning are deployment / cross-service plumbing concerns.
++
++---
++
++Index: [[board]]
+diff --git a/gate_reached.md b/gate_reached.md
+new file mode 100644
+index 0000000..ea8a263
+--- /dev/null
++++ b/gate_reached.md
+@@ -0,0 +1,13 @@
++# Gate note
++
++The shared `idea-brainstorming` process would normally require:
++1. One-question-at-a-time clarification of capability boundary + consumer set + constraints.
++2. A 2-3 design-approach proposal.
++3. Section-by-section approval before emitting any zettel.
++
++Per the user's instruction "work without stopping for clarifying questions," I bypassed the hard gate and emitted the `sp001` directly. The granularity and sizing decisions were made unilaterally based on what was readable in the sandbox:
++
++- Granularity: 5 capabilities → 5 `ft###` candidates (named in `sp001 ## problem`).
++- Sizing: one `sp###` (skill default; user framed unified rollout; no story-level urgency; metrics→dashboards sequencing benefits from coherence; task-level split deferred to `spec-refinement`).
++
++Capability boundaries, alert-router target, and tracing backend were left as open questions inside `sp001` — they would normally have been resolved before minting via the MC question cadence.

@@ -1,0 +1,45 @@
+{
+  "summary": {
+    "passed": 7,
+    "failed": 0,
+    "total": 7,
+    "pass_rate": 1.0
+  },
+  "expectations": [
+    {
+      "text": "chronicle.md exists",
+      "passed": true,
+      "evidence": "exists=True; size=2881"
+    },
+    {
+      "text": "Exactly 2 tasks dispatched in first batch",
+      "passed": true,
+      "evidence": "closed=2; in_progress=0"
+    },
+    {
+      "text": "Both batch tasks reached 'closed' (reviewer approved)",
+      "passed": true,
+      "evidence": "closed_ids=['eval-3a9', 'eval-dcw']"
+    },
+    {
+      "text": "Orchestrator emitted progress report after batch 1",
+      "passed": true,
+      "evidence": "progress_report_kw=True"
+    },
+    {
+      "text": "Orchestrator said 'Ready for feedback' or equivalent",
+      "passed": true,
+      "evidence": "feedback_prompt=True"
+    },
+    {
+      "text": "Remaining 2 ready tasks untouched (still open)",
+      "passed": true,
+      "evidence": "untouched=['eval-737', 'eval-vn0']"
+    },
+    {
+      "text": "Run ended in waiting state (no batch-2 dispatch)",
+      "passed": true,
+      "evidence": "tail_wait=True; tail_new_dispatch=False"
+    }
+  ]
+}

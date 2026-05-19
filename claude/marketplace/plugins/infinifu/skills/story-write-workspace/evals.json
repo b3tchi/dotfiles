@@ -1,0 +1,73 @@
+{
+  "skill_name": "story-write",
+  "evals": [
+    {
+      "id": 0,
+      "eval_name": "full-info-upfront-existing-persona",
+      "prompt": "Add a user story: as a requestor I want to cancel a submitted request before it has been approved, because I sometimes realize I ordered the wrong samples after submitting. Acceptance criteria: cancel button only shown for status=Submitted requests; cancellation sets status to Cancelled; cancelled requests cannot be re-edited.",
+      "assertions": [
+        {"text": "A new file docs/notes/us###.md was created in the sandbox"},
+        {"text": "Filename slug matches us<NNN>.md with three-digit zero-padded sequential id"},
+        {"text": "ID does not collide with existing us001/us002/us003/us013/us014 (so id is us015 or higher)"},
+        {"text": "YAML frontmatter contains aliases (list), status, created keys"},
+        {"text": "status frontmatter value is 'draft'"},
+        {"text": "created frontmatter value matches ISO date YYYY-MM-DD"},
+        {"text": "H1 includes [[product]] wikilink"},
+        {"text": "## role section contains wikilink [[pn001|requestor]] referencing the existing persona"},
+        {"text": "## want section describes cancelling a submitted request"},
+        {"text": "## because section explains realizing wrong samples / ordered incorrectly"},
+        {"text": "## acceptance_criteria has exactly 3 bullets matching the user's input"},
+        {"text": "Footer contains 'Index: [[product]]'"}
+      ]
+    },
+    {
+      "id": 1,
+      "eval_name": "partial-info-new-persona",
+      "prompt": "Capture this as a story — the warehouse picker wants to mark a request as picked once items are pulled from inventory, because that signals it's ready for handoff.",
+      "assertions": [
+        {"text": "A new file docs/notes/us###.md was created"},
+        {"text": "Filename slug is us<NNN>.md with three-digit zero-padded id"},
+        {"text": "Frontmatter aliases entry is a human-readable title describing the pick action"},
+        {"text": "status frontmatter is 'draft'"},
+        {"text": "## role wikilink either references an existing persona alias (e.g. requestor, approver) OR a newly-created pn### that matches 'picker' or 'warehouse'"},
+        {"text": "## want describes marking the request as picked"},
+        {"text": "## because gives a non-empty motivation (mentions handoff or ready-for-pickup)"},
+        {"text": "## acceptance_criteria has at least 1 bullet (derived if user did not specify, with disclosure)"},
+        {"text": "Footer contains 'Index: [[product]]'"}
+      ]
+    },
+    {
+      "id": 2,
+      "eval_name": "fresh-workspace-first-story",
+      "prompt": "Add my first story: as a guest I want to view the public catalog without signing in, because I want to evaluate the products before creating an account.",
+      "assertions": [
+        {"text": "A new file docs/notes/us001.md was created (first story of empty workspace)"},
+        {"text": "Filename is exactly us001.md, not us<larger>.md"},
+        {"text": "Frontmatter contains aliases (with at least one entry), status: draft, created: ISO date"},
+        {"text": "H1 ends with [[product]] wikilink"},
+        {"text": "## role section references a persona via wikilink (existing or newly created pn###)"},
+        {"text": "## want describes browsing the public catalog without auth"},
+        {"text": "## because mentions evaluation / pre-account browsing"},
+        {"text": "## acceptance_criteria has at least 1 testable bullet"},
+        {"text": "Footer contains 'Index: [[product]]'"}
+      ]
+    },
+    {
+      "id": 3,
+      "eval_name": "worktree-writes-to-main",
+      "prompt": "Add a user story: as a requestor I want to clone a previous request as a starting point for a new one, because most of my orders look almost identical to past ones. Acceptance criteria: clone button visible on closed requests; clone copies line items but leaves notes blank; cloned request starts in Draft status.",
+      "sandbox": {"mode": "worktree", "cwd": "feat"},
+      "assertions": [
+        {"text": "A new file us###.md was created under <sandbox>/main/docs/notes/ (the main worktree's AKM dir)"},
+        {"text": "NO new us*.md was created under <sandbox>/feat/docs/notes/ (the feature worktree's tree is untouched)"},
+        {"text": "Filename slug matches us<NNN>.md with three-digit zero-padded id and is us015 or higher (does not collide with seeded ids us001-us014)"},
+        {"text": "The new file is staged in the main worktree's git index (git -C <sandbox>/main status --porcelain shows the file as 'A ' or 'AM ')"},
+        {"text": "No commit was created on main for this story (git -C <sandbox>/main log --oneline shows only the seed commit, not a new story commit) — story-write only stages, the next lifecycle stage commits"},
+        {"text": "## role section contains [[pn001|requestor]] referencing the existing seeded persona"},
+        {"text": "## acceptance_criteria has exactly 3 bullets matching the user's input"},
+        {"text": "Footer contains 'Index: [[product]]'"},
+        {"text": "Skill confirmation surfaces the absolute AKM path so the user sees the write landed in <sandbox>/main, not <sandbox>/feat"}
+      ]
+    }
+  ]
+}

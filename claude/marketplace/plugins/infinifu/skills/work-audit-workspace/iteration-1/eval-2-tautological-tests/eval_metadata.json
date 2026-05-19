@@ -1,0 +1,13 @@
+{
+  "eval_id": 2,
+  "eval_name": "tautological-tests",
+  "prompt": "Audit Task 1 (rotate_secret helper) via work-audit. Task id is in .work-do-task-ids.json. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent read tests/lib/test_vault.py"},
+    {"text": "Agent identified the tests are tautological (mentions tautological / weak / can't catch bugs / trivia)"},
+    {"text": "Agent issued REJECTED verdict"},
+    {"text": "Agent did NOT close Task 1"},
+    {"text": "Agent logged gap notes to bd including test-quality issues"},
+    {"text": "Rejection report names specific tests as weak (e.g., 'test_rotate_secret_exists' or similar)"}
+  ]
+}

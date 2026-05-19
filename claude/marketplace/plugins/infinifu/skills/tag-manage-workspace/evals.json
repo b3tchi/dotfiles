@@ -1,0 +1,43 @@
+{
+  "skill_name": "tag-manage",
+  "evals": [
+    {
+      "id": 0,
+      "eval_name": "list-taxonomy",
+      "prompt": "What tags do we have in the product backlog?",
+      "assertions": [
+        {"text": "Output is a markdown table or list of tags with usage counts"},
+        {"text": "Output includes tag 'auth' with count 2"},
+        {"text": "Output includes tag 'export' with count 2"},
+        {"text": "Output includes tag 'admin' with count 2"},
+        {"text": "Output includes tag 'reports' with count 2"},
+        {"text": "Output mentions example story ids per tag (e.g. 2605-002, 2605-005 under auth)"},
+        {"text": "Output includes a summary line stating distinct tag count"}
+      ]
+    },
+    {
+      "id": 1,
+      "eval_name": "add-tag-to-story",
+      "prompt": "Add the tag 'billing' to story 2605-001.",
+      "assertions": [
+        {"text": "stories.yaml was modified — story 2605-001's tags now contains 'billing'"},
+        {"text": "Original tags ('export', 'data') are preserved on 2605-001"},
+        {"text": "No other story's tags were modified"},
+        {"text": "Response notes that 'billing' is a new tag (not previously in taxonomy)"},
+        {"text": "Response shows the resulting tags line for 2605-001"}
+      ]
+    },
+    {
+      "id": 2,
+      "eval_name": "suggest-for-draft",
+      "prompt": "I'm drafting a story: as a billing admin I want to view monthly subscription invoices so I can reconcile revenue. What tags should I use?",
+      "assertions": [
+        {"text": "Output proposes 1-4 tags"},
+        {"text": "Suggested tags include 'billing' OR 'admin' OR 'reports'"},
+        {"text": "Output explains why each tag was picked (which keyword matched)"},
+        {"text": "Output uses existing taxonomy where possible (does not invent unique new tags)"},
+        {"text": "Output is in the suggest-mode template (proposing, not modifying yaml)"}
+      ]
+    }
+  ]
+}

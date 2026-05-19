@@ -1,0 +1,45 @@
+{
+  "eval_id": 5,
+  "eval_name": "persona-missing",
+  "config": "without_skill",
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 6,
+    "failed": 0,
+    "total": 6
+  },
+  "expectations": [
+    {
+      "text": "Agent read us005 and confirmed status: draft",
+      "passed": true,
+      "evidence": "us005 + draft"
+    },
+    {
+      "text": "Agent identified pn999 (compliance-officer) is missing",
+      "passed": true,
+      "evidence": "pn999 + missing-language phrase"
+    },
+    {
+      "text": "Agent did NOT promote us005 to ready before pn### is in place",
+      "passed": [
+        "docs/notes/pn003.md"
+      ],
+      "evidence": "us005_modified=True status=ready new_pn=['docs/notes/pn003.md']"
+    },
+    {
+      "text": "Agent minted persona OR routed to persona-write OR hit gate requesting mint",
+      "passed": true,
+      "evidence": "new_pn=['docs/notes/pn003.md'] gate=False route=False"
+    },
+    {
+      "text": "Agent did NOT silently proceed past the missing-persona gap",
+      "passed": true,
+      "evidence": "missing-persona acknowledged"
+    },
+    {
+      "text": "Persona-mint is acknowledged before any sp###.md emission",
+      "passed": true,
+      "evidence": "sp_count=1 new_pn=['docs/notes/pn003.md'] gate=False route=False"
+    }
+  ]
+}

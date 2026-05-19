@@ -1,0 +1,43 @@
+{
+  "eval_id": 3,
+  "eval_name": "wrong-status-spec",
+  "config": "without_skill",
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 6,
+    "failed": 0,
+    "total": 6
+  },
+  "expectations": [
+    {
+      "text": "Agent recognized sp001 not at status: ready",
+      "passed": true,
+      "evidence": "wrong-status signal"
+    },
+    {
+      "text": "Agent did NOT modify sp001 / us003 / im002 zettels",
+      "passed": true,
+      "evidence": "sp_mod=False us_mod=False im_mod=False"
+    },
+    {
+      "text": "Agent did NOT modify docs/board.md",
+      "passed": true,
+      "evidence": "board_modified=False"
+    },
+    {
+      "text": "Agent did NOT modify docs/archive.md (sp001 NOT added to ## done)",
+      "passed": true,
+      "evidence": "sp001_under_done=False"
+    },
+    {
+      "text": "Agent did NOT close the bd epic",
+      "passed": true,
+      "evidence": "epic_closed=False"
+    },
+    {
+      "text": "Output routes back appropriately ((spec-refinement|spec-ready|not.{0,20}ready|status.{0,20}spec))",
+      "passed": true,
+      "evidence": "routing phrase present"
+    }
+  ]
+}

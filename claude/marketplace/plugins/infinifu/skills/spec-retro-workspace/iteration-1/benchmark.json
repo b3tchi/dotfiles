@@ -1,0 +1,460 @@
+{
+  "metadata": {
+    "skill_name": "spec-retro",
+    "skill_path": "<path/to/skill>",
+    "executor_model": "<model-name>",
+    "analyzer_model": "<model-name>",
+    "timestamp": "2026-05-17T08:55:21Z",
+    "evals_run": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "runs_per_configuration": 3
+  },
+  "runs": [
+    {
+      "eval_id": 0,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 8,
+        "failed": 0,
+        "total": 8,
+        "time_seconds": 251.8,
+        "tokens": 73393,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent ran git log / git diff for shipped reality",
+          "passed": true,
+          "evidence": "git command in text"
+        },
+        {
+          "text": "Agent read im002 + ft002 + adr + bd notes",
+          "passed": true,
+          "evidence": "context-survey present"
+        },
+        {
+          "text": "Agent rewrote im002 body",
+          "passed": true,
+          "evidence": "im002_modified=True"
+        },
+        {
+          "text": "Agent updated ft002 (widen api_surface)",
+          "passed": true,
+          "evidence": "ft002_modified=True"
+        },
+        {
+          "text": "Agent drafted new us### at status: draft for follow-up",
+          "passed": true,
+          "evidence": "new_us_drafts=['docs/notes/us006.md']"
+        },
+        {
+          "text": "Agent closed the bd epic",
+          "passed": true,
+          "evidence": "epic_status=closed"
+        },
+        {
+          "text": "Agent did NOT touch docs/board.md or docs/archive.md",
+          "passed": true,
+          "evidence": "board_mod=False archive_mod=False"
+        },
+        {
+          "text": "Agent did NOT change sp001/us003/im002 frontmatter status",
+          "passed": true,
+          "evidence": "sp=done us=done im=accepted"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 160.4,
+        "tokens": 59100,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent detected epic already closed",
+          "passed": true,
+          "evidence": "already-closed phrase"
+        },
+        {
+          "text": "Agent did NOT re-close (or reopen) the epic",
+          "passed": true,
+          "evidence": "epic_status=closed"
+        },
+        {
+          "text": "Agent did NOT rewrite im002 / mint new us / adr / ft updates",
+          "passed": true,
+          "evidence": "im_mod=False ft_mod=False new_us=0 new_adr=0"
+        },
+        {
+          "text": "Output explicitly states 'already closed' / 'retro already ran'",
+          "passed": true,
+          "evidence": "no-op phrase"
+        },
+        {
+          "text": "Agent did NOT touch docs/board.md or docs/archive.md",
+          "passed": true,
+          "evidence": "board=False archive=False"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 108.8,
+        "tokens": 41795,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent recognized sp001 status is ready (not done)",
+          "passed": true,
+          "evidence": "status-ready phrase"
+        },
+        {
+          "text": "Agent did NOT rewrite im002 / mint new us / adr / ft updates",
+          "passed": true,
+          "evidence": "im=False ft=False new_us=0 new_adr=0"
+        },
+        {
+          "text": "Agent did NOT close the bd epic",
+          "passed": true,
+          "evidence": "epic_status=open"
+        },
+        {
+          "text": "Output routes back to work-merge OR states 'not done'",
+          "passed": true,
+          "evidence": "route phrase"
+        },
+        {
+          "text": "Agent did NOT touch docs/board.md or docs/archive.md",
+          "passed": true,
+          "evidence": "board=False archive=False"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.8571428571428571,
+        "passed": 6,
+        "failed": 1,
+        "total": 7,
+        "time_seconds": 271.7,
+        "tokens": 55021,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent ran git log / git diff",
+          "passed": false,
+          "evidence": "git evidence"
+        },
+        {
+          "text": "Agent read im002 / ft002 / bd notes",
+          "passed": true,
+          "evidence": "survey evidence"
+        },
+        {
+          "text": "Agent may have rewritten im002 body OR left as-is",
+          "passed": true,
+          "evidence": "im002_modified=False (acceptable either way)"
+        },
+        {
+          "text": "Agent did NOT draft new us###",
+          "passed": true,
+          "evidence": "new_us=[]"
+        },
+        {
+          "text": "Agent did NOT mint new adr####",
+          "passed": true,
+          "evidence": "new_adr=[]"
+        },
+        {
+          "text": "Agent closed the bd epic",
+          "passed": true,
+          "evidence": "epic_status=closed"
+        },
+        {
+          "text": "Agent did NOT touch docs/board.md or docs/archive.md",
+          "passed": true,
+          "evidence": "board=False archive=False"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 0,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.75,
+        "passed": 6,
+        "failed": 2,
+        "total": 8,
+        "time_seconds": 271.9,
+        "tokens": 72515,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent ran git log / git diff for shipped reality",
+          "passed": false,
+          "evidence": "git command in text"
+        },
+        {
+          "text": "Agent read im002 + ft002 + adr + bd notes",
+          "passed": true,
+          "evidence": "context-survey present"
+        },
+        {
+          "text": "Agent rewrote im002 body",
+          "passed": true,
+          "evidence": "im002_modified=True"
+        },
+        {
+          "text": "Agent updated ft002 (widen api_surface)",
+          "passed": false,
+          "evidence": "ft002_modified=False"
+        },
+        {
+          "text": "Agent drafted new us### at status: draft for follow-up",
+          "passed": true,
+          "evidence": "new_us_drafts=['docs/notes/us006.md', 'docs/notes/us007.md', 'docs/notes/us008.md']"
+        },
+        {
+          "text": "Agent closed the bd epic",
+          "passed": true,
+          "evidence": "epic_status=closed"
+        },
+        {
+          "text": "Agent did NOT touch docs/board.md or docs/archive.md",
+          "passed": true,
+          "evidence": "board_mod=False archive_mod=False"
+        },
+        {
+          "text": "Agent did NOT change sp001/us003/im002 frontmatter status",
+          "passed": true,
+          "evidence": "sp=done us=done im=accepted"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 110.4,
+        "tokens": 55517,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent detected epic already closed",
+          "passed": true,
+          "evidence": "already-closed phrase"
+        },
+        {
+          "text": "Agent did NOT re-close (or reopen) the epic",
+          "passed": true,
+          "evidence": "epic_status=closed"
+        },
+        {
+          "text": "Agent did NOT rewrite im002 / mint new us / adr / ft updates",
+          "passed": true,
+          "evidence": "im_mod=False ft_mod=False new_us=0 new_adr=0"
+        },
+        {
+          "text": "Output explicitly states 'already closed' / 'retro already ran'",
+          "passed": true,
+          "evidence": "no-op phrase"
+        },
+        {
+          "text": "Agent did NOT touch docs/board.md or docs/archive.md",
+          "passed": true,
+          "evidence": "board=False archive=False"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.6,
+        "passed": 3,
+        "failed": 2,
+        "total": 5,
+        "time_seconds": 236.2,
+        "tokens": 57810,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent recognized sp001 status is ready (not done)",
+          "passed": true,
+          "evidence": "status-ready phrase"
+        },
+        {
+          "text": "Agent did NOT rewrite im002 / mint new us / adr / ft updates",
+          "passed": true,
+          "evidence": "im=False ft=False new_us=0 new_adr=0"
+        },
+        {
+          "text": "Agent did NOT close the bd epic",
+          "passed": false,
+          "evidence": "epic_status=closed"
+        },
+        {
+          "text": "Output routes back to work-merge OR states 'not done'",
+          "passed": true,
+          "evidence": "route phrase"
+        },
+        {
+          "text": "Agent did NOT touch docs/board.md or docs/archive.md",
+          "passed": false,
+          "evidence": "board=True archive=True"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.8571428571428571,
+        "passed": 6,
+        "failed": 1,
+        "total": 7,
+        "time_seconds": 186.5,
+        "tokens": 49727,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent ran git log / git diff",
+          "passed": false,
+          "evidence": "git evidence"
+        },
+        {
+          "text": "Agent read im002 / ft002 / bd notes",
+          "passed": true,
+          "evidence": "survey evidence"
+        },
+        {
+          "text": "Agent may have rewritten im002 body OR left as-is",
+          "passed": true,
+          "evidence": "im002_modified=False (acceptable either way)"
+        },
+        {
+          "text": "Agent did NOT draft new us###",
+          "passed": true,
+          "evidence": "new_us=[]"
+        },
+        {
+          "text": "Agent did NOT mint new adr####",
+          "passed": true,
+          "evidence": "new_adr=[]"
+        },
+        {
+          "text": "Agent closed the bd epic",
+          "passed": true,
+          "evidence": "epic_status=closed"
+        },
+        {
+          "text": "Agent did NOT touch docs/board.md or docs/archive.md",
+          "passed": true,
+          "evidence": "board=False archive=False"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 0.9643,
+        "stddev": 0.0714,
+        "min": 0.8571,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 198.175,
+        "stddev": 76.8037,
+        "min": 108.8,
+        "max": 271.7
+      },
+      "tokens": {
+        "mean": 57327.25,
+        "stddev": 13010.5156,
+        "min": 41795,
+        "max": 73393
+      }
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 0.8018,
+        "stddev": 0.1691,
+        "min": 0.6,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 201.25,
+        "stddev": 69.9624,
+        "min": 110.4,
+        "max": 271.9
+      },
+      "tokens": {
+        "mean": 58892.25,
+        "stddev": 9697.8469,
+        "min": 49727,
+        "max": 72515
+      }
+    },
+    "delta": {
+      "pass_rate": "+0.16",
+      "time_seconds": "-3.1",
+      "tokens": "-1565"
+    }
+  },
+  "notes": []
+}

@@ -1,0 +1,14 @@
+{
+  "eval_id": 1,
+  "eval_name": "task-still-in-progress",
+  "prompt": "Run work-merge on sp001. Task ids in .work-do-task-ids.json. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent verified bd children status and detected Task 2 is still in_progress"},
+    {"text": "Agent did NOT flip sp001 status (stays ready)"},
+    {"text": "Agent did NOT flip us003 or im002 statuses"},
+    {"text": "Agent did NOT modify docs/board.md"},
+    {"text": "Agent did NOT modify docs/archive.md (sp001 NOT added to archive)"},
+    {"text": "Agent did NOT close the bd epic"},
+    {"text": "Output routes back to work-audit OR explicitly states tasks not complete"}
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "run_id": "eval-worktree-writes-to-main-old_skill",
+  "expectations": [
+    {"text": "A new file us###.md was created under <sandbox>/main/docs/notes/ (the main worktree's AKM dir)", "passed": false, "evidence": "main-tree.txt has only seeded us001-us014; no us015 in main"},
+    {"text": "NO new us*.md was created under <sandbox>/feat/docs/notes/ (the feature worktree's tree is untouched)", "passed": false, "evidence": "feat-tree.txt shows /tmp/sw-iter6-old/feat/docs/notes/us015.md — leak into feature worktree"},
+    {"text": "Filename slug matches us<NNN>.md with three-digit zero-padded id and is us015 or higher (does not collide with seeded ids us001-us014)", "passed": true, "evidence": "filename us015.md (but in wrong worktree)"},
+    {"text": "The new file is staged in the main worktree's git index (git -C <sandbox>/main status --porcelain shows the file as 'A ' or 'AM ')", "passed": false, "evidence": "main-status.txt is empty — main is clean; nothing was staged on main"},
+    {"text": "No commit was created on main for this story", "passed": true, "evidence": "main-log.txt has only seed commit — but vacuously, since nothing was written to main"},
+    {"text": "## role section contains [[pn001|requestor]] referencing the existing seeded persona", "passed": true, "evidence": "zettel role section uses [[pn001|requestor]]"},
+    {"text": "## acceptance_criteria has exactly 3 bullets matching the user's input", "passed": true, "evidence": "zettel AC has 3 bullets verbatim"},
+    {"text": "Footer contains 'Index: [[product]]'", "passed": true, "evidence": "zettel ends with Index: [[product]]"},
+    {"text": "Skill confirmation surfaces the absolute AKM path so the user sees the write landed in <sandbox>/main, not <sandbox>/feat", "passed": false, "evidence": "response.md reports docs/notes/us015.md path relative to cwd (feat worktree); no AKM root concept in old skill"}
+  ],
+  "summary": {"pass_rate": 0.555, "passed": 5, "failed": 4, "total": 9}
+}

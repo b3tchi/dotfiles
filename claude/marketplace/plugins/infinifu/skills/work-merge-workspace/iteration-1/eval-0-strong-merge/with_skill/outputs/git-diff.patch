@@ -1,0 +1,116 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..15283b6
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,55 @@
++./AGENTS.md
++./.beads/config.yaml
++./.beads/dolt-server.port
++./.beads/export-state.json
++./.beads/.gitignore
++./.beads/hooks/post-checkout
++./.beads/hooks/post-merge
++./.beads/hooks/pre-commit
++./.beads/hooks/prepare-commit-msg
++./.beads/hooks/pre-push
++./.beads/interactions.jsonl
++./.beads/issues.jsonl
++./.beads/last-touched
++./.beads/.local_version
++./.beads/metadata.json
++./.beads/README.md
++./CLAUDE.md
++./.claude/settings.json
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/im002.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/spec/sp001.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/notes/us004.md
++./docs/notes/us005.md
++./docs/product.md
++./.gitignore
++./pyproject.toml
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/lib/vault.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
++./tests/lib/__init__.py
++./tests/lib/test_vault.py
++./.work-do-task-ids.json
+diff --git a/docs/archive.md b/docs/archive.md
+index 8c42aab..a36f589 100644
+--- a/docs/archive.md
++++ b/docs/archive.md
+@@ -3,3 +3,5 @@
+ Shipped specs.
+ 
+ ## done
++
++- [[sp001|rotate service credentials without downtime]]
+diff --git a/docs/board.md b/docs/board.md
+index 205ea48..7d49dfe 100644
+--- a/docs/board.md
++++ b/docs/board.md
+@@ -8,4 +8,3 @@ One spec ready for execution.
+ 
+ ## ready
+ 
+-- [[sp001|rotate service credentials without downtime]]
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+index 672b2d5..34a83a7 100644
+--- a/docs/notes/spec/sp001.md
++++ b/docs/notes/spec/sp001.md
+@@ -1,10 +1,10 @@
+ ---
+ aliases:
+   - rotate service credentials without downtime
+-status: ready
++status: done
+ created: 2026-04-28
+ ---
+-# Spec [[cat001]] [[cat003]] [[board]]
++# Spec [[cat001]] [[cat003]] [[archive]]
+ 
+ ## solves
+ [[us003|rotate service credentials without downtime]]
+@@ -149,4 +149,4 @@ task
+ 
+ ---
+ 
+-Index: [[board]]
++Index: [[archive]]
+diff --git a/docs/notes/us003.md b/docs/notes/us003.md
+index 6145838..561bd30 100644
+--- a/docs/notes/us003.md
++++ b/docs/notes/us003.md
+@@ -1,7 +1,7 @@
+ ---
+ aliases:
+   - rotate service credentials without downtime
+-status: ready
++status: done
+ created: 2026-04-15
+ ---
+ # Story [[platform-flow]] [[product]]

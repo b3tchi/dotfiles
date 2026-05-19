@@ -1,0 +1,150 @@
+#!/usr/bin/env nu
+# akm — manage markdown-oxide PKM workspaces from a single canonical akm.md.
+#
+# Subcommands:
+#   akm init <target>     bootstrap (or re-link) PKM under <target>/docs/
+#
+# Examples:
+#   akm init .                       # init current repo
+#   akm init ~/repos/new-project     # init another project
+#
+# Env overrides:
+#   AKM_SOURCE   absolute path to canonical akm.md
+#                default: ~/.dotfiles/claude/akm/akm.md
+#
+# To use as `akm` from anywhere, put this file (or a symlink) on PATH:
+#   ln -s ~/.dotfiles/claude/akm/akm ~/.local/bin/akm
+
+def "main init" [target: string] {
+  let akm_source = ($env.AKM_SOURCE? | default $"($env.HOME)/.dotfiles/claude/akm/akm.md")
+
+  if not ($akm_source | path exists) {
+    error make {
+      msg: $"AKM source not found at ($akm_source). Create it first, or override via AKM_SOURCE env var."
+    }
+  }
+
+  let root = ($target | path expand)
+  let docs = $"($root)/docs"
+  let notes = $"($docs)/notes"
+  let daily = $"($notes)/daily"
+  let assets = $"($docs)/assets"
+
+  mkdir $docs $notes $daily $assets
+
+  # Placeholder gitkeeps (no-op if already exist).
+  for d in [$notes $daily $assets] {
+    let keep = $"($d)/.gitkeep"
+    if not ($keep | path exists) { touch $keep }
+  }
+
+  # .moxide.toml — markdown-oxide workspace config.
+  let moxide = $"($docs)/.moxide.toml"
+  if not ($moxide | path exists) {
+    let content = '# markdown-oxide PKM workspace config
+# Workspace root: ./docs/
+# Notes (zettel) live in ./docs/notes/
+# Assets live in ./docs/assets/ (managed outside moxide — Obsidian attachmentFolderPath if used)
+
+dailynote = "%Y-%m-%d"
+
+new_file_folder_path = "notes"
+daily_notes_folder = "notes/daily"
+
+heading_completions = true
+title_headings = true
+unresolved_diagnostics = true
+semantic_tokens = true
+
+link_filenames_only = true
+
+include_md_extension_md_link = false
+include_md_extension_wikilink = false
+
+case_matching = "Smart"
+
+inlay_hints = true
+block_transclusion = true
+block_transclusion_length = "Full"
+
+excluded_folders = ["assets"]
+'
+    $content | save --force $moxide
+    print $"created: ($moxide)"
+  } else {
+    print $"kept:    ($moxide)"
+  }
+
+  # .markdownlint.json — lint relaxations.
+  let lint = $"($docs)/.markdownlint.json"
+  if not ($lint | path exists) {
+    '{
+  "MD022": false,
+  "MD032": false
+}
+' | save --force $lint
+    print $"created: ($lint)"
+  } else {
+    print $"kept:    ($lint)"
+  }
+
+  # product.md — hub stub if missing (don't overwrite existing).
+  let product = $"($docs)/product.md"
+  if not ($product | path exists) {
+    let stub = '# Product
+
+Central hub for this PKM. Every typed zettel is reachable from here.
+
+## Stories
+
+_(none yet — add `[[us###|<want clause>]]` under a persona heading)_
+
+## Features
+
+_(none yet — add `[[ft###|<capability>]]` entries when defined)_
+
+## Architecture Decision Records
+
+_(none yet — group `[[adr####]]` entries by `### [[cat###]]`)_
+
+## AKM Reference
+
+- [[akm]] — knowledge model: every zettel type, its schema and life-cycle
+'
+    $stub | save --force $product
+    print $"created: ($product)"
+  } else {
+    print $"kept:    ($product)"
+  }
+
+  # akm.md — symlink to canonical source.
+  # Use `test -L` so broken symlinks (target moved/renamed) get refreshed
+  # instead of blocking the new `ln -s`.
+  let akm_link = $"($notes)/akm.md"
+  let is_symlink = ((^test -L $akm_link | complete | get exit_code) == 0)
+  let is_regular = ((^test -e $akm_link | complete | get exit_code) == 0) and (not $is_symlink)
+
+  if $is_symlink {
+    ^rm $akm_link
+  } else if $is_regular {
+    print $"warn:    ($akm_link) exists as regular file; backing up to akm.md.bak"
+    mv $akm_link $"($akm_link).bak"
+  }
+  ^ln -s $akm_source $akm_link
+  print $"linked:  ($akm_link) -> ($akm_source)"
+
+  print ""
+  print $"PKM ready under ($docs)."
+}
+
+# Default — print help when invoked with no subcommand.
+def main [] {
+  print "akm — manage markdown-oxide PKM workspaces"
+  print ""
+  print "Usage:"
+  print "  akm init <target>     bootstrap (or re-link) PKM under <target>/docs/"
+  print ""
+  print "Examples:"
+  print "  akm init ."
+  print "  akm init ~/repos/new-project"
+}

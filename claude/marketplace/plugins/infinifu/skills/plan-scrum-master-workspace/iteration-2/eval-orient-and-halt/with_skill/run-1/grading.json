@@ -1,0 +1,75 @@
+{
+  "summary": {
+    "passed": 13,
+    "failed": 0,
+    "total": 13,
+    "pass_rate": 1.0
+  },
+  "expectations": [
+    {
+      "text": "dispatch_summary.md exists at sandbox root and is non-empty",
+      "passed": true,
+      "evidence": "exists=True; size=5277"
+    },
+    {
+      "text": "Summary references both seeded epic IDs",
+      "passed": true,
+      "evidence": "epic_auth=True; epic_billing=True"
+    },
+    {
+      "text": "Summary includes an interference / conflict assessment",
+      "passed": true,
+      "evidence": "interference_kw=True"
+    },
+    {
+      "text": "Summary classifies the epics as non-interfering",
+      "passed": true,
+      "evidence": "non_interfering_verdict=True"
+    },
+    {
+      "text": "Summary flags the stale in_progress task",
+      "passed": true,
+      "evidence": "stale_id_in_summary=True; flagged_language=True"
+    },
+    {
+      "text": "First batch lists exactly 2 tasks (max_parallel=2)",
+      "passed": true,
+      "evidence": "task_ids_in_batch=['eval-5jc', 'eval-ddg']"
+    },
+    {
+      "text": "First batch contains one task from each epic",
+      "passed": true,
+      "evidence": "a1_in_batch=True; b1_in_batch=True"
+    },
+    {
+      "text": "Summary references required config (max_parallel=2, mode=waves, worker_model=auto)",
+      "passed": true,
+      "evidence": "has_required_config=True"
+    },
+    {
+      "text": "Per-task worker_model with reasoning (auto mode)",
+      "passed": true,
+      "evidence": "model_mentions=3; has_reasoning=True"
+    },
+    {
+      "text": "Summary asks human for confirmation",
+      "passed": true,
+      "evidence": "proceed_gate=True"
+    },
+    {
+      "text": "No bd task newly claimed \u2014 in_progress count still 1 (the stale task)",
+      "passed": true,
+      "evidence": "in_progress_ids=['eval-6c1']"
+    },
+    {
+      "text": "No new git commits beyond the seed",
+      "passed": true,
+      "evidence": "commit_count=1"
+    },
+    {
+      "text": "No git worktrees were created",
+      "passed": true,
+      "evidence": "worktrees_dir_exists=False"
+    }
+  ]
+}

@@ -1,0 +1,160 @@
+diff --git a/docs/board.md b/docs/board.md
+index e500c4e..748e51d 100644
+--- a/docs/board.md
++++ b/docs/board.md
+@@ -1,9 +1,11 @@
+ # Board
+ 
+-Nothing in flight right now.
++One spec in flight at idea stage.
+ 
+ ## idea
+ 
++- [[sp001|quarterly audit-log export]]
++
+ ## spec
+ 
+ ## ready
+diff --git a/docs/notes/pn003.md b/docs/notes/pn003.md
+new file mode 100644
+index 0000000..0743947
+--- /dev/null
++++ b/docs/notes/pn003.md
+@@ -0,0 +1,30 @@
++---
++aliases:
++  - compliance-officer
++status: draft
++created: 2026-05-16
++---
++# Persona [[product]]
++
++## name
++Compliance Officer
++
++## summary
++Internal compliance role responsible for evidencing regulatory and
++legal obligations to auditors. Touches the platform read-only to
++extract audit artifacts (deletion logs, access logs, retention
++attestations) on a periodic cadence — typically quarterly.
++
++## primary_goals
++- Produce auditor-ready evidence on demand without engineering escalation
++- Trust the integrity of exported artifacts (tamper-evident, signed)
++- Stay aligned with legal and retention policy in place
++
++## open_questions
++- Which regulatory framework(s) drive the quarterly cadence (SOX, GDPR, internal policy)?
++- Are exports consumed only internally, or shared with external auditors directly?
++- Should the role have its own UI surface, or are CLI / scheduled-job exports sufficient?
++
++---
++
++Index: [[product]]
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+new file mode 100644
+index 0000000..90af100
+--- /dev/null
++++ b/docs/notes/spec/sp001.md
+@@ -0,0 +1,66 @@
++---
++aliases:
++  - quarterly audit-log export
++status: idea
++created: 2026-05-16
++---
++# Spec [[cat001]] [[cat002]] [[board]]
++
++## solves
++[[us005|quarterly audit-log export]]
++
++## problem
++
++The [[pn003|compliance-officer]] persona needs a quarterly export of
++all hard-deleted rows so legal can evidence proof-of-deletion to
++auditors. Today no such export exists; deletions happen via the
++nightly retention job ([[adr0002]] — Postgres `report_runs`, 90-day
++hard delete) but leave no durable, queryable audit trail outside the
++deletion itself.
++
++Story [[us005]] requires a CSV of all rows hard-deleted in the
++trailing quarter, with deletion timestamp, table, primary-key, and
++triggering job id, signed with a vault-managed key for tamper-evidence.
++
++**Categories touched.** This is both a security concern (audit trail,
++tamper-evidence — [[cat001]]) and a data concern (retention,
++deletion-record schema — [[cat002]]).
++
++**Binding decisions to inherit.**
++
++- [[adr0001]] — services authenticate via [[ft001]] basic-auth, so any
++  export endpoint or CLI the compliance officer touches inherits that
++  contract.
++- [[adr0002]] — reports persist in Postgres and are hard-deleted after
++  90 days via a nightly job. The deletion event itself is the data
++  source for the audit log; capturing it durably (without inflating
++  the 90-day window) is the core data-modeling question.
++
++**Candidate feature consumers (binding deferred to spec-writing).**
++
++- [[ft002]] — vault-secrets is the natural source of the tamper-
++  evidence signing key. Spec-writing decides the exact key shape /
++  rotation cadence.
++- [[ft001]] — basic-auth gates whoever triggers the export
++  (compliance-officer must authenticate even for read-only artifact
++  generation).
++
++No existing `[[ft###]]` provides an audit-log capability, so
++spec-writing will likely propose either a new feature or a story-local
++implementation; that choice is out of scope for the idea stage.
++
++**Open shape questions (for spec-writing).**
++
++- Where does the deletion record live? Sidecar table written by the
++  nightly job, append-only event log, or reconstructed from WAL? The
++  90-day retention from [[adr0002]] cannot apply to the audit trail
++  itself or quarterly evidence vanishes.
++- Synchronous CSV vs scheduled job depositing into a known location?
++  The compliance-officer persona's `open_questions` flag this
++  ([[pn003]] — UI vs CLI vs scheduled export).
++- Signing scope: per-row HMAC, manifest digest, detached signature on
++  the CSV file, or all three?
++
++---
++
++Index: [[board]]
+diff --git a/docs/notes/us005.md b/docs/notes/us005.md
+index e551a0a..a4743ae 100644
+--- a/docs/notes/us005.md
++++ b/docs/notes/us005.md
+@@ -1,13 +1,13 @@
+ ---
+ aliases:
+   - quarterly audit-log export
+-status: draft
++status: ready
+ created: 2026-04-25
+ ---
+ # Story [[compliance-flow]] [[product]]
+ 
+ ## role
+-[[pn999|compliance-officer]]
++[[pn003|compliance-officer]]
+ 
+ ## want
+ export a quarterly audit log of all data deletions
+diff --git a/docs/product.md b/docs/product.md
+index fdfa212..6477130 100644
+--- a/docs/product.md
++++ b/docs/product.md
+@@ -14,6 +14,10 @@ operations analyst and the platform-engineer personas.
+ 
+ - [[us003|rotate service credentials without downtime]]
+ 
++### [[pn003|compliance-officer]]
++
++- [[us005|quarterly audit-log export]]
++
+ ## Features
+ 
+ - [[ft001|basic-auth (password+TOTP)]]

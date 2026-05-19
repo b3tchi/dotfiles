@@ -1,0 +1,490 @@
+{
+  "metadata": {
+    "skill_name": "work-merge",
+    "skill_path": "<path/to/skill>",
+    "executor_model": "<model-name>",
+    "analyzer_model": "<model-name>",
+    "timestamp": "2026-05-17T08:36:32Z",
+    "evals_run": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "runs_per_configuration": 3
+  },
+  "runs": [
+    {
+      "eval_id": 0,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 10,
+        "failed": 0,
+        "total": 10,
+        "time_seconds": 148.0,
+        "tokens": 53532,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent ran tests and verified pass",
+          "passed": true,
+          "evidence": "pytest evidence"
+        },
+        {
+          "text": "Agent verified all bd children closed",
+          "passed": true,
+          "evidence": "bd-verify language"
+        },
+        {
+          "text": "Agent flipped sp001 status from ready to done",
+          "passed": true,
+          "evidence": "status=done"
+        },
+        {
+          "text": "Agent flipped sp001 footer Index from [[board]] to [[archive]]",
+          "passed": true,
+          "evidence": "footer_archive=True"
+        },
+        {
+          "text": "Agent flipped us003 status from ready to done",
+          "passed": true,
+          "evidence": "us003_status=done"
+        },
+        {
+          "text": "Agent flipped im002 status from proposed to accepted",
+          "passed": true,
+          "evidence": "im002_status=accepted"
+        },
+        {
+          "text": "Agent removed [[sp001]] from docs/board.md ## ready",
+          "passed": true,
+          "evidence": "board_modified=True under_ready=False"
+        },
+        {
+          "text": "Agent added [[sp001]] to docs/archive.md ## done",
+          "passed": true,
+          "evidence": "archive_modified=True under_done=True"
+        },
+        {
+          "text": "Agent closed the bd epic",
+          "passed": true,
+          "evidence": "epic_closed=True"
+        },
+        {
+          "text": "Agent presented the 4 git-landing options (or executed one)",
+          "passed": true,
+          "evidence": "options_presented=True"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 104.8,
+        "tokens": 45274,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent detected Task 2 is still in_progress",
+          "passed": true,
+          "evidence": "in_progress signal"
+        },
+        {
+          "text": "Agent did NOT modify sp001 / us003 / im002 zettels",
+          "passed": true,
+          "evidence": "sp_mod=False us_mod=False im_mod=False"
+        },
+        {
+          "text": "Agent did NOT modify docs/board.md",
+          "passed": true,
+          "evidence": "board_modified=False"
+        },
+        {
+          "text": "Agent did NOT modify docs/archive.md (sp001 NOT added to ## done)",
+          "passed": true,
+          "evidence": "sp001_under_done=False"
+        },
+        {
+          "text": "Agent did NOT close the bd epic",
+          "passed": true,
+          "evidence": "epic_closed=False"
+        },
+        {
+          "text": "Output routes back appropriately ((work-audit|in_progress|tasks.{0,20}not.{0,20}complete|incomplete))",
+          "passed": true,
+          "evidence": "routing phrase present"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 160.7,
+        "tokens": 48891,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent detected test failures",
+          "passed": true,
+          "evidence": "test-fail signal"
+        },
+        {
+          "text": "Agent did NOT modify sp001 / us003 / im002 zettels",
+          "passed": true,
+          "evidence": "sp_mod=False us_mod=False im_mod=False"
+        },
+        {
+          "text": "Agent did NOT modify docs/board.md",
+          "passed": true,
+          "evidence": "board_modified=False"
+        },
+        {
+          "text": "Agent did NOT modify docs/archive.md (sp001 NOT added to ## done)",
+          "passed": true,
+          "evidence": "sp001_under_done=False"
+        },
+        {
+          "text": "Agent did NOT close the bd epic",
+          "passed": true,
+          "evidence": "epic_closed=False"
+        },
+        {
+          "text": "Output routes back appropriately ((fix.{0,20}test|test.{0,20}fail|blocked.{0,20}test|cannot.{0,20}proceed|pytest.{0,30}fail))",
+          "passed": true,
+          "evidence": "routing phrase present"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 115.9,
+        "tokens": 45002,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent recognized sp001 not at status: ready",
+          "passed": true,
+          "evidence": "wrong-status signal"
+        },
+        {
+          "text": "Agent did NOT modify sp001 / us003 / im002 zettels",
+          "passed": true,
+          "evidence": "sp_mod=False us_mod=False im_mod=False"
+        },
+        {
+          "text": "Agent did NOT modify docs/board.md",
+          "passed": true,
+          "evidence": "board_modified=False"
+        },
+        {
+          "text": "Agent did NOT modify docs/archive.md (sp001 NOT added to ## done)",
+          "passed": true,
+          "evidence": "sp001_under_done=False"
+        },
+        {
+          "text": "Agent did NOT close the bd epic",
+          "passed": true,
+          "evidence": "epic_closed=False"
+        },
+        {
+          "text": "Output routes back appropriately ((spec-refinement|spec-ready|not.{0,20}ready|status.{0,20}spec))",
+          "passed": true,
+          "evidence": "routing phrase present"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 0,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.9,
+        "passed": 9,
+        "failed": 1,
+        "total": 10,
+        "time_seconds": 301.4,
+        "tokens": 71444,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent ran tests and verified pass",
+          "passed": true,
+          "evidence": "pytest evidence"
+        },
+        {
+          "text": "Agent verified all bd children closed",
+          "passed": true,
+          "evidence": "bd-verify language"
+        },
+        {
+          "text": "Agent flipped sp001 status from ready to done",
+          "passed": true,
+          "evidence": "status=done"
+        },
+        {
+          "text": "Agent flipped sp001 footer Index from [[board]] to [[archive]]",
+          "passed": true,
+          "evidence": "footer_archive=True"
+        },
+        {
+          "text": "Agent flipped us003 status from ready to done",
+          "passed": true,
+          "evidence": "us003_status=done"
+        },
+        {
+          "text": "Agent flipped im002 status from proposed to accepted",
+          "passed": true,
+          "evidence": "im002_status=accepted"
+        },
+        {
+          "text": "Agent removed [[sp001]] from docs/board.md ## ready",
+          "passed": true,
+          "evidence": "board_modified=True under_ready=False"
+        },
+        {
+          "text": "Agent added [[sp001]] to docs/archive.md ## done",
+          "passed": true,
+          "evidence": "archive_modified=True under_done=True"
+        },
+        {
+          "text": "Agent closed the bd epic",
+          "passed": true,
+          "evidence": "epic_closed=True"
+        },
+        {
+          "text": "Agent presented the 4 git-landing options (or executed one)",
+          "passed": false,
+          "evidence": "options_presented=False"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 106.3,
+        "tokens": 43289,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent detected Task 2 is still in_progress",
+          "passed": true,
+          "evidence": "in_progress signal"
+        },
+        {
+          "text": "Agent did NOT modify sp001 / us003 / im002 zettels",
+          "passed": true,
+          "evidence": "sp_mod=False us_mod=False im_mod=False"
+        },
+        {
+          "text": "Agent did NOT modify docs/board.md",
+          "passed": true,
+          "evidence": "board_modified=False"
+        },
+        {
+          "text": "Agent did NOT modify docs/archive.md (sp001 NOT added to ## done)",
+          "passed": true,
+          "evidence": "sp001_under_done=False"
+        },
+        {
+          "text": "Agent did NOT close the bd epic",
+          "passed": true,
+          "evidence": "epic_closed=False"
+        },
+        {
+          "text": "Output routes back appropriately ((work-audit|in_progress|tasks.{0,20}not.{0,20}complete|incomplete))",
+          "passed": true,
+          "evidence": "routing phrase present"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 115.1,
+        "tokens": 46403,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent detected test failures",
+          "passed": true,
+          "evidence": "test-fail signal"
+        },
+        {
+          "text": "Agent did NOT modify sp001 / us003 / im002 zettels",
+          "passed": true,
+          "evidence": "sp_mod=False us_mod=False im_mod=False"
+        },
+        {
+          "text": "Agent did NOT modify docs/board.md",
+          "passed": true,
+          "evidence": "board_modified=False"
+        },
+        {
+          "text": "Agent did NOT modify docs/archive.md (sp001 NOT added to ## done)",
+          "passed": true,
+          "evidence": "sp001_under_done=False"
+        },
+        {
+          "text": "Agent did NOT close the bd epic",
+          "passed": true,
+          "evidence": "epic_closed=False"
+        },
+        {
+          "text": "Output routes back appropriately ((fix.{0,20}test|test.{0,20}fail|blocked.{0,20}test|cannot.{0,20}proceed|pytest.{0,30}fail))",
+          "passed": true,
+          "evidence": "routing phrase present"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 99.2,
+        "tokens": 40166,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent recognized sp001 not at status: ready",
+          "passed": true,
+          "evidence": "wrong-status signal"
+        },
+        {
+          "text": "Agent did NOT modify sp001 / us003 / im002 zettels",
+          "passed": true,
+          "evidence": "sp_mod=False us_mod=False im_mod=False"
+        },
+        {
+          "text": "Agent did NOT modify docs/board.md",
+          "passed": true,
+          "evidence": "board_modified=False"
+        },
+        {
+          "text": "Agent did NOT modify docs/archive.md (sp001 NOT added to ## done)",
+          "passed": true,
+          "evidence": "sp001_under_done=False"
+        },
+        {
+          "text": "Agent did NOT close the bd epic",
+          "passed": true,
+          "evidence": "epic_closed=False"
+        },
+        {
+          "text": "Output routes back appropriately ((spec-refinement|spec-ready|not.{0,20}ready|status.{0,20}spec))",
+          "passed": true,
+          "evidence": "routing phrase present"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": 0.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 132.35,
+        "stddev": 26.3201,
+        "min": 104.8,
+        "max": 160.7
+      },
+      "tokens": {
+        "mean": 48174.75,
+        "stddev": 3987.2227,
+        "min": 45002,
+        "max": 53532
+      }
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 0.975,
+        "stddev": 0.05,
+        "min": 0.9,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 155.5,
+        "stddev": 97.4838,
+        "min": 99.2,
+        "max": 301.4
+      },
+      "tokens": {
+        "mean": 50325.5,
+        "stddev": 14307.3969,
+        "min": 40166,
+        "max": 71444
+      }
+    },
+    "delta": {
+      "pass_rate": "+0.03",
+      "time_seconds": "-23.2",
+      "tokens": "-2151"
+    }
+  },
+  "notes": []
+}

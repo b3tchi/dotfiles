@@ -1,0 +1,13 @@
+{
+  "eval_id": 1,
+  "eval_name": "already-ready-stop",
+  "prompt": "Run spec-ready on sp001. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent read sp001 and recognized status: ready (not spec)"},
+    {"text": "Agent recognized #### bd annotations already exist on tasks"},
+    {"text": "Agent did NOT create any new bd epic / tasks"},
+    {"text": "Agent did NOT modify sp001 file"},
+    {"text": "Agent did NOT modify docs/board.md"},
+    {"text": "Output routes to work-do OR explicitly states 'already ready'"}
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "eval_id": 2,
+  "eval_name": "no-tasks-block",
+  "prompt": "Run spec-ready on sp001. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent read sp001 and recognized ## tasks section is missing/empty"},
+    {"text": "Agent did NOT create any bd epic / tasks (tasks can't be invented from nothing)"},
+    {"text": "Agent did NOT modify sp001 file"},
+    {"text": "Agent did NOT modify docs/board.md"},
+    {"text": "Agent did NOT change sp001 status from spec"},
+    {"text": "Output routes to spec-refinement OR explicitly states 'tasks missing'"}
+  ]
+}

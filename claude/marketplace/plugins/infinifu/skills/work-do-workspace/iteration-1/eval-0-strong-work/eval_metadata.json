@@ -1,0 +1,14 @@
+{
+  "eval_id": 0,
+  "eval_name": "strong-work",
+  "prompt": "Run work-do on Task 1 (rotate_secret helper) — bd task id is in .work-do-task-ids.json. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent ran bd show on the target task id"},
+    {"text": "Agent claimed the task — bd state shows it as in_progress (or was set to in_progress at some point)"},
+    {"text": "Agent wrote tests under tests/lib/ (new test file or modifications)"},
+    {"text": "Agent wrote implementation in src/lib/vault.py (rotate_secret added)"},
+    {"text": "Agent left the task at status: in_progress (NOT closed) — closing is reviewer's job"},
+    {"text": "Agent recorded evidence in bd task notes (IMPLEMENTED: ... pattern OR similar evidence block)"},
+    {"text": "Agent did NOT file unrelated work outside Task 1 scope (no silent expansion to set_timeout fix, etc.)"}
+  ]
+}

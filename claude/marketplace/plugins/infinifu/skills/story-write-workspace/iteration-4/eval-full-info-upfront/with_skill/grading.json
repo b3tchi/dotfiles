@@ -1,0 +1,71 @@
+{
+  "eval_name": "eval-full-info-upfront",
+  "expectations": [
+    {
+      "text": "product/stories.yaml exists at sandbox root",
+      "passed": true,
+      "evidence": "path=/home/jan/repos/b3tchi/acag/infinifu/skills/story-create-workspace/iteration-4/eval-full-info-upfront/with_skill/outputs/stories.yaml, exists=True"
+    },
+    {
+      "text": "stories.yaml is valid YAML with a top-level stories: list",
+      "passed": true,
+      "evidence": "keys=['stories']"
+    },
+    {
+      "text": "Exactly one story entry was added",
+      "passed": true,
+      "evidence": "count=1"
+    },
+    {
+      "text": "id matches yymm-NNN pattern (regex ^\\d{4}-\\d{3}$)",
+      "passed": true,
+      "evidence": "id='2605-001'"
+    },
+    {
+      "text": "role field equals 'data analyst' (case-insensitive)",
+      "passed": true,
+      "evidence": "role='data analyst'"
+    },
+    {
+      "text": "want field describes exporting CSV",
+      "passed": true,
+      "evidence": "want='to export query results as csv'"
+    },
+    {
+      "text": "so_that field mentions sharing with stakeholders",
+      "passed": true,
+      "evidence": "so_that='i can share them with non-technical stakeholders'"
+    },
+    {
+      "text": "acceptance_criteria has exactly 3 items matching what the user provided",
+      "passed": true,
+      "evidence": "ac_count=3"
+    },
+    {
+      "text": "status equals 'draft'",
+      "passed": true,
+      "evidence": "status='draft'"
+    },
+    {
+      "text": "created field is an ISO date YYYY-MM-DD",
+      "passed": true,
+      "evidence": "created='2026-05-09'"
+    },
+    {
+      "text": "title field is present and <= 80 chars",
+      "passed": true,
+      "evidence": "title='Export query results as CSV' (len=27)"
+    },
+    {
+      "text": "tags field is a non-empty list",
+      "passed": true,
+      "evidence": "tags=['export', 'data']"
+    },
+    {
+      "text": "tags include 'export' or 'data'",
+      "passed": true,
+      "evidence": "tags=['export', 'data']"
+    }
+  ],
+  "summary": "13/13 passed"
+}

@@ -1,0 +1,33 @@
+{
+  "skill_name": "zettel-write",
+  "evals": [
+    {
+      "id": 1,
+      "name": "atomic-single-concept",
+      "prompt": "ok let me write down something I want to remember: a deadlock is when two threads each hold a resource the other one needs. came up in our incident last week on the payment queue. should connect to our circuit-breaker note from before and maybe to the on-call rotation card.",
+      "expected_output": "Single generic named-slug card at docs/notes/deadlock.md with [[product]] H1, one short paragraph defining deadlock, ## see also linking to [[circuit-breaker]] and [[on-call-rotation]], Index: [[product]] footer. No status field. Atomicity gate passes without split prompt.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "compound-split-prompt",
+      "prompt": "capture today's learnings from the kanban workshop: WIP limits prevent overload by capping in-flight work, and pull-based systems generally beat push-based because they self-regulate to capacity. both fit our team but the WIP limit one is the one I keep coming back to.",
+      "expected_output": "Skill detects compound (two distinct claims: WIP-limit definition + pull-vs-push generalization). Proposes split into two cards (e.g. wip-limits.md and pull-vs-push.md) with mutual see-also links, confirms split with user before writing. Does NOT silently merge into one card.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "route-to-story-write",
+      "prompt": "I need to capture a backlog item — our field reps want bulk csv contact upload so they don't waste evenings typing entries in the office one at a time. priority is medium-ish, not urgent.",
+      "expected_output": "Skill detects Connextra story shape (persona=field rep, want=bulk csv upload, because=time waste). Atomicity passes (single ask). Delegates to infinifu:story-write rather than writing a generic card itself. Announces the delegation explicitly.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "name": "hidden-compound-comparison",
+      "prompt": "write a quick note on optimistic locking — specifically how it differs from pessimistic locking for our database access layer. came up when we were reviewing the inventory service and trying to decide which one fits the contention profile.",
+      "expected_output": "Skill detects this as a HIDDEN compound (no explicit `and`, but `X — how it differs from Y` carries TWO claims: optimistic-locking definition + comparison-of-the-two). Proposes split into at least 2 cards: `[[optimistic-locking]]` (definition) and `[[pessimistic-locking]]` (definition), with mutual see-also links. Optionally a third meta card on when-to-choose-which. Does NOT cram both into a single optimistic-locking.md with a `## comparison` section.",
+      "files": []
+    }
+  ]
+}

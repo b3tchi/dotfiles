@@ -1,0 +1,38 @@
+{
+  "eval_id": 1,
+  "eval_name": "already-spec-stop",
+  "config": "without_skill",
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 5,
+    "failed": 0,
+    "total": 5
+  },
+  "expectations": [
+    {
+      "text": "Agent read sp001 and recognized status: spec",
+      "passed": true,
+      "evidence": "sp001 + spec"
+    },
+    {
+      "text": "Agent did NOT re-write / re-emit ## solution",
+      "passed": true,
+      "evidence": "sp001_modified=False status=spec"
+    },
+    {
+      "text": "Agent did NOT change sp001 status",
+      "passed": true,
+      "evidence": "status=spec"
+    },
+    {
+      "text": "board.md NOT modified",
+      "passed": true,
+      "evidence": "board_modified=False"
+    },
+    {
+      "text": "Output routes to spec-refinement or 'already spec'",
+      "passed": true,
+      "evidence": "matching phrase"
+    }
+  ]
+}

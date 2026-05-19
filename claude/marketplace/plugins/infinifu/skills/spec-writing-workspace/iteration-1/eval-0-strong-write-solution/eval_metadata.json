@@ -1,0 +1,17 @@
+{
+  "eval_id": 0,
+  "eval_name": "strong-write-solution",
+  "prompt": "sp001 is at idea stage with problem populated — run spec-writing to propose the solution. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent read sp001 and confirmed status: idea"},
+    {"text": "Agent re-read us003 acceptance_criteria"},
+    {"text": "Agent surveyed ft002 (vault-secrets) as a binding feature candidate"},
+    {"text": "Agent surveyed adr0001 and/or adr0002 as binding decisions"},
+    {"text": "Agent appended ## solution section to sp001"},
+    {"text": "sp001 ## solution carries wikilinks (at least 2 of ft/adr/cat)"},
+    {"text": "Agent flipped sp001 frontmatter from status: idea to status: spec"},
+    {"text": "docs/board.md moved [[sp001]] from ## idea to ## spec"},
+    {"text": "Agent did NOT write ## plan / ## tasks (those are spec-refinement scope)"},
+    {"text": "Agent did NOT mint a new bd epic / task / use the bd command"}
+  ]
+}

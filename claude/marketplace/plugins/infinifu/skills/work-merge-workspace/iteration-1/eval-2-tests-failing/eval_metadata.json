@@ -1,0 +1,14 @@
+{
+  "eval_id": 2,
+  "eval_name": "tests-failing",
+  "prompt": "Run work-merge on sp001. Task ids in .work-do-task-ids.json. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent ran tests and detected failures (pytest output shows N failures)"},
+    {"text": "Agent did NOT proceed to AKM writes"},
+    {"text": "Agent did NOT flip sp001 status"},
+    {"text": "Agent did NOT modify docs/board.md"},
+    {"text": "Agent did NOT modify docs/archive.md"},
+    {"text": "Agent did NOT close the bd epic"},
+    {"text": "Output blocks on tests failing OR routes back to fix"}
+  ]
+}

@@ -1,0 +1,17 @@
+[
+  {
+    "id": "wd3-247277-bsz",
+    "title": "Epic: rotate service credentials without downtime [sp001]",
+    "design": "Spec: docs/notes/spec/sp001.md",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "epic",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-17T08:26:16Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-17T08:26:16Z",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  }
+]

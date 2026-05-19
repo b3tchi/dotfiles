@@ -1,0 +1,62 @@
+{
+  "eval_id": 1,
+  "config": "with_skill",
+  "expectations": [
+    {
+      "text": "Exactly one new zettel .md file produced (excl. summary/decision-log)",
+      "passed": true,
+      "evidence": "outputs/deadlock.md only \u2014 summary.md + decision-log.md excluded"
+    },
+    {
+      "text": "Filename is a kebab-slug concept name",
+      "passed": true,
+      "evidence": "deadlock.md \u2014 clean, no date/owner"
+    },
+    {
+      "text": "H1 contains [[product]]",
+      "passed": true,
+      "evidence": "# Deadlock [[product]]"
+    },
+    {
+      "text": "Index: [[product]] footer present",
+      "passed": true,
+      "evidence": "footer present"
+    },
+    {
+      "text": "\u22651 outbound wikilink beyond [[product]] and Index",
+      "passed": true,
+      "evidence": "[[circuit-breaker]] + [[on-call-rotation]]"
+    },
+    {
+      "text": "Links to circuit-breaker or on-call-rotation",
+      "passed": true,
+      "evidence": "both linked"
+    },
+    {
+      "text": "Body under 300 words",
+      "passed": true,
+      "evidence": "~85 words"
+    },
+    {
+      "text": "Frontmatter has aliases + created",
+      "passed": true,
+      "evidence": "both present, created: 2026-05-15"
+    },
+    {
+      "text": "No status field on generic card",
+      "passed": true,
+      "evidence": "no status: key"
+    },
+    {
+      "text": "Single claim restatable in one sentence",
+      "passed": true,
+      "evidence": "definition of deadlock + livelock contrast \u2014 coherent single concept"
+    }
+  ],
+  "summary": {
+    "passed": 10,
+    "failed": 0,
+    "total": 10,
+    "pass_rate": 1.0
+  }
+}

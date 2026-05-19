@@ -1,0 +1,17 @@
+{
+  "eval_id": 0,
+  "eval_name": "strong-implement-on-draft",
+  "prompt": "us003 (rotate service credentials without downtime) is in draft — let's run idea-implement to get it ready for spec-writing. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent read us003 and confirmed status: draft"},
+    {"text": "Agent surveyed pn002 (the persona referenced by us003.role)"},
+    {"text": "Agent surveyed at least one cat### (taxonomy bucket the story touches)"},
+    {"text": "Agent surveyed at least one adr#### relevant to the picked categories"},
+    {"text": "Agent surveyed at least one ft### as candidate consumer"},
+    {"text": "Agent promoted us003 from status: draft to status: ready (file modified)"},
+    {"text": "Agent emitted a new sp###.md under docs/notes/spec/ with status: idea"},
+    {"text": "sp###.md body contains ## solves [[us003]] back-link"},
+    {"text": "sp###.md ## problem section carries wikilinks to at least 3 of: us, pn, cat, ft, adr"},
+    {"text": "docs/board.md was updated to append [[sp###]] under ## idea"}
+  ]
+}

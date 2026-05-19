@@ -1,0 +1,658 @@
+{
+  "metadata": {
+    "skill_name": "idea-implement",
+    "skill_path": "<path/to/skill>",
+    "executor_model": "<model-name>",
+    "analyzer_model": "<model-name>",
+    "timestamp": "2026-05-16T15:07:00Z",
+    "evals_run": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "runs_per_configuration": 3
+  },
+  "runs": [
+    {
+      "eval_id": 0,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 10,
+        "failed": 0,
+        "total": 10,
+        "time_seconds": 165.0,
+        "tokens": 63484,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent read us003 and confirmed status: draft",
+          "passed": true,
+          "evidence": "draft + us003 mentioned together"
+        },
+        {
+          "text": "Agent surveyed pn002 (persona referenced by us003.role)",
+          "passed": true,
+          "evidence": "pn002 referenced"
+        },
+        {
+          "text": "Agent surveyed at least one cat###",
+          "passed": true,
+          "evidence": "cats found: ['cat001', 'cat002', 'cat003', 'cat004']"
+        },
+        {
+          "text": "Agent surveyed at least one adr####",
+          "passed": true,
+          "evidence": "adrs found: ['adr0001', 'adr0002', 'adr0003']"
+        },
+        {
+          "text": "Agent surveyed at least one ft###",
+          "passed": true,
+          "evidence": "ft found: ['ft001', 'ft002']"
+        },
+        {
+          "text": "Agent promoted us003 from draft to ready (file modified, status: ready)",
+          "passed": true,
+          "evidence": "us003_modified=True status=ready"
+        },
+        {
+          "text": "Agent emitted a new sp###.md under docs/notes/spec/ with status: idea",
+          "passed": true,
+          "evidence": "sp_files=['docs/notes/spec/sp001.md'] status_idea=True"
+        },
+        {
+          "text": "sp###.md body contains ## solves [[us003]] back-link",
+          "passed": true,
+          "evidence": "solves_us003=True"
+        },
+        {
+          "text": "sp### ## problem carries wikilinks to at least 3 of: us, pn, cat, ft, adr",
+          "passed": true,
+          "evidence": "link kinds present: ['us', 'pn', 'cat', 'ft', 'adr']"
+        },
+        {
+          "text": "docs/board.md updated with [[sp###]] under ## idea",
+          "passed": true,
+          "evidence": "sp_id=sp001 found_under_idea=True"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 99.2,
+        "tokens": 51364,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent read us002 and recognized status: ready",
+          "passed": true,
+          "evidence": "us002 + ready mentioned"
+        },
+        {
+          "text": "Agent did NOT re-promote / re-emit us002",
+          "passed": true,
+          "evidence": "us002_modified=False status=ready"
+        },
+        {
+          "text": "Agent did NOT mint a new sp###.md",
+          "passed": true,
+          "evidence": "sp_count=0"
+        },
+        {
+          "text": "docs/board.md NOT modified",
+          "passed": true,
+          "evidence": "board_changed=False"
+        },
+        {
+          "text": "Output explicitly states us002 is already ready (or routes to spec-writing)",
+          "passed": true,
+          "evidence": "matching phrase present"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 86.0,
+        "tokens": 50703,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent read us001 and recognized status: done",
+          "passed": true,
+          "evidence": "us001 + done mentioned"
+        },
+        {
+          "text": "Agent did NOT re-promote / re-emit us001",
+          "passed": true,
+          "evidence": "us001_modified=False status=done"
+        },
+        {
+          "text": "Agent did NOT mint a new sp###.md",
+          "passed": true,
+          "evidence": "sp_count=0"
+        },
+        {
+          "text": "docs/board.md NOT modified",
+          "passed": true,
+          "evidence": "board_changed=False"
+        },
+        {
+          "text": "Output routes to idea-extend OR explicitly states done story can't be promoted",
+          "passed": true,
+          "evidence": "matching phrase present"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 113.8,
+        "tokens": 55021,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent verified us042 does not exist",
+          "passed": true,
+          "evidence": "missing-language phrase present"
+        },
+        {
+          "text": "Agent did NOT invent / write a new us042.md",
+          "passed": true,
+          "evidence": "us042_created=False"
+        },
+        {
+          "text": "Agent did NOT mint a new sp###.md",
+          "passed": true,
+          "evidence": "sp_count=0"
+        },
+        {
+          "text": "docs/board.md NOT modified",
+          "passed": true,
+          "evidence": "board_changed=False"
+        },
+        {
+          "text": "Output routes to story-write OR states 'create story first'",
+          "passed": true,
+          "evidence": "matching phrase present"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 4,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 165.5,
+        "tokens": 61694,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent read us004 and confirmed status: draft",
+          "passed": true,
+          "evidence": "us004 + draft mentioned"
+        },
+        {
+          "text": "Agent recognized AC are vague / not testable",
+          "passed": true,
+          "evidence": "vague-language phrase present"
+        },
+        {
+          "text": "Agent did NOT promote us004 to status: ready",
+          "passed": true,
+          "evidence": "us004_modified=False status=draft"
+        },
+        {
+          "text": "Agent did NOT mint a new sp###.md",
+          "passed": true,
+          "evidence": "sp_files=[]"
+        },
+        {
+          "text": "docs/board.md NOT modified",
+          "passed": true,
+          "evidence": "board_changed=False"
+        },
+        {
+          "text": "Agent hit the gate (gate_reached.md OR explicit gate-language)",
+          "passed": true,
+          "evidence": "gate_reached=True gate-language=True"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 5,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 199.6,
+        "tokens": 67916,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent read us005 and confirmed status: draft",
+          "passed": true,
+          "evidence": "us005 + draft"
+        },
+        {
+          "text": "Agent identified pn999 (compliance-officer) is missing",
+          "passed": true,
+          "evidence": "pn999 + missing-language phrase"
+        },
+        {
+          "text": "Agent did NOT promote us005 to ready before pn### is in place",
+          "passed": [
+            "docs/notes/pn003.md"
+          ],
+          "evidence": "us005_modified=True status=ready new_pn=['docs/notes/pn003.md']"
+        },
+        {
+          "text": "Agent minted persona OR routed to persona-write OR hit gate requesting mint",
+          "passed": true,
+          "evidence": "new_pn=['docs/notes/pn003.md'] gate=False route=False"
+        },
+        {
+          "text": "Agent did NOT silently proceed past the missing-persona gap",
+          "passed": true,
+          "evidence": "missing-persona acknowledged"
+        },
+        {
+          "text": "Persona-mint is acknowledged before any sp###.md emission",
+          "passed": true,
+          "evidence": "sp_count=1 new_pn=['docs/notes/pn003.md'] gate=False route=False"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 0,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.9,
+        "passed": 9,
+        "failed": 1,
+        "total": 10,
+        "time_seconds": 180.9,
+        "tokens": 55949,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent read us003 and confirmed status: draft",
+          "passed": true,
+          "evidence": "draft + us003 mentioned together"
+        },
+        {
+          "text": "Agent surveyed pn002 (persona referenced by us003.role)",
+          "passed": true,
+          "evidence": "pn002 referenced"
+        },
+        {
+          "text": "Agent surveyed at least one cat###",
+          "passed": true,
+          "evidence": "cats found: ['cat001', 'cat002', 'cat003', 'cat004']"
+        },
+        {
+          "text": "Agent surveyed at least one adr####",
+          "passed": true,
+          "evidence": "adrs found: ['adr0001', 'adr0002', 'adr0003']"
+        },
+        {
+          "text": "Agent surveyed at least one ft###",
+          "passed": true,
+          "evidence": "ft found: ['ft001', 'ft002']"
+        },
+        {
+          "text": "Agent promoted us003 from draft to ready (file modified, status: ready)",
+          "passed": true,
+          "evidence": "us003_modified=True status=ready"
+        },
+        {
+          "text": "Agent emitted a new sp###.md under docs/notes/spec/ with status: idea",
+          "passed": true,
+          "evidence": "sp_files=['docs/notes/spec/sp001.md'] status_idea=True"
+        },
+        {
+          "text": "sp###.md body contains ## solves [[us003]] back-link",
+          "passed": true,
+          "evidence": "solves_us003=True"
+        },
+        {
+          "text": "sp### ## problem carries wikilinks to at least 3 of: us, pn, cat, ft, adr",
+          "passed": false,
+          "evidence": "link kinds present: ['us', 'cat']"
+        },
+        {
+          "text": "docs/board.md updated with [[sp###]] under ## idea",
+          "passed": true,
+          "evidence": "sp_id=sp001 found_under_idea=True"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.6,
+        "passed": 3,
+        "failed": 2,
+        "total": 5,
+        "time_seconds": 119.0,
+        "tokens": 50762,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent read us002 and recognized status: ready",
+          "passed": true,
+          "evidence": "us002 + ready mentioned"
+        },
+        {
+          "text": "Agent did NOT re-promote / re-emit us002",
+          "passed": true,
+          "evidence": "us002_modified=False status=ready"
+        },
+        {
+          "text": "Agent did NOT mint a new sp###.md",
+          "passed": false,
+          "evidence": "sp_count=1"
+        },
+        {
+          "text": "docs/board.md NOT modified",
+          "passed": false,
+          "evidence": "board_changed=True"
+        },
+        {
+          "text": "Output explicitly states us002 is already ready (or routes to spec-writing)",
+          "passed": true,
+          "evidence": "matching phrase present"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 87.2,
+        "tokens": 35850,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent read us001 and recognized status: done",
+          "passed": true,
+          "evidence": "us001 + done mentioned"
+        },
+        {
+          "text": "Agent did NOT re-promote / re-emit us001",
+          "passed": true,
+          "evidence": "us001_modified=False status=done"
+        },
+        {
+          "text": "Agent did NOT mint a new sp###.md",
+          "passed": true,
+          "evidence": "sp_count=0"
+        },
+        {
+          "text": "docs/board.md NOT modified",
+          "passed": true,
+          "evidence": "board_changed=False"
+        },
+        {
+          "text": "Output routes to idea-extend OR explicitly states done story can't be promoted",
+          "passed": true,
+          "evidence": "matching phrase present"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.6,
+        "passed": 3,
+        "failed": 2,
+        "total": 5,
+        "time_seconds": 78.4,
+        "tokens": 38000,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent verified us042 does not exist",
+          "passed": false,
+          "evidence": "weak"
+        },
+        {
+          "text": "Agent did NOT invent / write a new us042.md",
+          "passed": true,
+          "evidence": "us042_created=False"
+        },
+        {
+          "text": "Agent did NOT mint a new sp###.md",
+          "passed": true,
+          "evidence": "sp_count=0"
+        },
+        {
+          "text": "docs/board.md NOT modified",
+          "passed": true,
+          "evidence": "board_changed=False"
+        },
+        {
+          "text": "Output routes to story-write OR states 'create story first'",
+          "passed": false,
+          "evidence": "missing"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 4,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.5,
+        "passed": 3,
+        "failed": 3,
+        "total": 6,
+        "time_seconds": 151.1,
+        "tokens": 54526,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent read us004 and confirmed status: draft",
+          "passed": true,
+          "evidence": "us004 + draft mentioned"
+        },
+        {
+          "text": "Agent recognized AC are vague / not testable",
+          "passed": true,
+          "evidence": "vague-language phrase present"
+        },
+        {
+          "text": "Agent did NOT promote us004 to status: ready",
+          "passed": false,
+          "evidence": "us004_modified=True status=ready"
+        },
+        {
+          "text": "Agent did NOT mint a new sp###.md",
+          "passed": false,
+          "evidence": "sp_files=['docs/notes/spec/sp001.md']"
+        },
+        {
+          "text": "docs/board.md NOT modified",
+          "passed": false,
+          "evidence": "board_changed=True"
+        },
+        {
+          "text": "Agent hit the gate (gate_reached.md OR explicit gate-language)",
+          "passed": true,
+          "evidence": "gate_reached=False gate-language=True"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 5,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 242.7,
+        "tokens": 59164,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent read us005 and confirmed status: draft",
+          "passed": true,
+          "evidence": "us005 + draft"
+        },
+        {
+          "text": "Agent identified pn999 (compliance-officer) is missing",
+          "passed": true,
+          "evidence": "pn999 + missing-language phrase"
+        },
+        {
+          "text": "Agent did NOT promote us005 to ready before pn### is in place",
+          "passed": [
+            "docs/notes/pn003.md"
+          ],
+          "evidence": "us005_modified=True status=ready new_pn=['docs/notes/pn003.md']"
+        },
+        {
+          "text": "Agent minted persona OR routed to persona-write OR hit gate requesting mint",
+          "passed": true,
+          "evidence": "new_pn=['docs/notes/pn003.md'] gate=False route=False"
+        },
+        {
+          "text": "Agent did NOT silently proceed past the missing-persona gap",
+          "passed": true,
+          "evidence": "missing-persona acknowledged"
+        },
+        {
+          "text": "Persona-mint is acknowledged before any sp###.md emission",
+          "passed": true,
+          "evidence": "sp_count=1 new_pn=['docs/notes/pn003.md'] gate=False route=False"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": 0.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 138.1833,
+        "stddev": 44.8881,
+        "min": 86.0,
+        "max": 199.6
+      },
+      "tokens": {
+        "mean": 58363.6667,
+        "stddev": 7034.3525,
+        "min": 50703,
+        "max": 67916
+      }
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 0.7667,
+        "stddev": 0.2251,
+        "min": 0.5,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 143.2167,
+        "stddev": 62.1363,
+        "min": 78.4,
+        "max": 242.7
+      },
+      "tokens": {
+        "mean": 49041.8333,
+        "stddev": 9789.2678,
+        "min": 35850,
+        "max": 59164
+      }
+    },
+    "delta": {
+      "pass_rate": "+0.23",
+      "time_seconds": "-5.0",
+      "tokens": "+9322"
+    }
+  },
+  "notes": []
+}

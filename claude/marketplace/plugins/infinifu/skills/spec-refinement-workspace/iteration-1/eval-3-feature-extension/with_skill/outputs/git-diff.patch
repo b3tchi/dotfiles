@@ -1,0 +1,442 @@
+diff --git a/docs/notes/im002.md b/docs/notes/im002.md
+index 85fc005..a5e5bc1 100644
+--- a/docs/notes/im002.md
++++ b/docs/notes/im002.md
+@@ -28,7 +28,7 @@ use a new internal `rotate_secret(name)` helper that lands in the same lib.
+ - `src/lib/vault.py`
+ 
+ ## specs
+-- (none yet — spec-refinement should finalize the back-link)
++- [[sp001|rotate service credentials without downtime]]
+ 
+ ---
+ 
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+index da7317c..621bdb9 100644
+--- a/docs/notes/spec/sp001.md
++++ b/docs/notes/spec/sp001.md
+@@ -36,6 +36,325 @@ overlap window globally, and the rotation flow will emit structured
+ audit records via [[ft002]]'s audit-log channel so security team has a
+ trail of every rotation.
+ 
++## plan
++
++### File tree
++
++```
++src/lib/
++├── vault.py            # adds rotate_secret(name); calls set_default_ttl on import (NEW once ft002 extended)
++└── __init__.py
++src/services/
++├── auth/__init__.py    # touched if rotation needs hook; otherwise read-only
++├── reports/__init__.py # touched if rotation needs hook; otherwise read-only
++└── metrics/__init__.py # touched if rotation needs hook; otherwise read-only
++tests/
++└── test_vault_rotation.py   # NEW
++docs/notes/
++├── spec/sp001.md       # this spec
++├── im002.md            # back-link finalization
++└── ft002.md            # MAY be touched only after idea-extend produces a new sp###
++```
++
++### Conventions
++
++- All vault access goes through `acme.lib.vault` — no direct vault SDK calls
++  inside services.
++- Public read path remains `vault.secret(name)`. Internal rotate path is
++  `vault.rotate_secret(name)`; not exported from `__init__`.
++- Tests live under `tests/` and import via `src.lib.vault`.
++- Logging: structured JSON to stdout. The audit-log channel for rotation
++  events is **gated on a Feature extension** (see Task 1) — do **not**
++  invent a side-channel inside `vault.py` to ship the audit hook ahead of
++  the extension.
++
++### Anti-patterns (auto-reject during review)
++
++- Adding `vault.set_default_ttl(...)` call without [[ft002]] exposing it in
++  `## api_surface`. Calling a private/undocumented helper = Feature
++  contract violation.
++- Emitting "audit" records directly to stdout in `vault.py` under the
++  guise of "logging" — that's a hidden Feature extension. Either ft002
++  provides the audit-log channel after `idea-extend`, or the spec drops
++  the audit requirement.
++- Hard-coding the 5-minute overlap inside `rotate_secret` instead of
++  reading the ttl from ft002 once it's exposed.
++- Letting a service fall back to direct vault SDK when `secret()` errors.
++  Errors propagate; the synthetic check is what proves zero-5xx.
++
++### Known limitations
++
++- ft002 today (read at `aliases: vault-secrets`, `status: stable`) exposes
++  only `secret(name)`. The spec's `## solution` references two surfaces
++  (`set_default_ttl`, audit-log channel) that ft002 does **not** provide.
++  **Tasks 2–4 cannot ship until ft002 is extended via `idea-extend`.**
++- The 5-minute overlap is wall-clock, not per-request. Long-running
++  requests started before the flip will continue using the old value
++  until they finish — acceptable for AC `Old secret stays valid for 5
++  minutes after rotation` but worth surfacing.
++
++## tasks
++
++### Task 1: Route ft002 extension through idea-extend (set_default_ttl + audit-log channel)
++
++#### type
++task
++
++#### effort
++2h (scoping only — no code; produces a new `sp###` for ft002)
++
++#### depends
++- — none (must run **first**; gates Tasks 2–4)
++
++#### files_touched
++- (no source edits) — produces a new `docs/notes/spec/sp###.md` for ft002
++  via [[infinifu:idea-extend]] and appends it under `## idea` in
++  [[board]]. ft002.md itself is **not** mutated here.
++
++#### success_criteria
++- A new `sp###` exists at `status: idea` whose `## problem` names two
++  ft002 surface additions: `set_default_ttl(seconds: int)` and a
++  structured audit-log emit hook for rotation events.
++- The new `sp###` links back to [[ft002]] and identifies [[sp001]] (this
++  spec) as the first consumer in its `## problem` narrative.
++- [[board]] `## idea` lists the new sp### entry.
++- This task's success implicitly maps to AC `Rotation script can swap
++  secrets while services run` and `No 5xx during rotation window in
++  synthetic check` (both depend on the audit/ttl surfaces being in
++  ft002's contract, not bolted on inside `vault.py`).
++
++#### edge_cases
++- ft002 maintainer pushes back on widening the contract → the spec
++  pivots: drop the audit-log requirement from sp001's `## solution`, and
++  drop the `set_default_ttl` global call (hard-code the 300-second
++  overlap inside `rotate_secret` instead). That pivot rewrites sp001's
++  `## solution` and must come back through spec-refinement.
++- ft002 already has an undocumented audit hook somewhere → still route
++  through `idea-extend`; the extension formalizes the hook in
++  `## api_surface` rather than leaving it a hidden surface.
++
++#### test_plan
++- No code test. The "test" is grep: after Task 1, `rg
++  'set_default_ttl|audit_log' docs/notes/ft###.md` (the new ft### or the
++  refreshed ft002 once the extension lands) returns matches in
++  `## api_surface`. If it doesn't, Tasks 2–4 are still blocked.
++
++### Task 2: Implement `rotate_secret(name)` helper in `src/lib/vault.py`
++
++#### type
++feature
++
++#### effort
++4h
++
++#### depends
++- Task 1 (extension scoped; otherwise this task ships and silently
++  violates ft002's surface)
++
++#### files_touched
++- `src/lib/vault.py`
++
++#### success_criteria
++- New function `rotate_secret(name: str) -> None` exists in
++  `src/lib/vault.py`. Not exported from `__init__`.
++- Calling `rotate_secret("foo")` stages a new versioned alias for `foo`
++  in vault; the prior version stays readable for the overlap window.
++- After the overlap window expires, `vault.secret("foo")` returns the new
++  value and the prior version is no longer reachable.
++- Maps to us003.AC `Rotation script can swap secrets while services
++  run`.
++
++#### edge_cases
++- `rotate_secret` called for a name that doesn't exist yet → raise
++  `KeyError`, do **not** stage a phantom alias.
++- `rotate_secret` called twice in rapid succession (e.g. retry storm) →
++  the second call extends the overlap window; concurrent stages must not
++  race (use vault's CAS or a lib-side lock keyed on `name`).
++- Vault unreachable mid-rotation → the prior version must remain readable
++  via `secret(name)`; partial rotation must roll back.
++
++#### test_plan
++- `tests/test_vault_rotation.py::test_rotate_creates_versioned_alias` —
++  call `rotate_secret("svc/db_url")`, assert vault contains both
++  versions, assert `secret("svc/db_url")` returns either value during
++  the overlap.
++- `tests/test_vault_rotation.py::test_rotate_unknown_name_raises` —
++  `rotate_secret("does-not-exist")` raises `KeyError`. Catches a real
++  bug (silent phantom alias) — not a tautology.
++- `tests/test_vault_rotation.py::test_concurrent_rotate_serializes` —
++  two threads call `rotate_secret("foo")` concurrently; vault ends up
++  with exactly one new version, not two. Catches the race.
++- `tests/test_vault_rotation.py::test_vault_outage_rolls_back` —
++  simulate vault `ConnectionError` mid-stage; assert `secret("foo")`
++  still returns the prior value.
++
++### Task 3: Wire `set_default_ttl(300)` at boot
++
++#### type
++feature
++
++#### effort
++2h
++
++#### depends
++- Task 1 (ft002 must expose `set_default_ttl` in `## api_surface`)
++- Task 2 (rotate_secret must exist before any service relies on TTL)
++
++#### files_touched
++- `src/lib/vault.py` (single import-time call)
++
++#### success_criteria
++- `vault.set_default_ttl(seconds=300)` is called exactly once at module
++  import time.
++- After import, `vault.secret(name)` for a rotated name returns the new
++  value after 300 seconds and the prior value before that.
++- Maps to us003.AC `Old secret stays valid for 5 minutes after
++  rotation`.
++
++#### edge_cases
++- Module re-imported in tests → repeated `set_default_ttl(300)` calls
++  must be idempotent (ft002's extension must guarantee this; flag in
++  Task 1's success criteria).
++- A consumer overrides the TTL globally to a smaller value → not
++  supported; document that 300s is the platform standard.
++
++#### test_plan
++- `tests/test_vault_rotation.py::test_import_sets_ttl_once` — patch
++  `vault.set_default_ttl`, import `src.lib.vault`, assert called with
++  `seconds=300`.
++- `tests/test_vault_rotation.py::test_old_secret_valid_for_window` —
++  rotate, advance clock 299s, assert `secret(name)` returns prior value;
++  advance to 301s, assert returns new value. Catches a wall-clock
++  off-by-one.
++
++### Task 4: Emit rotation audit records via ft002 audit-log channel
++
++#### type
++feature
++
++#### effort
++3h
++
++#### depends
++- Task 1 (audit-log channel must exist in ft002's `## api_surface`)
++- Task 2 (rotate_secret is the emit site)
++
++#### files_touched
++- `src/lib/vault.py`
++
++#### success_criteria
++- Every successful call to `rotate_secret(name)` produces exactly one
++  audit record with at least: `event="vault.rotate"`, `name`,
++  `timestamp`, `actor` (if available from context), `outcome="ok"`.
++- Failed rotations produce one audit record with `outcome="failed"` and
++  the error class. Failures do **not** raise from the audit emit path
++  itself.
++- Maps to us003.AC `No 5xx during rotation window in synthetic check`
++  (audit visibility is what proves the rotation didn't silently fail).
++
++#### edge_cases
++- Audit channel is itself unreachable → log a fallback warning to
++  stdout, do **not** fail the rotation. The rotation outcome is the
++  user-visible signal; audit is observation.
++- Audit record at high rotation rate → ensure emit is non-blocking
++  (async or fire-and-forget). Synchronous emit on a hot path
++  re-introduces the 5xx risk.
++
++#### test_plan
++- `tests/test_vault_rotation.py::test_successful_rotation_emits_audit`
++  — patch the audit channel, rotate, assert one record with
++  `outcome="ok"` and the right fields.
++- `tests/test_vault_rotation.py::test_failed_rotation_emits_audit_and_raises`
++  — force vault failure, assert one record with `outcome="failed"` AND
++  the rotation raised to the caller.
++- `tests/test_vault_rotation.py::test_audit_channel_outage_does_not_break_rotation`
++  — patch the audit channel to raise on emit, assert `rotate_secret`
++  still completes and the synthetic-check semantics hold.
++
++### Task 5: Synthetic-check harness for zero-5xx during rotation window
++
++#### type
++feature
++
++#### effort
++4h
++
++#### depends
++- Task 2 (rotate_secret exists)
++- Task 3 (ttl wired)
++
++#### files_touched
++- `tests/test_vault_rotation.py`
++- `src/services/reports/__init__.py` (read-only audit; add no production code)
++
++#### success_criteria
++- A test (`test_zero_5xx_during_window`) spins up a fake service that
++  calls `vault.secret(name)` once per simulated request, triggers
++  `rotate_secret(name)` mid-loop, and asserts zero non-2xx responses
++  across the 5-minute overlap.
++- The test fails if the prior value becomes unreadable before TTL
++  expires.
++- Maps to us003.AC `No 5xx during rotation window in synthetic check`.
++
++#### edge_cases
++- Clock skew between writer and readers → the test uses a controlled
++  fake clock, not wall-clock sleeps.
++- A request started just before the flip → it completes against the
++  prior value; no 5xx.
++
++#### test_plan
++- `tests/test_vault_rotation.py::test_zero_5xx_during_window` — the
++  synthetic check; named per scenario, not `test_basic`.
++
++### Task 6: Finalize back-link on im002
++
++#### type
++task
++
++#### effort
++0.5h
++
++#### depends
++- Tasks 1–5 designed (back-link is part of refinement deliverable, not
++  ship gate)
++
++#### files_touched
++- `docs/notes/im002.md` — append `## specs - [[sp001|...]]` so the graph
++  closes.
++
++#### success_criteria
++- `im002.md` `## specs` lists `[[sp001|rotate service credentials
++  without downtime]]`.
++- `rg 'sp001' docs/notes/im002.md` returns at least one hit.
++- Closes the AKM graph so `spec-retro` can find the trail.
++
++#### edge_cases
++- im002 status drifts to `superseded` between refinement and ready →
++  re-target the back-link on the new im###.
++
++#### test_plan
++- Grep-only: `rg '\[\[sp001' docs/notes/im002.md`. Not a code test, but a
++  concrete acceptance signal.
++
++## sanity-check notes
++
++- **ADR sanity.** [[adr0001]] (cat001) and [[adr0002]] (cat002, only
++  cat001+cat003 bind here, so adr0002 is informational) reviewed. No
++  task overturns either decision: rotation reads through ft001-backed
++  auth for vault, and no Postgres retention behavior changes. [[adr0003]]
++  (cat003 — smtplib direct, no SMTP relay) is unrelated to rotation. No
++  supersession task needed.
++- **Feature sanity — BLOCKING ISSUE.** Spec's `## solution` references
++  two ft002 surfaces that ft002 does NOT provide:
++  1. `vault.set_default_ttl(seconds=300)` — ft002 `## api_surface`
++     exposes only `secret(name)`.
++  2. ft002 "audit-log channel" — ft002 has no `## providing` paragraph
++     mentioning audit, and `## data_model` says `None local`.
++  Per spec-refinement Feature-sanity rule (and ft002's append-only
++  contract), Task 1 routes this through `infinifu:idea-extend` on
++  [[ft002]] **before** Tasks 2–4 can ship. Task 1 is the gate. See
++  `route_decision.md` at sandbox root for the full call.
++
+ ---
+ 
+ Index: [[board]]
+diff --git a/route_decision.md b/route_decision.md
+new file mode 100644
+index 0000000..14065f3
+--- /dev/null
++++ b/route_decision.md
+@@ -0,0 +1,93 @@
++# Route decision — sp001 spec-refinement (Feature-sanity surfaced extension)
++
++## Decision
++
++**Did NOT block.** Refinement proceeded, but the breakdown is **gated on
++a Feature extension** — Task 1 of sp001 routes the user to
++`infinifu:idea-extend` on `[[ft002]]` **before** Tasks 2–4 can ship.
++
++## Why this is a Feature-extension, not a silent over-reach
++
++Per `spec-refinement` Feature-sanity rule:
++
++> Re-read the Feature's `## providing` paragraph. If the spec uses the
++> feature in a way that isn't in `## providing`, that's a *Feature
++> extension* — call it out as a separate task that goes through
++> `idea-extend` on that `ft###` first.
++
++sp001's `## solution` body contains an "Implementation detail" addendum
++that calls into two ft002 surfaces that ft002 does **not** currently
++provide:
++
++| Call site in sp001 | ft002 today | Verdict |
++|---|---|---|
++| `vault.set_default_ttl(seconds=300)` once at boot | `## api_surface` exposes only `secret(name)`; no ttl helper | **Extension required** |
++| "emit structured audit records via [[ft002]]'s audit-log channel" | `## providing` says "Vault-backed secret retrieval"; `## data_model: None local`; no audit channel | **Extension required** |
++
++ft002 status is `stable`. Features are append-only in spirit (per
++`docs/notes/akm.md`): "Tighten the `providing` / `api_surface` contract
++only when reality demands; widening means a new Feature" — widening is
++exactly what's happening here, and it goes through `idea-extend`.
++
++## Why this is a hard gate, not a "we'll discover it during work"
++
++If Tasks 2–4 ship without the extension:
++
++- `vault.py` either calls a `set_default_ttl` that doesn't exist in
++  ft002 (test fails / runtime ImportError) **or** reaches around
++  ft002's contract by talking to the vault SDK directly — silently
++  forking the platform's vault story. Both are Feature-contract
++  violations and the #1 source of post-merge rework that the
++  spec-refinement skill exists to prevent.
++- The audit-log channel becomes a side-channel inside `vault.py`
++  (e.g. `print()` masquerading as "logging"), which is a hidden
++  Feature-extension that the next consumer copies and the AKM graph
++  loses sight of. The skill's "anti-patterns" section explicitly calls
++  this out.
++
++## What the user sees
++
++- `docs/notes/spec/sp001.md` now contains the SRE-passed `## plan` +
++  `## tasks` blocks. The breakdown is **not** approved-and-ready — it's
++  the breakdown that the user reviews per the skill's design-approval
++  gate.
++- **Task 1** is "Route ft002 extension through idea-extend". It has zero
++  source files in `files_touched`, 2h effort, and its success criterion
++  is "a new `sp###` exists at `status: idea` whose `## problem` names
++  the two ft002 surface additions". This routes the user out of
++  spec-refinement and into `infinifu:idea-extend` for ft002.
++- Tasks 2, 3, 4 all carry `depends: Task 1` so the dependency is
++  machine-readable when `spec-ready` later writes bd ids.
++- `docs/notes/im002.md` `## specs` back-link is finalized (skill's
++  graph-closure deliverable).
++- `docs/board.md` is **unchanged** — sp001 stays at `status: spec` per
++  the skill's "Out of scope" rule (board moves happen at `spec-ready`).
++
++## Two pivot paths if the user does NOT want to extend ft002
++
++Documented in Task 1's `#### edge_cases`:
++
++1. **Drop the audit-log requirement** from sp001's `## solution` and
++   **hard-code the 300-second overlap** inside `rotate_secret` instead
++   of calling `set_default_ttl` globally. That pivot rewrites sp001's
++   `## solution` and the spec re-enters `spec-writing` →
++   `spec-refinement`.
++2. **Mint a new ft### entirely** for the rotation telemetry (instead of
++   widening ft002). Same downstream consequence — sp001's `## solution`
++   needs a rewrite before the breakdown stands.
++
++Either way, the call is the user's, not the skill's. The skill's job is
++to surface the conflict at refinement time, not silently bake it into
++the task list.
++
++## Alignment with skill's own rules
++
++- "Feature surface, not feature intent. Tasks must call `## api_surface`
++  exactly. If the spec needs functionality outside the Feature's
++  `## providing`, that's a Feature extension via `idea-extend`, not a
++  silent over-reach in the task list." → applied.
++- "Surface as design-approval gate to the user — the breakdown is a
++  commitment, not a proposal." → sp001 is now in the user's hands for
++  approval, gated on Task 1.
++- "Does NOT use bd, NOT promote status, NOT touch the board" → confirmed:
++  sp001.status stays `spec`, board.md untouched, no bd activity.

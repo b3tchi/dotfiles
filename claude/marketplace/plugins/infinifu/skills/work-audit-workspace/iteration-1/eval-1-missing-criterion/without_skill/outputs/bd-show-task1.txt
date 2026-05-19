@@ -1,0 +1,34 @@
+◐ wd1-3780-8i4.1 · Task 1: Add rotate_secret helper to vault.py   [● P2 · IN_PROGRESS]
+Owner: eval · Type: task
+Created: 2026-05-16 · Started: 2026-05-16 · Updated: 2026-05-16
+
+DESCRIPTION
+  (none)
+
+DESIGN
+Extend src/lib/vault.py with rotate_secret(name, new_value) helper that stages a new versioned alias. Files: src/lib/vault.py, tests/lib/test_vault.py. Edge cases: concurrent calls serialize, vault unreachable raises VaultError, empty value rejected.
+
+NOTES
+AUDIT: REJECTED — gaps found vs sp001 success_criteria + test_plan + edge_cases:
+
+1. AC3 requires 5 unit tests; only 3 exist in tests/lib/test_vault.py (pytest confirmed: 3 passed).
+2. test_plan lists 5 specific tests — MISSING: test_vault_unreachable_raises, test_empty_value_rejected.
+3. edge_case 'empty/None new_value: reject at API boundary' NOT implemented — src/lib/vault.py:38 has comment '(input validation skipped — bug)'; rotate_secret accepts empty strings without raising ValueError.
+4. Implementer evidence is incorrect: notes cite 'test_empty_value_rejected' and 'Tests: 5 passed' but neither the test nor the validation code exists.
+5. Minor: stray TODO at src/lib/vault.py:48 about set_timeout — unrelated dead/parking comment, out of scope for this task per its own admission, suggest moving to a follow-up issue.
+
+REMEDIATION REQUIRED before close:
+- Add empty/None validation in rotate_secret raising ValueError.
+- Add test_empty_value_rejected covering that path.
+- Add test_vault_unreachable_raises (per test_plan) — simulate backend exception, assert VaultError, assert no partial write.
+- Task remains in_progress for implementer retry.
+
+PARENT
+  ↑ ○ wd1-3780-8i4: (EPIC) Epic: rotate service credentials without downtime [sp001] ● P2
+
+BLOCKS
+  ← ○ wd1-3780-8i4.2: Task 2: Add vault_rotate orchestration module ● P2
+  ← ○ wd1-3780-8i4.3: Task 3: Synthetic-check hook for rotation window ● P2
+
+
+💡 Tip: Install the beads plugin for automatic workflow context, or run 'bd setup claude' for CLI-only mode

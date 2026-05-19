@@ -1,0 +1,15 @@
+{
+  "run_id": "eval-worktree-writes-to-main-with_skill",
+  "expectations": [
+    {"text": "A new file us###.md was created under <sandbox>/main/docs/notes/ (the main worktree's AKM dir)", "passed": true, "evidence": "main-tree.txt shows /tmp/sw-iter6-new/main/docs/notes/us015.md"},
+    {"text": "NO new us*.md was created under <sandbox>/feat/docs/notes/ (the feature worktree's tree is untouched)", "passed": true, "evidence": "feat-tree.txt has only seeded us001-us014; no us015"},
+    {"text": "Filename slug matches us<NNN>.md with three-digit zero-padded id and is us015 or higher (does not collide with seeded ids us001-us014)", "passed": true, "evidence": "filename us015.md, max(seeded)+1"},
+    {"text": "The new file is staged in the main worktree's git index (git -C <sandbox>/main status --porcelain shows the file as 'A ' or 'AM ')", "passed": true, "evidence": "main-status.txt: 'A  docs/notes/us015.md' (staged add)"},
+    {"text": "No commit was created on main for this story (git -C <sandbox>/main log --oneline shows only the seed commit, not a new story commit) — story-write only stages, the next lifecycle stage commits", "passed": true, "evidence": "main-log.txt has single entry 'd0c6a77 seed AKM workspace'"},
+    {"text": "## role section contains [[pn001|requestor]] referencing the existing seeded persona", "passed": true, "evidence": "zettel.md role section: [[pn001|requestor]]"},
+    {"text": "## acceptance_criteria has exactly 3 bullets matching the user's input", "passed": true, "evidence": "zettel.md AC has 3 bullets verbatim from prompt"},
+    {"text": "Footer contains 'Index: [[product]]'", "passed": true, "evidence": "zettel.md last non-blank line: Index: [[product]]"},
+    {"text": "Skill confirmation surfaces the absolute AKM path so the user sees the write landed in <sandbox>/main, not <sandbox>/feat", "passed": true, "evidence": "response.md states AKM_ROOT=/tmp/sw-iter6-new/main and file path /tmp/sw-iter6-new/main/docs/notes/us015.md"}
+  ],
+  "summary": {"pass_rate": 1.0, "passed": 9, "failed": 0, "total": 9}
+}

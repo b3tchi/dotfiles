@@ -1,0 +1,13 @@
+{
+  "eval_id": 5,
+  "eval_name": "persona-missing",
+  "prompt": "us005 (quarterly audit-log export) is in draft — let's run idea-implement to move it forward. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent read us005 and confirmed status: draft"},
+    {"text": "Agent identified that pn999 (compliance-officer) referenced by us005.role does NOT exist in docs/notes/"},
+    {"text": "Agent did NOT promote us005 to status: ready before pn### is in place"},
+    {"text": "Agent either minted a new pn###.md (via persona-write sub-loop) OR routed to persona-write OR hit gate requesting persona-mint"},
+    {"text": "Agent did NOT silently proceed past the missing-persona gap"},
+    {"text": "Persona-mint is acknowledged before any sp###.md emission (gate_reached.md, route_decision.md, or new pn###.md exists before sp###.md)"}
+  ]
+}

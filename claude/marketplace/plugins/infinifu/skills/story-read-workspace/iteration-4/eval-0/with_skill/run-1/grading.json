@@ -1,0 +1,46 @@
+{
+  "run_id": "eval-0-with_skill",
+  "expectations": [
+    {
+      "text": "Output contains the id us001",
+      "passed": true,
+      "evidence": "Line 1: '## us001 \u2014 order samples for upcoming client work'"
+    },
+    {
+      "text": "Output renders the Connextra one-liner: 'As a ... I want ... because ...'",
+      "passed": true,
+      "evidence": "Line 3: '**As a** requestor, **I want** order samples..., **because** I need product in hand...'"
+    },
+    {
+      "text": "Output renders persona alias 'requestor' (not the raw wikilink [[pn001|requestor]])",
+      "passed": true,
+      "evidence": "Line 3 uses 'requestor' bare, no [[pn001|...]] wikilink in output"
+    },
+    {
+      "text": "Output lists all 3 acceptance criteria for us001 (browse catalog, add items, submit request)",
+      "passed": true,
+      "evidence": "Lines 8-10 list browse / add / submit bullets"
+    },
+    {
+      "text": "Output shows status field (done)",
+      "passed": true,
+      "evidence": "Line 5: 'Status: done'"
+    },
+    {
+      "text": "Output is in detail mode (single story), not table or render mode",
+      "passed": true,
+      "evidence": "Single H2 header, no markdown table, no grouped sections"
+    },
+    {
+      "text": "Output does not include any other story (us002, us003, us013, us014)",
+      "passed": true,
+      "evidence": "Only us001 appears in the response"
+    }
+  ],
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 7,
+    "failed": 0,
+    "total": 7
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "eval_id": 2,
+  "eval_name": "compound-split-prompt",
+  "prompt": "capture today's learnings from the kanban workshop: WIP limits prevent overload by capping in-flight work, and pull-based systems generally beat push-based because they self-regulate to capacity. both fit our team but the WIP limit one is the one I keep coming back to.",
+  "assertions": [
+    {
+      "id": "compound_detected",
+      "description": "Summary or decision-log explicitly states the input contained multiple claims (compound), not a single idea"
+    },
+    {
+      "id": "split_plan_documented",
+      "description": "Either two-or-more separate zettel files are written, or a split plan is documented in decision-log.md before deciding what to write"
+    },
+    {
+      "id": "no_compound_card",
+      "description": "No single .md file contains BOTH the WIP-limits definition AND the pull-vs-push generalization mashed together"
+    },
+    {
+      "id": "each_card_has_product_h1",
+      "description": "Every emitted zettel file has [[product]] in its H1"
+    },
+    {
+      "id": "each_card_has_index_footer",
+      "description": "Every emitted zettel file ends with `Index: [[product]]` footer"
+    },
+    {
+      "id": "cards_link_each_other_or_have_links",
+      "description": "Each emitted card has at least one outbound wikilink in the body — they may cross-link, or link to other existing zettels"
+    },
+    {
+      "id": "filenames_meaningful_slugs",
+      "description": "Output filenames are meaningful kebab-slugs (e.g. wip-limits.md, pull-vs-push.md), not generic names like card-1.md"
+    },
+    {
+      "id": "atomicity_visible_in_summary",
+      "description": "Subjective: summary.md acknowledges the atomicity gate and explains the split decision in a way that shows the skill's principles were applied"
+    }
+  ]
+}

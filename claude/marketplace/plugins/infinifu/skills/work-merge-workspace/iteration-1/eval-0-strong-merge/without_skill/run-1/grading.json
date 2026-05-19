@@ -1,0 +1,63 @@
+{
+  "eval_id": 0,
+  "eval_name": "strong-merge",
+  "config": "without_skill",
+  "summary": {
+    "pass_rate": 0.9,
+    "passed": 9,
+    "failed": 1,
+    "total": 10
+  },
+  "expectations": [
+    {
+      "text": "Agent ran tests and verified pass",
+      "passed": true,
+      "evidence": "pytest evidence"
+    },
+    {
+      "text": "Agent verified all bd children closed",
+      "passed": true,
+      "evidence": "bd-verify language"
+    },
+    {
+      "text": "Agent flipped sp001 status from ready to done",
+      "passed": true,
+      "evidence": "status=done"
+    },
+    {
+      "text": "Agent flipped sp001 footer Index from [[board]] to [[archive]]",
+      "passed": true,
+      "evidence": "footer_archive=True"
+    },
+    {
+      "text": "Agent flipped us003 status from ready to done",
+      "passed": true,
+      "evidence": "us003_status=done"
+    },
+    {
+      "text": "Agent flipped im002 status from proposed to accepted",
+      "passed": true,
+      "evidence": "im002_status=accepted"
+    },
+    {
+      "text": "Agent removed [[sp001]] from docs/board.md ## ready",
+      "passed": true,
+      "evidence": "board_modified=True under_ready=False"
+    },
+    {
+      "text": "Agent added [[sp001]] to docs/archive.md ## done",
+      "passed": true,
+      "evidence": "archive_modified=True under_done=True"
+    },
+    {
+      "text": "Agent closed the bd epic",
+      "passed": true,
+      "evidence": "epic_closed=True"
+    },
+    {
+      "text": "Agent presented the 4 git-landing options (or executed one)",
+      "passed": false,
+      "evidence": "options_presented=False"
+    }
+  ]
+}

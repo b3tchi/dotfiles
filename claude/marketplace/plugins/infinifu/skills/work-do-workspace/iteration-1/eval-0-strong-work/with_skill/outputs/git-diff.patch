@@ -1,0 +1,263 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..15283b6
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,55 @@
++./AGENTS.md
++./.beads/config.yaml
++./.beads/dolt-server.port
++./.beads/export-state.json
++./.beads/.gitignore
++./.beads/hooks/post-checkout
++./.beads/hooks/post-merge
++./.beads/hooks/pre-commit
++./.beads/hooks/prepare-commit-msg
++./.beads/hooks/pre-push
++./.beads/interactions.jsonl
++./.beads/issues.jsonl
++./.beads/last-touched
++./.beads/.local_version
++./.beads/metadata.json
++./.beads/README.md
++./CLAUDE.md
++./.claude/settings.json
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/im002.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/spec/sp001.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/notes/us004.md
++./docs/notes/us005.md
++./docs/product.md
++./.gitignore
++./pyproject.toml
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/lib/vault.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
++./tests/lib/__init__.py
++./tests/lib/test_vault.py
++./.work-do-task-ids.json
+diff --git a/src/lib/vault.py b/src/lib/vault.py
+index b11a1ae..a9160a8 100644
+--- a/src/lib/vault.py
++++ b/src/lib/vault.py
+@@ -1,23 +1,84 @@
+ """Vault client. ft002 provides this surface today."""
+ 
++from __future__ import annotations
++
++import threading
++from typing import Dict
++
++# Module-level state: {name: {version_int: value_str}}.
++# Mutated only inside _LOCK. Tests reset via _reset_state().
++_STATE: Dict[str, Dict[int, str]] = {}
++_LOCK = threading.Lock()
++
++
++class VaultError(RuntimeError):
++    pass
++
+ 
+ def secret(name: str) -> str:
+     """Read a secret by name from vault.
+ 
+     Returns the current value for `name`. Raises VaultError if unreachable.
+     """
++    aliases = _STATE.get(name)
++    if aliases:
++        # Highest version wins — that's the "flipped" alias.
++        latest_version = max(aliases)
++        return aliases[latest_version]
+     return _read_alias(name)
+ 
+ 
++def rotate_secret(name: str, new_value: str) -> int:
++    """Stage a new versioned alias for `name` without touching prior versions.
++
++    Returns the new version number. Raises:
++      ValueError if `new_value` is empty or None (input-validation gate).
++      VaultError if the backend write fails (no partial state mutation).
++    """
++    # Boundary validation before taking the lock.
++    if new_value is None or new_value == "":
++        raise ValueError("new_value must be a non-empty string")
++
++    # Serialize rotations to prevent lost writes / interleaved versions.
++    with _LOCK:
++        try:
++            version = _stage_new_alias(name, new_value)
++        except VaultError:
++            raise
++        except Exception as exc:  # backend connectivity, etc.
++            # Wrap unexpected errors as VaultError so callers have a stable type.
++            # State is unchanged because _stage_new_alias failed before commit.
++            raise VaultError(f"vault rotate failed for {name!r}: {exc}") from exc
++        return version
++
++
++def _stage_new_alias(name: str, value: str) -> int:
++    """Write a new versioned alias entry; return the new version number.
++
++    Caller must hold _LOCK.
++    """
++    aliases = _STATE.setdefault(name, {})
++    next_version = max(aliases, default=0) + 1
++    aliases[next_version] = value
++    return next_version
++
++
++def _alias_snapshot(name: str) -> Dict[int, str]:
++    """Return a shallow copy of the alias map for `name` (test helper)."""
++    return dict(_STATE.get(name, {}))
++
++
++def _reset_state() -> None:
++    """Clear all aliases (test helper)."""
++    with _LOCK:
++        _STATE.clear()
++
++
+ def _read_alias(name: str) -> str:
+     # Placeholder: real implementation talks to vault.
+     return f"<vault:{name}>"
+ 
+ 
+-class VaultError(RuntimeError):
+-    pass
+-
+-
+ # TODO: set_timeout(timeout_ms) — current default is hardcoded to 5000ms which
+ # is too short for the European region; needs to become configurable. Out of
+ # scope for the rotation work but worth tracking.
+diff --git a/tests/lib/test_vault.py b/tests/lib/test_vault.py
+index c8b28d3..6dcbc70 100644
+--- a/tests/lib/test_vault.py
++++ b/tests/lib/test_vault.py
+@@ -1,7 +1,103 @@
+ """Vault smoke tests. Add tests as features land."""
+ 
+-from vault import secret
++from __future__ import annotations
++
++import threading
++from unittest.mock import patch
++
++import pytest
++
++import vault
++from vault import VaultError, rotate_secret, secret
++
++
++def setup_function(_func):
++    """Reset vault state between tests."""
++    vault._reset_state()
+ 
+ 
+ def test_secret_returns_value():
++    # Pre-existing smoke test — no value staged, falls back to placeholder.
+     assert secret("foo") == "<vault:foo>"
++
++
++def test_rotate_stages_new_alias():
++    """rotate_secret writes a new versioned alias without touching the old one."""
++    # Stage an initial value so we have a "prior" to preserve.
++    rotate_secret("db_password", "v1")
++    # Capture the prior alias map before the second rotation.
++    prior_aliases = vault._alias_snapshot("db_password")
++
++    rotate_secret("db_password", "v2")
++
++    new_aliases = vault._alias_snapshot("db_password")
++    # The new versioned alias must exist in addition to the prior one.
++    assert len(new_aliases) == len(prior_aliases) + 1
++    # The prior alias entry must be untouched (same version → same value).
++    for version, value in prior_aliases.items():
++        assert new_aliases[version] == value
++
++
++def test_secret_returns_new_after_flip():
++    """vault.secret(name) returns the new value after the alias flip."""
++    rotate_secret("api_key", "old-token")
++    assert secret("api_key") == "old-token"
++
++    rotate_secret("api_key", "new-token")
++    assert secret("api_key") == "new-token"
++
++
++def test_concurrent_rotate_serializes():
++    """Concurrent rotate_secret calls for the same name serialize, no interleaving."""
++    observed_during_critical_section: list[int] = []
++    name = "shared"
++
++    original_stage = vault._stage_new_alias
++
++    def slow_stage(n: str, value: str) -> int:
++        # Record how many threads are inside the critical section concurrently.
++        observed_during_critical_section.append(1)
++        try:
++            # Yield to other threads — if no lock, they'll pile in here.
++            import time as _t
++            _t.sleep(0.05)
++            return original_stage(n, value)
++        finally:
++            observed_during_critical_section.pop()
++
++    threads = [
++        threading.Thread(target=rotate_secret, args=(name, f"v{i}"))
++        for i in range(5)
++    ]
++
++    with patch.object(vault, "_stage_new_alias", side_effect=slow_stage):
++        for t in threads:
++            t.start()
++        for t in threads:
++            t.join()
++
++    # After all rotations, exactly 5 versioned aliases must exist (no lost writes).
++    assert len(vault._alias_snapshot(name)) == 5
++
++
++def test_vault_unreachable_raises():
++    """When the vault backend is unreachable, raise VaultError and do not partial-write."""
++    def boom(_name: str, _value: str) -> int:
++        raise ConnectionError("vault down")
++
++    before = dict(vault._STATE)  # full state snapshot
++
++    with patch.object(vault, "_stage_new_alias", side_effect=boom):
++        with pytest.raises(VaultError):
++            rotate_secret("db_password", "v1")
++
++    # No partial write: state is byte-identical to before.
++    assert vault._STATE == before
++
++
++def test_empty_value_rejected():
++    """Empty or None new_value is rejected at the API boundary."""
++    with pytest.raises(ValueError):
++        rotate_secret("db_password", "")
++    with pytest.raises(ValueError):
++        rotate_secret("db_password", None)  # type: ignore[arg-type]

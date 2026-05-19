@@ -1,0 +1,68 @@
+{
+  "eval_id": 0,
+  "eval_name": "strong-ready",
+  "config": "without_skill",
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 11,
+    "failed": 0,
+    "total": 11
+  },
+  "expectations": [
+    {
+      "text": "Agent read sp001 and confirmed status: spec",
+      "passed": true,
+      "evidence": "sp001 + spec"
+    },
+    {
+      "text": "Agent created exactly one bd epic for sp001",
+      "passed": true,
+      "evidence": "epic_count=1 ids=['sandbox-nt2']"
+    },
+    {
+      "text": "Agent created at least 3 bd tasks (one per ### Task N)",
+      "passed": true,
+      "evidence": "task_count=3"
+    },
+    {
+      "text": "All bd tasks have --parent linking to the epic",
+      "passed": true,
+      "evidence": "with_parent=3 of 3"
+    },
+    {
+      "text": "Agent added blocking deps (>=2 dep edges from #### depends)",
+      "passed": true,
+      "evidence": "dep_count=3"
+    },
+    {
+      "text": "Agent annotated each ### Task N with #### bd <id>",
+      "passed": true,
+      "evidence": "bd_annotations=6 task_headers=3"
+    },
+    {
+      "text": "Agent flipped sp001 status from spec to ready",
+      "passed": true,
+      "evidence": "status=ready"
+    },
+    {
+      "text": "Agent moved docs/board.md [[sp001]] from ## spec to ## ready",
+      "passed": true,
+      "evidence": "under_spec=False under_ready=True"
+    },
+    {
+      "text": "Agent did NOT use bd update --status in_progress",
+      "passed": true,
+      "evidence": "in_progress_called=False"
+    },
+    {
+      "text": "Agent did NOT use bd close",
+      "passed": true,
+      "evidence": "close_called=False"
+    },
+    {
+      "text": "Agent did NOT touch src/",
+      "passed": true,
+      "evidence": "src_modified=False"
+    }
+  ]
+}

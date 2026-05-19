@@ -1,0 +1,284 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..15283b6
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,55 @@
++./AGENTS.md
++./.beads/config.yaml
++./.beads/dolt-server.port
++./.beads/export-state.json
++./.beads/.gitignore
++./.beads/hooks/post-checkout
++./.beads/hooks/post-merge
++./.beads/hooks/pre-commit
++./.beads/hooks/prepare-commit-msg
++./.beads/hooks/pre-push
++./.beads/interactions.jsonl
++./.beads/issues.jsonl
++./.beads/last-touched
++./.beads/.local_version
++./.beads/metadata.json
++./.beads/README.md
++./CLAUDE.md
++./.claude/settings.json
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/im002.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/spec/sp001.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/notes/us004.md
++./docs/notes/us005.md
++./docs/product.md
++./.gitignore
++./pyproject.toml
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/lib/vault.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
++./tests/lib/__init__.py
++./tests/lib/test_vault.py
++./.work-do-task-ids.json
+diff --git a/src/lib/vault.py b/src/lib/vault.py
+index d9959e9..9ca236c 100644
+--- a/src/lib/vault.py
++++ b/src/lib/vault.py
+@@ -1,23 +1,126 @@
+-"""Vault client. ft002 provides this surface today."""
++"""Vault client. ft002 provides this surface today.
++
++Adds versioned-alias bookkeeping for credential rotation (sp001 / im002).
++The in-process state below is intentionally simple: it's the seam the real
++vault driver will plug into, but is sufficient for unit tests of rotation
++semantics.
++"""
++
++from __future__ import annotations
++
++import threading
++from typing import Dict, List, Optional
++
++
++class VaultError(RuntimeError):
++    pass
++
++
++# Per-name lock table — guarantees concurrent rotate_secret calls for the same
++# name serialize. A module-level lock guards lookup of the per-name lock so we
++# don't race creating it.
++_locks_guard = threading.Lock()
++_locks: Dict[str, threading.Lock] = {}
++
++# Versioned alias store. Each name maps to an ordered list of versions; the
++# last entry is the "current" value returned by secret(). Older entries remain
++# readable during the overlap window — the orchestration module (vault_rotate)
++# is responsible for expiring them at T+5min.
++_aliases: Dict[str, List[str]] = {}
++
++# Optional fault injection hook. Tests set this to simulate vault unreachable.
++# Production code never sets it; the default is "reachable".
++_unreachable: bool = False
++
++
++def _lock_for(name: str) -> threading.Lock:
++    with _locks_guard:
++        lock = _locks.get(name)
++        if lock is None:
++            lock = threading.Lock()
++            _locks[name] = lock
++        return lock
++
++
++def _check_reachable() -> None:
++    if _unreachable:
++        raise VaultError("vault unreachable")
+ 
+ 
+ def secret(name: str) -> str:
+-    """Read a secret by name from vault.
++    """Read the current value of a secret by name.
+ 
+-    Returns the current value for `name`. Raises VaultError if unreachable.
++    Returns the most recently staged version for `name`. Raises VaultError
++    if the vault is unreachable. If `rotate_secret` has not been called for
++    `name`, falls back to the legacy placeholder read path so existing
++    callers keep working.
+     """
++    _check_reachable()
++    versions = _aliases.get(name)
++    if versions:
++        return versions[-1]
+     return _read_alias(name)
+ 
+ 
++def rotate_secret(name: str, new_value: str) -> None:
++    """Stage a new versioned alias for `name` carrying `new_value`.
++
++    Semantics:
++    - Writes a new version; does NOT mutate or delete prior versions.
++    - Subsequent `secret(name)` calls return `new_value` (alias flipped).
++    - Prior versions remain in the version list for the overlap window;
++      `vault_rotate` is responsible for expiring them at T+5min.
++    - Concurrent calls for the same `name` serialize via a per-name lock.
++    - Raises VaultError if vault is unreachable (no partial write).
++    - Raises ValueError if `new_value` is empty or None.
++    """
++    if new_value is None or new_value == "":
++        raise ValueError("new_value must be a non-empty string")
++
++    lock = _lock_for(name)
++    with lock:
++        # Reachability check inside the lock so the failure mode is "no
++        # partial write" — if we raise here, the version list is unchanged.
++        _check_reachable()
++        versions = _aliases.setdefault(name, [])
++        versions.append(new_value)
++
++
++def _versions(name: str) -> List[str]:
++    """Internal: inspect the staged version list for `name` (for vault_rotate
++    and tests). Returns a copy."""
++    return list(_aliases.get(name, []))
++
++
++def _expire_to(name: str, keep: str) -> None:
++    """Internal: drop all versions except `keep` (used by vault_rotate at
++    T+5min). No-op if `keep` not present."""
++    with _lock_for(name):
++        versions = _aliases.get(name, [])
++        if keep in versions:
++            _aliases[name] = [keep]
++
++
++def _reset_for_tests() -> None:
++    """Test-only helper: clear all in-memory rotation state and fault flags."""
++    global _unreachable
++    with _locks_guard:
++        _locks.clear()
++    _aliases.clear()
++    _unreachable = False
++
++
++def _set_unreachable(flag: bool) -> None:
++    """Test-only helper: toggle the vault-unreachable fault injection."""
++    global _unreachable
++    _unreachable = flag
++
++
+ def _read_alias(name: str) -> str:
+     # Placeholder: real implementation talks to vault.
+     return f"<vault:{name}>"
+ 
+ 
+-class VaultError(RuntimeError):
+-    pass
+-
+-
+ def set_timeout(timeout_ms: int) -> None:
+     """Configure the per-request timeout (broken: never persists)."""
+     # FIXME: this assigns to a local that never escapes. Existing bug.
+diff --git a/tests/lib/test_vault.py b/tests/lib/test_vault.py
+index c8b28d3..c96d185 100644
+--- a/tests/lib/test_vault.py
++++ b/tests/lib/test_vault.py
+@@ -1,7 +1,79 @@
+ """Vault smoke tests. Add tests as features land."""
+ 
+-from vault import secret
++import threading
++
++import pytest
++
++import vault
++from vault import VaultError, rotate_secret, secret
++
++
++def setup_function(_func):
++    # Isolate each test: rotate_secret holds module-level state.
++    vault._reset_for_tests()
+ 
+ 
+ def test_secret_returns_value():
++    # Pre-rotation read path: legacy placeholder.
+     assert secret("foo") == "<vault:foo>"
++
++
++def test_rotate_stages_new_alias():
++    # New version is staged; the previous (legacy) value is no longer the
++    # one returned, but a prior staged version is preserved alongside.
++    rotate_secret("db_password", "v1")
++    rotate_secret("db_password", "v2")
++    versions = vault._versions("db_password")
++    assert versions == ["v1", "v2"], (
++        "rotate_secret must append a versioned alias without dropping prior versions"
++    )
++
++
++def test_secret_returns_new_after_flip():
++    rotate_secret("api_key", "old")
++    assert secret("api_key") == "old"
++    rotate_secret("api_key", "new")
++    assert secret("api_key") == "new", "alias flip must make the new value current"
++    # Prior version still in the version list (overlap window).
++    assert "old" in vault._versions("api_key")
++
++
++def test_concurrent_rotate_serializes():
++    # Hammer the same name from many threads; the final version list must
++    # contain every value exactly once, no lost writes.
++    values = [f"v{i}" for i in range(50)]
++    errors: list[BaseException] = []
++
++    def worker(v: str) -> None:
++        try:
++            rotate_secret("shared", v)
++        except BaseException as e:  # noqa: BLE001 — test harness
++            errors.append(e)
++
++    threads = [threading.Thread(target=worker, args=(v,)) for v in values]
++    for t in threads:
++        t.start()
++    for t in threads:
++        t.join()
++
++    assert errors == []
++    versions = vault._versions("shared")
++    assert sorted(versions) == sorted(values), (
++        "concurrent rotate_secret calls must all land — no lost writes"
++    )
++
++
++def test_vault_unreachable_raises():
++    vault._set_unreachable(True)
++    with pytest.raises(VaultError):
++        rotate_secret("foo", "v1")
++    # No partial write: nothing should have been staged.
++    assert vault._versions("foo") == []
++
++
++def test_empty_value_rejected():
++    with pytest.raises(ValueError):
++        rotate_secret("foo", "")
++    with pytest.raises(ValueError):
++        rotate_secret("foo", None)  # type: ignore[arg-type]
++    assert vault._versions("foo") == []

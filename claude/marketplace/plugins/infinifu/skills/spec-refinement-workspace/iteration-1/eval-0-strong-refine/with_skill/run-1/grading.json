@@ -1,0 +1,78 @@
+{
+  "eval_id": 0,
+  "eval_name": "strong-refine",
+  "config": "with_skill",
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 13,
+    "failed": 0,
+    "total": 13
+  },
+  "expectations": [
+    {
+      "text": "Agent read sp001 and confirmed status: spec",
+      "passed": true,
+      "evidence": "sp001 + spec"
+    },
+    {
+      "text": "Agent re-read us003 AC",
+      "passed": true,
+      "evidence": "us003 + AC ref"
+    },
+    {
+      "text": "Agent read im002",
+      "passed": true,
+      "evidence": "im002 mentioned"
+    },
+    {
+      "text": "Agent surveyed adr0001 / adr0002",
+      "passed": true,
+      "evidence": "adrs: ['adr0001', 'adr0002']"
+    },
+    {
+      "text": "Agent surveyed ft002 including api_surface",
+      "passed": true,
+      "evidence": "ft002 + api_surface"
+    },
+    {
+      "text": "Agent appended ## plan to sp001",
+      "passed": true,
+      "evidence": "has_plan=True"
+    },
+    {
+      "text": "Agent appended ## tasks with H3 headers",
+      "passed": true,
+      "evidence": "has_tasks=True task_headers=['### Task 1', '### Task 2', '### Task 3', '### Task 4']"
+    },
+    {
+      "text": "Tasks include >=4 H4 properties",
+      "passed": true,
+      "evidence": "h4 present: ['type', 'effort', 'depends', 'files_touched', 'success_criteria', 'edge_cases', 'test_plan']"
+    },
+    {
+      "text": "Tasks do NOT include #### bd id annotations",
+      "passed": true,
+      "evidence": "bd_annotations=False"
+    },
+    {
+      "text": "Agent did NOT use bd commands",
+      "passed": true,
+      "evidence": "bd_called=False"
+    },
+    {
+      "text": "Agent did NOT change sp001 status",
+      "passed": true,
+      "evidence": "status=spec"
+    },
+    {
+      "text": "Agent did NOT modify docs/board.md",
+      "passed": true,
+      "evidence": "board_modified=False"
+    },
+    {
+      "text": "Agent finalized im002 ## specs back-link",
+      "passed": true,
+      "evidence": "im002_modified=True has_sp001=True"
+    }
+  ]
+}

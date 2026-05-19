@@ -1,0 +1,38 @@
+{
+  "eval_id": 2,
+  "eval_name": "adr-conflict",
+  "config": "with_skill",
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 5,
+    "failed": 0,
+    "total": 5
+  },
+  "expectations": [
+    {
+      "text": "Agent surveyed adr0001",
+      "passed": true,
+      "evidence": "adr0001 referenced"
+    },
+    {
+      "text": "Agent detected conflict between solution and adr0001",
+      "passed": true,
+      "evidence": "adr0001 + conflict-language"
+    },
+    {
+      "text": "Output flags conflict (adr0001 + conflict/violate/supersede nearby)",
+      "passed": true,
+      "evidence": "proximity match"
+    },
+    {
+      "text": "Either supersession task in breakdown OR skill stops",
+      "passed": true,
+      "evidence": "gate=False route=True"
+    },
+    {
+      "text": "Did NOT silently implement conflicting solution",
+      "passed": true,
+      "evidence": "conflict acknowledged"
+    }
+  ]
+}

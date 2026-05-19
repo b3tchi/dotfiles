@@ -1,0 +1,41 @@
+{
+  "skill_name": "story-find",
+  "evals": [
+    {
+      "id": 0,
+      "eval_name": "tag-match-catalog",
+      "prompt": "Which stories cover the catalog area?",
+      "assertions": [
+        {"text": "Output renders us001 (has [[catalog]] tag)"},
+        {"text": "us001 checklist shows [x] for all criteria (status=done)"},
+        {"text": "us001 validation line says 'Validated: 3/3 criteria met (status=done).'"},
+        {"text": "us001 match score is at least 5 (tag-weight hit)"},
+        {"text": "Output excludes stories with no catalog tag (us002 approver-flow, us003 tracking, us013, us014)"},
+        {"text": "Coverage summary mentions catalog and at least 1 matched story"}
+      ]
+    },
+    {
+      "id": 1,
+      "eval_name": "body-keyword-resubmission",
+      "prompt": "Are there stories about resubmission?",
+      "assertions": [
+        {"text": "Output renders us013 (alias mentions 'resubmit')"},
+        {"text": "us013 checklist shows [ ] for all criteria (status=draft, unverified)"},
+        {"text": "us013 validation line says 'Unverified: 0/3 criteria checked (status=draft).'"},
+        {"text": "Output excludes unrelated stories (us001, us002, us003, us014)"}
+      ]
+    },
+    {
+      "id": 2,
+      "eval_name": "tag-flow-requestor",
+      "prompt": "Show me stories tagged requestor-flow.",
+      "assertions": [
+        {"text": "Output renders all stories with [[requestor-flow]] tag: us001, us003, us013, us014"},
+        {"text": "Output excludes us002 (approver-flow tag, not requestor-flow)"},
+        {"text": "Each matched story has the requestor-flow tag listed in its Tags: line"},
+        {"text": "Match scores are at least 5 for each (tag exact hit)"},
+        {"text": "Coverage summary lists status breakdown across the matched stories"}
+      ]
+    }
+  ]
+}

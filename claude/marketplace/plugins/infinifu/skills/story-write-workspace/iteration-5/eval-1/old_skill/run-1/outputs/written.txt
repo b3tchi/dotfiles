@@ -1,0 +1,14 @@
+stories:
+  - id: 2605-001
+    title: Mark a request as picked after items pulled from inventory
+    role: warehouse picker
+    want: to mark a request as picked once items are pulled from inventory
+    because: that signals it's ready for handoff
+    acceptance_criteria:
+      - Picker can transition a request to "picked" status from the request detail view
+      - Marking as picked is only allowed when the request is in an active/in-progress state (not already picked, cancelled, or handed off)
+      - Once marked picked, the request appears in the handoff-ready queue and is timestamped with the pick completion time
+      - Attempting to mark an already-picked request as picked returns a clear error and does not change state
+    tags: [warehouse, fulfillment, request-status]
+    status: draft
+    created: 2026-05-14

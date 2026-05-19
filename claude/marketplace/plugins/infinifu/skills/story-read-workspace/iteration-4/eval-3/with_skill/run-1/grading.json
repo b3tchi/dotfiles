@@ -1,0 +1,31 @@
+{
+  "run_id": "eval-3-with_skill",
+  "expectations": [
+    {
+      "text": "Output is a table or filtered list (not a single-story detail)",
+      "passed": true,
+      "evidence": "Markdown table with 2 rows, not a single ## detail header"
+    },
+    {
+      "text": "Result includes us013 (resubmit) \u2014 matches 'resubmission'",
+      "passed": true,
+      "evidence": "Row 1: us013 resubmit"
+    },
+    {
+      "text": "Result includes us014 (bulk import) \u2014 matches 'import'",
+      "passed": true,
+      "evidence": "Row 2: us014 bulk import"
+    },
+    {
+      "text": "Result excludes unrelated stories (us001, us002, us003)",
+      "passed": true,
+      "evidence": "Table has only us013 and us014"
+    }
+  ],
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 4,
+    "failed": 0,
+    "total": 4
+  }
+}

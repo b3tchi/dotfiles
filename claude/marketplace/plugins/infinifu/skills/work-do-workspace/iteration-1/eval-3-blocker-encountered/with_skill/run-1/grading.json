@@ -1,0 +1,43 @@
+{
+  "eval_id": 3,
+  "eval_name": "blocker-encountered",
+  "config": "with_skill",
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 6,
+    "failed": 0,
+    "total": 6
+  },
+  "expectations": [
+    {
+      "text": "Agent ran bd show on the task",
+      "passed": true,
+      "evidence": "bd show present"
+    },
+    {
+      "text": "Agent detected ft999 does not exist",
+      "passed": true,
+      "evidence": "ft999+missing language"
+    },
+    {
+      "text": "Agent did NOT silently invent / fabricate ft999.cache surface",
+      "passed": true,
+      "evidence": "has_rotate=False"
+    },
+    {
+      "text": "Agent did NOT close the task",
+      "passed": true,
+      "evidence": "status=open"
+    },
+    {
+      "text": "Agent logged a BLOCKED note OR set status: blocked",
+      "passed": true,
+      "evidence": "BLOCKED_in_notes=True status=open"
+    },
+    {
+      "text": "rotate_secret NOT written (work didn't proceed past blocker)",
+      "passed": true,
+      "evidence": "has_rotate=False"
+    }
+  ]
+}

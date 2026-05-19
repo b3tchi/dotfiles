@@ -1,0 +1,500 @@
+{
+  "metadata": {
+    "skill_name": "spec-ready",
+    "skill_path": "<path/to/skill>",
+    "executor_model": "<model-name>",
+    "analyzer_model": "<model-name>",
+    "timestamp": "2026-05-16T16:06:15Z",
+    "evals_run": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "runs_per_configuration": 3
+  },
+  "runs": [
+    {
+      "eval_id": 0,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 11,
+        "failed": 0,
+        "total": 11,
+        "time_seconds": 169.9,
+        "tokens": 63284,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent read sp001 and confirmed status: spec",
+          "passed": true,
+          "evidence": "sp001 + spec"
+        },
+        {
+          "text": "Agent created exactly one bd epic for sp001",
+          "passed": true,
+          "evidence": "epic_count=1 ids=['sandbox-nt2']"
+        },
+        {
+          "text": "Agent created at least 3 bd tasks (one per ### Task N)",
+          "passed": true,
+          "evidence": "task_count=3"
+        },
+        {
+          "text": "All bd tasks have --parent linking to the epic",
+          "passed": true,
+          "evidence": "with_parent=3 of 3"
+        },
+        {
+          "text": "Agent added blocking deps (>=2 dep edges from #### depends)",
+          "passed": true,
+          "evidence": "dep_count=3"
+        },
+        {
+          "text": "Agent annotated each ### Task N with #### bd <id>",
+          "passed": true,
+          "evidence": "bd_annotations=6 task_headers=3"
+        },
+        {
+          "text": "Agent flipped sp001 status from spec to ready",
+          "passed": true,
+          "evidence": "status=ready"
+        },
+        {
+          "text": "Agent moved docs/board.md [[sp001]] from ## spec to ## ready",
+          "passed": true,
+          "evidence": "under_spec=False under_ready=True"
+        },
+        {
+          "text": "Agent did NOT use bd update --status in_progress",
+          "passed": true,
+          "evidence": "in_progress_called=False"
+        },
+        {
+          "text": "Agent did NOT use bd close",
+          "passed": true,
+          "evidence": "close_called=False"
+        },
+        {
+          "text": "Agent did NOT touch src/",
+          "passed": true,
+          "evidence": "src_modified=False"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 108.2,
+        "tokens": 56307,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent recognized status: ready",
+          "passed": true,
+          "evidence": "sp001 + ready"
+        },
+        {
+          "text": "Agent recognized #### bd annotations already exist",
+          "passed": true,
+          "evidence": "bd-annotation language"
+        },
+        {
+          "text": "Agent did NOT modify sp001",
+          "passed": true,
+          "evidence": "sp001_modified=False"
+        },
+        {
+          "text": "Agent did NOT modify docs/board.md",
+          "passed": true,
+          "evidence": "board_modified=False"
+        },
+        {
+          "text": "Output routes to work-do or states 'already ready'",
+          "passed": true,
+          "evidence": "route phrase"
+        },
+        {
+          "text": "Agent did NOT create any new bd epic / tasks (stopped clean)",
+          "passed": true,
+          "evidence": "route=True gate=False"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.8333333333333334,
+        "passed": 5,
+        "failed": 1,
+        "total": 6,
+        "time_seconds": 130.7,
+        "tokens": 55239,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent recognized ## tasks missing/empty",
+          "passed": true,
+          "evidence": "missing-tasks phrase"
+        },
+        {
+          "text": "Agent did NOT create bd epic / tasks (cannot invent)",
+          "passed": false,
+          "evidence": "epics=1 tasks=3"
+        },
+        {
+          "text": "Agent did NOT modify sp001",
+          "passed": true,
+          "evidence": "sp001_modified=False"
+        },
+        {
+          "text": "Agent did NOT modify docs/board.md",
+          "passed": true,
+          "evidence": "board_modified=False"
+        },
+        {
+          "text": "Agent did NOT change sp001 status",
+          "passed": true,
+          "evidence": "status=spec"
+        },
+        {
+          "text": "Output routes to spec-refinement OR 'tasks missing'",
+          "passed": true,
+          "evidence": "route phrase"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.8333333333333334,
+        "passed": 5,
+        "failed": 1,
+        "total": 6,
+        "time_seconds": 111.3,
+        "tokens": 56039,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent recognized #### bd ids already present",
+          "passed": true,
+          "evidence": "annotation-language"
+        },
+        {
+          "text": "Agent recognized the spec has been processed",
+          "passed": true,
+          "evidence": "processed-language present"
+        },
+        {
+          "text": "Agent did NOT create duplicate bd epic / tasks",
+          "passed": false,
+          "evidence": "epics=1 tasks=3"
+        },
+        {
+          "text": "Agent did NOT modify sp001",
+          "passed": true,
+          "evidence": "sp001_modified=False"
+        },
+        {
+          "text": "Agent did NOT modify docs/board.md",
+          "passed": true,
+          "evidence": "board_modified=False"
+        },
+        {
+          "text": "Output states 'already processed' or routes accordingly",
+          "passed": true,
+          "evidence": "route phrase"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 0,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 11,
+        "failed": 0,
+        "total": 11,
+        "time_seconds": 172.9,
+        "tokens": 62528,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent read sp001 and confirmed status: spec",
+          "passed": true,
+          "evidence": "sp001 + spec"
+        },
+        {
+          "text": "Agent created exactly one bd epic for sp001",
+          "passed": true,
+          "evidence": "epic_count=1 ids=['sandbox-nt2']"
+        },
+        {
+          "text": "Agent created at least 3 bd tasks (one per ### Task N)",
+          "passed": true,
+          "evidence": "task_count=3"
+        },
+        {
+          "text": "All bd tasks have --parent linking to the epic",
+          "passed": true,
+          "evidence": "with_parent=3 of 3"
+        },
+        {
+          "text": "Agent added blocking deps (>=2 dep edges from #### depends)",
+          "passed": true,
+          "evidence": "dep_count=3"
+        },
+        {
+          "text": "Agent annotated each ### Task N with #### bd <id>",
+          "passed": true,
+          "evidence": "bd_annotations=6 task_headers=3"
+        },
+        {
+          "text": "Agent flipped sp001 status from spec to ready",
+          "passed": true,
+          "evidence": "status=ready"
+        },
+        {
+          "text": "Agent moved docs/board.md [[sp001]] from ## spec to ## ready",
+          "passed": true,
+          "evidence": "under_spec=False under_ready=True"
+        },
+        {
+          "text": "Agent did NOT use bd update --status in_progress",
+          "passed": true,
+          "evidence": "in_progress_called=False"
+        },
+        {
+          "text": "Agent did NOT use bd close",
+          "passed": true,
+          "evidence": "close_called=False"
+        },
+        {
+          "text": "Agent did NOT touch src/",
+          "passed": true,
+          "evidence": "src_modified=False"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 114.3,
+        "tokens": 57716,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent recognized status: ready",
+          "passed": true,
+          "evidence": "sp001 + ready"
+        },
+        {
+          "text": "Agent recognized #### bd annotations already exist",
+          "passed": true,
+          "evidence": "bd-annotation language"
+        },
+        {
+          "text": "Agent did NOT modify sp001",
+          "passed": true,
+          "evidence": "sp001_modified=False"
+        },
+        {
+          "text": "Agent did NOT modify docs/board.md",
+          "passed": true,
+          "evidence": "board_modified=False"
+        },
+        {
+          "text": "Output routes to work-do or states 'already ready'",
+          "passed": true,
+          "evidence": "route phrase"
+        },
+        {
+          "text": "Agent did NOT create any new bd epic / tasks (stopped clean)",
+          "passed": true,
+          "evidence": "route=False gate=False"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.3333333333333333,
+        "passed": 2,
+        "failed": 4,
+        "total": 6,
+        "time_seconds": 193.5,
+        "tokens": 57763,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent recognized ## tasks missing/empty",
+          "passed": true,
+          "evidence": "missing-tasks phrase"
+        },
+        {
+          "text": "Agent did NOT create bd epic / tasks (cannot invent)",
+          "passed": false,
+          "evidence": "epics=1 tasks=3"
+        },
+        {
+          "text": "Agent did NOT modify sp001",
+          "passed": false,
+          "evidence": "sp001_modified=True"
+        },
+        {
+          "text": "Agent did NOT modify docs/board.md",
+          "passed": false,
+          "evidence": "board_modified=True"
+        },
+        {
+          "text": "Agent did NOT change sp001 status",
+          "passed": false,
+          "evidence": "status=ready"
+        },
+        {
+          "text": "Output routes to spec-refinement OR 'tasks missing'",
+          "passed": true,
+          "evidence": "route phrase"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.5,
+        "passed": 3,
+        "failed": 3,
+        "total": 6,
+        "time_seconds": 129.6,
+        "tokens": 60454,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent recognized #### bd ids already present",
+          "passed": true,
+          "evidence": "annotation-language"
+        },
+        {
+          "text": "Agent recognized the spec has been processed",
+          "passed": true,
+          "evidence": "processed-language present"
+        },
+        {
+          "text": "Agent did NOT create duplicate bd epic / tasks",
+          "passed": false,
+          "evidence": "epics=1 tasks=3"
+        },
+        {
+          "text": "Agent did NOT modify sp001",
+          "passed": false,
+          "evidence": "sp001_modified=True"
+        },
+        {
+          "text": "Agent did NOT modify docs/board.md",
+          "passed": false,
+          "evidence": "board_modified=True"
+        },
+        {
+          "text": "Output states 'already processed' or routes accordingly",
+          "passed": true,
+          "evidence": "route phrase"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 0.9167,
+        "stddev": 0.0962,
+        "min": 0.8333,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 130.025,
+        "stddev": 28.3868,
+        "min": 108.2,
+        "max": 169.9
+      },
+      "tokens": {
+        "mean": 57717.25,
+        "stddev": 3738.7947,
+        "min": 55239,
+        "max": 63284
+      }
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 0.7083,
+        "stddev": 0.3436,
+        "min": 0.3333,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 152.575,
+        "stddev": 36.8817,
+        "min": 114.3,
+        "max": 193.5
+      },
+      "tokens": {
+        "mean": 59615.25,
+        "stddev": 2325.625,
+        "min": 57716,
+        "max": 62528
+      }
+    },
+    "delta": {
+      "pass_rate": "+0.21",
+      "time_seconds": "-22.5",
+      "tokens": "-1898"
+    }
+  },
+  "notes": []
+}

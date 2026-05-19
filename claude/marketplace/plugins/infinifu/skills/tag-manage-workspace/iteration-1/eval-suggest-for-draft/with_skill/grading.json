@@ -1,0 +1,31 @@
+{
+  "eval_name": "eval-suggest-for-draft",
+  "expectations": [
+    {
+      "text": "Output proposes 1-4 tags",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Suggested tags include 'billing' OR 'admin' OR 'reports'",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output explains why each tag was picked (which keyword matched)",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output uses existing taxonomy where possible",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Output is in suggest-mode template (proposing, not modifying yaml)",
+      "passed": true,
+      "evidence": "yaml_modified=False"
+    }
+  ],
+  "summary": "5/5 passed"
+}

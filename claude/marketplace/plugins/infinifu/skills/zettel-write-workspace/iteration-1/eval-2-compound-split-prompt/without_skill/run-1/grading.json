@@ -1,0 +1,52 @@
+{
+  "eval_id": 2,
+  "config": "without_skill",
+  "expectations": [
+    {
+      "text": "Compound input detected",
+      "passed": true,
+      "evidence": "summary acknowledges split into 2 atomic notes"
+    },
+    {
+      "text": "Split plan documented (\u22652 files or written plan)",
+      "passed": true,
+      "evidence": "wip-limits.md + pull-based-flow.md + summary.md"
+    },
+    {
+      "text": "No single file conflates both claims",
+      "passed": true,
+      "evidence": "separated by file"
+    },
+    {
+      "text": "Every emitted card has [[product]] in H1",
+      "passed": true,
+      "evidence": "both cards confirmed"
+    },
+    {
+      "text": "Every card has Index: [[product]] footer",
+      "passed": true,
+      "evidence": "both confirmed"
+    },
+    {
+      "text": "Each card has \u22651 outbound wikilink",
+      "passed": true,
+      "evidence": "wip-limits\u2192pull-based-flow only (single link, but \u22651)"
+    },
+    {
+      "text": "Filenames are meaningful kebab-slugs",
+      "passed": true,
+      "evidence": "wip-limits.md, pull-based-flow.md"
+    },
+    {
+      "text": "Summary acknowledges atomicity gate explicitly per skill",
+      "passed": false,
+      "evidence": "summary says split inferred from vault style + prompt structure, NOT from any explicit zettelkasten/atomicity rule \u2014 principle not applied as discipline"
+    }
+  ],
+  "summary": {
+    "passed": 7,
+    "failed": 1,
+    "total": 8,
+    "pass_rate": 0.875
+  }
+}

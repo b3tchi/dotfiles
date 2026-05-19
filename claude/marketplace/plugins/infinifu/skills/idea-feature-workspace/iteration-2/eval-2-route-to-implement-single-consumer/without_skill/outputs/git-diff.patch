@@ -1,0 +1,163 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..d686d2d
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,28 @@
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/product.md
++./.gitignore
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
+diff --git a/docs/board.md b/docs/board.md
+index e500c4e..b148c49 100644
+--- a/docs/board.md
++++ b/docs/board.md
+@@ -1,9 +1,12 @@
+ # Board
+ 
+-Nothing in flight right now.
++One spec captured at idea stage — quarterly retention purge tool for
++[[pn002|platform-engineer]], pending spec-writing.
+ 
+ ## idea
+ 
++- [[sp001|quarterly retention purge tool]]
++
+ ## spec
+ 
+ ## ready
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+new file mode 100644
+index 0000000..7900be2
+--- /dev/null
++++ b/docs/notes/spec/sp001.md
+@@ -0,0 +1,49 @@
++---
++aliases:
++  - quarterly retention purge tool
++status: idea
++created: 2026-05-16
++---
++# Spec [[cat002]] [[cat001]] [[board]]
++
++## solves
++[[us004|quarterly retention purge tool with deletion proof]]
++
++## problem
++
++Legal asks the platform-engineer once a quarter for proof that the
++90-day retention rule set in [[adr0002]] is actually being enforced
++against the `report_runs` table. Today the nightly delete-job runs
++in the background and the platform-engineer reconstructs evidence by
++hand — there is no operator-facing tool, no signed artifact, and no
++way to re-run the proof on demand.
++
++The single consumer of this tool is [[pn002|platform-engineer]];
++expected cadence is once a quarter. It is *not* a horizontal
++capability that other services will reuse — it is a one-shot
++operator workflow that wraps the existing retention rule.
++
++Scope at idea stage:
++
++- Initial table in scope: `report_runs` (the only retention-bound
++  table today per [[adr0002]]).
++- Out of scope: schedule changes, retention-window changes, adding
++  other tables, multi-tenant proof signing.
++- Open questions for the spec stage:
++  - Where does the deletion-proof artifact live (file on disk,
++    Postgres table, S3-equivalent)?
++  - Does it need a cryptographic signature, or is "human-readable
++    + checked into a git-tracked operator log" enough?
++  - Is the existing nightly cron still authoritative, or does the
++    tool *become* the authoritative purge with the cron removed?
++
++Routing note: the seeded request named the *idea-feature* skill, but
++the shape ("single consumer, once a quarter, no other implementation
++will consume it") is a vertical user-story flow, not a horizontal
++reusable capability. Captured here as a fresh `us004` + `sp001` at
++`idea` stage so spec-writing can confirm or pivot before any `ft###`
++is minted.
++
++---
++
++Index: [[board]]
+diff --git a/docs/notes/us004.md b/docs/notes/us004.md
+new file mode 100644
+index 0000000..c10ec54
+--- /dev/null
++++ b/docs/notes/us004.md
+@@ -0,0 +1,38 @@
++---
++aliases:
++  - quarterly retention purge tool with deletion proof
++status: draft
++created: 2026-05-16
++---
++# Story [[platform-flow]] [[product]]
++
++## role
++[[pn002|platform-engineer]]
++
++## want
++run a quarterly retention purge tool that hard-deletes data past the
++retention window and emits a signed deletion-proof report
++
++## because
++legal asks once a quarter for evidence that retention rules
++(see [[adr0002]] — 90-day report retention) were enforced, and today
++the platform-engineer either trusts the nightly cron or stitches a
++proof together by hand
++
++## acceptance_criteria
++- A CLI / one-shot tool exists that the platform-engineer can run
++  on-demand (not a service, not on a schedule beyond the existing
++  nightly cron)
++- The tool identifies rows past the [[adr0002]] retention window in
++  scope (initially `report_runs`)
++- The tool hard-deletes those rows and writes a deletion-proof
++  artifact (counts, ids, timestamps, operator, table) somewhere
++  legal can be handed
++- The deletion-proof artifact is reproducible: re-running the tool
++  the same day produces an empty proof, not a duplicate purge
++- Only [[pn002|platform-engineer]] can invoke it (auth-gated via
++  [[ft001]] or equivalent operator-only path)
++
++---
++
++Index: [[product]]
+diff --git a/docs/product.md b/docs/product.md
+index fdfa212..4abdf8b 100644
+--- a/docs/product.md
++++ b/docs/product.md
+@@ -13,6 +13,7 @@ operations analyst and the platform-engineer personas.
+ ### [[pn002|platform-engineer]]
+ 
+ - [[us003|rotate service credentials without downtime]]
++- [[us004|quarterly retention purge tool with deletion proof]]
+ 
+ ## Features
+ 

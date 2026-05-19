@@ -1,0 +1,202 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..15283b6
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,55 @@
++./AGENTS.md
++./.beads/config.yaml
++./.beads/dolt-server.port
++./.beads/export-state.json
++./.beads/.gitignore
++./.beads/hooks/post-checkout
++./.beads/hooks/post-merge
++./.beads/hooks/pre-commit
++./.beads/hooks/prepare-commit-msg
++./.beads/hooks/pre-push
++./.beads/interactions.jsonl
++./.beads/issues.jsonl
++./.beads/last-touched
++./.beads/.local_version
++./.beads/metadata.json
++./.beads/README.md
++./CLAUDE.md
++./.claude/settings.json
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/im002.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/spec/sp001.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/notes/us004.md
++./docs/notes/us005.md
++./docs/product.md
++./.gitignore
++./pyproject.toml
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/lib/vault.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
++./tests/lib/__init__.py
++./tests/lib/test_vault.py
++./.work-do-task-ids.json
+diff --git a/src/lib/vault.py b/src/lib/vault.py
+index b11a1ae..b7191c8 100644
+--- a/src/lib/vault.py
++++ b/src/lib/vault.py
+@@ -1,5 +1,13 @@
+ """Vault client. ft002 provides this surface today."""
+ 
++import threading
++
++
++# Module-level lock to serialize rotate_secret calls. Vault aliasing is not
++# safe under concurrent writers in our deployment, so callers from different
++# threads must take turns staging a new version.
++_rotate_lock = threading.Lock()
++
+ 
+ def secret(name: str) -> str:
+     """Read a secret by name from vault.
+@@ -9,11 +17,37 @@ def secret(name: str) -> str:
+     return _read_alias(name)
+ 
+ 
++def rotate_secret(name: str, new_value: str) -> str:
++    """Stage a new versioned alias for `name` with `new_value`.
++
++    Returns the freshly staged alias (e.g. ``"foo@v2"``). Raises:
++      * ``ValueError`` if ``name`` or ``new_value`` is empty.
++      * ``VaultError`` if the vault is unreachable.
++
++    Concurrent calls are serialized via a module-level lock so we never
++    interleave two stagings for the same (or different) names.
++    """
++    if not name:
++        raise ValueError("name must be non-empty")
++    if not new_value:
++        raise ValueError("new_value must be non-empty")
++
++    with _rotate_lock:
++        return _stage_alias(name, new_value)
++
++
+ def _read_alias(name: str) -> str:
+     # Placeholder: real implementation talks to vault.
+     return f"<vault:{name}>"
+ 
+ 
++def _stage_alias(name: str, new_value: str) -> str:
++    # Placeholder: real implementation stages a new versioned alias in vault
++    # and returns the alias identifier. The orchestrator (Task 2) is what
++    # eventually promotes the staged alias to current.
++    return f"{name}@v1"
++
++
+ class VaultError(RuntimeError):
+     pass
+ 
+diff --git a/tests/lib/test_vault.py b/tests/lib/test_vault.py
+index c8b28d3..23fd62b 100644
+--- a/tests/lib/test_vault.py
++++ b/tests/lib/test_vault.py
+@@ -1,7 +1,79 @@
+ """Vault smoke tests. Add tests as features land."""
+ 
+-from vault import secret
++import threading
++from unittest.mock import patch
++
++import pytest
++
++import vault
++from vault import VaultError, rotate_secret, secret
+ 
+ 
+ def test_secret_returns_value():
+     assert secret("foo") == "<vault:foo>"
++
++
++def test_rotate_secret_stages_versioned_alias():
++    """rotate_secret stages a new versioned alias for `name`."""
++    with patch.object(vault, "_stage_alias") as stage:
++        stage.return_value = "foo@v2"
++        alias = rotate_secret("foo", "new-value")
++    assert alias == "foo@v2"
++    stage.assert_called_once_with("foo", "new-value")
++
++
++def test_rotate_secret_rejects_empty_value():
++    with pytest.raises(ValueError):
++        rotate_secret("foo", "")
++
++
++def test_rotate_secret_rejects_empty_name():
++    with pytest.raises(ValueError):
++        rotate_secret("", "v")
++
++
++def test_rotate_secret_raises_vault_error_when_unreachable():
++    def boom(name, value):
++        raise VaultError("vault unreachable")
++
++    with patch.object(vault, "_stage_alias", side_effect=boom):
++        with pytest.raises(VaultError):
++            rotate_secret("foo", "v")
++
++
++def test_rotate_secret_serializes_concurrent_calls():
++    """Concurrent rotate_secret calls must serialize via the module lock.
++
++    We assert mutual exclusion by recording max concurrency seen inside the
++    critical section; with a real lock it must be 1.
++    """
++    in_flight = 0
++    max_seen = 0
++    enter_lock = threading.Lock()
++
++    def slow_stage(name, value):
++        nonlocal in_flight, max_seen
++        with enter_lock:
++            in_flight += 1
++            if in_flight > max_seen:
++                max_seen = in_flight
++        # Hold long enough that any unserialized caller would overlap.
++        # We use a small sleep but verified by max_seen instead of timing.
++        import time
++
++        time.sleep(0.02)
++        with enter_lock:
++            in_flight -= 1
++        return f"{name}@v1"
++
++    with patch.object(vault, "_stage_alias", side_effect=slow_stage):
++        threads = [
++            threading.Thread(target=rotate_secret, args=("foo", "v"))
++            for _ in range(5)
++        ]
++        for t in threads:
++            t.start()
++        for t in threads:
++            t.join()
++
++    assert max_seen == 1, f"expected serialization, observed {max_seen} concurrent"

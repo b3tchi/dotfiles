@@ -1,0 +1,597 @@
+{
+  "metadata": {
+    "skill_name": "idea-feature",
+    "skill_path": "<path/to/skill>",
+    "executor_model": "<model-name>",
+    "analyzer_model": "<model-name>",
+    "timestamp": "2026-05-16T10:06:25Z",
+    "evals_run": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "runs_per_configuration": 3
+  },
+  "runs": [
+    {
+      "eval_id": 0,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 9,
+        "failed": 0,
+        "total": 9,
+        "time_seconds": 229.1,
+        "tokens": 65754,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent surveyed existing features \u2014 output references ft001 and/or ft002 explicitly",
+          "passed": true,
+          "evidence": "matches: ft001, ft002"
+        },
+        {
+          "text": "Agent picked a real existing category \u2014 references cat003 or cat004",
+          "passed": true,
+          "evidence": "matches: cat003, cat004"
+        },
+        {
+          "text": "Agent identified concrete consumers \u2014 names at least 2 of auth/metrics/reports",
+          "passed": true,
+          "evidence": "consumers found: ['auth', 'metrics', 'reports']"
+        },
+        {
+          "text": "Agent surfaced migration target adr0003 (ad-hoc smtplib decision)",
+          "passed": true,
+          "evidence": "matches: adr0003"
+        },
+        {
+          "text": "Agent did NOT mint a new ft###.md (skill rule \u2014 ft### only at spec-writing)",
+          "passed": true,
+          "evidence": "new ft files: []"
+        },
+        {
+          "text": "If sp###.md was emitted: docs/notes/spec/, status: idea, body has ## problem",
+          "passed": true,
+          "evidence": "path=docs/notes/spec/sp001.md status_idea=True problem=True"
+        },
+        {
+          "text": "docs/board.md updated with [[sp###]] reference under ## idea",
+          "passed": true,
+          "evidence": "sp_id=sp001 found_under_idea=True"
+        },
+        {
+          "text": "Agent raised the granularity question (one notif feature vs router+transport split)",
+          "passed": true,
+          "evidence": "phrases: \\bdecomposition\\b, \\batomic\\b, \\bgranular(?:ity)?\\b"
+        },
+        {
+          "text": "sp### ## problem carries wikilink references to surveyed ids (ft/im/cat/adr) \u2014 at least 3 kinds present",
+          "passed": true,
+          "evidence": "link kinds present: ['ft', 'im', 'cat', 'adr']"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 7,
+        "failed": 0,
+        "total": 7,
+        "time_seconds": 194.2,
+        "tokens": 60725,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent surveyed ft001 (basic-auth)",
+          "passed": true,
+          "evidence": "ft001"
+        },
+        {
+          "text": "Agent surveyed adr0001",
+          "passed": true,
+          "evidence": "adr0001"
+        },
+        {
+          "text": "Agent used adr0001 to drive the routing decision (genuine new-feature ask, not extend)",
+          "passed": true,
+          "evidence": "adr0001 + new-feature phrase match"
+        },
+        {
+          "text": "Agent identified a real category \u2014 cat001 or cat003",
+          "passed": true,
+          "evidence": "cat001, cat003"
+        },
+        {
+          "text": "Agent stopped at design-approval gate (gate_reached.md exists OR no sp###.md)",
+          "passed": true,
+          "evidence": "gate_reached=True sp_count=0"
+        },
+        {
+          "text": "Agent did NOT mint a new ft###.md",
+          "passed": true,
+          "evidence": "new ft: []"
+        },
+        {
+          "text": "If sp###.md was emitted: docs/notes/spec/, status: idea, has ## problem",
+          "passed": true,
+          "evidence": "no sp### emitted"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 156.7,
+        "tokens": 60077,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent identified pn002 (platform-engineer) as the single plausible consumer",
+          "passed": true,
+          "evidence": "pn002"
+        },
+        {
+          "text": "Agent concluded single-consumer and re-routed to idea-implement",
+          "passed": true,
+          "evidence": "idea-implement + single-consumer language"
+        },
+        {
+          "text": "route_decision.md exists OR run_notes.md explicitly states idea-implement",
+          "passed": true,
+          "evidence": "route_decision=True notes_mentions=True"
+        },
+        {
+          "text": "Agent did NOT emit a new sp###.md under docs/notes/spec/",
+          "passed": true,
+          "evidence": "sp_count=0"
+        },
+        {
+          "text": "docs/board.md NOT modified",
+          "passed": true,
+          "evidence": "board_changed=False"
+        },
+        {
+          "text": "Agent did NOT mint a new ft###.md",
+          "passed": true,
+          "evidence": "new ft: []"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 7,
+        "failed": 0,
+        "total": 7,
+        "time_seconds": 251.0,
+        "tokens": 70403,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent identified at least 3 distinct capabilities (metrics/logging/tracing/alerting/dashboards)",
+          "passed": true,
+          "evidence": "capabilities found: ['metrics', 'logging', 'tracing', 'alerting', 'dashboards']"
+        },
+        {
+          "text": "Agent explicitly flagged the granularity problem",
+          "passed": true,
+          "evidence": "phrases: \\bsplit\\b, \\bdecomposition\\b, \\bgranular(?:ity)?\\b, \\batomic\\b"
+        },
+        {
+          "text": "Agent surveyed real categories \u2014 cat003 or cat004",
+          "passed": true,
+          "evidence": "cat003, cat004"
+        },
+        {
+          "text": "If sp###.md emitted: ## problem names multiple sub-capabilities (non-monolithic)",
+          "passed": true,
+          "evidence": "caps in sp body: ['metrics', 'logging', 'tracing', 'alerting', 'dashboards']"
+        },
+        {
+          "text": "Agent did NOT silently mint a new ft###.md spanning all capabilities",
+          "passed": true,
+          "evidence": "new ft: []"
+        },
+        {
+          "text": "Agent proposes splitting into multiple sp###/features OR surfaces split-question",
+          "passed": true,
+          "evidence": "split/decompose language present"
+        },
+        {
+          "text": "sp### body carries wikilink references to surveyed ids \u2014 at least 2 kinds present",
+          "passed": true,
+          "evidence": "link kinds present: ['ft', 'im', 'cat', 'adr']"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 4,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 124.2,
+        "tokens": 55746,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent ran the dedup check \u2014 references ft002 (vault-secrets) by id",
+          "passed": true,
+          "evidence": "ft002"
+        },
+        {
+          "text": "Agent recognized ft002 already provides this capability",
+          "passed": true,
+          "evidence": "ft002 + dedup-language match"
+        },
+        {
+          "text": "Agent re-routed to idea-extend on ft002",
+          "passed": true,
+          "evidence": "idea-extend+ft002 in text=True route_decision=True"
+        },
+        {
+          "text": "Agent did NOT emit a new sp###.md under docs/notes/spec/",
+          "passed": true,
+          "evidence": "sp_count=0"
+        },
+        {
+          "text": "docs/board.md NOT modified",
+          "passed": true,
+          "evidence": "board_changed=False"
+        },
+        {
+          "text": "Agent did NOT mint a new ft###.md",
+          "passed": true,
+          "evidence": "new ft: []"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 0,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.7777777777777778,
+        "passed": 7,
+        "failed": 2,
+        "total": 9,
+        "time_seconds": 185.3,
+        "tokens": 54608,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent surveyed existing features \u2014 output references ft001 and/or ft002 explicitly",
+          "passed": true,
+          "evidence": "matches: ft001, ft002"
+        },
+        {
+          "text": "Agent picked a real existing category \u2014 references cat003 or cat004",
+          "passed": true,
+          "evidence": "matches: cat003, cat004"
+        },
+        {
+          "text": "Agent identified concrete consumers \u2014 names at least 2 of auth/metrics/reports",
+          "passed": true,
+          "evidence": "consumers found: ['auth', 'metrics', 'reports']"
+        },
+        {
+          "text": "Agent surfaced migration target adr0003 (ad-hoc smtplib decision)",
+          "passed": true,
+          "evidence": "matches: adr0003"
+        },
+        {
+          "text": "Agent did NOT mint a new ft###.md (skill rule \u2014 ft### only at spec-writing)",
+          "passed": true,
+          "evidence": "new ft files: []"
+        },
+        {
+          "text": "If sp###.md was emitted: docs/notes/spec/, status: idea, body has ## problem",
+          "passed": true,
+          "evidence": "path=docs/notes/spec/sp001.md status_idea=True problem=True"
+        },
+        {
+          "text": "docs/board.md updated with [[sp###]] reference under ## idea",
+          "passed": true,
+          "evidence": "sp_id=sp001 found_under_idea=True"
+        },
+        {
+          "text": "Agent raised the granularity question (one notif feature vs router+transport split)",
+          "passed": false,
+          "evidence": "phrases: (no match)"
+        },
+        {
+          "text": "sp### ## problem carries wikilink references to surveyed ids (ft/im/cat/adr) \u2014 at least 3 kinds present",
+          "passed": false,
+          "evidence": "link kinds present: ['cat', 'adr']"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.8571428571428571,
+        "passed": 6,
+        "failed": 1,
+        "total": 7,
+        "time_seconds": 151.4,
+        "tokens": 56240,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent surveyed ft001 (basic-auth)",
+          "passed": true,
+          "evidence": "ft001"
+        },
+        {
+          "text": "Agent surveyed adr0001",
+          "passed": true,
+          "evidence": "adr0001"
+        },
+        {
+          "text": "Agent used adr0001 to drive the routing decision (genuine new-feature ask, not extend)",
+          "passed": true,
+          "evidence": "adr0001 + new-feature phrase match"
+        },
+        {
+          "text": "Agent identified a real category \u2014 cat001 or cat003",
+          "passed": true,
+          "evidence": "cat001, cat003"
+        },
+        {
+          "text": "Agent stopped at design-approval gate (gate_reached.md exists OR no sp###.md)",
+          "passed": false,
+          "evidence": "gate_reached=False sp_count=1"
+        },
+        {
+          "text": "Agent did NOT mint a new ft###.md",
+          "passed": true,
+          "evidence": "new ft: []"
+        },
+        {
+          "text": "If sp###.md was emitted: docs/notes/spec/, status: idea, has ## problem",
+          "passed": true,
+          "evidence": "path=docs/notes/spec/sp001.md status_idea=True problem=True"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.6666666666666666,
+        "passed": 4,
+        "failed": 2,
+        "total": 6,
+        "time_seconds": 135.8,
+        "tokens": 54260,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent identified pn002 (platform-engineer) as the single plausible consumer",
+          "passed": true,
+          "evidence": "pn002"
+        },
+        {
+          "text": "Agent concluded single-consumer and re-routed to idea-implement",
+          "passed": true,
+          "evidence": "idea-implement + single-consumer language"
+        },
+        {
+          "text": "route_decision.md exists OR run_notes.md explicitly states idea-implement",
+          "passed": true,
+          "evidence": "route_decision=False notes_mentions=True"
+        },
+        {
+          "text": "Agent did NOT emit a new sp###.md under docs/notes/spec/",
+          "passed": false,
+          "evidence": "sp_count=1"
+        },
+        {
+          "text": "docs/board.md NOT modified",
+          "passed": false,
+          "evidence": "board_changed=True"
+        },
+        {
+          "text": "Agent did NOT mint a new ft###.md",
+          "passed": true,
+          "evidence": "new ft: []"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.8571428571428571,
+        "passed": 6,
+        "failed": 1,
+        "total": 7,
+        "time_seconds": 145.6,
+        "tokens": 53187,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent identified at least 3 distinct capabilities (metrics/logging/tracing/alerting/dashboards)",
+          "passed": true,
+          "evidence": "capabilities found: ['metrics', 'logging', 'tracing', 'alerting', 'dashboards']"
+        },
+        {
+          "text": "Agent explicitly flagged the granularity problem",
+          "passed": true,
+          "evidence": "phrases: \\bdecomposition\\b, \\bgranular(?:ity)?\\b, \\bone feature\\b"
+        },
+        {
+          "text": "Agent surveyed real categories \u2014 cat003 or cat004",
+          "passed": true,
+          "evidence": "cat003, cat004"
+        },
+        {
+          "text": "If sp###.md emitted: ## problem names multiple sub-capabilities (non-monolithic)",
+          "passed": true,
+          "evidence": "caps in sp body: ['metrics', 'logging', 'tracing', 'alerting', 'dashboards']"
+        },
+        {
+          "text": "Agent did NOT silently mint a new ft###.md spanning all capabilities",
+          "passed": true,
+          "evidence": "new ft: []"
+        },
+        {
+          "text": "Agent proposes splitting into multiple sp###/features OR surfaces split-question",
+          "passed": false,
+          "evidence": "absent"
+        },
+        {
+          "text": "sp### body carries wikilink references to surveyed ids \u2014 at least 2 kinds present",
+          "passed": true,
+          "evidence": "link kinds present: ['cat', 'adr']"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 4,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.5,
+        "passed": 3,
+        "failed": 3,
+        "total": 6,
+        "time_seconds": 135.1,
+        "tokens": 56393,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Agent ran the dedup check \u2014 references ft002 (vault-secrets) by id",
+          "passed": true,
+          "evidence": "ft002"
+        },
+        {
+          "text": "Agent recognized ft002 already provides this capability",
+          "passed": true,
+          "evidence": "ft002 + dedup-language match"
+        },
+        {
+          "text": "Agent re-routed to idea-extend on ft002",
+          "passed": false,
+          "evidence": "idea-extend+ft002 in text=False route_decision=False"
+        },
+        {
+          "text": "Agent did NOT emit a new sp###.md under docs/notes/spec/",
+          "passed": false,
+          "evidence": "sp_count=1"
+        },
+        {
+          "text": "docs/board.md NOT modified",
+          "passed": false,
+          "evidence": "board_changed=True"
+        },
+        {
+          "text": "Agent did NOT mint a new ft###.md",
+          "passed": true,
+          "evidence": "new ft: []"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": 0.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 191.04,
+        "stddev": 51.7218,
+        "min": 124.2,
+        "max": 251.0
+      },
+      "tokens": {
+        "mean": 62541.0,
+        "stddev": 5649.6812,
+        "min": 55746,
+        "max": 70403
+      }
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 0.7317,
+        "stddev": 0.1513,
+        "min": 0.5,
+        "max": 0.8571
+      },
+      "time_seconds": {
+        "mean": 150.64,
+        "stddev": 20.5488,
+        "min": 135.1,
+        "max": 185.3
+      },
+      "tokens": {
+        "mean": 54937.6,
+        "stddev": 1364.4425,
+        "min": 53187,
+        "max": 56393
+      }
+    },
+    "delta": {
+      "pass_rate": "+0.27",
+      "time_seconds": "+40.4",
+      "tokens": "+7603"
+    }
+  },
+  "notes": []
+}

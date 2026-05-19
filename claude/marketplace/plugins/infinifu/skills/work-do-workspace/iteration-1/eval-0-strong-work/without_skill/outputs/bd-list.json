@@ -1,0 +1,120 @@
+[
+  {
+    "id": "wd0-4176417-ool.3",
+    "title": "Task 3: Synthetic-check hook for rotation window",
+    "design": "Hook a synthetic check that runs every 30s during rotation window; assert zero 5xx. Files: src/lib/vault_rotate.py, tests/integration/test_rotate_synthetic.py.",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:14:32Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:14:32Z",
+    "dependencies": [
+      {
+        "issue_id": "wd0-4176417-ool.3",
+        "depends_on_id": "wd0-4176417-ool",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:14:31Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd0-4176417-ool.3",
+        "depends_on_id": "wd0-4176417-ool.1",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:14:33Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd0-4176417-ool.3",
+        "depends_on_id": "wd0-4176417-ool.2",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:14:34Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 2,
+    "dependent_count": 0,
+    "comment_count": 0,
+    "parent": "wd0-4176417-ool"
+  },
+  {
+    "id": "wd0-4176417-ool.2",
+    "title": "Task 2: Add vault_rotate orchestration module",
+    "design": "Create src/lib/vault_rotate.py with rotate(name, new_value) that calls vault.rotate_secret + schedules T+5min expiry. Files: src/lib/vault_rotate.py, tests/lib/test_vault_rotate.py.",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:14:31Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:14:31Z",
+    "dependencies": [
+      {
+        "issue_id": "wd0-4176417-ool.2",
+        "depends_on_id": "wd0-4176417-ool",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:14:30Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd0-4176417-ool.2",
+        "depends_on_id": "wd0-4176417-ool.1",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:14:32Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 1,
+    "dependent_count": 1,
+    "comment_count": 0,
+    "parent": "wd0-4176417-ool"
+  },
+  {
+    "id": "wd0-4176417-ool.1",
+    "title": "Task 1: Add rotate_secret helper to vault.py",
+    "design": "Extend src/lib/vault.py with rotate_secret(name, new_value) helper that stages a new versioned alias. Files: src/lib/vault.py, tests/lib/test_vault.py. Edge cases: concurrent calls serialize, vault unreachable raises VaultError, empty value rejected.",
+    "notes": "Implemented rotate_secret(name, new_value) in src/lib/vault.py:\n- Module-level threading.Lock serializes concurrent calls.\n- Empty name or empty new_value -\u003e ValueError.\n- VaultError propagates from _stage_alias when vault is unreachable.\n- Returns the staged versioned alias string (e.g. foo@v1).\n\nTests added in tests/lib/test_vault.py (all 6 passing):\n- test_rotate_secret_stages_versioned_alias (patches _stage_alias, asserts call+return)\n- test_rotate_secret_rejects_empty_value\n- test_rotate_secret_rejects_empty_name\n- test_rotate_secret_raises_vault_error_when_unreachable\n- test_rotate_secret_serializes_concurrent_calls (5 threads, asserts max concurrency == 1)\n- existing test_secret_returns_value preserved\n\nVerification: python -m pytest tests/lib/test_vault.py -\u003e 6 passed in 0.15s.\n\nStatus: left in_progress for reviewer (work-audit) per protocol; not closing here.",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:14:30Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:18:35Z",
+    "dependencies": [
+      {
+        "issue_id": "wd0-4176417-ool.1",
+        "depends_on_id": "wd0-4176417-ool",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:14:29Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 0,
+    "dependent_count": 2,
+    "comment_count": 0,
+    "parent": "wd0-4176417-ool"
+  },
+  {
+    "id": "wd0-4176417-ool",
+    "title": "Epic: rotate service credentials without downtime [sp001]",
+    "design": "Spec: docs/notes/spec/sp001.md",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "epic",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:14:28Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:14:28Z",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  }
+]

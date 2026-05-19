@@ -1,0 +1,12 @@
+{
+  "eval_id": 3,
+  "eval_name": "dedup-existing-im",
+  "prompt": "Run spec-writing on sp001. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent surveyed implementations and found im002 already solves us003"},
+    {"text": "Agent surfaced the duplicate in output (mentions im002 + duplicate/supersede/existing)"},
+    {"text": "Agent did NOT silently write a new ## solution duplicating im002's approach"},
+    {"text": "Either (a) explicit supersession decision recorded OR (b) stop / route to user-decision before writing solution"},
+    {"text": "If ## solution was written, it explicitly references [[im002]] as supersession candidate"}
+  ]
+}

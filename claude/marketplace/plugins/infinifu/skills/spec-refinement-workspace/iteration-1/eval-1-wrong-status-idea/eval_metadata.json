@@ -1,0 +1,13 @@
+{
+  "eval_id": 1,
+  "eval_name": "wrong-status-idea",
+  "prompt": "Run spec-refinement on sp001. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent read sp001 and recognized status: idea (not spec)"},
+    {"text": "Agent recognized ## solution is missing"},
+    {"text": "Agent did NOT append ## plan or ## tasks to sp001"},
+    {"text": "Agent did NOT modify sp001 frontmatter"},
+    {"text": "Agent did NOT modify docs/board.md"},
+    {"text": "Output routes to spec-writing OR explicitly states 'solution missing, can't refine'"}
+  ]
+}

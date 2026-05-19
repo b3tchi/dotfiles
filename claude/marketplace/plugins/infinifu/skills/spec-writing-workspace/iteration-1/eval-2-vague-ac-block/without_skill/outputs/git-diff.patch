@@ -1,0 +1,255 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..ff6808b
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,31 @@
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/spec/sp001.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/notes/us004.md
++./docs/notes/us005.md
++./docs/product.md
++./.gitignore
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
+diff --git a/docs/board.md b/docs/board.md
+index f5eb479..6e24907 100644
+--- a/docs/board.md
++++ b/docs/board.md
+@@ -1,11 +1,11 @@
+ # Board
+ 
+-One spec in flight at idea stage.
++One spec in flight at spec stage.
+ 
+ ## idea
+ 
+-- [[sp001|rotate service credentials without downtime]]
+-
+ ## spec
+ 
++- [[sp001|rotate service credentials without downtime]]
++
+ ## ready
+diff --git a/docs/notes/im002.md b/docs/notes/im002.md
+new file mode 100644
+index 0000000..b23efa2
+--- /dev/null
++++ b/docs/notes/im002.md
+@@ -0,0 +1,45 @@
++---
++aliases:
++  - zero-downtime credential rotation via dual-secret overlap
++status: proposed
++created: 2026-04-28
++---
++# Implementation [[cat001]] [[cat003]]
++
++## solves
++[[us003|rotate service credentials without downtime]]
++
++## approach
++Add a versioned (`current` + `previous`) read path inside
++[[ft002|vault-secrets]] and a new `acme-rotate` CLI that drives a
++5-minute overlap window: mint new value → write `current` (demoting
++old to `previous`) → poll a per-service `/healthz/auth` synthetic →
++expire `previous` after the window. Reuses the existing
++`secret(name)` API surface so no consumer code changes. Inherits
++[[adr0001]] (basic-auth scope) and [[adr0002]] (Postgres retention)
++unchanged.
++
++## features
++- [[ft002|vault-secrets]]
++
++## data_model
++No new tables. Vault stores `current` and `previous` versions per
++secret path; the dual-version state is internal to Vault, not surfaced
++to callers.
++
++## api_surface
++- `acme-rotate <secret-name> [--overlap=5m] [--dry-run]` — new CLI.
++- `GET /healthz/auth` — new synthetic-check endpoint per service.
++- `secret(name)` — unchanged (returns the scalar `current` value).
++
++## components
++- `src/lib/vault_rotate.py` — orchestrator + CLI entry point.
++- `src/lib/vault.py` — extended with version-aware helpers.
++- `src/services/*/healthz.py` — per-service synthetic-check endpoint.
++
++## specs
++- [[sp001|rotate service credentials without downtime]]
++
++---
++
++Index: [[product]]
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+index fa70d5d..9221c67 100644
+--- a/docs/notes/spec/sp001.md
++++ b/docs/notes/spec/sp001.md
+@@ -1,7 +1,7 @@
+ ---
+ aliases:
+   - rotate service credentials without downtime
+-status: idea
++status: spec
+ created: 2026-04-28
+ ---
+ # Spec [[cat001]] [[cat003]] [[board]]
+@@ -9,6 +9,9 @@ created: 2026-04-28
+ ## solves
+ [[us003|rotate service credentials without downtime]]
+ 
++## implements
++[[im002|zero-downtime credential rotation via dual-secret overlap]]
++
+ ## problem
+ The platform-engineer [[pn002|platform-engineer]] needs to rotate service
+ credentials without downtime. Today this is a maintenance-window task; the
+@@ -24,6 +27,111 @@ Out of scope at idea stage: the actual rotation script, the synthetic-check
+ hook, the secret-overlap window mechanism. spec-writing chooses the shape
+ across vault-rotate-policy vs zero-downtime-swap vs blue-green-cred patterns.
+ 
++## solution
++
++**Chosen shape: dual-secret overlap inside [[ft002|vault-secrets]].**
++
++Of the three candidate patterns surveyed at idea stage, we pick
++**zero-downtime-swap via dual-secret read** because it requires no
++service restarts, no LB cutover, and reuses the existing `secret(name)`
++contract every service already calls.
++
++### Approach
++
++1. **Versioned secrets in Vault.** For every rotatable secret we maintain
++   two versions in Vault: `current` and `previous`. The rotation flow
++   writes the new value to `current` (moving the old `current` to
++   `previous`) and starts a 5-minute overlap window during which both
++   versions are valid against the downstream system (DB user, API key,
++   etc.).
++
++2. **`secret(name)` returns `current` only.** No change to the
++   read-side contract for callers. New writers always pick up `current`
++   on their next call (Vault client TTL is 30s, which fits inside the
++   overlap window with margin).
++
++3. **Downstream acceptance of both versions during overlap.** This is
++   what makes "zero 5xx" possible. Concretely:
++   - For Postgres credentials: pre-create the new role, grant the same
++     permissions, and let the old role keep working until the overlap
++     window expires; then revoke.
++   - For internal HTTP API keys: gateway validates against the set
++     `{previous, current}` for the overlap window, then drops
++     `previous`.
++
++4. **Rotation CLI.** A new `acme-rotate` command (lives in
++   `src/lib/vault.py` package, exposed via console script) drives the
++   flow:
++   ```
++   acme-rotate <secret-name> [--overlap=5m] [--dry-run]
++   ```
++   Steps: mint new value → write to Vault `current` → wait for
++   downstream to accept both → poll synthetic check → expire
++   `previous` after overlap window.
++
++5. **Synthetic check hook.** During the overlap window the CLI polls a
++   service-specific health endpoint (`GET /healthz/auth`) that the
++   service implements to confirm it can mint a session using the
++   currently-cached `secret(name)`. Two consecutive green polls within
++   the window are required before `previous` is expired. A red poll
++   triggers immediate rollback (re-promote `previous` → `current`).
++
++### Inherited constraints
++
++- [[ft002|vault-secrets]] keeps its existing `secret(name)` API
++  surface — no changes for consumers. The dual-version semantics are
++  internal to Vault and the rotation CLI.
++- [[adr0001]] basic-auth via [[ft001]]: rotation does not touch user
++  passwords or TOTP seeds; those live in `users` / `totp_secrets`
++  tables, not in Vault.
++- [[adr0002]] Postgres retention: not affected — rotation is operational
++  state, not report data.
++
++### Components touched
++
++- `src/lib/vault.py` — extend with version-aware read path (still
++  returns scalar to callers) and helpers used by the CLI.
++- `src/lib/vault_rotate.py` *(new)* — rotation orchestrator + CLI
++  entry point.
++- `src/services/*/healthz.py` *(new per service)* — synthetic
++  `/healthz/auth` endpoint that exercises `secret(name)`.
++- Vault policy update — write path for the rotation principal.
++
++### Anti-patterns explicitly rejected
++
++- **Coordinated restart with new secret.** Caused the maintenance
++  window in the first place. Rejected on the zero-downtime requirement.
++- **Blue-green deploy of services per rotation.** Heavy, expensive
++  for a rotation flow that should be boring.
++- **Vault lease-based dynamic credentials.** Promising long-term but
++  requires reshaping each service to handle credential expiry
++  mid-request. Out of scope; revisit as a separate story.
++
++### Open questions surfaced (defer to refinement)
++
++- **AC vagueness on the story.** [[us003]] currently lists "it should
++  work" and "be fast enough" as acceptance_criteria. The concrete
++  targets (5-minute overlap window, zero 5xx during rotation, rollback
++  on red synthetic) live in this spec's problem statement, not in the
++  story. spec-refinement should either (a) tighten [[us003]] to carry
++  those targets verbatim or (b) accept the spec as the source of truth
++  for AC and note the story as informally-scoped.
++- **Synthetic-check coverage.** Each service needs the
++  `/healthz/auth` endpoint before its first rotation; gating order is
++  a refinement-stage decision.
++- **Audit trail.** Should rotations emit an audit-log event? No shared
++  audit feature exists yet (would be a new ft###); spec-refinement
++  decides whether to defer that or pull it in.
++
++### Missing prerequisite
++
++There is no Implementation card for [[us003]] yet (im001 covers
++[[us001]]). Per AKM `## Process flow`, an `im###` must exist before
++spec-writing. This spec assumes a soon-to-be-created
++`[[im002|zero-downtime credential rotation via dual-secret overlap]]`
++that captures the persistent solution shape; the body of that card
++mirrors the *Approach* and *Components touched* sections above.
++
+ ---
+ 
+ Index: [[board]]
+diff --git a/docs/product.md b/docs/product.md
+index fdfa212..5f76320 100644
+--- a/docs/product.md
++++ b/docs/product.md
+@@ -12,7 +12,7 @@ operations analyst and the platform-engineer personas.
+ 
+ ### [[pn002|platform-engineer]]
+ 
+-- [[us003|rotate service credentials without downtime]]
++- [[us003|rotate service credentials without downtime]] >> [[im002]]
+ 
+ ## Features
+ 

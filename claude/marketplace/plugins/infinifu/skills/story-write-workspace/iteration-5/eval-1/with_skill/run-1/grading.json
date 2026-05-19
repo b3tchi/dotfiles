@@ -1,0 +1,15 @@
+{
+  "run_id": "eval-1-with_skill",
+  "expectations": [
+    {"text": "A new file docs/notes/us###.md was created", "passed": true, "evidence": "us015.md created"},
+    {"text": "Filename slug is us<NNN>.md with three-digit zero-padded id", "passed": true, "evidence": "us015.md"},
+    {"text": "Frontmatter aliases entry is a human-readable title describing the pick action", "passed": true, "evidence": "Line 3: 'mark a request as picked once items are pulled'"},
+    {"text": "status frontmatter is 'draft'", "passed": true, "evidence": "Line 4: 'status: draft'"},
+    {"text": "## role wikilink either references an existing persona alias (e.g. requestor, approver) OR a newly-created pn### that matches 'picker' or 'warehouse'", "passed": true, "evidence": "Line 10: '[[pn003|picker]]' — agent created new persona pn003"},
+    {"text": "## want describes marking the request as picked", "passed": true, "evidence": "Line 13: 'mark a request as picked once items are pulled from inventory'"},
+    {"text": "## because gives a non-empty motivation (mentions handoff or ready-for-pickup)", "passed": true, "evidence": "Line 16: 'that signals the request is ready for handoff'"},
+    {"text": "## acceptance_criteria has at least 1 bullet (derived if user did not specify, with disclosure)", "passed": true, "evidence": "Lines 19-22 list 4 derived criteria; agent disclosed derivation in response.md"},
+    {"text": "Footer contains 'Index: [[product]]'", "passed": true, "evidence": "Line 26: 'Index: [[product]]'"}
+  ],
+  "summary": {"pass_rate": 1.0, "passed": 9, "failed": 0, "total": 9}
+}

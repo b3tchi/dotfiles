@@ -1,0 +1,146 @@
+[
+  {
+    "id": "wd1-4177092-pdh",
+    "title": "Discovered: set_timeout in vault.py never persists timeout",
+    "design": "src/lib/vault.py set_timeout(timeout_ms) assigns to a local _timeout that never escapes — FIXME left in code. Discovered while implementing Task 1 (wd1-4177092-t8l.1). Out of scope there. Fix: introduce module-level timeout state (or pass it through to the underlying client) and add a test that asserts the configured timeout is observable from a subsequent vault operation. Don't fix here — schedule separately.",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:17:58Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:17:58Z",
+    "dependencies": [
+      {
+        "issue_id": "wd1-4177092-pdh",
+        "depends_on_id": "wd1-4177092-t8l.1",
+        "type": "discovered-from",
+        "created_at": "2026-05-16T18:18:05Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  },
+  {
+    "id": "wd1-4177092-t8l.3",
+    "title": "Task 3: Synthetic-check hook for rotation window",
+    "design": "Hook a synthetic check that runs every 30s during rotation window; assert zero 5xx. Files: src/lib/vault_rotate.py, tests/integration/test_rotate_synthetic.py.",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:14:41Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:14:41Z",
+    "dependencies": [
+      {
+        "issue_id": "wd1-4177092-t8l.3",
+        "depends_on_id": "wd1-4177092-t8l",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:14:41Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd1-4177092-t8l.3",
+        "depends_on_id": "wd1-4177092-t8l.1",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:14:43Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd1-4177092-t8l.3",
+        "depends_on_id": "wd1-4177092-t8l.2",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:14:44Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 2,
+    "dependent_count": 0,
+    "comment_count": 0,
+    "parent": "wd1-4177092-t8l"
+  },
+  {
+    "id": "wd1-4177092-t8l.2",
+    "title": "Task 2: Add vault_rotate orchestration module",
+    "design": "Create src/lib/vault_rotate.py with rotate(name, new_value) that calls vault.rotate_secret + schedules T+5min expiry. Files: src/lib/vault_rotate.py, tests/lib/test_vault_rotate.py.",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:14:40Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:14:40Z",
+    "dependencies": [
+      {
+        "issue_id": "wd1-4177092-t8l.2",
+        "depends_on_id": "wd1-4177092-t8l",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:14:40Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd1-4177092-t8l.2",
+        "depends_on_id": "wd1-4177092-t8l.1",
+        "type": "blocks",
+        "created_at": "2026-05-16T18:14:42Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 1,
+    "dependent_count": 1,
+    "comment_count": 0,
+    "parent": "wd1-4177092-t8l"
+  },
+  {
+    "id": "wd1-4177092-t8l.1",
+    "title": "Task 1: Add rotate_secret helper to vault.py",
+    "design": "Extend src/lib/vault.py with rotate_secret(name, new_value) helper that stages a new versioned alias. Files: src/lib/vault.py, tests/lib/test_vault.py. Edge cases: concurrent calls serialize, vault unreachable raises VaultError, empty value rejected.",
+    "notes": "IMPLEMENTED: rotate_secret(name, new_value) added to src/lib/vault.py with versioned-alias bookkeeping and per-name locking.\n\nEvidence:\n- SC1 (writes new versioned alias without touching old): src/lib/vault.py:37-38 (_stage_alias appends, never overwrites); test_rotate_stages_new_alias asserts both old and new versions are present.\n- SC2 (secret returns new value after flip): src/lib/vault.py:48-52 (secret returns versions[-1]); test_secret_returns_new_after_flip.\n- SC3 (5 unit tests pass write-staging / read-during-overlap / post-expiry): 5 new test functions in tests/lib/test_vault.py — test_rotate_stages_new_alias, test_secret_returns_new_after_flip, test_concurrent_rotate_serializes, test_vault_unreachable_raises, test_empty_value_rejected (None + ''). Post-expiry behavior is intentionally Task 2's scope (vault_rotate orchestration owns expiry timing); this task's overlap test asserts the prior version is still readable after staging.\n- Edge case (concurrent serialize): _lock_for + per-name threading.Lock in rotate_secret; test_concurrent_rotate_serializes runs 4 parallel rotations and asserts the final version list has exactly 5 entries (1 base + 4 staged).\n- Edge case (vault unreachable, no partial-write): try/except wraps _stage_alias raises into VaultError; test_vault_unreachable_raises asserts only the base alias remains after a failing stage.\n- Edge case (empty/None rejected): explicit guard at the top of rotate_secret; test_empty_value_rejected parametrized over None and ''.\n- Tests: pytest -v -\u003e 7 passed in 0.05s (1 baseline smoke + 6 new test cases from 5 functions).\n\nDeviations:\n- Spec convention says 'exceptions inherit acme.errors.VaultError', but no acme.errors module exists in the sandbox. Task 1 files_touched is scoped to vault.py + test_vault.py, so creating acme.errors would expand scope. Used the existing vault.VaultError class. Flagged earlier in this notes thread.\n\nDiscoveries filed:\n- wd1-4177092-pdh: set_timeout in vault.py never persists timeout (FIXME left in source, out of Task 1 scope). Linked via discovered-from dependency.\n\nStatus: in_progress (leaving for reviewer per work-do skill — close transition is the reviewer's via work-audit).",
+    "status": "in_progress",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:14:39Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:20:20Z",
+    "started_at": "2026-05-16T16:20:20Z",
+    "dependencies": [
+      {
+        "issue_id": "wd1-4177092-t8l.1",
+        "depends_on_id": "wd1-4177092-t8l",
+        "type": "parent-child",
+        "created_at": "2026-05-16T18:14:39Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 0,
+    "dependent_count": 2,
+    "comment_count": 0,
+    "parent": "wd1-4177092-t8l"
+  },
+  {
+    "id": "wd1-4177092-t8l",
+    "title": "Epic: rotate service credentials without downtime [sp001]",
+    "design": "Spec: docs/notes/spec/sp001.md",
+    "status": "open",
+    "priority": 2,
+    "issue_type": "epic",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-16T16:14:38Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-16T16:14:38Z",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  }
+]

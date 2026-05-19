@@ -1,0 +1,31 @@
+{
+  "eval_name": "eval-attach-add-path",
+  "expectations": [
+    {
+      "text": "stories.yaml modified \u2014 2605-001 paths now contains src/payments/checkout.ts",
+      "passed": true,
+      "evidence": "paths=['src/export/csv.ts', 'src/export/csv.test.ts', 'src/components/ExportButton.svelte', 'src/payments/checkout.ts']"
+    },
+    {
+      "text": "Original paths preserved on 2605-001",
+      "passed": true,
+      "evidence": "paths=['src/export/csv.ts', 'src/export/csv.test.ts', 'src/components/ExportButton.svelte', 'src/payments/checkout.ts']"
+    },
+    {
+      "text": "No other story's paths were modified (2605-002 unchanged)",
+      "passed": true,
+      "evidence": "2605-002 paths=['src/auth/login.ts', 'src/auth/password-reset.ts', 'src/email/templates/reset.html']"
+    },
+    {
+      "text": "Response shows the resulting paths list for 2605-001",
+      "passed": true,
+      "evidence": ""
+    },
+    {
+      "text": "Response notes the missing-from-tree warning",
+      "passed": true,
+      "evidence": ""
+    }
+  ],
+  "summary": "5/5 passed"
+}

@@ -1,0 +1,176 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..15283b6
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,55 @@
++./AGENTS.md
++./.beads/config.yaml
++./.beads/dolt-server.port
++./.beads/export-state.json
++./.beads/.gitignore
++./.beads/hooks/post-checkout
++./.beads/hooks/post-merge
++./.beads/hooks/pre-commit
++./.beads/hooks/prepare-commit-msg
++./.beads/hooks/pre-push
++./.beads/interactions.jsonl
++./.beads/issues.jsonl
++./.beads/last-touched
++./.beads/.local_version
++./.beads/metadata.json
++./.beads/README.md
++./CLAUDE.md
++./.claude/settings.json
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/im002.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/spec/sp001.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/notes/us004.md
++./docs/notes/us005.md
++./docs/product.md
++./.gitignore
++./pyproject.toml
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/lib/vault.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
++./tests/lib/__init__.py
++./tests/lib/test_vault.py
++./.work-do-task-ids.json
+diff --git a/docs/archive.md b/docs/archive.md
+index 8c42aab..a36f589 100644
+--- a/docs/archive.md
++++ b/docs/archive.md
+@@ -3,3 +3,5 @@
+ Shipped specs.
+ 
+ ## done
++
++- [[sp001|rotate service credentials without downtime]]
+diff --git a/docs/board.md b/docs/board.md
+index 205ea48..df5e595 100644
+--- a/docs/board.md
++++ b/docs/board.md
+@@ -1,11 +1,9 @@
+ # Board
+ 
+-One spec ready for execution.
++No specs in flight.
+ 
+ ## idea
+ 
+ ## spec
+ 
+ ## ready
+-
+-- [[sp001|rotate service credentials without downtime]]
+diff --git a/docs/notes/ft002.md b/docs/notes/ft002.md
+index 595d78a..b574816 100644
+--- a/docs/notes/ft002.md
++++ b/docs/notes/ft002.md
+@@ -7,13 +7,16 @@ created: 2026-03-20
+ # Feature [[cat001]] [[product]]
+ 
+ ## providing
+-Vault-backed secret retrieval. Every service calls `secret(name)` to
+-read credentials at runtime.
++Vault-backed secret retrieval and rotation. Every service calls
++`secret(name)` to read credentials at runtime. Operators call
++`rotate_secret(name, new_value)` to stage a new versioned alias
++without service downtime.
+ 
+ ## api_surface
+ ```python
+-from acme.lib.vault import secret
++from acme.lib.vault import secret, rotate_secret, VaultError
+ db_url = secret("reports/db_url")
++rotate_secret("reports/db_url", "<new-credential>")  # per-name lock
+ ```
+ 
+ ## data_model
+diff --git a/docs/notes/im002.md b/docs/notes/im002.md
+index 12abdc8..98d8719 100644
+--- a/docs/notes/im002.md
++++ b/docs/notes/im002.md
+@@ -25,8 +25,8 @@ No schema change. Vault holds versioned aliases.
+ use a new internal `rotate_secret(name)` helper that lands in the same lib.
+ 
+ ## components
+-- `src/lib/vault.py`
+-- `src/lib/vault_rotate.py`
++- `src/lib/vault.py` — `rotate_secret(name, new_value)` helper (per-name lock, versioned alias staging, empty-input rejection)
++- `tests/lib/test_vault.py` — 5 unit tests covering stage, flip, concurrency, empty-value, empty-name
+ 
+ ## specs
+ - [[sp001|rotate service credentials without downtime]]
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+index 0f59d2b..ef21e75 100644
+--- a/docs/notes/spec/sp001.md
++++ b/docs/notes/spec/sp001.md
+@@ -1,10 +1,10 @@
+ ---
+ aliases:
+   - rotate service credentials without downtime
+-status: ready
++status: done
+ created: 2026-04-28
+ ---
+-# Spec [[cat001]] [[cat003]] [[board]]
++# Spec [[cat001]] [[cat003]] [[archive]]
+ 
+ ## solves
+ [[us003|rotate service credentials without downtime]]
+@@ -149,4 +149,4 @@ task
+ 
+ ---
+ 
+-Index: [[board]]
++Index: [[archive]]
+diff --git a/docs/notes/us003.md b/docs/notes/us003.md
+index 6145838..561bd30 100644
+--- a/docs/notes/us003.md
++++ b/docs/notes/us003.md
+@@ -1,7 +1,7 @@
+ ---
+ aliases:
+   - rotate service credentials without downtime
+-status: ready
++status: done
+ created: 2026-04-15
+ ---
+ # Story [[platform-flow]] [[product]]
+diff --git a/docs/product.md b/docs/product.md
+index fdfa212..5f76320 100644
+--- a/docs/product.md
++++ b/docs/product.md
+@@ -12,7 +12,7 @@ operations analyst and the platform-engineer personas.
+ 
+ ### [[pn002|platform-engineer]]
+ 
+-- [[us003|rotate service credentials without downtime]]
++- [[us003|rotate service credentials without downtime]] >> [[im002]]
+ 
+ ## Features
+ 

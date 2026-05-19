@@ -1,0 +1,228 @@
+diff --git a/.seed_manifest.txt b/.seed_manifest.txt
+new file mode 100644
+index 0000000..ff6808b
+--- /dev/null
++++ b/.seed_manifest.txt
+@@ -0,0 +1,31 @@
++./docs/archive.md
++./docs/assets/.gitkeep
++./docs/board.md
++./docs/notes/adr0001.md
++./docs/notes/adr0002.md
++./docs/notes/adr0003.md
++./docs/notes/akm.md
++./docs/notes/cat001.md
++./docs/notes/cat002.md
++./docs/notes/cat003.md
++./docs/notes/cat004.md
++./docs/notes/ft001.md
++./docs/notes/ft002.md
++./docs/notes/.gitkeep
++./docs/notes/im001.md
++./docs/notes/pn001.md
++./docs/notes/pn002.md
++./docs/notes/spec/sp001.md
++./docs/notes/us001.md
++./docs/notes/us002.md
++./docs/notes/us003.md
++./docs/notes/us004.md
++./docs/notes/us005.md
++./docs/product.md
++./.gitignore
++./README.md
++./.seed_manifest.txt
++./src/lib/__init__.py
++./src/services/auth/__init__.py
++./src/services/metrics/__init__.py
++./src/services/reports/__init__.py
+diff --git a/docs/board.md b/docs/board.md
+index f5eb479..6e24907 100644
+--- a/docs/board.md
++++ b/docs/board.md
+@@ -1,11 +1,11 @@
+ # Board
+ 
+-One spec in flight at idea stage.
++One spec in flight at spec stage.
+ 
+ ## idea
+ 
+-- [[sp001|rotate service credentials without downtime]]
+-
+ ## spec
+ 
++- [[sp001|rotate service credentials without downtime]]
++
+ ## ready
+diff --git a/docs/notes/im002.md b/docs/notes/im002.md
+new file mode 100644
+index 0000000..e07f484
+--- /dev/null
++++ b/docs/notes/im002.md
+@@ -0,0 +1,59 @@
++---
++aliases:
++  - zero-downtime credential rotation via vault dual-secret overlap
++status: proposed
++created: 2026-05-16
++---
++# Implementation [[cat001]] [[cat003]]
++
++## solves
++[[us003|rotate service credentials without downtime]]
++
++## approach
++Extend [[ft002]] vault-secrets with a dual-secret overlap window. Vault
++holds `current` and `previous` versions of each secret simultaneously
++during a configurable overlap (default 5 minutes). The `secret(name)`
++read path transparently accepts either version while the window is
++open; after the window, `previous` is destroyed. A new admin entry
++point `rotate(name, new_value, overlap=300)` writes the rotation and
++schedules cleanup. A `bin/rotate-secret` CLI wraps it for the
++platform-engineer, gated by a synthetic check (curl loop against each
++of the three services) that aborts rotation on any observed 5xx.
++
++Chosen over vault-rotate-policy (too Vault-coupled, no overlap-window
++control, nowhere natural for the synthetic-check hook) and over
++blue-green-cred (heavy infra change, conflicts with [[adr0003]]'s
++minimal-infra preference). Inherits the auth contract from [[adr0001]]
++and leaves [[adr0002]] data retention untouched (rotation is
++credential-only).
++
++## features
++- [[ft002|vault-secrets]]
++
++## data_model
++No schema change. The dual-secret state lives in Vault, not Postgres.
++[[adr0002]] `report_runs` table is untouched.
++
++## api_surface
++Widening of [[ft002]] (not a new service):
++
++- `secret(name)` — unchanged signature, now reads `current` and
++  transparently accepts `previous` during an open overlap window.
++- `rotate(name, new_value, overlap=300)` — new admin entry point.
++  Writes `new_value` as `current`, demotes the old to `previous`,
++  schedules destruction of `previous` after `overlap` seconds.
++- `bin/rotate-secret <name> <new_value> [--overlap 300]` — CLI for
++  the platform-engineer. Runs the synthetic check before+during+after
++  the swap; aborts and rolls back on observed 5xx.
++
++## components
++- `src/lib/vault.py` — widen `secret()`, add `rotate()`
++- `bin/rotate-secret` — new CLI entry point (story-specific glue)
++- synthetic-check helper (path pinned at spec-refinement)
++
++## specs
++- [[sp001|rotate service credentials without downtime]]
++
++---
++
++Index: [[product]]
+diff --git a/docs/notes/spec/sp001.md b/docs/notes/spec/sp001.md
+index fa70d5d..748bad4 100644
+--- a/docs/notes/spec/sp001.md
++++ b/docs/notes/spec/sp001.md
+@@ -1,7 +1,7 @@
+ ---
+ aliases:
+   - rotate service credentials without downtime
+-status: idea
++status: spec
+ created: 2026-04-28
+ ---
+ # Spec [[cat001]] [[cat003]] [[board]]
+@@ -9,6 +9,9 @@ created: 2026-04-28
+ ## solves
+ [[us003|rotate service credentials without downtime]]
+ 
++## implements
++[[im002|zero-downtime credential rotation via vault dual-secret overlap]]
++
+ ## problem
+ The platform-engineer [[pn002|platform-engineer]] needs to rotate service
+ credentials without downtime. Today this is a maintenance-window task; the
+@@ -24,6 +27,70 @@ Out of scope at idea stage: the actual rotation script, the synthetic-check
+ hook, the secret-overlap window mechanism. spec-writing chooses the shape
+ across vault-rotate-policy vs zero-downtime-swap vs blue-green-cred patterns.
+ 
++## solution
++
++**Chosen shape: dual-secret overlap window inside `ft002` vault-secrets.**
++
++Of the three candidate patterns surfaced at idea stage:
++
++- *vault-rotate-policy* — push rotation into Vault's native rotation
++  policy. Rejected: ties us to Vault-specific features, no per-service
++  control over the overlap window, and the synthetic-check hook in the
++  acceptance criteria has nowhere natural to live.
++- *blue-green-cred* — stand up a parallel deployment with the new
++  secret, drain traffic. Rejected: heavy infra change, conflicts with
++  [[adr0003]] preference for minimal infra (everything in-process), and
++  overkill for a 5-minute overlap requirement.
++- *zero-downtime-swap via dual-secret overlap* — **chosen.** Vault
++  holds `current` and `previous` versions of each secret simultaneously
++  for an explicit overlap window. Services accept either during the
++  window. After the window, `previous` is destroyed.
++
++The contract change lives in [[ft002]] vault-secrets. Today `secret(name)`
++returns one value; we widen it so that consumers transparently accept
++either the current or previous version during the overlap. A new
++`rotate(name, new_value, overlap=300)` admin entry point writes the new
++value as `current`, demotes the old to `previous`, and schedules the
++`previous` destruction after `overlap` seconds.
++
++A `bin/rotate-secret` CLI wraps `rotate()` for the platform-engineer.
++A synthetic check (curl loop against an authenticated endpoint of each
++of the three services — auth, reports, metrics) runs continuously during
++the overlap window; rotation aborts and rolls back if any 5xx is observed.
++
++Inherits from:
++
++- [[adr0001]] — all services authenticate via [[ft001]]; rotation must
++  not break that flow. The overlap window covers the propagation gap
++  between Vault write and in-process secret cache refresh.
++- [[adr0002]] — Postgres-backed `report_runs` is untouched; rotation is
++  credential-only, no schema impact.
++- [[ft002]] — consumed and *extended* by this spec. The `secret(name)`
++  surface keeps backward compatibility (returns `current`), while the
++  new dual-read behavior and `rotate()` admin entry point widen the
++  contract. The ft002 zettel will be updated to reflect the widened
++  api_surface as part of this spec landing.
++
++Categories: [[cat001]] security (credential handling) and [[cat003]]
++infrastructure (cross-service rotation plumbing).
++
++Affected components:
++
++- `src/lib/vault.py` — widen `secret()`, add `rotate()`.
++- `bin/rotate-secret` — new CLI (out of `src/lib/`, top-level script).
++- `src/services/{auth,reports,metrics}/__init__.py` — no code change;
++  each already calls `secret(name)` via ft002, so dual-read is
++  transparent.
++- Synthetic check script — new file under `src/lib/` or `bin/`,
++  spec-refinement will pin location.
++
++Open at spec-refinement:
++
++- Where the secret-version cache lives in-process (TTL vs explicit
++  invalidation on rotate).
++- Whether the synthetic check is one binary or a shell loop.
++- Rollback path when the synthetic check trips mid-window.
++
+ ---
+ 
+ Index: [[board]]
+diff --git a/docs/product.md b/docs/product.md
+index fdfa212..5f76320 100644
+--- a/docs/product.md
++++ b/docs/product.md
+@@ -12,7 +12,7 @@ operations analyst and the platform-engineer personas.
+ 
+ ### [[pn002|platform-engineer]]
+ 
+-- [[us003|rotate service credentials without downtime]]
++- [[us003|rotate service credentials without downtime]] >> [[im002]]
+ 
+ ## Features
+ 
