@@ -1,0 +1,89 @@
+diff --git a/docs/notes/im002.md b/docs/notes/im002.md
+index 12abdc8..4172303 100644
+--- a/docs/notes/im002.md
++++ b/docs/notes/im002.md
+@@ -10,23 +10,44 @@ created: 2026-04-26
+ [[us003|rotate service credentials without downtime]]
+ 
+ ## approach
+-Adopt the vault-rotate-policy pattern via [[ft002]]: writers stage the
+-new credential under a versioned alias; readers fall back to the prior
+-version for up to 5 minutes; alias flips at the end of the window.
++Adopt the vault-rotate-policy pattern: writers stage the new credential
++under a deterministic versioned alias backed by Vault's Transit secrets
++engine; readers fall back to the prior version for up to 5 minutes; alias
++flips at the end of the window. Original [[sp001]] plan was KV-backed; in
++flight we shifted to Transit for native deterministic versioning — see
++[[adr0004|Vault Transit secrets engine over plain KV for credential rotation]]
++for the trade-off record. The Transit primitives are wrapped once in
++[[ft003|vault-transit-wrapper]] so future encrypted-rotation flows
++(alerting, signed-URL) consume the same surface.
+ 
+ ## features
+-- [[ft002|vault-secrets]]
++- [[ft002|vault-secrets]] — Vault connectivity + plain `secret(name)` read path
++- [[ft003|vault-transit-wrapper]] — encrypt / decrypt / rotate_key primitives
+ 
+ ## data_model
+-No schema change. Vault holds versioned aliases.
++No schema change. Vault holds versioned aliases; key versions are owned
++by the Transit engine.
+ 
+ ## api_surface
+-`acme.lib.vault.secret(name)` continues to be the only read path; writes
+-use a new internal `rotate_secret(name)` helper that lands in the same lib.
++- `acme.lib.vault.secret(name)` continues to be the only read path
++  (unchanged from [[ft002]])
++- `acme.lib.vault.rotate_secret(name, new_value)` is the internal helper
++  that stages a new versioned alias and serializes concurrent rotations
++  per name; raises `VaultError` on backend failure, `ValueError` on
++  empty input
++- `acme.lib.vault_transit.encrypt / decrypt / rotate_key` provide the
++  Transit-backed primitives consumed by `rotate_secret` for the
++  deterministic version flip (surface owned by [[ft003]])
+ 
+ ## components
+-- `src/lib/vault.py`
+-- `src/lib/vault_rotate.py`
++- `src/lib/vault.py` — `rotate_secret` helper + per-name lock map + alias bookkeeping
++- `src/lib/vault_transit.py` — Transit wrapper (consumed surface; owned by [[ft003]])
++- `src/lib/vault_rotate.py` — orchestration: 5-minute overlap timer + expiry + synthetic-check hook
++
++## binds
++- [[adr0001]] — auth via ft001 (unchanged)
++- [[adr0002]] — Postgres retention (unaffected; rotation is Vault-side)
++- [[adr0004]] — Transit over KV for credential rotation (new, recorded post-merge)
+ 
+ ## specs
+ - [[sp001|rotate service credentials without downtime]]
+diff --git a/docs/product.md b/docs/product.md
+index fdfa212..ee6ad76 100644
+--- a/docs/product.md
++++ b/docs/product.md
+@@ -12,12 +12,13 @@ operations analyst and the platform-engineer personas.
+ 
+ ### [[pn002|platform-engineer]]
+ 
+-- [[us003|rotate service credentials without downtime]]
++- [[us003|rotate service credentials without downtime]] >> [[im002]]
+ 
+ ## Features
+ 
+ - [[ft001|basic-auth (password+TOTP)]]
+ - [[ft002|vault-secrets]]
++- [[ft003|vault-transit-wrapper]]
+ 
+ ## Architecture Decision Records
+ 
+@@ -29,6 +30,11 @@ operations analyst and the platform-engineer personas.
+ 
+ - [[adr0002|Reports written to Postgres, retained 90 days]]
+ 
++### [[cat003|infrastructure]]
++
++- [[adr0003|No external SMTP relay — services use smtplib directly]]
++- [[adr0004|Vault Transit secrets engine over plain KV for credential rotation]]
++
+ ## Categories
+ 
+ - [[cat001|security]] — [[cat002|data]] — [[cat003|infrastructure]]

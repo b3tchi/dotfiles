@@ -1,0 +1,17 @@
+✓ wd4-1263359-e5u [EPIC] · Epic: rotate service credentials without downtime [sp001]   [● P2 · CLOSED]
+Owner: eval · Type: epic
+Created: 2026-05-19 · Updated: 2026-05-19
+Close reason: Retro: rotate_secret + per-name versioned-alias bookkeeping shipped in vault.py. Rewrote im002 (## approach / ## data_model / ## api_surface to reflect _ALIASES + _LOCKS + VaultError surface). Updated ft002 (widened api_surface to include rotate_secret). No new ADRs; no us drafts beyond pre-existing us006. Candidate flagged: ft-extract 'rotate_secret + versioned-alias primitive' from im002 — would also serve us006 (rotate OAuth client api-keys). Decision deferred to human per vertical-over-horizontal default.
+
+DESCRIPTION
+  (none)
+
+DESIGN
+Spec: docs/notes/spec/sp001.md
+
+CHILDREN
+  ↳ ✓ wd4-1263359-e5u.1: Task 1: Add rotate_secret helper to vault.py ● P2
+  ↳ ✓ wd4-1263359-e5u.2: Task 2: Add vault_rotate orchestration module ● P2
+  ↳ ✓ wd4-1263359-e5u.3: Task 3: Synthetic-check hook for rotation window ● P2
+  ✓ 3/3 complete (100%) — eligible for close
+

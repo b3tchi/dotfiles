@@ -1,0 +1,17 @@
+✓ wd5-1265137-1ol [EPIC] · Epic: rotate service credentials without downtime [sp001]   [● P2 · CLOSED]
+Owner: eval · Type: epic
+Created: 2026-05-19 · Updated: 2026-05-19
+Close reason: Retro: rotate_secret + per-name lock + input validation shipped on src/lib/vault.py. Rewrote im002 to match shipped reality (in-process alias map, threading.Lock keyed by name, ValueError on empty input, VaultError on backend failure). 0 new ADRs / 0 ft updates / 0 us drafts. Speculative ft-extract of rotate_secret considered and rejected per vertical-over-horizontal: no concrete second consumer named, YAGNI applies.
+
+DESCRIPTION
+  (none)
+
+DESIGN
+Spec: docs/notes/spec/sp001.md
+
+CHILDREN
+  ↳ ✓ wd5-1265137-1ol.1: Task 1: Add rotate_secret helper to vault.py ● P2
+  ↳ ✓ wd5-1265137-1ol.2: Task 2: Add vault_rotate orchestration module ● P2
+  ↳ ✓ wd5-1265137-1ol.3: Task 3: Synthetic-check hook for rotation window ● P2
+  ✓ 3/3 complete (100%) — eligible for close
+
