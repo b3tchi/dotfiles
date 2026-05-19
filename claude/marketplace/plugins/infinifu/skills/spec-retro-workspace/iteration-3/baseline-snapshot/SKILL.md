@@ -76,48 +76,7 @@ Stage 8 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Read shipped r
 4. **Compare diff vs spec.** Walk the `sp###.## tasks` blocks against the actual code change. For each task, note the file/function it landed in vs what the design predicted. Discrepancies feed the rewrite.
 5. **Re-read `$AKM_ROOT/docs/notes/im###.md`.** Confirm the `## approach` / `## components` / `## data_model` / `## api_surface` reflect shipped reality. List the sections that need rewriting.
 6. **Re-read each consumed `$AKM_ROOT/docs/notes/ft###.md`.** For each, check whether its `## api_surface` or `## providing` matches what the implementation actually called / consumed. List the features needing update.
-7. **Cross-scan other `im###` for actual reuse, then propose Feature-extraction candidates** (pragmatic, not aggressive — see Key Principles). The goal: detect when code, modules, or capabilities written for *this* `im###` are *already* present in (or named by) at least one other shipped/in-flight Implementation — that's the evidence threshold for proposing a `ft###`. Speculative "feels reusable" doesn't qualify; concrete overlap with named, on-disk `im###` does.
-
-   **Procedure:**
-
-   a. List the candidate symbols from the just-shipped `im###`. Walk its `## components` (file paths) and `## approach` (named modules / helpers / utilities) and write down each unit that looks like generic capability rather than spec-specific glue — retry wrappers, validators, formatters, queues, schedulers, auth helpers, parsers, etc. Internal domain logic that only this `im###` would ever call (e.g. a wrapper named after the spec's specific business action) is **not** a candidate.
-
-   b. For each candidate symbol, cross-scan `$AKM_ROOT/docs/notes/im*.md` for evidence of reuse:
-
-      ```bash
-      ls "$AKM_ROOT/docs/notes/"im*.md
-      ```
-
-      For each *other* `im###` file, read its `## components` and `## approach`. Look for:
-      - the **same file path** appearing in its `## components`
-      - the **same symbol / module name** referenced in its `## approach`
-      - a **near-synonym** of the capability (e.g. `retry_with_jitter` here, `exponential_backoff` there — same shape, different name) that the two Implementations could share
-
-   c. Tally consumers per candidate AND assess **correlation strength**. Two implementations can both touch a file and still not share a Feature — they may use it in incompatible ways. Apply the signal table:
-      - **Strong correlation: 2+ `im###` use the same symbol with the same shape** — same function signature, same call site pattern, same expected behavior — and the capability is genuinely generic (not domain-specific glue with the same name) → **propose extraction**, name each consumer.
-      - **Weak correlation: 2+ `im###` touch the same file but use it differently** — different signatures, different semantics, divergent error handling, or one is wrapping the other in a domain-specific way → **do NOT propose**. The "shared file" is incidental, not a Feature. Vertical over horizontal.
-      - **1 other `im###` plus a named draft / planned story** with strong correlation → flag for human with both anchors named.
-      - **Only this `im###` touches it, no others** → leave in `im###`. Speculative reuse is YAGNI; do not propose.
-
-      Correlation test for each candidate: *"If I extract this to a `ft###` with one canonical signature, would im001 and im002 both consume it without per-consumer wrapping?"* If yes → strong, propose. If each consumer would still need a domain-specific adapter around the extracted code, the abstraction isn't ready — leave it as duplicated glue and let it bake.
-
-   d. Surface findings as a `Candidate Features:` block in the final summary. **Each candidate must cite the other `im###` it would serve** — without the cross-reference, the candidate is speculative and shouldn't be raised:
-
-      ```text
-      Candidate Features:
-      - ft-extract `retry_with_jitter` from im002 — also present in im005 (## components: src/utils/retry.go) and named in im007 (## approach: "exponential backoff with jitter"). Three consumers: extract to ft###?
-      - ft-extract `iso_date_parser` from im002 — only this im### touches it; not raised (single consumer).
-      ```
-
-   e. **The human always decides — never mint `ft###` automatically.** Three constraints stack here and all three must hold before any extraction happens:
-
-      1. **Evidence**: cross-scan turned up actual on-disk consumers (not speculation).
-      2. **Strong correlation**: the consumers use the same shape (not just the same file).
-      3. **Human verification**: even when (1) and (2) both hold, leave the `Candidate Features:` block as a recommendation. Do **NOT** write a new `ft###.md`, do **NOT** edit the consuming `im###` files to point at a not-yet-minted Feature, do **NOT** assume agreement from past patterns. The user reads the candidate, decides whether to mint, and runs `feature-write` themselves (or asks you to). Vertical over horizontal stays the default; the cross-scan + correlation test just supply the human with concrete evidence — the call is theirs.
-
-      If the user later confirms a candidate, that's a *separate* `feature-write` invocation, not part of this retro. This retro's deliverable is the candidate block; the mint, if it happens, is a future operation.
-
-   **Why this matters.** Without the cross-scan, "would another im### consume this?" is a guess that drifts toward over-extraction (every helper looks reusable in the abstract). With the cross-scan, the proposal is grounded in named, on-disk evidence — the human sees *which* other Implementations would consume the extracted Feature, and the decision becomes concrete instead of speculative.
+7. **Scan `im###` body for Feature-extraction candidates** (pragmatic, not aggressive — see Key Principles). Walk the `## components` list and the `## approach` narrative looking for code that *named* existing or in-flight `im###` would also consume. Apply the signal table: two+ real consumers → propose extraction; one real + one named draft → flag for human; speculative reuse → leave in `im###`. Output a `Candidate Features:` block in the final summary so the human decides whether to mint each `ft###` now or defer. **Do not extract silently** — vertical over horizontal stays the default.
 8. **Re-read every Accepted `$AKM_ROOT/docs/notes/adr####.md` under the spec's categories.** For each, check whether the implementation respected the decision. If a decision shifted, draft a new ADR.
 9. **Mine bd notes for discovered scope.** `bd show <epic-id>` and `bd list --parent <epic-id>`. Walk each closed task's notes for "Discovered:" entries, deviation logs, and BLOCKED-then-resolved sequences. Each unique discovery becomes either a new `us###` draft or a follow-up task (filed at this stage if not already).
 10. **Write the rewrites + new entries on main**, every path under `$AKM_ROOT`, in this order: ADRs first (decisions bind the rest), `ft###` updates next, `im###` rewrite next, `us###` drafts last, then `$AKM_ROOT/docs/product.md` to attach `>> [[im###]]` to the shipped story bullet. Feature-extraction candidates flagged in step 7 stay as a summary block for the human — do NOT mint `ft###` from a candidate without confirmation.
@@ -157,18 +116,17 @@ Stage 8 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Read shipped r
 
   Test: "Could a future engineer choose this differently?" Yes → ADR (it's a commitment). "Could a future engineer reuse this?" Yes → Feature (it's a building block). Both → both.
 
-- **Feature extraction is evidence-based AND requires strong correlation — vertical stays over horizontal.** Step 7 mandates a cross-scan of every other `$AKM_ROOT/docs/notes/im*.md` for actual reuse of the candidate symbol *before* a `ft###` is proposed. The cross-scan only justifies a candidate when correlation is **strong** — the same shape used the same way. Two implementations touching the same file in different ways is not a Feature, it's coincidence. Default bias stays *leave glue in `im###`*:
+- **Feature extraction is pragmatic, not aggressive — vertical over horizontal.** Scan the rewritten `im###` body for code or surfaces that one or two *existing or planned* Implementations would also consume. Surface those as **candidate Features** for the human ("Possible ft### extraction: <module> — would also serve us<XYZ>"). Default bias is to leave glue in `im###` (vertical solution). Extract to `ft###` only when the reuse is concrete and named:
 
-  | Signal (evidence from the cross-scan) | Action |
+  | Signal | Action |
   |---|---|
-  | 2+ shipped or in-flight `im###` use the **same symbol with the same shape** (same signature, same call pattern, no per-consumer wrapping) | propose `ft###` extraction; name each consumer `im###` in the candidate block |
-  | 2+ `im###` touch the same file but use it **differently** (divergent signatures, semantics, error handling) | leave in `im###` — weak correlation; the shared file is incidental, not a Feature |
-  | 1 shipped `im###` + 1 named draft `us###` whose `## want` clearly needs the same shape | flag as candidate; cite both anchors so the human decides |
-  | Only this `im###` touches the code; no other `im*.md` mentions it | leave in `im###` — speculative reuse is YAGNI, do not raise |
-  | Internal helper used only by this `im###` (spec-specific business glue) | leave in `im###` — not a Feature |
-  | Domain-specific wrapper around an existing shared `ft###` | leave in `im###` — that's the vertical layer the Feature already serves |
+  | Two+ shipped or in-flight `im###` already need this code | extract to `ft###` (real reuse) |
+  | One shipped `im###` + one named draft `us###` that will obviously need it | flag as candidate, decide with human |
+  | "Feels reusable" / "someone might want this later" | leave in `im###` — speculative reuse is YAGNI |
+  | Internal helper used only by this `im###` | leave in `im###` — not a Feature |
+  | Domain-specific wrapper around a shared `ft###` | leave in `im###` — that's the vertical layer the Feature exists to serve |
 
-  Why evidence-based: premature Feature extraction freezes the wrong API surface. The cost of a wrong `ft###` is *higher* than the cost of duplicated glue — `ft###` enters the append-only-contract regime and every consumer pays the abstraction tax. Guessing "this looks reusable" gives one false positive per retro and the Feature catalog rots. Reading the other `im###` files takes a few seconds and turns the proposal into a concrete pointer ("would also serve `im005` and `im007`") the human can evaluate in one glance.
+  Why pragmatic: premature Feature extraction freezes the wrong API surface. The cost of a wrong `ft###` is *higher* than the cost of duplicated glue — `ft###` enters the append-only-contract regime and every consumer pays the abstraction tax. When in doubt, file a candidate for the human to decide; don't extract silently.
 
 - **Discovered scope becomes drafts, not silent edits.** New `us###` at `status: draft` is the cheapest moment to capture follow-up work. The next `idea-implement` cycle picks them up. Don't expand silently into the closing epic.
 - **Bd epic close carries the retro signal.** The `--reason` text is the one-line summary the team will see when they search history later. Make it specific: counts, names, what shifted.

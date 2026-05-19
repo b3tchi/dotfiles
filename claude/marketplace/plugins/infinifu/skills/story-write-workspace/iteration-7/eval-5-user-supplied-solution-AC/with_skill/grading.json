@@ -1,0 +1,15 @@
+{
+  "run_id": "eval-5-user-supplied-solution-AC-with_skill",
+  "expectations": [
+    {"text": "us###.md created", "passed": true, "evidence": "us015.md"},
+    {"text": "role [[pn001|requestor]]", "passed": true, "evidence": "ok"},
+    {"text": "want preserves user outcome-shape (attach a receipt)", "passed": true, "evidence": "want preserved"},
+    {"text": "because mentions documentation / approver context", "passed": true, "evidence": "ok"},
+    {"text": "AC contains user's wording — not silently rewritten", "passed": true, "evidence": "all 4 user bullets verbatim in zettel.md"},
+    {"text": "Response flags AC as solution-shaped — does not silently accept", "passed": true, "evidence": "response.md flags each of 4 bullets with rephrase suggestion"},
+    {"text": "Flag text mentions 'solution'/'implementation'/'rephrase'/'spec-writing decides HOW'/'observable behavior'", "passed": true, "evidence": "response uses 'reads as a solution', 'spec-writing decides HOW', 'observable behavior'"},
+    {"text": "Original wording preserved in file (user must consent before rewrite)", "passed": true, "evidence": "zettel matches user's exact bullets"},
+    {"text": "Footer Index: [[product]]", "passed": true, "evidence": "ok"}
+  ],
+  "summary": {"pass_rate": 1.0, "passed": 9, "failed": 0, "total": 9}
+}

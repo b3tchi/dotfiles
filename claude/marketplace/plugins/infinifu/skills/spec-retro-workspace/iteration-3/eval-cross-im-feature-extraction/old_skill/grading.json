@@ -1,0 +1,15 @@
+{
+  "run_id": "eval-cross-im-feature-extraction-old_skill",
+  "expectations": [
+    {"text": "Skill lists $AKM_ROOT/docs/notes/im*.md to cross-scan", "passed": false, "evidence": "baseline checklist scans only the rewritten im###'s own body; agent self-reports no ls of sibling im###"},
+    {"text": "Skill reads im001.md and im002.md (in addition to im003)", "passed": false, "evidence": "agent admits 'I did not open im001.md or im002.md'; signal came from im003 prose only"},
+    {"text": "Skill identifies src/lib/retry.go as candidate symbol", "passed": true, "evidence": "candidate names retry_with_jitter / src/lib/retry.go"},
+    {"text": "Produces Candidate Features block", "passed": true, "evidence": "block in response"},
+    {"text": "Candidate names im001 AND im002 as consumers", "passed": true, "evidence": "block cites im001 + im002 (via prose, not via cross-scan)"},
+    {"text": "Candidate is recommendation only — no ft002.md, user decides", "passed": true, "evidence": "tree.txt has no new ft###; only im003 mutated"},
+    {"text": "Correlation strength assessed explicitly — same shape not just same file", "passed": false, "evidence": "no shape-vs-file distinction; candidate based on prose mentioning siblings, not on signature/call-pattern comparison"},
+    {"text": "Retro commits 'feat(akm): retro sp003'", "passed": true, "evidence": "git-log.txt shows feat(akm): retro sp003"},
+    {"text": "im003 mutated, im001/im002 untouched", "passed": true, "evidence": "im-mtimes.txt"}
+  ],
+  "summary": {"pass_rate": 0.667, "passed": 6, "failed": 3, "total": 9}
+}

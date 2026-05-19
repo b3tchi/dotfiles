@@ -1,0 +1,13 @@
+{
+  "run_id": "eval-6-solution-shaped-want-with_skill",
+  "expectations": [
+    {"text": "us###.md created", "passed": true, "evidence": "ok"},
+    {"text": "role [[pn001|requestor]]", "passed": true, "evidence": "ok"},
+    {"text": "want preserved verbatim OR user offered alternative and chose", "passed": true, "evidence": "preserved verbatim, alternative offered in response"},
+    {"text": "Response flags want as solution-shaped AND suggests outcome-shaped alternative", "passed": true, "evidence": "response.md proposes 'cancel a request I've already submitted, because I sometimes change my mind...'"},
+    {"text": "Flagged phrasing distinguishes outcome vs UI", "passed": true, "evidence": "response explicitly contrasts 'what to achieve' (cancel) with 'how UI shows it' (button vs menu vs swipe vs auto-expiry)"},
+    {"text": "Footer Index: [[product]]", "passed": true, "evidence": "ok"},
+    {"text": "EXTRA: derived AC stay problem-side despite solution-shaped want", "passed": true, "evidence": "AC bullets: 'requestor can cancel', 'cancellation is only possible while...', 'a cancelled request is visibly marked' — no UI prescriptions"}
+  ],
+  "summary": {"pass_rate": 1.0, "passed": 7, "failed": 0, "total": 7}
+}

@@ -1,0 +1,16 @@
+{
+  "eval_id": 0,
+  "eval_name": "cross-im-feature-extraction",
+  "prompt": "Run spec-retro on sp003. The reports SMTP retry just shipped; im003 is the new implementation. Find and flag any feature-extraction candidates based on actual cross-im reuse.",
+  "assertions": [
+    {"text": "Skill lists $AKM_ROOT/docs/notes/im*.md to cross-scan other implementations"},
+    {"text": "Skill reads im001.md and im002.md (in addition to im003) to check for shared symbols/files"},
+    {"text": "Skill identifies src/lib/retry.go (or 'RetryWithJitter' / 'retry-with-jitter') as a candidate symbol used by all three implementations"},
+    {"text": "Skill produces a 'Candidate Features:' block in the final summary"},
+    {"text": "The candidate explicitly names im001 AND im002 as consumers, not just a generic 'others would benefit' phrase"},
+    {"text": "The candidate is presented as a recommendation for the user to verify — no new ft002.md or ft003.md file was created, no consuming im###.md was rewritten to reference a not-yet-minted feature, and the response asks the user to decide / confirm before any mint"},
+    {"text": "Correlation strength is assessed explicitly — the response notes that the three im### use the same retry helper with the same shape (same signature, same call pattern), not just that they happen to touch the same file"},
+    {"text": "The retro commits on main with message matching 'feat(akm): retro sp003' convention"},
+    {"text": "im003.md was rewritten (mtime newer than seed); other im### files were NOT mutated (only read for cross-scan)"}
+  ]
+}

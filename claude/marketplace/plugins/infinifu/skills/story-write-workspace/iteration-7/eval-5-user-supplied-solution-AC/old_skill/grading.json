@@ -1,0 +1,15 @@
+{
+  "run_id": "eval-5-user-supplied-solution-AC-old_skill",
+  "expectations": [
+    {"text": "us###.md created", "passed": true, "evidence": "ok"},
+    {"text": "role [[pn001|requestor]]", "passed": true, "evidence": "ok"},
+    {"text": "want preserves user outcome-shape", "passed": true, "evidence": "ok"},
+    {"text": "because", "passed": true, "evidence": "ok"},
+    {"text": "AC contains user's wording", "passed": true, "evidence": "verbatim"},
+    {"text": "Response flags AC as solution-shaped", "passed": false, "evidence": "baseline did not flag; straight transcription, no comment"},
+    {"text": "Flag text mentions solution/implementation/rephrase", "passed": false, "evidence": "no such flag in response"},
+    {"text": "Original wording preserved", "passed": true, "evidence": "ok"},
+    {"text": "Footer Index: [[product]]", "passed": true, "evidence": "ok"}
+  ],
+  "summary": {"pass_rate": 0.778, "passed": 7, "failed": 2, "total": 9}
+}
