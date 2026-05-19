@@ -292,7 +292,7 @@ def "main archive create" [
     }
 
     let closed = try {
-        ^bd list --json --status closed | from json
+        ^bd list --json --status closed --limit 0 | from json
     } catch { [] }
 
     let to_archive = ($closed | where { |i|
@@ -326,9 +326,10 @@ def "main archive create" [
     $merged | str join "\n" | save -f $prune
     print -e $"Prune-list → ($prune) \(($merged | length) total IDs\)"
 
-    for id in $new_ids {
-        ^bd delete $id --force | ignore
-    }
+    let tmp = $"/tmp/bd-prune-(random uuid).txt"
+    $new_ids | str join "\n" | save -f $tmp
+    ^bd delete --from-file $tmp --force | ignore
+    rm $tmp
     print -e $"Deleted ($new_ids | length) issues from local bd"
 
     ^bd export -o .beads/issues.jsonl | ignore
@@ -351,15 +352,10 @@ def "main archive apply" [] {
         return
     }
 
-    mut deleted = 0
-    mut missing = 0
-    for id in $ids {
-        let r = (do { ^bd delete $id --force } | complete)
-        if $r.exit_code == 0 {
-            $deleted = $deleted + 1
-        } else {
-            $missing = $missing + 1
-        }
-    }
+    let before = (try { ^bd list --json --all --limit 0 | from json | length } catch { 0 })
+    ^bd delete --from-file $prune --force | ignore
+    let after = (try { ^bd list --json --all --limit 0 | from json | length } catch { 0 })
+    let deleted = ($before - $after)
+    let missing = (($ids | length) - $deleted)
     print -e $"Applied prune-list: deleted ($deleted), already-gone ($missing) of ($ids | length)."
 }
