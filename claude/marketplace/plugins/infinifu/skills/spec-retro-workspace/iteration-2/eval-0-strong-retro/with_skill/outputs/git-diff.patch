@@ -1,0 +1,152 @@
+diff --git a/docs/notes/ft002.md b/docs/notes/ft002.md
+index 595d78a..568557d 100644
+--- a/docs/notes/ft002.md
++++ b/docs/notes/ft002.md
+@@ -7,20 +7,30 @@ created: 2026-03-20
+ # Feature [[cat001]] [[product]]
+ 
+ ## providing
+-Vault-backed secret retrieval. Every service calls `secret(name)` to
+-read credentials at runtime.
++Vault-backed secret retrieval *and* live rotation. Every service calls
++`secret(name)` to read credentials at runtime; rotation writers call
++`rotate_secret(name, new_value)` to stage a new versioned alias under
++per-name serialization. Errors surface as `VaultError`.
+ 
+ ## api_surface
+ ```python
+-from acme.lib.vault import secret
++from acme.lib.vault import secret, rotate_secret, VaultError
++
++# read path
+ db_url = secret("reports/db_url")
++
++# rotation path (per-name serialized; raises ValueError on empty input,
++# VaultError if the backend rejects)
++rotate_secret("reports/db_url", new_value)
+ ```
+ 
+ ## data_model
+-None local. Vault is the source of truth.
++None local. Vault is the source of truth. In-memory the client keeps a
++per-name version list so `secret(name)` returns the most recently
++staged value; older versions remain reachable until expiry lands.
+ 
+ ## sample
+-`src/lib/vault.py` ships the canonical client.
++`src/lib/vault.py` ships the canonical client (read + rotate).
+ 
+ ## components
+ - `src/lib/vault.py`
+diff --git a/docs/notes/im002.md b/docs/notes/im002.md
+index 12abdc8..98abc6d 100644
+--- a/docs/notes/im002.md
++++ b/docs/notes/im002.md
+@@ -10,23 +10,47 @@ created: 2026-04-26
+ [[us003|rotate service credentials without downtime]]
+ 
+ ## approach
+-Adopt the vault-rotate-policy pattern via [[ft002]]: writers stage the
+-new credential under a versioned alias; readers fall back to the prior
+-version for up to 5 minutes; alias flips at the end of the window.
++Extend [[ft002|vault-secrets]] with an in-process rotation primitive.
++`rotate_secret(name, new_value)` stages a new versioned alias under a
++per-name `threading.Lock` (lazily created and guarded by a single
++`_LOCKS_GUARD`), so concurrent writers for the same name serialize but
++distinct names rotate in parallel. `secret(name)` reads the most
++recently staged version, so readers transparently see the new value as
++soon as it lands. Empty `name` or empty/`None` `new_value` is rejected
++at the API boundary with `ValueError`; backend failures surface as
++`VaultError`. The planned 5-minute overlap-then-expire orchestration
++(separate `vault_rotate` scheduler) did *not* ship in this spec and is
++captured for follow-up — today the staging primitive is the surface,
++and expiry is left to a subsequent iteration.
+ 
+ ## features
+ - [[ft002|vault-secrets]]
+ 
+ ## data_model
+-No schema change. Vault holds versioned aliases.
++No schema change. Vault remains the source of truth; in-process the
++client keeps a per-name list of staged values (`_ALIASES: dict[str,
++list[str]]`) so `secret(name)` returns the last entry.
+ 
+ ## api_surface
+-`acme.lib.vault.secret(name)` continues to be the only read path; writes
+-use a new internal `rotate_secret(name)` helper that lands in the same lib.
++Public surface lives on `acme.lib.vault`:
++
++- `secret(name) -> str` — read path; returns the most recently staged
++  version, or a sentinel `<vault:{name}>` when no rotation has occurred.
++- `rotate_secret(name, new_value) -> None` — stages a new versioned
++  alias under a per-name lock. Raises `ValueError` on empty name /
++  empty / `None` value; raises `VaultError` if the backend rejects.
++- `VaultError` — re-exported exception type consumers catch.
++
++No `vault_rotate.rotate(...)` orchestration entrypoint shipped; the
++scheduler module remains future work.
+ 
+ ## components
+-- `src/lib/vault.py`
+-- `src/lib/vault_rotate.py`
++- `src/lib/vault.py` — `secret`, `rotate_secret`, `VaultError`,
++  `_lock_for`, `_read_alias`, module-level `_LOCKS` / `_LOCKS_GUARD` /
++  `_ALIASES` state.
++- `tests/lib/test_vault.py` — five-test contract: stages new alias,
++  post-flip read, concurrent serialization (5 threads), empty-value
++  rejection, empty-name rejection.
+ 
+ ## specs
+ - [[sp001|rotate service credentials without downtime]]
+diff --git a/docs/notes/us006.md b/docs/notes/us006.md
+new file mode 100644
+index 0000000..0939348
+--- /dev/null
++++ b/docs/notes/us006.md
+@@ -0,0 +1,33 @@
++---
++aliases:
++  - verify credential rotation across regions
++status: draft
++created: 2026-05-19
++---
++# Story [[platform-flow]] [[product]]
++
++## role
++[[pn002|platform-engineer]]
++
++## want
++verify credential rotation behaves correctly across regions
++
++## because
++the synthetic check that gates rotation today is single-region, so
++rotation correctness across regions is unverified — a regional failover
++during a rotation window could surface 5xx that the existing
++[[sp001]] check would miss
++
++## acceptance_criteria
++- Synthetic check during a rotation window runs against more than one
++  region (at minimum: primary + one secondary)
++- Cross-region read-after-rotate returns the new value within the
++  overlap window (no stale reads from a lagging region)
++- Forced regional failover mid-rotation does not produce 5xx beyond the
++  single-transient threshold already established in [[us003]]
++- Test plan exercises the failover path end-to-end, not just the
++  happy-path multi-region read
++
++---
++
++Index: [[product]]
+diff --git a/docs/product.md b/docs/product.md
+index fdfa212..5f76320 100644
+--- a/docs/product.md
++++ b/docs/product.md
+@@ -12,7 +12,7 @@ operations analyst and the platform-engineer personas.
+ 
+ ### [[pn002|platform-engineer]]
+ 
+-- [[us003|rotate service credentials without downtime]]
++- [[us003|rotate service credentials without downtime]] >> [[im002]]
+ 
+ ## Features
+ 

@@ -1,0 +1,130 @@
+[
+  {
+    "id": "wd0-1258131-3a1.3",
+    "title": "Task 3: Synthetic-check hook for rotation window",
+    "design": "Hook a synthetic check that runs every 30s during rotation window; assert zero 5xx. Files: src/lib/vault_rotate.py, tests/integration/test_rotate_synthetic.py.",
+    "notes": "AUDITED: APPROVED. Synthetic check hook meets all criteria.\n\nDISCOVERED during implementation: rotation correctness across regions is\nunverified — current synthetic check is single-region. Likely needs a\nfollow-up us### for cross-region failover behavior.",
+    "status": "closed",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-19T00:57:09Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-19T00:57:23Z",
+    "closed_at": "2026-05-19T00:57:20Z",
+    "close_reason": "AUDITED: APPROVED. Synthetic check hook meets all criteria.",
+    "dependencies": [
+      {
+        "issue_id": "wd0-1258131-3a1.3",
+        "depends_on_id": "wd0-1258131-3a1",
+        "type": "parent-child",
+        "created_at": "2026-05-19T02:57:08Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd0-1258131-3a1.3",
+        "depends_on_id": "wd0-1258131-3a1.1",
+        "type": "blocks",
+        "created_at": "2026-05-19T02:57:11Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd0-1258131-3a1.3",
+        "depends_on_id": "wd0-1258131-3a1.2",
+        "type": "blocks",
+        "created_at": "2026-05-19T02:57:12Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 2,
+    "dependent_count": 0,
+    "comment_count": 0,
+    "parent": "wd0-1258131-3a1"
+  },
+  {
+    "id": "wd0-1258131-3a1.2",
+    "title": "Task 2: Add vault_rotate orchestration module",
+    "design": "Create src/lib/vault_rotate.py with rotate(name, new_value) that calls vault.rotate_secret + schedules T+5min expiry. Files: src/lib/vault_rotate.py, tests/lib/test_vault_rotate.py.",
+    "status": "closed",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-19T00:57:07Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-19T00:57:18Z",
+    "closed_at": "2026-05-19T00:57:18Z",
+    "close_reason": "AUDITED: APPROVED. vault_rotate orchestration meets all criteria.",
+    "dependencies": [
+      {
+        "issue_id": "wd0-1258131-3a1.2",
+        "depends_on_id": "wd0-1258131-3a1",
+        "type": "parent-child",
+        "created_at": "2026-05-19T02:57:07Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd0-1258131-3a1.2",
+        "depends_on_id": "wd0-1258131-3a1.1",
+        "type": "blocks",
+        "created_at": "2026-05-19T02:57:10Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 1,
+    "dependent_count": 1,
+    "comment_count": 0,
+    "parent": "wd0-1258131-3a1"
+  },
+  {
+    "id": "wd0-1258131-3a1.1",
+    "title": "Task 1: Add rotate_secret helper to vault.py",
+    "design": "Extend src/lib/vault.py with rotate_secret(name, new_value) helper that stages a new versioned alias. Files: src/lib/vault.py, tests/lib/test_vault.py. Edge cases: concurrent calls serialize, vault unreachable raises VaultError, empty value rejected.",
+    "notes": "IMPLEMENTED: rotate_secret helper added to vault.py.\n\nEvidence:\n- vault.rotate_secret(name, new_value) stages versioned alias: src/lib/vault.py:36\n- secret(name) returns latest after flip: tests/lib/test_vault.py::test_secret_returns_new_after_flip\n- Concurrent serialization via per-name lock: src/lib/vault.py:24\n- Empty value rejected with ValueError: tests/lib/test_vault.py::test_empty_value_rejected\n- Tests: 5 passed (test_vault.py)\nDeviations: none",
+    "status": "closed",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-19T00:57:06Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-19T00:57:17Z",
+    "started_at": "2026-05-19T00:57:14Z",
+    "closed_at": "2026-05-19T00:57:17Z",
+    "close_reason": "AUDITED: APPROVED. rotate_secret meets all criteria.",
+    "dependencies": [
+      {
+        "issue_id": "wd0-1258131-3a1.1",
+        "depends_on_id": "wd0-1258131-3a1",
+        "type": "parent-child",
+        "created_at": "2026-05-19T02:57:05Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 0,
+    "dependent_count": 2,
+    "comment_count": 0,
+    "parent": "wd0-1258131-3a1"
+  },
+  {
+    "id": "wd0-1258131-3a1",
+    "title": "Epic: rotate service credentials without downtime [sp001]",
+    "design": "Spec: docs/notes/spec/sp001.md",
+    "status": "closed",
+    "priority": 2,
+    "issue_type": "epic",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-19T00:57:04Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-19T01:00:00Z",
+    "closed_at": "2026-05-19T01:00:00Z",
+    "close_reason": "Retro: rotate_secret + per-name locking shipped (vault.py); scheduled-expiry orchestration deferred. Rewrote im002, widened ft002 api_surface (rotate_secret + VaultError), drafted us006 (cross-region rotation verification). No new ADRs.",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  }
+]

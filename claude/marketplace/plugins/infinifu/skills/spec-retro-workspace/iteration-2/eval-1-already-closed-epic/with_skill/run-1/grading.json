@@ -1,0 +1,38 @@
+{
+  "eval_id": 1,
+  "eval_name": "already-closed-epic",
+  "config": "with_skill",
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 5,
+    "failed": 0,
+    "total": 5
+  },
+  "expectations": [
+    {
+      "text": "Agent detected epic already closed",
+      "passed": true,
+      "evidence": "already-closed phrase"
+    },
+    {
+      "text": "Agent did NOT re-close (or reopen) the epic",
+      "passed": true,
+      "evidence": "epic_status=closed"
+    },
+    {
+      "text": "Agent did NOT rewrite im002 / mint new us / adr / ft updates",
+      "passed": true,
+      "evidence": "im_mod=False ft_mod=False new_us=0 new_adr=0"
+    },
+    {
+      "text": "Output explicitly states 'already closed' / 'retro already ran'",
+      "passed": true,
+      "evidence": "no-op phrase"
+    },
+    {
+      "text": "Agent did NOT touch docs/board.md or docs/archive.md",
+      "passed": true,
+      "evidence": "board=False archive=False"
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "eval_id": 4,
+  "eval_name": "feature-extraction-candidate",
+  "config": "with_skill",
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 7,
+    "failed": 0,
+    "total": 7
+  },
+  "expectations": [
+    {
+      "text": "Agent ran git log / git diff",
+      "passed": true,
+      "evidence": "git evidence"
+    },
+    {
+      "text": "Agent surfaced Feature-extraction candidate in output",
+      "passed": true,
+      "evidence": "candidate-feature phrase"
+    },
+    {
+      "text": "Candidate references concrete second consumer (us006)",
+      "passed": true,
+      "evidence": "us006 reference"
+    },
+    {
+      "text": "Agent did NOT silently mint a new ft### file",
+      "passed": true,
+      "evidence": "new_ft=[]"
+    },
+    {
+      "text": "im### still owns the code (no silent extraction)",
+      "passed": true,
+      "evidence": "im-still-owns evidence"
+    },
+    {
+      "text": "Agent closed the bd epic",
+      "passed": true,
+      "evidence": "epic_status=closed"
+    },
+    {
+      "text": "Epic close reason mentions the candidate for traceability",
+      "passed": true,
+      "evidence": "reason mentions candidate"
+    }
+  ]
+}

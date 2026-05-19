@@ -1,0 +1,12 @@
+{
+  "eval_id": 1,
+  "eval_name": "already-closed-epic",
+  "prompt": "Run spec-retro on sp001. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent detected the bd epic is already closed (prior retro)"},
+    {"text": "Agent did NOT re-close the epic"},
+    {"text": "Agent did NOT rewrite im002 or mint new us### / adr#### / ft### changes (idempotent no-op or surfaces 'already done')"},
+    {"text": "Output explicitly states 'already closed' / 'retro already ran' / similar"},
+    {"text": "Agent did NOT touch docs/board.md or docs/archive.md"}
+  ]
+}

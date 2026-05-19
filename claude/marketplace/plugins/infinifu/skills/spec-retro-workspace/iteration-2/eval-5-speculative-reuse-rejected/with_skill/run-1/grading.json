@@ -1,0 +1,43 @@
+{
+  "eval_id": 5,
+  "eval_name": "speculative-reuse-rejected",
+  "config": "with_skill",
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 6,
+    "failed": 0,
+    "total": 6
+  },
+  "expectations": [
+    {
+      "text": "Agent ran git log / git diff",
+      "passed": true,
+      "evidence": "git evidence"
+    },
+    {
+      "text": "Agent did NOT mint a new ft### on speculative signal",
+      "passed": true,
+      "evidence": "new_ft=[]"
+    },
+    {
+      "text": "Skill did not flag a candidate, OR explicitly marked speculative",
+      "passed": true,
+      "evidence": "candidate_block=True speculative_marker=True"
+    },
+    {
+      "text": "Agent referenced the vertical-over-horizontal principle (or equivalent)",
+      "passed": true,
+      "evidence": "principle invoked"
+    },
+    {
+      "text": "Agent closed the bd epic",
+      "passed": true,
+      "evidence": "epic_status=closed"
+    },
+    {
+      "text": "Agent did NOT touch docs/board.md or docs/archive.md",
+      "passed": true,
+      "evidence": "board=False archive=False"
+    }
+  ]
+}

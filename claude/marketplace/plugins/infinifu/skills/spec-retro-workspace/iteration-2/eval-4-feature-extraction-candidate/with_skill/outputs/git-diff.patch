@@ -1,0 +1,90 @@
+diff --git a/docs/notes/ft002.md b/docs/notes/ft002.md
+index 595d78a..6ac83a5 100644
+--- a/docs/notes/ft002.md
++++ b/docs/notes/ft002.md
+@@ -7,20 +7,26 @@ created: 2026-03-20
+ # Feature [[cat001]] [[product]]
+ 
+ ## providing
+-Vault-backed secret retrieval. Every service calls `secret(name)` to
+-read credentials at runtime.
++Vault-backed secret retrieval and rotation. Every service calls
++`secret(name)` to read credentials at runtime; rotation flows call
++`rotate_secret(name, new_value)` to stage a new versioned alias with
++per-name serialization.
+ 
+ ## api_surface
+ ```python
+-from acme.lib.vault import secret
++from acme.lib.vault import secret, rotate_secret, VaultError
++
+ db_url = secret("reports/db_url")
++rotate_secret("reports/db_url", new_url)  # per-name lock; raises VaultError on backend failure
+ ```
+ 
+ ## data_model
+-None local. Vault is the source of truth.
++None local. Vault is the source of truth; the in-process versioned-alias
++list (`_ALIASES`) is a write-stage buffer owned by the rotation primitive
++in [[im002]].
+ 
+ ## sample
+-`src/lib/vault.py` ships the canonical client.
++`src/lib/vault.py` ships the canonical client (read + rotate).
+ 
+ ## components
+ - `src/lib/vault.py`
+diff --git a/docs/notes/im002.md b/docs/notes/im002.md
+index 12abdc8..9f37e69 100644
+--- a/docs/notes/im002.md
++++ b/docs/notes/im002.md
+@@ -10,19 +10,30 @@ created: 2026-04-26
+ [[us003|rotate service credentials without downtime]]
+ 
+ ## approach
+-Adopt the vault-rotate-policy pattern via [[ft002]]: writers stage the
+-new credential under a versioned alias; readers fall back to the prior
+-version for up to 5 minutes; alias flips at the end of the window.
++Vault writes are staged under a per-name versioned alias list; readers
++return the latest version via `secret(name)`. The rotation primitive
++appends a new version under a per-name `threading.Lock` so concurrent
++rotations for the same name serialize while different names progress
++independently. The orchestration layer ([[ft002]] + `vault_rotate.py`)
++holds the 5-minute overlap timer; the alias bookkeeping itself is
++contained in `vault.py`.
+ 
+ ## features
+ - [[ft002|vault-secrets]]
+ 
+ ## data_model
+-No schema change. Vault holds versioned aliases.
++In-process per-name alias list (`_ALIASES: dict[str, list[str]]`) plus a
++per-name lock registry (`_LOCKS: dict[str, threading.Lock]`) guarded by a
++single `_LOCKS_GUARD` lock. No schema change in Vault — versioned aliases
++are how the backend already represents history.
+ 
+ ## api_surface
+-`acme.lib.vault.secret(name)` continues to be the only read path; writes
+-use a new internal `rotate_secret(name)` helper that lands in the same lib.
++- `acme.lib.vault.secret(name) -> str` — read path, returns the latest
++  staged version (or `<vault:{name}>` if none).
++- `acme.lib.vault.rotate_secret(name, new_value) -> None` — write path.
++  Per-name serialization; raises `ValueError` on empty name/value,
++  wraps backend errors as `VaultError`.
++- `acme.lib.vault.VaultError` — exception type for backend rejection.
+ 
+ ## components
+ - `src/lib/vault.py`
+diff --git a/docs/product.md b/docs/product.md
+index 3688496..4ce9fa0 100644
+--- a/docs/product.md
++++ b/docs/product.md
+@@ -12,7 +12,7 @@ operations analyst and the platform-engineer personas.
+ 
+ ### [[pn002|platform-engineer]]
+ 
+-- [[us003|rotate service credentials without downtime]]
++- [[us003|rotate service credentials without downtime]] >> [[im002]]
+ - [[us006|rotate OAuth client api-keys]]
+ 
+ ## Features

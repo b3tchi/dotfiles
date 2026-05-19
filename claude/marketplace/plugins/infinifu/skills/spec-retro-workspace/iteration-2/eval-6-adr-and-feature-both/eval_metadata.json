@@ -1,0 +1,16 @@
+{
+  "eval_id": 6,
+  "eval_name": "adr-and-feature-both",
+  "prompt": "sp001 just merged. Run spec-retro to refresh the AKM graph. Task/epic ids in .work-do-task-ids.json. Working dir is the seeded Acme sandbox. During execution the team adopted Vault Transit over plain KV (decision) AND shipped src/lib/vault_transit.py as a reusable wrapper (capability). Apply the ADR-vs-Feature classification correctly — this is the 'both' row.",
+  "fixture": "Post-merge state from eval-0 baseline PLUS src/lib/vault_transit.py landed in the shipping commit. Task 1 audit note explicitly records both a DECISION SHIFT (Transit vs KV, trade-offs) and a CAPABILITY (the transit wrapper, concrete API, designed for reuse, named next consumers).",
+  "expected_behavior": "Emit BOTH a new adr#### capturing the Transit-vs-KV decision (vendor / paradigm — strategic) AND either widen ft002 or mint a new ft### for the vault_transit wrapper surface (api_surface = encrypt/decrypt/rotate_key — implementation-near reusable). Both must reference the same execution event but record separate concerns: ADR captures what was *chosen*, Feature captures what was *provided*. Rewrite im002 body to reference the new ADR + Feature.",
+  "assertions": [
+    {"text": "Agent ran git log / git diff"},
+    {"text": "Agent minted a new adr#### for the vendor/paradigm decision"},
+    {"text": "New ADR captures the Vault Transit decision"},
+    {"text": "Agent widened existing ft### OR minted new ft### for the wrapper surface"},
+    {"text": "Feature update captures the vault_transit wrapper surface"},
+    {"text": "im002 body rewritten to reference shipped reality"},
+    {"text": "Agent closed the bd epic"}
+  ]
+}
