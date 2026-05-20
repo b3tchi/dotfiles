@@ -22,6 +22,7 @@ Type detection (which AKM writer to call) is flexible — guess from context, co
 |-------|-------|------|
 | Single idea | yes | One claim per card. Compound topics split before writing. |
 | Body length | yes | ≤ 300 words / ~30 lines body (excluding frontmatter + footer). Typed AKM schemas with many sections get soft warning instead. |
+| Line wrap | yes | Prose lines ≤ 80 chars. Exempt: code blocks, tables, link/URL lines that would break if wrapped. |
 | Outbound wikilinks | yes | ≥ 1 link beyond `[[product]]` and `Index:`. Use `[[id]]` or `[[slug]]` to existing notes; surface dangling links via moxide LSP. |
 | AKM invariants | yes | `[[product]]` in H1 + `Index: [[product]]` footer on every typed zettel. Filename = stable id. |
 | Type routing | soft | Match request → AKM type → typed writer; else generic named-slug card. |
@@ -195,6 +196,7 @@ Re-read the file you just wrote and check:
 |-------|----------------|---------|
 | Single idea | One claim restatable in one sentence | Reject — go back to atomicity gate with split plan |
 | Body length | ≤ 300 words / ~30 lines (typed AKM zettel: schema sections fit naturally — no padding) | Trim or split |
+| Line wrap | Prose lines ≤ 80 chars (code blocks, tables, unbreakable URLs exempt) | Re-flow paragraph, do not silently leave long lines |
 | Outbound wikilinks | ≥ 1 link beyond `[[product]]` and `Index:` line | Add a `## see also` link or reject as orphan |
 | AKM invariants | `[[product]]` in H1, `Index: [[product]]` footer, valid filename | Fix and re-emit |
 | Schema (typed only) | Matches `akm.md` for the type | Re-emit; do not "almost" the schema |
@@ -265,6 +267,7 @@ Route: invoke `infinifu:story-write` and stop. The atomicity gate already passed
 <critical_rules>
 
 - **One idea per card.** A card making two claims is two cards waiting to be split. The atomicity gate runs before any write — never after.
+- **Wrap prose at 80 chars.** Long unbroken lines wreck diffs, terminal rendering, and vim navigation; the 80-char cap forces tight phrasing and keeps review noise low. Code blocks, tables, and unbreakable URLs are the only exceptions — wrap everything else by hand at sentence/clause boundaries, not mid-word.
 - **Every card links.** A card with no outbound wikilink beyond `[[product]]` is an orphan and gets rejected. The graph is the value; the prose is the body.
 - **Don't duplicate the AKM schema.** Typed writers own their schemas; this skill routes to them. `docs/notes/akm.md` is the canonical reference for every typed body shape.
 - **Slugs are wikilink-shaped.** Read `[[bus-factor]]` aloud — it should sound like the concept. Avoid dates, owners, or context in the slug; those go in the aliases or body.
@@ -280,6 +283,7 @@ Before reporting the capture complete:
 
 - [ ] One-sentence restatement of the card's claim fits, no "and" / "also"
 - [ ] Body ≤ 300 words / ~30 lines (typed schema sections fit naturally without padding)
+- [ ] Prose lines wrapped at ≤ 80 chars (code blocks, tables, unbreakable URLs exempt)
 - [ ] ≥ 1 outbound wikilink beyond `[[product]]` and `Index:` footer
 - [ ] `[[product]]` present in H1, `Index: [[product]]` footer present
 - [ ] Filename is stable (`us###` / `im###` / … for typed; `<kebab-slug>` for generic) — not date-stamped, not owner-stamped
