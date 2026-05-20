@@ -1,0 +1,27 @@
+# markdown-oxide PKM workspace config
+# Workspace root: ./docs/
+# Notes (zettel) live in ./docs/notes/
+# Assets live in ./docs/assets/ (managed outside moxide — Obsidian attachmentFolderPath if used)
+
+dailynote = "%Y-%m-%d"
+
+new_file_folder_path = "notes"
+daily_notes_folder = "notes/daily"
+
+heading_completions = true
+title_headings = true
+unresolved_diagnostics = true
+semantic_tokens = true
+
+link_filenames_only = true
+
+include_md_extension_md_link = false
+include_md_extension_wikilink = false
+
+case_matching = "Smart"
+
+inlay_hints = true
+block_transclusion = true
+block_transclusion_length = "Full"
+
+excluded_folders = ["assets"]
