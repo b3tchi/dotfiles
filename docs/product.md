@@ -11,7 +11,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 
 ## Features
 
-_(none yet — add `[[ft###|<capability>]]` entries when defined)_
+- [[ft001|project registry and navigation module]]
 
 ## Architecture Decision Records
 
