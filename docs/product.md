@@ -18,6 +18,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 ### [[cat001|workflow-tooling]]
 
 - [[adr0001|Nushell as primary language for scripts and data manipulation]]
+- [[adr0002|When to use bash (vs nushell)]]
 
 ## AKM Reference
 
