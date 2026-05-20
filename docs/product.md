@@ -7,7 +7,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 ### [[pn001|developer]]
 
 - [[us001|mark project as remote so terminals open against the remote host]]
-- [[us002|register a location as a project and navigate to it easily]]
+- [[us002|register a location as a project and navigate to it easily]] >> [[im001]]
 
 ## Features
 
@@ -17,7 +17,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 
 ### [[cat001|workflow-tooling]]
 
-_(no ADRs yet)_
+- [[adr0001|Nushell as primary language for scripts and data manipulation]]
 
 ## AKM Reference
 
