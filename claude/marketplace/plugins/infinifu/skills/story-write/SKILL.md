@@ -1,6 +1,6 @@
 ---
 name: story-write
-description: Use when the user wants to create, add, or write a user story — captures a product requirement or backlog item in "as a... I want... because..." form and emits a new `docs/notes/us###.md` AKM zettel with frontmatter (aliases/status/created) and body sections (role/want/because/acceptance_criteria) per the schema in `docs/notes/akm.md`. Also handles edits via re-emit with the same id (story content lives in the same file; refining a story is rewriting it). Invoke this whenever someone asks to "create a story", "add a story", "write a story", "new story", "make a backlog item", "log a requirement", "capture this as a user story", "revise story us013", or phrases a feature request from a user/persona perspective even if they don't say the word "story".
+description: Use when the user wants to create, add, or write a user story — captures a product requirement or backlog item in "as a... I want... because..." form and emits a new `docs/notes/us###.md` AKM zettel with frontmatter (aliases/status/created) and body sections (role/want/because/acceptance_criteria). This skill owns the Story schema (frontmatter shape, body, lifecycle); shared styling (atomicity, 80-char wrap, link discipline) is enforced by `infinifu:zettel-write`; `docs/notes/akm.md` carries only the top-level AKM model overview and lifecycle process flow. Also handles edits via re-emit with the same id (story content lives in the same file; refining a story is rewriting it). Invoke this whenever someone asks to "create a story", "add a story", "write a story", "new story", "make a backlog item", "log a requirement", "capture this as a user story", "revise story us013", or phrases a feature request from a user/persona perspective even if they don't say the word "story".
 ---
 
 # Story Write
@@ -9,7 +9,7 @@ description: Use when the user wants to create, add, or write a user story — c
 
 Capture a single user story in Connextra format and write it as a new AKM zettel under `docs/notes/us###.md`. Stories are the product-level requirements that feed downstream Implementation zettels (`im###.md`) and bd epics. They describe **who** wants **what** and **why**, not how to build it.
 
-**Storage backend:** AKM (Agentic Knowledge Model). The schema is documented in `docs/notes/akm.md`; this skill writes one file per story under `docs/notes/`.
+**Storage backend:** AKM (Agentic Knowledge Model). This skill owns the Story schema (defined inline below under "Zettel Schema"). Top-level AKM model + lifecycle process flow live in `docs/notes/akm.md`; cross-type styling rules (atomicity, 80-char wrap, link discipline, post-write audit) live in `infinifu:zettel-write` and apply here.
 
 **Announce at start:** "Using story-write skill to capture this as a user story."
 
@@ -125,7 +125,7 @@ Index: [[product]]
 - `## role`, `## want`, `## because`, `## acceptance_criteria` sections.
 - `Index: [[product]]` footer.
 
-**Lifecycle status values** (from `akm.md`):
+**Lifecycle status values:**
 
 | Status | Meaning |
 |--------|---------|

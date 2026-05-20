@@ -1,10 +1,10 @@
 ---
 name: category-write
-description: Use when the user wants to create a new ADR taxonomy bucket — a Category zettel (`cat###.md`) that ADRs file under via their H1 `[[cat###]]` link and that any zettel can reuse as a tag. Emits a new `docs/notes/cat###.md` AKM zettel with the minimal Category schema (frontmatter `aliases`/`status: stable`/`created`, body `## name` and `## summary`, `Index: [[product]]` footer) per `docs/notes/akm.md`. Invoke this whenever someone says "create a category", "add a new ADR taxonomy bucket", "we need a `cat###` for X", "register a category for security/data/infra/...", "make a new tag bucket", or otherwise wants to mint the taxonomy bucket itself rather than apply existing tags. Pick this over `infinifu:tag-manage` (which manages H1 tag wikilinks on existing zettels — a different concept, not a bucket-minting tool) and over `infinifu:adr-write` (which *consumes* categories rather than creating them). Categories are stable, slow-changing, append-only — there is no draft/superseded lifecycle, just `stable` from birth.
+description: Use when the user wants to create a new ADR taxonomy bucket — a Category zettel (`cat###.md`) that ADRs file under via their H1 `[[cat###]]` link and that any zettel can reuse as a tag. Emits a new `docs/notes/cat###.md` AKM zettel with the minimal Category schema (frontmatter `aliases`/`status: stable`/`created`, body `## name` and `## summary`, `Index: [[product]]` footer). This skill owns the Category schema (frontmatter shape, body, lifecycle); shared styling (atomicity, 80-char wrap, link discipline) is enforced by `infinifu:zettel-write`; `docs/notes/akm.md` carries only the top-level AKM model overview. Invoke this whenever someone says "create a category", "add a new ADR taxonomy bucket", "we need a `cat###` for X", "register a category for security/data/infra/...", "make a new tag bucket", or otherwise wants to mint the taxonomy bucket itself rather than apply existing tags. Pick this over `infinifu:tag-manage` (which manages H1 tag wikilinks on existing zettels — a different concept, not a bucket-minting tool) and over `infinifu:adr-write` (which *consumes* categories rather than creating them). Categories are stable, slow-changing, append-only — there is no draft/superseded lifecycle, just `stable` from birth.
 ---
 
 <skill_overview>
-Mint a new Category zettel — a taxonomy bucket for ADRs and a reusable tag for any zettel. Output: one file at `docs/notes/cat###.md` per the AKM schema in `docs/notes/akm.md` (see the **Category — `cat###.md`** section there). Categories are tiny: a name, a one-line summary of what kinds of decisions belong in the bucket, and that is the whole card.
+Mint a new Category zettel — a taxonomy bucket for ADRs and a reusable tag for any zettel. Output: one file at `docs/notes/cat###.md` per the schema this skill owns (see `<schema>` block below). Categories are tiny: a name, a one-line summary of what kinds of decisions belong in the bucket, and that is the whole card.
 
 **Announce at start:** "Using category-write skill to mint a new Category bucket."
 </skill_overview>
@@ -21,13 +21,53 @@ MEDIUM FREEDOM — the schema and the duplicate / sanity / rename-audit gates ar
 | 3 | Gather name (kebab noun phrase) + one-line summary | two strings |
 | 4 | Sanity-check bucket scope (is this really an ADR?) | go / push-back |
 | 5 | Generate id `cat###` (max existing + 1, zero-padded) | new id |
-| 6 | Write zettel per schema in `docs/notes/akm.md` | `$AKM_ROOT/docs/notes/cat###.md` on disk |
+| 6 | Write zettel per `<schema>` block below | `$AKM_ROOT/docs/notes/cat###.md` on disk |
 | 7 | Append `### [[cat###\|<name>]]` heading under product.md `## Architecture Decision Records` | hub linked |
 | 8 | Commit on main (`git -C "$AKM_ROOT" commit`) | stable artifact landed |
 | 9 | Confirm with rename-cost reminder | user signs off |
 
-**Schema source of truth:** `docs/notes/akm.md` → **Category — `cat###.md`** section. Do not duplicate it here.
+**Schema source of truth:** this skill (`<schema>` block below); styling via `infinifu:zettel-write`.
 </quick_reference>
+
+<schema>
+
+**Frontmatter.**
+
+```yaml
+aliases:
+  - <category name>
+status: stable
+created: YYYY-MM-DD
+```
+
+**Body skeleton.**
+
+```markdown
+# Category [[product]]
+
+## name
+<category name>
+
+## summary
+<one-liner: what kinds of decisions belong here>
+
+---
+
+Index: [[product]]
+```
+
+**Required wikilinks.** `[[product]]` in H1, `Index: [[product]]` footer.
+No other wikilinks in the H1 — Categories *are* the taxonomy layer; they
+do not get tagged by other categories.
+
+**Lifecycle.** Status is always `stable` from birth. No `draft` /
+`proposed` / `deprecated` / `superseded` states. Categories are
+append-only — if a category turns out to be wrong, the cure is a new
+category plus a wikilink audit on the affected ADRs, not a status flip.
+Rename of the *label* (aliases + `## name`) is cheap; rename of the
+*slug* (file move) is forbidden — slugs are stable ids.
+
+</schema>
 
 <workspace_resolution>
 Categories are shared taxonomy — they live on **main**, even from a feature-branch worktree. Resolve before any file op:
@@ -103,7 +143,7 @@ digraph category_create {
 3. **Gather name + summary.** Name: short kebab-friendly noun phrase (`security`, `data`, `observability`). Summary: one sentence stating which kinds of architectural decisions belong here. If both arrived upfront, write; if pieces are missing, ask one focused question per turn (`AskUserQuestion` when 2–4 names are in play). Good/bad summaries in `references/examples.md`.
 4. **Sanity-check scope.** Is this a recurring axis of decision-making, or a single decision in disguise? Names like `use-postgres`, `logging-format-json-vs-text`, `rate-limit-on-public-api` are ADRs, not categories — the parent category already exists (`data`, `observability`, `api-design`). Push back once, then defer to the user.
 5. **Generate id.** `cat` + three-digit zero-padded. Find max numeric portion across existing `$AKM_ROOT/docs/notes/cat*.md`, add 1. Gaps are never reused — they preserve historical context.
-6. **Write the zettel.** Compose `$AKM_ROOT/docs/notes/cat<NNN>.md` per the **Category — `cat###.md`** section of `docs/notes/akm.md`. The whole card: frontmatter (`aliases`, `status: stable`, `created`), H1 `# Category [[product]]` (no other wikilinks), `## name`, `## summary`, `---`, `Index: [[product]]`. Worked example in `references/examples.md`.
+6. **Write the zettel.** Compose `$AKM_ROOT/docs/notes/cat<NNN>.md` per the `<schema>` block above. The whole card: frontmatter (`aliases`, `status: stable`, `created`), H1 `# Category [[product]]` (no other wikilinks), `## name`, `## summary`, `---`, `Index: [[product]]`. Worked example in `references/examples.md`.
 7. **Update the hub.** Append `### [[cat###|<name>]]` under `## Architecture Decision Records` in `$AKM_ROOT/docs/product.md`, initially with no ADR bullets. Skip and warn if the hub does not exist.
 8. **Commit on main.** Categories are stable from birth — land the file and hub edit in one commit:
 
@@ -149,5 +189,6 @@ digraph category_create {
 Load these on demand, not preemptively.
 
 - `references/examples.md` — worked zettel example, duplicate-check walkthrough, good/bad summaries, rename-audit procedure. Load when minting a non-trivial category, when the duplicate check returns a near-match, or when the user asks to rename a category.
-- `docs/notes/akm.md` (in the target workspace) — canonical AKM schema. The **Category — `cat###.md`** section is the source of truth for the body shape, frontmatter, and lifecycle. Load when in doubt about schema details or when reviewing this skill against AKM drift.
+- `docs/notes/akm.md` (in the target workspace) — top-level AKM model + lifecycle process flow. Load when needing cross-type perspective (how Categories relate to ADRs / Features / Implementations). Schema details live in the `<schema>` block above, not here.
+- `infinifu:zettel-write` — cross-type styling rules (atomicity, 80-char wrap, link discipline, post-write audit). Load when the styling rule is unclear; this skill owns the Category schema, that one owns shared discipline.
 </references>

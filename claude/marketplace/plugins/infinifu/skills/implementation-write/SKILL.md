@@ -1,10 +1,10 @@
 ---
 name: implementation-write
-description: Use when the user wants to record *how* a story will be solved — write an implementation card, log how we'll build us###, record the solution shape for the X story, im### for that backlog item, "draft the implementation for us014", "how are we going to do this story", "compose the features for that work". Emits a new `docs/notes/im###.md` AKM zettel with frontmatter (aliases/status/created), an H1 carrying one-or-more `[[cat###]]` categories, a mandatory `solves: [[us###]]` back-link, consumed `[[ft###]]` Features, and the body sections (approach / data_model / api_surface / components / specs) per the schema in `docs/notes/akm.md`. Distinct from `story-write` (the *problem* in Connextra form), `spec-writing` (the transient execution *plan* on the board), and `feature-write` (the *reusable capabilities* this card consumes). Pick this whenever a story is `ready` and you're choosing the solution shape *before* anyone opens `board/spec/`. Invoke aggressively — spec-writing without a backing `im###` is a smell.
+description: Use when the user wants to record *how* a story will be solved — write an implementation card, log how we'll build us###, record the solution shape for the X story, im### for that backlog item, "draft the implementation for us014", "how are we going to do this story", "compose the features for that work". Emits a new `docs/notes/im###.md` AKM zettel with frontmatter (aliases/status/created), an H1 carrying one-or-more `[[cat###]]` categories, a mandatory `solves: [[us###]]` back-link, consumed `[[ft###]]` Features, and the body sections (approach / data_model / api_surface / components / specs). This skill owns the Implementation schema (frontmatter shape, body, lifecycle); shared styling (atomicity, 80-char wrap, link discipline) is enforced by `infinifu:zettel-write`; `docs/notes/akm.md` carries only the top-level AKM model overview. Distinct from `story-write` (the *problem* in Connextra form), `spec-writing` (the transient execution *plan* on the board), and `feature-write` (the *reusable capabilities* this card consumes). Pick this whenever a story is `ready` and you're choosing the solution shape *before* anyone opens `board/spec/`. Invoke aggressively — spec-writing without a backing `im###` is a smell.
 ---
 
 <skill_overview>
-An Implementation zettel persists the *solution shape* for a single user story: which Features it composes, what story-specific glue it adds, and which architectural categories it touches. This skill captures that shape as `docs/notes/im###.md` per the AKM schema. It sits between the Story (the problem) and the Spec (the transient execution plan), and gates `spec-writing` — no spec should be written for a story that does not have an `im###` card to anchor against. The card is append-only on `accepted`: reshape by writing a new `im###` and superseding, never by rewriting history.
+An Implementation zettel persists the *solution shape* for a single user story: which Features it composes, what story-specific glue it adds, and which architectural categories it touches. This skill captures that shape as `docs/notes/im###.md` per the schema it owns (see `<schema>` block below). It sits between the Story (the problem) and the Spec (the transient execution plan), and gates `spec-writing` — no spec should be written for a story that does not have an `im###` card to anchor against. The card is append-only on `accepted`: reshape by writing a new `im###` and superseding, never by rewriting history.
 </skill_overview>
 
 <rigidity_level>
@@ -32,6 +32,86 @@ Everything else (how many categories, which Features to list, depth of `## compo
 **Status lifecycle:** `proposed` (drafted, revisable) → `accepted` (specs shipped, body now history) → `superseded` (replaced; `## superseded_by` carries the forward pointer).
 
 </quick_reference>
+
+<schema>
+
+**Frontmatter.**
+
+```yaml
+aliases:
+  - <human-readable solution one-liner>
+status: <proposed|accepted|superseded>
+created: YYYY-MM-DD
+```
+
+**Body skeleton.**
+
+```markdown
+# Implementation [[cat###]] [[cat###]]
+
+## solves
+[[us###|<story-alias>]]
+
+## approach
+<one-paragraph chosen solution shape: pattern, layering, key trade-off>
+
+## features
+- [[ft###|<feature>]]
+- [[ft###|<feature>]]
+
+## data_model
+<schema deltas / glue tables this implementation owns; features carry their own state>
+
+## api_surface
+<endpoints, payloads, contracts this implementation adds — exclude what features already expose>
+
+## components
+- <story-specific glue: module / file / path>
+- <story-specific glue: module / file / path>
+
+## specs
+- [[sp###|<spec-title>]]
+- [[sp###|<spec-title>]]
+
+## superseded_by
+[[im###|<replacement>]]        # only when status = superseded
+
+---
+
+Index: [[product]]
+```
+
+**Required wikilinks.** `solves` to a `[[us###]]`, at least one
+`[[cat###]]` in the H1, every consumed Feature in `features` as
+`[[ft###]]`, and the `Index: [[product]]` footer.
+
+**Lifecycle.**
+
+- `proposed` — drafted before spec is written. May still be revised.
+  Spec-writing should reference this card and not start until it exists.
+- `accepted` — the spec(s) listed in `specs` shipped. Body stays as the
+  persistent solution record. Mutate only `components` / `data_model` /
+  `api_surface` if reality drifts, never the historical narrative.
+- `superseded` — replaced by a newer implementation. Frontmatter
+  `status` is `superseded`; the `## superseded_by` body section carries
+  the `[[im###]]` wikilink.
+
+Implementation cards are append-only in spirit, like ADRs. Reshape the
+codebase by writing a new card and superseding, never by rewriting
+history on an `accepted` card.
+
+**Relationship to other AKM types.**
+
+- `solves` — back-link to the [[us###]] story whose problem this card
+  answers.
+- `features` — [[ft###]] capabilities consumed; each Feature's
+  constraints become this Implementation's inherited constraints.
+- H1 categories — [[cat###]] taxonomy buckets relevant to the solution;
+  ADRs that matter surface via the category, not by direct link.
+- `specs` — board specs that touched or delivered this implementation;
+  the spec is transient, the implementation card persists.
+
+</schema>
 
 <when_to_use>
 **Use when:**
@@ -131,7 +211,7 @@ In `proposed` status, these can be educated guesses; the spec-retro pass updates
 Transient board spec(s) that touched or delivered this card. Empty for a fresh `proposed`. While active: `[[<topic>|<title>]]` → `board/spec/<topic>.md`. Once archived: same wikilink, file moves to `board/done/<topic>.md`. Add as specs land; don't pre-populate.
 
 ### Step 8 — Generate the id, write the zettel
-IDs are `im` + 3-digit zero-padded sequential. `ls "$AKM_ROOT/docs/notes/"im*.md`, take max + 1 (never reuse gaps), zero-pad. Compose per the schema (see `references/examples.md` for the full template + worked examples). Write to `$AKM_ROOT/docs/notes/im<NNN>.md`. ISO date for `created`. Section ordering matches `akm.md` — moxide LSP parses on these headings.
+IDs are `im` + 3-digit zero-padded sequential. `ls "$AKM_ROOT/docs/notes/"im*.md`, take max + 1 (never reuse gaps), zero-pad. Compose per the `<schema>` block above (see `references/examples.md` for worked examples). Write to `$AKM_ROOT/docs/notes/im<NNN>.md`. ISO date for `created`. moxide LSP parses on the section headings — order matches the schema.
 
 ### Step 9 — Update `$AKM_ROOT/docs/product.md`
 Annotate the story bullet in `## Stories`:
@@ -204,9 +284,9 @@ A spec for a story with no `im###` is a smell — refuse to start `spec-writing`
 
 <references>
 
-- `references/examples.md` — full zettel template, three worked examples (fresh card, story-still-draft push-back, missing-Feature elevation), verification checklist. **Load when** composing the file, validating a draft, or seeing an unfamiliar edge case (draft anchor, missing category, no fitting Feature).
-- `docs/notes/akm.md` (in the target repo) — canonical AKM schema, source of truth. **Load when** verifying body shape beyond what `examples.md` shows.
-- `infinifu:zettel-write` — orchestrator and atomicity gate. **Load when** the request shape is ambiguous between AKM types.
+- `references/examples.md` — three worked examples (fresh card, story-still-draft push-back, missing-Feature elevation). **Load when** validating a draft or seeing an unfamiliar edge case (draft anchor, missing category, no fitting Feature).
+- `docs/notes/akm.md` — top-level AKM model + lifecycle process flow. **Load when** needing cross-type perspective (how Implementations sit relative to Stories / Features / Specs / ADRs).
+- `infinifu:zettel-write` — orchestrator, atomicity gate, and cross-type styling rules (atomicity, 80-char wrap, link discipline, post-write audit). **Load when** the request shape is ambiguous or the styling rule is unclear; this skill owns the Implementation schema, that one owns shared discipline.
 - `infinifu:story-write` — counterpart for the problem side. **Load when** the anchoring story doesn't exist yet.
 - `infinifu:meta-skill-writing` — house style for this SKILL.md. **Load when** refactoring this file.
 

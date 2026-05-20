@@ -1,6 +1,6 @@
 ---
 name: feature-write
-description: Use when the user wants to write a feature, register a reusable capability, add a building block, or log this as a shared service — an **implementation-near reusable capability** the system provides once and many Implementations consume, with a concrete `## api_surface` (signature / endpoint / message contract), `## data_model`, `## sample`, and `## components` (code paths). Emits a new `docs/notes/ft###.md` AKM zettel (frontmatter aliases/status/created; sections providing/api_surface/data_model/sample/components, optional superseded_by) per `docs/notes/akm.md`. Examples: notifications service, audit-log, rate-limiter, template renderer, SAML SSO endpoint set, payment-processing service, database-access layer. Discriminator: "could a future engineer reuse this concrete surface?" yes → Feature. Pick over `infinifu:adr-write` when it's the concrete reusable capability itself with an API contract — NOT the strategic decision behind which vendor or paradigm to adopt; over `infinifu:story-write` when it's a *capability* (notifications, auth, audit-log) not a user requirement; over `infinifu:implementation-write` when it's reusable across stories, not one story's bespoke solution; over `infinifu:zettel-write` when the AKM type is clear. Handles edits, deprecate, and supersede chains. Invoke on "write a feature", "register a reusable capability", "add a building block", "log this as a shared service", "deprecate ft005", "supersede ft003", or any horizontal service many stories will consume.
+description: Use when the user wants to write a feature, register a reusable capability, add a building block, or log this as a shared service — an **implementation-near reusable capability** the system provides once and many Implementations consume, with a concrete `## api_surface` (signature / endpoint / message contract), `## data_model`, `## sample`, and `## components` (code paths). Emits a new `docs/notes/ft###.md` AKM zettel (frontmatter aliases/status/created; sections providing/api_surface/data_model/sample/components, optional superseded_by). This skill owns the Feature schema (frontmatter shape, body, lifecycle); shared styling (atomicity, 80-char wrap, link discipline) is enforced by `infinifu:zettel-write`; `docs/notes/akm.md` carries only the top-level AKM model overview. Examples: notifications service, audit-log, rate-limiter, template renderer, SAML SSO endpoint set, payment-processing service, database-access layer. Discriminator: "could a future engineer reuse this concrete surface?" yes → Feature. Pick over `infinifu:adr-write` when it's the concrete reusable capability itself with an API contract — NOT the strategic decision behind which vendor or paradigm to adopt; over `infinifu:story-write` when it's a *capability* (notifications, auth, audit-log) not a user requirement; over `infinifu:implementation-write` when it's reusable across stories, not one story's bespoke solution; over `infinifu:zettel-write` when the AKM type is clear. Handles edits, deprecate, and supersede chains. Invoke on "write a feature", "register a reusable capability", "add a building block", "log this as a shared service", "deprecate ft005", "supersede ft003", or any horizontal service many stories will consume.
 ---
 
 <skill_overview>
@@ -22,9 +22,77 @@ MEDIUM FREEDOM — the AKM schema is fixed (filename, sections, required wikilin
 | Body sections | `## providing`, `## api_surface`, `## data_model`, `## sample`, `## components`, optional `## depends_on`, optional `## superseded_by` |
 | Footer | `Index: [[product]]` |
 | Layering | Features may `depends_on` other Features (notifications → templating) |
-| Schema source | `docs/notes/akm.md` § Feature — `ft###.md` |
+| Schema source | this skill (`<schema>` block below); styling via `infinifu:zettel-write` |
 
 </quick_reference>
+
+<schema>
+
+**Frontmatter.**
+
+```yaml
+aliases:
+  - <human-readable capability one-liner>
+status: <proposed|stable|deprecated|superseded>
+created: YYYY-MM-DD
+```
+
+**Body skeleton.**
+
+```markdown
+# Feature [[cat###]] [[cat###]] [[product]]
+
+## providing
+<one-paragraph: what capability this provides, who/what consumes it>
+
+## api_surface
+<how consumers invoke it: function, endpoint, message contract>
+
+## data_model
+<own state, if any — schema, retention, ownership>
+
+## sample
+<sample code snippet or link to a sample file showing how to implement / consume the feature>
+
+## components
+- <module / file / path>
+- <module / file / path>
+
+## superseded_by
+[[ft###|<replacement>]]        # only when status = superseded
+
+---
+
+Index: [[product]]
+```
+
+**Required wikilinks.** At least one `[[cat###]]` in the H1, `[[product]]`
+in the H1, and the `Index: [[product]]` footer.
+
+**Lifecycle.**
+
+- `proposed` — design under discussion. No production consumers yet.
+- `stable` — at least one Implementation consumes it; constraints are the
+  contract.
+- `deprecated` — no longer recommended; existing consumers may stay until
+  migrated. No forward link.
+- `superseded` — replaced by a newer feature. Frontmatter `status` is
+  `superseded`; the `## superseded_by` body section carries the
+  `[[ft###]]` wikilink. Existing consumers should migrate.
+
+Features are append-only like ADRs. Tighten the `providing` / `api_surface`
+contract only when reality demands; widening means a new Feature.
+
+**Relationship to other AKM types.**
+
+- No direct `solves` link to a story. Features serve Implementations,
+  Implementations serve stories.
+- Consumed via the Implementation `features` field (back-refs surface
+  through moxide / grep, not stored on the Feature itself).
+- May `depends_on` another Feature when capabilities layer (e.g.
+  notifications → templating).
+
+</schema>
 
 <when_to_use>
 **Use when:**
@@ -101,7 +169,7 @@ digraph feature_write {
 5. **Pick H1 categories (≥1).** `ls "$AKM_ROOT/docs/notes/"cat*.md`, read frontmatter `aliases:` for canonical labels, match user-named buckets. No match and a new bucket genuinely needed → route to `infinifu:category-write`; never fabricate dangling `[[cat###]]`.
 6. **Resolve dependencies.** If this Feature layers on others (notifications → templating, audit-log → database-access), record `## depends_on` with upstream `[[ft###]]` wikilinks. Omit the heading entirely when empty.
 7. **Generate id.** `ls "$AKM_ROOT/docs/notes/"ft*.md` → max numeric portion + 1, zero-padded to 3. None yet → start at `001`. Gaps stay gaps; superseded ids are never reused.
-8. **Write the zettel.** Compose `$AKM_ROOT/docs/notes/ft<NNN>.md` per the schema in `docs/notes/akm.md` § Feature (frontmatter + H1 with `[[cat###]]`+`[[product]]` + body sections in order + `Index: [[product]]` footer after `---`). For full schema + worked example, see `references/examples.md`.
+8. **Write the zettel.** Compose `$AKM_ROOT/docs/notes/ft<NNN>.md` per the `<schema>` block above (frontmatter + H1 with `[[cat###]]`+`[[product]]` + body sections in order + `Index: [[product]]` footer after `---`). Worked example in `references/examples.md`.
 9. **Update the hub.** Append `[[ft###|<alias>]]` (first alias as label) under `## Features` in `$AKM_ROOT/docs/product.md`. For supersede chains, swap entries; old file stays on disk. Hub missing → skip and note "Feature on disk but not linked from hub."
 10. **Commit on main.** Features are stable artifacts — stage and commit in one shot from the AKM root:
     ```bash
@@ -167,10 +235,10 @@ Before reporting the Feature written:
 
 <references>
 
-- `references/examples.md` — full schema reproduction, worked example (`ft004` audit-log), lifecycle status table, hub-update rules, and editing/superseding rationale. Load when writing the file body, when handling a deprecate/supersede chain, or when the user disputes which edit mode applies.
-- `docs/notes/akm.md` § Feature — canonical schema; this skill mirrors it. Load when checking edge cases (frontmatter keys, body section order, lifecycle states) against the source of truth.
+- `references/examples.md` — worked example (`ft004` audit-log), hub-update rules, and editing/superseding rationale. Load when handling a deprecate/supersede chain or when the user disputes which edit mode applies.
+- `docs/notes/akm.md` — top-level AKM model + lifecycle process flow. Load when needing cross-type perspective (how Features sit in the lifecycle relative to Stories / Implementations / Specs).
+- `infinifu:zettel-write` — cross-type styling rules (atomicity, 80-char wrap, link discipline, post-write audit). Load when the styling rule is unclear; this skill owns the Feature schema, that one owns shared discipline.
 - `infinifu:meta-skill-writing` — house style for this SKILL.md itself. Load when refactoring this file.
-- `infinifu:zettel-write` — the orchestrator that routes generic capture requests here. Load when reviewing the routing contract.
 
 </references>
 </content>

@@ -1,10 +1,10 @@
 ---
 name: adr-write
-description: Use when the user wants to record an architectural decision — a **strategic, often cross-cutting commitment** that locks in trade-offs and is expensive to reverse (vendor choice, language/stack, paradigm, security stance, data residency, protocol, cross-cutting policy). Captures one immutable choice as a new `docs/notes/adr####.md` AKM zettel (four-digit zero-padded id) with frontmatter (aliases/status/created) and body sections (title/context/decision/consequences) per the schema in `docs/notes/akm.md`. **No implementation surface — no api_surface, no components, no sample.** Also handles supersession by emitting a new ADR and flipping the old one's `status: Superseded` plus `## superseded_by` back-link — ADRs are append-only, never rewritten in place. Invoke this whenever someone says "write an ADR", "log a decision", "record an architectural decision", "ADR for X", "we decided to use Y instead of Z", "supersede adr0007", or otherwise wants a durable record of a design commitment. Discriminator: "could a future engineer choose this differently?" yes → ADR. Pick this over `infinifu:feature-write` (which records the capability with concrete API surface, not the decision behind it), over `infinifu:story-write` (which captures requirements, not decisions), over `infinifu:zettel-write` (which routes generic captures and delegates here for ADRs), and over `infinifu:idea-brainstorming` (which is the upstream design conversation that produces the decision this skill records).
+description: Use when the user wants to record an architectural decision — a **strategic, often cross-cutting commitment** that locks in trade-offs and is expensive to reverse (vendor choice, language/stack, paradigm, security stance, data residency, protocol, cross-cutting policy). Captures one immutable choice as a new `docs/notes/adr####.md` AKM zettel (four-digit zero-padded id) with frontmatter (aliases/status/created) and body sections (title/context/decision/consequences). This skill owns the ADR schema (frontmatter shape, body, lifecycle); shared styling (atomicity, 80-char wrap, link discipline) is enforced by `infinifu:zettel-write`; `docs/notes/akm.md` carries only the top-level AKM model overview. **No implementation surface — no api_surface, no components, no sample.** Also handles supersession by emitting a new ADR and flipping the old one's `status: Superseded` plus `## superseded_by` back-link — ADRs are append-only, never rewritten in place. Invoke this whenever someone says "write an ADR", "log a decision", "record an architectural decision", "ADR for X", "we decided to use Y instead of Z", "supersede adr0007", or otherwise wants a durable record of a design commitment. Discriminator: "could a future engineer choose this differently?" yes → ADR. Pick this over `infinifu:feature-write` (which records the capability with concrete API surface, not the decision behind it), over `infinifu:story-write` (which captures requirements, not decisions), over `infinifu:zettel-write` (which routes generic captures and delegates here for ADRs), and over `infinifu:idea-brainstorming` (which is the upstream design conversation that produces the decision this skill records).
 ---
 
 <skill_overview>
-Capture a single Architectural Decision Record as a new AKM zettel under `docs/notes/adr####.md`. ADRs document *what* the team chose, *why*, and *what it locks in* — one decision per file, immutable once accepted. Storage backend is AKM; schema lives in `docs/notes/akm.md`. Announce at start: "Using adr-write skill to record this architectural decision."
+Capture a single Architectural Decision Record as a new AKM zettel under `docs/notes/adr####.md`. ADRs document *what* the team chose, *why*, and *what it locks in* — one decision per file, immutable once accepted. This skill owns the ADR schema inline (see `<schema>` block below); shared styling (atomicity, 80-char wrap, link discipline) lives in `infinifu:zettel-write`. Announce at start: "Using adr-write skill to record this architectural decision."
 </skill_overview>
 
 <rigidity_level>
@@ -24,6 +24,61 @@ LOW FREEDOM on the structural rules (one decision per file, four-digit id, exact
 | Default status | `Accepted` (decision already taken) — `Proposed` only if user says still under review |
 | Immutability | `Accepted` ADRs are append-only; never rewrite — supersede with a new file |
 </quick_reference>
+
+<schema>
+
+**Frontmatter.**
+
+```yaml
+aliases:
+  - <decision one-liner, same as ## title>
+status: <Proposed|Accepted|Deprecated|Superseded>
+created: YYYY-MM-DD
+```
+
+**Body skeleton.**
+
+```markdown
+# ADR [[cat###]] [[product]]
+
+## title
+<decision one-liner>
+
+## context
+<forces, constraints, problem>
+
+## decision
+<what we chose>
+
+## consequences
+<positive + negative; what it locks us into>
+
+## superseded_by
+[[adr####|<replacement>]]      # only when status = Superseded
+
+---
+
+Index: [[product]]
+```
+
+**Required wikilinks.** Exactly one `[[cat###]]` category link in H1,
+`[[product]]` in H1, `Index: [[product]]` footer. ADRs are filed under
+a single primary category — pick the most accurate bucket rather than
+listing several. If superseded, link the replacing ADR via the
+`## superseded_by` body section.
+
+**Lifecycle.**
+
+- `Proposed` — under review.
+- `Accepted` — current. Mutate only `consequences` if reality drifts.
+- `Deprecated` — no longer applies, no replacement.
+- `Superseded` — replaced. Frontmatter `status` is `Superseded`; the
+  `## superseded_by` body section carries the `[[adr####]]` wikilink.
+
+ADRs are append-only in spirit: never rewrite history. Create a new ADR
+to overturn a decision.
+
+</schema>
 
 <when_to_use>
 **Use when:**
@@ -93,7 +148,7 @@ digraph adr_create {
 4. **Gather decision fields.** Title (one declarative sentence), context (forces + constraints + options surveyed), decision (active voice), consequences (positive + *honest* negative). Don't over-interview — if the design hasn't been discussed yet, redirect to `infinifu:idea-brainstorming`. If everything was provided upfront, write it; otherwise ask only for missing fields.
 5. **Pick category — exactly one.** Match against existing `cat###` aliases (case-insensitive) via `ls "$AKM_ROOT/docs/notes/"cat*.md`. If none match, ask once with the existing list or create a new `$AKM_ROOT/docs/notes/cat###.md` inline (minimal: `## name`, `## summary`, `status: stable`). If two categories tempt, pick the one where a future engineer would look first.
 6. **Generate id.** List `$AKM_ROOT/docs/notes/adr*.md`, extract numerics, take max + 1, zero-pad to 4 digits. Start at `0001` if none exist.
-7. **Write the zettel** to `$AKM_ROOT/docs/notes/adr<NNNN>.md` per the schema in `docs/notes/akm.md` § *ADR — `adr####.md`*. See `references/examples.md` for a fully worked fresh ADR and a supersession pair.
+7. **Write the zettel** to `$AKM_ROOT/docs/notes/adr<NNNN>.md` per the `<schema>` block above. See `references/examples.md` for a fully worked fresh ADR and a supersession pair.
 8. **On supersession**, patch the prior ADR at `$AKM_ROOT/docs/notes/adr<old>.md`: flip frontmatter `status: Accepted` → `Superseded` and append a `## superseded_by` body section with `[[adr<new-id>|<new-title>]]`. Do **not** edit the prior ADR's `## title` / `## context` / `## decision` / `## consequences`.
 9. **Update `$AKM_ROOT/docs/product.md`** (the hub): append `[[adr####|<title>]]` under the matching category H3 inside `## Architecture Decision Records`. Add the category subheading if it doesn't yet exist. If the hub doesn't exist, skip and tell the user.
 10. **Commit on main.** ADRs are stable, immutable artifacts — stage and commit in one shot from the AKM root:
@@ -108,7 +163,7 @@ digraph adr_create {
     ```
 11. **Confirm with the user.** Show id + absolute path under `$AKM_ROOT`, decision one-liner, category, status, supersession info (if any), whether the hub was updated, and commit sha on main. Ask once: "Anything to revise?" — but push back on edits to an `Accepted` ADR's content.
 
-For schema details (exact frontmatter shape, lifecycle status semantics, superseded_by invariants) load `docs/notes/akm.md`. For worked examples (fresh ADR markdown, supersession patch, good vs bad consequences), load `references/examples.md`.
+For schema details (exact frontmatter shape, lifecycle status semantics, superseded_by invariants) see the `<schema>` block above — this skill owns it. For worked examples (fresh ADR markdown, supersession patch, good vs bad consequences), load `references/examples.md`.
 
 </the_process>
 
@@ -163,7 +218,8 @@ Before reporting the ADR written:
 
 <references>
 
-- `docs/notes/akm.md` — canonical AKM schema. Load when needing exact frontmatter shape, the lifecycle status table, supersession invariants, or any cross-zettel rule. Don't duplicate schema in this file.
+- `docs/notes/akm.md` — top-level AKM model + lifecycle process flow. Load when needing cross-type perspective (how ADRs sit in the lifecycle relative to Stories / Features / Implementations / Categories). Schema details live in the `<schema>` block above, not here.
+- `infinifu:zettel-write` — cross-type styling rules (atomicity, 80-char wrap, link discipline, post-write audit). Load when the styling rule is unclear; this skill owns the ADR schema, that one owns shared discipline.
 - `references/examples.md` — worked examples (fresh ADR markdown, supersession workflow with both files, good vs bad consequences, hub update snippet, edge cases). Load when actually composing the markdown for a new or superseding ADR.
 - `infinifu:meta-skill-writing` — house style for this SKILL.md; load when refactoring this file.
 
