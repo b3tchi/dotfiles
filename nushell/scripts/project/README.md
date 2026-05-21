@@ -35,12 +35,17 @@ A stateless project management system that spans two layers: the **WM layer** (i
 # ~/.config/project/projects.yaml
 projects:
   dotfiles:
-    path: /home/jan/.dotfiles
+    path: /home/jan/.dotfiles       # local entry
   myapp:
-    path: /home/jan/repos/myapp
+    path: /home/jan/repos/myapp     # local entry
+  remoteapp:
+    path: /home/user/repos/remoteapp  # remote entry — path lives on the workstation
+    ssh: workstation                  # ~/.ssh/config.d/workstation Host alias
 ```
 
-No workspace assignments, no session state. Just name and path.
+No workspace assignments, no session state. Just name, path, and an optional ssh profile.
+
+The `ssh` field is optional. When absent the entry is local (today's behavior). When present the entry is remote: `project go` delegates to `tmux-to-workstation` instead of doing a local `cd`. A mixed registry of local and remote entries is valid. `ssh: null` and `ssh: ""` are normalised to absent (treated as local).
 
 ## WM Layer (i3 + sway)
 
@@ -193,14 +198,17 @@ When inside tmux, switches the client to the project's session group. When outsi
 
 | Command | Description |
 |---|---|
-| `project list` | List registered projects with active tmux session indicators |
-| `project add <name> [path]` | Register a project (defaults to current directory) |
+| `project list` | List registered projects with active tmux session indicators. Table includes `name`, `path`, `ssh` (empty for local, profile name for remote), and `active` columns. |
+| `project add <name> [path]` | Register a local project (path defaults to current directory). |
+| `project add <name> <path> --ssh <profile>` | Register a remote project. `path` is the directory on the remote host; `--ssh` is the `~/.ssh/config.d/<profile>` Host alias. `path` must be explicit — PWD default is not available for remote entries. |
 | `project remove <name>` | Unregister a project |
-| `project go <name>` | Navigate to project: cd + tmux session management |
+| `project go <name>` | Navigate to project. Local: cd + tmux session management (unchanged). Remote: delegates to `tmux-to-workstation connect -g <name> --cwd <path> -- <ssh-alias>`; no local cd. |
 
 ### Auto-cd on Startup
 
 When the `PROJECT` environment variable is set (by bashrc), nushell's `export-env` block automatically changes to the project directory. This happens transparently when opening a terminal on a project workspace.
+
+Remote entries are silently skipped during auto-cd. Initiating an ssh connection on every shell open would be surprising and breaks offline; remote navigation is opt-in via explicit `project go`.
 
 ## Use Cases
 
@@ -251,6 +259,29 @@ Or with explicit path:
 project add my-new-project ~/repos/my-new-project
 ```
 
+### 6b. Register a remote project
+
+Prerequisite: `~/.ssh/config.d/workstation` contains a `Host workstation` entry with the connection parameters (user, hostname, port).
+
+```nushell
+# Register remote project — path is on the workstation, not local
+project add myapp /home/user/repos/myapp --ssh workstation
+
+# List confirms ssh column is populated
+project list
+# name    path                      ssh           active
+# ------  ------------------------  ------------  ------
+# myapp   /home/user/repos/myapp    workstation
+
+# Navigate — opens thin local tmux window connected to remote session
+project go myapp
+# Equivalent to: tmux-to-workstation connect -g myapp --cwd /home/user/repos/myapp -- workstation
+```
+
+`project go` on a remote entry does not `cd` locally — it delegates entirely to `tmux-to-workstation`. The remote tmux session starts with its default-directory set to the registered `path`.
+
+If the connection drops, `tmux-to-workstation revive` respawns the ssh command in-place; the remote session state survives the disconnect.
+
 ### 7. Clean up
 
 ```nushell
@@ -266,4 +297,7 @@ Tmux sessions and workspaces for the removed project are not affected (they cont
 - **Normalize automatically**: Orphaned `_N` names are cleaned up on every workspace operation.
 - **Layers are independent**: The WM layer and tmux layer work together but don't depend on each other. You can use `project go` without a WM, or WM workspaces without tmux.
 - **WM agnostic**: Same scripts work on i3 and sway via `wm-ipc.nu` abstraction.
-- **No schema bloat**: `projects.yaml` only stores `name -> path`. Everything else is runtime state.
+- **Minimal schema**: `projects.yaml` stores `name -> { path, ssh? }`. Local entries carry only `path`; remote entries add `ssh` (a profile alias). No workspace assignments, no session state, no other metadata.
+- **Remote is opt-in**: Auto-cd on shell startup silently skips remote entries. Firing ssh on every shell open is surprising and breaks offline. Remote navigation requires explicit `project go`.
+- **Single remote-attach entry point**: `project go` on remote entries always delegates to `tmux-to-workstation connect`. ssh connection parameters stay in `~/.ssh/config.d/<profile>` — the registry stores only the alias.
+- **Backwards-compatible widening**: Local entries are unchanged. The `ssh` field is additive; existing `project add` / `project go` / `project list` behavior is preserved exactly.
