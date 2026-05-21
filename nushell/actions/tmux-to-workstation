@@ -55,6 +55,7 @@ def create-thin-session [cmd: string, meta: record]: nothing -> string {
 
 def --wrapped "main connect" [
     --group (-g): string  # Remote session group name (default: "local")
+    --cwd (-c): string    # Remote working directory for the new session
     ...args: string       # SSH args (e.g. -p 8022 user@host)
 ] {
     if ($args | is-empty) {
@@ -89,8 +90,19 @@ def --wrapped "main connect" [
     # Thin window name encodes connection info
     let thin_window = $"($display_host)_($remote_session)"
 
+    # Build remote tmux-start invocation:
+    #   - Without --cwd: start 0 <group>               (uid and cwd omitted)
+    #   - With    --cwd: start 0 <group> "" '<cwd>'    (uid="" so cwd lands in 5th positional)
+    # Single-quote the cwd so the remote shell preserves spaces without word-splitting.
+    # Known limitation: paths containing literal single-quotes are not supported.
+    let remote_cmd = if ($cwd | is-not-empty) {
+        $"~/.local/bin/tmux-start start 0 ($remote_session) '' '($cwd)'"
+    } else {
+        $"~/.local/bin/tmux-start start 0 ($remote_session)"
+    }
+
     # Create linked session on remote via SSH (headless, unpinned)
-    let target = (^ssh ...$args $"~/.local/bin/tmux-start start 0 ($remote_session)" 2>/dev/null | str trim)
+    let target = (^ssh ...$args $remote_cmd 2>/dev/null | str trim)
     if ($target | is-empty) {
         print $"Error: tmux-start failed on ($display_host)"
         return
