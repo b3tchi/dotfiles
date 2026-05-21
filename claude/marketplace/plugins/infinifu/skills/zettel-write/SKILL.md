@@ -22,6 +22,7 @@ Type detection (which AKM writer to call) is flexible — guess from context, co
 |-------|-------|------|
 | Single idea | yes | One claim per card. Compound topics split before writing. |
 | Body length | yes | ≤ 300 words / ~30 lines body (excluding frontmatter + footer). Typed AKM schemas with many sections get soft warning instead. |
+| Line wrap | yes | Prose lines ≤ 80 chars. Exempt: code blocks, tables, link/URL lines that would break if wrapped. |
 | Outbound wikilinks | yes | ≥ 1 link beyond `[[product]]` and `Index:`. Use `[[id]]` or `[[slug]]` to existing notes; surface dangling links via moxide LSP. |
 | AKM invariants | yes | `[[product]]` in H1 + `Index: [[product]]` footer on every typed zettel. Filename = stable id. |
 | Type routing | soft | Match request → AKM type → typed writer; else generic named-slug card. |
@@ -195,6 +196,7 @@ Re-read the file you just wrote and check:
 |-------|----------------|---------|
 | Single idea | One claim restatable in one sentence | Reject — go back to atomicity gate with split plan |
 | Body length | ≤ 300 words / ~30 lines (typed AKM zettel: schema sections fit naturally — no padding) | Trim or split |
+| Line wrap | Prose lines ≤ 80 chars (code blocks, tables, unbreakable URLs exempt) | Re-flow paragraph, do not silently leave long lines |
 | Outbound wikilinks | ≥ 1 link beyond `[[product]]` and `Index:` line | Add a `## see also` link or reject as orphan |
 | AKM invariants | `[[product]]` in H1, `Index: [[product]]` footer, valid filename | Fix and re-emit |
 | Schema (typed only) | Matches `akm.md` for the type | Re-emit; do not "almost" the schema |
@@ -265,8 +267,9 @@ Route: invoke `infinifu:story-write` and stop. The atomicity gate already passed
 <critical_rules>
 
 - **One idea per card.** A card making two claims is two cards waiting to be split. The atomicity gate runs before any write — never after.
+- **Wrap prose at 80 chars.** Long unbroken lines wreck diffs, terminal rendering, and vim navigation; the 80-char cap forces tight phrasing and keeps review noise low. Code blocks, tables, and unbreakable URLs are the only exceptions — wrap everything else by hand at sentence/clause boundaries, not mid-word.
 - **Every card links.** A card with no outbound wikilink beyond `[[product]]` is an orphan and gets rejected. The graph is the value; the prose is the body.
-- **Don't duplicate the AKM schema.** Typed writers own their schemas; this skill routes to them. `docs/notes/akm.md` is the canonical reference for every typed body shape.
+- **Typed writers own per-type schema; this skill owns shared discipline.** When routing matches an AKM type, delegate to the typed writer (`story-write`, `feature-write`, `adr-write`, `implementation-write`, `persona-write`, `category-write`) — it carries the frontmatter shape, body sections, and lifecycle for its type. The cross-type invariants below apply on top of any type-specific schema.
 - **Slugs are wikilink-shaped.** Read `[[bus-factor]]` aloud — it should sound like the concept. Avoid dates, owners, or context in the slug; those go in the aliases or body.
 - **No status on generic cards.** Lifecycle states (`draft|ready|done|…`) belong to typed AKM zettels with workflows. Generic concept notes either exist or don't.
 - **Reject visibly.** When a post-write check fails, quote the violation and rewrite — don't silently patch. The user learns the discipline from seeing the rejections.
@@ -274,12 +277,50 @@ Route: invoke `infinifu:story-write` and stop. The atomicity gate already passed
 
 </critical_rules>
 
+<schema_invariants>
+
+Cross-type invariants every typed writer (`story-write`, `feature-write`,
+`adr-write`, `implementation-write`, `persona-write`, `category-write`)
+enforces on write. Per-type schemas (frontmatter shape, body sections,
+lifecycle states) are owned by the respective writer; these rules apply
+across all of them.
+
+1. **Filename = stable id.** `us###`, `ft###`, `im###`, `pn###`, `cat###`
+   for three-digit types; `adr####` for the four-digit ADR space.
+   Aliases carry the human label; the slug never changes.
+2. **`[[product]]` in H1.** Every typed zettel carries `[[product]]` in
+   the H1 (Board-citizen Specs carry `[[board]]` instead while active).
+   Other taxonomy wikilinks (e.g. `[[cat###]]`) precede `[[product]]`.
+3. **`Index: [[product]]` footer.** Every typed zettel ends with a `---`
+   rule followed by `Index: [[product]]` on its own line.
+4. **`[[id|label]]` form.** Use the pipe form when the rendered label
+   differs from the filename slug (`[[us014|bulk import requests]]`).
+   Bare `[[id]]` only when the slug already reads well.
+5. **ISO dates.** `created:`, deadlines, retire dates all use
+   `YYYY-MM-DD`. No locale formats, no relative dates.
+6. **Status + created in YAML; supersession in body.** `status` and
+   `created` live in frontmatter (machine-queryable). `superseded_by`
+   stays in the body as a `## superseded_by` section carrying a `[[…]]`
+   wikilink — YAML doesn't parse wikilinks, so the forward pointer is
+   body-side.
+7. **Never delete `done` / `Accepted` zettels.** Supersede in place by
+   writing a new zettel and flipping the old one's status; the chain is
+   part of the graph.
+8. **moxide LSP is the link source of truth.**
+   `unresolved_diagnostics = true` surfaces dangling wikilinks at edit
+   time; treat its diagnostics as the canonical view of graph health.
+9. **80-char prose wrap.** See the wrap rule above in `<critical_rules>`
+   for the full why and exemptions.
+
+</schema_invariants>
+
 <verification_checklist>
 
 Before reporting the capture complete:
 
 - [ ] One-sentence restatement of the card's claim fits, no "and" / "also"
 - [ ] Body ≤ 300 words / ~30 lines (typed schema sections fit naturally without padding)
+- [ ] Prose lines wrapped at ≤ 80 chars (code blocks, tables, unbreakable URLs exempt)
 - [ ] ≥ 1 outbound wikilink beyond `[[product]]` and `Index:` footer
 - [ ] `[[product]]` present in H1, `Index: [[product]]` footer present
 - [ ] Filename is stable (`us###` / `im###` / … for typed; `<kebab-slug>` for generic) — not date-stamped, not owner-stamped

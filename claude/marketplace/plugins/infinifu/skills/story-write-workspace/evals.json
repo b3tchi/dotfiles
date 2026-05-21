@@ -53,6 +53,52 @@
       ]
     },
     {
+      "id": 4,
+      "eval_name": "tech-laden-context-derives-problem-side-AC",
+      "prompt": "Add a story. Context: we're on Next.js 14 / Postgres 16 / Drizzle ORM. The requestor wants to export their request history as a CSV — they keep getting asked for expense reports by accounting and screenshotting the dashboard is tedious. The CSV should have one row per request and include the date, status, and total line-item count. Probably a GET /api/requests/export endpoint, served from the same auth-protected route as the dashboard. Use pn001.",
+      "assertions": [
+        {"text": "A new file us###.md was created in the seeded sandbox under docs/notes/"},
+        {"text": "## role section references [[pn001|requestor]]"},
+        {"text": "## want section describes the outcome (export request history / get a CSV / etc.) and does NOT mention Next.js, Drizzle, Postgres, /api/, or 'endpoint'"},
+        {"text": "## because section captures the motivation (expense reports / accounting asks / screenshotting is tedious)"},
+        {"text": "## acceptance_criteria has at least 2 bullets"},
+        {"text": "No AC bullet mentions: 'Next.js', 'Drizzle', 'Postgres', '/api/', 'GET ', 'POST ', 'endpoint', 'route', '.tsx', '.ts', 'middleware', 'foreign key', 'table', 'column', 'index' — i.e. AC stays in problem-space, not solution-space"},
+        {"text": "No AC bullet starts with imperative-on-developer verbs ('Add ', 'Create ', 'Implement ', 'Build ', 'Use ', 'Wire ')"},
+        {"text": "AC bullets describe observable behavior (the requestor can do X, the CSV contains Y, the export fails when Z) — subject is the user or the system as observed by the user, not the developer"},
+        {"text": "Confirmation flags that AC were derived (user didn't supply them) — does NOT silently invent without disclosure"},
+        {"text": "Footer contains 'Index: [[product]]'"}
+      ]
+    },
+    {
+      "id": 5,
+      "eval_name": "user-supplied-solution-shaped-AC",
+      "prompt": "Add a user story: as a requestor I want to attach a PDF receipt to a request so the approver has documentation. Acceptance criteria: 1) Add a 'Attach receipt' button to the request form; 2) POST /api/requests/{id}/attachments accepts multipart/form-data and returns 201; 3) Store the file in S3 under requests/{id}/{uuid}.pdf; 4) Add an attachments column to the requests table linking to attachment ids. Use pn001.",
+      "assertions": [
+        {"text": "A new file us###.md was created"},
+        {"text": "## role section references [[pn001|requestor]]"},
+        {"text": "## want describes attaching a receipt (preserves the user's outcome-shaped want)"},
+        {"text": "## because mentions documentation / the approver having context"},
+        {"text": "## acceptance_criteria contains the user's wording — user-supplied bullets are NOT silently rewritten into problem-space"},
+        {"text": "The skill's response (response.md or equivalent) explicitly flags that the AC are solution-shaped — calls out at least one of the user's bullets as reading like a solution / implementation detail and offers to rephrase, instead of just writing the file and moving on"},
+        {"text": "The flag text mentions at least one of these phrases: 'solution', 'implementation', 'rephrase', 'spec-writing decides HOW', 'observable behavior' — i.e. the user is told this is a problem-vs-solution issue, not just a 'looks weird' complaint"},
+        {"text": "If the skill offered to rephrase, the original user wording is preserved in the on-disk file (the user must consent before the file is rewritten)"},
+        {"text": "Footer contains 'Index: [[product]]'"}
+      ]
+    },
+    {
+      "id": 6,
+      "eval_name": "solution-shaped-want-pushback",
+      "prompt": "Capture this as a story: as a requestor I want a 'Cancel' button on the request detail view, because I sometimes need to cancel after submitting. Use pn001.",
+      "assertions": [
+        {"text": "A new file us###.md was created"},
+        {"text": "## role references [[pn001|requestor]]"},
+        {"text": "## want is preserved verbatim OR the user was offered an alternative phrasing (e.g. 'cancel a submitted request before approval') and they chose"},
+        {"text": "The skill's response (response.md or equivalent) flags the want as solution-shaped ('the want describes a UI element, not an outcome') AND suggests an outcome-shaped alternative — does NOT silently rewrite, does NOT just accept without comment"},
+        {"text": "The flagged phrasing distinguishes between 'what the user wants to achieve' (outcome) and 'how the UI shows it' (Cancel button) — i.e. shows the model understands the distinction, not just keyword-matched on 'button'"},
+        {"text": "Footer contains 'Index: [[product]]'"}
+      ]
+    },
+    {
       "id": 3,
       "eval_name": "worktree-writes-to-main",
       "prompt": "Add a user story: as a requestor I want to clone a previous request as a starting point for a new one, because most of my orders look almost identical to past ones. Acceptance criteria: clone button visible on closed requests; clone copies line items but leaves notes blank; cloned request starts in Draft status.",

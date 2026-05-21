@@ -1,0 +1,16 @@
+{
+  "run_id": "eval-4-tech-laden-context-old_skill",
+  "expectations": [
+    {"text": "A new file us###.md was created", "passed": true, "evidence": "us015.md"},
+    {"text": "## role references [[pn001|requestor]]", "passed": true, "evidence": "ok"},
+    {"text": "## want does NOT mention Next.js/Drizzle/Postgres/api/endpoint", "passed": true, "evidence": "want clause clean"},
+    {"text": "## because captures motivation", "passed": true, "evidence": "ok"},
+    {"text": "## AC has at least 2 bullets", "passed": true, "evidence": "4 bullets"},
+    {"text": "No AC mentions Next.js/Drizzle/Postgres/api//GET/POST/endpoint/route/.tsx/.ts/middleware/foreign key/table/column/index", "passed": false, "evidence": "AC #1 contains 'GET /api/requests/export'; AC #2 contains 'endpoint' and 'auth-protected route'"},
+    {"text": "No AC starts with developer-imperative verbs", "passed": true, "evidence": "ok"},
+    {"text": "AC describe observable behavior — not developer", "passed": false, "evidence": "AC #1 prescribes HTTP verb + path; AC #2 prescribes route-level auth coupling — these are implementation contracts, not user-observable outcomes"},
+    {"text": "Confirmation flags derived AC", "passed": true, "evidence": "response.md noted derivation"},
+    {"text": "Footer Index: [[product]]", "passed": true, "evidence": "ok"}
+  ],
+  "summary": {"pass_rate": 0.8, "passed": 8, "failed": 2, "total": 10}
+}

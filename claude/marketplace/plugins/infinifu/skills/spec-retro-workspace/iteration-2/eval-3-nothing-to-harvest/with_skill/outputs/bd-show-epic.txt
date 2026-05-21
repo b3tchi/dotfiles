@@ -1,0 +1,17 @@
+✓ wd3-1261126-fse [EPIC] · Epic: rotate service credentials without downtime [sp001]   [● P2 · CLOSED]
+Owner: eval · Type: epic
+Created: 2026-05-19 · Updated: 2026-05-19
+Close reason: Retro: rotate_secret + per-name lock + alias bookkeeping shipped via vault.py. Im002 left as-is (matches shipped reality). No new ADRs (decisions held). No ft002 surface changes (vault-secrets unchanged). No follow-up us drafts (no discoveries). Product hub updated with >> [[im002]] link on us003.
+
+DESCRIPTION
+  (none)
+
+DESIGN
+Spec: docs/notes/spec/sp001.md
+
+CHILDREN
+  ↳ ✓ wd3-1261126-fse.1: Task 1: Add rotate_secret helper to vault.py ● P2
+  ↳ ✓ wd3-1261126-fse.2: Task 2: Add vault_rotate orchestration module ● P2
+  ↳ ✓ wd3-1261126-fse.3: Task 3: Synthetic-check hook for rotation window ● P2
+  ✓ 3/3 complete (100%) — eligible for close
+

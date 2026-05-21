@@ -1,0 +1,15 @@
+{
+  "run_id": "eval-cross-im-feature-extraction-with_skill",
+  "expectations": [
+    {"text": "Skill lists $AKM_ROOT/docs/notes/im*.md to cross-scan", "passed": true, "evidence": "response.md step 7b shows explicit `ls $AKM_ROOT/docs/notes/im*.md` invocation"},
+    {"text": "Skill reads im001.md and im002.md (in addition to im003)", "passed": true, "evidence": "response includes per-im### table walking components + approach for all three"},
+    {"text": "Skill identifies src/lib/retry.go as candidate symbol", "passed": true, "evidence": "step 7a names lib.RetryWithJitter / src/lib/retry.go"},
+    {"text": "Produces Candidate Features block", "passed": true, "evidence": "verbatim block in response"},
+    {"text": "Candidate names im001 AND im002 as consumers", "passed": true, "evidence": "table cites im001 (SSO) + im002 (Prom scrape) + im003 with file paths"},
+    {"text": "Candidate is recommendation only — no ft002.md created, no im001/im002 rewritten, user decides", "passed": true, "evidence": "tree.txt shows no new ft###; im-mtimes confirms only im003 mutated post-seed; response defers to human"},
+    {"text": "Correlation strength assessed explicitly — same shape not just same file", "passed": true, "evidence": "step 7c quotes 'Strong correlation' + 'same symbol via same file with same call shape, no per-consumer wrapping'"},
+    {"text": "Retro commits 'feat(akm): retro sp003'", "passed": true, "evidence": "git-log.txt: 3eb640f feat(akm): retro sp003"},
+    {"text": "im003 mutated, im001/im002 untouched", "passed": true, "evidence": "im-mtimes.txt confirms"}
+  ],
+  "summary": {"pass_rate": 1.0, "passed": 9, "failed": 0, "total": 9}
+}

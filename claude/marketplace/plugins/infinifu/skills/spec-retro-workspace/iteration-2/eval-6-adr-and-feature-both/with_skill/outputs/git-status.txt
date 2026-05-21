@@ -1,0 +1,6 @@
+ M docs/notes/im002.md
+ M docs/product.md
+?? .seed_manifest.txt
+?? docs/notes/adr0004.md
+?? docs/notes/ft003.md
+?? run_notes.md

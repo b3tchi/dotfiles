@@ -1153,6 +1153,122 @@ EOF
     bd update "$T1_ID" --notes "AUDITED: APPROVED. rotate_secret meets all criteria. No deviations." >/dev/null 2>&1 || true
     bd update "$T3_ID" --notes "AUDITED: APPROVED. Synthetic check hook meets all criteria. No deviations." >/dev/null 2>&1 || true
     ;;
+  4)
+    # eval-4 feature-extraction-candidate: a concrete second consumer (named
+    # draft us006) would obviously reuse the per-name versioned-alias rotation
+    # primitive that landed in im002. The skill MUST surface this as a
+    # Candidate Features block — but NOT mint ft### silently. Default bias is
+    # to leave glue in im### until the human approves extraction.
+    cat > docs/notes/us006.md <<'EOF'
+---
+aliases:
+  - rotate OAuth client api-keys
+status: draft
+created: 2026-05-15
+---
+# Story [[platform-flow]] [[product]]
+
+## role
+[[pn002|platform-engineer]]
+
+## want
+rotate OAuth client api-keys without downtime, same overlap semantics as service credentials
+
+## because
+external OAuth clients hold long-lived api-keys; quarterly rotation needs the same 5-minute overlap pattern us003 shipped
+
+## acceptance_criteria
+- Rotation script can swap api-keys while OAuth flows run
+- Old key stays valid for 5 minutes after rotation
+- No 401s during rotation window for active OAuth sessions
+
+---
+
+Index: [[product]]
+EOF
+    # Add us006 to product.md so it's discoverable from the hub
+    python3 - <<'PY'
+from pathlib import Path
+p = Path('docs/product.md')
+body = p.read_text()
+body = body.replace(
+    "- [[us003|rotate service credentials without downtime]]",
+    "- [[us003|rotate service credentials without downtime]]\n- [[us006|rotate OAuth client api-keys]]"
+)
+p.write_text(body)
+PY
+    # Update Task 1 notes to make the reuse signal concrete (per the
+    # 'two real consumers OR one real + one named draft' rule).
+    bd update "$T1_ID" --notes "AUDITED: APPROVED. rotate_secret meets all criteria.
+
+DISCOVERED during implementation: the per-name versioned-alias rotation
+primitive in vault.py (rotate_secret + the _ALIASES + per-name lock pattern)
+is more general than this story. The newly-drafted [[us006|rotate OAuth
+client api-keys]] will need the *same* primitive — same overlap semantics,
+same lock granularity, same versioned-alias bookkeeping. Worth surfacing
+as a Feature-extraction candidate for the retro." >/dev/null 2>&1 || true
+    ;;
+  5)
+    # eval-5 speculative-reuse-rejected: the implementer wrote a helper that
+    # 'feels reusable' but there is NO named second consumer. Skill MUST
+    # apply the vertical-over-horizontal default — leave the glue in im###,
+    # do NOT flag a candidate, do NOT mint ft###.
+    bd update "$T1_ID" --notes "AUDITED: APPROVED. rotate_secret meets all criteria.
+
+NOTE: rotate_secret is reasonably general — the per-name lock pattern feels
+like something other code might want eventually. No concrete second consumer
+yet, just a hunch. Not blocking anything." >/dev/null 2>&1 || true
+    # Wipe Task 3 discovery so the only signal is the speculative one.
+    bd update "$T3_ID" --notes "AUDITED: APPROVED. Synthetic check hook meets all criteria. No deviations." >/dev/null 2>&1 || true
+    ;;
+  6)
+    # eval-6 adr-and-feature-both: a finding has BOTH a strategic decision
+    # AND a concrete reusable surface. During execution the team decided to
+    # back rotation on Vault's Transit secrets engine (vendor/paradigm pick)
+    # and shipped src/lib/vault_transit.py as a thin wrapper that other
+    # services could call. Skill must emit ONE new adr#### (the decision)
+    # AND update or mint a ft### (the surface).
+    cat > src/lib/vault_transit.py <<'EOF'
+"""Thin wrapper around HashiCorp Vault Transit secrets engine.
+
+ft002 (vault-secrets) was KV-only. We added Transit during the rotation
+work because rotate_secret needed deterministic versioned aliases that
+Transit gives us out of the box. Other services that need encrypted
+rotation primitives can now call this without rebuilding the wrapper.
+"""
+from __future__ import annotations
+
+
+def encrypt(plaintext: str, *, key_name: str) -> str:
+    """Encrypt plaintext under the named Transit key. Returns ciphertext."""
+    return f"<transit:{key_name}:{plaintext}>"
+
+
+def decrypt(ciphertext: str, *, key_name: str) -> str:
+    """Decrypt a Transit-wrapped ciphertext under the named key."""
+    return ciphertext.removeprefix(f"<transit:{key_name}:").removesuffix(">")
+
+
+def rotate_key(key_name: str) -> int:
+    """Rotate the named Transit key. Returns the new version number."""
+    return 2
+EOF
+    bd update "$T1_ID" --notes "AUDITED: APPROVED. rotate_secret meets all criteria.
+
+DECISION SHIFT during implementation: we adopted HashiCorp Vault's Transit
+secrets engine over the original KV-only plan for the versioned-alias
+backing. Trade-off: Transit gives us deterministic versions + key rotation
+out of the box but ties us to HashiCorp Vault specifically (KV would have
+let us swap to other backends). Cross-cutting — affects how every future
+encrypted-rotation feature is built.
+
+CAPABILITY: src/lib/vault_transit.py landed as a thin wrapper around the
+Transit engine (encrypt / decrypt / rotate_key). Concrete API surface,
+zero domain logic, designed for reuse — the metrics service alerting and
+the reports service signed-URL flow are obvious next consumers." >/dev/null 2>&1 || true
+    git add -A
+    git commit -q -m "ship sp001 [decision shift]: add Vault Transit wrapper" 2>/dev/null || true
+    ;;
 esac
 
 # ----- Commit baseline + manifest -----------------------------------------

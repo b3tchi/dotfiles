@@ -1,6 +1,6 @@
 ---
 name: story-write
-description: Use when the user wants to create, add, or write a user story — captures a product requirement or backlog item in "as a... I want... because..." form and emits a new `docs/notes/us###.md` AKM zettel with frontmatter (aliases/status/created) and body sections (role/want/because/acceptance_criteria) per the schema in `docs/notes/akm.md`. Also handles edits via re-emit with the same id (story content lives in the same file; refining a story is rewriting it). Invoke this whenever someone asks to "create a story", "add a story", "write a story", "new story", "make a backlog item", "log a requirement", "capture this as a user story", "revise story us013", or phrases a feature request from a user/persona perspective even if they don't say the word "story".
+description: Use when the user wants to create, add, or write a user story — captures a product requirement or backlog item in "as a... I want... because..." form and emits a new `docs/notes/us###.md` AKM zettel with frontmatter (aliases/status/created) and body sections (role/want/because/acceptance_criteria). This skill owns the Story schema (frontmatter shape, body, lifecycle); shared styling (atomicity, 80-char wrap, link discipline) is enforced by `infinifu:zettel-write`; `docs/notes/akm.md` carries only the top-level AKM model overview and lifecycle process flow. Also handles edits via re-emit with the same id (story content lives in the same file; refining a story is rewriting it). Invoke this whenever someone asks to "create a story", "add a story", "write a story", "new story", "make a backlog item", "log a requirement", "capture this as a user story", "revise story us013", or phrases a feature request from a user/persona perspective even if they don't say the word "story".
 ---
 
 # Story Write
@@ -9,7 +9,7 @@ description: Use when the user wants to create, add, or write a user story — c
 
 Capture a single user story in Connextra format and write it as a new AKM zettel under `docs/notes/us###.md`. Stories are the product-level requirements that feed downstream Implementation zettels (`im###.md`) and bd epics. They describe **who** wants **what** and **why**, not how to build it.
 
-**Storage backend:** AKM (Agentic Knowledge Model). The schema is documented in `docs/notes/akm.md`; this skill writes one file per story under `docs/notes/`.
+**Storage backend:** AKM (Agentic Knowledge Model). This skill owns the Story schema (defined inline below under "Zettel Schema"). Top-level AKM model + lifecycle process flow live in `docs/notes/akm.md`; cross-type styling rules (atomicity, 80-char wrap, link discipline, post-write audit) live in `infinifu:zettel-write` and apply here.
 
 **Announce at start:** "Using story-write skill to capture this as a user story."
 
@@ -125,7 +125,7 @@ Index: [[product]]
 - `## role`, `## want`, `## because`, `## acceptance_criteria` sections.
 - `Index: [[product]]` footer.
 
-**Lifecycle status values** (from `akm.md`):
+**Lifecycle status values:**
 
 | Status | Meaning |
 |--------|---------|
@@ -188,19 +188,53 @@ The wikilink form is `[[pn001|requestor]]` — `pn001` is the file slug, `reques
 
 ## Acceptance Criteria
 
-Each criterion must be objectively testable. A criterion is good if a tester can read it and know whether it passes or fails.
+Each criterion must be (a) objectively testable AND (b) phrased in **problem-space, not solution-space**. Testable means a tester can read it and know whether it passes or fails. Problem-space means it describes *what the user or system does* (observable behavior), not *how the developer builds it*.
 
-**Good:**
+**Good (testable + problem-side):**
 - "browse catalog of available samples"
 - "rejected request can be reopened from the rejected view"
 - "preview parsed rows before commit and reject bad rows with row-level error messages"
 
-**Bad:**
-- "Works well" — not testable
+**Bad — not testable:**
+- "Works well" — subjective
 - "Users like the feature" — subjective
 - "Handles edge cases" — vague
 
+**Bad — solution-side leakage** (testable, but prescribes the implementation):
+- "Add a `Clone` button to the request detail view" — imperative on the developer
+- "POST `/api/requests/{id}/clone` returns `201` with the new id" — pre-commits a REST contract
+- "Use the React `useFormState` hook in `CloneRequestForm.tsx`" — names files, frameworks
+- "Add `cloned_from_id` foreign key to `requests` table" — pre-commits the schema
+- "Implement validation in middleware" — reads like a dev task, not a behavior
+
 If the user gives only one vague criterion, push back once: "Can you add 1-2 more criteria covering [edge case / failure mode / boundary]?" Don't fabricate criteria they didn't ask for.
+
+### Problem-side, not solution-side
+
+The story is a *problem statement*. The AC sharpen the problem; they do not commit to a solution. Pre-committed solutions in AC are the most common rot pattern in user stories — they accidentally lock the design before `spec-writing` has a chance to weigh alternatives (queue vs API vs UI-only duplicate vs background job, etc.). Keep AC in problem-space and the spec phase preserves design optionality.
+
+**Signals that a criterion has drifted into solution-mode** — and how to reframe each:
+
+| Signal | Example (solution-side) | Reframe (problem-side) |
+|---|---|---|
+| Imperative verb on the developer (`add`, `create`, `implement`, `build`, `use`) | "Add a `Clone` button to the request detail view" | "User can duplicate a closed request from its detail view" |
+| Names an API endpoint, route, HTTP verb, or status code | "`POST /api/clone` returns `201` with the new id" | "Cloning produces a new draft request linked to the original" |
+| Names a framework, library, file path, or component | "Use the React `useFormState` hook in `CloneRequestForm.tsx`" | "Cloning preserves all line items but clears the notes field" |
+| Names a database table, column, index, or schema | "Add `cloned_from_id` foreign key to `requests` table" | "Each cloned request remembers which request it came from" |
+| Reads like a ticket on a dev's task list | "Implement validation in middleware" | "Submitting a cloned request fails fast if any line item is unavailable" |
+
+The subject of a problem-side AC is almost always the **user / persona / system observable to the user** — not the developer or the codebase.
+
+**When the user supplies solution-shaped AC** (e.g. they pasted in implementation notes): do **not** silently rewrite — they wrote what they wrote, and they may be constrained by an external contract you can't see. Instead:
+
+1. Write the story with their wording intact.
+2. In the confirmation step, flag each solution-leaking bullet with a one-line note:
+   > *"AC #N reads as a solution (`add X button`). Spec-writing decides HOW; want me to rephrase as observable behavior, or keep as-is?"*
+3. If they say "rephrase", reword inline and re-show. If they say "keep", leave it. Always ask before changing user-supplied wording.
+
+**When you derive AC** (user gave none, see the "Zero Acceptance Criteria" subsection below): stay strictly problem-side from the start. Don't invent imperative dev tasks. Use the role + want + because to extract observable behaviors only — entry point, success path, edge case, failure mode.
+
+**When the user's `want` itself is solution-shaped** (e.g. "I want a Clone button on the detail view"): that's a different problem — the *want* should describe an outcome, not a UI element. Push back once: *"That phrasing is the solution. What's the underlying need? Try: 'I want to duplicate a previous request so I don't have to retype identical orders.'"* If they decline, accept their wording — the rule about preserving user phrasing wins.
 
 ### When the User Gives Zero Acceptance Criteria
 

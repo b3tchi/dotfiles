@@ -37,20 +37,59 @@ export-env {
 		if ($path | path exists) {
 			let projects = (open $path | get -o projects | default {})
 			if ($project_name in ($projects | columns)) {
-				let project_path = ($projects | get $project_name | get path)
-				if ($project_path | path exists) {
-					cd $project_path
+				let entry = ($projects | get $project_name)
+				# Remote entries (ssh field present) must not auto-cd locally.
+				# Remote is opt-in via explicit 'project go'; skip silently here.
+				let is_remote = ('ssh' in $entry) and ($entry | get ssh | describe) == 'string' and not ($entry | get ssh | is-empty)
+				if not $is_remote {
+					let project_path = ($entry | get path)
+					if ($project_path | path exists) {
+						cd $project_path
+					}
 				}
 			}
 		}
 	}
 }
 
+# validate and normalise a single project entry read from yaml
+# - ssh absent or null or "" → treated as local (ssh key removed)
+# - ssh non-empty string → valid remote profile, kept as-is
+# - ssh any other type (int, list, record…) → error loud at parse time
+def parse_project_entry [name: string, entry: record] {
+	if 'ssh' not-in $entry {
+		return $entry
+	}
+	let ssh_val = $entry | get ssh
+	let ssh_type = $ssh_val | describe
+	if $ssh_type == 'nothing' {
+		# ssh: null → treat as absent (local entry)
+		return ($entry | reject ssh)
+	}
+	if $ssh_type == 'string' {
+		if ($ssh_val | is-empty) {
+			# ssh: "" → treat as absent (local entry)
+			return ($entry | reject ssh)
+		}
+		# valid non-empty ssh profile name
+		return $entry
+	}
+	# malformed: non-string, non-null value → fail loud
+	error make { msg: $"project '($name)': ssh field must be a string, got: ($ssh_type)" }
+}
+
 # read projects registry, return empty record if file missing
+# each entry is validated: ssh field must be a string when present;
+# null / empty-string ssh is normalised away (treated as local).
 def data [] {
 	let path = ($config_path | path expand)
 	if ($path | path exists) {
-		open $path | get -o projects | default {}
+		let raw = open $path | get -o projects | default {}
+		$raw | columns | reduce --fold {} { |name, acc|
+			let entry = ($raw | get $name)
+			let parsed = (parse_project_entry $name $entry)
+			$acc | insert $name $parsed
+		}
 	} else {
 		{}
 	}
@@ -91,9 +130,11 @@ export def 'list' [] {
 	$projects | columns | each { |name|
 		let p = ($projects | get $name)
 		let active = if ($name in $active_groups) { "*" } else { "" }
+		let ssh = ($p | get -o ssh | default "")
 		{
 			name: $name
 			path: $p.path
+			ssh: $ssh
 			active: $active
 		}
 	}
@@ -102,8 +143,21 @@ export def 'list' [] {
 # register a project
 export def 'add' [
 	name: string          # project name (used as tmux session group name)
-	path?: string         # project path (default: current directory)
+	path?: string         # project path (default: current directory; ignored when --ssh set — path is required for remote)
+	--ssh: string         # ssh profile name; when set, registers a remote entry (path is required)
 ] {
+	# Validate --ssh constraints before touching anything.
+	# $ssh is `nothing` when flag is absent; a string (possibly "") when provided.
+	let ssh_provided = ($ssh | describe) != "nothing"
+	if $ssh_provided {
+		if ($ssh | str trim | is-empty) {
+			error make { msg: "ssh profile name cannot be empty" }
+		}
+		if ($path | is-empty) {
+			error make { msg: "path required when --ssh set" }
+		}
+	}
+
 	let project_path = if ($path | is-empty) { $env.PWD } else { $path | path expand }
 
 	if not ($project_path | path exists) {
@@ -118,10 +172,20 @@ export def 'add' [
 		return
 	}
 
-	$projects = ($projects | insert $name { path: $project_path })
+	let entry = if $ssh_provided {
+		{ path: $project_path, ssh: $ssh }
+	} else {
+		{ path: $project_path }
+	}
+
+	$projects = ($projects | insert $name $entry)
 	save_data $projects
 
-	print $"Project '($name)' registered at ($project_path)"
+	if $ssh_provided {
+		print $"Project '($name)' registered at ($project_path) [ssh: ($ssh)]"
+	} else {
+		print $"Project '($name)' registered at ($project_path)"
+	}
 }
 
 # unregister a project
@@ -155,6 +219,8 @@ export def 'config' [] {
 }
 
 # navigate to project and create/attach tmux session
+# Local project (no ssh): cd to path, create/attach local tmux session group.
+# Remote project (ssh set): delegate entirely to tmux-to-workstation connect; no local cd.
 export def --env 'go' [
 	name: string@project_names # project to navigate to
 ] {
@@ -165,14 +231,31 @@ export def --env 'go' [
 		return
 	}
 
-	let project_path = ($projects | get $name | get path)
+	let entry = ($projects | get $name)
 
+	# Guard: path field is mandatory regardless of local/remote
+	if 'path' not-in $entry {
+		error make { msg: $"invalid project entry: ($name)" }
+	}
+
+	let project_path = ($entry | get path)
+	let ssh_profile  = ($entry | get -o ssh | default null)
+
+	# --- Remote dispatch (ssh field present) ---
+	if $ssh_profile != null {
+		# Delegate entirely: tmux-to-workstation owns the thin-session lifecycle.
+		# Do NOT cd locally — the path lives on the remote host.
+		tmux-to-workstation connect -g $name --cwd $project_path -- $ssh_profile
+		return
+	}
+
+	# --- Local dispatch (no ssh field) ---
 	if not ($project_path | path exists) {
 		print $"Project path does not exist: ($project_path)"
 		return
 	}
 
-	# cd to project directory
+	# cd to project directory (local only)
 	cd $project_path
 
 	# check if we are inside tmux

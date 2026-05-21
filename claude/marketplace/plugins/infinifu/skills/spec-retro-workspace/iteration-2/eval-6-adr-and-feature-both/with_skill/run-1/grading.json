@@ -1,0 +1,48 @@
+{
+  "eval_id": 6,
+  "eval_name": "adr-and-feature-both",
+  "config": "with_skill",
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 7,
+    "failed": 0,
+    "total": 7
+  },
+  "expectations": [
+    {
+      "text": "Agent ran git log / git diff",
+      "passed": true,
+      "evidence": "git evidence"
+    },
+    {
+      "text": "Agent minted a new adr#### for the vendor/paradigm decision",
+      "passed": true,
+      "evidence": "new_adr=['docs/notes/adr0004.md']"
+    },
+    {
+      "text": "New ADR captures the Vault Transit decision",
+      "passed": true,
+      "evidence": "transit-decision phrase"
+    },
+    {
+      "text": "Agent widened existing ft### OR minted new ft### for the wrapper surface",
+      "passed": true,
+      "evidence": "ft002_modified=False new_ft=['docs/notes/ft003.md']"
+    },
+    {
+      "text": "Feature update captures the vault_transit wrapper surface",
+      "passed": true,
+      "evidence": "transit-wrapper phrase"
+    },
+    {
+      "text": "im002 body rewritten to reference shipped reality",
+      "passed": true,
+      "evidence": "im002_modified=True"
+    },
+    {
+      "text": "Agent closed the bd epic",
+      "passed": true,
+      "evidence": "epic_status=closed"
+    }
+  ]
+}

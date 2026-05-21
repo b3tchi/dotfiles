@@ -8,6 +8,26 @@ vim.api.nvim_create_autocmd("FileType", {
 	end,
 })
 
+-- Gray any tag (`<...>` / `</...>`) at the beginning of a line in markdown,
+-- regardless of whether treesitter html injection caught it. matchadd is
+-- window-local and draws on top of treesitter extmarks. FileType + BufWinEnter
+-- + WinEnter together cover: opening a buffer, splitting, switching windows.
+local md_match_group = vim.api.nvim_create_augroup("MdTagFallback", { clear = true })
+vim.api.nvim_create_autocmd({ "FileType", "BufWinEnter", "WinEnter" }, {
+	group = md_match_group,
+	callback = function()
+		if vim.bo.filetype ~= "markdown" then
+			return
+		end
+		for _, m in ipairs(vim.fn.getmatches()) do
+			if m.group == "MdTagFallback" then
+				return
+			end
+		end
+		pcall(vim.fn.matchadd, "MdTagFallback", [[^\s*\zs</\?[A-Za-z][A-Za-z0-9_:.\-]*\%(\s[^>]*\)\?/\?>]])
+	end,
+})
+
 return {
 	{
 		"neovim/nvim-lspconfig",
@@ -32,18 +52,18 @@ return {
 		"MeanderingProgrammer/render-markdown.nvim",
 		opts = {
 			heading = {
-				enabled = true,
+				enabled = false, -- headings handled by headlines.nvim (see orgmode.lua)
 				atx = true, --icons
 				setext = false, --icons
 				width = "block",
 				icons = { "✶ ", "✶✶ ", "✶✶✶ ", "✶✶✶✶ ", "✶✶✶✶✶ ", "✶✶✶✶✶✶ " },
 				backgrounds = {
-					false,
-					false,
-					false,
-					false,
-					false,
-					false,
+					"Statement",
+					"Statement",
+					"Statement",
+					"Statement",
+					"Statement",
+					"Statement",
 				},
 				foregrounds = {
 					"Statement",
@@ -61,6 +81,10 @@ return {
 				min_width = 80,
 				position = "right",
 				language_icon = false,
+				highlight_language = "RenderMarkdownLanguage",
+			},
+			bullet = {
+				icons = { "•", "•", "•", "•" },
 			},
 		},
 	},

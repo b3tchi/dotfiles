@@ -1,0 +1,13 @@
+diff --git a/docs/product.md b/docs/product.md
+index fdfa212..5f76320 100644
+--- a/docs/product.md
++++ b/docs/product.md
+@@ -12,7 +12,7 @@ operations analyst and the platform-engineer personas.
+ 
+ ### [[pn002|platform-engineer]]
+ 
+-- [[us003|rotate service credentials without downtime]]
++- [[us003|rotate service credentials without downtime]] >> [[im002]]
+ 
+ ## Features
+ 

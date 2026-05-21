@@ -68,6 +68,7 @@
     "json-lsp@dotfiles": true,
     "yaml-lsp@dotfiles": true,
     "wiki-oxide@dotfiles": true,
+    "clangd-lsp@claude-plugins-official": true,
     "infinifu@dotfiles": true
   },
   "extraKnownMarketplaces": {

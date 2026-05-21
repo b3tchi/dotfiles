@@ -1,6 +1,6 @@
 ---
 name: persona-write
-description: Use when the user wants to create, add, register, or define a Persona — a user role the system serves — and emit a new `docs/notes/pn###.md` AKM zettel with frontmatter (aliases/status/created) and body sections (name/summary/primary_goals/open_questions) per the schema in `docs/notes/akm.md`. Invoke this whenever someone says "create a persona", "add a new user role", "register persona X", "we have a new actor type", "who is the requestor", "pn### for X", or describes a fresh role/actor that stories will reference via `[[pn###|alias]]`. Pick this over `infinifu:story-write` when the request is about the role itself (not a want from that role) and over `infinifu:zettel-write` when the user has already named "persona" as the artifact — `zettel-write` is the routing orchestrator that delegates here for persona shapes.
+description: Use when the user wants to create, add, register, or define a Persona — a user role the system serves — and emit a new `docs/notes/pn###.md` AKM zettel with frontmatter (aliases/status/created) and body sections (name/summary/primary_goals/open_questions). This skill owns the Persona schema (frontmatter shape, body, lifecycle); shared styling (atomicity, 80-char wrap, link discipline) is enforced by `infinifu:zettel-write`; `docs/notes/akm.md` carries only the top-level AKM model overview. Invoke this whenever someone says "create a persona", "add a new user role", "register persona X", "we have a new actor type", "who is the requestor", "pn### for X", or describes a fresh role/actor that stories will reference via `[[pn###|alias]]`. Pick this over `infinifu:story-write` when the request is about the role itself (not a want from that role) and over `infinifu:zettel-write` when the user has already named "persona" as the artifact — `zettel-write` is the routing orchestrator that delegates here for persona shapes.
 ---
 
 <skill_overview>
@@ -37,6 +37,53 @@ Non-negotiable: (1) filename is `pn###.md`, three-digit zero-padded, max-of-exis
 | `draft` → `retired` | Persona dropped before validation — same treatment |
 
 </quick_reference>
+
+<schema>
+
+**Frontmatter.**
+
+```yaml
+aliases:
+  - <short role label, e.g. requestor>
+status: <draft|validated|retired>
+created: YYYY-MM-DD
+```
+
+**Body skeleton.**
+
+```markdown
+# Persona [[product]]
+
+## name
+<full role name, e.g. Field Sales Rep>
+
+## summary
+<one-paragraph context: who, where, why they touch the system>
+
+## primary_goals
+- <goal>
+- <goal>
+
+## open_questions
+- <unresolved discovery question>
+
+---
+
+Index: [[product]]
+```
+
+**Required wikilinks.** `[[product]]` in H1, `Index: [[product]]` footer.
+No category tags, no flow tags — Persona H1 is intentionally minimal.
+
+**Lifecycle.**
+
+- `draft` — captured but `## open_questions` still populated.
+- `validated` — `## open_questions` empty (or migrated to ADR / decision
+  log).
+- `retired` — role no longer served. Keep the file (existing story
+  back-links remain valid); add a `## retired` section noting why.
+
+</schema>
 
 <when_to_use>
 **Use when:**
@@ -109,7 +156,7 @@ digraph persona_create {
 
 5. **Set status.** Default to `draft`. Flip to `validated` only when `## open_questions` is empty (or migrated to an ADR / decision log). `validated` at write time is rare but legitimate when formalizing a long-running role.
 
-6. **Write the zettel.** Compose `$AKM_ROOT/docs/notes/pn<NNN>.md` per the schema in `docs/notes/akm.md#persona--pnmd`. Do **not** touch `$AKM_ROOT/docs/product.md` — personas surface in the hub via stories, not directly (see `critical_rules`).
+6. **Write the zettel.** Compose `$AKM_ROOT/docs/notes/pn<NNN>.md` per the `<schema>` block above. Do **not** touch `$AKM_ROOT/docs/product.md` — personas surface in the hub via stories, not directly (see `critical_rules`).
 
 7. **Stage on main.** `git -C "$AKM_ROOT" add docs/notes/pn<NNN>.md`. No commit — the next lifecycle stage carries that.
 
@@ -162,7 +209,8 @@ Before reporting complete:
 
 <references>
 
-- `docs/notes/akm.md` — canonical AKM schema. Section `## Persona — pn###.md` is the source of truth for body shape, frontmatter keys, and lifecycle. **Load when in doubt about any schema detail** rather than duplicating it here.
+- `docs/notes/akm.md` — top-level AKM model + lifecycle process flow. **Load when** needing cross-type perspective (how Personas relate to Stories / Implementations). Schema details live in the `<schema>` block above, not here.
+- `infinifu:zettel-write` — cross-type styling rules (atomicity, 80-char wrap, link discipline, post-write audit). **Load when** the styling rule is unclear; this skill owns the Persona schema, that one owns shared discipline.
 - `references/examples.md` — three worked examples (fresh persona with open questions, story-write delegation handoff, revision/re-emit). **Load when** unclear how the workflow plays out end-to-end, especially for the alias-stability rationale or the status-lifecycle nuances.
 - `infinifu:meta-skill-writing` — house style for this skill's own SKILL.md. **Load when refactoring** this file.
 

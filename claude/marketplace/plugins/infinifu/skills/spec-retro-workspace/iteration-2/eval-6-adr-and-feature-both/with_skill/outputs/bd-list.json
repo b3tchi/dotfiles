@@ -1,0 +1,129 @@
+[
+  {
+    "id": "wd6-1266658-8wq.3",
+    "title": "Task 3: Synthetic-check hook for rotation window",
+    "design": "Hook a synthetic check that runs every 30s during rotation window; assert zero 5xx. Files: src/lib/vault_rotate.py, tests/integration/test_rotate_synthetic.py.",
+    "status": "closed",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-19T00:58:10Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-19T00:58:19Z",
+    "closed_at": "2026-05-19T00:58:19Z",
+    "close_reason": "AUDITED: APPROVED. Synthetic check hook meets all criteria.",
+    "dependencies": [
+      {
+        "issue_id": "wd6-1266658-8wq.3",
+        "depends_on_id": "wd6-1266658-8wq",
+        "type": "parent-child",
+        "created_at": "2026-05-19T02:58:09Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd6-1266658-8wq.3",
+        "depends_on_id": "wd6-1266658-8wq.1",
+        "type": "blocks",
+        "created_at": "2026-05-19T02:58:11Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd6-1266658-8wq.3",
+        "depends_on_id": "wd6-1266658-8wq.2",
+        "type": "blocks",
+        "created_at": "2026-05-19T02:58:13Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 2,
+    "dependent_count": 0,
+    "comment_count": 0,
+    "parent": "wd6-1266658-8wq"
+  },
+  {
+    "id": "wd6-1266658-8wq.2",
+    "title": "Task 2: Add vault_rotate orchestration module",
+    "design": "Create src/lib/vault_rotate.py with rotate(name, new_value) that calls vault.rotate_secret + schedules T+5min expiry. Files: src/lib/vault_rotate.py, tests/lib/test_vault_rotate.py.",
+    "status": "closed",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-19T00:58:08Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-19T00:58:18Z",
+    "closed_at": "2026-05-19T00:58:18Z",
+    "close_reason": "AUDITED: APPROVED. vault_rotate orchestration meets all criteria.",
+    "dependencies": [
+      {
+        "issue_id": "wd6-1266658-8wq.2",
+        "depends_on_id": "wd6-1266658-8wq",
+        "type": "parent-child",
+        "created_at": "2026-05-19T02:58:08Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd6-1266658-8wq.2",
+        "depends_on_id": "wd6-1266658-8wq.1",
+        "type": "blocks",
+        "created_at": "2026-05-19T02:58:10Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 1,
+    "dependent_count": 1,
+    "comment_count": 0,
+    "parent": "wd6-1266658-8wq"
+  },
+  {
+    "id": "wd6-1266658-8wq.1",
+    "title": "Task 1: Add rotate_secret helper to vault.py",
+    "design": "Extend src/lib/vault.py with rotate_secret(name, new_value) helper that stages a new versioned alias. Files: src/lib/vault.py, tests/lib/test_vault.py. Edge cases: concurrent calls serialize, vault unreachable raises VaultError, empty value rejected.",
+    "notes": "AUDITED: APPROVED. rotate_secret meets all criteria.\n\nDECISION SHIFT during implementation: we adopted HashiCorp Vault's Transit\nsecrets engine over the original KV-only plan for the versioned-alias\nbacking. Trade-off: Transit gives us deterministic versions + key rotation\nout of the box but ties us to HashiCorp Vault specifically (KV would have\nlet us swap to other backends). Cross-cutting — affects how every future\nencrypted-rotation feature is built.\n\nCAPABILITY: src/lib/vault_transit.py landed as a thin wrapper around the\nTransit engine (encrypt / decrypt / rotate_key). Concrete API surface,\nzero domain logic, designed for reuse — the metrics service alerting and\nthe reports service signed-URL flow are obvious next consumers.",
+    "status": "closed",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-19T00:58:07Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-19T00:58:23Z",
+    "started_at": "2026-05-19T00:58:14Z",
+    "closed_at": "2026-05-19T00:58:17Z",
+    "close_reason": "AUDITED: APPROVED. rotate_secret meets all criteria.",
+    "dependencies": [
+      {
+        "issue_id": "wd6-1266658-8wq.1",
+        "depends_on_id": "wd6-1266658-8wq",
+        "type": "parent-child",
+        "created_at": "2026-05-19T02:58:06Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 0,
+    "dependent_count": 2,
+    "comment_count": 0,
+    "parent": "wd6-1266658-8wq"
+  },
+  {
+    "id": "wd6-1266658-8wq",
+    "title": "Epic: rotate service credentials without downtime [sp001]",
+    "design": "Spec: docs/notes/spec/sp001.md",
+    "status": "closed",
+    "priority": 2,
+    "issue_type": "epic",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-19T00:58:06Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-19T01:00:48Z",
+    "closed_at": "2026-05-19T01:00:48Z",
+    "close_reason": "Retro sp001: rotate_secret + Transit wrapper shipped. Rewrote im002 to reference Transit. Minted adr0004 (Vault Transit over KV — vendor/paradigm lock-in to HashiCorp) and ft003 (vault-transit-wrapper — encrypt/decrypt/rotate_key surface, named next consumers: metrics alerting, reports signed-URL).",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  }
+]

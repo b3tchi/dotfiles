@@ -1,0 +1,12 @@
+{
+  "eval_id": 2,
+  "eval_name": "wrong-status-ready",
+  "prompt": "Run spec-retro on sp001. Working dir is the seeded Acme sandbox.",
+  "assertions": [
+    {"text": "Agent recognized sp001 status is ready (not done)"},
+    {"text": "Agent did NOT rewrite im002 / mint new us / adr / ft updates"},
+    {"text": "Agent did NOT close the bd epic"},
+    {"text": "Output routes back to work-merge OR explicitly states 'not done yet'"},
+    {"text": "Agent did NOT touch docs/board.md or docs/archive.md"}
+  ]
+}

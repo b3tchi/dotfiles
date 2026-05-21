@@ -80,10 +80,12 @@ Stage 7 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Status flips a
    - Add `[[sp###|<title>]]` under `$AKM_ROOT/docs/archive.md ## done`.
    - Close the bd epic via `bd close <epic-id> --reason "Merged via sp###. All N tasks closed by work-audit."`
 8. **Commit on main (AKM admin commit).** Stage and commit the five touched AKM files in one shot — this is the lifecycle commit for the archive flip. Code merge happens separately in step 9.
+
    ```bash
    git -C "$AKM_ROOT" add docs/notes/spec/sp<NNN>.md docs/notes/us<NNN>.md docs/notes/im<NNN>.md docs/board.md docs/archive.md
    git -C "$AKM_ROOT" commit -m "feat(akm): archive sp<NNN>"
    ```
+
 9. **Git landing (operational vehicle, on the feature worktree — NOT `$AKM_ROOT`):** present the 4-option menu to the user (Merge / PR / Keep / Discard). Execute the chosen path. This is where the actual code lands; the AKM admin commit in step 8 is separate.
 10. **Worktree cleanup** where appropriate (Options 1 + 4).
 11. **Hand off to `spec-retro`** with a one-line pointer — the user runs spec-retro next to refresh `im###` narrative + file any new ADRs / `ft###` updates / draft `us###`.
@@ -109,7 +111,7 @@ Stage 7 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Status flips a
 
 After AKM writes complete, present exactly these 4 options:
 
-```
+```text
 Implementation complete. AKM lifecycle flipped (sp### → done, board → archive).
 How do you want the code to land?
 

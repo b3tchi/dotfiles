@@ -1,0 +1,16 @@
+{
+  "run_id": "eval-4-tech-laden-context-with_skill",
+  "expectations": [
+    {"text": "A new file us###.md was created in the seeded sandbox under docs/notes/", "passed": true, "evidence": "us015.md present per tree.txt"},
+    {"text": "## role section references [[pn001|requestor]]", "passed": true, "evidence": "zettel role section"},
+    {"text": "## want describes the outcome and does NOT mention Next.js, Drizzle, Postgres, /api/, or 'endpoint'", "passed": true, "evidence": "want = 'export their request history as a CSV ...' — no tech jargon"},
+    {"text": "## because captures motivation", "passed": true, "evidence": "expense reports / accounting / screenshotting tedious"},
+    {"text": "## acceptance_criteria has at least 2 bullets", "passed": true, "evidence": "4 bullets"},
+    {"text": "No AC bullet mentions Next.js/Drizzle/Postgres/api//GET /POST /endpoint/route/.tsx/.ts/middleware/foreign key/table/column/index", "passed": true, "evidence": "none of those terms appear in any AC bullet"},
+    {"text": "No AC bullet starts with imperative-on-developer verbs (Add/Create/Implement/Build/Use/Wire)", "passed": true, "evidence": "bullets start with 'export', 'each row', 'only the requestor', 'exporting with no'"},
+    {"text": "AC describe observable behavior — subject is user/system observed by user, not developer", "passed": true, "evidence": "subjects: 'export', 'each row', 'only the requestor's own requests', 'exporting' — outcomes"},
+    {"text": "Confirmation flags that AC were derived (user didn't supply them)", "passed": true, "evidence": "response.md flags all 4 AC as derived"},
+    {"text": "Footer contains 'Index: [[product]]'", "passed": true, "evidence": "zettel footer"}
+  ],
+  "summary": {"pass_rate": 1.0, "passed": 10, "failed": 0, "total": 10}
+}

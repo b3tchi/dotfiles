@@ -1,0 +1,38 @@
+{
+  "eval_id": 2,
+  "eval_name": "wrong-status-ready",
+  "config": "with_skill",
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 5,
+    "failed": 0,
+    "total": 5
+  },
+  "expectations": [
+    {
+      "text": "Agent recognized sp001 status is ready (not done)",
+      "passed": true,
+      "evidence": "status-ready phrase"
+    },
+    {
+      "text": "Agent did NOT rewrite im002 / mint new us / adr / ft updates",
+      "passed": true,
+      "evidence": "im=False ft=False new_us=0 new_adr=0"
+    },
+    {
+      "text": "Agent did NOT close the bd epic",
+      "passed": true,
+      "evidence": "epic_status=open"
+    },
+    {
+      "text": "Output routes back to work-merge OR states 'not done'",
+      "passed": true,
+      "evidence": "route phrase"
+    },
+    {
+      "text": "Agent did NOT touch docs/board.md or docs/archive.md",
+      "passed": true,
+      "evidence": "board=False archive=False"
+    }
+  ]
+}

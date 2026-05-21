@@ -1,0 +1,13 @@
+{
+  "run_id": "eval-6-solution-shaped-want-old_skill",
+  "expectations": [
+    {"text": "us###.md created", "passed": true, "evidence": "ok"},
+    {"text": "role [[pn001|requestor]]", "passed": true, "evidence": "ok"},
+    {"text": "want preserved OR alternative offered", "passed": true, "evidence": "preserved verbatim (no alternative offered)"},
+    {"text": "Response flags want as solution-shaped + suggests alternative", "passed": false, "evidence": "baseline did not flag; accepted as-is"},
+    {"text": "Flagged phrasing distinguishes outcome vs UI", "passed": false, "evidence": "no flag at all"},
+    {"text": "Footer Index: [[product]]", "passed": true, "evidence": "ok"},
+    {"text": "EXTRA: derived AC stay problem-side", "passed": false, "evidence": "all 4 AC reference 'Cancel button' by name — UI element propagated into AC"}
+  ],
+  "summary": {"pass_rate": 0.571, "passed": 4, "failed": 3, "total": 7}
+}

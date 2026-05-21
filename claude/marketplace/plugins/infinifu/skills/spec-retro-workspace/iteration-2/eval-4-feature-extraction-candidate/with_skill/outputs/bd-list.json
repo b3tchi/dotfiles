@@ -1,0 +1,129 @@
+[
+  {
+    "id": "wd4-1263359-e5u.3",
+    "title": "Task 3: Synthetic-check hook for rotation window",
+    "design": "Hook a synthetic check that runs every 30s during rotation window; assert zero 5xx. Files: src/lib/vault_rotate.py, tests/integration/test_rotate_synthetic.py.",
+    "status": "closed",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-19T00:57:43Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-19T00:57:52Z",
+    "closed_at": "2026-05-19T00:57:52Z",
+    "close_reason": "AUDITED: APPROVED. Synthetic check hook meets all criteria.",
+    "dependencies": [
+      {
+        "issue_id": "wd4-1263359-e5u.3",
+        "depends_on_id": "wd4-1263359-e5u",
+        "type": "parent-child",
+        "created_at": "2026-05-19T02:57:43Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd4-1263359-e5u.3",
+        "depends_on_id": "wd4-1263359-e5u.1",
+        "type": "blocks",
+        "created_at": "2026-05-19T02:57:45Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd4-1263359-e5u.3",
+        "depends_on_id": "wd4-1263359-e5u.2",
+        "type": "blocks",
+        "created_at": "2026-05-19T02:57:46Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 2,
+    "dependent_count": 0,
+    "comment_count": 0,
+    "parent": "wd4-1263359-e5u"
+  },
+  {
+    "id": "wd4-1263359-e5u.2",
+    "title": "Task 2: Add vault_rotate orchestration module",
+    "design": "Create src/lib/vault_rotate.py with rotate(name, new_value) that calls vault.rotate_secret + schedules T+5min expiry. Files: src/lib/vault_rotate.py, tests/lib/test_vault_rotate.py.",
+    "status": "closed",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-19T00:57:42Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-19T00:57:51Z",
+    "closed_at": "2026-05-19T00:57:51Z",
+    "close_reason": "AUDITED: APPROVED. vault_rotate orchestration meets all criteria.",
+    "dependencies": [
+      {
+        "issue_id": "wd4-1263359-e5u.2",
+        "depends_on_id": "wd4-1263359-e5u",
+        "type": "parent-child",
+        "created_at": "2026-05-19T02:57:41Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "wd4-1263359-e5u.2",
+        "depends_on_id": "wd4-1263359-e5u.1",
+        "type": "blocks",
+        "created_at": "2026-05-19T02:57:44Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 1,
+    "dependent_count": 1,
+    "comment_count": 0,
+    "parent": "wd4-1263359-e5u"
+  },
+  {
+    "id": "wd4-1263359-e5u.1",
+    "title": "Task 1: Add rotate_secret helper to vault.py",
+    "design": "Extend src/lib/vault.py with rotate_secret(name, new_value) helper that stages a new versioned alias. Files: src/lib/vault.py, tests/lib/test_vault.py. Edge cases: concurrent calls serialize, vault unreachable raises VaultError, empty value rejected.",
+    "notes": "AUDITED: APPROVED. rotate_secret meets all criteria.\n\nDISCOVERED during implementation: the per-name versioned-alias rotation\nprimitive in vault.py (rotate_secret + the _ALIASES + per-name lock pattern)\nis more general than this story. The newly-drafted [[us006|rotate OAuth\nclient api-keys]] will need the *same* primitive — same overlap semantics,\nsame lock granularity, same versioned-alias bookkeeping. Worth surfacing\nas a Feature-extraction candidate for the retro.",
+    "status": "closed",
+    "priority": 2,
+    "issue_type": "task",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-19T00:57:40Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-19T00:57:56Z",
+    "started_at": "2026-05-19T00:57:48Z",
+    "closed_at": "2026-05-19T00:57:50Z",
+    "close_reason": "AUDITED: APPROVED. rotate_secret meets all criteria.",
+    "dependencies": [
+      {
+        "issue_id": "wd4-1263359-e5u.1",
+        "depends_on_id": "wd4-1263359-e5u",
+        "type": "parent-child",
+        "created_at": "2026-05-19T02:57:40Z",
+        "created_by": "eval",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 0,
+    "dependent_count": 2,
+    "comment_count": 0,
+    "parent": "wd4-1263359-e5u"
+  },
+  {
+    "id": "wd4-1263359-e5u",
+    "title": "Epic: rotate service credentials without downtime [sp001]",
+    "design": "Spec: docs/notes/spec/sp001.md",
+    "status": "closed",
+    "priority": 2,
+    "issue_type": "epic",
+    "owner": "eval@example.com",
+    "created_at": "2026-05-19T00:57:39Z",
+    "created_by": "eval",
+    "updated_at": "2026-05-19T01:00:00Z",
+    "closed_at": "2026-05-19T01:00:00Z",
+    "close_reason": "Retro: rotate_secret + per-name versioned-alias bookkeeping shipped in vault.py. Rewrote im002 (## approach / ## data_model / ## api_surface to reflect _ALIASES + _LOCKS + VaultError surface). Updated ft002 (widened api_surface to include rotate_secret). No new ADRs; no us drafts beyond pre-existing us006. Candidate flagged: ft-extract 'rotate_secret + versioned-alias primitive' from im002 — would also serve us006 (rotate OAuth client api-keys). Decision deferred to human per vertical-over-horizontal default.",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "comment_count": 0
+  }
+]
