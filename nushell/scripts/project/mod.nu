@@ -213,6 +213,8 @@ export def 'config' [] {
 }
 
 # navigate to project and create/attach tmux session
+# Local project (no ssh): cd to path, create/attach local tmux session group.
+# Remote project (ssh set): delegate entirely to tmux-to-workstation connect; no local cd.
 export def --env 'go' [
 	name: string@project_names # project to navigate to
 ] {
@@ -223,14 +225,31 @@ export def --env 'go' [
 		return
 	}
 
-	let project_path = ($projects | get $name | get path)
+	let entry = ($projects | get $name)
 
+	# Guard: path field is mandatory regardless of local/remote
+	if 'path' not-in $entry {
+		error make { msg: $"invalid project entry: ($name)" }
+	}
+
+	let project_path = ($entry | get path)
+	let ssh_profile  = ($entry | get -o ssh | default null)
+
+	# --- Remote dispatch (ssh field present) ---
+	if $ssh_profile != null {
+		# Delegate entirely: tmux-to-workstation owns the thin-session lifecycle.
+		# Do NOT cd locally — the path lives on the remote host.
+		tmux-to-workstation connect -g $name --cwd $project_path -- $ssh_profile
+		return
+	}
+
+	# --- Local dispatch (no ssh field) ---
 	if not ($project_path | path exists) {
 		print $"Project path does not exist: ($project_path)"
 		return
 	}
 
-	# cd to project directory
+	# cd to project directory (local only)
 	cd $project_path
 
 	# check if we are inside tmux
