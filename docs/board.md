@@ -8,6 +8,6 @@ sections when status flips.
 
 ## spec
 
-- [[sp001|mark project as remote so terminals open against the remote host]]
-
 ## ready
+
+- [[sp001|mark project as remote so terminals open against the remote host]]
