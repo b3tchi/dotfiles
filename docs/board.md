@@ -10,4 +10,3 @@ sections when status flips.
 
 ## ready
 
-- [[sp001|mark project as remote so terminals open against the remote host]]
