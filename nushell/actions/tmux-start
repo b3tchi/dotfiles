@@ -7,6 +7,7 @@ def main [
     pinned: int = 0             # Whether pane should be pinned (default 0)
     session: string = "local"   # Session name (default "local")
     uid?: string                # Optional unique identifier for pane
+    cwd?: string                # Optional working directory for the new session
 ] {
     # Check if tmux is available
     if (which tmux | is-empty) {
@@ -18,6 +19,13 @@ def main [
         if ($env | get -o TMUX | is-not-empty) {
             return
         }
+    }
+
+    # Build optional -c <cwd> flag list for tmux new-session
+    let cwd_args = if ($cwd | is-not-empty) and (($cwd | str length) > 0) {
+        ["-c" $cwd]
+    } else {
+        []
     }
 
     # If UID provided, search for existing pane
@@ -58,7 +66,7 @@ def main [
                 }
 
                 let new_session = $"($session)_($view_nr)"
-                tmux new-session -d -t $session -s $new_session
+                tmux new-session -d -t $session -s $new_session ...$cwd_args
 
                 print $"($new_session):($window_idx)"
                 return
@@ -87,7 +95,7 @@ def main [
 
     let pane_target = if $view_nr == 0 {
         # Create first session
-        tmux new-session -d -t $session -s $new_session
+        tmux new-session -d -t $session -s $new_session ...$cwd_args
 
         let window_idx = 0
         let target = $"($new_session):($window_idx)"
@@ -101,7 +109,7 @@ def main [
         $target
     } else {
         # Create new session with new window
-        tmux new-session -d -t $session -s $new_session
+        tmux new-session -d -t $session -s $new_session ...$cwd_args
 
         let window_idx = (tmux new-window -d -P -F "#{window_index}" -t $new_session
             | str trim)
