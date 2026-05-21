@@ -46,11 +46,44 @@ export-env {
 	}
 }
 
+# validate and normalise a single project entry read from yaml
+# - ssh absent or null or "" → treated as local (ssh key removed)
+# - ssh non-empty string → valid remote profile, kept as-is
+# - ssh any other type (int, list, record…) → error loud at parse time
+def parse_project_entry [name: string, entry: record] {
+	if 'ssh' not-in $entry {
+		return $entry
+	}
+	let ssh_val = $entry | get ssh
+	let ssh_type = $ssh_val | describe
+	if $ssh_type == 'nothing' {
+		# ssh: null → treat as absent (local entry)
+		return ($entry | reject ssh)
+	}
+	if $ssh_type == 'string' {
+		if ($ssh_val | is-empty) {
+			# ssh: "" → treat as absent (local entry)
+			return ($entry | reject ssh)
+		}
+		# valid non-empty ssh profile name
+		return $entry
+	}
+	# malformed: non-string, non-null value → fail loud
+	error make { msg: $"project '($name)': ssh field must be a string, got: ($ssh_type)" }
+}
+
 # read projects registry, return empty record if file missing
+# each entry is validated: ssh field must be a string when present;
+# null / empty-string ssh is normalised away (treated as local).
 def data [] {
 	let path = ($config_path | path expand)
 	if ($path | path exists) {
-		open $path | get -o projects | default {}
+		let raw = open $path | get -o projects | default {}
+		$raw | columns | reduce --fold {} { |name, acc|
+			let entry = ($raw | get $name)
+			let parsed = (parse_project_entry $name $entry)
+			$acc | insert $name $parsed
+		}
 	} else {
 		{}
 	}
