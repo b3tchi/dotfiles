@@ -37,9 +37,15 @@ export-env {
 		if ($path | path exists) {
 			let projects = (open $path | get -o projects | default {})
 			if ($project_name in ($projects | columns)) {
-				let project_path = ($projects | get $project_name | get path)
-				if ($project_path | path exists) {
-					cd $project_path
+				let entry = ($projects | get $project_name)
+				# Remote entries (ssh field present) must not auto-cd locally.
+				# Remote is opt-in via explicit 'project go'; skip silently here.
+				let is_remote = ('ssh' in $entry) and ($entry | get ssh | describe) == 'string' and not ($entry | get ssh | is-empty)
+				if not $is_remote {
+					let project_path = ($entry | get path)
+					if ($project_path | path exists) {
+						cd $project_path
+					}
 				}
 			}
 		}
