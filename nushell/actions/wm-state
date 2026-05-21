@@ -6,7 +6,7 @@ const wm_ipc = '~/.local/bin/wm-ipc.nu'
 use $wm_ipc *
 
 # Terminal identifiers to match (sway app_id or i3 window_properties.class).
-const terminal_ids = ["foot", "kitty", "wezterm", "WezTerm", "Alacritty", "alacritty", "xterm"]
+const terminal_ids = ["foot", "kitty", "wezterm", "WezTerm", "Alacritty", "alacritty", "xterm", "st", "st-256color"]
 
 # Default terminal to launch per WM on restore.
 const default_term_by_wm = { sway: "foot", i3: "kitty" }

@@ -20,8 +20,12 @@ def main [
 
     # Get all thin sessions from tmux-to-workstation
     let all_thins = (do { tmux-to-workstation list } | complete)
-    let thin_sessions = if $all_thins.exit_code == 0 and ($all_thins.stdout | is-not-empty) {
-        $all_thins.stdout | from yaml | get session
+    let parsed_thins = if $all_thins.exit_code == 0 and ($all_thins.stdout | is-not-empty) {
+        try { $all_thins.stdout | from yaml } catch { null }
+    } else { null }
+    let parsed_kind = if $parsed_thins != null { ($parsed_thins | describe) } else { "" }
+    let thin_sessions = if ($parsed_thins != null) and (($parsed_kind | str starts-with "table") or ($parsed_kind | str starts-with "list")) {
+        $parsed_thins | each {|e| $e | get -o session } | compact
     } else {
         print "No thin sessions"
         return
