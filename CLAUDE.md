@@ -144,10 +144,10 @@ Environment-level meta-packages use rotz `depends` to pull in the right set of a
 
 | Meta-Package | Target | Depends On |
 |---|---|---|
-| `meta-linux` | Personal Linux (native, i3/X11) | distro, nushell, tmux, nvim, lazygit, claude, opencode, wezterm, kitty, i3, xterm, emacs, logseq, freecad, evolution, xournalpp |
-| `meta-wsl` | WSL (nested in Windows, Sway/WSLg) | distro, nushell, tmux, nvim, lazygit, claude, opencode, sway |
-| `meta-proot` | proot Arch (nested in Termux, i3/Termux:X11) | distro, nushell, tmux, nvim, lazygit, claude, opencode, i3 |
-| `meta-termux` | Termux (direct on Android, no WM) | nushell, tmux, nvim, lazygit, claude, opencode |
+| `meta-linux` | Personal Linux (native, i3/X11) | distro, nushell, tmux, nvim, lazygit, ssh, claude, opencode, wezterm, kitty, i3, xterm, emacs, logseq, freecad, evolution, xournalpp |
+| `meta-wsl` | WSL (nested in Windows, Sway/WSLg) | distro, nushell, tmux, nvim, lazygit, ssh, claude, opencode, sway |
+| `meta-proot` | proot Arch (nested in Termux, i3/Termux:X11) | distro, nushell, tmux, nvim, lazygit, ssh, claude, opencode, i3 |
+| `meta-termux` | Termux (direct on Android, no WM) | nushell, tmux, nvim, lazygit, ssh, claude, opencode |
 | `meta-windows` | Windows host (bridge for WSL) | wezterm, winterm, pwsh, powertoys, fancywm, flow-launcher, office |
 
 Usage: `rotz install meta-linux`, `rotz install meta-wsl`, etc.

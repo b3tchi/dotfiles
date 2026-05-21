@@ -1,0 +1,33 @@
+windows:
+  links:
+    config: ~/.ssh/config
+    config.d: ~/.ssh/config.d
+
+linux:
+  links:
+    config: ~/.ssh/config
+    config.d: ~/.ssh/config.d
+  installs:
+    cmd: |
+      mkdir -p ~/.ssh
+      chmod 700 ~/.ssh
+      # Termux (Android, direct)
+      {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
+      pkg install -y openssh
+      {{/if}}
+      # proot Arch (nested in Termux, aarch64)
+      {{#if (eq whoami.distro "Arch Linux ARM")}}
+      sudo pacman -Syu --needed --noconfirm openssh
+      {{/if}}
+      # WSL Arch + native Arch (whoami.distro == "Arch Linux" in both)
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -Syu --needed --noconfirm openssh
+      {{/if}}
+      # Manjaro native
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -Syu --needed --noconfirm openssh
+      {{/if}}
+      # Post-install verification — fail loud if client missing on any target
+      command -v ssh        >/dev/null || { echo "ssh client missing after install"        >&2; exit 1; }
+      command -v ssh-keygen >/dev/null || { echo "ssh-keygen missing after install"        >&2; exit 1; }
+      rotz link ssh --force

@@ -6,5 +6,6 @@ depends:
   - tmux
   - nvim
   - lazygit
+  - ssh
   - claude
   - opencode

@@ -1,21 +1,6 @@
+# Managed by rotz — main ssh client config.
+# Per-host entries live under ~/.ssh/config.d/ (symlinked from ssh/config.d/).
+# First-match wins in ssh_config(5), so keep this file minimal and put
+# host-specific overrides in config.d/* files.
 
-#LEGO/
-Host github.com-lego
-    HostName github.com
-    User git
-    IdentityFile ~/.ssh/id_rsa_lego
-
-#b3tchi/
-Host github.com-b3tchi
-    HostName github.com
-    User git
-    IdentityFile ~/.ssh/id_rsa_b3tchi
-
-#jan-becka/
-Host github.com-jan-becka
-    HostName github.com
-    User git
-    IdentityFile ~/.ssh/id_ed25519_jan-becka
-
-Host gitlab.com
-    IdentityFile ~/.ssh/id_rsa_git
+Include config.d/*
