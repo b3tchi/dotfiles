@@ -124,9 +124,11 @@ export def 'list' [] {
 	$projects | columns | each { |name|
 		let p = ($projects | get $name)
 		let active = if ($name in $active_groups) { "*" } else { "" }
+		let ssh = ($p | get -o ssh | default "")
 		{
 			name: $name
 			path: $p.path
+			ssh: $ssh
 			active: $active
 		}
 	}
@@ -135,8 +137,21 @@ export def 'list' [] {
 # register a project
 export def 'add' [
 	name: string          # project name (used as tmux session group name)
-	path?: string         # project path (default: current directory)
+	path?: string         # project path (default: current directory; ignored when --ssh set — path is required for remote)
+	--ssh: string         # ssh profile name; when set, registers a remote entry (path is required)
 ] {
+	# Validate --ssh constraints before touching anything.
+	# $ssh is `nothing` when flag is absent; a string (possibly "") when provided.
+	let ssh_provided = ($ssh | describe) != "nothing"
+	if $ssh_provided {
+		if ($ssh | str trim | is-empty) {
+			error make { msg: "ssh profile name cannot be empty" }
+		}
+		if ($path | is-empty) {
+			error make { msg: "path required when --ssh set" }
+		}
+	}
+
 	let project_path = if ($path | is-empty) { $env.PWD } else { $path | path expand }
 
 	if not ($project_path | path exists) {
@@ -151,10 +166,20 @@ export def 'add' [
 		return
 	}
 
-	$projects = ($projects | insert $name { path: $project_path })
+	let entry = if $ssh_provided {
+		{ path: $project_path, ssh: $ssh }
+	} else {
+		{ path: $project_path }
+	}
+
+	$projects = ($projects | insert $name $entry)
 	save_data $projects
 
-	print $"Project '($name)' registered at ($project_path)"
+	if $ssh_provided {
+		print $"Project '($name)' registered at ($project_path) [ssh: ($ssh)]"
+	} else {
+		print $"Project '($name)' registered at ($project_path)"
+	}
 }
 
 # unregister a project
