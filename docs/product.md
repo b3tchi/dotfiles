@@ -6,7 +6,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 
 ### [[pn001|developer]]
 
-- [[us001|mark project as remote so terminals open against the remote host]]
+- [[us001|mark project as remote so terminals open against the remote host]] >> [[im002]]
 - [[us002|register a location as a project and navigate to it easily]] >> [[im001]]
 
 ## Features
