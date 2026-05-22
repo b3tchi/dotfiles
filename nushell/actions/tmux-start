@@ -111,7 +111,7 @@ def main [
         # Create new session with new window
         tmux new-session -d -t $session -s $new_session ...$cwd_args
 
-        let window_idx = (tmux new-window -d -P -F "#{window_index}" -t $new_session
+        let window_idx = (tmux new-window -d -P -F "#{window_index}" -t $new_session ...$cwd_args
             | str trim)
 
         let target = $"($new_session):($window_idx)"
