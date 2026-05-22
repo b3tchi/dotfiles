@@ -62,8 +62,45 @@ def preflight [] {
         ^bd hooks install | ignore
     }
 
+    gate_bd_hooks $root
+
     for stage in ["idea" "spec" "ready" "done" "archive"] {
         mkdir $"($root)/board/($stage)"
+    }
+}
+
+# Add a worktree-skip guard above bd's BEGIN BEADS INTEGRATION block.
+# Why: .git/hooks/ is shared across worktrees, but .beads/ only lives at
+# the main worktree. A linked-worktree commit running the bd hook would
+# (a) dirty main's working tree with a re-exported jsonl that the
+# worktree commit can't carry, and (b) race the jsonl rewrite with sibling
+# worktree commits. The gate short-circuits when --git-dir != --git-common-dir
+# (canonical "we are in a linked worktree" check). Idempotent: re-running
+# after `bd hooks install` is safe — already-gated hooks are left alone.
+def gate_bd_hooks [root: string] {
+    let hooks_dir = $"($root)/.git/hooks"
+    if not ($hooks_dir | path exists) {
+        return
+    }
+    let gate = "# Skip bd hooks entirely when running from a linked worktree.
+# Rationale: dolt is shared across worktrees, but .beads/issues.jsonl
+# only lives in the main worktree. Re-exporting from a linked worktree
+# would dirty main's working tree without including the diff in the
+# worktree commit, and concurrent worktree commits would race on the
+# jsonl rewrite. bd state is committed from main only.
+if [ \"$(git rev-parse --git-dir 2>/dev/null)\" != \"$(git rev-parse --git-common-dir 2>/dev/null)\" ]; then
+  exit 0
+fi
+"
+    for hook in [pre-commit post-merge post-checkout pre-push prepare-commit-msg] {
+        let f = $"($hooks_dir)/($hook)"
+        if not ($f | path exists) { continue }
+        let content = (open --raw $f)
+        if ($content | str contains "linked worktree") { continue }
+        if not ($content | str contains "BEGIN BEADS INTEGRATION") { continue }
+        let patched = ($content | str replace "# --- BEGIN BEADS INTEGRATION" $"($gate)\n# --- BEGIN BEADS INTEGRATION")
+        $patched | save --force --raw $f
+        print -e $"gated ($hook)"
     }
 }
 
