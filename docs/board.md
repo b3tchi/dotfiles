@@ -8,7 +8,7 @@ sections when status flips.
 
 ## spec
 
-- [[sp002|WM mod+Return on remote project launches against the remote host]]
-
 ## ready
+
+- [[sp002|WM mod+Return on remote project launches against the remote host]]
 
