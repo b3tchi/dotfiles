@@ -100,8 +100,8 @@ created: YYYY-MM-DD
 <sample code snippet or link to a sample file showing how to implement / consume>
 
 ## components
-- <module / file / path>
-- <module / file / path>
+- [<module / file / path>](../../<module / file / path>)
+- [<module / file / path>](../../<module / file / path>)
 
 ## depends_on            ← only when this Feature layers on others
 - [[ft###|<feature>]]
@@ -144,9 +144,9 @@ retention enforced by drop job. No updates, no deletes.
 `event_id = record("request.approved", actor_id=user.id, payload={"request_id": req.id})`
 
 ## components
-- `services/audit/recorder.py`
-- `services/audit/schema.sql`
-- `infra/retention/audit_drop.cron`
+- [services/audit/recorder.py](../../services/audit/recorder.py)
+- [services/audit/schema.sql](../../services/audit/schema.sql)
+- [infra/retention/audit_drop.cron](../../infra/retention/audit_drop.cron)
 
 ## depends_on
 - [[ft002|database-access]]

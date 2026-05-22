@@ -66,8 +66,8 @@ created: YYYY-MM-DD
 <endpoints, payloads, contracts this implementation adds — exclude what features already expose>
 
 ## components
-- <story-specific glue: module / file / path>
-- <story-specific glue: module / file / path>
+- [<story-specific glue: module / file / path>](../../<module / file / path>)
+- [<story-specific glue: module / file / path>](../../<module / file / path>)
 
 ## specs
 - [[sp###|<spec-title>]]
@@ -203,7 +203,7 @@ One paragraph, ≤5 sentences. Three things it must convey: (1) the chosen patte
 ### Step 6 — Fill body sections (delta only)
 - **`## data_model`** — schema deltas this card *owns*. Features own their own state; don't re-document. Empty is OK (*"none — read-only over [[ft003]]"*).
 - **`## api_surface`** — endpoints/payloads this card *adds*. Exclude inherited surface.
-- **`## components`** — story-specific code paths. **Concrete** (`src/orders/sample-request.ts`, `migrations/2026-05-15-create-samples.sql`) — vague labels like *"the orders module"* defeat traceability.
+- **`## components`** — story-specific code paths. **Concrete** (`src/orders/sample-request.ts`, `migrations/2026-05-15-create-samples.sql`) — vague labels like *"the orders module"* defeat traceability. Bullet shape and any in-repo path elsewhere follow `infinifu:zettel-link-form` (markdown link `[<path>](../../<path>)` from `docs/notes/`).
 
 In `proposed` status, these can be educated guesses; the spec-retro pass updates them to match what landed.
 
@@ -241,6 +241,7 @@ Show: id + absolute path under `$AKM_ROOT`, story solved, H1 categories, Feature
 - **`solves` is non-negotiable.** No story → no card. Route to `infinifu:story-write`.
 - **Don't re-describe Feature contracts.** Listed `[[ft###]]`s inherit `api_surface` + constraints automatically; restating drifts.
 - **`## components` is concrete.** File/module paths, migration filenames — not *"the orders module"*. Vague entries defeat code-to-story traceability.
+- **References follow `infinifu:zettel-link-form`.** `## components` bullets, any in-repo path in `## api_surface` / prose, AKM zettel refs, runtime paths — each takes its target-specific shape per the microskill. Mixed shapes inside one section is a smell.
 - **Append-only on `accepted`.** Drift means narrow updates to factual sections only. If `approach` changed, the implementation changed — supersede.
 - **Categories are first-class.** They're the *only* index back to relevant ADRs and the hub. Defaulting to `architecture` makes the card unfindable.
 - **Spec is the plan; Implementation is the shape.** *"How will we sequence the work"* → `spec-writing`, not this skill.
@@ -258,6 +259,7 @@ Before reporting the Implementation written:
 - [ ] H1 has `# Implementation` plus ≥1 `[[cat###]]` plus `[[product]]`
 - [ ] Body sections in order: `## solves`, `## approach`, `## features`, `## data_model`, `## api_surface`, `## components`, `## specs` (+ `## superseded_by` only when `superseded`)
 - [ ] Hub annotated in `$AKM_ROOT/docs/product.md` (or skipped with note if hub missing)
+- [ ] All references follow `infinifu:zettel-link-form` — `## components` bullets in markdown-link form, AKM zettels in `[[…]]`, runtime paths in backticks
 - [ ] File staged on main (`git -C "$AKM_ROOT" add docs/notes/im<NNN>.md`) and **no commit created** — spec-refinement commits the lifecycle batch
 - [ ] Confirmation surfaces the absolute `$AKM_ROOT/docs/notes/im<NNN>.md` path so the user sees where it landed from a worktree
 
@@ -287,6 +289,7 @@ A spec for a story with no `im###` is a smell — refuse to start `spec-writing`
 - `references/examples.md` — three worked examples (fresh card, story-still-draft push-back, missing-Feature elevation). **Load when** validating a draft or seeing an unfamiliar edge case (draft anchor, missing category, no fitting Feature).
 - `docs/notes/akm.md` — top-level AKM model + lifecycle process flow. **Load when** needing cross-type perspective (how Implementations sit relative to Stories / Features / Specs / ADRs).
 - `infinifu:zettel-write` — orchestrator, atomicity gate, and cross-type styling rules (atomicity, 80-char wrap, link discipline, post-write audit). **Load when** the request shape is ambiguous or the styling rule is unclear; this skill owns the Implementation schema, that one owns shared discipline.
+- `infinifu:zettel-link-form` — microskill for which link shape to use per reference target. **Load when** writing or auditing `## components` / `## api_surface` / any in-repo path.
 - `infinifu:story-write` — counterpart for the problem side. **Load when** the anchoring story doesn't exist yet.
 - `infinifu:meta-skill-writing` — house style for this SKILL.md. **Load when** refactoring this file.
 

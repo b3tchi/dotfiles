@@ -46,8 +46,8 @@ created: YYYY-MM-DD
 <endpoints>
 
 ## components
-- src/foo/bar.ts
-- src/components/Baz.svelte
+- [src/foo/bar.ts](../../src/foo/bar.ts)
+- [src/components/Baz.svelte](../../src/components/Baz.svelte)
 
 ## specs
 - [[<spec-topic>|<spec-title>]]
@@ -57,7 +57,9 @@ created: YYYY-MM-DD
 Index: [[product]]
 ```
 
-The two body sections this skill cares about are `## solves` (one wikilink to a story) and `## components` (a bullet list of repo-relative paths or globs).
+The two body sections this skill cares about are `## solves` (one wikilink to a story) and `## components` (a bullet list of repo-relative paths or globs, each rendered as a markdown relative link `[<path>](../../<path>)` from `docs/notes/im###.md`).
+
+**Path-form invariant:** delegated to `infinifu:zettel-link-form`. Each bullet is `- [<path>](../../<path>)`; older bare-backtick entries `` - `<path>` `` are legacy — accept on read, but **normalize to the link form on attach** (and on any neighboring edit). The microskill carries the worked examples, glob handling, and anti-patterns.
 
 ## AKM Workspace Resolution
 
@@ -124,7 +126,7 @@ Treat the user input as a path if it contains `/`, ends in a known extension (`.
 
 **Process:**
 
-1. Search `$AKM_ROOT/docs/notes/im*.md` for the path. `grep -l '<query-path>' "$AKM_ROOT/docs/notes/"im*.md` returns the implementation files that list it under `## components`. Also handles glob expansion: if an im### has `src/auth/**` in components and the query is `src/auth/login.ts`, that should match — accept either *exact*, *prefix*, or *glob-style* coverage.
+1. Search `$AKM_ROOT/docs/notes/im*.md` for the path. `grep -l '<query-path>' "$AKM_ROOT/docs/notes/"im*.md` returns the implementation files that list it under `## components`. Plain substring grep is enough because the path string appears in both the bracketed label and the parenthesized href of the markdown link form `[<path>](../../<path>)` (and in legacy bare-backtick entries). Also handles glob expansion: if an im### has `src/auth/**` in components and the query is `src/auth/login.ts`, that should match — accept either *exact*, *prefix*, or *glob-style* coverage.
 2. For each matching `im###.md`, read `## solves` to extract the back-linked `us###`.
 3. Read the story's title (frontmatter `aliases[0]`) and status — that's what you'll render.
 
@@ -188,11 +190,11 @@ If no `im###.md` solves the story: "Story `us<id>` has no Implementation zettel 
    - **Sanity check:** if the path contains no `/` and no extension, ask "Is `<path>` really a code path? It looks like a topic word." — one confirmation, then proceed.
    - **Existence check (optional but recommended):** if a working tree is available, run `git ls-files <path>` or `ls` **in the user's cwd** (not `$AKM_ROOT` — code paths reference the user's source tree, which may be a feature worktree). If the path doesn't exist, warn: "Path `<X>` doesn't exist in the working tree. Add anyway?" Proceed under auto mode and note the warning in the response.
    - Locate the `## components` body section in the `im###.md`.
-   - Check whether the path is already a bullet. If yes → "Already listed, nothing to do."
-   - Append a new bullet `- <path>` to the section. Preserve other body sections untouched.
+   - Check whether the path is already a bullet. Match by the path string — it appears in both forms (markdown link `[path](../../path)` and legacy bare backtick `` `path` ``). If yes → "Already listed, nothing to do."
+   - Append a new bullet in markdown-link form: `- [<path>](../../<path>)` (the `../../` prefix is constant from `docs/notes/`). Do not emit the legacy bare-backtick form. Preserve other body sections untouched. If neighboring bullets in the same `## components` section are still in the legacy form, **normalize them too in the same edit** — mixed forms in one section are noisy and hide drift.
 5. **For remove:**
-   - Find the bullet for the path. If not present → "Path `<X>` not listed under im###'s `## components`."
-   - Delete just that line. Preserve all other content.
+   - Find the bullet for the path. Match by the path string (covers both markdown-link and legacy bare-backtick forms). If not present → "Path `<X>` not listed under im###'s `## components`."
+   - Delete just that bullet line. Preserve all other content.
 6. Write the file back.
 
 **Output:** show the operation (add/remove), the affected im### id, and the resulting **reverse-lookup** view for the story so the user sees the new state for that story.
@@ -267,3 +269,4 @@ This boundary keeps story-map narrow (it edits `## components` and reads `## sol
 - User wants to find by topic/keyword (no path) → `story-find`.
 - User wants to read a single story's full content → `story-read`.
 - User wants to manage H1 tags → `tag-manage`.
+- Question about which link shape to use (wikilink vs markdown vs backticks) → `infinifu:zettel-link-form`.

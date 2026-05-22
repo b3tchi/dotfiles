@@ -274,6 +274,7 @@ Route: invoke `infinifu:story-write` and stop. The atomicity gate already passed
 - **No status on generic cards.** Lifecycle states (`draft|ready|done|…`) belong to typed AKM zettels with workflows. Generic concept notes either exist or don't.
 - **Reject visibly.** When a post-write check fails, quote the violation and rewrite — don't silently patch. The user learns the discipline from seeing the rejections.
 - **Daily notes are exempt.** Journal entries under `docs/notes/daily/` are intentionally non-atomic logs; do not route them through this skill.
+- **Link form follows target type.** Delegated to the `infinifu:zettel-link-form` microskill — load it when in doubt. Short version: AKM zettels → `[[wikilink]]`, in-repo files → `[path](../../path)`, runtime/external → backticks. Mixing shapes (markdown link to a zettel, or wikilink to a code file) breaks both the graph and the renderer.
 
 </critical_rules>
 
@@ -311,6 +312,12 @@ across all of them.
    time; treat its diagnostics as the canonical view of graph health.
 9. **80-char prose wrap.** See the wrap rule above in `<critical_rules>`
    for the full why and exemptions.
+10. **Link form by target type.** Owned by the `infinifu:zettel-link-form`
+    microskill. Short version: AKM zettels → `[[wikilink]]`; in-repo
+    files → `[<path>](../../<path>)` markdown link from `docs/notes/`;
+    runtime/external paths → backticks. Load the microskill when emitting
+    or auditing references — it carries the worked examples, edge cases,
+    and anti-patterns.
 
 </schema_invariants>
 
@@ -329,6 +336,7 @@ Before reporting the capture complete:
 - [ ] If generic: `## see also` present with at least one entry; file was **staged** on main (`git -C "$AKM_ROOT" add docs/notes/<slug>.md`) and **no commit** was created
 - [ ] Confirmation surfaces the absolute `$AKM_ROOT/docs/notes/...` path so the user sees where it landed
 - [ ] moxide LSP shows no unresolved diagnostics for the new wikilinks (or the dangles are deliberate and noted)
+- [ ] Link forms follow `infinifu:zettel-link-form`: AKM zettels in `[[…]]`, in-repo paths in `[path](../../path)`, runtime/external in backticks; no mixed bullets inside a single section
 
 </verification_checklist>
 
@@ -357,6 +365,7 @@ Before reporting the capture complete:
 <references>
 
 - `docs/notes/akm.md` — canonical AKM schema for every typed zettel. Load when routing to a type or auditing a typed write against its schema.
+- `infinifu:zettel-link-form` — microskill that owns the link-form-by-target-type rule (invariant 10). Load when emitting or auditing any reference in a zettel body.
 - `infinifu:meta-skill-writing` — house style for this skill's own SKILL.md; load when refactoring this file.
 
 </references>

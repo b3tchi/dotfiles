@@ -55,8 +55,8 @@ created: YYYY-MM-DD
 <sample code snippet or link to a sample file showing how to implement / consume the feature>
 
 ## components
-- <module / file / path>
-- <module / file / path>
+- [<module / file / path>](../../<module / file / path>)
+- [<module / file / path>](../../<module / file / path>)
 
 ## superseded_by
 [[ft###|<replacement>]]        # only when status = superseded
@@ -201,6 +201,7 @@ Promote `proposed` → `stable` once a real Implementation lists this Feature in
 - **Concrete `api_surface`.** Signature, endpoint, or message contract — not "you call it somehow". Vague → back to `infinifu:idea-brainstorming`.
 - **`sample` is the proof.** A Feature nobody can show how to use is still an idea. Snippet or link to an existing sample file.
 - **Lowercase status values.** `proposed | stable | deprecated | superseded`. ADR statuses are capitalized; don't mix.
+- **References follow `infinifu:zettel-link-form`.** Every `## components` bullet, every in-repo path in `## api_surface` / `## sample` / prose uses the markdown link form `[<path>](../../<path>)`. AKM zettels stay `[[wikilink]]`; runtime paths stay in backticks. Load the microskill for the worked examples and anti-patterns.
 
 </critical_rules>
 
@@ -214,6 +215,7 @@ Before reporting the Feature written:
 - [ ] H1 has `# Feature` plus ≥1 `[[cat###]]` (resolving to existing files) plus `[[product]]`
 - [ ] Body sections in order: `## providing`, `## api_surface`, `## data_model`, `## sample`, `## components`
 - [ ] `## depends_on` present only when the Feature actually layers on others; each entry `[[ft###]]` resolves
+- [ ] All references follow `infinifu:zettel-link-form` (AKM → `[[…]]`, in-repo → `[path](../../path)`, runtime → backticks) — especially every `## components` bullet
 - [ ] `## superseded_by` present iff `status: superseded`, with `[[ft###]]` to the replacement
 - [ ] `Index: [[product]]` footer present after a `---` rule
 - [ ] No `solves: [[us###]]` link anywhere in the body
@@ -238,6 +240,7 @@ Before reporting the Feature written:
 - `references/examples.md` — worked example (`ft004` audit-log), hub-update rules, and editing/superseding rationale. Load when handling a deprecate/supersede chain or when the user disputes which edit mode applies.
 - `docs/notes/akm.md` — top-level AKM model + lifecycle process flow. Load when needing cross-type perspective (how Features sit in the lifecycle relative to Stories / Implementations / Specs).
 - `infinifu:zettel-write` — cross-type styling rules (atomicity, 80-char wrap, link discipline, post-write audit). Load when the styling rule is unclear; this skill owns the Feature schema, that one owns shared discipline.
+- `infinifu:zettel-link-form` — microskill for which link shape to use per reference target. Load when emitting `## components`, `## sample`, `## api_surface`, or any in-repo path.
 - `infinifu:meta-skill-writing` — house style for this SKILL.md itself. Load when refactoring this file.
 
 </references>

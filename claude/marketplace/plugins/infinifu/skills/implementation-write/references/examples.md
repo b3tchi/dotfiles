@@ -30,8 +30,8 @@ created: YYYY-MM-DD
 <endpoints / payloads / contracts this implementation adds — exclude what features already expose>
 
 ## components
-- <story-specific glue: module / file / path>
-- <story-specific glue: module / file / path>
+- [<story-specific glue: module / file / path>](../../<module / file / path>)
+- [<story-specific glue: module / file / path>](../../<module / file / path>)
 
 ## specs
 - [[<spec-topic>|<spec-title>]]
@@ -91,9 +91,9 @@ Stage parsed rows in a per-upload table, run validators against the staging set,
 - `GET /samples/import/:id` — returns row-level validation state and promotion progress.
 
 ## components
-- src/samples/import.ts
-- src/samples/staging-table.sql
-- migrations/2026-05-15-create-sample-import-staging.sql
+- [src/samples/import.ts](../../src/samples/import.ts)
+- [src/samples/staging-table.sql](../../src/samples/staging-table.sql)
+- [migrations/2026-05-15-create-sample-import-staging.sql](../../migrations/2026-05-15-create-sample-import-staging.sql)
 
 ## specs
 - (none yet — `board/spec/samples-bulk-import.md` once drafted)
@@ -148,7 +148,7 @@ Before reporting the card complete:
 - [ ] Every `[[ft###]]` in `## features` resolves to a real file; status acknowledged for `proposed`/`deprecated` Features
 - [ ] `## approach` is one paragraph (≤5 sentences), names pattern + trade-off, mentions binding ADRs/Features in prose
 - [ ] `## data_model` / `## api_surface` / `## components` describe deltas only, not Feature internals
-- [ ] `## components` entries are concrete file/module paths (not vague labels)
+- [ ] `## components` entries are concrete file/module paths (not vague labels), each rendered as a markdown relative link `[<path>](../../<path>)`
 - [ ] `Index: [[product]]` footer present
 - [ ] Filename is `docs/notes/im<NNN>.md`, sequential next id (max + 1, gaps preserved)
 - [ ] `docs/product.md` story bullet annotated with `>> [[im###]]` (or hub-missing message shown)
