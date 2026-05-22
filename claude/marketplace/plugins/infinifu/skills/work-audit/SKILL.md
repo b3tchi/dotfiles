@@ -1,12 +1,10 @@
 ---
 name: work-audit
-description: Use when auditing a single bd task after the implementer reported ready (task still `in_progress` with implementation notes) — compare the design and success criteria against what was actually shipped, verify tests catch real bugs, and catch dead code left from refactoring. This is the per-task verification gate invoked by reviewer agents (and by solo devs after `work-do`). You own the `in_progress → closed` verdict (approved or rejected) but you do NOT write to bd from the worktree — emit a structured verdict block and the orchestrator (scrum-master or solo dev) applies `bd close` / `bd update --notes` and triggers `work-merge` serially from main. Epic-level completeness is just every task passing its own audit.
+description: Use when auditing a single bd task after the implementer reported ready (task still `in_progress` with implementation notes) — compare the design and success criteria against what was actually shipped, verify tests catch real bugs, and catch dead code left from refactoring. This is the per-task verification gate invoked by reviewer agents (and by solo devs after `work-do`). You own the `in_progress → closed` transition: approved → you call `bd close` with audit evidence; rejected → add gap notes and leave `in_progress` for the implementer to retry. Epic-level completeness is just every task passing its own audit.
 ---
 
 <skill_overview>
 Audit one bd task: did the implementation fulfil the task's contract without deviation, and is every success criterion met with evidence? The task is the contract. Every claim you make (approved or rejected) is backed by a file:line citation, a command output, or a search result — not vibes.
-
-**Worker contract — no bd writes from the worktree.** You own the *verdict* (APPROVED / REJECTED with evidence). You do NOT run `bd close` or `bd update --notes` from the worktree. You emit a structured verdict block; the **orchestrator** (the scrum-master in automated mode, the user in solo-dev mode) applies `bd close` / `bd update --notes` and invokes `work-merge` serially from `$AKM_ROOT`. This centralizes bd writes to main, eliminating the concurrent-writer race on bd's shared Dolt server that has been observed reverting closes.
 </skill_overview>
 
 <rigidity_level>
@@ -78,7 +76,7 @@ Stage 6 of the AKM lifecycle — see `claude/akm/akm-lifecycle.md` for the full 
 - `us###.acceptance_criteria` — the binding contract. Audit against this, not just the bd task body. A task can be technically "done" against the bd description but still fail the story AC; that is a rejection.
 - `sp###.tasks` block matching `#### bd <task-id>` — `#### success_criteria`, `#### edge_cases`, and `#### test_plan` are the assertions the implementation must satisfy.
 
-**Writes:** none from this skill — neither AKM zettels nor bd. You produce a verdict block at Step 7; the orchestrator translates it into `bd close` (approval) or `bd update --notes` (rejection gaps) and runs `work-merge` on approval, all from `$AKM_ROOT` serially.
+**Writes:** none. Audit evidence belongs in the bd task notes; `bd close` (approval) or gap notes (rejection) is the only state transition this skill owns.
 
 ## Step 1 — Load the task
 
@@ -166,102 +164,77 @@ Common deviation shapes:
 
 If the implementer logged a DEVIATION note in bd, they flagged it honestly — decide whether the deviation is acceptable (often it is — specs are imperfect). If they didn't log it but it exists, that's a harder reject because the honest-deviation discipline was violated.
 
-## Step 7 — Verdict (you own the decision; orchestrator applies it)
+## Step 7 — Verdict (you own the state transition)
 
-The implementer left the task `in_progress` with evidence notes. You, the reviewer, decide `APPROVED` or `REJECTED`. The **orchestrator** (scrum-master in automated mode; user in solo mode) is the actor that runs `bd close` / `bd update --notes` and fires `work-merge` — they do it from `$AKM_ROOT` to keep bd writes serial. Your job here is to emit a structured verdict block they can apply mechanically.
+The implementer left the task `in_progress` with evidence notes. You, the reviewer, own the `in_progress → closed` transition. That gate is what makes `closed` mean "reviewed and approved" rather than "implementer thinks it's done".
 
 ### Approved
 
 Every success criterion has evidence, no automated-check hits, no anti-patterns, no silent deviation, tests meaningful.
 
-Emit this report block:
+Close the task with audit evidence:
 
-```yaml
-# work-audit verdict — bd <id>
-verdict: APPROVED
-task_id: <id>
-iteration: <N>                    # from branch bd-<id>.<N> (git branch --show-current in audited worktree)
-branch: bd-<id>.<N>
-worktree: <absolute path>
+```bash
+bd close <id> --reason "AUDITED: APPROVED
 
-criteria_verified:
-  - criterion: <text>
-    evidence: <file:line or command output>
-  - criterion: <text>
-    evidence: <file:line or command output>
-
-tests:
-  passed: <N>
-  new: <N>
-  outcome: <one-line summary>
-
-deviations: |
-  none
-  # OR: "logged and acceptable: <note>"
-
-close_reason: |
-  AUDITED: APPROVED
-
-  Criteria verified:
-  - <criterion 1>: <evidence>
-  - <criterion 2>: <evidence>
-  Tests: <N passed, N new>
-  Deviations: <either 'none' or 'logged and acceptable: <note>'>
-
-orchestrator_actions:
-  - cmd: bd close <id> --reason "$(extract close_reason)"
-  - cmd: invoke infinifu:work-merge with task_id=<id> iteration=<N>
+Criteria verified:
+- <criterion 1>: <evidence>
+- <criterion 2>: <evidence>
+Tests: <N passed, N new>
+Deviations: <either 'none' or 'logged and acceptable: <note>'>"
 ```
 
-The orchestrator then runs, in order, from `$AKM_ROOT`:
+**Then auto-trigger `infinifu:work-merge` with the task id AND the approved iteration `<N>`** (extracted from the current branch name `bd-<id>.<N>` of the audited worktree — `git -C <worktree> branch --show-current`, then split on `.`). work-merge is the per-task land step — it merges `bd-<id>.<N>` into base locally, runs the post-merge test gate, removes the worktree, sweeps any sibling rejected iterations of the same task, and (if this was the last open child of the parent epic) flips the AKM lifecycle + archives the spec + closes the bd epic. All operations are local; no push. This trigger is part of the audit-approve gesture — the dispatcher / user should not be required to type a separate "merge" command.
 
-1. `bd close <id> --reason "$close_reason"` — single writer, no race.
-2. `infinifu:work-merge` for `bd-<id>.<N>` — merges into base, runs post-merge tests, removes worktree, fires epic finale if last child.
+work-merge's possible outcomes:
 
-work-merge's possible outcomes (the orchestrator routes these — not you):
+| Result | Meaning | Next |
+|--------|---------|------|
+| `TASK_LANDED` | Merge clean, tests green, worktree removed. Other tasks still open in the epic. | Report APPROVED to dispatcher; pipeline continues. |
+| `TASK_LANDED + EPIC_DONE` | Same as above plus the epic finale fired (AKM flip + board→archive + bd close epic). | Report APPROVED + EPIC_DONE; dispatcher runs `spec-retro` to refresh the graph and push. |
+| `POST-MERGE FAIL` (exit 2 from `land-bd-task.sh`) | Tests failed after merging into base; merge rolled back; task reopened with a `POST-MERGE FAIL` note. | Convert this back to a REJECTED audit verdict — the task left audit looking clean but the integration is broken. Re-dispatch the implementer with the post-merge failure as the gap. |
 
-| Result | Meaning | Orchestrator next step |
-|--------|---------|------------------------|
-| `TASK_LANDED` | Merge clean, tests green, worktree removed. Other tasks still open in the epic. | Continue pipeline. |
-| `TASK_LANDED + EPIC_DONE` | Same as above plus the epic finale fired (AKM flip + board→archive + bd close epic). | Run `spec-retro` to refresh the graph and push. |
-| `POST-MERGE FAIL` (exit 2 from `land-bd-task.sh`) | Tests failed after merging into base; merge rolled back; task reopened with a `POST-MERGE FAIL` note. | Treat as REJECTED — re-dispatch implementer with post-merge failure as the gap. |
+Then report to the dispatcher:
+
+```
+Task <id>: APPROVED (closed + landed locally)
+
+Criteria:
+- <criterion 1>: <evidence>
+- <criterion 2>: <evidence>
+Tests: <N passed, N new>
+Deviations: <either 'none' or 'logged and acceptable: <note>'>
+Land result: <TASK_LANDED | TASK_LANDED + EPIC_DONE>
+Epic <epic-id>: <N open children remaining | closed — run spec-retro for sp###>
+```
 
 ### Rejected
 
-One or more gaps found. Emit this report block — the task stays `in_progress`; the orchestrator only appends rejection notes:
+One or more gaps found. Leave the task `in_progress` (do NOT close — the work isn't done) and record the rejection on the task itself so the next implementer dispatch has the evidence:
 
-```yaml
-# work-audit verdict — bd <id>
-verdict: REJECTED
-task_id: <id>
-iteration: <N>
-branch: bd-<id>.<N>
-worktree: <absolute path>
+```bash
+bd update <id> --notes "AUDITED: REJECTED
 
-gaps:
-  - check: <criterion or anti-pattern label>
-    evidence: <file:line or command output showing the gap>
-  - check: <next gap>
-    evidence: <…>
+Gaps:
+- <criterion or check>: <what's missing, with file:line or command output>
+- <next gap>: ...
 
-requested_action: |
-  <what the implementer needs to do to pass re-audit>
-
-notes_to_append: |
-  AUDITED: REJECTED
-
-  Gaps:
-  - <criterion or check>: <what's missing, with file:line or command output>
-  - <next gap>: ...
-
-  Requested action: <what the implementer needs to do to pass re-audit>
-
-orchestrator_actions:
-  - cmd: bd update <id> --notes "$(extract notes_to_append)"
-  - cmd: re-dispatch implementer for next iteration (bd-<id>.<N+1>)
+Requested action: <what the implementer needs to do to pass re-audit>"
 ```
 
-The orchestrator appends the notes from main, then re-dispatches the implementer who reads the rejection evidence and fixes the gaps. Re-run the audit after they report ready again. If rejected twice on the same gap, escalate to the human — don't loop indefinitely.
+Then report to the dispatcher:
+
+```
+Task <id>: REJECTED (left in_progress, notes updated)
+
+Gaps:
+- <criterion or check>: <what's missing, with file:line or command output>
+- <next gap>: ...
+
+Requested action: <what the implementer needs to do to pass re-audit>
+```
+
+The dispatcher re-dispatches the implementer, who reads the updated notes with the rejection evidence and fixes the gaps. Re-run the audit after they report ready again. If rejected twice on the same gap, escalate to the human — don't loop indefinitely.
 
 </the_process>
 
@@ -325,21 +298,19 @@ Can't check all boxes? Keep auditing — don't issue a verdict on partial work.
 **Call chain (per task):**
 
 ```
-implementer (work-do) → emits report block (notes + status_transition)
-                           ↓
-orchestrator on $AKM_ROOT → bd update notes, bd update status (serial)
+implementer (work-do) → records evidence in notes, leaves in_progress
                            ↓
          reviewer agent (work-audit)
-          ├── verdict: APPROVED → orchestrator runs `bd close` + invokes `work-merge`
-          └── verdict: REJECTED → orchestrator runs `bd update --notes` with gaps;
-                                   re-dispatches implementer for next iteration
+          ├── approved → reviewer calls bd close with audit evidence
+          └── rejected → reviewer updates notes with gaps, leaves in_progress;
+                         dispatcher sends implementer back to fix
 ```
 
-**Decision ownership vs write ownership.** The implementer decides "ready for review"; the reviewer decides "approved or rejected". The **orchestrator** (scrum-master or solo dev) is the only actor that runs bd write commands, and it runs them serially from `$AKM_ROOT`. Decoupling decision from write is what makes the model safe under parallel agents: many workers can decide in parallel; one writer applies the decisions sequentially.
+**State ownership:** the implementer owns `open → in_progress` (claim) and `in_progress → blocked` (stuck). The reviewer owns `in_progress → closed` (approval gate). That split is what makes `closed` mean "reviewed and approved" instead of "implementer thinks it's done".
 
-**Epic completeness** is detected by `work-merge` (invoked by the orchestrator on the approved path) — when the just-closed task is the last open child of its parent epic, work-merge runs the epic finale (AKM flip + board→archive + bd close epic). This skill doesn't track it; it just hands the verdict block to the orchestrator, who runs work-merge and routes the result.
+**Epic completeness** is detected by `work-merge` (auto-invoked on the approved path) — when the just-closed task is the last open child of its parent epic, work-merge runs the epic finale (AKM flip + board→archive + bd close epic). This skill doesn't track it; it just hands the task id to work-merge and reports whatever work-merge returns.
 
-Use `bd` read commands (`bd show`, `bd list`, `bd dep tree`); never read `.beads/issues.jsonl` directly. Never run bd write commands (`bd close`, `bd update`, `bd create`) from the audited worktree — emit them in the verdict block instead.
+Use `bd` commands (`bd show`, `bd list`, `bd dep tree`), never read `.beads/issues.jsonl` directly.
 </integration>
 
 <references>

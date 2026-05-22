@@ -70,18 +70,18 @@ Stage 7 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`).
 
 ## Trigger contract
 
-work-merge is invoked **per task**, with the bd task id and the approved iteration `<N>`, by the **orchestrator** (the scrum-master in automated mode, the user in solo mode). The orchestrator invokes work-merge *after* it has applied `bd close <id>` from `$AKM_ROOT` based on work-audit's APPROVED verdict block — keeping all bd writes serial on main.
+work-merge is invoked **per task**, with the bd task id, by `work-audit` after a successful APPROVED verdict. The id is the only required input.
 
 ```
-work-merge <bd-id> <iteration>
+work-merge <bd-id>
 ```
 
-work-audit no longer auto-fires work-merge directly: that would be a worktree-side write. Instead, work-audit emits a verdict block listing `orchestrator_actions: [bd close …, invoke work-merge …]`, and the orchestrator runs both serially.
+work-audit's Step 7 Approved path ends with this invocation. No manual user step is required between audit-approve and land.
 
-For a solo developer running outside the scrum-master pipeline, the user IS the orchestrator: they read work-audit's verdict block, run the `bd close …` line, then invoke work-merge:
+For a solo developer running outside the scrum-master pipeline, invoke manually after a manual audit:
 
 ```
-"merge bd-42 iteration 0"   →  work-merge skill fires
+"merge bd-42"   →  work-merge skill fires
 ```
 
 ## Process
@@ -200,10 +200,8 @@ Next: run spec-retro for sp### — it refreshes the AKM graph and pushes everyth
 
 **Triggered by:**
 
-- The orchestrator (`infinifu:plan-scrum-master` in automated mode, the solo dev in manual mode) — after the orchestrator applies `bd close` from `$AKM_ROOT` per work-audit's APPROVED verdict block.
-- Solo dev — manual invocation after manual audit, with the verdict block in hand.
-
-work-merge does NOT auto-fire from work-audit anymore; that would put the bd write back into a worktree context. The orchestrator owns the serialization point.
+- `infinifu:work-audit` — auto-invokes work-merge on APPROVED verdict (per task).
+- Solo dev — manual invocation after manual audit.
 
 **Calls:**
 

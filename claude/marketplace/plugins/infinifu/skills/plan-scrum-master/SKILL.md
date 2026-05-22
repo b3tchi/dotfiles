@@ -7,33 +7,11 @@ description: Use to run, dispatch, orchestrate, kick off, or execute multi-agent
 
 ## Overview
 
-Orchestrate bd-driven development by reading the ready queue, dispatching implementer agents, applying their state transitions to bd from main, relaying reports to reviewer agents, and routing verdicts.
+Orchestrate bd-driven development by reading the ready queue, dispatching implementer agents, relaying their reports to reviewer agents, and tracking pipeline progress.
 
-**Core principle:** You are the bd write gateway. You stay on `$AKM_ROOT` (main) for the entire pipeline. Workers (implementers + reviewers) live in feature worktrees and never write to bd themselves — they emit structured reports / verdict blocks that you parse and apply serially from main. This eliminates concurrent-writer races on bd's shared Dolt server that have been observed reverting closes.
+**Core principle:** You are a task dispatcher that stays on main. Your domain is bd. You never touch code, git, worktrees, or files. You read the board, dispatch agents (no `isolation: "worktree"` — implementers create their own worktree at `bd-<id>.<N>` so dir name matches branch name), relay information, and track progress. Reviewers verify and per-task land via work-audit → work-merge.
 
 **Announce at start:** "I'm using the plan-scrum-master skill to orchestrate the pipeline."
-
-## BD WRITE GATEWAY — you are the only writer
-
-bd has one persistent Dolt server shared across worktrees. Multiple parallel agents writing to it simultaneously have been observed producing reverted closes (a task closes, then on the next `bd show` it shows open again). The fix is process-level: a **single serial writer** on a single workspace.
-
-**You** are that writer. **You stay on `$AKM_ROOT`** and apply every bd write — claim, notes, discoveries, close, blocked, epic close — sequentially. Workers report; you write.
-
-What this looks like in practice:
-
-| When | What you write to bd from `$AKM_ROOT` |
-|---|---|
-| Before dispatching first task of an epic | `bd update <epic-id> --status in_progress --priority 1`; bump children to P1 |
-| Before dispatching each implementer | `bd update <id> --status in_progress` (the claim) |
-| After saving agent metadata | `bd update <id> --notes "Agent session: …"` |
-| Receiving implementer report | Apply `notes_to_append`, file `discoveries:`, apply blocked status if reported |
-| Receiving reviewer APPROVED verdict | `bd close <id> --reason "$close_reason"`; then invoke `work-merge` (which closes the epic if last child) |
-| Receiving reviewer REJECTED verdict | Apply `notes_to_append` with gaps |
-| Retry decisions | `bd update <id> --notes "Retry attempt N: …"` |
-
-Workers MUST NOT run any of these from the worktree. Read-only bd commands (`bd show`, `bd dep tree`, `bd list`) are fine in the worktree because reads don't race.
-
-If you find yourself reading a worker report that says "I ran `bd close …`" — that's a contract violation. Flag the worker, double-check the bd state from `$AKM_ROOT`, and re-apply if the state diverged from the report's intent.
 
 ## Execution Model
 
@@ -248,16 +226,6 @@ bd list --parent <epic-id> --status open --json | jq -r '.[].id' \
 
 Skip this if the epic is already `in_progress` / P1 (e.g., resumed session). Do this once per epic, not per task. If some child tasks already have a higher-priority override (P0 — urgent), leave those alone.
 
-### Claim the task (you, on main)
-
-Before dispatching the implementer, you (running on `$AKM_ROOT`) claim the task. This is the **first half of bd write serialization** — the implementer never writes to bd from the worktree.
-
-```bash
-bd update <id> --status in_progress
-```
-
-Then dispatch.
-
 ### Dispatch the task
 
 For each task, run `bd show <id>` and dispatch an `Agent` tool call with `run_in_background: true` (no `isolation: "worktree"` — that auto-generates an opaque dir name; the implementer creates its own worktree at the right name per work-do Step 2). The dispatch payload contains:
@@ -265,17 +233,17 @@ For each task, run `bd show <id>` and dispatch an `Agent` tool call with `run_in
 1. **Task ID and title**
 2. **Full design text** from `bd show` (paste it — don't make agent query bd)
 3. **Context** — what tasks were recently completed, what else is in the pipeline
-4. **Branch + worktree name to use:** both `bd-<id>.<N>`. `<N>` is the iteration (`.0` first attempt; orchestrator increments on retry — see Step 5). Path = `$AKM_ROOT/.worktrees/bd-<id>.<N>`. The implementer creates the worktree itself with `git worktree add` so the dir name matches the branch name — work-merge and the spec-retro safety-net sweep both key off `bd-<id>` branches, and the matching dir name makes `git worktree list` self-documenting.
-5. **Mandatory rules:**
-   - "NEVER use `cd path && command` in bash — always use absolute paths. `cd &&` triggers user confirmation prompts that block background agents."
-   - **"NEVER run bd write commands** (`bd close`, `bd update`, `bd create`, `bd dep add`, `bd remember`) from the worktree. Read-only bd commands (`bd show`, `bd dep tree`, `bd list`) are fine. Emit your report block per work-do Step 8; the orchestrator applies all bd writes from `$AKM_ROOT` serially."
+4. **Branch + worktree name to use:** both `bd-<id>.<N>`. `<N>` is the iteration computed by work-do's picker (`.0` on first attempt, increment on retry). Path = `$AKM_ROOT/.worktrees/bd-<id>.<N>`. The implementer creates the worktree itself with `git worktree add` so the dir name matches the branch name — work-merge and the spec-retro safety-net sweep both key off `bd-<id>` branches, and the matching dir name makes `git worktree list` self-documenting.
+5. **Mandatory rule:** "NEVER use `cd path && command` in bash — always use absolute paths. `cd &&` triggers user confirmation prompts that block background agents."
 
 **The implementer is responsible for:**
+- Claiming the task: `bd update <id> --status in_progress`
 - **Creating its own worktree** at `$AKM_ROOT/.worktrees/bd-<id>.<N>` on branch `bd-<id>.<N>` via `git worktree add` (per work-do Step 2). Do NOT rely on `isolation: "worktree"` — opaque dir names break the dir-to-task mapping the cleanup sweeps depend on.
 - `cd` into the newly-created worktree; do all work there
 - Implementing, testing, committing in the worktree
-- Do NOT merge — orchestrator handles that via work-merge
-- **Emitting the structured report** per work-do Step 8 (status_transition, notes_to_append, discoveries, blocked_reason). NO bd write commands from the worktree.
+- Do NOT merge — reviewer will handle that
+- Reporting back: what it did, branch name (`bd-<id>.<N>`), absolute worktree path, test results, concerns
+- Marking blocked if it can't proceed: `bd update <id> --status blocked`
 - **NEVER use `cd ... &&` in bash commands** — use absolute paths instead (triggers extra user confirmation, breaks background flow)
 
 **Dispatch up to `max_parallel` agents in a single message**, all with `run_in_background: true`. Do NOT poll or sleep — you will be automatically notified when each agent completes. While waiting, you may report status or respond to the human.
@@ -285,84 +253,28 @@ For each task, run `bd show <id>` and dispatch an `Agent` tool call with `run_in
 - **Worktree path** — for reviewers to inspect the code
 - **Branch name** — for reviewers to merge
 
-Apply these to bd notes from `$AKM_ROOT`, serially:
-
-```bash
-bd update <id> --notes "Agent session: [id], worktree: [path], branch: [branch]"
-```
+Log these to bd notes: `bd update <id> --notes "Agent session: [id], worktree: [path], branch: [branch]"`
 
 This enables resuming agents on rejection instead of dispatching fresh ones — the original agent retains its full context.
 
-## Step 4: Apply implementer report + relay to reviewer
+## Step 4: Relay to Reviewer
 
-When an implementer notification arrives, the report block contains `notes_to_append`, `discoveries`, `status_transition`, and optionally `blocked_reason`. **You apply all bd writes from `$AKM_ROOT` before dispatching the reviewer** — this is the bd write gateway.
-
-### 4a: Parse and apply the report (serial bd writes from main)
-
-```bash
-# 1. Append implementation notes
-bd update <id> --notes "$(extract notes_to_append from report block)"
-
-# 2. File discoveries (if any)
-for d in discoveries:
-  bd create "$d.title" --type "$d.type" --design "$d.design"
-  bd dep add <new-id> "$d.depends-on" --type discovered-from
-
-# 3. Status transition
-if status_transition is "in_progress → blocked":
-  bd update <id> --status blocked --notes "$(extract blocked_reason)"
-  # Then ESCALATE — see Step 5
-else:
-  # status stays in_progress; reviewer will close on approval
-  proceed to 4b
-```
-
-If `blocked`, do NOT dispatch the reviewer — go to Step 5 (escalation).
-
-### 4b: Dispatch the reviewer
-
-Dispatch a reviewer agent with `run_in_background: true`:
+When notified that an implementer has completed, dispatch a reviewer agent with `run_in_background: true`:
 
 1. **Task spec** — the original design text from bd
-2. **Implementer's full report** — pass through as-is, including paths/branches
-3. **Same hard rules as implementer:** NO bd write commands from the worktree. Read-only bd is fine. Emit the verdict block per work-audit Step 7.
+2. **Implementer's full report** — pass through as-is, including any metadata (paths, branches, etc.)
 
-Do NOT wait for the reviewer — you will be notified when it completes.
+You do not interpret the report. You relay it. Do NOT wait for the reviewer — you will be notified when it completes. Continue processing other notifications or dispatching new implementers in the meantime.
 
 **The reviewer is responsible for:**
-- Invoking `infinifu:work-audit` against the task — that skill produces the verdict block (APPROVED / REJECTED with evidence) but does NOT run bd writes or fire work-merge directly
+- Invoking `infinifu:work-audit` against the task — that skill owns the verdict, the `bd close` on approve, and the auto-trigger of `infinifu:work-merge` for per-task local landing
 - Reading actual code in the implementer's worktree as part of work-audit's evidence-gathering
-- Emitting the verdict block with `orchestrator_actions: [...]`
+- **work-audit on APPROVED auto-fires work-merge**, which: merges `bd-<id>` into base locally with `--no-ff`, runs the post-merge test gate, removes the worktree + local branch, and (if this was the last open child of the epic) flips the AKM lifecycle + moves board→archive + closes the bd epic. All local — no push. spec-retro syncs to remote later.
+- Closing the task happens inside work-audit (`bd close <id> --reason "AUDITED: APPROVED ..."`); reviewer does not call `bd close` directly
 - **NEVER use `cd ... &&` in bash commands** — use absolute paths instead (triggers extra user confirmation, breaks background flow)
-- **NEVER run bd write commands** from the audited worktree
-
-### 4c: Apply reviewer verdict (serial bd writes + work-merge from main)
-
-When the reviewer notification arrives with its verdict block:
-
-**APPROVED path:**
-```bash
-# 1. Close the task
-bd close <id> --reason "$(extract close_reason from verdict block)"
-
-# 2. Invoke work-merge for this task + iteration
-infinifu:work-merge <id> <N>     # iteration from verdict block
-
-# 3. Route work-merge's outcome:
-#    TASK_LANDED            → continue pipeline
-#    TASK_LANDED + EPIC_DONE → run infinifu:spec-retro
-#    POST-MERGE FAIL        → treat as REJECTED, re-dispatch implementer
-```
-
-**REJECTED path:**
-```bash
-# 1. Append rejection notes
-bd update <id> --notes "$(extract notes_to_append from verdict block)"
-
-# 2. Re-dispatch implementer for next iteration (bd-<id>.<N+1>) — see Step 5
-```
-
-work-audit no longer auto-fires work-merge directly. Putting the bd close + work-merge invocation on the orchestrator side keeps every bd write on main and serial — the whole point of this gateway.
+- If rejected (verdict from work-audit OR `POST-MERGE FAIL` from work-merge converted back to rejection):
+  - work-audit / work-merge already updated bd notes with `Gaps:` or `POST-MERGE FAIL:` evidence
+  - Reporting the rejection details (gaps, requested action) to scrum master so the implementer can be re-dispatched
 
 ## Step 5: Handle Rejections and Failures
 
@@ -430,27 +342,20 @@ Need your decision to continue.
 
 ## What You Do Touch vs. What You Don't
 
-**You own (from `$AKM_ROOT`, serially — you are the bd write gateway):**
+**You own:**
 - Reading the board (`bd ready`, `bd list`, `bd show`, `bd stats`)
-- Epic state: `open → in_progress` and priority bump on first dispatch
-- Task claim: `bd update <id> --status in_progress` before dispatching the implementer
+- Epic state: `open → in_progress` on first dispatch (close is NOT yours — spec-retro handles it)
 - Logging dispatch metadata to bd notes (agent id, worktree path, branch)
-- Applying implementer report blocks: notes_to_append, discoveries (bd create + bd dep add), blocked status
-- Applying reviewer verdict blocks: `bd close` on APPROVED + invoke `work-merge`; `bd update --notes` on REJECTED
-- Routing work-merge outcomes: `TASK_LANDED` → continue; `TASK_LANDED + EPIC_DONE` → run spec-retro; `POST-MERGE FAIL` → treat as REJECTED
 
 **You never:**
 - Write code, edit files, or run tests
-- Touch git, branches, worktrees, or merges — you stay on `$AKM_ROOT`
-- Create or manage worktrees — implementer creates its own worktree per work-do Step 2 (with the matching `bd-<id>.<N>` dir name); work-merge handles removal on approve
-- Close **epics directly** — work-merge closes the epic when it detects the last open child has landed. You invoke work-merge; it does the epic-finale bd close.
+- Touch git, branches, worktrees, or merges — you stay on main
+- Create or manage worktrees — implementer creates its own worktree per work-do Step 2 (with the matching `bd-<id>.<N>` dir name); reviewer's work-audit → work-merge handles removal on approve
+- Claim or close **tasks** — implementer sets `in_progress`, reviewer closes
+- Close **epics** — spec-retro owns that (after merge)
 - Analyze code, detect file conflicts, or review implementations
 - Decide technical approach for agents
-
-**Workers (implementers + reviewers) never:**
-- Run any bd write command (`bd close`, `bd update`, `bd create`, `bd dep add`, `bd remember`) — they emit structured reports / verdict blocks for you to apply.
-
-Read-only bd (`bd show`, `bd list`, `bd dep tree`) is safe everywhere — reads don't race.
+- Interpret agent metadata — just relay it
 
 ## Integration
 
@@ -464,7 +369,7 @@ Read-only bd (`bd show`, `bd list`, `bd dep tree`) is safe everywhere — reads 
 
 **Reviewer agents should use:**
 - **infinifu:work-audit** — per-task verification gate. Auto-triggers work-merge on the APPROVED verdict.
-- **infinifu:work-merge** (invoked by the orchestrator from `$AKM_ROOT` after applying `bd close` for an APPROVED task) — per-task local land + worktree cleanup; epic finale (AKM flip + board→archive + bd close epic) on the last open child.
+- **infinifu:work-merge** (auto-triggered, not invoked directly) — per-task local land + worktree cleanup; epic finale (AKM flip + board→archive + bd close epic) on the last open child.
 
 **After every pipeline task lands and the epic finale has fired:**
 - **infinifu:spec-retro** — refreshes the AKM graph (im### body rewrite, new ADRs, ft### updates, us### drafts) and pushes everything to remote (`git push` + `bd dolt push`). work-merge stayed local; this is where remote sync happens.
