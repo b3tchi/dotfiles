@@ -103,14 +103,20 @@ def --wrapped "main connect" [
     }
 
     # Create linked session on remote via SSH (headless, unpinned)
-    let target = (^ssh ...$args $remote_cmd 2>/dev/null | str trim)
+    # do -i: don't abort on nonzero ssh exit; complete captures it for us
+    let start_result = (do -i { ^ssh ...$args $remote_cmd } | complete)
+    let target = ($start_result.stdout | str trim)
     if ($target | is-empty) {
-        print -e $"Error: tmux-start failed on ($display_host)"
+        print -e $"Error: tmux-start failed on ($display_host) — exit ($start_result.exit_code)"
+        if ($start_result.stderr | str trim | is-not-empty) {
+            print -e ($start_result.stderr | str trim)
+        }
         exit 1
     }
 
     # Resolve stable remote_target as session_group:window_id
-    let remote_target = (^ssh ...$args $"tmux display-message -t '($target)' -p '#{session_group}:#{window_id}'" 2>/dev/null | str trim)
+    let resolve_result = (do -i { ^ssh ...$args $"tmux display-message -t '($target)' -p '#{session_group}:#{window_id}'" } | complete)
+    let remote_target = ($resolve_result.stdout | str trim)
     let remote_target = if ($remote_target | is-empty) { $target } else { $remote_target }
 
     # SSH command for the thin pane
