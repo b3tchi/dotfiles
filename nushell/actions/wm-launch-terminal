@@ -1,0 +1,73 @@
+#!/usr/bin/env nu
+# Launch a terminal with TMUX_TARGET set for the focused WM workspace.
+# Resolves the workspace via wm-current-workspace, looks up the project
+# registry entry, and branches:
+#   local  (no entry or no ssh field):
+#     TMUX_TARGET=$(tmux-start start 0 <ws>) <term_cmd>
+#   remote (ssh field present):
+#     TMUX_TARGET=$(tmux-to-workstation connect --no-attach -g <ws> --cwd <path> -- <ssh>) <term_cmd>
+# Both branches set TMUX_TARGET; distro/bashrc pattern-matches ^thin_ to
+# select the right tmux socket.
+# Symlinked to ~/.local/bin/wm-launch-terminal via rotz.
+
+const project_mod = '~/.config/nushell/scripts/project/mod.nu'
+
+def main [
+    term_cmd: string  # Terminal command to launch (may be multi-word, e.g. 'wezterm-gui start')
+] {
+    # Resolve focused workspace name. Falls back to "local" when no WM is available.
+    let ws = (do { ^~/.local/bin/wm-current-workspace } | complete)
+    let ws_name = if $ws.exit_code == 0 {
+        let trimmed = ($ws.stdout | str trim)
+        if ($trimmed | is-empty) { "local" } else { $trimmed }
+    } else {
+        "local"
+    }
+
+    # Look up registry entry via project module.
+    # use is a parse-time directive so we guard with path exists to avoid
+    # hard-failing on machines where the module is not yet linked.
+    let entry = if ($project_mod | path expand | path exists) {
+        use $project_mod *
+        lookup $ws_name
+    } else {
+        null
+    }
+
+    let ssh_profile = if $entry != null { $entry | get -o ssh | default null } else { null }
+    let project_path = if $entry != null { $entry | get -o path | default null } else { null }
+
+    # Determine TMUX_TARGET via the appropriate primitive.
+    let target_result = if $ssh_profile != null {
+        # Remote branch: create thin session without attaching; print session name.
+        let cwd_args = if $project_path != null { [--cwd $project_path] } else { [] }
+        do { ^~/.local/bin/tmux-to-workstation connect --no-attach -g $ws_name ...$cwd_args -- $ssh_profile } | complete
+    } else {
+        # Local branch: start/join a local tmux session group.
+        do { ^~/.local/bin/tmux-start start 0 $ws_name } | complete
+    }
+
+    # Surface errors from tmux-start / tmux-to-workstation; do NOT launch terminal.
+    if $target_result.exit_code != 0 {
+        print -e $"wm-launch-terminal: failed to resolve TMUX_TARGET for workspace '($ws_name)'"
+        print -e ($target_result.stderr | str trim)
+        exit $target_result.exit_code
+    }
+
+    let tmux_target = ($target_result.stdout | str trim)
+
+    # Split term_cmd on whitespace so multi-word commands are dispatched correctly.
+    let parts = ($term_cmd | split row " " | where { |p| $p | is-not-empty })
+    if ($parts | is-empty) {
+        print -e "wm-launch-terminal: term_cmd is empty"
+        exit 1
+    }
+
+    let bin = ($parts | first)
+    let args = ($parts | skip 1)
+
+    # Launch terminal with TMUX_TARGET in its environment.
+    # Exit with the same status as the launched process.
+    let launch_result = (do { with-env { TMUX_TARGET: $tmux_target } { ^$bin ...$args } } | complete)
+    exit $launch_result.exit_code
+}
