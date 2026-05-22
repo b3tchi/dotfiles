@@ -56,6 +56,7 @@ def create-thin-session [cmd: string, meta: record]: nothing -> string {
 def --wrapped "main connect" [
     --group (-g): string  # Remote session group name (default: "local")
     --cwd (-c): string    # Remote working directory for the new session
+    --no-attach           # Create thin session, print session name to stdout, exit without attaching
     ...args: string       # SSH args (e.g. -p 8022 user@host)
 ] {
     if ($args | is-empty) {
@@ -66,8 +67,8 @@ def --wrapped "main connect" [
     let hostname = parse-hostname $args
 
     if ($hostname == null) {
-        print "Error: could not determine hostname from args"
-        return
+        print -e "Error: could not determine hostname from args"
+        exit 1
     }
 
     let display_host = if ($hostname | str contains "@") {
@@ -104,8 +105,8 @@ def --wrapped "main connect" [
     # Create linked session on remote via SSH (headless, unpinned)
     let target = (^ssh ...$args $remote_cmd 2>/dev/null | str trim)
     if ($target | is-empty) {
-        print $"Error: tmux-start failed on ($display_host)"
-        return
+        print -e $"Error: tmux-start failed on ($display_host)"
+        exit 1
     }
 
     # Resolve stable remote_target as session_group:window_id
@@ -122,6 +123,12 @@ def --wrapped "main connect" [
         remote_port: $port
         remote_target: $remote_target
         ssh_args: ($args | str join " ")
+    }
+
+    # --no-attach: print session name and exit without attaching
+    if $no_attach {
+        print $session_name
+        return
     }
 
     # Attach
