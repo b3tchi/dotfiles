@@ -10,5 +10,3 @@ sections when status flips.
 
 ## ready
 
-- [[sp002|WM mod+Return on remote project launches against the remote host]]
-
