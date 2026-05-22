@@ -102,10 +102,11 @@ def --wrapped "main connect" [
     }
 
     # Create linked session on remote via SSH (headless, unpinned)
-    let start_result = (do { ^ssh ...$args $remote_cmd } | complete)
+    # do -i: don't abort on nonzero ssh exit; complete captures it for us
+    let start_result = (do -i { ^ssh ...$args $remote_cmd } | complete)
     let target = ($start_result.stdout | str trim)
     if ($target | is-empty) {
-        print $"Error: tmux-start failed on ($display_host) (exit ($start_result.exit_code))"
+        print $"Error: tmux-start failed on ($display_host) — exit ($start_result.exit_code)"
         if ($start_result.stderr | str trim | is-not-empty) {
             print ($start_result.stderr | str trim)
         }
@@ -113,7 +114,7 @@ def --wrapped "main connect" [
     }
 
     # Resolve stable remote_target as session_group:window_id
-    let resolve_result = (do { ^ssh ...$args $"tmux display-message -t '($target)' -p '#{session_group}:#{window_id}'" } | complete)
+    let resolve_result = (do -i { ^ssh ...$args $"tmux display-message -t '($target)' -p '#{session_group}:#{window_id}'" } | complete)
     let remote_target = ($resolve_result.stdout | str trim)
     let remote_target = if ($remote_target | is-empty) { $target } else { $remote_target }
 
