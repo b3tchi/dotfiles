@@ -37,7 +37,7 @@ Before starting:
 
 1. You have been given (or chosen) a specific bd task ID
 2. `bd show <id>` has a design field with enough detail to implement — if it doesn't, STOP and route back for refinement via `spec-refinement`
-3. You are on the correct branch/worktree (if dispatched via `isolation: "worktree"`, this is already set up). The branch must be named `bd-<id>.<N>` — `<N>` is the iteration (first attempt = `.0`, retries `.1`, `.2`, …). See Step 2 for how to compute `<N>`. Reviewers and worktree-sweeps rely on this convention to map a worktree back to its bd task and iteration.
+3. You will create a worktree at `.worktrees/bd-<id>.<N>` on branch `bd-<id>.<N>` as Step 2 (do NOT rely on `isolation: "worktree"` auto-creation — that generates an opaque dir name and the dir-to-task mapping is lost). `<N>` is the iteration (first attempt = `.0`, retries `.1`, `.2`, …). Worktree dir name and branch name are deliberately identical so `git worktree list` is self-documenting.
 
 ## The Process
 
@@ -55,7 +55,7 @@ Also check:
 bd dep tree <id>   # anything upstream that must be verified first?
 ```
 
-### Step 2: Claim the task and name the branch
+### Step 2: Claim, then create the worktree and branch at the right name
 
 ```bash
 bd update <id> --status in_progress
@@ -63,26 +63,35 @@ bd update <id> --status in_progress
 
 Claiming signals to other agents that this task is yours. Do this **before** any code changes — if you crash, the next agent knows something was in flight.
 
-Then ensure your branch is named `bd-<id>.<N>` where `<N>` is the iteration. First attempt = `.0`; each retry (after work-audit rejection) increments. Example: `bd-42.0` on first attempt, `bd-42.1` after the first rejection. This is the convention work-merge and spec-retro rely on to map a branch / worktree back to its bd task — without it, cleanup sweeps cannot tell which worktrees are safe to remove. The iteration suffix exists so rejected attempts and the approved attempt can coexist as separate branches without name collisions.
+Then create the worktree + branch in one shot — both named `bd-<id>.<N>` where `<N>` is the iteration. First attempt = `.0`; each retry (after work-audit rejection) increments. Example: `bd-42.0` on first attempt, `bd-42.1` after the first rejection. The iteration suffix exists so rejected attempts and the approved attempt coexist as separate branches without name collisions; the matching worktree dir name makes `git worktree list` and `ls .worktrees` self-documenting.
 
 Pick the next iteration:
 
 ```bash
 ID=<bd-id>
-# Highest existing bd-<id>.N, or empty if none
-PREV=$(git branch --list "bd-${ID}.*" --format='%(refname:short)' \
+AKM_ROOT="$(akm-root)"
+# Highest existing bd-<id>.N branch, or empty if none
+PREV=$(git -C "$AKM_ROOT" branch --list "bd-${ID}.*" --format='%(refname:short)' \
        | awk -F. '{print $NF}' | sort -n | tail -1)
 NEXT=$(( ${PREV:--1} + 1 ))     # if PREV empty → 0
 BRANCH="bd-${ID}.${NEXT}"
+WT="$AKM_ROOT/.worktrees/$BRANCH"
 ```
 
-Then:
+Create with the right name from the start (do NOT rename / move later):
 
-- **Fresh worktree, no branch yet:** `git checkout -b "$BRANCH"`
-- **Worktree auto-created by `isolation: "worktree"` (auto-generated branch name):** rename before your first commit — `git branch -m "$BRANCH"`
-- **Already on a `bd-<id>.<N>` branch:** nothing to do (you are resuming the same iteration after `SendMessage`)
+```bash
+git -C "$AKM_ROOT" worktree add "$WT" -b "$BRANCH"
+cd "$WT"
+```
 
-Verify with `git branch --show-current` before continuing.
+(For the directory selection rules — `.worktrees` vs `worktrees` vs `~/.config/infinifu/worktrees/<project>` — see `infinifu:domain-git-worktrees`. The convention here assumes the project-local `.worktrees/` location; substitute as appropriate.)
+
+**If you were dispatched into a `isolation: "worktree"` auto-created worktree** (opaque name): the auto-worktree is a mistake under this convention. ExitWorktree it (`action: remove` if untouched, otherwise hand back with `keep` and log a deviation) and create a properly-named worktree as above. The dir-to-task mapping is load-bearing for the work-merge sweep + spec-retro safety-net sweep — opaque names break it.
+
+**If you are resuming after rejection** (`SendMessage` continuing the same agent): you are already in the previous iteration's worktree on the previous iteration's branch. The previous iteration was rejected, so its worktree + branch will be swept on the next successful land. Pick the next `<N>` and create a fresh worktree + branch per the picker above; do your work in the new worktree.
+
+Verify with `git branch --show-current` and `pwd` before continuing.
 
 ### Step 3: Do the work
 

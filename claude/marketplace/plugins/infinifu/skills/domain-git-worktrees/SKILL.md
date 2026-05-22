@@ -208,20 +208,17 @@ Ready to implement auth feature
 
 ## Integration
 
-**When to use this skill vs `isolation: "worktree"`:**
+**When to use this skill vs `git worktree add` directly:**
 
-- **Subagents dispatched by plan-scrum-master**: Use `isolation: "worktree"` on the Agent tool instead. Claude Code auto-creates the worktree and the dispatcher stays on main. This skill is NOT needed.
-- **Direct worktree creation** (manual work, plan-supervised, idea-brainstorming): Use this skill when you need to create a worktree yourself in the current session.
+- **bd-task implementer worktrees** (dispatched by plan-scrum-master, plan-supervised, or solo via work-do): the dir+branch name is fixed as `bd-<id>.<N>`, so `git worktree add .worktrees/bd-<id>.<N> -b bd-<id>.<N>` inline (per work-do Step 2) is usually enough. Reach for this skill when you also need the directory-selection rules (`.worktrees` vs `worktrees` vs `~/.config/infinifu/worktrees/<project>`), the `.gitignore` safety check, or the auto project-setup steps.
+- **Non-bd-task worktrees** (idea-brainstorming spikes, ad-hoc experiments, plan-supervised setup): use this skill — branch name is open-ended and you want the full directory-selection + ignore-verification + setup pipeline.
+- **`isolation: "worktree"` on the Agent tool**: deliberately NOT used by infinifu pipelines. The auto-generated dir name is opaque and breaks the `bd-<id>.<N>` dir-to-task mapping that work-merge + spec-retro sweeps depend on. If you find an opaque worktree from a stray auto-isolation, treat it as a deviation per work-do Step 2.
 
 **Called by:**
 - **idea-brainstorming** (Phase 4) - REQUIRED when design is approved and implementation follows
+- **work-do** Step 2 (implementer) - either invokes this skill OR runs `git worktree add` inline for the `bd-<id>.<N>` worktree
 - **plan-supervised** implementers - REQUIRED before executing any tasks
 - Any agent needing to manually create a worktree in its own session
 
-**NOT called by:**
-- **plan-scrum-master** — it uses `isolation: "worktree"` on the Agent tool
-- **Subagents dispatched with `isolation: "worktree"`** — worktree already exists
-- **Reviewers** — they use work-merge to merge and clean up
-
 **Pairs with:**
-- **work-merge** - REQUIRED: reviewer merges to main and cleans up worktree after approval
+- **work-merge** - REQUIRED: per-task land removes the implementer's `bd-<id>.<N>` worktree on the APPROVED audit verdict

@@ -9,13 +9,13 @@ description: Use to run, dispatch, orchestrate, kick off, or execute multi-agent
 
 Orchestrate bd-driven development by reading the ready queue, dispatching implementer agents, relaying their reports to reviewer agents, and tracking pipeline progress.
 
-**Core principle:** You are a task dispatcher that stays on main. Your domain is bd. You never touch code, git, worktrees, or files. You read the board, dispatch agents with `isolation: "worktree"`, relay information, and track progress. Claude Code auto-creates worktrees for each agent. Reviewers verify and merge to main.
+**Core principle:** You are a task dispatcher that stays on main. Your domain is bd. You never touch code, git, worktrees, or files. You read the board, dispatch agents (no `isolation: "worktree"` — implementers create their own worktree at `bd-<id>.<N>` so dir name matches branch name), relay information, and track progress. Reviewers verify and per-task land via work-audit → work-merge.
 
 **Announce at start:** "I'm using the plan-scrum-master skill to orchestrate the pipeline."
 
 ## Execution Model
 
-The main Claude session is the scrum-master — the user invokes the skill directly (`/plan-dispatch-fnf` or equivalent) and talks to the orchestrator as themselves. Workers (implementers + reviewers) are dispatched as background subagents via the `Agent` tool with `run_in_background: true` and `isolation: "worktree"`. Main Claude reacts to completion notifications; it does not poll or sleep.
+The main Claude session is the scrum-master — the user invokes the skill directly (`/plan-dispatch-fnf` or equivalent) and talks to the orchestrator as themselves. Workers (implementers + reviewers) are dispatched as background subagents via the `Agent` tool with `run_in_background: true`. Each implementer creates its own worktree at `bd-<id>.<N>` as part of work-do Step 2 (the previous `isolation: "worktree"` shortcut was dropped because the auto-generated dir name was opaque and broke the dir-to-task mapping). Main Claude reacts to completion notifications; it does not poll or sleep.
 
 For the rationale (why a wrapper agent cannot do this) and the full dispatch contract, see `references/architecture.md`.
 
@@ -228,21 +228,21 @@ Skip this if the epic is already `in_progress` / P1 (e.g., resumed session). Do 
 
 ### Dispatch the task
 
-For each task, run `bd show <id>` and dispatch an `Agent` tool call with `isolation: "worktree"` and `run_in_background: true` containing:
+For each task, run `bd show <id>` and dispatch an `Agent` tool call with `run_in_background: true` (no `isolation: "worktree"` — that auto-generates an opaque dir name; the implementer creates its own worktree at the right name per work-do Step 2). The dispatch payload contains:
 
 1. **Task ID and title**
 2. **Full design text** from `bd show` (paste it — don't make agent query bd)
 3. **Context** — what tasks were recently completed, what else is in the pipeline
-4. **Branch name to use:** `bd-<id>.<N>` — the implementer must rename the auto-created branch to this before its first commit. `<N>` is the iteration (first attempt = `.0`, retries `.1`, `.2`, …) — work-do has the `git branch --list` snippet to compute the next `<N>`. This is the convention work-merge and the spec-retro worktree-sweep rely on to map a worktree back to its bd task + iteration; without it, cleanup is manual.
+4. **Branch + worktree name to use:** both `bd-<id>.<N>`. `<N>` is the iteration computed by work-do's picker (`.0` on first attempt, increment on retry). Path = `$AKM_ROOT/.worktrees/bd-<id>.<N>`. The implementer creates the worktree itself with `git worktree add` so the dir name matches the branch name — work-merge and the spec-retro safety-net sweep both key off `bd-<id>` branches, and the matching dir name makes `git worktree list` self-documenting.
 5. **Mandatory rule:** "NEVER use `cd path && command` in bash — always use absolute paths. `cd &&` triggers user confirmation prompts that block background agents."
 
 **The implementer is responsible for:**
 - Claiming the task: `bd update <id> --status in_progress`
-- Working in its auto-created worktree (created by `isolation: "worktree"`)
-- **Renaming its branch to `bd-<id>.<N>`** (`git branch -m bd-<id>.<N>`) before the first commit, where `<N>` is the next iteration (`.0` on first attempt, increment on retry — see work-do for the picker). Worktree-sweeps and reviewers map worktree → task + iteration via this name.
-- Implementing, testing, committing in its worktree
+- **Creating its own worktree** at `$AKM_ROOT/.worktrees/bd-<id>.<N>` on branch `bd-<id>.<N>` via `git worktree add` (per work-do Step 2). Do NOT rely on `isolation: "worktree"` — opaque dir names break the dir-to-task mapping the cleanup sweeps depend on.
+- `cd` into the newly-created worktree; do all work there
+- Implementing, testing, committing in the worktree
 - Do NOT merge — reviewer will handle that
-- Reporting back: what it did, branch name (`bd-<id>.<N>`), worktree path, test results, concerns
+- Reporting back: what it did, branch name (`bd-<id>.<N>`), absolute worktree path, test results, concerns
 - Marking blocked if it can't proceed: `bd update <id> --status blocked`
 - **NEVER use `cd ... &&` in bash commands** — use absolute paths instead (triggers extra user confirmation, breaks background flow)
 
@@ -350,7 +350,7 @@ Need your decision to continue.
 **You never:**
 - Write code, edit files, or run tests
 - Touch git, branches, worktrees, or merges — you stay on main
-- Create or manage worktrees — `isolation: "worktree"` handles this automatically
+- Create or manage worktrees — implementer creates its own worktree per work-do Step 2 (with the matching `bd-<id>.<N>` dir name); reviewer's work-audit → work-merge handles removal on approve
 - Claim or close **tasks** — implementer sets `in_progress`, reviewer closes
 - Close **epics** — spec-retro owns that (after merge)
 - Analyze code, detect file conflicts, or review implementations
@@ -363,7 +363,7 @@ Need your decision to continue.
 - **infinifu:spec-ready** — creates the bd tasks and promotes spec to ready; reference for bd commands
 - **infinifu:spec-writing** — creates the plan this skill orchestrates
 
-**Implementer agents are dispatched with `isolation: "worktree"` and should use:**
+**Implementer agents are dispatched without `isolation: "worktree"` (they create their own worktree at `bd-<id>.<N>` per work-do Step 2) and should use:**
 - **infinifu:work-do** — per-task protocol (read `bd show`, claim, implement, close with evidence, report back)
 - **infinifu:domain-tdd** — invoked by work-do for RED-GREEN-REFACTOR
 
