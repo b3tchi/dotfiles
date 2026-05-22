@@ -184,16 +184,28 @@ Tests: <N passed, N new>
 Deviations: <either 'none' or 'logged and acceptable: <note>'>"
 ```
 
+**Then auto-trigger `infinifu:work-merge` with the task id AND the approved iteration `<N>`** (extracted from the current branch name `bd-<id>.<N>` of the audited worktree — `git -C <worktree> branch --show-current`, then split on `.`). work-merge is the per-task land step — it merges `bd-<id>.<N>` into base locally, runs the post-merge test gate, removes the worktree, sweeps any sibling rejected iterations of the same task, and (if this was the last open child of the parent epic) flips the AKM lifecycle + archives the spec + closes the bd epic. All operations are local; no push. This trigger is part of the audit-approve gesture — the dispatcher / user should not be required to type a separate "merge" command.
+
+work-merge's possible outcomes:
+
+| Result | Meaning | Next |
+|--------|---------|------|
+| `TASK_LANDED` | Merge clean, tests green, worktree removed. Other tasks still open in the epic. | Report APPROVED to dispatcher; pipeline continues. |
+| `TASK_LANDED + EPIC_DONE` | Same as above plus the epic finale fired (AKM flip + board→archive + bd close epic). | Report APPROVED + EPIC_DONE; dispatcher runs `spec-retro` to refresh the graph and push. |
+| `POST-MERGE FAIL` (exit 2 from `land-bd-task.sh`) | Tests failed after merging into base; merge rolled back; task reopened with a `POST-MERGE FAIL` note. | Convert this back to a REJECTED audit verdict — the task left audit looking clean but the integration is broken. Re-dispatch the implementer with the post-merge failure as the gap. |
+
 Then report to the dispatcher:
 
 ```
-Task <id>: APPROVED (closed)
+Task <id>: APPROVED (closed + landed locally)
 
 Criteria:
 - <criterion 1>: <evidence>
 - <criterion 2>: <evidence>
 Tests: <N passed, N new>
 Deviations: <either 'none' or 'logged and acceptable: <note>'>
+Land result: <TASK_LANDED | TASK_LANDED + EPIC_DONE>
+Epic <epic-id>: <N open children remaining | closed — run spec-retro for sp###>
 ```
 
 ### Rejected
@@ -278,6 +290,7 @@ Can't check all boxes? Keep auditing — don't issue a verdict on partial work.
 **Calls:**
 - `test-runner` agent (for quality gates)
 - `infinifu:domain-test-effectiveness` (only when a test-quality issue is systemic — e.g., whole suite has tautology problem — not for every per-task audit)
+- `infinifu:work-merge` (auto-triggered on APPROVED verdict — per-task local land + epic finale if last child)
 
 **Uses principles from:**
 - `infinifu:domain-verification` — evidence before claims
@@ -295,7 +308,7 @@ implementer (work-do) → records evidence in notes, leaves in_progress
 
 **State ownership:** the implementer owns `open → in_progress` (claim) and `in_progress → blocked` (stuck). The reviewer owns `in_progress → closed` (approval gate). That split is what makes `closed` mean "reviewed and approved" instead of "implementer thinks it's done".
 
-**Epic completeness** is not this skill's concern. When every task in an epic has been through `work-audit` and stays closed, the epic is done — `work-merge` takes over from there.
+**Epic completeness** is detected by `work-merge` (auto-invoked on the approved path) — when the just-closed task is the last open child of its parent epic, work-merge runs the epic finale (AKM flip + board→archive + bd close epic). This skill doesn't track it; it just hands the task id to work-merge and reports whatever work-merge returns.
 
 Use `bd` commands (`bd show`, `bd list`, `bd dep tree`), never read `.beads/issues.jsonl` directly.
 </integration>

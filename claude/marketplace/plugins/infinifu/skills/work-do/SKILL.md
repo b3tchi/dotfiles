@@ -37,7 +37,7 @@ Before starting:
 
 1. You have been given (or chosen) a specific bd task ID
 2. `bd show <id>` has a design field with enough detail to implement — if it doesn't, STOP and route back for refinement via `spec-refinement`
-3. You are on the correct branch/worktree (if dispatched via `isolation: "worktree"`, this is already set up)
+3. You are on the correct branch/worktree (if dispatched via `isolation: "worktree"`, this is already set up). The branch must be named `bd-<id>.<N>` — `<N>` is the iteration (first attempt = `.0`, retries `.1`, `.2`, …). See Step 2 for how to compute `<N>`. Reviewers and worktree-sweeps rely on this convention to map a worktree back to its bd task and iteration.
 
 ## The Process
 
@@ -55,13 +55,34 @@ Also check:
 bd dep tree <id>   # anything upstream that must be verified first?
 ```
 
-### Step 2: Claim the task
+### Step 2: Claim the task and name the branch
 
 ```bash
 bd update <id> --status in_progress
 ```
 
 Claiming signals to other agents that this task is yours. Do this **before** any code changes — if you crash, the next agent knows something was in flight.
+
+Then ensure your branch is named `bd-<id>.<N>` where `<N>` is the iteration. First attempt = `.0`; each retry (after work-audit rejection) increments. Example: `bd-42.0` on first attempt, `bd-42.1` after the first rejection. This is the convention work-merge and spec-retro rely on to map a branch / worktree back to its bd task — without it, cleanup sweeps cannot tell which worktrees are safe to remove. The iteration suffix exists so rejected attempts and the approved attempt can coexist as separate branches without name collisions.
+
+Pick the next iteration:
+
+```bash
+ID=<bd-id>
+# Highest existing bd-<id>.N, or empty if none
+PREV=$(git branch --list "bd-${ID}.*" --format='%(refname:short)' \
+       | awk -F. '{print $NF}' | sort -n | tail -1)
+NEXT=$(( ${PREV:--1} + 1 ))     # if PREV empty → 0
+BRANCH="bd-${ID}.${NEXT}"
+```
+
+Then:
+
+- **Fresh worktree, no branch yet:** `git checkout -b "$BRANCH"`
+- **Worktree auto-created by `isolation: "worktree"` (auto-generated branch name):** rename before your first commit — `git branch -m "$BRANCH"`
+- **Already on a `bd-<id>.<N>` branch:** nothing to do (you are resuming the same iteration after `SendMessage`)
+
+Verify with `git branch --show-current` before continuing.
 
 ### Step 3: Do the work
 
@@ -128,12 +149,16 @@ Return a short report to whoever dispatched you:
 ```
 Task <id>: <title> — ready for review
 
+Branch: bd-<id>.<N>
+Worktree: <absolute path>
 Summary: <one or two sentences on what was done>
 Files changed: <list>
 Tests: <N added, M modified, all green>
 Deviations: <any, or 'none'>
 Discoveries filed: <bd IDs, or 'none'>
 ```
+
+Branch and worktree lines let the reviewer (and the later worktree-sweep in spec-retro) act mechanically without re-querying you.
 
 Keep it tight. The dispatcher (scrum-master, or a user under plan-supervised) routes this to the reviewer; they don't need a walkthrough.
 

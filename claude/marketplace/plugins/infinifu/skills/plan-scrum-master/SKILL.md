@@ -233,14 +233,16 @@ For each task, run `bd show <id>` and dispatch an `Agent` tool call with `isolat
 1. **Task ID and title**
 2. **Full design text** from `bd show` (paste it — don't make agent query bd)
 3. **Context** — what tasks were recently completed, what else is in the pipeline
-4. **Mandatory rule:** "NEVER use `cd path && command` in bash — always use absolute paths. `cd &&` triggers user confirmation prompts that block background agents."
+4. **Branch name to use:** `bd-<id>.<N>` — the implementer must rename the auto-created branch to this before its first commit. `<N>` is the iteration (first attempt = `.0`, retries `.1`, `.2`, …) — work-do has the `git branch --list` snippet to compute the next `<N>`. This is the convention work-merge and the spec-retro worktree-sweep rely on to map a worktree back to its bd task + iteration; without it, cleanup is manual.
+5. **Mandatory rule:** "NEVER use `cd path && command` in bash — always use absolute paths. `cd &&` triggers user confirmation prompts that block background agents."
 
 **The implementer is responsible for:**
 - Claiming the task: `bd update <id> --status in_progress`
 - Working in its auto-created worktree (created by `isolation: "worktree"`)
+- **Renaming its branch to `bd-<id>.<N>`** (`git branch -m bd-<id>.<N>`) before the first commit, where `<N>` is the next iteration (`.0` on first attempt, increment on retry — see work-do for the picker). Worktree-sweeps and reviewers map worktree → task + iteration via this name.
 - Implementing, testing, committing in its worktree
 - Do NOT merge — reviewer will handle that
-- Reporting back: what it did, branch name, test results, concerns
+- Reporting back: what it did, branch name (`bd-<id>.<N>`), worktree path, test results, concerns
 - Marking blocked if it can't proceed: `bd update <id> --status blocked`
 - **NEVER use `cd ... &&` in bash commands** — use absolute paths instead (triggers extra user confirmation, breaks background flow)
 
@@ -265,14 +267,14 @@ When notified that an implementer has completed, dispatch a reviewer agent with 
 You do not interpret the report. You relay it. Do NOT wait for the reviewer — you will be notified when it completes. Continue processing other notifications or dispatching new implementers in the meantime.
 
 **The reviewer is responsible for:**
-- Reading actual code in the implementer's worktree and verifying against the task spec
-- If approved: merging branch to main, running tests on main, cleaning up worktree
-- Closing the task: `bd close <id> --reason "Verified: [summary]"`
+- Invoking `infinifu:work-audit` against the task — that skill owns the verdict, the `bd close` on approve, and the auto-trigger of `infinifu:work-merge` for per-task local landing
+- Reading actual code in the implementer's worktree as part of work-audit's evidence-gathering
+- **work-audit on APPROVED auto-fires work-merge**, which: merges `bd-<id>` into base locally with `--no-ff`, runs the post-merge test gate, removes the worktree + local branch, and (if this was the last open child of the epic) flips the AKM lifecycle + moves board→archive + closes the bd epic. All local — no push. spec-retro syncs to remote later.
+- Closing the task happens inside work-audit (`bd close <id> --reason "AUDITED: APPROVED ..."`); reviewer does not call `bd close` directly
 - **NEVER use `cd ... &&` in bash commands** — use absolute paths instead (triggers extra user confirmation, breaks background flow)
-- If rejected:
-  - Updating bd: `bd update <id> --design "..."` (updated requirements based on rejection)
-  - Logging feedback: `bd update <id> --notes "Rejected: [reason]. [what needs to change]"`
-  - Reporting specific rejection details to scrum master
+- If rejected (verdict from work-audit OR `POST-MERGE FAIL` from work-merge converted back to rejection):
+  - work-audit / work-merge already updated bd notes with `Gaps:` or `POST-MERGE FAIL:` evidence
+  - Reporting the rejection details (gaps, requested action) to scrum master so the implementer can be re-dispatched
 
 ## Step 5: Handle Rejections and Failures
 
@@ -366,7 +368,8 @@ Need your decision to continue.
 - **infinifu:domain-tdd** — invoked by work-do for RED-GREEN-REFACTOR
 
 **Reviewer agents should use:**
-- **infinifu:work-merge** — merges to main and cleans up worktree after approval
+- **infinifu:work-audit** — per-task verification gate. Auto-triggers work-merge on the APPROVED verdict.
+- **infinifu:work-merge** (auto-triggered, not invoked directly) — per-task local land + worktree cleanup; epic finale (AKM flip + board→archive + bd close epic) on the last open child.
 
-**After completion:**
-- **infinifu:work-merge** — if final integration is needed
+**After every pipeline task lands and the epic finale has fired:**
+- **infinifu:spec-retro** — refreshes the AKM graph (im### body rewrite, new ADRs, ft### updates, us### drafts) and pushes everything to remote (`git push` + `bd dolt push`). work-merge stayed local; this is where remote sync happens.

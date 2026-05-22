@@ -35,9 +35,11 @@ If either gate was not passed, STOP and go back. Do NOT start execution without 
 ### Step 2: Execute Batch
 **Default: First 3 tasks**
 
-For each task, follow the **`work-do`** per-task protocol: `bd show` → claim → implement via `domain-tdd` → log deviations immediately → close with evidence → report. `work-do` has the full checklist; don't reinvent it inline.
+For each task, follow the **`work-do`** per-task protocol: `bd show` → claim → name branch `bd-<id>` → implement via `domain-tdd` → log deviations immediately → record evidence in notes → report ready. `work-do` has the full checklist; don't reinvent it inline.
 
-After each task closes, run `bd ready` to find the next unblocked task.
+After the implementer reports ready, run **`work-audit`** to verify. On APPROVED, work-audit closes the task and auto-fires **`work-merge`** — per-task local land (merge `bd-<id>` into base, post-merge test, remove worktree, delete branch). If the just-closed task was the last open child of the epic, work-merge also runs the epic finale (AKM status flips + board→archive + bd close epic). All local — push is deferred to spec-retro.
+
+After each task lands, run `bd ready` to find the next unblocked task.
 
 ### Step 3: Report
 When batch complete:
@@ -53,11 +55,12 @@ Based on feedback:
 
 ### Step 5: Complete Development
 
-After all tasks complete and verified:
+After every task in the epic has been through work-audit (and thus work-merge), the **epic finale has already fired** as part of the last task's land — AKM statuses flipped, board → archive, bd epic closed. Nothing more to do at this layer for landing.
+
 - bd 1.0 auto-exports `.beads/issues.jsonl` after each mutation; nothing extra needed to persist state.
-- Announce: "I'm using the work-merge skill to complete this work."
-- **REQUIRED SUB-SKILL:** Use infinifu:work-merge
-- Follow that skill to verify tests, present options, execute choice
+- Announce: "All tasks landed; epic finale fired. Running spec-retro to refresh the AKM graph and push to remote."
+- **REQUIRED SUB-SKILL:** Use `infinifu:spec-retro`
+- Follow that skill to rewrite `im###` body, mint new ADRs / `ft###` updates / `us###` drafts as needed, then `git push` + `bd dolt push`.
 
 ## When to Stop and Ask for Help
 
@@ -91,8 +94,10 @@ After all tasks complete and verified:
 **Required workflow skills:**
 - **infinifu:domain-git-worktrees** - REQUIRED: Set up isolated workspace before starting
 - **infinifu:spec-writing** - Creates the plan this skill executes
-- **infinifu:work-do** - Per-task protocol applied to each task in the batch
-- **infinifu:work-merge** - Complete development after all tasks
+- **infinifu:work-do** - Per-task protocol applied to each task in the batch (implementer side)
+- **infinifu:work-audit** - Per-task verification gate after each implementer reports ready
+- **infinifu:work-merge** - Per-task local land + epic finale, auto-triggered by work-audit on APPROVED
+- **infinifu:spec-retro** - Post-epic AKM graph refresh + push to remote
 
 **Alternative workflow:**
 - **infinifu:plan-scrum-master** - Fully automated bd-driven pipeline dispatch with a reviewer agent (no per-batch user gate)

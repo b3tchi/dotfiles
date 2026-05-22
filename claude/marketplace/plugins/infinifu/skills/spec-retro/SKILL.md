@@ -20,10 +20,15 @@ Then close the bd epic.
 
 **Out of scope (already done upstream):**
 
-- Status flips on `us###` / `im###` / `sp###` — `work-merge` did those.
-- `docs/board.md` `## ready → removed` + `docs/archive.md ## done` append — `work-merge` did those.
-- Branch landing / PR / worktree cleanup — `work-merge` did those.
-- Running tests — `work-merge`'s precondition was green tests; if you arrived here, they passed.
+- Status flips on `us###` / `im###` / `sp###` — `work-merge`'s epic finale did those (auto-fired by `work-audit` when the last task closed).
+- `docs/board.md` `## ready → removed` + `docs/archive.md ## done` append — `work-merge`'s epic finale did those.
+- Per-task local merges of `bd-<id>` branches — `work-merge` ran one per task as `work-audit` approved each. By the time spec-retro runs, base already carries every bd-<id> merge commit locally.
+- Per-task worktree removal — `work-merge` removed each as part of per-task land. Step 13 here is a safety net that should usually report `0 removed`.
+- Running tests — `work-merge`'s per-task land already gated each merge with the post-merge test command.
+
+**Owned by spec-retro (not upstream):**
+
+- `git push` and `bd dolt push` (step 14). work-merge stayed local; spec-retro syncs everything to remote in one push so the AKM archive commit and the retro graph-refresh land together with the bd-task merges.
 
 **Announce at start:** "Using spec-retro skill to refresh the AKM graph post-merge."
 
@@ -127,8 +132,35 @@ Stage 8 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Read shipped r
     git -C "$AKM_ROOT" commit -m "feat(akm): retro sp<NNN>"
     ```
     Extend the subject with new ids in brackets when the retro mints them, e.g. `feat(akm): retro sp012 [+ adr0014, ft007, us023]`. Only stage files that actually changed; a minimal retro may be `im<NNN>.md` alone.
-12. **Close the bd epic** with a one-line reason summarizing what shipped + the count of zettels touched (e.g., "Retro: rotate_secret + scheduler + synthetic-check shipped. Rewrote im002, minted adr0004 (lock granularity), updated ft002 (rotate_secret surface), drafted us004 (cross-region failover). Candidates flagged: ft-extract `retry_with_jitter` from im002 — would also serve us005").
-13. **Verify.** Commit landed on main (`git -C "$AKM_ROOT" log -1 --oneline` matches the convention); every file path under `$AKM_ROOT`; bd epic shows `closed` with retro-shaped reason.
+12. **Close the bd epic** if not already closed by work-merge's epic finale. (work-merge closes the epic when the last child's audit lands; this step is a no-op idempotent guard for the rare case where the retro is the first thing to notice.) One-line reason summarizing what shipped + the count of zettels touched (e.g., "Retro: rotate_secret + scheduler + synthetic-check shipped. Rewrote im002, minted adr0004 (lock granularity), updated ft002 (rotate_secret surface), drafted us004 (cross-region failover). Candidates flagged: ft-extract `retry_with_jitter` from im002 — would also serve us005").
+13. **Sweep merged worktrees (safety net).** work-merge removes each worktree as the per-task land succeeds, so this should usually report `0 removed`. The sweep exists for edge cases: a script that errored mid-cleanup, a sibling worktree from a parallel pipeline, or a manually-created worktree that happens to be on a merged `bd-<id>` branch. Run:
+
+    ```bash
+    bash <skill-path>/spec-retro/scripts/sweep-merged-worktrees.sh "$AKM_ROOT"
+    ```
+
+    The script (see `scripts/sweep-merged-worktrees.sh`):
+    - `fetch --prune`, then resolves `origin/HEAD` as base.
+    - Walks `git worktree list --porcelain` for branches matching `^bd-`.
+    - For each, checks `merge-base --is-ancestor` against `origin/<base>` — only merged branches get touched.
+    - Removes with `git worktree remove` (no `--force`; refuses if uncommitted/untracked work present — investigate before forcing).
+    - Deletes the local branch with `git branch -d` (safe, not `-D`).
+    - Final `git worktree prune` + one-line summary `removed / kept / skipped`.
+
+    Non-`bd-<id>` worktrees and unmerged branches are out of scope. Pass the script output through in the final report so the user can act on survivors.
+14. **Push to remote.** spec-retro owns remote sync; work-merge stayed local. Push base, the AKM commits (archive + retro), and any new tags:
+
+    ```bash
+    git -C "$AKM_ROOT" pull --rebase    # pick up anything else that landed on remote while we worked
+    bd dolt push                         # bd state (closed epic, audit notes, retro reason) — needs to land before code refs the closed epic
+    git -C "$AKM_ROOT" push              # base + AKM admin commits
+    git -C "$AKM_ROOT" status            # MUST show "up to date with origin"
+    ```
+
+    This is the gesture that the project's `Session Completion` workflow (see `CLAUDE.md`) calls out — work is not complete until `git push` succeeds. spec-retro is the canonical place that gesture fires; do NOT defer to the user "to push when ready". If push fails (conflict, auth, hook), resolve and retry until it succeeds — leaving local commits stranded is a regression of the whole flow.
+
+    If you're on a feature branch (no upstream, or branch isn't base), confirm with the user before pushing: a stray `git push` of an experimental branch can pollute the remote. The typical run is on `main` / `master` because work-merge's per-task lands already moved every bd-<id> into base.
+15. **Verify.** AKM retro commit landed on main (`git -C "$AKM_ROOT" log -1 --oneline` matches `feat(akm): retro sp<NNN>`); every file path under `$AKM_ROOT`; bd epic shows `closed`; `git worktree list` no longer shows the current spec's worktree; `git status` shows `up to date with origin`.
 
 ## Disambiguation
 
@@ -196,7 +228,8 @@ Stage 8 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Read shipped r
 
 **Out of scope (do NOT call from here):**
 
-- Status flips on `us###` / `im###` / `sp###` — work-merge did those.
-- `docs/board.md` / `docs/archive.md` edits — work-merge did those.
-- Branch / worktree / PR operations — work-merge did those.
-- Running tests — work-merge already gated.
+- Status flips on `us###` / `im###` / `sp###` — work-merge's epic finale did those.
+- `docs/board.md` / `docs/archive.md` edits — work-merge's epic finale did those.
+- Per-task local merges + worktree removal — work-merge did those per task as work-audit approved each.
+- Running tests — work-merge already gated each per-task land.
+- PR creation / `gh pr create` — out of scope for the local-only flow. If a project wants PRs, that's a separate skill / future extension; spec-retro pushes to remote and stops.
