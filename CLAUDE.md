@@ -369,6 +369,7 @@ bd close <id>         # Complete work
 - Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
 - Run `bd prime` for detailed command reference and session close protocol
 - Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
+- **bd writes are main-only.** Run `bd close`, `bd update`, `bd create`, `bd dep add`, `bd remember` **only from `$AKM_ROOT` (main worktree)**, never from feature worktrees. bd's shared Dolt server races on concurrent writers; closes have been observed reverting when parallel worktree agents write at the same time. Workers (`work-do` / `work-audit`) emit structured report / verdict blocks; the orchestrator (`plan-scrum-master`, or the solo dev) parses them and applies all bd writes serially from main. Reads (`bd show`, `bd list`, `bd dep tree`, `bd ready`) are safe from anywhere. See bd memory `bd-write-main-only-contract-2026`.
 
 ## Session Completion
 

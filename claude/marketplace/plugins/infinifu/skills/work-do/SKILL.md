@@ -9,9 +9,20 @@ description: Use when you are an agent that has been handed a single bd task ID 
 
 Execute one bd task end-to-end: read the spec, do the work, verify, close with evidence, report back. This is the per-task protocol that agents follow when a dispatcher hands them a task ID — it is not for creating tasks (use `spec-ready`) or for deciding which tasks to run (use `plan-scrum-master` or `plan-supervised`).
 
-**Core principle:** The bd task is the contract. You implement exactly what the task says, close it with evidence a reviewer can verify, and report back clearly. Discoveries become new bd tasks — you don't silently expand scope.
+**Core principle:** The bd task is the contract. You implement exactly what the task says, report evidence a reviewer can verify, and surface discoveries. You do NOT write to bd from the worktree.
 
 **Announce at start:** "I'm using the work-do skill to implement bd task `<id>`."
+
+## BD STATE OWNERSHIP — workers do not write to bd
+
+**You read bd. You never write bd.** All bd state transitions — claim, notes, blocked, discoveries, close — are applied by the **orchestrator** (the scrum-master, or the solo dev who dispatched you) from the main worktree. You emit a structured report; the orchestrator applies it serially.
+
+Why: bd's shared Dolt server is sensitive to concurrent writes from parallel agents. Closes have been observed reverting on subsequent reads when multiple worktree-side writers race. Centralizing writes on main eliminates the race; the contract is "workers report, orchestrator writes."
+
+Concretely:
+- ❌ Do NOT run `bd update`, `bd close`, `bd create`, `bd dep add`, `bd remember` from the worktree.
+- ✅ DO run `bd show`, `bd dep tree`, `bd list` — reads are safe.
+- ✅ DO populate the structured report block at Step 8 — orchestrator parses it and applies all bd writes from main.
 
 ## When to use this skill
 
@@ -55,15 +66,11 @@ Also check:
 bd dep tree <id>   # anything upstream that must be verified first?
 ```
 
-### Step 2: Claim, then create the worktree and branch at the right name
+### Step 2: Create the worktree and branch at the right name
 
-```bash
-bd update <id> --status in_progress
-```
+The orchestrator handles the bd claim (`open → in_progress`) when it dispatches you — you don't do it from the worktree. Just go straight to worktree creation.
 
-Claiming signals to other agents that this task is yours. Do this **before** any code changes — if you crash, the next agent knows something was in flight.
-
-Then create the worktree + branch in one shot — both named `bd-<id>.<N>` where `<N>` is the iteration. First attempt = `.0`; each retry (after work-audit rejection) increments. Example: `bd-42.0` on first attempt, `bd-42.1` after the first rejection. The iteration suffix exists so rejected attempts and the approved attempt coexist as separate branches without name collisions; the matching worktree dir name makes `git worktree list` and `ls .worktrees` self-documenting.
+Create the worktree + branch in one shot — both named `bd-<id>.<N>` where `<N>` is the iteration. First attempt = `.0`; each retry (after work-audit rejection) increments. Example: `bd-42.0` on first attempt, `bd-42.1` after the first rejection. The iteration suffix exists so rejected attempts and the approved attempt coexist as separate branches without name collisions; the matching worktree dir name makes `git worktree list` and `ls .worktrees` self-documenting.
 
 Pick the next iteration:
 
@@ -105,26 +112,27 @@ Implementation goes through `domain-tdd` — RED-GREEN-REFACTOR. Read that skill
 
 If the task is non-code (docs, config, tooling), skip TDD and apply the equivalent verification: run the thing, check the output, prove it works.
 
-### Step 4: Log surprises to bd immediately
+### Step 4: Record surprises in a scratchpad
 
-When something doesn't match the spec — a hidden constraint, a dependency that was wrong, an approach the spec suggested that didn't work — log it to bd **right now**, not in the final report:
+When something doesn't match the spec — a hidden constraint, a dependency that was wrong, an approach the spec suggested that didn't work — capture it in a local scratchpad **right now**, not in the final report from memory.
 
-```bash
-bd update <id> --notes "DEVIATION: spec said X, actually needed Y because Z"
-```
+A scratchpad is just a file in the worktree (e.g. `/tmp/work-do-<id>-deviations.md`) where you append `DEVIATION: spec said X, actually needed Y because Z` lines as they happen. At Step 8 you fold the scratchpad into the structured report's `deviations:` block. The orchestrator writes these into bd notes from main.
 
-This is the single most important discipline. Deviations logged late get lost; deviations logged in the moment guide the next task and the retro.
+This is the single most important discipline. Deviations recorded late get lost; deviations recorded in the moment guide the next task and the retro.
 
 ### Step 5: Handle discoveries
 
-If you find work that needs doing but isn't part of this task, **do not expand scope**. File a new task:
+If you find work that needs doing but isn't part of this task, **do not expand scope**. **Do not create a bd task yourself** — instead, append the discovery to your scratchpad with enough detail for the orchestrator to file it:
 
-```bash
-bd create "Discovered: <short description>" --type task --design "<what and why>"
-bd dep add <new-id> <current-id> --type discovered-from
+```text
+DISCOVERY:
+  title: <short description>
+  type: task
+  design: <what and why; enough for someone to pick it up>
+  depends-on: <current-id>   # so the orchestrator wires `bd dep add`
 ```
 
-Then continue with the current task. Discovered work gets picked up later by a dispatcher.
+The orchestrator parses the discovery block from your final report and runs `bd create` + `bd dep add` from main. Continue with the current task — discovered work gets scheduled later.
 
 ### Step 6: Verify
 
@@ -135,63 +143,91 @@ Before reporting back, produce evidence the task is done:
 - No regressions — run the broader suite if applicable
 - `domain-verification` checklist applied if relevant
 
-### Step 7: Record evidence on the task — do NOT close
+### Step 7: Gather evidence for the report (do NOT touch bd)
 
-Closing is the reviewer's transition, not yours. Leave the task `in_progress` and record your completion evidence in the task notes so the reviewer (running `work-audit`) can verify each claim:
+Closing is the reviewer's transition, not yours — and even your `IMPLEMENTED:` notes are applied by the orchestrator from main, not by you from the worktree. Collect the evidence; you'll emit it in Step 8.
+
+Per criterion: file path + line range (or command output) proving the criterion was met. Per test added/modified: test name + what bug it would catch. Note any deviations from your scratchpad.
+
+Why you don't close (and don't even write `IMPLEMENTED:` notes from here): bd's shared Dolt server races on concurrent writes. Centralizing all writes on main via the orchestrator removes the race. Functionally `closed` still means "reviewed and approved" because the reviewer (work-audit) still drives the close decision — the orchestrator is just the actor that types the command.
+
+### Step 8: Emit the structured report
+
+Return the structured report below to your dispatcher. The block is parseable — the orchestrator extracts `notes_to_append`, `discoveries`, and the status transition, then applies each to bd from the main worktree.
+
+```yaml
+# work-do report — bd <id>
+status_transition: in_progress → ready_for_review   # or "in_progress → blocked" with reason below
+
+branch: bd-<id>.<N>
+worktree: <absolute path>
+summary: <one or two sentences on what was done>
+files_changed:
+  - <path>
+  - <path>
+tests:
+  added: <N>
+  modified: <M>
+  outcome: all green   # or list failures
+
+notes_to_append: |
+  IMPLEMENTED: <one-line summary>
+
+  Evidence:
+  - <criterion 1>: <file:line or command output>
+  - <criterion 2>: <file:line or command output>
+  - Tests: <test file, N passed>
+  - Deviations: <any from scratchpad, or 'none'>
+
+discoveries:
+  - title: <short description>
+    type: task
+    design: <what and why>
+    depends-on: <id>            # current task id, so orchestrator can bd dep add
+  # …additional discoveries…
+  # if none, omit the key or write `discoveries: []`
+
+blocked_reason: |
+  # populate ONLY if status_transition is "in_progress → blocked"
+  # describe what you tried, what's blocking, what would unblock
+```
+
+The orchestrator (scrum-master or solo dev) parses this and applies — from `$AKM_ROOT`, serially:
 
 ```bash
-bd update <id> --notes "IMPLEMENTED: <one-line summary>
+# Notes
+bd update <id> --notes "$(extract notes_to_append)"
 
-Evidence:
-- <criterion 1>: <file:line or command output>
-- <criterion 2>: <file:line or command output>
-- Tests: <test file, N passed>
-- Deviations: <any logged in step 4, or 'none'>"
+# Discoveries
+for d in discoveries: do
+  bd create "$d.title" --type "$d.type" --design "$d.design"
+  bd dep add <new-id> "$d.depends-on" --type discovered-from
+done
+
+# Status transition (only on blocked — ready_for_review stays in_progress for the reviewer)
+if blocked: bd update <id> --status blocked
 ```
 
-Why you don't close: if you close, `closed` just means "implementer thinks it's done" — which is the same information as `in_progress` + implementation notes. The reviewer owns the `in_progress → closed` transition so `closed` means "reviewed and approved". That gate collapses if the implementer grabs the close too.
-
-### Step 8: Report back
-
-Return a short report to whoever dispatched you:
-
-```
-Task <id>: <title> — ready for review
-
-Branch: bd-<id>.<N>
-Worktree: <absolute path>
-Summary: <one or two sentences on what was done>
-Files changed: <list>
-Tests: <N added, M modified, all green>
-Deviations: <any, or 'none'>
-Discoveries filed: <bd IDs, or 'none'>
-```
-
-Branch and worktree lines let the reviewer (and the later worktree-sweep in spec-retro) act mechanically without re-querying you.
-
-Keep it tight. The dispatcher (scrum-master, or a user under plan-supervised) routes this to the reviewer; they don't need a walkthrough.
+Keep the report tight. Branch and worktree lines let the reviewer act mechanically without re-querying you.
 
 ## When you hit a blocker
 
 If you can't complete the task:
 
-1. Leave it in `in_progress` (do NOT close it)
-2. Log what you tried and why it's blocked:
-   ```bash
-   bd update <id> --notes "BLOCKED: <reason>. Tried: <list>. Needs: <what would unblock>"
-   ```
-3. Report back to the dispatcher with `status: blocked`
-4. Optionally file a new bd task for the blocker so it can be scheduled
+1. Do NOT write to bd. Set `status_transition: in_progress → blocked` in the Step 8 report.
+2. Populate `blocked_reason:` with: what you tried, what's blocking, what would unblock.
+3. If the blocker itself is a new piece of work, list it under `discoveries:` so the orchestrator can file a separate bd task and wire the dependency.
+4. Send the report. The orchestrator applies `bd update --status blocked` and any discovery filings from main.
 
-Do not close blocked tasks — closing is a reviewer transition and means "reviewed and approved". `in_progress` with a BLOCKED note is the honest state.
+Do not close blocked tasks — closing is a reviewer transition and means "reviewed and approved". `in_progress` with a BLOCKED note is the honest state; the orchestrator writes that note.
 
 ## Anti-patterns
 
-- **Silent scope expansion.** Doing "related" work that wasn't in the task. File a new task instead.
-- **Closing the task yourself.** `bd close` is the reviewer's job. Record implementation evidence in `bd update --notes` and leave state as `in_progress` for audit.
-- **Skipping the deviation log.** Deviations you plan to mention "later" get forgotten. Log immediately in Step 4.
+- **Silent scope expansion.** Doing "related" work that wasn't in the task. Append a `DISCOVERY:` scratchpad entry instead; orchestrator files the new task.
+- **Writing to bd from the worktree.** `bd close`, `bd update`, `bd create`, `bd dep add` from a feature worktree races against other agents on the shared Dolt server and has been observed reverting state. Emit the report block; orchestrator writes.
+- **Skipping the deviation scratchpad.** Deviations you plan to remember "later" get forgotten. Append to the scratchpad immediately in Step 4.
 - **Starting before reading `bd show`.** The task body has context that the dispatcher's summary does not.
-- **Editing the task's own spec mid-implementation to match what you did.** If the spec is wrong, log a deviation and close honestly — don't rewrite history.
+- **Editing the task's own spec mid-implementation to match what you did.** If the spec is wrong, record a deviation in the scratchpad — don't rewrite history.
 
 ## Integration
 
