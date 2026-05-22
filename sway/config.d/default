@@ -116,7 +116,7 @@ font pango:Iosevka 11
 # Basics:
 #
     # Start a terminal with pre-created tmux session
-    bindsym $mod+Return exec TMUX_TARGET=$(~/.local/bin/tmux-start start 0 $(~/.local/bin/wm-current-workspace)) $term
+    bindsym $mod+Return exec ~/.local/bin/wm-launch-terminal $term
 
     # Kill focused window
     bindsym $mod+Shift+q kill
