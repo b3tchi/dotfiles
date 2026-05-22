@@ -205,6 +205,19 @@ export def 'remove' [
 	print $"Project '($name)' removed"
 }
 
+# look up a registered project by name
+# Returns record { path } for local projects or { path, ssh } for remote projects.
+# Returns null (no error) when the name is not registered or the registry file is missing.
+export def 'lookup' [
+	name: string@project_names # project name to look up
+] {
+	let projects = data
+	if $name not-in ($projects | columns) {
+		return null
+	}
+	$projects | get $name
+}
+
 # open the projects config file in $EDITOR
 export def 'config' [] {
 	let path = ($config_path | path expand)
