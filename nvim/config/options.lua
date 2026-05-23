@@ -19,9 +19,14 @@ vim.o.expandtab = false
 -- (see sway/scripts/clipboard-to-win.nu) handle propagation to Windows.
 local uid = tostring(vim.uv.getuid())
 local wl_sock = "/run/user/" .. uid .. "/wayland-0"
-local has_wayland = (vim.uv.fs_stat(wl_sock) ~= nil) or (os.getenv("WAYLAND_DISPLAY") ~= nil)
+local has_wayland_env = (os.getenv("WAYLAND_DISPLAY") ~= nil)
+local has_wayland = (vim.uv.fs_stat(wl_sock) ~= nil) or has_wayland_env
 
-if has_wayland and vim.fn.executable("wl-copy") == 1 then
+-- Only override clipboard provider when WAYLAND_DISPLAY is missing (SSH session
+-- on a Wayland host). With env present, nvim's built-in auto-detection picks
+-- the right socket — forcing wayland-0 here would hit the WSLg compositor
+-- instead of the active sway/Hyprland one (different clipboards).
+if not has_wayland_env and has_wayland and vim.fn.executable("wl-copy") == 1 then
 	local env_prefix = {
 		"env",
 		"WAYLAND_DISPLAY=wayland-0",
@@ -43,7 +48,7 @@ if has_wayland and vim.fn.executable("wl-copy") == 1 then
 			["+"] = with_env({ "wl-paste", "--no-newline" }),
 			["*"] = with_env({ "wl-paste", "--no-newline", "--primary" }),
 		},
-		cache_enabled = 0,
+		cache_enabled = 1,
 	}
 elseif vim.fn.executable("xclip") == 1 then
 	vim.g.clipboard = {
