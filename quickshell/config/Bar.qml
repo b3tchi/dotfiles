@@ -338,10 +338,75 @@ PanelWindow {
         }
     }
 
-    // No event subscription — WSLg/RDP fires xkb_layout on every Shift
-    // press/release, which would flicker the indicator. Indicator is owned
-    // by user click only: we predict locally and trust kbdToggleProc.
-    Process { id: kbdToggleProc; command: ["swaymsg", "input", "*", "xkb_switch_layout", "next"] }
+    // Indicator owned by user click. xkb_layout events from sway fire on
+    // every Shift press/release under WSLg/RDP — flickers — so we predict
+    // locally instead of subscribing to xkb events.
+    //
+    // Absolute index (not `next`) + type:keyboard (not `*`) — under WSLg,
+    // virtual keyboards spawn/despawn on focus changes and start at index 0,
+    // so a `next` toggle on `*` would race the new keyboard and revert.
+    Process { id: kbdApplyProc }
+    function _applyKbdLayout() {
+        // Under WSLg, sway's `xkb_switch_layout` flips its internal group
+        // but clients don't re-render the keymap — they keep typing the
+        // old layout. Replacing xkb_layout/xkb_variant outright forces sway
+        // to emit a brand new keymap on wl_keyboard.keymap, which clients
+        // do honor. The desired layout goes first so active index 0 (the
+        // default on keymap regeneration) is the one we want. Both
+        // entries remain `us` so sway-side keybinds keep working.
+        //
+        // The single-quoted argument is required because swaymsg's command
+        // parser treats `,` as a chain separator unless the layout list is
+        // double-quoted inside the command string.
+        var variant = root.kbdLayout === "dvorak" ? "dvorak," : ",dvorak"
+        var cmd =
+            "swaymsg 'input type:keyboard xkb_layout \"us,us\"' && " +
+            "swaymsg 'input type:keyboard xkb_variant \"" + variant + "\"'"
+        kbdApplyProc.command = ["sh", "-c", cmd]
+        kbdApplyProc.running = false
+        kbdApplyProc.running = true
+    }
+
+    // Re-apply the user's chosen layout whenever a new keyboard appears.
+    // Without this, focusing a Windows-host window spawns a fresh virtual
+    // keyboard at layout 0, which becomes the active input source and
+    // silently reverts the layout despite the indicator staying correct.
+    Process {
+        id: inputEventSub
+        running: root.isSway
+        command: ["swaymsg", "-t", "subscribe", "-m", '["input"]']
+        stdout: SplitParser {
+            onRead: data => {
+                try {
+                    var e = JSON.parse(data)
+                    if (e.change === "added" && e.input && e.input.type === "keyboard") {
+                        root._applyKbdLayout()
+                    }
+                } catch(err) {}
+            }
+        }
+        onExited: running = true
+    }
+
+    // Window focus also resets layout under WSLg — new windows can pull a
+    // fresh wlroots virtual keyboard at group 0 without firing an `input
+    // added` event quickshell sees in time. Re-apply on every focus change.
+    Process {
+        id: windowEventSub
+        running: root.isSway
+        command: ["swaymsg", "-t", "subscribe", "-m", '["window"]']
+        stdout: SplitParser {
+            onRead: data => {
+                try {
+                    var e = JSON.parse(data)
+                    if (e.change === "focus" || e.change === "new") {
+                        root._applyKbdLayout()
+                    }
+                } catch(err) {}
+            }
+        }
+        onExited: running = true
+    }
 
 
     // --- Layout (using Row, not RowLayout — RowLayout leaks Text.color) ---
@@ -558,10 +623,8 @@ PanelWindow {
                     acceptedButtons: Qt.LeftButton
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
-                        // Predict locally — sway events are unreliable on WSLg
                         root.kbdLayout = root.kbdLayout === "dvorak" ? "us" : "dvorak"
-                        kbdToggleProc.running = false
-                        kbdToggleProc.running = true
+                        root._applyKbdLayout()
                     }
                 }
             }
