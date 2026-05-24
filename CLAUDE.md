@@ -370,9 +370,21 @@ bd close <id>         # Complete work
 - Run `bd prime` for detailed command reference and session close protocol
 - Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
 
-### Worktree + jsonl sync setup
+### Sync setup (Dolt-canonical, manual jsonl)
 
-`.beads/config.yaml` has `no-auto-flush` and `no-auto-import` enabled so bd's per-CLI file-sync layer (the race source) is off. Sync happens via git hooks. `epic init` (claude/epic.nu) installs bd's hooks AND adds a worktree-skip guard above the BEADS INTEGRATION block in `.git/hooks/{pre-commit,post-merge,post-checkout,pre-push,prepare-commit-msg}` so bd hooks fire only from the main worktree — preventing concurrent linked-worktree commits from racing on the jsonl rewrite or dirtying main's working tree. **Run `epic init` after `rotz link` on a fresh clone** (or after `bd hooks install` re-runs). Idempotent.
+`.beads/config.yaml` has `no-auto-flush` and `no-auto-import` enabled. **bd auto-hooks are uninstalled by `epic init`** — git pull no longer touches Dolt and git commit no longer rewrites the jsonl. This eliminates the merge-clobber loop where a peer's older `.beads/issues.jsonl` would silently revert locally-closed issues after `git pull`.
+
+State model:
+- **bd Dolt = source of truth** on each machine.
+- **`.beads/issues.jsonl` = history snapshot** committed to git, rewritten only by `epic export` or `epic archive create`.
+- **Cross-machine state sync = `bd dolt push/pull`** (db-to-db, requires a Dolt remote configured via `bd dolt remote add`).
+
+Workflow:
+- After mutating bd state and before `git commit`: run `epic export` to refresh the jsonl snapshot.
+- After `git pull`: run `epic import` ONLY if you want the pulled jsonl to overwrite local Dolt (rare — usually you trust local Dolt more than what a peer pushed).
+- For live cross-machine sync: configure a Dolt remote and use `bd dolt push` / `bd dolt pull` (separate from git).
+
+**Run `epic init` after `rotz link` on a fresh clone** (or after `bd hooks install` re-installs auto-hooks). Idempotent.
 
 ## Session Completion
 

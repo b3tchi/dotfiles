@@ -5,9 +5,19 @@
 #   epic create <name>   — create or resume; execs claude in current pane
 #   epic delete <name>   — remove bd epic + idea file
 #   epic list            — show all epics
-#   epic init            — prepare repo (bd hooks, board/* dirs)
+#   epic init            — prepare repo (strip bd auto-hooks, board/* dirs)
+#   epic export          — bd Dolt → .beads/issues.jsonl (commit-ready)
+#   epic import          — .beads/issues.jsonl → bd Dolt (after a git pull)
 #   epic archive create  — snapshot + prune old closed issues
 #   epic archive apply   — apply prune-list on other machines
+#
+# State model:
+#   - Dolt = source of truth for bd state on this machine.
+#   - .beads/issues.jsonl = history snapshot committed to git, rewritten only
+#     on `epic export` or `epic archive create`. Never written by hooks.
+#   - Cross-machine sync = `bd dolt push/pull` (db-to-db) when a Dolt remote
+#     is configured. The jsonl-in-git is an out-of-band history record, not
+#     a live sync channel — that is what caused the merge-clobber loop.
 
 def project_root [] {
     mut cur = $env.PWD
@@ -40,7 +50,7 @@ def archive_dir [] {
 # Ensures the project has everything wired up for epic workflows:
 #   - bd CLI present
 #   - .beads/ initialized
-#   - bd git hooks installed (idempotent)
+#   - bd auto-hooks uninstalled (export/import is manual via epic export/import)
 #   - board/idea/ and board/archive/ directories exist
 # Prints only on action or error; silent when already in good shape.
 def preflight [] {
@@ -53,54 +63,59 @@ def preflight [] {
         error make { msg: $"($root)/.beads not found — run 'bd init' from the project root first" }
     }
 
-    let hooks = try {
-        do { ^bd hooks list } | complete
-    } catch { { exit_code: 1, stdout: "" } }
-    let missing = ($hooks.stdout | lines | where { |l| ($l | str contains "✗") or ($l | str contains "not installed") })
-    if ($hooks.exit_code != 0) or (not ($missing | is-empty)) {
-        print -e "Installing bd git hooks..."
-        ^bd hooks install | ignore
-    }
-
-    gate_bd_hooks $root
+    strip_bd_hooks $root
 
     for stage in ["idea" "spec" "ready" "done" "archive"] {
         mkdir $"($root)/board/($stage)"
     }
 }
 
-# Add a worktree-skip guard above bd's BEGIN BEADS INTEGRATION block.
-# Why: .git/hooks/ is shared across worktrees, but .beads/ only lives at
-# the main worktree. A linked-worktree commit running the bd hook would
-# (a) dirty main's working tree with a re-exported jsonl that the
-# worktree commit can't carry, and (b) race the jsonl rewrite with sibling
-# worktree commits. The gate short-circuits when --git-dir != --git-common-dir
-# (canonical "we are in a linked worktree" check). Idempotent: re-running
-# after `bd hooks install` is safe — already-gated hooks are left alone.
-def gate_bd_hooks [root: string] {
+# Remove bd's auto-installed hook shims and the legacy worktree-skip gate.
+# Rationale: bd hooks auto-export Dolt → jsonl on every commit and auto-import
+# jsonl → Dolt on every merge. With jsonl tracked in git, that turns every
+# `git pull` into a state-clobber: a peer machine's older jsonl overwrites
+# the local Dolt's freshly-closed status, silently reverting closures. We
+# keep state in Dolt (manual `epic export` writes jsonl only when we want a
+# history snapshot) and rely on `bd dolt push/pull` for cross-machine sync.
+# Idempotent: leaves hook files intact and only removes the BEADS INTEGRATION
+# block and the linked-worktree gate that wrapped it.
+def strip_bd_hooks [root: string] {
     let hooks_dir = $"($root)/.git/hooks"
-    if not ($hooks_dir | path exists) {
-        return
-    }
-    let gate = "# Skip bd hooks entirely when running from a linked worktree.
-# Rationale: dolt is shared across worktrees, but .beads/issues.jsonl
-# only lives in the main worktree. Re-exporting from a linked worktree
-# would dirty main's working tree without including the diff in the
-# worktree commit, and concurrent worktree commits would race on the
-# jsonl rewrite. bd state is committed from main only.
-if [ \"$(git rev-parse --git-dir 2>/dev/null)\" != \"$(git rev-parse --git-common-dir 2>/dev/null)\" ]; then
-  exit 0
-fi
-"
+    if not ($hooks_dir | path exists) { return }
+
+    # Ask bd to uninstall first — it knows where its shims live across versions.
+    # bd hooks list marks installed hooks with `✓` and uninstalled with `✗`;
+    # we trigger only when at least one `✓` line is present so re-runs after
+    # a clean install are silent.
+    try {
+        let status = (do { ^bd hooks list } | complete)
+        if ($status.exit_code == 0) and ($status.stdout | str contains "✓") {
+            print -e "Uninstalling bd auto-hooks (epic export/import is manual)..."
+            ^bd hooks uninstall | ignore
+        }
+    } catch { }
+
+    # Belt-and-suspenders: scrub any leftover markers and the worktree gate
+    # from earlier epic init runs. bd hooks uninstall removes its own block;
+    # this cleans the linked-worktree guard that used to wrap it.
     for hook in [pre-commit post-merge post-checkout pre-push prepare-commit-msg] {
         let f = $"($hooks_dir)/($hook)"
         if not ($f | path exists) { continue }
         let content = (open --raw $f)
-        if ($content | str contains "linked worktree") { continue }
-        if not ($content | str contains "BEGIN BEADS INTEGRATION") { continue }
-        let patched = ($content | str replace "# --- BEGIN BEADS INTEGRATION" $"($gate)\n# --- BEGIN BEADS INTEGRATION")
-        $patched | save --force --raw $f
-        print -e $"gated ($hook)"
+        let cleaned = (
+            $content
+            | str replace -r '(?s)# Skip bd hooks entirely when running from a linked worktree\..*?^fi\n' ''
+            | str replace -r '(?s)# --- BEGIN BEADS INTEGRATION.*?# --- END BEADS INTEGRATION[^\n]*\n' ''
+        )
+        if $cleaned != $content {
+            if (($cleaned | str trim) == "#!/usr/bin/env sh") or (($cleaned | str trim) == "") {
+                rm $f
+                print -e $"removed empty ($hook)"
+            } else {
+                $cleaned | save --force --raw $f
+                print -e $"scrubbed ($hook)"
+            }
+        }
     }
 }
 
@@ -138,18 +153,56 @@ def read_meta [file: string] {
 }
 
 def main [] {
-    print "Usage: epic <init|create|delete|list|archive> [args...]"
+    print "Usage: epic <init|create|delete|list|export|import|archive> [args...]"
     print "  create <name>   — create or resume epic; execs claude in current pane"
     print "  delete <name>   — remove bd epic + idea file"
     print "  list            — show all epics"
-    print "  init            — prepare repo: install bd hooks, create board/* dirs"
+    print "  init            — prepare repo: strip bd auto-hooks, create board/* dirs"
+    print "  export          — bd Dolt → .beads/issues.jsonl (commit-ready snapshot)"
+    print "  import          — .beads/issues.jsonl → bd Dolt (after a git pull)"
     print "  archive create  — snapshot + prune closed issues older than cutoff"
     print "  archive apply   — apply cumulative prune-list to local bd (for other machines)"
 }
 
 def "main init" [] {
     preflight
-    print -e "Repo ready: bd hooks installed, board/{idea,spec,ready,done,archive}/ present."
+    print -e "Repo ready: bd auto-hooks stripped, board/{idea,spec,ready,done,archive}/ present."
+    print -e "Sync model: bd Dolt = canonical. Use `epic export` to refresh"
+    print -e ".beads/issues.jsonl before committing, `epic import` after a pull."
+}
+
+# Write current Dolt state to .beads/issues.jsonl. Run before `git commit`
+# when you want the jsonl snapshot to capture a status change. Mirrors what
+# `epic archive create` does at line 372 — same export path, no prune.
+def "main export" [] {
+    cd (project_root)
+    ^bd export -o .beads/issues.jsonl
+    print -e "Exported bd Dolt → .beads/issues.jsonl"
+}
+
+# Replay .beads/issues.jsonl into the local Dolt. Run after `git pull` if you
+# want the pulled jsonl (peer history) merged into your Dolt. Skip when you
+# trust your local Dolt is more recent than what just arrived — that is the
+# whole reason auto-import was removed.
+def "main import" [
+    --force  # skip confirmation
+] {
+    cd (project_root)
+    let jsonl = ".beads/issues.jsonl"
+    if not ($jsonl | path exists) {
+        error make { msg: $"($jsonl) not found" }
+    }
+    if not $force {
+        print -e $"Will replay ($jsonl) into local bd Dolt."
+        print -e "This can resurrect closed issues if the jsonl is older than Dolt."
+        let ans = (input "Proceed? [y/N]: ")
+        if ($ans | str downcase) != "y" {
+            print -e "Aborted"
+            return
+        }
+    }
+    ^bd import $jsonl
+    print -e $"Imported ($jsonl) → bd Dolt"
 }
 
 def "main create" [
