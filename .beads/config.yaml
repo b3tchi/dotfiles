@@ -88,3 +88,5 @@ export.auto: false
 # Don't auto-stage .beads/issues.jsonl after export — we want explicit
 # `git add` so a half-finished mutation can't sneak into the next commit.
 export.git-add: false
+
+dolt.auto-commit: "on"

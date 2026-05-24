@@ -64,9 +64,32 @@ def preflight [] {
     }
 
     strip_bd_hooks $root
+    ensure_bd_config
 
     for stage in ["idea" "spec" "ready" "done" "archive"] {
         mkdir $"($root)/board/($stage)"
+    }
+}
+
+# Pin bd config keys that enforce the Dolt-canonical / manual-export model.
+# Defensive — a fresh clone, `bd init` re-run, or future bd version that
+# resets defaults would otherwise silently re-enable auto-export and we'd
+# be back to the merge-clobber loop. Each `bd config set` is a no-op when
+# the value already matches, so this is idempotent and silent on re-runs.
+def ensure_bd_config [] {
+    let desired = {
+        "export.auto":      "false"   # new namespaced disable for jsonl auto-write
+        "export.git-add":   "false"   # don't auto-`git add` the jsonl
+        "dolt.auto-commit": "on"      # commit Dolt writes so state persists
+    }
+    for kv in ($desired | transpose key value) {
+        let current = try {
+            (^bd config get $kv.key | complete).stdout | lines | last | str trim
+        } catch { "" }
+        if $current != $kv.value {
+            print -e $"Setting bd config ($kv.key) = ($kv.value) \(was: ($current)\)"
+            ^bd config set $kv.key $kv.value | ignore
+        }
     }
 }
 
