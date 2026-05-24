@@ -90,3 +90,5 @@ export.auto: false
 export.git-add: false
 
 dolt.auto-commit: "on"
+
+export.path: "issues-snapshot.jsonl"

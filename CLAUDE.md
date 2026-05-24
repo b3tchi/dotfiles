@@ -372,11 +372,11 @@ bd close <id>         # Complete work
 
 ### Sync setup (Dolt-canonical, manual jsonl)
 
-`.beads/config.yaml` has `no-auto-flush` and `no-auto-import` enabled. **bd auto-hooks are uninstalled by `epic init`** — git pull no longer touches Dolt and git commit no longer rewrites the jsonl. This eliminates the merge-clobber loop where a peer's older `.beads/issues.jsonl` would silently revert locally-closed issues after `git pull`.
+`.beads/config.yaml` has `no-auto-flush` and `no-auto-import` enabled. **bd auto-hooks are uninstalled by `epic init`** — git pull no longer touches Dolt and git commit no longer rewrites the jsonl. This eliminates the merge-clobber loop where a peer's older `.beads/issues-snapshot.jsonl` would silently revert locally-closed issues after `git pull`.
 
 State model:
 - **bd Dolt = source of truth** on each machine.
-- **`.beads/issues.jsonl` = history snapshot** committed to git, rewritten only by `epic export` or `epic archive create`.
+- **`.beads/issues-snapshot.jsonl` = history snapshot** committed to git, rewritten only by `epic export` or `epic archive create`. Named off bd's default `.beads/issues.jsonl` watch path so bd's auto-import-on-startup doesn't fire (`export.path` config pins this).
 - **Cross-machine state sync = `bd dolt push/pull`** (db-to-db, requires a Dolt remote configured via `bd dolt remote add`).
 
 Workflow:

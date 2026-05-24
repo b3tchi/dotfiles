@@ -6,14 +6,14 @@
 #   epic delete <name>   — remove bd epic + idea file
 #   epic list            — show all epics
 #   epic init            — prepare repo (strip bd auto-hooks, board/* dirs)
-#   epic export          — bd Dolt → .beads/issues.jsonl (commit-ready)
-#   epic import          — .beads/issues.jsonl → bd Dolt (after a git pull)
+#   epic export          — bd Dolt → .beads/issues-snapshot.jsonl (commit-ready)
+#   epic import          — .beads/issues-snapshot.jsonl → bd Dolt (after a git pull)
 #   epic archive create  — snapshot + prune old closed issues
 #   epic archive apply   — apply prune-list on other machines
 #
 # State model:
 #   - Dolt = source of truth for bd state on this machine.
-#   - .beads/issues.jsonl = history snapshot committed to git, rewritten only
+#   - .beads/issues-snapshot.jsonl = history snapshot committed to git, rewritten only
 #     on `epic export` or `epic archive create`. Never written by hooks.
 #   - Cross-machine sync = `bd dolt push/pull` (db-to-db) when a Dolt remote
 #     is configured. The jsonl-in-git is an out-of-band history record, not
@@ -78,9 +78,10 @@ def preflight [] {
 # the value already matches, so this is idempotent and silent on re-runs.
 def ensure_bd_config [] {
     let desired = {
-        "export.auto":      "false"   # new namespaced disable for jsonl auto-write
-        "export.git-add":   "false"   # don't auto-`git add` the jsonl
-        "dolt.auto-commit": "on"      # commit Dolt writes so state persists
+        "export.auto":      "false"                     # disable jsonl auto-write
+        "export.git-add":   "false"                     # no auto-`git add`
+        "export.path":      "issues-snapshot.jsonl"     # off bd's default-import watch path
+        "dolt.auto-commit": "on"                        # commit Dolt writes so state persists
     }
     for kv in ($desired | transpose key value) {
         let current = try {
@@ -181,8 +182,8 @@ def main [] {
     print "  delete <name>   — remove bd epic + idea file"
     print "  list            — show all epics"
     print "  init            — prepare repo: strip bd auto-hooks, create board/* dirs"
-    print "  export          — bd Dolt → .beads/issues.jsonl (commit-ready snapshot)"
-    print "  import          — .beads/issues.jsonl → bd Dolt (after a git pull)"
+    print "  export          — bd Dolt → .beads/issues-snapshot.jsonl (commit-ready snapshot)"
+    print "  import          — .beads/issues-snapshot.jsonl → bd Dolt (after a git pull)"
     print "  archive create  — snapshot + prune closed issues older than cutoff"
     print "  archive apply   — apply cumulative prune-list to local bd (for other machines)"
 }
@@ -191,19 +192,19 @@ def "main init" [] {
     preflight
     print -e "Repo ready: bd auto-hooks stripped, board/{idea,spec,ready,done,archive}/ present."
     print -e "Sync model: bd Dolt = canonical. Use `epic export` to refresh"
-    print -e ".beads/issues.jsonl before committing, `epic import` after a pull."
+    print -e ".beads/issues-snapshot.jsonl before committing, `epic import` after a pull."
 }
 
-# Write current Dolt state to .beads/issues.jsonl. Run before `git commit`
+# Write current Dolt state to .beads/issues-snapshot.jsonl. Run before `git commit`
 # when you want the jsonl snapshot to capture a status change. Mirrors what
 # `epic archive create` does at line 372 — same export path, no prune.
 def "main export" [] {
     cd (project_root)
-    ^bd export -o .beads/issues.jsonl
-    print -e "Exported bd Dolt → .beads/issues.jsonl"
+    ^bd export -o .beads/issues-snapshot.jsonl
+    print -e "Exported bd Dolt → .beads/issues-snapshot.jsonl"
 }
 
-# Replay .beads/issues.jsonl into the local Dolt. Run after `git pull` if you
+# Replay .beads/issues-snapshot.jsonl into the local Dolt. Run after `git pull` if you
 # want the pulled jsonl (peer history) merged into your Dolt. Skip when you
 # trust your local Dolt is more recent than what just arrived — that is the
 # whole reason auto-import was removed.
@@ -211,7 +212,7 @@ def "main import" [
     --force  # skip confirmation
 ] {
     cd (project_root)
-    let jsonl = ".beads/issues.jsonl"
+    let jsonl = ".beads/issues-snapshot.jsonl"
     if not ($jsonl | path exists) {
         error make { msg: $"($jsonl) not found" }
     }
@@ -445,11 +446,11 @@ def "main archive create" [
     rm $tmp
     print -e $"Deleted ($new_ids | length) issues from local bd"
 
-    ^bd export -o .beads/issues.jsonl | ignore
-    print -e "Refreshed .beads/issues.jsonl"
+    ^bd export -o .beads/issues-snapshot.jsonl | ignore
+    print -e "Refreshed .beads/issues-snapshot.jsonl"
 
     print -e ""
-    print -e "Next: review `git status`, commit board/archive/ + .beads/issues.jsonl, push."
+    print -e "Next: review `git status`, commit board/archive/ + .beads/issues-snapshot.jsonl, push."
 }
 
 def "main archive apply" [] {
