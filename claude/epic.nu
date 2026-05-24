@@ -47,6 +47,87 @@ def archive_dir [] {
     $dir
 }
 
+# AKM spec dir holds `sp###.md` zettels (idea → spec → ready → done lifecycle).
+# Optional: when present, `epic create` mints a companion sp zettel and back-
+# links it via the board.md index. When absent, AKM integration is silently
+# skipped — non-AKM projects keep the legacy board/ flow unchanged.
+def akm_spec_dir [] {
+    let dir = $"(project_root)/docs/notes/spec"
+    if ($dir | path exists) { $dir } else { "" }
+}
+
+def akm_board_file [] {
+    let f = $"(project_root)/docs/board.md"
+    if ($f | path exists) { $f } else { "" }
+}
+
+# Scan docs/notes/spec/sp*.md, return next zero-padded 3-digit id (e.g. "sp003").
+# Robust to gaps — picks max + 1, not count + 1.
+def next_sp_id [] {
+    let dir = (akm_spec_dir)
+    if ($dir == "") { return "" }
+    let existing = (glob $"($dir)/sp*.md")
+    let nums = ($existing | each { |f|
+        ($f | path basename | str replace -r '^sp(\d+)\.md$' '$1' | into int)
+    })
+    let next = (if ($nums | is-empty) { 1 } else { ($nums | math max) + 1 })
+    $"sp(($next) | fill -a r -c '0' -w 3)"
+}
+
+# Mint a fresh idea-stage sp zettel. Body is intentionally minimal — the
+# real problem statement is captured later by the `infinifu:idea-*` skill
+# that drives the brainstorm session. This just allocates the id and the
+# board entry so the workstream is visible from `docs/board.md ## idea`.
+def create_sp_zettel [sp_id: string, name: string, bd_id: string] {
+    let dir = (akm_spec_dir)
+    if ($dir == "") { return "" }
+    let f = $"($dir)/($sp_id).md"
+    if ($f | path exists) { return $f }
+    let today = (date now | format date "%Y-%m-%d")
+    [
+        "---"
+        "aliases:"
+        $"  - ($name)"
+        "status: idea"
+        $"created: ($today)"
+        "---"
+        "# Spec [[board]]"
+        ""
+        "## problem"
+        $"TBD — captured at idea-* skill stage for ($name)."
+        ""
+        "---"
+        ""
+        $"Epic: ($bd_id)"
+        ""
+        "Index: [[board]]"
+        ""
+    ] | str join "\n" | save -f $f
+    $f
+}
+
+# Insert `- [[sp_id|name]]` under the `## idea` section of docs/board.md.
+# Idempotent — skips if the wikilink already exists anywhere in the file.
+def add_to_board_idea [sp_id: string, name: string] {
+    let board = (akm_board_file)
+    if ($board == "") { return }
+    let content = (open --raw $board)
+    let link = $"- [[($sp_id)|($name)]]"
+    if ($content | str contains $"[[($sp_id)|") { return }
+    let lines = ($content | lines)
+    # Find "## idea" line, insert link on the next non-empty position.
+    let idea_idx = ($lines | enumerate | where { |it| $it.item == "## idea" } | get -o 0.index)
+    if ($idea_idx == null) { return }
+    let insert_at = ($idea_idx + 1)
+    let new_lines = (
+        ($lines | take $insert_at)
+        | append ""
+        | append $link
+        | append ($lines | skip $insert_at)
+    )
+    ($new_lines | str join "\n") | save -f $board
+}
+
 # Ensures the project has everything wired up for epic workflows:
 #   - bd CLI present
 #   - .beads/ initialized
@@ -173,6 +254,7 @@ def read_meta [file: string] {
     {
         session_id: (read_field $content "claude_session_id")
         bd_id: (read_field $content "bd_epic_id")
+        sp_id: (read_field $content "sp_id")
     }
 }
 
@@ -259,18 +341,32 @@ def "main create" [
         let idea_file = $"($dir)/($name).($short).md"
         let now = (date now | format date "%Y-%m-%d %H:%M")
 
-        [
+        # Mint AKM spec zettel + board.md index entry when docs/notes/spec/
+        # exists. Skipped silently on non-AKM projects so this stays a no-op
+        # for repos that haven't adopted the PKM scaffolding.
+        let sp_id = (next_sp_id)
+        if ($sp_id != "") {
+            create_sp_zettel $sp_id $name $full_id
+            add_to_board_idea $sp_id $name
+        }
+
+        let fm_base = [
             "---"
             $"idea: ($name)"
             $"bd_epic_id: ($full_id)"
             $"claude_session_id: ($session_id)"
             $"created_at: ($now)"
-            "---"
-            ""
-        ] | str join "\n" | save -f $idea_file
+        ]
+        let fm = (if ($sp_id != "") {
+            $fm_base | append $"sp_id: ($sp_id)"
+        } else { $fm_base })
+        ($fm | append "---" | append "" | str join "\n") | save -f $idea_file
 
         print -e $"Created ($idea_file)"
         print -e $"BD epic:  ($full_id)"
+        if ($sp_id != "") {
+            print -e $"AKM spec: ($sp_id) \(at docs/notes/spec/($sp_id).md, linked from docs/board.md ## idea\)"
+        }
 
         { session_id: $session_id, short: $short, resume: false, idea_file: $idea_file, bd_id: $full_id }
     } else {
@@ -285,11 +381,14 @@ def "main create" [
 
     let env_prefix = if ($profile_dir == "") { "" } else { $"CLAUDE_CONFIG_DIR=($profile_dir) " }
 
+    let sp_id = (read_meta $meta.idea_file | get sp_id)
+
     if $no_launch {
         print -e ""
         print -e $"Label:    ($label)"
         print -e $"Idea:     ($meta.idea_file)"
         print -e $"BD epic:  ($meta.bd_id)"
+        if ($sp_id != "") { print -e $"AKM spec: ($sp_id)" }
         if ($profile_dir != "") { print -e $"Profile:  ($profile) → ($profile_dir)" }
         print -e ""
         if $meta.resume {
@@ -323,10 +422,16 @@ def "main delete" [
     let idea_file = ($existing | first)
     let m = (read_meta $idea_file)
 
+    let sp_file = (if ($m.sp_id != "") {
+        let f = $"(project_root)/docs/notes/spec/($m.sp_id).md"
+        if ($f | path exists) { $f } else { "" }
+    } else { "" })
+
     if not $force {
         print -e $"Will delete:"
         print -e $"  bd epic: ($m.bd_id)"
         print -e $"  file:    ($idea_file)"
+        if ($sp_file != "") { print -e $"  AKM:     ($sp_file) + board.md entry" }
         let ans = (input "Proceed? [y/N]: ")
         if ($ans | str downcase) != "y" {
             print -e "Aborted"
@@ -336,7 +441,18 @@ def "main delete" [
 
     ^bd delete $m.bd_id --force
     rm $idea_file
+    if ($sp_file != "") {
+        rm $sp_file
+        # Strip the board.md wikilink line; leave section structure intact.
+        let board = (akm_board_file)
+        if ($board != "") {
+            let pat = $"[[($m.sp_id)|"
+            let kept = (open --raw $board | lines | where { |l| not ($l | str contains $pat) })
+            ($kept | str join "\n") | save -f $board
+        }
+    }
     print -e $"Deleted ($m.bd_id) and ($idea_file)"
+    if ($sp_file != "") { print -e $"Deleted ($sp_file) and board.md entry" }
 }
 
 def "main list" [] {
