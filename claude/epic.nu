@@ -150,6 +150,58 @@ def preflight [] {
     for stage in ["idea" "spec" "ready" "done" "archive"] {
         mkdir $"($root)/board/($stage)"
     }
+
+    check_akm $root
+}
+
+# Verify AKM scaffolding (the `docs/notes/spec/` + `docs/board.md` pair that
+# `epic create` mints sp### zettels into). If `docs/` exists but the spec
+# scaffold doesn't, create the minimum so the AKM branch of epic create
+# stops no-op'ing silently. If `docs/` itself is absent (non-AKM repo),
+# print a one-line note and skip — we don't impose the PKM layout on repos
+# that have not opted in.
+def check_akm [root: string] {
+    let docs = $"($root)/docs"
+    if not ($docs | path exists) {
+        print -e "AKM: docs/ absent — epic create will skip sp### minting."
+        return
+    }
+
+    let spec_dir = $"($docs)/notes/spec"
+    if not ($spec_dir | path exists) {
+        print -e $"AKM: creating ($spec_dir)"
+        mkdir $spec_dir
+    }
+
+    let board = $"($docs)/board.md"
+    if not ($board | path exists) {
+        print -e $"AKM: creating ($board)"
+        [
+            "# Board"
+            ""
+            "Active workstreams. Specs (`sp###`) at `status` ∈ {idea, spec, ready}"
+            "grouped under section headings matching their status. Move between"
+            "sections when status flips."
+            ""
+            "## idea"
+            ""
+            "## spec"
+            ""
+            "## ready"
+            ""
+        ] | str join "\n" | save -f $board
+    } else {
+        # Existing board.md must have the three section headings or
+        # add_to_board_idea will silently no-op on epic create. Warn,
+        # don't auto-edit — the file may carry user content above/below.
+        let content = (open --raw $board)
+        let missing = (["## idea" "## spec" "## ready"]
+            | where { |h| not ($content | str contains $h) })
+        if not ($missing | is-empty) {
+            print -e $"AKM: warning — docs/board.md missing sections: ($missing | str join ', ')"
+            print -e "     epic create will not be able to insert sp### links until these exist."
+        }
+    }
 }
 
 # Pin bd config keys that enforce the Dolt-canonical / manual-export model.
