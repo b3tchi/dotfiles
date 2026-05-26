@@ -1,6 +1,0 @@
-Host ws
-  HostName 10.42.80.11
-  User jan
-  Port 22
-  IdentityFile ~/.ssh/id_ed25519
-  IdentitiesOnly yes

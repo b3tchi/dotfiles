@@ -1,5 +1,5 @@
 # Managed by rotz — main ssh client config.
-# Per-host entries live under ~/.ssh/config.d/ (symlinked from ssh/config.d/).
+# Per-host entries live under ~/.ssh/config.d/ (per-machine, not tracked).
 # First-match wins in ssh_config(5), so keep this file minimal and put
 # host-specific overrides in config.d/* files.
 

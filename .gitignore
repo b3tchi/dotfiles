@@ -18,6 +18,10 @@ nushell/scripts/gwt/config/profiles.yaml
 # Perles per-project config (use global ~/.config/perles/config.yaml)
 .perles/
 
+# SSH per-host configs (per-machine, not tracked; .gitkeep preserves dir)
+ssh/config.d/*
+!ssh/config.d/.gitkeep
+
 # Eval sandboxes (each seed re-creates a throwaway git repo)
 claude/marketplace/plugins/infinifu/skills/*-workspace/iteration-*/eval-*/with_skill/sandbox/
 claude/marketplace/plugins/infinifu/skills/*-workspace/iteration-*/eval-*/without_skill/sandbox/

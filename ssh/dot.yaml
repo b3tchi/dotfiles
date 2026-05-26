@@ -1,16 +1,14 @@
 windows:
   links:
     config: ~/.ssh/config
-    config.d: ~/.ssh/config.d
 
 linux:
   links:
     config: ~/.ssh/config
-    config.d: ~/.ssh/config.d
   installs:
     cmd: |
-      mkdir -p ~/.ssh
-      chmod 700 ~/.ssh
+      mkdir -p ~/.ssh ~/.ssh/config.d
+      chmod 700 ~/.ssh ~/.ssh/config.d
       # Termux (Android, direct)
       {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
       pkg install -y openssh
