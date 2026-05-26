@@ -70,6 +70,7 @@ $env.ENV_CONVERSIONS = {
 }
 
 $env.TEMP = $nu.temp-dir
+$env.PATH = ($env.PATH | split row (char esep) | prepend ($env.HOME | path join '.local' 'bin') | uniq )
 #filter out native paths
 if $nu.os-info.kernel_version =~ 'microsoft-standard-WSL' {
 	# scoop and powerhsell
@@ -85,7 +86,6 @@ if $nu.os-info.kernel_version =~ 'microsoft-standard-WSL' {
 	 )
 	
     # Prepend ~/.local/bin so custom xdg-open wrapper is found first
-    $env.PATH = ($env.PATH | split row (char esep) | prepend ($env.HOME | path join '.local' 'bin'))
     # Set browser for CLI tools (pac, dotnet, etc.)
     $env.BROWSER = '/home/jan/.local/bin/xdg-open'
 }
