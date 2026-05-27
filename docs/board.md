@@ -6,6 +6,8 @@ sections when status flips.
 
 ## idea
 
+- [[sp003|fix-categories]]
+
 ## spec
 
 ## ready
