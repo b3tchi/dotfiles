@@ -13,28 +13,26 @@ Three output modes — pick one, don't combine.
 
 **Announce at start:** "Using category-read skill to surface the taxonomy."
 
-## AKM Workspace Resolution
+## Data source
 
-Readers always anchor on the main worktree's view of the AKM, never the
-feature worktree's local copy (which may be stale or branch-divergent).
-Resolve first:
+All reads go through the `akm` CLI — never resolve `AKM_ROOT` or parse
+frontmatter by hand. The CLI enforces the strict main-worktree rule
+and returns canonical state.
 
 ```bash
-AKM_ROOT="$(akm-root)"
+akm list cat --json | from json        # all categories as structured rows
+akm read cat003                         # full markdown of one category
+akm cat check                           # warn about non-canonical taxonomy drift
 ```
 
-All lookups anchor on `$AKM_ROOT/docs/notes/...`. If `akm-root` errors,
-surface its stderr and fall back to cwd with the warning *"reading from
-cwd worktree — may be stale; check out the default branch for canonical
-view"*.
+If `akm` refuses with exit 2, surface its stderr and stop.
+If `akm list cat --json` returns `[]`: tell the user "No categories
+found. Use category-write to add one (or `akm init <target>` to
+scaffold the canonical 8-category taxonomy)."
 
-## Storage
-
-**Backend:** AKM. Categories live in `$AKM_ROOT/docs/notes/cat###.md`. Schema in `docs/notes/akm.md`; this skill only needs the slice below.
-
-Categories are append-only and `status` is always `stable`. There is no draft/superseded lifecycle for categories — renaming is a wikilink-graph operation.
-
-If no `cat*.md` files under `$AKM_ROOT/docs/notes/`: tell the user "No categories found. Use category-write to add one."
+Categories are append-only and `status` is always `stable`. There is
+no draft/superseded lifecycle for categories — renaming is a
+wikilink-graph operation.
 
 ### Zettel slice this skill needs
 
@@ -68,7 +66,16 @@ Categories are taxonomy buckets — their value is in the zettels that reference
 - **Features in this category** — `ft###` zettels whose H1 contains the `[[cat###]]` link.
 - **Implementations in this category** — `im###` zettels whose H1 contains the `[[cat###]]` link.
 
-This is a cheap grep: `grep -l '\[\[cat003\]\]' "$AKM_ROOT/docs/notes/"{adr,ft,im}*.md`. Cache the count; render up to 3 example ids per type in detail mode.
+Cheap to compute from the list output — the `categories` column already carries the H1 wikilink set per zettel:
+
+```
+let by_cat = (akm list --json | from json | where { |r| 'cat003' in $r.categories } | group-by type)
+$by_cat.adr | length    # ADR count under cat003
+$by_cat.ft  | length    # Feature count
+$by_cat.im  | length    # Implementation count
+```
+
+Cache once per category-read invocation; render up to 3 example ids per type in detail mode.
 
 For table mode, count-only (no list) keeps the table scannable.
 
@@ -106,13 +113,13 @@ digraph mode_select {
 
 ## Reading the zettels
 
-1. List ids: `ls "$AKM_ROOT/docs/notes/"cat*.md`.
-2. Per mode:
-   - **Detail** — single file + usage cross-reference.
-   - **Table** — `head -15` (frontmatter + `## name` + `## summary` first line). Usage counts via grep per category.
-   - **Render** — full read + usage cross-reference per category.
+- **Detail** — `akm read <id>` (e.g. `akm read cat003`) + usage cross-reference (see "Usage counts" above).
+- **Table / Render** — `akm list cat --json | from json` returns
+  type / id / name / status / created. For `## summary` body content,
+  fetch via `akm read <id>` per matching row. Usage counts come from
+  `akm list --json | from json | where { |r| '<cat>' in $r.categories }`.
 
-Sort by filename ascending.
+`akm list` sorts by `type status id` — natural ordering works.
 
 ## Mode 1: Detail
 

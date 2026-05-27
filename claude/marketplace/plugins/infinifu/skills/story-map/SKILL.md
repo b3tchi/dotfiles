@@ -61,37 +61,51 @@ The two body sections this skill cares about are `## solves` (one wikilink to a 
 
 **Path-form invariant:** delegated to `infinifu:zettel-link-form`. Each bullet is `- [<path>](../../<path>)`; older bare-backtick entries `` - `<path>` `` are legacy — accept on read, but **normalize to the link form on attach** (and on any neighboring edit). The microskill carries the worked examples, glob handling, and anti-patterns.
 
-## AKM Workspace Resolution
+## Data source
 
-Readers always anchor on the main worktree's view of the AKM, never the
-feature worktree's local copy (which may be stale or branch-divergent).
-Resolve first:
+The `akm` CLI is the read gateway — enforces strict main-worktree
+access and returns canonical state:
 
 ```bash
-AKM_ROOT="$(akm-root)"
+akm list us --json | from json         # all stories
+akm list im --json | from json         # all implementations
+akm read us013                          # one story body
+akm read im007                          # one implementation body
 ```
 
-All AKM zettel lookups (`us###`, `im###`) anchor on `$AKM_ROOT/docs/notes/...`.
-If `akm-root` errors, surface its stderr and fall back to cwd with the
-warning *"reading from cwd worktree — may be stale; check out the default
-branch for canonical view"*.
+For grep-shaped queries over `## components` paths and `## solves`
+wikilinks (the bulk of story-map's work), resolve the AKM root once
+and keep it as a shell var so the inline `rg` / `grep` calls below
+have a stable anchor:
+
+```bash
+AKM_ROOT="$(akm-root)"        # exit 2 → surface stderr, stop
+```
+
+When edits need to land back on disk (attach path under
+`## components` on an existing `im###`), the same `$AKM_ROOT` anchors
+the write:
+
+```bash
+edit "$AKM_ROOT/docs/notes/im007.md"
+git -C "$AKM_ROOT" add docs/notes/im007.md
+```
 
 **Code paths are different.** The paths inside `## components` (e.g.
 `src/auth/login.ts`) refer to the source tree the user is actually
 working in — typically the current worktree, possibly a feature branch.
-**Do not rewrite code paths to be anchored on `$AKM_ROOT`.** Existence
-checks like `git ls-files` and `ls` run in the user's cwd, not the AKM
-root. Only the `us###` / `im###` / `docs/notes/` reads anchor on
-`$AKM_ROOT`; component path strings stay as-written.
+**Do not rewrite code paths to be anchored on the AKM root.**
+Existence checks (`git ls-files`, `ls`) run in the user's cwd, not the
+AKM root. Only `us###` / `im###` / `docs/notes/` reads anchor on the
+AKM root; component path strings stay as-written.
 
-## Storage
-
-- **Stories:** `$AKM_ROOT/docs/notes/us###.md` (read-only here — to add stories, see `story-write`).
-- **Implementations:** `$AKM_ROOT/docs/notes/im###.md` (this is what we read and edit).
-
-If `$AKM_ROOT/docs/notes/` has no `im*.md` files: the map is empty.
-- Forward / reverse lookup → "No implementations indexed yet. Stories with shipped code typically have an `im###` zettel; create one before mapping."
-- Attach → tell the user "No `im###` zettel exists for story `<id>`. Create one via `spec-writing` or by hand following the AKM Implementation schema, then re-run attach."
+If `akm list im --json` returns `[]`, the map is empty:
+- Forward / reverse lookup → "No implementations indexed yet. Stories
+  with shipped code typically have an `im###` zettel; create one
+  before mapping."
+- Attach → tell the user "No `im###` zettel exists for story `<id>`.
+  Create one via `spec-writing` or by hand following the AKM
+  Implementation schema, then re-run attach."
 
 ## Mode Selection
 

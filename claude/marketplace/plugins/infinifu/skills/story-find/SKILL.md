@@ -16,26 +16,31 @@ It is read-only. It does not modify any AKM zettel, does not flip statuses, and 
 
 **Announce at start:** "Using story-find skill to surface stories touching this area + their validation state."
 
-## AKM Workspace Resolution
+## Data source
 
-Readers always anchor on the main worktree's view of the AKM, never the
-feature worktree's local copy (which may be stale or branch-divergent).
-Resolve first:
+The story listing comes from the `akm` CLI; full body content for
+tag / acceptance-criteria matching comes from `akm read <id>` per
+candidate. The CLI enforces the strict main-worktree rule and returns
+canonical state.
 
 ```bash
-AKM_ROOT="$(akm-root)"
+# Index — id, name (first alias), status, created, categories (H1 tags).
+akm list us --json | from json
+
+# Per-story body for body-field scoring:
+akm read us013
 ```
 
-All lookups anchor on `$AKM_ROOT/docs/notes/...`. If `akm-root` errors,
-surface its stderr and fall back to cwd with the warning *"reading from
-cwd worktree — may be stale; check out the default branch for canonical
-view"*.
+When a search needs body grep across many stories at once (rare), use
+`akm root` to anchor a ripgrep:
 
-## Storage
+```bash
+rg -l '<token>' "$(akm root)/docs/notes/"us*.md
+```
 
-**Backend:** AKM. Stories live as individual markdown zettels in `$AKM_ROOT/docs/notes/us###.md`. The schema is documented in `docs/notes/akm.md`; the slice this skill needs is the same as in `story-read`.
-
-If `$AKM_ROOT/docs/notes/` does not contain any `us*.md` files: tell the user "No stories found — nothing to search." Do not fabricate matches.
+If `akm` refuses with exit 2, surface its stderr and stop.
+If `akm list us --json` returns `[]`: tell the user "No stories found
+— nothing to search."
 
 ### Zettel slice this skill reads
 
@@ -141,13 +146,22 @@ The synonym map is a hint, not a hard rule — if the user query is already spec
 
 A story matches if `score >= 1`. Lower scores indicate weaker relevance.
 
-**Reading shortcuts.** AKM tag wikilinks live in the H1; `head -10` on each `$AKM_ROOT/docs/notes/us*.md` is usually enough to capture frontmatter + H1. For body-field matches you need a fuller read. A reasonable strategy:
+**Reading shortcuts.** Tag scoring is already implicit in
+`akm list us --json | from json` — the `categories` column carries the
+`[[cat###]]` H1 wikilinks. For non-cat tag matches and body-field
+matches you still need full body content via `akm read <id>`. A
+reasonable strategy:
 
-1. Read the H1 of every story via `head -10`; score against tag wikilinks.
-2. For stories that scored on tags, do a full read to render the checklist.
-3. For stories that scored 0 on tags, do a body grep across all `$AKM_ROOT/docs/notes/us*.md` files for the remaining tokens and add body-field scores.
+1. `akm list us --json | from json` — score each row's `categories`
+   against the query's tag tokens.
+2. For stories that scored on tags, `akm read <id>` to render the
+   checklist with acceptance criteria.
+3. For stories that scored 0 on tags, body grep across the AKM root
+   for the remaining tokens:
+   `rg -li '<token>' "$(akm root)/docs/notes/"us*.md`.
 
-`grep -l '\[\[<token>\]\]' "$AKM_ROOT/docs/notes/"us*.md` finds tag matches cheaply. For substring matches across body fields, `grep -i '<token>' "$AKM_ROOT/docs/notes/"us*.md` returns hits with paths.
+For raw tag-wikilink matches outside the canonical H1 cat-set, the
+same ripgrep works: `rg -l '\[\[<token>\]\]' "$(akm root)/docs/notes/"us*.md`.
 
 ## Step 3: Rank and Cap
 

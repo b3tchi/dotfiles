@@ -11,28 +11,22 @@ Read implementation zettels under `docs/notes/im###.md` and present them in the 
 
 **Announce at start:** "Using implementation-read skill to surface solution records."
 
-## AKM Workspace Resolution
+## Data source
 
-Readers always anchor on the main worktree's view of the AKM, never the
-feature worktree's local copy (which may be stale or branch-divergent).
-Resolve first:
+All reads go through the `akm` CLI — never resolve `AKM_ROOT` or parse
+frontmatter by hand. The CLI is the single gatekeeper: it enforces the
+strict main-worktree rule and returns canonical state.
 
 ```bash
-AKM_ROOT="$(akm-root)"
+akm list im --json | from json         # all implementations as structured rows
+akm read im007                          # full markdown of one implementation
 ```
 
-All lookups anchor on `$AKM_ROOT/docs/notes/...`. If `akm-root` errors,
-surface its stderr and fall back to cwd with the warning *"reading from
-cwd worktree — may be stale; check out the default branch for canonical
-view"*.
+If `akm` refuses with exit 2, surface its stderr and stop.
+If `akm list im --json` returns `[]`: tell the user "No implementations
+found. Use implementation-write to add one."
 
-## Storage
-
-**Backend:** AKM. Implementations live in `$AKM_ROOT/docs/notes/im###.md`. Schema in `docs/notes/akm.md`; this skill only needs the slice below.
-
-If no `im*.md` files in `$AKM_ROOT/docs/notes/`: tell the user "No implementations found. Use implementation-write to add one."
-
-### Zettel slice this skill needs
+## Schema (this skill's slice)
 
 ```markdown
 ---
@@ -117,13 +111,15 @@ digraph mode_select {
 
 ## Reading the zettels
 
-1. List ids: `ls "$AKM_ROOT/docs/notes/"im*.md`.
-2. Per mode:
-   - **Detail** — single file.
-   - **Table** — full read is cheap; you need `solves`, `features`, and `approach`.
-   - **Render** — full read.
+- **Detail** — `akm read <id>` (e.g. `akm read im007`).
+- **Table / Render** — `akm list im --json | from json` returns
+  type / id / name / status / created / categories. For body fields
+  (`## solves`, `## features`, `## approach`) the list doesn't carry,
+  fetch each matching id via `akm read <id>`.
 
-For "how was us005 solved", scan every im file's `## solves` and match — usually a small set.
+For "how was us005 solved", scan every im body via `akm list im --json
+| from json | get id | each { |id| akm read $id }` and grep the
+`## solves` lines — usually a small set, so the fetch cost is fine.
 
 ## Mode 1: Detail
 

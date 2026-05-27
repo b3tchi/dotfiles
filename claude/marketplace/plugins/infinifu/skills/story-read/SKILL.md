@@ -11,28 +11,28 @@ Read user-story zettels under `docs/notes/us###.md` and present them in the form
 
 **Announce at start:** "Using story-read skill to surface the backlog."
 
-## AKM Workspace Resolution
+## Data source
 
-Readers always anchor on the main worktree's view of the AKM, never the
-feature worktree's local copy (which may be stale or branch-divergent).
-Resolve first:
+All reads go through the `akm` CLI — never resolve `AKM_ROOT` or parse
+frontmatter by hand. The CLI is the single gatekeeper: it enforces the
+strict main-worktree rule (refuses from feature worktrees with exit 2)
+and returns canonical state.
 
 ```bash
-AKM_ROOT="$(akm-root)"
+# All stories as structured rows: columns type, id, name (first alias),
+# status, created, categories (list of cat ids from H1 wikilinks).
+akm list us --json | from json
+
+# Full markdown of a single story:
+akm read us001
 ```
 
-All lookups anchor on `$AKM_ROOT/docs/notes/...`. If `akm-root` errors,
-surface its stderr and fall back to cwd with the warning *"reading from
-cwd worktree — may be stale; check out the default branch for canonical
-view"*.
+If `akm` refuses with exit 2, surface its stderr verbatim and stop.
 
-## Storage
+If `akm list us --json` returns `[]`: tell the user "No stories found.
+Use story-write to add one." Don't fabricate a backlog.
 
-**Backend:** AKM (Agentic Knowledge Model). Stories live as individual markdown zettels in `$AKM_ROOT/docs/notes/us###.md`. The schema is documented in `docs/notes/akm.md`; this skill only needs the slice below.
-
-If `$AKM_ROOT/docs/notes/` does not contain any `us*.md` files: tell the user "No stories found. Use story-write to add one." Don't fabricate a backlog.
-
-### Zettel slice this skill needs
+## Schema (this skill's slice)
 
 ```markdown
 ---
@@ -109,15 +109,19 @@ If the query is ambiguous between table and render, prefer **table** — it's mo
 
 ## Reading the zettels
 
-Two-step pattern: list files cheaply, parse only what you need.
+- **Detail mode** — `akm read <id>` (e.g. `akm read us001`).
+- **Table / Render mode** — `akm list us --json | from json` returns
+  type / id / name / status / created / categories. Apply filters as
+  nu pipeline stages:
+  ```
+  akm list us --json | from json | where status == 'ready'
+  akm list us --json | from json | where { |r| 'cat002' in $r.categories }
+  ```
+  For role / acceptance-criteria details that aren't in the list rows,
+  fetch the full body via `akm read <id>` per matching row.
 
-1. **List ids.** `ls "$AKM_ROOT/docs/notes/"us*.md` (or in-process equivalent). The filename slug is the id.
-2. **Read per mode:**
-   - **Detail mode** — read only the one matching file.
-   - **Table mode** — read all `us*.md` to extract frontmatter + role + title; you can skip body sections after `## want` is found if your tooling supports it, but a full read per file is fine (these are small).
-   - **Render mode** — read every `us*.md` fully (acceptance criteria are needed).
-
-If you have shell access, you can pipe `head -20` on each file to grab frontmatter + role cheaply for the table mode. Do not assume the file order matches id order; sort by filename after reading.
+`akm list` already sorts by `type status id` — natural ordering works
+for both modes.
 
 ## Mode 1: Detail
 
@@ -211,7 +215,7 @@ Translate natural-language filters into structured matches:
 
 Multiple filters compose with AND. Example: "draft stories about catalog" → `status == draft AND any-text-field-or-tag contains 'catalog'`.
 
-For role filtering, remember the role field is `[[pn###|alias]]` — match against the alias label, not the persona id. If you need the alias and only have the id, read `$AKM_ROOT/docs/notes/pn###.md` and pick the first `aliases:` entry. Cache that lookup if you read more than one story.
+For role filtering, remember the role field is `[[pn###|alias]]` — match against the alias label, not the persona id. If you need the alias and only have the id, `akm read pn###` (or `akm list pn --json | from json` once and reuse the table for many lookups).
 
 ## What This Skill Does NOT Do
 

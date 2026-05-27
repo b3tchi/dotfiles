@@ -11,28 +11,22 @@ Read feature zettels under `docs/notes/ft###.md` and present them in the format 
 
 **Announce at start:** "Using feature-read skill to surface capabilities."
 
-## AKM Workspace Resolution
+## Data source
 
-Readers always anchor on the main worktree's view of the AKM, never the
-feature worktree's local copy (which may be stale or branch-divergent).
-Resolve first:
+All reads go through the `akm` CLI — never resolve `AKM_ROOT` or parse
+frontmatter by hand. The CLI enforces the strict main-worktree rule
+and returns canonical state.
 
 ```bash
-AKM_ROOT="$(akm-root)"
+akm list ft --json | from json         # all features as structured rows
+akm read ft003                          # full markdown of one feature
 ```
 
-All lookups anchor on `$AKM_ROOT/docs/notes/...`. If `akm-root` errors,
-surface its stderr and fall back to cwd with the warning *"reading from
-cwd worktree — may be stale; check out the default branch for canonical
-view"*.
+If `akm` refuses with exit 2, surface its stderr and stop.
+If `akm list ft --json` returns `[]`: tell the user "No features found.
+Use feature-write to add one."
 
-## Storage
-
-**Backend:** AKM. Features live as individual markdown zettels in `$AKM_ROOT/docs/notes/ft###.md`. Schema is documented in `docs/notes/akm.md`; this skill only needs the slice below.
-
-If `$AKM_ROOT/docs/notes/` has no `ft*.md` files: tell the user "No features found. Use feature-write to add one."
-
-### Zettel slice this skill needs
+## Schema (this skill's slice)
 
 ```markdown
 ---
@@ -110,11 +104,11 @@ digraph mode_select {
 
 ## Reading the zettels
 
-1. List ids: `ls "$AKM_ROOT/docs/notes/"ft*.md`.
-2. Per mode:
-   - **Detail** — single file.
-   - **Table** — `head -30` is enough (frontmatter + H1 + `## providing` first line).
-   - **Render** — full read.
+- **Detail** — `akm read <id>` (e.g. `akm read ft003`).
+- **Table / Render** — `akm list ft --json | from json` returns
+  type / id / name / status / created / categories. For body fields
+  (`## providing`, `## api_surface`, etc.) the list doesn't carry,
+  fetch each matching id via `akm read <id>`.
 
 ## Mode 1: Detail
 

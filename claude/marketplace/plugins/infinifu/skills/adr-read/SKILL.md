@@ -11,28 +11,32 @@ Read ADR zettels under `docs/notes/adr####.md` and present them in the format th
 
 **Announce at start:** "Using adr-read skill to surface decisions."
 
-## AKM Workspace Resolution
+## Data source
 
-Readers always anchor on the main worktree's view of the AKM, never the
-feature worktree's local copy (which may be stale or branch-divergent).
-Resolve first:
+All reads go through the `akm` CLI — never resolve `AKM_ROOT` or parse
+frontmatter by hand. The CLI is the single gatekeeper: it enforces the
+strict main-worktree rule (refuses from feature worktrees with exit 2)
+and returns canonical state.
 
 ```bash
-AKM_ROOT="$(akm-root)"
+# All ADRs as structured rows: columns type, id, name (first alias),
+# status, created, categories (list of cat ids parsed from H1 wikilinks).
+akm list adr --json | from json
+
+# Full markdown of a single ADR:
+akm read adr0007
 ```
 
-All lookups anchor on `$AKM_ROOT/docs/notes/...`. If `akm-root` errors,
-surface its stderr and fall back to cwd with the warning *"reading from
-cwd worktree — may be stale; check out the default branch for canonical
-view"*.
+If `akm` refuses with exit 2, surface its stderr verbatim and stop —
+that's the strict-mode gate, not a transient failure.
 
-## Storage
+If `akm list adr --json` returns `[]`: tell the user "No ADRs found. Use
+adr-write to add one."
 
-**Backend:** AKM. ADRs live in `$AKM_ROOT/docs/notes/adr####.md` (four-digit zero-padded id, e.g. `adr0007`). Schema in `docs/notes/akm.md`; this skill only needs the slice below.
+## Schema (this skill's slice)
 
-ADRs are immutable in spirit: never edited in place, only superseded by a new ADR. The status field captures lifecycle stages.
-
-If no `adr*.md` files under `$AKM_ROOT/docs/notes/`: tell the user "No ADRs found. Use adr-write to add one."
+ADRs are immutable in spirit: never edited in place, only superseded by
+a new ADR. Status captures lifecycle stages.
 
 ### Zettel slice this skill needs
 
@@ -104,13 +108,17 @@ digraph mode_select {
 
 ## Reading the zettels
 
-1. List ids: `ls "$AKM_ROOT/docs/notes/"adr*.md`. Filenames are `adr0001.md` … `adr9999.md`.
-2. Per mode:
-   - **Detail** — single file.
-   - **Table** — `head -25` is usually enough (frontmatter + H1 + `## title`).
-   - **Render** — full read.
+- **Detail** — `akm read <id>`.
+- **Table / Render** — `akm list adr --json | from json` returns
+  everything the modes need without parsing files. Apply filters as
+  nu pipeline stages:
+  ```
+  akm list adr --json | from json | where status == 'Accepted'
+  akm list adr --json | from json | where { |r| 'cat002' in $r.categories }
+  ```
 
-Sort by filename ascending (numeric, since zero-padded).
+Sort by id ascending (numeric, since zero-padded) — `akm list` already
+sorts by `type status id`, so the natural order works.
 
 ## Mode 1: Detail
 

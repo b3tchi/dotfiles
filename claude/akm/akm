@@ -681,16 +681,45 @@ def "main delete" [
   print -e $"Deleted ($id)"
 }
 
+# Extract `[[cat###]]` wikilinks from a zettel's H1 line. Returns a list
+# of cat ids (e.g. ["cat001" "cat002"]) — empty when the zettel has no
+# category links in its H1. Skills filter on this column for category-
+# scoped queries like "ADRs in cat002" or "Features in cat005".
+def read_h1_categories [content: string] {
+  let lines = ($content | lines)
+  let h1 = ($lines | where { |l| $l | str starts-with "# " } | first)
+  if ($h1 == null) { return [] }
+  # Capture group inside the brackets — match cat###, return the id only.
+  let matches = ($h1 | parse --regex '\[\[(cat\d+)\]\]')
+  if ($matches | is-empty) { return [] }
+  $matches | get capture0
+}
+
 # List zettels grouped by type+status. Pass a type to filter. Frontmatter
 # `status` is the source of truth — board.md sections / product.md groupings
 # are navigational, not state.
 #
+# Columns: type, id, name (first alias), status, created, categories.
+#
+# Default output is a rendered nushell table (good for humans). Pass --json
+# to get a JSON array; skills downstream parse it via `from json` and
+# filter natively:
+#
+#   akm list adr --json | from json | where status == 'Accepted'
+#   akm list adr --json | from json | where 'cat002' in categories
+#   akm list ft  --json | from json | where status == 'stable' | get id
+#
+# `--json` exists because `akm` is an external command — across process
+# boundaries nu only passes text, so structured pipelines need an explicit
+# serialization step.
+#
 # Usage:
-#   akm list           # all types
-#   akm list sp        # spec lifecycle (idea / spec / ready / done)
-#   akm list adr       # ADR taxonomy
+#   akm list                 # all types, table
+#   akm list sp              # spec lifecycle
+#   akm list adr --json      # ADRs as JSON for pipelining
 def "main list" [
   type?: string  # one of sp us pn ft im adr cat — omit to list all
+  --json        # emit JSON instead of a rendered table (for shell pipelines)
 ] {
   let root = (require_akm_root)
   let prefixes = (if ($type == null) {
@@ -713,12 +742,15 @@ def "main list" [
         name: (read_first_alias $content)
         status: (read_field $content "status")
         created: (read_field $content "created")
+        categories: (read_h1_categories $content)
       }
     }
   } | flatten)
 
   if ($rows | is-empty) {
-    if ($type == null) {
+    if $json {
+      "[]"
+    } else if ($type == null) {
       print "No zettels (empty docs/notes/)"
     } else {
       print $"No ($type)### zettels"
@@ -726,7 +758,12 @@ def "main list" [
     return
   }
 
-  $rows | sort-by type status id
+  let sorted = ($rows | sort-by type status id)
+  if $json {
+    $sorted | to json
+  } else {
+    $sorted
+  }
 }
 
 # Pass-through wrapper around the `akm-root` shell helper. Useful for shell

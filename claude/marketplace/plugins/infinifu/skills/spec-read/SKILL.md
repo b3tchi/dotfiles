@@ -13,29 +13,28 @@ Note: specs are the board-citizen AKM type. Active ones (`idea` / `spec` / `read
 
 **Announce at start:** "Using spec-read skill to surface board state."
 
-## AKM Workspace Resolution
+## Data source
 
-Readers always anchor on the main worktree's view of the AKM, never the
-feature worktree's local copy (which may be stale or branch-divergent).
-Resolve first:
+All reads go through the `akm` CLI — never resolve `AKM_ROOT` or parse
+frontmatter by hand. The CLI enforces the strict main-worktree rule
+and returns canonical state.
 
 ```bash
-AKM_ROOT="$(akm-root)"
+akm list sp --json | from json         # all specs as structured rows
+akm read sp001                          # full markdown of one spec
 ```
 
-All lookups — `$AKM_ROOT/docs/notes/spec/sp###.md`, `$AKM_ROOT/docs/board.md`,
-and `$AKM_ROOT/docs/archive.md` — anchor on `$AKM_ROOT`. If `akm-root`
-errors, surface its stderr and fall back to cwd with the warning
-*"reading from cwd worktree — may be stale; check out the default branch
-for canonical view"*.
+`docs/board.md` and `docs/archive.md` are the navigational indexes;
+the CLI doesn't expose them directly. When you need their structure
+(e.g. for a "what's on the board" render), fall back to a path-based
+read via the AKM root reported by `akm root` — for example
+`open "$(akm root)/docs/board.md"`.
 
-## Storage
+If `akm` refuses with exit 2, surface its stderr and stop.
+If `akm list sp --json` returns `[]`: tell the user "No specs found.
+Use idea-brainstorming → spec-writing to create one."
 
-**Backend:** AKM. Specs live in `$AKM_ROOT/docs/notes/spec/sp###.md` (the `spec/` subfolder under `notes/`). Schema in `docs/notes/akm.md`; this skill only needs the slice below.
-
-If `$AKM_ROOT/docs/notes/spec/` does not exist or has no `sp*.md` files: tell the user "No specs found. Use spec-writing (via idea-brainstorming → spec-writing) to create one."
-
-### Zettel slice this skill needs
+## Schema (this skill's slice)
 
 ```markdown
 ---
@@ -142,13 +141,13 @@ digraph mode_select {
 
 ## Reading the zettels
 
-1. List ids: `ls "$AKM_ROOT/docs/notes/spec/"sp*.md`.
-2. Per mode:
-   - **Detail** — single file.
-   - **Table** — `head -40` is enough (frontmatter + H1 + `## solves` + `## implements` + count of `### Task` lines).
-   - **Render** — full read, including task blocks.
+- **Detail** — `akm read <id>` (e.g. `akm read sp001`).
+- **Table / Render** — `akm list sp --json | from json` returns
+  type / id / name / status / created / categories. For body fields
+  (`## solves`, `## implements`, `### Task` blocks), fetch via
+  `akm read <id>` per matching row.
 
-For task counts under table mode, `grep -c '^### Task' <file>` is the cheapest measure.
+Task counts come from `akm read <id> | rg -c '^### Task'`.
 
 ## Mode 1: Detail
 

@@ -11,28 +11,22 @@ Read persona zettels under `docs/notes/pn###.md` and present them in the format 
 
 **Announce at start:** "Using persona-read skill to surface roles."
 
-## AKM Workspace Resolution
+## Data source
 
-Readers always anchor on the main worktree's view of the AKM, never the
-feature worktree's local copy (which may be stale or branch-divergent).
-Resolve first:
+All reads go through the `akm` CLI — never resolve `AKM_ROOT` or parse
+frontmatter by hand. The CLI is the single gatekeeper: it enforces the
+strict main-worktree rule and returns canonical state.
 
 ```bash
-AKM_ROOT="$(akm-root)"
+akm list pn --json | from json         # all personas as structured rows
+akm read pn001                          # full markdown of one persona
 ```
 
-All lookups anchor on `$AKM_ROOT/docs/notes/...`. If `akm-root` errors,
-surface its stderr and fall back to cwd with the warning *"reading from
-cwd worktree — may be stale; check out the default branch for canonical
-view"*.
+If `akm` refuses with exit 2, surface its stderr and stop.
+If `akm list pn --json` returns `[]`: tell the user "No personas found.
+Use persona-write to add one." Don't fabricate.
 
-## Storage
-
-**Backend:** AKM (Agentic Knowledge Model). Personas live as individual markdown zettels in `$AKM_ROOT/docs/notes/pn###.md`. Schema is documented in `docs/notes/akm.md`; this skill only needs the slice below.
-
-If `$AKM_ROOT/docs/notes/` does not contain any `pn*.md` files: tell the user "No personas found. Use persona-write to add one." Don't fabricate.
-
-### Zettel slice this skill needs
+## Schema (this skill's slice)
 
 ```markdown
 ---
@@ -105,13 +99,13 @@ Ambiguous between table and render → prefer table.
 
 ## Reading the zettels
 
-1. **List ids.** `ls "$AKM_ROOT/docs/notes/"pn*.md`.
-2. **Read per mode:**
-   - **Detail** — read only the matching file.
-   - **Table** — `head -25` is usually enough (frontmatter + `## name` + first line of `## summary`).
-   - **Render** — full read.
+- **Detail** — `akm read <id>` (e.g. `akm read pn001`).
+- **Table / Render** — `akm list pn --json | from json` returns
+  type / id / name / status / created / categories. For body content
+  (`## summary`, `## primary_goals`, etc.) that the list doesn't carry,
+  fetch via `akm read <id>` per matching row.
 
-Sort by filename ascending — don't trust list order.
+`akm list` already sorts by `type status id` — natural ordering works.
 
 ## Mode 1: Detail
 
