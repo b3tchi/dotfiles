@@ -741,7 +741,7 @@ def "main root" [] {
 # canonical slot, or extra cat id past cat008). Exits 0 either way — this
 # is a diagnostic, not a gate. Use it before adding a new ADR / Feature
 # zettel so the `[[cat###]]` link in the H1 points at the right semantic.
-def "main check cat" [] {
+def "main cat check" [] {
   let root = (require_akm_root)
   let notes = $"($root)/docs/notes"
   if not ($notes | path exists) {
@@ -750,11 +750,26 @@ def "main check cat" [] {
   check_cat_collisions $notes (canonical_cats)
 }
 
-def "main check" [] {
-  print "akm check — taxonomy / structure diagnostics"
+def "main cat" [] {
+  print "akm cat — category taxonomy operations"
   print ""
   print "Subcommands:"
-  print "  akm check cat        compare cat### against canonical 8-category taxonomy"
+  print "  akm cat check        compare cat### against canonical 8-category taxonomy"
+}
+
+# Run every available diagnostic in sequence. Currently the cat-collision
+# check is the only one implemented; future passes (board.md structure,
+# dangling wikilinks, status-vs-section drift) will hook in here so a
+# single `akm check` keeps surfacing every project-health signal in one
+# go. Exit 0 even on warnings — diagnostics never gate.
+def "main check" [] {
+  let root = (require_akm_root)
+  let notes = $"($root)/docs/notes"
+  if not ($notes | path exists) {
+    error make { msg: $"AKM not initialized in ($root) — run `akm init ($root)` first" }
+  }
+  print -e "→ cat taxonomy:"
+  check_cat_collisions $notes (canonical_cats)
 }
 
 # ----------------------------------------------------------------------------
@@ -1021,7 +1036,8 @@ def main [] {
   print "                                 key = id (sp025/adr0010/...) or first alias"
   print "                                 --force    skip confirmation"
   print "  akm list [type]              show zettels grouped by type+status"
-  print "  akm check cat                verify cat### against canonical taxonomy"
+  print "  akm check                    run all project-health diagnostics"
+  print "  akm cat check                verify cat### against canonical taxonomy"
   print "  akm root                     print AKM workspace root (refuses on feature wt)"
   print ""
   print "bd housekeeping (any worktree):"
