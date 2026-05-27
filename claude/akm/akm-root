@@ -1,20 +1,30 @@
 #!/usr/bin/env bash
-# akm-root — print absolute path to AKM workspace root.
+# akm-root — print absolute path to AKM workspace root, but ONLY when invoked
+# from inside the main worktree. Refuses (exit 2) from feature worktrees.
 #
-# Resolution rule:
-#   1. If cwd is inside a git repo, locate the worktree whose branch is the
-#      project's default (origin/HEAD, falling back to local 'main' or 'master').
-#      Return that worktree's absolute path. This is the AKM root.
-#   2. If no such worktree exists, exit 1 with a hint.
-#   3. If cwd is not in a git repo, print cwd (so non-git AKM workspaces still work).
+# Strict-mode rule (applies to all AKM access: read, write, search):
+#   AKM artifacts describe shared product knowledge and live on the default
+#   branch. Any AKM operation must happen from the main worktree so reads see
+#   the canonical state and writes commit on the canonical branch. Feature
+#   worktrees exist only for code work (work-do / work-audit cycle) — they
+#   must not read, search, or write AKM.
 #
-# Why: AKM zettels (docs/notes/us###.md, pn###.md, etc.) describe shared product
-# knowledge and must live on main. Code work in a feature worktree should not
-# scatter AKM artifacts across branches. Writer/reader skills delegate path
-# resolution here so the rule is consistent.
+# Resolution:
+#   1. AKM_ROOT_OVERRIDE set → print it, exit 0  (test/override escape hatch)
+#   2. cwd not in git repo   → print pwd, exit 0  (non-git AKM workspaces)
+#   3. cwd in git repo:
+#        a. determine default branch (origin/HEAD → init.defaultBranch → main → master)
+#        b. find worktree on default branch
+#        c. compare current worktree's toplevel against main worktree path
+#        d. match    → print main path, exit 0
+#           mismatch → stderr message + exit 2 (refuse — switch to main)
+#
+# Why exit 2 (not 1): callers can distinguish "no AKM workspace at all" (1)
+# from "AKM exists but you are in the wrong worktree" (2). Skills should
+# surface the stderr verbatim and abort the operation either way.
 #
 # Usage:
-#   akm-root                     # print path, exit 0 on success
+#   akm-root                       # print path, exit 0 on main worktree
 #   AKM_ROOT_OVERRIDE=/p akm-root  # force a path (testing / non-standard layouts)
 
 set -euo pipefail
@@ -59,6 +69,20 @@ main_path="$(git worktree list --porcelain | awk -v b="refs/heads/$default_branc
 if [ -z "$main_path" ]; then
     echo "akm-root: no worktree on branch '$default_branch' found. Create one with 'git worktree add ../main $default_branch' or check out '$default_branch' directly." >&2
     exit 1
+fi
+
+# Strict-mode gate: cwd must be inside the main worktree.
+current_toplevel="$(git rev-parse --show-toplevel)"
+if [ "$current_toplevel" != "$main_path" ]; then
+    current_branch="$(git symbolic-ref --short HEAD 2>/dev/null || echo DETACHED)"
+    {
+        echo "akm-root: AKM access only from main worktree (read, search, and write all require this)."
+        echo "  current branch:    $current_branch"
+        echo "  current worktree:  $current_toplevel"
+        echo "  main worktree:     $main_path"
+        echo "  fix: cd $main_path and retry."
+    } >&2
+    exit 2
 fi
 
 printf '%s\n' "$main_path"

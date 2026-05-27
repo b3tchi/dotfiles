@@ -100,34 +100,53 @@ typed writer.
 
 ---
 
-## Workspace Resolution — main worktree is the AKM home
+## Workspace Resolution — main worktree only (strict)
 
 AKM zettels (`us###`, `pn###`, `ft###`, `im###`, `adr####`, `cat###`)
 plus the singleton hubs (`product.md`, `board.md`, `archive.md`) describe
 shared product knowledge. They live on **main**, never on feature branches.
 
-When code work happens in a git worktree on a feature branch, AKM writes
-must still target the main worktree's `docs/notes/` — otherwise the
-knowledge model fractures across branches and wikilinks dangle on merge.
+**Strict-mode rule.** Every AKM operation — read, search, *and* write — must
+run from inside the main worktree. Feature worktrees exist solely for code
+work (`work-do` / `work-audit` cycle); they have no AKM access at all. This
+keeps the agent's mental model honest: when AKM is involved you are on main,
+when AKM is silent you are coding in a worktree.
 
-**Rule for skills that read or write AKM files:** resolve the AKM root via
-the `akm-root` helper, then anchor every path to `<akm-root>/docs/...`.
+Earlier iterations let `akm-root` silently redirect feature-worktree writes
+to the main worktree path. That ergonomic shortcut masked accidents — agents
+could stage on main without context switching, and stray AKM mutations could
+go un-committed because the agent's `git add .` ran in the wrong worktree.
+Strict mode collapses that surface: the resolver refuses outright.
+
+**Rule for skills that touch AKM files:** call `akm-root`, *check the exit
+code*, surface its stderr to the user, and abort on non-zero. Anchor every
+path to `<akm-root>/docs/...` only after a successful resolution.
 
 ```bash
-AKM_ROOT="$(akm-root)"
+AKM_ROOT="$(akm-root)" || {
+    # akm-root already printed the reason on stderr — relay and stop.
+    exit $?
+}
 # write a story: $AKM_ROOT/docs/notes/us015.md
 # read a feature: $AKM_ROOT/docs/notes/ft003.md
 ```
 
-`akm-root` returns the absolute path of the worktree on the project's
-default branch (origin/HEAD → init.defaultBranch → main → master). If
-no worktree is checked out on the default branch, it errors with a hint
-to create one. Outside a git repo it falls back to the current directory,
-which keeps non-git AKM workspaces working.
+`akm-root` resolution:
+1. `AKM_ROOT_OVERRIDE` env set → print it (test/override escape hatch).
+2. cwd not in a git repo → print `pwd` (non-git AKM workspaces).
+3. cwd in a git repo:
+   a. determine default branch (origin/HEAD → init.defaultBranch → main → master),
+   b. find the worktree on that branch,
+   c. if current worktree's toplevel matches the main worktree → print path (exit 0),
+   d. otherwise → **exit 2** with stderr explaining where to `cd` to.
 
-**Commit policy.** Writes during exploratory or draft phases stay
-*unstaged or staged-only* — the lifecycle commits AKM on stage transitions
-that mark a stable artifact:
+Exit code 2 distinguishes "wrong worktree — switch to main" from exit 1
+"no AKM workspace at all". Both are aborts; only the message differs.
+
+**Commit policy.** Because every write now runs from inside main, the per-
+skill staging/committing rule simplifies — `git add` works on cwd, no
+`git -C "$AKM_ROOT"` ceremony needed. The lifecycle commits AKM on stage
+transitions that mark a stable artifact:
 
 | Stage transition                          | Commit on main |
 |-------------------------------------------|----------------|
@@ -138,11 +157,9 @@ that mark a stable artifact:
 | ADR added or superseded (adr-write)       | commit         |
 | im### / ft### finalize (spec-refinement)  | commit         |
 
-Skills outside those transitions write through to main's working tree and
-stage the file (`git -C "$AKM_ROOT" add <path>`); the next stage skill
-commits the accumulated AKM mutations together. This keeps the main-branch
-history readable (one commit per lifecycle event) while still landing every
-write on main from any worktree.
+Skills outside those transitions stage the file and leave the commit for
+the next stage skill, so the main-branch history reads as one commit per
+lifecycle event rather than a stream of micro-edits.
 
 ---
 
