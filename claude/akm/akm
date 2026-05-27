@@ -77,17 +77,54 @@ def require_akm_root [] {
   $root
 }
 
-# Glob sp###.md files under docs/notes/spec/ and return next zero-padded
-# 3-digit id (e.g. "sp003"). Robust to gaps — picks max + 1, not count + 1.
-def next_sp_id [root: string] {
-  let dir = $"($root)/docs/notes/spec"
+# Per-type AKM schema. Each typed zettel has a stable id prefix, a directory
+# it lives under (relative to the AKM root), a default status for fresh
+# stubs, a list of `##` body section headers it expects, and (for sp only)
+# the board.md section to register itself under. Returns the schema record
+# or raises on unknown type so the CLI fails fast with a useful list.
+def type_schema [t: string] {
+  match $t {
+    "sp"  => { type: "sp",  dir: "docs/notes/spec", digits: 3, status: "idea",     index: "board",
+               sections: ["## problem"],                                                                         board: "idea" }
+    "us"  => { type: "us",  dir: "docs/notes",      digits: 3, status: "draft",    index: "product",
+               sections: ["## role" "## want" "## because" "## acceptance_criteria"],                            board: "" }
+    "pn"  => { type: "pn",  dir: "docs/notes",      digits: 3, status: "draft",    index: "product",
+               sections: ["## name" "## summary" "## primary_goals" "## open_questions"],                        board: "" }
+    "ft"  => { type: "ft",  dir: "docs/notes",      digits: 3, status: "proposed", index: "product",
+               sections: ["## providing" "## api_surface" "## data_model" "## sample" "## components"],         board: "" }
+    "im"  => { type: "im",  dir: "docs/notes",      digits: 3, status: "proposed", index: "product",
+               sections: ["## solves" "## approach" "## data_model" "## api_surface" "## components" "## specs"], board: "" }
+    "adr" => { type: "adr", dir: "docs/notes",      digits: 4, status: "Proposed", index: "product",
+               sections: ["## context" "## decision" "## consequences"],                                         board: "" }
+    "cat" => { type: "cat", dir: "docs/notes",      digits: 3, status: "stable",   index: "product",
+               sections: ["## name" "## summary" "## scope_notes"],                                              board: "" }
+    _ => { error make { msg: $"unknown AKM type `($t)` — valid: sp us pn ft im adr cat" } }
+  }
+}
+
+# All AKM type prefixes, used when scanning for a zettel by id or alias.
+def type_prefixes [] { ["sp" "us" "pn" "ft" "im" "adr" "cat"] }
+
+# Glob <prefix>NNN.md (or NNNN.md for adr) under the schema's dir and return
+# the next zero-padded id. Robust to gaps — picks max + 1, not count + 1.
+# Creates the dir on first use so a freshly initialized AKM workspace can
+# mint the first zettel without a separate scaffolding step.
+def next_id [root: string, prefix: string] {
+  let s = (type_schema $prefix)
+  let dir = $"($root)/($s.dir)"
   if not ($dir | path exists) { mkdir $dir }
-  let existing = (glob $"($dir)/sp*.md")
+  let existing = (glob $"($dir)/($prefix)*.md")
+  let plen = ($prefix | str length)
   let nums = ($existing | each { |f|
-    ($f | path basename | str replace -r '^sp(\d+)\.md$' '$1' | into int)
+    let base = ($f | path basename | str replace ".md" "")
+    let num_str = ($base | str substring $plen..)
+    # Some files may have suffixes after the digits (none expected today,
+    # but be defensive). into int parses leading digits.
+    try { $num_str | into int } catch { 0 }
   })
   let next = (if ($nums | is-empty) { 1 } else { ($nums | math max) + 1 })
-  $"sp(($next) | fill -a r -c '0' -w 3)"
+  let padded = ($next | fill -a r -c '0' -w $s.digits)
+  $"($prefix)($padded)"
 }
 
 # Insert `- [[sp_id|name]]` under `## idea` of docs/board.md. Idempotent —
@@ -169,22 +206,33 @@ def read_first_alias [content: string] {
   }
 }
 
-# Find an sp###.md file by either its id ("sp025") or its first alias.
-# Returns absolute path or "" when no match.
-def find_sp_file [root: string, key: string] {
-  let dir = $"($root)/docs/notes/spec"
-  if not ($dir | path exists) { return "" }
-  # By id — direct hit.
-  if ($key =~ '^sp\d{3}$') {
-    let f = $"($dir)/($key).md"
-    if ($f | path exists) { return $f }
+# Find any typed zettel by id ("sp025", "adr0010", "us003", ...) or by its
+# first alias. Returns absolute path or "" when no match. Looks up the type
+# from the id prefix when present; otherwise scans every type's directory
+# for an alias match. Designed for `akm delete <key>` and similar lookups
+# where the caller doesn't know the type up front.
+def find_zettel [root: string, key: string] {
+  # Try id form first: prefix + digits.
+  for p in (type_prefixes) {
+    if ($key | str starts-with $p) {
+      let tail = ($key | str substring ($p | str length)..)
+      if ($tail =~ '^\d+$') {
+        let s = (type_schema $p)
+        let f = $"($root)/($s.dir)/($key).md"
+        if ($f | path exists) { return $f }
+      }
+    }
   }
-  # By alias — scan all sp###.md frontmatter.
-  let candidates = (glob $"($dir)/sp*.md")
-  for f in $candidates {
-    let content = (open --raw $f)
-    let alias = (read_first_alias $content)
-    if $alias == $key { return $f }
+  # Alias fallback — scan every type's directory.
+  for p in (type_prefixes) {
+    let s = (type_schema $p)
+    let dir = $"($root)/($s.dir)"
+    if not ($dir | path exists) { continue }
+    for f in (glob $"($dir)/($p)*.md") {
+      let content = (open --raw $f)
+      let alias = (read_first_alias $content)
+      if $alias == $key { return $f }
+    }
   }
   ""
 }
@@ -343,95 +391,124 @@ when status flips; `spec-retro` moves `done` entries into `archive.md`.
   print $"PKM ready under ($docs)."
 }
 
-# Mint a new sp### zettel at status:idea, link it from docs/board.md.
-# Frontmatter carries metadata that used to live in board/idea/*.md (alias
-# name, claude_session_id when --session is passed) — sp### is the single
-# canonical record for a workstream.
+# Mint a stub zettel of the given AKM type. Allocates the next id, writes
+# a frontmatter-and-section-headers scaffold, and (for sp only) inserts a
+# wikilink under docs/board.md ## idea.
+#
+# This is intentionally a thin stub — the per-type writer skills
+# (story-write, adr-write, persona-write, etc.) are what fill in body
+# content with proper interview-driven schemas. The CLI just allocates
+# the id and frontmatter so a user (or skill) can fill the file in.
+#
+# Type-specific extras:
+#   --session   (sp only) mint a claude session id into frontmatter and
+#               print a `claude --session-id <id>` resume command. Useful
+#               for kicking off a brainstorm in a fresh tmux pane.
 def "main create" [
-  name: string
-  --session  # also mint a claude session id for `claude --session-id <id>` resume
+  type: string  # sp | us | pn | ft | im | adr | cat
+  name: string  # alphanumeric / dash / underscore — used as the first alias
+  --session    # only meaningful for type=sp — mints a claude session id
 ] {
   if not ($name =~ '^[a-zA-Z0-9_-]+$') {
     error make { msg: "name must contain only alphanumeric characters, dashes, and underscores" }
   }
+  let s = (type_schema $type)
   let root = (require_akm_root)
 
-  # Refuse if an sp### already exists with this alias (idempotency boundary —
-  # mint once; `akm create foo` twice is almost certainly a user mistake).
-  let existing = (find_sp_file $root $name)
-  if ($existing != "") {
-    print -e $"already exists: ($existing)"
+  # Idempotency boundary — refuse duplicate alias even across types, since
+  # alias collisions break find_zettel's alias fallback.
+  let dupe = (find_zettel $root $name)
+  if ($dupe != "") {
+    print -e $"already exists with this alias: ($dupe)"
     return
   }
 
-  let sp_id = (next_sp_id $root)
-  let f = $"($root)/docs/notes/spec/($sp_id).md"
+  let id = (next_id $root $type)
+  let dir = $"($root)/($s.dir)"
+  let f = $"($dir)/($id).md"
   let today = (date now | format date "%Y-%m-%d")
 
+  if ($session and $type != "sp") {
+    error make { msg: "--session is only valid for type=sp" }
+  }
   let session_id = (if $session { (random uuid) } else { "" })
 
   let fm_base = [
     "---"
     "aliases:"
     $"  - ($name)"
-    "status: idea"
+    $"status: ($s.status)"
     $"created: ($today)"
   ]
   let fm = (if ($session_id != "") {
     $fm_base | append $"claude_session_id: ($session_id)"
   } else { $fm_base })
 
+  # Body header — sp lives on the board so its H1 links back to [[board]];
+  # other types link back to [[product]] since they live in the typed-zettel
+  # navigation hub. Skills may rewrite the H1 (e.g. im### prepends a
+  # `[[cat###]]` link); the stub form is just a valid starting point.
+  let h1_target = (if $type == "sp" { "[[board]]" } else { "[[product]]" })
+
+  let section_lines = ($s.sections | each { |h| [$h "" ] } | flatten)
+
   let body = ([
     "---"
-    "# Spec [[board]]"
     ""
-    "## problem"
-    $"TBD — captured at idea-* skill stage for ($name)."
+    $"# ($type | str capitalize) ($h1_target)"
     ""
+  ]
+  | append $section_lines
+  | append [
     "---"
     ""
-    "Index: [[board]]"
+    $"Index: [[($s.index)]]"
     ""
   ])
 
   ($fm | append $body | str join "\n") | save -f $f
   print -e $"Created ($f)"
 
-  # Insert link in docs/board.md ## idea section.
-  let board = $"($root)/docs/board.md"
-  if ($board | path exists) {
-    add_to_board_idea $board $sp_id $name
-    print -e $"Linked in ($board) ## idea"
-  } else {
-    print -e $"warn: ($board) missing — run `akm init ($root)` to scaffold"
+  # Only sp registers on docs/board.md ## idea. Other types are reachable
+  # via docs/product.md (and via wikilinks from sibling zettels).
+  if ($s.board != "") {
+    let board = $"($root)/docs/board.md"
+    if ($board | path exists) {
+      add_to_board_idea $board $id $name
+      print -e $"Linked in ($board) ## ($s.board)"
+    } else {
+      print -e $"warn: ($board) missing — run `akm init ($root)` to scaffold"
+    }
   }
 
   if ($session_id != "") {
     print -e ""
-    print -e $"Resume cmd: claude --session-id ($session_id) -n ($name).($sp_id)"
+    print -e $"Resume cmd: claude --session-id ($session_id) -n ($name).($id)"
   }
 }
 
-# Delete sp### + its board.md entry. Accepts id ("sp025") or alias.
-# Does NOT touch bd — the bd epic (if any) lives independently and is
-# managed by the lifecycle skills.
+# Delete any typed zettel + (for sp only) its board.md entry. Accepts an
+# id ("sp025", "adr0010", "us003") or a first-alias. Does NOT touch bd —
+# bd epic / task lifecycle is the skills' job (spec-retro closes; here we
+# just remove the zettel and its board reference if any).
 def "main delete" [
   key: string
   --force  # skip confirmation
 ] {
   let root = (require_akm_root)
-  let f = (find_sp_file $root $key)
+  let f = (find_zettel $root $key)
   if ($f == "") {
-    error make { msg: $"no sp### matching `($key)` (by id or alias)" }
+    error make { msg: $"no zettel matching `($key)` (by id or alias)" }
   }
-  let sp_id = ($f | path basename | str replace ".md" "")
+  let id = ($f | path basename | str replace ".md" "")
   let board = $"($root)/docs/board.md"
+  let has_board_entry = (($id | str starts-with "sp") and ($board | path exists))
 
   if not $force {
     print -e $"Will delete:"
     print -e $"  ($f)"
-    if ($board | path exists) {
-      print -e $"  ($board) entry for ($sp_id)"
+    if $has_board_entry {
+      print -e $"  ($board) entry for ($id)"
     }
     let ans = (input "Proceed? [y/N]: ")
     if ($ans | str downcase) != "y" {
@@ -441,34 +518,56 @@ def "main delete" [
   }
 
   rm $f
-  remove_from_board $board $sp_id
-  print -e $"Deleted ($sp_id)"
+  if $has_board_entry { remove_from_board $board $id }
+  print -e $"Deleted ($id)"
 }
 
-# List all sp### zettels grouped by status. Frontmatter is the source of
-# truth for status — board.md sections are a navigational index, not state.
-def "main list" [] {
+# List zettels grouped by type+status. Pass a type to filter. Frontmatter
+# `status` is the source of truth — board.md sections / product.md groupings
+# are navigational, not state.
+#
+# Usage:
+#   akm list           # all types
+#   akm list sp        # spec lifecycle (idea / spec / ready / done)
+#   akm list adr       # ADR taxonomy
+def "main list" [
+  type?: string  # one of sp us pn ft im adr cat — omit to list all
+] {
   let root = (require_akm_root)
-  let dir = $"($root)/docs/notes/spec"
-  if not ($dir | path exists) {
-    print "No sp### zettels (docs/notes/spec/ absent)"
-    return
-  }
-  let files = (glob $"($dir)/sp*.md")
-  if ($files | is-empty) {
-    print "No sp### zettels"
-    return
-  }
-  $files | each { |f|
-    let content = (open --raw $f)
-    let sp_id = ($f | path basename | str replace ".md" "")
-    {
-      sp_id: $sp_id
-      name: (read_first_alias $content)
-      status: (read_field $content "status")
-      created: (read_field $content "created")
+  let prefixes = (if ($type == null) {
+    type_prefixes
+  } else {
+    [ (type_schema $type | get type) ]
+  })
+
+  let rows = ($prefixes | each { |p|
+    let s = (type_schema $p)
+    let dir = $"($root)/($s.dir)"
+    if not ($dir | path exists) { return [] }
+    let files = (glob $"($dir)/($p)*.md")
+    $files | each { |f|
+      let content = (open --raw $f)
+      let id = ($f | path basename | str replace ".md" "")
+      {
+        type: $p
+        id: $id
+        name: (read_first_alias $content)
+        status: (read_field $content "status")
+        created: (read_field $content "created")
+      }
     }
-  } | sort-by status sp_id
+  } | flatten)
+
+  if ($rows | is-empty) {
+    if ($type == null) {
+      print "No zettels (empty docs/notes/)"
+    } else {
+      print $"No ($type)### zettels"
+    }
+    return
+  }
+
+  $rows | sort-by type status id
 }
 
 # Pass-through wrapper around the `akm-root` shell helper. Useful for shell
@@ -733,27 +832,34 @@ def main [] {
   print "akm — manage markdown-oxide PKM workspaces (AKM zettelkasten) + bd housekeeping"
   print ""
   print "AKM zettel ops (main worktree only):"
-  print "  akm init <target>     bootstrap (or re-link) PKM under <target>/docs/"
-  print "  akm create <name>     mint sp### at status:idea + board.md entry"
-  print "                          --session  also mint claude session id"
-  print "  akm delete <key>      delete sp### + board.md entry (key = id or alias)"
-  print "                          --force    skip confirmation"
-  print "  akm list              show sp### grouped by status"
-  print "  akm root              print AKM workspace root (refuses on feature worktree)"
+  print "  akm init <target>            bootstrap (or re-link) PKM under <target>/docs/"
+  print "  akm create <type> <name>     mint a typed zettel stub"
+  print "                                 types: sp us pn ft im adr cat"
+  print "                                 --session  (sp only) also mint claude session id"
+  print "  akm delete <key>             delete zettel + board.md entry if any"
+  print "                                 key = id (sp025/adr0010/...) or first alias"
+  print "                                 --force    skip confirmation"
+  print "  akm list [type]              show zettels grouped by type+status"
+  print "  akm root                     print AKM workspace root (refuses on feature wt)"
   print ""
   print "bd housekeeping (any worktree):"
-  print "  akm bd init           strip bd auto-hooks, pin bd config"
-  print "  akm bd export         bd Dolt → .beads/issues-snapshot.jsonl"
-  print "  akm bd import         .beads/issues-snapshot.jsonl → bd Dolt"
-  print "  akm bd archive create snapshot + prune old closed issues"
-  print "  akm bd archive apply  apply prune-list on other machines"
+  print "  akm bd init                  strip bd auto-hooks, pin bd config"
+  print "  akm bd export                bd Dolt → .beads/issues-snapshot.jsonl"
+  print "  akm bd import                .beads/issues-snapshot.jsonl → bd Dolt"
+  print "  akm bd archive create        snapshot + prune old closed issues"
+  print "  akm bd archive apply         apply prune-list on other machines"
   print ""
   print "Examples:"
   print "  akm init ."
-  print "  akm create rotate-credentials --session"
+  print "  akm create sp rotate-credentials --session"
+  print "  akm create adr azure-region-eu-west"
+  print "  akm create us bulk-rejection-with-reason"
+  print "  akm list adr"
   print "  akm bd export"
   print ""
   print "Notes:"
+  print "  - This CLI mints STUBS (frontmatter + section headers). The per-type writer"
+  print "    skills (story-write, adr-write, persona-write, ...) fill in body content."
   print "  - bd epic / task creation is the lifecycle skills' job (spec-ready, spec-retro)."
   print "  - AKM zettel commands refuse from a feature worktree (strict main-only rule)."
   print "  - bd housekeeping works from any worktree (bd state is repo-scoped)."
