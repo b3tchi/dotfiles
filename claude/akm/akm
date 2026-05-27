@@ -152,13 +152,19 @@ def add_to_board_idea [board: string, sp_id: string, name: string] {
   ($new_lines | str join "\n") | save -f $board
 }
 
-# Strip a single `[[sp_id|...]]` line from board.md. Leaves section
-# structure intact so the file is reusable after delete.
+# Strip a single `[[sp_id|...]]` line from board.md. Also collapses runs
+# of more than one consecutive blank line that result from the removal so
+# add/remove cycles don't accumulate whitespace under `## idea`.
 def remove_from_board [board: string, sp_id: string] {
   if not ($board | path exists) { return }
   let pat = $"[[($sp_id)|"
   let kept = (open --raw $board | lines | where { |l| not ($l | str contains $pat) })
-  ($kept | str join "\n") | save -f $board
+  # Collapse adjacent blank lines (drop a blank if the previous kept line is also blank).
+  let collapsed = ($kept | reduce --fold [] { |line, acc|
+    let prev = ($acc | last)
+    if ($line == "") and ($prev == "") { $acc } else { $acc | append $line }
+  })
+  (($collapsed | str join "\n") + "\n") | save -f $board
 }
 
 # Parse YAML frontmatter (first --- ... --- block) into a list of "key: value" lines.
