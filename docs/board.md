@@ -6,6 +6,8 @@ sections when status flips.
 
 ## idea
 
+- [[sp004|propagate-per-type-api]]
+
 - [[sp003|fix-categories]]
 
 ## spec
