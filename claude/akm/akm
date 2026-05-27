@@ -105,6 +105,68 @@ def type_schema [t: string] {
 # All AKM type prefixes, used when scanning for a zettel by id or alias.
 def type_prefixes [] { ["sp" "us" "pn" "ft" "im" "adr" "cat"] }
 
+# The canonical 8-category taxonomy — single source of truth for both the
+# `akm init` scaffolding pass and the collision check that runs when a
+# project already has cat### files. Index 0 → cat001, index 7 → cat008.
+def canonical_cats [] {
+  [
+    "Technology choices"      # cat001
+    "Architecture patterns"   # cat002
+    "API design"              # cat003
+    "Data modeling"           # cat004
+    "Infrastructure"          # cat005
+    "Security"                # cat006
+    "Testing"                 # cat007
+    "Process"                 # cat008
+  ]
+}
+
+# Compare existing cat### files under <notes_dir> against the canonical
+# taxonomy and print warnings for each mismatch:
+#   - same id, different first-alias  → "cat001 alias 'workflow-tooling' != canonical 'Technology choices'"
+#   - id missing                      → "cat003 missing (canonical: 'API design')"
+#   - extra id past cat008            → "cat009 'foo' not in canonical taxonomy"
+# Silent when fully aligned. Used by `akm init` and exposed via `akm check cat`.
+def check_cat_collisions [notes_dir: string, canonical: list<string>] {
+  mut mismatches = 0
+
+  # Walk canonical slots: warn on missing or alias mismatch.
+  for entry in ($canonical | enumerate) {
+    let n = ($entry.index + 1)
+    let id = $"cat(($n) | fill -a r -c '0' -w 3)"
+    let expected = $entry.item
+    let f = $"($notes_dir)/($id).md"
+    if not ($f | path exists) {
+      print -e $"⚠ ($id) missing — canonical: '($expected)'"
+      $mismatches = ($mismatches + 1)
+      continue
+    }
+    let actual = (read_first_alias (open --raw $f))
+    if $actual != $expected {
+      print -e $"⚠ ($id) alias '($actual)' != canonical '($expected)'"
+      $mismatches = ($mismatches + 1)
+    }
+  }
+
+  # Walk all existing cat### files: warn on ids past the canonical range.
+  let max = ($canonical | length)
+  let files = (glob $"($notes_dir)/cat*.md")
+  for f in $files {
+    let id = ($f | path basename | str replace ".md" "")
+    let num_str = ($id | str substring 3..)
+    let num = (try { $num_str | into int } catch { 0 })
+    if $num > $max {
+      let alias = (read_first_alias (open --raw $f))
+      print -e $"⚠ ($id) '($alias)' not in canonical taxonomy (extends past cat(($max) | fill -a r -c '0' -w 3))"
+      $mismatches = ($mismatches + 1)
+    }
+  }
+
+  if $mismatches > 0 {
+    print -e $"     ($mismatches) collisions — rename / supersede / extend per project policy"
+  }
+}
+
 # Glob <prefix>NNN.md (or NNNN.md for adr) under the schema's dir and return
 # the next zero-padded id. Robust to gaps — picks max + 1, not count + 1.
 # Creates the dir on first use so a freshly initialized AKM workspace can
@@ -386,23 +448,17 @@ when status flips; `spec-retro` moves `done` entries into `archive.md`.
   # below matches the set converged on in real projects (samples-demo,
   # stock-design-system). Users can rename, supersede, or extend after init.
   #
-  # Idempotent: only mints when `docs/notes/` contains no cat*.md at all.
-  # An existing cat001 (even a stub) skips the entire pass so a partially
-  # populated taxonomy is not silently overwritten.
+  # When `docs/notes/` already has cat### files, we keep them (no overwrite)
+  # but compare each canonical slot against what's on disk and surface every
+  # collision: same id with different alias, missing canonical slots, or
+  # non-canonical cat### that occupy ids reserved by the taxonomy. The
+  # warnings give the user enough information to decide whether to rename
+  # in place, supersede, or extend the canonical set.
+  let canonical = (canonical_cats)
   let existing_cats = (glob $"($notes)/cat*.md")
   if ($existing_cats | is-empty) {
-    let cats = [
-      "Technology choices"
-      "Architecture patterns"
-      "API design"
-      "Data modeling"
-      "Infrastructure"
-      "Security"
-      "Testing"
-      "Process"
-    ]
     let today = (date now | format date "%Y-%m-%d")
-    for entry in ($cats | enumerate) {
+    for entry in ($canonical | enumerate) {
       let n = ($entry.index + 1)
       let id = $"cat(($n) | fill -a r -c '0' -w 3)"
       let f = $"($notes)/($id).md"
@@ -434,6 +490,7 @@ when status flips; `spec-retro` moves `done` entries into `archive.md`.
     }
   } else {
     print $"kept:    ($existing_cats | length) existing cat### zettel(s)"
+    check_cat_collisions $notes $canonical
   }
 
   # akm.md — symlink to canonical source.
@@ -677,6 +734,27 @@ def "main list" [
 # the same way every other AKM tool does.
 def "main root" [] {
   ^akm-root
+}
+
+# Verify the workspace's category taxonomy against the canonical 8-cat set.
+# Emits a warning per mismatch (same id but different alias, missing
+# canonical slot, or extra cat id past cat008). Exits 0 either way — this
+# is a diagnostic, not a gate. Use it before adding a new ADR / Feature
+# zettel so the `[[cat###]]` link in the H1 points at the right semantic.
+def "main check cat" [] {
+  let root = (require_akm_root)
+  let notes = $"($root)/docs/notes"
+  if not ($notes | path exists) {
+    error make { msg: $"AKM not initialized in ($root) — run `akm init ($root)` first" }
+  }
+  check_cat_collisions $notes (canonical_cats)
+}
+
+def "main check" [] {
+  print "akm check — taxonomy / structure diagnostics"
+  print ""
+  print "Subcommands:"
+  print "  akm check cat        compare cat### against canonical 8-category taxonomy"
 }
 
 # ----------------------------------------------------------------------------
@@ -943,6 +1021,7 @@ def main [] {
   print "                                 key = id (sp025/adr0010/...) or first alias"
   print "                                 --force    skip confirmation"
   print "  akm list [type]              show zettels grouped by type+status"
+  print "  akm check cat                verify cat### against canonical taxonomy"
   print "  akm root                     print AKM workspace root (refuses on feature wt)"
   print ""
   print "bd housekeeping (any worktree):"
