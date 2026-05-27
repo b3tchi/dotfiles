@@ -903,15 +903,26 @@ def "main adr write" [
     $title
   })
 
+  # H1 convention across all typed zettels is the literal type word plus
+  # categorization wikilinks (e.g. `# ADR [[cat001]] [[product]]`), not
+  # the title. The title appears in `## title` below. This matches every
+  # other zettel type (`# Story`, `# Feature`, `# Implementation`, …)
+  # and what markdown-oxide expects when it resolves backlinks.
+  #
+  # Alias convention: the first `aliases:` entry is the title sentence,
+  # not the slug — readers/find_zettel match against it as a display
+  # string. We prefer `--title` (sentence) over `<name>` (slug) when
+  # both are given, falling back to the slug only when title is empty.
+  let alias_text = (if ($title | is-empty) { $name } else { $title })
   let parts = ([
     "---"
     "aliases:"
-    $"  - ($name)"
+    $"  - ($alias_text)"
     $"status: ($status)"
     $"created: ($today)"
     "---"
     ""
-    $"# ($final_title) [[($category)]] [[product]]"
+    $"# ADR [[($category)]] [[product]]"
     ""
     "## title"
     $final_title
