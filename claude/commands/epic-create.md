@@ -1,7 +1,7 @@
 ---
 description: Mint a brainstorm spec (sp### zettel + board.md entry + claude session id)
 argument-hint: <name>
-allowed-tools: Bash(akm create:*)
+allowed-tools: Bash(akm write:*)
 ---
 
 Create the brainstorm sp### zettel from `$ARGUMENTS`.
@@ -10,7 +10,7 @@ This writes `docs/notes/spec/sp###.md` at `status: idea` and inserts a wikilink 
 
 bd epic / task creation happens later in the lifecycle (`spec-ready` skill when the spec is ready for execution) — not here. Profile handling (`CLAUDE_CONFIG_DIR=...`) is left to the user; prefix it manually when copying the resume command.
 
-!`akm create sp $ARGUMENTS --session`
+!`akm write sp $ARGUMENTS --session`
 
 After running:
 - Confirm in one line which sp### was minted (id, name).

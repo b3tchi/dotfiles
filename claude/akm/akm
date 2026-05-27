@@ -371,6 +371,65 @@ when status flips; `spec-retro` moves `done` entries into `archive.md`.
     }
   }
 
+  # cat### scaffolding — canonical 8-category taxonomy.
+  #
+  # ADR / Implementation / Feature zettels file under a `[[cat###]]` link in
+  # their H1. Without a starting taxonomy each project drifts to its own
+  # category names, which makes cross-project zettel reuse harder and adds
+  # an extra interview step to every adr-write call. The 8-category default
+  # below matches the set converged on in real projects (samples-demo,
+  # stock-design-system). Users can rename, supersede, or extend after init.
+  #
+  # Idempotent: only mints when `docs/notes/` contains no cat*.md at all.
+  # An existing cat001 (even a stub) skips the entire pass so a partially
+  # populated taxonomy is not silently overwritten.
+  let existing_cats = (glob $"($notes)/cat*.md")
+  if ($existing_cats | is-empty) {
+    let cats = [
+      "Technology choices"
+      "Architecture patterns"
+      "API design"
+      "Data modeling"
+      "Infrastructure"
+      "Security"
+      "Testing"
+      "Process"
+    ]
+    let today = (date now | format date "%Y-%m-%d")
+    for entry in ($cats | enumerate) {
+      let n = ($entry.index + 1)
+      let id = $"cat(($n) | fill -a r -c '0' -w 3)"
+      let f = $"($notes)/($id).md"
+      let cat_name = $entry.item
+      let content = ([
+        "---"
+        "aliases:"
+        $"  - ($cat_name)"
+        "status: stable"
+        $"created: ($today)"
+        "---"
+        ""
+        $"# ($cat_name) [[product]]"
+        ""
+        "## name"
+        $cat_name
+        ""
+        "## summary"
+        ""
+        "## scope_notes"
+        ""
+        "---"
+        ""
+        "Index: [[product]]"
+        ""
+      ] | str join "\n")
+      $content | save -f $f
+      print $"created: ($f)"
+    }
+  } else {
+    print $"kept:    ($existing_cats | length) existing cat### zettel(s)"
+  }
+
   # akm.md — symlink to canonical source.
   # Use `test -L` so broken symlinks (target moved/renamed) get refreshed
   # instead of blocking the new `ln -s`.
@@ -391,20 +450,29 @@ when status flips; `spec-retro` moves `done` entries into `archive.md`.
   print $"PKM ready under ($docs)."
 }
 
-# Mint a stub zettel of the given AKM type. Allocates the next id, writes
-# a frontmatter-and-section-headers scaffold, and (for sp only) inserts a
-# wikilink under docs/board.md ## idea.
+# Upsert a typed zettel — mint a stub if it doesn't exist, leave it alone
+# if it does. Returns the resolved id either way so callers (scripts,
+# skills) can chain off this without first checking existence.
 #
-# This is intentionally a thin stub — the per-type writer skills
-# (story-write, adr-write, persona-write, etc.) are what fill in body
-# content with proper interview-driven schemas. The CLI just allocates
-# the id and frontmatter so a user (or skill) can fill the file in.
+# Why upsert and not strict create: AKM workflows often want "ensure a
+# zettel exists for X" without caring whether this run is the first. A
+# strict create errored on every retry and pushed users to write
+# pre-existence checks at every call site. Upsert is the friendlier
+# default; a destructive "rewrite this stub" surface can be added later
+# if real demand shows up (today the typed writer skills handle full
+# body edits — `akm write` is just id-and-scaffold).
+#
+# Existence is checked by alias OR id collision via `find_zettel`. When
+# the zettel already exists `akm write` is a no-op on disk (frontmatter,
+# body, and board.md untouched); only `--session` is special-cased — if
+# the existing sp### has no `claude_session_id:` line yet we surface the
+# id but do NOT inject one, since that would silently mutate the file.
 #
 # Type-specific extras:
 #   --session   (sp only) mint a claude session id into frontmatter and
 #               print a `claude --session-id <id>` resume command. Useful
 #               for kicking off a brainstorm in a fresh tmux pane.
-def "main create" [
+def "main write" [
   type: string  # sp | us | pn | ft | im | adr | cat
   name: string  # alphanumeric / dash / underscore — used as the first alias
   --session    # only meaningful for type=sp — mints a claude session id
@@ -415,11 +483,26 @@ def "main create" [
   let s = (type_schema $type)
   let root = (require_akm_root)
 
-  # Idempotency boundary — refuse duplicate alias even across types, since
-  # alias collisions break find_zettel's alias fallback.
+  if ($session and $type != "sp") {
+    error make { msg: "--session is only valid for type=sp" }
+  }
+
+  # Upsert short-circuit — if any zettel already matches the alias or the
+  # caller passed an id form, return that path. No frontmatter rewrite, no
+  # board.md re-insertion, no session_id minting.
   let dupe = (find_zettel $root $name)
   if ($dupe != "") {
-    print -e $"already exists with this alias: ($dupe)"
+    let dupe_id = ($dupe | path basename | str replace ".md" "")
+    print -e $"Exists ($dupe)"
+    if $session {
+      let content = (open --raw $dupe)
+      let sid = (read_field $content "claude_session_id")
+      if ($sid != "") {
+        print -e $"Resume cmd: claude --session-id ($sid) -n ($name).($dupe_id)"
+      } else {
+        print -e "Note: --session ignored on existing sp### with no session id (rewriting frontmatter would be destructive)"
+      }
+    }
     return
   }
 
@@ -428,9 +511,6 @@ def "main create" [
   let f = $"($dir)/($id).md"
   let today = (date now | format date "%Y-%m-%d")
 
-  if ($session and $type != "sp") {
-    error make { msg: "--session is only valid for type=sp" }
-  }
   let session_id = (if $session { (random uuid) } else { "" })
 
   let fm_base = [
@@ -485,6 +565,22 @@ def "main create" [
     print -e ""
     print -e $"Resume cmd: claude --session-id ($session_id) -n ($name).($id)"
   }
+}
+
+# Read the raw markdown of a typed zettel by id ("sp025", "adr0010", ...)
+# or first alias. Prints the file content to stdout. Useful for scripts
+# and skills that want zettel content via a single resolver — `akm read`
+# goes through `require_akm_root` so feature-worktree access refuses the
+# same way every other AKM surface does.
+def "main read" [
+  key: string  # id or first alias
+] {
+  let root = (require_akm_root)
+  let f = (find_zettel $root $key)
+  if ($f == "") {
+    error make { msg: $"no zettel matching `($key)` (by id or alias)" }
+  }
+  open --raw $f
 }
 
 # Delete any typed zettel + (for sp only) its board.md entry. Accepts an
@@ -833,9 +929,10 @@ def main [] {
   print ""
   print "AKM zettel ops (main worktree only):"
   print "  akm init <target>            bootstrap (or re-link) PKM under <target>/docs/"
-  print "  akm create <type> <name>     mint a typed zettel stub"
+  print "  akm write <type> <name>      upsert a typed zettel stub (no-op if exists)"
   print "                                 types: sp us pn ft im adr cat"
   print "                                 --session  (sp only) also mint claude session id"
+  print "  akm read <key>               print raw markdown of a zettel by id or alias"
   print "  akm delete <key>             delete zettel + board.md entry if any"
   print "                                 key = id (sp025/adr0010/...) or first alias"
   print "                                 --force    skip confirmation"
@@ -851,9 +948,9 @@ def main [] {
   print ""
   print "Examples:"
   print "  akm init ."
-  print "  akm create sp rotate-credentials --session"
-  print "  akm create adr azure-region-eu-west"
-  print "  akm create us bulk-rejection-with-reason"
+  print "  akm write sp rotate-credentials --session"
+  print "  akm write adr azure-region-eu-west"
+  print "  akm write us bulk-rejection-with-reason"
   print "  akm list adr"
   print "  akm bd export"
   print ""
