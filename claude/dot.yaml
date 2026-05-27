@@ -7,7 +7,6 @@ linux:
     hooks/tmux-responding.sh: ~/.claude/hooks/tmux-responding.sh
     beads/perles-config.yaml: ~/.config/perles/config.yaml
     repos-health.nu: ~/.local/bin/repos-health.nu
-    epic.nu: ~/.local/bin/epic
     akm/akm: ~/.local/bin/akm
     akm/akm-root: ~/.local/bin/akm-root
     commands/epic-create.md: ~/.claude/commands/epic-create.md
@@ -30,7 +29,7 @@ linux:
       # dolt + bd + perles installed via installs.depends → ./beads/dot.yaml
 
       curl -fsSL https://claude.ai/install.sh | sh
-      chmod +x ~/.dotfiles/claude/epic.nu
+      chmod +x ~/.dotfiles/claude/akm/akm ~/.dotfiles/claude/akm/akm-root
 
       # Mirror slash commands to personal claude account dir.
       # ~/.claude → ~/.claude-work symlink; ~/.claude-personal is separate.

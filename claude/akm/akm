@@ -1,40 +1,51 @@
 #!/usr/bin/env nu
-# akm — manage markdown-oxide PKM workspaces (AKM zettelkasten).
+# akm — manage markdown-oxide PKM workspaces (AKM zettelkasten) and the
+# bd (beads) state plumbing that backs them.
 #
-# Subcommands:
+# AKM subcommands (zettel + board lifecycle):
 #   akm init <target>     bootstrap (or re-link) PKM under <target>/docs/
 #   akm create <name>     mint sp### at status:idea + board.md ## idea entry
 #   akm delete <name>     delete sp### + remove board.md entry
 #   akm list              show all sp### grouped by status
 #   akm root              print AKM workspace root (wraps the akm-root helper)
 #
+# bd housekeeping (`akm bd ...`):
+#   akm bd init           strip bd auto-hooks, pin bd config (run once per repo)
+#   akm bd export         bd Dolt → .beads/issues-snapshot.jsonl (commit-ready)
+#   akm bd import         .beads/issues-snapshot.jsonl → bd Dolt (after a git pull)
+#   akm bd archive create snapshot + prune old closed issues
+#   akm bd archive apply  apply prune-list on other machines
+#
 # Examples:
 #   akm init .                       # init current repo
-#   akm init ~/repos/new-project     # init another project
 #   akm create rotate-credentials    # mint sp025 (or next id) at status:idea
-#   akm delete rotate-credentials    # remove by alias
 #   akm delete sp025                 # remove by id
 #   akm list                         # idea / spec / ready / done buckets
+#   akm bd init                      # bd hook strip + config pin
+#   akm bd export                    # snapshot Dolt before commit
 #
 # Env overrides:
 #   AKM_SOURCE          absolute path to canonical akm.md
 #                       default: ~/.dotfiles/claude/akm/akm.md
 #   AKM_ROOT_OVERRIDE   force a workspace path (testing / non-standard layouts)
 #
-# Design contract — bd is OUT OF SCOPE:
-#   AKM is pure zettel + lifecycle-document management. Beads (bd) epic
-#   creation, task minting, and closure happen in the lifecycle skills
-#   (`spec-ready` mints the bd epic and child tasks when sp### → ready;
-#   `spec-retro` closes the bd epic when sp### → done). This CLI does not
-#   touch bd at all — that keeps the AKM data model coherent regardless
-#   of which work-tracker the team uses.
+# Design contract — bd epic / task LIFECYCLE is out of scope here:
+#   `akm bd ...` is bd state PLUMBING only (hook strip, jsonl snapshot/restore,
+#   archival pruning). Beads (bd) epic creation, task minting, and closure
+#   happen in the lifecycle skills (`spec-ready` mints the bd epic and child
+#   tasks when sp### → ready; `spec-retro` closes them when sp### → done).
+#   Keeping lifecycle out of the CLI means the AKM data model stays coherent
+#   regardless of which work-tracker the team uses.
 #
 # Workspace resolution — strict main-worktree rule:
-#   Every AKM operation (read, search, write) resolves its workspace via
-#   the `akm-root` helper. From a feature worktree akm-root refuses with
+#   Every AKM zettel operation (read, search, write) resolves its workspace
+#   via the `akm-root` helper. From a feature worktree akm-root refuses with
 #   exit 2 and stderr explaining where to `cd`. This CLI surfaces that
 #   message verbatim. AKM zettels live on the default branch; feature
 #   worktrees exist only for code work (work-do / work-audit / work-merge).
+#   bd housekeeping commands (`akm bd ...`) use a separate `bd_project_root`
+#   resolver — bd Dolt state is repo-scoped, not branch-scoped, so they work
+#   from any worktree.
 
 # Resolve the AKM workspace root via the `akm-root` shell helper.
 #   exit 0 → return path (cwd is inside the main worktree of an AKM repo)
@@ -467,11 +478,261 @@ def "main root" [] {
   ^akm-root
 }
 
+# ----------------------------------------------------------------------------
+# bd housekeeping helpers — cwd-rooted, NOT akm-root-rooted.
+#
+# bd Dolt state is repo-scoped (one .beads/ per repo, shared across worktrees
+# via Dolt). These commands walk up from cwd to find `.beads/` rather than
+# resolving the main worktree — that keeps them usable from any worktree for
+# routine operations like `akm bd export` before a feature-branch commit.
+# ----------------------------------------------------------------------------
+
+def bd_project_root [] {
+  mut cur = $env.PWD
+  loop {
+    if ($"($cur)/.beads" | path exists) {
+      return $cur
+    }
+    let parent = ($cur | path dirname)
+    if $parent == $cur {
+      error make { msg: "Not inside a bd project (no .beads/ found walking up from PWD)" }
+    }
+    $cur = $parent
+  }
+}
+
+def bd_archive_dir [] {
+  let dir = $"(bd_project_root)/board/archive"
+  mkdir $dir
+  $dir
+}
+
+# Pin bd config keys that enforce the Dolt-canonical / manual-export model.
+# Defensive — a fresh clone, `bd init` re-run, or future bd version that
+# resets defaults would otherwise silently re-enable auto-export and we'd
+# be back to the merge-clobber loop. Each `bd config set` is a no-op when
+# the value already matches, so this is idempotent and silent on re-runs.
+def bd_ensure_config [] {
+  let desired = {
+    "export.auto":      "false"                     # disable jsonl auto-write
+    "export.git-add":   "false"                     # no auto-`git add`
+    "export.path":      "issues-snapshot.jsonl"     # off bd's default-import watch path
+    "dolt.auto-commit": "on"                        # commit Dolt writes so state persists
+  }
+  for kv in ($desired | transpose key value) {
+    let current = try {
+      (^bd config get $kv.key | complete).stdout | lines | last | str trim
+    } catch { "" }
+    if $current != $kv.value {
+      print -e $"Setting bd config ($kv.key) = ($kv.value) \(was: ($current)\)"
+      ^bd config set $kv.key $kv.value | ignore
+    }
+  }
+}
+
+# Remove bd's auto-installed hook shims and the legacy worktree-skip gate.
+# Rationale: bd hooks auto-export Dolt → jsonl on every commit and auto-import
+# jsonl → Dolt on every merge. With jsonl tracked in git, that turns every
+# `git pull` into a state-clobber: a peer machine's older jsonl overwrites
+# the local Dolt's freshly-closed status, silently reverting closures. We
+# keep state in Dolt (manual `akm bd export` writes jsonl only when we want a
+# history snapshot) and rely on `bd dolt push/pull` for cross-machine sync.
+def bd_strip_hooks [root: string] {
+  let hooks_dir = $"($root)/.git/hooks"
+  if not ($hooks_dir | path exists) { return }
+
+  # Ask bd to uninstall first — it knows where its shims live across versions.
+  try {
+    let status = (do { ^bd hooks list } | complete)
+    if ($status.exit_code == 0) and ($status.stdout | str contains "✓") {
+      print -e "Uninstalling bd auto-hooks (export/import is manual)..."
+      ^bd hooks uninstall | ignore
+    }
+  } catch { }
+
+  # Belt-and-suspenders: scrub any leftover markers and the worktree gate
+  # from earlier init runs.
+  for hook in [pre-commit post-merge post-checkout pre-push prepare-commit-msg] {
+    let f = $"($hooks_dir)/($hook)"
+    if not ($f | path exists) { continue }
+    let content = (open --raw $f)
+    let cleaned = (
+      $content
+      | str replace -r '(?s)# Skip bd hooks entirely when running from a linked worktree\..*?^fi\n' ''
+      | str replace -r '(?s)# --- BEGIN BEADS INTEGRATION.*?# --- END BEADS INTEGRATION[^\n]*\n' ''
+    )
+    if $cleaned != $content {
+      if (($cleaned | str trim) == "#!/usr/bin/env sh") or (($cleaned | str trim) == "") {
+        rm $f
+        print -e $"removed empty ($hook)"
+      } else {
+        $cleaned | save --force --raw $f
+        print -e $"scrubbed ($hook)"
+      }
+    }
+  }
+}
+
+def bd_preflight [] {
+  if (which bd | is-empty) {
+    error make { msg: "bd (beads) CLI not found on PATH — run infinifu/install.sh" }
+  }
+  let root = (bd_project_root)
+  if not ($"($root)/.beads" | path exists) {
+    error make { msg: $"($root)/.beads not found — run 'bd init' from the project root first" }
+  }
+  bd_strip_hooks $root
+  bd_ensure_config
+}
+
+def "main bd" [] {
+  print "akm bd — bd (beads) housekeeping"
+  print ""
+  print "Subcommands:"
+  print "  akm bd init           strip bd auto-hooks, pin bd config (idempotent)"
+  print "  akm bd export         bd Dolt → .beads/issues-snapshot.jsonl"
+  print "  akm bd import         .beads/issues-snapshot.jsonl → bd Dolt"
+  print "                          --force  skip confirmation"
+  print "  akm bd archive create snapshot + prune old closed issues"
+  print "                          --before <date>  cutoff (default: 365 days ago)"
+  print "                          --yes            skip confirmation"
+  print "  akm bd archive apply  apply cumulative prune-list to local bd"
+  print ""
+  print "Notes:"
+  print "  - bd epic / task creation belongs to lifecycle skills (spec-ready, spec-retro),"
+  print "    not this CLI. These commands are state plumbing only."
+}
+
+def "main bd init" [] {
+  bd_preflight
+  print -e "Repo ready: bd auto-hooks stripped, bd config pinned."
+  print -e "Sync model: bd Dolt = canonical. Use `akm bd export` to refresh"
+  print -e ".beads/issues-snapshot.jsonl before committing, `akm bd import` after a pull."
+}
+
+# Write current Dolt state to .beads/issues-snapshot.jsonl. Run before `git commit`
+# when you want the jsonl snapshot to capture a status change.
+def "main bd export" [] {
+  cd (bd_project_root)
+  ^bd export -o .beads/issues-snapshot.jsonl
+  print -e "Exported bd Dolt → .beads/issues-snapshot.jsonl"
+}
+
+# Replay .beads/issues-snapshot.jsonl into the local Dolt. Run after `git pull` if you
+# want the pulled jsonl (peer history) merged into your Dolt. Skip when you
+# trust your local Dolt is more recent than what just arrived — that is the
+# whole reason auto-import was removed.
+def "main bd import" [
+  --force  # skip confirmation
+] {
+  cd (bd_project_root)
+  let jsonl = ".beads/issues-snapshot.jsonl"
+  if not ($jsonl | path exists) {
+    error make { msg: $"($jsonl) not found" }
+  }
+  if not $force {
+    print -e $"Will replay ($jsonl) into local bd Dolt."
+    print -e "This can resurrect closed issues if the jsonl is older than Dolt."
+    let ans = (input "Proceed? [y/N]: ")
+    if ($ans | str downcase) != "y" {
+      print -e "Aborted"
+      return
+    }
+  }
+  ^bd import $jsonl
+  print -e $"Imported ($jsonl) → bd Dolt"
+}
+
+def "main bd archive create" [
+  --before: string  # ISO cutoff date (default: 365 days ago); archive closed issues closed before this
+  --yes             # skip confirmation
+] {
+  cd (bd_project_root)
+  let dir = (bd_archive_dir)
+  let year = (date now | format date "%Y")
+  let snap = $"($dir)/($year).jsonl"
+  let prune = $"($dir)/prune-list"
+
+  let cutoff_str = if ($before | is-empty) {
+    (date now) - 365day | format date "%Y-%m-%d"
+  } else {
+    $before
+  }
+
+  let closed = try {
+    ^bd list --json --status closed --limit 0 | from json
+  } catch { [] }
+
+  let to_archive = ($closed | where { |i|
+    ($i.closed_at? | default "") != "" and ($i.closed_at < $cutoff_str)
+  })
+
+  if ($to_archive | is-empty) {
+    print -e $"No closed issues with closed_at < ($cutoff_str) — nothing to archive."
+    return
+  }
+
+  print -e $"Archiving ($to_archive | length) closed issues \(cutoff: ($cutoff_str)\):"
+  $to_archive | select id title closed_at | table | print
+
+  if not $yes {
+    let ans = (input "Proceed? [y/N]: ")
+    if ($ans | str downcase) != "y" {
+      print -e "Aborted"
+      return
+    }
+  }
+
+  ^bd export --all | save -f $snap
+  print -e $"Snapshot → ($snap)"
+
+  let new_ids = ($to_archive | get id)
+  let existing = if ($prune | path exists) {
+    open --raw $prune | lines | where { |l| ($l | str trim) != "" }
+  } else { [] }
+  let merged = ($existing | append $new_ids | uniq | sort)
+  $merged | str join "\n" | save -f $prune
+  print -e $"Prune-list → ($prune) \(($merged | length) total IDs\)"
+
+  let tmp = $"/tmp/bd-prune-(random uuid).txt"
+  $new_ids | str join "\n" | save -f $tmp
+  ^bd delete --from-file $tmp --force | ignore
+  rm $tmp
+  print -e $"Deleted ($new_ids | length) issues from local bd"
+
+  ^bd export -o .beads/issues-snapshot.jsonl | ignore
+  print -e "Refreshed .beads/issues-snapshot.jsonl"
+
+  print -e ""
+  print -e "Next: review `git status`, commit board/archive/ + .beads/issues-snapshot.jsonl, push."
+}
+
+def "main bd archive apply" [] {
+  let prune = $"(bd_project_root)/board/archive/prune-list"
+  if not ($prune | path exists) {
+    print -e $"No prune-list at ($prune) — nothing to apply."
+    return
+  }
+
+  let ids = (open --raw $prune | lines | where { |l| ($l | str trim) != "" })
+  if ($ids | is-empty) {
+    print -e "Prune-list is empty."
+    return
+  }
+
+  let before = (try { ^bd list --json --all --limit 0 | from json | length } catch { 0 })
+  ^bd delete --from-file $prune --force | ignore
+  let after = (try { ^bd list --json --all --limit 0 | from json | length } catch { 0 })
+  let deleted = ($before - $after)
+  let missing = (($ids | length) - $deleted)
+  print -e $"Applied prune-list: deleted ($deleted), already-gone ($missing) of ($ids | length)."
+}
+
 # Default — print help when invoked with no subcommand.
 def main [] {
-  print "akm — manage markdown-oxide PKM workspaces (AKM zettelkasten)"
+  print "akm — manage markdown-oxide PKM workspaces (AKM zettelkasten) + bd housekeeping"
   print ""
-  print "Usage:"
+  print "AKM zettel ops (main worktree only):"
   print "  akm init <target>     bootstrap (or re-link) PKM under <target>/docs/"
   print "  akm create <name>     mint sp### at status:idea + board.md entry"
   print "                          --session  also mint claude session id"
@@ -480,13 +741,20 @@ def main [] {
   print "  akm list              show sp### grouped by status"
   print "  akm root              print AKM workspace root (refuses on feature worktree)"
   print ""
+  print "bd housekeeping (any worktree):"
+  print "  akm bd init           strip bd auto-hooks, pin bd config"
+  print "  akm bd export         bd Dolt → .beads/issues-snapshot.jsonl"
+  print "  akm bd import         .beads/issues-snapshot.jsonl → bd Dolt"
+  print "  akm bd archive create snapshot + prune old closed issues"
+  print "  akm bd archive apply  apply prune-list on other machines"
+  print ""
   print "Examples:"
   print "  akm init ."
   print "  akm create rotate-credentials --session"
-  print "  akm delete sp025 --force"
-  print "  akm list"
+  print "  akm bd export"
   print ""
   print "Notes:"
   print "  - bd epic / task creation is the lifecycle skills' job (spec-ready, spec-retro)."
-  print "  - All commands refuse from a feature worktree (strict main-only rule)."
+  print "  - AKM zettel commands refuse from a feature worktree (strict main-only rule)."
+  print "  - bd housekeeping works from any worktree (bd state is repo-scoped)."
 }
