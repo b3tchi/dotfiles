@@ -96,7 +96,7 @@ Stage parsed rows in a per-upload table, run validators against the staging set,
 - [migrations/2026-05-15-create-sample-import-staging.sql](../../migrations/2026-05-15-create-sample-import-staging.sql)
 
 ## specs
-- (none yet — `board/spec/samples-bulk-import.md` once drafted)
+- (none yet — `[[sp###]]` linked here once an sp### is drafted)
 
 ---
 

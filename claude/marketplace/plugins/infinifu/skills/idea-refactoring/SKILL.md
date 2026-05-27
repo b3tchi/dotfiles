@@ -127,7 +127,7 @@ After diagnosis, outline the refactor design direction:
 After diagnosis + design direction:
 - Invoke `spec-writing` to formalize into an implementation spec
 - `spec-refinement` reviews the spec
-- `spec-ready` creates tasks with deps and parallelism, promotes spec to `board/ready/`
+- `spec-ready` creates tasks with deps and parallelism, flips `sp###.status: spec → ready` and moves the board.md entry from `## spec` to `## ready`
 - `domain-refactor-safely` executes the refactor
 
 </the_process>

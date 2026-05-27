@@ -1,6 +1,6 @@
 # Multi-epic parallelism
 
-When multiple epics exist in `board/ready/`, the scrum master can dispatch tasks from different epics in parallel — provided they don't interfere.
+When multiple specs sit at `status: ready` (visible under `docs/board.md ## ready`, each backed by a bd epic), the scrum master can dispatch tasks from different epics in parallel — provided they don't interfere.
 
 ## Interference check
 

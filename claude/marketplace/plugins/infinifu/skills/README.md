@@ -2,19 +2,21 @@
 
 ## Two-Layer Model
 
-Work happens on two layers in parallel. **Layer 1** tracks the epic as a single markdown file moving through `board/` subdirectories. **Layer 2** is the bd task graph that executes the epic's implementation. `spec-ready` is the bridge that creates Layer 2 from Layer 1; `spec-retro` closes Layer 2 and archives Layer 1.
+Work happens on two layers in parallel. **Layer 1** tracks each workstream as one `sp###` zettel whose `status:` frontmatter flips through four values; `docs/board.md` is a navigational index keyed on the same statuses. **Layer 2** is the bd task graph that executes the spec's implementation. `spec-ready` is the bridge that creates Layer 2 from Layer 1; `work-merge` closes Layer 2 and the AKM lifecycle bookkeeping; `spec-retro` does the post-merge knowledge-graph pass.
 
 ```
-Layer 1 — Epic document (one .md file per epic, moves through board/)
+Layer 1 — sp### lifecycle (one zettel per workstream; status drives section in docs/board.md)
 
-  idea-brainstorming   spec-writing      spec-refinement   spec-ready                              spec-retro
+  idea-brainstorming   spec-writing      spec-refinement   spec-ready                              work-merge (finale)
   ─────────────────▶   ────────────▶     ──────────────▶   ──────────▶         ...                 ──────────▶
-  board/idea/X.md      board/spec/X.md   board/spec/X.md   board/ready/X.md                        board/done/X.md
-                                         ⛔ human gate     ⛔ human gate                                   ▲
+  status: idea         status: spec      status: spec      status: ready                           status: done
+  docs/board.md        docs/board.md     docs/board.md     docs/board.md                           docs/archive.md
+   ## idea              ## spec           ## spec           ## ready                                ## done
+                                         ⛔ human gate     ⛔ human gate                                  ▲
                                                                 │                                         │
                                                                 │ creates bd epic + tasks                 │ Layer 2 complete:
                                                                 ▼                                         │ close bd epic,
-                                                                                                          │ archive .md
+                                                                                                          │ flip sp### → done
 Layer 2 — Task graph (bd issues, orchestrated by plan-scrum-master)                                       │
 
   bd epic                                                                                                 │
@@ -42,7 +44,7 @@ Layer 2 — Task graph (bd issues, orchestrated by plan-scrum-master)           
 
 **Per-task audit** — after an implementer closes a task, a reviewer agent runs `work-audit`: compares design vs. what was built, verifies every success criterion with evidence, flags silent deviations. Approved tasks stay closed; rejected ones re-open and bounce back with specific evidence of what's missing. Epic completeness is just the aggregate — every task passing its own audit.
 
-**Crossing back to Layer 1** — when `work-merge` lands the branch, control returns to Layer 1: `spec-retro` closes the bd epic and `git mv`s the spec from `board/ready/` to `board/done/`. Layer 2 is about bd tasks; archiving the `.md` is a Layer 1 concern.
+**Crossing back to Layer 1** — when `work-merge` lands the branch, control returns to Layer 1: it flips `sp###.status: ready → done`, moves the wikilink from `docs/board.md ## ready` into `docs/archive.md ## done`, and closes the bd epic. `spec-retro` then runs the post-merge knowledge-graph refresh (rewrites `im###` to match shipped reality, mints new `adr####` for in-flight decisions, supersedes `ft###` whose surfaces widened). Layer 2 is about bd tasks; status bookkeeping and AKM updates are Layer 1 concerns.
 
 **Layer 2 dispatcher options** — pick one based on how much supervision you want:
 - `plan-scrum-master` — fully automated: agents implement, reviewer agent verifies, user sees results at the end
@@ -80,7 +82,7 @@ idea → spec → plan → work → done
 |-------|----------------------------------|------------|
 | idea  | Explore what and why             | feature only |
 | spec  | Define precisely what to build   | varies by scenario |
-| spec-ready | Promote spec to ready: bd tasks, deps, parallelism, git mv to board/ready/ | always |
+| spec-ready | Promote spec to ready: bd tasks, deps, parallelism, sp### status flip + board.md section move | always |
 | work  | Build, test, review, debug       | always |
 | done  | Close tasks, cleanup, archive    | always |
 
@@ -152,15 +154,15 @@ Each transition has: a **trigger** (what causes it), an **artifact** (what gets 
 | | |
 |-|-|
 | **Trigger** | `idea-brainstorming` invokes `Skill(spec-writing)` |
-| **Artifact** | Design doc (`board/idea/<topic>.md`) + bd epic |
+| **Artifact** | `sp###.md` at `status: idea` with `## problem` populated |
 | **Gate** | User approves design |
 
 ### spec-writing → spec-refinement
 
 | | |
 |-|-|
-| **Trigger** | `spec-writing` produces implementation spec |
-| **Artifact** | Implementation spec (`board/spec/<topic>.md`) |
+| **Trigger** | `spec-writing` writes `## solution` on `sp###` and flips `status: idea → spec` |
+| **Artifact** | `sp###.md` at `status: spec` with `## problem` + `## solution` |
 | **Gate** | Mandatory for non-trivial specs (multiple tasks, >4h estimated). Skippable for single-task fixes. |
 
 `spec-refinement` applies an 8-category SRE checklist: granularity, implementability, success criteria, dependencies, safety, edge cases, red flags, test meaningfulness. Re-reviews until APPROVED.
@@ -175,14 +177,14 @@ Each transition has: a **trigger** (what causes it), an **artifact** (what gets 
 
 **STOP:** Present the approved spec to the user and wait for explicit approval. Do NOT create bd tasks until the user says to. The user may want to revise scope, approach, or priorities.
 
-`spec-ready` creates the bd epic, breaks tasks into dependency chains, identifies which tasks can run in parallel, sets blockers, and promotes the spec from `board/spec/` to `board/ready/` — all as one atomic operation.
+`spec-ready` creates the bd epic, breaks tasks into dependency chains, identifies which tasks can run in parallel, sets blockers, flips `sp###.status: spec → ready`, and moves the board.md wikilink from `## spec` to `## ready` — all as one atomic operation.
 
 ### spec-ready → plan-dispatch ⛔ MANDATORY HUMAN GATE
 
 | | |
 |-|-|
-| **Trigger** | `spec-ready` has populated the ready queue with tasks, deps, and parallelism, and moved the file to `board/ready/` |
-| **Artifact** | bd epic with tasks, dependencies, and blockers; spec file in `board/ready/` |
+| **Trigger** | `spec-ready` has populated the ready queue with tasks, deps, and parallelism, flipped `sp###.status: spec → ready`, and moved the board.md wikilink into `## ready` |
+| **Artifact** | bd epic with tasks, dependencies, and blockers; `sp###.md` at `status: ready` indexed under `docs/board.md ## ready` |
 | **Gate** | **User reviews and approves the bd tasks.** Then user chooses execution strategy: `plan-scrum-master` (automated) or `plan-supervised` (human-in-the-loop batches). |
 
 **STOP:** After creating bd tasks, present the task list to the user and wait for explicit approval. Do NOT proceed to execution until the user says to. The user may want to reorder, edit, add, or remove tasks.
@@ -217,7 +219,7 @@ test-write (red) → code (green) → test-run → repeat until green
 | **Artifact** | Working, verified code |
 | **Gate** | Verification commands confirm output |
 
-`work-merge` decides: merge, PR, or cleanup. On merge/PR, calls `spec-retro` which closes the bd epic and archives the spec from `board/ready/` to `board/done/`.
+`work-merge` decides: merge, PR, or cleanup. On the final task of the epic it runs the epic finale — flips `sp###.status: ready → done`, moves the wikilink from `docs/board.md ## ready` into `docs/archive.md ## done`, and closes the bd epic. `spec-retro` then runs the post-merge knowledge-graph refresh (im### rewrite, new adr####, ft### supersession).
 
 ## Skill Naming
 
@@ -258,7 +260,7 @@ Work subdomains use nested prefixes: `domain-debug-`, `work-refactor-`, `work-te
 | Audit implementation against bd spec  | `work-audit`                 |
 | Work in an isolated worktree          | `domain-git-worktrees`         |
 | Finish a branch (merge/PR)            | `work-merge`      |
-| Close epic + archive spec to done     | `spec-retro`                 |
+| Post-merge knowledge-graph refresh (im### / adr#### / ft### updates) | `spec-retro`         |
 | Start a new session                   | `meta-bootstrap`             |
 | Write or edit a skill                 | `meta-skill-writing`         |
 
@@ -274,8 +276,8 @@ Grouped by **kind** (process = flow-ordered step; util = toolbelt pulled in on d
 | `Skill(idea-refactoring)`     | Refactor entry — identify smells, design refactor approach                         |
 | `Skill(spec-writing)`         | Have requirements, need implementation spec                                        |
 | `Skill(spec-refinement)`      | Review spec quality with SRE checklist before tasks are created                    |
-| `Skill(spec-ready)`           | Create bd tasks + promote spec from `board/spec/` to `board/ready/`                |
-| `Skill(spec-retro)`           | After merge — close bd epic, archive spec to `board/done/`                         |
+| `Skill(spec-ready)`           | Create bd tasks + flip `sp###.status: spec → ready` + move board.md wikilink       |
+| `Skill(spec-retro)`           | After merge — knowledge-graph refresh (im### rewrite, new adr####, ft### supersede) |
 
 ### Process — Layer 2 (bd task execution)
 

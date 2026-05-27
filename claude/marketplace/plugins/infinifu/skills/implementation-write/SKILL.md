@@ -1,6 +1,6 @@
 ---
 name: implementation-write
-description: Use when the user wants to record *how* a story will be solved — write an implementation card, log how we'll build us###, record the solution shape for the X story, im### for that backlog item, "draft the implementation for us014", "how are we going to do this story", "compose the features for that work". Emits a new `docs/notes/im###.md` AKM zettel with frontmatter (aliases/status/created), an H1 carrying one-or-more `[[cat###]]` categories, a mandatory `solves: [[us###]]` back-link, consumed `[[ft###]]` Features, and the body sections (approach / data_model / api_surface / components / specs). This skill owns the Implementation schema (frontmatter shape, body, lifecycle); shared styling (atomicity, 80-char wrap, link discipline) is enforced by `infinifu:zettel-write`; `docs/notes/akm.md` carries only the top-level AKM model overview. Distinct from `story-write` (the *problem* in Connextra form), `spec-writing` (the transient execution *plan* on the board), and `feature-write` (the *reusable capabilities* this card consumes). Pick this whenever a story is `ready` and you're choosing the solution shape *before* anyone opens `board/spec/`. Invoke aggressively — spec-writing without a backing `im###` is a smell.
+description: Use when the user wants to record *how* a story will be solved — write an implementation card, log how we'll build us###, record the solution shape for the X story, im### for that backlog item, "draft the implementation for us014", "how are we going to do this story", "compose the features for that work". Emits a new `docs/notes/im###.md` AKM zettel with frontmatter (aliases/status/created), an H1 carrying one-or-more `[[cat###]]` categories, a mandatory `solves: [[us###]]` back-link, consumed `[[ft###]]` Features, and the body sections (approach / data_model / api_surface / components / specs). This skill owns the Implementation schema (frontmatter shape, body, lifecycle); shared styling (atomicity, 80-char wrap, link discipline) is enforced by `infinifu:zettel-write`; `docs/notes/akm.md` carries only the top-level AKM model overview. Distinct from `story-write` (the *problem* in Connextra form), `spec-writing` (the transient execution *plan* on the board), and `feature-write` (the *reusable capabilities* this card consumes). Pick this whenever a story is `ready` and you're choosing the solution shape *before* anyone flips an `sp###` from `idea` to `spec`. Invoke aggressively — spec-writing without a backing `im###` is a smell.
 ---
 
 <skill_overview>
@@ -208,7 +208,7 @@ One paragraph, ≤5 sentences. Three things it must convey: (1) the chosen patte
 In `proposed` status, these can be educated guesses; the spec-retro pass updates them to match what landed.
 
 ### Step 7 — `## specs`
-Transient board spec(s) that touched or delivered this card. Empty for a fresh `proposed`. While active: `[[<topic>|<title>]]` → `board/spec/<topic>.md`. Once archived: same wikilink, file moves to `board/done/<topic>.md`. Add as specs land; don't pre-populate.
+Transient spec(s) that touched or delivered this card. Empty for a fresh `proposed`. Each entry is a wikilink to a `[[sp###]]` zettel under `docs/notes/spec/`. While active, the board.md index shows that `sp###` under `## spec` / `## ready`; once shipped the entry moves to `docs/archive.md ## done`. Add as specs land; don't pre-populate.
 
 ### Step 8 — Generate the id, write the zettel
 IDs are `im` + 3-digit zero-padded sequential. `ls "$AKM_ROOT/docs/notes/"im*.md`, take max + 1 (never reuse gaps), zero-pad. Compose per the `<schema>` block above (see `references/examples.md` for worked examples). Write to `$AKM_ROOT/docs/notes/im<NNN>.md`. ISO date for `created`. moxide LSP parses on the section headings — order matches the schema.
@@ -232,7 +232,7 @@ git -C "$AKM_ROOT" add docs/notes/im<NNN>.md docs/product.md
 ### Step 11 — Confirm
 Show: id + absolute path under `$AKM_ROOT`, story solved, H1 categories, Features consumed (with status), one-line approach summary, hub annotation status, staging state on main (no commit). Ask once: *"Anything to revise?"* If yes, edit in place. If no/no-response, done.
 
-**Next step prompt:** *"`im###` is `proposed`. Next: `infinifu:spec-writing` produces `board/spec/<topic>.md` against this card. The card flips to `accepted` after the spec ships (via `spec-retro`)."*
+**Next step prompt:** *"`im###` is `proposed`. Next: `infinifu:spec-writing` writes `## solution` on the existing `sp###` (status flips `idea → spec`) against this card. The card flips to `accepted` after the spec ships (via `spec-retro`)."*
 
 </the_process>
 
@@ -271,7 +271,7 @@ Before reporting the Implementation written:
 
 ```
 infinifu:story-write → infinifu:implementation-write → infinifu:spec-writing → infinifu:spec-ready → (bd execution) → infinifu:spec-retro
-   (us###)                (im### proposed)                (board/spec/)                                              (im### → accepted)
+   (us###)                (im### proposed)                (sp### at status: spec)                                    (im### → accepted)
 ```
 
 A spec for a story with no `im###` is a smell — refuse to start `spec-writing` until the card exists.
