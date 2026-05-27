@@ -79,7 +79,7 @@ def _walk_down(start: Path) -> Path | None:
 
 
 def _detect_vault(cwd: Path) -> Path | None:
-    """Detect the vault root from `cwd`.
+    """Detect the vault root from `cwd` via marker walk (legacy path).
 
     Search strategy:
     1. If WIKI_ROOT env var is set, use it — but return None if the path does
@@ -88,6 +88,9 @@ def _detect_vault(cwd: Path) -> Path | None:
     2. Walk up from `cwd` looking for a vault marker (.moxide.toml, .obsidian).
     3. If no marker found upward, BFS downward up to _DESCEND_MAX_DEPTH levels.
     4. Return None if no vault is detected.
+
+    This path is kept as a fallback for non-AKM vaults. AKM-bearing repos
+    go through `akm-root` first (see `_resolve_call_vault`).
     """
     env = os.environ.get("WIKI_ROOT")
     if env:
@@ -99,9 +102,54 @@ def _detect_vault(cwd: Path) -> Path | None:
     return None
 
 
+class AkmAccessRefused(Exception):
+    """Raised when `akm-root` refuses (exit 2) — feature-worktree access.
+
+    Tool entry points catch this and surface the helper's stderr to the
+    caller so the user sees the same refusal message the bash skills get.
+    """
+
+
 def _resolve_call_vault(cwd: str | None) -> Path | None:
-    """Resolve the vault for a single MCP tool call."""
+    """Resolve the vault for a single MCP tool call.
+
+    AKM-aware resolution: if the `akm-root` helper is on PATH, consult it
+    first so this MCP and the bash skills agree on a single source of
+    truth for the AKM workspace location. The helper enforces the strict-
+    mode rule that all AKM access (read, search, write) only happens from
+    the main worktree.
+
+    Resolution order:
+    1. Run `akm-root` with cwd = the caller's cwd.
+       - exit 0 + valid `docs/` under returned path → use it.
+       - exit 2 (strict refusal — feature worktree) → raise AkmAccessRefused.
+       - any other failure (helper missing, no AKM workspace, no `docs/`)
+         → fall through to legacy marker-walk so non-AKM vaults keep
+         working.
+    2. Marker walk via `_detect_vault`.
+    """
     start = Path(cwd).resolve() if cwd else Path.cwd()
+    try:
+        r = subprocess.run(
+            ["akm-root"],
+            cwd=str(start),
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        r = None
+
+    if r is not None:
+        if r.returncode == 2:
+            raise AkmAccessRefused(r.stderr.strip() or "AKM access refused")
+        if r.returncode == 0:
+            akm_path = r.stdout.strip()
+            if akm_path:
+                docs = (Path(akm_path) / "docs").resolve()
+                if docs.exists():
+                    return docs
+
     return _detect_vault(start)
 
 
@@ -345,7 +393,10 @@ def wiki_search(query: str, cwd: str | None = None) -> list[dict]:
     surface here. Inline #tag body markers are not indexed by
     markdown-oxide; use wiki_grep for raw text lookup.
     """
-    vault = _resolve_call_vault(cwd)
+    try:
+        vault = _resolve_call_vault(cwd)
+    except AkmAccessRefused as e:
+        return [{"error": str(e)}]
     if vault is None:
         return [{"error": f"no vault marker above {cwd or Path.cwd()}"}]
     q = query.strip()
@@ -382,7 +433,10 @@ def wiki_tags(prefix: str = "", cwd: str | None = None) -> list[str]:
     `prefix` narrows by leading characters after `#` (e.g. "v" → tags
     starting with #v). Empty prefix returns all tags.
     """
-    vault = _resolve_call_vault(cwd)
+    try:
+        vault = _resolve_call_vault(cwd)
+    except AkmAccessRefused as e:
+        return [f"error: {e}"]
     if vault is None:
         return [f"error: no vault marker above {cwd or Path.cwd()}"]
     client = _pool.get(vault)
@@ -410,7 +464,10 @@ def wiki_grep(pattern: str, max_results: int = 100, cwd: str | None = None) -> l
       - "^#\\s"              (top-level headings)
       - "\\[\\[.+?\\]\\]"    (any wikilink)
     """
-    vault = _resolve_call_vault(cwd)
+    try:
+        vault = _resolve_call_vault(cwd)
+    except AkmAccessRefused as e:
+        return [{"error": str(e)}]
     if vault is None:
         return [{"error": "no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"}]
     if not shutil.which("rg"):
@@ -433,7 +490,10 @@ def wiki_grep(pattern: str, max_results: int = 100, cwd: str | None = None) -> l
 @mcp.tool()
 def wiki_list(cwd: str | None = None) -> list[str]:
     """List all markdown files in the vault, relative to the vault root."""
-    vault = _resolve_call_vault(cwd)
+    try:
+        vault = _resolve_call_vault(cwd)
+    except AkmAccessRefused as e:
+        return [f"error: {e}"]
     if vault is None:
         return ["error: no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"]
     return sorted(str(p.relative_to(vault)) for p in vault.rglob("*.md"))
@@ -442,7 +502,10 @@ def wiki_list(cwd: str | None = None) -> list[str]:
 @mcp.tool()
 def wiki_root(cwd: str | None = None) -> str:
     """Return the configured vault root path."""
-    vault = _resolve_call_vault(cwd)
+    try:
+        vault = _resolve_call_vault(cwd)
+    except AkmAccessRefused as e:
+        return f"error: {e}"
     if vault is None:
         return "error: no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"
     return str(vault)
@@ -477,7 +540,10 @@ def wiki_read(name: str, cwd: str | None = None) -> dict:
     `name` accepts wikilink-style names ("ovpn-home"), relative paths
     ("notes/ovpn-home.md"), or absolute paths within the vault.
     """
-    vault = _resolve_call_vault(cwd)
+    try:
+        vault = _resolve_call_vault(cwd)
+    except AkmAccessRefused as e:
+        return {"error": str(e)}
     if vault is None:
         return {"error": "no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"}
     p = _resolve_note(vault, name)
@@ -507,7 +573,10 @@ def wiki_preview(name: str, cwd: str | None = None) -> dict:
     `wiki_references`. Built directly from the filesystem — no LSP
     hover involved (markdown-oxide hover wedges after a few calls).
     """
-    vault = _resolve_call_vault(cwd)
+    try:
+        vault = _resolve_call_vault(cwd)
+    except AkmAccessRefused as e:
+        return {"error": str(e)}
     if vault is None:
         return {"error": "no vault detected: run from a directory containing .moxide.toml or .obsidian, or set WIKI_ROOT"}
     target = Path(name).stem
@@ -564,7 +633,10 @@ def wiki_references(name: str, cwd: str | None = None) -> list[dict]:
     markdown `](name.md)` style links all surface here, depending on
     markdown-oxide's reference resolution.
     """
-    vault = _resolve_call_vault(cwd)
+    try:
+        vault = _resolve_call_vault(cwd)
+    except AkmAccessRefused as e:
+        return [{"error": str(e)}]
     if vault is None:
         return [{"error": f"no vault marker above {cwd or Path.cwd()}"}]
     p = _resolve_note(vault, name)
