@@ -1,15 +1,21 @@
 #!/usr/bin/env nu
-# epic — manage brainstorm epics (bd epic + idea file + claude session)
+# epic — bd (beads) housekeeping for AKM-style projects.
 # Installed as `epic` via rotz symlink: ~/.local/bin/epic → claude/epic.nu
-# Usage:
-#   epic create <name>   — create or resume; execs claude in current pane
-#   epic delete <name>   — remove bd epic + idea file
-#   epic list            — show all epics
-#   epic init            — prepare repo (strip bd auto-hooks, board/* dirs)
+#
+# Subcommands:
+#   epic init            — prepare repo (strip bd auto-hooks, pin bd config)
 #   epic export          — bd Dolt → .beads/issues-snapshot.jsonl (commit-ready)
 #   epic import          — .beads/issues-snapshot.jsonl → bd Dolt (after a git pull)
 #   epic archive create  — snapshot + prune old closed issues
 #   epic archive apply   — apply prune-list on other machines
+#
+# Scope:
+#   This tool is bd housekeeping ONLY. AKM zettel management (sp### create,
+#   delete, list, board.md updates) lives in the `akm` CLI. bd epic / task
+#   creation and closure are handled by lifecycle skills (`spec-ready` mints
+#   the bd epic + child tasks when sp### → ready; `spec-retro` closes them
+#   when sp### → done). Use this CLI for project-level bd state plumbing
+#   only: hook stripping, jsonl snapshot/restore, and archival pruning.
 #
 # State model:
 #   - Dolt = source of truth for bd state on this machine.
@@ -22,23 +28,15 @@
 def project_root [] {
     mut cur = $env.PWD
     loop {
-        if ($"($cur)/board" | path exists) or ($"($cur)/.beads" | path exists) {
+        if ($"($cur)/.beads" | path exists) {
             return $cur
         }
         let parent = ($cur | path dirname)
         if $parent == $cur {
-            error make { msg: "Not inside a project (no board/ or .beads/ found walking up from PWD)" }
+            error make { msg: "Not inside a project (no .beads/ found walking up from PWD)" }
         }
         $cur = $parent
     }
-}
-
-def idea_dir [] {
-    let dir = $"(project_root)/board/idea"
-    if not ($dir | path exists) {
-        error make { msg: $"($dir) not found — run from a project with board/idea/" }
-    }
-    $dir
 }
 
 def archive_dir [] {
@@ -47,92 +45,10 @@ def archive_dir [] {
     $dir
 }
 
-# AKM spec dir holds `sp###.md` zettels (idea → spec → ready → done lifecycle).
-# Optional: when present, `epic create` mints a companion sp zettel and back-
-# links it via the board.md index. When absent, AKM integration is silently
-# skipped — non-AKM projects keep the legacy board/ flow unchanged.
-def akm_spec_dir [] {
-    let dir = $"(project_root)/docs/notes/spec"
-    if ($dir | path exists) { $dir } else { "" }
-}
-
-def akm_board_file [] {
-    let f = $"(project_root)/docs/board.md"
-    if ($f | path exists) { $f } else { "" }
-}
-
-# Scan docs/notes/spec/sp*.md, return next zero-padded 3-digit id (e.g. "sp003").
-# Robust to gaps — picks max + 1, not count + 1.
-def next_sp_id [] {
-    let dir = (akm_spec_dir)
-    if ($dir == "") { return "" }
-    let existing = (glob $"($dir)/sp*.md")
-    let nums = ($existing | each { |f|
-        ($f | path basename | str replace -r '^sp(\d+)\.md$' '$1' | into int)
-    })
-    let next = (if ($nums | is-empty) { 1 } else { ($nums | math max) + 1 })
-    $"sp(($next) | fill -a r -c '0' -w 3)"
-}
-
-# Mint a fresh idea-stage sp zettel. Body is intentionally minimal — the
-# real problem statement is captured later by the `infinifu:idea-*` skill
-# that drives the brainstorm session. This just allocates the id and the
-# board entry so the workstream is visible from `docs/board.md ## idea`.
-def create_sp_zettel [sp_id: string, name: string, bd_id: string] {
-    let dir = (akm_spec_dir)
-    if ($dir == "") { return "" }
-    let f = $"($dir)/($sp_id).md"
-    if ($f | path exists) { return $f }
-    let today = (date now | format date "%Y-%m-%d")
-    [
-        "---"
-        "aliases:"
-        $"  - ($name)"
-        "status: idea"
-        $"created: ($today)"
-        "---"
-        "# Spec [[board]]"
-        ""
-        "## problem"
-        $"TBD — captured at idea-* skill stage for ($name)."
-        ""
-        "---"
-        ""
-        $"Epic: ($bd_id)"
-        ""
-        "Index: [[board]]"
-        ""
-    ] | str join "\n" | save -f $f
-    $f
-}
-
-# Insert `- [[sp_id|name]]` under the `## idea` section of docs/board.md.
-# Idempotent — skips if the wikilink already exists anywhere in the file.
-def add_to_board_idea [sp_id: string, name: string] {
-    let board = (akm_board_file)
-    if ($board == "") { return }
-    let content = (open --raw $board)
-    let link = $"- [[($sp_id)|($name)]]"
-    if ($content | str contains $"[[($sp_id)|") { return }
-    let lines = ($content | lines)
-    # Find "## idea" line, insert link on the next non-empty position.
-    let idea_idx = ($lines | enumerate | where { |it| $it.item == "## idea" } | get -o 0.index)
-    if ($idea_idx == null) { return }
-    let insert_at = ($idea_idx + 1)
-    let new_lines = (
-        ($lines | take $insert_at)
-        | append ""
-        | append $link
-        | append ($lines | skip $insert_at)
-    )
-    ($new_lines | str join "\n") | save -f $board
-}
-
-# Ensures the project has everything wired up for epic workflows:
+# Ensures the project's bd state is wired up for the Dolt-canonical model:
 #   - bd CLI present
 #   - .beads/ initialized
 #   - bd auto-hooks uninstalled (export/import is manual via epic export/import)
-#   - board/idea/ and board/archive/ directories exist
 # Prints only on action or error; silent when already in good shape.
 def preflight [] {
     if (which bd | is-empty) {
@@ -146,62 +62,6 @@ def preflight [] {
 
     strip_bd_hooks $root
     ensure_bd_config
-
-    for stage in ["idea" "spec" "ready" "done" "archive"] {
-        mkdir $"($root)/board/($stage)"
-    }
-
-    check_akm $root
-}
-
-# Verify AKM scaffolding (the `docs/notes/spec/` + `docs/board.md` pair that
-# `epic create` mints sp### zettels into). If `docs/` exists but the spec
-# scaffold doesn't, create the minimum so the AKM branch of epic create
-# stops no-op'ing silently. If `docs/` itself is absent (non-AKM repo),
-# print a one-line note and skip — we don't impose the PKM layout on repos
-# that have not opted in.
-def check_akm [root: string] {
-    let docs = $"($root)/docs"
-    if not ($docs | path exists) {
-        print -e "AKM: docs/ absent — epic create will skip sp### minting."
-        return
-    }
-
-    let spec_dir = $"($docs)/notes/spec"
-    if not ($spec_dir | path exists) {
-        print -e $"AKM: creating ($spec_dir)"
-        mkdir $spec_dir
-    }
-
-    let board = $"($docs)/board.md"
-    if not ($board | path exists) {
-        print -e $"AKM: creating ($board)"
-        [
-            "# Board"
-            ""
-            "Active workstreams. Specs (`sp###`) at `status` ∈ {idea, spec, ready}"
-            "grouped under section headings matching their status. Move between"
-            "sections when status flips."
-            ""
-            "## idea"
-            ""
-            "## spec"
-            ""
-            "## ready"
-            ""
-        ] | str join "\n" | save -f $board
-    } else {
-        # Existing board.md must have the three section headings or
-        # add_to_board_idea will silently no-op on epic create. Warn,
-        # don't auto-edit — the file may carry user content above/below.
-        let content = (open --raw $board)
-        let missing = (["## idea" "## spec" "## ready"]
-            | where { |h| not ($content | str contains $h) })
-        if not ($missing | is-empty) {
-            print -e $"AKM: warning — docs/board.md missing sections: ($missing | str join ', ')"
-            print -e "     epic create will not be able to insert sp### links until these exist."
-        }
-    }
 }
 
 # Pin bd config keys that enforce the Dolt-canonical / manual-export model.
@@ -276,62 +136,26 @@ def strip_bd_hooks [root: string] {
     }
 }
 
-def short_id [full_id: string] {
-    $full_id | split row "-" | last
-}
-
-def frontmatter [content: string] {
-    let lines = ($content | lines)
-    if ($lines | is-empty) or ($lines | first) != "---" {
-        return []
-    }
-    let rest = ($lines | skip 1)
-    let end = ($rest | enumerate | where item == "---" | get -o 0.index)
-    if ($end | is-empty) { return [] }
-    $rest | take $end
-}
-
-def read_field [content: string, key: string] {
-    let fm = (frontmatter $content)
-    let matches = ($fm | where { |l| $l | str starts-with $"($key):" })
-    if ($matches | is-empty) {
-        ""
-    } else {
-        $matches | first | str replace $"($key):" "" | str trim
-    }
-}
-
-def read_meta [file: string] {
-    let content = (open --raw $file)
-    {
-        session_id: (read_field $content "claude_session_id")
-        bd_id: (read_field $content "bd_epic_id")
-        sp_id: (read_field $content "sp_id")
-    }
-}
-
 def main [] {
-    print "Usage: epic <init|create|delete|list|export|import|archive> [args...]"
-    print "  create <name>   — create or resume epic; execs claude in current pane"
-    print "  delete <name>   — remove bd epic + idea file"
-    print "  list            — show all epics"
-    print "  init            — prepare repo: strip bd auto-hooks, create board/* dirs"
+    print "Usage: epic <init|export|import|archive> [args...]"
+    print "  init            — prepare repo: strip bd auto-hooks, pin bd config"
     print "  export          — bd Dolt → .beads/issues-snapshot.jsonl (commit-ready snapshot)"
     print "  import          — .beads/issues-snapshot.jsonl → bd Dolt (after a git pull)"
     print "  archive create  — snapshot + prune closed issues older than cutoff"
     print "  archive apply   — apply cumulative prune-list to local bd (for other machines)"
+    print ""
+    print "Note: sp### / board.md / lifecycle minting is `akm create` and the lifecycle skills."
 }
 
 def "main init" [] {
     preflight
-    print -e "Repo ready: bd auto-hooks stripped, board/{idea,spec,ready,done,archive}/ present."
+    print -e "Repo ready: bd auto-hooks stripped, bd config pinned."
     print -e "Sync model: bd Dolt = canonical. Use `epic export` to refresh"
     print -e ".beads/issues-snapshot.jsonl before committing, `epic import` after a pull."
 }
 
 # Write current Dolt state to .beads/issues-snapshot.jsonl. Run before `git commit`
-# when you want the jsonl snapshot to capture a status change. Mirrors what
-# `epic archive create` does at line 372 — same export path, no prune.
+# when you want the jsonl snapshot to capture a status change.
 def "main export" [] {
     cd (project_root)
     ^bd export -o .beads/issues-snapshot.jsonl
@@ -361,200 +185,6 @@ def "main import" [
     }
     ^bd import $jsonl
     print -e $"Imported ($jsonl) → bd Dolt"
-}
-
-def "main create" [
-    name: string
-    --no-launch              # skip `exec claude`; just create/resume metadata and print resume cmd
-    --profile: string = ""   # claude account: personal | work (default: current $CLAUDE_CONFIG_DIR)
-] {
-    if not ($name =~ '^[a-zA-Z0-9_-]+$') {
-        error make { msg: "Name must contain only alphanumeric characters, dashes, and underscores" }
-    }
-
-    let profile_dir = match $profile {
-        "" => ""
-        "personal" => $"($env.HOME)/.claude-personal"
-        "work" => $"($env.HOME)/.claude-work"
-        _ => { error make { msg: $"--profile must be 'personal' or 'work', got: ($profile)" } }
-    }
-
-    preflight
-
-    let dir = (idea_dir)
-    cd (project_root)
-
-    let existing = (glob $"($dir)/($name).*.md")
-
-    let meta = if ($existing | is-empty) {
-        let full_id = (^bd q $name --type epic --priority 4 | str trim)
-        let short = (short_id $full_id)
-        let session_id = (random uuid)
-        let idea_file = $"($dir)/($name).($short).md"
-        let now = (date now | format date "%Y-%m-%d %H:%M")
-
-        # Mint AKM spec zettel + board.md index entry when docs/notes/spec/
-        # exists. Skipped silently on non-AKM projects so this stays a no-op
-        # for repos that haven't adopted the PKM scaffolding.
-        let sp_id = (next_sp_id)
-        if ($sp_id != "") {
-            create_sp_zettel $sp_id $name $full_id
-            add_to_board_idea $sp_id $name
-        }
-
-        let fm_base = [
-            "---"
-            $"idea: ($name)"
-            $"bd_epic_id: ($full_id)"
-            $"claude_session_id: ($session_id)"
-            $"created_at: ($now)"
-        ]
-        let fm = (if ($sp_id != "") {
-            $fm_base | append $"sp_id: ($sp_id)"
-        } else { $fm_base })
-        ($fm | append "---" | append "" | str join "\n") | save -f $idea_file
-
-        print -e $"Created ($idea_file)"
-        print -e $"BD epic:  ($full_id)"
-        if ($sp_id != "") {
-            print -e $"AKM spec: ($sp_id) \(at docs/notes/spec/($sp_id).md, linked from docs/board.md ## idea\)"
-        }
-
-        { session_id: $session_id, short: $short, resume: false, idea_file: $idea_file, bd_id: $full_id }
-    } else {
-        let idea_file = ($existing | first)
-        let m = (read_meta $idea_file)
-        let short = (short_id $m.bd_id)
-        print -e $"Resuming ($idea_file) — ($m.bd_id)"
-        { session_id: $m.session_id, short: $short, resume: true, idea_file: $idea_file, bd_id: $m.bd_id }
-    }
-
-    let label = $"($name).($meta.short)"
-
-    let env_prefix = if ($profile_dir == "") { "" } else { $"CLAUDE_CONFIG_DIR=($profile_dir) " }
-
-    let sp_id = (read_meta $meta.idea_file | get sp_id)
-
-    if $no_launch {
-        print -e ""
-        print -e $"Label:    ($label)"
-        print -e $"Idea:     ($meta.idea_file)"
-        print -e $"BD epic:  ($meta.bd_id)"
-        if ($sp_id != "") { print -e $"AKM spec: ($sp_id)" }
-        if ($profile_dir != "") { print -e $"Profile:  ($profile) → ($profile_dir)" }
-        print -e ""
-        if $meta.resume {
-            print -e $"Resume in a terminal pane:  ($env_prefix)claude --resume ($meta.session_id) -n ($label)"
-        } else {
-            print -e $"Start in a terminal pane:   ($env_prefix)claude -n ($label) --session-id ($meta.session_id)"
-        }
-        return
-    }
-
-    if ($profile_dir != "") {
-        $env.CLAUDE_CONFIG_DIR = $profile_dir
-    }
-
-    if $meta.resume {
-        exec claude --resume $meta.session_id -n $label
-    } else {
-        exec claude -n $label --session-id $meta.session_id
-    }
-}
-
-def "main delete" [
-    name: string
-    --force  # skip confirmation
-] {
-    let dir = (idea_dir)
-    let existing = (glob $"($dir)/($name).*.md")
-    if ($existing | is-empty) {
-        error make { msg: $"No idea file matching ($name).*.md" }
-    }
-    let idea_file = ($existing | first)
-    let m = (read_meta $idea_file)
-
-    let sp_file = (if ($m.sp_id != "") {
-        let f = $"(project_root)/docs/notes/spec/($m.sp_id).md"
-        if ($f | path exists) { $f } else { "" }
-    } else { "" })
-
-    if not $force {
-        print -e $"Will delete:"
-        print -e $"  bd epic: ($m.bd_id)"
-        print -e $"  file:    ($idea_file)"
-        if ($sp_file != "") { print -e $"  AKM:     ($sp_file) + board.md entry" }
-        let ans = (input "Proceed? [y/N]: ")
-        if ($ans | str downcase) != "y" {
-            print -e "Aborted"
-            return
-        }
-    }
-
-    ^bd delete $m.bd_id --force
-    rm $idea_file
-    if ($sp_file != "") {
-        rm $sp_file
-        # Strip the board.md wikilink line; leave section structure intact.
-        let board = (akm_board_file)
-        if ($board != "") {
-            let pat = $"[[($m.sp_id)|"
-            let kept = (open --raw $board | lines | where { |l| not ($l | str contains $pat) })
-            ($kept | str join "\n") | save -f $board
-        }
-    }
-    print -e $"Deleted ($m.bd_id) and ($idea_file)"
-    if ($sp_file != "") { print -e $"Deleted ($sp_file) and board.md entry" }
-}
-
-def "main list" [] {
-    let board = $"(project_root)/board"
-    let stages = ["idea" "spec" "ready" "done"]
-
-    let files = ($stages | each { |stage|
-        let d = $"($board)/($stage)"
-        if ($d | path exists) {
-            let fs = (glob $"($d)/*.md")
-            $fs | each { |f| { file: $f, stage: $stage } }
-        } else { [] }
-    } | flatten)
-
-    if ($files | is-empty) {
-        print "No epics"
-        return
-    }
-
-    let bd_data = try {
-        ^bd list --json --type epic --all | from json
-    } catch { [] }
-
-    let running = try {
-        ^tmux list-panes -a -F '#{pane_title}'
-        | lines
-        | each { |t| $t | str replace -r '^. ' '' }
-        | uniq
-    } catch { [] }
-
-    $files | each { |entry|
-        let content = (open --raw $entry.file)
-        let bd_id = (read_field $content "bd_epic_id")
-        if ($bd_id | is-empty) { return null }
-        let name = (read_field $content "idea")
-        let match = ($bd_data | where id == $bd_id)
-        let title = (if ($match | is-empty) { "-" } else { $match | first | get title })
-        let bd_status = (if ($match | is-empty) { "-" } else { $match | first | get status })
-        let label = (if ($bd_id | is-empty) { "" } else { $"($name).(short_id $bd_id)" })
-        let tmux_running = (if ($label != "" and ($label in $running)) { "running" } else { "" })
-
-        {
-            name: $name
-            bd_id: $bd_id
-            title: $title
-            bd: $bd_status
-            stage: $entry.stage
-            tmux: $tmux_running
-        }
-    }
 }
 
 def "main archive create" [

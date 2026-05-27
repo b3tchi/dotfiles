@@ -1,17 +1,17 @@
 ---
-description: Create or resume a brainstorm epic (bd epic + idea file + claude session metadata)
-argument-hint: <name> [--profile personal|work]
-allowed-tools: Bash(epic create:*)
+description: Mint a brainstorm spec (sp### zettel + board.md entry + claude session id)
+argument-hint: <name>
+allowed-tools: Bash(akm create:*)
 ---
 
-Create or resume the brainstorm epic from `$ARGUMENTS`.
+Create the brainstorm sp### zettel from `$ARGUMENTS`.
 
-Pass an optional `--profile personal` or `--profile work` to control which Claude account (`$CLAUDE_CONFIG_DIR`) the resume command will target. Without a profile, the current account is used.
+This writes `docs/notes/spec/sp###.md` at `status: idea` and inserts a wikilink under `docs/board.md ## idea`. A claude session id is minted into the zettel's frontmatter so the brainstorm can be resumed in a fresh pane via `claude --session-id <id>`.
 
-This writes the bd epic and `board/idea/<name>.<short>.md`, but does **not** launch a nested `claude` session — that has to happen from a terminal/tmux pane outside this session. The script prints the exact `claude --resume` / `claude --session-id` invocation, including a `CLAUDE_CONFIG_DIR=...` prefix when a profile is set.
+bd epic / task creation happens later in the lifecycle (`spec-ready` skill when the spec is ready for execution) — not here. Profile handling (`CLAUDE_CONFIG_DIR=...`) is left to the user; prefix it manually when copying the resume command.
 
-!`epic create $ARGUMENTS --no-launch`
+!`akm create $ARGUMENTS --session`
 
 After running:
-- Confirm in one line which epic was created or resumed (name, bd id, profile if any).
-- Surface the full `[CLAUDE_CONFIG_DIR=...] claude ... -n <label>` invocation so the user can copy-paste it into a fresh tmux pane.
+- Confirm in one line which sp### was minted (id, name).
+- Surface the full `claude --session-id <id> -n <name>.<sp###>` invocation so the user can copy-paste it into a fresh tmux pane.
