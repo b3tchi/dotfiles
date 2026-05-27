@@ -848,7 +848,7 @@ def "main adr list" [--json] {
 # Mint a new ADR. Body comes from stdin (the full markdown after H1 and
 # before the Index footer — the skill composes `## title / ## context /
 # ## decision / ## consequences` sections). CLI handles id allocation,
-# frontmatter, H1 categorization, footer, and staging on main.
+# frontmatter, H1 categorization, footer, and staging on the default branch.
 def "main adr write" [
   name: string             # alphanumeric / dash / underscore
   --category: string       # required: cat### id (validated against on-disk cat zettels)
@@ -948,13 +948,18 @@ def "main adr write" [
   ]
 
   ($parts | append $body_block | append $footer | str join "\n") | save -f $f
-  print -e $"Created ($f)"
 
-  # Stage on main — ADRs are commit-on-creation per the AKM commit policy.
-  # The actual commit is left to the skill orchestrator so multi-file
-  # changes (ADR + product.md update) can land as one commit.
+  # Stage on the default branch — ADRs are commit-on-creation per the
+  # AKM commit policy. The actual commit is left to the skill
+  # orchestrator so multi-file changes (ADR + product.md update) can
+  # land as one commit.
   ^git -C $root add $"docs/notes/($id).md" | ignore
-  print -e $"Staged docs/notes/($id).md on main"
+
+  # Print the allocated id as a structured first line so skills can
+  # capture it with a single split instead of regex-parsing the path.
+  print $"Id: ($id)"
+  print -e $"Path: ($f)"
+  print -e $"Staged docs/notes/($id).md"
 }
 
 # Run every available diagnostic in sequence. Currently the cat-collision

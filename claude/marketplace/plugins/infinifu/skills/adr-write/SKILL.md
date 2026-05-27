@@ -97,7 +97,7 @@ to overturn a decision.
 </when_to_use>
 
 <workspace_resolution>
-ADRs are shared product knowledge — they live on **main**, even from a feature-branch worktree. All zettel mutations go through the `akm adr` CLI, which enforces the strict main-worktree rule, allocates ids, composes frontmatter + H1 (`[[cat###]] [[product]]`) + footer, and stages the new file on main. The skill no longer resolves `AKM_ROOT` by hand or formats the markdown itself.
+ADRs are shared product knowledge — they live on the default branch (`main` or `master`, whichever the host repo uses), even from a feature-branch worktree. All zettel mutations go through the `akm adr` CLI, which enforces the strict main-worktree rule, allocates ids, composes frontmatter + H1 (`# ADR [[cat###]] [[product]]`) + footer, and stages the new file on the default branch. The skill no longer resolves `AKM_ROOT` by hand or formats the markdown itself.
 
 ```bash
 # Read an existing ADR (for supersession context):
@@ -107,14 +107,26 @@ akm adr read adr0007
 akm adr list --json | from json | where status == 'Accepted'
 
 # Mint a fresh ADR. Body comes from stdin; CLI does id allocation,
-# frontmatter, H1, footer, and `git -C $AKM_ROOT add`.
+# frontmatter, H1, footer, and `git -C $AKM_ROOT add`. The default
+# `--status` is `Proposed`; pass `--status Accepted` when the decision
+# is already settled and you're recording it after the fact.
 printf "<composed body>" | akm adr write <name> \
-    --category <cat###> --title "<title>" --status Proposed --stdin
+    --category <cat###> --title "<title>" [--status Accepted] --stdin
 ```
+
+CLI output is structured for easy capture by the skill:
+
+```
+Id: adr0007
+Path: /…/docs/notes/adr0007.md
+Staged docs/notes/adr0007.md
+```
+
+Capture the id with `head -1 | str replace 'Id: ' ''` (or split on `: `).
 
 If `akm` refuses with exit 2 (cwd not on the main worktree), surface its stderr and abort — never silently land an ADR on the feature branch.
 
-ADRs are immutable stable artifacts: this writer **commits on creation** on main. The CLI stages the ADR file; the skill is responsible for adding the hub edit (`docs/product.md`) to the same commit so a single `git -C "$(akm root)" commit -m "feat(akm): add adr<NNNN> <title>"` lands the pair atomically. For supersession the same commit also includes the patched prior ADR. See the per-stage commit table in `docs/notes/akm.md#workspace-resolution`.
+ADRs are immutable stable artifacts: this writer **commits on creation** on the default branch. The CLI stages the ADR file; the skill is responsible for adding the hub edit (`docs/product.md`) to the same commit so a single `git -C "$(akm root)" commit -m "feat(akm): add adr<NNNN> <title>"` lands the pair atomically. For supersession the same commit also includes the patched prior ADR. See the per-stage commit table in `docs/notes/akm.md#workspace-resolution`.
 </workspace_resolution>
 
 <the_process>
@@ -129,7 +141,7 @@ digraph adr_create {
     "akm adr write --stdin" [shape=box];
     "Flip prior to Superseded" [shape=box];
     "Update product.md hub" [shape=box];
-    "Commit on main" [shape=box];
+    "Commit on default branch" [shape=box];
     "Confirm with user" [shape=doublecircle];
 
     "Supersession?" -> "akm adr read prior" [label="yes"];
@@ -141,8 +153,8 @@ digraph adr_create {
     "akm adr write --stdin" -> "Flip prior to Superseded" [label="supersession"];
     "akm adr write --stdin" -> "Update product.md hub" [label="fresh"];
     "Flip prior to Superseded" -> "Update product.md hub";
-    "Update product.md hub" -> "Commit on main";
-    "Commit on main" -> "Confirm with user";
+    "Update product.md hub" -> "Commit on default branch";
+    "Commit on default branch" -> "Confirm with user";
 }
 ```
 
@@ -156,17 +168,17 @@ digraph adr_create {
      | akm adr write <name> \
          --category <cat###> \
          --title "<title>" \
-         --status Proposed \
+         [--status Accepted] \
          --stdin
    ```
-   The CLI allocates the next `adr####` id, composes the file, and stages it via `git -C "$(akm root)" add docs/notes/adr<NNNN>.md`. Capture the printed id from the CLI's output for the supersession patch + hub update + commit below.
+   Status defaults to `Proposed`; pass `--status Accepted` when recording an already-settled decision. The CLI allocates the next `adr####` id, composes the file, and stages it. It prints three lines (`Id:`, `Path:`, `Staged …`); capture the id from the first line for the supersession patch + hub update + commit below.
 6. **On supersession**, patch the prior ADR. `akm adr read` doesn't write, so this step still edits the file directly under the AKM root: flip frontmatter `status: Accepted` → `Superseded` and append a `## superseded_by` body section with `[[adr<new-id>|<new-title>]]`. Stage the edit:
    ```bash
    git -C "$(akm root)" add docs/notes/adr<old>.md
    ```
    Do **not** edit the prior ADR's `## title` / `## context` / `## decision` / `## consequences`.
 7. **Update `docs/product.md`** (the hub): append `[[adr####|<title>]]` under the matching category H3 inside `## Architecture Decision Records`. Add the category subheading if it doesn't yet exist. Stage the edit (`git -C "$(akm root)" add docs/product.md`). If the hub doesn't exist, skip and tell the user.
-8. **Commit on main.** ADRs are stable, immutable artifacts — the CLI staged the new ADR; this step folds the hub update (and the patched prior ADR on supersession) into the same commit:
+8. **Commit on the default branch.** ADRs are stable, immutable artifacts — the CLI staged the new ADR; this step folds the hub update (and the patched prior ADR on supersession) into the same commit:
    ```bash
    # Fresh ADR
    git -C "$(akm root)" commit -m "feat(akm): add adr<NNNN> <title>"
@@ -174,7 +186,7 @@ digraph adr_create {
    # Supersession (everything already staged across steps 5-7)
    git -C "$(akm root)" commit -m "feat(akm): supersede adr<old> with adr<new> <title>"
    ```
-9. **Confirm with the user.** Show id + absolute path, decision one-liner, category, status, supersession info (if any), whether the hub was updated, and commit sha on main. Ask once: "Anything to revise?" — but push back on edits to an `Accepted` ADR's content.
+9. **Confirm with the user.** Show id + absolute path, decision one-liner, category, status, supersession info (if any), whether the hub was updated, and commit sha on the default branch. Ask once: "Anything to revise?" — but push back on edits to an `Accepted` ADR's content.
 
 For schema details (exact frontmatter shape, lifecycle status semantics, superseded_by invariants) see the `<schema>` block above — this skill owns it. For worked examples (fresh ADR markdown, supersession patch, good vs bad consequences), load `references/examples.md`.
 
@@ -210,7 +222,7 @@ Before reporting the ADR written:
 - [ ] `Index: [[product]]` footer after a `---` rule
 - [ ] Hub annotated in `$AKM_ROOT/docs/product.md` under the matching category H3 (or skipped with note if hub missing)
 - [ ] On supersession: prior ADR has `status: Superseded` + `## superseded_by` appended; its `## title` / `## context` / `## decision` / `## consequences` are untouched
-- [ ] Single commit landed on main covering the new ADR + hub diff (+ the old ADR's patch when superseding) — verify with `git -C "$AKM_ROOT" log -1`
+- [ ] Single commit landed on the default branch covering the new ADR + hub diff (+ the old ADR's patch when superseding) — verify with `git -C "$(akm root)" log -1`
 - [ ] Confirmation surfaces the absolute `$AKM_ROOT/docs/notes/adr<NNNN>.md` path so the user sees where it landed from a worktree
 
 </verification_checklist>
