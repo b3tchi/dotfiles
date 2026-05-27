@@ -794,6 +794,158 @@ def "main cat" [] {
   print "  akm cat check        compare cat### against canonical 8-category taxonomy"
 }
 
+# ----------------------------------------------------------------------------
+# akm adr — Architectural Decision Records (guinea pig for the per-type API)
+#
+# Each typed zettel namespace exposes the same shape: `akm <type> read`,
+# `akm <type> write` (with body from stdin), and `akm <type> list`. adr is
+# the first type to receive its own namespace; once the pattern proves out
+# the other six types (us, pn, ft, im, sp, cat) follow.
+#
+# Why a per-type API: skills currently compose the full markdown body and
+# save it via raw `$AKM_ROOT/docs/notes/<id>.md` writes. That means the
+# strict-mode gate, id allocation, frontmatter shape, and staging policy
+# live in every *-write skill. Centralizing into the CLI removes that
+# duplication and gives one audit point for all AKM mutations.
+# ----------------------------------------------------------------------------
+
+def "main adr" [] {
+  print "akm adr — Architectural Decision Records"
+  print ""
+  print "Subcommands:"
+  print "  akm adr read <id>      print raw markdown of one ADR"
+  print "  akm adr list           list ADRs (`--json` for pipeline)"
+  print "  akm adr write <name>   mint a new ADR"
+  print "    --category <cat###>  required — H1 category link"
+  print "    --title <text>       optional — title (defaults to <name>)"
+  print "    --status <s>         optional — default Proposed"
+  print "                          (Proposed | Accepted | Deprecated | Superseded)"
+  print "    --stdin              read body markdown from stdin"
+  print "                          (otherwise mints stub with empty sections)"
+  print ""
+  print "Notes:"
+  print "  - ADRs are append-only; never edit a Proposed/Accepted body in place."
+  print "  - Supersession is not yet implemented in the CLI — use adr-write skill"
+  print "    for that flow (it will move into `akm adr supersede` once the pattern"
+  print "    proves out)."
+}
+
+def "main adr read" [id: string] {
+  if not ($id =~ '^adr\d{4}$') {
+    error make { msg: $"expected adr#### form (e.g. adr0007), got `($id)`" }
+  }
+  main read $id
+}
+
+def "main adr list" [--json] {
+  if $json {
+    main list adr --json
+  } else {
+    main list adr
+  }
+}
+
+# Mint a new ADR. Body comes from stdin (the full markdown after H1 and
+# before the Index footer — the skill composes `## title / ## context /
+# ## decision / ## consequences` sections). CLI handles id allocation,
+# frontmatter, H1 categorization, footer, and staging on main.
+def "main adr write" [
+  name: string             # alphanumeric / dash / underscore
+  --category: string       # required: cat### id (validated against on-disk cat zettels)
+  --title: string = ""     # default: <name> with dashes-to-spaces, title-cased
+  --status: string = "Proposed"  # Proposed | Accepted | Deprecated | Superseded
+  --stdin                 # read body from stdin (default: mint stub with empty sections)
+] {
+  if not ($name =~ '^[a-zA-Z0-9_-]+$') {
+    error make { msg: "name must contain only alphanumeric characters, dashes, and underscores" }
+  }
+  if ($category | is-empty) {
+    error make { msg: "--category is required (e.g. --category cat003)" }
+  }
+  if not ($category =~ '^cat\d{3}$') {
+    error make { msg: $"--category must be cat### form, got `($category)`" }
+  }
+  if ($status not-in ["Proposed" "Accepted" "Deprecated" "Superseded"]) {
+    error make { msg: $"--status must be one of Proposed | Accepted | Deprecated | Superseded, got `($status)`" }
+  }
+  let root = (require_akm_root)
+
+  # Verify category exists on disk — refuse to mint an ADR pointing at a
+  # dangling cat wikilink, since the H1 link would 404 in markdown-oxide.
+  let cat_file = $"($root)/docs/notes/($category).md"
+  if not ($cat_file | path exists) {
+    error make { msg: $"category ($category) not found at ($cat_file) — run `akm list cat` to see existing categories" }
+  }
+
+  # Upsert short-circuit — if any zettel already matches the alias or id
+  # form, return that path. Mirrors `akm write` semantics so callers can
+  # retry without pre-existence checks.
+  let dupe = (find_zettel $root $name)
+  if ($dupe != "") {
+    print -e $"already exists with this alias: ($dupe)"
+    return
+  }
+
+  # Pull body from stdin only when --stdin is set. Nu's `$in` doesn't
+  # auto-capture script-invocation stdin (it's a pipeline construct);
+  # we explicitly invoke `^cat` so the read is opt-in and never blocks
+  # on a TTY when the caller forgets the flag. Skills that compose body
+  # markdown will pipe via `printf ... | akm adr write ... --stdin`.
+  let body = (if $stdin { (^cat | str trim) } else { "" })
+
+  let id = (next_id $root "adr")
+  let f = $"($root)/docs/notes/($id).md"
+  let today = (date now | format date "%Y-%m-%d")
+
+  let final_title = (if ($title | is-empty) {
+    $name | str replace -a "-" " "
+  } else {
+    $title
+  })
+
+  let parts = ([
+    "---"
+    "aliases:"
+    $"  - ($name)"
+    $"status: ($status)"
+    $"created: ($today)"
+    "---"
+    ""
+    $"# ($final_title) [[($category)]] [[product]]"
+    ""
+    "## title"
+    $final_title
+    ""
+  ])
+  let body_block = (if ($body == "") {
+    [
+      "## context"
+      ""
+      "## decision"
+      ""
+      "## consequences"
+      ""
+    ]
+  } else {
+    [$body ""]
+  })
+  let footer = [
+    "---"
+    ""
+    "Index: [[product]]"
+    ""
+  ]
+
+  ($parts | append $body_block | append $footer | str join "\n") | save -f $f
+  print -e $"Created ($f)"
+
+  # Stage on main — ADRs are commit-on-creation per the AKM commit policy.
+  # The actual commit is left to the skill orchestrator so multi-file
+  # changes (ADR + product.md update) can land as one commit.
+  ^git -C $root add $"docs/notes/($id).md" | ignore
+  print -e $"Staged docs/notes/($id).md on main"
+}
+
 # Run every available diagnostic in sequence. Currently the cat-collision
 # check is the only one implemented; future passes (board.md structure,
 # dangling wikilinks, status-vs-section drift) will hook in here so a
@@ -1075,6 +1227,7 @@ def main [] {
   print "  akm list [type]              show zettels grouped by type+status"
   print "  akm check                    run all project-health diagnostics"
   print "  akm cat check                verify cat### against canonical taxonomy"
+  print "  akm adr <subcmd>             ADR namespace (read / write / list)"
   print "  akm root                     print AKM workspace root (refuses on feature wt)"
   print ""
   print "bd housekeeping (any worktree):"
