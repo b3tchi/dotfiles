@@ -13,20 +13,37 @@ vim.o.expandtab = false
 
 -- Clipboard provider — picks based on what's actually available, so the same
 -- config works on WSL/Sway (Wayland), Manjaro/i3 (X11), and Termux:X11.
--- WSL note: SSH sessions strip WAYLAND_DISPLAY/XDG_RUNTIME_DIR but the socket
--- at /run/user/$UID/wayland-0 is still reachable, so we detect by socket and
--- inject env when calling wl-copy/wl-paste. The Wayland↔Win sync daemons
--- (see sway/scripts/clipboard-to-win.nu) handle propagation to Windows.
 local uid = tostring(vim.uv.getuid())
 local wl_sock = "/run/user/" .. uid .. "/wayland-0"
 local has_wayland_env = (os.getenv("WAYLAND_DISPLAY") ~= nil)
 local has_wayland = (vim.uv.fs_stat(wl_sock) ~= nil) or has_wayland_env
+local is_ssh = (os.getenv("SSH_TTY") ~= nil) or (os.getenv("SSH_CONNECTION") ~= nil)
 
--- Only override clipboard provider when WAYLAND_DISPLAY is missing (SSH session
--- on a Wayland host). With env present, nvim's built-in auto-detection picks
--- the right socket — forcing wayland-0 here would hit the WSLg compositor
--- instead of the active sway/Hyprland one (different clipboards).
-if not has_wayland_env and has_wayland and vim.fn.executable("wl-copy") == 1 then
+-- Over SSH the clipboard must reach the terminal we're actually sitting at
+-- (foot, which owns the real sway/Windows clipboard + the browser) — NOT the
+-- remote host's own wayland/X clipboard. A wl-copy on the remote writes the
+-- REMOTE clipboard, which is invisible to the local browser (the sway→sway
+-- "yank in nvim, Ctrl+V in firefox does nothing" bug). OSC 52 rides back up
+-- through tmux (set-clipboard on + allow-passthrough all, configured on both
+-- ends) to foot, which sets the local clipboard. Correct for both a remote
+-- workstation and localhost-ssh into this box — and sidesteps the old
+-- wayland-0-vs-wayland-1 ambiguity entirely.
+if is_ssh then
+	local osc52 = require("vim.ui.clipboard.osc52")
+	vim.g.clipboard = {
+		name = "OSC52",
+		copy = {
+			["+"] = osc52.copy("+"),
+			["*"] = osc52.copy("*"),
+		},
+		paste = {
+			["+"] = osc52.paste("+"),
+			["*"] = osc52.paste("*"),
+		},
+	}
+-- Local session that lost WAYLAND_DISPLAY but still has a reachable socket
+-- (rare): talk to the wayland-0 compositor directly.
+elseif not has_wayland_env and has_wayland and vim.fn.executable("wl-copy") == 1 then
 	local env_prefix = {
 		"env",
 		"WAYLAND_DISPLAY=wayland-0",
