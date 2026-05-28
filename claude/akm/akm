@@ -791,7 +791,106 @@ def "main cat" [] {
   print "akm cat — category taxonomy operations"
   print ""
   print "Subcommands:"
-  print "  akm cat check        compare cat### against canonical 8-category taxonomy"
+  print "  akm cat read <id>     print raw markdown of one category"
+  print "  akm cat list          list categories (`--json` for pipeline)"
+  print "  akm cat write <name>  mint a new category"
+  print "    --stdin             read body markdown from stdin"
+  print "                          (otherwise mints stub with empty sections)"
+  print "  akm cat check         compare cat### against canonical 8-category taxonomy"
+  print ""
+  print "Notes:"
+  print "  - Categories are tagless (`# Category [[product]]`, no `[[cat###]]`)"
+  print "    and append-only at `status: stable` — no --category/--status/--title."
+  print "  - Body sections: `## name / ## summary / ## scope_notes`."
+}
+
+def "main cat read" [id: string] {
+  if not ($id =~ '^cat\d{3}$') {
+    error make { msg: $"expected cat### form (e.g. cat003), got `($id)`" }
+  }
+  main read $id
+}
+
+def "main cat list" [--json] {
+  if $json {
+    main list cat --json
+  } else {
+    main list cat
+  }
+}
+
+# Mint a new category. Categories are the taxonomy layer itself: tagless
+# H1 (`# Category [[product]]`, no `[[cat###]]`), always `status: stable`
+# (append-only, no draft/superseded lifecycle), and no title separate from
+# the `## name` section — so this drops adr's --category/--status/--title
+# flags. Body comes from stdin (the skill composes `## name / ## summary /
+# ## scope_notes`); CLI handles id allocation, frontmatter, H1, footer, and
+# staging on the default branch.
+def "main cat write" [
+  name: string             # alphanumeric / dash / underscore — first alias
+  --stdin                 # read body from stdin (default: mint stub with empty sections)
+] {
+  if not ($name =~ '^[a-zA-Z0-9_-]+$') {
+    error make { msg: "name must contain only alphanumeric characters, dashes, and underscores" }
+  }
+  let root = (require_akm_root)
+
+  # Upsert short-circuit — mirror `akm adr write` / `akm write` semantics so
+  # callers can retry without pre-existence checks.
+  let dupe = (find_zettel $root $name)
+  if ($dupe != "") {
+    print -e $"already exists with this alias: ($dupe)"
+    return
+  }
+
+  # Pull body from stdin only when --stdin is set (see `akm adr write` for
+  # why the read is opt-in and never blocks on a TTY).
+  let body = (if $stdin { (^cat | str trim) } else { "" })
+
+  let id = (next_id $root "cat")
+  let f = $"($root)/docs/notes/($id).md"
+  let today = (date now | format date "%Y-%m-%d")
+
+  # Tagless H1 — categories are the taxonomy layer and never carry a
+  # `[[cat###]]` link of their own. Status is always `stable` from birth.
+  let parts = ([
+    "---"
+    "aliases:"
+    $"  - ($name)"
+    "status: stable"
+    $"created: ($today)"
+    "---"
+    ""
+    "# Category [[product]]"
+    ""
+  ])
+  let body_block = (if ($body == "") {
+    [
+      "## name"
+      $name
+      ""
+      "## summary"
+      ""
+      "## scope_notes"
+      ""
+    ]
+  } else {
+    [$body ""]
+  })
+  let footer = [
+    "---"
+    ""
+    "Index: [[product]]"
+    ""
+  ]
+
+  ($parts | append $body_block | append $footer | str join "\n") | save -f $f
+
+  ^git -C $root add $"docs/notes/($id).md" | ignore
+
+  print $"Id: ($id)"
+  print -e $"Path: ($f)"
+  print -e $"Staged docs/notes/($id).md"
 }
 
 # ----------------------------------------------------------------------------

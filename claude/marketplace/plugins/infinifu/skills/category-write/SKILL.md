@@ -18,13 +18,14 @@ MEDIUM FREEDOM — the schema and the duplicate / sanity / rename-audit gates ar
 |------|--------|--------|
 | 1 | Resolve `AKM_ROOT="$(akm-root)"`; bootstrap `$AKM_ROOT/docs/notes/` if missing | workspace ready |
 | 2 | Duplicate check — scan existing `cat###` aliases under `$AKM_ROOT` | go / stop-and-point |
-| 3 | Gather name (kebab noun phrase) + one-line summary | two strings |
+| 3 | Gather name (kebab noun phrase) + summary + scope_notes | three strings |
 | 4 | Sanity-check bucket scope (is this really an ADR?) | go / push-back |
-| 5 | Generate id `cat###` (max existing + 1, zero-padded) | new id |
-| 6 | Write zettel per `<schema>` block below | `$AKM_ROOT/docs/notes/cat###.md` on disk |
-| 7 | Append `### [[cat###\|<name>]]` heading under product.md `## Architecture Decision Records` | hub linked |
-| 8 | Commit on main (`git -C "$AKM_ROOT" commit`) | stable artifact landed |
-| 9 | Confirm with rename-cost reminder | user signs off |
+| 5 | Pipe composed body to `akm cat write <name> --stdin`; capture `Id: cat###` | `$AKM_ROOT/docs/notes/cat###.md` staged, id captured |
+| 6 | Append `### [[cat###\|<name>]]` heading under product.md `## Architecture Decision Records` | hub linked |
+| 7 | Commit on main (`git -C "$AKM_ROOT" commit`) | stable artifact landed |
+| 8 | Confirm with rename-cost reminder | user signs off |
+
+**Id allocation, frontmatter, H1, footer, and staging are the CLI's job** (`akm cat write`); this skill composes only the body sections and handles the product.md hub edit + commit.
 
 **Schema source of truth:** this skill (`<schema>` block below); styling via `infinifu:zettel-write`.
 </quick_reference>
@@ -50,6 +51,9 @@ created: YYYY-MM-DD
 
 ## summary
 <one-liner: what kinds of decisions belong here>
+
+## scope_notes
+<what is in vs out of this bucket; near-neighbors it must not absorb>
 
 ---
 
@@ -110,11 +114,10 @@ digraph category_create {
     "Bootstrap docs/notes/" [shape=box];
     "Check for duplicate" [shape=diamond];
     "Stop — point to existing" [shape=box];
-    "Gather name + summary" [shape=box];
+    "Gather name + summary + scope_notes" [shape=box];
     "Sanity-check bucket scope" [shape=diamond];
     "Push back on too-narrow" [shape=box];
-    "Generate id (cat###)" [shape=box];
-    "Write cat###.md zettel" [shape=box];
+    "akm cat write --stdin (allocates id, stages)" [shape=box];
     "Update product.md hub" [shape=box];
     "Commit on main" [shape=box];
     "Confirm with user" [shape=doublecircle];
@@ -124,13 +127,12 @@ digraph category_create {
     "Storage exists?" -> "Check for duplicate" [label="yes"];
     "Bootstrap docs/notes/" -> "Check for duplicate";
     "Check for duplicate" -> "Stop — point to existing" [label="match"];
-    "Check for duplicate" -> "Gather name + summary" [label="none"];
-    "Gather name + summary" -> "Sanity-check bucket scope";
+    "Check for duplicate" -> "Gather name + summary + scope_notes" [label="none"];
+    "Gather name + summary + scope_notes" -> "Sanity-check bucket scope";
     "Sanity-check bucket scope" -> "Push back on too-narrow" [label="too narrow"];
-    "Push back on too-narrow" -> "Gather name + summary";
-    "Sanity-check bucket scope" -> "Generate id (cat###)" [label="ok"];
-    "Generate id (cat###)" -> "Write cat###.md zettel";
-    "Write cat###.md zettel" -> "Update product.md hub";
+    "Push back on too-narrow" -> "Gather name + summary + scope_notes";
+    "Sanity-check bucket scope" -> "akm cat write --stdin (allocates id, stages)" [label="ok"];
+    "akm cat write --stdin (allocates id, stages)" -> "Update product.md hub";
     "Update product.md hub" -> "Commit on main";
     "Commit on main" -> "Confirm with user";
 }
@@ -140,12 +142,19 @@ digraph category_create {
 
 1. **Storage bootstrap.** Resolve `AKM_ROOT="$(akm-root)"` first. Create `$AKM_ROOT/docs/notes/` if missing. If `$AKM_ROOT/docs/product.md` is missing, warn ("AKM workspace not initialized in `$AKM_ROOT`") and either proceed (zettel will reference a dangling `[[product]]`) or abort per the user's choice.
 2. **Duplicate check.** `ls "$AKM_ROOT/docs/notes/"cat*.md`, read each frontmatter `aliases` and `## name`. If the requested name matches an existing alias (case-insensitive, including near-synonyms like `security` vs `auth-and-security`), stop and surface the match. Full procedure in `references/examples.md` → *Duplicate-check walkthrough*.
-3. **Gather name + summary.** Name: short kebab-friendly noun phrase (`security`, `data`, `observability`). Summary: one sentence stating which kinds of architectural decisions belong here. If both arrived upfront, write; if pieces are missing, ask one focused question per turn (`AskUserQuestion` when 2–4 names are in play). Good/bad summaries in `references/examples.md`.
+3. **Gather name + summary + scope_notes.** Name: short kebab-friendly noun phrase (`security`, `data`, `observability`). Summary: one sentence stating which kinds of architectural decisions belong here. Scope_notes: what is in vs out of the bucket and which near-neighbor categories it must not absorb. If all arrived upfront, write; if pieces are missing, ask one focused question per turn (`AskUserQuestion` when 2–4 names are in play). Good/bad summaries in `references/examples.md`.
 4. **Sanity-check scope.** Is this a recurring axis of decision-making, or a single decision in disguise? Names like `use-postgres`, `logging-format-json-vs-text`, `rate-limit-on-public-api` are ADRs, not categories — the parent category already exists (`data`, `observability`, `api-design`). Push back once, then defer to the user.
-5. **Generate id.** `cat` + three-digit zero-padded. Find max numeric portion across existing `$AKM_ROOT/docs/notes/cat*.md`, add 1. Gaps are never reused — they preserve historical context.
-6. **Write the zettel.** Compose `$AKM_ROOT/docs/notes/cat<NNN>.md` per the `<schema>` block above. The whole card: frontmatter (`aliases`, `status: stable`, `created`), H1 `# Category [[product]]` (no other wikilinks), `## name`, `## summary`, `---`, `Index: [[product]]`. Worked example in `references/examples.md`.
-7. **Update the hub.** Append `### [[cat###|<name>]]` under `## Architecture Decision Records` in `$AKM_ROOT/docs/product.md`, initially with no ADR bullets. Skip and warn if the hub does not exist.
-8. **Commit on main.** Categories are stable from birth — land the file and hub edit in one commit:
+5. **Write via the CLI.** Pipe the composed body (the three `## name / ## summary / ## scope_notes` sections only — no frontmatter, no H1, no footer) to the typed writer, which allocates the id, writes frontmatter + tagless H1 + footer, and stages the file on the default branch:
+
+   ```bash
+   printf '## name\n%s\n\n## summary\n%s\n\n## scope_notes\n%s\n' \
+     "$name" "$summary" "$scope_notes" \
+     | akm cat write "$name" --stdin
+   ```
+
+   Capture the allocated id from the structured `Id: cat###` first line of stdout. The CLI owns id allocation (max existing + 1, gaps never reused), frontmatter shape, the tagless `# Category [[product]]` H1, the `Index: [[product]]` footer, and `git add`. Do **not** hand-write the file. If the alias already exists the CLI short-circuits and prints the existing path — treat that as the duplicate-check failing and stop.
+6. **Update the hub.** Append `### [[cat###|<name>]]` under `## Architecture Decision Records` in `$AKM_ROOT/docs/product.md`, initially with no ADR bullets. Skip and warn if the hub does not exist.
+7. **Commit on main.** Categories are stable from birth — land the staged file (already `git add`ed by the CLI) and the hub edit in one commit:
 
    ```bash
    git -C "$AKM_ROOT" add docs/notes/cat<NNN>.md docs/product.md
@@ -153,7 +162,7 @@ digraph category_create {
    ```
 
    If the hub was not updated (no `product.md`), commit only the zettel.
-9. **Confirm.** Report id, absolute file path under `$AKM_ROOT`, name, summary, hub-status, the commit sha, and the rename-cost reminder ("Renaming this later means auditing every ADR that links `[[cat<NNN>]]`"). Ask once: "Anything to revise?"
+8. **Confirm.** Report id, absolute file path under `$AKM_ROOT`, name, summary, hub-status, the commit sha, and the rename-cost reminder ("Renaming this later means auditing every ADR that links `[[cat<NNN>]]`"). Ask once: "Anything to revise?"
 
 </the_process>
 
@@ -166,7 +175,8 @@ digraph category_create {
 - **Run the sanity check before writing.** A category that is too narrow is a hidden ADR. If the proposed name reads like a single decision, route to `infinifu:adr-write` with the existing parent category rather than minting a one-shot bucket.
 - **Rename is a workspace-wide audit, not a single-file edit.** Renaming the *label* (aliases + `## name`) is cheap because wikilinks `[[cat###]]` still resolve. Renaming the *slug* (moving `cat003.md`) is forbidden — slugs are stable ids. Either way, grep `[[cat<NNN>` and `[[<old-alias>` across the workspace and surface every consumer in the confirmation. Full procedure in `references/examples.md` → *Rename audit*.
 - **Gaps are never reused.** `cat003` missing means `cat003` is gone forever. Always take max + 1.
-- **No optional body sections.** Categories are buckets, not articles. `## examples` or `## related` belong on the ADRs that file under this category, not on the category itself.
+- **Exactly three body sections.** The canonical Category body is `## name / ## summary / ## scope_notes` — nothing more. `## examples` or `## related` belong on the ADRs that file under this category, not on the category itself.
+- **Don't hand-write the file.** Id allocation, frontmatter, the tagless H1, and the footer are the CLI's job (`akm cat write --stdin`). The skill composes only the three body sections and pipes them in. Raw `docs/notes/cat###.md` writes are the drift this migration removed.
 
 </critical_rules>
 

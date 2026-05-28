@@ -163,6 +163,48 @@ lifecycle event rather than a stream of micro-edits.
 
 ---
 
+## Typed CLI API — `akm <type> read|list|write`
+
+Each typed namespace exposes the same file-I/O triple so the owning
+writer skill never hand-composes a `docs/notes/<id>.md` body. The CLI
+owns id allocation, frontmatter, the H1 categorization line, the footer,
+and staging on the default branch; the skill composes only the body
+sections and pipes them in.
+
+- `akm <type> read <id>` — validate the id against the type prefix, then
+  print the raw markdown (delegates to the shared `find_zettel` resolver).
+- `akm <type> list [--json]` — filtered view of that type; `--json` for
+  pipelines.
+- `akm <type> write <name> [--stdin]` — allocate the next id, compose
+  frontmatter + H1 + footer, stage the file, and print `Id: <id>` on
+  stdout for capture. With `--stdin` the body markdown is read from
+  stdin; without it a stub with empty sections is minted.
+
+Per-type flags vary with the schema: `adr` carries `--category` (required)
+/ `--title` / `--status`; `cat` is tagless and append-only at `status:
+stable`, so it drops all three. The pattern is otherwise identical.
+
+**Migration status** (sp004 — propagate the adr guinea-pig template to
+all six typed namespaces; one commit per type, scope is file-I/O only —
+lifecycle verbs stay at the skill layer):
+
+| Type | `read` | `list` | `write --stdin` | Owning skill migrated |
+|------|--------|--------|-----------------|-----------------------|
+| adr  | ✓      | ✓      | ✓               | `infinifu:adr-write`      |
+| cat  | ✓      | ✓      | ✓               | `infinifu:category-write` |
+| pn   | —      | —      | —               | pending                   |
+| sp   | —      | —      | —               | pending                   |
+| ft   | —      | —      | —               | pending                   |
+| us   | —      | —      | —               | pending                   |
+| im   | —      | —      | —               | pending                   |
+
+Pending types still ride the flat `akm write <type> <name>` form (stub
+output) and their owning skills still compose bodies via raw
+`$AKM_ROOT/docs/notes/...` writes. Both forms coexist until every type
+has migrated; the flat form is retired in a later cleanup spec.
+
+---
+
 ## Product — `product.md` *(singleton hub)*
 
 **Purpose.** Central navigation hub for the workspace. Lists every
