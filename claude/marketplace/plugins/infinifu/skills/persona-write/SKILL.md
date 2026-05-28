@@ -110,7 +110,9 @@ AKM_ROOT="$(akm-root)"
 
 `akm-root` returns the main-worktree path (default branch); outside git, cwd. Anchor every path on `$AKM_ROOT` (`$AKM_ROOT/docs/notes/pn###.md`, `$AKM_ROOT/docs/product.md`). If `akm-root` errors, surface its stderr and abort — never silently land a persona on the feature branch.
 
-Personas are a `draft → validated → retired` artifact and typically born as `draft`, so this writer **stages on main without committing**: `git -C "$AKM_ROOT" add docs/notes/pn<NNN>.md`. The next lifecycle commit happens when the persona is referenced from a `ready` story or flipped to `validated` by spec-refinement. See the per-stage commit table in `docs/notes/akm.md#workspace-resolution`.
+Personas are a `draft → validated → retired` artifact and typically born as `draft`. **Minting a new persona goes through `akm pn write <name> [--status <s>] --stdin`**, which allocates the id, writes frontmatter + tagless H1 + footer, and **stages on main without committing** (`git add docs/notes/pn<NNN>.md`). The next lifecycle commit happens when the persona is referenced from a `ready` story or flipped to `validated` by spec-refinement. See the per-stage commit table in `docs/notes/akm.md#workspace-resolution`.
+
+**Revising an existing persona is a body edit, not a mint** — `akm pn write` short-circuits on a duplicate alias and will not overwrite. For revisions, edit the existing `$AKM_ROOT/docs/notes/pn<NNN>.md` in place and re-stage.
 </workspace_resolution>
 
 <the_process>
@@ -121,46 +123,46 @@ digraph persona_create {
     "Storage exists?" [shape=diamond];
     "Bootstrap docs/notes/" [shape=box];
     "Existing persona?" [shape=diamond];
-    "Re-emit same id" [shape=box];
+    "Edit existing file in place" [shape=box];
     "Gather alias + body" [shape=box];
-    "Generate id (pn###)" [shape=box];
-    "Write pn###.md zettel" [shape=box];
-    "Stage on main" [shape=box];
+    "akm pn write --stdin (allocates id, stages)" [shape=box];
     "Confirm with user" [shape=doublecircle];
 
     "Resolve AKM root" -> "Storage exists?";
     "Storage exists?" -> "Bootstrap docs/notes/" [label="no"];
     "Storage exists?" -> "Existing persona?" [label="yes"];
     "Bootstrap docs/notes/" -> "Existing persona?";
-    "Existing persona?" -> "Re-emit same id" [label="revising"];
+    "Existing persona?" -> "Edit existing file in place" [label="revising"];
     "Existing persona?" -> "Gather alias + body" [label="new"];
-    "Re-emit same id" -> "Stage on main";
-    "Gather alias + body" -> "Generate id (pn###)";
-    "Generate id (pn###)" -> "Write pn###.md zettel";
-    "Write pn###.md zettel" -> "Stage on main";
-    "Stage on main" -> "Confirm with user";
+    "Edit existing file in place" -> "Confirm with user";
+    "Gather alias + body" -> "akm pn write --stdin (allocates id, stages)";
+    "akm pn write --stdin (allocates id, stages)" -> "Confirm with user";
 }
 ```
 
 1. **Check storage.** Resolve `$AKM_ROOT` first. If `$AKM_ROOT/docs/notes/` is missing, create it. If `$AKM_ROOT/docs/product.md` is missing, warn *"No `docs/product.md` found in `$AKM_ROOT`; AKM workspace not initialized."* and proceed with a dangling `[[product]]` (or abort if the user prefers).
 
-2. **Generate id.** List `$AKM_ROOT/docs/notes/pn*.md`, extract numbers, max + 1, zero-pad to 3 digits. Start at `001` if none. Gaps from retired personas are **not** reused — wikilink stability is the point of the sequential id.
+2. **Choose the canonical alias.** `aliases[0]` is what every story will use as label inside `[[pn###|alias]]`, and the `name` argument to `akm pn write`. Kebab-case, short, role-shaped (`requestor`, `approver`, `field-sales-rep`). Stable once chosen — see `references/examples.md` for why renaming is expensive.
 
-3. **Choose the canonical alias.** `aliases[0]` is what every story will use as label inside `[[pn###|alias]]`. Kebab-case, short, role-shaped (`requestor`, `approver`, `field-sales-rep`). Stable once chosen — see `references/examples.md` for why renaming is expensive. Add more aliases only if the user gave multiple equivalent phrasings.
-
-4. **Gather body content.** Personas are small — don't over-interview. Ask only for what's missing, one focused question per turn:
+3. **Gather body content.** Personas are small — don't over-interview. Ask only for what's missing, one focused question per turn:
    - `## name` — full role name in prose ("Field Sales Rep", "Warehouse Approver").
    - `## summary` — one paragraph (≤3 sentences): who, where, why they touch the system.
    - `## primary_goals` — 2–4 bullets, role-shaped (not story-shaped — push back once if they read like stories).
    - `## open_questions` — bullets of unresolved discovery. Empty iff `validated`.
 
-5. **Set status.** Default to `draft`. Flip to `validated` only when `## open_questions` is empty (or migrated to an ADR / decision log). `validated` at write time is rare but legitimate when formalizing a long-running role.
+4. **Set status.** Default to `draft` (the CLI default). Pass `--status validated` only when `## open_questions` is empty (or migrated to an ADR / decision log). `validated` at write time is rare but legitimate when formalizing a long-running role.
 
-6. **Write the zettel.** Compose `$AKM_ROOT/docs/notes/pn<NNN>.md` per the `<schema>` block above. Do **not** touch `$AKM_ROOT/docs/product.md` — personas surface in the hub via stories, not directly (see `critical_rules`).
+5. **Write via the CLI.** Pipe the composed body (the four `## name / ## summary / ## primary_goals / ## open_questions` sections only — no frontmatter, no H1, no footer) to the typed writer, which allocates the id, writes frontmatter + tagless `# Persona [[product]]` H1 + footer, and stages the file on main:
 
-7. **Stage on main.** `git -C "$AKM_ROOT" add docs/notes/pn<NNN>.md`. No commit — the next lifecycle stage carries that.
+   ```bash
+   printf '## name\n%s\n\n## summary\n%s\n\n## primary_goals\n%s\n\n## open_questions\n%s\n' \
+     "$name" "$summary" "$goals" "$open_qs" \
+     | akm pn write "$alias" --stdin          # add --status validated if appropriate
+   ```
 
-8. **Confirm.** Show id + absolute file path (so the user sees the AKM root when invoked from a worktree), the canonical alias (*"Stories will reference this as `[[pn<NNN>|<alias>]]`"*), the name + one-line summary gist, the status, the open-questions count, the staging state on main, and note that the hub was **not** updated. Ask once: *"Anything to revise?"* If yes, edit in place.
+   Capture the allocated id from the structured `Id: pn###` first line of stdout. The CLI owns id allocation (max + 1, gaps never reused), frontmatter, the tagless H1, the `Index: [[product]]` footer, and `git add`. Do **not** hand-write the file and do **not** touch `$AKM_ROOT/docs/product.md` — personas surface in the hub via stories (see `critical_rules`). If the alias already exists the CLI short-circuits without overwriting; treat that as "this is a revision" and edit the existing file in place instead.
+
+6. **Confirm.** Show id + absolute file path (so the user sees the AKM root when invoked from a worktree), the canonical alias (*"Stories will reference this as `[[pn<NNN>|<alias>]]`"*), the name + one-line summary gist, the status, the open-questions count, the staging state on main, and note that the hub was **not** updated. Ask once: *"Anything to revise?"* If yes, edit in place.
 
 See `references/examples.md` for fresh-persona, story-write-delegation, and revision walkthroughs.
 
@@ -175,6 +177,7 @@ See `references/examples.md` for fresh-persona, story-write-delegation, and revi
 - **Don't touch the hub.** `docs/product.md` only changes when a story references this persona — that's `infinifu:story-write`'s job. Personas are a supporting type with no `[[product]]` section of their own.
 - **Retire, never delete.** A retired persona keeps its file (existing story back-links are history). Add a `## retired` section with date + reason. Ids are never reused.
 - **No category tags in the H1.** Just `# Persona [[product]]`. Personas are supporting with no taxonomy.
+- **Don't hand-write the file.** Id allocation, frontmatter, the tagless H1, the footer, and staging are the CLI's job (`akm pn write --stdin`). The skill composes only the four body sections and pipes them in. The one exception is revising an *existing* persona — `write` is mint-only, so revisions edit the file in place.
 
 </critical_rules>
 
@@ -182,7 +185,8 @@ See `references/examples.md` for fresh-persona, story-write-delegation, and revi
 
 Before reporting complete:
 
-- [ ] Filename is `pn<NNN>.md` — three digits, zero-padded, max-existing + 1, no gap reuse
+- [ ] Minted via `akm pn write <alias> --stdin` (not hand-written) — `Id: pn###` captured from stdout
+- [ ] Filename is `pn<NNN>.md` — three digits, zero-padded, max-existing + 1, no gap reuse (CLI enforces)
 - [ ] Frontmatter has `aliases:` (≥ 1, first is kebab-case short label), `status:`, `created:` (ISO date)
 - [ ] H1 is exactly `# Persona [[product]]` — no extra tags
 - [ ] Body sections in order: `## name`, `## summary`, `## primary_goals`, `## open_questions`
@@ -191,7 +195,7 @@ Before reporting complete:
 - [ ] `## open_questions` empty *iff* `validated` (or `retired` with no follow-up)
 - [ ] Footer is `---` rule then `Index: [[product]]` on its own line
 - [ ] `$AKM_ROOT/docs/product.md` was **not** touched
-- [ ] File was staged on main (`git -C "$AKM_ROOT" add docs/notes/pn<NNN>.md`) and no commit was created
+- [ ] File was staged on main by the CLI (`git add docs/notes/pn<NNN>.md`) and no commit was created
 - [ ] Confirmation surfaces the absolute path under `$AKM_ROOT` so the user sees where it landed
 - [ ] Canonical alias shown back to the user so they can object before story-write uses it
 

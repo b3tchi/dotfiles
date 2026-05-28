@@ -189,6 +189,65 @@ def next_id [root: string, prefix: string] {
   $"($prefix)($padded)"
 }
 
+# Shared by every typed `<type> write` — the first-alias / slug rule. Names
+# become `aliases[0]` and (for some types) the find_zettel match key, so they
+# must stay path- and wikilink-safe. Raises on violation so the CLI fails
+# fast the same way for every type.
+def validate_zettel_name [name: string] {
+  if not ($name =~ '^[a-zA-Z0-9_-]+$') {
+    error make { msg: "name must contain only alphanumeric characters, dashes, and underscores" }
+  }
+}
+
+# Compose + stage a *tagless* typed zettel (H1 carries only `[[product]]`,
+# no `[[cat###]]`). Shared by the two tagless writers — `cat` and `pn` —
+# extracted on the second landing per sp004's incremental "helpers per pair"
+# plan. The caller owns the per-type bits: status value, the H1 type word,
+# and the stub body section list. Allocates the id, writes frontmatter + H1
+# + (stdin body or stub) + footer, stages on the default branch, and prints
+# the structured `Id: <id>` line skills capture. Returns nothing — the id is
+# on stdout.
+def compose_tagless_zettel [
+  root: string
+  prefix: string         # "cat" | "pn"
+  type_word: string      # "Category" | "Persona"
+  name: string           # first alias
+  status: string         # frontmatter status (cat: stable; pn: draft/validated/retired)
+  stub: list<string>     # body lines used when no --stdin body was piped
+  body: string           # stdin body, or "" to fall back to stub
+] {
+  let id = (next_id $root $prefix)
+  let f = $"($root)/docs/notes/($id).md"
+  let today = (date now | format date "%Y-%m-%d")
+
+  let parts = ([
+    "---"
+    "aliases:"
+    $"  - ($name)"
+    $"status: ($status)"
+    $"created: ($today)"
+    "---"
+    ""
+    $"# ($type_word) [[product]]"
+    ""
+  ])
+  let body_block = (if ($body == "") { $stub } else { [$body ""] })
+  let footer = [
+    "---"
+    ""
+    "Index: [[product]]"
+    ""
+  ]
+
+  ($parts | append $body_block | append $footer | str join "\n") | save -f $f
+
+  ^git -C $root add $"docs/notes/($id).md" | ignore
+
+  print $"Id: ($id)"
+  print -e $"Path: ($f)"
+  print -e $"Staged docs/notes/($id).md"
+}
+
 # Insert `- [[sp_id|name]]` under `## idea` of docs/board.md. Idempotent —
 # skips if the wikilink already exists anywhere in the file. The board.md
 # must already have `## idea` / `## spec` / `## ready` sections (created by
@@ -830,9 +889,7 @@ def "main cat write" [
   name: string             # alphanumeric / dash / underscore — first alias
   --stdin                 # read body from stdin (default: mint stub with empty sections)
 ] {
-  if not ($name =~ '^[a-zA-Z0-9_-]+$') {
-    error make { msg: "name must contain only alphanumeric characters, dashes, and underscores" }
-  }
+  validate_zettel_name $name
   let root = (require_akm_root)
 
   # Upsert short-circuit — mirror `akm adr write` / `akm write` semantics so
@@ -847,50 +904,86 @@ def "main cat write" [
   # why the read is opt-in and never blocks on a TTY).
   let body = (if $stdin { (^cat | str trim) } else { "" })
 
-  let id = (next_id $root "cat")
-  let f = $"($root)/docs/notes/($id).md"
-  let today = (date now | format date "%Y-%m-%d")
+  # Categories are the taxonomy layer: tagless H1 and `status: stable` from
+  # birth. The shared tagless writer handles id allocation, frontmatter, H1,
+  # footer, and staging.
+  let stub = ["## name" $name "" "## summary" "" "## scope_notes" ""]
+  compose_tagless_zettel $root "cat" "Category" $name "stable" $stub $body
+}
 
-  # Tagless H1 — categories are the taxonomy layer and never carry a
-  # `[[cat###]]` link of their own. Status is always `stable` from birth.
-  let parts = ([
-    "---"
-    "aliases:"
-    $"  - ($name)"
-    "status: stable"
-    $"created: ($today)"
-    "---"
-    ""
-    "# Category [[product]]"
-    ""
-  ])
-  let body_block = (if ($body == "") {
-    [
-      "## name"
-      $name
-      ""
-      "## summary"
-      ""
-      "## scope_notes"
-      ""
-    ]
+# ----------------------------------------------------------------------------
+# akm pn — Personas (supporting type; sp004 type 2/6)
+#
+# Second tagless type after cat. Same read|list|write triple, but personas
+# carry a `draft → validated → retired` lifecycle, so `pn write` keeps a
+# --status flag (cat, being append-only, dropped it). pn never touches
+# docs/product.md — personas surface in the hub via the stories that
+# reference them, not directly. `write` is mint-only (short-circuits on a
+# duplicate alias); revising an existing persona is a body edit, distinct
+# from minting, and is not part of this verb.
+# ----------------------------------------------------------------------------
+
+def "main pn" [] {
+  print "akm pn — persona (user-role) operations"
+  print ""
+  print "Subcommands:"
+  print "  akm pn read <id>      print raw markdown of one persona"
+  print "  akm pn list           list personas (`--json` for pipeline)"
+  print "  akm pn write <name>   mint a new persona"
+  print "    --status <s>        optional — default draft"
+  print "                          (draft | validated | retired)"
+  print "    --stdin             read body markdown from stdin"
+  print "                          (otherwise mints stub with empty sections)"
+  print ""
+  print "Notes:"
+  print "  - Personas are tagless (`# Persona [[product]]`, no `[[cat###]]`)."
+  print "  - Body sections: `## name / ## summary / ## primary_goals /"
+  print "    ## open_questions`."
+  print "  - `write` is mint-only; it does not update docs/product.md (stories"
+  print "    surface personas in the hub) and does not revise existing files."
+}
+
+def "main pn read" [id: string] {
+  if not ($id =~ '^pn\d{3}$') {
+    error make { msg: $"expected pn### form (e.g. pn003), got `($id)`" }
+  }
+  main read $id
+}
+
+def "main pn list" [--json] {
+  if $json {
+    main list pn --json
   } else {
-    [$body ""]
-  })
-  let footer = [
-    "---"
-    ""
-    "Index: [[product]]"
-    ""
-  ]
+    main list pn
+  }
+}
 
-  ($parts | append $body_block | append $footer | str join "\n") | save -f $f
+# Mint a new persona. Tagless like cat, but with a status lifecycle: born
+# `draft` by default, `validated` once open_questions resolve, `retired`
+# when the role is no longer served. Body comes from stdin (the skill
+# composes `## name / ## summary / ## primary_goals / ## open_questions`);
+# CLI handles id allocation, frontmatter, H1, footer, and staging.
+def "main pn write" [
+  name: string             # alphanumeric / dash / underscore — first alias
+  --status: string = "draft"  # draft | validated | retired
+  --stdin                 # read body from stdin (default: mint stub with empty sections)
+] {
+  validate_zettel_name $name
+  if ($status not-in ["draft" "validated" "retired"]) {
+    error make { msg: $"--status must be one of draft | validated | retired, got `($status)`" }
+  }
+  let root = (require_akm_root)
 
-  ^git -C $root add $"docs/notes/($id).md" | ignore
+  let dupe = (find_zettel $root $name)
+  if ($dupe != "") {
+    print -e $"already exists with this alias: ($dupe)"
+    return
+  }
 
-  print $"Id: ($id)"
-  print -e $"Path: ($f)"
-  print -e $"Staged docs/notes/($id).md"
+  let body = (if $stdin { (^cat | str trim) } else { "" })
+
+  let stub = ["## name" "" "## summary" "" "## primary_goals" "" "## open_questions" ""]
+  compose_tagless_zettel $root "pn" "Persona" $name $status $stub $body
 }
 
 # ----------------------------------------------------------------------------

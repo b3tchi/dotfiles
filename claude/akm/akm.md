@@ -182,7 +182,10 @@ sections and pipes them in.
 
 Per-type flags vary with the schema: `adr` carries `--category` (required)
 / `--title` / `--status`; `cat` is tagless and append-only at `status:
-stable`, so it drops all three. The pattern is otherwise identical.
+stable`, so it drops all three; `pn` is tagless too but keeps `--status`
+(default `draft`) for its `draft → validated → retired` lifecycle. The
+pattern is otherwise identical. Both `cat` and `pn` are composed by a
+shared `compose_tagless_zettel` helper.
 
 **Migration status** (sp004 — propagate the adr guinea-pig template to
 all six typed namespaces; one commit per type, scope is file-I/O only —
@@ -192,7 +195,7 @@ lifecycle verbs stay at the skill layer):
 |------|--------|--------|-----------------|-----------------------|
 | adr  | ✓      | ✓      | ✓               | `infinifu:adr-write`      |
 | cat  | ✓      | ✓      | ✓               | `infinifu:category-write` |
-| pn   | —      | —      | —               | pending                   |
+| pn   | ✓      | ✓      | ✓               | `infinifu:persona-write`  |
 | sp   | —      | —      | —               | pending                   |
 | ft   | —      | —      | —               | pending                   |
 | us   | —      | —      | —               | pending                   |
