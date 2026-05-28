@@ -248,6 +248,41 @@ def compose_tagless_zettel [
   print -e $"Staged docs/notes/($id).md"
 }
 
+# Parse a comma-separated --category string into a validated list of cat###
+# ids. Shared by every *categorized* writer (adr / sp / ft) — extracted on
+# the ft landing once there were three categorized types duplicating the
+# same parse + form-check + dangling-link guard. Errors (never returns a
+# bad list) so callers can trust the result. Refuses an empty list, a
+# malformed id, or a cat### with no file on disk (the H1 link would 404 in
+# markdown-oxide).
+def parse_and_validate_cats [root: string, category: string] {
+  if ($category | is-empty) {
+    error make { msg: "--category is required (e.g. --category cat003 or --category cat003,cat006)" }
+  }
+  let cats = ($category | split row "," | each { |c| $c | str trim } | where { |c| not ($c | is-empty) })
+  if ($cats | is-empty) {
+    error make { msg: "--category is required (e.g. --category cat003 or --category cat003,cat006)" }
+  }
+  for c in $cats {
+    if not ($c =~ '^cat\d{3}$') {
+      error make { msg: $"--category entries must be cat### form, got `($c)`" }
+    }
+    let cat_file = $"($root)/docs/notes/($c).md"
+    if not ($cat_file | path exists) {
+      error make { msg: $"category ($c) not found at ($cat_file) — run `akm cat list` to see existing categories" }
+    }
+  }
+  $cats
+}
+
+# Build a categorized H1 line: `# <Word> [[cat003]] [[cat006]] [[index]]`.
+# `index_target` is the hub the type indexes under — `product` for adr / ft,
+# `board` for sp. Shared by the categorized writers.
+def categorized_h1 [type_word: string, cats: list<string>, index_target: string] {
+  let cat_links = ($cats | each { |c| $"[[($c)]]" } | str join " ")
+  $"# ($type_word) ($cat_links) [[($index_target)]]"
+}
+
 # Insert `- [[sp_id|name]]` under `## idea` of docs/board.md. Idempotent —
 # skips if the wikilink already exists anywhere in the file. The board.md
 # must already have `## idea` / `## spec` / `## ready` sections (created by
@@ -1046,25 +1081,10 @@ def "main sp write" [
   --stdin                 # read body from stdin (default: stub with empty ## problem)
 ] {
   validate_zettel_name $name
-  if ($category | is-empty) {
-    error make { msg: "--category is required (e.g. --category cat003 or --category cat003,cat006)" }
-  }
-  let cats = ($category | split row "," | each { |c| $c | str trim } | where { |c| not ($c | is-empty) })
-  for c in $cats {
-    if not ($c =~ '^cat\d{3}$') {
-      error make { msg: $"--category entries must be cat### form, got `($c)`" }
-    }
-  }
   let root = (require_akm_root)
 
-  # Refuse to mint a spec pointing at a dangling cat wikilink — the H1 link
-  # would 404 in markdown-oxide. Same guard as `akm adr write`.
-  for c in $cats {
-    let cat_file = $"($root)/docs/notes/($c).md"
-    if not ($cat_file | path exists) {
-      error make { msg: $"category ($c) not found at ($cat_file) — run `akm cat list` to see existing categories" }
-    }
-  }
+  # Validate the category(ies) — shared dangling-link guard with adr / ft.
+  let cats = (parse_and_validate_cats $root $category)
 
   let dupe = (find_zettel $root $name)
   if ($dupe != "") {
@@ -1090,9 +1110,7 @@ def "main sp write" [
     $fm_base | append $"claude_session_id: ($session_id)"
   } else { $fm_base })
 
-  # Categorized H1: `# Spec [[cat003]] [[cat006]] [[board]]`.
-  let cat_links = ($cats | each { |c| $"[[($c)]]" } | str join " ")
-  let h1 = $"# Spec ($cat_links) [[board]]"
+  let h1 = (categorized_h1 "Spec" $cats "board")
 
   let body_block = (if ($body == "") {
     ["## problem" ""]
@@ -1188,26 +1206,16 @@ def "main adr write" [
   --status: string = "Proposed"  # Proposed | Accepted | Deprecated | Superseded
   --stdin                 # read body from stdin (default: mint stub with empty sections)
 ] {
-  if not ($name =~ '^[a-zA-Z0-9_-]+$') {
-    error make { msg: "name must contain only alphanumeric characters, dashes, and underscores" }
-  }
-  if ($category | is-empty) {
-    error make { msg: "--category is required (e.g. --category cat003)" }
-  }
-  if not ($category =~ '^cat\d{3}$') {
-    error make { msg: $"--category must be cat### form, got `($category)`" }
-  }
+  validate_zettel_name $name
   if ($status not-in ["Proposed" "Accepted" "Deprecated" "Superseded"]) {
     error make { msg: $"--status must be one of Proposed | Accepted | Deprecated | Superseded, got `($status)`" }
   }
   let root = (require_akm_root)
 
-  # Verify category exists on disk — refuse to mint an ADR pointing at a
-  # dangling cat wikilink, since the H1 link would 404 in markdown-oxide.
-  let cat_file = $"($root)/docs/notes/($category).md"
-  if not ($cat_file | path exists) {
-    error make { msg: $"category ($category) not found at ($cat_file) — run `akm list cat` to see existing categories" }
-  }
+  # Validate the category(ies) against on-disk cat zettels — refuse to mint
+  # an ADR pointing at a dangling cat wikilink (the H1 link would 404 in
+  # markdown-oxide). Shared with sp / ft via `parse_and_validate_cats`.
+  let cats = (parse_and_validate_cats $root $category)
 
   # Upsert short-circuit — if any zettel already matches the alias or id
   # form, return that path. Mirrors `akm write` semantics so callers can
@@ -1254,7 +1262,7 @@ def "main adr write" [
     $"created: ($today)"
     "---"
     ""
-    $"# ADR [[($category)]] [[product]]"
+    (categorized_h1 "ADR" $cats "product")
     ""
     "## title"
     $final_title
@@ -1289,6 +1297,129 @@ def "main adr write" [
 
   # Print the allocated id as a structured first line so skills can
   # capture it with a single split instead of regex-parsing the path.
+  print $"Id: ($id)"
+  print -e $"Path: ($f)"
+  print -e $"Staged docs/notes/($id).md"
+}
+
+# ----------------------------------------------------------------------------
+# akm ft — Features (reusable capabilities; sp004 type 4/6)
+#
+# Categorized like adr/sp (`# Feature [[cat###]]... [[product]]`), indexed on
+# [[product]], born `status: proposed`. Structured body — `## providing /
+# ## api_surface / ## data_model / ## sample / ## components` — composed by
+# the skill and piped via --stdin (optional `## depends_on` / `## superseded_by`
+# the skill adds when relevant). Supersession (new ft### + old flipped to
+# `superseded`) stays a skill-layer edit, out of sp004's scope — `ft write`
+# is mint-only.
+# ----------------------------------------------------------------------------
+
+def "main ft" [] {
+  print "akm ft — feature (reusable capability) operations"
+  print ""
+  print "Subcommands:"
+  print "  akm ft read <id>      print raw markdown of one feature"
+  print "  akm ft list           list features (`--json` for pipeline)"
+  print "  akm ft write <name>   mint a new feature at status: proposed"
+  print "    --category <ids>    required — one or more cat### (comma-separated)"
+  print "    --status <s>        optional — default proposed"
+  print "                          (proposed | stable | deprecated | superseded)"
+  print "    --stdin             read body markdown from stdin"
+  print "                          (otherwise mints stub with empty sections)"
+  print ""
+  print "Notes:"
+  print "  - Features are categorized: `# Feature [[cat###]]... [[product]]`."
+  print "  - Body sections: `## providing / ## api_surface / ## data_model /"
+  print "    ## sample / ## components` (skill may add ## depends_on /"
+  print "    ## superseded_by)."
+  print "  - `write` is mint-only; supersession (new ft### + old flipped to"
+  print "    superseded) is a skill-layer edit, not this verb."
+}
+
+def "main ft read" [id: string] {
+  if not ($id =~ '^ft\d{3}$') {
+    error make { msg: $"expected ft### form (e.g. ft003), got `($id)`" }
+  }
+  main read $id
+}
+
+def "main ft list" [--json] {
+  if $json {
+    main list ft --json
+  } else {
+    main list ft
+  }
+}
+
+# Mint a new feature. Categorized + product-indexed, so it uses the shared
+# categorized helpers (parse_and_validate_cats + categorized_h1) but composes
+# its own structured stub. Body comes from stdin (the skill composes the
+# providing/api_surface/data_model/sample/components sections, plus optional
+# depends_on/superseded_by); CLI handles id, frontmatter, H1, footer, staging.
+def "main ft write" [
+  name: string             # alphanumeric / dash / underscore — first alias
+  --category: string = ""  # required: one or more cat### ids, comma-separated
+  --status: string = "proposed"  # proposed | stable | deprecated | superseded
+  --stdin                 # read body from stdin (default: mint stub with empty sections)
+] {
+  validate_zettel_name $name
+  if ($status not-in ["proposed" "stable" "deprecated" "superseded"]) {
+    error make { msg: $"--status must be one of proposed | stable | deprecated | superseded, got `($status)`" }
+  }
+  let root = (require_akm_root)
+
+  let cats = (parse_and_validate_cats $root $category)
+
+  let dupe = (find_zettel $root $name)
+  if ($dupe != "") {
+    print -e $"already exists with this alias: ($dupe)"
+    return
+  }
+
+  let body = (if $stdin { (^cat | str trim) } else { "" })
+
+  let id = (next_id $root "ft")
+  let f = $"($root)/docs/notes/($id).md"
+  let today = (date now | format date "%Y-%m-%d")
+
+  let parts = ([
+    "---"
+    "aliases:"
+    $"  - ($name)"
+    $"status: ($status)"
+    $"created: ($today)"
+    "---"
+    ""
+    (categorized_h1 "Feature" $cats "product")
+    ""
+  ])
+  let body_block = (if ($body == "") {
+    [
+      "## providing"
+      ""
+      "## api_surface"
+      ""
+      "## data_model"
+      ""
+      "## sample"
+      ""
+      "## components"
+      ""
+    ]
+  } else {
+    [$body ""]
+  })
+  let footer = [
+    "---"
+    ""
+    "Index: [[product]]"
+    ""
+  ]
+
+  ($parts | append $body_block | append $footer | str join "\n") | save -f $f
+
+  ^git -C $root add $"docs/notes/($id).md" | ignore
+
   print $"Id: ($id)"
   print -e $"Path: ($f)"
   print -e $"Staged docs/notes/($id).md"

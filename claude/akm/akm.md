@@ -187,11 +187,20 @@ stable`, so it drops all three; `pn` is tagless too but keeps `--status`
 the board citizen — `--category` (one or more cat###, comma-separated,
 required) drives its `# Spec [[cat###]]... [[board]]` H1, `--session` mints
 a `claude_session_id`, and the write registers the spec under `docs/board.md
-## idea`. The pattern is otherwise identical. `cat` and `pn` share the
-`compose_tagless_zettel` helper; `sp` (categorized + board-registered) has
-its own writer. Note: `sp write` mints the spec at `status: idea` only —
-the lifecycle transitions (`idea → spec → ready → done` status flips and
-board section moves) stay in the lifecycle skills, not the CLI.
+## idea`. `ft` is categorized + product-indexed — `--category` (one or
+more, required) drives its `# Feature [[cat###]]... [[product]]` H1 and
+`--status` (default `proposed`) covers its `proposed → stable → deprecated
+→ superseded` lifecycle. The pattern is otherwise identical.
+
+Helper sharing: `cat` and `pn` (tagless) share `compose_tagless_zettel`;
+the categorized writers (`adr`, `sp`, `ft`) share `parse_and_validate_cats`
+(comma-separated cat### parse + dangling-link guard) and `categorized_h1`
+(the `# <Word> [[cat###]]... [[index]]` builder). `sp` adds board
+registration + `--session` on top. Note: `sp write` mints at `status:
+idea` only and `ft write` is mint-only — the lifecycle transitions (sp
+`idea → spec → ready → done` status flips + board moves; ft
+supersede/deprecate chains) stay in the lifecycle / writer skills, not the
+CLI.
 
 **Migration status** (sp004 — propagate the adr guinea-pig template to
 all six typed namespaces; one commit per type, scope is file-I/O only —
@@ -203,7 +212,7 @@ lifecycle verbs stay at the skill layer):
 | cat  | ✓      | ✓      | ✓               | `infinifu:category-write` |
 | pn   | ✓      | ✓      | ✓               | `infinifu:persona-write`  |
 | sp   | ✓      | ✓      | ✓               | `infinifu:idea-brainstorming` |
-| ft   | —      | —      | —               | pending                   |
+| ft   | ✓      | ✓      | ✓               | `infinifu:feature-write`  |
 | us   | —      | —      | —               | pending                   |
 | im   | —      | —      | —               | pending                   |
 

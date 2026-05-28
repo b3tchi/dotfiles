@@ -137,8 +137,8 @@ digraph feature_write {
     "Gather capability shape" [shape=box];
     "Pick H1 categories" [shape=box];
     "Resolve dependencies" [shape=box];
-    "Generate id (ft###)" [shape=box];
-    "Write ft###.md zettel" [shape=box];
+    "akm ft write --stdin (allocates id, stages)" [shape=box];
+    "Edit existing file in place" [shape=box];
     "Update product.md hub" [shape=box];
     "Commit on main" [shape=box];
     "Confirm with user" [shape=doublecircle];
@@ -147,14 +147,13 @@ digraph feature_write {
     "AKM workspace exists?" -> "Bootstrap docs/notes/" [label="no"];
     "AKM workspace exists?" -> "Existing ft### update?" [label="yes"];
     "Bootstrap docs/notes/" -> "Existing ft### update?";
-    "Existing ft### update?" -> "Re-emit with same id" [label="yes"];
+    "Existing ft### update?" -> "Edit existing file in place" [label="yes"];
     "Existing ft### update?" -> "Gather capability shape" [label="no — new"];
-    "Re-emit with same id" -> "Update product.md hub";
+    "Edit existing file in place" -> "Update product.md hub";
     "Gather capability shape" -> "Pick H1 categories";
     "Pick H1 categories" -> "Resolve dependencies";
-    "Resolve dependencies" -> "Generate id (ft###)";
-    "Generate id (ft###)" -> "Write ft###.md zettel";
-    "Write ft###.md zettel" -> "Update product.md hub";
+    "Resolve dependencies" -> "akm ft write --stdin (allocates id, stages)";
+    "akm ft write --stdin (allocates id, stages)" -> "Update product.md hub";
     "Update product.md hub" -> "Commit on main";
     "Commit on main" -> "Confirm with user";
 }
@@ -168,16 +167,23 @@ digraph feature_write {
 4. **Gather the capability shape.** Elicit any missing piece: `providing` (what + who consumes), `api_surface` (concrete signature/endpoint/contract — not "you call it somehow"), `data_model` ("stateless" is OK; otherwise schema + retention + ownership), `sample` (snippet or path to sample file), `components` (modules/paths implementing it). If ≥2 pieces stay vague after one round, send the user to `infinifu:idea-brainstorming` first.
 5. **Pick H1 categories (≥1).** `ls "$AKM_ROOT/docs/notes/"cat*.md`, read frontmatter `aliases:` for canonical labels, match user-named buckets. No match and a new bucket genuinely needed → route to `infinifu:category-write`; never fabricate dangling `[[cat###]]`.
 6. **Resolve dependencies.** If this Feature layers on others (notifications → templating, audit-log → database-access), record `## depends_on` with upstream `[[ft###]]` wikilinks. Omit the heading entirely when empty.
-7. **Generate id.** `ls "$AKM_ROOT/docs/notes/"ft*.md` → max numeric portion + 1, zero-padded to 3. None yet → start at `001`. Gaps stay gaps; superseded ids are never reused.
-8. **Write the zettel.** Compose `$AKM_ROOT/docs/notes/ft<NNN>.md` per the `<schema>` block above (frontmatter + H1 with `[[cat###]]`+`[[product]]` + body sections in order + `Index: [[product]]` footer after `---`). Worked example in `references/examples.md`.
-9. **Update the hub.** Append `[[ft###|<alias>]]` (first alias as label) under `## Features` in `$AKM_ROOT/docs/product.md`. For supersede chains, swap entries; old file stays on disk. Hub missing → skip and note "Feature on disk but not linked from hub."
-10. **Commit on main.** Features are stable artifacts — stage and commit in one shot from the AKM root:
+7. **Write via the CLI.** Pipe the composed body (the `## providing / ## api_surface / ## data_model / ## sample / ## components` sections, plus `## depends_on` / `## superseded_by` when relevant — body only, no frontmatter, no H1, no footer) to the typed writer, which allocates the id, writes frontmatter + the categorized H1 + footer, and stages the file:
+
+   ```bash
+   printf '## providing\n%s\n\n## api_surface\n%s\n\n## data_model\n%s\n\n## sample\n%s\n\n## components\n%s\n' \
+     "$providing" "$api" "$data_model" "$sample" "$components" \
+     | akm ft write "$alias" --category cat003,cat006 --stdin   # --status stable if a consumer already exists
+   ```
+
+   `--category` takes the H1 picks (one or more, comma-separated; each must resolve to an existing `cat###` or the CLI refuses). Capture the id from the `Id: ft###` first line of stdout. The CLI owns id allocation (max + 1, gaps never reused), frontmatter, the `# Feature [[cat###]]... [[product]]` H1, the `Index: [[product]]` footer, and `git add`. Do **not** hand-write the file. If the alias already exists the CLI short-circuits without overwriting — treat that as an edit and edit the file in place instead.
+8. **Update the hub.** Append `[[ft###|<alias>]]` (first alias as label) under `## Features` in `$AKM_ROOT/docs/product.md`. For supersede chains, swap entries; old file stays on disk. Hub missing → skip and note "Feature on disk but not linked from hub."
+9. **Commit on main.** Features are stable artifacts — the CLI already staged `ft<NNN>.md`; add the hub diff and commit in one shot from the AKM root:
     ```bash
     git -C "$AKM_ROOT" add docs/notes/ft<NNN>.md docs/product.md
     git -C "$AKM_ROOT" commit -m "feat(akm): add ft<NNN> <alias>"
     ```
     For supersession, also stage the old `ft###.md` (status flip + `## superseded_by` append) in the same commit. Commit message: `feat(akm): supersede ft<old> with ft<new> <alias>`.
-11. **Confirm.** Show: Feature id + absolute path under `$AKM_ROOT`, `providing` restatement, H1 categories + `depends_on`, `components` paths, hub status, commit sha on main. Ask once: "Anything to revise?" Yes → edit in place (same id) and amend or new commit per the situation.
+10. **Confirm.** Show: Feature id + absolute path under `$AKM_ROOT`, `providing` restatement, H1 categories + `depends_on`, `components` paths, hub status, commit sha on main. Ask once: "Anything to revise?" Yes → edit in place (same id) and amend or new commit per the situation.
 
 ## Editing / superseding / deprecating
 
@@ -202,6 +208,7 @@ Promote `proposed` → `stable` once a real Implementation lists this Feature in
 - **`sample` is the proof.** A Feature nobody can show how to use is still an idea. Snippet or link to an existing sample file.
 - **Lowercase status values.** `proposed | stable | deprecated | superseded`. ADR statuses are capitalized; don't mix.
 - **References follow `infinifu:zettel-link-form`.** Every `## components` bullet, every in-repo path in `## api_surface` / `## sample` / prose uses the markdown link form `[<path>](../../<path>)`. AKM zettels stay `[[wikilink]]`; runtime paths stay in backticks. Load the microskill for the worked examples and anti-patterns.
+- **Don't hand-write the file.** Id allocation, frontmatter, the categorized H1, and the footer are the CLI's job (`akm ft write --category … --stdin`). The skill composes only the body sections and pipes them in. `ft write` is mint-only — supersede/deprecate/tighten edits an *existing* file in place (the CLI short-circuits on a duplicate alias rather than overwriting).
 
 </critical_rules>
 
@@ -209,8 +216,9 @@ Promote `proposed` → `stable` once a real Implementation lists this Feature in
 
 Before reporting the Feature written:
 
+- [ ] Minted via `akm ft write <alias> --category … --stdin` (not hand-written) — `Id: ft###` captured from stdout
 - [ ] File path is `$AKM_ROOT/docs/notes/ft###.md` (resolved via `akm-root`, not the current cwd)
-- [ ] Id is `max(existing) + 1`, zero-padded to 3
+- [ ] Id is `max(existing) + 1`, zero-padded to 3 (CLI enforces)
 - [ ] Frontmatter has `aliases:` (≥1), `status:` (lowercase from the four allowed values), `created:` ISO date
 - [ ] H1 has `# Feature` plus ≥1 `[[cat###]]` (resolving to existing files) plus `[[product]]`
 - [ ] Body sections in order: `## providing`, `## api_surface`, `## data_model`, `## sample`, `## components`
