@@ -93,16 +93,35 @@ Each entry skill's `## AKM hooks` block lists the read set. Survey concretely vi
 
 ### 7. Mint the zettel(s)
 
-Per the entry skill's `## AKM hooks` write set. The common write across all four:
+Per the entry skill's `## AKM hooks` write set. The common write across all
+four is the `sp###`, minted through the typed CLI so id allocation,
+frontmatter, the categorized H1, the `Index: [[board]]` footer, the board
+`## idea` registration, and staging all happen in one place:
 
-- `sp###` at `$AKM_ROOT/docs/notes/spec/sp<NNN>.md` — frontmatter `status: idea`, `Index: [[board]]`, body has `## problem` populated, H1 carries the proposed `[[cat###]]` picks.
-- `$AKM_ROOT/docs/board.md` — append `[[sp###|<title>]]` under `## idea`.
+```bash
+printf '## problem\n%s\n' "$problem_body" \
+  | akm sp write "$title-slug" --category cat003,cat006 --stdin
+# add --session to mint a claude_session_id + get a resume command back
+```
 
-Entry-specific writes (new `us###`, new `pn###`, severity annotation, etc.) live in the entry skill.
+- `--category` takes the proposed `[[cat###]]` picks (one or more,
+  comma-separated) — the H1 becomes `# Spec [[cat###]]... [[board]]`.
+- Capture the allocated id from the `Id: sp###` first line of stdout.
+- The CLI registers `[[sp###|<title>]]` under `docs/board.md ## idea` and
+  stages both files. Do **not** hand-write the spec file or edit board.md
+  directly.
+
+Entry-specific writes (new `us###`, new `pn###`, severity annotation, etc.)
+live in the entry skill — those use their own typed writers (`akm pn
+write`, etc.) or, where no typed writer exists yet, a staged write.
 
 ### 8. Stage on main
 
-`git -C "$AKM_ROOT" add docs/notes/spec/sp<NNN>.md docs/board.md` (plus any entry-specific paths the entry skill wrote on main). Do **not** commit — `spec-writing` handles the first commit when the idea graduates to a spec. See the per-stage table in `docs/notes/akm.md#workspace-resolution`.
+The `akm sp write` call already staged the spec + board.md. Stage any
+entry-specific paths the entry skill wrote (`git -C "$AKM_ROOT" add ...`).
+Do **not** commit — `spec-writing` handles the first commit when the idea
+graduates to a spec. See the per-stage table in
+`docs/notes/akm.md#workspace-resolution`.
 
 ### 9. Hand off to spec-writing
 

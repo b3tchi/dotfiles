@@ -183,9 +183,15 @@ sections and pipes them in.
 Per-type flags vary with the schema: `adr` carries `--category` (required)
 / `--title` / `--status`; `cat` is tagless and append-only at `status:
 stable`, so it drops all three; `pn` is tagless too but keeps `--status`
-(default `draft`) for its `draft → validated → retired` lifecycle. The
-pattern is otherwise identical. Both `cat` and `pn` are composed by a
-shared `compose_tagless_zettel` helper.
+(default `draft`) for its `draft → validated → retired` lifecycle; `sp` is
+the board citizen — `--category` (one or more cat###, comma-separated,
+required) drives its `# Spec [[cat###]]... [[board]]` H1, `--session` mints
+a `claude_session_id`, and the write registers the spec under `docs/board.md
+## idea`. The pattern is otherwise identical. `cat` and `pn` share the
+`compose_tagless_zettel` helper; `sp` (categorized + board-registered) has
+its own writer. Note: `sp write` mints the spec at `status: idea` only —
+the lifecycle transitions (`idea → spec → ready → done` status flips and
+board section moves) stay in the lifecycle skills, not the CLI.
 
 **Migration status** (sp004 — propagate the adr guinea-pig template to
 all six typed namespaces; one commit per type, scope is file-I/O only —
@@ -196,7 +202,7 @@ lifecycle verbs stay at the skill layer):
 | adr  | ✓      | ✓      | ✓               | `infinifu:adr-write`      |
 | cat  | ✓      | ✓      | ✓               | `infinifu:category-write` |
 | pn   | ✓      | ✓      | ✓               | `infinifu:persona-write`  |
-| sp   | —      | —      | —               | pending                   |
+| sp   | ✓      | ✓      | ✓               | `infinifu:idea-brainstorming` |
 | ft   | —      | —      | —               | pending                   |
 | us   | —      | —      | —               | pending                   |
 | im   | —      | —      | —               | pending                   |

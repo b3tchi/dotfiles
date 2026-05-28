@@ -987,6 +987,146 @@ def "main pn write" [
 }
 
 # ----------------------------------------------------------------------------
+# akm sp — Specs (board citizen; sp004 type 3/6)
+#
+# sp breaks the tagless mold: it is categorized (`# Spec [[cat###]]... [[board]]`,
+# per the AKM spec schema), indexed on `[[board]]` rather than `[[product]]`,
+# registered under `docs/board.md ## idea` on mint, and may carry a
+# `claude_session_id` (via --session) so a dedicated brainstorm session can
+# be resumed. Scope here is file-I/O mint only — the lifecycle verbs
+# (solution / refine / ready / done: status flips + board section moves)
+# stay at the skill layer and are out of sp004's scope.
+# ----------------------------------------------------------------------------
+
+def "main sp" [] {
+  print "akm sp — spec (board-citizen) operations"
+  print ""
+  print "Subcommands:"
+  print "  akm sp read <id>      print raw markdown of one spec"
+  print "  akm sp list           list specs (`--json` for pipeline)"
+  print "  akm sp write <name>   mint a new spec at status: idea"
+  print "    --category <ids>    required — one or more cat### (comma-separated)"
+  print "    --session           mint a claude_session_id + print a resume cmd"
+  print "    --stdin             read body markdown from stdin"
+  print "                          (otherwise mints stub with empty ## problem)"
+  print ""
+  print "Notes:"
+  print "  - Specs are categorized: `# Spec [[cat###]]... [[board]]`, indexed"
+  print "    on `[[board]]`, and registered under docs/board.md `## idea`."
+  print "  - Lifecycle verbs (solution/refine/ready/done) are NOT here — those"
+  print "    are status flips + board moves owned by the lifecycle skills."
+}
+
+def "main sp read" [id: string] {
+  if not ($id =~ '^sp\d{3}$') {
+    error make { msg: $"expected sp### form (e.g. sp012), got `($id)`" }
+  }
+  main read $id
+}
+
+def "main sp list" [--json] {
+  if $json {
+    main list sp --json
+  } else {
+    main list sp
+  }
+}
+
+# Mint a new spec. Categorized + board-registered, so this is its own writer
+# rather than the shared tagless one. --category accepts one or more cat###
+# (comma-separated); each must exist on disk (same dangling-link guard as
+# adr). Body comes from stdin (the brainstormer composes `## problem`); CLI
+# handles id allocation, frontmatter (+ session id), the `# Spec [[cat###]]...
+# [[board]]` H1, the `Index: [[board]]` footer, board `## idea` registration,
+# and staging.
+def "main sp write" [
+  name: string             # alphanumeric / dash / underscore — first alias
+  --category: string = ""  # required: one or more cat### ids, comma-separated
+  --session               # mint a claude_session_id + print a resume cmd
+  --stdin                 # read body from stdin (default: stub with empty ## problem)
+] {
+  validate_zettel_name $name
+  if ($category | is-empty) {
+    error make { msg: "--category is required (e.g. --category cat003 or --category cat003,cat006)" }
+  }
+  let cats = ($category | split row "," | each { |c| $c | str trim } | where { |c| not ($c | is-empty) })
+  for c in $cats {
+    if not ($c =~ '^cat\d{3}$') {
+      error make { msg: $"--category entries must be cat### form, got `($c)`" }
+    }
+  }
+  let root = (require_akm_root)
+
+  # Refuse to mint a spec pointing at a dangling cat wikilink — the H1 link
+  # would 404 in markdown-oxide. Same guard as `akm adr write`.
+  for c in $cats {
+    let cat_file = $"($root)/docs/notes/($c).md"
+    if not ($cat_file | path exists) {
+      error make { msg: $"category ($c) not found at ($cat_file) — run `akm cat list` to see existing categories" }
+    }
+  }
+
+  let dupe = (find_zettel $root $name)
+  if ($dupe != "") {
+    print -e $"already exists with this alias: ($dupe)"
+    return
+  }
+
+  let body = (if $stdin { (^cat | str trim) } else { "" })
+
+  let id = (next_id $root "sp")
+  let f = $"($root)/docs/notes/spec/($id).md"
+  let today = (date now | format date "%Y-%m-%d")
+  let session_id = (if $session { (random uuid) } else { "" })
+
+  let fm_base = [
+    "---"
+    "aliases:"
+    $"  - ($name)"
+    "status: idea"
+    $"created: ($today)"
+  ]
+  let fm = (if ($session_id != "") {
+    $fm_base | append $"claude_session_id: ($session_id)"
+  } else { $fm_base })
+
+  # Categorized H1: `# Spec [[cat003]] [[cat006]] [[board]]`.
+  let cat_links = ($cats | each { |c| $"[[($c)]]" } | str join " ")
+  let h1 = $"# Spec ($cat_links) [[board]]"
+
+  let body_block = (if ($body == "") {
+    ["## problem" ""]
+  } else {
+    [$body ""]
+  })
+  let footer = [
+    "---"
+    ""
+    "Index: [[board]]"
+    ""
+  ]
+
+  ($fm | append ["---" "" $h1 ""] | append $body_block | append $footer | str join "\n") | save -f $f
+
+  # Register on the board under ## idea (idempotent).
+  let board = $"($root)/docs/board.md"
+  if ($board | path exists) {
+    add_to_board_idea $board $id $name
+  } else {
+    print -e $"warn: ($board) missing — run `akm init ($root)` to scaffold"
+  }
+
+  ^git -C $root add $"docs/notes/spec/($id).md" $"docs/board.md" | ignore
+
+  print $"Id: ($id)"
+  print -e $"Path: ($f)"
+  print -e $"Staged docs/notes/spec/($id).md + docs/board.md"
+  if ($session_id != "") {
+    print -e $"Resume cmd: claude --session-id ($session_id) -n ($name).($id)"
+  }
+}
+
+# ----------------------------------------------------------------------------
 # akm adr — Architectural Decision Records (guinea pig for the per-type API)
 #
 # Each typed zettel namespace exposes the same shape: `akm <type> read`,
