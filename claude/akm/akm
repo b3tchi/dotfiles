@@ -93,7 +93,7 @@ def type_schema [t: string] {
     "ft"  => { type: "ft",  dir: "docs/notes",      digits: 3, status: "proposed", index: "product",
                sections: ["## providing" "## api_surface" "## data_model" "## sample" "## components"],         board: "" }
     "im"  => { type: "im",  dir: "docs/notes",      digits: 3, status: "proposed", index: "product",
-               sections: ["## solves" "## approach" "## data_model" "## api_surface" "## components" "## specs"], board: "" }
+               sections: ["## solves" "## approach" "## features" "## data_model" "## api_surface" "## components" "## specs"], board: "" }
     "adr" => { type: "adr", dir: "docs/notes",      digits: 4, status: "Proposed", index: "product",
                sections: ["## context" "## decision" "## consequences"],                                         board: "" }
     "cat" => { type: "cat", dir: "docs/notes",      digits: 3, status: "stable",   index: "product",
@@ -1527,6 +1527,157 @@ def "main us write" [
       "## because"
       ""
       "## acceptance_criteria"
+      ""
+    ]
+  } else {
+    [$body ""]
+  })
+  let footer = [
+    "---"
+    ""
+    "Index: [[product]]"
+    ""
+  ]
+
+  ($parts | append $body_block | append $footer | str join "\n") | save -f $f
+
+  ^git -C $root add $"docs/notes/($id).md" | ignore
+
+  print $"Id: ($id)"
+  print -e $"Path: ($f)"
+  print -e $"Staged docs/notes/($id).md"
+}
+
+# ----------------------------------------------------------------------------
+# akm im — Implementations (solution shapes; sp004 type 6/6, final)
+#
+# Categorized like ft (`# Implementation [[cat###]]... [[product]]`, shared
+# `parse_and_validate_cats` + `compose_h1_with_links`), but with one extra
+# load-bearing structural link: the mandatory `## solves [[us###|alias]]`
+# back-link to the story this card answers. `--solves us###` parallels adr's
+# `--category`: the CLI validates the story exists on disk, resolves its first
+# alias for the wikilink label, and injects the `## solves` section — so the
+# piped body carries only the narrative (approach onward). Born `status:
+# proposed`. `write` is mint-only; reshaping an accepted card is a new im### +
+# supersede at the skill layer (out of scope). `## components` paths are under
+# the user's cwd, not the AKM root — but that's the skill's concern; the CLI
+# writes whatever body it is handed.
+# ----------------------------------------------------------------------------
+
+def "main im" [] {
+  print "akm im — implementation (solution-shape) operations"
+  print ""
+  print "Subcommands:"
+  print "  akm im read <id>      print raw markdown of one implementation"
+  print "  akm im list           list implementations (`--json` for pipeline)"
+  print "  akm im write <name>   mint a new implementation at status: proposed"
+  print "    --category <ids>    required — one or more cat### (comma-separated)"
+  print "    --solves <us###>    required — the story this card solves"
+  print "                          (validated against an existing us### on disk)"
+  print "    --status <s>        optional — default proposed"
+  print "                          (proposed | accepted | superseded)"
+  print "    --stdin             read body markdown from stdin"
+  print "                          (otherwise mints stub with empty sections)"
+  print ""
+  print "Notes:"
+  print "  - The CLI injects `## solves [[us###|alias]]` from --solves; the"
+  print "    piped body carries the narrative only (## approach / ## features /"
+  print "    ## data_model / ## api_surface / ## components / ## specs)."
+  print "  - `write` is mint-only; reshaping an accepted card is a new im### +"
+  print "    supersede at the skill layer, not this verb."
+}
+
+def "main im read" [id: string] {
+  if not ($id =~ '^im\d{3}$') {
+    error make { msg: $"expected im### form (e.g. im007), got `($id)`" }
+  }
+  main read $id
+}
+
+def "main im list" [--json] {
+  if $json {
+    main list im --json
+  } else {
+    main list im
+  }
+}
+
+# Mint a new implementation. Categorized (shared cat helpers) plus a mandatory
+# `--solves us###` story back-link: validated to exist on disk, its first
+# alias resolved for the `[[us###|alias]]` label, and the `## solves` section
+# injected ahead of the piped narrative body. Body from stdin carries
+# ## approach / ## features / ## data_model / ## api_surface / ## components /
+# ## specs; CLI handles id, frontmatter, H1, the solves backlink, footer, and
+# staging.
+def "main im write" [
+  name: string             # alphanumeric / dash / underscore — first alias
+  --category: string = ""  # required: one or more cat### ids, comma-separated
+  --solves: string = ""    # required: the us### story this implementation solves
+  --status: string = "proposed"  # proposed | accepted | superseded
+  --stdin                 # read body from stdin (default: mint stub with empty sections)
+] {
+  validate_zettel_name $name
+  if ($status not-in ["proposed" "accepted" "superseded"]) {
+    error make { msg: $"--status must be one of proposed | accepted | superseded, got `($status)`" }
+  }
+  if ($solves | is-empty) {
+    error make { msg: "--solves is required (e.g. --solves us014) — every implementation answers a story" }
+  }
+  if not ($solves =~ '^us\d{3}$') {
+    error make { msg: $"--solves must be us### form, got `($solves)`" }
+  }
+  let root = (require_akm_root)
+
+  let cats = (parse_and_validate_cats $root $category)
+
+  # Verify the solved story exists on disk — refuse to mint an implementation
+  # whose `## solves` back-link would dangle. Mirrors the adr cat-exists guard.
+  let us_file = $"($root)/docs/notes/($solves).md"
+  if not ($us_file | path exists) {
+    error make { msg: $"story ($solves) not found at ($us_file) — run `akm us list` to see existing stories" }
+  }
+  let us_alias = (read_first_alias (open --raw $us_file))
+  let solves_label = (if ($us_alias | is-empty) { $solves } else { $"($solves)|($us_alias)" })
+
+  let dupe = (find_zettel $root $name)
+  if ($dupe != "") {
+    print -e $"already exists with this alias: ($dupe)"
+    return
+  }
+
+  let body = (if $stdin { (^cat | str trim) } else { "" })
+
+  let id = (next_id $root "im")
+  let f = $"($root)/docs/notes/($id).md"
+  let today = (date now | format date "%Y-%m-%d")
+
+  # The CLI owns the structural `## solves` back-link (validated + alias
+  # resolved); the narrative body sections come from stdin (or the stub).
+  let solves_block = ["## solves" $"[[($solves_label)]]" ""]
+  let parts = ([
+    "---"
+    "aliases:"
+    $"  - ($name)"
+    $"status: ($status)"
+    $"created: ($today)"
+    "---"
+    ""
+    (compose_h1_with_links "Implementation" $cats "product")
+    ""
+  ] | append $solves_block)
+  let body_block = (if ($body == "") {
+    [
+      "## approach"
+      ""
+      "## features"
+      ""
+      "## data_model"
+      ""
+      "## api_surface"
+      ""
+      "## components"
+      ""
+      "## specs"
       ""
     ]
   } else {

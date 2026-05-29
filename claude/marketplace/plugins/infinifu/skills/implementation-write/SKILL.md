@@ -156,8 +156,8 @@ digraph implementation_write {
     "Refine story first" [shape=box];
     "Pick categories + survey ADRs/Features" [shape=box];
     "Draft approach + body sections" [shape=box];
-    "Write im###.md + annotate hub" [shape=box];
-    "Stage on main" [shape=box];
+    "akm im write --solves --category --stdin (allocates id, stages)" [shape=box];
+    "Annotate hub" [shape=box];
     "Confirm with user" [shape=doublecircle];
 
     "Resolve AKM root" -> "Target story given?";
@@ -167,9 +167,9 @@ digraph implementation_write {
     "Story status: ready?" -> "Refine story first" [label="draft"];
     "Story status: ready?" -> "Pick categories + survey ADRs/Features" [label="ready"];
     "Pick categories + survey ADRs/Features" -> "Draft approach + body sections";
-    "Draft approach + body sections" -> "Write im###.md + annotate hub";
-    "Write im###.md + annotate hub" -> "Stage on main";
-    "Stage on main" -> "Confirm with user";
+    "Draft approach + body sections" -> "akm im write --solves --category --stdin (allocates id, stages)";
+    "akm im write --solves --category --stdin (allocates id, stages)" -> "Annotate hub";
+    "Annotate hub" -> "Confirm with user";
 }
 ```
 
@@ -179,7 +179,7 @@ digraph implementation_write {
 `AKM_ROOT="$(akm-root)"`. Every subsequent path anchors on it. Abort with the helper's stderr if it errors — don't fall back to cwd silently when on a feature-branch worktree.
 
 ### Step 1 — Anchor the story
-Read `$AKM_ROOT/docs/notes/us###.md`. Pull first alias for `[[us###|<alias>]]`. If `status: draft`, push back once: *"Story `usNNN` is still `draft`. Implementations should anchor on a `ready` story so acceptance criteria are stable. Refine first via `infinifu:story-write`, or proceed if you accept the approach may need revisiting."* No story → stop, route to `infinifu:story-write`.
+Read `$AKM_ROOT/docs/notes/us###.md`. If `status: draft`, push back once: *"Story `usNNN` is still `draft`. Implementations should anchor on a `ready` story so acceptance criteria are stable. Refine first via `infinifu:story-write`, or proceed if you accept the approach may need revisiting."* No story → stop, route to `infinifu:story-write`. You don't need to hand-build the `[[us###|alias]]` link — `akm im write --solves us###` (Step 8) validates the story exists and resolves its first alias for the `## solves` back-link.
 
 ### Step 2 — Pick categories for the H1
 `ls "$AKM_ROOT/docs/notes/"cat*.md`; read frontmatter `aliases` for labels. Pick 1–3 that the solution actually touches; >3 is a smell. Missing category → route to `category-write` (or inline-create per the AKM Category schema). H1 reads `# Implementation [[cat###]] [[cat###]] [[product]]` — categories first, `[[product]]` last.
@@ -210,8 +210,19 @@ In `proposed` status, these can be educated guesses; the spec-retro pass updates
 ### Step 7 — `## specs`
 Transient spec(s) that touched or delivered this card. Empty for a fresh `proposed`. Each entry is a wikilink to a `[[sp###]]` zettel under `docs/notes/spec/`. While active, the board.md index shows that `sp###` under `## spec` / `## ready`; once shipped the entry moves to `docs/archive.md ## done`. Add as specs land; don't pre-populate.
 
-### Step 8 — Generate the id, write the zettel
-IDs are `im` + 3-digit zero-padded sequential. `ls "$AKM_ROOT/docs/notes/"im*.md`, take max + 1 (never reuse gaps), zero-pad. Compose per the `<schema>` block above (see `references/examples.md` for worked examples). Write to `$AKM_ROOT/docs/notes/im<NNN>.md`. ISO date for `created`. moxide LSP parses on the section headings — order matches the schema.
+### Step 8 — Write via the CLI
+Pipe the **narrative body** (the sections from `## approach` onward — `## approach / ## features / ## data_model / ## api_surface / ## components / ## specs`; **no `## solves`, no frontmatter, no H1, no footer**) to the typed writer. The CLI injects the `## solves [[us###|alias]]` back-link from `--solves` (validated + alias-resolved), allocates the id, writes frontmatter + the categorized H1 + footer, and stages the file:
+
+```bash
+printf '## approach\n%s\n\n## features\n%s\n\n## data_model\n%s\n\n## api_surface\n%s\n\n## components\n%s\n\n## specs\n%s\n' \
+  "$approach" "$features" "$data_model" "$api_surface" "$components" "$specs" \
+  | akm im write "$slug" --category cat003,cat006 --solves us014 --stdin   # --status accepted only after the spec ships
+```
+
+- `$slug` is a **kebab-case slug** (letters/digits/dash/underscore only — the CLI rejects spaces or prose); it becomes `aliases[0]`.
+- `--solves us###` is **required** and validated against an existing story on disk — a dangling story id is refused. The CLI reads the story's first alias and emits `## solves\n[[us###|alias]]` as the first body section, so don't compose that line yourself.
+- `--category` takes the H1 picks (one or more, comma-separated; each must resolve to an existing `cat###`).
+- Capture the id from the `Id: im###` first line of stdout. The CLI owns id allocation (max + 1, gaps never reused), frontmatter, the H1, the `## solves` back-link, and `git add`. Do **not** hand-write the file. If the alias already exists the CLI short-circuits without overwriting — treat that as a reshape and write a *new* card to supersede instead.
 
 ### Step 9 — Update `$AKM_ROOT/docs/product.md`
 Annotate the story bullet in `## Stories`:
@@ -220,16 +231,9 @@ Annotate the story bullet in `## Stories`:
 - [[us014|bulk import requests from spreadsheet]] >> [[im007]]
 ```
 
-Hub missing → skip and tell the user: *"Hub `docs/product.md` not found in `$AKM_ROOT`; im### is on disk but not annotated."*
+Hub missing → skip and tell the user: *"Hub `docs/product.md` not found in `$AKM_ROOT`; im### is on disk but not annotated."* Stage the hub edit too (`git -C "$AKM_ROOT" add docs/product.md`) — the CLI already staged the `im###.md`.
 
-### Step 10 — Stage on main
-Implementations evolve through their lifecycle; this writer does **not** commit. Stage from the AKM root so the file shows in `git status` on main and the next lifecycle skill (`spec-refinement`) picks it up in its commit:
-
-```bash
-git -C "$AKM_ROOT" add docs/notes/im<NNN>.md docs/product.md
-```
-
-### Step 11 — Confirm
+### Step 10 — Confirm
 Show: id + absolute path under `$AKM_ROOT`, story solved, H1 categories, Features consumed (with status), one-line approach summary, hub annotation status, staging state on main (no commit). Ask once: *"Anything to revise?"* If yes, edit in place. If no/no-response, done.
 
 **Next step prompt:** *"`im###` is `proposed`. Next: `infinifu:spec-writing` writes `## solution` on the existing `sp###` (status flips `idea → spec`) against this card. The card flips to `accepted` after the spec ships (via `spec-retro`)."*
@@ -246,6 +250,7 @@ Show: id + absolute path under `$AKM_ROOT`, story solved, H1 categories, Feature
 - **Categories are first-class.** They're the *only* index back to relevant ADRs and the hub. Defaulting to `architecture` makes the card unfindable.
 - **Spec is the plan; Implementation is the shape.** *"How will we sequence the work"* → `spec-writing`, not this skill.
 - **No `## features` re-implementation.** User lists a Feature then describes its internals → push back; either the Feature contract is wrong or the card is duplicating known state.
+- **Don't hand-write the file.** Id allocation, frontmatter, the categorized H1, the `## solves` back-link (from `--solves`), the footer, and staging are the CLI's job (`akm im write --category … --solves us### --stdin`). The skill composes only the narrative body (`## approach` onward) and pipes it in. `write` is mint-only — reshaping an `accepted` card is a new im### + supersede, never an in-place rewrite.
 
 </critical_rules>
 
@@ -253,9 +258,10 @@ Show: id + absolute path under `$AKM_ROOT`, story solved, H1 categories, Feature
 
 Before reporting the Implementation written:
 
+- [ ] Minted via `akm im write <slug> --category … --solves us### --stdin` (not hand-written) — `Id: im###` captured from stdout
 - [ ] File path is `$AKM_ROOT/docs/notes/im###.md` (resolved via `akm-root`, not the current cwd)
-- [ ] Id is `max(existing) + 1`, zero-padded to 3
-- [ ] Exactly one `## solves [[us###]]` back-link, resolving to an existing story file under `$AKM_ROOT/docs/notes/`
+- [ ] Id is `max(existing) + 1`, zero-padded to 3 (CLI enforces)
+- [ ] Exactly one `## solves [[us###]]` back-link (CLI-injected from `--solves`), resolving to an existing story file under `$AKM_ROOT/docs/notes/`
 - [ ] H1 has `# Implementation` plus ≥1 `[[cat###]]` plus `[[product]]`
 - [ ] Body sections in order: `## solves`, `## approach`, `## features`, `## data_model`, `## api_surface`, `## components`, `## specs` (+ `## superseded_by` only when `superseded`)
 - [ ] Hub annotated in `$AKM_ROOT/docs/product.md` (or skipped with note if hub missing)

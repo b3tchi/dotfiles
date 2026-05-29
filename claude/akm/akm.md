@@ -193,20 +193,26 @@ more, required) drives its `# Feature [[cat###]]... [[product]]` H1 and
 → superseded` lifecycle. `us` carries arbitrary **tag** slugs in its H1
 (`--tags`, comma-separated, optional) — NOT validated `cat###`; story tags
 may dangle — yielding `# Story [[tag]]... [[product]]`, born `status:
-draft`. The pattern is otherwise identical.
+draft`. `im` is categorized like `ft` (`--category`, default `status:
+proposed`) plus one extra required flag — `--solves us###`, the story
+back-link: the CLI validates the story exists on disk, resolves its first
+alias, and injects `## solves [[us###|alias]]` as the first body section
+(so the piped body carries the narrative from `## approach` onward). The
+pattern is otherwise identical.
 
 Helper sharing: `cat` and `pn` (tagless) share `compose_tagless_zettel`;
-the categorized writers (`adr`, `sp`, `ft`) share `parse_and_validate_cats`
-(comma-separated cat### parse + dangling-link guard). The H1 builder
-`compose_h1_with_links` (`# <Word> [[link]]... [[index]]`) is shared more
-widely — by the categorized writers (links = validated cat###) and by `us`
-(links = arbitrary unvalidated tag slugs); an empty link list collapses to
-`# <Word> [[index]]`. `sp` adds board registration + `--session` on top.
-Note: `sp write` mints at `status: idea` only and `ft write` / `us write`
-are mint-only — the lifecycle transitions (sp `idea → spec → ready → done`
-status flips + board moves; ft supersede/deprecate chains; us
-`draft → ready → …` flips) stay in the lifecycle / writer skills, not the
-CLI.
+the categorized writers (`adr`, `sp`, `ft`, `im`) share
+`parse_and_validate_cats` (comma-separated cat### parse + dangling-link
+guard). The H1 builder `compose_h1_with_links` (`# <Word> [[link]]...
+[[index]]`) is shared widest — by every categorized writer (links =
+validated cat###) and by `us` (links = arbitrary unvalidated tag slugs);
+an empty link list collapses to `# <Word> [[index]]`. `sp` adds board
+registration + `--session`; `im` adds the validated `--solves` back-link.
+Note: `sp write` mints at `status: idea` only, and `ft` / `us` / `im`
+writes are mint-only — the lifecycle transitions (sp `idea → spec → ready
+→ done` status flips + board moves; ft supersede/deprecate chains; us
+`draft → ready → …` flips; im `proposed → accepted → superseded`) stay in
+the lifecycle / writer skills, not the CLI.
 
 **Migration status** (sp004 — propagate the adr guinea-pig template to
 all six typed namespaces; one commit per type, scope is file-I/O only —
@@ -220,12 +226,15 @@ lifecycle verbs stay at the skill layer):
 | sp   | ✓      | ✓      | ✓               | `infinifu:idea-brainstorming` |
 | ft   | ✓      | ✓      | ✓               | `infinifu:feature-write`  |
 | us   | ✓      | ✓      | ✓               | `infinifu:story-write`    |
-| im   | —      | —      | —               | pending                   |
+| im   | ✓      | ✓      | ✓               | `infinifu:implementation-write` |
 
-Pending types still ride the flat `akm write <type> <name>` form (stub
-output) and their owning skills still compose bodies via raw
-`$AKM_ROOT/docs/notes/...` writes. Both forms coexist until every type
-has migrated; the flat form is retired in a later cleanup spec.
+**All six typed namespaces are migrated** — sp004 complete. The flat
+`akm write <type> <name>` form still exists as a back-compat alias (it
+shares `next_id` / `type_schema` and emits an empty-section stub), but no
+owning skill composes raw `$AKM_ROOT/docs/notes/...` bodies anymore.
+Retiring the flat form, and adding a CLI supersession verb (`akm <type>
+supersede`), are deferred to later cleanup specs per sp004's out-of-scope
+list.
 
 ---
 
