@@ -10,6 +10,4 @@ sections when status flips.
 
 ## spec
 
-- [[sp004|propagate-per-type-api]]
-
 ## ready
