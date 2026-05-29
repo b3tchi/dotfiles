@@ -207,8 +207,9 @@ pattern is otherwise identical. `poc` is categorized like `im`
 [[board]]`) — it is board-adjacent evidence, not product knowledge. Its
 back-link `--informs sp###` records which spec's `## solution` the PoC
 de-risks; this is the common case, since the confidence gate fires
-*during* spec-writing once the `sp###` already exists. It also accepts
-`us###` and may be omitted for a standalone spike; when given it injects
+*after* spec-writing has written the `## solution` (the `sp###` is at
+`status: spec`). It also accepts `us###` and may be omitted for a
+standalone spike; when given it injects
 `## informs [[id|alias]]` ahead of the piped body (`## hypothesis /
 ## method / ## result / ## recommendation`).
 
@@ -581,8 +582,9 @@ Index: [[archive]]    # once status = done
 
 **Purpose.** Proof-of-concept lab notebook. Records a throwaway de-risking
 experiment run at the **spec-writing confidence gate** (the solution-domain
-loop between spec-writing and spec-refinement) to validate — or kill — a
-chosen `## solution` *before* spec-refinement invests in a task plan. The
+loop after spec-writing has written the `## solution`, before
+spec-refinement) to validate — or kill — that written `## solution`
+*before* spec-refinement invests in a task plan. The
 code is disposable (a discarded `poc/<slug>` worktree); the recorded verdict
 is the deliverable. Board-adjacent, not a board citizen: it is *evidence
 feeding* a spec, never a deliverable itself, so it is not listed on
