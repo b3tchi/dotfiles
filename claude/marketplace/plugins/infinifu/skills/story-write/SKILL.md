@@ -24,9 +24,7 @@ digraph story_create {
     "Gather acceptance criteria" [shape=box];
     "Pick persona" [shape=box];
     "Gather H1 tags (optional)" [shape=box];
-    "Generate id (us###)" [shape=box];
-    "Write us###.md zettel" [shape=box];
-    "Stage on main" [shape=box];
+    "akm us write --stdin (allocates id, stages)" [shape=box];
     "Confirm with user" [shape=doublecircle];
 
     "Resolve AKM root" -> "Storage exists?";
@@ -36,10 +34,8 @@ digraph story_create {
     "Gather Connextra fields" -> "Gather acceptance criteria";
     "Gather acceptance criteria" -> "Pick persona";
     "Pick persona" -> "Gather H1 tags (optional)";
-    "Gather H1 tags (optional)" -> "Generate id (us###)";
-    "Generate id (us###)" -> "Write us###.md zettel";
-    "Write us###.md zettel" -> "Stage on main";
-    "Stage on main" -> "Confirm with user";
+    "Gather H1 tags (optional)" -> "akm us write --stdin (allocates id, stages)";
+    "akm us write --stdin (allocates id, stages)" -> "Confirm with user";
 }
 ```
 
@@ -141,13 +137,7 @@ New stories default to `draft`.
 
 IDs are `us` + three-digit zero-padded sequential (`us001`, `us002`, …). Not date-bucketed — the AKM model uses pure sequential ids so wikilinks like `[[us001]]` stay stable forever.
 
-1. List existing story zettels: `ls "$AKM_ROOT/docs/notes/"us*.md` (or in-process equivalent).
-2. Extract the numeric portion of each filename. Find max, add 1.
-3. Zero-pad to 3 digits. If no existing stories, start at `001`.
-
-Example: `us001.md`, `us002.md`, `us013.md` exist → next is `us014`.
-
-If a gap exists (e.g. `us003.md` is missing because the story was dropped), do **not** reuse — gaps preserve historical context. Always take max + 1.
+**The CLI owns id allocation** — `akm us write` takes the max numeric portion of existing `us*.md` files + 1, zero-padded to 3 digits, gaps never reused (a dropped `us003` stays a gap). You don't compute the id; you capture it from the `Id: us###` first line of the CLI's stdout. The detail here is just so you understand what the returned id means.
 
 ## Gathering Story Content
 
@@ -261,7 +251,7 @@ These are **optional** and **may dangle** — `[[requestor-flow]]` is fine even 
 
 1. Invoke `tag-manage` in suggest mode with the draft story's role/want/because/criteria as input.
 2. It returns 1-4 suggested tags as bare wikilink targets (e.g. `requestor-flow`, `catalog`).
-3. Render them as `[[<tag>]]` in the H1, before `[[product]]`.
+3. Pass them to `akm us write` via `--tags requestor-flow,catalog` (comma-separated, no brackets) — the CLI renders them as `[[<tag>]]` before `[[product]]` in the H1.
 4. **If the user did not explicitly specify tags, flag in your confirmation** which tags came from the suggester. Same derivation-flag rule as for acceptance criteria.
 
 **If the user explicitly listed tags in their message** (e.g. "tag this with requestor-flow and catalog"), use them verbatim — skip the suggester. tag-manage's `add` mode is for after-the-fact tagging.
@@ -270,15 +260,32 @@ These are **optional** and **may dangle** — `[[requestor-flow]]` is fine even 
 
 ## Writing the Zettel
 
-Compose the full markdown file per the schema above. Write to `$AKM_ROOT/docs/notes/us<NNN>.md` using the generated id.
-
-After the file is on disk, stage it on main so it shows up in `git status`
-and isn't lost between worktrees:
+Pipe the composed body (the four `## role / ## want / ## because /
+## acceptance_criteria` sections only — no frontmatter, no H1, no footer) to
+the typed writer, which allocates the id, writes frontmatter + the tagged
+`# Story [[tag]]... [[product]]` H1 + footer, and stages the file on main:
 
 ```bash
-git -C "$AKM_ROOT" add "docs/notes/us<NNN>.md"
-# If the hub was updated (see below), also: docs/product.md
+printf '## role\n[[%s|%s]]\n\n## want\n%s\n\n## because\n%s\n\n## acceptance_criteria\n%s\n' \
+  "$pn_id" "$persona_alias" "$want" "$because" "$criteria_bullets" \
+  | akm us write "$slug" --tags requestor-flow,import --stdin
 ```
+
+- `$slug` is the **first alias as a kebab-case slug** (letters/digits/dash/
+  underscore only — the CLI rejects spaces and prose). It becomes
+  `aliases[0]`. If the natural title has spaces, slugify it for the argument;
+  the human-readable title can be refined in the file afterward if needed.
+- `--tags` takes the optional H1 tag slugs (comma-separated, arbitrary, may
+  dangle). Omit it for a tagless `# Story [[product]]`.
+- The `## role` body line holds the `[[pn###|alias]]` persona link (see
+  "Picking the Persona"); the CLI does not resolve personas — you compose
+  that line into the piped body.
+- Capture the allocated id from the `Id: us###` first line of stdout.
+
+The CLI owns id allocation, frontmatter, the H1, the `Index: [[product]]`
+footer, and `git add`. Do **not** hand-write the file. If the alias already
+exists the CLI short-circuits without overwriting — treat that as a revision
+and edit the existing file in place instead.
 
 Do **not** commit at this stage — `story-write` produces a `draft` artifact.
 `spec-writing` (the next lifecycle skill) commits the accumulated AKM changes

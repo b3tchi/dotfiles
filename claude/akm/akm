@@ -275,12 +275,15 @@ def parse_and_validate_cats [root: string, category: string] {
   $cats
 }
 
-# Build a categorized H1 line: `# <Word> [[cat003]] [[cat006]] [[index]]`.
-# `index_target` is the hub the type indexes under — `product` for adr / ft,
-# `board` for sp. Shared by the categorized writers.
-def categorized_h1 [type_word: string, cats: list<string>, index_target: string] {
-  let cat_links = ($cats | each { |c| $"[[($c)]]" } | str join " ")
-  $"# ($type_word) ($cat_links) [[($index_target)]]"
+# Build an H1 line: `# <Word> [[link]] [[link]]... [[index]]`. The leading
+# links are either validated categories (adr / sp / ft, via
+# `parse_and_validate_cats`) or arbitrary tag slugs (us, which may dangle).
+# `index_target` is the hub the type indexes under — `product` for adr / ft /
+# us, `board` for sp. An empty `links` list yields `# <Word> [[index]]`
+# (no double space), so a tagless story is still well-formed.
+def compose_h1_with_links [type_word: string, links: list<string>, index_target: string] {
+  let all = ($links | each { |c| $"[[($c)]]" } | append $"[[($index_target)]]" | str join " ")
+  $"# ($type_word) ($all)"
 }
 
 # Insert `- [[sp_id|name]]` under `## idea` of docs/board.md. Idempotent —
@@ -1110,7 +1113,7 @@ def "main sp write" [
     $fm_base | append $"claude_session_id: ($session_id)"
   } else { $fm_base })
 
-  let h1 = (categorized_h1 "Spec" $cats "board")
+  let h1 = (compose_h1_with_links "Spec" $cats "board")
 
   let body_block = (if ($body == "") {
     ["## problem" ""]
@@ -1262,7 +1265,7 @@ def "main adr write" [
     $"created: ($today)"
     "---"
     ""
-    (categorized_h1 "ADR" $cats "product")
+    (compose_h1_with_links "ADR" $cats "product")
     ""
     "## title"
     $final_title
@@ -1352,7 +1355,7 @@ def "main ft list" [--json] {
 }
 
 # Mint a new feature. Categorized + product-indexed, so it uses the shared
-# categorized helpers (parse_and_validate_cats + categorized_h1) but composes
+# categorized helpers (parse_and_validate_cats + compose_h1_with_links) but composes
 # its own structured stub. Body comes from stdin (the skill composes the
 # providing/api_surface/data_model/sample/components sections, plus optional
 # depends_on/superseded_by); CLI handles id, frontmatter, H1, footer, staging.
@@ -1390,7 +1393,7 @@ def "main ft write" [
     $"created: ($today)"
     "---"
     ""
-    (categorized_h1 "Feature" $cats "product")
+    (compose_h1_with_links "Feature" $cats "product")
     ""
   ])
   let body_block = (if ($body == "") {
@@ -1404,6 +1407,126 @@ def "main ft write" [
       "## sample"
       ""
       "## components"
+      ""
+    ]
+  } else {
+    [$body ""]
+  })
+  let footer = [
+    "---"
+    ""
+    "Index: [[product]]"
+    ""
+  ]
+
+  ($parts | append $body_block | append $footer | str join "\n") | save -f $f
+
+  ^git -C $root add $"docs/notes/($id).md" | ignore
+
+  print $"Id: ($id)"
+  print -e $"Path: ($f)"
+  print -e $"Staged docs/notes/($id).md"
+}
+
+# ----------------------------------------------------------------------------
+# akm us — Stories (product requirements; sp004 type 5/6)
+#
+# us carries arbitrary TAG wikilinks in its H1 (`# Story [[tag]]... [[product]]`),
+# not validated `[[cat###]]` — tags are free slugs that may dangle (the moxide
+# LSP flags them as soft diagnostics; users tolerate conceptual tags). So us
+# uses the shared `compose_h1_with_links` builder but skips
+# `parse_and_validate_cats` — tags are split on comma with no existence check.
+# Body is the Connextra shape: `## role` (a [[pn###|alias]] link the skill
+# composes) / ## want / ## because / ## acceptance_criteria. Born `status:
+# draft`, indexed on [[product]]. `write` is mint-only; revising a story is an
+# in-place edit (the CLI short-circuits on a duplicate alias).
+# ----------------------------------------------------------------------------
+
+def "main us" [] {
+  print "akm us — story (product requirement) operations"
+  print ""
+  print "Subcommands:"
+  print "  akm us read <id>      print raw markdown of one story"
+  print "  akm us list           list stories (`--json` for pipeline)"
+  print "  akm us write <name>   mint a new story at status: draft"
+  print "    --tags <slugs>      optional — one or more H1 tag slugs"
+  print "                          (comma-separated, arbitrary, may dangle)"
+  print "    --stdin             read body markdown from stdin"
+  print "                          (otherwise mints stub with empty sections)"
+  print ""
+  print "Notes:"
+  print "  - Tags are free slugs, NOT cat### — they are not validated and may"
+  print "    dangle. H1 becomes `# Story [[tag]]... [[product]]` (or just"
+  print "    `# Story [[product]]` with no tags)."
+  print "  - Body sections: `## role / ## want / ## because /"
+  print "    ## acceptance_criteria` (## role is a [[pn###|alias]] link)."
+  print "  - `write` is mint-only; revising a story is an in-place edit."
+}
+
+def "main us read" [id: string] {
+  if not ($id =~ '^us\d{3}$') {
+    error make { msg: $"expected us### form (e.g. us014), got `($id)`" }
+  }
+  main read $id
+}
+
+def "main us list" [--json] {
+  if $json {
+    main list us --json
+  } else {
+    main list us
+  }
+}
+
+# Mint a new story. Tags are arbitrary slugs (split on comma, no validation —
+# they intentionally may dangle), composed into the H1 via the shared
+# `compose_h1_with_links` builder. Body comes from stdin (the skill composes
+# the role/want/because/acceptance_criteria sections, with ## role holding a
+# [[pn###|alias]] link); CLI handles id, frontmatter, H1, footer, and staging.
+def "main us write" [
+  name: string             # alphanumeric / dash / underscore — first alias
+  --tags: string = ""      # optional: one or more H1 tag slugs, comma-separated
+  --stdin                 # read body from stdin (default: mint stub with empty sections)
+] {
+  validate_zettel_name $name
+  let root = (require_akm_root)
+
+  # Tags are free slugs — split + trim + drop empties, but DO NOT validate
+  # against on-disk files (unlike categories, story tags may dangle).
+  let tags = ($tags | split row "," | each { |t| $t | str trim } | where { |t| not ($t | is-empty) })
+
+  let dupe = (find_zettel $root $name)
+  if ($dupe != "") {
+    print -e $"already exists with this alias: ($dupe)"
+    return
+  }
+
+  let body = (if $stdin { (^cat | str trim) } else { "" })
+
+  let id = (next_id $root "us")
+  let f = $"($root)/docs/notes/($id).md"
+  let today = (date now | format date "%Y-%m-%d")
+
+  let parts = ([
+    "---"
+    "aliases:"
+    $"  - ($name)"
+    "status: draft"
+    $"created: ($today)"
+    "---"
+    ""
+    (compose_h1_with_links "Story" $tags "product")
+    ""
+  ])
+  let body_block = (if ($body == "") {
+    [
+      "## role"
+      ""
+      "## want"
+      ""
+      "## because"
+      ""
+      "## acceptance_criteria"
       ""
     ]
   } else {

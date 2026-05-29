@@ -152,7 +152,7 @@ digraph category_create {
      | akm cat write "$name" --stdin
    ```
 
-   Capture the allocated id from the structured `Id: cat###` first line of stdout. The CLI owns id allocation (max existing + 1, gaps never reused), frontmatter shape, the tagless `# Category [[product]]` H1, the `Index: [[product]]` footer, and `git add`. Do **not** hand-write the file. If the alias already exists the CLI short-circuits and prints the existing path — treat that as the duplicate-check failing and stop.
+   The `<name>` argument is a **kebab-case slug** (letters/digits/dash/underscore only) — it becomes `aliases[0]`; the CLI rejects spaces or prose. Capture the allocated id from the structured `Id: cat###` first line of stdout. The CLI owns id allocation (max existing + 1, gaps never reused), frontmatter shape, the tagless `# Category [[product]]` H1, the `Index: [[product]]` footer, and `git add`. Do **not** hand-write the file. If the alias already exists the CLI short-circuits and prints the existing path — treat that as the duplicate-check failing and stop.
 6. **Update the hub.** Append `### [[cat###|<name>]]` under `## Architecture Decision Records` in `$AKM_ROOT/docs/product.md`, initially with no ADR bullets. Skip and warn if the hub does not exist.
 7. **Commit on main.** Categories are stable from birth — land the staged file (already `git add`ed by the CLI) and the hub edit in one commit:
 

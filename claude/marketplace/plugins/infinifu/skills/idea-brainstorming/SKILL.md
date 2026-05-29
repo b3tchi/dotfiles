@@ -104,6 +104,8 @@ printf '## problem\n%s\n' "$problem_body" \
 # add --session to mint a claude_session_id + get a resume command back
 ```
 
+- `$title-slug` is a **kebab-case slug** (letters/digits/dash/underscore
+  only — the CLI rejects spaces or prose); it becomes `aliases[0]`.
 - `--category` takes the proposed `[[cat###]]` picks (one or more,
   comma-separated) — the H1 becomes `# Spec [[cat###]]... [[board]]`.
 - Capture the allocated id from the `Id: sp###` first line of stdout.

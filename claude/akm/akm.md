@@ -190,16 +190,22 @@ a `claude_session_id`, and the write registers the spec under `docs/board.md
 ## idea`. `ft` is categorized + product-indexed — `--category` (one or
 more, required) drives its `# Feature [[cat###]]... [[product]]` H1 and
 `--status` (default `proposed`) covers its `proposed → stable → deprecated
-→ superseded` lifecycle. The pattern is otherwise identical.
+→ superseded` lifecycle. `us` carries arbitrary **tag** slugs in its H1
+(`--tags`, comma-separated, optional) — NOT validated `cat###`; story tags
+may dangle — yielding `# Story [[tag]]... [[product]]`, born `status:
+draft`. The pattern is otherwise identical.
 
 Helper sharing: `cat` and `pn` (tagless) share `compose_tagless_zettel`;
 the categorized writers (`adr`, `sp`, `ft`) share `parse_and_validate_cats`
-(comma-separated cat### parse + dangling-link guard) and `categorized_h1`
-(the `# <Word> [[cat###]]... [[index]]` builder). `sp` adds board
-registration + `--session` on top. Note: `sp write` mints at `status:
-idea` only and `ft write` is mint-only — the lifecycle transitions (sp
-`idea → spec → ready → done` status flips + board moves; ft
-supersede/deprecate chains) stay in the lifecycle / writer skills, not the
+(comma-separated cat### parse + dangling-link guard). The H1 builder
+`compose_h1_with_links` (`# <Word> [[link]]... [[index]]`) is shared more
+widely — by the categorized writers (links = validated cat###) and by `us`
+(links = arbitrary unvalidated tag slugs); an empty link list collapses to
+`# <Word> [[index]]`. `sp` adds board registration + `--session` on top.
+Note: `sp write` mints at `status: idea` only and `ft write` / `us write`
+are mint-only — the lifecycle transitions (sp `idea → spec → ready → done`
+status flips + board moves; ft supersede/deprecate chains; us
+`draft → ready → …` flips) stay in the lifecycle / writer skills, not the
 CLI.
 
 **Migration status** (sp004 — propagate the adr guinea-pig template to
@@ -213,7 +219,7 @@ lifecycle verbs stay at the skill layer):
 | pn   | ✓      | ✓      | ✓               | `infinifu:persona-write`  |
 | sp   | ✓      | ✓      | ✓               | `infinifu:idea-brainstorming` |
 | ft   | ✓      | ✓      | ✓               | `infinifu:feature-write`  |
-| us   | —      | —      | —               | pending                   |
+| us   | ✓      | ✓      | ✓               | `infinifu:story-write`    |
 | im   | —      | —      | —               | pending                   |
 
 Pending types still ride the flat `akm write <type> <name>` form (stub

@@ -160,7 +160,7 @@ digraph persona_create {
      | akm pn write "$alias" --stdin          # add --status validated if appropriate
    ```
 
-   Capture the allocated id from the structured `Id: pn###` first line of stdout. The CLI owns id allocation (max + 1, gaps never reused), frontmatter, the tagless H1, the `Index: [[product]]` footer, and `git add`. Do **not** hand-write the file and do **not** touch `$AKM_ROOT/docs/product.md` — personas surface in the hub via stories (see `critical_rules`). If the alias already exists the CLI short-circuits without overwriting; treat that as "this is a revision" and edit the existing file in place instead.
+   The `$alias` argument is the **kebab-case slug** (letters/digits/dash/underscore only — `field-sales-rep`, not "Field Sales Rep"); the CLI rejects spaces or prose and stores it as `aliases[0]`. Capture the allocated id from the structured `Id: pn###` first line of stdout. The CLI owns id allocation (max + 1, gaps never reused), frontmatter, the tagless H1, the `Index: [[product]]` footer, and `git add`. Do **not** hand-write the file and do **not** touch `$AKM_ROOT/docs/product.md` — personas surface in the hub via stories (see `critical_rules`). If the alias already exists the CLI short-circuits without overwriting; treat that as "this is a revision" and edit the existing file in place instead.
 
 6. **Confirm.** Show id + absolute file path (so the user sees the AKM root when invoked from a worktree), the canonical alias (*"Stories will reference this as `[[pn<NNN>|<alias>]]`"*), the name + one-line summary gist, the status, the open-questions count, the staging state on main, and note that the hub was **not** updated. Ask once: *"Anything to revise?"* If yes, edit in place.
 
