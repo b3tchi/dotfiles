@@ -81,10 +81,15 @@ back into the spec's `## solution`.
 
 ## 1. Frame a falsifiable hypothesis
 
+First, **check for an existing PoC**: `akm poc list` (or grep `docs/notes/lab/`)
+for a `poc###` already informing this `sp###` or testing the same assumption.
+If one settled the question, cite it and skip — don't re-run a spike someone
+already paid for.
+
 "Approach X works" is not testable. The smallest claim that, if true, removes
 the risk *is*: "nushell can drive an fzf picker inside a tmux popup without TTY
 breakage". If you cannot state it falsifiably, you do not yet know what you are
-de-risking — go back to brainstorming and find the real unknown.
+de-risking — go back to spec-writing and pin the real unknown.
 
 ## 2. Resolve AKM root
 
@@ -134,6 +139,7 @@ the hypothesis and rerun.
 printf '## hypothesis\n%s\n\n## method\n%s\n\n## result\n%s\n\n## recommendation\n%s\n' \
   "$hypothesis" "$method" "$result" "$recommendation" \
   | akm poc write "$slug" --category cat003 --informs sp012 --status validated --stdin
+# cat003 / sp012 are PLACEHOLDERS — use the de-risked spec's real category + id
 # --informs sp###     the spec whose ## solution this PoC de-risks (the common case)
 # --status open|validated|invalidated   (the verdict)
 ```
@@ -146,7 +152,9 @@ printf '## hypothesis\n%s\n\n## method\n%s\n\n## result\n%s\n\n## recommendation
   It also accepts `us###`, and may be omitted for a bare standalone spike with
   no spec yet.
 - `## method` should name the throwaway worktree or scratch dir so the record
-  is reproducible.
+  is reproducible — and the tool version where behavior is version-sensitive
+  (an API that shifts between releases is exactly the kind of thing a PoC
+  catches, and the next reader needs to know which version you measured).
 - Success is the `Id: poc###` line printed on stdout — capture it. The CLI also
   stages the file; a `git add` warning (e.g. outside a git repo in a sandbox)
   is benign and does not mean the write failed.
