@@ -98,12 +98,14 @@ def type_schema [t: string] {
                sections: ["## context" "## decision" "## consequences"],                                         board: "" }
     "cat" => { type: "cat", dir: "docs/notes",      digits: 3, status: "stable",   index: "product",
                sections: ["## name" "## summary" "## scope_notes"],                                              board: "" }
-    _ => { error make { msg: $"unknown AKM type `($t)` — valid: sp us pn ft im adr cat" } }
+    "poc" => { type: "poc", dir: "docs/notes/lab",  digits: 3, status: "open",      index: "board",
+               sections: ["## informs" "## hypothesis" "## method" "## result" "## recommendation"],             board: "" }
+    _ => { error make { msg: $"unknown AKM type `($t)` — valid: sp us pn ft im adr cat poc" } }
   }
 }
 
 # All AKM type prefixes, used when scanning for a zettel by id or alias.
-def type_prefixes [] { ["sp" "us" "pn" "ft" "im" "adr" "cat"] }
+def type_prefixes [] { ["sp" "us" "pn" "ft" "im" "adr" "cat" "poc"] }
 
 # The canonical 8-category taxonomy — single source of truth for both the
 # `akm init` scaffolding pass and the collision check that runs when a
@@ -1699,6 +1701,156 @@ def "main im write" [
   print -e $"Staged docs/notes/($id).md"
 }
 
+# ----------------------------------------------------------------------------
+# poc — proof-of-concept lab notebook (`docs/notes/lab/poc###.md`).
+#
+# A poc### records a throwaway de-risking experiment run during brainstorming
+# to validate (or kill) an approach *before* it becomes a spec's chosen
+# solution. Categorized like im/ft/sp; indexed under [[board]] because it is
+# active-work evidence, not reusable product knowledge. The `--informs`
+# back-link is OPTIONAL: the experiment often runs before the sp### exists, so
+# the spec cites the poc### later (sp `## solution` → [[poc###]]) rather than
+# the other way round. The verdict (status: open → validated | invalidated)
+# is flipped by the `idea-poc` skill, not this verb.
+# ----------------------------------------------------------------------------
+
+def "main poc" [] {
+  print "akm poc — proof-of-concept lab-notebook operations"
+  print ""
+  print "Subcommands:"
+  print "  akm poc read <id>     print raw markdown of one PoC"
+  print "  akm poc list          list PoCs (`--json` for pipeline)"
+  print "  akm poc write <name>  mint a new PoC at status: open"
+  print "    --category <ids>    required — one or more cat### (comma-separated)"
+  print "    --informs <id>      optional — the us### / sp### this PoC de-risks"
+  print "                          (validated against an existing zettel on disk)"
+  print "    --status <s>        optional — default open"
+  print "                          (open | validated | invalidated)"
+  print "    --stdin             read body markdown from stdin"
+  print "                          (otherwise mints stub with empty sections)"
+  print ""
+  print "Notes:"
+  print "  - Lives in docs/notes/lab/ (created on first write); H1 is"
+  print "    `# PoC [[cat###]]... [[board]]`, footer `Index: [[board]]`."
+  print "  - With --informs the CLI injects `## informs [[id|alias]]` ahead of"
+  print "    the piped body; body sections are ## hypothesis / ## method /"
+  print "    ## result / ## recommendation."
+  print "  - PoC code is throwaway (a discarded poc/<slug> worktree); only the"
+  print "    poc### record lands on main. The verdict flip lives in `idea-poc`."
+}
+
+def "main poc read" [id: string] {
+  if not ($id =~ '^poc\d{3}$') {
+    error make { msg: $"expected poc### form (e.g. poc007), got `($id)`" }
+  }
+  main read $id
+}
+
+def "main poc list" [--json] {
+  if $json {
+    main list poc --json
+  } else {
+    main list poc
+  }
+}
+
+# Mint a new PoC. Categorized (shared cat helpers); an OPTIONAL `--informs`
+# back-link to the us###/sp### being de-risked — validated to exist on disk
+# when given, its first alias resolved for the `[[id|alias]]` label, and the
+# `## informs` section injected ahead of the piped narrative body. Body from
+# stdin carries ## hypothesis / ## method / ## result / ## recommendation;
+# CLI handles id, frontmatter, H1, the optional informs backlink, footer, and
+# staging (creating docs/notes/lab/ on first write).
+def "main poc write" [
+  name: string             # alphanumeric / dash / underscore — first alias
+  --category: string = ""  # required: one or more cat### ids, comma-separated
+  --informs: string = ""   # optional: the us###/sp### this PoC de-risks
+  --status: string = "open"  # open | validated | invalidated
+  --stdin                 # read body from stdin (default: mint stub with empty sections)
+] {
+  validate_zettel_name $name
+  if ($status not-in ["open" "validated" "invalidated"]) {
+    error make { msg: $"--status must be one of open | validated | invalidated, got `($status)`" }
+  }
+  let root = (require_akm_root)
+
+  let cats = (parse_and_validate_cats $root $category)
+
+  # Optional informs back-link — accept us### or sp### form. When given,
+  # verify the zettel exists on disk (refuse to mint a dangling link) and
+  # resolve its first alias for the `[[id|alias]]` label.
+  let informs_block = (if ($informs | is-empty) {
+    []
+  } else {
+    if not ($informs =~ '^(us|sp)\d{3}$') {
+      error make { msg: $"--informs must be us### or sp### form, got `($informs)`" }
+    }
+    let inf_dir = (if ($informs | str starts-with "sp") { "docs/notes/spec" } else { "docs/notes" })
+    let inf_file = $"($root)/($inf_dir)/($informs).md"
+    if not ($inf_file | path exists) {
+      error make { msg: $"informed zettel ($informs) not found at ($inf_file)" }
+    }
+    let inf_alias = (read_first_alias (open --raw $inf_file))
+    let inf_label = (if ($inf_alias | is-empty) { $informs } else { $"($informs)|($inf_alias)" })
+    ["## informs" $"[[($inf_label)]]" ""]
+  })
+
+  let dupe = (find_zettel $root $name)
+  if ($dupe != "") {
+    print -e $"already exists with this alias: ($dupe)"
+    return
+  }
+
+  let body = (if $stdin { (^cat | str trim) } else { "" })
+
+  let id = (next_id $root "poc")
+  let f = $"($root)/docs/notes/lab/($id).md"
+  let today = (date now | format date "%Y-%m-%d")
+
+  let parts = ([
+    "---"
+    "aliases:"
+    $"  - ($name)"
+    $"status: ($status)"
+    $"created: ($today)"
+    "---"
+    ""
+    (compose_h1_with_links "PoC" $cats "board")
+    ""
+  ] | append $informs_block)
+  let body_block = (if ($body == "") {
+    # The stub repeats `## informs` only when --informs did not already
+    # inject the resolved back-link block (avoids a duplicate header).
+    let informs_stub = (if ($informs_block | is-empty) { ["## informs" ""] } else { [] })
+    ($informs_stub | append [
+      "## hypothesis"
+      ""
+      "## method"
+      ""
+      "## result"
+      ""
+      "## recommendation"
+      ""
+    ])
+  } else {
+    [$body ""]
+  })
+  let footer = [
+    "---"
+    ""
+    "Index: [[board]]"
+    ""
+  ]
+
+  ($parts | append $body_block | append $footer | str join "\n") | save -f $f
+
+  ^git -C $root add $"docs/notes/lab/($id).md" | ignore
+
+  print $"Id: ($id)"
+  print -e $"Path: ($f)"
+  print -e $"Staged docs/notes/lab/($id).md"
+}
+
 # Run every available diagnostic in sequence. Currently the cat-collision
 # check is the only one implemented; future passes (board.md structure,
 # dangling wikilinks, status-vs-section drift) will hook in here so a
@@ -1981,6 +2133,7 @@ def main [] {
   print "  akm check                    run all project-health diagnostics"
   print "  akm cat check                verify cat### against canonical taxonomy"
   print "  akm adr <subcmd>             ADR namespace (read / write / list)"
+  print "  akm poc <subcmd>             PoC lab-notebook namespace (read / write / list)"
   print "  akm root                     print AKM workspace root (refuses on feature wt)"
   print ""
   print "bd housekeeping (any worktree):"

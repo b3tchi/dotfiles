@@ -85,6 +85,18 @@ Each entry skill's `## AKM hooks` block lists the read set. Survey concretely vi
 - Each option carries trade-offs.
 - Anchor every option in the surveyed AKM context (which categories, which ADRs constrain, which features are candidates).
 
+### 5a. Proof gate — is the recommended approach proven?
+
+Before presenting an approach as settled, ask: **is there clear proof this
+works?** If it rests on an unproven assumption — a library you haven't seen do
+this, a tool integration nobody has tried here, a perf budget you're guessing
+at — do not present it as the design. De-risk it first via `infinifu:idea-poc`:
+a small throwaway experiment that validates (or kills) the approach in
+isolation and records a `poc###` verdict. Then present the design with
+`[[poc###]]` as evidence. Skip the gate only when the approach is already
+proven (cite where). A design built on an unproven approach is the expensive
+kind of assumption the lifecycle exists to catch.
+
 ### 6. Present the design, get approval
 
 - Section by section, scaled to complexity (a few sentences for simple, up to 200-300 words for nuanced).
@@ -137,6 +149,7 @@ The only next step. Do **not** invoke any implementation skill (`work-do`, `doma
 - **YAGNI ruthlessly.** Trim non-essential scope.
 - **Incremental validation.** Approval per section.
 - **The hard gate is non-negotiable.** No exception for "simple", no exception for hotfix urgency.
+- **Don't present an unproven approach as the design.** When proof is missing, branch to `infinifu:idea-poc` and de-risk before approval (step 5a).
 
 ## Process flow
 
@@ -148,6 +161,8 @@ digraph brainstorm_basics {
     "Ask one clarifying question" [shape=box];
     "Have enough?" [shape=diamond];
     "Propose 2-3 approaches" [shape=box];
+    "Recommended approach proven?" [shape=diamond];
+    "Branch to idea-poc (de-risk)" [shape=box];
     "Present design sections" [shape=box];
     "User approves?" [shape=diamond];
     "Mint sp### + entry-specific writes" [shape=box];
@@ -160,7 +175,10 @@ digraph brainstorm_basics {
     "Ask one clarifying question" -> "Have enough?";
     "Have enough?" -> "Ask one clarifying question" [label="no"];
     "Have enough?" -> "Propose 2-3 approaches" [label="yes"];
-    "Propose 2-3 approaches" -> "Present design sections";
+    "Propose 2-3 approaches" -> "Recommended approach proven?";
+    "Recommended approach proven?" -> "Branch to idea-poc (de-risk)" [label="no"];
+    "Recommended approach proven?" -> "Present design sections" [label="yes"];
+    "Branch to idea-poc (de-risk)" -> "Present design sections" [label="poc### verdict"];
     "Present design sections" -> "User approves?";
     "User approves?" -> "Present design sections" [label="no, revise"];
     "User approves?" -> "Mint sp### + entry-specific writes" [label="yes"];
@@ -179,5 +197,7 @@ digraph brainstorm_basics {
 - `infinifu:idea-hotfix`
 
 **Not a direct entry point.** If a user request truly doesn't fit any of the four entry types, ask one MC question to identify the type before routing — never run this skill standalone.
+
+**Branches to (proof gate, step 5a):** `infinifu:idea-poc` — when the recommended approach has no clear proof it works, de-risk it before presenting the design.
 
 **Next skill in chain (every entry type):** `infinifu:spec-writing`.

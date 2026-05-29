@@ -1,0 +1,23 @@
+{
+  "skill_name": "idea-poc",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I want the i3 status bar to be rendered by a nushell script instead of the current bash one, but I'm not actually sure nushell starts up fast enough to redraw the bar without visible lag. Before I commit to rewriting the whole i3blocks config around it, can we figure out if this is even viable?",
+      "expected_output": "Triggers idea-poc. Frames a falsifiable hypothesis (e.g. nushell renders the full status line under a latency budget), isolates in a throwaway poc/<slug> worktree, runs the smallest experiment, reads the verdict, records docs/notes/lab/poc###.md via `akm poc write` with a category and verdict status, discards the worktree, and feeds the recommendation back. Does NOT start rewriting the real i3blocks config.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "We're brainstorming a new shared audit-log feature for the dotfiles tooling. The plan leans on streaming uploads through library X. I've never seen library X handle large payloads — should we just go with it?",
+      "expected_output": "Recognizes the proof gate: the approach (library X streaming) is unproven, so it should NOT be presented as the settled design. Branches to idea-poc to de-risk: hypothesis about library X streaming behavior at size, isolated experiment, poc### verdict (likely surfacing a limit), recommendation that either validates or kills the streaming approach before the sp###/ft### is committed.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "prove that carapace completions can be lazy-loaded in nushell without breaking the prompt — spike it",
+      "expected_output": "Direct idea-poc trigger ('prove', 'spike'). Falsifiable hypothesis about lazy-loading carapace, isolated throwaway experiment, honest verdict, poc### record, throwaway discarded. Should not modify the real nushell config.",
+      "files": []
+    }
+  ]
+}

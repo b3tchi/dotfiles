@@ -73,6 +73,7 @@ Walk the shared process around this checklist.
 - **Capability that serves exactly one story** → re-route to `idea-implement` (it's `im###` glue, not `ft###`).
 - **Modification to an existing feature** → re-route to `idea-extend` framed against the `ft###`.
 - **Production-broken capability** → re-route to `idea-hotfix`.
+- **Capability whose feasibility is unproven** (new library, untried integration, a perf budget you're guessing at) → de-risk via `infinifu:idea-poc` *before* minting the sp###. A throwaway PoC validates (or kills) the approach in isolation; cite `[[poc###]]` in `## problem` as the evidence. This is the proof gate (`idea-brainstorming` step 5a) applied to feasibility — don't register a feature you haven't shown the system can actually provide.
 - **Ask spans multiple distinct capabilities** ("observability stack", "notifications platform", "data layer") → N `ft###`, never one monolithic feature. Whether they ride in 1 sp### or N sp### is a sizing call (step 8) — small scaffolding → one sp### with task-level split, independent non-trivial work → N sp###.
 
 ## Key Principles (entry-specific)
@@ -90,4 +91,5 @@ Walk the shared process around this checklist.
 
 - `infinifu:feature-read` / `implementation-read` / `category-read` / `adr-read` — AKM context survey (no `story-find` / `story-read` — lifecycle reads `im###` for consumers).
 - `infinifu:idea-brainstorming` — shared process basics.
+- `infinifu:idea-poc` — proof gate: de-risk an unproven capability before minting the sp### (cite `[[poc###]]` in `## problem`).
 - `infinifu:spec-writing` — the only next step after design approval; it mints `ft###`.

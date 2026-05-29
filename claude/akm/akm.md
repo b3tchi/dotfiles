@@ -35,6 +35,8 @@ docs/
     ├── daily/               ← daily journal (YYYY-MM-DD.md)
     ├── spec/                ← board-citizen specs
     │   └── sp###.md             Specs
+    ├── lab/                 ← board-adjacent PoC lab notebook
+    │   └── poc###.md            Proofs-of-concept
     ├── us###.md             ← Stories
     ├── pn###.md             ← Personas
     ├── ft###.md             ← Features
@@ -93,6 +95,7 @@ type's role inside the AKM model and points at the writer skill.
 | (subordinate to Stories) | `pn###` | `infinifu:persona-write` |
 | (the hub itself)      | `product.md` | this file (singleton hub schema below) |
 | (board citizen)       | `sp###` | `infinifu:spec-writing` / `spec-refinement` / `spec-ready` |
+| (board-adjacent evidence) | `poc###` | `infinifu:idea-poc` |
 
 Cross-type styling (atomicity, 80-char wrap, link discipline, post-write
 audit) is owned by `infinifu:zettel-write` and applied uniformly by every
@@ -198,7 +201,14 @@ proposed`) plus one extra required flag — `--solves us###`, the story
 back-link: the CLI validates the story exists on disk, resolves its first
 alias, and injects `## solves [[us###|alias]]` as the first body section
 (so the piped body carries the narrative from `## approach` onward). The
-pattern is otherwise identical.
+pattern is otherwise identical. `poc` is categorized like `im`
+(`--category` required, default `status: open`) but lives in
+`docs/notes/lab/` and indexes under `[[board]]` (`# PoC [[cat###]]...
+[[board]]`) — it is board-adjacent evidence, not product knowledge. Its
+back-link `--informs us###/sp###` is **optional** (the experiment usually
+predates the spec, so the spec cites the `poc###` later) and accepts
+either prefix; when given it injects `## informs [[id|alias]]` ahead of the
+piped body (`## hypothesis / ## method / ## result / ## recommendation`).
 
 Helper sharing: `cat` and `pn` (tagless) share `compose_tagless_zettel`;
 the categorized writers (`adr`, `sp`, `ft`, `im`) share
@@ -235,6 +245,15 @@ owning skill composes raw `$AKM_ROOT/docs/notes/...` bodies anymore.
 Retiring the flat form, and adding a CLI supersession verb (`akm <type>
 supersede`), are deferred to later cleanup specs per sp004's out-of-scope
 list.
+
+**Added after sp004: `poc`** (`infinifu:idea-poc`). Same `read | list |
+write --stdin` triple via the shared categorized helpers
+(`parse_and_validate_cats` + `compose_h1_with_links`), so it inherited the
+template rather than re-deriving it. The only new shape is the optional
+`--informs` back-link (vs `im`'s required `--solves`) and the `lab/`
+directory + `[[board]]` index. The verdict flip (`open → validated |
+invalidated`) stays in the skill, consistent with the lifecycle-in-skills
+rule.
 
 ### Design rationale (sp003 / sp004)
 
@@ -553,6 +572,31 @@ Index: [[archive]]    # once status = done
   under `## ready` in [[board]].
 - `done` — merged via work-merge. Footer flipped to `[[archive]]`.
   Removed from [[board]], added to [[archive]].
+
+---
+
+## PoC — `poc###.md` *(board-adjacent evidence)*
+
+**Purpose.** Proof-of-concept lab notebook. Records a throwaway de-risking
+experiment run during brainstorming to validate — or kill — an approach
+*before* it becomes a spec's chosen solution. The code is disposable (a
+discarded `poc/<slug>` worktree); the recorded verdict is the deliverable.
+Board-adjacent, not a board citizen: it is *evidence feeding* a spec, never
+a deliverable itself, so it is not listed on `board.md` — it is reached via
+the `sp###` `## solution` that cites `[[poc###]]` and via `akm poc list`.
+
+**Location.** `docs/notes/lab/poc###.md` (three-digit zero-padded). Its own
+`lab/` subfolder under `notes/`, created on first write. Wikilinks resolve
+flat (`[[poc001]]`).
+
+**Index.** `[[board]]` in the H1 (`# PoC [[cat###]]... [[board]]`) and the
+footer — active-work evidence, distinct from product zettel which point at
+`[[product]]`.
+
+**Schema, ID generation, isolation discipline, verdict lifecycle
+(`open → validated | invalidated`).** Owned by `infinifu:idea-poc`. File-I/O
+(id, frontmatter, H1, optional `## informs` back-link, staging) is owned by
+`akm poc write`. Shared styling lives in `infinifu:zettel-write`.
 
 ---
 
