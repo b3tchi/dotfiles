@@ -236,6 +236,37 @@ Retiring the flat form, and adding a CLI supersession verb (`akm <type>
 supersede`), are deferred to later cleanup specs per sp004's out-of-scope
 list.
 
+### Design rationale (sp003 / sp004)
+
+Conventions — not architectural decisions, so they live here in the
+schema sheet rather than as `adr####`. Captured so the reasoning isn't
+lost:
+
+- **Why per-type CLI namespaces (file-I/O in CLI, lifecycle in skills).**
+  Before sp003, each typed skill hand-composed the full markdown body and
+  re-implemented id allocation, frontmatter, H1 categorization, footer,
+  and staging — boilerplate that drifted (a skill-creator eval on
+  adr-write caught an H1 mismatch the other skills silently carried).
+  Centralizing file-I/O in the CLI gives one audit point and kills the
+  drift; lifecycle verbs (status flips, board/archive moves, supersession)
+  stay in the skills because they are workflow-shaped, not file-shaped.
+  Rejected: keep the flat form + hand-composed markdown (the drift);
+  push lifecycle into the CLI too (couples it to the bd/board state
+  machine, bloats it).
+- **Why the categorized spec H1.** sp001/sp002 carried categories,
+  sp003/sp004 were tagless `# Sp [[board]]` (the old stub's output), while
+  this schema + `idea-brainstorming` said categorized. The `sp` migration
+  resolved the drift in favor of `# Spec [[cat###]]... [[board]]`; the
+  tagless form is retired and sp003/sp004 were re-H1'd.
+
+**Category cardinality.** Specs, Features, and Implementations carry
+**one or more** `[[cat###]]` in the H1 (a workstream / capability / shape
+legitimately spans categories). ADRs carry **exactly one** — a decision
+that spans categories is usually two decisions. *(Open question raised
+during the sp004 retro: whether ADRs should also be allowed multiple
+categories. Not changed; the exactly-one rule still stands until
+revisited.)*
+
 ---
 
 ## Product — `product.md` *(singleton hub)*
