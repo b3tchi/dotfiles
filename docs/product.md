@@ -19,6 +19,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 
 - [[adr0001|Nushell as primary language for scripts and data manipulation]]
 - [[adr0002|When to use bash (vs nushell)]]
+- [[adr0003|Typed AKM zettels expose per-type CLI namespaces; file-I/O in the CLI, lifecycle in skills]]
 
 ## AKM Reference
 
