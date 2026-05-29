@@ -3,20 +3,20 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "I want the i3 status bar to be rendered by a nushell script instead of the current bash one, but I'm not actually sure nushell starts up fast enough to redraw the bar without visible lag. Before I commit to rewriting the whole i3blocks config around it, can we figure out if this is even viable?",
-      "expected_output": "Triggers idea-poc. Frames a falsifiable hypothesis (e.g. nushell renders the full status line under a latency budget), isolates in a throwaway poc/<slug> worktree, runs the smallest experiment, reads the verdict, records docs/notes/lab/poc###.md via `akm poc write` with a category and verdict status, discards the worktree, and feeds the recommendation back. Does NOT start rewriting the real i3blocks config.",
+      "prompt": "We've got sp014's solution settled on paper — render the i3 status bar with a nushell script instead of the current bash one. But I'm not actually sure nushell starts up fast enough to redraw the bar without visible lag, and I don't want spec-refinement to plan out a whole task breakdown around an approach that might not hold. Can we confirm this is viable before we go further?",
+      "expected_output": "Triggers idea-poc as the spec-writing confidence gate. Frames a falsifiable hypothesis (nushell renders the full status line under a latency budget), isolates in a throwaway poc/<slug> worktree or scratch dir, runs the smallest experiment, reads the verdict, records docs/notes/lab/poc###.md via `akm poc write --informs sp014` with a category and verdict status, discards the throwaway, and feeds the recommendation back to spec-writing (validated → cite [[poc###]] in ## solution → spec-refinement). Does NOT start the real i3blocks rewrite.",
       "files": []
     },
     {
       "id": 2,
-      "prompt": "We're brainstorming a new shared audit-log feature for the dotfiles tooling. The plan leans on streaming uploads through library X. I've never seen library X handle large payloads — should we just go with it?",
-      "expected_output": "Recognizes the proof gate: the approach (library X streaming) is unproven, so it should NOT be presented as the settled design. Branches to idea-poc to de-risk: hypothesis about library X streaming behavior at size, isolated experiment, poc### verdict (likely surfacing a limit), recommendation that either validates or kills the streaming approach before the sp###/ft### is committed.",
+      "prompt": "sp012's solution leans on streaming uploads through library X. The solution shape looks right but I've never seen library X handle large payloads — I'm not confident enough to hand this to spec-refinement. Should we just go with it?",
+      "expected_output": "Recognizes the confidence gate: the chosen ## solution rests on an unproven assumption (library X streaming at size), so it should NOT be finalized / handed to spec-refinement yet. Branches to idea-poc: hypothesis about library X streaming behavior at size, isolated experiment, poc### verdict (likely surfacing a limit) recorded with --informs sp012. If invalidated, recommends revising the solution (e.g. chunked multipart) and looping a new PoC; if validated, cite [[poc###]] and proceed.",
       "files": []
     },
     {
       "id": 3,
       "prompt": "prove that carapace completions can be lazy-loaded in nushell without breaking the prompt — spike it",
-      "expected_output": "Direct idea-poc trigger ('prove', 'spike'). Falsifiable hypothesis about lazy-loading carapace, isolated throwaway experiment, honest verdict, poc### record, throwaway discarded. Should not modify the real nushell config.",
+      "expected_output": "Direct idea-poc trigger ('prove', 'spike'). Falsifiable hypothesis about lazy-loading carapace, isolated throwaway experiment, honest verdict, poc### record (--informs omitted is acceptable for a standalone spike with no spec yet), throwaway discarded. Should not modify the real nushell config.",
       "files": []
     }
   ]

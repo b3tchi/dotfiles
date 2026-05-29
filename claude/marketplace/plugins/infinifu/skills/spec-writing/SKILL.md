@@ -64,6 +64,8 @@ digraph spec_writing {
     "Dedup im### check" [shape=box];
     "Propose ## solution" [shape=box];
     "Approval gate" [shape=diamond];
+    "Confident the solution works?" [shape=diamond];
+    "Branch to idea-poc (loop until validated)" [shape=box];
     "Write solution + flip statuses + board" [shape=box];
     "Commit on main" [shape=box];
     "Confirm with user" [shape=doublecircle];
@@ -73,8 +75,11 @@ digraph spec_writing {
     "Re-read AC + survey cat/adr/ft" -> "Dedup im### check";
     "Dedup im### check" -> "Propose ## solution";
     "Propose ## solution" -> "Approval gate";
-    "Approval gate" -> "Write solution + flip statuses + board" [label="approved"];
     "Approval gate" -> "Propose ## solution" [label="revise"];
+    "Approval gate" -> "Confident the solution works?" [label="approved"];
+    "Confident the solution works?" -> "Branch to idea-poc (loop until validated)" [label="no — unproven"];
+    "Confident the solution works?" -> "Write solution + flip statuses + board" [label="yes / proven"];
+    "Branch to idea-poc (loop until validated)" -> "Propose ## solution" [label="poc### verdict: validated → cite it; invalidated → new approach"];
     "Write solution + flip statuses + board" -> "Commit on main";
     "Commit on main" -> "Confirm with user";
 }
@@ -92,7 +97,8 @@ digraph spec_writing {
 8. **Survey features** the solution will consume via `feature-read`. Where the problem mentioned candidate `[[ft###]]` ids, decide which actually bind; identify any new ones.
 9. **Dedup check.** Does an existing `im###` already solve this story (or an adjacent one) in a way the new spec is about to duplicate? If yes, surface the duplicate and ask whether to extend the existing solution shape rather than mint a new one. Lifecycle goal: "ensure no duplication or propose possible made solution".
 10. **Propose `## solution`.** One paragraph naming the approach + ADR refs + bound `[[ft###]]` consumed + the trade-offs taken. Surface this as the design-approval question — the user owns whether the proposed shape is the right one.
-11. **On approval:** append `## solution` to `$AKM_ROOT/docs/notes/spec/sp<NNN>.md` with the wikilink reference discipline; flip its frontmatter `status: idea → spec`; flip the source story `$AKM_ROOT/docs/notes/us<NNN>.md` `status: draft → ready`; move the `[[sp###]]` entry in `$AKM_ROOT/docs/board.md` from `## idea` to `## spec`.
+10a. **Confidence gate — is the chosen solution proven?** Once the user has approved the *shape*, ask whether there is clear proof the approach actually *works*. If it rests on an unproven assumption — a library you haven't seen do this, a tool integration nobody has tried here, a perf budget you're guessing at — do **not** finalize a guess. Branch to `infinifu:idea-poc` to de-risk it: a throwaway isolated experiment (`--informs sp<NNN>`) that returns a `poc###` verdict. This is an optional **loop**: a `validated` PoC means finalize the solution and cite `[[poc###]]` in `## solution` as the evidence; an `invalidated` PoC means the approach is dead — revise the solution and run a new PoC on the next approach, until one validates. Skip the gate only when the approach is already proven (cite where). De-risking *here* — after the problem is clear and a solution shape is chosen, before spec-refinement invests in a task plan — is the cheapest place to kill a bad approach.
+11. **On confidence:** append `## solution` to `$AKM_ROOT/docs/notes/spec/sp<NNN>.md` with the wikilink reference discipline (cite `[[poc###]]` when a PoC validated the approach); flip its frontmatter `status: idea → spec`; flip the source story `$AKM_ROOT/docs/notes/us<NNN>.md` `status: draft → ready`; move the `[[sp###]]` entry in `$AKM_ROOT/docs/board.md` from `## idea` to `## spec`.
 12. **Commit on main.** spec-writing is the first lifecycle transition that commits — it picks up the idea-phase staged files (the originating `sp###.Problem`, any newly-referenced draft stories) and bundles them with this skill's writes into a single commit on main:
     ```bash
     git -C "$AKM_ROOT" add docs/notes/spec/sp<NNN>.md docs/board.md docs/notes/us<NNN>.md
@@ -134,6 +140,7 @@ Before reporting complete:
 - **Feature consumption commits here.** Idea-* listed candidates; spec-writing picks the actual `[[ft###]]` set the solution will consume. Spec-refinement will design tasks against that set.
 - **Dedup before mint.** If an existing `im###` already solves the same story, the new spec needs to either supersede it (named decision) or stop (don't duplicate). The lifecycle explicitly carries this goal at stage 2.
 - **Reference discipline.** Every consumed `ft###`, binding `adr####`, and category `cat###` appears as a wikilink in `## solution`. The moxide LSP and downstream skills traverse the graph through those wikilinks.
+- **Don't finalize an unproven solution.** The confidence gate (step 10a) is the lifecycle's de-risking point: a solution shape can be the *right* one yet still rest on an assumption nobody has tested. When proof is missing, loop through `infinifu:idea-poc` until an approach validates — cheaper here than discovering it during `work-do`.
 
 ## Integration
 
@@ -144,7 +151,8 @@ Before reporting complete:
 - `infinifu:category-read` / `adr-read` / `feature-read` — context survey.
 - `infinifu:implementation-read` — dedup check against existing im### that solves the same us###.
 - `infinifu:idea-brainstorming` — shared process basics (reference, not invoked as router).
-- `infinifu:spec-refinement` — the only next step after solution approval; it adds `## plan` + `## tasks`.
+- `infinifu:idea-poc` — confidence gate (step 10a): when the chosen solution is unproven, loop a throwaway PoC to de-risk it before spec-refinement; cite `[[poc###]]` in `## solution`.
+- `infinifu:spec-refinement` — the next step once the solution is approved *and* confident; it adds `## plan` + `## tasks`.
 
 **Out of scope (do NOT call from here):**
 

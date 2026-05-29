@@ -205,10 +205,12 @@ pattern is otherwise identical. `poc` is categorized like `im`
 (`--category` required, default `status: open`) but lives in
 `docs/notes/lab/` and indexes under `[[board]]` (`# PoC [[cat###]]...
 [[board]]`) — it is board-adjacent evidence, not product knowledge. Its
-back-link `--informs us###/sp###` is **optional** (the experiment usually
-predates the spec, so the spec cites the `poc###` later) and accepts
-either prefix; when given it injects `## informs [[id|alias]]` ahead of the
-piped body (`## hypothesis / ## method / ## result / ## recommendation`).
+back-link `--informs sp###` records which spec's `## solution` the PoC
+de-risks; this is the common case, since the confidence gate fires
+*during* spec-writing once the `sp###` already exists. It also accepts
+`us###` and may be omitted for a standalone spike; when given it injects
+`## informs [[id|alias]]` ahead of the piped body (`## hypothesis /
+## method / ## result / ## recommendation`).
 
 Helper sharing: `cat` and `pn` (tagless) share `compose_tagless_zettel`;
 the categorized writers (`adr`, `sp`, `ft`, `im`) share
@@ -578,12 +580,15 @@ Index: [[archive]]    # once status = done
 ## PoC — `poc###.md` *(board-adjacent evidence)*
 
 **Purpose.** Proof-of-concept lab notebook. Records a throwaway de-risking
-experiment run during brainstorming to validate — or kill — an approach
-*before* it becomes a spec's chosen solution. The code is disposable (a
-discarded `poc/<slug>` worktree); the recorded verdict is the deliverable.
-Board-adjacent, not a board citizen: it is *evidence feeding* a spec, never
-a deliverable itself, so it is not listed on `board.md` — it is reached via
-the `sp###` `## solution` that cites `[[poc###]]` and via `akm poc list`.
+experiment run at the **spec-writing confidence gate** (the solution-domain
+loop between spec-writing and spec-refinement) to validate — or kill — a
+chosen `## solution` *before* spec-refinement invests in a task plan. The
+code is disposable (a discarded `poc/<slug>` worktree); the recorded verdict
+is the deliverable. Board-adjacent, not a board citizen: it is *evidence
+feeding* a spec, never a deliverable itself, so it is not listed on
+`board.md` — it is reached via the `sp###` `## solution` that cites
+`[[poc###]]` (and the PoC's own `## informs [[sp###]]` back-link) and via
+`akm poc list`.
 
 **Location.** `docs/notes/lab/poc###.md` (three-digit zero-padded). Its own
 `lab/` subfolder under `notes/`, created on first write. Wikilinks resolve

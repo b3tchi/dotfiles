@@ -1,17 +1,21 @@
 ---
 name: idea-poc
-description: "Use when an approach proposed during brainstorming has no clear proof it works yet — before committing it as a spec's chosen solution. Triggers on 'prove X works first', 'spike this', 'is this even possible', 'poc', 'I think the library can do Y', or the proof gate in `infinifu:idea-brainstorming` / `idea-feature` hitting an unproven approach. Builds the smallest THROWAWAY experiment in complete isolation (a discarded `poc/<slug>` worktree for code, a scratch dir for tooling), reads the verdict honestly, and records it as a `docs/notes/lab/poc###.md` lab-notebook zettel (hypothesis / method / result / recommendation) that feeds the spec's `## solution`. Pick this over `infinifu:idea-feature` (captures the capability, not its feasibility), `infinifu:domain-debug` (investigates broken code, not an unbuilt idea), and `infinifu:domain-tdd` / `work-do` (build the real, reviewed thing — a PoC never becomes the implementation)."
+description: "Use when a spec's chosen `## solution` (from `infinifu:spec-writing`) has no clear proof the approach works — the optional confidence-gate loop in the SOLUTION domain, between spec-writing and spec-refinement. Triggers on 'I'm not confident this solution works', 'prove this approach before we plan it', 'spike the sp### solution', 'is this even possible', 'poc', or spec-writing's confidence gate hitting an unproven solution. Builds the smallest THROWAWAY experiment in isolation (a discarded `poc/<slug>` worktree for code, scratch dir for tooling), reads the verdict honestly, and records a `docs/notes/lab/poc###.md` zettel (`--informs sp###`) feeding the spec's `## solution`. A loop: validated → spec-writing cites `[[poc###]]` → spec-refinement; invalidated → try another approach. Pick over `infinifu:idea-feature` (captures a capability, not a solution's feasibility) and `infinifu:domain-tdd` / `work-do` (build the real thing — a PoC never becomes the implementation)."
 ---
 
-# Idea: PoC (de-risk an unproven approach)
+# Idea: PoC (de-risk an unproven solution)
 
 <skill_overview>
-A proof-of-concept de-risks an approach by building the smallest throwaway
-thing that proves — or kills — it, in complete isolation, then records the
-verdict as evidence that feeds the spec's chosen solution. The code is
-disposable; the knowledge is the deliverable. A PoC that validates lets the
-real lifecycle proceed with confidence; a PoC that invalidates kills a bad
-approach in an hour instead of a sprint.
+A proof-of-concept de-risks a chosen solution by building the smallest
+throwaway thing that proves — or kills — the approach, in complete isolation,
+then records the verdict as evidence that feeds the spec's `## solution`. It
+sits in the **solution domain**: the problem is already clear and
+`infinifu:spec-writing` has proposed a solution shape, but nobody is confident
+the approach actually works. The code is disposable; the knowledge is the
+deliverable. A validated PoC lets spec-writing finalize the solution (citing
+`[[poc###]]`) and hand off to spec-refinement; an invalidated PoC kills a bad
+approach in an hour instead of a sprint, and the spec tries another. It runs as
+an optional loop until an approach validates.
 </skill_overview>
 
 <rigidity_level>
@@ -28,11 +32,11 @@ disciplines, because they are the entire reason a PoC is cheap and honest:
    edge cases, no review. Promoting it smuggles untested code past the hard
    gate — the exact outage the lifecycle exists to prevent.
 
-These two are why a PoC is a *sanctioned exception* to the brainstorming hard
-gate (which forbids writing code before design approval): a PoC produces
-knowledge, not product. The gate keeps undocumented behavior from shipping;
+These two are why a PoC is a *sanctioned exception* to the lifecycle's rule
+that no implementation code is written until the work stage: a PoC produces
+knowledge, not product. The rule keeps undocumented behavior from shipping;
 throwaway PoC code ships nothing. Discard the worktree, carry only the verdict
-back into the design.
+back into the spec's `## solution`.
 </rigidity_level>
 
 <quick_reference>
@@ -43,28 +47,31 @@ back into the design.
 | 3 | Isolate — `poc/<slug>` worktree (code) or scratch dir (tooling) | a place born to be deleted |
 | 4 | Build the smallest thing that answers the hypothesis | a running experiment, nothing more |
 | 5 | Read the verdict honestly + capture evidence | validated / invalidated / inconclusive |
-| 6 | `akm poc write <slug> --category … [--informs …] --stdin` | `docs/notes/lab/poc###.md` |
+| 6 | `akm poc write <slug> --category … --informs sp### --stdin` | `docs/notes/lab/poc###.md` |
 | 7 | **Discard** the worktree / scratch dir | clean main |
-| 8 | Hand the recommendation back to brainstorming | spec `## solution` cites `[[poc###]]` |
+| 8 | Hand the verdict back to spec-writing | validated → `## solution` cites `[[poc###]]` → spec-refinement; invalidated → spec tries another approach |
 </quick_reference>
 
 <when_to_use>
 **Use when:**
 
-- An approach proposed during brainstorming hinges on an unproven assumption —
-  the proof gate in `infinifu:idea-brainstorming` / `idea-feature` routes here.
-- You catch yourself about to commit to a solution you have not seen work
+- A spec's chosen `## solution` (from `infinifu:spec-writing`) rests on an
+  unproven assumption — the confidence gate in spec-writing (step 10a), the
+  transition between spec-writing and spec-refinement, routes here.
+- You catch yourself about to finalize a solution you have not seen work
   ("I *think* nushell can drive an fzf popup", "this library *probably*
   supports streaming").
 - The user says "prove it works first", "spike this", "poc", "is this even
-  possible".
+  possible", "I'm not confident this approach holds".
 
 **Don't use for:**
 
 - Building the real, reviewed implementation → `infinifu:work-do` /
   `infinifu:domain-tdd`.
 - Investigating why *existing* code misbehaves → `infinifu:domain-debug`.
-- Capturing a reusable capability → `infinifu:idea-feature`.
+- Capturing a reusable capability at idea stage → `infinifu:idea-feature`.
+- Choosing the solution shape itself → `infinifu:spec-writing` (this skill
+  only *de-risks* an already-proposed shape).
 - An approach already proven elsewhere — cite that evidence and skip the PoC.
 </when_to_use>
 
@@ -124,16 +131,17 @@ the hypothesis and rerun.
 ```bash
 printf '## hypothesis\n%s\n\n## method\n%s\n\n## result\n%s\n\n## recommendation\n%s\n' \
   "$hypothesis" "$method" "$result" "$recommendation" \
-  | akm poc write "$slug" --category cat003 --status validated --stdin
-# --informs us014   when the story/spec being de-risked already exists
+  | akm poc write "$slug" --category cat003 --informs sp012 --status validated --stdin
+# --informs sp###     the spec whose ## solution this PoC de-risks (the common case)
 # --status open|validated|invalidated   (the verdict)
 ```
 
 - `$slug` is kebab-case (becomes `aliases[0]`).
 - `--category` is the `[[cat###]]` bucket(s) the approach lives in (required).
-- `--informs` is optional and usually omitted — the experiment typically runs
-  *before* the `sp###` exists, so the spec cites the `poc###` later rather than
-  the reverse. Pass it only when the story/spec being de-risked already exists.
+- `--informs sp###` is the common case here — the spec already exists (the
+  confidence gate fires *during* spec-writing, after `## solution` is proposed),
+  so pass it to record which spec this PoC de-risks. It also accepts `us###`,
+  and may be omitted for a bare standalone spike with no spec yet.
 - `## method` should name the throwaway worktree or scratch dir so the record
   is reproducible.
 - Success is the `Id: poc###` line printed on stdout — capture it. The CLI also
@@ -145,12 +153,19 @@ printf '## hypothesis\n%s\n\n## method\n%s\n\n## result\n%s\n\n## recommendation
 Delete the `poc/<slug>` worktree/branch (or the scratch dir). The code's job is
 done. Keeping it around is step 1 of the "just promote the branch" anti-pattern.
 
-## 8. Feed the verdict back
+## 8. Feed the verdict back (the loop)
 
-Hand the `## recommendation` to whoever is brainstorming. When the design is
-approved and the `sp###` graduates, its `## solution` cites `[[poc###]]` as the
-evidence for the chosen approach. If invalidated, the rejected approach is
-documented so nobody re-litigates it.
+Hand the `## recommendation` back to `infinifu:spec-writing`, which owns the
+confidence gate that sent you here:
+
+- **Validated** → spec-writing finalizes the `## solution` and cites
+  `[[poc###]]` as the evidence, then hands off to `infinifu:spec-refinement`.
+  Done.
+- **Invalidated** → that approach is dead. spec-writing revises the
+  `## solution` to a different approach; if *that* one is also unproven, run a
+  **new** PoC on it. The loop repeats until an approach validates (or the spec
+  concludes the problem isn't tractable as framed). Either way the rejected
+  `poc###` stays on record so nobody re-litigates it.
 
 </the_process>
 
@@ -199,22 +214,24 @@ Output (recommendation): "Reject the streaming-upload approach via lib X — it 
 
 <integration>
 
-**Branched from (the proof gate):** `infinifu:idea-brainstorming` and its entry
-skills — `infinifu:idea-feature`, `infinifu:idea-implement`,
-`infinifu:idea-extend`, `infinifu:idea-hotfix` — when a proposed approach lacks
-clear proof it works.
+**Branched from (the confidence gate):** `infinifu:spec-writing` step 10a — the
+solution-domain gate between spec-writing and spec-refinement, when a chosen
+`## solution` lacks clear proof it works. (Stage placement: idea → *spec-writing
+→ [idea-poc loop] →* spec-refinement. The idea-* entry skills do **not** branch
+here — de-risking is solution-domain, after the problem is clear.)
 
 **Calls:**
 
 - `infinifu:domain-git-worktrees` — the isolated, disposable `poc/<slug>`
   worktree for code experiments.
 - `akm poc write` — mints `docs/notes/lab/poc###.md` (id allocation,
-  frontmatter, `# PoC [[cat###]]... [[board]]` H1, optional `## informs`
+  frontmatter, `# PoC [[cat###]]... [[board]]` H1, `--informs sp###`
   back-link, staging).
 
-**Feeds:** `infinifu:spec-writing` — the verdict informs the design; the
-graduating `sp###`'s `## solution` cites `[[poc###]]` as evidence for (or
-against) the chosen approach.
+**Feeds back to:** `infinifu:spec-writing` — the verdict resolves the
+confidence gate. Validated → spec-writing finalizes `## solution` citing
+`[[poc###]]` and hands to `infinifu:spec-refinement`; invalidated → spec-writing
+revises the solution and may loop a new PoC.
 
 </integration>
 
@@ -222,32 +239,35 @@ against) the chosen approach.
 
 ```dot
 digraph idea_poc {
-    "Approach proposed in brainstorming" [shape=box];
-    "Clear proof it works?" [shape=diamond];
-    "Proceed — cite existing evidence" [shape=doublecircle];
+    "spec-writing: ## solution proposed" [shape=box];
+    "Confident it works?" [shape=diamond];
+    "spec-refinement (cite existing evidence)" [shape=doublecircle];
     "State falsifiable hypothesis" [shape=box];
-    "Isolate: poc/<slug> worktree or scratch dir" [shape=box];
+    "Isolate: poc/<slug> worktree (code) or scratch dir (tooling)" [shape=box];
     "Build smallest experiment" [shape=box];
     "Read verdict honestly" [shape=diamond];
-    "Record poc### (validated)" [shape=box];
-    "Record poc### (invalidated)" [shape=box];
+    "Record poc### --informs sp### (validated)" [shape=box];
+    "Record poc### --informs sp### (invalidated)" [shape=box];
     "Refine hypothesis" [shape=box];
     "Discard worktree / scratch" [shape=box];
-    "Feed recommendation to spec ## solution" [shape=doublecircle];
+    "Back to spec-writing: finalize, cite [[poc###]]" [shape=doublecircle];
+    "Back to spec-writing: revise solution" [shape=box];
 
-    "Approach proposed in brainstorming" -> "Clear proof it works?";
-    "Clear proof it works?" -> "Proceed — cite existing evidence" [label="yes"];
-    "Clear proof it works?" -> "State falsifiable hypothesis" [label="no"];
-    "State falsifiable hypothesis" -> "Isolate: poc/<slug> worktree or scratch dir";
-    "Isolate: poc/<slug> worktree or scratch dir" -> "Build smallest experiment";
+    "spec-writing: ## solution proposed" -> "Confident it works?";
+    "Confident it works?" -> "spec-refinement (cite existing evidence)" [label="yes / proven"];
+    "Confident it works?" -> "State falsifiable hypothesis" [label="no — unproven"];
+    "State falsifiable hypothesis" -> "Isolate: poc/<slug> worktree (code) or scratch dir (tooling)";
+    "Isolate: poc/<slug> worktree (code) or scratch dir (tooling)" -> "Build smallest experiment";
     "Build smallest experiment" -> "Read verdict honestly";
-    "Read verdict honestly" -> "Record poc### (validated)" [label="validated"];
-    "Read verdict honestly" -> "Record poc### (invalidated)" [label="invalidated"];
+    "Read verdict honestly" -> "Record poc### --informs sp### (validated)" [label="validated"];
+    "Read verdict honestly" -> "Record poc### --informs sp### (invalidated)" [label="invalidated"];
     "Read verdict honestly" -> "Refine hypothesis" [label="inconclusive"];
     "Refine hypothesis" -> "Build smallest experiment";
-    "Record poc### (validated)" -> "Discard worktree / scratch";
-    "Record poc### (invalidated)" -> "Discard worktree / scratch";
-    "Discard worktree / scratch" -> "Feed recommendation to spec ## solution";
+    "Record poc### --informs sp### (validated)" -> "Discard worktree / scratch";
+    "Record poc### --informs sp### (invalidated)" -> "Discard worktree / scratch";
+    "Discard worktree / scratch" -> "Back to spec-writing: finalize, cite [[poc###]]" [label="validated"];
+    "Discard worktree / scratch" -> "Back to spec-writing: revise solution" [label="invalidated"];
+    "Back to spec-writing: revise solution" -> "Confident it works?" [label="loop: new approach"];
 }
 ```
 
