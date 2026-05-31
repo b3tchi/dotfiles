@@ -72,3 +72,6 @@ bd.db
 # since no pattern above ignores them.
 
 export-state.json
+
+# bd hook templates — hook-free model; never track (clone re-infection vector).
+hooks/

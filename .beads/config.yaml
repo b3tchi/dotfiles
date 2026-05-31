@@ -22,13 +22,11 @@
 # made by earlier processes, then re-import overwrites in-memory state with
 # the stale jsonl). With this true, the jsonl is rebuilt only via explicit
 # `bd export` — single writer, no race.
-no-auto-flush: true
 
 # Disable auto-import from JSONL when it's newer than database
 # Pairs with no-auto-flush: same race, opposite direction. With this true,
 # dolt stays canonical and bd doesn't clobber its in-memory state by
 # re-reading a possibly-stale jsonl on every invocation.
-no-auto-import: true
 
 # Enable JSON output by default
 # json: false
