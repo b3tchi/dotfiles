@@ -12,6 +12,7 @@
 # bd housekeeping (`akm bd ...`):
 #   akm bd init           strip bd auto-hooks, pin bd config, heal schema (per repo)
 #   akm bd doctor         health-check + self-heal Dolt state (also: akm doctor)
+#                         (--diagnose = read-only audit, no heal)
 #   akm bd export         bd Dolt → .beads/issues-snapshot.jsonl (commit-ready)
 #   akm bd import         .beads/issues-snapshot.jsonl → bd Dolt (after a git pull)
 #   akm bd archive create snapshot + prune old closed issues
@@ -2166,6 +2167,7 @@ def "main bd" [] {
   print "Subcommands:"
   print "  akm bd init           strip bd auto-hooks, pin bd config, heal schema (idempotent)"
   print "  akm bd doctor         health-check + self-heal Dolt state (also: akm doctor)"
+  print "                          --diagnose  report only, no self-heal"
   print "  akm bd export         bd Dolt → .beads/issues-snapshot.jsonl"
   print "  akm bd import         .beads/issues-snapshot.jsonl → bd Dolt"
   print "                          --force  skip confirmation"
@@ -2193,7 +2195,9 @@ def "main bd init" [] {
 # compat column) are present — repairing each in place. Run after a fresh
 # clone / `bd bootstrap`, or whenever perles shows an empty board or bd errors
 # with "table not found: wisps".
-def "main bd doctor" [] {
+def "main bd doctor" [
+  --diagnose  # report only; do NOT self-heal (read-only audit)
+] {
   let root = (bd_project_root)
   print -e $"akm bd doctor — ($root)"
 
@@ -2211,20 +2215,37 @@ def "main bd doctor" [] {
   }
   print -e $"  ✓ Dolt server: ($conn.db) @ 127.0.0.1:($conn.port)"
 
-  # Config pins + hook strip (reuse init's enforcement)
-  bd_strip_hooks $root
-  bd_ensure_config
-  print -e "  ✓ config pinned, auto-hooks stripped"
+  # Config pins + hook strip
+  if $diagnose {
+    let hooks_on = (try { ((do { ^bd hooks list } | complete).stdout | str contains "✓") } catch { false })
+    print -e (if $hooks_on { "  ✖ bd auto-hooks installed — run `akm bd doctor` (no --diagnose) to strip" } else { "  ✓ auto-hooks stripped" })
+    let want = { "export.auto": "false", "export.git-add": "false", "export.path": "issues-snapshot.jsonl", "dolt.auto-commit": "on" }
+    for kv in ($want | transpose key value) {
+      let cur = (try { (^bd config get $kv.key | complete).stdout | lines | last | str trim } catch { "" })
+      print -e (if $cur == $kv.value { $"  ✓ ($kv.key) = ($kv.value)" } else { $"  ✖ ($kv.key) = ($cur) \(want ($kv.value)\) — run `akm bd doctor` to pin" })
+    }
+  } else {
+    bd_strip_hooks $root
+    bd_ensure_config
+    print -e "  ✓ config pinned, auto-hooks stripped"
+  }
 
   # Per-clone schema fixups
-  let w = (bd_ensure_wisps)
-  print -e (if $w { "  ⚙ wisp tables recreated" } else { "  ✓ wisp tables present" })
-  let p = (bd_ensure_perles_compat)
-  print -e (if $p { "  ⚙ perles depends_on_id compat column added" } else { "  ✓ perles compat column ok (or n/a)" })
-
-  if ($w or $p) {
-    bd_dolt_exec "CALL dolt_add('-A'); CALL dolt_commit('-m', 'akm bd doctor: per-clone Dolt schema fixups (wisps / perles compat)');"
-    print -e "  ⚙ committed schema fixups to Dolt"
+  if $diagnose {
+    print -e (if (bd_has_table "wisps") { "  ✓ wisp tables present" } else { "  ✖ wisp tables missing — run `akm bd doctor` to recreate" })
+    let perles_ok = (if (bd_has_table "dependencies") {
+      (bd_has_column "dependencies" "depends_on_id") or (not (bd_has_column "dependencies" "depends_on_issue_id"))
+    } else { true })
+    print -e (if $perles_ok { "  ✓ perles compat column ok (or n/a)" } else { "  ✖ perles depends_on_id compat column missing — run `akm bd doctor` to add" })
+  } else {
+    let w = (bd_ensure_wisps)
+    print -e (if $w { "  ⚙ wisp tables recreated" } else { "  ✓ wisp tables present" })
+    let p = (bd_ensure_perles_compat)
+    print -e (if $p { "  ⚙ perles depends_on_id compat column added" } else { "  ✓ perles compat column ok (or n/a)" })
+    if ($w or $p) {
+      bd_dolt_exec "CALL dolt_add('-A'); CALL dolt_commit('-m', 'akm bd doctor: per-clone Dolt schema fixups (wisps / perles compat)');"
+      print -e "  ⚙ committed schema fixups to Dolt"
+    }
   }
   # Git-side hygiene (read-only) — snapshot committed, legacy path retired,
   # snapshot fresh vs Dolt, optional dolt transport configured.
@@ -2273,17 +2294,25 @@ def "main bd doctor" [] {
   # per-repo — strip it so every repo shares one board config. Self-heal.
   let local_perles = $"($root)/.perles"
   if ($local_perles | path exists) {
-    rm -rf $local_perles
-    print -e "  ⚙ stripped local .perles/ — perles uses global ~/.config/perles/config.yaml"
+    if $diagnose {
+      print -e "  ✖ local .perles/ present — shadows global config; run `akm bd doctor` to strip"
+    } else {
+      rm -rf $local_perles
+      print -e "  ⚙ stripped local .perles/ — perles uses global ~/.config/perles/config.yaml"
+    }
   } else {
     print -e "  ✓ no local perles config (global only)"
   }
 
-  print -e "Healthy."
+  if $diagnose {
+    print -e "Diagnosis complete (read-only). ✖ items need `akm bd doctor` (no --diagnose) to self-heal."
+  } else {
+    print -e "Healthy."
+  }
 }
 
 # Top-level alias so `akm doctor` / `akm healthcheck` reach the bd healthcheck.
-def "main doctor" [] { main bd doctor }
+def "main doctor" [--diagnose] { if $diagnose { main bd doctor --diagnose } else { main bd doctor } }
 def "main healthcheck" [] { main bd doctor }
 
 # Write current Dolt state to .beads/issues-snapshot.jsonl. Run before `git commit`
