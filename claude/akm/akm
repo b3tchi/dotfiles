@@ -2243,6 +2243,31 @@ def "main bd doctor" [] {
     rm -f $tmp
     print -e (if $live == $committed { "  ✓ snapshot in sync with Dolt" } else { "  ⚠ snapshot stale vs Dolt — run `akm bd export` + commit" })
   }
+  # Legacy / pre-migration artifacts that survive the config self-heal and can
+  # re-introduce the auto-flush race — especially on a fresh clone.
+  let tracked_hooks = (do { ^git -C $root ls-files .beads/hooks } | complete | get stdout | lines | where { |l| ($l | str trim) != "" })
+  if ($tracked_hooks | is-empty) {
+    print -e "  ✓ no tracked bd hook templates"
+  } else {
+    print -e $"  ⚠ ($tracked_hooks | length) tracked .beads/hooks templates re-install the auto-flush race on clone — `git rm -r --cached .beads/hooks` + gitignore"
+  }
+  if ($"($root)/.beads/issues.jsonl" | path exists) {
+    print -e "  ⚠ on-disk .beads/issues.jsonl present — bd may auto-import it; remove (Dolt canonical, snapshot is issues-snapshot.jsonl)"
+  } else {
+    print -e "  ✓ no on-disk legacy issues.jsonl"
+  }
+  let cfg = $"($root)/.beads/config.yaml"
+  let legacy_keys = (if ($cfg | path exists) {
+    ["no-auto-flush" "no-auto-import" "no-db" "no-daemon"] | where { |k|
+      (open --raw $cfg | lines | any { |l| ($l | str starts-with $"($k):") })
+    }
+  } else { [] })
+  if ($legacy_keys | is-empty) {
+    print -e "  ✓ no legacy no-db-mode config keys"
+  } else {
+    print -e $"  ⚠ stale pre-Dolt config keys: ($legacy_keys | str join ', ') — harmless but obsolete, safe to delete from config.yaml"
+  }
+
   print -e "Healthy."
 }
 
