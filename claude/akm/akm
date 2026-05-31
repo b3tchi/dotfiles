@@ -2226,6 +2226,23 @@ def "main bd doctor" [] {
     bd_dolt_exec "CALL dolt_add('-A'); CALL dolt_commit('-m', 'akm bd doctor: per-clone Dolt schema fixups (wisps / perles compat)');"
     print -e "  ⚙ committed schema fixups to Dolt"
   }
+  # Git-side hygiene (read-only) — snapshot committed, legacy path retired,
+  # snapshot fresh vs Dolt, optional dolt transport configured.
+  let snap_tracked = ((do { ^git -C $root ls-files --error-unmatch .beads/issues-snapshot.jsonl } | complete).exit_code == 0)
+  print -e (if $snap_tracked { "  ✓ issues-snapshot.jsonl tracked" } else { "  ✖ issues-snapshot.jsonl not tracked — run `akm bd export` then git add" })
+  let legacy_tracked = ((do { ^git -C $root ls-files --error-unmatch .beads/issues.jsonl } | complete).exit_code == 0)
+  print -e (if $legacy_tracked { "  ✖ legacy issues.jsonl tracked — stale-import hazard; git rm --cached + gitignore it" } else { "  ✓ legacy issues.jsonl not tracked" })
+  let remote = try { (^bd config get sync.remote | complete).stdout | lines | last | str trim } catch { "" }
+  print -e (if ($remote | is-empty) { "  ⚠ sync.remote unset — dolt push/pull unavailable (jsonl snapshot still works)" } else { $"  ✓ sync.remote = ($remote)" })
+  let snap = $"($root)/.beads/issues-snapshot.jsonl"
+  if ($snap | path exists) {
+    let tmp = $"/tmp/bd-doctor-(random uuid).jsonl"
+    do { ^bd export -o $tmp } | complete | ignore
+    let live = (open --raw $tmp | lines | where { |l| ($l | str trim) != "" } | sort)
+    let committed = (open --raw $snap | lines | where { |l| ($l | str trim) != "" } | sort)
+    rm -f $tmp
+    print -e (if $live == $committed { "  ✓ snapshot in sync with Dolt" } else { "  ⚠ snapshot stale vs Dolt — run `akm bd export` + commit" })
+  }
   print -e "Healthy."
 }
 
