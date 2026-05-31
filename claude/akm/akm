@@ -2268,6 +2268,17 @@ def "main bd doctor" [] {
     print -e $"  ⚠ stale pre-Dolt config keys: ($legacy_keys | str join ', ') — harmless but obsolete, safe to delete from config.yaml"
   }
 
+  # perles config is global-only (~/.config/perles/config.yaml, symlinked from
+  # dotfiles). A local .perles/ (from `perles init`) shadows the global config
+  # per-repo — strip it so every repo shares one board config. Self-heal.
+  let local_perles = $"($root)/.perles"
+  if ($local_perles | path exists) {
+    rm -rf $local_perles
+    print -e "  ⚙ stripped local .perles/ — perles uses global ~/.config/perles/config.yaml"
+  } else {
+    print -e "  ✓ no local perles config (global only)"
+  }
+
   print -e "Healthy."
 }
 
