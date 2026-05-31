@@ -1927,6 +1927,24 @@ def bd_ensure_config [] {
 # the local Dolt's freshly-closed status, silently reverting closures. We
 # keep state in Dolt (manual `akm bd export` writes jsonl only when we want a
 # history snapshot) and rely on `bd dolt push/pull` for cross-machine sync.
+# Return the list of git hooks that contain REAL bd auto-export/import logic
+# (a non-comment line invoking `bd export|import|hooks run`). bd / partial
+# strips can leave an inert worktree-gate stub behind — that is harmless and
+# must NOT be flagged as a race vector. Only a body with an actual bd command
+# re-introduces the auto-flush clobber.
+def bd_race_hooks [root: string] {
+  let hooks_dir = $"($root)/.git/hooks"
+  if not ($hooks_dir | path exists) { return [] }
+  ["pre-commit" "post-merge" "post-checkout" "pre-push" "prepare-commit-msg"] | where { |h|
+    let f = $"($hooks_dir)/($h)"
+    ($f | path exists) and (
+      open --raw $f | lines
+      | where { |l| not ($l | str trim | str starts-with "#") }
+      | any { |l| ($l =~ 'bd +(export|import|hooks +run)') }
+    )
+  }
+}
+
 def bd_strip_hooks [root: string] {
   let hooks_dir = $"($root)/.git/hooks"
   if not ($hooks_dir | path exists) { return }
@@ -2217,8 +2235,8 @@ def "main bd doctor" [
 
   # Config pins + hook strip
   if $diagnose {
-    let hooks_on = (try { ((do { ^bd hooks list } | complete).stdout | str contains "✓") } catch { false })
-    print -e (if $hooks_on { "  ✖ bd auto-hooks installed — run `akm bd doctor` (no --diagnose) to strip" } else { "  ✓ auto-hooks stripped" })
+    let race = (bd_race_hooks $root)
+    print -e (if ($race | is-empty) { "  ✓ no auto-export/import hook logic" } else { $"  ✖ race hooks with bd logic: ($race | str join ', ') — run `akm bd doctor` to strip" })
     let want = { "export.auto": "false", "export.git-add": "false", "export.path": "issues-snapshot.jsonl", "dolt.auto-commit": "on" }
     for kv in ($want | transpose key value) {
       let cur = (try { (^bd config get $kv.key | complete).stdout | lines | last | str trim } catch { "" })
@@ -2227,7 +2245,8 @@ def "main bd doctor" [
   } else {
     bd_strip_hooks $root
     bd_ensure_config
-    print -e "  ✓ config pinned, auto-hooks stripped"
+    let race = (bd_race_hooks $root)
+    print -e (if ($race | is-empty) { "  ✓ config pinned, no auto-export/import hook logic" } else { $"  ✖ config pinned, but race hooks persist: ($race | str join ', ') — bd is regenerating them" })
   }
 
   # Per-clone schema fixups
@@ -2305,7 +2324,7 @@ def "main bd doctor" [
   }
 
   if $diagnose {
-    print -e "Diagnosis complete (read-only). ✖ items need `akm bd doctor` (no --diagnose) to self-heal."
+    print -e "Diagnosis complete (read-only). Any ✖/⚠ above are fixed by `akm bd doctor` (no --diagnose)."
   } else {
     print -e "Healthy."
   }
