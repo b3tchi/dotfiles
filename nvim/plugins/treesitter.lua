@@ -1,8 +1,24 @@
 return {
 	"nvim-treesitter/nvim-treesitter",
+	-- d2 isn't in nvim-treesitter's main-branch registry. The ravsii/tree-sitter-d2
+	-- grammar registers it, but only inside a `User TSUpdate` autocmd that loads
+	-- AFTER nvim-treesitter (it depends on it) — so `ensure_installed` runs first
+	-- and warns "skipping unsupported language: d2". Registering here in `init`
+	-- (before nvim-treesitter's setup fires `User TSUpdate`) makes d2 known in time.
+	init = function()
+		vim.api.nvim_create_autocmd("User", {
+			pattern = "TSUpdate",
+			callback = function()
+				require("nvim-treesitter.parsers").d2 = {
+					install_info = { path = vim.fn.stdpath("data") .. "/lazy/tree-sitter-d2" },
+				}
+			end,
+		})
+	end,
 	opts = {
 		ensure_installed = {
 			"bash",
+			"d2",
 			"html",
 			"javascript",
 			"json",
