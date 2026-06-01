@@ -12,15 +12,9 @@ vim.api.nvim_create_autocmd("FileType", {
 				return
 			end
 			if vim.b[ev.buf].d2_watch_job and vim.fn.jobwait({ vim.b[ev.buf].d2_watch_job }, 0)[1] == -1 then
-				-- Already watching: re-open the browser to refresh/refocus the view.
-				-- (The server already hot-reloads on save; this just brings the tab back.)
-				local url = vim.b[ev.buf].d2_watch_url
-				if url then
-					vim.ui.open(url)
-					vim.notify("d2: refreshed view — " .. url, vim.log.levels.INFO)
-				else
-					vim.notify("d2: watch running, URL not captured yet", vim.log.levels.WARN)
-				end
+				-- Already watching: don't re-open the browser. The running server
+				-- hot-reloads on save, so leave the existing tab alone.
+				vim.notify("d2: watch already running" .. (vim.b[ev.buf].d2_watch_url and (" — " .. vim.b[ev.buf].d2_watch_url) or ""), vim.log.levels.INFO)
 				return
 			end
 			local function on_out(_, data)
