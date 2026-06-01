@@ -18,4 +18,3 @@ linux:
       {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
       curl -fsSL https://d2lang.com/install.sh | sh -s --
       {{/if}}
-      rotz link d2 --force

@@ -8,6 +8,7 @@ depends:
   - tmux
   - nvim
   - lazygit
+  - d2
   - ssh
   - glab
   - azcli
