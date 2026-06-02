@@ -17,11 +17,12 @@ alias ls='ls --color=auto'
 alias grep='grep --color=auto'
 PS1='[\u@\h \W]\$ '
 
-# Inside zellij, zellij IS the multiplexer — don't nest tmux (nesting blanks
-# the web client and double-attaches the shared `local` tmux session). Drop
-# straight to nushell, mirroring the tmux→nushell stack used elsewhere.
+# Inside zellij, wrap a tmux session dedicated to this zellij session.
+# NOT the shared `local` group used by other terminals — two clients on the
+# same grouped windows clamp to the smallest client's size and blank the web
+# client. A per-zellij session keeps sizing independent.
 if [[ -n "$ZELLIJ" ]]; then
-	command -v nu &>/dev/null && exec nu
+	command -v tmux-start &>/dev/null && tmux-start attach 0 "zj_${ZELLIJ_SESSION_NAME}"
 # Auto-start tmux session (script symlinked to ~/.local/bin via rotz)
 elif command -v tmux-start &>/dev/null; then
 	if [[ -n "$TMUX_TARGET" ]]; then
