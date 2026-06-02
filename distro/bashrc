@@ -17,8 +17,13 @@ alias ls='ls --color=auto'
 alias grep='grep --color=auto'
 PS1='[\u@\h \W]\$ '
 
+# Inside zellij, zellij IS the multiplexer — don't nest tmux (nesting blanks
+# the web client and double-attaches the shared `local` tmux session). Drop
+# straight to nushell, mirroring the tmux→nushell stack used elsewhere.
+if [[ -n "$ZELLIJ" ]]; then
+	command -v nu &>/dev/null && exec nu
 # Auto-start tmux session (script symlinked to ~/.local/bin via rotz)
-if command -v tmux-start &>/dev/null; then
+elif command -v tmux-start &>/dev/null; then
 	if [[ -n "$TMUX_TARGET" ]]; then
 		# Pre-created session:window — attach, drop to bash on detach
 		# ^thin_ prefix → attach via -L thin socket; otherwise default server
