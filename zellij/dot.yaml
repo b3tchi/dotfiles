@@ -1,0 +1,30 @@
+linux:
+  links:
+    config.kdl: ~/.config/zellij/config.kdl
+
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -Syu --needed --noconfirm zellij mkcert
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -Syu --needed --noconfirm zellij mkcert
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux ARM")}}
+      sudo pacman -Syu --needed --noconfirm zellij mkcert
+      {{/if}}
+      {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
+      pkg install -y zellij
+      {{/if}}
+      # TLS cert for the web server (LAN access over HTTPS).
+      # Per-machine, NEVER tracked in git — the private key must stay local.
+      # Cert SANs cover localhost + the detected LAN IP so browsers on the LAN
+      # trust it. Regenerate by deleting ~/.certs/zellij-web.pem and re-running.
+      mkdir -p ~/.certs
+      if command -v mkcert >/dev/null && [ ! -f ~/.certs/zellij-web.pem ]; then
+        mkcert -install
+        LAN_IP=$(ip -4 addr show scope global | grep -oP 'inet \K[\d.]+' | grep -vE '^(172\.1[78]\.|10\.255\.)' | head -1)
+        mkcert -cert-file ~/.certs/zellij-web.pem -key-file ~/.certs/zellij-web-key.pem localhost 127.0.0.1 0.0.0.0 "$LAN_IP"
+      fi
+      command -v zellij >/dev/null || { echo "zellij missing after install" >&2; exit 1; }
+      rotz link zellij --force
