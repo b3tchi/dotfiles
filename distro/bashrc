@@ -27,7 +27,7 @@ if [[ -n "$ZELLIJ" ]]; then
 	# into the daemon env). Clear it so tmux-start doesn't think we're already
 	# in tmux and bail — otherwise the pane drops to plain bash, no wrapping.
 	unset TMUX
-	command -v tmux-start &>/dev/null && tmux-start attach 0 "zj_${ZELLIJ_SESSION_NAME}"
+	command -v tmux-start &>/dev/null && tmux-start attach 0 "${ZELLIJ_SESSION_NAME}"
 # Auto-start tmux session (script symlinked to ~/.local/bin via rotz)
 elif command -v tmux-start &>/dev/null; then
 	if [[ -n "$TMUX_TARGET" ]]; then
