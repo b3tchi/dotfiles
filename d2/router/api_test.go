@@ -446,8 +446,30 @@ func TestAPIResolve_tableTests(t *testing.T) {
 			wantStatus: 404,
 		},
 		{
+			name:        "non-canonical .. that cleans back inside project → 200",
+			path:        "/home/user/dotfiles/../dotfiles/x.d2",
+			wantStatus:  200,
+			wantProject: "dotfiles",
+			wantFile:    "x.d2",
+		},
+		{
+			name:       "traversal .. that escapes all projects → 404",
+			path:       "/home/user/dotfiles/../../etc/passwd.d2",
+			wantStatus: 404,
+		},
+		{
+			name:       "deep traversal escaping to /etc → 404",
+			path:       "/home/user/proj/../../../etc/passwd.d2",
+			wantStatus: 404,
+		},
+		{
 			name:       "relative path",
 			path:       "relative/file.d2",
+			wantStatus: 400,
+		},
+		{
+			name:       "relative .. path stays 400 (not 404)",
+			path:       "../../etc/passwd.d2",
 			wantStatus: 400,
 		},
 		{
@@ -506,6 +528,51 @@ func TestAPIResolve_sshExcluded(t *testing.T) {
 
 	if rr.Code != http.StatusNotFound {
 		t.Errorf("ssh excluded: want 404, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestAPIResolve_traversalEscapesProject is the reviewer's verbatim repro: with
+// registry {proj: /home/user/proj}, a ..-escaping path that path.Clean resolves
+// OUTSIDE the project must 404, not 200 with a wrong-project match (ft002:38).
+func TestAPIResolve_traversalEscapesProject(t *testing.T) {
+	cm := NewChildManager(config{D2Bin: "false", ChildPortBase: "4801", IdleTimeout: "30m"}, nil)
+	reg := Registry{"proj": "/home/user/proj"}
+	h := NewAPIHandler(cm, reg, "4800")
+
+	// path.Clean("/home/user/proj/../../../etc/passwd.d2") == "/etc/passwd.d2",
+	// which is outside proj → must be 404.
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/resolve?path=/home/user/proj/../../../etc/passwd.d2", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("traversal escaping proj: want 404, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestAPIResolve_traversalCleansInside verifies the in-project ..-form: a path
+// with ".." segments that path.Clean resolves back INSIDE the project still 200s.
+func TestAPIResolve_traversalCleansInside(t *testing.T) {
+	cm := NewChildManager(config{D2Bin: "false", ChildPortBase: "4801", IdleTimeout: "30m"}, nil)
+	reg := Registry{"proj": "/home/user/proj"}
+	h := NewAPIHandler(cm, reg, "4800")
+
+	// path.Clean("/home/user/proj/sub/../a.d2") == "/home/user/proj/a.d2" → 200.
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/resolve?path=/home/user/proj/sub/../a.d2", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("in-project ..: want 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp resolveResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Project != "proj" || resp.File != "a.d2" {
+		t.Errorf("in-project ..: want proj/a.d2, got %s/%s", resp.Project, resp.File)
 	}
 }
 

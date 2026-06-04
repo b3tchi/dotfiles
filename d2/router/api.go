@@ -221,6 +221,15 @@ func (h *APIHandler) handleResolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Canonicalize BEFORE prefix-matching. Without this, a ..-escaping path
+	// (e.g. /home/user/proj/../../../etc/passwd.d2) would raw-prefix-match its
+	// origin project and 200 with the wrong project — but filepath.Clean
+	// resolves it to /etc/passwd.d2, which is outside every project → 404
+	// (ft002:38). The IsAbs check stays above so a relative path still 400s
+	// (Clean would otherwise mask "../x" as a rooted-looking path); an
+	// in-project ".." that cleans back inside still matches and 200s.
+	absPath = filepath.Clean(absPath)
+
 	// Longest-prefix match: find the project whose path is the longest
 	// prefix of absPath.
 	bestProject := ""
