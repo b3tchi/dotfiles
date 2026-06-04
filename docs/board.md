@@ -11,5 +11,3 @@ sections when status flips.
 ## spec
 
 ## ready
-
-- [[sp005|d2-watch-router]]
