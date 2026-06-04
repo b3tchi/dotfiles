@@ -74,7 +74,7 @@
 
 dolt.shared-server: true
 
-sync.remote: "git+ssh://git@github.com-b3tchi/b3tchi/dotfiles.git"
+sync.remote: "git+https://github.com/b3tchi/dotfiles.git"
 
 # Disable bd's auto-export-after-mutation. Pairs with no-auto-flush above;
 # this is the newer namespaced key that supersedes it. .beads/issues.jsonl
