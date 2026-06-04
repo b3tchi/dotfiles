@@ -1,0 +1,126 @@
+#!/usr/bin/env nu
+# d2-router-test — stale-pidfile unit test for d2-router start
+#
+# Tests:
+#   1. Bogus pid in pidfile → cleaned + relaunch (fake daemon on PATH)
+#   2. No pidfile, binary missing → error names "rotz install d2"
+#
+# Run: nu nushell/actions/d2-router-test
+# Pass: exits 0 and prints "PASS: 2 tests passed"
+# Fail: exits 1 and prints "FAIL: <description>"
+
+const WRAPPER = "/home/jan/.dotfiles/.worktrees/bd-dotfiles-bnc.6.0/nushell/actions/d2-router"
+
+# ── setup ─────────────────────────────────────────────────────────────────────
+
+let tmp = (^mktemp -d | str trim)
+let fake_bin_dir = $"($tmp)/bin"
+# Wrapper expands PID_FILE = "~/.cache/d2-router/pid" against HOME
+let cache_dir = $"($tmp)/.cache/d2-router"
+let pid_file = $"($cache_dir)/pid"
+let fake_daemon = $"($fake_bin_dir)/d2-router-d"
+let launched_marker = $"($tmp)/daemon_launched"
+
+^mkdir -p $fake_bin_dir
+^mkdir -p $cache_dir
+
+# Create a fake d2-router-d that records it was launched and sleeps briefly.
+$"#!/bin/bash\ntouch ($launched_marker)\nsleep 10\n" | save --force $fake_daemon
+^chmod +x $fake_daemon
+
+# We use a test port that is unlikely to be in use.
+# 58901 is far from the d2-router default (4800) and any common service.
+let test_port = "58901"
+# PATH that includes fake bin dir first, then standard dirs (excludes ~/.local/bin)
+let test_path = ([$fake_bin_dir "/usr/local/bin" "/usr/bin" "/bin"] | str join ":")
+
+# ── test 1: stale pidfile → cleaned + relaunch ────────────────────────────────
+
+# Write a bogus (dead) pid. Use a very high number that should not exist.
+let bogus_pid = 9999991
+
+# Ensure bogus pid is truly dead before the test.
+if (do { ^kill -0 $bogus_pid } | complete | get exit_code) == 0 {
+    print $"FAIL: bogus pid ($bogus_pid) unexpectedly alive — choose a different test pid"
+    exit 1
+}
+
+# Write stale pidfile at the overridden HOME location.
+$bogus_pid | into string | save --force $pid_file
+
+# Run d2-router start via bash to set env cleanly for the child process.
+let result = (do {
+    ^bash -c $"HOME=($tmp) D2_ROUTER_PORT=($test_port) PATH=($test_path) /usr/bin/nu ($WRAPPER) start"
+} | complete)
+
+# The start should succeed (exit 0).
+if $result.exit_code != 0 {
+    print $"FAIL: start exited non-zero: ($result.exit_code)\nstdout: ($result.stdout)\nstderr: ($result.stderr)"
+    exit 1
+}
+
+# Pidfile must be updated (not the bogus pid anymore).
+if ($pid_file | path exists) {
+    let new_pid_str = (open $pid_file | str trim)
+    let new_pid = (try { $new_pid_str | into int } catch { -1 })
+    if $new_pid == $bogus_pid {
+        print $"FAIL: pidfile still contains bogus pid ($bogus_pid) — stale cleanup failed"
+        exit 1
+    }
+    if $new_pid <= 0 {
+        print $"FAIL: pidfile contains invalid pid after start: ($new_pid_str)"
+        exit 1
+    }
+} else {
+    print "FAIL: pidfile absent after start — expected new pid to be written"
+    exit 1
+}
+
+# Fake daemon must have been launched.
+if not ($launched_marker | path exists) {
+    print "FAIL: fake daemon was not launched (marker file absent)"
+    exit 1
+}
+
+print "PASS: stale-pidfile: bogus pid cleaned and daemon relaunched"
+
+# Cleanup: kill the fake daemon we launched.
+let live_pid = (open $pid_file | str trim | into int)
+do { ^kill -TERM $live_pid } | complete | ignore
+^rm -f $pid_file
+^rm -f $launched_marker
+
+# ── test 2: binary missing → error message names "rotz install d2" ────────────
+
+# Remove the fake daemon binary (no d2-router-d in PATH at all).
+^rm -f $fake_daemon
+
+# Use a PATH without ~/.local/bin so the real d2-router-d is also excluded.
+let no_daemon_path = "/usr/local/bin:/usr/bin:/bin"
+# Ensure port 58901 is also free for test 2
+
+let result2 = (do {
+    ^bash -c $"HOME=($tmp) D2_ROUTER_PORT=($test_port) PATH=($no_daemon_path) /usr/bin/nu ($WRAPPER) start"
+} | complete)
+
+# Should fail (exit non-zero).
+if $result2.exit_code == 0 {
+    print "FAIL: start should have failed when daemon binary is missing"
+    exit 1
+}
+
+# Error output must mention 'rotz install d2'.
+let combined = $"($result2.stdout)($result2.stderr)"
+if not ($combined | str contains "rotz install d2") {
+    print $"FAIL: error output does not mention 'rotz install d2':\n($combined)"
+    exit 1
+}
+
+print "PASS: missing binary: error names 'rotz install d2'"
+
+# ── cleanup ───────────────────────────────────────────────────────────────────
+
+^rm -rf $tmp
+
+print ""
+print "PASS: 2 tests passed"
