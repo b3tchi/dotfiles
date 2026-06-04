@@ -81,7 +81,7 @@ def main-start [] {
             print $"d2-router: ERROR — port (router-port) appears occupied by pid ($old_pid) (not d2-router-d); refusing to start"
             error make { msg: "d2-router: port occupied by foreign process" }
         } else {
-            print $"d2-router: stale pidfile \(pid $old_pid dead\) — cleaning up"
+            print $"d2-router: stale pidfile \(pid ($old_pid) dead\) — cleaning up"
             rm --force ($PID_FILE | path expand)
         }
     }
@@ -104,7 +104,7 @@ def main-start [] {
 
     let new_pid = ($pid_result.stdout | str trim | into int)
     write-pidfile $new_pid
-    print $"d2-router: started \(pid $new_pid\), logging to ($log)"
+    print $"d2-router: started \(pid ($new_pid)\), logging to ($log)"
 }
 
 # Stop the daemon: api stop-all first, then SIGTERM the pid.

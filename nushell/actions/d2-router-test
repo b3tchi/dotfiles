@@ -9,7 +9,9 @@
 # Pass: exits 0 and prints "PASS: 2 tests passed"
 # Fail: exits 1 and prints "FAIL: <description>"
 
-const WRAPPER = "/home/jan/.dotfiles/.worktrees/bd-dotfiles-bnc.6.0/nushell/actions/d2-router"
+# Self-locate the wrapper relative to this test script so the test survives
+# moving/merging out of the author's worktree (no hardcoded paths).
+const WRAPPER = (path self | path dirname | path join "d2-router")
 
 # ── setup ─────────────────────────────────────────────────────────────────────
 
