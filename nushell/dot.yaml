@@ -43,6 +43,7 @@ linux:
     actions/tmux-to-workstation: ~/.local/bin/tmux-to-workstation
     actions/tmux-session-cleaner: ~/.local/bin/tmux-session-cleaner
     actions/wm-launch-terminal: ~/.local/bin/wm-launch-terminal
+    actions/d2-router: ~/.local/bin/d2-router
   installs:
     cmd: |
       {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
@@ -79,6 +80,7 @@ linux:
       chmod +x ~/.dotfiles/nushell/actions/tmux-to-workstation
       chmod +x ~/.dotfiles/nushell/actions/tmux-session-cleaner
       chmod +x ~/.dotfiles/nushell/actions/wm-launch-terminal
+      chmod +x ~/.dotfiles/nushell/actions/d2-router
       # WSL: curated Windows exe symlinks — env.nu puts ~/.local/bin/win on
       # PATH instead of System32 (4000+ files would pollute completions).
       # Runtime kernel check, not env.WSL_DISTRO_NAME — that var is unset in

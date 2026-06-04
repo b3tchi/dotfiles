@@ -1,0 +1,239 @@
+#!/usr/bin/env nu
+# d2-router — thin CLI wrapper around the d2-router-d daemon
+#
+# Usage:
+#   d2-router start                       # idempotent daemon launch
+#   d2-router stop                        # graceful stop (api stop-all + SIGTERM)
+#   d2-router status                      # table of running children
+#   d2-router open <project>/<file>       # resolve route and open in browser
+#   d2-router open <abs-path>             # resolve absolute path and open in browser
+#   d2-router reload <project>/<file>     # force re-render via API
+
+const DAEMON_BIN = "d2-router-d"
+const CACHE_DIR  = "~/.cache/d2-router"
+const PID_FILE   = "~/.cache/d2-router/pid"
+const LOG_FILE   = "~/.cache/d2-router/log"
+
+# Resolve the router port from the environment (mirrors daemon default).
+def router-port [] {
+    $env | get -o D2_ROUTER_PORT | default "4800"
+}
+
+# Base URL for the daemon API.
+def api-base [] {
+    $"http://127.0.0.1:(router-port)"
+}
+
+# Probe /api/status. Returns the parsed JSON array or null on connection failure.
+def probe-status [] {
+    try {
+        http get --max-time 2sec $"(api-base)/api/status"
+    } catch {
+        null
+    }
+}
+
+# Read the pid from the pidfile. Returns null if absent or unreadable.
+def read-pidfile [] {
+    let p = ($PID_FILE | path expand)
+    if ($p | path exists) {
+        try { open $p | str trim | into int } catch { null }
+    } else {
+        null
+    }
+}
+
+# Check if a pid is alive (kill -0 equivalent). Returns bool.
+def pid-alive [pid: int] {
+    (do { ^kill -0 $pid } | complete | get exit_code) == 0
+}
+
+# Ensure cache dir and write pidfile.
+def write-pidfile [pid: int] {
+    let dir = ($CACHE_DIR | path expand)
+    if not ($dir | path exists) {
+        mkdir $dir
+    }
+    $pid | into string | save --force ($PID_FILE | path expand)
+}
+
+# Idempotent start: port-probe first, pidfile second, then detached launch.
+def main-start [] {
+    # 1. Port probe — if daemon is already answering, no-op.
+    let live = (probe-status)
+    if $live != null {
+        print $"d2-router: daemon already running on port (router-port) — no-op"
+        return
+    }
+
+    # 2. Binary check — fail loud with actionable message.
+    if (which $DAEMON_BIN | is-empty) {
+        error make {
+            msg: $"d2-router: '($DAEMON_BIN)' not found on PATH — run: rotz install d2"
+        }
+    }
+
+    # 3. Stale pidfile cleanup.
+    let old_pid = (read-pidfile)
+    if $old_pid != null {
+        if (pid-alive $old_pid) {
+            # Process alive but not answering the API — foreign process on port?
+            print $"d2-router: ERROR — port (router-port) appears occupied by pid ($old_pid) (not d2-router-d); refusing to start"
+            error make { msg: "d2-router: port occupied by foreign process" }
+        } else {
+            print $"d2-router: stale pidfile \(pid ($old_pid) dead\) — cleaning up"
+            rm --force ($PID_FILE | path expand)
+        }
+    }
+
+    # 4. Detached launch — adr0002 condition 4 (one-liner shim, startup cost dominates).
+    let log = ($LOG_FILE | path expand)
+    let dir = ($CACHE_DIR | path expand)
+    if not ($dir | path exists) {
+        mkdir $dir
+    }
+
+    # nohup + bash & echo $! detaches the daemon from the current terminal session.
+    let pid_result = (do {
+        ^bash -c $"nohup ($DAEMON_BIN) >>($log) 2>&1 & echo $!"
+    } | complete)
+
+    if $pid_result.exit_code != 0 {
+        error make { msg: $"d2-router: failed to launch daemon: ($pid_result.stderr)" }
+    }
+
+    let new_pid = ($pid_result.stdout | str trim | into int)
+    write-pidfile $new_pid
+    print $"d2-router: started \(pid ($new_pid)\), logging to ($log)"
+}
+
+# Stop the daemon: api stop-all first, then SIGTERM the pid.
+def main-stop [] {
+    # Send stop-all via API (best-effort — daemon may already be down).
+    let sent = (try {
+        http post $"(api-base)/api/stop-all" ""
+        true
+    } catch {
+        false
+    })
+    if $sent {
+        print "d2-router: sent stop-all to daemon"
+    }
+
+    # SIGTERM the recorded pid.
+    let pid = (read-pidfile)
+    if $pid != null {
+        if (pid-alive $pid) {
+            ^kill -TERM $pid
+            print $"d2-router: sent SIGTERM to pid ($pid)"
+        } else {
+            print $"d2-router: pid ($pid) already gone"
+        }
+        rm --force ($PID_FILE | path expand)
+    } else {
+        print "d2-router: no pidfile — daemon may not have been started with this wrapper"
+    }
+}
+
+# Print running children as a nu table.
+def main-status [] {
+    let data = (probe-status)
+    if $data == null {
+        print $"d2-router: daemon not responding on port (router-port)"
+        return
+    }
+    if ($data | is-empty) {
+        print "d2-router: no children running"
+        return
+    }
+    $data | select project file port pid clients lastCompile lastError
+}
+
+# Open a diagram in the default browser.
+# Accepts either "<project>/<file>" or an absolute path.
+def main-open [target: string] {
+    let url = (resolve-to-url $target)
+    open-url $url
+}
+
+# Force reload a running watcher.
+# target must be "<project>/<file>".
+def main-reload [target: string] {
+    let clean = ($target | str trim --char "/")
+    try {
+        http post $"(api-base)/api/reload/($clean)" ""
+        print $"d2-router: reloaded ($clean)"
+    } catch { |err|
+        error make { msg: $"d2-router reload failed: ($err.msg)" }
+    }
+}
+
+# ── helpers ───────────────────────────────────────────────────────────────────
+
+# Resolve target (project/file or abs path) to a browser URL via the API.
+def resolve-to-url [target: string] {
+    # Detect absolute path vs project/file shorthand.
+    let is_abs = ($target | str starts-with "/")
+
+    if $is_abs {
+        # Use /api/resolve?path=<abs>
+        try {
+            let resp = (http get $"(api-base)/api/resolve?path=($target | url encode)")
+            $resp | get url
+        } catch { |err|
+            error make { msg: $"d2-router open: ($err.msg)" }
+        }
+    } else {
+        # Build URL directly: http://127.0.0.1:<port>/<project>/<file>
+        let clean = ($target | str trim --char "/")
+        $"(api-base)/($clean)"
+    }
+}
+
+# Open a URL: xdg-open when available, else print (headless fallback).
+def open-url [url: string] {
+    if (which xdg-open | is-not-empty) {
+        ^xdg-open $url
+        print $"d2-router: opened ($url)"
+    } else {
+        # Headless / no display — print the URL for the user/caller.
+        print $"d2-router: ($url)"
+    }
+}
+
+# ── entry point ───────────────────────────────────────────────────────────────
+
+# d2-router — control the d2-router-d daemon
+def main [
+    subcommand?: string  # start | stop | status | open | reload
+    ...args: string      # subcommand arguments
+] {
+    match $subcommand {
+        "start"  => { main-start }
+        "stop"   => { main-stop }
+        "status" => { main-status }
+        "open"   => {
+            if ($args | is-empty) {
+                error make { msg: "d2-router open: requires <project>/<file> or <abs-path>" }
+            }
+            main-open ($args | first)
+        }
+        "reload" => {
+            if ($args | is-empty) {
+                error make { msg: "d2-router reload: requires <project>/<file>" }
+            }
+            main-reload ($args | first)
+        }
+        _ => {
+            print "Usage: d2-router <subcommand> [args]"
+            print ""
+            print "Subcommands:"
+            print "  start                    — launch daemon (idempotent)"
+            print "  stop                     — stop daemon"
+            print "  status                   — table of running children"
+            print "  open <project>/<file>    — open diagram in browser"
+            print "  open <abs-path>          — resolve abs path and open in browser"
+            print "  reload <project>/<file>  — force re-render"
+        }
+    }
+}
