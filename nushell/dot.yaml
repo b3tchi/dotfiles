@@ -79,4 +79,17 @@ linux:
       chmod +x ~/.dotfiles/nushell/actions/tmux-to-workstation
       chmod +x ~/.dotfiles/nushell/actions/tmux-session-cleaner
       chmod +x ~/.dotfiles/nushell/actions/wm-launch-terminal
+      # WSL: curated Windows exe symlinks — env.nu puts ~/.local/bin/win on
+      # PATH instead of System32 (4000+ files would pollute completions).
+      # Runtime kernel check, not env.WSL_DISTRO_NAME — that var is unset in
+      # sessions spawned outside wsl.exe (tmux server, sway/WSLg, ssh).
+      if uname -r | grep -q 'microsoft-standard-WSL'; then
+        mkdir -p ~/.local/bin/win
+        ln -sf /mnt/c/WINDOWS/system32/wsl.exe ~/.local/bin/win/wsl.exe
+        ln -sf /mnt/c/WINDOWS/system32/cmd.exe ~/.local/bin/win/cmd.exe
+        ln -sf /mnt/c/WINDOWS/explorer.exe ~/.local/bin/win/explorer.exe
+        ln -sf /mnt/c/WINDOWS/system32/clip.exe ~/.local/bin/win/clip.exe
+        ln -sf /mnt/c/WINDOWS/system32/notepad.exe ~/.local/bin/win/notepad.exe
+        ln -sf '/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/powershell.exe' ~/.local/bin/win/powershell.exe
+      fi
       rotz link nushell --force

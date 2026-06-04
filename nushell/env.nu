@@ -73,18 +73,23 @@ $env.TEMP = $nu.temp-dir
 $env.PATH = ($env.PATH | split row (char esep) | prepend ($env.HOME | path join '.local' 'bin') | uniq )
 #filter out native paths
 if $nu.os-info.kernel_version =~ 'microsoft-standard-WSL' {
-	# scoop and powerhsell
-	$env.PATH = ($env.PATH | split row (char esep) | sort | uniq 
-	| do {|x| ($x | where $it !~ '/mnt/c')
-	 		| append ($x | where $it =~ '/mnt/c' and ( 
-	 			$it =~ 'PowerShell'
-	 			or $it =~ '/scoop/shims'
-	 			or $it =~ '/scoop/apps/vscode'
-	 			)
-	 		)
-	 } $in
-	 )
-	
+	# prune inherited /mnt/c noise, then append the Windows paths we want —
+	# append (not filter) so they exist even when the session was spawned
+	# without Windows PATH injection (tmux server, sway/WSLg, ssh).
+	# System32 is NOT added directly (4000+ files pollute completions) —
+	# curated symlinks live in ~/.local/bin/win (wsl/cmd/explorer/clip/
+	# notepad/powershell), add more with: ln -s /mnt/c/... ~/.local/bin/win/
+	let win_path = [
+		($env.HOME | path join '.local' 'bin' 'win')
+		'/mnt/c/Users/jbecka/scoop/shims'
+		'/mnt/c/Users/jbecka/scoop/apps/vscode/current/bin'
+	]
+	$env.PATH = ($env.PATH | split row (char esep)
+		| where $it !~ '/mnt/c'
+		| append $win_path
+		| uniq
+		)
+
     # Prepend ~/.local/bin so custom xdg-open wrapper is found first
     # Set browser for CLI tools (pac, dotnet, etc.)
     $env.BROWSER = '/home/jan/.local/bin/xdg-open'
