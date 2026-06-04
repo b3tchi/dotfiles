@@ -18,3 +18,11 @@ linux:
       {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
       curl -fsSL https://d2lang.com/install.sh | sh -s --
       {{/if}}
+      # Build the d2-router daemon. Guarded on the go toolchain so the d2
+      # package install above still succeeds on hosts without go.
+      if command -v go >/dev/null 2>&1; then
+        mkdir -p ~/.local/bin
+        go build -C ~/.dotfiles/d2/router -o ~/.local/bin/d2-router-d .
+      else
+        echo "d2-router: go toolchain not found — skipping daemon build (install go, then re-run 'rotz install d2')" >&2
+      fi

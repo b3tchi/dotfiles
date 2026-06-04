@@ -77,7 +77,7 @@ views:
 
       - name: In Progress
         type: bql
-        query: "status = in_progress and type in ( epic, bug)"
+        query: "status = in_progress and (type = epic or type = bug)"
         color: "#73F59F"
 
 # View options:
@@ -94,12 +94,16 @@ views:
 #
 # BQL Query Syntax:
 #   Fields: type, priority, status, blocked, ready, label, title, id, created, updated
-#   Operators: = != < > <= >= ~ (contains) in not-in
+#   Operators: = != < > <= >= ~ (contains)
+#   NOTE: the `in (...)` / `not-in (...)` operators are documented upstream but
+#   are NOT parseable by bd 1.0.5's BQL engine — `type in (epic, bug)` fails with
+#   "expected comparison operator ... got IDENT". Use an OR chain instead:
+#   `(type = epic or type = bug)`.
 #   Examples:
 #     status = open
 #     type = bug and priority = P0
 #     blocked = true
-#     label in (urgent, critical)
+#     (type = epic or type = bug)
 #     title ~ auth
 
 # Orchestration mode settings — which AI client to use when entering orchestration mode
