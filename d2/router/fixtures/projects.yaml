@@ -1,0 +1,14 @@
+projects:
+  local-alpha:
+    path: /tmp/d2router-test-alpha
+  local-beta:
+    path: /tmp/d2router-test-beta
+  remote-proj:
+    path: /home/user/repos/remote
+    ssh: workstation
+  ssh-empty:
+    path: /home/user/repos/ssh-empty
+    ssh: ""
+  ssh-null:
+    path: /home/user/repos/ssh-null
+    ssh:
