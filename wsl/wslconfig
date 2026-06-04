@@ -1,5 +1,5 @@
 [wsl2]
-memory=24GB
+memory={{#if (eq whoami.devicename "CZ-01-2588")}}8GB{{else}}24GB{{/if}}
 networkingMode=mirrored
 firewall=true
 dnsTunneling=true
