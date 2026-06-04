@@ -66,9 +66,11 @@ func main() {
 
 	proxyHandler := NewProxyHandler(idx, cm)
 	indexH := newIndexHandler(idx, registryMissing)
+	apiH := NewAPIHandler(cm, reg, cfg.RouterPort)
 
 	mux := http.NewServeMux()
-	// Single "/" catch-all: dispatch index (path="/") vs proxy (2+ path segments).
+	// /api/* → control API; "/" catch-all: index (path="/") vs proxy.
+	mux.Handle("/api/", apiH)
 	mux.Handle("/", newRootHandler(indexH, proxyHandler))
 
 	addr := net.JoinHostPort("127.0.0.1", cfg.RouterPort)
