@@ -87,15 +87,22 @@ func (p *ProxyHandler) lookupRoute(reqPath string) (RouteEntry, bool) {
 
 // ServeHTTP handles all requests matching /{project}/{file}[/...].
 func (p *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Reject path traversal before any routing (raw and decoded).
+	// Reject path traversal before any routing. The check runs on the *decoded,
+	// pre-clean* path: a path is hostile if any segment is exactly ".." or if
+	// path.Clean changes it (i.e. it was not already in canonical form). We must
+	// NOT test strings.Contains(path.Clean(p), "..") — Clean *resolves* ".."
+	// segments, so the very thing we want to reject is removed before the test.
+	//
+	// Go pre-decodes r.URL.Path, but RawPath can hide separators behind %2f and
+	// dot-dots behind %2e%2e, so we additionally check the fully-decoded RawPath.
 	decodedPath := r.URL.Path
-	if strings.Contains(path.Clean(decodedPath), "..") {
+	if hasTraversal(decodedPath) {
 		writeJSONErr(w, http.StatusBadRequest, "path traversal rejected")
 		return
 	}
 	if r.URL.RawPath != "" {
 		if decoded, err := url.PathUnescape(r.URL.RawPath); err == nil {
-			if strings.Contains(path.Clean(decoded), "..") {
+			if hasTraversal(decoded) {
 				writeJSONErr(w, http.StatusBadRequest, "path traversal rejected")
 				return
 			}
@@ -149,6 +156,36 @@ func (p *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p.proxyHTTP(w, r, child, key, suffix)
+}
+
+// hasTraversal reports whether a decoded path is a directory-traversal attempt.
+// A path is hostile if either:
+//   - any "/"-delimited segment is exactly ".." (catches the dangerous
+//     /{matched-route}/../../ suffix form that path.Clean would otherwise
+//     resolve away before inspection), or
+//   - path.Clean(p) != p, i.e. p was not already in canonical form (catches
+//     "." segments, doubled slashes, and any other non-canonical shape that
+//     could be reinterpreted downstream).
+//
+// It deliberately does NOT call strings.Contains(path.Clean(p), "..") — Clean
+// removes ".." segments, so that test almost never fires.
+func hasTraversal(p string) bool {
+	for _, seg := range strings.Split(p, "/") {
+		if seg == ".." {
+			return true
+		}
+	}
+	// A single trailing slash is a legitimate request shape (trailing-slash
+	// variants must proxy normally), and path.Clean strips it — so compare
+	// against the trailing slash trimmed to avoid a false positive there.
+	canonical := strings.TrimSuffix(p, "/")
+	if canonical == "" {
+		canonical = "/"
+	}
+	if path.Clean(p) != canonical {
+		return true
+	}
+	return false
 }
 
 // splitKeyFromPath splits a URL path of the form /{project}/{file}[/rest] into

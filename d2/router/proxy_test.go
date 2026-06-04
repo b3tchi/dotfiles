@@ -387,6 +387,127 @@ func TestProxyTraversalBlocked(t *testing.T) {
 	}
 }
 
+// TestProxyTraversalRawForms drives the real ProxyHandler with httptest.NewRequest
+// (NOT http.Get, which normalises the path client-side before sending). This
+// exercises the dangerous /{matched-route}/../../ suffix form and its encoded
+// variants that reach a real server unmodified. The child records every suffix it
+// receives: any request that escapes the guard MUST be rejected (400/404) AND the
+// child suffix must never contain "..".
+func TestProxyTraversalRawForms(t *testing.T) {
+	// Backend that records the URL path it was asked to serve.
+	var gotSuffix atomic.Value
+	gotSuffix.Store("")
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Record both the (pre-decoded) Path and the RawPath so we can prove no
+		// ".." segment slipped through in either form.
+		seen := r.URL.Path
+		if r.URL.RawPath != "" {
+			seen = r.URL.RawPath
+		}
+		gotSuffix.Store(seen)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, "child served %s", seen)
+	}))
+	defer backend.Close()
+
+	idx := &IndexData{
+		Entries: []RouteEntry{{Route: "/myproject/test.d2", AbsPath: "/fake/test.d2"}},
+	}
+	cfg := config{D2Bin: os.Args[0], ChildPortBase: "0", IdleTimeout: "30m"}
+	cm := NewChildManager(cfg, os.Environ())
+	injectFakeChild(cm, "myproject/test.d2", "/fake/test.d2", backendPort(backend))
+	h := NewProxyHandler(idx, cm)
+
+	cases := []struct {
+		name    string
+		path    string // decoded path (sets r.URL.Path)
+		rawPath string // optional encoded path (sets r.URL.RawPath); "" → none
+	}{
+		{
+			name: "matched-route suffix traversal",
+			path: "/myproject/test.d2/../../etc/passwd",
+		},
+		{
+			name: "matched-route deep traversal",
+			path: "/myproject/test.d2/../../../../../../etc/passwd",
+		},
+		{
+			name:    "encoded slash traversal",
+			path:    "/myproject/test.d2/../../etc/passwd",
+			rawPath: "/myproject/test.d2/..%2f..%2fetc%2fpasswd",
+		},
+		{
+			name:    "double-encoded dotdot",
+			path:    "/myproject/test.d2/../secret",
+			rawPath: "/myproject/test.d2/%2e%2e/secret",
+		},
+		{
+			name: "leading traversal",
+			path: "/../etc/passwd",
+		},
+		{
+			name:    "encoded dotdot no slash route",
+			path:    "/myproject/../etc/passwd",
+			rawPath: "/myproject/%2e%2e/etc/passwd",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotSuffix.Store("") // reset child recorder
+			req := httptest.NewRequest(http.MethodGet, "http://router"+tc.path, nil)
+			if tc.rawPath != "" {
+				req.URL.RawPath = tc.rawPath
+			}
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest && rec.Code != http.StatusNotFound {
+				t.Errorf("path=%q raw=%q: want 400/404, got %d (body %q)",
+					tc.path, tc.rawPath, rec.Code, rec.Body.String())
+			}
+			if seen, _ := gotSuffix.Load().(string); strings.Contains(seen, "..") {
+				t.Errorf("path=%q raw=%q: child received traversal suffix %q (filesystem-hit risk)",
+					tc.path, tc.rawPath, seen)
+			}
+		})
+	}
+}
+
+// TestHasTraversal unit-tests the guard predicate directly: hostile dot-dot and
+// non-canonical shapes are rejected; canonical paths and legitimate trailing
+// slashes are allowed.
+func TestHasTraversal(t *testing.T) {
+	hostile := []string{
+		"/myproject/test.d2/../../etc/passwd",
+		"/myproject/test.d2/..",
+		"/../etc/passwd",
+		"/..",
+		"/a/./b",  // "." segment → non-canonical
+		"/a//b",   // doubled slash → non-canonical
+		"/a/../b", // resolvable but still a traversal attempt
+	}
+	for _, p := range hostile {
+		if !hasTraversal(p) {
+			t.Errorf("hasTraversal(%q) = false, want true (hostile)", p)
+		}
+	}
+
+	allowed := []string{
+		"/myproject/test.d2",
+		"/myproject/test.d2/",          // legit trailing slash
+		"/myproject/test.d2/static/",   // legit trailing slash on sub-path
+		"/myproject/test.d2/static/watch.js",
+		"/",
+		"/myproject/..file.d2", // ".." inside a segment, not a segment itself
+	}
+	for _, p := range allowed {
+		if hasTraversal(p) {
+			t.Errorf("hasTraversal(%q) = true, want false (legitimate)", p)
+		}
+	}
+}
+
 // ── Accept-Encoding forced to identity ───────────────────────────────────────
 
 func TestProxyAcceptEncodingIdentity(t *testing.T) {
@@ -581,15 +702,14 @@ func TestProxyWebSocketEcho(t *testing.T) {
 	conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
 	conn.Write(buildWSTextFrame(payload))
 
-	// Read echoed frame.
+	// Read echoed frame. The echo MUST round-trip through the upgrade proxy:
+	// a read error or a payload mismatch is a hard failure, not an optional log.
 	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	echoed, err := readWSTextFrame(reader)
 	if err != nil {
-		// Echo may not propagate through httputil.ReverseProxy — upgrade itself passing is sufficient.
-		t.Logf("ws echo read: %v — upgrade succeeded, echo optional via stdlib proxy", err)
-		return
+		t.Fatalf("ws echo read: %v — echoed frame must round-trip through the proxy", err)
 	}
 	if !bytes.Equal(echoed, payload) {
-		t.Logf("echo payload mismatch: want %q got %q — upgrade path functional", payload, echoed)
+		t.Errorf("ws echo payload mismatch: want %q got %q", payload, echoed)
 	}
 }
