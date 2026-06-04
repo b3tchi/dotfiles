@@ -62,14 +62,24 @@ func main() {
 	reg, registryMissing := loadRegistryWithFallback(cfg.RegistryPath)
 	idx := buildIndex(reg)
 
+	cm := NewChildManager(cfg, os.Environ())
+
+	proxyHandler := NewProxyHandler(idx, cm)
+	indexH := newIndexHandler(idx, registryMissing)
+
 	mux := http.NewServeMux()
-	mux.Handle("/", newIndexHandler(idx, registryMissing))
+	// Single "/" catch-all: dispatch index (path="/") vs proxy (2+ path segments).
+	mux.Handle("/", newRootHandler(indexH, proxyHandler))
 
 	addr := net.JoinHostPort("127.0.0.1", cfg.RouterPort)
 	srv := &http.Server{
 		Addr:    addr,
 		Handler: mux,
 	}
+
+	// Start the idle reaper.
+	reaperCtx, reaperCancel := context.WithCancel(context.Background())
+	cm.StartReaper(reaperCtx)
 
 	// Start listening in a goroutine.
 	listenErr := make(chan error, 1)
@@ -91,12 +101,28 @@ func main() {
 		log.Printf("received signal %v — shutting down", sig)
 	}
 
+	// Graceful shutdown: stop reaper + all children.
+	reaperCancel()
+	cm.StopAll()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("shutdown error: %v", err)
 	}
 	log.Println("stopped")
+}
+
+// newRootHandler returns an http.Handler that dispatches "/" → index,
+// all other paths → proxyHandler.
+func newRootHandler(indexH, proxyH http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			indexH.ServeHTTP(w, r)
+			return
+		}
+		proxyH.ServeHTTP(w, r)
+	})
 }
 
 // loadRegistryWithFallback loads the registry and returns it plus a missing flag.
