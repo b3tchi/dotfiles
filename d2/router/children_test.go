@@ -33,11 +33,18 @@ func TestMain(m *testing.M) {
 
 // runTestHelperProcess is called when this binary is re-executed as the fake d2.
 // It parses --port from argv and serves HTTP on 127.0.0.1:<port>.
-// Exit 0 on SIGTERM, exit 2 on --crash flag.
+// Behaviour by flag:
+//   - default:            serve until SIGTERM, then exit 0
+//   - --crash:            exit 3 immediately, BEFORE opening the port
+//     (never becomes ready → exercises the readiness-failure path)
+//   - --crash-after-ready: open the port, serve briefly, then exit 3
+//     (becomes ready, then dies → exercises the crash-after-ready path
+//     that records LastError in children.go)
 func runTestHelperProcess() {
 	args := os.Args[1:]
 	port := ""
 	crash := false
+	crashAfterReady := false
 	for i, a := range args {
 		if a == "--port" && i+1 < len(args) {
 			port = args[i+1]
@@ -45,14 +52,17 @@ func runTestHelperProcess() {
 		if a == "--crash" {
 			crash = true
 		}
+		if a == "--crash-after-ready" {
+			crashAfterReady = true
+		}
 	}
 	if port == "" {
 		fmt.Fprintln(os.Stderr, "helper: --port not provided")
 		os.Exit(1)
 	}
 	if crash {
-		fmt.Fprintln(os.Stderr, "helper: crash requested")
-		os.Exit(3) // non-zero → lastError
+		fmt.Fprintln(os.Stderr, "helper: crash requested (before listen)")
+		os.Exit(3) // non-zero, never opens port → readiness-failure path
 	}
 
 	ln, err := net.Listen("tcp", "127.0.0.1:"+port)
@@ -60,6 +70,24 @@ func runTestHelperProcess() {
 		fmt.Fprintf(os.Stderr, "helper: listen on %s: %v\n", port, err)
 		os.Exit(1)
 	}
+
+	if crashAfterReady {
+		// Become ready (port is open), let the parent's readiness probe succeed,
+		// then die non-zero to exercise the crash-after-ready path.
+		fmt.Fprintln(os.Stderr, "helper: crash-after-ready requested")
+		go func() {
+			srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			})}
+			srv.Serve(ln) //nolint:errcheck — intentional: we exit below
+		}()
+		// Give the parent's readiness probe (100ms dial + 20ms poll) ample time
+		// to connect and for Ensure to return before we exit.
+		time.Sleep(200 * time.Millisecond)
+		fmt.Fprintln(os.Stderr, "helper: crash-after-ready exiting")
+		os.Exit(3) // non-zero, after becoming ready → crash path records LastError
+	}
+
 	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})}
@@ -340,15 +368,14 @@ func TestDoubleStop(t *testing.T) {
 	_ = err
 }
 
-// TestCrashLastError: a crashing child records lastError and is removed from the map.
-func TestCrashLastError(t *testing.T) {
+// TestCrashBeforeReady: a child that exits non-zero BEFORE opening its port never
+// becomes ready, so Ensure returns an error (readiness-failure path) and the child
+// is removed from the map. This path does NOT record LastError — the wait goroutine
+// takes the deliberate-stop branch because spawnLocked calls stopCancel() on the
+// readiness failure. See TestCrashAfterReadyRecordsLastError for the LastError path.
+func TestCrashBeforeReady(t *testing.T) {
 	cfg := makeHelperConfig(t, freePort(t))
-	// Override D2Bin args: helper exits immediately with --crash flag.
-	// We use a custom ChildManager that appends --crash to the spawn args.
-	// Since the spawn function uses D2Bin + standard args, we wrap by setting
-	// D2_ROUTER_CRASH_HELPER_ARGS (handled in children.go via extra args).
-	// Instead, we use the test helper directly as a "crash" mode.
-	m := newCrashChildManager(t, cfg)
+	m := newCrashBeforeReadyManager(t, cfg)
 	defer m.StopAll()
 
 	dir := t.TempDir()
@@ -358,20 +385,80 @@ func TestCrashLastError(t *testing.T) {
 	}
 
 	key := "proj/crash.d2"
-	// A crashing child exits before opening its port, so probeReadyOrExit detects
-	// the early exit and Ensure returns an error.
+	// The child exits before opening its port, so probeReadyOrExit detects the
+	// early exit and Ensure returns an error.
 	_, ensureErr := m.Ensure(key, filePath)
 	if ensureErr == nil {
-		t.Error("expected Ensure to return an error for a crashing child, got nil")
+		t.Error("expected Ensure to return an error for a child that crashes before ready, got nil")
 	}
 
 	// Give any background goroutines a moment to finish.
 	time.Sleep(50 * time.Millisecond)
 
-	// The child must not be in the map after a crash.
+	// The child must not be in the map after the readiness failure.
 	snapshot := m.Snapshot()
 	if _, found := snapshot[key]; found {
-		t.Error("crashed child still in map — expected removal")
+		t.Error("crashed-before-ready child still in map — expected removal")
+	}
+}
+
+// TestCrashAfterReadyRecordsLastError: a child that opens its port (becomes ready),
+// then exits non-zero must (a) let Ensure succeed, and (b) have its LastError
+// populated by the wait goroutine before the entry is removed from the map.
+//
+// This is the test that guards children.go's crash path (the `LastError = waitErr`
+// assignment). Deleting that assignment must make this test fail.
+//
+// Race-free observation: Ensure returns the *Child the wait goroutine mutates.
+// The goroutine writes LastError under e.mu, releases it, THEN takes m.mu to delete
+// the map entry. So once Snapshot() (which takes m.mu) can no longer find the key,
+// the delete — sequenced AFTER the LastError write in the goroutine's program order
+// — has happened, and the m.mu release/acquire establishes happens-before. Reading
+// ch.LastError after confirming removal is therefore data-race-free and guaranteed
+// to observe the write.
+func TestCrashAfterReadyRecordsLastError(t *testing.T) {
+	cfg := makeHelperConfig(t, freePort(t))
+	m := newCrashAfterReadyManager(t, cfg)
+	defer m.StopAll()
+
+	dir := t.TempDir()
+	filePath := dir + "/crash-after-ready.d2"
+	if err := os.WriteFile(filePath, []byte("x -> y"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	key := "proj/crash-after-ready.d2"
+	// The child opens its port and becomes ready, so Ensure must succeed.
+	ch, ensureErr := m.Ensure(key, filePath)
+	if ensureErr != nil {
+		t.Fatalf("expected Ensure to succeed for a child that crashes after becoming ready, got: %v", ensureErr)
+	}
+	if ch == nil {
+		t.Fatal("Ensure returned nil child")
+	}
+
+	// Wait (race-free) for the wait goroutine to remove the crashed child from the
+	// map. Removal is sequenced after the LastError write, so once removal is
+	// observed the write is guaranteed visible.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, found := m.Snapshot()[key]; !found {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("crashed-after-ready child still in map after 5s — wait goroutine did not remove it")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// (a) LastError must be populated by the crash path.
+	if ch.LastError == nil {
+		t.Error("LastError is nil after a crash-after-ready exit — expected the wait goroutine to record it")
+	}
+
+	// (b) The child must be removed from the map (confirmed by the loop above).
+	if _, found := m.Snapshot()[key]; found {
+		t.Error("crashed-after-ready child still in map — expected removal")
 	}
 }
 
@@ -519,16 +606,28 @@ func TestStopAllNoZombies(t *testing.T) {
 
 // ── Crash helper ─────────────────────────────────────────────────────────────
 
-// crashChildManager embeds ChildManager but injects --crash into spawn args.
+// crashChildManager embeds ChildManager but injects a crash flag into spawn args.
 type crashChildManager struct {
 	*ChildManager
 }
 
-// newCrashChildManager creates a ChildManager whose spawned children immediately crash.
-func newCrashChildManager(t *testing.T, cfg config) *crashChildManager {
+// newCrashBeforeReadyManager creates a ChildManager whose spawned children exit
+// non-zero BEFORE opening their port — they never become ready. This exercises
+// the readiness-failure path (probeReadyOrExit detects the early exit).
+func newCrashBeforeReadyManager(t *testing.T, cfg config) *crashChildManager {
 	t.Helper()
 	m := NewChildManager(cfg, helperEnv())
-	m.extraSpawnArgs = []string{"--crash"} // triggers exit(3) in helper
+	m.extraSpawnArgs = []string{"--crash"} // triggers exit(3) before net.Listen
+	return &crashChildManager{m}
+}
+
+// newCrashAfterReadyManager creates a ChildManager whose spawned children open
+// their port (become ready), then exit non-zero. This exercises the crash path
+// in children.go that records LastError and removes the child from the map.
+func newCrashAfterReadyManager(t *testing.T, cfg config) *crashChildManager {
+	t.Helper()
+	m := NewChildManager(cfg, helperEnv())
+	m.extraSpawnArgs = []string{"--crash-after-ready"} // ready, then exit(3)
 	return &crashChildManager{m}
 }
 
