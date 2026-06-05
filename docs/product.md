@@ -14,6 +14,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 
 - [[ft001|project registry and navigation module]]
 - [[ft002|d2-preview-router]]
+- [[ft003|i3-config-layering]]
 
 ## Architecture Decision Records
 
