@@ -1,0 +1,4 @@
+# xrdp session entry (see poc002) — sourced by /etc/xrdp/startwm.sh
+# NOTE: do NOT set GALLIUM_DRIVER=d3d12 here — poisons /dev/dxg (poc002)
+unset SWAYSOCK I3SOCK
+exec i3 -c /etc/i3/config
