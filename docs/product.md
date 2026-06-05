@@ -23,6 +23,8 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[adr0002|When to use bash (vs nushell)]]
 - [[adr0003|When to use a compiled helper (Go) instead of nushell]]
 
+### [[cat002|display-platform]]
+
 ## AKM Reference
 
 - [[akm]] — knowledge model: every zettel type, its schema and life-cycle
