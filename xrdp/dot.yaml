@@ -33,6 +33,10 @@ linux:
       {{#if (eq whoami.distro "Arch Linux")}}
       yay -Syu --needed --noconfirm xrdp xorgxrdp xorg-xrdb
       sudo sed -i '0,/^port=3389$/s//port=3391/' /etc/xrdp/xrdp.ini
+      # RFX before H.264: H264 4:2:0 chroma subsampling washes out flat UI
+      # colors; RFX is 4:4:4 full color (fine on localhost/LAN bandwidth).
+      # H.264 kept as fallback for clients without RFX.
+      sudo sed -i 's/order = \[ "H.264", "RFX" \]/order = [ "RFX", "H.264" ]/' /etc/xrdp/gfx.toml
       {{/if}}
       {{/if}}
       rotz link xrdp --force
