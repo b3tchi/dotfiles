@@ -1,0 +1,28 @@
+# Meta-package: WSL with i3 over xrdp (X11, full desktop — adr0004)
+# Usage: rotz install meta-wsl-i3
+# Sets i3-over-xrdp as the active WSL session via wsl-wm-switch.
+depends:
+  - distro
+  - nushell
+  - tmux
+  - nvim
+  - lazygit
+  - d2
+  - ssh
+  - glab
+  - azcli
+  - claude
+  - opencode
+  - st
+  - quickshell
+  - docker
+
+installs:
+  # prerequisites of the switch cmd: wsl links wsl-wm-switch,
+  # i3 + xrdp provide the session being enabled
+  depends:
+    - wsl
+    - i3
+    - xrdp
+  cmd: |
+    ~/.local/bin/wsl-wm-switch i3

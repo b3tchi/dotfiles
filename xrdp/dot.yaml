@@ -25,7 +25,6 @@
 linux:
   links:
     xinitrc: ~/.xinitrc
-    wsl-wm-switch: ~/.local/bin/wsl-wm-switch
 
   installs:
     cmd: |

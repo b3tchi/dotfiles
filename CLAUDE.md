@@ -140,19 +140,22 @@ links:
 
 ### Meta-Packages
 
-Environment-level meta-packages use rotz `depends` to pull in the right set of apps per target environment. Each is a `dot.yaml` with only `depends:` — no links or installs of its own.
+Environment-level meta-packages use rotz `depends` to pull in the right set of apps per target environment. Each is a `dot.yaml` with `depends:` (additional packages) and optionally `installs.depends` (prerequisites) + `installs.cmd` (e.g. the WSL metas run `wsl-wm-switch` to set the active session); no links of their own.
 
 | Meta-Package | Target | Depends On |
 |---|---|---|
 | `meta-linux` | Personal Linux (native, i3/X11) | distro, nushell, tmux, nvim, lazygit, ssh, claude, opencode, wezterm, kitty, i3, xterm, emacs, logseq, freecad, evolution, xournalpp |
-| `meta-wsl` | WSL (nested in Windows, Sway/WSLg) | distro, nushell, tmux, nvim, lazygit, ssh, claude, opencode, sway |
+| `meta-wsl-sway` | WSL (nested in Windows, Sway/WSLg) | distro, nushell, tmux, nvim, lazygit, ssh, claude, opencode, quickshell, docker + installs.depends: wsl, sway |
+| `meta-wsl-i3` | WSL (nested in Windows, i3 over xrdp — adr0004) | same core + st + installs.depends: wsl, i3, xrdp |
 | `meta-proot` | proot Arch (nested in Termux, i3/Termux:X11) | distro, nushell, tmux, nvim, lazygit, ssh, claude, opencode, i3 |
 | `meta-termux` | Termux (direct on Android, no WM) | nushell, tmux, nvim, lazygit, ssh, claude, opencode |
 | `meta-windows` | Windows host (bridge for WSL) | wezterm, winterm, pwsh, powertoys, fancywm, flow-launcher, office |
 
-Usage: `rotz install meta-linux`, `rotz install meta-wsl`, etc.
+Usage: `rotz install meta-linux`, `rotz install meta-wsl-i3`, etc.
 
-Note: On a Windows + WSL setup, run `rotz install meta-windows` on the Windows side and `rotz install meta-wsl` inside WSL.
+WSL session choice: each meta-wsl-* runs `wsl-wm-switch` (linked by the `wsl` package) as its install cmd — installing the meta sets that WM as the active session; flip anytime with `wsl-wm-switch i3|sway|status`.
+
+Note: On a Windows + WSL setup, run `rotz install meta-windows` on the Windows side and `rotz install meta-wsl-i3` (or `meta-wsl-sway`) inside WSL.
 
 ### Legacy: `dtlf.sh`
 
