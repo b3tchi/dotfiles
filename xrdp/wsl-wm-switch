@@ -1,0 +1,23 @@
+#!/bin/sh
+# Switch WSL desktop between sway (WSLg) and i3 (xrdp) — ft003/poc002.
+# Sessions are exclusive by design (qs-start.sh killall would cross-kill).
+case "$1" in
+  i3)
+    systemctl --user disable --now sway-session 2>/dev/null
+    sudo systemctl enable --now xrdp xrdp-sesman
+    echo "i3-over-xrdp active — connect: mstsc /v:localhost:3391"
+    ;;
+  sway)
+    sudo systemctl disable --now xrdp xrdp-sesman
+    systemctl --user enable sway-session
+    echo "sway-session enabled — restart WSL terminal session to start sway"
+    ;;
+  status)
+    printf 'sway-session: %s\n' "$(systemctl --user is-enabled sway-session 2>/dev/null)"
+    printf 'xrdp:         %s\n' "$(systemctl is-enabled xrdp 2>/dev/null)"
+    ;;
+  *)
+    echo "usage: wsl-wm-switch i3|sway|status" >&2
+    exit 1
+    ;;
+esac

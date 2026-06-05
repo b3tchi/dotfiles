@@ -18,21 +18,24 @@
 # Connect: mstsc /v:<host-ip>:3391 — session type Xorg, Linux credentials.
 # GUI apps from tmux shells need DISPLAY=:10 and GDK_BACKEND=x11 (tmux
 # server env lacks the session display; GTK otherwise escapes to WSLg).
-depends:
-  - i3
-  - st
-
+#
+# Sessions are exclusive: `wsl-wm-switch i3|sway|status` flips between
+# sway-session (WSLg user unit) and xrdp services. Install does NOT
+# auto-enable xrdp — run the switch explicitly.
 linux:
   links:
     xinitrc: ~/.xinitrc
+    wsl-wm-switch: ~/.local/bin/wsl-wm-switch
 
   installs:
+    depends:
+      - i3
+      - st
     cmd: |
       {{#if env.WSL_DISTRO_NAME}}
       {{#if (eq whoami.distro "Arch Linux")}}
       yay -Syu --needed --noconfirm xrdp xorgxrdp
       sudo sed -i '0,/^port=3389$/s//port=3391/' /etc/xrdp/xrdp.ini
-      sudo systemctl enable xrdp xrdp-sesman
       {{/if}}
       {{/if}}
       rotz link xrdp --force
