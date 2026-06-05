@@ -20,7 +20,9 @@ Item {
     Process {
         id: borderProc
         running: false
-        command: ["sh", "-c", "exec python3 -u $HOME/.dotfiles/quickshell/qs-focus-border.py"]
+        // GDK_BACKEND=x11: this branch only runs on X11/i3, but GTK would
+        // otherwise escape to a WSLg wayland socket when one exists (wsl)
+        command: ["sh", "-c", "exec env GDK_BACKEND=x11 python3 -u $HOME/.dotfiles/quickshell/qs-focus-border.py"]
         onExited: restartTimer.restart()
     }
     Timer { id: restartTimer; interval: 2000; onTriggered: { if (!root.isSway && !root.isProot) borderProc.running = true } }

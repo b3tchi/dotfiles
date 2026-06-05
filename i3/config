@@ -1,8 +1,11 @@
 # i3 config file (v4)
 # Please see http://i3wm.org/docs/userguide.html for a complete reference!
 
-# Set mod key (Mod1=<Alt>, Mod4=<Super>)
-set $mod Mod4
+# Set mod key (Mod1=<Alt>, Mod4=<Super>) via X resource with fallback —
+# i3 include limitation: vars set in included overlays are invisible to
+# this main file, so platform mod comes from xrdb (xrdp xinitrc merges
+# "i3wm.mod: Mod1"; native loads nothing → Mod4 fallback)
+set_from_resource $mod i3wm.mod Mod4
 
 # Platform overlay (ft003 i3-config-layering): rotz links exactly one of
 # i3/config.d/{native,wsl}.conf here. Overlay owns $term + all autostart
@@ -40,8 +43,8 @@ floating_modifier $mod
 #enable tiling tiling
 tiling_drag modifier titlebar
 
-# start a terminal with pre-created tmux session ($term set by overlay)
-bindsym $mod+Return exec ~/.local/bin/wm-launch-terminal $term
+# start a terminal with pre-created tmux session
+bindsym $mod+Return exec ~/.local/bin/wm-launch-terminal st
 # bindsym $mod+Return exec wezterm-gui start --always-new-process
 
 # kill focused window

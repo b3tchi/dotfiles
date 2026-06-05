@@ -17,6 +17,10 @@ killall quickshell 2>/dev/null
 pkill -f 'qs-keymon.py' 2>/dev/null
 pkill -f 'xinput test-xi2' 2>/dev/null
 pkill -f 'qs-stats-daemon' 2>/dev/null
+# focus helpers hold a flock — an orphan from a killed quickshell blocks
+# respawns silently (new instances exit at the lock), so reap them too
+pkill -f 'qs-focus-border.py' 2>/dev/null
+pkill -f 'qs-focus-dim.py' 2>/dev/null
 sleep 0.5
 
 # Event-driven stats source for Bar.qml. Runs alongside quickshell so it

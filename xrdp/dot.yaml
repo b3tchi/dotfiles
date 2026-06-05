@@ -31,7 +31,7 @@ linux:
     cmd: |
       {{#if env.WSL_DISTRO_NAME}}
       {{#if (eq whoami.distro "Arch Linux")}}
-      yay -Syu --needed --noconfirm xrdp xorgxrdp
+      yay -Syu --needed --noconfirm xrdp xorgxrdp xorg-xrdb
       sudo sed -i '0,/^port=3389$/s//port=3391/' /etc/xrdp/xrdp.ini
       {{/if}}
       {{/if}}
