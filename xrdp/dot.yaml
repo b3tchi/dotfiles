@@ -11,6 +11,10 @@
 #     -Protocol TCP -LocalPort 3391 -Action Allow -Profile Private `
 #     -RemoteAddress LocalSubnet
 #
+# TLS deliberately not configured yet (security_layer=negotiate, bundled
+# key) — fine for localhost/trusted LAN; add cert + security_layer=tls
+# before exposing wider.
+#
 # Connect: mstsc /v:<host-ip>:3391 — session type Xorg, Linux credentials.
 # GUI apps from tmux shells need DISPLAY=:10 and GDK_BACKEND=x11 (tmux
 # server env lacks the session display; GTK otherwise escapes to WSLg).
@@ -23,14 +27,7 @@ linux:
       {{#if env.WSL_DISTRO_NAME}}
       {{#if (eq whoami.distro "Arch Linux")}}
       yay -Syu --needed --noconfirm xrdp xorgxrdp i3-wm
-      sudo test -f /etc/xrdp/cert.pem || sudo openssl req -x509 -newkey rsa:4096 -nodes \
-        -keyout /etc/xrdp/key.pem -out /etc/xrdp/cert.pem -days 1095 -subj "/CN=wsl-xrdp"
-      sudo sed -i \
-        -e '0,/^port=3389$/s//port=3391/' \
-        -e 's|^security_layer=negotiate|security_layer=tls|' \
-        -e 's|^certificate=$|certificate=/etc/xrdp/cert.pem|' \
-        -e 's|^key_file=$|key_file=/etc/xrdp/key.pem|' \
-        /etc/xrdp/xrdp.ini
+      sudo sed -i '0,/^port=3389$/s//port=3391/' /etc/xrdp/xrdp.ini
       sudo systemctl enable xrdp xrdp-sesman
       {{/if}}
       {{/if}}
