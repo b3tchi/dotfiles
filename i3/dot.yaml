@@ -6,19 +6,29 @@
 linux:
   links:
     config: ~/.i3/config
-    picom.conf: ~/.config/picom.conf
     i3status.conf: ~/.config/i3status/config
     i3blocks.conf: ~/.config/i3blocks/config
     scripts/qs-title-trim.sh: ~/.i3/scripts/qs-title-trim.sh
+    # Platform overlay (ft003 i3-config-layering): exactly one config.d/*
+    {{#if env.WSL_DISTRO_NAME}}
+    config.d/wsl.conf: ~/.i3/config.d/wsl.conf
+    {{else}}
+    config.d/native.conf: ~/.i3/config.d/native.conf
+    picom.conf: ~/.config/picom.conf
+    {{/if}}
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
       sudo pacman -Syu --needed --noconfirm i3
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux")}}
+      {{#if env.WSL_DISTRO_NAME}}
+      sudo pacman -Syu --needed --noconfirm i3-wm xorg-xinput
+      {{else}}
       sudo pacman -Syu --needed --noconfirm \
         i3-wm i3status i3blocks \
         picom xdotool
+      {{/if}}
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux ARM")}}
       sudo pacman -Syu --needed --noconfirm \
