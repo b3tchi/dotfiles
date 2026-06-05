@@ -18,3 +18,5 @@ depends:
   - quickshell
   - docker
   - xrdp
+  - i3
+  - st

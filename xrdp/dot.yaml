@@ -28,9 +28,6 @@ linux:
     wsl-wm-switch: ~/.local/bin/wsl-wm-switch
 
   installs:
-    depends:
-      - i3
-      - st
     cmd: |
       {{#if env.WSL_DISTRO_NAME}}
       {{#if (eq whoami.distro "Arch Linux")}}
