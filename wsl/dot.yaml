@@ -1,7 +1,6 @@
 linux:
   links:
     xdg-open: ~/.local/bin/xdg-open
-    wsl-wm-switch: ~/.local/bin/wsl-wm-switch
   installs:
     cmd: |
       {{#if env.WSL_DISTRO_NAME}}

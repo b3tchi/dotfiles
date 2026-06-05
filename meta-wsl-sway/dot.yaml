@@ -23,4 +23,4 @@ installs:
     - wsl
     - sway
   cmd: |
-    ~/.local/bin/wsl-wm-switch sway
+    ~/.dotfiles/wsl/wsl-wm-switch sway

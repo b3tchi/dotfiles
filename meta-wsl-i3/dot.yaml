@@ -25,4 +25,4 @@ installs:
     - i3
     - xrdp
   cmd: |
-    ~/.local/bin/wsl-wm-switch i3
+    ~/.dotfiles/wsl/wsl-wm-switch i3

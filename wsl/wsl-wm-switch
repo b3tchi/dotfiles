@@ -1,6 +1,8 @@
 #!/bin/sh
 # Switch WSL desktop between sway (WSLg) and i3 (xrdp) — ft003/poc002.
 # Sessions are exclusive by design (qs-start.sh killall would cross-kill).
+# Internal: NOT on PATH. Entry point is `rotz install meta-wsl-i3` /
+# `meta-wsl-sway`, whose installs.cmd runs this after links + deps land.
 case "$1" in
   i3)
     systemctl --user disable --now sway-session 2>/dev/null

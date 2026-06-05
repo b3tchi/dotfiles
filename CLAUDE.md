@@ -153,7 +153,7 @@ Environment-level meta-packages use rotz `depends` to pull in the right set of a
 
 Usage: `rotz install meta-linux`, `rotz install meta-wsl-i3`, etc.
 
-WSL session choice: each meta-wsl-* runs `wsl-wm-switch` (linked by the `wsl` package) as its install cmd — installing the meta sets that WM as the active session; flip anytime with `wsl-wm-switch i3|sway|status`.
+WSL session choice: installing a meta-wsl-* sets that WM as the active session — its installs.cmd runs `wsl/wsl-wm-switch` (internal script, not on PATH) after links + deps land. Flip WMs by installing the other meta, never by calling the script directly (a bare service flip skips links/deps and half-switches).
 
 Note: On a Windows + WSL setup, run `rotz install meta-windows` on the Windows side and `rotz install meta-wsl-i3` (or `meta-wsl-sway`) inside WSL.
 
