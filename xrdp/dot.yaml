@@ -37,5 +37,12 @@ linux:
       # H.264 kept as fallback for clients without RFX.
       sudo sed -i 's/order = \[ "H.264", "RFX" \]/order = [ "RFX", "H.264" ]/' /etc/xrdp/gfx.toml
       {{/if}}
+      {{else}}
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      # Native: AUR via pamac; port stays 3389 (no Windows host RDP clash).
+      # Codec order kept at upstream default (H.264 first) — preferred on
+      # this box; the RFX-first flip is a wsl-only fix for 4:2:0 washout.
+      pamac build --no-confirm xrdp xorgxrdp
+      {{/if}}
       {{/if}}
       rotz link xrdp --force

@@ -1,8 +1,11 @@
 # xrdp session entry (see poc002) — sourced by /etc/xrdp/startwm.sh
 # NOTE: do NOT set GALLIUM_DRIVER=d3d12 here — poisons /dev/dxg (poc002)
 unset SWAYSOCK I3SOCK
-# Alt as i3 modifier on wsl (Win key captured by Windows host in windowed
-# RDP) — base config reads this via set_from_resource, fallback Mod4
-printf 'i3wm.mod: Mod1\n' | xrdb -merge
+# Alt as i3 modifier in any xrdp session (Win key captured by client
+# host: Windows windowed RDP, Android RDP apps) — base config reads this
+# via set_from_resource, fallback Mod4. Guard keeps local startx on Mod4.
+if [ -n "$XRDP_SESSION" ]; then
+    printf 'i3wm.mod: Mod1\n' | xrdb -merge
+fi
 # shared config (ft003): ~/.i3/config + ~/.i3/config.d/wsl.conf via rotz
 exec i3
