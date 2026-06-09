@@ -21,22 +21,26 @@ linux:
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
-      sudo pacman -Syu --needed --noconfirm i3
+      # xclip: X11 clipboard tool — nvim's + register provider on i3/X11
+      sudo pacman -Syu --needed --noconfirm i3 xclip
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux")}}
       # runtime WSL check (env.WSL_DISTRO_NAME unreliable, see links note)
+      # xclip: X11 clipboard tool — nvim yank reaches the xrdp X11 CLIPBOARD
+      # (then xrdp-chansrv → Windows). Without it nvim falls back to the idle
+      # WSLg wayland-0 clipboard, which chansrv can't see (dotfiles-0ak).
       if [ -d /mnt/c ]; then
         sudo pacman -Syu --needed --noconfirm i3-wm xorg-xinput picom \
-          python-gobject python-cairo
+          python-gobject python-cairo xclip
       else
         sudo pacman -Syu --needed --noconfirm \
           i3-wm i3status i3blocks \
-          picom xdotool
+          picom xdotool xclip
       fi
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux ARM")}}
       sudo pacman -Syu --needed --noconfirm \
         i3-wm i3status i3blocks \
-        picom xdotool
+        picom xdotool xclip
       {{/if}}
       rotz link i3 --force
