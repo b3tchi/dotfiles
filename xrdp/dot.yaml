@@ -31,7 +31,9 @@ linux:
       {{#if (eq whoami.distro "Arch Linux")}}
       # runtime WSL check (env.WSL_DISTRO_NAME unreliable: unset in
       # sessions spawned outside wsl.exe — tmux server, sway/WSLg, ssh)
-      yay -Syu --needed --noconfirm xrdp xorgxrdp xorg-xrdb
+      # xclip: lets X11 apps (nvim's + register) write the session CLIPBOARD
+      # that xrdp-chansrv bridges to the Windows clipboard (dotfiles-0ak).
+      yay -Syu --needed --noconfirm xrdp xorgxrdp xorg-xrdb xclip
       if [ -d /mnt/c ]; then
         # WSL: port 3391 (avoid Windows host RDP 3389 clash) + RFX-first.
         sudo sed -i '0,/^port=3389$/s//port=3391/' /etc/xrdp/xrdp.ini
@@ -47,5 +49,6 @@ linux:
       # Codec order kept at upstream default (H.264 first) — preferred on
       # this box; the RFX-first flip is a wsl-only fix for 4:2:0 washout.
       pamac build --no-confirm xrdp xorgxrdp
+      sudo pacman -S --needed --noconfirm xclip
       {{/if}}
       rotz link xrdp --force
