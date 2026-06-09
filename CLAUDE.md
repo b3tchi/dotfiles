@@ -90,7 +90,13 @@ Rotz handles the platform model at two levels:
    - `{{#if (eq whoami.distro "Arch Linux")}}` — Arch-specific packages (pacman/yay)
    - `{{#if (eq whoami.distro "Arch Linux ARM")}}` — ARM-specific packages
    - `{{#if (eq env.HOME "/data/data/com.termux/files/home")}}` — Termux-specific paths
-   - `{{#if env.WSL_DISTRO_NAME}}` — WSL-specific configs
+   - `{{#if (eval "test -d /mnt/c && echo wsl || true")}}` — WSL-specific links
+     (template-time). For `installs.cmd` use runtime `if [ -d /mnt/c ]` instead.
+     Do NOT use `env.WSL_DISTRO_NAME` — unset in sessions spawned outside
+     wsl.exe (tmux server, sway/WSLg, ssh). `eval` gotchas: errors on nonzero
+     exit (always guard `|| true`; empty output = falsy); avoid template eval
+     in dots that also have a `windows:` section (template renders on the
+     Windows host too, where `test` doesn't exist).
 
 ### Available Template Variables
 
@@ -99,7 +105,7 @@ Rotz handles the platform model at two levels:
 | `whoami.distro` | `"Manjaro Linux"`, `"Arch Linux"`, `"Arch Linux ARM"` | Distro-specific package managers |
 | `whoami.platform` | `"Linux"`, `"Windows"` | OS-level branching (rarely needed, use sections instead) |
 | `env.HOME` | `/home/jan`, `/data/data/com.termux/files/home` | Termux detection |
-| `env.WSL_DISTRO_NAME` | `"arch"`, unset | WSL detection |
+| `env.WSL_DISTRO_NAME` | `"arch"`, unset | DEPRECATED — see WSL detection note above (use eval path check / runtime shell check) |
 | `whoami.username` | `"jan"` | User-specific paths |
 | `whoami.arch` | `"x86_64"`, `"aarch64"` | Architecture-specific installs |
 

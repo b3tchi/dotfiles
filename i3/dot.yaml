@@ -11,7 +11,9 @@ linux:
     scripts/qs-title-trim.sh: ~/.i3/scripts/qs-title-trim.sh
     picom.conf: ~/.config/picom.conf
     # Platform overlay (ft003 i3-config-layering): exactly one config.d/*
-    {{#if env.WSL_DISTRO_NAME}}
+    # eval path check, not env.WSL_DISTRO_NAME — that var is unset in
+    # sessions spawned outside wsl.exe (tmux server, sway/WSLg, ssh).
+    {{#if (eval "test -d /mnt/c && echo wsl || true")}}
     config.d/wsl.conf: ~/.i3/config.d/wsl.conf
     {{else}}
     config.d/native.conf: ~/.i3/config.d/native.conf
@@ -22,14 +24,15 @@ linux:
       sudo pacman -Syu --needed --noconfirm i3
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux")}}
-      {{#if env.WSL_DISTRO_NAME}}
-      sudo pacman -Syu --needed --noconfirm i3-wm xorg-xinput picom \
-        python-gobject python-cairo
-      {{else}}
-      sudo pacman -Syu --needed --noconfirm \
-        i3-wm i3status i3blocks \
-        picom xdotool
-      {{/if}}
+      # runtime WSL check (env.WSL_DISTRO_NAME unreliable, see links note)
+      if [ -d /mnt/c ]; then
+        sudo pacman -Syu --needed --noconfirm i3-wm xorg-xinput picom \
+          python-gobject python-cairo
+      else
+        sudo pacman -Syu --needed --noconfirm \
+          i3-wm i3status i3blocks \
+          picom xdotool
+      fi
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux ARM")}}
       sudo pacman -Syu --needed --noconfirm \
