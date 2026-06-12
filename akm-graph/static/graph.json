@@ -1,0 +1,25 @@
+{
+  "nodes": [
+    {"id": "us001", "type": "us", "status": "ready", "alias": "visualize-note-relations", "degree": 4, "ghost": false},
+    {"id": "sp006", "type": "sp", "status": "ready", "alias": "akm-graph-cosmos-viz", "degree": 3, "ghost": false},
+    {"id": "im004", "type": "im", "status": "proposed", "alias": "akm-graph-note-relations-viz", "degree": 2, "ghost": false},
+    {"id": "ft004", "type": "ft", "status": "open", "alias": "akm-graph", "degree": 3, "ghost": false},
+    {"id": "adr0003", "type": "adr", "status": "accepted", "alias": "go-daemon-gate", "degree": 2, "ghost": false},
+    {"id": "cat001", "type": "cat", "status": "accepted", "alias": "workflow-tooling", "degree": 5, "ghost": false},
+    {"id": "poc003", "type": "poc", "status": "validated", "alias": "cosmos-single-file-vendor", "degree": 2, "ghost": false},
+    {"id": "board", "type": "hub", "status": "", "alias": "board", "degree": 8, "ghost": false},
+    {"id": "pn001", "type": "pn", "status": "draft", "alias": "personal-note", "degree": 1, "ghost": false},
+    {"id": "dangling-ref", "type": "note", "status": "", "alias": "", "degree": 1, "ghost": true}
+  ],
+  "links": [
+    {"source": "sp006", "target": "us001"},
+    {"source": "sp006", "target": "im004"},
+    {"source": "sp006", "target": "ft004"},
+    {"source": "ft004", "target": "adr0003"},
+    {"source": "sp006", "target": "cat001"},
+    {"source": "sp006", "target": "poc003"},
+    {"source": "board", "target": "sp006"},
+    {"source": "board", "target": "cat001"},
+    {"source": "pn001", "target": "dangling-ref"}
+  ]
+}
