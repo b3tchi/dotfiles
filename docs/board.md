@@ -6,6 +6,8 @@ sections when status flips.
 
 ## idea
 
+- [[sp006|akm-graph-cosmos-viz]]
+
 - [[sp003|fix-categories]]
 
 ## spec
