@@ -10,6 +10,6 @@ sections when status flips.
 
 ## spec
 
-- [[sp006|akm-graph-cosmos-viz]]
-
 ## ready
+
+- [[sp006|akm-graph-cosmos-viz]]
