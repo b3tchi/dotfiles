@@ -5,6 +5,40 @@ return {
 		dependencies = "nvim-treesitter/nvim-treesitter",
 		ft = { "org", "markdown" },
 		config = function()
+			-- orgmode's bundled org parser is only on the runtimepath after
+			-- orgmode itself loads, but headlines (its dependency) loads first
+			-- on ft=markdown. Register the parser explicitly so the org query
+			-- below parses instead of erroring "No parser for language org".
+			local org_ok = pcall(vim.treesitter.language.add, "org", {
+				path = vim.fn.stdpath("data") .. "/lazy/orgmode/parser/org.so",
+			})
+			local org_query
+			if org_ok then
+				org_ok, org_query = pcall(
+					vim.treesitter.query.parse,
+					"org",
+					[[
+					(headline (stars) @headline)
+					(
+						(expr) @dash
+						(#match? @dash "^-----+$")
+					)
+					(block
+						name: (expr) @_name
+						contents: (contents) @codeblock
+						(#match? @_name "(SRC|src|EXAMPLE|example)")
+					)
+					;inline blocks
+					;((expr) @quote
+					;	(#match? @quote "[~].+[~]")
+					;)
+					(paragraph . (expr) @quote
+						(#eq? @quote ">")
+					)
+				]]
+				)
+			end
+
 			require("headlines").setup({
 				markdown = {
 					query = vim.treesitter.query.parse(
@@ -49,29 +83,8 @@ return {
 					quote_string = "┃",
 					fat_headlines = false,
 				},
-				org = {
-					query = vim.treesitter.query.parse(
-						"org",
-						[[
-						(headline (stars) @headline)
-						(
-							(expr) @dash
-							(#match? @dash "^-----+$")
-						)
-						(block
-							name: (expr) @_name
-							contents: (contents) @codeblock
-							(#match? @_name "(SRC|src|EXAMPLE|example)")
-						)
-						;inline blocks
-						;((expr) @quote
-						;	(#match? @quote "[~].+[~]")
-						;)
-						(paragraph . (expr) @quote
-							(#eq? @quote ">")
-						)
-					]]
-					),
+				org = org_ok and {
+					query = org_query,
 					-- headline_highlights = false,
 					headline_highlights = {
 						"OrgHeadline1",
@@ -99,7 +112,7 @@ return {
 					fat_headlines = false,
 					-- fat_headline_upper_string = "▄",
 					-- fat_headline_lower_string = "▀",
-				},
+				} or nil,
 			})
 
 			-- vim.cmd([[highlight OrgHeadline1 guibg=#211e2d guifg=#ff9e64 gui=bold]])
