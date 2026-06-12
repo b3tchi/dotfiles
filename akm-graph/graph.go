@@ -52,7 +52,9 @@ func BuildGraph(notes []Note) Graph {
 	// Collect all deduped edges first (before degree computation).
 	type edgeKey struct{ src, dst string }
 	edgeSeen := make(map[edgeKey]bool)
-	var links []Link
+	// Non-nil so an edge-free graph serializes as "links": [] per the
+	// ft004 api_surface (never null).
+	links := []Link{}
 
 	for _, n := range notes {
 		for _, target := range n.Links {

@@ -115,19 +115,17 @@ func TestBuildGraph_Degree(t *testing.T) {
 	}
 }
 
-// TestBuildGraph_EmptyNotes verifies that empty input → valid empty graph.
+// TestBuildGraph_EmptyNotes verifies that empty input serializes to the exact
+// ft004 api_surface shape: nodes and links MUST be JSON arrays, never null.
 func TestBuildGraph_EmptyNotes(t *testing.T) {
 	g := BuildGraph(nil)
-	if g.Nodes == nil {
-		// []Node nil is acceptable, but let's ensure we get valid JSON
-	}
 	b, err := json.Marshal(g)
 	if err != nil {
 		t.Fatalf("json.Marshal empty graph: %v", err)
 	}
-	var roundTrip Graph
-	if err := json.Unmarshal(b, &roundTrip); err != nil {
-		t.Fatalf("json.Unmarshal: %v", err)
+	want := `{"nodes":[],"links":[]}`
+	if string(b) != want {
+		t.Errorf("empty graph JSON:\n  got:  %s\n  want: %s", b, want)
 	}
 }
 
@@ -244,9 +242,9 @@ func TestBuildGraphFromRoot_Empty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
 	}
-	// Must be valid JSON with nodes/links arrays.
-	var out map[string]interface{}
-	if err := json.Unmarshal(b, &out); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+	// Must be the exact ft004 shape: arrays, never null.
+	want := `{"nodes":[],"links":[]}`
+	if string(b) != want {
+		t.Errorf("empty root graph JSON:\n  got:  %s\n  want: %s", b, want)
 	}
 }

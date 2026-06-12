@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -90,9 +91,9 @@ func TestExtractWikilinks(t *testing.T) {
 // frontmatter at all.
 func TestParseFrontmatter(t *testing.T) {
 	tests := []struct {
-		name       string
-		content    string
-		wantFM     frontmatter
+		name        string
+		content     string
+		wantFM      frontmatter
 		wantBodyHas string
 	}{
 		{
@@ -172,25 +173,12 @@ body`,
 				t.Errorf("parseFrontmatter fm\n  got:  %+v\n  want: %+v", fm, tc.wantFM)
 			}
 			if tc.wantBodyHas != "" {
-				if !contains(string(body), tc.wantBodyHas) {
+				if !strings.Contains(string(body), tc.wantBodyHas) {
 					t.Errorf("body does not contain %q: %q", tc.wantBodyHas, string(body))
 				}
 			}
 		})
 	}
-}
-
-func contains(s, sub string) bool {
-	return len(s) >= len(sub) && (s == sub || len(s) > 0 && containsHelper(s, sub))
-}
-
-func containsHelper(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }
 
 // TestNodeTypeFromID covers the typed prefix → type mapping and hub/fallback.
@@ -296,9 +284,9 @@ func TestWalkNotes_Subdirs(t *testing.T) {
 		}
 	}
 	files := map[string]string{
-		filepath.Join(notesDir, "us001.md"):       "---\nstatus: ready\n---\n",
-		filepath.Join(notesDir, "spec", "sp001.md"): "---\nstatus: done\n---\n",
-		filepath.Join(notesDir, "lab", "poc001.md"): "---\nstatus: proposed\n---\n",
+		filepath.Join(notesDir, "us001.md"):               "---\nstatus: ready\n---\n",
+		filepath.Join(notesDir, "spec", "sp001.md"):       "---\nstatus: done\n---\n",
+		filepath.Join(notesDir, "lab", "poc001.md"):       "---\nstatus: proposed\n---\n",
 		filepath.Join(notesDir, "daily", "2026-06-12.md"): "# Today\n",
 	}
 	for p, content := range files {
