@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>tooltip-smoke pending</title>
+  <!-- Reuse the production styles so the tooltip element matches index.html -->
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #0d1117; }
+    #canvas { display: block; width: 100%; height: 100%; }
+    #tooltip { position: absolute; display: none; }
+    #status { position: absolute; top: 10px; right: 14px; }
+    #result { position: absolute; bottom: 10px; left: 10px; color: #fff; font-family: monospace; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <div id="tooltip"></div>
+  <div id="status"></div>
+  <div id="result"></div>
+  <!-- Load the real production app. Fixture is selected via the page URL's
+       ?fixture=graph.json query param (app.js reads window.location.search). -->
+  <script type="module" src="./app.js"></script>
+  <script type="module">
+    // Drive the exact cosmos v1 four-arg hover callback and assert the tooltip
+    // ends up positioned at the cursor (ev.clientX/Y), not NaN, and visible
+    // with id/alias/status text. This is the regression guard for the
+    // signature-mismatch bug (e bound to position array -> e.clientX undefined).
+    const NODE_ID = "us001";
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    async function run() {
+      const out = document.getElementById("result");
+      try {
+        // Wait for the module bootstrap + fixture fetch to wire up the hook.
+        for (let tries = 0; tries < 100 && !window.__akmGraph; tries++) await wait(50);
+        if (!window.__akmGraph) throw new Error("window.__akmGraph never appeared");
+
+        const g = window.__akmGraph;
+        for (let tries = 0; tries < 100 && !g.nodeById(NODE_ID); tries++) await wait(50);
+        const node = g.nodeById(NODE_ID);
+        if (!node) throw new Error("fixture node " + NODE_ID + " not loaded");
+
+        // Synthetic cosmos call: (node, index, position[x,y], MouseEvent)
+        const ev = { clientX: 321, clientY: 654 };
+        g.onNodeMouseOver(node, 0, [12, 34], ev);
+
+        const st = g.tooltipState();
+        const left = parseFloat(st.left);
+        const top = parseFloat(st.top);
+
+        if (st.display !== "block") throw new Error("tooltip not visible: display=" + st.display);
+        if (!Number.isFinite(left) || !Number.isFinite(top)) {
+          throw new Error("tooltip position NaN: left=" + st.left + " top=" + st.top);
+        }
+        // Tooltip is offset from the cursor; assert it tracks clientX/clientY,
+        // not [0,0] and not the position array fallback.
+        if (left <= 0 || top <= 0) throw new Error("tooltip not anchored to cursor: left=" + left + " top=" + top);
+        if (!st.text.includes(node.id)) throw new Error("tooltip missing id: " + st.text);
+        if (node.alias && !st.text.includes(node.alias)) throw new Error("tooltip missing alias: " + st.text);
+        if (node.status && !st.text.includes(node.status)) throw new Error("tooltip missing status: " + st.text);
+
+        // Fallback path: no MouseEvent -> use position [x,y] array.
+        g.onNodeMouseOut();
+        g.onNodeMouseOver(node, 0, [200, 150], undefined);
+        const st2 = g.tooltipState();
+        if (parseFloat(st2.left) <= 0 || !Number.isFinite(parseFloat(st2.left))) {
+          throw new Error("fallback position failed: left=" + st2.left);
+        }
+
+        out.textContent = "TOOLTIP_OK left=" + left + " top=" + top + " text=" + JSON.stringify(st.text);
+        document.title = "TOOLTIP_OK";
+      } catch (e) {
+        out.textContent = "TOOLTIP_FAIL " + e.message;
+        document.title = "TOOLTIP_FAIL " + e.message;
+      }
+    }
+    run();
+  </script>
+</body>
+</html>

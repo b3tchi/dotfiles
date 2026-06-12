@@ -67,12 +67,36 @@ function showTooltip(node, x, y) {
 
 function hideTooltip() { tooltipEl.style.display = "none"; }
 
+// Resolve cursor screen coordinates from cosmos' hover callback args.
+// Prefer the real MouseEvent (ev.clientX/clientY); fall back to the
+// screen-space `position` [x, y] array cosmos passes as the 3rd arg.
+function cursorXY(pos, ev) {
+  if (ev && Number.isFinite(ev.clientX) && Number.isFinite(ev.clientY)) {
+    return [ev.clientX, ev.clientY];
+  }
+  if (Array.isArray(pos) && Number.isFinite(pos[0]) && Number.isFinite(pos[1])) {
+    return [pos[0], pos[1]];
+  }
+  return [0, 0];
+}
+
 function escHtml(s) {
   return String(s)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+// ── Hover handler (cosmos v1 four-arg callback) ─────────────────────────────────
+// Exposed via window.__akmGraph for the smoke test so it can drive the exact
+// callback cosmos invokes — (node, index, position, currentEvent) — without a
+// real WebGL pointer event.
+function handleNodeMouseOver(n, i, pos, ev) {
+  if (!n) return;
+  const nd = nodeIndex[n.id] || n;
+  const [x, y] = cursorXY(pos, ev);
+  showTooltip(nd, x, y);
 }
 
 // ── Init cosmos ────────────────────────────────────────────────────────────────
@@ -94,11 +118,12 @@ function initGraph() {
       friction:         0.85,
     },
     events: {
-      onNodeMouseOver(n, i, e) {
-        if (!n) return;
-        const nd = nodeIndex[n.id] || n;
-        showTooltip(nd, e.clientX, e.clientY);
-      },
+      // Cosmos v1 invokes this with FOUR args:
+      //   (node, index, position, currentEvent)
+      // where `position` is a screen-space [x, y] array and `ev` is the
+      // MouseEvent. Bind all four — earlier (n, i, e) silently aliased the
+      // position array onto `e`, so e.clientX was undefined → NaN px.
+      onNodeMouseOver: handleNodeMouseOver,
       onNodeMouseOut() { hideTooltip(); },
     },
   });
@@ -145,7 +170,6 @@ async function fetchGraph() {
 let wsDelay   = 1000;
 const WS_MAX  = 30000;
 let wsTimer   = null;
-let wsActive  = false;
 
 function connectWS() {
   if (wsTimer) { clearTimeout(wsTimer); wsTimer = null; }
@@ -160,8 +184,7 @@ function connectWS() {
   }
 
   ws.onopen = () => {
-    wsDelay  = 1000;
-    wsActive = true;
+    wsDelay = 1000;
   };
 
   ws.onmessage = (evt) => {
@@ -174,13 +197,11 @@ function connectWS() {
   };
 
   ws.onclose = () => {
-    wsActive = false;
     scheduleReconnect();
   };
 
   ws.onerror = () => {
     // onerror is always followed by onclose; don't log to avoid spam
-    wsActive = false;
   };
 }
 
@@ -197,3 +218,17 @@ function scheduleReconnect() {
 initGraph();
 fetchGraph();
 connectWS();
+
+// Test hook — lets the headless smoke test drive the real hover handler with a
+// synthetic cosmos-shaped 4-arg call and inspect tooltip state.
+window.__akmGraph = {
+  onNodeMouseOver: handleNodeMouseOver,
+  onNodeMouseOut: hideTooltip,
+  nodeById: (id) => nodeIndex[id],
+  tooltipState: () => ({
+    display: tooltipEl.style.display,
+    left: tooltipEl.style.left,
+    top: tooltipEl.style.top,
+    text: tooltipEl.textContent,
+  }),
+};
