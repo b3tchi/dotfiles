@@ -12,6 +12,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[us004|xrdp access hardened with TLS before exposing it beyond localhost]]
 - [[us005|the shared i3 config verified live on native linux and proot]]
 - [[us006|visualize-note-relations]] >> [[im004]]
+- [[us007|work remotely on my development machine — full desktop from another device]] >> [[im005]]
 
 ## Features
 

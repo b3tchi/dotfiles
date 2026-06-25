@@ -1,0 +1,35 @@
+#!/bin/sh
+# gnome-rdp-session — headless GNOME Wayland session served over RDP on WSL.
+# Validated in poc004. Native-Wayland + headless + connect-from-cold RDP — the
+# combo cosmic (poc003) and KRdp could not deliver. Coexists with i3+xrdp
+# (adr0004) on a separate port: gnome-rdp = 3390, xrdp = 3391.
+#
+# adr0005: outside the WSLg-blessed path WSL2 has no GPU — d3d12 is forbidden,
+# everything renders on llvmpipe. Force software GL so the grd daemon does not
+# take the Zink-on-dzn path (which crashes: "Zink requires nullDescriptor").
+set -eu
+
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=GNOME
+export XDG_SESSION_DESKTOP=gnome
+export WAYLAND_DISPLAY=wayland-grd
+export GALLIUM_DRIVER=llvmpipe
+export LIBGL_ALWAYS_SOFTWARE=1
+
+# grd's EGL needs a DRM render node; WSL2 ships none. vgem provides a virtual
+# one — persisted via /etc/modules-load.d/vgem.conf (see dot.yaml).
+if [ ! -e /dev/dri/renderD128 ]; then
+  echo "gnome-rdp-session: /dev/dri/renderD128 absent — is vgem loaded?" >&2
+fi
+
+# Start the grd headless RDP daemon once the compositor's socket appears.
+{
+  i=0
+  while [ ! -S "${XDG_RUNTIME_DIR}/wayland-grd" ] && [ "$i" -lt 60 ]; do
+    i=$((i + 1)); sleep 0.5
+  done
+  exec /usr/lib/gnome-remote-desktop-daemon --headless
+} &
+
+exec gnome-shell --headless --virtual-monitor 1920x1080 --wayland \
+  --wayland-display wayland-grd --no-x11

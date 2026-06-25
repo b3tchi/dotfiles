@@ -1,0 +1,46 @@
+# gnome-rdp — headless GNOME Wayland desktop served over RDP on WSL (poc004).
+# Native-Wayland + headless + connect-from-cold, the combo cosmic (poc003) and
+# KRdp could not deliver. Coexists with i3+xrdp (adr0004) on a separate port
+# (gnome-rdp 3390, xrdp 3391). Install never stores the RDP password in the
+# repo — it prints a reminder to set it.
+linux:
+  links:
+    {{#if env.WSL_DISTRO_NAME}}
+    wsl/gnome-rdp-session: ~/.local/bin/gnome-rdp-session
+    wsl/gnome-rdp-session.service: ~/.config/systemd/user/gnome-rdp-session.service
+    {{/if}}
+
+  installs:
+    cmd: |
+      {{#if env.WSL_DISTRO_NAME}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -Syu --needed --noconfirm \
+        gnome-shell gnome-remote-desktop gnome-control-center nautilus \
+        gnome-console pipewire pipewire-pulse wireplumber xorg-xwayland
+      # vgem render node: grd's EGL requires a DRM render node; WSL2 has none.
+      # vgem provides a virtual one (adr0005 — software/llvmpipe only, never
+      # d3d12). Persist across WSL restarts + load now.
+      echo vgem | sudo tee /etc/modules-load.d/vgem.conf >/dev/null
+      sudo modprobe vgem
+      # Autostart the headless session at boot with no interactive login.
+      sudo loginctl enable-linger {{ whoami.username }}
+      systemctl --user daemon-reload
+      systemctl --user enable gnome-rdp-session
+      # grd headless config: TLS + port 3390 (xrdp owns 3391). Self-signed cert
+      # once; the password is NEVER committed — user sets it (reminder below).
+      GRD_DIR="$HOME/.local/share/gnome-remote-desktop"
+      mkdir -p "$GRD_DIR"
+      [ -f "$GRD_DIR/tls.crt" ] || openssl req -new -newkey rsa:4096 -days 3650 \
+        -nodes -x509 -subj "/CN=wsl-gnome-rdp" \
+        -out "$GRD_DIR/tls.crt" -keyout "$GRD_DIR/tls.key"
+      grdctl --headless rdp set-tls-cert "$GRD_DIR/tls.crt"
+      grdctl --headless rdp set-tls-key  "$GRD_DIR/tls.key"
+      grdctl --headless rdp set-port 3390
+      grdctl --headless rdp set-auth-methods credentials
+      grdctl --headless rdp enable
+      echo ">>> Set RDP password:  grdctl --headless rdp set-credentials {{ whoami.username }}"
+      echo ">>> Start session now:  systemctl --user start gnome-rdp-session"
+      echo ">>> Connect (Windows):  mstsc /v:localhost:3390"
+      {{/if}}
+      {{/if}}
+      rotz link gnome-rdp --force
