@@ -9,6 +9,7 @@ linux:
     i3status.conf: ~/.config/i3status/config
     i3blocks.conf: ~/.config/i3blocks/config
     scripts/qs-title-trim.sh: ~/.i3/scripts/qs-title-trim.sh
+    scripts/clip-sync.sh: ~/.i3/scripts/clip-sync.sh
     picom.conf: ~/.config/picom.conf
     # Platform overlay (ft003 i3-config-layering): exactly one config.d/*
     # eval path check, not env.WSL_DISTRO_NAME — that var is unset in
