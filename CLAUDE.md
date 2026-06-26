@@ -153,13 +153,14 @@ Environment-level meta-packages use rotz `depends` to pull in the right set of a
 | `meta-linux` | Personal Linux (native, i3/X11) | distro, nushell, tmux, nvim, lazygit, ssh, claude, opencode, wezterm, kitty, i3, xterm, emacs, logseq, freecad, evolution, xournalpp |
 | `meta-wsl-sway` | WSL (nested in Windows, Sway/WSLg) | distro, nushell, tmux, nvim, lazygit, ssh, claude, opencode, quickshell, docker + installs.depends: wsl, sway |
 | `meta-wsl-i3` | WSL (nested in Windows, i3 over xrdp — adr0004) | same core + st + installs.depends: wsl, i3, xrdp |
+| `meta-wsl-gnome` | WSL (nested in Windows, full GNOME over RDP — im005) | core (no quickshell) + installs.depends: wsl, gnome-rdp; installs the full `gnome` group + `gnome-shell-extension-forge` (i3-like tiling) |
 | `meta-proot` | proot Arch (nested in Termux, i3/Termux:X11) | distro, nushell, tmux, nvim, lazygit, ssh, claude, opencode, i3 |
 | `meta-termux` | Termux (direct on Android, no WM) | nushell, tmux, nvim, lazygit, ssh, claude, opencode |
 | `meta-windows` | Windows host (bridge for WSL) | wezterm, winterm, pwsh, powertoys, fancywm, flow-launcher, office |
 
 Usage: `rotz install meta-linux`, `rotz install meta-wsl-i3`, etc.
 
-WSL session choice: installing a meta-wsl-* sets that WM as the active session — its installs.cmd runs `wsl/wsl-wm-switch` (internal script, not on PATH) after links + deps land. Flip WMs by installing the other meta, never by calling the script directly (a bare service flip skips links/deps and half-switches).
+WSL session choice: installing a meta-wsl-* sets that WM as the active session — its installs.cmd runs `wsl/wsl-wm-switch` (internal script, not on PATH) after links + deps land. Flip WMs by installing the other meta, never by calling the script directly (a bare service flip skips links/deps and half-switches). Exception: `meta-wsl-gnome` does NOT call `wsl-wm-switch` — it serves a headless GNOME session on its own RDP port (3390, vs xrdp 3391) and coexists alongside whichever i3/sway session is active.
 
 Note: On a Windows + WSL setup, run `rotz install meta-windows` on the Windows side and `rotz install meta-wsl-i3` (or `meta-wsl-sway`) inside WSL.
 
