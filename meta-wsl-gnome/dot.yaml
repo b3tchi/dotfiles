@@ -32,11 +32,15 @@ installs:
       # Forge — i3/sway-like tree tiling (AUR). Super is grabbed by the RDP
       # client, so dynamic tiling matters more than a dock here.
       yay -Syu --needed --noconfirm gnome-shell-extension-forge
-      # enable Forge in the headless GNOME session (appends to the gsettings
-      # list; fallback sets it directly if gnome-extensions is unavailable)
+      # Forge caps at GNOME shell-version 49; this runs GNOME 50, so the shell
+      # rejects it as incompatible ("does not exist"). Disable the version
+      # check — Forge loads and tiles fine on 50 (verified live).
+      gsettings set org.gnome.shell disable-extension-version-validation true
+      # enable Forge (fallback sets the gsettings list directly if the shell
+      # has not scanned it yet — it picks it up on the restart below)
       gnome-extensions enable forge@jmmaranan.com 2>/dev/null || \
         gsettings set org.gnome.shell enabled-extensions "['forge@jmmaranan.com']"
-      # reload the running session so Forge takes effect (no-op if not started)
+      # restart the session so the shell rescans with validation off + loads Forge
       systemctl --user restart gnome-rdp-session 2>/dev/null || true
     fi
     {{/if}}
