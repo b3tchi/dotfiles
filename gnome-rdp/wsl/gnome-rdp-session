@@ -31,5 +31,8 @@ fi
   exec /usr/lib/gnome-remote-desktop-daemon --headless
 } &
 
-exec gnome-shell --headless --virtual-monitor 1920x1080 --wayland \
+# No pinned --virtual-monitor: let the RDP client supply monitor geometry, so
+# there is ONE display matching the client (mstsc /multimon adds more on
+# purpose). Pinning one AND grd's client-supplied monitor yields two displays.
+exec gnome-shell --headless --mode=user --wayland \
   --wayland-display wayland-grd --no-x11
