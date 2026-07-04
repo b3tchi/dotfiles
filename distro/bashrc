@@ -2,6 +2,11 @@
 # ~/.bashrc
 #
 
+# UTF-8 locale — without this LANG=C/POSIX breaks glyph rendering
+# (nerd icons, box-draw, emoji, wide chars all tofu). Set for all shells.
+export LANG=en_US.UTF-8
+export LC_ALL=en_US.UTF-8
+
 # Always ensure ~/.local/bin is in PATH (non-interactive shells too)
 export PATH="$HOME/.local/bin:$PATH"
 

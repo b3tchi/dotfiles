@@ -20,6 +20,7 @@ windows:
 linux:
   links:
     bashrc: ~/.bashrc
+    bash_profile: ~/.bash_profile
     actions/tmux-cleanup: ~/.local/bin/tmux-cleanup
     actions/tmux-start: ~/.local/bin/tmux-start
 
