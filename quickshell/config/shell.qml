@@ -1,7 +1,12 @@
+import QtQuick
 import Quickshell
 import Quickshell.Services.Notifications
 
 ShellRoot {
+    // Focus border/dim are X11 compositing overlays — slow/glitchy over RDP.
+    // The RDP start scripts export QS_RDP=1 to turn them off there.
+    readonly property bool focusFx: Quickshell.env("QS_RDP") !== "1"
+
     property int globalNotifCount: 0
     property string lastNotifText: ""
     property int globalNotifSeq: 0
@@ -78,8 +83,8 @@ ShellRoot {
         }
     }
 
-    FocusBorder {}
-    FocusDim {}
+    Loader { active: focusFx; sourceComponent: Component { FocusBorder {} } }
+    Loader { active: focusFx; sourceComponent: Component { FocusDim {} } }
 
     Variants {
         model: Quickshell.screens

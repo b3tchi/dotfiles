@@ -89,6 +89,8 @@ proot-distro login "$DISTRO" \
   # No GPU over RDP: force Qt Quick's software renderer so quickshell (bar +
   # launcher) runs without GL. Inherited by i3 and every quickshell it spawns.
   export QT_QUICK_BACKEND=software
+  # RDP: skip focus border/dim compositing overlays (glitchy without a compositor).
+  export QS_RDP=1
 
   # No GPU: stub out picom (compositor not needed / would fail without GL).
   mkdir -p /usr/local/bin
