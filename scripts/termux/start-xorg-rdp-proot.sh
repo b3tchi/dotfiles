@@ -79,7 +79,23 @@ if ! pgrep -x xrdp >/dev/null; then
   echo "!! xrdp failed - tail:" >&2; tail -n 15 /var/log/xrdp.log >&2; exit 1
 fi
 
+# --- persistent tmux base session (as jan) ----------------------------------
+# Runs in THIS proot instance (same one the RDP session's terminals live in,
+# so they can attach — a tmux server in a different proot instance rejects
+# clients with "access not allowed"). Because it lives with the holder, it
+# survives i3/xrdp restarts; only `xorg-rdp.sh stop --all` (drops the holder)
+# kills it. Idempotent: skip if 'local' already exists (e.g. holder restart).
+if ! runuser -l jan -c 'tmux has-session -t local 2>/dev/null'; then
+  if runuser -l jan -c 'tmux new-session -d -s local' 2>/dev/null; then
+    echo ">> tmux base session 'local' started (jan)"
+  else
+    echo "   (tmux base 'local' start failed - terminals will create their own)"
+  fi
+else
+  echo ">> tmux base session 'local' already running (kept)"
+fi
+
 echo ""
 echo ">> native RDP up. connect: 127.0.0.1:3389  login: jan / <unix password>"
 echo "   session log: /var/log/xrdp-sesman.log   Xorg: ~/.xorgxrdp.10.log"
-echo "   stop: pkill -x xrdp; pkill -x xrdp-sesman"
+echo "   stop: xorg-rdp.sh stop  (keeps tmux)  |  stop --all  (kills tmux too)"
