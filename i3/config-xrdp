@@ -1,0 +1,44 @@
+# i3 config — XRDP / remote variant (proot i3 over Xvnc:2 + xrdp).
+# Shares all bindings/theme from config.common; drops the desktop-only
+# autostarts (quickshell/GPU bar, picom compositor, tray applets, xautolock,
+# physical-keyboard xinput remap, xborders) that are broken or pointless
+# over RDP. Launch via: i3 -c ~/.dotfiles/i3/config-xrdp
+# (start-i3-xrdp.sh passes this with -c).
+
+# Alt is natively Mod1 in the keymap xrdp programs on every (re)connect, so
+# $mod=Mod1 makes Alt the modifier with NO xmodmap and survives reconnects.
+# (A stuck Super from the client is harmless - Super stays Mod4, not $mod.)
+set $mod Mod1
+include ~/.dotfiles/i3/config.common
+
+# --- remote-safe autostarts -------------------------------------------------
+# Plain background (no nitrogen/picom compositor over RDP).
+exec --no-startup-id xsetroot -solid "#152024"
+
+# Keyboard: RDP client supplies the layout. Uncomment for dvorak in-session
+# (no -device: the physical AT keyboard doesn't exist over RDP).
+# exec --no-startup-id setxkbmap us -variant dvorak
+
+
+# Audio still works via PULSE_SERVER; use $mod+Ctrl+m (alsamixer) to adjust.
+
+# --- override quickshell launchers with X11 ones (quickshell needs GPU/
+#     Wayland -> dead over RDP). These come after the include, so i3 uses them.
+bindsym $mod+Return exec --no-startup-id ~/.local/bin/st
+bindsym $mod+d exec --no-startup-id rofi -show drun
+bindsym $mod+Shift+d exec --no-startup-id dmenu_run
+bindsym $mod+p exec --no-startup-id rofi -show run
+
+# --- plain workspace/status bar (quickshell bar can't run over RDP) ---------
+bar {
+    i3bar_command i3bar
+    status_command i3status
+    position top
+    tray_output none
+    colors {
+        background #152024
+        statusline #d8e0e0
+        focused_workspace  #2b5c6b #2b5c6b #ffffff
+        inactive_workspace #152024 #152024 #8a9a9a
+    }
+}

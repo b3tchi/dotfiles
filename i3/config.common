@@ -1,0 +1,437 @@
+# i3 config file (v4)
+# Please see http://i3wm.org/docs/userguide.html for a complete reference!
+
+# $mod is set by the including file BEFORE `include config.common`:
+#   config      (desktop) -> set $mod Mod4  (Super)
+#   config-xrdp (RDP)      -> set $mod Mod1  (Alt; native over RDP, survives
+#                            xrdp's per-connect keymap reset, no xmodmap needed)
+
+# set default desktop layout (default is tiling)
+# workspace_layout tabbed <stacking|tabbed>
+workspace_layout tabbed
+
+# Configure border style <normal|1pixel|pixel xx|none|pixel>
+default_border normal 4
+default_floating_border normal 4
+
+# Hide borders
+hide_edge_borders none
+
+# change borders
+bindsym $mod+u border none
+bindsym $mod+y border pixel 4
+bindsym $mod+n border normal 4
+
+# avoid leaving unfocuse with full screen
+popup_during_fullscreen smart
+
+# Font for window titles. Will also be used by the bar unless a different font
+# is used in the bar {} block below.
+# font xft:URWGothic-Book 11
+font xft:Iosevka 11
+
+# Use Mouse+$mod to drag floating windows
+floating_modifier $mod
+
+#enable tiling tiling
+tiling_drag modifier titlebar
+
+# start a terminal with pre-created tmux session
+# terminal binding moved to per-variant config (router pattern):
+#   config (desktop) -> wm-launch-terminal st (tmux/project wrapper)
+#   config-xrdp (RDP) -> plain st
+
+# kill focused window
+bindsym $mod+Shift+q kill
+
+# program launcher moved to per-variant config (router pattern):
+#   config (desktop) -> quickshell ; config-xrdp (RDP) -> rofi/dmenu
+# (also $mod+p, $mod+Shift+d --release, and the Tab/w switcher grabs below)
+
+# old rofi launcher (replaced by quickshell AppLauncher)
+# bindsym $mod+d exec --no-startup-id rofi -show run
+# bindsym $mod+d exec --no-startup-id rofi -show run -theme-str 'entry {placeholder:"run";}'
+
+
+# launch categorized menu
+bindsym $mod+m exec --no-startup-id morc_menu
+
+################################################################################################
+## sound-section - DO NOT EDIT if you wish to automatically upgrade Alsa -> Pulseaudio later! ##
+################################################################################################
+
+bindsym $mod+Ctrl+m exec terminal -e 'alsamixer'
+#exec --no-startup-id pulseaudio
+#exec --no-startup-id pa-applet
+#bindsym $mod+Ctrl+m exec pavucontrol
+
+################################################################################################
+
+# Screen brightness controls
+# bindsym XF86MonBrightnessUp exec "xbacklight -inc 10; notify-send 'brightness upX'"
+# bindsym XF86MonBrightnessDown exec "xbacklight -dec 10; notify-send 'brightness downX'"
+
+# Start Applications
+# bindsym $mod+Ctrl+b exec terminal -e 'bmenu'
+bindsym $mod+F2 exec palemoon
+bindsym $mod+F3 exec pcmanfm
+# bindsym $mod+F3 exec ranger
+bindsym $mod+Shift+F3 exec pcmanfm_pkexec
+bindsym $mod+F5 exec terminal -e 'mocp'
+# bindsym $mod+t exec --no-startup-id pkill picom
+bindsym $mod+Ctrl+t exec --no-startup-id picom -b
+# (router: moved to desktop config) bindsym $mod+Shift+d --release exec ~/.dotfiles/quickshell/qs-start.sh
+bindsym Print exec --no-startup-id i3-scrot
+bindsym $mod+Print --release exec --no-startup-id i3-scrot -w
+bindsym $mod+Shift+Print --release exec --no-startup-id i3-scrot -s
+bindsym $mod+Shift+h exec xdg-open /usr/share/doc/manjaro/i3_help.pdf
+bindsym $mod+Ctrl+x --release exec --no-startup-id xkill
+
+# focus_follows_mouse no
+
+# change focus
+bindsym $mod+j focus left
+bindsym $mod+k focus down
+bindsym $mod+l focus up
+bindsym $mod+semicolon focus right
+
+# alternatively, you can use the cursor keys:
+bindsym $mod+Left focus left
+bindsym $mod+Down focus down
+bindsym $mod+Up focus up
+bindsym $mod+Right focus right
+
+# move focused window
+bindsym $mod+Shift+j move left
+bindsym $mod+Shift+k move down
+bindsym $mod+Shift+l move up
+bindsym $mod+Shift+semicolon move right
+
+# alternatively, you can use the cursor keys:
+bindsym $mod+Shift+Left move left
+bindsym $mod+Shift+Down move down
+bindsym $mod+Shift+Up move up
+bindsym $mod+Shift+Right move right
+
+# workspace back and forth (with/without active container)
+workspace_auto_back_and_forth yes
+# bindsym $mod+b workspace back_and_forth
+# bindsym $mod+Shift+b move container to workspace back_and_forth; workspace back_and_forth
+
+# split orientation
+bindsym $mod+s split h;exec notify-send 'tile side'
+bindsym $mod+b split v;exec notify-send 'tile bellow'
+bindsym $mod+q split toggle
+
+# toggle fullscreen mode for the focused container
+bindsym $mod+z fullscreen toggle
+
+# change container layout (stacked, tabbed, toggle split)
+# bindsym $mod+s layout stacking
+bindsym $mod+t layout tabbed
+bindsym $mod+e layout toggle split
+
+# toggle tiling / floating
+# bindsym $mod+Shift+space floating toggle
+
+# change focus between tiling / floating windows
+# bindsym $mod+space focus mode_toggle
+
+# toggle sticky
+bindsym $mod+Shift+s sticky toggle
+
+# focus the parent container
+bindsym $mod+a focus parent
+
+# move the currently focused window to the scratchpad
+bindsym $mod+Shift+minus move scratchpad
+
+# Show the next scratchpad window or hide the focused scratchpad window.
+# If there are multiple scratchpad windows, this command cycles through them.
+bindsym $mod+minus scratchpad show
+
+#navigate workspaces next / previous
+bindsym $mod+Ctrl+Right workspace next
+bindsym $mod+Ctrl+Left workspace prev
+
+# Workspace switching by Polybar display order (supports named project workspaces)
+set $ws_switch ~/.local/bin/ws-switch.nu
+
+# switch to workspace by display position
+bindsym $mod+1 exec --no-startup-id $ws_switch 1
+bindsym $mod+2 exec --no-startup-id $ws_switch 2
+bindsym $mod+3 exec --no-startup-id $ws_switch 3
+bindsym $mod+4 exec --no-startup-id $ws_switch 4
+bindsym $mod+5 exec --no-startup-id $ws_switch 5
+bindsym $mod+6 exec --no-startup-id $ws_switch 6
+bindsym $mod+7 exec --no-startup-id $ws_switch 7
+bindsym $mod+8 exec --no-startup-id $ws_switch 8
+
+# Move focused container to workspace by display position
+bindsym $mod+Ctrl+1 exec --no-startup-id $ws_switch 1 move
+bindsym $mod+Ctrl+2 exec --no-startup-id $ws_switch 2 move
+bindsym $mod+Ctrl+3 exec --no-startup-id $ws_switch 3 move
+bindsym $mod+Ctrl+4 exec --no-startup-id $ws_switch 4 move
+bindsym $mod+Ctrl+5 exec --no-startup-id $ws_switch 5 move
+bindsym $mod+Ctrl+6 exec --no-startup-id $ws_switch 6 move
+bindsym $mod+Ctrl+7 exec --no-startup-id $ws_switch 7 move
+bindsym $mod+Ctrl+8 exec --no-startup-id $ws_switch 8 move
+
+# Move container to workspace and follow
+bindsym $mod+Shift+1 exec --no-startup-id $ws_switch 1 follow
+bindsym $mod+Shift+2 exec --no-startup-id $ws_switch 2 follow
+bindsym $mod+Shift+3 exec --no-startup-id $ws_switch 3 follow
+bindsym $mod+Shift+4 exec --no-startup-id $ws_switch 4 follow
+bindsym $mod+Shift+5 exec --no-startup-id $ws_switch 5 follow
+bindsym $mod+Shift+6 exec --no-startup-id $ws_switch 6 follow
+bindsym $mod+Shift+7 exec --no-startup-id $ws_switch 7 follow
+bindsym $mod+Shift+8 exec --no-startup-id $ws_switch 8 follow
+
+# Open applications on specific workspaces
+# assign [class="Thunderbird"] $ws1
+# assign [class="Pale moon"] $ws2
+# assign [class="Pcmanfm"] $ws3
+# assign [class="Skype"] $ws5
+
+# Open specific applications in floating mode
+for_window [all] title_window_icon on
+for_window [all] title_window_icon padding 4px
+
+for_window [all] title_format "%title"
+# PrusaSlicer: trim version from title ("*file - PrusaSlicer-2.8.1 based on Slic3r" → "*file - PrusaSlicer")
+for_window [all] border normal 4
+
+for_window [title="qs-launcher"] floating enable, border none, move position center
+for_window [title="qs-switcher"] floating enable, border none, move position center
+for_window [title="qs-projects"] floating enable, border none, move position center
+for_window [title="alsamixer"] floating enable border pixel 1
+for_window [class="calamares"] floating enable border normal
+for_window [class="Clipgrab"] floating enable
+for_window [title="File Transfer*"] floating enable
+for_window [class="fpakman"] floating enable
+for_window [class="Galculator"] floating enable border pixel 1
+for_window [class="GParted"] floating enable border normal
+for_window [title="i3_help"] floating enable sticky enable border normal
+for_window [class="Lightdm-settings"] floating enable
+for_window [class="Lxappearance"] floating enable sticky enable border normal
+for_window [class="Manjaro-hello"] floating enable
+for_window [class="Manjaro Settings Manager"] floating enable border normal
+for_window [title="MuseScore: Play Panel"] floating enable
+for_window [class="Nitrogen"] floating enable sticky enable border normal
+for_window [class="Oblogout"] fullscreen enable
+for_window [class="octopi"] floating enable
+for_window [title="About Pale Moon"] floating enable
+for_window [class="Pamac-manager"] floating enable
+for_window [class="Pavucontrol"] floating enable
+for_window [class="qt5ct"] floating enable sticky enable border normal
+for_window [class="Qtconfig-qt4"] floating enable sticky enable border normal
+for_window [class="Simple-scan"] floating enable border normal
+for_window [class="(?i)System-config-printer.py"] floating enable border normal
+for_window [class="Skype"] floating enable border normal
+for_window [class="Timeset-gui"] floating enable border normal
+for_window [class="(?i)virtualbox"] floating enable border normal
+for_window [class="Xfburn"] floating enable
+for_window [title="quickshell-notifications"] floating enable, border none, sticky enable, move position 400 60
+
+# switch to workspace with urgent window automatically
+for_window [urgent=latest] focus
+
+# reload the configuration file
+bindsym $mod+Shift+c reload
+
+# restart i3 inplace (preserves your layout/session, can be used to upgrade i3)
+bindsym $mod+Shift+r restart
+
+# exit i3 (logs you out of your X session)
+bindsym $mod+Shift+e exec "i3-nagbar -t warning -m 'You pressed the exit shortcut. Do you really want to exit i3? This will end your X session.' -b 'Yes, exit i3' 'i3-msg exit'"
+
+# Set shut down, restart and locking features
+bindsym $mod+0 mode "$mode_system"
+set $mode_system (l)ock, (e)xit, switch_(u)ser, (s)uspend, (h)ibernate, (r)eboot, (Shift+s)hutdown
+mode "$mode_system" {
+    bindsym l exec --no-startup-id i3exit lock, mode "default"
+    bindsym s exec --no-startup-id i3exit suspend, mode "default"
+    bindsym u exec --no-startup-id i3exit switch_user, mode "default"
+    bindsym e exec --no-startup-id i3exit logout, mode "default"
+    bindsym h exec --no-startup-id i3exit hibernate, mode "default"
+    bindsym r exec --no-startup-id i3exit reboot, mode "default"
+    bindsym Shift+s exec --no-startup-id i3exit shutdown, mode "default"
+
+    # exit system mode: "Enter" or "Escape"
+    bindsym Return mode "default"
+    bindsym Escape mode "default"
+}
+# Rename workspace
+bindsym $mod+Shift+n exec i3-input -f "xft:Iosevka" -F 'name workspace to "%s"' -P 'Workspace name: '
+
+# Project workspace picker (quickshell) moved to desktop config (router pattern)
+# bindsym $mod+p exec --no-startup-id ~/.dotfiles/quickshell/qs-overlay.sh projects
+
+# Resize window (you can also use the mouse for that)
+bindsym $mod+r mode "resize"
+mode "resize" {
+        # These bindings trigger as soon as you enter the resize mode
+        # Pressing left will shrink the window’s width.
+        # Pressing right will grow the window’s width.
+        # Pressing up will shrink the window’s height.
+        # Pressing down will grow the window’s height.
+        bindsym j resize shrink width 5 px or 5 ppt
+        bindsym k resize grow height 5 px or 5 ppt
+        bindsym l resize shrink height 5 px or 5 ppt
+        bindsym semicolon resize grow width 5 px or 5 ppt
+
+        # same bindings, but for the arrow keys
+        bindsym Left resize shrink width 10 px or 10 ppt
+        bindsym Down resize grow height 10 px or 10 ppt
+        bindsym Up resize shrink height 10 px or 10 ppt
+        bindsym Right resize grow width 10 px or 10 ppt
+
+        # exit resize mode: Enter or Escape
+        bindsym Return mode "default"
+        bindsym Escape mode "default"
+}
+
+# Lock screen
+bindsym $mod+9 exec --no-startup-id blurlock
+
+# polybar (replaced by quickshell)
+# exec_always --no-startup-id $HOME/.config/polybar/launch.sh
+
+# quickshell bar + overlay (kill+restart on every reload until stable)
+# Autostart applications
+# authentication for gnome based apps
+# exec --no-startup-id /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1
+
+#wallpaper + compozitor
+
+# (overlay started above with bar)
+
+#exec --no-startup-id manjaro-hello
+# exec --no-startup-id blueman-applet
+# exec_always --no-startup-id sbxkb
+
+# information on desktop
+# exec --no-startup-id start_conky_maia
+# exec --no-startup-id start_conky_green
+
+#lockscreen
+
+#dvorak default layout 
+
+#firefox fix?
+# exec_always --no-startup-id ff-theme-util
+
+#mouse cursor
+# exec_always --no-startup-id fix_xcursor
+
+# task switcher — action handled by quickshell via xinput key monitor
+# (needs to track Super release for confirm; i3 bindsym fires on press only).
+# i3 still grabs the combo via `nop` so the Tab key doesn't leak through to
+# the focused window (the raw XI2 events used by the keymon are delivered
+# below the grab layer and are unaffected).
+# quickshell switcher grabs ($mod+Tab / Mod1+Tab / $mod+w / Mod1+w) moved to
+# the desktop config (router pattern) — they collide when $mod itself is Mod1
+# (RDP), and the quickshell switcher doesn't run over RDP anyway.
+# Focus border now handled by quickshell (config/FocusBorder.qml)
+# Previously: xborders-patched Python script (kept in repo as fallback)
+
+# alttab (replaced by quickshell switcher)
+# exec_always alttab -font xft:Iosevka-11 -mk Super_L -vertical -s 1 -t 300x24 -i 20x20 -bg "#222d31" -bw 2 -bc "#222d31" -inact "#222d31" -frame "#16a085"
+
+# Color palette used for the terminal ( ~/.Xresources file )
+# Colors are gathered based on the documentation::
+# https://i3wm.org/docs/userguide.html#xresources
+# Change the variable name at the place you want to match the color
+# of your terminal like this:
+# [example]
+# If you want your bar to have the same background color as your 
+# terminal background change the line 362 from:
+# background #14191D
+# to:
+# background $term_background
+# Same logic applied to everything else.
+set_from_resource $term_background background
+set_from_resource $term_foreground foreground
+set_from_resource $term_color0     color0
+set_from_resource $term_color1     color1
+set_from_resource $term_color2     color2
+set_from_resource $term_color3     color3
+set_from_resource $term_color4     color4
+set_from_resource $term_color5     color5
+set_from_resource $term_color6     color6
+set_from_resource $term_color7     color7
+set_from_resource $term_color8     color8
+set_from_resource $term_color9     color9
+set_from_resource $term_color10    color10
+set_from_resource $term_color11    color11
+set_from_resource $term_color12    color12
+set_from_resource $term_color13    color13
+set_from_resource $term_color14    color14
+set_from_resource $term_color15    color15
+
+# Start i3bar to display a workspace bar (plus the system information i3status if available)
+set $transp       #00000000
+
+# bar {
+# 	i3bar_command i3bar
+# 	status_command i3status
+# 	# status_command i3blocks #alternative status bar
+# 	position bottom
+#
+# 	## please set your primary output first. Example: 'xrandr --output eDP1 --primary'
+# 	#tray_output primary
+# 	#tray_output eDP1
+# 	tray_padding 5 
+#
+# 	bindsym button4 nop
+# 	bindsym button5 nop
+# 	#   font xft:URWGothic-Book 11
+# 	strip_workspace_numbers yes
+# 	# separator_symbol ''
+#
+#     colors {
+#         background #222D31
+#         statusline #F9FAF9
+#         separator  #222D31 ##454948
+# 		#                  border  backgr. text
+#         focused_workspace  #16a085 #16a085 #292F34
+#         active_workspace   #353836 #353836 #FDF6E3
+#         inactive_workspace #222D31 #222D31 #EEE8D5
+#         binding_mode       #2C2C2C #2C2C2C #F9FAF9
+#         urgent_workspace   #FDF6E3 #FDF6E3 #CB4B16
+#     }
+# }
+
+# hide/unhide i3status bar
+# bindsym $mod+m bar mode toggle
+
+# Theme colors
+# class                   border  backgr. text    indic.   child_border
+client.focused            #152024 #152024 #FDF6E3 #222D31 
+client.focused_inactive   #152024 #152024 #707880 #222D31
+client.unfocused          #222D31 #222D31 #707880 #222D31
+client.urgent             #CB4B16 #FDF6E3 #16a085 #268BD2
+client.placeholder        #152024 #152024 #FDF6E3 #152024
+
+client.background       $transp
+
+#############################
+### settings for i3-gaps: ###
+#############################
+
+# Set inner/outer gaps
+
+gaps inner 4
+gaps outer 2
+# Additionally, you can issue commands with the following syntax. This is useful to bind keys to changing the gap size.
+# gaps inner|outer current|all set|plus|minus <px>
+# gaps inner all set 10
+# gaps outer all plus 5
+
+# Smart gaps (gaps used if only more than one container on the workspace)
+smart_gaps off
+
+# Smart borders (draw borders around container only if it is not the only container on this workspace) 
+# on|no_gaps (on=always activate and no_gaps=only activate if the gap size to the edge of the screen is 0)
+smart_borders no_gaps
+
