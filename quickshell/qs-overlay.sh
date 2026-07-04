@@ -11,14 +11,23 @@ fi
 
 OVERLAY="$HOME/.dotfiles/quickshell/overlay"
 
+# Over RDP (QS_RDP=1) the overlay is embedded in the main/default quickshell
+# instance (single process), so IPC targets it with no -p. Desktop keeps the
+# separate `-p overlay` instance.
+if [ "$QS_RDP" = "1" ]; then
+    QS="quickshell"
+else
+    QS="quickshell -p $OVERLAY"
+fi
+
 case "$1" in
-    start)            exec quickshell -p "$OVERLAY" ;;
-    launcher)         quickshell -p "$OVERLAY" msg launcher toggle ;;
-    switcher)         quickshell -p "$OVERLAY" msg switcher next ;;
-    switcher-prev)    quickshell -p "$OVERLAY" msg switcher prev ;;
-    switcher-confirm) quickshell -p "$OVERLAY" msg switcher confirm ;;
-    switcher-cancel)  quickshell -p "$OVERLAY" msg switcher cancel ;;
-    switcher-search)  quickshell -p "$OVERLAY" msg switcher search ;;
-    projects)         quickshell -p "$OVERLAY" msg projects toggle ;;
+    start)            exec $QS ;;
+    launcher)         $QS msg launcher toggle ;;
+    switcher)         $QS msg switcher next ;;
+    switcher-prev)    $QS msg switcher prev ;;
+    switcher-confirm) $QS msg switcher confirm ;;
+    switcher-cancel)  $QS msg switcher cancel ;;
+    switcher-search)  $QS msg switcher search ;;
+    projects)         $QS msg projects toggle ;;
     *)                echo "Usage: qs-overlay.sh {start|launcher|switcher|switcher-prev|switcher-confirm|switcher-cancel|switcher-search|projects}" ;;
 esac
