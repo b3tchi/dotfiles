@@ -101,5 +101,7 @@ proot-distro login "$DISTRO" \
   (sleep 3 && xmodmap -e 'remove mod1 = Alt_L' -e 'add mod4 = Alt_L') &
 
   # Separate config: shared bindings/theme, no desktop-only autostarts.
-  dbus-launch --exit-with-session i3 -c ~/.dotfiles/i3/config-xrdp
+  # dbus-run-session (not dbus-launch --exit-with-session): in proot the latter's
+  # session daemon dies early, leaving a stale socket -> notifications break.
+  dbus-run-session -- i3 -c ~/.dotfiles/i3/config-xrdp
 "

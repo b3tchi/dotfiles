@@ -41,7 +41,7 @@ mkdir -p "$XDG_RUNTIME_DIR" "$HOME/.vnc" /tmp/.X11-unix 2>/dev/null
 chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null
 chmod 1777 /tmp/.X11-unix 2>/dev/null || true
 
-for b in Xvnc i3 xrdp dbus-launch pulseaudio; do
+for b in Xvnc i3 xrdp dbus-run-session pulseaudio; do
   command -v "$b" >/dev/null 2>&1 || { echo "!! missing: $b" >&2; exit 1; }
 done
 if [ ! -f "$HOME/.vnc/passwd" ]; then
@@ -83,7 +83,7 @@ mkdir -p "$HOME/.local/bin"
 printf '#!/bin/sh\n' > "$HOME/.local/bin/picom-stub"; chmod +x "$HOME/.local/bin/picom-stub"
 # Alt -> Mod4 remap ($mod=Mod4). Re-run once the WM is up.
 ( sleep 3 && DISPLAY=":$DISP" xmodmap -e 'remove mod1 = Alt_L' -e 'add mod4 = Alt_L' >/dev/null 2>&1 ) &
-setsid bash -c "export DISPLAY=:$DISP; export QT_QUICK_BACKEND=software; export QS_RDP=1; exec dbus-launch --exit-with-session i3 -c '$I3_CONFIG'" \
+setsid bash -c "export DISPLAY=:$DISP; export QT_QUICK_BACKEND=software; export QS_RDP=1; exec dbus-run-session -- i3 -c '$I3_CONFIG'" \
   </dev/null >"$HOME/.vnc/i3.log" 2>&1 &
 sleep 2
 if ! pgrep -x i3 >/dev/null; then
