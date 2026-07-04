@@ -79,21 +79,13 @@ if ! pgrep -x xrdp >/dev/null; then
   echo "!! xrdp failed - tail:" >&2; tail -n 15 /var/log/xrdp.log >&2; exit 1
 fi
 
-# --- persistent tmux base session (as jan) ----------------------------------
-# Runs in THIS proot instance (same one the RDP session's terminals live in,
-# so they can attach — a tmux server in a different proot instance rejects
-# clients with "access not allowed"). Because it lives with the holder, it
-# survives i3/xrdp restarts; only `xorg-rdp.sh stop --all` (drops the holder)
-# kills it. Idempotent: skip if 'local' already exists (e.g. holder restart).
-if ! runuser -l jan -c 'tmux has-session -t local 2>/dev/null'; then
-  if runuser -l jan -c 'tmux new-session -d -s local' 2>/dev/null; then
-    echo ">> tmux base session 'local' started (jan)"
-  else
-    echo "   (tmux base 'local' start failed - terminals will create their own)"
-  fi
-else
-  echo ">> tmux base session 'local' already running (kept)"
-fi
+# NOTE: we deliberately do NOT pre-create the tmux server here. Starting it as
+# root->jan (runuser) puts the socket in a different uid/proot context than the
+# sesman-spawned jan session, so the session's terminals get "access not
+# allowed". Instead the first jan terminal's tmux-start creates the base
+# session in the correct context; it daemonizes and lives in this holder proot,
+# so it already survives i3/xrdp restarts and plain `stop` (holder kept alive).
+# A stale socket from a dead server is cleared by tmux-start's self-heal.
 
 echo ""
 echo ">> native RDP up. connect: 127.0.0.1:3389  login: jan / <unix password>"

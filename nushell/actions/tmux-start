@@ -14,6 +14,22 @@ def main [
         return
     }
 
+    # Self-heal: a tmux socket left by a server in a defunct proot instance (or
+    # a mismatched uid context) rejects new clients with "access not allowed",
+    # which breaks every terminal. A healthy server always has >=1 session, so
+    # if the socket exists but `list-sessions` fails for ANY reason, the server
+    # is dead/inaccessible — remove the stale socket so the next new-session
+    # spins up a fresh server in THIS context. (Verified: rm + new-session
+    # clears the "access not allowed" state.)
+    let sock = $"/tmp/tmux-(^id -u | str trim)/default"
+    if ($sock | path exists) {
+        let probe = (do { ^tmux list-sessions } | complete)
+        if $probe.exit_code != 0 {
+            do { ^tmux kill-server } | complete | ignore
+            rm -f $sock
+        }
+    }
+
     # If mode is "attach", check if already in tmux
     if $mode == "attach" {
         if ($env | get -o TMUX | is-not-empty) {

@@ -55,9 +55,10 @@ case "${1:-start}" in
   stop)
     full=0
     case "${2:-}" in --all|-a) full=1;; esac
-    # Always stop the RDP display daemons (the session).
+    # Always stop the RDP display daemons (the session). xrdp-chansrv is reaped
+    # too — one spawns per connect and they orphan on disconnect, piling up.
     proot-distro login "$DISTRO" -- \
-      bash -lc 'pkill -x xrdp 2>/dev/null; pkill -x xrdp-sesman 2>/dev/null; pkill -x Xorg 2>/dev/null; pkill -x i3 2>/dev/null; true' 2>/dev/null || true
+      bash -lc 'pkill -x xrdp 2>/dev/null; pkill -x xrdp-sesman 2>/dev/null; pkill -x Xorg 2>/dev/null; pkill -x i3 2>/dev/null; pkill -x xrdp-chansrv 2>/dev/null; true' 2>/dev/null || true
     if [ "$full" = 1 ]; then
       # --all: drop the proot holder too -> kills the persistent tmux server.
       if [ -f "$PIDFILE" ]; then kill "$(cat "$PIDFILE")" 2>/dev/null || true; rm -f "$PIDFILE"; fi
