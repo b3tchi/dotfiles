@@ -86,6 +86,9 @@ proot-distro login "$DISTRO" \
   -- bash -c "
   export DISPLAY=:$DISP
   export PULSE_SERVER=tcp:127.0.0.1:4713
+  # No GPU over RDP: force Qt Quick's software renderer so quickshell (bar +
+  # launcher) runs without GL. Inherited by i3 and every quickshell it spawns.
+  export QT_QUICK_BACKEND=software
 
   # No GPU: stub out picom (compositor not needed / would fail without GL).
   mkdir -p /usr/local/bin
