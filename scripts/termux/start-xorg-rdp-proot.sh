@@ -31,6 +31,30 @@ if [ ! -S /run/dbus/system_bus_socket ]; then
   dbus-daemon --system --fork 2>/dev/null || echo "   (dbus-daemon failed; spam will persist but harmless)"
 fi
 
+# --- ensure /etc/xrdp/startwm.sh (authoritative; not shipped by the pkg) -----
+# dbus-run-session, NOT dbus-launch --exit-with-session: the latter's session
+# daemon dies early in proot, leaving a stale /tmp/dbus-* socket -> quickshell's
+# NotificationServer can't bind org.freedesktop.Notifications -> no notifications.
+cat > /etc/xrdp/startwm.sh <<'EOF'
+#!/bin/sh
+export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+mkdir -p "$XDG_RUNTIME_DIR" 2>/dev/null
+chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null
+
+# Audio: native unix-socket pulse, no TCP needed inside one namespace.
+pulseaudio --start --exit-idle-time=-1 >/dev/null 2>&1
+
+# No GPU: stub picom so the i3 autostart line can't fail on missing GL.
+mkdir -p /usr/local/bin
+printf '#!/bin/sh\n' > /usr/local/bin/picom
+chmod +x /usr/local/bin/picom
+
+# dbus-run-session keeps the session bus alive as i3's parent.
+exec dbus-run-session -- i3 -c "/home/jan/.dotfiles/i3/config-xrdp"
+EOF
+chmod +x /etc/xrdp/startwm.sh
+echo ">> startwm.sh ensured (dbus-run-session)"
+
 # --- clear stale sesman pid/socket/lock -------------------------------------
 pkill -x xrdp 2>/dev/null || true
 pkill -x xrdp-sesman 2>/dev/null || true
