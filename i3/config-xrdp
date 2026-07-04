@@ -23,12 +23,15 @@ exec --no-startup-id xsetroot -solid "#152024"
 # Audio still works via PULSE_SERVER; use $mod+Ctrl+m (alsamixer) to adjust.
 
 # --- quickshell bar + launcher over RDP (replaces rofi + i3bar) -------------
-# Software-rendered: QT_QUICK_BACKEND=software is exported by the start script
-# (start-i3-xrdp*.sh) so no GPU/GL is needed. Runs under the session dbus from
-# `dbus-launch i3`, so notifications + tray work. The for_window rules
-# (qs-launcher / qs-projects / quickshell-notifications) come from the include.
+# QT_QUICK_BACKEND=software is REQUIRED: without it quickshell tries GL and
+# SEGFAULTS over RDP (no GPU/GL). QS_RDP=1 disables focus border/dim overlays.
+# Set here (not just in the start scripts) so the env is applied at exec time —
+# a bare `$mod+Shift+r` reload works, not only a full session restart. Runs
+# under the session dbus from `dbus-launch i3` (notifications + tray). The
+# for_window rules (qs-launcher / qs-projects / notifications) come from the include.
+set $qsenv env QT_QUICK_BACKEND=software QS_RDP=1
 bindsym $mod+Return exec --no-startup-id ~/.local/bin/st
-exec_always --no-startup-id ~/.dotfiles/quickshell/qs-start.sh
-bindsym $mod+d exec --no-startup-id ~/.dotfiles/quickshell/qs-overlay.sh launcher
-bindsym $mod+p exec --no-startup-id ~/.dotfiles/quickshell/qs-overlay.sh projects
-bindsym $mod+Shift+d --release exec --no-startup-id ~/.dotfiles/quickshell/qs-start.sh
+exec_always --no-startup-id $qsenv ~/.dotfiles/quickshell/qs-start.sh
+bindsym $mod+d exec --no-startup-id $qsenv ~/.dotfiles/quickshell/qs-overlay.sh launcher
+bindsym $mod+p exec --no-startup-id $qsenv ~/.dotfiles/quickshell/qs-overlay.sh projects
+bindsym $mod+Shift+d --release exec --no-startup-id $qsenv ~/.dotfiles/quickshell/qs-start.sh
