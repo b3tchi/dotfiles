@@ -432,7 +432,9 @@ PanelWindow {
         anchors.rightMargin: root.insetSide
         anchors.bottomMargin: root.insetBottom
         anchors.topMargin: root.insetTop
-        radius: 12
+        // Pill look only when inset from the sides; bottom-only inset = flat
+        // full-width bar with a black chin strip below (part of the desktop).
+        radius: root.insetSide > 0 ? 12 : 0
         color: root.barColor
     }
 
