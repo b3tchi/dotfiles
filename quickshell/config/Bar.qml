@@ -54,9 +54,10 @@ PanelWindow {
     // and corners. Tunable via env: QS_BAR_INSET_BOTTOM / QS_BAR_INSET_SIDE.
     readonly property int insetBottom: parseInt(Quickshell.env("QS_BAR_INSET_BOTTOM") ?? "0") || 0
     readonly property int insetSide:   parseInt(Quickshell.env("QS_BAR_INSET_SIDE") ?? "0") || 0
-    readonly property bool inset: insetBottom > 0 || insetSide > 0
+    readonly property int insetTop:    parseInt(Quickshell.env("QS_BAR_INSET_TOP") ?? "0") || 0
+    readonly property bool inset: insetBottom > 0 || insetSide > 0 || insetTop > 0
 
-    implicitHeight: (isSway ? 24 : 27) + insetBottom
+    implicitHeight: (isSway ? 24 : 27) + insetBottom + insetTop
 
     // Phone (sxmo, sway/Wayland): floating pill via real layer-shell margins;
     // desktop (i3/sway): full-width. On X11 use QS_BAR_INSET_* instead.
@@ -430,6 +431,7 @@ PanelWindow {
         anchors.leftMargin: root.insetSide
         anchors.rightMargin: root.insetSide
         anchors.bottomMargin: root.insetBottom
+        anchors.topMargin: root.insetTop
         radius: 12
         color: root.barColor
     }
@@ -440,6 +442,7 @@ PanelWindow {
         anchors.leftMargin: root.inset ? root.insetSide + 10 : 0
         anchors.rightMargin: root.inset ? root.insetSide + 10 : 0
         anchors.bottomMargin: root.insetBottom
+        anchors.topMargin: root.insetTop
 
         // Left: workspaces + mode
         Row {
