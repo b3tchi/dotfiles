@@ -51,4 +51,12 @@ linux:
       pamac build --no-confirm xrdp xorgxrdp
       sudo pacman -S --needed --noconfirm xclip
       {{/if}}
+      {{#if (eq whoami.distro "Arch Linux ARM")}}
+      # proot Arch on Termux (Android): xrdp/xorgxrdp not in ALARM repos —
+      # AUR-build via yay (yay itself bootstrapped by distro/dot.yaml).
+      # Port stays 3389. The native-Xorg stack's hand-tuned configs
+      # (xrdp.ini, xorg.conf, PAM) are installed at runtime by
+      # scripts/termux/start-xorg-rdp-proot.sh from xrdp-proot/.
+      yay -Syu --needed --noconfirm xrdp xorgxrdp xorg-xrdb xclip
+      {{/if}}
       rotz link xrdp --force

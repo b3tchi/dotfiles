@@ -1,23 +1,20 @@
 # Termux-host scripts (tracked copies)
 
-These run on the **Termux side** (not inside proot). Live locations in
-Termux home (`/data/data/com.termux/files/home`, bind-mounted at `~/termux`
-from inside proot):
+These run on the **Termux side** (not inside proot). Termux home
+(`/data/data/com.termux/files/home`) is bind-mounted at `~/termux` from
+inside proot.
 
-| tracked copy      | live location            |
-|-------------------|--------------------------|
-| `start-xrdp.sh`   | `~/start-xrdp.sh`        |
-| `stop-xrdp.sh`    | `~/stop-xrdp.sh`         |
-| `vnc-xstartup`    | `~/.vnc/xstartup`        |
-| `fix-env.sh`      | `~/fix-env.sh`           |
+| tracked copy | live location   | purpose                    |
+|--------------|-----------------|----------------------------|
+| `fix-env.sh` | `~/fix-env.sh`  | TMPDIR fix for Termux env  |
 
-These belong to the older **Xvnc-bridge** stack (xrdp → Xvnc :2/5902,
-VNC-password auth, no sesman). The current native-Xorg stack is
-`scripts/termux/xorg-rdp.sh` + `start-xorg-rdp-proot.sh`.
+The RDP desktop is the native-Xorg stack: `scripts/termux/xorg-rdp.sh`
+(Termux-side manager) + `scripts/termux/start-xorg-rdp-proot.sh` (in-proot
+stack). The legacy Xvnc-bridge stack (xrdp → Xvnc :2/5902, VNC-password
+auth) was pruned 2026-07-05; recover from git history if ever needed.
 
 No auto-deploy (Termux side has no rotz). After editing here, copy back:
 
 ```sh
-cp scripts/termux-host/start-xrdp.sh ~/termux/start-xrdp.sh
-cp scripts/termux-host/vnc-xstartup  ~/termux/.vnc/xstartup
+cp scripts/termux-host/fix-env.sh ~/termux/fix-env.sh
 ```
