@@ -1,0 +1,12 @@
+#!/data/data/com.termux/files/usr/bin/bash
+export PREFIX=/data/data/com.termux/files/usr
+export TMPDIR="$PREFIX/tmp"
+export HOME="${HOME:-/data/data/com.termux/files/home}"
+export XDG_RUNTIME_DIR="$TMPDIR/runtime-$(id -u)"
+# Termux has no /bin/sh; terminals (st, etc.) must be told a real shell,
+# else they exit instantly with "couldn't read from shell: I/O error".
+export SHELL="$PREFIX/bin/bash"
+export PATH="$PREFIX/bin:$PATH"
+export LANG="${LANG:-en_US.UTF-8}"
+mkdir -p "$XDG_RUNTIME_DIR"
+exec dbus-launch --exit-with-session i3

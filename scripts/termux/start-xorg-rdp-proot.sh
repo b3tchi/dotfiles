@@ -31,6 +31,19 @@ if [ ! -S /run/dbus/system_bus_socket ]; then
   dbus-daemon --system --fork 2>/dev/null || echo "   (dbus-daemon failed; spam will persist but harmless)"
 fi
 
+# --- install tracked xrdp configs (authoritative copies in dotfiles) --------
+# xrdp.ini (Xorg backend etc), xorg.conf (GPU-less xrdpdev), and the minimal
+# proot-friendly PAM stack. The PAM file especially: it is NOT in the xrdp
+# package's backup array, so every pkg upgrade silently overwrites it and
+# breaks sesman auth ("pam_authenticate: System error") until re-applied.
+XRDP_CFG=/home/jan/.dotfiles/xrdp-proot
+if [ -d "$XRDP_CFG" ]; then
+  cp "$XRDP_CFG/xrdp.ini"        /etc/xrdp/xrdp.ini
+  cp "$XRDP_CFG/xorg.conf"       /etc/X11/xrdp/xorg.conf
+  cp "$XRDP_CFG/pam-xrdp-sesman" /etc/pam.d/xrdp-sesman
+  echo ">> xrdp configs installed from dotfiles (xrdp.ini, xorg.conf, PAM)"
+fi
+
 # --- ensure /etc/xrdp/startwm.sh (authoritative; not shipped by the pkg) -----
 # dbus-run-session, NOT dbus-launch --exit-with-session: the latter's session
 # daemon dies early in proot, leaving a stale /tmp/dbus-* socket -> quickshell's
