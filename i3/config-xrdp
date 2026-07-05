@@ -29,7 +29,10 @@ exec --no-startup-id xsetroot -solid "#152024"
 # a bare `$mod+Shift+r` reload works, not only a full session restart. Runs
 # under the session dbus from `dbus-launch i3` (notifications + tray). The
 # for_window rules (qs-launcher / qs-projects / notifications) come from the include.
-set $qsenv env QT_QUICK_BACKEND=software QS_RDP=1
+# QS_PHONE=1: this RDP session is viewed on the Razr's own screen — the bar
+# gets pill margins (bottom 20 / sides 40 in Bar.qml) so the chin doesn't sit
+# on it and the rounded display corners don't crop its ends.
+set $qsenv env QT_QUICK_BACKEND=software QS_RDP=1 QS_PHONE=1
 bindsym $mod+Return exec --no-startup-id ~/.local/bin/st
 exec_always --no-startup-id $qsenv ~/.dotfiles/quickshell/qs-start.sh
 bindsym $mod+d exec --no-startup-id $qsenv ~/.dotfiles/quickshell/qs-overlay.sh launcher
