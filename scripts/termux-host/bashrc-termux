@@ -1,0 +1,2 @@
+export TMPDIR=$PREFIX/tmp
+alias claude='proot-distro login archlinux --user jan -- bash -lc '\''cd "$HOME" && exec "$HOME/.local/bin/claude" "$@"'\'' bash'
