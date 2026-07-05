@@ -62,6 +62,15 @@ mkdir -p /usr/local/bin
 printf '#!/bin/sh\n' > /usr/local/bin/picom
 chmod +x /usr/local/bin/picom
 
+# Firefox under proot: the content-process sandbox can't set up its
+# seccomp/namespace jail ("Sandbox: Couldn't list /dev") and every tab
+# segfaults (signal 11) on page load. Disable the child sandboxes -- proot
+# itself is the only isolation layer available here anyway.
+export MOZ_DISABLE_CONTENT_SANDBOX=1
+export MOZ_DISABLE_GMP_SANDBOX=1
+export MOZ_DISABLE_RDD_SANDBOX=1
+export MOZ_DISABLE_SOCKET_PROCESS_SANDBOX=1
+
 # dbus-run-session keeps the session bus alive as i3's parent.
 exec dbus-run-session -- i3 -c "/home/jan/.dotfiles/i3/config-xrdp"
 EOF
