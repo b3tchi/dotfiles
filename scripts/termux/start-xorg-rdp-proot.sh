@@ -41,7 +41,12 @@ if [ -d "$XRDP_CFG" ]; then
   cp "$XRDP_CFG/xrdp.ini"        /etc/xrdp/xrdp.ini
   cp "$XRDP_CFG/xorg.conf"       /etc/X11/xrdp/xorg.conf
   cp "$XRDP_CFG/pam-xrdp-sesman" /etc/pam.d/xrdp-sesman
-  echo ">> xrdp configs installed from dotfiles (xrdp.ini, xorg.conf, PAM)"
+  # Firefox site whitelist: with the content sandbox off (proot), restrict
+  # browsing to trusted dev sites via enterprise policy (blocks top-level
+  # navigation to everything else; risky browsing goes to the Android browser).
+  mkdir -p /etc/firefox/policies
+  cp "$XRDP_CFG/firefox-policies.json" /etc/firefox/policies/policies.json
+  echo ">> xrdp configs installed from dotfiles (xrdp.ini, xorg.conf, PAM, ff policy)"
 fi
 
 # --- ensure /etc/xrdp/startwm.sh (authoritative; not shipped by the pkg) -----
