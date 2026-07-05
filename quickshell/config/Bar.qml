@@ -68,7 +68,9 @@ PanelWindow {
     }
 
     readonly property color barColor: currentMode !== "default" ? "#152024" : "#222d31"
-    color: inset ? "#152024" : barColor
+    // Black surround: blends into the Razr's bezel/chin so the pill reads as
+    // floating on the hardware edge rather than on a colored strip.
+    color: inset ? "#000000" : barColor
 
     readonly property string fontFamily: "Iosevka Nerd Font"
     readonly property int fontSize: isSway ? 14 : 16
