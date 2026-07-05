@@ -46,9 +46,20 @@ PanelWindow {
         bottom: true
     }
 
-    implicitHeight: isSway ? 24 : 27
+    // X11 inset pill (Razr chin + rounded display corners): PanelWindow
+    // margins are a Wayland/layer-shell feature and a NO-OP on X11, so instead
+    // the window grows by the inset and the bar is drawn as an inset pill
+    // inside it; the surround is painted the desktop color (#152024, matches
+    // config-xrdp's xsetroot) so the bar appears to float clear of the chin
+    // and corners. Tunable via env: QS_BAR_INSET_BOTTOM / QS_BAR_INSET_SIDE.
+    readonly property int insetBottom: parseInt(Quickshell.env("QS_BAR_INSET_BOTTOM") ?? "0") || 0
+    readonly property int insetSide:   parseInt(Quickshell.env("QS_BAR_INSET_SIDE") ?? "0") || 0
+    readonly property bool inset: insetBottom > 0 || insetSide > 0
 
-    // Phone (sxmo): floating pill; desktop (i3/sway): full-width
+    implicitHeight: (isSway ? 24 : 27) + insetBottom
+
+    // Phone (sxmo, sway/Wayland): floating pill via real layer-shell margins;
+    // desktop (i3/sway): full-width. On X11 use QS_BAR_INSET_* instead.
     readonly property bool isPhone: Quickshell.env("QS_PHONE") === "1"
     margins {
         bottom: isPhone ? 20 : 0
@@ -56,7 +67,8 @@ PanelWindow {
         right:  isPhone ? 40 : 0
     }
 
-    color: currentMode !== "default" ? "#152024" : "#222d31"
+    readonly property color barColor: currentMode !== "default" ? "#152024" : "#222d31"
+    color: inset ? "#152024" : barColor
 
     readonly property string fontFamily: "Iosevka Nerd Font"
     readonly property int fontSize: isSway ? 14 : 16
@@ -409,9 +421,23 @@ PanelWindow {
     }
 
 
+    // Inset-pill background (X11 phone mode; invisible when inset is 0)
+    Rectangle {
+        visible: root.inset
+        anchors.fill: parent
+        anchors.leftMargin: root.insetSide
+        anchors.rightMargin: root.insetSide
+        anchors.bottomMargin: root.insetBottom
+        radius: 12
+        color: root.barColor
+    }
+
     // --- Layout (using Row, not RowLayout — RowLayout leaks Text.color) ---
     Item {
         anchors.fill: parent
+        anchors.leftMargin: root.inset ? root.insetSide + 10 : 0
+        anchors.rightMargin: root.inset ? root.insetSide + 10 : 0
+        anchors.bottomMargin: root.insetBottom
 
         // Left: workspaces + mode
         Row {
