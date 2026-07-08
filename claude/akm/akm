@@ -13,8 +13,8 @@
 #   akm bd init           strip bd auto-hooks, pin bd config, heal schema (per repo)
 #   akm bd doctor         health-check + self-heal Dolt state (also: akm doctor)
 #                         (--diagnose = read-only audit, no heal)
-#   akm bd export         bd Dolt → .beads/issues-snapshot.jsonl (commit-ready)
-#   akm bd import         .beads/issues-snapshot.jsonl → bd Dolt (after a git pull)
+#   akm bd export         bd Dolt closed issues → .beads/issues-snapshot.jsonl (archive)
+#   akm bd import         .beads/issues-snapshot.jsonl → bd Dolt (closed-history recovery)
 #   akm bd archive create snapshot + prune old closed issues
 #   akm bd archive apply  apply prune-list on other machines
 #
@@ -2186,8 +2186,8 @@ def "main bd" [] {
   print "  akm bd init           strip bd auto-hooks, pin bd config, heal schema (idempotent)"
   print "  akm bd doctor         health-check + self-heal Dolt state (also: akm doctor)"
   print "                          --diagnose  report only, no self-heal"
-  print "  akm bd export         bd Dolt → .beads/issues-snapshot.jsonl"
-  print "  akm bd import         .beads/issues-snapshot.jsonl → bd Dolt"
+  print "  akm bd export         bd Dolt closed issues → .beads/issues-snapshot.jsonl"
+  print "  akm bd import         .beads/issues-snapshot.jsonl → bd Dolt (closed-history recovery)"
   print "                          --force  skip confirmation"
   print "  akm bd archive create snapshot + prune old closed issues"
   print "                          --before <date>  cutoff (default: 365 days ago)"
@@ -2203,8 +2203,9 @@ def "main bd init" [] {
   bd_preflight
   bd_ensure_schema
   print -e "Repo ready: bd auto-hooks stripped, bd config pinned, Dolt schema healed."
-  print -e "Sync model: bd Dolt = canonical. Use `akm bd export` to refresh"
-  print -e ".beads/issues-snapshot.jsonl before committing, `akm bd import` after a pull."
+  print -e "Sync model: bd Dolt = canonical, synced via `bd dolt push/pull`."
+  print -e ".beads/issues-snapshot.jsonl archives CLOSED issues only — refresh with"
+  print -e "`akm bd export` after closes; `akm bd import` = closed-history recovery."
 }
 
 # Health-check + self-heal the bd/Dolt state for this repo. Idempotent:
@@ -2276,12 +2277,9 @@ def "main bd doctor" [
   print -e (if ($remote | is-empty) { "  ⚠ sync.remote unset — dolt push/pull unavailable (jsonl snapshot still works)" } else { $"  ✓ sync.remote = ($remote)" })
   let snap = $"($root)/.beads/issues-snapshot.jsonl"
   if ($snap | path exists) {
-    let tmp = $"/tmp/bd-doctor-(random uuid).jsonl"
-    do { ^bd export -o $tmp } | complete | ignore
-    let live = (open --raw $tmp | lines | where { |l| ($l | str trim) != "" } | sort)
+    let live = (try { bd_export_closed | sort } catch { [] })
     let committed = (open --raw $snap | lines | where { |l| ($l | str trim) != "" } | sort)
-    rm -f $tmp
-    print -e (if $live == $committed { "  ✓ snapshot in sync with Dolt" } else { "  ⚠ snapshot stale vs Dolt — run `akm bd export` + commit" })
+    print -e (if $live == $committed { "  ✓ snapshot in sync with Dolt (closed issues)" } else { "  ⚠ snapshot stale vs Dolt closed set — run `akm bd export` + commit" })
   }
   # Legacy / pre-migration artifacts that survive the config self-heal and can
   # re-introduce the auto-flush race — especially on a fresh clone.
@@ -2334,18 +2332,34 @@ def "main bd doctor" [
 def "main doctor" [--diagnose] { if $diagnose { main bd doctor --diagnose } else { main bd doctor } }
 def "main healthcheck" [] { main bd doctor }
 
-# Write current Dolt state to .beads/issues-snapshot.jsonl. Run before `git commit`
-# when you want the jsonl snapshot to capture a status change.
-def "main bd export" [] {
-  cd (bd_project_root)
-  ^bd export -o .beads/issues-snapshot.jsonl
-  print -e "Exported bd Dolt → .beads/issues-snapshot.jsonl"
+# Closed-only export lines from bd. Snapshot policy: live (open/in_progress)
+# state lives ONLY in Dolt (synced via `bd dolt push/pull`); git archives just
+# the closed history — human-readable, tool-independent, diffable next to code.
+def bd_export_closed [] {
+  ^bd export | lines | where { |l|
+    ($l | str trim) != "" and (($l | from json | get status) == "closed")
+  }
 }
 
-# Replay .beads/issues-snapshot.jsonl into the local Dolt. Run after `git pull` if you
-# want the pulled jsonl (peer history) merged into your Dolt. Skip when you
-# trust your local Dolt is more recent than what just arrived — that is the
-# whole reason auto-import was removed.
+# Rewrite .beads/issues-snapshot.jsonl (closed issues only). Returns count.
+def bd_write_snapshot [] {
+  let closed = (bd_export_closed)
+  let body = if ($closed | is-empty) { "" } else { ($closed | str join "\n") + "\n" }
+  $body | save -f .beads/issues-snapshot.jsonl
+  $closed | length
+}
+
+# Write closed issues to .beads/issues-snapshot.jsonl. Run before `git commit`
+# when closes happened. Live issues are NOT in the jsonl — Dolt is canonical.
+def "main bd export" [] {
+  cd (bd_project_root)
+  let n = (bd_write_snapshot)
+  print -e $"Exported ($n) closed issues → .beads/issues-snapshot.jsonl \(live state stays in Dolt\)"
+}
+
+# Replay .beads/issues-snapshot.jsonl (closed-issue archive) into the local
+# Dolt. Recovery path only — restores closed history, NOT live issues (those
+# exist solely in Dolt / refs/dolt/data). Skip when local Dolt is healthy.
 def "main bd import" [
   --force  # skip confirmation
 ] {
@@ -2425,8 +2439,8 @@ def "main bd archive create" [
   rm $tmp
   print -e $"Deleted ($new_ids | length) issues from local bd"
 
-  ^bd export -o .beads/issues-snapshot.jsonl | ignore
-  print -e "Refreshed .beads/issues-snapshot.jsonl"
+  bd_write_snapshot | ignore
+  print -e "Refreshed .beads/issues-snapshot.jsonl (closed issues)"
 
   print -e ""
   print -e "Next: review `git status`, commit board/archive/ + .beads/issues-snapshot.jsonl, push."

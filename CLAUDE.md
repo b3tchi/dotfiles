@@ -385,14 +385,14 @@ bd close <id>         # Complete work
 `.beads/config.yaml` has `no-auto-flush` and `no-auto-import` enabled. **bd auto-hooks are uninstalled by `akm bd init`** — git pull no longer touches Dolt and git commit no longer rewrites the jsonl. This eliminates the merge-clobber loop where a peer's older `.beads/issues-snapshot.jsonl` would silently revert locally-closed issues after `git pull`.
 
 State model:
-- **bd Dolt = source of truth** on each machine.
-- **`.beads/issues-snapshot.jsonl` = history snapshot** committed to git, rewritten only by `akm bd export` or `akm bd archive create`. Named off bd's default `.beads/issues.jsonl` watch path so bd's auto-import-on-startup doesn't fire (`export.path` config pins this).
-- **Cross-machine state sync = `bd dolt push/pull`** (db-to-db, requires a Dolt remote configured via `bd dolt remote add`).
+- **bd Dolt = source of truth** on each machine. Live issues (open/in_progress) exist ONLY in Dolt.
+- **`.beads/issues-snapshot.jsonl` = closed-issue archive** committed to git, rewritten only by `akm bd export` or `akm bd archive create`. Closed issues only — human-readable, tool-independent history diffable next to code. Named off bd's default `.beads/issues.jsonl` watch path so bd's auto-import-on-startup doesn't fire (`export.path` config pins this).
+- **Cross-machine state sync = `bd dolt push/pull`** (db-to-db; Dolt chunks ride the same GitHub repo under `refs/dolt/data`, invisible to normal git clones).
 
 Workflow:
-- After mutating bd state and before `git commit`: run `akm bd export` to refresh the jsonl snapshot.
-- After `git pull`: run `akm bd import` ONLY if you want the pulled jsonl to overwrite local Dolt (rare — usually you trust local Dolt more than what a peer pushed).
-- For live cross-machine sync: configure a Dolt remote and use `bd dolt push` / `bd dolt pull` (separate from git).
+- After closing issues and before `git commit`: run `akm bd export` to refresh the closed-issue jsonl.
+- `akm bd import` = recovery only — replays closed history into Dolt. It cannot restore live issues; those sync exclusively via `bd dolt push/pull`.
+- For cross-machine sync: `bd dolt push` / `bd dolt pull` (separate from git). Pull requires a clean Dolt working set; bd's config-table churn can block it — if so, commit + pull in one SQL session against the shared server.
 
 **Run `akm bd init` after `rotz link` on a fresh clone** (or after `bd hooks install` re-installs auto-hooks). Idempotent.
 
