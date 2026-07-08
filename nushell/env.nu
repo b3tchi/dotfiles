@@ -95,9 +95,29 @@ if $nu.os-info.kernel_version =~ 'microsoft-standard-WSL' {
     $env.BROWSER = '/home/jan/.local/bin/xdg-open'
 }
 
+# fnm — per-project Node version manager (binary in ~/.local/bin).
+# Loads the per-session multishell; no `fnm default` is set, so fresh shells
+# fall through to system node (pacman). The PWD hook in config.nu switches to
+# the pinned version in dirs that carry .node-version / .nvmrc.
+let fnm_bin = ($env.HOME | path join '.local' 'bin' 'fnm')
+if ($fnm_bin | path exists) {
+	# Absolute path: `which` can't resolve during env.nu eval (PATH not yet list-form).
+	# Direct $env assignment: load-env does not persist from env.nu's eval context.
+	let fnm_env = (^$fnm_bin env --json | from json)
+	$env.FNM_MULTISHELL_PATH = $fnm_env.FNM_MULTISHELL_PATH
+	$env.FNM_DIR = $fnm_env.FNM_DIR
+	$env.FNM_ARCH = $fnm_env.FNM_ARCH
+	$env.FNM_NODE_DIST_MIRROR = $fnm_env.FNM_NODE_DIST_MIRROR
+	$env.FNM_VERSION_FILE_STRATEGY = $fnm_env.FNM_VERSION_FILE_STRATEGY
+	$env.FNM_RESOLVE_ENGINES = $fnm_env.FNM_RESOLVE_ENGINES
+	$env.FNM_LOGLEVEL = $fnm_env.FNM_LOGLEVEL
+	$env.FNM_COREPACK_ENABLED = $fnm_env.FNM_COREPACK_ENABLED
+	$env.PATH = ($env.PATH | split row (char esep) | prepend ($fnm_env.FNM_MULTISHELL_PATH | path join 'bin') | uniq)
+}
+
 # Directories to search for scripts when calling source or use
-$env.NU_LIB_DIRS = [ 
-    ($nu.default-config-dir | path join 'apps') 
+$env.NU_LIB_DIRS = [
+    ($nu.default-config-dir | path join 'apps')
     ($nu.default-config-dir | path join 'scripts') 
 ]
 

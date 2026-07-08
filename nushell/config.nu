@@ -320,7 +320,13 @@ $env.config = {
         pre_prompt: [{ null }] # run before the prompt is shown
         pre_execution: [{ null }] # run before the repl input is run
         env_change: {
-            PWD: [{|before, after| null }] # run if the PWD environment is different since the last repl input
+            PWD: [{|before, after|
+                # fnm: per-project Node. System node (pacman) is the default;
+                # switch to the pinned version only in dirs with .node-version/.nvmrc.
+                if (['.node-version' '.nvmrc'] | any {|f| $f | path exists }) {
+                    fnm use --silent-if-unchanged --install-if-missing
+                }
+            }] # run if the PWD environment is different since the last repl input
         }
         # display_output: { $env.LAST = $in | table;  $in | if (term size).columns >= 100 { table -e } else { table }  } # run before the output of a command is drawn, example: `{ if (term size).columns >= 100 { table -e } else { table } }`
         display_output: { table  } # run before the output of a command is drawn, example: `{ if (term size).columns >= 100 { table -e } else { table } }`
