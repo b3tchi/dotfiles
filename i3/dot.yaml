@@ -20,6 +20,7 @@ linux:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
       sudo pacman -Syu --needed --noconfirm i3
+      pamac install --no-confirm autocutsel
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux")}}
       {{#if env.WSL_DISTRO_NAME}}
@@ -30,10 +31,12 @@ linux:
         i3-wm i3status i3blocks \
         picom xdotool
       {{/if}}
+      yay -S --needed --noconfirm autocutsel
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux ARM")}}
       sudo pacman -Syu --needed --noconfirm \
         i3-wm i3status i3blocks \
         picom xdotool
+      yay -S --needed --noconfirm autocutsel
       {{/if}}
       rotz link i3 --force

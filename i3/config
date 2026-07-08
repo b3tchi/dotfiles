@@ -308,6 +308,12 @@ exec_always --no-startup-id ~/.dotfiles/quickshell/qs-start.sh
 # clean up legacy xborders fallback
 exec_always pkill -f xborders-patched; pkill -x xborders
 
+# Clipboard sync — bridge PRIMARY (mouse-select) <-> CLIPBOARD so terminal
+# selections paste into apps that read CLIPBOARD (Claude Code, Ctrl+Shift+V).
+# All X11 i3 platforms (native, proot, WSL-i3).
+exec_always --no-startup-id pkill -x autocutsel; autocutsel -fork
+exec_always --no-startup-id autocutsel -selection PRIMARY -fork
+
 # Other autostarts (wallpaper, compositor, tray apps, lockscreen, keyboard
 # layout) live in the platform overlay → config.d/native.conf
 # (quickshell task-switcher nop grabs live in overlays — $mod differs)

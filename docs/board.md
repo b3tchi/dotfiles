@@ -6,6 +6,8 @@ sections when status flips.
 
 ## idea
 
+- [[sp006|remote-workstation-hardening]]
+
 - [[sp003|fix-categories]]
 
 ## spec

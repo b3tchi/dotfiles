@@ -9,8 +9,9 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[us001|mark project as remote so terminals open against the remote host]] >> [[im002]]
 - [[us002|register a location as a project and navigate to it easily]] >> [[im001]]
 - [[us003|create diagrams]] >> [[im003]]
-- [[us004|xrdp access hardened with TLS before exposing it beyond localhost]]
+- [[us004|xrdp access hardened with TLS before exposing it beyond localhost]] (dropped → [[us006]])
 - [[us005|the shared i3 config verified live on native linux and proot]]
+- [[us006|securely access and work on my workstation remotely with full desktop]]
 
 ## Features
 
