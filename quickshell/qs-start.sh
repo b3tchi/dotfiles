@@ -53,4 +53,8 @@ if [ -x "$QS_DAEMON" ]; then
 fi
 
 setsid quickshell &
-setsid quickshell -p "$HOME/.dotfiles/quickshell/overlay" &
+# Over RDP the main instance hosts the overlay too (single process, gated by
+# QS_RDP in config/shell.qml), so skip the separate overlay process there.
+if [ "$QS_RDP" != "1" ]; then
+    setsid quickshell -p "$HOME/.dotfiles/quickshell/overlay" &
+fi

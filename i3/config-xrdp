@@ -1,0 +1,41 @@
+# i3 config — XRDP / remote variant (proot i3 over Xvnc:2 + xrdp).
+# Shares all bindings/theme from config.common; drops the desktop-only
+# autostarts (quickshell/GPU bar, picom compositor, tray applets, xautolock,
+# physical-keyboard xinput remap, xborders) that are broken or pointless
+# over RDP. Launch via: i3 -c ~/.dotfiles/i3/config-xrdp
+# (start-i3-xrdp.sh passes this with -c).
+
+# Alt is natively Mod1 in the keymap xrdp programs on every (re)connect, so
+# $mod=Mod1 makes Alt the modifier with NO xmodmap and survives reconnects.
+# (A stuck Super from the client is harmless - Super stays Mod4, not $mod.)
+set $mod Mod1
+include ~/.dotfiles/i3/config.common
+
+# --- remote-safe autostarts -------------------------------------------------
+# Plain background (no nitrogen/picom compositor over RDP).
+exec --no-startup-id xsetroot -solid "#152024"
+
+# Keyboard: RDP client supplies the layout. Uncomment for dvorak in-session
+# (no -device: the physical AT keyboard doesn't exist over RDP).
+# exec --no-startup-id setxkbmap us -variant dvorak
+
+
+# Audio still works via PULSE_SERVER; use $mod+Ctrl+m (alsamixer) to adjust.
+
+# --- quickshell bar + launcher over RDP (replaces rofi + i3bar) -------------
+# QT_QUICK_BACKEND=software is REQUIRED: without it quickshell tries GL and
+# SEGFAULTS over RDP (no GPU/GL). QS_RDP=1 disables focus border/dim overlays.
+# Set here (not just in the start scripts) so the env is applied at exec time —
+# a bare `$mod+Shift+r` reload works, not only a full session restart. Runs
+# under the session dbus from `dbus-launch i3` (notifications + tray). The
+# for_window rules (qs-launcher / qs-projects / notifications) come from the include.
+# QS_BAR_INSET_*: session is viewed on the Razr's own screen — draw the bar
+# as an inset pill (window margins are Wayland-only, no-op on X11) so the chin
+# doesn't sit on it and the rounded display corners don't crop its ends.
+# (QS_PHONE is the sxmo/sway device's flag — real margins, Wayland only.)
+set $qsenv env QT_QUICK_BACKEND=software QS_RDP=1 QS_BAR_INSET_BOTTOM=50
+bindsym $mod+Return exec --no-startup-id ~/.local/bin/st
+exec_always --no-startup-id $qsenv ~/.dotfiles/quickshell/qs-start.sh
+bindsym $mod+d exec --no-startup-id $qsenv ~/.dotfiles/quickshell/qs-overlay.sh launcher
+bindsym $mod+p exec --no-startup-id $qsenv ~/.dotfiles/quickshell/qs-overlay.sh projects
+bindsym $mod+Shift+d --release exec --no-startup-id $qsenv ~/.dotfiles/quickshell/qs-start.sh

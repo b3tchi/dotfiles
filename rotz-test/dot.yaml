@@ -60,3 +60,12 @@ linux:
       {{else}}
       echo std_linux1
       {{/if}}
+
+      # eval helper probes (mq3: WSL detect without WSL_DISTRO_NAME)
+      # NOTE: eval errors on nonzero exit -> always guard with || true.
+      # Empty output = falsy, any output = truthy.
+      {{#if (eval "grep -io microsoft /proc/version || true")}}
+      echo EVAL_WSL_DETECTED
+      {{else}}
+      echo EVAL_NOT_WSL
+      {{/if}}

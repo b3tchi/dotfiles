@@ -29,6 +29,16 @@ vim.api.nvim_create_autocmd({ "FileType", "BufWinEnter", "WinEnter" }, {
 })
 
 return {
+	-- LazyVim markdown extra puts marksman in ensure_installed; filter it out
+	-- so Mason doesn't reinstall it (markdown-oxide is the markdown LSP here).
+	{
+		"mason-org/mason.nvim",
+		opts = function(_, opts)
+			opts.ensure_installed = vim.tbl_filter(function(p)
+				return p ~= "marksman"
+			end, opts.ensure_installed or {})
+		end,
+	},
 	{
 		"neovim/nvim-lspconfig",
 		opts = {
@@ -44,6 +54,13 @@ return {
 							didChangeWatchedFiles = { dynamicRegistration = true },
 						},
 					},
+					-- markdown-oxide semantic tokens hang nvim when a wikilink's
+					-- |alias wraps across a line break (markdown-oxide#466) —
+					-- e.g. sp032.md froze nvim at one full core. Treesitter
+					-- already highlights markdown; drop the token provider.
+					on_attach = function(client)
+						client.server_capabilities.semanticTokensProvider = nil
+					end,
 				},
 			},
 		},

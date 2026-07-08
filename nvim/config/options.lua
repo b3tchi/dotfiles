@@ -12,23 +12,32 @@ vim.o.shiftwidth = 4
 vim.o.expandtab = false
 
 -- Clipboard provider — picks based on what's actually available, so the same
--- config works on WSL/Sway (Wayland), Manjaro/i3 (X11), and Termux:X11.
+-- config works on WSL/Sway (Wayland), Manjaro/i3 (X11), Termux:X11, and the
+-- xrdp i3 session (X11 :10 alongside an idle WSLg Wayland compositor).
 local uid = tostring(vim.uv.getuid())
 local wl_sock = "/run/user/" .. uid .. "/wayland-0"
 local has_wayland_env = (os.getenv("WAYLAND_DISPLAY") ~= nil)
-local has_wayland = (vim.uv.fs_stat(wl_sock) ~= nil) or has_wayland_env
+local has_wayland_sock = (vim.uv.fs_stat(wl_sock) ~= nil)
+local has_x11 = (os.getenv("DISPLAY") ~= nil)
 local is_ssh = (os.getenv("SSH_TTY") ~= nil) or (os.getenv("SSH_CONNECTION") ~= nil)
 
--- Over SSH the clipboard must reach the terminal we're actually sitting at
--- (foot, which owns the real sway/Windows clipboard + the browser) — NOT the
--- remote host's own wayland/X clipboard. A wl-copy on the remote writes the
--- REMOTE clipboard, which is invisible to the local browser (the sway→sway
--- "yank in nvim, Ctrl+V in firefox does nothing" bug). OSC 52 rides back up
--- through tmux (set-clipboard on + allow-passthrough all, configured on both
--- ends) to foot, which sets the local clipboard. Correct for both a remote
--- workstation and localhost-ssh into this box — and sidesteps the old
--- wayland-0-vs-wayland-1 ambiguity entirely.
+-- Selection order matters. The discriminator for which clipboard a session
+-- actually owns is the DISPLAY/WAYLAND_DISPLAY env, NOT whether a wayland
+-- socket exists: on WSL the WSLg compositor keeps /run/user/UID/wayland-0
+-- alive permanently, so an xrdp X11 session (DISPLAY=:10, no WAYLAND_DISPLAY)
+-- would otherwise get hijacked into writing the idle WSLg clipboard — which
+-- xrdp-chansrv can't see, so yank→Ctrl+V on Windows does nothing. Hence:
+--   1. ssh        → OSC 52 (reach the terminal we sit at, not the remote)
+--   2. wayland    → wl-copy, only when WAYLAND_DISPLAY is set (real session)
+--   3. X11        → xclip, when a DISPLAY exists (xrdp i3, Manjaro i3, Termux)
+--   4. wayland-0  → last-resort socket talk for a local session that lost
+--                   WAYLAND_DISPLAY and has no X11 display at all
 if is_ssh then
+	-- Over SSH the clipboard must reach the terminal we're actually sitting
+	-- at (foot, which owns the real sway/Windows clipboard + the browser) —
+	-- NOT the remote host's own wayland/X clipboard. OSC 52 rides back up
+	-- through tmux (set-clipboard on + allow-passthrough all, both ends) to
+	-- foot, which sets the local clipboard.
 	local osc52 = require("vim.ui.clipboard.osc52")
 	vim.g.clipboard = {
 		name = "OSC52",
@@ -41,9 +50,38 @@ if is_ssh then
 			["*"] = osc52.paste("*"),
 		},
 	}
--- Local session that lost WAYLAND_DISPLAY but still has a reachable socket
--- (rare): talk to the wayland-0 compositor directly.
-elseif not has_wayland_env and has_wayland and vim.fn.executable("wl-copy") == 1 then
+elseif has_wayland_env and vim.fn.executable("wl-copy") == 1 then
+	-- Genuine Wayland session (sway/WSLg): WAYLAND_DISPLAY already in env.
+	vim.g.clipboard = {
+		name = "wayland",
+		copy = {
+			["+"] = { "wl-copy" },
+			["*"] = { "wl-copy", "--primary" },
+		},
+		paste = {
+			["+"] = { "wl-paste", "--no-newline" },
+			["*"] = { "wl-paste", "--no-newline", "--primary" },
+		},
+		cache_enabled = 1,
+	}
+elseif has_x11 and vim.fn.executable("xclip") == 1 then
+	-- X11 session: xrdp i3 (:10), Manjaro i3, Termux:X11. Talks to THIS X
+	-- server, whose CLIPBOARD xrdp-chansrv bridges to the RDP/Windows clip.
+	vim.g.clipboard = {
+		name = "xclip-x11",
+		copy = {
+			["+"] = { "xclip", "-selection", "clipboard", "-i" },
+			["*"] = { "xclip", "-selection", "primary", "-i" },
+		},
+		paste = {
+			["+"] = { "xclip", "-selection", "clipboard", "-o" },
+			["*"] = { "xclip", "-selection", "primary", "-o" },
+		},
+		cache_enabled = 0,
+	}
+elseif has_wayland_sock and vim.fn.executable("wl-copy") == 1 then
+	-- Last resort: local session that lost WAYLAND_DISPLAY but the wayland-0
+	-- socket is reachable and no X11 display exists. Point wl-copy at it.
 	local env_prefix = {
 		"env",
 		"WAYLAND_DISPLAY=wayland-0",
@@ -66,19 +104,6 @@ elseif not has_wayland_env and has_wayland and vim.fn.executable("wl-copy") == 1
 			["*"] = with_env({ "wl-paste", "--no-newline", "--primary" }),
 		},
 		cache_enabled = 1,
-	}
-elseif vim.fn.executable("xclip") == 1 then
-	vim.g.clipboard = {
-		name = "xclip-x11",
-		copy = {
-			["+"] = { "xclip", "-selection", "clipboard", "-i" },
-			["*"] = { "xclip", "-selection", "primary", "-i" },
-		},
-		paste = {
-			["+"] = { "xclip", "-selection", "clipboard", "-o" },
-			["*"] = { "xclip", "-selection", "primary", "-o" },
-		},
-		cache_enabled = 0,
 	}
 end
 -- LazyVim sets clipboard="" when SSH_CONNECTION is set (it expects OSC 52).

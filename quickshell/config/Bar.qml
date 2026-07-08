@@ -46,9 +46,21 @@ PanelWindow {
         bottom: true
     }
 
-    implicitHeight: isSway ? 24 : 27
+    // X11 inset pill (Razr chin + rounded display corners): PanelWindow
+    // margins are a Wayland/layer-shell feature and a NO-OP on X11, so instead
+    // the window grows by the inset and the bar is drawn as an inset pill
+    // inside it; the surround is painted the desktop color (#152024, matches
+    // config-xrdp's xsetroot) so the bar appears to float clear of the chin
+    // and corners. Tunable via env: QS_BAR_INSET_BOTTOM / QS_BAR_INSET_SIDE.
+    readonly property int insetBottom: parseInt(Quickshell.env("QS_BAR_INSET_BOTTOM") ?? "0") || 0
+    readonly property int insetSide:   parseInt(Quickshell.env("QS_BAR_INSET_SIDE") ?? "0") || 0
+    readonly property int insetTop:    parseInt(Quickshell.env("QS_BAR_INSET_TOP") ?? "0") || 0
+    readonly property bool inset: insetBottom > 0 || insetSide > 0 || insetTop > 0
 
-    // Phone (sxmo): floating pill; desktop (i3/sway): full-width
+    implicitHeight: (isSway ? 24 : 27) + insetBottom + insetTop
+
+    // Phone (sxmo, sway/Wayland): floating pill via real layer-shell margins;
+    // desktop (i3/sway): full-width. On X11 use QS_BAR_INSET_* instead.
     readonly property bool isPhone: Quickshell.env("QS_PHONE") === "1"
     margins {
         bottom: isPhone ? 20 : 0
@@ -56,7 +68,10 @@ PanelWindow {
         right:  isPhone ? 40 : 0
     }
 
-    color: currentMode !== "default" ? "#152024" : "#222d31"
+    readonly property color barColor: currentMode !== "default" ? "#152024" : "#222d31"
+    // Black surround: blends into the Razr's bezel/chin so the pill reads as
+    // floating on the hardware edge rather than on a colored strip.
+    color: inset ? "#000000" : barColor
 
     readonly property string fontFamily: "Iosevka Nerd Font"
     readonly property int fontSize: isSway ? 14 : 16
@@ -409,9 +424,27 @@ PanelWindow {
     }
 
 
+    // Inset-pill background (X11 phone mode; invisible when inset is 0)
+    Rectangle {
+        visible: root.inset
+        anchors.fill: parent
+        anchors.leftMargin: root.insetSide
+        anchors.rightMargin: root.insetSide
+        anchors.bottomMargin: root.insetBottom
+        anchors.topMargin: root.insetTop
+        // Pill look only when inset from the sides; bottom-only inset = flat
+        // full-width bar with a black chin strip below (part of the desktop).
+        radius: root.insetSide > 0 ? 12 : 0
+        color: root.barColor
+    }
+
     // --- Layout (using Row, not RowLayout — RowLayout leaks Text.color) ---
     Item {
         anchors.fill: parent
+        anchors.leftMargin: root.inset ? root.insetSide + 10 : 0
+        anchors.rightMargin: root.inset ? root.insetSide + 10 : 0
+        anchors.bottomMargin: root.insetBottom
+        anchors.topMargin: root.insetTop
 
         // Left: workspaces + mode
         Row {

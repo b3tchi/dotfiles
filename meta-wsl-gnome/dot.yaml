@@ -1,0 +1,46 @@
+# Meta-package: WSL with full GNOME desktop over RDP (headless Wayland — im005)
+# Usage: rotz install meta-wsl-gnome
+# Full GNOME + Forge i3-like tiling, served headless over RDP on port 3390.
+# Coexists with i3+xrdp (3391) — NOT exclusive, so it does NOT call
+# wsl-wm-switch. gnome-rdp (a dependency) owns the session unit + grd + vgem.
+depends:
+  - distro
+  - nushell
+  - tmux
+  - nvim
+  - lazygit
+  - d2
+  - ssh
+  - glab
+  - azcli
+  - claude
+  - opencode
+  - docker
+
+installs:
+  # gnome-rdp provides the headless-RDP session mechanism (unit + grd + vgem);
+  # this meta layers the full GNOME desktop + Forge tiling on top.
+  depends:
+    - wsl
+    - gnome-rdp
+  cmd: |
+    {{#if (eq whoami.distro "Arch Linux")}}
+    # runtime WSL check (env.WSL_DISTRO_NAME unreliable in tmux/WSLg/ssh)
+    if [ -d /mnt/c ]; then
+      # full GNOME desktop (group, ~58 pkgs) + tweaks + elementary icon theme
+      sudo pacman -Syu --needed --noconfirm gnome gnome-tweaks elementary-icon-theme
+      # Forge — i3/sway-like tree tiling (AUR). Super is grabbed by the RDP
+      # client, so dynamic tiling matters more than a dock here.
+      yay -Syu --needed --noconfirm gnome-shell-extension-forge
+      # Forge caps at GNOME shell-version 49; this runs GNOME 50, so the shell
+      # rejects it as incompatible ("does not exist"). Disable the version
+      # check — Forge loads and tiles fine on 50 (verified live).
+      gsettings set org.gnome.shell disable-extension-version-validation true
+      # enable Forge (fallback sets the gsettings list directly if the shell
+      # has not scanned it yet — it picks it up on the restart below)
+      gnome-extensions enable forge@jmmaranan.com 2>/dev/null || \
+        gsettings set org.gnome.shell enabled-extensions "['forge@jmmaranan.com']"
+      # restart the session so the shell rescans with validation off + loads Forge
+      systemctl --user restart gnome-rdp-session 2>/dev/null || true
+    fi
+    {{/if}}

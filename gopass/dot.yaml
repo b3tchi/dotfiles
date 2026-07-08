@@ -15,19 +15,21 @@ linux:
       {{/if}}
 
       # create gopass age passphrase file if missing
-      {{#if env.WSL_DISTRO_NAME}}
-      GOPASS_PW_FILE="/mnt/c/Users/jbecka/.gopass-age-password"
-      {{else}}
-      GOPASS_PW_FILE="$HOME/.gopass-age-password"
-      {{/if}}
+      # runtime WSL check (env.WSL_DISTRO_NAME unreliable: unset in
+      # sessions spawned outside wsl.exe — tmux server, sway/WSLg, ssh)
+      if [ -d /mnt/c ]; then
+        GOPASS_PW_FILE="/mnt/c/Users/jbecka/.gopass-age-password"
+      else
+        GOPASS_PW_FILE="$HOME/.gopass-age-password"
+      fi
 
       if [ ! -f "$GOPASS_PW_FILE" ]; then
         printf "Enter gopass age passphrase: "
         read -s GOPASS_PW
         echo
         printf "%s" "$GOPASS_PW" > "$GOPASS_PW_FILE"
-        {{#unless env.WSL_DISTRO_NAME}}
-        chmod 600 "$GOPASS_PW_FILE"
-        {{/unless}}
+        if [ ! -d /mnt/c ]; then
+          chmod 600 "$GOPASS_PW_FILE"
+        fi
         echo "Passphrase saved to $GOPASS_PW_FILE"
       fi

@@ -1,0 +1,16 @@
+[Unit]
+Description=Headless GNOME Wayland session over RDP (WSL, poc004)
+After=basic.target
+
+[Service]
+Type=simple
+ExecStart=/home/jan/.local/bin/gnome-rdp-session
+Restart=always
+RestartSec=2
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+Environment=HOME=/home/jan
+Environment=LANG=en_US.UTF-8
+KillMode=control-group
+
+[Install]
+WantedBy=default.target

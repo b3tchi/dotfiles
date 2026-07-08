@@ -6,10 +6,12 @@ sections when status flips.
 
 ## idea
 
-- [[sp006|remote-workstation-hardening]]
+- [[sp007|remote-workstation-hardening]]
 
 - [[sp003|fix-categories]]
 
 ## spec
 
 ## ready
+
+- [[sp006|akm-graph-cosmos-viz]]

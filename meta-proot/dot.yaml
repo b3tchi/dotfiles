@@ -1,5 +1,5 @@
 # Meta-package: proot Arch (nested in Termux)
-# Arch Linux ARM with i3 (Termux:X11)
+# Arch Linux ARM with i3 (Termux:X11 or xrdp native-Xorg RDP)
 # Usage: rotz install meta-proot
 depends:
   - distro
@@ -13,3 +13,4 @@ depends:
   - i3
   - quickshell
   - st
+  - xrdp

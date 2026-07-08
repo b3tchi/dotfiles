@@ -1,0 +1,24 @@
+{
+  "policies": {
+    "WebsiteFilter": {
+      "Block": ["<all_urls>"],
+      "Exceptions": [
+        "https://github.com/*",
+        "https://*.github.com/*",
+        "https://*.githubusercontent.com/*",
+        "https://archlinux.org/*",
+        "https://*.archlinux.org/*",
+        "https://stackoverflow.com/*",
+        "https://*.stackoverflow.com/*",
+        "https://*.stackexchange.com/*",
+        "https://developer.mozilla.org/*",
+        "https://duckduckgo.com/*",
+        "https://portal.azure.com/*",
+        "https://*.azure.com/*",
+        "https://login.microsoftonline.com/*",
+        "https://login.live.com/*",
+        "https://*.microsoft.com/*"
+      ]
+    }
+  }
+}

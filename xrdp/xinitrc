@@ -7,5 +7,12 @@ unset SWAYSOCK I3SOCK
 if [ -n "$XRDP_SESSION" ]; then
     printf 'i3wm.mod: Mod1\n' | xrdb -merge
 fi
+# Reset keymap + clear inherited locked modifiers. xrdp sessions can start
+# with a stuck Mod3 (ISO_Level5 lock) latched in from the RDP client's
+# keyboard-state sync. That extra bit rides on every key event, so i3's
+# keybind grabs (which only compensate for NumLock/CapsLock) never match and
+# Alt shortcuts silently leak to the focused window. setxkbmap recompiles the
+# map and resets the locked state to 0.
+setxkbmap -layout us -model pc104 -option ""
 # shared config (ft003): ~/.i3/config + ~/.i3/config.d/wsl.conf via rotz
 exec i3

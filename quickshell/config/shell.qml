@@ -1,7 +1,15 @@
+import QtQuick
 import Quickshell
 import Quickshell.Services.Notifications
 
 ShellRoot {
+    // Over RDP (QS_RDP=1): single quickshell process — focus border/dim off
+    // (X11 compositing overlays, glitchy without a compositor), and the
+    // launcher/switcher/projects overlay is hosted in THIS instance instead of
+    // a second `quickshell -p overlay` process.
+    readonly property bool isRdp: Quickshell.env("QS_RDP") === "1"
+    readonly property bool focusFx: !isRdp
+
     property int globalNotifCount: 0
     property string lastNotifText: ""
     property int globalNotifSeq: 0
@@ -78,8 +86,11 @@ ShellRoot {
         }
     }
 
-    FocusBorder {}
-    FocusDim {}
+    Loader { active: focusFx; sourceComponent: Component { FocusBorder {} } }
+    Loader { active: focusFx; sourceComponent: Component { FocusDim {} } }
+
+    // RDP single-instance: host the launcher/switcher/projects overlay here.
+    Loader { active: isRdp; sourceComponent: Component { Overlay {} } }
 
     Variants {
         model: Quickshell.screens

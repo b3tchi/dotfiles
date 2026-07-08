@@ -1,0 +1,9 @@
+#%PAM-1.0
+# Minimal proot-friendly stack. Arch's system-login/system-auth pull in
+# pam_systemd_home, pam_faillock, pam_shells, pam_systemd - all of which throw
+# PAM_SYSTEM_ERR under proot (no systemd/dbus). shadow is 644-readable here, so
+# plain pam_unix authenticates directly.
+auth       required   pam_unix.so
+account    required   pam_unix.so
+password   required   pam_unix.so
+session    required   pam_unix.so

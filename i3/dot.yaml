@@ -9,9 +9,12 @@ linux:
     i3status.conf: ~/.config/i3status/config
     i3blocks.conf: ~/.config/i3blocks/config
     scripts/qs-title-trim.sh: ~/.i3/scripts/qs-title-trim.sh
+    scripts/clip-sync.sh: ~/.i3/scripts/clip-sync.sh
     picom.conf: ~/.config/picom.conf
     # Platform overlay (ft003 i3-config-layering): exactly one config.d/*
-    {{#if env.WSL_DISTRO_NAME}}
+    # eval path check, not env.WSL_DISTRO_NAME — that var is unset in
+    # sessions spawned outside wsl.exe (tmux server, sway/WSLg, ssh).
+    {{#if (eval "test -d /mnt/c && echo wsl || true")}}
     config.d/wsl.conf: ~/.i3/config.d/wsl.conf
     {{else}}
     config.d/native.conf: ~/.i3/config.d/native.conf
@@ -19,24 +22,29 @@ linux:
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
-      sudo pacman -Syu --needed --noconfirm i3
+      # xclip: X11 clipboard tool — nvim's + register provider on i3/X11
+      sudo pacman -Syu --needed --noconfirm i3 xclip
       pamac install --no-confirm autocutsel
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux")}}
-      {{#if env.WSL_DISTRO_NAME}}
-      sudo pacman -Syu --needed --noconfirm i3-wm xorg-xinput picom \
-        python-gobject python-cairo
-      {{else}}
-      sudo pacman -Syu --needed --noconfirm \
-        i3-wm i3status i3blocks \
-        picom xdotool
-      {{/if}}
+      # runtime WSL check (env.WSL_DISTRO_NAME unreliable, see links note)
+      # xclip: X11 clipboard tool — nvim yank reaches the xrdp X11 CLIPBOARD
+      # (then xrdp-chansrv → Windows). Without it nvim falls back to the idle
+      # WSLg wayland-0 clipboard, which chansrv can't see (dotfiles-0ak).
+      if [ -d /mnt/c ]; then
+        sudo pacman -Syu --needed --noconfirm i3-wm xorg-xinput picom \
+          python-gobject python-cairo xclip
+      else
+        sudo pacman -Syu --needed --noconfirm \
+          i3-wm i3status i3blocks \
+          picom xdotool xclip
+      fi
       yay -S --needed --noconfirm autocutsel
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux ARM")}}
       sudo pacman -Syu --needed --noconfirm \
         i3-wm i3status i3blocks \
-        picom xdotool
+        picom xdotool xclip
       yay -S --needed --noconfirm autocutsel
       {{/if}}
       rotz link i3 --force

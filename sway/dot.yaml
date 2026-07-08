@@ -3,7 +3,9 @@ linux:
     config: ~/.config/sway/config
     config.d: ~/.config/sway/config.d
     # WSL-specific links (wrapped as full key-value pairs)
-    {{#if env.WSL_DISTRO_NAME}}
+    # eval path check, not env.WSL_DISTRO_NAME — that var is unset in
+    # sessions spawned outside wsl.exe (tmux server, sway/WSLg, ssh).
+    {{#if (eval "test -d /mnt/c && echo wsl || true")}}
     wsl/sway-session.sh: ~/.local/bin/sway-session
     wsl/sway-session.service: ~/.config/systemd/user/sway-session.service
     profiles.yaml: ~/.config/sway/profiles.yaml
@@ -16,16 +18,17 @@ linux:
 
   installs:
     cmd: |
-      {{#if env.WSL_DISTRO_NAME}}
       {{#if (eq whoami.distro "Arch Linux")}}
-      sudo pacman -Syu --needed --noconfirm \
-        sway \
-        foot \
-        swaybg \
-        xorg-xwayland \
-        wl-clipboard
-      systemctl --user daemon-reload
-      systemctl --user enable sway-session
-      {{/if}}
+      # runtime WSL check (env.WSL_DISTRO_NAME unreliable, see links note)
+      if [ -d /mnt/c ]; then
+        sudo pacman -Syu --needed --noconfirm \
+          sway \
+          foot \
+          swaybg \
+          xorg-xwayland \
+          wl-clipboard
+        systemctl --user daemon-reload
+        systemctl --user enable sway-session
+      fi
       {{/if}}
       rotz link sway --force
