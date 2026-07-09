@@ -9,8 +9,12 @@ import cairo
 # Single-instance lock. Orphaned instances (parent quickshell crashed) keep
 # drawing stale borders, producing the union of multiple frames at different
 # sizes — looks like the frame wraps a parent container.
+# Lock is per display so concurrent sessions (local + xrdp) don't block
+# each other's helper.
+_dpy = os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY') or '0'
+_dpy = ''.join(c if c.isalnum() else '_' for c in _dpy)
 _lock_path = os.path.join(
-    os.environ.get('XDG_RUNTIME_DIR', '/tmp'), 'qs-focus-border.lock'
+    os.environ.get('XDG_RUNTIME_DIR', '/tmp'), 'qs-focus-border.%s.lock' % _dpy
 )
 _lock_fp = open(_lock_path, 'w')
 try:

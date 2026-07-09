@@ -182,7 +182,9 @@ PanelWindow {
     // fifoMode is decided once at startup by fifoProbe; the four polling
     // chains are gated on !fifoMode to silence them when the daemon is up.
     readonly property string statsFile: "/tmp/qs-stats"
-    readonly property string statsFifo: "/tmp/qs-stats.pipe"
+    // Per-session FIFO from qs-start.sh (QS_STATS_FIFO) so concurrent
+    // sessions (local + xrdp) don't share one pipe; legacy path as fallback.
+    readonly property string statsFifo: Quickshell.env("QS_STATS_FIFO") || "/tmp/qs-stats.pipe"
     property bool fifoMode: false
     property bool fifoProbed: false
     property string cpuVal:  "?"

@@ -8,8 +8,12 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GLib
 import cairo
 
+# Lock is per display so concurrent sessions (local + xrdp) don't block
+# each other's helper.
+_dpy = os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY') or '0'
+_dpy = ''.join(c if c.isalnum() else '_' for c in _dpy)
 _lock_path = os.path.join(
-    os.environ.get('XDG_RUNTIME_DIR', '/tmp'), 'qs-focus-dim.lock'
+    os.environ.get('XDG_RUNTIME_DIR', '/tmp'), 'qs-focus-dim.%s.lock' % _dpy
 )
 _lock_fp = open(_lock_path, 'w')
 try:
