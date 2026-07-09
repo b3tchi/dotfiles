@@ -2,10 +2,14 @@
  * qs-stats-daemon — event-driven system stats source for quickshell Bar.qml
  *
  * Build:  clang -O2 -Wall -Wextra -o qs-stats-daemon qs-stats-daemon.c
- * Run:    qs-stats-daemon [fifo-path]
- *           default fifo: $TMPDIR/qs-stats.pipe, fallback /tmp/qs-stats.pipe
+ * Run:    qs-stats-daemon [state-file]
+ *           default: $TMPDIR/qs-stats.state, fallback /tmp/qs-stats.state
  *
- * Output protocol (one line per emit, newline-terminated):
+ * Output: full state rewritten atomically (tmp + rename) on every change.
+ * One daemon per machine — stats are system-wide, so concurrent sessions
+ * (local + xrdp) share it; each session's bar follows the file with
+ * `tail -F` and a late-joining bar gets the complete state immediately.
+ * Line protocol (one line per stat):
  *   cpu <pct>
  *   ram <pct>
  *   disk <pct>
@@ -45,40 +49,60 @@
 #define BUF 4096
 
 static volatile sig_atomic_t want_exit = 0;
-static int fifo_fd = -1;
-static char fifo_path[512];
+static char state_path[512];
+static char state_tmp[520];
 
 /* ----------------------------- output ----------------------------- */
 
-static void open_fifo(void) {
-    if (fifo_fd >= 0) close(fifo_fd);
-    /* O_RDWR keeps fd valid even with no reader; writes are silently
-     * buffered to pipe cap and dropped when full. Suits a stats stream. */
-    fifo_fd = open(fifo_path, O_RDWR | O_NONBLOCK);
-    if (fifo_fd < 0) {
+/* One slot per protocol key; the whole set is rewritten on any change so
+ * the file always carries complete current state (late readers need no
+ * event replay). Empty slot = stat not yet known, line omitted. */
+static char slot_cpu[160], slot_ram[160], slot_disk[160],
+            slot_bat[160], slot_net[160], slot_vol[160];
+
+static void write_state(void) {
+    FILE *f = fopen(state_tmp, "w");
+    if (!f) {
         fprintf(stderr, "qs-stats-daemon: open %s: %s\n",
-                fifo_path, strerror(errno));
+                state_tmp, strerror(errno));
+        return;
+    }
+    if (slot_cpu[0])  fputs(slot_cpu, f);
+    if (slot_ram[0])  fputs(slot_ram, f);
+    if (slot_disk[0]) fputs(slot_disk, f);
+    if (slot_bat[0])  fputs(slot_bat, f);
+    if (slot_net[0])  fputs(slot_net, f);
+    if (slot_vol[0])  fputs(slot_vol, f);
+    fclose(f);
+    /* atomic swap — tail -F readers see rename and re-read the new file */
+    if (rename(state_tmp, state_path) < 0) {
+        fprintf(stderr, "qs-stats-daemon: rename %s: %s\n",
+                state_path, strerror(errno));
     }
 }
 
 static void emit(const char *fmt, ...) {
-    char buf[512];
+    char buf[160];  /* == largest slot; longest line is `net IFACE SSID` */
     va_list ap;
     va_start(ap, fmt);
     int n = vsnprintf(buf, sizeof(buf) - 1, fmt, ap);
     va_end(ap);
     if (n < 0) return;
     if (n >= (int)sizeof(buf) - 1) n = sizeof(buf) - 2;
-    if (buf[n - 1] != '\n') { buf[n++] = '\n'; }
+    if (buf[n - 1] != '\n') { buf[n] = '\n'; buf[n + 1] = 0; }
 
-    if (fifo_fd < 0) open_fifo();
-    if (fifo_fd < 0) return;
-
-    ssize_t w = write(fifo_fd, buf, (size_t)n);
-    if (w < 0) {
-        if (errno == EPIPE || errno == EBADF) open_fifo();
-        /* EAGAIN = pipe full, drop */
-    }
+    char *slot = NULL;
+    size_t cap = 0;
+    if      (!strncmp(buf, "cpu ",  4)) { slot = slot_cpu;  cap = sizeof(slot_cpu); }
+    else if (!strncmp(buf, "ram ",  4)) { slot = slot_ram;  cap = sizeof(slot_ram); }
+    else if (!strncmp(buf, "disk ", 5)) { slot = slot_disk; cap = sizeof(slot_disk); }
+    else if (!strncmp(buf, "bat ",  4)) { slot = slot_bat;  cap = sizeof(slot_bat); }
+    else if (!strncmp(buf, "net",   3)) { slot = slot_net;  cap = sizeof(slot_net); }
+    else if (!strncmp(buf, "vol ",  4)) { slot = slot_vol;  cap = sizeof(slot_vol); }
+    if (!slot) return;
+    if (!strncmp(slot, buf, cap - 1)) return;  /* unchanged — skip rewrite */
+    snprintf(slot, cap, "%s", buf);
+    write_state();
 }
 
 /* ----------------------------- cpu/ram/disk ----------------------------- */
@@ -396,18 +420,11 @@ int main(int argc, char **argv) {
     const char *tmp = getenv("TMPDIR");
     if (!tmp || !*tmp) tmp = "/tmp";
     if (argc >= 2) {
-        snprintf(fifo_path, sizeof(fifo_path), "%s", argv[1]);
+        snprintf(state_path, sizeof(state_path), "%s", argv[1]);
     } else {
-        snprintf(fifo_path, sizeof(fifo_path), "%s/qs-stats.pipe", tmp);
+        snprintf(state_path, sizeof(state_path), "%s/qs-stats.state", tmp);
     }
-
-    /* idempotent FIFO create */
-    if (mkfifo(fifo_path, 0644) < 0 && errno != EEXIST) {
-        fprintf(stderr, "qs-stats-daemon: mkfifo %s: %s\n",
-                fifo_path, strerror(errno));
-        return 1;
-    }
-    open_fifo();
+    snprintf(state_tmp, sizeof(state_tmp), "%s.tmp", state_path);
 
     signal(SIGPIPE, SIG_IGN);
     signal(SIGTERM, on_sig);
@@ -495,6 +512,5 @@ int main(int argc, char **argv) {
     }
 
     if (pactl_pid > 0) kill(pactl_pid, SIGTERM);
-    if (fifo_fd >= 0) close(fifo_fd);
     return 0;
 }

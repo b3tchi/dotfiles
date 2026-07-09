@@ -11,24 +11,23 @@ qs_kill_session -x quickshell
 # partial upgrade or an orphan from an older quickshell version is cleaned up.
 qs_kill_session -f 'qs-keymon.py'
 qs_kill_session -f 'xinput test-xi2'
-qs_kill_session -f 'qs-stats-daemon'
 # focus helpers hold a flock — an orphan from a killed quickshell blocks
 # respawns silently (new instances exit at the lock), so reap them too
 qs_kill_session -f 'qs-focus-border.py'
 qs_kill_session -f 'qs-focus-dim.py'
 sleep 0.5
 
-# Event-driven stats source for Bar.qml. Runs alongside quickshell so it
-# shares lifecycle (kill/restart together) and writes to a local FIFO
-# inside proot. Hash-check the source so a `git pull` triggers a rebuild
-# even though git does not bump file mtimes.
+# Event-driven stats source for Bar.qml. Stats are system-wide, so ONE
+# daemon is shared by all concurrent sessions (local + xrdp) — it writes an
+# atomic state file every bar follows with `tail -F`, and it survives any
+# single session's bar restart. Hash-check the source so a `git pull`
+# triggers a rebuild even though git does not bump file mtimes.
 QS_DAEMON="$HOME/.local/bin/qs-stats-daemon"
-# Per-session FIFO — concurrent sessions run one daemon each. Bar.qml picks
-# the path up from QS_STATS_FIFO (falls back to the legacy /tmp/qs-stats.pipe).
-QS_FIFO="/tmp/qs-stats.$QS_SID.pipe"
-export QS_STATS_FIFO="$QS_FIFO"
+QS_STATE="${TMPDIR:-/tmp}/qs-stats.state"
+export QS_STATS_FILE="$QS_STATE"   # Bar.qml reads this (has same-path fallback)
 QS_SRC="$HOME/.dotfiles/quickshell/qs-stats-daemon.c"
 QS_HASH_FILE="$HOME/.cache/qs-stats-daemon.sha"
+QS_REBUILT=""
 QS_CC=""
 for cc in clang gcc cc; do
     if command -v "$cc" >/dev/null 2>&1; then QS_CC="$cc"; break; fi
@@ -42,12 +41,26 @@ if [ -f "$QS_SRC" ] && [ -n "$QS_CC" ]; then
         if "$QS_CC" -O2 -Wall -o "$QS_DAEMON" "$QS_SRC"; then
             chmod +x "$QS_DAEMON"
             echo "$QS_HASH_NEW" > "$QS_HASH_FILE"
+            QS_REBUILT=1
         fi
     fi
 fi
+# flock so two sessions starting at once don't race the singleton check.
+# Restart only after a rebuild (stale binary); otherwise leave the running
+# daemon alone — another session's bar may be reading it right now.
 if [ -x "$QS_DAEMON" ]; then
-    rm -f "$QS_FIFO"
-    "$QS_DAEMON" "$QS_FIFO" >/dev/null 2>"$XDG_RUNTIME_DIR/qs-stats.$QS_SID.log" &
+    (
+        flock -w 5 9 || exit 0
+        if [ -n "$QS_REBUILT" ]; then
+            pkill -f "^$QS_DAEMON " 2>/dev/null
+            sleep 0.2
+        fi
+        if ! pgrep -f "^$QS_DAEMON " >/dev/null 2>&1; then
+            # 9>&- — don't let the daemon inherit the lock fd (it would
+            # hold the flock forever and stall every later session start)
+            setsid "$QS_DAEMON" "$QS_STATE" >/dev/null 2>"$XDG_RUNTIME_DIR/qs-stats.log" 9>&- &
+        fi
+    ) 9>"${TMPDIR:-/tmp}/qs-stats-daemon.lock"
 fi
 
 setsid quickshell &

@@ -174,19 +174,20 @@ PanelWindow {
 
     // --- System stats ---
     // Two modes:
-    //   1. fifoMode (Termux/proot, native Linux with daemon): single long-running
-    //      process reads qs-stats-daemon FIFO at /tmp/qs-stats.pipe. Lines are
+    //   1. daemonMode (Termux/proot, native Linux with daemon): one machine-wide
+    //      qs-stats-daemon rewrites a state file atomically; every session's bar
+    //      (local + xrdp concurrently) follows it with `tail -F`. Lines are
     //      `cpu N`, `ram N`, `disk N`, `bat N STATUS`, `net IFACE [SSID]`,
     //      `vol N MUTE`. One fork total, no polling timers.
     //   2. fallback: existing per-widget Process+Timer polling chain.
-    // fifoMode is decided once at startup by fifoProbe; the four polling
-    // chains are gated on !fifoMode to silence them when the daemon is up.
+    // daemonMode is decided at startup by daemonProbe (a few retries so a
+    // daemon that's still booting isn't mistaken for absent); the polling
+    // chains are gated on !daemonMode to silence them when the daemon is up.
     readonly property string statsFile: "/tmp/qs-stats"
-    // Per-session FIFO from qs-start.sh (QS_STATS_FIFO) so concurrent
-    // sessions (local + xrdp) don't share one pipe; legacy path as fallback.
-    readonly property string statsFifo: Quickshell.env("QS_STATS_FIFO") || "/tmp/qs-stats.pipe"
-    property bool fifoMode: false
-    property bool fifoProbed: false
+    readonly property string daemonFile: Quickshell.env("QS_STATS_FILE") || "/tmp/qs-stats.state"
+    property bool daemonMode: false
+    property bool daemonProbed: false
+    property int daemonProbeTries: 0
     property string cpuVal:  "?"
     property string ramVal:  "?"
     property string diskVal: "?"
@@ -197,21 +198,31 @@ PanelWindow {
     property string batStatus: ""
 
     Process {
-        id: fifoProbe
+        id: daemonProbe
         running: true
-        command: ["sh", "-c", "[ -p " + root.statsFifo + " ] && echo yes || echo no"]
+        command: ["sh", "-c", "[ -s " + root.daemonFile + " ] && echo yes || echo no"]
         stdout: SplitParser {
             onRead: data => {
-                root.fifoMode = (data.trim() === "yes")
-                root.fifoProbed = true
+                if (data.trim() === "yes") {
+                    root.daemonMode = true
+                    root.daemonProbed = true
+                } else if (root.daemonProbeTries < 5) {
+                    root.daemonProbeTries++
+                    daemonProbeRetry.restart()
+                } else {
+                    root.daemonProbed = true   // no daemon — polling fallback
+                }
             }
         }
     }
+    Timer { id: daemonProbeRetry; interval: 2000; onTriggered: daemonProbe.running = true }
 
     Process {
         id: feedProc
-        running: root.fifoMode
-        command: ["sh", "-c", "exec cat " + root.statsFifo]
+        running: root.daemonMode
+        // -F follows across the daemon's atomic tmp+rename swaps and re-emits
+        // the whole (complete-state) file each time; sets below are idempotent
+        command: ["sh", "-c", "exec tail -n +1 -F " + root.daemonFile + " 2>/dev/null"]
         stdout: SplitParser {
             onRead: data => {
                 var line = data.trim()
@@ -241,13 +252,13 @@ PanelWindow {
                 }
             }
         }
-        onExited: { if (root.fifoMode) feedRestart.restart() }
+        onExited: { if (root.daemonMode) feedRestart.restart() }
     }
-    Timer { id: feedRestart; interval: 2000; onTriggered: feedProc.running = root.fifoMode }
+    Timer { id: feedRestart; interval: 2000; onTriggered: feedProc.running = root.daemonMode }
 
     Process {
         id: statsProc
-        running: !root.fifoMode
+        running: !root.daemonMode
         command: ["sh", "-c",
             "if [ -f " + root.statsFile + " ]; then cat " + root.statsFile + "; else " +
             "read _ a1 b1 c1 d1 e1 f1 g1 _ < /proc/stat; sleep 1; " +
@@ -267,23 +278,23 @@ PanelWindow {
                 lineNum++
             }
         }
-        onExited: { statsProc.stdout.lineNum = 0; if (!root.fifoMode) statsTimer.restart() }
+        onExited: { statsProc.stdout.lineNum = 0; if (!root.daemonMode) statsTimer.restart() }
     }
-    Timer { id: statsTimer; interval: 3000; onTriggered: if (!root.fifoMode) statsProc.running = true }
+    Timer { id: statsTimer; interval: 3000; onTriggered: if (!root.daemonMode) statsProc.running = true }
 
     Process {
         id: netProc
-        running: !root.fifoMode
+        running: !root.daemonMode
         command: ["sh", "-c",
             "iwgetid -r 2>/dev/null && exit; ip -brief addr | awk '!/^lo /{if($2==\"UP\") print $1; exit}'"]
         stdout: SplitParser { onRead: data => root.netVal = data.trim() }
-        onExited: { if (!root.fifoMode) netTimer.restart() }
+        onExited: { if (!root.daemonMode) netTimer.restart() }
     }
-    Timer { id: netTimer; interval: 10000; onTriggered: if (!root.fifoMode) netProc.running = true }
+    Timer { id: netTimer; interval: 10000; onTriggered: if (!root.daemonMode) netProc.running = true }
 
     Process {
         id: volProc
-        running: !root.fifoMode
+        running: !root.daemonMode
         command: ["sh", "-c",
             "pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | grep -oP '\\d+(?=%)' | head -1; " +
             "pactl get-sink-mute @DEFAULT_SINK@ 2>/dev/null | grep -oP '(yes|no)'"]
@@ -295,19 +306,19 @@ PanelWindow {
                 lineNum++
             }
         }
-        onExited: { volProc.stdout.lineNum = 0; if (!root.fifoMode) volTimer.restart() }
+        onExited: { volProc.stdout.lineNum = 0; if (!root.daemonMode) volTimer.restart() }
     }
-    Timer { id: volTimer; interval: 5000; onTriggered: if (!root.fifoMode) volProc.running = true }
+    Timer { id: volTimer; interval: 5000; onTriggered: if (!root.daemonMode) volProc.running = true }
 
     // Click-driven controls — kept regardless of mode. The daemon will pick
     // up the state change via pactl subscribe and emit a fresh `vol` line.
-    Process { id: volToggleMute; command: ["pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"]; onExited: { if (!root.fifoMode) volProc.running = true } }
-    Process { id: volUp; command: ["sh", "-c", "cur=$(pactl get-sink-volume @DEFAULT_SINK@ | grep -oP '\\d+(?=%)' | head -1); [ \"$cur\" -lt 100 ] && pactl set-sink-volume @DEFAULT_SINK@ +5%"]; onExited: { if (!root.fifoMode) volProc.running = true } }
-    Process { id: volDown; command: ["pactl", "set-sink-volume", "@DEFAULT_SINK@", "-5%"]; onExited: { if (!root.fifoMode) volProc.running = true } }
+    Process { id: volToggleMute; command: ["pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"]; onExited: { if (!root.daemonMode) volProc.running = true } }
+    Process { id: volUp; command: ["sh", "-c", "cur=$(pactl get-sink-volume @DEFAULT_SINK@ | grep -oP '\\d+(?=%)' | head -1); [ \"$cur\" -lt 100 ] && pactl set-sink-volume @DEFAULT_SINK@ +5%"]; onExited: { if (!root.daemonMode) volProc.running = true } }
+    Process { id: volDown; command: ["pactl", "set-sink-volume", "@DEFAULT_SINK@", "-5%"]; onExited: { if (!root.daemonMode) volProc.running = true } }
 
     Process {
         id: batProc
-        running: !root.fifoMode
+        running: !root.daemonMode
         command: ["sh", "-c",
             "cat /sys/class/power_supply/BAT0/capacity 2>/dev/null; cat /sys/class/power_supply/BAT0/status 2>/dev/null"]
         stdout: SplitParser {
@@ -318,9 +329,9 @@ PanelWindow {
                 lineNum++
             }
         }
-        onExited: { batProc.stdout.lineNum = 0; if (!root.fifoMode) batTimer.restart() }
+        onExited: { batProc.stdout.lineNum = 0; if (!root.daemonMode) batTimer.restart() }
     }
-    Timer { id: batTimer; interval: 10000; onTriggered: if (!root.fifoMode) batProc.running = true }
+    Timer { id: batTimer; interval: 10000; onTriggered: if (!root.daemonMode) batProc.running = true }
 
     // --- Keyboard layout (sway only — no per-input IPC on i3) ---
     // Track only real keyboards. Virtual keyboards (browsers, foot, etc.)
