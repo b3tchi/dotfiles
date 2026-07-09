@@ -11,6 +11,12 @@ import QtQuick
 //   QS_RDP=1              RDP session — software render, no focus fx
 //   QS_PHONE=1            sxmo/phone — floating pill via layer-shell margins
 //   QS_BAR_INSET_*        X11 inset pill (bottom/side/top), pixels
+//   QS_BAR_INSET_AUTO=1   apply insets only while the viewport is taller
+//                         than 2:1 — identifies a phone client (Razr
+//                         768x1804 ~ 2.35:1; rounded corners + chin) while
+//                         a monitor client, even a rotated one (1080x1920
+//                         = 1.78:1), keeps a flush bar; xrdp resizes the
+//                         display per client, so the ratio tracks the client
 //   QS_BAR_HEIGHT=N       bar height override (default 24 sway / 27 i3)
 //   QS_BAR_FONT=N         font pixel size override (default 14 sway / 16 i3)
 //   QS_BAR_DENSITY=x      full | compact | minimal | auto (default auto:
@@ -36,6 +42,14 @@ Singleton {
     readonly property int insetBottom: envInt("QS_BAR_INSET_BOTTOM", 0)
     readonly property int insetSide:   envInt("QS_BAR_INSET_SIDE", 0)
     readonly property int insetTop:    envInt("QS_BAR_INSET_TOP", 0)
+    // With QS_BAR_INSET_AUTO=1 insets engage only when the viewport is
+    // phone-shaped: taller than 2:1. Screen dims come from the Bar's own
+    // screen so a reconnect that resizes the display re-evaluates this
+    // live via RANDR.
+    readonly property bool insetAuto: Quickshell.env("QS_BAR_INSET_AUTO") === "1"
+    function insetActive(screenWidth, screenHeight) {
+        return !insetAuto || screenHeight >= 2 * screenWidth
+    }
     readonly property int barHeight:   envInt("QS_BAR_HEIGHT", isSway ? 24 : 27)
     readonly property int fontSize:    envInt("QS_BAR_FONT",   isSway ? 14 : 16)
 

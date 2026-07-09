@@ -61,9 +61,14 @@ PanelWindow {
     // inside it; the surround is painted the desktop color (#152024, matches
     // config-xrdp's xsetroot) so the bar appears to float clear of the chin
     // and corners. Tunable via env: QS_BAR_INSET_BOTTOM / QS_BAR_INSET_SIDE.
-    readonly property int insetBottom: Session.insetBottom
-    readonly property int insetSide:   Session.insetSide
-    readonly property int insetTop:    Session.insetTop
+    // With QS_BAR_INSET_AUTO=1 the inset engages only while the viewport is
+    // phone-shaped (taller than 2:1) — reactive to screen size, so an xrdp
+    // reconnect from a monitor client flattens the bar without a restart.
+    readonly property bool insetOn: Session.insetActive(
+        screen ? screen.width : 1920, screen ? screen.height : 1080)
+    readonly property int insetBottom: insetOn ? Session.insetBottom : 0
+    readonly property int insetSide:   insetOn ? Session.insetSide : 0
+    readonly property int insetTop:    insetOn ? Session.insetTop : 0
     readonly property bool inset: insetBottom > 0 || insetSide > 0 || insetTop > 0
 
     implicitHeight: Session.barHeight + insetBottom + insetTop

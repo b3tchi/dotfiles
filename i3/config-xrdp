@@ -37,7 +37,10 @@ exec --no-startup-id xsetroot -solid "#152024"
 #   QS_BAR_HEIGHT=N   QS_BAR_FONT=N   QS_BAR_DENSITY=full|compact|minimal|auto
 # Density defaults to auto — tiered from this session's screen width
 # (>=1400 full, >=1000 compact, else minimal: sheds NET/HDD then CPU/RAM).
-set $qsenv env QT_QUICK_BACKEND=software QS_RDP=1 QS_BAR_INSET_BOTTOM=50
+# QS_BAR_INSET_AUTO: the same session may be viewed from the phone (>=2:1
+# tall viewport, needs the chin offset) or a monitor client (flush bar) —
+# the inset follows the viewport ratio live across reconnects.
+set $qsenv env QT_QUICK_BACKEND=software QS_RDP=1 QS_BAR_INSET_BOTTOM=50 QS_BAR_INSET_AUTO=1
 bindsym $mod+Return exec --no-startup-id ~/.local/bin/st
 exec_always --no-startup-id $qsenv ~/.dotfiles/quickshell/qs-start.sh
 bindsym $mod+d exec --no-startup-id $qsenv ~/.dotfiles/quickshell/qs-overlay.sh launcher

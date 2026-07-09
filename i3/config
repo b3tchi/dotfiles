@@ -87,7 +87,10 @@ bindsym $mod+Shift+F3 exec pcmanfm_pkexec
 bindsym $mod+F5 exec terminal -e 'mocp'
 # bindsym $mod+t exec --no-startup-id pkill picom
 bindsym $mod+Ctrl+t exec --no-startup-id picom -b
-bindsym $mod+Shift+d --release exec --no-startup-id ~/.dotfiles/quickshell/qs-start.sh
+# qs bar env — defined here (i3 vars must precede first use); rationale at
+# the exec_always further down
+set $qsbarenv env QS_BAR_INSET_BOTTOM=50 QS_BAR_INSET_AUTO=1
+bindsym $mod+Shift+d --release exec --no-startup-id $qsbarenv ~/.dotfiles/quickshell/qs-start.sh
 bindsym Print exec --no-startup-id i3-scrot
 bindsym $mod+Print --release exec --no-startup-id i3-scrot -w
 bindsym $mod+Shift+Print --release exec --no-startup-id i3-scrot -s
@@ -302,8 +305,13 @@ mode "resize" {
 # Lock screen
 bindsym $mod+9 exec --no-startup-id blurlock
 
-# quickshell bar + overlay — all platforms (kill+restart on every reload)
-exec_always --no-startup-id ~/.dotfiles/quickshell/qs-start.sh
+# quickshell bar + overlay — all platforms (kill+restart on every reload).
+# This config also serves xrdp sessions (same machine, DISPLAY :10+); the
+# INSET_AUTO pair draws the chin-offset pill only while the viewport is
+# phone-shaped (>=2:1 tall, e.g. Razr client), flush bar otherwise —
+# reactive across reconnects. ($qsbarenv defined near $mod+Shift+d binding;
+# knobs documented in quickshell/config/Common/Session.qml.)
+exec_always --no-startup-id $qsbarenv ~/.dotfiles/quickshell/qs-start.sh
 # Focus border handled by quickshell (config/FocusBorder.qml);
 # clean up legacy xborders fallback
 exec_always pkill -f xborders-patched; pkill -x xborders
