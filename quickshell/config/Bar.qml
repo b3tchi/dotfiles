@@ -4,6 +4,7 @@ import Quickshell.Io
 import Quickshell.Services.SystemTray
 import QtQuick
 import QtQuick.Layouts
+import "./Common"
 
 PanelWindow {
     id: root
@@ -17,8 +18,16 @@ PanelWindow {
     signal tickerFinished()
 
     // WM detection — sway uses same IPC as i3
-    readonly property bool isSway: Quickshell.env("SWAYSOCK") !== null
+    readonly property bool isSway: Session.isSway
     readonly property string wmMsg: isSway ? "swaymsg" : "i3-msg"
+
+    // Per-session + per-screen widget density (Session.qml): gates the wide
+    // stats block so a narrow xrdp viewport / small monitor stays uncluttered.
+    readonly property string density: Session.densityFor(screen ? screen.width : 1920)
+    readonly property bool showNet:  density === "full"
+    readonly property bool showDisk: density === "full"
+    readonly property bool showCpu:  density !== "minimal"
+    readonly property bool showRam:  density !== "minimal"
 
     // Ticker state
     property bool tickerActive: false
@@ -52,16 +61,16 @@ PanelWindow {
     // inside it; the surround is painted the desktop color (#152024, matches
     // config-xrdp's xsetroot) so the bar appears to float clear of the chin
     // and corners. Tunable via env: QS_BAR_INSET_BOTTOM / QS_BAR_INSET_SIDE.
-    readonly property int insetBottom: parseInt(Quickshell.env("QS_BAR_INSET_BOTTOM") ?? "0") || 0
-    readonly property int insetSide:   parseInt(Quickshell.env("QS_BAR_INSET_SIDE") ?? "0") || 0
-    readonly property int insetTop:    parseInt(Quickshell.env("QS_BAR_INSET_TOP") ?? "0") || 0
+    readonly property int insetBottom: Session.insetBottom
+    readonly property int insetSide:   Session.insetSide
+    readonly property int insetTop:    Session.insetTop
     readonly property bool inset: insetBottom > 0 || insetSide > 0 || insetTop > 0
 
-    implicitHeight: (isSway ? 24 : 27) + insetBottom + insetTop
+    implicitHeight: Session.barHeight + insetBottom + insetTop
 
     // Phone (sxmo, sway/Wayland): floating pill via real layer-shell margins;
     // desktop (i3/sway): full-width. On X11 use QS_BAR_INSET_* instead.
-    readonly property bool isPhone: Quickshell.env("QS_PHONE") === "1"
+    readonly property bool isPhone: Session.isPhone
     margins {
         bottom: isPhone ? 20 : 0
         left:   isPhone ? 40 : 0
@@ -74,7 +83,7 @@ PanelWindow {
     color: inset ? "#000000" : barColor
 
     readonly property string fontFamily: "Iosevka Nerd Font"
-    readonly property int fontSize: isSway ? 14 : 16
+    readonly property int fontSize: Session.fontSize
     readonly property int nativeRender: Text.NativeRendering
 
     // Workspaces sourced directly from i3 IPC (authoritative). Quickshell's
@@ -619,22 +628,22 @@ PanelWindow {
             spacing: 0
 
             // Stats (hidden during ticker)
-            Text { visible: !root.tickerActive && root.netVal !== ""; text: "NET:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { visible: !root.tickerActive && root.netVal !== ""; text: root.netVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { visible: !root.tickerActive && root.netVal !== ""; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: root.showNet && !root.tickerActive && root.netVal !== ""; text: "NET:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: root.showNet && !root.tickerActive && root.netVal !== ""; text: root.netVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: root.showNet && !root.tickerActive && root.netVal !== ""; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
             // CPU hidden when daemon couldn't read /proc/stat (proot/Termux on
             // Android — values masked for unprivileged → cpuVal stays "?").
-            Text { visible: !root.tickerActive && root.cpuVal !== "?"; text: "CPU:"; color: parseInt(root.cpuVal) >= 90 ? "#cb4b16" : "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { visible: !root.tickerActive && root.cpuVal !== "?"; text: root.cpuVal; color: parseInt(root.cpuVal) >= 90 ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { visible: !root.tickerActive && root.cpuVal !== "?"; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: root.showCpu && !root.tickerActive && root.cpuVal !== "?"; text: "CPU:"; color: parseInt(root.cpuVal) >= 90 ? "#cb4b16" : "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: root.showCpu && !root.tickerActive && root.cpuVal !== "?"; text: root.cpuVal; color: parseInt(root.cpuVal) >= 90 ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: root.showCpu && !root.tickerActive && root.cpuVal !== "?"; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
-            Text { visible: !root.tickerActive && root.ramVal !== "?"; text: "RAM:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { visible: !root.tickerActive && root.ramVal !== "?"; text: root.ramVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { visible: !root.tickerActive && root.ramVal !== "?"; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: root.showRam && !root.tickerActive && root.ramVal !== "?"; text: "RAM:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: root.showRam && !root.tickerActive && root.ramVal !== "?"; text: root.ramVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: root.showRam && !root.tickerActive && root.ramVal !== "?"; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
-            Text { visible: !root.tickerActive && root.diskVal !== "?"; text: "HDD:"; color: parseInt(root.diskVal) >= 90 ? "#cb4b16" : "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { visible: !root.tickerActive && root.diskVal !== "?"; text: root.diskVal; color: parseInt(root.diskVal) >= 90 ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: root.showDisk && !root.tickerActive && root.diskVal !== "?"; text: "HDD:"; color: parseInt(root.diskVal) >= 90 ? "#cb4b16" : "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: root.showDisk && !root.tickerActive && root.diskVal !== "?"; text: root.diskVal; color: parseInt(root.diskVal) >= 90 ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
             Text { visible: !root.tickerActive && root.volVal !== ""; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Item {

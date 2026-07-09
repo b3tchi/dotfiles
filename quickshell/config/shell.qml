@@ -1,13 +1,15 @@
 import QtQuick
 import Quickshell
 import Quickshell.Services.Notifications
+import "./Common"
 
 ShellRoot {
     // Over RDP (QS_RDP=1): single quickshell process — focus border/dim off
     // (X11 compositing overlays, glitchy without a compositor), and the
     // launcher/switcher/projects overlay is hosted in THIS instance instead of
     // a second `quickshell -p overlay` process.
-    readonly property bool isRdp: Quickshell.env("QS_RDP") === "1"
+    // Per-session knobs (flags, bar geometry, density) live in Common/Session.qml.
+    readonly property bool isRdp: Session.isRdp
     readonly property bool focusFx: !isRdp
 
     property int globalNotifCount: 0

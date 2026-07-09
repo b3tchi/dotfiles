@@ -33,6 +33,10 @@ exec --no-startup-id xsetroot -solid "#152024"
 # as an inset pill (window margins are Wayland-only, no-op on X11) so the chin
 # doesn't sit on it and the rounded display corners don't crop its ends.
 # (QS_PHONE is the sxmo/sway device's flag — real margins, Wayland only.)
+# More per-session bar knobs (quickshell/config/Common/Session.qml):
+#   QS_BAR_HEIGHT=N   QS_BAR_FONT=N   QS_BAR_DENSITY=full|compact|minimal|auto
+# Density defaults to auto — tiered from this session's screen width
+# (>=1400 full, >=1000 compact, else minimal: sheds NET/HDD then CPU/RAM).
 set $qsenv env QT_QUICK_BACKEND=software QS_RDP=1 QS_BAR_INSET_BOTTOM=50
 bindsym $mod+Return exec --no-startup-id ~/.local/bin/st
 exec_always --no-startup-id $qsenv ~/.dotfiles/quickshell/qs-start.sh
