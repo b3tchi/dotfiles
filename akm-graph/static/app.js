@@ -20,6 +20,15 @@ const TYPE_COLORS = {
 const GHOST_COLOR   = [0.50, 0.50, 0.55, 0.55];  // gray, semi-transparent
 const DEFAULT_COLOR = [0.65, 0.70, 0.75, 1.00];
 
+// cosmos v1 normalizes array colors as [r/255, g/255, b/255, a] — it expects
+// RGB in the 0–255 range, alpha in 0–1. The palette above is authored in 0–1
+// for readability, so scale RGB to 0–255 on the way out (alpha untouched).
+// Without this every color collapses to ~black and links vanish on the dark bg.
+function rgba255(c) {
+  return [c[0] * 255, c[1] * 255, c[2] * 255, c[3]];
+}
+const LINK_COLOR = rgba255([0.25, 0.30, 0.35, 0.6]);
+
 // ── Size by degree ─────────────────────────────────────────────────────────────
 const BASE_SIZE = 3;
 const MAX_SIZE  = 20;
@@ -31,8 +40,8 @@ function nodeSize(n) {
 }
 
 function nodeColor(n) {
-  if (n.ghost) return GHOST_COLOR;
-  return TYPE_COLORS[n.type] || DEFAULT_COLOR;
+  if (n.ghost) return rgba255(GHOST_COLOR);
+  return rgba255(TYPE_COLORS[n.type] || DEFAULT_COLOR);
 }
 
 // ── State ──────────────────────────────────────────────────────────────────────
@@ -106,7 +115,7 @@ function initGraph() {
     backgroundColor: "#0d1117",
     nodeColor:  n => nodeColor(n),
     nodeSize:   n => nodeSize(n),
-    linkColor:  [0.25, 0.30, 0.35, 0.6],
+    linkColor:  LINK_COLOR,
     linkWidth:  0.8,
     simulation: {
       repulsion:        0.5,

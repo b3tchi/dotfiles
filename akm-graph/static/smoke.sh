@@ -101,11 +101,95 @@ echo "tooltip result = '$TT_RESULT'"
 
 if [ "$TT_TITLE" = "TOOLTIP_OK" ]; then
   echo "PASS: tooltip positioned at cursor with id/alias/status text"
-  exit 0
 else
   echo "FAIL: tooltip assertion failed"
   echo ""
   echo "--- tooltip DOM snippet (first 2000 chars) ---"
   echo "${TT_DOM:0:2000}"
+  exit 1
+fi
+
+# ── Stage 3: color-rendering guard (dotfiles-mry) ───────────────────────────────
+# Screenshots the fixture page and counts distinct non-background color buckets.
+# cosmos normalizes array colors as [r/255,g/255,b/255,a]; when app.js supplied
+# 0–1 floats instead of 0–255 every node rendered ~black and links vanished. The
+# title/tooltip stages can't see that — this one can.
+#
+# Headless WebGL paint timing is racy: some frames capture before cosmos draws
+# (an all-dark frame). That flakiness is one-sided — the real 0–1 bug is dark on
+# EVERY frame, a timing miss is dark on SOME. So we take up to $MAX_TRIES
+# screenshots and pass on the first that clears the threshold; only a genuine
+# all-black regression fails all tries.
+echo ""
+if [[ "$CHROME" == /mnt/c/* ]]; then
+  SHOT_ARG='C:\Users\Public\akm-smoke-shot.png'
+  SHOT_LNX='/mnt/c/Users/Public/akm-smoke-shot.png'
+else
+  SHOT_LNX="$(mktemp --suffix=.png)"
+  SHOT_ARG="$SHOT_LNX"
+fi
+echo "Screenshot: $URL"
+
+count_buckets() {
+  python3 - "$1" <<'PY' 2>/dev/null || echo 0
+import sys, zlib, struct
+def load(path):
+    d = open(path, 'rb').read(); i = 8; idat = b''; w = h = ct = 0
+    while i < len(d):
+        ln = struct.unpack('>I', d[i:i+4])[0]; t = d[i+4:i+8]; dt = d[i+8:i+8+ln]
+        if t == b'IHDR': w, h, _, ct = struct.unpack('>IIBB', dt[:10])
+        elif t == b'IDAT': idat += dt
+        elif t == b'IEND': break
+        i += 12 + ln
+    raw = zlib.decompress(idat); ch = 4 if ct == 6 else 3; st = w * ch
+    prev = bytearray(st); pos = 0; rows = []
+    for _ in range(h):
+        f = raw[pos]; pos += 1; line = bytearray(raw[pos:pos+st]); pos += st
+        for x in range(st):
+            a = line[x-ch] if x >= ch else 0; b = prev[x]; c = prev[x-ch] if x >= ch else 0
+            if f == 1: line[x] = (line[x]+a) & 255
+            elif f == 2: line[x] = (line[x]+b) & 255
+            elif f == 3: line[x] = (line[x]+((a+b)>>1)) & 255
+            elif f == 4:
+                p = a+b-c; pa = abs(p-a); pb = abs(p-b); pc = abs(p-c)
+                line[x] = (line[x]+(a if (pa<=pb and pa<=pc) else (b if pb<=pc else c))) & 255
+        rows.append(line); prev = line
+    return ch, b''.join(rows)
+ch, px = load(sys.argv[1]); bg = (13, 17, 23); buckets = {}
+for p in range(0, len(px), ch):
+    r, g, b = px[p], px[p+1], px[p+2]
+    if abs(r-bg[0]) + abs(g-bg[1]) + abs(b-bg[2]) > 24:
+        buckets[(r//32, g//32, b//32)] = 1
+print(len(buckets))
+PY
+}
+
+MAX_TRIES=5
+THRESHOLD=20
+BEST=0
+for try in $(seq 1 $MAX_TRIES); do
+  rm -f "$SHOT_LNX" 2>/dev/null
+  "$CHROME" \
+    --headless=new \
+    --disable-gpu \
+    --no-sandbox \
+    --window-size=1000,800 \
+    --virtual-time-budget=15000 \
+    --run-all-compositor-stages-before-draw \
+    --screenshot="$SHOT_ARG" \
+    "$URL" 2>/dev/null || true
+  n=$(count_buckets "$SHOT_LNX")
+  [ "${n:-0}" -gt "$BEST" ] && BEST="$n"
+  echo "  try $try: $n color buckets (best $BEST)"
+  [ "$BEST" -ge "$THRESHOLD" ] && break
+done
+rm -f "$SHOT_LNX" 2>/dev/null
+
+echo "best distinct node-color buckets: $BEST (want >= $THRESHOLD over $MAX_TRIES tries)"
+if [ "$BEST" -ge "$THRESHOLD" ]; then
+  echo "PASS: nodes render in color (not all-black)"
+  exit 0
+else
+  echo "FAIL: max $BEST color buckets across $MAX_TRIES tries — nodes rendering ~black (0–1 vs 0–255 color regression)"
   exit 1
 fi
