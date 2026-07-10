@@ -14,4 +14,3 @@ sections when status flips.
 
 ## ready
 
-- [[sp006|akm-graph-cosmos-viz]]

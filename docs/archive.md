@@ -5,6 +5,8 @@ Shipped workstreams. Specs (`sp###`) at `status: done` after
 
 ## done
 
+- [[sp006|akm-graph-cosmos-viz]]
+
 - [[sp001|mark project as remote so terminals open against the remote host]]
 - [[sp002|WM mod+Return on remote project launches against the remote host]]
 - [[sp004|propagate-per-type-api]]
