@@ -30,13 +30,18 @@ function rgba255(c) {
 const LINK_COLOR = rgba255([0.25, 0.30, 0.35, 0.6]);
 
 // ── Size by degree ─────────────────────────────────────────────────────────────
-const BASE_SIZE = 3;
-const MAX_SIZE  = 20;
-const SIZE_K    = 0.8;   // pixels per degree
+// Nodes are sized by degree but floored at MIN_SIZE so even a 0-degree node is
+// clearly visible (the country-borders demo look: every node a legible dot,
+// hubs noticeably larger).
+const MIN_SIZE  = 6;
+const BASE_SIZE = 6;
+const MAX_SIZE  = 34;
+const SIZE_K    = 1.6;   // pixels per degree
 
 function nodeSize(n) {
-  if (n.ghost) return BASE_SIZE * 0.7;
-  return Math.min(BASE_SIZE + (n.degree || 0) * SIZE_K, MAX_SIZE);
+  const s = Math.min(BASE_SIZE + (n.degree || 0) * SIZE_K, MAX_SIZE);
+  if (n.ghost) return Math.max(s * 0.6, 4);
+  return Math.max(s, MIN_SIZE);
 }
 
 function nodeColor(n) {
@@ -112,19 +117,29 @@ function handleNodeMouseOver(n, i, pos, ev) {
 function initGraph() {
   const canvas = document.getElementById("canvas");
   graph = new Graph(canvas, {
-    backgroundColor: "#0d1117",
-    nodeColor:  n => nodeColor(n),
-    nodeSize:   n => nodeSize(n),
-    linkColor:  LINK_COLOR,
-    linkWidth:  0.8,
+    backgroundColor:  "#0d1117",
+    spaceSize:        4096,
+    nodeColor:        n => nodeColor(n),
+    nodeSize:         n => nodeSize(n),
+    nodeSizeScale:    1,
+    scaleNodesOnZoom: true,           // nodes grow as you zoom in — stay legible
+    renderHoveredNodeRing: true,      // highlight the hovered node
+    linkColor:        LINK_COLOR,
+    linkWidth:        1.1,
+    curvedLinks:      true,           // gentle arcs — the country-borders look
+    fitViewOnInit:    true,           // frame the whole graph on load
+    // Force-directed spread: stronger repulsion + light gravity pushes clusters
+    // apart into a legible 2D map instead of a tight central blob. decay left at
+    // the cosmos default (1000) so the layout settles instead of jittering
+    // forever (the old 100000 never cooled).
     simulation: {
-      repulsion:        0.5,
-      repulsionTheta:   1.5,
-      linkSpring:       1.0,
-      linkDistance:     30,
-      gravity:          0.1,
-      decay:            100000,
-      friction:         0.85,
+      repulsion:      1.3,
+      repulsionTheta: 1.7,
+      linkSpring:     1.2,
+      linkDistance:   10,
+      gravity:        0.25,
+      decay:          3000,
+      friction:       0.85,
     },
     events: {
       // Cosmos v1 invokes this with FOUR args:
