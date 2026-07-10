@@ -25,14 +25,6 @@
       "ghost": false
     },
     {
-      "id": "nonexistent-target",
-      "type": "note",
-      "status": "",
-      "alias": "",
-      "degree": 1,
-      "ghost": true
-    },
-    {
       "id": "poc001",
       "type": "poc",
       "status": "validated",
@@ -63,6 +55,14 @@
       "alias": "story-one",
       "degree": 8,
       "ghost": false
+    },
+    {
+      "id": "us999",
+      "type": "us",
+      "status": "",
+      "alias": "",
+      "degree": 1,
+      "ghost": true
     }
   ],
   "links": [
@@ -96,7 +96,7 @@
     },
     {
       "source": "poc001",
-      "target": "nonexistent-target"
+      "target": "us999"
     },
     {
       "source": "product",

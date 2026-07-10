@@ -35,6 +35,15 @@ var hubIDs = map[string]bool{
 	"akm":     true,
 }
 
+// isZettelID reports whether id has a typed-zettel shape — a known type prefix
+// immediately followed by a digit (us006, adr0003, poc001). It reuses
+// nodeTypeFromID: bare prefixes ("cat") and plain words ("link", "archive")
+// return "note" and are not zettels. Used to decide whether a dangling link
+// target is a genuine missing note (→ ghost) or documentation noise (→ dropped).
+func isZettelID(id string) bool {
+	return nodeTypeFromID(id, false) != "note"
+}
+
 // BuildGraph constructs the full Graph from a set of parsed notes.
 //
 // Rules:
@@ -61,6 +70,16 @@ func BuildGraph(notes []Note) Graph {
 		for _, target := range n.Links {
 			if target == n.ID {
 				continue // drop self-link
+			}
+			// Drop links whose target is neither a real note nor a
+			// zettel-shaped id. A ghost must represent a MISSING NOTE, and
+			// notes are zettel-shaped (typeprefix+digits). Arbitrary dangling
+			// words are documentation noise, not missing zettels: schema
+			// placeholders ([[cat###]] -> "cat"), nav footers ([[archive]]),
+			// and examples ([[link]], [[id|alias]]) would otherwise litter the
+			// graph with spurious ghosts (dotfiles-ov8).
+			if _, real := noteByID[target]; !real && !isZettelID(target) {
+				continue
 			}
 			k := edgeKey{n.ID, target}
 			if edgeSeen[k] {

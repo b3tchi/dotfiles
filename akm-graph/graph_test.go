@@ -114,10 +114,50 @@ func TestBuildGraph_DuplicateLinks(t *testing.T) {
 	}
 }
 
-// TestBuildGraph_GhostNode verifies dangling link targets become ghost nodes.
+// TestBuildGraph_DropsNonZettelDanglingLinks proves that dangling links whose
+// target is NOT zettel-shaped (schema placeholders like [[cat###]] -> "cat",
+// nav like [[archive]], examples like [[link]]) are dropped entirely — no edge,
+// no ghost — while a dangling link to a zettel-shaped id (a genuinely missing
+// note, e.g. us999) still renders as a ghost (dotfiles-ov8, us006 AC3).
+func TestBuildGraph_DropsNonZettelDanglingLinks(t *testing.T) {
+	notes := []Note{
+		{ID: "akm", FM: frontmatter{Status: "stable"},
+			Links: []string{"cat", "link", "tag", "archive", "id", "us", "us999", "sp001"}},
+		{ID: "sp001", FM: frontmatter{Status: "done"}},
+	}
+	g := BuildGraph(notes)
+	byID := map[string]Node{}
+	for _, n := range g.Nodes {
+		byID[n.ID] = n
+	}
+
+	for _, junk := range []string{"cat", "link", "tag", "archive", "id", "us"} {
+		if _, ok := byID[junk]; ok {
+			t.Errorf("non-zettel dangling target %q rendered as a node; want dropped", junk)
+		}
+	}
+	if n, ok := byID["us999"]; !ok || !n.Ghost {
+		t.Errorf("us999 (missing zettel) should be a ghost node; got %+v ok=%v", n, ok)
+	}
+	if n, ok := byID["sp001"]; !ok || n.Ghost {
+		t.Errorf("sp001 (real note) should be a non-ghost node; got %+v ok=%v", n, ok)
+	}
+	if _, ok := byID["akm"]; !ok {
+		t.Error("akm node missing")
+	}
+	for _, l := range g.Links {
+		if l.Source == "akm" && l.Target != "us999" && l.Target != "sp001" {
+			t.Errorf("akm retains a junk edge -> %q; want only zettel/real targets", l.Target)
+		}
+	}
+}
+
+// TestBuildGraph_GhostNode verifies dangling links to a missing zettel become
+// ghost nodes. The target must be zettel-shaped (us999) — an arbitrary dangling
+// word is dropped, not ghosted (see TestBuildGraph_DropsNonZettelDanglingLinks).
 func TestBuildGraph_GhostNode(t *testing.T) {
 	notes := []Note{
-		{ID: "us001", FM: frontmatter{Status: "ready"}, Links: []string{"nonexistent-target"}},
+		{ID: "us001", FM: frontmatter{Status: "ready"}, Links: []string{"us999"}},
 	}
 	g := BuildGraph(notes)
 
@@ -128,7 +168,7 @@ func TestBuildGraph_GhostNode(t *testing.T) {
 
 	var ghostNode *Node
 	for i := range g.Nodes {
-		if g.Nodes[i].ID == "nonexistent-target" {
+		if g.Nodes[i].ID == "us999" {
 			ghostNode = &g.Nodes[i]
 		}
 	}
