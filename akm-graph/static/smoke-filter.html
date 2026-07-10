@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>filter-smoke pending</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #0d1117; }
+    #canvas { display: block; width: 100%; height: 100%; }
+    #tooltip { position: absolute; display: none; }
+    #legend { position: absolute; top: 10px; left: 14px; }
+    .legend-chip.off { opacity: 0.4; }
+    #labels { position: absolute; inset: 0; }
+    .node-label.hidden { display: none; }
+    #status { position: absolute; top: 10px; right: 14px; }
+    #result { position: absolute; bottom: 10px; left: 10px; color: #fff; font-family: monospace; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <div id="legend"></div>
+  <div id="labels"></div>
+  <div id="tooltip"></div>
+  <div id="status"></div>
+  <div id="result"></div>
+  <script type="module" src="./app.js"></script>
+  <script type="module">
+    // Regression guard for the category toggle: every type gets a chip and starts
+    // visible; toggling a type off hides exactly that type's nodes (and their
+    // labels); toggling back on restores them.
+    const TYPE = "us";                 // fixture has exactly one us node (us001)
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    async function run() {
+      const out = document.getElementById("result");
+      try {
+        for (let t = 0; t < 100 && !window.__akmGraph; t++) await wait(50);
+        const g = window.__akmGraph;
+        if (!g) throw new Error("__akmGraph never appeared");
+        for (let t = 0; t < 100 && !g.nodeById(TYPE + "001"); t++) await wait(50);
+        if (!g.nodeById(TYPE + "001")) throw new Error("fixture node not loaded");
+        for (let t = 0; t < 100 && g.filterState().total === 0; t++) await wait(50);
+
+        const before = g.filterState();
+        if (before.chips < 2) throw new Error("too few legend chips: " + before.chips);
+        if (before.hidden !== 0) throw new Error("nodes hidden before any toggle: " + before.hidden);
+        if (!before.active.includes(TYPE)) throw new Error(TYPE + " not active at start");
+
+        g.toggleType(TYPE);
+        const off = g.filterState();
+        if (off.active.includes(TYPE)) throw new Error("type still active after toggle-off");
+        if (off.shown !== before.shown - 1) throw new Error(
+          "expected 1 node hidden, got shown " + before.shown + " -> " + off.shown);
+
+        g.toggleType(TYPE);
+        const on = g.filterState();
+        if (!on.active.includes(TYPE)) throw new Error("type not re-activated");
+        if (on.shown !== before.shown) throw new Error(
+          "toggle-on did not restore: " + on.shown + " != " + before.shown);
+
+        out.textContent = "FILTER_OK chips=" + before.chips + " shown=" + before.shown +
+          " offShown=" + off.shown;
+        document.title = "FILTER_OK";
+      } catch (e) {
+        out.textContent = "FILTER_FAIL " + e.message;
+        document.title = "FILTER_FAIL " + e.message;
+      }
+    }
+    run();
+  </script>
+</body>
+</html>

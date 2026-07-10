@@ -213,8 +213,33 @@ echo "select title  = '$SEL_TITLE'"
 echo "select result = '$SEL_RESULT'"
 if [ "$SEL_TITLE" = "SELECT_OK" ]; then
   echo "PASS: click-isolate dims non-neighbor labels"
-  exit 0
 else
   echo "FAIL: click-isolate assertion failed"
+  exit 1
+fi
+
+# ── Stage 5: category-toggle regression (dotfiles-fj2) ──────────────────────────
+# Drives __akmGraph.toggleType via smoke-filter.html and asserts toggling a type
+# off hides exactly that type's nodes/labels and toggling it back on restores them.
+echo ""
+FIL_URL="http://localhost:${PORT}/smoke-filter.html?fixture=graph.json"
+echo "Filter:   $FIL_URL"
+FIL_DOM=$("$CHROME" \
+  --headless=new \
+  --disable-gpu \
+  --no-sandbox \
+  --virtual-time-budget=15000 \
+  --run-all-compositor-stages-before-draw \
+  --dump-dom \
+  "$FIL_URL" 2>/dev/null || true)
+FIL_TITLE=$(echo "$FIL_DOM" | grep -oP '(?<=<title>)[^<]+' | head -1 || true)
+FIL_RESULT=$(echo "$FIL_DOM" | grep -oP '(?<=id="result">)[^<]+' | head -1 || true)
+echo "filter title  = '$FIL_TITLE'"
+echo "filter result = '$FIL_RESULT'"
+if [ "$FIL_TITLE" = "FILTER_OK" ]; then
+  echo "PASS: category toggle hides/restores nodes by type"
+  exit 0
+else
+  echo "FAIL: category-toggle assertion failed"
   exit 1
 fi

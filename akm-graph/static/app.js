@@ -19,6 +19,15 @@ const TYPE_COLORS = {
 };
 const GHOST_COLOR   = [0.50, 0.50, 0.55, 0.55];  // gray, semi-transparent
 const DEFAULT_COLOR = [0.65, 0.70, 0.75, 1.00];
+const HIDDEN_COLOR  = [0, 0, 0, 0];              // fully transparent — toggled-off type
+
+// Human-readable legend names + display order for the category toggle panel.
+// Any type not listed still gets a chip (falls back to the raw type code).
+const TYPE_LABELS = {
+  us: "stories", sp: "specs", im: "impl", ft: "features", adr: "decisions",
+  cat: "categories", poc: "pocs", pn: "personal", hub: "hubs", note: "notes",
+};
+const TYPE_ORDER = ["us", "sp", "im", "ft", "adr", "cat", "poc", "pn", "hub", "note"];
 
 // cosmos v1 normalizes array colors as [r/255, g/255, b/255, a] — it expects
 // RGB in the 0–255 range, alpha in 0–1. The palette above is authored in 0–1
@@ -27,7 +36,25 @@ const DEFAULT_COLOR = [0.65, 0.70, 0.75, 1.00];
 function rgba255(c) {
   return [c[0] * 255, c[1] * 255, c[2] * 255, c[3]];
 }
-const LINK_COLOR = rgba255([0.25, 0.30, 0.35, 0.6]);
+const LINK_COLOR  = rgba255([0.25, 0.30, 0.35, 0.6]);
+const LINK_HIDDEN = [0, 0, 0, 0];   // link with a toggled-off endpoint disappears
+
+// ── Category toggle state ────────────────────────────────────────────────────
+// activeTypes holds the node types currently shown. Toggling a legend chip
+// adds/removes a type here, then a setData(...,false) recompute hides the nodes
+// and their links WITHOUT restarting the simulation (layout stays put).
+const activeTypes = new Set();  // types currently visible
+const knownTypes  = new Set();  // every type ever seen (so refreshes keep state)
+
+function typeVisible(t) { return activeTypes.has(t); }
+function nodeShown(n)   { return n && activeTypes.has(n.type); }
+
+// Resolve a link endpoint (id string OR node object) to its node record.
+function endpointNode(e) {
+  if (e == null) return null;
+  const id = (typeof e === "object" && e.id != null) ? e.id : e;
+  return nodeIndex[id] || (typeof e === "object" ? e : null);
+}
 
 // ── Size by degree ─────────────────────────────────────────────────────────────
 // Nodes are sized by degree but floored at MIN_SIZE so even a 0-degree node is
@@ -39,14 +66,24 @@ const MAX_SIZE  = 10;
 const SIZE_K    = 0.8;   // pixels per degree
 
 function nodeSize(n) {
+  if (!nodeShown(n)) return 0;   // toggled-off type: zero radius = gone + unhoverable
   const s = Math.min(BASE_SIZE + (n.degree || 0) * SIZE_K, MAX_SIZE);
   if (n.ghost) return Math.max(s * 0.7, 2);
   return Math.max(s, MIN_SIZE);
 }
 
 function nodeColor(n) {
+  if (!nodeShown(n)) return rgba255(HIDDEN_COLOR);
   if (n.ghost) return rgba255(GHOST_COLOR);
   return rgba255(TYPE_COLORS[n.type] || DEFAULT_COLOR);
+}
+
+// Link color accessor: a link vanishes if either endpoint's type is toggled off.
+function linkColor(l) {
+  const s = endpointNode(l && l.source);
+  const t = endpointNode(l && l.target);
+  if ((s && !nodeShown(s)) || (t && !nodeShown(t))) return LINK_HIDDEN;
+  return LINK_COLOR;
 }
 
 // CSS rgb() string for a node's type — used to tint its persistent label pill.
@@ -95,6 +132,63 @@ function selectNode(id) {
 function clearSelection() {
   if (graph) graph.unselectNodes();
   for (const el of Object.values(labelEls)) el.classList.remove("dim");
+}
+
+// ── Category legend (type toggle) ───────────────────────────────────────────────
+// One chip per node type present. Clicking a chip flips that type's membership
+// in activeTypes, then re-pushes the same data with runSimulation=false so the
+// GPU buffers (color/size) recompute against the new state but positions freeze.
+const legendEl = document.getElementById("legend");
+let allNodes = [];
+let allLinks = [];
+
+function typesPresent(nodes) {
+  const counts = {};
+  for (const n of nodes) counts[n.type] = (counts[n.type] || 0) + 1;
+  const seen = Object.keys(counts);
+  // known order first, then any stragglers alphabetically
+  const ordered = TYPE_ORDER.filter(t => t in counts)
+    .concat(seen.filter(t => !TYPE_ORDER.includes(t)).sort());
+  return ordered.map(t => ({ type: t, count: counts[t] }));
+}
+
+function buildLegend(nodes) {
+  legendEl.textContent = "";
+  for (const { type, count } of typesPresent(nodes)) {
+    const chip = document.createElement("div");
+    chip.className = "legend-chip" + (typeVisible(type) ? "" : " off");
+    chip.dataset.type = type;
+    const swatch = document.createElement("span");
+    swatch.className = "legend-swatch";
+    swatch.style.background = cssColor({ type });
+    const name = document.createElement("span");
+    name.className = "legend-name";
+    name.textContent = TYPE_LABELS[type] || type;
+    const cnt = document.createElement("span");
+    cnt.className = "legend-count";
+    cnt.textContent = count;
+    chip.append(swatch, name, cnt);
+    chip.addEventListener("click", () => toggleType(type));
+    legendEl.appendChild(chip);
+  }
+}
+
+// Show/hide the HTML label pills to match the current type filter.
+function applyLabelVisibility() {
+  for (const n of allNodes) {
+    const el = labelEls[n.id];
+    if (el) el.classList.toggle("hidden", !nodeShown(n));
+  }
+}
+
+function toggleType(type) {
+  if (activeTypes.has(type)) activeTypes.delete(type);
+  else activeTypes.add(type);
+  // recompute node/link buffers without restarting the layout
+  if (graph) graph.setData(allNodes, allLinks, false);
+  applyLabelVisibility();
+  const chip = legendEl.querySelector(`.legend-chip[data-type="${type}"]`);
+  if (chip) chip.classList.toggle("off", !typeVisible(type));
 }
 
 // positionLabels runs on every frame: project each node's graph-space position
@@ -195,7 +289,7 @@ function initGraph() {
     nodeSize:         n => nodeSize(n),
     nodeSizeScale:    1,
     scaleNodesOnZoom: false,          // fixed screen-size dots — crisp, no ballooning at fit-zoom
-    linkColor:        LINK_COLOR,
+    linkColor:        l => linkColor(l),
     linkWidth:        1.1,
     curvedLinks:      false,          // straight, direct edges between nodes
     fitViewOnInit:    true,           // frame the whole graph on load
@@ -242,8 +336,17 @@ function renderData(data) {
   nodeIndex = {};
   for (const n of nodes) nodeIndex[n.id] = n;
 
+  // stash full data for the category filter; newly-seen types start visible
+  allNodes = nodes;
+  allLinks = links;
+  for (const n of nodes) {
+    if (!knownTypes.has(n.type)) { knownTypes.add(n.type); activeTypes.add(n.type); }
+  }
+
   graph.setData(nodes, links);
   buildLabels(nodes);
+  buildLegend(nodes);
+  applyLabelVisibility();
   startLabelLoop();
 
   // update document title with node count for smoke test
@@ -342,5 +445,18 @@ window.__akmGraph = {
     const total = Object.keys(labelEls).length;
     const dim = Object.values(labelEls).filter((el) => el.classList.contains("dim")).length;
     return { total, dim, lit: total - dim };
+  },
+  // Category-toggle hooks for the smoke test.
+  toggleType,
+  filterState: () => {
+    const total = Object.keys(labelEls).length;
+    const hidden = Object.values(labelEls).filter((el) => el.classList.contains("hidden")).length;
+    return {
+      active: [...activeTypes].sort(),
+      chips: legendEl.querySelectorAll(".legend-chip").length,
+      total,
+      hidden,
+      shown: total - hidden,
+    };
   },
 };
