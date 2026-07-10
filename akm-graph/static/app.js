@@ -71,9 +71,30 @@ function buildLabels(nodes) {
     el.textContent = (n.alias && n.alias.trim()) ? n.alias : n.id;
     el.style.borderLeftColor = cssColor(n);
     el.style.transform = "translate(-9999px, -9999px)";  // off-screen until placed
+    el.addEventListener("click", (e) => { e.stopPropagation(); selectNode(n.id); });
     labelsEl.appendChild(el);
     labelEls[n.id] = el;
   }
+}
+
+// ── Selection: isolate a node + its direct neighbors ────────────────────────────
+// cosmos greys out non-selected nodes/links (nodeGreyoutOpacity/linkGreyoutOpacity);
+// we mirror that on the HTML labels via a .dim class.
+function selectNode(id) {
+  if (!graph) return;
+  graph.selectNodeById(id, true);   // node + adjacent selected, rest greyed
+  const keep = new Set([id]);
+  let adj;
+  try { adj = graph.getAdjacentNodes(id); } catch (e) { adj = null; }
+  if (adj) for (const a of adj) keep.add(a.id);
+  for (const [nid, el] of Object.entries(labelEls)) {
+    el.classList.toggle("dim", !keep.has(nid));
+  }
+}
+
+function clearSelection() {
+  if (graph) graph.unselectNodes();
+  for (const el of Object.values(labelEls)) el.classList.remove("dim");
 }
 
 // positionLabels runs on every frame: project each node's graph-space position
@@ -178,6 +199,8 @@ function initGraph() {
     linkWidth:        1.1,
     curvedLinks:      false,          // straight, direct edges between nodes
     fitViewOnInit:    true,           // frame the whole graph on load
+    nodeGreyoutOpacity: 0.1,          // dim non-selected nodes on click-isolate
+    linkGreyoutOpacity: 0.1,
     // Force-directed spread: stronger repulsion + light gravity pushes clusters
     // apart into a legible 2D map instead of a tight central blob. decay left at
     // the cosmos default (1000) so the layout settles instead of jittering
@@ -199,6 +222,11 @@ function initGraph() {
       // position array onto `e`, so e.clientX was undefined → NaN px.
       onNodeMouseOver: handleNodeMouseOver,
       onNodeMouseOut() { hideTooltip(); },
+      // Click a node -> isolate it + direct neighbors; click empty space -> reset.
+      onClick(node) {
+        if (node && node.id != null) selectNode(node.id);
+        else clearSelection();
+      },
     },
   });
   return graph;
@@ -307,4 +335,12 @@ window.__akmGraph = {
     top: tooltipEl.style.top,
     text: tooltipEl.textContent,
   }),
+  // Selection hooks for the smoke test (drive isolate without a real click).
+  selectNode,
+  clearSelection,
+  dimState: () => {
+    const total = Object.keys(labelEls).length;
+    const dim = Object.values(labelEls).filter((el) => el.classList.contains("dim")).length;
+    return { total, dim, lit: total - dim };
+  },
 };

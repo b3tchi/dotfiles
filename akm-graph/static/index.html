@@ -61,8 +61,12 @@
       line-height: 1.35;
       white-space: nowrap;
       box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+      pointer-events: auto;         /* clickable to isolate its neighborhood */
+      cursor: pointer;
+      transition: opacity 0.15s;
     }
     .node-label.ghost { opacity: 0.55; font-style: italic; }
+    .node-label.dim   { opacity: 0.12; }
   </style>
 </head>
 <body>

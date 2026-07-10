@@ -188,8 +188,33 @@ rm -f "$SHOT_LNX" 2>/dev/null
 echo "best distinct node-color buckets: $BEST (want >= $THRESHOLD over $MAX_TRIES tries)"
 if [ "$BEST" -ge "$THRESHOLD" ]; then
   echo "PASS: nodes render in color (not all-black)"
-  exit 0
 else
   echo "FAIL: max $BEST color buckets across $MAX_TRIES tries — nodes rendering ~black (0–1 vs 0–255 color regression)"
+  exit 1
+fi
+
+# ── Stage 4: click-isolate regression (dotfiles-xlv) ────────────────────────────
+# Drives __akmGraph.selectNode via smoke-select.html and asserts selecting a node
+# dims the non-neighbor labels (and clearing undims them).
+echo ""
+SEL_URL="http://localhost:${PORT}/smoke-select.html?fixture=graph.json"
+echo "Select:   $SEL_URL"
+SEL_DOM=$("$CHROME" \
+  --headless=new \
+  --disable-gpu \
+  --no-sandbox \
+  --virtual-time-budget=15000 \
+  --run-all-compositor-stages-before-draw \
+  --dump-dom \
+  "$SEL_URL" 2>/dev/null || true)
+SEL_TITLE=$(echo "$SEL_DOM" | grep -oP '(?<=<title>)[^<]+' | head -1 || true)
+SEL_RESULT=$(echo "$SEL_DOM" | grep -oP '(?<=id="result">)[^<]+' | head -1 || true)
+echo "select title  = '$SEL_TITLE'"
+echo "select result = '$SEL_RESULT'"
+if [ "$SEL_TITLE" = "SELECT_OK" ]; then
+  echo "PASS: click-isolate dims non-neighbor labels"
+  exit 0
+else
+  echo "FAIL: click-isolate assertion failed"
   exit 1
 fi
