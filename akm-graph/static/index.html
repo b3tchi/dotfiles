@@ -37,10 +37,37 @@
       font-size: 11px;
       pointer-events: none;
     }
+    /* Persistent per-node label overlay (name pills, country-borders style). */
+    #labels {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      pointer-events: none;
+      z-index: 50;
+    }
+    .node-label {
+      position: absolute;
+      left: 0; top: 0;
+      will-change: transform;
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 5px;
+      background: rgba(13, 17, 23, 0.82);
+      border: 1px solid #30363d;
+      border-left-width: 3px;
+      color: #e6edf3;
+      font-family: 'Iosevka', 'JetBrains Mono', 'Fira Code', monospace;
+      font-size: 11px;
+      line-height: 1.35;
+      white-space: nowrap;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+    }
+    .node-label.ghost { opacity: 0.55; font-style: italic; }
   </style>
 </head>
 <body>
   <canvas id="canvas"></canvas>
+  <div id="labels"></div>
   <div id="tooltip"></div>
   <div id="status"></div>
   <script type="module" src="./app.js"></script>

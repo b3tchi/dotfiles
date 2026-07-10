@@ -49,6 +49,57 @@ function nodeColor(n) {
   return rgba255(TYPE_COLORS[n.type] || DEFAULT_COLOR);
 }
 
+// CSS rgb() string for a node's type — used to tint its persistent label pill.
+function cssColor(n) {
+  const c = n.ghost ? GHOST_COLOR : (TYPE_COLORS[n.type] || DEFAULT_COLOR);
+  return `rgb(${Math.round(c[0] * 255)}, ${Math.round(c[1] * 255)}, ${Math.round(c[2] * 255)})`;
+}
+
+// ── Persistent node labels (HTML overlay) ───────────────────────────────────────
+// cosmos core has no text labels, so we render one HTML pill per node and sync
+// it to the node's screen position every animation frame (country-borders look).
+const labelsEl = document.getElementById("labels");
+let labelEls = {};       // id → pill element
+let labelRAF = null;
+
+function buildLabels(nodes) {
+  labelsEl.textContent = "";
+  labelEls = {};
+  for (const n of nodes) {
+    const el = document.createElement("div");
+    el.className = "node-label" + (n.ghost ? " ghost" : "");
+    el.textContent = (n.alias && n.alias.trim()) ? n.alias : n.id;
+    el.style.borderLeftColor = cssColor(n);
+    el.style.transform = "translate(-9999px, -9999px)";  // off-screen until placed
+    labelsEl.appendChild(el);
+    labelEls[n.id] = el;
+  }
+}
+
+// positionLabels runs on every frame: project each node's graph-space position
+// to screen coordinates and park its pill just above the dot.
+function positionLabels() {
+  labelRAF = requestAnimationFrame(positionLabels);
+  if (!graph) return;
+  let positions;
+  try { positions = graph.getNodePositionsMap(); } catch (e) { return; }
+  if (!positions) return;
+  const entries = positions instanceof Map ? positions : Object.entries(positions);
+  for (const [id, pos] of entries) {
+    const el = labelEls[id];
+    if (!el || !pos) continue;
+    let screen;
+    try { screen = graph.spaceToScreenPosition([pos[0], pos[1]]); } catch (e) { continue; }
+    if (!screen) continue;
+    el.style.transform =
+      `translate(${Math.round(screen[0])}px, ${Math.round(screen[1])}px) translate(-50%, -190%)`;
+  }
+}
+
+function startLabelLoop() {
+  if (labelRAF == null) positionLabels();
+}
+
 // ── State ──────────────────────────────────────────────────────────────────────
 let graph = null;       // cosmos Graph instance
 let nodeIndex = {};     // id → node, for tooltip lookup
@@ -164,6 +215,8 @@ function renderData(data) {
   for (const n of nodes) nodeIndex[n.id] = n;
 
   graph.setData(nodes, links);
+  buildLabels(nodes);
+  startLabelLoop();
 
   // update document title with node count for smoke test
   document.title = `OK nodes=${nodes.length}`;
