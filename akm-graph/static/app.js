@@ -125,7 +125,7 @@ function initGraph() {
     scaleNodesOnZoom: false,          // fixed screen-size dots — crisp, no ballooning at fit-zoom
     linkColor:        LINK_COLOR,
     linkWidth:        1.1,
-    curvedLinks:      true,           // gentle arcs — the country-borders look
+    curvedLinks:      false,          // straight, direct edges between nodes
     fitViewOnInit:    true,           // frame the whole graph on load
     // Force-directed spread: stronger repulsion + light gravity pushes clusters
     // apart into a legible 2D map instead of a tight central blob. decay left at
