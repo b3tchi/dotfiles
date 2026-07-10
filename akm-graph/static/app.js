@@ -33,14 +33,14 @@ const LINK_COLOR = rgba255([0.25, 0.30, 0.35, 0.6]);
 // Nodes are sized by degree but floored at MIN_SIZE so even a 0-degree node is
 // clearly visible (the country-borders demo look: every node a legible dot,
 // hubs noticeably larger).
-const MIN_SIZE  = 6;
-const BASE_SIZE = 6;
-const MAX_SIZE  = 34;
-const SIZE_K    = 1.6;   // pixels per degree
+const MIN_SIZE  = 3;
+const BASE_SIZE = 3;
+const MAX_SIZE  = 6;
+const SIZE_K    = 0.5;   // pixels per degree
 
 function nodeSize(n) {
   const s = Math.min(BASE_SIZE + (n.degree || 0) * SIZE_K, MAX_SIZE);
-  if (n.ghost) return Math.max(s * 0.6, 4);
+  if (n.ghost) return Math.max(s * 0.7, 2);
   return Math.max(s, MIN_SIZE);
 }
 
@@ -122,8 +122,7 @@ function initGraph() {
     nodeColor:        n => nodeColor(n),
     nodeSize:         n => nodeSize(n),
     nodeSizeScale:    1,
-    scaleNodesOnZoom: true,           // nodes grow as you zoom in — stay legible
-    renderHoveredNodeRing: true,      // highlight the hovered node
+    scaleNodesOnZoom: false,          // fixed screen-size dots — crisp, no ballooning at fit-zoom
     linkColor:        LINK_COLOR,
     linkWidth:        1.1,
     curvedLinks:      true,           // gentle arcs — the country-borders look
