@@ -222,23 +222,32 @@ func TestBuildGraph_EmptyNotes(t *testing.T) {
 	}
 }
 
-// TestBuildGraph_HubNodes verifies board and product get type "hub".
+// TestBuildGraph_HubNodes verifies akm is the only hub type, and that links to
+// the excluded board/product nav pages are dropped (dotfiles-t9v).
 func TestBuildGraph_HubNodes(t *testing.T) {
 	notes := []Note{
-		{ID: "board", FM: frontmatter{}, Links: []string{}},
-		{ID: "product", FM: frontmatter{}, Links: []string{}},
-		{ID: "us001", FM: frontmatter{}, Links: []string{"board"}},
+		{ID: "akm", FM: frontmatter{}, Links: []string{}},
+		{ID: "us001", FM: frontmatter{}, Links: []string{"board", "product", "akm"}},
 	}
 	g := BuildGraph(notes)
 	byID := make(map[string]Node)
 	for _, n := range g.Nodes {
 		byID[n.ID] = n
 	}
-	if byID["board"].Type != "hub" {
-		t.Errorf("board type: got %q, want hub", byID["board"].Type)
+	if byID["akm"].Type != "hub" {
+		t.Errorf("akm type: got %q, want hub", byID["akm"].Type)
 	}
-	if byID["product"].Type != "hub" {
-		t.Errorf("product type: got %q, want hub", byID["product"].Type)
+	if _, ok := byID["board"]; ok {
+		t.Errorf("board should be excluded (nav page, non-zettel link dropped)")
+	}
+	if _, ok := byID["product"]; ok {
+		t.Errorf("product should be excluded (nav page, non-zettel link dropped)")
+	}
+	// us001 -> akm is the only surviving edge (board/product dropped).
+	for _, l := range g.Links {
+		if l.Source == "us001" && l.Target != "akm" {
+			t.Errorf("us001 has an unexpected edge -> %q", l.Target)
+		}
 	}
 }
 

@@ -9,19 +9,11 @@
       "ghost": false
     },
     {
-      "id": "board",
-      "type": "hub",
-      "status": "",
-      "alias": "",
-      "degree": 5,
-      "ghost": false
-    },
-    {
       "id": "ft001",
       "type": "ft",
       "status": "proposed",
       "alias": "feature-one",
-      "degree": 6,
+      "degree": 4,
       "ghost": false
     },
     {
@@ -29,15 +21,7 @@
       "type": "poc",
       "status": "validated",
       "alias": "proof-of-concept-one",
-      "degree": 4,
-      "ghost": false
-    },
-    {
-      "id": "product",
-      "type": "hub",
-      "status": "",
-      "alias": "",
-      "degree": 7,
+      "degree": 2,
       "ghost": false
     },
     {
@@ -45,7 +29,7 @@
       "type": "sp",
       "status": "done",
       "alias": "spec-one",
-      "degree": 6,
+      "degree": 3,
       "ghost": false
     },
     {
@@ -53,7 +37,7 @@
       "type": "us",
       "status": "ready",
       "alias": "story-one",
-      "degree": 8,
+      "degree": 5,
       "ghost": false
     },
     {
@@ -71,24 +55,8 @@
       "target": "us001"
     },
     {
-      "source": "board",
-      "target": "product"
-    },
-    {
-      "source": "board",
-      "target": "sp001"
-    },
-    {
-      "source": "ft001",
-      "target": "product"
-    },
-    {
       "source": "ft001",
       "target": "us001"
-    },
-    {
-      "source": "poc001",
-      "target": "board"
     },
     {
       "source": "poc001",
@@ -99,26 +67,6 @@
       "target": "us999"
     },
     {
-      "source": "product",
-      "target": "ft001"
-    },
-    {
-      "source": "product",
-      "target": "poc001"
-    },
-    {
-      "source": "product",
-      "target": "sp001"
-    },
-    {
-      "source": "product",
-      "target": "us001"
-    },
-    {
-      "source": "sp001",
-      "target": "board"
-    },
-    {
       "source": "sp001",
       "target": "ft001"
     },
@@ -128,15 +76,7 @@
     },
     {
       "source": "us001",
-      "target": "board"
-    },
-    {
-      "source": "us001",
       "target": "ft001"
-    },
-    {
-      "source": "us001",
-      "target": "product"
     },
     {
       "source": "us001",

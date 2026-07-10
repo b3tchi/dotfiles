@@ -113,7 +113,11 @@ func parseNote(absPath string) (Note, error) {
 // docs/notes/akm.md is a symlink to claude/akm/akm.md; the docs/notes walk skips
 // symlinks, so the AKM overview hub is picked up here via os.Stat (which follows
 // the link) instead of being dropped (dotfiles-2ry).
-var hubFiles = []string{"docs/board.md", "docs/product.md", "docs/notes/akm.md"}
+//
+// docs/board.md and docs/product.md are intentionally excluded (dotfiles-t9v):
+// they are navigation/meta index pages, not knowledge zettels. Their [[board]] /
+// [[product]] back-links then fall to the non-zettel filter and are dropped.
+var hubFiles = []string{"docs/notes/akm.md"}
 
 // WalkNotes walks root for all *.md files under docs/notes/** and the two hub
 // files docs/board.md and docs/product.md. root is the absolute path to the

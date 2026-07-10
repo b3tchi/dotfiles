@@ -28,11 +28,10 @@ type Graph struct {
 	Links []Link `json:"links"`
 }
 
-// hubIDs is the set of IDs for hub notes (board, product, akm overview).
+// hubIDs is the set of IDs typed as "hub". Only the AKM overview note remains a
+// hub — board/product are excluded from the graph entirely (dotfiles-t9v).
 var hubIDs = map[string]bool{
-	"board":   true,
-	"product": true,
-	"akm":     true,
+	"akm": true,
 }
 
 // isZettelID reports whether id has a typed-zettel shape — a known type prefix
