@@ -57,6 +57,33 @@ func TestServeStaticAsset(t *testing.T) {
 	}
 }
 
+// TestEmbedViewerAssetsOnly proves the daemon binary embeds only the viewer
+// assets (index.html, app.js, cosmos-bundle.js) and not the smoke-test files
+// (smoke.sh, smoke-tooltip.html, graph.json), which are served on-disk by
+// smoke.sh's own http server (regression for dotfiles-blm).
+func TestEmbedViewerAssetsOnly(t *testing.T) {
+	srv := newTestServer(t)
+	h := srv.Handler()
+
+	served := []string{"/", "/app.js", "/cosmos-bundle.js"}
+	for _, p := range served {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, p, nil))
+		if rec.Code != http.StatusOK {
+			t.Errorf("GET %s: status %d, want 200 (viewer asset must be embedded)", p, rec.Code)
+		}
+	}
+
+	notEmbedded := []string{"/smoke.sh", "/smoke-tooltip.html", "/graph.json"}
+	for _, p := range notEmbedded {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, p, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("GET %s: status %d, want 404 (test file must NOT be embedded)", p, rec.Code)
+		}
+	}
+}
+
 // TestAPIGraph proves GET /api/graph returns the ft004-shape JSON built from
 // the fixture root — same graph as the golden file (spot-checked by node count).
 func TestAPIGraph(t *testing.T) {

@@ -27,8 +27,11 @@ const (
 
 // staticFS embeds the viewer assets so GET / and static paths serve from the
 // binary regardless of the working directory (us006 AC5, ft004 offline-safe).
+// Only the three viewer files are embedded — the smoke-test files (smoke.sh,
+// smoke-tooltip.html, graph.json) stay on disk, served by smoke.sh's own http
+// server, and must not bloat the daemon binary (dotfiles-blm).
 //
-//go:embed static
+//go:embed static/index.html static/app.js static/cosmos-bundle.js
 var staticFS embed.FS
 
 // Status is the GET /api/status payload: daemon health snapshot.
