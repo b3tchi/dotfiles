@@ -35,8 +35,8 @@ const LINK_COLOR = rgba255([0.25, 0.30, 0.35, 0.6]);
 // hubs noticeably larger).
 const MIN_SIZE  = 3;
 const BASE_SIZE = 3;
-const MAX_SIZE  = 6;
-const SIZE_K    = 0.5;   // pixels per degree
+const MAX_SIZE  = 10;
+const SIZE_K    = 0.8;   // pixels per degree
 
 function nodeSize(n) {
   const s = Math.min(BASE_SIZE + (n.degree || 0) * SIZE_K, MAX_SIZE);

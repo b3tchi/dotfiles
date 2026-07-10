@@ -129,8 +129,17 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/stop", s.handleStop)
 	mux.HandleFunc("/watch", s.handleWatch)
-	mux.Handle("/", http.FileServer(http.FS(s.static)))
+	mux.Handle("/", noCache(http.FileServer(http.FS(s.static))))
 	return mux
+}
+
+// noCache stops the browser caching the viewer assets so a rebuilt daemon's
+// updated index.html / app.js show on a normal refresh (no hard-reload needed).
+func noCache(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		h.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
