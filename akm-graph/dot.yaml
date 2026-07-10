@@ -1,0 +1,29 @@
+# akm-graph — build + install the akm-graph-d daemon (ft004 zettel-graph viewer).
+#
+# The nushell wrapper (`akm-graph` / `akm graph`) and its ~/.local/bin link live
+# in nushell/dot.yaml. This dot only builds the Go daemon binary. Linux-only:
+# the daemon uses fsnotify + a localhost HTTP/WS surface and is consumed by the
+# nu wrapper, which is a Core-UX (Linux) tool.
+
+linux:
+  installs:
+    cmd: |
+      # Build the akm-graph-d daemon. Guarded on the go toolchain so linking
+      # (done by `rotz link`) still lands on hosts without go — the wrapper then
+      # reports "rotz install akm-graph" until the binary exists.
+      if command -v go >/dev/null 2>&1; then
+        mkdir -p ~/.local/bin
+        # Resolve the source dir via akm-root so a non-standard clone path
+        # (not ~/.dotfiles) still builds. Fall back to ~/.dotfiles.
+        SRC="$HOME/.dotfiles/akm-graph"
+        if command -v akm-root >/dev/null 2>&1; then
+          ROOT="$(akm-root 2>/dev/null || true)"
+          if [ -n "$ROOT" ] && [ -d "$ROOT/akm-graph" ]; then
+            SRC="$ROOT/akm-graph"
+          fi
+        fi
+        go build -C "$SRC" -o ~/.local/bin/akm-graph-d .
+        echo "akm-graph: built ~/.local/bin/akm-graph-d from $SRC"
+      else
+        echo "akm-graph: go toolchain not found — skipping daemon build (install go, then re-run 'rotz install akm-graph')" >&2
+      fi
