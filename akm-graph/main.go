@@ -15,6 +15,9 @@ import (
 
 const defaultPort = "4810"
 
+// watchDebounce coalesces editor save bursts into a single rebuild+broadcast.
+const watchDebounce = 300 * time.Millisecond
+
 func main() {
 	rootFlag := flag.String("root", "", "notes repo root (default: $AKM_GRAPH_ROOT or cwd)")
 	flag.Parse()
@@ -32,6 +35,12 @@ func main() {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "akm-graph: cannot bind %s: %v\n", addr, err)
+		os.Exit(1)
+	}
+
+	// Live-reload: watch the notes tree, rebuild + WS-broadcast on change.
+	if err := srv.StartWatcher(srv.WatchContext(), watchDebounce); err != nil {
+		fmt.Fprintf(os.Stderr, "akm-graph: watch: %v\n", err)
 		os.Exit(1)
 	}
 

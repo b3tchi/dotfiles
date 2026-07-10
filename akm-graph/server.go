@@ -6,10 +6,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"log"
 	"net/http"
 	"os"
 	"sync"
 	"time"
+
+	"github.com/gorilla/websocket"
+)
+
+const (
+	// wsSendBuffer bounds a client's pending-broadcast queue; a client that
+	// falls this far behind is dropped rather than allowed to stall the hub.
+	wsSendBuffer = 16
+	// wsWriteWait is the per-message write deadline.
+	wsWriteWait = 10 * time.Second
+	// wsPingPeriod keeps the socket alive through idle periods.
+	wsPingPeriod = 30 * time.Second
 )
 
 // staticFS embeds the viewer assets so GET / and static paths serve from the
@@ -40,7 +53,10 @@ type Server struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	static fs.FS
+	static   fs.FS
+	hub      *Hub
+	upgrader websocket.Upgrader
+	watcher  *Watcher
 }
 
 // NewServer builds the initial graph from repoRoot and returns a ready Server.
@@ -62,6 +78,9 @@ func NewServer(repoRoot string) (*Server, error) {
 		ctx:    ctx,
 		cancel: cancel,
 		static: sub,
+		hub:    NewHub(),
+		// localhost-only tool — same no-auth stance as ft002; accept any origin.
+		upgrader: websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }},
 	}
 	if err := s.Rebuild(ctx); err != nil {
 		cancel()
@@ -95,6 +114,10 @@ func (s *Server) Snapshot() Graph {
 // shutdown loop, tests) can block on graceful-stop.
 func (s *Server) Done() <-chan struct{} { return s.ctx.Done() }
 
+// WatchContext returns the server lifecycle context so the file watcher stops
+// when the daemon shuts down (POST /api/stop / signal).
+func (s *Server) WatchContext() context.Context { return s.ctx }
+
 // Handler wires the HTTP mux. Each /api/* handler enforces its method and emits
 // a 405 + Allow header on mismatch (ft002 parity).
 func (s *Server) Handler() http.Handler {
@@ -102,6 +125,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/graph", s.handleGraph)
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/stop", s.handleStop)
+	mux.HandleFunc("/watch", s.handleWatch)
 	mux.Handle("/", http.FileServer(http.FS(s.static)))
 	return mux
 }
@@ -141,6 +165,104 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 		f.Flush()
 	}
 	s.cancel()
+}
+
+// handleWatch upgrades to WebSocket, pushes the current graph immediately, then
+// streams every subsequent rebuild. A non-WebSocket request is rejected by the
+// upgrader with a 400 (it never hangs). Only GET can carry an Upgrade header,
+// so ServeMux + the upgrader together enforce method+protocol.
+func (s *Server) handleWatch(w http.ResponseWriter, r *http.Request) {
+	conn, err := s.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		// Upgrade already wrote the 4xx response.
+		return
+	}
+	c := &wsClient{conn: conn, send: make(chan []byte, wsSendBuffer)}
+	s.hub.Register(c)
+
+	// Prime the new client with the current graph so it renders without waiting
+	// for the next file change.
+	if b, err := json.Marshal(s.Snapshot()); err == nil {
+		select {
+		case c.send <- b:
+		default:
+		}
+	}
+
+	go s.writePump(c)
+	s.readPump(c) // blocks until the client disconnects
+}
+
+// readPump drains inbound frames (control frames + any client chatter) purely to
+// detect disconnect, then unregisters the client. Runs on the request goroutine.
+func (s *Server) readPump(c *wsClient) {
+	defer func() {
+		s.hub.Unregister(c)
+		_ = c.conn.Close()
+	}()
+	for {
+		if _, _, err := c.conn.ReadMessage(); err != nil {
+			return
+		}
+	}
+}
+
+// writePump serialises all writes to a single client's socket (gorilla requires
+// one concurrent writer) and sends periodic pings. It exits when the hub closes
+// c.send (client dropped) or a write fails.
+func (s *Server) writePump(c *wsClient) {
+	ticker := time.NewTicker(wsPingPeriod)
+	defer ticker.Stop()
+	for {
+		select {
+		case msg, ok := <-c.send:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
+			if !ok {
+				_ = c.conn.WriteMessage(websocket.CloseMessage, nil)
+				return
+			}
+			if err := c.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+				return
+			}
+		case <-ticker.C:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
+		}
+	}
+}
+
+// broadcastGraph marshals the current snapshot and fans it out to all clients.
+func (s *Server) broadcastGraph() {
+	b, err := json.Marshal(s.Snapshot())
+	if err != nil {
+		return
+	}
+	s.hub.Broadcast(b)
+}
+
+// StartWatcher wires an fsnotify Watcher whose debounced onChange rebuilds the
+// graph and broadcasts it. A rebuild error (e.g. root deleted) is logged and
+// the last good graph keeps being served — no broadcast, no crash.
+func (s *Server) StartWatcher(ctx context.Context, debounce time.Duration) error {
+	wt, err := NewWatcher(s.root, debounce, func() {
+		if err := s.Rebuild(ctx); err != nil {
+			log.Printf("akm-graph: rebuild skipped: %v", err)
+			return
+		}
+		s.broadcastGraph()
+	})
+	if err != nil {
+		return err
+	}
+	s.watcher = wt
+	go wt.Run(ctx)
+	go func() {
+		<-ctx.Done()
+		_ = wt.Close()
+	}()
+	return nil
 }
 
 // requireMethod enforces want; on mismatch it writes 405 + Allow and returns
