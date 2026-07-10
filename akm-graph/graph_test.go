@@ -11,6 +11,59 @@ import (
 
 var update = flag.Bool("update", false, "regenerate golden files")
 
+// TestBuildGraphFromRoot_SymlinkedAkmHub proves the AKM overview hub note,
+// which ships as docs/notes/akm.md symlinked to claude/akm/akm.md, appears as a
+// non-ghost "hub" node with its frontmatter parsed — not dropped by the walk's
+// symlink guard and not left as a ghost of an incoming [[akm]] link
+// (regression for dotfiles-2ry).
+func TestBuildGraphFromRoot_SymlinkedAkmHub(t *testing.T) {
+	root := t.TempDir()
+	notes := filepath.Join(root, "docs", "notes")
+	if err := os.MkdirAll(notes, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "board.md"), []byte("# board"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// A note that links to [[akm]] — akm must resolve to a real node, not a ghost.
+	if err := os.WriteFile(filepath.Join(notes, "us001.md"), []byte("# us [[akm]]"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// The hub note lives outside docs/notes and is symlinked in as akm.md,
+	// mirroring the real docs/notes/akm.md -> claude/akm/akm.md layout.
+	target := filepath.Join(root, "hub-akm.md")
+	if err := os.WriteFile(target, []byte("---\naliases:\n  - akm-model\n---\n# AKM"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(notes, "akm.md")); err != nil {
+		t.Skipf("symlinks unsupported on this platform: %v", err)
+	}
+
+	g, err := BuildGraphFromRoot(root)
+	if err != nil {
+		t.Fatalf("BuildGraphFromRoot: %v", err)
+	}
+
+	var akm *Node
+	for i := range g.Nodes {
+		if g.Nodes[i].ID == "akm" {
+			akm = &g.Nodes[i]
+		}
+	}
+	if akm == nil {
+		t.Fatalf("akm node absent — symlinked hub note dropped; nodes=%d", len(g.Nodes))
+	}
+	if akm.Ghost {
+		t.Errorf("akm node is a ghost; want a real node parsed from the symlink target")
+	}
+	if akm.Type != "hub" {
+		t.Errorf("akm node type = %q, want hub", akm.Type)
+	}
+	if akm.Alias != "akm-model" {
+		t.Errorf("akm alias = %q, want akm-model (frontmatter parsed via symlink)", akm.Alias)
+	}
+}
+
 // TestBuildGraph_Basic verifies node and link construction.
 func TestBuildGraph_Basic(t *testing.T) {
 	notes := []Note{

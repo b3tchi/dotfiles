@@ -28,10 +28,11 @@ type Graph struct {
 	Links []Link `json:"links"`
 }
 
-// hubIDs is the set of IDs for hub files (board, product).
+// hubIDs is the set of IDs for hub notes (board, product, akm overview).
 var hubIDs = map[string]bool{
 	"board":   true,
 	"product": true,
+	"akm":     true,
 }
 
 // BuildGraph constructs the full Graph from a set of parsed notes.

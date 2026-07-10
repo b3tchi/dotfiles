@@ -109,8 +109,11 @@ func parseNote(absPath string) (Note, error) {
 	}, nil
 }
 
-// hubPaths are the hub files relative to the repo root (resolved at walk time).
-var hubFiles = []string{"docs/board.md", "docs/product.md"}
+// hubFiles are the hub notes relative to the repo root (resolved at walk time).
+// docs/notes/akm.md is a symlink to claude/akm/akm.md; the docs/notes walk skips
+// symlinks, so the AKM overview hub is picked up here via os.Stat (which follows
+// the link) instead of being dropped (dotfiles-2ry).
+var hubFiles = []string{"docs/board.md", "docs/product.md", "docs/notes/akm.md"}
 
 // WalkNotes walks root for all *.md files under docs/notes/** and the two hub
 // files docs/board.md and docs/product.md. root is the absolute path to the
