@@ -1,0 +1,184 @@
+#!/usr/bin/env nu
+# akm-graph-test — scripted test for the akm-graph wrapper (d2-router-test pattern)
+#
+# Tests:
+#   1. Idempotent lifecycle: start → start (no-op) → status → stop → status,
+#      against a fake akm-graph-d that serves a minimal /api/status + /api/stop.
+#   2. Stale pidfile: bogus dead pid → cleaned + relaunch.
+#   3. Missing binary → error names "rotz install akm-graph".
+#
+# Run:  nu nushell/actions/akm-graph-test
+# Pass: exits 0 and prints "PASS: 3 tests passed"
+# Fail: exits 1 and prints "FAIL: <description>"
+
+# Self-locate the wrapper relative to this test so it survives merging out of
+# the author's worktree (no hardcoded paths).
+const WRAPPER = (path self | path dirname | path join "akm-graph")
+
+# ── setup ─────────────────────────────────────────────────────────────────────
+
+let tmp = (^mktemp -d | str trim)
+let fake_bin_dir = $"($tmp)/bin"
+let cache_dir = $"($tmp)/.cache/akm-graph"
+let pid_file = $"($cache_dir)/pid"
+let fake_daemon = $"($fake_bin_dir)/akm-graph-d"
+let launched_marker = $"($tmp)/daemon_launched"
+
+^mkdir -p $fake_bin_dir
+^mkdir -p $cache_dir
+
+# Test port far from the 4810 default and common services.
+let test_port = "58910"
+let test_path = ([$fake_bin_dir "/usr/local/bin" "/usr/bin" "/bin" "/sbin"] | str join ":")
+
+# Fake akm-graph-d: a tiny python HTTP server answering GET /api/status and
+# POST /api/stop (exits on stop). Records that it was launched.
+let fake_src = "#!/bin/bash
+touch " + $launched_marker + "
+exec python3 - \"$@\" <<'PY'
+import sys, os, json
+from http.server import BaseHTTPRequestHandler, HTTPServer
+port = int(os.environ.get('AKM_GRAPH_PORT', '4810'))
+class H(BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self):
+        if self.path == '/api/status':
+            body = json.dumps({'pid': os.getpid(), 'root': '/fake',
+                               'nodes': 3, 'links': 1,
+                               'last_rebuild': '2026-01-01T00:00:00Z'}).encode()
+            self.send_response(200); self.send_header('Content-Type','application/json')
+            self.send_header('Content-Length', str(len(body))); self.end_headers()
+            self.wfile.write(body)
+        else:
+            self.send_response(404); self.end_headers()
+    def do_POST(self):
+        if self.path == '/api/stop':
+            self.send_response(200); self.send_header('Content-Length','0'); self.end_headers()
+            def die(): os._exit(0)
+            import threading; threading.Timer(0.1, die).start()
+        else:
+            self.send_response(404); self.end_headers()
+HTTPServer(('127.0.0.1', port), H).serve_forever()
+PY
+"
+$fake_src | save --force $fake_daemon
+^chmod +x $fake_daemon
+
+# Helper: run the wrapper with a clean env (isolated HOME/PATH/port).
+def run-wrapper [tmp: string, port: string, path: string, verb: string] {
+    do {
+        ^bash -c $"HOME=($tmp) AKM_GRAPH_PORT=($port) AKM_GRAPH_ROOT=($tmp) PATH=($path) /usr/bin/nu ($WRAPPER) ($verb)"
+    } | complete
+}
+
+def wait-port-free [port: string] {
+    for _ in 1..30 {
+        let up = (do { ^bash -c $"curl -sf --max-time 1 http://127.0.0.1:($port)/api/status" } | complete)
+        if $up.exit_code != 0 { return }
+        sleep 100ms
+    }
+}
+
+# ── test 1: idempotent lifecycle ──────────────────────────────────────────────
+
+let r1 = (run-wrapper $tmp $test_port $test_path "start")
+if $r1.exit_code != 0 {
+    print $"FAIL: first start exited ($r1.exit_code)\n($r1.stdout)($r1.stderr)"
+    exit 1
+}
+if not ($launched_marker | path exists) {
+    print "FAIL: fake daemon not launched on first start"
+    exit 1
+}
+# Wait for the fake daemon to bind.
+for _ in 1..30 {
+    let up = (do { ^bash -c $"curl -sf --max-time 1 http://127.0.0.1:($test_port)/api/status" } | complete)
+    if $up.exit_code == 0 { break }
+    sleep 100ms
+}
+
+# Second start must be a no-op (port-probe short-circuit), still exit 0.
+let r2 = (run-wrapper $tmp $test_port $test_path "start")
+if $r2.exit_code != 0 {
+    print $"FAIL: second start exited ($r2.exit_code)"
+    exit 1
+}
+if not ($"($r2.stdout)($r2.stderr)" | str contains "no-op") {
+    print $"FAIL: second start did not report no-op:\n($r2.stdout)($r2.stderr)"
+    exit 1
+}
+
+# status must report the daemon's fields.
+let rs = (run-wrapper $tmp $test_port $test_path "status")
+if not ($"($rs.stdout)" | str contains "nodes") {
+    print $"FAIL: status did not surface daemon fields:\n($rs.stdout)($rs.stderr)"
+    exit 1
+}
+
+# stop must bring it down.
+let rstop = (run-wrapper $tmp $test_port $test_path "stop")
+if $rstop.exit_code != 0 {
+    print $"FAIL: stop exited ($rstop.exit_code)"
+    exit 1
+}
+wait-port-free $test_port
+
+# status after stop must report not-responding.
+let rs2 = (run-wrapper $tmp $test_port $test_path "status")
+if not ($"($rs2.stdout)($rs2.stderr)" | str contains "not responding") {
+    print $"FAIL: status after stop should report not responding:\n($rs2.stdout)($rs2.stderr)"
+    exit 1
+}
+^rm -f $pid_file $launched_marker
+print "PASS: idempotent lifecycle start/start/status/stop/status"
+
+# ── test 2: stale pidfile → cleaned + relaunch ────────────────────────────────
+
+let bogus_pid = 9999992
+if (do { ^kill -0 $bogus_pid } | complete | get exit_code) == 0 {
+    print $"FAIL: bogus pid ($bogus_pid) unexpectedly alive"
+    exit 1
+}
+$bogus_pid | into string | save --force $pid_file
+
+let r3 = (run-wrapper $tmp $test_port $test_path "start")
+if $r3.exit_code != 0 {
+    print $"FAIL: start with stale pidfile exited ($r3.exit_code)\n($r3.stdout)($r3.stderr)"
+    exit 1
+}
+let new_pid = (try { open $pid_file | str trim | into int } catch { -1 })
+if $new_pid == $bogus_pid or $new_pid <= 0 {
+    print $"FAIL: stale pidfile not replaced, pid ($new_pid)"
+    exit 1
+}
+# Bring the relaunched daemon down.
+for _ in 1..30 {
+    let up = (do { ^bash -c $"curl -sf --max-time 1 http://127.0.0.1:($test_port)/api/status" } | complete)
+    if $up.exit_code == 0 { break }
+    sleep 100ms
+}
+run-wrapper $tmp $test_port $test_path "stop" | ignore
+wait-port-free $test_port
+^rm -f $pid_file $launched_marker
+print "PASS: stale pidfile cleaned and daemon relaunched"
+
+# ── test 3: missing binary → error names 'rotz install akm-graph' ─────────────
+
+^rm -f $fake_daemon
+let no_daemon_path = "/usr/local/bin:/usr/bin:/bin:/sbin"
+let r4 = (run-wrapper $tmp $test_port $no_daemon_path "start")
+if $r4.exit_code == 0 {
+    print "FAIL: start should fail when daemon binary is missing"
+    exit 1
+}
+if not ($"($r4.stdout)($r4.stderr)" | str contains "rotz install akm-graph") {
+    print $"FAIL: missing-binary error does not name 'rotz install akm-graph':\n($r4.stdout)($r4.stderr)"
+    exit 1
+}
+print "PASS: missing binary names 'rotz install akm-graph'"
+
+# ── cleanup ───────────────────────────────────────────────────────────────────
+
+^rm -rf $tmp
+print ""
+print "PASS: 3 tests passed"

@@ -874,6 +874,24 @@ def "main root" [] {
   ^akm-root
 }
 
+# akm graph <verb> — passthrough to the akm-graph wrapper (ft004 zettel-graph
+# viewer daemon). Delegates identically: `akm graph start|stop|status|open`
+# forwards to `akm-graph <verb>`. The wrapper owns the daemon lifecycle
+# (port-probe / pidfile / detached launch); this is a thin convenience alias
+# so the graph viewer lives under the same `akm` umbrella as the zettel ops.
+def "main graph" [
+  verb?: string  # start | stop | status | open
+] {
+  if (which akm-graph | is-empty) {
+    error make { msg: "akm graph: 'akm-graph' wrapper not on PATH — run: rotz link nushell" }
+  }
+  if ($verb | is-empty) {
+    ^akm-graph
+  } else {
+    ^akm-graph $verb
+  }
+}
+
 # Verify the workspace's category taxonomy against the canonical 8-cat set.
 # Emits a warning per mismatch (same id but different alias, missing
 # canonical slot, or extra cat id past cat008). Exits 0 either way — this
@@ -2486,6 +2504,8 @@ def main [] {
   print "  akm adr <subcmd>             ADR namespace (read / write / list)"
   print "  akm poc <subcmd>             PoC lab-notebook namespace (read / write / list)"
   print "  akm root                     print AKM workspace root (refuses on feature wt)"
+  print "  akm graph <verb>             control the zettel-graph viewer daemon"
+  print "                                 verbs: start stop status open"
   print ""
   print "bd housekeeping (any worktree):"
   print "  akm bd init                  strip bd auto-hooks, pin bd config"

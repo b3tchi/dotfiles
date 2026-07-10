@@ -1,0 +1,200 @@
+#!/usr/bin/env nu
+# akm-graph — thin CLI wrapper around the akm-graph-d daemon (ft004).
+#
+# Usage:
+#   akm-graph start    # idempotent daemon launch (port-probe → pidfile → detach)
+#   akm-graph stop     # graceful stop (POST /api/stop + SIGTERM fallback)
+#   akm-graph status   # daemon health (pid / root / counts / last rebuild)
+#   akm-graph open     # launch browser at the viewer page (starts daemon if down)
+#
+# Mirrors nushell/actions/d2-router (adr0001 nushell-first surface,
+# adr0003 mandatory-wrapper mandate). The daemon watches the AKM notes tree
+# and pushes graph updates over WS; this wrapper only launches/queries it.
+
+const DAEMON_BIN = "akm-graph-d"
+const CACHE_DIR  = "~/.cache/akm-graph"
+const PID_FILE   = "~/.cache/akm-graph/pid"
+const LOG_FILE   = "~/.cache/akm-graph/log"
+
+# Resolve the graph port from the environment (mirrors daemon default 4810).
+def graph-port [] {
+    $env | get -o AKM_GRAPH_PORT | default "4810"
+}
+
+# Base URL for the daemon API / viewer.
+def api-base [] {
+    $"http://127.0.0.1:(graph-port)"
+}
+
+# Resolve the notes root to watch: $AKM_GRAPH_ROOT, else the akm-root helper,
+# else the current directory.
+def graph-root [] {
+    let env_root = ($env | get -o AKM_GRAPH_ROOT | default "")
+    if ($env_root | is-not-empty) {
+        return $env_root
+    }
+    let resolved = (do { ^akm-root } | complete)
+    if $resolved.exit_code == 0 and ($resolved.stdout | str trim | is-not-empty) {
+        return ($resolved.stdout | str trim)
+    }
+    (pwd)
+}
+
+# Probe /api/status. Returns parsed JSON or null on connection failure.
+def probe-status [] {
+    try {
+        http get --max-time 2sec $"(api-base)/api/status"
+    } catch {
+        null
+    }
+}
+
+# Read the pid from the pidfile. Returns null if absent or unreadable.
+def read-pidfile [] {
+    let p = ($PID_FILE | path expand)
+    if ($p | path exists) {
+        try { open $p | str trim | into int } catch { null }
+    } else {
+        null
+    }
+}
+
+# Check if a pid is alive (kill -0 equivalent). Returns bool.
+def pid-alive [pid: int] {
+    (do { ^kill -0 $pid } | complete | get exit_code) == 0
+}
+
+# Ensure cache dir and write pidfile.
+def write-pidfile [pid: int] {
+    let dir = ($CACHE_DIR | path expand)
+    if not ($dir | path exists) {
+        mkdir $dir
+    }
+    $pid | into string | save --force ($PID_FILE | path expand)
+}
+
+# Idempotent start: port-probe first, pidfile second, then detached launch.
+def main-start [] {
+    # 1. Port probe — if the daemon is already answering, no-op.
+    let live = (probe-status)
+    if $live != null {
+        print $"akm-graph: daemon already running \(pid ($live.pid)\) on port (graph-port) — no-op"
+        return
+    }
+
+    # 2. Binary check — fail loud with an actionable message.
+    if (which $DAEMON_BIN | is-empty) {
+        error make {
+            msg: $"akm-graph: '($DAEMON_BIN)' not found on PATH — run: rotz install akm-graph"
+        }
+    }
+
+    # 3. Stale pidfile cleanup.
+    let old_pid = (read-pidfile)
+    if $old_pid != null {
+        if (pid-alive $old_pid) {
+            print $"akm-graph: ERROR — port (graph-port) appears occupied by pid ($old_pid) (not akm-graph-d); refusing to start"
+            error make { msg: "akm-graph: port occupied by foreign process" }
+        } else {
+            print $"akm-graph: stale pidfile \(pid ($old_pid) dead\) — cleaning up"
+            rm --force ($PID_FILE | path expand)
+        }
+    }
+
+    # 4. Detached launch on the resolved notes root.
+    let log  = ($LOG_FILE | path expand)
+    let dir  = ($CACHE_DIR | path expand)
+    let root = (graph-root)
+    if not ($dir | path exists) {
+        mkdir $dir
+    }
+
+    # nohup + bash & echo $! detaches the daemon from the current session.
+    let pid_result = (do {
+        ^bash -c $"nohup ($DAEMON_BIN) --root '($root)' >>($log) 2>&1 & echo $!"
+    } | complete)
+
+    if $pid_result.exit_code != 0 {
+        error make { msg: $"akm-graph: failed to launch daemon: ($pid_result.stderr)" }
+    }
+
+    let new_pid = ($pid_result.stdout | str trim | into int)
+    write-pidfile $new_pid
+    print $"akm-graph: started \(pid ($new_pid)\), root ($root), logging to ($log)"
+}
+
+# Stop the daemon: POST /api/stop first, then SIGTERM the recorded pid.
+def main-stop [] {
+    let sent = (try {
+        http post --max-time 2sec $"(api-base)/api/stop" ""
+        true
+    } catch {
+        false
+    })
+    if $sent {
+        print "akm-graph: sent stop to daemon"
+    }
+
+    let pid = (read-pidfile)
+    if $pid != null {
+        if (pid-alive $pid) {
+            ^kill -TERM $pid
+            print $"akm-graph: sent SIGTERM to pid ($pid)"
+        } else {
+            print $"akm-graph: pid ($pid) already gone"
+        }
+        rm --force ($PID_FILE | path expand)
+    } else if not $sent {
+        print "akm-graph: no pidfile — daemon may not have been started with this wrapper"
+    }
+}
+
+# Print daemon health as a nu record.
+def main-status [] {
+    let data = (probe-status)
+    if $data == null {
+        print $"akm-graph: daemon not responding on port (graph-port)"
+        return
+    }
+    $data | select pid root nodes links last_rebuild
+}
+
+# Open the viewer page in the default browser, starting the daemon if it's down.
+def main-open [] {
+    if (probe-status) == null {
+        main-start
+        # Give the freshly-launched daemon a moment to bind the port.
+        for _ in 1..20 {
+            if (probe-status) != null { break }
+            sleep 100ms
+        }
+    }
+    let url = $"(api-base)/"
+    if (which xdg-open | is-not-empty) {
+        ^xdg-open $url
+        print $"akm-graph: opened ($url)"
+    } else {
+        print $"akm-graph: ($url)"
+    }
+}
+
+# akm-graph — control the akm-graph-d daemon
+def main [
+    subcommand?: string  # start | stop | status | open
+] {
+    match $subcommand {
+        "start"  => { main-start }
+        "stop"   => { main-stop }
+        "status" => { main-status }
+        "open"   => { main-open }
+        _ => {
+            print "Usage: akm-graph <subcommand>"
+            print ""
+            print "Subcommands:"
+            print "  start   — launch daemon (idempotent)"
+            print "  stop    — stop daemon"
+            print "  status  — daemon health (pid / root / counts / last rebuild)"
+            print "  open    — open the viewer page in the browser (starts daemon if down)"
+        }
+    }
+}

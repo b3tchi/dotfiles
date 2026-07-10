@@ -44,6 +44,7 @@ linux:
     actions/tmux-session-cleaner: ~/.local/bin/tmux-session-cleaner
     actions/wm-launch-terminal: ~/.local/bin/wm-launch-terminal
     actions/d2-router: ~/.local/bin/d2-router
+    actions/akm-graph: ~/.local/bin/akm-graph
   installs:
     cmd: |
       {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
