@@ -7,8 +7,14 @@ mkdir -p "$XDG_RUNTIME_DIR" 2>/dev/null
 
 if [ -n "$SWAYSOCK" ]; then
     : # Sway — SWAYSOCK already set by sway
-elif [ -z "$I3SOCK" ] && command -v i3 >/dev/null 2>&1; then
-    export I3SOCK="$(i3 --get-socketpath 2>/dev/null)"
+elif command -v i3 >/dev/null 2>&1; then
+    # ALWAYS re-derive from DISPLAY (X root atom), even if I3SOCK is already
+    # set: an inherited value may belong to a different session — e.g. a
+    # restart issued from a shell inside the xrdp session targeting the
+    # desktop display — which paints one session's focus frames / workspaces
+    # onto the other session's bar and screen.
+    _i3sock="$(i3 --get-socketpath 2>/dev/null)"
+    [ -n "$_i3sock" ] && export I3SOCK="$_i3sock"
 fi
 
 # Session key: X11 DISPLAY when present (both native i3 and xrdp/Xvnc are
