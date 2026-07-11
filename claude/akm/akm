@@ -109,6 +109,21 @@ def type_schema [t: string] {
 # All AKM type prefixes, used when scanning for a zettel by id or alias.
 def type_prefixes [] { ["sp" "us" "pn" "ft" "im" "adr" "cat" "poc"] }
 
+# Directories to scan for a type's zettels: the active dir plus its archive
+# mirror. Retired zettels move under docs/notes/archive/ mirroring their active
+# path (sp done -> archive/spec, obsolete product -> archive/) but keep their id
+# and alias in the same namespace, so id-allocation and alias lookup MUST span
+# both dirs — else a moved id gets re-minted (collision) or goes unfound.
+# The mirror is docs/notes/... -> docs/notes/archive/... . poc/cat have no
+# auto-archive rule, so their mirror dir simply stays absent and is skipped,
+# but the generic mechanism still supports a manual/special-status move.
+def type_dirs [root: string, prefix: string] {
+  let s = (type_schema $prefix)
+  let active  = $"($root)/($s.dir)"
+  let archive = $"($root)/($s.dir | str replace 'docs/notes' 'docs/notes/archive')"
+  [$active $archive]
+}
+
 # The canonical 8-category taxonomy — single source of truth for both the
 # `akm init` scaffolding pass and the collision check that runs when a
 # project already has cat### files. Index 0 → cat001, index 7 → cat008.
@@ -177,9 +192,12 @@ def check_cat_collisions [notes_dir: string, canonical: list<string>] {
 # mint the first zettel without a separate scaffolding step.
 def next_id [root: string, prefix: string] {
   let s = (type_schema $prefix)
-  let dir = $"($root)/($s.dir)"
-  if not ($dir | path exists) { mkdir $dir }
-  let existing = (glob $"($dir)/($prefix)*.md")
+  let active = $"($root)/($s.dir)"
+  if not ($active | path exists) { mkdir $active }
+  # Scan active + archive mirror so a retired id is never re-minted.
+  let existing = ((type_dirs $root $prefix) | each { |d|
+    if ($d | path exists) { glob $"($d)/($prefix)*.md" } else { [] }
+  } | flatten)
   let plen = ($prefix | str length)
   let nums = ($existing | each { |f|
     let base = ($f | path basename | str replace ".md" "")
@@ -381,26 +399,28 @@ def read_first_alias [content: string] {
 # for an alias match. Designed for `akm delete <key>` and similar lookups
 # where the caller doesn't know the type up front.
 def find_zettel [root: string, key: string] {
-  # Try id form first: prefix + digits.
+  # Try id form first: prefix + digits. Check active + archive mirror so a
+  # retired zettel (moved under docs/notes/archive/) still resolves by id.
   for p in (type_prefixes) {
     if ($key | str starts-with $p) {
       let tail = ($key | str substring ($p | str length)..)
       if ($tail =~ '^\d+$') {
-        let s = (type_schema $p)
-        let f = $"($root)/($s.dir)/($key).md"
-        if ($f | path exists) { return $f }
+        for d in (type_dirs $root $p) {
+          let f = $"($d)/($key).md"
+          if ($f | path exists) { return $f }
+        }
       }
     }
   }
-  # Alias fallback — scan every type's directory.
+  # Alias fallback — scan every type's active + archive dir.
   for p in (type_prefixes) {
-    let s = (type_schema $p)
-    let dir = $"($root)/($s.dir)"
-    if not ($dir | path exists) { continue }
-    for f in (glob $"($dir)/($p)*.md") {
-      let content = (open --raw $f)
-      let alias = (read_first_alias $content)
-      if $alias == $key { return $f }
+    for dir in (type_dirs $root $p) {
+      if not ($dir | path exists) { continue }
+      for f in (glob $"($dir)/($p)*.md") {
+        let content = (open --raw $f)
+        let alias = (read_first_alias $content)
+        if $alias == $key { return $f }
+      }
     }
   }
   ""
@@ -421,11 +441,16 @@ def "main init" [target: string] {
   let daily = $"($notes)/daily"
   let assets = $"($docs)/assets"
   let spec_dir = $"($notes)/spec"
+  # Archive mirror: retired zettels land here keeping their notes/ path
+  # (delivered sp### -> archive/spec, obsolete product -> archive/). See
+  # type_dirs — id-allocation + alias lookup span active + this mirror.
+  let archive_dir = $"($notes)/archive"
+  let archive_spec_dir = $"($archive_dir)/spec"
 
-  mkdir $docs $notes $daily $assets $spec_dir
+  mkdir $docs $notes $daily $assets $spec_dir $archive_dir $archive_spec_dir
 
   # Placeholder gitkeeps (no-op if already exist).
-  for d in [$notes $daily $assets $spec_dir] {
+  for d in [$notes $daily $assets $spec_dir $archive_dir $archive_spec_dir] {
     let keep = $"($d)/.gitkeep"
     if not ($keep | path exists) { touch $keep }
   }
@@ -830,22 +855,25 @@ def "main list" [
   })
 
   let rows = ($prefixes | each { |p|
-    let s = (type_schema $p)
-    let dir = $"($root)/($s.dir)"
-    if not ($dir | path exists) { return [] }
-    let files = (glob $"($dir)/($p)*.md")
-    $files | each { |f|
-      let content = (open --raw $f)
-      let id = ($f | path basename | str replace ".md" "")
-      {
-        type: $p
-        id: $id
-        name: (read_first_alias $content)
-        status: (read_field $content "status")
-        created: (read_field $content "created")
-        categories: (read_h1_categories $content)
+    let dirs = (type_dirs $root $p)
+    let active = ($dirs | first)
+    $dirs | each { |dir|
+      if not ($dir | path exists) { return [] }
+      let is_archived = ($dir != $active)
+      glob $"($dir)/($p)*.md" | each { |f|
+        let content = (open --raw $f)
+        let id = ($f | path basename | str replace ".md" "")
+        {
+          type: $p
+          id: $id
+          name: (read_first_alias $content)
+          status: (read_field $content "status")
+          created: (read_field $content "created")
+          categories: (read_h1_categories $content)
+          archived: $is_archived
+        }
       }
-    }
+    } | flatten
   } | flatten)
 
   if ($rows | is-empty) {

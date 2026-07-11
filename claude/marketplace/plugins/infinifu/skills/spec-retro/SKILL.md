@@ -40,7 +40,7 @@ The implementation card, new ADRs, updated features, new story drafts, and the p
 AKM_ROOT="$(akm-root)"
 ```
 
-`akm-root` returns the main-worktree path (default branch); outside git, cwd. Anchor every AKM path on `$AKM_ROOT` (`$AKM_ROOT/docs/notes/im<NNN>.md`, `$AKM_ROOT/docs/notes/adr<NNNN>.md`, `$AKM_ROOT/docs/notes/ft<NNN>.md`, `$AKM_ROOT/docs/notes/us<NNN>.md`, `$AKM_ROOT/docs/product.md`, `$AKM_ROOT/docs/notes/spec/sp<NNN>.md`). The diff itself (`git log` / `git diff`) is read from whichever worktree merged the work; only the AKM writes have to land under `$AKM_ROOT`. If `akm-root` errors, surface its stderr and abort — never silently land retro mutations on the feature branch.
+`akm-root` returns the main-worktree path (default branch); outside git, cwd. Anchor every AKM path on `$AKM_ROOT` (`$AKM_ROOT/docs/notes/im<NNN>.md`, `$AKM_ROOT/docs/notes/adr<NNNN>.md`, `$AKM_ROOT/docs/notes/ft<NNN>.md`, `$AKM_ROOT/docs/notes/us<NNN>.md`, `$AKM_ROOT/docs/product.md`, `$AKM_ROOT/docs/notes/archive/spec/sp<NNN>.md` — the delivered spec, relocated into the archive mirror by work-merge). The diff itself (`git log` / `git diff`) is read from whichever worktree merged the work; only the AKM writes have to land under `$AKM_ROOT`. If `akm-root` errors, surface its stderr and abort — never silently land retro mutations on the feature branch.
 
 spec-retro is a **transition skill that commits on main** per the AKM commit policy. The post-merge knowledge-graph refresh is multi-file and lands as one retrospective commit covering every zettel touched:
 
@@ -76,7 +76,7 @@ Stage 8 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Read shipped r
 ## Entry-specific checklist
 
 1. **Resolve AKM root.** `AKM_ROOT="$(akm-root)"` — every AKM path anchors on it. Abort with the helper's stderr if it errors.
-2. **Identify target sp###.** Verify `$AKM_ROOT/docs/notes/spec/sp###.md` shows `status: done` and the spec lives under `$AKM_ROOT/docs/archive.md ## done` (work-merge precondition). If status is anything else, route back to `work-merge`.
+2. **Identify target sp###.** Verify `$AKM_ROOT/docs/notes/archive/spec/sp###.md` shows `status: done` and the spec is listed under `$AKM_ROOT/docs/archive.md ## done` (work-merge relocated the delivered spec into the archive mirror and moved the board entry). If the file is still at `docs/notes/spec/sp###.md` or status is anything but `done`, work-merge hasn't run — route back to `work-merge`.
 3. **Read the shipped diff.** `git log <merge-base>..HEAD --oneline` and `git diff <merge-base>..HEAD` for files under `src/` plus any moved AKM zettels. The diff is the ground truth.
 4. **Compare diff vs spec.** Walk the `sp###.## tasks` blocks against the actual code change. For each task, note the file/function it landed in vs what the design predicted. Discrepancies feed the rewrite.
 5. **Re-read `$AKM_ROOT/docs/notes/im###.md`.** Confirm the `## approach` / `## components` / `## data_model` / `## api_surface` reflect shipped reality. List the sections that need rewriting.

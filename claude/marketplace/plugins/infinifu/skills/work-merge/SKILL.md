@@ -1,6 +1,6 @@
 ---
 name: work-merge
-description: "Use this when work-audit has just APPROVED a single bd task — auto-triggered from work-audit on the approved verdict, or invoked manually as 'merge bd-42', 'land task bd-7'. Per-task local landing: merges branch `bd-<id>.<N>` into base, runs tests, removes the worktree. If the closed task was the last open child of its parent epic, the skill also runs the epic finale — flips `us###.status: ready → done`, `im###.status: proposed → accepted`, `sp###.status: ready → done` + footer `Index: [[board]] → [[archive]]`, moves `[[sp###]]` from `docs/board.md` to `docs/archive.md ## done`, and closes the bd epic. All operations are LOCAL — no push, no PR. Remote sync is `spec-retro`'s job. Does NOT rewrite `im###` body, NOT mint new ADRs, NOT mint new draft stories — those are `spec-retro` scope."
+description: "Use this when work-audit has just APPROVED a single bd task — auto-triggered from work-audit on the approved verdict, or invoked manually as 'merge bd-42', 'land task bd-7'. Per-task local landing: merges branch `bd-<id>.<N>` into base, runs tests, removes the worktree. If the closed task was the last open child of its parent epic, the skill also runs the epic finale — flips `us###.status: ready → done`, `im###.status: proposed → accepted`, `sp###.status: ready → done` + footer `Index: [[board]] → [[archive]]`, relocates the spec file `docs/notes/spec/ → docs/notes/archive/spec/`, moves `[[sp###]]` from `docs/board.md` to `docs/archive.md ## done`, and closes the bd epic. All operations are LOCAL — no push, no PR. Remote sync is `spec-retro`'s job. Does NOT rewrite `im###` body, NOT mint new ADRs, NOT mint new draft stories — those are `spec-retro` scope."
 ---
 
 # Work Merge (per-task local land + epic finale)
@@ -65,7 +65,7 @@ Stage 7 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`).
 
 - Local merge commit on base: `merge: bd-<id>.<N>`.
 - Worktree removal + local branch deletion.
-- On epic finale: `sp###.md` / `us###.md` / `im###.md` frontmatter, `board.md`, `archive.md`, one `feat(akm): archive sp<NNN>` commit on `$AKM_ROOT`.
+- On epic finale: `sp###.md` / `us###.md` / `im###.md` frontmatter, spec file relocated `docs/notes/spec/ → docs/notes/archive/spec/`, `board.md`, `archive.md`, one `feat(akm): archive sp<NNN>` commit on `$AKM_ROOT`.
 - `bd close <epic-id>` on epic finale.
 
 ## Trigger contract
@@ -143,6 +143,7 @@ Script behavior (`scripts/archive-epic.sh`):
 
 - Flips `us###.status: ready → done`, `im###.status: proposed → accepted`, `sp###.status: ready → done`.
 - Flips `sp###` footer line `Index: [[board]] → [[archive]]`.
+- `git mv`s the delivered spec `docs/notes/spec/sp###.md → docs/notes/archive/spec/sp###.md` (the archive mirror; `spec/` then holds only active specs). akm id-allocation + alias lookup span both dirs, so the id stays reserved and the spec stays findable via `akm read`.
 - Removes `[[sp###...]]` line from `$AKM_ROOT/docs/board.md`.
 - Inserts `[[sp###...]]` under `$AKM_ROOT/docs/archive.md ## done`.
 - `bd close <epic-id> --reason "Merged via sp###. All child tasks closed by work-audit."`

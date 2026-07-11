@@ -7,7 +7,7 @@ description: Use when the user wants to see, list, find, or look up Specs — th
 
 ## Overview
 
-Read spec zettels under `docs/notes/spec/sp###.md` and present them in the format that best fits the user's question. Three output modes — pick one, don't combine.
+Read spec zettels (active under `docs/notes/spec/sp###.md`, delivered under `docs/notes/archive/spec/sp###.md`) and present them in the format that best fits the user's question. Reads go through the `akm` CLI, which spans both locations — never hardcode a path. Three output modes — pick one, don't combine.
 
 Note: specs are the board-citizen AKM type. Active ones (`idea` / `spec` / `ready`) appear in [[board]]; shipped ones (`done`) appear in [[archive]]. The footer flips accordingly.
 
@@ -249,7 +249,7 @@ When `$AKM_ROOT/docs/board.md` or `$AKM_ROOT/docs/archive.md` disagrees with `sp
 
 - It does not modify specs. To flip status / add solution / add tasks, use the corresponding lifecycle skill (`spec-writing`, `spec-refinement`, `spec-ready`, `work-merge`).
 - It does not run bd commands for the listed tasks. It only reports the `#### bd <id>` annotations as-recorded.
-- It does not move files between `docs/notes/spec/` and an archive location. Specs live in one place; only the footer and status field flip when archived.
+- It does not move files. Relocating a delivered spec into the archive mirror (`docs/notes/spec/` → `docs/notes/archive/spec/`, plus the footer + status flip) is `work-merge`'s epic finale, not this skill's job. This skill only *reads* both locations.
 
 ## When to Defer to Other Skills
 

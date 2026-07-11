@@ -51,6 +51,15 @@ flip_status "$SP_FILE" "ready"    "done"
 # sp### footer Index flip (whole file — footer is usually last line)
 sed -i 's/^Index: \[\[board\]\]$/Index: [[archive]]/' "$SP_FILE"
 
+# Physically relocate the delivered spec into the archive mirror
+# (docs/notes/archive/spec/) so spec/ holds only active specs. akm's
+# id-allocation + alias lookup span active + archive (see `type_dirs`), so the
+# id stays reserved and the zettel stays findable after the move. Done after the
+# in-place edits above; git mv carries the working-tree changes to the new path.
+SP_ARCHIVE="$AKM_ROOT/docs/notes/archive/spec/$SP.md"
+mkdir -p "$(dirname "$SP_ARCHIVE")"
+git -C "$AKM_ROOT" mv "$SP_FILE" "$SP_ARCHIVE"
+
 # Board → archive move. Match `[[sp###` to allow `[[sp012|title]]` aliases.
 SP_LINE="$(grep -E "\[\[$SP(\\||\\])" "$BOARD" || true)"
 if [ -n "$SP_LINE" ]; then
@@ -72,11 +81,13 @@ fi
 # Close the bd epic
 bd close "$EPIC" --reason "Merged via $SP. All child tasks closed by work-audit." >/dev/null
 
-# Commit the lifecycle flip as one AKM admin commit on main
+# Commit the lifecycle flip as one AKM admin commit on main. The git mv above
+# already staged the spec rename (old path deleted, new path added); re-add the
+# archive path so its in-place status/footer edits are staged too.
 git -C "$AKM_ROOT" add \
-  "$SP_FILE" "$US_FILE" "$IM_FILE" "$BOARD" "$ARCHIVE"
+  "$SP_ARCHIVE" "$US_FILE" "$IM_FILE" "$BOARD" "$ARCHIVE"
 git -C "$AKM_ROOT" commit -m "feat(akm): archive $SP"
 
 echo "---"
-echo "Archived: $SP → done, $US → done, $IM → accepted. Board → archive. Epic $EPIC closed."
+echo "Archived: $SP → done ($SP_ARCHIVE), $US → done, $IM → accepted. Board → archive. Epic $EPIC closed."
 echo "Next: run spec-retro for $SP to refresh AKM graph + push to remote."
