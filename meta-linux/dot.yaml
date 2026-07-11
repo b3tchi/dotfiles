@@ -11,6 +11,7 @@ depends:
   - ssh
   - claude
   - opencode
+  - akm-graph
   - wezterm
   - kitty
   - st
