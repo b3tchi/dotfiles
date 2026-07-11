@@ -771,7 +771,7 @@ def "main delete" [
       print -e $"  ($board) entry for ($id)"
     }
     let ans = (input "Proceed? [y/N]: ")
-    if ($ans | str downcase) != "y" {
+    if ($ans | str lowercase) != "y" {
       print -e "Aborted"
       return
     }
@@ -2390,7 +2390,7 @@ def "main bd import" [
     print -e $"Will replay ($jsonl) into local bd Dolt."
     print -e "This can resurrect closed issues if the jsonl is older than Dolt."
     let ans = (input "Proceed? [y/N]: ")
-    if ($ans | str downcase) != "y" {
+    if ($ans | str lowercase) != "y" {
       print -e "Aborted"
       return
     }
@@ -2434,7 +2434,7 @@ def "main bd archive create" [
 
   if not $yes {
     let ans = (input "Proceed? [y/N]: ")
-    if ($ans | str downcase) != "y" {
+    if ($ans | str lowercase) != "y" {
       print -e "Aborted"
       return
     }
