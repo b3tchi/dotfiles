@@ -114,15 +114,16 @@ func parseNote(absPath string) (Note, error) {
 // symlinks, so the AKM overview hub is picked up here via os.Stat (which follows
 // the link) instead of being dropped (dotfiles-2ry).
 //
-// docs/board.md and docs/product.md are intentionally excluded (dotfiles-t9v):
-// they are navigation/meta index pages, not knowledge zettels. Their [[board]] /
-// [[product]] back-links then fall to the non-zettel filter and are dropped.
+// docs/board.md, docs/archive.md, and docs/product.md are intentionally
+// excluded (dotfiles-t9v): they are navigation/meta index pages, not knowledge
+// zettels. Their [[board]] / [[archive]] / [[product]] back-links then fall to
+// the non-zettel filter and are dropped.
 var hubFiles = []string{"docs/notes/akm.md"}
 
-// WalkNotes walks root for all *.md files under docs/notes/** and the two hub
-// files docs/board.md and docs/product.md. root is the absolute path to the
-// dotfiles/akm-graph root — the function resolves notes paths relative to the
-// parent of root (i.e. root/..).
+// WalkNotes walks root for all *.md files under docs/notes/** plus the hub files
+// in hubFiles (currently only docs/notes/akm.md — a symlink the docs/notes walk
+// skips). root is the absolute path to the dotfiles repo root — the function
+// resolves notes paths relative to it.
 //
 // For the actual server use case, call WalkNotes(repoRoot) directly.
 func WalkNotes(repoRoot string) ([]Note, error) {
@@ -172,7 +173,7 @@ func WalkNotes(repoRoot string) ([]Note, error) {
 }
 
 // nodeTypeFromID derives the node type from the note ID prefix.
-// Hub notes (board, product) must be typed externally via isHub.
+// Hub notes (currently only akm) must be typed externally via isHub.
 func nodeTypeFromID(id string, isHub bool) string {
 	if isHub {
 		return "hub"
