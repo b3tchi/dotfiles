@@ -284,6 +284,63 @@ func TestBuildGraph_NodeAlias(t *testing.T) {
 	}
 }
 
+// TestBuildGraph_ArchivedFlag verifies Note.Archived propagates to Node.Archived
+// and that ghost targets are never archived.
+func TestBuildGraph_ArchivedFlag(t *testing.T) {
+	notes := []Note{
+		{ID: "sp001", FM: frontmatter{}, Links: []string{"sp999"}, Archived: false},
+		{ID: "sp002", FM: frontmatter{}, Links: []string{}, Archived: true},
+	}
+	g := BuildGraph(notes)
+	byID := make(map[string]Node)
+	for _, n := range g.Nodes {
+		byID[n.ID] = n
+	}
+	if byID["sp001"].Archived {
+		t.Errorf("sp001 archived: got true, want false")
+	}
+	if !byID["sp002"].Archived {
+		t.Errorf("sp002 archived: got false, want true")
+	}
+	if byID["sp999"].Archived {
+		t.Errorf("ghost sp999 archived: got true, want false (ghosts never archived)")
+	}
+}
+
+// TestWalkNotes_ArchivedFromPath verifies a note under docs/notes/archive/ is
+// flagged Archived while a sibling under docs/notes/ (or spec/) is not.
+func TestWalkNotes_ArchivedFromPath(t *testing.T) {
+	root := t.TempDir()
+	spec := filepath.Join(root, "docs", "notes", "spec")
+	archiveSpec := filepath.Join(root, "docs", "notes", "archive", "spec")
+	for _, d := range []string{spec, archiveSpec} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(spec, "sp001.md"), []byte("# active"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(archiveSpec, "sp002.md"), []byte("# retired"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := WalkNotes(root)
+	if err != nil {
+		t.Fatalf("WalkNotes: %v", err)
+	}
+	byID := make(map[string]Note)
+	for _, n := range got {
+		byID[n.ID] = n
+	}
+	if byID["sp001"].Archived {
+		t.Errorf("sp001 (docs/notes/spec) archived: got true, want false")
+	}
+	if !byID["sp002"].Archived {
+		t.Errorf("sp002 (docs/notes/archive/spec) archived: got false, want true")
+	}
+}
+
 // TestBuildGraphFromRoot_Fixture is the golden-file test.
 // Run with -update to regenerate the golden file.
 func TestBuildGraphFromRoot_Fixture(t *testing.T) {

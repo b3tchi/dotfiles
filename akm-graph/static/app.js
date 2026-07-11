@@ -45,9 +45,13 @@ const LINK_HIDDEN = [0, 0, 0, 0];   // link with a toggled-off endpoint disappea
 // and their links WITHOUT restarting the simulation (layout stays put).
 const activeTypes = new Set();  // types currently visible
 const knownTypes  = new Set();  // every type ever seen (so refreshes keep state)
+let showArchived = false;       // archived (retired) nodes hidden by default
 
 function typeVisible(t) { return activeTypes.has(t); }
-function nodeShown(n)   { return n && activeTypes.has(n.type); }
+// A node is shown only when its type is active AND (it's not archived, or the
+// archived toggle is on). Archived nodes/links share the same zero-radius +
+// transparent path as a toggled-off type via nodeSize/nodeColor/linkColor.
+function nodeShown(n)   { return n && activeTypes.has(n.type) && (showArchived || !n.archived); }
 
 // Resolve a link endpoint (id string OR node object) to its node record.
 function endpointNode(e) {
@@ -154,6 +158,26 @@ function typesPresent(nodes) {
 
 function buildLegend(nodes) {
   legendEl.textContent = "";
+  // Archived toggle chip — first in the column, only when archived nodes exist.
+  // Default off (archived hidden); click to reveal retired zettels.
+  const archivedCount = nodes.filter(n => n.archived).length;
+  if (archivedCount > 0) {
+    const chip = document.createElement("div");
+    chip.className = "legend-chip archived-chip" + (showArchived ? "" : " off");
+    chip.title = "Show archived (retired) zettels";
+    const swatch = document.createElement("span");
+    swatch.className = "legend-swatch";
+    swatch.style.background = "#8b949e";
+    const name = document.createElement("span");
+    name.className = "legend-name";
+    name.textContent = "archived";
+    const cnt = document.createElement("span");
+    cnt.className = "legend-count";
+    cnt.textContent = archivedCount;
+    chip.append(swatch, name, cnt);
+    chip.addEventListener("click", toggleArchived);
+    legendEl.appendChild(chip);
+  }
   for (const { type, count } of typesPresent(nodes)) {
     const chip = document.createElement("div");
     chip.className = "legend-chip" + (typeVisible(type) ? "" : " off");
@@ -189,6 +213,16 @@ function toggleType(type) {
   applyLabelVisibility();
   const chip = legendEl.querySelector(`.legend-chip[data-type="${type}"]`);
   if (chip) chip.classList.toggle("off", !typeVisible(type));
+}
+
+// Flip archived visibility. Same freeze-layout recompute as toggleType — the
+// archived nodes + their links appear/vanish via the nodeShown gate.
+function toggleArchived() {
+  showArchived = !showArchived;
+  if (graph) graph.setData(allNodes, allLinks, false);
+  applyLabelVisibility();
+  const chip = legendEl.querySelector(".archived-chip");
+  if (chip) chip.classList.toggle("off", !showArchived);
 }
 
 // positionLabels runs on every frame: project each node's graph-space position

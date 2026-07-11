@@ -27,6 +27,10 @@ type Note struct {
 	FM frontmatter
 	// Links is the list of wikilink targets extracted from the body.
 	Links []string
+	// Archived is true when the note lives under docs/notes/archive/ (a
+	// delivered spec or obsolete product zettel). Retired zettels stay in the
+	// graph but the viewer hides them by default.
+	Archived bool
 }
 
 // wikilinkRe matches [[target]], [[target|label]], [[target#section]],
@@ -128,6 +132,8 @@ var hubFiles = []string{"docs/notes/akm.md"}
 // For the actual server use case, call WalkNotes(repoRoot) directly.
 func WalkNotes(repoRoot string) ([]Note, error) {
 	notesDir := filepath.Join(repoRoot, "docs", "notes")
+	// Notes under this subtree are retired (delivered specs, obsolete product).
+	archivePrefix := filepath.Join(notesDir, "archive") + string(os.PathSeparator)
 	var notes []Note
 
 	// Walk docs/notes/**
@@ -147,6 +153,7 @@ func WalkNotes(repoRoot string) ([]Note, error) {
 				if err != nil {
 					return nil // skip unparseable
 				}
+				note.Archived = strings.HasPrefix(p, archivePrefix)
 				notes = append(notes, note)
 			}
 			return nil

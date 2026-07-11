@@ -6,12 +6,13 @@ import (
 
 // Node represents a single zettel node in the graph.
 type Node struct {
-	ID     string `json:"id"`
-	Type   string `json:"type"`
-	Status string `json:"status"`
-	Alias  string `json:"alias"`
-	Degree int    `json:"degree"`
-	Ghost  bool   `json:"ghost"`
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Status   string `json:"status"`
+	Alias    string `json:"alias"`
+	Degree   int    `json:"degree"`
+	Ghost    bool   `json:"ghost"`
+	Archived bool   `json:"archived"`
 }
 
 // Link represents a directed edge source → target.
@@ -22,7 +23,7 @@ type Link struct {
 
 // Graph is the full serialisable graph payload matching the ft004 api_surface:
 //
-//	{nodes: [{id, type, status, alias, degree, ghost}], links: [{source, target}]}
+//	{nodes: [{id, type, status, alias, degree, ghost, archived}], links: [{source, target}]}
 type Graph struct {
 	Nodes []Node `json:"nodes"`
 	Links []Link `json:"links"`
@@ -112,12 +113,13 @@ func BuildGraph(notes []Note) Graph {
 			alias = n.FM.Aliases[0]
 		}
 		nodes = append(nodes, Node{
-			ID:     n.ID,
-			Type:   nodeTypeFromID(n.ID, hubIDs[n.ID]),
-			Status: n.FM.Status,
-			Alias:  alias,
-			Degree: degree[n.ID],
-			Ghost:  false,
+			ID:       n.ID,
+			Type:     nodeTypeFromID(n.ID, hubIDs[n.ID]),
+			Status:   n.FM.Status,
+			Alias:    alias,
+			Degree:   degree[n.ID],
+			Ghost:    false,
+			Archived: n.Archived,
 		})
 	}
 

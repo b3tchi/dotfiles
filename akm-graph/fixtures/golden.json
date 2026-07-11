@@ -6,15 +6,17 @@
       "status": "",
       "alias": "",
       "degree": 1,
-      "ghost": false
+      "ghost": false,
+      "archived": false
     },
     {
       "id": "ft001",
       "type": "ft",
       "status": "proposed",
       "alias": "feature-one",
-      "degree": 4,
-      "ghost": false
+      "degree": 5,
+      "ghost": false,
+      "archived": false
     },
     {
       "id": "poc001",
@@ -22,7 +24,8 @@
       "status": "validated",
       "alias": "proof-of-concept-one",
       "degree": 2,
-      "ghost": false
+      "ghost": false,
+      "archived": false
     },
     {
       "id": "sp001",
@@ -30,15 +33,26 @@
       "status": "done",
       "alias": "spec-one",
       "degree": 3,
-      "ghost": false
+      "ghost": false,
+      "archived": false
+    },
+    {
+      "id": "sp002",
+      "type": "sp",
+      "status": "done",
+      "alias": "spec-two-archived",
+      "degree": 2,
+      "ghost": false,
+      "archived": true
     },
     {
       "id": "us001",
       "type": "us",
       "status": "ready",
       "alias": "story-one",
-      "degree": 5,
-      "ghost": false
+      "degree": 6,
+      "ghost": false,
+      "archived": false
     },
     {
       "id": "us999",
@@ -46,7 +60,8 @@
       "status": "",
       "alias": "",
       "degree": 1,
-      "ghost": true
+      "ghost": true,
+      "archived": false
     }
   ],
   "links": [
@@ -72,6 +87,14 @@
     },
     {
       "source": "sp001",
+      "target": "us001"
+    },
+    {
+      "source": "sp002",
+      "target": "ft001"
+    },
+    {
+      "source": "sp002",
       "target": "us001"
     },
     {
