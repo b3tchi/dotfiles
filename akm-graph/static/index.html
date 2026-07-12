@@ -3,10 +3,17 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Default render backend; ?backend=cosmos|force-graph overrides. The daemon
+       may rewrite content= from $AKM_GRAPH_BACKEND at serve time. -->
+  <meta name="akm-backend" content="force-graph" />
   <title>akm-graph</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 100%; height: 100%; overflow: hidden; background: #0d1117; }
+    /* graph-root hosts the active engine's canvas: cosmos draws into #canvas;
+       force-graph appends its own canvas here. Both fill the viewport. */
+    #graph-root { position: absolute; inset: 0; }
+    #graph-root canvas { display: block; width: 100%; height: 100%; }
     #canvas { display: block; width: 100%; height: 100%; }
     #tooltip {
       position: absolute;
@@ -109,7 +116,7 @@
   </style>
 </head>
 <body>
-  <canvas id="canvas"></canvas>
+  <div id="graph-root"><canvas id="canvas"></canvas></div>
   <div id="legend"></div>
   <div id="labels"></div>
   <div id="tooltip"></div>

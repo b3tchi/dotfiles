@@ -159,8 +159,17 @@ def main-status [] {
     $data | select pid root nodes links last_rebuild
 }
 
+# Resolve the render backend for the viewer URL: explicit --backend wins, then
+# $AKM_GRAPH_BACKEND, else empty (server-side meta default applies). Only the two
+# known engines pass through; anything else is dropped so the server default holds.
+def resolve-backend [flag: string] {
+    let raw = if ($flag | is-not-empty) { $flag } else { ($env | get -o AKM_GRAPH_BACKEND | default "") }
+    if $raw in ["cosmos" "force-graph"] { $raw } else { "" }
+}
+
 # Open the viewer page in the default browser, starting the daemon if it's down.
-def main-open [] {
+# --backend force-graph|cosmos appends ?backend= so this load picks that engine.
+def main-open [--backend: string = ""] {
     if (probe-status) == null {
         main-start
         # Give the freshly-launched daemon a moment to bind the port.
@@ -169,7 +178,8 @@ def main-open [] {
             sleep 100ms
         }
     }
-    let url = $"(api-base)/"
+    let be = (resolve-backend $backend)
+    let url = if ($be | is-not-empty) { $"(api-base)/?backend=($be)" } else { $"(api-base)/" }
     if (which xdg-open | is-not-empty) {
         ^xdg-open $url
         print $"akm-graph: opened ($url)"
@@ -180,21 +190,25 @@ def main-open [] {
 
 # akm-graph — control the akm-graph-d daemon
 def main [
-    subcommand?: string  # start | stop | status | open
+    subcommand?: string      # start | stop | status | open
+    --backend (-b): string = ""  # open: render engine — force-graph | cosmos
 ] {
     match $subcommand {
         "start"  => { main-start }
         "stop"   => { main-stop }
         "status" => { main-status }
-        "open"   => { main-open }
+        "open"   => { main-open --backend $backend }
         _ => {
-            print "Usage: akm-graph <subcommand>"
+            print "Usage: akm-graph <subcommand> [--backend force-graph|cosmos]"
             print ""
             print "Subcommands:"
             print "  start   — launch daemon (idempotent)"
             print "  stop    — stop daemon"
             print "  status  — daemon health (pid / root / counts / last rebuild)"
             print "  open    — open the viewer page in the browser (starts daemon if down)"
+            print ""
+            print "Flags:"
+            print "  --backend, -b   viewer render engine for 'open': force-graph (default) | cosmos"
         }
     }
 }

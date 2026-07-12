@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,12 +28,30 @@ const (
 
 // staticFS embeds the viewer assets so GET / and static paths serve from the
 // binary regardless of the working directory (us006 AC5, ft004 offline-safe).
-// Only the three viewer files are embedded — the smoke-test files (smoke.sh,
-// smoke-tooltip.html, graph.json) stay on disk, served by smoke.sh's own http
-// server, and must not bloat the daemon binary (dotfiles-blm).
+// Both render-engine bundles are embedded — the client loads only the one the
+// active backend needs (?backend= / AKM_GRAPH_BACKEND). The smoke-test files
+// (smoke.sh, smoke-tooltip.html, graph.json) stay on disk, served by smoke.sh's
+// own http server, and must not bloat the daemon binary (dotfiles-blm).
 //
-//go:embed static/index.html static/app.js static/cosmos-bundle.js
+//go:embed static/index.html static/app.js static/cosmos-bundle.js static/force-graph-bundle.js
 var staticFS embed.FS
+
+// defaultBackend is served in index.html's <meta name="akm-backend"> when
+// $AKM_GRAPH_BACKEND is unset. force-graph (2D canvas) is default: for a
+// ~100s-node graph it keeps the GPU cold at idle where cosmos.gl (WebGL) does not.
+const defaultBackend = "force-graph"
+
+// resolveBackend validates $AKM_GRAPH_BACKEND, falling back to defaultBackend.
+func resolveBackend() string {
+	switch os.Getenv("AKM_GRAPH_BACKEND") {
+	case "cosmos":
+		return "cosmos"
+	case "force-graph":
+		return "force-graph"
+	default:
+		return defaultBackend
+	}
+}
 
 // Status is the GET /api/status payload: daemon health snapshot.
 type Status struct {
@@ -57,6 +76,7 @@ type Server struct {
 	cancel context.CancelFunc
 
 	static   fs.FS
+	backend  string
 	hub      *Hub
 	upgrader websocket.Upgrader
 	watcher  *Watcher
@@ -77,11 +97,12 @@ func NewServer(repoRoot string) (*Server, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
-		root:   repoRoot,
-		ctx:    ctx,
-		cancel: cancel,
-		static: sub,
-		hub:    NewHub(),
+		root:    repoRoot,
+		ctx:     ctx,
+		cancel:  cancel,
+		static:  sub,
+		backend: resolveBackend(),
+		hub:     NewHub(),
 		// localhost-only tool — same no-auth stance as ft002; accept any origin.
 		upgrader: websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }},
 	}
@@ -129,8 +150,35 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/stop", s.handleStop)
 	mux.HandleFunc("/watch", s.handleWatch)
-	mux.Handle("/", noCache(http.FileServer(http.FS(s.static))))
+	fileServer := noCache(http.FileServer(http.FS(s.static)))
+	mux.Handle("/", noCache(s.indexHandler(fileServer)))
 	return mux
+}
+
+// indexHandler serves index.html with its <meta name="akm-backend"> content
+// rewritten to the resolved daemon default ($AKM_GRAPH_BACKEND), so a fresh page
+// load picks the right engine without a query param. All other paths fall through
+// to the embedded file server. The ?backend= query param still overrides client-side.
+func (s *Server) indexHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" && r.URL.Path != "/index.html" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		raw, err := fs.ReadFile(s.static, "index.html")
+		if err != nil {
+			next.ServeHTTP(w, r) // fall back to the file server on any read error
+			return
+		}
+		html := strings.Replace(
+			string(raw),
+			`<meta name="akm-backend" content="`+defaultBackend+`" />`,
+			`<meta name="akm-backend" content="`+s.backend+`" />`,
+			1,
+		)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(html))
+	})
 }
 
 // noCache stops the browser caching the viewer assets so a rebuilt daemon's

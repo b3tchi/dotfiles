@@ -45,44 +45,51 @@ trap 'kill $SERVER_PID 2>/dev/null' EXIT
 # Give server a moment to start
 sleep 1
 
-URL="http://localhost:${PORT}/index.html?fixture=graph.json"
+BASE_URL="http://localhost:${PORT}/index.html?fixture=graph.json"
 echo "Serving:  $STATIC_DIR"
-echo "URL:      $URL"
 echo "Chrome:   $CHROME"
 echo ""
 
-# Run headless Chrome, dump DOM
-# NOTE: do NOT add --disable-software-rasterizer — cosmos needs software WebGL
-DOM=$("$CHROME" \
-  --headless=new \
-  --disable-gpu \
-  --no-sandbox \
-  --virtual-time-budget=15000 \
-  --run-all-compositor-stages-before-draw \
-  --dump-dom \
-  "$URL" 2>/dev/null || true)
-
-# Extract <title>
-TITLE=$(echo "$DOM" | grep -oP '(?<=<title>)[^<]+' | head -1 || true)
-echo "document.title = '$TITLE'"
-
+# ── Stage 1: render assertion, both backends ────────────────────────────────────
+# Each engine must build the graph and set document.title = "OK nodes=N". The 2D
+# canvas backend (force-graph) renders fine under --disable-gpu; cosmos needs the
+# software WebGL path (do NOT add --disable-software-rasterizer).
 EXPECTED="OK nodes=${EXPECTED_NODES}"
-if [ "$TITLE" = "$EXPECTED" ]; then
-  echo "PASS: title matches '$EXPECTED'"
-else
-  echo "FAIL: expected '$EXPECTED', got '$TITLE'"
-  echo ""
-  echo "--- DOM snippet (first 2000 chars) ---"
-  echo "${DOM:0:2000}"
-  exit 1
-fi
+for BE in force-graph cosmos; do
+  URL="${BASE_URL}&backend=${BE}"
+  echo "Render [$BE]: $URL"
+  DOM=$("$CHROME" \
+    --headless=new \
+    --disable-gpu \
+    --no-sandbox \
+    --virtual-time-budget=15000 \
+    --run-all-compositor-stages-before-draw \
+    --dump-dom \
+    "$URL" 2>/dev/null || true)
+
+  TITLE=$(echo "$DOM" | grep -oP '(?<=<title>)[^<]+' | head -1 || true)
+  echo "  document.title = '$TITLE'"
+  if [ "$TITLE" = "$EXPECTED" ]; then
+    echo "  PASS [$BE]: title matches '$EXPECTED'"
+  else
+    echo "  FAIL [$BE]: expected '$EXPECTED', got '$TITLE'"
+    echo ""
+    echo "--- DOM snippet (first 2000 chars) ---"
+    echo "${DOM:0:2000}"
+    exit 1
+  fi
+done
+
+# Stages 2–3 below target the cosmos WebGL paint path specifically (tooltip
+# signature + 0–255 color normalization), so they pin ?backend=cosmos.
+URL="${BASE_URL}&backend=cosmos"
 
 # ── Stage 2: hover tooltip regression (us006 AC2) ───────────────────────────────
 # Drives the real cosmos v1 four-arg hover callback via window.__akmGraph and
 # asserts the tooltip lands at the cursor (non-NaN left/top) with id/alias/status
 # text. The title-only smoke could not catch the signature-mismatch bug; this can.
 echo ""
-TT_URL="http://localhost:${PORT}/smoke-tooltip.html?fixture=graph.json"
+TT_URL="http://localhost:${PORT}/smoke-tooltip.html?fixture=graph.json&backend=cosmos"
 echo "Tooltip:  $TT_URL"
 
 TT_DOM=$("$CHROME" \

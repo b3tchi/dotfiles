@@ -65,7 +65,7 @@ func TestEmbedViewerAssetsOnly(t *testing.T) {
 	srv := newTestServer(t)
 	h := srv.Handler()
 
-	served := []string{"/", "/app.js", "/cosmos-bundle.js"}
+	served := []string{"/", "/app.js", "/cosmos-bundle.js", "/force-graph-bundle.js"}
 	for _, p := range served {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, p, nil))
@@ -81,6 +81,34 @@ func TestEmbedViewerAssetsOnly(t *testing.T) {
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("GET %s: status %d, want 404 (test file must NOT be embedded)", p, rec.Code)
 		}
+	}
+}
+
+// TestBackendMetaDefault proves GET / serves the force-graph default in the
+// <meta name="akm-backend"> tag when $AKM_GRAPH_BACKEND is unset.
+func TestBackendMetaDefault(t *testing.T) {
+	t.Setenv("AKM_GRAPH_BACKEND", "")
+	srv := newTestServer(t)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if !strings.Contains(rec.Body.String(), `name="akm-backend" content="force-graph"`) {
+		t.Errorf("GET / default backend meta missing force-graph; body:\n%s", rec.Body.String())
+	}
+}
+
+// TestBackendMetaEnv proves $AKM_GRAPH_BACKEND=cosmos rewrites the served meta
+// tag so a fresh page load selects the WebGL backend without a query param.
+func TestBackendMetaEnv(t *testing.T) {
+	t.Setenv("AKM_GRAPH_BACKEND", "cosmos")
+	srv := newTestServer(t)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	body := rec.Body.String()
+	if !strings.Contains(body, `name="akm-backend" content="cosmos"`) {
+		t.Errorf("GET / with AKM_GRAPH_BACKEND=cosmos: meta not rewritten to cosmos; body:\n%s", body)
+	}
+	if strings.Contains(body, `content="force-graph"`) {
+		t.Errorf("GET / still advertises force-graph after cosmos override")
 	}
 }
 

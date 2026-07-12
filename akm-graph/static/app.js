@@ -1,10 +1,27 @@
 // akm-graph viewer — app.js
-// Cosmos v1 API: new Graph(canvas, config), graph.setData(nodes, links)
-// Graph JSON: {nodes:[{id,type,status,alias,degree,ghost}], links:[{source,target}]}
-
-import { Graph } from "./cosmos-bundle.js";
+//
+// Pluggable render backend: the data/legend/filter/tooltip/isolate/label layer is
+// backend-agnostic and drives ONE adapter interface. Two adapters ship:
+//   • cosmos      — cosmos.gl WebGL renderer (cosmos-bundle.js, ES module)
+//   • force-graph — Vasturiano force-graph 2D canvas (force-graph-bundle.js, UMD)
+// Backend is chosen by ?backend=force-graph|cosmos (default force-graph, or the
+// <meta name="akm-backend"> the server injects). force-graph is the default: for
+// a ~100s-node 2D graph, WebGL is overkill and its per-frame GPU readback +
+// always-on render loop keep the GPU hot at idle. The 2D canvas backend parks
+// both its layout engine and its render loop when idle → cold GPU.
+//
+// Adapter contract (see makeCosmosBackend / makeForceGraphBackend):
+//   init(rootEl, opts)              construct engine + wire events
+//   setData(nodes, links)           push data, (re)heat layout
+//   refresh()                       re-evaluate color/size accessors, NO relayout
+//   forEachScreenPos(cb)            cb(id, screenX, screenY) for every node
+//   isMoving() -> bool              layout still settling? (drives the label loop)
+//
+// Graph JSON: {nodes:[{id,type,status,alias,degree,ghost,archived}], links:[{source,target}]}
 
 // ── Color palette — one distinct color per node type ──────────────────────────
+// Authored as [r, g, b, a] in the 0–1 range for readability. Each backend
+// converts to its own native form (cosmos: 0–255 RGB; force-graph: CSS string).
 const TYPE_COLORS = {
   us:   [0.18, 0.60, 1.00, 1],   // blue      — user stories
   sp:   [0.50, 0.85, 0.50, 1],   // green     — specs
@@ -20,38 +37,27 @@ const TYPE_COLORS = {
 const GHOST_COLOR   = [0.50, 0.50, 0.55, 0.55];  // gray, semi-transparent
 const DEFAULT_COLOR = [0.65, 0.70, 0.75, 1.00];
 const HIDDEN_COLOR  = [0, 0, 0, 0];              // fully transparent — toggled-off type
+const LINK_RGBA     = [0.25, 0.30, 0.35, 0.6];
+const LINK_HIDDEN   = [0, 0, 0, 0];              // link with a toggled-off endpoint disappears
+const DIM_ALPHA     = 0.12;                       // greyout factor for non-selected nodes/links
 
 // Human-readable legend names + display order for the category toggle panel.
-// Any type not listed still gets a chip (falls back to the raw type code).
 const TYPE_LABELS = {
   us: "stories", sp: "specs", im: "impl", ft: "features", adr: "decisions",
   cat: "categories", poc: "pocs", pn: "personal", hub: "hubs", note: "notes",
 };
 const TYPE_ORDER = ["us", "sp", "im", "ft", "adr", "cat", "poc", "pn", "hub", "note"];
 
-// cosmos v1 normalizes array colors as [r/255, g/255, b/255, a] — it expects
-// RGB in the 0–255 range, alpha in 0–1. The palette above is authored in 0–1
-// for readability, so scale RGB to 0–255 on the way out (alpha untouched).
-// Without this every color collapses to ~black and links vanish on the dark bg.
-function rgba255(c) {
-  return [c[0] * 255, c[1] * 255, c[2] * 255, c[3]];
-}
-const LINK_COLOR  = rgba255([0.25, 0.30, 0.35, 0.6]);
-const LINK_HIDDEN = [0, 0, 0, 0];   // link with a toggled-off endpoint disappears
-
-// ── Category toggle state ────────────────────────────────────────────────────
-// activeTypes holds the node types currently shown. Toggling a legend chip
-// adds/removes a type here, then a setData(...,false) recompute hides the nodes
-// and their links WITHOUT restarting the simulation (layout stays put).
-const activeTypes = new Set();  // types currently visible
-const knownTypes  = new Set();  // every type ever seen (so refreshes keep state)
-let showArchived = false;       // archived (retired) nodes hidden by default
+// ── Category toggle + selection state ────────────────────────────────────────
+const activeTypes  = new Set();  // types currently visible
+const knownTypes   = new Set();  // every type ever seen (so refreshes keep state)
+let   showArchived = false;      // archived (retired) nodes hidden by default
+let   selectedKeep = null;       // null = no isolate; else Set of kept ids (self+adjacent)
 
 function typeVisible(t) { return activeTypes.has(t); }
 // A node is shown only when its type is active AND (it's not archived, or the
-// archived toggle is on). Archived nodes/links share the same zero-radius +
-// transparent path as a toggled-off type via nodeSize/nodeColor/linkColor.
-function nodeShown(n)   { return n && activeTypes.has(n.type) && (showArchived || !n.archived); }
+// archived toggle is on).
+function nodeShown(n) { return n && activeTypes.has(n.type) && (showArchived || !n.archived); }
 
 // Resolve a link endpoint (id string OR node object) to its node record.
 function endpointNode(e) {
@@ -59,11 +65,12 @@ function endpointNode(e) {
   const id = (typeof e === "object" && e.id != null) ? e.id : e;
   return nodeIndex[id] || (typeof e === "object" ? e : null);
 }
+function endpointId(e) {
+  if (e == null) return null;
+  return (typeof e === "object" && e.id != null) ? e.id : e;
+}
 
 // ── Size by degree ─────────────────────────────────────────────────────────────
-// Nodes are sized by degree but floored at MIN_SIZE so even a 0-degree node is
-// clearly visible (the country-borders demo look: every node a legible dot,
-// hubs noticeably larger).
 const MIN_SIZE  = 3;
 const BASE_SIZE = 3;
 const MAX_SIZE  = 10;
@@ -76,18 +83,28 @@ function nodeSize(n) {
   return Math.max(s, MIN_SIZE);
 }
 
-function nodeColor(n) {
-  if (!nodeShown(n)) return rgba255(HIDDEN_COLOR);
-  if (n.ghost) return rgba255(GHOST_COLOR);
-  return rgba255(TYPE_COLORS[n.type] || DEFAULT_COLOR);
+// Canonical node color as [r,g,b,a] in 0–1. Gates on visibility + isolate state;
+// the backend adapter converts this to its native color form.
+function nodeRGBA(n) {
+  if (!nodeShown(n)) return HIDDEN_COLOR;
+  let c = n.ghost ? GHOST_COLOR : (TYPE_COLORS[n.type] || DEFAULT_COLOR);
+  if (selectedKeep && !selectedKeep.has(n.id)) c = [c[0], c[1], c[2], c[3] * DIM_ALPHA];
+  return c;
 }
 
-// Link color accessor: a link vanishes if either endpoint's type is toggled off.
-function linkColor(l) {
+// Canonical link color: vanishes if either endpoint is toggled off; dims if an
+// isolate is active and the link isn't fully inside the kept neighborhood.
+function linkRGBA(l) {
   const s = endpointNode(l && l.source);
   const t = endpointNode(l && l.target);
   if ((s && !nodeShown(s)) || (t && !nodeShown(t))) return LINK_HIDDEN;
-  return LINK_COLOR;
+  if (selectedKeep) {
+    const sid = endpointId(l && l.source), tid = endpointId(l && l.target);
+    if (!selectedKeep.has(sid) || !selectedKeep.has(tid)) {
+      return [LINK_RGBA[0], LINK_RGBA[1], LINK_RGBA[2], LINK_RGBA[3] * DIM_ALPHA];
+    }
+  }
+  return LINK_RGBA;
 }
 
 // CSS rgb() string for a node's type — used to tint its persistent label pill.
@@ -97,8 +114,8 @@ function cssColor(n) {
 }
 
 // ── Persistent node labels (HTML overlay) ───────────────────────────────────────
-// cosmos core has no text labels, so we render one HTML pill per node and sync
-// it to the node's screen position every animation frame (country-borders look).
+// Neither backend draws text, so we render one HTML pill per node and sync it to
+// the node's screen position while the graph moves (see the label loop below).
 const labelsEl = document.getElementById("labels");
 let labelEls = {};       // id → pill element
 let labelRAF = null;
@@ -119,29 +136,37 @@ function buildLabels(nodes) {
 }
 
 // ── Selection: isolate a node + its direct neighbors ────────────────────────────
-// cosmos greys out non-selected nodes/links (nodeGreyoutOpacity/linkGreyoutOpacity);
-// we mirror that on the HTML labels via a .dim class.
-function selectNode(id) {
-  if (!graph) return;
-  graph.selectNodeById(id, true);   // node + adjacent selected, rest greyed
+// Backend-agnostic: compute the kept neighborhood from the link list, stash it in
+// selectedKeep (the color accessors greyout everything else), then refresh the
+// render + mirror the dim on the HTML labels.
+function neighborsOf(id) {
   const keep = new Set([id]);
-  let adj;
-  try { adj = graph.getAdjacentNodes(id); } catch (e) { adj = null; }
-  if (adj) for (const a of adj) keep.add(a.id);
-  for (const [nid, el] of Object.entries(labelEls)) {
-    el.classList.toggle("dim", !keep.has(nid));
+  for (const l of allLinks) {
+    const s = endpointId(l.source), t = endpointId(l.target);
+    if (s === id) keep.add(t);
+    if (t === id) keep.add(s);
   }
+  return keep;
+}
+
+function selectNode(id) {
+  if (!backend) return;
+  selectedKeep = neighborsOf(id);
+  backend.refresh();
+  for (const [nid, el] of Object.entries(labelEls)) {
+    el.classList.toggle("dim", !selectedKeep.has(nid));
+  }
+  pumpLabels();
 }
 
 function clearSelection() {
-  if (graph) graph.unselectNodes();
+  selectedKeep = null;
+  if (backend) backend.refresh();
   for (const el of Object.values(labelEls)) el.classList.remove("dim");
+  pumpLabels();
 }
 
 // ── Category legend (type toggle) ───────────────────────────────────────────────
-// One chip per node type present. Clicking a chip flips that type's membership
-// in activeTypes, then re-pushes the same data with runSimulation=false so the
-// GPU buffers (color/size) recompute against the new state but positions freeze.
 const legendEl = document.getElementById("legend");
 let allNodes = [];
 let allLinks = [];
@@ -150,7 +175,6 @@ function typesPresent(nodes) {
   const counts = {};
   for (const n of nodes) counts[n.type] = (counts[n.type] || 0) + 1;
   const seen = Object.keys(counts);
-  // known order first, then any stragglers alphabetically
   const ordered = TYPE_ORDER.filter(t => t in counts)
     .concat(seen.filter(t => !TYPE_ORDER.includes(t)).sort());
   return ordered.map(t => ({ type: t, count: counts[t] }));
@@ -159,7 +183,6 @@ function typesPresent(nodes) {
 function buildLegend(nodes) {
   legendEl.textContent = "";
   // Archived toggle chip — first in the column, only when archived nodes exist.
-  // Default off (archived hidden); click to reveal retired zettels.
   const archivedCount = nodes.filter(n => n.archived).length;
   if (archivedCount > 0) {
     const chip = document.createElement("div");
@@ -208,54 +231,55 @@ function applyLabelVisibility() {
 function toggleType(type) {
   if (activeTypes.has(type)) activeTypes.delete(type);
   else activeTypes.add(type);
-  // recompute node/link buffers without restarting the layout
-  if (graph) graph.setData(allNodes, allLinks, false);
+  if (backend) backend.refresh();   // recompute color/size, freeze layout
   applyLabelVisibility();
+  pumpLabels();
   const chip = legendEl.querySelector(`.legend-chip[data-type="${type}"]`);
   if (chip) chip.classList.toggle("off", !typeVisible(type));
 }
 
-// Flip archived visibility. Same freeze-layout recompute as toggleType — the
-// archived nodes + their links appear/vanish via the nodeShown gate.
 function toggleArchived() {
   showArchived = !showArchived;
-  if (graph) graph.setData(allNodes, allLinks, false);
+  if (backend) backend.refresh();
   applyLabelVisibility();
+  pumpLabels();
   const chip = legendEl.querySelector(".archived-chip");
   if (chip) chip.classList.toggle("off", !showArchived);
 }
 
-// positionLabels runs on every frame: project each node's graph-space position
-// to screen coordinates and park its pill just above the dot.
-function positionLabels() {
-  labelRAF = requestAnimationFrame(positionLabels);
-  if (!graph) return;
-  let positions;
-  try { positions = graph.getNodePositionsMap(); } catch (e) { return; }
-  if (!positions) return;
-  const entries = positions instanceof Map ? positions : Object.entries(positions);
-  for (const [id, pos] of entries) {
+// ── Label loop ──────────────────────────────────────────────────────────────────
+// syncLabels does ONE projection pass. positionLabels is self-terminating: it
+// reschedules only while the layout is still moving, so at idle the loop parks and
+// does no per-frame work. pumpLabels wakes it for a single frame; a live gesture
+// keeps calling pumpLabels (via the backend's per-transform zoom event) so labels
+// track the camera without a sticky "is-panning" flag that could get stuck on.
+function syncLabels() {
+  if (!backend) return;
+  backend.forEachScreenPos((id, x, y) => {
     const el = labelEls[id];
-    if (!el || !pos) continue;
-    let screen;
-    try { screen = graph.spaceToScreenPosition([pos[0], pos[1]]); } catch (e) { continue; }
-    if (!screen) continue;
+    if (!el) return;
     el.style.transform =
-      `translate(${Math.round(screen[0])}px, ${Math.round(screen[1])}px) translate(-50%, -190%)`;
+      `translate(${Math.round(x)}px, ${Math.round(y)}px) translate(-50%, -190%)`;
+  });
+}
+
+function positionLabels() {
+  labelRAF = null;
+  syncLabels();
+  if (backend && backend.isMoving()) {
+    labelRAF = requestAnimationFrame(positionLabels);
   }
 }
 
-function startLabelLoop() {
-  if (labelRAF == null) positionLabels();
+function pumpLabels() {
+  if (labelRAF == null && backend) labelRAF = requestAnimationFrame(positionLabels);
 }
-
-// ── State ──────────────────────────────────────────────────────────────────────
-let graph = null;       // cosmos Graph instance
-let nodeIndex = {};     // id → node, for tooltip lookup
 
 // ── Tooltip ────────────────────────────────────────────────────────────────────
 const tooltipEl = document.getElementById("tooltip");
 const statusEl  = document.getElementById("status");
+let lastPointer = [0, 0];   // latest cursor position, for backends that omit the event
+window.addEventListener("mousemove", (e) => { lastPointer = [e.clientX, e.clientY]; });
 
 function showTooltip(node, x, y) {
   if (!node) { tooltipEl.style.display = "none"; return; }
@@ -267,7 +291,6 @@ function showTooltip(node, x, y) {
     (node.status ? ` · ${escHtml(node.status)}` : "") +
     (node.ghost ? ` · <em>dangling</em>` : "") +
     `</div>`;
-  // keep tooltip within viewport
   const pad = 12;
   const tw = 270, th = 80;
   let tx = x + pad, ty = y - th / 2;
@@ -278,20 +301,14 @@ function showTooltip(node, x, y) {
   tooltipEl.style.top     = `${ty}px`;
   tooltipEl.style.display = "block";
 }
-
 function hideTooltip() { tooltipEl.style.display = "none"; }
 
-// Resolve cursor screen coordinates from cosmos' hover callback args.
-// Prefer the real MouseEvent (ev.clientX/clientY); fall back to the
-// screen-space `position` [x, y] array cosmos passes as the 3rd arg.
+// Resolve cursor screen coordinates: prefer a real MouseEvent, then a cosmos
+// screen-space [x,y] array, else the last tracked pointer.
 function cursorXY(pos, ev) {
-  if (ev && Number.isFinite(ev.clientX) && Number.isFinite(ev.clientY)) {
-    return [ev.clientX, ev.clientY];
-  }
-  if (Array.isArray(pos) && Number.isFinite(pos[0]) && Number.isFinite(pos[1])) {
-    return [pos[0], pos[1]];
-  }
-  return [0, 0];
+  if (ev && Number.isFinite(ev.clientX) && Number.isFinite(ev.clientY)) return [ev.clientX, ev.clientY];
+  if (Array.isArray(pos) && Number.isFinite(pos[0]) && Number.isFinite(pos[1])) return [pos[0], pos[1]];
+  return lastPointer;
 }
 
 function escHtml(s) {
@@ -302,100 +319,202 @@ function escHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
-// ── Hover handler (cosmos v1 four-arg callback) ─────────────────────────────────
-// Exposed via window.__akmGraph for the smoke test so it can drive the exact
-// callback cosmos invokes — (node, index, position, currentEvent) — without a
-// real WebGL pointer event.
-function handleNodeMouseOver(n, i, pos, ev) {
+// Shared hover handler — both backends funnel node-over here with whatever
+// position info they carry.
+function handleNodeMouseOver(n, pos, ev) {
   if (!n) return;
   const nd = nodeIndex[n.id] || n;
   const [x, y] = cursorXY(pos, ev);
   showTooltip(nd, x, y);
 }
 
-// ── Init cosmos ────────────────────────────────────────────────────────────────
-function initGraph() {
-  const canvas = document.getElementById("canvas");
-  graph = new Graph(canvas, {
-    backgroundColor:  "#0d1117",
-    spaceSize:        4096,
-    nodeColor:        n => nodeColor(n),
-    nodeSize:         n => nodeSize(n),
-    nodeSizeScale:    1,
-    scaleNodesOnZoom: false,          // fixed screen-size dots — crisp, no ballooning at fit-zoom
-    linkColor:        l => linkColor(l),
-    linkWidth:        1.1,
-    curvedLinks:      false,          // straight, direct edges between nodes
-    fitViewOnInit:    true,           // frame the whole graph on load
-    nodeGreyoutOpacity: 0.1,          // dim non-selected nodes on click-isolate
-    linkGreyoutOpacity: 0.1,
-    // Force-directed spread: stronger repulsion + light gravity pushes clusters
-    // apart into a legible 2D map instead of a tight central blob. decay left at
-    // the cosmos default (1000) so the layout settles instead of jittering
-    // forever (the old 100000 never cooled).
-    simulation: {
-      repulsion:      1.3,
-      repulsionTheta: 1.7,
-      linkSpring:     1.2,
-      linkDistance:   10,
-      gravity:        0.25,
-      decay:          3000,
-      friction:       0.85,
+// ── State ──────────────────────────────────────────────────────────────────────
+let backend   = null;   // active render-backend adapter
+let nodeIndex = {};     // id → node, for tooltip lookup
+
+// ── Backend adapter: cosmos.gl (WebGL) ──────────────────────────────────────────
+function rgba255(c) { return [c[0] * 255, c[1] * 255, c[2] * 255, c[3]]; }
+
+function makeCosmosBackend(Graph) {
+  let g = null;
+  let curNodes = [], curLinks = [];
+  return {
+    init(rootEl, opts) {
+      const canvas = rootEl.querySelector("canvas") || rootEl;
+      g = new Graph(canvas, {
+        backgroundColor:  "#0d1117",
+        spaceSize:        4096,
+        nodeColor:        n => rgba255(opts.nodeRGBA(n)),
+        nodeSize:         n => opts.nodeSize(n),
+        nodeSizeScale:    1,
+        scaleNodesOnZoom: false,
+        linkColor:        l => rgba255(opts.linkRGBA(l)),
+        linkWidth:        opts.linkWidth,
+        curvedLinks:      false,
+        fitViewOnInit:    true,
+        simulation: {
+          repulsion:      opts.sim.repulsion,
+          repulsionTheta: 1.7,
+          linkSpring:     opts.sim.linkSpring,
+          linkDistance:   opts.sim.linkDistance,
+          gravity:        opts.sim.gravity,
+          decay:          opts.sim.decay,
+          friction:       opts.sim.friction,
+          onStart:        () => opts.onEngStart(),
+          onEnd:          () => opts.onEngEnd(),
+        },
+        events: {
+          onNodeMouseOver: (n, i, pos, ev) => opts.onHover(n, pos, ev),
+          onNodeMouseOut:  () => opts.onOut(),
+          onClick:         (node) => opts.onClick(node && node.id != null ? node : null),
+          onZoom:          () => opts.onCamNudge(),   // fires per transform → one label sync each
+          onZoomEnd:       () => opts.onCamNudge(),   // final settle sync
+        },
+      });
     },
-    events: {
-      // Cosmos v1 invokes this with FOUR args:
-      //   (node, index, position, currentEvent)
-      // where `position` is a screen-space [x, y] array and `ev` is the
-      // MouseEvent. Bind all four — earlier (n, i, e) silently aliased the
-      // position array onto `e`, so e.clientX was undefined → NaN px.
-      onNodeMouseOver: handleNodeMouseOver,
-      onNodeMouseOut() { hideTooltip(); },
-      // Click a node -> isolate it + direct neighbors; click empty space -> reset.
-      onClick(node) {
-        if (node && node.id != null) selectNode(node.id);
-        else clearSelection();
-      },
+    setData(nodes, links) {
+      curNodes = nodes; curLinks = links;
+      g.setData(nodes, links);
     },
-  });
-  return graph;
+    refresh() { if (g) g.setData(curNodes, curLinks, false); },
+    forEachScreenPos(cb) {
+      if (!g) return;
+      let positions;
+      try { positions = g.getNodePositionsMap(); } catch (e) { return; }
+      if (!positions) return;
+      const entries = positions instanceof Map ? positions : Object.entries(positions);
+      for (const [id, pos] of entries) {
+        if (!pos) continue;
+        let screen;
+        try { screen = g.spaceToScreenPosition([pos[0], pos[1]]); } catch (e) { continue; }
+        if (screen) cb(id, screen[0], screen[1]);
+      }
+    },
+    isMoving() { return !!(g && g.isSimulationRunning); },
+  };
 }
 
-// ── Render data ────────────────────────────────────────────────────────────────
+// ── Backend adapter: force-graph (2D canvas) ────────────────────────────────────
+function cssRGBA(c) {
+  return `rgba(${Math.round(c[0] * 255)}, ${Math.round(c[1] * 255)}, ${Math.round(c[2] * 255)}, ${c[3]})`;
+}
+
+function makeForceGraphBackend(ForceGraph) {
+  let fg = null;
+  let engineRunning = false;
+  let curNodes = [];
+  let idleTimer = null;
+  let needsFit = false;   // frame the whole graph once after the first layout settles
+
+  // Park the render loop once the layout has cooled AND the user has gone idle;
+  // any pointer/wheel activity resumes it. This is what keeps the 2D canvas from
+  // repainting a static scene 60fps forever.
+  function schedulePark() {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      if (!engineRunning) fg.pauseAnimation();
+    }, 400);
+  }
+  function wake() {
+    if (!fg) return;
+    fg.resumeAnimation();
+    schedulePark();
+  }
+
+  return {
+    init(rootEl, opts) {
+      fg = ForceGraph()(rootEl)
+        .backgroundColor("#0d1117")
+        .nodeRelSize(1)
+        .nodeVal(n => { const r = opts.nodeSize(n); return r * r; })  // radius = sqrt(val)*relSize
+        .nodeColor(n => cssRGBA(opts.nodeRGBA(n)))
+        .linkColor(l => cssRGBA(opts.linkRGBA(l)))
+        .linkWidth(opts.linkWidth)
+        .warmupTicks(0)
+        .cooldownTicks(200)
+        .onNodeHover(node => { if (node) opts.onHover(node, null, null); else opts.onOut(); })
+        .onNodeClick(node => opts.onClick(node || null))
+        .onBackgroundClick(() => opts.onClick(null))
+        .onZoom(() => { wake(); opts.onCamNudge(); })     // per transform: keep drawing + sync labels
+        .onZoomEnd(() => opts.onCamNudge())
+        .onEngineStop(() => {
+          engineRunning = false;
+          if (needsFit) { needsFit = false; fg.zoomToFit(400, 40); }  // frame graph on first settle (cosmos fitViewOnInit parity)
+          opts.onEngEnd();
+          schedulePark();
+        });
+
+      // Map cosmos-scale sim params onto d3-force. repulsion → charge strength,
+      // linkDistance → link distance, gravity → center pull. Values are tuned so
+      // clusters spread into a legible 2D map rather than a central blob.
+      const charge = fg.d3Force("charge");
+      if (charge) charge.strength(-opts.sim.repulsion * 120).theta(0.9);
+      const link = fg.d3Force("link");
+      if (link) link.distance(opts.sim.linkDistance * 3);
+      fg.d3VelocityDecay(1 - opts.sim.friction);
+
+      // Resume the render loop on any interaction; re-park after a short idle.
+      for (const ev of ["pointerdown", "pointermove", "wheel"]) {
+        rootEl.addEventListener(ev, wake, { passive: true });
+      }
+    },
+    setData(nodes, links) {
+      if (curNodes.length === 0) needsFit = true;   // first load only: fit once, like cosmos fitViewOnInit
+      curNodes = nodes;
+      // force-graph mutates node objects (adds x/y/vx/vy); pushing new data reheats.
+      fg.graphData({ nodes, links });
+      engineRunning = true;
+      wake();
+    },
+    refresh() {
+      if (!fg) return;
+      // Re-register the accessors so force-graph repaints without reheating layout.
+      fg.nodeColor(fg.nodeColor()).nodeVal(fg.nodeVal()).linkColor(fg.linkColor());
+      wake();
+    },
+    forEachScreenPos(cb) {
+      if (!fg) return;
+      for (const n of curNodes) {
+        if (n.x == null || n.y == null) continue;
+        const p = fg.graph2ScreenCoords(n.x, n.y);
+        if (p) cb(n.id, p.x, p.y);
+      }
+    },
+    isMoving() { return engineRunning; },
+  };
+}
+
+// ── Render data ──────────────────────────────────────────────────────────────────
 function renderData(data) {
   if (!data || !Array.isArray(data.nodes)) return;
   const nodes = data.nodes;
   const links = data.links || [];
 
-  // rebuild index
   nodeIndex = {};
   for (const n of nodes) nodeIndex[n.id] = n;
 
-  // stash full data for the category filter; newly-seen types start visible
   allNodes = nodes;
   allLinks = links;
   for (const n of nodes) {
     if (!knownTypes.has(n.type)) { knownTypes.add(n.type); activeTypes.add(n.type); }
   }
+  selectedKeep = null;   // fresh data clears any isolate
 
-  graph.setData(nodes, links);
+  backend.setData(nodes, links);
   buildLabels(nodes);
   buildLegend(nodes);
   applyLabelVisibility();
-  startLabelLoop();
+  pumpLabels();
 
-  // update document title with node count for smoke test
   document.title = `OK nodes=${nodes.length}`;
   statusEl.textContent = `nodes: ${nodes.length}  links: ${links.length}`;
 }
 
 // ── Fetch initial graph ────────────────────────────────────────────────────────
 async function fetchGraph() {
-  // Support a ?fixture=path query param (for smoke tests and dev):
-  //   ?fixture=graph.json  -> fetches ./graph.json instead of /api/graph
   const params = new URLSearchParams(window.location.search);
   const fixture = params.get("fixture");
   const url = fixture ? `./${fixture}` : "/api/graph";
-
   try {
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -408,62 +527,92 @@ async function fetchGraph() {
 }
 
 // ── WebSocket with exponential backoff ────────────────────────────────────────
-let wsDelay   = 1000;
-const WS_MAX  = 30000;
-let wsTimer   = null;
+let wsDelay = 1000;
+const WS_MAX = 30000;
+let wsTimer = null;
 
 function connectWS() {
   if (wsTimer) { clearTimeout(wsTimer); wsTimer = null; }
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  const url   = `${proto}://${location.host}/watch`;
+  const url = `${proto}://${location.host}/watch`;
   let ws;
-  try {
-    ws = new WebSocket(url);
-  } catch (e) {
-    scheduleReconnect();
-    return;
-  }
-
-  ws.onopen = () => {
-    wsDelay = 1000;
-  };
-
+  try { ws = new WebSocket(url); } catch (e) { scheduleReconnect(); return; }
+  ws.onopen = () => { wsDelay = 1000; };
   ws.onmessage = (evt) => {
-    try {
-      const data = JSON.parse(evt.data);
-      renderData(data);
-    } catch (e) {
-      console.warn("akm-graph: invalid ws payload");
-    }
+    try { renderData(JSON.parse(evt.data)); }
+    catch (e) { console.warn("akm-graph: invalid ws payload"); }
   };
-
-  ws.onclose = () => {
-    scheduleReconnect();
-  };
-
-  ws.onerror = () => {
-    // onerror is always followed by onclose; don't log to avoid spam
-  };
+  ws.onclose = () => { scheduleReconnect(); };
+  ws.onerror = () => {};   // always followed by onclose; don't log to avoid spam
 }
 
 function scheduleReconnect() {
   if (wsTimer) return;
-  wsTimer = setTimeout(() => {
-    wsTimer = null;
-    connectWS();
-  }, wsDelay);
+  wsTimer = setTimeout(() => { wsTimer = null; connectWS(); }, wsDelay);
   wsDelay = Math.min(wsDelay * 2, WS_MAX);
 }
 
-// ── Bootstrap ──────────────────────────────────────────────────────────────────
-initGraph();
-fetchGraph();
-connectWS();
+// ── Backend selection + bootstrap ───────────────────────────────────────────────
+function resolveBackendName() {
+  const q = new URLSearchParams(location.search).get("backend");
+  if (q === "cosmos" || q === "force-graph") return q;
+  const meta = document.querySelector('meta[name="akm-backend"]');
+  const m = meta && meta.getAttribute("content");
+  if (m === "cosmos" || m === "force-graph") return m;
+  return "force-graph";
+}
 
-// Test hook — lets the headless smoke test drive the real hover handler with a
-// synthetic cosmos-shaped 4-arg call and inspect tooltip state.
+function loadScript(src) {
+  return new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = src; s.onload = res; s.onerror = () => rej(new Error(`load ${src}`));
+    document.head.appendChild(s);
+  });
+}
+
+async function makeBackend(name) {
+  if (name === "cosmos") {
+    const mod = await import("./cosmos-bundle.js");
+    return makeCosmosBackend(mod.Graph);
+  }
+  await loadScript("./force-graph-bundle.js");
+  return makeForceGraphBackend(window.ForceGraph);
+}
+
+// The accessor + event bundle every adapter is initialised with.
+const backendOpts = {
+  nodeRGBA, linkRGBA, nodeSize, linkWidth: 1.1,
+  sim: { repulsion: 1.3, linkSpring: 1.2, linkDistance: 10, gravity: 0.25, decay: 3000, friction: 0.85 },
+  onHover: handleNodeMouseOver,
+  onOut:   hideTooltip,
+  onClick: (node) => { if (node && node.id != null) selectNode(node.id); else clearSelection(); },
+  onCamNudge: () => pumpLabels(),   // one label sync per camera transform event
+  onEngStart: () => pumpLabels(),
+  onEngEnd:   () => pumpLabels(),
+};
+
+async function boot() {
+  const name = resolveBackendName();
+  const rootEl = document.getElementById("graph-root");
+  try {
+    backend = await makeBackend(name);
+  } catch (e) {
+    console.error("akm-graph: backend load failed:", name, e);
+    statusEl.textContent = `backend load failed: ${name}`;
+    return;
+  }
+  backend.init(rootEl, backendOpts);
+  statusEl.dataset.backend = name;
+  fetchGraph();
+  connectWS();
+  window.addEventListener("resize", () => pumpLabels());
+}
+
+boot();
+
+// Test hook — lets the headless smoke test drive handlers without real events.
 window.__akmGraph = {
-  onNodeMouseOver: handleNodeMouseOver,
+  onNodeMouseOver: (n, i, pos, ev) => handleNodeMouseOver(n, pos, ev),
   onNodeMouseOut: hideTooltip,
   nodeById: (id) => nodeIndex[id],
   tooltipState: () => ({
@@ -472,7 +621,6 @@ window.__akmGraph = {
     top: tooltipEl.style.top,
     text: tooltipEl.textContent,
   }),
-  // Selection hooks for the smoke test (drive isolate without a real click).
   selectNode,
   clearSelection,
   dimState: () => {
@@ -480,7 +628,6 @@ window.__akmGraph = {
     const dim = Object.values(labelEls).filter((el) => el.classList.contains("dim")).length;
     return { total, dim, lit: total - dim };
   },
-  // Category-toggle hooks for the smoke test.
   toggleType,
   filterState: () => {
     const total = Object.keys(labelEls).length;
@@ -493,4 +640,5 @@ window.__akmGraph = {
       shown: total - hidden,
     };
   },
+  backendName: () => (statusEl.dataset.backend || null),
 };
