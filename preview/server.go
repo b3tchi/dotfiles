@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -54,12 +56,14 @@ func NewServer(root, port string) (*Server, error) {
 // callers (main's shutdown loop, tests) can block on graceful stop.
 func (s *Server) Done() <-chan struct{} { return s.ctx.Done() }
 
-// Handler wires the HTTP mux. Task 1 seeds /status and /stop; /file/<path>,
-// /preview<N>, /open, /watch land in later sp008 tasks.
+// Handler wires the HTTP mux. Task 1 seeded /status and /stop; Task 2 adds
+// /file/<path> (the stateless render primitive). /preview<N>, /open,
+// /watch land in later sp008 tasks.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/status", s.handleStatus)
 	mux.HandleFunc("/stop", s.handleStop)
+	mux.HandleFunc("/file/", s.handleFile)
 	return mux
 }
 
@@ -91,6 +95,34 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 		f.Flush()
 	}
 	s.cancel()
+}
+
+// handleFile serves GET /file/<path>: the stateless render primitive
+// (ft005 api_surface). It is the primary attack surface of preview-d — it
+// serves local disk content to a webview — so the requested path is
+// jailed through resolveInRoot (path.go) BEFORE any content is read.
+// resolveInRoot's two error cases map to distinct, honest statuses: an
+// escape attempt (ErrPathEscape) is a client error (400), a path that
+// simply doesn't exist under root is a 404 — never a 500 for either (sp008
+// Task 2 anti-pattern: no raw webview input reaches disk I/O unvalidated).
+func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	reqPath := strings.TrimPrefix(r.URL.Path, "/file/")
+	resolved, err := resolveInRoot(s.root, reqPath)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrPathEscape):
+			http.Error(w, "bad path", http.StatusBadRequest)
+		case errors.Is(err, os.ErrNotExist):
+			http.Error(w, "not found", http.StatusNotFound)
+		default:
+			http.Error(w, "internal error", http.StatusInternalServerError)
+		}
+		return
+	}
+	renderFile(w, resolved)
 }
 
 // requireMethod enforces want; on mismatch it writes 405 + Allow and

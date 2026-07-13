@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -142,5 +144,186 @@ func TestMissingRootErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "does-not-exist-xyz-preview-root") {
 		t.Errorf("error %q does not name the missing path", err.Error())
+	}
+}
+
+// TestHandleFileServesCodeInRoot proves GET /file/<path> reaches the code
+// renderer end-to-end through the real mux (sp008 Task 2 success
+// criteria).
+func TestHandleFileServesCodeInRoot(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "sample.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	srv, err := NewServer(root, "4200")
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/file/sample.go", nil)
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /file/sample.go: status %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `class="chroma"`) {
+		t.Errorf("GET /file/sample.go: body missing chroma wrapper: %s", rec.Body.String())
+	}
+}
+
+// TestHandleFileNonexistentReturns404 proves a nonexistent in-root path
+// returns 404 through the full handler chain, not a 500 (sp008 Task 2 edge
+// case).
+func TestHandleFileNonexistentReturns404(t *testing.T) {
+	srv := newTestServer(t)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/file/does-not-exist.go", nil)
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("GET /file/does-not-exist.go: status %d, want 404 (body: %s)", rec.Code, rec.Body.String())
+	}
+}
+
+// TestHandleFileWrongMethodRejected proves a non-GET /file/<path> request
+// returns 405 (ft002 method-parity, same as /status and /stop).
+func TestHandleFileWrongMethodRejected(t *testing.T) {
+	srv := newTestServer(t)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/file/sample.go", nil)
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST /file/sample.go: status %d, want 405", rec.Code)
+	}
+}
+
+// TestHandleFileRejectsDotDotEscapeAndReadsNothing is the sp008 Task 2
+// security test: a ".." traversal request must be rejected with 400 by
+// path.go's containment check and must NEVER reach the secret file's
+// content. The handler is called directly (bypassing http.ServeMux, which
+// would otherwise 307-redirect an unclean "/file/../../etc/passwd" request
+// to "/etc/passwd" before our own code ever runs — a stdlib quirk that is
+// not the security boundary we're proving; resolveInRoot's explicit
+// containment check is) so the test exercises our own path-jail logic
+// end to end.
+//
+// The secret lives one level above root, is unreadable (mode 0000) as a
+// tripwire — if any code path incorrectly attempted to open it, that would
+// surface as a distinct (non-400) failure — and its content is asserted
+// absent from the response body.
+func TestHandleFileRejectsDotDotEscapeAndReadsNothing(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "root")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+	secret := filepath.Join(parent, "secret.txt")
+	const secretMarker = "TOP-SECRET-CONTENT-MUST-NOT-LEAK"
+	if err := os.WriteFile(secret, []byte(secretMarker), 0o644); err != nil {
+		t.Fatalf("write secret: %v", err)
+	}
+	if err := os.Chmod(secret, 0o000); err != nil {
+		t.Fatalf("chmod secret: %v", err)
+	}
+	defer os.Chmod(secret, 0o644) // t.TempDir cleanup needs to remove it
+
+	srv, err := NewServer(root, "4200")
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/file/../secret.txt", nil)
+	srv.handleFile(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("GET /file/../secret.txt: status %d, want 400 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), secretMarker) {
+		t.Fatalf("GET /file/../secret.txt: response leaked secret content: %s", rec.Body.String())
+	}
+}
+
+// TestHandleFileRejectsSymlinkEscapeAndReadsNothing proves a symlink
+// planted inside root that points outside it is rejected with 400 and its
+// target's content never appears in the response — the classic path-jail
+// bypass that a pure string-prefix check on the unresolved request path
+// would miss (sp008 Task 2 security-critical success criteria).
+func TestHandleFileRejectsSymlinkEscapeAndReadsNothing(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.txt")
+	const secretMarker = "TOP-SECRET-SYMLINK-TARGET-CONTENT"
+	if err := os.WriteFile(secret, []byte(secretMarker), 0o644); err != nil {
+		t.Fatalf("write secret: %v", err)
+	}
+	if err := os.Chmod(secret, 0o000); err != nil {
+		t.Fatalf("chmod secret: %v", err)
+	}
+	defer os.Chmod(secret, 0o644)
+
+	link := filepath.Join(root, "escape-link")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	srv, err := NewServer(root, "4200")
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/file/escape-link", nil)
+	srv.handleFile(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("GET /file/escape-link: status %d, want 400 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), secretMarker) {
+		t.Fatalf("GET /file/escape-link: response leaked secret content: %s", rec.Body.String())
+	}
+}
+
+// TestHandleFileSymlinkEscapeViaFullMux re-runs the symlink-escape case
+// through the real srv.Handler() (http.ServeMux) rather than calling
+// handleFile directly. Unlike a literal ".."-containing request path
+// (which net/http's ServeMux redirects away from before any handler runs
+// — see TestHandleFileRejectsDotDotEscapeAndReadsNothing's doc comment), a
+// symlink target is invisible at the URL level: "/file/escape-link" is
+// already a clean path, so the mux dispatches it straight to handleFile
+// with no redirect. This proves the 400 our path-jail returns is what a
+// real client actually receives for this attack, not just what direct unit
+// tests observe.
+func TestHandleFileSymlinkEscapeViaFullMux(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.txt")
+	const secretMarker = "TOP-SECRET-FULL-MUX-CONTENT"
+	if err := os.WriteFile(secret, []byte(secretMarker), 0o644); err != nil {
+		t.Fatalf("write secret: %v", err)
+	}
+	link := filepath.Join(root, "escape-link")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	srv, err := NewServer(root, "4200")
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/file/escape-link", nil)
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("GET /file/escape-link via full mux: status %d, want 400 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), secretMarker) {
+		t.Fatalf("GET /file/escape-link via full mux: response leaked secret content: %s", rec.Body.String())
 	}
 }
