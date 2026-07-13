@@ -1,0 +1,21 @@
+# ksnip — screenshot/annotation tool (native linux desktop, i3)
+# Autostart lives in i3/config.d/native.conf, launched with
+# QT_QPA_PLATFORMTHEME=qt6ct so ksnip gets a dark Fusion palette + Iosevka
+# UI font from qt6ct.conf WITHOUT theming other Qt apps (env is scoped to
+# the ksnip process only). ksnip's own toolbar icons switch to its bundled
+# dark set automatically once the palette is dark.
+#
+# ksnip.conf itself is intentionally NOT linked — ksnip rewrites it on every
+# capture (recent images, window position), which would churn the repo.
+linux:
+  links:
+    qt6ct.conf: ~/.config/qt6ct/qt6ct.conf
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -Syu --needed --noconfirm ksnip qt6ct
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -Syu --needed --noconfirm ksnip qt6ct
+      {{/if}}
+      rotz link ksnip --force
