@@ -1,0 +1,19 @@
+# remmina — remote desktop client (GTK3, native linux desktop)
+# dark_theme=true in remmina.pref flips GTK to the dark Adwaita variant
+# (remmina is GTK, not Qt, so the qt6ct trick used for ksnip does not apply).
+# Runs in the tray via `remmina -i`; disable_tray_icon stays false.
+#
+# remmina rewrites remmina.pref at runtime (window geometry, recent list) —
+# expect git churn; the only key we care about here is dark_theme.
+linux:
+  links:
+    remmina.pref: ~/.config/remmina/remmina.pref
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -Syu --needed --noconfirm remmina
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -Syu --needed --noconfirm remmina
+      {{/if}}
+      rotz link remmina --force
