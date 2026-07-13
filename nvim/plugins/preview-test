@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# nvim/plugins/preview-test — headless-nvim test for the CursorHold/CursorMoved
+# cursor-signal autocmd (sp008 Task 5 test_plan): asserts the mandatory
+# wrapper (`preview send <path>`, adr0003) is invoked with the buffer's
+# absolute path on a real file, is NOT invoked for a no-file/scratch buffer
+# or a non-file buftype (sp008 Task 5 edge cases), and that rapid
+# CursorMoved churn debounces to a single send (edge case: "very fast
+# cursor motion — debounce so we don't flood").
+#
+# Loads nvim/plugins/preview.lua directly via `luafile` in a --clean
+# headless nvim — no lazy.nvim bootstrap needed since the file's autocmds
+# are plain top-level Lua with no plugin dependency.
+#
+# Run:  bash nvim/plugins/preview-test
+# Pass: exits 0 and prints "PASS: 4 tests passed"
+# Fail: exits 1 and prints "FAIL: <description>"
+set -uo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLUGIN="$HERE/preview.lua"
+NVIM_LOG="/tmp/preview-plugin-test-nvim.log"
+
+fail() {
+	echo "FAIL: $1"
+	exit 1
+}
+
+# A spy `preview` binary on PATH that appends its argv to $LOG_FILE (one
+# line per invocation) instead of hitting a real daemon.
+make_spy() {
+	local dir="$1"
+	cat >"$dir/preview" <<'SPY'
+#!/bin/bash
+echo "$@" >> "$LOG_FILE"
+SPY
+	chmod +x "$dir/preview"
+}
+
+# ── test 1: a real file buffer sends its absolute path on CursorHold ──────────
+
+tmp=$(mktemp -d)
+spy_dir="$tmp/bin"
+mkdir -p "$spy_dir"
+make_spy "$spy_dir"
+log_file="$tmp/log.txt"
+testfile="$tmp/note.md"
+echo "hello" >"$testfile"
+
+PATH="$spy_dir:$PATH" LOG_FILE="$log_file" nvim --headless --noplugin -u NONE \
+	-c "luafile $PLUGIN" \
+	"$testfile" \
+	-c "doautocmd CursorHold" -c "sleep 300m" -c "qa!" >"$NVIM_LOG" 2>&1
+
+if [ ! -f "$log_file" ]; then
+	fail "CursorHold on a real file did not call the wrapper (nvim log: $(cat "$NVIM_LOG"))"
+fi
+if ! grep -qF "send $testfile" "$log_file"; then
+	fail "wrapper was not called with the absolute path: $(cat "$log_file")"
+fi
+echo "PASS: CursorHold sends the buffer's absolute path"
+rm -rf "$tmp"
+
+# ── test 2: a [No Name] scratch buffer does not send ───────────────────────────
+
+tmp=$(mktemp -d)
+spy_dir="$tmp/bin"
+mkdir -p "$spy_dir"
+make_spy "$spy_dir"
+log_file="$tmp/log.txt"
+
+PATH="$spy_dir:$PATH" LOG_FILE="$log_file" nvim --headless --noplugin -u NONE \
+	-c "luafile $PLUGIN" \
+	-c "doautocmd CursorHold" -c "sleep 300m" -c "qa!" >"$NVIM_LOG" 2>&1
+
+if [ -f "$log_file" ]; then
+	fail "CursorHold on a [No Name] buffer should not call the wrapper: $(cat "$log_file")"
+fi
+echo "PASS: [No Name] scratch buffer does not send"
+rm -rf "$tmp"
+
+# ── test 3: a non-file buftype (nofile, e.g. help/terminal-like) does not send ─
+
+tmp=$(mktemp -d)
+spy_dir="$tmp/bin"
+mkdir -p "$spy_dir"
+make_spy "$spy_dir"
+log_file="$tmp/log.txt"
+
+PATH="$spy_dir:$PATH" LOG_FILE="$log_file" nvim --headless --noplugin -u NONE \
+	-c "luafile $PLUGIN" \
+	-c "set buftype=nofile" -c "file /tmp/should-not-exist-preview-test" \
+	-c "doautocmd CursorHold" -c "sleep 300m" -c "qa!" >"$NVIM_LOG" 2>&1
+
+if [ -f "$log_file" ]; then
+	fail "CursorHold on a nofile buftype should not call the wrapper: $(cat "$log_file")"
+fi
+echo "PASS: non-file buftype does not send"
+rm -rf "$tmp"
+
+# ── test 4: rapid CursorMoved debounces to a single send ───────────────────────
+
+tmp=$(mktemp -d)
+spy_dir="$tmp/bin"
+mkdir -p "$spy_dir"
+make_spy "$spy_dir"
+log_file="$tmp/log.txt"
+testfile="$tmp/note2.md"
+echo "hello" >"$testfile"
+
+PATH="$spy_dir:$PATH" LOG_FILE="$log_file" nvim --headless --noplugin -u NONE \
+	-c "luafile $PLUGIN" \
+	"$testfile" \
+	-c "doautocmd CursorMoved" -c "doautocmd CursorMoved" -c "doautocmd CursorMoved" \
+	-c "sleep 300m" -c "qa!" >"$NVIM_LOG" 2>&1
+
+if [ ! -f "$log_file" ]; then
+	fail "debounced CursorMoved never sent (nvim log: $(cat "$NVIM_LOG"))"
+fi
+count=$(wc -l <"$log_file")
+if [ "$count" -ne 1 ]; then
+	fail "rapid CursorMoved should debounce to exactly 1 send, got $count: $(cat "$log_file")"
+fi
+echo "PASS: rapid CursorMoved debounces to a single send"
+rm -rf "$tmp"
+
+echo ""
+echo "PASS: 4 tests passed"
