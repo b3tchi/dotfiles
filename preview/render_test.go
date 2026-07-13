@@ -64,7 +64,7 @@ func TestRenderFileByType(t *testing.T) {
 			}
 
 			rec := httptest.NewRecorder()
-			renderFile(rec, path)
+			renderFile(rec, path, false)
 
 			if rec.Code != tc.wantStatus {
 				t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tc.wantStatus, rec.Body.String())
@@ -89,7 +89,7 @@ func TestRenderFileEmpty(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	renderFile(rec, path)
+	renderFile(rec, path, false)
 
 	if rec.Code != 200 {
 		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
@@ -110,7 +110,7 @@ func TestRenderFileNoExtension(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	renderFile(rec, path)
+	renderFile(rec, path, false)
 
 	if rec.Code != 200 {
 		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
@@ -144,7 +144,7 @@ func TestRenderFileHugeCapped(t *testing.T) {
 	f.Close()
 
 	rec := httptest.NewRecorder()
-	renderFile(rec, path)
+	renderFile(rec, path, false)
 
 	if rec.Code != 200 {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -170,7 +170,7 @@ func TestRenderFileUnicodeCRLF(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	renderFile(rec, path)
+	renderFile(rec, path, false)
 
 	if rec.Code != 200 {
 		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
@@ -185,7 +185,7 @@ func TestRenderFileUnicodeCRLF(t *testing.T) {
 func TestRenderFileNonexistent(t *testing.T) {
 	dir := t.TempDir()
 	rec := httptest.NewRecorder()
-	renderFile(rec, filepath.Join(dir, "does-not-exist.go"))
+	renderFile(rec, filepath.Join(dir, "does-not-exist.go"), false)
 
 	if rec.Code != 404 {
 		t.Fatalf("status = %d, want 404 (body: %s)", rec.Code, rec.Body.String())

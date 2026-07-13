@@ -19,15 +19,17 @@ import (
 const maxRenderSize = 5 * 1024 * 1024 // 5 MiB
 
 // renderFile stats path and dispatches to the renderer selected by the
-// path's type: markdown extensions render via goldmark, anything chroma
-// recognises (including its plaintext lexer, which covers .txt and
-// unmatched-but-textual files) renders as syntax HTML, everything else —
-// unknown extensions, files with no extension chroma can't match, and
-// binary content — falls back to a safe "no preview" page. It never
-// panics and never emits a 500 for a problem with the FILE itself (sp008
-// Task 2 success criteria); only a genuine I/O failure reading an
-// existing, already root-jailed path falls through to 500.
-func renderFile(w http.ResponseWriter, path string) {
+// path's type: markdown extensions render via goldmark, image extensions
+// render via renderImage (thumbnail by default, full-res when full is true
+// — the ft005 api_surface image row), anything chroma recognises (including
+// its plaintext lexer, which covers .txt and unmatched-but-textual files)
+// renders as syntax HTML, everything else — unknown extensions, files with
+// no extension chroma can't match, and binary content — falls back to a
+// safe "no preview" page. It never panics and never emits a 500 for a
+// problem with the FILE itself (sp008 Task 2/3 success criteria); only a
+// genuine I/O failure reading an existing, already root-jailed path falls
+// through to 500.
+func renderFile(w http.ResponseWriter, path string, full bool) {
 	fi, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -39,6 +41,16 @@ func renderFile(w http.ResponseWriter, path string) {
 	}
 	if fi.IsDir() {
 		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	// Images are binary content that must never pass through the capped
+	// text read below (readCapped's 5 MiB cap exists for text/code/markdown
+	// rendering; an image's full=true response must stream every byte of
+	// the source unmodified — sp008 Task 3 success criteria: no
+	// re-encoding loss).
+	if isImageExt(path) {
+		renderImage(w, path, fi, full)
 		return
 	}
 
