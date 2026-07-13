@@ -107,6 +107,46 @@ func isMarkdown(path string) bool {
 	}
 }
 
+// isD2Ext reports whether path's extension is d2 (case-insensitive), the
+// same detection style as isImageExt/isVideoExt/isSTLExt. sp008 Task 7:
+// server.go's handleFile special-cases this before the renderFile dispatch
+// so a .d2 file resolves to a cross-origin-proxied embed of [[ft002]]
+// (d2-router) instead of the plain code render chroma would otherwise give
+// it (chroma has no d2 lexer, so without this it would fall through to the
+// plaintext lexer).
+func isD2Ext(path string) bool {
+	return strings.ToLower(filepath.Ext(path)) == ".d2"
+}
+
+// isAkmZettel reports whether resolved — an absolute, already root-jailed
+// filesystem path (path.go's resolveInRoot output) — is a markdown zettel
+// under root's AKM notes tree (docs/notes/**.md, any depth including
+// archive/). This mirrors the subtree akm-graph/parser.go's WalkNotes walks
+// to build the [[ft004]] graph. sp008 Task 7: server.go's handleFile
+// special-cases these paths before the renderFile dispatch so they resolve
+// to a cross-origin iframe of akm-graph instead of the plain goldmark
+// markdown render the isMarkdown branch would otherwise give them.
+//
+// root is compared via filepath.Abs (NOT symlink-resolved) to match
+// path.go's resolveInRoot, which performs its own containment check against
+// the same non-symlink-resolved root. A known, non-blocking gap: the single
+// hub file docs/notes/akm.md is a symlink whose EvalSymlinks target
+// (claude/akm/akm.md) escapes this prefix check, so that one file still
+// renders as plain markdown rather than the akm-graph embed — akm-graph's
+// own WalkNotes special-cases exactly this file for the same underlying
+// reason (see its hubFiles comment).
+func isAkmZettel(root, resolved string) bool {
+	if strings.ToLower(filepath.Ext(resolved)) != ".md" {
+		return false
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	notesDir := filepath.Join(filepath.Clean(absRoot), "docs", "notes") + string(filepath.Separator)
+	return strings.HasPrefix(resolved, notesDir)
+}
+
 // readCapped reads up to maxRenderSize bytes of path's content, reporting
 // whether the file was longer than that (sp008 Task 2 edge case: huge
 // file must not be read/rendered in full).

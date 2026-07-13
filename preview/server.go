@@ -94,6 +94,11 @@ func (s *Server) Handler() http.Handler {
 	// handleFile — keeps a clean auto-merge.
 	mux.HandleFunc("/open", s.handleOpen)
 
+	// sp008 Task 7: GET /d2embed/<path> is the same-origin proxy target a
+	// .d2 file's iframe embed points at (proxy.go's handleD2Embed) — kept in
+	// its own block for the same clean-auto-merge reason as /open above.
+	mux.HandleFunc("/d2embed/", s.handleD2Embed)
+
 	return s.previewRouter(mux)
 }
 
@@ -340,6 +345,25 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 	// resolved filesystem path.
 	if isVideoExt(resolved) && r.URL.Query().Has("live") {
 		renderVideoLive(w, reqPath)
+		return
+	}
+	// sp008 Task 7 (DEVIATION flagged per task instructions, same pattern as
+	// Task 8's ?live special-case immediately above): a .d2 file or an akm
+	// zettel (docs/notes/**.md) resolves to an iframe embed of ft002/ft004
+	// respectively, rather than the plain code/markdown render the switch
+	// below would otherwise give it. Special-cased here, before the
+	// renderFile dispatch, because renderD2Embed needs reqPath (to build the
+	// /d2embed/<reqPath> proxy target) and renderAkmEmbed needs s.root (to
+	// spawn akm-graph-d with the matching --root) — neither is available
+	// inside renderFile's signature (path.go/render.go's dispatcher only
+	// ever receives the resolved filesystem path), the exact same
+	// constraint that put the ?live case here instead of inside renderFile.
+	if isD2Ext(resolved) {
+		renderD2Embed(w, reqPath)
+		return
+	}
+	if isAkmZettel(s.root, resolved) {
+		renderAkmEmbed(w, s.root)
 		return
 	}
 	// sp008 Task 3: ?full selects the full-res tier (image row of the ft005
