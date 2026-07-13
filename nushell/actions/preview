@@ -1,0 +1,185 @@
+#!/usr/bin/env nu
+# preview — thin CLI wrapper around the preview-d daemon (ft005).
+#
+# Usage:
+#   preview start    # idempotent daemon launch (port-probe -> pidfile -> detach)
+#   preview stop     # graceful stop (POST /stop + SIGTERM fallback)
+#   preview status   # daemon health (pid / root / port / started_at)
+#
+# Mirrors nushell/actions/akm-graph + nushell/actions/d2-router (adr0001
+# nushell-first surface, adr0003 mandatory-wrapper mandate — the preview-d
+# binary is an engine, not an interface; no consumer calls it directly).
+# sp008 Task 1 wires only start/stop/status; the open/send verbs land in
+# later sp008 tasks (5/6) without changing this shape.
+
+const DAEMON_BIN = "preview-d"
+const CACHE_DIR  = "~/.cache/preview"
+const PID_FILE   = "~/.cache/preview/pid"
+const LOG_FILE   = "~/.cache/preview/log"
+
+# Resolve the daemon port from the environment (mirrors daemon default 4200).
+def preview-port [] {
+    $env | get -o PREVIEW_PORT | default "4200"
+}
+
+# Base URL for the daemon API.
+def api-base [] {
+    $"http://127.0.0.1:(preview-port)"
+}
+
+# Resolve the preview root: $PREVIEW_ROOT, else the akm-root helper, else cwd.
+def preview-root [] {
+    let env_root = ($env | get -o PREVIEW_ROOT | default "")
+    if ($env_root | is-not-empty) {
+        return $env_root
+    }
+    let resolved = (do { ^akm-root } | complete)
+    if $resolved.exit_code == 0 and ($resolved.stdout | str trim | is-not-empty) {
+        return ($resolved.stdout | str trim)
+    }
+    (pwd)
+}
+
+# Probe /status. Returns parsed JSON or null on connection failure.
+def probe-status [] {
+    try {
+        http get --max-time 2sec $"(api-base)/status"
+    } catch {
+        null
+    }
+}
+
+# Read the pid from the pidfile. Returns null if absent or unreadable.
+def read-pidfile [] {
+    let p = ($PID_FILE | path expand)
+    if ($p | path exists) {
+        try { open $p | str trim | into int } catch { null }
+    } else {
+        null
+    }
+}
+
+# Check if a pid is alive (kill -0 equivalent). Returns bool.
+def pid-alive [pid: int] {
+    (do { ^kill -0 $pid } | complete | get exit_code) == 0
+}
+
+# Ensure cache dir and write pidfile.
+def write-pidfile [pid: int] {
+    let dir = ($CACHE_DIR | path expand)
+    if not ($dir | path exists) {
+        mkdir $dir
+    }
+    $pid | into string | save --force ($PID_FILE | path expand)
+}
+
+# Idempotent start: port-probe first, pidfile second, then detached launch.
+def main-start [] {
+    # 1. Port probe — if the daemon is already answering, no-op.
+    let live = (probe-status)
+    if $live != null {
+        print $"preview: daemon already running \(pid ($live.pid)\) on port (preview-port) — no-op"
+        return
+    }
+
+    # 2. Binary check — fail loud with an actionable message.
+    if (which $DAEMON_BIN | is-empty) {
+        error make {
+            msg: $"preview: '($DAEMON_BIN)' not found on PATH — run: rotz install preview"
+        }
+    }
+
+    # 3. Stale pidfile cleanup.
+    let old_pid = (read-pidfile)
+    if $old_pid != null {
+        if (pid-alive $old_pid) {
+            print $"preview: ERROR — port (preview-port) appears occupied by pid ($old_pid) (not preview-d); refusing to start"
+            error make { msg: "preview: port occupied by foreign process" }
+        } else {
+            print $"preview: stale pidfile \(pid ($old_pid) dead\) — cleaning up"
+            rm --force ($PID_FILE | path expand)
+        }
+    }
+
+    # 4. Detached launch on the resolved root + port.
+    let log  = ($LOG_FILE | path expand)
+    let dir  = ($CACHE_DIR | path expand)
+    let root = (preview-root)
+    let port = (preview-port)
+    if not ($dir | path exists) {
+        mkdir $dir
+    }
+
+    # nohup + bash & echo $! detaches the daemon from the current session.
+    let pid_result = (do {
+        ^bash -c $"PREVIEW_PORT=($port) nohup ($DAEMON_BIN) --root '($root)' >>($log) 2>&1 & echo $!"
+    } | complete)
+
+    if $pid_result.exit_code != 0 {
+        error make { msg: $"preview: failed to launch daemon: ($pid_result.stderr)" }
+    }
+
+    let new_pid = ($pid_result.stdout | str trim | into int)
+    write-pidfile $new_pid
+    print $"preview: started \(pid ($new_pid)\), root ($root), port ($port), logging to ($log)"
+}
+
+# Stop the daemon: POST /stop first, then SIGTERM the recorded pid. Both
+# steps are safe to repeat — a POST /stop against an already-stopped daemon
+# just fails the try (probe-status style) and a missing/dead pid is a
+# no-op, so a second `preview stop` is a clean idempotent no-op rather than
+# an error (sp008 Task 1 edge case: double stop).
+def main-stop [] {
+    let sent = (try {
+        http post --max-time 2sec $"(api-base)/stop" ""
+        true
+    } catch {
+        false
+    })
+    if $sent {
+        print "preview: sent stop to daemon"
+    }
+
+    let pid = (read-pidfile)
+    if $pid != null {
+        if (pid-alive $pid) {
+            ^kill -TERM $pid
+            print $"preview: sent SIGTERM to pid ($pid)"
+        } else {
+            print $"preview: pid ($pid) already gone"
+        }
+        rm --force ($PID_FILE | path expand)
+    } else if not $sent {
+        print "preview: not running (no pidfile, no response on port (preview-port))"
+    }
+}
+
+# Print daemon health as a nu record, or a clean "not running" message —
+# never a stack trace — when the daemon is down (sp008 Task 1 test_plan).
+def main-status [] {
+    let data = (probe-status)
+    if $data == null {
+        print $"preview: not running — no response on port (preview-port)"
+        return
+    }
+    $data | select pid root port started_at
+}
+
+# preview — control the preview-d daemon
+def main [
+    subcommand?: string      # start | stop | status
+] {
+    match $subcommand {
+        "start"  => { main-start }
+        "stop"   => { main-stop }
+        "status" => { main-status }
+        _ => {
+            print "Usage: preview <subcommand>"
+            print ""
+            print "Subcommands:"
+            print "  start   — launch daemon (idempotent)"
+            print "  stop    — stop daemon"
+            print "  status  — daemon health (pid / root / port / started_at)"
+        }
+    }
+}
