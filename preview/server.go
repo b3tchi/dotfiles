@@ -5,10 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 // Status is the GET /status payload: daemon health snapshot (ft002/ft004
@@ -20,9 +24,10 @@ type Status struct {
 	StartedAt time.Time `json:"started_at"`
 }
 
-// Server owns the preview-d lifecycle and HTTP surface. Task 1 wires only
-// the skeleton routes (/status, /stop); the render + session routes
-// (/file/<path>, /preview<N>, /open, /watch) land in later sp008 tasks.
+// Server owns the preview-d lifecycle and HTTP surface. Task 1 wired the
+// skeleton routes (/status, /stop); Task 2 added /file/<path>; Task 4 adds
+// /preview<N> (the stateful live-shell + ws hub route family). /open and
+// /watch land in later sp008 tasks.
 type Server struct {
 	root      string
 	port      string
@@ -30,6 +35,10 @@ type Server struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	static   fs.FS
+	slots    *SlotManager
+	upgrader websocket.Upgrader
 }
 
 // NewServer validates root and returns a ready Server. It fails fast,
@@ -42,6 +51,11 @@ func NewServer(root, port string) (*Server, error) {
 		return nil, fmt.Errorf("preview-d: root %q not found or not a directory: %w", root, err)
 	}
 
+	sub, err := fs.Sub(staticFS, "static")
+	if err != nil {
+		return nil, fmt.Errorf("preview-d: embedded static fs: %w", err)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{
 		root:      root,
@@ -49,6 +63,11 @@ func NewServer(root, port string) (*Server, error) {
 		startedAt: time.Now(),
 		ctx:       ctx,
 		cancel:    cancel,
+		static:    sub,
+		slots:     NewSlotManager(),
+		// localhost-only tool — same no-auth stance as ft002/ft004; accept
+		// any origin (akm-graph NewServer precedent).
+		upgrader: websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }},
 	}, nil
 }
 
@@ -56,15 +75,193 @@ func NewServer(root, port string) (*Server, error) {
 // callers (main's shutdown loop, tests) can block on graceful stop.
 func (s *Server) Done() <-chan struct{} { return s.ctx.Done() }
 
-// Handler wires the HTTP mux. Task 1 seeded /status and /stop; Task 2 adds
-// /file/<path> (the stateless render primitive). /preview<N>, /open,
-// /watch land in later sp008 tasks.
+// Handler wires the HTTP mux. Task 1 seeded /status and /stop; Task 2 added
+// /file/<path>; Task 4 adds /static/ (shell assets) and routes /preview<N>
+// through previewRouter, since a bare "/preview1"-shaped path has no
+// separator for net/http's ServeMux subtree matching. /open and /watch land
+// in later sp008 tasks.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/status", s.handleStatus)
 	mux.HandleFunc("/stop", s.handleStop)
 	mux.HandleFunc("/file/", s.handleFile)
-	return mux
+	mux.Handle("/static/", http.StripPrefix("/static/", noCache(http.FileServer(http.FS(s.static)))))
+	return s.previewRouter(mux)
+}
+
+// noCache stops the browser caching the shell/app.js assets so a rebuilt
+// daemon's updated static files show on a normal refresh (akm-graph
+// noCache precedent).
+func noCache(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		h.ServeHTTP(w, r)
+	})
+}
+
+// previewRouter intercepts any path shaped like /preview<N> before falling
+// through to next for the other routes. Go 1.21's ServeMux has no
+// path-variable support, and "/preview<N>" has no "/" separator for a
+// subtree pattern, so the slot number is parsed here by hand. A path
+// starting with "/preview" whose suffix does not parse as a non-negative
+// integer is a 400 (sp008 Task 4 edge case: N non-numeric -> 400), not a
+// fall-through to 404 — it is unambiguously a malformed preview-slot
+// request, not some other unmatched route.
+func (s *Server) previewRouter(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n, ok, matched := parsePreviewSlot(r.URL.Path)
+		if !matched {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if !ok {
+			http.Error(w, "bad preview slot", http.StatusBadRequest)
+			return
+		}
+		s.handlePreview(n, w, r)
+	})
+}
+
+// previewPrefix is the fixed lead-in for the /preview<N> route family.
+const previewPrefix = "/preview"
+
+// parsePreviewSlot reports whether path is shaped like /preview<N>
+// (matched) and, if so, whether <N> parsed as a valid non-negative slot
+// number (ok). matched=false means path is not a preview-route request at
+// all and the caller should fall through to other routes.
+func parsePreviewSlot(path string) (n int, ok bool, matched bool) {
+	if !strings.HasPrefix(path, previewPrefix) {
+		return 0, false, false
+	}
+	suffix := path[len(previewPrefix):]
+	v, err := strconv.Atoi(suffix)
+	if err != nil || v < 0 {
+		return 0, false, true
+	}
+	return v, true, true
+}
+
+// handlePreview dispatches GET (shell HTML, or a websocket upgrade) and
+// POST (set slot n's current path) for one /preview<N> slot (ft005
+// api_surface /preview<N> + POST /preview<N>).
+func (s *Server) handlePreview(n int, w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		if websocket.IsWebSocketUpgrade(r) {
+			s.handlePreviewWS(n, w, r)
+			return
+		}
+		s.handlePreviewShell(w, r)
+	case http.MethodPost:
+		s.handlePreviewSet(n, w, r)
+	default:
+		w.Header().Set("Allow", "GET, POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handlePreviewShell serves the static shell page for a plain (non-ws) GET
+// /preview<N>. The shell is slot-agnostic HTML/JS: it discovers which slot
+// it belongs to client-side from window.location.pathname (sp008 Task 4
+// success criteria: shell opens a websocket and loads the current
+// /file/<path>).
+func (s *Server) handlePreviewShell(w http.ResponseWriter, r *http.Request) {
+	raw, err := fs.ReadFile(s.static, "shell.html")
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	_, _ = w.Write(raw)
+}
+
+// handlePreviewSet handles POST /preview<N> {"path": "..."}: it sets slot
+// n's current path and broadcasts a redraw to every window currently
+// connected to that slot (ft005 api_surface POST /preview<N>). A malformed
+// body is a 400, never a 500 or panic (sp008-wide anti-pattern).
+func (s *Server) handlePreviewSet(n int, w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	var body struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad request body", http.StatusBadRequest)
+		return
+	}
+	s.slots.SetPath(n, body.Path)
+	writeJSON(w, map[string]any{"slot": n, "path": body.Path})
+}
+
+// handlePreviewWS upgrades GET /preview<N> to a websocket and registers the
+// connection against slot n's Hub only — the slot isolation that lets
+// distinct N values maintain independent client sets (sp008 Task 4 success
+// criteria). A newly-connected window is primed with the slot's buffered
+// current path (if any) so a POST that landed before this window connected
+// is still applied immediately (sp008 Task 4 edge case).
+func (s *Server) handlePreviewWS(n int, w http.ResponseWriter, r *http.Request) {
+	conn, err := s.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		// Upgrade already wrote the 4xx response.
+		return
+	}
+	c := &wsClient{conn: conn, send: make(chan []byte, wsSendBuffer)}
+	hub := s.slots.Hub(n)
+	hub.Register(c)
+
+	if path := s.slots.CurrentPath(n); path != "" {
+		select {
+		case c.send <- redrawMessage(path):
+		default:
+		}
+	}
+
+	go s.writePreviewPump(c)
+	s.readPreviewPump(hub, c) // blocks until the client disconnects
+}
+
+// readPreviewPump drains inbound frames (control frames + any client
+// chatter) purely to detect disconnect, then unregisters the client from
+// its slot's hub. Runs on the request goroutine (ported akm-graph
+// readPump pattern).
+func (s *Server) readPreviewPump(hub *Hub, c *wsClient) {
+	defer func() {
+		hub.Unregister(c)
+		_ = c.conn.Close()
+	}()
+	for {
+		if _, _, err := c.conn.ReadMessage(); err != nil {
+			return
+		}
+	}
+}
+
+// writePreviewPump serialises all writes to a single client's socket
+// (gorilla requires one concurrent writer) and sends periodic pings. It
+// exits when the hub closes c.send (client dropped — bounded buffer, sp008
+// Task 4 edge case: slow client dropped without blocking others) or a
+// write fails (ported akm-graph writePump pattern).
+func (s *Server) writePreviewPump(c *wsClient) {
+	ticker := time.NewTicker(wsPingPeriod)
+	defer ticker.Stop()
+	for {
+		select {
+		case msg, ok := <-c.send:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
+			if !ok {
+				_ = c.conn.WriteMessage(websocket.CloseMessage, nil)
+				return
+			}
+			if err := c.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+				return
+			}
+		case <-ticker.C:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
+		}
+	}
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
