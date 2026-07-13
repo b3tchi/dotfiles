@@ -14,6 +14,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[us006|visualize-note-relations]] >> [[im004]]
 - [[us007|work remotely on my development machine — full desktop from another device]] >> [[im005]]
 - [[us008|securely access and work on my workstation remotely with full desktop]]
+- [[us009|selecting a graph node or diagram element in the preview opens its source in the editor]] (draft)
 
 ## Features
 
@@ -35,6 +36,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 
 - [[adr0004|xrdp + xorgxrdp + llvmpipe as the WSL2 full-desktop remoting stack]]
 - [[adr0005|No d3d12 GPU acceleration outside the WSLg-blessed path on WSL2]]
+- [[adr0006|preview-d embeds peer daemons via same-origin proxy or cross-origin iframe by frame-header]]
 
 ## AKM Reference
 
