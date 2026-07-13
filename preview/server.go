@@ -122,7 +122,12 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	renderFile(w, resolved)
+	// sp008 Task 3: ?full selects the full-res tier (image row of the ft005
+	// api_surface); its presence, not its value, is what matters (e.g.
+	// "?full" or "?full=1" both count). Minimal, necessary one-line
+	// passthrough — the query lives only on r, which render.go's dispatch
+	// has no other way to see.
+	renderFile(w, resolved, r.URL.Query().Has("full"))
 }
 
 // requireMethod enforces want; on mismatch it writes 405 + Allow and
