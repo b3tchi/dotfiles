@@ -21,6 +21,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[ft002|d2-preview-router]]
 - [[ft003|i3-config-layering]]
 - [[ft004|akm-graph]]
+- [[ft005|file-preview-daemon]]
 
 ## Architecture Decision Records
 
