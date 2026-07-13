@@ -73,4 +73,42 @@ vim.api.nvim_create_autocmd("CursorMoved", {
 	end,
 })
 
+-- Reverse channel (sp008 Task 6): the daemon's `POST /open` handler drives
+-- `nvim --server $NVIM --remote <path>` — it reads $NVIM from its OWN
+-- process environment, not from any running nvim's internal state. That
+-- only resolves to a live server if the daemon process itself inherited
+-- $NVIM from an nvim instance, which requires the daemon to have been
+-- launched as a child of THAT nvim (nvim injects $NVIM into the env of
+-- jobs/terminals it starts) rather than from an unrelated shell.
+--
+-- `:PreviewStart` is the helper that makes that true: it launches the
+-- preview-d daemon (via the mandatory `preview` wrapper, adr0003) as a
+-- detached job of this nvim instance, so the daemon's environment carries
+-- this nvim's `$NVIM`/`v:servername` and the webview's `POST /open` can
+-- find its way back here. `ensure_server` guards the rare case where this
+-- nvim instance has no server address yet (e.g. started with an explicit
+-- empty --listen) — serverstart() with no args uses nvim's own default
+-- address scheme.
+local function ensure_server()
+	if vim.v.servername == "" or vim.v.servername == nil then
+		vim.fn.serverstart()
+	end
+end
+
+vim.api.nvim_create_user_command("PreviewStart", function()
+	ensure_server()
+	if vim.fn.executable("preview") ~= 1 then
+		vim.notify("preview: 'preview' wrapper not found on PATH", vim.log.levels.ERROR)
+		return
+	end
+	vim.system({ "preview", "start" }, { detach = true })
+end, { desc = "preview: start preview-d as a child of this nvim (so $NVIM reaches it for the reverse /open channel)" })
+
+vim.api.nvim_create_user_command("PreviewStop", function()
+	if vim.fn.executable("preview") ~= 1 then
+		return
+	end
+	vim.system({ "preview", "stop" })
+end, { desc = "preview: stop preview-d" })
+
 return {}

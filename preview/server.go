@@ -78,14 +78,22 @@ func (s *Server) Done() <-chan struct{} { return s.ctx.Done() }
 // Handler wires the HTTP mux. Task 1 seeded /status and /stop; Task 2 added
 // /file/<path>; Task 4 adds /static/ (shell assets) and routes /preview<N>
 // through previewRouter, since a bare "/preview1"-shaped path has no
-// separator for net/http's ServeMux subtree matching. /open and /watch land
-// in later sp008 tasks.
+// separator for net/http's ServeMux subtree matching. Task 6 adds /open
+// (the reverse channel, proxy.go). /watch lands in a later sp008 task.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/status", s.handleStatus)
 	mux.HandleFunc("/stop", s.handleStop)
 	mux.HandleFunc("/file/", s.handleFile)
 	mux.Handle("/static/", http.StripPrefix("/static/", noCache(http.FileServer(http.FS(s.static)))))
+
+	// sp008 Task 6: POST /open is the reverse channel (webview -> nvim),
+	// handled in proxy.go. Registered in its own block, deliberately away
+	// from handleFile/previewRouter above, so this task's server.go edits
+	// land in a different region than sibling tasks touching render.go /
+	// handleFile — keeps a clean auto-merge.
+	mux.HandleFunc("/open", s.handleOpen)
+
 	return s.previewRouter(mux)
 }
 
