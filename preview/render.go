@@ -68,6 +68,17 @@ func renderFile(w http.ResponseWriter, path string, full bool) {
 		return
 	}
 
+	// STL is binary content, same rationale as image/video above -- must
+	// never pass through the capped text read below. Unlike image/video it
+	// has no thumbnail tier: the default (full=false) response IS the live
+	// orbit-viewer page (sp008 Task 9 success criteria: "loads live
+	// directly, no thumbnail"); full=true streams the raw bytes that page's
+	// own client-side fetch pulls via ?full.
+	if isSTLExt(path) {
+		renderSTL(w, path, fi, full)
+		return
+	}
+
 	src, truncated, err := readCapped(path, fi.Size())
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
