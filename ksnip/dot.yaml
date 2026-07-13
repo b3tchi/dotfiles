@@ -5,11 +5,14 @@
 # the ksnip process only). ksnip's own toolbar icons switch to its bundled
 # dark set automatically once the palette is dark.
 #
-# ksnip.conf itself is intentionally NOT linked — ksnip rewrites it on every
-# capture (recent images, window position), which would churn the repo.
+# ksnip.conf holds the stable settings (Fusion style, start-to-tray, Iosevka
+# annotation ToolFont). ksnip rewrites this file on capture and re-adds
+# volatile keys (recent images, window position, dock state) — expect some
+# git churn; re-strip those groups when they accumulate.
 linux:
   links:
     qt6ct.conf: ~/.config/qt6ct/qt6ct.conf
+    ksnip.conf: ~/.config/ksnip/ksnip.conf
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
