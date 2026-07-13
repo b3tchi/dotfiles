@@ -2,15 +2,17 @@
 # preview — thin CLI wrapper around the preview-d daemon (ft005).
 #
 # Usage:
-#   preview start    # idempotent daemon launch (port-probe -> pidfile -> detach)
-#   preview stop     # graceful stop (POST /stop + SIGTERM fallback)
-#   preview status   # daemon health (pid / root / port / started_at)
+#   preview start                       # idempotent daemon launch (port-probe -> pidfile -> detach)
+#   preview stop                        # graceful stop (POST /stop + SIGTERM fallback)
+#   preview status                      # daemon health (pid / root / port / started_at)
+#   preview send <path> [--window N]    # POST {path} to /preview<N> (default window 1)
 #
 # Mirrors nushell/actions/akm-graph + nushell/actions/d2-router (adr0001
 # nushell-first surface, adr0003 mandatory-wrapper mandate — the preview-d
 # binary is an engine, not an interface; no consumer calls it directly).
-# sp008 Task 1 wires only start/stop/status; the open/send verbs land in
-# later sp008 tasks (5/6) without changing this shape.
+# sp008 Task 1 wired start/stop/status; sp008 Task 5 adds `send` (the
+# editor/nnn cursor-signal path) without changing this shape. The `open`
+# verb (reverse channel) lands in sp008 Task 6.
 
 const DAEMON_BIN = "preview-d"
 const CACHE_DIR  = "~/.cache/preview"
@@ -165,21 +167,47 @@ def main-status [] {
     $data | select pid root port started_at
 }
 
+# Push a path to window N's slot: POST /preview<N> {"path": <path>} (ft005
+# api_surface `send` verb — sp008 Task 5). This is the wrapper both nvim's
+# CursorHold/CursorMoved autocmd (nvim/plugins/preview.lua) and nnn's
+# preview hook call — nothing calls the daemon directly ([[adr0003]]). A
+# missing/empty path (e.g. a caller forgetting to guard a no-file buffer)
+# is a loud error, not a silent no-op, so misuse surfaces immediately in a
+# manual run — the guarding against "no file to send" lives in the callers
+# (nvim autocmd's should_send / nnn hook's directory check), per the sp008
+# Task 5 edge cases.
+def main-send [path?: string, window: int = 1] {
+    if ($path | is-empty) {
+        error make { msg: "preview: send requires a path" }
+    }
+    let url = $"(api-base)/preview($window)"
+    try {
+        http post --max-time 2sec --content-type application/json $url { path: $path }
+    } catch { |err|
+        error make { msg: $"preview: send failed — ($err.msg)" }
+    }
+    print $"preview: sent ($path) to window ($window)"
+}
+
 # preview — control the preview-d daemon
 def main [
-    subcommand?: string      # start | stop | status
+    subcommand?: string       # start | stop | status | send
+    path?: string              # path arg for `send`
+    --window (-w): int = 1    # target preview<N> slot for `send` (default 1)
 ] {
     match $subcommand {
         "start"  => { main-start }
         "stop"   => { main-stop }
         "status" => { main-status }
+        "send"   => { main-send $path $window }
         _ => {
             print "Usage: preview <subcommand>"
             print ""
             print "Subcommands:"
-            print "  start   — launch daemon (idempotent)"
-            print "  stop    — stop daemon"
-            print "  status  — daemon health (pid / root / port / started_at)"
+            print "  start                    — launch daemon (idempotent)"
+            print "  stop                     — stop daemon"
+            print "  status                   — daemon health (pid / root / port / started_at)"
+            print "  send <path> [--window N] — push path to window N (default 1)"
         }
     }
 }
