@@ -1,0 +1,3 @@
+preview-d static assets — populated by later sp008 tasks (shell.html,
+app.js, style.css, stl-viewer bundle). This placeholder exists only so the
+go:embed directive in embed.go has a file to match.

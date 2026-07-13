@@ -1,0 +1,29 @@
+# preview — build + install the preview-d daemon (ft005 file-preview-daemon).
+#
+# The nushell wrapper (`preview`) and its ~/.local/bin link live in
+# nushell/dot.yaml, mirroring akm-graph/dot.yaml + d2/dot.yaml. This dot only
+# builds the Go daemon binary. Linux-only: the daemon serves a localhost
+# HTTP surface and is consumed by the nu wrapper, a Core-UX (Linux) tool.
+
+linux:
+  installs:
+    cmd: |
+      # Build the preview-d daemon. Guarded on the go toolchain so linking
+      # (done by `rotz link`) still lands on hosts without go — the wrapper
+      # then reports "rotz install preview" until the binary exists.
+      if command -v go >/dev/null 2>&1; then
+        mkdir -p ~/.local/bin
+        # Resolve the source dir via akm-root so a non-standard clone path
+        # (not ~/.dotfiles) still builds. Fall back to ~/.dotfiles.
+        SRC="$HOME/.dotfiles/preview"
+        if command -v akm-root >/dev/null 2>&1; then
+          ROOT="$(akm-root 2>/dev/null || true)"
+          if [ -n "$ROOT" ] && [ -d "$ROOT/preview" ]; then
+            SRC="$ROOT/preview"
+          fi
+        fi
+        go build -C "$SRC" -o ~/.local/bin/preview-d .
+        echo "preview: built ~/.local/bin/preview-d from $SRC"
+      else
+        echo "preview: go toolchain not found — skipping daemon build (install go, then re-run 'rotz install preview')" >&2
+      fi
