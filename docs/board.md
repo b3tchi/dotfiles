@@ -16,7 +16,7 @@ sections when status flips.
 
 ## spec
 
-- [[sp008|cursor-driven-preview-bridge]]
-
 ## ready
+
+- [[sp008|cursor-driven-preview-bridge]]
 
