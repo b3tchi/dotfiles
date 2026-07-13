@@ -21,14 +21,17 @@ const maxRenderSize = 5 * 1024 * 1024 // 5 MiB
 // renderFile stats path and dispatches to the renderer selected by the
 // path's type: markdown extensions render via goldmark, image extensions
 // render via renderImage (thumbnail by default, full-res when full is true
-// — the ft005 api_surface image row), anything chroma recognises (including
-// its plaintext lexer, which covers .txt and unmatched-but-textual files)
-// renders as syntax HTML, everything else — unknown extensions, files with
-// no extension chroma can't match, and binary content — falls back to a
-// safe "no preview" page. It never panics and never emits a 500 for a
-// problem with the FILE itself (sp008 Task 2/3 success criteria); only a
-// genuine I/O failure reading an existing, already root-jailed path falls
-// through to 500.
+// — the ft005 api_surface image row), video extensions render via
+// renderVideo (poster frame by default, raw bytes when full is true — the
+// ft005 api_surface video row's byte-stream half; the ?live HTML wrapper is
+// handled separately by server.go's handleFile), anything chroma recognises
+// (including its plaintext lexer, which covers .txt and unmatched-but-
+// textual files) renders as syntax HTML, everything else — unknown
+// extensions, files with no extension chroma can't match, and binary
+// content — falls back to a safe "no preview" page. It never panics and
+// never emits a 500 for a problem with the FILE itself (sp008 Task 2/3/8
+// success criteria); only a genuine I/O failure reading an existing,
+// already root-jailed path falls through to 500.
 func renderFile(w http.ResponseWriter, path string, full bool) {
 	fi, err := os.Stat(path)
 	if err != nil {
@@ -51,6 +54,17 @@ func renderFile(w http.ResponseWriter, path string, full bool) {
 	// re-encoding loss).
 	if isImageExt(path) {
 		renderImage(w, path, fi, full)
+		return
+	}
+
+	// Video is binary content that must never pass through the capped text
+	// read below, same rationale as the image branch above (sp008 Task 8:
+	// poster frame by default, raw bytes on full — the ft005 api_surface
+	// video row's byte-stream half; the ?live HTML wrapper is special-cased
+	// in server.go's handleFile since it needs the original request path,
+	// not just the resolved filesystem path renderFile receives).
+	if isVideoExt(path) {
+		renderVideo(w, path, fi, full)
 		return
 	}
 

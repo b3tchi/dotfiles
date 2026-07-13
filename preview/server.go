@@ -327,6 +327,21 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	// sp008 Task 8 (DEVIATION flagged per task instructions): ?live selects
+	// the video renderer's live tier — an HTML wrapper embedding a <video>
+	// element that plays the file via its own ?full byte-stream (ft005
+	// api_surface video row). This is special-cased here, before the
+	// renderFile dispatch below, rather than threaded through renderFile's
+	// existing single "full" bool: reusing one flag for both "return the
+	// live wrapper" and "return raw bytes" would make the wrapper's own
+	// <video src> re-trigger the wrapper instead of the byte stream it
+	// needs to actually play. It also needs reqPath (the original request
+	// path) to build that src, which renderFile never receives — only the
+	// resolved filesystem path.
+	if isVideoExt(resolved) && r.URL.Query().Has("live") {
+		renderVideoLive(w, reqPath)
+		return
+	}
 	// sp008 Task 3: ?full selects the full-res tier (image row of the ft005
 	// api_surface); its presence, not its value, is what matters (e.g.
 	// "?full" or "?full=1" both count). Minimal, necessary one-line
