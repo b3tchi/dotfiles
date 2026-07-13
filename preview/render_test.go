@@ -191,3 +191,53 @@ func TestRenderFileNonexistent(t *testing.T) {
 		t.Fatalf("status = %d, want 404 (body: %s)", rec.Code, rec.Body.String())
 	}
 }
+
+// TestIsD2Ext proves the .d2 extension is detected case-insensitively, the
+// same style as isImageExt/isVideoExt/isSTLExt (sp008 Task 7: .d2 files
+// dispatch to the d2-router embed rather than the plain code/text render).
+func TestIsD2Ext(t *testing.T) {
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{"diagram.d2", true},
+		{"diagram.D2", true},
+		{"/abs/path/network.d2", true},
+		{"notes.md", false},
+		{"noext", false},
+		{"diagram.d2x", false},
+	}
+	for _, tc := range cases {
+		if got := isD2Ext(tc.path); got != tc.want {
+			t.Errorf("isD2Ext(%q) = %v, want %v", tc.path, got, tc.want)
+		}
+	}
+}
+
+// TestIsAkmZettel proves an akm zettel path is detected as any markdown
+// file under root's docs/notes/** subtree — the same subtree ft004's
+// WalkNotes (akm-graph/parser.go) walks to build the graph (sp008 Task 7:
+// these paths dispatch to the akm-graph embed rather than the plain
+// goldmark markdown render).
+func TestIsAkmZettel(t *testing.T) {
+	root := "/repo"
+	cases := []struct {
+		name     string
+		resolved string
+		want     bool
+	}{
+		{"zettel", "/repo/docs/notes/us006.md", true},
+		{"nested archive zettel", "/repo/docs/notes/archive/spec/sp001.md", true},
+		{"non-md under notes", "/repo/docs/notes/diagram.d2", false},
+		{"md outside notes", "/repo/README.md", false},
+		{"md at docs root", "/repo/docs/board.md", false},
+		{"sibling dir name collision", "/repo/docs/notes-other/x.md", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isAkmZettel(root, tc.resolved); got != tc.want {
+				t.Errorf("isAkmZettel(%q, %q) = %v, want %v", root, tc.resolved, got, tc.want)
+			}
+		})
+	}
+}
