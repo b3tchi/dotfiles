@@ -6,6 +6,10 @@ sections when status flips.
 
 ## idea
 
+- [[sp009|akm-graph-node-select-postmessage]]
+
+- [[sp010|d2-router-element-select-postmessage]]
+
 - [[sp007|remote-workstation-hardening]]
 
 - [[sp003|fix-categories]]
