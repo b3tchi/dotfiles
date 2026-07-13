@@ -25,3 +25,9 @@ ssh/config.d/*
 # Eval sandboxes (each seed re-creates a throwaway git repo)
 claude/marketplace/plugins/infinifu/skills/*-workspace/iteration-*/eval-*/with_skill/sandbox/
 claude/marketplace/plugins/infinifu/skills/*-workspace/iteration-*/eval-*/without_skill/sandbox/
+
+# Compiled daemon build artifacts (Go binaries — build output, not source)
+akm-graph/akmgraph
+preview/preview
+preview/preview-d
+d2/d2router
