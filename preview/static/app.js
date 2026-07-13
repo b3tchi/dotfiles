@@ -4,6 +4,72 @@
 (() => {
   "use strict";
 
+  // ── sp008 Task 10: akm/d2 reverse-channel postMessage listener ─────────
+  //
+  // ASSUMED CONTRACT — sp009/sp010 (the ft004 akm-graph / ft002 d2-router
+  // page-side EMIT) are both still `status: idea`, NOT shipped anywhere.
+  // This is deliberately the LISTENER half only, built against an assumed
+  // message shape so it can be implemented and tested now; reconcile against
+  // whatever sp009/sp010 actually ship.
+  //
+  //   event.data   = { type: "preview-open", path: "<root-relative-or-
+  //                    absolute file path>" }
+  //   event.origin must be one of the known embedded-iframe origins:
+  //     - akm-graph (ft004):    http://localhost:4810
+  //     - d2-router (ft002):    http://localhost:4800
+  //     - this shell's own origin — the /d2embed/ same-origin proxy route
+  //       (proxy.go handleD2Embed) serves d2-router's page through preview-d
+  //       itself, so that message would arrive with location.origin, not
+  //       d2-router's origin.
+  //   Any other origin is rejected silently (edge case: postMessage from an
+  //   unexpected origin -> ignored, not an error).
+  //
+  //   The emitting page is expected to post to window.top (or otherwise
+  //   ensure delivery reaches this top-level shell document directly) since
+  //   akm-graph/d2-router render inside a NESTED iframe one level below this
+  //   shell (renderAkmEmbed/renderD2Embed in proxy.go wrap them in an
+  //   intermediate /file/<path> document) — a plain window.parent.postMessage
+  //   from that nested iframe would only reach the intermediate document,
+  //   not this shell. That's on the sp009/sp010 emit side to get right.
+  //
+  // Registered synchronously as the very first thing this script does (before
+  // any other setup, including the websocket connect below) so no message
+  // sent after the shell finishes loading can be missed: postMessage delivery
+  // is always an asynchronous task, so any listener already attached by the
+  // time this synchronous script finishes executing is guaranteed to see it —
+  // no separate buffering scheme is needed.
+  //
+  // A node/element with no backing file is expected to omit `path` (or send
+  // an empty string) rather than error — treated as a silent no-op here too.
+  const PREVIEW_OPEN_ORIGINS = [
+    "http://localhost:4810", // akm-graph (ft004)
+    "http://localhost:4800", // d2-router (ft002)
+    location.origin, // same-origin /d2embed/ proxy (proxy.go handleD2Embed)
+  ];
+
+  function isAllowedPreviewOrigin(origin) {
+    return PREVIEW_OPEN_ORIGINS.indexOf(origin) !== -1;
+  }
+
+  function extractOpenPath(data) {
+    if (!data || typeof data !== "object") return "";
+    if (data.type !== "preview-open") return "";
+    return typeof data.path === "string" ? data.path : "";
+  }
+
+  function handlePreviewOpenMessage(event) {
+    if (!isAllowedPreviewOrigin(event.origin)) return; // wrong origin -> ignore
+    const path = extractOpenPath(event.data);
+    if (!path) return; // no backing file / malformed -> no-op, no error
+    fetch("/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    }).catch(() => {}); // best-effort; failures surface via nvim, not here
+  }
+
+  addEventListener("message", handlePreviewOpenMessage);
+
   const contentEl = document.getElementById("content");
   const emptyEl = document.getElementById("empty");
 
