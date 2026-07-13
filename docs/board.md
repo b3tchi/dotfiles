@@ -18,5 +18,4 @@ sections when status flips.
 
 ## ready
 
-- [[sp008|cursor-driven-preview-bridge]]
 

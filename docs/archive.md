@@ -5,6 +5,8 @@ Shipped workstreams. Specs (`sp###`) at `status: done` after
 
 ## done
 
+- [[sp008|cursor-driven-preview-bridge]]
+
 - [[sp006|akm-graph-cosmos-viz]]
 
 - [[sp001|mark project as remote so terminals open against the remote host]]
