@@ -1,7 +1,9 @@
 package main
 
 import (
+	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // Node represents a single zettel node in the graph.
@@ -13,6 +15,11 @@ type Node struct {
 	Degree   int    `json:"degree"`
 	Ghost    bool   `json:"ghost"`
 	Archived bool   `json:"archived"`
+	// Path is the root-relative, forward-slash source file path (empty and
+	// omitted for ghost nodes, which have no backing Note). Consumed by
+	// reverse-open (ft005 / dotfiles-184.5) to resolve a clicked node back to
+	// its file.
+	Path string `json:"path,omitempty"`
 }
 
 // Link represents a directed edge source → target.
@@ -23,10 +30,28 @@ type Link struct {
 
 // Graph is the full serialisable graph payload matching the ft004 api_surface:
 //
-//	{nodes: [{id, type, status, alias, degree, ghost, archived}], links: [{source, target}]}
+//	{nodes: [{id, type, status, alias, degree, ghost, archived, path?}], links: [{source, target}]}
 type Graph struct {
 	Nodes []Node `json:"nodes"`
 	Links []Link `json:"links"`
+}
+
+// relPath returns the root-relative, forward-slash path for absPath. It
+// returns "" (never an escaping path) when either input is empty, when the
+// two paths aren't comparable (filepath.Rel error), or when the resolved
+// path climbs outside root (a ".." prefixed result).
+func relPath(root, absPath string) string {
+	if root == "" || absPath == "" {
+		return ""
+	}
+	rel, err := filepath.Rel(root, absPath)
+	if err != nil {
+		return ""
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	return filepath.ToSlash(rel)
 }
 
 // hubIDs is the set of IDs typed as "hub". Only the AKM overview note remains a
@@ -44,7 +69,10 @@ func isZettelID(id string) bool {
 	return nodeTypeFromID(id, false) != "note"
 }
 
-// BuildGraph constructs the full Graph from a set of parsed notes.
+// BuildGraph constructs the full Graph from a set of parsed notes. root is
+// the repo root the notes were walked from — real-node Path values are
+// computed root-relative to it (empty root or an out-of-root AbsPath both
+// yield an empty Path, never an escaping one).
 //
 // Rules:
 //   - One Node per Note (id = filename stem). Type from nodeTypeFromID.
@@ -52,7 +80,7 @@ func isZettelID(id string) bool {
 //   - Self-links dropped.
 //   - Duplicate source→target pairs deduplicated to one Link.
 //   - Degree = number of links incident on the node (in + out).
-func BuildGraph(notes []Note) Graph {
+func BuildGraph(notes []Note, root string) Graph {
 	// Build lookup of known note IDs → Note
 	noteByID := make(map[string]Note, len(notes))
 	for _, n := range notes {
@@ -120,6 +148,7 @@ func BuildGraph(notes []Note) Graph {
 			Degree:   degree[n.ID],
 			Ghost:    false,
 			Archived: n.Archived,
+			Path:     relPath(root, n.AbsPath),
 		})
 	}
 
@@ -156,5 +185,5 @@ func BuildGraphFromRoot(repoRoot string) (Graph, error) {
 	if err != nil {
 		return Graph{}, err
 	}
-	return BuildGraph(notes), nil
+	return BuildGraph(notes, repoRoot), nil
 }
