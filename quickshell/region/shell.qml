@@ -154,7 +154,6 @@ ShellRoot {
                     height: infoCol.height + 20
                     radius: 6
                     color: "#152024"
-                    opacity: 0.85
                     border.color: root.accent
                     border.width: 1
 
