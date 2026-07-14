@@ -97,6 +97,14 @@ ShellRoot {
                 anchors.fill: parent
                 focus: true
                 Keys.onEscapePressed: root.cancel()
+                // Keys.onEscapePressed only fires with active focus, which a
+                // frameless window may not reliably hold — back it with a
+                // Shortcut (focus-independent) and grab focus on load.
+                Component.onCompleted: forceActiveFocus()
+                Shortcut {
+                    sequences: ["Escape"]
+                    onActivated: root.cancel()
+                }
 
                 // dim the whole frozen shot
                 Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.35 }
