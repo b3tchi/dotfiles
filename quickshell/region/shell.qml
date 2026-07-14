@@ -98,9 +98,25 @@ ShellRoot {
                 focus: true
                 Keys.onEscapePressed: root.cancel()
 
-                // dim the frozen shot; selection reads brighter (the saved crop
-                // comes from the un-dimmed source, so this is just a guide)
+                // dim the whole frozen shot
                 Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.35 }
+
+                // …then punch a bright hole: a clipped copy of the frozen image
+                // over the selection, at full brightness, so the selected part
+                // shows un-dimmed (the crop still comes from the source file).
+                Item {
+                    visible: root.dragging && root.selW() > 0 && root.selH() > 0
+                    x: root.selX(); y: root.selY()
+                    width: root.selW(); height: root.selH()
+                    clip: true
+                    Image {
+                        source: frozen.source
+                        x: -parent.x; y: -parent.y
+                        width: win.width; height: win.height
+                        fillMode: Image.Stretch
+                        cache: false
+                    }
+                }
 
                 Rectangle {
                     visible: root.dragging
@@ -130,17 +146,44 @@ ShellRoot {
                     border.color: root.accent; border.width: 2
                 }
 
-                // hint
-                Text {
+                // instruction panel (top-center)
+                Rectangle {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    y: 24
-                    text: root.clickState === 1 ? "tap the opposite corner   ·   right-click / Esc to cancel"
-                                                : "drag a box, or tap two corners   ·   right-click / Esc to cancel"
-                    color: "#FDF6E3"
-                    font.family: "Iosevka Nerd Font"
-                    font.pixelSize: 14
-                    Rectangle { anchors.fill: parent; anchors.margins: -8; z: -1
-                                color: "#152024"; opacity: 0.7; radius: 4 }
+                    y: 20
+                    width: infoCol.width + 28
+                    height: infoCol.height + 20
+                    radius: 6
+                    color: "#152024"
+                    opacity: 0.85
+                    border.color: root.accent
+                    border.width: 1
+
+                    Column {
+                        id: infoCol
+                        anchors.centerIn: parent
+                        spacing: 3
+                        Text {
+                            text: "Pick screenshot region"
+                            color: root.accent
+                            font.family: "Iosevka Nerd Font"
+                            font.pixelSize: 16
+                            font.bold: true
+                        }
+                        Text {
+                            text: root.clickState === 1
+                                  ? "Now tap the OPPOSITE corner to capture"
+                                  : "Drag a box, or tap two opposite corners"
+                            color: "#FDF6E3"
+                            font.family: "Iosevka Nerd Font"
+                            font.pixelSize: 14
+                        }
+                        Text {
+                            text: "Saved to ~/Pictures/screenshots + clipboard  ·  Esc / Cancel to abort"
+                            color: "#9BB0B5"
+                            font.family: "Iosevka Nerd Font"
+                            font.pixelSize: 12
+                        }
+                    }
                 }
 
                 MouseArea {
@@ -180,6 +223,38 @@ ShellRoot {
                             root.curX = m.x; root.curY = m.y
                             root.finish()
                         }
+                    }
+                }
+
+                // Cancel button (top-right) — declared last so it sits above the
+                // selection MouseArea and consumes its own taps (touch-abort,
+                // since right-click / Esc aren't available on a touchscreen).
+                Rectangle {
+                    id: cancelBtn
+                    anchors.top: parent.top
+                    anchors.right: parent.right
+                    anchors.margins: 20
+                    width: cancelRow.width + 28
+                    height: 44
+                    radius: 6
+                    color: cancelMa.pressed ? "#c0392b" : "#152024"
+                    border.color: "#c0392b"
+                    border.width: 2
+
+                    Row {
+                        id: cancelRow
+                        anchors.centerIn: parent
+                        spacing: 8
+                        Text { text: "✕"; color: "#FDF6E3"
+                               font.family: "Iosevka Nerd Font"; font.pixelSize: 18 }
+                        Text { text: "Cancel"; color: "#FDF6E3"
+                               font.family: "Iosevka Nerd Font"; font.pixelSize: 16 }
+                    }
+
+                    MouseArea {
+                        id: cancelMa
+                        anchors.fill: parent
+                        onClicked: root.cancel()
                     }
                 }
             }
