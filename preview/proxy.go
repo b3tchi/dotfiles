@@ -22,10 +22,17 @@ import (
 // anti-pattern: never block a request goroutine unbounded).
 const openTimeout = 3 * time.Second
 
-// handleOpen serves POST /open {"path": "..."} — the reverse channel (ft005
-// api_surface /open, sp008 Task 6): the webview asks the daemon to open a
-// file back in the running nvim instance via
-// "nvim --server $NVIM --remote <path>".
+// handleOpen serves POST /open {"path": "...", "slot": N?} — the reverse
+// channel (ft005 api_surface /open, sp008 Task 6): the webview asks the
+// daemon to open a file back in a running nvim instance via
+// "nvim --server <addr> --remote <path>".
+//
+// slot is optional (sp009 Task 2, back-compat with sp008 Task 6): when
+// present, the target address comes from SlotManager.NvimAddr(slot) — the
+// per-slot registry sp009 Task 1 built — so a multi-window setup opens the
+// file back in the SPECIFIC nvim that owns that /preview<N> slot rather
+// than whichever nvim happened to set the global $NVIM. When slot is
+// absent, behavior is unchanged from sp008: the global os.Getenv("NVIM").
 //
 // Validation runs strictly before any subprocess exec, in this order:
 //  1. decode the JSON body (malformed -> 400, never reaches the next step)
@@ -33,10 +40,12 @@ const openTimeout = 3 * time.Second
 //     resolve inside the allowed root; an escape is 400, a missing path is
 //  404. This is the sp008 Task 6 anti-pattern gate: no raw webview input
 //     reaches a subprocess unvalidated.
-//  3. $NVIM must be set — with no running nvim server there is nothing to
-//     drive, and a missing target must be a distinct, visible error (424
-//     Failed Dependency), not a silent no-op (sp008 Task 6 success
-//     criteria).
+//  3. a target nvim address must be resolvable — either the slot's
+//     registered addr (slot present) or $NVIM (slot absent). With nothing
+//     to drive, a missing target must be a distinct, visible error (424
+//     Failed Dependency), not a silent no-op (sp008 Task 6 / sp009 Task 2
+//     success criteria) — and this must never fall back to the OTHER
+//     source (a slot present but unbound must NOT silently use $NVIM).
 //
 // Only once all three hold does exec.CommandContext run, and it runs with
 // an explicit arg vector ("nvim", "--server", <addr>, "--remote", <path>)
@@ -51,6 +60,7 @@ func (s *Server) handleOpen(w http.ResponseWriter, r *http.Request) {
 
 	var body struct {
 		Path string `json:"path"`
+		Slot *int   `json:"slot"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "bad request body", http.StatusBadRequest)
@@ -70,10 +80,19 @@ func (s *Server) handleOpen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	nvimServer := os.Getenv("NVIM")
-	if nvimServer == "" {
-		http.Error(w, "no running nvim server ($NVIM unset)", http.StatusFailedDependency)
-		return
+	var nvimServer string
+	if body.Slot != nil {
+		nvimServer = s.slots.NvimAddr(*body.Slot)
+		if nvimServer == "" {
+			http.Error(w, "no nvim registered for this slot", http.StatusFailedDependency)
+			return
+		}
+	} else {
+		nvimServer = os.Getenv("NVIM")
+		if nvimServer == "" {
+			http.Error(w, "no running nvim server ($NVIM unset)", http.StatusFailedDependency)
+			return
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), openTimeout)

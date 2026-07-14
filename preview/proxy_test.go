@@ -113,6 +113,88 @@ func TestHandleOpenValidPathInvokesNvimRemote(t *testing.T) {
 	}
 }
 
+// TestHandleOpenWithSlotRoutesToSlotNvimAddr proves the sp009 Task 2 core
+// case: when the request body carries a "slot" that has a registered nvim
+// address (via SlotManager.SetNvimAddr, sp009 Task 1), handleOpen targets
+// THAT address rather than the global $NVIM env var — the per-slot routing
+// this task adds. $NVIM is deliberately left unset here so a fallback to it
+// would make the assertion on --server's value fail.
+func TestHandleOpenWithSlotRoutesToSlotNvimAddr(t *testing.T) {
+	logPath := newFakeNvimOnPath(t)
+	t.Setenv("NVIM", "")
+
+	root := t.TempDir()
+	target := filepath.Join(root, "note.md")
+	if err := os.WriteFile(target, []byte("# hi"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	srv, err := NewServer(root, "4200")
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	srv.slots.SetNvimAddr(3, "/tmp/slot3-nvim-socket")
+
+	reqBody, _ := json.Marshal(map[string]any{"path": "note.md", "slot": 3})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/open", bytes.NewReader(reqBody))
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /open (slot 3): status %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+
+	wantAbs, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatalf("EvalSymlinks fixture: %v", err)
+	}
+	argv := readArgvLog(t, logPath)
+	if !containsArg(argv, "--server") {
+		t.Errorf("nvim argv %v missing --server", argv)
+	}
+	if !containsArg(argv, "/tmp/slot3-nvim-socket") {
+		t.Errorf("nvim argv %v missing --server value from slot 3's registered addr", argv)
+	}
+	if !containsArg(argv, "--remote") {
+		t.Errorf("nvim argv %v missing --remote", argv)
+	}
+	if !containsArg(argv, wantAbs) {
+		t.Errorf("nvim argv %v missing abs path %q", argv, wantAbs)
+	}
+}
+
+// TestHandleOpenWithUnboundSlotReturns424NoExec proves the sp009 Task 2 edge
+// case: a slot with no registered nvim address (no SetNvimAddr ever landed
+// for it) must fail closed with 424 Failed Dependency and never invoke the
+// nvim subprocess — mirroring the existing $NVIM-unset behavior, but scoped
+// per-slot rather than falling back to the global env var.
+func TestHandleOpenWithUnboundSlotReturns424NoExec(t *testing.T) {
+	logPath := newFakeNvimOnPath(t)
+	t.Setenv("NVIM", "/tmp/fake-global-nvim-socket") // set globally, must NOT be used as a fallback
+
+	root := t.TempDir()
+	target := filepath.Join(root, "note.md")
+	if err := os.WriteFile(target, []byte("# hi"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	srv, err := NewServer(root, "4200")
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	// Slot 7 is never registered via SetNvimAddr.
+
+	reqBody, _ := json.Marshal(map[string]any{"path": "note.md", "slot": 7})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/open", bytes.NewReader(reqBody))
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFailedDependency {
+		t.Fatalf("POST /open (unbound slot 7): status %d, want 424 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+		t.Errorf("fake nvim was invoked for an unbound slot (log exists at %q)", logPath)
+	}
+}
+
 // TestHandleOpenOutOfRootRejectedWithoutExec proves the sp008 Task 6
 // anti-pattern gate: a path that escapes the allowed root is rejected with
 // 400 and the subprocess is NEVER invoked — validation happens strictly
