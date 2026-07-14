@@ -147,8 +147,8 @@ bindsym $mod+e layout toggle split
 # change focus between tiling / floating windows
 # bindsym $mod+space focus mode_toggle
 
-# toggle sticky
-bindsym $mod+Shift+s sticky toggle
+# toggle sticky (pinned — p, like tmux; $mod+Shift+s freed for ksnip capture)
+bindsym $mod+Shift+p sticky toggle
 
 # focus the parent container
 bindsym $mod+a focus parent
