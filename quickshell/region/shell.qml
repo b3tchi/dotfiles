@@ -46,12 +46,18 @@ ShellRoot {
     function selW() { return Math.abs(curX - startX) }
     function selH() { return Math.abs(curY - startY) }
 
+    // Transient confirmation shown in-overlay (like tmux's display-message) —
+    // deliberately NOT a desktop notification, so nothing lands under the bell.
+    property string toastText: ""
+
     function cleanupCmd() { return "rm -f '" + src + "'" }
 
     function cancel() {
         Quickshell.execDetached(["sh", "-c", cleanupCmd()])
         Qt.quit()
     }
+
+    Timer { id: quitTimer; interval: 1400; onTriggered: Qt.quit() }
 
     function finish() {
         var w = Math.round(selW())
@@ -62,16 +68,18 @@ ShellRoot {
             var dir = Quickshell.env("HOME") + "/Pictures/screenshots"
             var f = dir + "/shot_" + Qt.formatDateTime(new Date(), "yyyyMMdd-hhmmss") + ".png"
             var geom = w + "x" + h + "+" + x + "+" + y
-            // crop the FROZEN full-screen grab (bright, no dim) to the selection.
-            // `magick` (not the deprecated `convert`); xclip serves the clipboard
-            // as image/png and self-backgrounds to hold the selection after we quit.
+            // crop the FROZEN full-screen grab (bright, no dim) to the selection
+            // (`magick`, not the deprecated `convert`), then copy the file PATH
+            // (text) to the clipboard — like tmux copy — so it can be pasted
+            // anywhere; xclip self-backgrounds to hold the selection after we quit.
             var cmd = "mkdir -p '" + dir + "'; " +
                       "magick '" + src + "' -crop " + geom + " +repage '" + f + "' && " +
-                      "xclip -selection clipboard -t image/png -i '" + f + "' && " +
-                      "notify-send 'Screenshot' 'Saved " + f + "  (+ clipboard)'; " +
+                      "printf %s '" + f + "' | xclip -selection clipboard; " +
                       cleanupCmd()
             Quickshell.execDetached(["sh", "-c", cmd])
-            Qt.quit()
+            // show the confirmation briefly on the frozen shot, then close
+            toastText = "Copied path  " + f
+            quitTimer.start()
         } else {
             cancel()
         }
@@ -267,6 +275,43 @@ ShellRoot {
                         id: cancelMa
                         anchors.fill: parent
                         onClicked: root.cancel()
+                    }
+                }
+
+                // Transient "Copied path" toast (center) — shown for ~1.4s after
+                // capture, then the overlay closes. Its full-screen MouseArea
+                // swallows any further input so a stray click can't re-trigger.
+                MouseArea {
+                    anchors.fill: parent
+                    visible: root.toastText !== ""
+                    enabled: visible
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: toastCol.width + 40
+                        height: toastCol.height + 28
+                        radius: 8
+                        color: "#152024"
+                        border.color: root.accent
+                        border.width: 2
+                        Column {
+                            id: toastCol
+                            anchors.centerIn: parent
+                            spacing: 4
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: "✓ Copied path to clipboard"
+                                color: root.accent
+                                font.family: "Iosevka Nerd Font"
+                                font.pixelSize: 18
+                                font.bold: true
+                            }
+                            Text {
+                                text: root.toastText.replace("Copied path  ", "")
+                                color: "#FDF6E3"
+                                font.family: "Iosevka Nerd Font"
+                                font.pixelSize: 14
+                            }
+                        }
                     }
                 }
             }
