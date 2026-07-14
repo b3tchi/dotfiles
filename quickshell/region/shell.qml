@@ -167,42 +167,27 @@ ShellRoot {
                     border.color: root.accent; border.width: 2
                 }
 
-                // instruction panel (top-center)
+                // instruction hint — slim top strip (matches the bottom
+                // confirmation strip), with the cancel methods spelled out.
                 Rectangle {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    y: 20
-                    width: infoCol.width + 28
-                    height: infoCol.height + 20
-                    radius: 6
+                    visible: root.toastText === ""
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    width: parent.width
+                    height: hint.implicitHeight + 12
                     color: "#152024"
-                    border.color: root.accent
-                    border.width: 1
-
-                    Column {
-                        id: infoCol
-                        anchors.centerIn: parent
-                        spacing: 3
-                        Text {
-                            text: "Pick screenshot region"
-                            color: root.accent
-                            font.family: "Iosevka Nerd Font"
-                            font.pixelSize: 16
-                            font.bold: true
-                        }
-                        Text {
-                            text: root.clickState === 1
-                                  ? "Now tap the OPPOSITE corner to capture"
-                                  : "Drag a box, or tap two opposite corners"
-                            color: "#FDF6E3"
-                            font.family: "Iosevka Nerd Font"
-                            font.pixelSize: 14
-                        }
-                        Text {
-                            text: "Saved to ~/Pictures/screenshots + clipboard  ·  Esc / Cancel to abort"
-                            color: "#9BB0B5"
-                            font.family: "Iosevka Nerd Font"
-                            font.pixelSize: 12
-                        }
+                    Text {
+                        id: hint
+                        anchors.left: parent.left
+                        anchors.leftMargin: 14
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: (root.clickState === 1
+                               ? "Tap the opposite corner"
+                               : "Drag a box, or tap two opposite corners")
+                              + "     Esc / right-click / ✕ to cancel"
+                        color: "#FDF6E3"
+                        font.family: "Iosevka Nerd Font"
+                        font.pixelSize: 13
                     }
                 }
 
