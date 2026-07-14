@@ -5,6 +5,8 @@ Shipped workstreams. Specs (`sp###`) at `status: done` after
 
 ## done
 
+- [[sp009|akm-graph-node-select-reverse-open]]
+
 - [[sp008|cursor-driven-preview-bridge]]
 
 - [[sp006|akm-graph-cosmos-viz]]

@@ -16,5 +16,3 @@ sections when status flips.
 
 ## ready
 
-- [[sp009|akm-graph-node-select-reverse-open]]
-
