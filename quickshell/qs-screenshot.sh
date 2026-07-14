@@ -24,7 +24,7 @@ for _p in $(pgrep -x quickshell 2>/dev/null); do
     case "$(printf '%s\n' "$_e" | sed -n 's/^DISPLAY=//p' | head -1)" in
         ":$_dpynum"|":$_dpynum."*) ;; *) continue ;;
     esac
-    for _v in QS_BAR_HEIGHT QS_BAR_INSET_BOTTOM QS_BAR_INSET_TOP; do
+    for _v in QS_BAR_HEIGHT QS_BAR_INSET_BOTTOM QS_BAR_INSET_TOP QS_BAR_INSET_AUTO; do
         _val=$(printf '%s\n' "$_e" | sed -n "s/^${_v}=//p" | head -1)
         [ -n "$_val" ] && export "${_v}=${_val}"
     done

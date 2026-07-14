@@ -24,13 +24,23 @@ ShellRoot {
     readonly property string src: Quickshell.env("QS_SHOT_SRC") ?? ""
     readonly property string accent: "#16a085"
 
-    // Height the status bar occupies at the bottom, so the confirmation strip
-    // sits ABOVE it instead of behind it. qs-screenshot.sh forwards the bar's
-    // QS_BAR_* env from the running bar; fall back to the i3 default (27).
-    readonly property int barGap: {
-        function ei(n, d) { var v = parseInt(Quickshell.env(n)); return isNaN(v) ? d : v }
-        return ei("QS_BAR_HEIGHT", 27) + ei("QS_BAR_INSET_BOTTOM", 0) + ei("QS_BAR_INSET_TOP", 0)
+    // Status-bar geometry, forwarded from the running bar by qs-screenshot.sh,
+    // so the overlay's mode strip lands exactly on the bar's pill. The bar draws
+    // as a pill offset up by QS_BAR_INSET_BOTTOM (with a black chin below);
+    // QS_BAR_INSET_AUTO engages that only on a phone-shaped viewport (height >=
+    // 2*width — mirrors Session.insetActive). Overlay window is #000000, so the
+    // chin area under the strip matches the bar's black chin.
+    readonly property var scr: Quickshell.screens.length > 0 ? Quickshell.screens[0] : null
+    function envInt(n, d) { var v = parseInt(Quickshell.env(n)); return isNaN(v) ? d : v }
+    readonly property bool insetActive: {
+        var auto = Quickshell.env("QS_BAR_INSET_AUTO") === "1"
+        return !auto || (scr !== null && scr.height >= 2 * scr.width)
     }
+    readonly property int barHeight:  envInt("QS_BAR_HEIGHT", 27)
+    readonly property int insetBottom: insetActive ? envInt("QS_BAR_INSET_BOTTOM", 0) : 0
+    readonly property int insetTop:    insetActive ? envInt("QS_BAR_INSET_TOP", 0) : 0
+    // full bottom footprint of the bar (pill + chin), for lifting things clear
+    readonly property int barGap: barHeight + insetBottom + insetTop
 
     property real startX: 0
     property real startY: 0
@@ -182,8 +192,9 @@ ShellRoot {
                     visible: root.toastText === ""
                     anchors.left: parent.left
                     anchors.bottom: parent.bottom
+                    anchors.bottomMargin: root.insetBottom
                     width: parent.width
-                    height: 27
+                    height: root.barHeight
                     color: "#152024"
                     Row {
                         anchors.left: parent.left
