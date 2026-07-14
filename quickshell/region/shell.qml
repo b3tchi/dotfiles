@@ -85,6 +85,10 @@ ShellRoot {
         color: "#000000"
         title: "qs-region"
 
+        // Grab WM activation so keyboard events (Esc) actually reach us — a
+        // frameless fullscreen window doesn't always get input focus on its own.
+        Component.onCompleted: requestActivate()
+
         Image {
             id: frozen
             anchors.fill: parent
@@ -103,6 +107,7 @@ ShellRoot {
                 Component.onCompleted: forceActiveFocus()
                 Shortcut {
                     sequences: ["Escape"]
+                    context: Qt.ApplicationShortcut
                     onActivated: root.cancel()
                 }
 
