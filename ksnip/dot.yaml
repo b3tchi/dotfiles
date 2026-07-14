@@ -4,16 +4,17 @@
 # demand: `ksnip -e <file>`. Launched manually; quits on close (single-instance
 # + tray disabled in ksnip.conf).
 #
-# qt6ct.conf styles the editor dark (Fusion + darker palette + Iosevka), scoped
-# to ksnip via the platform theme — launch dark with:
-#   QT_QPA_PLATFORMTHEME=qt6ct ksnip -e <file>
-# (nothing sets that env globally, so other Qt apps are unaffected).
+# qt6ct.conf styles the editor dark (Fusion + darker palette + Iosevka). The
+# `ksnip` wrapper (~/.local/bin, shadows /usr/bin/ksnip) sets
+# QT_QPA_PLATFORMTHEME=qt6ct so plain `ksnip -e <file>` is dark by default;
+# the env is scoped to ksnip, so no other Qt app is themed.
 #
 # ksnip.conf is linked but ksnip rewrites it on use (recent files, window
 # geometry) — expect occasional churn; re-strip the volatile groups if they
 # pile up.
 linux:
   links:
+    ksnip: ~/.local/bin/ksnip
     qt6ct.conf: ~/.config/qt6ct/qt6ct.conf
     ksnip.conf: ~/.config/ksnip/ksnip.conf
   installs:

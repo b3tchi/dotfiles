@@ -1,0 +1,9 @@
+#!/bin/sh
+# Wrapper (shadows /usr/bin/ksnip via ~/.local/bin): launch ksnip with dark
+# editor styling by default (qt6ct → Fusion darker palette + Iosevka, see
+# ksnip/qt6ct.conf). ksnip is annotation-editor only now (`ksnip -e <file>`);
+# quickshell handles screen capture. The platform-theme env is scoped to this
+# process, so no other Qt app is themed. Absolute path avoids recursing into
+# this wrapper.
+export QT_QPA_PLATFORMTHEME=qt6ct
+exec /usr/bin/ksnip "$@"
