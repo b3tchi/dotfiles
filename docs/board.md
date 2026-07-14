@@ -14,8 +14,7 @@ sections when status flips.
 
 ## spec
 
-- [[sp009|akm-graph-node-select-reverse-open]]
-
 ## ready
 
+- [[sp009|akm-graph-node-select-reverse-open]]
 
