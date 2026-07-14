@@ -11,8 +11,17 @@
 # headless nvim — no lazy.nvim bootstrap needed since the file's autocmds
 # are plain top-level Lua with no plugin dependency.
 #
+# sp009 Task 3 adds own-slot registration: `:PreviewStart` now also calls
+# `preview register <v:servername>` and stores the returned slot so
+# `send()` targets it (`--window N`) instead of the wrapper's hardcoded
+# default. Tests 5-7 below cover that: register is called with the real
+# server address, a subsequent send uses the registered slot (not 1), two
+# independent nvim instances land on distinct slots, and a second
+# `:PreviewStart` in the same instance reuses its slot instead of
+# allocating a new one (idempotent).
+#
 # Run:  bash nvim/plugins/preview-test
-# Pass: exits 0 and prints "PASS: 4 tests passed"
+# Pass: exits 0 and prints "PASS: 7 tests passed"
 # Fail: exits 1 and prints "FAIL: <description>"
 set -uo pipefail
 
@@ -32,6 +41,51 @@ make_spy() {
 	cat >"$dir/preview" <<'SPY'
 #!/bin/bash
 echo "$@" >> "$LOG_FILE"
+SPY
+	chmod +x "$dir/preview"
+}
+
+# A spy `preview` binary that additionally answers the `register` verb: it
+# logs argv like make_spy's spy, and for `register <addr> [--slot N]` it
+# prints a slot number to stdout (mirroring the real wrapper's contract —
+# nushell/actions/preview's `main-register` prints the parsed `slot` from
+# preview-d's /register response). Passing --slot echoes that slot back
+# unchanged (rebind, no new allocation); omitting it allocates the next
+# number from $COUNTER_FILE (shared across invocations/processes so two
+# nvim instances registering against the same counter land on distinct
+# slots — mirrors preview-d's real per-daemon slot allocator).
+make_spy_register() {
+	local dir="$1"
+	cat >"$dir/preview" <<'SPY'
+#!/bin/bash
+echo "$@" >> "$LOG_FILE"
+if [ "$1" = "register" ]; then
+	shift
+	shift # nvim address, unused beyond logging above
+	slot=""
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--slot)
+			slot="$2"
+			shift 2
+			;;
+		*)
+			shift
+			;;
+		esac
+	done
+	if [ -n "$slot" ]; then
+		echo "$slot"
+	else
+		: "${COUNTER_FILE:?COUNTER_FILE not set}"
+		if [ ! -f "$COUNTER_FILE" ]; then
+			echo 0 >"$COUNTER_FILE"
+		fi
+		n=$(($(cat "$COUNTER_FILE") + 1))
+		echo "$n" >"$COUNTER_FILE"
+		echo "$n"
+	fi
+fi
 SPY
 	chmod +x "$dir/preview"
 }
@@ -123,5 +177,121 @@ fi
 echo "PASS: rapid CursorMoved debounces to a single send"
 rm -rf "$tmp"
 
+# ── test 5: PreviewStart registers with the real v:servername, and the ────────
+#           subsequent send targets that registered slot (not the hardcoded 1)
+
+tmp=$(mktemp -d)
+spy_dir="$tmp/bin"
+mkdir -p "$spy_dir"
+make_spy_register "$spy_dir"
+log_file="$tmp/log.txt"
+counter_file="$tmp/counter"
+testfile="$tmp/note3.md"
+echo "hello" >"$testfile"
+# Preset the counter so the allocated slot is provably not 1.
+echo 10 >"$counter_file"
+
+PATH="$spy_dir:$PATH" LOG_FILE="$log_file" COUNTER_FILE="$counter_file" nvim --headless --noplugin -u NONE \
+	-c "luafile $PLUGIN" \
+	"$testfile" \
+	-c "PreviewStart" -c "doautocmd CursorHold" -c "sleep 300m" -c "qa!" >"$NVIM_LOG" 2>&1
+
+register_line=$(grep '^register ' "$log_file" || true)
+if [ -z "$register_line" ]; then
+	fail "PreviewStart did not call 'preview register' (log: $(cat "$log_file"))"
+fi
+addr=$(echo "$register_line" | awk '{print $2}')
+if [ -z "$addr" ]; then
+	fail "register was called with no server address: $register_line"
+fi
+echo "PASS: PreviewStart registers with the real v:servername"
+
+send_line=$(grep '^send ' "$log_file" || true)
+if [ -z "$send_line" ]; then
+	fail "no send call recorded after CursorHold: $(cat "$log_file")"
+fi
+if ! echo "$send_line" | grep -qE -- '--window 11$'; then
+	fail "send did not target the registered slot (--window 11): $send_line"
+fi
+if echo "$send_line" | grep -qE -- '--window 1$'; then
+	fail "send used the hardcoded default window 1 instead of the registered slot: $send_line"
+fi
+echo "PASS: send uses the registered slot (--window N), not the hardcoded 1"
+rm -rf "$tmp"
+
+# ── test 6: two independent nvim instances land on distinct slots ─────────────
+
+tmp=$(mktemp -d)
+spy_dir="$tmp/bin"
+mkdir -p "$spy_dir"
+make_spy_register "$spy_dir"
+counter_file="$tmp/counter" # shared across both nvim instances below
+log_a="$tmp/log_a.txt"
+log_b="$tmp/log_b.txt"
+file_a="$tmp/a.md"
+file_b="$tmp/b.md"
+echo "hello" >"$file_a"
+echo "hello" >"$file_b"
+
+PATH="$spy_dir:$PATH" LOG_FILE="$log_a" COUNTER_FILE="$counter_file" nvim --headless --noplugin -u NONE \
+	-c "luafile $PLUGIN" \
+	"$file_a" \
+	-c "PreviewStart" -c "doautocmd CursorHold" -c "sleep 300m" -c "qa!" >"$NVIM_LOG" 2>&1
+
+PATH="$spy_dir:$PATH" LOG_FILE="$log_b" COUNTER_FILE="$counter_file" nvim --headless --noplugin -u NONE \
+	-c "luafile $PLUGIN" \
+	"$file_b" \
+	-c "PreviewStart" -c "doautocmd CursorHold" -c "sleep 300m" -c "qa!" >"$NVIM_LOG" 2>&1
+
+slot_a=$(grep '^send ' "$log_a" | grep -oE -- '--window [0-9]+' | awk '{print $2}')
+slot_b=$(grep '^send ' "$log_b" | grep -oE -- '--window [0-9]+' | awk '{print $2}')
+if [ -z "$slot_a" ] || [ -z "$slot_b" ]; then
+	fail "one of the two nvim instances never sent with a registered slot (a=$slot_a b=$slot_b)"
+fi
+if [ "$slot_a" = "$slot_b" ]; then
+	fail "two independent nvim instances got the same slot: $slot_a"
+fi
+echo "PASS: two nvim instances registered against distinct slots ($slot_a vs $slot_b)"
+rm -rf "$tmp"
+
+# ── test 7: a second PreviewStart in the same nvim is idempotent (reuses the ──
+#           slot instead of allocating a new one)
+
+tmp=$(mktemp -d)
+spy_dir="$tmp/bin"
+mkdir -p "$spy_dir"
+make_spy_register "$spy_dir"
+log_file="$tmp/log.txt"
+counter_file="$tmp/counter"
+testfile="$tmp/note4.md"
+echo "hello" >"$testfile"
+
+PATH="$spy_dir:$PATH" LOG_FILE="$log_file" COUNTER_FILE="$counter_file" nvim --headless --noplugin -u NONE \
+	-c "luafile $PLUGIN" \
+	"$testfile" \
+	-c "PreviewStart" -c "PreviewStart" -c "doautocmd CursorHold" -c "sleep 300m" -c "qa!" >"$NVIM_LOG" 2>&1
+
+register_count=$(grep -c '^register ' "$log_file" || true)
+if [ "$register_count" -ne 2 ]; then
+	fail "expected exactly 2 register calls (one per :PreviewStart), got $register_count: $(cat "$log_file")"
+fi
+first_register=$(grep '^register ' "$log_file" | sed -n '1p')
+second_register=$(grep '^register ' "$log_file" | sed -n '2p')
+if echo "$first_register" | grep -q -- '--slot'; then
+	fail "the first register call should not pass --slot (no prior slot to reuse): $first_register"
+fi
+if ! echo "$second_register" | grep -qE -- '--slot 1$'; then
+	fail "the second register call should rebind the same slot (--slot 1), not allocate a new one: $second_register"
+fi
+if [ "$(cat "$counter_file")" -ne 1 ]; then
+	fail "a second :PreviewStart allocated a new slot instead of reusing the first: counter=$(cat "$counter_file")"
+fi
+send_line=$(grep '^send ' "$log_file" || true)
+if ! echo "$send_line" | grep -qE -- '--window 1$'; then
+	fail "send after the idempotent re-register should still target slot 1: $send_line"
+fi
+echo "PASS: a second PreviewStart reuses the registered slot (idempotent, no new allocation)"
+rm -rf "$tmp"
+
 echo ""
-echo "PASS: 4 tests passed"
+echo "PASS: 7 tests passed"
