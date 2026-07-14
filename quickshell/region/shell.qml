@@ -181,7 +181,8 @@ ShellRoot {
                 Rectangle {
                     visible: root.toastText === ""
                     anchors.left: parent.left
-                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: root.barGap
                     width: parent.width
                     height: 27
                     color: "#152024"
