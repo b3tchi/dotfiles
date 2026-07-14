@@ -175,27 +175,62 @@ ShellRoot {
                     border.color: root.accent; border.width: 2
                 }
 
-                // instruction hint — slim top strip (matches the bottom
-                // confirmation strip), with the cancel methods spelled out.
+                // instruction bar — styled to match the i3 mode indicator in the
+                // status bar (orange "screenshot" label + underline, then
+                // key/label hint chips), but drawn here in the overlay itself.
                 Rectangle {
                     visible: root.toastText === ""
                     anchors.left: parent.left
                     anchors.top: parent.top
                     width: parent.width
-                    height: hint.implicitHeight + 12
+                    height: 27
                     color: "#152024"
-                    Text {
-                        id: hint
+                    Row {
                         anchors.left: parent.left
-                        anchors.leftMargin: 14
+                        anchors.leftMargin: 4
                         anchors.verticalCenter: parent.verticalCenter
-                        text: (root.clickState === 1
-                               ? "Tap the opposite corner"
-                               : "Drag a box, or tap two opposite corners")
-                              + "     Esc to cancel"
-                        color: "#FDF6E3"
-                        font.family: "Iosevka Nerd Font"
-                        font.pixelSize: 13
+                        spacing: 0
+
+                        Rectangle {
+                            width: modeLabel.implicitWidth + 14
+                            height: 27
+                            color: "#152024"
+                            Text {
+                                id: modeLabel
+                                anchors.centerIn: parent
+                                text: "screenshot"
+                                color: "#fdf6e3"
+                                font.family: "Iosevka Nerd Font"
+                                font.pixelSize: 16
+                            }
+                            Rectangle {
+                                anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
+                                height: 3
+                                color: "#cb4b16"
+                            }
+                        }
+                        Item { width: 10; height: 27 }
+
+                        Repeater {
+                            model: root.clickState === 1
+                                   ? [{key: "tap", label: "opposite corner"}, {key: "Esc", label: "cancel"}]
+                                   : [{key: "drag", label: "select region"}, {key: "2-tap", label: "corners"}, {key: "Esc", label: "cancel"}]
+                            Row {
+                                required property var modelData
+                                required property int index
+                                anchors.verticalCenter: parent ? parent.verticalCenter : undefined
+                                Text { text: index > 0 ? "   " : ""; font.pixelSize: 16 }
+                                Text {
+                                    text: modelData.key; color: "#cb4b16"; font.bold: true
+                                    font.family: "Iosevka Nerd Font"; font.pixelSize: 16
+                                }
+                                Text { text: " "; font.pixelSize: 16 }
+                                Text {
+                                    text: modelData.label; color: "#fdf6e3"
+                                    font.family: "Iosevka Nerd Font"; font.pixelSize: 16
+                                }
+                            }
+                        }
                     }
                 }
 
