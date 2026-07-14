@@ -18,22 +18,30 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
 
-function loadAppJs({ origin, fetchImpl }) {
+function loadAppJs({ origin, fetchImpl, pathname }) {
   const listeners = {};
+  let wsInstance = null;
+
+  // Real elements (not a fresh `{style:{}}` per call) so a test can read
+  // back `.src` after app.js's showFile() sets it — needed for the sp009
+  // Task 6 slot-threading tests below, which assert on contentEl.src.
+  const contentEl = { style: {} };
+  const emptyEl = { style: {} };
 
   global.document = {
-    getElementById: () => ({ style: {} }),
+    getElementById: (id) => (id === "content" ? contentEl : emptyEl),
   };
   global.location = {
     protocol: "http:",
     host: "localhost:9999",
-    pathname: "/preview1",
+    pathname: pathname || "/preview1",
     origin: origin,
   };
   global.WebSocket = function FakeWebSocket(_url) {
-    // Never actually connects; nothing in the listener test exercises the
-    // websocket hot-swap path, so a no-op stand-in is enough to let app.js's
-    // existing connectWS() call run without throwing.
+    // Never actually connects; the listener/showFile tests drive
+    // ws.onmessage directly instead, so capturing `this` is enough — no
+    // real socket needed.
+    wsInstance = this;
   };
   global.addEventListener = (type, handler) => {
     listeners[type] = handler;
@@ -48,7 +56,7 @@ function loadAppJs({ origin, fetchImpl }) {
   delete require.cache[require.resolve(appJsPath)];
   require(appJsPath);
 
-  return listeners;
+  return { listeners, contentEl, emptyEl, getWs: () => wsInstance };
 }
 
 function fetchSpy() {
@@ -63,7 +71,7 @@ function fetchSpy() {
 
 test("valid origin + path posts /open with that path", () => {
   const fetchMock = fetchSpy();
-  const listeners = loadAppJs({
+  const { listeners } = loadAppJs({
     origin: "http://localhost:9999",
     fetchImpl: fetchMock,
   });
@@ -82,7 +90,7 @@ test("valid origin + path posts /open with that path", () => {
 
 test("d2-router origin + path posts /open with that path", () => {
   const fetchMock = fetchSpy();
-  const listeners = loadAppJs({
+  const { listeners } = loadAppJs({
     origin: "http://localhost:9999",
     fetchImpl: fetchMock,
   });
@@ -97,7 +105,7 @@ test("d2-router origin + path posts /open with that path", () => {
 
 test("same-origin (d2embed proxy) + path posts /open with that path", () => {
   const fetchMock = fetchSpy();
-  const listeners = loadAppJs({
+  const { listeners } = loadAppJs({
     origin: "http://localhost:9999",
     fetchImpl: fetchMock,
   });
@@ -112,7 +120,7 @@ test("same-origin (d2embed proxy) + path posts /open with that path", () => {
 
 test("message from an unexpected origin is ignored", () => {
   const fetchMock = fetchSpy();
-  const listeners = loadAppJs({
+  const { listeners } = loadAppJs({
     origin: "http://localhost:9999",
     fetchImpl: fetchMock,
   });
@@ -127,7 +135,7 @@ test("message from an unexpected origin is ignored", () => {
 
 test("empty path is a no-op", () => {
   const fetchMock = fetchSpy();
-  const listeners = loadAppJs({
+  const { listeners } = loadAppJs({
     origin: "http://localhost:9999",
     fetchImpl: fetchMock,
   });
@@ -142,7 +150,7 @@ test("empty path is a no-op", () => {
 
 test("missing path field is a no-op", () => {
   const fetchMock = fetchSpy();
-  const listeners = loadAppJs({
+  const { listeners } = loadAppJs({
     origin: "http://localhost:9999",
     fetchImpl: fetchMock,
   });
@@ -157,7 +165,7 @@ test("missing path field is a no-op", () => {
 
 test("unrelated message type is a no-op", () => {
   const fetchMock = fetchSpy();
-  const listeners = loadAppJs({
+  const { listeners } = loadAppJs({
     origin: "http://localhost:9999",
     fetchImpl: fetchMock,
   });
@@ -168,4 +176,35 @@ test("unrelated message type is a no-op", () => {
   });
 
   assert.equal(fetchMock.calls.length, 0);
+});
+
+// ── sp009 Task 6: slot threading — /preview<N> -> handleFile -> renderAkmEmbed
+//
+// The shell knows its own window N from its own URL path (/preview<N>).
+// showFile (driven here via a fake ws.onmessage, the same path a real
+// redraw broadcast takes) must encode /file/<path> with ?slot=N appended so
+// the daemon can thread it through to the embedded akm-graph iframe.
+
+test("showFile appends this window's slot number to the /file/<path> src", () => {
+  const { contentEl, getWs } = loadAppJs({
+    origin: "http://localhost:9999",
+    fetchImpl: fetchSpy(),
+    pathname: "/preview3",
+  });
+
+  getWs().onmessage({ data: JSON.stringify({ path: "notes/foo.md" }) });
+
+  assert.equal(contentEl.src, "/file/notes/foo.md?slot=3");
+});
+
+test("showFile omits ?slot when the shell's own path doesn't carry a slot number", () => {
+  const { contentEl, getWs } = loadAppJs({
+    origin: "http://localhost:9999",
+    fetchImpl: fetchSpy(),
+    pathname: "/not-a-preview-slot",
+  });
+
+  getWs().onmessage({ data: JSON.stringify({ path: "notes/foo.md" }) });
+
+  assert.equal(contentEl.src, "/file/notes/foo.md");
 });

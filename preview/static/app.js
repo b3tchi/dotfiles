@@ -73,11 +73,30 @@
   const contentEl = document.getElementById("content");
   const emptyEl = document.getElementById("empty");
 
+  // ── sp009 Task 6: slot threading ────────────────────────────────────────
+  //
+  // This shell is served at /preview<N> — parse N once from the shell's own
+  // URL path so every /file/<path> load into the content iframe can carry
+  // it through (?slot=N), which handleFile/renderAkmEmbed (proxy.go) then
+  // thread onto the embedded akm-graph iframe's own src. That's what lets a
+  // click inside the embedded graph route back through /open to THIS
+  // window's slot rather than some other window's. A pathname that doesn't
+  // match /preview<N> (shouldn't happen — the shell is always served at
+  // that path) leaves SLOT null, and encodeFilePath below omits the query
+  // param entirely — the same back-compat shape as no slot at all.
+  const SLOT = (() => {
+    const m = location.pathname.match(/^\/preview(\d+)$/);
+    return m ? m[1] : null;
+  })();
+
   // encodeFilePath turns a root-relative path into a /file/<path> URL,
   // percent-encoding each segment individually so a literal "/" in the
-  // path stays a directory separator rather than becoming %2F.
+  // path stays a directory separator rather than becoming %2F. Appends
+  // ?slot=<this window's N> when known (sp009 Task 6) so the embedded akm
+  // graph inherits which /preview<N> slot it's rendering inside of.
   function encodeFilePath(path) {
-    return "/file/" + path.split("/").map(encodeURIComponent).join("/");
+    const base = "/file/" + path.split("/").map(encodeURIComponent).join("/");
+    return SLOT !== null ? base + "?slot=" + SLOT : base;
   }
 
   // showFile hot-swaps the iframe to the given root-relative path without a

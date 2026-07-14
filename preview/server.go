@@ -371,7 +371,7 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if isAkmZettel(s.root, resolved) {
-		renderAkmEmbed(w, s.root)
+		renderAkmEmbed(w, s.root, parseSlotQuery(r))
 		return
 	}
 	// sp008 Task 3: ?full selects the full-res tier (image row of the ft005
@@ -380,6 +380,23 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 	// passthrough — the query lives only on r, which render.go's dispatch
 	// has no other way to see.
 	renderFile(w, resolved, r.URL.Query().Has("full"))
+}
+
+// parseSlotQuery reads the optional ?slot=N query parameter off r (sp009
+// Task 6: threading the /preview<N> window's slot down to renderAkmEmbed's
+// iframe src). A missing or non-numeric value returns nil — slot is a
+// routing hint carried through the URL, never grounds for a 400 (sp009 Task
+// 6 edge case: non-numeric ?slot -> ignored, not rejected).
+func parseSlotQuery(r *http.Request) *int {
+	raw := r.URL.Query().Get("slot")
+	if raw == "" {
+		return nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return nil
+	}
+	return &n
 }
 
 // handleRegister handles POST /register {"nvim": "...", "slot": N?}: an

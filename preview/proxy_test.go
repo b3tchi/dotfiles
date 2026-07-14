@@ -673,6 +673,72 @@ func TestHandleFileAkmZettelLazySpawnsSingleDaemonUnderConcurrency(t *testing.T)
 	}
 }
 
+// TestHandleFileAkmZettelWithSlotAppendsSlotQuery proves the sp009 Task 6
+// success criteria: GET /file/<akm-zettel>?slot=N threads N through to the
+// akm-graph iframe's src as ?slot=N, so a click inside the embedded akm-graph
+// carries the /preview<N> window's slot back through /open.
+func TestHandleFileAkmZettelWithSlotAppendsSlotQuery(t *testing.T) {
+	port := freePort(t)
+	t.Setenv("AKM_GRAPH_PORT", port)
+	startStubDaemon(t, port)
+
+	srv, reqPath := akmZettelServer(t, "us010")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, reqPath+"?slot=3", nil)
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET %s?slot=3: status %d, want 200 (body: %s)", reqPath, rec.Code, rec.Body.String())
+	}
+	wantSrc := "http://127.0.0.1:" + port + "/?slot=3"
+	if !strings.Contains(rec.Body.String(), `<iframe src="`+wantSrc) {
+		t.Errorf("body missing iframe targeting %q; body=%s", wantSrc, rec.Body.String())
+	}
+}
+
+// TestHandleFileAkmZettelWithoutSlotOmitsSlotQuery proves the sp009 Task 6
+// back-compat success criteria: a standalone GET /file/<akm-zettel> with no
+// ?slot omits the slot param from the iframe src entirely.
+func TestHandleFileAkmZettelWithoutSlotOmitsSlotQuery(t *testing.T) {
+	port := freePort(t)
+	t.Setenv("AKM_GRAPH_PORT", port)
+	startStubDaemon(t, port)
+
+	srv, reqPath := akmZettelServer(t, "us011")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, reqPath, nil)
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET %s: status %d, want 200 (body: %s)", reqPath, rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "slot=") {
+		t.Errorf("body contains a slot query param despite no ?slot on the request; body=%s", rec.Body.String())
+	}
+}
+
+// TestHandleFileAkmZettelNonNumericSlotIgnored proves the sp009 Task 6 edge
+// case: a non-numeric ?slot value is treated as absent (a routing hint,
+// never a 400) — the iframe src omits the slot param just like no ?slot at
+// all, and the request still succeeds.
+func TestHandleFileAkmZettelNonNumericSlotIgnored(t *testing.T) {
+	port := freePort(t)
+	t.Setenv("AKM_GRAPH_PORT", port)
+	startStubDaemon(t, port)
+
+	srv, reqPath := akmZettelServer(t, "us012")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, reqPath+"?slot=abc", nil)
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET %s?slot=abc: status %d, want 200 (body: %s)", reqPath, rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "slot=") {
+		t.Errorf("body contains a slot query param for a non-numeric ?slot; body=%s", rec.Body.String())
+	}
+}
+
 // TestHandleFileAkmZettelBackendUnavailableWhenSpawnFails proves the sp008
 // Task 7 edge case: the target daemon binary is absent (spawn fails) ->
 // preview-d surfaces a "backend unavailable" preview (200 HTML), not a
