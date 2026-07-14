@@ -24,6 +24,14 @@ ShellRoot {
     readonly property string src: Quickshell.env("QS_SHOT_SRC") ?? ""
     readonly property string accent: "#16a085"
 
+    // Height the status bar occupies at the bottom, so the confirmation strip
+    // sits ABOVE it instead of behind it. qs-screenshot.sh forwards the bar's
+    // QS_BAR_* env from the running bar; fall back to the i3 default (27).
+    readonly property int barGap: {
+        function ei(n, d) { var v = parseInt(Quickshell.env(n)); return isNaN(v) ? d : v }
+        return ei("QS_BAR_HEIGHT", 27) + ei("QS_BAR_INSET_BOTTOM", 0) + ei("QS_BAR_INSET_TOP", 0)
+    }
+
     property real startX: 0
     property real startY: 0
     property real curX: 0
@@ -184,7 +192,7 @@ ShellRoot {
                         text: (root.clickState === 1
                                ? "Tap the opposite corner"
                                : "Drag a box, or tap two opposite corners")
-                              + "     Esc / right-click / ✕ to cancel"
+                              + "     Esc to cancel"
                         color: "#FDF6E3"
                         font.family: "Iosevka Nerd Font"
                         font.pixelSize: 13
@@ -231,38 +239,6 @@ ShellRoot {
                     }
                 }
 
-                // Cancel button (top-right) — declared last so it sits above the
-                // selection MouseArea and consumes its own taps (touch-abort,
-                // since right-click / Esc aren't available on a touchscreen).
-                Rectangle {
-                    id: cancelBtn
-                    anchors.top: parent.top
-                    anchors.right: parent.right
-                    anchors.margins: 20
-                    width: cancelRow.width + 28
-                    height: 44
-                    radius: 6
-                    color: cancelMa.pressed ? "#c0392b" : "#152024"
-                    border.color: "#c0392b"
-                    border.width: 2
-
-                    Row {
-                        id: cancelRow
-                        anchors.centerIn: parent
-                        spacing: 8
-                        Text { text: "✕"; color: "#FDF6E3"
-                               font.family: "Iosevka Nerd Font"; font.pixelSize: 18 }
-                        Text { text: "Cancel"; color: "#FDF6E3"
-                               font.family: "Iosevka Nerd Font"; font.pixelSize: 16 }
-                    }
-
-                    MouseArea {
-                        id: cancelMa
-                        anchors.fill: parent
-                        onClicked: root.cancel()
-                    }
-                }
-
                 // Transient confirmation — a slim bottom strip (like i3's
                 // resize-mode indicator), shown for ~1.4s then the overlay
                 // closes. Full-screen MouseArea swallows stray input meanwhile.
@@ -273,6 +249,7 @@ ShellRoot {
                     Rectangle {
                         anchors.left: parent.left
                         anchors.bottom: parent.bottom
+                        anchors.bottomMargin: root.barGap
                         width: parent.width
                         height: strip.implicitHeight + 12
                         color: "#152024"
