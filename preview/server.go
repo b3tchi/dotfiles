@@ -99,6 +99,14 @@ func (s *Server) Handler() http.Handler {
 	// its own block for the same clean-auto-merge reason as /open above.
 	mux.HandleFunc("/d2embed/", s.handleD2Embed)
 
+	// sp009 Task 1: POST /register is the per-slot nvim-address binding
+	// route — an nvim instance registers its server addr against a slot
+	// (allocated when omitted, or an explicit slot it already owns) so a
+	// later task's /open routing can send the reverse-open request to the
+	// nvim that owns the targeted slot. Own block for the same
+	// clean-auto-merge reason as /open and /d2embed above.
+	mux.HandleFunc("/register", s.handleRegister)
+
 	return s.previewRouter(mux)
 }
 
@@ -372,6 +380,46 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 	// passthrough — the query lives only on r, which render.go's dispatch
 	// has no other way to see.
 	renderFile(w, resolved, r.URL.Query().Has("full"))
+}
+
+// handleRegister handles POST /register {"nvim": "...", "slot": N?}: an
+// nvim instance registers its server address against a slot so a later
+// task's /open routing can find the nvim that owns the targeted slot
+// (sp009 Task 1 success criteria). When slot is omitted, a free slot is
+// allocated (mutex-guarded via SlotManager.AllocateSlot, so concurrent
+// no-slot registers never collide) and returned as {"slot": N}; when slot
+// is given explicitly, that slot's addr is (re-)bound — re-registering an
+// already-bound slot updates the addr rather than allocating a new one
+// (sp009 Task 1 edge case: last-wins). An empty "nvim" address is rejected
+// with 400 before anything is bound (sp009 Task 1 edge case), and a
+// malformed JSON body is a 400 as well (sp008-wide anti-pattern: no panic,
+// no 500 for a bad client body).
+func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	defer r.Body.Close()
+	var body struct {
+		Nvim string `json:"nvim"`
+		Slot *int   `json:"slot"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad request body", http.StatusBadRequest)
+		return
+	}
+	if body.Nvim == "" {
+		http.Error(w, "nvim address required", http.StatusBadRequest)
+		return
+	}
+
+	n := 0
+	if body.Slot != nil {
+		n = *body.Slot
+	} else {
+		n = s.slots.AllocateSlot()
+	}
+	s.slots.SetNvimAddr(n, body.Nvim)
+	writeJSON(w, map[string]any{"slot": n})
 }
 
 // requireMethod enforces want; on mismatch it writes 405 + Allow and

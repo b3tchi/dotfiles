@@ -112,9 +112,10 @@ func redrawMessage(path string) []byte {
 // window N has connected is still applied the moment one connects (sp008
 // Task 4 edge case).
 type slot struct {
-	mu   sync.Mutex
-	path string // "" = no path ever set for this slot yet
-	hub  *Hub
+	mu       sync.Mutex
+	path     string // "" = no path ever set for this slot yet
+	hub      *Hub
+	nvimAddr string // "" = no nvim has registered against this slot yet
 }
 
 // SlotManager owns the independent {path, client-set} state for every
@@ -170,4 +171,45 @@ func (sm *SlotManager) CurrentPath(n int) string {
 // Hub returns slot n's websocket hub.
 func (sm *SlotManager) Hub(n int) *Hub {
 	return sm.slotFor(n).hub
+}
+
+// SetNvimAddr binds slot n to the nvim server address that owns it (sp009
+// Task 1: the per-slot half of "open in the nvim that owns slot N").
+// Re-registering the same n is last-wins: the previous address is simply
+// overwritten, not added alongside it (sp009 Task 1 edge case: re-register
+// existing slot updates the addr, not a new slot).
+func (sm *SlotManager) SetNvimAddr(n int, addr string) {
+	s := sm.slotFor(n)
+	s.mu.Lock()
+	s.nvimAddr = addr
+	s.mu.Unlock()
+}
+
+// NvimAddr returns slot n's bound nvim server address, or "" if no
+// SetNvimAddr has ever landed for it (sp009 Task 1 edge case: NvimAddr for
+// an unknown slot -> "").
+func (sm *SlotManager) NvimAddr(n int) string {
+	s := sm.slotFor(n)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.nvimAddr
+}
+
+// AllocateSlot reserves and returns the lowest unused slot number (starting
+// at 1), creating that slot's map entry atomically under sm.mu so two
+// concurrent callers (e.g. simultaneous no-slot POST /register requests)
+// can never be handed the same number (sp009 Task 1 success criteria:
+// "concurrent registers with no slot receive distinct slot numbers").
+// Unlike slotFor's lazy per-slot creation, the reservation and the scan
+// happen inside a single critical section here — the mutex guard the edge
+// case demands.
+func (sm *SlotManager) AllocateSlot() int {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	for n := 1; ; n++ {
+		if _, taken := sm.slots[n]; !taken {
+			sm.slots[n] = &slot{hub: NewHub()}
+			return n
+		}
+	}
 }
