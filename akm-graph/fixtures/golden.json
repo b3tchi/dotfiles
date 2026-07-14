@@ -7,7 +7,8 @@
       "alias": "",
       "degree": 1,
       "ghost": false,
-      "archived": false
+      "archived": false,
+      "path": "docs/notes/daily/2026-06-12.md"
     },
     {
       "id": "ft001",
@@ -16,7 +17,8 @@
       "alias": "feature-one",
       "degree": 5,
       "ghost": false,
-      "archived": false
+      "archived": false,
+      "path": "docs/notes/ft001.md"
     },
     {
       "id": "poc001",
@@ -25,7 +27,8 @@
       "alias": "proof-of-concept-one",
       "degree": 2,
       "ghost": false,
-      "archived": false
+      "archived": false,
+      "path": "docs/notes/lab/poc001.md"
     },
     {
       "id": "sp001",
@@ -34,7 +37,8 @@
       "alias": "spec-one",
       "degree": 3,
       "ghost": false,
-      "archived": false
+      "archived": false,
+      "path": "docs/notes/spec/sp001.md"
     },
     {
       "id": "sp002",
@@ -43,7 +47,8 @@
       "alias": "spec-two-archived",
       "degree": 2,
       "ghost": false,
-      "archived": true
+      "archived": true,
+      "path": "docs/notes/archive/spec/sp002.md"
     },
     {
       "id": "us001",
@@ -52,7 +57,8 @@
       "alias": "story-one",
       "degree": 6,
       "ghost": false,
-      "archived": false
+      "archived": false,
+      "path": "docs/notes/us001.md"
     },
     {
       "id": "us999",

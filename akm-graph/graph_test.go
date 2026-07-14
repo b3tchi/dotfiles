@@ -71,7 +71,7 @@ func TestBuildGraph_Basic(t *testing.T) {
 		{ID: "sp001", FM: frontmatter{Status: "done"}, Links: []string{"us001"}},
 		{ID: "ft001", FM: frontmatter{Aliases: []string{"feature-one"}, Status: "proposed"}, Links: []string{}},
 	}
-	g := BuildGraph(notes)
+	g := BuildGraph(notes, "")
 
 	// All 3 input notes should appear as nodes.
 	if len(g.Nodes) != 3 {
@@ -90,7 +90,7 @@ func TestBuildGraph_SelfLink(t *testing.T) {
 		{ID: "us001", FM: frontmatter{}, Links: []string{"us001", "sp001"}},
 		{ID: "sp001", FM: frontmatter{}, Links: []string{}},
 	}
-	g := BuildGraph(notes)
+	g := BuildGraph(notes, "")
 	for _, l := range g.Links {
 		if l.Source == l.Target {
 			t.Errorf("self-link not dropped: %v", l)
@@ -108,7 +108,7 @@ func TestBuildGraph_DuplicateLinks(t *testing.T) {
 		{ID: "us001", FM: frontmatter{}, Links: []string{"sp001", "sp001", "sp001"}},
 		{ID: "sp001", FM: frontmatter{}, Links: []string{}},
 	}
-	g := BuildGraph(notes)
+	g := BuildGraph(notes, "")
 	if len(g.Links) != 1 {
 		t.Errorf("expected 1 deduped link, got %d: %v", len(g.Links), g.Links)
 	}
@@ -125,7 +125,7 @@ func TestBuildGraph_DropsNonZettelDanglingLinks(t *testing.T) {
 			Links: []string{"cat", "link", "tag", "archive", "id", "us", "us999", "sp001"}},
 		{ID: "sp001", FM: frontmatter{Status: "done"}},
 	}
-	g := BuildGraph(notes)
+	g := BuildGraph(notes, "")
 	byID := map[string]Node{}
 	for _, n := range g.Nodes {
 		byID[n.ID] = n
@@ -159,7 +159,7 @@ func TestBuildGraph_GhostNode(t *testing.T) {
 	notes := []Note{
 		{ID: "us001", FM: frontmatter{Status: "ready"}, Links: []string{"us999"}},
 	}
-	g := BuildGraph(notes)
+	g := BuildGraph(notes, "")
 
 	// Should have us001 + ghost node.
 	if len(g.Nodes) != 2 {
@@ -192,7 +192,7 @@ func TestBuildGraph_Degree(t *testing.T) {
 		{ID: "sp001", FM: frontmatter{}, Links: []string{"us001"}},
 		{ID: "ft001", FM: frontmatter{}, Links: []string{}},
 	}
-	g := BuildGraph(notes)
+	g := BuildGraph(notes, "")
 	byID := make(map[string]Node)
 	for _, n := range g.Nodes {
 		byID[n.ID] = n
@@ -211,7 +211,7 @@ func TestBuildGraph_Degree(t *testing.T) {
 // TestBuildGraph_EmptyNotes verifies that empty input serializes to the exact
 // ft004 api_surface shape: nodes and links MUST be JSON arrays, never null.
 func TestBuildGraph_EmptyNotes(t *testing.T) {
-	g := BuildGraph(nil)
+	g := BuildGraph(nil, "")
 	b, err := json.Marshal(g)
 	if err != nil {
 		t.Fatalf("json.Marshal empty graph: %v", err)
@@ -229,7 +229,7 @@ func TestBuildGraph_HubNodes(t *testing.T) {
 		{ID: "akm", FM: frontmatter{}, Links: []string{}},
 		{ID: "us001", FM: frontmatter{}, Links: []string{"board", "product", "akm"}},
 	}
-	g := BuildGraph(notes)
+	g := BuildGraph(notes, "")
 	byID := make(map[string]Node)
 	for _, n := range g.Nodes {
 		byID[n.ID] = n
@@ -256,7 +256,7 @@ func TestBuildGraph_Unicode(t *testing.T) {
 	notes := []Note{
 		{ID: "us001", FM: frontmatter{Aliases: []string{"日本語テスト"}, Status: "ready"}, Links: []string{}},
 	}
-	g := BuildGraph(notes)
+	g := BuildGraph(notes, "")
 	if len(g.Nodes) != 1 {
 		t.Fatalf("expected 1 node, got %d", len(g.Nodes))
 	}
@@ -271,7 +271,7 @@ func TestBuildGraph_NodeAlias(t *testing.T) {
 		{ID: "us001", FM: frontmatter{Aliases: []string{"first", "second"}}, Links: []string{}},
 		{ID: "sp001", FM: frontmatter{}, Links: []string{}},
 	}
-	g := BuildGraph(notes)
+	g := BuildGraph(notes, "")
 	byID := make(map[string]Node)
 	for _, n := range g.Nodes {
 		byID[n.ID] = n
@@ -291,7 +291,7 @@ func TestBuildGraph_ArchivedFlag(t *testing.T) {
 		{ID: "sp001", FM: frontmatter{}, Links: []string{"sp999"}, Archived: false},
 		{ID: "sp002", FM: frontmatter{}, Links: []string{}, Archived: true},
 	}
-	g := BuildGraph(notes)
+	g := BuildGraph(notes, "")
 	byID := make(map[string]Node)
 	for _, n := range g.Nodes {
 		byID[n.ID] = n
@@ -405,5 +405,87 @@ func TestBuildGraphFromRoot_Empty(t *testing.T) {
 	want := `{"nodes":[],"links":[]}`
 	if string(b) != want {
 		t.Errorf("empty root graph JSON:\n  got:  %s\n  want: %s", b, want)
+	}
+}
+
+// TestBuildGraph_NodePath verifies a real node's path is the root-relative,
+// forward-slash path of its backing Note.AbsPath, and that a ghost node (no
+// backing Note) carries no path (ft004 T4, dotfiles-184.4).
+func TestBuildGraph_NodePath(t *testing.T) {
+	root := t.TempDir()
+	notesDir := filepath.Join(root, "docs", "notes")
+	if err := os.MkdirAll(notesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// us001 links to a missing zettel (us999) so a ghost node is produced too.
+	if err := os.WriteFile(filepath.Join(notesDir, "us001.md"), []byte("# us [[us999]]"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	g, err := BuildGraphFromRoot(root)
+	if err != nil {
+		t.Fatalf("BuildGraphFromRoot: %v", err)
+	}
+	byID := make(map[string]Node)
+	for _, n := range g.Nodes {
+		byID[n.ID] = n
+	}
+
+	want := "docs/notes/us001.md"
+	if got := byID["us001"].Path; got != want {
+		t.Errorf("us001 path = %q, want %q", got, want)
+	}
+	if got := byID["us999"].Path; got != "" {
+		t.Errorf("ghost us999 path = %q, want empty", got)
+	}
+}
+
+// TestBuildGraph_PathOutsideRoot verifies a note whose AbsPath resolves
+// outside root never yields an escaping ../ path — it is skipped (empty)
+// rather than exposing a path outside the served root.
+func TestBuildGraph_PathOutsideRoot(t *testing.T) {
+	notes := []Note{
+		{ID: "us001", AbsPath: "/somewhere/else/us001.md", FM: frontmatter{}, Links: []string{}},
+	}
+	g := BuildGraph(notes, "/repo/root")
+	if len(g.Nodes) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(g.Nodes))
+	}
+	if got := g.Nodes[0].Path; got != "" {
+		t.Errorf("outside-root path = %q, want empty (never escaping)", got)
+	}
+}
+
+// TestBuildGraph_NodePathJSONOmitsGhost verifies the JSON encoding of the
+// graph includes "path" for a real node and omits the key entirely for a
+// ghost node (omitempty), matching the ft004 api_surface widening.
+func TestBuildGraph_NodePathJSONOmitsGhost(t *testing.T) {
+	notes := []Note{
+		{ID: "us001", AbsPath: filepath.Join("root", "docs", "notes", "us001.md"), FM: frontmatter{}, Links: []string{"us999"}},
+	}
+	g := BuildGraph(notes, "root")
+	b, err := json.Marshal(g)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	var raw struct {
+		Nodes []map[string]any `json:"nodes"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	for _, n := range raw.Nodes {
+		id, _ := n["id"].(string)
+		_, hasPath := n["path"]
+		switch id {
+		case "us001":
+			if !hasPath {
+				t.Errorf("real node %q missing path key in JSON", id)
+			}
+		case "us999":
+			if hasPath {
+				t.Errorf("ghost node %q has path key in JSON; want omitted", id)
+			}
+		}
 	}
 }
