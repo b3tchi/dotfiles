@@ -244,7 +244,7 @@ ShellRoot {
                         Repeater {
                             model: root.clickState === 1
                                    ? [{key: "tap", label: "opposite corner"}, {key: "Esc", label: "cancel"}]
-                                   : [{key: "drag", label: "select region"}, {key: "2-tap", label: "corners"}, {key: "w", label: "full screen"}, {key: "Esc", label: "cancel"}]
+                                   : [{key: "drag", label: "select region"}, {key: "2-tap", label: "corners"}, {key: "w", label: "whole screen"}, {key: "Esc", label: "cancel"}]
                             Row {
                                 required property var modelData
                                 required property int index
