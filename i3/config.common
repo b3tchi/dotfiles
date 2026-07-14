@@ -204,6 +204,9 @@ for_window [all] border normal 4
 for_window [title="qs-launcher"] floating enable, border none, move position center
 for_window [title="qs-switcher"] floating enable, border none, move position center
 for_window [title="qs-projects"] floating enable, border none, move position center
+# region-screenshot selector overlay (quickshell/region) — float it; the QML
+# self-fullscreens (visibility: Window.FullScreen) so it maps 1:1 to the screen
+for_window [title="qs-region"] floating enable, border none
 for_window [title="alsamixer"] floating enable border pixel 1
 for_window [class="calamares"] floating enable border normal
 for_window [class="Clipgrab"] floating enable
