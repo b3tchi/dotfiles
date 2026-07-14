@@ -51,9 +51,11 @@ ShellRoot {
             var dir = Quickshell.env("HOME") + "/Pictures/screenshots"
             var f = dir + "/shot_" + Qt.formatDateTime(new Date(), "yyyyMMdd-hhmmss") + ".png"
             var geom = w + "x" + h + "+" + x + "+" + y
-            // crop the FROZEN full-screen grab (bright, no dim) to the selection
+            // crop the FROZEN full-screen grab (bright, no dim) to the selection.
+            // `magick` (not the deprecated `convert`); xclip serves the clipboard
+            // as image/png and self-backgrounds to hold the selection after we quit.
             var cmd = "mkdir -p '" + dir + "'; " +
-                      "convert '" + src + "' -crop " + geom + " +repage '" + f + "' && " +
+                      "magick '" + src + "' -crop " + geom + " +repage '" + f + "' && " +
                       "xclip -selection clipboard -t image/png -i '" + f + "' && " +
                       "notify-send 'Screenshot' 'Saved " + f + "  (+ clipboard)'; " +
                       cleanupCmd()
