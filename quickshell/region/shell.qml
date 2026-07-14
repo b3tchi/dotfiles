@@ -278,39 +278,28 @@ ShellRoot {
                     }
                 }
 
-                // Transient "Copied path" toast (center) — shown for ~1.4s after
-                // capture, then the overlay closes. Its full-screen MouseArea
-                // swallows any further input so a stray click can't re-trigger.
+                // Transient confirmation — a slim bottom strip (like i3's
+                // resize-mode indicator), shown for ~1.4s then the overlay
+                // closes. Full-screen MouseArea swallows stray input meanwhile.
                 MouseArea {
                     anchors.fill: parent
                     visible: root.toastText !== ""
                     enabled: visible
                     Rectangle {
-                        anchors.centerIn: parent
-                        width: toastCol.width + 40
-                        height: toastCol.height + 28
-                        radius: 8
+                        anchors.left: parent.left
+                        anchors.bottom: parent.bottom
+                        width: parent.width
+                        height: strip.implicitHeight + 12
                         color: "#152024"
-                        border.color: root.accent
-                        border.width: 2
-                        Column {
-                            id: toastCol
-                            anchors.centerIn: parent
-                            spacing: 4
-                            Text {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                text: "✓ Copied path to clipboard"
-                                color: root.accent
-                                font.family: "Iosevka Nerd Font"
-                                font.pixelSize: 18
-                                font.bold: true
-                            }
-                            Text {
-                                text: root.toastText.replace("Copied path  ", "")
-                                color: "#FDF6E3"
-                                font.family: "Iosevka Nerd Font"
-                                font.pixelSize: 14
-                            }
+                        Text {
+                            id: strip
+                            anchors.left: parent.left
+                            anchors.leftMargin: 14
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "✓ " + root.toastText
+                            color: root.accent
+                            font.family: "Iosevka Nerd Font"
+                            font.pixelSize: 13
                         }
                     }
                 }
