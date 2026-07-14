@@ -103,6 +103,20 @@ ShellRoot {
         }
     }
 
+    // Whole-screen capture (the "w" key): the frozen src IS the full screen,
+    // so just copy it out — no crop.
+    function captureFull() {
+        var dir = Quickshell.env("HOME") + "/Pictures/screenshots"
+        var f = dir + "/shot_" + Qt.formatDateTime(new Date(), "yyyyMMdd-hhmmss") + ".png"
+        var cmd = "mkdir -p '" + dir + "'; " +
+                  "cp '" + src + "' '" + f + "' && " +
+                  "printf %s '" + f + "' | xclip -selection clipboard; " +
+                  cleanupCmd()
+        Quickshell.execDetached(["sh", "-c", cmd])
+        toastText = "Copied path  " + f
+        quitTimer.start()
+    }
+
     Window {
         id: win
         visible: true
@@ -135,6 +149,11 @@ ShellRoot {
                     sequences: ["Escape"]
                     context: Qt.ApplicationShortcut
                     onActivated: root.cancel()
+                }
+                Shortcut {
+                    sequences: ["w"]
+                    context: Qt.ApplicationShortcut
+                    onActivated: root.captureFull()
                 }
 
                 // dim the whole frozen shot
@@ -225,7 +244,7 @@ ShellRoot {
                         Repeater {
                             model: root.clickState === 1
                                    ? [{key: "tap", label: "opposite corner"}, {key: "Esc", label: "cancel"}]
-                                   : [{key: "drag", label: "select region"}, {key: "2-tap", label: "corners"}, {key: "Esc", label: "cancel"}]
+                                   : [{key: "drag", label: "select region"}, {key: "2-tap", label: "corners"}, {key: "w", label: "full screen"}, {key: "Esc", label: "cancel"}]
                             Row {
                                 required property var modelData
                                 required property int index
