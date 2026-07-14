@@ -2,17 +2,21 @@
 # preview — thin CLI wrapper around the preview-d daemon (ft005).
 #
 # Usage:
-#   preview start                       # idempotent daemon launch (port-probe -> pidfile -> detach)
-#   preview stop                        # graceful stop (POST /stop + SIGTERM fallback)
-#   preview status                      # daemon health (pid / root / port / started_at)
-#   preview send <path> [--window N]    # POST {path} to /preview<N> (default window 1)
+#   preview start                          # idempotent daemon launch (port-probe -> pidfile -> detach)
+#   preview stop                           # graceful stop (POST /stop + SIGTERM fallback)
+#   preview status                         # daemon health (pid / root / port / started_at)
+#   preview send <path> [--window N]       # POST {path} to /preview<N> (default window 1)
+#   preview register <addr> [--slot N]     # POST {nvim, slot?} to /register, prints assigned slot
 #
 # Mirrors nushell/actions/akm-graph + nushell/actions/d2-router (adr0001
 # nushell-first surface, adr0003 mandatory-wrapper mandate — the preview-d
 # binary is an engine, not an interface; no consumer calls it directly).
 # sp008 Task 1 wired start/stop/status; sp008 Task 5 adds `send` (the
 # editor/nnn cursor-signal path) without changing this shape. The `open`
-# verb (reverse channel) lands in sp008 Task 6.
+# verb (reverse channel) lands in sp008 Task 6. sp009 Task 3 adds
+# `register` so each nvim instance can claim its own slot instead of every
+# instance defaulting to window 1 (nvim/plugins/preview.lua calls this on
+# `:PreviewStart`).
 
 const DAEMON_BIN = "preview-d"
 const CACHE_DIR  = "~/.cache/preview"
@@ -189,25 +193,52 @@ def main-send [path?: string, window: int = 1] {
     print $"preview: sent ($path) to window ($window)"
 }
 
+# Register this nvim's server address against a slot (ft005 api_surface
+# `register` verb — sp009 Task 3): POST {nvim, slot?} to /register and
+# print the daemon's assigned slot on stdout — the machine-parseable
+# contract nvim/plugins/preview.lua relies on to learn its own slot number
+# after `:PreviewStart`. Passing --slot rebinds that slot to a (possibly
+# refreshed) address instead of allocating a new one, which is how the
+# plugin makes a second `:PreviewStart` in the same nvim instance
+# idempotent rather than leaking a fresh slot per call (sp009 Task 3 edge
+# case). A missing address is a loud error, not a silent no-op, mirroring
+# `send`'s missing-path guard.
+def main-register [nvim?: string, slot?: int] {
+    if ($nvim | is-empty) {
+        error make { msg: "preview: register requires an nvim server address" }
+    }
+    let url = $"(api-base)/register"
+    let body = if ($slot == null) { {nvim: $nvim} } else { {nvim: $nvim, slot: $slot} }
+    let resp = (try {
+        http post --max-time 2sec --content-type application/json $url $body
+    } catch { |err|
+        error make { msg: $"preview: register failed — ($err.msg)" }
+    })
+    print $resp.slot
+}
+
 # preview — control the preview-d daemon
 def main [
-    subcommand?: string       # start | stop | status | send
-    path?: string              # path arg for `send`
-    --window (-w): int = 1    # target preview<N> slot for `send` (default 1)
+    subcommand?: string        # start | stop | status | send | register
+    arg?: string                # path for `send`; nvim server address for `register`
+    --window (-w): int = 1     # target preview<N> slot for `send` (default 1)
+    --slot (-s): int             # explicit slot for `register` (rebind instead of allocate)
 ] {
     match $subcommand {
-        "start"  => { main-start }
-        "stop"   => { main-stop }
-        "status" => { main-status }
-        "send"   => { main-send $path $window }
+        "start"    => { main-start }
+        "stop"     => { main-stop }
+        "status"   => { main-status }
+        "send"     => { main-send $arg $window }
+        "register" => { main-register $arg $slot }
         _ => {
             print "Usage: preview <subcommand>"
             print ""
             print "Subcommands:"
-            print "  start                    — launch daemon (idempotent)"
-            print "  stop                     — stop daemon"
-            print "  status                   — daemon health (pid / root / port / started_at)"
-            print "  send <path> [--window N] — push path to window N (default 1)"
+            print "  start                        — launch daemon (idempotent)"
+            print "  stop                         — stop daemon"
+            print "  status                       — daemon health (pid / root / port / started_at)"
+            print "  send <path> [--window N]     — push path to window N (default 1)"
+            print "  register <addr> [--slot N]   — bind nvim server addr to a slot, print the slot"
         }
     }
 }

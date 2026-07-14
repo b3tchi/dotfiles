@@ -12,9 +12,17 @@
 -- Only calls the mandatory nushell wrapper (`preview send <path>`,
 -- adr0001 nushell-first surface, adr0003 mandatory-wrapper mandate) — this
 -- file never talks to the preview-d daemon directly.
+--
+-- sp009 Task 3: multiple nvim instances can each drive their own preview
+-- slot instead of every instance fighting over the hardcoded window 1.
+-- `registered_slot` holds the slot this nvim instance was assigned by
+-- preview-d's POST /register (via the `preview register` wrapper verb,
+-- sp009 Task 1); `send()` targets that slot once known, falling back to
+-- the wrapper's own default (window 1) before registration completes.
 local DEBOUNCE_MS = 150
 
 local timer = nil
+local registered_slot = nil
 
 --- True when the buffer is a real, on-disk file worth pushing to the
 --- preview window — excludes `[No Name]`/scratch buffers (empty name) and
@@ -31,11 +39,21 @@ end
 --- push must never interrupt editing, so failures (daemon not running,
 --- wrapper missing) are swallowed rather than surfaced on every cursor
 --- move — `preview status` is the place to diagnose a dead daemon.
+---
+--- Targets this instance's own slot (`registered_slot`, sp009 Task 3) once
+--- `:PreviewStart` has registered one; before that (or if registration
+--- failed) it omits `--window` and lets the wrapper fall back to its
+--- default slot 1 rather than erroring on every cursor move.
 local function send(path)
 	if vim.fn.executable("preview") ~= 1 then
 		return
 	end
-	vim.system({ "preview", "send", path })
+	local args = { "preview", "send", path }
+	if registered_slot then
+		table.insert(args, "--window")
+		table.insert(args, tostring(registered_slot))
+	end
+	vim.system(args)
 end
 
 local function send_current_buffer()
@@ -95,6 +113,48 @@ local function ensure_server()
 	end
 end
 
+--- Register this nvim's server address against a slot via the mandatory
+--- `preview register` wrapper verb (sp009 Task 1/3), storing the daemon's
+--- assigned slot in `registered_slot` so `send()` can target it.
+---
+--- Idempotent: if this instance already holds a slot (a prior
+--- `:PreviewStart` in the same session), that slot is passed back
+--- explicitly via `--slot` so the daemon rebinds the same slot to the
+--- (possibly refreshed) address instead of allocating a new one — sp009
+--- Task 3 edge case: "second PreviewStart in the same nvim → idempotent".
+---
+--- Synchronous (`:wait()`): registration must complete before `send()`
+--- can target the right slot, and the wrapper's own 2s http timeout
+--- bounds the wait. Failures (daemon down, wrapper missing, malformed
+--- response) surface via `vim.notify` rather than failing silently —
+--- sp009 Task 3 edge case: "register while daemon down ... a clear
+--- surfaced error, not silent failure".
+local function register(addr)
+	if vim.fn.executable("preview") ~= 1 then
+		vim.notify("preview: 'preview' wrapper not found on PATH", vim.log.levels.ERROR)
+		return
+	end
+	local args = { "preview", "register", addr }
+	if registered_slot then
+		table.insert(args, "--slot")
+		table.insert(args, tostring(registered_slot))
+	end
+	local result = vim.system(args, { text = true }):wait()
+	if result.code ~= 0 then
+		vim.notify(
+			"preview: register failed — " .. ((result.stderr or "") .. (result.stdout or "")),
+			vim.log.levels.ERROR
+		)
+		return
+	end
+	local slot = tonumber(vim.trim(result.stdout or ""))
+	if not slot then
+		vim.notify("preview: register returned no usable slot: " .. (result.stdout or ""), vim.log.levels.ERROR)
+		return
+	end
+	registered_slot = slot
+end
+
 vim.api.nvim_create_user_command("PreviewStart", function()
 	ensure_server()
 	if vim.fn.executable("preview") ~= 1 then
@@ -102,7 +162,8 @@ vim.api.nvim_create_user_command("PreviewStart", function()
 		return
 	end
 	vim.system({ "preview", "start" }, { detach = true })
-end, { desc = "preview: start preview-d as a child of this nvim (so $NVIM reaches it for the reverse /open channel)" })
+	register(vim.v.servername)
+end, { desc = "preview: start preview-d as a child of this nvim (so $NVIM reaches it for the reverse /open channel), and register this instance's own preview slot" })
 
 vim.api.nvim_create_user_command("PreviewStop", function()
 	if vim.fn.executable("preview") ~= 1 then
