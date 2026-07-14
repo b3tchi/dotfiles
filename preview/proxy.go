@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -335,12 +336,40 @@ func ensureD2RouterRunning() error {
 // frame-blocking headers, so unlike the d2 case below, no proxying is
 // needed — the browser talks to akm-graph:port directly (sp008 Task 7
 // success criteria).
-func renderAkmEmbed(w http.ResponseWriter, root string) {
+//
+// slot is sp009 Task 6's addition: when the /preview<N> shell loaded this
+// /file/<path> with ?slot=N (handleFile's parseSlotQuery), that N is
+// threaded onto the akm-graph iframe's own src as ?slot=N, so a click inside
+// the embedded graph carries the window's slot back through /open (T2's
+// handleOpen routing). nil (no ?slot on the request — e.g. a standalone
+// /file/<path> visited directly) omits the param entirely, matching
+// pre-sp009 behavior exactly (back-compat).
+func renderAkmEmbed(w http.ResponseWriter, root string, slot *int) {
 	if err := ensureAkmGraphRunning(root); err != nil {
 		renderBackendUnavailable(w, "akm-graph", err)
 		return
 	}
-	writeIframeEmbed(w, "http://127.0.0.1:"+akmGraphPort()+"/")
+	src := "http://127.0.0.1:" + akmGraphPort() + "/"
+	if slot != nil {
+		src = appendSlotQuery(src, *slot)
+	}
+	writeIframeEmbed(w, src)
+}
+
+// appendSlotQuery appends ?slot=N (or &slot=N, correctly, if src already
+// carries a query string) to src. Parsed/re-encoded through net/url rather
+// than naive string concatenation so this stays correct if src ever gains
+// its own query params (sp009 Task 6 edge case: akm path that already
+// carries a query -> slot appended correctly, not double "?").
+func appendSlotQuery(src string, slot int) string {
+	u, err := url.Parse(src)
+	if err != nil {
+		return src
+	}
+	q := u.Query()
+	q.Set("slot", strconv.Itoa(slot))
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // renderD2Embed serves the /file/<path> response for a .d2 file: a page

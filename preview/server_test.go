@@ -329,6 +329,36 @@ func TestHandleFileSymlinkEscapeViaFullMux(t *testing.T) {
 	}
 }
 
+// TestParseSlotQuery proves the sp009 Task 6 ?slot parsing contract: a
+// missing or non-numeric value returns nil (absent — slot is a routing
+// hint, never grounds for a 400), while a valid integer returns a pointer to
+// it.
+func TestParseSlotQuery(t *testing.T) {
+	intPtr := func(n int) *int { return &n }
+	cases := []struct {
+		name string
+		url  string
+		want *int
+	}{
+		{"missing", "/file/x.md", nil},
+		{"numeric", "/file/x.md?slot=3", intPtr(3)},
+		{"non-numeric", "/file/x.md?slot=abc", nil},
+		{"empty value", "/file/x.md?slot=", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.url, nil)
+			got := parseSlotQuery(req)
+			if (got == nil) != (tc.want == nil) {
+				t.Fatalf("parseSlotQuery(%q) = %v, want %v", tc.url, got, tc.want)
+			}
+			if got != nil && *got != *tc.want {
+				t.Errorf("parseSlotQuery(%q) = %d, want %d", tc.url, *got, *tc.want)
+			}
+		})
+	}
+}
+
 // --- POST /register: per-slot nvim address binding (sp009 Task 1) ------
 
 // registerBody is the POST /register response shape: {"slot": N}.
