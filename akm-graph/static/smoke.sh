@@ -245,8 +245,43 @@ echo "filter title  = '$FIL_TITLE'"
 echo "filter result = '$FIL_RESULT'"
 if [ "$FIL_TITLE" = "FILTER_OK" ]; then
   echo "PASS: category toggle hides/restores nodes by type"
-  exit 0
 else
   echo "FAIL: category-toggle assertion failed"
   exit 1
 fi
+
+# ── Stage 6: reverse-open regression (sp009 Task 5, dotfiles-184.5) ─────────────
+# Drives __akmGraph.selectNode via smoke-open.html with a fetch spy and asserts
+# the click fires POST /api/open carrying {id} — plus slot:2 when ?slot=2 is on
+# the URL, and NO slot field at all when ?slot is absent (standalone akm-graph →
+# preview-d global $NVIM). Guards the reverse-open wiring end to end on the
+# client side.
+run_open_stage() {
+  local label="$1" query="$2"
+  local url="http://localhost:${PORT}/smoke-open.html?fixture=graph.json${query}"
+  echo ""
+  echo "Open [$label]: $url"
+  local dom title result
+  dom=$("$CHROME" \
+    --headless=new \
+    --disable-gpu \
+    --no-sandbox \
+    --virtual-time-budget=15000 \
+    --run-all-compositor-stages-before-draw \
+    --dump-dom \
+    "$url" 2>/dev/null || true)
+  title=$(echo "$dom" | grep -oP '(?<=<title>)[^<]+' | head -1 || true)
+  result=$(echo "$dom" | grep -oP '(?<=id="result">)[^<]+' | head -1 || true)
+  echo "  open title  = '$title'"
+  echo "  open result = '$result'"
+  if [ "$title" = "OPEN_OK" ]; then
+    echo "  PASS [$label]: selectNode fired POST /api/open with expected body"
+  else
+    echo "  FAIL [$label]: reverse-open assertion failed"
+    exit 1
+  fi
+}
+
+run_open_stage "slot=2"  "&slot=2"
+run_open_stage "no-slot" ""
+exit 0

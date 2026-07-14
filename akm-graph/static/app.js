@@ -149,8 +149,37 @@ function neighborsOf(id) {
   return keep;
 }
 
+// openSlot — the preview-d window slot this akm-graph iframe belongs to, read
+// ONCE at bootstrap from ?slot= (sp009 Task 5), mirroring how ?fixture/?backend
+// are read. When akm-graph is embedded in a preview-d window, ?slot names which
+// nvim owns that window so a reverse-open lands in the right editor. Standalone
+// (no ?slot) → null → the POST omits slot and preview-d falls back to its global
+// $NVIM. A non-integer ?slot is treated as absent.
+const openSlot = (() => {
+  const raw = new URLSearchParams(window.location.search).get("slot");
+  if (raw == null) return null;
+  const n = Number.parseInt(raw, 10);
+  return Number.isNaN(n) ? null : n;
+})();
+
+// requestOpen asks the akm daemon (POST /api/open) to reverse-open the clicked
+// node's source file back in nvim (sp009 Task 5). Best-effort and fire-and-
+// forget: the daemon resolves id→path and forwards to preview-d, but a failure
+// (standalone akm-graph with no daemon route, preview-d down, ghost id → 404)
+// must never disturb the client-side isolate. slot is included only when the
+// page carried one, so a standalone view omits it entirely.
+function requestOpen(id) {
+  const body = openSlot == null ? { id } : { id, slot: openSlot };
+  fetch("/api/open", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }).catch(() => {});
+}
+
 function selectNode(id) {
   if (!backend) return;
+  requestOpen(id);
   selectedKeep = neighborsOf(id);
   backend.refresh();
   for (const [nid, el] of Object.entries(labelEls)) {

@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>open-smoke pending</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #0d1117; }
+    #canvas { display: block; width: 100%; height: 100%; }
+    #tooltip { position: absolute; display: none; }
+    #labels { position: absolute; inset: 0; }
+    .node-label.dim { opacity: 0.12; }
+    #status { position: absolute; top: 10px; right: 14px; }
+    #result { position: absolute; bottom: 10px; left: 10px; color: #fff; font-family: monospace; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <div id="labels"></div>
+  <div id="tooltip"></div>
+  <div id="status"></div>
+  <div id="result"></div>
+  <!--
+    Reverse-open regression guard (sp009 Task 5): selecting a node must fire a
+    POST /api/open carrying {id} plus the bootstrap ?slot when present. A
+    fetch spy installed BEFORE app.js loads captures the call; the graph load
+    (fetch to ./graph.json / /api/graph) delegates to the real fetch untouched.
+    Drive with ?slot=2 → body must carry slot:2; without ?slot → body must
+    omit slot entirely (standalone akm-graph → preview-d global $NVIM).
+  -->
+  <script>
+    // Classic (non-module) script: runs before the deferred app.js module, so
+    // the spy is in place before selectNode's first call.
+    window.__openCalls = [];
+    const __realFetch = window.fetch.bind(window);
+    window.fetch = (url, opts) => {
+      const u = typeof url === "string" ? url : (url && url.url) || "";
+      if (u.indexOf("/api/open") !== -1) {
+        window.__openCalls.push({ url: u, opts: opts || {} });
+        return Promise.resolve(new Response('{"opened":true}', { status: 200 }));
+      }
+      return __realFetch(url, opts);
+    };
+  </script>
+  <script type="module" src="./app.js"></script>
+  <script type="module">
+    const NODE_ID = "us001";
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    async function run() {
+      const out = document.getElementById("result");
+      try {
+        for (let t = 0; t < 100 && !window.__akmGraph; t++) await wait(50);
+        const g = window.__akmGraph;
+        if (!g) throw new Error("__akmGraph never appeared");
+        for (let t = 0; t < 100 && !g.nodeById(NODE_ID); t++) await wait(50);
+        if (!g.nodeById(NODE_ID)) throw new Error("fixture node " + NODE_ID + " not loaded");
+
+        const rawSlot = new URLSearchParams(location.search).get("slot");
+
+        window.__openCalls.length = 0;
+        g.selectNode(NODE_ID);
+        for (let t = 0; t < 40 && window.__openCalls.length === 0; t++) await wait(25);
+        if (window.__openCalls.length === 0) throw new Error("selectNode issued no /api/open POST");
+
+        const call = window.__openCalls[0];
+        if (!call.opts || call.opts.method !== "POST") {
+          throw new Error("not a POST: " + JSON.stringify(call.opts));
+        }
+        const body = JSON.parse(call.opts.body);
+        if (body.id !== NODE_ID) throw new Error("body.id=" + body.id);
+
+        if (rawSlot == null) {
+          if ("slot" in body) throw new Error("no ?slot must omit slot; got " + JSON.stringify(body));
+        } else {
+          if (body.slot !== Number(rawSlot)) throw new Error("expected slot " + rawSlot + " got " + JSON.stringify(body));
+        }
+
+        out.textContent = "OPEN_OK body=" + JSON.stringify(body);
+        document.title = "OPEN_OK";
+      } catch (e) {
+        out.textContent = "OPEN_FAIL " + e.message;
+        document.title = "OPEN_FAIL " + e.message;
+      }
+    }
+    run();
+  </script>
+</body>
+</html>

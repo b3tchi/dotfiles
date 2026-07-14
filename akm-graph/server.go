@@ -149,6 +149,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/graph", s.handleGraph)
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/stop", s.handleStop)
+	mux.HandleFunc("/api/open", s.handleOpen)
 	mux.HandleFunc("/watch", s.handleWatch)
 	fileServer := noCache(http.FileServer(http.FS(s.static)))
 	mux.Handle("/", noCache(s.indexHandler(fileServer)))
