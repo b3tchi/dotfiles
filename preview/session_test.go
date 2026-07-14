@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"sync"
 	"testing"
 )
 
@@ -110,6 +111,85 @@ func TestSlotManagerNewSlotHasEmptyPath(t *testing.T) {
 	sm := NewSlotManager()
 	if got := sm.CurrentPath(99); got != "" {
 		t.Errorf("fresh slot 99 path = %q, want empty", got)
+	}
+}
+
+// --- SlotManager: per-slot nvim address (sp009 Task 1) -----------------
+
+// TestSlotManagerNvimAddrSetAndGet proves SetNvimAddr binds an address to a
+// slot and NvimAddr returns it back (sp009 Task 1 success criteria: the
+// per-slot half of "open in the nvim that owns slot N").
+func TestSlotManagerNvimAddrSetAndGet(t *testing.T) {
+	sm := NewSlotManager()
+	sm.SetNvimAddr(1, "/tmp/nvim.1.sock")
+
+	if got := sm.NvimAddr(1); got != "/tmp/nvim.1.sock" {
+		t.Errorf("NvimAddr(1) = %q, want /tmp/nvim.1.sock", got)
+	}
+}
+
+// TestSlotManagerNvimAddrUnknownSlotEmpty proves NvimAddr on a slot that
+// never had SetNvimAddr called returns "" (sp009 Task 1 edge case).
+func TestSlotManagerNvimAddrUnknownSlotEmpty(t *testing.T) {
+	sm := NewSlotManager()
+	if got := sm.NvimAddr(42); got != "" {
+		t.Errorf("NvimAddr(42) on fresh slot = %q, want empty", got)
+	}
+}
+
+// TestSlotManagerNvimAddrReRegisterUpdates proves a second SetNvimAddr call
+// on the same slot overwrites the address (last-wins, not additive) — the
+// re-register-updates-not-new-slot edge case (sp009 Task 1).
+func TestSlotManagerNvimAddrReRegisterUpdates(t *testing.T) {
+	sm := NewSlotManager()
+	sm.SetNvimAddr(3, "/tmp/nvim.a.sock")
+	sm.SetNvimAddr(3, "/tmp/nvim.b.sock")
+
+	if got := sm.NvimAddr(3); got != "/tmp/nvim.b.sock" {
+		t.Errorf("NvimAddr(3) after re-register = %q, want /tmp/nvim.b.sock", got)
+	}
+}
+
+// --- SlotManager: free-slot allocation (sp009 Task 1) -------------------
+
+// TestSlotManagerAllocateSlotReturnsUnusedSlot proves AllocateSlot returns a
+// slot number not already occupied by an existing slot.
+func TestSlotManagerAllocateSlotReturnsUnusedSlot(t *testing.T) {
+	sm := NewSlotManager()
+	sm.SetNvimAddr(1, "/tmp/nvim.1.sock")
+
+	n := sm.AllocateSlot()
+	if n == 1 {
+		t.Errorf("AllocateSlot() = %d, want a slot distinct from the occupied slot 1", n)
+	}
+}
+
+// TestSlotManagerAllocateSlotConcurrentDistinct proves concurrent
+// AllocateSlot calls (as would happen from simultaneous no-slot /register
+// requests) never hand out the same slot number twice — the mutex-guarded
+// allocation success criterion (sp009 Task 1: "concurrent registers with no
+// slot receive distinct slot numbers").
+func TestSlotManagerAllocateSlotConcurrentDistinct(t *testing.T) {
+	sm := NewSlotManager()
+
+	const n = 20
+	results := make([]int, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			results[idx] = sm.AllocateSlot()
+		}(i)
+	}
+	wg.Wait()
+
+	seen := make(map[int]bool, n)
+	for _, got := range results {
+		if seen[got] {
+			t.Fatalf("AllocateSlot handed out duplicate slot %d across %d concurrent calls: %v", got, n, results)
+		}
+		seen[got] = true
 	}
 }
 

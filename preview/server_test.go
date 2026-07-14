@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -325,5 +326,160 @@ func TestHandleFileSymlinkEscapeViaFullMux(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), secretMarker) {
 		t.Fatalf("GET /file/escape-link via full mux: response leaked secret content: %s", rec.Body.String())
+	}
+}
+
+// --- POST /register: per-slot nvim address binding (sp009 Task 1) ------
+
+// registerBody is the POST /register response shape: {"slot": N}.
+type registerResp struct {
+	Slot int `json:"slot"`
+}
+
+// doRegister posts a /register request through the real mux and decodes the
+// JSON response, failing the test on a non-200 status.
+func doRegister(t *testing.T, srv *Server, body string) registerResp {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /register %s: status %d, want 200 (body: %s)", body, rec.Code, rec.Body.String())
+	}
+	var got registerResp
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode /register response %s: %v", rec.Body.String(), err)
+	}
+	return got
+}
+
+// TestHandleRegisterAllocatesSlotWhenOmitted proves POST /register
+// {"nvim":...} with no slot allocates a free slot, returns it as {"slot":N},
+// and binds the nvim addr to that slot (sp009 Task 1 success criteria).
+func TestHandleRegisterAllocatesSlotWhenOmitted(t *testing.T) {
+	srv := newTestServer(t)
+
+	got := doRegister(t, srv, `{"nvim":"/tmp/nvim.a.sock"}`)
+
+	if got.Slot <= 0 {
+		t.Fatalf("POST /register with no slot: allocated slot %d, want > 0", got.Slot)
+	}
+	if addr := srv.slots.NvimAddr(got.Slot); addr != "/tmp/nvim.a.sock" {
+		t.Errorf("NvimAddr(%d) = %q, want /tmp/nvim.a.sock", got.Slot, addr)
+	}
+}
+
+// TestHandleRegisterExplicitSlotBindsAddr proves POST /register
+// {"nvim":...,"slot":N} binds addr to the caller-chosen slot N and echoes N
+// back in the response (sp009 Task 1 success criteria).
+func TestHandleRegisterExplicitSlotBindsAddr(t *testing.T) {
+	srv := newTestServer(t)
+
+	got := doRegister(t, srv, `{"nvim":"/tmp/nvim.b.sock","slot":5}`)
+
+	if got.Slot != 5 {
+		t.Fatalf("POST /register with slot=5: response slot %d, want 5", got.Slot)
+	}
+	if addr := srv.slots.NvimAddr(5); addr != "/tmp/nvim.b.sock" {
+		t.Errorf("NvimAddr(5) = %q, want /tmp/nvim.b.sock", addr)
+	}
+}
+
+// TestHandleRegisterReRegisterUpdatesAddrNotNewSlot proves re-registering an
+// explicit slot updates its bound address (last-wins) rather than
+// allocating a new slot (sp009 Task 1 edge case).
+func TestHandleRegisterReRegisterUpdatesAddrNotNewSlot(t *testing.T) {
+	srv := newTestServer(t)
+
+	first := doRegister(t, srv, `{"nvim":"/tmp/nvim.old.sock","slot":2}`)
+	second := doRegister(t, srv, `{"nvim":"/tmp/nvim.new.sock","slot":2}`)
+
+	if first.Slot != 2 || second.Slot != 2 {
+		t.Fatalf("re-register slot 2: got slots %d then %d, want 2 both times", first.Slot, second.Slot)
+	}
+	if addr := srv.slots.NvimAddr(2); addr != "/tmp/nvim.new.sock" {
+		t.Errorf("NvimAddr(2) after re-register = %q, want /tmp/nvim.new.sock", addr)
+	}
+}
+
+// TestHandleRegisterEmptyNvimReturns400 proves an empty "nvim" address is
+// rejected with 400 rather than silently registering a blank address
+// (sp009 Task 1 edge case).
+func TestHandleRegisterEmptyNvimReturns400(t *testing.T) {
+	srv := newTestServer(t)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(`{"nvim":""}`))
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("POST /register with empty nvim: status %d, want 400 (body: %s)", rec.Code, rec.Body.String())
+	}
+}
+
+// TestHandleRegisterMalformedBodyReturns400 proves an unparseable JSON body
+// is a 400, never a 500 or panic (sp008-wide anti-pattern, applied to the
+// new route).
+func TestHandleRegisterMalformedBodyReturns400(t *testing.T) {
+	srv := newTestServer(t)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(`{not json`))
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("POST /register with malformed body: status %d, want 400 (body: %s)", rec.Code, rec.Body.String())
+	}
+}
+
+// TestHandleRegisterWrongMethodRejected proves a non-POST /register request
+// returns 405 (ft002/ft004 method-parity, same as the other routes).
+func TestHandleRegisterWrongMethodRejected(t *testing.T) {
+	srv := newTestServer(t)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/register", nil)
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET /register: status %d, want 405", rec.Code)
+	}
+}
+
+// TestHandleRegisterConcurrentNoSlotDistinct proves concurrent no-slot
+// /register requests (as real simultaneous nvim startups would produce)
+// never receive the same allocated slot number — the full-stack version of
+// the SlotManager.AllocateSlot concurrency guarantee, exercised through the
+// real HTTP handler (sp009 Task 1 success criteria).
+func TestHandleRegisterConcurrentNoSlotDistinct(t *testing.T) {
+	srv := newTestServer(t)
+
+	const n = 20
+	results := make([]int, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			rec := httptest.NewRecorder()
+			body := `{"nvim":"/tmp/nvim.concurrent.sock"}`
+			req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
+			srv.Handler().ServeHTTP(rec, req)
+			var got registerResp
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Errorf("decode concurrent /register response: %v", err)
+				return
+			}
+			results[idx] = got.Slot
+		}(i)
+	}
+	wg.Wait()
+
+	seen := make(map[int]bool, n)
+	for _, got := range results {
+		if seen[got] {
+			t.Fatalf("concurrent POST /register handed out duplicate slot %d: %v", got, results)
+		}
+		seen[got] = true
 	}
 }
