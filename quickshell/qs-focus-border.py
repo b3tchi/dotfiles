@@ -34,10 +34,16 @@ IGNORE_TITLES = {'qs-focus-border', 'qs-focus-dim'}
 # between binding event and overlay grabbing focus, leaving a frame
 # visible around whatever was focused before mod+d / mod+p / mod+tab.
 SUPPRESS_WHEN_PRESENT_TITLES = {'qs-launcher', 'qs-projects', 'qs-switcher'}
-# i3 modes whose overlay covers the screen as a dock layer (screenshot
-# selector). While one is active refreshes are blocked — but the border is
-# NOT hidden at mode enter: the overlay takes ~0.5s to map (scrot + startup)
-# and hiding early blinks. The hide lands on the overlay's window::new event.
+# i3 modes whose overlay covers the screen (screenshot selector,
+# quickshell/qs-region.py). That overlay is a GDK POPUP window —
+# override-redirect — so i3 emits NO window::new for it; a hide keyed off
+# that event (the old contract here) would never fire and the ring would be
+# captured live in every shot. Hide immediately at MODE ENTER instead (see
+# the "change in SUPPRESS_MODES" branch in handle_event below); refreshes
+# stay blocked for the whole mode so the border can't restack above the live
+# overlay, and it reappears once the mode ends — cancel and save both funnel
+# through the same i3 "mode default" transition, so both are covered by the
+# same code path.
 SUPPRESS_MODES = {'screenshot'}
 
 
@@ -130,8 +136,8 @@ def should_ignore(c):
 
 def apply_geom(c, parents):
     # mode_suppressed re-checked here: a refresh already in flight when the
-    # mode started must not restack the border. Skip without hiding — the
-    # border stays as-is until the overlay's window::new hides it.
+    # mode started must not restack the border. It was already hidden at
+    # mode-enter (see handle_event's mode branch) — just bail.
     if mode_suppressed:
         return
     if should_ignore(c):
@@ -171,14 +177,17 @@ def handle_event(data):
             refresh_focused()
         return
     # i3 "mode" change. A mode event has only 'change' (the mode name) — no
-    # container/current/binding. Entering a SUPPRESS_MODES mode arms
-    # suppression (no hide — see SUPPRESS_MODES comment). Any other mode,
-    # including "default", refreshes: leaving the screenshot mode must redraw
+    # container/current/binding. Entering a SUPPRESS_MODES mode hides the
+    # border immediately AND arms suppression (see SUPPRESS_MODES comment —
+    # the overlay is an override-redirect POPUP, so a hide keyed off its
+    # window::new would never fire). Any other mode, including "default",
+    # unsuppresses and refreshes: leaving the screenshot mode must redraw
     # because the overlay never emits a focus event, and modes like "resize"
     # keep the live-refresh behavior.
     if 'container' not in e and 'current' not in e and 'binding' not in e:
         global mode_suppressed
         if change in SUPPRESS_MODES:
+            border.hide()
             mode_suppressed = True
         else:
             mode_suppressed = False
@@ -188,14 +197,15 @@ def handle_event(data):
     if not c:
         return
     if change == 'new':
-        # A quickshell window mapped (screenshot selector dock — PanelWindow
-        # has no title, so its event name is the default "quickshell" — or a
-        # qs-* titled launcher overlay). It may cover the screen and the
-        # border would float above it — hide exactly now, not at mode enter,
-        # so the border stays up during the scrot/startup gap. The follow-up
-        # refresh restores the border after a plain bar restart (no qs-*
-        # overlay in the tree then); under an active SUPPRESS_MODES mode
-        # it's a no-op.
+        # A quickshell-hosted window mapped — the qs-launcher/qs-switcher/
+        # qs-projects overlays, or a plain bar restart (PanelWindow with no
+        # title reports the default name "quickshell"). It may cover the
+        # screen and the border would float above it — hide now, before the
+        # follow-up refresh restores it. NOT used for the screenshot
+        # selector (quickshell/qs-region.py): that overlay hides on i3 MODE
+        # ENTER (see the mode branch above), not here — it is a GDK POPUP
+        # (override-redirect), and i3 never emits window::new for
+        # override-redirect windows, so this branch would never see it.
         name = c.get('name') or ''
         cls = (c.get('window_properties') or {}).get('class') or ''
         if name.startswith('qs-') or name == 'quickshell' or cls == 'quickshell':
