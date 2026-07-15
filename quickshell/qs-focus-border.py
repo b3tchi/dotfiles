@@ -86,6 +86,14 @@ class Border:
 
 border = Border()
 
+# While an i3 mode (screenshot, resize, ...) is active a quickshell overlay
+# may cover the screen as a dock layer; the border (keep-above notification)
+# would restack above it on every refresh — binding events and the 100ms
+# mouse-drag poll fire constantly during a selection drag. Hide and block all
+# refreshes until the mode returns to "default". Only touched on the GLib
+# main thread (all event/poll paths run there).
+mode_suppressed = False
+
 
 def should_ignore(c):
     """Skip quickshell, rofi, and other overlay windows."""
@@ -101,7 +109,9 @@ def should_ignore(c):
 
 
 def apply_geom(c, parents):
-    if should_ignore(c):
+    # mode_suppressed re-checked here: a refresh already in flight when the
+    # mode started must not land after the hide.
+    if mode_suppressed or should_ignore(c):
         border.hide()
         return
     r = c.get('rect', {})
@@ -137,12 +147,19 @@ def handle_event(data):
         if nodes:
             refresh_focused()
         return
-    # i3 "mode" change (e.g. leaving the screenshot mode). The screenshot
-    # overlay is a dock that covers the border without a focus/close event, so
-    # redraw the border for whatever is focused now when the mode ends. A mode
-    # event has only 'change' — no container/current/binding.
+    # i3 "mode" change. A mode event has only 'change' (the mode name) — no
+    # container/current/binding. Entering a mode (e.g. "screenshot") means an
+    # overlay dock may cover the screen: hide + suppress. Leaving (change ==
+    # "default") redraws for whatever is focused — the overlay covers the
+    # border without ever emitting a focus/close event.
     if 'container' not in e and 'current' not in e and 'binding' not in e:
-        refresh_focused()
+        global mode_suppressed
+        if change and change != 'default':
+            mode_suppressed = True
+            border.hide()
+        else:
+            mode_suppressed = False
+            refresh_focused()
         return
     c = e.get('container')
     if not c:
@@ -203,6 +220,10 @@ def _has_overlay_present(node):
 
 def refresh_focused():
     """Re-read focused window geometry from i3 tree (runs in background thread)."""
+    if mode_suppressed:
+        GLib.idle_add(border.hide)
+        return
+
     def _do_refresh():
         if not _refresh_lock.acquire(blocking=False):
             return  # skip if already refreshing

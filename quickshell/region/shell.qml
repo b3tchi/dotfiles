@@ -52,16 +52,20 @@ ShellRoot {
     function selW() { return Math.abs(curX - startX) }
     function selH() { return Math.abs(curY - startY) }
 
-    // Leave the i3/sway "screenshot" mode (returns the bar to normal), then quit.
+    readonly property string ptr: (Quickshell.env("XDG_RUNTIME_DIR") ?? "/tmp") + "/qs-shot-src"
+
+    // Leave the i3/sway "screenshot" mode (returns the bar to normal). Called
+    // only at quit time: the focus-border helper suppresses itself while the
+    // mode is active, so exiting the mode before the overlay is unmapped lets
+    // the border restack above the (still visible) frozen shot.
     function exitMode() {
         Quickshell.execDetached(["sh", "-c", wmMsg + " mode default >/dev/null 2>&1"])
     }
-    Timer { id: closeTimer; interval: 60; onTriggered: Qt.quit() }
-    Timer { id: quitTimer; interval: 1400; onTriggered: Qt.quit() }
+    Timer { id: closeTimer; interval: 60; onTriggered: { root.exitMode(); Qt.quit() } }
+    Timer { id: quitTimer; interval: 1400; onTriggered: { root.exitMode(); Qt.quit() } }
 
     function cancel() {
-        Quickshell.execDetached(["sh", "-c", "rm -f '" + src + "'"])
-        exitMode()
+        Quickshell.execDetached(["sh", "-c", "rm -f '" + src + "' '" + ptr + "'"])
         closeTimer.start()
     }
 
@@ -78,13 +82,13 @@ ShellRoot {
             var cmd = "mkdir -p '" + dir + "'; " +
                       "magick '" + src + "' -crop " + geom + " +repage '" + f + "' && " +
                       "printf %s '" + f + "' | xclip -selection clipboard; " +
-                      "rm -f '" + src + "'"
+                      "rm -f '" + src + "' '" + ptr + "'"
             Quickshell.execDetached(["sh", "-c", cmd])
             dragging = false
             clickState = 0
-            exitMode()                 // bar back to normal now
             toastText = "Copied path  " + f
-            quitTimer.start()          // keep the confirmation up briefly, then close
+            quitTimer.start()          // keep the confirmation up briefly, then
+                                       // close + leave the mode (border returns)
         } else {
             cancel()
         }
