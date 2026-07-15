@@ -1,9 +1,11 @@
 """One-shot synthetic tests for qs-focus-border i3-mode suppression.
 
-The screenshot selector is a quickshell dock layer entered via an i3 mode;
-the border (keep-above notification window) must hide on mode enter and stay
-hidden through binding/mouse-poll refreshes until the mode returns to
-"default".
+The screenshot selector is a quickshell dock layer entered via an i3 mode.
+The border (keep-above notification window) must NOT redraw/restack while
+that mode is active, must hide when the overlay dock actually maps
+(window::new — not at mode enter, which is ~0.5s before the overlay covers
+the screen), and must come back when the mode ends. Other modes (resize)
+keep the live-refresh behavior.
 
 Run: python3 quickshell/test_qs_focus_border_mode.py
 """
@@ -69,7 +71,8 @@ class SelectiveThread:
 
 threading.Thread = SelectiveThread
 
-# Canned i3 tree: one focused terminal window.
+# Canned i3 tree: one focused terminal window. Mutated per-test to add the
+# overlay dock.
 TREE = {
     "name": "root",
     "nodes": [{
@@ -114,26 +117,46 @@ calls.clear()
 qsb.refresh_focused()
 check("baseline refresh shows border", "show" in calls)
 
-# Mode enter (e.g. "screenshot"): border hides, no redraw.
+# Mode enter ("screenshot"): border must stay up — no hide (the overlay
+# takes ~0.5s to map; hiding now blinks), no redraw.
 calls.clear()
 qsb.handle_event('{"change":"screenshot", "pango_markup":false}')
-check("mode enter hides border", "hide" in calls)
-check("mode enter does not redraw", "show" not in calls)
+check("screenshot mode enter does not hide", "hide" not in calls)
+check("screenshot mode enter does not redraw", "show" not in calls)
 
-# While the mode is active, binding/mouse-poll refreshes must not redraw.
+# While the mode is active, binding/mouse-poll refreshes must do nothing.
 calls.clear()
 qsb.refresh_focused()
-check("refresh while suppressed does not redraw", "show" not in calls)
-
-# A binding event inside the mode must not redraw either.
-calls.clear()
 qsb.handle_event('{"change":"run", "binding":{"command":"nop"}}')
-check("binding event while suppressed does not redraw", "show" not in calls)
+check("refresh while suppressed is a no-op", not calls)
+
+# Overlay dock maps: window::new (PanelWindow default name "quickshell")
+# hides the border; the follow-up refresh is a no-op while suppressed.
+calls.clear()
+qsb.handle_event(json.dumps({"change": "new", "container": {"name": "quickshell"}}))
+check("overlay window::new hides border", "hide" in calls)
+check("overlay window::new does not redraw", "show" not in calls)
 
 # Mode leave: border comes back for the focused window.
 calls.clear()
 qsb.handle_event('{"change":"default", "pango_markup":false}')
 check("mode leave redraws border", "show" in calls)
+
+# Non-suppress modes (resize) keep the live-refresh behavior.
+calls.clear()
+qsb.handle_event('{"change":"resize", "pango_markup":false}')
+check("resize mode still refreshes", "show" in calls)
+calls.clear()
+qsb.refresh_focused()
+check("refresh during resize mode still redraws", "show" in calls)
+qsb.handle_event('{"change":"default", "pango_markup":false}')
+
+# Bar restart: window::new (name "quickshell") outside any mode hides, then
+# the follow-up refresh restores the border (no overlay in the tree).
+calls.clear()
+qsb.handle_event(json.dumps({"change": "new", "container": {"name": "quickshell"}}))
+check("bar window::new hides then restores", "hide" in calls and "show" in calls
+      and calls.index("hide") < calls.index("show"))
 
 print()
 if failures:

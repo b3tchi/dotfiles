@@ -54,6 +54,11 @@ ShellRoot {
 
     readonly property string ptr: (Quickshell.env("XDG_RUNTIME_DIR") ?? "/tmp") + "/qs-shot-src"
 
+    // Fade the dim/toast out before quitting: after the fade the overlay
+    // shows the un-dimmed frozen shot ≈ the live screen, so the unmap itself
+    // is invisible — no blink.
+    property bool closing: false
+
     // Leave the i3/sway "screenshot" mode (returns the bar to normal). Called
     // only at quit time: the focus-border helper suppresses itself while the
     // mode is active, so exiting the mode before the overlay is unmapped lets
@@ -61,12 +66,16 @@ ShellRoot {
     function exitMode() {
         Quickshell.execDetached(["sh", "-c", wmMsg + " mode default >/dev/null 2>&1"])
     }
-    Timer { id: closeTimer; interval: 60; onTriggered: { root.exitMode(); Qt.quit() } }
-    Timer { id: quitTimer; interval: 1400; onTriggered: { root.exitMode(); Qt.quit() } }
+    function beginClose() {
+        closing = true
+        closeTimer.start()             // quit once the fade has finished
+    }
+    Timer { id: closeTimer; interval: 170; onTriggered: { root.exitMode(); Qt.quit() } }
+    Timer { id: quitTimer; interval: 1400; onTriggered: root.beginClose() }
 
     function cancel() {
         Quickshell.execDetached(["sh", "-c", "rm -f '" + src + "' '" + ptr + "'"])
-        closeTimer.start()
+        beginClose()
     }
 
     function finish() {
@@ -98,6 +107,8 @@ ShellRoot {
         anchors { top: true; bottom: true; left: true; right: true }
         exclusionMode: ExclusionMode.Ignore
         color: "#000000"
+        // No title property on PanelWindow — the window::new i3 event carries
+        // the default name "quickshell"; qs-focus-border.py hides on it.
 
         Image {
             id: frozen
@@ -107,8 +118,17 @@ ShellRoot {
             cache: false
             asynchronous: false
 
-            // dim the whole frozen shot
-            Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.35 }
+            // dim the whole frozen shot — faded in/out so entering/leaving
+            // the mode is a soft transition, not a blink
+            Rectangle {
+                id: dim
+                anchors.fill: parent
+                color: "#000000"
+                property bool shown: false
+                opacity: root.closing ? 0 : (shown ? 0.35 : 0)
+                Behavior on opacity { NumberAnimation { duration: 140 } }
+                Component.onCompleted: shown = true
+            }
 
             // bright hole over the selection (un-dimmed)
             Item {
@@ -187,6 +207,8 @@ ShellRoot {
 
             // transient "Copied path" confirmation, above the (visible) bar
             Rectangle {
+                opacity: root.closing ? 0 : 1
+                Behavior on opacity { NumberAnimation { duration: 140 } }
                 visible: root.toastText !== ""
                 anchors.left: parent.left
                 anchors.bottom: parent.bottom

@@ -34,6 +34,11 @@ IGNORE_TITLES = {'qs-focus-border', 'qs-focus-dim'}
 # between binding event and overlay grabbing focus, leaving a frame
 # visible around whatever was focused before mod+d / mod+p / mod+tab.
 SUPPRESS_WHEN_PRESENT_TITLES = {'qs-launcher', 'qs-projects', 'qs-switcher'}
+# i3 modes whose overlay covers the screen as a dock layer (screenshot
+# selector). While one is active refreshes are blocked — but the border is
+# NOT hidden at mode enter: the overlay takes ~0.5s to map (scrot + startup)
+# and hiding early blinks. The hide lands on the overlay's window::new event.
+SUPPRESS_MODES = {'screenshot'}
 
 
 class Border:
@@ -86,12 +91,11 @@ class Border:
 
 border = Border()
 
-# While an i3 mode (screenshot, resize, ...) is active a quickshell overlay
-# may cover the screen as a dock layer; the border (keep-above notification)
-# would restack above it on every refresh — binding events and the 100ms
-# mouse-drag poll fire constantly during a selection drag. Hide and block all
-# refreshes until the mode returns to "default". Only touched on the GLib
-# main thread (all event/poll paths run there).
+# While a SUPPRESS_MODES mode is active the border (keep-above notification)
+# would restack above the overlay dock on every refresh — binding events and
+# the 100ms mouse-drag poll fire constantly during a selection drag. Block
+# all refreshes until the mode ends. Only touched on the GLib main thread
+# (all event/poll paths run there).
 mode_suppressed = False
 
 
@@ -110,8 +114,11 @@ def should_ignore(c):
 
 def apply_geom(c, parents):
     # mode_suppressed re-checked here: a refresh already in flight when the
-    # mode started must not land after the hide.
-    if mode_suppressed or should_ignore(c):
+    # mode started must not restack the border. Skip without hiding — the
+    # border stays as-is until the overlay's window::new hides it.
+    if mode_suppressed:
+        return
+    if should_ignore(c):
         border.hide()
         return
     r = c.get('rect', {})
@@ -148,21 +155,36 @@ def handle_event(data):
             refresh_focused()
         return
     # i3 "mode" change. A mode event has only 'change' (the mode name) — no
-    # container/current/binding. Entering a mode (e.g. "screenshot") means an
-    # overlay dock may cover the screen: hide + suppress. Leaving (change ==
-    # "default") redraws for whatever is focused — the overlay covers the
-    # border without ever emitting a focus/close event.
+    # container/current/binding. Entering a SUPPRESS_MODES mode arms
+    # suppression (no hide — see SUPPRESS_MODES comment). Any other mode,
+    # including "default", refreshes: leaving the screenshot mode must redraw
+    # because the overlay never emits a focus event, and modes like "resize"
+    # keep the live-refresh behavior.
     if 'container' not in e and 'current' not in e and 'binding' not in e:
         global mode_suppressed
-        if change and change != 'default':
+        if change in SUPPRESS_MODES:
             mode_suppressed = True
-            border.hide()
         else:
             mode_suppressed = False
             refresh_focused()
         return
     c = e.get('container')
     if not c:
+        return
+    if change == 'new':
+        # A quickshell window mapped (screenshot selector dock — PanelWindow
+        # has no title, so its event name is the default "quickshell" — or a
+        # qs-* titled launcher overlay). It may cover the screen and the
+        # border would float above it — hide exactly now, not at mode enter,
+        # so the border stays up during the scrot/startup gap. The follow-up
+        # refresh restores the border after a plain bar restart (no qs-*
+        # overlay in the tree then); under an active SUPPRESS_MODES mode
+        # it's a no-op.
+        name = c.get('name') or ''
+        cls = (c.get('window_properties') or {}).get('class') or ''
+        if name.startswith('qs-') or name == 'quickshell' or cls == 'quickshell':
+            border.hide()
+            refresh_focused()
         return
     if change == 'close':
         # Redraw on whatever i3 refocuses after the close. Normally a following
@@ -221,7 +243,6 @@ def _has_overlay_present(node):
 def refresh_focused():
     """Re-read focused window geometry from i3 tree (runs in background thread)."""
     if mode_suppressed:
-        GLib.idle_add(border.hide)
         return
 
     def _do_refresh():
