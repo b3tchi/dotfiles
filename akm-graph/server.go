@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -80,6 +81,18 @@ type Server struct {
 	hub      *Hub
 	upgrader websocket.Upgrader
 	watcher  *Watcher
+
+	// highlightMu guards highlights independently of mu (the graph lock) —
+	// highlight state and graph state are updated on unrelated triggers (a
+	// POST vs a filesystem rebuild) and gating one behind the other's lock
+	// would be an artificial coupling (sp011 Task 1: per-slot state under
+	// its own mutex).
+	highlightMu sync.Mutex
+	// highlights maps slot -> resolved node id ("" means no/cleared
+	// highlight). Absent slot keys read back as "" (Go zero value), which is
+	// indistinguishable from an explicitly-cleared slot — both are a no-op
+	// for the viewer, so no separate "ok" tracking is needed.
+	highlights map[int]string
 }
 
 // NewServer builds the initial graph from repoRoot and returns a ready Server.
@@ -97,12 +110,13 @@ func NewServer(repoRoot string) (*Server, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
-		root:    repoRoot,
-		ctx:     ctx,
-		cancel:  cancel,
-		static:  sub,
-		backend: resolveBackend(),
-		hub:     NewHub(),
+		root:       repoRoot,
+		ctx:        ctx,
+		cancel:     cancel,
+		static:     sub,
+		backend:    resolveBackend(),
+		hub:        NewHub(),
+		highlights: make(map[int]string),
 		// localhost-only tool — same no-auth stance as ft002; accept any origin.
 		upgrader: websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }},
 	}
@@ -150,6 +164,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/stop", s.handleStop)
 	mux.HandleFunc("/api/open", s.handleOpen)
+	mux.HandleFunc("/api/highlight", s.handleHighlight)
 	mux.HandleFunc("/watch", s.handleWatch)
 	fileServer := noCache(http.FileServer(http.FS(s.static)))
 	mux.Handle("/", noCache(s.indexHandler(fileServer)))
@@ -228,10 +243,114 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	s.cancel()
 }
 
-// handleWatch upgrades to WebSocket, pushes the current graph immediately, then
-// streams every subsequent rebuild. A non-WebSocket request is rejected by the
-// upgrader with a 400 (it never hangs). Only GET can carry an Upgrade header,
-// so ServeMux + the upgrader together enforce method+protocol.
+// highlightMsg is the /watch envelope for a current-node highlight (sp011
+// Task 1). It is discriminated from a raw Graph payload BY SHAPE — a
+// "type":"highlight" key that a {nodes,links} graph frame never carries — so
+// existing graph consumers parse unchanged (sp011 anti-pattern: no typed
+// wrapper on the graph broadcast).
+type highlightMsg struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+	Slot int    `json:"slot"`
+}
+
+// handleHighlight serves POST /api/highlight {"path": "...", "slot": N?} —
+// the forward twin of handleOpen's id->path resolution (sp011 Task 1,
+// mirroring the adr0007 discipline: the id is resolved server-side from the
+// trusted in-process graph, never trusted from the caller). Localhost-only
+// trust boundary — same no-auth stance as every other /api/* handler here.
+//
+// Resolution order:
+//  1. decode the JSON body; malformed -> 400, never reaches graph lookup
+//  2. reject a missing/empty path -> 400 (distinct from an unknown path,
+//     which is a valid "clear" signal, not a caller error)
+//  3. look up path against the current graph snapshot's node paths (a plain
+//     string match — no filesystem access, so no traversal surface even for
+//     a path containing ".." or an absolute escape); unknown/ghost/non-graph
+//     path resolves to "" rather than an error (silent clear contract)
+//  4. store the resolved id for the slot (last-write-wins under
+//     highlightMu) and broadcast {type:"highlight", id, slot} over the
+//     existing hub — always, even for an empty id, so viewers clear stale
+//     emphasis
+func (s *Server) handleHighlight(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	defer r.Body.Close()
+
+	var body struct {
+		Path string `json:"path"`
+		Slot *int   `json:"slot"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad request body", http.StatusBadRequest)
+		return
+	}
+	if body.Path == "" {
+		http.Error(w, "missing path", http.StatusBadRequest)
+		return
+	}
+
+	slot := 0
+	if body.Slot != nil {
+		slot = *body.Slot
+	}
+
+	id := ""
+	for _, n := range s.Snapshot().Nodes {
+		if n.Path != "" && n.Path == body.Path {
+			id = n.ID
+			break
+		}
+	}
+
+	s.setHighlight(slot, id)
+	s.broadcastHighlight(id, slot)
+
+	writeJSON(w, map[string]any{"id": id, "slot": slot})
+}
+
+// setHighlight stores id (possibly empty) as slot's current highlight.
+// Concurrent POSTs to the same slot are last-write-wins under highlightMu
+// (sp011 Task 1 edge case).
+func (s *Server) setHighlight(slot int, id string) {
+	s.highlightMu.Lock()
+	s.highlights[slot] = id
+	s.highlightMu.Unlock()
+}
+
+// getHighlight returns the stored id for slot ("" if never set or explicitly
+// cleared — both read the same, which is correct: neither should render
+// emphasis).
+func (s *Server) getHighlight(slot int) string {
+	s.highlightMu.Lock()
+	defer s.highlightMu.Unlock()
+	return s.highlights[slot]
+}
+
+// broadcastHighlight fans a highlight envelope out to every /watch client,
+// regardless of which slot they're primed for — the viewer ignores messages
+// for a slot that isn't its own (ft004 Task 2 scope). Marshal failure (should
+// be unreachable for this fixed shape) is swallowed rather than panicking,
+// matching broadcastGraph's no-panic contract.
+func (s *Server) broadcastHighlight(id string, slot int) {
+	b, err := json.Marshal(highlightMsg{Type: "highlight", ID: id, Slot: slot})
+	if err != nil {
+		return
+	}
+	s.hub.Broadcast(b)
+}
+
+// handleWatch upgrades to WebSocket, pushes the current graph immediately,
+// then — for a connection carrying ?slot=N — primes the stored highlight for
+// that slot right after the graph frame (sp011 Task 1: first zettel preview
+// highlights once ready, priming order graph-then-highlight so consumers can
+// rely on it). A connection with no ?slot= (standalone viewer) gets no
+// highlight priming at all — same behavior as before this feature. Then
+// streams every subsequent rebuild/highlight broadcast. A non-WebSocket
+// request is rejected by the upgrader with a 400 (it never hangs). Only GET
+// can carry an Upgrade header, so ServeMux + the upgrader together enforce
+// method+protocol.
 func (s *Server) handleWatch(w http.ResponseWriter, r *http.Request) {
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -247,6 +366,22 @@ func (s *Server) handleWatch(w http.ResponseWriter, r *http.Request) {
 		select {
 		case c.send <- b:
 		default:
+		}
+	}
+
+	// Slot-aware highlight priming: only when the query string names an
+	// explicit slot (an embed's ?slot=N). A malformed slot value is treated
+	// the same as absent — no priming, no error (this is a best-effort
+	// convenience, not a contract the caller can violate its way into a 4xx).
+	if slotStr := r.URL.Query().Get("slot"); slotStr != "" {
+		if slot, err := strconv.Atoi(slotStr); err == nil {
+			id := s.getHighlight(slot)
+			if b, err := json.Marshal(highlightMsg{Type: "highlight", ID: id, Slot: slot}); err == nil {
+				select {
+				case c.send <- b:
+				default:
+				}
+			}
 		}
 	}
 
