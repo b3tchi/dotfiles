@@ -14,5 +14,7 @@ sections when status flips.
 
 ## spec
 
+- [[sp011|akm-graph-live-highlight-no-reload]]
+
 ## ready
 
