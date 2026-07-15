@@ -141,6 +141,13 @@ ShellRoot {
     Window {
         id: win
         visible: true
+        // Size to the screen up front so the very first mapped frame already
+        // fills it — otherwise the window briefly shows at its default (small,
+        // centered) size before i3 fullscreens it: a miniature screenshot flash.
+        x: root.scr ? root.scr.x : 0
+        y: root.scr ? root.scr.y : 0
+        width: root.scr ? root.scr.width : 1920
+        height: root.scr ? root.scr.height : 1080
         visibility: Window.FullScreen
         flags: Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
         color: "#000000"
