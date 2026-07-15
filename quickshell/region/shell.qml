@@ -70,12 +70,22 @@ ShellRoot {
 
     function cleanupCmd() { return "rm -f '" + src + "'" }
 
-    function cancel() {
-        Quickshell.execDetached(["sh", "-c", cleanupCmd()])
-        Qt.quit()
+    // Close cleanly: unmap the window FIRST so the WM hands keyboard focus back
+    // to the previous window, THEN quit a moment later. Quitting while the
+    // fullscreen grab is still mapped leaves the keyboard focused on a dead
+    // window (input "blocked" until you click), especially over xrdp.
+    Timer { id: closeTimer; interval: 90; onTriggered: Qt.quit() }
+    function closeOverlay() {
+        win.visible = false
+        closeTimer.start()
     }
 
-    Timer { id: quitTimer; interval: 1400; onTriggered: Qt.quit() }
+    function cancel() {
+        Quickshell.execDetached(["sh", "-c", cleanupCmd()])
+        closeOverlay()
+    }
+
+    Timer { id: quitTimer; interval: 1400; onTriggered: root.closeOverlay() }
 
     function finish() {
         var w = Math.round(selW())
