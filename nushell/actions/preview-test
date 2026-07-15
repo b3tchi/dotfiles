@@ -19,9 +19,12 @@
 #      addr and parses `slot` from the response").
 #   8. `preview register <addr> --slot N` includes {"slot": N} in the
 #      request body (the plugin's idempotent-rebind path, sp009 Task 3).
+#   9. `preview start` blocks until the daemon answers /status, so a
+#      register fired immediately after start (nvim :PreviewStart's exact
+#      sequence) cannot hit connection-refused (dotfiles-nbt).
 #
 # Run:  nu nushell/actions/preview-test
-# Pass: exits 0 and prints "PASS: 8 tests passed"
+# Pass: exits 0 and prints "PASS: 9 tests passed"
 # Fail: exits 1 and prints "FAIL: <description>"
 
 # Self-locate the wrapper relative to this test so it survives merging out
@@ -52,8 +55,9 @@ let test_path = ([$fake_bin_dir "/usr/local/bin" "/usr/bin" "/bin" "/sbin"] | st
 let fake_src = "#!/bin/bash
 touch " + $launched_marker + "
 exec python3 - \"$@\" <<'PY'
-import sys, os, json
+import sys, os, json, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
+time.sleep(float(os.environ.get('STARTUP_DELAY', '0')))
 port = int(os.environ.get('PREVIEW_PORT', '4200'))
 capture_file = os.environ.get('CAPTURE_FILE', '')
 class H(BaseHTTPRequestHandler):
@@ -368,8 +372,31 @@ wait-port-free $test_port
 ^rm -f $pid_file $launched_marker $capture_file
 print "PASS: register --slot N includes {slot: N} in the request body"
 
+# ── test 9: start blocks until daemon ready (register-after-start race) ──────
+
+# The fake daemon delays its bind by STARTUP_DELAY seconds; start must not
+# return before /status answers, so the register fired straight after it
+# (nvim :PreviewStart's exact sequence, dotfiles-nbt) succeeds without any
+# retry on the caller's side.
+let r9 = (do {
+    ^bash -c $"HOME=($tmp) PREVIEW_PORT=($test_port) PREVIEW_ROOT=($tmp) PATH=($test_path) STARTUP_DELAY=1 /usr/bin/nu ($WRAPPER) start"
+} | complete)
+if $r9.exit_code != 0 {
+    print $"FAIL: start against slow-boot daemon exited ($r9.exit_code)\n($r9.stdout)($r9.stderr)"
+    exit 1
+}
+let rreg9 = (run-wrapper $tmp $test_port $test_path "register" $nvim_addr)
+if $rreg9.exit_code != 0 {
+    print $"FAIL: register immediately after start hit a not-ready daemon — start returned before /status answered:\n($rreg9.stdout)($rreg9.stderr)"
+    exit 1
+}
+run-wrapper $tmp $test_port $test_path "stop" | ignore
+wait-port-free $test_port
+^rm -f $pid_file $launched_marker
+print "PASS: start blocks until the daemon answers, register-after-start is race-free"
+
 # ── cleanup ───────────────────────────────────────────────────────────────────
 
 ^rm -rf $tmp
 print ""
-print "PASS: 8 tests passed"
+print "PASS: 9 tests passed"

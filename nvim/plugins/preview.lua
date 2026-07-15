@@ -161,7 +161,18 @@ vim.api.nvim_create_user_command("PreviewStart", function()
 		vim.notify("preview: 'preview' wrapper not found on PATH", vim.log.levels.ERROR)
 		return
 	end
-	vim.system({ "preview", "start" }, { detach = true })
+	-- Synchronous: the wrapper's `start` verb gates on the daemon answering
+	-- /status (readiness poll, dotfiles-nbt), so waiting here is what makes
+	-- the register below race-free on the fresh-start path. `detach` keeps
+	-- the wrapper (and the daemon it nohups) out of this nvim's job table.
+	local started = vim.system({ "preview", "start" }, { detach = true, text = true }):wait()
+	if started.code ~= 0 then
+		vim.notify(
+			"preview: start failed — " .. ((started.stderr or "") .. (started.stdout or "")),
+			vim.log.levels.ERROR
+		)
+		return
+	end
 	register(vim.v.servername)
 end, { desc = "preview: start preview-d as a child of this nvim (so $NVIM reaches it for the reverse /open channel), and register this instance's own preview slot" })
 

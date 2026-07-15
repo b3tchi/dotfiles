@@ -127,6 +127,19 @@ def main-start [] {
 
     let new_pid = ($pid_result.stdout | str trim | into int)
     write-pidfile $new_pid
+
+    # Readiness gate: callers treat `start` returning as "the daemon is
+    # answering" (nvim :PreviewStart registers immediately after, dotfiles-nbt),
+    # so block until /status responds — bounded so a crashed daemon fails
+    # loud instead of hanging.
+    mut ready = false
+    for _ in 1..50 {
+        if (probe-status) != null { $ready = true; break }
+        sleep 100ms
+    }
+    if not $ready {
+        error make { msg: $"preview: daemon \(pid ($new_pid)\) not answering on port ($port) after 5s — check ($log)" }
+    }
     print $"preview: started \(pid ($new_pid)\), root ($root), port ($port), logging to ($log)"
 }
 
