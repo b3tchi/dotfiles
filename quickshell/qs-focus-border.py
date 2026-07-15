@@ -137,6 +137,13 @@ def handle_event(data):
         if nodes:
             refresh_focused()
         return
+    # i3 "mode" change (e.g. leaving the screenshot mode). The screenshot
+    # overlay is a dock that covers the border without a focus/close event, so
+    # redraw the border for whatever is focused now when the mode ends. A mode
+    # event has only 'change' — no container/current/binding.
+    if 'container' not in e and 'current' not in e and 'binding' not in e:
+        refresh_focused()
+        return
     c = e.get('container')
     if not c:
         return
@@ -168,7 +175,7 @@ def subscribe():
     while True:
         try:
             proc = subprocess.Popen(
-                ['i3-msg', '-t', 'subscribe', '-m', '["window","workspace","binding"]'],
+                ['i3-msg', '-t', 'subscribe', '-m', '["window","workspace","binding","mode"]'],
                 stdout=subprocess.PIPE, text=True
             )
             for line in proc.stdout:
