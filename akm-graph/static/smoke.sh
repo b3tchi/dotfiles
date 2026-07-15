@@ -284,4 +284,40 @@ run_open_stage() {
 
 run_open_stage "slot=2"  "&slot=2"
 run_open_stage "no-slot" ""
+
+# ── Stage 7: highlight-rendering regression (sp011 ft004 Task 2) ───────────────
+# Drives __akmGraph.simulateWS via smoke-highlight.html with canned
+# {type:"highlight",...} and {nodes,links} messages (no real WebSocket). With
+# ?slot=2 it runs the full apply/switch/wrong-slot/clear/rebuild-survive chain
+# for an embedded viewer; without ?slot it asserts a standalone viewer ignores
+# every slot-tagged highlight outright.
+run_highlight_stage() {
+  local label="$1" query="$2" expect="$3"
+  local url="http://localhost:${PORT}/smoke-highlight.html?fixture=graph.json${query}"
+  echo ""
+  echo "Highlight [$label]: $url"
+  local dom title result
+  dom=$("$CHROME" \
+    --headless=new \
+    --disable-gpu \
+    --no-sandbox \
+    --virtual-time-budget=15000 \
+    --run-all-compositor-stages-before-draw \
+    --dump-dom \
+    "$url" 2>/dev/null || true)
+  title=$(echo "$dom" | grep -oP '(?<=<title>)[^<]+' | head -1 || true)
+  result=$(echo "$dom" | grep -oP '(?<=id="result">)[^<]+' | head -1 || true)
+  echo "  highlight title  = '$title'"
+  echo "  highlight result = '$result'"
+  if [ "$title" = "$expect" ]; then
+    echo "  PASS [$label]: $expect"
+  else
+    echo "  FAIL [$label]: highlight assertion failed"
+    exit 1
+  fi
+}
+
+run_highlight_stage "slot=2"  "&slot=2" "HIGHLIGHT_OK"
+run_highlight_stage "no-slot" ""        "STANDALONE_OK"
+
 exit 0

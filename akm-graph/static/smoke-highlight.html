@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>highlight-smoke pending</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #0d1117; }
+    #canvas { display: block; width: 100%; height: 100%; }
+    #tooltip { position: absolute; display: none; }
+    #labels { position: absolute; inset: 0; }
+    .node-label.dim { opacity: 0.12; }
+    .node-label.highlight {
+      opacity: 1;
+      border-color: #ffd23f;
+      box-shadow: 0 0 0 2px rgba(255, 210, 63, 0.55);
+    }
+    #status { position: absolute; top: 10px; right: 14px; }
+    #result { position: absolute; bottom: 10px; left: 10px; color: #fff; font-family: monospace; }
+  </style>
+</head>
+<body>
+  <!-- #graph-root is REQUIRED: boot() does
+       document.getElementById("graph-root") and hands it straight to
+       backend.init() with no null guard — a bare #canvas (no wrapper) makes
+       init() throw, which aborts boot() before fetchGraph()/connectWS() ever
+       run (pre-existing bug also hit by smoke-select/filter/open.html,
+       reported separately). -->
+  <div id="graph-root"><canvas id="canvas"></canvas></div>
+  <!-- #legend is also REQUIRED: buildLegend() (called from renderData() on
+       every graph frame, including our simulateWS(fixture) rebuild-survive
+       scenario) does legendEl.textContent = "" with no null guard. -->
+  <div id="legend"></div>
+  <div id="labels"></div>
+  <div id="tooltip"></div>
+  <div id="status"></div>
+  <div id="result"></div>
+  <!--
+    Highlight-rendering regression guard (sp011 ft004 Task 2). Drives the
+    viewer's __akmGraph.simulateWS hook with canned {type:"highlight",...}
+    and {nodes,links} messages instead of a real WebSocket — same technique
+    as the fetch spy in smoke-open.html, but for /watch frames.
+
+    Two modes, selected by the page's own ?slot= query param (the SLOT this
+    viewer boots with):
+      - ?slot=N present: full scenario chain — apply / switch / clear /
+        rebuild-survive / wrong-slot-ignore. Title HIGHLIGHT_OK on success.
+      - ?slot= absent (standalone viewer): a single scenario proving a
+        slot-tagged highlight is ignored entirely (no "own slot" to match).
+        Title STANDALONE_OK on success.
+  -->
+  <script type="module" src="./app.js"></script>
+  <script type="module">
+    const NODE_A = "us001";
+    const NODE_B = "sp006";
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    async function run() {
+      const out = document.getElementById("result");
+      try {
+        for (let t = 0; t < 100 && !window.__akmGraph; t++) await wait(50);
+        const g = window.__akmGraph;
+        if (!g) throw new Error("__akmGraph never appeared");
+        for (let t = 0; t < 100 && !g.nodeById(NODE_A); t++) await wait(50);
+        if (!g.nodeById(NODE_A)) throw new Error("fixture node " + NODE_A + " not loaded");
+        if (!g.nodeById(NODE_B)) throw new Error("fixture node " + NODE_B + " not loaded");
+
+        const rawSlot = new URLSearchParams(location.search).get("slot");
+
+        if (rawSlot == null) {
+          // Standalone viewer: even a highlight tagged for slot 0 must be a
+          // silent no-op — there's no ?slot on this page, so openSlot is
+          // null and nothing can ever match it.
+          g.simulateWS({ type: "highlight", id: NODE_A, slot: 0 });
+          await wait(30);
+          const st = g.highlightState();
+          if (st.active !== null || st.stored !== null) {
+            throw new Error("standalone viewer applied a slot-tagged highlight: " + JSON.stringify(st));
+          }
+          out.textContent = "STANDALONE_OK state=" + JSON.stringify(st);
+          document.title = "STANDALONE_OK";
+          return;
+        }
+
+        const SLOT = Number(rawSlot);
+
+        // ── apply ────────────────────────────────────────────────────────────
+        g.simulateWS({ type: "highlight", id: NODE_A, slot: SLOT });
+        await wait(30);
+        let st = g.highlightState();
+        if (st.active !== NODE_A) throw new Error("apply: expected active=" + NODE_A + " got " + JSON.stringify(st));
+        if (st.labelHighlighted !== NODE_A) throw new Error("apply: label not emphasized: " + JSON.stringify(st));
+
+        // ── switch (rapid sweep, last one wins) ─────────────────────────────
+        g.simulateWS({ type: "highlight", id: NODE_B, slot: SLOT });
+        await wait(30);
+        st = g.highlightState();
+        if (st.active !== NODE_B) throw new Error("switch: expected active=" + NODE_B + " got " + JSON.stringify(st));
+        if (st.labelHighlighted !== NODE_B) throw new Error("switch: label not moved: " + JSON.stringify(st));
+
+        // ── wrong-slot ignore ────────────────────────────────────────────────
+        g.simulateWS({ type: "highlight", id: NODE_A, slot: SLOT + 999 });
+        await wait(30);
+        st = g.highlightState();
+        if (st.active !== NODE_B) throw new Error("wrong-slot: highlight changed from " + NODE_B + ": " + JSON.stringify(st));
+
+        // ── clear ────────────────────────────────────────────────────────────
+        g.simulateWS({ type: "highlight", id: "", slot: SLOT });
+        await wait(30);
+        st = g.highlightState();
+        if (st.active !== null) throw new Error("clear: expected no active highlight, got " + JSON.stringify(st));
+        if (st.labelHighlighted !== null) throw new Error("clear: label still emphasized: " + JSON.stringify(st));
+
+        // ── rebuild-survive ──────────────────────────────────────────────────
+        // Re-apply, then push a fresh graph frame that still contains the node:
+        // the highlight must survive the rebuild without a second highlight msg.
+        g.simulateWS({ type: "highlight", id: NODE_A, slot: SLOT });
+        await wait(30);
+        const fixtureResp = await fetch("./graph.json");
+        const fixture = await fixtureResp.json();
+        g.simulateWS(fixture);   // raw {nodes,links} — the graph-reload path
+        await wait(30);
+        st = g.highlightState();
+        if (st.active !== NODE_A) throw new Error("rebuild-survive: highlight lost across a same-node rebuild: " + JSON.stringify(st));
+        if (st.labelHighlighted !== NODE_A) throw new Error("rebuild-survive: label emphasis lost: " + JSON.stringify(st));
+
+        // ── rebuild drops the node ───────────────────────────────────────────
+        const shrunk = {
+          nodes: fixture.nodes.filter((n) => n.id !== NODE_A),
+          links: fixture.links.filter((l) => l.source !== NODE_A && l.target !== NODE_A),
+        };
+        g.simulateWS(shrunk);
+        await wait(30);
+        st = g.highlightState();
+        if (st.active !== null) throw new Error("rebuild-drop: highlight should clear when node vanishes, got " + JSON.stringify(st));
+        if (st.stored !== NODE_A) throw new Error("rebuild-drop: stored id should be retained (not resolved), got " + JSON.stringify(st));
+
+        out.textContent = "HIGHLIGHT_OK slot=" + SLOT;
+        document.title = "HIGHLIGHT_OK";
+      } catch (e) {
+        out.textContent = "HIGHLIGHT_FAIL " + e.message;
+        document.title = "HIGHLIGHT_FAIL " + e.message;
+      }
+    }
+    run();
+  </script>
+</body>
+</html>

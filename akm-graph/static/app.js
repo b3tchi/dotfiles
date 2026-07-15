@@ -40,6 +40,12 @@ const HIDDEN_COLOR  = [0, 0, 0, 0];              // fully transparent — toggle
 const LINK_RGBA     = [0.25, 0.30, 0.35, 0.6];
 const LINK_HIDDEN   = [0, 0, 0, 0];              // link with a toggled-off endpoint disappears
 const DIM_ALPHA     = 0.12;                       // greyout factor for non-selected nodes/links
+// Current-zettel highlight (sp011 ft004 Task 2) — bright gold, distinct from
+// every TYPE_COLOR/GHOST_COLOR/DEFAULT_COLOR so it reads unambiguously as "the
+// editor is here now", not just another category. Overrides isolate dimming
+// (see nodeRGBA) so the highlight stays visible even mid-isolate.
+const HIGHLIGHT_COLOR      = [1.00, 0.92, 0.23, 1];
+const HIGHLIGHT_SIZE_BOOST = 3;   // px added to the highlighted node's radius — a halo, without a per-backend ring-drawing hook
 
 // Human-readable legend names + display order for the category toggle panel.
 const TYPE_LABELS = {
@@ -53,6 +59,31 @@ const activeTypes  = new Set();  // types currently visible
 const knownTypes   = new Set();  // every type ever seen (so refreshes keep state)
 let   showArchived = false;      // archived (retired) nodes hidden by default
 let   selectedKeep = null;       // null = no isolate; else Set of kept ids (self+adjacent)
+
+// ── Highlight state (sp011 ft004 Task 2) ────────────────────────────────────────
+// Server-pushed "this is the zettel currently open in the editor" marker.
+// Deliberately a SEPARATE state var from selectedKeep — applying a highlight
+// must never mutate isolate, and isolate must never clear a highlight (sp011
+// problem: click semantics stay untouched). Two pieces of state:
+//   storedHighlightId — last id received for OUR slot; kept even if the id
+//                       doesn't (yet, or anymore) resolve against the live
+//                       graph, so it survives a rebuild and re-resolves once
+//                       the node reappears.
+//   highlightId        — storedHighlightId resolved against the CURRENT
+//                       graph (nodeIndex), or null if unresolved/absent.
+//                       This is what the color/size accessors + label
+//                       emphasis actually key off.
+let storedHighlightId = null;
+let highlightId       = null;
+
+function isHighlighted(id) { return highlightId != null && id === highlightId; }
+
+// Re-resolve storedHighlightId against the current nodeIndex. Called after
+// every graph frame lands (rebuild may have dropped or restored the node) and
+// after a fresh highlight message is stored.
+function recomputeHighlight() {
+  highlightId = (storedHighlightId && nodeIndex[storedHighlightId]) ? storedHighlightId : null;
+}
 
 function typeVisible(t) { return activeTypes.has(t); }
 // A node is shown only when its type is active AND (it's not archived, or the
@@ -79,14 +110,18 @@ const SIZE_K    = 0.8;   // pixels per degree
 function nodeSize(n) {
   if (!nodeShown(n)) return 0;   // toggled-off type: zero radius = gone + unhoverable
   const s = Math.min(BASE_SIZE + (n.degree || 0) * SIZE_K, MAX_SIZE);
-  if (n.ghost) return Math.max(s * 0.7, 2);
-  return Math.max(s, MIN_SIZE);
+  const sized = n.ghost ? Math.max(s * 0.7, 2) : Math.max(s, MIN_SIZE);
+  return isHighlighted(n.id) ? sized + HIGHLIGHT_SIZE_BOOST : sized;
 }
 
 // Canonical node color as [r,g,b,a] in 0–1. Gates on visibility + isolate state;
-// the backend adapter converts this to its native color form.
+// the backend adapter converts this to its native color form. The highlight
+// check runs BEFORE the isolate dim so the current-zettel marker stays fully
+// visible even while an unrelated isolate is active (highlight is independent
+// of, and takes visual precedence over, selectedKeep dimming).
 function nodeRGBA(n) {
   if (!nodeShown(n)) return HIDDEN_COLOR;
+  if (isHighlighted(n.id)) return HIGHLIGHT_COLOR;
   let c = n.ghost ? GHOST_COLOR : (TYPE_COLORS[n.type] || DEFAULT_COLOR);
   if (selectedKeep && !selectedKeep.has(n.id)) c = [c[0], c[1], c[2], c[3] * DIM_ALPHA];
   return c;
@@ -193,6 +228,29 @@ function clearSelection() {
   if (backend) backend.refresh();
   for (const el of Object.values(labelEls)) el.classList.remove("dim");
   pumpLabels();
+}
+
+// ── Highlight rendering (sp011 ft004 Task 2) ────────────────────────────────────
+// Toggle the "highlight" class on label pills to match the current
+// highlightId. Safe to call any time (fresh labels after a rebuild, or a
+// changed highlight against the same labels) — it's a pure resync, never
+// touches selectedKeep/dim state.
+function applyHighlightLabel() {
+  for (const [nid, el] of Object.entries(labelEls)) {
+    el.classList.toggle("highlight", nid === highlightId);
+  }
+}
+
+// setHighlight is the single entry point for a highlight message meant for
+// this viewer: store the id (possibly empty/null = clear), re-resolve against
+// the live graph, then repaint node color/size + label emphasis. No isolate
+// mutation, no camera motion (backend.refresh() repaints in place, same
+// mechanism toggleType/selectNode already use).
+function setHighlight(id) {
+  storedHighlightId = id || null;
+  recomputeHighlight();
+  if (backend) backend.refresh();
+  applyHighlightLabel();
 }
 
 // ── Category legend (type toggle) ───────────────────────────────────────────────
@@ -528,11 +586,13 @@ function renderData(data) {
     if (!knownTypes.has(n.type)) { knownTypes.add(n.type); activeTypes.add(n.type); }
   }
   selectedKeep = null;   // fresh data clears any isolate
+  recomputeHighlight();  // re-resolve the STORED highlight against the fresh graph — survives rebuild if the node's still there, clears if it's gone (sp011 AC)
 
   backend.setData(nodes, links);
   buildLabels(nodes);
   buildLegend(nodes);
   applyLabelVisibility();
+  applyHighlightLabel();  // labels were just rebuilt from scratch; reapply emphasis
   pumpLabels();
 
   document.title = `OK nodes=${nodes.length}`;
@@ -560,6 +620,32 @@ let wsDelay = 1000;
 const WS_MAX = 30000;
 let wsTimer = null;
 
+// handleHighlightMessage applies (or ignores) an inbound {type:"highlight",
+// id, slot} message. Slot-scoped: a standalone viewer (no ?slot= on the URL,
+// openSlot === null) ignores every highlight message — it has no "own slot"
+// to match — and an embedded viewer ignores any message whose slot isn't its
+// own (sp011 edge cases: standalone ignores slot-tagged, wrong-slot ignored).
+function handleHighlightMessage(msg) {
+  if (openSlot == null) return;        // standalone viewer: no slot to match
+  if (msg.slot !== openSlot) return;   // not our slot
+  setHighlight(msg.id || null);
+}
+
+// handleWSMessage is the single shape-discrimination point for every /watch
+// frame: a {"type":"highlight",...} envelope routes to the highlight path,
+// anything else is treated as a raw {nodes,links} graph payload — the
+// existing reload path, unchanged (sp011 anti-pattern guard: never wrap the
+// graph payload in a typed envelope, so this must stay a shape check, not a
+// type-tag check on the graph side). Factored out of ws.onmessage so smoke
+// tests can drive it directly with canned messages, no real WebSocket needed.
+function handleWSMessage(raw) {
+  let msg;
+  try { msg = JSON.parse(raw); }
+  catch (e) { console.warn("akm-graph: invalid ws payload"); return; }
+  if (msg && msg.type === "highlight") { handleHighlightMessage(msg); return; }
+  renderData(msg);
+}
+
 function connectWS() {
   if (wsTimer) { clearTimeout(wsTimer); wsTimer = null; }
   const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -567,10 +653,7 @@ function connectWS() {
   let ws;
   try { ws = new WebSocket(url); } catch (e) { scheduleReconnect(); return; }
   ws.onopen = () => { wsDelay = 1000; };
-  ws.onmessage = (evt) => {
-    try { renderData(JSON.parse(evt.data)); }
-    catch (e) { console.warn("akm-graph: invalid ws payload"); }
-  };
+  ws.onmessage = (evt) => handleWSMessage(evt.data);
   ws.onclose = () => { scheduleReconnect(); };
   ws.onerror = () => {};   // always followed by onclose; don't log to avoid spam
 }
@@ -670,4 +753,18 @@ window.__akmGraph = {
     };
   },
   backendName: () => (statusEl.dataset.backend || null),
+  // simulateWS feeds a canned message through the exact same shape-discrimination
+  // + apply/render path a real /watch frame would (sp011 ft004 Task 2 smoke
+  // hook) — pass a graph payload {nodes,links} to drive the reload path, or
+  // {type:"highlight", id, slot} to drive the highlight path.
+  simulateWS: (obj) => handleWSMessage(JSON.stringify(obj)),
+  highlightState: () => {
+    const lit = Object.entries(labelEls).find(([, el]) => el.classList.contains("highlight"));
+    return {
+      stored: storedHighlightId,
+      active: highlightId,
+      ownSlot: openSlot,
+      labelHighlighted: lit ? lit[0] : null,
+    };
+  },
 };

@@ -75,6 +75,16 @@
     .node-label.ghost { opacity: 0.55; font-style: italic; }
     .node-label.dim   { opacity: 0.12; }
     .node-label.hidden { display: none; }
+    /* Current-zettel highlight (sp011 ft004 Task 2) — declared AFTER .dim so
+       it wins on equal specificity: the highlight stays visible even on a
+       label an active isolate would otherwise dim (highlight is independent
+       of, and takes visual precedence over, isolate). */
+    .node-label.highlight {
+      opacity: 1;
+      border-color: #ffd23f;
+      border-left-color: #ffd23f;
+      box-shadow: 0 0 0 2px rgba(255, 210, 63, 0.55), 0 1px 4px rgba(0, 0, 0, 0.5);
+    }
     /* Category legend — click a chip to toggle that node type on/off. */
     #legend {
       position: absolute;
