@@ -70,13 +70,16 @@ ShellRoot {
 
     function cleanupCmd() { return "rm -f '" + src + "'" }
 
-    // Close cleanly: unmap the window FIRST so the WM hands keyboard focus back
-    // to the previous window, THEN quit a moment later. Quitting while the
-    // fullscreen grab is still mapped leaves the keyboard focused on a dead
-    // window (input "blocked" until you click), especially over xrdp.
+    // Close cleanly. The fullscreen overlay grabs X input focus; on close the
+    // WM doesn't always hand it back, so the keyboard is "blocked" until you
+    // click (worse over xrdp). Unmap the window, then re-assert focus on the
+    // WM's focused container so X input focus lands on a live window, then quit.
+    readonly property string wmMsg: Quickshell.env("SWAYSOCK") ? "swaymsg" : "i3-msg"
     Timer { id: closeTimer; interval: 90; onTriggered: Qt.quit() }
     function closeOverlay() {
         win.visible = false
+        Quickshell.execDetached(["sh", "-c",
+            wmMsg + " '[con_id=__focused__] focus' >/dev/null 2>&1"])
         closeTimer.start()
     }
 
