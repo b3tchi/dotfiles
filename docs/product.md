@@ -15,6 +15,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[us007|work remotely on my development machine — full desktop from another device]] >> [[im005]]
 - [[us008|securely access and work on my workstation remotely with full desktop]]
 - [[us009|selecting a graph node or diagram element in the preview opens its source in the editor]] (draft)
+- [[us010|running akm-graph preview highlights the zettel under the editor cursor without reloading]] >> [[im004]]
 
 ## Features
 
