@@ -40,12 +40,6 @@ const HIDDEN_COLOR  = [0, 0, 0, 0];              // fully transparent — toggle
 const LINK_RGBA     = [0.25, 0.30, 0.35, 0.6];
 const LINK_HIDDEN   = [0, 0, 0, 0];              // link with a toggled-off endpoint disappears
 const DIM_ALPHA     = 0.12;                       // greyout factor for non-selected nodes/links
-// Current-zettel highlight (sp011 ft004 Task 2) — bright gold, distinct from
-// every TYPE_COLOR/GHOST_COLOR/DEFAULT_COLOR so it reads unambiguously as "the
-// editor is here now", not just another category. Overrides isolate dimming
-// (see nodeRGBA) so the highlight stays visible even mid-isolate.
-const HIGHLIGHT_COLOR      = [1.00, 0.92, 0.23, 1];
-const HIGHLIGHT_SIZE_BOOST = 3;   // px added to the highlighted node's radius — a halo, without a per-backend ring-drawing hook
 
 // Human-readable legend names + display order for the category toggle panel.
 const TYPE_LABELS = {
@@ -60,11 +54,12 @@ const knownTypes   = new Set();  // every type ever seen (so refreshes keep stat
 let   showArchived = false;      // archived (retired) nodes hidden by default
 let   selectedKeep = null;       // null = no isolate; else Set of kept ids (self+adjacent)
 
-// ── Highlight state (sp011 ft004 Task 2) ────────────────────────────────────────
+// ── Highlight state (sp011 ft004 Task 2, revised by Task 4) ─────────────────────
 // Server-pushed "this is the zettel currently open in the editor" marker.
-// Deliberately a SEPARATE state var from selectedKeep — applying a highlight
-// must never mutate isolate, and isolate must never clear a highlight (sp011
-// problem: click semantics stay untouched). Two pieces of state:
+// Since Task 4 a highlight ALSO drives the isolate (setHighlight re-derives
+// selectedKeep around it, last action wins vs manual click); the marker
+// itself renders on the label pill only (nodeRGBA keeps the dot's type
+// color). Two pieces of state:
 //   storedHighlightId — last id received for OUR slot; kept even if the id
 //                       doesn't (yet, or anymore) resolve against the live
 //                       graph, so it survives a rebuild and re-resolves once
@@ -110,20 +105,19 @@ const SIZE_K    = 0.8;   // pixels per degree
 function nodeSize(n) {
   if (!nodeShown(n)) return 0;   // toggled-off type: zero radius = gone + unhoverable
   const s = Math.min(BASE_SIZE + (n.degree || 0) * SIZE_K, MAX_SIZE);
-  const sized = n.ghost ? Math.max(s * 0.7, 2) : Math.max(s, MIN_SIZE);
-  return isHighlighted(n.id) ? sized + HIGHLIGHT_SIZE_BOOST : sized;
+  return n.ghost ? Math.max(s * 0.7, 2) : Math.max(s, MIN_SIZE);
 }
 
 // Canonical node color as [r,g,b,a] in 0–1. Gates on visibility + isolate state;
-// the backend adapter converts this to its native color form. The highlight
-// check runs BEFORE the isolate dim so the current-zettel marker stays fully
-// visible even while an unrelated isolate is active (highlight is independent
-// of, and takes visual precedence over, selectedKeep dimming).
+// the backend adapter converts this to its native color form. The highlighted
+// node keeps its ORIGINAL type color and size — the current-zettel marker
+// lives on the label pill only (user revision 2026-07-15: "don't highlight
+// dot, keep original color, only highlight label"); the dot still escapes
+// the isolate dim so it never fades while current.
 function nodeRGBA(n) {
   if (!nodeShown(n)) return HIDDEN_COLOR;
-  if (isHighlighted(n.id)) return HIGHLIGHT_COLOR;
   let c = n.ghost ? GHOST_COLOR : (TYPE_COLORS[n.type] || DEFAULT_COLOR);
-  if (selectedKeep && !selectedKeep.has(n.id)) c = [c[0], c[1], c[2], c[3] * DIM_ALPHA];
+  if (selectedKeep && !selectedKeep.has(n.id) && !isHighlighted(n.id)) c = [c[0], c[1], c[2], c[3] * DIM_ALPHA];
   return c;
 }
 
