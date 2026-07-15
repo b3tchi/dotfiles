@@ -250,7 +250,7 @@ ShellRoot {
                                       '<font color="#cb4b16">Esc</font> cancel']
                                    : ['<font color="#cb4b16">drag</font> select region',
                                       '<font color="#cb4b16">2-tap</font> corners',
-                                      '(<font color="#cb4b16">w</font>)hole screen',
+                                      '<font color="#cb4b16">w</font>hole screen',
                                       '<font color="#cb4b16">Esc</font> cancel']
                             Text {
                                 required property var modelData
