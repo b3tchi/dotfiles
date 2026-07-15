@@ -929,3 +929,173 @@ func TestHandleFileD2BackendUnavailableWhenSpawnFails(t *testing.T) {
 		t.Errorf("body missing 'unavailable' marker: %s", rec.Body.String())
 	}
 }
+
+// ── sp011 Task 3: POST /api/highlight forward (ft004's inbound surface) ──
+
+// highlightCall is the decoded shape of one captured POST /api/highlight
+// body — sp011 Task 3 test_plan: "stub akm-graph daemon capturing
+// /api/highlight bodies".
+type highlightCall struct {
+	Path string `json:"path"`
+	Slot int    `json:"slot"`
+}
+
+// highlightCapture records every POST /api/highlight body a stub daemon
+// receives, guarded by a mutex since the test's assertion goroutine and the
+// stub's request-handling goroutine touch it concurrently.
+type highlightCapture struct {
+	mu    sync.Mutex
+	calls []highlightCall
+}
+
+func (c *highlightCapture) add(call highlightCall) {
+	c.mu.Lock()
+	c.calls = append(c.calls, call)
+	c.mu.Unlock()
+}
+
+func (c *highlightCapture) len() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.calls)
+}
+
+func (c *highlightCapture) last() highlightCall {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls[len(c.calls)-1]
+}
+
+// startStubHighlightDaemon binds 127.0.0.1:port and answers POST
+// /api/highlight, decoding and recording every body into capture and
+// replying with status (a minimal {"id":"stub","slot":N} body on a 2xx,
+// an empty body otherwise) — enough to drive forwardAkmHighlight's success
+// and failure paths without a real akm-graph-d binary.
+func startStubHighlightDaemon(t *testing.T, port string, status int, capture *highlightCapture) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:"+port)
+	if err != nil {
+		t.Fatalf("bind stub akm-graph highlight daemon on port %s: %v", port, err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/highlight", func(w http.ResponseWriter, r *http.Request) {
+		var body highlightCall
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		capture.add(body)
+		w.WriteHeader(status)
+		if status >= 200 && status < 300 {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{"id":"stub","slot":%d}`, body.Slot)
+		}
+	})
+	srv := &http.Server{Handler: mux}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
+}
+
+// TestForwardAkmHighlightPostsRelativizedPathAndSlot proves the core
+// forward case: forwardAkmHighlight POSTs exactly the given root-relative
+// path and slot to akm-graph-d's /api/highlight and reports success on 200
+// (sp011 Task 3 test_plan: "akm path -> POST with relativized path +
+// slot").
+func TestForwardAkmHighlightPostsRelativizedPathAndSlot(t *testing.T) {
+	port := freePort(t)
+	t.Setenv("AKM_GRAPH_PORT", port)
+	capture := &highlightCapture{}
+	startStubHighlightDaemon(t, port, http.StatusOK, capture)
+
+	if err := forwardAkmHighlight("docs/notes/us010.md", 2); err != nil {
+		t.Fatalf("forwardAkmHighlight: %v", err)
+	}
+
+	if got := capture.len(); got != 1 {
+		t.Fatalf("stub received %d POSTs, want 1", got)
+	}
+	call := capture.last()
+	if call.Path != "docs/notes/us010.md" || call.Slot != 2 {
+		t.Errorf("captured call = %+v, want {docs/notes/us010.md 2}", call)
+	}
+}
+
+// TestForwardAkmHighlightNon2xxReturnsError proves a non-2xx response (the
+// daemon rejecting or erroring on the request) is surfaced as an error, not
+// swallowed — the caller (handlePreviewSet) needs this to drive its
+// akm->akm fallback-broadcast decision.
+func TestForwardAkmHighlightNon2xxReturnsError(t *testing.T) {
+	port := freePort(t)
+	t.Setenv("AKM_GRAPH_PORT", port)
+	startStubHighlightDaemon(t, port, http.StatusInternalServerError, &highlightCapture{})
+
+	if err := forwardAkmHighlight("docs/notes/us010.md", 1); err == nil {
+		t.Fatal("forwardAkmHighlight: want error on 500, got nil")
+	}
+}
+
+// TestForwardAkmHighlightConnectionRefusedReturnsError proves the
+// daemon-down case (nothing listening on the target port) is a plain error,
+// never a panic or an unbounded hang — freePort reserves and releases a
+// port so nothing answers it.
+func TestForwardAkmHighlightConnectionRefusedReturnsError(t *testing.T) {
+	port := freePort(t) // reserved then released; nothing is listening
+	t.Setenv("AKM_GRAPH_PORT", port)
+
+	if err := forwardAkmHighlight("docs/notes/us010.md", 1); err == nil {
+		t.Fatal("forwardAkmHighlight: want error on connection refused, got nil")
+	}
+}
+
+// TestHandlePreviewSetForwardsHighlightOnlyForAkmPaths proves the sp011
+// Task 3 success criteria end-to-end through the real /preview<N> handler:
+// a non-akm path never triggers a highlight POST, and an akm path triggers
+// exactly one, carrying the relativized path and the slot (test_plan: "akm
+// path -> POST with relativized path + slot; non-akm -> no call").
+func TestHandlePreviewSetForwardsHighlightOnlyForAkmPaths(t *testing.T) {
+	root := t.TempDir()
+	notesDir := filepath.Join(root, "docs", "notes")
+	if err := os.MkdirAll(notesDir, 0o755); err != nil {
+		t.Fatalf("mkdir docs/notes: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(notesDir, "a.md"), []byte("# a"), 0o644); err != nil {
+		t.Fatalf("write zettel fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "code.go"), []byte("package main"), 0o644); err != nil {
+		t.Fatalf("write code fixture: %v", err)
+	}
+	srv, err := NewServer(root, "4200")
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	port := freePort(t)
+	t.Setenv("AKM_GRAPH_PORT", port)
+	capture := &highlightCapture{}
+	startStubHighlightDaemon(t, port, http.StatusOK, capture)
+
+	// Non-akm path: no highlight call at all.
+	rec := httptest.NewRecorder()
+	reqBody, _ := json.Marshal(map[string]string{"path": "code.go"})
+	req := httptest.NewRequest(http.MethodPost, "/preview1", bytes.NewReader(reqBody))
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /preview1 code.go: status %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if got := capture.len(); got != 0 {
+		t.Fatalf("non-akm POST /preview1: stub received %d highlight calls, want 0", got)
+	}
+
+	// Akm path: exactly one highlight call, relativized path + slot.
+	rec = httptest.NewRecorder()
+	reqBody, _ = json.Marshal(map[string]string{"path": "docs/notes/a.md"})
+	req = httptest.NewRequest(http.MethodPost, "/preview1", bytes.NewReader(reqBody))
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /preview1 docs/notes/a.md: status %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if got := capture.len(); got != 1 {
+		t.Fatalf("akm POST /preview1: stub received %d highlight calls, want 1", got)
+	}
+	call := capture.last()
+	if call.Path != "docs/notes/a.md" || call.Slot != 1 {
+		t.Errorf("captured call = %+v, want {docs/notes/a.md 1}", call)
+	}
+}

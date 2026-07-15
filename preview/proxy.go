@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -274,6 +275,50 @@ func d2RouterPort() string {
 		return p
 	}
 	return "4800"
+}
+
+// highlightForwardTimeout bounds forwardAkmHighlight's POST to akm-graph-d
+// so a dead/unresponsive daemon can't stall the /preview<N> request
+// goroutine indefinitely — the sp009 handleOpen scoped-client discipline
+// applied to an HTTP forward instead of an nvim subprocess (sp011 Task 3
+// success criteria: "scoped-timeout client, the sp009 /open pattern").
+const highlightForwardTimeout = 2 * time.Second
+
+// forwardAkmHighlight POSTs {"path":path,"slot":slot} to akm-graph-d's
+// POST /api/highlight (ft004 api_surface, sp011 Task 1) so the embedded
+// viewer can mark the new current zettel without preview-d reloading the
+// iframe (sp011 solution). path must already be root-relative — the same
+// canonicalized string handlePreviewSet stores as the slot's current path
+// — since akm-graph-d resolves it against its own in-process graph
+// (trusted-map direction, mirroring /api/open's id -> path lookup in
+// reverse; sp011 Task 3 anti-pattern: never trust a client-sent id).
+//
+// Any failure — daemon down (connection refused), timeout, or a non-2xx
+// status — is returned as a plain error and never panics. The caller
+// (handlePreviewSet) decides what a failure means for the broadcast
+// decision; this function's only job is "did the forward succeed" (sp011
+// Task 3 success criteria: highlight POST failure on an akm->akm
+// transition falls back to broadcasting the redraw frame, never a dead
+// preview).
+func forwardAkmHighlight(path string, slot int) error {
+	body, err := json.Marshal(map[string]any{"path": path, "slot": slot})
+	if err != nil {
+		return err
+	}
+	client := http.Client{Timeout: highlightForwardTimeout}
+	resp, err := client.Post(
+		"http://127.0.0.1:"+akmGraphPort()+"/api/highlight",
+		"application/json",
+		bytes.NewReader(body),
+	)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("akm-graph highlight: status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // akmSpawnMu/d2SpawnMu are the per-daemon locks ensureDaemonRunning uses to

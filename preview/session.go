@@ -159,6 +159,26 @@ func (sm *SlotManager) SetPath(n int, path string) {
 	s.hub.Broadcast(redrawMessage(path))
 }
 
+// SwapPath sets slot n's current path to path and returns the path it
+// replaced, WITHOUT broadcasting a redraw — unlike SetPath, which does
+// both unconditionally. The conditional-broadcast caller (handlePreviewSet,
+// sp011 Task 3) needs the OLD path to classify the akm-zettel transition
+// (prev vs new) BEFORE deciding whether a redraw should go out at all, so
+// the read-old/write-new step must be separate from — and precede — that
+// decision. The read and write happen under a single critical section so
+// concurrent POSTs to the same slot each observe a consistent "path being
+// replaced" rather than racing another goroutine's update (sp011 Task 3
+// edge case: concurrent same-slot POSTs ordered so classification uses the
+// path actually being replaced).
+func (sm *SlotManager) SwapPath(n int, path string) (old string) {
+	s := sm.slotFor(n)
+	s.mu.Lock()
+	old = s.path
+	s.path = path
+	s.mu.Unlock()
+	return old
+}
+
 // CurrentPath returns slot n's buffered path, or "" if no POST has ever
 // landed for it.
 func (sm *SlotManager) CurrentPath(n int) string {

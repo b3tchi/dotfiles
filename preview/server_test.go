@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -578,5 +580,160 @@ func TestHandlePreviewSetKeepsRelativePathVerbatim(t *testing.T) {
 	}
 	if got := srv.slots.CurrentPath(2); got != "docs/x.md" {
 		t.Fatalf("CurrentPath(2) = %q, want %q", got, "docs/x.md")
+	}
+}
+
+// ── sp011 Task 3: conditional broadcast + highlight forward ─────────────
+
+// postPreviewSet POSTs {"path":path} to /preview<N> through the real mux
+// and fails the test on a non-200 response — shared plumbing for the sp011
+// Task 3 transition-matrix / highlight-forward tests below.
+func postPreviewSet(t *testing.T, srv *Server, slot int, path string) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	body, _ := json.Marshal(map[string]string{"path": path})
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/preview%d", slot), bytes.NewReader(body))
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /preview%d %s: status %d, want 200 (body: %s)", slot, path, rec.Code, rec.Body.String())
+	}
+}
+
+// clientReceived reports whether c's send channel has a pending message
+// (non-blocking) — used to assert whether handlePreviewSet's conditional
+// broadcast fired for a given transition.
+func clientReceived(c *wsClient) bool {
+	select {
+	case <-c.send:
+		return true
+	default:
+		return false
+	}
+}
+
+// writeAkmFixture writes a minimal markdown zettel fixture at
+// docs/notes/<name>.md under root so isAkmZettel classifies it true.
+func writeAkmFixture(t *testing.T, root, name string) {
+	t.Helper()
+	notesDir := filepath.Join(root, "docs", "notes")
+	if err := os.MkdirAll(notesDir, 0o755); err != nil {
+		t.Fatalf("mkdir docs/notes: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(notesDir, name+".md"), []byte("# "+name), 0o644); err != nil {
+		t.Fatalf("write zettel fixture: %v", err)
+	}
+}
+
+// TestHandlePreviewSetTransitionMatrixBroadcast is the us010 AC1 regression
+// guard: an akm-zettel -> akm-zettel transition must NOT broadcast a
+// redraw (the shell iframe stays put so the embedded viewer's camera,
+// isolate, and legend state survive a zettel->zettel cursor sweep), while
+// every other transition broadcasts exactly as it did before sp011 (sp011
+// Task 3 success criteria + test_plan: "table-driven transition-matrix test
+// with a fake WS client on the slot hub: assert exactly which transitions
+// produce a broadcast").
+func TestHandlePreviewSetTransitionMatrixBroadcast(t *testing.T) {
+	cases := []struct {
+		name          string
+		prev, next    string // prev == "" means "never set" (first send)
+		wantBroadcast bool
+	}{
+		{"first-send-non-akm", "", "code.go", true},
+		{"first-send-akm", "", "docs/notes/a.md", true},
+		{"non-akm-to-akm", "code.go", "docs/notes/a.md", true},
+		{"akm-to-akm", "docs/notes/a.md", "docs/notes/b.md", false},
+		{"akm-to-non-akm", "docs/notes/a.md", "code.go", true},
+		{"non-akm-to-non-akm", "code.go", "other.go", true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeAkmFixture(t, root, "a")
+			writeAkmFixture(t, root, "b")
+			for _, f := range []string{"code.go", "other.go"} {
+				if err := os.WriteFile(filepath.Join(root, f), []byte("package main"), 0o644); err != nil {
+					t.Fatalf("write fixture %s: %v", f, err)
+				}
+			}
+			srv, err := NewServer(root, "4200")
+			if err != nil {
+				t.Fatalf("NewServer: %v", err)
+			}
+
+			// A healthy stub daemon so an akm->akm cell's highlight forward
+			// succeeds — this test isolates the broadcast decision, not the
+			// forward-failure fallback (that's TestHandlePreviewSetHighlight
+			// ForwardFailureFallsBackToBroadcast below).
+			port := freePort(t)
+			t.Setenv("AKM_GRAPH_PORT", port)
+			startStubHighlightDaemon(t, port, http.StatusOK, &highlightCapture{})
+
+			const slot = 1
+			if tc.prev != "" {
+				postPreviewSet(t, srv, slot, tc.prev)
+			}
+
+			// Register the client only AFTER priming prev, so its buffered
+			// send channel reflects only the transition under test.
+			c := newTestClient(4)
+			srv.slots.Hub(slot).Register(c)
+
+			postPreviewSet(t, srv, slot, tc.next)
+
+			if got := clientReceived(c); got != tc.wantBroadcast {
+				t.Errorf("%s: broadcast = %v, want %v", tc.name, got, tc.wantBroadcast)
+			}
+		})
+	}
+}
+
+// TestHandlePreviewSetHighlightForwardFailureFallsBackToBroadcast proves the
+// sp011 Task 3 degrade-not-die guarantee: on an akm->akm transition, if the
+// highlight POST to akm-graph-d fails (daemon down / connection refused, or
+// a non-2xx response), handlePreviewSet still broadcasts the redraw frame
+// instead of silently leaving a dead preview (test_plan: "failure-injection
+// test: stub returns 500 / connection refused on an akm->akm move ->
+// redraw broadcast happens").
+func TestHandlePreviewSetHighlightForwardFailureFallsBackToBroadcast(t *testing.T) {
+	cases := []struct {
+		name       string
+		daemonUp   bool
+		daemonCode int
+	}{
+		{"daemon-down-connection-refused", false, 0},
+		{"daemon-up-500", true, http.StatusInternalServerError},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeAkmFixture(t, root, "a")
+			writeAkmFixture(t, root, "b")
+			srv, err := NewServer(root, "4200")
+			if err != nil {
+				t.Fatalf("NewServer: %v", err)
+			}
+
+			port := freePort(t)
+			t.Setenv("AKM_GRAPH_PORT", port)
+			if tc.daemonUp {
+				startStubHighlightDaemon(t, port, tc.daemonCode, &highlightCapture{})
+			}
+			// else: leave the port unbound so the forward hits connection
+			// refused.
+
+			const slot = 3
+			postPreviewSet(t, srv, slot, "docs/notes/a.md") // prime akm state
+
+			c := newTestClient(4)
+			srv.slots.Hub(slot).Register(c)
+
+			postPreviewSet(t, srv, slot, "docs/notes/b.md") // akm->akm, forward fails
+
+			if !clientReceived(c) {
+				t.Errorf("%s: akm->akm with a failing highlight forward did not fall back to a redraw broadcast", tc.name)
+			}
+		})
 	}
 }

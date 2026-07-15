@@ -198,10 +198,38 @@ func (s *Server) handlePreviewShell(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(raw)
 }
 
+// slotPathIsAkm classifies a slot's stored root-relative path p as an akm
+// zettel or not. isAkmZettel (render.go) expects the ABSOLUTE
+// resolveInRoot output, not the root-relative form SlotManager stores, so p
+// is resolved back through resolveInRoot first. An empty p (sp011 Task 3
+// edge case: no path ever set for the slot — first send) and any resolve
+// failure (deleted mid-flight, or any other escape/not-exist case) both
+// classify as non-akm — the safe default that preserves today's broadcast
+// behavior rather than guessing at a path that can't be verified to exist.
+func slotPathIsAkm(root, p string) bool {
+	if p == "" {
+		return false
+	}
+	resolved, err := resolveInRoot(root, p)
+	if err != nil {
+		return false
+	}
+	return isAkmZettel(root, resolved)
+}
+
 // handlePreviewSet handles POST /preview<N> {"path": "..."}: it sets slot
-// n's current path and broadcasts a redraw to every window currently
-// connected to that slot (ft005 api_surface POST /preview<N>). A malformed
-// body is a 400, never a 500 or panic (sp008-wide anti-pattern).
+// n's current path and conditionally broadcasts a redraw to every window
+// currently connected to that slot (ft005 api_surface POST /preview<N>). A
+// malformed body is a 400, never a 500 or panic (sp008-wide anti-pattern).
+//
+// sp011 Task 3 widens this beyond "always broadcast": the previous and new
+// stored paths are each classified via slotPathIsAkm, and an akm->akm
+// transition is the ONLY cell that skips the redraw — the embedded
+// akm-graph viewer instead learns the new current zettel through the
+// highlight forward below, so swapping the shell's iframe src would
+// needlessly reboot it (sp011 solution / us010 AC1: no reload on a
+// zettel->zettel cursor sweep). Every other transition (non-akm->akm,
+// akm->non-akm, non-akm->non-akm) broadcasts exactly as before sp011.
 func (s *Server) handlePreviewSet(n int, w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	var body struct {
@@ -231,7 +259,34 @@ func (s *Server) handlePreviewSet(n int, w http.ResponseWriter, r *http.Request)
 		}
 		p = rel
 	}
-	s.slots.SetPath(n, p)
+
+	// SwapPath reads the path being replaced and stores p in one critical
+	// section (sp011 Task 3 edge case: concurrent same-slot POSTs must
+	// classify against the path actually being replaced, not a value
+	// clobbered by a racing writer).
+	old := s.slots.SwapPath(n, p)
+	oldAkm := slotPathIsAkm(s.root, old)
+	newAkm := slotPathIsAkm(s.root, p)
+
+	// Forward to akm-graph-d BEFORE the broadcast decision, whenever the
+	// new path is a zettel (sp011 Task 3 success criteria: "every new
+	// akm-zettel path is forwarded ... BEFORE the broadcast decision").
+	// Non-akm paths never trigger this call. A failure here doesn't stop
+	// the response — it only forces the broadcast below for the akm->akm
+	// cell, which would otherwise skip it.
+	var highlightErr error
+	if newAkm {
+		highlightErr = forwardAkmHighlight(p, n)
+	}
+
+	// akm->akm skips the redraw ONLY when the highlight forward actually
+	// succeeded; a failed forward degrades to the old broadcast/reload
+	// behavior rather than leaving a dead preview with no visible update
+	// at all (sp011 Task 3 success criteria).
+	if !(oldAkm && newAkm) || highlightErr != nil {
+		s.slots.Hub(n).Broadcast(redrawMessage(p))
+	}
+
 	writeJSON(w, map[string]any{"slot": n, "path": p})
 }
 
