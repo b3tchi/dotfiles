@@ -95,22 +95,25 @@ bindsym Print exec --no-startup-id i3-scrot
 bindsym $mod+Print --release exec --no-startup-id i3-scrot -w
 bindsym $mod+Shift+Print --release exec --no-startup-id i3-scrot -s
 # region screenshot — enters a "screenshot" i3 mode (shown in the bar like
-# resize) and launches a quickshell PanelWindow selector (grab-only → file +
-# clipboard). The overlay handles the MOUSE (drag / tap two corners); the
-# keyboard actions are i3 mode bindings since a dock layer can't get keys.
-# See quickshell/qs-screenshot.sh + region/shell.qml + qs-shot-action.sh.
-# Base, not the platform overlay: every quickshell session (native :0, WSL and
-# desktop xrdp :10) has scrot + the overlay, and the overlay's for_window rule
-# already lives here — stranding the bind in native.conf left WSL unbound.
+# resize) and launches the live selector: a GDK window shaped down to the
+# rubber-band outline, so the real desktop shows through and nothing is frozen
+# or dimmed. Drag or tap two corners; the crop lands in ~/Pictures/screenshots
+# and its PATH goes on the clipboard.
+# See quickshell/qs-screenshot.sh + quickshell/qs-region.py.
+#
+# Base, not the platform overlay: every X11 session gets it (native :0, WSL and
+# desktop xrdp :10) — stranding the bind in native.conf left WSL unable to
+# reach it at all (dotfiles-13q).
+#
 # The mode exists ONLY so the bar paints its hint strip (Bar.qml modeHints).
 # qs-screenshot.sh enters it and resets it on every exit path, so the bind does
 # NOT set the mode itself — a bind-set mode would be redundant with the
 # launcher's, and the launcher is the one that can guarantee the reset.
 #
 # The selector holds a pointer+keyboard grab, so it receives the keys directly;
-# there are no `w` / drag bindings here. The old ones existed only because a
-# quickshell dock layer could not receive arbitrary keys, which is also why
-# qs-shot-action.sh existed. Both are retired.
+# there are no `w` / drag bindings here. The old ones — and the IPC shim script
+# they called — existed only because the retired quickshell dock layer could not
+# receive arbitrary keys. Both are gone.
 #
 # Escape stays as a DEAD-OVERLAY FALLBACK: while the selector lives its grab
 # swallows Esc, so this never fires. If the selector dies or never starts, the

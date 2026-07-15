@@ -43,9 +43,9 @@ sleep 1
 ~/.dotfiles/quickshell/qs-screenshot.sh >/dev/null 2>&1 &
 sleep 3
 # `w` (whole screen) goes straight to the selector: it holds a pointer+keyboard
-# grab, so it receives keys directly. The old qs-shot-action.sh IPC shim existed
-# only because a quickshell dock layer could not get arbitrary keys; it is
-# retired along with the frozen-PNG overlay.
+# grab, so it receives keys directly. The IPC shim this used to call existed only
+# because the retired quickshell dock layer could not get arbitrary keys; it went
+# with the frozen-PNG overlay.
 xdotool key w >/dev/null 2>&1
 
 wait $FF
