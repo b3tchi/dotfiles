@@ -32,8 +32,9 @@ for _p in $(pgrep -x quickshell 2>/dev/null); do
 done
 
 tmp="$(mktemp --tmpdir qs-shot-XXXXXX.png)" || exit 1
-# full-screen grab (root window) — non-interactive
-if ! import -window root "$tmp" 2>/dev/null; then
+# full-screen grab — non-interactive. scrot (~0.2s) instead of ImageMagick's
+# `import` (~0.6s) so the overlay pops up promptly.
+if ! scrot -o "$tmp" 2>/dev/null; then
     rm -f "$tmp"
     exit 1
 fi
