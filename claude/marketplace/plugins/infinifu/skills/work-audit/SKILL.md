@@ -206,7 +206,11 @@ Tests: <N passed, N new>
 Deviations: <either 'none' or 'logged and acceptable: <note>'>"
 ```
 
-**Then auto-trigger `infinifu:work-merge` with the task id AND the approved iteration `<N>`** (extracted from the current branch name `bd-<id>.<N>` of the audited worktree — `git -C <worktree> branch --show-current`, then split on `.`). work-merge is the per-task land step — it merges `bd-<id>.<N>` into base locally, runs the post-merge test gate, removes the worktree, sweeps any sibling rejected iterations of the same task, and (if this was the last open child of the parent epic) flips the AKM lifecycle + archives the spec + closes the bd epic. All operations are local; no push. This trigger is part of the audit-approve gesture — the dispatcher / user should not be required to type a separate "merge" command.
+**Then auto-trigger `infinifu:work-merge` with the task id, the approved iteration `<N>`, AND the post-merge `<test-command>`.** The iteration comes from the audited worktree's branch name `bd-<id>.<N>` (`git -C <worktree> branch --show-current`, then split on `.`).
+
+**Derive `<test-command>` from the task's own `success_criteria` — do not invent one.** Use exactly what the criteria claim will pass (e.g. a criterion reading "`npm run test:unit` green" ⇒ gate is `npm run test:unit`). Do **not** substitute a broader repo-wide "quality" command the task never claimed: if it is already red on base for unrelated reasons, the gate can never pass and you will roll back a good merge and report a false `POST-MERGE FAIL`. You have just measured these commands yourself during the audit — pass the one you watched go green. If a criterion is shaped "no NEW errors vs baseline" rather than "zero errors", that is not expressible as an exit code: keep it out of the gate (you already verified it with real numbers) and gate on the clean binary part. See work-merge's "Choosing `<test-command>`" for the full rule.
+
+work-merge is the per-task land step — it merges `bd-<id>.<N>` into base locally, runs the post-merge test gate, removes the worktree, sweeps any sibling rejected iterations of the same task, and (if this was the last open child of the parent epic) flips the AKM lifecycle + archives the spec + closes the bd epic. All operations are local; no push. This trigger is part of the audit-approve gesture — the dispatcher / user should not be required to type a separate "merge" command.
 
 work-merge's possible outcomes:
 
@@ -214,7 +218,7 @@ work-merge's possible outcomes:
 |--------|---------|------|
 | `TASK_LANDED` | Merge clean, tests green, worktree removed. Other tasks still open in the epic. | Report APPROVED to dispatcher; pipeline continues. |
 | `TASK_LANDED + EPIC_DONE` | Same as above plus the epic finale fired (AKM flip + board→archive + bd close epic). | Report APPROVED + EPIC_DONE; dispatcher runs `spec-retro` to refresh the graph and push. |
-| `POST-MERGE FAIL` (exit 2 from `land-bd-task.sh`) | Tests failed after merging into base; merge rolled back; task reopened with a `POST-MERGE FAIL` note. | Convert this back to a REJECTED audit verdict — the task left audit looking clean but the integration is broken. Re-dispatch the implementer with the post-merge failure as the gap. |
+| `POST-MERGE FAIL` (exit 2 from `land-bd-task.sh`) | Tests failed after merging into base; merge rolled back; task reopened with a `POST-MERGE FAIL` note. | **First: was the gate legitimate?** Re-run `<test-command>` on base WITHOUT the merge. If it fails there too, the gate was impossible and this is a gate bug, not a code defect — fix the command (see "Choosing `<test-command>`"), re-run the land, and do NOT reject the implementer for it. Only if the command is green on base and red after the merge is this a real integration failure: convert to a REJECTED verdict and re-dispatch the implementer with the post-merge failure as the gap. |
 
 Then report to the dispatcher:
 

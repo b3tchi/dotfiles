@@ -13,7 +13,7 @@ Two operations, gated by whether this task was the last open child of its parent
 
 1. **Always — per-task local land:**
    - Merge `bd-<id>.<N>` into base (`origin/HEAD`, e.g. `main`) with `--no-ff` to preserve the bd-task boundary in history.
-   - Run the configured post-merge test command. Failure rolls the merge back and reopens the task as `in_progress` with a `POST-MERGE FAIL` note.
+   - Run the post-merge test command **derived from the task's own `success_criteria`** — see "Choosing `<test-command>`" in Step 2. Never invent a repo-wide quality command the task didn't claim; a gate that is already red on base can never certify the merge. Failure rolls the merge back and reopens the task as `in_progress` with a `POST-MERGE FAIL` note.
    - Remove the worktree (`git worktree remove`, no `--force`) and the local branch (`git branch -d`).
 2. **Conditional — epic finale** (only if `bd list --parent <epic-id>` shows no open/in_progress/blocked children left):
    - Flip `us###.status: ready → done`, `im###.status: proposed → accepted`, `sp###.status: ready → done` + footer `Index: [[board]] → [[archive]]`.
@@ -101,6 +101,23 @@ SP="$(bd show "$EPIC" --json | jq -r '.notes // ""' | grep -oE 'sp[0-9]+' | head
 Required: `$ID`, `$ITER`, `$AKM_ROOT`, `$EPIC`. Spec id `$SP` is only needed for the epic finale; resolve from the epic notes or design. If `$SP` can't be resolved when the finale fires, escalate to the human.
 
 ### Step 2 — Per-task local land
+
+#### Choosing `<test-command>` — derive it, never invent it
+
+**The gate must be a command the task's own `success_criteria` asserts will pass.** Read them (`bd show <id>`) and use exactly what they claim. If a criterion says "`npm run test:unit` green", the gate is `npm run test:unit`. If it says "`cargo test -p auth` passes", that's the gate.
+
+**Never reach for a repo-wide "quality" command the task never claimed.** That is the failure mode this rule exists to prevent:
+
+> A reviewer picked `npm run check && npm run test:unit` because it looked like the responsible choice. But `npm run check` was **permanently non-zero** in that repo — 31 pre-existing type errors, tracked as a separate bug. The gate could never pass, on any task, ever. It rolled back a good merge and reported `POST-MERGE FAIL`, which reads as "the code is broken" when the truth was "the gate was impossible".
+
+The trap is that the invented gate is *more* stringent, so it feels safer. It isn't — it's a false-rejection generator, and a gate that cannot pass teaches everyone to ignore gate failures.
+
+Sanity-check before passing a command:
+
+- **Does the task's `success_criteria` actually name it?** If not, don't use it.
+- **Is it already failing on base, independent of this task?** Run it on base first if unsure. A command that's red *before* the merge cannot certify the merge. Repos routinely carry known-red tooling (type-check debt, a broken lint config) tracked as its own issue — that belongs to that issue, not to this gate.
+- **Does the criterion say "no NEW errors vs a baseline" rather than "zero errors"?** Then a bare exit-code gate is the wrong shape — it cannot express "no worse than before". Pass the part that IS a clean binary (usually the test command) and leave the baseline comparison to work-audit, which already verified it with real numbers.
+- **When in doubt, narrower is better.** `<test-command>` is optional and the script skips it if empty. A missing gate is a known hole; a permanently-red gate is a landmine that makes every future failure ambiguous.
 
 ```bash
 bash <skill-path>/work-merge/scripts/land-bd-task.sh "$ID" "$ITER" "$AKM_ROOT" "<test-command>"
