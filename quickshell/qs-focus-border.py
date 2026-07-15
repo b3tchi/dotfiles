@@ -42,15 +42,18 @@ SUPPRESS_MODES = {'screenshot'}
 
 
 class Border:
+    """Compositor-free border: instead of an ARGB window with a transparent
+    interior (which renders as a solid black box on bare X11 — that's what
+    used to force picom onto xrdp/wsl), the window's BOUNDING shape is cut
+    down to just the ring. No alpha involved, works with or without a
+    compositor. Rounded corners survive via region-from-surface."""
+
     def __init__(self):
         self.win = Gtk.Window(type=Gtk.WindowType.POPUP)
         self.win.set_title('qs-focus-border')
         self.win.set_keep_above(True)
         self.win.set_accept_focus(False)
         self.win.set_type_hint(Gdk.WindowTypeHint.NOTIFICATION)
-        visual = self.win.get_screen().get_rgba_visual()
-        if visual:
-            self.win.set_visual(visual)
         self.win.set_app_paintable(True)
         self.win.connect('draw', self._draw)
         self.win.connect('realize', lambda w: self._passthrough())
@@ -61,28 +64,41 @@ class Border:
             region = cairo.Region(cairo.RectangleInt(0, 0, 0, 0))
             self.win.get_window().input_shape_combine_region(region, 0, 0)
 
-    def _draw(self, widget, cr):
-        cr.set_operator(cairo.OPERATOR_SOURCE)
-        cr.set_source_rgba(0, 0, 0, 0)
-        cr.paint()
-        cr.set_operator(cairo.OPERATOR_OVER)
-        a = widget.get_allocation()
-        x, y, w, h = BW / 2, BW / 2, a.width - BW, a.height - BW
+    def _ring_path(self, cr, w, h):
+        x, y, ww, hh = BW / 2, BW / 2, w - BW, h - BW
         cr.new_sub_path()
-        cr.arc(x + w - BR, y + BR, BR, -math.pi / 2, 0)
-        cr.arc(x + w - BR, y + h - BR, BR, 0, math.pi / 2)
-        cr.arc(x + BR, y + h - BR, BR, math.pi / 2, math.pi)
+        cr.arc(x + ww - BR, y + BR, BR, -math.pi / 2, 0)
+        cr.arc(x + ww - BR, y + hh - BR, BR, 0, math.pi / 2)
+        cr.arc(x + BR, y + hh - BR, BR, math.pi / 2, math.pi)
         cr.arc(x + BR, y + BR, BR, math.pi, 3 * math.pi / 2)
         cr.close_path()
-        cr.set_source_rgb(*BC)
+
+    def _ring_region(self, w, h):
+        """Rasterize the ring stroke and turn pixels with alpha into the
+        window's bounding shape."""
+        surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, w, h)
+        cr = cairo.Context(surf)
+        cr.set_source_rgba(1, 1, 1, 1)
+        self._ring_path(cr, w, h)
         cr.set_line_width(BW)
         cr.stroke()
+        surf.flush()
+        return Gdk.cairo_region_create_from_surface(surf)
+
+    def _draw(self, widget, cr):
+        # The shape clips everything but the ring — solid fill is enough.
+        cr.set_source_rgb(*BC)
+        cr.paint()
 
     def update(self, x, y, w, h):
+        W, H = w + 2 * BW, h + 2 * BW
         self.win.move(x - BW, y - BW)
-        self.win.resize(w + 2 * BW, h + 2 * BW)
+        self.win.resize(W, H)
         self._passthrough()
         self.win.show_all()
+        gdk_win = self.win.get_window()
+        if gdk_win:
+            gdk_win.shape_combine_region(self._ring_region(W, H), 0, 0)
         self.win.queue_draw()
 
     def hide(self):

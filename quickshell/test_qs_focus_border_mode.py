@@ -28,6 +28,7 @@ class FakeWin:
     def move(self, *a): calls.append("move")
     def resize(self, *a): calls.append("resize")
     def get_realized(self): return False
+    def get_window(self): return None
     def show_all(self): calls.append("show")
     def queue_draw(self): pass
     def hide(self): calls.append("hide")
