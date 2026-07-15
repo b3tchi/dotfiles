@@ -1,48 +1,82 @@
 #!/bin/sh
-# Region screenshot via the quickshell selector overlay (region/shell.qml).
-# Bound to $mod+Shift+s. Grab-only: drag-select (or tap two corners) → the
-# region is cropped to ~/Pictures/screenshots and its file PATH is copied to
-# the clipboard (text, like tmux copy). A slim in-overlay strip confirms, then
-# the overlay quits. No persistent process, no single-instance server.
+# Region screenshot launcher — enters the i3 "screenshot" mode, runs the live
+# selector (qs-region.py), then resets the mode when it exits.
 #
-# Freeze-frame: capture the WHOLE screen first, then the overlay shows that
-# frozen PNG fullscreen to select on — works over xrdp with no compositor
-# (a live translucent overlay renders black without one). The crop comes from
-# this frozen source. To annotate afterwards: `ksnip -e <saved file>`.
+# Bound to $mod+Shift+s. The selector shapes its window down to a rubber-band
+# outline over the LIVE desktop: no frozen grab, no dim, and no opaque
+# fullscreen window, so there is no blink. Drag or tap two corners; `w` takes
+# the whole screen; Esc / right-click cancels. The crop lands in
+# ~/Pictures/screenshots and its file PATH goes on the clipboard (text, like a
+# tmux copy). To annotate afterwards: `ksnip -e <saved file>`.
 #
-# Over xrdp there's no GPU/GL — force the software scene graph or quickshell
-# segfaults (same reason the RDP bar sets it).
-[ -n "$XRDP_SESSION" ] && export QT_QUICK_BACKEND=software
+# The screen is captured AFTER the selection, so nothing is grabbed up front
+# and a cancel captures nothing. That is why this no longer pre-scrots to
+# QS_SHOT_SRC, and why the unscoped ${XDG_RUNTIME_DIR}/qs-shot-src handoff is
+# gone — it was shared by every display and clobbered across sessions
+# (dotfiles-8xt).
+#
+# The i3 mode exists ONLY so the bar paints its hint strip (Bar.qml modeHints).
+# The keys are handled inside the selector, which holds a pointer+keyboard
+# grab. That is also why we do NOT exec: the mode must be reset once the
+# selector exits, so this script has to outlive it.
+set -eu
 
-# Forward the status bar's geometry (QS_BAR_*) from the bar quickshell on THIS
-# display, so the overlay lifts its confirmation strip above the bar instead of
-# behind it. Best effort — the overlay falls back to the i3 default height.
-_dpynum=${DISPLAY#:}; _dpynum=${_dpynum%%.*}
-for _p in $(pgrep -x quickshell 2>/dev/null); do
-    _e=$(tr '\0' '\n' < "/proc/$_p/environ" 2>/dev/null) || continue
-    printf '%s\n' "$_e" | grep -q '^QS_SHOT_SRC=' && continue   # skip region instances
-    case "$(printf '%s\n' "$_e" | sed -n 's/^DISPLAY=//p' | head -1)" in
-        ":$_dpynum"|":$_dpynum."*) ;; *) continue ;;
-    esac
-    for _v in QS_BAR_HEIGHT QS_BAR_INSET_BOTTOM QS_BAR_INSET_TOP QS_BAR_INSET_AUTO; do
-        _val=$(printf '%s\n' "$_e" | sed -n "s/^${_v}=//p" | head -1)
-        [ -n "$_val" ] && export "${_v}=${_val}"
-    done
-    break
-done
+# Session scoping (QS_SID / qs_same_session / qs_kill_session). Sourced, never
+# forked. Concurrent sessions of the same user (native :0, xrdp :10) must never
+# kill or clobber each other — that is dotfiles-8xt, and re-deriving the display
+# id by hand here is how the old script got it wrong.
+QS_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+QS_SESSION_SH="$QS_DIR/qs-session.sh"
 
-tmp="$(mktemp --tmpdir qs-shot-XXXXXX.png)" || exit 1
-# full-screen grab — non-interactive. scrot (~0.2s) instead of ImageMagick's
-# `import` (~0.6s) so the overlay pops up promptly.
-if ! scrot -o "$tmp" 2>/dev/null; then
-    rm -f "$tmp"
+# Validate DISPLAY BEFORE sourcing the helper, not after: qs-session.sh probes
+# `i3 --get-socketpath`, which fails without a display and — under `set -e` —
+# kills this script silently, so a later check would never be reached. The
+# script would still exit 1, but for the wrong reason and with no message.
+# Do NOT fall back to :0 either: on a box running native :0 AND xrdp :10 that
+# would fire the overlay onto the other session's screen.
+if [ -z "${DISPLAY:-}" ]; then
+    echo "qs-screenshot: DISPLAY is unset — refusing to guess" >&2
     exit 1
 fi
 
-# Record the grab path so the i3 "screenshot" mode key bindings (Esc/w, see
-# i3 config → qs-shot-action.sh) can reach it — a PanelWindow layer can't get
-# arbitrary keys, so those actions live in the i3 mode, not the overlay.
-printf '%s' "$tmp" > "${XDG_RUNTIME_DIR:-/tmp}/qs-shot-src"
+if [ ! -r "$QS_SESSION_SH" ]; then
+    echo "qs-screenshot: cannot read $QS_SESSION_SH — refusing to run unscoped" >&2
+    exit 1
+fi
+# qs-session.sh dereferences $SWAYSOCK unguarded, so it aborts under `set -u`.
+# Its other consumers (qs-start.sh, qs-overlay.sh) set no shell options, so this
+# script is the first to hit it. Relax -u across the source only, rather than
+# edit a shared helper from this task — filed as dotfiles-0ov.
+set +u
+. "$QS_SESSION_SH"
+set -u
 
-export QS_SHOT_SRC="$tmp"
-exec quickshell -p "$HOME/.dotfiles/quickshell/region"
+# MANDATORY. WSLg leaves a wayland-0 socket in XDG_RUNTIME_DIR and GTK
+# auto-connects to it EVEN WITH WAYLAND_DISPLAY UNSET. The selector then maps
+# onto an idle, invisible compositor: no error, no window on $DISPLAY, no
+# events — and any measurement of it falsely passes. This cost hours in
+# poc008; do not remove it because "WAYLAND_DISPLAY isn't set anyway".
+GDK_BACKEND=x11
+export GDK_BACKEND
+
+# Already up on THIS display? Replace it rather than stack a second pointer
+# grab. Scoped to our session: an overlay on another display is left alone.
+qs_kill_session -f 'qs-region\.py'
+
+wm_msg() {
+    if [ -n "${SWAYSOCK:-}" ]; then swaymsg "$@"; else i3-msg "$@"; fi
+}
+
+# Enter the mode so the bar shows the hint strip, then run the selector.
+wm_msg mode screenshot >/dev/null 2>&1 || true
+
+set +e
+"$QS_DIR/qs-region.py" "$@"
+status=$?
+set -e
+
+# Reset the mode on EVERY exit path — capture, cancel, or crash. Without this
+# the bar sits in "screenshot" forever (the dotfiles-ux1 failure class).
+wm_msg mode default >/dev/null 2>&1 || true
+
+exit "$status"
