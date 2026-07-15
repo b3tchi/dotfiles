@@ -38,9 +38,15 @@ ffmpeg -y -f x11grab -framerate 60 -video_size "$GEOM" -i "$DISPLAY" \
 FF=$!
 sleep 1
 
-i3-msg 'mode "screenshot"; exec --no-startup-id ~/.dotfiles/quickshell/qs-screenshot.sh' >/dev/null 2>&1
+# The launcher enters the i3 mode itself and resets it on exit, so do NOT set
+# the mode here — that was the old bind's job.
+~/.dotfiles/quickshell/qs-screenshot.sh >/dev/null 2>&1 &
 sleep 3
-~/.dotfiles/quickshell/qs-shot-action.sh whole >/dev/null 2>&1
+# `w` (whole screen) goes straight to the selector: it holds a pointer+keyboard
+# grab, so it receives keys directly. The old qs-shot-action.sh IPC shim existed
+# only because a quickshell dock layer could not get arbitrary keys; it is
+# retired along with the frozen-PNG overlay.
+xdotool key w >/dev/null 2>&1
 
 wait $FF
 # Safety net: never leave the session stuck in the mode if a step misfired.
