@@ -241,24 +241,26 @@ ShellRoot {
                         }
                         Item { width: 10; height: 27 }
 
+                        // Each hint: the shortcut is highlighted orange inline,
+                        // embedded in the word where it's a letter — (w)hole screen,
+                        // i3-mode style.
                         Repeater {
                             model: root.clickState === 1
-                                   ? [{key: "tap", label: "opposite corner"}, {key: "Esc", label: "cancel"}]
-                                   : [{key: "drag", label: "select region"}, {key: "2-tap", label: "corners"}, {key: "w", label: "whole screen"}, {key: "Esc", label: "cancel"}]
-                            Row {
+                                   ? ['<font color="#cb4b16">tap</font> opposite corner',
+                                      '<font color="#cb4b16">Esc</font> cancel']
+                                   : ['<font color="#cb4b16">drag</font> select region',
+                                      '<font color="#cb4b16">2-tap</font> corners',
+                                      '(<font color="#cb4b16">w</font>)hole screen',
+                                      '<font color="#cb4b16">Esc</font> cancel']
+                            Text {
                                 required property var modelData
                                 required property int index
                                 anchors.verticalCenter: parent ? parent.verticalCenter : undefined
-                                Text { text: index > 0 ? "   " : ""; font.pixelSize: 16 }
-                                Text {
-                                    text: modelData.key; color: "#cb4b16"; font.bold: true
-                                    font.family: "Iosevka Nerd Font"; font.pixelSize: 16
-                                }
-                                Text { text: " "; font.pixelSize: 16 }
-                                Text {
-                                    text: modelData.label; color: "#fdf6e3"
-                                    font.family: "Iosevka Nerd Font"; font.pixelSize: 16
-                                }
+                                textFormat: Text.StyledText
+                                text: (index > 0 ? "&#160;&#160;&#160;" : "") + modelData
+                                color: "#fdf6e3"
+                                font.family: "Iosevka Nerd Font"
+                                font.pixelSize: 16
                             }
                         }
                     }
