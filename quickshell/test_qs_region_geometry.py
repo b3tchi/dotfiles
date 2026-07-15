@@ -87,10 +87,14 @@ check("fully offscreen collapses to zero, not negative",
       qsr.normalise(-900, -900, -500, -500, 2560, 1440)[2:] == (0, 0))
 
 print("is_selection(): a stray click is a cancel, not a 0x0 capture")
-check("3px is too small", not qsr.is_selection(2, 2))
 check("zero area", not qsr.is_selection(0, 0))
 check("thin sliver rejected (w ok, h too small)", not qsr.is_selection(500, 1))
 check("real drag accepted", qsr.is_selection(1200, 600))
+# Pin the boundary from BOTH sides, or an off-by-one in MIN_SEL slips through:
+# MIN_SEL=3 means 3 is accepted and 2 is not.
+check("just below MIN_SEL rejected", not qsr.is_selection(qsr.MIN_SEL - 1,
+                                                          qsr.MIN_SEL - 1))
+check("exactly MIN_SEL accepted", qsr.is_selection(qsr.MIN_SEL, qsr.MIN_SEL))
 
 print("contract constants the rest of the system keys off")
 # i3/picom.conf matches this literal (sp012 T5, dispatch decision). A rename
@@ -99,8 +103,22 @@ print("contract constants the rest of the system keys off")
 check("window title is exactly 'qs-region'", qsr.TITLE == "qs-region",
       f"got {getattr(qsr, 'TITLE', None)!r}")
 # The MODE colour from Bar.qml:576/589 — NOT the #16a085 workspace green.
-check("outline is the mode colour #cb4b16", qsr.ACCENT_HEX.lower() == "#cb4b16",
-      f"got {getattr(qsr, 'ACCENT_HEX', None)!r}")
+#
+# Assert the TUPLE, because that is what _draw() paints with — asserting on
+# ACCENT_HEX alone was tautological: the two constants used to be independent,
+# so the painted colour could drift to the forbidden green with this test still
+# green. Mutating the painted colour must now fail this.
+check("painted outline colour is the mode colour #cb4b16",
+      qsr.ACCENT == (0xcb / 255, 0x4b / 255, 0x16 / 255),
+      f"got {getattr(qsr, 'ACCENT', None)!r}")
+check("ACCENT_HEX agrees with the painted tuple (single source of truth)",
+      qsr.ACCENT == tuple(int(qsr.ACCENT_HEX[i:i + 2], 16) / 255
+                          for i in (1, 3, 5)),
+      f"hex={qsr.ACCENT_HEX!r} tuple={qsr.ACCENT!r}")
+# The green this must never be — an explicit negative guard, since the whole
+# hazard is silently drifting to the workspace-focused colour.
+check("painted colour is NOT the #16a085 workspace green",
+      qsr.ACCENT != (0x16 / 255, 0xa0 / 255, 0x85 / 255))
 
 print("shot_path(): matches ft006's api_surface contract")
 p = qsr.shot_path("/tmp/xyz")

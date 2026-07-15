@@ -61,8 +61,14 @@ TITLE = 'qs-region'
 
 # The i3 MODE colour (Bar.qml:576/589), so the outline and the bar's mode hint
 # agree. NOT #16a085 — that is the workspace-focused green.
+#
+# ACCENT is DERIVED from ACCENT_HEX rather than restated as literals: the two
+# were independent before, so ACCENT_HEX was dead in production and a test
+# asserting on it could not catch the painted colour drifting (proved by
+# mutation — the suite passed while the overlay painted the forbidden green).
+# One source, so guarding it guards what actually gets painted.
 ACCENT_HEX = '#cb4b16'
-ACCENT = (0xcb / 255, 0x4b / 255, 0x16 / 255)
+ACCENT = tuple(int(ACCENT_HEX[i:i + 2], 16) / 255 for i in (1, 3, 5))
 
 BW = 2                      # outline stroke width
 MIN_SEL = 3                 # below this, a "drag" is really a stray click
