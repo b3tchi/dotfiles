@@ -70,16 +70,19 @@ ShellRoot {
 
     function cleanupCmd() { return "rm -f '" + src + "'" }
 
-    // Close cleanly. The fullscreen overlay grabs X input focus; on close the
-    // WM doesn't always hand it back, so the keyboard is "blocked" until you
-    // click (worse over xrdp). Unmap the window, then re-assert focus on the
-    // WM's focused container so X input focus lands on a live window, then quit.
+    // Close cleanly. Keep the overlay MAPPED (covering the screen) while we
+    // re-focus the window that was active BEFORE we launched (captured by
+    // qs-screenshot.sh as QS_PREV_WIN). That hands keyboard focus back to a
+    // live window (else the keyboard is "blocked" until a click, worse over
+    // xrdp) AND lets it repaint BEHIND the overlay; only then does quit unmap
+    // us, so the revealed window is already painted — no wallpaper flash/glitch.
     readonly property string wmMsg: Quickshell.env("SWAYSOCK") ? "swaymsg" : "i3-msg"
+    readonly property string prevWin: Quickshell.env("QS_PREV_WIN") ?? ""
     Timer { id: closeTimer; interval: 90; onTriggered: Qt.quit() }
     function closeOverlay() {
-        win.visible = false
-        Quickshell.execDetached(["sh", "-c",
-            wmMsg + " '[con_id=__focused__] focus' >/dev/null 2>&1"])
+        if (prevWin !== "")
+            Quickshell.execDetached(["sh", "-c",
+                wmMsg + " '[id=" + prevWin + "] focus' >/dev/null 2>&1"])
         closeTimer.start()
     }
 
