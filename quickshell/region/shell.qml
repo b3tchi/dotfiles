@@ -9,7 +9,9 @@
 // NO hint strip is drawn here. This overlay only does the MOUSE selection:
 // drag or tap-two-corners → crop to a file + path on the clipboard. The
 // keyboard actions (Esc cancel, w whole-screen) are i3 mode bindings, since a
-// dock layer doesn't reliably receive arbitrary keys.
+// dock layer doesn't reliably receive arbitrary keys — they arrive here via
+// `quickshell ipc call shot ...` (qs-shot-action.sh) so every exit path gets
+// the same fade-out.
 import Quickshell
 import Quickshell.Io
 import QtQuick
@@ -70,34 +72,57 @@ ShellRoot {
         closing = true
         closeTimer.start()             // quit once the fade has finished
     }
-    Timer { id: closeTimer; interval: 170; onTriggered: { root.exitMode(); Qt.quit() } }
+    // exitMode and Qt.quit must NOT share a handler: execDetached's spawn
+    // doesn't survive an immediate quit, leaving i3 stuck in the mode.
+    Timer { id: closeTimer; interval: 170; onTriggered: { root.exitMode(); finalQuit.start() } }
+    Timer { id: finalQuit; interval: 60; onTriggered: Qt.quit() }
     Timer { id: quitTimer; interval: 1400; onTriggered: root.beginClose() }
 
     function cancel() {
+        if (closing) return
         Quickshell.execDetached(["sh", "-c", "rm -f '" + src + "' '" + ptr + "'"])
         beginClose()
+    }
+
+    // Save a shot (the whole frozen grab, or a crop of it), put the file
+    // path on the clipboard, confirm with the toast, then fade out.
+    function save(cropGeom) {
+        var dir = Quickshell.env("HOME") + "/Pictures/screenshots"
+        var f = dir + "/shot_" + Qt.formatDateTime(new Date(), "yyyyMMdd-hhmmss") + ".png"
+        var make = cropGeom
+            ? "magick '" + src + "' -crop " + cropGeom + " +repage '" + f + "'"
+            : "cp '" + src + "' '" + f + "'"
+        var cmd = "mkdir -p '" + dir + "'; " + make + " && " +
+                  "printf %s '" + f + "' | xclip -selection clipboard; " +
+                  "rm -f '" + src + "' '" + ptr + "'"
+        Quickshell.execDetached(["sh", "-c", cmd])
+        toastText = "Copied path  " + f
+        quitTimer.start()          // keep the confirmation up briefly, then
+                                   // fade out + leave the mode (border returns)
+    }
+
+    // Esc / w from the i3 "screenshot" mode land here through
+    // `quickshell ipc call shot ...` so they fade out like mouse actions.
+    IpcHandler {
+        target: "shot"
+        function cancel(): void { root.cancel() }
+        function whole(): void {
+            if (root.closing || root.toastText !== "") return
+            root.dragging = false
+            root.clickState = 0
+            root.save("")
+        }
     }
 
     function finish() {
         var w = Math.round(selW())
         var h = Math.round(selH())
         if (dragging && w >= 3 && h >= 3) {
-            var x = Math.round(selX())
-            var y = Math.round(selY())
-            var dir = Quickshell.env("HOME") + "/Pictures/screenshots"
-            var f = dir + "/shot_" + Qt.formatDateTime(new Date(), "yyyyMMdd-hhmmss") + ".png"
-            var geom = w + "x" + h + "+" + x + "+" + y
             // crop the FROZEN grab; copy the file PATH (text) to the clipboard.
-            var cmd = "mkdir -p '" + dir + "'; " +
-                      "magick '" + src + "' -crop " + geom + " +repage '" + f + "' && " +
-                      "printf %s '" + f + "' | xclip -selection clipboard; " +
-                      "rm -f '" + src + "' '" + ptr + "'"
-            Quickshell.execDetached(["sh", "-c", cmd])
+            var geom = w + "x" + h + "+" + Math.round(selX()) + "+" + Math.round(selY())
             dragging = false
             clickState = 0
-            toastText = "Copied path  " + f
-            quitTimer.start()          // keep the confirmation up briefly, then
-                                       // close + leave the mode (border returns)
+            save(geom)
         } else {
             cancel()
         }

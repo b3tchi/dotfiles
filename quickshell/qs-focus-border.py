@@ -284,10 +284,19 @@ _orig_handle_event = handle_event
 
 
 def handle_event(data):
+    global mode_suppressed
     try:
         e = json.loads(data)
         # Binding events — refresh after any keybinding (catches move/resize/layout)
         if 'binding' in e:
+            cmd = (e.get('binding') or {}).get('command') or ''
+            # The binding that ENTERS a suppress mode arrives BEFORE the mode
+            # event — arm suppression here already, or this very refresh can
+            # land in between and restack the border above the overlay.
+            if any('mode "%s"' % m in cmd or 'mode %s' % m in cmd
+                   for m in SUPPRESS_MODES):
+                mode_suppressed = True
+                return
             refresh_focused()
             return
     except Exception:

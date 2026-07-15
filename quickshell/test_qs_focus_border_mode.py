@@ -117,6 +117,13 @@ calls.clear()
 qsb.refresh_focused()
 check("baseline refresh shows border", "show" in calls)
 
+# The binding that enters the screenshot mode arrives BEFORE the mode event
+# and must already arm suppression instead of refreshing.
+calls.clear()
+qsb.handle_event(json.dumps({"change": "run", "binding": {
+    "command": 'mode "screenshot"; exec --no-startup-id ~/x/qs-screenshot.sh'}}))
+check("mode-enter binding arms suppression (no redraw)", not calls)
+
 # Mode enter ("screenshot"): border must stay up — no hide (the overlay
 # takes ~0.5s to map; hiding now blinks), no redraw.
 calls.clear()
