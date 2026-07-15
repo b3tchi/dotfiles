@@ -39,10 +39,10 @@ if ! scrot -o "$tmp" 2>/dev/null; then
     exit 1
 fi
 
-# Remember the window focused right now, so the overlay can hand keyboard
-# focus back to it on close (and let it repaint behind the overlay before we
-# unmap — avoids a wallpaper flash). i3 '[id=N]' matches this X11 window id.
-export QS_PREV_WIN="$(xdotool getactivewindow 2>/dev/null || true)"
+# Record the grab path so the i3 "screenshot" mode key bindings (Esc/w, see
+# i3 config → qs-shot-action.sh) can reach it — a PanelWindow layer can't get
+# arbitrary keys, so those actions live in the i3 mode, not the overlay.
+printf '%s' "$tmp" > "${XDG_RUNTIME_DIR:-/tmp}/qs-shot-src"
 
 export QS_SHOT_SRC="$tmp"
 exec quickshell -p "$HOME/.dotfiles/quickshell/region"

@@ -158,6 +158,13 @@ PanelWindow {
                 {key: "←↓↑→", label: "arrows"},
                 {key: "Esc", label: "exit"}
             ]
+        if (mode === "screenshot")
+            return [
+                {key: "drag", label: "select region"},
+                {key: "2-tap", label: "corners"},
+                {key: "w", label: "whole screen"},
+                {key: "Esc", label: "cancel"}
+            ]
         if (mode.indexOf("(l)ock") !== -1)
             return [
                 {key: "l", label: "lock"},
@@ -555,7 +562,8 @@ PanelWindow {
                 Text {
                     id: modeNameText
                     anchors.centerIn: parent
-                    text: root.currentMode === "resize" ? "resize" : "system"
+                    text: root.currentMode === "resize" ? "resize"
+                          : root.currentMode === "screenshot" ? "screenshot" : "system"
                     color: "#fdf6e3"
                     font.family: root.fontFamily
                     font.pixelSize: root.fontSize
