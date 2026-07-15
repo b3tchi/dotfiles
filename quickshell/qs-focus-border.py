@@ -141,7 +141,13 @@ def handle_event(data):
     if not c:
         return
     if change == 'close':
+        # Redraw on whatever i3 refocuses after the close. Normally a following
+        # window::focus event would do this, but if the next window was already
+        # focused (e.g. the screenshot overlay pre-focuses its caller before
+        # quitting) no focus event fires — so the border would vanish. Refresh
+        # explicitly. refresh_focused() hides if nothing focusable remains.
         border.hide()
+        refresh_focused()
     elif change == 'focus':
         border.hide()
         if c.get('fullscreen_mode', 0) > 0:
