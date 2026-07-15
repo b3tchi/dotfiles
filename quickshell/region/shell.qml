@@ -108,7 +108,10 @@ ShellRoot {
                       "printf %s '" + f + "' | xclip -selection clipboard; " +
                       cleanupCmd()
             Quickshell.execDetached(["sh", "-c", cmd])
-            // show the confirmation briefly on the frozen shot, then close
+            // stop selecting immediately (clears the box + disables the drag
+            // MouseArea via toastText), show the confirmation, then close
+            dragging = false
+            clickState = 0
             toastText = "Copied path  " + f
             quitTimer.start()
         } else {
@@ -126,6 +129,8 @@ ShellRoot {
                   "printf %s '" + f + "' | xclip -selection clipboard; " +
                   cleanupCmd()
         Quickshell.execDetached(["sh", "-c", cmd])
+        dragging = false
+        clickState = 0
         toastText = "Copied path  " + f
         quitTimer.start()
     }
@@ -281,6 +286,7 @@ ShellRoot {
 
                 MouseArea {
                     anchors.fill: parent
+                    enabled: root.toastText === ""
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     cursorShape: Qt.CrossCursor
                     hoverEnabled: true
