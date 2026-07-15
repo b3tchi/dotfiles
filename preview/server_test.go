@@ -513,3 +513,70 @@ func TestHandleRegisterConcurrentNoSlotDistinct(t *testing.T) {
 		seen[got] = true
 	}
 }
+
+// TestHandlePreviewSetRelativizesAbsolutePathUnderRoot proves POST
+// /preview<N> canonicalizes an absolute path under root to the
+// root-relative form /file/<path> expects — nvim sends absolute buffer
+// paths, and storing them verbatim made every viewer iframe 404
+// (dotfiles-hva).
+func TestHandlePreviewSetRelativizesAbsolutePathUnderRoot(t *testing.T) {
+	srv := newTestServer(t)
+	abs := filepath.Join(srv.root, "docs", "note.md")
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(abs, []byte("# x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	body := `{"path":"` + abs + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/preview1", strings.NewReader(body))
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /preview1 abs-under-root: status %d, want 200 (%s)", rec.Code, rec.Body.String())
+	}
+	want := filepath.Join("docs", "note.md")
+	if got := srv.slots.CurrentPath(1); got != want {
+		t.Fatalf("CurrentPath(1) = %q, want root-relative %q", got, want)
+	}
+	if !strings.Contains(rec.Body.String(), `"path":"docs/note.md"`) {
+		t.Errorf("response should echo the relativized path: %s", rec.Body.String())
+	}
+}
+
+// TestHandlePreviewSetRejectsAbsolutePathOutsideRoot proves an absolute
+// path that cannot be served (outside root) is rejected at ingestion with
+// 400 instead of being broadcast to every window as a guaranteed 404
+// (dotfiles-hva).
+func TestHandlePreviewSetRejectsAbsolutePathOutsideRoot(t *testing.T) {
+	srv := newTestServer(t)
+	rec := httptest.NewRecorder()
+	body := `{"path":"/etc/passwd"}`
+	req := httptest.NewRequest(http.MethodPost, "/preview1", strings.NewReader(body))
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("POST /preview1 abs-outside-root: status %d, want 400", rec.Code)
+	}
+	if got := srv.slots.CurrentPath(1); got != "" {
+		t.Fatalf("CurrentPath(1) = %q, want empty (rejected path must not be stored)", got)
+	}
+}
+
+// TestHandlePreviewSetKeepsRelativePathVerbatim pins the existing
+// contract: a root-relative path passes through unchanged.
+func TestHandlePreviewSetKeepsRelativePathVerbatim(t *testing.T) {
+	srv := newTestServer(t)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/preview2", strings.NewReader(`{"path":"docs/x.md"}`))
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /preview2 relative: status %d, want 200", rec.Code)
+	}
+	if got := srv.slots.CurrentPath(2); got != "docs/x.md" {
+		t.Fatalf("CurrentPath(2) = %q, want %q", got, "docs/x.md")
+	}
+}

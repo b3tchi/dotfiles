@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -210,8 +211,28 @@ func (s *Server) handlePreviewSet(n int, w http.ResponseWriter, r *http.Request)
 		http.Error(w, "bad request body", http.StatusBadRequest)
 		return
 	}
-	s.slots.SetPath(n, body.Path)
-	writeJSON(w, map[string]any{"slot": n, "path": body.Path})
+	// Canonicalize to the root-relative form /file/<path> expects. nvim
+	// sends absolute buffer paths (the wrapper forwards them verbatim);
+	// stored verbatim they made every viewer iframe request
+	// /file//home/... and 404 (dotfiles-hva). An absolute path outside
+	// root can never be served — reject at ingestion instead of
+	// broadcasting a guaranteed 404 to every window.
+	p := body.Path
+	if filepath.IsAbs(p) {
+		absRoot, err := filepath.Abs(s.root)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		rel, err := filepath.Rel(filepath.Clean(absRoot), filepath.Clean(p))
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			http.Error(w, "path outside preview root", http.StatusBadRequest)
+			return
+		}
+		p = rel
+	}
+	s.slots.SetPath(n, p)
+	writeJSON(w, map[string]any{"slot": n, "path": p})
 }
 
 // handlePreviewWS upgrades GET /preview<N> to a websocket and registers the
