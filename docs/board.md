@@ -14,8 +14,8 @@ sections when status flips.
 
 ## spec
 
-- [[sp012|live-region-xshape-overlay]]
-
 ## ready
+
+- [[sp012|live-region-xshape-overlay]]
 
 
