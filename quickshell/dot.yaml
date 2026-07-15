@@ -18,18 +18,18 @@ linux:
       sudo pacman -S --needed --noconfirm \
         quickshell python-xlib xorg-xinput \
         python-cairo python-gobject libwnck3 gtk3 \
-        scrot imagemagick xclip
+        scrot xclip
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux")}}
       sudo pacman -S --needed --noconfirm \
         quickshell python-xlib xorg-xinput \
         python-cairo python-gobject libwnck3 gtk3 \
-        scrot imagemagick xclip
+        scrot xclip
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux ARM")}}
       sudo pacman -S --needed --noconfirm \
         quickshell python-xlib xorg-xinput \
         python-cairo python-gobject libwnck3 gtk3 \
-        scrot imagemagick xclip
+        scrot xclip
       {{/if}}
       rotz link quickshell --force

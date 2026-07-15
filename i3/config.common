@@ -204,9 +204,10 @@ for_window [all] border normal 4
 for_window [title="qs-launcher"] floating enable, border none, move position center
 for_window [title="qs-switcher"] floating enable, border none, move position center
 for_window [title="qs-projects"] floating enable, border none, move position center
-# region-screenshot selector overlay (quickshell/region) — float it; the QML
-# self-fullscreens (visibility: Window.FullScreen) so it maps 1:1 to the screen
-for_window [title="qs-region"] floating enable, border none
+# No for_window rule for the region selector: qs-region.py is a GTK POPUP =
+# override-redirect, so i3 never manages it and no criteria could ever match.
+# (The rule that used to sit here matched title="qs-region" against the OLD
+# quickshell dock, which set no title at all — it never matched anything.)
 for_window [title="alsamixer"] floating enable border pixel 1
 for_window [class="calamares"] floating enable border normal
 for_window [class="Clipgrab"] floating enable
