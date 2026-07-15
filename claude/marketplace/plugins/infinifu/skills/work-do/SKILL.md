@@ -1,6 +1,6 @@
 ---
 name: work-do
-description: Use when you are an agent that has been handed a single bd task ID to execute — read the task with bd show, mark in_progress, do the work through domain-tdd, record evidence in task notes, and report back for review. Do NOT close the task yourself; the reviewer (via work-audit) owns the close transition. Pair with plan-scrum-master (automated dispatch) or plan-supervised (user-supervised batches); also usable by a solo developer picking up `bd ready` manually.
+description: Use when you are an agent that has been handed a single bd task ID to execute — read the task with bd show, mark in_progress, do the work through domain-tdd, commit it to the task branch, record evidence in task notes, and report back for review. Do NOT close the task yourself; the reviewer (via work-audit) owns the close transition. Do NOT report ready without committing — work-merge merges the branch, not your worktree, so uncommitted work is a silent no-op merge. Pair with plan-scrum-master (automated dispatch) or plan-supervised (user-supervised batches); also usable by a solo developer picking up `bd ready` manually.
 ---
 
 # Do a bd Task
@@ -135,7 +135,27 @@ Before reporting back, produce evidence the task is done:
 - No regressions — run the broader suite if applicable
 - `domain-verification` checklist applied if relevant
 
-### Step 7: Record evidence on the task — do NOT close
+### Step 7: Commit to the branch — the work does not exist until you do
+
+Everything so far lives as uncommitted changes in your worktree. **`work-merge` merges your BRANCH — it cannot see your working tree.** An uncommitted worktree means the branch has zero commits over base, the merge is a silent no-op, and the only thing standing between you and lost work is `git worktree remove` refusing to delete dirty state.
+
+```bash
+git -C "$WT" add -A
+git -C "$WT" commit -m "<type>(<scope>): <what changed> [<spec-id> T<n>]"
+git -C "$WT" log --oneline "$(git -C "$WT" merge-base HEAD @{upstream} 2>/dev/null || echo main)"..HEAD
+```
+
+The last line is the check that matters: **it must print at least one commit.** If it prints nothing, you have not committed — fix that before going near Step 9.
+
+Rules:
+
+- **Commit before reporting ready. Always.** Not "if it feels done", not "the reviewer can handle it". The reviewer must never author the diff it audits — that collapses the review gate exactly like closing your own task does (Step 8).
+- Stage deliberately. `git add -A` is fine in a clean task worktree; if you generated scratch files, artifacts, or debug output, don't sweep them in.
+- Multiple commits are fine. A rejected-then-fixed iteration typically stacks a second commit on the first — that's good history, and the reviewer diffs your fix against what it already approved.
+- Do **not** push. `work-merge` lands locally; `spec-retro` owns remote sync.
+- Do **not** merge into base yourself.
+
+### Step 8: Record evidence on the task — do NOT close
 
 Closing is the reviewer's transition, not yours. Leave the task `in_progress` and record your completion evidence in the task notes so the reviewer (running `work-audit`) can verify each claim:
 
@@ -146,12 +166,13 @@ Evidence:
 - <criterion 1>: <file:line or command output>
 - <criterion 2>: <file:line or command output>
 - Tests: <test file, N passed>
+- Commits: <sha(s) on bd-<id>.<N>>
 - Deviations: <any logged in step 4, or 'none'>"
 ```
 
 Why you don't close: if you close, `closed` just means "implementer thinks it's done" — which is the same information as `in_progress` + implementation notes. The reviewer owns the `in_progress → closed` transition so `closed` means "reviewed and approved". That gate collapses if the implementer grabs the close too.
 
-### Step 8: Report back
+### Step 9: Report back
 
 Return a short report to whoever dispatched you:
 
@@ -159,6 +180,7 @@ Return a short report to whoever dispatched you:
 Task <id>: <title> — ready for review
 
 Branch: bd-<id>.<N>
+Commits: <sha(s)>          # MUST be non-empty — see Step 7
 Worktree: <absolute path>
 Summary: <one or two sentences on what was done>
 Files changed: <list>
@@ -167,7 +189,7 @@ Deviations: <any, or 'none'>
 Discoveries filed: <bd IDs, or 'none'>
 ```
 
-Branch and worktree lines let the reviewer (and the later worktree-sweep in spec-retro) act mechanically without re-querying you.
+Branch, commits, and worktree let the reviewer (and the later worktree-sweep in spec-retro) act mechanically without re-querying you. **A report with a branch but no commit sha is the failure mode this contract exists to catch** — `work-audit` will bounce it straight back.
 
 Keep it tight. The dispatcher (scrum-master, or a user under plan-supervised) routes this to the reviewer; they don't need a walkthrough.
 
@@ -176,17 +198,19 @@ Keep it tight. The dispatcher (scrum-master, or a user under plan-supervised) ro
 If you can't complete the task:
 
 1. Leave it in `in_progress` (do NOT close it)
-2. Log what you tried and why it's blocked:
+2. **Commit whatever partial work exists** to your branch (`git -C "$WT" add -A && git -C "$WT" commit -m "wip(<scope>): <where you got to> [BLOCKED]"`). A blocked task is the case where losing the work hurts most — the next agent (or you, resumed) picks up from the commit, not from a worktree that may get swept. If there is genuinely nothing to commit, say so explicitly in the note.
+3. Log what you tried and why it's blocked:
    ```bash
-   bd update <id> --notes "BLOCKED: <reason>. Tried: <list>. Needs: <what would unblock>"
+   bd update <id> --notes "BLOCKED: <reason>. Tried: <list>. Needs: <what would unblock>. WIP committed: <sha or 'nothing to commit'>"
    ```
-3. Report back to the dispatcher with `status: blocked`
-4. Optionally file a new bd task for the blocker so it can be scheduled
+4. Report back to the dispatcher with `status: blocked`
+5. Optionally file a new bd task for the blocker so it can be scheduled
 
 Do not close blocked tasks — closing is a reviewer transition and means "reviewed and approved". `in_progress` with a BLOCKED note is the honest state.
 
 ## Anti-patterns
 
+- **Reporting ready with an uncommitted worktree.** `work-merge` merges the BRANCH; it cannot see your working tree. Uncommitted work = a branch with zero commits = a no-op merge, and the work survives only because `git worktree remove` refuses to delete dirty state. Observed in the wild: the reviewer noticed, committed the diff on the implementer's behalf to unblock the land, and thereby authored the artifact it had just approved — collapsing the review gate. Commit in Step 7; report the sha in Step 9.
 - **Silent scope expansion.** Doing "related" work that wasn't in the task. File a new task instead.
 - **Closing the task yourself.** `bd close` is the reviewer's job. Record implementation evidence in `bd update --notes` and leave state as `in_progress` for audit.
 - **Skipping the deviation log.** Deviations you plan to mention "later" get forgotten. Log immediately in Step 4.

@@ -96,11 +96,33 @@ If the implementer logged a DEVIATION note, that's not automatically a rejection
 
 **Never read `.beads/issues.jsonl` directly.** Use `bd` commands — they return canonical state.
 
+### Pre-flight gate: the branch MUST have commits
+
+Before reading a single line of code, verify the implementer actually committed:
+
+```bash
+git -C "$WT" log --oneline "$BASE".."$BRANCH"    # BASE is usually main
+```
+
+**Empty output → REJECT immediately.** Do not read the worktree, do not audit, and above all **do not commit the work yourself**.
+
+This is not pedantry. `work-merge` merges the *branch*; an uncommitted worktree means a branch with zero commits, a silent no-op merge, and work that survives only because `git worktree remove` refuses to delete dirty state. The tempting move — "the diff is right there in the worktree, I'll just commit it and land it" — **collapses the review gate**: you become the author of the artifact you just approved, and nothing independently verifies that what got committed is what got reviewed. That exact sequence happened once and is why this gate exists.
+
+Bounce it back instead:
+
+```bash
+bd update <id> --notes "REJECTED (pre-flight): branch <branch> has no commits over <base>. work-do Step 7 requires committing before reporting ready. Worktree left intact; commit and re-report."
+```
+
+Then report the rejection to the dispatcher. The implementer still has its worktree and full context; committing is a ten-second fix for them and a gate violation for you.
+
 ## Step 2 — Read the actual changed files
 
 ```bash
 git diff main...HEAD   # scope of what changed in this task
 ```
+
+(If this is empty but the worktree has changes, you skipped the pre-flight gate above — go back.)
 
 Then open each changed file with the Read tool. Reading the full file — not just the diff — is the single most important discipline. The diff hides missing code: if validation *should* have been added and wasn't, the diff has nothing to show you. Only the full file reveals the gap.
 
@@ -253,6 +275,7 @@ The dispatcher re-dispatches the implementer, who reads the updated notes with t
 
 These thoughts all mean the audit is skipping work it shouldn't:
 
+- *"The branch has no commits but the diff is right there — I'll just commit it and land it"* — **no.** Committing the work makes you the author of what you're approving; nothing then verifies that the committed tree matches the reviewed tree. Pre-flight gate: empty `log base..branch` = reject, bounce to the implementer.
 - *"Tests pass, must be complete"* — tests ≠ task criteria; verify every criterion
 - *"Implementer says it's done"* — implementer bias is why audits exist
 - *"Small task, quick scan is enough"* — small tasks pass small audits, but still get audited
@@ -268,6 +291,7 @@ These thoughts all mean the audit is skipping work it shouldn't:
 Before issuing a verdict:
 
 - [ ] Loaded the task with `bd show <id>`
+- [ ] **Pre-flight: `git log base..branch` is non-empty** — the implementer committed; you did not commit on their behalf
 - [ ] Ran automated checks (TODOs, stubs, unwrap, ignored tests, dead code)
 - [ ] Read changed files with the Read tool, not just the diff
 - [ ] Verified every success criterion with a command and real output
