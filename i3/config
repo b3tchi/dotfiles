@@ -94,6 +94,21 @@ bindsym $mod+Shift+d --release exec --no-startup-id $qsbarenv ~/.dotfiles/quicks
 bindsym Print exec --no-startup-id i3-scrot
 bindsym $mod+Print --release exec --no-startup-id i3-scrot -w
 bindsym $mod+Shift+Print --release exec --no-startup-id i3-scrot -s
+# region screenshot — enters a "screenshot" i3 mode (shown in the bar like
+# resize) and launches a quickshell PanelWindow selector (grab-only → file +
+# clipboard). The overlay handles the MOUSE (drag / tap two corners); the
+# keyboard actions are i3 mode bindings since a dock layer can't get keys.
+# See quickshell/qs-screenshot.sh + region/shell.qml + qs-shot-action.sh.
+# Base, not the platform overlay: every quickshell session (native :0, WSL and
+# desktop xrdp :10) has scrot + the overlay, and the overlay's for_window rule
+# already lives here — stranding the bind in native.conf left WSL unbound.
+# No `mode default` here — the overlay leaves the mode itself after its
+# fade-out (qs-shot-action.sh IPCs into it; its fallback resets the mode).
+mode "screenshot" {
+    bindsym Escape exec --no-startup-id ~/.dotfiles/quickshell/qs-shot-action.sh cancel
+    bindsym w      exec --no-startup-id ~/.dotfiles/quickshell/qs-shot-action.sh whole
+}
+bindsym $mod+Shift+s mode "screenshot"; exec --no-startup-id ~/.dotfiles/quickshell/qs-screenshot.sh
 bindsym $mod+Shift+h exec xdg-open /usr/share/doc/manjaro/i3_help.pdf
 bindsym $mod+Ctrl+x --release exec --no-startup-id xkill
 
@@ -147,7 +162,7 @@ bindsym $mod+e layout toggle split
 # change focus between tiling / floating windows
 # bindsym $mod+space focus mode_toggle
 
-# toggle sticky (pinned — p, like tmux; $mod+Shift+s freed for ksnip capture)
+# toggle sticky (pinned — p, like tmux; $mod+Shift+s is the region screenshot)
 bindsym $mod+Shift+p sticky toggle
 
 # focus the parent container
