@@ -212,22 +212,29 @@ function requestOpen(id) {
   }).catch(() => {});
 }
 
-function selectNode(id) {
-  if (!backend) return;
-  requestOpen(id);
-  selectedKeep = neighborsOf(id);
-  backend.refresh();
+// applyIsolate sets the isolate neighborhood (null = none) and repaints
+// nodes + label dim state — the shared tail of selectNode/clearSelection
+// and, since sp011 Task 4, setHighlight/renderData. Cursor highlight and
+// manual click share selectedKeep deliberately: last action wins in both
+// directions (the Task 4 user revision superseding Task 2's independence
+// rule).
+function applyIsolate(keep) {
+  selectedKeep = keep;
+  if (backend) backend.refresh();
   for (const [nid, el] of Object.entries(labelEls)) {
-    el.classList.toggle("dim", !selectedKeep.has(nid));
+    el.classList.toggle("dim", keep ? !keep.has(nid) : false);
   }
   pumpLabels();
 }
 
+function selectNode(id) {
+  if (!backend) return;
+  requestOpen(id);
+  applyIsolate(neighborsOf(id));
+}
+
 function clearSelection() {
-  selectedKeep = null;
-  if (backend) backend.refresh();
-  for (const el of Object.values(labelEls)) el.classList.remove("dim");
-  pumpLabels();
+  applyIsolate(null);
 }
 
 // ── Highlight rendering (sp011 ft004 Task 2) ────────────────────────────────────
@@ -243,13 +250,15 @@ function applyHighlightLabel() {
 
 // setHighlight is the single entry point for a highlight message meant for
 // this viewer: store the id (possibly empty/null = clear), re-resolve against
-// the live graph, then repaint node color/size + label emphasis. No isolate
-// mutation, no camera motion (backend.refresh() repaints in place, same
-// mechanism toggleType/selectNode already use).
+// the live graph, then repaint. Since sp011 Task 4 it ALSO isolates the
+// node's direct neighborhood — the same visual as clicking it, but WITHOUT
+// selectNode's requestOpen side effect (that would bounce the editor on
+// every cursor move). Empty/unknown id clears both the gold emphasis and
+// the isolate. Still no camera motion.
 function setHighlight(id) {
   storedHighlightId = id || null;
   recomputeHighlight();
-  if (backend) backend.refresh();
+  applyIsolate(highlightId != null ? neighborsOf(highlightId) : null);
   applyHighlightLabel();
 }
 
@@ -585,14 +594,19 @@ function renderData(data) {
   for (const n of nodes) {
     if (!knownTypes.has(n.type)) { knownTypes.add(n.type); activeTypes.add(n.type); }
   }
-  selectedKeep = null;   // fresh data clears any isolate
-  recomputeHighlight();  // re-resolve the STORED highlight against the fresh graph — survives rebuild if the node's still there, clears if it's gone (sp011 AC)
+  // Re-resolve the STORED highlight against the fresh graph — survives
+  // rebuild if the node's still there, clears if it's gone (sp011 AC).
+  // Task 4: the cursor-driven isolate is re-derived from that highlight
+  // (manual click isolate has no stored source, so it still clears).
+  recomputeHighlight();
+  selectedKeep = highlightId != null ? neighborsOf(highlightId) : null;
 
   backend.setData(nodes, links);
   buildLabels(nodes);
   buildLegend(nodes);
   applyLabelVisibility();
-  applyHighlightLabel();  // labels were just rebuilt from scratch; reapply emphasis
+  applyIsolate(selectedKeep); // labels rebuilt from scratch; reapply dim state
+  applyHighlightLabel();      // ...and emphasis
   pumpLabels();
 
   document.title = `OK nodes=${nodes.length}`;
@@ -740,6 +754,9 @@ window.__akmGraph = {
     const dim = Object.values(labelEls).filter((el) => el.classList.contains("dim")).length;
     return { total, dim, lit: total - dim };
   },
+  // sp011 Task 4: expose the isolate set so smoke-highlight.html can assert
+  // the cursor-driven neighborhood (null = no isolate active).
+  keepIds: () => (selectedKeep ? Array.from(selectedKeep) : null),
   toggleType,
   filterState: () => {
     const total = Object.keys(labelEls).length;

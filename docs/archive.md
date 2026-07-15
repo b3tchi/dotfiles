@@ -5,7 +5,6 @@ Shipped workstreams. Specs (`sp###`) at `status: done` after
 
 ## done
 
-- [[sp011|akm-graph-live-highlight-no-reload]]
 
 - [[sp009|akm-graph-node-select-reverse-open]]
 

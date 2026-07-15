@@ -84,12 +84,27 @@
 
         const SLOT = Number(rawSlot);
 
-        // ── apply ────────────────────────────────────────────────────────────
+        // Spy on /api/open: cursor-driven highlights must NEVER fire the
+        // reverse channel (sp011 Task 4 — isolate WITHOUT selectNode's
+        // requestOpen, or every cursor move would bounce the editor).
+        let openCalls = 0;
+        const realFetch = window.fetch.bind(window);
+        window.fetch = (url, opts) => {
+          if (String(url).includes("/api/open")) { openCalls++; return Promise.resolve(new Response("{}")); }
+          return realFetch(url, opts);
+        };
+
+        // ── apply (highlight + neighbor isolate, sp011 Task 4) ──────────────
         g.simulateWS({ type: "highlight", id: NODE_A, slot: SLOT });
         await wait(30);
         let st = g.highlightState();
         if (st.active !== NODE_A) throw new Error("apply: expected active=" + NODE_A + " got " + JSON.stringify(st));
         if (st.labelHighlighted !== NODE_A) throw new Error("apply: label not emphasized: " + JSON.stringify(st));
+        let keep = g.keepIds();
+        if (!keep || !keep.includes(NODE_A)) throw new Error("apply: isolate not applied around " + NODE_A + ": " + JSON.stringify(keep));
+        let dim = g.dimState();
+        if (dim.dim !== dim.total - keep.length) throw new Error("apply: dim count mismatch: keep=" + keep.length + " " + JSON.stringify(dim));
+        if (dim.dim === 0) throw new Error("apply: nothing dimmed — isolate visual missing: " + JSON.stringify(dim));
 
         // ── switch (rapid sweep, last one wins) ─────────────────────────────
         g.simulateWS({ type: "highlight", id: NODE_B, slot: SLOT });
@@ -104,12 +119,26 @@
         st = g.highlightState();
         if (st.active !== NODE_B) throw new Error("wrong-slot: highlight changed from " + NODE_B + ": " + JSON.stringify(st));
 
-        // ── clear ────────────────────────────────────────────────────────────
+        // ── manual click interplay (last action wins, both directions) ──────
+        g.selectNode(NODE_B);
+        await wait(30);
+        keep = g.keepIds();
+        if (!keep || !keep.includes(NODE_B)) throw new Error("click-after-highlight: isolate not around clicked " + NODE_B + ": " + JSON.stringify(keep));
+        if (openCalls !== 1) throw new Error("manual click should fire /api/open exactly once, got " + openCalls);
+        g.simulateWS({ type: "highlight", id: NODE_A, slot: SLOT });
+        await wait(30);
+        keep = g.keepIds();
+        if (!keep || !keep.includes(NODE_A)) throw new Error("highlight-after-click: isolate not re-centered on " + NODE_A + ": " + JSON.stringify(keep));
+
+        // ── clear (both gold emphasis AND isolate) ───────────────────────────
         g.simulateWS({ type: "highlight", id: "", slot: SLOT });
         await wait(30);
         st = g.highlightState();
         if (st.active !== null) throw new Error("clear: expected no active highlight, got " + JSON.stringify(st));
         if (st.labelHighlighted !== null) throw new Error("clear: label still emphasized: " + JSON.stringify(st));
+        if (g.keepIds() !== null) throw new Error("clear: isolate still active: " + JSON.stringify(g.keepIds()));
+        dim = g.dimState();
+        if (dim.dim !== 0) throw new Error("clear: labels still dimmed: " + JSON.stringify(dim));
 
         // ── rebuild-survive ──────────────────────────────────────────────────
         // Re-apply, then push a fresh graph frame that still contains the node:
@@ -123,6 +152,8 @@
         st = g.highlightState();
         if (st.active !== NODE_A) throw new Error("rebuild-survive: highlight lost across a same-node rebuild: " + JSON.stringify(st));
         if (st.labelHighlighted !== NODE_A) throw new Error("rebuild-survive: label emphasis lost: " + JSON.stringify(st));
+        keep = g.keepIds();
+        if (!keep || !keep.includes(NODE_A)) throw new Error("rebuild-survive: isolate not re-derived after rebuild: " + JSON.stringify(keep));
 
         // ── rebuild drops the node ───────────────────────────────────────────
         const shrunk = {
@@ -134,6 +165,10 @@
         st = g.highlightState();
         if (st.active !== null) throw new Error("rebuild-drop: highlight should clear when node vanishes, got " + JSON.stringify(st));
         if (st.stored !== NODE_A) throw new Error("rebuild-drop: stored id should be retained (not resolved), got " + JSON.stringify(st));
+        if (g.keepIds() !== null) throw new Error("rebuild-drop: isolate should clear when node vanishes: " + JSON.stringify(g.keepIds()));
+
+        // Highlights fired throughout must never have hit the reverse channel.
+        if (openCalls !== 1) throw new Error("highlight path leaked into /api/open: total calls " + openCalls + " (expected only the 1 manual click)");
 
         out.textContent = "HIGHLIGHT_OK slot=" + SLOT;
         document.title = "HIGHLIGHT_OK";
