@@ -16,7 +16,5 @@ sections when status flips.
 
 ## ready
 
-- [[sp013|preview-webview-client-host]]
-
 - [[sp012|live-region-xshape-overlay]]
 
