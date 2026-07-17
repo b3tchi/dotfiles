@@ -136,7 +136,7 @@ let fake_wv = $"($fake_bin_dir)/preview-wv"
 let wv_calls_file = $"($tmp)/wv_calls"
 let fake_wv_src = "#!/bin/bash
 echo \"$@\" >> " + $wv_calls_file + "
-trap 'exit 0' TERM
+trap 'kill $! 2>/dev/null; exit 0' TERM
 sleep 3600 &
 wait
 "
