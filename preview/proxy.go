@@ -7,13 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 )
@@ -109,22 +107,27 @@ func (s *Server) handleOpen(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"opened": resolved})
 }
 
-// ── sp008 Task 7: akm/d2 iframe embed + lazy-spawn ──────────────────────────
+// ── akm/d2 iframe embed + lazy-spawn (sp008 Task 7; revised by adr0009) ─────
 //
-// akm zettels embed [[ft004]] (akm-graph) as a genuine cross-origin
-// <iframe> — poc006 confirmed akm-graph emits zero frame-blocking headers,
-// so a direct browser-to-daemon iframe is safe and needs no proxying
-// (renderAkmEmbed below).
+// BOTH akm zettels and .d2 files embed their backing daemon as a plain
+// cross-origin <iframe> — renderAkmEmbed points at akm-graph, renderD2Embed
+// at d2-router's resolved URL. preview-d proxies neither.
 //
-// .d2 files instead route their iframe src through THIS daemon's own
-// /d2embed/ route (handleD2Embed), which reverse-proxies exactly one d2-
-// router page response and strips any frame-blocking header — poc006
-// flagged d2-router's proxied `d2 --watch` page as not run-tested for this,
-// so preview-d defends against it directly rather than assuming ft002
-// already does (renderD2Embed / handleD2Embed / proxyAndStripFrameHeaders
-// below). This is deliberately NOT a general path-prefix reverse proxy of
-// d2-router's whole asset/websocket surface (poc006's explicit
-// recommendation) — just this one top-level document.
+// sp008 Task 7 originally routed .d2 through a same-origin /d2embed/ proxy
+// that stripped frame-blocking headers, because poc006 flagged d2-router's
+// `d2 --watch` page as never run-tested for them. Running it finally
+// (dotfiles-ars) settled both halves of that guess, in opposite directions:
+// the page emits NO frame-blocking headers, so the proxy defended against
+// nothing — while the proxy itself BROKE the embed. `d2 --watch` serves an
+// empty #d2-svg-container and pushes the SVG over a websocket watch.js opens
+// at a root-relative /{project}/{file}/watch, next to root-relative
+// /{project}/{file}/static/* assets. Fronting only the document left both
+// resolving against preview-d, which serves neither, so the diagram rendered
+// blank with no error at all.
+//
+// Proxying the document alone cannot work, and proxying the rest would mean
+// carrying d2-router's whole asset + websocket surface — exactly what
+// poc006 warned against. The origin has to be d2-router's own. See adr0009.
 
 // daemonHealthTimeout bounds a single /api/status health probe so a
 // half-dead daemon (accepting TCP but never responding) can't stall a
@@ -194,55 +197,6 @@ func ensureDaemonRunning(mu *sync.Mutex, port string, spawn func() error) error 
 		time.Sleep(daemonSpawnPoll)
 	}
 	return &daemonError{msg: fmt.Sprintf("daemon on port %s did not become healthy within %s", port, daemonSpawnWait)}
-}
-
-// frameProxyTimeout bounds proxyAndStripFrameHeaders' single upstream fetch
-// so an unreachable/hanging daemon can't stall the request goroutine
-// indefinitely (sp008 plan anti-pattern: external calls MUST carry a
-// timeout).
-const frameProxyTimeout = 5 * time.Second
-
-// frameBlockingHeaders lists response headers that would prevent embedded
-// content from rendering inside our iframe. Matched case-insensitively
-// (net/http header keys are already canonicalized, but the match helper
-// stays defensive) and stripped unconditionally from any proxied upstream
-// response (poc006 residual; sp008 Task 7 success criteria).
-var frameBlockingHeaders = []string{"X-Frame-Options", "Content-Security-Policy"}
-
-func isFrameBlockingHeader(name string) bool {
-	for _, h := range frameBlockingHeaders {
-		if strings.EqualFold(h, name) {
-			return true
-		}
-	}
-	return false
-}
-
-// proxyAndStripFrameHeaders fetches target and copies its status, headers
-// (minus frameBlockingHeaders), and body verbatim to w — a single-hop proxy
-// for exactly one page response. An unreachable/erroring upstream degrades
-// to renderBackendUnavailable's safe 200 page rather than a raw 502 or a
-// panic (sp008 Task 7 edge case: target daemon unavailable -> a graceful
-// preview, not a broken iframe).
-func proxyAndStripFrameHeaders(w http.ResponseWriter, target string) {
-	client := http.Client{Timeout: frameProxyTimeout}
-	resp, err := client.Get(target)
-	if err != nil {
-		renderBackendUnavailable(w, "d2-router", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	for k, vv := range resp.Header {
-		if isFrameBlockingHeader(k) {
-			continue
-		}
-		for _, v := range vv {
-			w.Header().Add(k, v)
-		}
-	}
-	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
 }
 
 // renderBackendUnavailable serves a safe "backend unavailable" HTML page —
@@ -418,18 +372,31 @@ func appendSlotQuery(src string, slot int) string {
 }
 
 // renderD2Embed serves the /file/<path> response for a .d2 file: a page
-// embedding an <iframe> whose src is preview-d's OWN /d2embed/<reqPath>
-// route (handleD2Embed below) rather than a direct cross-origin link to
-// d2-router. This is the poc006-flagged difference from the akm case: since
-// d2-router's proxied `d2 --watch` page headers were never run-tested,
-// preview-d proxies that one page itself so it can strip a frame-blocking
-// header if one ever appears (sp008 Task 7 success criteria).
-func renderD2Embed(w http.ResponseWriter, reqPath string) {
+// embedding an <iframe> pointed DIRECTLY at d2-router's own resolved URL,
+// the same plain cross-origin embed renderAkmEmbed uses (adr0009).
+//
+// The origin is the whole point. `d2 --watch` serves an empty
+// #d2-svg-container and pushes the SVG over a websocket watch.js opens at a
+// root-relative /{project}/{file}/watch, alongside root-relative
+// /{project}/{file}/static/* assets. Every one of those resolves against the
+// iframe's own origin, so only d2-router can answer them. Fronting the
+// document with a preview-d proxy left the assets and the socket pointed at
+// preview-d, which served neither — the page loaded and the diagram rendered
+// blank, with no error anywhere (dotfiles-ars).
+//
+// absPath must be the already-root-validated filesystem path (handleFile
+// resolves it through resolveInRoot before dispatching here), since it is
+// handed straight to d2-router's /api/resolve.
+func renderD2Embed(w http.ResponseWriter, absPath string) {
 	if err := ensureD2RouterRunning(); err != nil {
 		renderBackendUnavailable(w, "d2-router", err)
 		return
 	}
-	src := (&url.URL{Path: "/d2embed/" + reqPath}).String()
+	src, err := resolveD2URL(absPath)
+	if err != nil {
+		renderBackendUnavailable(w, "d2-router", err)
+		return
+	}
 	writeIframeEmbed(w, src)
 }
 
@@ -444,50 +411,6 @@ func writeIframeEmbed(w http.ResponseWriter, src string) {
 		`<iframe src="%s" style="position:fixed;inset:0;width:100%%;height:100%%;border:0" title="embedded preview"></iframe>`+
 		`</body></html>`,
 		html.EscapeString(src))
-}
-
-// handleD2Embed serves GET /d2embed/<path> — the same-origin proxy target
-// renderD2Embed's iframe points at. It re-validates path through
-// resolveInRoot rather than trusting the iframe src as pre-validated (sp008
-// Task 2 anti-pattern: no raw webview input reaches network I/O
-// unvalidated), ensures d2-router is running, resolves the absolute path to
-// a routed URL via ft002's GET /api/resolve, and proxies that ONE response
-// with frame-blocking headers stripped (proxyAndStripFrameHeaders). A path
-// this daemon doesn't recognise (resolveD2URL failing, e.g. resolve's own
-// 404 for a file outside every registered project) degrades to the same
-// backend-unavailable preview as a fully-down daemon — a simplification of
-// the sp008 Task 7 edge case "its own 404 shown in iframe": preview-d always
-// surfaces SOMETHING legible inside the iframe rather than a bare network
-// error, even though it doesn't replicate d2-router's exact 404 body.
-func (s *Server) handleD2Embed(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodGet) {
-		return
-	}
-	reqPath := strings.TrimPrefix(r.URL.Path, "/d2embed/")
-	resolved, err := resolveInRoot(s.root, reqPath)
-	if err != nil {
-		switch {
-		case errors.Is(err, ErrPathEscape):
-			http.Error(w, "bad path", http.StatusBadRequest)
-		case errors.Is(err, os.ErrNotExist):
-			http.Error(w, "not found", http.StatusNotFound)
-		default:
-			http.Error(w, "internal error", http.StatusInternalServerError)
-		}
-		return
-	}
-
-	if err := ensureD2RouterRunning(); err != nil {
-		renderBackendUnavailable(w, "d2-router", err)
-		return
-	}
-
-	target, err := resolveD2URL(resolved)
-	if err != nil {
-		renderBackendUnavailable(w, "d2-router", err)
-		return
-	}
-	proxyAndStripFrameHeaders(w, target)
 }
 
 // resolveD2URL asks the (already-healthy) d2-router daemon which URL serves

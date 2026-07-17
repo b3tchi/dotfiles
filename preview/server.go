@@ -95,11 +95,6 @@ func (s *Server) Handler() http.Handler {
 	// handleFile — keeps a clean auto-merge.
 	mux.HandleFunc("/open", s.handleOpen)
 
-	// sp008 Task 7: GET /d2embed/<path> is the same-origin proxy target a
-	// .d2 file's iframe embed points at (proxy.go's handleD2Embed) — kept in
-	// its own block for the same clean-auto-merge reason as /open above.
-	mux.HandleFunc("/d2embed/", s.handleD2Embed)
-
 	// sp009 Task 1: POST /register is the per-slot nvim-address binding
 	// route — an nvim instance registers its server addr against a slot
 	// (allocated when omitted, or an explicit slot it already owns) so a
@@ -436,14 +431,15 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 	// zettel (docs/notes/**.md) resolves to an iframe embed of ft002/ft004
 	// respectively, rather than the plain code/markdown render the switch
 	// below would otherwise give it. Special-cased here, before the
-	// renderFile dispatch, because renderD2Embed needs reqPath (to build the
-	// /d2embed/<reqPath> proxy target) and renderAkmEmbed needs s.root (to
-	// spawn akm-graph-d with the matching --root) — neither is available
-	// inside renderFile's signature (path.go/render.go's dispatcher only
-	// ever receives the resolved filesystem path), the exact same
-	// constraint that put the ?live case here instead of inside renderFile.
+	// renderFile dispatch, because renderD2Embed needs the resolved abs path
+	// (to ask d2-router's /api/resolve which URL serves it) and
+	// renderAkmEmbed needs s.root (to spawn akm-graph-d with the matching
+	// --root) — neither is available inside renderFile's signature
+	// (path.go/render.go's dispatcher only ever receives the resolved
+	// filesystem path), the exact same constraint that put the ?live case
+	// here instead of inside renderFile.
 	if isD2Ext(resolved) {
-		renderD2Embed(w, reqPath)
+		renderD2Embed(w, resolved)
 		return
 	}
 	if isAkmZettel(s.root, resolved) {

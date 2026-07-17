@@ -450,78 +450,8 @@ func TestEnsureDaemonRunningTimesOutWhenNeverHealthy(t *testing.T) {
 	}
 }
 
-// TestProxyAndStripFrameHeadersRemovesXFrameOptions proves the poc006
-// residual: if an upstream page (d2-router's proxied d2 --watch page in
-// production) emits a frame-blocking header, preview-d's own proxy strips
-// it from what it serves back — the sp008 Task 7 success criteria "if ft002
-// emits a frame-blocking header ... the proxy strips it" and its test_plan
-// ("stub sends X-Frame-Options: DENY; proxied response has it removed").
-// Tested directly against an httptest upstream stub, independent of any
-// daemon spawn/health machinery.
-func TestProxyAndStripFrameHeadersRemovesXFrameOptions(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("<html>upstream d2 page</html>"))
-	}))
-	defer upstream.Close()
 
-	rec := httptest.NewRecorder()
-	proxyAndStripFrameHeaders(rec, upstream.URL)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-	}
-	if got := rec.Header().Get("X-Frame-Options"); got != "" {
-		t.Errorf("X-Frame-Options = %q, want stripped (empty)", got)
-	}
-	if got := rec.Header().Get("Content-Security-Policy"); got != "" {
-		t.Errorf("Content-Security-Policy = %q, want stripped (empty)", got)
-	}
-	if !strings.Contains(rec.Body.String(), "upstream d2 page") {
-		t.Errorf("body not proxied through: %s", rec.Body.String())
-	}
-}
-
-// TestProxyAndStripFrameHeadersPassesThroughOtherHeaders proves the strip is
-// scoped to frame-blocking headers only — an unrelated header (and the
-// upstream's status code) survives the proxy untouched.
-func TestProxyAndStripFrameHeadersPassesThroughOtherHeaders(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Custom-Marker", "keep-me")
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte("not found upstream"))
-	}))
-	defer upstream.Close()
-
-	rec := httptest.NewRecorder()
-	proxyAndStripFrameHeaders(rec, upstream.URL)
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 (upstream's own status passed through)", rec.Code)
-	}
-	if got := rec.Header().Get("X-Custom-Marker"); got != "keep-me" {
-		t.Errorf("X-Custom-Marker = %q, want passed through unchanged", got)
-	}
-}
-
-// TestProxyAndStripFrameHeadersUpstreamUnreachable proves an unreachable
-// upstream degrades to a safe "backend unavailable" 200 response, never a
-// panic or a raw 502 that would render as a broken iframe (sp008 Task 7
-// edge case: target daemon unavailable -> a graceful preview).
-func TestProxyAndStripFrameHeadersUpstreamUnreachable(t *testing.T) {
-	rec := httptest.NewRecorder()
-	proxyAndStripFrameHeaders(rec, "http://127.0.0.1:1/unreachable")
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (graceful fallback)", rec.Code)
-	}
-	if !strings.Contains(strings.ToLower(rec.Body.String()), "unavailable") {
-		t.Errorf("body missing 'unavailable' marker: %s", rec.Body.String())
-	}
-}
 
 // TestHandleOpenWrongMethodRejected proves method-parity with the other
 // routes (/status, /stop, /file/<path>): a non-POST /open is 405.
@@ -814,18 +744,24 @@ func startStubD2Router(t *testing.T, port, wantAbsPath, resolvedURL string) {
 	t.Cleanup(func() { _ = srv.Close() })
 }
 
-// TestHandleFileD2FileEmbedsViaD2EmbedRoute proves the sp008 Task 7 success
-// criteria for .d2 files: the /file/<path> response embeds an iframe whose
-// src is preview-d's OWN /d2embed/ route (not a raw cross-origin link to
-// d2-router) — poc006's header-strip residual requires preview-d to proxy
-// this page itself, so it can't be a bare cross-origin iframe like the akm
-// case.
-func TestHandleFileD2FileEmbedsViaD2EmbedRoute(t *testing.T) {
+// TestHandleFileD2FileEmbedsD2RouterDirectly proves the .d2 embed points
+// DIRECTLY at d2-router's own resolved URL, exactly as renderAkmEmbed does
+// for akm zettels — preview-d proxies nothing.
+//
+// This is what makes live preview work. `d2 --watch` ships an empty
+// #d2-svg-container and pushes the SVG over a websocket that watch.js opens
+// at a root-relative /{project}/{file}/watch. Only a same-origin iframe can
+// reach it, so the document, watch.js and that socket must all share
+// d2-router's origin. Routing the document through a preview-d proxy stranded
+// the assets and the socket on the wrong origin and rendered the diagram
+// blank (dotfiles-ars).
+func TestHandleFileD2FileEmbedsD2RouterDirectly(t *testing.T) {
 	port := freePort(t)
 	t.Setenv("D2_ROUTER_PORT", port)
 
 	srv, reqPath, absPath := d2FileServer(t)
-	startStubD2Router(t, port, absPath, "http://127.0.0.1:"+port+"/dotfiles/diagram.d2")
+	resolved := "http://127.0.0.1:" + port + "/dotfiles/diagram.d2"
+	startStubD2Router(t, port, absPath, resolved)
 
 	withD2RouterSpawn(t, func() error {
 		t.Fatal("d2-router spawn invoked despite daemon already healthy")
@@ -839,69 +775,15 @@ func TestHandleFileD2FileEmbedsViaD2EmbedRoute(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET %s: status %d, want 200 (body: %s)", reqPath, rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), `<iframe src="/d2embed/diagram.d2"`) {
-		t.Errorf("body missing same-origin d2embed iframe; body=%s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), `<iframe src="`+resolved+`"`) {
+		t.Errorf("body missing direct cross-origin iframe at %s; body=%s", resolved, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "/d2embed/") {
+		t.Errorf("body still points at the removed same-origin proxy route: %s", rec.Body.String())
 	}
 }
 
-// TestHandleD2EmbedProxiesResolvedURLAndStripsFrameHeaders proves the
-// /d2embed/ route itself: it lazy-spawns/health-checks d2-router, resolves
-// the abs path via ft002's GET /api/resolve, then proxies that resolved
-// page's response — stripping any frame-blocking header the upstream sent
-// (sp008 Task 7 test_plan header-strip case, end-to-end through the real
-// route this time rather than proxyAndStripFrameHeaders in isolation).
-func TestHandleD2EmbedProxiesResolvedURLAndStripsFrameHeaders(t *testing.T) {
-	// The actual d2 page content lives on a THIRD server (the thing
-	// d2-router's resolved URL points at) so the stub d2-router's own
-	// /api/resolve handler and the final proxied page are independently
-	// verifiable.
-	d2Page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Frame-Options", "DENY")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("<html>d2 diagram</html>"))
-	}))
-	defer d2Page.Close()
 
-	port := freePort(t)
-	t.Setenv("D2_ROUTER_PORT", port)
-
-	srv, _, absPath := d2FileServer(t)
-	startStubD2Router(t, port, absPath, d2Page.URL)
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/d2embed/diagram.d2", nil)
-	srv.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /d2embed/diagram.d2: status %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-	}
-	if got := rec.Header().Get("X-Frame-Options"); got != "" {
-		t.Errorf("X-Frame-Options = %q, want stripped", got)
-	}
-	if !strings.Contains(rec.Body.String(), "d2 diagram") {
-		t.Errorf("body not proxied from resolved d2 page: %s", rec.Body.String())
-	}
-}
-
-// TestHandleD2EmbedOutOfRootRejected proves /d2embed/ re-validates its path
-// through the same root-jail as /file/<path> — it never trusts the iframe
-// src as pre-validated (sp008 Task 2 anti-pattern: no raw webview input
-// reaches network I/O unvalidated). The handler is called directly,
-// bypassing http.ServeMux (which would otherwise 301-redirect an unclean
-// "/d2embed/../../etc/passwd" request before our own code runs — a stdlib
-// path-cleaning quirk, not the security boundary being proven here; see
-// TestHandleFileRejectsDotDotEscapeAndReadsNothing in server_test.go for
-// the same rationale on /file/<path>).
-func TestHandleD2EmbedOutOfRootRejected(t *testing.T) {
-	srv := newTestServer(t)
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/d2embed/../../etc/passwd", nil)
-	srv.handleD2Embed(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("GET /d2embed/ (out-of-root): status %d, want 400 (body: %s)", rec.Code, rec.Body.String())
-	}
-}
 
 // TestHandleFileD2BackendUnavailableWhenSpawnFails proves the same "backend
 // unavailable, not a broken iframe" edge case as the akm test, but for the
@@ -1099,3 +981,7 @@ func TestHandlePreviewSetForwardsHighlightOnlyForAkmPaths(t *testing.T) {
 		t.Errorf("captured call = %+v, want {docs/notes/a.md 1}", call)
 	}
 }
+
+
+
+
