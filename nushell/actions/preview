@@ -26,6 +26,15 @@
 
 const DAEMON_BIN = "preview-d"
 const WEBVIEW_BIN = "preview-wv"
+
+# How long place-window waits for a detached window to be mapped before
+# giving up (dotfiles-816). 20 × 150ms ≈ 3s — comfortably longer than a
+# webview takes to map, short enough that a window which never appears
+# doesn't stall the caller. Placement is best-effort: expiring here leaves
+# the window where the WM put it, which is what happened before this
+# existed, not a failure worth erroring on.
+const PLACE_ATTEMPTS = 20
+const PLACE_POLL = 150ms
 const CACHE_DIR  = "~/.cache/preview"
 const PID_FILE   = "~/.cache/preview/pid"
 const LOG_FILE   = "~/.cache/preview/log"
@@ -270,7 +279,62 @@ def window-spawn [n: int] {
 
     let new_pid = ($pid_result.stdout | str trim | into int)
     write-pidfile-at $pid_file $new_pid
+    place-window $n
     print $"preview: opened window ($n) \(pid ($new_pid)\)"
+}
+
+# Read slot n's recorded workspace off the daemon, or "" if the daemon has
+# none (no nvim ever registered for this slot — e.g. a window opened straight
+# from a shell) or is unreachable. Never errors: placement is best-effort
+# decoration on top of a window that already exists.
+def slot-workspace [n: int] {
+    let rows = (try {
+        http get --max-time 2sec $"(api-base)/slots"
+    } catch { return "" })
+    let row = ($rows | where slot == $n)
+    if ($row | is-empty) { return "" }
+    ($row | get 0.workspace)
+}
+
+# Move window n to the workspace its nvim registered from (dotfiles-816), so
+# the preview lands beside the editor driving it rather than wherever the
+# spawning shell happened to be focused.
+#
+# A no-op when the slot has no recorded workspace: the WM's default
+# placement is the correct fallback, and inventing a workspace would be
+# worse than leaving it alone.
+#
+# The criteria carry BOTH class and title. Every slot's window shares
+# WM_CLASS "preview-wv", so class alone would drag every open preview window
+# onto this workspace; the per-slot title ("preview <n>") is what makes the
+# match specific. I3SOCK is unset for the same wrong-session reason as
+# current-workspace.
+def place-window [n: int] {
+    let ws = (slot-workspace $n)
+    if ($ws | is-empty) { return }
+    let criteria = $"[class=\"preview-wv\" title=\"^preview ($n)$\"]"
+    for bin in [swaymsg i3-msg] {
+        if (which $bin | is-empty) { continue }
+        # The window was spawned DETACHED, so it is usually not mapped yet
+        # when we get here — i3 then matches nothing, and the exit code does
+        # NOT say so: i3-msg exits 0 while reporting {"success": false,
+        # "error": "Nothing to move: ..."} in its body. Trusting the exit
+        # code silently no-ops, which is exactly how this first shipped
+        # broken. Poll on the body's success flag instead, bounded, so a
+        # window that never appears costs a bounded wait rather than a hang.
+        for attempt in 1..($PLACE_ATTEMPTS) {
+            let r = (do {
+                ^env -u I3SOCK $bin $"($criteria) move workspace ($ws)"
+            } | complete)
+            if $r.exit_code == 0 {
+                let ok = (try {
+                    $r.stdout | from json | get 0.success
+                } catch { false })
+                if $ok { return }
+            }
+            sleep $PLACE_POLL
+        }
+    }
 }
 
 # `preview window [N] [--close]` — default N=1.
@@ -376,12 +440,45 @@ def main-send [path?: string, window: int = 1] {
 # idempotent rather than leaking a fresh slot per call (sp009 Task 3 edge
 # case). A missing address is a loud error, not a silent no-op, mirroring
 # `send`'s missing-path guard.
+# Ask the running WM which workspace is focused, or "" when there is no WM
+# to ask (Termux), no WM running, or the query fails (dotfiles-816).
+#
+# I3SOCK is unset for the call ON PURPOSE. An inherited I3SOCK points at
+# whichever session the calling shell was born in, so a shell in session A
+# would answer with session A's workspace and place the window on the wrong
+# screen. Unset, i3-msg re-derives the socket from $DISPLAY — the session
+# the caller is actually in. SWAYSOCK is left alone: swaymsg needs it, and
+# it does not carry the same cross-session hazard.
+#
+# "" is the honest answer for "no workspace known" and callers must treat it
+# as "leave placement to the WM", never as a workspace name.
+def current-workspace [] {
+    for bin in [swaymsg i3-msg] {
+        if (which $bin | is-empty) { continue }
+        let out = (do { ^env -u I3SOCK $bin -t get_workspaces } | complete)
+        if $out.exit_code != 0 { continue }
+        let ws = (try {
+            $out.stdout | from json | where focused | get 0.name
+        } catch { "" })
+        if ($ws | is-not-empty) { return $ws }
+    }
+    ""
+}
+
 def main-register [nvim?: string, slot?: int] {
     if ($nvim | is-empty) {
         error make { msg: "preview: register requires an nvim server address" }
     }
     let url = $"(api-base)/register"
+    # The workspace is captured HERE, at register time, because this is the
+    # one moment we know the answer: :PreviewStart runs from inside nvim, so
+    # the focused workspace IS nvim's. A later `preview window N` runs in a
+    # different process (possibly a different workspace entirely) and cannot
+    # work it out — nvim sits under tmux, which severs the pid chain from the
+    # terminal window the WM knows about.
+    let ws = (current-workspace)
     let body = if ($slot == null) { {nvim: $nvim} } else { {nvim: $nvim, slot: $slot} }
+    let body = if ($ws | is-empty) { $body } else { $body | insert workspace $ws }
     let resp = (try {
         http post --max-time 2sec --content-type application/json $url $body
     } catch { |err|

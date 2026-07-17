@@ -737,3 +737,62 @@ func TestHandlePreviewSetHighlightForwardFailureFallsBackToBroadcast(t *testing.
 		})
 	}
 }
+
+// TestRegisterStoresWorkspaceAndStatusServesIt proves the dotfiles-816 wire
+// path end-to-end through the real routes: nvim's `preview register` carries
+// the workspace it was on, and a LATER `preview window N` invocation — a
+// separate process that cannot see nvim's environment — reads it back off
+// the daemon. That read-back is why the binding lives in preview-d rather
+// than in the wrapper's cache dir.
+func TestRegisterStoresWorkspaceAndStatusServesIt(t *testing.T) {
+	srv := newTestServer(t)
+
+	body, _ := json.Marshal(map[string]any{"nvim": "/tmp/nvim.sock", "workspace": "dotfiles"})
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /register: status %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	var reg struct {
+		Slot int `json:"slot"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &reg); err != nil {
+		t.Fatalf("decode register response: %v", err)
+	}
+
+	if got := srv.slots.Workspace(reg.Slot); got != "dotfiles" {
+		t.Errorf("slot %d workspace = %q, want \"dotfiles\" — register dropped it", reg.Slot, got)
+	}
+
+	// The wrapper's read-back path: GET /slots must expose it.
+	rec2 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/slots", nil))
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("GET /slots: status %d, want 200 (body: %s)", rec2.Code, rec2.Body.String())
+	}
+	if !strings.Contains(rec2.Body.String(), `"workspace":"dotfiles"`) {
+		t.Errorf("GET /slots body missing the recorded workspace: %s", rec2.Body.String())
+	}
+}
+
+// TestRegisterWithoutWorkspaceLeavesItEmpty proves workspace stays optional:
+// a register with no workspace (a non-WM caller — Termux has no WM at all)
+// must still succeed and simply record nothing, so window-spawn falls back
+// to default placement instead of moving the window somewhere invented.
+func TestRegisterWithoutWorkspaceLeavesItEmpty(t *testing.T) {
+	srv := newTestServer(t)
+
+	body, _ := json.Marshal(map[string]any{"nvim": "/tmp/nvim.sock"})
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /register (no workspace): status %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	var reg struct {
+		Slot int `json:"slot"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &reg)
+	if got := srv.slots.Workspace(reg.Slot); got != "" {
+		t.Errorf("slot %d workspace = %q, want \"\" when none was sent", reg.Slot, got)
+	}
+}

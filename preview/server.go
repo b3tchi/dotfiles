@@ -103,6 +103,12 @@ func (s *Server) Handler() http.Handler {
 	// clean-auto-merge reason as /open and /d2embed above.
 	mux.HandleFunc("/register", s.handleRegister)
 
+	// dotfiles-816: GET /slots is the read-back for slot metadata (nvim
+	// addr, workspace, path). `preview window N` runs in a different process
+	// from the nvim that registered, so it needs a wire path to the
+	// workspace rather than an environment it cannot see.
+	mux.HandleFunc("/slots", s.handleSlots)
+
 	return s.previewRouter(mux)
 }
 
@@ -491,6 +497,12 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Nvim string `json:"nvim"`
 		Slot *int   `json:"slot"`
+		// Workspace is optional (dotfiles-816): the WM workspace this nvim
+		// is on, captured by the wrapper at register time. Absent for a
+		// caller with no WM at all (Termux), in which case nothing is
+		// recorded and window placement falls back to the WM default —
+		// never an invented workspace.
+		Workspace string `json:"workspace"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "bad request body", http.StatusBadRequest)
@@ -508,7 +520,40 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		n = s.slots.AllocateSlot()
 	}
 	s.slots.SetNvimAddr(n, body.Nvim)
+	if body.Workspace != "" {
+		s.slots.SetWorkspace(n, body.Workspace)
+	}
 	writeJSON(w, map[string]any{"slot": n})
+}
+
+// slotInfo is the GET /slots wire shape — the read-back path for a `preview
+// window N` invocation, which runs in a different process from the nvim that
+// registered and so cannot see its environment (dotfiles-816).
+type slotInfo struct {
+	Slot      int    `json:"slot"`
+	Nvim      string `json:"nvim"`
+	Workspace string `json:"workspace"`
+	Path      string `json:"path"`
+}
+
+// handleSlots serves GET /slots — every slot the daemon knows, with its
+// bound nvim address, recorded workspace and current path. Read-only: the
+// wrapper decides what to do with the workspace (WM placement is its job,
+// not the daemon's — adr0003).
+func (s *Server) handleSlots(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	out := []slotInfo{}
+	for _, n := range s.slots.SlotNumbers() {
+		out = append(out, slotInfo{
+			Slot:      n,
+			Nvim:      s.slots.NvimAddr(n),
+			Workspace: s.slots.Workspace(n),
+			Path:      s.slots.CurrentPath(n),
+		})
+	}
+	writeJSON(w, out)
 }
 
 // requireMethod enforces want; on mismatch it writes 405 + Allow and

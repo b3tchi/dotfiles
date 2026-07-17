@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"sort"
 	"sync"
 	"time"
 
@@ -112,10 +113,11 @@ func redrawMessage(path string) []byte {
 // window N has connected is still applied the moment one connects (sp008
 // Task 4 edge case).
 type slot struct {
-	mu       sync.Mutex
-	path     string // "" = no path ever set for this slot yet
-	hub      *Hub
-	nvimAddr string // "" = no nvim has registered against this slot yet
+	mu        sync.Mutex
+	path      string // "" = no path ever set for this slot yet
+	hub       *Hub
+	nvimAddr  string // "" = no nvim has registered against this slot yet
+	workspace string // "" = no WM workspace recorded for this slot yet
 }
 
 // SlotManager owns the independent {path, client-set} state for every
@@ -213,6 +215,44 @@ func (sm *SlotManager) NvimAddr(n int) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.nvimAddr
+}
+
+// SlotNumbers returns every known slot number in ascending order. Sorted,
+// not map order, so GET /slots is stable across calls — an unstable listing
+// would make the wrapper's output jitter between invocations for no reason.
+func (sm *SlotManager) SlotNumbers() []int {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	out := make([]int, 0, len(sm.slots))
+	for n := range sm.slots {
+		out = append(out, n)
+	}
+	sort.Ints(out)
+	return out
+}
+
+// SetWorkspace records the WM workspace slot n's nvim was on when it
+// registered (dotfiles-816). preview-d treats it as an opaque string: the
+// wrapper captures it (i3-msg/swaymsg) and performs the move, because
+// placement is an interface concern and this daemon is an engine (adr0003).
+// Re-registering overwrites, so moving nvim and re-running :PreviewStart is
+// how a stale workspace gets corrected.
+func (sm *SlotManager) SetWorkspace(n int, ws string) {
+	s := sm.slotFor(n)
+	s.mu.Lock()
+	s.workspace = ws
+	s.mu.Unlock()
+}
+
+// Workspace returns slot n's recorded WM workspace, or "" if none was ever
+// recorded — the signal for callers to fall back to default placement
+// rather than invent one (a slot spawned from a shell that never registered
+// an nvim has no meaningful workspace).
+func (sm *SlotManager) Workspace(n int) string {
+	s := sm.slotFor(n)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.workspace
 }
 
 // AllocateSlot reserves and returns the lowest unused slot number (starting

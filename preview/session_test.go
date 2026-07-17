@@ -198,3 +198,34 @@ func TestSlotManagerAllocateSlotConcurrentDistinct(t *testing.T) {
 func newTestClient(buf int) *wsClient {
 	return &wsClient{send: make(chan []byte, buf)}
 }
+
+// TestSlotWorkspaceRoundTrip proves a slot carries the WM workspace its
+// nvim was on when it registered, alongside the nvim address it already
+// holds (dotfiles-816). preview-d only stores and serves the string — the
+// wrapper captures it and does the WM move, since placement is an interface
+// concern and the daemon is an engine (adr0003).
+func TestSlotWorkspaceRoundTrip(t *testing.T) {
+	sm := NewSlotManager()
+
+	if got := sm.Workspace(1); got != "" {
+		t.Errorf("Workspace(1) on a fresh slot = %q, want \"\" (no workspace recorded)", got)
+	}
+
+	sm.SetWorkspace(1, "dotfiles")
+	if got := sm.Workspace(1); got != "dotfiles" {
+		t.Errorf("Workspace(1) = %q, want \"dotfiles\"", got)
+	}
+
+	// Slots must not leak into each other — the whole point of the slot model.
+	if got := sm.Workspace(2); got != "" {
+		t.Errorf("Workspace(2) = %q, want \"\" — slot 1's workspace leaked", got)
+	}
+
+	// Re-registering from a different workspace must overwrite, not append:
+	// nvim moving workspaces and re-running :PreviewStart is the fix path for
+	// the known staleness caveat.
+	sm.SetWorkspace(1, "promotool")
+	if got := sm.Workspace(1); got != "promotool" {
+		t.Errorf("Workspace(1) after re-register = %q, want \"promotool\"", got)
+	}
+}
