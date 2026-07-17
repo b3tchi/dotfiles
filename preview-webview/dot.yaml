@@ -15,6 +15,22 @@ linux:
       # lands on hosts without rust — the wrapper then reports "rotz install
       # preview-webview" until the binary exists.
       if command -v cargo >/dev/null 2>&1; then
+        # System deps: wry/tao link against WebKitGTK, and the build dies at
+        # javascriptcore-rs-sys without it. webkit2gtk-4.1 owns both the
+        # javascriptcoregtk-4.1 and webkit2gtk-4.1 .pc files and pulls
+        # gtk3/libsoup3/glib2/cairo/pango transitively, so it is the only
+        # package worth declaring. Arch-family only — the package name is
+        # identical on Arch/Manjaro/Arch ARM, so a runtime pacman guard beats
+        # branching whoami.distro three times for one identical line (and
+        # matches this dot's existing runtime `command -v cargo` idiom).
+        # pkg-config short-circuit keeps re-runs from shelling out to pacman.
+        if ! pkg-config --exists javascriptcoregtk-4.1 2>/dev/null; then
+          if command -v pacman >/dev/null 2>&1; then
+            sudo pacman -S --needed --noconfirm webkit2gtk-4.1
+          else
+            echo "preview-webview: WebKitGTK dev libs missing and no pacman found — install your distro's javascriptcoregtk-4.1 / webkit2gtk-4.1 dev package, then re-run 'rotz install preview-webview'" >&2
+          fi
+        fi
         mkdir -p ~/.local/bin
         # Resolve the source dir via akm-root so a non-standard clone path
         # (not ~/.dotfiles) still builds. Fall back to ~/.dotfiles.
@@ -25,8 +41,15 @@ linux:
             SRC="$ROOT/preview-webview"
           fi
         fi
-        cargo build --manifest-path "$SRC/Cargo.toml" --release
-        cp "$SRC/target/release/preview-wv" ~/.local/bin/preview-wv
+        cargo build --manifest-path "$SRC/Cargo.toml" --release || exit 1
+        # Install via temp + atomic rename, never a plain cp: the kernel
+        # refuses to overwrite a RUNNING executable (ETXTBSY, "Text file
+        # busy"), so `cp` onto a live preview-wv silently leaves the old
+        # binary while the dot still reports success. rename(2) is allowed on
+        # a busy inode — the running process keeps its open image until it
+        # exits, and the next spawn picks up the new one.
+        cp "$SRC/target/release/preview-wv" ~/.local/bin/preview-wv.new || exit 1
+        mv -f ~/.local/bin/preview-wv.new ~/.local/bin/preview-wv || exit 1
         echo "preview-webview: built ~/.local/bin/preview-wv from $SRC"
       else
         echo "preview-webview: cargo toolchain not found — skipping build (install rust, then re-run 'rotz install preview-webview')" >&2
