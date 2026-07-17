@@ -23,8 +23,28 @@
 #      register fired immediately after start (nvim :PreviewStart's exact
 #      sequence) cannot hit connection-refused (dotfiles-nbt).
 #
+# sp013 Task 2 (wrapper `window` verb + stop integration), against a fake
+# preview-wv (sleep stub on the same temp PATH as the fake preview-d):
+#  10. `preview window` (default N=1) spawns the stub detached and writes
+#      wv-1.pid.
+#  11. A second `preview window` call is an idempotent no-op (same pid).
+#  12. A stale pidfile (dead pid) is cleaned up and the window respawned.
+#  13. A recycled pid (alive, but /proc/<pid>/cmdline does not contain
+#      preview-wv) is treated as stale and respawned WITHOUT ever
+#      signaling the foreign process (asserted alive after the call) —
+#      the sp013 plan's ship-blocker anti-pattern.
+#  14. `preview window --close` SIGTERMs the cmdline-verified stub and
+#      removes the pidfile.
+#  15. A second `--close` is an idempotent clean no-op message.
+#  16. `--close` on a window that was never opened is a clean message,
+#      exit 0.
+#  17. `preview stop` closes every open wv-*.pid window before it touches
+#      the daemon.
+#  18. Missing preview-wv binary → error names "rotz install preview-webview".
+#  19. Daemon not answering /status → error names "preview start".
+#
 # Run:  nu nushell/actions/preview-test
-# Pass: exits 0 and prints "PASS: 9 tests passed"
+# Pass: exits 0 and prints "PASS: 19 tests passed"
 # Fail: exits 1 and prints "FAIL: <description>"
 
 # Self-locate the wrapper relative to this test so it survives merging out
@@ -105,6 +125,68 @@ PY
 "
 $fake_src | save --force $fake_daemon
 ^chmod +x $fake_daemon
+
+# Fake preview-wv (sp013 Task 2 test_plan: "fake preview-wv, sleep stub on
+# temp PATH, existing fake-daemon pattern"). Records every invocation's
+# args (so spawn tests can assert what N/--port it was launched with) and
+# then sleeps until it's SIGTERMed — no `exec`, so the recorded pid stays
+# the pid of *this* script (whose /proc/<pid>/cmdline therefore contains
+# "preview-wv"), not of the `sleep` it spawns as a plain child.
+let fake_wv = $"($fake_bin_dir)/preview-wv"
+let wv_calls_file = $"($tmp)/wv_calls"
+let fake_wv_src = "#!/bin/bash
+echo \"$@\" >> " + $wv_calls_file + "
+trap 'exit 0' TERM
+sleep 3600 &
+wait
+"
+$fake_wv_src | save --force $fake_wv
+^chmod +x $fake_wv
+
+# Path to window N's pidfile under the isolated cache dir (mirrors the
+# wrapper's own window-pid-file, but computed independently here so the
+# test doesn't depend on the wrapper's internals).
+def wv-pid-file [cache: string, n: int] {
+    $"($cache)/wv-($n).pid"
+}
+
+# Spawn a bystander process that is deliberately NOT preview-wv — used to
+# simulate a recycled pid (alive, but /proc/<pid>/cmdline doesn't match).
+# Returns its pid.
+def spawn-bystander [] {
+    # Redirect the backgrounded sleep's stdout/stderr away from the parent
+    # bash -c's own streams — otherwise the child keeps nu's `complete`
+    # capture pipe open for as long as it lives (3600s), hanging this call
+    # instead of returning as soon as `echo $!` completes.
+    let r = (do { ^bash -c "sleep 3600 >/dev/null 2>&1 & echo $!" } | complete)
+    ($r.stdout | str trim | into int)
+}
+
+def pid-is-alive [pid: int] {
+    (do { ^kill -0 $pid } | complete | get exit_code) == 0
+}
+
+def wait-pid-dead [pid: int] {
+    for _ in 1..30 {
+        if not (pid-is-alive $pid) { return true }
+        sleep 100ms
+    }
+    false
+}
+
+def wait-pid-alive [pid: int] {
+    for _ in 1..30 {
+        if (pid-is-alive $pid) { return true }
+        sleep 100ms
+    }
+    false
+}
+
+# Track every real preview-wv stub pid we spawn during the window tests so
+# leftovers (e.g. deliberately orphaned by overwriting a pidfile to
+# simulate stale/recycled scenarios) get reaped in cleanup instead of
+# lingering as `sleep 3600` processes.
+mut spawned_pids = []
 
 # Helper: run the wrapper with a clean env (isolated HOME/PATH/port).
 def run-wrapper [tmp: string, port: string, path: string, verb: string, extra_args: string = ""] {
@@ -395,8 +477,252 @@ wait-port-free $test_port
 ^rm -f $pid_file $launched_marker
 print "PASS: start blocks until the daemon answers, register-after-start is race-free"
 
+# ── test 10: window (default N=1) spawns preview-wv, writes wv-1.pid ─────────
+
+run-wrapper $tmp $test_port $test_path "start" | ignore
+for _ in 1..30 {
+    let up = (do { ^bash -c $"curl -sf --max-time 1 http://127.0.0.1:($test_port)/status" } | complete)
+    if $up.exit_code == 0 { break }
+    sleep 100ms
+}
+
+let win1_pid_file = (wv-pid-file $cache_dir 1)
+let r10 = (run-wrapper $tmp $test_port $test_path "window")
+if $r10.exit_code != 0 {
+    print $"FAIL: window spawn exited ($r10.exit_code)\n($r10.stdout)($r10.stderr)"
+    exit 1
+}
+if not ($win1_pid_file | path exists) {
+    print $"FAIL: window spawn did not write ($win1_pid_file)"
+    exit 1
+}
+let win1_pid = (open $win1_pid_file | str trim | into int)
+if not (wait-pid-alive $win1_pid) {
+    print $"FAIL: window spawn's recorded pid ($win1_pid) never came alive"
+    exit 1
+}
+let wv_calls = (if ($wv_calls_file | path exists) { open $wv_calls_file } else { "<no calls file>" })
+if not ($wv_calls | str contains "1 --port 58920") {
+    print $"FAIL: preview-wv stub was not invoked with the expected args \(N=1 --port ($test_port)\):\n($wv_calls)"
+    exit 1
+}
+$spawned_pids = ($spawned_pids | append $win1_pid)
+print "PASS: window (default N=1) spawns preview-wv detached and writes wv-1.pid"
+
+# ── test 11: second window call is an idempotent no-op ───────────────────────
+
+let r11 = (run-wrapper $tmp $test_port $test_path "window")
+if $r11.exit_code != 0 {
+    print $"FAIL: second window call exited ($r11.exit_code)\n($r11.stdout)($r11.stderr)"
+    exit 1
+}
+if not ($"($r11.stdout)($r11.stderr)" | str contains "no-op") {
+    print $"FAIL: second window call did not report no-op:\n($r11.stdout)($r11.stderr)"
+    exit 1
+}
+let win1_pid_after = (open $win1_pid_file | str trim | into int)
+if $win1_pid_after != $win1_pid {
+    print $"FAIL: idempotent window call replaced pid ($win1_pid) with ($win1_pid_after)"
+    exit 1
+}
+print "PASS: second window call is an idempotent no-op"
+
+# ── test 12: stale (dead) pidfile is cleaned up and the window respawned ─────
+
+# The window from test 10/11 is still alive; kill it directly (bypassing
+# the wrapper) so we can overwrite its pidfile with a bogus dead pid
+# without leaking the real stub process.
+^kill -TERM $win1_pid
+wait-pid-dead $win1_pid | ignore
+
+let bogus_win_pid = 9999992
+if (pid-is-alive $bogus_win_pid) {
+    print $"FAIL: bogus pid ($bogus_win_pid) unexpectedly alive"
+    exit 1
+}
+$bogus_win_pid | into string | save --force $win1_pid_file
+
+let r12 = (run-wrapper $tmp $test_port $test_path "window")
+if $r12.exit_code != 0 {
+    print $"FAIL: window spawn over a stale pidfile exited ($r12.exit_code)\n($r12.stdout)($r12.stderr)"
+    exit 1
+}
+if not ($"($r12.stdout)($r12.stderr)" | str contains "stale") {
+    print $"FAIL: window spawn over a stale pidfile did not mention cleanup:\n($r12.stdout)($r12.stderr)"
+    exit 1
+}
+let win1_pid_v2 = (open $win1_pid_file | str trim | into int)
+if $win1_pid_v2 == $bogus_win_pid or not (wait-pid-alive $win1_pid_v2) {
+    print $"FAIL: stale pidfile was not replaced with a live respawned pid \(got ($win1_pid_v2)\)"
+    exit 1
+}
+$spawned_pids = ($spawned_pids | append $win1_pid_v2)
+print "PASS: stale (dead) pidfile is cleaned up and the window respawned"
+
+# ── test 13: recycled pid (alive, cmdline mismatch) is NEVER killed ──────────
+
+let bystander_pid = (spawn-bystander)
+if not (wait-pid-alive $bystander_pid) {
+    print $"FAIL: bystander process ($bystander_pid) never came alive"
+    exit 1
+}
+# Overwrite window 1's pidfile with the bystander's pid — same shape as a
+# recycled pid: alive, but not a preview-wv process.
+$bystander_pid | into string | save --force $win1_pid_file
+
+let r13 = (run-wrapper $tmp $test_port $test_path "window")
+if $r13.exit_code != 0 {
+    print $"FAIL: window spawn over a recycled pid exited ($r13.exit_code)\n($r13.stdout)($r13.stderr)"
+    exit 1
+}
+if not ($"($r13.stdout)($r13.stderr)" | str contains "stale") {
+    print $"FAIL: window spawn over a recycled pid did not report stale cleanup:\n($r13.stdout)($r13.stderr)"
+    exit 1
+}
+if not (pid-is-alive $bystander_pid) {
+    print $"FAIL: recycled/bystander pid ($bystander_pid) was killed — anti-pattern violated \(cmdline was never verified\)"
+    exit 1
+}
+let win1_pid_v3 = (open $win1_pid_file | str trim | into int)
+if $win1_pid_v3 == $bystander_pid or not (wait-pid-alive $win1_pid_v3) {
+    print $"FAIL: window was not respawned with a fresh real pid after the recycled-pid cleanup \(got ($win1_pid_v3)\)"
+    exit 1
+}
+$spawned_pids = ($spawned_pids | append $win1_pid_v3)
+# The bystander was deliberately left alone by the wrapper (asserted
+# above) — reap it ourselves now that the assertion has run.
+^kill -TERM $bystander_pid
+wait-pid-dead $bystander_pid | ignore
+print "PASS: recycled pid (alive, cmdline mismatch) is treated as stale and never killed"
+
+# ── test 14: --close SIGTERMs the cmdline-verified pid and removes the pidfile ─
+
+let r14 = (run-wrapper $tmp $test_port $test_path "window" "--close")
+if $r14.exit_code != 0 {
+    print $"FAIL: window --close exited ($r14.exit_code)\n($r14.stdout)($r14.stderr)"
+    exit 1
+}
+if ($win1_pid_file | path exists) {
+    print "FAIL: window --close did not remove the pidfile"
+    exit 1
+}
+if not (wait-pid-dead $win1_pid_v3) {
+    print $"FAIL: window --close did not terminate pid ($win1_pid_v3)"
+    exit 1
+}
+print "PASS: window --close terminates the cmdline-verified pid and removes the pidfile"
+
+# ── test 15: double --close is an idempotent clean no-op ─────────────────────
+
+let r15 = (run-wrapper $tmp $test_port $test_path "window" "--close")
+if $r15.exit_code != 0 {
+    print $"FAIL: second window --close exited ($r15.exit_code)\n($r15.stdout)($r15.stderr)"
+    exit 1
+}
+if not ($"($r15.stdout)($r15.stderr)" | str contains "not open") {
+    print $"FAIL: second window --close did not report a clean not-open message:\n($r15.stdout)($r15.stderr)"
+    exit 1
+}
+print "PASS: double --close is an idempotent clean no-op"
+
+# ── test 16: --close on a never-opened window is a clean message, exit 0 ─────
+
+let r16 = (run-wrapper $tmp $test_port $test_path "window" "9 --close")
+if $r16.exit_code != 0 {
+    print $"FAIL: --close on never-opened window 9 exited ($r16.exit_code)\n($r16.stdout)($r16.stderr)"
+    exit 1
+}
+if not ($"($r16.stdout)($r16.stderr)" | str contains "not open") {
+    print $"FAIL: --close on never-opened window 9 did not report a clean message:\n($r16.stdout)($r16.stderr)"
+    exit 1
+}
+print "PASS: --close on a never-opened window is a clean message, exit 0"
+
+# ── test 17: stop closes all windows before the daemon ───────────────────────
+
+let win2_pid_file = (wv-pid-file $cache_dir 2)
+let r17a = (run-wrapper $tmp $test_port $test_path "window" "1")
+let r17b = (run-wrapper $tmp $test_port $test_path "window" "2")
+if $r17a.exit_code != 0 or $r17b.exit_code != 0 {
+    print $"FAIL: opening windows 1+2 ahead of stop failed:\n($r17a.stdout)($r17a.stderr)\n($r17b.stdout)($r17b.stderr)"
+    exit 1
+}
+let win1_pid_v4 = (open $win1_pid_file | str trim | into int)
+let win2_pid = (open $win2_pid_file | str trim | into int)
+if not ((wait-pid-alive $win1_pid_v4) and (wait-pid-alive $win2_pid)) {
+    print "FAIL: windows 1+2 did not come alive ahead of stop"
+    exit 1
+}
+$spawned_pids = ($spawned_pids | append $win1_pid_v4 | append $win2_pid)
+
+let r17 = (run-wrapper $tmp $test_port $test_path "stop")
+if $r17.exit_code != 0 {
+    print $"FAIL: stop exited ($r17.exit_code)\n($r17.stdout)($r17.stderr)"
+    exit 1
+}
+wait-port-free $test_port
+if ($win1_pid_file | path exists) or ($win2_pid_file | path exists) {
+    print "FAIL: stop did not remove both window pidfiles"
+    exit 1
+}
+if not ((wait-pid-dead $win1_pid_v4) and (wait-pid-dead $win2_pid)) {
+    print "FAIL: stop did not terminate both window processes"
+    exit 1
+}
+^rm -f $pid_file $launched_marker
+print "PASS: stop closes all windows before stopping the daemon"
+
+# ── test 18: missing preview-wv binary names 'rotz install preview-webview' ──
+
+run-wrapper $tmp $test_port $test_path "start" | ignore
+for _ in 1..30 {
+    let up = (do { ^bash -c $"curl -sf --max-time 1 http://127.0.0.1:($test_port)/status" } | complete)
+    if $up.exit_code == 0 { break }
+    sleep 100ms
+}
+^rm -f $fake_wv
+let r18 = (run-wrapper $tmp $test_port $test_path "window")
+if $r18.exit_code == 0 {
+    print "FAIL: window spawn should fail when preview-wv is missing"
+    exit 1
+}
+if not ($"($r18.stdout)($r18.stderr)" | str contains "rotz install preview-webview") {
+    print $"FAIL: missing-binary error does not name 'rotz install preview-webview':\n($r18.stdout)($r18.stderr)"
+    exit 1
+}
+# Restore the stub for any later use, then stop the daemon.
+$fake_wv_src | save --force $fake_wv
+^chmod +x $fake_wv
+run-wrapper $tmp $test_port $test_path "stop" | ignore
+wait-port-free $test_port
+^rm -f $pid_file $launched_marker
+print "PASS: missing preview-wv binary names 'rotz install preview-webview'"
+
+# ── test 19: daemon not answering /status names 'preview start' ─────────────
+
+# No daemon running at this point (stopped at the end of test 18) — a
+# window spawn attempt must fail loud naming the fix, not hang or crash.
+let r19 = (run-wrapper $tmp $test_port $test_path "window" "3")
+if $r19.exit_code == 0 {
+    print "FAIL: window spawn should fail when the daemon is not answering /status"
+    exit 1
+}
+if not ($"($r19.stdout)($r19.stderr)" | str contains "preview start") {
+    print $"FAIL: daemon-down error does not name 'preview start':\n($r19.stdout)($r19.stderr)"
+    exit 1
+}
+print "PASS: daemon not answering /status names 'preview start'"
+
 # ── cleanup ───────────────────────────────────────────────────────────────────
+
+# Reap any real preview-wv stub pids still alive (deliberately orphaned
+# ones from the stale/recycled-pid tests).
+for pid in $spawned_pids {
+    if (pid-is-alive $pid) {
+        ^kill -TERM $pid
+    }
+}
 
 ^rm -rf $tmp
 print ""
-print "PASS: 9 tests passed"
+print "PASS: 19 tests passed"

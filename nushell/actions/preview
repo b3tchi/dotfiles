@@ -3,22 +3,29 @@
 #
 # Usage:
 #   preview start                          # idempotent daemon launch (port-probe -> pidfile -> detach)
-#   preview stop                           # graceful stop (POST /stop + SIGTERM fallback)
+#   preview stop                           # graceful stop (closes windows, then POST /stop + SIGTERM fallback)
 #   preview status                         # daemon health (pid / root / port / started_at)
 #   preview send <path> [--window N]       # POST {path} to /preview<N> (default window 1)
 #   preview register <addr> [--slot N]     # POST {nvim, slot?} to /register, prints assigned slot
+#   preview window [N] [--close]           # idempotent preview-wv window spawn/close (default N=1)
 #
 # Mirrors nushell/actions/akm-graph + nushell/actions/d2-router (adr0001
 # nushell-first surface, adr0003 mandatory-wrapper mandate — the preview-d
-# binary is an engine, not an interface; no consumer calls it directly).
-# sp008 Task 1 wired start/stop/status; sp008 Task 5 adds `send` (the
-# editor/nnn cursor-signal path) without changing this shape. The `open`
-# verb (reverse channel) lands in sp008 Task 6. sp009 Task 3 adds
-# `register` so each nvim instance can claim its own slot instead of every
-# instance defaulting to window 1 (nvim/plugins/preview.lua calls this on
-# `:PreviewStart`).
+# and preview-wv binaries are engines, not interfaces; no consumer calls
+# either directly). sp008 Task 1 wired start/stop/status; sp008 Task 5 adds
+# `send` (the editor/nnn cursor-signal path) without changing this shape.
+# The `open` verb (reverse channel) lands in sp008 Task 6. sp009 Task 3
+# adds `register` so each nvim instance can claim its own slot instead of
+# every instance defaulting to window 1 (nvim/plugins/preview.lua calls
+# this on `:PreviewStart`). sp013 Task 2 adds `window` — lifecycle control
+# for the preview-wv webview client host (sp013 Task 1) — with the same
+# probe/pidfile discipline `start` already uses, plus mandatory
+# /proc/<pid>/cmdline verification before any SIGTERM (pid recycling is a
+# ship-blocker anti-pattern per the sp013 plan). `stop` now closes all
+# open windows before touching the daemon.
 
 const DAEMON_BIN = "preview-d"
+const WEBVIEW_BIN = "preview-wv"
 const CACHE_DIR  = "~/.cache/preview"
 const PID_FILE   = "~/.cache/preview/pid"
 const LOG_FILE   = "~/.cache/preview/log"
@@ -55,14 +62,30 @@ def probe-status [] {
     }
 }
 
-# Read the pid from the pidfile. Returns null if absent or unreadable.
-def read-pidfile [] {
-    let p = ($PID_FILE | path expand)
-    if ($p | path exists) {
-        try { open $p | str trim | into int } catch { null }
+# Read an int pid from an arbitrary pidfile path. Returns null if absent,
+# empty, or unreadable — shared by the daemon pidfile and each window's
+# per-N pidfile.
+def read-pidfile-at [path: string] {
+    if ($path | path exists) {
+        try { open $path | str trim | into int } catch { null }
     } else {
         null
     }
+}
+
+# Ensure the pidfile's parent dir exists (edge case: cache dir missing —
+# created), then write the pid.
+def write-pidfile-at [path: string, pid: int] {
+    let dir = ($path | path dirname)
+    if not ($dir | path exists) {
+        mkdir $dir
+    }
+    $pid | into string | save --force $path
+}
+
+# Read the pid from the daemon pidfile. Returns null if absent or unreadable.
+def read-pidfile [] {
+    read-pidfile-at ($PID_FILE | path expand)
 }
 
 # Check if a pid is alive (kill -0 equivalent). Returns bool.
@@ -70,13 +93,36 @@ def pid-alive [pid: int] {
     (do { ^kill -0 $pid } | complete | get exit_code) == 0
 }
 
-# Ensure cache dir and write pidfile.
-def write-pidfile [pid: int] {
-    let dir = ($CACHE_DIR | path expand)
-    if not ($dir | path exists) {
-        mkdir $dir
+# Verify /proc/<pid>/cmdline contains the expected binary name before any
+# SIGTERM is sent — the anti-pattern sp013's plan calls a ship-blocker: a
+# recycled pid could otherwise belong to an unrelated process. Returns
+# false (never throws) so callers can treat "can't verify" the same as
+# "doesn't match" — i.e. never kill.
+def pid-cmdline-matches [pid: int, needle: string] {
+    let cmdline_path = $"/proc/($pid)/cmdline"
+    if not ($cmdline_path | path exists) {
+        return false
     }
-    $pid | into string | save --force ($PID_FILE | path expand)
+    try {
+        (open $cmdline_path) | str contains $needle
+    } catch {
+        false
+    }
+}
+
+# Ensure cache dir and write the daemon pidfile.
+def write-pidfile [pid: int] {
+    write-pidfile-at ($PID_FILE | path expand) $pid
+}
+
+# Path to window N's pidfile.
+def window-pid-file [n: int] {
+    $"($CACHE_DIR)/wv-($n).pid" | path expand
+}
+
+# Path to window N's spawn log.
+def window-log-file [n: int] {
+    $"($CACHE_DIR)/wv-($n).log" | path expand
 }
 
 # Idempotent start: port-probe first, pidfile second, then detached launch.
@@ -143,12 +189,126 @@ def main-start [] {
     print $"preview: started \(pid ($new_pid)\), root ($root), port ($port), logging to ($log)"
 }
 
-# Stop the daemon: POST /stop first, then SIGTERM the recorded pid. Both
-# steps are safe to repeat — a POST /stop against an already-stopped daemon
-# just fails the try (probe-status style) and a missing/dead pid is a
-# no-op, so a second `preview stop` is a clean idempotent no-op rather than
-# an error (sp008 Task 1 edge case: double stop).
+# Close window N: SIGTERM the pidfile's pid, but only after
+# /proc/<pid>/cmdline confirms it is actually a preview-wv process — a
+# recycled pid (alive, but now belongs to something else) is treated as
+# stale and is never signaled (sp013 Task 2 edge case). Always removes the
+# pidfile on the way out so this is safe to call repeatedly (double
+# `--close` is a clean idempotent no-op) and safe to call on a window that
+# was never opened (no pidfile -> clean message, exit 0).
+def window-close [n: int] {
+    let pid_file = (window-pid-file $n)
+    let pid = (read-pidfile-at $pid_file)
+    if $pid == null {
+        print $"preview: window ($n) not open — nothing to close"
+        return
+    }
+    if (pid-alive $pid) and (pid-cmdline-matches $pid $WEBVIEW_BIN) {
+        ^kill -TERM $pid
+        print $"preview: closed window ($n) \(pid ($pid)\)"
+    } else if (pid-alive $pid) {
+        print $"preview: window ($n) pidfile pid ($pid) is alive but is not ($WEBVIEW_BIN) \(recycled pid\) — leaving it running, cleaning up stale pidfile"
+    } else {
+        print $"preview: window ($n) pidfile stale \(pid ($pid) dead\) — cleaning up"
+    }
+    rm --force $pid_file
+}
+
+# Idempotent spawn of window N's preview-wv process, guarded by a per-window
+# pidfile — the same probe/pidfile discipline `main-start` uses for the
+# daemon (sp013 Task 2 success criteria).
+def window-spawn [n: int] {
+    let pid_file = (window-pid-file $n)
+
+    # 1. Existing pidfile check — alive + cmdline-verified -> no-op. Alive
+    #    but mismatched (recycled pid) or dead -> stale, clean the pidfile
+    #    but never signal the foreign process, then fall through to spawn.
+    let existing = (read-pidfile-at $pid_file)
+    if $existing != null {
+        if (pid-alive $existing) and (pid-cmdline-matches $existing $WEBVIEW_BIN) {
+            print $"preview: window ($n) already open \(pid ($existing)\) — no-op"
+            return
+        } else {
+            print $"preview: window ($n) stale pidfile \(pid ($existing)\) — cleaning up and respawning"
+            rm --force $pid_file
+        }
+    }
+
+    # 2. Binary check — fail loud with an actionable message.
+    if (which $WEBVIEW_BIN | is-empty) {
+        error make {
+            msg: $"preview: '($WEBVIEW_BIN)' not found on PATH — run: rotz install preview-webview"
+        }
+    }
+
+    # 3. Daemon check — no window spawn when the daemon is down (sp013
+    #    plan anti-pattern: probe /status first, loud error pointing at
+    #    `preview start`).
+    if (probe-status) == null {
+        error make {
+            msg: $"preview: daemon not answering on port (preview-port) — run: preview start"
+        }
+    }
+
+    # 4. Detached spawn, inheriting the caller's environment
+    #    (DISPLAY/XAUTHORITY carry through automatically; PREVIEW_PORT is
+    #    set explicitly to mirror main-start's convention).
+    let dir = ($CACHE_DIR | path expand)
+    if not ($dir | path exists) {
+        mkdir $dir
+    }
+    let log  = (window-log-file $n)
+    let port = (preview-port)
+
+    let pid_result = (do {
+        ^bash -c $"PREVIEW_PORT=($port) nohup ($WEBVIEW_BIN) ($n) --port ($port) >>($log) 2>&1 & echo $!"
+    } | complete)
+
+    if $pid_result.exit_code != 0 {
+        error make { msg: $"preview: failed to launch window ($n): ($pid_result.stderr)" }
+    }
+
+    let new_pid = ($pid_result.stdout | str trim | into int)
+    write-pidfile-at $pid_file $new_pid
+    print $"preview: opened window ($n) \(pid ($new_pid)\)"
+}
+
+# `preview window [N] [--close]` — default N=1.
+def main-window [n: int, close: bool] {
+    if $close {
+        window-close $n
+    } else {
+        window-spawn $n
+    }
+}
+
+# Close every open window (wv-*.pid) — called by `stop` before it touches
+# the daemon (sp013 Task 2 success criteria). Missing cache dir is a
+# no-op, not an error.
+def close-all-windows [] {
+    let dir = ($CACHE_DIR | path expand)
+    if not ($dir | path exists) {
+        return
+    }
+    let files = (try { glob ($dir | path join "wv-*.pid") } catch { [] })
+    for pid_file in $files {
+        let base = ($pid_file | path basename)
+        let n = (try { $base | str replace "wv-" "" | str replace ".pid" "" | into int } catch { null })
+        if $n != null {
+            window-close $n
+        }
+    }
+}
+
+# Stop the daemon: close all windows first, then POST /stop, then SIGTERM
+# the recorded pid. All steps are safe to repeat — a POST /stop against an
+# already-stopped daemon just fails the try (probe-status style) and a
+# missing/dead pid is a no-op, so a second `preview stop` is a clean
+# idempotent no-op rather than an error (sp008 Task 1 edge case: double
+# stop; sp013 Task 2 extends this to windows too).
 def main-stop [] {
+    close-all-windows
+
     let sent = (try {
         http post --max-time 2sec $"(api-base)/stop" ""
         true
@@ -230,12 +390,27 @@ def main-register [nvim?: string, slot?: int] {
     print $resp.slot
 }
 
+# Parse `arg` (the `window` subcommand's optional positional) into a window
+# number, defaulting to 1 when omitted. A non-numeric arg is a loud usage
+# error rather than a silent fallback.
+def parse-window-arg [arg?: string] {
+    if ($arg | is-empty) {
+        return 1
+    }
+    try {
+        $arg | into int
+    } catch {
+        error make { msg: $"preview: invalid window number '($arg)'" }
+    }
+}
+
 # preview — control the preview-d daemon
 def main [
-    subcommand?: string        # start | stop | status | send | register
-    arg?: string                # path for `send`; nvim server address for `register`
+    subcommand?: string        # start | stop | status | send | register | window
+    arg?: string                # path for `send`; nvim server address for `register`; N for `window`
     --window (-w): int = 1     # target preview<N> slot for `send` (default 1)
     --slot (-s): int             # explicit slot for `register` (rebind instead of allocate)
+    --close                      # with `window`: close instead of spawn
 ] {
     match $subcommand {
         "start"    => { main-start }
@@ -243,15 +418,17 @@ def main [
         "status"   => { main-status }
         "send"     => { main-send $arg $window }
         "register" => { main-register $arg $slot }
+        "window"   => { main-window (parse-window-arg $arg) $close }
         _ => {
             print "Usage: preview <subcommand>"
             print ""
             print "Subcommands:"
             print "  start                        — launch daemon (idempotent)"
-            print "  stop                         — stop daemon"
+            print "  stop                         — stop daemon (closes all windows first)"
             print "  status                       — daemon health (pid / root / port / started_at)"
             print "  send <path> [--window N]     — push path to window N (default 1)"
             print "  register <addr> [--slot N]   — bind nvim server addr to a slot, print the slot"
+            print "  window [N] [--close]         — open (or close) preview-wv window N (default 1)"
         }
     }
 }
