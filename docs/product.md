@@ -39,6 +39,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[adr0004|xrdp + xorgxrdp + llvmpipe as the WSL2 full-desktop remoting stack]]
 - [[adr0005|No d3d12 GPU acceleration outside the WSLg-blessed path on WSL2]]
 - [[adr0006|preview-d embeds peer daemons via same-origin proxy or cross-origin iframe by frame-header]]
+- [[adr0009|preview-d embeds every peer daemon as a direct cross-origin iframe]]
 
 ## AKM Reference
 
