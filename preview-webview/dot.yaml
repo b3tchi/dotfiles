@@ -1,0 +1,33 @@
+# preview-webview — build the preview-wv webview client host (ft005
+# file-preview daemon's display half, sp013).
+#
+# The nushell wrapper (`preview`, sp013 Task 2) is the only consumer of this
+# binary — no consumer calls preview-wv directly ([[adr0003]]
+# engine-not-interface). This dot only builds the Rust binary. Linux-only:
+# the binary is a chrome-less wry/tao/WebKitGTK window, a Core-UX (Linux)
+# tool with no Windows/macOS target.
+
+linux:
+  installs:
+    cmd: |
+      # Build preview-wv. Guarded on the cargo toolchain (mirrors preview/dot.yaml's
+      # go guard) so linking (done by `rotz link`, if this dot ever gains links) still
+      # lands on hosts without rust — the wrapper then reports "rotz install
+      # preview-webview" until the binary exists.
+      if command -v cargo >/dev/null 2>&1; then
+        mkdir -p ~/.local/bin
+        # Resolve the source dir via akm-root so a non-standard clone path
+        # (not ~/.dotfiles) still builds. Fall back to ~/.dotfiles.
+        SRC="$HOME/.dotfiles/preview-webview"
+        if command -v akm-root >/dev/null 2>&1; then
+          ROOT="$(akm-root 2>/dev/null || true)"
+          if [ -n "$ROOT" ] && [ -d "$ROOT/preview-webview" ]; then
+            SRC="$ROOT/preview-webview"
+          fi
+        fi
+        cargo build --manifest-path "$SRC/Cargo.toml" --release
+        cp "$SRC/target/release/preview-wv" ~/.local/bin/preview-wv
+        echo "preview-webview: built ~/.local/bin/preview-wv from $SRC"
+      else
+        echo "preview-webview: cargo toolchain not found — skipping build (install rust, then re-run 'rotz install preview-webview')" >&2
+      fi

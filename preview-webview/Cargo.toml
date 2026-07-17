@@ -1,0 +1,30 @@
+[package]
+name = "preview-webview"
+version = "0.1.0"
+edition = "2021"
+
+# preview-wv <N> [--port P] — chrome-less wry/tao window client for the
+# ft005 file-preview daemon's /preview<N> live window. See sp013.
+
+[[bin]]
+name = "preview-wv"
+path = "src/main.rs"
+
+[dependencies]
+wry = "0.45"
+tao = "0.30"
+# Matches tao 0.30's internal gtk-rs versions (must resolve to the same
+# crate versions tao links against). Used to force WM_CLASS via
+# glib::set_prgname and to pre-check GTK/GDK init (gtk::init) before tao's
+# own EventLoop::new(), which panics instead of erroring on init failure.
+gtk = "0.18"
+glib = "0.18"
+gdkx11 = "0.18"
+# Raw XSetClassHint call: GTK3 auto-capitalizes the WM_CLASS "class" field
+# derived from prgname (e.g. "preview-wv" -> "Preview-wv"), which i3/sway
+# `for_window [class=...]` match against case-sensitively. Setting both
+# WM_CLASS fields explicitly avoids that mismatch (see run_window).
+x11 = { version = "2", features = ["xlib"] }
+
+[profile.release]
+opt-level = 2
