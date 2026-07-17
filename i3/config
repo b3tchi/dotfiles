@@ -247,7 +247,7 @@ for_window [title="qs-projects"] floating enable, border none, move position cen
 # preview-webview client host (sp013 Task 3): each nvim slot's chrome-less
 # wry window carries WM_CLASS preview-wv (sp013 Task 1) — float it instead
 # of tiling, same as the quickshell overlays above.
-for_window [class="preview-wv"] floating enable
+for_window [class="preview-wv"] floating enable, move position center
 # No for_window rule for the region selector: qs-region.py is a GTK POPUP =
 # override-redirect, so i3 never manages it and no criteria could ever match.
 # (The rule that used to sit here matched title="qs-region" against the OLD

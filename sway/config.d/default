@@ -53,7 +53,7 @@ for_window [title="quickshell-notifications"] floating enable, border none, stic
 # preview-webview client host (sp013 Task 3): each nvim slot's chrome-less
 # wry window carries WM_CLASS preview-wv (sp013 Task 1) — runs via
 # XWayland since GDK is forced to x11, so class= matching works here too.
-for_window [class="preview-wv"] floating enable
+for_window [class="preview-wv"] floating enable, move position center
 
 ### Output configuration
 #
