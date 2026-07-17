@@ -155,6 +155,31 @@ local function register(addr)
 	registered_slot = slot
 end
 
+--- Spawn this instance's own slot window via the mandatory `preview
+--- window <N>` wrapper verb (sp013 Task 2). Idempotent per slot (the
+--- wrapper's pidfile lifecycle): a second `:PreviewStart` in the same
+--- nvim instance no-ops against the already-running window instead of
+--- opening a duplicate (sp013 Task 3 success criterion); a window closed
+--- by hand is treated as stale and respawned on the next call.
+---
+--- Only ever called with a slot that `register()` actually assigned —
+--- callers must guard on `registered_slot` first, so a failed
+--- registration never attempts a spawn (sp013 Task 3 edge case).
+---
+--- Synchronous (`:wait()`): the wrapper's own probe/pidfile lifecycle
+--- (daemon-down / missing-binary checks) bounds the wait, same as
+--- `register` above. Failure surfaces via `vim.notify` but never returns
+--- an error to the caller — spawn failure must leave editing unaffected.
+local function spawn_window(slot)
+	local result = vim.system({ "preview", "window", tostring(slot) }, { text = true }):wait()
+	if result.code ~= 0 then
+		vim.notify(
+			"preview: window spawn failed — " .. ((result.stderr or "") .. (result.stdout or "")),
+			vim.log.levels.ERROR
+		)
+	end
+end
+
 vim.api.nvim_create_user_command("PreviewStart", function()
 	ensure_server()
 	if vim.fn.executable("preview") ~= 1 then
@@ -174,7 +199,13 @@ vim.api.nvim_create_user_command("PreviewStart", function()
 		return
 	end
 	register(vim.v.servername)
-end, { desc = "preview: start preview-d as a child of this nvim (so $NVIM reaches it for the reverse /open channel), and register this instance's own preview slot" })
+	-- registered_slot is only set once register() succeeds — a failed
+	-- registration leaves it nil (or unchanged on a re-run) and this
+	-- instance never attempts to open a window (sp013 Task 3 edge case).
+	if registered_slot then
+		spawn_window(registered_slot)
+	end
+end, { desc = "preview: start preview-d as a child of this nvim (so $NVIM reaches it for the reverse /open channel), register this instance's own preview slot, and spawn that slot's webview window" })
 
 vim.api.nvim_create_user_command("PreviewStop", function()
 	if vim.fn.executable("preview") ~= 1 then

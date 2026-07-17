@@ -50,6 +50,11 @@ for_window [title="qs-switcher"] floating enable, border none, move position cen
 for_window [title="qs-projects"] floating enable, border none, move position center, focus
 for_window [title="quickshell-notifications"] floating enable, border none, sticky enable
 
+# preview-webview client host (sp013 Task 3): each nvim slot's chrome-less
+# wry window carries WM_CLASS preview-wv (sp013 Task 1) — runs via
+# XWayland since GDK is forced to x11, so class= matching works here too.
+for_window [class="preview-wv"] floating enable
+
 ### Output configuration
 #
 # Default wallpaper (more resolutions are available in /usr/share/backgrounds/sway/)
