@@ -4,6 +4,8 @@ import (
 	"html/template"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 )
 
 const indexTmpl = `<!DOCTYPE html>
@@ -99,16 +101,42 @@ var indexTemplate = template.Must(template.New("index").Funcs(template.FuncMap{
 	},
 }).Parse(indexTmpl))
 
-// indexHandler serves GET / with the precomputed IndexData.
+// indexRebuildTTL bounds how often GET / re-walks the registered projects.
+// A var so tests can force a rebuild every request (0) or pin the cache.
+var indexRebuildTTL = time.Second
+
+// indexHandler serves GET / with a route listing rebuilt from the filesystem
+// on demand. It holds the Registry (project → root) rather than a frozen
+// IndexData so a .d2 created after startup appears in the listing — the proxy
+// re-walks on a routing miss (dotfiles-t1o), and the index page must not lie
+// about what exists (dotfiles-glo). Rebuilds are TTL-cached so a landing-page
+// view (or a reload storm) does not walk the tree on every hit.
 type indexHandler struct {
-	idx             *IndexData
+	reg             Registry
 	registryMissing bool
+
+	mu       sync.Mutex
+	cached   *IndexData
+	cachedAt time.Time
 }
 
 // newIndexHandler creates an http.Handler for GET /.
 // registryMissing controls whether the warning banner is shown.
-func newIndexHandler(idx *IndexData, registryMissing bool) http.Handler {
-	return &indexHandler{idx: idx, registryMissing: registryMissing}
+func newIndexHandler(reg Registry, registryMissing bool) http.Handler {
+	return &indexHandler{reg: reg, registryMissing: registryMissing}
+}
+
+// current returns a fresh-enough IndexData, re-walking the registry when the
+// cached snapshot is older than indexRebuildTTL. The walk runs under mu, so
+// concurrent "/" requests collapse to one walk rather than a thundering herd.
+func (h *indexHandler) current() *IndexData {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.cached == nil || time.Since(h.cachedAt) >= indexRebuildTTL {
+		h.cached = buildIndex(h.reg)
+		h.cachedAt = time.Now()
+	}
+	return h.cached
 }
 
 func (h *indexHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -118,7 +146,7 @@ func (h *indexHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Entries         []RouteEntry
 		RegistryMissing bool
 	}{
-		Entries:         h.idx.Entries,
+		Entries:         h.current().Entries,
 		RegistryMissing: h.registryMissing,
 	}
 

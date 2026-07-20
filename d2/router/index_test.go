@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestIndexHandlerLinks(t *testing.T) {
@@ -17,8 +18,7 @@ func TestIndexHandlerLinks(t *testing.T) {
 	}
 
 	reg := Registry{"myproject": dir}
-	idx := buildIndex(reg)
-	handler := newIndexHandler(idx, false)
+	handler := newIndexHandler(reg, false)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
@@ -39,8 +39,7 @@ func TestIndexHandlerSSHAbsent(t *testing.T) {
 	// at registry load time so we just verify a registry with no local entries
 	// produces an empty but non-crashing index page.
 	reg := Registry{} // no local projects (ssh were already filtered out by loadRegistry)
-	idx := buildIndex(reg)
-	handler := newIndexHandler(idx, false)
+	handler := newIndexHandler(reg, false)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
@@ -54,8 +53,7 @@ func TestIndexHandlerSSHAbsent(t *testing.T) {
 func TestIndexHandlerMissingRegistryBanner(t *testing.T) {
 	// When the registry file is missing, the handler should show a warning banner.
 	reg := Registry{}
-	idx := buildIndex(reg)
-	handler := newIndexHandler(idx, true) // registryMissing = true
+	handler := newIndexHandler(reg, true) // registryMissing = true
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
@@ -86,8 +84,7 @@ func TestIndexHandlerCollisionFlag(t *testing.T) {
 	}
 
 	reg := Registry{"colproj": dir}
-	idx := buildIndex(reg)
-	handler := newIndexHandler(idx, false)
+	handler := newIndexHandler(reg, false)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
@@ -108,8 +105,7 @@ func TestIndexHandlerUnicodeFilename(t *testing.T) {
 	}
 
 	reg := Registry{"uniproj": dir}
-	idx := buildIndex(reg)
-	handler := newIndexHandler(idx, false)
+	handler := newIndexHandler(reg, false)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
@@ -120,4 +116,66 @@ func TestIndexHandlerUnicodeFilename(t *testing.T) {
 	if !strings.Contains(body, "%E6%97%A5%E6%9C%AC%E8%AA%9E") && !strings.Contains(body, "日本語") {
 		t.Errorf("expected unicode filename (raw or encoded) in body, got:\n%s", body)
 	}
+}
+
+// TestIndexHandlerReflectsFileCreatedAfterStartup proves the dotfiles-glo
+// fix: the landing page must show a .d2 created after the handler was built,
+// not a frozen startup snapshot. The proxy already re-walks on demand so the
+// file ROUTES; the index page must not lie about what exists.
+func TestIndexHandlerReflectsFileCreatedAfterStartup(t *testing.T) {
+	defer withIndexRebuildTTL(0)() // rebuild every request, no debounce
+
+	dir := t.TempDir() // empty at construction
+	reg := Registry{"proj": dir}
+	handler := newIndexHandler(reg, false)
+
+	// Nothing yet.
+	rec0 := httptest.NewRecorder()
+	handler.ServeHTTP(rec0, httptest.NewRequest(http.MethodGet, "/", nil))
+	if strings.Contains(rec0.Body.String(), "/proj/late.d2") {
+		t.Fatalf("baseline listed a file that does not exist yet")
+	}
+
+	// Create a diagram AFTER the handler exists.
+	if err := os.WriteFile(filepath.Join(dir, "late.d2"), []byte("a -> b"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if !strings.Contains(rec.Body.String(), "/proj/late.d2") {
+		t.Errorf("index did not list a file created after startup; body:\n%s", rec.Body.String())
+	}
+}
+
+// TestIndexHandlerDebouncesWalk proves the TTL cache: within the window a
+// second request reuses the snapshot and does NOT reflect a just-created
+// file. This is the guard against walking the tree on every landing-page hit.
+func TestIndexHandlerDebouncesWalk(t *testing.T) {
+	defer withIndexRebuildTTL(time.Hour)() // effectively "walk once"
+
+	dir := t.TempDir()
+	reg := Registry{"proj": dir}
+	handler := newIndexHandler(reg, false)
+
+	// First request warms the cache (empty tree).
+	rec0 := httptest.NewRecorder()
+	handler.ServeHTTP(rec0, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	if err := os.WriteFile(filepath.Join(dir, "late.d2"), []byte("a -> b"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if strings.Contains(rec.Body.String(), "/proj/late.d2") {
+		t.Errorf("index re-walked inside the TTL window (should have served the cached snapshot)")
+	}
+}
+
+// withIndexRebuildTTL sets the package rebuild TTL and returns a restore func.
+// Sequential tests (no t.Parallel), so mutating the global is safe.
+func withIndexRebuildTTL(d time.Duration) func() {
+	prev := indexRebuildTTL
+	indexRebuildTTL = d
+	return func() { indexRebuildTTL = prev }
 }
