@@ -128,6 +128,28 @@ own_clipboard() { # <text> [extra-mime ...]
   exit 1
 }
 
+# Own SRC CLIPBOARD with <benign-text>, handing the selection to a
+# hint-bearing owner serving <secret-text> the moment the feeder's TARGETS
+# gate has been answered.  See race-owner.py.  Returns once win1 holds it.
+own_race_clipboard() { # <benign-text> <secret-text>
+  [ -n "${OWNER_PID:-}" ] && { kill "$OWNER_PID" 2>/dev/null; wait "$OWNER_PID" 2>/dev/null; }
+  env DISPLAY="$SRC" python3 "$TMP/race-owner.py" "$@" >"$TMP/owner.out" 2>&1 &
+  OWNER_PID=$!
+  local i
+  for i in $(seq 1 20); do
+    grep -q '^owned$' "$TMP/owner.out" 2>/dev/null && return 0
+    sleep 0.25
+  done
+  echo "FATAL: could not own clipboard on $SRC; $(cat "$TMP/owner.out")" >&2
+  exit 1
+}
+
+# Did the mid-poll ownership handoff actually happen?  A race scenario whose
+# handoff never fired is just an ordinary benign copy, and asserting "no
+# secret in history" against it would be a green that proves nothing.  Every
+# race scenario asserts this first.
+race_fired() { grep -q '^handed$' "$TMP/owner.out" 2>/dev/null && echo fired || echo not-fired; }
+
 # Wait until `copyq size` differs from <baseline>, or timeout.  Echoes size.
 wait_size_change() { # <baseline> [seconds]
   local base="$1" limit="${2:-10}" i n
@@ -212,6 +234,10 @@ while True:
         e.requestor.change_property(
             prop, Xlib.Xatom.ATOM, 32, [TARGETS] + list(served))
     elif e.target in served:
+        # Logged so the suite can assert the STRONGER property of the first
+        # gate: a hint-bearing selection has its payload never even requested,
+        # not merely never fed.
+        print("served-payload", flush=True)
         e.requestor.change_property(prop, e.target, 8, served[e.target])
     else:
         ok = False
@@ -219,6 +245,99 @@ while True:
         time=e.time, requestor=e.requestor, selection=e.selection,
         target=e.target, property=prop if ok else Xlib.X.NONE))
     d.flush()
+PYEOF
+
+cat > "$TMP/race-owner.py" <<'PYEOF'
+"""Own CLIPBOARD benignly, then hand it to a hint-bearing owner the instant
+the first TARGETS request has been answered.
+
+This reproduces the clip-feed.sh TOCTOU window: the feeder reads TARGETS and
+the payload as two separate X requests (measured ~10-13ms apart), and X
+offers no way to fetch them atomically.  A password-manager copy landing in
+that gap is gated on the OLD owner and read from the NEW one.
+
+Two windows on one connection:
+  win1  benign text, TARGETS WITHOUT the password-manager hint -- what the
+        feeder's gate inspects, and correctly judges safe.
+  win2  the secret, TARGETS WITH the hint -- the password manager that took
+        the clipboard microseconds after the gate passed.
+
+The handoff fires from inside the handler for win1's TARGETS reply, after
+the SelectionNotify is flushed, so the feeder's NEXT X request -- the payload
+read -- is answered by win2.  That is precisely the race, made deterministic:
+gate passed on win1, payload came from win2.
+
+Prints "owned" once win1 holds the selection and "handed" once win2 does.
+A scenario that never prints "handed" did not exercise the race and its
+result means nothing; the suite asserts on it.
+
+usage: race-owner.py <benign-text> <secret-text>
+"""
+import sys
+import Xlib.display
+import Xlib.protocol.event
+import Xlib.X
+import Xlib.Xatom
+
+benign = sys.argv[1].encode()
+secret = sys.argv[2].encode()
+
+d = Xlib.display.Display()
+screen = d.screen()
+win1 = screen.root.create_window(0, 0, 1, 1, 0, screen.root_depth)
+win2 = screen.root.create_window(0, 0, 1, 1, 0, screen.root_depth)
+
+SEL = d.get_atom("CLIPBOARD")
+TARGETS = d.get_atom("TARGETS")
+HINT = d.get_atom("application/x-kde-passwordManagerHint")
+UTF8 = d.get_atom("UTF8_STRING")
+PLAIN = d.get_atom("text/plain")
+
+
+def table(payload, hint):
+    t = {UTF8: payload, PLAIN: payload, Xlib.Xatom.STRING: payload}
+    if hint:
+        t[HINT] = b"secret"
+    return t
+
+
+served = {win1.id: table(benign, False), win2.id: table(secret, True)}
+
+win1.set_selection_owner(SEL, Xlib.X.CurrentTime)
+d.sync()
+if d.get_selection_owner(SEL) != win1:
+    print("FAILED to own CLIPBOARD", file=sys.stderr)
+    sys.exit(1)
+print("owned", flush=True)
+
+handed = False
+while True:
+    e = d.next_event()
+    if e.type != Xlib.X.SelectionRequest:
+        continue
+    tbl = served.get(e.owner.id, {})
+    prop = e.property if e.property != Xlib.X.NONE else e.target
+    ok = True
+    if e.target == TARGETS:
+        e.requestor.change_property(
+            prop, Xlib.Xatom.ATOM, 32, [TARGETS] + list(tbl))
+    elif e.target in tbl:
+        e.requestor.change_property(prop, e.target, 8, tbl[e.target])
+    else:
+        ok = False
+    d.send_event(e.requestor, Xlib.protocol.event.SelectionNotify(
+        time=e.time, requestor=e.requestor, selection=e.selection,
+        target=e.target, property=prop if ok else Xlib.X.NONE))
+    d.flush()
+
+    # THE RACE.  win1's TARGETS answer is on the wire and the feeder has
+    # passed its gate.  Take the clipboard for the hint-bearing owner before
+    # the feeder gets round to asking for the payload.
+    if not handed and e.owner.id == win1.id and e.target == TARGETS:
+        win2.set_selection_owner(SEL, Xlib.X.CurrentTime)
+        d.sync()
+        handed = d.get_selection_owner(SEL) == win2
+        print("handed" if handed else "HANDOFF-FAILED", flush=True)
 PYEOF
 
 command -v "$COPYQ" >/dev/null 2>&1 || { echo "FATAL: copyq not found (set COPYQ=)" >&2; exit 1; }
@@ -293,6 +412,31 @@ for ((i = 0; i < n; i++)); do
   cq read "$i" | grep -q 'SECRET-PASSWORD-marker' && leaked="row $i"
 done
 assert_eq "secret text appears in no history row" "" "$leaked"
+# The first gate's distinct guarantee, which the post-read re-check cannot
+# provide: the payload is never fetched at all, so it never touches a tmpfile.
+assert_eq "the payload was never even requested from the owner" "not-requested" \
+  "$(grep -q '^served-payload$' "$TMP/owner.out" && echo requested || echo not-requested)"
+
+scenario "toctou-race: a hint-bearing owner taking the clipboard AFTER the gate passed still never reaches history"
+# The scenario above proves the gate stops a selection that already carries
+# the hint when the gate looks.  This one covers the residual window the gate
+# structurally cannot close: TARGETS and the payload are two X requests, and
+# ownership can flip between them.  race-owner.py makes that flip fire
+# deterministically off the gate's own TARGETS request, so the feeder reads
+# the payload from a password manager it never gated.
+before="$(cq size)"
+own_race_clipboard 'RACE-DECOY-benign' 'RACE-SECRET-marker'
+sleep 4
+assert_eq "the handoff fired, so the race really was exercised" "fired" "$(race_fired)"
+assert_eq "history size unchanged" "$before" "$(cq size)"
+assert_eq "newest item is still the previous copy" "line-one
+line-two" "$(cq read 0)"
+leaked=""
+n="$(cq size)"
+for ((i = 0; i < n; i++)); do
+  cq read "$i" | grep -q 'RACE-SECRET-marker' && leaked="row $i"
+done
+assert_eq "raced secret appears in no history row" "" "$leaked"
 
 scenario "image-skipped: a selection with no text target is not fed"
 before="$(cq size)"
@@ -366,11 +510,18 @@ assert_eq "newest item is the cold-start copy" "feed-marker-COLD-START" "$(cq re
 # Without these, the phase-1 "nothing was captured" assertions would pass just
 # as well if the feeder were broken and captured nothing at all.
 
-scenario "CONTROL hint-check-is-load-bearing: same copy IS fed without the check"
+scenario "CONTROL hint-check-is-load-bearing: same copy IS fed without the checks"
 stop_feeder
-# A patched copy of the feeder with only the hint gate removed.  The bypass
+# A patched copy of the feeder with the hint filtering removed.  The bypass
 # lives in the test, never in the shipped script.
-awk '/SECURITY GATE/,/^  fi$/ {next} {print}' "$FEEDER" > "$TMP/clip-feed-nohint.sh"
+#
+# BOTH the pre-read gate and the post-read re-check have to go here: they are
+# defence in depth against the same hint, so stripping either one alone leaves
+# the other still dropping this copy and the control would assert nothing.
+# The re-check's own isolated control is the raced scenario further down,
+# which strips ONLY the re-check.
+awk '/SECURITY GATE/,/^  fi$/ {next} /TOCTOU RE-CHECK/,/^    fi$/ {next} {print}' \
+  "$FEEDER" > "$TMP/clip-feed-nohint.sh"
 grep -qF -- "-qFx 'application/x-kde-passwordManagerHint'" "$TMP/clip-feed-nohint.sh" \
   && { echo "FATAL: patched feeder still contains the hint check" >&2; exit 1; }
 grep -q 'copyq add' "$TMP/clip-feed-nohint.sh" \
@@ -382,6 +533,28 @@ own_clipboard 'SECRET-PASSWORD-marker' application/x-kde-passwordManagerHint
 size="$(wait_size_change "$before" 10)"
 assert_eq "hint-bearing copy IS fed when the check is absent" "$((before + 1))" "$size"
 assert_eq "and its full text lands in DST history" "SECRET-PASSWORD-marker" "$(cq read 0)"
+stop_feeder
+
+scenario "CONTROL recheck-is-load-bearing: the raced secret IS fed without the post-read re-check"
+# The phase-1 race scenario would pass just as well if the drop were coming
+# from the FIRST gate rather than the re-check.  Strip only the re-check --
+# leaving the first gate intact -- and the same race must leak.
+stop_feeder
+awk '/TOCTOU RE-CHECK/,/^    fi$/ {next} {print}' "$FEEDER" > "$TMP/clip-feed-norecheck.sh"
+grep -qF 'TOCTOU RE-CHECK' "$TMP/clip-feed-norecheck.sh" \
+  && { echo "FATAL: patched feeder still contains the re-check" >&2; exit 1; }
+grep -qF 'SECURITY GATE' "$TMP/clip-feed-norecheck.sh" \
+  || { echo "FATAL: patched feeder lost the FIRST gate too; control would prove nothing" >&2; exit 1; }
+grep -q 'copyq add' "$TMP/clip-feed-norecheck.sh" \
+  || { echo "FATAL: patched feeder lost its feed path" >&2; exit 1; }
+rm -f "$TMP/feed.lock"
+start_feeder "$TMP/clip-feed-norecheck.sh"
+before="$(cq size)"
+own_race_clipboard 'RACE-DECOY-benign' 'RACE-SECRET-CONTROL'
+size="$(wait_size_change "$before" 10)"
+assert_eq "the handoff fired, so the race really was exercised" "fired" "$(race_fired)"
+assert_eq "raced secret IS fed when the re-check is absent" "$((before + 1))" "$size"
+assert_eq "and its full text lands in DST history" "RACE-SECRET-CONTROL" "$(cq read 0)"
 stop_feeder
 
 scenario "CONTROL feeder-is-load-bearing: no capture at all with no feeder"
