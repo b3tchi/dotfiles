@@ -36,8 +36,32 @@
 # That is why the TARGETS list is inspected FIRST and a selection advertising
 # application/x-kde-passwordManagerHint is skipped without its payload ever
 # being read.  Do not move that check below the read, and do not remove it.
-# test-clip-feed.sh asserts both the drop and, via a patched copy of this
-# file, that the check is load-bearing.
+#
+# The gate is checked TWICE, and the second check is not redundant.  TARGETS
+# and the payload are separate X protocol requests — measured 10-13ms apart —
+# and X offers no way to fetch them atomically.  Against a ~520ms poll that is
+# a ~2% window per copy in which a password manager can take the clipboard
+# AFTER the gate passed on the previous owner, so the payload read returns the
+# secret.  Re-checking TARGETS after the read and before the feed closes that:
+# the password manager still owns the selection at re-check time and still
+# advertises the hint, so the item is dropped.  (dotfiles-l6s.)
+#
+# RESIDUAL EXPOSURE, stated plainly rather than papered over:
+#  * The secret payload does reach "$NEW", a mktemp file under /tmp, before it
+#    is dropped.  Mode 0600, overwritten next poll, removed on exit — but it
+#    is on disk for one poll.  Stopping that would need an atomic
+#    TARGETS+payload fetch, which X does not provide.
+#  * The re-check narrows the window, it does not eliminate it.  A THIRD
+#    owner taking the clipboard between the payload read and the re-check
+#    would present hint-free targets and the secret would be fed.  That needs
+#    two ownership flips inside ~10ms; the single-flip case this file is
+#    actually exposed to is covered.
+#  * Only KDE/KeePassXC-style hint publishers are recognised at all.  A
+#    password manager that advertises no hint is indistinguishable from a
+#    normal copy at either check.
+#
+# test-clip-feed.sh asserts the drop, the raced drop, and — via patched copies
+# of this file — that BOTH checks are load-bearing.
 #
 # usage: i3/scripts/clip-feed.sh          (daemon; exits 0 if already running)
 # env:   CLIP_FEED_SRC=:10   display watched for copies
@@ -137,6 +161,16 @@ while :; do
   # Dedup against the last item we fed: xclip reports the same content on
   # every tick, and without this the history would gain a copy twice a second.
   if read_src && ! cmp -s "$NEW" "$LAST"; then
+    # TOCTOU RE-CHECK — the second half of the security gate; see the header.
+    # The gate above passed on whoever owned the selection THEN; the payload
+    # in "$NEW" came from whoever owned it a few milliseconds LATER.  Ask who
+    # owns it now, and refuse to publish a payload that a password manager is
+    # currently claiming.  Fails CLOSED: a re-check that times out or finds no
+    # owner drops the item too.  "$LAST" is deliberately not updated, so a
+    # legitimate copy dropped by a hung owner is simply re-fed next poll.
+    if ! targets || grep -qFx 'application/x-kde-passwordManagerHint' "$TGT"; then
+      nap "$POLL"; continue
+    fi
     feed_dst && cp "$NEW" "$LAST"
   fi
 

@@ -234,6 +234,10 @@ while True:
         e.requestor.change_property(
             prop, Xlib.Xatom.ATOM, 32, [TARGETS] + list(served))
     elif e.target in served:
+        # Logged so the suite can assert the STRONGER property of the first
+        # gate: a hint-bearing selection has its payload never even requested,
+        # not merely never fed.
+        print("served-payload", flush=True)
         e.requestor.change_property(prop, e.target, 8, served[e.target])
     else:
         ok = False
@@ -408,6 +412,10 @@ for ((i = 0; i < n; i++)); do
   cq read "$i" | grep -q 'SECRET-PASSWORD-marker' && leaked="row $i"
 done
 assert_eq "secret text appears in no history row" "" "$leaked"
+# The first gate's distinct guarantee, which the post-read re-check cannot
+# provide: the payload is never fetched at all, so it never touches a tmpfile.
+assert_eq "the payload was never even requested from the owner" "not-requested" \
+  "$(grep -q '^served-payload$' "$TMP/owner.out" && echo requested || echo not-requested)"
 
 scenario "toctou-race: a hint-bearing owner taking the clipboard AFTER the gate passed still never reaches history"
 # The scenario above proves the gate stops a selection that already carries
@@ -502,11 +510,18 @@ assert_eq "newest item is the cold-start copy" "feed-marker-COLD-START" "$(cq re
 # Without these, the phase-1 "nothing was captured" assertions would pass just
 # as well if the feeder were broken and captured nothing at all.
 
-scenario "CONTROL hint-check-is-load-bearing: same copy IS fed without the check"
+scenario "CONTROL hint-check-is-load-bearing: same copy IS fed without the checks"
 stop_feeder
-# A patched copy of the feeder with only the hint gate removed.  The bypass
+# A patched copy of the feeder with the hint filtering removed.  The bypass
 # lives in the test, never in the shipped script.
-awk '/SECURITY GATE/,/^  fi$/ {next} {print}' "$FEEDER" > "$TMP/clip-feed-nohint.sh"
+#
+# BOTH the pre-read gate and the post-read re-check have to go here: they are
+# defence in depth against the same hint, so stripping either one alone leaves
+# the other still dropping this copy and the control would assert nothing.
+# The re-check's own isolated control is the raced scenario further down,
+# which strips ONLY the re-check.
+awk '/SECURITY GATE/,/^  fi$/ {next} /TOCTOU RE-CHECK/,/^    fi$/ {next} {print}' \
+  "$FEEDER" > "$TMP/clip-feed-nohint.sh"
 grep -qF -- "-qFx 'application/x-kde-passwordManagerHint'" "$TMP/clip-feed-nohint.sh" \
   && { echo "FATAL: patched feeder still contains the hint check" >&2; exit 1; }
 grep -q 'copyq add' "$TMP/clip-feed-nohint.sh" \
@@ -518,6 +533,28 @@ own_clipboard 'SECRET-PASSWORD-marker' application/x-kde-passwordManagerHint
 size="$(wait_size_change "$before" 10)"
 assert_eq "hint-bearing copy IS fed when the check is absent" "$((before + 1))" "$size"
 assert_eq "and its full text lands in DST history" "SECRET-PASSWORD-marker" "$(cq read 0)"
+stop_feeder
+
+scenario "CONTROL recheck-is-load-bearing: the raced secret IS fed without the post-read re-check"
+# The phase-1 race scenario would pass just as well if the drop were coming
+# from the FIRST gate rather than the re-check.  Strip only the re-check --
+# leaving the first gate intact -- and the same race must leak.
+stop_feeder
+awk '/TOCTOU RE-CHECK/,/^    fi$/ {next} {print}' "$FEEDER" > "$TMP/clip-feed-norecheck.sh"
+grep -qF 'TOCTOU RE-CHECK' "$TMP/clip-feed-norecheck.sh" \
+  && { echo "FATAL: patched feeder still contains the re-check" >&2; exit 1; }
+grep -qF 'SECURITY GATE' "$TMP/clip-feed-norecheck.sh" \
+  || { echo "FATAL: patched feeder lost the FIRST gate too; control would prove nothing" >&2; exit 1; }
+grep -q 'copyq add' "$TMP/clip-feed-norecheck.sh" \
+  || { echo "FATAL: patched feeder lost its feed path" >&2; exit 1; }
+rm -f "$TMP/feed.lock"
+start_feeder "$TMP/clip-feed-norecheck.sh"
+before="$(cq size)"
+own_race_clipboard 'RACE-DECOY-benign' 'RACE-SECRET-CONTROL'
+size="$(wait_size_change "$before" 10)"
+assert_eq "the handoff fired, so the race really was exercised" "fired" "$(race_fired)"
+assert_eq "raced secret IS fed when the re-check is absent" "$((before + 1))" "$size"
+assert_eq "and its full text lands in DST history" "RACE-SECRET-CONTROL" "$(cq read 0)"
 stop_feeder
 
 scenario "CONTROL feeder-is-load-bearing: no capture at all with no feeder"
