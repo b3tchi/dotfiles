@@ -77,6 +77,34 @@ fn window_title(cfg: &Config) -> String {
     format!("preview {}", cfg.n)
 }
 
+/// Pure formatter for the startup log line (dotfiles-bo2). run_window
+/// eprintln!s it to stderr — which the wrapper redirects to
+/// ~/.cache/preview/wv-<N>.log — immediately before entering the event
+/// loop. It is the "this process reached a live event loop" marker a silent
+/// death otherwise leaves no trace of: the log was empty on every run,
+/// healthy or not, so a crash, a clean exit and a SIGKILL were
+/// indistinguishable. Kept pure (no I/O) so it is unit-testable.
+fn ready_line(cfg: &Config, pid: u32) -> String {
+    format!(
+        "preview-wv: window {} ready (pid {}, port {}) — entering event loop",
+        cfg.n, pid, cfg.port
+    )
+}
+
+/// Pure formatter for the clean-exit log line, emitted when the WM/session
+/// delivers WindowEvent::CloseRequested — the ONLY path by which this binary
+/// exits itself. Its presence after ready_line means the environment closed
+/// the window (exit 0, e.g. an xrdp session recycling its X windows); its
+/// ABSENCE — ready_line logged, no close_line, process gone — means an
+/// external signal (SIGKILL/OOM/crash) killed it. That is the bo2
+/// distinguisher, previously invisible.
+fn close_line(cfg: &Config) -> String {
+    format!(
+        "preview-wv: window {} received CloseRequested — exiting 0",
+        cfg.n
+    )
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let env_port = std::env::var("PREVIEW_PORT").ok();
@@ -218,6 +246,12 @@ fn run_window(cfg: &Config) -> ExitCode {
         }
     };
 
+    // bo2 observability: mark that a live event loop was reached, and
+    // precompute the close message so the 'static event-loop closure can log
+    // it without capturing the non-'static &Config borrow.
+    eprintln!("{}", ready_line(cfg, std::process::id()));
+    let close_msg = close_line(cfg);
+
     // EventLoop::run never returns (-> !); ControlFlow::Exit triggers
     // std::process::exit(0) internally, which is how "exits 0 on window
     // close" is satisfied.
@@ -228,6 +262,7 @@ fn run_window(cfg: &Config) -> ExitCode {
             ..
         } = event
         {
+            eprintln!("{close_msg}");
             *control_flow = ControlFlow::Exit;
         }
     });
@@ -303,5 +338,26 @@ mod tests {
         let cfg = Config { n: 4, port: 4321 };
         assert_eq!(window_url(&cfg), "http://127.0.0.1:4321/preview4");
         assert_eq!(window_title(&cfg), "preview 4");
+    }
+
+    // dotfiles-bo2: lifecycle log lines are the observability that turns a
+    // silent death into a diagnosable one. ready_line marks "reached a live
+    // event loop"; close_line marks the only self-exit path (CloseRequested).
+    // ready with no close + process gone == killed externally.
+    #[test]
+    fn ready_line_names_slot_pid_and_port() {
+        let line = ready_line(&Config { n: 3, port: 4200 }, 12345);
+        assert!(line.contains("window 3"), "{line}");
+        assert!(line.contains("12345"), "{line}");
+        assert!(line.contains("4200"), "{line}");
+        assert!(line.contains("ready"), "{line}");
+    }
+
+    #[test]
+    fn close_line_names_slot_and_clean_exit() {
+        let line = close_line(&Config { n: 7, port: 4200 });
+        assert!(line.contains("window 7"), "{line}");
+        assert!(line.contains("CloseRequested"), "{line}");
+        assert!(line.contains("exiting 0"), "{line}");
     }
 }
