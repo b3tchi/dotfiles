@@ -128,6 +128,28 @@ own_clipboard() { # <text> [extra-mime ...]
   exit 1
 }
 
+# Own SRC CLIPBOARD with <benign-text>, handing the selection to a
+# hint-bearing owner serving <secret-text> the moment the feeder's TARGETS
+# gate has been answered.  See race-owner.py.  Returns once win1 holds it.
+own_race_clipboard() { # <benign-text> <secret-text>
+  [ -n "${OWNER_PID:-}" ] && { kill "$OWNER_PID" 2>/dev/null; wait "$OWNER_PID" 2>/dev/null; }
+  env DISPLAY="$SRC" python3 "$TMP/race-owner.py" "$@" >"$TMP/owner.out" 2>&1 &
+  OWNER_PID=$!
+  local i
+  for i in $(seq 1 20); do
+    grep -q '^owned$' "$TMP/owner.out" 2>/dev/null && return 0
+    sleep 0.25
+  done
+  echo "FATAL: could not own clipboard on $SRC; $(cat "$TMP/owner.out")" >&2
+  exit 1
+}
+
+# Did the mid-poll ownership handoff actually happen?  A race scenario whose
+# handoff never fired is just an ordinary benign copy, and asserting "no
+# secret in history" against it would be a green that proves nothing.  Every
+# race scenario asserts this first.
+race_fired() { grep -q '^handed$' "$TMP/owner.out" 2>/dev/null && echo fired || echo not-fired; }
+
 # Wait until `copyq size` differs from <baseline>, or timeout.  Echoes size.
 wait_size_change() { # <baseline> [seconds]
   local base="$1" limit="${2:-10}" i n
@@ -221,6 +243,99 @@ while True:
     d.flush()
 PYEOF
 
+cat > "$TMP/race-owner.py" <<'PYEOF'
+"""Own CLIPBOARD benignly, then hand it to a hint-bearing owner the instant
+the first TARGETS request has been answered.
+
+This reproduces the clip-feed.sh TOCTOU window: the feeder reads TARGETS and
+the payload as two separate X requests (measured ~10-13ms apart), and X
+offers no way to fetch them atomically.  A password-manager copy landing in
+that gap is gated on the OLD owner and read from the NEW one.
+
+Two windows on one connection:
+  win1  benign text, TARGETS WITHOUT the password-manager hint -- what the
+        feeder's gate inspects, and correctly judges safe.
+  win2  the secret, TARGETS WITH the hint -- the password manager that took
+        the clipboard microseconds after the gate passed.
+
+The handoff fires from inside the handler for win1's TARGETS reply, after
+the SelectionNotify is flushed, so the feeder's NEXT X request -- the payload
+read -- is answered by win2.  That is precisely the race, made deterministic:
+gate passed on win1, payload came from win2.
+
+Prints "owned" once win1 holds the selection and "handed" once win2 does.
+A scenario that never prints "handed" did not exercise the race and its
+result means nothing; the suite asserts on it.
+
+usage: race-owner.py <benign-text> <secret-text>
+"""
+import sys
+import Xlib.display
+import Xlib.protocol.event
+import Xlib.X
+import Xlib.Xatom
+
+benign = sys.argv[1].encode()
+secret = sys.argv[2].encode()
+
+d = Xlib.display.Display()
+screen = d.screen()
+win1 = screen.root.create_window(0, 0, 1, 1, 0, screen.root_depth)
+win2 = screen.root.create_window(0, 0, 1, 1, 0, screen.root_depth)
+
+SEL = d.get_atom("CLIPBOARD")
+TARGETS = d.get_atom("TARGETS")
+HINT = d.get_atom("application/x-kde-passwordManagerHint")
+UTF8 = d.get_atom("UTF8_STRING")
+PLAIN = d.get_atom("text/plain")
+
+
+def table(payload, hint):
+    t = {UTF8: payload, PLAIN: payload, Xlib.Xatom.STRING: payload}
+    if hint:
+        t[HINT] = b"secret"
+    return t
+
+
+served = {win1.id: table(benign, False), win2.id: table(secret, True)}
+
+win1.set_selection_owner(SEL, Xlib.X.CurrentTime)
+d.sync()
+if d.get_selection_owner(SEL) != win1:
+    print("FAILED to own CLIPBOARD", file=sys.stderr)
+    sys.exit(1)
+print("owned", flush=True)
+
+handed = False
+while True:
+    e = d.next_event()
+    if e.type != Xlib.X.SelectionRequest:
+        continue
+    tbl = served.get(e.owner.id, {})
+    prop = e.property if e.property != Xlib.X.NONE else e.target
+    ok = True
+    if e.target == TARGETS:
+        e.requestor.change_property(
+            prop, Xlib.Xatom.ATOM, 32, [TARGETS] + list(tbl))
+    elif e.target in tbl:
+        e.requestor.change_property(prop, e.target, 8, tbl[e.target])
+    else:
+        ok = False
+    d.send_event(e.requestor, Xlib.protocol.event.SelectionNotify(
+        time=e.time, requestor=e.requestor, selection=e.selection,
+        target=e.target, property=prop if ok else Xlib.X.NONE))
+    d.flush()
+
+    # THE RACE.  win1's TARGETS answer is on the wire and the feeder has
+    # passed its gate.  Take the clipboard for the hint-bearing owner before
+    # the feeder gets round to asking for the payload.
+    if not handed and e.owner.id == win1.id and e.target == TARGETS:
+        win2.set_selection_owner(SEL, Xlib.X.CurrentTime)
+        d.sync()
+        handed = d.get_selection_owner(SEL) == win2
+        print("handed" if handed else "HANDOFF-FAILED", flush=True)
+PYEOF
+
 command -v "$COPYQ" >/dev/null 2>&1 || { echo "FATAL: copyq not found (set COPYQ=)" >&2; exit 1; }
 command -v "$XVFB"  >/dev/null 2>&1 || { echo "FATAL: Xvfb not found (set XVFB=)"  >&2; exit 1; }
 command -v xclip    >/dev/null 2>&1 || { echo "FATAL: xclip not found" >&2; exit 1; }
@@ -293,6 +408,27 @@ for ((i = 0; i < n; i++)); do
   cq read "$i" | grep -q 'SECRET-PASSWORD-marker' && leaked="row $i"
 done
 assert_eq "secret text appears in no history row" "" "$leaked"
+
+scenario "toctou-race: a hint-bearing owner taking the clipboard AFTER the gate passed still never reaches history"
+# The scenario above proves the gate stops a selection that already carries
+# the hint when the gate looks.  This one covers the residual window the gate
+# structurally cannot close: TARGETS and the payload are two X requests, and
+# ownership can flip between them.  race-owner.py makes that flip fire
+# deterministically off the gate's own TARGETS request, so the feeder reads
+# the payload from a password manager it never gated.
+before="$(cq size)"
+own_race_clipboard 'RACE-DECOY-benign' 'RACE-SECRET-marker'
+sleep 4
+assert_eq "the handoff fired, so the race really was exercised" "fired" "$(race_fired)"
+assert_eq "history size unchanged" "$before" "$(cq size)"
+assert_eq "newest item is still the previous copy" "line-one
+line-two" "$(cq read 0)"
+leaked=""
+n="$(cq size)"
+for ((i = 0; i < n; i++)); do
+  cq read "$i" | grep -q 'RACE-SECRET-marker' && leaked="row $i"
+done
+assert_eq "raced secret appears in no history row" "" "$leaked"
 
 scenario "image-skipped: a selection with no text target is not fed"
 before="$(cq size)"
