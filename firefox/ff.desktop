@@ -1,0 +1,38 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Firefox (ff)
+GenericName=Web Browser
+Comment=Firefox, profile routed by display server
+Keywords=Internet;WWW;Browser;Web;Explorer;
+Categories=Network;WebBrowser;
+Icon=firefox
+Terminal=false
+StartupNotify=true
+X-MultipleArgs=false
+
+# Routes through ff so xdg-open lands in the profile matching $DISPLAY
+# instead of whichever instance Firefox's DBus remoting answers first.
+Exec=ff %u
+
+# The process is still plain firefox, so its windows carry WM_CLASS=firefox.
+# Without this the WM cannot tie a window back to this entry.
+StartupWMClass=firefox
+
+# DBus activation would hand the URL to firefox's own service name and bypass
+# the wrapper entirely, defeating the routing.
+DBusActivatable=false
+
+MimeType=application/json;application/pdf;application/rdf+xml;application/rss+xml;application/x-xpinstall;application/xhtml+xml;application/xml;audio/flac;audio/ogg;audio/webm;image/avif;image/gif;image/jpeg;image/png;image/svg+xml;image/webp;text/html;text/xml;video/ogg;video/webm;x-scheme-handler/chrome;x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/mailto;
+
+# No open-profile-manager action: ff selects profiles by path via --profile,
+# so profiles.ini is unused and the manager would misrepresent the setup.
+Actions=new-window;new-private-window;
+
+[Desktop Action new-window]
+Exec=ff --new-window %u
+Name=New Window
+
+[Desktop Action new-private-window]
+Exec=ff --private-window %u
+Name=New Private Window

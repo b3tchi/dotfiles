@@ -14,6 +14,7 @@
 linux:
   links:
     ff: ~/.local/bin/ff
+    ff.desktop: ~/.local/share/applications/ff.desktop
     user.js:
       - ~/.mozilla/firefox/home/user.js
       - ~/.mozilla/firefox/rdp/user.js
@@ -30,3 +31,16 @@ linux:
       sudo pacman -Syu --needed --noconfirm firefox
       {{/if}}
       chmod +x ~/.local/bin/ff
+
+      # Refresh the MIME cache so ff.desktop is offered as a handler.
+      update-desktop-database ~/.local/share/applications 2>/dev/null || true
+
+      # Make ff the default browser -- but NOT on WSL, where wsl/dot.yaml
+      # installs its own ~/.local/bin/xdg-open forwarding links to the
+      # Windows browser via Start-Process. That wrapper shadows the real
+      # xdg-open on PATH and never consults .desktop files, so setting a
+      # default here would be inert and misleading. Runtime check, not
+      # template eval (see CLAUDE.md).
+      if [ ! -d /mnt/c ]; then
+        xdg-settings set default-web-browser ff.desktop || true
+      fi
