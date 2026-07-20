@@ -10,6 +10,7 @@ linux:
     akm/akm: ~/.local/bin/akm
     akm/akm-root: ~/.local/bin/akm-root
     commands/epic-create.md: ~/.claude/commands/epic-create.md
+    commands/preview.md: ~/.claude/commands/preview.md
 
     {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
     claude-wrapper: /data/data/com.termux/files/usr/bin/claude
@@ -36,6 +37,7 @@ linux:
       if [ -d ~/.claude-personal ]; then
         mkdir -p ~/.claude-personal/commands
         ln -sf ~/.dotfiles/claude/commands/epic-create.md ~/.claude-personal/commands/epic-create.md
+        ln -sf ~/.dotfiles/claude/commands/preview.md ~/.claude-personal/commands/preview.md
       fi
 
       # LSP servers (binaries) — required by code intelligence plugins.

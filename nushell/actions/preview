@@ -5,6 +5,7 @@
 #   preview start                          # idempotent daemon launch (port-probe -> pidfile -> detach)
 #   preview stop                           # graceful stop (closes windows, then POST /stop + SIGTERM fallback)
 #   preview status                         # daemon health (pid / root / port / started_at)
+#   preview show <path> [--window N]       # one-shot: /-rooted daemon + window + send + print URL
 #   preview send <path> [--window N]       # POST {path} to /preview<N> (default window 1)
 #   preview register <addr> [--slot N]     # POST {nvim, slot?} to /register, prints assigned slot
 #   preview window [N] [--close]           # idempotent preview-wv window spawn/close (default N=1)
@@ -135,7 +136,10 @@ def window-log-file [n: int] {
 }
 
 # Idempotent start: port-probe first, pidfile second, then detached launch.
-def main-start [] {
+# Idempotent start. root_override forces a specific root (the `show` verb
+# passes "/" so any absolute path previews); omitted, it resolves the normal
+# $PREVIEW_ROOT/akm-root/cwd chain.
+def main-start [root_override?: string] {
     # 1. Port probe — if the daemon is already answering, no-op.
     let live = (probe-status)
     if $live != null {
@@ -165,7 +169,7 @@ def main-start [] {
     # 4. Detached launch on the resolved root + port.
     let log  = ($LOG_FILE | path expand)
     let dir  = ($CACHE_DIR | path expand)
-    let root = (preview-root)
+    let root = (if ($root_override | is-empty) { (preview-root) } else { $root_override })
     let port = (preview-port)
     if not ($dir | path exists) {
         mkdir $dir
@@ -430,6 +434,49 @@ def main-send [path?: string, window: int = 1] {
     print $"preview: sent ($path) to window ($window)"
 }
 
+# Ensure a running daemon rooted at "/" so `show` can preview ANY absolute
+# path without a per-call restart (localhost-only, no-auth, single-user — the
+# jail is relaxed to the whole filesystem on purpose; see dotfiles-ad7). Down
+# -> start at /. Up but rooted narrower (e.g. an nvim/nnn session started it
+# at the repo root) -> one-time restart at /, which is a superset so those
+# consumers keep resolving. Already at / -> no-op.
+def ensure-daemon-slash [] {
+    let st = (probe-status)
+    if $st == null {
+        main-start "/"
+    } else if $st.root != "/" {
+        print $"preview: daemon rooted at ($st.root) — restarting at / so any path previews"
+        main-stop
+        main-start "/"
+    }
+}
+
+# One-shot preview: ensure a /-rooted daemon, open window N, send the file,
+# and print its localhost URL (the browser-on-a-port fallback). This is the
+# verb Claude Code's /preview slash command and any ad-hoc caller uses to
+# throw an arbitrary image/file into the preview-wv window in one command
+# (dotfiles-ad7). A missing/nonexistent path is a loud error, mirroring
+# `send`'s guard.
+def main-show [path?: string, window: int = 1] {
+    if ($path | is-empty) {
+        error make { msg: "preview: show requires a path" }
+    }
+    let abs = ($path | path expand)
+    if not ($abs | path exists) {
+        error make { msg: $"preview: no such file: ($abs)" }
+    }
+    ensure-daemon-slash
+    # Window spawn is best-effort GUI: on a headless host (Termux, no WM) the
+    # detached preview-wv just dies in its log — the daemon + URL below still
+    # give a working browser-on-a-port preview, so this never gates the send.
+    window-spawn $window
+    # The daemon (root=/) converts this absolute path abs->rel internally
+    # (handlePreviewSet), so /file/<abs-minus-leading-slash> is the URL.
+    main-send $abs $window
+    let rel = ($abs | str trim --left --char '/')
+    print $"preview: (api-base)/file/($rel)?full"
+}
+
 # Register this nvim's server address against a slot (ft005 api_surface
 # `register` verb — sp009 Task 3): POST {nvim, slot?} to /register and
 # print the daemon's assigned slot on stdout — the machine-parseable
@@ -503,9 +550,9 @@ def parse-window-arg [arg?: string] {
 
 # preview — control the preview-d daemon
 def main [
-    subcommand?: string        # start | stop | status | send | register | window
-    arg?: string                # path for `send`; nvim server address for `register`; N for `window`
-    --window (-w): int = 1     # target preview<N> slot for `send` (default 1)
+    subcommand?: string        # start | stop | status | show | send | register | window
+    arg?: string                # path for `show`/`send`; nvim server address for `register`; N for `window`
+    --window (-w): int = 1     # target preview<N> slot for `show`/`send` (default 1)
     --slot (-s): int             # explicit slot for `register` (rebind instead of allocate)
     --close                      # with `window`: close instead of spawn
 ] {
@@ -513,6 +560,7 @@ def main [
         "start"    => { main-start }
         "stop"     => { main-stop }
         "status"   => { main-status }
+        "show"     => { main-show $arg $window }
         "send"     => { main-send $arg $window }
         "register" => { main-register $arg $slot }
         "window"   => { main-window (parse-window-arg $arg) $close }
@@ -523,6 +571,7 @@ def main [
             print "  start                        — launch daemon (idempotent)"
             print "  stop                         — stop daemon (closes all windows first)"
             print "  status                       — daemon health (pid / root / port / started_at)"
+            print "  show <path> [--window N]     — one-shot: /-rooted daemon + window + send + URL (default 1)"
             print "  send <path> [--window N]     — push path to window N (default 1)"
             print "  register <addr> [--slot N]   — bind nvim server addr to a slot, print the slot"
             print "  window [N] [--close]         — open (or close) preview-wv window N (default 1)"

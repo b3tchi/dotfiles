@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -157,6 +158,34 @@ func TestResolveInRootRejectsSymlinkDirEscape(t *testing.T) {
 	_, err := resolveInRoot(root, "escape-dir/sub/secret.txt")
 	if !errors.Is(err, ErrPathEscape) {
 		t.Fatalf("resolveInRoot(symlinked dir escape): err = %v, want ErrPathEscape", err)
+	}
+}
+
+// TestResolveInRootFilesystemRootServesAbsolutePaths proves root="/" (the
+// mode `preview show` uses so any absolute path previews — dotfiles-ad7)
+// resolves a real descendant instead of rejecting it as an escape. The
+// naive root+separator prefix would compute "//" here and 400 every path;
+// underRoot must treat a root already ending in the separator specially.
+func TestResolveInRootFilesystemRootServesAbsolutePaths(t *testing.T) {
+	// A file guaranteed to exist and live below "/". Resolve symlinks so the
+	// comparison matches resolveInRoot's own EvalSymlinks output (e.g. on a
+	// host where /tmp -> /private/tmp).
+	dir := t.TempDir()
+	target := filepath.Join(dir, "pixel.png")
+	if err := os.WriteFile(target, []byte("data"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	want, _ := filepath.EvalSymlinks(target)
+	// Strip the leading separator to mimic the /file/<path> request shape the
+	// handler passes (r.URL.Path minus the "/file/" prefix).
+	reqPath := strings.TrimPrefix(want, string(filepath.Separator))
+
+	got, err := resolveInRoot("/", reqPath)
+	if err != nil {
+		t.Fatalf("resolveInRoot(\"/\", %q): unexpected error: %v", reqPath, err)
+	}
+	if got != want {
+		t.Errorf("resolveInRoot = %q, want %q", got, want)
 	}
 }
 

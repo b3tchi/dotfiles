@@ -78,5 +78,17 @@ func underRoot(root, candidate string) bool {
 	if candidate == root {
 		return true
 	}
-	return strings.HasPrefix(candidate, root+string(filepath.Separator))
+	// The boundary check is "candidate starts with root + separator". When
+	// root is the filesystem root "/" it already ends in the separator, so
+	// naively appending another yields "//" and rejects every real path
+	// under it (dotfiles-ad7: `preview show` roots the daemon at "/" so any
+	// absolute path previews). Only append the separator when root does not
+	// already end in one — this preserves the sibling-collision guard for
+	// every normal root while letting "/" match its descendants.
+	sep := string(filepath.Separator)
+	prefix := root
+	if !strings.HasSuffix(prefix, sep) {
+		prefix += sep
+	}
+	return strings.HasPrefix(candidate, prefix)
 }
