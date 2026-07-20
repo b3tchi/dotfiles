@@ -10,6 +10,9 @@ linux:
     i3blocks.conf: ~/.config/i3blocks/config
     scripts/qs-title-trim.sh: ~/.i3/scripts/qs-title-trim.sh
     scripts/clip-sync.sh: ~/.i3/scripts/clip-sync.sh
+    # sp014 cross-display clipboard feeder — autostarted by config.d/native.conf
+    # (linked on every platform; only the native overlay execs it)
+    scripts/clip-feed.sh: ~/.i3/scripts/clip-feed.sh
     picom.conf: ~/.config/picom.conf
     # Platform overlay (ft003 i3-config-layering): exactly one config.d/*
     # eval path check, not env.WSL_DISTRO_NAME — that var is unset in

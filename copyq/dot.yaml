@@ -52,6 +52,24 @@
 #    plugin commands, `size=7`) precisely so the first server start has
 #    nothing to write back and leaves no dirty git diff.
 #
+# WHO STARTS THE SERVER (sp014 task 5). Nothing here does — this dot.yaml only
+# installs copyq and links its two ini files. The server is autostarted by the
+# i3 platform overlay, `exec_always --no-startup-id copyq --start-server`:
+#
+#   i3/config.d/native.conf   server on :0 (+ i3/scripts/clip-feed.sh, which
+#                             feeds the xrdp display's copies into it)
+#   i3/config.d/wsl.conf      server on the single WSL display, no feeder
+#
+# It lives in the overlay rather than the base i3 config because adr0004 gives
+# the native host two live X servers and the history must have exactly one
+# home; the base config only carries the $mod+Shift+v picker keybind, which is
+# platform-independent.
+#
+# `--start-server` is idempotent, which is what makes exec_always safe across
+# i3 config reloads: a second invocation reaches the running server over the
+# socket, prints "CopyQ server is already running" and exits 0 without starting
+# a second one. Verified on copyq 16.0.0 by i3/scripts/test-clip-integration.sh.
+#
 # Test: copyq/test-copyq.sh (headless, Xvfb; does not touch the live session
 # or ~/.config/copyq).
 linux:
