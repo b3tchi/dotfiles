@@ -1,41 +1,40 @@
 #!/usr/bin/env bash
-# test-clip-paste.sh — verify i3/scripts/clip-paste.sh (dotfiles-92w.3).
+# test-clip-set.sh — verify i3/scripts/clip-set.sh (dotfiles-92w.3).
 #
-# Runs entirely headless on its own Xvfb display with an isolated
+# Runs entirely headless on its own pair of Xvfb displays with an isolated
 # XDG_CONFIG_HOME, so it never touches the live X session, the live clipboard,
 # or the real ~/.config/copyq.
 #
 # WHAT IS ACTUALLY OBSERVED (no "it exited 0" assertions)
 #
-#   The fixture `paste-target.py` is a real X client: it owns a window with a
-#   settable WM_CLASS, takes input focus, and *implements paste* -- on a
-#   ctrl+v / ctrl+shift+v KeyPress it converts the CLIPBOARD selection (INCR
-#   included) and appends the received bytes to a buffer file, exactly as a
-#   real editor would at its cursor.
+#   clip-set.sh publishes an entry to every live display. So the observation
+#   is made from the *outside*, on each display independently: what do
+#   CLIPBOARD and PRIMARY on :93 and on :94 serve back, byte for byte, after
+#   the script ran? Exit status is asserted only where the contract is about
+#   exit status (the guard cases), and there it is always paired with an
+#   assertion that the selections were left alone.
 #
-#   So each end-to-end scenario asserts on effect, not on exit status:
-#     - which modifier combo the *focused window* received (class -> keystroke)
-#     - what text that window pulled out of the selection (== the copyq entry)
-#     - what CLIPBOARD and PRIMARY hold afterwards
+#   TWO displays are up for every scenario. That is not decoration: with a
+#   single display, "set the clipboard on the one display" and "set it on all
+#   of them" are indistinguishable, and the bug this suite exists to prevent
+#   (enumeration order deciding which session gets the entry) cannot be seen.
+#   Every content scenario asserts on BOTH displays, so a mutant that drops
+#   the second write -- or the first -- fails an assertion.
 #
-#   The one thing this cannot prove headlessly is caret placement inside a
-#   third-party GUI -- "lands at cursor" is the pasting application's own
-#   behaviour once the key arrives. What is proven is that the correct key
-#   reaches the focused window and that the selection it reads is byte-exact.
-#
-# usage: i3/scripts/test-clip-paste.sh
+# usage: i3/scripts/test-clip-set.sh
 # env:   COPYQ=/path/to/copyq  XVFB=/path/to/Xvfb   (default: from PATH)
-#        TEST_DISPLAY=:93                           (default: :93)
-#        CLIP_PASTE=/path/to/clip-paste.sh          (default: alongside this)
+#        TEST_DISPLAY=:93 TEST_DISPLAY2=:94
+#        CLIP_SET=/path/to/clip-set.sh              (default: alongside this)
 set -u
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-CLIP_PASTE="${CLIP_PASTE:-$SCRIPT_DIR/clip-paste.sh}"
+CLIP_SET="${CLIP_SET:-$SCRIPT_DIR/clip-set.sh}"
 COPYQ="${COPYQ:-copyq}"
 XVFB="${XVFB:-Xvfb}"
 DPY="${TEST_DISPLAY:-:93}"
+DPY2="${TEST_DISPLAY2:-:94}"
 
-TMP="/tmp/clip-paste-test.$$"   # kept short: copyq's socket lives under $CFG
+TMP="/tmp/clip-set-test.$$"     # kept short: copyq's socket lives under $CFG
 CFG="$TMP/cfg"
 DAT="$TMP/data"
 CCH="$TMP/cache"
@@ -55,10 +54,10 @@ assert_eq() { # <scenario> <expected> <actual>
 scenario() { printf '\n[%s]\n' "$1"; }
 
 cleanup() {
-  stop_target
   [ -n "${SERVER_STARTED:-}" ] && cq exit >/dev/null 2>&1
   sleep 1
   [ -n "${XVFB_PID:-}" ] && kill "$XVFB_PID" 2>/dev/null
+  [ -n "${XVFB2_PID:-}" ] && kill "$XVFB2_PID" 2>/dev/null
   rm -rf "$TMP"
 }
 trap cleanup EXIT
@@ -66,30 +65,57 @@ trap cleanup EXIT
 cq() { env DISPLAY="$DPY" XDG_CONFIG_HOME="$CFG" XDG_DATA_HOME="$DAT" \
            XDG_CACHE_HOME="$CCH" "$COPYQ" "$@"; }
 
-# clip-paste.sh under test. XDG_* are exported for the *harness's* isolation
+# clip-set.sh under test. XDG_* are exported for the *harness's* isolation
 # (the script itself still calls a plain `copyq`, per copyq/dot.yaml's client
 # contract). DISPLAY is deliberately exported WRONG -- an inherited DISPLAY
-# must never be trusted, so the script has to derive the real one.
-run_paste() { # <row> [extra env assignments...]
+# must never be trusted, and :987 does not exist, so anything that reached a
+# selection got there by enumerating sockets, not by inheriting.
+run_set_in() { # <socket-dir> <args...>
+  local dir="$1"; shift
   env DISPLAY=:987 XDG_CONFIG_HOME="$CFG" XDG_DATA_HOME="$DAT" \
-      XDG_CACHE_HOME="$CCH" CLIP_PASTE_DISPLAY="$DPY" \
-      sh "$CLIP_PASTE" "$@" 2>"$TMP/paste.err"
+      XDG_CACHE_HOME="$CCH" CLIP_SET_SOCKET_DIR="$dir" \
+      sh "$CLIP_SET" "$@" 2>"$TMP/set.err"
 }
 
-sel() { # <clipboard|primary>  -> current selection content on the test display
-  env DISPLAY="$DPY" timeout 10 xclip -selection "$1" -o 2>/dev/null
+run_set() { run_set_in "$TMP/x11" "$@"; }
+
+sel_on() { # <display> <clipboard|primary>
+  env DISPLAY="$1" timeout 10 xclip -selection "$2" -o 2>/dev/null
 }
 
-# Take ownership of both selections away from anything the previous scenario
-# left behind, so an assertion can never pass on a stale selection.
+# Take ownership of both selections on both displays away from whatever the
+# previous scenario left behind, so no assertion can pass on a stale selection
+# and "nothing was written" is a statement about a known prior value.
+SENTINEL='SENTINEL-nothing-set'
 reset_selections() {
-  printf 'SENTINEL-nothing-pasted' | env DISPLAY="$DPY" timeout 5 xclip -selection clipboard -i
-  printf 'SENTINEL-nothing-pasted' | env DISPLAY="$DPY" timeout 5 xclip -selection primary -i
+  local d
+  for d in "$DPY" "$DPY2"; do
+    printf '%s' "$SENTINEL" | env DISPLAY="$d" timeout 5 xclip -selection clipboard -i
+    printf '%s' "$SENTINEL" | env DISPLAY="$d" timeout 5 xclip -selection primary -i
+  done
   sleep 0.5
 }
 
+# Assert all four selections still hold the sentinel -- i.e. the run under
+# test performed ZERO selection writes.
+assert_untouched() { # <label>
+  assert_eq "$1: $DPY clipboard untouched"  "$SENTINEL" "$(sel_on "$DPY" clipboard)"
+  assert_eq "$1: $DPY primary untouched"    "$SENTINEL" "$(sel_on "$DPY" primary)"
+  assert_eq "$1: $DPY2 clipboard untouched" "$SENTINEL" "$(sel_on "$DPY2" clipboard)"
+  assert_eq "$1: $DPY2 primary untouched"   "$SENTINEL" "$(sel_on "$DPY2" primary)"
+}
+
+# Assert the entry landed on BOTH displays, both selections. This is the
+# assertion that kills a dropped-second-display mutant.
+assert_on_both() { # <label> <expected>
+  assert_eq "$1: $DPY clipboard"  "$2" "$(sel_on "$DPY" clipboard)"
+  assert_eq "$1: $DPY primary"    "$2" "$(sel_on "$DPY" primary)"
+  assert_eq "$1: $DPY2 clipboard" "$2" "$(sel_on "$DPY2" clipboard)"
+  assert_eq "$1: $DPY2 primary"   "$2" "$(sel_on "$DPY2" primary)"
+}
+
 # Block until the copyq history stops growing. Every clipboard write this
-# harness makes (the sentinel reset, and the paste under test itself) is a
+# harness makes (the sentinel reset, and the run under test itself) is a
 # genuine clipboard change that the running server captures and PREPENDS --
 # so row numbers move under our feet unless we wait for capture to finish
 # before deciding which row to address. (Getting this wrong is a silent
@@ -106,7 +132,8 @@ settle() {
 
 # Clear the selections, let capture settle, then push <text...> onto the
 # history so the LAST argument is row 0. `copyq add` does not touch the
-# clipboard, so this cannot itself perturb the row numbering.
+# clipboard, so this cannot itself perturb the row numbering. (`copyq copy`
+# would be a false-pass trap here: copyq ignores clipboard changes it owns.)
 arm() {
   reset_selections
   settle
@@ -122,153 +149,14 @@ arm_file() {
   cq eval -- 'add(str(input()))' < "$1" >/dev/null
 }
 
-# ------------------------------------------------------ paste-target fixture ---
-
-start_target() { # <wm_class>
-  stop_target
-  : > "$TMP/target.combo"
-  : > "$TMP/target.buffer"
-  : > "$TMP/target.out"
-  env DISPLAY="$DPY" python3 "$TMP/paste-target.py" "$1" \
-      "$TMP/target.combo" "$TMP/target.buffer" >"$TMP/target.out" 2>&1 &
-  TARGET_PID=$!
-  local i
-  for i in $(seq 1 40); do
-    grep -q ready "$TMP/target.out" 2>/dev/null && { sleep 0.3; return 0; }
-    sleep 0.25
-  done
-  echo "FATAL: paste-target did not come up; $(cat "$TMP/target.out")" >&2
-  exit 1
-}
-
-stop_target() {
-  [ -n "${TARGET_PID:-}" ] && { kill "$TARGET_PID" 2>/dev/null; wait "$TARGET_PID" 2>/dev/null; }
-  TARGET_PID=""
-}
-
-# Wait for the target to finish handling a paste (combo recorded AND the
-# selection transfer completed), then echo the combo it saw.
-await_paste() {
-  local i
-  for i in $(seq 1 80); do
-    if [ -s "$TMP/target.combo" ] && grep -q . "$TMP/target.done" 2>/dev/null; then
-      break
-    fi
-    sleep 0.25
-  done
-  cat "$TMP/target.combo" 2>/dev/null
-}
-
 # ---------------------------------------------------------------- fixtures ---
 
 mkdir -p "$TMP" "$CFG/copyq" "$DAT" "$CCH"
 
-cat > "$TMP/paste-target.py" <<'PYEOF'
-"""A minimal X client that really pastes, used to observe clip-paste.sh.
-
-Owns a window with a chosen WM_CLASS (so xdotool's class detection has
-something to detect), holds the input focus, and on a ctrl+v / ctrl+shift+v
-KeyPress converts the CLIPBOARD selection -- INCR transfers included -- and
-appends the bytes it receives to a buffer file, the way an editor would insert
-at its caret. The modifier combo it saw is written to a separate file so the
-class -> keystroke mapping can be asserted on the *receiving* end rather than
-on the sending command line.
-
-usage: paste-target.py <wm_class> <combo-file> <buffer-file>
-"""
-import sys
-
-import Xlib.display
-import Xlib.X
-import Xlib.Xatom
-
-wm_class, combo_path, buffer_path = sys.argv[1], sys.argv[2], sys.argv[3]
-done_path = combo_path.rsplit(".", 1)[0] + ".done"
-open(done_path, "w").close()
-
-d = Xlib.display.Display()
-screen = d.screen()
-win = screen.root.create_window(
-    0, 0, 400, 300, 0, screen.root_depth,
-    event_mask=Xlib.X.KeyPressMask | Xlib.X.PropertyChangeMask)
-win.set_wm_name("paste-target")
-win.set_wm_class(wm_class.lower(), wm_class)
-win.map()
-d.sync()
-win.set_input_focus(Xlib.X.RevertToParent, Xlib.X.CurrentTime)
-d.sync()
-
-CLIPBOARD = d.get_atom("CLIPBOARD")
-UTF8 = d.get_atom("UTF8_STRING")
-INCR = d.get_atom("INCR")
-DEST = d.get_atom("CLIP_PASTE_TEST")
-
-CTRL, SHIFT = 1 << 2, 1 << 0
-V_KEYCODE = d.keysym_to_keycode(0x076)  # XK_v, on the CURRENT keymap
-
-
-def read_property():
-    """Read DEST off our window, following an INCR transfer if offered."""
-    r = win.get_full_property(DEST, Xlib.X.AnyPropertyType,
-                              sizehint=1 << 20)
-    if r is None:
-        return b""
-    if r.property_type == INCR:
-        win.delete_property(DEST)
-        d.flush()
-        chunks = []
-        while True:
-            e = d.next_event()
-            if (e.type != Xlib.X.PropertyNotify or e.atom != DEST
-                    or e.state != Xlib.X.PropertyNewValue):
-                continue
-            part = win.get_full_property(DEST, Xlib.X.AnyPropertyType,
-                                         sizehint=1 << 20)
-            win.delete_property(DEST)
-            d.flush()
-            data = b"" if part is None else bytes(bytearray(part.value))
-            if not data:
-                return b"".join(chunks)
-            chunks.append(data)
-    win.delete_property(DEST)
-    d.flush()
-    return bytes(bytearray(r.value))
-
-
-def paste():
-    win.convert_selection(CLIPBOARD, UTF8, DEST, Xlib.X.CurrentTime)
-    d.flush()
-    while True:
-        e = d.next_event()
-        if e.type == Xlib.X.SelectionNotify:
-            if e.property == Xlib.X.NONE:
-                return b""
-            return read_property()
-
-
-print("ready", flush=True)
-while True:
-    e = d.next_event()
-    if e.type != Xlib.X.KeyPress or e.detail != V_KEYCODE:
-        continue
-    if not e.state & CTRL:
-        continue
-    combo = "ctrl+shift+v" if e.state & SHIFT else "ctrl+v"
-    data = paste()
-    with open(buffer_path, "ab") as f:
-        f.write(data)
-    with open(combo_path, "a") as f:
-        f.write(combo + "\n")
-    with open(done_path, "w") as f:
-        f.write("1\n")
-PYEOF
-
 command -v "$COPYQ" >/dev/null 2>&1 || { echo "FATAL: copyq not found (set COPYQ=)" >&2; exit 1; }
 command -v "$XVFB"  >/dev/null 2>&1 || { echo "FATAL: Xvfb not found (set XVFB=)"  >&2; exit 1; }
-command -v xdotool  >/dev/null 2>&1 || { echo "FATAL: xdotool not found" >&2; exit 1; }
 command -v xclip    >/dev/null 2>&1 || { echo "FATAL: xclip not found" >&2; exit 1; }
-python3 -c 'import Xlib' 2>/dev/null || { echo "FATAL: python-xlib missing" >&2; exit 1; }
-[ -r "$CLIP_PASTE" ] || { echo "FATAL: $CLIP_PASTE not readable" >&2; exit 1; }
+[ -r "$CLIP_SET" ] || { echo "FATAL: $CLIP_SET not readable" >&2; exit 1; }
 
 "$XVFB" "$DPY" -screen 0 800x600x24 >"$TMP/xvfb.log" 2>&1 &
 XVFB_PID=$!
@@ -278,22 +166,29 @@ for i in $(seq 1 20); do
 done
 [ -e "/tmp/.X11-unix/X${DPY#:}" ] || { echo "FATAL: Xvfb $DPY did not start" >&2; exit 1; }
 
-echo "clip-paste: $CLIP_PASTE"
-echo "copyq:      $("$COPYQ" --version 2>/dev/null | head -1)"
-echo "display:    $DPY"
+"$XVFB" "$DPY2" -screen 0 800x600x24 >"$TMP/xvfb2.log" 2>&1 &
+XVFB2_PID=$!
+for i in $(seq 1 20); do
+  [ -e "/tmp/.X11-unix/X${DPY2#:}" ] && break
+  sleep 0.5
+done
+[ -e "/tmp/.X11-unix/X${DPY2#:}" ] || { echo "FATAL: Xvfb $DPY2 did not start" >&2; exit 1; }
 
-# ============================== PHASE 0: no window, nothing to paste into ====
+# The controlled socket directory handed to clip-set.sh via
+# CLIP_SET_SOCKET_DIR. Symlinks, not copies -- the script only reads the NAMES
+# to build ":93" / ":94"; the X connection itself still goes through the real
+# socket. This keeps the host's live :0 / :10 out of the test.
+mkdir -p "$TMP/x11"
+ln -sf "/tmp/.X11-unix/X${DPY#:}"  "$TMP/x11/X${DPY#:}"
+ln -sf "/tmp/.X11-unix/X${DPY2#:}" "$TMP/x11/X${DPY2#:}"
 
-# Deliberately first, while the Xvfb display still has no client windows.
-scenario "no-active-window: exits nonzero and leaves the selections untouched"
-reset_selections
-run_paste 0
-rc=$?
-assert_eq "exit status is nonzero" "nonzero" "$([ "$rc" -ne 0 ] && echo nonzero || echo 0)"
-assert_eq "clipboard was not overwritten" "SENTINEL-nothing-pasted" "$(sel clipboard)"
-assert_eq "primary was not overwritten" "SENTINEL-nothing-pasted" "$(sel primary)"
-assert_eq "reason names the missing window" "yes" \
-  "$(grep -qi 'no focused window' "$TMP/paste.err" && echo yes || echo no)"
+# An empty socket dir, and one holding nothing but a dead socket name.
+mkdir -p "$TMP/x11-empty" "$TMP/x11-dead"
+: > "$TMP/x11-dead/X95"
+
+echo "clip-set: $CLIP_SET"
+echo "copyq:    $("$COPYQ" --version 2>/dev/null | head -1)"
+echo "displays: $DPY $DPY2"
 
 # =============================== copyq server, seeded history ================
 
@@ -306,134 +201,148 @@ for i in $(seq 1 40); do
 done
 [ -n "${SERVER_STARTED:-}" ] || { echo "FATAL: copyq server did not start" >&2; cat "$TMP/server.log" >&2; exit 1; }
 
-# Seed known rows. `copyq add` inserts at row 0, so the LAST add is row 0.
-# (Seeding via `copyq add` is sound here because nothing in this file asserts
-# on clipboard *capture* -- capture is dotfiles-92w.1's contract, and copyq
-# ignores changes it owns itself, which makes `copyq copy` a false-pass trap.)
 PLAIN='plain-entry-marker'
 MULTI='first line
   second line with  spaces
 third'
 UNI='héllo → 世界 🎉 ünïcodé'
 
-scenario "row-addressing: an entry deeper in the history is the one pasted"
+# ====================== PHASE 1: the entry reaches EVERY live display ========
+
+scenario "both-displays: the entry lands on CLIPBOARD+PRIMARY of both sessions"
+arm "$PLAIN"
+run_set 0; rc=$?
+assert_eq "exits 0" "0" "$rc"
+assert_on_both "plain entry" "$PLAIN"
+
+scenario "row-addressing: an entry deeper in the history is the one published"
 arm "$MULTI" "$UNI" "$PLAIN"     # rows: 0=PLAIN 1=UNI 2=MULTI
 assert_eq "row 0 is the newest add" "$PLAIN" "$(cq read 0)"
 assert_eq "row 2 is the oldest add" "$MULTI" "$(cq read 2)"
-start_target firefox
-run_paste 2
-await_paste >/dev/null
-assert_eq "row 2, not row 0, reached the window" "$MULTI" "$(cat "$TMP/target.buffer")"
-stop_target
+run_set 2; rc=$?
+assert_eq "exits 0" "0" "$rc"
+assert_on_both "row 2, not row 0" "$MULTI"
 
-# ================= PHASE 1: class -> keystroke, observed at the receiver =====
-
-scenario "class-to-keystroke: the focused window's class picks the paste key"
-for probe in "st ctrl+shift+v" "wezterm ctrl+shift+v" "Alacritty ctrl+shift+v" \
-             "firefox ctrl+v" "Code ctrl+v" "SomeUnknownApp ctrl+v"; do
-  set -- $probe
-  klass="$1"; want="$2"
-  arm "$PLAIN"
-  start_target "$klass"
-  run_paste 0
-  got="$(await_paste)"
-  assert_eq "class '$klass' -> $want" "$want" "$got"
-  stop_target
-done
-
-# ======================= PHASE 2: end-to-end paste into the focused window ===
-
-scenario "plain-entry: the focused window receives the entry verbatim"
-arm "$PLAIN"
-start_target firefox
-run_paste 0
-await_paste >/dev/null
-assert_eq "window pasted the entry" "$PLAIN" "$(cat "$TMP/target.buffer")"
-assert_eq "CLIPBOARD holds the entry" "$PLAIN" "$(sel clipboard)"
-assert_eq "PRIMARY holds the entry" "$PLAIN" "$(sel primary)"
-stop_target
-
-scenario "multiline: newlines and interior spacing survive the round trip"
+scenario "multiline: newlines and interior spacing survive to both displays"
 arm "$MULTI"
-start_target st
-run_paste 0
-await_paste >/dev/null
-assert_eq "window pasted every line unchanged" "$MULTI" "$(cat "$TMP/target.buffer")"
+run_set 0
+assert_on_both "multiline entry" "$MULTI"
 # MULTI is 3 lines with no trailing newline, so exactly 2 newline bytes must
-# have made it across -- a paste that flattened or doubled them fails here.
-assert_eq "newline count preserved" "2" "$(tr -cd '\n' < "$TMP/target.buffer" | wc -c | tr -d ' ')"
-stop_target
+# be present -- a selection that flattened or doubled them fails here.
+assert_eq "$DPY newline count preserved" "2" \
+  "$(sel_on "$DPY" clipboard | tr -cd '\n' | wc -c | tr -d ' ')"
+assert_eq "$DPY2 newline count preserved" "2" \
+  "$(sel_on "$DPY2" clipboard | tr -cd '\n' | wc -c | tr -d ' ')"
 
-scenario "unicode: multibyte text and emoji are not mangled"
+scenario "unicode: multibyte text and emoji are not mangled on either display"
 arm "$UNI"
-start_target firefox
-run_paste 0
-await_paste >/dev/null
-assert_eq "window pasted the unicode entry byte-exact" "$UNI" "$(cat "$TMP/target.buffer")"
-assert_eq "byte length preserved" "$(printf '%s' "$UNI" | wc -c)" \
-  "$(wc -c < "$TMP/target.buffer" | tr -d ' ')"
-stop_target
+run_set 0
+assert_on_both "unicode entry" "$UNI"
+assert_eq "$DPY byte length preserved" "$(printf '%s' "$UNI" | wc -c | tr -d ' ')" \
+  "$(sel_on "$DPY" clipboard | wc -c | tr -d ' ')"
+assert_eq "$DPY2 byte length preserved" "$(printf '%s' "$UNI" | wc -c | tr -d ' ')" \
+  "$(sel_on "$DPY2" clipboard | wc -c | tr -d ' ')"
 
-scenario "huge-entry: a 1 MB entry transfers whole (INCR) without truncation"
-python3 -c "import sys; sys.stdout.write('H' * 1000000)" > "$TMP/big.txt"
+scenario "huge-entry: a 1 MB entry transfers whole (INCR) to both displays"
+head -c 1000000 /dev/zero | tr '\0' 'H' > "$TMP/big.txt"
 arm_file "$TMP/big.txt"
 assert_eq "1 MB entry is in history at row 0" "1000000" "$(cq read 0 | wc -c | tr -d ' ')"
-start_target firefox
-run_paste 0
-await_paste >/dev/null
-assert_eq "window received all 1000000 bytes" "1000000" \
-  "$(wc -c < "$TMP/target.buffer" | tr -d ' ')"
-assert_eq "CLIPBOARD holds all 1000000 bytes" "1000000" "$(sel clipboard | wc -c | tr -d ' ')"
-stop_target
+run_set 0; rc=$?
+assert_eq "exits 0" "0" "$rc"
+for d in "$DPY" "$DPY2"; do
+  for s in clipboard primary; do
+    assert_eq "$d $s holds all 1000000 bytes" "1000000" \
+      "$(sel_on "$d" "$s" | wc -c | tr -d ' ')"
+  done
+done
+
+# ======================= PHASE 2: displays that are not there ================
+
+scenario "dead-socket-among-live: a stale socket name is skipped, not fatal"
+# x11-mixed enumerates :93, :94 AND a :95 whose "socket" is a plain file no X
+# server is behind. The run must still succeed on the two real ones.
+mkdir -p "$TMP/x11-mixed"
+ln -sf "/tmp/.X11-unix/X${DPY#:}"  "$TMP/x11-mixed/X${DPY#:}"
+ln -sf "/tmp/.X11-unix/X${DPY2#:}" "$TMP/x11-mixed/X${DPY2#:}"
+: > "$TMP/x11-mixed/X95"
+arm "$PLAIN"
+run_set_in "$TMP/x11-mixed" 0; rc=$?
+assert_eq "exits 0 despite the dead display" "0" "$rc"
+assert_on_both "with a dead socket present" "$PLAIN"
+
+scenario "no-display-at-all: an empty socket dir is a clean exit 1"
+arm "$PLAIN"
+run_set_in "$TMP/x11-empty" 0; rc=$?
+assert_eq "exits 1" "1" "$rc"
+assert_eq "reason names the missing display" "yes" \
+  "$(grep -qi 'no live X display' "$TMP/set.err" && echo yes || echo no)"
+assert_untouched "no-display"
+
+scenario "only-dead-displays: sockets with no server behind them are exit 1"
+arm "$PLAIN"
+run_set_in "$TMP/x11-dead" 0; rc=$?
+assert_eq "exits 1" "1" "$rc"
+assert_eq "reason names the missing display" "yes" \
+  "$(grep -qi 'no live X display' "$TMP/set.err" && echo yes || echo no)"
+assert_untouched "only-dead"
 
 # ================================= PHASE 3: argument + row edge cases ========
+#
+# Every one of these must be exit 1 specifically -- exit 1 is the code that
+# promises the clipboard was not touched, and task .4 builds against that.
 
-scenario "bad-row: non-numeric and missing arguments are refused"
+scenario "bad-row: a non-numeric row is refused before anything is written"
 arm "$PLAIN"
-start_target firefox
-run_paste abc; rc=$?
-assert_eq "non-numeric row exits nonzero" "nonzero" "$([ "$rc" -ne 0 ] && echo nonzero || echo 0)"
-assert_eq "non-numeric row explains itself" "yes" \
-  "$(grep -qi 'non-negative integer' "$TMP/paste.err" && echo yes || echo no)"
-run_paste; rc=$?
-assert_eq "missing row exits nonzero" "nonzero" "$([ "$rc" -ne 0 ] && echo nonzero || echo 0)"
-assert_eq "no key was delivered for a bad row" "" "$(cat "$TMP/target.combo")"
-assert_eq "clipboard untouched by a bad row" "SENTINEL-nothing-pasted" "$(sel clipboard)"
-stop_target
+run_set abc; rc=$?
+assert_eq "exits 1" "1" "$rc"
+assert_eq "explains itself" "yes" \
+  "$(grep -qi 'non-negative integer' "$TMP/set.err" && echo yes || echo no)"
+assert_untouched "bad-row"
 
-scenario "out-of-range-row: a row past the end of history is a no-op"
+scenario "missing-row: no argument at all is refused"
 arm "$PLAIN"
-start_target firefox
-run_paste 9999; rc=$?
-assert_eq "exits nonzero" "nonzero" "$([ "$rc" -ne 0 ] && echo nonzero || echo 0)"
-assert_eq "no key was delivered" "" "$(cat "$TMP/target.combo")"
-assert_eq "clipboard untouched" "SENTINEL-nothing-pasted" "$(sel clipboard)"
-stop_target
+run_set; rc=$?
+assert_eq "exits 1" "1" "$rc"
+assert_eq "prints usage" "yes" \
+  "$(grep -qi 'usage' "$TMP/set.err" && echo yes || echo no)"
+assert_untouched "missing-row"
 
-scenario "empty-entry: an empty history row pastes nothing rather than blanking"
+scenario "out-of-range-row: a row past the end of history writes nothing"
+arm "$PLAIN"
+run_set 9999; rc=$?
+assert_eq "exits 1" "1" "$rc"
+assert_untouched "out-of-range"
+
+scenario "empty-entry: an empty history row does not blank the clipboard"
 reset_selections
 settle
 cq add "" >/dev/null 2>&1 || true
 assert_eq "row 0 really is the empty entry" "" "$(cq read 0)"
-start_target firefox
-run_paste 0; rc=$?
-assert_eq "exits nonzero" "nonzero" "$([ "$rc" -ne 0 ] && echo nonzero || echo 0)"
-assert_eq "no key was delivered" "" "$(cat "$TMP/target.combo")"
-assert_eq "clipboard still holds the previous content" "SENTINEL-nothing-pasted" "$(sel clipboard)"
-stop_target
+run_set 0; rc=$?
+assert_eq "exits 1" "1" "$rc"
+assert_eq "reason names the empty row" "yes" \
+  "$(grep -qi 'empty or does not exist' "$TMP/set.err" && echo yes || echo no)"
+assert_untouched "empty-entry"
 
-# Phase 0 ran before the copyq server existed, so its "selections untouched"
-# assertion could also have been satisfied by the read failing. Repeat it here
-# with a live server and a seeded row, where the ONLY thing that can stop the
-# clipboard being overwritten is the missing-window guard itself.
-scenario "no-active-window-with-history: the guard, not a failed read, stops it"
+# ============ PHASE 4: a display disappearing underneath us (destructive) ====
+#
+# Last, because it tears $DPY2 down for good.
+
+scenario "surviving-display: one session dying does not stop the other"
 arm "$PLAIN"
-stop_target                    # nothing focused from here on
-run_paste 0; rc=$?
-assert_eq "exits nonzero" "nonzero" "$([ "$rc" -ne 0 ] && echo nonzero || echo 0)"
-assert_eq "row 0 was readable, so the read was not the blocker" "$PLAIN" "$(cq read 0)"
-assert_eq "clipboard was not overwritten" "SENTINEL-nothing-pasted" "$(sel clipboard)"
-assert_eq "primary was not overwritten" "SENTINEL-nothing-pasted" "$(sel primary)"
+kill "$XVFB2_PID" 2>/dev/null
+wait "$XVFB2_PID" 2>/dev/null
+XVFB2_PID=""
+for i in $(seq 1 20); do
+  env DISPLAY="$DPY2" timeout 2 xclip -selection clipboard -o >/dev/null 2>&1 || break
+  sleep 0.5
+done
+assert_eq "$DPY2 really is gone" "gone" \
+  "$(env DISPLAY="$DPY2" timeout 2 xclip -selection clipboard -o >/dev/null 2>&1 && echo alive || echo gone)"
+run_set 0; rc=$?
+assert_eq "exits 0 on the survivor alone" "0" "$rc"
+assert_eq "$DPY clipboard holds the entry" "$PLAIN" "$(sel_on "$DPY" clipboard)"
+assert_eq "$DPY primary holds the entry" "$PLAIN" "$(sel_on "$DPY" primary)"
 
 # ------------------------------------------------------------------ result ---
 
