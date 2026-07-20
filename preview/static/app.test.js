@@ -25,7 +25,11 @@ function loadAppJs({ origin, fetchImpl, pathname }) {
   // Real elements (not a fresh `{style:{}}` per call) so a test can read
   // back `.src` after app.js's showFile() sets it — needed for the sp009
   // Task 6 slot-threading tests below, which assert on contentEl.src.
-  const contentEl = { style: {} };
+  // removeAttribute deletes the property so showFile's src/srcdoc clearing
+  // (dotfiles-ad7: image branch uses srcdoc, non-image uses src) is testable
+  // against this plain-object stub the same way a real iframe would drop the
+  // attribute.
+  const contentEl = { style: {}, removeAttribute(name) { delete this[name]; } };
   const emptyEl = { style: {} };
 
   global.document = {
@@ -207,4 +211,41 @@ test("showFile omits ?slot when the shell's own path doesn't carry a slot number
   getWs().onmessage({ data: JSON.stringify({ path: "notes/foo.md" }) });
 
   assert.equal(contentEl.src, "/file/notes/foo.md");
+});
+
+// ── dotfiles-ad7: image previews fit the window ──────────────────────────
+//
+// An image path loads via srcdoc (a fit-to-window <img>), not by navigating
+// the iframe at the raw bytes, so a large screenshot scales down and a small
+// image scales up to the window instead of rendering at native size.
+
+test("showFile wraps an image in a fit-to-window srcdoc pointing at ?full", () => {
+  const { contentEl, getWs } = loadAppJs({
+    origin: "http://localhost:9999",
+    fetchImpl: fetchSpy(),
+    pathname: "/preview1",
+  });
+
+  getWs().onmessage({ data: JSON.stringify({ path: "pics/shot.png" }) });
+
+  assert.equal(contentEl.src, undefined, "raw src must be cleared for images");
+  assert.match(contentEl.srcdoc, /\/file\/pics\/shot\.png\?full/);
+  assert.match(contentEl.srcdoc, /object-fit:contain/);
+  // Carries the fit <-> 1:1 (actual-pixel) toggle.
+  assert.match(contentEl.srcdoc, /body\.actual/);
+  assert.match(contentEl.srcdoc, /addEventListener\('click'/);
+});
+
+test("showFile clears a stale image srcdoc when switching to a non-image", () => {
+  const { contentEl, getWs } = loadAppJs({
+    origin: "http://localhost:9999",
+    fetchImpl: fetchSpy(),
+    pathname: "/preview1",
+  });
+
+  getWs().onmessage({ data: JSON.stringify({ path: "pics/shot.png" }) });
+  getWs().onmessage({ data: JSON.stringify({ path: "notes/foo.md" }) });
+
+  assert.equal(contentEl.srcdoc, undefined, "srcdoc must be cleared for non-images");
+  assert.equal(contentEl.src, "/file/notes/foo.md?slot=1");
 });

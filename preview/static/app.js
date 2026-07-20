@@ -99,15 +99,66 @@
     return SLOT !== null ? base + "?slot=" + SLOT : base;
   }
 
+  // Image previews get a fit-to-window wrapper instead of navigating the
+  // iframe straight at the raw image bytes. WebKit renders a bare image
+  // document at native size (top-left), so a 2560px screenshot overflowed
+  // and a small image sat tiny in the corner — neither zoomed to the window
+  // (dotfiles-ad7 follow-up). Wrapping full-res (?full, not the 320px
+  // thumbnail — the fitted image stays crisp) in an <img object-fit:contain>
+  // that fills the viewport scales every image to fit, up or down. The
+  // extension list mirrors renderImage's server-side isImageExt so only
+  // paths the daemon actually serves as raw image bytes take this branch.
+  const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif"];
+  function isImagePath(path) {
+    const dot = path.lastIndexOf(".");
+    return dot >= 0 && IMAGE_EXTS.includes(path.slice(dot + 1).toLowerCase());
+  }
+
+  // imageDoc builds a self-contained document (loaded via the iframe's
+  // srcdoc) that fits the image to the window by default and toggles to 1:1
+  // actual-pixel view — scrollable when the image is larger than the window
+  // — on click or the z / 1 / space key. The toggle logic lives inside this
+  // document's own <script> rather than the parent shell because the image
+  // renders inside the iframe; the parent has no handle on the img element.
+  function imageDoc(path) {
+    const url = "/file/" + path.split("/").map(encodeURIComponent).join("/") + "?full";
+    return "<!doctype html><meta charset=utf-8>" +
+      "<style>" +
+      "html,body{margin:0;height:100vh;background:#111;overflow:hidden}" +
+      "body.actual{overflow:auto}" +
+      "img{display:block;width:100vw;height:100vh;object-fit:contain;cursor:zoom-in}" +
+      "body.actual img{width:auto;height:auto;object-fit:none;margin:auto;cursor:zoom-out}" +
+      "</style>" +
+      '<img src="' + url + '" alt="">' +
+      "<script>" +
+      "var b=document.body,f=function(e){b.classList.toggle('actual');" +
+      "if(e&&e.preventDefault)e.preventDefault();};" +
+      "document.querySelector('img').addEventListener('click',f);" +
+      "addEventListener('keydown',function(e){" +
+      "if(e.key==='z'||e.key==='1'||e.key===' ')f(e);});" +
+      "addEventListener('load',function(){window.focus();});" +
+      "</script>";
+  }
+
   // showFile hot-swaps the iframe to the given root-relative path without a
   // page reload. An empty path reverts to the "waiting for a file" state.
+  // Images load via srcdoc (imageDoc above); everything else navigates the
+  // iframe at /file/<path>. Whichever attribute isn't in use is cleared so a
+  // lingering srcdoc (which takes precedence over src) can't mask a later
+  // non-image load, and vice-versa.
   function showFile(path) {
     if (!path) {
       contentEl.style.display = "none";
       emptyEl.style.display = "flex";
       return;
     }
-    contentEl.src = encodeFilePath(path);
+    if (isImagePath(path)) {
+      contentEl.removeAttribute("src");
+      contentEl.srcdoc = imageDoc(path);
+    } else {
+      contentEl.removeAttribute("srcdoc");
+      contentEl.src = encodeFilePath(path);
+    }
     contentEl.style.display = "block";
     emptyEl.style.display = "none";
   }
