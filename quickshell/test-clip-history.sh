@@ -159,9 +159,24 @@ gone_on() { # <display>
   return 1
 }
 
+pid_for() { # <display>
+  case "$1" in "$DPY") printf '%s' "$QS_PID" ;; *) printf '%s' "$QS2_PID" ;; esac
+}
+
+# Force the picker shut, whatever a previous scenario left behind. Without
+# this, one scenario failing to close would silently invert the next
+# scenario's `toggle` and every assertion after it would be measuring the
+# wrong thing -- the cross-scenario bleed that made a mutant look survivable.
+close_picker() { # <display>
+  env "${ISO[@]}" "$QUICKSHELL" ipc --pid "$(pid_for "$1")" call cliphistory close \
+    >/dev/null 2>&1
+  gone_on "$1"
+}
+
 # Open the picker on <display> and give it keyboard focus. Echoes the win id.
 open_picker() { # <display>
   local d="$1" id
+  close_picker "$d"
   env DISPLAY="$d" "${ISO[@]}" QS_CLIP_SET="$STUB" QS_CLIP_DISPLAY="DISPLAY=$d" \
       sh "$QS_CLIP" toggle >/dev/null 2>&1
   id="$(win_on "$d")" || { echo ""; return 1; }
@@ -550,6 +565,7 @@ gone_on "$DPY2"
 
 scenario "rapid reopen: repeated toggles never leave a second window"
 clear_log
+close_picker "$DPY2"
 for i in 1 2 3 4 5 6; do
   env DISPLAY="$DPY2" "${ISO[@]}" QS_CLIP_SET="$STUB" QS_CLIP_DISPLAY="DISPLAY=$DPY2" \
       sh "$QS_CLIP" toggle >/dev/null 2>&1
@@ -581,6 +597,7 @@ assert_eq "no picker opened on $DPY2" "0" \
 assert_ne "and it says which sessions it found" "" "$(printf '%s' "$out" | grep -o 'DISPLAY=:9[56]' | head -1)"
 
 scenario "derivation: an inherited DISPLAY that DOES match a live session is honoured"
+close_picker "$DPY2"
 env DISPLAY="$DPY2" "${ISO[@]}" sh "$QS_CLIP" toggle >/dev/null 2>&1
 assert_ne "the picker opened on $DPY2" "" "$(win_on "$DPY2")"
 assert_eq "and not on $DPY" "0" \
