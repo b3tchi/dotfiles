@@ -68,11 +68,22 @@ done
 
 # Id of the window holding input focus on display $1, or nonzero if there is
 # none. i3 (EWMH) answers getactivewindow; a bare X server without a WM only
-# answers getwindowfocus, and answers it with an error when nothing is
-# focused -- which is exactly the "no active window" signal we want.
+# answers getwindowfocus.
+#
+# "Nothing is focused" has TWO shapes and both must be rejected. If focus was
+# never taken, X reports PointerRoot and xdotool errors out. But when the last
+# focused client *exits*, focus reverts to its parent -- the ROOT window --
+# and xdotool happily returns the root's id. Pasting into that means the
+# clipboard is overwritten and a ctrl+v is fired into the desktop background,
+# which is precisely the no-op-and-fail case. So the root id is fetched (a
+# depth-0 search from root matches only root) and excluded.
 focused_window() {
-  DISPLAY="$1" xdotool getactivewindow 2>/dev/null \
-    || DISPLAY="$1" xdotool getwindowfocus 2>/dev/null
+  _root="$(DISPLAY="$1" xdotool search --maxdepth 0 '' 2>/dev/null | head -1)"
+  _win="$(DISPLAY="$1" xdotool getactivewindow 2>/dev/null \
+          || DISPLAY="$1" xdotool getwindowfocus 2>/dev/null)" || return 1
+  [ -n "$_win" ] || return 1
+  [ -n "$_root" ] && [ "$_win" = "$_root" ] && return 1
+  echo "$_win"
 }
 
 # Echo the display to act on. A caller-pinned CLIP_PASTE_DISPLAY is still

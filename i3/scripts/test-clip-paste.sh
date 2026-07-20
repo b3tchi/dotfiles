@@ -422,6 +422,19 @@ assert_eq "no key was delivered" "" "$(cat "$TMP/target.combo")"
 assert_eq "clipboard still holds the previous content" "SENTINEL-nothing-pasted" "$(sel clipboard)"
 stop_target
 
+# Phase 0 ran before the copyq server existed, so its "selections untouched"
+# assertion could also have been satisfied by the read failing. Repeat it here
+# with a live server and a seeded row, where the ONLY thing that can stop the
+# clipboard being overwritten is the missing-window guard itself.
+scenario "no-active-window-with-history: the guard, not a failed read, stops it"
+arm "$PLAIN"
+stop_target                    # nothing focused from here on
+run_paste 0; rc=$?
+assert_eq "exits nonzero" "nonzero" "$([ "$rc" -ne 0 ] && echo nonzero || echo 0)"
+assert_eq "row 0 was readable, so the read was not the blocker" "$PLAIN" "$(cq read 0)"
+assert_eq "clipboard was not overwritten" "SENTINEL-nothing-pasted" "$(sel clipboard)"
+assert_eq "primary was not overwritten" "SENTINEL-nothing-pasted" "$(sel primary)"
+
 # ------------------------------------------------------------------ result ---
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
