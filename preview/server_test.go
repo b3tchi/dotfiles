@@ -25,6 +25,24 @@ func newTestServer(t *testing.T) *Server {
 	return srv
 }
 
+// writeInRoot materializes a fixture file at srv.root/relpath (creating
+// parent dirs). POST /preview<N> now requires the path to exist in root
+// (dotfiles-joz), so tests that exercise slot storage / WS broadcast must
+// give the handler a real file to accept. The content is irrelevant — only
+// existence is checked.
+func writeInRoot(t *testing.T, srv *Server, relpath ...string) {
+	t.Helper()
+	for _, p := range relpath {
+		abs := filepath.Join(srv.root, filepath.FromSlash(p))
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			t.Fatalf("mkdir for fixture %q: %v", p, err)
+		}
+		if err := os.WriteFile(abs, []byte("fixture"), 0o644); err != nil {
+			t.Fatalf("write fixture %q: %v", p, err)
+		}
+	}
+}
+
 // TestStatus proves GET /status returns 200 + a JSON health snapshot with
 // the expected fields (sp008 Task 1 success criteria, ft002/ft004 parity).
 func TestStatus(t *testing.T) {
@@ -571,6 +589,7 @@ func TestHandlePreviewSetRejectsAbsolutePathOutsideRoot(t *testing.T) {
 // contract: a root-relative path passes through unchanged.
 func TestHandlePreviewSetKeepsRelativePathVerbatim(t *testing.T) {
 	srv := newTestServer(t)
+	writeInRoot(t, srv, "docs/x.md")
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/preview2", strings.NewReader(`{"path":"docs/x.md"}`))
 	srv.Handler().ServeHTTP(rec, req)

@@ -80,6 +80,7 @@ func TestPreviewNonNumericSlotReturns400(t *testing.T) {
 // freshly-connecting window is primed with).
 func TestPreviewPostSetsSlotPath(t *testing.T) {
 	srv := newTestServer(t)
+	writeInRoot(t, srv, "a.go")
 	body, _ := json.Marshal(map[string]string{"path": "a.go"})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/preview1", bytes.NewReader(body))
@@ -168,6 +169,7 @@ func readRedraw(t *testing.T, c *websocket.Conn, timeout time.Duration) redrawMs
 // A; POST {path=B} -> receives B.
 func TestPreviewWSReceivesSequentialPathUpdates(t *testing.T) {
 	srv := newTestServer(t)
+	writeInRoot(t, srv, "a.go", "b.go")
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -190,6 +192,7 @@ func TestPreviewWSReceivesSequentialPathUpdates(t *testing.T) {
 // receive the pushes made to /preview1.
 func TestPreviewWSSlotIsolation(t *testing.T) {
 	srv := newTestServer(t)
+	writeInRoot(t, srv, "a.go", "b.go", "c.md")
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -225,6 +228,7 @@ func TestPreviewWSSlotIsolation(t *testing.T) {
 // moment a window does connect (sp008 Task 4 edge case).
 func TestPreviewWSPrimesBufferedPathOnConnect(t *testing.T) {
 	srv := newTestServer(t)
+	writeInRoot(t, srv, "buffered.go")
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -242,6 +246,7 @@ func TestPreviewWSPrimesBufferedPathOnConnect(t *testing.T) {
 // slot N both receive the same broadcast (edge case: two windows same N).
 func TestPreviewWSTwoWindowsSameSlot(t *testing.T) {
 	srv := newTestServer(t)
+	writeInRoot(t, srv, "shared.go")
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 

@@ -261,6 +261,25 @@ func (s *Server) handlePreviewSet(n int, w http.ResponseWriter, r *http.Request)
 		p = rel
 	}
 
+	// Validate the path resolves to a real file inside root before storing or
+	// broadcasting it (dotfiles-joz). Without this, any in-root path — a typo,
+	// a stale path, a relative "../" escape — was stored and 200'd, so
+	// `preview send <bad>` reported success and exited 0 while the webview
+	// alone rendered "not found". Same resolveInRoot the /file/ serve path
+	// uses, so a path accepted here is guaranteed servable. Reject at
+	// ingestion rather than broadcasting a guaranteed 404 to every window.
+	if _, err := resolveInRoot(s.root, p); err != nil {
+		switch {
+		case errors.Is(err, ErrPathEscape):
+			http.Error(w, "path outside preview root", http.StatusBadRequest)
+		case errors.Is(err, os.ErrNotExist):
+			http.Error(w, "no such file", http.StatusNotFound)
+		default:
+			http.Error(w, "internal error", http.StatusInternalServerError)
+		}
+		return
+	}
+
 	// SwapPath reads the path being replaced and stores p in one critical
 	// section (sp011 Task 3 edge case: concurrent same-slot POSTs must
 	// classify against the path actually being replaced, not a value

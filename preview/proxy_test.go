@@ -985,3 +985,45 @@ func TestHandlePreviewSetForwardsHighlightOnlyForAkmPaths(t *testing.T) {
 
 
 
+
+// TestHandlePreviewSetRejectsNonexistentPath proves the dotfiles-joz fix:
+// POST /preview<N> with an in-root path that does not exist on disk must be
+// rejected (404), not stored-and-200'd. Before the fix the daemon accepted
+// any in-root path, so `preview send <typo>` printed success and exited 0
+// while the webview later rendered "not found" — the only signal a bad path
+// ever produced. The wrapper's existing catch turns this 404 into a loud
+// error + nonzero exit.
+func TestHandlePreviewSetRejectsNonexistentPath(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "real.md"), []byte("# real"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	srv, err := NewServer(root, "4200")
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	// Nonexistent in-root path → 404.
+	rec := httptest.NewRecorder()
+	body, _ := json.Marshal(map[string]string{"path": "ghost.md"})
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/preview1", bytes.NewReader(body)))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("POST /preview1 ghost.md: status %d, want 404 (nonexistent path); body=%s", rec.Code, rec.Body.String())
+	}
+
+	// A relative escape must be rejected too (400), not stored for a serve-time 404.
+	rec = httptest.NewRecorder()
+	body, _ = json.Marshal(map[string]string{"path": "../../etc/passwd"})
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/preview1", bytes.NewReader(body)))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("POST /preview1 ../../etc/passwd: status %d, want 400 (escape); body=%s", rec.Code, rec.Body.String())
+	}
+
+	// The happy path is unchanged: an existing in-root file still 200s.
+	rec = httptest.NewRecorder()
+	body, _ = json.Marshal(map[string]string{"path": "real.md"})
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/preview1", bytes.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Errorf("POST /preview1 real.md: status %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+}
