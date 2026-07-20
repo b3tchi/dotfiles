@@ -1,0 +1,75 @@
+# copyq — shared-clipboard-history backend (sp014 task 1, dotfiles-92w.1)
+#
+# The clipboard-history server behind the quickshell picker. Consumed by the
+# cross-display feeder (task .2), the paste script (task .3), the quickshell
+# history browser (task .4) and the i3 autostart/keybind wiring (task .5).
+#
+# ===========================================================================
+# CONTRACT FOR DOWNSTREAM TASKS — read this before writing a copyq client
+# ===========================================================================
+#
+# 1. Talk to the server with a plain `copyq <cmd>`. No environment juggling.
+#
+#    copyq creates its server socket (`.copyq_s`) *inside its config dir*, so
+#    anything that moves the config dir also moves the socket and breaks every
+#    client that does not re-export the same XDG_CONFIG_HOME. That is why the
+#    memory-only behaviour below is NOT implemented by pointing
+#    XDG_CONFIG_HOME at a tmpfs path (an approach evaluated and rejected):
+#    the config dir stays at the standard ~/.config/copyq, clients stay
+#    env-free, and the autostart is a plain `copyq --start-server`.
+#
+# 2. History is memory-only, via `store_items=false` on the &clipboard tab
+#    (copyq.conf `[Tabs]`). Items live in the running server's memory and die
+#    with it — logout clears history, and nothing reaches disk. Verified on
+#    copyq 16.0.0 by copyq/test-copyq.sh, including a 3 MB item (well over
+#    `item_data_threshold`, which would otherwise spill a large item into its
+#    own file next to the tab data).
+#
+#    There is no copyq option that disables saving globally; `store_items` is
+#    a *per-tab* property. If a second tab is ever added, it needs its own
+#    `N\store_items=false` or that tab will persist to disk.
+#
+# 3. Password-manager copies are dropped by the automatic command in
+#    commands.ini, matching `Input=application/x-kde-passwordManagerHint`
+#    with `Remove=true`.
+#
+#    This rule is the ONLY thing standing between a KeePassXC copy and the
+#    history. copyq 16.0.0 has NO native handling of that atom — the string
+#    does not appear anywhere in the binary or its plugins, and with the rule
+#    removed a hint-bearing clipboard change IS captured in full (that is an
+#    asserted negative control in test-copyq.sh, not an assumption). Do not
+#    "simplify" the rule away.
+#
+# 4. Neither ini file may contain comments. Both are Qt QSettings files;
+#    copyq rewrites them in place and QSettings does not support comment
+#    lines — a `#` line survives a rewrite as a percent-encoded garbage key
+#    (observed). That is why this documentation lives here in dot.yaml, which
+#    rotz reads but nothing rewrites.
+#
+#    copyq writes *through* the rotz symlinks rather than replacing them, so
+#    the links survive. commands.ini is committed in copyq's own canonical
+#    serialization (our rule as entry 1, plus copyq's six built-in pinned/tag
+#    plugin commands, `size=7`) precisely so the first server start has
+#    nothing to write back and leaves no dirty git diff.
+#
+# Test: copyq/test-copyq.sh (headless, Xvfb; does not touch the live session
+# or ~/.config/copyq).
+linux:
+  links:
+    copyq.conf: ~/.config/copyq/copyq.conf
+    # copyq's commands store is `copyq-commands.ini`; the repo-side name is
+    # the plainer `commands.ini` (same repo-name/target-name split as
+    # i3/dot.yaml's i3status.conf -> ~/.config/i3status/config).
+    commands.ini: ~/.config/copyq/copyq-commands.ini
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -S --needed --noconfirm copyq xclip
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -S --needed --noconfirm copyq xclip
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux ARM")}}
+      sudo pacman -S --needed --noconfirm copyq xclip
+      {{/if}}
+      rotz link copyq --force
