@@ -1,0 +1,30 @@
+#!/bin/sh
+# ff — launch Firefox with the profile matching the current display server.
+#
+# A profile is a set of SQLite DBs guarded by a lock (.parentlock), so one
+# profile cannot back two concurrent Firefox processes. Where two X servers
+# share a $HOME — native :0 and the xrdp virtual Xorg :10 — a single profile
+# means the second launch hands its URL to the first instance over DBus and
+# the window opens on the wrong display.
+#
+# So the split is drawn only where two servers share a $HOME. Everywhere else
+# (native-only :0, WSLg wayland, Xwayland) the session is the only one on that
+# machine and takes 'home'. Xwayland reporting DISPLAY=:0 is harmless — the
+# catch-all covers it.
+#
+# --profile <path> rather than -P <name>: -P needs the name registered in
+# profiles.ini, a per-machine GUI step that breaks on a fresh clone.
+# --profile takes a bare path and creates the profile on first run.
+#
+# Deliberately no --no-remote. Modern Firefox scopes its DBus remoting name
+# per-profile, so the two coexist while URLs still open as tabs in the running
+# instance. If they ever do collide (a URL aimed at :10 opens a tab on :0
+# instead), add --no-remote here and accept that xdg-open then only works for
+# the first window on each display.
+
+case "$DISPLAY" in
+  :10*) prof=rdp  ;;
+  *)    prof=home ;;
+esac
+
+exec firefox --profile "$HOME/.mozilla/firefox/$prof" "$@"

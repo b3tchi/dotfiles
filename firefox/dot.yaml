@@ -1,0 +1,32 @@
+# Firefox — per-display profiles (dotfiles-dc1).
+#
+# A profile is a set of SQLite DBs guarded by .parentlock, so one profile
+# cannot back two concurrent Firefox processes. Where two X servers share a
+# $HOME — native :0 and the xrdp virtual Xorg :10 — a single profile means the
+# second launch hands its URL to the first instance over DBus and the window
+# opens on the wrong display. `ff` routes by $DISPLAY: :10 -> rdp, everything
+# else (native :0, WSLg wayland, Xwayland) -> home.
+#
+# Only non-SQLite, read-at-startup files are linked in. NEVER link *.sqlite,
+# sessionstore*, lock/.parentlock, or a whole profile dir — concurrent writers
+# corrupt them, which is exactly what the lock exists to prevent. Share live
+# state (bookmarks, history, open tabs) between the two via Firefox Sync.
+linux:
+  links:
+    ff: ~/.local/bin/ff
+    user.js:
+      - ~/.mozilla/firefox/home/user.js
+      - ~/.mozilla/firefox/rdp/user.js
+    chrome/userChrome.css:
+      - ~/.mozilla/firefox/home/chrome/userChrome.css
+      - ~/.mozilla/firefox/rdp/chrome/userChrome.css
+
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -Syu --needed --noconfirm firefox
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -Syu --needed --noconfirm firefox
+      {{/if}}
+      chmod +x ~/.local/bin/ff

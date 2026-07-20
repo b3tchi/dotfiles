@@ -92,8 +92,7 @@ ml $d code/keybindings.json ~/.config/Code/User/
 #wezterm
 ml $d wezterm/wezterm.lua ~/.config/wezterm/
 
-#firefox not working yet
-md $d firefox/personal ~/.mozilla/firefox/
+#firefox -> migrated to firefox/dot.yaml (rotz), see dotfiles-dc1
 
 #kde
 ml $d kde/konsoleui.rc ~/.local/share/kxmlgui5/konsole/
