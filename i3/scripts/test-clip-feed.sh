@@ -302,6 +302,17 @@ assert_eq "history size unchanged" "$before" "$(cq size)"
 assert_eq "newest item is still the previous copy" "line-one
 line-two" "$(cq read 0)"
 
+scenario "empty-selection-skipped: an owner holding an empty string adds no row"
+# Distinct from the image case, which xclip refuses outright: here the read
+# succeeds with zero bytes, and `copyq add -` would happily append a blank
+# history row.  This is what makes the feeder's -s check load-bearing.
+before="$(cq size)"
+own_clipboard ''
+sleep 4
+assert_eq "history size unchanged" "$before" "$(cq size)"
+assert_eq "newest item is still the previous copy" "line-one
+line-two" "$(cq read 0)"
+
 scenario "double-start-guarded: a second feeder exits instead of double-feeding"
 start_feeder            # FEED_PID now points at the second instance
 sleep 1

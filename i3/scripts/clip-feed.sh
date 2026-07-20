@@ -79,8 +79,8 @@ trap 'rm -f "$NEW" "$LAST" "$TGT" "$ERR"' EXIT
 # and what lets it pick straight back up when the session returns.
 src_up() { [ -e "/tmp/.X11-unix/X${SRC#:}" ]; }
 
-# The MIME targets the current SRC owner advertises.  Cheap, and it is the
-# only thing read for a selection that turns out to be a secret or an image.
+# The MIME targets the current SRC owner advertises.  Cheap, and for a
+# selection that turns out to be a secret it is the ONLY thing ever read.
 targets() {
   timeout "$T" env DISPLAY="$SRC" xclip -selection clipboard -t TARGETS -o \
     > "$TGT" 2> "$ERR" 9>&-
@@ -95,6 +95,17 @@ targets() {
 src_gone() { grep -q "Can't open display" "$ERR"; }
 
 # Read SRC CLIPBOARD as text; nonzero on timeout, error, or empty selection.
+#
+# Both failure modes matter and they are separate:
+#  * A non-text selection (an image copy) has no text target to hand over, so
+#    xclip itself exits nonzero and nothing is fed.  An explicit TARGETS
+#    text-target filter was written here and then removed as dead code —
+#    deleting it changed no test outcome, because this path already covers the
+#    image-only owner, and a mixed owner (image plus a text/plain URL, as
+#    browsers publish) advertises a text target and should feed the URL.
+#  * An owner holding an EMPTY string succeeds, and `copyq add -` on empty
+#    stdin appends an empty history row (verified on copyq 16.0.0) — so the
+#    `-s` test is what keeps blank rows out.
 read_src() {
   timeout "$T" env DISPLAY="$SRC" xclip -selection clipboard -o \
     > "$NEW" 2>/dev/null 9>&- && [ -s "$NEW" ]
@@ -120,12 +131,6 @@ while :; do
   # SECURITY GATE — must stay above read_src.  A password-manager copy is
   # skipped without its payload ever being fetched.
   if grep -qFx 'application/x-kde-passwordManagerHint' "$TGT"; then
-    nap "$POLL"; continue
-  fi
-
-  # Text only.  An image or other binary selection has no text target; copying
-  # it would put a blob (or xclip's error output) into the text history.
-  if ! grep -qEx 'UTF8_STRING|STRING|TEXT|text/plain(;charset=.*)?' "$TGT"; then
     nap "$POLL"; continue
   fi
 
