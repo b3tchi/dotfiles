@@ -12,9 +12,13 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 // watchJSOldPattern is the literal template-literal ws:// connect string
@@ -33,6 +37,7 @@ const probeVersion = "v0.7.1"
 // and rewrites two known body patterns from d2's served assets.
 type ProxyHandler struct {
 	idx *IndexData
+	reg Registry // project name → root path, for lazy re-walk on a route miss
 	cm  *ChildManager
 
 	// rewriteWarned tracks (key, rewriteType) pairs that have already logged
@@ -40,49 +45,139 @@ type ProxyHandler struct {
 	mu            sync.Mutex
 	rewriteWarned map[string]bool
 
-	// routeOnce guards both route caches.
-	routeOnce sync.Once
-	// routeByRaw: route (URL-encoded, as stored in Index) → RouteEntry.
-	routeByRaw map[string]RouteEntry
-	// routeByDecoded: URL-decoded route → RouteEntry (for Go HTTP's pre-decoded r.URL.Path).
-	routeByDecoded map[string]RouteEntry
+	// routes is the current route set, replaced wholesale on re-walk
+	// (copy-on-write). Readers Load() it lock-free; rebuilds serialize on
+	// walkMu and Store() a fresh cache. Never mutated in place.
+	routes atomic.Pointer[routeCache]
+
+	// walkMu serializes re-walks and guards lastWalk. Held across the whole
+	// walk+rebuild so two projects' rebuilds can't race a Load→Store clobber.
+	walkMu   sync.Mutex
+	lastWalk map[string]time.Time // project → last re-walk attempt (debounce)
 }
 
-// NewProxyHandler creates a ProxyHandler backed by the given index and child manager.
-func NewProxyHandler(idx *IndexData, cm *ChildManager) *ProxyHandler {
-	return &ProxyHandler{
+// routeCache is one immutable snapshot of the route set, in the two lookup
+// forms ServeHTTP needs. Swapped atomically; never mutated after Store.
+type routeCache struct {
+	byRaw     map[string]RouteEntry // route as stored (URL-encoded)
+	byDecoded map[string]RouteEntry // URL-decoded route (Go pre-decodes r.URL.Path)
+}
+
+// rewalkDebounce caps how often a single project is re-walked, so a flood of
+// 404s for a genuinely-absent file can't spin the walker. A var so tests can
+// shorten or zero it (mirrors children.go's tunable-timeout style).
+var rewalkDebounce = 500 * time.Millisecond
+
+// buildRouteCache builds an immutable routeCache from a flat entry list.
+func buildRouteCache(entries []RouteEntry) *routeCache {
+	rc := &routeCache{
+		byRaw:     make(map[string]RouteEntry, len(entries)),
+		byDecoded: make(map[string]RouteEntry, len(entries)),
+	}
+	for _, e := range entries {
+		rc.byRaw[e.Route] = e
+		if decoded, err := url.PathUnescape(e.Route); err == nil {
+			rc.byDecoded[decoded] = e
+		}
+	}
+	return rc
+}
+
+// NewProxyHandler creates a ProxyHandler backed by the given index, registry
+// and child manager. reg may be nil (tests with a fixed index and no re-walk
+// need): a nil reg simply means a route miss can never be reconciled.
+func NewProxyHandler(idx *IndexData, reg Registry, cm *ChildManager) *ProxyHandler {
+	p := &ProxyHandler{
 		idx:           idx,
+		reg:           reg,
 		cm:            cm,
 		rewriteWarned: make(map[string]bool),
+		lastWalk:      make(map[string]time.Time),
 	}
-}
-
-// buildRoutes initialises both route caches on first call.
-func (p *ProxyHandler) buildRoutes() {
-	p.routeOnce.Do(func() {
-		p.routeByRaw = make(map[string]RouteEntry, len(p.idx.Entries))
-		p.routeByDecoded = make(map[string]RouteEntry, len(p.idx.Entries))
-		for _, e := range p.idx.Entries {
-			p.routeByRaw[e.Route] = e
-			if decoded, err := url.PathUnescape(e.Route); err == nil {
-				p.routeByDecoded[decoded] = e
-			}
-		}
-	})
+	p.routes.Store(buildRouteCache(idx.Entries))
+	return p
 }
 
 // lookupRoute finds a RouteEntry for a request path.
 // Go's HTTP server pre-decodes r.URL.Path, so we check the decoded map first,
 // then fall back to the raw map.
+//
+// On a miss the route set is a snapshot from the last walk, so a .d2 created
+// after that walk is absent (dotfiles-t1o). Re-walk the project this path
+// names and retry once. resolveInProject on the daemon happily hands the
+// browser a URL for such a file, so routing must be willing to catch up or
+// the preview 404s.
 func (p *ProxyHandler) lookupRoute(reqPath string) (RouteEntry, bool) {
-	p.buildRoutes()
-	// Check decoded map first (covers Go HTTP server's pre-decoded paths).
-	if e, ok := p.routeByDecoded[reqPath]; ok {
+	if e, ok := lookupIn(p.routes.Load(), reqPath); ok {
 		return e, true
 	}
-	// Fall back to raw map (covers paths passed directly, e.g. in tests).
-	e, ok := p.routeByRaw[reqPath]
+	project := projectFromRoute(reqPath)
+	if project == "" || !p.rewalkProject(project) {
+		return RouteEntry{}, false
+	}
+	return lookupIn(p.routes.Load(), reqPath)
+}
+
+// lookupIn checks the decoded map first (Go pre-decodes paths), then raw.
+func lookupIn(rc *routeCache, reqPath string) (RouteEntry, bool) {
+	if e, ok := rc.byDecoded[reqPath]; ok {
+		return e, true
+	}
+	e, ok := rc.byRaw[reqPath]
 	return e, ok
+}
+
+// projectFromRoute extracts the project name (first segment) from a
+// "/{project}/{file}" route path, or "" if there is no such segment.
+func projectFromRoute(reqPath string) string {
+	trimmed := strings.TrimPrefix(reqPath, "/")
+	i := strings.IndexByte(trimmed, '/')
+	if i <= 0 {
+		return ""
+	}
+	return trimmed[:i]
+}
+
+// rewalkProject re-walks one project's root and swaps in a route cache that
+// keeps every other project's routes untouched, replacing only this
+// project's with the fresh walk. Returns whether a walk actually ran (false
+// when the project is unknown, its root is gone, or the debounce window is
+// still open). Serialized under walkMu — the walk is the slow part, but
+// serializing under a 404 flood is desirable (no thundering herd) and it
+// removes the Load→Store clobber two concurrent project rebuilds would race.
+func (p *ProxyHandler) rewalkProject(project string) bool {
+	root, ok := p.reg[project]
+	if !ok {
+		return false
+	}
+
+	p.walkMu.Lock()
+	defer p.walkMu.Unlock()
+
+	if last, seen := p.lastWalk[project]; seen && time.Since(last) < rewalkDebounce {
+		return false
+	}
+	p.lastWalk[project] = time.Now()
+
+	if _, err := os.Stat(root); err != nil {
+		return false
+	}
+	routes, collisions := walkProjectFiles(project, root)
+
+	prefix := "/" + project + "/"
+	cur := p.routes.Load()
+	entries := make([]RouteEntry, 0, len(cur.byRaw)+len(routes))
+	for route, e := range cur.byRaw {
+		if !strings.HasPrefix(route, prefix) {
+			entries = append(entries, e) // keep other projects verbatim
+		}
+	}
+	for _, e := range routes {
+		e.Collision = collisions[filepath.Base(e.AbsPath)]
+		entries = append(entries, e)
+	}
+	p.routes.Store(buildRouteCache(entries))
+	return true
 }
 
 // ServeHTTP handles all requests matching /{project}/{file}[/...].

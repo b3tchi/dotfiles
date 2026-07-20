@@ -643,3 +643,72 @@ var (
 	_ = exec.Command     // os/exec — used via helperBin
 	_ = context.Background // context — used in StartReaper
 )
+
+// TestReaperKillsChildWhoseFileWasDeleted proves the dotfiles-t1o delete-side
+// fix: a child whose source .d2 no longer exists is reaped even though it has
+// an active client and is NOT idle. The idle-only reaper left such a child
+// (and its port) running for as long as a browser held the /watch socket —
+// which after adr0009 is the live-preview socket, so "forever" in practice.
+func TestReaperKillsChildWhoseFileWasDeleted(t *testing.T) {
+	cfg := makeHelperConfig(t, freePort(t))
+	cfg.IdleTimeout = "30m" // long: prove it's the deletion, not idleness, that reaps
+	m := NewChildManager(cfg, helperEnv())
+
+	dir := t.TempDir()
+	filePath := dir + "/gone.d2"
+	if err := os.WriteFile(filePath, []byte("a -> b"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	key := "proj/gone.d2"
+	ch, err := m.Ensure(key, filePath)
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	pid := ch.PID
+
+	// An active client + fresh activity: the idle reaper would never touch it.
+	m.AddClient(key)
+	m.ForceLastActive(key, time.Now())
+
+	// Delete the source file, then reap.
+	if err := os.Remove(filePath); err != nil {
+		t.Fatal(err)
+	}
+	m.Reap()
+	time.Sleep(300 * time.Millisecond)
+
+	if _, found := m.Snapshot()[key]; found {
+		t.Errorf("child pid %d still running after its source file was deleted", pid)
+	}
+}
+
+// TestReaperKeepsChildWhoseFileExists guards the other direction: a busy,
+// non-idle child whose file is present must NOT be reaped. Without this, an
+// over-eager deletion check could kill live previews.
+func TestReaperKeepsChildWhoseFileExists(t *testing.T) {
+	cfg := makeHelperConfig(t, freePort(t))
+	cfg.IdleTimeout = "30m"
+	m := NewChildManager(cfg, helperEnv())
+
+	dir := t.TempDir()
+	filePath := dir + "/present.d2"
+	if err := os.WriteFile(filePath, []byte("a -> b"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	key := "proj/present.d2"
+	if _, err := m.Ensure(key, filePath); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	m.AddClient(key)
+	m.ForceLastActive(key, time.Now())
+
+	m.Reap()
+	time.Sleep(100 * time.Millisecond)
+
+	if _, found := m.Snapshot()[key]; !found {
+		t.Errorf("busy child with a present file was reaped — live preview would die")
+	}
+	_ = m.Stop(key)
+}

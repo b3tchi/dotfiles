@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -411,11 +412,26 @@ func (m *ChildManager) reapWithTimeout(idleTimeout time.Duration) {
 
 		e.mu.Lock()
 		ch := e.child
-		shouldReap := ch != nil && ch.Clients == 0 && now.Sub(ch.LastActive) > idleTimeout
+		// A child whose source .d2 was deleted is reaped regardless of
+		// clients or idleness (dotfiles-t1o delete-side): the idle-only rule
+		// left it — and its port — alive for as long as a browser held the
+		// /watch socket open, which is the live-preview socket after adr0009.
+		// os.Stat under e.mu is a fast local syscall; ErrNotExist is the only
+		// signal that counts (a transient stat error is not a deletion).
+		gone := ch != nil && func() bool {
+			_, err := os.Stat(ch.AbsPath)
+			return errors.Is(err, os.ErrNotExist)
+		}()
+		idle := ch != nil && ch.Clients == 0 && now.Sub(ch.LastActive) > idleTimeout
+		shouldReap := gone || idle
 		e.mu.Unlock()
 
 		if shouldReap {
-			log.Printf("children: reaper: %q idle — stopping", key)
+			reason := "idle"
+			if gone {
+				reason = "source file deleted"
+			}
+			log.Printf("children: reaper: %q %s — stopping", key, reason)
 			_ = m.Stop(key)
 		}
 	}

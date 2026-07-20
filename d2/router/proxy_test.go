@@ -187,7 +187,7 @@ func makeProxy(t *testing.T, backend *httptest.Server, project, file string) (ht
 	cfg := config{D2Bin: os.Args[0], ChildPortBase: "0", IdleTimeout: "30m"}
 	cm := NewChildManager(cfg, os.Environ())
 	injectFakeChild(cm, key, "/fake/"+key+".d2", backendPort(backend))
-	return NewProxyHandler(idx, cm), cm, key
+	return NewProxyHandler(idx, nil, cm), cm, key
 }
 
 // ── HTML rewrite tests ────────────────────────────────────────────────────────
@@ -416,7 +416,7 @@ func TestProxyTraversalRawForms(t *testing.T) {
 	cfg := config{D2Bin: os.Args[0], ChildPortBase: "0", IdleTimeout: "30m"}
 	cm := NewChildManager(cfg, os.Environ())
 	injectFakeChild(cm, "myproject/test.d2", "/fake/test.d2", backendPort(backend))
-	h := NewProxyHandler(idx, cm)
+	h := NewProxyHandler(idx, nil, cm)
 
 	cases := []struct {
 		name    string
@@ -526,7 +526,7 @@ func TestProxyAcceptEncodingIdentity(t *testing.T) {
 	cfg := config{D2Bin: os.Args[0], ChildPortBase: "0", IdleTimeout: "30m"}
 	cm := NewChildManager(cfg, os.Environ())
 	injectFakeChild(cm, "proj/f.d2", "/fake/f.d2", backendPort(backend))
-	h := NewProxyHandler(idx, cm)
+	h := NewProxyHandler(idx, nil, cm)
 	ts := httptest.NewServer(h)
 	defer ts.Close()
 
@@ -559,7 +559,7 @@ func TestProxyURLDecodedRouteMatch(t *testing.T) {
 	cfg := config{D2Bin: os.Args[0], ChildPortBase: "0", IdleTimeout: "30m"}
 	cm := NewChildManager(cfg, os.Environ())
 	injectFakeChild(cm, "myproj/test%20file.d2", "/fake/test file.d2", backendPort(backend))
-	h := NewProxyHandler(idx, cm)
+	h := NewProxyHandler(idx, nil, cm)
 	ts := httptest.NewServer(h)
 	defer ts.Close()
 
@@ -589,7 +589,7 @@ func TestProxyDeadChild502(t *testing.T) {
 	cfg := config{D2Bin: os.Args[0], ChildPortBase: "0", IdleTimeout: "30m"}
 	cm := NewChildManager(cfg, os.Environ())
 	injectFakeChild(cm, "proj/file.d2", "/fake/file.d2", backendPort(backend))
-	h := NewProxyHandler(idx, cm)
+	h := NewProxyHandler(idx, nil, cm)
 	ts := httptest.NewServer(h)
 	defer ts.Close()
 
@@ -712,4 +712,131 @@ func TestProxyWebSocketEcho(t *testing.T) {
 	if !bytes.Equal(echoed, payload) {
 		t.Errorf("ws echo payload mismatch: want %q got %q", payload, echoed)
 	}
+}
+
+// TestProxyReindexesFileCreatedAfterStartup proves the dotfiles-t1o
+// create-side fix: a .d2 file that did not exist when the handler's route
+// set was built is picked up by a lazy re-walk on the routing miss, so it
+// routes (200) instead of a permanent 404. Before the fix the route set was
+// frozen at construction and a post-startup file was invisible forever.
+func TestProxyReindexesFileCreatedAfterStartup(t *testing.T) {
+	// The baseline 404 below triggers one re-walk; disable the debounce so
+	// the post-create request re-walks again instead of being throttled.
+	// (Throttling is covered by TestProxyRewalkDebounced.)
+	defer withRewalkDebounce(0)()
+
+	root := t.TempDir()                 // empty — no .d2 at "startup"
+	reg := Registry{"proj": root}
+	idx := buildIndex(reg)              // zero entries
+
+	backend := newFakeBackend(t, readFixture(t, "watch.html"), readFixture(t, "watch.js"))
+	defer backend.Close()
+
+	cfg := config{D2Bin: os.Args[0], ChildPortBase: "0", IdleTimeout: "30m"}
+	cm := NewChildManager(cfg, os.Environ())
+	h := NewProxyHandler(idx, reg, cm)
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+
+	// Baseline: with nothing on disk, the route is genuinely absent → 404.
+	resp0, err := http.Get(ts.URL + "/proj/new.d2")
+	if err != nil {
+		t.Fatalf("GET baseline: %v", err)
+	}
+	resp0.Body.Close()
+	if resp0.StatusCode != http.StatusNotFound {
+		t.Fatalf("baseline GET /proj/new.d2: want 404 (nothing created yet), got %d", resp0.StatusCode)
+	}
+
+	// Create the file AFTER the handler's route set was built, then wire a
+	// fake child so the post-reindex lazy-spawn resolves to the backend.
+	newFile := filepath.Join(root, "new.d2")
+	if err := os.WriteFile(newFile, []byte("a -> b\n"), 0o644); err != nil {
+		t.Fatalf("write new.d2: %v", err)
+	}
+	injectFakeChild(cm, "proj/new.d2", newFile, backendPort(backend))
+
+	resp, err := http.Get(ts.URL + "/proj/new.d2")
+	if err != nil {
+		t.Fatalf("GET after create: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /proj/new.d2 after create: want 200 (lazy re-walk), got %d", resp.StatusCode)
+	}
+}
+
+// TestProxyReindexGenuinelyMissingStays404 proves the re-walk does not turn
+// every miss into a hit: a request for a file that is not on disk still 404s
+// after the re-walk runs (the walk finds nothing to add).
+func TestProxyReindexGenuinelyMissingStays404(t *testing.T) {
+	root := t.TempDir()
+	reg := Registry{"proj": root}
+	idx := buildIndex(reg)
+
+	cfg := config{D2Bin: os.Args[0], ChildPortBase: "0", IdleTimeout: "30m"}
+	cm := NewChildManager(cfg, os.Environ())
+	h := NewProxyHandler(idx, reg, cm)
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/proj/ghost.d2")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("GET /proj/ghost.d2 (never existed): want 404, got %d", resp.StatusCode)
+	}
+}
+
+// withRewalkDebounce sets the package debounce window and returns a restore
+// func for defer. Tests run sequentially (no t.Parallel here), so mutating
+// the global is safe.
+func withRewalkDebounce(d time.Duration) func() {
+	prev := rewalkDebounce
+	rewalkDebounce = d
+	return func() { rewalkDebounce = prev }
+}
+
+// TestProxyRewalkDebounced proves the debounce throttles re-walks: a second
+// miss for a project inside the window does NOT re-walk, so a file created
+// between two rapid requests stays 404 until the window passes. This is the
+// DoS guard — repeated 404s for an absent file must not spin the walker.
+func TestProxyRewalkDebounced(t *testing.T) {
+	defer withRewalkDebounce(time.Hour)() // effectively "never re-walk twice"
+
+	root := t.TempDir()
+	reg := Registry{"proj": root}
+	h := NewProxyHandler(buildIndex(reg), reg, &ChildManager{}) // never spawns; all requests miss
+
+	// First miss consumes the single allowed walk for this window.
+	resp0, err := http.Get(mustServe(t, h) + "/proj/late.d2")
+	if err != nil {
+		t.Fatalf("GET first: %v", err)
+	}
+	resp0.Body.Close()
+
+	// Create the file, then request again within the (1h) window.
+	if err := os.WriteFile(filepath.Join(root, "late.d2"), []byte("a -> b\n"), 0o644); err != nil {
+		t.Fatalf("write late.d2: %v", err)
+	}
+	resp, err := http.Get(mustServe(t, h) + "/proj/late.d2")
+	if err != nil {
+		t.Fatalf("GET second: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("second GET inside debounce window: want 404 (throttled), got %d", resp.StatusCode)
+	}
+}
+
+// mustServe starts an httptest.Server for h and returns its URL, cleaning up
+// via t.Cleanup. A tiny helper so debounce tests can issue two requests to
+// the same handler without repeating server boilerplate.
+func mustServe(t *testing.T, h http.Handler) string {
+	t.Helper()
+	ts := httptest.NewServer(h)
+	t.Cleanup(ts.Close)
+	return ts.URL
 }

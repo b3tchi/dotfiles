@@ -64,7 +64,7 @@ func main() {
 
 	cm := NewChildManager(cfg, os.Environ())
 
-	proxyHandler := NewProxyHandler(idx, cm)
+	proxyHandler := NewProxyHandler(idx, reg, cm)
 	indexH := newIndexHandler(idx, registryMissing)
 	apiH := NewAPIHandler(cm, reg, cfg.RouterPort)
 
