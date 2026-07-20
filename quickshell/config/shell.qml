@@ -94,6 +94,12 @@ ShellRoot {
     // RDP single-instance: host the launcher/switcher/projects overlay here.
     Loader { active: isRdp; sourceComponent: Component { Overlay {} } }
 
+    // Clipboard-history picker (sp014). Hosted in the MAIN instance on every
+    // session type — desktop and RDP alike — so `qs-clip.sh toggle` finds
+    // exactly one picker per session and rapid reopening cannot orphan a
+    // window. Idle until its IPC target is called.
+    ClipHistory {}
+
     Variants {
         model: Quickshell.screens
         Bar {
