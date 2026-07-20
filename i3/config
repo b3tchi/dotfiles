@@ -91,6 +91,16 @@ bindsym $mod+Ctrl+t exec --no-startup-id picom -b
 # the exec_always further down
 set $qsbarenv env QS_BAR_INSET_BOTTOM=50 QS_BAR_INSET_AUTO=1
 bindsym $mod+Shift+d --release exec --no-startup-id $qsbarenv ~/.dotfiles/quickshell/qs-start.sh
+# clipboard-history picker (sp014) — opens the quickshell picker; choosing a
+# row puts that entry on the clipboard. It is a PICKER, not a paste tool:
+# nothing is typed or injected into the focused window, you still paste
+# yourself. Binding lives in the base config because every platform gets the
+# picker (the copyq server and the cross-display feeder that back it are
+# platform-specific and live in config.d/); qs-clip.sh derives the target
+# session itself from the live quickshell instances, so no DISPLAY is passed
+# here — and nothing on this line depends on an overlay var, which would be
+# invisible across the include boundary anyway.
+bindsym $mod+Shift+v exec --no-startup-id ~/.dotfiles/quickshell/qs-clip.sh toggle
 bindsym Print exec --no-startup-id i3-scrot
 bindsym $mod+Print --release exec --no-startup-id i3-scrot -w
 bindsym $mod+Shift+Print --release exec --no-startup-id i3-scrot -s
