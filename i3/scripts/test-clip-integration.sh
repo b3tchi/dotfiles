@@ -36,6 +36,35 @@
 # quickshell) never runs.  copyq and the feeder run on a throwaway Xvfb with
 # an isolated XDG_CONFIG_HOME and a feeder source display that does not exist.
 #
+# THE FEEDER PATTERN, AND WHY IT IS A FULL PATH
+#
+# This suite starts and stops clip-feed.sh processes.  An earlier revision
+# matched them on the BASENAME (`pgrep -f 'clip-feed\.sh$'`), which cannot tell
+# this suite's feeder under $TMP from the PRODUCTION feeder that
+# config.d/native.conf autostarts at ~/.i3/scripts/clip-feed.sh — the very
+# deployment this task creates.  On a deployed machine that suite killed the
+# live feeder, started its own, asserted "exactly 1" and went GREEN, while
+# cross-display clipboard silently stayed dead until the next i3 reload (the
+# autostart is exec_always, so nothing restarts it before then).  Merged task .2
+# had already got this right — test-clip-feed.sh scopes with `pgrep -f -- "$FEEDER"`.
+#
+# So: every start/stop/count here is scoped to $FEED_PATH, an absolute path
+# unique to this run ($TMP carries $$).  A feeder anywhere else is invisible to
+# this suite and is never signalled.
+#
+# The basename pattern survives in exactly one place — foreign_feeders(), a
+# preflight tripwire that ABORTS when it finds a feeder outside this run's path,
+# and never kills one.  With full-path scoping a foreign feeder is already
+# harmless, so this is defence in depth: if the scoping is ever regressed back
+# to a basename match, the tripwire fires first and the suite refuses to run
+# instead of destroying production.  Consequence, stated plainly: on a deployed
+# machine you must stop your own feeder before running this suite.  That is the
+# intended trade — a refusal to run is recoverable, a silent kill is not.
+#
+# [decoy-safety] proves the scoping holds, rather than trusting it: a decoy
+# feeder is planted at an unrelated path and asserted still alive after the
+# sections that start, stop and count feeders have all run.
+#
 # usage: i3/scripts/test-clip-integration.sh
 # env:   COPYQ=  XVFB=  I3=   (default: from PATH)
 #        TEST_DISPLAY=:95   TEST_FEED_SRC=:94   (throwaway displays)
@@ -55,6 +84,14 @@ FEED_SRC="${TEST_FEED_SRC:-:94}"     # deliberately a display that is not up
 
 TMP="/tmp/clip-integration-test.$$"  # short: copyq's socket lives under $CFG
 
+# The ONLY feeder this suite may ever signal or count.  Absolute, and unique to
+# this run because $TMP carries $$.  See "THE FEEDER PATTERN" in the header.
+FEED_PATH="$TMP/xhome/.i3/scripts/clip-feed.sh"
+# The [decoy-safety] stand-in for a production feeder: basename identical,
+# path unrelated.  Mirrors ~/.i3/scripts/clip-feed.sh, which is what
+# config.d/native.conf autostarts.
+DECOY_PATH="$TMP/prodsim/.i3/scripts/clip-feed.sh"
+
 PASS=0
 FAIL=0
 
@@ -71,6 +108,8 @@ scenario() { printf '\n[%s]\n' "$1"; }
 
 cleanup() {
   stop_feeders
+  # The decoy is ours, so it dies by PID — never by pattern.
+  [ -n "${DECOY_PID:-}" ] && kill "$DECOY_PID" 2>/dev/null
   cq exit >/dev/null 2>&1
   [ -n "${XVFB_PID:-}" ] && kill "$XVFB_PID" 2>/dev/null
   rm -rf "$TMP"
@@ -128,13 +167,29 @@ count_copyq_servers() {
   printf '%s\n' "$n"
 }
 
+# Feeders belonging to THIS run, matched on the full unique path.  A feeder at
+# any other path — production's ~/.i3/scripts/clip-feed.sh above all — is not
+# counted and, in stop_feeders, not signalled.
 count_feeders() {
-  pgrep -f "clip-feed\.sh$" 2>/dev/null | grep -c . || true
+  pgrep -f -- "$FEED_PATH" 2>/dev/null | grep -c . || true
 }
 
 stop_feeders() {
-  pkill -f "clip-feed\.sh$" 2>/dev/null
+  pkill -f -- "$FEED_PATH" 2>/dev/null
   return 0
+}
+
+# The tripwire: feeders matched by BASENAME that are not ours and not the
+# decoy.  Reported, never killed.  Prints "<pid> <cmdline>" per line.
+foreign_feeders() {
+  local pid argv
+  for pid in $(pgrep -f "clip-feed\.sh$" 2>/dev/null); do
+    argv="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)" || continue
+    case "$argv" in
+      *"$FEED_PATH"*|*"$DECOY_PATH"*) continue ;;
+    esac
+    printf '%s %s\n' "$pid" "$argv"
+  done
 }
 
 cq() { env DISPLAY="$DPY" XDG_CONFIG_HOME="$TMP/cfg" XDG_DATA_HOME="$TMP/dat" \
@@ -150,7 +205,38 @@ for f in "$BASE" "$NATIVE" "$WSL" "$FEEDER"; do
   [ -r "$f" ] || { echo "FATAL: missing $f" >&2; exit 1; }
 done
 
+# Tripwire — see "THE FEEDER PATTERN" in the header.  Nothing is killed; the
+# suite refuses to run.  On a deployed machine the production feeder started by
+# config.d/native.conf lands here, and stopping it yourself is the price of
+# running this suite.
+FOREIGN="$(foreign_feeders)"
+if [ -n "$FOREIGN" ]; then
+  {
+    echo "FATAL: a clip-feed.sh is running outside this test run:"
+    printf '  %s\n' "$FOREIGN"
+    echo
+    echo "Refusing to start. This suite never signals a feeder it did not start"
+    echo "(killing the production feeder would break cross-display clipboard"
+    echo "until the next i3 reload, silently and with a green test run)."
+    echo "Stop it yourself and re-run."
+  } >&2
+  exit 1
+fi
+
 echo "=== sp014 i3 integration (dotfiles-92w.5) ==="
+
+# The decoy stands in for a production feeder for the rest of the run: same
+# basename, unrelated path, planted only AFTER the tripwire has cleared so it
+# is never mistaken for one.  [decoy-safety] at the end asserts it survived.
+mkdir -p "$(dirname "$DECOY_PATH")"
+cat > "$DECOY_PATH" <<'DECOY'
+#!/bin/sh
+# Stand-in for the production feeder. Must outlive this suite.
+while :; do sleep 1; done
+DECOY
+chmod +x "$DECOY_PATH"
+"$DECOY_PATH" & DECOY_PID=$!
+sleep 1
 
 # =========================================================== [config-parse] ==
 #
@@ -444,6 +530,41 @@ fi
 scenario "rotz: clip-feed.sh is linked to the path native.conf names"
 assert_eq "i3/dot.yaml link entries for clip-feed.sh" "1" \
   "$(grep -c '^ *scripts/clip-feed\.sh: ~/\.i3/scripts/clip-feed\.sh$' "$REPO_DIR/dot.yaml" || true)"
+
+# ========================================================== [decoy-safety] ==
+#
+# A feeder at a path this run does not own must come through untouched.  The
+# decoy has been running since before [config-parse], through every start,
+# stop and count above — including the two unconditional stop_feeders calls.
+#
+# This section is the ONLY thing guarding the scoping, and that is worth
+# spelling out because the obvious assumption is wrong.  Reverting the two
+# helpers to the old basename pattern was measured, and the "feeders == 1"
+# counts above stayed GREEN: stop_feeders kills the decoy before the first
+# count runs, so exactly one feeder — ours — is left to count.  Only the
+# survival assertion below fails.
+#
+# That is the original bug reproduced in miniature: green counts, dead feeder.
+# Do not weaken these three assertions on the theory that the counts upstream
+# already cover the scoping.  They do not.
+
+scenario "decoy-safety: a feeder at an unrelated path survives the whole run"
+if kill -0 "$DECOY_PID" 2>/dev/null; then
+  pass "decoy (pid $DECOY_PID, $DECOY_PATH) still alive"
+else
+  fail "decoy still alive" "running" "killed by the suite"
+fi
+
+scenario "decoy-safety: the decoy was never counted as one of our feeders"
+# Our feeders are all stopped by now, so a basename-scoped counter would
+# report the decoy here and this would read 1.
+assert_eq "count_feeders with only the decoy running" "0" "$(count_feeders)"
+
+scenario "decoy-safety: the preflight tripwire does detect it (non-vacuous)"
+# Re-run the tripwire with the decoy's exemption removed: it must name it.
+# Without this, a tripwire that could never fire would look identical.
+DETECTED="$(DECOY_PATH=/nonexistent/clip-feed.sh foreign_feeders | grep -c "^$DECOY_PID " || true)"
+assert_eq "tripwire reports the decoy pid" "1" "$DETECTED"
 
 # --------------------------------------------------------------- summary ---
 
