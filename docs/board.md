@@ -16,6 +16,5 @@ sections when status flips.
 
 ## ready
 
-- [[sp014|shared-clipboard-history-browser]]
 
 - [[sp012|live-region-xshape-overlay]]

@@ -5,6 +5,8 @@ Shipped workstreams. Specs (`sp###`) at `status: done` after
 
 ## done
 
+- [[sp014|shared-clipboard-history-browser]]
+
 - [[sp013|preview-webview-client-host]]
 
 - [[sp011|akm-graph-live-highlight-no-reload]]
