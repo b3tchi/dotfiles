@@ -316,6 +316,14 @@ def slot-workspace [n: int] {
 def place-window [n: int] {
     let ws = (slot-workspace $n)
     if ($ws | is-empty) { return }
+    # If the recorded workspace is the one already focused, a `move workspace`
+    # only yanks the window out of its dock split into a plain tab on the SAME
+    # workspace — which is exactly what made nvim :PreviewStart open an
+    # invisible tab (dotfiles-nmp). The dock (prepare-split in main-window)
+    # already positioned it here; leave it. Cross-workspace moves still run so
+    # the dotfiles-816 "preview follows the editor to another workspace" case
+    # keeps working.
+    if $ws == (current-workspace) { return }
     let criteria = $"[class=\"preview-wv\" title=\"^preview ($n)$\"]"
     for bin in [swaymsg i3-msg] {
         if (which $bin | is-empty) { continue }
@@ -345,9 +353,22 @@ def place-window [n: int] {
 def main-window [n: int, close: bool] {
     if $close {
         window-close $n
-    } else {
-        window-spawn $n
+        return
     }
+    # Dock the window beside the launching frame as a side split (preview to
+    # the right), visible next to the editor — the design the i3 config
+    # describes ("sits beside the editor like a split"), and the fix for nvim
+    # :PreviewStart opening an invisible tab (dotfiles-nmp). No image shape is
+    # known at window-open (nvim previews many files, and re-docking per file
+    # would reparent the live webview and kill it), so the direction is fixed
+    # rather than shape-chosen as in `show`. Pre-split before the window maps
+    # to dodge the reparent-death (dotfiles-bfk); only for a fresh window with
+    # both a launching frame and a WM to talk to.
+    let orig = (active-window-id)
+    if ($orig != null and (wm-bin) != null and not (window-open $n)) {
+        prepare-split $orig "right"
+    }
+    window-spawn $n
 }
 
 # Close every open window (wv-*.pid) — called by `stop` before it touches
@@ -566,7 +587,7 @@ def prepare-split [orig: int, mode: string] {
             i3run $"[id=($orig)] focus"
             i3run "split vertical"
         }
-        "left" => {
+        "left" | "right" => {
             i3run $"[id=($orig)] focus"
             i3run "split horizontal"
         }
