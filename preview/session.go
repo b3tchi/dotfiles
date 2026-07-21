@@ -130,7 +130,7 @@ type SlotManager struct {
 }
 
 // NewSlotManager returns an empty SlotManager; slots are created lazily on
-// first access (SetPath, CurrentPath, or Hub) so an unused N never
+// first access (SwapPath, CurrentPath, or Hub) so an unused N never
 // allocates state.
 func NewSlotManager() *SlotManager {
 	return &SlotManager{slots: make(map[int]*slot)}
@@ -148,22 +148,8 @@ func (sm *SlotManager) slotFor(n int) *slot {
 	return s
 }
 
-// SetPath sets slot n's current path and broadcasts a redraw message to
-// every client currently connected to that slot only. Concurrent/rapid
-// calls are last-wins: only the most recently set path is ever stored or
-// broadcast, so a burst of cursor-driven updates collapses to the caller's
-// last call rather than queuing a redraw storm (sp008 Task 4 edge case).
-func (sm *SlotManager) SetPath(n int, path string) {
-	s := sm.slotFor(n)
-	s.mu.Lock()
-	s.path = path
-	s.mu.Unlock()
-	s.hub.Broadcast(redrawMessage(path))
-}
-
 // SwapPath sets slot n's current path to path and returns the path it
-// replaced, WITHOUT broadcasting a redraw — unlike SetPath, which does
-// both unconditionally. The conditional-broadcast caller (handlePreviewSet,
+// replaced, WITHOUT broadcasting a redraw. The conditional-broadcast caller (handlePreviewSet,
 // sp011 Task 3) needs the OLD path to classify the akm-zettel transition
 // (prev vs new) BEFORE deciding whether a redraw should go out at all, so
 // the read-old/write-new step must be separate from — and precede — that

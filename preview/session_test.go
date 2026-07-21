@@ -60,8 +60,8 @@ func TestHubUnregisterIdempotent(t *testing.T) {
 func TestSlotManagerIndependentPaths(t *testing.T) {
 	sm := NewSlotManager()
 
-	sm.SetPath(1, "a.go")
-	sm.SetPath(2, "c.md")
+	sm.SwapPath(1, "a.go")
+	sm.SwapPath(2, "c.md")
 
 	if got := sm.CurrentPath(1); got != "a.go" {
 		t.Errorf("slot 1 path = %q, want a.go", got)
@@ -82,7 +82,11 @@ func TestSlotManagerIndependentHubs(t *testing.T) {
 	sm.Hub(1).Register(c1)
 	sm.Hub(2).Register(c2)
 
-	sm.SetPath(2, "c.md")
+	// The production store+broadcast pair (handlePreviewSet: SwapPath then a
+	// per-slot Hub broadcast). Exercises the same primitives rather than the
+	// removed SetPath convenience.
+	sm.SwapPath(2, "c.md")
+	sm.Hub(2).Broadcast(redrawMessage("c.md"))
 
 	select {
 	case msg := <-c2.send:
@@ -94,7 +98,7 @@ func TestSlotManagerIndependentHubs(t *testing.T) {
 			t.Errorf("slot 2 client got path %q, want c.md", got.Path)
 		}
 	default:
-		t.Fatal("slot 2 client received nothing after SetPath(2, ...)")
+		t.Fatal("slot 2 client received nothing after SwapPath + broadcast")
 	}
 
 	select {
