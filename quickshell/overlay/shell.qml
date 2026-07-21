@@ -99,8 +99,13 @@ ShellRoot {
     Process {
         id: pathScanner
         running: true
+        // -L so symlinks resolve to their targets. Without it a symlink is
+        // -type l and never matches -type f, which hid every rotz-linked bin
+        // in ~/.local/bin (preview, akm, project-picker, tmux-*, ff, ...).
+        // Real binaries matched fine, so the launcher looked healthy.
+        // Broken symlinks stay excluded: stat fails, so -type f cannot match.
         command: ["sh", "-c",
-            "echo $PATH | tr ':' '\\n' | xargs -I{} find {} -maxdepth 1 -executable -type f 2>/dev/null | sed 's|.*/||' | sort -u"]
+            "echo $PATH | tr ':' '\\n' | xargs -I{} find -L {} -maxdepth 1 -executable -type f 2>/dev/null | sed 's|.*/||' | sort -u"]
         stdout: SplitParser {
             onRead: data => {
                 var trimmed = data.trim()
