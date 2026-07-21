@@ -15,11 +15,15 @@
 #        TEST_DISPLAY=:99             (default: :99)
 #        KEEP_TMP=1                   (debug: skip deleting $TMP on exit)
 #
-# KNOWN BLOCKER: xorg-server-xvfb is not installed on the primary dev host
-# (dotfiles-saa). Point XVFB= at an extracted `Xvfb` binary (no install
-# needed -- `pacman -Sw`/curl the package, bsdtar -x, run in place; no sudo)
-# if it is not on PATH. Same applies to CLIPCATD/CLIPCATCTL before `rotz
-# install clipcat` has run on this host.
+# REQUIREMENTS: clipcat + xorg-server-xvfb must be installed (both are on
+# the primary dev host as of 2026-07-21, resolving the former dotfiles-saa
+# blocker). The defaults above intentionally resolve clipcatd/clipcatctl/
+# Xvfb from PATH so the suite always exercises the SAME binaries the rest
+# of the system runs -- never a side-loaded copy that can silently drift
+# from the installed package. The CLIPCATD=/CLIPCATCTL=/XVFB= overrides
+# exist only for testing an unreleased build on purpose; if you find
+# yourself needing them just to get a green run, install the packages
+# instead.
 set -u
 
 REPO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,6 +39,10 @@ CFG="$TMP/cfg"    # XDG_CONFIG_HOME
 DAT="$TMP/data"   # XDG_DATA_HOME
 CCH="$TMP/cache"  # XDG_CACHE_HOME
 RUN="$TMP/run"    # XDG_RUNTIME_DIR stand-in (tmpfs 0700 in production)
+# The path clipcat.toml's own "$XDG_RUNTIME_DIR/clipcat/history" resolves to
+# once clipcatd shell-expands it against the XDG_RUNTIME_DIR="$RUN" we set
+# for the daemon below -- not passed on any command line, just the expected
+# value config alone produces. Used only for assertions.
 HIST="$RUN/clipcat/history"
 SOCK="$RUN/clipcat/grpc.sock"
 
@@ -71,26 +79,71 @@ cc() { timeout 10 env XDG_RUNTIME_DIR="$RUN" "$CLIPCATCTL" --server-endpoint "$S
 # serves every later phase; the same loss happens if the backgrounding
 # happens inside a command substitution.
 #
-# --history-file / --grpc-socket-path are the CLI overrides clipcat.toml's
-# own header mandates (its history_file_path key is deliberately absent).
-# Optional $1 overrides the history path (used by the mutation scenario) --
-# clap rejects --history-file passed twice ("cannot be used multiple
-# times"), so this is a substitution, not an appended extra arg.
+# --grpc-socket-path is a required CLI override (one clipcatd binds one
+# socket; this suite reuses $SOCK across restarts). --history-file is NOT
+# passed by default: clipcat.toml bakes in the literal string
+# "$XDG_RUNTIME_DIR/clipcat/history", and clipcatd shell-expands that
+# specific field itself at startup against the real $XDG_RUNTIME_DIR we set
+# in the env below -- config alone is the memory-only guarantee (see
+# clipcat.toml / dot.yaml point 3). Optional $1, when non-empty, passes
+# --history-file as a deliberate override -- used ONLY by the mutation
+# scenario to force a persistent-style path, not needed for anything else.
 #
 # One attempt: launch, wait for gRPC readiness, then prove the X11 watcher
-# is actually live with a disposable warm-up capture (gRPC readiness alone
-# is NOT sufficient -- verified empirically that the watcher's XFixes
-# registration and the gRPC listener coming up are unordered relative to
-# each other, and a capture made right after gRPC answers can be missed
-# ENTIRELY: a lost event, not just latency -- a 15s poll never saw the
-# length change). Returns nonzero on any failure instead of exiting, so the
-# caller can retry a whole attempt rather than just the warm-up loop.
+# is actually live with a disposable warm-up capture. gRPC readiness alone
+# is NOT sufficient to trust a fresh clipcatd process.
+#
+# ROOT CAUSE (measured, dotfiles-egm.1 -- see also the upstream-defect issue
+# filed from it). This is an UPSTREAM DEFECT IN clipcat 0.25.0, not a
+# harness artifact and not sandbox flakiness. On a fraction of daemon
+# starts, clipcatd's X11 listener enters a permanently broken state:
+#
+#   WARN clipcat_clipboard::listener::x11: Clipboard is changed but we
+#   could not get available formats, error: Could not get property reply,
+#   error: X11 error X11Error { error_kind: Atom, error_code: 5,
+#   bad_value: 0, ..., request_name: Some("GetProperty") }
+#
+# Note what that says: the daemon DOES receive the selection-change
+# notification every single time. XFixes registration is fine. It then
+# fails one step later, enumerating the available formats -- calling
+# GetProperty with property atom 0 (None, i.e. the conversion was refused
+# or unanswered) without guarding the None case, yielding BadAtom. So the
+# earlier "the watcher lost a registration race" explanation in this file
+# was WRONG; it was inferred from the symptom (no capture) without reading
+# the daemon's own log.
+#
+# The state is per-PROCESS and PERMANENT: across every failing cycle in
+# every variant measured, 12 further ownership changes over ~24s were all
+# dropped with the identical error. Zero late recoveries were ever
+# observed. Only a fresh clipcatd process clears it -- which is exactly
+# what the outer start_server retry below does, and why the warm-up loop
+# here is deliberately short (2 tries): retrying inside a doomed process
+# is provably wasted time.
+#
+# What was RULED OUT by direct experiment, so nobody re-litigates it:
+#   - binary provenance: pacman-extracted vs natively installed clipcatd
+#     are byte-identical (same md5); identical failure rate.
+#   - "sandbox environmental churn": reproduces on natively installed
+#     clipcat + xorg-server-xvfb packages.
+#   - X server atom-table reset on last-client-disconnect: `Xvfb -noreset`
+#     changed nothing (3/12 vs 4/12 -- noise).
+#   - a clipboard owner already holding the selection when the daemon
+#     starts: fails at the same rate (4/12) with no owner alive at start.
+#   - this suite's own clip-owner.py: reproduces with plain `xclip` as the
+#     owner (2/12), so it is not the harness's selection handling.
+#
+# Measured per-start failure rate: ~17-33% depending on variant (2/12 with
+# xclip, 3/12 and 4/12 with clip-owner.py). Treat ~25% as the working
+# figure; it is NOT the "10-20%" an earlier revision of this comment
+# claimed, and that number should not be trusted to size anything.
 _start_server_once() {
-  local history_path="$1"
+  local history_override="${1:-}"
+  local -a extra_args=()
+  [ -n "$history_override" ] && extra_args=(--history-file "$history_override")
   mkdir -p "$RUN/clipcat"
   chmod 700 "$RUN"
   env DISPLAY="$DPY" XDG_CONFIG_HOME="$CFG" XDG_DATA_HOME="$DAT" XDG_CACHE_HOME="$CCH" XDG_RUNTIME_DIR="$RUN" \
-    "$CLIPCATD" --no-daemon --history-file "$history_path" --grpc-socket-path "$SOCK" \
+    "$CLIPCATD" --no-daemon --grpc-socket-path "$SOCK" "${extra_args[@]}" \
     >"$TMP/server.log" 2>&1 &
   DAEMON_PID=$!
   local i
@@ -104,7 +157,7 @@ _start_server_once() {
     DAEMON_PID=""
     return 1
   fi
-  for i in $(seq 1 20); do
+  for i in 1 2; do
     own_clipboard "__warmup_$$_${i}__"
     if [ "$(wait_length_change 0 3)" = "1" ]; then
       cc clear >/dev/null 2>&1
@@ -117,21 +170,50 @@ _start_server_once() {
   return 1
 }
 
-# Outer retry around a full launch attempt: this sandbox has shown
-# occasional transient failures to even fork/exec cleanly under load
-# (an empty server.log, no error text at all -- not a config or logic
-# problem, environmental flakiness). A real launcher (task 5's autostart)
-# gets this for free from exec_always retrying on i3 reload; this gives
-# the test suite the same tolerance rather than failing the whole run on
-# a fluke unrelated to the backend contract being verified.
+# Outer retry around a full launch attempt: the only known mitigation for
+# the upstream defect documented above -- a fresh clipcatd process each
+# attempt, not a wider inner loop against the same doomed process (which
+# provably never recovers).
+#
+# Sizing, honestly -- READ THIS BEFORE TRUSTING A GREEN RUN:
+#
+# If the ~25% per-start failures were independent, 5 fresh attempts would
+# leave ~0.1% chance of exhausting one start_server call. They are NOT
+# independent. MEASURED over 12 full suite runs (5 on pacman-extracted
+# binaries, 7 on natively installed ones -- byte-identical, so pooled):
+#
+#   9/12 runs completed, each 39 passed / 0 failed
+#   3/12 runs FATAL-aborted with all 5 retries exhausted
+#
+# A ~25% whole-run abort rate is orders of magnitude above what independent
+# retries predict, which is itself the evidence that consecutive fresh
+# clipcatd starts are CORRELATED -- something about the display's state at
+# that moment makes several successive daemons fail together. That
+# correlation is NOT root-caused; it is the known residual unknown here
+# (the per-process BadAtom mechanism above IS root-caused; why it clusters
+# is not). Do not let a green run persuade you otherwise.
+#
+# What aborts do and do not mean: no assertion has ever produced a WRONG
+# answer across those 10 runs -- completed runs are always 39/0, and the
+# aborts happen late (one at 38 of 39 assertions, one at 29). So a FATAL
+# is LOST COVERAGE, never a false pass. Re-run on abort; if a run
+# completes, its results are trustworthy.
+#
+# The retry count is deliberately left at 5. Raising it would convert a
+# visible abort into a slower, quieter abort and would suppress the one
+# signal that surfaces this upstream bug at all. Tracked as dotfiles-apl.
 start_server() {
-  local history_path="${1:-$HIST}" attempt
+  local history_override="${1:-}" attempt
   for attempt in 1 2 3 4 5; do
-    _start_server_once "$history_path" && return 0
-    echo "warning: start_server attempt $attempt failed, retrying" >&2
+    _start_server_once "$history_override" && return 0
+    echo "warning: start_server attempt $attempt failed (known clipcat 0.25.0 defect: listener sees the change, then GetProperty->BadAtom on format enumeration -- see comment above _start_server_once), restarting the daemon fresh" >&2
     sleep 1
   done
-  echo "FATAL: clipcatd did not start after 5 attempts; see $TMP/server.log" >&2
+  echo "FATAL: clipcatd did not start a working watcher after 5 independent fresh attempts." >&2
+  echo "Most likely the known upstream clipcat 0.25.0 listener defect (see comment above _start_server_once) hitting 5 times in a row." >&2
+  echo "NOTE: the daemon log below is EXPECTED TO BE EMPTY for that defect -- clipcat.toml sets emit_journald=true / emit_stdout=false," >&2
+  echo "so the diagnostic WARN goes to journald, not to this file. Confirm with:  journalctl --user -t clipcatd -n 50" >&2
+  echo "This file only captures hard startup failures that predate logging init (e.g. an unresolved \$XDG_RUNTIME_DIR). Last attempt's captured output:" >&2
   cat "$TMP/server.log" >&2
   exit 1
 }
@@ -345,6 +427,18 @@ echo "display: $DPY   config: $CFG   runtime: $RUN"
 seed_config
 start_server
 
+scenario "config-alone-resolves-history-path: history_file_path from clipcat.toml resolves against \$XDG_RUNTIME_DIR with NO --history-file flag"
+# start_server above passed no history override at all -- this asserts the
+# checked-in config's literal "$XDG_RUNTIME_DIR/clipcat/history" really did
+# resolve against the env var we set for the daemon (not a directory
+# literally named "$XDG_RUNTIME_DIR", and not clipcatd's own
+# $XDG_CACHE_HOME fallback), i.e. the Gap 1 fix is a tested fact, not just
+# a comment.
+assert_eq "history directory exists at the expanded runtime-dir path" "true" \
+  "$([ -d "$HIST" ] && echo true || echo false)"
+assert_eq "no directory named literally \$XDG_RUNTIME_DIR was created" "false" \
+  "$([ -e '$XDG_RUNTIME_DIR' ] && echo true || echo false)"
+
 scenario "plain-capture-byte-exact: a plain external copy lands in history verbatim"
 own_clipboard 'hello-plain-marker'
 n="$(wait_length_change 0)"
@@ -499,26 +593,28 @@ assert_eq "and its full text is readable" "SECRET-should-be-captured-now" \
 stop_server
 
 # =========================== PHASE 4: XDG_RUNTIME_DIR unset =================
-# Edge case: the launcher must fail loudly, never fall back to a persistent
-# path, if $XDG_RUNTIME_DIR is unset. This is a property of the *launcher*
-# convention clipcat.toml's header mandates (`set -u` + `--history-file
-# "$XDG_RUNTIME_DIR/..."`), not of clipcatd itself, so it is exercised as a
-# subshell reproducing that convention.
+# Edge case: clipcatd must fail loudly, never fall back to a persistent
+# path, if $XDG_RUNTIME_DIR is unset. This is a DAEMON-level guarantee, not
+# a launcher convention: clipcatd itself shell-expands the literal
+# "$XDG_RUNTIME_DIR/clipcat/history" baked into clipcat.toml and refuses to
+# start at all when that lookup fails -- verified empirically (exit 78,
+# "environment variable not found"). No `set -u` wrapper or --history-file
+# flag is needed to get this behavior, so none is used below: this runs
+# clipcatd exactly as task 5's autostart will, straight off the checked-in
+# config, with the one env var removed.
 
-scenario "xdg-runtime-dir-unset: launcher aborts before clipcatd ever starts"
+scenario "xdg-runtime-dir-unset: clipcatd itself refuses to start (no launcher wrapper needed)"
 seed_config
 before_procs="$(pgrep -f "$CLIPCATD" 2>/dev/null | wc -l)"
-(
-  set -u
-  unset XDG_RUNTIME_DIR
-  env DISPLAY="$DPY" XDG_CONFIG_HOME="$CFG" \
-    bash -c 'set -u; exec "$1" --no-daemon --history-file "$XDG_RUNTIME_DIR/clipcat/history"' _ "$CLIPCATD"
-) >"$TMP/unset-attempt.log" 2>&1
+env -u XDG_RUNTIME_DIR DISPLAY="$DPY" XDG_CONFIG_HOME="$CFG" \
+  "$CLIPCATD" --no-daemon >"$TMP/unset-attempt.log" 2>&1
 rc=$?
 sleep 1
 after_procs="$(pgrep -f "$CLIPCATD" 2>/dev/null | wc -l)"
-assert_eq "launcher shell exits nonzero rather than starting clipcatd" "nonzero" "$([ "$rc" -ne 0 ] && echo nonzero || echo zero)"
-assert_eq "no new clipcatd process was spawned" "$before_procs" "$after_procs"
+assert_eq "clipcatd exits nonzero rather than starting" "nonzero" "$([ "$rc" -ne 0 ] && echo nonzero || echo zero)"
+assert_eq "no clipcatd process is left running" "$before_procs" "$after_procs"
+assert_eq "failure names the unresolved XDG_RUNTIME_DIR lookup, not a silent fallback" "yes" \
+  "$(grep -q 'XDG_RUNTIME_DIR' "$TMP/unset-attempt.log" && echo yes || echo no)"
 
 # =========================== PHASE 5: mutation — persistent path DOES leak ==
 # Prove the no-content-on-persistent-disk assertion is not vacuous: point

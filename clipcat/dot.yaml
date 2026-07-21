@@ -44,32 +44,50 @@
 #    at the 200-entry cap (`max_history` in clipcat.toml); revisit if the
 #    cap rises.
 #
-# 3. MEMORY-ONLY IS CONFIG (AND LAUNCHER) DISCIPLINE, NOT A DAEMON GUARANTEE.
+# 3. MEMORY-ONLY IS A DAEMON-LEVEL GUARANTEE, BAKED INTO THE CHECKED-IN
+#    CONFIG -- NOT LAUNCHER DISCIPLINE.
 #
-#    copyq could not persist even if misconfigured -- store_items=false was
-#    a per-tab daemon property with no failure mode. clipcat has no
-#    equivalent switch: history is written CONTINUOUSLY while the session
-#    runs (not just at exit) to whatever `history_file_path` names, and if
-#    that key is left out of clipcat.toml entirely, clipcatd defaults it to
-#    $XDG_CACHE_HOME/clipcat -- PERSISTENT DISK. TOML string values are
-#    never shell-expanded by clipcatd (verified empirically: a literal
-#    "$XDG_RUNTIME_DIR/..." string in the config produces a directory
-#    named literally `$XDG_RUNTIME_DIR`, then fails outright), so
-#    clipcat.toml deliberately OMITS history_file_path and every launcher of
-#    clipcatd MUST supply it on the command line, resolved by a shell that
-#    has already read the real environment:
+#    copyq's guarantee was store_items=false, a per-tab daemon property with
+#    no failure mode. clipcat has no equivalent switch, but
+#    `history_file_path` in clipcat.toml IS the literal string
+#    "$XDG_RUNTIME_DIR/clipcat/history", and clipcatd DOES shell-expand this
+#    specific field at startup -- verified empirically: with that exact
+#    literal string in the config, the daemon's own log reports the fully
+#    resolved path (e.g. "History file path: /run/user/1000/clipcat/history"),
+#    and if $XDG_RUNTIME_DIR is unset clipcatd refuses to start at all,
+#    loudly, on its own: `Error: Could not resolve file path
+#    $XDG_RUNTIME_DIR/clipcat/history, error: error looking key
+#    'XDG_RUNTIME_DIR' up: environment variable not found` (exit 78). No
+#    launcher-side flag or `set -u` wrapper is needed for that failure mode
+#    -- every clipcatd invocation reads this same checked-in file, so there
+#    is no "did the launcher remember the flag" gap the way there would be
+#    if the path lived only on a CLI argument. `clear_history_on_start =
+#    true` is the other half: a daemon that restarts mid-session starts
+#    empty regardless.
 #
-#      clipcatd -c ~/.config/clipcat/clipcatd.toml \
-#               --history-file "$XDG_RUNTIME_DIR/clipcat/history"
+#    Earlier drafts of this file claimed the opposite -- that TOML string
+#    values are never shell-expanded, and therefore every launcher had to
+#    pass `--history-file` under `set -u`. That claim was FALSE, based on a
+#    confounded test (the literal-string failure actually came from
+#    `pid_file`, a field that genuinely does not expand, tested alongside
+#    history_file_path in the same broken config). i3's `exec_always`
+#    (task 5's autostart mechanism) does not run under `set -u`, so that
+#    design would have silently persisted clipboard history to
+#    $XDG_CACHE_HOME on any forgotten flag -- a secrets-on-disk failure mode
+#    this correction removes entirely.
 #
-#    under `set -u`, so an unset $XDG_RUNTIME_DIR aborts the launching shell
-#    before clipcatd ever starts -- it must NEVER silently fall back to the
-#    persistent default above. `clear_history_on_start = true` in
-#    clipcat.toml is the other half: a daemon that has to restart mid-
-#    session (correct flag or not) restarts with an empty history file.
-#    Every launcher (this task's test-clipcat.sh, task 5's autostart lines)
-#    must follow this exactly; clipcat.toml's own header repeats it at the
-#    point of use, since that is the file most likely to be edited later.
+#    `--history-file` remains available as a CLI override, and task 5 will
+#    likely still use it -- not to make memory-only work (config alone
+#    already guarantees that), but because native.conf runs two clipcatd
+#    processes under the SAME user session (adr0004: :0 and :10 share one
+#    $XDG_RUNTIME_DIR), and both would otherwise resolve the identical
+#    baked-in path and collide on one history file. That is a per-display
+#    disambiguation concern for task 5 to solve, unrelated to this point.
+#    `pid_file` and `local_socket` are left out of clipcat.toml entirely
+#    (not given a literal `$XDG_RUNTIME_DIR/...` string) precisely because
+#    they do NOT get the same expansion treatment -- omitting them lets
+#    clipcatd fall back to its own env-var-driven defaults instead of a
+#    broken literal string.
 #
 # 4. `clipcatctl insert` DOES NOT RE-TRIGGER THE WATCHER (poc010 Q3) -- an
 #    inserted item bypasses `sensitive_mime_types` exactly as `copyq add`
