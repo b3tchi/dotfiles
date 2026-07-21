@@ -570,6 +570,17 @@ def prepare-split [orig: int, mode: string] {
             i3run $"[id=($orig)] focus"
             i3run "split horizontal"
         }
+        "tab" => {
+            # A frame short enough to hit this fallback is one sitting in a
+            # vertical split, so the WM default would stack the preview as yet
+            # another thin sibling — the opposite of what "too small to split"
+            # wants. Set the frame's container tabbed BEFORE the window maps so
+            # the preview joins as a full-size tab (mapping into a tabbed
+            # container, like the split cases, avoids the fatal post-map
+            # reparent).
+            i3run $"[id=($orig)] focus"
+            i3run "layout tabbed"
+        }
         _ => {}
     }
 }
