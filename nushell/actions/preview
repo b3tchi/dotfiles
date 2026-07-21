@@ -780,6 +780,10 @@ def main [
             print "  send <path> [--window N]     — push path to window N (default 1)"
             print "  register <addr> [--slot N]   — bind nvim server addr to a slot, print the slot"
             print "  window [N] [--close]         — open (or close) preview-wv window N (default 1)"
+            print ""
+            print "Image window: fit-to-window by default; click or z / 1 / space toggles 1:1."
+            print "Docking: show picks top/left/below/tab by image shape; window docks right."
+            print "See preview/README.md for the full reference."
         }
     }
 }
