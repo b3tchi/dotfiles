@@ -149,6 +149,19 @@ func newFakeBackend(t *testing.T, watchHTML, watchJS []byte) *httptest.Server {
 
 // ── proxy test infrastructure ─────────────────────────────────────────────────
 
+// realD2 creates an on-disk .d2 file in a scratch dir and returns its path.
+// Tests that build an IndexData entry by hand need a real AbsPath because
+// lookupRoute now verifies a cached route's file still exists before serving
+// (dotfiles-3tj). The name is irrelevant — only existence is checked.
+func realD2(t *testing.T) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "fixture.d2")
+	if err := os.WriteFile(p, []byte("a -> b\n"), 0o644); err != nil {
+		t.Fatalf("write d2 fixture: %v", err)
+	}
+	return p
+}
+
 // injectFakeChild adds a pre-built Child directly into cm without spawning.
 func injectFakeChild(cm *ChildManager, key, absPath string, port int) {
 	e := &childEntry{
@@ -179,14 +192,21 @@ func backendPort(srv *httptest.Server) int {
 func makeProxy(t *testing.T, backend *httptest.Server, project, file string) (http.Handler, *ChildManager, string) {
 	t.Helper()
 	key := project + "/" + file
+	// A real on-disk file: lookupRoute now verifies a cached route's AbsPath
+	// still exists before serving (dotfiles-3tj), so a fabricated path would
+	// 404 before reaching the proxy logic these tests exercise.
+	absPath := filepath.Join(t.TempDir(), file+".d2")
+	if err := os.WriteFile(absPath, []byte("a -> b\n"), 0o644); err != nil {
+		t.Fatalf("write proxy fixture: %v", err)
+	}
 	idx := &IndexData{
 		Entries: []RouteEntry{
-			{Route: "/" + key, AbsPath: "/fake/" + key + ".d2"},
+			{Route: "/" + key, AbsPath: absPath},
 		},
 	}
 	cfg := config{D2Bin: os.Args[0], ChildPortBase: "0", IdleTimeout: "30m"}
 	cm := NewChildManager(cfg, os.Environ())
-	injectFakeChild(cm, key, "/fake/"+key+".d2", backendPort(backend))
+	injectFakeChild(cm, key, absPath, backendPort(backend))
 	return NewProxyHandler(idx, nil, cm), cm, key
 }
 
@@ -520,12 +540,13 @@ func TestProxyAcceptEncodingIdentity(t *testing.T) {
 	}))
 	defer backend.Close()
 
+	abs := realD2(t)
 	idx := &IndexData{
-		Entries: []RouteEntry{{Route: "/proj/f.d2", AbsPath: "/fake/f.d2"}},
+		Entries: []RouteEntry{{Route: "/proj/f.d2", AbsPath: abs}},
 	}
 	cfg := config{D2Bin: os.Args[0], ChildPortBase: "0", IdleTimeout: "30m"}
 	cm := NewChildManager(cfg, os.Environ())
-	injectFakeChild(cm, "proj/f.d2", "/fake/f.d2", backendPort(backend))
+	injectFakeChild(cm, "proj/f.d2", abs, backendPort(backend))
 	h := NewProxyHandler(idx, nil, cm)
 	ts := httptest.NewServer(h)
 	defer ts.Close()
@@ -553,7 +574,7 @@ func TestProxyURLDecodedRouteMatch(t *testing.T) {
 	// Register a route with a space-encoded name.
 	idx := &IndexData{
 		Entries: []RouteEntry{
-			{Route: "/myproj/test%20file.d2", AbsPath: "/fake/test file.d2"},
+			{Route: "/myproj/test%20file.d2", AbsPath: realD2(t)},
 		},
 	}
 	cfg := config{D2Bin: os.Args[0], ChildPortBase: "0", IdleTimeout: "30m"}
@@ -584,7 +605,7 @@ func TestProxyDeadChild502(t *testing.T) {
 	defer backend.Close()
 
 	idx := &IndexData{
-		Entries: []RouteEntry{{Route: "/proj/file.d2", AbsPath: "/fake/file.d2"}},
+		Entries: []RouteEntry{{Route: "/proj/file.d2", AbsPath: realD2(t)}},
 	}
 	cfg := config{D2Bin: os.Args[0], ChildPortBase: "0", IdleTimeout: "30m"}
 	cm := NewChildManager(cfg, os.Environ())
@@ -839,4 +860,44 @@ func mustServe(t *testing.T, h http.Handler) string {
 	ts := httptest.NewServer(h)
 	t.Cleanup(ts.Close)
 	return ts.URL
+}
+
+// TestProxyDeletedFileRouteStops404sNoSpawn proves the dotfiles-3tj fix: a
+// cached route whose file was deleted since indexing must 404 rather than
+// lazy-spawn a d2 --watch child on the missing file (which the reaper then
+// kills — a flap on every re-request). The route is dropped and the request
+// misses; no child is created.
+func TestProxyDeletedFileRouteStops404sNoSpawn(t *testing.T) {
+	defer withRewalkDebounce(0)()
+
+	root := t.TempDir()
+	diagram := filepath.Join(root, "gone.d2")
+	if err := os.WriteFile(diagram, []byte("a -> b\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg := Registry{"proj": root}
+	idx := buildIndex(reg) // indexes gone.d2 while it exists
+
+	cfg := config{D2Bin: os.Args[0], ChildPortBase: "0", IdleTimeout: "30m"}
+	cm := NewChildManager(cfg, os.Environ())
+	h := NewProxyHandler(idx, reg, cm)
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+
+	// Delete the source AFTER it was indexed — the route is now a stale HIT.
+	if err := os.Remove(diagram); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := http.Get(ts.URL + "/proj/gone.d2")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("GET deleted route: status %d, want 404 (no spawn on a missing file)", resp.StatusCode)
+	}
+	if _, ok := cm.Snapshot()["proj/gone.d2"]; ok {
+		t.Errorf("a child was spawned for a deleted file — the 3tj flap")
+	}
 }

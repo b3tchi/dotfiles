@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -109,13 +110,32 @@ func NewProxyHandler(idx *IndexData, reg Registry, cm *ChildManager) *ProxyHandl
 // the preview 404s.
 func (p *ProxyHandler) lookupRoute(reqPath string) (RouteEntry, bool) {
 	if e, ok := lookupIn(p.routes.Load(), reqPath); ok {
-		return e, true
+		// A cached route can outlive its file: it may have been deleted since
+		// the walk that indexed it (dotfiles-3tj). Serving it would lazy-spawn
+		// a d2 --watch child on a missing file that the reaper immediately
+		// kills — a flap on every re-request. Verify existence; if gone, drop
+		// the route (best-effort debounced re-walk) and fall through to a miss
+		// so this request 404s instead of spawning.
+		if fileExists(e.AbsPath) {
+			return e, true
+		}
+		p.rewalkProject(projectFromRoute(reqPath))
+		return RouteEntry{}, false
 	}
 	project := projectFromRoute(reqPath)
 	if project == "" || !p.rewalkProject(project) {
 		return RouteEntry{}, false
 	}
 	return lookupIn(p.routes.Load(), reqPath)
+}
+
+// fileExists reports whether path resolves to an existing filesystem entry.
+// Only a definitive os.ErrNotExist counts as absent — a transient stat error
+// (permission, I/O) is treated as "exists" so a working preview is never
+// dropped over a glitch. Mirrors the reaper's deletion check in children.go.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return !errors.Is(err, os.ErrNotExist)
 }
 
 // lookupIn checks the decoded map first (Go pre-decodes paths), then raw.
