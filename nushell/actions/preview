@@ -451,6 +451,158 @@ def ensure-daemon-slash [] {
     }
 }
 
+# ── shape-based docking (dotfiles-bfk) ───────────────────────────────────
+#
+# `preview show` docks the window beside the frame it was launched from
+# instead of tabbing into whatever i3 container has focus. Split direction
+# follows image shape: landscape -> above (top), portrait -> left, square ->
+# below (or a tab when the frame is too short to usefully split). Always
+# tiled, never floating (the i3 config carries no float rule for preview-wv).
+
+# Aspect bands: w/h > SQUARE_HI is landscape, < SQUARE_LO is portrait, in
+# between is square. SQUARE_MIN_H is the launching frame height (px) below
+# which a square image tabs rather than splitting below — a below-split of a
+# short frame leaves two unusably thin panes.
+const SQUARE_LO = 0.8
+const SQUARE_HI = 1.25
+const SQUARE_MIN_H = 900
+
+# The X11 id of the window focused right now — captured at launch to remember
+# the "original frame" before any preview window steals a spot in the tree.
+# null when there is no X session / xdotool (Termux, headless).
+def active-window-id [] {
+    if (which xdotool | is-empty) { return null }
+    let r = (do { ^xdotool getactivewindow } | complete)
+    if $r.exit_code != 0 { return null }
+    try { $r.stdout | str trim | into int } catch { null }
+}
+
+# Image pixel dimensions as {w, h}, or null if they can't be read. Prefers
+# ImageMagick `identify` (authoritative); falls back to parsing `file`'s
+# "W x H" — taking the LAST match, since JPEG headers report a density pair
+# (e.g. "72 x 72") before the real dimensions.
+def image-dims [path: string] {
+    if (which identify | is-not-empty) {
+        let r = (do { ^identify -format "%w %h" $path } | complete)
+        if $r.exit_code == 0 {
+            let parts = ($r.stdout | str trim | split row " ")
+            if ($parts | length) >= 2 {
+                let d = (try { {w: ($parts.0 | into int), h: ($parts.1 | into int)} } catch { null })
+                if $d != null { return $d }
+            }
+        }
+    }
+    if (which file | is-empty) { return null }
+    let r = (do { ^file -b $path } | complete)
+    if $r.exit_code != 0 { return null }
+    let m = ($r.stdout | parse -r '(?<w>\d+)\s*x\s*(?<h>\d+)')
+    if ($m | is-empty) { return null }
+    try { {w: ($m | last | get w | into int), h: ($m | last | get h | into int)} } catch { null }
+}
+
+# Height in px of window `id`, or null. Used for the square-frame-too-short
+# tab fallback.
+def window-height [id: int] {
+    if (which xdotool | is-empty) { return null }
+    let r = (do { ^xdotool getwindowgeometry --shell $id } | complete)
+    if $r.exit_code != 0 { return null }
+    let line = ($r.stdout | lines | where ($it | str starts-with "HEIGHT="))
+    if ($line | is-empty) { return null }
+    try { ($line | first | str replace "HEIGHT=" "" | into int) } catch { null }
+}
+
+# The active WM control binary (i3 or sway — identical split/move syntax), or
+# null if neither is present.
+def wm-bin [] {
+    for bin in [i3-msg swaymsg] {
+        if (which $bin | is-not-empty) { return $bin }
+    }
+    null
+}
+
+# Choose the dock mode from image shape and the launching frame's height:
+# "top" (landscape), "left" (portrait), "below" (square), or "tab" (square
+# but the frame is too short to split).
+def dock-mode [w: int, h: int, orig: int] {
+    let r = ($w / $h)
+    if $r > $SQUARE_HI {
+        "top"
+    } else if $r < $SQUARE_LO {
+        "left"
+    } else {
+        let fh = (window-height $orig)
+        if ($fh != null and $fh < $SQUARE_MIN_H) { "tab" } else { "below" }
+    }
+}
+
+# Run one WM (i3/sway) command, swallowing failure — placement is
+# best-effort and must never break `show`.
+def i3run [cmd: string] {
+    let bin = (wm-bin)
+    if $bin == null { return }
+    do { ^env -u I3SOCK $bin $cmd } | complete | ignore
+}
+
+# Is preview-wv window N already open? A fresh spawn is what docking hooks
+# into; a window that already exists is left where it is (re-docking would
+# reparent the live webview and kill it — see prepare-split).
+def window-open [n: int] {
+    let pid = (read-pidfile-at (window-pid-file $n))
+    if $pid == null { return false }
+    (pid-alive $pid) and (pid-cmdline-matches $pid $WEBVIEW_BIN)
+}
+
+# Set the launching frame's split orientation BEFORE the preview window maps,
+# so the webview opens directly into position. This is the crux of the whole
+# approach: reparenting an already-mapped wry/WebKitGTK window (i3
+# split/move/move-to-mark after the fact) makes it self-close with
+# CloseRequested on xrdp's GL-limited virtual Xorg (dotfiles-bfk — verified;
+# not fixed by software GL). A window that maps straight into its final
+# container is never reparented and survives. "tab" wants no split (the WM's
+# default drops the new window into orig's container as a tab).
+def prepare-split [orig: int, mode: string] {
+    match $mode {
+        "top" | "below" => {
+            i3run $"[id=($orig)] focus"
+            i3run "split vertical"
+        }
+        "left" => {
+            i3run $"[id=($orig)] focus"
+            i3run "split horizontal"
+        }
+        _ => {}
+    }
+}
+
+# Wait (bounded) for a preview-wv window to actually map. window-spawn spawns
+# the webview detached and returns without waiting for the map (place-window
+# no-ops for a Claude/ad-hoc window with no registered workspace), so a
+# reorder issued immediately would find no sibling yet — the exact bug that
+# left "top" images docked at the bottom. Polls by class (reliable; the
+# xdotool --name title match is flaky for this window).
+def wait-preview-mapped [] {
+    if (which xdotool | is-empty) { return }
+    for _ in 1..($PLACE_ATTEMPTS) {
+        let r = (do { ^xdotool search --class $WEBVIEW_BIN } | complete)
+        if $r.exit_code == 0 and ($r.stdout | str trim | is-not-empty) { return }
+        sleep $PLACE_POLL
+    }
+}
+
+# After the window has mapped (below/right of orig, per prepare-split's
+# split), reorder for the top/left modes by moving the LAUNCHING FRAME — a
+# normal terminal, safe to reparent — never the fragile webview. below/right
+# and tab need no reorder. The move waits for the window to map first, else it
+# runs before the split has two children and does nothing (leaving "top" at
+# the bottom).
+def finalize-dock [orig: int, mode: string] {
+    match $mode {
+        "top" => { wait-preview-mapped; i3run $"[id=($orig)] move down" }   # push frame down -> preview on top
+        "left" => { wait-preview-mapped; i3run $"[id=($orig)] move right" } # push frame right -> preview on left
+        _ => {}
+    }
+}
+
 # One-shot preview: ensure a /-rooted daemon, open window N, send the file,
 # and print its localhost URL (the browser-on-a-port fallback). This is the
 # verb Claude Code's /preview slash command and any ad-hoc caller uses to
@@ -465,7 +617,22 @@ def main-show [path?: string, window: int = 1] {
     if not ($abs | path exists) {
         error make { msg: $"preview: no such file: ($abs)" }
     }
+    # Capture the launching frame + image shape BEFORE anything opens a
+    # window, so shape docking has the original frame to dock against
+    # (dotfiles-bfk).
+    let orig = (active-window-id)
+    let dims = (image-dims $abs)
     ensure-daemon-slash
+    # Dock only a FRESH image window: no frame/WM/dims -> no dock; a non-image
+    # (dims null) -> no dock; an already-open window is left in place (moving
+    # the live webview would reparent and kill it). Decide the mode, then set
+    # the split BEFORE the window maps.
+    let mode = if ($orig != null and $dims != null and not (window-open $window)) {
+        (dock-mode $dims.w $dims.h $orig)
+    } else {
+        null
+    }
+    if $mode != null { prepare-split $orig $mode }
     # Window spawn is best-effort GUI: on a headless host (Termux, no WM) the
     # detached preview-wv just dies in its log — the daemon + URL below still
     # give a working browser-on-a-port preview, so this never gates the send.
@@ -473,6 +640,12 @@ def main-show [path?: string, window: int = 1] {
     # The daemon (root=/) converts this absolute path abs->rel internally
     # (handlePreviewSet), so /file/<abs-minus-leading-slash> is the URL.
     main-send $abs $window
+    # Reorder for top/left by moving the launching frame (reparent-safe),
+    # never the webview.
+    if $mode != null {
+        finalize-dock $orig $mode
+        print $"preview: docked window ($window) ($mode) of frame ($orig)"
+    }
     let rel = ($abs | str trim --left --char '/')
     print $"preview: (api-base)/file/($rel)?full"
 }
