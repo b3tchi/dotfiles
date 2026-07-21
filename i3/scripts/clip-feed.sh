@@ -1,12 +1,14 @@
 #!/bin/sh
 # clip-feed.sh — one-way clipboard feeder: CLIPBOARD on the xrdp display (:10)
-# into the copyq history on the native display (:0).  [sp014 task 2]
+# into the clipcat history owned by the native session's daemon (:0).
+# [sp014 task 2; backend swapped copyq -> clipcat by sp016 task 4]
 #
 # adr0004 gives this host two X servers at once: the native session on :0 and
 # the xrdp session on :10.  Each owns its own X selections, so a copy made in
-# the xrdp session is invisible to the native one.  copyq runs a single server,
-# on :0, where the picker lives; this daemon watches :10 and pushes what is
-# copied there into that history, giving one shared history across both.
+# the xrdp session is invisible to the native one.  The picker lives on :0 and
+# reads the clipcat daemon serving that session; this daemon watches :10 and
+# pushes what is copied there into that history, giving one shared history
+# across both.
 #
 # Direction is deliberately one-way.  :0 -> :10 is not needed (the picker
 # pastes onto the active display, clip-paste.sh) and a two-way feeder would
@@ -18,24 +20,69 @@
 #  * Never trust the inherited DISPLAY.  Every X call carries an explicit
 #    DISPLAY= naming the display it means, so the daemon behaves identically
 #    started from an i3 autostart, a tmux pane, or a login shell.
+#  * Never guess the destination clipcat socket either.  One clipcatd binds
+#    exactly one socket and this host runs two of them (clipcat/dot.yaml
+#    point 1), so the DST daemon is named by an explicit --server-endpoint
+#    path, never derived from a DISPLAY.
 #  * Every xclip call is wrapped in `timeout`.  A selection owner can hang (a
 #    dead RDP client, an image payload) and a bare `xclip -o` blocks forever —
 #    one stuck read wedged the whole clip-sync.sh loop until it was killed.
-#  * History is fed with `copyq add`, never `copyq copy`: the feeder must not
-#    steal the native CLIPBOARD out from under whoever is working on :0.
-#    (`copyq copy` would not reach the history anyway — copyq ignores
-#    clipboard changes it owns itself.)
-#  * copyq is invoked as a plain `copyq` with no environment juggling, per the
-#    contract in copyq/dot.yaml.
+#    Every clipcatctl call is wrapped for the same reason (adr0002): a wedged
+#    daemon must not wedge the feeder.
+#  * History is fed WITHOUT touching any selection the user can see: the
+#    feeder must not steal the native CLIPBOARD out from under whoever is
+#    working on :0.  Under copyq that was `copyq add` (never `copyq copy`).
+#    Under clipcat it is `clipcatctl load -k secondary` — see BACKEND below,
+#    because the obvious call is a trap.
 #
-# SECURITY — password-manager copies.  copyq's hint-drop rule
-# (copyq/commands.ini) is an *automatic command*: it only fires on clipboard
-# changes the :0 server observes.  Items inserted with `copyq add` bypass
-# automatic commands entirely, so a KeePassXC copy made on :10 would launder
-# straight past that rule into history if this daemon just forwarded text.
-# That is why the TARGETS list is inspected FIRST and a selection advertising
-# application/x-kde-passwordManagerHint is skipped without its payload ever
-# being read.  Do not move that check below the read, and do not remove it.
+# ---------------------------------------------------------------- BACKEND ---
+# Two measured facts about clipcat 0.25.0 shaped the feed call.  Both were
+# verified empirically against the shipped clipcat/clipcat.toml; neither is
+# what sp016 / clipcat/dot.yaml assumed when they said "swap `copyq add -`
+# for `clipcatctl insert`".
+#
+# 1. `clipcatctl insert <DATA>` takes the payload as a COMMAND-LINE ARGUMENT.
+#    Linux caps a single argv string at MAX_ARG_STRLEN (128 KiB), so a 200 KB
+#    clip fails at exec with "Argument list too long" — measured.  The feeder
+#    has to carry whatever the user copied, and multi-MB clips are ordinary
+#    (clipcat/test-clipcat.sh itself ships a 3 MB fixture).  `clipcatctl load
+#    -f <file>` performs the same insert reading from a file instead: 3 MB
+#    verified fine.  It also keeps clipboard content out of /proc/<pid>/cmdline
+#    on a path that by construction handles secrets.
+#
+# 2. `insert`/`load` with the DEFAULT `-k clipboard` DOES NOT merely seed the
+#    history — it makes the DST daemon TAKE OWNERSHIP OF THE DST X CLIPBOARD.
+#    Measured: the X CLIPBOARD on the daemon's display changed to the inserted
+#    text the moment the call returned.  That is exactly the "steal the native
+#    clipboard" behaviour `copyq add` was chosen over `copyq copy` to avoid,
+#    and it would mean every copy made in the xrdp session silently yanked the
+#    native session's clipboard.  (poc010 Q3 still holds — the insert does not
+#    re-trigger the WATCHER, so nothing is double-recorded.  It asserts the X
+#    selection, which is a different thing, and was missed.)
+#
+#    `-k secondary` is the fix: the clip is recorded in history, `list` and
+#    `get` return it byte-exact like any other entry, and CLIPBOARD and
+#    PRIMARY are both left untouched — measured.  This works because
+#    clipcat.toml sets `enable_secondary = false` (and `enable_primary =
+#    false`) in [watcher], so the daemon records the clip but never asserts
+#    ownership of that selection.  THAT SETTING IS LOAD-BEARING HERE: turning
+#    `enable_secondary = true` on would give this call back the stealing
+#    behaviour.  test-clip-feed.sh asserts the config setting and asserts the
+#    DST clipboard is untouched after a feed, with a mutation control showing
+#    `-k clipboard` really does steal it.
+#
+# SECURITY — password-manager copies.  clipcat's own secret filter
+# (`sensitive_mime_types` in clipcat.toml) is a WATCHER-side rule: it only
+# fires on clipboard changes the DST daemon observes for itself.  Items
+# arriving through insert/load bypass the watcher entirely (poc010 Q3), so a
+# KeePassXC copy made on :10 would launder straight past that filter into
+# history if this daemon just forwarded text.  This is the same hole `copyq
+# add` had past copyq's automatic commands — the backend swap changed nothing
+# about it.  That is why the TARGETS list is inspected FIRST and a selection
+# advertising application/x-kde-passwordManagerHint is skipped without its
+# payload ever being read.  Do not move that check below the read, and do not
+# remove it.  On this path the feeder's own two gates are the ONLY filter
+# there is.
 #
 # The gate is checked TWICE, and the second check is not redundant.  TARGETS
 # and the payload are separate X protocol requests — measured 10-13ms apart —
@@ -58,26 +105,43 @@
 #    actually exposed to is covered.
 #  * Only KDE/KeePassXC-style hint publishers are recognised at all.  A
 #    password manager that advertises no hint is indistinguishable from a
-#    normal copy at either check.
+#    normal copy at either check.  (dotfiles-cyg / sp015 is the actual fix;
+#    the clipcat swap bought no security improvement here.)
 #
 # test-clip-feed.sh asserts the drop, the raced drop, and — via patched copies
 # of this file — that BOTH checks are load-bearing.
 #
 # usage: i3/scripts/clip-feed.sh          (daemon; exits 0 if already running)
-# env:   CLIP_FEED_SRC=:10   display watched for copies
-#        CLIP_FEED_DST=:0    display whose copyq server receives them
+# env:   CLIP_FEED_SRC=:10          display watched for copies
+#        CLIP_FEED_DST_SOCKET=...   clipcatd gRPC socket receiving them;
+#                                   defaults to $XDG_RUNTIME_DIR/clipcat/
+#                                   grpc.sock (clipcatd's own default when it
+#                                   is started without --grpc-socket-path)
 #        CLIP_FEED_POLL=0.5  seconds between polls while SRC is up
 #        CLIP_FEED_IDLE=5    seconds between polls while SRC is absent
-#        CLIP_FEED_TIMEOUT=1 seconds before a single xclip call is abandoned
+#        CLIP_FEED_TIMEOUT=1 seconds before a single xclip/clipcatctl call is
+#                            abandoned
 #        CLIP_FEED_LOCK=...  single-instance lock file
 set -u
 
 SRC="${CLIP_FEED_SRC:-:10}"
-DST="${CLIP_FEED_DST:-:0}"
 POLL="${CLIP_FEED_POLL:-0.5}"
 IDLE="${CLIP_FEED_IDLE:-5}"
 T="${CLIP_FEED_TIMEOUT:-1}"
 LOCK="${CLIP_FEED_LOCK:-/tmp/clip-feed.$(id -u).lock}"
+
+# The DST daemon is named, never guessed.  Refusing to start beats silently
+# feeding the wrong session's history (or none at all), and mirrors clipcatd's
+# own loud refusal — exit 78, EX_CONFIG — when it cannot resolve
+# $XDG_RUNTIME_DIR for its history path.
+if [ -n "${CLIP_FEED_DST_SOCKET:-}" ]; then
+  SOCK="$CLIP_FEED_DST_SOCKET"
+elif [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+  SOCK="$XDG_RUNTIME_DIR/clipcat/grpc.sock"
+else
+  echo "clip-feed.sh: no destination socket: set CLIP_FEED_DST_SOCKET or XDG_RUNTIME_DIR" >&2
+  exit 78
+fi
 
 # Single-instance guard.  i3 autostarts re-run on config reload, and a second
 # feeder would double every captured item.  flock releases the lock when the
@@ -127,17 +191,26 @@ src_gone() { grep -q "Can't open display" "$ERR"; }
 #    deleting it changed no test outcome, because this path already covers the
 #    image-only owner, and a mixed owner (image plus a text/plain URL, as
 #    browsers publish) advertises a text target and should feed the URL.
-#  * An owner holding an EMPTY string succeeds, and `copyq add -` on empty
-#    stdin appends an empty history row (verified on copyq 16.0.0) — so the
-#    `-s` test is what keeps blank rows out.
+#  * An owner holding an EMPTY string succeeds, and an empty file handed to
+#    the backend appends an empty history row — so the `-s` test is what keeps
+#    blank rows out.  (clipcat's own `filter_text_min_length = 1` would also
+#    catch this one, but that is the WATCHER's filter and this path bypasses
+#    the watcher; the `-s` check is what actually holds here.)
 read_src() {
   timeout "$T" env DISPLAY="$SRC" xclip -selection clipboard -o \
     > "$NEW" 2>/dev/null 9>&- && [ -s "$NEW" ]
 }
 
-# Append to the DST copyq history without touching the DST clipboard.
+# Append to the DST clipcat history without touching any DST selection.
+#
+# `load -f` rather than `insert <data>`: the payload would otherwise ride on
+# argv and die at 128 KiB.  `-k secondary` rather than the default
+# `-k clipboard`: the default makes the daemon assert ownership of the DST X
+# CLIPBOARD, i.e. steals it from the native session.  Both measured — see
+# BACKEND in the header before changing either flag.
 feed_dst() {
-  timeout "$T" env DISPLAY="$DST" copyq add - < "$NEW" >/dev/null 2>&1 9>&-
+  timeout "$T" clipcatctl --server-endpoint "$SOCK" load -k secondary \
+    -f "$NEW" >/dev/null 2>&1 9>&-
 }
 
 # `sleep` is an external command too, so it also has to drop the lock fd.
