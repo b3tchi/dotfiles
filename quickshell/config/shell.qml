@@ -114,4 +114,15 @@ ShellRoot {
             onTickerFinished: trackCurrent()
         }
     }
+
+    // Bottom rounded-corner clearance (phone/Razr xrdp only). Reserves the
+    // bottom inset as strut so apps stay clear of the physical corners while
+    // the bar sits at the top. Hidden (no strut) on desktop-shaped screens.
+    Variants {
+        model: Quickshell.screens
+        BarChin {
+            required property var modelData
+            screen: modelData
+        }
+    }
 }

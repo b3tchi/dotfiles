@@ -48,41 +48,44 @@ PanelWindow {
         }
     }
 
-    // Both polybar and waybar use bottom position
+    // Bar sits at the top on every session type (desktop + phone).
     anchors {
         left: true
         right: true
-        bottom: true
+        top: true
     }
 
-    // X11 inset pill (Razr chin + rounded display corners): PanelWindow
-    // margins are a Wayland/layer-shell feature and a NO-OP on X11, so instead
-    // the window grows by the inset and the bar is drawn as an inset pill
-    // inside it; the surround is painted the desktop color (#152024, matches
-    // config-xrdp's xsetroot) so the bar appears to float clear of the chin
-    // and corners. Tunable via env: QS_BAR_INSET_BOTTOM / QS_BAR_INSET_SIDE.
-    // With QS_BAR_INSET_AUTO=1 the inset engages only while the viewport is
-    // phone-shaped (taller than 2:1) — reactive to screen size, so an xrdp
-    // reconnect from a monitor client flattens the bar without a restart.
+    // X11 inset pill (rounded display corners): PanelWindow margins are a
+    // Wayland/layer-shell feature and a NO-OP on X11, so instead the window
+    // grows by the inset and the bar is drawn as an inset pill inside it.
+    // The bar is anchored at the TOP; the bottom rounded-corner clearance
+    // (Razr chin) is a separate strut-reserving panel — see BarChin.qml — so
+    // app windows stay clear of the physical bottom corners while the bar
+    // lives at the top. Only side/top insets shape the bar itself here.
+    // Tunable via env: QS_BAR_INSET_SIDE / QS_BAR_INSET_TOP (bottom clearance
+    // via QS_BAR_INSET_BOTTOM is consumed by BarChin). With QS_BAR_INSET_AUTO=1
+    // the inset engages only while the viewport is phone-shaped (taller than
+    // 2:1) — reactive to screen size, so an xrdp reconnect from a monitor
+    // client flattens everything without a restart.
     readonly property bool insetOn: Session.insetActive(
         screen ? screen.width : 1920, screen ? screen.height : 1080)
-    readonly property int insetBottom: insetOn ? Session.insetBottom : 0
     readonly property int insetSide:   insetOn ? Session.insetSide : 0
     readonly property int insetTop:    insetOn ? Session.insetTop : 0
-    readonly property bool inset: insetBottom > 0 || insetSide > 0 || insetTop > 0
+    readonly property bool inset: insetSide > 0 || insetTop > 0
 
-    implicitHeight: Session.barHeight + insetBottom + insetTop
+    implicitHeight: Session.barHeight + insetTop
 
-    // Phone (sxmo, sway/Wayland): floating pill via real layer-shell margins;
-    // desktop (i3/sway): full-width. On X11 use QS_BAR_INSET_* instead.
+    // Phone (sxmo, sway/Wayland): floating pill at the top via real
+    // layer-shell margins; desktop (i3/sway): full-width top bar. On X11 use
+    // QS_BAR_INSET_* instead.
     readonly property bool isPhone: Session.isPhone
     margins {
-        bottom: isPhone ? 20 : 0
-        left:   isPhone ? 40 : 0
-        right:  isPhone ? 40 : 0
+        top:   isPhone ? 20 : 0
+        left:  isPhone ? 40 : 0
+        right: isPhone ? 40 : 0
     }
 
-    readonly property color barColor: currentMode !== "default" ? "#152024" : "#222d31"
+    readonly property color barColor: "#000000"
     // Black surround: blends into the Razr's bezel/chin so the pill reads as
     // floating on the hardware edge rather than on a colored strip.
     color: inset ? "#000000" : barColor
@@ -464,10 +467,8 @@ PanelWindow {
         anchors.fill: parent
         anchors.leftMargin: root.insetSide
         anchors.rightMargin: root.insetSide
-        anchors.bottomMargin: root.insetBottom
         anchors.topMargin: root.insetTop
-        // Pill look only when inset from the sides; bottom-only inset = flat
-        // full-width bar with a black chin strip below (part of the desktop).
+        // Pill look only when inset from the sides; otherwise a flat top bar.
         radius: root.insetSide > 0 ? 12 : 0
         color: root.barColor
     }
@@ -477,7 +478,6 @@ PanelWindow {
         anchors.fill: parent
         anchors.leftMargin: root.inset ? root.insetSide + 10 : 0
         anchors.rightMargin: root.inset ? root.insetSide + 10 : 0
-        anchors.bottomMargin: root.insetBottom
         anchors.topMargin: root.insetTop
 
         // Left: workspaces + mode
