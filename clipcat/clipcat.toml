@@ -20,54 +20,47 @@ daemonize = true
 # point keeping server-side history the picker will never show.
 max_history = 200
 
-# MEMORY-ONLY, PART 1 OF 2. This does not stop the daemon from persisting --
-# clipcat has no `store_items=false` equivalent (copyq's actual guarantee).
-# It only clears whatever the history file already holds at every startup.
-# Part 2 (WHERE that file lives) is deliberately not a key in this file --
-# see the block below.
+# MEMORY-ONLY. clipcat has no `store_items=false` equivalent (copyq's actual
+# daemon-level guarantee: nothing ever reached disk, full stop). The nearest
+# reproduction is two settings together:
+#
+# 1. `clear_history_on_start = true` below -- a restarted daemon starts
+#    empty, whatever the history file on disk already held.
+# 2. `history_file_path` pinned to a literal `$XDG_RUNTIME_DIR/...` string,
+#    immediately below. clipcatd DOES shell-expand this specific field at
+#    startup (verified empirically: with the literal string
+#    "$XDG_RUNTIME_DIR/clipcat/history" written exactly as below, the
+#    daemon's own log reports the fully resolved path, e.g.
+#    "History file path: /run/user/1000/clipcat/history" -- not the literal
+#    string). This is a genuine daemon-level guarantee, not launcher
+#    discipline: every clipcatd invocation reads this same checked-in file,
+#    so there is no separate "did the launcher remember the flag" failure
+#    mode. `pid_file` and `local_socket` do NOT get this treatment (plain
+#    PathBuf fields, no expansion -- confirmed by the same test producing
+#    "No such file or directory" on a literal "$XDG_RUNTIME_DIR/..." pid
+#    path) which is why those two are left out of this file entirely below,
+#    to fall back to clipcatd's own env-var-driven defaults instead of a
+#    broken literal string.
+#
+# If $XDG_RUNTIME_DIR is unset, clipcatd fails to start on its own, loudly,
+# before doing anything else: `Error: Could not resolve file path
+# $XDG_RUNTIME_DIR/clipcat/history, error: error looking key
+# 'XDG_RUNTIME_DIR' up: environment variable not found` (exit 78) --
+# verified empirically. No launcher-side `set -u` wrapper is needed for
+# this specific failure mode; the daemon already refuses to fall back to
+# any default, let alone a persistent one. `history_file_path` is a
+# *directory* (contains a `clips` file and a `header.json`), written to
+# CONTINUOUSLY while the session runs -- not only at exit -- so this
+# directory is expected to briefly hold plaintext for as long as the
+# session lives; only `$XDG_RUNTIME_DIR` (tmpfs, destroyed by logind at
+# last logout) makes that acceptable.
+history_file_path = "$XDG_RUNTIME_DIR/clipcat/history"
 clear_history_on_start = true
 
 # Do not mirror CLIPBOARD into PRIMARY or vice versa: clip-set.sh already
 # writes both explicitly on publish, and this daemon must not silently
 # overwrite an ordinary mouse-selection PRIMARY behind the user's back.
 synchronize_selection_with_clipboard = false
-
-# -----------------------------------------------------------------------
-# MEMORY-ONLY, PART 2 OF 2 -- history_file_path is DELIBERATELY ABSENT.
-#
-# copyq guaranteed memory-only as a daemon property: store_items=false,
-# nothing ever reached disk, full stop. clipcat has no equivalent switch.
-# `history_file_path` is a *directory* (contains a `clips` file and a
-# `header.json`), written to CONTINUOUSLY while the session runs -- not
-# only at exit -- and if this key is omitted from the config entirely,
-# clipcatd defaults it to `$XDG_CACHE_HOME/clipcat`: PERSISTENT DISK.
-#
-# Worse, this field is a plain TOML string: clipcatd does NOT shell-expand
-# it. Writing the literal text "$XDG_RUNTIME_DIR/..." here does not work --
-# verified empirically (same behaviour on the analogous `pid_file` key):
-# clipcatd creates a directory named literally `$XDG_RUNTIME_DIR` in the
-# working directory and then fails outright, it does not fall back to
-# anything.
-#
-# The only correct way to get memory-only history is a shell that resolves
-# $XDG_RUNTIME_DIR itself, BEFORE clipcatd ever sees the value, passed as a
-# CLI flag that overrides this file:
-#
-#   clipcatd -c clipcatd.toml --history-file "$XDG_RUNTIME_DIR/clipcat/history"
-#
-# under `set -u`, so an unset $XDG_RUNTIME_DIR aborts the *launching shell*
-# with an unbound-variable error before clipcatd ever runs -- it must never
-# silently fall back to the persistent default above. Every launcher of
-# this daemon (this task's test-clipcat.sh, and task 5's i3 autostart
-# lines) MUST pass --history-file exactly like this. `clear_history_on_start
-# = true` above is the other half of the guarantee: even if a launcher gets
-# the path right but the daemon has to restart mid-session, it restarts
-# empty.
-#
-# This is why memory-only is CONFIG (and launcher) DISCIPLINE here, not a
-# daemon guarantee: a launcher that forgets --history-file persists every
-# clip to $XDG_CACHE_HOME silently, with no error from clipcatd at all.
-# -----------------------------------------------------------------------
 
 [log]
 emit_journald = true
