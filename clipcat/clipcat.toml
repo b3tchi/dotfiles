@@ -1,0 +1,112 @@
+# clipcatd.toml -- clipcat backend server config (sp016 task 1, dotfiles-egm.1)
+#
+# clipcat replaces copyq as the [[ft007]] shared-clipboard-history backend
+# (see clipcat/dot.yaml for the full client contract). This file is
+# clipcatd's *server* config only, rotz-linked to
+# ~/.config/clipcat/clipcatd.toml. clipcatctl and clipcat-menu each read
+# their own separate config file by default; every caller in this repo
+# skips that entirely and passes --server-endpoint on the command line
+# instead, so no clipcatctl.toml / clipcat-menu.toml is checked in here.
+#
+# Unlike copyq's QSettings .ini files, .toml supports comments and clipcatd
+# does not rewrite this file, so the contract can live inline.
+
+# Run detached from the invoking shell so an i3 exec_always line returns
+# immediately, exactly as `copyq --start-server` did (task 5's autostart).
+# Tests below override this with --no-daemon for a killable, foreground pid.
+daemonize = true
+
+# Matches quickshell/qs-clip.sh's own display cap (QS_CLIP_CAP=200) -- no
+# point keeping server-side history the picker will never show.
+max_history = 200
+
+# MEMORY-ONLY. clipcat has no `store_items=false` equivalent (copyq's actual
+# daemon-level guarantee: nothing ever reached disk, full stop). The nearest
+# reproduction is two settings together:
+#
+# 1. `clear_history_on_start = true` below -- a restarted daemon starts
+#    empty, whatever the history file on disk already held.
+# 2. `history_file_path` pinned to a literal `$XDG_RUNTIME_DIR/...` string,
+#    immediately below. clipcatd DOES shell-expand this specific field at
+#    startup (verified empirically: with the literal string
+#    "$XDG_RUNTIME_DIR/clipcat/history" written exactly as below, the
+#    daemon's own log reports the fully resolved path, e.g.
+#    "History file path: /run/user/1000/clipcat/history" -- not the literal
+#    string). This is a genuine daemon-level guarantee, not launcher
+#    discipline: every clipcatd invocation reads this same checked-in file,
+#    so there is no separate "did the launcher remember the flag" failure
+#    mode. `pid_file` and `local_socket` do NOT get this treatment (plain
+#    PathBuf fields, no expansion -- confirmed by the same test producing
+#    "No such file or directory" on a literal "$XDG_RUNTIME_DIR/..." pid
+#    path) which is why those two are left out of this file entirely below,
+#    to fall back to clipcatd's own env-var-driven defaults instead of a
+#    broken literal string.
+#
+# If $XDG_RUNTIME_DIR is unset, clipcatd fails to start on its own, loudly,
+# before doing anything else: `Error: Could not resolve file path
+# $XDG_RUNTIME_DIR/clipcat/history, error: error looking key
+# 'XDG_RUNTIME_DIR' up: environment variable not found` (exit 78) --
+# verified empirically. No launcher-side `set -u` wrapper is needed for
+# this specific failure mode; the daemon already refuses to fall back to
+# any default, let alone a persistent one. `history_file_path` is a
+# *directory* (contains a `clips` file and a `header.json`), written to
+# CONTINUOUSLY while the session runs -- not only at exit -- so this
+# directory is expected to briefly hold plaintext for as long as the
+# session lives; only `$XDG_RUNTIME_DIR` (tmpfs, destroyed by logind at
+# last logout) makes that acceptable.
+history_file_path = "$XDG_RUNTIME_DIR/clipcat/history"
+clear_history_on_start = true
+
+# Do not mirror CLIPBOARD into PRIMARY or vice versa: clip-set.sh already
+# writes both explicitly on publish, and this daemon must not silently
+# overwrite an ordinary mouse-selection PRIMARY behind the user's back.
+synchronize_selection_with_clipboard = false
+
+[log]
+emit_journald = true
+emit_stdout = false
+emit_stderr = false
+level = "INFO"
+
+[watcher]
+# Text only, per ft007 scope. Images/rich clipboard are out of scope and
+# must be skipped by the watcher, not crash it.
+enable_clipboard = true
+enable_primary = false
+enable_secondary = false
+capture_image = false
+
+# Matched by EXACT atom name, no prefix normalisation (poc010 Q1). Neither
+# spelling below has been verified against a real password-manager emitter
+# on this host (sp015 / dotfiles-cyg is the actual fix for that gap) --
+# both forms are listed so whichever turns out to be real, the drop fires.
+sensitive_mime_types = [
+  "x-kde-passwordManagerHint",
+  "application/x-kde-passwordManagerHint",
+]
+
+filter_text_min_length = 1
+filter_text_max_length = 20000000
+denied_text_regex_patterns = []
+
+[grpc]
+# Local socket only -- no TCP listener, one less thing exposed on a
+# secrets-adjacent daemon. `local_socket` is also left unset here: when
+# absent, clipcatd computes `$XDG_RUNTIME_DIR/clipcat/grpc.sock` itself via
+# a real environment lookup at startup (NOT a literal string substitution
+# like history_file_path above), so leaving it out is safe by construction.
+# Task 5's multi-display autostart overrides it per-display with
+# --grpc-socket-path, since one clipcatd binds exactly one socket and the
+# native host runs two displays (adr0004).
+enable_http = false
+enable_local_socket = true
+
+[dbus]
+# Not consumed by anything in this repo -- one less service exposed.
+enable = false
+
+[metrics]
+enable = false
+
+[desktop_notification]
+enable = false

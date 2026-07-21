@@ -1,0 +1,149 @@
+# clipcat -- shared-clipboard-history backend (sp016 task 1, dotfiles-egm.1)
+#
+# Replaces copyq (sp014 / dotfiles-92w.1) as ft007's backend: no Qt6/KDE
+# chain on a secrets-adjacent daemon, 96 -> 4 linked libs, private RSS
+# 16 -> 9.9 MiB, measured and validated by poc010. Consumed by qs-clip.sh
+# (task 2), clip-set.sh (task 3), clip-feed.sh (task 4) and the i3
+# autostart/keybind wiring (task 5). copyq/ stays in-tree for one cycle as a
+# flippable rollback -- see copyq/dot.yaml, whose links are removed (not its
+# files) once this swap proves out.
+#
+# ===========================================================================
+# CONTRACT FOR DOWNSTREAM TASKS -- read this before writing a clipcat client
+# ===========================================================================
+#
+# 1. TALK TO THE SERVER WITH `clipcatctl --server-endpoint <sock> <cmd>`,
+#    ALWAYS timeout-wrapped (adr0002). Unlike copyq (env-free, a bare
+#    `copyq <cmd>` just works because there is exactly one socket), clipcat
+#    has no single well-known socket: one clipcatd binds ONE socket, and the
+#    native host runs two live displays (adr0004: :0 and :10). Every client
+#    MUST pass --server-endpoint explicitly for the session it means to
+#    reach; never guess it from an inherited DISPLAY. Task 5 wires up the
+#    actual per-display socket paths in i3/config.d/native.conf and
+#    wsl.conf; this dot.yaml and clipcat.toml only cover the single-daemon
+#    case (used directly by test-clipcat.sh, and by wsl.conf as-is).
+#
+# 2. THE ID CONTRACT (fixed here so tasks 2-4 can build in parallel without
+#    waiting on each other):
+#
+#      clipcatctl list          "<hex-id>: <preview>" lines, newest first,
+#                                preview truncated to preview_length (100,
+#                                clipcatctl's own default -- no clipcatctl
+#                                config is checked in here, so this is the
+#                                as-installed default, not overridden)
+#      clipcatctl get <id>      full entry text, byte-exact
+#      clipcatctl length        item count
+#      clipcatctl insert <data> seed an entry (does NOT re-trigger the
+#                                watcher -- see point 4)
+#
+#    Ids are content hashes, NOT positional indices -- STABLE under
+#    concurrent capture, unlike copyq's row numbers (a real bug source in
+#    two of sp014's test suites: rows shift under the reader). No consumer
+#    may parse, order, or do arithmetic on an id. Listing is therefore N+1
+#    calls (one `list`, one `get` per entry needing full text) -- acceptable
+#    at the 200-entry cap (`max_history` in clipcat.toml); revisit if the
+#    cap rises.
+#
+# 3. MEMORY-ONLY IS A DAEMON-LEVEL GUARANTEE, BAKED INTO THE CHECKED-IN
+#    CONFIG -- NOT LAUNCHER DISCIPLINE.
+#
+#    copyq's guarantee was store_items=false, a per-tab daemon property with
+#    no failure mode. clipcat has no equivalent switch, but
+#    `history_file_path` in clipcat.toml IS the literal string
+#    "$XDG_RUNTIME_DIR/clipcat/history", and clipcatd DOES shell-expand this
+#    specific field at startup -- verified empirically: with that exact
+#    literal string in the config, the daemon's own log reports the fully
+#    resolved path (e.g. "History file path: /run/user/1000/clipcat/history"),
+#    and if $XDG_RUNTIME_DIR is unset clipcatd refuses to start at all,
+#    loudly, on its own: `Error: Could not resolve file path
+#    $XDG_RUNTIME_DIR/clipcat/history, error: error looking key
+#    'XDG_RUNTIME_DIR' up: environment variable not found` (exit 78). No
+#    launcher-side flag or `set -u` wrapper is needed for that failure mode
+#    -- every clipcatd invocation reads this same checked-in file, so there
+#    is no "did the launcher remember the flag" gap the way there would be
+#    if the path lived only on a CLI argument. `clear_history_on_start =
+#    true` is the other half: a daemon that restarts mid-session starts
+#    empty regardless.
+#
+#    Earlier drafts of this file claimed the opposite -- that TOML string
+#    values are never shell-expanded, and therefore every launcher had to
+#    pass `--history-file` under `set -u`. That claim was FALSE, based on a
+#    confounded test (the literal-string failure actually came from
+#    `pid_file`, a field that genuinely does not expand, tested alongside
+#    history_file_path in the same broken config). i3's `exec_always`
+#    (task 5's autostart mechanism) does not run under `set -u`, so that
+#    design would have silently persisted clipboard history to
+#    $XDG_CACHE_HOME on any forgotten flag -- a secrets-on-disk failure mode
+#    this correction removes entirely.
+#
+#    `--history-file` remains available as a CLI override, and task 5 will
+#    likely still use it -- not to make memory-only work (config alone
+#    already guarantees that), but because native.conf runs two clipcatd
+#    processes under the SAME user session (adr0004: :0 and :10 share one
+#    $XDG_RUNTIME_DIR), and both would otherwise resolve the identical
+#    baked-in path and collide on one history file. That is a per-display
+#    disambiguation concern for task 5 to solve, unrelated to this point.
+#    `pid_file` and `local_socket` are left out of clipcat.toml entirely
+#    (not given a literal `$XDG_RUNTIME_DIR/...` string) precisely because
+#    they do NOT get the same expansion treatment -- omitting them lets
+#    clipcatd fall back to its own env-var-driven defaults instead of a
+#    broken literal string.
+#
+# 4. `clipcatctl insert` DOES NOT RE-TRIGGER THE WATCHER (poc010 Q3) -- an
+#    inserted item bypasses `sensitive_mime_types` exactly as `copyq add`
+#    bypassed copyq's automatic commands. clip-feed.sh (task 4) MUST keep
+#    BOTH its own secret gates (TARGETS pre-check, post-read re-check) when
+#    it swaps `copyq add` for `clipcatctl insert`; nothing in this backend
+#    swap makes either gate redundant.
+#
+# 5. Password-manager copies are dropped by `sensitive_mime_types` in
+#    clipcat.toml's `[watcher]` section, matching BOTH the bare
+#    (`x-kde-passwordManagerHint`) and prefixed
+#    (`application/x-kde-passwordManagerHint`) atom spellings -- matching is
+#    EXACT with no prefix normalisation (poc010 Q1), and neither spelling is
+#    verified against a real password-manager emitter on this host (sp015 /
+#    dotfiles-cyg is the actual fix for that gap; this swap buys no security
+#    improvement on its own). test-clipcat.sh confirms that on a match,
+#    clipcatd requests ONLY TARGETS from the owning process and never reads
+#    the payload -- stronger than copyq, which read the payload into a
+#    0600 tmpfile before dropping it.
+#
+# 6. .toml FILES SUPPORT COMMENTS and clipcatd does not rewrite this file in
+#    place (unlike copyq's QSettings .ini files -- see copyq/dot.yaml point
+#    4), so this documentation safely lives inline in clipcat.toml too. It
+#    is duplicated here because dot.yaml is the first file a new task 2/3/4
+#    author is likely to open.
+#
+# WHO STARTS THE SERVER (task 5). Nothing here does -- this dot.yaml only
+# installs clipcat and links its server config. The daemon is autostarted by
+# the i3 platform overlay, one `clipcatd` per live display:
+#
+#   i3/config.d/native.conf   one clipcatd per display (:0, :10 -- adr0004),
+#                             each on its own --grpc-socket-path and its own
+#                             --history-file under that session's
+#                             $XDG_RUNTIME_DIR, plus clip-feed.sh bridging
+#                             :10 -> :0 so one history stays the shared one
+#   i3/config.d/wsl.conf      one clipcatd, single display, no feeder
+#
+# It lives in the overlay rather than the base i3 config for the same reason
+# copyq's did: adr0004 gives the native host two live X servers and the
+# history must have exactly one home per display; the base config only
+# carries the $mod+Shift+v picker keybind, which stays platform-independent.
+#
+# Test: clipcat/test-clipcat.sh (headless, Xvfb; does not touch the live
+# session, the live clipboard, or the real ~/.config/clipcat).
+linux:
+  links:
+    clipcat.toml: ~/.config/clipcat/clipcatd.toml
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -S --needed --noconfirm clipcat xclip
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -S --needed --noconfirm clipcat xclip
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux ARM")}}
+      sudo pacman -S --needed --noconfirm clipcat xclip
+      {{/if}}
+      rotz link clipcat --force
