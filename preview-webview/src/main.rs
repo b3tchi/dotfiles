@@ -105,6 +105,64 @@ fn close_line(cfg: &Config) -> String {
     )
 }
 
+/// The X display number from a DISPLAY value: ":10.0" -> "10", ":0" -> "0".
+/// None when DISPLAY is empty, remote ("host:10"), or otherwise malformed.
+fn display_number(display: &str) -> Option<&str> {
+    let rest = display.strip_prefix(':')?;
+    let num = rest.split('.').next().unwrap_or(rest);
+    if num.is_empty() || !num.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some(num)
+}
+
+/// Reports whether DISPLAY is served by an xorgxrdp virtual Xorg, matched by
+/// finding a running Xorg whose args carry this display's EXACT token (":N")
+/// and mention xrdp. Deliberately per-display: a desktop runs native :0 (real
+/// GPU) alongside xrdp :10, and only the latter must force software GL
+/// (dotfiles-49j). xorg_cmdlines is injected so the match is unit-testable
+/// without /proc.
+fn is_xrdp_display(display: &str, xorg_cmdlines: &[String]) -> bool {
+    let Some(n) = display_number(display) else {
+        return false;
+    };
+    let tok = format!(":{n}");
+    xorg_cmdlines
+        .iter()
+        .any(|c| c.to_lowercase().contains("xrdp") && c.split_whitespace().any(|t| t == tok))
+}
+
+/// Space-joined cmdlines of every running Xorg, read from /proc. Empty on any
+/// read failure — a detection miss degrades to "not xrdp" (no guard), which
+/// is the pre-fix status quo, never worse.
+fn running_xorg_cmdlines() -> Vec<String> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        if let Ok(bytes) = std::fs::read(entry.path().join("cmdline")) {
+            let joined: String = bytes
+                .split(|b| *b == 0)
+                .filter_map(|s| std::str::from_utf8(s).ok())
+                .collect::<Vec<_>>()
+                .join(" ");
+            if joined.contains("Xorg") {
+                out.push(joined);
+            }
+        }
+    }
+    out
+}
+
+/// Set an env var only when the caller has not already set it, so an explicit
+/// override (a manual export, or the wrapper) always wins.
+fn set_env_if_unset(key: &str, val: &str) {
+    if std::env::var_os(key).is_none() {
+        std::env::set_var(key, val);
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let env_port = std::env::var("PREVIEW_PORT").ok();
@@ -192,6 +250,24 @@ fn run_window(cfg: &Config) -> ExitCode {
     // this env var exactly once, at gtk_init() time, so it must be set
     // before gtk::init()/EventLoop::new() below.
     std::env::set_var("GDK_BACKEND", "x11");
+
+    // xorgxrdp is a GPU-less virtual Xorg: forcing hardware GL through mesa
+    // there wedges its x264 encoder (dotfiles-49j; the xrdp-servo-wedges
+    // signature), and there is no hardware GL to lose on a virtual display
+    // anyway. When this DISPLAY is served by xorgxrdp, force software GL and
+    // disable WebKit's accelerated compositing — set before gtk::init()/GL
+    // context creation, alongside GDK_BACKEND, and only if the caller did not
+    // already choose (an explicit override wins). Native :0 (real GPU) is
+    // detected as non-xrdp and keeps hardware GL.
+    let display = std::env::var("DISPLAY").unwrap_or_default();
+    if is_xrdp_display(&display, &running_xorg_cmdlines()) {
+        // Logged (like the lifecycle lines) so a GL choice is never silent:
+        // the guard's presence is only observable in the log, since a runtime
+        // setenv does not show in /proc/<pid>/environ.
+        eprintln!("preview-wv: xorgxrdp display {display} — forcing software GL");
+        set_env_if_unset("LIBGL_ALWAYS_SOFTWARE", "1");
+        set_env_if_unset("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+    }
 
     // On X11/GTK3, WM_CLASS's res_name/res_class default to the process's
     // prgname. Setting it here (before gtk::init()) is what makes `xprop`
@@ -359,5 +435,52 @@ mod tests {
         assert!(line.contains("window 7"), "{line}");
         assert!(line.contains("CloseRequested"), "{line}");
         assert!(line.contains("exiting 0"), "{line}");
+    }
+
+    #[test]
+    fn display_number_parses() {
+        assert_eq!(display_number(":10.0"), Some("10"));
+        assert_eq!(display_number(":0"), Some("0"));
+        assert_eq!(display_number(":100"), Some("100"));
+        assert_eq!(display_number(""), None);
+        assert_eq!(display_number("localhost:10"), None);
+    }
+
+    #[test]
+    fn xrdp_display_detected_by_matching_xorg_cmdline() {
+        let cmds =
+            vec!["/usr/lib/Xorg :10 -auth .Xauthority -config xrdp/xorg.conf -noreset".to_string()];
+        assert!(is_xrdp_display(":10.0", &cmds));
+        assert!(is_xrdp_display(":10", &cmds));
+    }
+
+    #[test]
+    fn native_display_not_flagged_even_when_xrdp_coexists() {
+        // Desktop: native :0 (real GPU) and xrdp :10 on the same host — only
+        // the xrdp one must force software GL.
+        let cmds = vec![
+            "/usr/lib/Xorg :0 vt2 -displayfd 3 -auth /run/x".to_string(),
+            "/usr/lib/Xorg :10 -config xrdp/xorg.conf -noreset".to_string(),
+        ];
+        assert!(
+            !is_xrdp_display(":0", &cmds),
+            ":0 is native, must not force software GL"
+        );
+        assert!(is_xrdp_display(":10", &cmds));
+    }
+
+    #[test]
+    fn no_matching_xorg_is_not_xrdp() {
+        assert!(!is_xrdp_display(":0", &[]));
+        assert!(!is_xrdp_display(
+            "",
+            &["/usr/lib/Xorg :10 xrdp".to_string()]
+        ));
+    }
+
+    #[test]
+    fn display_token_not_confused_by_longer_number() {
+        let cmds = vec!["/usr/lib/Xorg :100 -config xrdp/xorg.conf".to_string()];
+        assert!(!is_xrdp_display(":10", &cmds), ":10 must not match :100");
     }
 }
