@@ -24,6 +24,8 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[ft003|i3-config-layering]]
 - [[ft004|akm-graph]]
 - [[ft005|file-preview-daemon]]
+- [[ft006|region-capture]]
+- [[ft007|shared-clipboard-history]]
 
 ## Architecture Decision Records
 
@@ -33,6 +35,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[adr0002|When to use bash (vs nushell)]]
 - [[adr0003|When to use a compiled helper (Go) instead of nushell]]
 - [[adr0007|preview reverse channel routes server-side daemon-to-daemon, not via browser postMessage relay]]
+- [[adr0010|the clipboard picker publishes to the clipboard, it never synthesizes a paste]]
 
 ### [[cat002|display-platform]]
 
