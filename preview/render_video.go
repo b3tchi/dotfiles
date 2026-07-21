@@ -131,18 +131,46 @@ func renderVideoLive(w http.ResponseWriter, reqPath string) {
 // (sp008 Task 8 edge case: concurrent poster requests -> cache/bound); the
 // cached bytes are reused as long as the file's mtime/size are unchanged.
 type posterEntry struct {
-	mu      sync.Mutex
-	haveGen bool // a generation attempt has completed at least once
-	ok      bool // that attempt succeeded
-	data    []byte
-	modTime time.Time
-	size    int64
+	mu         sync.Mutex
+	haveGen    bool // a generation attempt has completed at least once
+	ok         bool // that attempt succeeded
+	data       []byte
+	modTime    time.Time
+	size       int64
+	lastAccess time.Time // for LRU eviction; guarded by posterCacheMu
 }
 
 var (
 	posterCacheMu sync.Mutex
 	posterCache   = map[string]*posterEntry{}
 )
+
+// posterCacheMaxEntries bounds the poster cache so a long-lived daemon that
+// previews many distinct videos over its lifetime does not grow posterCache
+// without limit (dotfiles-e6o). Eviction is LRU by lastAccess. A var so tests
+// can shrink it. 128 poster JPEGs is a few MB — ample for a personal tree,
+// still a hard ceiling for a large video collection.
+var posterCacheMaxEntries = 128
+
+// evictPosterCacheLocked removes least-recently-accessed entries until the
+// cache is within posterCacheMaxEntries. Caller must hold posterCacheMu.
+// O(n) per evicted entry, which is fine at this cap and frequency (only runs
+// when a new path grows the map past the ceiling). Evicting an entry whose
+// per-file mu is held mid-generation is safe: that goroutine keeps its own
+// reference and completes; only future lookups miss and regenerate.
+func evictPosterCacheLocked() {
+	for len(posterCache) > posterCacheMaxEntries {
+		var oldestKey string
+		var oldest time.Time
+		first := true
+		for k, e := range posterCache {
+			if first || e.lastAccess.Before(oldest) {
+				oldestKey, oldest, first = k, e.lastAccess, false
+			}
+		}
+		delete(posterCache, oldestKey)
+	}
+}
 
 // posterFor returns path's cached poster bytes, (re)generating via ffmpeg
 // only when no valid cache entry exists for the file's current mtime/size.
@@ -152,6 +180,12 @@ func posterFor(path string, fi os.FileInfo) ([]byte, error) {
 	if !ok {
 		e = &posterEntry{}
 		posterCache[path] = e
+	}
+	e.lastAccess = time.Now()
+	if !ok {
+		// The map just grew — bound it. Runs after lastAccess is set so the
+		// entry we just created (newest) is never the one evicted.
+		evictPosterCacheLocked()
 	}
 	posterCacheMu.Unlock()
 

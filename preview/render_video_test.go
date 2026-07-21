@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"time"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -316,5 +317,82 @@ func TestHandleFileFfmpegAbsentReturnsIconFallback(t *testing.T) {
 	}
 	if !bytes.Contains(rec.Body.Bytes(), []byte("no preview")) {
 		t.Errorf("ffmpeg-absent response missing fallback marker: %s", rec.Body.String())
+	}
+}
+
+// resetPosterCache clears the package-level cache so cache tests don't leak
+// into each other (the cache is process-global).
+func resetPosterCache() {
+	posterCacheMu.Lock()
+	posterCache = map[string]*posterEntry{}
+	posterCacheMu.Unlock()
+}
+
+// TestPosterCacheEvictsLRUWhenOverCap proves the dotfiles-e6o fix: the poster
+// cache is bounded, and when it grows past the cap the least-recently-accessed
+// entries are evicted while recent ones survive. Without this a long-lived
+// daemon previewing many distinct videos grew the map without limit.
+func TestPosterCacheEvictsLRUWhenOverCap(t *testing.T) {
+	resetPosterCache()
+	defer resetPosterCache()
+	old := posterCacheMaxEntries
+	posterCacheMaxEntries = 3
+	defer func() { posterCacheMaxEntries = old }()
+
+	base := time.Now()
+	// Seed a,b,c oldest→newer; then d newest, over the cap of 3.
+	posterCacheMu.Lock()
+	for i, k := range []string{"a", "b", "c"} {
+		posterCache[k] = &posterEntry{lastAccess: base.Add(time.Duration(i) * time.Second)}
+	}
+	posterCache["d"] = &posterEntry{lastAccess: base.Add(10 * time.Second)}
+	evictPosterCacheLocked()
+	posterCacheMu.Unlock()
+
+	if got := len(posterCache); got != 3 {
+		t.Fatalf("cache size = %d, want 3 (bounded to cap)", got)
+	}
+	if _, ok := posterCache["a"]; ok {
+		t.Errorf("oldest entry 'a' was not evicted")
+	}
+	for _, k := range []string{"b", "c", "d"} {
+		if _, ok := posterCache[k]; !ok {
+			t.Errorf("recent entry %q was wrongly evicted", k)
+		}
+	}
+}
+
+// TestPosterForBoundsCache proves posterFor itself wires the eviction: with
+// the cache already at cap, requesting a new path keeps the map bounded. The
+// eviction runs before generation, so it holds whether or not ffmpeg exists
+// (the generation for the temp file may fail — that's irrelevant here).
+func TestPosterForBoundsCache(t *testing.T) {
+	resetPosterCache()
+	defer resetPosterCache()
+	old := posterCacheMaxEntries
+	posterCacheMaxEntries = 2
+	defer func() { posterCacheMaxEntries = old }()
+
+	base := time.Now()
+	posterCacheMu.Lock()
+	posterCache["old1"] = &posterEntry{lastAccess: base}
+	posterCache["old2"] = &posterEntry{lastAccess: base.Add(time.Second)}
+	posterCacheMu.Unlock()
+
+	f := filepath.Join(t.TempDir(), "clip.mp4")
+	if err := os.WriteFile(f, []byte("not a real video"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = posterFor(f, fi) // generation may fail; eviction runs first
+
+	posterCacheMu.Lock()
+	n := len(posterCache)
+	posterCacheMu.Unlock()
+	if n > posterCacheMaxEntries {
+		t.Errorf("posterFor left cache at %d entries, want <= %d (unbounded growth)", n, posterCacheMaxEntries)
 	}
 }
