@@ -107,8 +107,17 @@ xsel_of() { # <display> <selection>
 # The socket file alone is not proof: a SIGKILLed Xvfb leaves its socket
 # behind, so a restart would otherwise be declared up before it is.
 start_xvfb() { # <display> <varname-for-pid>
+  local i
+  # Wait for the display number to be FREE before claiming it.  Xvfb refuses
+  # to start on a display whose /tmp/.X<n>-lock still exists, and a previous
+  # run of this same suite takes a moment to drop it — running the suite twice
+  # back-to-back aborted here otherwise (observed: 1 of 3 consecutive runs).
+  for i in $(seq 1 20); do
+    [ -e "/tmp/.X${1#:}-lock" ] || break
+    sleep 0.5
+  done
   "$XVFB" "$1" -screen 0 800x600x24 >"$TMP/xvfb${1#:}.log" 2>&1 &
-  local pid=$! i
+  local pid=$!
   for i in $(seq 1 40); do
     if ! timeout 2 env DISPLAY="$1" xclip -selection clipboard -t TARGETS -o \
          2>&1 >/dev/null | grep -q "Can't open display"; then
@@ -117,7 +126,9 @@ start_xvfb() { # <display> <varname-for-pid>
     fi
     sleep 0.5
   done
-  echo "FATAL: Xvfb $1 did not start; see $TMP/xvfb${1#:}.log" >&2
+  echo "FATAL: Xvfb $1 did not start. Its own output follows; the usual cause" >&2
+  echo "is a stale /tmp/.X${1#:}-lock from an earlier run that had not gone away yet." >&2
+  cat "$TMP/xvfb${1#:}.log" >&2
   exit 1
 }
 
