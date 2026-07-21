@@ -502,14 +502,15 @@ PanelWindow {
                         id: wsText
                         anchors.centerIn: parent
                         text: modelData.name
-                        color: "#fdf6e3"
+                        // Focused/urgent tab bright; other project tabs dimmed.
+                        color: (modelData.focused || modelData.urgent) ? "#fdf6e3" : "#707880"
                         font.family: root.fontFamily
                         font.pixelSize: root.fontSize
                         renderType: root.nativeRender
                     }
 
                     Rectangle {
-                        anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
+                        anchors { top: parent.top; left: parent.left; right: parent.right }
                         height: 3
                         color: modelData.focused                    ? "#16a085"
                              : (modelData.active && !modelData.focused) ? "#454948"
@@ -541,7 +542,7 @@ PanelWindow {
                 }
 
                 Rectangle {
-                    anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
+                    anchors { top: parent.top; left: parent.left; right: parent.right }
                     height: 3
                     color: "#cb4b16"
                 }
@@ -571,7 +572,7 @@ PanelWindow {
                 }
 
                 Rectangle {
-                    anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
+                    anchors { top: parent.top; left: parent.left; right: parent.right }
                     height: 3
                     color: "#cb4b16"
                 }
@@ -641,21 +642,21 @@ PanelWindow {
             spacing: 0
 
             // Stats (hidden during ticker)
-            Text { visible: root.showNet && !root.tickerActive && root.netVal !== ""; text: "NET:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: root.showNet && !root.tickerActive && root.netVal !== ""; text: "NET:"; color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text { visible: root.showNet && !root.tickerActive && root.netVal !== ""; text: root.netVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text { visible: root.showNet && !root.tickerActive && root.netVal !== ""; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
             // CPU hidden when daemon couldn't read /proc/stat (proot/Termux on
             // Android — values masked for unprivileged → cpuVal stays "?").
-            Text { visible: root.showCpu && !root.tickerActive && root.cpuVal !== "?"; text: "CPU:"; color: parseInt(root.cpuVal) >= 90 ? "#cb4b16" : "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: root.showCpu && !root.tickerActive && root.cpuVal !== "?"; text: "CPU:"; color: parseInt(root.cpuVal) >= 90 ? "#cb4b16" : "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text { visible: root.showCpu && !root.tickerActive && root.cpuVal !== "?"; text: root.cpuVal; color: parseInt(root.cpuVal) >= 90 ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text { visible: root.showCpu && !root.tickerActive && root.cpuVal !== "?"; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
-            Text { visible: root.showRam && !root.tickerActive && root.ramVal !== "?"; text: "RAM:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: root.showRam && !root.tickerActive && root.ramVal !== "?"; text: "RAM:"; color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text { visible: root.showRam && !root.tickerActive && root.ramVal !== "?"; text: root.ramVal; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text { visible: root.showRam && !root.tickerActive && root.ramVal !== "?"; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
-            Text { visible: root.showDisk && !root.tickerActive && root.diskVal !== "?"; text: "HDD:"; color: parseInt(root.diskVal) >= 90 ? "#cb4b16" : "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: root.showDisk && !root.tickerActive && root.diskVal !== "?"; text: "HDD:"; color: parseInt(root.diskVal) >= 90 ? "#cb4b16" : "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text { visible: root.showDisk && !root.tickerActive && root.diskVal !== "?"; text: root.diskVal; color: parseInt(root.diskVal) >= 90 ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
             Text { visible: !root.tickerActive && root.volVal !== ""; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
@@ -663,7 +664,7 @@ PanelWindow {
                 visible: !root.tickerActive && root.volVal !== ""
                 width: volLabel.implicitWidth + volValue.implicitWidth
                 height: parent.height
-                Text { id: volLabel; text: (root.volMuted || root.volVal === "0") ? "" : "VOL:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender; anchors.verticalCenter: parent.verticalCenter }
+                Text { id: volLabel; text: (root.volMuted || root.volVal === "0") ? "" : "VOL:"; color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender; anchors.verticalCenter: parent.verticalCenter }
                 Text { id: volValue; anchors.left: volLabel.right; text: (root.volMuted || root.volVal === "0") ? "MUTED" : root.volVal + "%"; color: (root.volMuted || root.volVal === "0") ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender; anchors.verticalCenter: parent.verticalCenter }
                 MouseArea {
                     anchors.fill: parent
@@ -674,9 +675,9 @@ PanelWindow {
             }
 
             Text { visible: !root.tickerActive && root.batVal !== ""; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { visible: !root.tickerActive && root.batVal !== "" && root.batVal !== "100"; text: (root.batStatus === "Charging" ? "CHR:" : "BAT:"); color: "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive && root.batVal !== "" && root.batVal !== "100"; text: (root.batStatus === "Charging" ? "CHR:" : "BAT:"); color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
             Text { visible: !root.tickerActive && root.batVal !== "" && root.batVal !== "100"; text: root.batVal + "%"; color: root.batStatus === "Discharging" && parseInt(root.batVal) <= 20 ? "#cb4b16" : "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-            Text { visible: !root.tickerActive && root.batVal === "100"; text: "CHARGED"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
+            Text { visible: !root.tickerActive && root.batVal === "100"; text: "CHARGED"; color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
             // Keyboard layout indicator (sway only). Click cycles us↔dvorak.
             Text { visible: root.isSway && !root.tickerActive; text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
@@ -684,7 +685,7 @@ PanelWindow {
                 visible: root.isSway && !root.tickerActive
                 width: visible ? kbdLabel.implicitWidth + kbdValue.implicitWidth : 0
                 height: parent.height
-                Text { id: kbdLabel; text: "KBL:"; color: "#16a085"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender; anchors.verticalCenter: parent.verticalCenter }
+                Text { id: kbdLabel; text: "KBL:"; color: "#707880"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender; anchors.verticalCenter: parent.verticalCenter }
                 Text { id: kbdValue; anchors.left: kbdLabel.right; text: root.kbdLayout === "dvorak" ? "DVK" : "QWT"; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender; anchors.verticalCenter: parent.verticalCenter }
                 MouseArea {
                     anchors.fill: parent
