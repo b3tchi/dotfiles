@@ -427,6 +427,9 @@ client.background       $transp
 
 gaps inner 4
 gaps outer 2
+# Narrow the top gap so windows sit closer under the top bar
+# (cancels inner+outer at the top edge; other edges keep 4+2).
+gaps top -6
 # Additionally, you can issue commands with the following syntax. This is useful to bind keys to changing the gap size.
 # gaps inner|outer current|all set|plus|minus <px>
 # gaps inner all set 10

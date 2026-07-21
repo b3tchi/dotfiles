@@ -484,7 +484,7 @@ PanelWindow {
         Row {
             id: leftSide
             visible: root.currentMode === "default"
-            anchors { left: parent.left; top: parent.top; bottom: parent.bottom; leftMargin: 4 }
+            anchors { left: parent.left; top: parent.top; bottom: parent.bottom; leftMargin: 8 }
             spacing: 0
 
             Repeater {
@@ -500,7 +500,9 @@ PanelWindow {
 
                     Text {
                         id: wsText
-                        anchors.centerIn: parent
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.bottom: parent.bottom
+                        anchors.bottomMargin: 1
                         text: modelData.name
                         // Focused/urgent tab bright; other project tabs dimmed.
                         color: (modelData.focused || modelData.urgent) ? "#fdf6e3" : "#707880"
@@ -552,7 +554,7 @@ PanelWindow {
         // Mode hints overlay (whole bar, left-aligned)
         Row {
             visible: root.currentMode !== "default"
-            anchors { left: parent.left; top: parent.top; bottom: parent.bottom; leftMargin: 4 }
+            anchors { left: parent.left; top: parent.top; bottom: parent.bottom; leftMargin: 8 }
             spacing: 0
 
             Rectangle {
@@ -562,7 +564,9 @@ PanelWindow {
 
                 Text {
                     id: modeNameText
-                    anchors.centerIn: parent
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 1
                     text: root.currentMode === "resize" ? "resize"
                           : root.currentMode === "screenshot" ? "screenshot" : "system"
                     color: "#fdf6e3"
@@ -585,7 +589,8 @@ PanelWindow {
                 Row {
                     required property var modelData
                     required property int index
-                    anchors.verticalCenter: parent ? parent.verticalCenter : undefined
+                    anchors.bottom: parent ? parent.bottom : undefined
+                    anchors.bottomMargin: 1
                     Text { text: index > 0 ? "  " : ""; font.pixelSize: root.fontSize; renderType: root.nativeRender }
                     Text { text: modelData.key; color: "#cb4b16"; font.family: root.fontFamily; font.pixelSize: root.fontSize; font.bold: true; renderType: root.nativeRender; Rectangle { anchors.fill: parent; color: "transparent"; z: -1 } }
                     Text { text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
@@ -611,7 +616,7 @@ PanelWindow {
                 font.family: root.fontFamily
                 font.pixelSize: root.fontSize
                 renderType: root.nativeRender
-                y: (parent.height - height) / 2
+                y: parent.height - height - 1
             }
 
             MouseArea {
@@ -638,7 +643,7 @@ PanelWindow {
         Row {
             id: rightSide
             visible: root.currentMode === "default"
-            anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: 4 }
+            anchors { right: parent.right; bottom: parent.bottom; bottomMargin: 1; rightMargin: 8 }
             spacing: 0
 
             // Stats (hidden during ticker)
