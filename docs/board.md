@@ -6,6 +6,9 @@ sections when status flips.
 
 ## idea
 
+- 🔥 hotfix [[sp015|gopass-clipboard-secret-marking]]
+
+
 - [[sp010|d2-router-element-select-postmessage]]
 
 - [[sp007|remote-workstation-hardening]]
@@ -13,6 +16,8 @@ sections when status flips.
 - [[sp003|fix-categories]]
 
 ## spec
+
+- [[sp016|clipcat-backend-swap]]
 
 ## ready
 
