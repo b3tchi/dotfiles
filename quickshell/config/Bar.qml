@@ -557,8 +557,8 @@ PanelWindow {
 
             Rectangle {
                 width: modeNameText.implicitWidth + 14
-                height: 27
-                color: "#152024"
+                height: parent.height
+                color: "transparent"
 
                 Text {
                     id: modeNameText
@@ -587,7 +587,7 @@ PanelWindow {
                     required property int index
                     anchors.verticalCenter: parent ? parent.verticalCenter : undefined
                     Text { text: index > 0 ? "  " : ""; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-                    Text { text: modelData.key; color: "#cb4b16"; font.family: root.fontFamily; font.pixelSize: root.fontSize; font.bold: true; renderType: root.nativeRender; Rectangle { anchors.fill: parent; color: "#152024"; z: -1 } }
+                    Text { text: modelData.key; color: "#cb4b16"; font.family: root.fontFamily; font.pixelSize: root.fontSize; font.bold: true; renderType: root.nativeRender; Rectangle { anchors.fill: parent; color: "transparent"; z: -1 } }
                     Text { text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
                     Text { text: modelData.label; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
                 }
