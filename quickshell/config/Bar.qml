@@ -505,16 +505,8 @@ PanelWindow {
                         anchors.horizontalCenter: parent.horizontalCenter
                         anchors.bottom: parent.bottom
                         anchors.bottomMargin: 1
-                        // Focused tab: first letter green as the focus accent.
-                        // Other tabs: plain name (dimmed via color below).
-                        textFormat: Text.StyledText
-                        text: {
-                            var raw = modelData.name || ""
-                            if (raw.length === 0) return ""
-                            var esc = function(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") }
-                            if (!modelData.focused) return esc(raw)
-                            return '<font color="#16a085">' + esc(raw.charAt(0)) + '</font>' + esc(raw.substring(1))
-                        }
+                        text: modelData.name
+                        // Focused/urgent tab bright; other project tabs dimmed.
                         color: (modelData.focused || modelData.urgent) ? "#fdf6e3" : "#707880"
                         font.family: root.fontFamily
                         font.pixelSize: root.fontSize
@@ -524,7 +516,7 @@ PanelWindow {
 
                     Rectangle {
                         anchors { top: parent.top; left: parent.left; right: parent.right }
-                        height: 3
+                        height: 2
                         color: modelData.focused                    ? "#16a085"
                              : (modelData.active && !modelData.focused) ? "#454948"
                              : "transparent"
