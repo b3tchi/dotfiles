@@ -522,6 +522,14 @@ PanelWindow {
                         renderType: root.nativeRender
                     }
 
+                    Rectangle {
+                        anchors { top: parent.top; left: parent.left; right: parent.right }
+                        height: 3
+                        color: modelData.focused                    ? "#16a085"
+                             : (modelData.active && !modelData.focused) ? "#454948"
+                             : "transparent"
+                    }
+
                     MouseArea {
                         anchors.fill: parent
                         onClicked: I3.dispatch("workspace " + modelData.name)
