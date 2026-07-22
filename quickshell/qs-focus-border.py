@@ -33,7 +33,7 @@ IGNORE_TITLES = {'qs-focus-border', 'qs-focus-dim'}
 # focus may still report the underlying window during the brief window
 # between binding event and overlay grabbing focus, leaving a frame
 # visible around whatever was focused before mod+d / mod+p / mod+tab.
-SUPPRESS_WHEN_PRESENT_TITLES = {'qs-launcher', 'qs-projects', 'qs-switcher'}
+SUPPRESS_WHEN_PRESENT_TITLES = {'qs-launcher', 'qs-projects', 'qs-switcher', 'qs-clip'}
 # i3 modes whose overlay covers the screen (screenshot selector,
 # quickshell/qs-region.py). That overlay is a GDK POPUP window —
 # override-redirect — so i3 emits NO window::new for it; a hide keyed off
