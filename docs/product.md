@@ -16,6 +16,10 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[us008|securely access and work on my workstation remotely with full desktop]]
 - [[us009|selecting a graph node or diagram element in the preview opens its source in the editor]] (draft)
 - [[us010|running akm-graph preview highlights the zettel under the editor cursor without reloading]] >> [[im004]]
+- [[us011|clipboard history captures images and shows thumbnails in the picker]] (draft)
+- [[us012|clip glue rewritten in nushell per the adr0002 boundary]] (draft)
+- [[us013|delete the copyq and clipcat rollback trees after one cycle of daily use]] (draft)
+- [[us014|fresh installs pull the clipboard-history backend via meta-packages]] (draft)
 
 ## Features
 
@@ -36,6 +40,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[adr0003|When to use a compiled helper (Go) instead of nushell]]
 - [[adr0007|preview reverse channel routes server-side daemon-to-daemon, not via browser postMessage relay]]
 - [[adr0010|the clipboard picker publishes to the clipboard, it never synthesizes a paste]]
+- [[adr0011|bespoke clipnotify file store over vendor clipboard managers]]
 
 ### [[cat002|display-platform]]
 
