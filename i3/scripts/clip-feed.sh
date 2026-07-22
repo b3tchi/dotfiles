@@ -1,14 +1,15 @@
 #!/bin/sh
 # clip-feed.sh — one-way clipboard feeder: CLIPBOARD on the xrdp display (:10)
-# into the clipcat history owned by the native session's daemon (:0).
-# [sp014 task 2; backend swapped copyq -> clipcat by sp016 task 4]
+# into the file-store the native session's own clip-store.sh loop writes.
+# [sp014 task 2; backend swapped copyq -> clipcat by sp016 task 4; clipcat ->
+#  bespoke file store by sp016 task 7]
 #
 # adr0004 gives this host two X servers at once: the native session on :0 and
 # the xrdp session on :10.  Each owns its own X selections, so a copy made in
 # the xrdp session is invisible to the native one.  The picker lives on :0 and
-# reads the clipcat daemon serving that session; this daemon watches :10 and
-# pushes what is copied there into that history, giving one shared history
-# across both.
+# reads the store clip-store.sh's :0 loop maintains; this feeder watches :10
+# and writes what is copied there into that SAME store directory, giving one
+# shared history across both displays.
 #
 # Direction is deliberately one-way.  :0 -> :10 is not needed (the picker
 # pastes onto the active display, clip-paste.sh) and a two-way feeder would
@@ -18,71 +19,75 @@
 # Design constraints (sp014 "Anti-patterns"; the clip-sync.sh mould):
 #
 #  * Never trust the inherited DISPLAY.  Every X call carries an explicit
-#    DISPLAY= naming the display it means, so the daemon behaves identically
+#    DISPLAY= naming the display it means, so the feeder behaves identically
 #    started from an i3 autostart, a tmux pane, or a login shell.
-#  * Never guess the destination clipcat socket either.  One clipcatd binds
-#    exactly one socket and this host runs two of them (clipcat/dot.yaml
-#    point 1), so the DST daemon is named by an explicit --server-endpoint
-#    path, never derived from a DISPLAY.
+#  * Never guess the destination store directory either.  It is named by an
+#    explicit CLIP_FEED_DST display, never derived from CLIP_FEED_SRC or an
+#    inherited DISPLAY — this host runs two X servers and the wrong guess
+#    would feed nowhere anyone reads, or (worse) the xrdp session's own store.
 #  * Every xclip call is wrapped in `timeout`.  A selection owner can hang (a
 #    dead RDP client, an image payload) and a bare `xclip -o` blocks forever —
 #    one stuck read wedged the whole clip-sync.sh loop until it was killed.
-#    Every clipcatctl call is wrapped for the same reason (adr0002): a wedged
-#    daemon must not wedge the feeder.
 #  * History is fed WITHOUT touching any selection the user can see: the
 #    feeder must not steal the native CLIPBOARD out from under whoever is
-#    working on :0.  Under copyq that was `copyq add` (never `copyq copy`).
-#    Under clipcat it is `clipcatctl load -k secondary` — see BACKEND below,
-#    because the obvious call is a trap.
+#    working on :0.  Under copyq that was `copyq add` (never `copyq copy`);
+#    under clipcat it took a non-obvious flag (`-k secondary`) to avoid a trap
+#    — see WRITE below.  Writing a store file structurally cannot own a
+#    selection at all, so this property no longer depends on picking the
+#    right flag; there is no flag to pick.
 #
-# ---------------------------------------------------------------- BACKEND ---
-# Two measured facts about clipcat 0.25.0 shaped the feed call.  Both were
-# verified empirically against the shipped clipcat/clipcat.toml; neither is
-# what sp016 / clipcat/dot.yaml assumed when they said "swap `copyq add -`
-# for `clipcatctl insert`".
+# ------------------------------------------------------------------ WRITE ---
+# The destination is `$XDG_RUNTIME_DIR/clip-store/<CLIP_FEED_DST>/` — the
+# EXACT directory clip-store.sh's own loop for that display writes into (see
+# that file for the store contract in full).  This feeder is a second writer
+# into the same directory, so the write path matches clip-store.sh's shape
+# deliberately, not by convention:
 #
-# 1. `clipcatctl insert <DATA>` takes the payload as a COMMAND-LINE ARGUMENT.
-#    Linux caps a single argv string at MAX_ARG_STRLEN (128 KiB), so a 200 KB
-#    clip fails at exec with "Argument list too long" — measured.  The feeder
-#    has to carry whatever the user copied, and multi-MB clips are ordinary
-#    (clipcat/test-clipcat.sh itself ships a 3 MB fixture).  `clipcatctl load
-#    -f <file>` performs the same insert reading from a file instead: 3 MB
-#    verified fine.  It also keeps clipboard content out of /proc/<pid>/cmdline
-#    on a path that by construction handles secrets.
+#  * Atomic publish is `ln`, not `mv`: the payload goes to a `.tmp` file
+#    INSIDE the destination store dir and is link(2)ed into its final
+#    NNNNNN.clip name.  `ln` FAILS on an existing name rather than clobbering
+#    it, so a seq raced by clip-store.sh's own loop on that display (a local
+#    capture landing at the same instant) costs this feeder a retry, not a
+#    corrupted or lost entry — see concurrent-capture-seq-no-clobber in the
+#    test suite.  The `.tmp` name (`.feed.wip.tmp`) is deliberately distinct
+#    from clip-store.sh's own `.wip.tmp` so the two writers never touch the
+#    same work file.
+#  * Dedup on the write is against the store's OWN current newest entry —
+#    the same comparison clip-store.sh's loop makes — not a private cache, so
+#    a fed copy identical to whatever the native session's OWN loop most
+#    recently captured is not double-stored either.
+#  * The destination dir is created (and re-created if removed mid-session)
+#    on every feed attempt, exactly as clip-store.sh's handle_event does —
+#    "destination store absent" is not a special case, just an empty
+#    directory that mkdir -p fixes.
+#  * CLIP_FEED_DST_CAP prunes the destination the same way clip-store.sh's
+#    own CLIP_STORE_CAP does, so a feeder running alone (the native loop
+#    idle) cannot grow that store unbounded either.
 #
-# 2. `insert`/`load` with the DEFAULT `-k clipboard` DOES NOT merely seed the
-#    history — it makes the DST daemon TAKE OWNERSHIP OF THE DST X CLIPBOARD.
-#    Measured: the X CLIPBOARD on the daemon's display changed to the inserted
-#    text the moment the call returned.  That is exactly the "steal the native
-#    clipboard" behaviour `copyq add` was chosen over `copyq copy` to avoid,
-#    and it would mean every copy made in the xrdp session silently yanked the
-#    native session's clipboard.  (poc010 Q3 still holds — the insert does not
-#    re-trigger the WATCHER, so nothing is double-recorded.  It asserts the X
-#    selection, which is a different thing, and was missed.)
+# No selection is ever asserted on CLIP_FEED_DST: nothing in this file runs
+# an X call against it, targeted or otherwise.  The old backend's
+# no-clipboard-stealing property (Task 4's `-k secondary` finding) is
+# therefore structural now, not a flag choice — see dst-selection-untouched
+# in the test suite, which still asserts it behaviourally.
 #
-#    `-k secondary` is the fix: the clip is recorded in history, `list` and
-#    `get` return it byte-exact like any other entry, and CLIPBOARD and
-#    PRIMARY are both left untouched — measured.  This works because
-#    clipcat.toml sets `enable_secondary = false` (and `enable_primary =
-#    false`) in [watcher], so the daemon records the clip but never asserts
-#    ownership of that selection.  THAT SETTING IS LOAD-BEARING HERE: turning
-#    `enable_secondary = true` on would give this call back the stealing
-#    behaviour.  test-clip-feed.sh asserts the config setting and asserts the
-#    DST clipboard is untouched after a feed, with a mutation control showing
-#    `-k clipboard` really does steal it.
+# REMOVED: CLIP_FEED_DST_SOCKET, the clipcatd gRPC socket from the pre-pivot
+# backend (sp016 task 4).  There is no daemon and no socket any more.  Setting
+# this variable is refused loudly (exit 78), not silently ignored — see the
+# migration check below, before the single-instance lock is even taken.
 #
-# SECURITY — password-manager copies.  clipcat's own secret filter
-# (`sensitive_mime_types` in clipcat.toml) is a WATCHER-side rule: it only
-# fires on clipboard changes the DST daemon observes for itself.  Items
-# arriving through insert/load bypass the watcher entirely (poc010 Q3), so a
-# KeePassXC copy made on :10 would launder straight past that filter into
-# history if this daemon just forwarded text.  This is the same hole `copyq
-# add` had past copyq's automatic commands — the backend swap changed nothing
-# about it.  That is why the TARGETS list is inspected FIRST and a selection
-# advertising application/x-kde-passwordManagerHint is skipped without its
-# payload ever being read.  Do not move that check below the read, and do not
-# remove it.  On this path the feeder's own two gates are the ONLY filter
-# there is.
+# SECURITY — password-manager copies.  Whatever secret filter the
+# destination's OWN capture path applies (clip-store.sh's TARGETS gate, or
+# clipcat's `sensitive_mime_types` before it) is a WATCHER-side rule: it only
+# fires on clipboard changes that path observes for itself.  A file this
+# feeder writes directly bypasses that watcher entirely, so a KeePassXC copy
+# made on :10 would launder straight past the destination's own filter into
+# the shared store if this feeder just forwarded text.  This is the same hole
+# every backend swap on this path has had past its own automatic filters —
+# the backend changed, the exposure didn't.  That is why the TARGETS list is
+# inspected FIRST and a selection advertising a password-manager hint is
+# skipped without its payload ever being read.  Do not move that check below
+# the read, and do not remove it.  On this path the feeder's own two gates
+# are the ONLY filter there is.
 #
 # The gate is checked TWICE, and the second check is not redundant.  TARGETS
 # and the payload are separate X protocol requests — measured 10-13ms apart —
@@ -94,10 +99,13 @@
 # advertises the hint, so the item is dropped.  (dotfiles-l6s.)
 #
 # RESIDUAL EXPOSURE, stated plainly rather than papered over:
-#  * The secret payload does reach "$NEW", a mktemp file under /tmp, before it
-#    is dropped.  Mode 0600, overwritten next poll, removed on exit — but it
-#    is on disk for one poll.  Stopping that would need an atomic
-#    TARGETS+payload fetch, which X does not provide.
+#  * The secret payload does reach "$NEW", a scratch file under
+#    $XDG_RUNTIME_DIR/clip-feed/ (tmpfs, mode 0600), before it is dropped —
+#    one poll's lifetime, overwritten next tick, removed on exit.  This used
+#    to be a mktemp file under /tmp; requiring XDG_RUNTIME_DIR unconditionally
+#    (this task) closed that — nothing this file creates lives outside
+#    $XDG_RUNTIME_DIR any more.  Stopping the exposure entirely would need an
+#    atomic TARGETS+payload fetch, which X does not provide.
 #  * The re-check narrows the window, it does not eliminate it.  A THIRD
 #    owner taking the clipboard between the payload read and the re-check
 #    would present hint-free targets and the secret would be fed.  That needs
@@ -106,42 +114,51 @@
 #  * Only KDE/KeePassXC-style hint publishers are recognised at all.  A
 #    password manager that advertises no hint is indistinguishable from a
 #    normal copy at either check.  (dotfiles-cyg / sp015 is the actual fix;
-#    the clipcat swap bought no security improvement here.)
+#    no backend swap on this path has bought any security improvement here.)
 #
 # test-clip-feed.sh asserts the drop, the raced drop, and — via patched copies
 # of this file — that BOTH checks are load-bearing.
 #
 # usage: i3/scripts/clip-feed.sh          (daemon; exits 0 if already running)
 # env:   CLIP_FEED_SRC=:10          display watched for copies
-#        CLIP_FEED_DST_SOCKET=...   clipcatd gRPC socket receiving them;
-#                                   defaults to $XDG_RUNTIME_DIR/clipcat/
-#                                   grpc.sock (clipcatd's own default when it
-#                                   is started without --grpc-socket-path)
+#        CLIP_FEED_DST=:0           display naming the destination store dir
+#                                   ($XDG_RUNTIME_DIR/clip-store/<CLIP_FEED_DST>/),
+#                                   the same directory clip-store.sh's own
+#                                   loop for that display writes into
+#        CLIP_FEED_DST_CAP=100      destination entries kept (oldest pruned)
 #        CLIP_FEED_POLL=0.5  seconds between polls while SRC is up
 #        CLIP_FEED_IDLE=5    seconds between polls while SRC is absent
-#        CLIP_FEED_TIMEOUT=1 seconds before a single xclip/clipcatctl call is
+#        CLIP_FEED_TIMEOUT=1 seconds before a single xclip call is
 #                            abandoned
 #        CLIP_FEED_LOCK=...  single-instance lock file
 set -u
 
 SRC="${CLIP_FEED_SRC:-:10}"
+DST="${CLIP_FEED_DST:-:0}"
+CAP="${CLIP_FEED_DST_CAP:-100}"
 POLL="${CLIP_FEED_POLL:-0.5}"
 IDLE="${CLIP_FEED_IDLE:-5}"
 T="${CLIP_FEED_TIMEOUT:-1}"
 LOCK="${CLIP_FEED_LOCK:-/tmp/clip-feed.$(id -u).lock}"
 
-# The DST daemon is named, never guessed.  Refusing to start beats silently
-# feeding the wrong session's history (or none at all), and mirrors clipcatd's
-# own loud refusal — exit 78, EX_CONFIG — when it cannot resolve
-# $XDG_RUNTIME_DIR for its history path.
+# Daemon-era plumbing, refused loudly rather than silently ignored (sp016
+# task 7 edge case).  A feeder that quietly dropped this would look like it
+# started fine while feeding nothing anyone can find.
 if [ -n "${CLIP_FEED_DST_SOCKET:-}" ]; then
-  SOCK="$CLIP_FEED_DST_SOCKET"
-elif [ -n "${XDG_RUNTIME_DIR:-}" ]; then
-  SOCK="$XDG_RUNTIME_DIR/clipcat/grpc.sock"
-else
-  echo "clip-feed.sh: no destination socket: set CLIP_FEED_DST_SOCKET or XDG_RUNTIME_DIR" >&2
+  echo "clip-feed.sh: CLIP_FEED_DST_SOCKET is set but no longer used -- the destination is a file store now, not a clipcatd socket (sp016 task 7). Unset it and set CLIP_FEED_DST=<display> instead (default :0); see i3/scripts/clip-store.sh for the store contract." >&2
   exit 78
 fi
+
+# The destination is named, never guessed -- mirrors clipcatd's own loud
+# refusal (and clip-store.sh's) when $XDG_RUNTIME_DIR cannot be resolved:
+# exit 78, EX_CONFIG.  No persistent-path fallback exists to fall back to.
+if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
+  echo "clip-feed.sh: XDG_RUNTIME_DIR is unset; refusing to fall back to a persistent path" >&2
+  exit 78
+fi
+
+ROOT="$XDG_RUNTIME_DIR/clip-store"
+STORE="$ROOT/$DST"
 
 # Single-instance guard.  i3 autostarts re-run on config reload, and a second
 # feeder would double every captured item.  flock releases the lock when the
@@ -156,6 +173,15 @@ flock -n 9 || exit 0
 # restarted within one poll of the old one being killed (i3 config reload)
 # would then see the lock held, decide it was the duplicate, and exit,
 # leaving no feeder running at all.  Observed; do not drop the `9>&-`.
+
+# Scratch files live under $XDG_RUNTIME_DIR too now (0700, tmpfs) rather than
+# a bare /tmp mktemp -- see RESIDUAL EXPOSURE above.  TMPDIR steers mktemp
+# here without changing any of its call sites below.
+SCRATCH="$XDG_RUNTIME_DIR/clip-feed"
+umask 077
+mkdir -p "$SCRATCH" || exit 1
+chmod 700 "$SCRATCH"
+TMPDIR="$SCRATCH"; export TMPDIR
 
 NEW="$(mktemp)"; LAST="$(mktemp)"; TGT="$(mktemp)"; ERR="$(mktemp)"
 trap 'rm -f "$NEW" "$LAST" "$TGT" "$ERR"' EXIT
@@ -192,25 +218,79 @@ src_gone() { grep -q "Can't open display" "$ERR"; }
 #    image-only owner, and a mixed owner (image plus a text/plain URL, as
 #    browsers publish) advertises a text target and should feed the URL.
 #  * An owner holding an EMPTY string succeeds, and an empty file handed to
-#    the backend appends an empty history row — so the `-s` test is what keeps
-#    blank rows out.  (clipcat's own `filter_text_min_length = 1` would also
-#    catch this one, but that is the WATCHER's filter and this path bypasses
-#    the watcher; the `-s` check is what actually holds here.)
+#    the destination store would create a blank entry — so the `-s` test is
+#    what keeps blank entries out (the store loop's own capture path applies
+#    no minimum-length filter of its own either; the `-s` check here is what
+#    actually holds).
 read_src() {
   timeout "$T" env DISPLAY="$SRC" xclip -selection clipboard -o \
     > "$NEW" 2>/dev/null 9>&- && [ -s "$NEW" ]
 }
 
-# Append to the DST clipcat history without touching any DST selection.
-#
-# `load -f` rather than `insert <data>`: the payload would otherwise ride on
-# argv and die at 128 KiB.  `-k secondary` rather than the default
-# `-k clipboard`: the default makes the daemon assert ownership of the DST X
-# CLIPBOARD, i.e. steals it from the native session.  Both measured — see
-# BACKEND in the header before changing either flag.
+# Path of the newest entry in the destination store (highest seq); empty when
+# the store is empty or absent.  Same construction as clip-store.sh's own
+# newest_entry(): pathname expansion is sorted, so the last match is newest.
+dst_newest() {
+  ne=""
+  for f in "$STORE"/[0-9][0-9][0-9][0-9][0-9][0-9].clip; do
+    [ -e "$f" ] && ne="$f"
+  done
+  printf '%s' "$ne"
+}
+
+# Enforce the cap on the destination store: delete oldest entries until at
+# most CLIP_FEED_DST_CAP remain.  Same shape as clip-store.sh's prune(), so a
+# feeder running with the native loop idle cannot grow that store unbounded.
+prune_dst() {
+  while :; do
+    count=0; oldest=""
+    for f in "$STORE"/[0-9][0-9][0-9][0-9][0-9][0-9].clip; do
+      [ -e "$f" ] || continue
+      count=$((count + 1))
+      [ -n "$oldest" ] || oldest="$f"
+    done
+    [ "$count" -le "$CAP" ] && break
+    rm -f "$oldest"
+  done
+}
+
+# Write "$NEW" into the destination store as the next seq entry -- the SAME
+# atomic write clip-store.sh's loop performs (see WRITE in the header):
+# `.tmp` inside the store dir, `ln`ed into its final name, retried on a
+# collision.  Dedup is against the store's own current newest entry, not a
+# private cache -- so a fed copy identical to whatever the native session's
+# OWN loop most recently captured is skipped too, the same as clip-store.sh
+# would skip it for itself.  Never asserts any DST X selection: this is a
+# file write, nothing here opens a DISPLAY= call against $DST.
 feed_dst() {
-  timeout "$T" clipcatctl --server-endpoint "$SOCK" load -k secondary \
-    -f "$NEW" >/dev/null 2>&1 9>&-
+  mkdir -p "$STORE" 2>/dev/null || return 1
+  chmod 700 "$ROOT" "$STORE" 2>/dev/null
+
+  last="$(dst_newest)"
+  if [ -n "$last" ] && cmp -s "$NEW" "$last"; then
+    return 0
+  fi
+
+  wip="$STORE/.feed.wip.tmp"
+  cp "$NEW" "$wip" 2>/dev/null || return 1
+
+  if [ -n "$last" ]; then
+    b="${last##*/}"; b="${b%.clip}"
+    n="${b#"${b%%[!0]*}"}"; [ -n "$n" ] || n=0
+    n=$((n + 1))
+  else
+    n=1
+  fi
+  tries=0
+  while [ "$tries" -lt 100 ]; do
+    if ln "$wip" "$STORE/$(printf '%06d' "$n").clip" 2>/dev/null; then
+      rm -f "$wip"
+      return 0
+    fi
+    n=$((n + 1)); tries=$((tries + 1))
+  done
+  rm -f "$wip"
+  return 1
 }
 
 # `sleep` is an external command too, so it also has to drop the lock fd.
@@ -244,7 +324,10 @@ while :; do
     if ! targets || grep -qFx 'application/x-kde-passwordManagerHint' "$TGT"; then
       nap "$POLL"; continue
     fi
-    feed_dst && cp "$NEW" "$LAST"
+    if feed_dst; then
+      cp "$NEW" "$LAST"
+      prune_dst
+    fi
   fi
 
   nap "$POLL"
