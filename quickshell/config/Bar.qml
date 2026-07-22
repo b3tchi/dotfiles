@@ -563,7 +563,8 @@ PanelWindow {
             Rectangle {
                 width: modeNameText.implicitWidth + 14
                 height: parent.height
-                color: "transparent"
+                // Same highlight as the focused tab / mod+d launcher selection.
+                color: "#152024"
 
                 Text {
                     id: modeNameText
@@ -575,6 +576,7 @@ PanelWindow {
                     color: "#fdf6e3"
                     font.family: root.fontFamily
                     font.pixelSize: root.fontSize
+                    font.bold: true
                     renderType: root.nativeRender
                 }
 
