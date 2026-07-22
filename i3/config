@@ -100,7 +100,7 @@ bindsym $mod+Shift+d --release exec --no-startup-id $qsbarenv ~/.dotfiles/quicks
 # session itself from the live quickshell instances, so no DISPLAY is passed
 # here — and nothing on this line depends on an overlay var, which would be
 # invisible across the include boundary anyway.
-bindsym $mod+Shift+v exec --no-startup-id ~/.dotfiles/quickshell/qs-clip.sh toggle
+bindsym $mod+v exec --no-startup-id ~/.dotfiles/quickshell/qs-clip.sh toggle
 bindsym Print exec --no-startup-id i3-scrot
 bindsym $mod+Print --release exec --no-startup-id i3-scrot -w
 bindsym $mod+Shift+Print --release exec --no-startup-id i3-scrot -s

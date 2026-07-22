@@ -437,7 +437,7 @@ assert_eq "wsl tree parses clean" "" "$ERR"
 
 # ================================================================ [keybind] ==
 #
-# "Is $mod+Shift+v bound to the picker?" is asked of i3's parser, not of grep.
+# "Is $mod+v bound to the picker?" is asked of i3's parser, not of grep.
 # A probe binding for the same combo is appended to the overlay; if the base
 # config really binds that combo, i3 must call the probe a duplicate.  The
 # negative control uses a combo nothing binds, and must NOT produce one — that
@@ -455,17 +455,17 @@ probe_dup() { # <fake-home> <overlay-basename> <combo>  -> "dup" | "nodup"
   fi
 }
 
-scenario "keybind: i3 sees \$mod+Shift+v as already bound (native)"
-assert_eq "probe on \$mod+Shift+v is a duplicate" \
-  "dup" "$(probe_dup "$H_NATIVE" native.conf '$mod+Shift+v')"
+scenario "keybind: i3 sees \$mod+v as already bound (native)"
+assert_eq "probe on \$mod+v is a duplicate" \
+  "dup" "$(probe_dup "$H_NATIVE" native.conf '$mod+v')"
 
 scenario "keybind: negative control — an unbound combo is not a duplicate"
 assert_eq "probe on \$mod+Shift+F12 is not a duplicate" \
   "nodup" "$(probe_dup "$H_NATIVE" native.conf '$mod+Shift+F12')"
 
-scenario "keybind: i3 sees \$mod+Shift+v as already bound (wsl)"
-assert_eq "probe on \$mod+Shift+v is a duplicate" \
-  "dup" "$(probe_dup "$H_WSL" wsl.conf '$mod+Shift+v')"
+scenario "keybind: i3 sees \$mod+v as already bound (wsl)"
+assert_eq "probe on \$mod+v is a duplicate" \
+  "dup" "$(probe_dup "$H_WSL" wsl.conf '$mod+v')"
 
 # Restore the two trees the probes scribbled on.
 H_NATIVE="$(mk_home native "$NATIVE")"
@@ -481,17 +481,17 @@ CLIP_BIND="$(lines_matching "$BASE" '^bindsym .*qs-clip\.sh')"
 CLIP_KEY="$(printf '%s\n' "$CLIP_BIND" | awk '{print $2}')"
 CLIP_CMD="$(printf '%s\n' "$CLIP_BIND" | sed -e 's/^bindsym [^ ]* exec //' -e 's/--no-startup-id //')"
 
-scenario "keybind-line-unchanged: the whole bindsym line is byte-identical to sp014's"
-# The backend swap must not touch the picker keybind — that is a success
-# criterion, and it is proven by BYTE comparison against the shipped sp014
-# line, not by inspecting fragments of it.
-printf '%s' 'bindsym $mod+Shift+v exec --no-startup-id ~/.dotfiles/quickshell/qs-clip.sh toggle' \
+scenario "keybind: the whole bindsym line is byte-identical to the golden"
+# The picker keybind ($mod+v as of the post-sp016 rebind) is proven by BYTE
+# comparison against the golden line, not by inspecting fragments of it. (Was
+# $mod+Shift+v through sp014/sp016; user-rebound to $mod+v afterward.)
+printf '%s' 'bindsym $mod+v exec --no-startup-id ~/.dotfiles/quickshell/qs-clip.sh toggle' \
   > "$TMP/keybind.golden"
 printf '%s' "$CLIP_BIND" > "$TMP/keybind.actual"
 if cmp -s "$TMP/keybind.golden" "$TMP/keybind.actual"; then
-  pass "the \$mod+Shift+v line has no diff"
+  pass "the \$mod+v line has no diff"
 else
-  fail "the \$mod+Shift+v line has no diff" \
+  fail "the \$mod+v line has no diff" \
     "$(cat "$TMP/keybind.golden")" "$CLIP_BIND"
 fi
 
@@ -811,7 +811,7 @@ mutate_and_recheck "drop-keybind" "$BASE" '/^bindsym .*qs-clip\.sh/d' \
   "-1" '^bindsym .*qs-clip\.sh' "0"
 
 scenario "mutation: a one-byte change to the keybind line must fail the byte comparison"
-sed 's/^bindsym $mod+Shift+v exec/bindsym $mod+Shift+b exec/' "$BASE" > "$MUT/config.keymut"
+sed 's/^bindsym $mod+v exec/bindsym $mod+Shift+b exec/' "$BASE" > "$MUT/config.keymut"
 if cmp -s "$BASE" "$MUT/config.keymut"; then
   fail "keybind byte-mutation applied" "bytes differ" "sed matched nothing"
 else
