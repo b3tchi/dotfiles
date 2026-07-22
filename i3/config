@@ -254,6 +254,7 @@ for_window [all] border normal 4
 for_window [title="qs-launcher"] floating enable, border none, move position center
 for_window [title="qs-switcher"] floating enable, border none, move position center
 for_window [title="qs-projects"] floating enable, border none, move position center
+for_window [title="qs-clip"] floating enable, border none, move position center
 # preview-webview client host (sp013): the chrome-less wry window
 # (WM_CLASS preview-wv) tiles/docks into the layout by design — no
 # floating rule; it sits beside the editor like a split.
