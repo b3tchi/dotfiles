@@ -13,6 +13,10 @@ linux:
     # sp014 cross-display clipboard feeder — autostarted by config.d/native.conf
     # (linked on every platform; only the native overlay execs it)
     scripts/clip-feed.sh: ~/.i3/scripts/clip-feed.sh
+    # sp016 file-store clipboard backend — one loop per display, autostarted
+    # by config.d/native.conf (:0 and :10) and config.d/wsl.conf (:10).
+    # clipnotify, its one non-base dependency, is installed by clip-store/.
+    scripts/clip-store.sh: ~/.i3/scripts/clip-store.sh
     picom.conf: ~/.config/picom.conf
     # Platform overlay (ft003 i3-config-layering): exactly one config.d/*
     # eval path check, not env.WSL_DISTRO_NAME — that var is unset in

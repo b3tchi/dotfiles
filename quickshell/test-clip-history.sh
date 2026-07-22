@@ -286,8 +286,29 @@ write_entry 1 "alpha"; write_entry 2 "bravo"; write_entry 3 "charlie"
 clear_log; stub_mode log
 qsclip set 000002.clip; rc=$?
 assert_eq "exits 0 (stub's default)" "0" "$rc"
-assert_eq "clip-set.sh received the SELECTED id -- not the newest (000003.clip), not the first-seeded (000001.clip), not a position (0/1/2)" \
-  "000002.clip" "$(logged)"
+# Two argv fields since sp016 task 5 (dotfiles-egm.5): the id, then the
+# SOURCE DISPLAY -- the session this process runs under, passed explicitly
+# because clip-set.sh refuses a bare call rather than fall back to its own
+# inherited DISPLAY (the store is per-display; see clip-set.sh's header).
+assert_eq "clip-set.sh received the SELECTED id -- not the newest (000003.clip), not the first-seeded (000001.clip), not a position (0/1/2) -- plus the session display as \$2" \
+  "000002.clip $DPY" "$(logged)"
+
+# ---- set-forwards-the-session-display ---------------------------------------
+# The display argument is the CALLER'S session, not a constant: the same set
+# against a second session's store must forward THAT display. This is what
+# keeps a :10 picker's pick out of :0's store (two stores routinely hold the
+# same id for unrelated entries).
+
+scenario "set-forwards-the-session-display"
+STORE2="$RUN/clip-store/$DPY2"
+rm -rf "$STORE2"; mkdir -p "$STORE2"; chmod 700 "$STORE2"
+printf '%s' "other-session" > "$STORE2/000007.clip"
+clear_log; stub_mode log
+env DISPLAY="$DPY2" XDG_RUNTIME_DIR="$RUN" QS_CLIP_SET="$STUB" sh "$QS_CLIP" set 000007.clip; rc=$?
+assert_eq "exits 0" "0" "$rc"
+assert_eq "the second argv field follows the session, not a hardcoded display" \
+  "000007.clip $DPY2" "$(logged)"
+rm -rf "$STORE2"
 
 # ---- stale-id-exits-1-publishes-nothing -------------------------------------
 
@@ -481,12 +502,10 @@ close_picker "$DPY2"
 # single-digit-losing case that still resolves to *some* existing file).
 # Moving off row 0 first and asserting the FULL filename closes that gap.
 #
-# qs-clip.sh's cmd_set currently execs `clip-set.sh <id>` bare -- it does not
-# yet forward the source display (see clip-set.sh's own header comment:
-# wiring that through is sp016 task 5's job, dotfiles-egm.5, not this one's).
-# So this scenario asserts on exactly what qs-clip.sh forwards TODAY: one
-# argument, the full id. When egm.5 lands the display argument, this
-# scenario's argv assertion should grow a second field to match.
+# Since sp016 task 5 (dotfiles-egm.5), qs-clip.sh's cmd_set forwards TWO
+# argv fields: the full id, then the session's display (clip-set.sh refuses
+# a bare call -- see its header). The assertion below covers both: a
+# truncated id AND a missing/wrong display both fail it.
 
 scenario "picker: keyboard-driven select of a NON-newest entry publishes its FULL id, untruncated (dotfiles-g5b)"
 close_picker "$DPY"
@@ -509,10 +528,98 @@ send "$DPY" Down
 send "$DPY" Return
 
 gone_on "$DPY"   # exit 0 from the stub closes the picker (setProc.onExited)
-assert_eq "clip-set.sh (stub) received the SELECTED entry's FULL untruncated id -- not a parseInt-truncated number ('2'), not the newest id (000003.clip), not a bare list position (0/1)" \
-  "000002.clip" "$(logged)"
+assert_eq "clip-set.sh (stub) received the SELECTED entry's FULL untruncated id -- not a parseInt-truncated number ('2'), not the newest id (000003.clip), not a bare list position (0/1) -- plus the session display" \
+  "000002.clip $DPY" "$(logged)"
 
 close_picker "$DPY"
+
+# ============================================================================
+# PHASE 1.6 — FULL-CHAIN end-to-end publish: real picker -> real qs-clip.sh
+#             -> REAL clip-set.sh -> the test display's actual selections
+# ============================================================================
+#
+# PHASE 1.5 proves the picker forwards the right id+display TO A STUB. This
+# phase removes the stub: the same keyboard-driven pick runs the real
+# i3/scripts/clip-set.sh, and the assertion is the X server's own state --
+# CLIPBOARD and PRIMARY on the test display serve the selected entry back
+# byte-exact (real newline, tab, literal two-char \n, unicode -- the
+# dotfiles-i9i class). This is the epic's last coverage gap (egm.2 + g5b
+# audits): every layer of ft007's chain in one scenario, driven from the
+# keyboard.
+#
+# Containment: clip-set.sh fans out to every display whose socket appears in
+# CLIP_SET_SOCKET_DIR (its test seam, production never sets it). The dir
+# handed in here holds ONE symlink -- this suite's own Xvfb -- so the live
+# session's displays structurally cannot receive the publish. XDG_RUNTIME_DIR
+# is already this suite's isolated $RUN, so the store read is isolated too.
+
+command -v timeout >/dev/null 2>&1 || { echo "FATAL: timeout not found" >&2; exit 1; }
+command -v xclip   >/dev/null 2>&1 || { echo "FATAL: xclip not found (PHASE 1.6 reads selections back)" >&2; exit 1; }
+
+CLIP_SET_REAL="$SCRIPT_DIR/../i3/scripts/clip-set.sh"
+[ -r "$CLIP_SET_REAL" ] || { echo "FATAL: $CLIP_SET_REAL not readable" >&2; exit 1; }
+
+scenario "e2e: keyboard-driven pick publishes the entry byte-exact onto the test display's selections (real clip-set.sh, no stub)"
+
+# The picker instance on $DPY is restarted WITHOUT the stub: QS_CLIP_SET is
+# left unset so qs-clip.sh execs its production default -- ../i3/scripts/
+# clip-set.sh relative to its own location, i.e. THIS worktree's real script
+# -- and CLIP_SET_SOCKET_DIR scopes the fan-out to this suite's Xvfb only.
+kill "$QS_PID" 2>/dev/null; wait "$QS_PID" 2>/dev/null
+mkdir -p "$TMP/socks"
+ln -sf "/tmp/.X11-unix/X${DPY#:}" "$TMP/socks/X${DPY#:}"
+QS_PID="$(env DISPLAY="$DPY" "${ISO[@]}" \
+              QS_CLIP_SH="$QS_CLIP" CLIP_SET_SOCKET_DIR="$TMP/socks" \
+              "$QUICKSHELL" -p "$TMP/entry" >"$TMP/qs-e2e.log" 2>&1 & printf '%s' $!)"
+for i in $(seq 1 40); do
+  a="$(env "${ISO[@]}" "$QUICKSHELL" ipc --pid "$QS_PID" show 2>/dev/null | grep -c 'cliphistory')"
+  [ "${a:-0}" -gt 0 ] && break
+  sleep 0.5
+done
+[ "${a:-0}" -gt 0 ] || { echo "FATAL: e2e picker instance did not expose cliphistory" >&2; tail -20 "$TMP/qs-e2e.log" >&2; exit 1; }
+
+# Byte-tricky NON-newest target entry: real newlines, an inner tab, a literal
+# two-character backslash-n, unicode, no trailing newline.
+reset_store
+write_entry 1 "oldest-decoy"
+mk_store
+printf 'e2e first line\nsecond\tline literal \\n two-char\nu\xcc\x88nicode \xe2\x86\x92 ok' \
+  > "$STORE/000002.clip"
+write_entry 3 "newest-decoy"
+
+env DISPLAY="$DPY" "${ISO[@]}" QS_CLIP_DISPLAY="DISPLAY=$DPY" sh "$QS_CLIP" toggle >/dev/null 2>&1
+WID="$(win_on "$DPY")"
+assert_ne "picker opened on $DPY" "" "$WID"
+[ -n "$WID" ] && env DISPLAY="$DPY" "$XDOTOOL" windowfocus "$WID" 2>/dev/null
+sleep 0.4
+
+# Rows newest-first: 000003 (row 0), 000002 (row 1), 000001 (row 2). One
+# Down selects the byte-tricky non-newest entry.
+send "$DPY" Down
+send "$DPY" Return
+
+# The picker closes ONLY on clip-set.sh exit 0 (setProc.onExited), so the
+# window going away IS the real script's success, observed through the UI.
+if gone_on "$DPY"; then
+  pass "picker closed -- real clip-set.sh exited 0"
+else
+  fail "picker closed -- real clip-set.sh exited 0" "window gone" "still open (clip-set failed; see $TMP/qs-e2e.log)"
+  close_picker "$DPY"
+fi
+
+timeout 5 env DISPLAY="$DPY" xclip -selection clipboard -o > "$TMP/e2e.clipboard" 2>/dev/null
+timeout 5 env DISPLAY="$DPY" xclip -selection primary   -o > "$TMP/e2e.primary"   2>/dev/null
+assert_eq "CLIPBOARD on $DPY serves the selected entry byte-exact" "identical" \
+  "$(cmp -s "$STORE/000002.clip" "$TMP/e2e.clipboard" && echo identical || echo different)"
+assert_eq "PRIMARY on $DPY serves the selected entry byte-exact" "identical" \
+  "$(cmp -s "$STORE/000002.clip" "$TMP/e2e.primary" && echo identical || echo different)"
+
+# Fan-out containment: $DPY2's socket was NOT in CLIP_SET_SOCKET_DIR, so its
+# CLIPBOARD must not have received the entry -- the same scoping that keeps
+# the live session's displays out of reach.
+timeout 5 env DISPLAY="$DPY2" xclip -selection clipboard -o > "$TMP/e2e.other" 2>/dev/null
+assert_eq "the display OUTSIDE the socket dir did not receive the publish" "different" \
+  "$(cmp -s "$STORE/000002.clip" "$TMP/e2e.other" && echo identical || echo different)"
 
 # ============================================================================
 # PHASE 2 — production wiring (inspection, not execution)

@@ -24,10 +24,9 @@
 # env: CLIP_SET_SRC_DISPLAY  same as the [src-display] positional, takes
 #                            precedence over it when both are given.
 #
-# CLI CONTRACT (the caller must now pass the source display explicitly --
-# qs-clip.sh's `cmd_set`, sp016 task 2, currently execs `clip-set.sh <id>`
-# bare; wiring it to also pass the session it already derived is sp016 task
-# 5's job, not this one's):
+# CLI CONTRACT (the caller must pass the source display explicitly --
+# qs-clip.sh's `cmd_set` passes its own session's display as $2, wired by
+# sp016 task 5):
 #
 #   clip-set.sh <id> [src-display]
 #     exit 0   the entry is on CLIPBOARD and PRIMARY of EVERY live X display,
@@ -118,10 +117,11 @@
 #   worked out which session it is (exactly as qs-clip.sh's `cmd_toggle`
 #   already does for its own purposes) and handing that answer down
 #   explicitly — this script will not do that derivation itself and will not
-#   accept an implicit one. qs-clip.sh's `cmd_set` (task 2, landed) does not
-#   yet pass this argument; wiring it through is sp016 task 5's job, and
-#   until that lands this script simply refuses every call it receives
-#   bare, loudly, rather than quietly guessing — which is the point.
+#   accept an implicit one. qs-clip.sh's `cmd_set` passes its own session's
+#   $DISPLAY as $2 (wired by sp016 task 5): `list`/`set` run inside a
+#   specific session's own quickshell process, so that value IS the derived
+#   session, resolved once and handed down. A bare call is still refused
+#   loudly rather than quietly guessed at — which is the point.
 #
 # Test: i3/scripts/test-clip-set.sh (headless, Xvfb, two displays).
 set -u

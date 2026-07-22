@@ -52,8 +52,10 @@
 #   reverse sort — deterministic, no daemon round-trip, no N+1 reads (the
 #   defect class the prior copyq/clipcat backends could not avoid).
 #
-# `set` is a thin wrapper over i3/scripts/clip-set.sh and propagates its exit
-# code verbatim, because the picker's UI depends on the 0/1/2 split:
+# `set` is a thin wrapper over i3/scripts/clip-set.sh — invoked as
+# `clip-set.sh <id> <src-display>`, the source display being this process's
+# own session (see cmd_set) — and propagates its exit code verbatim, because
+# the picker's UI depends on the 0/1/2 split:
 #   0 = on the clipboard of every live display, 1 = nothing written anywhere
 #   (safe to retry), 2 = partial write, clipboard state indeterminate.
 # See i3/scripts/clip-set.sh for the full contract. This script does its own
@@ -212,7 +214,16 @@ cmd_set() {
   [ -f "$_store/$1" ] || { printf '%s: no such entry: %s\n' "$PROG" "$1" >&2; exit 1; }
 
   [ -r "$CLIP_SET" ] || die "clip-set.sh not found at $CLIP_SET"
-  exec sh "$CLIP_SET" "$1"
+  # The SOURCE DISPLAY is passed explicitly as $2 (sp016 task 5, the egm.3
+  # outcome): the store is per-display, so "000005.clip" in :0's store and
+  # :10's store routinely both exist as unrelated entries, and clip-set.sh
+  # REFUSES a bare call rather than fall back to its own inherited DISPLAY
+  # (see "WHICH STORE THE ID IS READ FROM" in its header). This process runs
+  # inside a specific session's own quickshell instance, so its $DISPLAY *is*
+  # the derived session — the same one store_dir() just resolved the id
+  # against, which is what makes the existence check above and the read below
+  # look at the same store.
+  exec sh "$CLIP_SET" "$1" "$DISPLAY"
 }
 
 # ----------------------------------------------------------------- toggle ---
