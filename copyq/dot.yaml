@@ -1,4 +1,27 @@
-# copyq — shared-clipboard-history backend (sp014 task 1, dotfiles-92w.1)
+# copyq — DECOMMISSIONED clipboard-history backend, kept in-tree as ROLLBACK
+# LAYER 1 for one cycle (sp016 task 5, dotfiles-egm.5).
+#
+# ft007's backend is now the bespoke clipnotify file store (clip-store/,
+# i3/scripts/clip-store.sh — the sp016 pivot, poc012). This dot links
+# NOTHING and no i3 config starts a copyq server any more. The files
+# (copyq.conf, commands.ini, test-copyq.sh) and the install stanza below
+# stay in-tree so the backend can be flipped back on if the store fails in
+# daily use; delete this whole directory once it proves out.
+#
+# ROLLBACK — to restore copyq as the backend:
+#   1. Uncomment the `links:` block below (restores both ini links).
+#   2. Put the autostart lines back in the i3 overlays:
+#        i3/config.d/native.conf:  exec_always --no-startup-id copyq --start-server
+#                                  (plus ~/.i3/scripts/clip-feed.sh, already there)
+#        i3/config.d/wsl.conf:     exec_always --no-startup-id copyq --start-server
+#      and remove the clip-store.sh lines they replaced.
+#   3. `rotz install copyq` (installs the package and re-runs the link).
+#   Note: clip-feed.sh has since been rewritten to write store files, not
+#   `copyq add` — a full copyq rollback also needs the pre-sp016 feeder
+#   (git history has it; sp014 task 2 / dotfiles-92w.2).
+#
+# --- Original header (sp014 task 1, dotfiles-92w.1) follows, kept verbatim
+# --- because it documents the contracts the rollback would restore:
 #
 # The clipboard-history server behind the quickshell picker. Consumed by the
 # cross-display feeder (task .2), the paste script (task .3), the quickshell
@@ -72,13 +95,16 @@
 #
 # Test: copyq/test-copyq.sh (headless, Xvfb; does not touch the live session
 # or ~/.config/copyq).
+# DECOMMISSIONED: the links are commented out, NOT deleted — they are the
+# exact set the rollback above restores (uncomment to re-enable):
+#
+#   links:
+#     copyq.conf: ~/.config/copyq/copyq.conf
+#     # copyq's commands store is `copyq-commands.ini`; the repo-side name is
+#     # the plainer `commands.ini` (same repo-name/target-name split as
+#     # i3/dot.yaml's i3status.conf -> ~/.config/i3status/config).
+#     commands.ini: ~/.config/copyq/copyq-commands.ini
 linux:
-  links:
-    copyq.conf: ~/.config/copyq/copyq.conf
-    # copyq's commands store is `copyq-commands.ini`; the repo-side name is
-    # the plainer `commands.ini` (same repo-name/target-name split as
-    # i3/dot.yaml's i3status.conf -> ~/.config/i3status/config).
-    commands.ini: ~/.config/copyq/copyq-commands.ini
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
@@ -90,4 +116,5 @@ linux:
       {{#if (eq whoami.distro "Arch Linux ARM")}}
       sudo pacman -S --needed --noconfirm copyq xclip
       {{/if}}
-      rotz link copyq --force
+      # DECOMMISSIONED: `rotz link copyq --force` removed with the links
+      # block above; restore both together on rollback.

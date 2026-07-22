@@ -16,6 +16,10 @@ linux:
     # WSL<->Windows clipboard bridge over interop (dotfiles-5pw) — autostarted
     # only by config.d/wsl.conf; exits 0 immediately where powershell.exe is absent
     scripts/clip-win-bridge.sh: ~/.i3/scripts/clip-win-bridge.sh
+    # sp016 file-store clipboard backend — one loop per display, autostarted
+    # by config.d/native.conf (:0 and :10) and config.d/wsl.conf (:10).
+    # clipnotify, its one non-base dependency, is installed by clip-store/.
+    scripts/clip-store.sh: ~/.i3/scripts/clip-store.sh
     picom.conf: ~/.config/picom.conf
     # Platform overlay (ft003 i3-config-layering): exactly one config.d/*
     # eval path check, not env.WSL_DISTRO_NAME — that var is unset in

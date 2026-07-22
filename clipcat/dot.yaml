@@ -1,4 +1,35 @@
-# clipcat -- shared-clipboard-history backend (sp016 task 1, dotfiles-egm.1)
+# clipcat -- DECOMMISSIONED clipboard-history backend, kept in-tree as
+# ROLLBACK LAYER 2 for one cycle (sp016 task 5, dotfiles-egm.5).
+#
+# clipcat was validated as ft007's backend (poc010, task 1 landed), then
+# FALSIFIED in execution by three upstream defects unresolvable at the
+# clipcatctl surface: dotfiles-8il (list order non-deterministic),
+# dotfiles-i9i (get irreversibly escapes control chars), dotfiles-apl
+# (~25% of daemon starts born deaf). The backend is now the bespoke
+# clipnotify file store (clip-store/, i3/scripts/clip-store.sh — poc012).
+# This dot links NOTHING and no i3 config ever started a clipcatd (the
+# swap pivoted before task 5 wired autostarts). The files (clipcat.toml,
+# test-clipcat.sh — retained as the reference for the disk-leak and
+# secret-atom assertions) and the install stanza stay in-tree; delete this
+# whole directory once the store proves out.
+#
+# ROLLBACK — to restore clipcat as the backend (accepting the three open
+# defects above):
+#   1. Uncomment the `links:` block below.
+#   2. Add autostart lines to the i3 overlays (never shipped; the shape
+#      task 5 would have wired):
+#        i3/config.d/native.conf:  one clipcatd per display (:0, :10), each
+#                                  with its own --grpc-socket-path and
+#                                  --history-file under $XDG_RUNTIME_DIR
+#        i3/config.d/wsl.conf:     one clipcatd, single display, no feeder
+#      and remove the clip-store.sh lines.
+#   3. `rotz install clipcat`.
+#   Note: qs-clip.sh, clip-set.sh and clip-feed.sh have all since been
+#   rewritten against the file store — a clipcat rollback also needs their
+#   pre-pivot revisions (git history: sp016 tasks 2-4 as first landed).
+#
+# --- Original header (sp016 task 1, dotfiles-egm.1) follows, kept verbatim
+# --- because it documents the contracts the rollback would restore:
 #
 # Replaces copyq (sp014 / dotfiles-92w.1) as ft007's backend: no Qt6/KDE
 # chain on a secrets-adjacent daemon, 96 -> 4 linked libs, private RSS
@@ -132,9 +163,12 @@
 #
 # Test: clipcat/test-clipcat.sh (headless, Xvfb; does not touch the live
 # session, the live clipboard, or the real ~/.config/clipcat).
+# DECOMMISSIONED: the link is commented out, NOT deleted — it is exactly
+# what the rollback above restores (uncomment to re-enable):
+#
+#   links:
+#     clipcat.toml: ~/.config/clipcat/clipcatd.toml
 linux:
-  links:
-    clipcat.toml: ~/.config/clipcat/clipcatd.toml
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
@@ -146,4 +180,5 @@ linux:
       {{#if (eq whoami.distro "Arch Linux ARM")}}
       sudo pacman -S --needed --noconfirm clipcat xclip
       {{/if}}
-      rotz link clipcat --force
+      # DECOMMISSIONED: `rotz link clipcat --force` removed with the links
+      # block above; restore both together on rollback.
