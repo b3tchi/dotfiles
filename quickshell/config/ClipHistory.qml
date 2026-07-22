@@ -42,10 +42,14 @@ import QtQuick.Window
 Scope {
     id: root
 
+    // WM detection — same lookup Overlay.qml uses, so font.pixelSize tracks
+    // its per-compositor value instead of drifting to a third number here.
+    readonly property bool isSway: Quickshell.env("SWAYSOCK") !== null
+
     readonly property string fontFamily: "Iosevka Nerd Font"
-    readonly property int fontSize: 15
-    readonly property int rowHeight: 30
-    readonly property int visibleRows: 12
+    readonly property int fontSize: isSway ? 14 : 16
+    readonly property int rowHeight: 32
+    readonly property int visibleRows: 8
 
     readonly property string clipSh:
         Quickshell.env("QS_CLIP_SH") ?? (Quickshell.env("HOME") + "/.dotfiles/quickshell/qs-clip.sh")
@@ -191,8 +195,14 @@ Scope {
     Window {
         id: picker
         visible: false
-        width: 720
-        height: 36 + Math.max(Math.min(root.filtered.length, root.visibleRows), 1) * root.rowHeight
+        width: 480
+        // Mirrors Overlay.qml's launcher case (32 + min(rows,8)*32 + 8): the
+        // 32 here is this input bar's height, root.rowHeight/visibleRows are
+        // the same 32/8 constants, and the trailing +8 is the same pad. The
+        // extra terms are ClipHistory-only UI Overlay's launcher doesn't have:
+        // a floor of 1 row so an empty history still shows its placeholder
+        // row, and +26 for the one-line status bar when it's visible.
+        height: 32 + Math.max(Math.min(root.filtered.length, root.visibleRows), 1) * root.rowHeight
                 + (root.status === "" ? 0 : 26) + 8
         flags: Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
         color: "#222D31"
@@ -222,7 +232,7 @@ Scope {
 
             Rectangle {
                 width: parent.width
-                height: 36
+                height: 32
                 color: "#152024"
 
                 TextInput {
