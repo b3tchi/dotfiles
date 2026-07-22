@@ -106,7 +106,10 @@ store_dir() {
     printf '%s: DISPLAY is unset; cannot locate this session'"'"'s clipboard store\n' "$PROG" >&2
     return 1
   fi
-  printf '%s/clip-store/%s\n' "$XDG_RUNTIME_DIR" "$DISPLAY"
+  # X DISPLAY may carry a screen suffix (`:0.0`); clip-store.sh is launched
+  # with the bare display (`:0`) as its store-dir key, so strip the screen
+  # to match. In sh globs `.` is literal: `:0.0` -> `:0`, bare `:0` unchanged.
+  printf '%s/clip-store/%s\n' "$XDG_RUNTIME_DIR" "${DISPLAY%.*}"
   return 0
 }
 
@@ -223,7 +226,9 @@ cmd_set() {
   # the derived session — the same one store_dir() just resolved the id
   # against, which is what makes the existence check above and the read below
   # look at the same store.
-  exec sh "$CLIP_SET" "$1" "$DISPLAY"
+  # Bare display (strip any `:0.0` screen suffix) so clip-set.sh reads the
+  # same per-display store store_dir() just checked — see the note there.
+  exec sh "$CLIP_SET" "$1" "${DISPLAY%.*}"
 }
 
 # ----------------------------------------------------------------- toggle ---
