@@ -494,7 +494,11 @@ PanelWindow {
                     required property var modelData
                     width: wsText.implicitWidth + 14
                     height: leftSide.height
-                    color: modelData.urgent ? "#cb4b16" : "transparent"
+                    // Focused tab uses the same highlight as the mod+d launcher
+                    // input/selection (#152024, Overlay.qml).
+                    color: modelData.urgent  ? "#cb4b16"
+                         : modelData.focused ? "#152024"
+                         : "transparent"
 
                     Text {
                         id: wsText
