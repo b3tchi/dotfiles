@@ -13,6 +13,9 @@ linux:
     # sp014 cross-display clipboard feeder — autostarted by config.d/native.conf
     # (linked on every platform; only the native overlay execs it)
     scripts/clip-feed.sh: ~/.i3/scripts/clip-feed.sh
+    # WSL<->Windows clipboard bridge over interop (dotfiles-5pw) — autostarted
+    # only by config.d/wsl.conf; exits 0 immediately where powershell.exe is absent
+    scripts/clip-win-bridge.sh: ~/.i3/scripts/clip-win-bridge.sh
     picom.conf: ~/.config/picom.conf
     # Platform overlay (ft003 i3-config-layering): exactly one config.d/*
     # eval path check, not env.WSL_DISTRO_NAME — that var is unset in
