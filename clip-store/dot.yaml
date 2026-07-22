@@ -1,0 +1,85 @@
+# clip-store -- bespoke file-store clipboard backend (sp016 task 6,
+# dotfiles-egm.6)
+#
+# Replaces clipcat (which replaced copyq) as ft007's backend, per the sp016
+# mid-execution pivot: clipcat 0.25.0 was falsified by three upstream
+# defects unresolvable at the clipcatctl surface (dotfiles-8il list order
+# non-deterministic, dotfiles-i9i get irreversibly escapes control chars,
+# dotfiles-apl ~25% of daemon starts born deaf), and clipse was rejected
+# (poc011).  The bespoke clipnotify+file loop was validated by poc012.
+# Both prior backends stay in-tree, links removed, as rollback layers for
+# one cycle: copyq/ (layer 1) and clipcat/ (layer 2).
+#
+# ===========================================================================
+# CONTRACT FOR DOWNSTREAM TASKS -- read this before writing a store client
+# ===========================================================================
+#
+# 1. THE STORE (defined in full in i3/scripts/clip-store.sh's header; fixed
+#    by sp016 ## plan so tasks 2/3/7 proceed in parallel):
+#
+#      store dir   $XDG_RUNTIME_DIR/clip-store/<display>/    0700, tmpfs
+#      entry       NNNNNN.clip -- six-digit zero-padded monotonic seq, raw
+#                  payload bytes, no trailing-newline games
+#      id          the filename; opaque to consumers -- equality only,
+#                  never parsed or done arithmetic on
+#
+#    Lexicographic filename order IS capture order (seq ascending), so
+#    "newest first" is a reversed name sort -- deterministic, unlike
+#    clipcatctl list (dotfiles-8il).  `get` is `cat` of a file -- raw bytes
+#    by definition, unlike clipcatctl get (dotfiles-i9i).  Consumers read
+#    only `??????.clip` names and skip everything else: dotfiles and
+#    `*.tmp` are writer work files (entries appear atomically via
+#    write-then-link; a mid-write tmp is never a visible entry).
+#
+# 2. WRITERS append via clip-store.sh's write shape: payload to a tmp in the
+#    same dir, `ln` into the next seq name, retry on collision (ln FAILS on
+#    an existing name where mv would silently clobber -- that is what makes
+#    a concurrent local capture and a clip-feed.sh feed both land under
+#    distinct seqs, task 7's edge case).  Consecutive identical entries
+#    dedup against the newest; CLIP_STORE_CAP prunes oldest.
+#
+# 3. MEMORY-ONLY IS A FILESYSTEM-LEVEL PROPERTY.  The store lives under
+#    $XDG_RUNTIME_DIR (tmpfs, 0700, destroyed by logind at last logout) and
+#    nowhere else; clip-store.sh refuses to start (exit 78) when
+#    $XDG_RUNTIME_DIR is unset rather than fall back to a persistent path.
+#    Stronger than clipcat's config discipline, equal to copyq's daemon
+#    guarantee.  The known exposure is unchanged from both prior backends:
+#    plaintext on tmpfs for the session lifetime, survives SIGKILL, cleared
+#    only by logind teardown.
+#
+# 4. THE SECRET GATE IS IN THE LOOP, NOT IN CONFIG.  clip-store.sh checks
+#    the owner's TARGETS list before any payload read and drops selections
+#    advertising a password-manager hint in EITHER spelling (bare
+#    `x-kde-passwordManagerHint` and prefixed
+#    `application/x-kde-passwordManagerHint`), plus a post-read TOCTOU
+#    re-check -- the same two-gate shape as clip-feed.sh, adversarially
+#    tested by i3/scripts/test-clip-store.sh.  As with every backend before
+#    it: no local password manager emits either hint, so this ships no
+#    security improvement on its own (sp015 / dotfiles-cyg are the fix).
+#
+# WHO STARTS THE LOOP (task 5).  Nothing here does -- this dot.yaml only
+# installs clipnotify (official `extra`; the loop's only non-base
+# dependency, xclip being installed by i3/dot.yaml already).  The loop is
+# autostarted by the i3 platform overlay, one per live display:
+#
+#   i3/config.d/native.conf   clip-store.sh :0 and :10 (adr0004), plus
+#                             clip-feed.sh bridging :10 -> :0
+#   i3/config.d/wsl.conf      one loop, single display, no feeder
+#
+# No links yet: clip-store.sh is linked by i3/dot.yaml alongside the other
+# i3 scripts once task 5 wires the autostarts.
+#
+# Test: i3/scripts/test-clip-store.sh (headless, Xvfb; does not touch the
+# live X session, the live clipboard, or the live session's store).
+linux:
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -S --needed --noconfirm clipnotify xclip
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -S --needed --noconfirm clipnotify xclip
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux ARM")}}
+      sudo pacman -S --needed --noconfirm clipnotify xclip
+      {{/if}}
