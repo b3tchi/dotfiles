@@ -202,7 +202,9 @@ own_clipboard_file() { # <file> [extra-mime ...]
 # Own SRC CLIPBOARD with <benign-text>, handing the selection to a
 # hint-bearing owner serving <secret-text> the moment the feeder's TARGETS
 # gate has been answered.  See race-owner.py.  Returns once win1 holds it.
-own_race_clipboard() { # <benign-text> <secret-text>
+# Optional 3rd arg names the hint atom the handoff owner advertises (default:
+# prefixed; pass 'x-kde-passwordManagerHint' for the bare-atom race).
+own_race_clipboard() { # <benign-text> <secret-text> [hint-atom]
   [ -n "${OWNER_PID:-}" ] && { kill "$OWNER_PID" 2>/dev/null; wait "$OWNER_PID" 2>/dev/null; }
   env DISPLAY="$SRC" python3 "$TMP/race-owner.py" "$@" >"$TMP/owner.out" 2>&1 &
   OWNER_PID=$!
@@ -406,7 +408,12 @@ against the X protocol, not anything about copyq, clipcat, or the file
 store, and has now survived two backend swaps unchanged for exactly that
 reason.
 
-usage: race-owner.py <benign-text> <secret-text>
+The hint atom served by win2 defaults to the prefixed spelling but takes an
+optional 3rd argument so the SAME race can be replayed with the bare atom
+(dotfiles-wtr) -- the feeder's gate must match both, mirroring
+clip-store.sh's hinted().
+
+usage: race-owner.py <benign-text> <secret-text> [hint-atom]
 """
 import sys
 import Xlib.display
@@ -416,6 +423,7 @@ import Xlib.Xatom
 
 benign = sys.argv[1].encode()
 secret = sys.argv[2].encode()
+hint_atom_name = sys.argv[3] if len(sys.argv) > 3 else "application/x-kde-passwordManagerHint"
 
 d = Xlib.display.Display()
 screen = d.screen()
@@ -424,7 +432,7 @@ win2 = screen.root.create_window(0, 0, 1, 1, 0, screen.root_depth)
 
 SEL = d.get_atom("CLIPBOARD")
 TARGETS = d.get_atom("TARGETS")
-HINT = d.get_atom("application/x-kde-passwordManagerHint")
+HINT = d.get_atom(hint_atom_name)
 UTF8 = d.get_atom("UTF8_STRING")
 PLAIN = d.get_atom("text/plain")
 
@@ -684,6 +692,22 @@ assert_eq "no payload target was ever requested from the owner" "" \
 assert_eq "TARGETS itself was requested (the gate did look)" "yes" \
   "$(reqlog_of_owner | grep -q '^REQ TARGETS$' && echo yes || echo no)"
 
+scenario "secret-not-laundered-bare-atom: a bare-atom hint-bearing SRC copy never enters the DST store"
+# dotfiles-wtr: the feeder's gate matched only the prefixed spelling; a
+# password manager emitting just the bare 'x-kde-passwordManagerHint' atom
+# (no 'application/' prefix -- clipcat's own default) would be dropped by
+# clip-store.sh's loop on :0 but laundered straight across by this feeder
+# from :10.  Same shape as secret-not-laundered above, bare atom instead.
+before="$(store_count)"
+own_clipboard 'BARE-SECRET-marker' x-kde-passwordManagerHint
+sleep 4
+assert_eq "store count unchanged" "$before" "$(store_count)"
+assert_eq "bare-atom secret text appears in no entry" "absent" "$(content_present 'BARE-SECRET-marker')"
+assert_eq "no payload target was ever requested from the owner" "" \
+  "$(reqlog_of_owner | grep -v '^REQ TARGETS$')"
+assert_eq "TARGETS itself was requested (the gate did look)" "yes" \
+  "$(reqlog_of_owner | grep -q '^REQ TARGETS$' && echo yes || echo no)"
+
 scenario "toctou-race: a hint-bearing owner taking the clipboard AFTER the gate passed still never reaches the store"
 # The scenario above proves the gate stops a selection that already carries
 # the hint when the gate looks.  This one covers the residual window the gate
@@ -697,6 +721,17 @@ sleep 4
 assert_eq "the handoff fired, so the race really was exercised" "fired" "$(race_fired)"
 assert_eq "store count unchanged" "$before" "$(store_count)"
 assert_eq "raced secret appears in no entry" "absent" "$(content_present 'RACE-SECRET-marker')"
+
+scenario "toctou-race-bare-atom: a bare-atom hint-bearing owner taking the clipboard AFTER the gate passed still never reaches the store"
+# dotfiles-wtr: same race as toctou-race above, but win2 advertises the bare
+# 'x-kde-passwordManagerHint' atom instead of the prefixed one -- the
+# re-check must fail closed on either spelling, same as the first gate does.
+before="$(store_count)"
+own_race_clipboard 'RACE-DECOY-benign' 'RACE-SECRET-BARE-marker' 'x-kde-passwordManagerHint'
+sleep 4
+assert_eq "the handoff fired, so the race really was exercised" "fired" "$(race_fired)"
+assert_eq "store count unchanged" "$before" "$(store_count)"
+assert_eq "bare-atom raced secret appears in no entry" "absent" "$(content_present 'RACE-SECRET-BARE-marker')"
 
 scenario "image-skipped: a selection with no text target is not fed"
 before="$(store_count)"
@@ -861,8 +896,8 @@ stop_feeder
 # strips ONLY the re-check.
 awk '/SECURITY GATE/,/^  fi$/ {next} /TOCTOU RE-CHECK/,/^    fi$/ {next} {print}' \
   "$FEEDER" > "$TMP/clip-feed-nohint.sh"
-grep -qF -- "-qFx 'application/x-kde-passwordManagerHint'" "$TMP/clip-feed-nohint.sh" \
-  && { echo "FATAL: patched feeder still contains the hint check" >&2; exit 1; }
+grep -qE 'if hinted|\|\| hinted' "$TMP/clip-feed-nohint.sh" \
+  && { echo "FATAL: patched feeder still calls the gate" >&2; exit 1; }
 grep -qF 'feed_dst' "$TMP/clip-feed-nohint.sh" \
   || { echo "FATAL: patched feeder lost its feed path" >&2; exit 1; }
 rm -f "$TMP/feed.lock"
@@ -879,6 +914,16 @@ assert_eq "and its full text lands in the store" "SECRET-PASSWORD-marker" \
 # inverse of secret-not-laundered's "payload never even requested" assertion.
 assert_eq "the payload WAS requested from the owner (the pre-check is what normally stops that)" "yes" \
   "$(reqlog_of_owner | grep -q 'REQ \(UTF8_STRING\|STRING\|text/plain\)' && echo yes || echo no)"
+# Bare-atom negative control (dotfiles-wtr): with both checks stripped, a
+# bare-atom hint-bearing copy must ALSO be fed -- proving
+# secret-not-laundered-bare-atom's drop really comes from the gate matching
+# the bare spelling, not some other accident of the harness.
+before="$(store_count)"
+own_clipboard 'BARE-SECRET-CONTROL-marker' x-kde-passwordManagerHint
+size="$(wait_store_change "$before" 10)"
+assert_eq "bare-atom hint-bearing copy IS fed when the check is absent" "$((before + 1))" "$size"
+assert_eq "and its full text lands in the store" "BARE-SECRET-CONTROL-marker" \
+  "$(cat "$(entry_for_content 'BARE-SECRET-CONTROL-marker')" 2>/dev/null)"
 stop_feeder
 
 scenario "CONTROL recheck-is-load-bearing: the raced secret IS fed without the post-read re-check"
@@ -901,6 +946,17 @@ assert_eq "the handoff fired, so the race really was exercised" "fired" "$(race_
 assert_eq "raced secret IS fed when the re-check is absent" "$((before + 1))" "$size"
 assert_eq "and its full text lands in the store" "RACE-SECRET-CONTROL" \
   "$(cat "$(entry_for_content 'RACE-SECRET-CONTROL')" 2>/dev/null)"
+# Bare-atom negative control (dotfiles-wtr): with the re-check stripped, a
+# bare-atom raced secret must ALSO be fed -- proving toctou-race-bare-atom's
+# drop really comes from the re-check matching the bare spelling, not
+# vacuously true.
+before="$(store_count)"
+own_race_clipboard 'RACE-DECOY-benign' 'RACE-SECRET-BARE-CONTROL' 'x-kde-passwordManagerHint'
+size="$(wait_store_change "$before" 10)"
+assert_eq "the handoff fired, so the race really was exercised" "fired" "$(race_fired)"
+assert_eq "bare-atom raced secret IS fed when the re-check is absent" "$((before + 1))" "$size"
+assert_eq "and its full text lands in the store" "RACE-SECRET-BARE-CONTROL" \
+  "$(cat "$(entry_for_content 'RACE-SECRET-BARE-CONTROL')" 2>/dev/null)"
 stop_feeder
 
 scenario "CONTROL feeder-is-load-bearing: no capture at all with no feeder"
