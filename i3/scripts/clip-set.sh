@@ -4,17 +4,32 @@
 # clip-store.sh file store ([[sp016]] mid-execution pivot); this script's own
 # CLI contract and display fan-out are unchanged.
 #
-# usage: clip-set.sh <id>
+# usage: clip-set.sh <id> [src-display]
 #
-#   <id>  a store entry filename, e.g. "000005.clip" -- opaque, exactly as
-#         `qs-clip.sh list` (task 2) hands it back. Must match the store's
-#         own naming, six digits + ".clip"; anything else (a .tmp work file,
-#         a path, garbage) is refused before anything is read.
+#   <id>           a store entry filename, e.g. "000005.clip" -- opaque,
+#                  exactly as `qs-clip.sh list` (task 2) hands it back. Must
+#                  match the store's own naming, six digits + ".clip";
+#                  anything else (a .tmp work file, a path, garbage) is
+#                  refused before anything is read. The store's own writer
+#                  (clip-store.sh) owns what happens at the six-digit
+#                  ceiling (999999) -- this script never generates or
+#                  increments an id, only consumes whatever it is handed, so
+#                  that boundary is out of scope here.
+#   [src-display]  REQUIRED, one way or another (positional here, or the
+#                  CLIP_SET_SRC_DISPLAY env override below) -- which
+#                  display's store <id> is read from. See "WHICH STORE THE
+#                  ID IS READ FROM" below for why this cannot default to
+#                  anything, least of all inherited $DISPLAY.
 #
-# CLI CONTRACT (task .2's quickshell picker invokes exactly this, unchanged
-# from sp014 -- qs-clip.sh's `cmd_set` execs straight into this script):
+# env: CLIP_SET_SRC_DISPLAY  same as the [src-display] positional, takes
+#                            precedence over it when both are given.
 #
-#   clip-set.sh <id>
+# CLI CONTRACT (the caller must now pass the source display explicitly --
+# qs-clip.sh's `cmd_set`, sp016 task 2, currently execs `clip-set.sh <id>`
+# bare; wiring it to also pass the session it already derived is sp016 task
+# 5's job, not this one's):
+#
+#   clip-set.sh <id> [src-display]
 #     exit 0   the entry is on CLIPBOARD and PRIMARY of EVERY live X display,
 #              and each of those displays has been observed serving it back
 #     exit 1   precondition failure — NO selection was written anywhere, on any
@@ -72,26 +87,41 @@
 #   server is gone, the socket is stale) is skipped silently — that is a dead
 #   session, not an error. If NO display accepts it, that is exit 1.
 #
-# WHICH STORE THE ID IS READ FROM — THE ONE NEW RESOLUTION THIS TASK ADDS
+# WHICH STORE THE ID IS READ FROM — THE ONE NEW RESOLUTION THIS TASK ADDS,
+# AND WHY IT IS *ALSO* "NEVER INHERITED, NEVER GUESSED"
 #
 #   Unlike copyq (one global daemon, one global history, no display concept on
 #   the read side at all), the file store is PER DISPLAY: clip-store.sh runs
 #   one loop per live display, each with its own directory and its own
-#   independently-numbered ids, so "000005.clip" in :0's store and in :10's
-#   store are two unrelated entries. Something has to say which store an id
-#   came from, and unlike the fan-out above, this is NOT a "never trust
-#   DISPLAY" situation: this script is invoked one layer down from
-#   `qs-clip.sh set` (task 2), which execs into it directly from inside the
-#   quickshell process hosting the picker for one specific session. There is
-#   no cross-session IPC hop in that call path — it is the same process tree,
-#   the same session, start to finish — so the environment this script
-#   inherits genuinely IS the session the id was listed from, which is exactly
-#   the "same resolution model" copyq had (a single, unambiguous source) now
-#   expressed as "the display already established by the caller" instead of
-#   "the one global daemon". Concretely: $DISPLAY (or CLIP_SET_SRC_DISPLAY to
-#   override it, for tests and for a future non-X caller) names the source
-#   store; the fan-out loop below is completely separate code and does not
-#   consult it.
+#   independently-numbered ids starting at 000001, so "000005.clip" in :0's
+#   store and in :10's store ROUTINELY both exist, as two entirely unrelated
+#   entries. Something has to say which store an id came from, and this is
+#   NOT a case where an ambient signal can be trusted: sp016's own anti-
+#   patterns are unqualified on this point ("Never trust inherited DISPLAY —
+#   derive it, as the shipped scripts do"), and the failure mode of getting
+#   it wrong here is worse than the fan-out's, not milder. Guessing the wrong
+#   FAN-OUT target just means a display that should have received the entry
+#   doesn't (a partial-failure exit 2, or a display silently not offered a
+#   pick it should have been). Guessing the wrong SOURCE store means finding
+#   a DIFFERENT, VALID entry under the same id in the wrong store and
+#   publishing IT — successfully, exit 0, to every live display. A
+#   silent-wrong-content publish is worse in kind than the ordering/escaping
+#   bugs (dotfiles-8il, dotfiles-i9i) that motivated the whole pivot away
+#   from clipcat.
+#
+#   So the source display is a REQUIRED, EXPLICIT argument: pass it
+#   positionally as $2, or set CLIP_SET_SRC_DISPLAY (which wins if both are
+#   given). Neither present is a hard usage error, not a guess and not a
+#   fallback to $DISPLAY — mirroring clip-store.sh's own precedent exactly
+#   (`DPY="${CLIP_STORE_DISPLAY:-${1:-}}"`: env override or positional arg,
+#   never ambient $DISPLAY). The caller is responsible for having already
+#   worked out which session it is (exactly as qs-clip.sh's `cmd_toggle`
+#   already does for its own purposes) and handing that answer down
+#   explicitly — this script will not do that derivation itself and will not
+#   accept an implicit one. qs-clip.sh's `cmd_set` (task 2, landed) does not
+#   yet pass this argument; wiring it through is sp016 task 5's job, and
+#   until that lands this script simply refuses every call it receives
+#   bare, loudly, rather than quietly guessing — which is the point.
 #
 # Test: i3/scripts/test-clip-set.sh (headless, Xvfb, two displays).
 set -u
@@ -117,8 +147,9 @@ die_config() { printf '%s: %s\n' "$PROG" "$1" >&2; exit 78; }
 
 # ------------------------------------------------------------------ args ---
 
-[ $# -eq 1 ] || die "usage: $PROG <id>"
+[ $# -ge 1 ] && [ $# -le 2 ] || die "usage: $PROG <id> [src-display]"
 ID="$1"
+ARG_SRC="${2:-}"
 case "$ID" in
   [0-9][0-9][0-9][0-9][0-9][0-9].clip) : ;;
   *) die "id must look like NNNNNN.clip, got '$ID'" ;;
@@ -136,12 +167,14 @@ command -v xclip >/dev/null 2>&1 || die "xclip not found in PATH"
 [ -n "${XDG_RUNTIME_DIR:-}" ] \
   || die_config "XDG_RUNTIME_DIR is unset; refusing to guess where the store is"
 
-# The source display: see "WHICH STORE THE ID IS READ FROM" above. Trusted
-# here -- unlike the fan-out below -- because this script sits one layer
-# under qs-clip.sh's own already-derived session, in the same process tree.
-SRC_DPY="${CLIP_SET_SRC_DISPLAY:-${DISPLAY:-}}"
+# The source display: see "WHICH STORE THE ID IS READ FROM" above. REQUIRED
+# and EXPLICIT -- CLIP_SET_SRC_DISPLAY wins if set, else the $2 positional,
+# else a hard refusal. $DISPLAY is deliberately never consulted here: it is
+# exactly as untrustworthy for picking a source store as it is for picking a
+# fan-out target, and picking the wrong one is worse (see above).
+SRC_DPY="${CLIP_SET_SRC_DISPLAY:-$ARG_SRC}"
 [ -n "$SRC_DPY" ] \
-  || die "no source display: set DISPLAY or CLIP_SET_SRC_DISPLAY"
+  || die "no source display given -- pass it as \$2 or set CLIP_SET_SRC_DISPLAY; \$DISPLAY is never trusted (a per-display store id is meaningless without knowing which store it came from)"
 
 STORE="$XDG_RUNTIME_DIR/clip-store/$SRC_DPY"
 
@@ -155,6 +188,24 @@ STORE="$XDG_RUNTIME_DIR/clip-store/$SRC_DPY"
 ENTRY="$STORE/$ID"
 [ -f "$ENTRY" ] \
   || die "no such entry: $ENTRY (unknown or stale id, or store not created yet)"
+
+# A ZERO-BYTE entry is a VALID publish, not a guard failure -- deliberately
+# different from copyq's old behaviour, which treated "row empty" and "row
+# does not exist" as the same rejection. copyq's `read` had no way to tell
+# those apart (an absent row and an empty one both come back as nothing), so
+# sp014 task 3 folded "empty" into the precondition-failure guard rather than
+# publish an ambiguous result. The file store removes the ambiguity: `-f`
+# above answers "does this entry exist" completely independently of its
+# length, so an empty file is simply an entry whose content happens to be
+# zero bytes -- exactly as real as a copy of an empty selection would be.
+# Byte-exactness is this task's whole point (see above); refusing to
+# publish a legitimate zero-byte entry would be re-introducing, by policy,
+# the exact kind of "not really byte-exact" carve-out the pivot exists to
+# eliminate. So: file exists -> publish whatever bytes it holds, including
+# none. (In practice clip-store.sh's own capture path never stores a
+# zero-byte entry -- its read_sel requires `-s` -- so this case is only
+# reachable via direct seeding, e.g. a test fixture or a future writer; it
+# is handled correctly here regardless.)
 
 TMP="$(mktemp)" || die "mktemp failed"
 trap 'rm -f "$TMP" "$TMP.head"' EXIT

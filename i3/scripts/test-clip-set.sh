@@ -162,8 +162,10 @@ seed_content() { # <display> <content-file>
 #   CLIP_SET_ENV_SRC      -- CLIP_SET_SRC_DISPLAY override, i.e. which
 #     store the id is read FROM. Defaults to $DPY (this suite's stand-in for
 #     "the session the picker derived"). Empty string = do not set the
-#     override at all (used by the one scenario that proves the DEFAULT
-#     fallback to a correctly-inherited $DISPLAY also works).
+#     override at all -- used by scenarios proving the $2 positional
+#     argument works on its own, and by the one proving that omitting BOTH
+#     the override and the argument is a hard refusal ($DISPLAY is never
+#     consulted as a fallback -- see clip-set.sh's own header).
 #   CLIP_SET_ENV_XDG      -- $XDG_RUNTIME_DIR value. "UNSET" is a sentinel
 #     meaning: do not export it at all (the one scenario that needs this).
 CLIP_SET_ENV_DISPLAY=":987"
@@ -315,16 +317,24 @@ assert_eq "$DPY byte length preserved" "$(wc -c < "$TMP/uni.src" | tr -d ' ')" \
 assert_eq "$DPY2 byte length preserved" "$(wc -c < "$TMP/uni.src" | tr -d ' ')" \
   "$(sel_on "$DPY2" clipboard | wc -c | tr -d ' ')"
 
-scenario "huge-entry: a 1 MB entry transfers whole (INCR) to both displays"
+scenario "huge-entry: a 1 MB entry transfers whole (INCR) to both displays, byte for byte"
 reset_selections
-head -c 1000000 /dev/zero | tr '\0' 'H' > "$TMP/big.src"
+# Not all-identical-byte filler: a repeated single byte would let an INCR
+# chunking bug that duplicates or drops a whole chunk of IDENTICAL bytes
+# still pass a byte-count check (and even a naive cmp, if the corruption
+# happened to preserve length) -- vary it so a shifted/dropped/duplicated
+# chunk is visible as a genuine content difference, not just a count.
+{ for _i in $(seq 1 15625); do printf 'A%063d' "$_i"; done; } > "$TMP/big.src"
+assert_eq "seed sanity: big.src really is 1000000 bytes" "1000000" \
+  "$(wc -c < "$TMP/big.src" | tr -d ' ')"
 ID="$(seed_content "$DPY" "$TMP/big.src")"
 run_set "$ID"; rc=$?
 assert_eq "exits 0" "0" "$rc"
 for d in "$DPY" "$DPY2"; do
   for s in clipboard primary; do
-    assert_eq "$d $s holds all 1000000 bytes" "1000000" \
-      "$(sel_on "$d" "$s" | wc -c | tr -d ' ')"
+    sel_to_file "$d" "$s" "$TMP/big.$d.$s.out"
+    assert_eq "$d $s matches the seed file exactly (cmp, not just a byte count)" "same" \
+      "$(cmp -s "$TMP/big.src" "$TMP/big.$d.$s.out" && echo same || echo DIFFERENT)"
   done
 done
 
@@ -336,16 +346,59 @@ run_set "$ID"; rc=$?
 assert_eq "exits 0" "0" "$rc"
 assert_on_both "empty entry" ""
 
-scenario "default-display-fallback: no override -- an inherited, correctly-set DISPLAY resolves the store"
+scenario "no-explicit-source-refuses: DISPLAY is never trusted -- omitting both the arg and the override is a loud refusal, not a guess"
+# The blocking gap this suite exists to close: a per-display store means
+# the SAME id commonly exists, with DIFFERENT content, in more than one
+# store (proven directly below). Falling back to an inherited $DISPLAY --
+# even a perfectly live, correct one, as set here -- would make the wrong
+# guess indistinguishable from the right one: both "succeed", exit 0, and
+# publish SOMETHING. So this must refuse outright with neither signal given.
 reset_selections
 ID="$(seed_content "$DPY" "$TMP/plain.src")"
 _saved_dpy="$CLIP_SET_ENV_DISPLAY"; _saved_src="$CLIP_SET_ENV_SRC"
-CLIP_SET_ENV_DISPLAY="$DPY"   # this time DISPLAY itself IS the real session
-CLIP_SET_ENV_SRC=""           # no CLIP_SET_SRC_DISPLAY override
+CLIP_SET_ENV_DISPLAY="$DPY"   # a REAL, correct display -- must still not be used
+CLIP_SET_ENV_SRC=""           # no CLIP_SET_SRC_DISPLAY override, and no $2 below
 run_set "$ID"; rc=$?
 CLIP_SET_ENV_DISPLAY="$_saved_dpy"; CLIP_SET_ENV_SRC="$_saved_src"
+assert_eq "exits 1" "1" "$rc"
+assert_eq "reason names the missing source display" "yes" \
+  "$(grep -qi 'no source display' "$TMP/set.err" && echo yes || echo no)"
+assert_untouched "no-explicit-source"
+
+scenario "positional-src-arg-selects-store: \$2 alone (no env override) resolves the store"
+reset_selections
+ID="$(seed_content "$DPY" "$TMP/plain.src")"
+_saved_src="$CLIP_SET_ENV_SRC"
+CLIP_SET_ENV_SRC=""            # no env override -- prove the positional arg alone suffices
+run_set "$ID" "$DPY"; rc=$?
+CLIP_SET_ENV_SRC="$_saved_src"
 assert_eq "exits 0" "0" "$rc"
-assert_on_both "resolved via inherited DISPLAY" "$PLAIN"
+assert_on_both "resolved via the positional \$2 argument" "$PLAIN"
+
+scenario "wrong-store-explicit-src-publishes-right-one: an id colliding across two stores is resolved by the explicit source, not guessed"
+# THE anti-bug test: seed the identical filename in TWO stores with
+# DIFFERENT content -- exactly the "000005.clip commonly exists in both"
+# collision a per-display, independently-seq'd store creates by
+# construction -- and prove the explicit source display, not enumeration
+# order or ambient state, decides which one gets published.
+reset_selections
+mkdir -p "$(store_dir ":winA")" "$(store_dir ":winB")"
+printf 'content-from-store-A' > "$(store_dir ":winA")/000001.clip"
+printf 'content-from-store-B' > "$(store_dir ":winB")/000001.clip"
+_saved_src="$CLIP_SET_ENV_SRC"
+
+CLIP_SET_ENV_SRC=":winA"
+run_set "000001.clip"; rc=$?
+assert_eq "store A: exits 0" "0" "$rc"
+assert_on_both "publishes store A's content, not store B's" "content-from-store-A"
+
+reset_selections
+CLIP_SET_ENV_SRC=":winB"
+run_set "000001.clip"; rc=$?
+assert_eq "store B: exits 0" "0" "$rc"
+assert_on_both "publishes store B's content, not store A's" "content-from-store-B"
+
+CLIP_SET_ENV_SRC="$_saved_src"
 
 # ======================= PHASE 2: displays that are not there ================
 
