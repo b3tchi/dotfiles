@@ -11,33 +11,37 @@
 # involved ("seeding" is just writing files), which is what PHASE 0 below
 # tests directly and exhaustively, per sp016 Task 2's test_plan.
 #
-# WHAT WAS REMOVED, AND WHY (read before "fixing" this suite to restore it)
+# WHAT WAS REMOVED, THEN RESTORED (dotfiles-g5b)
 #
-#   The old PHASE 1-4 drove ClipHistory.qml with xdotool and asserted on the
-#   exact row number the picker sent to a stubbed/real clip-set.sh (Down,
-#   Down, Enter -> row "2", etc). That is now IMPOSSIBLE to restore honestly
-#   without also editing quickshell/config/ClipHistory.qml, which is outside
-#   this task's files_touched (quickshell/qs-clip.sh,
-#   quickshell/test-clip-history.sh only — see sp016's Task 2 card).
-#   ClipHistory.qml's listProc.onRead does `parseInt(data.substring(0, tab))`
-#   and accept() re-stringifies that NUMBER. Under copyq, ids were small
-#   integers and this round-tripped losslessly. Under the file store, ids are
-#   opaque filenames like "000004.clip" — parseInt("000004.clip") is 4, a
-#   silent truncation to the numeric seq prefix, dropping ".clip" entirely.
-#   Keeping the old UI scenarios would mean either (a) asserting on that
-#   truncated number as if it were correct, which bakes a real bug into the
-#   suite as a passing contract, or (b) fixing ClipHistory.qml here, which is
-#   scope this task does not own. Filed as dotfiles-g5b (discovered-from this
-#   task, blocking sp016 Task 5's integration pass) instead. Until g5b lands,
-#   the picker's Enter key does not reliably reach the right store entry —
-#   that is a real, currently-open gap; see this suite's README note in the
-#   task report, not a claim resolved by anything below.
+#   The old PHASE 1-4 (sp014 task .4, dotfiles-92w.4) drove ClipHistory.qml
+#   with xdotool and asserted on the exact row value the picker sent to a
+#   stubbed/real clip-set.sh (Down, Down, Enter -> row "2", etc). When this
+#   suite was first rewritten for the file-store backend (sp016 Task 2,
+#   dotfiles-egm.2), that coverage was deliberately DROPPED rather than kept
+#   passing on a bug: ClipHistory.qml's listProc.onRead did
+#   `parseInt(data.substring(0, tab))` and accept() re-stringified that
+#   NUMBER. Under copyq, ids were small integers and this round-tripped
+#   losslessly. Under the file store, ids are opaque filenames like
+#   "000004.clip" — parseInt("000004.clip") is 4, a silent truncation to the
+#   numeric seq prefix, dropping ".clip" entirely. Keeping the old UI
+#   scenarios would have meant asserting on that truncated number as if it
+#   were correct, baking a real bug into the suite as a passing contract — so
+#   task .2 filed the fix as dotfiles-g5b (its own files_touched being
+#   qs-clip.sh + this suite only, not ClipHistory.qml) and left the gap
+#   documented rather than papered over.
 #
-#   What's KEPT from the old UI section: `toggle`'s session-derivation logic
-#   (candidates()/session_key_of()/cmd_toggle) is untouched by this task and
-#   is still regression-tested end to end (PHASE 1 below) — it does not
-#   depend on the id format at all, only on which quickshell instance answers
-#   the `cliphistory` IPC target.
+#   dotfiles-g5b (this task) owns quickshell/config/ClipHistory.qml: the
+#   parseInt is gone, entry.row now carries the raw string id end to end, and
+#   PHASE 1.5 below restores the keyboard-driven end-to-end scenario against
+#   the fixed QML — selecting a NON-newest entry and asserting the FULL id
+#   reaches (a stub for) clip-set.sh, closing the exact gap this comment used
+#   to describe as open.
+#
+#   What was NEVER dropped: `toggle`'s session-derivation logic
+#   (candidates()/session_key_of()/cmd_toggle) does not depend on the id
+#   format at all, only on which quickshell instance answers the
+#   `cliphistory` IPC target, and stayed regression-tested throughout (PHASE 1
+#   below).
 #
 # WHAT IS ACTUALLY OBSERVED (PHASE 0)
 #
@@ -457,6 +461,58 @@ assert_ne "the picker opened on $DPY2" "" "$WID2"
 assert_eq "and not on $DPY" "0" \
   "$(env DISPLAY="$DPY" "$XDOTOOL" search --onlyvisible --name '^qs-clip$' 2>/dev/null | wc -l | tr -d ' ')"
 close_picker "$DPY2"
+
+# ============================================================================
+# PHASE 1.5 — end-to-end keyboard-driven publish (dotfiles-g5b regression)
+# ============================================================================
+#
+# Restores the coverage debt the file-level comment above documents: PHASE
+# 1-4 of the pre-pivot suite drove the REAL ClipHistory.qml picker with
+# xdotool and asserted on the id it sent to (a stub for) clip-set.sh, but
+# were removed rather than kept passing on a truncated number, because
+# fixing that required editing ClipHistory.qml -- out of egm.2's
+# files_touched. This task (dotfiles-g5b) owns that file, so the scenario
+# is restored here, against the fixed QML.
+#
+# Selecting a NON-newest entry is the point: the old bug
+# (`parseInt("000004.clip") === 4`) truncated any id to its leading numeric
+# run, and asserting only on the newest row risks an accidental pass if that
+# row's id happens to survive truncation by coincidence (e.g. a
+# single-digit-losing case that still resolves to *some* existing file).
+# Moving off row 0 first and asserting the FULL filename closes that gap.
+#
+# qs-clip.sh's cmd_set currently execs `clip-set.sh <id>` bare -- it does not
+# yet forward the source display (see clip-set.sh's own header comment:
+# wiring that through is sp016 task 5's job, dotfiles-egm.5, not this one's).
+# So this scenario asserts on exactly what qs-clip.sh forwards TODAY: one
+# argument, the full id. When egm.5 lands the display argument, this
+# scenario's argv assertion should grow a second field to match.
+
+scenario "picker: keyboard-driven select of a NON-newest entry publishes its FULL id, untruncated (dotfiles-g5b)"
+close_picker "$DPY"
+reset_store
+write_entry 1 "alpha"
+write_entry 2 "bravo"
+write_entry 3 "charlie"
+clear_log; stub_mode log
+
+env DISPLAY="$DPY" "${ISO[@]}" QS_CLIP_SET="$STUB" QS_CLIP_DISPLAY="DISPLAY=$DPY" sh "$QS_CLIP" toggle >/dev/null 2>&1
+WID="$(win_on "$DPY")"
+assert_ne "picker opened on $DPY" "" "$WID"
+[ -n "$WID" ] && env DISPLAY="$DPY" "$XDOTOOL" windowfocus "$WID" 2>/dev/null
+sleep 0.4
+
+# list is newest-first: 000003.clip (row 0, newest), 000002.clip (row 1),
+# 000001.clip (row 2, oldest). One Down moves selection off the newest row
+# onto 000002.clip -- a NON-newest entry, deliberately.
+send "$DPY" Down
+send "$DPY" Return
+
+gone_on "$DPY"   # exit 0 from the stub closes the picker (setProc.onExited)
+assert_eq "clip-set.sh (stub) received the SELECTED entry's FULL untruncated id -- not a parseInt-truncated number ('2'), not the newest id (000003.clip), not a bare list position (0/1)" \
+  "000002.clip" "$(logged)"
+
+close_picker "$DPY"
 
 # ============================================================================
 # PHASE 2 — production wiring (inspection, not execution)

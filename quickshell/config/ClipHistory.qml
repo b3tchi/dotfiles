@@ -18,10 +18,15 @@
 // left here is presentation, which is the part a headless suite can only ever
 // observe indirectly.
 //
-// Rows carry their copyq index, NOT their position in the visible list. The
-// filter reorders/removes nothing else, so `set` is always handed the index the
-// history actually uses — a filtered list that published row 0 because the
-// match happened to be first is the bug this arrangement exists to prevent.
+// Rows carry their opaque store id (the filename qs-clip.sh's `list` reports,
+// e.g. "000004.clip"), NOT their position in the visible list, and NEVER as a
+// parsed/re-stringified number — ids are opaque strings end to end (sp016's
+// store contract). The filter reorders/removes nothing else, so `set` is
+// always handed the id the history actually uses — a filtered list that
+// published the first row's id because the match happened to be first is the
+// bug this arrangement exists to prevent, and `parseInt`-ing that id into a
+// truncated number was a second, independent instance of the same bug class
+// (dotfiles-g5b: "000004.clip" parsed to 4, silently dropping the filename).
 //
 // Env knobs (all optional, all read by qs-clip.sh except QS_CLIP_SH):
 //   QS_CLIP_SH        path to qs-clip.sh (default ~/.dotfiles/quickshell/qs-clip.sh)
@@ -45,7 +50,9 @@ Scope {
     readonly property string clipSh:
         Quickshell.env("QS_CLIP_SH") ?? (Quickshell.env("HOME") + "/.dotfiles/quickshell/qs-clip.sh")
 
-    // Every row copyq offered, newest first: { row: <copyq index>, preview: <string> }.
+    // Every row qs-clip.sh offered, newest first: { row: <opaque store id
+    // string, e.g. "000004.clip">, preview: <string> }. `row` is ALWAYS the
+    // raw string qs-clip.sh emitted — never parsed, never re-stringified.
     property var entries: []
     property var _buffer: []
 
@@ -70,7 +77,11 @@ Scope {
 
     // ── Backend ──
 
-    // `qs-clip.sh list` emits "<copyq row>\t<preview>" per line.
+    // `qs-clip.sh list` emits "<id>\t<preview>" per line. The id is an
+    // opaque store filename (e.g. "000004.clip") under the file-store backend
+    // (sp016) — carried here as the exact string qs-clip.sh printed, with no
+    // numeric parsing of any kind. Do NOT `parseInt` this: it silently
+    // truncates "000004.clip" to 4, which was dotfiles-g5b.
     Process {
         id: listProc
         running: false
@@ -79,9 +90,9 @@ Scope {
             onRead: data => {
                 var tab = data.indexOf("\t")
                 if (tab < 0) return
-                var n = parseInt(data.substring(0, tab))
-                if (isNaN(n)) return
-                root._buffer.push({ row: n, preview: data.substring(tab + 1) })
+                var id = data.substring(0, tab)
+                if (id === "") return
+                root._buffer.push({ row: id, preview: data.substring(tab + 1) })
             }
         }
         onExited: (exitCode, exitStatus) => {
@@ -95,7 +106,7 @@ Scope {
         }
     }
 
-    // `qs-clip.sh set <row>` -> clip-set.sh, whose exit code is the contract:
+    // `qs-clip.sh set <id>` -> clip-set.sh, whose exit code is the contract:
     //   0  the entry is on CLIPBOARD+PRIMARY of every live display
     //   1  a precondition failed and NOTHING was written anywhere
     //   2  a partial write — clipboard state is indeterminate
@@ -148,7 +159,10 @@ Scope {
         if (root.filtered.length === 0 || root.index >= root.filtered.length) return
         root.status = ""
         root.busy = true
-        setProc.command = ["sh", root.clipSh, "set", String(root.filtered[root.index].row)]
+        // The id travels verbatim: it is already the exact string
+        // qs-clip.sh's `list` emitted (see listProc.onRead) — no
+        // re-stringification, no format assumption about its shape.
+        setProc.command = ["sh", root.clipSh, "set", root.filtered[root.index].row]
         setProc.running = true
     }
 
