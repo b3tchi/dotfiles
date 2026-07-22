@@ -1,9 +1,10 @@
 #!/bin/sh
-# qs-clip.sh — clipboard-history picker control script (sp014 task 4).
+# qs-clip.sh — clipboard-history picker control script (sp014 task 4; backend
+# swapped to the bespoke file store by sp016 task 2, dotfiles-egm.2).
 #
 # usage: qs-clip.sh [toggle]      open/close the picker on the active session
-#        qs-clip.sh list          print the history as "<row>\t<preview>" lines
-#        qs-clip.sh set <row>     put history row <row> on the clipboard
+#        qs-clip.sh list          print the history as "<id>\t<preview>" lines
+#        qs-clip.sh set <id>      put store entry <id> on the clipboard
 #
 # The picker itself is quickshell/config/ClipHistory.qml, hosted inside the
 # session's normal quickshell instance (config/shell.qml wires it in). This
@@ -12,7 +13,7 @@
 # non-UI logic lives here in sh where it can be unit-tested without an X server,
 # and the QML stays presentation only.
 #
-# WHICH SESSION — DERIVED, NEVER INHERITED
+# WHICH SESSION — DERIVED, NEVER INHERITED (toggle only)
 #
 #   Native `:0` and xrdp `:10` are both permanently live ([[adr0004]]), and the
 #   shell this runs from may carry a DISPLAY belonging to the other session or
@@ -29,29 +30,54 @@
 #   those instances; otherwise, if exactly one instance qualifies it is used,
 #   and if several do the script refuses and names them rather than guessing.
 #
-#   `QS_CLIP_DISPLAY` (e.g. `DISPLAY=:10`) forces a session explicitly.
+#   `QS_CLIP_DISPLAY` (e.g. `DISPLAY=:10`) forces a session explicitly. This
+#   logic is UNCHANGED by the backend swap below — `list`/`set` are called
+#   from inside a specific session's own quickshell process (its own `sh
+#   qs-clip.sh list`/`set` child), so they read the session they are already
+#   running under (`$DISPLAY`) and never need to probe or guess between
+#   instances the way `toggle` does.
+#
+# BACKEND — THE FILE STORE (sp016 ## plan; see clip-store/dot.yaml and
+# i3/scripts/clip-store.sh for the full contract this reads):
+#
+#   store dir   $XDG_RUNTIME_DIR/clip-store/<display>/    0700, tmpfs
+#   entry       NNNNNN.clip — six-digit zero-padded monotonic seq, raw bytes
+#   id          the filename. Opaque to this script: matched for existence
+#               and equality only, never parsed or arithmetic'd on. `list`
+#               reads it to preview and reports it back verbatim; `set`
+#               forwards it to clip-set.sh unexamined beyond a shape check
+#               that guards against it being used as a path component.
+#
+#   Lexicographic filename order IS capture order, so newest-first is a
+#   reverse sort — deterministic, no daemon round-trip, no N+1 reads (the
+#   defect class the prior copyq/clipcat backends could not avoid).
 #
 # `set` is a thin wrapper over i3/scripts/clip-set.sh and propagates its exit
 # code verbatim, because the picker's UI depends on the 0/1/2 split:
 #   0 = on the clipboard of every live display, 1 = nothing written anywhere
 #   (safe to retry), 2 = partial write, clipboard state indeterminate.
-# See i3/scripts/clip-set.sh for the full contract.
+# See i3/scripts/clip-set.sh for the full contract. This script does its own
+# existence check on the id before ever invoking clip-set.sh — belt-and-
+# suspenders against the entry vanishing between `list` and `set` (a file
+# whose last reader was seconds ago, pruned by a cap enforcement in between)
+# — but does not otherwise duplicate clip-set.sh's job.
 #
-# copyq is addressed as a plain `copyq eval` per copyq/dot.yaml's client
-# contract — no XDG_CONFIG_HOME juggling, or the server socket path moves.
-#
-# Test: quickshell/test-clip-history.sh (headless, Xvfb + xdotool).
+# Test: quickshell/test-clip-history.sh (headless; file-store fixtures need
+# no X server for `list`/`set` — only the `toggle` session-derivation
+# regression scenarios still use Xvfb + a running quickshell instance).
 set -u
 
 PROG="${0##*/}"
 SELF_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
 TARGET=cliphistory                    # the IpcHandler target in ClipHistory.qml
+ENTRY_GLOB='[0-9][0-9][0-9][0-9][0-9][0-9].clip'
+ENTRY_RE='^[0-9]{6}\.clip$'
 
 # Overridable only so the headless suite can point at a stub / a worktree copy;
 # production leaves all three unset.
 CLIP_SET="${QS_CLIP_SET:-$SELF_DIR/../i3/scripts/clip-set.sh}"
-CAP="${QS_CLIP_CAP:-200}"             # most rows the picker will ever show
+CAP="${QS_CLIP_CAP:-200}"             # most entries the picker will ever show
 WIDTH="${QS_CLIP_PREVIEW:-120}"       # preview characters before truncation
 
 die() { printf '%s: %s\n' "$PROG" "$1" >&2; exit 1; }
@@ -59,51 +85,132 @@ die() { printf '%s: %s\n' "$PROG" "$1" >&2; exit 1; }
 case "$CAP"   in '' | *[!0-9]*) die "QS_CLIP_CAP must be a number, got '$CAP'" ;; esac
 case "$WIDTH" in '' | *[!0-9]*) die "QS_CLIP_PREVIEW must be a number, got '$WIDTH'" ;; esac
 
+# --------------------------------------------------------------- the store ---
+#
+# Prints the store directory for the session this process is running under,
+# or fails loudly. Matches clip-store.sh's own computation exactly (same
+# $XDG_RUNTIME_DIR/clip-store/<display> shape) so a consumer always looks
+# where the writer wrote. Unset $XDG_RUNTIME_DIR fails loudly (exit 78, the
+# family convention every store script shares) rather than falling back to
+# any persistent path. An unset $DISPLAY is a plain usage error (exit 1):
+# `list`/`set` run inside a specific session's own quickshell process, which
+# always has one — there is nothing to derive here, unlike `toggle`.
+store_dir() {
+  if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
+    printf '%s: XDG_RUNTIME_DIR is unset; refusing to guess a store location\n' "$PROG" >&2
+    return 78
+  fi
+  if [ -z "${DISPLAY:-}" ]; then
+    printf '%s: DISPLAY is unset; cannot locate this session'"'"'s clipboard store\n' "$PROG" >&2
+    return 1
+  fi
+  printf '%s/clip-store/%s\n' "$XDG_RUNTIME_DIR" "$DISPLAY"
+  return 0
+}
+
 # ------------------------------------------------------------------- list ---
 #
-# One line per history row: "<row>\t<preview>". The row number is the copyq
-# index the caller must hand back to `set`, so filtering/sorting in the UI can
-# never desynchronise the visible list from the history.
+# One line per entry: "<id>\t<preview>". The id is the store filename the
+# caller must hand back to `set` verbatim — it is never renumbered, so
+# filtering/sorting in the UI can never desynchronise the visible list from
+# the store (a filtered-to-one-row list still reports that row's real id).
+#
+# Newest first: filenames sort lexicographically in capture order, so a
+# descending sort on the name IS newest-first — deterministic across calls
+# with an unchanged store, unlike the copyq backend this replaced.
 #
 # The preview is the first NON-BLANK line of the entry, with tabs and other
-# control whitespace folded to spaces (a tab would break the field split) and
-# truncated to WIDTH characters. Leading blank lines are skipped because an
-# entry that starts with them would otherwise render as a blank row — the
-# preview exists to identify the entry, and only the preview is truncated: the
-# full entry is what `set` publishes.
+# control whitespace folded to spaces (a raw tab or newline in the preview
+# would break the "<id>\t<preview>" line protocol) and truncated to WIDTH
+# characters. Leading blank lines are skipped because an entry that starts
+# with them would otherwise render as a blank row — the preview exists only
+# to identify the entry; `set` still publishes the full raw file, untouched
+# by any of this folding or truncation.
 #
-# The list is capped at CAP rows. A history longer than that is not paged; the
-# oldest entries are simply not offered (they are still in copyq, reachable by
-# `set <row>` directly).
+# Consumers of the store read ONLY the `??????.clip` glob (six digits, the
+# literal extension) and skip everything else: dotfiles (`.wip.tmp`, `.tgt`)
+# and any in-flight `*.tmp` are writer work files, never a visible entry —
+# this is what makes tmp-file-mid-write invisible to `list` by construction,
+# not by a special case.
+#
+# The list is capped at CAP entries. A store larger than that is not paged;
+# the oldest entries are simply not offered (still reachable by `set <id>`
+# directly, and pruned from the store itself only by clip-store.sh's own cap).
+#
+# Absent/empty store dir: no output, exit 0 — a fresh session with nothing
+# captured yet is not an error.
 cmd_list() {
-  command -v copyq >/dev/null 2>&1 || die "copyq not found in PATH"
-  copyq eval -- '
-var CAP='"$CAP"', W='"$WIDTH"';
-var n = size(); if (n > CAP) n = CAP;
-var o = [];
-for (var i = 0; i < n; ++i) {
-  var t = str(read("text/plain", i));
-  var ls = t.split("\n");
-  var p = "";
-  for (var j = 0; j < ls.length; ++j) {
-    var c = ls[j].replace(/[\t\r\v\f]/g, " ").replace(/^\s+|\s+$/g, "");
-    if (c !== "") { p = c; break; }
-  }
-  if (p === "") p = "(empty)";
-  if (p.length > W) p = p.substring(0, W - 1) + "…";
-  o.push(i + "\t" + p);
+  _store="$(store_dir)"; _rc=$?
+  [ "$_rc" -eq 0 ] || exit "$_rc"
+
+  [ -d "$_store" ] || return 0
+
+  _n=0
+  for _name in $(cd "$_store" 2>/dev/null && ls -1 2>/dev/null \
+                 | grep -E "$ENTRY_RE" | sort -r); do
+    [ "$_n" -lt "$CAP" ] || break
+    _path="$_store/$_name"
+    [ -f "$_path" ] || continue   # vanished between the listing and this read
+    printf '%s\t%s\n' "$_name" "$(preview_of "$_path")"
+    _n=$((_n + 1))
+  done
+  return 0
 }
-o.join("\n")
-'
+
+# The first non-blank line of <file>, tabs/control-whitespace folded to a
+# single space, trimmed, truncated to WIDTH characters (an ellipsis replaces
+# the last character when it is). "(empty)" when every line is blank or the
+# file has none. A literal two-character `\n` (backslash, n) is two ordinary
+# characters here — only a REAL newline byte splits lines — and gawk's
+# length()/substr() are character-, not byte-, aware in a UTF-8 locale, so a
+# multi-byte preview truncates on a character boundary rather than mid-byte.
+preview_of() { # <path>
+  gawk -v W="$WIDTH" '
+    {
+      line = $0
+      gsub(/[\t\r\v\f]/, " ", line)
+      gsub(/^[ ]+/, "", line)
+      gsub(/[ ]+$/, "", line)
+      if (line != "" && !found) { p = line; found = 1 }
+    }
+    END {
+      if (!found) p = "(empty)"
+      if (length(p) > W) p = substr(p, 1, W - 1) "\xe2\x80\xa6"
+      print p
+    }
+  ' "$1"
 }
 
 # -------------------------------------------------------------------- set ---
 #
 # exec, so clip-set.sh's exit code IS this script's exit code — the picker
-# reads 0/1/2 off it and shows a different outcome for each.
+# reads 0/1/2 off it and shows a different outcome for each. The id is
+# forwarded byte-for-byte; nothing here reads or touches the entry's payload,
+# so the full raw file is what eventually gets published, never the
+# (lossy, truncated) preview.
 cmd_set() {
-  [ $# -eq 1 ] || die "usage: $PROG set <row>"
-  case "$1" in '' | *[!0-9]*) die "row must be a non-negative integer, got '$1'" ;; esac
+  [ $# -eq 1 ] || die "usage: $PROG set <id>"
+
+  # Shape check only — six digits + the literal extension. This is NOT
+  # parsing the id for meaning (no arithmetic, no stripped leading zeros); it
+  # exists solely so an id is never used to build an unexpected path
+  # component. Equality against what `list` actually offered is still what
+  # matters; this just bounds what "equality" is allowed to look like.
+  case "$1" in
+    $ENTRY_GLOB) : ;;
+    *) die "invalid id: '$1'" ;;
+  esac
+
+  _store="$(store_dir)"; _rc=$?
+  [ "$_rc" -eq 0 ] || exit "$_rc"
+
+  # The entry may have vanished between the `list` that offered this id and
+  # this `set` (a cap-enforced prune, a concurrent capture pushing it out).
+  # Caught here, before clip-set.sh ever runs: exit 1, nothing published —
+  # the same "nothing was touched" promise clip-set.sh's own precondition
+  # checks make for every other failure it can detect up front.
+  [ -f "$_store/$1" ] || { printf '%s: no such entry: %s\n' "$PROG" "$1" >&2; exit 1; }
+
   [ -r "$CLIP_SET" ] || die "clip-set.sh not found at $CLIP_SET"
   exec sh "$CLIP_SET" "$1"
 }
@@ -175,5 +282,5 @@ case "${1:-toggle}" in
   list)   cmd_list ;;
   set)    shift; cmd_set "$@" ;;
   toggle) cmd_toggle ;;
-  *)      die "usage: $PROG [toggle|list|set <row>]" ;;
+  *)      die "usage: $PROG [toggle|list|set <id>]" ;;
 esac
