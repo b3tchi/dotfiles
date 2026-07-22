@@ -1,73 +1,67 @@
 #!/usr/bin/env bash
 # test-clip-feed.sh — verify the cross-display clipboard feeder
 # (i3/scripts/clip-feed.sh): sp014 dotfiles-92w.2, ported to the clipcat
-# backend by sp016 dotfiles-egm.4.
+# backend by sp016 dotfiles-egm.4, ported again to the bespoke file-store
+# backend by sp016 dotfiles-egm.7.
 #
 # Runs entirely headless on two throwaway Xvfb displays — a stand-in for the
 # xrdp session (SRC) and one for the native session (DST) — with an isolated
-# XDG_CONFIG_HOME / XDG_RUNTIME_DIR for the DST clipcatd, so it never touches
-# the live X sessions, the live clipboard, the real ~/.config/clipcat, or the
-# live session's clipcat daemon.
+# XDG_RUNTIME_DIR, so it never touches the live X sessions, the live
+# clipboard, or the live session's store under the real
+# $XDG_RUNTIME_DIR/clip-store.
 #
 # The feeder is deliberately launched with a bogus DISPLAY exported AND with
-# XDG_RUNTIME_DIR unset, so the suite fails if it ever starts trusting the
-# inherited DISPLAY or guessing the destination socket from the environment
-# instead of taking CLIP_FEED_DST_SOCKET.
+# XDG_RUNTIME_DIR pointed at the isolated tree, so the suite fails if it ever
+# starts trusting the inherited DISPLAY instead of CLIP_FEED_SRC/CLIP_FEED_DST.
 #
-# Selections are owned by a python-xlib helper rather than a clipcatctl call:
-# a clipcatctl insert/load does not re-trigger the daemon's watcher at all
-# (poc010 Q3), so seeding through it would make every capture assertion a
-# false pass.  The helper also publishes several MIME targets on one change,
-# which xclip (one target per call) cannot do — needed for the
-# password-manager-hint case.
+# Selections are owned by a python-xlib helper rather than a plain xclip call:
+# the helper can publish several MIME targets on one change (xclip cannot —
+# one target per invocation), which the password-manager-hint cases need, and
+# it logs every SelectionRequest target it receives to a reqlog file, turning
+# "the payload was never requested" from an assumption into a measurement
+# (carried from test-clip-store.sh's clip-owner.py).
 #
 # ------------------------------------------------------------------------
-# WHY THIS SUITE IS STRUCTURALLY IMMUNE TO dotfiles-apl
+# WHY THIS SUITE NO LONGER NEEDS A DAEMON AT ALL
 # ------------------------------------------------------------------------
-# clipcat 0.25.0 has an upstream listener defect (dotfiles-apl): on a
-# fraction of daemon starts the X11 watcher dies permanently on
-# GetProperty->BadAtom, and that daemon then silently records nothing for its
-# whole lifetime.  clipcat/test-clipcat.sh has to fight it with a bounded
-# fresh-restart retry, because everything it asserts arrives through the
-# watcher.
+# Under the clipcat backend (task 4) this suite ran a real clipcatd and read
+# the feeder's effect through clipcatctl, and had to fight dotfiles-apl (a
+# fraction of daemon starts go permanently deaf) with a bounded restart retry
+# and a diagnostic-only watcher probe.  The file-store backend has no daemon
+# on the destination: the feeder writes `$XDG_RUNTIME_DIR/clip-store/<DST>/`
+# directly, the exact directory clip-store.sh's own loop for that display
+# writes into.  So this suite reads that directory with plain shell globs
+# (store_count / entry_for_content / etc., carried from test-clip-store.sh),
+# and the destination Xvfb display (DST) exists ONLY so the
+# dst-selection-untouched scenario has a real X CLIPBOARD to assert nothing
+# touched — no daemon, no gRPC socket, no watcher-liveness probe needed here
+# any more.
 #
-# This suite does not, because the FEED PATH NEVER USES THE DST WATCHER.
-# clip-feed.sh reads the SRC selection with xclip and hands the bytes to the
-# DST daemon over gRPC (`clipcatctl load`), which by poc010 Q3 bypasses the
-# watcher entirely.  A born-deaf DST daemon still accepts, stores and serves
-# every fed clip.  So "the feeder didn't feed" and "the daemon was born deaf"
-# are not confusable here: the latter cannot produce the former.
-#
-# That claim is not left as an assertion of faith — the diagnostic line
-# printed after startup MEASURES the DST watcher's liveness on each run, so
-# the record shows whether a given green run happened to have a deaf daemon
-# (it should, sometimes, and the results should be identical either way).
-# The daemon startup retry below is therefore bounded on gRPC readiness only,
-# with no X11 warm-up gate; the retry exists for ordinary start failures, not
-# for apl.
+# The concurrent-capture-seq-no-clobber scenario goes one step further and
+# runs a REAL clip-store.sh loop against the DST display at the same time as
+# the feeder, both writing into the same store directory — the actual
+# integration point sp016 task 7 exists to prove safe (ln fails on a seq
+# collision instead of clobbering; see clip-store.sh's WRITE section).
 #
 # usage: i3/scripts/test-clip-feed.sh
-# env:   CLIPCATD=/path/to/clipcatd  CLIPCATCTL=/path/to/clipcatctl
-#        XVFB=/path/to/Xvfb          (all default: from PATH)
+# env:   XVFB=/path/to/Xvfb  CLIPNOTIFY=/path/to/clipnotify  (default: PATH)
 #        SRC_DISPLAY=:98  DST_DISPLAY=:97
+#        KEEP_TMP=1   (debug: skip deleting $TMP on exit)
 set -u
 
 REPO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 FEEDER="$REPO_DIR/clip-feed.sh"
-CLIPCATD="${CLIPCATD:-clipcatd}"
-CLIPCATCTL="${CLIPCATCTL:-clipcatctl}"
+STORESH="$REPO_DIR/clip-store.sh"
 XVFB="${XVFB:-Xvfb}"
 SRC="${SRC_DISPLAY:-:98}"
 DST="${DST_DISPLAY:-:97}"
 
-# AF_UNIX socket paths are capped near 108 bytes (SUN_LEN), so $TMP is kept
-# short — same reason clipcat/test-clipcat.sh does it.
+# AF_UNIX socket paths are capped near 108 bytes (SUN_LEN); kept short as a
+# carried convention even though this suite no longer opens any socket
+# itself — clip-store.sh's own lock/store paths inherit whatever $TMP is.
 TMP="/tmp/clip-feed-test.$$"
-CFG="$TMP/cfg"    # XDG_CONFIG_HOME for the DST daemon
-DAT="$TMP/data"
-CCH="$TMP/cache"
 RUN="$TMP/run"    # XDG_RUNTIME_DIR stand-in (tmpfs 0700 in production)
-SOCK="$RUN/clipcat/grpc.sock"
+SDIR="$RUN/clip-store/$DST"   # the destination store dir the feeder writes
 
 PASS=0
 FAIL=0
@@ -85,18 +79,13 @@ scenario() { printf '\n[%s]\n' "$1"; }
 
 cleanup() {
   stop_feeder
-  stop_server
+  stop_loop
   [ -n "${OWNER_PID:-}" ] && kill "$OWNER_PID" 2>/dev/null
   [ -n "${SRC_PID:-}" ] && kill "$SRC_PID" 2>/dev/null
   [ -n "${DST_PID:-}" ] && kill "$DST_PID" 2>/dev/null
   [ -n "${KEEP_TMP:-}" ] || rm -rf "$TMP"
 }
 trap cleanup EXIT
-
-# clipcatctl client for the DST daemon.  Always timeout-wrapped (adr0002).
-# The env here is the *test's* isolation; the feeder gets its own environment
-# in start_feeder and is deliberately given LESS than this.
-cc() { timeout 10 env XDG_RUNTIME_DIR="$RUN" "$CLIPCATCTL" --server-endpoint "$SOCK" "$@"; }
 
 # Read a selection on a given display.
 xsel_of() { # <display> <selection>
@@ -132,87 +121,18 @@ start_xvfb() { # <display> <varname-for-pid>
   exit 1
 }
 
-# The DST clipcatd.  Backgrounded by invoking the binary directly, never via
-# a shell function or $(...) — otherwise $! is the subshell and the real
-# daemon is orphaned (clipcat/test-clipcat.sh harness bugs #1/#2).
-#
-# Readiness is gRPC only, deliberately: see the dotfiles-apl note in the file
-# header.  Every assertion in this suite reaches the daemon over gRPC, so a
-# daemon whose X11 watcher is dead is still a perfectly good daemon here.
-_start_server_once() {
-  mkdir -p "$RUN/clipcat"
-  chmod 700 "$RUN"
-  env DISPLAY="$DST" XDG_CONFIG_HOME="$CFG" XDG_DATA_HOME="$DAT" \
-      XDG_CACHE_HOME="$CCH" XDG_RUNTIME_DIR="$RUN" \
-    "$CLIPCATD" --no-daemon --grpc-socket-path "$SOCK" >"$TMP/server.log" 2>&1 &
-  DAEMON_PID=$!
-  local i
-  for i in $(seq 1 40); do
-    cc length >/dev/null 2>&1 && return 0
-    sleep 0.5
-  done
-  kill "$DAEMON_PID" 2>/dev/null
-  wait "$DAEMON_PID" 2>/dev/null
-  DAEMON_PID=""
-  return 1
-}
-
-start_server() {
-  local attempt
-  for attempt in 1 2 3 4 5; do
-    _start_server_once && return 0
-    echo "warning: DST clipcatd start attempt $attempt failed; retrying fresh" >&2
-    sleep 1
-  done
-  echo "FATAL: DST clipcatd did not become reachable after 5 attempts." >&2
-  echo "NOTE: clipcat.toml sets emit_journald=true / emit_stdout=false, so the" >&2
-  echo "daemon's own diagnostics go to journald:  journalctl --user -t clipcatd -n 50" >&2
-  cat "$TMP/server.log" >&2
-  exit 1
-}
-
-stop_server() {
-  [ -n "${DAEMON_PID:-}" ] || return 0
-  kill -TERM "$DAEMON_PID" 2>/dev/null
-  wait "$DAEMON_PID" 2>/dev/null
-  DAEMON_PID=""
-}
-
-# Is the DST daemon's X11 watcher alive on this run?  DIAGNOSTIC ONLY — no
-# assertion depends on the answer, which is exactly the point (see the
-# dotfiles-apl note in the header).  Costs one throwaway capture, which is
-# cleared afterwards.
-#
-# The xclip below MUST have its stdout redirected: xclip forks a background
-# process to keep serving the selection, and that child inherits whatever
-# stdout it was given.  This function is called inside a command
-# substitution, so an un-redirected xclip child holds the substitution's pipe
-# open forever and the whole suite hangs before its first assertion.
-# (Observed.  Every other xclip-as-owner call in this file runs at statement
-# level, where the inherited stdout is harmless.)
-probe_dst_watcher() {
-  local before after
-  before="$(cc length 2>/dev/null)"
-  printf '__watcher_probe_%s__' "$$" \
-    | env DISPLAY="$DST" timeout 5 xclip -selection clipboard >/dev/null 2>&1
-  sleep 3
-  after="$(cc length 2>/dev/null)"
-  # drop whatever the probe added and release the selection
-  cc clear >/dev/null 2>&1
-  [ "$before" != "$after" ] && echo alive || echo "deaf (known upstream defect dotfiles-apl)"
-}
-
 # Start a feeder ($1 = script to run, default the real one).
 #
-# DISPLAY is set to a display that does not exist and XDG_RUNTIME_DIR is
-# REMOVED: a feeder that trusts either captures nothing / feeds nowhere.  The
-# destination is named explicitly, exactly as task 5's autostart will name it.
+# DISPLAY is set to a display that does not exist: a feeder that trusts it
+# captures nothing.  XDG_RUNTIME_DIR points at the isolated tree -- it is
+# mandatory now (the destination is a directory under it), not a fallback --
+# and CLIP_FEED_DST names the destination display explicitly, exactly as
+# task 5's autostart will.
 start_feeder() {
-  env -u XDG_RUNTIME_DIR DISPLAY=:77 \
-      XDG_CONFIG_HOME="$CFG" XDG_DATA_HOME="$DAT" XDG_CACHE_HOME="$CCH" \
-      CLIP_FEED_SRC="$SRC" CLIP_FEED_DST_SOCKET="$SOCK" \
+  env DISPLAY=:77 XDG_RUNTIME_DIR="$RUN" \
+      CLIP_FEED_SRC="$SRC" CLIP_FEED_DST="$DST" \
       CLIP_FEED_LOCK="$TMP/feed.lock" \
-      CLIP_FEED_POLL=0.5 CLIP_FEED_IDLE=5 CLIP_FEED_TIMEOUT=1 \
+      CLIP_FEED_POLL=0.5 CLIP_FEED_IDLE=5 CLIP_FEED_TIMEOUT=5 \
       sh "${1:-$FEEDER}" >>"$TMP/feeder.log" 2>&1 &
   FEED_PID=$!
   sleep 1
@@ -225,8 +145,32 @@ stop_feeder() {
   FEED_PID=""
 }
 
+# A REAL clip-store.sh loop against the DST display, writing into the same
+# store directory the feeder targets -- used only by
+# concurrent-capture-seq-no-clobber, the scenario that proves the two
+# writers share the directory safely.  Killed by pid lineage, never by name
+# (dotfiles-92w.5).
+start_loop() {
+  env DISPLAY=:77 XDG_RUNTIME_DIR="$RUN" CLIPNOTIFY="$CN" \
+      CLIP_STORE_DISPLAY="$DST" \
+      sh "$STORESH" >>"$TMP/loop.log" 2>&1 &
+  LOOP_PID=$!
+  sleep 1
+}
+
+stop_loop() {
+  [ -n "${LOOP_PID:-}" ] || return 0
+  local kids k
+  kids="$(pgrep -P "$LOOP_PID" 2>/dev/null)"
+  kill "$LOOP_PID" 2>/dev/null
+  wait "$LOOP_PID" 2>/dev/null
+  for k in $kids; do kill "$k" 2>/dev/null; done
+  LOOP_PID=""
+}
+
 # Own SRC CLIPBOARD with <text>, advertising any further arguments as extra
-# MIME targets (each serving the value "secret").  Returns once held.
+# MIME targets (each serving the value "secret").  Returns once held.  Every
+# SelectionRequest target received is logged to reqlog.<owner-pid>.
 own_clipboard() { # <text> [extra-mime ...]
   [ -n "${OWNER_PID:-}" ] && { kill "$OWNER_PID" 2>/dev/null; wait "$OWNER_PID" 2>/dev/null; }
   env DISPLAY="$SRC" python3 "$TMP/clip-owner.py" "$@" >"$TMP/owner.out" 2>&1 &
@@ -273,58 +217,75 @@ own_race_clipboard() { # <benign-text> <secret-text>
 
 # Did the mid-poll ownership handoff actually happen?  A race scenario whose
 # handoff never fired is just an ordinary benign copy, and asserting "no
-# secret in history" against it would be a green that proves nothing.  Every
-# race scenario asserts this first.
+# secret in the store" against it would be a green that proves nothing.
 race_fired() { grep -q '^handed$' "$TMP/owner.out" 2>/dev/null && echo fired || echo not-fired; }
 
-# ---- id-keyed history helpers (dotfiles-8il) --------------------------------
-# `clipcatctl list` has NO stable or temporal order — three consecutive calls
-# against unchanged history returned three different orderings.  So nothing
-# here reads position 0, or any position: entries are found by content, which
-# is also the spec's own rule (ids are content hashes, not row numbers).
+reqlog_of_owner() { cat "$TMP/reqlog.$OWNER_PID" 2>/dev/null; }
 
-# How many history entries have exactly this text as their (untruncated)
-# preview.  Used for "landed exactly once".
+# ---- destination store readers ---------------------------------------------
+# These read the store exactly as consumers must: only ??????.clip names,
+# lexicographic order == capture order, ids opaque.  Carried from
+# test-clip-store.sh, pointed at SDIR (the destination the feeder writes).
+
+store_count() {
+  local n=0 f
+  for f in "$SDIR"/[0-9][0-9][0-9][0-9][0-9][0-9].clip; do
+    [ -e "$f" ] && n=$((n + 1))
+  done
+  echo "$n"
+}
+
+newest_path() {
+  local last="" f
+  for f in "$SDIR"/[0-9][0-9][0-9][0-9][0-9][0-9].clip; do
+    [ -e "$f" ] && last="$f"
+  done
+  echo "$last"
+}
+
+entries_asc() { # entry paths, oldest first
+  local f
+  for f in "$SDIR"/[0-9][0-9][0-9][0-9][0-9][0-9].clip; do
+    [ -e "$f" ] && echo "$f"
+  done
+}
+
+# Does <text> appear anywhere in any entry?  The leak check.
+content_present() { # <text>
+  grep -qF -- "$1" "$SDIR"/[0-9][0-9][0-9][0-9][0-9][0-9].clip 2>/dev/null \
+    && echo present || echo absent
+}
+
+# Path of the entry whose full content is exactly <text>; empty if none.
+entry_for_content() { # <exact text>
+  local want="$1" f
+  for f in "$SDIR"/[0-9][0-9][0-9][0-9][0-9][0-9].clip; do
+    [ -e "$f" ] || continue
+    if [ "$(cat "$f")" = "$want" ]; then echo "$f"; return; fi
+  done
+}
+
+# How many entries have exactly this text as their full content.  Used for
+# "landed exactly once".
 count_content() { # <exact text>
-  cc list 2>/dev/null | awk -v want="$1" -F': ' \
-    '{ id=$1; sub(/^[^:]*: /, "", $0); if ($0 == want) n++ } END { print n + 0 }'
-}
-
-# id of the first entry whose full preview is exactly <text>; empty if none.
-id_for_content() { # <exact text>
-  cc list 2>/dev/null | while IFS= read -r line; do
-    if [ "${line#*: }" = "$1" ]; then echo "${line%%: *}"; return; fi
+  local want="$1" n=0 f
+  for f in "$SDIR"/[0-9][0-9][0-9][0-9][0-9][0-9].clip; do
+    [ -e "$f" ] || continue
+    [ "$(cat "$f")" = "$want" ] && n=$((n + 1))
   done
+  echo "$n"
 }
 
-# id of the first entry whose preview STARTS WITH <prefix>.  For fixtures
-# longer than clipcatctl's 100-char preview.
-id_for_preview_prefix() { # <prefix>
-  cc list 2>/dev/null | while IFS= read -r line; do
-    case "${line#*: }" in
-      "$1"*) echo "${line%%: *}"; return ;;
-    esac
-  done
-}
-
-# Does <text> appear anywhere in any history entry?  The leak check.
-leaks() { # <text>
-  local id
-  cc list 2>/dev/null | cut -d: -f1 | while IFS= read -r id; do
-    [ -n "$id" ] || continue
-    cc get "$id" 2>/dev/null | grep -qF -- "$1" && { echo "id $id"; return; }
-  done
-}
-
-# Wait until `clipcatctl length` differs from <baseline>, or timeout.
-wait_length_change() { # <baseline> [seconds]
+# Wait until the store count differs from <baseline>, or timeout; echoes the
+# count either way (mirrors the old wait_length_change against clipcatctl).
+wait_store_change() { # <baseline> [seconds]
   local base="$1" limit="${2:-10}" i n
-  for i in $(seq 1 $((limit * 5))); do
-    n="$(cc length 2>/dev/null)"
-    [ -n "$n" ] && [ "$n" != "$base" ] && { echo "$n"; return 0; }
-    sleep 0.2
+  for i in $(seq 1 $((limit * 10))); do
+    n="$(store_count)"
+    [ "$n" != "$base" ] && { echo "$n"; return 0; }
+    sleep 0.1
   done
-  cc length 2>/dev/null
+  store_count
 }
 
 # Total CPU jiffies charged to <pid> and its reaped children.
@@ -334,28 +295,25 @@ cpu_jiffies() { # <pid>
 
 # --------------------------------------------------------------- fixtures ---
 
-mkdir -p "$TMP" "$CFG/clipcat" "$DAT" "$CCH" "$RUN/clipcat"
+mkdir -p "$TMP" "$RUN" "$TMP/fix"
 chmod 700 "$RUN"
-
-# The DST daemon runs the shipped config through a symlink, exactly as rotz
-# links it — so `sensitive_mime_types` is ACTIVE on the receiving side.  That
-# is the point of the laundering scenario below: a clipcatctl load bypasses
-# the watcher (poc010 Q3), so the destination's own filter cannot save us and
-# the feeder must filter for itself.
-ln -s "$REPO_DIR/../../clipcat/clipcat.toml" "$CFG/clipcat/clipcatd.toml"
 
 cat > "$TMP/clip-owner.py" <<'PYEOF'
 """Own the X CLIPBOARD advertising several targets at once.
 
 Simulates a password manager (KeePassXC) publishing the text payload and the
-`application/x-kde-passwordManagerHint` marker on one clipboard change --
-which xclip cannot do (one target per invocation) and a clipcatctl load
-cannot be used for at all (it bypasses the watcher, so it would exercise
-nothing).
+password-manager-hint marker on one clipboard change -- which xclip cannot do
+(one target per invocation).  Every SelectionRequest target received is
+appended to <this-script's-directory>/reqlog.<own-pid>, so a caller can
+assert exactly what was requested, not just what was (or was not) captured.
+
+"image/png" as the sole extra means: serve ONLY this MIME, no text targets
+at all (an image-style selection).
 
 usage: clip-owner.py <text> [extra-mime ...]
        clip-owner.py --file <path> [extra-mime ...]
 """
+import os
 import sys
 import Xlib.display
 import Xlib.protocol.event
@@ -383,13 +341,14 @@ served = {
     d.get_atom("text/plain"): text,
     Xlib.Xatom.STRING: text,
 }
-# "image/png" as the sole extra means: serve ONLY this MIME, no text targets
-# at all (an image-style selection).
 if extra[:1] == ["image/png"]:
     served = {d.get_atom("image/png"): text}
     extra = []
 for mime in extra:
     served[d.get_atom(mime)] = b"secret"
+
+reqlog_path = os.path.join(os.path.dirname(sys.argv[0]), "reqlog." + str(os.getpid()))
+reqlog = open(reqlog_path, "w")
 
 win.set_selection_owner(SEL, Xlib.X.CurrentTime)
 d.sync()
@@ -402,16 +361,13 @@ while True:
     e = d.next_event()
     if e.type != Xlib.X.SelectionRequest:
         continue
+    print("REQ " + d.get_atom_name(e.target), file=reqlog, flush=True)
     prop = e.property if e.property != Xlib.X.NONE else e.target
     ok = True
     if e.target == TARGETS:
         e.requestor.change_property(
             prop, Xlib.Xatom.ATOM, 32, [TARGETS] + list(served))
     elif e.target in served:
-        # Logged so the suite can assert the STRONGER property of the first
-        # gate: a hint-bearing selection has its payload never even requested,
-        # not merely never fed.
-        print("served-payload", flush=True)
         e.requestor.change_property(prop, e.target, 8, served[e.target])
     else:
         ok = False
@@ -446,8 +402,9 @@ A scenario that never prints "handed" did not exercise the race and its
 result means nothing; the suite asserts on it.
 
 This fixture is BACKEND-INDEPENDENT.  It tests the feeder's own gating
-against the X protocol, not anything about copyq or clipcat, and survived
-the sp016 backend swap unchanged for exactly that reason.
+against the X protocol, not anything about copyq, clipcat, or the file
+store, and has now survived two backend swaps unchanged for exactly that
+reason.
 
 usage: race-owner.py <benign-text> <secret-text>
 """
@@ -518,172 +475,245 @@ while True:
         print("handed" if handed else "HANDOFF-FAILED", flush=True)
 PYEOF
 
-command -v "$CLIPCATD"   >/dev/null 2>&1 || { echo "FATAL: clipcatd not found (set CLIPCATD=)" >&2; exit 1; }
-command -v "$CLIPCATCTL" >/dev/null 2>&1 || { echo "FATAL: clipcatctl not found (set CLIPCATCTL=)" >&2; exit 1; }
+cat >"$TMP/mini-clipnotify.c" <<'CEOF'
+/* mini-clipnotify.c -- harness stand-in for clipnotify(1), built only when
+ * the packaged binary is absent.  Same contract: subscribe to XFixes
+ * selection events for the named selection, block until one arrives, exit
+ * 0.  Exits nonzero when the display cannot be opened or dies, which is
+ * what ends clip-store.sh's loop cleanly. */
+#include <stdio.h>
+#include <string.h>
+#include <strings.h>
+#include <X11/Xlib.h>
+#include <X11/Xatom.h>
+#include <X11/extensions/Xfixes.h>
+
+int main(int argc, char **argv) {
+    const char *sel = "clipboard";
+    int i;
+    for (i = 1; i < argc - 1; i++)
+        if (!strcmp(argv[i], "-s")) sel = argv[i + 1];
+    Display *d = XOpenDisplay(NULL);
+    if (!d) { fprintf(stderr, "mini-clipnotify: cannot open display\n"); return 1; }
+    Atom a;
+    if (!strcasecmp(sel, "clipboard")) a = XInternAtom(d, "CLIPBOARD", False);
+    else if (!strcasecmp(sel, "primary")) a = XA_PRIMARY;
+    else if (!strcasecmp(sel, "secondary")) a = XA_SECONDARY;
+    else { fprintf(stderr, "mini-clipnotify: bad selection\n"); return 2; }
+    int event_base, error_base;
+    if (!XFixesQueryExtension(d, &event_base, &error_base)) {
+        fprintf(stderr, "mini-clipnotify: no XFixes\n");
+        return 1;
+    }
+    XFixesSelectSelectionInput(d, DefaultRootWindow(d), a,
+        XFixesSetSelectionOwnerNotifyMask |
+        XFixesSelectionWindowDestroyNotifyMask |
+        XFixesSelectionClientCloseNotifyMask);
+    XEvent ev;
+    XNextEvent(d, &ev);
+    XCloseDisplay(d);
+    return 0;
+}
+CEOF
+
 command -v "$XVFB"  >/dev/null 2>&1 || { echo "FATAL: Xvfb not found (set XVFB=)"  >&2; exit 1; }
 command -v xclip    >/dev/null 2>&1 || { echo "FATAL: xclip not found" >&2; exit 1; }
 command -v flock    >/dev/null 2>&1 || { echo "FATAL: flock not found" >&2; exit 1; }
 python3 -c 'import Xlib' 2>/dev/null || { echo "FATAL: python-xlib missing" >&2; exit 1; }
-[ -f "$FEEDER" ] || { echo "FATAL: feeder not found at $FEEDER" >&2; exit 1; }
+[ -f "$FEEDER" ]  || { echo "FATAL: feeder not found at $FEEDER" >&2; exit 1; }
+[ -f "$STORESH" ] || { echo "FATAL: clip-store.sh not found at $STORESH" >&2; exit 1; }
+
+# Resolve clipnotify for the concurrent-capture scenario's local loop: PATH
+# first (the production binary), source-built stand-in only as a harness
+# fallback (test-clip-store.sh's pattern).
+if [ -n "${CLIPNOTIFY:-}" ]; then
+  CN="$CLIPNOTIFY"
+elif command -v clipnotify >/dev/null 2>&1; then
+  CN="clipnotify"
+else
+  command -v gcc >/dev/null 2>&1 || { echo "FATAL: clipnotify not installed and no gcc to build the stand-in" >&2; exit 1; }
+  gcc -O2 -o "$TMP/clipnotify" "$TMP/mini-clipnotify.c" -lX11 -lXfixes \
+    || { echo "FATAL: could not build the clipnotify stand-in (libXfixes headers?)" >&2; exit 1; }
+  CN="$TMP/clipnotify"
+fi
 
 start_xvfb "$DST" DST_PID
 start_xvfb "$SRC" SRC_PID
-start_server
 
-echo "clipcatd: $("$CLIPCATD" --version 2>/dev/null | head -1)"
-echo "src(xrdp stand-in): $SRC   dst(native stand-in): $DST   socket: $SOCK"
-echo "DST watcher on this run: $(probe_dst_watcher)  <- diagnostic only; no assertion below depends on it (see header)"
+echo "src(xrdp stand-in): $SRC   dst(native stand-in): $DST   run: $RUN"
+echo "clipnotify: $CN"
 
 # ======================= PHASE 1: capture, dedup, filtering =================
 
 start_feeder
 
-scenario "cross-display-capture: a copy on SRC reaches the DST clipcat history exactly once"
-before="$(cc length)"
+scenario "cross-display-capture: a copy on SRC reaches the DST store exactly once"
+before="$(store_count)"
 own_clipboard 'feed-marker-ONE'
-size="$(wait_length_change "$before" 5)"
-assert_eq "history grew by exactly one" "$((before + 1))" "$size"
+size="$(wait_store_change "$before" 5)"
+assert_eq "store grew by exactly one" "$((before + 1))" "$size"
 assert_eq "the SRC copy is present, byte-exact" "feed-marker-ONE" \
-  "$(cc get "$(id_for_content 'feed-marker-ONE')" 2>/dev/null)"
-# "exactly once" is its own assertion, not implied by the length delta: a
-# feeder that fed twice while something else was removed would still show +1.
+  "$(cat "$(entry_for_content 'feed-marker-ONE')" 2>/dev/null)"
+# "exactly once" is its own assertion, not implied by the count delta: a
+# feeder that fed twice while something else was pruned would still show +1.
 sleep 2
 assert_eq "it appears exactly once, and stays once after another poll" "1" \
   "$(count_content 'feed-marker-ONE')"
 
-scenario "dst-clipboard-untouched: feeding does NOT steal the DST session's clipboard"
-# The founding constraint of this feeder (sp014): pushing into the history
-# must never yank the clipboard out from under whoever is working on the
-# native display.  `clipcatctl load`'s DEFAULT -k clipboard DOES exactly
-# that, which is why clip-feed.sh uses -k secondary.  The MUTATION control in
-# phase 4 proves this assertion is not vacuous.
-# stdout redirected for the same reason as in probe_dst_watcher: xclip forks
-# a child that keeps serving the selection, and that child would otherwise
-# hold this script's stdout open — invisible until you pipe the suite's
-# output somewhere and the pipe never closes.
+scenario "dst-selection-untouched: feeding does NOT touch any DST X selection"
+# The founding constraint of this feeder (sp014): pushing into the shared
+# history must never yank the clipboard out from under whoever is working on
+# the native display.  Under copyq that was `copyq add` (never `copyq
+# copy`); under clipcat it needed a non-obvious flag (`-k secondary`).  The
+# file-store backend makes this structural: nothing in clip-feed.sh runs an
+# X call against DST at all, so there is no selection left to steal.  This
+# scenario still asserts it behaviourally, not just by code inspection.
 printf 'DST-USER-SENTINEL' \
   | env DISPLAY="$DST" timeout 5 xclip -selection clipboard >/dev/null 2>&1
 sleep 2
-before="$(cc length)"
+before="$(store_count)"
 own_clipboard 'feed-marker-NOSTEAL'
-wait_length_change "$before" 5 >/dev/null
+wait_store_change "$before" 5 >/dev/null
 sleep 1
-assert_eq "the fed copy did land in history" "feed-marker-NOSTEAL" \
-  "$(cc get "$(id_for_content 'feed-marker-NOSTEAL')" 2>/dev/null)"
+assert_eq "the fed copy did land in the store" "feed-marker-NOSTEAL" \
+  "$(cat "$(entry_for_content 'feed-marker-NOSTEAL')" 2>/dev/null)"
 assert_eq "DST CLIPBOARD still holds what the DST user put there" "DST-USER-SENTINEL" \
   "$(xsel_of "$DST" clipboard)"
 
 scenario "capture-latency: the copy lands within a second"
-before="$(cc length)"
+before="$(store_count)"
 own_clipboard 'feed-marker-LATENCY'
 start_ns="$(date +%s%N)"
 for i in $(seq 1 40); do
-  [ "$(cc length 2>/dev/null)" != "$before" ] && break
+  [ "$(store_count)" != "$before" ] && break
   sleep 0.05
 done
 elapsed_ms=$(( ($(date +%s%N) - start_ns) / 1000000 ))
-assert_eq "the latency marker is in history" "feed-marker-LATENCY" \
-  "$(cc get "$(id_for_content 'feed-marker-LATENCY')" 2>/dev/null)"
+assert_eq "the latency marker is in the store" "feed-marker-LATENCY" \
+  "$(cat "$(entry_for_content 'feed-marker-LATENCY')" 2>/dev/null)"
 assert_eq "landed within 1000ms (took ${elapsed_ms}ms)" "true" \
   "$([ "$elapsed_ms" -lt 1000 ] && echo true || echo "false (${elapsed_ms}ms)")"
 
 scenario "repeat-copy-deduped: re-owning with identical text adds nothing"
-before="$(cc length)"
+before="$(store_count)"
 own_clipboard 'feed-marker-LATENCY'
-sleep 3   # no length change is the expected outcome, so this cannot poll-and-exit
-assert_eq "history length unchanged" "$before" "$(cc length)"
+sleep 3   # no count change is the expected outcome, so this cannot poll-and-exit
+assert_eq "store count unchanged" "$before" "$(store_count)"
 assert_eq "and the entry is still there exactly once" "1" \
   "$(count_content 'feed-marker-LATENCY')"
 
 scenario "distinct-copy-after-repeat: a genuinely new copy still gets through"
-before="$(cc length)"
+before="$(store_count)"
 own_clipboard 'feed-marker-TWO'
-size="$(wait_length_change "$before" 5)"
-assert_eq "history grew by one" "$((before + 1))" "$size"
+size="$(wait_store_change "$before" 5)"
+assert_eq "store grew by one" "$((before + 1))" "$size"
 assert_eq "the new copy is present, byte-exact" "feed-marker-TWO" \
-  "$(cc get "$(id_for_content 'feed-marker-TWO')" 2>/dev/null)"
+  "$(cat "$(entry_for_content 'feed-marker-TWO')" 2>/dev/null)"
 
-scenario "large-copy-fed: a 200 KB copy is carried whole"
-# This is the scenario that forced `load -f` over `insert <DATA>`: insert
-# puts the payload on argv, and Linux caps a single argv string at
-# MAX_ARG_STRLEN (128 KiB), so this exact fixture fails at exec with
-# "Argument list too long".  Measured, not assumed.
-python3 -c "import sys; sys.stdout.write('BIGFEED' + 'B' * 200000)" >"$TMP/big.txt"
-before="$(cc length)"
-own_clipboard_file "$TMP/big.txt"
-size="$(wait_length_change "$before" 15)"
-assert_eq "history grew by one" "$((before + 1))" "$size"
-big_id="$(id_for_preview_prefix 'BIGFEED')"
-# `clipcatctl get` unconditionally appends exactly one trailing 0x0a to its
-# output (egm.1 finding) -- the +1 below is that CLI artifact, not data loss.
-assert_eq "stored byte count matches the source (+1 for get's trailing newline)" \
-  "$(( $(wc -c <"$TMP/big.txt") + 1 ))" "$(cc get "$big_id" 2>/dev/null | wc -c)"
+scenario "multi-MB-copy-fed: a 3 MB copy is carried whole (no argv limit any more)"
+# Task 4 discovered `clipcatctl insert <DATA>` capped at MAX_ARG_STRLEN
+# (128 KiB) because the payload rode on argv, and had to switch to `load -f`.
+# The file-store write never puts the payload on argv at all -- this is the
+# edge case the task explicitly calls moot, proved with a fixture bigger
+# than the old 200 KB one ever needed to be.
+#
+# Owned via a PLAIN xclip client here, not clip-owner.py: python-xlib's
+# ChangeProperty encodes the request length in a 16-bit field with no
+# INCR/BIG-REQUESTS chunking, so the fixture's own owner tops out around
+# ~200 KB (measured -- a 3 MB serve raises "'H' format requires 0 <= number
+# <= 65535" from python-xlib itself). Real xclip performs INCR properly,
+# which is exactly why test-clip-store.sh's own 3 MB scenario uses it as
+# the owner too. This is a test-fixture ceiling, not anything clip-feed.sh
+# does -- the feeder's own read side (xclip -o) handles INCR fine either way.
+python3 -c "import sys; sys.stdout.write('BIGFEED' + 'B' * 3000000)" >"$TMP/fix/big"
+[ -n "${OWNER_PID:-}" ] && { kill "$OWNER_PID" 2>/dev/null; wait "$OWNER_PID" 2>/dev/null; OWNER_PID=""; }
+before="$(store_count)"
+env DISPLAY="$SRC" timeout 30 xclip -selection clipboard "$TMP/fix/big" >/dev/null 2>&1
+size="$(wait_store_change "$before" 20)"
+assert_eq "store grew by one" "$((before + 1))" "$size"
+assert_eq "stored bytes match the 3 MB source exactly" "identical" \
+  "$(cmp -s "$TMP/fix/big" "$(newest_path)" && echo identical || echo different)"
 
-scenario "multiline-fed: a multi-line copy is carried across (see dotfiles-i9i)"
-# KNOWN BACKEND LIMITATION, not a feeder bug: `clipcatctl get` irreversibly
-# escapes embedded \n \r \t into literal two-character sequences
-# (dotfiles-i9i, blocks dotfiles-egm.3).  So this asserts the escaped
-# rendering, which is what the CLI can actually return.  Every byte-exactness
-# assertion in this suite deliberately uses single-line fixtures for that
-# reason; asserting raw multiline bytes through `get` would be asserting a
-# known-false thing.
-before="$(cc length)"
-own_clipboard 'ml-line-one
-ml-line-two'
-size="$(wait_length_change "$before" 5)"
-assert_eq "history grew by one" "$((before + 1))" "$size"
-assert_eq "both lines were carried (rendered escaped by clipcatctl get)" \
-  'ml-line-one\nml-line-two' \
-  "$(cc get "$(id_for_preview_prefix 'ml-line-one')" 2>/dev/null)"
+scenario "multiline-fed: a multi-line copy is carried across byte-exact"
+# UPGRADE over task 4: clipcatctl get irreversibly escaped embedded control
+# characters (dotfiles-i9i), so that suite could only assert the escaped
+# rendering.  A store entry is a plain file -- cat is exact -- so this now
+# asserts the REAL bytes, not a known-lossy approximation.
+printf 'ml-line-one\nml-line-two\ttabbed\nunicode-\303\251' >"$TMP/fix/ml"
+before="$(store_count)"
+own_clipboard_file "$TMP/fix/ml"
+size="$(wait_store_change "$before" 5)"
+assert_eq "store grew by one" "$((before + 1))" "$size"
+assert_eq "the multiline/tab/unicode entry is byte-exact" "identical" \
+  "$(cmp -s "$TMP/fix/ml" "$(newest_path)" && echo identical || echo different)"
 
-scenario "secret-not-laundered: a hint-bearing SRC copy never enters DST history"
-# THIS FIXTURE IS NOT copyq-SPECIFIC and did not get dropped in the swap.
-# It tests the FEEDER's first gate.  It matters MORE under clipcat, not less:
-# a clipcatctl load bypasses the daemon's own sensitive_mime_types filter
-# entirely (poc010 Q3), so on this path the feeder's two gates are the only
-# thing between a password and the history.
-before="$(cc length)"
+scenario "literal-backslash-n-distinct: a two-char \\n sequence is not a newline (dotfiles-i9i)"
+printf 'nl-DISTINCT-A\nnl-DISTINCT-B' >"$TMP/fix/realnl"
+printf '%s' 'nl-DISTINCT-A\nnl-DISTINCT-B' >"$TMP/fix/litnl"
+before="$(store_count)"
+own_clipboard_file "$TMP/fix/realnl"
+wait_store_change "$before" 5 >/dev/null
+real_entry="$(newest_path)"
+before="$(store_count)"
+own_clipboard_file "$TMP/fix/litnl"
+wait_store_change "$before" 5 >/dev/null
+lit_entry="$(newest_path)"
+assert_eq "real-newline entry is byte-exact" "identical" \
+  "$(cmp -s "$TMP/fix/realnl" "$real_entry" && echo identical || echo different)"
+assert_eq "literal-backslash-n entry is byte-exact" "identical" \
+  "$(cmp -s "$TMP/fix/litnl" "$lit_entry" && echo identical || echo different)"
+assert_eq "the two entries differ (distinct bytes stored distinctly)" "different" \
+  "$(cmp -s "$real_entry" "$lit_entry" && echo identical || echo different)"
+
+scenario "secret-not-laundered: a hint-bearing SRC copy never enters the DST store"
+# THIS FIXTURE IS NOT BACKEND-SPECIFIC and has not been dropped across two
+# swaps now.  It tests the FEEDER's first gate: whatever secret filter the
+# destination's own capture path applies is a watcher-side rule that a
+# direct file write bypasses entirely, so on this path the feeder's two
+# gates are the only thing between a password and the shared store.
+before="$(store_count)"
 own_clipboard 'SECRET-PASSWORD-marker' application/x-kde-passwordManagerHint
 sleep 4
-assert_eq "history length unchanged" "$before" "$(cc length)"
-assert_eq "secret text appears in no history entry" "" "$(leaks 'SECRET-PASSWORD-marker')"
+assert_eq "store count unchanged" "$before" "$(store_count)"
+assert_eq "secret text appears in no entry" "absent" "$(content_present 'SECRET-PASSWORD-marker')"
 # The first gate's distinct guarantee, which the post-read re-check cannot
-# provide: the payload is never fetched at all, so it never touches a tmpfile.
-assert_eq "the payload was never even requested from the owner" "not-requested" \
-  "$(grep -q '^served-payload$' "$TMP/owner.out" && echo requested || echo not-requested)"
+# provide: the payload is never fetched at all, so it never touches a
+# scratch file.
+assert_eq "no payload target was ever requested from the owner" "" \
+  "$(reqlog_of_owner | grep -v '^REQ TARGETS$')"
+assert_eq "TARGETS itself was requested (the gate did look)" "yes" \
+  "$(reqlog_of_owner | grep -q '^REQ TARGETS$' && echo yes || echo no)"
 
-scenario "toctou-race: a hint-bearing owner taking the clipboard AFTER the gate passed still never reaches history"
+scenario "toctou-race: a hint-bearing owner taking the clipboard AFTER the gate passed still never reaches the store"
 # The scenario above proves the gate stops a selection that already carries
 # the hint when the gate looks.  This one covers the residual window the gate
 # structurally cannot close: TARGETS and the payload are two X requests, and
 # ownership can flip between them.  race-owner.py makes that flip fire
 # deterministically off the gate's own TARGETS request, so the feeder reads
 # the payload from a password manager it never gated.
-#
-# Also not copyq-specific: nothing in it mentions a backend.
-before="$(cc length)"
+before="$(store_count)"
 own_race_clipboard 'RACE-DECOY-benign' 'RACE-SECRET-marker'
 sleep 4
 assert_eq "the handoff fired, so the race really was exercised" "fired" "$(race_fired)"
-assert_eq "history length unchanged" "$before" "$(cc length)"
-assert_eq "raced secret appears in no history entry" "" "$(leaks 'RACE-SECRET-marker')"
+assert_eq "store count unchanged" "$before" "$(store_count)"
+assert_eq "raced secret appears in no entry" "absent" "$(content_present 'RACE-SECRET-marker')"
 
 scenario "image-skipped: a selection with no text target is not fed"
-before="$(cc length)"
+before="$(store_count)"
 own_clipboard 'binary-image-marker' image/png
 sleep 4
-assert_eq "history length unchanged" "$before" "$(cc length)"
-assert_eq "the image marker appears in no history entry" "" "$(leaks 'binary-image-marker')"
+assert_eq "store count unchanged" "$before" "$(store_count)"
+assert_eq "the image marker appears in no entry" "absent" "$(content_present 'binary-image-marker')"
 
 scenario "empty-selection-skipped: an owner holding an empty string adds no entry"
 # Distinct from the image case, which xclip refuses outright: here the read
 # succeeds with zero bytes.  This is what makes the feeder's -s check
-# load-bearing -- and note it cannot be delegated to clipcat's own
-# filter_text_min_length, which is a WATCHER-side filter this path bypasses.
-before="$(cc length)"
+# load-bearing -- it cannot be delegated to the destination's own capture
+# path, which this write bypasses entirely.
+before="$(store_count)"
 own_clipboard ''
 sleep 4
-assert_eq "history length unchanged" "$before" "$(cc length)"
+assert_eq "store count unchanged" "$before" "$(store_count)"
 
 scenario "double-start-guarded: a second feeder exits instead of double-feeding"
 start_feeder            # FEED_PID now points at the second instance
@@ -698,34 +728,44 @@ running="$(pgrep -f -- "$FEEDER" | wc -l)"
 assert_eq "exactly one feeder process remains" "1" "$running"
 FEED_PID="$(pgrep -f -- "$FEEDER" | head -1)"
 
-scenario "dst-daemon-unreachable: a feed fired at a dead daemon loses nothing"
-# Edge case from the task: the DST daemon can be down when a copy happens.
-# The feeder must not die, must not spin, must keep the single-instance lock
-# (so the i3-reload restart path still behaves), and must feed the copy once
-# the daemon is back.  It must also NOT mark the copy as fed -- $LAST is only
-# updated on a successful feed, so the item is retried.
-stop_server
-own_clipboard 'feed-marker-WHILE-DST-DOWN'
-before_j="$(cpu_jiffies "$FEED_PID")"
-sleep 4
-after_j="$(cpu_jiffies "$FEED_PID")"
-assert_eq "feeder still alive with the daemon gone" "alive" \
-  "$(kill -0 "$FEED_PID" 2>/dev/null && echo alive || echo dead)"
-assert_eq "feeder did not busy-loop while feeds were failing (used $((after_j - before_j)) jiffies over 4s)" "true" \
-  "$([ $((after_j - before_j)) -le 40 ] && echo true || echo "false ($((after_j - before_j)) jiffies)")"
-# The lock is still held by the surviving feeder: a fresh instance must still
-# refuse to start.  (If the failing feed had killed the feeder, or released
-# the fd, this would come back "alive".)
-start_feeder
+scenario "concurrent-capture-seq-no-clobber: feeder and a real local clip-store.sh loop write the same dir at once"
+# The actual integration point sp016 task 7 exists to prove safe: clip-feed.sh
+# and clip-store.sh are two separate processes that both write into
+# $XDG_RUNTIME_DIR/clip-store/<DST>/.  A local capture on DST (handled by a
+# REAL clip-store.sh loop, not a stand-in) and a fed copy from SRC are fired
+# close together; both must land as distinct seq entries -- an `ln` collision
+# must cost a retry, never a clobbered or dropped entry.
+start_loop
+base="$(store_count)"
+# `wait` with no arguments waits for EVERY background job of this shell,
+# including FEED_PID and LOOP_PID -- both long-running daemons that never
+# exit on their own.  Waiting on the two just-launched job PIDs explicitly
+# is what makes this scenario terminate instead of deadlocking forever.
+own_clipboard 'CONC-SRC-marker' &
+conc_src_job=$!
+printf 'CONC-DST-marker' | env DISPLAY="$DST" timeout 5 xclip -selection clipboard >/dev/null 2>&1 &
+conc_dst_job=$!
+wait "$conc_src_job" "$conc_dst_job" 2>/dev/null
+size="$(wait_store_change "$base" 10)"
 sleep 1
-assert_eq "the single-instance lock is still held" "exited" \
-  "$(kill -0 "$FEED_PID" 2>/dev/null && echo alive || echo exited)"
-FEED_PID="$(pgrep -f -- "$FEEDER" | head -1)"
-start_server
-size="$(wait_length_change 0 15)"
-assert_eq "the copy made while DST was down is fed once DST returns" \
-  "feed-marker-WHILE-DST-DOWN" \
-  "$(cc get "$(id_for_content 'feed-marker-WHILE-DST-DOWN')" 2>/dev/null)"
+assert_eq "store grew by exactly two (no clobber)" "$((base + 2))" "$(store_count)"
+assert_eq "the fed SRC copy landed, byte-exact" "CONC-SRC-marker" \
+  "$(cat "$(entry_for_content 'CONC-SRC-marker')" 2>/dev/null)"
+assert_eq "the local DST copy landed, byte-exact" "CONC-DST-marker" \
+  "$(cat "$(entry_for_content 'CONC-DST-marker')" 2>/dev/null)"
+stop_loop
+
+scenario "dst-store-dir-absent: the feeder recreates a removed destination store dir"
+rm -rf "$SDIR"
+before="$(store_count)"    # 0, the dir is gone
+own_clipboard 'feed-marker-DIR-RECREATED'
+size="$(wait_store_change "$before" 5)"
+assert_eq "store grew by one after the dir was recreated" "$((before + 1))" "$size"
+assert_eq "the copy is present, byte-exact" "feed-marker-DIR-RECREATED" \
+  "$(cat "$(entry_for_content 'feed-marker-DIR-RECREATED')" 2>/dev/null)"
+assert_eq "recreated store dir mode is 700" "700" "$(stat -c '%a' "$SDIR" 2>/dev/null)"
+assert_eq "feeder still alive" "alive" \
+  "$(kill -0 "$FEED_PID" 2>/dev/null && echo alive || echo dead)"
 
 # ======================= PHASE 2: SRC teardown and recovery =================
 
@@ -745,12 +785,12 @@ assert_eq "CPU quiescent over 3s (used ${after_j:-?}-${before_j:-?} jiffies)" "t
 scenario "src-returns: feeder resumes capturing when SRC comes back"
 rm -f "/tmp/.X11-unix/X${SRC#:}"   # SIGKILL left the socket file behind
 start_xvfb "$SRC" SRC_PID
-before="$(cc length)"
+before="$(store_count)"
 own_clipboard 'feed-marker-AFTER-RESTART'
-size="$(wait_length_change "$before" 15)"
-assert_eq "history grew by one after SRC returned" "$((before + 1))" "$size"
+size="$(wait_store_change "$before" 15)"
+assert_eq "store grew by one after SRC returned" "$((before + 1))" "$size"
 assert_eq "the post-restart copy is present" "feed-marker-AFTER-RESTART" \
-  "$(cc get "$(id_for_content 'feed-marker-AFTER-RESTART')" 2>/dev/null)"
+  "$(cat "$(entry_for_content 'feed-marker-AFTER-RESTART')" 2>/dev/null)"
 
 scenario "start-with-src-absent: a feeder started before SRC exists still works"
 stop_feeder
@@ -761,42 +801,49 @@ start_feeder
 assert_eq "feeder started cleanly with no SRC" "alive" \
   "$(kill -0 "$FEED_PID" 2>/dev/null && echo alive || echo dead)"
 start_xvfb "$SRC" SRC_PID
-before="$(cc length)"
+before="$(store_count)"
 own_clipboard 'feed-marker-COLD-START'
-size="$(wait_length_change "$before" 15)"
+size="$(wait_store_change "$before" 15)"
 assert_eq "the copy is captured once SRC appears" "$((before + 1))" "$size"
 assert_eq "the cold-start copy is present" "feed-marker-COLD-START" \
-  "$(cc get "$(id_for_content 'feed-marker-COLD-START')" 2>/dev/null)"
+  "$(cat "$(entry_for_content 'feed-marker-COLD-START')" 2>/dev/null)"
 
 # ======================= PHASE 3: destination is named, never guessed =======
 
-scenario "no-destination-refuses: the feeder will not run without a named socket"
-# clipcat has no single well-known socket (clipcat/dot.yaml point 1) -- one
-# clipcatd binds one socket and this host runs two.  Silently feeding the
-# wrong session, or nowhere, is worse than refusing.
+scenario "no-destination-refuses: daemon-era CLIP_FEED_DST_SOCKET is refused loudly, not ignored"
+# sp016 task 7 edge case: a leftover CLIP_FEED_DST_SOCKET from the clipcat
+# backend (task 4) must fail loudly with a migration message, never be
+# silently ignored.  Run in the FOREGROUND under `timeout`: a feeder that
+# wrongly proceeds into its poll loop would otherwise hang the suite forever
+# instead of failing.  rc 124 here means "did not refuse", the failure to
+# report.
 stop_feeder
-rm -f "$TMP/feed.lock"
-# Run in the FOREGROUND (this is the one place the feeder is expected to
-# exit on its own) but under `timeout`: a feeder that wrongly proceeds into
-# its poll loop would otherwise hang the suite forever instead of failing.
-# rc 124 here means "did not refuse", which is exactly the failure to report.
-timeout 10 env -u XDG_RUNTIME_DIR -u CLIP_FEED_DST_SOCKET DISPLAY=:77 \
+rm -f "$TMP/feed-nosock.lock"
+timeout 10 env DISPLAY=:77 XDG_RUNTIME_DIR="$RUN" \
+    CLIP_FEED_DST_SOCKET="$RUN/bogus.sock" \
     CLIP_FEED_LOCK="$TMP/feed-nosock.lock" \
     sh "$FEEDER" >"$TMP/nosock.out" 2>&1
 rc=$?
-assert_eq "exits 78 (EX_CONFIG), as clipcatd itself does on an unresolvable path" "78" "$rc"
-assert_eq "and says what is missing" "yes" \
-  "$(grep -q 'CLIP_FEED_DST_SOCKET' "$TMP/nosock.out" && echo yes || echo no)"
+assert_eq "exits 78 (EX_CONFIG) on the daemon-era variable" "78" "$rc"
+assert_eq "and names the variable and points at the migration" "yes" \
+  "$(grep -q 'CLIP_FEED_DST_SOCKET' "$TMP/nosock.out" && grep -q 'CLIP_FEED_DST' "$TMP/nosock.out" && echo yes || echo no)"
 
-scenario "config-guards-the-no-steal-property: clipcat.toml keeps enable_secondary false"
-# clip-feed.sh's -k secondary is only non-stealing because the DST daemon does
-# not watch/own the SECONDARY selection.  If clipcat.toml ever enables it,
-# the feeder would start yanking a selection again.  Asserted here so the
-# coupling is caught in review rather than in daily use.
-assert_eq "enable_secondary is false in the shipped config" "yes" \
-  "$(grep -qE '^enable_secondary *= *false' "$REPO_DIR/../../clipcat/clipcat.toml" && echo yes || echo no)"
-assert_eq "the feeder does feed with -k secondary" "yes" \
-  "$(grep -qF 'load -k secondary' "$FEEDER" && echo yes || echo no)"
+scenario "xdg-runtime-dir-unset: the feeder refuses to start, loudly, with no fallback"
+timeout 10 env -u XDG_RUNTIME_DIR DISPLAY=:77 CLIP_FEED_SRC="$SRC" CLIP_FEED_DST="$DST" \
+    CLIP_FEED_LOCK="$TMP/feed-nodir.lock" \
+    sh "$FEEDER" >"$TMP/nodir.out" 2>&1
+rc=$?
+assert_eq "exits 78 (EX_CONFIG), as clip-store.sh does for the same variable" "78" "$rc"
+assert_eq "and names what is missing" "yes" \
+  "$(grep -q 'XDG_RUNTIME_DIR' "$TMP/nodir.out" && echo yes || echo no)"
+
+scenario "no-dst-selection-call: the feeder never opens an X call against the destination"
+# Static complement to dst-selection-untouched: the shipped feeder has no
+# code path that could assert a DST selection even by accident.
+assert_eq "no DISPLAY=\"\$DST\" (or equivalent) X call anywhere in the file" "" \
+  "$(grep -E 'DISPLAY="\$DST"|DISPLAY=\$DST' "$FEEDER" | tr '\n' ' ')"
+
+start_feeder
 
 # ======================= PHASE 4: negative controls and mutations ===========
 # Without these, the phase-1 "nothing was captured" assertions would pass just
@@ -816,71 +863,52 @@ awk '/SECURITY GATE/,/^  fi$/ {next} /TOCTOU RE-CHECK/,/^    fi$/ {next} {print}
   "$FEEDER" > "$TMP/clip-feed-nohint.sh"
 grep -qF -- "-qFx 'application/x-kde-passwordManagerHint'" "$TMP/clip-feed-nohint.sh" \
   && { echo "FATAL: patched feeder still contains the hint check" >&2; exit 1; }
-grep -qF 'clipcatctl --server-endpoint' "$TMP/clip-feed-nohint.sh" \
+grep -qF 'feed_dst' "$TMP/clip-feed-nohint.sh" \
   || { echo "FATAL: patched feeder lost its feed path" >&2; exit 1; }
 rm -f "$TMP/feed.lock"
 start_feeder "$TMP/clip-feed-nohint.sh"
-before="$(cc length)"
+before="$(store_count)"
 own_clipboard 'SECRET-PASSWORD-marker' application/x-kde-passwordManagerHint
-size="$(wait_length_change "$before" 10)"
+size="$(wait_store_change "$before" 10)"
 assert_eq "hint-bearing copy IS fed when the check is absent" "$((before + 1))" "$size"
-assert_eq "and its full text lands in DST history" "SECRET-PASSWORD-marker" \
-  "$(cc get "$(id_for_content 'SECRET-PASSWORD-marker')" 2>/dev/null)"
+assert_eq "and its full text lands in the store" "SECRET-PASSWORD-marker" \
+  "$(cat "$(entry_for_content 'SECRET-PASSWORD-marker')" 2>/dev/null)"
+# The task's mutation set names this precisely as "strip pre-check -> payload
+# requested": with the pre-check gone, read_src() runs unconditionally, so
+# the payload is fetched from the owner regardless of the hint -- the exact
+# inverse of secret-not-laundered's "payload never even requested" assertion.
+assert_eq "the payload WAS requested from the owner (the pre-check is what normally stops that)" "yes" \
+  "$(reqlog_of_owner | grep -q 'REQ \(UTF8_STRING\|STRING\|text/plain\)' && echo yes || echo no)"
 stop_feeder
 
 scenario "CONTROL recheck-is-load-bearing: the raced secret IS fed without the post-read re-check"
 # The phase-1 race scenario would pass just as well if the drop were coming
 # from the FIRST gate rather than the re-check.  Strip only the re-check --
 # leaving the first gate intact -- and the same race must leak.
-stop_feeder
 awk '/TOCTOU RE-CHECK/,/^    fi$/ {next} {print}' "$FEEDER" > "$TMP/clip-feed-norecheck.sh"
 grep -qF 'TOCTOU RE-CHECK' "$TMP/clip-feed-norecheck.sh" \
   && { echo "FATAL: patched feeder still contains the re-check" >&2; exit 1; }
 grep -qF 'SECURITY GATE' "$TMP/clip-feed-norecheck.sh" \
   || { echo "FATAL: patched feeder lost the FIRST gate too; control would prove nothing" >&2; exit 1; }
-grep -qF 'clipcatctl --server-endpoint' "$TMP/clip-feed-norecheck.sh" \
+grep -qF 'feed_dst' "$TMP/clip-feed-norecheck.sh" \
   || { echo "FATAL: patched feeder lost its feed path" >&2; exit 1; }
 rm -f "$TMP/feed.lock"
 start_feeder "$TMP/clip-feed-norecheck.sh"
-before="$(cc length)"
+before="$(store_count)"
 own_race_clipboard 'RACE-DECOY-benign' 'RACE-SECRET-CONTROL'
-size="$(wait_length_change "$before" 10)"
+size="$(wait_store_change "$before" 10)"
 assert_eq "the handoff fired, so the race really was exercised" "fired" "$(race_fired)"
 assert_eq "raced secret IS fed when the re-check is absent" "$((before + 1))" "$size"
-assert_eq "and its full text lands in DST history" "RACE-SECRET-CONTROL" \
-  "$(cc get "$(id_for_content 'RACE-SECRET-CONTROL')" 2>/dev/null)"
-stop_feeder
-
-scenario "MUTATION kind-clipboard-steals-the-DST-clipboard: the -k secondary choice is load-bearing"
-# Proves the dst-clipboard-untouched assertion in phase 1 is not vacuous.
-# Swap the ONE flag and the feeder starts yanking the DST session's clipboard
-# on every copy made on SRC -- the exact behaviour `copyq add` was chosen over
-# `copyq copy` to avoid, reintroduced by clipcatctl's DEFAULT kind.
-stop_feeder
-sed 's/load -k secondary/load -k clipboard/g' "$FEEDER" > "$TMP/clip-feed-kclip.sh"
-grep -qF 'load -k secondary' "$TMP/clip-feed-kclip.sh" \
-  && { echo "FATAL: patched feeder still feeds with -k secondary" >&2; exit 1; }
-grep -qF 'load -k clipboard' "$TMP/clip-feed-kclip.sh" \
-  || { echo "FATAL: patched feeder lost its feed path" >&2; exit 1; }
-rm -f "$TMP/feed.lock"
-printf 'DST-USER-SENTINEL-MUTATION' \
-  | env DISPLAY="$DST" timeout 5 xclip -selection clipboard >/dev/null 2>&1
-sleep 2
-start_feeder "$TMP/clip-feed-kclip.sh"
-before="$(cc length)"
-own_clipboard 'feed-marker-STEALS'
-wait_length_change "$before" 10 >/dev/null
-sleep 1
-assert_eq "the mutated feeder DOES steal the DST clipboard" "feed-marker-STEALS" \
-  "$(xsel_of "$DST" clipboard)"
+assert_eq "and its full text lands in the store" "RACE-SECRET-CONTROL" \
+  "$(cat "$(entry_for_content 'RACE-SECRET-CONTROL')" 2>/dev/null)"
 stop_feeder
 
 scenario "CONTROL feeder-is-load-bearing: no capture at all with no feeder"
 rm -f "$TMP/feed.lock"
-before="$(cc length)"
+before="$(store_count)"
 own_clipboard 'no-feeder-running-marker'
 sleep 4
-assert_eq "history length unchanged with the feeder stopped" "$before" "$(cc length)"
+assert_eq "store count unchanged with the feeder stopped" "$before" "$(store_count)"
 
 # ------------------------------------------------------------------ result ---
 
