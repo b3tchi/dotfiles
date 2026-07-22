@@ -494,29 +494,28 @@ PanelWindow {
                     required property var modelData
                     width: wsText.implicitWidth + 14
                     height: leftSide.height
-                    color: modelData.urgent  ? "#cb4b16"
-                         : modelData.focused ? "#152024"
-                         : "transparent"
+                    color: modelData.urgent ? "#cb4b16" : "transparent"
 
                     Text {
                         id: wsText
                         anchors.horizontalCenter: parent.horizontalCenter
                         anchors.bottom: parent.bottom
                         anchors.bottomMargin: 1
-                        text: modelData.name
-                        // Focused/urgent tab bright; other project tabs dimmed.
+                        // Focused tab: first letter green as the focus accent.
+                        // Other tabs: plain name (dimmed via color below).
+                        textFormat: Text.StyledText
+                        text: {
+                            var raw = modelData.name || ""
+                            if (raw.length === 0) return ""
+                            var esc = function(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") }
+                            if (!modelData.focused) return esc(raw)
+                            return '<font color="#16a085">' + esc(raw.charAt(0)) + '</font>' + esc(raw.substring(1))
+                        }
                         color: (modelData.focused || modelData.urgent) ? "#fdf6e3" : "#707880"
                         font.family: root.fontFamily
                         font.pixelSize: root.fontSize
+                        font.bold: modelData.focused
                         renderType: root.nativeRender
-                    }
-
-                    Rectangle {
-                        anchors { top: parent.top; left: parent.left; right: parent.right }
-                        height: 3
-                        color: modelData.focused                    ? "#16a085"
-                             : (modelData.active && !modelData.focused) ? "#454948"
-                             : "transparent"
                     }
 
                     MouseArea {
