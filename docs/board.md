@@ -19,7 +19,5 @@ sections when status flips.
 
 ## ready
 
-- [[sp016|clipcat-backend-swap]]
-
 
 - [[sp012|live-region-xshape-overlay]]

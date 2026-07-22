@@ -5,6 +5,8 @@ Shipped workstreams. Specs (`sp###`) at `status: done` after
 
 ## done
 
+- [[sp016|clipcat-backend-swap]]
+
 - [[sp014|shared-clipboard-history-browser]]
 
 - [[sp013|preview-webview-client-host]]
