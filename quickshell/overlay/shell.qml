@@ -925,7 +925,7 @@ ShellRoot {
                             color: "#FDF6E3"
                             font.family: root.fontFamily
                             font.pixelSize: root.fontSize
-                            font.bold: true
+                            font.bold: false
                             renderType: Text.NativeRendering
                         }
 
