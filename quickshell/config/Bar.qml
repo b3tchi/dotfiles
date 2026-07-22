@@ -494,6 +494,8 @@ PanelWindow {
                     required property var modelData
                     width: wsText.implicitWidth + 14
                     height: leftSide.height
+                    // Focused tab uses the same highlight as the mod+d launcher
+                    // input/selection (#152024, Overlay.qml).
                     color: modelData.urgent  ? "#cb4b16"
                          : modelData.focused ? "#152024"
                          : "transparent"
@@ -508,12 +510,13 @@ PanelWindow {
                         color: (modelData.focused || modelData.urgent) ? "#fdf6e3" : "#707880"
                         font.family: root.fontFamily
                         font.pixelSize: root.fontSize
+                        font.bold: modelData.focused
                         renderType: root.nativeRender
                     }
 
                     Rectangle {
                         anchors { top: parent.top; left: parent.left; right: parent.right }
-                        height: 3
+                        height: 2
                         color: modelData.focused                    ? "#16a085"
                              : (modelData.active && !modelData.focused) ? "#454948"
                              : "transparent"
@@ -545,7 +548,7 @@ PanelWindow {
 
                 Rectangle {
                     anchors { top: parent.top; left: parent.left; right: parent.right }
-                    height: 3
+                    height: 2
                     color: "#cb4b16"
                 }
             }
@@ -560,7 +563,8 @@ PanelWindow {
             Rectangle {
                 width: modeNameText.implicitWidth + 14
                 height: parent.height
-                color: "transparent"
+                // Same highlight as the focused tab / mod+d launcher selection.
+                color: "#152024"
 
                 Text {
                     id: modeNameText
@@ -572,12 +576,13 @@ PanelWindow {
                     color: "#fdf6e3"
                     font.family: root.fontFamily
                     font.pixelSize: root.fontSize
+                    font.bold: true
                     renderType: root.nativeRender
                 }
 
                 Rectangle {
                     anchors { top: parent.top; left: parent.left; right: parent.right }
-                    height: 3
+                    height: 2
                     color: "#cb4b16"
                 }
             }
