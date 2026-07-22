@@ -87,7 +87,12 @@
 # inspected FIRST and a selection advertising a password-manager hint is
 # skipped without its payload ever being read.  Do not move that check below
 # the read, and do not remove it.  On this path the feeder's own two gates
-# are the ONLY filter there is.
+# are the ONLY filter there is.  BOTH hint spellings are matched -- bare
+# `x-kde-passwordManagerHint` and prefixed
+# `application/x-kde-passwordManagerHint`, the same two clip-store.sh's own
+# hinted() gates -- so a password manager emitting only the bare atom is
+# dropped here too, not just at the native store's own capture path
+# (dotfiles-wtr).
 #
 # The gate is checked TWICE, and the second check is not redundant.  TARGETS
 # and the payload are separate X protocol requests — measured 10-13ms apart —
@@ -117,7 +122,7 @@
 #    no backend swap on this path has bought any security improvement here.)
 #
 # test-clip-feed.sh asserts the drop, the raced drop, and — via patched copies
-# of this file — that BOTH checks are load-bearing.
+# of this file — that BOTH checks are load-bearing, for BOTH hint spellings.
 #
 # usage: i3/scripts/clip-feed.sh          (daemon; exits 0 if already running)
 # env:   CLIP_FEED_SRC=:10          display watched for copies
@@ -198,6 +203,20 @@ src_up() { [ -e "/tmp/.X11-unix/X${SRC#:}" ]; }
 targets() {
   timeout "$T" env DISPLAY="$SRC" xclip -selection clipboard -t TARGETS -o \
     > "$TGT" 2> "$ERR" 9>&-
+}
+
+# Does the advertised TARGETS list carry a password-manager hint, in either
+# spelling?  Same gate shape as clip-store.sh's hinted() -- bare
+# `x-kde-passwordManagerHint` and prefixed
+# `application/x-kde-passwordManagerHint` are both matched (clipcat defaulted
+# to bare, the shipped copyq rule used prefixed; neither is verified against
+# a real emitter -- dotfiles-cyg / sp015 remain the actual fix).  Matching
+# only the prefixed form here would let a bare-only emitter launder straight
+# through this feeder even though clip-store.sh's own loop on :0 already
+# drops it (dotfiles-wtr).
+hinted() {
+  grep -qFx -e 'x-kde-passwordManagerHint' \
+            -e 'application/x-kde-passwordManagerHint' "$TGT"
 }
 
 # Did the last xclip fail because the X server is gone, rather than because
@@ -307,7 +326,7 @@ while :; do
 
   # SECURITY GATE — must stay above read_src.  A password-manager copy is
   # skipped without its payload ever being fetched.
-  if grep -qFx 'application/x-kde-passwordManagerHint' "$TGT"; then
+  if hinted; then
     nap "$POLL"; continue
   fi
 
@@ -321,7 +340,7 @@ while :; do
     # currently claiming.  Fails CLOSED: a re-check that times out or finds no
     # owner drops the item too.  "$LAST" is deliberately not updated, so a
     # legitimate copy dropped by a hung owner is simply re-fed next poll.
-    if ! targets || grep -qFx 'application/x-kde-passwordManagerHint' "$TGT"; then
+    if ! targets || hinted; then
       nap "$POLL"; continue
     fi
     if feed_dst; then
