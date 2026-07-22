@@ -548,7 +548,7 @@ PanelWindow {
 
                 Rectangle {
                     anchors { top: parent.top; left: parent.left; right: parent.right }
-                    height: 3
+                    height: 2
                     color: "#cb4b16"
                 }
             }
@@ -580,7 +580,7 @@ PanelWindow {
 
                 Rectangle {
                     anchors { top: parent.top; left: parent.left; right: parent.right }
-                    height: 3
+                    height: 2
                     color: "#cb4b16"
                 }
             }
