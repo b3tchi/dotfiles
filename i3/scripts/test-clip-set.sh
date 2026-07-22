@@ -1,9 +1,17 @@
 #!/usr/bin/env bash
-# test-clip-set.sh — verify i3/scripts/clip-set.sh (dotfiles-92w.3).
+# test-clip-set.sh — verify i3/scripts/clip-set.sh against the file-store
+# backend (sp016 task 3, adapted from sp014 task 3 / dotfiles-92w.3).
 #
 # Runs entirely headless on its own pair of Xvfb displays with an isolated
-# XDG_CONFIG_HOME, so it never touches the live X session, the live clipboard,
-# or the real ~/.config/copyq.
+# XDG_RUNTIME_DIR, so it never touches the live X session, the live
+# clipboard, or the real $XDG_RUNTIME_DIR/clip-store.
+#
+# SEEDING = WRITING STORE FILES DIRECTLY. There is no daemon and no server to
+# seed through (that was the whole point of the pivot away from clipcat): an
+# entry is a file named "NNNNNN.clip" under
+# $XDG_RUNTIME_DIR/clip-store/<display>/, so this harness creates that
+# directory and drops files into it exactly as clip-store.sh (task 6) would
+# have, then asks clip-set.sh to publish one of them by id.
 #
 # WHAT IS ACTUALLY OBSERVED (no "it exited 0" assertions)
 #
@@ -21,23 +29,28 @@
 #   Every content scenario asserts on BOTH displays, so a mutant that drops
 #   the second write -- or the first -- fails an assertion.
 #
+#   Byte-exact comparisons that could be corrupted by shell command
+#   substitution (trailing-newline stripping in particular -- the exact
+#   defect class this task exists to fix, dotfiles-i9i) go through FILES,
+#   never through a captured variable: xclip -o is redirected straight to a
+#   file and `cmp`d against the seed file. Short plain-text markers with no
+#   trailing whitespace are the only content compared via variables, as
+#   before.
+#
 # usage: i3/scripts/test-clip-set.sh
-# env:   COPYQ=/path/to/copyq  XVFB=/path/to/Xvfb   (default: from PATH)
+# env:   XVFB=/path/to/Xvfb                        (default: from PATH)
 #        TEST_DISPLAY=:93 TEST_DISPLAY2=:94
 #        CLIP_SET=/path/to/clip-set.sh              (default: alongside this)
 set -u
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 CLIP_SET="${CLIP_SET:-$SCRIPT_DIR/clip-set.sh}"
-COPYQ="${COPYQ:-copyq}"
 XVFB="${XVFB:-Xvfb}"
 DPY="${TEST_DISPLAY:-:93}"
 DPY2="${TEST_DISPLAY2:-:94}"
 
-TMP="/tmp/clip-set-test.$$"     # kept short: copyq's socket lives under $CFG
-CFG="$TMP/cfg"
-DAT="$TMP/data"
-CCH="$TMP/cache"
+TMP="/tmp/clip-set-test.$$"
+XDGRUN="$TMP/xdgrun"           # isolated $XDG_RUNTIME_DIR -- never the real one
 
 PASS=0
 FAIL=0
@@ -54,33 +67,20 @@ assert_eq() { # <scenario> <expected> <actual>
 scenario() { printf '\n[%s]\n' "$1"; }
 
 cleanup() {
-  [ -n "${SERVER_STARTED:-}" ] && cq exit >/dev/null 2>&1
-  sleep 1
   [ -n "${XVFB_PID:-}" ] && kill "$XVFB_PID" 2>/dev/null
   [ -n "${XVFB2_PID:-}" ] && kill "$XVFB2_PID" 2>/dev/null
   rm -rf "$TMP"
 }
 trap cleanup EXIT
 
-cq() { env DISPLAY="$DPY" XDG_CONFIG_HOME="$CFG" XDG_DATA_HOME="$DAT" \
-           XDG_CACHE_HOME="$CCH" "$COPYQ" "$@"; }
-
-# clip-set.sh under test. XDG_* are exported for the *harness's* isolation
-# (the script itself still calls a plain `copyq`, per copyq/dot.yaml's client
-# contract). DISPLAY is deliberately exported WRONG -- an inherited DISPLAY
-# must never be trusted, and :987 does not exist, so anything that reached a
-# selection got there by enumerating sockets, not by inheriting.
-run_set_in() { # <socket-dir> <args...>
-  local dir="$1"; shift
-  env DISPLAY=:987 XDG_CONFIG_HOME="$CFG" XDG_DATA_HOME="$DAT" \
-      XDG_CACHE_HOME="$CCH" CLIP_SET_SOCKET_DIR="$dir" \
-      sh "$CLIP_SET" "$@" 2>"$TMP/set.err"
-}
-
-run_set() { run_set_in "$TMP/x11" "$@"; }
-
 sel_on() { # <display> <clipboard|primary>
   env DISPLAY="$1" timeout 10 xclip -selection "$2" -o 2>/dev/null
+}
+
+# Same as sel_on but to a FILE, byte for byte, for comparisons a variable
+# capture would corrupt (trailing newlines, a bare single newline).
+sel_to_file() { # <display> <clipboard|primary> <outfile>
+  env DISPLAY="$1" timeout 10 xclip -selection "$2" -o > "$3" 2>/dev/null
 }
 
 # Take ownership of both selections on both displays away from whatever the
@@ -114,48 +114,83 @@ assert_on_both() { # <label> <expected>
   assert_eq "$1: $DPY2 primary"   "$2" "$(sel_on "$DPY2" primary)"
 }
 
-# Block until the copyq history stops growing. Every clipboard write this
-# harness makes (the sentinel reset, and the run under test itself) is a
-# genuine clipboard change that the running server captures and PREPENDS --
-# so row numbers move under our feet unless we wait for capture to finish
-# before deciding which row to address. (Getting this wrong is a silent
-# wrong-row test, not an error.)
-settle() {
-  local prev="" n i
-  for i in $(seq 1 40); do
-    n="$(cq size 2>/dev/null)"
-    [ -n "$n" ] && [ "$n" = "$prev" ] && return 0
-    prev="$n"
-    sleep 0.5
+# ------------------------------------------------------------ store seeding ---
+#
+# The next seq per source display is derived from the directory itself
+# (highest existing NNNNNN.clip, +1) -- the same rule clip-store.sh's own
+# newest_entry/store_write use -- rather than a counter kept in a shell
+# variable. seed_content is always called as `id="$(seed_content ...)"`,
+# i.e. inside a command substitution, which forks a SUBSHELL: a counter
+# updated there is invisible to the parent shell the moment the subshell
+# exits, so every call would see seq 0 again and every id would collide on
+# 000001.clip (caught by this suite's own first draft -- the id-addressing
+# scenario silently published the wrong entry because the "second" seed
+# clobbered the first at the same filename). Reading the directory is
+# stateless and immune to that.
+store_dir() { printf '%s/clip-store/%s' "$XDGRUN" "$1"; }
+
+# Write <content-file>'s bytes, exactly, as the next entry in <display>'s
+# store. Prints the id (e.g. "000003.clip") used.
+seed_content() { # <display> <content-file>
+  local dpy="$1" src="$2" dir last f b n id
+  dir="$(store_dir "$dpy")"
+  mkdir -p "$dir"
+  last=""
+  for f in "$dir"/[0-9][0-9][0-9][0-9][0-9][0-9].clip; do
+    [ -e "$f" ] && last="$f"
   done
+  if [ -n "$last" ]; then
+    b="${last##*/}"; b="${b%.clip}"
+    n=$((10#$b + 1))
+  else
+    n=1
+  fi
+  id="$(printf '%06d.clip' "$n")"
+  cp "$src" "$dir/$id"
+  printf '%s' "$id"
 }
 
-# Clear the selections, let capture settle, then push <text...> onto the
-# history so the LAST argument is row 0. `copyq add` does not touch the
-# clipboard, so this cannot itself perturb the row numbering. (`copyq copy`
-# would be a false-pass trap here: copyq ignores clipboard changes it owns.)
-arm() {
-  reset_selections
-  settle
-  local t
-  for t in "$@"; do cq add "$t" >/dev/null; done
-}
+# ------------------------------------------------------------- invocation ---
+#
+# clip-set.sh under test.
+#
+#   CLIP_SET_ENV_DISPLAY  -- what $DISPLAY the script inherits. Set WRONG
+#     (:987, which does not exist) by default for every scenario: an
+#     inherited DISPLAY must never be trusted for the WRITE fan-out (that
+#     half of the design is unchanged from sp014), so anything that reached
+#     a selection got there by enumerating sockets, not by inheriting.
+#   CLIP_SET_ENV_SRC      -- CLIP_SET_SRC_DISPLAY override, i.e. which
+#     store the id is read FROM. Defaults to $DPY (this suite's stand-in for
+#     "the session the picker derived"). Empty string = do not set the
+#     override at all -- used by scenarios proving the $2 positional
+#     argument works on its own, and by the one proving that omitting BOTH
+#     the override and the argument is a hard refusal ($DISPLAY is never
+#     consulted as a fallback -- see clip-set.sh's own header).
+#   CLIP_SET_ENV_XDG      -- $XDG_RUNTIME_DIR value. "UNSET" is a sentinel
+#     meaning: do not export it at all (the one scenario that needs this).
+CLIP_SET_ENV_DISPLAY=":987"
+CLIP_SET_ENV_SRC="$DPY"
+CLIP_SET_ENV_XDG="$XDGRUN"
 
-# arm() for an entry too large to survive argv (`copyq add "$(cat 1mb)"` dies
-# with E2BIG). copyq's own scripting reads the payload off stdin instead.
-arm_file() {
-  reset_selections
-  settle
-  cq eval -- 'add(str(input()))' < "$1" >/dev/null
+run_set_in() { # <socket-dir> <id...>
+  local dir="$1"; shift
+  local -a envargs=(DISPLAY="$CLIP_SET_ENV_DISPLAY" CLIP_SET_SOCKET_DIR="$dir")
+  [ -n "$CLIP_SET_ENV_SRC" ] && envargs+=(CLIP_SET_SRC_DISPLAY="$CLIP_SET_ENV_SRC")
+  if [ "$CLIP_SET_ENV_XDG" = "UNSET" ]; then
+    env -u XDG_RUNTIME_DIR "${envargs[@]}" sh "$CLIP_SET" "$@" 2>"$TMP/set.err"
+  else
+    envargs+=(XDG_RUNTIME_DIR="$CLIP_SET_ENV_XDG")
+    env "${envargs[@]}" sh "$CLIP_SET" "$@" 2>"$TMP/set.err"
+  fi
 }
+run_set() { run_set_in "$TMP/x11" "$@"; }
 
 # ---------------------------------------------------------------- fixtures ---
 
-mkdir -p "$TMP" "$CFG/copyq" "$DAT" "$CCH"
+mkdir -p "$TMP" "$XDGRUN"
 
-command -v "$COPYQ" >/dev/null 2>&1 || { echo "FATAL: copyq not found (set COPYQ=)" >&2; exit 1; }
-command -v "$XVFB"  >/dev/null 2>&1 || { echo "FATAL: Xvfb not found (set XVFB=)"  >&2; exit 1; }
-command -v xclip    >/dev/null 2>&1 || { echo "FATAL: xclip not found" >&2; exit 1; }
+command -v "$XVFB" >/dev/null 2>&1 || { echo "FATAL: Xvfb not found (set XVFB=)"  >&2; exit 1; }
+command -v xclip   >/dev/null 2>&1 || { echo "FATAL: xclip not found" >&2; exit 1; }
 [ -r "$CLIP_SET" ] || { echo "FATAL: $CLIP_SET not readable" >&2; exit 1; }
 
 "$XVFB" "$DPY" -screen 0 800x600x24 >"$TMP/xvfb.log" 2>&1 &
@@ -182,154 +217,207 @@ mkdir -p "$TMP/x11"
 ln -sf "/tmp/.X11-unix/X${DPY#:}"  "$TMP/x11/X${DPY#:}"
 ln -sf "/tmp/.X11-unix/X${DPY2#:}" "$TMP/x11/X${DPY2#:}"
 
+# A display number that is NOT live -- checked at runtime, not hardcoded.
+# Sibling suites in this same spec (test-clip-store.sh :96, test-clip-history
+# .sh :95/:96, test-clip-feed.sh :97/:98) run their own Xvfb on fixed numbers
+# and may be executing concurrently on the same host, so a hardcoded "dead"
+# number picked without checking can turn out to be very much alive on any
+# given run -- this suite hit exactly that flakily (a real Xvfb was up on
+# :95 from a sibling's run while this hardcoded :95 as its own dead filler).
+# Scanned well clear of the low numbers every suite in this repo uses.
+DEAD_NUM=195
+while [ -e "/tmp/.X11-unix/X$DEAD_NUM" ] || [ -e "/tmp/.X${DEAD_NUM}-lock" ]; do
+  DEAD_NUM=$((DEAD_NUM + 1))
+done
+
 # An empty socket dir, and one holding nothing but a dead socket name.
 mkdir -p "$TMP/x11-empty" "$TMP/x11-dead"
-: > "$TMP/x11-dead/X95"
+: > "$TMP/x11-dead/X$DEAD_NUM"
 
 echo "clip-set: $CLIP_SET"
-echo "copyq:    $("$COPYQ" --version 2>/dev/null | head -1)"
 echo "displays: $DPY $DPY2"
-
-# =============================== copyq server, seeded history ================
-
-ln -s "$SCRIPT_DIR/../../copyq/copyq.conf" "$CFG/copyq/copyq.conf" 2>/dev/null
-ln -s "$SCRIPT_DIR/../../copyq/commands.ini" "$CFG/copyq/copyq-commands.ini" 2>/dev/null
-cq --start-server >"$TMP/server.log" 2>&1 &
-for i in $(seq 1 40); do
-  cq eval 1 >/dev/null 2>&1 && { SERVER_STARTED=1; break; }
-  sleep 0.5
-done
-[ -n "${SERVER_STARTED:-}" ] || { echo "FATAL: copyq server did not start" >&2; cat "$TMP/server.log" >&2; exit 1; }
+echo "xdg-runtime (isolated): $XDGRUN"
 
 PLAIN='plain-entry-marker'
-MULTI='first line
-  second line with  spaces
-third'
 UNI='héllo → 世界 🎉 ünïcodé'
 
-# ====================== PHASE 1: the entry reaches EVERY live display ========
+printf '%s' "$PLAIN" > "$TMP/plain.src"
+printf '%s' "$UNI"   > "$TMP/uni.src"
 
-scenario "both-displays: the entry lands on CLIPBOARD+PRIMARY of both sessions"
-arm "$PLAIN"
-run_set 0; rc=$?
+# =============================== PHASE 1: byte-exact publish to both =========
+
+scenario "both-displays-byte-exact: the entry lands on CLIPBOARD+PRIMARY of both sessions"
+reset_selections
+ID="$(seed_content "$DPY" "$TMP/plain.src")"
+run_set "$ID"; rc=$?
 assert_eq "exits 0" "0" "$rc"
 assert_on_both "plain entry" "$PLAIN"
 
-scenario "row-addressing: an entry deeper in the history is the one published"
-arm "$MULTI" "$UNI" "$PLAIN"     # rows: 0=PLAIN 1=UNI 2=MULTI
-assert_eq "row 0 is the newest add" "$PLAIN" "$(cq read 0)"
-assert_eq "row 2 is the oldest add" "$MULTI" "$(cq read 2)"
-run_set 2; rc=$?
+scenario "id-addressing: a specific id, not just the latest seeded one, is the one published"
+reset_selections
+A="$(seed_content "$DPY" "$TMP/plain.src")"
+printf 'a-different-entry' > "$TMP/other.src"
+B="$(seed_content "$DPY" "$TMP/other.src")"
+# B is the newer seq; ask for A anyway.
+run_set "$A"; rc=$?
 assert_eq "exits 0" "0" "$rc"
-assert_on_both "row 2, not row 0" "$MULTI"
+assert_on_both "the requested id, not the newest" "$PLAIN"
 
-scenario "multiline: newlines and interior spacing survive to both displays"
-arm "$MULTI"
-run_set 0
-assert_on_both "multiline entry" "$MULTI"
-# MULTI is 3 lines with no trailing newline, so exactly 2 newline bytes must
-# be present -- a selection that flattened or doubled them fails here.
-assert_eq "$DPY newline count preserved" "2" \
-  "$(sel_on "$DPY" clipboard | tr -cd '\n' | wc -c | tr -d ' ')"
-assert_eq "$DPY2 newline count preserved" "2" \
-  "$(sel_on "$DPY2" clipboard | tr -cd '\n' | wc -c | tr -d ' ')"
-
-scenario "unicode: multibyte text and emoji are not mangled on either display"
-arm "$UNI"
-run_set 0
-assert_on_both "unicode entry" "$UNI"
-assert_eq "$DPY byte length preserved" "$(printf '%s' "$UNI" | wc -c | tr -d ' ')" \
-  "$(sel_on "$DPY" clipboard | wc -c | tr -d ' ')"
-assert_eq "$DPY2 byte length preserved" "$(printf '%s' "$UNI" | wc -c | tr -d ' ')" \
-  "$(sel_on "$DPY2" clipboard | wc -c | tr -d ' ')"
-
-scenario "huge-entry: a 1 MB entry transfers whole (INCR) to both displays"
-head -c 1000000 /dev/zero | tr '\0' 'H' > "$TMP/big.txt"
-arm_file "$TMP/big.txt"
-assert_eq "1 MB entry is in history at row 0" "1000000" "$(cq read 0 | wc -c | tr -d ' ')"
-run_set 0; rc=$?
+scenario "multiline-byte-exact-round-trip: embedded real newlines and spacing survive whole"
+reset_selections
+printf '%s' $'first line\n  second line with  spaces\nthird' > "$TMP/multi.src"
+ID="$(seed_content "$DPY" "$TMP/multi.src")"
+run_set "$ID"; rc=$?
 assert_eq "exits 0" "0" "$rc"
 for d in "$DPY" "$DPY2"; do
   for s in clipboard primary; do
-    assert_eq "$d $s holds all 1000000 bytes" "1000000" \
-      "$(sel_on "$d" "$s" | wc -c | tr -d ' ')"
+    sel_to_file "$d" "$s" "$TMP/multi.$d.$s.out"
+    assert_eq "$d $s matches the seed file exactly" "same" \
+      "$(cmp -s "$TMP/multi.src" "$TMP/multi.$d.$s.out" && echo same || echo DIFFERENT)"
   done
 done
+assert_eq "$DPY newline count preserved" "2" \
+  "$(tr -cd '\n' < "$TMP/multi.$DPY.clipboard.out" | wc -c | tr -d ' ')"
+
+scenario "literal-backslash-n-distinct-from-newline: a two-char backslash-n and a real newline publish distinctly"
+reset_selections
+printf '\\n' > "$TMP/litbs.src"    # two bytes: 0x5C 0x6E ("\" "n")
+printf '\n'   > "$TMP/realnl.src"  # one byte:  0x0A
+assert_eq "seed sanity: literal backslash-n is 2 bytes" "2" \
+  "$(wc -c < "$TMP/litbs.src" | tr -d ' ')"
+assert_eq "seed sanity: real newline is 1 byte" "1" \
+  "$(wc -c < "$TMP/realnl.src" | tr -d ' ')"
+
+LIT_ID="$(seed_content "$DPY" "$TMP/litbs.src")"
+run_set "$LIT_ID"; rc=$?
+assert_eq "literal backslash-n: exits 0" "0" "$rc"
+sel_to_file "$DPY" clipboard "$TMP/litbs.out"
+assert_eq "literal backslash-n published exactly (2 bytes, no real newline)" "same" \
+  "$(cmp -s "$TMP/litbs.src" "$TMP/litbs.out" && echo same || echo DIFFERENT)"
+
+reset_selections
+NL_ID="$(seed_content "$DPY" "$TMP/realnl.src")"
+run_set "$NL_ID"; rc=$?
+assert_eq "real newline: exits 0" "0" "$rc"
+sel_to_file "$DPY" clipboard "$TMP/realnl.out"
+assert_eq "real newline published exactly (1 byte)" "same" \
+  "$(cmp -s "$TMP/realnl.src" "$TMP/realnl.out" && echo same || echo DIFFERENT)"
+
+assert_eq "the two entries are byte-distinct on the wire" "distinct" \
+  "$(cmp -s "$TMP/litbs.out" "$TMP/realnl.out" && echo SAME-BUG || echo distinct)"
+
+scenario "unicode: multibyte text and emoji are not mangled on either display"
+reset_selections
+ID="$(seed_content "$DPY" "$TMP/uni.src")"
+run_set "$ID"; rc=$?
+assert_eq "exits 0" "0" "$rc"
+assert_on_both "unicode entry" "$UNI"
+assert_eq "$DPY byte length preserved" "$(wc -c < "$TMP/uni.src" | tr -d ' ')" \
+  "$(sel_on "$DPY" clipboard | wc -c | tr -d ' ')"
+assert_eq "$DPY2 byte length preserved" "$(wc -c < "$TMP/uni.src" | tr -d ' ')" \
+  "$(sel_on "$DPY2" clipboard | wc -c | tr -d ' ')"
+
+scenario "huge-entry: a 1 MB entry transfers whole (INCR) to both displays, byte for byte"
+reset_selections
+# Not all-identical-byte filler: a repeated single byte would let an INCR
+# chunking bug that duplicates or drops a whole chunk of IDENTICAL bytes
+# still pass a byte-count check (and even a naive cmp, if the corruption
+# happened to preserve length) -- vary it so a shifted/dropped/duplicated
+# chunk is visible as a genuine content difference, not just a count.
+{ for _i in $(seq 1 15625); do printf 'A%063d' "$_i"; done; } > "$TMP/big.src"
+assert_eq "seed sanity: big.src really is 1000000 bytes" "1000000" \
+  "$(wc -c < "$TMP/big.src" | tr -d ' ')"
+ID="$(seed_content "$DPY" "$TMP/big.src")"
+run_set "$ID"; rc=$?
+assert_eq "exits 0" "0" "$rc"
+for d in "$DPY" "$DPY2"; do
+  for s in clipboard primary; do
+    sel_to_file "$d" "$s" "$TMP/big.$d.$s.out"
+    assert_eq "$d $s matches the seed file exactly (cmp, not just a byte count)" "same" \
+      "$(cmp -s "$TMP/big.src" "$TMP/big.$d.$s.out" && echo same || echo DIFFERENT)"
+  done
+done
+
+scenario "empty-entry: a zero-byte entry is a valid publish, not a guard failure"
+reset_selections
+: > "$TMP/empty.src"
+ID="$(seed_content "$DPY" "$TMP/empty.src")"
+run_set "$ID"; rc=$?
+assert_eq "exits 0" "0" "$rc"
+assert_on_both "empty entry" ""
+
+scenario "no-explicit-source-refuses: DISPLAY is never trusted -- omitting both the arg and the override is a loud refusal, not a guess"
+# The blocking gap this suite exists to close: a per-display store means
+# the SAME id commonly exists, with DIFFERENT content, in more than one
+# store (proven directly below). Falling back to an inherited $DISPLAY --
+# even a perfectly live, correct one, as set here -- would make the wrong
+# guess indistinguishable from the right one: both "succeed", exit 0, and
+# publish SOMETHING. So this must refuse outright with neither signal given.
+reset_selections
+ID="$(seed_content "$DPY" "$TMP/plain.src")"
+_saved_dpy="$CLIP_SET_ENV_DISPLAY"; _saved_src="$CLIP_SET_ENV_SRC"
+CLIP_SET_ENV_DISPLAY="$DPY"   # a REAL, correct display -- must still not be used
+CLIP_SET_ENV_SRC=""           # no CLIP_SET_SRC_DISPLAY override, and no $2 below
+run_set "$ID"; rc=$?
+CLIP_SET_ENV_DISPLAY="$_saved_dpy"; CLIP_SET_ENV_SRC="$_saved_src"
+assert_eq "exits 1" "1" "$rc"
+assert_eq "reason names the missing source display" "yes" \
+  "$(grep -qi 'no source display' "$TMP/set.err" && echo yes || echo no)"
+assert_untouched "no-explicit-source"
+
+scenario "positional-src-arg-selects-store: \$2 alone (no env override) resolves the store"
+reset_selections
+ID="$(seed_content "$DPY" "$TMP/plain.src")"
+_saved_src="$CLIP_SET_ENV_SRC"
+CLIP_SET_ENV_SRC=""            # no env override -- prove the positional arg alone suffices
+run_set "$ID" "$DPY"; rc=$?
+CLIP_SET_ENV_SRC="$_saved_src"
+assert_eq "exits 0" "0" "$rc"
+assert_on_both "resolved via the positional \$2 argument" "$PLAIN"
+
+scenario "wrong-store-explicit-src-publishes-right-one: an id colliding across two stores is resolved by the explicit source, not guessed"
+# THE anti-bug test: seed the identical filename in TWO stores with
+# DIFFERENT content -- exactly the "000005.clip commonly exists in both"
+# collision a per-display, independently-seq'd store creates by
+# construction -- and prove the explicit source display, not enumeration
+# order or ambient state, decides which one gets published.
+reset_selections
+mkdir -p "$(store_dir ":winA")" "$(store_dir ":winB")"
+printf 'content-from-store-A' > "$(store_dir ":winA")/000001.clip"
+printf 'content-from-store-B' > "$(store_dir ":winB")/000001.clip"
+_saved_src="$CLIP_SET_ENV_SRC"
+
+CLIP_SET_ENV_SRC=":winA"
+run_set "000001.clip"; rc=$?
+assert_eq "store A: exits 0" "0" "$rc"
+assert_on_both "publishes store A's content, not store B's" "content-from-store-A"
+
+reset_selections
+CLIP_SET_ENV_SRC=":winB"
+run_set "000001.clip"; rc=$?
+assert_eq "store B: exits 0" "0" "$rc"
+assert_on_both "publishes store B's content, not store A's" "content-from-store-B"
+
+CLIP_SET_ENV_SRC="$_saved_src"
 
 # ======================= PHASE 2: displays that are not there ================
 
 scenario "dead-socket-among-live: a stale socket name is skipped, not fatal"
-# x11-mixed enumerates :93, :94 AND a :95 whose "socket" is a plain file no X
-# server is behind. The run must still succeed on the two real ones.
 mkdir -p "$TMP/x11-mixed"
 ln -sf "/tmp/.X11-unix/X${DPY#:}"  "$TMP/x11-mixed/X${DPY#:}"
 ln -sf "/tmp/.X11-unix/X${DPY2#:}" "$TMP/x11-mixed/X${DPY2#:}"
-: > "$TMP/x11-mixed/X95"
-arm "$PLAIN"
-run_set_in "$TMP/x11-mixed" 0; rc=$?
+: > "$TMP/x11-mixed/X$DEAD_NUM"
+reset_selections
+ID="$(seed_content "$DPY" "$TMP/plain.src")"
+run_set_in "$TMP/x11-mixed" "$ID"; rc=$?
 assert_eq "exits 0 despite the dead display" "0" "$rc"
 assert_on_both "with a dead socket present" "$PLAIN"
 
-scenario "no-display-at-all: an empty socket dir is a clean exit 1"
-arm "$PLAIN"
-run_set_in "$TMP/x11-empty" 0; rc=$?
-assert_eq "exits 1" "1" "$rc"
-assert_eq "reason names the missing display" "yes" \
-  "$(grep -qi 'no live X display' "$TMP/set.err" && echo yes || echo no)"
-assert_untouched "no-display"
-
-scenario "only-dead-displays: sockets with no server behind them are exit 1"
-arm "$PLAIN"
-run_set_in "$TMP/x11-dead" 0; rc=$?
-assert_eq "exits 1" "1" "$rc"
-assert_eq "reason names the missing display" "yes" \
-  "$(grep -qi 'no live X display' "$TMP/set.err" && echo yes || echo no)"
-assert_untouched "only-dead"
-
-# ================================= PHASE 3: argument + row edge cases ========
-#
-# Every one of these must be exit 1 specifically -- exit 1 is the code that
-# promises the clipboard was not touched, and task .4 builds against that.
-
-scenario "bad-row: a non-numeric row is refused before anything is written"
-arm "$PLAIN"
-run_set abc; rc=$?
-assert_eq "exits 1" "1" "$rc"
-assert_eq "explains itself" "yes" \
-  "$(grep -qi 'non-negative integer' "$TMP/set.err" && echo yes || echo no)"
-assert_untouched "bad-row"
-
-scenario "missing-row: no argument at all is refused"
-arm "$PLAIN"
-run_set; rc=$?
-assert_eq "exits 1" "1" "$rc"
-assert_eq "prints usage" "yes" \
-  "$(grep -qi 'usage' "$TMP/set.err" && echo yes || echo no)"
-assert_untouched "missing-row"
-
-scenario "out-of-range-row: a row past the end of history writes nothing"
-arm "$PLAIN"
-run_set 9999; rc=$?
-assert_eq "exits 1" "1" "$rc"
-assert_untouched "out-of-range"
-
-scenario "empty-entry: an empty history row does not blank the clipboard"
+scenario "survivor-display-still-succeeds: one session dying does not stop the other"
+# Last of the "displays that are not there" phase, because it tears $DPY2
+# down for good -- everything after this scenario has only ONE live display.
 reset_selections
-settle
-cq add "" >/dev/null 2>&1 || true
-assert_eq "row 0 really is the empty entry" "" "$(cq read 0)"
-run_set 0; rc=$?
-assert_eq "exits 1" "1" "$rc"
-assert_eq "reason names the empty row" "yes" \
-  "$(grep -qi 'empty or does not exist' "$TMP/set.err" && echo yes || echo no)"
-assert_untouched "empty-entry"
-
-# ============ PHASE 4: a display disappearing underneath us (destructive) ====
-#
-# Last, because it tears $DPY2 down for good.
-
-scenario "surviving-display: one session dying does not stop the other"
-arm "$PLAIN"
+ID="$(seed_content "$DPY" "$TMP/plain.src")"
 kill "$XVFB2_PID" 2>/dev/null
 wait "$XVFB2_PID" 2>/dev/null
 XVFB2_PID=""
@@ -339,10 +427,86 @@ for i in $(seq 1 20); do
 done
 assert_eq "$DPY2 really is gone" "gone" \
   "$(env DISPLAY="$DPY2" timeout 2 xclip -selection clipboard -o >/dev/null 2>&1 && echo alive || echo gone)"
-run_set 0; rc=$?
+run_set "$ID"; rc=$?
 assert_eq "exits 0 on the survivor alone" "0" "$rc"
 assert_eq "$DPY clipboard holds the entry" "$PLAIN" "$(sel_on "$DPY" clipboard)"
 assert_eq "$DPY primary holds the entry" "$PLAIN" "$(sel_on "$DPY" primary)"
+
+# ============ PHASE 3: guards -- every precondition failure writes nothing ===
+#
+# Every one of these must be exit 1 (or, for the XDG_RUNTIME_DIR case, exit
+# 78) specifically -- those are the codes that promise the clipboard was not
+# touched, and downstream callers (qs-clip.sh, the picker) build against
+# that promise. Only $DPY is live from here on (the previous scenario killed
+# $DPY2 for good), so assert_untouched only checks $DPY -- but it is still
+# the same "nothing was written" property, checked on both selections.
+assert_untouched_dpy_only() { # <label>
+  assert_eq "$1: $DPY clipboard untouched" "$SENTINEL" "$(sel_on "$DPY" clipboard)"
+  assert_eq "$1: $DPY primary untouched"   "$SENTINEL" "$(sel_on "$DPY" primary)"
+}
+
+scenario "guards-write-nothing: unknown-id-exits-1-writes-nothing"
+reset_selections
+run_set "999999.clip"; rc=$?
+assert_eq "exits 1" "1" "$rc"
+assert_eq "reason names the unknown id" "yes" \
+  "$(grep -qi 'no such entry' "$TMP/set.err" && echo yes || echo no)"
+assert_untouched_dpy_only "unknown-id"
+
+scenario "guards-write-nothing: bad-id format is refused before anything is written"
+reset_selections
+run_set "not-an-id"; rc=$?
+assert_eq "exits 1" "1" "$rc"
+assert_eq "explains itself" "yes" \
+  "$(grep -qi 'NNNNNN.clip' "$TMP/set.err" && echo yes || echo no)"
+assert_untouched_dpy_only "bad-id"
+
+scenario "guards-write-nothing: missing argument is refused"
+reset_selections
+run_set; rc=$?
+assert_eq "exits 1" "1" "$rc"
+assert_eq "prints usage" "yes" \
+  "$(grep -qi 'usage' "$TMP/set.err" && echo yes || echo no)"
+assert_untouched_dpy_only "missing-arg"
+
+scenario "guards-write-nothing: store dir absent entirely (a session that never captured anything)"
+reset_selections
+_saved_src="$CLIP_SET_ENV_SRC"
+CLIP_SET_ENV_SRC=":96"   # no clip-store/:96 directory exists at all
+run_set "000001.clip"; rc=$?
+CLIP_SET_ENV_SRC="$_saved_src"
+assert_eq "exits 1" "1" "$rc"
+assert_untouched_dpy_only "store-dir-absent"
+
+scenario "guards-write-nothing: no-display-at-all is a clean exit 1"
+reset_selections
+ID="$(seed_content "$DPY" "$TMP/plain.src")"
+run_set_in "$TMP/x11-empty" "$ID"; rc=$?
+assert_eq "exits 1" "1" "$rc"
+assert_eq "reason names the missing display" "yes" \
+  "$(grep -qi 'no live X display' "$TMP/set.err" && echo yes || echo no)"
+assert_untouched_dpy_only "no-display"
+
+scenario "guards-write-nothing: only-dead-displays (sockets with no server behind them) is exit 1"
+reset_selections
+ID="$(seed_content "$DPY" "$TMP/plain.src")"
+run_set_in "$TMP/x11-dead" "$ID"; rc=$?
+assert_eq "exits 1" "1" "$rc"
+assert_eq "reason names the missing display" "yes" \
+  "$(grep -qi 'no live X display' "$TMP/set.err" && echo yes || echo no)"
+assert_untouched_dpy_only "only-dead"
+
+scenario "guards-write-nothing: XDG_RUNTIME_DIR unset fails loudly (exit 78), not silently"
+reset_selections
+ID="$(seed_content "$DPY" "$TMP/plain.src")"
+_saved_xdg="$CLIP_SET_ENV_XDG"
+CLIP_SET_ENV_XDG="UNSET"
+run_set "$ID"; rc=$?
+CLIP_SET_ENV_XDG="$_saved_xdg"
+assert_eq "exits 78" "78" "$rc"
+assert_eq "reason names XDG_RUNTIME_DIR" "yes" \
+  "$(grep -qi 'XDG_RUNTIME_DIR' "$TMP/set.err" && echo yes || echo no)"
+assert_untouched_dpy_only "xdg-runtime-dir-unset"
 
 # ------------------------------------------------------------------ result ---
 
