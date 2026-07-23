@@ -966,6 +966,39 @@ own_clipboard 'no-feeder-running-marker'
 sleep 4
 assert_eq "store count unchanged with the feeder stopped" "$before" "$(store_count)"
 
+# ======================= PHASE 5: display screen-suffix normalization =======
+# dotfiles-3x85: a raw X DISPLAY can carry a screen suffix (:0.0) while
+# clip-feed.sh's own destination is normally the bare display the autostart
+# passes (CLIP_FEED_DST=:0). The feeder must strip that suffix before it
+# becomes a store-path component, or a caller naming the destination with the
+# suffixed form silently feeds a store nothing else ever reads.
+
+scenario "screen-suffix-dst-normalized: CLIP_FEED_DST=:N.0 feeds the bare-display store (dotfiles-3x85)"
+rm -f "$TMP/feed-suffix.lock"
+# The prior CONTROL scenario left SRC's clipboard owned (no feeder was
+# running to consume it) -- clip-feed.sh is a POLLING loop, not event-driven,
+# so a stale owner would be fed during THIS feeder's startup window, landing
+# an entry before own_clipboard below ever runs and corrupting both the count
+# and content assertions. Clear it first so the only owner during startup is
+# none at all.
+[ -n "${OWNER_PID:-}" ] && { kill "$OWNER_PID" 2>/dev/null; wait "$OWNER_PID" 2>/dev/null; OWNER_PID=""; }
+before="$(store_count)"
+env DISPLAY=:77 XDG_RUNTIME_DIR="$RUN" \
+    CLIP_FEED_SRC="$SRC" CLIP_FEED_DST="$DST.0" \
+    CLIP_FEED_LOCK="$TMP/feed-suffix.lock" \
+    CLIP_FEED_POLL=0.5 CLIP_FEED_IDLE=5 CLIP_FEED_TIMEOUT=5 \
+    sh "$FEEDER" >>"$TMP/feeder-suffix.log" 2>&1 &
+SUFFIX_FEED_PID=$!
+sleep 1
+own_clipboard 'suffix-dst-marker'
+size="$(wait_store_change "$before" 5)"
+assert_eq "store (\$SDIR, the bare-display dir) grew by one" "$((before + 1))" "$size"
+assert_eq "the suffix-fed copy is present, byte-exact" "suffix-dst-marker" \
+  "$(cat "$(entry_for_content 'suffix-dst-marker')" 2>/dev/null)"
+assert_eq "no suffixed store dir was ever created" "no" \
+  "$([ -d "$RUN/clip-store/$DST.0" ] && echo yes || echo no)"
+kill "$SUFFIX_FEED_PID" 2>/dev/null; wait "$SUFFIX_FEED_PID" 2>/dev/null
+
 # ------------------------------------------------------------------ result ---
 
 printf '\n----------------------------------------\n'

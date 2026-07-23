@@ -115,6 +115,14 @@ if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
   exit 78
 fi
 
+# X DISPLAY may carry a screen suffix (`:0.0`); the store dir is keyed on the
+# bare display so a caller that passes the raw $DISPLAY still lands in the
+# same directory the autostart (bare `:0`/`:10`) writes into. In sh globs `.`
+# is literal: `:0.0` -> `:0`, bare `:0` unchanged. Done AFTER the emptiness
+# check above so an unset display still fails loudly instead of silently
+# normalizing away to nothing.
+DPY="${DPY%.*}"
+
 if ! command -v "$CN" >/dev/null 2>&1; then
   echo "clip-store.sh: clipnotify not found ('$CN'); install it (rotz install clip-store) or set CLIPNOTIFY=" >&2
   exit 69

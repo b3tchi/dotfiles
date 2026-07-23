@@ -140,6 +140,11 @@ set -u
 
 SRC="${CLIP_FEED_SRC:-:10}"
 DST="${CLIP_FEED_DST:-:0}"
+# X DISPLAY may carry a screen suffix (`:0.0`); clip-store.sh keys the store
+# dir on the bare display, so strip the screen here too or a raw display
+# passed as the destination would feed a store nothing else reads. In sh
+# globs `.` is literal: `:0.0` -> `:0`, bare `:0` unchanged.
+DST="${DST%.*}"
 CAP="${CLIP_FEED_DST_CAP:-100}"
 POLL="${CLIP_FEED_POLL:-0.5}"
 IDLE="${CLIP_FEED_IDLE:-5}"

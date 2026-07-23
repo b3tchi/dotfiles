@@ -925,6 +925,25 @@ assert_eq "every .clip file in the sandbox lives under \$XDG_RUNTIME_DIR/clip-st
 assert_eq "clip-store.sh contains no mktemp and no /tmp path (code, comments stripped)" "" \
   "$(sed 's/[[:space:]]*#.*//' "$STORESH" | grep -E 'mktemp|/tmp/' | tr '\n' ' ')"
 
+# ================= PHASE 7: display screen-suffix normalization =============
+# dotfiles-3x85: a raw X DISPLAY can carry a screen suffix (:0.0) while the
+# autostart always launches this loop with the bare display (:0). The store
+# path must key on the bare form regardless of which one the loop was told
+# to use, or a caller passing the suffixed form silently writes into a store
+# nobody else ever reads.
+
+scenario "screen-suffix-normalized: a :N.0-suffixed display key writes into the bare-display store (dotfiles-3x85)"
+stop_loop
+start_loop "$STORESH" CLIP_STORE_DISPLAY="$DPY.0"
+base="$(store_count)"
+own_clipboard 'suffix-marker'
+wait_count "$((base + 1))" 10
+assert_eq "entry landed under the bare-display store (\$SDIR, not \$SDIR.0)" "$((base + 1))" "$(store_count)"
+assert_eq "no suffixed store dir was ever created" "no" \
+  "$([ -d "$RUN/clip-store/$DPY.0" ] && echo yes || echo no)"
+assert_eq "the entry content is byte-exact" "present" "$(content_present 'suffix-marker')"
+stop_loop
+
 # ------------------------------------------------------------------ result ---
 
 printf '\n----------------------------------------\n'

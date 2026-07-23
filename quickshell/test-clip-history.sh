@@ -208,6 +208,25 @@ touch -d '2020-01-01' "$STORE/000003.clip"   # newest seq, oldest mtime
 touch -d '2030-01-01' "$STORE/000001.clip"   # oldest seq, newest mtime
 assert_eq "still seq order despite an mtime tie/reversal" "000003.clip	charlie" "$(qsclip list | sed -n 1p)"
 
+# ---- list: screen-suffixed DISPLAY still resolves the bare-display store ----
+# dotfiles-3x85: qs-clip.sh's own store_dir() strips a trailing X screen
+# suffix (${DISPLAY%.*}) so a raw $DISPLAY of ":95.0" resolves the same store
+# as the bare ":95" the autostart actually writes into. Entries are seeded
+# under the BARE store ($STORE == .../clip-store/$DPY); the call below passes
+# DISPLAY="$DPY.0" directly (bypassing the qsclip() helper, which always uses
+# the bare $DPY) to prove the suffixed form is normalized, not just accepted
+# by coincidence.
+
+scenario "list: DISPLAY=:N.0 (screen-suffixed) still lists the bare-display store (dotfiles-3x85)"
+reset_store
+write_entry 1 "alpha"; write_entry 2 "bravo"
+out="$(env DISPLAY="$DPY.0" XDG_RUNTIME_DIR="$RUN" QS_CLIP_SET="$STUB" sh "$QS_CLIP" list)"; rc=$?
+assert_eq "exits 0" "0" "$rc"
+assert_eq "lists the entries seeded under the bare store, newest first" \
+  "000002.clip	bravo" "$(printf '%s\n' "$out" | sed -n 1p)"
+assert_eq "row count matches the bare store's entry count" "2" \
+  "$(printf '%s\n' "$out" | wc -l | tr -d ' ')"
+
 # ---- preview-is-first-nonblank-line -----------------------------------------
 
 scenario "preview-is-first-nonblank-line"
@@ -309,6 +328,22 @@ assert_eq "exits 0" "0" "$rc"
 assert_eq "the second argv field follows the session, not a hardcoded display" \
   "000007.clip $DPY2" "$(logged)"
 rm -rf "$STORE2"
+
+# ---- set: screen-suffixed DISPLAY forwards the bare display, not the raw one ---
+# dotfiles-3x85: cmd_set forwards "${DISPLAY%.*}" as clip-set.sh's $2 (its own
+# store_dir() call already stripped the suffix to find the id in the first
+# place) -- so a raw DISPLAY=":95.0" must still forward the bare ":95",
+# never ":95.0", or clip-set.sh would look for the id in a store nothing
+# else ever writes.
+
+scenario "set: DISPLAY=:N.0 (screen-suffixed) forwards the bare display as \$2 (dotfiles-3x85)"
+reset_store
+write_entry 1 "alpha"; write_entry 2 "bravo"
+clear_log; stub_mode log
+env DISPLAY="$DPY.0" XDG_RUNTIME_DIR="$RUN" QS_CLIP_SET="$STUB" sh "$QS_CLIP" set 000002.clip; rc=$?
+assert_eq "exits 0" "0" "$rc"
+assert_eq "clip-set.sh received the bare display, not the raw :N.0 form" \
+  "000002.clip $DPY" "$(logged)"
 
 # ---- stale-id-exits-1-publishes-nothing -------------------------------------
 

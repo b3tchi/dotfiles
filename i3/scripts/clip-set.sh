@@ -176,6 +176,12 @@ SRC_DPY="${CLIP_SET_SRC_DISPLAY:-$ARG_SRC}"
 [ -n "$SRC_DPY" ] \
   || die "no source display given -- pass it as \$2 or set CLIP_SET_SRC_DISPLAY; \$DISPLAY is never trusted (a per-display store id is meaningless without knowing which store it came from)"
 
+# X DISPLAY may carry a screen suffix (`:0.0`); clip-store.sh keys the store
+# dir on the bare display, so strip the screen here too or a raw $DISPLAY
+# passed as the source would miss the store entirely. In sh globs `.` is
+# literal: `:0.0` -> `:0`, bare `:0` unchanged.
+SRC_DPY="${SRC_DPY%.*}"
+
 STORE="$XDG_RUNTIME_DIR/clip-store/$SRC_DPY"
 
 # ----------------------------------------------------------------- entry ---

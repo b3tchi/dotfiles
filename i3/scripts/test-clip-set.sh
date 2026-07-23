@@ -375,6 +375,20 @@ CLIP_SET_ENV_SRC="$_saved_src"
 assert_eq "exits 0" "0" "$rc"
 assert_on_both "resolved via the positional \$2 argument" "$PLAIN"
 
+scenario "screen-suffix-src-normalized: a :N.0-suffixed src display resolves the bare-display store (dotfiles-3x85)"
+# Entry seeded under the BARE display's store (store_dir "$DPY" == .../clip-store/:93);
+# clip-set.sh is told the src is "$DPY.0" -- the X-screen-suffixed form a raw
+# $DISPLAY can carry -- and must still find it by stripping the suffix
+# internally, exactly as clip-store.sh's writer does at the other end.
+reset_selections
+ID="$(seed_content "$DPY" "$TMP/plain.src")"
+_saved_src="$CLIP_SET_ENV_SRC"
+CLIP_SET_ENV_SRC="$DPY.0"
+run_set "$ID"; rc=$?
+CLIP_SET_ENV_SRC="$_saved_src"
+assert_eq "exits 0 (found the entry under the bare-display store)" "0" "$rc"
+assert_on_both "resolved via the :N.0-suffixed src display" "$PLAIN"
+
 scenario "wrong-store-explicit-src-publishes-right-one: an id colliding across two stores is resolved by the explicit source, not guessed"
 # THE anti-bug test: seed the identical filename in TWO stores with
 # DIFFERENT content -- exactly the "000005.clip commonly exists in both"
