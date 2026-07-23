@@ -20,6 +20,8 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[us012|clip glue rewritten in nushell per the adr0002 boundary]] (draft)
 - [[us013|delete the copyq and clipcat rollback trees after one cycle of daily use]] (draft)
 - [[us014|fresh installs pull the clipboard-history backend via meta-packages]] (draft)
+- [[us015|picker-overlay-visual-parity]] (done)
+- [[us017|recall-clipboard-history]] (draft)
 
 ## Features
 
