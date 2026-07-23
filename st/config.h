@@ -89,8 +89,10 @@ static unsigned int tripleclicktimeout = 600;
 int allowaltscreen = 1;
 
 /* allow certain non-interactive (insecure) window operations such as:
-   setting the clipboard text */
-int allowwindowops = 0;
+   setting the clipboard text.  1 is required for OSC 52 — the only path a
+   tmux/Claude Code copy has into the X CLIPBOARD (and thus clip-store's
+   mod+v history); with 0 st silently drops every OSC 52 write. */
+int allowwindowops = 1;
 
 /*
  * draw latency range in ms - from new content/keypress/etc until drawing.
