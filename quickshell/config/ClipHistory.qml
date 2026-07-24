@@ -286,6 +286,7 @@ Scope {
                             color: DialogTheme.fg
                             font.family: DialogTheme.font
                             font.pixelSize: DialogTheme.fontSize
+                            font.bold: isSelected
                             renderType: Text.NativeRendering
                         }
 

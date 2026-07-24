@@ -566,6 +566,7 @@ Scope {
                         color: DialogTheme.fg
                         font.family: DialogTheme.font
                         font.pixelSize: DialogTheme.fontSize
+                        font.bold: isSelected
                         renderType: Text.NativeRendering
                     }
 
@@ -655,6 +656,7 @@ Scope {
                             color: row.focused ? DialogTheme.muted : DialogTheme.fg
                             font.family: DialogTheme.font
                             font.pixelSize: DialogTheme.fontSize
+                            font.bold: isSelected
                             renderType: Text.NativeRendering
                             elide: Text.ElideRight
                         }
@@ -721,7 +723,7 @@ Scope {
                             color: DialogTheme.fg
                             font.family: DialogTheme.font
                             font.pixelSize: DialogTheme.fontSize
-                            font.bold: false
+                            font.bold: isSelected
                             renderType: Text.NativeRendering
                         }
 
