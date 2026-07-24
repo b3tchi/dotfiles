@@ -68,9 +68,12 @@ assert_ne() { if [ "$2" != "$3" ]; then pass "$1"; else fail "$1" "anything but 
 cleanup() {
   # Kill the whole quickshell process group so the i3-msg subscribe stub (a
   # blocking sleep) and any launched marker stub die with it.
+  [ -n "${OV_QS_PID:-}" ] && kill -- -"$OV_QS_PID" 2>/dev/null
+  [ -n "${OV_QS_PID:-}" ] && kill "$OV_QS_PID" 2>/dev/null
   [ -n "${QS_PID:-}" ] && kill -- -"$QS_PID" 2>/dev/null
   [ -n "${QS_PID:-}" ] && kill "$QS_PID" 2>/dev/null
   sleep 0.3
+  [ -n "${OV_XVFB_PID:-}" ] && kill "$OV_XVFB_PID" 2>/dev/null
   [ -n "${XVFB_PID:-}" ] && kill "$XVFB_PID" 2>/dev/null
   rm -rf "$TMP"
 }
@@ -518,6 +521,103 @@ targets="$(ipc show)"
 assert_eq "launcher target present" "1" "$(printf '%s\n' "$targets" | grep -c 'launcher')"
 assert_eq "switcher target present" "1" "$(printf '%s\n' "$targets" | grep -c 'switcher')"
 assert_eq "projects target present" "1" "$(printf '%s\n' "$targets" | grep -c 'projects')"
+
+# ============================================================================
+# OVERLAY-PROFILE PHASE (T6 / dotfiles-evnv.6) — the deployed separate-process
+# shape, native host.
+# ============================================================================
+# The phases above load config/Overlay.qml directly in a minimal $ENTRY profile
+# with QS_RDP=1 — that proves the MAIN-instance host (adr0004 RDP mode). This
+# phase proves the OTHER adr0004 mode: the desktop `quickshell -p overlay`
+# SEPARATE process, booted through the SHIPPED overlay/ directory exactly as
+# rotz deploys it —
+#
+#   $TMP/fake-config-link  (symlink, mimics ~/.config/quickshell-overlay)
+#     -> repo quickshell/overlay/                 (the rotz deploy link target)
+#          ├── shell.qml    thin ShellRoot { Overlay {} } wrapper (T6)
+#          ├── Overlay.qml  relative symlink -> ../config/Overlay.qml
+#          └── Common       relative symlink -> ../config/Common
+#
+# quickshell -p resolves the wrapper, which resolves `Overlay {}` and Overlay's
+# own `import "./Common"` through the two in-repo RELATIVE symlinks. If the
+# wrapper were left as the old 950-line duplicate this would still boot — but
+# then overlay/shell.qml would have drifted again, which the dead-code sweep
+# below rejects. If the symlinks were missing the `Overlay` type is unresolved
+# and no launcher target ever appears: that is this phase's RED. No QS_RDP here
+# (native path); isolated XDG_CACHE_HOME so a stale bytecode of the old shell
+# cannot mask the rewrite. Same sandbox $PBIN/$HOME_S -> same deterministic
+# SCAN_N -> the T3 launcher geometry (480 x 32+min(n,8)*32+8) still holds.
+
+scenario "overlay-profile: quickshell -p boots the shipped overlay wrapper via a symlinked deploy path and answers launcher toggle with T3 geometry"
+
+OV_DIR="$SCRIPT_DIR/overlay"           # the real repo overlay/ (committed symlinks + wrapper)
+FAKE_LINK="$TMP/fake-config-link"      # mimics the rotz deploy link ~/.config/quickshell-overlay
+OV_DPY=":98"
+OV_RUN="$TMP/ov-run"                   # isolated runtime dir (own ipc socket)
+OV_CCH="$TMP/ov-cache"                 # isolated cache — stale old-shell bytecode can't mask
+
+ln -sf "$OV_DIR" "$FAKE_LINK"
+mkdir -p "$OV_RUN" "$OV_CCH"
+chmod 700 "$OV_RUN"
+
+"$XVFB" "$OV_DPY" -screen 0 1280x800x24 >"$TMP/xvfb-ov.log" 2>&1 &
+OV_XVFB_PID=$!
+for i in $(seq 1 20); do
+  [ -e "/tmp/.X11-unix/X${OV_DPY#:}" ] && break
+  sleep 0.5
+done
+if [ ! -e "/tmp/.X11-unix/X${OV_DPY#:}" ]; then
+  fail "overlay-profile Xvfb $OV_DPY started" "a display" "none"
+else
+  setsid env -u SWAYSOCK -u QS_RDP \
+      DISPLAY="$OV_DPY" HOME="$HOME_S" PATH="$PBIN" \
+      QS_NO_KEYMON=1 \
+      XDG_CONFIG_HOME="$CFG" XDG_RUNTIME_DIR="$OV_RUN" XDG_CACHE_HOME="$OV_CCH" \
+      "$QS_BIN" -p "$FAKE_LINK" >"$TMP/qs-ov.out" 2>&1 &
+  OV_QS_PID=$!
+
+  ov_ipc() { env XDG_CONFIG_HOME="$CFG" XDG_RUNTIME_DIR="$OV_RUN" XDG_CACHE_HOME="$OV_CCH" \
+                 "$QUICKSHELL" ipc --pid "$OV_QS_PID" "$@" 2>/dev/null; }
+
+  OV_UP=""
+  for i in $(seq 1 40); do
+    n="$(ov_ipc show | grep -c 'launcher')"
+    [ "${n:-0}" -gt 0 ] && { OV_UP=1; break; }
+    sleep 0.5
+  done
+  if [ -z "$OV_UP" ]; then
+    fail "the wrapper booted via -p and exposed the 'launcher' IPC target" \
+         "launcher target through the symlinked deploy path" \
+         "no launcher target (wrapper unresolved? Overlay/Common symlinks missing?)"
+    tail -20 "$TMP/qs-ov.out" >&2
+  else
+    pass "quickshell -p on the symlinked deploy path exposed the launcher target"
+    ov_ipc call launcher toggle >/dev/null 2>&1
+    OV_WID=""
+    for i in $(seq 1 40); do
+      OV_WID="$(env DISPLAY="$OV_DPY" "$XDOTOOL" search --onlyvisible --name '^qs-launcher$' 2>/dev/null | head -1)"
+      [ -n "$OV_WID" ] && break
+      sleep 0.25
+    done
+    if [ -z "$OV_WID" ]; then
+      fail "launcher window mapped through the native overlay-profile host" "a qs-launcher window" "none"
+    else
+      pass "launcher window mapped through the native overlay-profile host"
+      # wait for the $PATH scan to lift height off the empty floor (40)
+      for i in $(seq 1 40); do
+        eval "$(env DISPLAY="$OV_DPY" "$XDOTOOL" getwindowgeometry --shell "$OV_WID" 2>/dev/null)"
+        [ "${HEIGHT:-0}" -gt 40 ] 2>/dev/null && break
+        sleep 0.25
+      done
+      eval "$(env DISPLAY="$OV_DPY" "$XDOTOOL" getwindowgeometry --shell "$OV_WID" 2>/dev/null)"
+      cap=$(( SCAN_N < 8 ? SCAN_N : 8 ))
+      exp_h=$(( 32 + cap * 32 + 8 ))
+      assert_eq "overlay-profile launcher height == 32 + min($SCAN_N,8)*32 + 8 (T3 geometry, find -L scan)" \
+        "$exp_h" "${HEIGHT:-?}"
+      assert_eq "overlay-profile launcher width == 480" "480" "${WIDTH:-?}"
+    fi
+  fi
+fi
 
 # ============================================================================
 
