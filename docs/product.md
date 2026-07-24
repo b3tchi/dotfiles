@@ -32,6 +32,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[ft005|file-preview-daemon]]
 - [[ft006|region-capture]]
 - [[ft007|shared-clipboard-history]]
+- [[ft008|shared-combobox-dialog-control]]
 
 ## Architecture Decision Records
 
