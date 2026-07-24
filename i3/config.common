@@ -204,6 +204,7 @@ for_window [all] border normal 4
 for_window [title="qs-launcher"] floating enable, border none, move position center
 for_window [title="qs-switcher"] floating enable, border none, move position center
 for_window [title="qs-projects"] floating enable, border none, move position center
+for_window [title="qs-clip"] floating enable, border none, move position center
 # No for_window rule for the region selector: qs-region.py is a GTK POPUP =
 # override-redirect, so i3 never manages it and no criteria could ever match.
 # (The rule that used to sit here matched title="qs-region" against the OLD
