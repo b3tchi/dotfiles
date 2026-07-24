@@ -51,7 +51,7 @@ Singleton {
             {text: "suspend", key: "s"},
             {text: "hibernate", key: "h"},
             {text: "reboot", key: "r"},
-            {text: "shutdown", key: "S-s"},
+            {text: "poweroff", key: "p"},
             {text: "quit", key: "q"}
         ]
     })

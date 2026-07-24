@@ -202,12 +202,12 @@ assert_case "hints-resize-verbatim" \
 assert_case "hints-screenshot-verbatim" \
   '[{"text":"select-region","key":"drag"},{"text":"corners","key":"2-tap"},{"text":"whole-screen","key":"w"},{"text":"quit","key":"q"}]'
 assert_case "hints-system-verbatim" \
-  '[{"text":"lock","key":"l"},{"text":"exit","key":"e"},{"text":"switch-user","key":"u"},{"text":"suspend","key":"s"},{"text":"hibernate","key":"h"},{"text":"reboot","key":"r"},{"text":"shutdown","key":"S-s"},{"text":"quit","key":"q"}]'
+  '[{"text":"lock","key":"l"},{"text":"exit","key":"e"},{"text":"switch-user","key":"u"},{"text":"suspend","key":"s"},{"text":"hibernate","key":"h"},{"text":"reboot","key":"r"},{"text":"poweroff","key":"p"},{"text":"quit","key":"q"}]'
 
 scenario "resolve — full \$mode_system string routes to system via indexOf (AC4)"
 # An equality-match mutant returns the fallback row for the long name instead.
 assert_case "system-long-name-resolves" \
-  '[{"text":"lock","key":"l"},{"text":"exit","key":"e"},{"text":"switch-user","key":"u"},{"text":"suspend","key":"s"},{"text":"hibernate","key":"h"},{"text":"reboot","key":"r"},{"text":"shutdown","key":"S-s"},{"text":"quit","key":"q"}]'
+  '[{"text":"lock","key":"l"},{"text":"exit","key":"e"},{"text":"switch-user","key":"u"},{"text":"suspend","key":"s"},{"text":"hibernate","key":"h"},{"text":"reboot","key":"r"},{"text":"poweroff","key":"p"},{"text":"quit","key":"q"}]'
 
 scenario "hintsFor — unknown + empty modes fall back verbatim (AC4)"
 assert_case "unknown-mode-fallback" '[{"text":"somefuture","key":""}]'
@@ -454,9 +454,9 @@ scenario "system-long-name: the full \$mode_system string -> pill reads 'system'
 assert_case "system-long-name.visible" "1"
 assert_case "system-long-name.pill"    "system"
 # inline highlighting: lock->hk="l" post="ock"; switch-user->pre="switch-"
-# hk="u" post="ser". shutdown/"S-s" is fallback (key not a substring).
+# hk="u" post="ser". poweroff/"p" is inline (p at index 0).
 assert_case "system-long-name.hints" \
-  '[{"pre":"","key":"l","post":"ock","space":"","tail":""},{"pre":"","key":"e","post":"xit","space":"","tail":""},{"pre":"switch-","key":"u","post":"ser","space":"","tail":""},{"pre":"","key":"s","post":"uspend","space":"","tail":""},{"pre":"","key":"h","post":"ibernate","space":"","tail":""},{"pre":"","key":"r","post":"eboot","space":"","tail":""},{"pre":"","key":"S-s","post":"","space":" ","tail":"shutdown"},{"pre":"","key":"q","post":"uit","space":"","tail":""}]'
+  '[{"pre":"","key":"l","post":"ock","space":"","tail":""},{"pre":"","key":"e","post":"xit","space":"","tail":""},{"pre":"switch-","key":"u","post":"ser","space":"","tail":""},{"pre":"","key":"s","post":"uspend","space":"","tail":""},{"pre":"","key":"h","post":"ibernate","space":"","tail":""},{"pre":"","key":"r","post":"eboot","space":"","tail":""},{"pre":"","key":"p","post":"oweroff","space":"","tail":""},{"pre":"","key":"q","post":"uit","space":"","tail":""}]'
 
 scenario "unknown-fallback: unknown mode -> pill 'system' + one raw-name hint row (AC4)"
 assert_case "unknown-fallback.visible" "1"
