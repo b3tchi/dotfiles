@@ -551,8 +551,12 @@ PanelWindow {
         // Right side: stats + bell + date
         Row {
             id: rightSide
+            // Stats/tray/bell hide in a mode; the clock+date (clockDate Row
+            // below) stay pinned right, so the mode strip only replaces the
+            // left/workspace side. Anchored to clockDate.left so the two
+            // right-side blocks never overlap.
             visible: root.currentMode === "default"
-            anchors { right: parent.right; bottom: parent.bottom; bottomMargin: 1; rightMargin: 8 }
+            anchors { right: clockDate.left; bottom: parent.bottom; bottomMargin: 1 }
             spacing: 0
 
             // Stats (hidden during ticker)
@@ -678,9 +682,19 @@ PanelWindow {
                 }
             }
 
+        }
+
+        // Clock + date — always visible, kept on the right even while a mode
+        // strip is shown. Split out of rightSide so the mode gate only hides
+        // the stats/tray/bell, never the time.
+        Row {
+            id: clockDate
+            anchors { right: parent.right; bottom: parent.bottom; bottomMargin: 1; rightMargin: 8 }
+            spacing: 0
+
             Text { text: "  "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
 
-            // Date — sync to second/minute boundary so updates aren't delayed
+            // Time — sync to second/minute boundary so updates aren't delayed
             Text {
                 id: clockText
                 property bool showSeconds: false

@@ -6,6 +6,8 @@ sections when status flips.
 
 ## idea
 
+- [[sp019|notification-service-and-history-browser]]
+
 
 - 🔥 hotfix [[sp015|gopass-clipboard-secret-marking]]
 
