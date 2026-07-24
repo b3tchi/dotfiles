@@ -26,14 +26,25 @@ if [ -z "$QS_DPY_VAL" ]; then
     QS_DPY_VAR=WAYLAND_DISPLAY
     QS_DPY_VAL="$WAYLAND_DISPLAY"
 fi
+# Screen-suffix normalization: Qt canonicalizes DISPLAY to add the screen
+# (":10" -> ":10.0") in every quickshell's environ, but the i3 launcher's
+# DISPLAY is sometimes bare (":10"). An exact ^DISPLAY=:10$ match from a bare
+# context then MISSES the running ":10.0" instances, so a restart's kill leaks
+# the old bar and two bars stack up. Match the bare display followed by an
+# OPTIONAL screen suffix so ":10" and ":10.0" are the same session either way.
+# (Same ${VAR%.*} canonicalization as the clip-store scripts, dotfiles-3x85.)
+# Only strip for X DISPLAY — WAYLAND_DISPLAY names carry no screen suffix.
+QS_DPY_BASE="$QS_DPY_VAL"
+[ "$QS_DPY_VAR" = DISPLAY ] && QS_DPY_BASE="${QS_DPY_VAL%.*}"
 # Filename-safe id (":0" -> "_0") for per-session FIFOs/logs.
-QS_SID="$(printf %s "${QS_DPY_VAL:-nodisplay}" | tr -c 'A-Za-z0-9' '_')"
-# Regex-escaped value for the environ grep (displays like ":0.0" contain dots).
-QS_DPY_RE="$(printf %s "$QS_DPY_VAL" | sed 's/[].*^$[\\]/\\&/g')"
+QS_SID="$(printf %s "${QS_DPY_BASE:-nodisplay}" | tr -c 'A-Za-z0-9' '_')"
+# Regex-escaped bare value for the environ grep (displays like ":0" -> "\:0").
+QS_DPY_RE="$(printf %s "$QS_DPY_BASE" | sed 's/[].*^$[\\]/\\&/g')"
 
-# True if pid belongs to this session (environ carries our display).
+# True if pid belongs to this session (environ carries our display). The
+# trailing (\.[0-9]+)? tolerates the Qt-added screen suffix in either direction.
 qs_same_session() {
-    grep -zqs "^$QS_DPY_VAR=$QS_DPY_RE\$" "/proc/$1/environ" 2>/dev/null
+    grep -zqsE "^$QS_DPY_VAR=$QS_DPY_RE(\.[0-9]+)?\$" "/proc/$1/environ" 2>/dev/null
 }
 
 # Kill only this session's processes. Args are passed to pgrep
