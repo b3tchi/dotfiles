@@ -38,10 +38,43 @@ trap cleanup EXIT
 mkdir -p "$TMP" "$STATE" "$RUN"
 chmod 700 "$RUN"
 
+# --- frozen-clock shim -------------------------------------------------------
+# prune() (store ~line 135) samples its OWN `date +%s`, independent of whatever
+# "now" a fixture used to stamp its entries.  A wall-clock tick between fixture
+# creation and prune shifts every age by +delta, which makes any exact-second
+# age-boundary assertion nondeterministic.  This shim, placed FIRST on PATH only
+# for the age-boundary scenarios (via run_store_frozen), makes `date +%s` return
+# a fixed $FROZEN_NOW so the fixture and prune sample the SAME instant.  Only
+# `date +%s` is intercepted; every other date call (and every other binary)
+# falls through to the real one.
+FROZEN_BIN="$TMP/frozenbin"
+mkdir -p "$FROZEN_BIN"
+cat > "$FROZEN_BIN/date" <<'SHIM'
+#!/bin/sh
+if [ "${1:-}" = "+%s" ] && [ -n "${FROZEN_NOW:-}" ]; then
+  printf '%s\n' "$FROZEN_NOW"
+else
+  for _d in /usr/bin /bin /usr/local/bin; do
+    [ -x "$_d/date" ] && exec "$_d/date" "$@"
+  done
+  exit 127
+fi
+SHIM
+chmod +x "$FROZEN_BIN/date"
+
 # Run the store script with an isolated XDG env.  Extra VAR=VAL assignments
 # (if any) are given as leading args.
 run_store() { # [VAR=VAL ...] -- <verb> [args...]
   env XDG_STATE_HOME="$STATE" XDG_RUNTIME_DIR="$RUN" "$@"
+}
+
+# Like run_store, but with the store's `date +%s` frozen to <frozen_epoch> so
+# prune() measures ages against a clock the caller controls.  Any leading
+# VAR=VAL args (e.g. QS_NOTIF_MAX_AGE=0) are consumed by env as assignments too.
+run_store_frozen() { # <frozen_epoch> [VAR=VAL ...] -- <verb> [args...]
+  _fn="$1"; shift
+  env XDG_STATE_HOME="$STATE" XDG_RUNTIME_DIR="$RUN" \
+      PATH="$FROZEN_BIN:$PATH" FROZEN_NOW="$_fn" "$@"
 }
 
 [ -f "$STORESH" ] || { echo "FATAL: store script not found at $STORESH" >&2; exit 1; }
@@ -97,29 +130,38 @@ rm -rf "$SDIR"
 
 scenario "age-boundary-kept: an entry exactly at the cap is kept, one second past is pruned"
 mkdir -p "$SDIR"
-# Recompute "now" fresh here rather than reusing the script-start $NOW: real
-# wall-clock seconds elapse between scenarios, and this assertion depends on
-# exact second-level boundaries, so a stale timestamp would make the fixture
-# itself wrong (not the implementation).
-now_local="$(date +%s)"
-at_cap=$((now_local - 172800))
-past_cap=$((now_local - 172801))
+# The exact-second boundary (age == MAX_AGE kept, age == MAX_AGE+1 pruned) is
+# only well-defined if the fixture's "now" equals the value prune() reads from
+# its own `date +%s`.  Freeze both to the same fixed instant via the date shim
+# (run_store_frozen) so the boundary is deterministic regardless of real
+# wall-clock ticks or CPU-load-induced scheduling delay between the two.
+frozen=1700000000
+at_cap=$((frozen - 172800))     # age exactly MAX_AGE  -> kept  (prune uses strict >)
+past_cap=$((frozen - 172801))   # age MAX_AGE + 1      -> pruned
 printf '%s\tnormal\tapp-at-cap\nat-cap summary\nat-cap body\n' "$at_cap" > "$SDIR/000001.notif"
 printf '%s\tnormal\tapp-past-cap\npast-cap summary\npast-cap body\n' "$past_cap" > "$SDIR/000002.notif"
-printf 'trigger body' | run_store sh "$STORESH" append "$now_local" normal trigapp "trigger summary"
+printf 'trigger body' | run_store_frozen "$frozen" sh "$STORESH" append "$frozen" normal trigapp "trigger summary"
 assert_eq "at-cap entry (age == MAX_AGE) is kept" "yes" "$([ -f "$SDIR/000001.notif" ] && echo yes || echo no)"
 assert_eq "past-cap entry (age == MAX_AGE+1) is pruned" "no" "$([ -e "$SDIR/000002.notif" ] && echo yes || echo no)"
 rm -rf "$SDIR"
 
-scenario "age-prune-max-age-zero: QS_NOTIF_MAX_AGE=0 prunes everything but the entry just written"
+scenario "age-prune-max-age-zero: QS_NOTIF_MAX_AGE=0 prunes anything strictly older than now, keeps the just-written entry"
 mkdir -p "$SDIR"
-now_local="$(date +%s)"
-one_sec_ago=$((now_local - 1))
-printf '%s\tnormal\told\nold summary\nold body\n' "$one_sec_ago" > "$SDIR/000001.notif"
-printf 'zero-age body' | env XDG_STATE_HOME="$STATE" XDG_RUNTIME_DIR="$RUN" QS_NOTIF_MAX_AGE=0 \
-  sh "$STORESH" append "$now_local" normal zeroapp "zero-age summary"
-assert_eq "the one-second-old entry is pruned" "no" "$([ -e "$SDIR/000001.notif" ] && echo yes || echo no)"
-assert_eq "the just-written entry (age 0) survives" "yes" "$([ -f "$SDIR/000002.notif" ] && echo yes || echo no)"
+# Contract under test (store ~line 140): prune drops an entry when
+# (now - epoch) > MAX_AGE, a STRICT >.  With MAX_AGE=0 that means "strictly
+# older than now is pruned; an entry stamped at now (age 0) is kept" -- the
+# just-written entry survives ONLY because 0 > 0 is false.  That survival is a
+# one-tick race against prune's independently-read clock, so freeze both to the
+# same instant: the just-written entry is stamped at $frozen and prune reads
+# $frozen, giving age 0 deterministically; the seeded entry is a full 100s in
+# the past so it is unambiguously pruned.
+frozen=1700000000
+past=$((frozen - 100))
+printf '%s\tnormal\told\nold summary\nold body\n' "$past" > "$SDIR/000001.notif"
+printf 'zero-age body' | run_store_frozen "$frozen" QS_NOTIF_MAX_AGE=0 \
+  sh "$STORESH" append "$frozen" normal zeroapp "zero-age summary"
+assert_eq "the older entry (age 100 > 0) is pruned under MAX_AGE=0" "no" "$([ -e "$SDIR/000001.notif" ] && echo yes || echo no)"
+assert_eq "the just-written entry (epoch == frozen now, age 0) survives" "yes" "$([ -f "$SDIR/000002.notif" ] && echo yes || echo no)"
 rm -rf "$SDIR"
 
 scenario "unicode-body-byte-exact: tabs, real newlines and unicode in the body survive byte-exact"
@@ -308,18 +350,51 @@ grep -qF 'if mv "$_wip"' "$TMP/qs-notif-store-mv.sh" \
 grep -qF 'if ln "$_wip"' "$TMP/qs-notif-store-mv.sh" \
   && { echo "FATAL: mutant still contains the original ln call" >&2; exit 1; }
 mkdir -p "$SDIR"
-printf '%s\tnormal\tapp\nseed\nseed body\n' "$NOW" > "$SDIR/000001.notif"
-(printf 'mutant body A' | run_store sh "$TMP/qs-notif-store-mv.sh" append "$NOW" normal appA "mutant A") &
-MUT_PID1=$!
-(printf 'mutant body B' | run_store sh "$TMP/qs-notif-store-mv.sh" append "$NOW" normal appB "mutant B") &
-MUT_PID2=$!
-wait "$MUT_PID1" 2>/dev/null
-wait "$MUT_PID2" 2>/dev/null
+# FORCE the seq collision deterministically rather than hoping two lone appends
+# interleave (which they do only ~90% of the time under load).  Two levers:
+#   (1) seed the store with $MUT_SEED entries so newest_entry()'s directory scan
+#       is slow -- every writer dwells in the scan long enough to overlap the
+#       others, so they all read the SAME newest seq;
+#   (2) block each of $MUT_W writers on a FIFO for its body, then release them
+#       together, so none begins its scan until all are staged.
+# All $MUT_W writers then compute the identical next-seq and target one name.
+# Under `ln` (real store) every collision costs a bounded retry and all writers
+# survive; under the `mv` mutant they clobber the shared target and entries are
+# lost.  With this staging the mutant loses at least one entry on EVERY run.
+MUT_SEED=400
+MUT_W=8
+mi=1
+while [ "$mi" -le "$MUT_SEED" ]; do
+  printf '%s\tnormal\tapp\nseed %s\nseed body\n' "$NOW" "$mi" > "$SDIR/$(printf '%06d' "$mi").notif"
+  mi=$((mi + 1))
+done
+mj=1
+while [ "$mj" -le "$MUT_W" ]; do
+  mkfifo "$TMP/mfifo.$mj"
+  ( run_store sh "$TMP/qs-notif-store-mv.sh" append "$NOW" normal "appM$mj" "mutant $mj" < "$TMP/mfifo.$mj" ) &
+  mj=$((mj + 1))
+done
+# Release every blocked writer near-simultaneously: each background printf opens
+# its FIFO for write (rendezvousing with the store's blocked stdin read), feeds
+# the body, and closes -> EOF lets that writer fall through into store_write.
+mj=1
+while [ "$mj" -le "$MUT_W" ]; do
+  ( printf 'mutant body %s' "$mj" > "$TMP/mfifo.$mj" ) &
+  mj=$((mj + 1))
+done
+wait
 mut_count="$(n=0; for f in "$SDIR"/[0-9][0-9][0-9][0-9][0-9][0-9].notif; do [ -e "$f" ] && n=$((n + 1)); done; echo "$n")"
-a_present="$(grep -qF 'mutant body A' "$SDIR"/[0-9][0-9][0-9][0-9][0-9][0-9].notif 2>/dev/null && echo present || echo absent)"
-b_present="$(grep -qF 'mutant body B' "$SDIR"/[0-9][0-9][0-9][0-9][0-9][0-9].notif 2>/dev/null && echo present || echo absent)"
+mut_expected=$((MUT_SEED + MUT_W))
+mut_all_present=present
+mj=1
+while [ "$mj" -le "$MUT_W" ]; do
+  grep -qF "mutant body $mj" "$SDIR"/[0-9][0-9][0-9][0-9][0-9][0-9].notif 2>/dev/null \
+    || mut_all_present=absent
+  mj=$((mj + 1))
+done
 assert_eq "the mutant LOSES an entry (mv clobbers on collision instead of retrying)" "yes" \
-  "$([ "$mut_count" -lt 3 ] || [ "$a_present" = "absent" ] || [ "$b_present" = "absent" ] && echo yes || echo no)"
+  "$([ "$mut_count" -lt "$mut_expected" ] || [ "$mut_all_present" = "absent" ] && echo yes || echo no)"
+mj=1; while [ "$mj" -le "$MUT_W" ]; do rm -f "$TMP/mfifo.$mj"; mj=$((mj + 1)); done
 rm -rf "$SDIR"
 
 scenario "MUTATION no-prune: removing the prune call must fail age-prune-on-write"
