@@ -19,6 +19,5 @@ sections when status flips.
 
 ## ready
 
-- [[sp017|formalize-shared-combobox-dialog-control]]
 
 - [[sp012|live-region-xshape-overlay]]
