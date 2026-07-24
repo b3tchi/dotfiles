@@ -3,3 +3,4 @@ singleton Fuzzy 1.0 Fuzzy.qml
 singleton DialogTheme 1.0 DialogTheme.qml
 singleton ModeBarTheme 1.0 ModeBarTheme.qml
 Combo 1.0 Combo.qml
+ModeBar 1.0 ModeBar.qml
