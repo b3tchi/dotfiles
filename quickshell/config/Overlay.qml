@@ -67,7 +67,7 @@ Scope {
 
     function launcherShow() {
         mode = "launcher"
-        overlay.width = 480
+        overlay.width = DialogTheme.width
         overlay.visible = true
         Qt.callLater(function() { launcherCombo.forceFocus() })
         // Rescan $PATH executables so newly installed bins appear without quickshell restart.
@@ -387,7 +387,7 @@ Scope {
     function projectsShow() {
         _projectsBuffer = ""
         mode = "projects"
-        overlay.width = 480
+        overlay.width = DialogTheme.width
         projectsScanner.running = true
     }
 
@@ -493,7 +493,7 @@ Scope {
     Window {
         id: overlay
         visible: false
-        width: 480
+        width: DialogTheme.width
         height: {
             if (root.mode === "launcher")
                 return launcherCombo.implicitHeight
