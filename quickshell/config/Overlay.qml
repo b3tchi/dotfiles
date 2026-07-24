@@ -3,6 +3,7 @@ import Quickshell.Io
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Window
+import "./Common"
 
 Scope {
     id: root
@@ -12,6 +13,9 @@ Scope {
     readonly property string wmMsg: isSway ? "swaymsg" : "i3-msg"
 
     // ── Shared ──
+    // NOTE: fontFamily/fontSize are retained ONLY for the switcher UI, which
+    // stays hand-rolled in this task (T4 refactors it onto Combo). Launcher and
+    // projects now source every constant from DialogTheme via Combo/delegate.
 
     readonly property string fontFamily: "Iosevka Nerd Font"
     readonly property int fontSize: isSway ? 14 : 16
@@ -29,78 +33,26 @@ Scope {
     }
 
     // ── Launcher state ──
+    // The launcher is a Combo (Common/Combo.qml) over the flat list of $PATH
+    // executable basenames. Combo owns the search text, the fuzzy filtering
+    // (via Common/Fuzzy.qml), the selection index, and the keyboard contract;
+    // this scope only feeds the model and handles confirm (exec) / cancel.
 
-    property int launcherIndex: 0
-    property string launcherSearch: ""
     property var launcherAllApps: []
     property var _appBuffer: []
-
-    function fuzzyMatch(text, pattern) {
-        if (!pattern) return { matched: true, score: 0, indices: [] }
-        if (!text) return { matched: false, score: 0, indices: [] }
-
-        var lower = text.toLowerCase()
-        var pat = pattern.toLowerCase()
-        var ti = 0, pi = 0
-        var indices = []
-        var score = 0
-        var prevMatched = false
-
-        while (ti < lower.length && pi < pat.length) {
-            if (lower[ti] === pat[pi]) {
-                indices.push(ti)
-                if (prevMatched) score += 5
-                if (ti === 0 || text[ti - 1] === ' ' || text[ti - 1] === '-')
-                    score += 10
-                score += 1
-                pi++
-                prevMatched = true
-            } else {
-                prevMatched = false
-            }
-            ti++
-        }
-
-        return { matched: pi === pat.length, score: score, indices: indices }
-    }
-
-    function highlightMatch(text, indices) {
-        if (!indices || indices.length === 0) return text
-        var result = ""
-        var matchSet = {}
-        for (var i = 0; i < indices.length; i++) matchSet[indices[i]] = true
-        for (var j = 0; j < text.length; j++) {
-            if (matchSet[j])
-                result += "<font color='#16a085'><b>" + text[j] + "</b></font>"
-            else
-                result += text[j]
-        }
-        return result
-    }
-
-    property var launcherFiltered: {
-        var result = []
-        var search = launcherSearch
-        for (var i = 0; i < launcherAllApps.length; i++) {
-            var name = launcherAllApps[i]
-            var m = fuzzyMatch(name, search)
-            if (m.matched)
-                result.push({ name: name, score: m.score, indices: m.indices })
-        }
-        result.sort(function(a, b) {
-            if (search) {
-                if (b.score !== a.score) return b.score - a.score
-            }
-            return a.name.localeCompare(b.name)
-        })
-        return result
-    }
 
     Process {
         id: pathScanner
         running: true
+        // find -L follows symlinks so rotz-linked bins in ~/.local/bin (which
+        // are symlinks) appear; -type f on the RESOLVED target keeps broken
+        // symlinks out (their target does not stat, so they never match -type
+        // f, and find's warning is swallowed by 2>/dev/null). Without -L the
+        // symlink itself is type 'l', so every symlinked bin is invisible — the
+        // drift the overlay/shell.qml copy carried and config/Overlay.qml did
+        // not.
         command: ["sh", "-c",
-            "echo $PATH | tr ':' '\\n' | xargs -I{} find {} -maxdepth 1 -executable -type f 2>/dev/null | sed 's|.*/||' | sort -u"]
+            "echo $PATH | tr ':' '\\n' | xargs -I{} find -L {} -maxdepth 1 -executable -type f 2>/dev/null | sed 's|.*/||' | sort -u"]
         stdout: SplitParser {
             onRead: data => {
                 var trimmed = data.trim()
@@ -114,13 +66,10 @@ Scope {
     }
 
     function launcherShow() {
-        launcherIndex = 0
-        launcherSearch = ""
-        launcherInput.text = ""
         mode = "launcher"
         overlay.width = 480
         overlay.visible = true
-        launcherInput.forceActiveFocus()
+        Qt.callLater(function() { launcherCombo.forceFocus() })
         // Rescan $PATH executables so newly installed bins appear without quickshell restart.
         if (!pathScanner.running) {
             root._appBuffer = []
@@ -128,15 +77,22 @@ Scope {
         }
     }
 
-    function launcherLaunch() {
-        if (launcherFiltered.length > 0 && launcherIndex < launcherFiltered.length) {
-            execProc.command = ["sh", "-c", "setsid -f " + launcherFiltered[launcherIndex].name + " >/dev/null 2>&1 </dev/null"]
+    // Confirm handler — receives the selected ROW OBJECT from Combo, which for
+    // the launcher is the bin-name string itself (adr0010: never a position).
+    function launcherLaunch(name) {
+        if (name) {
+            execProc.command = ["sh", "-c", "setsid -f " + name + " >/dev/null 2>&1 </dev/null"]
             execProc.running = true
         }
         hide()
     }
 
     // ── Switcher state ──
+    // Left hand-rolled in this task; T4 moves it onto Combo (filterMode
+    // "external", dual-field name-OR-ws scoring stays caller-side). The only
+    // change here is mechanical: the scored match + match-char highlight now
+    // come from Common/Fuzzy.qml (the local bodies were deleted with the
+    // launcher/projects refactor).
 
     property int switcherIndex: 0
     property var switcherWindows: []
@@ -147,8 +103,8 @@ Scope {
         var result = []
         for (var i = 0; i < switcherWindows.length; i++) {
             var w = switcherWindows[i]
-            var nameMatch = fuzzyMatch(w.name, switcherSearch)
-            var wsMatch = fuzzyMatch(w.ws, switcherSearch)
+            var nameMatch = Fuzzy.match(w.name, switcherSearch)
+            var wsMatch = Fuzzy.match(w.ws, switcherSearch)
             var best = nameMatch.score >= wsMatch.score ? nameMatch : wsMatch
             if (nameMatch.matched || wsMatch.matched)
                 result.push({
@@ -276,7 +232,10 @@ Scope {
 
     Process {
         id: keyMonitor
-        running: !root.isSway  // X11 only — python-xlib XI2 events
+        // X11 only (python-xlib XI2 events). QS_NO_KEYMON=1 suppresses the
+        // respawn entirely on headless test displays, where the python helper
+        // would churn against a keyboard-less Xvfb.
+        running: !root.isSway && Quickshell.env("QS_NO_KEYMON") !== "1"
         command: ["sh", "-c", "exec python3 -u $HOME/.dotfiles/quickshell/qs-keymon.py"]
         stdout: SplitParser {
             onRead: data => {
@@ -362,29 +321,14 @@ Scope {
     }
 
     // ── Projects state ──
+    // A Combo over the project registry (projects.yaml × current workspaces).
+    // Enter switches to the project's workspace (confirm); Shift+Enter creates
+    // the next indexed workspace, renaming the bare one first (confirmAlt →
+    // projectsNew). Combo owns filter/index/keys; this scope feeds the model
+    // (projectsAll, from projectsScanner) and the two confirm actions.
 
-    property int projectsIndex: 0
-    property string projectsSearch: ""
     property var projectsAll: []      // [{name, workspaces: ["dotfiles", "dotfiles_1"]}]
     property var _projectsBuffer: ""
-
-    property var projectsFiltered: {
-        var result = []
-        var search = projectsSearch
-        for (var i = 0; i < projectsAll.length; i++) {
-            var p = projectsAll[i]
-            var m = fuzzyMatch(p.name, search)
-            if (m.matched)
-                result.push({ name: p.name, workspaces: p.workspaces, score: m.score, indices: m.indices })
-        }
-        result.sort(function(a, b) {
-            if (search) {
-                if (b.score !== a.score) return b.score - a.score
-            }
-            return a.name.localeCompare(b.name)
-        })
-        return result
-    }
 
     // Scans projects.yaml + current workspaces, outputs JSON
     Process {
@@ -431,7 +375,7 @@ Scope {
             }
             root._projectsBuffer = ""
             overlay.visible = true
-            projectsInput.forceActiveFocus()
+            Qt.callLater(function() { projectsCombo.forceFocus() })
         }
     }
 
@@ -442,17 +386,14 @@ Scope {
 
     function projectsShow() {
         _projectsBuffer = ""
-        projectsIndex = 0
-        projectsSearch = ""
-        projectsInput.text = ""
         mode = "projects"
         overlay.width = 480
         projectsScanner.running = true
     }
 
-    function projectsSwitch() {
-        if (projectsFiltered.length > 0 && projectsIndex < projectsFiltered.length) {
-            var p = projectsFiltered[projectsIndex]
+    // Confirm handler — receives the selected project ROW OBJECT from Combo.
+    function projectsSwitch(p) {
+        if (p) {
             var wsName = p.workspaces.length > 0 ? p.workspaces[0] : p.name
             projectsWmProc.command = [root.wmMsg, "workspace", wsName]
             projectsWmProc.running = true
@@ -460,9 +401,9 @@ Scope {
         hide()
     }
 
-    function projectsNew() {
-        if (projectsFiltered.length > 0 && projectsIndex < projectsFiltered.length) {
-            var p = projectsFiltered[projectsIndex]
+    // Alt-confirm handler (Shift+Enter) — receives the selected project ROW.
+    function projectsNew(p) {
+        if (p) {
             if (p.workspaces.length === 0) {
                 projectsWmProc.command = [root.wmMsg, "workspace", p.name]
             } else {
@@ -555,17 +496,17 @@ Scope {
         width: 480
         height: {
             if (root.mode === "launcher")
-                return 32 + Math.min(root.launcherFiltered.length, 8) * 32 + 8
+                return launcherCombo.implicitHeight
             if (root.mode === "switcher")
                 return Math.max(root.switcherFiltered.length, 1) * 32 + 8
             if (root.mode === "switcher-search")
                 return 32 + Math.min(root.switcherFiltered.length, 8) * 32 + 8
             if (root.mode === "projects")
-                return 32 + Math.min(root.projectsFiltered.length, 8) * 32 + 8
+                return projectsCombo.implicitHeight
             return 100
         }
         flags: Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
-        color: "#222D31"
+        color: DialogTheme.bodyBg
         title: root.mode === "switcher" ? "qs-switcher" : root.mode === "projects" ? "qs-projects" : "qs-launcher"
 
         // Explicit opaque background. Qt.Window has a `color` property but on
@@ -575,7 +516,7 @@ Scope {
         // cheap and removes the ambiguity.
         Rectangle {
             anchors.fill: parent
-            color: "#222D31"
+            color: DialogTheme.bodyBg
             z: -1
         }
 
@@ -583,100 +524,52 @@ Scope {
             if (!active && visible && (root.mode === "launcher" || root.mode === "projects")) root.hide()
         }
 
-        // ── Launcher UI ──
-        Column {
+        // ── Launcher UI (Combo) ──
+        Combo {
+            id: launcherCombo
             anchors.fill: parent
             visible: root.mode === "launcher"
+            model: root.launcherAllApps
+            textOf: (function(r) { return r })   // rows are bare bin-name strings
+            placeholder: "run"
 
-            Rectangle {
-                width: parent.width
-                height: 32
-                color: "#152024"
+            onConfirm: (row) => root.launcherLaunch(row)
+            onCancel: () => root.hide()
 
-                TextInput {
-                    id: launcherInput
+            delegate: Component {
+                Rectangle {
                     anchors.fill: parent
-                    anchors.leftMargin: 12
-                    anchors.rightMargin: 12
-                    verticalAlignment: TextInput.AlignVCenter
-                    color: "#FDF6E3"
-                    font.family: root.fontFamily
-                    font.pixelSize: root.fontSize
-                    clip: true
-
-                    onTextChanged: {
-                        root.launcherSearch = text
-                        root.launcherIndex = 0
-                    }
-
-                    Keys.onEscapePressed: root.hide()
-                    Keys.onReturnPressed: root.launcherLaunch()
-                    Keys.onEnterPressed: root.launcherLaunch()
-                    Keys.onDownPressed: {
-                        if (root.launcherIndex < root.launcherFiltered.length - 1)
-                            root.launcherIndex++
-                    }
-                    Keys.onUpPressed: {
-                        if (root.launcherIndex > 0)
-                            root.launcherIndex--
-                    }
-                }
-
-                Text {
-                    anchors.fill: launcherInput
-                    verticalAlignment: Text.AlignVCenter
-                    text: "run"
-                    color: "#707880"
-                    font.family: root.fontFamily
-                    font.pixelSize: root.fontSize
-                    renderType: Text.NativeRendering
-                    visible: !launcherInput.text
-                }
-            }
-
-            ListView {
-                width: parent.width
-                height: Math.min(root.launcherFiltered.length, 8) * 32 + 8
-                model: root.launcherFiltered.length
-                clip: true
-                currentIndex: root.launcherIndex
-
-                delegate: Rectangle {
-                    required property int index
-                    property var item: root.launcherFiltered[index]
-                    property bool isSelected: index === root.launcherIndex
-
-                    width: parent ? parent.width : 0
-                    height: 32
-                    color: isSelected ? "#152024" : "transparent"
+                    color: isSelected ? DialogTheme.inputBg : "transparent"
 
                     Rectangle {
                         visible: isSelected
                         width: 4; height: parent.height
-                        color: "#16a085"
+                        color: DialogTheme.accent
                     }
 
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
                         anchors.left: parent.left
-                        anchors.leftMargin: 12
-                        text: root.highlightMatch(item.name, item.indices)
+                        anchors.leftMargin: DialogTheme.textLeftMargin
+                        text: Fuzzy.highlight(row, matchIndices)
                         textFormat: Text.RichText
-                        color: "#FDF6E3"
-                        font.family: root.fontFamily
-                        font.pixelSize: root.fontSize
+                        color: DialogTheme.fg
+                        font.family: DialogTheme.font
+                        font.pixelSize: DialogTheme.fontSize
                         renderType: Text.NativeRendering
                     }
 
                     MouseArea {
                         anchors.fill: parent
-                        onClicked: { root.launcherIndex = index; root.launcherLaunch() }
+                        onClicked: root.launcherLaunch(row)
                     }
                 }
             }
         }
 
         // ── Switcher UI (also used for switcher-search) ──
+        // Hand-rolled; T4 moves it onto Combo. Only the match-highlight call
+        // (now Fuzzy.highlight) changed here.
         Column {
             anchors.fill: parent
             visible: root.mode === "switcher" || root.mode === "switcher-search"
@@ -794,7 +687,7 @@ Scope {
                             anchors.leftMargin: 12
                             anchors.right: clsText.left
                             anchors.rightMargin: 8
-                            text: (root.mode === "switcher-search" && item.nameIndices && item.nameIndices.length > 0) ? root.highlightMatch(item.name, item.nameIndices) : item.name
+                            text: (root.mode === "switcher-search" && item.nameIndices && item.nameIndices.length > 0) ? Fuzzy.highlight(item.name, item.nameIndices) : item.name
                             textFormat: root.mode === "switcher-search" ? Text.RichText : Text.PlainText
                             color: item.focused ? "#707880" : "#FDF6E3"
                             font.family: root.fontFamily
@@ -808,7 +701,7 @@ Scope {
                             anchors.verticalCenter: parent.verticalCenter
                             anchors.right: parent.right
                             anchors.rightMargin: 8
-                            text: (root.mode === "switcher-search" && item.wsIndices && item.wsIndices.length > 0) ? root.highlightMatch(item.ws, item.wsIndices) : item.ws
+                            text: (root.mode === "switcher-search" && item.wsIndices && item.wsIndices.length > 0) ? Fuzzy.highlight(item.ws, item.wsIndices) : item.ws
                             textFormat: root.mode === "switcher-search" ? Text.RichText : Text.PlainText
                             color: "#707880"
                             font.family: root.fontFamily
@@ -825,110 +718,53 @@ Scope {
             }
         }
 
-        // ── Projects UI ──
-        Column {
+        // ── Projects UI (Combo) ──
+        Combo {
+            id: projectsCombo
             anchors.fill: parent
             visible: root.mode === "projects"
+            model: root.projectsAll
+            altConfirmEnabled: true               // Shift+Enter → projectsNew
+            placeholder: "project"
 
-            Rectangle {
-                width: parent.width
-                height: 32
-                color: "#152024"
+            onConfirm: (row) => root.projectsSwitch(row)
+            onConfirmAlt: (row) => root.projectsNew(row)
+            onCancel: () => root.hide()
 
-                TextInput {
-                    id: projectsInput
+            delegate: Component {
+                Rectangle {
                     anchors.fill: parent
-                    anchors.leftMargin: 12
-                    anchors.rightMargin: 12
-                    verticalAlignment: TextInput.AlignVCenter
-                    color: "#FDF6E3"
-                    font.family: root.fontFamily
-                    font.pixelSize: root.fontSize
-                    clip: true
-
-                    onTextChanged: {
-                        root.projectsSearch = text
-                        root.projectsIndex = 0
-                    }
-
-                    Keys.onEscapePressed: root.hide()
-                    Keys.onPressed: event => {
-                        if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) &&
-                            (event.modifiers & Qt.ShiftModifier)) {
-                            root.projectsNew()
-                            event.accepted = true
-                        } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                            root.projectsSwitch()
-                            event.accepted = true
-                        } else if (event.key === Qt.Key_Down) {
-                            if (root.projectsIndex < root.projectsFiltered.length - 1)
-                                root.projectsIndex++
-                            event.accepted = true
-                        } else if (event.key === Qt.Key_Up) {
-                            if (root.projectsIndex > 0)
-                                root.projectsIndex--
-                            event.accepted = true
-                        }
-                    }
-                }
-
-                Text {
-                    anchors.fill: projectsInput
-                    verticalAlignment: Text.AlignVCenter
-                    text: "project"
-                    color: "#707880"
-                    font.family: root.fontFamily
-                    font.pixelSize: root.fontSize
-                    renderType: Text.NativeRendering
-                    visible: !projectsInput.text
-                }
-            }
-
-            ListView {
-                width: parent.width
-                height: Math.min(root.projectsFiltered.length, 8) * 32 + 8
-                model: root.projectsFiltered.length
-                clip: true
-                currentIndex: root.projectsIndex
-
-                delegate: Rectangle {
-                    required property int index
-                    property var item: root.projectsFiltered[index]
-                    property bool isSelected: index === root.projectsIndex
-
-                    width: parent ? parent.width : 0
-                    height: 32
-                    color: isSelected ? "#152024" : "transparent"
+                    color: isSelected ? DialogTheme.inputBg : "transparent"
 
                     Rectangle {
                         visible: isSelected
                         width: 4; height: parent.height
-                        color: "#16a085"
+                        color: DialogTheme.accent
                     }
 
                     Row {
                         anchors.verticalCenter: parent.verticalCenter
                         anchors.left: parent.left
-                        anchors.leftMargin: 12
+                        anchors.leftMargin: DialogTheme.textLeftMargin
                         anchors.right: parent.right
                         anchors.rightMargin: 8
                         spacing: 8
 
                         Text {
-                            text: root.highlightMatch(item.name, item.indices)
+                            text: Fuzzy.highlight(row.name, matchIndices)
                             textFormat: Text.RichText
-                            color: "#FDF6E3"
-                            font.family: root.fontFamily
-                            font.pixelSize: root.fontSize
+                            color: DialogTheme.fg
+                            font.family: DialogTheme.font
+                            font.pixelSize: DialogTheme.fontSize
                             font.bold: false
                             renderType: Text.NativeRendering
                         }
 
                         Text {
-                            text: item.workspaces.length > 0 ? "[" + item.workspaces.join(", ") + "]" : ""
-                            color: "#707880"
-                            font.family: root.fontFamily
-                            font.pixelSize: root.fontSize
+                            text: row.workspaces.length > 0 ? "[" + row.workspaces.join(", ") + "]" : ""
+                            color: DialogTheme.muted
+                            font.family: DialogTheme.font
+                            font.pixelSize: DialogTheme.fontSize
                             renderType: Text.NativeRendering
                             elide: Text.ElideRight
                         }
@@ -936,7 +772,7 @@ Scope {
 
                     MouseArea {
                         anchors.fill: parent
-                        onClicked: { root.projectsIndex = index; root.projectsSwitch() }
+                        onClicked: root.projectsSwitch(row)
                     }
                 }
             }
