@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # test-overlay.sh — consumer suite for the i3-dialog overlay (sp017 / ft008),
-# launcher + projects phases (Task 3 / dotfiles-evnv.3). Sibling of
+# launcher + projects phases (Task 3 / dotfiles-evnv.3) and the switcher phase
+# (Task 4 / dotfiles-evnv.4). Sibling of
 # test-clip-history.sh and test-combo.sh; same discipline — Xvfb display,
 # isolated XDG_* dirs, a SANDBOXED $PATH of argv-recording stubs, named
 # scenarios, and negative controls that fail on the specific mutant (a reverted
@@ -95,7 +96,8 @@ chmod 700 "$RUN"
 # pipelines resolve), plus the launcher test bins. `echo $PATH` inside
 # pathScanner therefore sees exactly $PBIN.
 SLEEP_BIN="$(command -v sleep)"
-for t in sh tr xargs find sed sort grep setsid; do
+# cat is needed by the i3-msg stub's get_tree case (serves $I3DIR/tree.json).
+for t in sh tr xargs find sed sort grep setsid cat; do
   src="$(command -v "$t")" || { echo "FATAL: $t not found for the sandbox PATH" >&2; exit 1; }
   ln -sf "$src" "$PBIN/$t"
 done
@@ -130,17 +132,26 @@ ln -sf "$IMPLS/symlinkbin-impl" "$PBIN/symlinkbin"
 ln -sf "$IMPLS/does-not-exist" "$PBIN/brokenbin"
 
 # --- i3-msg stub --------------------------------------------------------------
-# Serves canned get_workspaces, BLOCKS on -t subscribe (the windowSubscriber),
-# and records every other argv line (projectsSwitch's `workspace <n>` and
-# projectsNew's rename+create chain). get_workspaces/subscribe are NOT recorded.
+# Serves canned get_workspaces + get_tree (the switcher scan), emits ONE
+# window::focus event on -t subscribe then BLOCKS (the windowSubscriber, which
+# seeds focusHistory so the MRU order is deterministic), and records every other
+# argv line — projectsSwitch's `workspace <n>`, projectsNew's rename+create
+# chain, and switcherFocus's `[con_id=<id>] focus`. get_workspaces / get_tree /
+# subscribe are NOT recorded; the tree is served from $I3DIR/tree.json so a
+# scenario can swap it (e.g. the zero-windows floor) between toggles.
 WS_JSON='[{"name":"alpha","focused":false},{"name":"web","focused":true}]'
+# Injected MRU event: window 102 (beta) becomes the most-recent focus, so after
+# the scan sorts (focused alpha first, then history rank) the order is
+# alpha(101) beta(102) gamma(103) and setIndex(1) preselects beta.
+FOCUS_EVT='{"change":"focus","container":{"id":102}}'
 cat > "$PBIN/i3-msg" <<EOF
 #!/bin/sh
 case "\$1" in
   -t)
     case "\$2" in
       get_workspaces) printf '%s' '$WS_JSON'; exit 0 ;;
-      subscribe)      exec "$SLEEP_BIN" 300 ;;
+      get_tree)       cat "$I3DIR/tree.json"; exit 0 ;;
+      subscribe)      printf '%s\n' '$FOCUS_EVT'; exec "$SLEEP_BIN" 300 ;;
       *)              exit 0 ;;
     esac ;;
 esac
@@ -149,6 +160,16 @@ exit 0
 EOF
 chmod +x "$PBIN/i3-msg"
 : > "$I3DIR/argv.log"
+
+# --- canned get_tree (switcher phase) ----------------------------------------
+# Three real windows across three workspaces, plus one EXCLUDED self-title
+# (qs-launcher) the tree walk must drop. con ids 101/102/103/999; the walk keys
+# MRU off `id`. Single line: windowScanner's SplitParser strips newlines, so
+# any inter-token newline would be swallowed — keep it flat. TREE_FULL is the
+# default; the zero-windows scenario swaps in an empty workspace and restores.
+TREE_FULL='{"type":"root","nodes":[{"type":"workspace","name":"code","nodes":[{"type":"con","id":101,"window":1001,"name":"alpha","focused":true,"nodes":[]}]},{"type":"workspace","name":"mail","nodes":[{"type":"con","id":102,"window":1002,"name":"beta","focused":false,"nodes":[]}]},{"type":"workspace","name":"web","nodes":[{"type":"con","id":103,"window":1003,"name":"gamma","focused":false,"nodes":[]},{"type":"con","id":999,"window":1999,"name":"qs-launcher","focused":false,"nodes":[]}]}]}'
+TREE_EMPTY='{"type":"root","nodes":[{"type":"workspace","name":"void","nodes":[]}]}'
+printf '%s\n' "$TREE_FULL" > "$I3DIR/tree.json"
 
 # --- projects.yaml ------------------------------------------------------------
 # Scanner greps '^  [a-zA-Z]' and takes the key. Two projects: alpha (has a live
@@ -259,6 +280,27 @@ open_projects() {
   return 0
 }
 close_projects() { key Escape; gone_on qs-projects || ipc call projects toggle >/dev/null 2>&1; }
+
+# The switcher maps only AFTER the get_tree scan completes (windowScanner sets
+# overlay.visible + the setIndex(1) MRU preselect in onExited), so a mapped
+# qs-switcher window implies the model is loaded and index 1 is selected.
+open_switcher() {
+  ipc call switcher toggle >/dev/null 2>&1
+  WID="$(win_on qs-switcher)" || { fail "$1 (switcher map)" "a qs-switcher window" "none"; return 1; }
+  focuswin "$WID"
+  sleep 0.3
+  return 0
+}
+# search-mode entry via the IPC `search` verb (opens the switcher, then drops
+# into switcher-search — the sway/not-yet-up path). Same qs-switcher title.
+open_switcher_search() {
+  ipc call switcher search >/dev/null 2>&1
+  WID="$(win_on qs-switcher)" || { fail "$1 (switcher-search map)" "a qs-switcher window" "none"; return 1; }
+  focuswin "$WID"
+  sleep 0.4
+  return 0
+}
+close_switcher() { ipc call switcher cancel >/dev/null 2>&1; gone_on qs-switcher; }
 
 # expected launcher list size (same scan the QML runs), for the geometry formula
 SCAN_N="$(echo "$PBIN" | tr ':' '\n' | xargs -I{} find -L {} -maxdepth 1 -executable -type f 2>/dev/null | sed 's|.*/||' | sort -u | wc -l | tr -d ' ')"
@@ -374,6 +416,98 @@ if open_projects missing-projects-yaml; then
   close_projects
 fi
 mv "$HOME_S/.config/project/projects.yaml.bak" "$HOME_S/.config/project/projects.yaml"
+
+# ============================================================================
+# SWITCHER PHASE
+# ============================================================================
+# Canned get_tree: alpha(101,focused) beta(102) gamma(103) + excluded
+# qs-launcher(999). One injected window::focus for 102 seeds the MRU so the scan
+# order is alpha, beta, gamma; setIndex(1) preselects beta(102). Commit paths
+# (IPC confirm / mod release) route through Combo.confirmCurrent(), so the focus
+# argv carries the SELECTED filtered row's con id — never a positional index
+# against the unfiltered list (adr0010).
+
+confirm_and_capture() { # drives IPC confirm, waits for the switcher to close, echoes argv
+  ipc call switcher confirm >/dev/null 2>&1
+  gone_on qs-switcher
+  sleep 0.2
+  i3log
+}
+
+# ---- mru-preselect-index-1 --------------------------------------------------
+scenario "mru-preselect-index-1: plain switcher preselects the previous MRU window (index 1 = beta/102)"
+clear_i3log
+if open_switcher mru-preselect-index-1; then
+  assert_eq "confirm focuses the index-1 (preselected) window con_id=102" \
+    "[con_id=102] focus" "$(confirm_and_capture)"
+fi
+
+# ---- excluded-titles-absent -------------------------------------------------
+scenario "excluded-titles-absent: the qs-launcher self-title is filtered from the tree walk (3 rows, not 4)"
+clear_i3log
+if open_switcher excluded-titles-absent; then
+  # plain height = 0(no input) + max(min(n,-1cap→n),1)*32 + 8. 3 real windows ->
+  # 3*32+8=104; if qs-launcher leaked in it'd be 4*32+8=136.
+  assert_eq "plain switcher height == 3*32+8 (excluded title absent)" "104" "$(geom_h "$WID")"
+  close_switcher
+fi
+
+# ---- cycle-wraps-both-ends --------------------------------------------------
+scenario "cycle-wraps-both-ends: next() wraps end->start and prev() wraps start->end (Combo cycle)"
+# next from preselect(1=beta): ->2(gamma) ->wrap 0(alpha). confirm focuses 101.
+clear_i3log
+if open_switcher cycle-wraps-next; then
+  ipc call switcher next >/dev/null 2>&1; sleep 0.2   # -> gamma(idx2)
+  ipc call switcher next >/dev/null 2>&1; sleep 0.2   # -> wrap to alpha(idx0)
+  assert_eq "two next() from index 1 wrapped past the end to alpha con_id=101" \
+    "[con_id=101] focus" "$(confirm_and_capture)"
+fi
+# prev from preselect(1=beta): ->0(alpha) ->wrap 2(gamma). confirm focuses 103.
+clear_i3log
+if open_switcher cycle-wraps-prev; then
+  ipc call switcher prev >/dev/null 2>&1; sleep 0.2   # -> alpha(idx0)
+  ipc call switcher prev >/dev/null 2>&1; sleep 0.2   # -> wrap to gamma(idx2)
+  assert_eq "two prev() from index 1 wrapped past the start to gamma con_id=103" \
+    "[con_id=103] focus" "$(confirm_and_capture)"
+fi
+
+# ---- confirm-selected-con-id (the filtered-vs-unfiltered negative control) ---
+scenario "confirm-selected-con-id: with a search filter active, confirm focuses the SELECTED filtered row"
+# Search "gamma" narrows to gamma(103) alone; unfiltered index 0 is alpha(101).
+# A mutant resolving the index against the UNFILTERED list would focus 101.
+clear_i3log
+if open_switcher_search confirm-selected-con-id; then
+  typ "gamma"
+  captured="$(confirm_and_capture)"
+  assert_eq "confirm focuses the filtered row gamma con_id=103" \
+    "[con_id=103] focus" "$captured"
+  assert_ne "confirm did NOT focus the unfiltered-index-0 window (alpha con_id=101)" \
+    "[con_id=101] focus" "$captured"
+fi
+
+# ---- search-filters-by-ws ---------------------------------------------------
+scenario "search-filters-by-ws: a query matching only the workspace field selects that window"
+# "mail" matches no name (alpha/beta/gamma) but IS beta's ws; filters to beta(102).
+clear_i3log
+if open_switcher_search search-filters-by-ws; then
+  typ "mail"
+  assert_eq "ws-only match narrows to beta and confirm focuses con_id=102" \
+    "[con_id=102] focus" "$(confirm_and_capture)"
+fi
+
+# ---- zero-windows-noop ------------------------------------------------------
+scenario "zero-windows-noop: an empty tree shows the 1-row floor and confirm is a no-op (no focus, no crash)"
+printf '%s\n' "$TREE_EMPTY" > "$I3DIR/tree.json"
+clear_i3log
+if open_switcher zero-windows-noop; then
+  assert_eq "empty switcher height == floor of 1 row (0+1*32+8=40)" "40" "$(geom_h "$WID")"
+  ipc call switcher confirm >/dev/null 2>&1
+  gone_on qs-switcher
+  sleep 0.3
+  assert_eq "confirm over the empty floor recorded no [con_id=...] focus" \
+    "" "$(i3log | grep -o 'con_id')"
+fi
+printf '%s\n' "$TREE_FULL" > "$I3DIR/tree.json"
 
 # ============================================================================
 # IPC SURFACE (inspection) — verbs unchanged, qs-overlay.sh untouched

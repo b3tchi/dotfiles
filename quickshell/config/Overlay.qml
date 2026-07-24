@@ -13,14 +13,11 @@ Scope {
     readonly property string wmMsg: isSway ? "swaymsg" : "i3-msg"
 
     // ── Shared ──
-    // NOTE: fontFamily/fontSize are retained ONLY for the switcher UI, which
-    // stays hand-rolled in this task (T4 refactors it onto Combo). Launcher and
-    // projects now source every constant from DialogTheme via Combo/delegate.
+    // All four dialogs (launcher, switcher, projects, clip) now render through
+    // Combo (Common/Combo.qml) and source every geometry/color constant from
+    // DialogTheme. No dialog carries its own font/color literals any more.
 
-    readonly property string fontFamily: "Iosevka Nerd Font"
-    readonly property int fontSize: isSway ? 14 : 16
-
-    property string mode: "" // "launcher", "switcher", or "projects"
+    property string mode: "" // "launcher", "switcher", "switcher-search", or "projects"
 
     Process {
         id: execProc
@@ -88,15 +85,17 @@ Scope {
     }
 
     // ── Switcher state ──
-    // Left hand-rolled in this task; T4 moves it onto Combo (filterMode
-    // "external", dual-field name-OR-ws scoring stays caller-side). The only
-    // change here is mechanical: the scored match + match-char highlight now
-    // come from Common/Fuzzy.qml (the local bodies were deleted with the
-    // launcher/projects refactor).
+    // The switcher is a Combo in filterMode "external": Combo passes the model
+    // through untouched, so this scope keeps ownership of the DUAL-FIELD
+    // (name OR ws) best-of-two scoring below — a caller-side concern that Fuzzy
+    // deliberately does not formalize (sp017 known-limitation). The Combo
+    // delegate reads the caller-produced nameIndices/wsIndices off each row and
+    // highlights via Fuzzy.highlight. `switcherWindows` is the MRU-ordered scan
+    // result; `switcherFiltered` is what the Combo renders.
 
-    property int switcherIndex: 0
     property var switcherWindows: []
-    property string switcherSearch: ""
+    // Live search text is the Combo's own input (bound, not written here).
+    readonly property string switcherSearch: switcherCombo.search
 
     property var switcherFiltered: {
         if (switcherSearch === "") return switcherWindows
@@ -204,10 +203,14 @@ Scope {
                     return ra - rb
                 })
                 root.switcherWindows = wins
-                // Pre-select the previous MRU window (classic alt-tab toggle).
-                root.switcherIndex = wins.length > 1 ? 1 : 0
-                // Now show
+                // Now show, then drive the Combo selection. forceFocus() clears
+                // any stale filter + focuses the control (input hidden in plain
+                // mode -> its FocusScope); setIndex(1) AFTER it pre-selects the
+                // previous MRU window (classic alt-tab toggle) — Combo clamps to
+                // 0 when there are 0/1 windows.
                 overlay.visible = true
+                switcherCombo.forceFocus()
+                switcherCombo.setIndex(1)
             } catch(e) {}
             root._scanBuffer = ""
         }
@@ -261,7 +264,7 @@ Scope {
                 } else if (isMod && action === "release") {
                     root.modHeld = false
                     if (root.mode === "switcher" && overlay.visible)
-                        root.switcherFocus()
+                        root.switcherCommit()
                 } else if (isSpace && action === "press" && root.modHeld && root.mode === "switcher") {
                     root.switcherSearchMode()
                 } else if (isSwitcherKey && action === "press" && root.modHeld) {
@@ -279,45 +282,53 @@ Scope {
 
     function switcherShow() {
         _scanBuffer = ""
-        switcherSearch = ""
         mode = "switcher"
+        // 640 is the switcher's documented caller-side width (sp017: wider than
+        // the DialogTheme.width dialogs because it shows name + workspace).
         overlay.width = 640
         windowScanner.running = true
-        // overlay.visible set in windowScanner.onExited after windows load
+        // overlay.visible + Combo preselect set in windowScanner.onExited.
     }
 
     function switcherSearchMode() {
         mode = "switcher-search"
-        switcherSearch = ""
-        switcherIndex = 0
-        switcherSearchInput.text = ""
-        switcherSearchInput.forceActiveFocus()
-        // Clear the space that triggered search mode (arrives after focus)
-        Qt.callLater(function() { switcherSearchInput.text = ""; switcherSearch = "" })
+        // Re-enable + focus the Combo input. forceFocus() clears the text (also
+        // swallowing the Space keypress that triggered search on X11, which
+        // arrives after the focus) and resets the index to 0. Deferred so the
+        // inputVisible binding has flipped before we focus the TextInput.
+        Qt.callLater(function() { switcherCombo.forceFocus() })
     }
 
     function switcherNext() {
         if (!overlay.visible) overlay.visible = true
-        var list = switcherFiltered
-        switcherIndex = switcherIndex < list.length - 1
-            ? switcherIndex + 1 : 0
+        switcherCombo.next()   // wraps at both ends (sp017 T4 alt-tab cycle)
     }
 
     function switcherPrev() {
         if (!overlay.visible) overlay.visible = true
-        var list = switcherFiltered
-        switcherIndex = switcherIndex > 0
-            ? switcherIndex - 1 : list.length - 1
+        switcherCombo.prev()   // wraps at both ends
     }
 
-    function switcherFocus() {
-        var list = switcherFiltered
-        if (list.length > 0 && switcherIndex < list.length) {
-            var win = list[switcherIndex]
+    // confirm handler — receives the SELECTED filtered ROW OBJECT from Combo
+    // (adr0010: the focused con id is the selected row's, never a positional
+    // index against the unfiltered list).
+    function switcherFocus(win) {
+        if (win) {
             focusProc.command = [root.wmMsg, "[con_id=" + win.id + "]", "focus"]
             focusProc.running = true
         }
         hide()
+    }
+
+    // Commit the current selection. All commit paths land here — mod release
+    // (X11 keyMonitor / sway Keys.onReleased) and IPC confirm. Routes through
+    // Combo.confirmCurrent() so the SELECTED filtered row's con id is focused;
+    // the zero-window floor (empty filtered) is a no-op focus, just a hide.
+    function switcherCommit() {
+        if (switcherCombo.filtered.length > 0)
+            switcherCombo.confirmCurrent()   // -> switcherFocus(row): focus + hide
+        else
+            hide()
     }
 
     // ── Projects state ──
@@ -461,7 +472,7 @@ Scope {
             }
         }
         function confirm() {
-            root.switcherFocus()
+            root.switcherCommit()
         }
         function cancel() {
             root.hide()
@@ -497,17 +508,16 @@ Scope {
         height: {
             if (root.mode === "launcher")
                 return launcherCombo.implicitHeight
-            if (root.mode === "switcher")
-                return Math.max(root.switcherFiltered.length, 1) * 32 + 8
-            if (root.mode === "switcher-search")
-                return 32 + Math.min(root.switcherFiltered.length, 8) * 32 + 8
+            if (root.mode === "switcher" || root.mode === "switcher-search")
+                return switcherCombo.implicitHeight
             if (root.mode === "projects")
                 return projectsCombo.implicitHeight
             return 100
         }
         flags: Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
         color: DialogTheme.bodyBg
-        title: root.mode === "switcher" ? "qs-switcher" : root.mode === "projects" ? "qs-projects" : "qs-launcher"
+        title: (root.mode === "switcher" || root.mode === "switcher-search") ? "qs-switcher"
+               : root.mode === "projects" ? "qs-projects" : "qs-launcher"
 
         // Explicit opaque background. Qt.Window has a `color` property but on
         // quickshell under X11 with FramelessWindowHint it isn't always honored
@@ -567,151 +577,106 @@ Scope {
             }
         }
 
-        // ── Switcher UI (also used for switcher-search) ──
-        // Hand-rolled; T4 moves it onto Combo. Only the match-highlight call
-        // (now Fuzzy.highlight) changed here.
-        Column {
+        // ── Switcher UI (Combo, filterMode "external") ──
+        // The Combo owns the input bar, the row list frame, the index, and the
+        // Enter/Esc/arrow contract; this scope keeps the dual-field (name OR ws)
+        // scoring caller-side (switcherFiltered) and feeds it as the Combo model.
+        // Plain mode: no input bar, floor of one row, no visible-row cap. Search
+        // mode: input re-enabled, capped at DialogTheme.maxRows like the other
+        // dialogs. The wrapping Item carries the two switcher-only key paths the
+        // Combo does not model — the sway modifier-release commit and (sway)
+        // Space-to-search — which bubble up from the focused Combo when unhandled.
+        Item {
+            id: switcherHost
             anchors.fill: parent
             visible: root.mode === "switcher" || root.mode === "switcher-search"
 
-            // Search bar (only in search mode)
-            Rectangle {
-                visible: root.mode === "switcher-search"
-                width: parent.width
-                height: 32
-                color: "#152024"
-
-                TextInput {
-                    id: switcherSearchInput
-                    anchors.fill: parent
-                    anchors.leftMargin: 12
-                    anchors.rightMargin: 12
-                    verticalAlignment: TextInput.AlignVCenter
-                    color: "#FDF6E3"
-                    font.family: root.fontFamily
-                    font.pixelSize: root.fontSize
-                    clip: true
-
-                    onTextChanged: {
-                        root.switcherSearch = text
-                        root.switcherIndex = 0
-                    }
-
-                    Keys.onEscapePressed: root.hide()
-                    Keys.onReturnPressed: root.switcherFocus()
-                    Keys.onEnterPressed: root.switcherFocus()
-                    Keys.onDownPressed: root.switcherNext()
-                    Keys.onUpPressed: root.switcherPrev()
+            // Space while the modifier is held drops into search (X11 goes via
+            // keyMonitor; this covers the sway/Qt-focused path). Guarded to plain
+            // mode so Space types normally once searching.
+            Keys.onPressed: event => {
+                if (event.key === Qt.Key_Space && root.mode === "switcher") {
+                    root.switcherSearchMode()
+                    event.accepted = true
                 }
-
-                Text {
-                    anchors.fill: switcherSearchInput
-                    verticalAlignment: Text.AlignVCenter
-                    text: "search windows"
-                    color: "#707880"
-                    font.family: root.fontFamily
-                    font.pixelSize: root.fontSize
-                    renderType: Text.NativeRendering
-                    visible: !switcherSearchInput.text
+            }
+            // Sway path: releasing the modifier (Alt, the sway $mod) while the
+            // switcher is up commits the selection. On X11 the keyMonitor (XI2
+            // raw events) handles this globally; under Wayland the compositor
+            // delivers the release to the focused surface, so it bubbles here.
+            Keys.onReleased: event => {
+                if (!root.isSway) return
+                if (event.key === Qt.Key_Alt || event.key === Qt.Key_AltGr ||
+                    event.key === Qt.Key_Meta ||
+                    event.key === Qt.Key_Super_L || event.key === Qt.Key_Super_R) {
+                    if (root.mode === "switcher" && overlay.visible)
+                        root.switcherCommit()
+                    event.accepted = true
                 }
             }
 
-            // Window list
-            Item {
-                width: parent.width
-                height: parent.height - (root.mode === "switcher-search" ? 32 : 0)
-                focus: root.mode === "switcher"
+            Combo {
+                id: switcherCombo
+                anchors.fill: parent
+                filterMode: "external"          // caller pre-scores; see switcherFiltered
+                comboWidth: 640                 // documented caller-side switcher width
+                model: root.switcherFiltered
+                textOf: (function(r) { return r.name })
+                placeholder: "search windows"
+                inputVisible: root.mode === "switcher-search"
+                minVisibleRows: root.mode === "switcher-search" ? 0 : 1
+                maxVisibleRows: root.mode === "switcher-search" ? DialogTheme.maxRows : -1
 
-                Keys.onPressed: event => {
-                    if (event.key === Qt.Key_Down) {
-                        root.switcherNext()
-                        event.accepted = true
-                    } else if (event.key === Qt.Key_Up) {
-                        root.switcherPrev()
-                        event.accepted = true
-                    } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                        root.switcherFocus()
-                        event.accepted = true
-                    } else if (event.key === Qt.Key_Escape) {
-                        root.hide()
-                        event.accepted = true
-                    } else if (event.key === Qt.Key_Space) {
-                        // Mirror X11 keyMonitor behaviour: while modifier is
-                        // held in switcher mode, Space drops into search.
-                        root.switcherSearchMode()
-                        event.accepted = true
-                    }
-                }
-                // Sway path: when the user releases the modifier (Alt, the sway
-                // $mod) while the switcher is up, commit the selection. On X11
-                // the keyMonitor (XI2 raw events) handles this globally; under
-                // Wayland the compositor delivers the modifier release to the
-                // focused surface, so Qt's Keys.onReleased fires here directly.
-                Keys.onReleased: event => {
-                    if (!root.isSway) return
-                    if (event.key === Qt.Key_Alt || event.key === Qt.Key_AltGr ||
-                        event.key === Qt.Key_Meta ||
-                        event.key === Qt.Key_Super_L || event.key === Qt.Key_Super_R) {
-                        if (root.mode === "switcher" && overlay.visible)
-                            root.switcherFocus()
-                        event.accepted = true
-                    }
-                }
+                onConfirm: (row) => root.switcherFocus(row)
+                onCancel: () => root.hide()
 
-                ListView {
-                    anchors.fill: parent
-                    anchors.topMargin: 4
-                    anchors.bottomMargin: 4
-                    model: root.switcherFiltered.length
-                    clip: true
-                    currentIndex: root.switcherIndex
-
-                    delegate: Rectangle {
-                        required property int index
-                        property var item: root.switcherFiltered[index]
-                        property bool isSelected: index === root.switcherIndex
-
-                        width: parent ? parent.width : 0
-                        height: 32
-                        color: isSelected ? "#152024" : "transparent"
+                delegate: Component {
+                    Rectangle {
+                        anchors.fill: parent
+                        color: isSelected ? DialogTheme.inputBg : "transparent"
 
                         Rectangle {
                             visible: isSelected
                             width: 4; height: parent.height
-                            color: item.urgent ? "#CB4B16" : "#16a085"
+                            color: row.urgent ? DialogTheme.urgent : DialogTheme.accent
                         }
 
                         Text {
                             anchors.verticalCenter: parent.verticalCenter
                             anchors.left: parent.left
-                            anchors.leftMargin: 12
-                            anchors.right: clsText.left
+                            anchors.leftMargin: DialogTheme.textLeftMargin
+                            anchors.right: wsText.left
                             anchors.rightMargin: 8
-                            text: (root.mode === "switcher-search" && item.nameIndices && item.nameIndices.length > 0) ? Fuzzy.highlight(item.name, item.nameIndices) : item.name
+                            // Caller-side highlight off the dual-field indices
+                            // (external mode: Combo's matchIndices is empty).
+                            text: (root.mode === "switcher-search" && row.nameIndices && row.nameIndices.length > 0)
+                                  ? Fuzzy.highlight(row.name, row.nameIndices) : row.name
                             textFormat: root.mode === "switcher-search" ? Text.RichText : Text.PlainText
-                            color: item.focused ? "#707880" : "#FDF6E3"
-                            font.family: root.fontFamily
-                            font.pixelSize: root.fontSize
+                            color: row.focused ? DialogTheme.muted : DialogTheme.fg
+                            font.family: DialogTheme.font
+                            font.pixelSize: DialogTheme.fontSize
                             renderType: Text.NativeRendering
                             elide: Text.ElideRight
                         }
 
                         Text {
-                            id: clsText
+                            id: wsText
                             anchors.verticalCenter: parent.verticalCenter
                             anchors.right: parent.right
                             anchors.rightMargin: 8
-                            text: (root.mode === "switcher-search" && item.wsIndices && item.wsIndices.length > 0) ? Fuzzy.highlight(item.ws, item.wsIndices) : item.ws
+                            text: (root.mode === "switcher-search" && row.wsIndices && row.wsIndices.length > 0)
+                                  ? Fuzzy.highlight(row.ws, row.wsIndices) : row.ws
                             textFormat: root.mode === "switcher-search" ? Text.RichText : Text.PlainText
-                            color: "#707880"
-                            font.family: root.fontFamily
-                            font.pixelSize: root.fontSize
+                            color: DialogTheme.muted
+                            font.family: DialogTheme.font
+                            font.pixelSize: DialogTheme.fontSize
                             renderType: Text.NativeRendering
                         }
 
                         MouseArea {
                             anchors.fill: parent
-                            onClicked: { root.switcherIndex = index; root.switcherFocus() }
+                            // adr0010: focus the clicked ROW's con id directly.
+                            onClicked: root.switcherFocus(row)
                         }
                     }
                 }
