@@ -1,60 +1,68 @@
 #!/usr/bin/env bash
 # Claude Code status line script
-# Reads JSON from stdin and outputs a formatted status line
+# Reads JSON from stdin and outputs a formatted status line (bash + jq)
 
-python3 -c "
-import sys, json, os
+json=$(cat)
 
-data = json.load(sys.stdin)
-
-model = data.get('model', {}).get('display_name', 'Unknown')
-used_pct = data.get('context_window', {}).get('used_percentage')
-in_tok = data.get('context_window', {}).get('total_input_tokens', 0)
-out_tok = data.get('context_window', {}).get('total_output_tokens', 0)
+# Pull fields in one jq pass (one per line; mapfile preserves empty fields)
+mapfile -t f < <(
+  jq -r '
+    (.model.display_name // "Unknown"),
+    (.context_window.used_percentage // ""),
+    (.context_window.total_input_tokens // 0),
+    (.context_window.total_output_tokens // 0),
+    (.context_window.context_window_size // 0),
+    (.workspace.current_dir // .cwd // "")
+  ' <<<"$json"
+)
+model=${f[0]} used_pct=${f[1]} in_tok=${f[2]} out_tok=${f[3]} ctx_size=${f[4]} wd=${f[5]}
 
 # Colors
-R = '\033[0m'
-B = '\033[1m'
-D = '\033[2m'
-CYAN = '\033[36m'
-BLUE = '\033[34m'
-MAGENTA = '\033[35m'
-GREEN = '\033[32m'
-YELLOW = '\033[33m'
-RED = '\033[31m'
+R=$'\033[0m'; B=$'\033[1m'; D=$'\033[2m'
+CYAN=$'\033[36m'; BLUE=$'\033[34m'; MAGENTA=$'\033[35m'
+GREEN=$'\033[32m'; YELLOW=$'\033[33m'; RED=$'\033[31m'
 
 # Format tokens as K (thousands, no decimal)
-def fmt_tok(n):
-    return f'{n // 1000}K' if n >= 1000 else str(n)
+fmt_tok() { local n=$1; (( n >= 1000 )) && echo "$((n / 1000))K" || echo "$n"; }
 
-# Shorten model name: 'Claude Opus 4.6' -> 'Opus 4.6'
-import re
-short_model = re.sub(r'\s*\(.*context\)', '', model.replace('Claude ', ''))
-model_s = f'{D}{short_model}{R}'
+# Shorten model: 'Claude Opus 4.8 (1M context)' -> 'Opus 4.8'
+short_model=${model#Claude }
+short_model=$(sed -E 's/ *\([^)]*context\)//' <<<"$short_model")
+model_s="${D}${short_model}${R}"
 
 # Context window size label
-ctx_size = data.get('context_window', {}).get('context_window_size', 0)
-ctx_label = f'{ctx_size // 1000000}M' if ctx_size >= 1000000 else f'{ctx_size // 1000}K' if ctx_size else ''
+if   (( ctx_size >= 1000000 )); then ctx_label="$((ctx_size / 1000000))M"
+elif (( ctx_size >= 1000 ));    then ctx_label="$((ctx_size / 1000))K"
+else ctx_label=""; fi
 
-# Context
-if used_pct is not None:
-    pct = int(used_pct + 0.5)
-    color = RED if pct >= 85 else YELLOW if pct >= 60 else GREEN
-    ctx_s = f'{color}{pct}%{R} {D}i/o: {fmt_tok(in_tok)}/{fmt_tok(out_tok)}{R}'
-else:
-    ctx_s = f'{D}--{R}'
+# Context %
+if [[ -n $used_pct ]]; then
+  pct=$(printf '%.0f' "$used_pct")
+  if   (( pct >= 85 )); then color=$RED
+  elif (( pct >= 60 )); then color=$YELLOW
+  else color=$GREEN; fi
+  ctx_s="${color}${pct}%${R} ${D}i/o: $(fmt_tok "$in_tok")/$(fmt_tok "$out_tok")${R}"
+else
+  ctx_s="${D}--${R}"
+fi
 
 # Account: only show work / personal
-cfg = os.environ.get('CLAUDE_CONFIG_DIR') or os.path.realpath(os.path.expanduser('~/.claude'))
-base = os.path.basename(cfg.rstrip('/'))
-acct = base[len('.claude-'):] if base.startswith('.claude-') else ''
-if acct == 'work':
-    acct_s = f'{BLUE}work{R} '
-elif acct == 'personal':
-    acct_s = f'{MAGENTA}personal{R} '
-else:
-    acct_s = ''
+cfg=${CLAUDE_CONFIG_DIR:-$(realpath "$HOME/.claude")}
+base=$(basename "${cfg%/}")
+acct=""
+[[ $base == .claude-* ]] && acct=${base#.claude-}
+case $acct in
+  work)     acct_s="${BLUE}work${R} " ;;
+  personal) acct_s="${MAGENTA}personal${R} " ;;
+  *)        acct_s="" ;;
+esac
 
-size_s = f' ({ctx_label})' if ctx_label else ''
-print(f' {acct_s}{model_s}{D}{size_s}{R} {ctx_s} ')
-"
+# Last updated: git last-commit relative time of current repo
+updated_s=""
+if [[ -n $wd ]]; then
+  rel=$(git -C "$wd" log -1 --format=%cr 2>/dev/null)
+  [[ -n $rel ]] && updated_s=" ${D}| updated ${rel}${R}"
+fi
+
+size_s=""; [[ -n $ctx_label ]] && size_s=" (${ctx_label})"
+printf ' %s%s%s%s%s %s%s \n' "$acct_s" "$model_s" "$D" "$size_s" "$R" "$ctx_s" "$updated_s"
