@@ -12,6 +12,7 @@ linux:
   links:
     config: ~/.config/quickshell
     overlay: ~/.config/quickshell-overlay
+    notif: ~/.config/quickshell-notif
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}

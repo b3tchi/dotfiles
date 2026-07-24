@@ -384,6 +384,229 @@ n=0
 for f in "$S/state/qs-notif"/[0-9][0-9][0-9][0-9][0-9][0-9].notif; do [ -e "$f" ] && n=$((n + 1)); done
 assert_eq "exactly one store entry exists (only the real bus owner processed the notification)" "1" "$n"
 
+# ==================================================================================
+# LAUNCH PHASE (sp019 task 3, dotfiles-c5fd.3): exercises the REAL
+# quickshell/qs-start.sh guard block -- the user-level flock singleton launch,
+# the hash-check restart, and the kill-sweep's notif-daemon cmdline exclusion
+# -- fully sandboxed:
+#   - HOME points at a throwaway dir whose .dotfiles is a SYMLINK to this
+#     worktree's own repo root, so qs-start.sh's hardcoded $HOME/.dotfiles/...
+#     paths resolve to the code under test (not a real ~/.dotfiles install).
+#   - PATH is prepended with a stub bin dir: `quickshell` records its argv to
+#     LAUNCH_LOG and sleeps (stands in for the real binary, discoverable by
+#     pgrep exactly like the real one); `clang`/`gcc`/`cc` stubs always fail
+#     so the UNRELATED qs-stats-daemon C build/launch section fully no-ops --
+#     that section's `${TMPDIR:-/tmp}` paths are not sandboxed, so skipping it
+#     avoids ever touching a real system's live stats daemon.
+#   - DISPLAY is a unique throwaway value per scenario so qs_same_session
+#     (real, unmodified qs-session.sh) never matches a real desktop session's
+#     processes -- the kill-sweep can never reach outside the sandbox.
+#   - SWAYSOCK is stubbed non-empty so qs-session.sh's own i3-detection
+#     branch (`command -v i3 && i3 --get-socketpath`) is skipped -- on a
+#     fake DISPLAY, invoking the REAL i3 binary blocks for many seconds on
+#     an X connection attempt that can never succeed. This is a pre-existing,
+#     unmodified qs-session.sh code path; skipping it is purely a sandbox
+#     concern, not a functional change under test.
+#   - Every wait below is a bounded POLL loop, but the bound is deliberately
+#     generous (up to ~90s): this box's `pgrep` was empirically measured at
+#     5-6s PER CALL under its current load (`uptime` load average was ~168
+#     against 8 cores when this was diagnosed) -- qs_kill_session alone
+#     issues 5 pgrep calls per qs-start.sh run, so a single invocation can
+#     legitimately take 30-40s here. That is an environment characteristic
+#     (see bd notes), not a bug in the guard being tested.
+scenario "dotyaml/notif-link-syntax: dot.yaml declares the notif profile link (smoke-checked via yq, rotz itself is never invoked)"
+DOTYAML="$REPO_DIR/dot.yaml"
+if command -v yq >/dev/null 2>&1; then
+  LINK_VAL="$(yq -r '.linux.links.notif' "$DOTYAML" 2>/dev/null)"
+else
+  LINK_VAL="$(grep -E '^\s+notif:' "$DOTYAML" 2>/dev/null | sed -E 's/^\s+notif:\s*//')"
+fi
+assert_eq "dot.yaml links.notif points at ~/.config/quickshell-notif" "~/.config/quickshell-notif" "$LINK_VAL"
+
+scenario "LAUNCH PHASE setup"
+QS_START="$REPO_DIR/qs-start.sh"
+[ -f "$QS_START" ] || { echo "FATAL: qs-start.sh not found at $QS_START" >&2; exit 1; }
+DOTFILES_ROOT="$(cd -- "$REPO_DIR/.." && pwd)"
+
+LSTUB="$TMP/launch-stub-bin"
+mkdir -p "$LSTUB"
+cat > "$LSTUB/quickshell" <<'STUB'
+#!/bin/sh
+# Deliberately NOT `exec sleep 300`: exec REPLACES this process's own image,
+# which would blank /proc/<pid>/cmdline from "quickshell -p ..." to
+# "sleep 300" the instant it runs -- invisible to every `pgrep -f
+# "quickshell -p ..."` check in qs-start.sh (and in this harness), causing
+# spurious double-spawns that have nothing to do with the guard under test.
+# A plain (non-exec'd) `sleep` forks a child and this script's own process
+# blocks in wait(), keeping its ORIGINAL argv/cmdline intact throughout --
+# exactly like the real long-running quickshell binary never re-execs.
+printf '%s %s\n' "$(date +%s)" "$*" >> "$LAUNCH_LOG" 2>/dev/null
+echo "$$" >> "$LAUNCH_LOG.pids" 2>/dev/null
+sleep 300
+STUB
+chmod +x "$LSTUB/quickshell"
+for _fakecc in clang gcc cc; do
+  printf '#!/bin/sh\nexit 1\n' > "$LSTUB/$_fakecc"
+  chmod +x "$LSTUB/$_fakecc"
+done
+
+# Bounded poll: <max_seconds> <check-command...>. Sleeps 0.5s between tries
+# (see the "generous timeouts" note above for why this box needs ~90s
+# headroom for pgrep-backed checks).
+wait_for() { # <max_seconds> <cmd...>
+  _max="$1"; shift
+  _n=$(( _max * 2 ))
+  _k=0
+  while [ "$_k" -lt "$_n" ]; do
+    "$@" >/dev/null 2>&1 && return 0
+    _k=$((_k + 1)); sleep 0.5
+  done
+  return 1
+}
+
+# Runs the real qs-start.sh once, fully sandboxed. Args: <sandbox_dir> <display>
+run_launch() { # <sandbox_dir> <display>
+  _sb="$1" _dpy="$2"
+  _home="$_sb/home"
+  mkdir -p "$_home/.cache" "$_home/.local/bin" "$_sb/run" "$_sb/tmp"
+  # -sfn (no-dereference, force): atomically replaces any existing symlink
+  # in place rather than following it -- a plain check-then-act race here
+  # (two concurrent run_launch calls sharing one sandbox, as
+  # parallel-start-single does deliberately) would otherwise let a SECOND
+  # `ln -s` treat the FIRST call's already-created symlink as a directory
+  # target and place a stray link INSIDE the resolved dotfiles root instead
+  # of failing safely.
+  ln -sfn "$DOTFILES_ROOT" "$_home/.dotfiles"
+  env -i \
+    HOME="$_home" \
+    XDG_RUNTIME_DIR="$_sb/run" \
+    TMPDIR="$_sb/tmp" \
+    DISPLAY="$_dpy" \
+    SWAYSOCK="/dev/null" \
+    PATH="$LSTUB:/usr/bin:/bin" \
+    LAUNCH_LOG="$_sb/launch.log" \
+    sh "$QS_START" >"$_sb/qs-start.out" 2>&1
+}
+
+# The exact hash qs-start.sh's own hash-check computes -- mirrored here only
+# to seed/verify the cache file, never to bypass the real computation.
+notif_hash() { # <notif_profile_dir>
+  cat "$1"/*.qml "$DOTFILES_ROOT/quickshell/qs-notif-store.sh" 2>/dev/null | sha1sum | awk '{print $1}'
+}
+
+# Kills every stub `quickshell` pid this sandbox ever spawned (tracked via
+# LAUNCH_LOG.pids above) -- precise PID-based cleanup, never a name/pattern
+# pkill: the shell's PATH lookup leaves argv[0] as the bare "quickshell" it
+# was invoked as, so a path-based pkill pattern never matches these, and an
+# unscoped `pkill -x quickshell` would risk killing a REAL desktop session's
+# live bar. Safe to call on a sandbox dir with no pids file (no-op).
+cleanup_sb_pids() { # <sandbox_dir>...
+  for _sbd in "$@"; do
+    for _p in $(cat "$_sbd/launch.log.pids" 2>/dev/null); do
+      kill "$_p" 2>/dev/null
+    done
+  done
+}
+
+scenario "launch/second-start-noop: two sequential qs-start.sh runs spawn the notif daemon exactly once"
+SB="$TMP/launch-noop"; mkdir -p "$SB/tmp"
+DPY=":9001"
+run_launch "$SB" "$DPY"
+NOTIF_PATH="$SB/home/.dotfiles/quickshell/notif"
+wait_for 90 grep -qF -- "$NOTIF_PATH" "$SB/launch.log"
+run_launch "$SB" "$DPY"
+sleep 1
+SECOND_COUNT=$(grep -cF -- "$NOTIF_PATH" "$SB/launch.log" 2>/dev/null || echo 0)
+assert_eq "exactly one notif-daemon spawn logged after two sequential starts" "1" "$SECOND_COUNT"
+cleanup_sb_pids "$SB"
+
+scenario "launch/parallel-start-single: two concurrent qs-start.sh runs (real flock) spawn the notif daemon exactly once, green under CPU load"
+run_parallel_once() { # <sandbox_dir> <display> -> prints spawn count
+  _sb="$1" _dpy="$2"
+  mkdir -p "$_sb/tmp"
+  run_launch "$_sb" "$_dpy" &
+  _p1=$!
+  run_launch "$_sb" "$_dpy" &
+  _p2=$!
+  wait "$_p1" "$_p2"
+  _np="$_sb/home/.dotfiles/quickshell/notif"
+  wait_for 90 grep -qF -- "$_np" "$_sb/launch.log"
+  grep -cF -- "$_np" "$_sb/launch.log" 2>/dev/null || echo 0
+}
+LOAD_PIDS=""
+_ncpu="$( (command -v nproc >/dev/null 2>&1 && nproc) || echo 4)"
+_li=0
+while [ "$_li" -lt "$_ncpu" ]; do
+  yes >/dev/null 2>&1 &
+  LOAD_PIDS="$LOAD_PIDS $!"
+  _li=$((_li + 1))
+done
+ALL_OK=yes
+for _rep in 1 2; do
+  SBP="$TMP/launch-parallel-$_rep"
+  N="$(run_parallel_once "$SBP" ":900$((1 + _rep))")"
+  [ "$N" = "1" ] || ALL_OK="no(rep$_rep=$N)"
+  cleanup_sb_pids "$SBP"
+done
+for _lp in $LOAD_PIDS; do kill "$_lp" 2>/dev/null; done
+assert_eq "exactly one spawn across repeated parallel-start trials under CPU load" "yes" "$ALL_OK"
+
+scenario "launch/hash-same-leaves-pid: unchanged source across two runs leaves the daemon pid untouched"
+SB="$TMP/launch-hash-same"; mkdir -p "$SB/tmp"
+DPY=":9010"
+run_launch "$SB" "$DPY"
+NOTIF_PATH="$SB/home/.dotfiles/quickshell/notif"
+wait_for 90 pgrep -f -- "quickshell -p $NOTIF_PATH"
+PID1="$(pgrep -f -- "quickshell -p $NOTIF_PATH" | head -1)"
+run_launch "$SB" "$DPY"
+sleep 1
+PID2="$(pgrep -f -- "quickshell -p $NOTIF_PATH" | head -1)"
+assert_eq "daemon pid is unchanged when the source hash is unchanged" "yes" "$([ -n "$PID1" ] && [ "$PID1" = "$PID2" ] && echo yes || echo no)"
+kill "$PID1" 2>/dev/null; kill "$PID2" 2>/dev/null
+
+scenario "launch/hash-change-restarts: a stale cached hash forces pkill+respawn under the lock"
+SB="$TMP/launch-hash-change"; mkdir -p "$SB/tmp"
+DPY=":9011"
+run_launch "$SB" "$DPY"
+NOTIF_PATH="$SB/home/.dotfiles/quickshell/notif"
+wait_for 90 pgrep -f -- "quickshell -p $NOTIF_PATH"
+PID1="$(pgrep -f -- "quickshell -p $NOTIF_PATH" | head -1)"
+# Corrupt the CACHED hash so the next run believes the source changed,
+# without touching any real repo file.
+printf 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n' > "$SB/home/.cache/qs-notif-daemon.sha"
+run_launch "$SB" "$DPY"
+_i=0; while [ $_i -lt 180 ]; do
+  _p="$(pgrep -f -- "quickshell -p $NOTIF_PATH" | head -1)"
+  [ -n "$_p" ] && [ "$_p" != "$PID1" ] && break
+  _i=$((_i + 1)); sleep 0.5
+done
+PID2="$(pgrep -f -- "quickshell -p $NOTIF_PATH" | head -1)"
+assert_eq "daemon pid changes after a hash mismatch (restarted)" "yes" "$([ -n "$PID2" ] && [ "$PID1" != "$PID2" ] && echo yes || echo no)"
+CUR_HASH="$(notif_hash "$NOTIF_PATH")"
+assert_eq "hash cache is rewritten to the correct value after restart" "$CUR_HASH" "$(cat "$SB/home/.cache/qs-notif-daemon.sha" 2>/dev/null)"
+kill "$PID1" 2>/dev/null; kill "$PID2" 2>/dev/null
+
+scenario "launch/sweep-spares-daemon: kill-sweep kills a same-display quickshell pid but spares the notif-profile pid"
+SB="$TMP/launch-sweep"; mkdir -p "$SB/tmp" "$SB/home/.cache" "$SB/home/.local/bin" "$SB/run"
+ln -sfn "$DOTFILES_ROOT" "$SB/home/.dotfiles"
+DPY=":9012"
+NOTIF_PATH="$SB/home/.dotfiles/quickshell/notif"
+# Pre-seed the hash cache with the CURRENT correct value so the launch
+# section's OWN hash-check doesn't also pkill+relaunch this pid -- isolating
+# the assertion to the sweep's behavior only.
+notif_hash "$NOTIF_PATH" > "$SB/home/.cache/qs-notif-daemon.sha"
+env -i HOME="$SB/home" XDG_RUNTIME_DIR="$SB/run" DISPLAY="$DPY" LAUNCH_LOG="$SB/launch.log" "$LSTUB/quickshell" >/dev/null 2>&1 &
+DIER=$!
+env -i HOME="$SB/home" XDG_RUNTIME_DIR="$SB/run" DISPLAY="$DPY" LAUNCH_LOG="$SB/launch.log" "$LSTUB/quickshell" -p "$NOTIF_PATH" >/dev/null 2>&1 &
+SURVIVOR=$!
+_i=0; while [ $_i -lt 100 ]; do kill -0 "$DIER" 2>/dev/null && kill -0 "$SURVIVOR" 2>/dev/null && [ -r "/proc/$DIER/environ" ] && break; _i=$((_i + 1)); sleep 0.1; done
+run_launch "$SB" "$DPY"
+_i=0; while [ $_i -lt 180 ]; do kill -0 "$DIER" 2>/dev/null || break; _i=$((_i + 1)); sleep 0.5; done
+assert_eq "the fake same-display quickshell pid is killed by the sweep" "no" "$(kill -0 "$DIER" 2>/dev/null && echo yes || echo no)"
+assert_eq "the fake notif-profile pid survives the sweep" "yes" "$(kill -0 "$SURVIVOR" 2>/dev/null && echo yes || echo no)"
+kill "$SURVIVOR" 2>/dev/null
+cleanup_sb_pids "$SB"
+
 # ================= SELFTEST NEGATIVE CONTROL ================================
 # SELFTEST=1 deliberately flips one expectation to a value the daemon can
 # never produce. If this run does not report a FAIL, the harness itself
