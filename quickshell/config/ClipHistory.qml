@@ -1,15 +1,20 @@
-// ClipHistory.qml — the shared-clipboard-history picker (sp014 task 4).
+// ClipHistory.qml — the shared-clipboard-history picker (sp014 task 4;
+// refactored onto the shared Combo control in sp017 task 5 / dotfiles-evnv.5).
 //
-// A keyboard-driven list of the copyq history. Type to filter, Enter to put the
-// selected entry on the clipboard, Esc to leave. Hosted in the session's normal
-// quickshell instance (wired in shell.qml), so there is exactly one picker per
-// session and reopening can never leave an orphan window behind.
+// A keyboard-driven list of the copyq history. Type to fuzzy-filter, Enter to
+// put the selected entry on the clipboard, Esc to leave. Hosted in the
+// session's normal quickshell instance (wired in shell.qml), so there is
+// exactly one picker per session and reopening can never leave an orphan
+// window behind.
 //
 // IT COPIES, IT DOES NOT PASTE. Enter publishes the entry and closes; the user
 // then pastes with their own paste key. Nothing here inspects the focused
 // window and nothing synthesizes a keystroke — that was built, rejected and
 // deliberately removed (sp014 scope change, 2026-07-20), which is also why the
 // picker never has to care about keyboard layout, terminals, or held modifiers.
+// The publish carries the SELECTED row's OWN opaque store id (adr0010,
+// id-stability): Combo hands the confirmed ROW OBJECT back to onConfirm and we
+// pick `row.row` off it — never a positional index, never `filtered[0]`.
 //
 // ALL NON-UI LOGIC LIVES IN qs-clip.sh. This file never talks to copyq and
 // never talks to clip-set.sh; it runs `qs-clip.sh list` and `qs-clip.sh set`
@@ -17,6 +22,27 @@
 // display resolution are unit-testable in sh without an X server, and what is
 // left here is presentation, which is the part a headless suite can only ever
 // observe indirectly.
+//
+// CHROME + FILTER come from Common/ now (sp017): the input bar, row list,
+// arrow/Ctrl-N-P navigation, Enter-confirm / Esc-cancel and every parity
+// dimension (480 wide, 32px input bar, 32px rows, max 8 visible, dark body,
+// light text) live in Combo + DialogTheme — this file no longer hardcodes any
+// of those colors or numbers (DialogTheme is their single source, which is why
+// the suite can assert this file contains zero copies of the input-bar color).
+// The clip-only extras layered on top of the shared control: a floor of one
+// visible row so an empty history still shows its placeholder, the one-line
+// failure status bar (+26px), and the busy gate around an in-flight `set`.
+//
+// FILTER MODE is Combo `external`, NOT `fuzzy` — the caller-side filter below
+// (Fuzzy.match per entry) keeps the history in NEWEST-FIRST order, whereas
+// Combo's built-in fuzzy sort re-orders (empty query → alphabetical). Newest
+// first is the whole point of a clipboard history and is what the end-to-end
+// suite's Down-navigation assumes, so we own the filter and hand Combo an
+// already-ordered model with per-row match indices for the highlight. The
+// upgrade over the old plain-substring filter is real (subsequence matching:
+// "skg" finds "ssh-keygen"), and previews render as RichText through
+// Fuzzy.highlight, which HTML-escapes arbitrary clipboard bytes so a preview
+// containing markup cannot inject into the row renderer.
 //
 // Rows carry their opaque store id (the filename qs-clip.sh's `list` reports,
 // e.g. "000004.clip"), NOT their position in the visible list, and NEVER as a
@@ -38,18 +64,10 @@ import Quickshell
 import Quickshell.Io
 import QtQuick
 import QtQuick.Window
+import "Common"
 
 Scope {
     id: root
-
-    // WM detection — same lookup Overlay.qml uses, so font.pixelSize tracks
-    // its per-compositor value instead of drifting to a third number here.
-    readonly property bool isSway: Quickshell.env("SWAYSOCK") !== null
-
-    readonly property string fontFamily: "Iosevka Nerd Font"
-    readonly property int fontSize: isSway ? 14 : 16
-    readonly property int rowHeight: 32
-    readonly property int visibleRows: 8
 
     readonly property string clipSh:
         Quickshell.env("QS_CLIP_SH") ?? (Quickshell.env("HOME") + "/.dotfiles/quickshell/qs-clip.sh")
@@ -60,21 +78,27 @@ Scope {
     property var entries: []
     property var _buffer: []
 
-    property string search: ""
-    property int index: 0
-
     // One-line outcome shown under the list. Set on any failure; cleared on
     // every reopen. A failure NEVER closes the window — see setProc.onExited.
     property string status: ""
     property bool busy: false
 
-    property var filtered: {
-        if (search === "") return entries
-        var needle = search.toLowerCase()
+    // Caller-side filter (Combo filterMode "external"). Preserves the
+    // newest-first `entries` order — Combo passes this array through untouched
+    // — while upgrading the match from plain-substring to Fuzzy subsequence.
+    // Each surviving row carries its own `matchIndices` for the RichText
+    // highlight (external mode zeroes Combo's own indices, so the delegate
+    // reads them off the row object here). Empty query → every entry survives
+    // (Fuzzy.match of an empty pattern matches, no indices) in original order.
+    readonly property var filtered: {
+        var q = combo.search
         var out = []
         for (var i = 0; i < entries.length; i++) {
-            if (entries[i].preview.toLowerCase().indexOf(needle) !== -1)
-                out.push(entries[i])
+            var m = Fuzzy.match(entries[i].preview, q)
+            if (m.matched)
+                out.push({ row: entries[i].row,
+                           preview: entries[i].preview,
+                           matchIndices: m.indices })
         }
         return out
     }
@@ -102,11 +126,12 @@ Scope {
         onExited: (exitCode, exitStatus) => {
             root.entries = root._buffer
             root._buffer = []
-            root.index = 0
             if (exitCode !== 0)
                 root.status = "clipboard history unavailable (qs-clip.sh list exited " + exitCode + ")"
             picker.visible = true
-            searchInput.forceActiveFocus()
+            // Clears the filter text + index and takes focus — doubles as the
+            // reopen reset so a rapid close/reopen shows no stale filter/index.
+            combo.forceFocus()
         }
     }
 
@@ -142,9 +167,6 @@ Scope {
     function show() {
         root.status = ""
         root.busy = false
-        root.search = ""
-        searchInput.text = ""
-        root.index = 0
         root._buffer = []
         // The window is revealed in listProc.onExited, not here: showing first
         // would flash the previous session's history for as long as the fetch
@@ -156,26 +178,19 @@ Scope {
         picker.visible = false
     }
 
-    function accept() {
-        // Empty history, or a filter that matches nothing: Enter does nothing
-        // at all — no process spawned, no clipboard write, window stays.
+    // Combo confirm handler. `row` is the SELECTED row object — publish its own
+    // opaque id (row.row), verbatim (adr0010). The busy gate swallows a re-Enter
+    // while a `set` is already in flight; empty history / filter-matches-nothing
+    // never reaches here because Combo.confirmCurrent no-ops on an empty list.
+    function publish(row) {
         if (root.busy) return
-        if (root.filtered.length === 0 || root.index >= root.filtered.length) return
         root.status = ""
         root.busy = true
         // The id travels verbatim: it is already the exact string
         // qs-clip.sh's `list` emitted (see listProc.onRead) — no
         // re-stringification, no format assumption about its shape.
-        setProc.command = ["sh", root.clipSh, "set", root.filtered[root.index].row]
+        setProc.command = ["sh", root.clipSh, "set", row.row]
         setProc.running = true
-    }
-
-    function moveDown() {
-        if (root.index < root.filtered.length - 1) root.index++
-    }
-
-    function moveUp() {
-        if (root.index > 0) root.index--
     }
 
     // ── IPC (qs-clip.sh toggle) ──
@@ -195,17 +210,13 @@ Scope {
     Window {
         id: picker
         visible: false
-        width: 480
-        // Mirrors Overlay.qml's launcher case (32 + min(rows,8)*32 + 8): the
-        // 32 here is this input bar's height, root.rowHeight/visibleRows are
-        // the same 32/8 constants, and the trailing +8 is the same pad. The
-        // extra terms are ClipHistory-only UI Overlay's launcher doesn't have:
-        // a floor of 1 row so an empty history still shows its placeholder
-        // row, and +26 for the one-line status bar when it's visible.
-        height: 32 + Math.max(Math.min(root.filtered.length, root.visibleRows), 1) * root.rowHeight
-                + (root.status === "" ? 0 : 26) + 8
+        width: combo.implicitWidth
+        // Combo owns the parity height (input bar + rows + pad, all from
+        // DialogTheme, floor of 1 visible row via minVisibleRows). The only
+        // clip-specific term is the one-line status bar (+26) shown on failure.
+        height: combo.implicitHeight + (root.status === "" ? 0 : 26)
         flags: Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
-        color: "#222D31"
+        color: DialogTheme.bodyBg
         title: "qs-clip"
 
         // Explicit opaque fill: under X11 with FramelessWindowHint the Window
@@ -213,7 +224,7 @@ Scope {
         // Overlay.qml documents), leaving transparent strips around the list.
         Rectangle {
             anchors.fill: parent
-            color: "#222D31"
+            color: DialogTheme.bodyBg
             z: -1
         }
 
@@ -230,124 +241,67 @@ Scope {
         Column {
             anchors.fill: parent
 
-            Rectangle {
+            Combo {
+                id: combo
                 width: parent.width
-                height: 32
-                color: "#152024"
+                height: combo.implicitHeight
 
-                TextInput {
-                    id: searchInput
-                    anchors.fill: parent
-                    anchors.leftMargin: 12
-                    anchors.rightMargin: 12
-                    verticalAlignment: TextInput.AlignVCenter
-                    color: "#FDF6E3"
-                    font.family: root.fontFamily
-                    font.pixelSize: root.fontSize
-                    clip: true
+                // External filter (owned by root.filtered) so the newest-first
+                // order survives; a floor of one visible row keeps the empty
+                // history's placeholder on screen.
+                model: root.filtered
+                filterMode: "external"
+                minVisibleRows: 1
+                placeholder: "clipboard history"
+                // Two distinct empty states — the fix differs, so the text does.
+                emptyText: root.entries.length === 0
+                           ? "clipboard history is empty"
+                           : "no entry matches \"" + combo.search + "\""
 
-                    onTextChanged: {
-                        root.search = text
-                        root.index = 0
-                    }
+                delegate: Component {
+                    Rectangle {
+                        anchors.fill: parent
+                        color: isSelected ? DialogTheme.inputBg : "transparent"
 
-                    Keys.onEscapePressed: root.hide()
-                    Keys.onReturnPressed: root.accept()
-                    Keys.onEnterPressed: root.accept()
-                    Keys.onDownPressed: root.moveDown()
-                    Keys.onUpPressed: root.moveUp()
-                    // Ctrl+N / Ctrl+P — the picker is reachable from a terminal
-                    // keybind, where arrow keys are the awkward option.
-                    Keys.onPressed: event => {
-                        if (event.modifiers & Qt.ControlModifier) {
-                            if (event.key === Qt.Key_N) { root.moveDown(); event.accepted = true }
-                            else if (event.key === Qt.Key_P) { root.moveUp(); event.accepted = true }
+                        Rectangle {
+                            visible: isSelected
+                            width: 4; height: parent.height
+                            color: DialogTheme.accent
+                        }
+
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.left: parent.left
+                            anchors.leftMargin: DialogTheme.textLeftMargin
+                            anchors.right: parent.right
+                            anchors.rightMargin: DialogTheme.textLeftMargin
+                            // RichText over arbitrary clipboard bytes: Fuzzy.highlight
+                            // HTML-escapes &/</> before wrapping the matched chars,
+                            // so a preview containing markup renders literally
+                            // instead of injecting into the row (matchIndices read
+                            // off the row — external mode zeroes Combo's own set).
+                            text: Fuzzy.highlight(row.preview, row.matchIndices)
+                            textFormat: Text.RichText
+                            elide: Text.ElideRight
+                            color: DialogTheme.fg
+                            font.family: DialogTheme.font
+                            font.pixelSize: DialogTheme.fontSize
+                            renderType: Text.NativeRendering
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: { combo.setIndex(index); combo.confirmCurrent() }
                         }
                     }
                 }
 
-                Text {
-                    anchors.fill: searchInput
-                    verticalAlignment: Text.AlignVCenter
-                    text: "clipboard history"
-                    color: "#707880"
-                    font.family: root.fontFamily
-                    font.pixelSize: root.fontSize
-                    renderType: Text.NativeRendering
-                    visible: !searchInput.text
-                }
+                onConfirm: (row) => root.publish(row)
+                onCancel: () => root.hide()
             }
 
-            // Empty state. Distinguishes "nothing has been copied yet" from
-            // "the filter excluded everything", because the fix differs.
-            Rectangle {
-                width: parent.width
-                height: root.rowHeight
-                color: "transparent"
-                visible: root.filtered.length === 0
-
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.left: parent.left
-                    anchors.leftMargin: 12
-                    text: root.entries.length === 0
-                          ? "clipboard history is empty"
-                          : "no entry matches \"" + root.search + "\""
-                    color: "#707880"
-                    font.family: root.fontFamily
-                    font.pixelSize: root.fontSize
-                    renderType: Text.NativeRendering
-                }
-            }
-
-            ListView {
-                width: parent.width
-                height: Math.min(root.filtered.length, root.visibleRows) * root.rowHeight
-                model: root.filtered.length
-                clip: true
-                currentIndex: root.index
-                highlightMoveDuration: 0
-                // Keep the selected row on screen when the list is longer than
-                // the window: without this, arrowing past the twelfth entry
-                // selects rows nobody can see.
-                onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
-
-                delegate: Rectangle {
-                    required property int index
-                    property var entry: root.filtered[index]
-                    property bool isSelected: index === root.index
-
-                    width: parent ? parent.width : 0
-                    height: root.rowHeight
-                    color: isSelected ? "#152024" : "transparent"
-
-                    Rectangle {
-                        visible: parent.isSelected
-                        width: 4; height: parent.height
-                        color: "#16a085"
-                    }
-
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.left: parent.left
-                        anchors.leftMargin: 12
-                        anchors.right: parent.right
-                        anchors.rightMargin: 12
-                        text: parent.entry ? parent.entry.preview : ""
-                        elide: Text.ElideRight
-                        color: "#FDF6E3"
-                        font.family: root.fontFamily
-                        font.pixelSize: root.fontSize
-                        renderType: Text.NativeRendering
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: { root.index = parent.index; root.accept() }
-                    }
-                }
-            }
-
+            // One-line failure status. Clip-only chrome layered under the shared
+            // control; the accompanying +26 is added to the window height above.
             Rectangle {
                 width: parent.width
                 height: 26
@@ -357,14 +311,14 @@ Scope {
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: parent.left
-                    anchors.leftMargin: 12
+                    anchors.leftMargin: DialogTheme.textLeftMargin
                     anchors.right: parent.right
-                    anchors.rightMargin: 12
+                    anchors.rightMargin: DialogTheme.textLeftMargin
                     text: root.status
                     elide: Text.ElideRight
                     color: "#E8A0A0"
-                    font.family: root.fontFamily
-                    font.pixelSize: root.fontSize - 2
+                    font.family: DialogTheme.font
+                    font.pixelSize: DialogTheme.fontSize - 2
                     renderType: Text.NativeRendering
                 }
             }

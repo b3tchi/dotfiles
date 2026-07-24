@@ -128,6 +128,7 @@ printf '%s\n' "\$*" >> "$ARGV_LOG"
 case "\$(cat "$STUB_MODE" 2>/dev/null)" in
   fail1) exit 1 ;;
   fail2) exit 2 ;;
+  slow)  sleep 1; exit 0 ;;
   *)     exit 0 ;;
 esac
 STUBEOF
@@ -417,6 +418,11 @@ done
 
 mkdir -p "$TMP/entry"
 ln -sf "$CLIP_HISTORY_QML" "$TMP/entry/ClipHistory.qml"
+# ClipHistory.qml refactored onto the shared control imports "Common" (Combo +
+# Fuzzy + DialogTheme, sp017). Symlink the repo's Common/ dir next to the
+# picker in the throwaway entry dir so `import "Common"` resolves to THIS
+# worktree's singletons -- same discipline test-combo.sh uses.
+ln -sf "$SCRIPT_DIR/config/Common" "$TMP/entry/Common"
 cat > "$TMP/entry/shell.qml" <<'ENTRYEOF'
 import Quickshell
 ShellRoot { ClipHistory {} }
@@ -482,6 +488,8 @@ close_picker() { # <display>
 }
 
 send() { local d="$1"; shift; env DISPLAY="$d" "$XDOTOOL" key --clearmodifiers "$@" 2>/dev/null; sleep 0.15; }
+# Type literal text into the focused picker input (the fuzzy filter box).
+typ()  { local d="$1"; shift; env DISPLAY="$d" "$XDOTOOL" type --clearmodifiers "$1" 2>/dev/null; sleep 0.3; }
 
 scenario "derivation: the picker opens on the display it was asked for"
 close_picker "$DPY"
@@ -566,6 +574,159 @@ gone_on "$DPY"   # exit 0 from the stub closes the picker (setProc.onExited)
 assert_eq "clip-set.sh (stub) received the SELECTED entry's FULL untruncated id -- not a parseInt-truncated number ('2'), not the newest id (000003.clip), not a bare list position (0/1) -- plus the session display" \
   "000002.clip $DPY" "$(logged)"
 
+close_picker "$DPY"
+
+# ============================================================================
+# PHASE 1.55 — the Combo refactor's picker-level behavior (sp017 task 5)
+# ============================================================================
+#
+# The picker is now the shared Common/Combo control (external filter mode +
+# DialogTheme chrome) instead of a hand-rolled Column. These scenarios drive
+# the REAL ClipHistory.qml on the stub instance (QS_PID, still up before PHASE
+# 1.6 restarts it) and assert the four things the refactor must preserve or add:
+#   * parity chrome geometry sourced only from DialogTheme (AC1),
+#   * the substring -> fuzzy-subsequence filter UPGRADE (the accepted behavior
+#     delta; a substring revert makes fuzzy-subsequence-filter fail),
+#   * RichText previews with the markup escaped (drop-escape makes
+#     richtext-escape fail via an <img> load error in the picker log),
+#   * the failure contract + busy gate carried over from the old Column.
+# adr0010 id-stability (publish the selected row's own opaque id) is already
+# pinned end-to-end by PHASE 1.5's not-a-position; these build on it.
+
+# ---- parity-chrome-geometry -------------------------------------------------
+# 10 entries -> Combo caps the visible rows at DialogTheme.maxRows (8), so the
+# window is 480 wide and 32 (input) + 8*32 (rows) + 8 (pad) = 296 tall. Every
+# number comes from DialogTheme (grep '#152024' in the QML is separately 0).
+
+scenario "picker: parity chrome -- 10 entries -> 480 x 296 (input 32 + 8 rows*32 + pad 8), capped at 8 visible (AC1)"
+close_picker "$DPY"
+reset_store
+for n in 1 2 3 4 5 6 7 8 9 10; do write_entry "$n" "entry number $n"; done
+env DISPLAY="$DPY" "${ISO[@]}" QS_CLIP_SET="$STUB" QS_CLIP_DISPLAY="DISPLAY=$DPY" sh "$QS_CLIP" toggle >/dev/null 2>&1
+WID="$(win_on "$DPY")"
+assert_ne "picker opened on $DPY with 10 entries" "" "$WID"
+if [ -n "$WID" ]; then
+  eval "$(env DISPLAY="$DPY" "$XDOTOOL" getwindowgeometry --shell "$WID" 2>/dev/null)"
+  assert_eq "10 entries -> 480 wide, 296 tall (rows capped at 8; geometry from DialogTheme)" \
+    "480 296" "${WIDTH:-?} ${HEIGHT:-?}"
+fi
+close_picker "$DPY"
+
+# ---- fuzzy-subsequence-filter (the accepted behavior delta) -----------------
+# 'skg' is a SUBSEQUENCE of "ssh-keygen" but a SUBSTRING of neither entry. The
+# fuzzy upgrade narrows to ssh-keygen alone and Enter publishes ITS id. The
+# pre-refactor plain-substring filter matched nothing for 'skg' -> filtered
+# empty -> Enter a no-op -> argv log empty: reverting the filter to substring
+# (Fuzzy.match -> preview.indexOf) makes THIS scenario fail (the mutation pin).
+
+scenario "picker: fuzzy 'skg' narrows to ssh-keygen and Enter publishes its id -- substring would match nothing (behavior delta)"
+close_picker "$DPY"
+reset_store
+write_entry 1 "ssh-keygen -t ed25519"   # 000001.clip (oldest)
+write_entry 2 "shopping list"            # 000002.clip (newest, row 0)
+clear_log; stub_mode log
+env DISPLAY="$DPY" "${ISO[@]}" QS_CLIP_SET="$STUB" QS_CLIP_DISPLAY="DISPLAY=$DPY" sh "$QS_CLIP" toggle >/dev/null 2>&1
+WID="$(win_on "$DPY")"
+assert_ne "picker opened on $DPY" "" "$WID"
+[ -n "$WID" ] && env DISPLAY="$DPY" "$XDOTOOL" windowfocus "$WID" 2>/dev/null
+sleep 0.4
+typ "$DPY" "skg"
+send "$DPY" Return
+gone_on "$DPY"
+assert_eq "'skg' selects ssh-keygen (000001.clip) and Enter publishes ITS full id -- a substring filter matches nothing and publishes nothing" \
+  "000001.clip $DPY" "$(logged)"
+close_picker "$DPY"
+
+# ---- richtext-escape --------------------------------------------------------
+# The target entry's preview holds real markup AND an <img> whose src is a file
+# that does not exist. Fuzzy.highlight HTML-escapes the preview before it is
+# rendered as RichText, so the <img> is inert literal text. If the escape is
+# dropped (raw preview into a RichText Text), Qt parses the <img> and attempts
+# to LOAD it, logging "Error opening .../<unique>.png" to the picker's log.
+# The scenario requires: (a) the markup entry is listed + fuzzy-filterable +
+# publishes its FULL id byte-exact (markup never corrupts the pick, window
+# stays healthy and closes on exit 0), and (b) ZERO image-load errors for the
+# unique name -- (b) is what a dropped escape flips (empirically: no markup
+# payload breaks window liveness, but an unescaped <img> DOES hit the log).
+
+scenario "picker: a markup preview lists/filters/publishes byte-exact and its markup is escaped (no <img> injection into the RichText row)"
+close_picker "$DPY"
+reset_store
+IMG="qsclip-escape-probe-$$.png"
+write_entry 1 "cabbage soup recipe"                                # 000001.clip (oldest)
+write_entry 2 "<b>bold</b> pick me <img src='/nonexistent/$IMG'>"  # 000002.clip (target)
+write_entry 3 "shopping list"                                      # 000003.clip (newest, row 0)
+clear_log; stub_mode log
+env DISPLAY="$DPY" "${ISO[@]}" QS_CLIP_SET="$STUB" QS_CLIP_DISPLAY="DISPLAY=$DPY" sh "$QS_CLIP" toggle >/dev/null 2>&1
+WID="$(win_on "$DPY")"
+assert_ne "picker opened on $DPY with a markup entry present" "" "$WID"
+[ -n "$WID" ] && env DISPLAY="$DPY" "$XDOTOOL" windowfocus "$WID" 2>/dev/null
+sleep 0.6   # let all three rows render so an UNescaped <img> would attempt its load
+# 'pick' is a subsequence unique to the markup entry -- it does not
+# subsequence-match "cabbage soup recipe" or "shopping list".
+typ "$DPY" "pick"
+send "$DPY" Return
+gone_on "$DPY"
+assert_eq "the markup entry is fuzzy-filterable and Enter publishes its FULL id byte-exact -- markup does not corrupt the pick" \
+  "000002.clip $DPY" "$(logged)"
+assert_eq "the markup preview was HTML-escaped -- no <img> load was attempted (zero image-open errors for the unique name in the picker log)" \
+  "0" "$(grep -c "$IMG" "$TMP/qs.log" | tr -d ' ')"
+close_picker "$DPY"
+
+# ---- failure-contract: a failed set keeps the window open (+26px status) -----
+# clip-set exit 1/2 must NOT close the picker (a vanished window is
+# indistinguishable from success); it shows the one-line status bar, which the
+# refactor adds 26px for. Only exit 0 closes. Same invariant the old Column
+# had, re-proven against the Combo chrome.
+
+scenario "picker: a failed set (exit 1) shows the status line (+26px) and keeps the window OPEN; a later exit-0 closes it"
+close_picker "$DPY"
+reset_store
+write_entry 1 "alpha"; write_entry 2 "bravo"    # 2 rows -> base height 32 + 2*32 + 8 = 104
+clear_log; stub_mode log
+env DISPLAY="$DPY" "${ISO[@]}" QS_CLIP_SET="$STUB" QS_CLIP_DISPLAY="DISPLAY=$DPY" sh "$QS_CLIP" toggle >/dev/null 2>&1
+WID="$(win_on "$DPY")"
+assert_ne "picker opened on $DPY" "" "$WID"
+[ -n "$WID" ] && env DISPLAY="$DPY" "$XDOTOOL" windowfocus "$WID" 2>/dev/null
+sleep 0.4
+eval "$(env DISPLAY="$DPY" "$XDOTOOL" getwindowgeometry --shell "$WID" 2>/dev/null)"
+base_h="${HEIGHT:-0}"
+stub_mode fail1
+send "$DPY" Return
+sleep 0.6
+still="$(env DISPLAY="$DPY" "$XDOTOOL" search --onlyvisible --name '^qs-clip$' 2>/dev/null | head -1)"
+assert_ne "after a failed (exit 1) set the picker STAYS open" "" "$still"
+eval "$(env DISPLAY="$DPY" "$XDOTOOL" getwindowgeometry --shell "$WID" 2>/dev/null)"
+assert_eq "the one-line status bar adds exactly 26px to the window height" \
+  "$((base_h + 26))" "${HEIGHT:-0}"
+stub_mode log
+send "$DPY" Return
+assert_eq "an exit-0 set finally closes the picker" "closed" \
+  "$(gone_on "$DPY" && echo closed || echo open)"
+stub_mode log
+close_picker "$DPY"
+
+# ---- busy-gate: a re-Enter while a set is in flight is swallowed ------------
+# The first Enter spawns a set (the 'slow' stub sleeps ~1s before exit 0),
+# marking the picker busy; a second Enter during that window must be ignored,
+# so clip-set is invoked exactly ONCE.
+
+scenario "picker: the busy gate swallows a re-Enter while a set is in flight (clip-set invoked once)"
+close_picker "$DPY"
+reset_store
+write_entry 1 "alpha"
+clear_log; stub_mode slow
+env DISPLAY="$DPY" "${ISO[@]}" QS_CLIP_SET="$STUB" QS_CLIP_DISPLAY="DISPLAY=$DPY" sh "$QS_CLIP" toggle >/dev/null 2>&1
+WID="$(win_on "$DPY")"
+assert_ne "picker opened on $DPY" "" "$WID"
+[ -n "$WID" ] && env DISPLAY="$DPY" "$XDOTOOL" windowfocus "$WID" 2>/dev/null
+sleep 0.4
+send "$DPY" Return    # spawns the slow set; busy = true
+send "$DPY" Return    # arrives while busy -> must be swallowed
+gone_on "$DPY"        # slow set exits 0 after ~1s and closes the picker
+assert_eq "two Enters, one in-flight set -> clip-set.sh invoked exactly once (busy gate held)" \
+  "000001.clip $DPY" "$(logged)"
+stub_mode log
 close_picker "$DPY"
 
 # ============================================================================
