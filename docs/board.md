@@ -6,8 +6,6 @@ sections when status flips.
 
 ## idea
 
-- [[sp017|formalize-shared-combobox-dialog-control]]
-
 - 🔥 hotfix [[sp015|gopass-clipboard-secret-marking]]
 
 
@@ -18,6 +16,8 @@ sections when status flips.
 - [[sp003|fix-categories]]
 
 ## spec
+
+- [[sp017|formalize-shared-combobox-dialog-control]]
 
 ## ready
 
