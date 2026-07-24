@@ -236,7 +236,7 @@ class Region:
         return True
 
     def _key(self, _w, e):
-        if e.keyval == Gdk.KEY_Escape:
+        if e.keyval in (Gdk.KEY_Escape, Gdk.KEY_q, Gdk.KEY_Q):
             self.cancel()
         elif e.keyval in (Gdk.KEY_w, Gdk.KEY_W):
             self._shoot(0, 0, self.W, self.H)

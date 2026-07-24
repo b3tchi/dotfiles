@@ -70,9 +70,16 @@ Item {
         Item { objectName: "gap"; width: 4; height: parent.height }
 
         // hint rows: two-space separator before every entry after the first,
-        // key in highlight bold, single space, label in fg — all bottom-anchored
-        // 1px. Driven by ModeBarTheme.hintsFor(mode) (known modes -> their rows;
-        // unknown modes -> one [{key:"", label:<raw mode>}] fallback row).
+        // then the hint itself. ft009 extension (sp018 follow-up) — the key is
+        // the HIGHLIGHTED part of the word: when `key` occurs inside `text`,
+        // render pre(fg) + key(highlight bold) + post(fg) so e.g. "Escape"
+        // shows as **Esc**ape. When `key` is not a substring (arrows, `drag`,
+        // `2-tap`), fall back to the classic key(highlight bold) + space + text.
+        //
+        // A single 5-span layout serves both orderings by toggling which spans
+        // carry content: [pre][key][post][space][tail].
+        //   inline   : pre=text[0..hlAt)  key=key  post=text[hlAt+len..]  space="" tail=""
+        //   fallback : pre=""             key=key  post=""                space=" " tail=text
         Repeater {
             model: root.visible ? ModeBarTheme.hintsFor(root.mode) : []
 
@@ -83,6 +90,14 @@ Item {
                 anchors.bottom: parent ? parent.bottom : undefined
                 anchors.bottomMargin: 1
 
+                readonly property string kkey: modelData.key
+                readonly property string ktext: modelData.text
+                // first occurrence of the key inside the word (-1 => fallback).
+                // An empty key never matches -> unknown-mode raw name renders
+                // plain via the fallback path (space+tail, key span empty).
+                readonly property int hlAt: kkey.length > 0 ? ktext.indexOf(kkey) : -1
+                readonly property bool inl: hlAt >= 0
+
                 // separator — DEFAULT font (parity with Bar.qml:599); a
                 // space's advance differs by font, so Iosevka here would widen
                 // the strip. Only pixelSize + NativeRendering, like the source.
@@ -92,25 +107,46 @@ Item {
                     font.pixelSize: root.fontSize
                     renderType: Text.NativeRendering
                 }
+                // pre — word chars before the highlighted key (inline only).
+                Text {
+                    objectName: "hpre"
+                    text: inl ? ktext.substring(0, hlAt) : ""
+                    color: ModeBarTheme.fg
+                    font.family: ModeBarTheme.font
+                    font.pixelSize: root.fontSize
+                    renderType: Text.NativeRendering
+                }
+                // key — the highlighted trigger, in both orderings.
                 Text {
                     objectName: "hk"
-                    text: modelData.key
+                    text: kkey
                     color: ModeBarTheme.highlight
                     font.family: ModeBarTheme.font
                     font.pixelSize: root.fontSize
                     font.bold: true
                     renderType: Text.NativeRendering
                 }
-                // key/label spacer — DEFAULT font too (parity with Bar.qml:601).
+                // post — word chars after the highlighted key (inline only).
                 Text {
-                    objectName: "hspace"
-                    text: " "
+                    objectName: "hpost"
+                    text: inl ? ktext.substring(hlAt + kkey.length) : ""
+                    color: ModeBarTheme.fg
+                    font.family: ModeBarTheme.font
                     font.pixelSize: root.fontSize
                     renderType: Text.NativeRendering
                 }
+                // key/label spacer — DEFAULT font (parity with Bar.qml:601);
+                // fallback layout only.
+                Text {
+                    objectName: "hspace"
+                    text: inl ? "" : " "
+                    font.pixelSize: root.fontSize
+                    renderType: Text.NativeRendering
+                }
+                // tail — the whole word, fallback layout only (key not in word).
                 Text {
                     objectName: "hl"
-                    text: modelData.label
+                    text: inl ? "" : ktext
                     color: ModeBarTheme.fg
                     font.family: ModeBarTheme.font
                     font.pixelSize: root.fontSize

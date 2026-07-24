@@ -20,32 +20,39 @@ Singleton {
     readonly property string muted: "#707880"       // reserved (bar-muted tone)
     readonly property string font: "Iosevka Nerd Font"
 
-    // --- hints registry: mode -> [{key, label}], keyed by resolved mode name.
-    //     Rows are byte-identical to config/Bar.qml's pre-refactor modeHints().
+    // --- hints registry: mode -> [{text, key}], keyed by resolved mode name.
+    //     `text` is the full hint word; `key` is the trigger. ModeBar renders
+    //     the first occurrence of `key` inside `text` in `highlight` (i3's own
+    //     `(l)ock` convention — the key IS the highlighted part of the word).
+    //     When `key` is not a substring of `text` (arrow directions, `drag`,
+    //     `2-tap`), ModeBar falls back to the classic `key␣text` layout.
+    //     Multi-word hints are kebab-cased (no spaces) so the whole word is one
+    //     highlightable token. Every mode exits with `q` -> "quit" (bound
+    //     alongside Escape in i3 config.common/config + qs-region.py).
     readonly property var hints: ({
         "resize": [
-            {key: "j", label: "←"},
-            {key: "k", label: "↓"},
-            {key: "l", label: "↑"},
-            {key: ";", label: "→"},
-            {key: "←↓↑→", label: "arrows"},
-            {key: "Esc", label: "exit"}
+            {text: "←", key: "j"},
+            {text: "↓", key: "k"},
+            {text: "↑", key: "l"},
+            {text: "→", key: ";"},
+            {text: "arrows", key: "←↓↑→"},
+            {text: "quit", key: "q"}
         ],
         "screenshot": [
-            {key: "drag", label: "select region"},
-            {key: "2-tap", label: "corners"},
-            {key: "w", label: "whole screen"},
-            {key: "Esc", label: "cancel"}
+            {text: "select-region", key: "drag"},
+            {text: "corners", key: "2-tap"},
+            {text: "whole-screen", key: "w"},
+            {text: "quit", key: "q"}
         ],
         "system": [
-            {key: "l", label: "lock"},
-            {key: "e", label: "exit"},
-            {key: "u", label: "switch user"},
-            {key: "s", label: "suspend"},
-            {key: "h", label: "hibernate"},
-            {key: "r", label: "reboot"},
-            {key: "S-s", label: "shutdown"},
-            {key: "Esc", label: "cancel"}
+            {text: "lock", key: "l"},
+            {text: "exit", key: "e"},
+            {text: "switch-user", key: "u"},
+            {text: "suspend", key: "s"},
+            {text: "hibernate", key: "h"},
+            {text: "reboot", key: "r"},
+            {text: "shutdown", key: "S-s"},
+            {text: "quit", key: "q"}
         ]
     })
 
@@ -69,11 +76,11 @@ Singleton {
     }
 
     // Hint rows for a mode. Known modes return their registry rows; unknown
-    // modes fall back to a single [{key: "", label: <raw mode>}] row —
-    // verbatim from Bar.qml's modeHints() `return [{key:"", label:mode}]`.
+    // modes fall back to a single [{text: <raw mode>, key: ""}] row — an empty
+    // key highlights nothing, so the raw name renders plain (fg).
     function hintsFor(mode) {
         var key = resolve(mode)
-        if (key === "") return [{key: "", label: mode}]
+        if (key === "") return [{text: mode, key: ""}]
         return hints[key]
     }
 }

@@ -13,8 +13,10 @@
 # a pinned scenario table, prints `CASE <name> <payload>` lines, and exits;
 # quickshell runs it under Xvfb and this script asserts each expected line.
 #
-# The pin is byte-identical to Bar.qml's pre-refactor modeHints(): resize 6
-# rows, screenshot 4 rows, system 8 rows, unknown -> [{key:"",label:<raw>}].
+# The pin matches the ft009 {text,key} registry: resize 6 rows, screenshot 4
+# rows, system 8 rows, unknown -> [{text:<raw>,key:""}]. `key` is the trigger
+# and the highlighted part of the word; ModeBar renders it inline when it is a
+# substring of `text`, else falls back to `key␣text`.
 # The `system-long-name-resolves` scenario is the negative control — the
 # system mode's IPC name is the full `$mode_system` string
 # (`(l)ock, (e)xit, ...`, i3/config.common:255), matched via
@@ -194,22 +196,22 @@ EXP_CONST='{"highlight":"#CB4B16","pillBg":"#152024","fg":"#FDF6E3","muted":"#70
   && EXP_CONST='{"highlight":"#999999","pillBg":"#152024","fg":"#FDF6E3","muted":"#707880","font":"Iosevka Nerd Font"}'
 assert_case "theme-constants" "$EXP_CONST"
 
-scenario "ModeBarTheme.hints — byte-identical to Bar.qml modeHints() (AC3/AC4)"
+scenario "ModeBarTheme.hints — new {text,key} registry shape (AC3/AC4)"
 assert_case "hints-resize-verbatim" \
-  '[{"key":"j","label":"←"},{"key":"k","label":"↓"},{"key":"l","label":"↑"},{"key":";","label":"→"},{"key":"←↓↑→","label":"arrows"},{"key":"Esc","label":"exit"}]'
+  '[{"text":"←","key":"j"},{"text":"↓","key":"k"},{"text":"↑","key":"l"},{"text":"→","key":";"},{"text":"arrows","key":"←↓↑→"},{"text":"quit","key":"q"}]'
 assert_case "hints-screenshot-verbatim" \
-  '[{"key":"drag","label":"select region"},{"key":"2-tap","label":"corners"},{"key":"w","label":"whole screen"},{"key":"Esc","label":"cancel"}]'
+  '[{"text":"select-region","key":"drag"},{"text":"corners","key":"2-tap"},{"text":"whole-screen","key":"w"},{"text":"quit","key":"q"}]'
 assert_case "hints-system-verbatim" \
-  '[{"key":"l","label":"lock"},{"key":"e","label":"exit"},{"key":"u","label":"switch user"},{"key":"s","label":"suspend"},{"key":"h","label":"hibernate"},{"key":"r","label":"reboot"},{"key":"S-s","label":"shutdown"},{"key":"Esc","label":"cancel"}]'
+  '[{"text":"lock","key":"l"},{"text":"exit","key":"e"},{"text":"switch-user","key":"u"},{"text":"suspend","key":"s"},{"text":"hibernate","key":"h"},{"text":"reboot","key":"r"},{"text":"shutdown","key":"S-s"},{"text":"quit","key":"q"}]'
 
 scenario "resolve — full \$mode_system string routes to system via indexOf (AC4)"
 # An equality-match mutant returns the fallback row for the long name instead.
 assert_case "system-long-name-resolves" \
-  '[{"key":"l","label":"lock"},{"key":"e","label":"exit"},{"key":"u","label":"switch user"},{"key":"s","label":"suspend"},{"key":"h","label":"hibernate"},{"key":"r","label":"reboot"},{"key":"S-s","label":"shutdown"},{"key":"Esc","label":"cancel"}]'
+  '[{"text":"lock","key":"l"},{"text":"exit","key":"e"},{"text":"switch-user","key":"u"},{"text":"suspend","key":"s"},{"text":"hibernate","key":"h"},{"text":"reboot","key":"r"},{"text":"shutdown","key":"S-s"},{"text":"quit","key":"q"}]'
 
 scenario "hintsFor — unknown + empty modes fall back verbatim (AC4)"
-assert_case "unknown-mode-fallback" '[{"key":"","label":"somefuture"}]'
-assert_case "empty-mode-fallback"   '[{"key":"","label":""}]'
+assert_case "unknown-mode-fallback" '[{"text":"somefuture","key":""}]'
+assert_case "empty-mode-fallback"   '[{"text":"","key":""}]'
 
 scenario "displayName — resize/screenshot else system (AC4)"
 assert_case "display-names" '["resize","screenshot","system","system","system"]'
@@ -280,10 +282,24 @@ ShellRoot {
     var gap  = findChild(mb, "gap")
     var rows = hintRows(mb)
 
+    // Each hint renders 5 content spans: hpre + hk + hpost (inline layout) and
+    // hspace + hl (fallback layout). Dumping all five per row pins the ft009
+    // render intent — the key is the HIGHLIGHTED slice of the word when it is a
+    // substring (inline), else the classic `key␣text` fallback.
     var data = []
     for (var i = 0; i < rows.length; i++) {
-      var k = findChild(rows[i], "hk"), l = findChild(rows[i], "hl")
-      data.push({ key: k ? k.text : null, label: l ? l.text : null })
+      var pre  = findChild(rows[i], "hpre")
+      var k    = findChild(rows[i], "hk")
+      var post = findChild(rows[i], "hpost")
+      var sp   = findChild(rows[i], "hspace")
+      var l    = findChild(rows[i], "hl")
+      data.push({
+        pre:   pre  ? pre.text  : null,
+        key:   k    ? k.text    : null,
+        post:  post ? post.text : null,
+        space: sp   ? sp.text   : null,
+        tail:  l    ? l.text    : null
+      })
     }
 
     emit(name + ".visible", mb.visible ? "1" : "0")
@@ -293,19 +309,27 @@ ShellRoot {
     emit(name + ".gapW",    gap ? gap.width : -1)
     emit(name + ".hints",   j(data))
 
-    var hk = rows.length ? findChild(rows[0], "hk") : null
-    var hl = rows.length ? findChild(rows[0], "hl") : null
+    var hpre  = rows.length ? findChild(rows[0], "hpre")  : null
+    var hk    = rows.length ? findChild(rows[0], "hk")    : null
+    var hpost = rows.length ? findChild(rows[0], "hpost") : null
+    var hl    = rows.length ? findChild(rows[0], "hl")    : null
+    // pre/post carry fg (like the tail label); key carries highlight. A
+    // hardcoded literal drifting from the theme flips one of these to false.
     emit(name + ".colors", j({
       pillBg:    sameColour(pill.color, ModeBarTheme.pillBg),
       underline: sameColour(ul.color,   ModeBarTheme.highlight),
       pillLabel: sameColour(pl.color,   ModeBarTheme.fg),
-      key:       hk ? sameColour(hk.color, ModeBarTheme.highlight) : true,
-      label:     hl ? sameColour(hl.color, ModeBarTheme.fg)        : true
+      pre:       hpre  ? sameColour(hpre.color,  ModeBarTheme.fg)        : true,
+      key:       hk    ? sameColour(hk.color,    ModeBarTheme.highlight) : true,
+      post:      hpost ? sameColour(hpost.color, ModeBarTheme.fg)        : true,
+      label:     hl    ? sameColour(hl.color,    ModeBarTheme.fg)        : true
     }))
     emit(name + ".native", j({
       pill:  pl.renderType === Text.NativeRendering,
-      key:   hk ? hk.renderType === Text.NativeRendering : true,
-      label: hl ? hl.renderType === Text.NativeRendering : true
+      pre:   hpre  ? hpre.renderType  === Text.NativeRendering : true,
+      key:   hk    ? hk.renderType    === Text.NativeRendering : true,
+      post:  hpost ? hpost.renderType === Text.NativeRendering : true,
+      label: hl    ? hl.renderType    === Text.NativeRendering : true
     }))
     emit(name + ".bold",  j({ pill: pl.font.bold, key: hk ? hk.font.bold : true }))
     emit(name + ".font",  pl.font.family)
@@ -323,10 +347,12 @@ ShellRoot {
     var hspc  = rows.length ? findChild(rows[0], "hspace") : null
     emit(name + ".fonts", j({
       pill:  pl.font.family === ModeBarTheme.font,
-      key:   hk  ? hk.font.family  === ModeBarTheme.font : true,
-      label: hl2 ? hl2.font.family === ModeBarTheme.font : true,
-      sep:   hsep ? hsep.font.family !== ModeBarTheme.font : true,
-      space: hspc ? hspc.font.family !== ModeBarTheme.font : true
+      pre:   hpre  ? hpre.font.family  === ModeBarTheme.font : true,
+      key:   hk    ? hk.font.family    === ModeBarTheme.font : true,
+      post:  hpost ? hpost.font.family === ModeBarTheme.font : true,
+      label: hl2   ? hl2.font.family   === ModeBarTheme.font : true,
+      sep:   hsep  ? hsep.font.family  !== ModeBarTheme.font : true,
+      space: hspc  ? hspc.font.family  !== ModeBarTheme.font : true
     }))
   }
 
@@ -412,25 +438,32 @@ assert_case "default-invisible.visible" "0"
 scenario "resize-pill-and-hints: pill 'resize' + 6 verbatim hint rows (AC1/AC4)"
 assert_case "resize.visible" "1"
 assert_case "resize.pill"    "resize"
+# arrows/directions are fallback (key not a substring of text): pre/post empty,
+# space=" ", tail=<glyph>. "quit"/"q" is inline: pre="", hk="q", post="uit".
 assert_case "resize.hints" \
-  '[{"key":"j","label":"←"},{"key":"k","label":"↓"},{"key":"l","label":"↑"},{"key":";","label":"→"},{"key":"←↓↑→","label":"arrows"},{"key":"Esc","label":"exit"}]'
+  '[{"pre":"","key":"j","post":"","space":" ","tail":"←"},{"pre":"","key":"k","post":"","space":" ","tail":"↓"},{"pre":"","key":"l","post":"","space":" ","tail":"↑"},{"pre":"","key":";","post":"","space":" ","tail":"→"},{"pre":"","key":"←↓↑→","post":"","space":" ","tail":"arrows"},{"pre":"","key":"q","post":"uit","space":"","tail":""}]'
 
 scenario "screenshot-hints: pill 'screenshot' + 4 verbatim hint rows (AC4)"
 assert_case "screenshot.visible" "1"
 assert_case "screenshot.pill"    "screenshot"
+# "whole-screen"/"w" is inline: hk="w", post="hole-screen". drag/2-tap fallback.
 assert_case "screenshot.hints" \
-  '[{"key":"drag","label":"select region"},{"key":"2-tap","label":"corners"},{"key":"w","label":"whole screen"},{"key":"Esc","label":"cancel"}]'
+  '[{"pre":"","key":"drag","post":"","space":" ","tail":"select-region"},{"pre":"","key":"2-tap","post":"","space":" ","tail":"corners"},{"pre":"","key":"w","post":"hole-screen","space":"","tail":""},{"pre":"","key":"q","post":"uit","space":"","tail":""}]'
 
 scenario "system-long-name: the full \$mode_system string -> pill reads 'system' (AC4)"
 assert_case "system-long-name.visible" "1"
 assert_case "system-long-name.pill"    "system"
+# inline highlighting: lock->hk="l" post="ock"; switch-user->pre="switch-"
+# hk="u" post="ser". shutdown/"S-s" is fallback (key not a substring).
 assert_case "system-long-name.hints" \
-  '[{"key":"l","label":"lock"},{"key":"e","label":"exit"},{"key":"u","label":"switch user"},{"key":"s","label":"suspend"},{"key":"h","label":"hibernate"},{"key":"r","label":"reboot"},{"key":"S-s","label":"shutdown"},{"key":"Esc","label":"cancel"}]'
+  '[{"pre":"","key":"l","post":"ock","space":"","tail":""},{"pre":"","key":"e","post":"xit","space":"","tail":""},{"pre":"switch-","key":"u","post":"ser","space":"","tail":""},{"pre":"","key":"s","post":"uspend","space":"","tail":""},{"pre":"","key":"h","post":"ibernate","space":"","tail":""},{"pre":"","key":"r","post":"eboot","space":"","tail":""},{"pre":"","key":"S-s","post":"","space":" ","tail":"shutdown"},{"pre":"","key":"q","post":"uit","space":"","tail":""}]'
 
 scenario "unknown-fallback: unknown mode -> pill 'system' + one raw-name hint row (AC4)"
 assert_case "unknown-fallback.visible" "1"
 assert_case "unknown-fallback.pill"    "system"
-assert_case "unknown-fallback.hints"   '[{"key":"","label":"somefuture"}]'
+# empty key -> fallback path with an empty hk span; the raw name renders as the
+# tail (space+tail layout, key span empty).
+assert_case "unknown-fallback.hints"   '[{"pre":"","key":"","post":"","space":" ","tail":"somefuture"}]'
 
 scenario "geometry-deltas: pill width = label + 14, underline 2px, gap 4px (AC1)"
 EXP_DELTA=14
@@ -443,8 +476,8 @@ assert_case "screenshot.delta"  "14"
 scenario "colours bound to ModeBarTheme + Text.NativeRendering + bold (AC1)"
 # A hardcoded literal in ModeBar that drifts from the theme flips one of these
 # to false and fails.
-assert_case "resize.colors" '{"pillBg":true,"underline":true,"pillLabel":true,"key":true,"label":true}'
-assert_case "resize.native" '{"pill":true,"key":true,"label":true}'
+assert_case "resize.colors" '{"pillBg":true,"underline":true,"pillLabel":true,"pre":true,"key":true,"post":true,"label":true}'
+assert_case "resize.native" '{"pill":true,"pre":true,"key":true,"post":true,"label":true}'
 assert_case "resize.bold"   '{"pill":true,"key":true}'
 assert_case "resize.font"   "Iosevka Nerd Font"
 assert_case "resize.px"     "16"
@@ -452,7 +485,7 @@ assert_case "resize.px"     "16"
 scenario "font-invariant: coloured Texts use ModeBarTheme.font; whitespace Texts keep the default font (AC1 parity vs Bar.qml:599/601)"
 # Re-adding ModeBarTheme.font to the separator/spacer flips sep/space to false
 # and fails here — pinning the whitespace-font drift the reviewer measured.
-assert_case "resize.fonts" '{"pill":true,"key":true,"label":true,"sep":true,"space":true}'
+assert_case "resize.fonts" '{"pill":true,"pre":true,"key":true,"post":true,"label":true,"sep":true,"space":true}'
 
 scenario "fontsize-propagates: the fontSize prop reaches the pill label Text (AC1 edge)"
 assert_case "fontsize-22.px"   "22"
@@ -461,7 +494,7 @@ assert_case "fontsize-22.pill" "resize"
 scenario "mode-flip-no-stale: default->resize->default->screenshot leaves no stale rows (AC4)"
 assert_case "mode-flip-no-stale.pill"  "screenshot"
 assert_case "mode-flip-no-stale.hints" \
-  '[{"key":"drag","label":"select region"},{"key":"2-tap","label":"corners"},{"key":"w","label":"whole screen"},{"key":"Esc","label":"cancel"}]'
+  '[{"pre":"","key":"drag","post":"","space":" ","tail":"select-region"},{"pre":"","key":"2-tap","post":"","space":" ","tail":"corners"},{"pre":"","key":"w","post":"hole-screen","space":"","tail":""},{"pre":"","key":"q","post":"uit","space":"","tail":""}]'
 
 # ============================================================================
 # PHASE 2 — Bar.qml migrated onto ModeBar (sp018 Task 3 / dotfiles-80px.3):

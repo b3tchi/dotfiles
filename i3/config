@@ -131,6 +131,7 @@ bindsym $mod+Shift+Print --release exec --no-startup-id i3-scrot -s
 # session (the dotfiles-ux1 failure class).
 mode "screenshot" {
     bindsym Escape mode default
+    bindsym q mode default
 }
 bindsym $mod+Shift+s exec --no-startup-id ~/.dotfiles/quickshell/qs-screenshot.sh
 bindsym $mod+Shift+h exec xdg-open /usr/share/doc/manjaro/i3_help.pdf
@@ -318,6 +319,7 @@ mode "$mode_system" {
     # exit system mode: "Enter" or "Escape"
     bindsym Return mode "default"
     bindsym Escape mode "default"
+    bindsym q mode "default"
 }
 # Rename workspace
 bindsym $mod+Shift+n exec i3-input -f "xft:Iosevka" -F 'name workspace to "%s"' -P 'Workspace name: '
@@ -347,6 +349,7 @@ mode "resize" {
         # exit resize mode: Enter or Escape
         bindsym Return mode "default"
         bindsym Escape mode "default"
+        bindsym q mode "default"
 }
 
 # Lock screen
