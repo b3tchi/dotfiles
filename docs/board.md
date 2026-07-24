@@ -18,9 +18,10 @@ sections when status flips.
 
 ## spec
 
-- [[sp018|mode-bar-reusable-component]]
 
 ## ready
+
+- [[sp018|mode-bar-reusable-component]]
 
 
 - [[sp012|live-region-xshape-overlay]]
