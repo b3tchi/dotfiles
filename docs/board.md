@@ -21,7 +21,6 @@ sections when status flips.
 
 ## ready
 
-- [[sp018|mode-bar-reusable-component]]
 
 
 - [[sp012|live-region-xshape-overlay]]
