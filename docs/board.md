@@ -17,9 +17,10 @@ sections when status flips.
 
 ## spec
 
-- [[sp019|notification-service-and-history-browser]]
 
 ## ready
+
+- [[sp019|notification-service-and-history-browser]]
 
 
 
