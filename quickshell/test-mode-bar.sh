@@ -306,6 +306,24 @@ ShellRoot {
     emit(name + ".bold",  j({ pill: pl.font.bold, key: hk ? hk.font.bold : true }))
     emit(name + ".font",  pl.font.family)
     emit(name + ".px",    pl.font.pixelSize)
+
+    // Font invariant (parity guard): the coloured Texts carry ModeBarTheme.font
+    // (Iosevka); the pure-whitespace Texts (separator + spacer) keep the DEFAULT
+    // font, matching Bar.qml:599/601. A space's advance differs by font, so
+    // re-adding ModeBarTheme.font to the whitespace Texts widens the strip
+    // ~+61.5px in resize — flipping sep/space below to false and FAILING here,
+    // catching the drift in the suite (not just review). Machine-independent:
+    // it compares font *identity*, not pixel widths.
+    var hl2 = hl  // (already the first row's label)
+    var hsep  = rows.length ? findChild(rows[0], "hsep")  : null
+    var hspc  = rows.length ? findChild(rows[0], "hspace") : null
+    emit(name + ".fonts", j({
+      pill:  pl.font.family === ModeBarTheme.font,
+      key:   hk  ? hk.font.family  === ModeBarTheme.font : true,
+      label: hl2 ? hl2.font.family === ModeBarTheme.font : true,
+      sep:   hsep ? hsep.font.family !== ModeBarTheme.font : true,
+      space: hspc ? hspc.font.family !== ModeBarTheme.font : true
+    }))
   }
 
   IpcHandler {
@@ -426,6 +444,11 @@ assert_case "resize.native" '{"pill":true,"key":true,"label":true}'
 assert_case "resize.bold"   '{"pill":true,"key":true}'
 assert_case "resize.font"   "Iosevka Nerd Font"
 assert_case "resize.px"     "16"
+
+scenario "font-invariant: coloured Texts use ModeBarTheme.font; whitespace Texts keep the default font (AC1 parity vs Bar.qml:599/601)"
+# Re-adding ModeBarTheme.font to the separator/spacer flips sep/space to false
+# and fails here — pinning the whitespace-font drift the reviewer measured.
+assert_case "resize.fonts" '{"pill":true,"key":true,"label":true,"sep":true,"space":true}'
 
 scenario "fontsize-propagates: the fontSize prop reaches the pill label Text (AC1 edge)"
 assert_case "fontsize-22.px"   "22"

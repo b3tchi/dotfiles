@@ -2,12 +2,21 @@ import QtQuick
 import "."
 
 // ModeBar (sp018 / ft009) — the reusable i3/sway mode-hint strip: a name-pill
-// plus a keyboard-hint row, extracted VERBATIM from config/Bar.qml's inline
-// "Mode hints overlay" Row. An Item, never top-level chrome — the host owns the
-// bar surface and the mode-subscription i3 IPC watcher; ModeBar is pure render
-// driven by `mode` + `fontSize`. Every colour, the font, and the hint data come
-// from ModeBarTheme (no hardcoded literals — parity with the pre-refactor
-// render is the contract, sp018 AC1). `mode: "default"` renders nothing.
+// plus a keyboard-hint row, reproducing config/Bar.qml's inline "Mode hints
+// overlay" Row pixel-for-pixel (sp018 AC1). An Item, never top-level chrome —
+// the host owns the bar surface and the mode-subscription i3 IPC watcher;
+// ModeBar is pure render driven by `mode` + `fontSize`. Colours, the label
+// font, and the hint data come from ModeBarTheme (no hardcoded literals —
+// parity with the pre-refactor render is the contract). `mode: "default"`
+// renders nothing.
+//
+// Parity notes vs Bar.qml: the pure-whitespace Texts (the hint separator and
+// the key/label spacer) deliberately keep the DEFAULT font, NOT ModeBarTheme's
+// Iosevka — matching Bar.qml:599/601, because a space's advance width differs
+// by font (Iosevka nearly doubles it) and would widen the strip. Only the
+// coloured Texts (pill label, hint key, hint label) carry ModeBarTheme.font.
+// The one omission is Bar.qml's transparent `z:-1` Rectangle behind each key —
+// a true no-op (fully transparent, no layout effect), dropped as dead cruft.
 Item {
     id: root
 
@@ -74,9 +83,12 @@ Item {
                 anchors.bottom: parent ? parent.bottom : undefined
                 anchors.bottomMargin: 1
 
+                // separator — DEFAULT font (parity with Bar.qml:599); a
+                // space's advance differs by font, so Iosevka here would widen
+                // the strip. Only pixelSize + NativeRendering, like the source.
                 Text {
+                    objectName: "hsep"
                     text: index > 0 ? "  " : ""
-                    font.family: ModeBarTheme.font
                     font.pixelSize: root.fontSize
                     renderType: Text.NativeRendering
                 }
@@ -89,9 +101,10 @@ Item {
                     font.bold: true
                     renderType: Text.NativeRendering
                 }
+                // key/label spacer — DEFAULT font too (parity with Bar.qml:601).
                 Text {
+                    objectName: "hspace"
                     text: " "
-                    font.family: ModeBarTheme.font
                     font.pixelSize: root.fontSize
                     renderType: Text.NativeRendering
                 }
