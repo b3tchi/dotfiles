@@ -79,6 +79,10 @@ assert_case() { # <name> <expected>
 }
 
 cleanup() {
+  # PHASE 2 bar host is setsid'd into its own process group so the blocking
+  # i3-msg subscribe reader (and the ws-subscribe sleep) die with it.
+  [ -n "${BAR_PID:-}" ]  && kill -- -"$BAR_PID" 2>/dev/null
+  [ -n "${BAR_PID:-}" ]  && kill "$BAR_PID"  2>/dev/null
   [ -n "${QS_PID:-}" ]   && kill "$QS_PID"   2>/dev/null
   sleep 0.3
   [ -n "${XVFB_PID:-}" ] && kill "$XVFB_PID" 2>/dev/null
@@ -458,6 +462,224 @@ scenario "mode-flip-no-stale: default->resize->default->screenshot leaves no sta
 assert_case "mode-flip-no-stale.pill"  "screenshot"
 assert_case "mode-flip-no-stale.hints" \
   '[{"key":"drag","label":"select region"},{"key":"2-tap","label":"corners"},{"key":"w","label":"whole screen"},{"key":"Esc","label":"cancel"}]'
+
+# ============================================================================
+# PHASE 2 — Bar.qml migrated onto ModeBar (sp018 Task 3 / dotfiles-80px.3):
+#           the REAL config/Bar.qml component, hosted in a minimal ShellRoot and
+#           driven by a SANDBOXED-PATH i3-msg stub whose `-t subscribe ["mode"]`
+#           streams events from a harness FIFO — exactly the mode IPC the shipped
+#           bar consumes. Behaviour is inspected via an IpcHandler dump that
+#           walks the bar's render tree by objectName (ModeBar's pill) and by
+#           the seeded workspace-tab text, reading effective visibility.
+#           Precedent: test-clip-history.sh PHASE 1.5 / test-overlay.sh
+#           (sandboxed argv-recording stubs, real component in a ShellRoot).
+#
+#           A2 (AC3) grep contract is asserted HERE against the shipped Bar.qml,
+#           so re-introducing modeHints()/the dead Mode-indicator block, or the
+#           modeText/modeNameText ids, or a second ModeBar, fails the RUN — not
+#           just review.
+# ============================================================================
+
+BAR_QML="$SCRIPT_DIR/config/Bar.qml"
+[ -r "$BAR_QML" ] || { echo "FATAL: Bar.qml missing" >&2; exit 1; }
+
+# direct (non-CASE) shell assert for the grep contract + a few booleans.
+a2() { if [ "$2" = "$3" ]; then pass "$1"; else fail "$1" "$2" "$3"; fi; }
+
+# ---- AC3 grep contract (negative control, asserted in-suite) ----------------
+scenario "grep-contract: Bar.qml drops modeHints/(l)ock, the modeText/modeNameText ids, keeps exactly one ModeBar (AC3)"
+a2 "no modeHints() call or (l)ock sniff remains in Bar.qml" \
+  "0" "$(grep -cE 'modeHints|\(l\)ock' "$BAR_QML" | tr -d ' ')"
+a2 "the dead-block id 'modeText' is gone" \
+  "0" "$(grep -cE 'id:[[:space:]]*modeText\b' "$BAR_QML" | tr -d ' ')"
+a2 "the overlay-Row id 'modeNameText' is gone" \
+  "0" "$(grep -cE 'id:[[:space:]]*modeNameText\b' "$BAR_QML" | tr -d ' ')"
+a2 "exactly one ModeBar instance is wired in" \
+  "1" "$(grep -cE '^[[:space:]]*ModeBar[[:space:]]*\{' "$BAR_QML" | tr -d ' ')"
+
+# ---- end-to-end: real Bar + stubbed i3-msg mode subscription (FIFO) ----------
+CFG2="$TMP/cfg2"                 # PHASE 2 host config (real Bar in a ShellRoot)
+PBIN2="$TMP/pbin2"               # sandboxed PATH: coreutils + the i3-msg stub
+RUN2="$TMP/run2"                 # isolated runtime dir (own ipc socket)
+FIFO="$TMP/mode.fifo"            # the ["mode"] subscription stream
+ARGV2="$TMP/i3-argv.log"         # every non-subscribe/non-get_workspaces argv
+mkdir -p "$CFG2" "$PBIN2" "$RUN2"
+chmod 700 "$RUN2"
+ln -s "$COMMON_DIR" "$CFG2/Common"
+ln -s "$SCRIPT_DIR/config/Bar.qml" "$CFG2/Bar.qml"
+mkfifo "$FIFO"
+
+SLEEP_BIN="$(command -v sleep)"
+# Every coreutil the Bar's Processes shell out to (stats/net/vol/bat probes
+# harmlessly no-op under the sandbox) plus sh for the get_workspaces wrapper.
+for t in sh cat sleep tr awk df grep sed cut head; do
+  src="$(command -v "$t")" && ln -sf "$src" "$PBIN2/$t"
+done
+
+# One focused workspace tab named "wsprobe" — a text unique in the tree, so the
+# dump can locate the workspace Repeater's tab and read its effective visibility
+# (leftSide hides in a mode; the tab must go with it).
+WS2_JSON='[{"name":"wsprobe","num":1,"focused":true,"visible":true,"urgent":false,"id":1}]'
+cat > "$PBIN2/i3-msg" <<STUBEOF
+#!/bin/sh
+case "\$1" in
+  -t)
+    case "\$2" in
+      get_workspaces) printf '%s' '$WS2_JSON'; exit 0 ;;
+      subscribe)
+        case "\$4" in
+          *mode*)
+            # Stream mode events from the FIFO, line by line, forever (the
+            # harness holds a persistent RDWR writer so read never sees EOF).
+            while IFS= read -r line; do printf '%s\n' "\$line"; done < "$FIFO"
+            exit 0 ;;
+          *) exec "$SLEEP_BIN" 300 ;;
+        esac ;;
+      *) exit 0 ;;
+    esac ;;
+esac
+printf '%s\n' "\$*" >> "$ARGV2"
+exit 0
+STUBEOF
+chmod +x "$PBIN2/i3-msg"
+ln -sf "$PBIN2/i3-msg" "$PBIN2/swaymsg"   # sway path answers under either name
+: > "$ARGV2"
+
+# --- minimal ShellRoot hosting the REAL Bar, plus an inspection IpcHandler ----
+cat > "$CFG2/shell.qml" <<'HOST2EOF'
+import Quickshell
+import Quickshell.Io
+import QtQuick
+import "./Common"
+
+ShellRoot {
+  id: host
+  function emit(n, p) { console.log("CASE " + n + " " + p) }
+
+  // Walk from a PanelWindow's contentItem (declared children land there).
+  function rootOf(w) { return (w && w.contentItem) ? w.contentItem : w }
+  function findByName(item, name) {
+    if (!item) return null
+    var kids = item.children
+    for (var i = 0; i < kids.length; i++) {
+      var c = kids[i]
+      if (c.objectName === name) return c
+      var f = findByName(c, name)
+      if (f) return f
+    }
+    return null
+  }
+  function findByText(item, t) {
+    if (!item) return null
+    var kids = item.children
+    for (var i = 0; i < kids.length; i++) {
+      var c = kids[i]
+      if (c.text !== undefined && c.text === t) return c
+      var f = findByText(c, t)
+      if (f) return f
+    }
+    return null
+  }
+  // Effective visibility: an item renders iff it and every ancestor are visible.
+  function effVis(it) { var n = it; while (n) { if (n.visible === false) return false; n = n.parent } return true }
+
+  function dump(name) {
+    var r    = rootOf(bar)
+    var pill = findByName(r, "pillLabel")   // ModeBar's name-pill label
+    var ws   = findByText(r, "wsprobe")     // the workspace tab text
+    emit(name + ".mode",  bar.currentMode)
+    emit(name + ".strip", (pill && effVis(pill)) ? "1" : "0")
+    emit(name + ".pill",  pill ? pill.text : "?")
+    emit(name + ".ws",    (ws && effVis(ws)) ? "1" : "0")
+  }
+
+  IpcHandler {
+    target: "barprobe"
+    function dumpc(name: string): void { host.dump(name) }
+    function bye(): void { Quickshell.exit(0) }
+  }
+
+  Bar {
+    id: bar
+    screen: Quickshell.screens.length > 0 ? Quickshell.screens[0] : null
+  }
+}
+HOST2EOF
+
+QS_BIN="$(command -v "$QUICKSHELL")"
+# setsid: own process group so cleanup reaps the blocking FIFO reader. PATH is
+# the sandbox ONLY (so wmMsg resolves to the stub); SWAYSOCK unset => i3 path.
+setsid env -u SWAYSOCK DISPLAY="$DPY" PATH="$PBIN2" \
+    XDG_CONFIG_HOME="$CFG2" XDG_RUNTIME_DIR="$RUN2" XDG_CACHE_HOME="$CCH" \
+    "$QS_BIN" -p "$CFG2" >"$TMP/qs2.out" 2>&1 &
+BAR_PID=$!
+
+ipc2() { env XDG_CONFIG_HOME="$CFG2" XDG_RUNTIME_DIR="$RUN2" XDG_CACHE_HOME="$CCH" \
+             "$QUICKSHELL" ipc --pid "$BAR_PID" "$@" 2>/dev/null; }
+
+for i in $(seq 1 60); do
+  n="$(ipc2 show 2>/dev/null | grep -c 'barprobe')"
+  [ "${n:-0}" -gt 0 ] && { BAR_UP=1; break; }
+  sleep 0.5
+done
+
+if [ -z "${BAR_UP:-}" ]; then
+  fail "PHASE 2 bar host exposed the 'barprobe' IPC target" \
+       "a barprobe target" "none (host did not boot — see below)"
+  tail -30 "$TMP/qs2.out" >&2
+else
+  # Persistent RDWR writer: opening the FIFO O_RDWR never blocks and holds a
+  # writer open so the stub's `read` loop streams events without ever EOF-ing.
+  exec 3<>"$FIFO"
+  mode_emit() { printf '%s\n' "$1" >&3; }
+  # emit a mode event, let the scene settle (Text metrics + Repeater rebuild),
+  # then snapshot the tree.
+  barflip() { mode_emit "$1"; sleep 0.6; ipc2 call barprobe dumpc "$2" >/dev/null 2>&1; sleep 0.25; }
+
+  sleep 0.8   # let get_workspaces land + the workspace Repeater build the tab
+  ipc2 call barprobe dumpc "boot" >/dev/null 2>&1; sleep 0.3
+
+  barflip '{"change":"resize"}'  "resize-on"
+  barflip '{"change":"default"}' "default-off"
+  barflip "{\"change\":\"$SYS\"}" "system-on"
+  # garbage: current mode is the long system string; a malformed event must be
+  # swallowed by the existing try/catch, leaving currentMode UNCHANGED.
+  barflip 'this is not json @@@' "garbage-ignored"
+  mode_emit '{"change":"default"}'; sleep 0.3   # reset
+
+  grep -a 'CASE ' "$TMP/qs2.out" | sed 's/^.*CASE /CASE /' >> "$CASES"
+  ipc2 call barprobe bye >/dev/null 2>&1
+
+  scenario "boot: no mode event yet -> default, strip hidden, workspaces shown"
+  assert_case "boot.mode"  "default"
+  assert_case "boot.strip" "0"
+  assert_case "boot.ws"    "1"
+
+  scenario "mode-strip-appears-on-resize: {change:resize} maps the strip, pill reads 'resize' (AC1/AC4)"
+  assert_case "resize-on.mode"  "resize"
+  assert_case "resize-on.strip" "1"
+  assert_case "resize-on.pill"  "resize"
+
+  scenario "workspaces-hidden-in-mode: leftSide (its wsprobe tab) hides while the strip shows (visibility complement)"
+  assert_case "resize-on.ws" "0"
+
+  scenario "strip-clears-on-default: {change:default} clears the strip, workspaces return (AC4)"
+  assert_case "default-off.mode"  "default"
+  assert_case "default-off.strip" "0"
+  assert_case "default-off.ws"    "1"
+
+  scenario "system-long-name-pill: the full \$mode_system string -> strip shows, pill reads 'system' (AC4)"
+  assert_case "system-on.strip" "1"
+  assert_case "system-on.pill"  "system"
+  assert_case "system-on.ws"    "0"
+
+  scenario "garbage-event-ignored: a malformed mode event leaves currentMode unchanged (try/catch preserved)"
+  # Still the system string from the prior event — NOT reset to default, NOT the
+  # garbage payload; the strip and pill are unchanged too.
+  assert_case "garbage-ignored.mode"  "$SYS"
+  assert_case "garbage-ignored.strip" "1"
+  assert_case "garbage-ignored.pill"  "system"
+fi
 
 # ============================================================================
 

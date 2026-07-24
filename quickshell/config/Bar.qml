@@ -150,38 +150,6 @@ PanelWindow {
     // --- Mode tracking ---
     property string currentMode: "default"
 
-    // Mode hint definitions: [{key, label}]
-    function modeHints(mode) {
-        if (mode === "resize")
-            return [
-                {key: "j", label: "←"},
-                {key: "k", label: "↓"},
-                {key: "l", label: "↑"},
-                {key: ";", label: "→"},
-                {key: "←↓↑→", label: "arrows"},
-                {key: "Esc", label: "exit"}
-            ]
-        if (mode === "screenshot")
-            return [
-                {key: "drag", label: "select region"},
-                {key: "2-tap", label: "corners"},
-                {key: "w", label: "whole screen"},
-                {key: "Esc", label: "cancel"}
-            ]
-        if (mode.indexOf("(l)ock") !== -1)
-            return [
-                {key: "l", label: "lock"},
-                {key: "e", label: "exit"},
-                {key: "u", label: "switch user"},
-                {key: "s", label: "suspend"},
-                {key: "h", label: "hibernate"},
-                {key: "r", label: "reboot"},
-                {key: "S-s", label: "shutdown"},
-                {key: "Esc", label: "cancel"}
-            ]
-        return [{key: "", label: mode}]
-    }
-
     Process {
         command: [root.wmMsg, "-t", "subscribe", "-m", '["mode"]']
         running: true
@@ -528,80 +496,16 @@ PanelWindow {
                     }
                 }
             }
-
-            // Mode indicator
-            Rectangle {
-                visible: root.currentMode !== "default"
-                width: modeText.implicitWidth + 14
-                height: leftSide.height
-                color: "#152024"
-
-                Text {
-                    id: modeText
-                    anchors.centerIn: parent
-                    text: root.currentMode
-                    color: "#fdf6e3"
-                    font.family: root.fontFamily
-                    font.pixelSize: root.fontSize
-                    renderType: root.nativeRender
-                }
-
-                Rectangle {
-                    anchors { top: parent.top; left: parent.left; right: parent.right }
-                    height: 2
-                    color: "#cb4b16"
-                }
-            }
         }
 
-        // Mode hints overlay (whole bar, left-aligned)
-        Row {
-            visible: root.currentMode !== "default"
+        // Mode-hint strip (name-pill + keyboard hints), extracted to the shared
+        // ModeBar (sp018 / ft009). Same anchors + leftMargin as the old inline
+        // overlay Row; the host keeps the mode-subscription Process above and
+        // just feeds it root.currentMode.
+        ModeBar {
             anchors { left: parent.left; top: parent.top; bottom: parent.bottom; leftMargin: 8 }
-            spacing: 0
-
-            Rectangle {
-                width: modeNameText.implicitWidth + 14
-                height: parent.height
-                // Same highlight as the focused tab / mod+d launcher selection.
-                color: "#152024"
-
-                Text {
-                    id: modeNameText
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    anchors.bottom: parent.bottom
-                    anchors.bottomMargin: 1
-                    text: root.currentMode === "resize" ? "resize"
-                          : root.currentMode === "screenshot" ? "screenshot" : "system"
-                    color: "#fdf6e3"
-                    font.family: root.fontFamily
-                    font.pixelSize: root.fontSize
-                    font.bold: true
-                    renderType: root.nativeRender
-                }
-
-                Rectangle {
-                    anchors { top: parent.top; left: parent.left; right: parent.right }
-                    height: 2
-                    color: "#cb4b16"
-                }
-            }
-            Item { width: 4; height: parent.height }
-
-            Repeater {
-                model: root.currentMode !== "default" ? root.modeHints(root.currentMode) : []
-
-                Row {
-                    required property var modelData
-                    required property int index
-                    anchors.bottom: parent ? parent.bottom : undefined
-                    anchors.bottomMargin: 1
-                    Text { text: index > 0 ? "  " : ""; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-                    Text { text: modelData.key; color: "#cb4b16"; font.family: root.fontFamily; font.pixelSize: root.fontSize; font.bold: true; renderType: root.nativeRender; Rectangle { anchors.fill: parent; color: "transparent"; z: -1 } }
-                    Text { text: " "; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-                    Text { text: modelData.label; color: "#fdf6e3"; font.family: root.fontFamily; font.pixelSize: root.fontSize; renderType: root.nativeRender }
-                }
-            }
+            mode: root.currentMode
+            fontSize: root.fontSize
         }
 
         // Notification ticker — between workspaces and bell/date
