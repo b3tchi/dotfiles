@@ -6,6 +6,7 @@ sections when status flips.
 
 ## idea
 
+
 - 🔥 hotfix [[sp015|gopass-clipboard-secret-marking]]
 
 
@@ -16,6 +17,8 @@ sections when status flips.
 - [[sp003|fix-categories]]
 
 ## spec
+
+- [[sp018|mode-bar-reusable-component]]
 
 ## ready
 
