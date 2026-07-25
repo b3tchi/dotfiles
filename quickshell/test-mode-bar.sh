@@ -198,7 +198,7 @@ assert_case "theme-constants" "$EXP_CONST"
 
 scenario "ModeBarTheme.hints — new {text,key} registry shape (AC3/AC4)"
 assert_case "hints-resize-verbatim" \
-  '[{"text":"←","key":"j"},{"text":"↓","key":"k"},{"text":"↑","key":"l"},{"text":"→","key":";"},{"text":"arrows","key":"←↓↑→"},{"text":"quit","key":"q"}]'
+  '[{"text":"←","key":"h"},{"text":"↓","key":"j"},{"text":"↑","key":"k"},{"text":"→","key":"l"},{"text":"arrows","key":"←↓↑→"},{"text":"quit","key":"q"}]'
 assert_case "hints-screenshot-verbatim" \
   '[{"text":"select-region","key":"drag"},{"text":"corners","key":"2-tap"},{"text":"whole-screen","key":"w"},{"text":"quit","key":"q"}]'
 assert_case "hints-system-verbatim" \
@@ -441,7 +441,7 @@ assert_case "resize.pill"    "resize"
 # arrows/directions are fallback (key not a substring of text): pre/post empty,
 # space=" ", tail=<glyph>. "quit"/"q" is inline: pre="", hk="q", post="uit".
 assert_case "resize.hints" \
-  '[{"pre":"","key":"j","post":"","space":" ","tail":"←"},{"pre":"","key":"k","post":"","space":" ","tail":"↓"},{"pre":"","key":"l","post":"","space":" ","tail":"↑"},{"pre":"","key":";","post":"","space":" ","tail":"→"},{"pre":"","key":"←↓↑→","post":"","space":" ","tail":"arrows"},{"pre":"","key":"q","post":"uit","space":"","tail":""}]'
+  '[{"pre":"","key":"h","post":"","space":" ","tail":"←"},{"pre":"","key":"j","post":"","space":" ","tail":"↓"},{"pre":"","key":"k","post":"","space":" ","tail":"↑"},{"pre":"","key":"l","post":"","space":" ","tail":"→"},{"pre":"","key":"←↓↑→","post":"","space":" ","tail":"arrows"},{"pre":"","key":"q","post":"uit","space":"","tail":""}]'
 
 scenario "screenshot-hints: pill 'screenshot' + 4 verbatim hint rows (AC4)"
 assert_case "screenshot.visible" "1"

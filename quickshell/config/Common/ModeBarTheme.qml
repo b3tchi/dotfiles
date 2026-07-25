@@ -31,10 +31,10 @@ Singleton {
     //     alongside Escape in i3 config.common/config + qs-region.py).
     readonly property var hints: ({
         "resize": [
-            {text: "←", key: "j"},
-            {text: "↓", key: "k"},
-            {text: "↑", key: "l"},
-            {text: "→", key: ";"},
+            {text: "←", key: "h"},
+            {text: "↓", key: "j"},
+            {text: "↑", key: "k"},
+            {text: "→", key: "l"},
             {text: "arrows", key: "←↓↑→"},
             {text: "quit", key: "q"}
         ],
