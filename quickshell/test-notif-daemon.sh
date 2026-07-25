@@ -679,11 +679,15 @@ ln -s "$COMMON_DIR" "$BCFG/Common"
 ln -s "$BAR_QML" "$BCFG/Bar.qml"
 
 BAR_QS_BIN="$(command -v "$BAR_QS_BIN_NAME")"
-# Every real coreutil the Bar's OTHER (unrelated) Processes shell out to
-# (stats/net/vol/bat probes, all harmless no-ops here) resolves from the
-# real PATH -- only i3-msg/swaymsg are shadowed by the sandbox stub placed
-# FIRST on PATH, so this sandbox never needs to enumerate every tool the
-# rest of the bar happens to invoke.
+# PATH is EXCLUSIVELY this sandbox dir (test-mode-bar.sh PHASE 2 precedent),
+# so every real coreutil the Bar's OTHER (unrelated) Processes shell out to
+# -- sh itself (notifFeedProc/notifDismiss/statsProc/... are all `sh -c`),
+# plus the stats/net/vol/bat probes, all harmless no-ops here -- must be
+# symlinked in explicitly or quickshell logs "binary could not be found"
+# and every Process, including the ones under test, silently never starts.
+for _t in sh cat sleep tr awk df grep sed cut head timeout mv rm date mkfifo iwgetid ip pactl tail; do
+  _src="$(command -v "$_t" 2>/dev/null)" && ln -sf "$_src" "$BPBIN/$_t"
+done
 cat > "$BPBIN/i3-msg" <<'STUBEOF'
 #!/bin/sh
 case "$1" in
@@ -761,8 +765,14 @@ BAR_XVFB_PID="$(start_xvfb_bar "$BARDPY" "$TMP/bar-xvfb.log")"
 # Persistent background reader on the harness FIFO -- mirrors the daemon's
 # own reader shape (read line-wise in a loop) so a dismiss write from
 # Bar.qml always finds a reader and never blocks past its own 2s timeout.
+# Bail with `|| exit 1` if the FIFO ever vanishes (this dir gets torn down
+# at cleanup) and floor the iteration with a trailing `sleep 0.2` -- the
+# exact dotfiles-rfzs fork-bomb fix applied to the real daemon's own FIFO
+# reader (quickshell/notif/shell.qml): without both guards, a missing FIFO
+# makes `cat` return instantly on ENOENT and the loop burns two forks per
+# iteration with nothing to block on.
 mkfifo -m 0600 "$BFIFO"
-( while :; do timeout 3 cat "$BFIFO" >> "$BREADLOG" 2>/dev/null; done ) &
+( while :; do [ -p "$BFIFO" ] || exit 1; timeout 3 cat "$BFIFO" >> "$BREADLOG" 2>/dev/null; sleep 0.2; done ) &
 BAR_READER_PID=$!
 
 env -u SWAYSOCK DISPLAY="$BARDPY" PATH="$BPBIN" \

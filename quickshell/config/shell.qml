@@ -12,7 +12,7 @@ ShellRoot {
     readonly property bool focusFx: !isRdp
 
     // Notifications (sp019): this instance is now a READ-ONLY consumer.
-    // The single NotificationServer lives in the dedicated
+    // The single notification server lives in the dedicated
     // `quickshell -p notif` daemon (quickshell/notif/shell.qml, Task 2),
     // launched user-wide behind a flock (qs-start.sh, Task 3) so exactly one
     // process ever owns org.freedesktop.Notifications regardless of how
