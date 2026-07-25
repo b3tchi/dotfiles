@@ -68,6 +68,12 @@ cleanup() {
   [ -n "${QS2_PID:-}" ]   && kill "$QS2_PID"   2>/dev/null
   [ -n "${NOTIF_PID:-}" ] && kill "$NOTIF_PID" 2>/dev/null
   [ -n "${FIFO_READER_PID:-}" ] && kill "$FIFO_READER_PID" 2>/dev/null
+  # PHASE 3 (dotfiles-c5fd.7) E2E: the real daemon + real bar/browser both
+  # run INSIDE a dbus-run-session that is waited on synchronously, so by the
+  # time control returns here they are already reaped -- only the E2E's own
+  # Xvfb (started outside that session, like PHASE 1's XVFB_PID/XVFB2_PID)
+  # can still be alive on an early/abnormal exit.
+  [ -n "${E2E_XVFB_PID:-}" ] && kill "$E2E_XVFB_PID" 2>/dev/null
   sleep 1
   [ -n "${XVFB_PID:-}" ]  && kill "$XVFB_PID"  2>/dev/null
   [ -n "${XVFB2_PID:-}" ] && kill "$XVFB2_PID" 2>/dev/null
@@ -901,6 +907,380 @@ for f in "$SCRIPT_DIR/../i3/config" "$SCRIPT_DIR/../i3/config.common"; do
 done
 
 kill "$NOTIF_PID" 2>/dev/null; wait "$NOTIF_PID" 2>/dev/null; NOTIF_PID=""
+
+# ============================================================================
+# PHASE 3 -- i3 keybind relocation: $mod+Shift+n toggles the browser,
+# $mod+Shift+o carries the relocated name-workspace i3-input bind (sp019
+# task 7, dotfiles-c5fd.7). Scenarios 1-5 are headless text/parser checks
+# (i3 -C needs no DISPLAY -- confirmed empirically before this suite was
+# written); the final scenario is the real end-to-end proof, under Xvfb,
+# with the REAL daemon (no FIFO stand-in, unlike PHASE 2 above, which used
+# a harness loop in the daemon's place).
+# ============================================================================
+
+I3_BASE="$SCRIPT_DIR/../i3/config"
+I3_COMMON="$SCRIPT_DIR/../i3/config.common"
+I3_XRDP="$SCRIPT_DIR/../i3/config-xrdp"
+I3="${I3:-i3}"
+
+for f in "$I3_BASE" "$I3_COMMON" "$I3_XRDP"; do
+  [ -r "$f" ] || { echo "FATAL: $f not readable" >&2; exit 1; }
+done
+command -v "$I3" >/dev/null 2>&1 || { echo "FATAL: $I3 not found (I3= to override)" >&2; exit 1; }
+
+# The two golden lines this task cares about, matched as FIXED strings
+# throughout this phase -- no regex-escaping games with the literal `$` in
+# `$mod` (grep -F takes the whole needle literally, dollar sign and all).
+NOTIF_TOGGLE_LINE='bindsym $mod+Shift+n exec --no-startup-id ~/.dotfiles/quickshell/qs-notif.sh toggle'
+NAME_WS_LINE='bindsym $mod+Shift+o exec i3-input -f "xft:Iosevka" -F '"'"'name workspace to "%s"'"'"' -P '"'"'Workspace name: '"'"''
+OLD_BIND_SUBSTR='$mod+Shift+n exec i3-input'
+
+count_fixed_line() { grep -F -x -c -- "$2" "$1" 2>/dev/null || true; }  # <file> <whole-line>
+count_fixed_sub()  { grep -F -c -- "$2" "$1" 2>/dev/null || true; }     # <file> <substring>
+
+scenario "shift-n-is-notif-toggle-both-files: \$mod+Shift+n binds the qs-notif.sh toggle exec in BOTH base configs"
+for f in "$I3_BASE" "$I3_COMMON"; do
+  assert_eq "$(basename "$f"): exactly one notif-toggle bindsym line" "1" "$(count_fixed_line "$f" "$NOTIF_TOGGLE_LINE")"
+done
+
+scenario "shift-o-is-name-workspace-both-files: \$mod+Shift+o carries the relocated i3-input bind, byte-identical, in BOTH base configs"
+for f in "$I3_BASE" "$I3_COMMON"; do
+  assert_eq "$(basename "$f"): exactly one name-workspace bindsym line on \$mod+Shift+o" "1" "$(count_fixed_line "$f" "$NAME_WS_LINE")"
+done
+BASE_WS_LINE="$(grep -F -x -- "$NAME_WS_LINE" "$I3_BASE" | head -1)"
+COMMON_WS_LINE="$(grep -F -x -- "$NAME_WS_LINE" "$I3_COMMON" | head -1)"
+assert_eq "the relocated i3-input command string is byte-identical between config and config.common" \
+  "$BASE_WS_LINE" "$COMMON_WS_LINE"
+
+scenario "no-shift-n-i3-input-left: the OLD \$mod+Shift+n -> i3-input name-workspace bind is gone from BOTH base configs"
+for f in "$I3_BASE" "$I3_COMMON"; do
+  assert_eq "$(basename "$f"): zero bindsym lines still pairing Shift+n with i3-input" "0" "$(count_fixed_sub "$f" "$OLD_BIND_SUBSTR")"
+done
+
+# ---- no-duplicate-chords ----------------------------------------------------
+#
+# i3 gives every `mode "..." { }` block its OWN binding table -- the same
+# physical chord legitimately means something different in "default" vs
+# "resize" vs the system-exit mode, and i3 itself does not call that a
+# collision (proven empirically: `$mod+Shift+d` is bound once for press and
+# once with `--release` in the shipped config TODAY, and `i3 -C` already
+# accepts it clean). So this textual check is scoped to TOP-LEVEL
+# (unindented, "default"-mode) bindsym lines only -- indentation is this
+# file's own established signal for "inside a mode block" (every mode body
+# below is 4-space indented). That scope is a deliberate, commented choice,
+# not an oversight: i3's OWN parser is the fully mode-aware authority, and
+# it is exercised separately in the i3-C-parses-clean scenarios right after
+# this one. `--release` is folded into the comparison key (not stripped),
+# for the same reason: press and release are different binding events to
+# i3, not a collision.
+top_level_chords() { # <file> -- one normalized "chord[ --release]" token per line
+  grep -E '^bindsym ' "$1" | awk '{ key = $2; if ($3 == "--release") key = key " --release"; print key }'
+}
+
+scenario "no-duplicate-chords: i3/config's own top-level bindsym chords are all unique"
+DUP_BASE="$(top_level_chords "$I3_BASE" | sort | uniq -d)"
+assert_eq "sort | uniq -d on i3/config's chords" "" "$DUP_BASE"
+
+scenario "no-duplicate-chords: i3/config.common's own top-level bindsym chords are all unique"
+DUP_COMMON="$(top_level_chords "$I3_COMMON" | sort | uniq -d)"
+assert_eq "sort | uniq -d on i3/config.common's chords" "" "$DUP_COMMON"
+
+scenario "no-duplicate-chords: config-xrdp's effective chord set (its own binds + the config.common it includes) has no duplicate"
+DUP_XRDP="$( { top_level_chords "$I3_XRDP"; top_level_chords "$I3_COMMON"; } | sort | uniq -d)"
+assert_eq "sort | uniq -d on config-xrdp's effective chords" "" "$DUP_XRDP"
+
+# ---- i3 -C parses clean ------------------------------------------------------
+#
+# The authoritative, fully mode-aware duplicate-keybinding detector: i3's OWN
+# parser. `i3 -C` needs no running X server (verified separately: it exits 0
+# with DISPLAY unset). i3/config's `include ~/.i3/config.d/*.conf` is
+# stubbed with an EMPTY dir (an i3 include glob with no matches parses
+# clean -- verified separately, too); config-xrdp's own
+# `include ~/.dotfiles/i3/config.common` is resolved for REAL, against the
+# actual file this task just edited, by symlinking a fake $HOME/.dotfiles at
+# the real repo root -- so this proves the MERGE-TIME truth (the edge case
+# sp019.md Task 7 calls out), not a stale refinement-time snapshot.
+
+I3_ERR_MARKER='ERROR:'
+I3CHK="$TMP/i3check"
+rm -rf "$I3CHK"
+mkdir -p "$I3CHK/native/.i3/config.d" "$I3CHK/xrdp"
+cp "$I3_BASE" "$I3CHK/native/.i3/config"
+ln -sf "$SCRIPT_DIR/.." "$I3CHK/xrdp/.dotfiles"
+
+scenario "i3 -C: i3/config (with an empty config.d/ include dir) validates with no errors"
+ERR="$(HOME="$I3CHK/native" "$I3" -C -c "$I3CHK/native/.i3/config" 2>&1 | grep -F "$I3_ERR_MARKER" || true)"
+assert_eq "no ERROR lines from i3 -C on i3/config" "" "$ERR"
+
+scenario "i3 -C: config-xrdp's include chain (config-xrdp -> the real, just-edited config.common) validates with no errors"
+ERR="$(HOME="$I3CHK/xrdp" "$I3" -C -c "$I3_XRDP" 2>&1 | grep -F "$I3_ERR_MARKER" || true)"
+assert_eq "no ERROR lines from i3 -C on config-xrdp's include chain" "" "$ERR"
+
+# ---- MUTANT PIN: a wrong relocation (Shift+o bound in only ONE file) --------
+
+scenario "MUTANT PIN: Shift+o bound in only i3/config (not config.common) fails shift-o-is-name-workspace-both-files"
+# Simulate the bug directly rather than trust the detector in the abstract:
+# take the REAL (correctly relocated) config.common and strip the
+# $mod+Shift+o line back out, as if this task's edit had only ever touched
+# i3/config. Re-running this scenario's own check against the mutant must
+# report the file as MISSING the bind (count 0, not 1) -- the exact
+# condition that would turn the real scenario above red.
+MUT_COMMON="$TMP/config.common.mut-onefile"
+grep -F -x -v -- "$NAME_WS_LINE" "$I3_COMMON" > "$MUT_COMMON"
+assert_eq "the real i3/config still has the bind (unaffected by the mutation)" "1" "$(count_fixed_line "$I3_BASE" "$NAME_WS_LINE")"
+assert_eq "the mutant config.common no longer has it -- shift-o-is-name-workspace-both-files would FAIL here" \
+  "0" "$(count_fixed_line "$MUT_COMMON" "$NAME_WS_LINE")"
+
+# ============================================================================
+# PHASE 3 END-TO-END -- real daemon + real bar/browser under Xvfb (AC1, AC4)
+# ============================================================================
+#
+# A genuine `quickshell -p quickshell/notif` daemon (the same
+# dbus-run-session + ready-file + bus-owner + fifo-present wait
+# test-notif-daemon.sh already proved reliable) feeds a genuine Bar{} +
+# NotifHistory{} instance under Xvfb -- no FIFO stand-in this time (PHASE 2
+# above used a harness loop in the daemon's place; here the daemon itself
+# owns the FIFO end to end). notify-send is sent under a DISPLAY that
+# matches neither the harness's own Xvfb display nor anything real, proving
+# the daemon -- a D-Bus session-bus singleton, not a per-DISPLAY server --
+# picks it up regardless: the fix this whole epic exists for (AC1).
+# "Bar ticker text" is asserted two ways: the daemon's live-state file
+# (exactly what Bar.qml's own notifFile property tails) AND the live bar
+# instance's own notifCount/notifText properties, read back over IPC -- not
+# just the file, the ACTUAL consumer wiring. "Window title probe": the real
+# NotifHistory browser is toggled open over its real notifhistory IPC
+# target and xdotool searches for the mapped "qs-notif" window, then
+# qs-notif.sh list (same real store) is checked for the entry.
+#
+# FORK-BOMB CAUTION (sp019.md): the daemon's FIFO reader loop must carry
+# exactly one `sleep 0.2` floor (the dotfiles-rfzs fix) before this
+# scenario ever starts the real daemon process -- checked below, and this
+# whole scenario refuses to run if that count is not exactly 1.
+
+QMLDIR_DAEMON="$SCRIPT_DIR/notif"
+STORESH="$SCRIPT_DIR/qs-notif-store.sh"
+[ -r "$QMLDIR_DAEMON/shell.qml" ] || { echo "FATAL: daemon profile not found at $QMLDIR_DAEMON/shell.qml" >&2; exit 1; }
+[ -r "$STORESH" ] || { echo "FATAL: store script not found at $STORESH" >&2; exit 1; }
+for tool in dbus-run-session dbus-send notify-send; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "FATAL: $tool not found" >&2; exit 1; }
+done
+
+SLEEP_GUARD_COUNT="$(grep -c 'sleep 0.2' "$QMLDIR_DAEMON/shell.qml" 2>/dev/null || true)"
+if [ "${SLEEP_GUARD_COUNT:-0}" != "1" ]; then
+  echo "FATAL: quickshell/notif/shell.qml's 'sleep 0.2' fork-bomb guard count is ${SLEEP_GUARD_COUNT:-0}, expected exactly 1 -- refusing to start the real daemon" >&2
+  exit 1
+fi
+
+E2E="$TMP/e2e"
+E2E_RUN="$E2E/run"; E2E_STATE="$E2E/state"; E2E_CFG="$E2E/cfg"; E2E_PBIN="$E2E/pbin"
+E2E_FIFO="$E2E_RUN/qs-notif.cmd"
+E2E_READY="$E2E_RUN/daemon-ready"
+E2E_DPY="${TEST_DISPLAY3:-:97}"
+mkdir -p "$E2E_RUN" "$E2E_STATE" "$E2E_CFG" "$E2E_PBIN"
+chmod 700 "$E2E_RUN"
+
+ln -sf "$SCRIPT_DIR/config/Common" "$E2E_CFG/Common"
+ln -sf "$SCRIPT_DIR/config/Bar.qml" "$E2E_CFG/Bar.qml"
+ln -sf "$SCRIPT_DIR/config/NotifHistory.qml" "$E2E_CFG/NotifHistory.qml"
+
+# Only i3-msg/swaymsg are stubbed: Bar.qml polls workspace state over i3 IPC,
+# there is no live i3 in this harness, and a REAL i3-msg would error on
+# every poll -- a busy-restart storm, the exact hazard test-notif-daemon.sh's
+# own Bar harness already stubs around. Everything else (gawk, timeout,
+# mkfifo, quickshell, xdotool, ...) resolves through the REAL system PATH,
+# prepended by this stub dir -- deliberately NOT an exclusive sandbox PATH,
+# to avoid an exhaustive (and fragile) coreutils allowlist.
+cat > "$E2E_PBIN/i3-msg" <<'STUBEOF'
+#!/bin/sh
+case "$1" in
+  -t)
+    case "$2" in
+      get_workspaces) printf '%s' '[]'; exit 0 ;;
+      subscribe) exec sleep 300 ;;
+      *) exit 0 ;;
+    esac ;;
+esac
+exit 0
+STUBEOF
+chmod +x "$E2E_PBIN/i3-msg"
+ln -sf "$E2E_PBIN/i3-msg" "$E2E_PBIN/swaymsg"
+E2E_PATH="$E2E_PBIN:$PATH"
+
+cat > "$E2E_CFG/shell.qml" <<'ENTRYEOF'
+import Quickshell
+import Quickshell.Io
+import QtQuick
+import "./Common"
+
+ShellRoot {
+    id: host
+    function emit(n, p) { console.log("CASE " + n + " " + p) }
+
+    IpcHandler {
+        target: "notifprobe"
+        function dumpc(name: string): void {
+            host.emit(name + ".count",    bar.notifCount)
+            host.emit(name + ".text",     bar.notifText)
+            host.emit(name + ".critical", bar.hasCritical ? "1" : "0")
+            host.emit(name + ".seq",      bar.notifSeq)
+        }
+    }
+
+    Bar {
+        id: bar
+        screen: Quickshell.screens.length > 0 ? Quickshell.screens[0] : null
+    }
+
+    NotifHistory {}
+}
+ENTRYEOF
+
+start_xvfb_e2e() { # <display> <logfile>
+  "$XVFB" "$1" -screen 0 1280x800x24 >"$2" 2>&1 &
+  local pid=$! i
+  for i in $(seq 1 40); do
+    [ -e "/tmp/.X11-unix/X${1#:}" ] && break
+    sleep 0.25
+  done
+  [ -e "/tmp/.X11-unix/X${1#:}" ] || { echo "FATAL: Xvfb $1 did not start" >&2; exit 1; }
+  printf '%s' "$pid"
+}
+E2E_XVFB_PID="$(start_xvfb_e2e "$E2E_DPY" "$E2E/xvfb.log")"
+
+# The body sourced INSIDE the dbus-run-session cannot hand results back as
+# shell state -- the session is a child process this script waits on
+# synchronously -- so it deposits findings into plain files under $E2E
+# (real paths under $TMP, unaffected by the bus/session going away), and the
+# actual assert_eq calls run afterward, back out here. Same split
+# test-notif-daemon.sh's with_daemon/body-sourcing already uses.
+
+TESTBODY_MARKER="e2e-$$"
+NOTIF_SUMMARY="E2E Hello"
+NOTIF_BODY="e2e body $TESTBODY_MARKER"
+
+cat > "$E2E/wrapper.sh" <<WRAP
+#!/bin/sh
+set -u
+export XDG_RUNTIME_DIR="$E2E_RUN"
+export XDG_STATE_HOME="$E2E_STATE"
+export QS_NOTIF_FIFO="$E2E_FIFO"
+export QS_NOTIF_STORE_SCRIPT="$STORESH"
+export QS_NOTIF_READY_FILE="$E2E_READY"
+
+# 1. the REAL daemon (offscreen -- it hosts no rendering Window, by design)
+QT_QPA_PLATFORM=offscreen quickshell -p "$QMLDIR_DAEMON" >"$E2E_RUN/daemon.log" 2>&1 &
+DAEMON_PID=\$!
+i=0; while [ \$i -lt 100 ]; do [ -e "$E2E_READY" ] && break; i=\$((i + 1)); sleep 0.1; done
+i=0; while [ \$i -lt 100 ]; do
+  dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.GetNameOwner string:org.freedesktop.Notifications >/dev/null 2>&1 && break
+  i=\$((i + 1)); sleep 0.1
+done
+i=0; while [ \$i -lt 100 ]; do [ -p "$E2E_FIFO" ] && break; i=\$((i + 1)); sleep 0.1; done
+if [ ! -p "$E2E_FIFO" ]; then
+  echo "not-ready" > "$E2E/daemon-not-ready"
+  kill \$DAEMON_PID 2>/dev/null
+  exit 1
+fi
+
+# 2. the REAL bar + browser, on a REAL Xvfb display (needs a mapped window)
+env DISPLAY="$E2E_DPY" PATH="$E2E_PATH" \\
+    XDG_CONFIG_HOME="$E2E_CFG" XDG_RUNTIME_DIR="$E2E_RUN" XDG_STATE_HOME="$E2E_STATE" \\
+    QS_NOTIF_FILE="$E2E_RUN/qs-notif.state" QS_NOTIF_FIFO="$E2E_FIFO" \\
+    QS_NOTIF_SH="$QS_NOTIF" \\
+    quickshell -p "$E2E_CFG" >"$E2E/bar-qs.out" 2>&1 &
+BAR_PID=\$!
+i=0; a=0; b=0
+while [ \$i -lt 80 ]; do
+  a=\$(env XDG_CONFIG_HOME="$E2E_CFG" XDG_RUNTIME_DIR="$E2E_RUN" quickshell ipc --pid \$BAR_PID show 2>/dev/null | grep -c 'notifprobe')
+  b=\$(env XDG_CONFIG_HOME="$E2E_CFG" XDG_RUNTIME_DIR="$E2E_RUN" quickshell ipc --pid \$BAR_PID show 2>/dev/null | grep -c 'notifhistory')
+  [ "\${a:-0}" -gt 0 ] && [ "\${b:-0}" -gt 0 ] && break
+  i=\$((i + 1)); sleep 0.1
+done
+if [ "\${a:-0}" -eq 0 ] || [ "\${b:-0}" -eq 0 ]; then
+  echo "not-ready" > "$E2E/bar-not-ready"
+  kill \$BAR_PID \$DAEMON_PID 2>/dev/null
+  exit 1
+fi
+
+# 3. before-toggle: no qs-notif window mapped yet
+env DISPLAY="$E2E_DPY" xdotool search --onlyvisible --name '^qs-notif$' 2>/dev/null | wc -l | tr -d ' ' > "$E2E/wid-before-count"
+
+# 4. notify-send from a FOREIGN-DISPLAY environment -- AC1: the daemon is a
+#    D-Bus singleton, not scoped to any DISPLAY, so this must land anyway.
+env DISPLAY=:123456 notify-send "$NOTIF_SUMMARY" "$NOTIF_BODY" >/dev/null 2>&1
+
+# 5. wait for the live-state file (Bar.qml's own read source) to reflect it
+i=0
+while [ \$i -lt 100 ]; do
+  grep -q "^count 1\$" "$E2E_RUN/qs-notif.state" 2>/dev/null && break
+  i=\$((i + 1)); sleep 0.1
+done
+cp "$E2E_RUN/qs-notif.state" "$E2E/state-after.txt" 2>/dev/null || : > "$E2E/state-after.txt"
+
+# 6. wait for the LIVE bar's own properties (read over IPC, not the file) --
+#    proves Bar.qml's tail -F consumer wiring actually re-read it
+i=0
+while [ \$i -lt 100 ]; do
+  env XDG_CONFIG_HOME="$E2E_CFG" XDG_RUNTIME_DIR="$E2E_RUN" quickshell ipc --pid \$BAR_PID call notifprobe dumpc afterprobe >/dev/null 2>&1
+  grep -q 'CASE afterprobe.count 1' "$E2E/bar-qs.out" 2>/dev/null && break
+  i=\$((i + 1)); sleep 0.1
+done
+grep -a 'CASE afterprobe' "$E2E/bar-qs.out" > "$E2E/bar-cases.txt" 2>/dev/null || : > "$E2E/bar-cases.txt"
+
+# 7. window-title probe + real list: toggle the REAL browser open, confirm
+#    a window titled qs-notif is mapped, and qs-notif.sh list (same store)
+#    shows the entry newest-first.
+env XDG_CONFIG_HOME="$E2E_CFG" XDG_RUNTIME_DIR="$E2E_RUN" quickshell ipc --pid \$BAR_PID call notifhistory toggle >/dev/null 2>&1
+i=0
+while [ \$i -lt 40 ]; do
+  wid="\$(env DISPLAY="$E2E_DPY" xdotool search --onlyvisible --name '^qs-notif$' 2>/dev/null | head -1)"
+  [ -n "\$wid" ] && break
+  i=\$((i + 1)); sleep 0.25
+done
+if [ -n "\${wid:-}" ]; then printf '1' > "$E2E/wid-after-count"; else printf '0' > "$E2E/wid-after-count"; fi
+
+env XDG_STATE_HOME="$E2E_STATE" sh "$QS_NOTIF" list > "$E2E/list-after.txt" 2>/dev/null
+
+env XDG_CONFIG_HOME="$E2E_CFG" XDG_RUNTIME_DIR="$E2E_RUN" quickshell ipc --pid \$BAR_PID call notifhistory close >/dev/null 2>&1
+
+# teardown, inside the session, both reaped by this same script
+kill \$BAR_PID 2>/dev/null; wait \$BAR_PID 2>/dev/null
+kill \$DAEMON_PID 2>/dev/null; wait \$DAEMON_PID 2>/dev/null
+exit 0
+WRAP
+chmod +x "$E2E/wrapper.sh"
+
+timeout 45 dbus-run-session -- sh "$E2E/wrapper.sh"
+E2E_SESSION_RC=$?
+
+kill "$E2E_XVFB_PID" 2>/dev/null; wait "$E2E_XVFB_PID" 2>/dev/null; E2E_XVFB_PID=""
+
+scenario "e2e: the harness session itself completed cleanly (daemon + bar came up, notify-send delivered, no timeout)"
+assert_eq "dbus-run-session wrapper exit code" "0" "$E2E_SESSION_RC"
+
+scenario "e2e: no qs-notif window was mapped before the toggle"
+assert_eq "pre-toggle window count" "0" "$(cat "$E2E/wid-before-count" 2>/dev/null || echo unknown)"
+
+scenario "e2e AC1: notify-send from a foreign-DISPLAY environment lands in the daemon's live-state file (count 1) -- exactly what the real bar's ticker reads"
+assert_eq "state file shows count 1" "yes" \
+  "$(grep -q '^count 1$' "$E2E/state-after.txt" 2>/dev/null && echo yes || echo no)"
+assert_eq "state file's last line carries this notification's own text" "yes" \
+  "$(grep -q "$TESTBODY_MARKER" "$E2E/state-after.txt" 2>/dev/null && echo yes || echo no)"
+
+scenario "e2e AC1: the LIVE bar instance's own notifCount/notifText properties (read over IPC, not the raw file) reflect it too"
+assert_eq "bar.notifCount == 1 (over IPC)" "1" \
+  "$(grep -o 'CASE afterprobe\.count [0-9]*' "$E2E/bar-cases.txt" 2>/dev/null | awk '{print $NF}' | tail -1)"
+assert_eq "bar.notifText carries this notification's own text (over IPC)" "yes" \
+  "$(grep 'CASE afterprobe\.text' "$E2E/bar-cases.txt" 2>/dev/null | grep -q "$TESTBODY_MARKER" && echo yes || echo no)"
+
+scenario "e2e AC4: toggling \$mod+Shift+n's target (the notifhistory IPC) maps a REAL qs-notif window (window-title probe)"
+assert_eq "a qs-notif window was mapped after toggle" "1" "$(cat "$E2E/wid-after-count" 2>/dev/null || echo 0)"
+
+scenario "e2e AC4: the real qs-notif.sh list (same store the daemon just wrote) shows the notification, newest-first"
+assert_eq "list output mentions the notification's own preview text" "yes" \
+  "$(grep -q "$TESTBODY_MARKER" "$E2E/list-after.txt" 2>/dev/null && echo yes || echo no)"
+
+rm -rf "$E2E_CFG" "$E2E_PBIN"
 
 # ================= SELFTEST NEGATIVE CONTROL ================================
 # SELFTEST=1 deliberately flips one expectation to a value the real script

@@ -268,8 +268,15 @@ mode "$mode_system" {
     bindsym Escape mode "default"
     bindsym q mode "default"
 }
-# Rename workspace
-bindsym $mod+Shift+n exec i3-input -f "xft:Iosevka" -F 'name workspace to "%s"' -P 'Workspace name: '
+# notification-history picker (sp019) — opens the quickshell browser over
+# the persistent notification store. quickshell/notif is the single
+# user-bus-singleton daemon owning org.freedesktop.Notifications (ft003
+# base-owns-keybinds contract; overlays untouched), so this bind works
+# identically regardless of which session started first.
+bindsym $mod+Shift+n exec --no-startup-id ~/.dotfiles/quickshell/qs-notif.sh toggle
+
+# Rename workspace (moved off $mod+Shift+n, now the notif-history toggle)
+bindsym $mod+Shift+o exec i3-input -f "xft:Iosevka" -F 'name workspace to "%s"' -P 'Workspace name: '
 
 # Project workspace picker (quickshell) moved to desktop config (router pattern)
 # bindsym $mod+p exec --no-startup-id ~/.dotfiles/quickshell/qs-overlay.sh projects
