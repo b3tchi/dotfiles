@@ -20,7 +20,6 @@ sections when status flips.
 
 ## ready
 
-- [[sp019|notification-service-and-history-browser]]
 
 
 

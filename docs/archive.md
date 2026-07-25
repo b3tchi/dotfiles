@@ -5,6 +5,8 @@ Shipped workstreams. Specs (`sp###`) at `status: done` after
 
 ## done
 
+- [[sp019|notification-service-and-history-browser]]
+
 - [[sp018|mode-bar-reusable-component]]
 
 - [[sp017|formalize-shared-combobox-dialog-control]]
