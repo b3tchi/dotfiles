@@ -34,6 +34,8 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[ft006|region-capture]]
 - [[ft007|shared-clipboard-history]]
 - [[ft008|shared-combobox-dialog-control]]
+- [[ft009|mode-bar-control]]
+- [[ft010|notification-service]] >> [[im008]]
 
 ## Architecture Decision Records
 
@@ -52,6 +54,9 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[adr0005|No d3d12 GPU acceleration outside the WSLg-blessed path on WSL2]]
 - [[adr0006|preview-d embeds peer daemons via same-origin proxy or cross-origin iframe by frame-header]]
 - [[adr0009|preview-d embeds every peer daemon as a direct cross-origin iframe]]
+- [[adr0012|notification server is a user-bus singleton daemon, bars are read-only consumers]]
+- [[adr0013|persistent age-capped notification store]]
+- [[adr0014|reader loops fail fast and are rate-bounded when their runtime dir vanishes]]
 
 ## AKM Reference
 
