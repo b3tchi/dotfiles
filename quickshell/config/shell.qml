@@ -33,6 +33,12 @@ ShellRoot {
     // window. Idle until its IPC target is called.
     ClipHistory {}
 
+    // Notification-history browser (sp019 task 6). Hosted in the MAIN
+    // instance beside ClipHistory for the same reason: `qs-notif.sh toggle`
+    // must find exactly one browser per session. View + dismiss only
+    // (adr0010) — idle until its IPC target (`notifhistory`) is called.
+    NotifHistory {}
+
     Variants {
         model: Quickshell.screens
         Bar {

@@ -64,12 +64,14 @@ assert_ne() { # <scenario> <not-expected> <actual>
 scenario() { printf '\n[%s]\n' "$1"; }
 
 cleanup() {
-  [ -n "${QS_PID:-}" ]  && kill "$QS_PID"  2>/dev/null
-  [ -n "${QS2_PID:-}" ] && kill "$QS2_PID" 2>/dev/null
+  [ -n "${QS_PID:-}" ]    && kill "$QS_PID"    2>/dev/null
+  [ -n "${QS2_PID:-}" ]   && kill "$QS2_PID"   2>/dev/null
+  [ -n "${NOTIF_PID:-}" ] && kill "$NOTIF_PID" 2>/dev/null
+  [ -n "${FIFO_READER_PID:-}" ] && kill "$FIFO_READER_PID" 2>/dev/null
   sleep 1
   [ -n "${XVFB_PID:-}" ]  && kill "$XVFB_PID"  2>/dev/null
   [ -n "${XVFB2_PID:-}" ] && kill "$XVFB2_PID" 2>/dev/null
-  rm -rf "$TMP"
+  [ -n "${KEEP_TMP:-}" ] || rm -rf "$TMP"
 }
 trap cleanup EXIT
 
@@ -471,6 +473,434 @@ close_stub "$DPY2"
 # NotifHistory.qml UI scenarios) below this line. Nothing above is to be
 # reordered or renumbered by that task.
 # ============================================================================
+
+# ============================================================================
+# PHASE 2 -- the real NotifHistory.qml browser (sp019 task 6, dotfiles-c5fd.6)
+# ============================================================================
+#
+# PHASE 1's stub instances (QS_PID/QS2_PID) are retired here -- they only
+# ever existed to regression-test toggle's session derivation against a
+# throwaway double, and this phase needs the notifhistory IPC target free on
+# $DPY for the REAL browser.
+#
+# A harness-owned background loop stands in for the daemon on the FIFO
+# (qs-notif.sh's `dismiss` contract only needs a READER for the write to
+# succeed -- see qs-notif.sh's header -- so this loop reads each "dismiss
+# <id>" line and, playing the daemon's part, removes the matching store file
+# itself: that is what makes NotifHistory.qml's post-dismiss re-`list` show
+# the entry actually gone, exactly as a real daemon round-trip would).
+
+NOTIF_HISTORY_QML="$SCRIPT_DIR/config/NotifHistory.qml"
+[ -r "$NOTIF_HISTORY_QML" ] || { echo "FATAL: $NOTIF_HISTORY_QML not readable" >&2; exit 1; }
+
+kill "$QS_PID"  2>/dev/null; wait "$QS_PID"  2>/dev/null; QS_PID=""
+kill "$QS2_PID" 2>/dev/null; wait "$QS2_PID" 2>/dev/null; QS2_PID=""
+
+mkdir -p "$TMP/entry2"
+ln -sf "$NOTIF_HISTORY_QML" "$TMP/entry2/NotifHistory.qml"
+ln -sf "$SCRIPT_DIR/config/Common" "$TMP/entry2/Common"
+cat > "$TMP/entry2/shell.qml" <<'ENTRYEOF'
+import Quickshell
+ShellRoot { NotifHistory {} }
+ENTRYEOF
+
+NOTIF_PID="$(env DISPLAY="$DPY" "${ISO[@]}" \
+               XDG_STATE_HOME="$STATE" \
+               QS_NOTIF_SH="$QS_NOTIF" \
+               "$QUICKSHELL" -p "$TMP/entry2" >"$TMP/qs-phase2.log" 2>&1 & printf '%s' $!)"
+for i in $(seq 1 40); do
+  a="$(env "${ISO[@]}" "$QUICKSHELL" ipc --pid "$NOTIF_PID" show 2>/dev/null | grep -c 'notifhistory')"
+  [ "${a:-0}" -gt 0 ] && break
+  sleep 0.25
+done
+[ "${a:-0}" -gt 0 ] || { echo "FATAL: the real NotifHistory instance did not expose notifhistory" >&2; tail -20 "$TMP/qs-phase2.log" >&2; exit 1; }
+
+# --- daemon-stub FIFO reader --------------------------------------------------
+
+FIFO_DELAY="$TMP/fifo-delay"
+FIFO_READER_LOG="$TMP/fifo-reader.log"
+printf '0' > "$FIFO_DELAY"
+: > "$FIFO_READER_LOG"
+
+start_daemon_stub() {
+  rm -f "$FIFO"; mkfifo "$FIFO"
+  ( while true; do
+      d="$(cat "$FIFO_DELAY" 2>/dev/null)"; d="${d:-0}"
+      case "$d" in ''|*[!0-9.]*) d=0 ;; esac
+      [ "$d" != "0" ] && sleep "$d"
+      if IFS= read -r line < "$FIFO" 2>/dev/null; then
+        printf '%s\n' "$line" >> "$FIFO_READER_LOG"
+        case "$line" in
+          dismiss\ *)
+            _id="${line#dismiss }"
+            case "$_id" in
+              [0-9][0-9][0-9][0-9][0-9][0-9].notif) rm -f "$STORE/$_id" ;;
+            esac
+            ;;
+        esac
+      fi
+    done ) &
+  FIFO_READER_PID=$!
+}
+stop_daemon_stub() {
+  [ -n "${FIFO_READER_PID:-}" ] && kill "$FIFO_READER_PID" 2>/dev/null
+  FIFO_READER_PID=""
+  rm -f "$FIFO"
+}
+set_daemon_delay() { printf '%s' "$1" > "$FIFO_DELAY"; }
+clear_fifo_reader_log() { : > "$FIFO_READER_LOG"; }
+fifo_reader_lines() { wc -l < "$FIFO_READER_LOG" | tr -d ' '; }
+
+# --- window + keyboard helpers ------------------------------------------------
+
+win_notif() { # [tries]
+  local tries="${1:-40}" i id
+  for i in $(seq 1 "$tries"); do
+    id="$(env DISPLAY="$DPY" "$XDOTOOL" search --onlyvisible --name '^qs-notif$' 2>/dev/null | head -1)"
+    [ -n "$id" ] && { printf '%s' "$id"; return 0; }
+    sleep 0.25
+  done
+  return 1
+}
+
+gone_notif() { # [tries]
+  local tries="${1:-40}" i id
+  for i in $(seq 1 "$tries"); do
+    id="$(env DISPLAY="$DPY" "$XDOTOOL" search --onlyvisible --name '^qs-notif$' 2>/dev/null | head -1)"
+    [ -z "$id" ] && return 0
+    sleep 0.25
+  done
+  return 1
+}
+
+# A store entry file staying gone (not just "gone right now") -- proves a
+# dismiss really landed, not a race about to be won the other way.
+wait_gone() { # <path> [tries]
+  local f="$1" tries="${2:-40}" i
+  for i in $(seq 1 "$tries"); do
+    [ ! -e "$f" ] && return 0
+    sleep 0.1
+  done
+  return 1
+}
+
+# A store entry file staying present across a bounded window -- proves a
+# dismiss did NOT fire, not just "hasn't yet".
+stays_present() { # <path> [hold-ticks]
+  local f="$1" hold="${2:-10}" i
+  for i in $(seq 1 "$hold"); do
+    [ ! -e "$f" ] && return 1
+    sleep 0.1
+  done
+  return 0
+}
+
+browser_toggle() {
+  env DISPLAY="$DPY" "${ISO[@]}" QS_NOTIF_DISPLAY="DISPLAY=$DPY" sh "$QS_NOTIF" toggle >/dev/null 2>&1
+}
+browser_close() {
+  env "${ISO[@]}" "$QUICKSHELL" ipc --pid "$NOTIF_PID" call notifhistory close >/dev/null 2>&1
+  gone_notif >/dev/null
+}
+send() { env DISPLAY="$DPY" "$XDOTOOL" key --clearmodifiers "$@" 2>/dev/null; sleep 0.15; }
+typ()  { env DISPLAY="$DPY" "$XDOTOOL" type --clearmodifiers "$1" 2>/dev/null; sleep 0.3; }
+open_and_focus() {
+  browser_close
+  browser_toggle
+  WID="$(win_notif)"
+  [ -n "$WID" ] && env DISPLAY="$DPY" "$XDOTOOL" windowfocus "$WID" 2>/dev/null
+  sleep 0.4
+  printf '%s' "$WID"
+}
+
+start_daemon_stub
+
+# ---- toggle-opens-newest-first + not-a-position (mutant pin) -----------------
+#
+# Seeds three entries, filters down to a NON-newest one by a substring unique
+# to it, and dismisses via Enter. A "confirm handler fed filtered[0]"
+# mutant -- ignoring the confirmed row and always acting on the newest
+# overall entry -- would remove 000003.notif (the newest) instead; this
+# scenario fails on that mutant because it asserts specifically on
+# 000002.notif's file, not "some file disappeared".
+
+scenario "toggle-opens-newest-first / enter-dismisses-stays-open: filtering onto a NON-newest row and confirming dismisses THAT row (mutant pin: not filtered[0]/newest)"
+reset_store
+write_entry 1 "$NOW" normal app "oldest-decoy" "irrelevant"
+write_entry 2 "$NOW" normal app "unique-target-xyz" "irrelevant"
+write_entry 3 "$NOW" normal app "newest-decoy" "irrelevant"
+clear_fifo_reader_log
+WID="$(open_and_focus)"
+assert_ne "browser opened on $DPY" "" "$WID"
+typ "unique-target"
+send Return
+assert_eq "the FILTERED (non-newest) entry's store file is gone" "0" \
+  "$([ -e "$STORE/000002.notif" ] && echo 1 || echo 0)"
+wait_gone "$STORE/000002.notif"
+assert_eq "the entry the filter actually matched (000002.notif, not the newest 000003.notif) was dismissed" "yes" \
+  "$([ ! -e "$STORE/000002.notif" ] && echo yes || echo no)"
+assert_eq "the newest entry (000003.notif) was left untouched -- a filtered[0]/newest-only mutant would have removed THIS one instead" \
+  "present" "$([ -e "$STORE/000003.notif" ] && echo present || echo MISSING)"
+assert_ne "the picker STAYS OPEN after a successful dismiss (ClipHistory's publish would have closed it; dismiss never does)" "" \
+  "$(win_notif 10)"
+
+# ---- select-non-zero-row-under-filter (stronger mutant pin) -------------------
+#
+# The scenario above pins "confirm ignores the filter and always acts on the
+# newest entry overall". It does NOT pin a narrower bug: a filter that
+# matches MULTIPLE rows, confirm always acting on the FILTERED list's row 0
+# regardless of which row is actually SELECTED (Down-navigated). All three
+# entries below match the same filter substring, so the filtered list itself
+# has 3 rows; one Down moves off row 0 onto row 1, and Enter must dismiss
+# THAT row -- a "confirmCurrent() always uses filtered[0]" mutant would
+# remove the row-0 entry (000003.notif) instead, exactly the divergence this
+# scenario is built to catch (unlike the scenario above, where the filter had
+# already narrowed to a single match and any positional bug within the
+# filtered list could not have been observed).
+
+scenario "select-non-zero-row-under-filter: Down-navigating within a multi-match filter, then Enter, dismisses the SELECTED row -- not filtered-list position 0"
+reset_store
+write_entry 1 "$NOW" normal app "match-alpha"   "irrelevant"
+write_entry 2 "$NOW" normal app "match-bravo"   "irrelevant"
+write_entry 3 "$NOW" normal app "match-charlie" "irrelevant"
+clear_fifo_reader_log
+WID="$(open_and_focus)"
+assert_ne "browser opened" "" "$WID"
+typ "match"
+# Filtered list is newest-first, all three still match "match": row 0 =
+# 000003.notif (charlie), row 1 = 000002.notif (bravo), row 2 = 000001.notif
+# (alpha). One Down selects row 1.
+send Down
+send Return
+assert_eq "row 1 (000002.notif) -- the one actually SELECTED -- was dismissed" "yes" \
+  "$(wait_gone "$STORE/000002.notif" && echo yes || echo no)"
+assert_eq "row 0 (000003.notif) was left untouched -- a filtered[0]-always mutant would have removed THIS one" \
+  "present" "$([ -e "$STORE/000003.notif" ] && echo present || echo MISSING)"
+assert_eq "row 2 (000001.notif) was left untouched" "present" \
+  "$([ -e "$STORE/000001.notif" ] && echo present || echo MISSING)"
+browser_close
+
+# ---- enter-dismisses-stays-open (newest row, plain case) ---------------------
+
+scenario "enter-dismisses-stays-open: Enter on the (newest, unfiltered) top row dismisses it and the window stays up"
+reset_store
+write_entry 1 "$NOW" normal app "alpha" "a"
+write_entry 2 "$NOW" normal app "bravo" "b"
+clear_fifo_reader_log
+WID="$(open_and_focus)"
+assert_ne "browser opened" "" "$WID"
+send Return
+assert_eq "the newest row's entry (000002.notif) is dismissed" "yes" \
+  "$(wait_gone "$STORE/000002.notif" && echo yes || echo no)"
+assert_ne "window is still mapped after the successful dismiss" "" "$(win_notif 10)"
+assert_eq "the other entry (000001.notif) is untouched" "present" \
+  "$([ -e "$STORE/000001.notif" ] && echo present || echo MISSING)"
+browser_close
+
+# ---- del-empty-filter-dismisses -----------------------------------------------
+
+scenario "del-empty-filter-dismisses: Delete with an EMPTY filter dismisses the selected row and stays open"
+reset_store
+write_entry 1 "$NOW" normal app "solo entry" "body"
+clear_fifo_reader_log
+WID="$(open_and_focus)"
+assert_ne "browser opened" "" "$WID"
+send Delete
+assert_eq "the entry is dismissed by a bare Delete (filter was empty)" "yes" \
+  "$(wait_gone "$STORE/000001.notif" && echo yes || echo no)"
+assert_ne "window stays open" "" "$(win_notif 10)"
+browser_close
+
+# ---- del-with-filter-edits-not-dismisses --------------------------------------
+
+scenario "del-with-filter-edits-not-dismisses: Delete while the filter has text edits the filter, never dismisses"
+reset_store
+write_entry 1 "$NOW" normal app "keepme-entry" "body"
+clear_fifo_reader_log
+WID="$(open_and_focus)"
+assert_ne "browser opened" "" "$WID"
+typ "keep"
+send Delete
+assert_eq "the entry survives a Delete pressed while the filter is non-empty" "yes" \
+  "$(stays_present "$STORE/000001.notif" 10 && echo yes || echo no)"
+assert_eq "nothing reached the daemon-stub fifo (no dismiss line logged)" "0" "$(fifo_reader_lines)"
+browser_close
+
+# ---- reopen-resets-del-gate (regression: forceFocus's reset must clear the
+#      Del-dismiss gate too, not just Combo's own visible search text) --------
+#
+# The scenario just above leaves the browser's internal Del-dismiss gate
+# primed "non-empty" (its last keypress was a Delete with "keep" still in the
+# filter). Closing does NOT reset that gate -- only a fresh show() does, via
+# combo.forceFocus(). This reopens on a BRAND NEW entry and presses Delete
+# immediately (search is genuinely empty this session): if the gate were
+# left stale from the PREVIOUS session instead of being reset on reopen, this
+# Delete would be wrongly swallowed as "filter is non-empty" and the entry
+# would survive when it must not.
+
+scenario "reopen-resets-del-gate: a fresh reopen's empty filter dismisses on Delete, unaffected by the PREVIOUS session's non-empty filter"
+reset_store
+write_entry 1 "$NOW" normal app "fresh-session-entry" "body"
+clear_fifo_reader_log
+WID="$(open_and_focus)"
+assert_ne "browser reopened" "" "$WID"
+send Delete
+assert_eq "the entry is dismissed -- the gate reset on reopen, it did not inherit the prior session's non-empty state" \
+  "yes" "$(wait_gone "$STORE/000001.notif" && echo yes || echo no)"
+browser_close
+
+# ---- esc-closes ----------------------------------------------------------------
+
+scenario "esc-closes: Escape closes the browser without dismissing anything"
+reset_store
+write_entry 1 "$NOW" normal app "untouched" "body"
+WID="$(open_and_focus)"
+assert_ne "browser opened" "" "$WID"
+send Escape
+assert_eq "window closes on Escape" "closed" "$(gone_notif 20 && echo closed || echo open)"
+assert_eq "the entry was never dismissed" "present" "$([ -e "$STORE/000001.notif" ] && echo present || echo MISSING)"
+
+# ---- dismiss-fail-status-bar-row-kept -----------------------------------------
+#
+# Kill the daemon stub so qs-notif.sh's `dismiss` fifo write has no reader
+# and times out (exit 1, bounded -- see qs-notif.sh's own dismiss contract).
+# The row must survive and the +26px status bar must appear.
+
+scenario "dismiss-fail-status-bar-row-kept: no daemon listening -> status bar shown, row kept, window stays open"
+stop_daemon_stub
+reset_store
+write_entry 1 "$NOW" normal app "kept-on-failure" "body"
+WID="$(open_and_focus)"
+assert_ne "browser opened" "" "$WID"
+eval "$(env DISPLAY="$DPY" "$XDOTOOL" getwindowgeometry --shell "$WID" 2>/dev/null)"
+base_h="${HEIGHT:-0}"
+send Return
+sleep 1.2   # the fifo write has QS_NOTIF_FIFO_TIMEOUT (default 2s) to fail
+assert_eq "the entry is KEPT (dismiss failed, never silently dropped)" "present" \
+  "$([ -e "$STORE/000001.notif" ] && echo present || echo MISSING)"
+still="$(win_notif 10)"
+assert_ne "window is still open after the failed dismiss" "" "$still"
+if [ -n "$still" ]; then
+  eval "$(env DISPLAY="$DPY" "$XDOTOOL" getwindowgeometry --shell "$still" 2>/dev/null)"
+  assert_eq "the one-line status bar adds exactly 26px" "$((base_h + 26))" "${HEIGHT:-0}"
+fi
+browser_close
+start_daemon_stub
+
+# ---- markup-renders-literally -------------------------------------------------
+#
+# A notification body containing HTML/markup must render as literal text
+# (Fuzzy.highlight HTML-escapes before the RichText delegate renders it) --
+# the same injection guard ClipHistory's richtext-escape scenario proves. An
+# unescaped <img src=...> would make Qt attempt to LOAD the image, logging an
+# open-error for a unique filename; escaping it renders the tag as inert text.
+
+scenario "markup-renders-literally: an HTML-bearing entry lists/dismisses byte-exact, and its markup never gets parsed as real markup"
+reset_store
+IMG="qsnotif-escape-probe-$$.png"
+write_entry 1 "$NOW" normal app "decoy" "irrelevant"
+write_entry 2 "$NOW" normal app "<b>bold</b> markup entry <img src='/nonexistent/$IMG'>" "body"
+clear_fifo_reader_log
+WID="$(open_and_focus)"
+assert_ne "browser opened with a markup entry present" "" "$WID"
+sleep 0.6   # let the row render so an UNescaped <img> would attempt its load
+send Return
+assert_eq "the newest (markup) row was dismissed successfully -- markup does not break the pick" "yes" \
+  "$(wait_gone "$STORE/000002.notif" && echo yes || echo no)"
+assert_eq "no image-load was attempted for the unique probe name -- the markup was escaped, not parsed" \
+  "0" "$(grep -c "$IMG" "$TMP/qs-phase2.log" | tr -d ' ')"
+browser_close
+
+# ---- busy-gate-double-enter ----------------------------------------------------
+#
+# Slow the daemon stub's read so the FIRST dismiss's fifo write stays
+# in-flight; a second Enter arriving during that window must be swallowed by
+# NotifHistory's busy gate -- exactly one "dismiss ..." line ever reaches the
+# stub, and the store shows exactly one removal, not a race.
+
+scenario "busy-gate-double-enter: two rapid Enters on one row -> exactly one dismiss reaches the daemon"
+reset_store
+write_entry 1 "$NOW" normal app "single-row" "body"
+clear_fifo_reader_log
+set_daemon_delay 1.2
+WID="$(open_and_focus)"
+assert_ne "browser opened" "" "$WID"
+send Return
+send Return
+sleep 1.6
+assert_eq "the daemon stub saw the dismiss line exactly once" "1" "$(fifo_reader_lines)"
+assert_eq "the entry was dismissed (the one dismiss that got through succeeded)" "yes" \
+  "$(wait_gone "$STORE/000001.notif" && echo yes || echo no)"
+set_daemon_delay 0
+browser_close
+
+# ---- empty-after-last-dismiss ---------------------------------------------------
+#
+# Dismissing the LAST entry must still render a window: minVisibleRows:1
+# holds a floor of one row for the empty-history placeholder, so the window
+# geometry after the dismiss must be IDENTICAL to what a single row already
+# produced (proving the floor held, not that the window shrank to nothing).
+
+scenario "empty-after-last-dismiss: dismissing the only entry leaves the floor-of-one-row window rendered, not collapsed"
+reset_store
+write_entry 1 "$NOW" normal app "last one" "body"
+WID="$(open_and_focus)"
+assert_ne "browser opened with exactly one entry" "" "$WID"
+eval "$(env DISPLAY="$DPY" "$XDOTOOL" getwindowgeometry --shell "$WID" 2>/dev/null)"
+one_row_h="${HEIGHT:-0}"
+send Return
+assert_eq "the only entry is dismissed" "yes" "$(wait_gone "$STORE/000001.notif" && echo yes || echo no)"
+still="$(win_notif 10)"
+assert_ne "window is still rendered with zero entries left (empty-history placeholder, floor of one row)" "" "$still"
+if [ -n "$still" ]; then
+  eval "$(env DISPLAY="$DPY" "$XDOTOOL" getwindowgeometry --shell "$still" 2>/dev/null)"
+  assert_eq "geometry is unchanged from the one-row height -- the floor held, the window did not collapse" \
+    "$one_row_h" "${HEIGHT:-0}"
+fi
+browser_close
+
+stop_daemon_stub
+
+# ---- no-common-diff -------------------------------------------------------------
+#
+# This task's own contract: it consumes ft008 Combo but must never widen it.
+# Proven by diffing against the merge-base with main -- everything this
+# task's branch has done to config/Common/ since it forked, which must be
+# nothing.
+
+scenario "no-common-diff: config/Common/ is untouched since this branch forked from main"
+REPO_ROOT="$SCRIPT_DIR/.."
+_base="$(git -C "$REPO_ROOT" merge-base HEAD main 2>/dev/null)"
+if [ -n "$_base" ]; then
+  _diff="$(git -C "$REPO_ROOT" diff --name-only "$_base" -- quickshell/config/Common/ 2>/dev/null)"
+  assert_eq "git diff --name-only vs merge-base(HEAD, main) touches nothing under config/Common/" "" "$_diff"
+else
+  echo "SKIP: could not resolve a merge-base with main (not fatal -- informational only)"
+fi
+
+# ---- adr0010 grep contract -------------------------------------------------------
+#
+# No pasteboard command and no action-invocation call anywhere in the
+# browser's own source -- asserted IN-SUITE so a future edit that reaches
+# for either fails the run, not just review.
+
+scenario "adr0010 grep contract: NotifHistory.qml never mentions a pasteboard tool, a clipboard-set script, CLIPBOARD, or an action-invoke call"
+_hits="$(grep -c -E 'xclip|clip-set|CLIPBOARD|invoke' "$NOTIF_HISTORY_QML" 2>/dev/null || true)"
+assert_eq "zero hits for the forbidden clipboard/action-invoke surface" "0" "${_hits:-0}"
+
+# ---- wiring: production shell.qml hosts the browser ------------------------------
+
+scenario "wiring: the shipped shell.qml instantiates NotifHistory beside ClipHistory"
+assert_eq "config/shell.qml contains NotifHistory {}" "1" \
+  "$(grep -c '^[[:space:]]*NotifHistory[[:space:]]*{}' "$SCRIPT_DIR/config/shell.qml" | tr -d ' ')"
+
+scenario "wiring: BOTH base i3 configs float qs-notif the same way they float qs-clip"
+for f in "$SCRIPT_DIR/../i3/config" "$SCRIPT_DIR/../i3/config.common"; do
+  assert_eq "$f has the qs-notif for_window float rule" "1" \
+    "$(grep -c '^for_window \[title="qs-notif"\] floating enable, border none, move position center$' "$f" | tr -d ' ')"
+done
+
+kill "$NOTIF_PID" 2>/dev/null; wait "$NOTIF_PID" 2>/dev/null; NOTIF_PID=""
 
 # ================= SELFTEST NEGATIVE CONTROL ================================
 # SELFTEST=1 deliberately flips one expectation to a value the real script
