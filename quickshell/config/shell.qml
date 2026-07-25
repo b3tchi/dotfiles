@@ -1,6 +1,5 @@
 import QtQuick
 import Quickshell
-import Quickshell.Services.Notifications
 import "./Common"
 
 ShellRoot {
@@ -12,81 +11,15 @@ ShellRoot {
     readonly property bool isRdp: Session.isRdp
     readonly property bool focusFx: !isRdp
 
-    property int globalNotifCount: 0
-    property string lastNotifText: ""
-    property int globalNotifSeq: 0
-    property bool globalHasCritical: {
-        var vals = notifSrv.trackedNotifications.values
-        for (var i = 0; i < vals.length; i++) {
-            if (vals[i].urgency === NotificationUrgency.Critical) return true
-        }
-        return false
-    }
-
-    function relativeTime(ms) {
-        var s = Math.floor((Date.now() - ms) / 1000)
-        if (s < 60) return "-" + s + "s"
-        var m = Math.floor(s / 60)
-        if (m < 60) return "-" + m + "m"
-        var d = new Date(ms)
-        return ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2)
-    }
-
-    function dismissLatest() {
-        var vals = notifSrv.trackedNotifications.values
-        if (vals.length > 0) {
-            var n = vals[vals.length - 1]
-            var text = (n.summary ?? "").replace(/\n/g, " ")
-            var body = (n.body ?? "").replace(/\n/g, " ").replace(/<[^>]*>/g, "")
-            if (body !== "") text += " — " + body
-            if (n._arrivalTime !== undefined) text = relativeTime(n._arrivalTime) + "  " + text
-            lastNotifText = text
-            globalNotifSeq++
-            if (globalNotifCount > 0) globalNotifCount--
-            n.dismiss()
-        }
-    }
-
-    property var _currentNotif: null
-
-    function trackCurrent() {
-        if (_currentNotif) {
-            globalNotifCount++
-            _currentNotif = null
-        }
-    }
-
-    function dismissCurrentSilent() {
-        if (_currentNotif) {
-            _currentNotif.dismiss()
-            _currentNotif = null
-        }
-    }
-
-    function dismissLatestSilent() {
-        dismissCurrentSilent()
-    }
-
-    NotificationServer {
-        id: notifSrv
-        keepOnReload: true
-        bodyMarkupSupported: true
-        imageSupported: false
-        actionsSupported: false
-        persistenceSupported: false
-
-        onNotification: notification => {
-            trackCurrent()
-            notification.tracked = true
-            notification._arrivalTime = Date.now()
-            _currentNotif = notification
-            var text = (notification.summary ?? "").replace(/\n/g, " ")
-            var body = (notification.body ?? "").replace(/\n/g, " ").replace(/<[^>]*>/g, "")
-            if (body !== "") text += " — " + body
-            lastNotifText = text
-            globalNotifSeq++
-        }
-    }
+    // Notifications (sp019): this instance is now a READ-ONLY consumer.
+    // The single NotificationServer lives in the dedicated
+    // `quickshell -p notif` daemon (quickshell/notif/shell.qml, Task 2),
+    // launched user-wide behind a flock (qs-start.sh, Task 3) so exactly one
+    // process ever owns org.freedesktop.Notifications regardless of how
+    // many sessions (local + xrdp, adr0004) are live. Every bar (Bar.qml,
+    // Task 4) tails the daemon's live-state file directly — no server, no
+    // notif-state properties, and no signal wiring back to this host remain
+    // here at all.
 
     Loader { active: focusFx; sourceComponent: Component { FocusBorder {} } }
     Loader { active: focusFx; sourceComponent: Component { FocusDim {} } }
@@ -105,13 +38,6 @@ ShellRoot {
         Bar {
             required property var modelData
             screen: modelData
-            notifCount: globalNotifCount
-            notifText: lastNotifText
-            notifSeq: globalNotifSeq
-            hasCritical: globalHasCritical
-            onDismissNotif: dismissLatest()
-            onDismissNotifSilent: dismissLatestSilent()
-            onTickerFinished: trackCurrent()
         }
     }
 

@@ -9,13 +9,108 @@ import "./Common"
 PanelWindow {
     id: root
 
+    // ---------------------------------------------------------- notifications ---
+    // Read-only consumer of the notif-service daemon's live-state file
+    // (sp019 Task 4, dotfiles-c5fd.4). The daemon
+    // (quickshell/notif/shell.qml, Task 2) is the ONLY NotificationServer
+    // left in this repo — every bar just tails its state file, the same
+    // daemonMode source-model already used for qs-stats below. relativeTime
+    // moved here from the old per-bar shell.qml host (it belongs wherever
+    // the epoch -> "-Ns"/"-Nm"/"HH:MM" text is actually rendered).
     property int notifCount: 0
     property string notifText: ""
     property int notifSeq: 0
     property bool hasCritical: false
-    signal dismissNotif()
-    signal dismissNotifSilent()
-    signal tickerFinished()
+
+    function relativeTime(ms) {
+        var s = Math.floor((Date.now() - ms) / 1000)
+        if (s < 60) return "-" + s + "s"
+        var m = Math.floor(s / 60)
+        if (m < 60) return "-" + m + "m"
+        var d = new Date(ms)
+        return ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2)
+    }
+
+    readonly property string notifFile: Quickshell.env("QS_NOTIF_FILE")
+        || ((Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/qs-notif.state")
+    readonly property string notifFifo: Quickshell.env("QS_NOTIF_FIFO")
+        || ((Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/qs-notif.cmd")
+
+    // Fields for the state-file rewrite CURRENTLY being read: the daemon
+    // always writes count/critical/seq/last as four separate lines in that
+    // fixed order (qs-notif-store.sh's `state` verb), but `-F` delivers
+    // them to this Process as four separate reads. Committing notifSeq and
+    // notifText together only once the LAST line arrives (always "last",
+    // always the final line the store writes) means the seq-bump check
+    // right below always sees THIS rewrite's own new text, never the
+    // previous one's — count/critical have no such ordering hazard (they
+    // gate nothing) and are set immediately, idempotently, per line.
+    property int _notifPendingSeq: 0
+
+    // No daemon probe/retry here (unlike qs-stats' daemonMode): an absent
+    // state file simply feeds nothing and the bar boots clean — count 0,
+    // no ticker, muted-grey bell.
+    Process {
+        id: notifFeedProc
+        running: true
+        // -F follows across the daemon's atomic tmp+rename swaps and
+        // re-emits the whole (complete-state) file each time; every set
+        // below is idempotent, so a mid-swap re-read is harmless.
+        command: ["sh", "-c", "exec tail -n +1 -F " + root.notifFile + " 2>/dev/null"]
+        stdout: SplitParser {
+            onRead: data => {
+                var line = data.trim()
+                var sp = line.indexOf(" ")
+                if (sp < 0) return
+                var key = line.substring(0, sp)
+                var rest = line.substring(sp + 1)
+                if (key === "count") {
+                    root.notifCount = parseInt(rest, 10) || 0
+                } else if (key === "critical") {
+                    root.hasCritical = (rest.trim() === "1")
+                } else if (key === "seq") {
+                    root._notifPendingSeq = parseInt(rest, 10) || 0
+                } else if (key === "last") {
+                    // Only the FIRST tab splits epoch from text — a stray
+                    // literal tab further into the text stays part of it.
+                    var tab = rest.indexOf("\t")
+                    if (tab < 0) return
+                    var epoch = parseInt(rest.substring(0, tab), 10)
+                    var text = rest.substring(tab + 1)
+                    var newText = isNaN(epoch) ? text : (root.relativeTime(epoch * 1000) + "  " + text)
+                    var seqChanged = root._notifPendingSeq !== root.notifSeq
+
+                    root.notifText = newText
+                    root.notifSeq = root._notifPendingSeq
+
+                    // Only a CHANGED seq restarts the ticker — a
+                    // dismiss/staterefresh rewrite that keeps the same seq
+                    // re-asserts the same properties without a second
+                    // animation (seq-gate-no-double-ticker).
+                    if (seqChanged && newText !== "") {
+                        tickerAnim.stop()
+                        root.tickerActive = true
+                        tickerStartDelay.restart()
+                    }
+                }
+            }
+        }
+        onExited: notifFeedRestart.restart()
+    }
+    Timer { id: notifFeedRestart; interval: 2000; onTriggered: notifFeedProc.running = true }
+
+    // Ticker click and bell click both ask the daemon to drop the newest
+    // tracked notification — a one-shot fire-and-forget FIFO write (the
+    // volToggleMute pattern further down). `timeout` bounds the open+write
+    // so a dead daemon (no FIFO reader) never hangs this Process; the bell
+    // count only decrements once the daemon's own state rewrite comes back
+    // around through notifFeedProc above, never optimistically here.
+    Process {
+        id: notifDismiss
+        command: ["timeout", "2", "sh", "-c",
+            "printf '%s\\n' 'dismiss latest' > \"$1\" 2>/dev/null", "_", root.notifFifo]
+    }
+    function requestDismiss() { notifDismiss.running = true }
 
     // WM detection — sway uses same IPC as i3
     readonly property bool isSway: Session.isSway
@@ -32,13 +127,6 @@ PanelWindow {
     // Ticker state
     property bool tickerActive: false
 
-    onNotifSeqChanged: {
-        if (notifText !== "") {
-            tickerAnim.stop()
-            tickerActive = true
-            tickerStartDelay.restart()
-        }
-    }
     Timer {
         id: tickerStartDelay
         interval: 0
@@ -520,6 +608,11 @@ PanelWindow {
 
             Text {
                 id: tickerText
+                // objectName purely for test introspection (the ModeBar
+                // pillLabel precedent, test-mode-bar.sh) -- lets a harness
+                // walk the render tree and read the animation's live x
+                // position without widening any public API.
+                objectName: "notifTickerText"
                 text: root.notifText
                 color: "#fdf6e3"
                 font.family: root.fontFamily
@@ -533,7 +626,7 @@ PanelWindow {
                 onClicked: {
                     tickerAnim.stop()
                     root.tickerActive = false
-                    root.dismissNotifSilent()
+                    root.requestDismiss()
                 }
             }
 
@@ -544,7 +637,7 @@ PanelWindow {
                 from: tickerArea.width
                 to: -tickerText.implicitWidth
                 duration: Math.max((tickerArea.width + tickerText.implicitWidth) * 12, 3000)
-                onFinished: { root.tickerActive = false; root.tickerFinished() }
+                onFinished: { root.tickerActive = false }
             }
         }
 
@@ -676,7 +769,7 @@ PanelWindow {
                             tickerAnim.stop()
                             root.tickerActive = false
                         } else {
-                            root.dismissNotif()
+                            root.requestDismiss()
                         }
                     }
                 }

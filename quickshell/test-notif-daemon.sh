@@ -38,12 +38,19 @@ assert_eq() { # <scenario> <expected> <actual>
 scenario() { printf '\n[%s]\n' "$1"; }
 
 DAEMON_PIDS=""
+# BAR PHASE (Task 4) background processes -- populated only if that phase runs.
+BAR_XVFB_PID=""
+BAR_QS_PID=""
+BAR_READER_PID=""
 
 cleanup() {
   for _p in $DAEMON_PIDS; do
     kill "$_p" 2>/dev/null
     wait "$_p" 2>/dev/null
   done
+  [ -n "$BAR_READER_PID" ] && kill "$BAR_READER_PID" 2>/dev/null
+  [ -n "$BAR_QS_PID" ]     && kill "$BAR_QS_PID"     2>/dev/null
+  [ -n "$BAR_XVFB_PID" ]   && kill "$BAR_XVFB_PID"   2>/dev/null
   [ -n "${KEEP_TMP:-}" ] || rm -rf "$TMP"
 }
 trap cleanup EXIT
@@ -606,6 +613,310 @@ assert_eq "the fake same-display quickshell pid is killed by the sweep" "no" "$(
 assert_eq "the fake notif-profile pid survives the sweep" "yes" "$(kill -0 "$SURVIVOR" 2>/dev/null && echo yes || echo no)"
 kill "$SURVIVOR" 2>/dev/null
 cleanup_sb_pids "$SB"
+
+# ==================================================================================
+# BAR PHASE (sp019 task 4, dotfiles-c5fd.4): Consumers -- the server is ripped
+# out of config/shell.qml; config/Bar.qml becomes a READ-ONLY consumer that
+# tails the daemon's live-state file, exactly the qs-stats daemonMode source
+# model. Every scenario below drives the REAL config/Bar.qml (symlinked into
+# a throwaway harness dir, Common/ alongside it -- test-mode-bar.sh PHASE 2
+# precedent) under Xvfb, with a SANDBOXED-PATH i3-msg stub (empty
+# get_workspaces, subscribe blocks forever) so no real i3/sway is needed.
+# QS_NOTIF_FILE/QS_NOTIF_FIFO point at harness-owned files; state-file
+# rewrites are hand-written here in the EXACT shape qs-notif-store.sh's
+# `state` verb produces (count/critical/seq/last, tmp+rename), never through
+# the real daemon -- this phase is Bar.qml's consumer contract in isolation.
+#
+# AC3 grep contract is asserted HERE against the shipped shell.qml/Bar.qml,
+# so reintroducing the server, the notif-state properties, or the
+# dismissNotif*/tickerFinished signal wiring fails the RUN, not just review.
+# ==================================================================================
+
+SHELL_QML="$REPO_DIR/config/shell.qml"
+BAR_QML="$REPO_DIR/config/Bar.qml"
+COMMON_DIR="$REPO_DIR/config/Common"
+
+scenario "grep-contract: shell.qml has no server, Bar.qml has no signal wiring, Variants pass no notif props (AC3)"
+a3() { if [ "$2" = "$3" ]; then pass "$1"; else fail "$1" "$2" "$3"; fi; }
+a3 "shell.qml: NotificationServer/notifSrv/Notifications import/trackCurrent/dismissLatest/_currentNotif all gone" \
+  "0" "$(grep -cE 'NotificationServer|notifSrv|Quickshell\.Services\.Notifications|trackCurrent|dismissLatest|_currentNotif' "$SHELL_QML" | tr -d ' ')"
+a3 "shell.qml: the Bar {} Variants block passes no notif properties" \
+  "0" "$(grep -cE 'notifCount:|notifText:|notifSeq:|hasCritical:' "$SHELL_QML" | tr -d ' ')"
+a3 "shell.qml: no dismissNotif/dismissNotifSilent/tickerFinished signal wiring remains" \
+  "0" "$(grep -cE 'onDismissNotif|onTickerFinished' "$SHELL_QML" | tr -d ' ')"
+a3 "Bar.qml: the dismissNotif/dismissNotifSilent/tickerFinished signals are gone (their props were only fed externally)" \
+  "0" "$(grep -cE 'signal dismissNotif|signal tickerFinished' "$BAR_QML" | tr -d ' ')"
+a3 "Bar.qml: derives its notif state from tail -F on QS_NOTIF_FILE" \
+  "1" "$(grep -cE 'QS_NOTIF_FILE' "$BAR_QML" | tr -d ' ')"
+a3 "Bar.qml: writes dismisses to QS_NOTIF_FIFO, not back to shell.qml" \
+  "1" "$(grep -cE 'QS_NOTIF_FIFO' "$BAR_QML" | tr -d ' ')"
+
+BAR_XVFB_BIN="${XVFB:-Xvfb}"
+BAR_QS_BIN_NAME="${QUICKSHELL:-quickshell}"
+BARDPY="${BAR_TEST_DISPLAY:-:99}"
+
+for tool in "$BAR_XVFB_BIN" "$BAR_QS_BIN_NAME"; do
+  command -v "$tool" >/dev/null 2>&1 \
+    || { echo "FATAL: $tool not found (XVFB=/QUICKSHELL= to override)" >&2; exit 1; }
+done
+[ -r "$BAR_QML" ] || { echo "FATAL: $BAR_QML not readable" >&2; exit 1; }
+[ -d "$COMMON_DIR" ] || { echo "FATAL: $COMMON_DIR not a directory" >&2; exit 1; }
+
+BCFG="$TMP/bar-cfg"
+BPBIN="$TMP/bar-pbin"
+BRUN="$TMP/bar-run"
+BCACHE="$TMP/bar-cache"
+BSTATE="$BRUN/qs-notif.state"    # harness-owned -- hand-written, never the real daemon
+BFIFO="$BRUN/qs-notif.cmd"
+BREADLOG="$TMP/bar-fifo-reads.log"
+BCASES="$TMP/bar-cases.txt"
+mkdir -p "$BCFG" "$BPBIN" "$BRUN" "$BCACHE"
+chmod 700 "$BRUN"
+: > "$BREADLOG"
+: > "$BCASES"
+
+ln -s "$COMMON_DIR" "$BCFG/Common"
+ln -s "$BAR_QML" "$BCFG/Bar.qml"
+
+BAR_QS_BIN="$(command -v "$BAR_QS_BIN_NAME")"
+# Every real coreutil the Bar's OTHER (unrelated) Processes shell out to
+# (stats/net/vol/bat probes, all harmless no-ops here) resolves from the
+# real PATH -- only i3-msg/swaymsg are shadowed by the sandbox stub placed
+# FIRST on PATH, so this sandbox never needs to enumerate every tool the
+# rest of the bar happens to invoke.
+cat > "$BPBIN/i3-msg" <<'STUBEOF'
+#!/bin/sh
+case "$1" in
+  -t)
+    case "$2" in
+      get_workspaces) printf '%s' '[]'; exit 0 ;;
+      subscribe) exec sleep 300 ;;
+      *) exit 0 ;;
+    esac ;;
+esac
+exit 0
+STUBEOF
+chmod +x "$BPBIN/i3-msg"
+ln -sf "$BPBIN/i3-msg" "$BPBIN/swaymsg"
+
+cat > "$BCFG/shell.qml" <<'HOSTEOF'
+import Quickshell
+import Quickshell.Io
+import QtQuick
+import "./Common"
+
+ShellRoot {
+  id: host
+  function emit(n, p) { console.log("CASE " + n + " " + p) }
+
+  function rootOf(w) { return (w && w.contentItem) ? w.contentItem : w }
+  function findByName(item, name) {
+    if (!item) return null
+    var kids = item.children
+    for (var i = 0; i < kids.length; i++) {
+      var c = kids[i]
+      if (c.objectName === name) return c
+      var f = findByName(c, name)
+      if (f) return f
+    }
+    return null
+  }
+
+  IpcHandler {
+    target: "notifprobe"
+    function dumpc(name: string): void {
+      var r = host.rootOf(bar)
+      var tt = host.findByName(r, "notifTickerText")
+      host.emit(name + ".count",    bar.notifCount)
+      host.emit(name + ".text",     bar.notifText)
+      host.emit(name + ".critical", bar.hasCritical ? "1" : "0")
+      host.emit(name + ".ticker",   bar.tickerActive ? "1" : "0")
+      host.emit(name + ".seq",      bar.notifSeq)
+      host.emit(name + ".tx",       tt ? Math.round(tt.x) : "-99999")
+    }
+    function dismiss(): void { bar.requestDismiss() }
+    function bye(): void { Quickshell.exit(0) }
+  }
+
+  Bar {
+    id: bar
+    screen: Quickshell.screens.length > 0 ? Quickshell.screens[0] : null
+  }
+}
+HOSTEOF
+
+start_xvfb_bar() { # <display> <logfile>
+  "$BAR_XVFB_BIN" "$1" -screen 0 1280x800x24 >"$2" 2>&1 &
+  _pid=$!
+  _i=0
+  while [ "$_i" -lt 40 ]; do
+    [ -e "/tmp/.X11-unix/X${1#:}" ] && break
+    _i=$((_i + 1)); sleep 0.5
+  done
+  [ -e "/tmp/.X11-unix/X${1#:}" ] || { echo "FATAL: Xvfb $1 did not start" >&2; exit 1; }
+  printf '%s' "$_pid"
+}
+BAR_XVFB_PID="$(start_xvfb_bar "$BARDPY" "$TMP/bar-xvfb.log")"
+
+# Persistent background reader on the harness FIFO -- mirrors the daemon's
+# own reader shape (read line-wise in a loop) so a dismiss write from
+# Bar.qml always finds a reader and never blocks past its own 2s timeout.
+mkfifo -m 0600 "$BFIFO"
+( while :; do timeout 3 cat "$BFIFO" >> "$BREADLOG" 2>/dev/null; done ) &
+BAR_READER_PID=$!
+
+env -u SWAYSOCK DISPLAY="$BARDPY" PATH="$BPBIN" \
+    XDG_CONFIG_HOME="$BCFG" XDG_RUNTIME_DIR="$BRUN" XDG_CACHE_HOME="$BCACHE" \
+    QS_NOTIF_FILE="$BSTATE" QS_NOTIF_FIFO="$BFIFO" \
+    "$BAR_QS_BIN" -p "$BCFG" >"$TMP/bar-qs.out" 2>&1 &
+BAR_QS_PID=$!
+
+refresh_cases() { grep -a 'CASE ' "$TMP/bar-qs.out" 2>/dev/null | sed 's/^.*CASE /CASE /' > "$BCASES"; }
+barprobe() { # <name>
+  env XDG_CONFIG_HOME="$BCFG" XDG_RUNTIME_DIR="$BRUN" XDG_CACHE_HOME="$BCACHE" \
+      "$BAR_QS_BIN_NAME" ipc --pid "$BAR_QS_PID" call notifprobe dumpc "$1" >/dev/null 2>&1
+}
+bar_dismiss() {
+  env XDG_CONFIG_HOME="$BCFG" XDG_RUNTIME_DIR="$BRUN" XDG_CACHE_HOME="$BCACHE" \
+      "$BAR_QS_BIN_NAME" ipc --pid "$BAR_QS_PID" call notifprobe dismiss >/dev/null 2>&1
+}
+bar_ipc_show() {
+  env XDG_CONFIG_HOME="$BCFG" XDG_RUNTIME_DIR="$BRUN" XDG_CACHE_HOME="$BCACHE" \
+      "$BAR_QS_BIN_NAME" ipc --pid "$BAR_QS_PID" show 2>/dev/null
+}
+bar_case() { # <name.field> -- payload of the LAST matching "CASE <name.field> ..." line so far
+  sed -n "s/^CASE $1 //p" "$BCASES" | tail -1
+}
+bar_assert() { # <scenario> <expected> <actual>
+  if [ "$2" = "$3" ]; then pass "$1"; else fail "$1" "$2" "$3"; fi
+}
+# Bounded poll: waits until dumpc's LATEST snapshot for <name> shows the
+# given field at the given value, or gives up after <max_seconds>. Every
+# iteration issues a FRESH dumpc call so the snapshot advances with real
+# state, not a fixed sleep sized to "should be enough" under load.
+wait_case() { # <max_seconds> <name> <field> <expected>
+  _max="$1" _cn="$2" _fd="$3" _exp="$4"
+  _n=$(( _max * 4 )); _k=0
+  while [ "$_k" -lt "$_n" ]; do
+    barprobe "$_cn"; sleep 0.15; refresh_cases
+    [ "$(bar_case "${_cn}.${_fd}")" = "$_exp" ] && return 0
+    _k=$((_k + 1))
+  done
+  return 1
+}
+
+BAR_UP=""
+_i=0
+while [ "$_i" -lt 80 ]; do
+  n="$(bar_ipc_show | grep -c 'notifprobe')"
+  [ "${n:-0}" -gt 0 ] && { BAR_UP=1; break; }
+  _i=$((_i + 1)); sleep 0.5
+done
+
+if [ -z "$BAR_UP" ]; then
+  fail "BAR PHASE host exposed the 'notifprobe' IPC target" "a notifprobe target" "none (host did not boot)"
+  tail -30 "$TMP/bar-qs.out" >&2
+else
+  # Atomic tmp+rename rewrite in the EXACT shape qs-notif-store.sh's `state`
+  # verb produces -- consumers must see this, never a partial file.
+  write_state() { # <count> <critical> <seq> <epoch> <text>
+    _wtmp="${BSTATE}.tmp.$$"
+    {
+      printf 'count %s\n' "$1"
+      printf 'critical %s\n' "$2"
+      printf 'seq %s\n' "$3"
+      printf 'last %s\t%s\n' "$4" "$5"
+    } > "$_wtmp"
+    mv -f "$_wtmp" "$BSTATE"
+  }
+
+  scenario "no-daemon-clean-boot: state file absent at boot -> count 0, no ticker, muted bell"
+  wait_case 10 "boot" "count" "0"
+  bar_assert "boot: count 0"          "0" "$(bar_case boot.count)"
+  bar_assert "boot: text empty"       ""  "$(bar_case boot.text)"
+  bar_assert "boot: not critical"     "0" "$(bar_case boot.critical)"
+  bar_assert "boot: ticker inactive"  "0" "$(bar_case boot.ticker)"
+
+  scenario "bar-follows-state: writing count/critical/seq/last makes the ticker text + count appear (AC3)"
+  EPOCH1="$(date +%s)"
+  write_state 1 0 1 "$EPOCH1" "first notification"
+  wait_case 20 "s1" "seq" "1"
+  bar_assert "s1: seq reaches 1"        "1" "$(bar_case s1.seq)"
+  bar_assert "s1: count reaches 1"      "1" "$(bar_case s1.count)"
+  bar_assert "s1: not critical"         "0" "$(bar_case s1.critical)"
+  bar_assert "s1: ticker became active" "1" "$(bar_case s1.ticker)"
+  case "$(bar_case s1.text)" in
+    *"first notification") pass "s1: text carries the relative-time-prefixed body" ;;
+    *) fail "s1: text carries the relative-time-prefixed body" "*first notification" "$(bar_case s1.text)" ;;
+  esac
+
+  scenario "critical-immediate: a critical arrival flips hasCritical the same instant, independent of ticker state (edge case)"
+  EPOCH2="$(date +%s)"
+  write_state 2 1 2 "$EPOCH2" "urgent thing"
+  wait_case 20 "s2" "critical" "1"
+  bar_assert "s2: hasCritical flips to 1 while the ticker is still active" "1" "$(bar_case s2.critical)"
+  bar_assert "s2: ticker still active (color binds hasCritical, not ticker state)" "1" "$(bar_case s2.ticker)"
+
+  scenario "seq-gate-no-double-ticker: rewriting the SAME seq updates text but never restarts the animation"
+  barprobe "before"; sleep 0.3; refresh_cases
+  TX_BEFORE="$(bar_case before.tx)"
+  # Same seq (2), different text -- an idempotent-per-line dismiss/
+  # staterefresh-style rewrite. A correct gate leaves the animation running
+  # (x keeps decreasing toward the negative implicitWidth target); a mutant
+  # that restarts on every "last" line snaps x back up toward the ticker
+  # area's full width the instant the rewrite lands.
+  EPOCH3="$(date +%s)"
+  write_state 1 0 2 "$EPOCH3" "urgent thing (updated)"
+  _k=0; UPDATED=""
+  while [ $_k -lt 60 ]; do
+    barprobe "after"; sleep 0.15; refresh_cases
+    case "$(bar_case after.text)" in *"updated)") UPDATED=1; break ;; esac
+    _k=$((_k + 1))
+  done
+  bar_assert "seq-gate: notifText updates even though seq is unchanged (idempotent per-line set)" "1" "${UPDATED:-0}"
+  bar_assert "seq-gate: notifSeq is still 2 (never bumped by the rewrite)" "2" "$(bar_case after.seq)"
+  TX_AFTER="$(bar_case after.tx)"
+  bar_assert "seq-gate: ticker x did not jump back up (no restart) after the same-seq rewrite" \
+    "no-jump" "$([ "${TX_AFTER:-0}" -le "${TX_BEFORE:-0}" ] && echo no-jump || echo JUMPED)"
+
+  scenario "embedded-tab-in-text: only the FIRST tab splits epoch from text (a stray literal tab stays part of the text)"
+  EPOCH4="$(date +%s)"
+  WEIRD_TEXT="weird$(printf '\t')text"
+  _wtmp2="${BSTATE}.tmp.embed"
+  {
+    printf 'count %s\n' 1
+    printf 'critical %s\n' 0
+    printf 'seq %s\n' 3
+    printf 'last %s\t%s\n' "$EPOCH4" "$WEIRD_TEXT"
+  } > "$_wtmp2"
+  mv -f "$_wtmp2" "$BSTATE"
+  wait_case 20 "s3" "seq" "3"
+  case "$(bar_case s3.text)" in
+    *"weird"*"text") pass "embedded-tab: text after the first tab (including the stray literal tab) survives intact" ;;
+    *) fail "embedded-tab: text after the first tab (including the stray literal tab) survives intact" "*weird<TAB>text" "$(bar_case s3.text)" ;;
+  esac
+
+  scenario "dismiss-roundtrip: requesting a dismiss (the bell/ticker click path) writes 'dismiss latest' to the FIFO"
+  : > "$BREADLOG"
+  bar_dismiss
+  _k=0; FOUND=""
+  while [ $_k -lt 40 ]; do
+    grep -qx 'dismiss latest' "$BREADLOG" 2>/dev/null && { FOUND=1; break; }
+    _k=$((_k + 1)); sleep 0.15
+  done
+  bar_assert "dismiss-roundtrip: the harness FIFO reader saw the literal 'dismiss latest' line" "1" "${FOUND:-0}"
+
+  env XDG_CONFIG_HOME="$BCFG" XDG_RUNTIME_DIR="$BRUN" XDG_CACHE_HOME="$BCACHE" \
+      "$BAR_QS_BIN_NAME" ipc --pid "$BAR_QS_PID" call notifprobe bye >/dev/null 2>&1
+fi
+
+kill "$BAR_READER_PID" 2>/dev/null
+BAR_READER_PID=""
+kill "$BAR_QS_PID" 2>/dev/null
+BAR_QS_PID=""
+sleep 0.5
+kill "$BAR_XVFB_PID" 2>/dev/null
+BAR_XVFB_PID=""
 
 # ================= SELFTEST NEGATIVE CONTROL ================================
 # SELFTEST=1 deliberately flips one expectation to a value the daemon can
