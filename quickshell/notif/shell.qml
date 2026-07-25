@@ -306,17 +306,27 @@ ShellRoot {
     // deleted FIFO is noticed and recreated within ~2s worst case -- verified
     // empirically that a bare `cat` blocked on an unlinked-but-still-open
     // FIFO inode never notices the deletion on its own; only a bounded
-    // timeout forces the reconnect-and-recreate cycle. onExited is a pure
-    // safety net (the shell loop is normally infinite -- `while :; do ...
-    // done` never falls through on its own); fifoRestartTimer just avoids a
-    // tight respawn loop in the unlikely case the shell itself dies.
+    // timeout forces the reconnect-and-recreate cycle.
+    //
+    // Two guards keep the loop from becoming a fork bomb when the FIFO's
+    // parent directory vanishes (XDG_RUNTIME_DIR torn down under a live
+    // session): `mkfifo ... || exit 1` bails instead of spinning on a FIFO
+    // that can never exist (without it, mkfifo fails silently, `cat` returns
+    // instantly on ENOENT, and the loop burns 2 forks/iteration unbounded --
+    // measured at 2814 forks/sec, 77.5% sys CPU), and the trailing `sleep
+    // 0.2` floors the iteration rate so no future fast-fail path can pin a
+    // core either. onExited + fifoRestartTimer then bound the respawn to
+    // ~2/sec: the timer is both the safety net for a shell that dies on its
+    // own and the retry path for the mkfifo bail above (the directory may
+    // come back).
     Process {
         id: fifoReader
         running: root.fifoPath !== ""
         command: ["sh", "-c",
             "FIFO=\"$1\"; while :; do " +
-            "[ -p \"$FIFO\" ] || { rm -f \"$FIFO\" 2>/dev/null; mkfifo -m 0600 \"$FIFO\" 2>/dev/null; }; " +
+            "[ -p \"$FIFO\" ] || { rm -f \"$FIFO\" 2>/dev/null; mkfifo -m 0600 \"$FIFO\" 2>/dev/null || exit 1; }; " +
             "timeout 2 cat \"$FIFO\"; " +
+            "sleep 0.2; " +
             "done",
             "_", root.fifoPath]
         stdout: SplitParser {
