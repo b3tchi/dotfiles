@@ -909,7 +909,7 @@ done
 kill "$NOTIF_PID" 2>/dev/null; wait "$NOTIF_PID" 2>/dev/null; NOTIF_PID=""
 
 # ============================================================================
-# PHASE 3 -- i3 keybind relocation: $mod+Shift+n toggles the browser,
+# PHASE 3 -- i3 keybind relocation: $mod+n toggles the browser,
 # $mod+Shift+o carries the relocated name-workspace i3-input bind (sp019
 # task 7, dotfiles-c5fd.7). Scenarios 1-5 are headless text/parser checks
 # (i3 -C needs no DISPLAY -- confirmed empirically before this suite was
@@ -931,14 +931,14 @@ command -v "$I3" >/dev/null 2>&1 || { echo "FATAL: $I3 not found (I3= to overrid
 # The two golden lines this task cares about, matched as FIXED strings
 # throughout this phase -- no regex-escaping games with the literal `$` in
 # `$mod` (grep -F takes the whole needle literally, dollar sign and all).
-NOTIF_TOGGLE_LINE='bindsym $mod+Shift+n exec --no-startup-id ~/.dotfiles/quickshell/qs-notif.sh toggle'
+NOTIF_TOGGLE_LINE='bindsym $mod+n exec --no-startup-id ~/.dotfiles/quickshell/qs-notif.sh toggle'
 NAME_WS_LINE='bindsym $mod+Shift+o exec i3-input -f "xft:Iosevka" -F '"'"'name workspace to "%s"'"'"' -P '"'"'Workspace name: '"'"''
 OLD_BIND_SUBSTR='$mod+Shift+n exec i3-input'
 
 count_fixed_line() { grep -F -x -c -- "$2" "$1" 2>/dev/null || true; }  # <file> <whole-line>
 count_fixed_sub()  { grep -F -c -- "$2" "$1" 2>/dev/null || true; }     # <file> <substring>
 
-scenario "shift-n-is-notif-toggle-both-files: \$mod+Shift+n binds the qs-notif.sh toggle exec in BOTH base configs"
+scenario "n-is-notif-toggle-both-files: \$mod+n binds the qs-notif.sh toggle exec in BOTH base configs"
 for f in "$I3_BASE" "$I3_COMMON"; do
   assert_eq "$(basename "$f"): exactly one notif-toggle bindsym line" "1" "$(count_fixed_line "$f" "$NOTIF_TOGGLE_LINE")"
 done
@@ -1273,7 +1273,7 @@ assert_eq "bar.notifCount == 1 (over IPC)" "1" \
 assert_eq "bar.notifText carries this notification's own text (over IPC)" "yes" \
   "$(grep 'CASE afterprobe\.text' "$E2E/bar-cases.txt" 2>/dev/null | grep -q "$TESTBODY_MARKER" && echo yes || echo no)"
 
-scenario "e2e AC4: toggling \$mod+Shift+n's target (the notifhistory IPC) maps a REAL qs-notif window (window-title probe)"
+scenario "e2e AC4: toggling \$mod+n's target (the notifhistory IPC) maps a REAL qs-notif window (window-title probe)"
 assert_eq "a qs-notif window was mapped after toggle" "1" "$(cat "$E2E/wid-after-count" 2>/dev/null || echo 0)"
 
 scenario "e2e AC4: the real qs-notif.sh list (same store the daemon just wrote) shows the notification, newest-first"
