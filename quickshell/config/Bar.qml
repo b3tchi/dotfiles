@@ -305,13 +305,14 @@ PanelWindow {
         if (!inNavMode) { navUnstick.stop(); navMoveSticky = false }
     }
 
-    // Debounced render state. An xrdp client that re-synthesises Shift around
-    // every keystroke emits a down/up pair per key; unfiltered, the pill (and
-    // only the pill — the binds themselves keep working) would strobe. Rising
-    // edge is immediate so the cue never lags the gesture; the falling edge
-    // waits, and a re-assert inside the window cancels it.
+    // Render state with a short bounce guard on the falling edge only. The
+    // 400ms window this used to carry was absorbing xrdp's per-keystroke Shift
+    // re-synthesis; Ctrl is transmitted as a real hold, so all that is left to
+    // guard against is a single stray release, and a longer wait would just
+    // read as lag on let-go. Rising edge stays immediate, and a re-assert
+    // inside the window cancels the pending clear.
     property bool navMoveSticky: false
-    Timer { id: navUnstick; interval: 400; onTriggered: root.navMoveSticky = false }
+    Timer { id: navUnstick; interval: 120; onTriggered: root.navMoveSticky = false }
     onMoveModChanged: {
         if (moveMod) { navUnstick.stop(); navMoveSticky = true }
         else if (navMoveSticky) navUnstick.restart()

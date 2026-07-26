@@ -138,10 +138,10 @@ ShellRoot {
     emit("hints-screenshot-verbatim", j(ModeBarTheme.hints["screenshot"]))
     emit("hints-system-verbatim",     j(ModeBarTheme.hints["system"]))
 
-    // ---- nav / nav-move (dotfiles-5u6m): the Shift pair. The two rows must
-    //      DIFFER (move-← vs ←, moving vs shift-to-move) — a registry that
-    //      aliases nav-move back to nav renders no Shift signal at all, which
-    //      is the whole point of the synthetic mode. ----
+    // ---- nav / nav-move (dotfiles-5u6m): the move-modifier pair. The rows
+    //      must DIFFER (move-← vs ←, moving vs ctrl-to-move) — a registry that
+    //      aliases nav-move back to nav renders no signal at all, which is the
+    //      whole point of the synthetic mode. ----
     emit("hints-nav",      j(ModeBarTheme.hints["nav"]))
     emit("hints-nav-move", j(ModeBarTheme.hints["nav-move"]))
     emit("nav-resolves",   JSON.stringify([
@@ -738,7 +738,7 @@ else
   # modifier as a `nop` binding event carrying its argument.
   bind_emit '[]' "" 'nop nav-move-on'; sleep 0.5
   ipc2 call barprobe dumpc "nav-nop-on" >/dev/null 2>&1; sleep 0.2
-  bind_emit '["ctrl"]' "" 'nop nav-move-off'; sleep 1.0   # past the debounce
+  bind_emit '["ctrl"]' "" 'nop nav-move-off'; sleep 0.6   # past the guard
   ipc2 call barprobe dumpc "nav-nop-off" >/dev/null 2>&1; sleep 0.2
   bindflip '[]'        h 'focus left'  "nav-focus-key"      # bare    -> nav
   bindflip '["ctrl"]' j 'move down'   "nav-move-key"       # shifted -> MOVE
@@ -757,7 +757,7 @@ else
   # before the command would re-arm MOVE on the very event that means "up".
   # MUTANT PIN: check mods first in Bar.qml's noteBinding and this latches.
   bindflip '["ctrl"]' j 'move down' "nav-pre-release"      # in MOVE first
-  bind_emit '["ctrl"]' "" 'nop nav-move-off'; sleep 1.0    # past the debounce
+  bind_emit '["ctrl"]' "" 'nop nav-move-off'; sleep 0.6    # past the guard
   ipc2 call barprobe dumpc "nav-after-release" >/dev/null 2>&1; sleep 0.25
 
   # --- per-keystroke twin churn (the xrdp case) ------------------------------
@@ -768,13 +768,13 @@ else
   bind_emit '[]' "" 'nop nav-move-on'; sleep 0.4       # Shift down
   ipc2 call barprobe dumpc "churn-armed" >/dev/null 2>&1; sleep 0.2
   # ... j arrives as: release nop, the shifted move, press nop again ...
-  bind_emit '["ctrl"]' "" 'nop nav-move-off'; sleep 0.12 # dip, under 400ms
+  bind_emit '["ctrl"]' "" 'nop nav-move-off'; sleep 0.04 # dip, under the guard
   ipc2 call barprobe dumpc "churn-mid-dip" >/dev/null 2>&1; sleep 0.05
   bind_emit '["ctrl"]' j 'move down'; sleep 0.05
   bind_emit '[]' "" 'nop nav-move-on'; sleep 0.4
   ipc2 call barprobe dumpc "churn-settled" >/dev/null 2>&1; sleep 0.2
-  # A REAL release must still clear, just later than the debounce window.
-  bind_emit '["ctrl"]' "" 'nop nav-move-off'; sleep 1.0  # > 400ms
+  # A REAL release must still clear, just past the guard window.
+  bind_emit '["ctrl"]' "" 'nop nav-move-off'; sleep 0.6  # > 120ms
   ipc2 call barprobe dumpc "churn-real-release" >/dev/null 2>&1; sleep 0.2
 
   # Leaving the mode resets the indicator, so re-entry never inherits MOVE from
@@ -857,14 +857,14 @@ else
 
   scenario "per-keystroke twin churn does not strobe the pill (the xrdp case)"
   assert_case "churn-armed.pill"    "nav MOVE"
-  # THE fix: mid-dip the raw mode is "nav", but the pill must still read MOVE.
-  # MUTANT PIN: remove the debounce (render navShift directly) and this reads
-  # "nav" — one flash per keystroke, which is what the user sees as flicker.
+  # Mid-dip the pill must still read MOVE: a stray release inside the guard
+  # window is swallowed. MUTANT PIN: render moveMod directly (no guard) and
+  # this reads "nav" — a visible flash.
   assert_case "churn-mid-dip.mode"  "nav"
   assert_case "churn-mid-dip.pill"  "nav MOVE"
   assert_case "churn-settled.pill"  "nav MOVE"
 
-  scenario "a REAL Shift release still clears, just past the debounce window"
+  scenario "a REAL release still clears, just past the guard window"
   assert_case "churn-real-release.pill" "nav"
   assert_case "churn-real-release.mode" "nav"
 
