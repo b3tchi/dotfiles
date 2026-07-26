@@ -1,5 +1,20 @@
 # i3 config file (v4)
 # Please see http://i3wm.org/docs/userguide.html for a complete reference!
+#
+# THIS FILE IS THE DESKTOP ENTRY POINT, NOT THE KEYMAP.
+# Every platform-neutral bind, mode, workspace, colour and for_window rule
+# lives in config.common, included below and shared verbatim with the other
+# entry point (config-xrdp). What stays here is only what genuinely differs
+# per entry point: the $mod source, the platform overlay, the binds that
+# depend on an env var or on which terminal/launcher this desktop uses, and
+# the autostart execs (the base never execs — ft003 i3-config-layering).
+#
+# Until this refactor the two entry points carried hand-synced COPIES of
+# ~140 identical binds. They had already drifted — config.common mapped
+# $mod+Shift+s to `sticky toggle` and carried no region-screenshot bind or
+# mode at all — and the drift was being policed by tests asserting
+# byte-parity between the files. The include enforces structurally what
+# those tests were checking by hand.
 
 # Set mod key (Mod1=<Alt>, Mod4=<Super>) via X resource with fallback —
 # i3 include limitation: vars set in included overlays are invisible to
@@ -13,450 +28,42 @@ set_from_resource $mod i3wm.mod Mod4
 # Include sits at top so overlay vars ($term) resolve before binds below.
 include ~/.i3/config.d/*.conf
 
-# set default desktop layout (default is tiling)
-# workspace_layout tabbed <stacking|tabbed>
-workspace_layout tabbed
+# Shared keymap + look. $mod being set above is the whole requirement:
+# config.common uses $mod plus variables it defines itself, and references
+# nothing from this file or from the overlay.
+include ~/.dotfiles/i3/config.common
 
-# Configure border style <normal|1pixel|pixel xx|none|pixel>
-default_border normal 4
-default_floating_border normal 4
-
-# Hide borders
-hide_edge_borders none
-
-# change borders
-bindsym $mod+u border none
-bindsym $mod+y border pixel 4
-# notification-history picker (sp019) — quickshell browser over the persistent
-# notification store; the user-bus-singleton daemon owns the freedesktop
-# Notifications name. (border normal 4 dropped to free $mod+n.)
-bindsym $mod+n exec --no-startup-id ~/.dotfiles/quickshell/qs-notif.sh toggle
-
-# avoid leaving unfocuse with full screen
-popup_during_fullscreen smart
-
-# Font for window titles. Will also be used by the bar unless a different font
-# is used in the bar {} block below.
-# font xft:URWGothic-Book 11
-font xft:Iosevka 11
-
-# Use Mouse+$mod to drag floating windows
-floating_modifier $mod
-
-#enable tiling tiling
-tiling_drag modifier titlebar
+# --- entry-point-specific binds ----------------------------------------------
+# The ones config-xrdp deliberately answers differently: it launches plain st
+# and wraps every quickshell exec in its own QT_QUICK_BACKEND/QS_RDP env.
 
 # start a terminal with pre-created tmux session
 bindsym $mod+Return exec ~/.local/bin/wm-launch-terminal st
 # bindsym $mod+Return exec wezterm-gui start --always-new-process
 
-# kill focused window
-bindsym $mod+Shift+q kill
-
 # start program launcher
 bindsym $mod+Shift+d exec --no-startup-id dmenu_recency
 bindsym $mod+d exec ~/.dotfiles/quickshell/qs-overlay.sh launcher
 
-# old rofi launcher (replaced by quickshell AppLauncher)
-# bindsym $mod+d exec --no-startup-id rofi -show run
-# bindsym $mod+d exec --no-startup-id rofi -show run -theme-str 'entry {placeholder:"run";}'
+# Project workspace picker (quickshell overlay)
+bindsym $mod+p exec --no-startup-id ~/.dotfiles/quickshell/qs-overlay.sh projects
 
-
-# launch categorized menu
-bindsym $mod+m exec --no-startup-id morc_menu
-
-################################################################################################
-## sound-section - DO NOT EDIT if you wish to automatically upgrade Alsa -> Pulseaudio later! ##
-################################################################################################
-
-# (volumeicon autostart → config.d/native.conf)
-bindsym $mod+Ctrl+m exec terminal -e 'alsamixer'
-#exec --no-startup-id pulseaudio
-#exec --no-startup-id pa-applet
-#bindsym $mod+Ctrl+m exec pavucontrol
-
-################################################################################################
-
-# Screen brightness controls
-# bindsym XF86MonBrightnessUp exec "xbacklight -inc 10; notify-send 'brightness upX'"
-# bindsym XF86MonBrightnessDown exec "xbacklight -dec 10; notify-send 'brightness downX'"
-
-# Start Applications
-# bindsym $mod+Ctrl+b exec terminal -e 'bmenu'
-bindsym $mod+F2 exec palemoon
-bindsym $mod+F3 exec pcmanfm
-# bindsym $mod+F3 exec ranger
-bindsym $mod+Shift+F3 exec pcmanfm_pkexec
-bindsym $mod+F5 exec terminal -e 'mocp'
-# bindsym $mod+t exec --no-startup-id pkill picom
-bindsym $mod+Ctrl+t exec --no-startup-id picom -b
 # qs bar env — defined here (i3 vars must precede first use); rationale at
 # the exec_always further down
 set $qsbarenv env QS_BAR_INSET_BOTTOM=50 QS_BAR_INSET_AUTO=1
 bindsym $mod+Shift+d --release exec --no-startup-id $qsbarenv ~/.dotfiles/quickshell/qs-start.sh
-# clipboard-history picker (sp014) — opens the quickshell picker; choosing a
-# row puts that entry on the clipboard. It is a PICKER, not a paste tool:
-# nothing is typed or injected into the focused window, you still paste
-# yourself. Binding lives in the base config because every platform gets the
-# picker (the copyq server and the cross-display feeder that back it are
-# platform-specific and live in config.d/); qs-clip.sh derives the target
-# session itself from the live quickshell instances, so no DISPLAY is passed
-# here — and nothing on this line depends on an overlay var, which would be
-# invisible across the include boundary anyway.
-bindsym $mod+v exec --no-startup-id ~/.dotfiles/quickshell/qs-clip.sh toggle
-bindsym Print exec --no-startup-id i3-scrot
-bindsym $mod+Print --release exec --no-startup-id i3-scrot -w
-bindsym $mod+Shift+Print --release exec --no-startup-id i3-scrot -s
-# region screenshot — enters a "screenshot" i3 mode (shown in the bar like
-# resize) and launches the live selector: a GDK window shaped down to the
-# rubber-band outline, so the real desktop shows through and nothing is frozen
-# or dimmed. Drag or tap two corners; the crop lands in ~/Pictures/screenshots
-# and its PATH goes on the clipboard.
-# See quickshell/qs-screenshot.sh + quickshell/qs-region.py.
-#
-# Base, not the platform overlay: every X11 session gets it (native :0, WSL and
-# desktop xrdp :10) — stranding the bind in native.conf left WSL unable to
-# reach it at all (dotfiles-13q).
-#
-# The mode exists ONLY so the bar paints its hint strip (Bar.qml modeHints).
-# qs-screenshot.sh enters it and resets it on every exit path, so the bind does
-# NOT set the mode itself — a bind-set mode would be redundant with the
-# launcher's, and the launcher is the one that can guarantee the reset.
-#
-# The selector holds a pointer+keyboard grab, so it receives the keys directly;
-# there are no `w` / drag bindings here. The old ones — and the IPC shim script
-# they called — existed only because the retired quickshell dock layer could not
-# receive arbitrary keys. Both are gone.
-#
-# Escape stays as a DEAD-OVERLAY FALLBACK: while the selector lives its grab
-# swallows Esc, so this never fires. If the selector dies or never starts, the
-# grab is gone, Esc reaches i3, and the mode unsticks instead of trapping the
-# session (the dotfiles-ux1 failure class).
-mode "screenshot" {
-    bindsym Escape mode default
-    bindsym q mode default
-}
-bindsym $mod+Shift+s exec --no-startup-id ~/.dotfiles/quickshell/qs-screenshot.sh
-# freed for `move left` (vim hjkl navigation)
-# bindsym $mod+Shift+h exec xdg-open /usr/share/doc/manjaro/i3_help.pdf
-bindsym $mod+Ctrl+x --release exec --no-startup-id xkill
 
-# focus_follows_mouse no
+# --- autostarts (the base never execs) ---------------------------------------
 
-# change focus
-bindsym $mod+h focus left
-bindsym $mod+j focus down
-bindsym $mod+k focus up
-bindsym $mod+l focus right
-
-# alternatively, you can use the cursor keys:
-bindsym $mod+Left focus left
-bindsym $mod+Down focus down
-bindsym $mod+Up focus up
-bindsym $mod+Right focus right
-
-# move focused window
-bindsym $mod+Shift+h move left
-bindsym $mod+Shift+j move down
-bindsym $mod+Shift+k move up
-bindsym $mod+Shift+l move right
-
-# alternatively, you can use the cursor keys:
-bindsym $mod+Shift+Left move left
-bindsym $mod+Shift+Down move down
-bindsym $mod+Shift+Up move up
-bindsym $mod+Shift+Right move right
-
-# workspace back and forth (with/without active container)
-workspace_auto_back_and_forth yes
-# bindsym $mod+b workspace back_and_forth
-# bindsym $mod+Shift+b move container to workspace back_and_forth; workspace back_and_forth
-
-# split orientation
-bindsym $mod+s split h;exec notify-send 'tile side'
-bindsym $mod+b split v;exec notify-send 'tile bellow'
-bindsym $mod+q split toggle
-
-# toggle fullscreen mode for the focused container
-bindsym $mod+z fullscreen toggle
-
-# change container layout (stacked, tabbed, toggle split)
-# bindsym $mod+s layout stacking
-bindsym $mod+t layout tabbed
-bindsym $mod+e layout toggle split
-
-# toggle tiling / floating
-# bindsym $mod+Shift+space floating toggle
-
-# change focus between tiling / floating windows
-# bindsym $mod+space focus mode_toggle
-
-# toggle sticky (pinned — p, like tmux; $mod+Shift+s is the region screenshot)
-bindsym $mod+Shift+p sticky toggle
-
-# focus the parent container
-bindsym $mod+a focus parent
-
-# move the currently focused window to the scratchpad
-bindsym $mod+Shift+minus move scratchpad
-
-# Show the next scratchpad window or hide the focused scratchpad window.
-# If there are multiple scratchpad windows, this command cycles through them.
-bindsym $mod+minus scratchpad show
-
-#navigate workspaces next / previous
-bindsym $mod+Ctrl+Right workspace next
-bindsym $mod+Ctrl+Left workspace prev
-
-# Workspace switching by Polybar display order (supports named project workspaces)
-set $ws_switch ~/.local/bin/ws-switch.nu
-
-# switch to workspace by display position
-bindsym $mod+1 exec --no-startup-id $ws_switch 1
-bindsym $mod+2 exec --no-startup-id $ws_switch 2
-bindsym $mod+3 exec --no-startup-id $ws_switch 3
-bindsym $mod+4 exec --no-startup-id $ws_switch 4
-bindsym $mod+5 exec --no-startup-id $ws_switch 5
-bindsym $mod+6 exec --no-startup-id $ws_switch 6
-bindsym $mod+7 exec --no-startup-id $ws_switch 7
-bindsym $mod+8 exec --no-startup-id $ws_switch 8
-
-# Move focused container to workspace by display position
-bindsym $mod+Ctrl+1 exec --no-startup-id $ws_switch 1 move
-bindsym $mod+Ctrl+2 exec --no-startup-id $ws_switch 2 move
-bindsym $mod+Ctrl+3 exec --no-startup-id $ws_switch 3 move
-bindsym $mod+Ctrl+4 exec --no-startup-id $ws_switch 4 move
-bindsym $mod+Ctrl+5 exec --no-startup-id $ws_switch 5 move
-bindsym $mod+Ctrl+6 exec --no-startup-id $ws_switch 6 move
-bindsym $mod+Ctrl+7 exec --no-startup-id $ws_switch 7 move
-bindsym $mod+Ctrl+8 exec --no-startup-id $ws_switch 8 move
-
-# Move container to workspace and follow
-bindsym $mod+Shift+1 exec --no-startup-id $ws_switch 1 follow
-bindsym $mod+Shift+2 exec --no-startup-id $ws_switch 2 follow
-bindsym $mod+Shift+3 exec --no-startup-id $ws_switch 3 follow
-bindsym $mod+Shift+4 exec --no-startup-id $ws_switch 4 follow
-bindsym $mod+Shift+5 exec --no-startup-id $ws_switch 5 follow
-bindsym $mod+Shift+6 exec --no-startup-id $ws_switch 6 follow
-bindsym $mod+Shift+7 exec --no-startup-id $ws_switch 7 follow
-bindsym $mod+Shift+8 exec --no-startup-id $ws_switch 8 follow
-
-# Open applications on specific workspaces
-# assign [class="Thunderbird"] $ws1
-# assign [class="Pale moon"] $ws2
-# assign [class="Pcmanfm"] $ws3
-# assign [class="Skype"] $ws5
-
-# Open specific applications in floating mode
-for_window [all] title_window_icon on
-for_window [all] title_window_icon padding 4px
-
-for_window [all] title_format "%title"
 # PrusaSlicer: trim version from title ("*file - PrusaSlicer-2.8.1 based on Slic3r" → "*file - PrusaSlicer")
 exec_always --no-startup-id pkill -f qs-title-trim; ~/.i3/scripts/qs-title-trim.sh &
-for_window [all] border normal 4
-
-for_window [title="qs-launcher"] floating enable, border none, move position center
-for_window [title="qs-switcher"] floating enable, border none, move position center
-for_window [title="qs-projects"] floating enable, border none, move position center
-for_window [title="qs-clip"] floating enable, border none, move position center
-for_window [title="qs-notif"] floating enable, border none, move position center
-# preview-webview client host (sp013): the chrome-less wry window
-# (WM_CLASS preview-wv) tiles/docks into the layout by design — no
-# floating rule; it sits beside the editor like a split.
-# No for_window rule for the region selector: qs-region.py is a GTK POPUP =
-# override-redirect, so i3 never manages it and no criteria could ever match.
-# (The rule that used to sit here matched title="qs-region" against the OLD
-# quickshell dock, which set no title at all — it never matched anything.)
-for_window [title="alsamixer"] floating enable border pixel 1
-for_window [class="calamares"] floating enable border normal
-for_window [class="Clipgrab"] floating enable
-for_window [title="File Transfer*"] floating enable
-for_window [class="fpakman"] floating enable
-for_window [class="Galculator"] floating enable border pixel 1
-for_window [class="GParted"] floating enable border normal
-for_window [title="i3_help"] floating enable sticky enable border normal
-for_window [class="Lightdm-settings"] floating enable
-for_window [class="Lxappearance"] floating enable sticky enable border normal
-for_window [class="Manjaro-hello"] floating enable
-for_window [class="Manjaro Settings Manager"] floating enable border normal
-for_window [title="MuseScore: Play Panel"] floating enable
-for_window [class="Nitrogen"] floating enable sticky enable border normal
-for_window [class="Oblogout"] fullscreen enable
-for_window [class="octopi"] floating enable
-for_window [title="About Pale Moon"] floating enable
-for_window [class="Pamac-manager"] floating enable
-for_window [class="Pavucontrol"] floating enable
-for_window [class="qt5ct"] floating enable sticky enable border normal
-for_window [class="Qtconfig-qt4"] floating enable sticky enable border normal
-for_window [class="Simple-scan"] floating enable border normal
-for_window [class="(?i)System-config-printer.py"] floating enable border normal
-for_window [class="Skype"] floating enable border normal
-for_window [class="Timeset-gui"] floating enable border normal
-for_window [class="(?i)virtualbox"] floating enable border normal
-for_window [class="Xfburn"] floating enable
-for_window [title="quickshell-notifications"] floating enable, border none, sticky enable, move position 400 60
-
-# switch to workspace with urgent window automatically
-for_window [urgent=latest] focus
-
-# reload the configuration file
-bindsym $mod+Shift+c reload
-
-# restart i3 inplace (preserves your layout/session, can be used to upgrade i3)
-bindsym $mod+Shift+r restart
-
-# exit i3 (logs you out of your X session)
-bindsym $mod+Shift+e exec "i3-nagbar -t warning -m 'You pressed the exit shortcut. Do you really want to exit i3? This will end your X session.' -b 'Yes, exit i3' 'i3-msg exit'"
-
-# Set shut down, restart and locking features
-bindsym $mod+0 mode "$mode_system"
-set $mode_system (l)ock, (e)xit, switch_(u)ser, (s)uspend, (h)ibernate, (r)eboot, (Shift+s)hutdown
-mode "$mode_system" {
-    bindsym l exec --no-startup-id i3exit lock, mode "default"
-    bindsym s exec --no-startup-id i3exit suspend, mode "default"
-    bindsym u exec --no-startup-id i3exit switch_user, mode "default"
-    bindsym e exec --no-startup-id i3exit logout, mode "default"
-    bindsym h exec --no-startup-id i3exit hibernate, mode "default"
-    bindsym r exec --no-startup-id i3exit reboot, mode "default"
-    bindsym p exec --no-startup-id i3exit shutdown, mode "default"
-
-    # exit system mode: "Enter" or "Escape"
-    bindsym Return mode "default"
-    bindsym Escape mode "default"
-    bindsym q mode "default"
-}
-# Rename workspace (relocated to $mod+Shift+o; $mod+Shift+n is now free —
-# the notification-history picker moved to the unshifted $mod+n above).
-bindsym $mod+Shift+o exec i3-input -f "xft:Iosevka" -F 'name workspace to "%s"' -P 'Workspace name: '
-
-# Project workspace picker (quickshell overlay)
-bindsym $mod+p exec --no-startup-id ~/.dotfiles/quickshell/qs-overlay.sh projects
-
-# Resize window (you can also use the mouse for that)
-bindsym $mod+r mode "resize"
-mode "resize" {
-        # These bindings trigger as soon as you enter the resize mode.
-        # h/left  shrinks the window’s width, l/right grows it.
-        # k/up    shrinks the window’s height, j/down grows it.
-        # The bar's hint strip mirrors these keys — keep them in sync with
-        # quickshell/config/Common/ModeBarTheme.qml's `hints["resize"]`.
-        bindsym h resize shrink width 5 px or 5 ppt
-        bindsym j resize grow height 5 px or 5 ppt
-        bindsym k resize shrink height 5 px or 5 ppt
-        bindsym l resize grow width 5 px or 5 ppt
-
-        # same bindings, but for the arrow keys
-        bindsym Left resize shrink width 10 px or 10 ppt
-        bindsym Down resize grow height 10 px or 10 ppt
-        bindsym Up resize shrink height 10 px or 10 ppt
-        bindsym Right resize grow width 10 px or 10 ppt
-
-        # exit resize mode: Enter or Escape
-        bindsym Return mode "default"
-        bindsym Escape mode "default"
-        bindsym q mode "default"
-}
-
-# Navigation mode (dotfiles-5u6m) — sticky hjkl focus without holding $mod.
-# $mod+o enters; hjkl / arrows focus, Shift+hjkl / Shift+arrows move the
-# focused window; q, Escape or Enter leave (Shift+q too — q must work with
-# Shift held).
-#
-# TWO modes with IDENTICAL bindings: "nav" and "nav-move". The pair exists
-# only so the bar can show whether Shift is down BEFORE any hjkl is pressed —
-# i3's IPC reports the mode name, so a mode flip is the one Shift signal that
-# reaches the bar instantly and identically on every session (native, xrdp,
-# sway). Bar.qml renders "nav" vs "nav MOVE" from it; the hint strips live in
-# quickshell/config/Common/ModeBarTheme.qml, keep them in sync with these keys.
-#
-# bindCODE for the Shift keys, not bindsym: i3's parser reads the leading
-# "Shift" of `bindsym Shift_L` as a MODIFIER and then fails to translate the
-# "_L" remainder, silently dropping the bind (log-only — `i3 -C` stays clean).
-# 50/62 are Shift_L/Shift_R in every evdev X keymap (xmodmap -pm). The release
-# event still carries the Shift bit (X state is pre-event), so the MASKED form
-# is the one that fires; the bare pair is a keymap-quirk fallback.
-#
-# The two modes bind the same keys to the same commands ON PURPOSE. A missed
-# release (an RDP client that re-synthesises modifiers per keystroke, a focus
-# steal) can strand the session in "nav-move", and if that mode moved windows
-# on bare hjkl the stranding would be destructive instead of merely cosmetic.
-# Bar.qml additionally re-asserts MOVE from the `mods` of each binding event,
-# so a session whose Shift release arrives spuriously still paints correctly.
-bindsym $mod+o mode "nav"
-mode "nav" {
-        bindsym h focus left
-        bindsym j focus down
-        bindsym k focus up
-        bindsym l focus right
-
-        bindsym Shift+h move left
-        bindsym Shift+j move down
-        bindsym Shift+k move up
-        bindsym Shift+l move right
-
-        # same bindings, but for the arrow keys
-        bindsym Left focus left
-        bindsym Down focus down
-        bindsym Up focus up
-        bindsym Right focus right
-
-        bindsym Shift+Left move left
-        bindsym Shift+Down move down
-        bindsym Shift+Up move up
-        bindsym Shift+Right move right
-
-        # Shift down -> the twin mode, so the bar repaints as "nav MOVE"
-        bindcode 50 mode "nav-move"
-        bindcode 62 mode "nav-move"
-
-        # exit nav mode: Enter, Escape or q
-        bindsym Return mode "default"
-        bindsym Escape mode "default"
-        bindsym Shift+q mode "default"
-        bindsym q mode "default"
-}
-mode "nav-move" {
-        bindsym h focus left
-        bindsym j focus down
-        bindsym k focus up
-        bindsym l focus right
-
-        bindsym Shift+h move left
-        bindsym Shift+j move down
-        bindsym Shift+k move up
-        bindsym Shift+l move right
-
-        bindsym Left focus left
-        bindsym Down focus down
-        bindsym Up focus up
-        bindsym Right focus right
-
-        bindsym Shift+Left move left
-        bindsym Shift+Down move down
-        bindsym Shift+Up move up
-        bindsym Shift+Right move right
-
-        # Shift released -> back to the plain twin
-        bindcode --release Shift+50 mode "nav"
-        bindcode --release Shift+62 mode "nav"
-        bindcode --release 50 mode "nav"
-        bindcode --release 62 mode "nav"
-
-        bindsym Return mode "default"
-        bindsym Escape mode "default"
-        bindsym Shift+q mode "default"
-        bindsym q mode "default"
-}
-# Lock screen
-bindsym $mod+9 exec --no-startup-id blurlock
 
 # quickshell bar + overlay — all platforms (kill+restart on every reload).
 # This config also serves xrdp sessions (same machine, DISPLAY :10+); the
 # INSET_AUTO pair draws the chin-offset pill only while the viewport is
 # phone-shaped (>=2:1 tall, e.g. Razr client), flush bar otherwise —
-# reactive across reconnects. ($qsbarenv defined near $mod+Shift+d binding;
-# knobs documented in quickshell/config/Common/Session.qml.)
+# reactive across reconnects. ($qsbarenv defined just above; knobs
+# documented in quickshell/config/Common/Session.qml.)
 exec_always --no-startup-id $qsbarenv ~/.dotfiles/quickshell/qs-start.sh
 # Focus border handled by quickshell (config/FocusBorder.qml);
 # clean up legacy xborders fallback
@@ -471,104 +78,3 @@ exec_always --no-startup-id autocutsel -selection PRIMARY -fork
 # Other autostarts (wallpaper, compositor, tray apps, lockscreen, keyboard
 # layout) live in the platform overlay → config.d/native.conf
 # (quickshell task-switcher nop grabs live in overlays — $mod differs)
-
-# alttab (replaced by quickshell switcher)
-# exec_always alttab -font xft:Iosevka-11 -mk Super_L -vertical -s 1 -t 300x24 -i 20x20 -bg "#222d31" -bw 2 -bc "#222d31" -inact "#222d31" -frame "#16a085"
-
-# Color palette used for the terminal ( ~/.Xresources file )
-# Colors are gathered based on the documentation::
-# https://i3wm.org/docs/userguide.html#xresources
-# Change the variable name at the place you want to match the color
-# of your terminal like this:
-# [example]
-# If you want your bar to have the same background color as your 
-# terminal background change the line 362 from:
-# background #14191D
-# to:
-# background $term_background
-# Same logic applied to everything else.
-set_from_resource $term_background background
-set_from_resource $term_foreground foreground
-set_from_resource $term_color0     color0
-set_from_resource $term_color1     color1
-set_from_resource $term_color2     color2
-set_from_resource $term_color3     color3
-set_from_resource $term_color4     color4
-set_from_resource $term_color5     color5
-set_from_resource $term_color6     color6
-set_from_resource $term_color7     color7
-set_from_resource $term_color8     color8
-set_from_resource $term_color9     color9
-set_from_resource $term_color10    color10
-set_from_resource $term_color11    color11
-set_from_resource $term_color12    color12
-set_from_resource $term_color13    color13
-set_from_resource $term_color14    color14
-set_from_resource $term_color15    color15
-
-# Start i3bar to display a workspace bar (plus the system information i3status if available)
-set $transp       #00000000
-
-# bar {
-# 	i3bar_command i3bar
-# 	status_command i3status
-# 	# status_command i3blocks #alternative status bar
-# 	position bottom
-#
-# 	## please set your primary output first. Example: 'xrandr --output eDP1 --primary'
-# 	#tray_output primary
-# 	#tray_output eDP1
-# 	tray_padding 5 
-#
-# 	bindsym button4 nop
-# 	bindsym button5 nop
-# 	#   font xft:URWGothic-Book 11
-# 	strip_workspace_numbers yes
-# 	# separator_symbol ''
-#
-#     colors {
-#         background #222D31
-#         statusline #F9FAF9
-#         separator  #222D31 ##454948
-# 		#                  border  backgr. text
-#         focused_workspace  #16a085 #16a085 #292F34
-#         active_workspace   #353836 #353836 #FDF6E3
-#         inactive_workspace #222D31 #222D31 #EEE8D5
-#         binding_mode       #2C2C2C #2C2C2C #F9FAF9
-#         urgent_workspace   #FDF6E3 #FDF6E3 #CB4B16
-#     }
-# }
-
-# hide/unhide i3status bar
-# bindsym $mod+m bar mode toggle
-
-# Theme colors
-# class                   border  backgr. text    indic.   child_border
-client.focused            #152024 #152024 #FDF6E3 #222D31 
-client.focused_inactive   #152024 #152024 #707880 #222D31
-client.unfocused          #222D31 #222D31 #707880 #222D31
-client.urgent             #CB4B16 #FDF6E3 #16a085 #268BD2
-client.placeholder        #152024 #152024 #FDF6E3 #152024
-
-client.background       $transp
-
-#############################
-### settings for i3-gaps: ###
-#############################
-
-# Set inner/outer gaps
-
-gaps inner 4
-gaps outer 2
-# Additionally, you can issue commands with the following syntax. This is useful to bind keys to changing the gap size.
-# gaps inner|outer current|all set|plus|minus <px>
-# gaps inner all set 10
-# gaps outer all plus 5
-
-# Smart gaps (gaps used if only more than one container on the workspace)
-smart_gaps off
-
-# Smart borders (draw borders around container only if it is not the only container on this workspace) 
-# on|no_gaps (on=always activate and no_gaps=only activate if the gap size to the edge of the screen is 0)
-smart_borders no_gaps
-

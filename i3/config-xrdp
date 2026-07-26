@@ -11,6 +11,12 @@
 set $mod Mod1
 include ~/.dotfiles/i3/config.common
 
+# Narrow the top gap so windows sit closer under the top bar
+# (cancels inner+outer at the top edge; other edges keep 4+2).
+# Lives here, not in the base: this is the remote viewport's chin offset —
+# the desktop entry point deliberately keeps the default top gap.
+gaps top -6
+
 # --- remote-safe autostarts -------------------------------------------------
 # Plain background (no nitrogen/picom compositor over RDP).
 exec --no-startup-id xsetroot -solid "#152024"

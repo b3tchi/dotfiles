@@ -63,6 +63,36 @@ assert_ne() { # <scenario> <not-expected> <actual>
 
 scenario() { printf '\n[%s]\n' "$1"; }
 
+# Expand `include` directives so assertions run against what i3 EFFECTIVELY
+# loads for an entry point, not against one file's text. Since the ~140 shared
+# binds collapsed behind an include (config -> config.common, same as
+# config-xrdp), "is this bind present for this session type" is a question
+# about the expansion; asserting per-file would now just re-encode the layout.
+# `~/.i3/config.d/*.conf` resolves through the LIVE symlinks, exactly as i3
+# would resolve it, and silently contributes nothing when unlinked.
+effective() { # <entry-point-config> -> the fully-included text
+  python3 - "$1" <<'EXPANDPY'
+import sys, os, glob, re
+def expand(path, seen):
+    path = os.path.realpath(os.path.expanduser(path))
+    if path in seen or not os.path.exists(path):
+        return ""
+    seen.add(path)
+    out = []
+    for line in open(path):
+        m = re.match(r'^\s*include\s+(.+?)\s*$', line)
+        if m:
+            for f in sorted(glob.glob(os.path.expanduser(m.group(1)))):
+                out.append(expand(f, seen))
+        else:
+            out.append(line)
+    return "".join(out)
+sys.stdout.write(expand(sys.argv[1], set()))
+EXPANDPY
+}
+count_eff_line() { effective "$1" | grep -F -x -c -- "$2" || true; }   # <entry> <whole-line>
+count_eff_sub()  { effective "$1" | grep -F -c -- "$2" || true; }      # <entry> <substring>
+
 cleanup() {
   [ -n "${QS_PID:-}" ]    && kill "$QS_PID"    2>/dev/null
   [ -n "${QS2_PID:-}" ]   && kill "$QS2_PID"   2>/dev/null
@@ -900,10 +930,12 @@ scenario "wiring: the shipped shell.qml instantiates NotifHistory beside ClipHis
 assert_eq "config/shell.qml contains NotifHistory {}" "1" \
   "$(grep -c '^[[:space:]]*NotifHistory[[:space:]]*{}' "$SCRIPT_DIR/config/shell.qml" | tr -d ' ')"
 
-scenario "wiring: BOTH base i3 configs float qs-notif the same way they float qs-clip"
-for f in "$SCRIPT_DIR/../i3/config" "$SCRIPT_DIR/../i3/config.common"; do
-  assert_eq "$f has the qs-notif for_window float rule" "1" \
-    "$(grep -c '^for_window \[title="qs-notif"\] floating enable, border none, move position center$' "$f" | tr -d ' ')"
+scenario "wiring: BOTH i3 entry points float qs-notif the same way they float qs-clip"
+# Asserted on the EFFECTIVE config (the rule is single-sourced in
+# config.common now); the question is whether each session type gets it.
+for f in "$SCRIPT_DIR/../i3/config" "$SCRIPT_DIR/../i3/config-xrdp"; do
+  assert_eq "$(basename "$f") effective: has the qs-notif for_window float rule" "1" \
+    "$(effective "$f" | grep -c '^for_window \[title="qs-notif"\] floating enable, border none, move position center$' | tr -d ' ')"
 done
 
 kill "$NOTIF_PID" 2>/dev/null; wait "$NOTIF_PID" 2>/dev/null; NOTIF_PID=""
@@ -938,23 +970,28 @@ OLD_BIND_SUBSTR='$mod+Shift+n exec i3-input'
 count_fixed_line() { grep -F -x -c -- "$2" "$1" 2>/dev/null || true; }  # <file> <whole-line>
 count_fixed_sub()  { grep -F -c -- "$2" "$1" 2>/dev/null || true; }     # <file> <substring>
 
-scenario "n-is-notif-toggle-both-files: \$mod+n binds the qs-notif.sh toggle exec in BOTH base configs"
-for f in "$I3_BASE" "$I3_COMMON"; do
-  assert_eq "$(basename "$f"): exactly one notif-toggle bindsym line" "1" "$(count_fixed_line "$f" "$NOTIF_TOGGLE_LINE")"
+scenario "n-is-notif-toggle: \$mod+n binds the qs-notif.sh toggle exec for BOTH entry points"
+# Exactly one, not at-least-one: two copies would be the duplication this
+# refactor removed (and i3 would warn about the chord).
+for f in "$I3_BASE" "$I3_XRDP"; do
+  assert_eq "$(basename "$f") effective: exactly one notif-toggle bindsym line" "1" "$(count_eff_line "$f" "$NOTIF_TOGGLE_LINE")"
 done
+# ...and it is single-sourced: the line itself lives only in the shared base.
+assert_eq "the bind text lives ONLY in config.common (config no longer copies it)" \
+  "0" "$(count_fixed_line "$I3_BASE" "$NOTIF_TOGGLE_LINE")"
 
-scenario "shift-o-is-name-workspace-both-files: \$mod+Shift+o carries the relocated i3-input bind, byte-identical, in BOTH base configs"
-for f in "$I3_BASE" "$I3_COMMON"; do
-  assert_eq "$(basename "$f"): exactly one name-workspace bindsym line on \$mod+Shift+o" "1" "$(count_fixed_line "$f" "$NAME_WS_LINE")"
+scenario "shift-o-is-name-workspace: \$mod+Shift+o carries the relocated i3-input bind for BOTH entry points"
+for f in "$I3_BASE" "$I3_XRDP"; do
+  assert_eq "$(basename "$f") effective: exactly one name-workspace bindsym on \$mod+Shift+o" "1" "$(count_eff_line "$f" "$NAME_WS_LINE")"
 done
-BASE_WS_LINE="$(grep -F -x -- "$NAME_WS_LINE" "$I3_BASE" | head -1)"
-COMMON_WS_LINE="$(grep -F -x -- "$NAME_WS_LINE" "$I3_COMMON" | head -1)"
-assert_eq "the relocated i3-input command string is byte-identical between config and config.common" \
-  "$BASE_WS_LINE" "$COMMON_WS_LINE"
+# The byte-identity assertion this replaces compared two hand-synced copies.
+# There is one copy now, so identity is structural — what is worth asserting
+# is that it stayed that way.
+assert_eq "the bind text lives ONLY in config.common" "0" "$(count_fixed_line "$I3_BASE" "$NAME_WS_LINE")"
 
-scenario "no-shift-n-i3-input-left: the OLD \$mod+Shift+n -> i3-input name-workspace bind is gone from BOTH base configs"
-for f in "$I3_BASE" "$I3_COMMON"; do
-  assert_eq "$(basename "$f"): zero bindsym lines still pairing Shift+n with i3-input" "0" "$(count_fixed_sub "$f" "$OLD_BIND_SUBSTR")"
+scenario "no-shift-n-i3-input-left: the OLD \$mod+Shift+n -> i3-input bind is gone from both effective configs"
+for f in "$I3_BASE" "$I3_XRDP"; do
+  assert_eq "$(basename "$f") effective: zero bindsym lines pairing Shift+n with i3-input" "0" "$(count_eff_sub "$f" "$OLD_BIND_SUBSTR")"
 done
 
 # ---- no-duplicate-chords ----------------------------------------------------
@@ -977,17 +1014,19 @@ top_level_chords() { # <file> -- one normalized "chord[ --release]" token per li
   grep -E '^bindsym ' "$1" | awk '{ key = $2; if ($3 == "--release") key = key " --release"; print key }'
 }
 
-scenario "no-duplicate-chords: i3/config's own top-level bindsym chords are all unique"
-DUP_BASE="$(top_level_chords "$I3_BASE" | sort | uniq -d)"
-assert_eq "sort | uniq -d on i3/config's chords" "" "$DUP_BASE"
-
-scenario "no-duplicate-chords: i3/config.common's own top-level bindsym chords are all unique"
-DUP_COMMON="$(top_level_chords "$I3_COMMON" | sort | uniq -d)"
-assert_eq "sort | uniq -d on i3/config.common's chords" "" "$DUP_COMMON"
-
-scenario "no-duplicate-chords: config-xrdp's effective chord set (its own binds + the config.common it includes) has no duplicate"
-DUP_XRDP="$( { top_level_chords "$I3_XRDP"; top_level_chords "$I3_COMMON"; } | sort | uniq -d)"
-assert_eq "sort | uniq -d on config-xrdp's effective chords" "" "$DUP_XRDP"
+scenario "no-duplicate-chords: each entry point's EFFECTIVE top-level chords are unique"
+# Upgraded with the include refactor: per-FILE uniqueness could never see a
+# chord bound once in the shared base and again in an entry point or overlay,
+# which is precisely the collision the merge could have introduced (e.g.
+# $mod+Shift+s living in both). Expanding first makes the check whole-session.
+eff_top_level_chords() { effective "$1" | top_level_chords_stdin; }
+top_level_chords_stdin() {
+  grep -E '^bindsym ' | awk '{ key = $2; if ($3 == "--release") key = key " --release"; print key }'
+}
+for f in "$I3_BASE" "$I3_XRDP"; do
+  DUP="$(eff_top_level_chords "$f" | sort | uniq -d)"
+  assert_eq "$(basename "$f") effective: sort | uniq -d on its chords" "" "$DUP"
+done
 
 # ---- i3 -C parses clean ------------------------------------------------------
 #
@@ -1018,18 +1057,22 @@ assert_eq "no ERROR lines from i3 -C on config-xrdp's include chain" "" "$ERR"
 
 # ---- MUTANT PIN: a wrong relocation (Shift+o bound in only ONE file) --------
 
-scenario "MUTANT PIN: Shift+o bound in only i3/config (not config.common) fails shift-o-is-name-workspace-both-files"
-# Simulate the bug directly rather than trust the detector in the abstract:
-# take the REAL (correctly relocated) config.common and strip the
-# $mod+Shift+o line back out, as if this task's edit had only ever touched
-# i3/config. Re-running this scenario's own check against the mutant must
-# report the file as MISSING the bind (count 0, not 1) -- the exact
-# condition that would turn the real scenario above red.
-MUT_COMMON="$TMP/config.common.mut-onefile"
+scenario "MUTANT PIN: dropping the bind from the shared base breaks BOTH entry points"
+# Simulate the bug directly rather than trust the detector in the abstract.
+# Pre-refactor the mutant was "bound in one file only"; that failure mode no
+# longer exists -- there is one file. The live failure mode now is a bind
+# vanishing from the shared base, which must take BOTH entry points down (and
+# is exactly what the include buys: no way to fix one and forget the other).
+MUT_COMMON="$TMP/config.common.mut-dropped"
+MUT_ENTRY="$TMP/config.mut-entry"
 grep -F -x -v -- "$NAME_WS_LINE" "$I3_COMMON" > "$MUT_COMMON"
-assert_eq "the real i3/config still has the bind (unaffected by the mutation)" "1" "$(count_fixed_line "$I3_BASE" "$NAME_WS_LINE")"
-assert_eq "the mutant config.common no longer has it -- shift-o-is-name-workspace-both-files would FAIL here" \
-  "0" "$(count_fixed_line "$MUT_COMMON" "$NAME_WS_LINE")"
+sed "s|^include ~/.dotfiles/i3/config.common$|include $MUT_COMMON|" "$I3_BASE" > "$MUT_ENTRY"
+assert_eq "the mutant base no longer carries the bind" "0" "$(count_fixed_line "$MUT_COMMON" "$NAME_WS_LINE")"
+assert_eq "so the desktop entry point loses it too -- shift-o-is-name-workspace would FAIL here" \
+  "0" "$(count_eff_line "$MUT_ENTRY" "$NAME_WS_LINE")"
+# and the unmutated entry point still has it, proving the probe discriminates
+assert_eq "the real entry point still resolves the bind through the include" "1" \
+  "$(count_eff_line "$I3_BASE" "$NAME_WS_LINE")"
 
 # ============================================================================
 # PHASE 3 END-TO-END -- real daemon + real bar/browser under Xvfb (AC1, AC4)
