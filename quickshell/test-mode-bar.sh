@@ -764,6 +764,24 @@ else
   bind_emit '["shift"]' "" 'mode "nav"'; sleep 0.5          # release bind, mods=shift
   ipc2 call barprobe dumpc "nav-after-release" >/dev/null 2>&1; sleep 0.25
 
+  # --- per-keystroke twin churn (the xrdp case) ------------------------------
+  # An RDP client that re-synthesises Shift around each keystroke makes i3 leave
+  # and re-enter the twin on every j. The BINDS keep working (the user sees the
+  # window move) but the pill would strobe. The falling edge is debounced, so a
+  # dip shorter than the window is invisible.
+  mode_emit '{"change":"nav-move"}'; sleep 0.4            # Shift down
+  ipc2 call barprobe dumpc "churn-armed" >/dev/null 2>&1; sleep 0.2
+  # ... j arrives as: leave twin, run the shifted move, re-enter twin ...
+  mode_emit '{"change":"nav"}'; sleep 0.12                # dip, well under 400ms
+  ipc2 call barprobe dumpc "churn-mid-dip" >/dev/null 2>&1; sleep 0.05
+  bind_emit '["shift"]' j 'move down'; sleep 0.05
+  mode_emit '{"change":"nav-move"}'; sleep 0.4
+  ipc2 call barprobe dumpc "churn-settled" >/dev/null 2>&1; sleep 0.2
+  # A REAL release must still clear, just later than the debounce window.
+  mode_emit '{"change":"nav"}'; sleep 0.15
+  bind_emit '["shift"]' "" 'mode "nav"'; sleep 1.0        # > 400ms
+  ipc2 call barprobe dumpc "churn-real-release" >/dev/null 2>&1; sleep 0.2
+
   # Leaving the mode resets the indicator, so re-entry never inherits MOVE from
   # the Shift+q that exited it.
   bind_emit '["shift"]' q 'mode default'; sleep 0.3
@@ -839,6 +857,19 @@ else
   assert_case "nav-pre-release.pill"    "nav MOVE"
   assert_case "nav-after-release.pill"  "nav"
   assert_case "nav-after-release.mode"  "nav"
+
+  scenario "per-keystroke twin churn does not strobe the pill (the xrdp case)"
+  assert_case "churn-armed.pill"    "nav MOVE"
+  # THE fix: mid-dip the raw mode is "nav", but the pill must still read MOVE.
+  # MUTANT PIN: remove the debounce (render navShift directly) and this reads
+  # "nav" — one flash per keystroke, which is what the user sees as flicker.
+  assert_case "churn-mid-dip.mode"  "nav"
+  assert_case "churn-mid-dip.pill"  "nav MOVE"
+  assert_case "churn-settled.pill"  "nav MOVE"
+
+  scenario "a REAL Shift release still clears, just past the debounce window"
+  assert_case "churn-real-release.pill" "nav"
+  assert_case "churn-real-release.mode" "nav"
 
   scenario "the indicator resets across mode transitions — re-entry reads 'nav', not 'nav MOVE'"
   # The Shift+q that exits leaves the flag set; entering again must not inherit

@@ -275,10 +275,15 @@ PanelWindow {
     // down, and it stays MOVE until an unshifted key is pressed. That is the
     // honest reading of what the WM did, needs no helper process on any
     // platform, and works under sway (which emits the same event) for free.
+    //
+    // The i3 twin mode ("nav-move", entered on the bare Shift keycode) is the
+    // second input: it is what lights the pill BEFORE any key is pressed. The
+    // two are unioned in navShift below.
     property bool shiftHeld: false
+    readonly property bool inNavMode: currentMode === "nav" || currentMode === "nav-move"
 
     function noteBinding(b) {
-        if (root.currentMode !== "nav") return
+        if (!root.inNavMode) return
         // Mode-switching binds describe the TWIN FLIP, not an hjkl action, and
         // must never drive the indicator. This is load-bearing: i3 emits the
         // mode event BEFORE the binding event, so on Shift release the flip
@@ -297,10 +302,39 @@ PanelWindow {
         root.shiftHeld = shifted
     }
 
-    // Any mode transition resets the indicator — including INTO nav, so the
-    // mode always opens in its plain state rather than inheriting whatever the
-    // previous session left behind (e.g. the Shift+q that exited it).
-    onCurrentModeChanged: shiftHeld = false
+    // Every mode transition clears the binding-derived flag. Leaving the twin
+    // IS i3 telling us the modifier came up, so a stale "the last action was
+    // shifted" must not outlive it — otherwise a real release never clears,
+    // since nothing else retracts that flag until an unshifted key is pressed.
+    // Under per-keystroke churn the flag is immediately re-armed by the shifted
+    // action binding that follows, which is precisely the case it exists for.
+    // Leaving the nav modes altogether also drops the debounced render state,
+    // so a later entry opens plain rather than inheriting the Shift+q that
+    // exited it.
+    onCurrentModeChanged: {
+        shiftHeld = false
+        if (!inNavMode) { navUnstick.stop(); navShiftSticky = false }
+    }
+
+    // Raw "should the pill read MOVE" — either i3 is in the twin (Shift is
+    // physically down, reported before any key is pressed) or the last action
+    // binding was a shifted one (the session re-synthesises modifiers per
+    // keystroke, so the twin flickers but the action still says shift).
+    readonly property bool navShift: currentMode === "nav-move" || (inNavMode && shiftHeld)
+
+    // ...and the debounced version the UI actually renders. An xrdp client that
+    // re-synthesises Shift around every keystroke makes i3 leave and re-enter
+    // the twin on each keypress; unfiltered, the pill (and only the pill — the
+    // binds themselves keep working) strobes MOVE/nav on every j. Rising edge
+    // is immediate so the cue never lags the gesture; the falling edge waits,
+    // and a re-entry inside the window cancels it outright, so per-keystroke
+    // churn is invisible while a real release still clears within ~0.4s.
+    property bool navShiftSticky: false
+    Timer { id: navUnstick; interval: 400; onTriggered: root.navShiftSticky = false }
+    onNavShiftChanged: {
+        if (navShift) { navUnstick.stop(); navShiftSticky = true }
+        else if (navShiftSticky) navUnstick.restart()
+    }
 
     // --- System stats ---
     // Two modes:
@@ -640,14 +674,15 @@ PanelWindow {
         // ModeBar (sp018 / ft009). Same anchors + leftMargin as the old inline
         // overlay Row; the host keeps the mode-subscription Process above and
         // just feeds it root.currentMode.
-        // "nav-move" is a SYNTHETIC mode name — i3 never enters it. Held Shift
-        // is a bar-side observation (navKeyMon above), and swapping the string
-        // fed to ModeBar is how it becomes visible without widening ft009's
+        // While in either nav twin the pill is decided by navShiftSticky, NOT
+        // by the raw mode name — that is what absorbs the per-keystroke twin
+        // churn an xrdp client produces. Swapping the string fed to ModeBar is
+        // also how the MOVE face stays available without widening ft009's
         // two-prop api_surface: the registry already carries both rows.
         ModeBar {
             anchors { left: parent.left; top: parent.top; bottom: parent.bottom; leftMargin: 8 }
-            mode: (root.currentMode === "nav" && root.shiftHeld) ? "nav-move"
-                                                                 : root.currentMode
+            mode: root.inNavMode ? (root.navShiftSticky ? "nav-move" : "nav")
+                                 : root.currentMode
             fontSize: root.fontSize
         }
 
