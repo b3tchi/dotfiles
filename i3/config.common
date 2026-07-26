@@ -306,17 +306,29 @@ mode "resize" {
 
 # Navigation mode (dotfiles-5u6m) — sticky hjkl focus without holding $mod.
 # $mod+o enters; hjkl / arrows focus, Shift+hjkl / Shift+arrows move the
-# focused window; q, Escape or Enter leave. Shift is a plain modifier on each
-# bind here — ONE mode, no sub-mode flip.
+# focused window; q, Escape or Enter leave (Shift+q too — q must work with
+# Shift held).
 #
-# The "is Shift down" indication is quickshell's job, not i3's: Bar.qml spawns
-# qs-keymon.py (the same XI2 raw-key listener the $mod+w switcher uses) while
-# this mode is active and repaints its pill "nav" -> "nav MOVE" from keycodes
-# 50/62. i3 cannot report live modifier state at all, so nothing here drives
-# that — but the hint strip mirrors these keys, so keep them in sync with
-# quickshell/config/Common/ModeBarTheme.qml's hints["nav"] / hints["nav-move"].
+# TWO modes with IDENTICAL bindings: "nav" and "nav-move". The pair exists
+# only so the bar can show whether Shift is down BEFORE any hjkl is pressed —
+# i3's IPC reports the mode name, so a mode flip is the one Shift signal that
+# reaches the bar instantly and identically on every session (native, xrdp,
+# sway). Bar.qml renders "nav" vs "nav MOVE" from it; the hint strips live in
+# quickshell/config/Common/ModeBarTheme.qml, keep them in sync with these keys.
 #
-# Shift+q exits too: q must still work with Shift physically held.
+# bindCODE for the Shift keys, not bindsym: i3's parser reads the leading
+# "Shift" of `bindsym Shift_L` as a MODIFIER and then fails to translate the
+# "_L" remainder, silently dropping the bind (log-only — `i3 -C` stays clean).
+# 50/62 are Shift_L/Shift_R in every evdev X keymap (xmodmap -pm). The release
+# event still carries the Shift bit (X state is pre-event), so the MASKED form
+# is the one that fires; the bare pair is a keymap-quirk fallback.
+#
+# The two modes bind the same keys to the same commands ON PURPOSE. A missed
+# release (an RDP client that re-synthesises modifiers per keystroke, a focus
+# steal) can strand the session in "nav-move", and if that mode moved windows
+# on bare hjkl the stranding would be destructive instead of merely cosmetic.
+# Bar.qml additionally re-asserts MOVE from the `mods` of each binding event,
+# so a session whose Shift release arrives spuriously still paints correctly.
 bindsym $mod+o mode "nav"
 mode "nav" {
         bindsym h focus left
@@ -340,7 +352,43 @@ mode "nav" {
         bindsym Shift+Up move up
         bindsym Shift+Right move right
 
+        # Shift down -> the twin mode, so the bar repaints as "nav MOVE"
+        bindcode 50 mode "nav-move"
+        bindcode 62 mode "nav-move"
+
         # exit nav mode: Enter, Escape or q
+        bindsym Return mode "default"
+        bindsym Escape mode "default"
+        bindsym Shift+q mode "default"
+        bindsym q mode "default"
+}
+mode "nav-move" {
+        bindsym h focus left
+        bindsym j focus down
+        bindsym k focus up
+        bindsym l focus right
+
+        bindsym Shift+h move left
+        bindsym Shift+j move down
+        bindsym Shift+k move up
+        bindsym Shift+l move right
+
+        bindsym Left focus left
+        bindsym Down focus down
+        bindsym Up focus up
+        bindsym Right focus right
+
+        bindsym Shift+Left move left
+        bindsym Shift+Down move down
+        bindsym Shift+Up move up
+        bindsym Shift+Right move right
+
+        # Shift released -> back to the plain twin
+        bindcode --release Shift+50 mode "nav"
+        bindcode --release Shift+62 mode "nav"
+        bindcode --release 50 mode "nav"
+        bindcode --release 62 mode "nav"
+
         bindsym Return mode "default"
         bindsym Escape mode "default"
         bindsym Shift+q mode "default"

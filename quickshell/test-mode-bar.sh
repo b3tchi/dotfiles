@@ -734,6 +734,10 @@ else
   }
 
   barflip '{"change":"nav"}' "nav-on"                        # entered, no key yet
+  # i3 itself reports the twin mode when Shift goes down (before any binding
+  # runs) — the bar must render that name directly, not only its own synthesis.
+  barflip '{"change":"nav-move"}' "nav-twin-from-i3"
+  barflip '{"change":"nav"}' "nav-twin-back"
   bindflip '[]'        h 'focus left'  "nav-focus-key"      # bare    -> nav
   bindflip '["shift"]' j 'move down'   "nav-move-key"       # shifted -> MOVE
   bindflip '["shift"]' k 'move up'     "nav-move-again"     # stays MOVE
@@ -789,6 +793,12 @@ else
   assert_case "nav-on.strip" "1"
   assert_case "nav-on.pill"  "nav"
   assert_case "nav-on.ws"    "0"
+
+  scenario "i3's own twin mode renders MOVE — the instant Shift signal, no binding needed"
+  assert_case "nav-twin-from-i3.pill"  "nav MOVE"
+  assert_case "nav-twin-from-i3.mode"  "nav-move"
+  assert_case "nav-twin-from-i3.strip" "1"
+  assert_case "nav-twin-back.pill"     "nav"
 
   scenario "Shift indicator: a binding event carrying mods ['shift'] repaints the pill 'nav' -> 'nav MOVE'"
   # i3 stays in mode "nav" throughout — MOVE is a bar-side synthesis from the

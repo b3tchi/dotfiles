@@ -26,6 +26,16 @@ _lock_fp.flush()
 
 BW, BR = 2, 4
 BC = (0x16/255, 0xa0/255, 0x85/255)
+# Frame colour while a KEY-CAPTURING mode is active (dotfiles-5u6m). In these
+# modes bare letters are WM commands, not input — the red ring is the standing
+# reminder that the next `q` quits the mode instead of reaching the terminal
+# under the cursor. The bar's mode pill says the same thing, but the frame is
+# where the eye already is while navigating.
+MODE_BC = (0xcb/255, 0x4b/255, 0x16/255)   # ModeBarTheme.highlight
+# Modes that get MODE_BC. The nav pair is one mode to the user (the twin only
+# exists so the bar can show held Shift), so both spellings belong here or the
+# frame would flicker between colours as Shift goes down and up.
+COLOR_MODES = {'nav', 'nav-move'}
 # Windows to never border (quickshell overlays, rofi, etc.)
 IGNORE_CLASSES = {'quickshell', 'Rofi', 'rofi'}
 IGNORE_TITLES = {'qs-focus-border', 'qs-focus-dim'}
@@ -93,7 +103,7 @@ class Border:
 
     def _draw(self, widget, cr):
         # The shape clips everything but the ring — solid fill is enough.
-        cr.set_source_rgb(*BC)
+        cr.set_source_rgb(*(MODE_BC if mode_colored else BC))
         cr.paint()
 
     def update(self, x, y, w, h):
@@ -119,6 +129,10 @@ border = Border()
 # all refreshes until the mode ends. Only touched on the GLib main thread
 # (all event/poll paths run there).
 mode_suppressed = False
+
+# True while a COLOR_MODES mode is active — read by Border._draw. Same
+# main-thread-only discipline as mode_suppressed.
+mode_colored = False
 
 
 def should_ignore(c):
@@ -185,13 +199,21 @@ def handle_event(data):
     # because the overlay never emits a focus event, and modes like "resize"
     # keep the live-refresh behavior.
     if 'container' not in e and 'current' not in e and 'binding' not in e:
-        global mode_suppressed
+        global mode_suppressed, mode_colored
+        # Recolour BEFORE any redraw below, so the refresh that follows a mode
+        # change paints the new colour rather than the previous one.
+        was_colored, mode_colored = mode_colored, change in COLOR_MODES
         if change in SUPPRESS_MODES:
             border.hide()
             mode_suppressed = True
         else:
             mode_suppressed = False
             refresh_focused()
+            # A mode swap that changes only the colour (nav -> default with
+            # focus unchanged) still needs the ring repainted: refresh_focused
+            # skips the GTK draw when geometry is identical.
+            if was_colored != mode_colored:
+                border.win.queue_draw()
         return
     c = e.get('container')
     if not c:

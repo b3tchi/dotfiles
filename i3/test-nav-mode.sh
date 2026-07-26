@@ -15,9 +15,10 @@
 # Windows are two `st` terminals identified by X11 window id, not title: st
 # rewrites its own title from the shell prompt, so titles are not stable.
 #
-# The held-Shift INDICATOR is not tested here — it lives in the bar and is
-# covered by quickshell/test-mode-bar.sh (nav / nav MOVE pill scenarios). This
-# suite covers what i3 itself does: focus unshifted, move shifted, one mode.
+# Scope: what i3 itself does — focus unshifted, move shifted, and the nav /
+# nav-move twin whose only purpose is to publish held-Shift as a mode name the
+# bar can render. How the bar PAINTS that is quickshell/test-mode-bar.sh's job;
+# the focus-frame recolour is asserted here because it needs a real WM.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -112,24 +113,120 @@ xdotool key l; sleep 0.4
 assert_eq "l focuses right -> B" "$(focused)" "$B"
 assert_eq "layout untouched by focusing" "$(ids)" "$A $B"
 
-scenario "Shift+hjkl MOVE the focused window, without leaving the mode"
+scenario "Shift+hjkl MOVE the focused window"
 xdotool key --clearmodifiers shift+h; sleep 0.5
 assert_eq "Shift+h moves B left -> B A" "$(ids)" "$B $A"
 assert_eq "focus follows the moved window" "$(focused)" "$B"
-# Single-mode design (the Shift indicator is the bar's job): i3 must NOT flip
-# into a second binding state, or the pill and the binds would disagree.
-assert_eq "still in nav — Shift did not change the mode" "$(mode)" "nav"
+
+# THE indicator contract: pressing Shift ALONE — before any hjkl — must already
+# put i3 in the twin mode, because the mode name is what the bar renders. An
+# indicator derived from binding events cannot do this (no binding has run
+# yet), which is exactly why the twin exists.
+scenario "Shift alone flips to the twin mode, and releasing it flips back"
+xdotool keyup shift 2>/dev/null; sleep 0.3   # ensure a known starting state
+xdotool key q; sleep 0.3; xdotool key super+o; sleep 0.4
+assert_eq "starts in nav" "$(mode)" "nav"
+LAYOUT_BEFORE="$(ids)"
+xdotool keydown shift; sleep 0.5
+assert_eq "Shift down -> nav-move" "$(mode)" "nav-move"
+assert_eq "no window moved by the modifier alone" "$(ids)" "$LAYOUT_BEFORE"
+xdotool keyup shift; sleep 0.5
+assert_eq "Shift up -> back to nav" "$(mode)" "nav"
+
+# The twin binds the same keys to the same commands. A missed release (RDP
+# clients that re-synthesise modifiers, a focus steal) can strand the session
+# in nav-move; if bare hjkl moved windows there, that stranding would be
+# destructive rather than cosmetic.
+scenario "the twin mode is behaviourally IDENTICAL — bare hjkl still focuses there"
+xdotool keydown shift; sleep 0.4
+assert_eq "in the twin" "$(mode)" "nav-move"
+LAYOUT_BEFORE="$(ids)"
+# focus the RIGHT window first, so a bare `h` has somewhere to focus TO and the
+# focus assertion below is a real claim rather than an edge no-op.
+xdotool key --clearmodifiers l; sleep 0.4
+xdotool key --clearmodifiers h; sleep 0.4
+assert_eq "bare h in the twin FOCUSED left, it did not move anything" "$(ids)" "$LAYOUT_BEFORE"
+assert_eq "and focus actually landed on the left window" "$(focused)" "${LAYOUT_BEFORE%% *}"
+xdotool keyup shift 2>/dev/null; sleep 0.4
+# back to the plain twin for the rest of the suite
+[ "$(mode)" = "nav-move" ] && { xdotool keydown shift; sleep 0.2; xdotool keyup shift; sleep 0.4; }
+assert_eq "settled back in nav" "$(mode)" "nav"
 
 scenario "after a move, unshifted keys go back to focusing (no sticky move)"
 xdotool key l; sleep 0.4
-assert_eq "l focuses A" "$(focused)" "$A"
-assert_eq "layout unchanged by focus" "$(ids)" "$B $A"
+LAYOUT_NOW="$(ids)"
+xdotool key h; sleep 0.4
+assert_eq "layout unchanged by focusing" "$(ids)" "$LAYOUT_NOW"
 
 scenario "arrow keys mirror hjkl in both roles"
+# Expectations are derived from the CURRENT order, not the fixture's: earlier
+# scenarios legitimately reshuffle the pair, and hardcoding A/B here would make
+# this scenario fail for the wrong reason whenever one of them is edited.
+xdotool key --clearmodifiers l; sleep 0.4          # focus the right-hand one
+ORDER_NOW="$(ids)"; RIGHT="${ORDER_NOW##* }"; LEFT="${ORDER_NOW%% *}"
 xdotool key --clearmodifiers shift+Left; sleep 0.5
-assert_eq "Shift+Left moves A left -> A B" "$(ids)" "$A $B"
-xdotool key Right; sleep 0.4
-assert_eq "Right focuses B" "$(focused)" "$B"
+assert_eq "Shift+Left swapped the pair" "$(ids)" "$RIGHT $LEFT"
+xdotool keyup shift 2>/dev/null; sleep 0.4
+xdotool key --clearmodifiers Right; sleep 0.4
+assert_eq "Right focuses the right-hand window" "$(focused)" "$LEFT"
+
+# --- focus-frame colour (dotfiles-5u6m) -------------------------------------
+#
+# quickshell/qs-focus-border.py draws the focus ring and already follows i3
+# mode events, so the "you are in a key-capturing mode" cue lives there rather
+# than in a second overlay. It is asserted HERE because this is the only
+# harness with a real i3 and real windows for it to draw around.
+#
+# The assertion is on actual PIXELS (adr0002 — UI observed through sh-visible
+# effects): screenshot the root window and count the ring's colour. Skipped
+# where the helper's GTK stack is unavailable rather than failing the suite.
+if ! command -v import >/dev/null; then
+  echo; echo "SKIP: focus-frame colour needs ImageMagick's import (not installed)"
+elif ! python3 -c 'import gi' 2>/dev/null; then
+  echo; echo "SKIP: focus-frame colour needs python-gobject (not installed)"
+else
+  ring_pixels() { # <hex-without-#> -> pixel count of that exact colour
+    import -window root "$TMP/shot.png" 2>/dev/null
+    convert "$TMP/shot.png" -format %c histogram:info:- 2>/dev/null \
+      | grep -i "#$1" | awk '{print $1}' | tr -d ':' | head -1
+  }
+  # leave nav so the helper starts in the default-mode colour
+  xdotool key q 2>/dev/null; sleep 0.3
+  DISPLAY="$DPY" python3 -u "$SCRIPT_DIR/../quickshell/qs-focus-border.py" \
+    >"$TMP/border.log" 2>&1 &
+  BORDER_PID=$!
+  sleep 2.5
+  i3-msg -s "$I3SOCK" 'focus left' >/dev/null; sleep 1.2
+
+  scenario "focus frame is the normal colour in the default mode"
+  TEAL_DEFAULT="$(ring_pixels 16A085)"
+  RED_DEFAULT="$(ring_pixels CB4B16)"
+  assert_eq "teal ring pixels present" "$([ "${TEAL_DEFAULT:-0}" -gt 0 ] && echo yes || echo no)" "yes"
+  assert_eq "no red ring pixels yet" "$([ "${RED_DEFAULT:-0}" -gt 0 ] && echo yes || echo no)" "no"
+
+  scenario "entering nav repaints the SAME frame red — the standing 'keys are captured' cue"
+  xdotool key super+o; sleep 1.5
+  TEAL_NAV="$(ring_pixels 16A085)"
+  RED_NAV="$(ring_pixels CB4B16)"
+  assert_eq "red ring pixels present in nav" "$([ "${RED_NAV:-0}" -gt 0 ] && echo yes || echo no)" "yes"
+  assert_eq "teal is gone (recoloured, not a second ring)" "$([ "${TEAL_NAV:-0}" -gt 0 ] && echo yes || echo no)" "no"
+
+  scenario "the twin mode keeps it red — Shift must not flicker the frame"
+  xdotool keydown shift; sleep 1.2
+  RED_TWIN="$(ring_pixels CB4B16)"
+  assert_eq "still red while Shift is held" "$([ "${RED_TWIN:-0}" -gt 0 ] && echo yes || echo no)" "yes"
+  xdotool keyup shift; sleep 0.6
+
+  scenario "leaving the mode restores the normal colour"
+  xdotool key q; sleep 1.5
+  TEAL_BACK="$(ring_pixels 16A085)"
+  RED_BACK="$(ring_pixels CB4B16)"
+  assert_eq "teal ring is back" "$([ "${TEAL_BACK:-0}" -gt 0 ] && echo yes || echo no)" "yes"
+  assert_eq "no red left behind" "$([ "${RED_BACK:-0}" -gt 0 ] && echo yes || echo no)" "no"
+
+  kill "$BORDER_PID" 2>/dev/null
+  xdotool key super+o; sleep 0.4    # the exit scenarios below expect nav
+fi
 
 # The bar's Shift indicator is driven ENTIRELY by these events (quickshell
 # Bar.qml noteBinding + test-mode-bar.sh, which replays this exact payload
@@ -155,7 +252,10 @@ while i < len(raw):
     while i < len(raw) and raw[i] in ' \n\r\t':
         i += 1
     b = obj.get("binding")
-    if b:
+    # bindcode binds (the Shift-keycode twin flips) report symbol null — they
+    # are asserted by the mode scenarios above, and including them here would
+    # pin xdotool's modifier-synthesis order rather than i3's mods reporting.
+    if b and b.get("symbol"):
         out.append("%s:%s:%s" % (b.get("symbol"), ",".join(b.get("mods", [])), b.get("command")))
 print("|".join(out))
 PY
