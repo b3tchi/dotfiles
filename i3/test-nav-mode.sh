@@ -15,10 +15,11 @@
 # Windows are two `st` terminals identified by X11 window id, not title: st
 # rewrites its own title from the shell prompt, so titles are not stable.
 #
-# Scope: what i3 itself does — focus bare, move with Ctrl, and the two `nop`
-# binds that publish held-Shift to the bar as binding events (there is ONE mode;
-# the nop signal replaced a twin mode that had to duplicate every movement bind
-# so a missed release could not strand the session somewhere destructive).
+# Scope: what i3 itself does — focus bare, move with Ctrl, resize with Alt, and
+# the `nop` binds that publish each held modifier to the bar as binding events.
+# There is ONE i3 mode for all three layers; the nop signal replaced a twin mode
+# that had to duplicate every movement bind so a missed release could not strand
+# the session somewhere destructive.
 # How the bar PAINTS that is quickshell/test-mode-bar.sh's job; the focus-frame
 # recolour is asserted here because it needs a real WM.
 set -u
@@ -144,6 +145,47 @@ assert_eq "the down/up pair reached the bar's stream" \
 assert_eq "the mode never left nav while Ctrl was held" "$MODE_WHILE_HELD" "nav"
 assert_eq "still nav after the release" "$(mode)" "nav"
 assert_eq "nop moved no window" "$(ids)" "$LAYOUT_BEFORE"
+
+# Width of the focused window, for the resize layer.
+fwidth() { i3-msg -s "$I3SOCK" -t get_tree | python3 -c '
+import sys, json
+def f(n):
+    if n.get("focused") and n.get("window"): return n["rect"]["width"]
+    for c in n.get("nodes", []) + n.get("floating_nodes", []):
+        r = f(c)
+        if r: return r
+print(f(json.load(sys.stdin)) or 0)'; }
+
+scenario "ALT is a third layer: Alt+hjkl RESIZE, and the mode still never changes"
+# The base config sets `workspace_layout tabbed`, where every window fills the
+# tab area and a width resize is a silent no-op — the resize layer is only
+# observable in a split container, so put the workspace in one first.
+i3-msg -s "$I3SOCK" 'layout splith' >/dev/null; sleep 0.5
+W_BEFORE="$(fwidth)"
+LAYOUT_BEFORE="$(ids)"
+xdotool key --clearmodifiers alt+l; sleep 0.5
+W_WIDER="$(fwidth)"
+[ "${W_WIDER:-0}" -gt "${W_BEFORE:-0}" ] \
+  && assert_eq "Alt+l made the focused window wider" "wider" "wider" \
+  || assert_eq "Alt+l made the focused window wider" "$W_BEFORE -> $W_WIDER" "wider"
+xdotool key --clearmodifiers alt+h; sleep 0.5
+assert_eq "Alt+h took the width back" "$(fwidth)" "$W_BEFORE"
+assert_eq "resizing reordered nothing" "$(ids)" "$LAYOUT_BEFORE"
+assert_eq "still one mode throughout" "$(mode)" "nav"
+
+scenario "Alt alone emits the resize nop pair, and moves/resizes nothing"
+ALT_LOG="$TMP/alt-nops.log"
+i3-msg -s "$I3SOCK" -t subscribe -m '["binding"]' > "$ALT_LOG" 2>&1 &
+ALT_SUB=$!
+sleep 0.8
+W_IDLE="$(fwidth)"
+xdotool keydown alt; sleep 0.5
+xdotool keyup alt; sleep 0.5
+kill "$ALT_SUB" 2>/dev/null; sleep 0.3
+assert_eq "the resize down/up pair reached the bar's stream" \
+  "$(python3 "$SCRIPT_DIR/test-events.py" "$ALT_LOG" "nop ")" \
+  "nop nav-resize-on|nop nav-resize-off"
+assert_eq "the modifier alone changed no geometry" "$(fwidth)" "$W_IDLE"
 
 scenario "after a move, unshifted keys go back to focusing (no sticky move)"
 xdotool key l; sleep 0.4

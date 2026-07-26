@@ -349,9 +349,14 @@ mode "resize" {
 }
 
 # Navigation mode (dotfiles-5u6m) — sticky hjkl focus without holding $mod.
-# $mod+o enters; hjkl / arrows focus, CTRL+hjkl / Ctrl+arrows move the focused
-# window; q, Escape or Enter leave (Ctrl+q and Shift+q too — q must work with a
-# modifier still held).
+# $mod+o enters; hjkl / arrows focus, CTRL+hjkl move the focused window, ALT+hjkl
+# resize it (same 5px/5ppt steps as the standalone `resize` mode); q, Escape or
+# Enter leave (Ctrl+q and Shift+q too — q must work with a modifier still held).
+#
+# Three layers, one mode: the bare keys act, and a held modifier reinterprets
+# them. Both modifiers are keys the session actually reports as held (see the
+# Ctrl note below), and each has its own nop pair so the bar can name the
+# layer — "nav", "nav MOVE", "nav RESIZE".
 #
 # CTRL, not Shift, is the move modifier — and that is a portability decision,
 # not a taste one. xrdp synthesises Shift around every character it sends (xev
@@ -403,7 +408,20 @@ mode "nav" {
         bindsym Ctrl+Up move up
         bindsym Ctrl+Right move right
 
-        # Ctrl down / up -> bar indicator only; no layout effect
+        # ALT = resize layer. Directions match the standalone `resize` mode:
+        # h/l shrink/grow width, k/j shrink/grow height.
+        bindsym Mod1+h resize shrink width 5 px or 5 ppt
+        bindsym Mod1+j resize grow height 5 px or 5 ppt
+        bindsym Mod1+k resize shrink height 5 px or 5 ppt
+        bindsym Mod1+l resize grow width 5 px or 5 ppt
+
+        bindsym Mod1+Left resize shrink width 5 px or 5 ppt
+        bindsym Mod1+Down resize grow height 5 px or 5 ppt
+        bindsym Mod1+Up resize shrink height 5 px or 5 ppt
+        bindsym Mod1+Right resize grow width 5 px or 5 ppt
+
+        # Modifier down / up -> bar indicator only; no layout effect.
+        # 37/105 = Control_L/Control_R, 64/108 = Alt_L/Alt_R (xmodmap -pm).
         bindcode 37 nop nav-move-on
         bindcode 105 nop nav-move-on
         bindcode --release Ctrl+37 nop nav-move-off
@@ -411,10 +429,18 @@ mode "nav" {
         bindcode --release 37 nop nav-move-off
         bindcode --release 105 nop nav-move-off
 
+        bindcode 64 nop nav-resize-on
+        bindcode 108 nop nav-resize-on
+        bindcode --release Mod1+64 nop nav-resize-off
+        bindcode --release Mod1+108 nop nav-resize-off
+        bindcode --release 64 nop nav-resize-off
+        bindcode --release 108 nop nav-resize-off
+
         # exit nav mode: Enter, Escape or q (with or without a modifier held)
         bindsym Return mode "default"
         bindsym Escape mode "default"
         bindsym Ctrl+q mode "default"
+        bindsym Mod1+q mode "default"
         bindsym Shift+q mode "default"
         bindsym q mode "default"
 }

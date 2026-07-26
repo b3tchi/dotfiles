@@ -45,10 +45,10 @@ Singleton {
             {text: "quit", key: "q"}
         ],
         // nav / nav-move (dotfiles-5u6m) — the sticky-hjkl mode's two faces.
-        // i3 has ONE mode here ("nav": hjkl focus, Ctrl+hjkl move); it never
-        // enters "nav-move". That name is SYNTHETIC: Bar.qml swaps it in while
-        // the move modifier is down, so the strip shows which role the keys are
-        // currently playing.
+        // i3 has ONE mode here ("nav": hjkl focus, Ctrl+hjkl move, Alt+hjkl
+        // resize); it never enters "nav-move" or "nav-resize". Those names are
+        // SYNTHETIC: Bar.qml swaps one in while its modifier is down, so the
+        // strip shows which role the keys are currently playing.
         // The modifier is CTRL, not Shift, because xrdp synthesises Shift
         // around every character it sends — a held Shift is unobservable on
         // that session, so the cue could not be honest (see the nav block in
@@ -67,6 +67,18 @@ Singleton {
             {text: "move-↑", key: "k"},
             {text: "move-→", key: "l"},
             {text: "moving", key: "^"},
+            {text: "quit", key: "q"}
+        ],
+        // Third layer: Alt held. Directions mirror the standalone resize mode
+        // (h/l width, k/j height), so the words describe the RESULT rather
+        // than the direction — "wider" reads better than "→" when the same
+        // arrow means "move right" one layer up.
+        "nav-resize": [
+            {text: "narrower", key: "h"},
+            {text: "taller", key: "j"},
+            {text: "shorter", key: "k"},
+            {text: "wider", key: "l"},
+            {text: "resizing", key: "⎇"},
             {text: "quit", key: "q"}
         ],
         "system": [
@@ -89,7 +101,8 @@ Singleton {
         if (mode === "resize") return "resize"
         if (mode === "screenshot") return "screenshot"
         if (mode === "nav") return "nav"
-        if (mode === "nav-move") return "nav-move"   // synthetic (see hints)
+        if (mode === "nav-move") return "nav-move"       // synthetic (see hints)
+        if (mode === "nav-resize") return "nav-resize"   // synthetic
         if (mode.indexOf("(l)ock") !== -1) return "system"
         return ""
     }
@@ -104,7 +117,8 @@ Singleton {
         return mode === "resize" ? "resize"
              : mode === "screenshot" ? "screenshot"
              : mode === "nav" ? "nav"
-             : mode === "nav-move" ? "nav MOVE" : "system"
+             : mode === "nav-move" ? "nav MOVE"
+             : mode === "nav-resize" ? "nav RESIZE" : "system"
     }
 
     // Hint rows for a mode. Known modes return their registry rows; unknown

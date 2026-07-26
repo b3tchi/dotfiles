@@ -254,68 +254,79 @@ PanelWindow {
         onExited: running = true
     }
 
-    // --- Move-modifier indicator for the nav mode (dotfiles-5u6m) ---
-    // i3 signals the modifier explicitly: the mode binds the Ctrl keycodes to
-    // `nop nav-move-on` / `nop nav-move-off`, and every executed binding — nop
-    // included, argument included — arrives as a binding event. The bar reads
-    // a statement of fact from the WM rather than inferring one.
+    // --- Layer indicator for the nav mode (dotfiles-5u6m) ---
+    // The mode has three layers: bare hjkl focus, Ctrl+hjkl move, Alt+hjkl
+    // resize. i3 signals which modifier is down explicitly — the mode binds the
+    // Ctrl and Alt keycodes to `nop nav-move-on/off` and `nop nav-resize-on/off`
+    // — and every executed binding arrives as a binding event, nop included,
+    // argument included. The bar reads a statement of fact from the WM rather
+    // than inferring one.
     //
-    // Ctrl rather than Shift is what makes this honest on every session: xrdp
-    // synthesises Shift around each character (xev shows it released on every
-    // letter press), so a held Shift is unobservable there, while Ctrl crosses
-    // as a real hold. Reading the physical modifier directly was tried twice
-    // and abandoned for the same reason — raw key edges desync when one is
-    // swallowed, and the X modifier mask is only as truthful as the session
-    // feeding it.
+    // Ctrl and Alt rather than Shift is what makes this honest on every
+    // session: xrdp synthesises Shift around each character (xev shows it
+    // released on every letter press), so a held Shift is unobservable there,
+    // while Ctrl and Alt cross as real holds. Reading the physical modifier
+    // directly was tried twice and abandoned for the same class of reason.
     //
-    // The mods of ordinary action bindings are a second, corroborating input:
-    // a binding i3 matched as Ctrl+hjkl proves the modifier was down for that
-    // keystroke even if the surrounding nop pair went missing.
+    // The mods of ordinary action bindings corroborate: a binding i3 matched as
+    // Ctrl+hjkl or Mod1+hjkl proves that modifier was down for the keystroke
+    // even if the surrounding nop pair went missing.
     property bool moveMod: false
+    property bool resizeMod: false
     readonly property bool inNavMode: currentMode === "nav"
+
+    // Resize wins when both are somehow held: it is the more destructive of
+    // the two, so naming it is the safer error.
+    readonly property string navLayer: resizeMod ? "nav-resize"
+                                     : moveMod   ? "nav-move" : "nav"
 
     function noteBinding(b) {
         if (!root.inNavMode) return
         var cmd = (b && b.command) ? String(b.command).trim() : ""
 
-        // The explicit signal wins outright. Matched BEFORE the mods below:
-        // the release nop legitimately carries mods:["ctrl"] (it IS the
+        // Explicit signals win outright, and are matched BEFORE the mods below:
+        // a release nop legitimately carries its own modifier (it IS the
         // release bind), so reading mods first would re-arm on the very event
         // that means "up".
-        if (cmd.indexOf("nop nav-move-on")  === 0) { root.moveMod = true;  return }
-        if (cmd.indexOf("nop nav-move-off") === 0) { root.moveMod = false; return }
+        if (cmd.indexOf("nop nav-move-on")    === 0) { root.moveMod   = true;  return }
+        if (cmd.indexOf("nop nav-move-off")   === 0) { root.moveMod   = false; return }
+        if (cmd.indexOf("nop nav-resize-on")  === 0) { root.resizeMod = true;  return }
+        if (cmd.indexOf("nop nav-resize-off") === 0) { root.resizeMod = false; return }
         // Any other nop is somebody else's marker — never an action.
         if (cmd.indexOf("nop") === 0) return
         // Mode switches describe leaving/entering, not what a key did.
         if (cmd.indexOf("mode ") === 0) return
 
         var mods = b && b.mods ? b.mods : []
-        var held = false
+        var ctrl = false, alt = false
         for (var i = 0; i < mods.length; i++) {
             var m = String(mods[i]).toLowerCase()
-            if (m === "ctrl" || m === "control") held = true
+            if (m === "ctrl" || m === "control") ctrl = true
+            if (m === "mod1" || m === "alt") alt = true
         }
-        root.moveMod = held
+        root.moveMod = ctrl
+        root.resizeMod = alt
     }
 
-    // Leaving nav resets everything, so the mode always opens plain rather
-    // than inheriting the Shift+q that exited it.
+    // Leaving nav resets every layer, so the mode always opens plain rather
+    // than inheriting the modifier that was held when it exited.
     onCurrentModeChanged: {
         moveMod = false
-        if (!inNavMode) { navUnstick.stop(); navMoveSticky = false }
+        resizeMod = false
+        if (!inNavMode) { navUnstick.stop(); navLayerSticky = "nav" }
     }
 
-    // Render state with a short bounce guard on the falling edge only. The
-    // 400ms window this used to carry was absorbing xrdp's per-keystroke Shift
-    // re-synthesis; Ctrl is transmitted as a real hold, so all that is left to
-    // guard against is a single stray release, and a longer wait would just
-    // read as lag on let-go. Rising edge stays immediate, and a re-assert
-    // inside the window cancels the pending clear.
-    property bool navMoveSticky: false
-    Timer { id: navUnstick; interval: 120; onTriggered: root.navMoveSticky = false }
-    onMoveModChanged: {
-        if (moveMod) { navUnstick.stop(); navMoveSticky = true }
-        else if (navMoveSticky) navUnstick.restart()
+    // Rendered layer, with a short bounce guard on the fall back to plain nav
+    // only. The 400ms window this once carried was absorbing xrdp's
+    // per-keystroke Shift re-synthesis; Ctrl and Alt are transmitted as real
+    // holds, so all that is left to guard is a single stray release, and a
+    // longer wait would read as lag on let-go. Switching BETWEEN modifier
+    // layers is immediate — only the fall to "nav" waits.
+    property string navLayerSticky: "nav"
+    Timer { id: navUnstick; interval: 120; onTriggered: root.navLayerSticky = "nav" }
+    onNavLayerChanged: {
+        if (navLayer !== "nav") { navUnstick.stop(); navLayerSticky = navLayer }
+        else if (navLayerSticky !== "nav") navUnstick.restart()
     }
 
     // --- System stats ---
@@ -656,14 +667,13 @@ PanelWindow {
         // ModeBar (sp018 / ft009). Same anchors + leftMargin as the old inline
         // overlay Row; the host keeps the mode-subscription Process above and
         // just feeds it root.currentMode.
-        // "nav-move" is a SYNTHETIC mode name — i3 never enters it, it stays
-        // in "nav" for the whole gesture. Swapping the string fed to ModeBar
-        // is how the MOVE face becomes visible without widening ft009's
-        // two-prop api_surface: the registry already carries both rows.
+        // "nav-move"/"nav-resize" are SYNTHETIC mode names — i3 never enters
+        // them, it stays in "nav" for the whole gesture. Swapping the string
+        // fed to ModeBar is how each layer's face becomes visible without
+        // widening ft009's two-prop api_surface: the registry carries all rows.
         ModeBar {
             anchors { left: parent.left; top: parent.top; bottom: parent.bottom; leftMargin: 8 }
-            mode: root.inNavMode ? (root.navMoveSticky ? "nav-move" : "nav")
-                                 : root.currentMode
+            mode: root.inNavMode ? root.navLayerSticky : root.currentMode
             fontSize: root.fontSize
         }
 

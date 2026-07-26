@@ -142,10 +142,12 @@ ShellRoot {
     //      must DIFFER (move-← vs ←, moving vs ctrl-to-move) — a registry that
     //      aliases nav-move back to nav renders no signal at all, which is the
     //      whole point of the synthetic mode. ----
-    emit("hints-nav",      j(ModeBarTheme.hints["nav"]))
-    emit("hints-nav-move", j(ModeBarTheme.hints["nav-move"]))
+    emit("hints-nav",        j(ModeBarTheme.hints["nav"]))
+    emit("hints-nav-move",   j(ModeBarTheme.hints["nav-move"]))
+    emit("hints-nav-resize", j(ModeBarTheme.hints["nav-resize"]))
     emit("nav-resolves",   JSON.stringify([
-      ModeBarTheme.resolve("nav"), ModeBarTheme.resolve("nav-move")
+      ModeBarTheme.resolve("nav"), ModeBarTheme.resolve("nav-move"),
+      ModeBarTheme.resolve("nav-resize")
     ]))
 
     // ---- resolve: the full \$mode_system string routes to system via
@@ -165,7 +167,8 @@ ShellRoot {
     ]))
     emit("nav-display-names", JSON.stringify([
       ModeBarTheme.displayName("nav"),
-      ModeBarTheme.displayName("nav-move")
+      ModeBarTheme.displayName("nav-move"),
+      ModeBarTheme.displayName("nav-resize")
     ]))
 
     // ---- empty-string mode -> fallback row with empty label ----
@@ -235,11 +238,13 @@ assert_case "hints-nav" \
   '[{"text":"←","key":"h"},{"text":"↓","key":"j"},{"text":"↑","key":"k"},{"text":"→","key":"l"},{"text":"ctrl-to-move","key":"^"},{"text":"quit","key":"q"}]'
 assert_case "hints-nav-move" \
   '[{"text":"move-←","key":"h"},{"text":"move-↓","key":"j"},{"text":"move-↑","key":"k"},{"text":"move-→","key":"l"},{"text":"moving","key":"^"},{"text":"quit","key":"q"}]'
+assert_case "hints-nav-resize" \
+  '[{"text":"narrower","key":"h"},{"text":"taller","key":"j"},{"text":"shorter","key":"k"},{"text":"wider","key":"l"},{"text":"resizing","key":"⎇"},{"text":"quit","key":"q"}]'
 # both must resolve to their OWN key — a nav-move falling through to "" would
 # render the raw mode name and lose the strip entirely.
-assert_case "nav-resolves" '["nav","nav-move"]'
+assert_case "nav-resolves" '["nav","nav-move","nav-resize"]'
 # the pill is the held-Shift tell: the two labels MUST NOT be equal.
-assert_case "nav-display-names" '["nav","nav MOVE"]'
+assert_case "nav-display-names" '["nav","nav MOVE","nav RESIZE"]'
 
 # ============================================================================
 # PHASE 1 — the ModeBar component (Common/ModeBar.qml): render structure,
@@ -777,6 +782,22 @@ else
   bind_emit '["ctrl"]' "" 'nop nav-move-off'; sleep 0.6  # > 120ms
   ipc2 call barprobe dumpc "churn-real-release" >/dev/null 2>&1; sleep 0.2
 
+  # --- the Alt/resize layer -------------------------------------------------
+  bind_emit '[]' "" 'nop nav-resize-on'; sleep 0.5
+  ipc2 call barprobe dumpc "nav-resize-on" >/dev/null 2>&1; sleep 0.2
+  # Both modifiers held: resize is the more destructive layer, so it is the one
+  # named (MUTANT PIN: flip the precedence in navLayer and this reads MOVE).
+  bind_emit '[]' "" 'nop nav-move-on'; sleep 0.5
+  ipc2 call barprobe dumpc "nav-both-mods" >/dev/null 2>&1; sleep 0.2
+  # Dropping Alt falls back to the layer still held, IMMEDIATELY — the guard is
+  # only for the fall to plain nav, so a layer switch must not lag.
+  bind_emit '["mod1"]' "" 'nop nav-resize-off'; sleep 0.2
+  ipc2 call barprobe dumpc "nav-alt-released" >/dev/null 2>&1; sleep 0.2
+  bind_emit '["ctrl"]' "" 'nop nav-move-off'; sleep 0.6
+  # An Alt action corroborates the layer even with no nop (mods=Mod1).
+  bindflip '["Mod1"]' l 'resize grow width 5 px or 5 ppt' "nav-resize-action"
+  bindflip '[]' h 'focus left' "nav-resize-cleared"
+
   # Leaving the mode resets the indicator, so re-entry never inherits MOVE from
   # the Shift+q that exited it.
   bind_emit '["ctrl"]' q 'mode default'; sleep 0.3
@@ -867,6 +888,20 @@ else
   scenario "a REAL release still clears, just past the guard window"
   assert_case "churn-real-release.pill" "nav"
   assert_case "churn-real-release.mode" "nav"
+
+  scenario "the Alt layer: nop nav-resize-on reads RESIZE, and outranks a held Ctrl"
+  assert_case "nav-resize-on.pill"  "nav RESIZE"
+  assert_case "nav-resize-on.mode"  "nav"
+  assert_case "nav-both-mods.pill"  "nav RESIZE"
+
+  scenario "dropping one modifier falls back to the other with no guard delay"
+  # Sampled 200ms after the release — inside the 120ms guard's reach if the
+  # layer switch were (wrongly) debounced like the fall to plain nav.
+  assert_case "nav-alt-released.pill" "nav MOVE"
+
+  scenario "an Alt action corroborates the layer, and a bare key clears it"
+  assert_case "nav-resize-action.pill"  "nav RESIZE"
+  assert_case "nav-resize-cleared.pill" "nav"
 
   scenario "the indicator resets across mode transitions — re-entry reads 'nav', not 'nav MOVE'"
   # The Shift+q that exits leaves the flag set; entering again must not inherit
