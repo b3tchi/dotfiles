@@ -253,40 +253,48 @@ PanelWindow {
     }
 
     // --- Held-Shift tracking for the nav mode (dotfiles-5u6m) ---
-    // i3 reports the MODE over IPC but never live modifier state, so the only
-    // way to show "Shift is down right now" is to read the X server directly.
-    // qs-keymon.py is the switcher's existing XI2 raw-key listener (it already
-    // emits keycodes 50/62 = Shift_L/Shift_R); the switcher's copy lives in the
-    // Overlay process, which on a desktop session is a SEPARATE quickshell
-    // instance whose properties this bar cannot read — hence a second listener
-    // here rather than a shared one.
+    // i3 reports the MODE over IPC but never live modifier state, so "Shift is
+    // down right now" has to come from the X server. qs-shiftmon.py polls the
+    // authoritative modifier mask and emits "shift 1" / "shift 0" on change.
+    //
+    // STATE, not edges: the switcher's qs-keymon.py reports key press/release
+    // edges, and an indicator built by pairing those desyncs the moment one
+    // edge goes missing — a release swallowed while another client holds a
+    // grab, or one that lands in the gap while this process is being started
+    // or killed at mode entry/exit — and then stays wrong until the next
+    // press. The polled mask is self-correcting (worst case one 40ms tick) and
+    // reports Shift from ANY key that maps into the modifier, not just the two
+    // keycodes a listener happens to hardcode.
     //
     // Gated on `currentMode === "nav"`, so it exists only for the seconds the
-    // mode is up: no idle python process, and on RDP (Overlay hosted in THIS
-    // instance) the brief overlap with the switcher's listener is two readers
-    // on the same root window, which XI2 fans out fine.
+    // mode is up — nothing polls while the bar is idle. The monitor emits its
+    // current state immediately on start, so entering the mode with Shift
+    // ALREADY down reads MOVE right away rather than waiting for a press.
     //
-    // X11 only — under sway the listener never runs and the pill simply stays
+    // X11 only — under sway the monitor never runs and the pill simply stays
     // "nav" while the Shift+hjkl binds keep working (i3/sway do the moving
     // either way). QS_NO_KEYMON=1 suppresses it on headless test displays.
     property bool shiftHeld: false
 
     Process {
-        id: navKeyMon
+        id: navShiftMon
         running: root.currentMode === "nav" && !root.isSway
                  && Quickshell.env("QS_NO_KEYMON") !== "1"
-        command: ["sh", "-c", "exec python3 -u $HOME/.dotfiles/quickshell/qs-keymon.py"]
+        command: ["sh", "-c", "exec python3 -u $HOME/.dotfiles/quickshell/qs-shiftmon.py"]
         stdout: SplitParser {
             onRead: data => {
                 var parts = data.trim().split(" ")
-                if (parts.length !== 2) return
-                var code = parseInt(parts[1])
-                if (code !== 50 && code !== 62) return   // Shift_L / Shift_R
-                root.shiftHeld = (parts[0] === "press")
+                // Anything that isn't exactly `shift <0|1>` is ignored rather
+                // than coerced — a truthiness test on a malformed line would
+                // flip the indicator on stray output (a python traceback line,
+                // a partial write).
+                if (parts.length !== 2 || parts[0] !== "shift") return
+                if (parts[1] !== "0" && parts[1] !== "1") return
+                root.shiftHeld = (parts[1] === "1")
             }
         }
     }
-    // Leaving the mode must clear the flag: the listener dies with the mode, so
+    // Leaving the mode must clear the flag: the monitor dies with the mode, so
     // a Shift release that lands after it exits would never be seen and the
     // next nav entry would open already reading MOVE.
     onCurrentModeChanged: if (currentMode !== "nav") shiftHeld = false

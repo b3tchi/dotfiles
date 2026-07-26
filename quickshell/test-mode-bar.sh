@@ -80,6 +80,12 @@ assert_case() { # <name> <expected>
   if [ "$2" = "$got" ]; then pass "$1"; else fail "$1" "$2" "$got"; fi
 }
 
+# Direct comparison, for PHASE 3's observations of a real process's stdout
+# (there is no CASE stream there — the script under test IS the producer).
+assert_eq() { # <label> <actual> <expected>
+  if [ "$2" = "$3" ]; then pass "$1"; else fail "$1" "$3" "$2"; fi
+}
+
 cleanup() {
   # PHASE 2 bar host is setsid'd into its own process group so the blocking
   # i3-msg subscribe reader (and the ws-subscribe sleep) die with it.
@@ -589,13 +595,14 @@ for t in sh cat sleep tr awk df grep sed cut head python3; do
   src="$(command -v "$t")" && ln -sf "$src" "$PBIN2/$t"
 done
 
-# --- fake HOME hosting a stub qs-keymon.py (dotfiles-5u6m) -------------------
+# --- fake HOME hosting a stub qs-shiftmon.py (dotfiles-5u6m) -----------------
 #
 # The nav-mode Shift indicator shells out to `python3 -u
-# $HOME/.dotfiles/quickshell/qs-keymon.py` — the real one needs XI2 + a real
-# keyboard, which an Xvfb has neither of. Pointing HOME at a sandbox lets the
-# suite substitute a stub that replays whatever the harness writes into a FIFO,
-# so "press 50" / "release 50" are driven on cue exactly as the X server would.
+# $HOME/.dotfiles/quickshell/qs-shiftmon.py` — the real one polls the X
+# modifier mask, which an Xvfb with no keyboard can never report as held.
+# Pointing HOME at a sandbox lets the suite substitute a stub that replays
+# whatever the harness writes into a FIFO, so "shift 1" / "shift 0" are driven
+# on cue exactly as the real monitor would emit them.
 # Reopen-in-a-loop (not a single open) because Bar.qml starts and KILLS this
 # process on every nav-mode entry/exit — each spawn must find the FIFO again.
 HOME2="$TMP/home"
@@ -603,7 +610,7 @@ KEYMON_DIR="$HOME2/.dotfiles/quickshell"
 KEYFIFO="$KEYMON_DIR/keys.fifo"
 mkdir -p "$KEYMON_DIR"
 mkfifo "$KEYFIFO"
-cat > "$KEYMON_DIR/qs-keymon.py" <<KEYEOF
+cat > "$KEYMON_DIR/qs-shiftmon.py" <<KEYEOF
 import sys
 while True:
     with open("$KEYFIFO") as f:
@@ -752,14 +759,13 @@ else
   keyflip() { key_emit "$1"; sleep 0.5; ipc2 call barprobe dumpc "$2" >/dev/null 2>&1; sleep 0.25; }
 
   barflip '{"change":"nav"}' "nav-on"          # entered, Shift not touched yet
-  keyflip "press 50"   "nav-shift-down"        # Shift_L down  -> pill flips
-  keyflip "release 50" "nav-shift-up"          # released      -> pill reverts
-  keyflip "press 62"   "nav-shiftr-down"       # Shift_R is equivalent
-  # Tab RELEASE while Shift is held: the switcher's monitor puts 23/25/133 on
-  # this same stream, so a handler that keyed on press/release alone (dropping
-  # the 50/62 filter) would clear the flag here and the pill would fall back to
-  # "nav" — the assertion below pins that it does not.
-  keyflip "release 23" "nav-other-key"
+  keyflip "shift 1" "nav-shift-down"           # held     -> pill flips
+  keyflip "shift 0" "nav-shift-up"             # released -> pill reverts
+  keyflip "shift 1" "nav-shift-again"          # and back — no latch either way
+  # Malformed output (a traceback line from the monitor, a partial write) must
+  # be IGNORED, not coerced: a truthiness test on the payload would clear the
+  # indicator here while Shift is still physically down.
+  keyflip "Traceback (most recent call last):" "nav-garbage-line"
   # leaving the mode with Shift still down must clear the flag — the listener
   # dies with the mode, so its release would never arrive.
   barflip '{"change":"default"}' "nav-off-shift-stuck"
@@ -805,24 +811,72 @@ else
   assert_case "nav-on.pill"  "nav"
   assert_case "nav-on.ws"    "0"
 
-  scenario "held-Shift indicator: a raw keymon 'press 50' repaints the pill 'nav' -> 'nav MOVE'"
+  scenario "held-Shift indicator: 'shift 1' from the monitor repaints the pill 'nav' -> 'nav MOVE'"
   # i3 stays in mode "nav" throughout — the MOVE label is a bar-side synthesis
-  # from the key monitor, so .mode must NOT change with it.
+  # from the shift monitor, so .mode must NOT change with it.
   assert_case "nav-shift-down.pill" "nav MOVE"
   assert_case "nav-shift-down.mode" "nav"
 
-  scenario "released Shift reverts the pill, and Shift_R (62) is equivalent to Shift_L (50)"
+  scenario "the indicator follows state in both directions, with no latch"
   assert_case "nav-shift-up.pill"    "nav"
-  assert_case "nav-shiftr-down.pill" "nav MOVE"
+  assert_case "nav-shift-again.pill" "nav MOVE"
 
-  scenario "non-Shift keycodes are ignored: a Tab (23) release does not clear held Shift"
-  # MUTANT PIN: drop the `code !== 50 && code !== 62` guard in Bar.qml and this
-  # release turns the pill back to "nav" while Shift is still physically down.
-  assert_case "nav-other-key.pill" "nav MOVE"
+  scenario "malformed monitor output is ignored, not coerced (Shift stays held)"
+  # MUTANT PIN: replace the `parts[0] !== "shift"` / `parts[1]` value checks in
+  # Bar.qml with a truthiness test and this line clears the indicator.
+  assert_case "nav-garbage-line.pill" "nav MOVE"
 
   scenario "leaving nav with Shift still down clears the flag — re-entry reads 'nav', not 'nav MOVE'"
   assert_case "nav-off-shift-stuck.strip" "0"
   assert_case "nav-reentry.pill"          "nav"
+fi
+
+# ============================================================================
+# PHASE 3 — the REAL qs-shiftmon.py against a real X server (dotfiles-5u6m).
+#           PHASE 2 drives the bar through a stubbed monitor, which proves the
+#           bar's parsing but nothing about what the monitor actually reports.
+#           This phase runs the shipped script on the harness Xvfb and drives
+#           it with XTEST, pinning the property the stub cannot: the state
+#           survives OTHER keys being pressed while Shift is held. That is the
+#           exact failure an edge-pairing implementation shows in the field.
+# ============================================================================
+
+SHIFTMON="$SCRIPT_DIR/qs-shiftmon.py"
+if ! command -v xdotool >/dev/null; then
+  echo; echo "SKIP: PHASE 3 needs xdotool (not installed) — real-monitor coverage not run"
+elif ! python3 -c 'import Xlib' 2>/dev/null; then
+  echo; echo "SKIP: PHASE 3 needs python-xlib (not installed) — real-monitor coverage not run"
+else
+  SM_LOG="$TMP/shiftmon.log"
+  DISPLAY="$DPY" python3 -u "$SHIFTMON" >"$SM_LOG" 2>&1 &
+  SM_PID=$!
+  sleep 1.2                      # let it emit its initial state
+  # settle > the monitor's 40ms poll on every step, so each read is a state
+  # the monitor has certainly observed.
+  sm_keys() { tr '\n' '|' < "$SM_LOG" | sed 's/|$//'; }
+
+  DISPLAY="$DPY" xdotool keydown shift; sleep 0.4
+  SM_HELD="$(sm_keys)"
+  # press an UNRELATED key twice while Shift stays physically down
+  DISPLAY="$DPY" xdotool keydown j; sleep 0.1; DISPLAY="$DPY" xdotool keyup j; sleep 0.4
+  DISPLAY="$DPY" xdotool keydown j; sleep 0.1; DISPLAY="$DPY" xdotool keyup j; sleep 0.4
+  SM_AFTER_J="$(sm_keys)"
+  DISPLAY="$DPY" xdotool keyup shift; sleep 0.4
+  SM_RELEASED="$(sm_keys)"
+  kill "$SM_PID" 2>/dev/null
+
+  scenario "real monitor: boots by reporting the CURRENT state, then 'shift 1' when held"
+  # The initial line matters — entering nav with Shift already down must read
+  # MOVE immediately instead of waiting for the next press.
+  assert_eq "initial state line + held transition" "$SM_HELD" "shift 0|shift 1"
+
+  scenario "real monitor: pressing OTHER keys while Shift is held emits nothing new"
+  # THE regression pin (the field bug): an edge-pairing monitor drops to
+  # 'shift 0' here. Polled state emits no further line at all.
+  assert_eq "no extra lines after two j presses" "$SM_AFTER_J" "shift 0|shift 1"
+
+  scenario "real monitor: releasing Shift emits exactly one 'shift 0'"
+  assert_eq "release transition" "$SM_RELEASED" "shift 0|shift 1|shift 0"
 fi
 
 # ============================================================================
