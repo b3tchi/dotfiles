@@ -32,10 +32,10 @@ BC = (0x16/255, 0xa0/255, 0x85/255)
 # under the cursor. The bar's mode pill says the same thing, but the frame is
 # where the eye already is while navigating.
 MODE_BC = (0xcb/255, 0x4b/255, 0x16/255)   # ModeBarTheme.highlight
-# Modes that get MODE_BC. The nav pair is one mode to the user (the twin only
-# exists so the bar can show held Shift), so both spellings belong here or the
-# frame would flicker between colours as Shift goes down and up.
-COLOR_MODES = {'nav', 'nav-move'}
+# Modes that get MODE_BC. Held Shift is signalled by nop binding events, not
+# by a second mode, so "nav" is the whole set and the frame never changes
+# colour mid-gesture.
+COLOR_MODES = {'nav'}
 # Windows to never border (quickshell overlays, rofi, etc.)
 IGNORE_CLASSES = {'quickshell', 'Rofi', 'rofi'}
 IGNORE_TITLES = {'qs-focus-border', 'qs-focus-dim'}

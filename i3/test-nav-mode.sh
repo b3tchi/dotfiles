@@ -15,10 +15,12 @@
 # Windows are two `st` terminals identified by X11 window id, not title: st
 # rewrites its own title from the shell prompt, so titles are not stable.
 #
-# Scope: what i3 itself does — focus unshifted, move shifted, and the nav /
-# nav-move twin whose only purpose is to publish held-Shift as a mode name the
-# bar can render. How the bar PAINTS that is quickshell/test-mode-bar.sh's job;
-# the focus-frame recolour is asserted here because it needs a real WM.
+# Scope: what i3 itself does — focus unshifted, move shifted, and the two `nop`
+# binds that publish held-Shift to the bar as binding events (there is ONE mode;
+# the nop signal replaced a twin mode that had to duplicate every movement bind
+# so a missed release could not strand the session somewhere destructive).
+# How the bar PAINTS that is quickshell/test-mode-bar.sh's job; the focus-frame
+# recolour is asserted here because it needs a real WM.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -119,38 +121,29 @@ assert_eq "Shift+h moves B left -> B A" "$(ids)" "$B $A"
 assert_eq "focus follows the moved window" "$(focused)" "$B"
 
 # THE indicator contract: pressing Shift ALONE — before any hjkl — must already
-# put i3 in the twin mode, because the mode name is what the bar renders. An
-# indicator derived from binding events cannot do this (no binding has run
-# yet), which is exactly why the twin exists.
-scenario "Shift alone flips to the twin mode, and releasing it flips back"
-xdotool keyup shift 2>/dev/null; sleep 0.3   # ensure a known starting state
+# emit a signal, because the cue answers "what will the next keystroke do".
+# i3 emits a binding event for `nop` like any other command, argument included,
+# so the bar learns it without the WM changing state at all.
+scenario "Shift alone emits nop nav-shift-down, releasing it emits nav-shift-up"
+xdotool keyup shift 2>/dev/null; sleep 0.3
 xdotool key q; sleep 0.3; xdotool key super+o; sleep 0.4
-assert_eq "starts in nav" "$(mode)" "nav"
+NOP_LOG="$TMP/nops.log"
+i3-msg -s "$I3SOCK" -t subscribe -m '["binding"]' > "$NOP_LOG" 2>&1 &
+NOP_SUB=$!
+sleep 0.8
 LAYOUT_BEFORE="$(ids)"
 xdotool keydown shift; sleep 0.5
-assert_eq "Shift down -> nav-move" "$(mode)" "nav-move"
-assert_eq "no window moved by the modifier alone" "$(ids)" "$LAYOUT_BEFORE"
+MODE_WHILE_HELD="$(mode)"
 xdotool keyup shift; sleep 0.5
-assert_eq "Shift up -> back to nav" "$(mode)" "nav"
-
-# The twin binds the same keys to the same commands. A missed release (RDP
-# clients that re-synthesise modifiers, a focus steal) can strand the session
-# in nav-move; if bare hjkl moved windows there, that stranding would be
-# destructive rather than cosmetic.
-scenario "the twin mode is behaviourally IDENTICAL — bare hjkl still focuses there"
-xdotool keydown shift; sleep 0.4
-assert_eq "in the twin" "$(mode)" "nav-move"
-LAYOUT_BEFORE="$(ids)"
-# focus the RIGHT window first, so a bare `h` has somewhere to focus TO and the
-# focus assertion below is a real claim rather than an edge no-op.
-xdotool key --clearmodifiers l; sleep 0.4
-xdotool key --clearmodifiers h; sleep 0.4
-assert_eq "bare h in the twin FOCUSED left, it did not move anything" "$(ids)" "$LAYOUT_BEFORE"
-assert_eq "and focus actually landed on the left window" "$(focused)" "${LAYOUT_BEFORE%% *}"
-xdotool keyup shift 2>/dev/null; sleep 0.4
-# back to the plain twin for the rest of the suite
-[ "$(mode)" = "nav-move" ] && { xdotool keydown shift; sleep 0.2; xdotool keyup shift; sleep 0.4; }
-assert_eq "settled back in nav" "$(mode)" "nav"
+kill "$NOP_SUB" 2>/dev/null; sleep 0.3
+NOPS="$(python3 "$SCRIPT_DIR/test-events.py" "$NOP_LOG" "nop ")"
+assert_eq "the down/up pair reached the bar's stream" \
+  "$NOPS" "nop nav-shift-down|nop nav-shift-up"
+# The WM does not change state for the indicator: no second mode to strand in,
+# and nothing churns when a client re-synthesises the modifier per keystroke.
+assert_eq "the mode never left nav while Shift was held" "$MODE_WHILE_HELD" "nav"
+assert_eq "still nav after the release" "$(mode)" "nav"
+assert_eq "nop moved no window" "$(ids)" "$LAYOUT_BEFORE"
 
 scenario "after a move, unshifted keys go back to focusing (no sticky move)"
 xdotool key l; sleep 0.4
@@ -211,7 +204,7 @@ else
   assert_eq "red ring pixels present in nav" "$([ "${RED_NAV:-0}" -gt 0 ] && echo yes || echo no)" "yes"
   assert_eq "teal is gone (recoloured, not a second ring)" "$([ "${TEAL_NAV:-0}" -gt 0 ] && echo yes || echo no)" "no"
 
-  scenario "the twin mode keeps it red — Shift must not flicker the frame"
+  scenario "holding Shift keeps it red — the signal must not repaint the frame"
   xdotool keydown shift; sleep 1.2
   RED_TWIN="$(ring_pixels CB4B16)"
   assert_eq "still red while Shift is held" "$([ "${RED_TWIN:-0}" -gt 0 ] && echo yes || echo no)" "yes"
@@ -228,12 +221,12 @@ else
   xdotool key super+o; sleep 0.4    # the exit scenarios below expect nav
 fi
 
-# The bar's Shift indicator is driven ENTIRELY by these events (quickshell
-# Bar.qml noteBinding + test-mode-bar.sh, which replays this exact payload
-# shape through a stubbed i3-msg). If i3 ever stopped reporting `mods`, or
-# spelled Shift differently, the indicator would go dark and only this
-# scenario — the one place a REAL i3 is asked — would notice.
-scenario "i3's binding events report the mods it matched (the bar's only Shift signal)"
+# Besides the explicit nop pair, the bar corroborates from the mods of ordinary
+# action bindings: one that ran as Shift+hjkl proves the modifier was down for
+# that keystroke even if a nop went missing. If i3 ever stopped reporting
+# `mods`, or spelled Shift differently, only this scenario — the one place a
+# REAL i3 is asked — would notice.
+scenario "i3's binding events report the mods it matched (the bar's corroborating signal)"
 BIND_LOG="$TMP/bindings.log"
 i3-msg -s "$I3SOCK" -t subscribe -m '["binding"]' > "$BIND_LOG" 2>&1 &
 SUB_PID=$!

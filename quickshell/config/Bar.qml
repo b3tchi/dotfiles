@@ -255,44 +255,36 @@ PanelWindow {
     }
 
     // --- Shift indicator for the nav mode (dotfiles-5u6m) ---
-    // Driven by i3's OWN binding events: every executed binding reports the
-    // modifiers i3 matched, so `mods: ["shift"]` means the keystroke ran a
-    // Shift+hjkl move and `mods: []` means it ran a bare hjkl focus. The pill
-    // therefore reports what the mode ACTUALLY DID, and it reports it the same
-    // way on every session.
+    // i3 signals the modifier explicitly: the mode binds the Shift keycodes to
+    // `nop nav-shift-down` / `nop nav-shift-up`, and every executed binding —
+    // nop included, argument included — arrives as a binding event. So the
+    // indicator reads a statement of fact from the WM rather than inferring
+    // one, and it reads the same on every session type.
     //
-    // Reading the physical modifier instead was tried twice and abandoned,
-    // both times because it is not display-agnostic: raw key edges (the
-    // switcher's qs-keymon.py) desync whenever one edge is swallowed, and even
+    // Physical-modifier reads were tried twice and abandoned: raw key edges
+    // (the switcher's qs-keymon.py) desync when an edge is swallowed, and even
     // the authoritative X modifier mask is only as truthful as the session
-    // feeding it — an RDP client decides for itself whether a held modifier is
-    // transmitted as a continuous hold or re-synthesised per keystroke, so the
-    // native session and the xrdp session disagreed about the very same
-    // gesture. i3 matching `Shift+j` is the one fact both sessions share.
+    // feeding it — an RDP client decides for itself whether a held modifier
+    // crosses the wire as a hold or is re-synthesised per keystroke, so the
+    // native and xrdp sessions disagreed about the same gesture. What they do
+    // agree on is what i3 matched, which is what these events report.
     //
-    // The trade: this shows the last keystroke's role rather than live
-    // modifier state, so the mode opens reading "nav" even if Shift is already
-    // down, and it stays MOVE until an unshifted key is pressed. That is the
-    // honest reading of what the WM did, needs no helper process on any
-    // platform, and works under sway (which emits the same event) for free.
-    //
-    // The i3 twin mode ("nav-move", entered on the bare Shift keycode) is the
-    // second input: it is what lights the pill BEFORE any key is pressed. The
-    // two are unioned in navShift below.
+    // The mods of ordinary action bindings are a second, corroborating input:
+    // a binding that ran as Shift+hjkl proves the modifier was down for that
+    // keystroke even if the surrounding nop pair went missing.
     property bool shiftHeld: false
-    readonly property bool inNavMode: currentMode === "nav" || currentMode === "nav-move"
+    readonly property bool inNavMode: currentMode === "nav"
 
     function noteBinding(b) {
         if (!root.inNavMode) return
-        // Mode-switching binds describe the TWIN FLIP, not an hjkl action, and
-        // must never drive the indicator. This is load-bearing: i3 emits the
-        // mode event BEFORE the binding event, so on Shift release the flip
-        // back to "nav" clears the flag and then its own binding — which
-        // legitimately carries mods:["shift"], it IS the Shift-release bind —
-        // would re-arm it, latching the pill on MOVE until the next unshifted
-        // key. Verified ordering, i3 4.25: MODE change=nav, then BINDING
-        // mods=['shift'] cmd=mode "nav".
         var cmd = (b && b.command) ? String(b.command).trim() : ""
+
+        // The explicit signal wins outright.
+        if (cmd.indexOf("nop nav-shift-down") === 0) { root.shiftHeld = true;  return }
+        if (cmd.indexOf("nop nav-shift-up")   === 0) { root.shiftHeld = false; return }
+        // Any other nop is somebody else's marker — never an action.
+        if (cmd.indexOf("nop") === 0) return
+        // Mode switches describe leaving/entering, not what a key did.
         if (cmd.indexOf("mode ") === 0) return
 
         var mods = b && b.mods ? b.mods : []
@@ -302,37 +294,22 @@ PanelWindow {
         root.shiftHeld = shifted
     }
 
-    // Every mode transition clears the binding-derived flag. Leaving the twin
-    // IS i3 telling us the modifier came up, so a stale "the last action was
-    // shifted" must not outlive it — otherwise a real release never clears,
-    // since nothing else retracts that flag until an unshifted key is pressed.
-    // Under per-keystroke churn the flag is immediately re-armed by the shifted
-    // action binding that follows, which is precisely the case it exists for.
-    // Leaving the nav modes altogether also drops the debounced render state,
-    // so a later entry opens plain rather than inheriting the Shift+q that
-    // exited it.
+    // Leaving nav resets everything, so the mode always opens plain rather
+    // than inheriting the Shift+q that exited it.
     onCurrentModeChanged: {
         shiftHeld = false
         if (!inNavMode) { navUnstick.stop(); navShiftSticky = false }
     }
 
-    // Raw "should the pill read MOVE" — either i3 is in the twin (Shift is
-    // physically down, reported before any key is pressed) or the last action
-    // binding was a shifted one (the session re-synthesises modifiers per
-    // keystroke, so the twin flickers but the action still says shift).
-    readonly property bool navShift: currentMode === "nav-move" || (inNavMode && shiftHeld)
-
-    // ...and the debounced version the UI actually renders. An xrdp client that
-    // re-synthesises Shift around every keystroke makes i3 leave and re-enter
-    // the twin on each keypress; unfiltered, the pill (and only the pill — the
-    // binds themselves keep working) strobes MOVE/nav on every j. Rising edge
-    // is immediate so the cue never lags the gesture; the falling edge waits,
-    // and a re-entry inside the window cancels it outright, so per-keystroke
-    // churn is invisible while a real release still clears within ~0.4s.
+    // Debounced render state. An xrdp client that re-synthesises Shift around
+    // every keystroke emits a down/up pair per key; unfiltered, the pill (and
+    // only the pill — the binds themselves keep working) would strobe. Rising
+    // edge is immediate so the cue never lags the gesture; the falling edge
+    // waits, and a re-assert inside the window cancels it.
     property bool navShiftSticky: false
     Timer { id: navUnstick; interval: 400; onTriggered: root.navShiftSticky = false }
-    onNavShiftChanged: {
-        if (navShift) { navUnstick.stop(); navShiftSticky = true }
+    onShiftHeldChanged: {
+        if (shiftHeld) { navUnstick.stop(); navShiftSticky = true }
         else if (navShiftSticky) navUnstick.restart()
     }
 
@@ -674,10 +651,9 @@ PanelWindow {
         // ModeBar (sp018 / ft009). Same anchors + leftMargin as the old inline
         // overlay Row; the host keeps the mode-subscription Process above and
         // just feeds it root.currentMode.
-        // While in either nav twin the pill is decided by navShiftSticky, NOT
-        // by the raw mode name — that is what absorbs the per-keystroke twin
-        // churn an xrdp client produces. Swapping the string fed to ModeBar is
-        // also how the MOVE face stays available without widening ft009's
+        // "nav-move" is a SYNTHETIC mode name — i3 never enters it, it stays
+        // in "nav" for the whole gesture. Swapping the string fed to ModeBar
+        // is how the MOVE face becomes visible without widening ft009's
         // two-prop api_surface: the registry already carries both rows.
         ModeBar {
             anchors { left: parent.left; top: parent.top; bottom: parent.bottom; leftMargin: 8 }

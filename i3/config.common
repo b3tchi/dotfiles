@@ -353,12 +353,21 @@ mode "resize" {
 # focused window; q, Escape or Enter leave (Shift+q too — q must work with
 # Shift held).
 #
-# TWO modes with IDENTICAL bindings: "nav" and "nav-move". The pair exists
-# only so the bar can show whether Shift is down BEFORE any hjkl is pressed —
-# i3's IPC reports the mode name, so a mode flip is the one Shift signal that
-# reaches the bar instantly and identically on every session (native, xrdp,
-# sway). Bar.qml renders "nav" vs "nav MOVE" from it; the hint strips live in
-# quickshell/config/Common/ModeBarTheme.qml, keep them in sync with these keys.
+# The bar shows whether Shift is down, and learns it from the two `nop` binds
+# below: i3 emits a binding event for every executed bind, INCLUDING nop and
+# including its argument, so `nop nav-shift-down` / `nop nav-shift-up` are an
+# explicit press/release signal that costs nothing at the WM level (nop does
+# not touch the layout, and binding the Shift keycode does not stop Shift+hjkl
+# from matching). quickshell Bar.qml reads the command string; the hint strips
+# live in Common/ModeBarTheme.qml, keep them in sync with these keys.
+#
+# This REPLACED a twin mode ("nav-move") that existed only to publish the same
+# fact as a mode name. The twin had to duplicate all 20 movement binds so that
+# a missed release — an RDP client re-synthesising modifiers, a focus steal —
+# could not strand the session somewhere bare hjkl moved windows. A signal
+# that carries no binding table cannot be stranded in, and i3 now stays in
+# ONE mode for the whole gesture, so nothing churns when a client bounces the
+# modifier per keystroke.
 #
 # bindCODE for the Shift keys, not bindsym: i3's parser reads the leading
 # "Shift" of `bindsym Shift_L` as a MODIFIER and then fails to translate the
@@ -366,13 +375,6 @@ mode "resize" {
 # 50/62 are Shift_L/Shift_R in every evdev X keymap (xmodmap -pm). The release
 # event still carries the Shift bit (X state is pre-event), so the MASKED form
 # is the one that fires; the bare pair is a keymap-quirk fallback.
-#
-# The two modes bind the same keys to the same commands ON PURPOSE. A missed
-# release (an RDP client that re-synthesises modifiers per keystroke, a focus
-# steal) can strand the session in "nav-move", and if that mode moved windows
-# on bare hjkl the stranding would be destructive instead of merely cosmetic.
-# Bar.qml additionally re-asserts MOVE from the `mods` of each binding event,
-# so a session whose Shift release arrives spuriously still paints correctly.
 bindsym $mod+o mode "nav"
 mode "nav" {
         bindsym h focus left
@@ -396,43 +398,15 @@ mode "nav" {
         bindsym Shift+Up move up
         bindsym Shift+Right move right
 
-        # Shift down -> the twin mode, so the bar repaints as "nav MOVE"
-        bindcode 50 mode "nav-move"
-        bindcode 62 mode "nav-move"
+        # Shift down / up -> bar indicator only; no layout effect
+        bindcode 50 nop nav-shift-down
+        bindcode 62 nop nav-shift-down
+        bindcode --release Shift+50 nop nav-shift-up
+        bindcode --release Shift+62 nop nav-shift-up
+        bindcode --release 50 nop nav-shift-up
+        bindcode --release 62 nop nav-shift-up
 
         # exit nav mode: Enter, Escape or q
-        bindsym Return mode "default"
-        bindsym Escape mode "default"
-        bindsym Shift+q mode "default"
-        bindsym q mode "default"
-}
-mode "nav-move" {
-        bindsym h focus left
-        bindsym j focus down
-        bindsym k focus up
-        bindsym l focus right
-
-        bindsym Shift+h move left
-        bindsym Shift+j move down
-        bindsym Shift+k move up
-        bindsym Shift+l move right
-
-        bindsym Left focus left
-        bindsym Down focus down
-        bindsym Up focus up
-        bindsym Right focus right
-
-        bindsym Shift+Left move left
-        bindsym Shift+Down move down
-        bindsym Shift+Up move up
-        bindsym Shift+Right move right
-
-        # Shift released -> back to the plain twin
-        bindcode --release Shift+50 mode "nav"
-        bindcode --release Shift+62 mode "nav"
-        bindcode --release 50 mode "nav"
-        bindcode --release 62 mode "nav"
-
         bindsym Return mode "default"
         bindsym Escape mode "default"
         bindsym Shift+q mode "default"

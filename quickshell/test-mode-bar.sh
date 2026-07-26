@@ -734,10 +734,12 @@ else
   }
 
   barflip '{"change":"nav"}' "nav-on"                        # entered, no key yet
-  # i3 itself reports the twin mode when Shift goes down (before any binding
-  # runs) — the bar must render that name directly, not only its own synthesis.
-  barflip '{"change":"nav-move"}' "nav-twin-from-i3"
-  barflip '{"change":"nav"}' "nav-twin-back"
+  # Shift alone, before any hjkl: i3 stays in mode "nav" and reports the
+  # modifier as a `nop` binding event carrying its argument.
+  bind_emit '[]' "" 'nop nav-shift-down'; sleep 0.5
+  ipc2 call barprobe dumpc "nav-nop-down" >/dev/null 2>&1; sleep 0.2
+  bind_emit '["shift"]' "" 'nop nav-shift-up'; sleep 1.0   # past the debounce
+  ipc2 call barprobe dumpc "nav-nop-up" >/dev/null 2>&1; sleep 0.2
   bindflip '[]'        h 'focus left'  "nav-focus-key"      # bare    -> nav
   bindflip '["shift"]' j 'move down'   "nav-move-key"       # shifted -> MOVE
   bindflip '["shift"]' k 'move up'     "nav-move-again"     # stays MOVE
@@ -750,18 +752,12 @@ else
   # action, not a `mode` switch — those are skipped outright by the release
   # guard, which would make this scenario pass for the wrong reason.
   bindflip '["ctrl"]'  h 'focus left'  "nav-other-mod"
-  # THE release regression (dotfiles-5u6m): i3 emits the MODE event BEFORE the
-  # BINDING event, so the flip back out of the twin arrives as
-  #   MODE change=nav   then   BINDING mods=["shift"] cmd=mode "nav"
-  # and the binding IS the Shift-release bind, mods and all. Replayed here in
-  # that exact order: the pill must settle on "nav", not re-arm to MOVE.
-  # MUTANT PIN: drop the `cmd.indexOf("mode ")` guard in Bar.qml and the
-  # indicator latches on MOVE until the next unshifted key.
+  # THE release case (dotfiles-5u6m): the release nop legitimately carries
+  # mods:["shift"] — it IS the Shift-release bind — so a handler that read mods
+  # before the command would re-arm MOVE on the very event that means "up".
+  # MUTANT PIN: check mods first in Bar.qml's noteBinding and this latches.
   bindflip '["shift"]' j 'move down' "nav-pre-release"      # in MOVE first
-  mode_emit '{"change":"nav-move"}'; sleep 0.3
-  bind_emit '[]' "" 'mode "nav-move"'; sleep 0.3            # twin entered
-  mode_emit '{"change":"nav"}'; sleep 0.3                   # ... and left
-  bind_emit '["shift"]' "" 'mode "nav"'; sleep 0.5          # release bind, mods=shift
+  bind_emit '["shift"]' "" 'nop nav-shift-up'; sleep 1.0    # past the debounce
   ipc2 call barprobe dumpc "nav-after-release" >/dev/null 2>&1; sleep 0.25
 
   # --- per-keystroke twin churn (the xrdp case) ------------------------------
@@ -769,17 +765,16 @@ else
   # and re-enter the twin on every j. The BINDS keep working (the user sees the
   # window move) but the pill would strobe. The falling edge is debounced, so a
   # dip shorter than the window is invisible.
-  mode_emit '{"change":"nav-move"}'; sleep 0.4            # Shift down
+  bind_emit '[]' "" 'nop nav-shift-down'; sleep 0.4       # Shift down
   ipc2 call barprobe dumpc "churn-armed" >/dev/null 2>&1; sleep 0.2
-  # ... j arrives as: leave twin, run the shifted move, re-enter twin ...
-  mode_emit '{"change":"nav"}'; sleep 0.12                # dip, well under 400ms
+  # ... j arrives as: release nop, the shifted move, press nop again ...
+  bind_emit '["shift"]' "" 'nop nav-shift-up'; sleep 0.12 # dip, under 400ms
   ipc2 call barprobe dumpc "churn-mid-dip" >/dev/null 2>&1; sleep 0.05
   bind_emit '["shift"]' j 'move down'; sleep 0.05
-  mode_emit '{"change":"nav-move"}'; sleep 0.4
+  bind_emit '[]' "" 'nop nav-shift-down'; sleep 0.4
   ipc2 call barprobe dumpc "churn-settled" >/dev/null 2>&1; sleep 0.2
   # A REAL release must still clear, just later than the debounce window.
-  mode_emit '{"change":"nav"}'; sleep 0.15
-  bind_emit '["shift"]' "" 'mode "nav"'; sleep 1.0        # > 400ms
+  bind_emit '["shift"]' "" 'nop nav-shift-up'; sleep 1.0  # > 400ms
   ipc2 call barprobe dumpc "churn-real-release" >/dev/null 2>&1; sleep 0.2
 
   # Leaving the mode resets the indicator, so re-entry never inherits MOVE from
@@ -828,11 +823,13 @@ else
   assert_case "nav-on.pill"  "nav"
   assert_case "nav-on.ws"    "0"
 
-  scenario "i3's own twin mode renders MOVE — the instant Shift signal, no binding needed"
-  assert_case "nav-twin-from-i3.pill"  "nav MOVE"
-  assert_case "nav-twin-from-i3.mode"  "nav-move"
-  assert_case "nav-twin-from-i3.strip" "1"
-  assert_case "nav-twin-back.pill"     "nav"
+  scenario "nop nav-shift-down lights MOVE before any hjkl, without a mode change"
+  assert_case "nav-nop-down.pill" "nav MOVE"
+  # The whole point of the nop signal: i3 never leaves "nav", so there is no
+  # second binding table to be stranded in and nothing churns per keystroke.
+  assert_case "nav-nop-down.mode" "nav"
+  assert_case "nav-nop-up.pill"   "nav"
+  assert_case "nav-nop-up.mode"   "nav"
 
   scenario "Shift indicator: a binding event carrying mods ['shift'] repaints the pill 'nav' -> 'nav MOVE'"
   # i3 stays in mode "nav" throughout — MOVE is a bar-side synthesis from the
@@ -853,7 +850,7 @@ else
   # MUTANT PIN: a `mods.length > 0` test passes every case above and fails here.
   assert_case "nav-other-mod.pill"    "nav"
 
-  scenario "Shift RELEASE settles on 'nav' despite i3 emitting mode-then-binding"
+  scenario "the release nop settles on 'nav' even though it carries mods=shift"
   assert_case "nav-pre-release.pill"    "nav MOVE"
   assert_case "nav-after-release.pill"  "nav"
   assert_case "nav-after-release.mode"  "nav"
