@@ -232,9 +232,9 @@ assert_case "display-names" '["resize","screenshot","system","system","system"]'
 
 scenario "nav pair (dotfiles-5u6m) — registry + resolve + pill labels differ by held Shift"
 assert_case "hints-nav" \
-  '[{"text":"←","key":"h"},{"text":"↓","key":"j"},{"text":"↑","key":"k"},{"text":"→","key":"l"},{"text":"shift-to-move","key":"⇧"},{"text":"quit","key":"q"}]'
+  '[{"text":"←","key":"h"},{"text":"↓","key":"j"},{"text":"↑","key":"k"},{"text":"→","key":"l"},{"text":"ctrl-to-move","key":"^"},{"text":"quit","key":"q"}]'
 assert_case "hints-nav-move" \
-  '[{"text":"move-←","key":"h"},{"text":"move-↓","key":"j"},{"text":"move-↑","key":"k"},{"text":"move-→","key":"l"},{"text":"moving","key":"⇧"},{"text":"quit","key":"q"}]'
+  '[{"text":"move-←","key":"h"},{"text":"move-↓","key":"j"},{"text":"move-↑","key":"k"},{"text":"move-→","key":"l"},{"text":"moving","key":"^"},{"text":"quit","key":"q"}]'
 # both must resolve to their OWN key — a nav-move falling through to "" would
 # render the raw mode name and lose the strip entirely.
 assert_case "nav-resolves" '["nav","nav-move"]'
@@ -494,9 +494,9 @@ assert_case "nav-move.pill"    "nav MOVE"
 # or in "move-←"), so pre/post stay empty and the word lands in `tail`;
 # "quit"/"q" is inline as everywhere else.
 assert_case "nav.hints" \
-  '[{"pre":"","key":"h","post":"","space":" ","tail":"←"},{"pre":"","key":"j","post":"","space":" ","tail":"↓"},{"pre":"","key":"k","post":"","space":" ","tail":"↑"},{"pre":"","key":"l","post":"","space":" ","tail":"→"},{"pre":"","key":"⇧","post":"","space":" ","tail":"shift-to-move"},{"pre":"","key":"q","post":"uit","space":"","tail":""}]'
+  '[{"pre":"","key":"h","post":"","space":" ","tail":"←"},{"pre":"","key":"j","post":"","space":" ","tail":"↓"},{"pre":"","key":"k","post":"","space":" ","tail":"↑"},{"pre":"","key":"l","post":"","space":" ","tail":"→"},{"pre":"","key":"^","post":"","space":" ","tail":"ctrl-to-move"},{"pre":"","key":"q","post":"uit","space":"","tail":""}]'
 assert_case "nav-move.hints" \
-  '[{"pre":"","key":"h","post":"","space":" ","tail":"move-←"},{"pre":"","key":"j","post":"","space":" ","tail":"move-↓"},{"pre":"","key":"k","post":"","space":" ","tail":"move-↑"},{"pre":"","key":"l","post":"","space":" ","tail":"move-→"},{"pre":"","key":"⇧","post":"","space":" ","tail":"moving"},{"pre":"","key":"q","post":"uit","space":"","tail":""}]'
+  '[{"pre":"","key":"h","post":"","space":" ","tail":"move-←"},{"pre":"","key":"j","post":"","space":" ","tail":"move-↓"},{"pre":"","key":"k","post":"","space":" ","tail":"move-↑"},{"pre":"","key":"l","post":"","space":" ","tail":"move-→"},{"pre":"","key":"^","post":"","space":" ","tail":"moving"},{"pre":"","key":"q","post":"uit","space":"","tail":""}]'
 
 scenario "unknown-fallback: unknown mode -> pill 'system' + one raw-name hint row (AC4)"
 assert_case "unknown-fallback.visible" "1"
@@ -736,28 +736,28 @@ else
   barflip '{"change":"nav"}' "nav-on"                        # entered, no key yet
   # Shift alone, before any hjkl: i3 stays in mode "nav" and reports the
   # modifier as a `nop` binding event carrying its argument.
-  bind_emit '[]' "" 'nop nav-shift-down'; sleep 0.5
-  ipc2 call barprobe dumpc "nav-nop-down" >/dev/null 2>&1; sleep 0.2
-  bind_emit '["shift"]' "" 'nop nav-shift-up'; sleep 1.0   # past the debounce
-  ipc2 call barprobe dumpc "nav-nop-up" >/dev/null 2>&1; sleep 0.2
+  bind_emit '[]' "" 'nop nav-move-on'; sleep 0.5
+  ipc2 call barprobe dumpc "nav-nop-on" >/dev/null 2>&1; sleep 0.2
+  bind_emit '["ctrl"]' "" 'nop nav-move-off'; sleep 1.0   # past the debounce
+  ipc2 call barprobe dumpc "nav-nop-off" >/dev/null 2>&1; sleep 0.2
   bindflip '[]'        h 'focus left'  "nav-focus-key"      # bare    -> nav
-  bindflip '["shift"]' j 'move down'   "nav-move-key"       # shifted -> MOVE
-  bindflip '["shift"]' k 'move up'     "nav-move-again"     # stays MOVE
+  bindflip '["ctrl"]' j 'move down'   "nav-move-key"       # shifted -> MOVE
+  bindflip '["ctrl"]' k 'move up'     "nav-move-again"     # stays MOVE
   bindflip '[]'        l 'focus right' "nav-back-to-focus"  # bare    -> nav
-  # Case-insensitive: sway spells the same modifier "Shift". A === "shift"
+  # Case-insensitive: sway spells the same modifier "Control". A === "ctrl"
   # comparison would silently never light the indicator there.
-  bindflip '["Shift"]' j 'move down'   "nav-move-capital"
-  # A modifier that is not Shift must NOT read as MOVE (a `mods.length > 0`
+  bindflip '["Control"]' j 'move down'   "nav-move-capital"
+  # A modifier that is not Ctrl must NOT read as MOVE (a `mods.length > 0`
   # mutant passes everything above and fails here). The command must be a real
   # action, not a `mode` switch — those are skipped outright by the release
   # guard, which would make this scenario pass for the wrong reason.
-  bindflip '["ctrl"]'  h 'focus left'  "nav-other-mod"
+  bindflip '["shift"]' h 'focus left'  "nav-other-mod"
   # THE release case (dotfiles-5u6m): the release nop legitimately carries
-  # mods:["shift"] — it IS the Shift-release bind — so a handler that read mods
+  # mods:["ctrl"] — it IS the Ctrl-release bind — so a handler that read mods
   # before the command would re-arm MOVE on the very event that means "up".
   # MUTANT PIN: check mods first in Bar.qml's noteBinding and this latches.
-  bindflip '["shift"]' j 'move down' "nav-pre-release"      # in MOVE first
-  bind_emit '["shift"]' "" 'nop nav-shift-up'; sleep 1.0    # past the debounce
+  bindflip '["ctrl"]' j 'move down' "nav-pre-release"      # in MOVE first
+  bind_emit '["ctrl"]' "" 'nop nav-move-off'; sleep 1.0    # past the debounce
   ipc2 call barprobe dumpc "nav-after-release" >/dev/null 2>&1; sleep 0.25
 
   # --- per-keystroke twin churn (the xrdp case) ------------------------------
@@ -765,21 +765,21 @@ else
   # and re-enter the twin on every j. The BINDS keep working (the user sees the
   # window move) but the pill would strobe. The falling edge is debounced, so a
   # dip shorter than the window is invisible.
-  bind_emit '[]' "" 'nop nav-shift-down'; sleep 0.4       # Shift down
+  bind_emit '[]' "" 'nop nav-move-on'; sleep 0.4       # Shift down
   ipc2 call barprobe dumpc "churn-armed" >/dev/null 2>&1; sleep 0.2
   # ... j arrives as: release nop, the shifted move, press nop again ...
-  bind_emit '["shift"]' "" 'nop nav-shift-up'; sleep 0.12 # dip, under 400ms
+  bind_emit '["ctrl"]' "" 'nop nav-move-off'; sleep 0.12 # dip, under 400ms
   ipc2 call barprobe dumpc "churn-mid-dip" >/dev/null 2>&1; sleep 0.05
-  bind_emit '["shift"]' j 'move down'; sleep 0.05
-  bind_emit '[]' "" 'nop nav-shift-down'; sleep 0.4
+  bind_emit '["ctrl"]' j 'move down'; sleep 0.05
+  bind_emit '[]' "" 'nop nav-move-on'; sleep 0.4
   ipc2 call barprobe dumpc "churn-settled" >/dev/null 2>&1; sleep 0.2
   # A REAL release must still clear, just later than the debounce window.
-  bind_emit '["shift"]' "" 'nop nav-shift-up'; sleep 1.0  # > 400ms
+  bind_emit '["ctrl"]' "" 'nop nav-move-off'; sleep 1.0  # > 400ms
   ipc2 call barprobe dumpc "churn-real-release" >/dev/null 2>&1; sleep 0.2
 
   # Leaving the mode resets the indicator, so re-entry never inherits MOVE from
   # the Shift+q that exited it.
-  bind_emit '["shift"]' q 'mode default'; sleep 0.3
+  bind_emit '["ctrl"]' q 'mode default'; sleep 0.3
   barflip '{"change":"default"}' "nav-off-after-shift"
   barflip '{"change":"nav"}'     "nav-reentry"
   mode_emit '{"change":"default"}'; sleep 0.3   # reset
@@ -823,15 +823,15 @@ else
   assert_case "nav-on.pill"  "nav"
   assert_case "nav-on.ws"    "0"
 
-  scenario "nop nav-shift-down lights MOVE before any hjkl, without a mode change"
-  assert_case "nav-nop-down.pill" "nav MOVE"
+  scenario "nop nav-move-on lights MOVE before any hjkl, without a mode change"
+  assert_case "nav-nop-on.pill" "nav MOVE"
   # The whole point of the nop signal: i3 never leaves "nav", so there is no
   # second binding table to be stranded in and nothing churns per keystroke.
-  assert_case "nav-nop-down.mode" "nav"
-  assert_case "nav-nop-up.pill"   "nav"
-  assert_case "nav-nop-up.mode"   "nav"
+  assert_case "nav-nop-on.mode" "nav"
+  assert_case "nav-nop-off.pill"   "nav"
+  assert_case "nav-nop-off.mode"   "nav"
 
-  scenario "Shift indicator: a binding event carrying mods ['shift'] repaints the pill 'nav' -> 'nav MOVE'"
+  scenario "move indicator: a binding event carrying mods ['ctrl'] repaints the pill 'nav' -> 'nav MOVE'"
   # i3 stays in mode "nav" throughout — MOVE is a bar-side synthesis from the
   # binding's mods, so .mode must NOT change with it. A binding event also
   # carries change:"run"; reading that as a mode change would set currentMode
@@ -845,12 +845,12 @@ else
   assert_case "nav-move-again.pill"    "nav MOVE"
   assert_case "nav-back-to-focus.pill" "nav"
 
-  scenario "mods matching is case-insensitive (sway spells it 'Shift') and Shift-specific"
+  scenario "mods matching is case-insensitive (sway spells it 'Control') and Ctrl-specific"
   assert_case "nav-move-capital.pill" "nav MOVE"
   # MUTANT PIN: a `mods.length > 0` test passes every case above and fails here.
   assert_case "nav-other-mod.pill"    "nav"
 
-  scenario "the release nop settles on 'nav' even though it carries mods=shift"
+  scenario "the release nop settles on 'nav' even though it carries mods=ctrl"
   assert_case "nav-pre-release.pill"    "nav MOVE"
   assert_case "nav-after-release.pill"  "nav"
   assert_case "nav-after-release.mode"  "nav"

@@ -15,7 +15,7 @@
 # Windows are two `st` terminals identified by X11 window id, not title: st
 # rewrites its own title from the shell prompt, so titles are not stable.
 #
-# Scope: what i3 itself does — focus unshifted, move shifted, and the two `nop`
+# Scope: what i3 itself does — focus bare, move with Ctrl, and the two `nop`
 # binds that publish held-Shift to the bar as binding events (there is ONE mode;
 # the nop signal replaced a twin mode that had to duplicate every movement bind
 # so a missed release could not strand the session somewhere destructive).
@@ -115,33 +115,33 @@ xdotool key l; sleep 0.4
 assert_eq "l focuses right -> B" "$(focused)" "$B"
 assert_eq "layout untouched by focusing" "$(ids)" "$A $B"
 
-scenario "Shift+hjkl MOVE the focused window"
-xdotool key --clearmodifiers shift+h; sleep 0.5
-assert_eq "Shift+h moves B left -> B A" "$(ids)" "$B $A"
+scenario "Ctrl+hjkl MOVE the focused window"
+xdotool key --clearmodifiers ctrl+h; sleep 0.5
+assert_eq "Ctrl+h moves B left -> B A" "$(ids)" "$B $A"
 assert_eq "focus follows the moved window" "$(focused)" "$B"
 
-# THE indicator contract: pressing Shift ALONE — before any hjkl — must already
+# THE indicator contract: pressing Ctrl ALONE — before any hjkl — must already
 # emit a signal, because the cue answers "what will the next keystroke do".
 # i3 emits a binding event for `nop` like any other command, argument included,
 # so the bar learns it without the WM changing state at all.
-scenario "Shift alone emits nop nav-shift-down, releasing it emits nav-shift-up"
-xdotool keyup shift 2>/dev/null; sleep 0.3
+scenario "Ctrl alone emits nop nav-move-on, releasing it emits nav-move-off"
+xdotool keyup ctrl 2>/dev/null; sleep 0.3
 xdotool key q; sleep 0.3; xdotool key super+o; sleep 0.4
 NOP_LOG="$TMP/nops.log"
 i3-msg -s "$I3SOCK" -t subscribe -m '["binding"]' > "$NOP_LOG" 2>&1 &
 NOP_SUB=$!
 sleep 0.8
 LAYOUT_BEFORE="$(ids)"
-xdotool keydown shift; sleep 0.5
+xdotool keydown ctrl; sleep 0.5
 MODE_WHILE_HELD="$(mode)"
-xdotool keyup shift; sleep 0.5
+xdotool keyup ctrl; sleep 0.5
 kill "$NOP_SUB" 2>/dev/null; sleep 0.3
 NOPS="$(python3 "$SCRIPT_DIR/test-events.py" "$NOP_LOG" "nop ")"
 assert_eq "the down/up pair reached the bar's stream" \
-  "$NOPS" "nop nav-shift-down|nop nav-shift-up"
+  "$NOPS" "nop nav-move-on|nop nav-move-off"
 # The WM does not change state for the indicator: no second mode to strand in,
 # and nothing churns when a client re-synthesises the modifier per keystroke.
-assert_eq "the mode never left nav while Shift was held" "$MODE_WHILE_HELD" "nav"
+assert_eq "the mode never left nav while Ctrl was held" "$MODE_WHILE_HELD" "nav"
 assert_eq "still nav after the release" "$(mode)" "nav"
 assert_eq "nop moved no window" "$(ids)" "$LAYOUT_BEFORE"
 
@@ -157,9 +157,9 @@ scenario "arrow keys mirror hjkl in both roles"
 # this scenario fail for the wrong reason whenever one of them is edited.
 xdotool key --clearmodifiers l; sleep 0.4          # focus the right-hand one
 ORDER_NOW="$(ids)"; RIGHT="${ORDER_NOW##* }"; LEFT="${ORDER_NOW%% *}"
-xdotool key --clearmodifiers shift+Left; sleep 0.5
-assert_eq "Shift+Left swapped the pair" "$(ids)" "$RIGHT $LEFT"
-xdotool keyup shift 2>/dev/null; sleep 0.4
+xdotool key --clearmodifiers ctrl+Left; sleep 0.5
+assert_eq "Ctrl+Left swapped the pair" "$(ids)" "$RIGHT $LEFT"
+xdotool keyup ctrl 2>/dev/null; sleep 0.4
 xdotool key --clearmodifiers Right; sleep 0.4
 assert_eq "Right focuses the right-hand window" "$(focused)" "$LEFT"
 
@@ -204,11 +204,11 @@ else
   assert_eq "red ring pixels present in nav" "$([ "${RED_NAV:-0}" -gt 0 ] && echo yes || echo no)" "yes"
   assert_eq "teal is gone (recoloured, not a second ring)" "$([ "${TEAL_NAV:-0}" -gt 0 ] && echo yes || echo no)" "no"
 
-  scenario "holding Shift keeps it red — the signal must not repaint the frame"
-  xdotool keydown shift; sleep 1.2
+  scenario "holding Ctrl keeps it red — the signal must not repaint the frame"
+  xdotool keydown ctrl; sleep 1.2
   RED_TWIN="$(ring_pixels CB4B16)"
-  assert_eq "still red while Shift is held" "$([ "${RED_TWIN:-0}" -gt 0 ] && echo yes || echo no)" "yes"
-  xdotool keyup shift; sleep 0.6
+  assert_eq "still red while Ctrl is held" "$([ "${RED_TWIN:-0}" -gt 0 ] && echo yes || echo no)" "yes"
+  xdotool keyup ctrl; sleep 0.6
 
   scenario "leaving the mode restores the normal colour"
   xdotool key q; sleep 1.5
@@ -222,9 +222,9 @@ else
 fi
 
 # Besides the explicit nop pair, the bar corroborates from the mods of ordinary
-# action bindings: one that ran as Shift+hjkl proves the modifier was down for
+# action bindings: one that ran as Ctrl+hjkl proves the modifier was down for
 # that keystroke even if a nop went missing. If i3 ever stopped reporting
-# `mods`, or spelled Shift differently, only this scenario — the one place a
+# `mods`, or spelled ctrl differently, only this scenario — the one place a
 # REAL i3 is asked — would notice.
 scenario "i3's binding events report the mods it matched (the bar's corroborating signal)"
 BIND_LOG="$TMP/bindings.log"
@@ -232,7 +232,7 @@ i3-msg -s "$I3SOCK" -t subscribe -m '["binding"]' > "$BIND_LOG" 2>&1 &
 SUB_PID=$!
 sleep 0.8
 xdotool key h; sleep 0.4                       # bare    -> focus
-xdotool key --clearmodifiers shift+j; sleep 0.4 # shifted -> move
+xdotool key --clearmodifiers ctrl+j; sleep 0.4 # shifted -> move
 kill "$SUB_PID" 2>/dev/null
 sleep 0.3
 # Concatenated JSON objects, one per event — decode them in sequence.
@@ -253,14 +253,14 @@ while i < len(raw):
 print("|".join(out))
 PY
 )"
-assert_eq "bare h reports no mods, Shift+j reports mods=shift" \
-  "$BIND_SUMMARY" "h::focus left|j:shift:move down"
+assert_eq "bare h reports no mods, Ctrl+j reports mods=ctrl" \
+  "$BIND_SUMMARY" "h::focus left|j:ctrl:move down"
 
-scenario "q exits — including with Shift physically held down"
-xdotool keydown shift; sleep 0.2
+scenario "q exits — including with Ctrl physically held down"
+xdotool keydown ctrl; sleep 0.2
 xdotool key --clearmodifiers q; sleep 0.4
-assert_eq "Shift+q leaves nav" "$(mode)" "default"
-xdotool keyup shift; sleep 0.2
+assert_eq "Ctrl+q leaves nav" "$(mode)" "default"
+xdotool keyup ctrl; sleep 0.2
 BEFORE="$(focused)"
 xdotool key h; sleep 0.4
 assert_eq "bare h is inert once the mode is gone" "$(focused)" "$BEFORE"

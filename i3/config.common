@@ -349,32 +349,37 @@ mode "resize" {
 }
 
 # Navigation mode (dotfiles-5u6m) — sticky hjkl focus without holding $mod.
-# $mod+o enters; hjkl / arrows focus, Shift+hjkl / Shift+arrows move the
-# focused window; q, Escape or Enter leave (Shift+q too — q must work with
-# Shift held).
+# $mod+o enters; hjkl / arrows focus, CTRL+hjkl / Ctrl+arrows move the focused
+# window; q, Escape or Enter leave (Ctrl+q and Shift+q too — q must work with a
+# modifier still held).
 #
-# The bar shows whether Shift is down, and learns it from the two `nop` binds
-# below: i3 emits a binding event for every executed bind, INCLUDING nop and
-# including its argument, so `nop nav-shift-down` / `nop nav-shift-up` are an
-# explicit press/release signal that costs nothing at the WM level (nop does
-# not touch the layout, and binding the Shift keycode does not stop Shift+hjkl
-# from matching). quickshell Bar.qml reads the command string; the hint strips
-# live in Common/ModeBarTheme.qml, keep them in sync with these keys.
+# CTRL, not Shift, is the move modifier — and that is a portability decision,
+# not a taste one. xrdp synthesises Shift around every character it sends (xev
+# on the remote session shows Shift released on each letter press), so a HELD
+# Shift is not observable there at all: the indicator below could never tell
+# "still holding" from "let go". Ctrl and Alt cross the wire as real holds on
+# the same session, so Ctrl is the modifier both session types can actually
+# report. i3 itself was never confused — Shift+hjkl moved windows fine — but a
+# cue that lies is worse than no cue.
 #
-# This REPLACED a twin mode ("nav-move") that existed only to publish the same
-# fact as a mode name. The twin had to duplicate all 20 movement binds so that
-# a missed release — an RDP client re-synthesising modifiers, a focus steal —
-# could not strand the session somewhere bare hjkl moved windows. A signal
-# that carries no binding table cannot be stranded in, and i3 now stays in
-# ONE mode for the whole gesture, so nothing churns when a client bounces the
-# modifier per keystroke.
+# The bar learns the modifier state from the two `nop` binds: i3 emits a
+# binding event for every executed bind, `nop` included and argument included,
+# so these are an explicit press/release signal that costs nothing at the WM
+# level (nop touches no layout, and binding the Ctrl keycode does not stop
+# Ctrl+hjkl from matching). quickshell Bar.qml reads the command string; the
+# hint strips live in Common/ModeBarTheme.qml — keep them in sync with these.
 #
-# bindCODE for the Shift keys, not bindsym: i3's parser reads the leading
-# "Shift" of `bindsym Shift_L` as a MODIFIER and then fails to translate the
-# "_L" remainder, silently dropping the bind (log-only — `i3 -C` stays clean).
-# 50/62 are Shift_L/Shift_R in every evdev X keymap (xmodmap -pm). The release
-# event still carries the Shift bit (X state is pre-event), so the MASKED form
-# is the one that fires; the bare pair is a keymap-quirk fallback.
+# This replaced a twin mode ("nav-move") that published the same fact as a mode
+# name and therefore had to duplicate every movement bind, so that a missed
+# release could not strand the session somewhere bare hjkl moved windows. A
+# signal carries no binding table and cannot be stranded in.
+#
+# bindCODE for the modifier keys, not bindsym: i3's parser reads the leading
+# "Control" of `bindsym Control_L` as a MODIFIER and then fails to translate
+# the "_L" remainder, silently dropping the bind (log-only — `i3 -C` stays
+# clean). 37/105 are Control_L/Control_R in every evdev X keymap (xmodmap -pm).
+# The release event still carries the Ctrl bit (X state is pre-event), so the
+# MASKED form is the one that fires; the bare pair is a keymap-quirk fallback.
 bindsym $mod+o mode "nav"
 mode "nav" {
         bindsym h focus left
@@ -382,10 +387,10 @@ mode "nav" {
         bindsym k focus up
         bindsym l focus right
 
-        bindsym Shift+h move left
-        bindsym Shift+j move down
-        bindsym Shift+k move up
-        bindsym Shift+l move right
+        bindsym Ctrl+h move left
+        bindsym Ctrl+j move down
+        bindsym Ctrl+k move up
+        bindsym Ctrl+l move right
 
         # same bindings, but for the arrow keys
         bindsym Left focus left
@@ -393,22 +398,23 @@ mode "nav" {
         bindsym Up focus up
         bindsym Right focus right
 
-        bindsym Shift+Left move left
-        bindsym Shift+Down move down
-        bindsym Shift+Up move up
-        bindsym Shift+Right move right
+        bindsym Ctrl+Left move left
+        bindsym Ctrl+Down move down
+        bindsym Ctrl+Up move up
+        bindsym Ctrl+Right move right
 
-        # Shift down / up -> bar indicator only; no layout effect
-        bindcode 50 nop nav-shift-down
-        bindcode 62 nop nav-shift-down
-        bindcode --release Shift+50 nop nav-shift-up
-        bindcode --release Shift+62 nop nav-shift-up
-        bindcode --release 50 nop nav-shift-up
-        bindcode --release 62 nop nav-shift-up
+        # Ctrl down / up -> bar indicator only; no layout effect
+        bindcode 37 nop nav-move-on
+        bindcode 105 nop nav-move-on
+        bindcode --release Ctrl+37 nop nav-move-off
+        bindcode --release Ctrl+105 nop nav-move-off
+        bindcode --release 37 nop nav-move-off
+        bindcode --release 105 nop nav-move-off
 
-        # exit nav mode: Enter, Escape or q
+        # exit nav mode: Enter, Escape or q (with or without a modifier held)
         bindsym Return mode "default"
         bindsym Escape mode "default"
+        bindsym Ctrl+q mode "default"
         bindsym Shift+q mode "default"
         bindsym q mode "default"
 }

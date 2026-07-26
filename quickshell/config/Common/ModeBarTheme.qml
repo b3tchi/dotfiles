@@ -45,21 +45,20 @@ Singleton {
             {text: "quit", key: "q"}
         ],
         // nav / nav-move (dotfiles-5u6m) — the sticky-hjkl mode's two faces.
-        // i3 has ONE mode here ("nav", hjkl focus + Shift+hjkl move); it never
-        // enters "nav-move". That name is SYNTHETIC: Bar.qml swaps it in after
-        // a binding event whose `mods` carried Shift, so the strip shows which
-        // role the keys are playing. It is the only Shift indication the user
-        // gets, and it follows the last keystroke rather than live modifier
-        // state (Bar.qml explains why that is the display-agnostic choice) —
-        // hence "shift-to-move" / "moving" rather than hold/release wording,
-        // which would promise a live read the bar deliberately does not do.
-        // Keep the keys in sync with i3 config/config.common.
+        // i3 has ONE mode here ("nav": hjkl focus, Ctrl+hjkl move); it never
+        // enters "nav-move". That name is SYNTHETIC: Bar.qml swaps it in while
+        // the move modifier is down, so the strip shows which role the keys are
+        // currently playing.
+        // The modifier is CTRL, not Shift, because xrdp synthesises Shift
+        // around every character it sends — a held Shift is unobservable on
+        // that session, so the cue could not be honest (see the nav block in
+        // i3/config.common). Keep these keys in sync with that block.
         "nav": [
             {text: "←", key: "h"},
             {text: "↓", key: "j"},
             {text: "↑", key: "k"},
             {text: "→", key: "l"},
-            {text: "shift-to-move", key: "⇧"},
+            {text: "ctrl-to-move", key: "^"},
             {text: "quit", key: "q"}
         ],
         "nav-move": [
@@ -67,7 +66,7 @@ Singleton {
             {text: "move-↓", key: "j"},
             {text: "move-↑", key: "k"},
             {text: "move-→", key: "l"},
-            {text: "moving", key: "⇧"},
+            {text: "moving", key: "^"},
             {text: "quit", key: "q"}
         ],
         "system": [
@@ -98,9 +97,9 @@ Singleton {
     // Pill label — verbatim from Bar.qml's display-name ternary: resize and
     // screenshot show their own name, everything else (incl. the long system
     // string and unknown/future modes) shows "system". The nav pair is the one
-    // addition (dotfiles-5u6m): the pill is where held-Shift becomes visible,
-    // so nav-move reads "nav MOVE" — a different WORD, not just a different
-    // hint row, because the pill is what the eye lands on.
+    // addition (dotfiles-5u6m): the pill is where the held move modifier
+    // becomes visible, so nav-move reads "nav MOVE" — a different WORD, not
+    // just a different hint row, because the pill is what the eye lands on.
     function displayName(mode) {
         return mode === "resize" ? "resize"
              : mode === "screenshot" ? "screenshot"

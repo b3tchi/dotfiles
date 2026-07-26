@@ -254,51 +254,55 @@ PanelWindow {
         onExited: running = true
     }
 
-    // --- Shift indicator for the nav mode (dotfiles-5u6m) ---
-    // i3 signals the modifier explicitly: the mode binds the Shift keycodes to
-    // `nop nav-shift-down` / `nop nav-shift-up`, and every executed binding —
-    // nop included, argument included — arrives as a binding event. So the
-    // indicator reads a statement of fact from the WM rather than inferring
-    // one, and it reads the same on every session type.
+    // --- Move-modifier indicator for the nav mode (dotfiles-5u6m) ---
+    // i3 signals the modifier explicitly: the mode binds the Ctrl keycodes to
+    // `nop nav-move-on` / `nop nav-move-off`, and every executed binding — nop
+    // included, argument included — arrives as a binding event. The bar reads
+    // a statement of fact from the WM rather than inferring one.
     //
-    // Physical-modifier reads were tried twice and abandoned: raw key edges
-    // (the switcher's qs-keymon.py) desync when an edge is swallowed, and even
-    // the authoritative X modifier mask is only as truthful as the session
-    // feeding it — an RDP client decides for itself whether a held modifier
-    // crosses the wire as a hold or is re-synthesised per keystroke, so the
-    // native and xrdp sessions disagreed about the same gesture. What they do
-    // agree on is what i3 matched, which is what these events report.
+    // Ctrl rather than Shift is what makes this honest on every session: xrdp
+    // synthesises Shift around each character (xev shows it released on every
+    // letter press), so a held Shift is unobservable there, while Ctrl crosses
+    // as a real hold. Reading the physical modifier directly was tried twice
+    // and abandoned for the same reason — raw key edges desync when one is
+    // swallowed, and the X modifier mask is only as truthful as the session
+    // feeding it.
     //
     // The mods of ordinary action bindings are a second, corroborating input:
-    // a binding that ran as Shift+hjkl proves the modifier was down for that
+    // a binding i3 matched as Ctrl+hjkl proves the modifier was down for that
     // keystroke even if the surrounding nop pair went missing.
-    property bool shiftHeld: false
+    property bool moveMod: false
     readonly property bool inNavMode: currentMode === "nav"
 
     function noteBinding(b) {
         if (!root.inNavMode) return
         var cmd = (b && b.command) ? String(b.command).trim() : ""
 
-        // The explicit signal wins outright.
-        if (cmd.indexOf("nop nav-shift-down") === 0) { root.shiftHeld = true;  return }
-        if (cmd.indexOf("nop nav-shift-up")   === 0) { root.shiftHeld = false; return }
+        // The explicit signal wins outright. Matched BEFORE the mods below:
+        // the release nop legitimately carries mods:["ctrl"] (it IS the
+        // release bind), so reading mods first would re-arm on the very event
+        // that means "up".
+        if (cmd.indexOf("nop nav-move-on")  === 0) { root.moveMod = true;  return }
+        if (cmd.indexOf("nop nav-move-off") === 0) { root.moveMod = false; return }
         // Any other nop is somebody else's marker — never an action.
         if (cmd.indexOf("nop") === 0) return
         // Mode switches describe leaving/entering, not what a key did.
         if (cmd.indexOf("mode ") === 0) return
 
         var mods = b && b.mods ? b.mods : []
-        var shifted = false
-        for (var i = 0; i < mods.length; i++)
-            if (String(mods[i]).toLowerCase() === "shift") shifted = true
-        root.shiftHeld = shifted
+        var held = false
+        for (var i = 0; i < mods.length; i++) {
+            var m = String(mods[i]).toLowerCase()
+            if (m === "ctrl" || m === "control") held = true
+        }
+        root.moveMod = held
     }
 
     // Leaving nav resets everything, so the mode always opens plain rather
     // than inheriting the Shift+q that exited it.
     onCurrentModeChanged: {
-        shiftHeld = false
-        if (!inNavMode) { navUnstick.stop(); navShiftSticky = false }
+        moveMod = false
+        if (!inNavMode) { navUnstick.stop(); navMoveSticky = false }
     }
 
     // Debounced render state. An xrdp client that re-synthesises Shift around
@@ -306,11 +310,11 @@ PanelWindow {
     // only the pill — the binds themselves keep working) would strobe. Rising
     // edge is immediate so the cue never lags the gesture; the falling edge
     // waits, and a re-assert inside the window cancels it.
-    property bool navShiftSticky: false
-    Timer { id: navUnstick; interval: 400; onTriggered: root.navShiftSticky = false }
-    onShiftHeldChanged: {
-        if (shiftHeld) { navUnstick.stop(); navShiftSticky = true }
-        else if (navShiftSticky) navUnstick.restart()
+    property bool navMoveSticky: false
+    Timer { id: navUnstick; interval: 400; onTriggered: root.navMoveSticky = false }
+    onMoveModChanged: {
+        if (moveMod) { navUnstick.stop(); navMoveSticky = true }
+        else if (navMoveSticky) navUnstick.restart()
     }
 
     // --- System stats ---
@@ -657,7 +661,7 @@ PanelWindow {
         // two-prop api_surface: the registry already carries both rows.
         ModeBar {
             anchors { left: parent.left; top: parent.top; bottom: parent.bottom; leftMargin: 8 }
-            mode: root.inNavMode ? (root.navShiftSticky ? "nav-move" : "nav")
+            mode: root.inNavMode ? (root.navMoveSticky ? "nav-move" : "nav")
                                  : root.currentMode
             fontSize: root.fontSize
         }
