@@ -358,6 +358,48 @@ mode "resize" {
         bindsym q mode "default"
 }
 
+# Navigation mode (dotfiles-5u6m) — sticky hjkl focus without holding $mod.
+# $mod+o enters; hjkl / arrows focus, Shift+hjkl / Shift+arrows move the
+# focused window; q, Escape or Enter leave. Shift is a plain modifier on each
+# bind here — ONE mode, no sub-mode flip.
+#
+# The "is Shift down" indication is quickshell's job, not i3's: Bar.qml spawns
+# qs-keymon.py (the same XI2 raw-key listener the $mod+w switcher uses) while
+# this mode is active and repaints its pill "nav" -> "nav MOVE" from keycodes
+# 50/62. i3 cannot report live modifier state at all, so nothing here drives
+# that — but the hint strip mirrors these keys, so keep them in sync with
+# quickshell/config/Common/ModeBarTheme.qml's hints["nav"] / hints["nav-move"].
+#
+# Shift+q exits too: q must still work with Shift physically held.
+bindsym $mod+o mode "nav"
+mode "nav" {
+        bindsym h focus left
+        bindsym j focus down
+        bindsym k focus up
+        bindsym l focus right
+
+        bindsym Shift+h move left
+        bindsym Shift+j move down
+        bindsym Shift+k move up
+        bindsym Shift+l move right
+
+        # same bindings, but for the arrow keys
+        bindsym Left focus left
+        bindsym Down focus down
+        bindsym Up focus up
+        bindsym Right focus right
+
+        bindsym Shift+Left move left
+        bindsym Shift+Down move down
+        bindsym Shift+Up move up
+        bindsym Shift+Right move right
+
+        # exit nav mode: Enter, Escape or q
+        bindsym Return mode "default"
+        bindsym Escape mode "default"
+        bindsym Shift+q mode "default"
+        bindsym q mode "default"
+}
 # Lock screen
 bindsym $mod+9 exec --no-startup-id blurlock
 

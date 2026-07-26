@@ -252,6 +252,45 @@ PanelWindow {
         onExited: running = true
     }
 
+    // --- Held-Shift tracking for the nav mode (dotfiles-5u6m) ---
+    // i3 reports the MODE over IPC but never live modifier state, so the only
+    // way to show "Shift is down right now" is to read the X server directly.
+    // qs-keymon.py is the switcher's existing XI2 raw-key listener (it already
+    // emits keycodes 50/62 = Shift_L/Shift_R); the switcher's copy lives in the
+    // Overlay process, which on a desktop session is a SEPARATE quickshell
+    // instance whose properties this bar cannot read — hence a second listener
+    // here rather than a shared one.
+    //
+    // Gated on `currentMode === "nav"`, so it exists only for the seconds the
+    // mode is up: no idle python process, and on RDP (Overlay hosted in THIS
+    // instance) the brief overlap with the switcher's listener is two readers
+    // on the same root window, which XI2 fans out fine.
+    //
+    // X11 only — under sway the listener never runs and the pill simply stays
+    // "nav" while the Shift+hjkl binds keep working (i3/sway do the moving
+    // either way). QS_NO_KEYMON=1 suppresses it on headless test displays.
+    property bool shiftHeld: false
+
+    Process {
+        id: navKeyMon
+        running: root.currentMode === "nav" && !root.isSway
+                 && Quickshell.env("QS_NO_KEYMON") !== "1"
+        command: ["sh", "-c", "exec python3 -u $HOME/.dotfiles/quickshell/qs-keymon.py"]
+        stdout: SplitParser {
+            onRead: data => {
+                var parts = data.trim().split(" ")
+                if (parts.length !== 2) return
+                var code = parseInt(parts[1])
+                if (code !== 50 && code !== 62) return   // Shift_L / Shift_R
+                root.shiftHeld = (parts[0] === "press")
+            }
+        }
+    }
+    // Leaving the mode must clear the flag: the listener dies with the mode, so
+    // a Shift release that lands after it exits would never be seen and the
+    // next nav entry would open already reading MOVE.
+    onCurrentModeChanged: if (currentMode !== "nav") shiftHeld = false
+
     // --- System stats ---
     // Two modes:
     //   1. daemonMode (Termux/proot, native Linux with daemon): one machine-wide
@@ -590,9 +629,14 @@ PanelWindow {
         // ModeBar (sp018 / ft009). Same anchors + leftMargin as the old inline
         // overlay Row; the host keeps the mode-subscription Process above and
         // just feeds it root.currentMode.
+        // "nav-move" is a SYNTHETIC mode name — i3 never enters it. Held Shift
+        // is a bar-side observation (navKeyMon above), and swapping the string
+        // fed to ModeBar is how it becomes visible without widening ft009's
+        // two-prop api_surface: the registry already carries both rows.
         ModeBar {
             anchors { left: parent.left; top: parent.top; bottom: parent.bottom; leftMargin: 8 }
-            mode: root.currentMode
+            mode: (root.currentMode === "nav" && root.shiftHeld) ? "nav-move"
+                                                                 : root.currentMode
             fontSize: root.fontSize
         }
 

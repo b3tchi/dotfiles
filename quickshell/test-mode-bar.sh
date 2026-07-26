@@ -138,6 +138,16 @@ ShellRoot {
     emit("hints-screenshot-verbatim", j(ModeBarTheme.hints["screenshot"]))
     emit("hints-system-verbatim",     j(ModeBarTheme.hints["system"]))
 
+    // ---- nav / nav-move (dotfiles-5u6m): the held-Shift pair. The two rows
+    //      must DIFFER (move-← vs ←, release-to-focus vs hold-to-move) — a
+    //      registry that aliases nav-move back to nav renders no Shift signal
+    //      at all, which is the whole point of the sub-mode. ----
+    emit("hints-nav",      j(ModeBarTheme.hints["nav"]))
+    emit("hints-nav-move", j(ModeBarTheme.hints["nav-move"]))
+    emit("nav-resolves",   JSON.stringify([
+      ModeBarTheme.resolve("nav"), ModeBarTheme.resolve("nav-move")
+    ]))
+
     // ---- resolve: the full \$mode_system string routes to system via
     //      indexOf("(l)ock"), NOT equality (an equality mutant fails here) ----
     emit("system-long-name-resolves", j(ModeBarTheme.hintsFor(sys)))
@@ -145,13 +155,17 @@ ShellRoot {
     // ---- unknown mode -> fallback row [{key:"", label:<raw>}] ----
     emit("unknown-mode-fallback", j(ModeBarTheme.hintsFor("somefuture")))
 
-    // ---- displayName ternary (resize/screenshot else system) ----
+    // ---- displayName ternary (resize/screenshot/nav pair else system) ----
     emit("display-names", JSON.stringify([
       ModeBarTheme.displayName("resize"),
       ModeBarTheme.displayName("screenshot"),
       ModeBarTheme.displayName(sys),
       ModeBarTheme.displayName("somefuture"),
       ModeBarTheme.displayName("")
+    ]))
+    emit("nav-display-names", JSON.stringify([
+      ModeBarTheme.displayName("nav"),
+      ModeBarTheme.displayName("nav-move")
     ]))
 
     // ---- empty-string mode -> fallback row with empty label ----
@@ -215,6 +229,17 @@ assert_case "empty-mode-fallback"   '[{"text":"","key":""}]'
 
 scenario "displayName — resize/screenshot else system (AC4)"
 assert_case "display-names" '["resize","screenshot","system","system","system"]'
+
+scenario "nav pair (dotfiles-5u6m) — registry + resolve + pill labels differ by held Shift"
+assert_case "hints-nav" \
+  '[{"text":"←","key":"h"},{"text":"↓","key":"j"},{"text":"↑","key":"k"},{"text":"→","key":"l"},{"text":"hold-to-move","key":"⇧"},{"text":"quit","key":"q"}]'
+assert_case "hints-nav-move" \
+  '[{"text":"move-←","key":"h"},{"text":"move-↓","key":"j"},{"text":"move-↑","key":"k"},{"text":"move-→","key":"l"},{"text":"release-to-focus","key":"⇧"},{"text":"quit","key":"q"}]'
+# both must resolve to their OWN key — a nav-move falling through to "" would
+# render the raw mode name and lose the strip entirely.
+assert_case "nav-resolves" '["nav","nav-move"]'
+# the pill is the held-Shift tell: the two labels MUST NOT be equal.
+assert_case "nav-display-names" '["nav","nav MOVE"]'
 
 # ============================================================================
 # PHASE 1 — the ModeBar component (Common/ModeBar.qml): render structure,
@@ -414,6 +439,8 @@ flip1 "resize"     "resize"
 flip1 "screenshot" "screenshot"
 flip1 "$SYS"       "system-long-name"
 flip1 "somefuture" "unknown-fallback"
+flip1 "nav"        "nav"
+flip1 "nav-move"   "nav-move"
 
 # fontSize propagation: the host passes a different size (phone/sway differ).
 setfont 22; sleep 0.2; flip1 "resize" "fontsize-22"; setfont 16; sleep 0.2
@@ -457,6 +484,19 @@ assert_case "system-long-name.pill"    "system"
 # hk="u" post="ser". poweroff/"p" is inline (p at index 0).
 assert_case "system-long-name.hints" \
   '[{"pre":"","key":"l","post":"ock","space":"","tail":""},{"pre":"","key":"e","post":"xit","space":"","tail":""},{"pre":"switch-","key":"u","post":"ser","space":"","tail":""},{"pre":"","key":"s","post":"uspend","space":"","tail":""},{"pre":"","key":"h","post":"ibernate","space":"","tail":""},{"pre":"","key":"r","post":"eboot","space":"","tail":""},{"pre":"","key":"p","post":"oweroff","space":"","tail":""},{"pre":"","key":"q","post":"uit","space":"","tail":""}]'
+
+scenario "nav-pair-render: 'nav' vs 'nav-move' render a DIFFERENT pill + strip (dotfiles-5u6m)"
+assert_case "nav.visible"      "1"
+assert_case "nav.pill"         "nav"
+assert_case "nav-move.visible" "1"
+assert_case "nav-move.pill"    "nav MOVE"
+# every direction row is fallback here (the key never occurs in an arrow glyph
+# or in "move-←"), so pre/post stay empty and the word lands in `tail`;
+# "quit"/"q" is inline as everywhere else.
+assert_case "nav.hints" \
+  '[{"pre":"","key":"h","post":"","space":" ","tail":"←"},{"pre":"","key":"j","post":"","space":" ","tail":"↓"},{"pre":"","key":"k","post":"","space":" ","tail":"↑"},{"pre":"","key":"l","post":"","space":" ","tail":"→"},{"pre":"","key":"⇧","post":"","space":" ","tail":"hold-to-move"},{"pre":"","key":"q","post":"uit","space":"","tail":""}]'
+assert_case "nav-move.hints" \
+  '[{"pre":"","key":"h","post":"","space":" ","tail":"move-←"},{"pre":"","key":"j","post":"","space":" ","tail":"move-↓"},{"pre":"","key":"k","post":"","space":" ","tail":"move-↑"},{"pre":"","key":"l","post":"","space":" ","tail":"move-→"},{"pre":"","key":"⇧","post":"","space":" ","tail":"release-to-focus"},{"pre":"","key":"q","post":"uit","space":"","tail":""}]'
 
 scenario "unknown-fallback: unknown mode -> pill 'system' + one raw-name hint row (AC4)"
 assert_case "unknown-fallback.visible" "1"
@@ -545,9 +585,32 @@ mkfifo "$FIFO"
 SLEEP_BIN="$(command -v sleep)"
 # Every coreutil the Bar's Processes shell out to (stats/net/vol/bat probes
 # harmlessly no-op under the sandbox) plus sh for the get_workspaces wrapper.
-for t in sh cat sleep tr awk df grep sed cut head; do
+for t in sh cat sleep tr awk df grep sed cut head python3; do
   src="$(command -v "$t")" && ln -sf "$src" "$PBIN2/$t"
 done
+
+# --- fake HOME hosting a stub qs-keymon.py (dotfiles-5u6m) -------------------
+#
+# The nav-mode Shift indicator shells out to `python3 -u
+# $HOME/.dotfiles/quickshell/qs-keymon.py` — the real one needs XI2 + a real
+# keyboard, which an Xvfb has neither of. Pointing HOME at a sandbox lets the
+# suite substitute a stub that replays whatever the harness writes into a FIFO,
+# so "press 50" / "release 50" are driven on cue exactly as the X server would.
+# Reopen-in-a-loop (not a single open) because Bar.qml starts and KILLS this
+# process on every nav-mode entry/exit — each spawn must find the FIFO again.
+HOME2="$TMP/home"
+KEYMON_DIR="$HOME2/.dotfiles/quickshell"
+KEYFIFO="$KEYMON_DIR/keys.fifo"
+mkdir -p "$KEYMON_DIR"
+mkfifo "$KEYFIFO"
+cat > "$KEYMON_DIR/qs-keymon.py" <<KEYEOF
+import sys
+while True:
+    with open("$KEYFIFO") as f:
+        for line in f:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+KEYEOF
 
 # One focused workspace tab named "wsprobe" — a text unique in the tree, so the
 # dump can locate the workspace Repeater's tab and read its effective visibility
@@ -642,7 +705,7 @@ HOST2EOF
 QS_BIN="$(command -v "$QUICKSHELL")"
 # setsid: own process group so cleanup reaps the blocking FIFO reader. PATH is
 # the sandbox ONLY (so wmMsg resolves to the stub); SWAYSOCK unset => i3 path.
-setsid env -u SWAYSOCK DISPLAY="$DPY" PATH="$PBIN2" \
+setsid env -u SWAYSOCK DISPLAY="$DPY" PATH="$PBIN2" HOME="$HOME2" \
     XDG_CONFIG_HOME="$CFG2" XDG_RUNTIME_DIR="$RUN2" XDG_CACHE_HOME="$CCH" \
     "$QS_BIN" -p "$CFG2" >"$TMP/qs2.out" 2>&1 &
 BAR_PID=$!
@@ -680,6 +743,29 @@ else
   barflip 'this is not json @@@' "garbage-ignored"
   mode_emit '{"change":"default"}'; sleep 0.3   # reset
 
+  # --- nav mode + held Shift (dotfiles-5u6m) ---------------------------------
+  # Persistent RDWR writer on the key FIFO, same trick as the mode stream.
+  exec 4<>"$KEYFIFO"
+  key_emit() { printf '%s\n' "$1" >&4; }
+  # a key event needs the stub's stdout -> SplitParser -> property hop, not a
+  # scene rebuild, so a shorter settle than barflip's suffices.
+  keyflip() { key_emit "$1"; sleep 0.5; ipc2 call barprobe dumpc "$2" >/dev/null 2>&1; sleep 0.25; }
+
+  barflip '{"change":"nav"}' "nav-on"          # entered, Shift not touched yet
+  keyflip "press 50"   "nav-shift-down"        # Shift_L down  -> pill flips
+  keyflip "release 50" "nav-shift-up"          # released      -> pill reverts
+  keyflip "press 62"   "nav-shiftr-down"       # Shift_R is equivalent
+  # Tab RELEASE while Shift is held: the switcher's monitor puts 23/25/133 on
+  # this same stream, so a handler that keyed on press/release alone (dropping
+  # the 50/62 filter) would clear the flag here and the pill would fall back to
+  # "nav" — the assertion below pins that it does not.
+  keyflip "release 23" "nav-other-key"
+  # leaving the mode with Shift still down must clear the flag — the listener
+  # dies with the mode, so its release would never arrive.
+  barflip '{"change":"default"}' "nav-off-shift-stuck"
+  barflip '{"change":"nav"}'     "nav-reentry"
+  mode_emit '{"change":"default"}'; sleep 0.3   # reset
+
   grep -a 'CASE ' "$TMP/qs2.out" | sed 's/^.*CASE /CASE /' >> "$CASES"
   ipc2 call barprobe bye >/dev/null 2>&1
 
@@ -712,6 +798,31 @@ else
   assert_case "garbage-ignored.mode"  "$SYS"
   assert_case "garbage-ignored.strip" "1"
   assert_case "garbage-ignored.pill"  "system"
+
+  scenario "nav-mode: entering 'nav' shows the strip, pill reads 'nav' before any Shift (dotfiles-5u6m)"
+  assert_case "nav-on.mode"  "nav"
+  assert_case "nav-on.strip" "1"
+  assert_case "nav-on.pill"  "nav"
+  assert_case "nav-on.ws"    "0"
+
+  scenario "held-Shift indicator: a raw keymon 'press 50' repaints the pill 'nav' -> 'nav MOVE'"
+  # i3 stays in mode "nav" throughout — the MOVE label is a bar-side synthesis
+  # from the key monitor, so .mode must NOT change with it.
+  assert_case "nav-shift-down.pill" "nav MOVE"
+  assert_case "nav-shift-down.mode" "nav"
+
+  scenario "released Shift reverts the pill, and Shift_R (62) is equivalent to Shift_L (50)"
+  assert_case "nav-shift-up.pill"    "nav"
+  assert_case "nav-shiftr-down.pill" "nav MOVE"
+
+  scenario "non-Shift keycodes are ignored: a Tab (23) release does not clear held Shift"
+  # MUTANT PIN: drop the `code !== 50 && code !== 62` guard in Bar.qml and this
+  # release turns the pill back to "nav" while Shift is still physically down.
+  assert_case "nav-other-key.pill" "nav MOVE"
+
+  scenario "leaving nav with Shift still down clears the flag — re-entry reads 'nav', not 'nav MOVE'"
+  assert_case "nav-off-shift-stuck.strip" "0"
+  assert_case "nav-reentry.pill"          "nav"
 fi
 
 # ============================================================================

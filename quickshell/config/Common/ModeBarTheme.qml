@@ -44,6 +44,30 @@ Singleton {
             {text: "whole-screen", key: "w"},
             {text: "quit", key: "q"}
         ],
+        // nav / nav-move (dotfiles-5u6m) — the sticky-hjkl mode's two faces.
+        // i3 has ONE mode here ("nav", hjkl focus + Shift+hjkl move); it never
+        // enters "nav-move". That name is SYNTHETIC: Bar.qml watches the X
+        // server's Shift keycodes through qs-keymon.py and feeds this string to
+        // ModeBar while Shift is physically down, because i3's IPC reports the
+        // mode but never live modifier state. This strip plus displayName's
+        // "nav MOVE" pill are the only held-Shift indication the user gets.
+        // Keep the keys in sync with i3 config/config.common.
+        "nav": [
+            {text: "←", key: "h"},
+            {text: "↓", key: "j"},
+            {text: "↑", key: "k"},
+            {text: "→", key: "l"},
+            {text: "hold-to-move", key: "⇧"},
+            {text: "quit", key: "q"}
+        ],
+        "nav-move": [
+            {text: "move-←", key: "h"},
+            {text: "move-↓", key: "j"},
+            {text: "move-↑", key: "k"},
+            {text: "move-→", key: "l"},
+            {text: "release-to-focus", key: "⇧"},
+            {text: "quit", key: "q"}
+        ],
         "system": [
             {text: "lock", key: "l"},
             {text: "exit", key: "e"},
@@ -63,16 +87,23 @@ Singleton {
     function resolve(mode) {
         if (mode === "resize") return "resize"
         if (mode === "screenshot") return "screenshot"
+        if (mode === "nav") return "nav"
+        if (mode === "nav-move") return "nav-move"   // synthetic (see hints)
         if (mode.indexOf("(l)ock") !== -1) return "system"
         return ""
     }
 
     // Pill label — verbatim from Bar.qml's display-name ternary: resize and
     // screenshot show their own name, everything else (incl. the long system
-    // string and unknown/future modes) shows "system".
+    // string and unknown/future modes) shows "system". The nav pair is the one
+    // addition (dotfiles-5u6m): the pill is where held-Shift becomes visible,
+    // so nav-move reads "nav MOVE" — a different WORD, not just a different
+    // hint row, because the pill is what the eye lands on.
     function displayName(mode) {
         return mode === "resize" ? "resize"
-             : mode === "screenshot" ? "screenshot" : "system"
+             : mode === "screenshot" ? "screenshot"
+             : mode === "nav" ? "nav"
+             : mode === "nav-move" ? "nav MOVE" : "system"
     }
 
     // Hint rows for a mode. Known modes return their registry rows; unknown
