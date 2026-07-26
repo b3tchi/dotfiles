@@ -279,6 +279,17 @@ PanelWindow {
 
     function noteBinding(b) {
         if (root.currentMode !== "nav") return
+        // Mode-switching binds describe the TWIN FLIP, not an hjkl action, and
+        // must never drive the indicator. This is load-bearing: i3 emits the
+        // mode event BEFORE the binding event, so on Shift release the flip
+        // back to "nav" clears the flag and then its own binding — which
+        // legitimately carries mods:["shift"], it IS the Shift-release bind —
+        // would re-arm it, latching the pill on MOVE until the next unshifted
+        // key. Verified ordering, i3 4.25: MODE change=nav, then BINDING
+        // mods=['shift'] cmd=mode "nav".
+        var cmd = (b && b.command) ? String(b.command).trim() : ""
+        if (cmd.indexOf("mode ") === 0) return
+
         var mods = b && b.mods ? b.mods : []
         var shifted = false
         for (var i = 0; i < mods.length; i++)

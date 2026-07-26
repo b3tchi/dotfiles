@@ -746,8 +746,24 @@ else
   # comparison would silently never light the indicator there.
   bindflip '["Shift"]' j 'move down'   "nav-move-capital"
   # A modifier that is not Shift must NOT read as MOVE (a `mods.length > 0`
-  # mutant passes everything above and fails here).
-  bindflip '["Mod4"]'  o 'mode nav'    "nav-other-mod"
+  # mutant passes everything above and fails here). The command must be a real
+  # action, not a `mode` switch — those are skipped outright by the release
+  # guard, which would make this scenario pass for the wrong reason.
+  bindflip '["ctrl"]'  h 'focus left'  "nav-other-mod"
+  # THE release regression (dotfiles-5u6m): i3 emits the MODE event BEFORE the
+  # BINDING event, so the flip back out of the twin arrives as
+  #   MODE change=nav   then   BINDING mods=["shift"] cmd=mode "nav"
+  # and the binding IS the Shift-release bind, mods and all. Replayed here in
+  # that exact order: the pill must settle on "nav", not re-arm to MOVE.
+  # MUTANT PIN: drop the `cmd.indexOf("mode ")` guard in Bar.qml and the
+  # indicator latches on MOVE until the next unshifted key.
+  bindflip '["shift"]' j 'move down' "nav-pre-release"      # in MOVE first
+  mode_emit '{"change":"nav-move"}'; sleep 0.3
+  bind_emit '[]' "" 'mode "nav-move"'; sleep 0.3            # twin entered
+  mode_emit '{"change":"nav"}'; sleep 0.3                   # ... and left
+  bind_emit '["shift"]' "" 'mode "nav"'; sleep 0.5          # release bind, mods=shift
+  ipc2 call barprobe dumpc "nav-after-release" >/dev/null 2>&1; sleep 0.25
+
   # Leaving the mode resets the indicator, so re-entry never inherits MOVE from
   # the Shift+q that exited it.
   bind_emit '["shift"]' q 'mode default'; sleep 0.3
@@ -818,6 +834,11 @@ else
   assert_case "nav-move-capital.pill" "nav MOVE"
   # MUTANT PIN: a `mods.length > 0` test passes every case above and fails here.
   assert_case "nav-other-mod.pill"    "nav"
+
+  scenario "Shift RELEASE settles on 'nav' despite i3 emitting mode-then-binding"
+  assert_case "nav-pre-release.pill"    "nav MOVE"
+  assert_case "nav-after-release.pill"  "nav"
+  assert_case "nav-after-release.mode"  "nav"
 
   scenario "the indicator resets across mode transitions — re-entry reads 'nav', not 'nav MOVE'"
   # The Shift+q that exits leaves the flag set; entering again must not inherit
