@@ -238,66 +238,58 @@ PanelWindow {
     // --- Mode tracking ---
     property string currentMode: "default"
 
+    // Also carries `binding` events — see the nav-mode Shift indicator below.
     Process {
-        command: [root.wmMsg, "-t", "subscribe", "-m", '["mode"]']
+        command: [root.wmMsg, "-t", "subscribe", "-m", '["mode","binding"]']
         running: true
         stdout: SplitParser {
             onRead: data => {
                 try {
                     var e = JSON.parse(data)
-                    if (e.change !== undefined) root.currentMode = e.change
+                    if (e.binding !== undefined) root.noteBinding(e.binding)
+                    else if (e.change !== undefined) root.currentMode = e.change
                 } catch(err) {}
             }
         }
         onExited: running = true
     }
 
-    // --- Held-Shift tracking for the nav mode (dotfiles-5u6m) ---
-    // i3 reports the MODE over IPC but never live modifier state, so "Shift is
-    // down right now" has to come from the X server. qs-shiftmon.py polls the
-    // authoritative modifier mask and emits "shift 1" / "shift 0" on change.
+    // --- Shift indicator for the nav mode (dotfiles-5u6m) ---
+    // Driven by i3's OWN binding events: every executed binding reports the
+    // modifiers i3 matched, so `mods: ["shift"]` means the keystroke ran a
+    // Shift+hjkl move and `mods: []` means it ran a bare hjkl focus. The pill
+    // therefore reports what the mode ACTUALLY DID, and it reports it the same
+    // way on every session.
     //
-    // STATE, not edges: the switcher's qs-keymon.py reports key press/release
-    // edges, and an indicator built by pairing those desyncs the moment one
-    // edge goes missing — a release swallowed while another client holds a
-    // grab, or one that lands in the gap while this process is being started
-    // or killed at mode entry/exit — and then stays wrong until the next
-    // press. The polled mask is self-correcting (worst case one 40ms tick) and
-    // reports Shift from ANY key that maps into the modifier, not just the two
-    // keycodes a listener happens to hardcode.
+    // Reading the physical modifier instead was tried twice and abandoned,
+    // both times because it is not display-agnostic: raw key edges (the
+    // switcher's qs-keymon.py) desync whenever one edge is swallowed, and even
+    // the authoritative X modifier mask is only as truthful as the session
+    // feeding it — an RDP client decides for itself whether a held modifier is
+    // transmitted as a continuous hold or re-synthesised per keystroke, so the
+    // native session and the xrdp session disagreed about the very same
+    // gesture. i3 matching `Shift+j` is the one fact both sessions share.
     //
-    // Gated on `currentMode === "nav"`, so it exists only for the seconds the
-    // mode is up — nothing polls while the bar is idle. The monitor emits its
-    // current state immediately on start, so entering the mode with Shift
-    // ALREADY down reads MOVE right away rather than waiting for a press.
-    //
-    // X11 only — under sway the monitor never runs and the pill simply stays
-    // "nav" while the Shift+hjkl binds keep working (i3/sway do the moving
-    // either way). QS_NO_KEYMON=1 suppresses it on headless test displays.
+    // The trade: this shows the last keystroke's role rather than live
+    // modifier state, so the mode opens reading "nav" even if Shift is already
+    // down, and it stays MOVE until an unshifted key is pressed. That is the
+    // honest reading of what the WM did, needs no helper process on any
+    // platform, and works under sway (which emits the same event) for free.
     property bool shiftHeld: false
 
-    Process {
-        id: navShiftMon
-        running: root.currentMode === "nav" && !root.isSway
-                 && Quickshell.env("QS_NO_KEYMON") !== "1"
-        command: ["sh", "-c", "exec python3 -u $HOME/.dotfiles/quickshell/qs-shiftmon.py"]
-        stdout: SplitParser {
-            onRead: data => {
-                var parts = data.trim().split(" ")
-                // Anything that isn't exactly `shift <0|1>` is ignored rather
-                // than coerced — a truthiness test on a malformed line would
-                // flip the indicator on stray output (a python traceback line,
-                // a partial write).
-                if (parts.length !== 2 || parts[0] !== "shift") return
-                if (parts[1] !== "0" && parts[1] !== "1") return
-                root.shiftHeld = (parts[1] === "1")
-            }
-        }
+    function noteBinding(b) {
+        if (root.currentMode !== "nav") return
+        var mods = b && b.mods ? b.mods : []
+        var shifted = false
+        for (var i = 0; i < mods.length; i++)
+            if (String(mods[i]).toLowerCase() === "shift") shifted = true
+        root.shiftHeld = shifted
     }
-    // Leaving the mode must clear the flag: the monitor dies with the mode, so
-    // a Shift release that lands after it exits would never be seen and the
-    // next nav entry would open already reading MOVE.
-    onCurrentModeChanged: if (currentMode !== "nav") shiftHeld = false
+
+    // Any mode transition resets the indicator — including INTO nav, so the
+    // mode always opens in its plain state rather than inheriting whatever the
+    // previous session left behind (e.g. the Shift+q that exited it).
+    onCurrentModeChanged: shiftHeld = false
 
     // --- System stats ---
     // Two modes:

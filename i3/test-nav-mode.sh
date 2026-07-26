@@ -131,6 +131,38 @@ assert_eq "Shift+Left moves A left -> A B" "$(ids)" "$A $B"
 xdotool key Right; sleep 0.4
 assert_eq "Right focuses B" "$(focused)" "$B"
 
+# The bar's Shift indicator is driven ENTIRELY by these events (quickshell
+# Bar.qml noteBinding + test-mode-bar.sh, which replays this exact payload
+# shape through a stubbed i3-msg). If i3 ever stopped reporting `mods`, or
+# spelled Shift differently, the indicator would go dark and only this
+# scenario — the one place a REAL i3 is asked — would notice.
+scenario "i3's binding events report the mods it matched (the bar's only Shift signal)"
+BIND_LOG="$TMP/bindings.log"
+i3-msg -s "$I3SOCK" -t subscribe -m '["binding"]' > "$BIND_LOG" 2>&1 &
+SUB_PID=$!
+sleep 0.8
+xdotool key h; sleep 0.4                       # bare    -> focus
+xdotool key --clearmodifiers shift+j; sleep 0.4 # shifted -> move
+kill "$SUB_PID" 2>/dev/null
+sleep 0.3
+# Concatenated JSON objects, one per event — decode them in sequence.
+BIND_SUMMARY="$(python3 - "$BIND_LOG" <<'PY'
+import sys, json
+raw = open(sys.argv[1]).read().strip()
+dec, i, out = json.JSONDecoder(), 0, []
+while i < len(raw):
+    obj, i = dec.raw_decode(raw, i)
+    while i < len(raw) and raw[i] in ' \n\r\t':
+        i += 1
+    b = obj.get("binding")
+    if b:
+        out.append("%s:%s:%s" % (b.get("symbol"), ",".join(b.get("mods", [])), b.get("command")))
+print("|".join(out))
+PY
+)"
+assert_eq "bare h reports no mods, Shift+j reports mods=shift" \
+  "$BIND_SUMMARY" "h::focus left|j:shift:move down"
+
 scenario "q exits — including with Shift physically held down"
 xdotool keydown shift; sleep 0.2
 xdotool key --clearmodifiers q; sleep 0.4

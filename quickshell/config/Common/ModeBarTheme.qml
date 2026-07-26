@@ -46,18 +46,20 @@ Singleton {
         ],
         // nav / nav-move (dotfiles-5u6m) — the sticky-hjkl mode's two faces.
         // i3 has ONE mode here ("nav", hjkl focus + Shift+hjkl move); it never
-        // enters "nav-move". That name is SYNTHETIC: Bar.qml watches the X
-        // server's Shift keycodes through qs-keymon.py and feeds this string to
-        // ModeBar while Shift is physically down, because i3's IPC reports the
-        // mode but never live modifier state. This strip plus displayName's
-        // "nav MOVE" pill are the only held-Shift indication the user gets.
+        // enters "nav-move". That name is SYNTHETIC: Bar.qml swaps it in after
+        // a binding event whose `mods` carried Shift, so the strip shows which
+        // role the keys are playing. It is the only Shift indication the user
+        // gets, and it follows the last keystroke rather than live modifier
+        // state (Bar.qml explains why that is the display-agnostic choice) —
+        // hence "shift-to-move" / "moving" rather than hold/release wording,
+        // which would promise a live read the bar deliberately does not do.
         // Keep the keys in sync with i3 config/config.common.
         "nav": [
             {text: "←", key: "h"},
             {text: "↓", key: "j"},
             {text: "↑", key: "k"},
             {text: "→", key: "l"},
-            {text: "hold-to-move", key: "⇧"},
+            {text: "shift-to-move", key: "⇧"},
             {text: "quit", key: "q"}
         ],
         "nav-move": [
@@ -65,7 +67,7 @@ Singleton {
             {text: "move-↓", key: "j"},
             {text: "move-↑", key: "k"},
             {text: "move-→", key: "l"},
-            {text: "release-to-focus", key: "⇧"},
+            {text: "moving", key: "⇧"},
             {text: "quit", key: "q"}
         ],
         "system": [

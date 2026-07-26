@@ -80,12 +80,6 @@ assert_case() { # <name> <expected>
   if [ "$2" = "$got" ]; then pass "$1"; else fail "$1" "$2" "$got"; fi
 }
 
-# Direct comparison, for PHASE 3's observations of a real process's stdout
-# (there is no CASE stream there — the script under test IS the producer).
-assert_eq() { # <label> <actual> <expected>
-  if [ "$2" = "$3" ]; then pass "$1"; else fail "$1" "$3" "$2"; fi
-}
-
 cleanup() {
   # PHASE 2 bar host is setsid'd into its own process group so the blocking
   # i3-msg subscribe reader (and the ws-subscribe sleep) die with it.
@@ -144,10 +138,10 @@ ShellRoot {
     emit("hints-screenshot-verbatim", j(ModeBarTheme.hints["screenshot"]))
     emit("hints-system-verbatim",     j(ModeBarTheme.hints["system"]))
 
-    // ---- nav / nav-move (dotfiles-5u6m): the held-Shift pair. The two rows
-    //      must DIFFER (move-← vs ←, release-to-focus vs hold-to-move) — a
-    //      registry that aliases nav-move back to nav renders no Shift signal
-    //      at all, which is the whole point of the sub-mode. ----
+    // ---- nav / nav-move (dotfiles-5u6m): the Shift pair. The two rows must
+    //      DIFFER (move-← vs ←, moving vs shift-to-move) — a registry that
+    //      aliases nav-move back to nav renders no Shift signal at all, which
+    //      is the whole point of the synthetic mode. ----
     emit("hints-nav",      j(ModeBarTheme.hints["nav"]))
     emit("hints-nav-move", j(ModeBarTheme.hints["nav-move"]))
     emit("nav-resolves",   JSON.stringify([
@@ -238,9 +232,9 @@ assert_case "display-names" '["resize","screenshot","system","system","system"]'
 
 scenario "nav pair (dotfiles-5u6m) — registry + resolve + pill labels differ by held Shift"
 assert_case "hints-nav" \
-  '[{"text":"←","key":"h"},{"text":"↓","key":"j"},{"text":"↑","key":"k"},{"text":"→","key":"l"},{"text":"hold-to-move","key":"⇧"},{"text":"quit","key":"q"}]'
+  '[{"text":"←","key":"h"},{"text":"↓","key":"j"},{"text":"↑","key":"k"},{"text":"→","key":"l"},{"text":"shift-to-move","key":"⇧"},{"text":"quit","key":"q"}]'
 assert_case "hints-nav-move" \
-  '[{"text":"move-←","key":"h"},{"text":"move-↓","key":"j"},{"text":"move-↑","key":"k"},{"text":"move-→","key":"l"},{"text":"release-to-focus","key":"⇧"},{"text":"quit","key":"q"}]'
+  '[{"text":"move-←","key":"h"},{"text":"move-↓","key":"j"},{"text":"move-↑","key":"k"},{"text":"move-→","key":"l"},{"text":"moving","key":"⇧"},{"text":"quit","key":"q"}]'
 # both must resolve to their OWN key — a nav-move falling through to "" would
 # render the raw mode name and lose the strip entirely.
 assert_case "nav-resolves" '["nav","nav-move"]'
@@ -500,9 +494,9 @@ assert_case "nav-move.pill"    "nav MOVE"
 # or in "move-←"), so pre/post stay empty and the word lands in `tail`;
 # "quit"/"q" is inline as everywhere else.
 assert_case "nav.hints" \
-  '[{"pre":"","key":"h","post":"","space":" ","tail":"←"},{"pre":"","key":"j","post":"","space":" ","tail":"↓"},{"pre":"","key":"k","post":"","space":" ","tail":"↑"},{"pre":"","key":"l","post":"","space":" ","tail":"→"},{"pre":"","key":"⇧","post":"","space":" ","tail":"hold-to-move"},{"pre":"","key":"q","post":"uit","space":"","tail":""}]'
+  '[{"pre":"","key":"h","post":"","space":" ","tail":"←"},{"pre":"","key":"j","post":"","space":" ","tail":"↓"},{"pre":"","key":"k","post":"","space":" ","tail":"↑"},{"pre":"","key":"l","post":"","space":" ","tail":"→"},{"pre":"","key":"⇧","post":"","space":" ","tail":"shift-to-move"},{"pre":"","key":"q","post":"uit","space":"","tail":""}]'
 assert_case "nav-move.hints" \
-  '[{"pre":"","key":"h","post":"","space":" ","tail":"move-←"},{"pre":"","key":"j","post":"","space":" ","tail":"move-↓"},{"pre":"","key":"k","post":"","space":" ","tail":"move-↑"},{"pre":"","key":"l","post":"","space":" ","tail":"move-→"},{"pre":"","key":"⇧","post":"","space":" ","tail":"release-to-focus"},{"pre":"","key":"q","post":"uit","space":"","tail":""}]'
+  '[{"pre":"","key":"h","post":"","space":" ","tail":"move-←"},{"pre":"","key":"j","post":"","space":" ","tail":"move-↓"},{"pre":"","key":"k","post":"","space":" ","tail":"move-↑"},{"pre":"","key":"l","post":"","space":" ","tail":"move-→"},{"pre":"","key":"⇧","post":"","space":" ","tail":"moving"},{"pre":"","key":"q","post":"uit","space":"","tail":""}]'
 
 scenario "unknown-fallback: unknown mode -> pill 'system' + one raw-name hint row (AC4)"
 assert_case "unknown-fallback.visible" "1"
@@ -591,33 +585,9 @@ mkfifo "$FIFO"
 SLEEP_BIN="$(command -v sleep)"
 # Every coreutil the Bar's Processes shell out to (stats/net/vol/bat probes
 # harmlessly no-op under the sandbox) plus sh for the get_workspaces wrapper.
-for t in sh cat sleep tr awk df grep sed cut head python3; do
+for t in sh cat sleep tr awk df grep sed cut head; do
   src="$(command -v "$t")" && ln -sf "$src" "$PBIN2/$t"
 done
-
-# --- fake HOME hosting a stub qs-shiftmon.py (dotfiles-5u6m) -----------------
-#
-# The nav-mode Shift indicator shells out to `python3 -u
-# $HOME/.dotfiles/quickshell/qs-shiftmon.py` — the real one polls the X
-# modifier mask, which an Xvfb with no keyboard can never report as held.
-# Pointing HOME at a sandbox lets the suite substitute a stub that replays
-# whatever the harness writes into a FIFO, so "shift 1" / "shift 0" are driven
-# on cue exactly as the real monitor would emit them.
-# Reopen-in-a-loop (not a single open) because Bar.qml starts and KILLS this
-# process on every nav-mode entry/exit — each spawn must find the FIFO again.
-HOME2="$TMP/home"
-KEYMON_DIR="$HOME2/.dotfiles/quickshell"
-KEYFIFO="$KEYMON_DIR/keys.fifo"
-mkdir -p "$KEYMON_DIR"
-mkfifo "$KEYFIFO"
-cat > "$KEYMON_DIR/qs-shiftmon.py" <<KEYEOF
-import sys
-while True:
-    with open("$KEYFIFO") as f:
-        for line in f:
-            sys.stdout.write(line)
-            sys.stdout.flush()
-KEYEOF
 
 # One focused workspace tab named "wsprobe" — a text unique in the tree, so the
 # dump can locate the workspace Repeater's tab and read its effective visibility
@@ -712,7 +682,7 @@ HOST2EOF
 QS_BIN="$(command -v "$QUICKSHELL")"
 # setsid: own process group so cleanup reaps the blocking FIFO reader. PATH is
 # the sandbox ONLY (so wmMsg resolves to the stub); SWAYSOCK unset => i3 path.
-setsid env -u SWAYSOCK DISPLAY="$DPY" PATH="$PBIN2" HOME="$HOME2" \
+setsid env -u SWAYSOCK DISPLAY="$DPY" PATH="$PBIN2" \
     XDG_CONFIG_HOME="$CFG2" XDG_RUNTIME_DIR="$RUN2" XDG_CACHE_HOME="$CCH" \
     "$QS_BIN" -p "$CFG2" >"$TMP/qs2.out" 2>&1 &
 BAR_PID=$!
@@ -750,25 +720,34 @@ else
   barflip 'this is not json @@@' "garbage-ignored"
   mode_emit '{"change":"default"}'; sleep 0.3   # reset
 
-  # --- nav mode + held Shift (dotfiles-5u6m) ---------------------------------
-  # Persistent RDWR writer on the key FIFO, same trick as the mode stream.
-  exec 4<>"$KEYFIFO"
-  key_emit() { printf '%s\n' "$1" >&4; }
-  # a key event needs the stub's stdout -> SplitParser -> property hop, not a
-  # scene rebuild, so a shorter settle than barflip's suffices.
-  keyflip() { key_emit "$1"; sleep 0.5; ipc2 call barprobe dumpc "$2" >/dev/null 2>&1; sleep 0.25; }
+  # --- nav mode + the Shift indicator (dotfiles-5u6m) ------------------------
+  # Binding events ride the SAME ["mode","binding"] subscription as the mode
+  # events above, so they are driven through the same FIFO — no second stream,
+  # exactly as the real bar sees them. Payloads are the shape i3 emits (verified
+  # against a live i3 in i3/test-nav-mode.sh).
+  bind_emit() { # <mods-json> <symbol> <command>
+    mode_emit "{\"change\":\"run\",\"binding\":{\"command\":\"$3\",\"mods\":$1,\"symbol\":\"$2\",\"input_type\":\"keyboard\"}}"
+  }
+  bindflip() { # <mods-json> <symbol> <command> <dump-name>
+    bind_emit "$1" "$2" "$3"; sleep 0.5
+    ipc2 call barprobe dumpc "$4" >/dev/null 2>&1; sleep 0.25
+  }
 
-  barflip '{"change":"nav"}' "nav-on"          # entered, Shift not touched yet
-  keyflip "shift 1" "nav-shift-down"           # held     -> pill flips
-  keyflip "shift 0" "nav-shift-up"             # released -> pill reverts
-  keyflip "shift 1" "nav-shift-again"          # and back — no latch either way
-  # Malformed output (a traceback line from the monitor, a partial write) must
-  # be IGNORED, not coerced: a truthiness test on the payload would clear the
-  # indicator here while Shift is still physically down.
-  keyflip "Traceback (most recent call last):" "nav-garbage-line"
-  # leaving the mode with Shift still down must clear the flag — the listener
-  # dies with the mode, so its release would never arrive.
-  barflip '{"change":"default"}' "nav-off-shift-stuck"
+  barflip '{"change":"nav"}' "nav-on"                        # entered, no key yet
+  bindflip '[]'        h 'focus left'  "nav-focus-key"      # bare    -> nav
+  bindflip '["shift"]' j 'move down'   "nav-move-key"       # shifted -> MOVE
+  bindflip '["shift"]' k 'move up'     "nav-move-again"     # stays MOVE
+  bindflip '[]'        l 'focus right' "nav-back-to-focus"  # bare    -> nav
+  # Case-insensitive: sway spells the same modifier "Shift". A === "shift"
+  # comparison would silently never light the indicator there.
+  bindflip '["Shift"]' j 'move down'   "nav-move-capital"
+  # A modifier that is not Shift must NOT read as MOVE (a `mods.length > 0`
+  # mutant passes everything above and fails here).
+  bindflip '["Mod4"]'  o 'mode nav'    "nav-other-mod"
+  # Leaving the mode resets the indicator, so re-entry never inherits MOVE from
+  # the Shift+q that exited it.
+  bind_emit '["shift"]' q 'mode default'; sleep 0.3
+  barflip '{"change":"default"}' "nav-off-after-shift"
   barflip '{"change":"nav"}'     "nav-reentry"
   mode_emit '{"change":"default"}'; sleep 0.3   # reset
 
@@ -811,72 +790,30 @@ else
   assert_case "nav-on.pill"  "nav"
   assert_case "nav-on.ws"    "0"
 
-  scenario "held-Shift indicator: 'shift 1' from the monitor repaints the pill 'nav' -> 'nav MOVE'"
-  # i3 stays in mode "nav" throughout — the MOVE label is a bar-side synthesis
-  # from the shift monitor, so .mode must NOT change with it.
-  assert_case "nav-shift-down.pill" "nav MOVE"
-  assert_case "nav-shift-down.mode" "nav"
+  scenario "Shift indicator: a binding event carrying mods ['shift'] repaints the pill 'nav' -> 'nav MOVE'"
+  # i3 stays in mode "nav" throughout — MOVE is a bar-side synthesis from the
+  # binding's mods, so .mode must NOT change with it. A binding event also
+  # carries change:"run"; reading that as a mode change would set currentMode
+  # to "run" and blank the strip, which these two assertions catch.
+  assert_case "nav-move-key.pill" "nav MOVE"
+  assert_case "nav-move-key.mode" "nav"
+  assert_case "nav-move-key.strip" "1"
 
-  scenario "the indicator follows state in both directions, with no latch"
-  assert_case "nav-shift-up.pill"    "nav"
-  assert_case "nav-shift-again.pill" "nav MOVE"
+  scenario "the indicator follows the LAST keystroke's role, both directions, no latch"
+  assert_case "nav-focus-key.pill"     "nav"
+  assert_case "nav-move-again.pill"    "nav MOVE"
+  assert_case "nav-back-to-focus.pill" "nav"
 
-  scenario "malformed monitor output is ignored, not coerced (Shift stays held)"
-  # MUTANT PIN: replace the `parts[0] !== "shift"` / `parts[1]` value checks in
-  # Bar.qml with a truthiness test and this line clears the indicator.
-  assert_case "nav-garbage-line.pill" "nav MOVE"
+  scenario "mods matching is case-insensitive (sway spells it 'Shift') and Shift-specific"
+  assert_case "nav-move-capital.pill" "nav MOVE"
+  # MUTANT PIN: a `mods.length > 0` test passes every case above and fails here.
+  assert_case "nav-other-mod.pill"    "nav"
 
-  scenario "leaving nav with Shift still down clears the flag — re-entry reads 'nav', not 'nav MOVE'"
-  assert_case "nav-off-shift-stuck.strip" "0"
+  scenario "the indicator resets across mode transitions — re-entry reads 'nav', not 'nav MOVE'"
+  # The Shift+q that exits leaves the flag set; entering again must not inherit
+  # it (MUTANT PIN: clearing only when leaving, not on every transition).
+  assert_case "nav-off-after-shift.strip" "0"
   assert_case "nav-reentry.pill"          "nav"
-fi
-
-# ============================================================================
-# PHASE 3 — the REAL qs-shiftmon.py against a real X server (dotfiles-5u6m).
-#           PHASE 2 drives the bar through a stubbed monitor, which proves the
-#           bar's parsing but nothing about what the monitor actually reports.
-#           This phase runs the shipped script on the harness Xvfb and drives
-#           it with XTEST, pinning the property the stub cannot: the state
-#           survives OTHER keys being pressed while Shift is held. That is the
-#           exact failure an edge-pairing implementation shows in the field.
-# ============================================================================
-
-SHIFTMON="$SCRIPT_DIR/qs-shiftmon.py"
-if ! command -v xdotool >/dev/null; then
-  echo; echo "SKIP: PHASE 3 needs xdotool (not installed) — real-monitor coverage not run"
-elif ! python3 -c 'import Xlib' 2>/dev/null; then
-  echo; echo "SKIP: PHASE 3 needs python-xlib (not installed) — real-monitor coverage not run"
-else
-  SM_LOG="$TMP/shiftmon.log"
-  DISPLAY="$DPY" python3 -u "$SHIFTMON" >"$SM_LOG" 2>&1 &
-  SM_PID=$!
-  sleep 1.2                      # let it emit its initial state
-  # settle > the monitor's 40ms poll on every step, so each read is a state
-  # the monitor has certainly observed.
-  sm_keys() { tr '\n' '|' < "$SM_LOG" | sed 's/|$//'; }
-
-  DISPLAY="$DPY" xdotool keydown shift; sleep 0.4
-  SM_HELD="$(sm_keys)"
-  # press an UNRELATED key twice while Shift stays physically down
-  DISPLAY="$DPY" xdotool keydown j; sleep 0.1; DISPLAY="$DPY" xdotool keyup j; sleep 0.4
-  DISPLAY="$DPY" xdotool keydown j; sleep 0.1; DISPLAY="$DPY" xdotool keyup j; sleep 0.4
-  SM_AFTER_J="$(sm_keys)"
-  DISPLAY="$DPY" xdotool keyup shift; sleep 0.4
-  SM_RELEASED="$(sm_keys)"
-  kill "$SM_PID" 2>/dev/null
-
-  scenario "real monitor: boots by reporting the CURRENT state, then 'shift 1' when held"
-  # The initial line matters — entering nav with Shift already down must read
-  # MOVE immediately instead of waiting for the next press.
-  assert_eq "initial state line + held transition" "$SM_HELD" "shift 0|shift 1"
-
-  scenario "real monitor: pressing OTHER keys while Shift is held emits nothing new"
-  # THE regression pin (the field bug): an edge-pairing monitor drops to
-  # 'shift 0' here. Polled state emits no further line at all.
-  assert_eq "no extra lines after two j presses" "$SM_AFTER_J" "shift 0|shift 1"
-
-  scenario "real monitor: releasing Shift emits exactly one 'shift 0'"
-  assert_eq "release transition" "$SM_RELEASED" "shift 0|shift 1|shift 0"
 fi
 
 # ============================================================================
