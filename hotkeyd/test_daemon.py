@@ -634,3 +634,100 @@ def test_two_daemons_on_two_displays_resolve_different_sockets(tmp_path):
     a = FakeXDisplay(str(tmp_path / "a.sock"))
     b = FakeXDisplay(str(tmp_path / "b.sock"))
     assert H.i3_socket_path(xdisp=a) != H.i3_socket_path(xdisp=b)
+
+
+# --------------------------------------------------------------------------
+# the load path must validate — not just --check (dotfiles-hwds.5)
+# --------------------------------------------------------------------------
+
+def write_table(tmp_path, body, name="t.py"):
+    f = tmp_path / name
+    f.write_text(f"import sys; sys.path.insert(0, {str(HERE)!r})\n"
+                 "from binds import Bind, Layer, Mod, run, enter_layer, exit_layer\n"
+                 + body)
+    return f
+
+
+def test_load_table_refuses_a_table_that_check_would_reject(tmp_path):
+    """us019 AC4 says the bind set is validated BEFORE it is loaded. Validation
+    lived only in --check, so a table with a duplicate chord loaded happily —
+    and post-T6 the escape-hatch restart takes exactly this path."""
+    bad = write_table(tmp_path,
+                      "BINDS = [Bind('Mod4+z', 'kill'), Bind('Mod4+z', 'nop')]\n"
+                      "LAYERS = {}\n")
+    with pytest.raises(H.TableInvalid) as ei:
+        H.load_table(str(bad))
+    assert "Mod4+z" in str(ei.value)
+
+
+def test_load_table_refuses_an_un_leavable_layer(tmp_path):
+    """The trap binds.py exists to catch: a layer with no exit keys. --check
+    refused it; the daemon loaded it."""
+    bad = write_table(tmp_path,
+                      "BINDS = [Bind('Mod4+o', enter_layer('trap'))]\n"
+                      "LAYERS = {'trap': Layer(binds=[Bind('h', 'focus left')],"
+                      " exit_keys=[])}\n")
+    with pytest.raises(H.TableInvalid) as ei:
+        H.load_table(str(bad))
+    assert "trap" in str(ei.value)
+
+
+def test_load_table_accepts_the_shipped_table():
+    assert H.load_table(None) is not None
+
+
+def test_load_table_reports_a_missing_binds_attribute_as_table_invalid(tmp_path):
+    """SIGHUP catches TableInvalid to keep the old table. This used to raise
+    SystemExit, which escaped the handler and KILLED the daemon."""
+    bad = write_table(tmp_path, "LAYERS = {}\n")
+    with pytest.raises(H.TableInvalid):
+        H.load_table(str(bad))
+
+
+def test_load_table_reports_a_missing_file_as_table_invalid(tmp_path):
+    with pytest.raises(H.TableInvalid):
+        H.load_table(str(tmp_path / "nope.py"))
+
+
+def test_load_table_reports_a_syntax_error_as_table_invalid(tmp_path):
+    bad = tmp_path / "broken.py"
+    bad.write_text("BINDS = [   # unterminated\n")
+    with pytest.raises(H.TableInvalid):
+        H.load_table(str(bad))
+
+
+def test_table_invalid_is_not_a_systemexit():
+    """SystemExit inherits BaseException, so `except Exception` does not catch
+    it — that is exactly how a bad reload killed the daemon."""
+    assert issubclass(H.TableInvalid, Exception)
+    assert not issubclass(H.TableInvalid, SystemExit)
+
+
+def test_reload_keeps_the_old_table_when_the_new_one_is_invalid(tmp_path):
+    """The promise the daemon logs. Exercised through the same helper the reload
+    path uses, so the two cannot drift."""
+    good = write_table(tmp_path, "BINDS = [Bind('Mod4+o', 'nop ok')]\n"
+                                 "LAYERS = {}\n", name="good.py")
+    table = H.load_table(str(good))
+    assert [b.chord for b in table.BINDS] == ["Mod4+o"]
+    bad = write_table(tmp_path, "BINDS = [Bind('Mod4+z', ''),]\n"
+                                "LAYERS = {}\n", name="bad.py")
+    try:
+        table = H.load_table(str(bad))
+        raise AssertionError("invalid table was accepted")
+    except H.TableInvalid:
+        pass
+    assert [b.chord for b in table.BINDS] == ["Mod4+o"], "old table was lost"
+
+
+def test_a_table_that_defines_dataclasses_loads(tmp_path):
+    """A real bind table is derived from binds.py and defines its own
+    dataclasses. Without registering the module in sys.modules before exec,
+    dataclasses resolves sys.modules[cls.__module__] to None and the import dies
+    with "'NoneType' object has no attribute '__dict__'" — so --binds was broken
+    for exactly the tables people would actually write."""
+    src = (HERE / "binds.py").read_text()
+    f = tmp_path / "derived.py"
+    f.write_text(src)
+    mod = H.load_table(str(f))
+    assert mod.BINDS and mod.LAYERS

@@ -60,6 +60,16 @@ class AlreadyRunning(RuntimeError):
     """Another daemon holds this display's lock."""
 
 
+class TableInvalid(Exception):
+    """A bind table that cannot be loaded — unreadable, unimportable, or
+    rejected by the validator.
+
+    Deliberately an Exception and NOT a SystemExit: the reload path catches
+    Exception to keep the old table, and SystemExit (a BaseException) sailed
+    straight through that handler and killed the daemon on a bad SIGHUP.
+    """
+
+
 # --------------------------------------------------------------------------
 # helpers
 # --------------------------------------------------------------------------
@@ -329,20 +339,48 @@ class I3Client:
 # table loading + --check
 # --------------------------------------------------------------------------
 
-def load_table(path: str | None):
+def load_table(path: str | None, validate: bool = True):
+    """Import a bind table and VALIDATE it before handing it over.
+
+    Validation lives here, not only in `--check`, because every path that loads
+    a table is a path where a broken one hurts: startup, SIGHUP, and the
+    escape-hatch restart. us019 AC4 asks for the bind set to be refused before
+    it is loaded — leaving that to whoever remembers to run `--check` is not
+    that. Everything that can go wrong raises TableInvalid, so a caller can keep
+    the table it already has.
+    """
     if not path:
-        return default_binds
-    p = Path(path).expanduser().resolve()
-    if not p.is_file():
-        raise SystemExit(f"hotkeyd: no such bind table: {p}")
-    spec = importlib.util.spec_from_file_location(f"hotkeyd_binds_{p.stem}", p)
-    if spec is None or spec.loader is None:
-        raise SystemExit(f"hotkeyd: cannot import bind table: {p}")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    for attr in ("BINDS", "LAYERS"):
-        if not hasattr(mod, attr):
-            raise SystemExit(f"hotkeyd: bind table {p} defines no {attr}")
+        mod = default_binds
+    else:
+        p = Path(path).expanduser().resolve()
+        if not p.is_file():
+            raise TableInvalid(f"no such bind table: {p}")
+        spec = importlib.util.spec_from_file_location(
+            f"hotkeyd_binds_{p.stem}", p)
+        if spec is None or spec.loader is None:
+            raise TableInvalid(f"cannot import bind table: {p}")
+        mod = importlib.util.module_from_spec(spec)
+        # Register BEFORE exec: dataclasses (and typing) resolve a class's
+        # module through sys.modules[cls.__module__], so a table module that
+        # defines its own dataclasses dies with "'NoneType' object has no
+        # attribute '__dict__'" if it is not there. Any table derived from
+        # binds.py hits this.
+        sys.modules[spec.name] = mod
+        try:
+            spec.loader.exec_module(mod)
+        except Exception as e:                  # noqa: BLE001
+            sys.modules.pop(spec.name, None)
+            raise TableInvalid(f"bind table {p} failed to import: {e}") from e
+        for attr in ("BINDS", "LAYERS"):
+            if not hasattr(mod, attr):
+                raise TableInvalid(f"bind table {p} defines no {attr}")
+
+    if validate:
+        problems = default_binds.validate(mod.BINDS, mod.LAYERS)
+        if problems:
+            raise TableInvalid(
+                f"{len(problems)} problem(s) in the bind table:\n  "
+                + "\n  ".join(problems))
     return mod
 
 
@@ -569,6 +607,9 @@ def run_daemon(table, display_name: str | None) -> int:
                                                publisher=pub)
                     dae.resync_grabs()
                     print("hotkeyd: reloaded", file=sys.stderr, flush=True)
+                except TableInvalid as e:
+                    print(f"hotkeyd: reload REFUSED, keeping the running table"
+                          f"\n  {e}", file=sys.stderr, flush=True)
                 except Exception as e:                   # noqa: BLE001
                     print(f"hotkeyd: reload failed, keeping the old table: {e}",
                           file=sys.stderr, flush=True)
@@ -617,7 +658,13 @@ def main() -> int:
     ap.add_argument("--display", help="X display (default: $DISPLAY)")
     args = ap.parse_args()
 
-    table = load_table(args.binds)
+    try:
+        # --check does its own reporting, so it loads WITHOUT validating and
+        # then prints the full problem list; every other path wants the refusal.
+        table = load_table(args.binds, validate=not args.check)
+    except TableInvalid as e:
+        print(f"hotkeyd: {e}", file=sys.stderr)
+        return 1
     if args.check:
         return check(table)
     try:
