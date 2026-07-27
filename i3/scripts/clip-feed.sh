@@ -124,18 +124,33 @@
 # test-clip-feed.sh asserts the drop, the raced drop, and — via patched copies
 # of this file — that BOTH checks are load-bearing, for BOTH hint spellings.
 #
+# IMAGES: read_src's own comment already covers why an image-only owner
+# falls through it untouched (no text target). This feeder now catches that
+# fall-through instead of just dropping it: same TARGETS-driven negotiation
+# as clip-store.sh's handle_image_event (image/png preferred, image/bmp
+# accepted and normalized via ImageMagick — xrdp-chansrv 0.10.x serves a
+# Windows clipboard image as image/bmp only), written to the destination
+# store as its OWN entry kind (`.img`) via the SAME shared seq counter
+# clip-store.sh's max_seq() uses, so a feed and that display's own capture
+# loop never collide on a number. Images get their own cap
+# (CLIP_FEED_DST_IMG_CAP), pruned independently of text — see
+# clip-store.sh's IMAGES section for why.
+#
 # usage: i3/scripts/clip-feed.sh          (daemon; exits 0 if already running)
 # env:   CLIP_FEED_SRC=:10          display watched for copies
 #        CLIP_FEED_DST=:0           display naming the destination store dir
 #                                   ($XDG_RUNTIME_DIR/clip-store/<CLIP_FEED_DST>/),
 #                                   the same directory clip-store.sh's own
 #                                   loop for that display writes into
-#        CLIP_FEED_DST_CAP=100      destination entries kept (oldest pruned)
+#        CLIP_FEED_DST_CAP=100      destination text entries kept (oldest pruned)
+#        CLIP_FEED_DST_IMG_CAP=20   destination image entries kept (oldest pruned)
 #        CLIP_FEED_POLL=0.5  seconds between polls while SRC is up
 #        CLIP_FEED_IDLE=5    seconds between polls while SRC is absent
 #        CLIP_FEED_TIMEOUT=1 seconds before a single xclip call is
 #                            abandoned
 #        CLIP_FEED_LOCK=...  single-instance lock file
+#        MAGICK              convert binary for image capture (default:
+#                            magick, falling back to convert)
 set -u
 
 SRC="${CLIP_FEED_SRC:-:10}"
@@ -146,6 +161,7 @@ DST="${CLIP_FEED_DST:-:0}"
 # globs `.` is literal: `:0.0` -> `:0`, bare `:0` unchanged.
 DST="${DST%.*}"
 CAP="${CLIP_FEED_DST_CAP:-100}"
+IMG_CAP="${CLIP_FEED_DST_IMG_CAP:-20}"
 POLL="${CLIP_FEED_POLL:-0.5}"
 IDLE="${CLIP_FEED_IDLE:-5}"
 T="${CLIP_FEED_TIMEOUT:-1}"
@@ -165,6 +181,19 @@ fi
 if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
   echo "clip-feed.sh: XDG_RUNTIME_DIR is unset; refusing to fall back to a persistent path" >&2
   exit 78
+fi
+
+# ImageMagick — only needed for the image/bmp->png fallback; a bare
+# image/png selection never reaches this. Refused loudly rather than
+# silently skipping every image feed, matching clip-store.sh's own refusal.
+MAGICK="${MAGICK:-}"
+if [ -z "$MAGICK" ]; then
+  if command -v magick >/dev/null 2>&1; then MAGICK=magick
+  elif command -v convert >/dev/null 2>&1; then MAGICK=convert
+  else
+    echo "clip-feed.sh: no ImageMagick 'magick'/'convert' found (needed for image/bmp capture)" >&2
+    exit 69
+  fi
 fi
 
 ROOT="$XDG_RUNTIME_DIR/clip-store"
@@ -194,8 +223,10 @@ chmod 700 "$SCRATCH"
 TMPDIR="$SCRATCH"; export TMPDIR
 
 NEW="$(mktemp)"; LAST="$(mktemp)"; TGT="$(mktemp)"; ERR="$(mktemp)"
-trap 'rm -f "$NEW" "$LAST" "$TGT" "$ERR"' EXIT
+NEW_IMG="$(mktemp)"; NEW_IMG_RAW="$(mktemp)"; LAST_IMG="$(mktemp)"
+trap 'rm -f "$NEW" "$LAST" "$TGT" "$ERR" "$NEW_IMG" "$NEW_IMG_RAW" "$LAST_IMG"' EXIT
 : > "$LAST"          # last content successfully fed, for dedup
+: > "$LAST_IMG"      # last image successfully fed, for dedup (own kind, own dedup)
 
 # Is the source X server there at all?  Checked before every poll so that a
 # torn-down :10 costs one stat(2) and a long sleep rather than a process spawn
@@ -224,6 +255,45 @@ hinted() {
             -e 'application/x-kde-passwordManagerHint' "$TGT"
 }
 
+# Does the (already-fetched) TARGETS list carry the given atom? $TGT is
+# still fresh from the targets() call earlier this tick — no second
+# round-trip needed to pick an image source target.
+has_target() { grep -qFx "$1" "$TGT"; }
+
+# Does the current owner advertise a text target at all? THIS, not
+# read_src's exit code, is what the main loop uses to decide text-vs-image.
+#
+# CORRECTION to this file's own prior claim: an earlier version of this
+# comment said "a non-text selection has no text target to hand over, so
+# xclip itself exits nonzero" and recorded that an explicit TARGETS
+# text-target filter had been tried and removed as dead code on that basis.
+# Verified live against this host's xclip and found FALSE: a bare
+# `xclip -o` with no `-t` does not fail on an image-only owner, it happily
+# serves the image bytes as "text" — exit 0, non-empty output. The dead-code
+# removal was measuring the wrong thing (a test double that failed
+# correctly, unlike the real binary) and its absence is exactly how a
+# run of plain image copies over this feeder ended up in the destination
+# store as garbage `.clip` entries — `PNG`/`BM` magic bytes filed under a
+# text extension — before this check existed. A mixed owner (image plus a
+# text/plain URL, as browsers publish) still routes to text, matching
+# original intent.
+has_text_target() {
+  has_target UTF8_STRING || has_target STRING || has_target TEXT || has_target text/plain
+}
+
+# Read SRC CLIPBOARD as text; nonzero on timeout, error, or empty selection.
+# Only ever called after has_text_target confirmed a text target exists —
+# see that function for why the bare call itself cannot be trusted to fail
+# on a non-text owner. An owner holding an EMPTY string succeeds, and an
+# empty file handed to the destination store would create a blank entry —
+# so the `-s` test is what keeps blank entries out (the store loop's own
+# capture path applies no minimum-length filter of its own either; the
+# `-s` check here is what actually holds).
+read_src() {
+  timeout "$T" env DISPLAY="$SRC" xclip -selection clipboard -o \
+    > "$NEW" 2>/dev/null 9>&- && [ -s "$NEW" ]
+}
+
 # Did the last xclip fail because the X server is gone, rather than because
 # nobody currently owns the selection?  The two are worth telling apart: an
 # unowned clipboard is the normal idle state and must keep polling fast enough
@@ -232,28 +302,34 @@ hinted() {
 # does not catch every teardown.
 src_gone() { grep -q "Can't open display" "$ERR"; }
 
-# Read SRC CLIPBOARD as text; nonzero on timeout, error, or empty selection.
-#
-# Both failure modes matter and they are separate:
-#  * A non-text selection (an image copy) has no text target to hand over, so
-#    xclip itself exits nonzero and nothing is fed.  An explicit TARGETS
-#    text-target filter was written here and then removed as dead code —
-#    deleting it changed no test outcome, because this path already covers the
-#    image-only owner, and a mixed owner (image plus a text/plain URL, as
-#    browsers publish) advertises a text target and should feed the URL.
-#  * An owner holding an EMPTY string succeeds, and an empty file handed to
-#    the destination store would create a blank entry — so the `-s` test is
-#    what keeps blank entries out (the store loop's own capture path applies
-#    no minimum-length filter of its own either; the `-s` check here is what
-#    actually holds).
-read_src() {
-  timeout "$T" env DISPLAY="$SRC" xclip -selection clipboard -o \
-    > "$NEW" 2>/dev/null 9>&- && [ -s "$NEW" ]
+# Called only when has_text_target found no text target at all (see the
+# main loop). Same image/png-preferred, image/bmp-normalized negotiation as
+# clip-store.sh's handle_image_event; see clip-store.sh's IMAGES section
+# for why bmp needs converting.
+read_src_image() {
+  if has_target image/png; then _img_t=image/png
+  elif has_target image/bmp; then _img_t=image/bmp
+  else return 1
+  fi
+
+  timeout "$T" env DISPLAY="$SRC" xclip -selection clipboard -t "$_img_t" -o \
+    > "$NEW_IMG_RAW" 2>/dev/null 9>&-
+  [ -s "$NEW_IMG_RAW" ] || { rm -f "$NEW_IMG_RAW"; return 1; }
+
+  if [ "$_img_t" = image/png ]; then
+    mv "$NEW_IMG_RAW" "$NEW_IMG"
+  else
+    "$MAGICK" "$NEW_IMG_RAW" "$NEW_IMG" 2>/dev/null || { rm -f "$NEW_IMG_RAW" "$NEW_IMG"; return 1; }
+    rm -f "$NEW_IMG_RAW"
+  fi
+  [ -s "$NEW_IMG" ]
 }
 
-# Path of the newest entry in the destination store (highest seq); empty when
-# the store is empty or absent.  Same construction as clip-store.sh's own
-# newest_entry(): pathname expansion is sorted, so the last match is newest.
+# Path of the newest TEXT entry in the destination store (highest seq);
+# empty when none exist.  Same construction as clip-store.sh's own
+# newest_clip(): pathname expansion is sorted, so the last match is newest.
+# Dedup only ever compares like against like — never against the newest
+# image, which is unrelated content.
 dst_newest() {
   ne=""
   for f in "$STORE"/[0-9][0-9][0-9][0-9][0-9][0-9].clip; do
@@ -261,22 +337,50 @@ dst_newest() {
   done
   printf '%s' "$ne"
 }
+dst_newest_img() {
+  ne=""
+  for f in "$STORE"/[0-9][0-9][0-9][0-9][0-9][0-9].img; do
+    [ -e "$f" ] && ne="$f"
+  done
+  printf '%s' "$ne"
+}
 
-# Enforce the cap on the destination store: delete oldest entries until at
-# most CLIP_FEED_DST_CAP remain.  Same shape as clip-store.sh's prune(), so a
-# feeder running with the native loop idle cannot grow that store unbounded.
-prune_dst() {
+# Highest sequence number in use ACROSS BOTH KINDS in the destination store
+# — mirrors clip-store.sh's max_seq() exactly, so this feeder and that
+# display's own clip-store.sh capture loop can never collide on a number
+# between them, however interleaved their writes land.
+dst_max_seq() {
+  m=0
+  for f in "$STORE"/[0-9][0-9][0-9][0-9][0-9][0-9].clip \
+           "$STORE"/[0-9][0-9][0-9][0-9][0-9][0-9].img; do
+    [ -e "$f" ] || continue
+    b="${f##*/}"; b="${b%.*}"
+    n="${b#"${b%%[!0]*}"}"; [ -n "$n" ] || n=0
+    [ "$n" -gt "$m" ] && m="$n"
+  done
+  printf '%s' "$m"
+}
+
+# Enforce the cap on ONE kind in the destination store: delete its oldest
+# entries until at most the given limit remain.  Same shape as
+# clip-store.sh's prune_kind(), so a feeder running with the native loop
+# idle cannot grow that store unbounded — and images get their own
+# (smaller) limit, pruned independently of text; see clip-store.sh's
+# IMAGES section for why.
+prune_dst_kind() { # <extension> <cap>
   while :; do
     count=0; oldest=""
-    for f in "$STORE"/[0-9][0-9][0-9][0-9][0-9][0-9].clip; do
+    for f in "$STORE"/[0-9][0-9][0-9][0-9][0-9][0-9]."$1"; do
       [ -e "$f" ] || continue
       count=$((count + 1))
       [ -n "$oldest" ] || oldest="$f"
     done
-    [ "$count" -le "$CAP" ] && break
+    [ "$count" -le "$2" ] && break
     rm -f "$oldest"
   done
 }
+prune_dst() { prune_dst_kind clip "$CAP"; }
+prune_dst_img() { prune_dst_kind img "$IMG_CAP"; }
 
 # Write "$NEW" into the destination store as the next seq entry -- the SAME
 # atomic write clip-store.sh's loop performs (see WRITE in the header):
@@ -286,6 +390,29 @@ prune_dst() {
 # OWN loop most recently captured is skipped too, the same as clip-store.sh
 # would skip it for itself.  Never asserts any DST X selection: this is a
 # file write, nothing here opens a DISPLAY= call against $DST.
+# Link a work file into place as the next seq entry, with the given
+# extension. Numbered off dst_max_seq() (shared across both kinds) rather
+# than the caller's own "last" lookup, so a collision with the OTHER kind's
+# concurrent writer (this feeder's image path racing its own text path, or
+# either racing that display's own clip-store.sh loop) costs a retry, not a
+# corrupted or lost entry — identical reasoning to clip-store.sh's
+# store_write_as().
+feed_write_as() { # <src-path> <extension> <wip-name>
+  wip="$STORE/$3"
+  cp "$1" "$wip" 2>/dev/null || return 1
+  n=$(($(dst_max_seq) + 1))
+  tries=0
+  while [ "$tries" -lt 100 ]; do
+    if ln "$wip" "$STORE/$(printf '%06d' "$n").$2" 2>/dev/null; then
+      rm -f "$wip"
+      return 0
+    fi
+    n=$((n + 1)); tries=$((tries + 1))
+  done
+  rm -f "$wip"
+  return 1
+}
+
 feed_dst() {
   mkdir -p "$STORE" 2>/dev/null || return 1
   chmod 700 "$ROOT" "$STORE" 2>/dev/null
@@ -295,26 +422,22 @@ feed_dst() {
     return 0
   fi
 
-  wip="$STORE/.feed.wip.tmp"
-  cp "$NEW" "$wip" 2>/dev/null || return 1
+  # Work-file name UNCHANGED from before this feature (.feed.wip.tmp,
+  # distinct from clip-store.sh's own .wip.tmp — see the header) so an
+  # existing consumer relying on that exact name sees no behavior change.
+  feed_write_as "$NEW" clip .feed.wip.tmp
+}
 
-  if [ -n "$last" ]; then
-    b="${last##*/}"; b="${b%.clip}"
-    n="${b#"${b%%[!0]*}"}"; [ -n "$n" ] || n=0
-    n=$((n + 1))
-  else
-    n=1
+feed_dst_img() {
+  mkdir -p "$STORE" 2>/dev/null || return 1
+  chmod 700 "$ROOT" "$STORE" 2>/dev/null
+
+  last="$(dst_newest_img)"
+  if [ -n "$last" ] && cmp -s "$NEW_IMG" "$last"; then
+    return 0
   fi
-  tries=0
-  while [ "$tries" -lt 100 ]; do
-    if ln "$wip" "$STORE/$(printf '%06d' "$n").clip" 2>/dev/null; then
-      rm -f "$wip"
-      return 0
-    fi
-    n=$((n + 1)); tries=$((tries + 1))
-  done
-  rm -f "$wip"
-  return 1
+
+  feed_write_as "$NEW_IMG" img .feed.img.wip.tmp
 }
 
 # `sleep` is an external command too, so it also has to drop the lock fd.
@@ -335,22 +458,41 @@ while :; do
     nap "$POLL"; continue
   fi
 
+  # Kind is decided from TARGETS content, not from read_src's exit code —
+  # see has_text_target's own comment for why that distinction matters.
+  #
   # Dedup against the last item we fed: xclip reports the same content on
   # every tick, and without this the history would gain a copy twice a second.
-  if read_src && ! cmp -s "$NEW" "$LAST"; then
-    # TOCTOU RE-CHECK — the second half of the security gate; see the header.
-    # The gate above passed on whoever owned the selection THEN; the payload
-    # in "$NEW" came from whoever owned it a few milliseconds LATER.  Ask who
-    # owns it now, and refuse to publish a payload that a password manager is
-    # currently claiming.  Fails CLOSED: a re-check that times out or finds no
-    # owner drops the item too.  "$LAST" is deliberately not updated, so a
-    # legitimate copy dropped by a hung owner is simply re-fed next poll.
-    if ! targets || hinted; then
-      nap "$POLL"; continue
+  if has_text_target; then
+    if read_src && ! cmp -s "$NEW" "$LAST"; then
+      # TOCTOU RE-CHECK — the second half of the security gate; see the
+      # header.  The gate above passed on whoever owned the selection THEN;
+      # the payload in "$NEW" came from whoever owned it a few milliseconds
+      # LATER.  Ask who owns it now, and refuse to publish a payload that a
+      # password manager is currently claiming.  Fails CLOSED: a re-check
+      # that times out or finds no owner drops the item too.  "$LAST" is
+      # deliberately not updated, so a legitimate copy dropped by a hung
+      # owner is simply re-fed next poll.
+      if ! targets || hinted; then
+        nap "$POLL"; continue
+      fi
+      if feed_dst; then
+        cp "$NEW" "$LAST"
+        prune_dst
+      fi
     fi
-    if feed_dst; then
-      cp "$NEW" "$LAST"
-      prune_dst
+  elif read_src_image; then
+    # Reached only when has_text_target found no text target at all — see
+    # read_src_image's own comment. Same TOCTOU/dedup/prune shape as the
+    # text branch above, scoped to the image kind throughout.
+    if ! cmp -s "$NEW_IMG" "$LAST_IMG"; then
+      if ! targets || hinted; then
+        nap "$POLL"; continue
+      fi
+      if feed_dst_img; then
+        cp "$NEW_IMG" "$LAST_IMG"
+        prune_dst_img
+      fi
     fi
   fi
 

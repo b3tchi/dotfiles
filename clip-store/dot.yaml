@@ -58,9 +58,10 @@
 #    security improvement on its own (sp015 / dotfiles-cyg are the fix).
 #
 # WHO STARTS THE LOOP (task 5).  Nothing here does -- this dot.yaml only
-# installs clipnotify (official `extra`; the loop's only non-base
-# dependency, xclip being installed by i3/dot.yaml already).  The loop is
-# autostarted by the i3 platform overlay, one per live display:
+# installs clipnotify (official `extra`) and imagemagick (image/bmp->png
+# normalization for the image-capture path); xclip is installed by
+# i3/dot.yaml already.  The loop is autostarted by the i3 platform overlay,
+# one per live display:
 #
 #   i3/config.d/native.conf   clip-store.sh :0 and :10 (adr0004), plus
 #                             clip-feed.sh bridging :10 -> :0
@@ -75,11 +76,11 @@ linux:
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
-      sudo pacman -S --needed --noconfirm clipnotify xclip
+      sudo pacman -S --needed --noconfirm clipnotify xclip imagemagick
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux")}}
-      sudo pacman -S --needed --noconfirm clipnotify xclip
+      sudo pacman -S --needed --noconfirm clipnotify xclip imagemagick
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux ARM")}}
-      sudo pacman -S --needed --noconfirm clipnotify xclip
+      sudo pacman -S --needed --noconfirm clipnotify xclip imagemagick
       {{/if}}

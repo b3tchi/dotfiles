@@ -41,12 +41,16 @@
 # i3/scripts/clip-store.sh for the full contract this reads):
 #
 #   store dir   $XDG_RUNTIME_DIR/clip-store/<display>/    0700, tmpfs
-#   entry       NNNNNN.clip — six-digit zero-padded monotonic seq, raw bytes
+#   entry       NNNNNN.clip (text) or NNNNNN.img (image, always normalized
+#               PNG bytes) — six-digit zero-padded monotonic seq shared
+#               across BOTH kinds, raw bytes
 #   id          the filename. Opaque to this script: matched for existence
 #               and equality only, never parsed or arithmetic'd on. `list`
 #               reads it to preview and reports it back verbatim; `set`
 #               forwards it to clip-set.sh unexamined beyond a shape check
-#               that guards against it being used as a path component.
+#               that guards against it being used as a path component. The
+#               extension alone tells `set`/the picker which kind an id is
+#               — this script never inspects an entry's content to decide.
 #
 #   Lexicographic filename order IS capture order, so newest-first is a
 #   reverse sort — deterministic, no daemon round-trip, no N+1 reads (the
@@ -73,8 +77,11 @@ PROG="${0##*/}"
 SELF_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
 TARGET=cliphistory                    # the IpcHandler target in ClipHistory.qml
+# Two entry kinds share one store (clip-store.sh's shared seq counter):
+# ".clip" (text, raw bytes) and ".img" (image, always normalized PNG bytes).
 ENTRY_GLOB='[0-9][0-9][0-9][0-9][0-9][0-9].clip'
-ENTRY_RE='^[0-9]{6}\.clip$'
+IMG_GLOB='[0-9][0-9][0-9][0-9][0-9][0-9].img'
+ENTRY_RE='^[0-9]{6}\.(clip|img)$'
 
 # Overridable only so the headless suite can point at a stub / a worktree copy;
 # production leaves all three unset.
@@ -150,13 +157,21 @@ cmd_list() {
 
   [ -d "$_store" ] || return 0
 
+  # A shared seq counter (clip-store.sh) means the two kinds' six-digit
+  # prefixes never collide, so a plain string sort over BOTH extensions
+  # together still yields true newest-first order — no separate merge step
+  # needed for the two globs ENTRY_RE now matches.
   _n=0
   for _name in $(cd "$_store" 2>/dev/null && ls -1 2>/dev/null \
                  | grep -E "$ENTRY_RE" | sort -r); do
     [ "$_n" -lt "$CAP" ] || break
     _path="$_store/$_name"
     [ -f "$_path" ] || continue   # vanished between the listing and this read
-    printf '%s\t%s\n' "$_name" "$(preview_of "$_path")"
+    case "$_name" in
+      *.img) _preview="[image]" ;;   # binary PNG bytes — never fed to preview_of
+      *)     _preview="$(preview_of "$_path")" ;;
+    esac
+    printf '%s\t%s\n' "$_name" "$_preview"
     _n=$((_n + 1))
   done
   return 0
@@ -202,7 +217,7 @@ cmd_set() {
   # component. Equality against what `list` actually offered is still what
   # matters; this just bounds what "equality" is allowed to look like.
   case "$1" in
-    $ENTRY_GLOB) : ;;
+    $ENTRY_GLOB | $IMG_GLOB) : ;;
     *) die "invalid id: '$1'" ;;
   esac
 

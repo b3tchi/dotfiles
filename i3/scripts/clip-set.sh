@@ -6,15 +6,20 @@
 #
 # usage: clip-set.sh <id> [src-display]
 #
-#   <id>           a store entry filename, e.g. "000005.clip" -- opaque,
-#                  exactly as `qs-clip.sh list` (task 2) hands it back. Must
-#                  match the store's own naming, six digits + ".clip";
-#                  anything else (a .tmp work file, a path, garbage) is
-#                  refused before anything is read. The store's own writer
-#                  (clip-store.sh) owns what happens at the six-digit
-#                  ceiling (999999) -- this script never generates or
-#                  increments an id, only consumes whatever it is handed, so
-#                  that boundary is out of scope here.
+#   <id>           a store entry filename, e.g. "000005.clip" or
+#                  "000007.img" -- opaque, exactly as `qs-clip.sh list`
+#                  hands it back. Must match the store's own naming, six
+#                  digits + ".clip" or ".img"; anything else (a .tmp work
+#                  file, a path, garbage) is refused before anything is
+#                  read. The extension selects WHAT gets published — a
+#                  ".clip" id is set as text, a ".img" id (always real PNG
+#                  bytes; see clip-store.sh's IMAGES section) is set as
+#                  image/png — but never changes any of the fan-out/source
+#                  resolution below, which is identical for both kinds. The
+#                  store's own writer (clip-store.sh) owns what happens at
+#                  the six-digit ceiling (999999) -- this script never
+#                  generates or increments an id, only consumes whatever it
+#                  is handed, so that boundary is out of scope here.
 #   [src-display]  REQUIRED, one way or another (positional here, or the
 #                  CLIP_SET_SRC_DISPLAY env override below) -- which
 #                  display's store <id> is read from. See "WHICH STORE THE
@@ -151,8 +156,9 @@ die_config() { printf '%s: %s\n' "$PROG" "$1" >&2; exit 78; }
 ID="$1"
 ARG_SRC="${2:-}"
 case "$ID" in
-  [0-9][0-9][0-9][0-9][0-9][0-9].clip) : ;;
-  *) die "id must look like NNNNNN.clip, got '$ID'" ;;
+  [0-9][0-9][0-9][0-9][0-9][0-9].clip) XCLIP_TARGET_ARGS="" ;;
+  [0-9][0-9][0-9][0-9][0-9][0-9].img)  XCLIP_TARGET_ARGS="-t image/png" ;;
+  *) die "id must look like NNNNNN.clip or NNNNNN.img, got '$ID'" ;;
 esac
 
 command -v xclip >/dev/null 2>&1 || die "xclip not found in PATH"
@@ -234,7 +240,7 @@ head -c 64 "$TMP" > "$TMP.head"
 settled_on() { # <display>
   _i=0
   while [ "$_i" -lt 40 ]; do
-    if timeout "$T" env DISPLAY="$1" xclip -selection clipboard -o 2>/dev/null \
+    if timeout "$T" env DISPLAY="$1" xclip -selection clipboard $XCLIP_TARGET_ARGS -o 2>/dev/null \
        | head -c 64 | cmp -s - "$TMP.head"; then
       return 0
     fi
@@ -254,14 +260,14 @@ for SOCK in "$SOCKET_DIR"/X*; do
   # hand the entry to is a display there is no point reporting on. Failing
   # here before anything else has been written is still a clean skip, so the
   # exit-1 promise survives an entirely dead socket directory.
-  if ! timeout "$T" env DISPLAY="$DPY" xclip -selection clipboard -i < "$TMP" \
+  if ! timeout "$T" env DISPLAY="$DPY" xclip -selection clipboard $XCLIP_TARGET_ARGS -i < "$TMP" \
        2>/dev/null; then
     continue
   fi
 
   # Past this point the display demonstrably accepted a selection, so any
   # further failure on it is a real, partial failure -- not a dead session.
-  timeout "$T" env DISPLAY="$DPY" xclip -selection primary -i < "$TMP" \
+  timeout "$T" env DISPLAY="$DPY" xclip -selection primary $XCLIP_TARGET_ARGS -i < "$TMP" \
     2>/dev/null || die_partial "could not set the primary selection on $DPY"
 
   settled_on "$DPY" || die_partial "clipboard ownership on $DPY did not settle"

@@ -54,6 +54,24 @@
 // truncated number was a second, independent instance of the same bug class
 // (dotfiles-g5b: "000004.clip" parsed to 4, silently dropping the filename).
 //
+// IMAGE ROWS: an id ending ".img" is clip-store.sh's other entry kind —
+// always real PNG bytes on disk (see clip-store.sh's IMAGES section), never
+// text. Kind is told apart purely from the id's extension (never by peeking
+// at file content), rendered at two sizes for two different purposes:
+//   * a small square thumbnail INLINE in the row (glance-while-scrolling —
+//     every visible row decodes its own, cheap at row-height via Image's
+//     own sourceSize downscale) next to the "[image]" label qs-clip.sh's
+//     `list` emits for that kind
+//   * a bigger panel BELOW the list showing only whichever entry currently
+//     has keyboard focus, sized to actually read the image — decoding a
+//     full-size render for every row at once would not scale to a
+//     200-entry history, so only the focused one ever does
+// Both read the same file via QML's own Image element (decode + downscale
+// native to it) — no separate thumbnail-generation step anywhere in this
+// path. The path is derived independently (storeDir + id) rather than
+// added to the wire protocol — "<id>\t<preview>" stays two fields for both
+// kinds.
+//
 // Env knobs (all optional, all read by qs-clip.sh except QS_CLIP_SH):
 //   QS_CLIP_SH        path to qs-clip.sh (default ~/.dotfiles/quickshell/qs-clip.sh)
 //   QS_CLIP_CAP       most rows to offer (default 200)
@@ -64,6 +82,7 @@ import Quickshell
 import Quickshell.Io
 import QtQuick
 import QtQuick.Window
+import QtQuick.Effects
 import "Common"
 
 Scope {
@@ -71,6 +90,22 @@ Scope {
 
     readonly property string clipSh:
         Quickshell.env("QS_CLIP_SH") ?? (Quickshell.env("HOME") + "/.dotfiles/quickshell/qs-clip.sh")
+
+    // Store dir for THIS session, computed the same way qs-clip.sh's
+    // store_dir() does (bare display — ":0.0" -> ":0" — under
+    // $XDG_RUNTIME_DIR/clip-store/). This process's own $DISPLAY IS the
+    // session qs-clip.sh already resolved `list`'s ids against, so no
+    // separate derivation is needed — only used to build an ".img" row's
+    // thumbnail path, never to re-decide which store `list`/`set` read.
+    readonly property string storeDir: {
+        var d = Quickshell.env("DISPLAY") ?? ""
+        var bare = d.replace(/\.\d+$/, "")
+        return (Quickshell.env("XDG_RUNTIME_DIR") ?? "") + "/clip-store/" + bare
+    }
+
+    // Clip-only chrome (not a DialogTheme constant — this panel exists only
+    // here, same reasoning as the status bar's own local "26" below).
+    readonly property int imgPreviewHeight: 220
 
     // Every row qs-clip.sh offered, newest first: { row: <opaque store id
     // string, e.g. "000004.clip">, preview: <string> }. `row` is ALWAYS the
@@ -102,6 +137,17 @@ Scope {
         }
         return out
     }
+
+    // The entry whose row currently has keyboard focus (arrow-key navigable,
+    // same `combo.index` everything else in Combo reads) — drives the image
+    // preview panel below the list. `root.filtered` is exactly what Combo
+    // was handed as `model` (filterMode "external" passes it through
+    // untouched; see Combo.qml), so indexing it directly here needs no
+    // separate lookup into Combo's own wrapped copy.
+    readonly property var selectedRow:
+        (combo.index >= 0 && combo.index < filtered.length) ? filtered[combo.index] : null
+    readonly property bool selectedIsImage:
+        selectedRow !== null && selectedRow.row.endsWith(".img")
 
     // ── Backend ──
 
@@ -212,9 +258,13 @@ Scope {
         visible: false
         width: combo.implicitWidth
         // Combo owns the parity height (input bar + rows + pad, all from
-        // DialogTheme, floor of 1 visible row via minVisibleRows). The only
-        // clip-specific term is the one-line status bar (+26) shown on failure.
-        height: combo.implicitHeight + (root.status === "" ? 0 : 26)
+        // DialogTheme, floor of 1 visible row via minVisibleRows). Clip-only
+        // terms added on top: the one-line status bar (+26, shown on
+        // failure) and the image preview panel (shown only when the
+        // currently-focused entry is an image).
+        height: combo.implicitHeight
+                + (root.status === "" ? 0 : 26)
+                + (root.selectedIsImage ? root.imgPreviewHeight : 0)
         flags: Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
         color: DialogTheme.bodyBg
         title: "qs-clip"
@@ -262,6 +312,10 @@ Scope {
                     Rectangle {
                         anchors.fill: parent
                         color: isSelected ? DialogTheme.inputBg : "transparent"
+                        // Kind is read off the id's own extension — never by
+                        // opening the file — mirroring every backend script's
+                        // own rule (see the file header's IMAGE ROWS note).
+                        readonly property bool isImage: row.row.endsWith(".img")
 
                         Rectangle {
                             visible: isSelected
@@ -269,10 +323,39 @@ Scope {
                             color: DialogTheme.accent
                         }
 
-                        Text {
+                        // Small glance-while-scrolling thumbnail — square,
+                        // clipped to the row's own height, never resized up
+                        // past it. The bigger, actually-readable render of
+                        // this SAME file lives in the preview panel below,
+                        // driven off keyboard focus rather than every row at
+                        // once (decoding one full-size image per row would
+                        // not scale to a 200-entry history). Grayscale for
+                        // every row except the focused one — a column of
+                        // full-color thumbnails competes with the accent bar
+                        // for attention; full color is reserved for the one
+                        // row that's actually selected right now.
+                        Image {
+                            id: thumb
+                            visible: isImage
                             anchors.verticalCenter: parent.verticalCenter
                             anchors.left: parent.left
                             anchors.leftMargin: DialogTheme.textLeftMargin
+                            height: parent.height - 6
+                            width: height
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                            sourceSize.height: parent.height - 6
+                            source: isImage ? ("file://" + root.storeDir + "/" + row.row) : ""
+                            layer.enabled: isImage
+                            layer.effect: MultiEffect {
+                                saturation: isSelected ? 0 : -1
+                            }
+                        }
+
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.left: isImage ? thumb.right : parent.left
+                            anchors.leftMargin: isImage ? DialogTheme.pad : DialogTheme.textLeftMargin
                             anchors.right: parent.right
                             anchors.rightMargin: DialogTheme.textLeftMargin
                             // RichText over arbitrary clipboard bytes: Fuzzy.highlight
@@ -280,6 +363,8 @@ Scope {
                             // so a preview containing markup renders literally
                             // instead of injecting into the row (matchIndices read
                             // off the row — external mode zeroes Combo's own set).
+                            // An image row's `preview` is qs-clip.sh's plain
+                            // "[image]" label, shown next to the thumbnail above.
                             text: Fuzzy.highlight(row.preview, row.matchIndices)
                             textFormat: Text.RichText
                             elide: Text.ElideRight
@@ -299,6 +384,31 @@ Scope {
 
                 onConfirm: (row) => root.publish(row)
                 onCancel: () => root.hide()
+            }
+
+            // Bigger preview panel for whichever entry currently has keyboard
+            // focus (arrow keys move it, same as everywhere else in Combo) —
+            // shown only when that entry is an image, big enough to actually
+            // read rather than the row's own 32px height. `combo.filtered[i]`
+            // wraps THIS file's own row object untouched (external filterMode;
+            // see Combo.qml), so `.row.row` is still the plain opaque id.
+            Rectangle {
+                width: parent.width
+                height: root.imgPreviewHeight
+                visible: root.selectedIsImage
+                color: DialogTheme.inputBg
+
+                Image {
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    fillMode: Image.PreserveAspectFit
+                    asynchronous: true
+                    // sourceSize bounds decode cost to the panel's own size
+                    // regardless of the source image's actual resolution.
+                    sourceSize.height: root.imgPreviewHeight
+                    source: root.selectedIsImage
+                            ? ("file://" + root.storeDir + "/" + root.selectedRow.row) : ""
+                }
             }
 
             // One-line failure status. Clip-only chrome layered under the shared
