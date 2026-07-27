@@ -27,6 +27,17 @@
 # i3's binding-event mods) is gone with the implementation it described.
 #
 # How the bar PAINTS the layer is quickshell/test-mode-bar.sh's job.
+#
+# DEVIATION from sp020 Task 6's fifth criterion ("no `nop nav-` string remains
+# anywhere in i3/ or quickshell/"): the i3/ half is done — this suite was the
+# last holder and is now clean. The quickshell/ half is NOT, deliberately.
+# Bar.qml still parses `nop nav-move-on/off` (config/Bar.qml noteBinding) and
+# quickshell/test-mode-bar.sh still asserts that parsing. Deleting either now
+# would break a green suite for a consumer whose cutover is T7's whole job
+# (dotfiles-hwds.2), so the strings leave with the code that reads them, in T7 —
+# together with qs-focus-border.py, the second consumer T7's file list missed
+# (dotfiles-hwds.9). Until then those binds simply never fire, because i3 no
+# longer has them to emit.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
