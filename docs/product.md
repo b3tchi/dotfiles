@@ -36,6 +36,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[ft008|shared-combobox-dialog-control]]
 - [[ft009|mode-bar-control]]
 - [[ft010|notification-service]] >> [[im008]]
+- [[ft011|global-hotkey-layer]]
 
 ## Architecture Decision Records
 
