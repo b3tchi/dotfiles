@@ -159,6 +159,76 @@ else
     bad "launcher suite ($lsummary)"
 fi
 
+# --- stage 8: daemon-level table handling ----------------------------------
+# The run_daemon zone had ZERO coverage in any style, which is exactly why the
+# SIGHUP kill and the skipped startup validation shipped. These drive a REAL
+# daemon against a throwaway display, so a regression in either fails here
+# rather than being discovered during an outage.
+echo "stage 8: daemon load path (real process, throwaway display)"
+if ! command -v Xvfb >/dev/null; then
+    printf '  \033[33mSKIP\033[0m Xvfb missing\n'
+else
+    D8=":87"
+    Xvfb "$D8" -screen 0 640x480x24 >/dev/null 2>&1 &
+    X8=$!
+    sleep 1.5
+    T8="$TMPD/t8"; mkdir -p "$T8"
+
+    cat > "$T8/trap.py" <<EOF
+import sys; sys.path.insert(0, "$HERE")
+from binds import Bind, Layer, enter_layer
+BINDS = [Bind('\$mod+o', enter_layer('trap'))]
+LAYERS = {'trap': Layer(binds=[Bind('h', 'focus left')], exit_keys=[])}
+EOF
+    out="$(DISPLAY=$D8 XDG_RUNTIME_DIR="$T8" timeout 15 \
+           python3 "$HERE/hotkeyd.py" --display "$D8" --binds "$T8/trap.py" 2>&1)"
+    rc=$?
+    if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "exit_keys"; then
+        ok "startup refuses an invalid table, naming the problem"
+    else
+        bad "startup accepted an invalid table (rc=$rc): $out"
+    fi
+
+    cp "$HERE/binds.py" "$T8/live.py"
+    DISPLAY=$D8 XDG_RUNTIME_DIR="$T8" setsid python3 "$HERE/hotkeyd.py" \
+        --display "$D8" --binds "$T8/live.py" >"$T8/d.log" 2>&1 &
+    sleep 2
+    dpid="$(pgrep -f "hotkeyd.py .*--display $D8" | head -1)"
+    if [ -z "$dpid" ]; then
+        bad "daemon did not start on $D8: $(tail -2 "$T8/d.log")"
+    else
+        ok "daemon started with a valid table"
+        if DISPLAY=$D8 XDG_RUNTIME_DIR="$T8" "$HERE/hotkeyd.sh" status >/dev/null 2>&1
+        then ok "launcher finds a daemon started with extra flags"
+        else bad "launcher's pgrep pattern misses a flag-carrying daemon"
+        fi
+
+        echo "LAYERS = {}" > "$T8/live.py"
+        kill -HUP "$dpid" 2>/dev/null; sleep 1.5
+        if kill -0 "$dpid" 2>/dev/null; then
+            ok "survives SIGHUP with a table missing BINDS"
+        else
+            bad "SIGHUP with a broken table KILLED the daemon"
+        fi
+
+        cp "$HERE/binds.py" "$T8/live.py"
+        printf "\nBINDS = BINDS + [Bind('\$mod+o', 'nop dup')]\n" >> "$T8/live.py"
+        kill -HUP "$dpid" 2>/dev/null; sleep 1.5
+        if kill -0 "$dpid" 2>/dev/null; then
+            ok "survives SIGHUP with a validation-invalid table"
+        else
+            bad "SIGHUP with a duplicate chord KILLED the daemon"
+        fi
+        if grep -q "reload REFUSED" "$T8/d.log"; then
+            ok "refused reloads say so and name the offender"
+        else
+            bad "no 'reload REFUSED' in the log: $(tail -3 "$T8/d.log")"
+        fi
+        kill "$dpid" 2>/dev/null
+    fi
+    kill "$X8" 2>/dev/null
+fi
+
 echo
 printf 'hotkeyd: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

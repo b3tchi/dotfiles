@@ -759,3 +759,106 @@ def test_a_table_that_defines_dataclasses_loads(tmp_path):
     f.write_text(src)
     mod = H.load_table(str(f))
     assert mod.BINDS and mod.LAYERS
+
+
+# --------------------------------------------------------------------------
+# composition wiring — each caught a mutant that passed everything else
+# --------------------------------------------------------------------------
+
+def test_engine_matches_the_mod_token_against_the_displays_modifier():
+    """M13: LayerEngine._index ignoring self.mod passed all 155 tests while
+    making the nav entry chord dead on :10. The per-display test injected mod=
+    directly; nothing checked the engine actually USES it."""
+    import layers as L                                   # noqa: PLC0415
+    binds = [B.Bind("$mod+o", B.enter_layer("nav"))]
+    layers = {"nav": B.Layer(binds=[B.Bind("h", "focus left")],
+                             exit_keys=["q"])}
+    rdp = L.LayerEngine(binds, layers, mod="Mod1")
+    rdp.handle(L.Event("press", "o", frozenset({"Mod1"})))
+    assert rdp.state["layer"] == "nav", "Alt+o did not enter nav where $mod is Alt"
+
+    rdp2 = L.LayerEngine(binds, layers, mod="Mod1")
+    rdp2.handle(L.Event("press", "o", frozenset({"Mod4"})))
+    assert rdp2.state["layer"] == "default", "Super+o entered nav where $mod is Alt"
+
+
+def test_daemon_resolves_the_display_mod_and_hands_it_to_the_grabs():
+    """M14: Daemon dropping mod= from GrabManager passed all 155 tests, so the
+    grab landed on Mod4 while the engine matched Mod1 — the chord grabbed on the
+    wrong modifier on the xrdp session."""
+
+    class XWithResource(FakeDisplay):
+        """An X-LIKE display: RESOURCE_MANAGER carrying the xrdp session's
+        i3wm.mod, and keysym_to_keycode taking an INTEGER keysym exactly as
+        python-xlib does — a fake that is easier to satisfy than X never
+        exercises the adapter under test."""
+
+        def __init__(self):
+            super().__init__(keymap={"o": 32})
+
+        def keysym_to_keycode(self, keysym):
+            from Xlib import XK                           # noqa: PLC0415
+            return 32 if keysym == XK.string_to_keysym("o") else 0
+
+        def intern_atom(self, name):
+            return 1
+
+        def screen(self):
+            outer = self
+
+            class Prop:
+                value = b"i3wm.mod:\tMod1\nXft.dpi:\t96\n"
+
+            class Root:
+                def get_full_property(self, atom, kind):
+                    return Prop()
+
+                def grab_key(self, code, mask, owner, pmode, kmode,
+                             onerror=None):
+                    outer.grabs.append((code, mask))
+
+                def ungrab_key(self, code, mask):
+                    outer.ungrabs.append((code, mask))
+
+            class Screen:
+                root = Root()
+
+            return Screen()
+
+    xd = XWithResource()
+    table = type("T", (), {"BINDS": [B.Bind("$mod+o", "nop x")], "LAYERS": {}})
+    pub = type("P", (), {"publish": lambda self, s: None,
+                         "close": lambda self: None,
+                         "poll": lambda self: None})()
+
+    class NullI3:
+        def command(self, c):
+            return True
+
+        def close(self):
+            pass
+
+    dae = H.Daemon(table, xd, pub, i3=NullI3(), display=":10")
+    assert dae.mod == "Mod1", "daemon did not read i3wm.mod from the display"
+    assert (32, H.MOD1) in xd.grabs, "grab did not land on the display's own $mod"
+    assert (32, H.MOD4) not in xd.grabs, "grabbed Super where $mod is Alt"
+
+
+def test_the_production_i3_resolver_pins_its_own_display(monkeypatch):
+    """The CLI fallback must not inherit the ambient DISPLAY: a :10 daemon
+    started from :0's session would otherwise resolve :0's socket whenever the
+    root property is unreadable — the hwds.6 defect by another route."""
+    monkeypatch.setenv("DISPLAY", ":0")
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen.update(kw.get("env", {}))
+
+        class R:
+            stdout = "/run/user/1000/i3/ipc-socket.X\n"
+        return R()
+
+    monkeypatch.setattr(H.subprocess, "run", fake_run)
+    H.i3_socket_path(display=":10", xdisp=FakeXDisplay(""))   # empty property
+    assert seen.get("DISPLAY") == ":10", \
+        f"fallback inherited the ambient display: {seen.get('DISPLAY')!r}"

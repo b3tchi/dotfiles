@@ -49,7 +49,11 @@ need_runtime() {
 # than by a pidfile: a pidfile can go stale after a SIGKILL and then lie about a
 # daemon that is not there, which is the state the escape hatch exists for.
 daemon_pid() {
-    pgrep -f "hotkeyd\.py .*--display $DPY_BASE\$" 2>/dev/null | head -n 1
+    # Word-boundary match, NOT anchored to end of line: a daemon started by hand
+    # with flags after --display (--binds while testing a table) would otherwise
+    # be invisible to status and stop, and start would happily spawn a second
+    # one beside it.
+    pgrep -f "hotkeyd\.py .*--display $DPY_BASE( |\$)" 2>/dev/null | head -n 1
 }
 
 case "$VERB" in

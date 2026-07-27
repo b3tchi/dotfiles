@@ -523,15 +523,21 @@ class Daemon:
     (and then testing the re-implementation).
     """
 
-    def __init__(self, table, d, publisher, i3=None):
+    def __init__(self, table, d, publisher, i3=None, display=None):
         self.table = table
         self.d = d
+        self.display = display or os.environ.get("DISPLAY")
         self.pub = publisher
         # Resolve i3's socket through OUR OWN X connection, re-read on every
         # reconnect: that is what keeps a per-display daemon talking to its own
         # window manager, and what lets it follow an i3 restart.
+        # BOTH arguments: xdisp for the root-property read, display for the CLI
+        # fallback's pinned env. Passing only xdisp meant that whenever the
+        # property was absent or unreadable the fallback inherited the AMBIENT
+        # DISPLAY — so a :10 daemon started from :0's session resolved :0's
+        # socket, which is the very bug this task exists to remove.
         self.i3 = i3 if i3 is not None else I3Client(
-            lambda: i3_socket_path(xdisp=d))
+            lambda: i3_socket_path(display=self.display, xdisp=d))
         self.mod = x_resource_mod(d)
         self.grabs = GrabManager(XAdapter(d, d.screen().root), mod=self.mod)
         self.engine = L.LayerEngine(table.BINDS, table.LAYERS,
@@ -605,7 +611,7 @@ def run_daemon(table, display_name: str | None) -> int:
     inst = SingleInstance(lock_path(disp_name))
     d = xdisplay.Display(disp_name)
     pub = L.StatePublisher(L.socket_path(disp_name))
-    dae = Daemon(table, d, pub)
+    dae = Daemon(table, d, pub, display=disp_name)
     dae._pending = []
     for p in dae.grabs.problems:
         print(f"hotkeyd: {p}", file=sys.stderr)
