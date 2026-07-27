@@ -862,3 +862,53 @@ def test_the_production_i3_resolver_pins_its_own_display(monkeypatch):
     H.i3_socket_path(display=":10", xdisp=FakeXDisplay(""))   # empty property
     assert seen.get("DISPLAY") == ":10", \
         f"fallback inherited the ambient display: {seen.get('DISPLAY')!r}"
+
+
+def test_the_daemons_own_resolver_pins_its_display(monkeypatch):
+    """Exercises the LAMBDA the Daemon actually builds, not the function it
+    wraps. Testing i3_socket_path directly left the wiring unguarded: dropping
+    `display=` from that lambda passed the whole suite while reintroducing
+    hwds.6 — a :10 daemon resolving :0's socket whenever the root property is
+    unreadable."""
+    monkeypatch.setenv("DISPLAY", ":0")            # the ambient, wrong one
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen.update(kw.get("env", {}))
+
+        class R:
+            stdout = "/run/user/1000/i3/ipc-socket.X\n"
+        return R()
+
+    monkeypatch.setattr(H.subprocess, "run", fake_run)
+
+    class XNoProperty(FakeDisplay):
+        """A display whose I3_SOCKET_PATH is absent, forcing the CLI fallback."""
+
+        def intern_atom(self, name):
+            return 1
+
+        def screen(self):
+            class Root:
+                def get_full_property(self, atom, kind):
+                    return None
+
+                def grab_key(self, *a, **kw):
+                    pass
+
+                def ungrab_key(self, *a, **kw):
+                    pass
+
+            class Screen:
+                root = Root()
+
+            return Screen()
+
+    table = type("T", (), {"BINDS": [], "LAYERS": {}})
+    pub = type("P", (), {"publish": lambda self, s: None,
+                         "close": lambda self: None,
+                         "poll": lambda self: None})()
+    dae = H.Daemon(table, XNoProperty(), pub, display=":10")
+    dae.i3._path_getter()                          # the wiring under test
+    assert seen.get("DISPLAY") == ":10", \
+        f"daemon resolver used the ambient display: {seen.get('DISPLAY')!r}"
