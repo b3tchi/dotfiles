@@ -172,6 +172,24 @@ def test_press_and_release_binds_on_one_chord_each_fire_on_their_own_event():
     assert e.handle(release("d", ["Mod4"])) == ["nop release"]
 
 
+def test_on_release_is_discriminated_inside_a_layer_too():
+    """The global path keys binds by (mods, key, on_release); the LAYER path
+    matches by chord and must check the flag itself. Dropping that check there
+    survived the whole suite — the nav table has no release binds, and every
+    other on_release test used global binds."""
+    layers = {"pick": B.Layer(
+        binds=[B.Bind("Return", "nop chose", on_release=True),
+               B.Bind("j", "nop next")],
+        exit_keys=["Escape"])}
+    e, _, _ = engine(binds=[B.Bind("Mod4+w", B.enter_layer("pick"))],
+                     layers=layers)
+    e.handle(press("w", ["Mod4"]))
+    assert e.handle(press("Return")) == []          # press must NOT fire it
+    assert e.handle(release("Return")) == ["nop chose"]
+    assert e.handle(press("j")) == ["nop next"]     # press bind still on press
+    assert e.handle(release("j")) == []
+
+
 def test_layer_binds_shadow_global_binds_while_a_layer_is_active():
     """i3 mode parity: in a mode, only that mode's binds are live. A global
     Mod4+h leaking through while nav is active would be a surprise."""
@@ -459,13 +477,19 @@ def test_a_client_killed_mid_stream_does_not_kill_the_publisher(sockpath):
         c = connect(sockpath)
         p.poll()
         p.publish({"layer": "nav", "mod": None})
+        assert p.client_count == 1
         c.close()                       # gone, unread data in flight
         for i in range(50):
             p.publish({"layer": "nav", "mod": f"x{i}"})
         p.poll()
+        # Reaped, not merely tolerated: swallowing the OSError without dropping
+        # the socket leaks a closed fd per dead bar, and the list grows for the
+        # life of the session. Asserting survival alone missed that.
+        assert p.client_count == 0, "dead client was not reaped"
         survivor = connect(sockpath)
         p.poll()
         assert read_lines(survivor, 1)  # still serving
+        assert p.client_count == 1
         survivor.close()
     finally:
         p.close()
@@ -497,10 +521,16 @@ def test_a_live_predecessor_is_not_stolen(sockpath):
 
 def test_vanished_parent_directory_fails_fast_instead_of_spinning(sockpath):
     """adr0014: a reader loop cannot re-establish its own vanished precondition
-    from the inside; it must die and let the layer above decide."""
+    from the inside; it must die and let the layer above decide.
+
+    Asserts the message NAMES the missing directory, which only the explicit
+    pre-check produces — bind()'s own ENOENT says just "No such file or
+    directory". Without that, deleting the pre-check passed the whole suite,
+    since the fallback raised the same class with a useless message."""
     missing = sockpath.parent / "gone" / "hotkeyd.sock"
-    with pytest.raises(L.ChannelUnavailable):
+    with pytest.raises(L.ChannelUnavailable) as ei:
         L.StatePublisher(missing)
+    assert str(missing.parent) in str(ei.value), str(ei.value)
 
 
 def test_close_removes_the_socket_file(sockpath):

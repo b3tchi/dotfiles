@@ -290,6 +290,14 @@ class StatePublisher:
         finally:
             probe.close()
 
+    @property
+    def client_count(self) -> int:
+        """Live subscribers. Exposed so tests can assert that a dead client is
+        actually reaped rather than merely tolerated — swallowing the write error
+        without dropping the socket leaks a closed fd per dead bar, and the list
+        grows for the life of the session."""
+        return len(self._clients)
+
     # -- fan-out ----------------------------------------------------------
     def poll(self):
         """Accept pending connections. Cheap; call from the daemon's loop."""
