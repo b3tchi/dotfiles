@@ -592,7 +592,11 @@ mkfifo "$FIFO"
 SLEEP_BIN="$(command -v sleep)"
 # Every coreutil the Bar's Processes shell out to (stats/net/vol/bat probes
 # harmlessly no-op under the sandbox) plus sh for the get_workspaces wrapper.
-for t in sh cat sleep tr awk df grep sed cut head; do
+# python3 is in here because the Bar's layer feed is a python reader
+# (hotkeyd/state-tail.py — quickshell cannot open a unix socket itself and this
+# host has no socat). Without it the feed Process would fail to spawn and every
+# layer assertion would read "default" for the wrong reason.
+for t in sh cat sleep tr awk df grep sed cut head python3; do
   src="$(command -v "$t")" && ln -sf "$src" "$PBIN2/$t"
 done
 
@@ -740,72 +744,81 @@ else
     ipc2 call barprobe dumpc "$4" >/dev/null 2>&1; sleep 0.25
   }
 
-  barflip '{"change":"nav"}' "nav-on"                        # entered, no key yet
-  # Shift alone, before any hjkl: i3 stays in mode "nav" and reports the
-  # modifier as a `nop` binding event carrying its argument.
-  bind_emit '[]' "" 'nop nav-move-on'; sleep 0.5
-  ipc2 call barprobe dumpc "nav-nop-on" >/dev/null 2>&1; sleep 0.2
-  bind_emit '["ctrl"]' "" 'nop nav-move-off'; sleep 0.6   # past the guard
-  ipc2 call barprobe dumpc "nav-nop-off" >/dev/null 2>&1; sleep 0.2
-  bindflip '[]'        h 'focus left'  "nav-focus-key"      # bare    -> nav
-  bindflip '["ctrl"]' j 'move down'   "nav-move-key"       # shifted -> MOVE
-  bindflip '["ctrl"]' k 'move up'     "nav-move-again"     # stays MOVE
-  bindflip '[]'        l 'focus right' "nav-back-to-focus"  # bare    -> nav
-  # Case-insensitive: sway spells the same modifier "Control". A === "ctrl"
-  # comparison would silently never light the indicator there.
-  bindflip '["Control"]' j 'move down'   "nav-move-capital"
-  # A modifier that is not Ctrl must NOT read as MOVE (a `mods.length > 0`
-  # mutant passes everything above and fails here). The command must be a real
-  # action, not a `mode` switch — those are skipped outright by the release
-  # guard, which would make this scenario pass for the wrong reason.
-  bindflip '["shift"]' h 'focus left'  "nav-other-mod"
-  # THE release case (dotfiles-5u6m): the release nop legitimately carries
-  # mods:["ctrl"] — it IS the Ctrl-release bind — so a handler that read mods
-  # before the command would re-arm MOVE on the very event that means "up".
-  # MUTANT PIN: check mods first in Bar.qml's noteBinding and this latches.
-  bindflip '["ctrl"]' j 'move down' "nav-pre-release"      # in MOVE first
-  bind_emit '["ctrl"]' "" 'nop nav-move-off'; sleep 0.6    # past the guard
-  ipc2 call barprobe dumpc "nav-after-release" >/dev/null 2>&1; sleep 0.25
 
-  # --- per-keystroke twin churn (the xrdp case) ------------------------------
-  # An RDP client that re-synthesises Shift around each keystroke makes i3 leave
-  # and re-enter the twin on every j. The BINDS keep working (the user sees the
-  # window move) but the pill would strobe. The falling edge is debounced, so a
-  # dip shorter than the window is invisible.
-  bind_emit '[]' "" 'nop nav-move-on'; sleep 0.4       # Shift down
-  ipc2 call barprobe dumpc "churn-armed" >/dev/null 2>&1; sleep 0.2
-  # ... j arrives as: release nop, the shifted move, press nop again ...
-  bind_emit '["ctrl"]' "" 'nop nav-move-off'; sleep 0.04 # dip, under the guard
-  ipc2 call barprobe dumpc "churn-mid-dip" >/dev/null 2>&1; sleep 0.05
-  bind_emit '["ctrl"]' j 'move down'; sleep 0.05
-  bind_emit '[]' "" 'nop nav-move-on'; sleep 0.4
-  ipc2 call barprobe dumpc "churn-settled" >/dev/null 2>&1; sleep 0.2
-  # A REAL release must still clear, just past the guard window.
-  bind_emit '["ctrl"]' "" 'nop nav-move-off'; sleep 0.6  # > 120ms
-  ipc2 call barprobe dumpc "churn-real-release" >/dev/null 2>&1; sleep 0.2
+  # --- hotkeyd layer feed fixture -------------------------------------------
+  # The bar no longer infers the layer from binding events; it reads hotkeyd's
+  # state socket (sp020 T7). This fixture publishes on that socket using the
+  # REAL StatePublisher from hotkeyd/layers.py, so the harness cannot drift from
+  # what the daemon actually writes — replay-on-connect included, which is what
+  # lets the bar be started before or after the publisher.
+  PUB_FIFO="$TMP/pub.fifo"
+  mkfifo "$PUB_FIFO"
+  cat > "$TMP/statepub.py" <<'PUBEOF'
+import json, os, sys, time
+sys.path.insert(0, os.path.expanduser("~/.dotfiles/hotkeyd"))
+import layers as L
+pub = L.StatePublisher(L.socket_path(os.environ.get("DISPLAY")))
+with open(sys.argv[1]) as fifo:
+    while True:
+        line = fifo.readline()
+        if not line:
+            time.sleep(0.05)
+            continue
+        line = line.strip()
+        if line == "QUIT":
+            break
+        if line:
+            try:
+                pub.publish(json.loads(line))
+            except Exception as e:
+                print("statepub: %s" % e, file=sys.stderr, flush=True)
+        pub.poll()
+pub.close()
+PUBEOF
+  DISPLAY="$DPY" XDG_RUNTIME_DIR="$RUN2" python3 "$TMP/statepub.py" "$PUB_FIFO" \
+      >"$TMP/statepub.log" 2>&1 &
+  PUB_PID=$!
+  exec 9>"$PUB_FIFO"          # hold the write end so the reader never sees EOF
+  sleep 0.6
 
-  # --- the Alt/resize layer -------------------------------------------------
-  bind_emit '[]' "" 'nop nav-resize-on'; sleep 0.5
-  ipc2 call barprobe dumpc "nav-resize-on" >/dev/null 2>&1; sleep 0.2
-  # Both modifiers held: resize is the more destructive layer, so it is the one
-  # named (MUTANT PIN: flip the precedence in navLayer and this reads MOVE).
-  bind_emit '[]' "" 'nop nav-move-on'; sleep 0.5
-  ipc2 call barprobe dumpc "nav-both-mods" >/dev/null 2>&1; sleep 0.2
-  # Dropping Alt falls back to the layer still held, IMMEDIATELY — the guard is
-  # only for the fall to plain nav, so a layer switch must not lag.
-  bind_emit '["mod1"]' "" 'nop nav-resize-off'; sleep 0.2
-  ipc2 call barprobe dumpc "nav-alt-released" >/dev/null 2>&1; sleep 0.2
-  bind_emit '["ctrl"]' "" 'nop nav-move-off'; sleep 0.6
-  # An Alt action corroborates the layer even with no nop (mods=Mod1).
-  bindflip '["Mod1"]' l 'resize grow width 5 px or 5 ppt' "nav-resize-action"
-  bindflip '[]' h 'focus left' "nav-resize-cleared"
+  # Publish one state line and give the bar time to render it.
+  pub() { printf '%s\n' "$1" >&9; sleep 0.45; }
+  # Publish, then snapshot the bar under a name.
+  pubdump() { pub "$1"; ipc2 call barprobe dumpc "$2" >/dev/null 2>&1; sleep 0.2; }
 
-  # Leaving the mode resets the indicator, so re-entry never inherits MOVE from
-  # the Shift+q that exited it.
-  bind_emit '["ctrl"]' q 'mode default'; sleep 0.3
-  barflip '{"change":"default"}' "nav-off-after-shift"
-  barflip '{"change":"nav"}'     "nav-reentry"
-  mode_emit '{"change":"default"}'; sleep 0.3   # reset
+  # Entering the layer: the daemon says so, no i3 mode involved.
+  pubdump '{"layer":"nav","mod":null}' "nav-on"
+  # A held modifier BEFORE any hjkl — the whole point of the indicator. i3 needed
+  # six marker binds to fake this; the daemon just says which modifier is down.
+  pubdump '{"layer":"nav","mod":"move"}' "nav-mod-move"
+  pubdump '{"layer":"nav","mod":null}' "nav-mod-cleared"
+  pubdump '{"layer":"nav","mod":"resize"}' "nav-mod-resize"
+  # Switching straight between modifier layers must be immediate — no bar-side
+  # debounce survives, because the daemon publishes on CHANGE only and already
+  # absorbs a stray release (its 120ms guard, tested in hotkeyd/test_layers.py).
+  pubdump '{"layer":"nav","mod":"move"}' "nav-mod-switch"
+  # An unknown mod value must degrade to plain nav, not to a blank pill.
+  pubdump '{"layer":"nav","mod":"wat"}' "nav-mod-unknown"
+  # Leaving the layer.
+  pubdump '{"layer":"default","mod":null}' "nav-off"
+  # A malformed line must be ignored rather than blanking the bar.
+  pubdump '{"layer":"nav","mod":"move"}' "nav-before-garbage"
+  pub 'not json at all'
+  ipc2 call barprobe dumpc "nav-after-garbage" >/dev/null 2>&1; sleep 0.2
+  pub '{"layer":"default","mod":null}'
+
+
+  # Leaving the layer while a modifier is still held, then re-entering: the bar
+  # must open plain rather than inheriting MOVE. The daemon guarantees this (it
+  # publishes default with mod=null on exit), and the bar must not add its own
+  # memory on top.
+  pubdump '{"layer":"nav","mod":"move"}' "nav-held-before-exit"
+  pubdump '{"layer":"default","mod":null}' "nav-off-after-mod"
+  pubdump '{"layer":"nav","mod":null}' "nav-reentry"
+  pub '{"layer":"default","mod":null}'
+  exec 9>&-
+  printf 'QUIT\n' > "$PUB_FIFO" 2>/dev/null || true
+  kill "$PUB_PID" 2>/dev/null
 
   grep -a 'CASE ' "$TMP/qs2.out" | sed 's/^.*CASE /CASE /' >> "$CASES"
   ipc2 call barprobe bye >/dev/null 2>&1
@@ -840,75 +853,47 @@ else
   assert_case "garbage-ignored.strip" "1"
   assert_case "garbage-ignored.pill"  "system"
 
-  scenario "nav-mode: entering 'nav' shows the strip, pill reads 'nav' before any Shift (dotfiles-5u6m)"
+  scenario "nav-layer: the daemon's feed shows the strip, pill reads 'nav' before any modifier"
   assert_case "nav-on.mode"  "nav"
   assert_case "nav-on.strip" "1"
   assert_case "nav-on.pill"  "nav"
   assert_case "nav-on.ws"    "0"
 
-  scenario "nop nav-move-on lights MOVE before any hjkl, without a mode change"
-  assert_case "nav-nop-on.pill" "nav MOVE"
-  # The whole point of the nop signal: i3 never leaves "nav", so there is no
-  # second binding table to be stranded in and nothing churns per keystroke.
-  assert_case "nav-nop-on.mode" "nav"
-  assert_case "nav-nop-off.pill"   "nav"
-  assert_case "nav-nop-off.mode"   "nav"
+  scenario "a held modifier lights MOVE before any hjkl, with no mode change"
+  # i3 needed six bindcode `nop` marker binds to fake this, because it cannot
+  # report a held modifier. The daemon states it and the bar renders the
+  # statement — no string matching, no corroboration from bind mods, no timer.
+  assert_case "nav-mod-move.pill"  "nav MOVE"
+  assert_case "nav-mod-move.mode"  "nav"
+  assert_case "nav-mod-move.strip" "1"
 
-  scenario "move indicator: a binding event carrying mods ['ctrl'] repaints the pill 'nav' -> 'nav MOVE'"
-  # i3 stays in mode "nav" throughout — MOVE is a bar-side synthesis from the
-  # binding's mods, so .mode must NOT change with it. A binding event also
-  # carries change:"run"; reading that as a mode change would set currentMode
-  # to "run" and blank the strip, which these two assertions catch.
-  assert_case "nav-move-key.pill" "nav MOVE"
-  assert_case "nav-move-key.mode" "nav"
-  assert_case "nav-move-key.strip" "1"
+  scenario "releasing the modifier falls back to plain nav"
+  assert_case "nav-mod-cleared.pill" "nav"
+  assert_case "nav-mod-cleared.mode" "nav"
 
-  scenario "the indicator follows the LAST keystroke's role, both directions, no latch"
-  assert_case "nav-focus-key.pill"     "nav"
-  assert_case "nav-move-again.pill"    "nav MOVE"
-  assert_case "nav-back-to-focus.pill" "nav"
+  scenario "the resize layer, and an immediate switch between modifier layers"
+  assert_case "nav-mod-resize.pill" "nav RESIZE"
+  # There is no bar-side debounce left at all: the daemon publishes on CHANGE
+  # and already absorbs a stray release, so a switch must appear at once.
+  assert_case "nav-mod-switch.pill" "nav MOVE"
 
-  scenario "mods matching is case-insensitive (sway spells it 'Control') and Ctrl-specific"
-  assert_case "nav-move-capital.pill" "nav MOVE"
-  # MUTANT PIN: a `mods.length > 0` test passes every case above and fails here.
-  assert_case "nav-other-mod.pill"    "nav"
+  scenario "an unknown mod value degrades to plain nav rather than a blank pill"
+  # MUTANT PIN: map the mod straight into the pill text and this reads "nav wat".
+  assert_case "nav-mod-unknown.pill" "nav"
+  assert_case "nav-mod-unknown.mode" "nav"
 
-  scenario "the release nop settles on 'nav' even though it carries mods=ctrl"
-  assert_case "nav-pre-release.pill"    "nav MOVE"
-  assert_case "nav-after-release.pill"  "nav"
-  assert_case "nav-after-release.mode"  "nav"
+  scenario "leaving the layer hides the strip and gives the workspace tabs back"
+  assert_case "nav-off.strip" "0"
+  assert_case "nav-off.ws"    "1"
 
-  scenario "per-keystroke twin churn does not strobe the pill (the xrdp case)"
-  assert_case "churn-armed.pill"    "nav MOVE"
-  # Mid-dip the pill must still read MOVE: a stray release inside the guard
-  # window is swallowed. MUTANT PIN: render moveMod directly (no guard) and
-  # this reads "nav" — a visible flash.
-  assert_case "churn-mid-dip.mode"  "nav"
-  assert_case "churn-mid-dip.pill"  "nav MOVE"
-  assert_case "churn-settled.pill"  "nav MOVE"
+  scenario "a malformed feed line is ignored rather than blanking the bar"
+  assert_case "nav-before-garbage.pill" "nav MOVE"
+  assert_case "nav-after-garbage.pill"  "nav MOVE"
+  assert_case "nav-after-garbage.mode"  "nav"
 
-  scenario "a REAL release still clears, just past the guard window"
-  assert_case "churn-real-release.pill" "nav"
-  assert_case "churn-real-release.mode" "nav"
-
-  scenario "the Alt layer: nop nav-resize-on reads RESIZE, and outranks a held Ctrl"
-  assert_case "nav-resize-on.pill"  "nav RESIZE"
-  assert_case "nav-resize-on.mode"  "nav"
-  assert_case "nav-both-mods.pill"  "nav RESIZE"
-
-  scenario "dropping one modifier falls back to the other with no guard delay"
-  # Sampled 200ms after the release — inside the 120ms guard's reach if the
-  # layer switch were (wrongly) debounced like the fall to plain nav.
-  assert_case "nav-alt-released.pill" "nav MOVE"
-
-  scenario "an Alt action corroborates the layer, and a bare key clears it"
-  assert_case "nav-resize-action.pill"  "nav RESIZE"
-  assert_case "nav-resize-cleared.pill" "nav"
-
-  scenario "the indicator resets across mode transitions — re-entry reads 'nav', not 'nav MOVE'"
-  # The Shift+q that exits leaves the flag set; entering again must not inherit
-  # it (MUTANT PIN: clearing only when leaving, not on every transition).
-  assert_case "nav-off-after-shift.strip" "0"
+  scenario "re-entry never inherits the modifier held when the layer was left"
+  assert_case "nav-held-before-exit.pill" "nav MOVE"
+  assert_case "nav-off-after-mod.strip"   "0"
   assert_case "nav-reentry.pill"          "nav"
 fi
 

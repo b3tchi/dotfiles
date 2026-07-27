@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Minimal i3 focus border — replaces xborders-patched.
 Started and managed by quickshell (config/FocusBorder.qml)."""
-import gi, json, subprocess, sys, math, signal, threading, fcntl, os
+import gi, json, subprocess, sys, math, signal, threading, fcntl, os, time
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GLib
 import cairo
@@ -32,12 +32,19 @@ BC = (0x16/255, 0xa0/255, 0x85/255)
 # under the cursor. The bar's mode pill says the same thing, but the frame is
 # where the eye already is while navigating.
 MODE_BC = (0xcb/255, 0x4b/255, 0x16/255)   # ModeBarTheme.highlight
-# Modes that get MODE_BC. "screenshot" added so the ring around the
-# currently-focused window doubles as "this is what `w` would capture" —
-# nav's held-Shift face is signalled by nop binding events, not a second
-# mode, so its frame never changes colour mid-gesture; screenshot's does,
-# via "screenshot-drag" (see SUPPRESS_MODES below).
-COLOR_MODES = {'nav', 'screenshot'}
+# i3 modes that still colour the frame. "screenshot" is here so the ring around
+# the currently-focused window doubles as "this is what `w` would capture" — it
+# changes again mid-gesture via "screenshot-drag" (see SUPPRESS_MODES below).
+#
+# `nav` is NOT here any more: it left i3 entirely in the sp020 T7 cutover, and
+# the daemon's layer feed replaced it (see hotkeyd_layer_monitor below). Any i3
+# mode listed here still works the old way.
+COLOR_MODES = {'screenshot'}
+
+# hotkeyd layers that mean the same thing as a colouring i3 mode did: bare
+# letters are WM commands, not input. Anything other than "default" qualifies —
+# a layer exists precisely because it captures keys.
+HOTKEYD_COLORS_ANY_LAYER = True
 # Windows to never border (quickshell overlays, rofi, etc.)
 IGNORE_CLASSES = {'quickshell', 'Rofi', 'rofi'}
 IGNORE_TITLES = {'qs-focus-border', 'qs-focus-dim'}
@@ -147,9 +154,26 @@ border = Border()
 # (all event/poll paths run there).
 mode_suppressed = False
 
-# True while a COLOR_MODES mode is active — read by Border._draw. Same
-# main-thread-only discipline as mode_suppressed.
+# The ring goes red from TWO independent sources now, and they must not clobber
+# each other: an i3 mode in COLOR_MODES (screenshot), and a non-default hotkeyd
+# layer (nav — no longer an i3 mode at all). Keeping one flag per source means a
+# "mode default" event on leaving screenshot cannot blank a red that the layer
+# feed owns, and vice versa. `mode_colored` is the derived OR, read by
+# Border._draw. All three are main-thread-only, same discipline as
+# mode_suppressed.
+i3_mode_colored = False
+layer_colored = False
 mode_colored = False
+
+
+def _recompute_colored():
+    """Fold the two colour sources into mode_colored. True if it changed."""
+    global mode_colored
+    want = i3_mode_colored or layer_colored
+    if want == mode_colored:
+        return False
+    mode_colored = want
+    return True
 
 
 def should_ignore(c):
@@ -216,20 +240,23 @@ def handle_event(data):
     # because the overlay never emits a focus event, and modes like "resize"
     # keep the live-refresh behavior.
     if 'container' not in e and 'current' not in e and 'binding' not in e:
-        global mode_suppressed, mode_colored
+        global mode_suppressed, i3_mode_colored
         # Recolour BEFORE any redraw below, so the refresh that follows a mode
-        # change paints the new colour rather than the previous one.
-        was_colored, mode_colored = mode_colored, change in COLOR_MODES
+        # change paints the new colour rather than the previous one. Only the
+        # i3 half of the colour state is touched — a hotkeyd layer that is up at
+        # the same time keeps the ring red through this event.
+        i3_mode_colored = change in COLOR_MODES
+        recolored = _recompute_colored()
         if change in SUPPRESS_MODES:
             border.hide()
             mode_suppressed = True
         else:
             mode_suppressed = False
             refresh_focused()
-            # A mode swap that changes only the colour (nav -> default with
-            # focus unchanged) still needs the ring repainted: refresh_focused
-            # skips the GTK draw when geometry is identical.
-            if was_colored != mode_colored:
+            # A mode swap that changes only the colour (screenshot -> default
+            # with focus unchanged) still needs the ring repainted:
+            # refresh_focused skips the GTK draw when geometry is identical.
+            if recolored:
                 border.win.queue_draw()
         return
     c = e.get('container')
@@ -274,6 +301,70 @@ def handle_event(data):
             refresh_focused()
 
 
+def hotkeyd_layer_monitor():
+    """Colour the ring from hotkeyd's layer feed (sp020 T7, dotfiles-hwds.9).
+
+    The red "keys are captured" ring used to key off i3 mode events, which
+    stopped existing for nav when the layer moved to the daemon. The daemon
+    publishes {"layer": ..., "mod": ...} on a per-display unix socket and
+    replays current state on connect, so a helper that starts late still paints
+    correctly.
+
+    [[adr0014]] shape: a failed connect or a closed socket ends the attempt and
+    the retry is a fixed sleep OUTSIDE the read loop, so a missing daemon costs
+    one connect per second rather than a spin.
+    """
+    import socket                                        # noqa: PLC0415
+
+    display = os.environ.get('DISPLAY', ':0')
+    tag = display.lstrip(':').split('.')[0]
+    runtime = os.environ.get('XDG_RUNTIME_DIR') or f'/run/user/{os.getuid()}'
+    path = f'{runtime}/hotkeyd-{tag}.sock'
+
+    while True:
+        try:
+            c = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            c.connect(path)
+        except OSError:
+            time.sleep(1)
+            continue
+        buf = b''
+        try:
+            while True:
+                chunk = c.recv(4096)
+                if not chunk:
+                    break
+                buf += chunk
+                while b'\n' in buf:
+                    line, buf = buf.split(b'\n', 1)
+                    if not line.strip():
+                        continue
+                    try:
+                        layer = json.loads(line).get('layer') or 'default'
+                    except Exception:
+                        continue
+                    GLib.idle_add(_set_layer_colored,
+                                  HOTKEYD_COLORS_ANY_LAYER and layer != 'default')
+        except OSError:
+            pass
+        finally:
+            c.close()
+        # The daemon went away or the socket broke: fall back to the plain
+        # colour rather than leaving the ring red for a layer nobody is in.
+        GLib.idle_add(_set_layer_colored, False)
+        time.sleep(1)
+
+
+def _set_layer_colored(colored):
+    """Main-thread-only, same discipline as the mode flags."""
+    global layer_colored
+    layer_colored = colored
+    if _recompute_colored():
+        refresh_focused()
+        border.win.queue_draw()
+    return False
+
+
 def subscribe():
     """Subscribe to i3 window/workspace/binding events; reconnects on failure."""
     while True:
@@ -289,7 +380,6 @@ def subscribe():
             proc.wait()
         except Exception:
             pass
-        import time
         time.sleep(1)
 
 
@@ -425,6 +515,8 @@ signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))
 signal.signal(signal.SIGINT, lambda *a: sys.exit(0))
 
 GLib.idle_add(refresh_focused)
+t_layer = threading.Thread(target=hotkeyd_layer_monitor, daemon=True)
+t_layer.start()
 t = threading.Thread(target=subscribe, daemon=True)
 t.start()
 t_mouse = threading.Thread(target=mouse_monitor, daemon=True)

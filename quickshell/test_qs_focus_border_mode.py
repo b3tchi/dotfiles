@@ -251,6 +251,30 @@ qsb.handle_event(json.dumps({"change": "new", "container": {"name": "quickshell"
 check("bar window::new hides then restores", "hide" in calls and "show" in calls
       and calls.index("hide") < calls.index("show"))
 
+# --- hotkeyd layer feed (dotfiles-hwds.9) -----------------------------------
+# The red "keys are captured" ring used to key off the i3 `nav` mode; that mode
+# left i3 in the sp020 T6 cutover, so the cue now follows the daemon's layer
+# feed. The four pixel-level scenarios in i3/test-nav-mode.sh prove it
+# end-to-end against a real daemon; these pin the mapping in isolation, which is
+# where a silent regression would otherwise hide.
+check("nav is no longer an i3 colouring mode", "nav" not in qsb.COLOR_MODES)
+
+qsb.mode_colored = False
+qsb._set_layer_colored(True)
+check("entering a layer colours the ring", qsb.mode_colored is True)
+
+calls.clear()
+qsb._set_layer_colored(True)
+check("a repeat of the same layer state does not redraw", calls == [])
+
+qsb._set_layer_colored(False)
+check("leaving the layer clears the colour", qsb.mode_colored is False)
+
+# A layer name the helper has never heard of still means "keys are captured":
+# the daemon only publishes a layer when one is active, so anything that is not
+# "default" qualifies. Guards against someone hardcoding {'nav'} here later.
+check("any non-default layer counts", qsb.HOTKEYD_COLORS_ANY_LAYER is True)
+
 print()
 if failures:
     print("%d failure(s): %s" % (len(failures), ", ".join(failures)))

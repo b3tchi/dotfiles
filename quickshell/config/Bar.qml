@@ -236,98 +236,89 @@ PanelWindow {
     }
 
     // --- Mode tracking ---
-    property string currentMode: "default"
+    // `currentMode` is derived further down, from the i3 mode plus hotkeyd's
+    // layer feed — there is no writable mode property any more.
 
-    // Also carries `binding` events — see the nav-mode Shift indicator below.
+    // i3 modes only — the ones i3 STILL owns after the sp020 T6 cutover:
+    // `resize`, `screenshot`, and the `$mode_system` power menu. `binding` is
+    // gone from the subscription because nothing reads it any more: the nav
+    // layer left i3 entirely and reports its own state (see the layer feed
+    // below).
+    property string i3Mode: "default"
     Process {
-        command: [root.wmMsg, "-t", "subscribe", "-m", '["mode","binding"]']
+        command: [root.wmMsg, "-t", "subscribe", "-m", '["mode"]']
         running: true
         stdout: SplitParser {
             onRead: data => {
                 try {
                     var e = JSON.parse(data)
-                    if (e.binding !== undefined) root.noteBinding(e.binding)
-                    else if (e.change !== undefined) root.currentMode = e.change
+                    if (e.change !== undefined) root.i3Mode = e.change
                 } catch(err) {}
             }
         }
         onExited: running = true
     }
 
-    // --- Layer indicator for the nav mode (dotfiles-5u6m) ---
-    // The mode has three layers: bare hjkl focus, Ctrl+hjkl move, Alt+hjkl
-    // resize. i3 signals which modifier is down explicitly — the mode binds the
-    // Ctrl and Alt keycodes to `nop nav-move-on/off` and `nop nav-resize-on/off`
-    // — and every executed binding arrives as a binding event, nop included,
-    // argument included. The bar reads a statement of fact from the WM rather
-    // than inferring one.
+    // --- Layer feed from hotkeyd (sp020 T7, ft011) ---
     //
-    // Ctrl and Alt rather than Shift is what makes this honest on every
-    // session: xrdp synthesises Shift around each character (xev shows it
-    // released on every letter press), so a held Shift is unobservable there,
-    // while Ctrl and Alt cross as real holds. Reading the physical modifier
-    // directly was tried twice and abandoned for the same class of reason.
+    // What this replaces: the bar used to RECONSTRUCT the nav layer from side
+    // effects of i3 binds. i3 cannot report a held modifier, so the mode bound
+    // the raw Ctrl and Alt keycodes to `nop nav-move-on/off` markers purely to
+    // make a binding event fire, and this file string-matched those commands,
+    // corroborated them against the `mods` of ordinary binds, and ran a 120 ms
+    // timer to guess when a release had been missed. Three mechanisms to answer
+    // one question the WM could not be asked.
     //
-    // The mods of ordinary action bindings corroborate: a binding i3 matched as
-    // Ctrl+hjkl or Mod1+hjkl proves that modifier was down for the keystroke
-    // even if the surrounding nop pair went missing.
-    property bool moveMod: false
-    property bool resizeMod: false
-    readonly property bool inNavMode: currentMode === "nav"
+    // Now the daemon owns the keys and simply says what state it is in, one JSON
+    // line per change: {"layer":"nav","mod":"move"}. `mod` is "move", "resize"
+    // or null. The 120 ms release guard still exists — xrdp's per-character
+    // Shift synthesis did not go away — but it lives in the daemon, next to the
+    // events it guards, instead of here.
+    //
+    // The reader is a tiny helper rather than socat (absent on this host) and it
+    // EXITS when the socket goes away, per [[adr0014]]: this Process's restart
+    // timer is the bounded respawn, so a missing daemon costs one process per
+    // interval rather than a fork storm.
+    property string daemonLayer: "default"
+    property string daemonMod: ""
 
-    // Resize wins when both are somehow held: it is the more destructive of
-    // the two, so naming it is the safer error.
-    readonly property string navLayer: resizeMod ? "nav-resize"
-                                     : moveMod   ? "nav-move" : "nav"
-
-    function noteBinding(b) {
-        if (!root.inNavMode) return
-        var cmd = (b && b.command) ? String(b.command).trim() : ""
-
-        // Explicit signals win outright, and are matched BEFORE the mods below:
-        // a release nop legitimately carries its own modifier (it IS the
-        // release bind), so reading mods first would re-arm on the very event
-        // that means "up".
-        if (cmd.indexOf("nop nav-move-on")    === 0) { root.moveMod   = true;  return }
-        if (cmd.indexOf("nop nav-move-off")   === 0) { root.moveMod   = false; return }
-        if (cmd.indexOf("nop nav-resize-on")  === 0) { root.resizeMod = true;  return }
-        if (cmd.indexOf("nop nav-resize-off") === 0) { root.resizeMod = false; return }
-        // Any other nop is somebody else's marker — never an action.
-        if (cmd.indexOf("nop") === 0) return
-        // Mode switches describe leaving/entering, not what a key did.
-        if (cmd.indexOf("mode ") === 0) return
-
-        var mods = b && b.mods ? b.mods : []
-        var ctrl = false, alt = false
-        for (var i = 0; i < mods.length; i++) {
-            var m = String(mods[i]).toLowerCase()
-            if (m === "ctrl" || m === "control") ctrl = true
-            if (m === "mod1" || m === "alt") alt = true
+    Process {
+        id: layerFeed
+        command: ["python3", Quickshell.env("HOME") + "/.dotfiles/hotkeyd/state-tail.py"]
+        running: true
+        stdout: SplitParser {
+            onRead: data => {
+                try {
+                    var s = JSON.parse(data)
+                    root.daemonLayer = s.layer ? String(s.layer) : "default"
+                    root.daemonMod = s.mod ? String(s.mod) : ""
+                } catch(err) {}
+            }
         }
-        root.moveMod = ctrl
-        root.resizeMod = alt
+        onExited: {
+            // No daemon (or it died): fall back to a plain bar rather than
+            // freezing on the last layer we were told about.
+            root.daemonLayer = "default"
+            root.daemonMod = ""
+            layerFeedRetry.restart()
+        }
     }
+    Timer { id: layerFeedRetry; interval: 1000; onTriggered: layerFeed.running = true }
 
-    // Leaving nav resets every layer, so the mode always opens plain rather
-    // than inheriting the modifier that was held when it exited.
-    onCurrentModeChanged: {
-        moveMod = false
-        resizeMod = false
-        if (!inNavMode) { navUnstick.stop(); navLayerSticky = "nav" }
-    }
+    // The mode the bar PAINTS: a daemon layer wins when one is active, otherwise
+    // whatever i3 mode is up. The two cannot both be meaningful — a chord
+    // belongs to exactly one grabber — and if they ever disagree, the daemon's
+    // layer is the one whose keys are live under your fingers.
+    readonly property string currentMode: daemonLayer !== "default" ? daemonLayer
+                                       : i3Mode
+    readonly property bool inNavMode: daemonLayer === "nav"
 
-    // Rendered layer, with a short bounce guard on the fall back to plain nav
-    // only. The 400ms window this once carried was absorbing xrdp's
-    // per-keystroke Shift re-synthesis; Ctrl and Alt are transmitted as real
-    // holds, so all that is left to guard is a single stray release, and a
-    // longer wait would read as lag on let-go. Switching BETWEEN modifier
-    // layers is immediate — only the fall to "nav" waits.
-    property string navLayerSticky: "nav"
-    Timer { id: navUnstick; interval: 120; onTriggered: root.navLayerSticky = "nav" }
-    onNavLayerChanged: {
-        if (navLayer !== "nav") { navUnstick.stop(); navLayerSticky = navLayer }
-        else if (navLayerSticky !== "nav") navUnstick.restart()
-    }
+    // Rendered layer name, straight from the feed. No sticky timer here: the
+    // daemon publishes on CHANGE only and already absorbs the stray release, so
+    // there is nothing left for the bar to debounce.
+    readonly property string navLayerSticky: daemonMod === "move" ? "nav-move"
+                                           : daemonMod === "resize" ? "nav-resize"
+                                           : "nav"
 
     // --- System stats ---
     // Two modes:
