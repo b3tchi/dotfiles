@@ -21,6 +21,7 @@ import json
 import os
 import selectors
 import socket
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -50,6 +51,14 @@ KEY_WEDGE_MS = 1000
 
 DEFAULT_LAYER = "default"
 
+# What i3 calls "no mode is active". i3 reports it under this exact name both in
+# the `mode` event's `change` field and in GET_BINDING_STATE.
+DEFAULT_I3_MODE = "default"
+
+
+def _stderr_log(msg: str):
+    print(f"hotkeyd: {msg}", file=sys.stderr, flush=True)
+
 
 @dataclass(frozen=True)
 class Event:
@@ -65,7 +74,7 @@ class Event:
 
 class LayerEngine:
     def __init__(self, binds, layers, publisher=None, clock=None,
-                 guard_ms: int = RELEASE_GUARD_MS, mod: str = None):
+                 guard_ms: int = RELEASE_GUARD_MS, mod: str = None, log=None):
         self.binds = list(binds)
         self.layers = layers
         self.publisher = publisher
@@ -73,11 +82,23 @@ class LayerEngine:
         self.guard_ms = guard_ms
         # What `$mod` resolves to on this display (Mod4 native, Mod1 on xrdp).
         self.mod = mod or B.DEFAULT_MOD
+        self.log = log or _stderr_log
+
+        # i3's binding mode, fed in by the daemon from i3's `mode` event. The
+        # engine starts optimistic: a daemon that cannot ask i3 (no IPC, an
+        # injected stub) must still be usable, so "unknown" means "default".
+        self._i3_mode = DEFAULT_I3_MODE
 
         self._layer = DEFAULT_LAYER
         self._held: dict[str, float] = {}   # canonical modifier -> last seen at
         self._down: dict[str, float] = {}   # non-modifier keys down -> last seen
-        self._last_published: dict | None = None
+        # Seeded with the STARTING state, not None: the contract is "publish on
+        # change", and the state a fresh engine is already in is not a change.
+        # Seeding it None meant the first event of the session emitted a
+        # `default` line even when nothing had happened — which also made
+        # "a refused layer entry publishes nothing" impossible to state exactly.
+        self._last_published: dict | None = {
+            "layer": self._layer, "mod": None}
         self._global = self._index(self.binds)
 
     # -- state ------------------------------------------------------------
@@ -100,6 +121,37 @@ class LayerEngine:
             if canon in self._held:
                 return label
         return None
+
+    # -- i3-mode arbitration ----------------------------------------------
+    @property
+    def i3_mode(self) -> str:
+        """The i3 binding mode this engine last heard about."""
+        return self._i3_mode
+
+    def set_i3_mode(self, name: str | None):
+        """Feed i3's binding mode in. The daemon calls this from the `mode`
+        event on the IPC connection it already holds.
+
+        i3 modes hold their own passive grabs on the same bare keys a layer
+        wants, so two active "modes" mean two owners: the daemon's grabs are
+        refused with BadAccess while its published state still claims the layer,
+        and the keys answer to i3 (dotfiles-hwds.10, reproduced). Arbitration is
+        one-sided on purpose — i3 grabbed first and cannot be asked to yield, so
+        the daemon is the one that steps back.
+        """
+        name = DEFAULT_I3_MODE if not name else str(name)
+        if name == self._i3_mode:
+            return
+        self._i3_mode = name
+        if name != DEFAULT_I3_MODE and self._layer != DEFAULT_LAYER:
+            left, self._layer = self._layer, DEFAULT_LAYER
+            self.log(f"i3 entered mode {name!r} — left layer {left!r}")
+            # _publish is change-only, so a layer exit that raced this event
+            # costs one `default` line in total, not two.
+            self._publish()
+
+    def _i3_owns_the_keyboard(self) -> bool:
+        return self._i3_mode != DEFAULT_I3_MODE
 
     def _publish(self):
         st = self.state
@@ -217,6 +269,14 @@ class LayerEngine:
         out = []
         for a in actions:
             if isinstance(a, B.EnterLayer):
+                if self._i3_owns_the_keyboard():
+                    # Refuse the transition outright: the layer's grabs would be
+                    # refused by X anyway, and taking the layer regardless is
+                    # what made the daemon's state disagree with reality. Not
+                    # entering means the daemon never asks for those grabs.
+                    self.log(f"refusing to enter layer {a.layer!r}: "
+                             f"i3 is in mode {self._i3_mode!r}")
+                    continue
                 self._layer = a.layer
             elif isinstance(a, B.ExitLayer):
                 self._layer = DEFAULT_LAYER

@@ -53,12 +53,13 @@ class Recorder:
         self.lines.append(state)
 
 
-def engine(binds=None, layers=None, clock=None, pub=None):
+def engine(binds=None, layers=None, clock=None, pub=None, log=None):
     clock = clock or FakeClock()
     pub = pub if pub is not None else Recorder()
     binds = B.BINDS if binds is None else binds
     layers = B.LAYERS if layers is None else layers
-    return L.LayerEngine(binds, layers, publisher=pub, clock=clock), pub, clock
+    return (L.LayerEngine(binds, layers, publisher=pub, clock=clock, log=log),
+            pub, clock)
 
 
 def press(key, mods=()):
@@ -348,6 +349,128 @@ def test_every_declared_exit_key_leaves_the_layer(key):
     e.handle(press("o", ["Mod4"]))
     e.handle(press(key))
     assert e.state["layer"] == "default"
+
+
+# --------------------------------------------------------------------------
+# i3-mode arbitration — never two active owners (dotfiles-hwds.10)
+# --------------------------------------------------------------------------
+# i3 binding modes hold their OWN passive grabs on the bare keys a layer wants,
+# so a layer entered while an i3 mode is up produces two owners: i3 answers `h`
+# with its resize command, the daemon still publishes `layer=nav`, and the keys
+# the daemon believes it owns were refused with BadAccess. Reproduced on Xvfb
+# with the real config (`i3-msg 'mode "resize"'` then `$mod+o` -> 11 BadAccess
+# and a divergent layer=nav). The engine is the arbiter: it knows i3's mode
+# because the daemon feeds it the `mode` event off the connection it already has.
+
+
+def test_layer_entry_is_refused_while_i3_is_in_a_mode():
+    logged = []
+    e, pub, _ = engine(log=logged.append)
+    e.set_i3_mode("resize")
+    e.handle(press("o", ["Mod4"]))
+    assert e.state == {"layer": "default", "mod": None}, \
+        "entered a layer whose keys i3's mode already owns"
+    assert pub.lines == [], "published a layer it never actually took"
+    assert any("resize" in m for m in logged), \
+        f"the refusal must name the i3 mode; logged: {logged}"
+
+
+def test_layer_entry_still_works_while_i3_is_in_the_default_mode():
+    """The negative case. Arbitration that refuses everything would satisfy the
+    'one owner' invariant trivially and break the whole feature."""
+    e, pub, _ = engine()
+    e.set_i3_mode("default")
+    e.handle(press("o", ["Mod4"]))
+    assert e.state == {"layer": "nav", "mod": None}
+    assert pub.lines == [{"layer": "nav", "mod": None}]
+
+
+def test_i3_entering_a_mode_leaves_an_active_layer_publishing_default_once():
+    e, pub, _ = engine()
+    e.handle(press("o", ["Mod4"]))
+    pub.lines.clear()
+    e.set_i3_mode("resize")
+    assert e.state == {"layer": "default", "mod": None}
+    assert pub.lines == [{"layer": "default", "mod": None}], \
+        "exactly one default line on the i3-mode takeover"
+
+
+def test_i3_mode_takeover_clears_a_held_sublayer_too():
+    """The bar must not be left showing `move` for a layer that no longer
+    exists — the published line is the whole state, not just the layer name."""
+    e, pub, _ = engine()
+    e.handle(press("o", ["Mod4"]))
+    e.handle(press("Control_L"))
+    assert e.state == {"layer": "nav", "mod": "move"}
+    pub.lines.clear()
+    e.set_i3_mode("$mode_system")
+    assert e.state == {"layer": "default", "mod": None}
+    assert pub.lines == [{"layer": "default", "mod": None}]
+
+
+def test_a_layer_exit_racing_an_i3_mode_entry_publishes_one_default_line():
+    """Spec edge case: the user leaves the layer in the same instant i3 takes a
+    mode. Two `default` lines would make a bar flicker through a state that
+    never existed."""
+    e, pub, _ = engine()
+    e.handle(press("o", ["Mod4"]))
+    pub.lines.clear()
+    e.handle(press("q"))                 # user exits
+    e.set_i3_mode("resize")              # i3's event arrives just after
+    assert pub.lines == [{"layer": "default", "mod": None}]
+
+
+def test_repeated_mode_events_for_the_same_mode_publish_nothing_extra():
+    e, pub, _ = engine()
+    e.set_i3_mode("resize")
+    e.set_i3_mode("resize")
+    e.set_i3_mode("resize")
+    assert pub.lines == []
+
+
+def test_leaving_the_i3_mode_makes_the_layer_enterable_again():
+    """The arbitration must be a gate, not a latch: i3 going back to `default`
+    hands ownership back."""
+    e, pub, _ = engine()
+    e.set_i3_mode("resize")
+    e.handle(press("o", ["Mod4"]))
+    e.handle(release("o", ["Mod4"]))
+    assert e.state["layer"] == "default"
+    e.set_i3_mode("default")
+    e.handle(press("o", ["Mod4"]))
+    assert e.state["layer"] == "nav"
+    assert pub.lines == [{"layer": "nav", "mod": None}]
+
+
+def test_an_empty_mode_name_is_read_as_default():
+    """i3 reports the default binding state as the literal `default`; a missing
+    or empty name must not be mistaken for 'some mode is up' and wedge the
+    daemon out of every layer for the rest of the session."""
+    for name in (None, "", "default"):
+        e, _, _ = engine()
+        e.set_i3_mode(name)
+        e.handle(press("o", ["Mod4"]))
+        assert e.state["layer"] == "nav", f"{name!r} blocked layer entry"
+
+
+def test_the_two_owners_never_overlap_across_the_transition_matrix():
+    """The invariant, stated once: at no point may i3's mode and the daemon's
+    layer BOTH be non-default. Each looks fine alone — that is the defect."""
+    e, _, _ = engine()
+    script = [
+        ("i3", "resize"), ("key", "o"), ("i3", "default"), ("key", "o"),
+        ("i3", "$mode_system"), ("i3", "default"), ("key", "o"),
+        ("key", "q"), ("i3", "screenshot"), ("key", "o"), ("i3", "default"),
+    ]
+    for kind, arg in script:
+        if kind == "i3":
+            e.set_i3_mode(arg)
+        else:
+            e.handle(press(arg, ["Mod4"] if arg == "o" else []))
+        both = e.i3_mode != "default" and e.state["layer"] != "default"
+        assert not both, (
+            f"two active owners after {kind} {arg!r}: "
+            f"i3={e.i3_mode!r} daemon={e.state['layer']!r}")
 
 
 # --------------------------------------------------------------------------

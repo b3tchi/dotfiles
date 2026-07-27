@@ -12,6 +12,7 @@ BadAccess against a second grabber) is covered by test-hotkeyd.sh under Xvfb.
 
 Run: pytest hotkeyd/test_daemon.py   (or hotkeyd/test-hotkeyd.sh)
 """
+import json
 import os
 import socket
 import struct
@@ -219,12 +220,21 @@ HDR = struct.Struct("=6sII")
 
 
 class FakeI3:
-    """A stub i3 IPC server. Counts connections so 'persistent' is measurable."""
+    """A stub i3 IPC server. Counts connections so 'persistent' is measurable.
 
-    def __init__(self, path):
+    Speaks enough of the protocol for the mode-arbitration path: SUBSCRIBE,
+    GET_BINDING_STATE, and unsolicited events with the high type bit set —
+    including an event delivered in the middle of a command's reply, which is
+    the interleaving i3's own docs warn about on a subscribed connection.
+    """
+
+    def __init__(self, path, binding_state="default"):
         self.path = str(path)
         self.connections = 0
         self.commands = []
+        self.subscriptions = []
+        self.binding_state = binding_state
+        self.event_before_reply = None
         self._srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self._srv.bind(self.path)
         self._srv.listen(4)
@@ -254,12 +264,34 @@ class FakeI3:
                 return
             _, length, mtype = HDR.unpack(hdr)
             payload = conn.recv(length) if length else b""
-            self.commands.append(payload.decode())
             body = b'[{"success":true}]'
+            if mtype == 2:                                  # SUBSCRIBE
+                self.subscriptions.append(json.loads(payload or b"[]"))
+            elif mtype == 12:                               # GET_BINDING_STATE
+                body = json.dumps({"name": self.binding_state}).encode()
+            else:
+                self.commands.append(payload.decode())
+                if self.event_before_reply is not None:
+                    # i3: "as soon as you subscribe, it is not guaranteed any
+                    # longer that requests are processed in order". A client
+                    # that treats the next message as its reply desynchronises
+                    # for the rest of the session.
+                    self.send_event(2, {"change": self.event_before_reply})
+                    self.event_before_reply = None
             try:
                 conn.sendall(HDR.pack(MAGIC, len(body), mtype) + body)
             except OSError:
                 return
+
+    def send_event(self, kind, payload):
+        """Push an unsolicited event to every connected client."""
+        body = json.dumps(payload).encode()
+        head = HDR.pack(MAGIC, len(body), kind | 0x80000000)
+        for c in list(self._conns):
+            try:
+                c.sendall(head + body)
+            except OSError:
+                pass
 
     def close(self):
         self._stop.set()
@@ -335,6 +367,143 @@ def test_dispatch_failure_is_reported_not_fatal(tmp_path):
     """i3 gone entirely: a keystroke must not take the daemon down with it."""
     c = H.I3Client(lambda: str(tmp_path / "nope.sock"))
     assert c.command("focus left") is False   # reported, no exception
+
+
+# --------------------------------------------------------------------------
+# i3 `mode` events on that SAME connection (dotfiles-hwds.10)
+# --------------------------------------------------------------------------
+
+def test_subscribing_to_mode_events_uses_the_connection_we_already_have(fake_i3):
+    """sp020: one persistent i3 connection for the process lifetime. A second
+    socket for events, or an `i3-msg -t subscribe` spawn, is the thing the
+    convention exists to forbid."""
+    c = H.I3Client(lambda: fake_i3.path)
+    assert c.subscribe(["mode"]) is True
+    for i in range(20):
+        c.command(f"nop {i}")
+    time.sleep(0.05)
+    assert fake_i3.connections == 1, "events opened a second connection"
+    assert fake_i3.subscriptions == [["mode"]]
+    assert len(fake_i3.commands) == 20
+    c.close()
+
+
+def test_an_event_arriving_before_a_reply_is_not_mistaken_for_it(fake_i3):
+    """The desync i3's docs warn about: once subscribed, an event can land
+    between a request and its reply. Reading it AS the reply leaves the client
+    one message behind forever."""
+    seen = []
+    c = H.I3Client(lambda: fake_i3.path,
+                   on_event=lambda k, d: seen.append((k, d)))
+    c.subscribe(["mode"])
+    fake_i3.event_before_reply = "resize"
+    assert c.command("nop x") is True, "the reply was lost to an event"
+    assert seen == [(H.EVENT_MODE, {"change": "resize"})]
+    assert c.command("nop y") is True, "connection desynchronised"
+    time.sleep(0.05)
+    assert fake_i3.commands == ["nop x", "nop y"]
+    c.close()
+
+
+def test_poll_events_reads_a_mode_event_off_the_shared_socket(fake_i3):
+    seen = []
+    c = H.I3Client(lambda: fake_i3.path,
+                   on_event=lambda k, d: seen.append((k, d)))
+    c.subscribe(["mode"])
+    fake_i3.send_event(2, {"change": "resize"})
+    time.sleep(0.05)
+    c.poll_events()
+    assert seen == [(H.EVENT_MODE, {"change": "resize"})]
+    c.close()
+
+
+def test_poll_events_returns_without_blocking_when_nothing_is_pending(fake_i3):
+    """It is called every loop iteration; a blocking read here would freeze the
+    key path until i3 happened to say something."""
+    c = H.I3Client(lambda: fake_i3.path)
+    c.subscribe(["mode"])
+    t0 = time.monotonic()
+    for _ in range(5):
+        c.poll_events()
+    assert time.monotonic() - t0 < 0.5
+    c.close()
+
+
+def test_binding_state_reports_the_mode_i3_is_already_in(fake_i3):
+    """Startup edge case: the daemon may be launched while i3 already holds a
+    mode, and no `mode` event will ever be sent for a mode entered earlier."""
+    fake_i3.binding_state = "resize"
+    c = H.I3Client(lambda: fake_i3.path)
+    assert c.binding_state() == "resize"
+    c.close()
+
+
+def test_binding_state_falls_back_to_default_when_i3_cannot_be_reached(tmp_path):
+    c = H.I3Client(lambda: str(tmp_path / "nope.sock"))
+    assert c.binding_state() == "default"
+
+
+def test_the_subscription_is_re_established_after_an_i3_restart(tmp_path):
+    """Spec edge case: i3 restarted while a layer is active. A subscription that
+    is not renewed leaves the daemon silently un-arbitrated — the worst shape of
+    this bug, because everything looks healthy."""
+    first = FakeI3(tmp_path / "i3-a.sock")
+    path = {"p": first.path}
+    seen = []
+    c = H.I3Client(lambda: path["p"], on_event=lambda k, d: seen.append((k, d)))
+    c.subscribe(["mode"])
+    first.close()
+
+    second = FakeI3(tmp_path / "i3-b.sock")
+    path["p"] = second.path
+    for _ in range(3):
+        c._retry_at = 0                   # skip the backoff, not the reconnect
+        c.poll_events()
+    assert second.subscriptions == [["mode"]], "did not re-subscribe after restart"
+    second.send_event(2, {"change": "resize"})
+    time.sleep(0.05)
+    c.poll_events()
+    assert seen == [(H.EVENT_MODE, {"change": "resize"})], \
+        "events stopped flowing after the restart"
+    c.close()
+    second.close()
+
+
+def test_a_reconnect_is_reported_so_the_daemon_can_re_read_the_mode(tmp_path):
+    """i3's mode resets when it restarts, so the daemon must re-read the binding
+    state rather than keep believing whatever it last heard."""
+    first = FakeI3(tmp_path / "i3-a.sock")
+    path = {"p": first.path}
+    c = H.I3Client(lambda: path["p"])
+    c.subscribe(["mode"])
+    assert c.poll_events() is False, "a healthy connection is not a reconnect"
+    first.close()
+    second = FakeI3(tmp_path / "i3-b.sock")
+    path["p"] = second.path
+    reconnected = False
+    for _ in range(3):
+        c._retry_at = 0
+        reconnected = c.poll_events() or reconnected
+    assert reconnected is True, "reconnect was not reported"
+    assert c.poll_events() is False, "reported the same reconnect twice"
+    c.close()
+    second.close()
+
+
+def test_reconnect_attempts_are_rate_limited(tmp_path):
+    """adr0014: no tight retry loop against a server that is gone. poll_events
+    runs every iteration of the key loop."""
+    tries = []
+
+    def getter():
+        tries.append(time.monotonic())
+        raise OSError("no i3")
+
+    c = H.I3Client(getter)
+    c.subscribe(["mode"])
+    for _ in range(50):
+        c.poll_events()
+    assert len(tries) <= 2, f"hammered i3's socket {len(tries)} times"
 
 
 # --------------------------------------------------------------------------
@@ -787,6 +956,206 @@ def test_a_table_that_defines_dataclasses_loads(tmp_path):
     f.write_text(src)
     mod = H.load_table(str(f))
     assert mod.BINDS and mod.LAYERS
+
+
+# --------------------------------------------------------------------------
+# the Daemon side of the arbitration (dotfiles-hwds.10)
+# --------------------------------------------------------------------------
+
+class FakeXServer(FakeDisplay):
+    """A FakeDisplay that also answers the calls Daemon.__init__ makes: a root
+    window to grab on and an (empty) resource database.
+
+    `keysym_to_keycode` takes an INTEGER keysym exactly as python-xlib does,
+    because the Daemon reaches X through the real XAdapter — a fake that accepts
+    the keysym NAME would let the adapter be wrong and still pass."""
+
+    def __init__(self, keymap=None):
+        super().__init__(keymap=keymap or {"o": 32, "h": 43, "q": 24,
+                                           "Escape": 9, "Return": 36,
+                                           "Left": 113, "Right": 114,
+                                           "Up": 111, "Down": 116,
+                                           "j": 44, "k": 45, "l": 46,
+                                           "Super_L": 133, "Control_L": 37,
+                                           "Control_R": 105, "Alt_L": 64,
+                                           "Alt_R": 108, "Meta_L": 205,
+                                           "Meta_R": 206})
+
+    def keysym_to_keycode(self, keysym):
+        from Xlib import XK                                  # noqa: PLC0415
+        for name, code in self.keymap.items():
+            if XK.string_to_keysym(name) == keysym:
+                return code
+        return 0
+
+    def intern_atom(self, name):
+        return 1
+
+    def screen(self):
+        outer = self
+
+        class Root:
+            def get_full_property(self, atom, kind):
+                return None
+
+            def grab_key(self, code, mask, owner, pmode, kmode, onerror=None):
+                outer.grabs.append((code, mask))
+
+            def ungrab_key(self, code, mask):
+                outer.ungrabs.append((code, mask))
+
+        class Screen:
+            root = Root()
+
+        return Screen()
+
+
+class Lines:
+    def __init__(self):
+        self.lines = []
+
+    def publish(self, state):
+        self.lines.append(state)
+
+    def poll(self):
+        pass
+
+    def close(self):
+        pass
+
+
+def key_press(detail, state=0):
+    from Xlib import X                                      # noqa: PLC0415
+
+    class Ev:
+        type = X.KeyPress
+        time = 0
+
+    ev = Ev()
+    ev.detail = detail
+    ev.state = state
+    return ev
+
+
+def arbitration_daemon(fake, table=B):
+    """The real Daemon over a fake X server and a real I3Client against the
+    stub i3 — the composition under test, not a re-implementation of it."""
+    xd = FakeXServer()
+    pub = Lines()
+    dae = H.Daemon(table, xd, pub, i3=H.I3Client(lambda: fake.path),
+                   display=":0")
+    dae._pending = []
+    return dae, xd, pub
+
+
+def test_daemon_subscribes_to_mode_on_the_connection_it_already_has(fake_i3):
+    dae, _, _ = arbitration_daemon(fake_i3)
+    time.sleep(0.05)
+    assert fake_i3.subscriptions == [["mode"]]
+    assert fake_i3.connections == 1, "the daemon opened a second i3 connection"
+    dae.close()
+
+
+def test_a_daemon_started_while_i3_holds_a_mode_starts_arbitrated(fake_i3):
+    """No `mode` event is ever sent for a mode entered before we subscribed."""
+    fake_i3.binding_state = "resize"
+    dae, _, _ = arbitration_daemon(fake_i3)
+    assert dae.engine.i3_mode == "resize"
+    dae.close()
+
+
+def test_a_refused_layer_entry_asks_x_for_no_grabs(fake_i3):
+    """The reproduced defect: `i3-msg 'mode "resize"'` then `$mod+o` produced 11
+    BadAccess (i3's mode already owns those bare keys) AND a published
+    layer=nav. Refusing the transition means the grabs are never requested, so
+    there is nothing to be refused."""
+    fake_i3.binding_state = "resize"
+    dae, xd, pub = arbitration_daemon(fake_i3)
+    grabs_before = len(xd.grabs)
+    dae.pump(key_press(32, H.MOD4))                 # $mod+o
+    assert dae.engine.state["layer"] == "default"
+    assert len(xd.grabs) == grabs_before, \
+        f"attempted {len(xd.grabs) - grabs_before} grabs i3's mode owns"
+    assert "h" not in dae.grabs.chords
+    assert pub.lines == [], "published a layer it never took"
+    dae.close()
+
+
+def test_layer_entry_still_works_when_i3_is_in_the_default_mode(fake_i3):
+    """The negative control at daemon level: arbitration must not be satisfied
+    by refusing every entry."""
+    dae, xd, pub = arbitration_daemon(fake_i3)
+    dae.pump(key_press(32, H.MOD4))                 # $mod+o
+    assert dae.engine.state["layer"] == "nav"
+    assert "h" in dae.grabs.chords, "nav's bare keys were not grabbed"
+    assert pub.lines == [{"layer": "nav", "mod": None}]
+    assert not dae.grabs.problems, f"BadAccess on entry: {dae.grabs.problems}"
+    dae.close()
+
+
+def test_an_i3_mode_event_exits_the_layer_and_releases_its_grabs(fake_i3):
+    """The other direction: i3 takes a mode while the daemon holds a layer. The
+    layer must be dropped AND its grabs given back, or the daemon keeps eating
+    keys for a layer it no longer claims."""
+    dae, xd, pub = arbitration_daemon(fake_i3)
+    dae.pump(key_press(32, H.MOD4))
+    assert "h" in dae.grabs.chords
+    pub.lines.clear()
+    xd.ungrabs.clear()
+
+    fake_i3.send_event(2, {"change": "resize"})
+    time.sleep(0.05)
+    dae.pump_i3()
+
+    assert dae.engine.state["layer"] == "default"
+    assert "h" not in dae.grabs.chords, "kept the layer's grabs after yielding"
+    assert xd.ungrabs, "grabs were never released"
+    assert pub.lines == [{"layer": "default", "mod": None}]
+    dae.close()
+
+
+def test_the_daemon_re_reads_the_binding_state_after_i3_restarts(tmp_path):
+    """i3's mode resets on restart. A daemon that keeps believing the last mode
+    it heard would refuse every layer entry for the rest of the session."""
+    first = FakeI3(tmp_path / "i3-a.sock", binding_state="resize")
+    path = {"p": first.path}
+    xd, pub = FakeXServer(), Lines()
+    dae = H.Daemon(B, xd, pub, i3=H.I3Client(lambda: path["p"]), display=":0")
+    dae._pending = []
+    assert dae.engine.i3_mode == "resize"
+    first.close()
+
+    second = FakeI3(tmp_path / "i3-b.sock", binding_state="default")
+    path["p"] = second.path
+    for _ in range(3):
+        dae.i3._retry_at = 0
+        dae.pump_i3()
+    assert dae.engine.i3_mode == "default", \
+        "stayed latched on a mode the restarted i3 no longer has"
+    dae.pump(key_press(32, H.MOD4))
+    assert dae.engine.state["layer"] == "nav"
+    dae.close()
+    second.close()
+
+
+def test_an_i3_stub_without_event_support_leaves_the_daemon_usable():
+    """live_check.py drives the real Daemon with a minimal NullI3. Event support
+    is optional wiring, not a new requirement on every injected client."""
+
+    class NullI3:
+        def command(self, cmd):
+            return True
+
+        def close(self):
+            pass
+
+    xd, pub = FakeXServer(), Lines()
+    dae = H.Daemon(B, xd, pub, i3=NullI3(), display=":0")
+    dae._pending = []
+    dae.pump_i3()                                   # must not raise
+    dae.pump(key_press(32, H.MOD4))
+    assert dae.engine.state["layer"] == "nav"
+    dae.close()
 
 
 # --------------------------------------------------------------------------

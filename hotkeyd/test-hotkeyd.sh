@@ -300,6 +300,188 @@ else
     fi
 fi
 
+# --- stage 11: i3-mode / daemon-layer arbitration (dotfiles-hwds.10) --------
+# The documented repro, run for real: `i3-msg 'mode "resize"'` then $mod+o used
+# to log 11 BadAccess (i3's mode already holds passive grabs on nav's bare keys)
+# while the daemon still published layer=nav — two owners, each looking healthy
+# on its own side. So every case here asserts BOTH sides: i3's binding state AND
+# the last line on the daemon's state socket.
+echo "stage 11: i3-mode / daemon-layer arbitration"
+if ! command -v Xvfb >/dev/null || ! command -v i3 >/dev/null \
+        || ! command -v xdotool >/dev/null; then
+    printf '  \033[33mSKIP\033[0m Xvfb, i3 or xdotool missing\n'
+else
+    # Take a display nobody has claimed, starting from a PID-derived offset. A
+    # fixed number collides with any other X server on the box (a second copy of
+    # this suite, a parallel worktree), and a collision here does not look like
+    # one: the two runs fight over the same grab, and — worse — a suite that
+    # cleans up with `pkill -f "hotkeyd.py.*--display :NN"` kills the other run's
+    # daemon, which reads as "the daemon did not start".
+    D11=""
+    _b=$(( 40 + ($$ % 20) ))
+    for _o in 0 1 2 3 4 5 6 7 8 9; do
+        _n=$(( _b + _o ))
+        [ -e "/tmp/.X${_n}-lock" ] || { D11=":$_n"; break; }
+    done
+    T11="$TMPD/t11"; mkdir -p "$T11"
+    # This i3 gets its OWN ipc socket, and every i3-msg below is pinned to it.
+    # Without that pin i3-msg follows the ambient $I3SOCK — the caller's real
+    # session — so the stage would drive the developer's live i3 into a mode
+    # and then assert against it. Ask how that was found.
+    XSOCK11="$T11/i3-arb.sock"
+    cat > "$T11/i3.conf" <<EOF
+ipc-socket $XSOCK11
+EOF
+    cat >> "$T11/i3.conf" <<'EOF'
+font pango:monospace 10
+set $mod Mod4
+# The colliding set measured on the real config: an i3 mode holding the bare
+# keys the nav layer wants. $mod+o is deliberately NOT bound here — it is the
+# daemon's entry chord.
+mode "resize" {
+        bindsym h resize shrink width 5 px
+        bindsym j resize grow height 5 px
+        bindsym k resize shrink height 5 px
+        bindsym l resize grow width 5 px
+        bindsym q mode "default"
+        bindsym Escape mode "default"
+        bindsym Return mode "default"
+}
+bindsym $mod+r mode "resize"
+EOF
+    Xvfb "$D11" -screen 0 640x480x24 >/dev/null 2>&1 &
+    X11P=$!
+    sleep 1.5
+    DISPLAY="$D11" i3 -c "$T11/i3.conf" >/dev/null 2>&1 &
+    I11P=$!
+    sleep 1.5
+
+    if [ -z "$D11" ]; then
+        bad "no free X display for the arbitration stage"
+    elif ! DISPLAY="$D11" I3SOCK="$XSOCK11" i3-msg -t get_version >/dev/null 2>&1;
+    then
+        bad "live i3 did not start on $D11"
+    else
+        DISPLAY="$D11" XDG_RUNTIME_DIR="$T11" setsid python3 "$HERE/hotkeyd.py" \
+            --display "$D11" >"$T11/d.log" 2>&1 &
+        d11=""
+        for _t in 1 2 3 4 5 6 7 8 9 10; do
+            sleep 0.5
+            d11="$(pgrep -f "hotkeyd.py --display $D11" | head -1)"
+            [ -n "$d11" ] && break
+        done
+        # Read the state socket for the whole stage: the daemon's own claim
+        # about who owns the keyboard, as a bar would see it.
+        python3 -u -c '
+import socket, sys
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.connect(sys.argv[1])
+for line in s.makefile():
+    sys.stdout.write(line)
+' "$T11/hotkeyd-${D11#:}.sock" >"$T11/state.log" 2>/dev/null &
+        R11=$!
+        sleep 0.5
+
+        state() { DISPLAY="$D11" I3SOCK="$XSOCK11" i3-msg -t get_binding_state \
+                      2>/dev/null; }
+        last()  { tail -1 "$T11/state.log" 2>/dev/null; }
+        # Entering the mode is this stage's PRECONDITION, not its assertion, so
+        # wait for i3 to report it rather than sleeping a guessed interval.
+        enter_mode() {
+            DISPLAY="$D11" I3SOCK="$XSOCK11" i3-msg "mode \"$1\"" >/dev/null 2>&1
+            for _w in 1 2 3 4 5 6 7 8 9 10; do
+                sleep 0.15
+                printf '%s' "$(state)" | grep -q "\"$1\"" && return 0
+            done
+            return 1
+        }
+
+        # This stage owns three processes on a box that may be running other
+        # copies of this suite. If one of them is gone the assertions below
+        # measure nothing, so say THAT rather than emit five mysteries.
+        alive() { kill -0 "$d11" 2>/dev/null && kill -0 "$I11P" 2>/dev/null; }
+
+        if [ -z "$d11" ]; then
+            bad "arbitration daemon did not start: $(tail -2 "$T11/d.log")"
+        elif ! DISPLAY="$D11" I3SOCK="$XSOCK11" i3-msg -t get_version \
+                >/dev/null 2>&1; then
+            bad "i3 stopped answering on $D11 before the stage began"
+        else
+            # -- the repro: enter an i3 mode, then press the layer chord ------
+            enter_mode resize
+            DISPLAY="$D11" xdotool key --clearmodifiers super+o
+            sleep 0.6
+            bs="$(state)"; ls="$(last)"
+            printf '%s' "$bs" | grep -q 'resize' \
+                && ok "i3 holds mode resize" \
+                || bad "i3 binding state is not resize: $bs"
+            case "$ls" in
+                *'"layer":"nav"'*)
+                    bad "daemon published layer=nav while i3 holds a mode" ;;
+                *) ok "daemon did NOT take the layer (socket: ${ls:-<no line>})" ;;
+            esac
+            if grep -q "BadAccess" "$T11/d.log"; then
+                bad "BadAccess during the refused entry: $(grep -c BadAccess "$T11/d.log")"
+            else
+                ok "zero BadAccess — the grabs were never requested"
+            fi
+            grep -q "refusing to enter layer" "$T11/d.log" \
+                && grep -q "resize" "$T11/d.log" \
+                && ok "the refusal is logged, naming i3's mode" \
+                || bad "no refusal naming the mode: $(tail -3 "$T11/d.log")"
+
+            # -- the negative case: with i3 in default, entry must still work --
+            enter_mode default
+            DISPLAY="$D11" xdotool key --clearmodifiers super+o
+            sleep 0.6
+            bs="$(state)"; ls="$(last)"
+            printf '%s' "$bs" | grep -q 'default' \
+                && ok "i3 is back in the default binding state" \
+                || bad "i3 binding state is not default: $bs"
+            case "$ls" in
+                *'"layer":"nav"'*)
+                    ok "layer entry still succeeds when i3 owns no mode" ;;
+                *) bad "arbitration refuses everything (socket: ${ls:-<no line>})" ;;
+            esac
+            grep -q "BadAccess" "$T11/d.log" \
+                && bad "BadAccess on an ACCEPTED layer entry" \
+                || ok "zero BadAccess on the accepted entry"
+
+            # -- the other direction: i3 takes a mode while the layer is up ----
+            # Sampled over a window, both sides each time: the invariant is that
+            # they are never BOTH non-default, and that while i3 holds the mode
+            # the daemon reports `default`. One sample after a fixed sleep would
+            # miss a daemon that yields late — and would fail spuriously if
+            # anything else on the box drops i3 back to default afterwards.
+            n_before="$(grep -c '"layer":"default"' "$T11/state.log")"
+            DISPLAY="$D11" I3SOCK="$XSOCK11" i3-msg 'mode "resize"' >/dev/null 2>&1
+            agreed=0; overlap=0
+            for _w in 1 2 3 4 5 6 7 8; do
+                sleep 0.15
+                bs="$(state)"; ls="$(last)"
+                case "$bs" in
+                    *resize*)
+                        [ "$ls" = '{"layer":"default","mod":null}' ] && agreed=1
+                        case "$ls" in *'"layer":"nav"'*) overlap=1 ;; esac ;;
+                esac
+            done
+            n_after="$(grep -c '"layer":"default"' "$T11/state.log")"
+            [ "$agreed" -eq 1 ] && [ "$overlap" -eq 0 ] \
+                && ok "i3 entering a mode exits the layer (both sides agree)" \
+                || bad "two owners: i3=$bs daemon=${ls:-<no line>}"
+            [ "$((n_after - n_before))" -eq 1 ] \
+                && ok "the takeover publishes exactly one default line" \
+                || bad "published $((n_after - n_before)) default lines, want 1"
+            alive || bad "the daemon or i3 died mid-stage — the results above " \
+                         "measured a corpse (another copy of this suite?)"
+            kill "$d11" 2>/dev/null
+        fi
+        kill "$R11" 2>/dev/null
+    fi
+    kill "$I11P" 2>/dev/null
+    kill "$X11P" 2>/dev/null
+fi
+
 echo
 printf 'hotkeyd: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

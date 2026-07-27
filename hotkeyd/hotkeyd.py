@@ -20,12 +20,14 @@ import argparse
 import errno
 import fcntl
 import importlib.util
+import json
 import os
 import signal
 import socket
 import struct
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -267,6 +269,19 @@ class GrabManager:
 MAGIC = b"i3-ipc"
 HDR = struct.Struct("=6sII")
 RUN_COMMAND = 0
+SUBSCRIBE = 2
+GET_BINDING_STATE = 12
+
+# i3 tags an unsolicited event by setting the high bit of the message type. On a
+# subscribed connection an event can land between a request and its reply, so
+# every read has to test this bit — a client that takes the next message as its
+# reply is one message behind for the rest of the session (i3 IPC docs).
+EVENT_MASK = 0x80000000
+EVENT_MODE = 2
+
+# adr0014: a lost i3 is not retried in a tight loop. poll_events() runs on every
+# iteration of the key loop, so the reconnect attempt is on a timer.
+I3_RECONNECT_BACKOFF_S = 5.0
 
 
 def i3_socket_path(display: str | None = None, xdisp=None) -> str:
@@ -310,17 +325,39 @@ class I3Client:
     """One connection for the process lifetime, reconnecting only when i3 itself
     restarts (which changes the socket path). Spawning `i3-msg` per keystroke is
     a ~30 ms process launch on the exact path this daemon exists to keep short.
+
+    The same connection carries events. i3 allows commands and a subscription on
+    one socket (it only warns that replies and events interleave, which
+    `_read_message` handles), so mode arbitration costs no second socket and no
+    `i3-msg -t subscribe` process — sp020's "one persistent i3 IPC connection".
     """
 
-    def __init__(self, path_getter=i3_socket_path):
+    def __init__(self, path_getter=i3_socket_path, on_event=None):
         self._path_getter = path_getter
         self._sock: socket.socket | None = None
+        self.on_event = on_event
+        self._subs: list[str] = []
+        self._retry_at = 0.0
+        # Bumped by every successful connect. poll_events() compares it against
+        # what it last reported, so a reconnect made by ANY path (a dispatch,
+        # the poll itself) is surfaced once — the daemon uses that to re-read
+        # i3's binding state, which a restarted i3 has reset.
+        self._gen = 0
+        self._seen_gen = 0
 
     def _connect(self):
         path = self._path_getter()
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         s.connect(path)
         self._sock = s
+        self._gen += 1
+        if self._subs:
+            self._send(SUBSCRIBE, json.dumps(self._subs))
+            self._read_message()
+
+    def _send(self, mtype: int, payload: str = ""):
+        data = payload.encode()
+        self._sock.sendall(HDR.pack(MAGIC, len(data), mtype) + data)
 
     def command(self, cmd: str) -> bool:
         """Returns True on success. A dispatch failure is REPORTED, never fatal:
@@ -329,9 +366,7 @@ class I3Client:
             try:
                 if self._sock is None:
                     self._connect()
-                payload = cmd.encode()
-                self._sock.sendall(HDR.pack(MAGIC, len(payload), RUN_COMMAND)
-                                   + payload)
+                self._send(RUN_COMMAND, cmd)
                 self._recv_reply()
                 return True
             except (OSError, ConnectionError, subprocess.CalledProcessError):
@@ -340,11 +375,106 @@ class I3Client:
                     return False
         return False
 
-    def _recv_reply(self):
+    # -- events -----------------------------------------------------------
+    def subscribe(self, events) -> bool:
+        """Subscribe to i3 events on THIS connection. Idempotent; the wanted set
+        is remembered so every later reconnect re-subscribes."""
+        for e in events:
+            if e not in self._subs:
+                self._subs.append(e)
+        try:
+            if self._sock is None:
+                self._connect()             # subscribes as part of connecting
+            else:
+                self._send(SUBSCRIBE, json.dumps(self._subs))
+                self._read_message()
+            # This connect is the caller's own, not news to report back to it.
+            self._seen_gen = self._gen
+            return True
+        except (OSError, ConnectionError, subprocess.CalledProcessError):
+            self.close()
+            return False
+
+    def binding_state(self) -> str:
+        """The mode i3 is in RIGHT NOW. Needed because no `mode` event is ever
+        sent for a mode i3 entered before we subscribed — a daemon started (or
+        restarted) mid-mode would otherwise believe it owns the keyboard."""
+        try:
+            if self._sock is None:
+                self._connect()
+            self._send(GET_BINDING_STATE, "")
+            _, payload = self._recv_reply()
+        except (OSError, ConnectionError, subprocess.CalledProcessError):
+            self.close()
+            return L.DEFAULT_I3_MODE
+        try:
+            data = json.loads(payload or b"{}")
+        except ValueError:
+            return L.DEFAULT_I3_MODE
+        if isinstance(data, dict) and data.get("name"):
+            return str(data["name"])
+        return L.DEFAULT_I3_MODE
+
+    def fileno(self) -> int | None:
+        return self._sock.fileno() if self._sock is not None else None
+
+    def poll_events(self) -> bool:
+        """Drain whatever i3 has queued, without blocking. Returns True if the
+        connection was (re-)established since the last poll, which is the
+        daemon's cue to re-read the binding state."""
+        import select                                       # noqa: PLC0415
+
+        if self._sock is None:
+            if not self._subs:
+                return False                # nothing to keep alive
+            now = time.monotonic()
+            if now < self._retry_at:
+                return False
+            self._retry_at = now + I3_RECONNECT_BACKOFF_S
+            try:
+                self._connect()
+            except (OSError, ConnectionError,
+                    subprocess.CalledProcessError):
+                self.close()
+                return False
+        fresh = self._gen != self._seen_gen
+        self._seen_gen = self._gen
+        while self._sock is not None:
+            try:
+                r, _, _ = select.select([self._sock], [], [], 0)
+                if not r:
+                    break
+                self._read_message()
+            except (OSError, ConnectionError):
+                self.close()
+                break
+        return fresh
+
+    def _read_message(self) -> tuple[int, bytes] | None:
+        """Read one message. Events are dispatched and reported as None so the
+        caller can keep waiting for its actual reply."""
         hdr = self._recv_exact(HDR.size)
-        _, length, _ = HDR.unpack(hdr)
-        if length:
-            self._recv_exact(length)
+        _, length, mtype = HDR.unpack(hdr)
+        payload = self._recv_exact(length) if length else b""
+        if mtype & EVENT_MASK:
+            self._dispatch_event(mtype & ~EVENT_MASK, payload)
+            return None
+        return mtype, payload
+
+    def _dispatch_event(self, kind: int, payload: bytes):
+        if self.on_event is None:
+            return
+        try:
+            data = json.loads(payload or b"{}")
+        except ValueError:
+            data = {}
+        self.on_event(kind, data)
+
+    def _recv_reply(self) -> tuple[int, bytes]:
+        while True:
+            msg = self._read_message()
+            if msg is not None:
+                return msg
 
     def _recv_exact(self, n: int) -> bytes:
         buf = b""
@@ -559,7 +689,53 @@ class Daemon:
         self.grabs = GrabManager(XAdapter(d, d.screen().root), mod=self.mod)
         self.engine = L.LayerEngine(table.BINDS, table.LAYERS,
                                     publisher=publisher, mod=self.mod)
+        self.wire_i3_mode()
         self.grabs.sync_binds(chords_for(table))
+
+    # -- i3-mode arbitration ----------------------------------------------
+    def wire_i3_mode(self) -> bool:
+        """Subscribe to i3's `mode` event on the connection we already hold and
+        seed the engine with the mode i3 is in right now.
+
+        Guarded by getattr because the live checks (and any embedder) inject a
+        minimal i3 stub: event support is optional wiring, and a client without
+        it simply never arbitrates rather than breaking the daemon.
+        """
+        subscribe = getattr(self.i3, "subscribe", None)
+        if subscribe is None:
+            return False
+        self.i3.on_event = self._on_i3_event
+        subscribe(["mode"])
+        self.sync_i3_mode()
+        return True
+
+    def _on_i3_event(self, kind: int, data: dict):
+        if kind == EVENT_MODE:
+            self.engine.set_i3_mode(data.get("change"))
+
+    def sync_i3_mode(self):
+        state = getattr(self.i3, "binding_state", None)
+        if state is None:
+            return
+        self.engine.set_i3_mode(state())
+
+    def pump_i3(self):
+        """One non-blocking pass over the i3 connection. Called from the key
+        loop, so an i3 mode takes the keyboard back within one iteration."""
+        poll = getattr(self.i3, "poll_events", None)
+        if poll is None:
+            return
+        before = self.engine.state["layer"]
+        if poll():
+            # A reconnect means a restarted i3, whose mode has reset. Believing
+            # the last mode we heard would refuse every layer entry from here on.
+            self.sync_i3_mode()
+        if self.engine.state["layer"] != before:
+            self.resync_grabs()
+
+    def i3_fileno(self) -> int | None:
+        fileno = getattr(self.i3, "fileno", None)
+        return fileno() if fileno is not None else None
 
     def resync_grabs(self):
         self.grabs.sync_binds(chords_for(self.table,
@@ -652,6 +828,7 @@ def run_daemon(table, display_name: str | None) -> int:
     try:
         while not stop["flag"]:
             pub.poll()
+            dae.pump_i3()
             if reload_wanted["flag"]:
                 reload_wanted["flag"] = False
                 try:
@@ -671,7 +848,14 @@ def run_daemon(table, display_name: str | None) -> int:
                 if dae._pending:
                     ev = dae._pending.pop(0)
                 elif not d.pending_events():
-                    select.select([d.fileno()], [], [], 0.25)
+                    # i3's socket is in the wait set too, so a mode change wakes
+                    # the loop immediately instead of up to 250 ms later — the
+                    # window in which both engines would think they own the keys.
+                    waits = [d.fileno()]
+                    i3fd = dae.i3_fileno()
+                    if i3fd is not None:
+                        waits.append(i3fd)
+                    select.select(waits, [], [], 0.25)
                     continue
                 else:
                     ev = d.next_event()
