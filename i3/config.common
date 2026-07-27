@@ -445,6 +445,21 @@ mode "nav" {
         bindsym Shift+q mode "default"
         bindsym q mode "default"
 }
+# hotkeyd ESCAPE HATCH (sp020, ft011) — the one bind that never migrates.
+#
+# The Python hotkey layer owns its binds via per-key XGrabKey, and X grabs die
+# with the process. So if hotkeyd crashes while holding the bind table, every
+# migrated key stops working at once and there is no way to bring it back —
+# unless one key is still handled by i3 itself. This is that key.
+#
+# It calls the LAUNCHER's restart verb, not the daemon: hotkeyd/test-launcher.sh
+# asserts this exact string exists here, so the bind and the launcher cannot
+# drift apart and be discovered mid-outage.
+#
+# $mod+Shift+F12 is deliberately awkward — it is an emergency control, and a
+# comfortable chord here is one that gets pressed by accident.
+bindsym $mod+Shift+F12 exec --no-startup-id ~/.dotfiles/hotkeyd/hotkeyd.sh restart
+
 # Lock screen
 bindsym $mod+9 exec --no-startup-id blurlock
 
