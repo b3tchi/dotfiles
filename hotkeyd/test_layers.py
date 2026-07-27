@@ -190,6 +190,42 @@ def test_on_release_is_discriminated_inside_a_layer_too():
     assert e.handle(release("j")) == []
 
 
+def test_exit_layer_verb_leaves_the_layer_and_is_not_dispatched():
+    """T3 audit M5: this branch was untested, and exit_layer() is published
+    ft011 api_surface. With the branch dead the ExitLayer OBJECT falls through
+    into the returned action list and gets sent to i3 as a garbage command."""
+    layers = {"pick": B.Layer(binds=[B.Bind("d", B.exit_layer())],
+                              exit_keys=["Escape"])}
+    e, pub, _ = engine(binds=[B.Bind("Mod4+w", B.enter_layer("pick"))],
+                       layers=layers)
+    e.handle(press("w", ["Mod4"]))
+    assert e.handle(press("d")) == []          # nothing dispatched to i3
+    assert e.state == {"layer": "default", "mod": None}
+    assert pub.lines[-1] == {"layer": "default", "mod": None}
+
+
+def test_a_key_whose_release_was_lost_becomes_usable_again(fake_clock=None):
+    """T3 audit M2: KEY_WEDGE_MS expiry was untested — without it a single lost
+    release (the xrdp hazard) makes that key dead for the rest of the session."""
+    e, _, clock = engine()
+    e.handle(press("o", ["Mod4"]))
+    assert e.handle(press("h")) == ["focus left"]
+    assert e.handle(press("h")) == []          # repeat suppressed, no release
+    clock.advance(L.KEY_WEDGE_MS + 100)
+    assert e.handle(press("h")) == ["focus left"], "key wedged after lost release"
+
+
+@pytest.mark.parametrize("mod_key", ["Control_L", "Control_R"])
+def test_both_hands_of_a_modifier_are_recognised(mod_key):
+    """T3 audit M3: only the _L variants were exercised, so dropping Control_R
+    from MOD_KEYSYMS left the suite green."""
+    e, _, _ = engine()
+    e.handle(press("o", ["Mod4"]))
+    e.handle(press(mod_key))
+    assert e.state == {"layer": "nav", "mod": "move"}
+    assert e.handle(press("h")) == ["move left"]
+
+
 def test_layer_binds_shadow_global_binds_while_a_layer_is_active():
     """i3 mode parity: in a mode, only that mode's binds are live. A global
     Mod4+h leaking through while nav is active would be a surprise."""
@@ -563,3 +599,32 @@ def test_socket_path_helper_is_per_display(tmp_path, monkeypatch):
     assert L.socket_path(":0") == tmp_path / "hotkeyd-0.sock"
     assert L.socket_path(":10.0") == tmp_path / "hotkeyd-10.sock"
     assert L.socket_path(":0") != L.socket_path(":10")
+
+
+def test_socket_path_falls_back_when_xdg_runtime_dir_is_unset(monkeypatch):
+    """T3 audit M8: the fallback was untested. A session with no
+    XDG_RUNTIME_DIR (some xrdp/proot starts) must still get a per-user path
+    rather than crashing or landing in the filesystem root."""
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    assert L.socket_path(":0") == Path(f"/run/user/{os.getuid()}/hotkeyd-0.sock")
+
+
+def test_a_dropped_line_is_resent_on_the_next_poll(sockpath):
+    """A state feed is last-value semantics: a client that missed the CURRENT
+    line must not stay stale forever. Fill the buffer so lines drop, then drain
+    and poll — the client must converge on the latest state."""
+    p = L.StatePublisher(sockpath)
+    try:
+        c = connect(sockpath)
+        p.poll()
+        for i in range(5000):                 # overflow the socket buffer
+            p.publish({"layer": "nav", "mod": str(i)})
+        p.publish({"layer": "default", "mod": None})
+        c.recv(1 << 20)                       # drain what fits
+        time.sleep(0.05)
+        p.poll()                              # resend pass
+        got = read_lines(c, 1, timeout=1.0)
+        assert got, "no resend after the client drained"
+        c.close()
+    finally:
+        p.close()
