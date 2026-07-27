@@ -144,6 +144,21 @@ else
     rm -f "$XSOCK"
 fi
 
+# --- stage 7: launcher lifecycle -------------------------------------------
+# Own file because it runs two Xvfb displays at once and drives real daemon
+# processes; kept behind this entry point so the post-merge gate stays one
+# command.
+echo "stage 7: launcher lifecycle"
+lout="$(bash "$HERE/test-launcher.sh" 2>&1)"
+lrc=$?
+printf '%s\n' "$lout" | sed -n 's/^  /    /p'
+lsummary="$(printf '%s' "$lout" | tail -1)"
+if [ "$lrc" -eq 0 ]; then
+    ok "launcher suite ($lsummary)"
+else
+    bad "launcher suite ($lsummary)"
+fi
+
 echo
 printf 'hotkeyd: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

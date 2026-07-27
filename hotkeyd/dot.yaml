@@ -1,0 +1,31 @@
+# hotkeyd — global keybinding daemon for X11 sessions (sp020, ft011).
+#
+# Owns the keybinding table outside i3: per-bind XGrabKey plus a persistent i3
+# IPC connection, so binds gain layers, held-modifier state, release triggers,
+# sequences and counts — none of which i3's bindsym table can express.
+#
+# NO LINKS. Every consumer runs the tree in place out of ~/.dotfiles/hotkeyd:
+# the i3 escape-hatch bind and both platform overlays call
+# ~/.dotfiles/hotkeyd/hotkeyd.sh directly. Linking a copy into ~/.config would
+# put a SECOND bind table on disk, and "which binds.py is the daemon actually
+# running" is not a question worth having during a keyboard outage.
+#
+# X11 only (native :0, xrdp :10). Sway is out of scope — no XGrabKey on Wayland.
+#
+# Dependency: python-xlib, per adr0015 condition 1 (an X-ecosystem binding with
+# working prior art in this repo — quickshell/qs-keymon.py uses the same one, so
+# on a machine that already has the quickshell dot this adds no new package).
+# xorg-server-xvfb is test-only: hotkeyd/test-hotkeyd.sh and
+# hotkeyd/test-launcher.sh drive throwaway displays rather than the caller's.
+linux:
+  installs:
+    cmd: |
+      {{#if (eq whoami.distro "Manjaro Linux")}}
+      sudo pacman -S --needed --noconfirm python-xlib xorg-server-xvfb
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux")}}
+      sudo pacman -S --needed --noconfirm python-xlib xorg-server-xvfb
+      {{/if}}
+      {{#if (eq whoami.distro "Arch Linux ARM")}}
+      sudo pacman -S --needed --noconfirm python-xlib xorg-server-xvfb
+      {{/if}}
