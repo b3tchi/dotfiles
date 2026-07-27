@@ -148,7 +148,104 @@ def main() -> int:
           "chord still fires after a keymap reset",
           f"regrabbed={changed}")
 
-    # -- 5: single instance --------------------------------------------------
+    # -- 5: the REAL Daemon, driven with REAL X events -----------------------
+    # These are the three defects the T4 audit found live. They are re-checked
+    # against the real composition (Daemon.pump + XAdapter), not a copy of it.
+    import layers as LZ                                   # noqa: PLC0415
+    runtime = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
+    pub = LZ.StatePublisher(runtime / "hotkeyd-live-check.sock")
+
+    class NullI3:
+        def command(self, cmd):
+            return True
+
+        def close(self):
+            pass
+
+    import binds as BT                                    # noqa: PLC0415
+    dae = H.Daemon(BT, d, pub, i3=NullI3())
+    dae._pending = []
+
+    def peek():
+        if dae._pending:
+            return dae._pending.pop(0)
+        return d.next_event() if d.pending_events() else None
+
+    def feed(keysym, kind="press", mods=()):
+        """Inject a real key and pump whatever the server delivers."""
+        code = code_for(d, keysym)
+        mod_codes = [code_for(d, m) for m in mods]
+        for mc in mod_codes:
+            xtest.fake_input(d, X.KeyPress, mc)
+        xtest.fake_input(d, X.KeyPress, code)
+        if kind == "press":
+            xtest.fake_input(d, X.KeyRelease, code)
+        for mc in reversed(mod_codes):
+            xtest.fake_input(d, X.KeyRelease, mc)
+        d.sync()
+        time.sleep(0.15)
+        out = []
+        while d.pending_events() or dae._pending:
+            ev = dae._pending.pop(0) if dae._pending else d.next_event()
+            out += dae.pump(ev, peek=peek)
+        return out
+
+    check("h" not in dae.grabs.chords,
+          "bare layer key is NOT grabbed in the default layer")
+    feed("o", mods=["Super_L"])
+    check(dae.engine.state["layer"] == "nav", "entered nav via a real keypress",
+          str(dae.engine.state))
+    check("h" in dae.grabs.chords, "entering nav grabbed its bare keys")
+    check("Control_L" in dae.grabs.chords,
+          "entering nav grabbed the sublayer modifier key")
+
+    acts = feed("h")
+    check(acts == ["focus left"], "bare h focuses in nav", str(acts))
+
+    # hold Ctrl for real, then tap h — the G2 case
+    xtest.fake_input(d, X.KeyPress, code_for(d, "Control_L"))
+    d.sync()
+    time.sleep(0.1)
+    while d.pending_events():
+        dae.pump(d.next_event(), peek=peek)
+    check(dae.engine.state["mod"] == "move",
+          "held Ctrl is observed as the move sublayer", str(dae.engine.state))
+    acts = feed("h", mods=[])
+    check(acts == ["move left"], "Ctrl+h MOVES instead of focusing", str(acts))
+
+    # exit while the modifier is still held — the T2 carry-forward risk, live
+    acts = feed("q")
+    check(dae.engine.state["layer"] == "default",
+          "q leaves the layer while Ctrl is still held",
+          str(dae.engine.state))
+    xtest.fake_input(d, X.KeyRelease, code_for(d, "Control_L"))
+    d.sync()
+    time.sleep(0.1)
+    while d.pending_events():
+        dae.pump(d.next_event(), peek=peek)
+    check("h" not in dae.grabs.chords,
+          "leaving the layer released its bare keys again")
+
+    # -- auto-repeat: the G3 case, measured on a real hold -------------------
+    feed("o", mods=["Super_L"])
+    hcode = code_for(d, "h")
+    xtest.fake_input(d, X.KeyPress, hcode)
+    d.sync()
+    time.sleep(1.2)                                    # let X auto-repeat run
+    xtest.fake_input(d, X.KeyRelease, hcode)
+    d.sync()
+    time.sleep(0.2)
+    fired = []
+    while d.pending_events() or dae._pending:
+        ev = dae._pending.pop(0) if dae._pending else d.next_event()
+        fired += dae.pump(ev, peek=peek)
+    check(len(fired) == 1,
+          "a held key fires ONCE despite the real auto-repeat stream",
+          f"{len(fired)} dispatches")
+    feed("q")
+    dae.close()
+
+    # -- 6: single instance --------------------------------------------------
     lock = H.lock_path()
     first = H.SingleInstance(lock)
     try:

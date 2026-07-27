@@ -76,7 +76,7 @@ def lock_path(display: str | None = None) -> Path:
     return _runtime_dir() / f"hotkeyd-{tag}.lock"
 
 
-def to_event(kind: str, keysym: str, state: int, _keymap=None) -> L.Event:
+def to_event(kind: str, keysym: str, state: int) -> L.Event:
     """Translate an X key event into the engine's X-agnostic Event.
 
     Lock bits are stripped: with NumLock on, `Ctrl+h` arrives with Mod2 set, and
@@ -171,7 +171,7 @@ class GrabManager:
         grab untouched, so SIGHUP reload never drops a grab mid-gesture.
         """
         wanted = list(dict.fromkeys(chords))
-        self.problems = [p for p in self.problems if False] or []
+        self.problems = []
         resolved: dict[str, tuple[int, int]] = {}
         for chord in wanted:
             r = self._resolve(chord)
@@ -317,20 +317,54 @@ def load_table(path: str | None):
     return mod
 
 
+# canonical modifier -> the keysyms that produce it, so a layer can grab the
+# modifier KEYS themselves. Without these grabs a Ctrl press inside a layer never
+# reaches the daemon, `_held` stays empty, and the move/resize sublayers are dead
+# in a real session while every unit test still passes.
+MOD_KEYSYMS_BY_NAME: dict[str, list[str]] = {}
+for _ks, _canon in L.MOD_KEYSYMS.items():
+    MOD_KEYSYMS_BY_NAME.setdefault(_canon, []).append(_ks)
+
+
+def global_chords(table) -> list[str]:
+    """What is grabbed in the default layer: the global binds, and nothing else.
+
+    Layer binds are deliberately NOT here. Grabbing nav's bare `h`/`Escape`/
+    `Return` permanently would swallow those keys from every application for as
+    long as the daemon runs — the keyboard layer must be invisible until a layer
+    is actually entered.
+    """
+    return list(dict.fromkeys(b.chord for b in table.BINDS))
+
+
+def layer_chords(table, name: str) -> list[str]:
+    """The extra chords a layer needs while it is ACTIVE: its bare keys, its exit
+    keys, its modifier-prefixed sublayer chords, and the modifier keys themselves
+    (so held-modifier state is observable at all)."""
+    layer = table.LAYERS[name]
+    out = [b.chord for b in layer.binds] + list(layer.exit_keys)
+    for mod in layer.mods.values():
+        canon = default_binds.MODIFIER_ALIASES.get(
+            str(mod.modifier).lower(), mod.modifier)
+        out += [f"{canon}+{b.chord}" for b in mod.binds]
+        out += MOD_KEYSYMS_BY_NAME.get(canon, [])
+    return list(dict.fromkeys(out))
+
+
+def chords_for(table, layer: str | None = None) -> list[str]:
+    """The grab set for the CURRENT state. Re-synced on every layer transition."""
+    out = global_chords(table)
+    if layer and layer != L.DEFAULT_LAYER and layer in table.LAYERS:
+        out = out + layer_chords(table, layer)
+    return list(dict.fromkeys(out))
+
+
 def all_chords(table) -> list[str]:
-    """Every chord the daemon must grab. Layer binds are NOT grabbed: while a
-    layer is active the daemon already receives its keys through the layer's
-    entry chord... except it does not — X delivers only grabbed keys, so a layer
-    needs its bare keys grabbed too. Hence layer binds and exit keys are folded
-    in here, deduplicated by the global table's own chords."""
-    out = [b.chord for b in table.BINDS]
-    for layer in table.LAYERS.values():
-        out += [b.chord for b in layer.binds]
-        out += list(layer.exit_keys)
-        for mod in layer.mods.values():
-            canon = default_binds.MODIFIER_ALIASES.get(
-                str(mod.modifier).lower(), mod.modifier)
-            out += [f"{canon}+{b.chord}" for b in mod.binds]
+    """Every chord any state could grab — used for reporting by --check, not as
+    a runtime grab set (see chords_for)."""
+    out = global_chords(table)
+    for name in table.LAYERS:
+        out += layer_chords(table, name)
     return list(dict.fromkeys(out))
 
 
@@ -355,6 +389,106 @@ def check(table) -> int:
 # daemon
 # --------------------------------------------------------------------------
 
+class XAdapter:
+    """Adapts python-xlib to the GrabManager's four-method interface, and turns
+    an async X error into the synchronous GrabRefused the manager degrades on.
+    Defined at module scope (not inside the run loop) so the live checks can
+    exercise the REAL adapter instead of a copy of it."""
+
+    def __init__(self, d, root):
+        self.d, self.root = d, root
+
+    def keysym_to_keycode(self, name):
+        from Xlib import XK                              # noqa: PLC0415
+        ks = XK.string_to_keysym(name)
+        return self.d.keysym_to_keycode(ks) if ks else 0
+
+    def grab_key(self, code, mask):
+        from Xlib import X                               # noqa: PLC0415
+        errs = []
+        self.root.grab_key(code, mask, 1, X.GrabModeAsync, X.GrabModeAsync,
+                           onerror=lambda err, req: errs.append(err))
+        self.d.sync()
+        if errs:
+            raise GrabRefused(type(errs[0]).__name__)
+
+    def ungrab_key(self, code, mask):
+        self.root.ungrab_key(code, mask)
+
+    def sync(self):
+        self.d.sync()
+
+
+class Daemon:
+    """The whole thing wired together: grabs -> engine -> dispatch + state feed.
+
+    `pump()` is the unit of work and is public so the live checks can drive the
+    REAL composition with REAL X events, rather than re-implementing the loop
+    (and then testing the re-implementation).
+    """
+
+    def __init__(self, table, d, publisher, i3=None):
+        self.table = table
+        self.d = d
+        self.pub = publisher
+        self.i3 = i3 if i3 is not None else I3Client()
+        self.grabs = GrabManager(XAdapter(d, d.screen().root))
+        self.engine = L.LayerEngine(table.BINDS, table.LAYERS,
+                                    publisher=publisher)
+        self.grabs.sync_binds(chords_for(table))
+
+    def resync_grabs(self):
+        self.grabs.sync_binds(chords_for(self.table,
+                                         self.engine.state["layer"]))
+
+    def pump(self, ev, peek=None) -> list:
+        """Handle one X event. `peek` returns the next queued event or None and
+        exists for auto-repeat coalescing. Returns the actions dispatched."""
+        from Xlib import X                               # noqa: PLC0415
+
+        if ev.type == X.MappingNotify:
+            self.d.refresh_keyboard_mapping(ev)
+            self.grabs.on_mapping_notify()
+            return []
+        if ev.type not in (X.KeyPress, X.KeyRelease):
+            return []
+
+        # Auto-repeat arrives as RELEASE+PRESS pairs sharing one timestamp:
+        # python-xlib exposes no XKB binding, so detectable auto-repeat cannot be
+        # switched on and the pairs must be coalesced here. Without this the
+        # engine sees a genuine release between every repeat, so nothing is ever
+        # suppressed and on_release binds fire ~15x a second while a key is held.
+        # Measured on Xvfb: a 1.5 s hold delivers 22 press + 22 release.
+        if ev.type == X.KeyRelease and peek is not None:
+            nxt = peek()
+            if nxt is not None:
+                if (nxt.type == X.KeyPress and nxt.detail == ev.detail
+                        and nxt.time == ev.time):
+                    return []           # synthetic pair: swallow both
+                self._pending.append(nxt)
+
+        name = self.grabs.keysym_for(ev.detail) or _keysym_name(self.d, ev)
+        if name is None:
+            return []
+        kind = "press" if ev.type == X.KeyPress else "release"
+        before = self.engine.state["layer"]
+        actions = self.engine.handle(to_event(kind, name, ev.state))
+        for action in actions:
+            _dispatch(self.i3, action)
+        if self.engine.state["layer"] != before:
+            # A layer's bare keys exist only while that layer is active, so they
+            # never shadow an application's keyboard outside it. sync_binds moves
+            # only the difference, so nothing is dropped mid-gesture.
+            self.resync_grabs()
+        return actions
+
+    _pending: list = []
+
+    def close(self):
+        self.pub.close()
+        self.i3.close()
+
+
 def run_daemon(table, display_name: str | None) -> int:
     """Grab, dispatch, publish. Returns a process exit code.
 
@@ -362,56 +496,32 @@ def run_daemon(table, display_name: str | None) -> int:
     launcher (or the i3 escape-hatch bind) restarts it, rather than spinning
     against a server that is gone.
     """
-    from Xlib import X, XK, display as xdisplay        # noqa: PLC0415
-    from Xlib.error import ConnectionClosedError       # noqa: PLC0415
+    import select                                        # noqa: PLC0415
+    from Xlib import X, display as xdisplay              # noqa: PLC0415
+    from Xlib.error import ConnectionClosedError         # noqa: PLC0415
 
     disp_name = display_name or os.environ.get("DISPLAY", ":0")
     inst = SingleInstance(lock_path(disp_name))
     d = xdisplay.Display(disp_name)
-    root = d.screen().root
-
-    class XAdapter:
-        """Adapts python-xlib to the GrabManager's four-method interface, and
-        turns an async X error into the synchronous GrabRefused the manager
-        degrades on."""
-
-        def __init__(self, d, root):
-            self.d, self.root = d, root
-
-        def keysym_to_keycode(self, name):
-            ks = XK.string_to_keysym(name)
-            return self.d.keysym_to_keycode(ks) if ks else 0
-
-        def grab_key(self, code, mask):
-            errs = []
-            self.root.grab_key(code, mask, 1, X.GrabModeAsync, X.GrabModeAsync,
-                               onerror=lambda err, req: errs.append(err))
-            self.d.sync()
-            if errs:
-                raise GrabRefused(type(errs[0]).__name__)
-
-        def ungrab_key(self, code, mask):
-            self.root.ungrab_key(code, mask)
-
-        def sync(self):
-            self.d.sync()
-
-    grabs = GrabManager(XAdapter(d, root))
-    grabs.sync_binds(all_chords(table))
-    for p in grabs.problems:
-        print(f"hotkeyd: {p}", file=sys.stderr)
-
     pub = L.StatePublisher(L.socket_path(disp_name))
-    engine = L.LayerEngine(table.BINDS, table.LAYERS, publisher=pub)
-    i3 = I3Client()
+    dae = Daemon(table, d, pub)
+    dae._pending = []
+    for p in dae.grabs.problems:
+        print(f"hotkeyd: {p}", file=sys.stderr)
 
     reload_wanted = {"flag": False}
     stop = {"flag": False}
-    signal.signal(signal.SIGHUP, lambda *_: reload_wanted.__setitem__("flag", True))
+    signal.signal(signal.SIGHUP,
+                  lambda *_: reload_wanted.__setitem__("flag", True))
     signal.signal(signal.SIGTERM, lambda *_: stop.__setitem__("flag", True))
     signal.signal(signal.SIGINT, lambda *_: stop.__setitem__("flag", True))
 
-    print(f"hotkeyd: {len(grabs.chords)} chords grabbed on {disp_name}",
+    def peek():
+        if dae._pending:
+            return dae._pending.pop(0)
+        return d.next_event() if d.pending_events() else None
+
+    print(f"hotkeyd: {len(dae.grabs.chords)} chords grabbed on {disp_name}",
           file=sys.stderr, flush=True)
     code = 0
     try:
@@ -421,44 +531,29 @@ def run_daemon(table, display_name: str | None) -> int:
                 reload_wanted["flag"] = False
                 try:
                     fresh = load_table(getattr(table, "__file__", None))
-                    grabs.sync_binds(all_chords(fresh))
-                    engine = L.LayerEngine(fresh.BINDS, fresh.LAYERS,
-                                           publisher=pub)
+                    dae.table = fresh
+                    dae.engine = L.LayerEngine(fresh.BINDS, fresh.LAYERS,
+                                               publisher=pub)
+                    dae.resync_grabs()
                     print("hotkeyd: reloaded", file=sys.stderr, flush=True)
                 except Exception as e:                   # noqa: BLE001
                     print(f"hotkeyd: reload failed, keeping the old table: {e}",
                           file=sys.stderr, flush=True)
             try:
-                if not d.pending_events():
-                    # Block on the X fd, but wake often enough to serve new
-                    # socket clients and honour signals.
-                    import select                        # noqa: PLC0415
+                if dae._pending:
+                    ev = dae._pending.pop(0)
+                elif not d.pending_events():
                     select.select([d.fileno()], [], [], 0.25)
                     continue
-                ev = d.next_event()
+                else:
+                    ev = d.next_event()
+                dae.pump(ev, peek=peek)
             except ConnectionClosedError:
                 print("hotkeyd: X connection lost, exiting", file=sys.stderr)
                 code = 1
                 break
-
-            if ev.type == X.MappingNotify:
-                d.refresh_keyboard_mapping(ev)
-                if grabs.on_mapping_notify():
-                    print("hotkeyd: keymap changed, re-grabbed",
-                          file=sys.stderr, flush=True)
-                continue
-            if ev.type not in (X.KeyPress, X.KeyRelease):
-                continue
-
-            keysym_name = grabs.keysym_for(ev.detail) or _keysym_name(d, ev)
-            if keysym_name is None:
-                continue
-            kind = "press" if ev.type == X.KeyPress else "release"
-            for action in engine.handle(to_event(kind, keysym_name, ev.state)):
-                _dispatch(i3, action)
     finally:
-        pub.close()
-        i3.close()
+        dae.close()
         inst.release()
     return code
 

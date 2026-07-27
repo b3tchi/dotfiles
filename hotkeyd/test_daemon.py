@@ -106,7 +106,7 @@ def test_chords_resolve_through_the_live_keymap_not_hardcoded_codes():
 def test_a_keysym_absent_from_the_keymap_is_reported_not_crashed():
     d = FakeDisplay(keymap={"o": 32})
     g = H.GrabManager(d)
-    g.sync_binds(["Mod4+nosuchkey"] if False else ["Mod4+F10"])
+    g.sync_binds(["Mod4+F10"])
     assert any("F10" in p for p in g.problems), g.problems
     assert d.grabs == [], "must not grab keycode 0"
 
@@ -395,37 +395,132 @@ def test_lock_path_is_per_display(tmp_path, monkeypatch):
 # the grab set — X delivers only GRABBED keys
 # --------------------------------------------------------------------------
 
-def test_layer_binds_are_in_the_grab_set():
-    """Nothing asserted this, and dropping layer binds from all_chords left the
-    whole suite green — while making nav mode completely dead in a real session,
-    since X delivers only the keys you actually grabbed."""
+def test_bare_layer_keys_are_not_grabbed_in_the_default_layer():
+    """G1 from the T4 audit. Grabbing nav's bare `h`/`Escape`/`Return` at startup
+    swallows those keys from EVERY application for as long as the daemon runs —
+    measured live: a focused app got the injected `h` 1/1 without the daemon and
+    0/1 with it. The layer's keys exist only while the layer does."""
+    default_set = H.chords_for(B)
+    for key in ("h", "j", "k", "l", "Left", "Escape", "Return", "q"):
+        assert key not in default_set, \
+            f"{key!r} grabbed in the default layer — eaten from every app"
+    assert "Mod4+o" in default_set, "the layer entry chord must still be grabbed"
+
+
+def test_entering_a_layer_grabs_its_bare_keys():
+    chords = H.chords_for(B, "nav")
+    assert "h" in chords, "bare nav keys not grabbed while nav is active"
+    assert "Left" in chords
+    assert "Mod4+o" in chords, "global binds stay grabbed inside a layer"
+
+
+def test_a_layer_grabs_the_modifier_keys_its_sublayers_need():
+    """G2 from the T4 audit. Modifier PREFIX keys were never grabbed, so a Ctrl
+    press inside nav never reached the daemon, `_held` stayed empty, and Ctrl+h
+    dispatched `focus left` instead of `move left` — with all unit tests green."""
+    chords = H.chords_for(B, "nav")
+    for keysym in ("Control_L", "Control_R", "Alt_L", "Alt_R"):
+        assert keysym in chords, f"{keysym} not grabbed — sublayer is dead"
+
+
+def test_modifier_keys_are_not_grabbed_outside_a_layer():
+    assert "Control_L" not in H.chords_for(B)
+
+
+def test_layer_binds_are_in_the_all_chords_report():
     chords = H.all_chords(B)
-    assert "h" in chords, "bare nav keys are not grabbed — the layer is dead"
+    assert "h" in chords
     assert "Left" in chords
 
 
 def test_layer_exit_keys_are_in_the_grab_set():
     """A layer you can enter but not leave is the dotfiles-ux1 failure class."""
-    chords = H.all_chords(B)
+    chords = H.chords_for(B, "nav")
     for k in B.LAYERS["nav"].exit_keys:
         assert k in chords, f"exit key {k!r} not grabbed — layer is a trap"
 
 
 def test_modifier_sublayer_chords_are_grabbed_with_their_modifier():
-    chords = H.all_chords(B)
+    chords = H.chords_for(B, "nav")
     assert "Ctrl+h" in chords, "nav move layer not grabbed"
     assert "Mod1+h" in chords, "nav resize layer not grabbed"
 
 
 def test_global_binds_are_in_the_grab_set():
-    chords = H.all_chords(B)
+    chords = H.chords_for(B)
     assert "Mod4+o" in chords
     assert "Mod4+1" in chords
 
 
 def test_the_grab_set_is_deduplicated():
-    chords = H.all_chords(B)
-    assert len(chords) == len(set(chords))
+    for chords in (H.chords_for(B), H.chords_for(B, "nav"), H.all_chords(B)):
+        assert len(chords) == len(set(chords))
+
+
+# --------------------------------------------------------------------------
+# reviewer-battery survivors: multi-modifier masks, keysym_for, Run dispatch
+# --------------------------------------------------------------------------
+
+def test_a_two_modifier_chord_grabs_the_combined_mask():
+    """M4: mask assembly `|=` -> `=` survived because no test grabbed a chord
+    with two modifiers — ~25 shipped chords would have grabbed the wrong mask."""
+    d = FakeDisplay(keymap={"1": 10, "Super_L": 133, "Control_L": 37})
+    H.GrabManager(d).sync_binds(["Mod4+Ctrl+1"])
+    want = H.MOD4 | H.CTRL
+    assert grabs_for(d, 10) == sorted([want, want | H.LOCK, want | H.MOD2,
+                                       want | H.LOCK | H.MOD2])
+
+
+def test_a_three_modifier_chord_grabs_every_bit():
+    d = FakeDisplay(keymap={"q": 24})
+    H.GrabManager(d).sync_binds(["Mod4+Ctrl+Shift+q"])
+    want = H.MOD4 | H.CTRL | H.SHIFT
+    assert (24, want) in d.grabs
+
+
+def test_keysym_for_maps_a_grabbed_keycode_back_to_its_name():
+    """M1: deleting keysym_for survived, but python-xlib's keysym_to_string
+    returns None for arrows and F-keys — so those binds would go dead."""
+    d = FakeDisplay()
+    g = H.GrabManager(d)
+    g.sync_binds(["Mod4+o", "F10"])
+    assert g.keysym_for(32) == "o"
+    assert g.keysym_for(76) == "F10"
+    assert g.keysym_for(9999) is None
+
+
+def test_run_actions_are_spawned_not_sent_to_i3(monkeypatch):
+    """M10: the Run branch of _dispatch had zero coverage — deleting it made all
+    24 shipped run() workspace binds silently no-op."""
+    spawned = []
+    monkeypatch.setattr(H.subprocess, "Popen",
+                        lambda cmd, **kw: spawned.append(cmd))
+    sent = []
+
+    class FakeI3Client:
+        def command(self, c):
+            sent.append(c)
+            return True
+
+    H._dispatch(FakeI3Client(), B.run("ws-switch.nu 3"))
+    assert spawned == ["ws-switch.nu 3"]
+    assert sent == [], "a run() action must not be sent to i3 as a command"
+
+
+def test_i3_command_actions_go_to_i3_not_a_shell(monkeypatch):
+    spawned = []
+    monkeypatch.setattr(H.subprocess, "Popen",
+                        lambda cmd, **kw: spawned.append(cmd))
+    sent = []
+
+    class FakeI3Client:
+        def command(self, c):
+            sent.append(c)
+            return True
+
+    H._dispatch(FakeI3Client(), "focus left")
+    assert sent == ["focus left"]
+    assert spawned == []
 
 
 # --------------------------------------------------------------------------
@@ -433,7 +528,7 @@ def test_the_grab_set_is_deduplicated():
 # --------------------------------------------------------------------------
 
 def test_x_state_mask_becomes_canonical_modifier_names():
-    ev = H.to_event("press", "h", H.MOD4 | H.CTRL, {"h": 43})
+    ev = H.to_event("press", "h", H.MOD4 | H.CTRL)
     assert ev.kind == "press"
     assert ev.key == "h"
     assert ev.mods == frozenset({"Mod4", "Ctrl"})
@@ -443,5 +538,5 @@ def test_lock_bits_are_stripped_from_the_reported_modifiers():
     """NumLock and CapsLock ride in the state mask but are not layer modifiers;
     leaving them in would make Ctrl+h with NumLock on look like a different
     chord than Ctrl+h without it."""
-    ev = H.to_event("press", "h", H.CTRL | H.MOD2 | H.LOCK, {"h": 43})
+    ev = H.to_event("press", "h", H.CTRL | H.MOD2 | H.LOCK)
     assert ev.mods == frozenset({"Ctrl"})
