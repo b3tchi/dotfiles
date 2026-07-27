@@ -97,10 +97,15 @@ case "$VERB" in
             sleep 0.1
         done
         kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
-        # SIGTERM unlinks the socket on the way out; a SIGKILLed predecessor
-        # leaves it behind, so sweep it here too. The daemon reaps a stale socket
-        # on startup as well — belt and braces, because a leftover socket is the
-        # thing that makes a restart fail.
+        # Reached on EVERY stop that found a daemon (the line above is a
+        # compound `&&`, not a branch), but only load-bearing on the wedged ->
+        # SIGKILL escalation, where the daemon never got to run its own
+        # cleanup: a graceful SIGTERM unlinks the socket itself, so this is a
+        # no-op there. A daemon already dead when stop was called exits at the
+        # "not running" branch above and never reaches here; THAT socket is
+        # reaped by the next daemon's own startup probe (layers.py
+        # _reap_stale_socket), which is what makes a restart after a SIGKILL
+        # work at all.
         rm -f "$SOCK"
         printf 'hotkeyd: stopped on %s\n' "$DPY_BASE"
         ;;
