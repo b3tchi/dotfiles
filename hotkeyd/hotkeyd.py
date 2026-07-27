@@ -435,10 +435,27 @@ def global_chords(table) -> list[str]:
 
 def layer_chords(table, name: str) -> list[str]:
     """The extra chords a layer needs while it is ACTIVE: its bare keys, its exit
-    keys, its modifier-prefixed sublayer chords, and the modifier keys themselves
-    (so held-modifier state is observable at all)."""
+    keys (bare AND Shift-held), its modifier-prefixed sublayer chords, and the
+    modifier keys themselves (so held-modifier state is observable at all).
+
+    Exit keys get an explicit `Shift+` variant because Shift is not a layer
+    modifier. Holding Ctrl or Alt starts an ACTIVE grab — their keysyms are
+    grabbed below — which delivers every following key here; nothing does that
+    for Shift, and a bare `q` grab has mask 0 while `Shift+q` arrives with
+    ShiftMask, matching no grab. The engine would leave the layer correctly (it
+    matches exit keys on the keysym alone, ignoring modifiers) — the event just
+    never reaches it, so the key goes to the focused window and the layer
+    sticks. i3's nav mode spelt `Shift+q` out for the same reason.
+
+    Deliberately NOT generalised to the layer's other binds: grabbing `Shift+h`
+    would take a chord the daemon has no meaning for, and grabbing
+    `Shift_L`/`Shift_R` to get an active grab would swallow every capital
+    letter — ruinous on :10, where xrdp synthesises Shift around every
+    character it sends.
+    """
     layer = table.LAYERS[name]
     out = [b.chord for b in layer.binds] + list(layer.exit_keys)
+    out += [f"Shift+{k}" for k in layer.exit_keys]
     for mod in layer.mods.values():
         canon = default_binds.MODIFIER_ALIASES.get(
             str(mod.modifier).lower(), mod.modifier)

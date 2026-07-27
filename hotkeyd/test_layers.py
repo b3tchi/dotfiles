@@ -275,6 +275,50 @@ def test_exit_key_works_while_a_layer_modifier_is_still_held(mod_key, label):
     assert e.state == {"layer": "default", "mod": None}
 
 
+def test_exit_key_works_while_shift_is_held():
+    """Shift is not a layer modifier, so unlike Ctrl/Alt nothing establishes an
+    active grab that routes the key here — the grab set carries an explicit
+    `Shift+<exit key>` (hotkeyd.layer_chords) to get the event delivered. This
+    asserts the other half: once delivered, the engine leaves the layer
+    regardless of ShiftMask riding in ev.mods.
+
+    Scope, stated so it is not over-read: this drives LayerEngine.handle with a
+    keysym string directly. It does NOT exercise keycode->keysym resolution and
+    so does not pin which shift level that lookup uses. The end-to-end path is
+    covered only by live_check.py, which presses a real Shift_L before tapping
+    the exit key. (In production the name comes from GrabManager.keysym_for,
+    which maps the keycode back through the grabbed chord and is
+    shift-level-independent by construction; `_keysym_name` is the fallback for
+    keycodes no grab claims.)
+    """
+    e, pub, _ = engine()
+    e.handle(press("o", ["Mod4"]))
+    assert e.state == {"layer": "nav", "mod": None}
+    e.handle(press("q", ["Shift"]))
+    assert e.state == {"layer": "default", "mod": None}
+    assert pub.lines[-1] == {"layer": "default", "mod": None}
+
+
+def test_shift_held_exit_works_from_inside_a_modifier_sublayer():
+    """The :10 case: xrdp synthesises Shift around characters it sends, so a
+    Shift-flagged exit can arrive while Ctrl or Alt is genuinely held."""
+    e, pub, _ = engine()
+    e.handle(press("o", ["Mod4"]))
+    e.handle(press("Control_L"))
+    assert e.state == {"layer": "nav", "mod": "move"}
+    e.handle(press("q", ["Shift", "Ctrl"]))
+    assert e.state == {"layer": "default", "mod": None}
+
+
+def test_shift_does_not_become_a_layer_modifier():
+    """Guard on the scope of the fix: Shift must not start publishing itself as
+    a held mod, or the bar paints a sublayer that has no binds behind it."""
+    e, pub, _ = engine()
+    e.handle(press("o", ["Mod4"]))
+    e.handle(press("Shift_L"))
+    assert e.state == {"layer": "nav", "mod": None}
+
+
 def test_layer_exit_while_a_modifier_is_held_publishes_default_not_a_stuck_mod():
     """Edge case from the spec: the state feed must not strand the bar showing
     'nav MOVE' after the layer is gone."""

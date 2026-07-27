@@ -226,6 +226,37 @@ def main() -> int:
     check("h" not in dae.grabs.chords,
           "leaving the layer released its bare keys again")
 
+    # -- Shift-held exit: the one modifier nothing routes for us -------------
+    # Ctrl/Alt work because their keysyms are grabbed, so holding one starts an
+    # ACTIVE grab that delivers every following key here. Shift is not a layer
+    # modifier and gets no such grab, so `Shift+q` has to be a passive grab in
+    # its own right or the key goes to the focused window and the layer sticks.
+    # Asserted on a real X grab set, not on the chord list, because the unit
+    # test cannot tell a requested grab from an obtained one.
+    feed("o", mods=["Super_L"])
+    _exits = list(BT.LAYERS["nav"].exit_keys)
+    _missing = [k for k in _exits if f"Shift+{k}" not in dae.grabs.chords]
+    check(not _missing,
+          f"entering nav OBTAINED a Shift-held grab for every exit key "
+          f"({', '.join(_exits)})",
+          f"missing: {_missing}" if _missing else "")
+    shift_code = code_for(d, "Shift_L")
+    xtest.fake_input(d, X.KeyPress, shift_code)
+    d.sync()
+    time.sleep(0.1)
+    while d.pending_events():
+        dae.pump(d.next_event(), peek=peek)
+    check(dae.engine.state == {"layer": "nav", "mod": None},
+          "held Shift does NOT become a sublayer", str(dae.engine.state))
+    feed("q", mods=[])
+    check(dae.engine.state["layer"] == "default",
+          "Shift+q leaves the layer", str(dae.engine.state))
+    xtest.fake_input(d, X.KeyRelease, shift_code)
+    d.sync()
+    time.sleep(0.1)
+    while d.pending_events():
+        dae.pump(d.next_event(), peek=peek)
+
     # -- auto-repeat: the G3 case, measured on a real hold -------------------
     feed("o", mods=["Super_L"])
     hcode = code_for(d, "h")

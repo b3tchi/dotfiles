@@ -440,6 +440,34 @@ def test_layer_exit_keys_are_in_the_grab_set():
         assert k in chords, f"exit key {k!r} not grabbed — layer is a trap"
 
 
+def test_exit_keys_are_also_grabbed_with_shift_held():
+    """Shift is not a layer modifier, so no active grab routes it to us: a bare
+    `q` grab has mask 0 and `Shift+q` arrives with ShiftMask, matching nothing.
+    The layer engine would exit fine (it matches exit keys on the keysym alone,
+    layers.py:205) — the event just never reaches it, so the key goes to the
+    focused window and the layer is stuck. i3's nav mode bound `Shift+q`
+    explicitly (i3/config.common:445); parity needs the grab.
+
+    Exit keys only. Grabbing Shift+ variants of the layer's movement binds would
+    take chords the daemon has no meaning for, and grabbing Shift_L/R outright
+    would swallow every capital letter — fatal on :10, where xrdp synthesises
+    Shift around every character it sends.
+    """
+    chords = H.chords_for(B, "nav")
+    for k in B.LAYERS["nav"].exit_keys:
+        assert f"Shift+{k}" in chords, (
+            f"exit key {k!r} not grabbed with Shift held — "
+            f"layer cannot be left one-handed while Shift is down")
+
+
+def test_shift_variants_are_not_added_to_ordinary_layer_binds():
+    """The Shift grab is scoped to exit keys. Widening it would silently take
+    chords from applications for as long as a layer is active."""
+    chords = H.chords_for(B, "nav")
+    assert "Shift+h" not in chords
+    assert "Ctrl+Shift+h" not in chords
+
+
 def test_modifier_sublayer_chords_are_grabbed_with_their_modifier():
     chords = H.chords_for(B, "nav")
     assert "Ctrl+h" in chords, "nav move layer not grabbed"
