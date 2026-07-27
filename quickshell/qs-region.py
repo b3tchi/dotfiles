@@ -4,8 +4,13 @@
 Select a rectangle on the LIVE desktop; the crop is saved to
 ~/Pictures/screenshots AND the image itself is put on the clipboard
 (image/png) -- Ctrl+V into an image-aware target (Claude Code CLI, a chat
-box, an editor) pastes the picture directly. Drag, or tap two corners. `w`
-grabs the whole screen, `Esc` (or right-click) cancels.
+box, an editor) pastes the picture directly. Drag, or tap two corners for a
+region. `w` grabs the current (i3-focused) window; `d` grabs the whole
+desktop; `Esc` (or right-click) cancels.
+
+`w` used to mean "whole screen" — moved to `d` ("desktop") when window
+capture was added, because a single window is the more common quick
+screenshot and deserves the easy-to-reach letter.
 
 Was file-PATH-as-text (like a tmux copy) until the clip-history image
 feature landed; switched to the image itself once pasting a real picture
@@ -50,6 +55,7 @@ Three traps, each of which cost real debugging time — do not "simplify" them:
 
 Launched by qs-screenshot.sh. Usage: qs-region.py [--whole]
 """
+import json
 import os
 import subprocess
 import sys
@@ -103,6 +109,40 @@ def normalise(x0, y0, x1, y1, sw, sh):
 def is_selection(w, h):
     """A real drag, or a stray click? Guards against writing a 0x0 PNG."""
     return w >= MIN_SEL and h >= MIN_SEL
+
+
+def focused_window_rect():
+    """The i3-focused window's (x, y, w, h) in root coordinates, or None if
+    nothing is focused (an empty workspace).
+
+    Read from the i3 TREE, not X11 WM hints (_NET_ACTIVE_WINDOW) -- the same
+    source of truth qs-focus-border.py's border overlay uses. This overlay's
+    own window is an override-redirect POPUP, so it is never part of the i3
+    tree and never shows up as "focused" here regardless of whether it is
+    still mapped when this runs -- no need to hide it first, unlike _shoot's
+    scrot capture, which must never grab the outline itself.
+    """
+    tree = json.loads(
+        subprocess.check_output(['i3-msg', '-t', 'get_tree']).decode())
+
+    def walk(node):
+        if node.get('focused') and node.get('window'):
+            return node
+        for child in node.get('nodes', []) + node.get('floating_nodes', []):
+            found = walk(child)
+            if found:
+                return found
+        return None
+
+    leaf = walk(tree)
+    if leaf is None:
+        return None
+    r = leaf.get('rect', {})
+    x, y = r.get('x', 0), r.get('y', 0)
+    w, h = r.get('width', 0), r.get('height', 0)
+    if w <= 0 or h <= 0:
+        return None
+    return x, y, w, h
 
 
 def shot_path(outdir=OUTDIR):
@@ -250,10 +290,26 @@ class Region:
         if e.keyval in (Gdk.KEY_Escape, Gdk.KEY_q, Gdk.KEY_Q):
             self.cancel()
         elif e.keyval in (Gdk.KEY_w, Gdk.KEY_W):
+            self._shoot_window()
+        elif e.keyval in (Gdk.KEY_d, Gdk.KEY_D):
             self._shoot(0, 0, self.W, self.H)
         return True
 
     # ── exits ────────────────────────────────────────────────────────────
+    def _shoot_window(self):
+        """`w`: capture the i3-focused window's own rect instead of a
+        region or the whole screen. focused_window_rect() reads the i3
+        tree, which this overlay never appears in (see its own docstring),
+        so there is no need to hide the overlay before asking — only
+        _shoot's actual scrot capture has to happen after hiding."""
+        rect = focused_window_rect()
+        if rect is None:
+            print('qs-region: no focused window to capture', file=sys.stderr)
+            self.status = 1
+            Gtk.main_quit()
+            return
+        self._shoot(*rect)
+
     def _shoot(self, x, y, w, h):
         """Drop the overlay, THEN capture — so the outline is never in the
         shot, and nothing was captured up front if the user cancels."""
