@@ -106,8 +106,22 @@ handle_event() {
   has_target 'image/bmp' || return 0
   has_target 'image/png' && return 0   # already visible to png readers
 
-  timeout "$T" env DISPLAY="$DPY" xclip -selection clipboard -t image/bmp -o \
-    > "$BMP" 2>/dev/null 9>&-
+  # chansrv is known-flaky (clip-win-bridge.sh header, upstream #2596):
+  # TARGETS can advertise image/bmp while the channel is transiently
+  # stalled, serving nothing. clipnotify gives this event exactly one
+  # shot — unlike clip-store.sh's poll loop, there is no "try again next
+  # cycle" — so a few quick retries absorb the stall inline instead of
+  # losing the paste until the next ownership change (which, for a
+  # single persistent chansrv owner across several Windows-side copies,
+  # may not come again this session).
+  tries=0
+  while [ "$tries" -lt 5 ]; do
+    timeout "$T" env DISPLAY="$DPY" xclip -selection clipboard -t image/bmp -o \
+      > "$BMP" 2>/dev/null 9>&-
+    [ -s "$BMP" ] && break
+    tries=$((tries + 1))
+    sleep 0.3 9>&-
+  done
   [ -s "$BMP" ] || { rm -f "$BMP"; return 0; }
 
   # TOCTOU re-check — owner may have changed while we read the payload.
@@ -127,6 +141,13 @@ handle_event() {
     2>/dev/null 9>&-
   rm -f "$PNG"
 }
+
+# Check the CURRENT selection once before waiting for the next change —
+# clipnotify only fires on ownership change, so a (re)start with an
+# already-pasted image/bmp-only selection sitting there (loop crashed and
+# was restarted, or an i3 reload raced a live paste) would otherwise sit
+# invisible until the next Windows-side copy.
+handle_event
 
 # Same pre-spawn-before-handling shape as clip-store.sh: the next clipnotify
 # watch is standing BEFORE handle_event runs, shrinking the unsubscribed
