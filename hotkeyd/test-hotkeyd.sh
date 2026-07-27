@@ -11,6 +11,16 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PASS=0
 FAIL=0
 
+# No .pyc files. Python validates a cached module by (source mtime, size) with
+# ONE-SECOND granularity, so editing binds.py within the same second that its
+# bytecode was written makes the stale cache look fresh — and the suite then
+# tests the previous version of the code while reporting on the current one.
+# Hit during this task's own mutation testing: a restored file kept running the
+# mutant. A test suite that can silently grade the wrong source is worse than
+# no suite, and the cache buys nothing here.
+export PYTHONDONTWRITEBYTECODE=1
+rm -rf "$HERE/__pycache__"
+
 ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; PASS=$((PASS + 1)); }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; FAIL=$((FAIL + 1)); }
 
