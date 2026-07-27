@@ -275,6 +275,58 @@ esac
     && ok "and status still exits 1 while panicked (unchanged for callers)" \
     || bad "status exit code moved to $rc while panicked"
 
+# --- 5b: CONTESTED — a daemon ALIVE behind the latch (dotfiles-hwds.21) -------
+# The latch is not self-enforcing, and the .19 argument that "a latched session
+# has no daemon by construction" is overstated. Two reachable paths end with
+# daemon + link:
+#
+#   1. hotkeyd.py invoked directly bypasses the launcher's latch check entirely —
+#      and daemon_pid() is DELIBERATELY written to see such a daemon, so the repo
+#      already treats a hand-started run as expected usage;
+#   2. panic stops daemons and only THEN links, and `start` has its own window
+#      between reading the link and the spawn completing. An i3 `exec_always`
+#      firing in either window rearms one display behind the fallback — which is
+#      why arming autostart widened this.
+#
+# That end state is precisely the contested state the whole panic design exists
+# to prevent: two X clients holding overlapping chords. Reporting it as a healthy
+# "running" at exit 0 is a worse diagnostic failure than the bare "not running"
+# .19 fixed, because it tells the operator to stop looking.
+echo "panic: status in the CONTESTED state (daemon alive behind the latch)"
+env -u I3SOCK DISPLAY="$XA" setsid "$HERE/hotkeyd.py" \
+    --display "$XA" --binds "$HOTKEYD_BINDS" >/dev/null 2>&1 &
+sleep 1
+[ "$(daemons_on "$XA")" = 1 ] \
+    && ok "a hand-started daemon runs behind the fallback link" \
+    || bad "setup: could not hand-start a daemon behind the link"
+
+out="$(DISPLAY="$XA" "$HERE/hotkeyd.sh" status "$XA" 2>&1)"; rc=$?
+case "$out" in
+    *CONTESTED*"$LINK"*panic*)
+        ok "status names the CONTESTED state, the link and the cure" ;;
+    *)  bad "status reported a contested session as healthy: $out" ;;
+esac
+# 4 specifically. Not 0 — that is the bug, "healthy" for the one state the
+# design forbids. Not 1 either: 1 means "no daemon" and callers read it that way
+# (test-launcher.sh asserts it), while here there IS one. 4 is already the
+# launcher's "the panic latch is set" code, which `start` returns for the same
+# reason, so the latch has ONE code across the launcher.
+[ "$rc" -eq 4 ] \
+    && ok "and status exits 4 — the launcher's panic-latch code, not 0 or 1" \
+    || bad "status exited $rc with a daemon running behind the fallback"
+
+# The cure named must be `panic`, not `resume`. The latched state is the WORKING
+# state — i3 owns the whole keyboard — so an ambiguous session has to fail TOWARD
+# the latch. `resume` would drop the link while the rogue daemon is still up and
+# leave nothing latched at all.
+case "$out" in
+    *resume*) bad "status told a contested session to resume — that unlatches" ;;
+    *)        ok "and it does not advise resume, which would drop the latch" ;;
+esac
+DISPLAY="$XA" "$HERE/hotkeyd.sh" stop "$XA" >/dev/null 2>&1
+sleep 0.5
+[ "$(daemons_on "$XA")" = 0 ] || bad "teardown: the contested daemon survived"
+
 # --- 6: resume round-trip ----------------------------------------------------
 echo "panic: resume"
 out="$(panic resume 2>&1)"; rc=$?

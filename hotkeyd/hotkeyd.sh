@@ -60,6 +60,14 @@ need_runtime() {
     [ -d "$RUNTIME" ] || die "runtime dir does not exist: $RUNTIME" 2
 }
 
+# Is the panic latch set? `-L` before `-e` on purpose: `-e` follows the symlink
+# and answers "no" for a link whose TARGET is gone, which is a dangling latch —
+# still parsed by i3's glob, still a file `start` must refuse behind. One helper
+# rather than the two byte-identical copies this used to carry at `start` and
+# `status`, matching `linked()` in hotkeyd-panic.sh. They read the same path and
+# so cannot disagree today; a predicate copied twice is one that eventually does.
+linked() { [ -L "$FALLBACK_LINK" ] || [ -e "$FALLBACK_LINK" ]; }
+
 # The daemon's pid, or empty. Identified by its own --display argument rather
 # than by a pidfile: a pidfile can go stale after a SIGKILL and then lie about a
 # daemon that is not there, which is the state the escape hatch exists for.
@@ -75,7 +83,7 @@ case "$VERB" in
     start)
         need_display
         need_runtime
-        if [ -L "$FALLBACK_LINK" ] || [ -e "$FALLBACK_LINK" ]; then
+        if linked; then
             die "session is PANICKED (fallback linked at $FALLBACK_LINK) — \
 run hotkeyd-panic.sh resume" 4
         fi
@@ -155,22 +163,56 @@ run hotkeyd-panic.sh resume" 4
         need_runtime
         pid="$(daemon_pid)"
         if [ -n "$pid" ]; then
+            # DAEMON + LATCH = CONTESTED, and it must not read as healthy
+            # (dotfiles-hwds.21). The latch is not self-enforcing: `start`
+            # refuses behind it, but hotkeyd.py run directly bypasses this
+            # script entirely — and daemon_pid() above is deliberately written
+            # to SEE such a daemon — while panic stops daemons and only THEN
+            # links, so an `exec_always` firing in that window rearms a display
+            # behind the fallback. Either ordering ends here: two X clients
+            # holding overlapping chords, the one state the whole panic design
+            # exists to prevent. Reporting "running … " at exit 0 is worse than
+            # the bare "not running" below, because it ends the investigation.
+            if linked; then
+                # Adjacent quoted strings, not a backslash-newline: inside
+                # SINGLE quotes a backslash is literal, so continuing the format
+                # that way would print a stray `\` and a line break into the i3
+                # log — which is where this now lands, autostart being armed.
+                printf 'hotkeyd: CONTESTED on %s — daemon running (pid %s) '\
+'BEHIND the panic fallback (linked at %s); i3 and the daemon both hold grabs, '\
+'run hotkeyd-panic.sh panic\n' \
+                    "$DPY_BASE" "$pid" "$FALLBACK_LINK"
+                # The cure is PANIC, not resume. The latched state is the
+                # working state — i3 owns the whole keyboard — so an ambiguous
+                # session fails TOWARD the latch: panic stops every daemon on
+                # the machine and relinks, and is idempotent, so it converges
+                # from here. `resume` would drop the link with the rogue daemon
+                # still up and leave nothing latched at all.
+                #
+                # Exit 4, the launcher's "the panic latch is set" code, the same
+                # one `start` returns for the same reason. NOT 0, which is the
+                # defect. NOT 1 either: 1 means "no daemon for this display" and
+                # callers read it that way (test-launcher.sh asserts zero vs
+                # non-zero on four paths, all of them latch-free), and here
+                # there IS a daemon — a contested session is a different problem
+                # from an absent one and gets a different code.
+                exit 4
+            fi
             printf 'hotkeyd: running on %s (pid %s, socket %s)\n' \
                 "$DPY_BASE" "$pid" "$SOCK"
             exit 0
         fi
-        # While the latch is set there is no daemon BY DESIGN — `start` refuses
-        # behind the link (see the FALLBACK_LINK note above) — so a bare "not
-        # running" names the symptom and hides the cause. Once autostart is
-        # armed, `start` runs from an i3 `exec_always` and its refusal goes to
-        # the i3 log rather than to a terminal, which makes `status` the
-        # diagnostic a person actually reads: it says the cause and the cure on
-        # one line. The exit code is unchanged — still 1, as callers expect for
-        # "no daemon" (test-launcher.sh asserts it); only the message grows.
-        if [ -L "$FALLBACK_LINK" ] || [ -e "$FALLBACK_LINK" ]; then
-            # Adjacent quoted strings, not a backslash-newline: inside SINGLE
-            # quotes a backslash is literal, so continuing the format that way
-            # would print a stray `\` and a line break into the i3 log.
+        # No daemon and the latch set is the QUIET half, and it is by design —
+        # `start` refuses behind the link (see the FALLBACK_LINK note above) —
+        # so a bare "not running" names the symptom and hides the cause. Once
+        # autostart is armed, `start` runs from an i3 `exec_always` and its
+        # refusal goes to the i3 log rather than to a terminal, which makes
+        # `status` the diagnostic a person actually reads: it says the cause and
+        # the cure on one line. The exit code is unchanged — still 1, as callers
+        # expect for "no daemon"; only the message grows. Here the cure IS
+        # `resume`: nothing contends, the session is simply parked in the
+        # fallback, and resume is the only way back out.
+        if linked; then
             printf 'hotkeyd: not running on %s — session is PANICKED '\
 '(fallback linked at %s), run hotkeyd-panic.sh resume\n' \
                 "$DPY_BASE" "$FALLBACK_LINK"
