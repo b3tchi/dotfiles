@@ -13,7 +13,7 @@
 # a pinned scenario table, prints `CASE <name> <payload>` lines, and exits;
 # quickshell runs it under Xvfb and this script asserts each expected line.
 #
-# The pin matches the ft009 {text,key} registry: resize 6 rows, screenshot 5
+# The pin matches the ft009 {text,key} registry: resize 6 rows, screenshot 4
 # rows, system 8 rows, unknown -> [{text:<raw>,key:""}]. `key` is the trigger
 # and the highlighted part of the word; ModeBar renders it inline when it is a
 # substring of `text`, else falls back to `key␣text`.
@@ -29,7 +29,7 @@
 # `mode`/`fontSize` and a `dumpc` call that walks the render tree (by
 # objectName) and prints CASE lines carrying the observed geometry deltas and
 # per-element colour/renderType. Named scenarios: default-invisible,
-# resize (pill + 6 hints), screenshot (5 hints), system-long-name (pill reads
+# resize (pill + 6 hints), screenshot (4 hints), system-long-name (pill reads
 # "system"), unknown-fallback (pill "system" + one raw-name row), fontsize-22
 # (the prop propagates to every Text), mode-flip-no-stale (default->resize->
 # default->screenshot rebuilds the Repeater with no leftover rows), plus
@@ -217,7 +217,7 @@ scenario "ModeBarTheme.hints — new {text,key} registry shape (AC3/AC4)"
 assert_case "hints-resize-verbatim" \
   '[{"text":"←","key":"h"},{"text":"↓","key":"j"},{"text":"↑","key":"k"},{"text":"→","key":"l"},{"text":"arrows","key":"←↓↑→"},{"text":"quit","key":"q"}]'
 assert_case "hints-screenshot-verbatim" \
-  '[{"text":"select-region","key":"drag"},{"text":"corners","key":"2-tap"},{"text":"window","key":"w"},{"text":"desktop","key":"d"},{"text":"quit","key":"q"}]'
+  '[{"text":"region","key":"drag/tap"},{"text":"window","key":"w"},{"text":"desktop","key":"d"},{"text":"quit","key":"q"}]'
 assert_case "hints-system-verbatim" \
   '[{"text":"lock","key":"l"},{"text":"exit","key":"e"},{"text":"switch-user","key":"u"},{"text":"suspend","key":"s"},{"text":"hibernate","key":"h"},{"text":"reboot","key":"r"},{"text":"poweroff","key":"p"},{"text":"quit","key":"q"}]'
 
@@ -451,7 +451,7 @@ flip1 "nav-move"   "nav-move"
 setfont 22; sleep 0.2; flip1 "resize" "fontsize-22"; setfont 16; sleep 0.2
 
 # mode-flip-no-stale: default->resize->default->screenshot, then dump; the
-# Repeater must hold screenshot's 5 rows with no leftover resize rows.
+# Repeater must hold screenshot's 4 rows with no leftover resize rows.
 setmodei "default";    sleep 0.2
 setmodei "resize";     sleep 0.2
 setmodei "default";    sleep 0.2
@@ -475,13 +475,14 @@ assert_case "resize.pill"    "resize"
 assert_case "resize.hints" \
   '[{"pre":"","key":"h","post":"","space":" ","tail":"←"},{"pre":"","key":"j","post":"","space":" ","tail":"↓"},{"pre":"","key":"k","post":"","space":" ","tail":"↑"},{"pre":"","key":"l","post":"","space":" ","tail":"→"},{"pre":"","key":"←↓↑→","post":"","space":" ","tail":"arrows"},{"pre":"","key":"q","post":"uit","space":"","tail":""}]'
 
-scenario "screenshot-hints: pill 'screenshot' + 5 verbatim hint rows (AC4)"
+scenario "screenshot-hints: pill 'screenshot' + 4 verbatim hint rows (AC4)"
 assert_case "screenshot.visible" "1"
 assert_case "screenshot.pill"    "screenshot"
 # "window"/"w" and "desktop"/"d" are both inline (key at index 0): hk="w"
-# post="indow", hk="d" post="esktop". drag/2-tap fallback.
+# post="indow", hk="d" post="esktop". "drag/tap"/"region" is fallback (key
+# not a substring of text).
 assert_case "screenshot.hints" \
-  '[{"pre":"","key":"drag","post":"","space":" ","tail":"select-region"},{"pre":"","key":"2-tap","post":"","space":" ","tail":"corners"},{"pre":"","key":"w","post":"indow","space":"","tail":""},{"pre":"","key":"d","post":"esktop","space":"","tail":""},{"pre":"","key":"q","post":"uit","space":"","tail":""}]'
+  '[{"pre":"","key":"drag/tap","post":"","space":" ","tail":"region"},{"pre":"","key":"w","post":"indow","space":"","tail":""},{"pre":"","key":"d","post":"esktop","space":"","tail":""},{"pre":"","key":"q","post":"uit","space":"","tail":""}]'
 
 scenario "system-long-name: the full \$mode_system string -> pill reads 'system' (AC4)"
 assert_case "system-long-name.visible" "1"
@@ -540,7 +541,7 @@ assert_case "fontsize-22.pill" "resize"
 scenario "mode-flip-no-stale: default->resize->default->screenshot leaves no stale rows (AC4)"
 assert_case "mode-flip-no-stale.pill"  "screenshot"
 assert_case "mode-flip-no-stale.hints" \
-  '[{"pre":"","key":"drag","post":"","space":" ","tail":"select-region"},{"pre":"","key":"2-tap","post":"","space":" ","tail":"corners"},{"pre":"","key":"w","post":"indow","space":"","tail":""},{"pre":"","key":"d","post":"esktop","space":"","tail":""},{"pre":"","key":"q","post":"uit","space":"","tail":""}]'
+  '[{"pre":"","key":"drag/tap","post":"","space":" ","tail":"region"},{"pre":"","key":"w","post":"indow","space":"","tail":""},{"pre":"","key":"d","post":"esktop","space":"","tail":""},{"pre":"","key":"q","post":"uit","space":"","tail":""}]'
 
 # ============================================================================
 # PHASE 2 — Bar.qml migrated onto ModeBar (sp018 Task 3 / dotfiles-80px.3):

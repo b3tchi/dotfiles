@@ -39,8 +39,7 @@ Singleton {
             {text: "quit", key: "q"}
         ],
         "screenshot": [
-            {text: "select-region", key: "drag"},
-            {text: "corners", key: "2-tap"},
+            {text: "region", key: "drag/tap"},
             {text: "window", key: "w"},
             {text: "desktop", key: "d"},
             {text: "quit", key: "q"}
