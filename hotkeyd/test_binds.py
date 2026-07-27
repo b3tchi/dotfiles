@@ -59,12 +59,43 @@ def test_nav_bare_keys_focus_ctrl_moves_alt_resizes():
         "resize shrink width 5 px or 5 ppt"
 
 
+@pytest.mark.parametrize("arrow,letter", [
+    ("Left", "h"), ("Down", "j"), ("Up", "k"), ("Right", "l"),
+])
+def test_arrow_keys_do_the_same_thing_as_their_letter(arrow, letter):
+    """Letters and arrows come from one shared table so they cannot drift, but
+    nothing asserted the MAPPING — swapping _ARROWS so Left focused right
+    survived both suites (found during audit). Checked in all three nav layers
+    plus the global $mod binds."""
+    nav = B.LAYERS["nav"]
+    def cmd(bs, key):
+        return next(b.action for b in bs if b.chord == key)
+    assert cmd(nav.binds, arrow) == cmd(nav.binds, letter)
+    for label in ("move", "resize"):
+        bs = nav.mods[label].binds
+        assert cmd(bs, arrow) == cmd(bs, letter), label
+    assert cmd(B.BINDS, f"Mod4+{arrow}") == cmd(B.BINDS, f"Mod4+{letter}")
+    assert (cmd(B.BINDS, f"Mod4+Shift+{arrow}")
+            == cmd(B.BINDS, f"Mod4+Shift+{letter}"))
+
+
 def test_workspace_binds_are_generated_for_all_eight():
     """ws-switch.nu is an external script, so these are run() spawns rather
-    than i3 command strings."""
-    switch = [b for b in B.BINDS
-              if isinstance(b.action, B.Run) and "ws-switch" in b.action.cmd]
-    assert len(switch) >= 8
+    than i3 command strings.
+
+    Asserts the exact chord set, not a count: the earlier `len(...) >= 8` was
+    blind because the filter also matched the `move` and `follow` variants, so
+    shrinking the generator to range(1, 4) still left 24 matches and the suite
+    green. Caught by mutation testing during audit."""
+    switch = sorted(b.chord for b in B.BINDS
+                    if isinstance(b.action, B.Run)
+                    and b.action.cmd.endswith(tuple(str(n) for n in range(1, 9))))
+    assert switch == sorted(f"Mod4+{n}" for n in range(1, 9))
+    for variant, suffix in (("Mod4+Ctrl", "move"), ("Mod4+Shift", "follow")):
+        got = sorted(b.chord for b in B.BINDS
+                     if isinstance(b.action, B.Run)
+                     and b.action.cmd.endswith(suffix))
+        assert got == sorted(f"{variant}+{n}" for n in range(1, 9)), suffix
 
 
 # --------------------------------------------------------------------------
@@ -143,7 +174,13 @@ def test_keycode_in_a_chord_is_rejected(chord):
     Keycodes in the table would silently bind the wrong key per session."""
     problems = B.validate([B.Bind(chord, "nop x")], {})
     assert any(chord in p for p in problems), problems
-    assert any("keysym" in p.lower() for p in problems), problems
+    # Assert "keycode", NOT "keysym": the word "keysym" appears in BOTH the
+    # dedicated keycode branch and the generic _KEYSYMS allowlist fallback, so
+    # asserting it passed even with the keycode branch deleted. Audit mutation
+    # testing caught that. This matters most when dotfiles-7yk3 replaces the
+    # static allowlist with live-keymap resolution: the masking fallback goes
+    # away, and only this assertion still guards the branch.
+    assert any("keycode" in p.lower() for p in problems), problems
 
 
 @pytest.mark.parametrize("chord", ["Mod4+1", "Mod4+Shift+8", "Mod4+Ctrl+3"])
