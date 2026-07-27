@@ -115,6 +115,10 @@ class LayerEngine:
         now = self.clock()
         canon = MOD_KEYSYMS.get(ev.key)
 
+        # Expire first, on EVERY event including modifier ones. Skipping it here
+        # let a stale hold win precedence for one publish after a lost release.
+        self._expire_stale_holds(ev, now)
+
         if canon is not None:
             if ev.kind == "press":
                 self._held[canon] = now
@@ -123,13 +127,15 @@ class LayerEngine:
             self._publish()
             return []                   # modifiers never act on their own
 
-        self._expire_stale_holds(ev, now)
-
         if ev.kind == "release":
             self._down.pop(ev.key, None)
             actions = self._match(ev, on_release=True)
         else:
             if self._is_repeat(ev.key, now):
+                # Publish before returning: expiry above may have changed the
+                # state, and swallowing it here left the bar showing a layer the
+                # engine had already left until the key was finally released.
+                self._publish()
                 return []               # auto-repeat: one action per press
             self._down[ev.key] = now
             actions = self._match(ev, on_release=False)
@@ -246,12 +252,17 @@ def socket_path(display: str | None = None) -> Path:
 
 class StatePublisher:
     """Unix-socket fan-out. Non-blocking on purpose: a bar that stops reading
-    must never stall the key path, so a client whose buffer is full loses lines
-    (and eventually the connection) rather than blocking dispatch."""
+    must never stall the key path, so a client whose buffer is full loses that
+    LINE rather than blocking dispatch.
+
+    Losing a line is safe because this is a last-value feed: any client that
+    dropped one is marked stale and re-sent the current state on the next
+    `poll()`, so it converges instead of sitting on an old layer forever."""
 
     def __init__(self, path, backlog: int = 8):
         self.path = Path(path)
         self._clients: list[socket.socket] = []
+        self._stale: set[socket.socket] = set()
         self._current: dict | None = None
 
         if not self.path.parent.is_dir():
@@ -300,7 +311,12 @@ class StatePublisher:
 
     # -- fan-out ----------------------------------------------------------
     def poll(self):
-        """Accept pending connections. Cheap; call from the daemon's loop."""
+        """Accept pending connections and re-send the current state to any
+        client that dropped a line. Cheap; call from the daemon's loop."""
+        for conn in list(self._stale):
+            self._stale.discard(conn)
+            if self._current is not None:
+                self._send(conn, self._current)
         for key, _ in self.sel.select(timeout=0):
             if key.fileobj is self.srv:
                 try:
@@ -325,13 +341,17 @@ class StatePublisher:
         try:
             conn.send(line)
         except (BlockingIOError, InterruptedError):
-            pass                        # slow consumer: drop the line, not the key
+            # Slow consumer: drop the LINE, never the key path. Marked stale so
+            # the next poll() re-sends the current state and the client
+            # converges rather than staying on an old layer.
+            self._stale.add(conn)
         except OSError:
             self._drop(conn)
 
     def _drop(self, conn: socket.socket):
         if conn in self._clients:
             self._clients.remove(conn)
+        self._stale.discard(conn)
         try:
             conn.close()
         except OSError:

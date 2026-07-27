@@ -29,7 +29,7 @@ echo "stage 1: bind table loader + layer engine (pytest)"
 if ! command -v python3 >/dev/null; then
     bad "python3 missing"
 else
-    for suite in test_binds.py test_layers.py; do
+    for suite in test_binds.py test_layers.py test_daemon.py; do
         out="$(cd "$HERE" && python3 -m pytest "$suite" -q 2>&1)"
         if [ $? -eq 0 ]; then
             ok "$suite ($(printf '%s' "$out" | tail -1))"
@@ -51,6 +51,7 @@ fi
 # --- stage 3: --check rejects a seeded duplicate, naming the chord ---------
 echo "stage 3: --check rejects a seeded fault"
 TMP="$(mktemp -d)"
+TMPD="$TMP"
 trap 'rm -rf "$TMP"' EXIT
 cat > "$TMP/faulty.py" <<EOF
 import sys; sys.path.insert(0, "$HERE")
@@ -82,14 +83,65 @@ else
     bad "needs an X display: $out"
 fi
 
-# --- stage 5: the grab loop is honest about not existing yet --------------
-echo "stage 5: running without --check reports unimplemented"
-out="$(python3 "$HERE/hotkeyd.py" 2>&1)"
+# --- stage 5: the daemon fails fast on a dead display ----------------------
+# NEVER run the daemon against the caller's own DISPLAY: it would grab every
+# chord in the table out from under the live i3 session for as long as the test
+# runs. :99 has no server, so this exercises the startup path and the adr0014
+# fail-fast exit without touching anything real.
+echo "stage 5: daemon fails fast on an unreachable display"
+out="$(DISPLAY=:99 timeout 10 python3 "$HERE/hotkeyd.py" --display :99 2>&1)"
 rc=$?
-if [ $rc -eq 2 ] && printf '%s' "$out" | grep -qi 'not implemented'; then
-    ok "exits 2 and says so"
+if [ "$rc" -eq 124 ]; then
+    bad "daemon hung against a dead display instead of failing fast"
+elif [ "$rc" -ne 0 ]; then
+    ok "exits non-zero ($rc) without hanging"
 else
-    bad "expected exit 2 + 'not implemented', got rc=$rc: $out"
+    bad "daemon reported success against a display that does not exist"
+fi
+
+
+# --- stage 6: live X — real grabs, real dispatch ---------------------------
+# Everything above runs against fakes. These stages are the ones that would have
+# caught poc013's findings, so they use a real X server and a real i3.
+echo "stage 6: live X (Xvfb + i3)"
+if ! command -v Xvfb >/dev/null || ! command -v i3 >/dev/null; then
+    printf '  \033[33mSKIP\033[0m Xvfb or i3 missing\n'
+else
+    XD=":89"
+    XSOCK="/tmp/i3-hotkeyd-test-$$.sock"
+    XCFG="$TMPD/i3-live.conf"
+    mkdir -p "$TMPD"
+    printf 'font pango:monospace 10\nipc-socket %s\nbindsym Mod4+F11 nop taken-by-i3\n' \
+        "$XSOCK" > "$XCFG"
+    Xvfb "$XD" -screen 0 800x600x24 >/dev/null 2>&1 &
+    XVFB_PID=$!
+    sleep 1.5
+    DISPLAY="$XD" i3 -c "$XCFG" >/dev/null 2>&1 &
+    I3_PID=$!
+    sleep 1.5
+
+    if ! DISPLAY="$XD" i3-msg -t get_version >/dev/null 2>&1; then
+        bad "live i3 did not start on $XD"
+    else
+        out="$(DISPLAY="$XD" XDG_RUNTIME_DIR="$TMPD" I3SOCK="$XSOCK" \
+               python3 "$HERE/live_check.py" 2>&1)"
+        rc=$?
+        printf '%s\n' "$out" | while IFS= read -r line; do
+            case "$line" in
+                PASS*) printf '  \033[32m%s\033[0m\n' "$line" ;;
+                FAIL*) printf '  \033[31m%s\033[0m\n' "$line" ;;
+                *)     printf '    %s\n' "$line" ;;
+            esac
+        done
+        n_pass=$(printf '%s' "$out" | grep -c '^PASS')
+        n_fail=$(printf '%s' "$out" | grep -c '^FAIL')
+        PASS=$((PASS + n_pass))
+        FAIL=$((FAIL + n_fail))
+        [ "$rc" -ne 0 ] && [ "$n_fail" -eq 0 ] && bad "live_check.py exited $rc"
+    fi
+    kill "$I3_PID" 2>/dev/null
+    kill "$XVFB_PID" 2>/dev/null
+    rm -f "$XSOCK"
 fi
 
 echo
