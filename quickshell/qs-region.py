@@ -260,6 +260,19 @@ class Region:
             self.x0, self.y0 = int(e.x_root), int(e.y_root)
             self.x1, self.y1 = self.x0, self.y0
             self.dragging = True
+            # The focus border was highlighting the i3-focused window red
+            # (entering "screenshot" mode; see qs-focus-border.py's
+            # COLOR_MODES) as a "this is what `w` would capture" cue. That
+            # cue is now stale — the user is drawing an arbitrary region,
+            # not capturing the highlighted window — so signal it away.
+            # Synthetic mode name, same trick as nav's nav-move/nav-resize
+            # dual face: i3 itself binds nothing under it (this grab already
+            # owns all input), it exists purely for qs-focus-border.py's
+            # SUPPRESS_MODES to react to. Fire-and-forget: a failed i3-msg
+            # (i3 not running, an already-torn-down socket) should not block
+            # or abort the capture itself.
+            subprocess.run(['i3-msg', 'mode', 'screenshot-drag'],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         else:
             self.x1, self.y1 = int(e.x_root), int(e.y_root)
         return True

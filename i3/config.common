@@ -129,6 +129,25 @@ mode "screenshot" {
     bindsym Escape mode default
     bindsym q mode default
 }
+# "screenshot-drag" — a SECOND, separately-declared mode the selector itself
+# switches into (an `i3-msg mode screenshot-drag` from qs-region.py's own
+# `_press`, not a keybind) the instant the user starts drawing a region.
+# Unlike nav-move/nav-resize (dotfiles-5u6m), which are PURELY a Bar.qml-
+# local string swap driven by held-modifier state and never touch i3's real
+# mode at all, this one has to be a REAL i3 mode: qs-focus-border.py is a
+# SEPARATE process with no access to qs-region.py's in-memory drag state,
+# and i3's mode-change IPC event is the only channel already wired to both
+# of them. i3 silently ignores `mode <name>` for any name never declared
+# with its own `mode "<name>" {}` block — there is no such thing as an
+# ad-hoc, undeclared mode — so this block has to exist for the signal to
+# actually take effect, even though (like "screenshot" above) the selector's
+# grab means no binding here ever fires for real; it exists in case the
+# grab is ever lost mid-drag, so Escape/q still un-sticks the session
+# instead of trapping it (same dotfiles-ux1 reasoning as "screenshot").
+mode "screenshot-drag" {
+    bindsym Escape mode default
+    bindsym q mode default
+}
 bindsym $mod+Shift+s exec --no-startup-id ~/.dotfiles/quickshell/qs-screenshot.sh
 bindsym $mod+Ctrl+x --release exec --no-startup-id xkill
 

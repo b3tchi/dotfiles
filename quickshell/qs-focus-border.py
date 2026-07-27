@@ -32,10 +32,12 @@ BC = (0x16/255, 0xa0/255, 0x85/255)
 # under the cursor. The bar's mode pill says the same thing, but the frame is
 # where the eye already is while navigating.
 MODE_BC = (0xcb/255, 0x4b/255, 0x16/255)   # ModeBarTheme.highlight
-# Modes that get MODE_BC. Held Shift is signalled by nop binding events, not
-# by a second mode, so "nav" is the whole set and the frame never changes
-# colour mid-gesture.
-COLOR_MODES = {'nav'}
+# Modes that get MODE_BC. "screenshot" added so the ring around the
+# currently-focused window doubles as "this is what `w` would capture" —
+# nav's held-Shift face is signalled by nop binding events, not a second
+# mode, so its frame never changes colour mid-gesture; screenshot's does,
+# via "screenshot-drag" (see SUPPRESS_MODES below).
+COLOR_MODES = {'nav', 'screenshot'}
 # Windows to never border (quickshell overlays, rofi, etc.)
 IGNORE_CLASSES = {'quickshell', 'Rofi', 'rofi'}
 IGNORE_TITLES = {'qs-focus-border', 'qs-focus-dim'}
@@ -44,17 +46,32 @@ IGNORE_TITLES = {'qs-focus-border', 'qs-focus-dim'}
 # between binding event and overlay grabbing focus, leaving a frame
 # visible around whatever was focused before mod+d / mod+p / mod+tab.
 SUPPRESS_WHEN_PRESENT_TITLES = {'qs-launcher', 'qs-projects', 'qs-switcher', 'qs-clip', 'qs-notif'}
-# i3 modes whose overlay covers the screen (screenshot selector,
-# quickshell/qs-region.py). That overlay is a GDK POPUP window —
-# override-redirect — so i3 emits NO window::new for it; a hide keyed off
-# that event (the old contract here) would never fire and the ring would be
-# captured live in every shot. Hide immediately at MODE ENTER instead (see
-# the "change in SUPPRESS_MODES" branch in handle_event below); refreshes
-# stay blocked for the whole mode so the border can't restack above the live
-# overlay, and it reappears once the mode ends — cancel and save both funnel
-# through the same i3 "mode default" transition, so both are covered by the
-# same code path.
-SUPPRESS_MODES = {'screenshot'}
+# i3 modes whose overlay covers the screen. That overlay
+# (quickshell/qs-region.py) is a GDK POPUP window — override-redirect — so
+# i3 emits NO window::new for it; a hide keyed off that event (the old
+# contract here) would never fire.
+#
+# "screenshot" itself is deliberately NOT in this set any more: entering it
+# now COLOURS the ring instead of hiding it (see COLOR_MODES) — a highlight
+# of the window `w` would capture, matching the crosshair overlay's own
+# accent colour. Suppression is deferred to the SYNTHETIC "screenshot-drag"
+# mode, entered by qs-region.py itself (subprocess i3-msg call, its own
+# `_press`) the moment the user actually starts drawing a region — the
+# highlight is stale from then on, the user is selecting an arbitrary area,
+# not capturing the ex-highlighted window. Same synthetic-mode-as-signal
+# trick as nav's nav-move/nav-resize (dotfiles-5u6m): i3 itself binds
+# nothing under "screenshot-drag" (the overlay's own grab already owns all
+# input by the time it fires), it exists purely for this file and
+# ModeBarTheme.resolve() to react to.
+#
+# Hide immediately at MODE ENTER (see the "change in SUPPRESS_MODES" branch
+# in handle_event below); refreshes stay blocked for the whole mode so the
+# border can't restack above the live overlay, and it reappears once the
+# mode ends — cancel and save both funnel through the same i3
+# "mode default" transition (fired by qs-screenshot.sh after the overlay
+# exits, regardless of which path it exited through), so both are covered
+# by the same code path.
+SUPPRESS_MODES = {'screenshot-drag'}
 
 
 class Border:

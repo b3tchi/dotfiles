@@ -101,6 +101,7 @@ Singleton {
     function resolve(mode) {
         if (mode === "resize") return "resize"
         if (mode === "screenshot") return "screenshot"
+        if (mode === "screenshot-drag") return "screenshot"   // synthetic — see qs-focus-border.py
         if (mode === "nav") return "nav"
         if (mode === "nav-move") return "nav-move"       // synthetic (see hints)
         if (mode === "nav-resize") return "nav-resize"   // synthetic
@@ -117,6 +118,7 @@ Singleton {
     function displayName(mode) {
         return mode === "resize" ? "resize"
              : mode === "screenshot" ? "screenshot"
+             : mode === "screenshot-drag" ? "screenshot"
              : mode === "nav" ? "nav"
              : mode === "nav-move" ? "nav MOVE"
              : mode === "nav-resize" ? "nav RESIZE" : "system"
