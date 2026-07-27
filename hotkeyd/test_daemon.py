@@ -540,3 +540,97 @@ def test_lock_bits_are_stripped_from_the_reported_modifiers():
     chord than Ctrl+h without it."""
     ev = H.to_event("press", "h", H.CTRL | H.MOD2 | H.LOCK)
     assert ev.mods == frozenset({"Ctrl"})
+
+
+# --------------------------------------------------------------------------
+# i3 socket resolution — must never trust an inherited I3SOCK (dotfiles-hwds.6)
+# --------------------------------------------------------------------------
+
+class FakeXDisplay:
+    """Just enough X to answer the I3_SOCKET_PATH root-window property."""
+
+    def __init__(self, path):
+        self.path = path
+        outer = self
+
+        class Prop:
+            def __init__(self, v):
+                self.value = v.encode()
+
+        class Root:
+            def get_full_property(self, atom, kind):
+                return Prop(outer.path) if outer.path else None
+
+        class Screen:
+            root = Root()
+
+        self._screen = Screen()
+
+    def intern_atom(self, name):
+        return 1
+
+    def screen(self):
+        return self._screen
+
+
+def test_socket_path_prefers_the_displays_own_root_property(monkeypatch):
+    """i3 exports I3SOCK into every child it execs, so a daemon started for :10
+    by :0's i3 inherits :0's socket and dispatches to the WRONG WM — a chord
+    pressed in the RDP session moves a window on the native desktop."""
+    monkeypatch.setenv("I3SOCK", "/tmp/some-other-session.sock")
+    xd = FakeXDisplay("/run/user/1000/i3/ipc-socket.RIGHT")
+    assert H.i3_socket_path(xdisp=xd) == "/run/user/1000/i3/ipc-socket.RIGHT"
+
+
+def test_socket_path_ignores_i3sock_even_with_no_x_display(monkeypatch):
+    monkeypatch.setenv("I3SOCK", "/tmp/inherited-and-wrong.sock")
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append((cmd, kw.get("env", {})))
+
+        class R:
+            stdout = "/run/user/1000/i3/ipc-socket.FROM-CLI\n"
+        return R()
+
+    monkeypatch.setattr(H.subprocess, "run", fake_run)
+    got = H.i3_socket_path(display=":10")
+    assert got == "/run/user/1000/i3/ipc-socket.FROM-CLI"
+    cmd, env = calls[0]
+    assert cmd[:1] == ["i3"]
+    assert env.get("DISPLAY") == ":10", "resolver must pin the target display"
+    assert "I3SOCK" not in env, "inherited I3SOCK must be scrubbed for the child"
+
+
+def test_explicit_override_is_honoured(monkeypatch):
+    """HOTKEYD_I3SOCK is an explicit operator/test override — unlike I3SOCK it is
+    never injected by i3, so trusting it cannot mis-route a session."""
+    monkeypatch.setenv("HOTKEYD_I3SOCK", "/tmp/explicit.sock")
+    monkeypatch.setenv("I3SOCK", "/tmp/inherited.sock")
+    assert H.i3_socket_path() == "/tmp/explicit.sock"
+
+
+def test_client_follows_the_property_across_an_i3_restart(tmp_path):
+    """The production resolver, not an injected lambda: i3 restarting rewrites
+    the root property, and the daemon must follow it."""
+    first = FakeI3(tmp_path / "i3-1.sock")
+    xd = FakeXDisplay(first.path)
+    c = H.I3Client(lambda: H.i3_socket_path(xdisp=xd))
+    c.command("nop one")
+    time.sleep(0.05)
+    assert first.commands == ["nop one"]
+    first.close()
+
+    second = FakeI3(tmp_path / "i3-2.sock")
+    xd.path = second.path                      # i3 restarted, property updated
+    c.command("nop two")
+    time.sleep(0.05)
+    assert second.commands == ["nop two"]
+    c.close()
+    second.close()
+
+
+def test_two_daemons_on_two_displays_resolve_different_sockets(tmp_path):
+    a = FakeXDisplay(str(tmp_path / "a.sock"))
+    b = FakeXDisplay(str(tmp_path / "b.sock"))
+    assert H.i3_socket_path(xdisp=a) != H.i3_socket_path(xdisp=b)

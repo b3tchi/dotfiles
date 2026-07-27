@@ -230,12 +230,41 @@ HDR = struct.Struct("=6sII")
 RUN_COMMAND = 0
 
 
-def i3_socket_path() -> str:
-    env = os.environ.get("I3SOCK")
-    if env:
-        return env
+def i3_socket_path(display: str | None = None, xdisp=None) -> str:
+    """Resolve THIS display's i3 socket.
+
+    Deliberately ignores `$I3SOCK`. i3 exports it into the environment of every
+    process it execs, so a daemon started for `:10` by `:0`'s i3 inherits `:0`'s
+    socket and every dispatch lands on the WRONG window manager — press a chord
+    in the RDP session, a window moves on the native desktop. It also goes stale
+    across an i3 restart, after which the daemon can never reconnect.
+
+    Order: explicit `$HOTKEYD_I3SOCK` (an operator/test override that i3 never
+    injects, so it cannot mis-route a session) -> the `I3_SOCKET_PATH` root
+    property of our OWN X connection, which i3 rewrites on every restart ->
+    `i3 --get-socketpath` with DISPLAY pinned and I3SOCK scrubbed.
+    """
+    override = os.environ.get("HOTKEYD_I3SOCK")
+    if override:
+        return override
+
+    if xdisp is not None:
+        try:
+            prop = xdisp.screen().root.get_full_property(
+                xdisp.intern_atom("I3_SOCKET_PATH"), 0)
+            if prop is not None and prop.value:
+                value = prop.value
+                if isinstance(value, (bytes, bytearray)):
+                    return value.decode().rstrip("\x00")
+                return str(value).rstrip("\x00")
+        except Exception:                       # noqa: BLE001
+            pass                                # fall through to the CLI
+
+    env = {k: v for k, v in os.environ.items() if k != "I3SOCK"}
+    if display:
+        env["DISPLAY"] = display
     return subprocess.run(["i3", "--get-socketpath"], capture_output=True,
-                          text=True, check=True).stdout.strip()
+                          text=True, check=True, env=env).stdout.strip()
 
 
 class I3Client:
@@ -431,7 +460,11 @@ class Daemon:
         self.table = table
         self.d = d
         self.pub = publisher
-        self.i3 = i3 if i3 is not None else I3Client()
+        # Resolve i3's socket through OUR OWN X connection, re-read on every
+        # reconnect: that is what keeps a per-display daemon talking to its own
+        # window manager, and what lets it follow an i3 restart.
+        self.i3 = i3 if i3 is not None else I3Client(
+            lambda: i3_socket_path(xdisp=d))
         self.grabs = GrabManager(XAdapter(d, d.screen().root))
         self.engine = L.LayerEngine(table.BINDS, table.LAYERS,
                                     publisher=publisher)
