@@ -343,6 +343,24 @@ def test_still_held_modifier_after_exit_does_not_re_enter_a_mod_state():
     assert pub.lines == []
 
 
+@pytest.mark.parametrize("mod_key", ["Control_L", "Alt_L", "Shift_L"])
+def test_a_mods_less_layer_is_still_left_with_a_modifier_held(mod_key):
+    """The match half of dotfiles-hwds.18. The grab half (hotkeyd.layer_chords)
+    is what was missing; the engine already ignores modifiers on exit keys, and
+    that must keep holding for a layer with no `mods` at all — otherwise the
+    grabs the daemon now takes would arrive and still do nothing."""
+    binds = [B.Bind("$mod+o", B.enter_layer("plain"))]
+    layers = {"plain": B.Layer(binds=[B.Bind("h", "focus left")],
+                               exit_keys=["q", "Escape"])}
+    e, _, _ = engine(binds=binds, layers=layers)
+    e.handle(press("o", ["Mod4"]))
+    assert e.state == {"layer": "plain", "mod": None}
+    e.handle(press(mod_key))
+    e.handle(press("q", [L.MOD_KEYSYMS[mod_key]]))
+    assert e.state["layer"] == "default", \
+        f"a mods-less layer could not be left with {mod_key} held"
+
+
 def test_every_layer_bind_the_grabber_registers_can_actually_fire():
     """The grab-set / match-set seam (dotfiles-hwds.8). The daemon grabs every
     chord in a layer's table; the engine matches layer binds by comparing the

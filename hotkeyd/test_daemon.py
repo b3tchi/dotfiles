@@ -629,6 +629,64 @@ def test_exit_keys_are_also_grabbed_with_shift_held():
             f"layer cannot be left one-handed while Shift is down")
 
 
+def _table(layers):
+    return type("T", (), {"BINDS": [B.Bind("$mod+o", B.enter_layer("plain"))],
+                          "LAYERS": layers})
+
+
+PLAIN = {"plain": B.Layer(binds=[B.Bind("h", "focus left")],
+                          exit_keys=["q", "Escape"])}
+
+
+@pytest.mark.parametrize("key", ["q", "Escape"])
+@pytest.mark.parametrize("mod", ["Shift", "Ctrl", "Mod1"])
+def test_a_layer_with_no_mods_still_grabs_its_exit_keys_held(mod, key):
+    """dotfiles-hwds.18. Ctrl/Alt-held exits work in the nav layer only by
+    accident of the X ACTIVE grab: nav declares Ctrl and Mod1, so their keysyms
+    are grabbed, and holding one routes every following key to the daemon
+    whatever the mask says. A layer that declares NO mods gets none of those
+    grabs, so `Ctrl+q` arrives with CtrlMask, matches no grab, is never
+    delivered — and the layer is a trap in exactly the way hwds.17 described for
+    Shift. validate() does not require mods, so such a layer is legal input."""
+    chords = H.layer_chords(_table(PLAIN), "plain")
+    assert f"{mod}+{key}" in chords, \
+        f"{mod}+{key} not grabbed — a mods-less layer cannot be left one-handed"
+
+
+def test_the_exit_variants_do_not_leak_onto_a_layers_other_binds():
+    """Scoped to exit keys, like the Shift fix before it. Widening it would take
+    chords the daemon has no meaning for from every application."""
+    chords = H.layer_chords(_table(PLAIN), "plain")
+    for dead in ("Ctrl+h", "Mod1+h", "Shift+h"):
+        assert dead not in chords
+
+
+def test_a_declared_modifier_is_not_also_grabbed_as_an_exit_variant():
+    """The other half of the rule, and the reason it is not simply 'always emit
+    every variant': a DECLARED modifier's keysyms are grabbed, which starts the
+    active grab that routes the exit key already. Adding a passive `Mod1+q` on
+    top would be a grab i3 owns on the xrdp display — `$mod+q` is `split toggle`
+    in i3/config.common and `$mod` is Mod1 there — so every nav entry would log
+    a BadAccess, breaking the zero-BadAccess assertion this epic runs on."""
+    chords = H.chords_for(B, "nav")
+    assert "Control_L" in chords, "nav declares Ctrl, so its keysym is grabbed"
+    assert "Ctrl+q" not in chords
+    assert "Mod1+q" not in chords, "would collide with i3's $mod+q on :10"
+    assert "Shift+q" in chords, "Shift is never routed by an active grab"
+
+
+def test_a_layer_declaring_only_ctrl_still_gets_the_alt_variant():
+    """The gap is per MODIFIER, not per layer: declaring Ctrl routes Ctrl-held
+    keys and says nothing about Alt."""
+    layers = {"plain": B.Layer(
+        binds=[B.Bind("h", "focus left")],
+        mods={"move": B.Mod("Ctrl", (B.Bind("h", "move left"),))},
+        exit_keys=["q"])}
+    chords = H.layer_chords(_table(layers), "plain")
+    assert "Mod1+q" in chords, "Alt-held exit is undeliverable in this layer"
+    assert "Ctrl+q" not in chords, "already routed by the Ctrl active grab"
+
+
 def test_shift_variants_are_not_added_to_ordinary_layer_binds():
     """The Shift grab is scoped to exit keys. Widening it would silently take
     chords from applications for as long as a layer is active."""

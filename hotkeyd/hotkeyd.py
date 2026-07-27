@@ -563,34 +563,58 @@ def global_chords(table) -> list[str]:
     return list(dict.fromkeys(b.chord for b in table.BINDS))
 
 
+# The modifiers a hand is plausibly still holding when it reaches for an exit
+# key. Each one must be able to DELIVER that key to the daemon — see
+# layer_chords for which of the two routes each gets.
+EXIT_MODIFIERS = ("Shift", "Ctrl", "Mod1")
+
+
 def layer_chords(table, name: str) -> list[str]:
     """The extra chords a layer needs while it is ACTIVE: its bare keys, its exit
-    keys (bare AND Shift-held), its modifier-prefixed sublayer chords, and the
-    modifier keys themselves (so held-modifier state is observable at all).
+    keys (bare and modifier-held), its modifier-prefixed sublayer chords, and
+    the modifier keys themselves (so held-modifier state is observable at all).
 
-    Exit keys get an explicit `Shift+` variant because Shift is not a layer
-    modifier. Holding Ctrl or Alt starts an ACTIVE grab — their keysyms are
-    grabbed below — which delivers every following key here; nothing does that
-    for Shift, and a bare `q` grab has mask 0 while `Shift+q` arrives with
-    ShiftMask, matching no grab. The engine would leave the layer correctly (it
-    matches exit keys on the keysym alone, ignoring modifiers) — the event just
-    never reaches it, so the key goes to the focused window and the layer
-    sticks. i3's nav mode spelt `Shift+q` out for the same reason.
+    A layer must stay leavable one-handed, with whatever modifier is still down
+    — the engine matches exit keys on the keysym alone precisely so that works.
+    But the engine only sees an event that X delivered, and X delivers by MASK:
+    a bare `q` grab has mask 0, while `Ctrl+q` arrives with CtrlMask and matches
+    no grab at all. There are two ways an exit key can reach us with a modifier
+    held, and each modifier gets exactly one of them:
+
+    - the modifier is DECLARED as a sublayer: its keysyms are grabbed below, and
+      holding one starts an ACTIVE grab that routes every following key here
+      regardless of mask. Nothing more is needed — and adding a passive variant
+      anyway would be actively harmful, because `Mod1+q` is i3's `$mod+q` on the
+      xrdp display (`split toggle`, i3/config.common) and every layer entry
+      would then log a BadAccess.
+    - the modifier is NOT declared: no keysym grab, no active grab, so the mask
+      variant must be grabbed explicitly or the layer is a trap. That is the
+      Shift case dotfiles-hwds.17 fixed, and dotfiles-hwds.18 is the same hole
+      for Ctrl/Alt in any layer that declares no `mods` — `nav` happens to
+      declare both, so the shipped table never exposed it.
+
+    Shift is always in the explicit set: grabbing `Shift_L`/`Shift_R` to get an
+    active grab is forbidden — it would swallow every capital letter, ruinous on
+    :10 where xrdp synthesises Shift around every character it sends.
 
     Deliberately NOT generalised to the layer's other binds: grabbing `Shift+h`
-    would take a chord the daemon has no meaning for, and grabbing
-    `Shift_L`/`Shift_R` to get an active grab would swallow every capital
-    letter — ruinous on :10, where xrdp synthesises Shift around every
-    character it sends.
+    would take a chord the daemon has no meaning for from every application for
+    as long as the layer is up.
     """
     layer = table.LAYERS[name]
     out = [b.chord for b in layer.binds] + list(layer.exit_keys)
-    out += [f"Shift+{k}" for k in layer.exit_keys]
+    routed = set()
     for mod in layer.mods.values():
         canon = default_binds.MODIFIER_ALIASES.get(
             str(mod.modifier).lower(), mod.modifier)
         out += [f"{canon}+{b.chord}" for b in mod.binds]
         out += MOD_KEYSYMS_BY_NAME.get(canon, [])
+        if canon != "Shift":            # see the docstring: never routed
+            routed.add(canon)
+    for canon in EXIT_MODIFIERS:
+        if canon in routed:
+            continue
+        out += [f"{canon}+{k}" for k in layer.exit_keys]
     return list(dict.fromkeys(out))
 
 

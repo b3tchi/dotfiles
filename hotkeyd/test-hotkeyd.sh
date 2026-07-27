@@ -482,6 +482,89 @@ for line in s.makefile():
     kill "$X11P" 2>/dev/null
 fi
 
+# --- stage 12: a mods-less layer is leavable one-handed (dotfiles-hwds.18) ---
+# The unit suite can only assert which grabs were REQUESTED. This asserts they
+# were OBTAINED and that X actually delivers `Ctrl+q` to the daemon: on a layer
+# that declares no `mods` there is no modifier keysym grab, so no active grab
+# routes the key — the passive mask variant is the only thing that can. No i3
+# here on purpose: this is about X delivery, and the daemon must work without a
+# window manager anyway.
+echo "stage 12: mods-less layer, exit key with Ctrl held"
+if ! command -v Xvfb >/dev/null || ! command -v xdotool >/dev/null; then
+    printf '  \033[33mSKIP\033[0m Xvfb or xdotool missing\n'
+else
+    D12=""
+    _b=$(( 40 + (($$ + 7) % 20) ))
+    for _o in 0 1 2 3 4 5 6 7 8 9; do
+        _n=$(( _b + _o ))
+        [ -e "/tmp/.X${_n}-lock" ] || { D12=":$_n"; break; }
+    done
+    T12="$TMPD/t12"; mkdir -p "$T12"
+    cat > "$T12/plain.py" <<EOF
+import sys; sys.path.insert(0, "$HERE")
+from binds import Bind, Layer, enter_layer
+# No mods: the shape dotfiles-hwds.18 is about. validate() allows it.
+BINDS = [Bind('\$mod+o', enter_layer('plain'))]
+LAYERS = {'plain': Layer(binds=[Bind('h', 'focus left')], exit_keys=['q'])}
+EOF
+    Xvfb "$D12" -screen 0 640x480x24 >/dev/null 2>&1 &
+    X12P=$!
+    sleep 1.5
+    if [ -z "$D12" ]; then
+        bad "no free X display for the mods-less layer stage"
+    else
+        # HOTKEYD_I3SOCK points at nothing: there is no i3 on this display, and
+        # this keeps the daemon from shelling out to `i3 --get-socketpath`.
+        DISPLAY="$D12" XDG_RUNTIME_DIR="$T12" HOTKEYD_I3SOCK="$T12/no-i3.sock" \
+            setsid python3 "$HERE/hotkeyd.py" --display "$D12" \
+            --binds "$T12/plain.py" >"$T12/d.log" 2>&1 &
+        d12=""
+        for _t in 1 2 3 4 5 6 7 8 9 10; do
+            sleep 0.5
+            d12="$(pgrep -f "hotkeyd.py --display $D12" | head -1)"
+            [ -n "$d12" ] && break
+        done
+        python3 -u -c '
+import socket, sys
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.connect(sys.argv[1])
+for line in s.makefile():
+    sys.stdout.write(line)
+' "$T12/hotkeyd-${D12#:}.sock" >"$T12/state.log" 2>/dev/null &
+        R12=$!
+        sleep 0.5
+
+        if [ -z "$d12" ]; then
+            bad "mods-less daemon did not start: $(tail -2 "$T12/d.log")"
+        else
+            DISPLAY="$D12" xdotool key --clearmodifiers super+o
+            sleep 0.6
+            l12="$(tail -1 "$T12/state.log" 2>/dev/null)"
+            case "$l12" in
+                *'"layer":"plain"'*) ok "entered the mods-less layer" ;;
+                *) bad "did not enter the layer (socket: ${l12:-<no line>})" ;;
+            esac
+            # Ctrl DOWN for the whole tap — no --clearmodifiers, which would
+            # release the very modifier under test.
+            DISPLAY="$D12" xdotool keydown ctrl
+            sleep 0.2
+            DISPLAY="$D12" xdotool key q
+            sleep 0.6
+            DISPLAY="$D12" xdotool keyup ctrl
+            l12="$(tail -1 "$T12/state.log" 2>/dev/null)"
+            [ "$l12" = '{"layer":"default","mod":null}' ] \
+                && ok "Ctrl+q left the layer on a layer that declares no mods" \
+                || bad "layer is a trap with Ctrl held (socket: ${l12:-<no line>})"
+            grep -q "BadAccess" "$T12/d.log" \
+                && bad "the exit-key grabs were REFUSED: $(grep -c BadAccess "$T12/d.log")" \
+                || ok "every exit-key grab was obtained (zero BadAccess)"
+            kill "$d12" 2>/dev/null
+        fi
+        kill "$R12" 2>/dev/null
+    fi
+    kill "$X12P" 2>/dev/null
+fi
+
 echo
 printf 'hotkeyd: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
