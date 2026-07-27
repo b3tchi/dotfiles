@@ -183,6 +183,28 @@ class Bind:
     chord: str
     action: Action
     on_release: bool = False
+    # Restrict this bind to ONE source device, by name as XI2 reports it
+    # (`xinput list`). None — the default — means "any source". Core X11
+    # `KeyPress` carries no device identity at all, which is why the daemon
+    # grabs through XI2: `XIDeviceEvent.sourceid` is the only channel that can
+    # tell one keyboard from another, or a real keystroke from an injected one,
+    # since injection and real input share a display.
+    device: str | None = None
+
+
+# Source devices whose events the daemon drops outright, by XI2 name. Matched
+# against the SOURCE (slave) device, not the master.
+#
+# EMPTY BY DEFAULT, deliberately. The obvious entry is
+# "Virtual core XTEST keyboard" — but XTEST is also what `xdotool` uses, what
+# every harness in this repo injects with, and what any user-facing automation
+# would come through, so dropping it by default would silently kill binds that
+# work today. And whether the xrdp session's synthesised Shift arrives as XTEST
+# (5) or as `xrdpKeyboard` (7) is UNMEASURED — it cannot be settled by
+# injection, since XTEST is what a harness injects with — so it needs a human
+# at a real RDP client ([[sp020]] Task 15 / dotfiles-hwds.3). Until that lands
+# the 120 ms release guard stays and nothing is ignored.
+IGNORE_DEVICES: list[str] = []
 
 
 @dataclass(frozen=True)
@@ -212,12 +234,36 @@ def _command_problem(bind: Bind, where: str) -> str | None:
     return None
 
 
+def _device_problem(bind: Bind, where: str) -> str | None:
+    """A `device=` that can never match is a bind that silently never fires.
+
+    Only the shape is checked here, never the name against a live inventory:
+    `validate()` is pure and runs headless (`--check` in a pre-commit hook), and
+    a device may legitimately be absent at validation time and present at press
+    time — a bluetooth keyboard that is off right now.
+    """
+    dev = getattr(bind, "device", None)
+    if dev is None:
+        return None
+    if not isinstance(dev, str) or not dev.strip():
+        return (f"{where}: chord {bind.chord!r} has an empty device= "
+                f"({dev!r}); omit it to match any source device")
+    return None
+
+
 def _key(bind: Bind, prefix: str = "", mod: str = DEFAULT_MOD) -> tuple:
     """Duplicate-detection identity. `on_release` is part of it: press and
     release on one chord are different events, not a collision (i3 does the
-    same with `--release`)."""
+    same with `--release`).
+
+    `device` is part of it for the same reason: two binds on one chord scoped to
+    DIFFERENT source devices are disambiguated at dispatch by `sourceid` and
+    cannot double-fire, so calling them a collision would refuse the exact table
+    the `device=` predicate exists to express. Two binds on one chord with the
+    SAME device (`None` included) still collide.
+    """
     chord = f"{prefix}+{bind.chord}" if prefix else bind.chord
-    return normalize_chord(chord, mod) + (bind.on_release,)
+    return normalize_chord(chord, mod) + (bind.on_release, bind.device)
 
 
 def _bare_problem(bind: Bind, where: str, mod: str) -> str | None:
@@ -277,6 +323,9 @@ def _scan(bs: Iterable[Bind], where: str, layers, seen: dict,
         else:
             seen[k] = where
         p = _command_problem(b, where)
+        if p:
+            problems.append(p)
+        p = _device_problem(b, where)
         if p:
             problems.append(p)
         if isinstance(b.action, EnterLayer) and b.action.layer not in layers:

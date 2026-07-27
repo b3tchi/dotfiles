@@ -844,3 +844,104 @@ def test_a_dropped_line_is_resent_on_the_next_poll(sockpath):
         c.close()
     finally:
         p.close()
+
+
+# --------------------------------------------------------------------------
+# source-device matching (sp020 Task 11, dotfiles-hwds.13)
+#
+# The engine is where a `device=` predicate is judged, because that is where a
+# bind is chosen. Two-sided throughout: a positive-only check passes against an
+# engine that ignores `Event.device` entirely.
+# --------------------------------------------------------------------------
+
+def ev(key, mods=(), device=None, kind="press"):
+    return L.Event(kind, key, frozenset(mods), device=device)
+
+
+def tap(engine, key, mods=(), device=None):
+    """Press and release. The release matters: without it the engine's own
+    auto-repeat suppression treats the next press of the same key as a repeat,
+    and a device check would be graded on an event that never reached it."""
+    out = engine.handle(ev(key, mods, device))
+    engine.handle(ev(key, mods, device, kind="release"))
+    return out
+
+
+def test_an_unscoped_bind_matches_any_source():
+    e = L.LayerEngine([B.Bind("Mod4+o", "nop any")], {})
+    for dev in (None, "Keyboard A", "Virtual core XTEST keyboard"):
+        assert tap(e, "o", ["Mod4"], dev) == ["nop any"]
+
+
+def test_a_scoped_global_bind_fires_only_for_its_device():
+    e = L.LayerEngine([B.Bind("Mod4+o", "nop a", device="Keyboard A")], {})
+    assert tap(e, "o", ["Mod4"], "Keyboard A") == ["nop a"]
+    assert tap(e, "o", ["Mod4"], "Keyboard B") == []
+    assert tap(e, "o", ["Mod4"], None) == [], \
+        "an unattributable event must not satisfy a device predicate"
+
+
+def test_one_chord_resolves_to_different_actions_per_source():
+    e = L.LayerEngine([B.Bind("Mod4+o", "nop a", device="Keyboard A"),
+                       B.Bind("Mod4+o", "nop b", device="Keyboard B")], {})
+    assert tap(e, "o", ["Mod4"], "Keyboard A") == ["nop a"]
+    assert tap(e, "o", ["Mod4"], "Keyboard B") == ["nop b"]
+
+
+def test_a_scoped_bind_is_tried_before_the_unscoped_fallback():
+    """Table order decides, and the scoped bind is written first — otherwise the
+    catch-all would shadow it and the predicate would never be reachable."""
+    e = L.LayerEngine([B.Bind("Mod4+o", "nop a", device="Keyboard A"),
+                       B.Bind("Mod4+o", "nop any")], {})
+    assert tap(e, "o", ["Mod4"], "Keyboard A") == ["nop a"]
+    assert tap(e, "o", ["Mod4"], "Keyboard B") == ["nop any"]
+
+
+def test_a_scoped_layer_bind_fires_only_for_its_device():
+    layers = {"nav": B.Layer(binds=[B.Bind("h", "focus left",
+                                           device="Keyboard A")],
+                             exit_keys=["q"])}
+    e = L.LayerEngine([B.Bind("Mod4+o", B.enter_layer("nav"))], layers)
+    e.handle(ev("o", ["Mod4"], "Keyboard A"))
+    assert e.state["layer"] == "nav"
+    assert tap(e, "h", device="Keyboard B") == []
+    assert tap(e, "h", device="Keyboard A") == ["focus left"]
+
+
+def test_a_scoped_sublayer_bind_fires_only_for_its_device():
+    layers = {"nav": B.Layer(
+        binds=[B.Bind("h", "focus left")],
+        mods={"move": B.Mod("Ctrl", (B.Bind("h", "move left",
+                                            device="Keyboard A"),))},
+        exit_keys=["q"])}
+    e = L.LayerEngine([B.Bind("Mod4+o", B.enter_layer("nav"))], layers)
+    e.handle(ev("o", ["Mod4"], "Keyboard A"))
+    e.handle(ev("Control_L", device="Keyboard A"))
+    assert e.state["mod"] == "move"
+    assert tap(e, "h", device="Keyboard B") == []
+    assert tap(e, "h", device="Keyboard A") == ["move left"]
+
+
+def test_exit_keys_are_never_device_scoped():
+    """A layer must stay leavable whatever produced the key: exit keys are
+    matched on the keysym alone, and a source predicate on the way OUT would
+    turn the layer into a trap for the second keyboard."""
+    layers = {"nav": B.Layer(binds=[B.Bind("h", "focus left",
+                                           device="Keyboard A")],
+                             exit_keys=["q"])}
+    e = L.LayerEngine([B.Bind("Mod4+o", B.enter_layer("nav"))], layers)
+    e.handle(ev("o", ["Mod4"], "Keyboard A"))
+    e.handle(ev("q", device="Keyboard B"))
+    assert e.state["layer"] == "default"
+
+
+def test_the_event_carries_the_source_id_alongside_the_name():
+    e = L.Event("press", "h", frozenset(), device="Keyboard A", device_id=12)
+    assert (e.device, e.device_id) == ("Keyboard A", 12)
+
+
+def test_an_event_built_without_a_device_is_unchanged():
+    """Parity: every X-free caller in the suite constructs Event(kind, key,
+    mods) and must keep meaning 'any source'."""
+    e = L.Event("press", "h", frozenset())
+    assert e.device is None and e.device_id is None

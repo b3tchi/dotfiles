@@ -66,10 +66,33 @@ class Event:
 
     `mods` is what the SESSION reports as held at this event — used only to
     corroborate or expire a hold, never as the primary source (see MOD_KEYSYMS).
+
+    `device` / `device_id` are the SOURCE device that produced the event —
+    XI2's `sourceid` (the physical slave) and the name it resolves to, not the
+    master in the event header. They are what a `Bind(device=...)` predicate is
+    matched against. Both default to None so every X-free test and every
+    unscoped bind behaves exactly as before the XI2 port.
     """
     kind: str                       # "press" | "release"
     key: str                        # keysym name
     mods: frozenset[str] = field(default_factory=frozenset)
+    device: str | None = None       # XI2 source device NAME
+    device_id: int | None = None    # XI2 sourceid
+
+
+def device_matches(bind, ev: Event) -> bool:
+    """Does this bind accept the event's SOURCE device?
+
+    An unscoped bind (`device=None`) accepts anything, which is what keeps the
+    whole shipped table behaving as it did before device identity existed. A
+    scoped bind accepts only its own device — and, deliberately, NOT an event
+    whose source could not be resolved: an unattributable event must not
+    activate a bind whose entire purpose is attribution.
+    """
+    want = getattr(bind, "device", None)
+    if want is None:
+        return True
+    return ev.device == want
 
 
 class LayerEngine:
@@ -231,13 +254,20 @@ class LayerEngine:
 
     # -- matching ---------------------------------------------------------
     def _index(self, bs) -> dict:
+        """chord identity -> the binds on it, in table order.
+
+        A LIST rather than one bind: `device=` splits one chord across several
+        binds that the validator deliberately does not call duplicates, because
+        `sourceid` disambiguates them at dispatch. Every other chord has exactly
+        one entry, so the lookup below is the same lookup it always was.
+        """
         out: dict = {}
         for b in bs:
             try:
                 key = B.normalize_chord(b.chord, self.mod) + (b.on_release,)
             except B.BindError:
                 continue                # validated at load; skip defensively
-            out[key] = b
+            out.setdefault(key, []).append(b)
         return out
 
     def _match(self, ev: Event, on_release: bool) -> list:
@@ -245,8 +275,10 @@ class LayerEngine:
         if layer is not None:
             return self._match_in_layer(layer, ev, on_release)
         want = (tuple(sorted(ev.mods)), ev.key, on_release)
-        b = self._global.get(want)
-        return [b.action] if b else []
+        for b in self._global.get(want, ()):
+            if device_matches(b, ev):
+                return [b.action]
+        return []
 
     def _match_in_layer(self, layer, ev: Event, on_release: bool) -> list:
         # Exit keys first, and matched on the KEYSYM ALONE — deliberately
@@ -267,7 +299,8 @@ class LayerEngine:
         mod_label = self._active_mod()
         table = layer.mods[mod_label].binds if mod_label else layer.binds
         for b in table:
-            if b.chord == ev.key and b.on_release == on_release:
+            if (b.chord == ev.key and b.on_release == on_release
+                    and device_matches(b, ev)):
                 return [b.action]
         return []
 

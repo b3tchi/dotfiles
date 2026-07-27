@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Live-X checks for hotkeyd (sp020 Task 4). Driven by test-hotkeyd.sh stage 6.
+"""Live-X checks for hotkeyd (sp020 Task 4, XI2 port at Task 11). Driven by
+test-hotkeyd.sh stage 6.
 
-These are the assertions that fakes cannot make: a REAL XGrabKey against a real
-X server, with NumLock and CapsLock actually toggled, dispatching to a real i3
-and reading the effect back out of the tree. poc013 measured that a bare-mask
-grab fires 0/3 with NumLock on — that finding only exists because it was checked
-against a live server, so it gets checked that way here too.
+These are the assertions that fakes cannot make: a REAL `XIGrabKeycode` against
+a real X server, with NumLock and CapsLock actually toggled, dispatching to a
+real i3 and reading the effect back out of the tree. poc013 measured that a
+bare-mask grab fires 0/3 with NumLock on — that finding only exists because it
+was checked against a live server, so it gets checked that way here too, and it
+is re-measured under XI2 rather than assumed to carry over.
 
 Prints `PASS <what>` / `FAIL <what>` lines; exits non-zero if anything failed.
 """
@@ -19,7 +21,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 from Xlib import X, Xatom, XK, display as xdisplay  # noqa: E402
-from Xlib.ext import xtest  # noqa: E402
+from Xlib.ext import xinput, xtest  # noqa: E402
 
 import hotkeyd as H  # noqa: E402
 
@@ -49,17 +51,39 @@ def tap(d, key_code, mod_code=None, n=1):
 
 
 def drain(d, code, seconds=0.6):
-    """Count KeyPress events delivered to our grab within the window."""
+    """Count XI2 KeyPress events delivered to our grab within the window.
+
+    XI2, not core: after the Task 11 port the grabs are `XIGrabKeycode`, so the
+    server delivers `GenericEvent`/`XI_KeyPress` and a core-typed counter would
+    read zero for every check in this file.
+    """
     seen = 0
     end = time.time() + seconds
     while time.time() < end:
         if d.pending_events():
             ev = d.next_event()
-            if ev.type == X.KeyPress and ev.detail == code:
+            k = H.key_event(ev)
+            if k is not None and k.kind == "press" and k.detail == code:
                 seen += 1
         else:
             time.sleep(0.02)
     return seen
+
+
+def sources(d, code, seconds=0.6):
+    """Every (sourceid, name) that delivered `code` within the window."""
+    reg = H.DeviceRegistry(d)
+    out = []
+    end = time.time() + seconds
+    while time.time() < end:
+        if d.pending_events():
+            ev = d.next_event()
+            k = H.key_event(ev)
+            if k is not None and k.kind == "press" and k.detail == code:
+                out.append((k.sourceid, reg.name(k.sourceid), k.deviceid))
+        else:
+            time.sleep(0.02)
+    return out
 
 
 def main() -> int:
@@ -71,29 +95,21 @@ def main() -> int:
     numlock = code_for(d, "Num_Lock")
     caps = code_for(d, "Caps_Lock")
 
-    class Adapter:
-        def keysym_to_keycode(self, name):
-            ks = XK.string_to_keysym(name)
-            return d.keysym_to_keycode(ks) if ks else 0
+    # The REAL adapter, not a copy of it: after the XI2 port the grab mechanism
+    # lives entirely in XAdapter (extension probe, XIGrabKeycode, the reply's
+    # failed-modifier list), and a re-implementation here would grade a copy.
+    Adapter = lambda: H.XAdapter(d, root)                       # noqa: E731
 
-        def grab_key(self, code, mask):
-            errs = []
-            root.grab_key(code, mask, 1, X.GrabModeAsync, X.GrabModeAsync,
-                          onerror=lambda e, r: errs.append(e))
-            d.sync()
-            if errs:
-                raise H.GrabRefused(type(errs[0]).__name__)
-
-        def ungrab_key(self, code, mask):
-            root.ungrab_key(code, mask)
-
-        def sync(self):
-            d.sync()
+    # -- 0: the mechanism itself --------------------------------------------
+    ver = H.require_xi2(d)
+    check(int(ver.major_version) >= 2, "the display speaks XI2",
+          f"{ver.major_version}.{ver.minor_version}")
 
     # -- 1: a real grab fires, with and without the lock keys on ------------
     g = H.GrabManager(Adapter())
     g.sync_binds(["Mod4+F10"])
-    check(not g.problems, "real XGrabKey registered Mod4+F10", str(g.problems))
+    check(not g.problems, "real XIGrabKeycode registered Mod4+F10",
+          str(g.problems))
 
     tap(d, f10, mod4, n=3)
     check(drain(d, f10) == 3, "chord fires with no lock keys")
@@ -109,14 +125,83 @@ def main() -> int:
         time.sleep(0.2)
         drain(d, f10, 0.2)
 
-    # -- 2: BadAccess on a chord i3 already owns, rest keeps working --------
+    # -- 1b: the grab really is per-chord, not an exclusive device grab ------
+    # A passing chord alone cannot tell `XIGrabKeycode` from `XIGrabDevice`:
+    # both deliver F10 here. What separates them is everything ELSE — an
+    # exclusive device grab funnels the whole keyboard to this client (and locks
+    # the session if the client hangs), while a passive keycode grab delivers
+    # only what it registered. F12 is in nobody's grab set, so silence on F12
+    # while F10 fires is the discriminator.
+    f12 = code_for(d, "F12")
+    drain(d, f12, 0.1)
+    tap(d, f12, n=3)
+    strays = drain(d, f12)
+    check(strays == 0,
+          "a key we did NOT grab is not delivered to us — the grab is per "
+          "chord, never XIGrabDevice", f"{strays} stray deliveries")
+    tap(d, f10, mod4, n=2)
+    check(drain(d, f10) == 2,
+          "while the chord we DID grab still arrives (else the check above is "
+          "satisfied by a daemon that grabbed nothing)")
+
+    # -- 2: a refused grab degrades to one chord, and the rest keep working --
+    # MEASURED, and it corrects sp020: the X server keeps core and XI2 passive
+    # grabs in SEPARATE conflict domains (`GrabMatchesSecond` compares grabtype),
+    # so an XI2 grab is NOT refused by i3's core grab on the same chord — the
+    # later grabber simply wins delivery. What still refuses is another XI2
+    # grabber, i.e. a second hotkeyd, which is what this checks. See
+    # dotfiles-hwds.13's DEVIATION note; ownership auditing therefore cannot
+    # lean on BadAccess and belongs to `check --ownership` (sp020 Task 13).
+    rival = xdisplay.Display()
+    rival.xinput_query_version()
+    rival_f11 = code_for(rival, "F11")
+    rival.screen().root.xinput_grab_keycode(
+        H.XI_ALL_MASTER_DEVICES, X.CurrentTime, rival_f11,
+        xinput.GrabModeAsync, xinput.GrabModeAsync, True,
+        xinput.KeyPressMask | xinput.KeyReleaseMask, [H.MOD4])
+    rival.sync()
     g2 = H.GrabManager(Adapter())
-    g2.sync_binds(["Mod4+F11", "Mod4+F10"])   # F11 is bound in the test i3 cfg
+    g2.sync_binds(["Mod4+F11", "Mod4+F10"])
     took_f11 = any("F11" in p for p in g2.problems)
-    check(took_f11, "BadAccess reported for the chord i3 already grabbed",
+    check(took_f11,
+          "a chord another XI2 client already grabbed is REFUSED and reported",
           str(g2.problems))
+    check("Mod4+F11" not in g2.chords,
+          "a refused chord is not recorded as ours")
     check("Mod4+F10" in g2.chords,
-          "the other chord is still grabbed after a BadAccess")
+          "the other chord is still grabbed after a refusal")
+    drain(d, f10, 0.1)                           # clear anything left queued
+    tap(d, f10, mod4, n=2)
+    check(drain(d, f10) == 2,
+          "and that other chord still FIRES after the refusal")
+
+    # The measurement itself, pinned so the finding cannot rot back into the
+    # spec's original claim: i3's core grab neither refuses nor survives ours.
+    core_client = xdisplay.Display()
+    f9 = code_for(core_client, "F9")
+    core_errs = []
+    core_client.screen().root.grab_key(
+        f9, H.MOD4, 1, X.GrabModeAsync, X.GrabModeAsync,
+        onerror=lambda e, r: core_errs.append(e))
+    core_client.sync()
+    g_core = H.GrabManager(Adapter())
+    g_core.sync_binds(["Mod4+F9"])
+    check(not core_errs, "the core grabber got its grab", str(core_errs))
+    check(not g_core.problems,
+          "an XI2 grab over a live CORE grab is NOT refused — core and XI2 "
+          "passive grabs are separate conflict domains (corrects sp020)",
+          str(g_core.problems))
+    tap(d, f9, mod4, n=3)
+    got_xi = drain(d, f9)
+    got_core = 0
+    while core_client.pending_events():
+        ev = core_client.next_event()
+        if ev.type == X.KeyPress and ev.detail == f9:
+            got_core += 1
+    check(got_xi == 3 and got_core == 0,
+          "and the LATER (XI2) grabber wins delivery outright",
+          f"xi2={got_xi} core={got_core}")
+    g_core.sync_binds([])
 
     # -- 3: persistent IPC dispatch actually moves i3 ------------------------
     i3 = H.I3Client()
@@ -164,12 +249,6 @@ def main() -> int:
 
     import binds as BT                                    # noqa: PLC0415
     dae = H.Daemon(BT, d, pub, i3=NullI3())
-    dae._pending = []
-
-    def peek():
-        if dae._pending:
-            return dae._pending.pop(0)
-        return d.next_event() if d.pending_events() else None
 
     def feed(keysym, kind="press", mods=()):
         """Inject a real key and pump whatever the server delivers."""
@@ -185,9 +264,8 @@ def main() -> int:
         d.sync()
         time.sleep(0.15)
         out = []
-        while d.pending_events() or dae._pending:
-            ev = dae._pending.pop(0) if dae._pending else d.next_event()
-            out += dae.pump(ev, peek=peek)
+        while d.pending_events():
+            out += dae.pump(d.next_event())
         return out
 
     check("h" not in dae.grabs.chords,
@@ -207,7 +285,7 @@ def main() -> int:
     d.sync()
     time.sleep(0.1)
     while d.pending_events():
-        dae.pump(d.next_event(), peek=peek)
+        dae.pump(d.next_event())
     check(dae.engine.state["mod"] == "move",
           "held Ctrl is observed as the move sublayer", str(dae.engine.state))
     acts = feed("h", mods=[])
@@ -222,7 +300,7 @@ def main() -> int:
     d.sync()
     time.sleep(0.1)
     while d.pending_events():
-        dae.pump(d.next_event(), peek=peek)
+        dae.pump(d.next_event())
     check("h" not in dae.grabs.chords,
           "leaving the layer released its bare keys again")
 
@@ -245,7 +323,7 @@ def main() -> int:
     d.sync()
     time.sleep(0.1)
     while d.pending_events():
-        dae.pump(d.next_event(), peek=peek)
+        dae.pump(d.next_event())
     check(dae.engine.state == {"layer": "nav", "mod": None},
           "held Shift does NOT become a sublayer", str(dae.engine.state))
     feed("q", mods=[])
@@ -255,9 +333,16 @@ def main() -> int:
     d.sync()
     time.sleep(0.1)
     while d.pending_events():
-        dae.pump(d.next_event(), peek=peek)
+        dae.pump(d.next_event())
 
     # -- auto-repeat: the G3 case, measured on a real hold -------------------
+    # The MECHANISM changed at the XI2 port and the measurement changed with it.
+    # Core delivery synthesised a RELEASE+PRESS pair per repeat and the daemon
+    # coalesced them by timestamp; XI2 sends no synthetic release at all and
+    # instead sets XIKeyRepeat on the press. Both numbers below are read off THIS
+    # run rather than asserted from the old shape, so a server that ever went
+    # back to release+press pairs would show up here as a changed count rather
+    # than as a mystery.
     feed("o", mods=["Super_L"])
     hcode = code_for(d, "h")
     xtest.fake_input(d, X.KeyPress, hcode)
@@ -266,61 +351,57 @@ def main() -> int:
     xtest.fake_input(d, X.KeyRelease, hcode)
     d.sync()
     time.sleep(0.2)
-    fired = []
-    while d.pending_events() or dae._pending:
-        ev = dae._pending.pop(0) if dae._pending else d.next_event()
-        fired += dae.pump(ev, peek=peek)
+    fired, raw = [], []
+    while d.pending_events():
+        ev = d.next_event()
+        k = H.key_event(ev)
+        if k is not None:
+            raw.append(k)
+        fired += dae.pump(ev)
+    n_press = sum(1 for k in raw if k.kind == "press")
+    n_rel = sum(1 for k in raw if k.kind == "release")
+    n_flag = sum(1 for k in raw if k.repeat)
+    check(n_press > 3 and n_flag == n_press - 1 and n_rel == 1,
+          "XI2 marks auto-repeat on the PRESS (XIKeyRepeat) and sends no "
+          "synthetic release — so the flag, not a timestamp pair, is the "
+          "discriminator",
+          f"{n_press} presses / {n_flag} flagged / {n_rel} releases")
     check(len(fired) == 1,
           "a held key fires ONCE despite the real auto-repeat stream",
           f"{len(fired)} dispatches")
 
-    # -- coalescer FAIRNESS: what the two guards must NOT swallow -------------
-    # The check above proves the coalescer eats auto-repeat. These prove it eats
-    # nothing else. Both guards in Daemon.pump were unconstrained by any
-    # committed test until this block existed (dotfiles-hwds.4) — each of these
-    # mutants survived the whole suite:
-    #   drop `nxt.time == ev.time`     -> ANY queued release+press of one key is
-    #      swallowed, so a genuine fast double-tap fires once instead of twice;
-    #   drop `nxt.detail == ev.detail` -> a same-millisecond release+press of
-    #      DIFFERENT keys is swallowed, so rolling typing inside a layer loses a
-    #      keystroke.
-    # Only a real server can settle either one: the discriminator is the
-    # timestamp X itself stamps on the events, and no fake can be trusted to
+    # -- repeat-filter FAIRNESS: what the guard must NOT swallow --------------
+    # The check above proves the filter eats auto-repeat. These prove it eats
+    # nothing else, and they are the same two cases the core coalescer had to
+    # survive (dotfiles-hwds.4) — a filter keyed on "same keycode as last time"
+    # or on "release+press adjacency" fails one of them:
+    #   a genuine 10 ms double-tap of ONE key must dispatch TWICE;
+    #   a rolling h,j landing on ONE millisecond must keep BOTH.
+    # Only a real server can settle either: the events, their timestamps and
+    # their repeat flags all come from the server, and no fake can be trusted to
     # reproduce how it stamps them.
     hcode, jcode = code_for(d, "h"), code_for(d, "j")
 
     def pump_traced(settle=0.2):
-        """Pump the queue and record every event the daemon actually LOOKED at,
-        `peek`ed ones included. The peeked event is the one the coalescer's
-        decision turns on, so its timestamp has to come off the same run that
-        produced the dispatches — reading it from a separate injection would
-        assert the shape of a run nobody graded."""
+        """Pump the queue, recording every key event the daemon LOOKED at."""
         time.sleep(settle)
         seen, out = [], []
-
-        def spy():
-            queued = bool(dae._pending)         # already recorded when peeked
-            ev = peek()
-            if ev is not None and not queued:
-                seen.append((ev.type, ev.detail, ev.time))
-            return ev
-
-        while d.pending_events() or dae._pending:
-            if dae._pending:
-                ev = dae._pending.pop(0)
-            else:
-                ev = d.next_event()
-                if ev.type in (X.KeyPress, X.KeyRelease):
-                    seen.append((ev.type, ev.detail, ev.time))
-            out += dae.pump(ev, peek=spy)
+        while d.pending_events():
+            ev = d.next_event()
+            k = H.key_event(ev)
+            if k is not None:
+                seen.append(k)
+            out += dae.pump(ev)
         return seen, out
 
     def adjacent(seen, same_key, same_time):
-        """The release->press adjacency a coalescer guard has to judge."""
+        """The release->press adjacency the old core guard had to judge, and
+        that any repeat filter must still not mistake for a repeat."""
         for a, b in zip(seen, seen[1:]):
-            if a[0] != X.KeyRelease or b[0] != X.KeyPress:
+            if a.kind != "release" or b.kind != "press":
                 continue
-            if (a[1] == b[1]) == same_key and (a[2] == b[2]) == same_time:
+            if ((a.detail == b.detail) == same_key
+                    and (a.time == b.time) == same_time):
                 return (a, b)
         return None
 
@@ -338,13 +419,12 @@ def main() -> int:
         return seen, out, 0
 
     check(dae.engine.state["layer"] == "nav",
-          "still in nav for the coalescer-fairness checks",
+          "still in nav for the repeat-filter fairness checks",
           str(dae.engine.state))
 
     # (a) a genuine double-tap: two taps of a nav bind ~10 ms apart. The release
     # of the first tap and the press of the second sit next to each other in the
-    # queue looking EXACTLY like an auto-repeat pair — same key, adjacent — and
-    # the only thing telling them apart is the millisecond X stamps on each.
+    # queue looking EXACTLY like the old auto-repeat pair — same key, adjacent.
     def double_tap():
         xtest.fake_input(d, X.KeyPress, hcode)
         xtest.fake_input(d, X.KeyRelease, hcode)
@@ -358,16 +438,19 @@ def main() -> int:
     check(n > 0,
           "a 10 ms double-tap really does put release+press of the SAME key on "
           "two different milliseconds (else the next check proves nothing)",
-          f"{[(k, t) for _, k, t in seen]}")
+          f"{[(k.detail, k.time) for k in seen or []]}")
+    check(not any(k.repeat for k in seen or []),
+          "and the server does NOT flag either tap as a repeat",
+          f"flagged: {[k.detail for k in seen or [] if k.repeat]}")
     check(taps == ["focus left", "focus left"],
           "a 10 ms double-tap dispatches TWICE — the release+press pair between "
-          "the taps is NOT coalesced away",
+          "the taps is NOT swallowed",
           f"{taps} (attempt {n})")
 
     # (b) rolling typing: h and j injected as one un-synced batch, which the
     # server stamps with a single millisecond. Release-h is then immediately
-    # followed by press-j at the SAME time — auto-repeat's timestamp signature
-    # across two different keys, and the keycode guard is all that saves the j.
+    # followed by press-j at the SAME time — the old auto-repeat signature
+    # across two different keys.
     def rolling_pair():
         xtest.fake_input(d, X.KeyPress, hcode)
         xtest.fake_input(d, X.KeyRelease, hcode)
@@ -379,11 +462,101 @@ def main() -> int:
     check(n > 0,
           "a rolling h,j pair really does land release+press of DIFFERENT keys "
           "on ONE millisecond (else the next check proves nothing)",
-          f"{[(k, t) for _, k, t in seen]}")
+          f"{[(k.detail, k.time) for k in seen or []]}")
     check(roll == ["focus left", "focus down"],
           "a same-millisecond release+press of DIFFERENT keys keeps BOTH — fast "
           "rolling typing inside a layer loses no keystroke",
           f"{roll} (attempt {n})")
+
+    # -- 5c: DEVICE ATTRIBUTION, the point of the XI2 port --------------------
+    # Two-sided on purpose. A positive-only check passes against an
+    # implementation that ignores `sourceid` entirely, so each claim below has
+    # its negative twin: the event carries the injecting device AND a bind
+    # scoped to a different real device on this same display stays inert.
+    reg = H.DeviceRegistry(d)
+    xtest_name = None
+    inventory = {}
+    for dev in d.xinput_query_device(xinput.AllDevices).devices:
+        inventory[dev.deviceid] = dev.name
+        if dev.name.endswith("XTEST keyboard"):
+            xtest_name = dev.name
+    check(xtest_name is not None,
+          "the display's XI2 inventory names an XTEST keyboard",
+          str(sorted(inventory.items())))
+
+    # A real, DIFFERENT keyboard on this display, used as the negative source.
+    other_kbd = next((n for i, n in inventory.items()
+                      if "keyboard" in n.lower() and n != xtest_name
+                      and not n.startswith("Virtual core keyboard")), None)
+    check(other_kbd is not None,
+          "and a second, distinct keyboard device to scope the negative case to",
+          str(other_kbd))
+
+    # (positive) every dispatched event carries the INJECTING device's sourceid
+    got = sources(d, code_for(d, "F10"), 0.05)          # clear the queue
+    g5 = H.GrabManager(H.XAdapter(d, root))
+    g5.sync_binds(["Mod4+F10"])
+    tap(d, code_for(d, "F10"), mod4, n=2)
+    got = sources(d, code_for(d, "F10"))
+    check(len(got) == 2 and all(name == xtest_name for _, name, _ in got),
+          f"every grabbed event resolves its source to {xtest_name!r}",
+          str(got))
+    check(all(sid != did for sid, _, did in got),
+          "and sourceid is the SLAVE, not the master in the event header",
+          str(got))
+    g5.sync_binds([])
+
+    # (positive/negative) a device= bind fires for its own source and for
+    # nothing else — driven through the REAL Daemon, on the real server.
+    import types                                        # noqa: PLC0415
+
+    def scoped_table(dev_for_f10, ignore=()):
+        m = types.ModuleType("scoped")
+        m.BINDS = [BT.Bind("Mod4+F10", "nop scoped", device=dev_for_f10)]
+        m.LAYERS = {}
+        m.IGNORE_DEVICES = list(ignore)
+        return m
+
+    class Recorder(NullI3):
+        def __init__(self):
+            self.cmds = []
+
+        def command(self, cmd):
+            self.cmds.append(cmd)
+            return True
+
+    def run_scoped(table):
+        rec = Recorder()
+        dd = H.Daemon(table, d, pub, i3=rec)
+        out = []
+        tap(d, code_for(d, "F10"), mod4, n=2)
+        time.sleep(0.2)
+        while d.pending_events():
+            out += dd.pump(d.next_event())
+        dd.grabs.sync_binds([])
+        dd.close()
+        return out
+
+    fired_same = run_scoped(scoped_table(xtest_name))
+    check(fired_same == ["nop scoped", "nop scoped"],
+          f"a bind scoped to device={xtest_name!r} FIRES for that source",
+          str(fired_same))
+
+    fired_other = run_scoped(scoped_table(other_kbd))
+    check(fired_other == [],
+          f"the same bind scoped to device={other_kbd!r} is INERT for a key "
+          "the XTEST device produced",
+          str(fired_other))
+
+    # (negative) IGNORE_DEVICES drops the source outright
+    fired_ignored = run_scoped(scoped_table(None, ignore=[xtest_name]))
+    check(fired_ignored == [],
+          f"IGNORE_DEVICES={[xtest_name]} drops every event from that source",
+          str(fired_ignored))
+    fired_unignored = run_scoped(scoped_table(None, ignore=["no such device"]))
+    check(fired_unignored == ["nop scoped", "nop scoped"],
+          "while an IGNORE_DEVICES naming something else changes nothing",
+          str(fired_unignored))
 
     feed("q")
     # Hand the grabs back before a second daemon opens on the same connection:
@@ -417,12 +590,6 @@ def main() -> int:
           H.x_resource_mod(d))
 
     alt = H.Daemon(BT, d, pub, i3=NullI3())
-    alt._pending = []
-
-    def alt_peek():
-        if alt._pending:
-            return alt._pending.pop(0)
-        return d.next_event() if d.pending_events() else None
 
     def alt_feed(keysym, mods=()):
         code = code_for(d, keysym)
@@ -436,9 +603,8 @@ def main() -> int:
         d.sync()
         time.sleep(0.15)
         out = []
-        while d.pending_events() or alt._pending:
-            ev = alt._pending.pop(0) if alt._pending else d.next_event()
-            out += alt.pump(ev, peek=alt_peek)
+        while d.pending_events():
+            out += alt.pump(d.next_event())
         return out
 
     check(alt.mod == "Mod1", "the daemon detected $mod=Mod1 for itself", alt.mod)

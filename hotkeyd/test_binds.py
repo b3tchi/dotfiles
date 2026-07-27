@@ -618,3 +618,71 @@ def test_the_i3_config_parser_actually_sees_binds():
     assert (("Mod4",), "o") in owned, "did not find $mod+o in i3/config.common"
     assert (("Mod4",), "h") in owned
     assert len(owned) > 80, f"only parsed {len(owned)} top-level i3 binds"
+
+
+# --------------------------------------------------------------------------
+# device= (sp020 Task 11, dotfiles-hwds.13)
+#
+# Core `KeyPress` carries no device identity; XI2's `sourceid` does, so a bind
+# can name the keyboard it belongs to. The validator's job here is narrow: keep
+# a scoped bind out of the duplicate rule, and refuse a `device=` that could
+# never match anything.
+# --------------------------------------------------------------------------
+
+def test_a_bind_is_unscoped_by_default():
+    """Parity: every bind in the shipped table predates device identity and must
+    keep matching whatever produced the key."""
+    assert B.Bind("Mod4+o", "nop x").device is None
+
+
+def test_two_binds_on_one_chord_with_different_devices_are_not_duplicates():
+    """`sourceid` disambiguates them at dispatch, so they cannot double-fire —
+    calling them a collision would refuse the exact table `device=` exists for."""
+    assert B.validate([B.Bind("Mod4+o", "nop a", device="Keyboard A"),
+                       B.Bind("Mod4+o", "nop b", device="Keyboard B")],
+                      {}) == []
+
+
+def test_two_binds_on_one_chord_with_the_SAME_device_are_still_duplicates():
+    problems = B.validate([B.Bind("Mod4+o", "nop a", device="Keyboard A"),
+                           B.Bind("Mod4+o", "nop b", device="Keyboard A")], {})
+    assert any("already bound" in p for p in problems), problems
+
+
+def test_a_scoped_bind_and_an_unscoped_one_on_the_same_chord_coexist():
+    """The fallback shape: one keyboard gets a special meaning, everything else
+    gets the general one. They are distinguishable, so they are not duplicates."""
+    assert B.validate([B.Bind("Mod4+o", "nop laptop", device="Keyboard A"),
+                       B.Bind("Mod4+o", "nop any")], {}) == []
+
+
+def test_two_unscoped_binds_on_one_chord_are_still_duplicates():
+    problems = B.validate([B.Bind("Mod4+o", "nop a"),
+                           B.Bind("Mod4+o", "nop b")], {})
+    assert any("already bound" in p for p in problems), problems
+
+
+def test_an_empty_device_is_refused_naming_the_chord():
+    """A `device=""` matches nothing, so the bind would silently never fire —
+    the failure mode the validator exists to convert into a refusal."""
+    for bad in ("", "   ", 12):
+        problems = B.validate([B.Bind("Mod4+o", "nop x", device=bad)], {})
+        assert any("device=" in p and "Mod4+o" in p for p in problems), \
+            (bad, problems)
+
+
+def test_a_layer_bind_may_be_device_scoped_too():
+    layers = {"nav": B.Layer(binds=[B.Bind("h", "focus left",
+                                           device="Keyboard A"),
+                                    B.Bind("h", "nop other",
+                                           device="Keyboard B")],
+                             exit_keys=["q"])}
+    assert B.validate([], layers) == []
+
+
+def test_the_shipped_table_ignores_no_device():
+    """Dropping XTEST by default would kill every xdotool-driven bind and every
+    harness in this repo, and whether xrdp's synthesised Shift is XTEST-sourced
+    is unmeasured (sp020 Task 15). So the list ships empty, on purpose."""
+    assert hasattr(B, "IGNORE_DEVICES")
+    assert list(B.IGNORE_DEVICES) == []

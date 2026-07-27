@@ -1,4 +1,4 @@
-"""Daemon core tests (sp020 Task 4, dotfiles-hwds.1).
+"""Daemon core tests (sp020 Task 4, dotfiles-hwds.1; XI2 port at Task 11).
 
 The X pieces are driven through a fake display that records every grab call, so
 the lock-bit and MappingNotify contracts are asserted exactly rather than
@@ -7,8 +7,15 @@ a real unix socket stub, because the property that matters — ONE connection fo
 the whole run, reconnecting only when i3 actually restarts — is only observable
 at the socket.
 
-Live-X behaviour (real XGrabKey, real i3 dispatch, NumLock/CapsLock permutations,
-BadAccess against a second grabber) is covered by test-hotkeyd.sh under Xvfb.
+The fake display speaks XI2 and REFUSES the core and exclusive grab calls
+(`XI2Root`), because after the port those are the two ways of getting the
+mechanism wrong: `XGrabKey` costs every event its source device, and
+`XIGrabDevice` locks the session when the daemon hangs. A fake that answered
+either would let a half-finished port pass this whole file.
+
+Live-X behaviour (real XIGrabKeycode, real i3 dispatch, NumLock/CapsLock
+permutations, refusal against a second XI2 grabber, real source attribution
+through XTEST) is covered by test-hotkeyd.sh under Xvfb.
 
 Run: pytest hotkeyd/test_daemon.py   (or hotkeyd/test-hotkeyd.sh)
 """
@@ -20,6 +27,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,17 +36,30 @@ sys.path.insert(0, str(HERE))
 
 import binds as B  # noqa: E402
 import hotkeyd as H  # noqa: E402
+import layers as L  # noqa: E402
 
 
 # --------------------------------------------------------------------------
 # fake X
 # --------------------------------------------------------------------------
 
+#: sourceid -> name, the XI2 inventory the fake displays report. Shaped after
+#: the measured one: `:0` has the laptop keyboard (12), bluetooth (13) and the
+#: XTEST injector (5).
+FAKE_DEVICES = {5: "Virtual core XTEST keyboard",
+                12: "AT Translated Set 2 keyboard",
+                13: "BlueZ 5.86 (MCS)"}
+
+
 class FakeDisplay:
     """Records grabs. `keymap` maps keysym name -> keycode and can be swapped
-    mid-test to simulate the xrdp per-connect keymap reset."""
+    mid-test to simulate the xrdp per-connect keymap reset.
 
-    def __init__(self, keymap=None, fail_chords=()):
+    Also answers the XI2 questions the real adapter asks a display: the
+    extension probe, the version, and the device inventory `sourceid` resolves
+    against."""
+
+    def __init__(self, keymap=None, fail_chords=(), devices=None, xi2=True):
         self.keymap = dict(keymap or {"o": 32, "h": 43, "q": 24, "F10": 76,
                                       "Super_L": 133, "Control_L": 37})
         self.grabs = []          # (keycode, mask)
@@ -46,6 +67,9 @@ class FakeDisplay:
         self.syncs = 0
         self.fail_keycodes = set(fail_chords)
         self.errors = []
+        self.devices = dict(FAKE_DEVICES if devices is None else devices)
+        self.xi2 = xi2
+        self.device_queries = []
 
     def keysym_to_keycode(self, name):
         return self.keymap.get(name, 0)
@@ -61,6 +85,78 @@ class FakeDisplay:
 
     def sync(self):
         self.syncs += 1
+
+    # -- XI2 --------------------------------------------------------------
+    def query_extension(self, name):
+        if name == "XInputExtension" and self.xi2:
+            return SimpleNamespace(major_opcode=131)
+        return None
+
+    def xinput_query_version(self):
+        if not self.xi2:
+            # Deliberately says nothing about the extension by name: the probe
+            # must be caught at `query_extension`, and an error message that
+            # happened to mention XInput here would let a version-only check
+            # pass the "names why" assertion for the wrong reason.
+            raise RuntimeError("BadRequest (major 131)")
+        return SimpleNamespace(major_version=2, minor_version=0)
+
+    def xinput_query_device(self, deviceid):
+        self.device_queries.append(deviceid)
+        if deviceid not in self.devices:
+            raise ValueError(f"BadDevice {deviceid}")
+        return SimpleNamespace(devices=[SimpleNamespace(
+            deviceid=deviceid, name=self.devices[deviceid])])
+
+
+class XI2Root:
+    """A root window that speaks XI2 and REFUSES the core / exclusive calls.
+
+    `outer` is the FakeDisplay that records what was grabbed. The refusals are
+    the point: a root that still answered `grab_key` would let a half-finished
+    port pass, and one that answered `xinput_grab_device` would let an
+    exclusive grab through — the failure mode that locks a whole session.
+    """
+
+    def __init__(self, outer, prop=None):
+        self.outer = outer
+        self.prop = prop
+        self.selected_events = []
+
+    def get_full_property(self, atom, kind):
+        return self.prop
+
+    def xinput_grab_keycode(self, deviceid, time, keycode, grab_mode,
+                            paired_device_mode, owner_events, event_mask,
+                            modifiers):
+        self.outer.grab_devices.append(deviceid)
+        for m in modifiers:
+            if keycode in self.outer.fail_keycodes:
+                return SimpleNamespace(modifiers=[m])
+            self.outer.grabs.append((keycode, m))
+        return SimpleNamespace(modifiers=[])
+
+    def xinput_ungrab_keycode(self, deviceid, keycode, modifiers):
+        for m in modifiers:
+            self.outer.ungrabs.append((keycode, m))
+
+    def xinput_select_events(self, spec):
+        self.selected_events.append(spec)
+        self.outer.selected_events.append(spec)
+
+    def grab_key(self, *a, **kw):
+        raise AssertionError(
+            "core XGrabKey: the adapter must grab through XI2, or the event "
+            "carries no source device")
+
+    def ungrab_key(self, *a, **kw):
+        raise AssertionError(
+            "core XUngrabKey: the adapter must ungrab through XI2")
+
+    def xinput_grab_device(self, *a, **kw):
+        raise AssertionError(
+            "XIGrabDevice: an exclusive grab held by a hung daemon locks the "
+            "whole session — grabs must be per chord")
 
 
 def grabs_for(disp, keycode):
@@ -1021,14 +1117,18 @@ def test_a_table_that_defines_dataclasses_loads(tmp_path):
 # --------------------------------------------------------------------------
 
 class FakeXServer(FakeDisplay):
-    """A FakeDisplay that also answers the calls Daemon.__init__ makes: a root
-    window to grab on and an (empty) resource database.
+    """A FakeDisplay that also answers the calls Daemon.__init__ makes: the XI2
+    extension probe, a root window to grab on, and an (empty) resource database.
 
     `keysym_to_keycode` takes an INTEGER keysym exactly as python-xlib does,
     because the Daemon reaches X through the real XAdapter — a fake that accepts
-    the keysym NAME would let the adapter be wrong and still pass."""
+    the keysym NAME would let the adapter be wrong and still pass. Same reason
+    the root window speaks `xinput_grab_keycode` and NOT `grab_key`: the adapter
+    grabs through XI2 now, and a root that still answered the core call would
+    let a half-finished port pass.
+    """
 
-    def __init__(self, keymap=None):
+    def __init__(self, keymap=None, devices=None, xi2=True, fail_chords=()):
         super().__init__(keymap=keymap or {"o": 32, "h": 43, "q": 24,
                                            "Escape": 9, "Return": 36,
                                            "Left": 113, "Right": 114,
@@ -1037,7 +1137,11 @@ class FakeXServer(FakeDisplay):
                                            "Super_L": 133, "Control_L": 37,
                                            "Control_R": 105, "Alt_L": 64,
                                            "Alt_R": 108, "Meta_L": 205,
-                                           "Meta_R": 206})
+                                           "Meta_R": 206},
+                         fail_chords=fail_chords, devices=devices, xi2=xi2)
+        self.selected_events = []
+        self.grab_devices = []       # deviceid per XIGrabKeycode call
+        self._root = XI2Root(self)
 
     def keysym_to_keycode(self, keysym):
         from Xlib import XK                                  # noqa: PLC0415
@@ -1046,26 +1150,18 @@ class FakeXServer(FakeDisplay):
                 return code
         return 0
 
+    def keycode_to_keysym(self, keycode, index):
+        from Xlib import XK                                  # noqa: PLC0415
+        for name, code in self.keymap.items():
+            if code == keycode:
+                return XK.string_to_keysym(name)
+        return 0
+
     def intern_atom(self, name):
         return 1
 
     def screen(self):
-        outer = self
-
-        class Root:
-            def get_full_property(self, atom, kind):
-                return None
-
-            def grab_key(self, code, mask, owner, pmode, kmode, onerror=None):
-                outer.grabs.append((code, mask))
-
-            def ungrab_key(self, code, mask):
-                outer.ungrabs.append((code, mask))
-
-        class Screen:
-            root = Root()
-
-        return Screen()
+        return SimpleNamespace(root=self._root)
 
 
 class Lines:
@@ -1082,17 +1178,27 @@ class Lines:
         pass
 
 
-def key_press(detail, state=0):
-    from Xlib import X                                      # noqa: PLC0415
+def xi_event(detail, state=0, kind="press", sourceid=5, deviceid=3,
+             flags=0, when=0):
+    """One XI2 device event in the shape python-xlib hands the daemon.
 
-    class Ev:
-        type = X.KeyPress
-        time = 0
+    Deliberately NOT a core `KeyPress`: every grab the daemon holds is an
+    `XIGrabKeycode`, so a core key event cannot be one of ours, and `key_event`
+    refuses it. A fake that still spoke core would let a half-finished port
+    pass every test in this file.
+    """
+    return SimpleNamespace(
+        type=H.GENERIC_EVENT,
+        evtype=H.XI_KEY_PRESS if kind == "press" else H.XI_KEY_RELEASE,
+        data=SimpleNamespace(
+            detail=detail, time=when, sourceid=sourceid, deviceid=deviceid,
+            flags=flags,
+            mods={"base_mods": state, "latched_mods": 0, "locked_mods": 0,
+                  "effective_mods": state}))
 
-    ev = Ev()
-    ev.detail = detail
-    ev.state = state
-    return ev
+
+def key_press(detail, state=0, **kw):
+    return xi_event(detail, state, kind="press", **kw)
 
 
 def arbitration_daemon(fake, table=B):
@@ -1102,7 +1208,6 @@ def arbitration_daemon(fake, table=B):
     pub = Lines()
     dae = H.Daemon(table, xd, pub, i3=H.I3Client(lambda: fake.path),
                    display=":0")
-    dae._pending = []
     return dae, xd, pub
 
 
@@ -1179,7 +1284,6 @@ def test_the_daemon_re_reads_the_binding_state_after_i3_restarts(tmp_path):
     path = {"p": first.path}
     xd, pub = FakeXServer(), Lines()
     dae = H.Daemon(B, xd, pub, i3=H.I3Client(lambda: path["p"]), display=":0")
-    dae._pending = []
     assert dae.engine.i3_mode == "resize"
     first.close()
 
@@ -1209,7 +1313,6 @@ def test_an_i3_stub_without_event_support_leaves_the_daemon_usable():
 
     xd, pub = FakeXServer(), Lines()
     dae = H.Daemon(B, xd, pub, i3=NullI3(), display=":0")
-    dae._pending = []
     dae.pump_i3()                                   # must not raise
     dae.pump(key_press(32, H.MOD4))
     assert dae.engine.state["layer"] == "nav"
@@ -1250,6 +1353,10 @@ def test_daemon_resolves_the_display_mod_and_hands_it_to_the_grabs():
 
         def __init__(self):
             super().__init__(keymap={"o": 32})
+            self.grab_devices = []
+            self.selected_events = []
+            self._root = XI2Root(self, prop=SimpleNamespace(
+                value=b"i3wm.mod:\tMod1\nXft.dpi:\t96\n"))
 
         def keysym_to_keycode(self, keysym):
             from Xlib import XK                           # noqa: PLC0415
@@ -1259,26 +1366,7 @@ def test_daemon_resolves_the_display_mod_and_hands_it_to_the_grabs():
             return 1
 
         def screen(self):
-            outer = self
-
-            class Prop:
-                value = b"i3wm.mod:\tMod1\nXft.dpi:\t96\n"
-
-            class Root:
-                def get_full_property(self, atom, kind):
-                    return Prop()
-
-                def grab_key(self, code, mask, owner, pmode, kmode,
-                             onerror=None):
-                    outer.grabs.append((code, mask))
-
-                def ungrab_key(self, code, mask):
-                    outer.ungrabs.append((code, mask))
-
-            class Screen:
-                root = Root()
-
-            return Screen()
+            return SimpleNamespace(root=self._root)
 
     xd = XWithResource()
     table = type("T", (), {"BINDS": [B.Bind("$mod+o", "nop x")], "LAYERS": {}})
@@ -1340,24 +1428,17 @@ def test_the_daemons_own_resolver_pins_its_display(monkeypatch):
     class XNoProperty(FakeDisplay):
         """A display whose I3_SOCKET_PATH is absent, forcing the CLI fallback."""
 
+        def __init__(self):
+            super().__init__()
+            self.grab_devices = []
+            self.selected_events = []
+            self._root = XI2Root(self)
+
         def intern_atom(self, name):
             return 1
 
         def screen(self):
-            class Root:
-                def get_full_property(self, atom, kind):
-                    return None
-
-                def grab_key(self, *a, **kw):
-                    pass
-
-                def ungrab_key(self, *a, **kw):
-                    pass
-
-            class Screen:
-                root = Root()
-
-            return Screen()
+            return SimpleNamespace(root=self._root)
 
     table = type("T", (), {"BINDS": [], "LAYERS": {}})
     pub = type("P", (), {"publish": lambda self, s: None,
@@ -1367,3 +1448,384 @@ def test_the_daemons_own_resolver_pins_its_display(monkeypatch):
     dae.i3._path_getter()                          # the wiring under test
     assert seen.get("DISPLAY") == ":10", \
         f"daemon resolver used the ambient display: {seen.get('DISPLAY')!r}"
+
+
+# ==========================================================================
+# XI2 port (sp020 Task 11, dotfiles-hwds.13)
+#
+# Core `KeyPress` carries no device identity, so the daemon could not tell one
+# keyboard from another — or a real keystroke from an injected one — and
+# injection shares the display with real input. Everything below is about the
+# one thing that changes: grabs go through `XIGrabKeycode` and every dispatched
+# event carries the SOURCE device that produced it.
+# ==========================================================================
+
+
+def xi2_daemon(table, xd=None, i3=None, pub=None):
+    """The real Daemon over the XI2 fake server — the composition under test."""
+    xd = xd or FakeXServer()
+    pub = pub or Lines()
+
+    class NullI3:
+        def __init__(self):
+            self.cmds = []
+
+        def command(self, cmd):
+            self.cmds.append(cmd)
+            return True
+
+        def close(self):
+            pass
+
+    i3 = i3 or NullI3()
+    return H.Daemon(table, xd, pub, i3=i3, display=":0"), xd, pub, i3
+
+
+def table_of(binds, layers=None, ignore=()):
+    return type("T", (), {"BINDS": list(binds),
+                          "LAYERS": dict(layers or {}),
+                          "IGNORE_DEVICES": list(ignore)})
+
+
+# -- the grab mechanism ----------------------------------------------------
+
+def test_the_all_master_devices_constant_is_the_protocols():
+    """Pinned against the LIBRARY's value, not against itself: asserting that
+    the grabs used `H.XI_ALL_MASTER_DEVICES` says nothing if that constant is
+    wrong, and `XIAllDevices` (0) — the neighbouring value — would grab from
+    floating slaves too and deliver the same press twice."""
+    from Xlib.ext import xinput                             # noqa: PLC0415
+    assert H.XI_ALL_MASTER_DEVICES == xinput.AllMasterDevices == 1
+    assert H.XI_ALL_MASTER_DEVICES != xinput.AllDevices
+
+
+def test_grabs_go_through_xi2_against_all_master_devices():
+    """`XIGrabKeycode` per chord against `XIAllMasterDevices` — the grab that
+    carries a sourceid. XI2Root raises on the core call, so a port that left
+    `XGrabKey` in place cannot reach this assertion."""
+    xd = FakeXServer()
+    H.GrabManager(H.XAdapter(xd, xd.screen().root)).sync_binds(["Mod4+o"])
+    assert xd.grab_devices, "no XIGrabKeycode was issued at all"
+    assert set(xd.grab_devices) == {1}, xd.grab_devices    # XIAllMasterDevices
+
+
+def test_the_four_lock_variants_survive_the_xi2_port():
+    """poc013 measured a bare-mask grab firing 0/3 with NumLock on. The bits
+    ride in the event state under XI2 exactly as they did under core."""
+    xd = FakeXServer()
+    H.GrabManager(H.XAdapter(xd, xd.screen().root)).sync_binds(["Mod4+o"])
+    base = H.MOD4
+    assert grabs_for(xd, 32) == sorted([
+        base, base | H.LOCK, base | H.MOD2, base | H.LOCK | H.MOD2])
+
+
+def test_a_refused_xi2_grab_is_reported_per_chord_not_raised():
+    """XI2 reports a refusal in the REPLY (a per-modifier failure list) rather
+    than as an async X error. The degradation contract is unchanged: that chord
+    is not ours, every other chord keeps working."""
+    xd = FakeXServer(fail_chords={43})              # 'h'
+    g = H.GrabManager(H.XAdapter(xd, xd.screen().root))
+    g.sync_binds(["Mod4+h", "Mod4+o"])
+    assert any("h" in p for p in g.problems), g.problems
+    assert any("BadAccess" in p for p in g.problems), g.problems
+    assert "Mod4+h" not in g.chords
+    assert grabs_for(xd, 32), "the other chord must still be grabbed"
+
+
+def test_ungrab_goes_through_xi2_too():
+    xd = FakeXServer()
+    g = H.GrabManager(H.XAdapter(xd, xd.screen().root))
+    g.sync_binds(["Mod4+o"])
+    g.sync_binds([])
+    assert len([1 for kc, _ in xd.ungrabs if kc == 32]) == 4, xd.ungrabs
+
+
+def test_the_daemon_asks_for_xi2_device_change_events_and_only_those():
+    """Hierarchy / device-changed is how a keyboard appearing or disappearing
+    invalidates the name cache.
+
+    KeyPress must NOT be in that mask. A root-wide XI2 key selection would
+    deliver EVERY keystroke in the session to the daemon — passwords included —
+    where a passive grab delivers only the chords it registered."""
+    from Xlib.ext import xinput                             # noqa: PLC0415
+    dae, xd, _, _ = xi2_daemon(B)
+    assert xd.selected_events, "the daemon selected no XI2 device events"
+    masks = [m for spec in xd.selected_events for _, m in spec]
+    assert all(m & xinput.HierarchyChangedMask for m in masks), masks
+    assert not any(m & (xinput.KeyPressMask | xinput.KeyReleaseMask)
+                   for m in masks), \
+        "selected key events on the ROOT — that is every keystroke, not ours"
+    dae.close()
+
+
+def test_xi2_missing_fails_fast_with_a_named_error():
+    """An XI2-less display must NOT degrade to core grabs: that would leave the
+    daemon running with no device attribution and nothing saying so."""
+    xd = FakeXServer(xi2=False)
+    with pytest.raises(H.XI2Unavailable) as e:
+        H.XAdapter(xd, xd.screen().root)
+    assert "no XInputExtension" in str(e.value), str(e.value)
+    assert xd.grabs == [], "asked for a grab on a display it cannot grab on"
+
+
+def test_xi2_too_old_fails_fast_naming_the_version():
+    class OldXI(FakeXServer):
+        def xinput_query_version(self):
+            return SimpleNamespace(major_version=1, minor_version=5)
+
+    xd = OldXI()
+    with pytest.raises(H.XI2Unavailable) as e:
+        H.XAdapter(xd, xd.screen().root)
+    assert "1.5" in str(e.value) and "XI2" in str(e.value)
+
+
+def test_main_reports_an_xi2_less_display_as_a_named_non_zero_exit(
+        monkeypatch, capsys):
+    """The operator-visible contract: a named message and a distinct code, not
+    a traceback (adr0014 fail-fast, and the launcher reads the code)."""
+    def boom(table, display):
+        raise H.XI2Unavailable("this display has no XInputExtension")
+
+    monkeypatch.setattr(H, "run_daemon", boom)
+    monkeypatch.setattr(sys, "argv", ["hotkeyd"])
+    rc = H.main()
+    err = capsys.readouterr().err
+    assert rc == 5, rc
+    assert "XI2 unavailable" in err and "XInputExtension" in err
+    assert "Traceback" not in err
+
+
+# -- the event normaliser --------------------------------------------------
+
+def test_key_event_reads_detail_state_and_sourceid_off_an_xi2_event():
+    k = H.key_event(xi_event(43, state=H.CTRL | H.MOD2, sourceid=12,
+                             deviceid=3, when=1234))
+    assert (k.kind, k.detail, k.state, k.time) == ("press", 43,
+                                                   H.CTRL | H.MOD2, 1234)
+    assert k.sourceid == 12 and k.deviceid == 3
+    assert k.repeat is False
+
+
+def test_key_event_reads_the_effective_modifier_mask():
+    """Effective, not base: it folds in the LOCKED bits, which is what made the
+    core `state` field equal to it — and `to_event` strips those bits later."""
+    ev = xi_event(43)
+    ev.data.mods = {"base_mods": 0, "latched_mods": 0,
+                    "locked_mods": H.MOD2, "effective_mods": H.MOD2}
+    assert H.key_event(ev).state == H.MOD2
+
+
+def test_key_event_marks_an_auto_repeat_press():
+    assert H.key_event(xi_event(43, flags=H.XI_KEY_REPEAT)).repeat is True
+
+
+def test_key_event_refuses_a_core_key_event():
+    """A core `KeyPress` cannot be one of ours — every grab is an XI2 grab — and
+    accepting one would dispatch an event with no resolvable source device,
+    which is the blind spot this port removes."""
+    from Xlib import X                                       # noqa: PLC0415
+    core = SimpleNamespace(type=X.KeyPress, detail=43, state=0, time=0)
+    assert H.key_event(core) is None
+
+
+def test_key_event_ignores_a_non_key_generic_event():
+    assert H.key_event(SimpleNamespace(
+        type=H.GENERIC_EVENT, evtype=H.XI_HIERARCHY_CHANGED, data=None)) is None
+
+
+# -- device attribution ----------------------------------------------------
+
+def test_every_dispatched_event_carries_its_source_device():
+    """The positive half. Asserted on what the ENGINE received, because that is
+    where a `device=` predicate is judged."""
+    seen = []
+    table = table_of([B.Bind("$mod+o", lambda ev: seen.append(ev))])
+    dae, _, _, _ = xi2_daemon(table)
+    dae.pump(key_press(32, H.MOD4, sourceid=12))
+    assert len(seen) == 1, seen
+    assert seen[0].device_id == 12
+    assert seen[0].device == "AT Translated Set 2 keyboard"
+    dae.close()
+
+
+def test_attribution_reads_the_source_slave_not_the_master_in_the_header():
+    """XI2 puts the master in `deviceid` and the physical slave in `sourceid`.
+    Reading the header would make every keyboard on a display report as
+    `Virtual core keyboard` and the whole predicate would be a no-op."""
+    seen = []
+    table = table_of([B.Bind("$mod+o", lambda ev: seen.append(ev))])
+    dae, xd, _, _ = xi2_daemon(table)
+    xd.devices[3] = "Virtual core keyboard"
+    dae.pump(key_press(32, H.MOD4, sourceid=13, deviceid=3))
+    assert seen[0].device == "BlueZ 5.86 (MCS)", seen[0]
+    assert 3 not in xd.device_queries, "resolved the MASTER, not the source"
+    dae.close()
+
+
+def test_a_device_scoped_bind_fires_for_its_own_source():
+    table = table_of([B.Bind("$mod+o", "nop laptop",
+                             device="AT Translated Set 2 keyboard")])
+    dae, _, _, i3 = xi2_daemon(table)
+    assert dae.pump(key_press(32, H.MOD4, sourceid=12)) == ["nop laptop"]
+    assert i3.cmds == ["nop laptop"]
+    dae.close()
+
+
+def test_a_device_scoped_bind_is_inert_for_another_source():
+    """The negative half, and the one that matters: a positive-only test passes
+    against an implementation that ignores `device=` entirely."""
+    table = table_of([B.Bind("$mod+o", "nop laptop",
+                             device="AT Translated Set 2 keyboard")])
+    dae, _, _, i3 = xi2_daemon(table)
+    assert dae.pump(key_press(32, H.MOD4, sourceid=13)) == []   # BlueZ
+    dae.pump(xi_event(32, H.MOD4, kind="release", sourceid=13))
+    assert dae.pump(key_press(32, H.MOD4, sourceid=5)) == []    # XTEST
+    assert i3.cmds == []
+    dae.close()
+
+
+def test_two_binds_on_one_chord_split_by_source_device():
+    """What `device=` is FOR: one chord, two meanings, resolved by who typed
+    it. Also the reason the validator does not call these a duplicate."""
+    table = table_of([B.Bind("$mod+o", "nop laptop",
+                             device="AT Translated Set 2 keyboard"),
+                      B.Bind("$mod+o", "nop bluetooth",
+                             device="BlueZ 5.86 (MCS)")])
+    assert B.validate(table.BINDS, table.LAYERS) == []
+    dae, _, _, _ = xi2_daemon(table)
+    assert dae.pump(key_press(32, H.MOD4, sourceid=12)) == ["nop laptop"]
+    dae.pump(xi_event(32, H.MOD4, kind="release", sourceid=12))
+    assert dae.pump(key_press(32, H.MOD4, sourceid=13)) == ["nop bluetooth"]
+    dae.close()
+
+
+def test_an_unscoped_bind_still_fires_for_every_source():
+    """Parity: the whole shipped table is unscoped and must behave exactly as it
+    did before device identity existed."""
+    table = table_of([B.Bind("$mod+o", "nop any")])
+    dae, _, _, _ = xi2_daemon(table)
+    for src in (5, 12, 13):
+        assert dae.pump(key_press(32, H.MOD4, sourceid=src)) == ["nop any"]
+        dae.pump(xi_event(32, H.MOD4, kind="release", sourceid=src))
+    dae.close()
+
+
+def test_a_scoped_bind_does_not_fire_for_an_unattributable_source():
+    """A device that vanished between the press and the lookup answers
+    BadDevice. The key still dispatches — but it cannot satisfy a predicate
+    whose entire purpose is attribution."""
+    table = table_of([B.Bind("$mod+o", "nop laptop",
+                             device="AT Translated Set 2 keyboard"),
+                      B.Bind("$mod+h", "nop any")])
+    dae, xd, _, _ = xi2_daemon(table)
+    assert dae.pump(key_press(32, H.MOD4, sourceid=99)) == []
+    assert dae.pump(key_press(43, H.MOD4, sourceid=99)) == ["nop any"]
+    assert xd.device_queries.count(99) >= 1
+    dae.close()
+
+
+def test_ignore_devices_drops_that_source_entirely():
+    table = table_of([B.Bind("$mod+o", "nop any")],
+                     ignore=["Virtual core XTEST keyboard"])
+    dae, _, _, i3 = xi2_daemon(table)
+    assert dae.pump(key_press(32, H.MOD4, sourceid=5)) == []
+    assert i3.cmds == []
+    assert dae.pump(key_press(32, H.MOD4, sourceid=12)) == ["nop any"]
+    dae.close()
+
+
+def test_ignore_devices_is_read_off_the_current_table_so_a_reload_changes_it():
+    table = table_of([B.Bind("$mod+o", "nop any")])
+    dae, _, _, _ = xi2_daemon(table)
+    assert dae.pump(key_press(32, H.MOD4, sourceid=5)) == ["nop any"]
+    dae.table = table_of([B.Bind("$mod+o", "nop any")],
+                         ignore=["Virtual core XTEST keyboard"])
+    assert dae.pump(key_press(32, H.MOD4, sourceid=5)) == []
+    dae.close()
+
+
+def test_the_default_shipped_table_ignores_nothing():
+    """Dropping XTEST by default would silently kill every xdotool-driven bind
+    and every harness in this repo — and whether xrdp's synthesised Shift is
+    XTEST-sourced is UNMEASURED (sp020 Task 15), so nothing is ignored yet."""
+    assert list(B.IGNORE_DEVICES) == []
+
+
+# -- the device-name cache -------------------------------------------------
+
+def test_a_device_name_is_resolved_once_and_then_cached():
+    reg = H.DeviceRegistry(FakeXServer())
+    assert reg.name(12) == "AT Translated Set 2 keyboard"
+    assert reg.name(12) == "AT Translated Set 2 keyboard"
+    assert reg.d.device_queries == [12], "queried X twice for one device"
+
+
+def test_a_hierarchy_change_invalidates_the_cache():
+    """A bluetooth keyboard powering off, or one plugged in after startup: ids
+    are reused, so a stale name would attribute one keyboard's keys to
+    another."""
+    dae, xd, _, _ = xi2_daemon(B)
+    dae.pump(key_press(32, H.MOD4, sourceid=13))
+    assert dae.devices.name(13) == "BlueZ 5.86 (MCS)"
+    xd.devices[13] = "Some Other Keyboard"
+    assert dae.devices.name(13) == "BlueZ 5.86 (MCS)", "cache not in play"
+    dae.pump(SimpleNamespace(type=H.GENERIC_EVENT,
+                             evtype=H.XI_HIERARCHY_CHANGED, data=None))
+    assert dae.devices.name(13) == "Some Other Keyboard"
+    dae.close()
+
+
+def test_a_failed_lookup_is_re_queried_so_a_later_device_resolves():
+    """An id absent now may exist after the next hierarchy change — a bluetooth
+    keyboard powering back on — so a miss must never become permanent."""
+    reg = H.DeviceRegistry(FakeXServer())
+    assert reg.name(99) is None
+    reg.d.devices[99] = "Late Arrival Keyboard"
+    assert reg.name(99) == "Late Arrival Keyboard"
+    assert reg.d.device_queries.count(99) == 2, reg.d.device_queries
+
+
+def test_a_vanished_device_does_not_crash_the_pump():
+    table = table_of([B.Bind("$mod+o", "nop any")])
+    dae, _, _, _ = xi2_daemon(table)
+    assert dae.pump(key_press(32, H.MOD4, sourceid=404)) == ["nop any"]
+    dae.close()
+
+
+# -- auto-repeat under XI2 -------------------------------------------------
+
+def test_an_auto_repeat_flagged_press_dispatches_nothing():
+    """XI2 sets XIKeyRepeat on the press and sends no synthetic release, so the
+    flag — not a timestamp pair — is the discriminator after the port."""
+    table = table_of([B.Bind("$mod+o", "nop any")])
+    dae, _, _, i3 = xi2_daemon(table)
+    assert dae.pump(key_press(32, H.MOD4)) == ["nop any"]
+    for _ in range(5):
+        assert dae.pump(key_press(32, H.MOD4, flags=H.XI_KEY_REPEAT)) == []
+    assert i3.cmds == ["nop any"]
+    dae.close()
+
+
+def test_the_repeat_flag_is_checked_independently_of_the_engines_wedge():
+    """The engine also suppresses repeats, but only inside KEY_WEDGE_MS. A
+    repeat arriving after a stall must still not fire, so the flag has to be
+    judged in the daemon rather than left to that window."""
+    table = table_of([B.Bind("$mod+o", "nop any")])
+    dae, _, _, _ = xi2_daemon(table)
+    clock = [1000.0]
+    dae.engine.clock = lambda: clock[0]
+    assert dae.pump(key_press(32, H.MOD4)) == ["nop any"]
+    clock[0] += (L.KEY_WEDGE_MS / 1000.0) + 5      # far past the wedge
+    assert dae.pump(key_press(32, H.MOD4, flags=H.XI_KEY_REPEAT)) == []
+    dae.close()
+
+
+def test_an_unflagged_repeat_press_of_one_key_still_fires_twice():
+    """Fairness: the guard must eat auto-repeat and nothing else. A genuine
+    double-tap arrives as two unflagged presses with a release between."""
+    table = table_of([B.Bind("$mod+o", "nop any")])
+    dae, _, _, _ = xi2_daemon(table)
+    assert dae.pump(key_press(32, H.MOD4, when=100)) == ["nop any"]
+    dae.pump(xi_event(32, H.MOD4, kind="release", when=105))
+    assert dae.pump(key_press(32, H.MOD4, when=110)) == ["nop any"]
+    dae.close()

@@ -565,6 +565,108 @@ for line in s.makefile():
     kill "$X12P" 2>/dev/null
 fi
 
+# --- stage 13: a display without XI2 fails fast, named (dotfiles-hwds.13) ---
+# Grabs go through XI2 because a core KeyPress carries no source device. A
+# display that cannot do XI2 must therefore say so and exit non-zero — never
+# fall back to core grabs, which would leave the daemon running with no device
+# attribution at all and nothing reporting it.
+#
+# The extension is refused through a sitecustomize shim on PYTHONPATH rather
+# than a flag in hotkeyd.py: a production switch that disables XI2 is exactly
+# the silent-fallback door this check exists to keep shut. The daemon runs as a
+# REAL process with REAL argv against a REAL server.
+echo "stage 13: a display without XI2 fails fast"
+if ! command -v Xvfb >/dev/null; then
+    printf '  \033[33mSKIP\033[0m Xvfb missing\n'
+else
+    D13=""
+    _b=$(( 40 + (($$ + 13) % 20) ))
+    for _o in 0 1 2 3 4 5 6 7 8 9; do
+        _n=$(( _b + _o ))
+        [ -e "/tmp/.X${_n}-lock" ] || { D13=":$_n"; break; }
+    done
+    T13="$TMPD/t13"; mkdir -p "$T13"
+    cat > "$T13/sitecustomize.py" <<'EOF'
+# Make python-xlib see the server exactly as it would see one built without
+# XInput: absent from ListExtensions (which is the gate python-xlib itself
+# uses, so the extension is never initialised) and absent from QueryExtension.
+# Nothing in hotkeyd.py is touched.
+import Xlib.display
+
+_real_list = Xlib.display.Display.list_extensions
+_real_query = Xlib.display.Display.query_extension
+
+
+def _list(self):
+    return [e for e in _real_list(self) if e != "XInputExtension"]
+
+
+def _query(self, name):
+    return None if name == "XInputExtension" else _real_query(self, name)
+
+
+Xlib.display.Display.list_extensions = _list
+Xlib.display.Display.query_extension = _query
+EOF
+    Xvfb "$D13" -screen 0 640x480x24 >/dev/null 2>&1 &
+    X13P=$!
+    sleep 1.5
+    if [ -z "$D13" ]; then
+        bad "no free X display for the XI2-absence stage"
+    else
+        out="$(DISPLAY=$D13 XDG_RUNTIME_DIR="$T13" PYTHONPATH="$T13" \
+               HOTKEYD_I3SOCK="$T13/no-i3.sock" timeout 15 \
+               python3 "$HERE/hotkeyd.py" --display "$D13" 2>&1)"
+        rc=$?
+        if [ "$rc" -eq 124 ]; then
+            bad "daemon HUNG on a display without XI2"
+        elif [ "$rc" -eq 0 ]; then
+            bad "daemon reported success on a display without XI2 — it fell "\
+"back to core grabs, which carry no source device"
+        else
+            ok "exits non-zero ($rc) on a display without XI2"
+        fi
+        printf '%s' "$out" | grep -qi 'XI2 unavailable' \
+            && ok "the message names XI2" \
+            || bad "no 'XI2 unavailable' in the output: $out"
+        printf '%s' "$out" | grep -q 'XInputExtension' \
+            && ok "and names the missing extension" \
+            || bad "does not name the extension: $out"
+        if printf '%s' "$out" | grep -q 'Traceback'; then
+            bad "failed with a stack trace instead of a named error"
+        else
+            ok "no stack trace"
+        fi
+        # Nothing left behind to reap: the probe runs before the lock and the
+        # state socket exist.
+        if [ -e "$T13/hotkeyd-${D13#:}.sock" ]; then
+            bad "left a state socket behind after refusing to start"
+        else
+            ok "left no state socket behind"
+        fi
+        # And the same tree on the SAME display, WITHOUT the shim, must start —
+        # otherwise every check above would pass on a daemon that is simply
+        # broken.
+        DISPLAY=$D13 XDG_RUNTIME_DIR="$T13" HOTKEYD_I3SOCK="$T13/no-i3.sock" \
+            setsid python3 "$HERE/hotkeyd.py" --display "$D13" \
+            >"$T13/d.log" 2>&1 &
+        d13=""
+        for _t in 1 2 3 4 5 6 7 8 9 10; do
+            sleep 0.5
+            d13="$(pgrep -f "hotkeyd.py --display $D13" | head -1)"
+            [ -n "$d13" ] && break
+        done
+        if [ -n "$d13" ] && grep -q "chords grabbed on $D13 via XI2" \
+                "$T13/d.log"; then
+            ok "the same display DOES start the daemon without the shim"
+        else
+            bad "control case failed — the stage proves nothing: $(tail -2 "$T13/d.log")"
+        fi
+        [ -n "$d13" ] && kill "$d13" 2>/dev/null
+    fi
+    kill "$X13P" 2>/dev/null
+fi
+
 echo
 printf 'hotkeyd: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

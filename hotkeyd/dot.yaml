@@ -1,8 +1,10 @@
 # hotkeyd — global keybinding daemon for X11 sessions (sp020, ft011).
 #
-# Owns the keybinding table outside i3: per-bind XGrabKey plus a persistent i3
-# IPC connection, so binds gain layers, held-modifier state, release triggers,
-# sequences and counts — none of which i3's bindsym table can express.
+# Owns the keybinding table outside i3: per-chord XIGrabKeycode (XI2, so every
+# event carries the SOURCE device that produced it — core KeyPress carries no
+# device identity at all) plus a persistent i3 IPC connection, so binds gain
+# layers, held-modifier state, release triggers, sequences, counts and
+# per-device scoping — none of which i3's bindsym table can express.
 #
 # NO LINKS. Every consumer runs the tree in place out of ~/.dotfiles/hotkeyd:
 # the i3 escape-hatch bind and both platform overlays call
@@ -10,7 +12,10 @@
 # put a SECOND bind table on disk, and "which binds.py is the daemon actually
 # running" is not a question worth having during a keyboard outage.
 #
-# X11 only (native :0, xrdp :10). Sway is out of scope — no XGrabKey on Wayland.
+# X11 only (native :0, xrdp :10), and specifically X11 WITH XInput2 — the
+# daemon exits 5 with a named error on a display that lacks it rather than
+# falling back to core grabs, which would silently cost every event its source
+# device. Sway is out of scope — no X passive grabs on Wayland at all.
 #
 # Dependency: python-xlib, per adr0015 condition 1 (an X-ecosystem binding with
 # working prior art in this repo — quickshell/qs-keymon.py uses the same one, so

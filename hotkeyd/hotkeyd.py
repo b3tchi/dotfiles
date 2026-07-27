@@ -1,11 +1,20 @@
 #!/usr/bin/env python3
 """hotkeyd — global keybinding daemon for X11 sessions (sp020, ft011).
 
-Owns its own grabs (per-bind `XGrabKey` on the root window, never
-`XGrabKeyboard` — an exclusive grab held by a hung daemon locks the whole
-session, per-key grabs degrade to "that chord stopped working") and dispatches
-over ONE persistent i3 IPC connection, so no `i3-msg` process is spawned per
-keystroke.
+Owns its own grabs (per-chord `XIGrabKeycode` against `XIAllMasterDevices` on
+the root window, never `XIGrabDevice` / `XGrabKeyboard` — an exclusive grab held
+by a hung daemon locks the whole session, per-key grabs degrade to "that chord
+stopped working") and dispatches over ONE persistent i3 IPC connection, so no
+`i3-msg` process is spawned per keystroke.
+
+Grabs go through XI2 rather than core `XGrabKey` because a core `KeyPress`
+carries no device identity, so the daemon could not tell one keyboard from
+another — or a real keystroke from an injected one — and injection shares the
+display with real input. `XIDeviceEvent.sourceid` is the only channel that can.
+`python-xlib` 0.33 parses these events itself (`Xlib.ext.xinput` registers
+`DeviceEventData`); the hand-unpacking in `quickshell/qs-keymon.py` is needed
+only for XI2 *raw* events, which have no registered parser, and grabbed-keycode
+delivery is not raw.
 
 Layer state and the bar feed live in `layers.py`; the bind table in `binds.py`.
 
@@ -28,6 +37,7 @@ import struct
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -52,10 +62,39 @@ NAME_BY_MASK = {v: k for k, v in MASK_BY_NAME.items()}
 LOCK_VARIANTS = (0, LOCK, MOD2, LOCK | MOD2)
 LOCK_BITS = LOCK | MOD2
 
+# XInput2 wire constants, duplicated as plain ints for the same reason the
+# modifier masks are: `--check` and the pure-logic tests import this module on
+# boxes with no X library at all.
+XI_ALL_MASTER_DEVICES = 1               # XIAllMasterDevices
+XI_KEY_PRESS, XI_KEY_RELEASE = 2, 3     # XI_KeyPress / XI_KeyRelease evtypes
+XI_DEVICE_CHANGED, XI_HIERARCHY_CHANGED = 1, 11
+XI_KEY_REPEAT = 1 << 16                 # XIKeyRepeat, set on an auto-repeat press
+GENERIC_EVENT = 35                      # Xlib.ext.ge.GenericEventCode
+
 
 class GrabRefused(Exception):
-    """X refused a grab — almost always BadAccess because another client (i3,
-    mid-migration) already owns that chord."""
+    """X refused a grab — almost always BadAccess because another client already
+    owns that chord.
+
+    XI2 reports this in the `XIPassiveGrabDevice` REPLY (a per-modifier status
+    list) rather than as an asynchronous X error, so the refusal is synchronous
+    here where the core path had to round-trip a `sync()`.
+
+    Measured caveat, and it is a real one: the X server keeps core and XI2
+    passive grabs in SEPARATE conflict domains (`GrabMatchesSecond` compares
+    grabtype), so this is raised for a colliding XI2 grabber — a second hotkeyd
+    — and NOT for i3's core grab on the same chord. See the header of
+    `live_check.py` section 2, which measures both directions.
+    """
+
+
+class XI2Unavailable(RuntimeError):
+    """This display cannot do XI2, so the daemon cannot resolve a source device.
+
+    Fail fast with this named error and NEVER fall back to core `XGrabKey`: a
+    silent fallback would leave the daemon running with no device attribution at
+    all — the one property the port exists for — and nothing would say so.
+    """
 
 
 class AlreadyRunning(RuntimeError):
@@ -116,7 +155,9 @@ def x_resource_mod(xdisp=None) -> str:
     return default_binds.DEFAULT_MOD
 
 
-def to_event(kind: str, keysym: str, state: int) -> L.Event:
+def to_event(kind: str, keysym: str, state: int,
+             device: str | None = None,
+             device_id: int | None = None) -> L.Event:
     """Translate an X key event into the engine's X-agnostic Event.
 
     Lock bits are stripped: with NumLock on, `Ctrl+h` arrives with Mod2 set, and
@@ -124,7 +165,115 @@ def to_event(kind: str, keysym: str, state: int) -> L.Event:
     """
     state &= ~LOCK_BITS
     mods = {name for mask, name in NAME_BY_MASK.items() if state & mask}
-    return L.Event(kind, keysym, frozenset(mods))
+    return L.Event(kind, keysym, frozenset(mods), device=device,
+                   device_id=device_id)
+
+
+@dataclass(frozen=True)
+class KeyEvent:
+    """One XI2 key event, reduced to what the daemon acts on.
+
+    Exists so the grab mechanism appears in exactly one place: everything below
+    reads this record, not an `XIDeviceEvent` layout.
+    """
+    kind: str                       # "press" | "release"
+    detail: int                     # keycode
+    state: int                      # effective modifier mask, as core `state`
+    time: int
+    sourceid: int | None = None     # the SLAVE that produced it
+    deviceid: int | None = None     # the MASTER it was routed through
+    repeat: bool = False
+
+
+def _mod_state(mods) -> int:
+    """`effective_mods` off an XI2 ModifierInfo.
+
+    Effective, not base: it folds in the latched and LOCKED bits, which is what
+    makes this the same number core `KeyPress.state` carried — measured equal on
+    a live server for a Ctrl-held press. `to_event` then strips the lock bits.
+    """
+    if mods is None:
+        return 0
+    try:
+        return int(mods["effective_mods"])
+    except (TypeError, KeyError, IndexError):
+        return int(getattr(mods, "effective_mods", 0) or 0)
+
+
+def key_event(ev) -> KeyEvent | None:
+    """Normalise an XI2 device event; None for anything that is not a key event.
+
+    Core `KeyPress`/`KeyRelease` are deliberately NOT accepted. Every grab this
+    daemon holds is an XI2 grab, so a core key event cannot be one of ours — and
+    accepting one would mean dispatching an event with no resolvable source
+    device, which is exactly the blind spot the XI2 port removes.
+    """
+    if getattr(ev, "type", None) != GENERIC_EVENT:
+        return None
+    evtype = getattr(ev, "evtype", None)
+    if evtype not in (XI_KEY_PRESS, XI_KEY_RELEASE):
+        return None
+    data = getattr(ev, "data", None)
+    if data is None:
+        return None
+    return KeyEvent(
+        kind="press" if evtype == XI_KEY_PRESS else "release",
+        detail=int(data.detail),
+        state=_mod_state(getattr(data, "mods", None)),
+        time=int(getattr(data, "time", 0) or 0),
+        sourceid=getattr(data, "sourceid", None),
+        deviceid=getattr(data, "deviceid", None),
+        repeat=bool(int(getattr(data, "flags", 0) or 0) & XI_KEY_REPEAT),
+    )
+
+
+class DeviceRegistry:
+    """XI2 device id -> device name, cached for the process lifetime.
+
+    Resolution is per SOURCE id, never the master in the event header: XI2 puts
+    the master keyboard in `deviceid` and the physical slave that actually
+    produced the event in `sourceid`, so reading the header would make every
+    keyboard on a display report as `Virtual core keyboard` and the whole
+    predicate would be a no-op. (`qs-keymon.py` reads the raw header because it
+    listens for RAW events, which have no grab and no meaningful sourceid split.)
+
+    The cache is dropped wholesale on an XI2 hierarchy or device change — a
+    bluetooth keyboard powering off, a device plugged in after startup — because
+    ids are reused and a stale name would attribute one keyboard's keys to
+    another. A lookup that FAILS is not cached: the id may exist after the next
+    hierarchy change, and caching the miss would keep it nameless forever.
+    """
+
+    def __init__(self, display):
+        self.d = display
+        self._names: dict[int, str] = {}
+
+    def invalidate(self):
+        self._names.clear()
+
+    def name(self, deviceid) -> str | None:
+        if deviceid is None:
+            return None
+        cached = self._names.get(deviceid)
+        if cached is not None:
+            return cached
+        found = None
+        try:
+            reply = self.d.xinput_query_device(deviceid)
+            for dev in getattr(reply, "devices", ()) or ():
+                if dev.deviceid == deviceid:
+                    found = dev.name
+                    break
+        except Exception:                           # noqa: BLE001
+            # A device that vanished between the press and this lookup answers
+            # BadDevice. An unattributable key is still a key: it dispatches
+            # with device=None (and so cannot satisfy a `device=` predicate).
+            found = None
+        if isinstance(found, (bytes, bytearray)):
+            found = found.decode(errors="replace")
+        if found is not None:
+            self._names[deviceid] = found
+        return found
 
 
 class SingleInstance:
@@ -656,14 +805,52 @@ def check(table) -> int:
 # daemon
 # --------------------------------------------------------------------------
 
+def require_xi2(d):
+    """Assert this display can do XI2, or raise XI2Unavailable naming why.
+
+    Called before the first grab, so an XI2-less display costs a named non-zero
+    exit at startup rather than a stack trace at the first keypress — and never
+    a silent degradation to core grabs (see XI2Unavailable).
+    """
+    try:
+        info = d.query_extension("XInputExtension")
+    except Exception as e:                              # noqa: BLE001
+        raise XI2Unavailable(
+            f"cannot query the XInputExtension on this display: {e}") from e
+    if not info:
+        raise XI2Unavailable(
+            "this display has no XInputExtension — hotkeyd grabs with "
+            "XIGrabKeycode and will not fall back to core grabs, which carry "
+            "no source device")
+    try:
+        ver = d.xinput_query_version()
+    except Exception as e:                              # noqa: BLE001
+        raise XI2Unavailable(
+            f"XIQueryVersion failed on this display: {e}") from e
+    major = int(getattr(ver, "major_version", 0) or 0)
+    minor = int(getattr(ver, "minor_version", 0) or 0)
+    if major < 2:
+        raise XI2Unavailable(
+            f"this display speaks XInput {major}.{minor}; hotkeyd needs XI2 "
+            "(2.0 or later) for XIGrabKeycode and sourceid")
+    return ver
+
+
 class XAdapter:
-    """Adapts python-xlib to the GrabManager's four-method interface, and turns
-    an async X error into the synchronous GrabRefused the manager degrades on.
-    Defined at module scope (not inside the run loop) so the live checks can
-    exercise the REAL adapter instead of a copy of it."""
+    """Adapts python-xlib's XI2 to the GrabManager's four-method interface, and
+    turns a refused passive grab into the synchronous GrabRefused the manager
+    degrades on. Defined at module scope (not inside the run loop) so the live
+    checks can exercise the REAL adapter instead of a copy of it.
+
+    Every grab is `XIGrabKeycode` against `XIAllMasterDevices` — per chord, per
+    lock-bit variant, on the root window. Never `XIGrabDevice`: an exclusive
+    grab held by a hung daemon locks the whole session, while a per-chord
+    passive grab degrades to "that chord stopped working".
+    """
 
     def __init__(self, d, root):
         self.d, self.root = d, root
+        self.xi_version = require_xi2(d)
 
     def keysym_to_keycode(self, name):
         from Xlib import XK                              # noqa: PLC0415
@@ -672,17 +859,42 @@ class XAdapter:
 
     def grab_key(self, code, mask):
         from Xlib import X                               # noqa: PLC0415
-        errs = []
-        self.root.grab_key(code, mask, 1, X.GrabModeAsync, X.GrabModeAsync,
-                           onerror=lambda err, req: errs.append(err))
-        self.d.sync()
-        if errs:
-            raise GrabRefused(type(errs[0]).__name__)
+        from Xlib.error import XError                    # noqa: PLC0415
+        from Xlib.ext import xinput                      # noqa: PLC0415
+        try:
+            reply = self.root.xinput_grab_keycode(
+                XI_ALL_MASTER_DEVICES, X.CurrentTime, code,
+                xinput.GrabModeAsync, xinput.GrabModeAsync, True,
+                xinput.KeyPressMask | xinput.KeyReleaseMask, [mask])
+        except XError as e:
+            raise GrabRefused(type(e).__name__) from e
+        # A non-empty `modifiers` list is the reply's per-modifier failure
+        # report. The only status the server returns for a passive-grab
+        # collision on a viewable root window is BadAccess (xserver
+        # `AddPassiveGrabToList`); the other statuses arrive as real X errors,
+        # caught above. python-xlib decodes each GrabModifierInfo as a bare
+        # Card32 and so loses the status byte, which is why this names the
+        # status rather than reading it.
+        if getattr(reply, "modifiers", None):
+            raise GrabRefused("BadAccess")
 
     def ungrab_key(self, code, mask):
-        self.root.ungrab_key(code, mask)
+        self.root.xinput_ungrab_keycode(XI_ALL_MASTER_DEVICES, code, [mask])
 
     def sync(self):
+        self.d.sync()
+
+    def watch_devices(self):
+        """Ask for XI2 hierarchy / device-changed events on the root window.
+
+        Not part of the GrabManager interface — the daemon calls it so a device
+        appearing or disappearing invalidates the name cache. Key events are
+        deliberately NOT selected here: those arrive through the grabs.
+        """
+        from Xlib.ext import xinput                      # noqa: PLC0415
+        self.root.xinput_select_events(
+            [(xinput.AllDevices,
+              xinput.HierarchyChangedMask | xinput.DeviceChangedMask)])
         self.d.sync()
 
 
@@ -710,11 +922,23 @@ class Daemon:
         self.i3 = i3 if i3 is not None else I3Client(
             lambda: i3_socket_path(display=self.display, xdisp=d))
         self.mod = x_resource_mod(d)
-        self.grabs = GrabManager(XAdapter(d, d.screen().root), mod=self.mod)
+        self.adapter = XAdapter(d, d.screen().root)
+        self.grabs = GrabManager(self.adapter, mod=self.mod)
+        self.devices = DeviceRegistry(d)
+        self.adapter.watch_devices()
         self.engine = L.LayerEngine(table.BINDS, table.LAYERS,
                                     publisher=publisher, mod=self.mod)
         self.wire_i3_mode()
         self.grabs.sync_binds(chords_for(table))
+
+    @property
+    def ignore_devices(self) -> frozenset:
+        """Source device names whose events are dropped outright.
+
+        Read off the CURRENT table rather than snapshotted at construction, so a
+        SIGHUP reload changes it the way it changes every other table value.
+        """
+        return frozenset(getattr(self.table, "IGNORE_DEVICES", ()) or ())
 
     # -- i3-mode arbitration ----------------------------------------------
     def wire_i3_mode(self) -> bool:
@@ -765,38 +989,52 @@ class Daemon:
         self.grabs.sync_binds(chords_for(self.table,
                                          self.engine.state["layer"]))
 
-    def pump(self, ev, peek=None) -> list:
-        """Handle one X event. `peek` returns the next queued event or None and
-        exists for auto-repeat coalescing. Returns the actions dispatched."""
+    def pump(self, ev) -> list:
+        """Handle one X event. Returns the actions dispatched."""
         from Xlib import X                               # noqa: PLC0415
 
         if ev.type == X.MappingNotify:
             self.d.refresh_keyboard_mapping(ev)
             self.grabs.on_mapping_notify()
             return []
-        if ev.type not in (X.KeyPress, X.KeyRelease):
+        if (ev.type == GENERIC_EVENT
+                and getattr(ev, "evtype", None) in (XI_HIERARCHY_CHANGED,
+                                                    XI_DEVICE_CHANGED)):
+            # A device arrived or left. Ids are reused, so every cached name is
+            # now suspect — this is the bluetooth-keyboard-powering-off case and
+            # the plugged-in-after-startup case, one handler for both.
+            self.devices.invalidate()
             return []
 
-        # Auto-repeat arrives as RELEASE+PRESS pairs sharing one timestamp:
-        # python-xlib exposes no XKB binding, so detectable auto-repeat cannot be
-        # switched on and the pairs must be coalesced here. Without this the
-        # engine sees a genuine release between every repeat, so nothing is ever
-        # suppressed and on_release binds fire ~15x a second while a key is held.
-        # Measured on Xvfb: a 1.5 s hold delivers 22 press + 22 release.
-        if ev.type == X.KeyRelease and peek is not None:
-            nxt = peek()
-            if nxt is not None:
-                if (nxt.type == X.KeyPress and nxt.detail == ev.detail
-                        and nxt.time == ev.time):
-                    return []           # synthetic pair: swallow both
-                self._pending.append(nxt)
+        k = key_event(ev)
+        if k is None:
+            return []
 
-        name = self.grabs.keysym_for(ev.detail) or _keysym_name(self.d, ev)
+        # Auto-repeat. Core delivery synthesised a RELEASE+PRESS pair per repeat
+        # and the daemon had to coalesce them by timestamp; XI2 sends neither the
+        # synthetic release nor an unmarked press — it sets XIKeyRepeat on the
+        # press itself. Measured on Xvfb: a 1.2 s hold delivers 15 XI2 presses,
+        # 14 of them flagged, and exactly 1 release. Dropping them here rather
+        # than relying on the engine's own repeat suppression keeps the guard
+        # independent of that suppression's wedge timeout, which a repeat
+        # arriving after a stall would otherwise slip past.
+        if k.repeat:
+            return []
+
+        name = self.grabs.keysym_for(k.detail) or _keysym_name(self.d, k.detail)
         if name is None:
             return []
-        kind = "press" if ev.type == X.KeyPress else "release"
+
+        # Source device, resolved per event. `sourceid` is the physical slave,
+        # never the master in the event header — see DeviceRegistry.
+        device = self.devices.name(k.sourceid)
+        if device is not None and device in self.ignore_devices:
+            return []
+
         before = self.engine.state["layer"]
-        actions = self.engine.handle(to_event(kind, name, ev.state))
+        actions = self.engine.handle(
+            to_event(k.kind, name, k.state, device=device,
+                     device_id=k.sourceid))
         for action in actions:
             _dispatch(self.i3, action)
         if self.engine.state["layer"] != before:
@@ -805,8 +1043,6 @@ class Daemon:
             # only the difference, so nothing is dropped mid-gesture.
             self.resync_grabs()
         return actions
-
-    _pending: list = []
 
     def close(self):
         self.pub.close()
@@ -825,11 +1061,13 @@ def run_daemon(table, display_name: str | None) -> int:
     from Xlib.error import ConnectionClosedError         # noqa: PLC0415
 
     disp_name = display_name or os.environ.get("DISPLAY", ":0")
-    inst = SingleInstance(lock_path(disp_name))
     d = xdisplay.Display(disp_name)
+    # Probed BEFORE the lock and the socket, so a display that cannot do XI2
+    # costs a named exit and leaves nothing behind to reap.
+    require_xi2(d)
+    inst = SingleInstance(lock_path(disp_name))
     pub = L.StatePublisher(L.socket_path(disp_name))
     dae = Daemon(table, d, pub, display=disp_name)
-    dae._pending = []
     for p in dae.grabs.problems:
         print(f"hotkeyd: {p}", file=sys.stderr)
 
@@ -840,13 +1078,8 @@ def run_daemon(table, display_name: str | None) -> int:
     signal.signal(signal.SIGTERM, lambda *_: stop.__setitem__("flag", True))
     signal.signal(signal.SIGINT, lambda *_: stop.__setitem__("flag", True))
 
-    def peek():
-        if dae._pending:
-            return dae._pending.pop(0)
-        return d.next_event() if d.pending_events() else None
-
     print(f"hotkeyd: {len(dae.grabs.chords)} chords grabbed on {disp_name} "
-          f"($mod={dae.mod})",
+          f"via XI2 ($mod={dae.mod})",
           file=sys.stderr, flush=True)
     code = 0
     try:
@@ -869,9 +1102,7 @@ def run_daemon(table, display_name: str | None) -> int:
                     print(f"hotkeyd: reload failed, keeping the old table: {e}",
                           file=sys.stderr, flush=True)
             try:
-                if dae._pending:
-                    ev = dae._pending.pop(0)
-                elif not d.pending_events():
+                if not d.pending_events():
                     # i3's socket is in the wait set too, so a mode change wakes
                     # the loop immediately instead of up to 250 ms later — the
                     # window in which both engines would think they own the keys.
@@ -881,9 +1112,8 @@ def run_daemon(table, display_name: str | None) -> int:
                         waits.append(i3fd)
                     select.select(waits, [], [], 0.25)
                     continue
-                else:
-                    ev = d.next_event()
-                dae.pump(ev, peek=peek)
+                ev = d.next_event()
+                dae.pump(ev)
             except ConnectionClosedError:
                 print("hotkeyd: X connection lost, exiting", file=sys.stderr)
                 code = 1
@@ -894,9 +1124,9 @@ def run_daemon(table, display_name: str | None) -> int:
     return code
 
 
-def _keysym_name(d, ev):
+def _keysym_name(d, keycode: int):
     from Xlib import XK                                  # noqa: PLC0415
-    ks = d.keycode_to_keysym(ev.detail, 0)
+    ks = d.keycode_to_keysym(keycode, 0)
     return XK.keysym_to_string(ks) if ks else None
 
 
@@ -934,6 +1164,12 @@ def main() -> int:
     except AlreadyRunning as e:
         print(f"hotkeyd: {e}", file=sys.stderr)
         return 3
+    except XI2Unavailable as e:
+        # Named, non-zero, no traceback: an operator reading the launcher log
+        # has to be able to tell "this display cannot do XI2" from "the daemon
+        # crashed". 5 is distinct from 3 (another daemon) and 4 (panic latch).
+        print(f"hotkeyd: XI2 unavailable — {e}", file=sys.stderr)
+        return 5
 
 
 if __name__ == "__main__":
