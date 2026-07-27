@@ -16,6 +16,7 @@ depends:
   - kitty
   - st
   - i3
+  - hotkeyd
   - quickshell
   - xterm
   - emacs

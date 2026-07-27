@@ -15,8 +15,21 @@ bad() { printf '  \033[31mFAIL\033[0m %s\n' "$1"; FAIL=$((FAIL + 1)); }
 
 export PYTHONDONTWRITEBYTECODE=1
 RUNTIME="$(mktemp -d)"
-XA=":81"
-XB=":82"
+
+# Probe for free displays rather than hardcoding: several suites in this repo run
+# their own Xvfbs on fixed low numbers and may be running concurrently. Same
+# helper shape as i3/scripts/test-clip-integration.sh.
+probe_free_display() { # <start-number>
+    local n="$1"
+    while [ -e "/tmp/.X11-unix/X$n" ] || [ -e "/tmp/.X${n}-lock" ]; do
+        n=$((n + 1))
+    done
+    printf ':%s' "$n"
+}
+XA="$(probe_free_display 71)"
+XB="$(probe_free_display "$(( ${XA#:} + 1 ))")"
+TAG_A="${XA#:}"
+TAG_B="${XB#:}"
 XVFB_PIDS=()
 
 cleanup() {
@@ -61,10 +74,10 @@ n_a=$(pgrep -f "hotkeyd.py.*--display $XA" 2>/dev/null | wc -l)
 n_b=$(pgrep -f "hotkeyd.py.*--display $XB" 2>/dev/null | wc -l)
 [ "$n_a" = 1 ] && ok "exactly one daemon on $XA" || bad "$n_a daemons on $XA"
 [ "$n_b" = 1 ] && ok "exactly one daemon on $XB" || bad "$n_b daemons on $XB"
-[ -e "$RUNTIME/hotkeyd-81.sock" ] && [ -e "$RUNTIME/hotkeyd-82.sock" ] \
+[ -e "$RUNTIME/hotkeyd-$TAG_A.sock" ] && [ -e "$RUNTIME/hotkeyd-$TAG_B.sock" ] \
     && ok "each display has its own state socket" \
     || bad "sockets missing: $(ls "$RUNTIME" | tr '\n' ' ')"
-[ -e "$RUNTIME/hotkeyd-81.lock" ] && [ -e "$RUNTIME/hotkeyd-82.lock" ] \
+[ -e "$RUNTIME/hotkeyd-$TAG_A.lock" ] && [ -e "$RUNTIME/hotkeyd-$TAG_B.lock" ] \
     && ok "each display has its own lock" || bad "locks missing"
 
 # --- idempotent start -------------------------------------------------------
@@ -99,13 +112,26 @@ else
     bad "no escape-hatch bind calling hotkeyd.sh restart in i3/config.common"
 fi
 
+# restart takes the display as an ARGUMENT — the i3 escape-hatch bind runs with
+# whatever DISPLAY i3 exports, but a human debugging one session passes it
+# explicitly. run() exports DISPLAY, so this calls the script directly with
+# DISPLAY unset to prove the argument alone is enough.
+echo "launcher: restart honours an explicit display argument"
+DISPLAY= XDG_RUNTIME_DIR="$RUNTIME" "$HERE/hotkeyd.sh" restart "$XA" >/dev/null 2>&1
+rc=$?
+sleep 1
+n=$(pgrep -f "hotkeyd.py.*--display $XA" 2>/dev/null | wc -l)
+[ "$rc" -eq 0 ] && [ "$n" = 1 ] \
+    && ok "restart with an explicit display and no DISPLAY env" \
+    || bad "restart rc=$rc daemons=$n with an explicit display argument"
+
 # --- stop -------------------------------------------------------------------
 echo "launcher: stop"
 run "$XA" stop >/dev/null 2>&1
 sleep 0.5
 n=$(pgrep -f "hotkeyd.py.*--display $XA" 2>/dev/null | wc -l)
 [ "$n" = 0 ] && ok "stop ends the daemon" || bad "$n daemons still running"
-[ ! -e "$RUNTIME/hotkeyd-81.sock" ] && ok "stop leaves no stale socket" \
+[ ! -e "$RUNTIME/hotkeyd-$TAG_A.sock" ] && ok "stop leaves no stale socket" \
     || bad "stale socket left behind"
 n_b=$(pgrep -f "hotkeyd.py.*--display $XB" 2>/dev/null | wc -l)
 [ "$n_b" = 1 ] && ok "stopping $XA left $XB alone" \
@@ -125,8 +151,10 @@ DISPLAY= XDG_RUNTIME_DIR="$RUNTIME" "$HERE/hotkeyd.sh" check >/dev/null 2>&1 \
 # --- degraded environments --------------------------------------------------
 echo "launcher: degraded environments"
 out="$(DISPLAY= XDG_RUNTIME_DIR="$RUNTIME" "$HERE/hotkeyd.sh" start 2>&1)"; rc=$?
-[ "$rc" -ne 0 ] && ok "start with no DISPLAY refuses ($rc)" \
-    || bad "start with no DISPLAY claimed success"
+# rc 2 specifically, not merely non-zero: "failed to start" is also non-zero,
+# and it would mean the launcher TRIED rather than refused.
+[ "$rc" -eq 2 ] && ok "start with no DISPLAY refuses (rc=2, did not try)" \
+    || bad "expected rc=2 refusal, got rc=$rc: $out"
 out="$(DISPLAY="$XA" XDG_RUNTIME_DIR=/nonexistent-dir-xyz \
        "$HERE/hotkeyd.sh" status 2>&1)"; rc=$?
 [ "$rc" -ne 0 ] && ok "status with an unwritable runtime dir refuses" \

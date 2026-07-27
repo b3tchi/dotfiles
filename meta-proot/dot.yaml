@@ -11,6 +11,7 @@ depends:
   - ssh
   - opencode
   - i3
+  - hotkeyd
   - quickshell
   - st
   - xrdp
