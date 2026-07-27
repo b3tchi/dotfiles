@@ -342,11 +342,31 @@ def test_dispatch_failure_is_reported_not_fatal(tmp_path):
 # --------------------------------------------------------------------------
 
 def test_second_instance_on_the_same_display_is_refused(tmp_path):
+    """Refused, and refused WITHOUT BLOCKING.
+
+    Run on a worker thread with a join timeout: dropping LOCK_NB makes flock
+    wait for the holder forever, which does not fail this test — it hangs it,
+    and a suite that hangs on a regression tells CI nothing. Found by mutation
+    testing, which wedged on exactly that mutant."""
     lock = tmp_path / "hotkeyd-0.lock"
     first = H.SingleInstance(lock)
-    try:
-        with pytest.raises(H.AlreadyRunning):
+    outcome = {}
+
+    def attempt():
+        try:
             H.SingleInstance(lock)
+            outcome["result"] = "acquired"
+        except H.AlreadyRunning:
+            outcome["result"] = "refused"
+        except Exception as e:                      # noqa: BLE001
+            outcome["result"] = f"error: {e!r}"
+
+    try:
+        t = threading.Thread(target=attempt, daemon=True)
+        t.start()
+        t.join(timeout=5.0)
+        assert not t.is_alive(), "second instance BLOCKED instead of failing"
+        assert outcome["result"] == "refused", outcome
     finally:
         first.release()
 
@@ -369,6 +389,43 @@ def test_lock_path_is_per_display(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
     assert H.lock_path(":0") == tmp_path / "hotkeyd-0.lock"
     assert H.lock_path(":10.0") == tmp_path / "hotkeyd-10.lock"
+
+
+# --------------------------------------------------------------------------
+# the grab set — X delivers only GRABBED keys
+# --------------------------------------------------------------------------
+
+def test_layer_binds_are_in_the_grab_set():
+    """Nothing asserted this, and dropping layer binds from all_chords left the
+    whole suite green — while making nav mode completely dead in a real session,
+    since X delivers only the keys you actually grabbed."""
+    chords = H.all_chords(B)
+    assert "h" in chords, "bare nav keys are not grabbed — the layer is dead"
+    assert "Left" in chords
+
+
+def test_layer_exit_keys_are_in_the_grab_set():
+    """A layer you can enter but not leave is the dotfiles-ux1 failure class."""
+    chords = H.all_chords(B)
+    for k in B.LAYERS["nav"].exit_keys:
+        assert k in chords, f"exit key {k!r} not grabbed — layer is a trap"
+
+
+def test_modifier_sublayer_chords_are_grabbed_with_their_modifier():
+    chords = H.all_chords(B)
+    assert "Ctrl+h" in chords, "nav move layer not grabbed"
+    assert "Mod1+h" in chords, "nav resize layer not grabbed"
+
+
+def test_global_binds_are_in_the_grab_set():
+    chords = H.all_chords(B)
+    assert "Mod4+o" in chords
+    assert "Mod4+1" in chords
+
+
+def test_the_grab_set_is_deduplicated():
+    chords = H.all_chords(B)
+    assert len(chords) == len(set(chords))
 
 
 # --------------------------------------------------------------------------
