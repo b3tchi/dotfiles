@@ -273,6 +273,118 @@ def main() -> int:
     check(len(fired) == 1,
           "a held key fires ONCE despite the real auto-repeat stream",
           f"{len(fired)} dispatches")
+
+    # -- coalescer FAIRNESS: what the two guards must NOT swallow -------------
+    # The check above proves the coalescer eats auto-repeat. These prove it eats
+    # nothing else. Both guards in Daemon.pump were unconstrained by any
+    # committed test until this block existed (dotfiles-hwds.4) — each of these
+    # mutants survived the whole suite:
+    #   drop `nxt.time == ev.time`     -> ANY queued release+press of one key is
+    #      swallowed, so a genuine fast double-tap fires once instead of twice;
+    #   drop `nxt.detail == ev.detail` -> a same-millisecond release+press of
+    #      DIFFERENT keys is swallowed, so rolling typing inside a layer loses a
+    #      keystroke.
+    # Only a real server can settle either one: the discriminator is the
+    # timestamp X itself stamps on the events, and no fake can be trusted to
+    # reproduce how it stamps them.
+    hcode, jcode = code_for(d, "h"), code_for(d, "j")
+
+    def pump_traced(settle=0.2):
+        """Pump the queue and record every event the daemon actually LOOKED at,
+        `peek`ed ones included. The peeked event is the one the coalescer's
+        decision turns on, so its timestamp has to come off the same run that
+        produced the dispatches — reading it from a separate injection would
+        assert the shape of a run nobody graded."""
+        time.sleep(settle)
+        seen, out = [], []
+
+        def spy():
+            queued = bool(dae._pending)         # already recorded when peeked
+            ev = peek()
+            if ev is not None and not queued:
+                seen.append((ev.type, ev.detail, ev.time))
+            return ev
+
+        while d.pending_events() or dae._pending:
+            if dae._pending:
+                ev = dae._pending.pop(0)
+            else:
+                ev = d.next_event()
+                if ev.type in (X.KeyPress, X.KeyRelease):
+                    seen.append((ev.type, ev.detail, ev.time))
+            out += dae.pump(ev, peek=spy)
+        return seen, out
+
+    def adjacent(seen, same_key, same_time):
+        """The release->press adjacency a coalescer guard has to judge."""
+        for a, b in zip(seen, seen[1:]):
+            if a[0] != X.KeyRelease or b[0] != X.KeyPress:
+                continue
+            if (a[1] == b[1]) == same_key and (a[2] == b[2]) == same_time:
+                return (a, b)
+        return None
+
+    def inject_until(shoot, same_key, same_time, tries=8):
+        """Fire `shoot` until the server hands back the adjacency the check
+        needs. Which side of a millisecond boundary two XTEST events land on is
+        a property of the clock, not of the daemon — retrying keeps the check
+        deterministic without weakening what it asserts."""
+        seen = out = None
+        for n in range(1, tries + 1):
+            shoot()
+            seen, out = pump_traced()
+            if adjacent(seen, same_key, same_time):
+                return seen, out, n
+        return seen, out, 0
+
+    check(dae.engine.state["layer"] == "nav",
+          "still in nav for the coalescer-fairness checks",
+          str(dae.engine.state))
+
+    # (a) a genuine double-tap: two taps of a nav bind ~10 ms apart. The release
+    # of the first tap and the press of the second sit next to each other in the
+    # queue looking EXACTLY like an auto-repeat pair — same key, adjacent — and
+    # the only thing telling them apart is the millisecond X stamps on each.
+    def double_tap():
+        xtest.fake_input(d, X.KeyPress, hcode)
+        xtest.fake_input(d, X.KeyRelease, hcode)
+        d.sync()
+        time.sleep(0.01)
+        xtest.fake_input(d, X.KeyPress, hcode)
+        xtest.fake_input(d, X.KeyRelease, hcode)
+        d.sync()
+
+    seen, taps, n = inject_until(double_tap, same_key=True, same_time=False)
+    check(n > 0,
+          "a 10 ms double-tap really does put release+press of the SAME key on "
+          "two different milliseconds (else the next check proves nothing)",
+          f"{[(k, t) for _, k, t in seen]}")
+    check(taps == ["focus left", "focus left"],
+          "a 10 ms double-tap dispatches TWICE — the release+press pair between "
+          "the taps is NOT coalesced away",
+          f"{taps} (attempt {n})")
+
+    # (b) rolling typing: h and j injected as one un-synced batch, which the
+    # server stamps with a single millisecond. Release-h is then immediately
+    # followed by press-j at the SAME time — auto-repeat's timestamp signature
+    # across two different keys, and the keycode guard is all that saves the j.
+    def rolling_pair():
+        xtest.fake_input(d, X.KeyPress, hcode)
+        xtest.fake_input(d, X.KeyRelease, hcode)
+        xtest.fake_input(d, X.KeyPress, jcode)
+        xtest.fake_input(d, X.KeyRelease, jcode)
+        d.sync()
+
+    seen, roll, n = inject_until(rolling_pair, same_key=False, same_time=True)
+    check(n > 0,
+          "a rolling h,j pair really does land release+press of DIFFERENT keys "
+          "on ONE millisecond (else the next check proves nothing)",
+          f"{[(k, t) for _, k, t in seen]}")
+    check(roll == ["focus left", "focus down"],
+          "a same-millisecond release+press of DIFFERENT keys keeps BOTH — fast "
+          "rolling typing inside a layer loses no keystroke",
+          f"{roll} (attempt {n})")
+
     feed("q")
     dae.close()
 
