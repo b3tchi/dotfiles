@@ -86,6 +86,34 @@ def lock_path(display: str | None = None) -> Path:
     return _runtime_dir() / f"hotkeyd-{tag}.lock"
 
 
+def x_resource_mod(xdisp=None) -> str:
+    """What `$mod` means on THIS display.
+
+    Read from the `i3wm.mod` X resource — the same source i3 reads via
+    `set_from_resource $mod i3wm.mod Mod4` (ft003), with the same default. The
+    xrdp session entry merges `i3wm.mod: Mod1` before exec'ing i3, so the two
+    displays genuinely disagree and a table that hardcodes a modifier is wrong
+    on one of them.
+    """
+    if xdisp is None:
+        return default_binds.DEFAULT_MOD
+    try:
+        prop = xdisp.screen().root.get_full_property(
+            xdisp.intern_atom("RESOURCE_MANAGER"), 0)
+        if prop is None or not prop.value:
+            return default_binds.DEFAULT_MOD
+        raw = prop.value
+        text = raw.decode(errors="replace") if isinstance(
+            raw, (bytes, bytearray)) else str(raw)
+        for line in text.splitlines():
+            name, _, value = line.partition(":")
+            if name.strip() == "i3wm.mod" and value.strip():
+                return value.strip()
+    except Exception:                           # noqa: BLE001
+        pass
+    return default_binds.DEFAULT_MOD
+
+
 def to_event(kind: str, keysym: str, state: int) -> L.Event:
     """Translate an X key event into the engine's X-agnostic Event.
 
@@ -136,14 +164,15 @@ class GrabManager:
     `sync` — the real X display in production, a recorder in tests.
     """
 
-    def __init__(self, display):
+    def __init__(self, display, mod: str = None):
         self.d = display
+        self.mod = mod or default_binds.DEFAULT_MOD
         self.problems: list[str] = []
         self._active: dict[str, tuple[int, int]] = {}   # chord -> (code, mask)
 
     def _resolve(self, chord: str) -> tuple[int, int] | None:
         try:
-            mods, key = default_binds.parse_chord(chord)
+            mods, key = default_binds.parse_chord(chord, self.mod)
         except default_binds.BindError as e:
             self.problems.append(str(e))
             return None
@@ -205,7 +234,7 @@ class GrabManager:
     def keysym_for(self, keycode: int) -> str | None:
         for chord, (code, _) in self._active.items():
             if code == keycode:
-                return default_binds.parse_chord(chord)[1]
+                return default_binds.parse_chord(chord, self.mod)[1]
         return None
 
     def on_mapping_notify(self) -> bool:
@@ -503,9 +532,10 @@ class Daemon:
         # window manager, and what lets it follow an i3 restart.
         self.i3 = i3 if i3 is not None else I3Client(
             lambda: i3_socket_path(xdisp=d))
-        self.grabs = GrabManager(XAdapter(d, d.screen().root))
+        self.mod = x_resource_mod(d)
+        self.grabs = GrabManager(XAdapter(d, d.screen().root), mod=self.mod)
         self.engine = L.LayerEngine(table.BINDS, table.LAYERS,
-                                    publisher=publisher)
+                                    publisher=publisher, mod=self.mod)
         self.grabs.sync_binds(chords_for(table))
 
     def resync_grabs(self):
@@ -592,7 +622,8 @@ def run_daemon(table, display_name: str | None) -> int:
             return dae._pending.pop(0)
         return d.next_event() if d.pending_events() else None
 
-    print(f"hotkeyd: {len(dae.grabs.chords)} chords grabbed on {disp_name}",
+    print(f"hotkeyd: {len(dae.grabs.chords)} chords grabbed on {disp_name} "
+          f"($mod={dae.mod})",
           file=sys.stderr, flush=True)
     code = 0
     try:
@@ -604,7 +635,7 @@ def run_daemon(table, display_name: str | None) -> int:
                     fresh = load_table(getattr(table, "__file__", None))
                     dae.table = fresh
                     dae.engine = L.LayerEngine(fresh.BINDS, fresh.LAYERS,
-                                               publisher=pub)
+                                               publisher=pub, mod=dae.mod)
                     dae.resync_grabs()
                     print("hotkeyd: reloaded", file=sys.stderr, flush=True)
                 except TableInvalid as e:

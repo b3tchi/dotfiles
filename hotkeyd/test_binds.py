@@ -74,33 +74,19 @@ def test_arrow_keys_do_the_same_thing_as_their_letter(arrow, letter):
     for label in ("move", "resize"):
         bs = nav.mods[label].binds
         assert cmd(bs, arrow) == cmd(bs, letter), label
-    assert cmd(B.BINDS, f"Mod4+{arrow}") == cmd(B.BINDS, f"Mod4+{letter}")
-    assert (cmd(B.BINDS, f"Mod4+Shift+{arrow}")
-            == cmd(B.BINDS, f"Mod4+Shift+{letter}"))
+    # The global $mod movement group lives in i3 until its own cutover commit,
+    # so there is nothing to check here beyond the nav layers.
 
 
-def test_workspace_binds_are_generated_for_all_eight():
-    """ws-switch.nu is an external script, so these are run() spawns rather
-    than i3 command strings.
+def test_workspace_group_has_not_been_migrated_yet():
+    """Guards sp020's anti-pattern from the other side: the workspace chords are
+    still live in i3/config.common, so they must NOT be in this table. When they
+    migrate, the commit that adds them here is the commit that deletes them
+    there — and this test is what should be rewritten then, deliberately."""
+    ws = [b.chord for b in B.BINDS if isinstance(b.action, B.Run)
+          and "ws-switch" in b.action.cmd]
+    assert ws == [], f"workspace group migrated without deleting it from i3: {ws}"
 
-    Asserts the exact chord set, not a count: the earlier `len(...) >= 8` was
-    blind because the filter also matched the `move` and `follow` variants, so
-    shrinking the generator to range(1, 4) still left 24 matches and the suite
-    green. Caught by mutation testing during audit."""
-    switch = sorted(b.chord for b in B.BINDS
-                    if isinstance(b.action, B.Run)
-                    and b.action.cmd.endswith(tuple(str(n) for n in range(1, 9))))
-    assert switch == sorted(f"Mod4+{n}" for n in range(1, 9))
-    for variant, suffix in (("Mod4+Ctrl", "move"), ("Mod4+Shift", "follow")):
-        got = sorted(b.chord for b in B.BINDS
-                     if isinstance(b.action, B.Run)
-                     and b.action.cmd.endswith(suffix))
-        assert got == sorted(f"{variant}+{n}" for n in range(1, 9)), suffix
-
-
-# --------------------------------------------------------------------------
-# chord normalization — order-insensitive, alias-folding
-# --------------------------------------------------------------------------
 
 @pytest.mark.parametrize("a,b", [
     ("Mod4+q", "Super+q"),
@@ -324,3 +310,61 @@ def test_check_reports_every_problem_not_just_the_first(tmp_path):
     assert r.returncode != 0
     for token in ("Mod4+z", "Mod4+y", "ghost"):
         assert token in out, (token, out)
+
+
+# --------------------------------------------------------------------------
+# the $mod token — one table, two displays (dotfiles-hwds.7, us019 AC3)
+# --------------------------------------------------------------------------
+
+def test_mod_token_resolves_to_the_given_modifier():
+    """ft003 gives i3 `set_from_resource $mod i3wm.mod Mod4`, and the xrdp
+    session sets Mod1. The table must express the same idea or it cannot drive
+    both displays — AC3 was only mechanically satisfied while chords hardcoded
+    Mod4."""
+    assert B.normalize_chord("$mod+o", mod="Mod4") == B.normalize_chord("Mod4+o")
+    assert B.normalize_chord("$mod+o", mod="Mod1") == B.normalize_chord("Mod1+o")
+
+
+def test_mod_token_defaults_to_mod4():
+    """Same default i3 uses when the resource is absent (native :0)."""
+    assert B.normalize_chord("$mod+o") == B.normalize_chord("Mod4+o")
+
+
+def test_the_same_chord_means_different_things_on_the_two_displays():
+    assert B.normalize_chord("$mod+o", mod="Mod1") != \
+        B.normalize_chord("$mod+o", mod="Mod4")
+
+
+def test_mod_token_composes_with_other_modifiers():
+    assert B.normalize_chord("$mod+Shift+q", mod="Mod1") == \
+        B.normalize_chord("Mod1+Shift+q")
+
+
+def test_an_unknown_token_is_still_rejected():
+    problems = B.validate([B.Bind("$super+o", "nop x")], {})
+    assert any("$super" in p for p in problems), problems
+
+
+def test_validate_threads_the_mod_through():
+    """A duplicate that only collides once $mod resolves must still be caught."""
+    problems = B.validate([B.Bind("$mod+o", "nop a"), B.Bind("Mod1+o", "nop b")],
+                          {}, mod="Mod1")
+    assert problems, "collision after resolution not detected"
+    assert B.validate([B.Bind("$mod+o", "nop a"), B.Bind("Mod1+o", "nop b")],
+                      {}, mod="Mod4") == []
+
+
+def test_the_shipped_table_uses_the_mod_token_not_a_hardcoded_modifier():
+    """On :10 $mod is Mod1, so a hardcoded Mod4 chord is FREE there — the daemon
+    would own and serve it while i3 owns the Alt equivalent."""
+    hardcoded = [b.chord for b in B.BINDS
+                 if "Mod4" in b.chord or "Super" in b.chord]
+    assert hardcoded == [], f"hardcoded modifier in the table: {hardcoded}"
+
+
+def test_the_shipped_table_is_scoped_to_the_nav_cutover():
+    """sp020's anti-pattern: a chord must not exist in both i3 and the daemon at
+    any commit boundary. Groups whose cutover is not T6 belong to i3 until the
+    commit that deletes them from it."""
+    assert [b.chord for b in B.BINDS] == ["$mod+o"], \
+        "table carries groups that i3 still owns"

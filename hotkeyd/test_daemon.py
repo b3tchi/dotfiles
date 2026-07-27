@@ -404,14 +404,14 @@ def test_bare_layer_keys_are_not_grabbed_in_the_default_layer():
     for key in ("h", "j", "k", "l", "Left", "Escape", "Return", "q"):
         assert key not in default_set, \
             f"{key!r} grabbed in the default layer — eaten from every app"
-    assert "Mod4+o" in default_set, "the layer entry chord must still be grabbed"
+    assert "$mod+o" in default_set, "the layer entry chord must still be grabbed"
 
 
 def test_entering_a_layer_grabs_its_bare_keys():
     chords = H.chords_for(B, "nav")
     assert "h" in chords, "bare nav keys not grabbed while nav is active"
     assert "Left" in chords
-    assert "Mod4+o" in chords, "global binds stay grabbed inside a layer"
+    assert "$mod+o" in chords, "global binds stay grabbed inside a layer"
 
 
 def test_a_layer_grabs_the_modifier_keys_its_sublayers_need():
@@ -448,8 +448,36 @@ def test_modifier_sublayer_chords_are_grabbed_with_their_modifier():
 
 def test_global_binds_are_in_the_grab_set():
     chords = H.chords_for(B)
-    assert "Mod4+o" in chords
-    assert "Mod4+1" in chords
+    assert "$mod+o" in chords
+
+
+def test_the_mod_token_resolves_per_display_at_grab_time():
+    """One table, two displays (us019 AC3): the same `$mod+o` chord must grab
+    Super on :0 and Alt on the xrdp session, where i3wm.mod is Mod1."""
+    native = FakeDisplay(keymap={"o": 32})
+    rdp = FakeDisplay(keymap={"o": 32})
+    H.GrabManager(native, mod="Mod4").sync_binds(["$mod+o"])
+    H.GrabManager(rdp, mod="Mod1").sync_binds(["$mod+o"])
+    assert (32, H.MOD4) in native.grabs
+    assert (32, H.MOD1) in rdp.grabs
+    assert (32, H.MOD4) not in rdp.grabs, "RDP session grabbed Super, not Alt"
+
+
+def test_mod_defaults_to_mod4_when_the_resource_is_absent():
+    assert H.x_resource_mod(None) == "Mod4"
+
+
+def test_mod_is_read_from_the_i3wm_resource():
+    """Same source i3 reads (ft003). xrdp/xinitrc merges `i3wm.mod: Mod1`."""
+    xd = FakeXDisplay("")
+    xd.path = "i3wm.mod:\tMod1\nXft.dpi:\t96\n"
+    assert H.x_resource_mod(xd) == "Mod1"
+
+
+def test_an_unrelated_resource_database_leaves_the_default():
+    xd = FakeXDisplay("")
+    xd.path = "Xft.dpi:\t96\nXcursor.theme:\tAdwaita\n"
+    assert H.x_resource_mod(xd) == "Mod4"
 
 
 def test_the_grab_set_is_deduplicated():
