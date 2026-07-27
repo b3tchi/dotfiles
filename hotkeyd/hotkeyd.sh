@@ -159,6 +159,23 @@ run hotkeyd-panic.sh resume" 4
                 "$DPY_BASE" "$pid" "$SOCK"
             exit 0
         fi
+        # While the latch is set there is no daemon BY DESIGN — `start` refuses
+        # behind the link (see the FALLBACK_LINK note above) — so a bare "not
+        # running" names the symptom and hides the cause. Once autostart is
+        # armed, `start` runs from an i3 `exec_always` and its refusal goes to
+        # the i3 log rather than to a terminal, which makes `status` the
+        # diagnostic a person actually reads: it says the cause and the cure on
+        # one line. The exit code is unchanged — still 1, as callers expect for
+        # "no daemon" (test-launcher.sh asserts it); only the message grows.
+        if [ -L "$FALLBACK_LINK" ] || [ -e "$FALLBACK_LINK" ]; then
+            # Adjacent quoted strings, not a backslash-newline: inside SINGLE
+            # quotes a backslash is literal, so continuing the format that way
+            # would print a stray `\` and a line break into the i3 log.
+            printf 'hotkeyd: not running on %s — session is PANICKED '\
+'(fallback linked at %s), run hotkeyd-panic.sh resume\n' \
+                "$DPY_BASE" "$FALLBACK_LINK"
+            exit 1
+        fi
         printf 'hotkeyd: not running on %s\n' "$DPY_BASE"
         exit 1
         ;;

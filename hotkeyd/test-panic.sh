@@ -258,6 +258,23 @@ out="$(DISPLAY="$XA" "$HERE/hotkeyd.sh" start "$XA" 2>&1)"; rc=$?
 [ "$(daemons_on "$XA")" = 0 ] && ok "and spawned nothing" \
     || bad "a daemon is running behind the fallback"
 
+# `status` is the other half of the same latch (dotfiles-hwds.19). Once
+# autostart is armed, `start` is run by an i3 `exec_always` and the refusal
+# above lands in the i3 log, never on anyone's terminal — `status` is what a
+# person types, and a bare "not running" would name the symptom while hiding
+# both the cause and the one command that undoes it. Asserted on the text, not
+# on the exit code, because the exit code must NOT move: 1 already means "no
+# daemon" and test-launcher.sh's callers read it that way.
+out="$(DISPLAY="$XA" "$HERE/hotkeyd.sh" status "$XA" 2>&1)"; rc=$?
+case "$out" in
+    *PANICKED*"$LINK"*resume*)
+        ok "status names the latch, the link and the cure while panicked" ;;
+    *)  bad "status hid the panic latch: $out" ;;
+esac
+[ "$rc" -eq 1 ] \
+    && ok "and status still exits 1 while panicked (unchanged for callers)" \
+    || bad "status exit code moved to $rc while panicked"
+
 # --- 6: resume round-trip ----------------------------------------------------
 echo "panic: resume"
 out="$(panic resume 2>&1)"; rc=$?
