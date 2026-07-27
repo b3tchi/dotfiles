@@ -15,29 +15,13 @@
 # Windows are two `st` terminals identified by X11 window id, not title: st
 # rewrites its own title from the shell prompt, so titles are not stable.
 #
-# Scope: the nav layer's real effects — focus bare, move with Ctrl, resize with
-# Alt — which are unchanged by the T6 cutover (sp020, dotfiles-zgs4). What
-# changed underneath is the MECHANISM: the layer left i3 entirely and is now
-# owned by hotkeyd, so this harness starts the daemon against its own display
-# and reads layer state from the daemon's socket instead of i3's binding state.
-#
-# The point of re-pointing rather than rewriting: these assertions are about
-# WINDOWS moving, and they must keep passing across a change of engine. Anything
-# that only made sense for the i3 implementation (the `nop` marker-bind pairs,
-# i3's binding-event mods) is gone with the implementation it described.
-#
-# How the bar PAINTS the layer is quickshell/test-mode-bar.sh's job.
-#
-# DEVIATION from sp020 Task 6's fifth criterion ("no `nop nav-` string remains
-# anywhere in i3/ or quickshell/"): the i3/ half is done — this suite was the
-# last holder and is now clean. The quickshell/ half is NOT, deliberately.
-# Bar.qml still parses `nop nav-move-on/off` (config/Bar.qml noteBinding) and
-# quickshell/test-mode-bar.sh still asserts that parsing. Deleting either now
-# would break a green suite for a consumer whose cutover is T7's whole job
-# (dotfiles-hwds.2), so the strings leave with the code that reads them, in T7 —
-# together with qs-focus-border.py, the second consumer T7's file list missed
-# (dotfiles-hwds.9). Until then those binds simply never fire, because i3 no
-# longer has them to emit.
+# Scope: what i3 itself does — focus bare, move with Ctrl, resize with Alt, and
+# the `nop` binds that publish each held modifier to the bar as binding events.
+# There is ONE i3 mode for all three layers; the nop signal replaced a twin mode
+# that had to duplicate every movement bind so a missed release could not strand
+# the session somewhere destructive.
+# How the bar PAINTS that is quickshell/test-mode-bar.sh's job; the focus-frame
+# recolour is asserted here because it needs a real WM.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -48,7 +32,6 @@ PASS=0
 FAIL=0
 
 cleanup() {
-  [ -n "${HOTKEYD_PID:-}" ] && kill "$HOTKEYD_PID" 2>/dev/null
   [ -n "${I3_PID:-}" ] && kill "$I3_PID" 2>/dev/null
   [ -n "${XVFB_PID:-}" ] && kill "$XVFB_PID" 2>/dev/null
   rm -rf "$TMP"
@@ -64,8 +47,6 @@ assert_eq() { # <label> <actual> <expected>
     FAIL=$((FAIL + 1))
   fi
 }
-
-HOTKEYD_DIR="$SCRIPT_DIR/../hotkeyd"
 
 for bin in Xvfb xdotool i3 i3-msg st python3; do
   command -v "$bin" >/dev/null || { echo "FATAL: $bin not found" >&2; exit 1; }
@@ -89,19 +70,6 @@ I3_PID=$!
 for _ in $(seq 1 20); do [ -S "$I3SOCK" ] && break; sleep 0.5; done
 [ -S "$I3SOCK" ] || { echo "FATAL: harness i3 did not come up" >&2; tail -5 "$TMP/i3.log" >&2; exit 1; }
 export DISPLAY="$DPY"
-
-# The daemon owns the nav layer now. Start it against THIS display with its own
-# runtime dir, and point it at the harness i3 explicitly — HOTKEYD_I3SOCK is the
-# one override the resolver trusts (dotfiles-hwds.6), precisely so a test can
-# aim a daemon at a specific WM without the ambient environment deciding.
-export XDG_RUNTIME_DIR="$TMP"
-HOTKEYD_I3SOCK="$I3SOCK" DISPLAY="$DPY" \
-  python3 "$HOTKEYD_DIR/hotkeyd.py" --display "$DPY" >"$TMP/hotkeyd.log" 2>&1 &
-HOTKEYD_PID=$!
-for _ in $(seq 1 20); do [ -S "$TMP/hotkeyd-${DPY#:}.sock" ] && break; sleep 0.3; done
-[ -S "$TMP/hotkeyd-${DPY#:}.sock" ] || {
-  echo "FATAL: hotkeyd did not come up on $DPY" >&2
-  tail -5 "$TMP/hotkeyd.log" >&2; exit 1; }
 
 # A keysym that fails to translate is only ever an i3 LOG line — `i3 -C` exits
 # clean and the bind is silently dropped. Catching it needs the running log.
@@ -128,34 +96,8 @@ def f(n):
         r = f(c)
         if r: return r
 print(f(json.load(sys.stdin)) or "none")'; }
-# Layer state comes from the DAEMON now, not i3's binding state: i3 has no nav
-# mode any more. Connecting replays the current state as the first line, which
-# is what makes a one-shot read like this possible at all.
-_state_field() { # <field>
-  python3 - "$TMP/hotkeyd-${DPY#:}.sock" "$1" <<'PYEOF'
-import json, socket, sys
-c = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-c.settimeout(2)
-try:
-    c.connect(sys.argv[1])
-    buf = b""
-    while b"\n" not in buf:
-        chunk = c.recv(4096)
-        if not chunk:
-            break
-        buf += chunk
-finally:
-    c.close()
-if not buf.strip():
-    print("none")
-else:
-    v = json.loads(buf.split(b"\n")[0]).get(sys.argv[2])
-    print(v if v else ("default" if sys.argv[2] == "layer" else "none"))
-PYEOF
-}
-mode() { _state_field layer; }
-# The held modifier as the bar reads it: "move", "resize" or "none".
-held_mod() { _state_field mod; }
+mode() { i3-msg -s "$I3SOCK" -t get_binding_state \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["name"])'; }
 
 ORDER="$(ids)"; A="${ORDER%% *}"; B="${ORDER##* }"
 
@@ -179,27 +121,30 @@ xdotool key --clearmodifiers ctrl+h; sleep 0.5
 assert_eq "Ctrl+h moves B left -> B A" "$(ids)" "$B $A"
 assert_eq "focus follows the moved window" "$(focused)" "$B"
 
-# THE indicator contract, unchanged in meaning and much cheaper to keep: holding
-# Ctrl ALONE — before any hjkl — must already publish the layer, because the cue
-# answers "what will the next keystroke do". i3 needed SIX bindcode `nop` marker
-# binds to fake this, since it cannot report a held modifier; the daemon sees the
-# modifier directly and publishes {"layer":"nav","mod":"move"}.
-scenario "Ctrl alone publishes the move layer, releasing it publishes back"
+# THE indicator contract: pressing Ctrl ALONE — before any hjkl — must already
+# emit a signal, because the cue answers "what will the next keystroke do".
+# i3 emits a binding event for `nop` like any other command, argument included,
+# so the bar learns it without the WM changing state at all.
+scenario "Ctrl alone emits nop nav-move-on, releasing it emits nav-move-off"
 xdotool keyup ctrl 2>/dev/null; sleep 0.3
-xdotool key q; sleep 0.3; xdotool key super+o; sleep 0.5
+xdotool key q; sleep 0.3; xdotool key super+o; sleep 0.4
+NOP_LOG="$TMP/nops.log"
+i3-msg -s "$I3SOCK" -t subscribe -m '["binding"]' > "$NOP_LOG" 2>&1 &
+NOP_SUB=$!
+sleep 0.8
 LAYOUT_BEFORE="$(ids)"
 xdotool keydown ctrl; sleep 0.5
-MOD_WHILE_HELD="$(held_mod)"
-LAYER_WHILE_HELD="$(mode)"
+MODE_WHILE_HELD="$(mode)"
 xdotool keyup ctrl; sleep 0.5
-MOD_AFTER="$(held_mod)"
-assert_eq "held Ctrl publishes mod=move" "$MOD_WHILE_HELD" "move"
-assert_eq "releasing it publishes mod=none" "$MOD_AFTER" "none"
-# The layer itself never changes for the indicator: no second layer to strand
-# in, and nothing churns when a client re-synthesises the modifier per keystroke.
-assert_eq "the layer never left nav while Ctrl was held" "$LAYER_WHILE_HELD" "nav"
+kill "$NOP_SUB" 2>/dev/null; sleep 0.3
+NOPS="$(python3 "$SCRIPT_DIR/test-events.py" "$NOP_LOG" "nop ")"
+assert_eq "the down/up pair reached the bar's stream" \
+  "$NOPS" "nop nav-move-on|nop nav-move-off"
+# The WM does not change state for the indicator: no second mode to strand in,
+# and nothing churns when a client re-synthesises the modifier per keystroke.
+assert_eq "the mode never left nav while Ctrl was held" "$MODE_WHILE_HELD" "nav"
 assert_eq "still nav after the release" "$(mode)" "nav"
-assert_eq "the modifier alone moved no window" "$(ids)" "$LAYOUT_BEFORE"
+assert_eq "nop moved no window" "$(ids)" "$LAYOUT_BEFORE"
 
 # Width of the focused window, for the resize layer.
 fwidth() { i3-msg -s "$I3SOCK" -t get_tree | python3 -c '
@@ -228,13 +173,18 @@ assert_eq "Alt+h took the width back" "$(fwidth)" "$W_BEFORE"
 assert_eq "resizing reordered nothing" "$(ids)" "$LAYOUT_BEFORE"
 assert_eq "still one mode throughout" "$(mode)" "nav"
 
-scenario "Alt alone publishes the resize layer, and moves/resizes nothing"
+scenario "Alt alone emits the resize nop pair, and moves/resizes nothing"
+ALT_LOG="$TMP/alt-nops.log"
+i3-msg -s "$I3SOCK" -t subscribe -m '["binding"]' > "$ALT_LOG" 2>&1 &
+ALT_SUB=$!
+sleep 0.8
 W_IDLE="$(fwidth)"
 xdotool keydown alt; sleep 0.5
-MOD_ALT="$(held_mod)"
 xdotool keyup alt; sleep 0.5
-assert_eq "held Alt publishes mod=resize" "$MOD_ALT" "resize"
-assert_eq "releasing it publishes mod=none" "$(held_mod)" "none"
+kill "$ALT_SUB" 2>/dev/null; sleep 0.3
+assert_eq "the resize down/up pair reached the bar's stream" \
+  "$(python3 "$SCRIPT_DIR/test-events.py" "$ALT_LOG" "nop ")" \
+  "nop nav-resize-on|nop nav-resize-off"
 assert_eq "the modifier alone changed no geometry" "$(fwidth)" "$W_IDLE"
 
 scenario "after a move, unshifted keys go back to focusing (no sticky move)"
@@ -257,27 +207,96 @@ assert_eq "Right focuses the right-hand window" "$(focused)" "$LEFT"
 
 # --- focus-frame colour (dotfiles-5u6m) -------------------------------------
 #
-# SKIPPED PENDING dotfiles-hwds.9, and deliberately left in place rather than
-# deleted: quickshell/qs-focus-border.py paints the red "keys are captured" ring
-# off i3 MODE events (COLOR_MODES = {'nav'}), and the T6 cutover removed the i3
-# nav mode those events came from. The ring is therefore stale-teal in nav until
-# that helper is re-pointed at the daemon's state socket — the same cutover the
-# bar gets in T7, on a second consumer sp020's task list did not name.
+# quickshell/qs-focus-border.py draws the focus ring and already follows i3
+# mode events, so the "you are in a key-capturing mode" cue lives there rather
+# than in a second overlay. It is asserted HERE because this is the only
+# harness with a real i3 and real windows for it to draw around.
 #
-# These four scenarios assert real PIXELS (import + histogram) and are the only
-# coverage of that cue, so they come back with hwds.9 rather than being rewritten
-# into something weaker now.
-echo
-echo "SKIP: focus-frame colour scenarios — qs-focus-border.py still follows i3"
-echo "      mode events, which the T6 cutover removed (dotfiles-hwds.9)"
+# The assertion is on actual PIXELS (adr0002 — UI observed through sh-visible
+# effects): screenshot the root window and count the ring's colour. Skipped
+# where the helper's GTK stack is unavailable rather than failing the suite.
+if ! command -v import >/dev/null; then
+  echo; echo "SKIP: focus-frame colour needs ImageMagick's import (not installed)"
+elif ! python3 -c 'import gi' 2>/dev/null; then
+  echo; echo "SKIP: focus-frame colour needs python-gobject (not installed)"
+else
+  ring_pixels() { # <hex-without-#> -> pixel count of that exact colour
+    import -window root "$TMP/shot.png" 2>/dev/null
+    convert "$TMP/shot.png" -format %c histogram:info:- 2>/dev/null \
+      | grep -i "#$1" | awk '{print $1}' | tr -d ':' | head -1
+  }
+  # leave nav so the helper starts in the default-mode colour
+  xdotool key q 2>/dev/null; sleep 0.3
+  DISPLAY="$DPY" python3 -u "$SCRIPT_DIR/../quickshell/qs-focus-border.py" \
+    >"$TMP/border.log" 2>&1 &
+  BORDER_PID=$!
+  sleep 2.5
+  i3-msg -s "$I3SOCK" 'focus left' >/dev/null; sleep 1.2
 
-# The old suite asserted i3's binding events reported the mods it matched — the
-# bar's corroborating signal when a `nop` went missing. Both the signal and the
-# thing it corroborated are gone: i3 has no nav binds to report, and the daemon
-# publishes modifier state as state rather than as a side effect of a bind.
-# What replaces it is the pair of scenarios above, which read that state
-# directly, plus the daemon suite's own coverage of the guard that expires a
-# hold whose release was lost (hotkeyd/test_layers.py).
+  scenario "focus frame is the normal colour in the default mode"
+  TEAL_DEFAULT="$(ring_pixels 16A085)"
+  RED_DEFAULT="$(ring_pixels CB4B16)"
+  assert_eq "teal ring pixels present" "$([ "${TEAL_DEFAULT:-0}" -gt 0 ] && echo yes || echo no)" "yes"
+  assert_eq "no red ring pixels yet" "$([ "${RED_DEFAULT:-0}" -gt 0 ] && echo yes || echo no)" "no"
+
+  scenario "entering nav repaints the SAME frame red — the standing 'keys are captured' cue"
+  xdotool key super+o; sleep 1.5
+  TEAL_NAV="$(ring_pixels 16A085)"
+  RED_NAV="$(ring_pixels CB4B16)"
+  assert_eq "red ring pixels present in nav" "$([ "${RED_NAV:-0}" -gt 0 ] && echo yes || echo no)" "yes"
+  assert_eq "teal is gone (recoloured, not a second ring)" "$([ "${TEAL_NAV:-0}" -gt 0 ] && echo yes || echo no)" "no"
+
+  scenario "holding Ctrl keeps it red — the signal must not repaint the frame"
+  xdotool keydown ctrl; sleep 1.2
+  RED_TWIN="$(ring_pixels CB4B16)"
+  assert_eq "still red while Ctrl is held" "$([ "${RED_TWIN:-0}" -gt 0 ] && echo yes || echo no)" "yes"
+  xdotool keyup ctrl; sleep 0.6
+
+  scenario "leaving the mode restores the normal colour"
+  xdotool key q; sleep 1.5
+  TEAL_BACK="$(ring_pixels 16A085)"
+  RED_BACK="$(ring_pixels CB4B16)"
+  assert_eq "teal ring is back" "$([ "${TEAL_BACK:-0}" -gt 0 ] && echo yes || echo no)" "yes"
+  assert_eq "no red left behind" "$([ "${RED_BACK:-0}" -gt 0 ] && echo yes || echo no)" "no"
+
+  kill "$BORDER_PID" 2>/dev/null
+  xdotool key super+o; sleep 0.4    # the exit scenarios below expect nav
+fi
+
+# Besides the explicit nop pair, the bar corroborates from the mods of ordinary
+# action bindings: one that ran as Ctrl+hjkl proves the modifier was down for
+# that keystroke even if a nop went missing. If i3 ever stopped reporting
+# `mods`, or spelled ctrl differently, only this scenario — the one place a
+# REAL i3 is asked — would notice.
+scenario "i3's binding events report the mods it matched (the bar's corroborating signal)"
+BIND_LOG="$TMP/bindings.log"
+i3-msg -s "$I3SOCK" -t subscribe -m '["binding"]' > "$BIND_LOG" 2>&1 &
+SUB_PID=$!
+sleep 0.8
+xdotool key h; sleep 0.4                       # bare    -> focus
+xdotool key --clearmodifiers ctrl+j; sleep 0.4 # shifted -> move
+kill "$SUB_PID" 2>/dev/null
+sleep 0.3
+# Concatenated JSON objects, one per event — decode them in sequence.
+BIND_SUMMARY="$(python3 - "$BIND_LOG" <<'PY'
+import sys, json
+raw = open(sys.argv[1]).read().strip()
+dec, i, out = json.JSONDecoder(), 0, []
+while i < len(raw):
+    obj, i = dec.raw_decode(raw, i)
+    while i < len(raw) and raw[i] in ' \n\r\t':
+        i += 1
+    b = obj.get("binding")
+    # bindcode binds (the Shift-keycode twin flips) report symbol null — they
+    # are asserted by the mode scenarios above, and including them here would
+    # pin xdotool's modifier-synthesis order rather than i3's mods reporting.
+    if b and b.get("symbol"):
+        out.append("%s:%s:%s" % (b.get("symbol"), ",".join(b.get("mods", [])), b.get("command")))
+print("|".join(out))
+PY
+)"
+assert_eq "bare h reports no mods, Ctrl+j reports mods=ctrl" \
+  "$BIND_SUMMARY" "h::focus left|j:ctrl:move down"
 
 scenario "q exits — including with Ctrl physically held down"
 xdotool keydown ctrl; sleep 0.2

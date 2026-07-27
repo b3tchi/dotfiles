@@ -912,29 +912,3 @@ def test_the_daemons_own_resolver_pins_its_display(monkeypatch):
     dae.i3._path_getter()                          # the wiring under test
     assert seen.get("DISPLAY") == ":10", \
         f"daemon resolver used the ambient display: {seen.get('DISPLAY')!r}"
-
-
-def test_the_resize_sublayer_is_grabbed_on_a_modifier_i3_does_not_own():
-    """T6 audit gap 2, statically: on an xrdp-shaped display the resize chords
-    must NOT be Mod1+hjkl, because that is exactly what i3 binds as $mod+hjkl
-    there — the daemon would get BadAccess on all 8 and the layer would be
-    unreachable."""
-    rdp = H.chords_for(B, "nav", "Mod1")
-    assert "Mod4+h" in rdp, "resize layer did not move off $mod on an Mod1 display"
-    assert "Mod1+h" not in rdp, "resize layer still collides with i3's $mod+h"
-
-    native = H.chords_for(B, "nav", "Mod4")
-    assert "Mod1+h" in native
-    assert "Mod4+h" not in native, "resize layer collides with $mod on :0"
-
-
-def test_the_engine_matches_the_resize_layer_under_both_modifiers():
-    import layers as L                                   # noqa: PLC0415
-    for mod, held in (("Mod4", "Alt_L"), ("Mod1", "Super_L")):
-        e = L.LayerEngine(B.BINDS, B.LAYERS, mod=mod)
-        e.handle(L.Event("press", "o", frozenset({mod})))
-        assert e.state["layer"] == "nav", mod
-        e.handle(L.Event("press", held))
-        assert e.state["mod"] == "resize", f"{mod}: {held} did not select resize"
-        assert e.handle(L.Event("press", "h")) == \
-            ["resize shrink width 5 px or 5 ppt"], mod

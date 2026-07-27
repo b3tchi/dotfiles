@@ -67,29 +67,6 @@ _KEYSYMS = frozenset(
 MOD_TOKEN = "$mod"
 DEFAULT_MOD = "Mod4"
 
-# The layer's SECOND modifier, for a sublayer that must not collide with `$mod`.
-# It cannot be a fixed modifier: nav's resize layer used a literal Mod1, which is
-# free on :0 but IS `$mod` on the xrdp session — where i3 owns Mod1+hjkl as its
-# focus binds, so the daemon got BadAccess on every one of them and Alt+h did
-# i3's focus instead of the layer's resize. `$altmod` is "Alt, unless Alt is
-# already $mod, in which case Super" — always the one of the pair that the WM
-# does not own.
-ALT_TOKEN = "$altmod"
-
-
-def alt_mod_for(mod: str = DEFAULT_MOD) -> str:
-    return "Mod4" if str(mod).strip().lower() in ("mod1", "alt") else "Mod1"
-
-
-def resolve_mod_name(name: str, mod: str = DEFAULT_MOD) -> str:
-    """Resolve a modifier token to a concrete modifier name."""
-    low = str(name).strip().lower()
-    if low == MOD_TOKEN:
-        return str(mod)
-    if low == ALT_TOKEN:
-        return alt_mod_for(mod)
-    return str(name)
-
 
 class BindError(ValueError):
     """A chord or table that cannot be loaded. Message names the offender."""
@@ -119,8 +96,8 @@ def parse_chord(chord: str, mod: str = DEFAULT_MOD) -> tuple[frozenset[str], str
     mods = set()
     for raw in parts[:-1]:
         name = raw.strip().lower()
-        if name in (MOD_TOKEN, ALT_TOKEN):
-            name = resolve_mod_name(name, mod).lower()
+        if name == MOD_TOKEN:
+            name = str(mod).lower()
         canon = MODIFIER_ALIASES.get(name)
         if canon is None:
             raise BindError(f"chord {chord!r} has unknown modifier {raw!r}")
@@ -266,8 +243,7 @@ def validate(binds: Iterable[Bind] = None,
         for label, mod_ in layer.mods.items():
             where = f"layer {name!r} mod {label!r}"
             try:
-                canon = MODIFIER_ALIASES.get(
-                    resolve_mod_name(mod_.modifier, mod).strip().lower())
+                canon = MODIFIER_ALIASES.get(str(mod_.modifier).strip().lower())
             except Exception:  # pragma: no cover - defensive
                 canon = None
             if canon is None:
@@ -350,10 +326,7 @@ LAYERS: dict[str, Layer] = {
         binds=_nav_binds("focus"),
         mods={
             "move": Mod("Ctrl", tuple(_nav_binds("move"))),
-            # $altmod, not a literal Mod1: on the xrdp session $mod IS Mod1,
-            # and i3 owns Mod1+hjkl there as its focus binds — a literal Mod1
-            # made the whole resize layer unreachable on that display.
-            "resize": Mod("$altmod", tuple(_nav_binds("resize"))),
+            "resize": Mod("Mod1", tuple(_nav_binds("resize"))),
         },
         # q must work with a modifier still held — a layer you cannot leave
         # while holding Ctrl is a trap. The daemon matches exit keys against
