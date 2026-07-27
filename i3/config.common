@@ -290,8 +290,9 @@ for_window [title="quickshell-notifications"] floating enable, border none, stic
 # switch to workspace with urgent window automatically
 for_window [urgent=latest] focus
 
-# reload the configuration file
-bindsym $mod+Shift+c reload
+# ($mod+Shift+c — reload — lives in the ENTRY POINTS, not here: it also has to
+# restart the bar, and that exec needs each entry point's own quickshell env.
+# See the note there for why a bare reload is not enough.)
 
 # restart i3 inplace (preserves your layout/session, can be used to upgrade i3)
 bindsym $mod+Shift+r restart

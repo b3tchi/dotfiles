@@ -989,6 +989,25 @@ done
 # is that it stayed that way.
 assert_eq "the bind text lives ONLY in config.common" "0" "$(count_fixed_line "$I3_BASE" "$NAME_WS_LINE")"
 
+scenario "reload-restarts-the-bar: \$mod+Shift+c chains a qs-start exec onto the reload"
+# i3 runs exec_always on RESTART only, never on reload (verified empirically),
+# so a bare `reload` leaves the running quickshell on the QML it started with.
+# Both entry points must therefore chain the bar restart onto the bind, each
+# with its OWN env prefix -- which is also why the bind cannot live in the
+# shared base (the base never execs, and the env vars are entry-point ones).
+for f in "$I3_BASE" "$I3_XRDP"; do
+  RELOAD_LINE="$(effective "$f" | grep -E '^bindsym \$mod\+Shift\+c ' | head -1)"
+  case "$RELOAD_LINE" in
+    *reload*qs-start.sh*) assert_eq "$(basename "$f") effective: reload also restarts the bar" "ok" "ok" ;;
+    *) assert_eq "$(basename "$f") effective: reload also restarts the bar" "$RELOAD_LINE" "reload + qs-start.sh exec" ;;
+  esac
+  assert_eq "$(basename "$f") effective: exactly one \$mod+Shift+c bind" "1" \
+    "$(effective "$f" | grep -cE '^bindsym \$mod\+Shift\+c ' | tr -d ' ')"
+done
+# the shared base must NOT carry it (it would exec, and without the env)
+assert_eq "config.common has no \$mod+Shift+c bind" "0" \
+  "$(grep -cE '^bindsym \$mod\+Shift\+c ' "$I3_COMMON" | tr -d ' ')"
+
 scenario "no-shift-n-i3-input-left: the OLD \$mod+Shift+n -> i3-input bind is gone from both effective configs"
 for f in "$I3_BASE" "$I3_XRDP"; do
   assert_eq "$(basename "$f") effective: zero bindsym lines pairing Shift+n with i3-input" "0" "$(count_eff_sub "$f" "$OLD_BIND_SUBSTR")"

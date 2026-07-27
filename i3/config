@@ -48,6 +48,17 @@ bindsym $mod+d exec ~/.dotfiles/quickshell/qs-overlay.sh launcher
 # Project workspace picker (quickshell overlay)
 bindsym $mod+p exec --no-startup-id ~/.dotfiles/quickshell/qs-overlay.sh projects
 
+# reload the configuration file, AND restart the bar with it.
+# i3 runs exec_always on RESTART only — a plain `reload` re-reads the config
+# and leaves every exec_always process untouched (verified empirically:
+# exec_always ran once at start, still once after reload, twice after
+# restart). The bar is an exec_always, so a bare reload kept a quickshell
+# instance alive with whatever QML it started with — edits appeared to have
+# no effect, and a session could sit for hours on stale code while its
+# config was current. Chaining the restart onto the same bind keeps
+# "reload" meaning what it looks like it means.
+bindsym $mod+Shift+c reload, exec --no-startup-id $qsbarenv ~/.dotfiles/quickshell/qs-start.sh
+
 # qs bar env — defined here (i3 vars must precede first use); rationale at
 # the exec_always further down
 set $qsbarenv env QS_BAR_INSET_BOTTOM=50 QS_BAR_INSET_AUTO=1

@@ -52,3 +52,7 @@ exec_always --no-startup-id $qsenv ~/.dotfiles/quickshell/qs-start.sh
 bindsym $mod+d exec --no-startup-id $qsenv ~/.dotfiles/quickshell/qs-overlay.sh launcher
 bindsym $mod+p exec --no-startup-id $qsenv ~/.dotfiles/quickshell/qs-overlay.sh projects
 bindsym $mod+Shift+d --release exec --no-startup-id $qsenv ~/.dotfiles/quickshell/qs-start.sh
+# reload + restart the bar in one bind — i3 runs exec_always on restart only,
+# so a bare reload leaves the running quickshell on its old QML (see the same
+# note in i3/config).
+bindsym $mod+Shift+c reload, exec --no-startup-id $qsenv ~/.dotfiles/quickshell/qs-start.sh
