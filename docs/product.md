@@ -48,6 +48,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[adr0007|preview reverse channel routes server-side daemon-to-daemon, not via browser postMessage relay]]
 - [[adr0010|the clipboard picker publishes to the clipboard, it never synthesizes a paste]]
 - [[adr0011|bespoke clipnotify file store over vendor clipboard managers]]
+- [[adr0015|Python is an allowed language for X-ecosystem clients and prototypes]]
 
 ### [[cat002|display-platform]]
 
