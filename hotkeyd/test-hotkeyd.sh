@@ -24,18 +24,20 @@ rm -rf "$HERE/__pycache__"
 ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; PASS=$((PASS + 1)); }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; FAIL=$((FAIL + 1)); }
 
-# --- stage 1: loader unit suite -------------------------------------------
-echo "stage 1: bind table loader (pytest)"
+# --- stage 1: loader + engine unit suites ----------------------------------
+echo "stage 1: bind table loader + layer engine (pytest)"
 if ! command -v python3 >/dev/null; then
     bad "python3 missing"
 else
-    out="$(cd "$HERE" && python3 -m pytest test_binds.py -q 2>&1)"
-    if [ $? -eq 0 ]; then
-        ok "loader suite ($(printf '%s' "$out" | tail -1))"
-    else
-        bad "loader suite"
-        printf '%s\n' "$out" | tail -20
-    fi
+    for suite in test_binds.py test_layers.py; do
+        out="$(cd "$HERE" && python3 -m pytest "$suite" -q 2>&1)"
+        if [ $? -eq 0 ]; then
+            ok "$suite ($(printf '%s' "$out" | tail -1))"
+        else
+            bad "$suite"
+            printf '%s\n' "$out" | tail -25
+        fi
+    done
 fi
 
 # --- stage 2: --check contract on the shipped table ------------------------
