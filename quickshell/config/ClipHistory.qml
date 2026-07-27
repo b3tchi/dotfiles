@@ -323,23 +323,56 @@ Scope {
                             color: DialogTheme.accent
                         }
 
-                        // Small glance-while-scrolling thumbnail — square,
-                        // clipped to the row's own height, never resized up
-                        // past it. The bigger, actually-readable render of
-                        // this SAME file lives in the preview panel below,
-                        // driven off keyboard focus rather than every row at
-                        // once (decoding one full-size image per row would
-                        // not scale to a 200-entry history). Grayscale for
-                        // every row except the focused one — a column of
-                        // full-color thumbnails competes with the accent bar
-                        // for attention; full color is reserved for the one
-                        // row that's actually selected right now.
+                        // Label first, thumbnail after it — "[image]" (or the
+                        // fuzzy-highlighted text preview) always leads the
+                        // row, same reading order as every other row.
+                        Text {
+                            id: label
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.left: parent.left
+                            anchors.leftMargin: DialogTheme.textLeftMargin
+                            // Image rows: no right anchor — the label sizes to
+                            // its own short "[image]" text so the thumbnail
+                            // can sit directly after it, not off at the far
+                            // right edge. Text rows: unchanged, stretches to
+                            // elide long content against the row's right edge.
+                            anchors.right: isImage ? undefined : parent.right
+                            anchors.rightMargin: isImage ? 0 : DialogTheme.textLeftMargin
+                            // RichText over arbitrary clipboard bytes: Fuzzy.highlight
+                            // HTML-escapes &/</> before wrapping the matched chars,
+                            // so a preview containing markup renders literally
+                            // instead of injecting into the row (matchIndices read
+                            // off the row — external mode zeroes Combo's own set).
+                            // An image row's `preview` is qs-clip.sh's plain
+                            // "[image]" label, with the thumbnail right after it.
+                            text: Fuzzy.highlight(row.preview, row.matchIndices)
+                            textFormat: Text.RichText
+                            elide: Text.ElideRight
+                            color: DialogTheme.fg
+                            font.family: DialogTheme.font
+                            font.pixelSize: DialogTheme.fontSize
+                            font.bold: isSelected
+                            renderType: Text.NativeRendering
+                        }
+
+                        // Glance-while-scrolling thumbnail, right after the
+                        // "[image]" label — square, clipped to the row's own
+                        // height, never resized up past it. The bigger,
+                        // actually-readable render of this SAME file lives
+                        // in the preview panel below, driven off keyboard
+                        // focus rather than every row at once (decoding one
+                        // full-size image per row would not scale to a
+                        // 200-entry history). Grayscale for every row except
+                        // the focused one — a column of full-color
+                        // thumbnails competes with the accent bar for
+                        // attention; full color is reserved for the one row
+                        // that's actually selected right now.
                         Image {
                             id: thumb
                             visible: isImage
                             anchors.verticalCenter: parent.verticalCenter
-                            anchors.left: parent.left
-                            anchors.leftMargin: DialogTheme.textLeftMargin
+                            anchors.left: label.right
+                            anchors.leftMargin: DialogTheme.pad
                             height: parent.height - 6
                             width: height
                             fillMode: Image.PreserveAspectCrop
@@ -350,29 +383,6 @@ Scope {
                             layer.effect: MultiEffect {
                                 saturation: isSelected ? 0 : -1
                             }
-                        }
-
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.left: isImage ? thumb.right : parent.left
-                            anchors.leftMargin: isImage ? DialogTheme.pad : DialogTheme.textLeftMargin
-                            anchors.right: parent.right
-                            anchors.rightMargin: DialogTheme.textLeftMargin
-                            // RichText over arbitrary clipboard bytes: Fuzzy.highlight
-                            // HTML-escapes &/</> before wrapping the matched chars,
-                            // so a preview containing markup renders literally
-                            // instead of injecting into the row (matchIndices read
-                            // off the row — external mode zeroes Combo's own set).
-                            // An image row's `preview` is qs-clip.sh's plain
-                            // "[image]" label, shown next to the thumbnail above.
-                            text: Fuzzy.highlight(row.preview, row.matchIndices)
-                            textFormat: Text.RichText
-                            elide: Text.ElideRight
-                            color: DialogTheme.fg
-                            font.family: DialogTheme.font
-                            font.pixelSize: DialogTheme.fontSize
-                            font.bold: isSelected
-                            renderType: Text.NativeRendering
                         }
 
                         MouseArea {
