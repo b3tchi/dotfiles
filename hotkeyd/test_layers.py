@@ -343,6 +343,37 @@ def test_still_held_modifier_after_exit_does_not_re_enter_a_mod_state():
     assert pub.lines == []
 
 
+def test_every_layer_bind_the_grabber_registers_can_actually_fire():
+    """The grab-set / match-set seam (dotfiles-hwds.8). The daemon grabs every
+    chord in a layer's table; the engine matches layer binds by comparing the
+    chord to a BARE keysym. Anything that validates and gets grabbed must
+    dispatch — a bind that is grabbed and silently dead is worse than one that
+    was never declared, because the key stops reaching the application too."""
+    # The event is built from what X would DELIVER for that chord — the bare
+    # keysym, with the chord's modifiers in `mods`. Feeding the chord string
+    # itself as the keysym would make this tautological: `b.chord == ev.key`
+    # matches trivially when the two are the same string, which is exactly the
+    # comparison under test.
+    layer = B.LAYERS["nav"]
+    for b in layer.binds:
+        mods, key = B.parse_chord(b.chord)
+        e, _, _ = engine()
+        e.handle(press("o", ["Mod4"]))
+        assert e.handle(press(key, tuple(mods))) == [b.action], \
+            f"nav bind {b.chord!r} is grabbed but never fires"
+    keysym_for = {"Ctrl": "Control_L", "Mod1": "Alt_L", "Mod4": "Super_L"}
+    for label, mod in layer.mods.items():
+        canon = B.MODIFIER_ALIASES[str(mod.modifier).lower()]
+        for b in mod.binds:
+            mods, key = B.parse_chord(b.chord)
+            e, _, _ = engine()
+            e.handle(press("o", ["Mod4"]))
+            e.handle(press(keysym_for[canon]))
+            assert e.state["mod"] == label
+            assert e.handle(press(key, tuple(mods))) == [b.action], \
+                f"{label} sublayer bind {b.chord!r} is grabbed but never fires"
+
+
 @pytest.mark.parametrize("key", ["q", "Escape", "Return"])
 def test_every_declared_exit_key_leaves_the_layer(key):
     e, _, _ = engine()

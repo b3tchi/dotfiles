@@ -220,10 +220,42 @@ def _key(bind: Bind, prefix: str = "", mod: str = DEFAULT_MOD) -> tuple:
     return normalize_chord(chord, mod) + (bind.on_release,)
 
 
+def _bare_problem(bind: Bind, where: str, mod: str) -> str | None:
+    """Layer chords must be BARE keysyms — see `_scan(bare=True)`."""
+    try:
+        mods, _ = parse_chord(bind.chord, mod)
+    except BindError:
+        return None                     # reported by the caller's own parse
+    if not mods:
+        return None
+    return (f"{where}: chord {bind.chord!r} carries modifiers "
+            f"({'+'.join(sorted(mods))}); layer binds must be BARE keysyms — "
+            "express a held modifier as a Mod sublayer. The engine matches a "
+            "layer bind against the keysym alone, so this chord would be "
+            "grabbed and could never fire")
+
+
 def _scan(bs: Iterable[Bind], where: str, layers, seen: dict,
-          prefix: str = "", mod: str = DEFAULT_MOD) -> list[str]:
+          prefix: str = "", mod: str = DEFAULT_MOD,
+          bare: bool = False) -> list[str]:
+    """`bare` marks a LAYER table (the layer's own binds, or a Mod sublayer's).
+
+    Inside a layer the modifier is not part of the chord: the sublayer supplies
+    it, and `LayerEngine._match_in_layer` compares the chord to the bare keysym
+    of the event. Three components used to read these chords differently — this
+    validator normalised them, `hotkeyd.layer_chords` grabbed them, and the
+    engine could never match them (dotfiles-hwds.8). Refusing them here keeps
+    the three in agreement by construction, and keeps the grab set narrow:
+    grabbing `Shift+h` inside a layer would take a chord the daemon has no
+    meaning for.
+    """
     problems: list[str] = []
     for b in bs:
+        if bare:
+            p = _bare_problem(b, where, mod)
+            if p:
+                problems.append(p)
+                continue
         try:
             k = _key(b, prefix, mod)
         except BindError as e:
@@ -271,7 +303,7 @@ def validate(binds: Iterable[Bind] = None,
     for name, layer in layers.items():
         seen: dict = {}
         problems += _scan(layer.binds, f"layer {name!r}", layers, seen,
-                          mod=mod)
+                          mod=mod, bare=True)
         for label, mod_ in layer.mods.items():
             where = f"layer {name!r} mod {label!r}"
             try:
@@ -283,16 +315,27 @@ def validate(binds: Iterable[Bind] = None,
                     f"{where}: unknown modifier {mod_.modifier!r}")
                 continue
             problems += _scan(mod_.binds, where, layers, seen, prefix=canon,
-                              mod=mod)
+                              mod=mod, bare=True)
         if not layer.exit_keys:
             problems.append(
                 f"layer {name!r} has no exit_keys — it could not be left")
         else:
             for k in layer.exit_keys:
                 try:
-                    parse_chord(k, mod)
+                    mods, _ = parse_chord(k, mod)
                 except BindError as e:
                     problems.append(f"layer {name!r} exit key: {e}")
+                    continue
+                if mods:
+                    # An exit key is matched on the KEYSYM alone, on purpose: a
+                    # layer must stay leavable with any modifier still held.
+                    # `Ctrl+q` here is therefore not "q with Ctrl" — it is a
+                    # chord nothing ever compares against, so the layer would be
+                    # a trap in exactly the way exit_keys exist to prevent.
+                    problems.append(
+                        f"layer {name!r} exit key {k!r} carries modifiers "
+                        f"({'+'.join(sorted(mods))}); exit keys are BARE "
+                        "keysyms and already work with any modifier held")
     return problems
 
 

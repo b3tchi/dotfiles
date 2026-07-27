@@ -220,6 +220,67 @@ def test_empty_chord_is_rejected():
 
 
 # --------------------------------------------------------------------------
+# layer chords are BARE keysyms (dotfiles-hwds.8)
+# --------------------------------------------------------------------------
+# Three components read a layer bind's chord and used to disagree: validate()
+# normalised it fully, hotkeyd.layer_chords() grabbed it fully, and
+# LayerEngine._match_in_layer compares `b.chord == ev.key` against a bare
+# keysym. So any layer chord containing a `+` validated, got grabbed, and could
+# never fire — validated-but-dead, the exact class this validator exists to
+# prevent. Rejecting them here is the fix: a held modifier inside a layer is
+# spelled as a Mod sublayer, which is the mechanism the design already has.
+
+
+@pytest.mark.parametrize("chord", ["Shift+h", "Ctrl+h", "$mod+h", "Mod4+h"])
+def test_a_layer_bind_with_a_modifier_is_rejected_by_name(chord):
+    layers = {"nav": B.Layer(binds=[B.Bind(chord, "focus left")],
+                             exit_keys=["q"])}
+    problems = B.validate([], layers)
+    assert any(chord in p for p in problems), problems
+    assert any("sublayer" in p.lower() or "bare" in p.lower()
+               for p in problems), \
+        f"the message must say what to do instead: {problems}"
+
+
+def test_a_modifier_sublayer_bind_with_its_own_modifier_is_rejected():
+    """A Mod sublayer already contributes the modifier — `Ctrl+h` inside the
+    Ctrl sublayer would be grabbed as Ctrl+Ctrl+h and matched as neither."""
+    layers = {"nav": B.Layer(
+        binds=[B.Bind("h", "focus left")],
+        mods={"move": B.Mod("Ctrl", (B.Bind("Ctrl+j", "move down"),))},
+        exit_keys=["q"])}
+    problems = B.validate([], layers)
+    assert any("Ctrl+j" in p for p in problems), problems
+
+
+def test_a_modifier_on_an_exit_key_is_rejected_by_name():
+    """exit_keys are matched on the KEYSYM alone, deliberately — a layer must
+    stay leavable with any modifier still held. So `Ctrl+q` as an exit key is
+    not 'q with Ctrl', it is a chord the engine will never look at."""
+    layers = {"nav": B.Layer(binds=[B.Bind("h", "focus left")],
+                             exit_keys=["Ctrl+q"])}
+    problems = B.validate([], layers)
+    assert any("Ctrl+q" in p for p in problems), problems
+
+
+def test_bare_layer_chords_and_exit_keys_are_still_accepted():
+    """The control. An over-strict rule that rejected bare keys too would pass
+    every assertion above and break the whole feature."""
+    layers = {"nav": B.Layer(
+        binds=[B.Bind("h", "focus left"), B.Bind("Left", "focus left")],
+        mods={"move": B.Mod("Ctrl", (B.Bind("h", "move left"),))},
+        exit_keys=["q", "Escape", "Return"])}
+    assert B.validate([], layers) == []
+
+
+def test_global_binds_may_still_carry_modifiers():
+    """The rule is scoped to layer tables. Global binds are matched against
+    (mods, key) and MUST keep their modifiers — $mod+o is the entry chord."""
+    assert B.validate([B.Bind("$mod+o", "nop x"),
+                       B.Bind("Ctrl+Shift+F1", "nop y")], {}) == []
+
+
+# --------------------------------------------------------------------------
 # things that must NOT be rejected (guards against over-strict validation)
 # --------------------------------------------------------------------------
 

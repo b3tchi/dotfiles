@@ -258,6 +258,12 @@ class LayerEngine:
             self._layer = DEFAULT_LAYER
             return []
 
+        # Layer chords are BARE keysyms, so this comparison is the whole match.
+        # That is a validated invariant, not an assumption: `binds._scan(bare=
+        # True)` refuses any layer or sublayer chord carrying a modifier, and
+        # every load path validates (dotfiles-hwds.8). Held modifiers are
+        # expressed as Mod sublayers — which is what picks `table` on the line
+        # above — so there is nothing left for a `+` to mean here.
         mod_label = self._active_mod()
         table = layer.mods[mod_label].binds if mod_label else layer.binds
         for b in table:
