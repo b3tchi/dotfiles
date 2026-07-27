@@ -20,6 +20,13 @@ linux:
     # by config.d/native.conf (:0 and :10) and config.d/wsl.conf (:10).
     # clipnotify, its one non-base dependency, is installed by clip-store/.
     scripts/clip-store.sh: ~/.i3/scripts/clip-store.sh
+    # xrdp-chansrv (0.10.x) bridges a Windows clipboard image onto the X
+    # CLIPBOARD as image/bmp only, invisible to image/png-only readers
+    # (Claude Code CLI's paste among them) — republishes it as image/png
+    # too. Autostarted on the xrdp display only: config.d/native.conf and
+    # config.d/wsl.conf, both :10. Needs xclip (already a base dep) and
+    # ImageMagick (magick/convert).
+    scripts/clip-img-bridge.sh: ~/.i3/scripts/clip-img-bridge.sh
     picom.conf: ~/.config/picom.conf
     # Platform overlay (ft003 i3-config-layering): exactly one config.d/*
     # eval path check, not env.WSL_DISTRO_NAME — that var is unset in
@@ -33,7 +40,8 @@ linux:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
       # xclip: X11 clipboard tool — nvim's + register provider on i3/X11
-      sudo pacman -Syu --needed --noconfirm i3 xclip
+      # imagemagick: clip-img-bridge.sh's bmp->png conversion
+      sudo pacman -Syu --needed --noconfirm i3 xclip imagemagick
       pamac install --no-confirm autocutsel
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux")}}
@@ -41,20 +49,21 @@ linux:
       # xclip: X11 clipboard tool — nvim yank reaches the xrdp X11 CLIPBOARD
       # (then xrdp-chansrv → Windows). Without it nvim falls back to the idle
       # WSLg wayland-0 clipboard, which chansrv can't see (dotfiles-0ak).
+      # imagemagick: clip-img-bridge.sh's bmp->png conversion.
       if [ -d /mnt/c ]; then
         sudo pacman -Syu --needed --noconfirm i3-wm xorg-xinput picom \
-          python-gobject python-cairo xclip
+          python-gobject python-cairo xclip imagemagick
       else
         sudo pacman -Syu --needed --noconfirm \
           i3-wm i3status i3blocks \
-          picom xdotool xclip
+          picom xdotool xclip imagemagick
       fi
       yay -S --needed --noconfirm autocutsel
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux ARM")}}
       sudo pacman -Syu --needed --noconfirm \
         i3-wm i3status i3blocks \
-        picom xdotool xclip
+        picom xdotool xclip imagemagick
       yay -S --needed --noconfirm autocutsel
       {{/if}}
       rotz link i3 --force
