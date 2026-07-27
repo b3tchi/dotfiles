@@ -18,7 +18,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from Xlib import X, XK, display as xdisplay  # noqa: E402
+from Xlib import X, Xatom, XK, display as xdisplay  # noqa: E402
 from Xlib.ext import xtest  # noqa: E402
 
 import hotkeyd as H  # noqa: E402
@@ -386,7 +386,92 @@ def main() -> int:
           f"{roll} (attempt {n})")
 
     feed("q")
+    # Hand the grabs back before a second daemon opens on the same connection:
+    # X would otherwise deliver this daemon's registrations to that one, and the
+    # Mod1 checks below would be reading a grab set nobody under test made.
+    dae.grabs.sync_binds([])
     dae.close()
+
+    # -- 5b: the SAME daemon on a Mod1 display — the :10 shape ----------------
+    # `$mod` is not a constant. The xrdp session entry merges `i3wm.mod: Mod1`
+    # before exec'ing i3, because the RDP client captures the Win key, so :10
+    # and :0 genuinely disagree about what `$mod+o` means (ft003 / adr0004).
+    #
+    # Everything above ran on a display carrying no i3wm.mod resource at all,
+    # where the detected mod and the Mod4 default are the SAME VALUE — so the
+    # daemon -> grab-set -> engine wiring was only ever exercised where a break
+    # in it is invisible. That is not hypothetical: dropping `mod=self.mod` from
+    # the LayerEngine constructor in Daemon.__init__ passes the entire committed
+    # suite (186 pytest + every check above), and on a real :10 it means the
+    # grabs land on Mod1 while the engine still matches Mod4 — nav is simply
+    # unreachable. Only a Mod1 display catches it, so here is one.
+    #
+    # The resource is merged AFTER i3 connected, deliberately: X discards root
+    # properties when the last client disconnects, so a resource written before
+    # the WM is up does not survive to be read.
+    rm_atom = d.intern_atom("RESOURCE_MANAGER")
+    root.change_property(rm_atom, Xatom.STRING, 8, b"i3wm.mod:\tMod1\n")
+    d.sync()
+    check(H.x_resource_mod(d) == "Mod1",
+          "i3wm.mod: Mod1 merged onto the live display is read back as $mod",
+          H.x_resource_mod(d))
+
+    alt = H.Daemon(BT, d, pub, i3=NullI3())
+    alt._pending = []
+
+    def alt_peek():
+        if alt._pending:
+            return alt._pending.pop(0)
+        return d.next_event() if d.pending_events() else None
+
+    def alt_feed(keysym, mods=()):
+        code = code_for(d, keysym)
+        mod_codes = [code_for(d, m) for m in mods]
+        for mc in mod_codes:
+            xtest.fake_input(d, X.KeyPress, mc)
+        xtest.fake_input(d, X.KeyPress, code)
+        xtest.fake_input(d, X.KeyRelease, code)
+        for mc in reversed(mod_codes):
+            xtest.fake_input(d, X.KeyRelease, mc)
+        d.sync()
+        time.sleep(0.15)
+        out = []
+        while d.pending_events() or alt._pending:
+            ev = alt._pending.pop(0) if alt._pending else d.next_event()
+            out += alt.pump(ev, peek=alt_peek)
+        return out
+
+    check(alt.mod == "Mod1", "the daemon detected $mod=Mod1 for itself", alt.mod)
+
+    # Super+o is what $mod+o means on :0 and NOTHING on :10. Checked first so a
+    # daemon that grabbed both modifiers cannot pass the next check by accident.
+    alt_feed("o", mods=["Super_L"])
+    check(alt.engine.state["layer"] == "default",
+          "Super+o does NOT enter nav where $mod is Mod1",
+          str(alt.engine.state))
+
+    # Alt+o is the payoff: it has to survive BOTH hops — grabbed on the Mod1
+    # mask, and then matched by an engine that also knows $mod is Mod1.
+    alt_feed("o", mods=["Alt_L"])
+    check(alt.engine.state["layer"] == "nav",
+          "Alt+o DOES enter nav where $mod is Mod1 — grab set and engine agree "
+          "on the display's own modifier",
+          str(alt.engine.state))
+    check("h" in alt.grabs.chords,
+          "and the layer's bare keys were grabbed on the way in",
+          str(sorted(alt.grabs.chords)))
+
+    acts = alt_feed("h")
+    check(acts == ["focus left"], "a nav bind dispatches on the Mod1 display",
+          str(acts))
+
+    alt_feed("q")
+    check(alt.engine.state["layer"] == "default",
+          "q leaves nav on the Mod1 display", str(alt.engine.state))
+    alt.grabs.sync_binds([])
+    alt.close()
+    root.delete_property(rm_atom)
+    d.sync()
 
     # -- 6: single instance --------------------------------------------------
     lock = H.lock_path()
