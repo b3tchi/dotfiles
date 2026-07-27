@@ -67,6 +67,17 @@ _KEYSYMS = frozenset(
 MOD_TOKEN = "$mod"
 DEFAULT_MOD = "Mod4"
 
+# The one chord i3 keeps forever (i3/config.common, `hotkeyd-panic.sh panic`).
+# Pressing it stops the daemon, links i3/config.d/zz-fallback-binds.conf and
+# reloads i3 — the way back from a daemon that is dead OR alive and wrong.
+PANIC_CHORD = "$mod+Shift+F12"
+
+# Every modifier `$mod` resolves to on a display this repo runs on: Mod4 on the
+# native :0 session, Mod1 on the xrdp :10 session (xrdp/xinitrc merges
+# `i3wm.mod: Mod1`). Both are enumerated because RESERVED_CHORDS below has to
+# hold under whichever one the validator happens to be called with.
+MOD_RESOLUTIONS = ("Mod4", "Mod1")
+
 
 class BindError(ValueError):
     """A chord or table that cannot be loaded. Message names the offender."""
@@ -113,6 +124,18 @@ def normalize_chord(chord: str, mod: str = DEFAULT_MOD) -> tuple[tuple[str, ...]
     """Order-insensitive, alias-folded identity of a chord, for dup detection."""
     mods, key = parse_chord(chord, mod)
     return tuple(sorted(mods)), key
+
+
+# The panic chord under EVERY spelling that reaches it, as normalised
+# identities. Reserving the literal `$mod` token alone leaves a hole, because
+# this validator is display-agnostic while `$mod` is not: a table that spells
+# `Mod1+Shift+F12` steals the chord on :10 and `Mod4+Shift+F12` steals it on :0,
+# and neither is a string match for `$mod`. Normalising the token under both
+# resolutions closes it in both directions — a `$mod+Shift+F12` in the table
+# normalises to whichever resolution the validator was called with, and both
+# are in the set. Alias folding (`Super`, `Alt`, `win`, case) comes free from
+# normalize_chord.
+RESERVED_CHORDS = {normalize_chord(PANIC_CHORD, m) for m in MOD_RESOLUTIONS}
 
 
 # --------------------------------------------------------------------------
@@ -206,6 +229,15 @@ def _scan(bs: Iterable[Bind], where: str, layers, seen: dict,
         except BindError as e:
             problems.append(f"{where}: {e}")
             continue
+        # Checked before duplicate detection and in EVERY context — global
+        # table, layer, held-modifier sublayer. A layer's grabs are live
+        # exactly while the layer is active, which is the state panic exists
+        # to escape, so "only the global table is reserved" is not a rule.
+        if k[:2] in RESERVED_CHORDS:
+            problems.append(
+                f"{where}: chord {b.chord!r} is the panic chord "
+                f"({PANIC_CHORD}), reserved for i3 — it is the only way back "
+                "from a daemon that is dead or wrong, so no table may bind it")
         if k in seen:
             problems.append(
                 f"{where}: chord {b.chord!r} is already bound in "

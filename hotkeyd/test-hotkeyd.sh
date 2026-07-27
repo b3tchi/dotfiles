@@ -229,6 +229,77 @@ EOF
     kill "$X8" 2>/dev/null
 fi
 
+# --- stage 9: panic / resume ------------------------------------------------
+# Own file for the same reason as the launcher suite: it runs two Xvfb displays
+# and a real i3, and it needs a throwaway HOME because panic links into
+# ~/.i3/config.d. Kept behind this entry point so the gate stays one command.
+echo "stage 9: panic / resume"
+pout="$(bash "$HERE/test-panic.sh" 2>&1)"
+prc=$?
+printf '%s\n' "$pout" | sed -n 's/^  /    /p'
+psummary="$(printf '%s' "$pout" | tail -1)"
+if [ "$prc" -eq 0 ]; then
+    ok "panic suite ($psummary)"
+else
+    bad "panic suite ($psummary)"
+fi
+
+# --- stage 10: i3 -C over the composed tree, fallback linked ----------------
+# The fallback is a REAL i3 config file that i3 parses during an outage. A stub
+# that rots is worse than nothing, because it is discovered exactly then. Its
+# CONTENT is guarded by test_binds.py (it must be binds.py's chord set minus
+# i3's); this is the other half — that the composed tree i3 will actually load,
+# WITH the fallback in it, still parses. The specific failure being guarded is
+# a duplicate keybinding: i3 treats one as a config ERROR rather than
+# last-wins, so a fallback restating a live bind breaks the config it was meant
+# to rescue. `zz-` settles glob order and grants no override.
+echo "stage 10: i3 -C on the composed tree with the fallback linked"
+if ! command -v i3 >/dev/null; then
+    printf '  \033[33mSKIP\033[0m i3 missing\n'
+else
+    for overlay in native wsl; do
+        C10="$TMPD/compose-$overlay"
+        mkdir -p "$C10/.i3/config.d"
+        ln -sfn "$HERE/.." "$C10/.dotfiles"
+        ln -sfn "$HERE/../i3/config.d/$overlay.conf" \
+            "$C10/.i3/config.d/$overlay.conf"
+        out="$(HOME="$C10" i3 -C -c "$HERE/../i3/config" 2>&1)"
+        rc=$?
+        [ "$rc" -eq 0 ] \
+            && ok "$overlay overlay parses clean without the fallback" \
+            || bad "$overlay overlay: rc=$rc $out"
+
+        ln -sfn "$HERE/../i3/config.d/zz-fallback-binds.conf" \
+            "$C10/.i3/config.d/zz-fallback-binds.conf"
+        out="$(HOME="$C10" i3 -C -c "$HERE/../i3/config" 2>&1)"
+        rc=$?
+        if [ "$rc" -ne 0 ]; then
+            bad "$overlay overlay FAILS i3 -C with the fallback linked: $out"
+        elif printf '%s' "$out" | grep -qi 'duplicate'; then
+            bad "$overlay overlay: duplicate keybinding with the fallback: $out"
+        else
+            ok "$overlay overlay parses clean WITH the fallback linked"
+        fi
+    done
+
+    # Guard on the guard: prove this stage can actually see a duplicate. A
+    # composed-tree check that passes no matter what the fallback says would
+    # give the freshness rule no teeth at all.
+    C10="$TMPD/compose-dup"
+    mkdir -p "$C10/.i3/config.d"
+    ln -sfn "$HERE/.." "$C10/.dotfiles"
+    ln -sfn "$HERE/../i3/config.d/native.conf" "$C10/.i3/config.d/native.conf"
+    # $mod+o is bound in i3/config.common — restating it is the exact mistake
+    # a fallback built from "the set i3 owns today" would make.
+    printf 'bindsym $mod+o mode "nav"\n' > "$C10/.i3/config.d/zz-dup.conf"
+    out="$(HOME="$C10" i3 -C -c "$HERE/../i3/config" 2>&1)"
+    if [ $? -ne 0 ] || printf '%s' "$out" | grep -qi 'duplicate'; then
+        ok "a fallback restating a live i3 bind IS caught by this stage"
+    else
+        bad "i3 -C accepted a duplicate keybinding — stage 10 proves nothing"
+    fi
+fi
+
 echo
 printf 'hotkeyd: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

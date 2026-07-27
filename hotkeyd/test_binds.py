@@ -368,3 +368,192 @@ def test_the_shipped_table_is_scoped_to_the_nav_cutover():
     commit that deletes them from it."""
     assert [b.chord for b in B.BINDS] == ["$mod+o"], \
         "table carries groups that i3 still owns"
+
+
+# --------------------------------------------------------------------------
+# the panic chord is RESERVED (sp020 Task 10, dotfiles-hwds.12)
+# --------------------------------------------------------------------------
+# The one chord i3 keeps forever. If a table could bind it, a future edit would
+# quietly take the only key that recovers a session from a daemon that is alive
+# and wrong. The validator is display-agnostic while `$mod` is not, so a
+# token-only check leaves the chord stealable on ONE display: a table spelling
+# `Mod1+Shift+F12` owns it on :10, `Mod4+Shift+F12` on :0, and neither matches a
+# `$mod` string compare. One fixture per spelling.
+
+PANIC_SPELLINGS = ["$mod+Shift+F12", "Mod4+Shift+F12", "Mod1+Shift+F12"]
+
+
+@pytest.mark.parametrize("spelling", PANIC_SPELLINGS)
+@pytest.mark.parametrize("mod", ["Mod4", "Mod1"])
+def test_validator_refuses_the_panic_chord_under_every_spelling(spelling, mod):
+    problems = B.validate([B.Bind(spelling, "nop steal")], {}, mod=mod)
+    assert problems, \
+        f"{spelling!r} accepted with $mod={mod} — the panic chord is stealable"
+    assert any(spelling in p for p in problems), problems
+    assert any("panic" in p.lower() for p in problems), problems
+
+
+@pytest.mark.parametrize("spelling", PANIC_SPELLINGS)
+def test_the_panic_chord_is_reserved_under_alias_spellings_too(spelling):
+    """`Super`/`Alt`/lowercase fold onto Mod4/Mod1, so the alias forms are the
+    same chord and must be refused identically."""
+    aliased = (spelling.replace("Mod4", "Super").replace("Mod1", "Alt")
+               .replace("Shift", "shift"))
+    assert B.validate([B.Bind(aliased, "nop steal")], {}), \
+        f"{aliased!r} (alias form of {spelling!r}) was accepted"
+
+
+@pytest.mark.parametrize("spelling", PANIC_SPELLINGS)
+def test_a_layer_cannot_bind_the_panic_chord_either(spelling):
+    """A layer's grabs are held while the layer is active — exactly the state
+    you press panic in. Reserving only the global table leaves that hole open."""
+    layers = {"nav": B.Layer(binds=[B.Bind(spelling, "nop steal")],
+                             exit_keys=["Escape"])}
+    problems = B.validate([], layers)
+    assert any(spelling in p for p in problems), problems
+
+
+def test_the_panic_chord_is_reserved_on_release_too():
+    """`--release` is a different event but the same passive grab."""
+    assert B.validate([B.Bind("$mod+Shift+F12", "nop", on_release=True)], {})
+
+
+def test_the_shipped_table_does_not_bind_the_panic_chord():
+    assert B.validate(B.BINDS, B.LAYERS) == []
+
+
+def test_check_exits_nonzero_on_a_table_that_binds_the_panic_chord(tmp_path):
+    faulty = tmp_path / "panic_steal.py"
+    faulty.write_text(
+        "import sys; sys.path.insert(0, %r)\n"
+        "from binds import Bind\n"
+        "BINDS = [Bind('Mod1+Shift+F12', 'nop steal')]\n"
+        "LAYERS = {}\n" % str(HERE))
+    r = run_check(faulty)
+    assert r.returncode != 0
+    assert "Mod1+Shift+F12" in (r.stdout + r.stderr)
+
+
+# --------------------------------------------------------------------------
+# the fallback bind table is FRESH (sp020 Task 10, dotfiles-hwds.12)
+# --------------------------------------------------------------------------
+# `i3/config.d/zz-fallback-binds.conf` is what panic links in so i3 can answer
+# the chords the daemon owns. Its content is the i3 equivalent of what
+# `binds.py` owns — NOT "the set i3 owns today", which are opposites: i3 still
+# owns its own binds, so a fallback restating them duplicates every one, and i3
+# treats a duplicate keybinding as a CONFIG ERROR (nagbar) rather than
+# last-wins. `i3/config.d/native.conf:101` already documents that trap. So the
+# freshness rule is
+#
+#     fallback == binds.py's global chords MINUS the chords i3 still owns
+#
+# which is empty today (binds.py owns `$mod+o`, and i3/config.common:408 still
+# owns it too) and names the directional group the moment T14 cuts it over.
+
+REPO = HERE.parent
+FALLBACK = REPO / "i3" / "config.d" / "zz-fallback-binds.conf"
+I3_CONFIGS = [REPO / "i3" / "config",
+              REPO / "i3" / "config.common",
+              REPO / "i3" / "config.d" / "native.conf",
+              REPO / "i3" / "config.d" / "wsl.conf"]
+
+_BIND_FLAGS = ("--release", "--border", "--whole-window", "--exclude-titlebar",
+               "--no-warn", "--locked")
+
+
+def _norm_i3_chord(chord, mod="Mod4"):
+    """Normalise an i3 chord the way binds.normalize_chord does, but tolerant of
+    keysyms `binds.py` has never heard of (XF86*, i3-only spellings)."""
+    parts = chord.split("+")
+    key = parts[-1].strip()
+    mods = set()
+    for raw in parts[:-1]:
+        name = raw.strip().lower()
+        if name == B.MOD_TOKEN:
+            name = mod.lower()
+        mods.add(B.MODIFIER_ALIASES.get(name, name))
+    return tuple(sorted(mods)), key
+
+
+def _i3_chords(path, mod="Mod4"):
+    """Top-level `bindsym` chords in an i3 config file.
+
+    Binds inside a `mode "..." { }` block are deliberately excluded: they are
+    grabbed only while that mode is active, so they are not part of the
+    always-on ownership set the fallback must not collide with.
+    """
+    out = set()
+    depth = 0
+    for line in path.read_text().splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        if s.startswith("mode ") and s.endswith("{"):
+            depth += 1
+            continue
+        if s == "}":
+            depth = max(0, depth - 1)
+            continue
+        if depth or not s.startswith("bindsym"):
+            continue
+        toks = s.split()[1:]
+        while toks and toks[0] in _BIND_FLAGS:
+            toks.pop(0)
+        if toks:
+            out.add(_norm_i3_chord(toks[0], mod))
+    return out
+
+
+def i3_owned_chords(mod="Mod4"):
+    owned = set()
+    for p in I3_CONFIGS:
+        owned |= _i3_chords(p, mod)
+    return owned
+
+
+def fallback_chords(mod="Mod4"):
+    return _i3_chords(FALLBACK, mod)
+
+
+def binds_py_chords(mod="Mod4"):
+    return {B.normalize_chord(b.chord, mod) for b in B.BINDS}
+
+
+def test_the_fallback_file_exists():
+    assert FALLBACK.is_file(), \
+        "panic links this file in; a missing one is found during the outage"
+
+
+@pytest.mark.parametrize("mod", ["Mod4", "Mod1"])
+def test_the_fallback_is_exactly_what_binds_py_owns_and_i3_does_not(mod):
+    expected = binds_py_chords(mod) - i3_owned_chords(mod)
+    got = fallback_chords(mod)
+    assert got == expected, (
+        f"fallback drifted with $mod={mod}: "
+        f"missing={sorted(expected - got)} extra={sorted(got - expected)}")
+
+
+@pytest.mark.parametrize("mod", ["Mod4", "Mod1"])
+def test_the_fallback_never_duplicates_a_live_i3_bind(mod):
+    """i3 errors on a duplicate keybinding rather than taking last-wins, so a
+    fallback restating a live bind fails `i3 -C` on the composed tree — the
+    `zz-` prefix settles glob ORDERING only, it grants no override."""
+    clash = fallback_chords(mod) & i3_owned_chords(mod)
+    assert clash == set(), f"fallback duplicates live i3 binds: {sorted(clash)}"
+
+
+def test_the_fallback_never_binds_the_panic_chord():
+    """Panic's own chord stays in the base config. Rebinding it from the file
+    panic links in is a duplicate at exactly the worst moment."""
+    reserved = {B.normalize_chord(B.PANIC_CHORD, m) for m in ("Mod4", "Mod1")}
+    for mod in ("Mod4", "Mod1"):
+        assert fallback_chords(mod) & reserved == set()
+
+
+def test_the_i3_config_parser_actually_sees_binds():
+    """Guard on the guard: a parser that silently returned nothing would make
+    every freshness assertion above vacuously true."""
+    owned = i3_owned_chords("Mod4")
+    assert (("Mod4",), "o") in owned, "did not find $mod+o in i3/config.common"
+    assert (("Mod4",), "h") in owned
+    assert len(owned) > 80, f"only parsed {len(owned)} top-level i3 binds"

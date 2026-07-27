@@ -464,20 +464,33 @@ mode "nav" {
         bindsym Shift+q mode "default"
         bindsym q mode "default"
 }
-# hotkeyd ESCAPE HATCH (sp020, ft011) — the one bind that never migrates.
+# hotkeyd PANIC BIND (sp020 Task 10, ft011) — the one bind that never migrates.
 #
 # The Python hotkey layer owns its binds via per-key XGrabKey, and X grabs die
 # with the process. So if hotkeyd crashes while holding the bind table, every
 # migrated key stops working at once and there is no way to bring it back —
 # unless one key is still handled by i3 itself. This is that key.
 #
-# It calls the LAUNCHER's restart verb, not the daemon: hotkeyd/test-launcher.sh
-# asserts this exact string exists here, so the bind and the launcher cannot
-# drift apart and be discovered mid-outage.
+# It used to call `hotkeyd.sh restart`, which was the wrong recovery: a restart
+# helps when the daemon is DEAD and not at all when it is alive and WRONG —
+# misgrabbing, stuck in a layer, or serving a table whose chords collide with
+# i3's. It also reinstates the very table that broke the session. So this bind
+# now hands the keyboard BACK to i3: stop the daemon everywhere, link
+# i3/config.d/zz-fallback-binds.conf, reload. Resume from a terminal with
+# `~/.dotfiles/hotkeyd/hotkeyd-panic.sh resume` — once panic has run i3 owns
+# the whole keyboard again, so a terminal is reachable and resume needs no
+# emergency chord of its own.
+#
+# hotkeyd/test-launcher.sh asserts this exact string exists here, so the bind
+# and the script cannot drift apart and be discovered mid-outage.
+#
+# binds.py's validator REFUSES any table that binds this chord, under every
+# modifier spelling ($mod, Mod4+, Mod1+) — see binds.RESERVED_CHORDS. A
+# display-agnostic token check alone would leave it stealable on one display.
 #
 # $mod+Shift+F12 is deliberately awkward — it is an emergency control, and a
 # comfortable chord here is one that gets pressed by accident.
-bindsym $mod+Shift+F12 exec --no-startup-id ~/.dotfiles/hotkeyd/hotkeyd.sh restart
+bindsym $mod+Shift+F12 exec --no-startup-id ~/.dotfiles/hotkeyd/hotkeyd-panic.sh panic
 
 # Lock screen
 bindsym $mod+9 exec --no-startup-id blurlock

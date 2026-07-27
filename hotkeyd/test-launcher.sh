@@ -16,6 +16,12 @@ bad() { printf '  \033[31mFAIL\033[0m %s\n' "$1"; FAIL=$((FAIL + 1)); }
 export PYTHONDONTWRITEBYTECODE=1
 RUNTIME="$(mktemp -d)"
 
+# `start` refuses while the panic fallback is linked (hotkeyd-panic.sh). Point
+# the latch at a throwaway dir so this suite never reads — or is blocked by —
+# the caller's real ~/.i3/config.d. The panic path itself is covered by
+# test-panic.sh.
+export HOTKEYD_I3_CONFIG_D="$RUNTIME/i3-config.d"
+
 # Probe for free displays rather than hardcoding: several suites in this repo run
 # their own Xvfbs on fixed low numbers and may be running concurrently. Same
 # helper shape as i3/scripts/test-clip-integration.sh.
@@ -104,12 +110,29 @@ n=$(pgrep -f "hotkeyd.py.*--display $XA" 2>/dev/null | wc -l)
     || bad "restart rc=$rc daemons=$n: $out"
 
 # The i3 escape-hatch bind must invoke EXACTLY this path — a bind that drifts
-# from the launcher is discovered during an outage, which is the worst moment.
-BIND_LINE="$(grep -n 'hotkeyd.sh restart' "$HERE/../i3/config.common" || true)"
+# from the script is discovered during an outage, which is the worst moment.
+#
+# RE-POINTED AT PANIC (sp020 Task 10). This used to assert `hotkeyd.sh restart`.
+# The escape hatch is now `hotkeyd-panic.sh panic`, because a restart only ever
+# recovered a DEAD daemon and this bind exists just as much for one that is
+# alive and wrong. Asserting the old string would now pass only if the old,
+# insufficient bind were still there.
+COMMON="$HERE/../i3/config.common"
+BIND_LINE="$(grep -n 'bindsym $mod+Shift+F12 .*hotkeyd-panic\.sh panic' \
+             "$COMMON" || true)"
 if [ -n "$BIND_LINE" ]; then
-    ok "i3 base config binds the launcher's restart verb"
+    ok "i3 base config binds \$mod+Shift+F12 to hotkeyd-panic.sh panic"
 else
-    bad "no escape-hatch bind calling hotkeyd.sh restart in i3/config.common"
+    bad "no panic bind calling hotkeyd-panic.sh panic in i3/config.common"
+fi
+
+# And the superseded one must be GONE, not merely joined. Two escape hatches is
+# one too many: the restart bind would still be reachable, still reinstate the
+# table that broke the session, and still look like the recovery key.
+if grep -q '^[[:space:]]*bind\(sym\|code\).*hotkeyd\.sh restart' "$COMMON"; then
+    bad "the superseded 'hotkeyd.sh restart' escape hatch is still bound"
+else
+    ok "the superseded restart escape hatch is gone from i3/config.common"
 fi
 
 # restart takes the display as an ARGUMENT — the i3 escape-hatch bind runs with
