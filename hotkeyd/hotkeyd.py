@@ -433,7 +433,7 @@ def global_chords(table) -> list[str]:
     return list(dict.fromkeys(b.chord for b in table.BINDS))
 
 
-def layer_chords(table, name: str) -> list[str]:
+def layer_chords(table, name: str, mod_name: str = None) -> list[str]:
     """The extra chords a layer needs while it is ACTIVE: its bare keys, its exit
     keys, its modifier-prefixed sublayer chords, and the modifier keys themselves
     (so held-modifier state is observable at all)."""
@@ -441,17 +441,18 @@ def layer_chords(table, name: str) -> list[str]:
     out = [b.chord for b in layer.binds] + list(layer.exit_keys)
     for mod in layer.mods.values():
         canon = default_binds.MODIFIER_ALIASES.get(
-            str(mod.modifier).lower(), mod.modifier)
+            default_binds.resolve_mod_name(mod.modifier, mod_name).lower(),
+            mod.modifier)
         out += [f"{canon}+{b.chord}" for b in mod.binds]
         out += MOD_KEYSYMS_BY_NAME.get(canon, [])
     return list(dict.fromkeys(out))
 
 
-def chords_for(table, layer: str | None = None) -> list[str]:
+def chords_for(table, layer: str | None = None, mod_name: str = None) -> list[str]:
     """The grab set for the CURRENT state. Re-synced on every layer transition."""
     out = global_chords(table)
     if layer and layer != L.DEFAULT_LAYER and layer in table.LAYERS:
-        out = out + layer_chords(table, layer)
+        out = out + layer_chords(table, layer, mod_name)
     return list(dict.fromkeys(out))
 
 
@@ -542,11 +543,12 @@ class Daemon:
         self.grabs = GrabManager(XAdapter(d, d.screen().root), mod=self.mod)
         self.engine = L.LayerEngine(table.BINDS, table.LAYERS,
                                     publisher=publisher, mod=self.mod)
-        self.grabs.sync_binds(chords_for(table))
+        self.grabs.sync_binds(chords_for(table, mod_name=self.mod))
 
     def resync_grabs(self):
         self.grabs.sync_binds(chords_for(self.table,
-                                         self.engine.state["layer"]))
+                                         self.engine.state["layer"],
+                                         self.mod))
 
     def pump(self, ev, peek=None) -> list:
         """Handle one X event. `peek` returns the next queued event or None and

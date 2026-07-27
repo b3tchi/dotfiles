@@ -31,7 +31,9 @@ def test_shipped_table_has_the_nav_layer_with_three_layers():
     nav = B.LAYERS["nav"]
     assert set(nav.mods) == {"move", "resize"}
     assert nav.mods["move"].modifier == "Ctrl"
-    assert nav.mods["resize"].modifier == "Mod1"
+    # $altmod, not a literal: it must differ per display (see the $altmod tests)
+    assert nav.mods["resize"].modifier == "$altmod"
+    assert B.resolve_mod_name(nav.mods["resize"].modifier, "Mod4") == "Mod1"
     assert nav.exit_keys, "a layer with no exit keys cannot be left"
 
 
@@ -368,3 +370,37 @@ def test_the_shipped_table_is_scoped_to_the_nav_cutover():
     commit that deletes them from it."""
     assert [b.chord for b in B.BINDS] == ["$mod+o"], \
         "table carries groups that i3 still owns"
+
+
+# --------------------------------------------------------------------------
+# $altmod — the sublayer modifier must never collide with $mod (T6 audit gap 2)
+# --------------------------------------------------------------------------
+
+def test_altmod_avoids_whatever_mod_is():
+    """On the xrdp session $mod IS Mod1, and i3 owns Mod1+hjkl as focus binds —
+    a literal Mod1 resize layer got BadAccess on every chord and Alt+h did i3's
+    focus instead of resizing. $altmod is always the one of the pair the WM does
+    not own."""
+    assert B.alt_mod_for("Mod4") == "Mod1"
+    assert B.alt_mod_for("Mod1") == "Mod4"
+    assert B.alt_mod_for("Alt") == "Mod4"
+
+
+def test_altmod_never_equals_mod():
+    for m in ("Mod4", "Mod1", "Super", "Alt"):
+        resolved = B.MODIFIER_ALIASES[m.lower()]
+        assert B.alt_mod_for(m) != resolved, m
+
+
+def test_the_resize_sublayer_uses_the_token_not_a_literal():
+    assert B.LAYERS["nav"].mods["resize"].modifier == "$altmod"
+
+
+def test_altmod_resolves_in_a_chord():
+    assert B.normalize_chord("$altmod+h", mod="Mod4") == B.normalize_chord("Mod1+h")
+    assert B.normalize_chord("$altmod+h", mod="Mod1") == B.normalize_chord("Mod4+h")
+
+
+def test_the_shipped_table_validates_under_both_display_modifiers():
+    for m in ("Mod4", "Mod1"):
+        assert B.validate(B.BINDS, B.LAYERS, mod=m) == [], m

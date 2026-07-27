@@ -96,7 +96,8 @@ class LayerEngine:
         if layer is None:
             return None
         for label, mod in layer.mods.items():
-            canon = B.MODIFIER_ALIASES.get(str(mod.modifier).lower())
+            canon = B.MODIFIER_ALIASES.get(
+                B.resolve_mod_name(mod.modifier, self.mod).lower())
             if canon in self._held:
                 return label
         return None
