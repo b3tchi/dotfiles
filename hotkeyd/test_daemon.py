@@ -1499,6 +1499,17 @@ def test_the_all_master_devices_constant_is_the_protocols():
     assert H.XI_ALL_MASTER_DEVICES != xinput.AllDevices
 
 
+def test_the_key_repeat_flag_constant_is_the_protocols():
+    """Same pin as the constant above, for the same reason and one that bit:
+    every auto-repeat unit test FEEDS `H.XI_KEY_REPEAT` as the event's flags, so
+    all of them agree with each other no matter what the value is. Mutating it
+    to `1 << 15` survived the whole pytest suite and was caught only by the live
+    stage — which is the machinery that replaced the deleted core coalescer, so
+    it is the last thing that should rest on a live run alone."""
+    from Xlib.ext import xinput                             # noqa: PLC0415
+    assert H.XI_KEY_REPEAT == xinput.KeyRepeat == 1 << 16
+
+
 def test_grabs_go_through_xi2_against_all_master_devices():
     """`XIGrabKeycode` per chord against `XIAllMasterDevices` — the grab that
     carries a sourceid. XI2Root raises on the core call, so a port that left
