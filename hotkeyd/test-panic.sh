@@ -80,6 +80,18 @@ export HOTKEYD_FALLBACK_SRC="$T/zz-fallback-binds.conf"
 mkdir -p "$HOTKEYD_I3_CONFIG_D" "$XDG_RUNTIME_DIR"
 LINK="$HOTKEYD_I3_CONFIG_D/zz-fallback-binds.conf"
 
+# `resume` enumerates local X displays to decide what to reload, because the
+# unlink it performs is machine-wide (dotfiles-hwds.20). Point that enumeration
+# at a throwaway directory naming ONLY this suite's two displays: left at the
+# real /tmp/.X11-unix, every resume below would reload the CALLER'S own live i3
+# sessions — the same class of accident the I3SOCK unset above prevents. Only
+# display numbers come from here; i3-msg still connects through the real socket
+# path from the DISPLAY it is handed.
+export HOTKEYD_X11_UNIX="$T/x11-unix"
+mkdir -p "$HOTKEYD_X11_UNIX"
+: > "$HOTKEYD_X11_UNIX/X${XA#:}"
+: > "$HOTKEYD_X11_UNIX/X${XB#:}"
+
 printf 'bindsym Mod4+F10 workspace i3-owns-it\n' > "$HOTKEYD_FALLBACK_SRC"
 
 # The daemon's table. Its action is an i3 command, so a keystroke the daemon
@@ -426,6 +438,98 @@ else
 fi
 DISPLAY="$XA" "$HERE/hotkeyd.sh" stop "$XA" >/dev/null 2>&1
 DISPLAY="$XB" "$HERE/hotkeyd.sh" stop "$XB" >/dev/null 2>&1
+
+# --- 8b: resume's RELOAD is machine-wide too (dotfiles-hwds.20) ---------------
+# The other half of the Task 10 machine-wide decision, and the half that was
+# missing. `resume` removes ONE shared link but reloads only the displays panic
+# recorded in its state file — the caller's plus those that HAD a daemon. A
+# display with no daemon is never in that set, yet it shares the config.d and can
+# have parsed the fallback at any point in the panic window, for a reason nobody
+# connected to hotkeyd. Unlinking does not retract grabs i3 has already taken;
+# only a reload does. So that display keeps the fallback's grabs while the start
+# latch it was protected by is gone — and the next daemon to come up there
+# contends with them. Exactly the contested state Task 10 exists to eliminate,
+# discovered during an outage.
+#
+# This needs a REAL i3 on the second display: get_config reports what i3 has
+# LOADED, which is the thing that survives the unlink, and only a live i3 holds
+# grabs to read back.
+echo "panic: resume reloads displays panic never recorded"
+SOCK_B="$T/i3-b.sock"
+sed "s|ipc-socket $SOCK_A|ipc-socket $SOCK_B|" "$T/i3.conf" > "$T/i3-b.conf"
+DISPLAY="$XB" i3 -c "$T/i3-b.conf" >/dev/null 2>&1 &
+I3_PIDS+=($!)
+sleep 1.5
+
+if ! DISPLAY="$XB" i3-msg -t get_version >/dev/null 2>&1; then
+    bad "setup: i3 did not start on $XB — the machine-wide resume case cannot run"
+else
+    i3_config_b() { python3 "$T/getconfig.py" "$SOCK_B" 2>/dev/null; }
+    # Same real-effect oracle as who_answers, on the OTHER display's i3.
+    who_answers_b() {
+        DISPLAY="$XB" i3-msg 'workspace nobody' >/dev/null 2>&1
+        DISPLAY="$XB" python3 "$T/tap.py" F10
+        if   DISPLAY="$XB" i3-msg -t get_workspaces 2>/dev/null \
+             | grep -q 'daemon-owns-it'; then printf 'daemon\n'
+        elif DISPLAY="$XB" i3-msg -t get_workspaces 2>/dev/null \
+             | grep -q 'i3-owns-it';     then printf 'i3\n'
+        else                                  printf 'nobody\n'
+        fi
+    }
+
+    # A daemon on XA ONLY. panic's target list is the caller's display plus every
+    # display running a daemon, so XB is deliberately outside it — that is the
+    # precondition, not an oversight.
+    DISPLAY="$XA" "$HERE/hotkeyd.sh" start "$XA" >/dev/null 2>&1
+    sleep 1
+    panic panic >/dev/null 2>&1
+    sleep 0.5
+    [ -L "$LINK" ] && ok "panic on $XA linked the fallback ($XB has no daemon)" \
+        || bad "setup: no link after panicking on $XA"
+    [ "$(daemons_on "$XB")" = 0 ] || bad "setup: $XB should have had no daemon"
+
+    # THE PANIC WINDOW. XB reloads for a reason of its own — $mod+Shift+c, a
+    # quickshell restart, an xrdp reconnect — and its i3 parses the fallback that
+    # panic linked into the shared directory.
+    DISPLAY="$XB" i3-msg reload >/dev/null 2>&1
+    sleep 0.5
+    if i3_config_b | grep -q 'workspace i3-owns-it'; then
+        ok "an unrelated reload on $XB pulled in the machine-wide fallback"
+    else
+        bad "setup: $XB did not pick up the fallback on its own reload"
+    fi
+    answer="$(who_answers_b)"
+    [ "$answer" = i3 ] && ok "and $XB's i3 holds the fallback's grab" \
+        || bad "setup: expected i3 on $XB to hold the chord, got: $answer"
+
+    # resume's EXIT CODE is deliberately not asserted here, the same choice
+    # section 8 makes above. `target_displays` pgreps every hotkeyd.py on the
+    # box — correct for a machine-wide recovery tool, but it means a daemon
+    # belonging to another checkout of this repo (a second agent running this
+    # very suite) lands in the state file, and resume then reports a real
+    # failure to restart a daemon that was never ours. Reproduced: a run whose
+    # XA/XB were :81/:82 tried to start on :87 and exited 1. The reload set is
+    # what this case is about and is asserted directly below; rc is reported in
+    # the failure text so a genuine breakage is still legible.
+    out="$(panic resume 2>&1)"; rc=$?
+    sleep 1
+    if i3_config_b | grep -q 'workspace i3-owns-it'; then
+        bad "$XB's loaded table still carries the fallback after resume (rc=$rc) \
+— the link is gone, its grabs are not, and the start latch went with it"
+    else
+        ok "resume reloaded $XB, which panic never recorded — its loaded table \
+is fallback-free"
+    fi
+    # Read as a real WM effect, not only from the config dump: no daemon was
+    # started on XB (it never had one), so after resume NOBODY may answer.
+    answer="$(who_answers_b)"
+    [ "$answer" = nobody ] \
+        && ok "and nobody holds the chord on $XB — the stale grabs are gone" \
+        || bad "expected no owner on $XB after resume (rc=$rc), got: $answer"
+
+    DISPLAY="$XA" "$HERE/hotkeyd.sh" stop "$XA" >/dev/null 2>&1
+    DISPLAY="$XB" "$HERE/hotkeyd.sh" stop "$XB" >/dev/null 2>&1
+fi
 
 # --- 9: degraded environments ------------------------------------------------
 echo "panic: degraded environments"

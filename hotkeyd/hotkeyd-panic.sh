@@ -44,6 +44,12 @@
 #     into the contested state behind the fallback's back. Panic is sticky until
 #     resume, which is the property that survives a reboot — the link is on
 #     disk, the daemon's absence is not.
+#   * `resume` RELOADS EVERY LOCAL DISPLAY, not merely the ones panic recorded.
+#     The link it removes was machine-wide, and removing a file does not retract
+#     grabs i3 already holds; a display that reloaded into the fallback during
+#     the panic window would otherwise keep those chords with the `start` latch
+#     now gone. Only the recorded displays get a daemon back — the reload set is
+#     a superset of the restart set, deliberately.
 #
 # WHY SH AND NOT NUSHELL — same as hotkeyd.sh: [[adr0015]] puts a thin shell
 # launcher in front of the Python X clients, and this is the one script that has
@@ -60,6 +66,13 @@ LAUNCHER="$HERE/hotkeyd.sh"
 FALLBACK_SRC="${HOTKEYD_FALLBACK_SRC:-$HERE/../i3/config.d/zz-fallback-binds.conf}"
 I3_CONFIG_D="${HOTKEYD_I3_CONFIG_D:-$HOME/.i3/config.d}"
 LINK="$I3_CONFIG_D/zz-fallback-binds.conf"
+
+# Where local X servers announce themselves. Overridable for the same reason
+# FALLBACK_SRC and I3_CONFIG_D are: the enumeration below is machine-wide by
+# design, and a suite reading the real path would reload the CALLER'S own live
+# sessions. Only display NUMBERS are read from here — i3-msg still resolves its
+# socket the real way, from the root window of the DISPLAY it is handed.
+X11_UNIX="${HOTKEYD_X11_UNIX:-/tmp/.X11-unix}"
 
 RUNTIME="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 # Which displays panic stopped, so resume restarts exactly those. Machine-wide
@@ -86,6 +99,21 @@ target_displays() {
         pgrep -af 'hotkeyd\.py .*--display' 2>/dev/null \
             | sed -n 's/.*--display \(:[0-9][0-9]*\).*/\1/p'
     } | sort -u
+}
+
+# EVERY local X display, whether or not it ever ran a daemon — the blast radius
+# of the ONE shared `~/.i3/config.d/`, which is what the link and the unlink both
+# actually reach (dotfiles-hwds.20). `target_displays` is the set panic must STOP
+# daemons on; this is the set a config change must be RELOADED on, and they are
+# not the same set. Best-effort by construction: a display with no i3, or one
+# belonging to another user, just fails its `i3-msg` and is skipped.
+all_displays() {
+    for s in "$X11_UNIX"/X*; do
+        [ -e "$s" ] || continue          # empty glob leaves the pattern itself
+        n="${s##*/X}"
+        case "$n" in ''|*[!0-9]*) continue ;; esac
+        printf ':%s\n' "$n"
+    done
 }
 
 # Best-effort per display: a display with no X server or no i3 is not an error
@@ -149,7 +177,24 @@ case "$VERB" in
         # chords it still owns and loses them to BadAccess.
         rm -f "$LINK"
         rm -f "$STATE"
-        reload_i3 "$targets"
+
+        # THE UNLINK IS MACHINE-WIDE, SO THE RELOAD MUST BE (dotfiles-hwds.20).
+        # `$targets` is what panic STOPPED — the caller plus displays that had a
+        # daemon. It is not "every display sharing the config.d", and the gap is
+        # load-bearing: a display with no daemon is never recorded, yet it reads
+        # the same directory and can have reloaded into the fallback at any point
+        # in the panic window, for a reason nobody connected to hotkeyd (a
+        # `$mod+Shift+c`, a quickshell restart, an xrdp reconnect). Removing the
+        # file does not retract grabs i3 has ALREADY taken — only a reload does —
+        # so reloading just `$targets` would leave that display holding the
+        # fallback's chords with the `start` latch now gone, and the next daemon
+        # there would contend with them.
+        #
+        # Reloading a display that never saw the fallback is a no-op; NOT
+        # reloading one that did is the contested state. So the reload set is the
+        # union, and it stays a superset of the RESTART set below — resume must
+        # not start a daemon on a display that never had one.
+        reload_i3 "$(printf '%s\n%s\n' "$targets" "$(all_displays)" | sort -u)"
         rc=0
         for d in $targets; do
             "$LAUNCHER" start "$d"
