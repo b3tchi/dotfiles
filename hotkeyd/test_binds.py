@@ -168,6 +168,23 @@ def test_empty_or_whitespace_command_is_rejected(cmd):
     assert any("Mod4+x" in p for p in problems), problems
 
 
+@pytest.mark.parametrize("cmd", ["", "  "])
+def test_empty_run_command_is_rejected(cmd):
+    """The Run() branch of _command_problem was uncovered — deleting it left the
+    whole suite green (found by the T2 audit's own mutation battery)."""
+    problems = B.validate([B.Bind("Mod4+x", B.run(cmd))], {})
+    assert any("Mod4+x" in p for p in problems), problems
+
+
+def test_invalid_exit_key_chord_is_rejected():
+    """exit_keys are chords too; a typo there is a key that cannot leave the
+    layer. Also previously uncovered per the T2 audit."""
+    layers = {"nav": B.Layer(binds=[B.Bind("h", "focus left")],
+                             exit_keys=["q", "NotAKey"])}
+    problems = B.validate([], layers)
+    assert any("NotAKey" in p for p in problems), problems
+
+
 @pytest.mark.parametrize("chord", ["Mod4+37", "105", "Ctrl+64"])
 def test_keycode_in_a_chord_is_rejected(chord):
     """poc013: Super_L is keycode 133 on :0 but 115 on :10 — the same key.
