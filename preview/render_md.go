@@ -20,10 +20,11 @@ func renderMarkdown(w http.ResponseWriter, src []byte, truncated bool) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body class="markdown-preview">`)
+	fmt.Fprint(w, `<!DOCTYPE html><html><head><meta charset="utf-8">`+
+		textPreviewStyle()+`</head><body class="markdown-preview">`)
 	_, _ = w.Write(buf.Bytes())
 	if truncated {
 		fmt.Fprint(w, `<p class="preview-truncated">[preview truncated]</p>`)
 	}
-	fmt.Fprint(w, `</body></html>`)
+	fmt.Fprint(w, textPreviewScript()+`</body></html>`)
 }

@@ -176,8 +176,9 @@ func readCapped(path string, size int64) (data []byte, truncated bool, err error
 // safely, never a 500).
 func renderFallback(w http.ResponseWriter, path string, fi os.FileInfo) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, `<!DOCTYPE html><html><head><meta charset="utf-8"></head>`+
-		`<body class="preview-fallback"><p>no preview available for %s (%d bytes)</p></body></html>`,
+	fmt.Fprintf(w, `<!DOCTYPE html><html><head><meta charset="utf-8">`+textPreviewStyle()+`</head>`+
+		`<body class="preview-fallback"><p>no preview available for %s (%d bytes)</p>`+
+		textPreviewScript()+`</body></html>`,
 		html.EscapeString(filepath.Base(path)), fi.Size())
 }
 
@@ -187,10 +188,11 @@ func renderFallback(w http.ResponseWriter, path string, fi os.FileInfo) {
 // safe response instead of a 500.
 func renderPlainFallback(w http.ResponseWriter, src []byte, truncated bool) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body class="preview-fallback"><pre>`)
+	fmt.Fprint(w, `<!DOCTYPE html><html><head><meta charset="utf-8">`+textPreviewStyle()+
+		`</head><body class="preview-fallback"><pre>`)
 	fmt.Fprint(w, html.EscapeString(string(src)))
 	if truncated {
 		fmt.Fprint(w, "\n[preview truncated]")
 	}
-	fmt.Fprint(w, `</pre></body></html>`)
+	fmt.Fprint(w, `</pre>`+textPreviewScript()+`</body></html>`)
 }

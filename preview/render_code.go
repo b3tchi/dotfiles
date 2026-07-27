@@ -29,7 +29,10 @@ func renderCode(w http.ResponseWriter, path string, src []byte, truncated bool) 
 	}
 
 	formatter := chromahtml.New(chromahtml.WithClasses(true), chromahtml.TabWidth(2))
-	style := styles.Get("github")
+	// Dark to match the webview shell — the light "github" style rendered
+	// near-black tokens that were unreadable once the page background went
+	// dark (render_theme.go).
+	style := styles.Get("github-dark")
 	if style == nil {
 		style = styles.Fallback
 	}
@@ -37,6 +40,9 @@ func renderCode(w http.ResponseWriter, path string, src []byte, truncated bool) 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprint(w, `<!DOCTYPE html><html><head><meta charset="utf-8"><style>`)
 	_ = formatter.WriteCSS(w, style)
+	// Shared palette last so its `.chroma` background override beats chroma's
+	// own; chroma's token selectors (.chroma .k, …) are untouched.
+	fmt.Fprint(w, textPreviewCSS)
 	fmt.Fprint(w, `</style></head><body class="code-preview">`)
 	// formatter.Format only errors on a write failure to w (e.g. a broken
 	// connection); there is nothing safe to fall back to at that point
@@ -46,5 +52,5 @@ func renderCode(w http.ResponseWriter, path string, src []byte, truncated bool) 
 	if truncated {
 		fmt.Fprint(w, `<p class="preview-truncated">[preview truncated]</p>`)
 	}
-	fmt.Fprint(w, `</body></html>`)
+	fmt.Fprint(w, textPreviewScript()+`</body></html>`)
 }
