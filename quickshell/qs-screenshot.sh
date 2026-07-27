@@ -6,8 +6,9 @@
 # outline over the LIVE desktop: no frozen grab, no dim, and no opaque
 # fullscreen window, so there is no blink. Drag or tap two corners; `w` takes
 # the whole screen; Esc / right-click cancels. The crop lands in
-# ~/Pictures/screenshots and its file PATH goes on the clipboard (text, like a
-# tmux copy). To annotate afterwards: `ksnip -e <saved file>`.
+# ~/Pictures/screenshots AND the image itself goes on the clipboard
+# (image/png) — Ctrl+V into an image-aware target pastes the picture
+# directly. To annotate afterwards: `ksnip -e <saved file>`.
 #
 # The screen is captured AFTER the selection, so nothing is grabbed up front
 # and a cancel captures nothing. That is why this no longer pre-scrots to

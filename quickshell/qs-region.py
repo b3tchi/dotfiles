@@ -2,9 +2,17 @@
 """Live region-screenshot selector — compositor-free, via X Shape.
 
 Select a rectangle on the LIVE desktop; the crop is saved to
-~/Pictures/screenshots and its file PATH is copied to the clipboard (text, like
-tmux copy). Drag, or tap two corners. `w` grabs the whole screen, `Esc` (or
-right-click) cancels.
+~/Pictures/screenshots AND the image itself is put on the clipboard
+(image/png) -- Ctrl+V into an image-aware target (Claude Code CLI, a chat
+box, an editor) pastes the picture directly. Drag, or tap two corners. `w`
+grabs the whole screen, `Esc` (or right-click) cancels.
+
+Was file-PATH-as-text (like a tmux copy) until the clip-history image
+feature landed; switched to the image itself once pasting a real picture
+became the common case this tool is used for. The file still lands on disk
+for anything that wants a path by hand (`ksnip -e <file>`) -- it is simply
+no longer echoed onto the clipboard as text, so a shell/editor paste no
+longer drops in a path the way it used to.
 
 WHY SHAPE, NOT ALPHA (this is the whole design — see [[poc008]]):
 bare X11 has no compositor here, so an ARGB window with a translucent interior
@@ -103,7 +111,9 @@ def shot_path(outdir=OUTDIR):
 
 
 def capture(x, y, w, h, outdir=OUTDIR):
-    """Grab a screen region to a file and put the PATH on the clipboard.
+    """Grab a screen region to a file and put the IMAGE ITSELF on the
+    clipboard (image/png) — see the module docstring for why this changed
+    from the file path.
 
     Returns the path. Raises on failure — callers must release the grab first;
     a held grab plus a traceback would strand the pointer.
@@ -112,8 +122,9 @@ def capture(x, y, w, h, outdir=OUTDIR):
     path = shot_path(outdir)
     subprocess.run(['scrot', '-o', '-a', '%d,%d,%d,%d' % (x, y, w, h), path],
                    check=True)
-    subprocess.run(['xclip', '-selection', 'clipboard'],
-                   input=path.encode(), check=True)
+    with open(path, 'rb') as f:
+        subprocess.run(['xclip', '-selection', 'clipboard', '-t', 'image/png'],
+                       input=f.read(), check=True)
     return path
 
 
