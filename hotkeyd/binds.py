@@ -58,12 +58,24 @@ _KEYSYMS = frozenset(
 )
 
 
+# The `$mod` token, resolved per display at daemon start from the same X
+# resource i3 reads (`i3wm.mod`, ft003) with the same Mod4 default. The xrdp
+# session sets Mod1 (xrdp/xinitrc) because Super does not survive an RDP client,
+# so ONE table has to mean Super on :0 and Alt on :10 — hardcoding Mod4 left
+# every such chord FREE on :10, where the daemon would own and serve it while i3
+# owned the Alt equivalent.
+MOD_TOKEN = "$mod"
+DEFAULT_MOD = "Mod4"
+
+
 class BindError(ValueError):
     """A chord or table that cannot be loaded. Message names the offender."""
 
 
-def parse_chord(chord: str) -> tuple[frozenset[str], str]:
+def parse_chord(chord: str, mod: str = DEFAULT_MOD) -> tuple[frozenset[str], str]:
     """Split a chord into (canonical modifiers, keysym name).
+
+    `mod` is what the `$mod` token resolves to on this display.
 
     Raises BindError naming the chord for anything unusable: an unknown
     modifier, an empty key, or a bare keycode (see the module docstring).
@@ -84,6 +96,8 @@ def parse_chord(chord: str) -> tuple[frozenset[str], str]:
     mods = set()
     for raw in parts[:-1]:
         name = raw.strip().lower()
+        if name == MOD_TOKEN:
+            name = str(mod).lower()
         canon = MODIFIER_ALIASES.get(name)
         if canon is None:
             raise BindError(f"chord {chord!r} has unknown modifier {raw!r}")
@@ -95,9 +109,9 @@ def parse_chord(chord: str) -> tuple[frozenset[str], str]:
     return frozenset(mods), key
 
 
-def normalize_chord(chord: str) -> tuple[tuple[str, ...], str]:
+def normalize_chord(chord: str, mod: str = DEFAULT_MOD) -> tuple[tuple[str, ...], str]:
     """Order-insensitive, alias-folded identity of a chord, for dup detection."""
-    mods, key = parse_chord(chord)
+    mods, key = parse_chord(chord, mod)
     return tuple(sorted(mods)), key
 
 
@@ -175,20 +189,20 @@ def _command_problem(bind: Bind, where: str) -> str | None:
     return None
 
 
-def _key(bind: Bind, prefix: str = "") -> tuple:
+def _key(bind: Bind, prefix: str = "", mod: str = DEFAULT_MOD) -> tuple:
     """Duplicate-detection identity. `on_release` is part of it: press and
     release on one chord are different events, not a collision (i3 does the
     same with `--release`)."""
     chord = f"{prefix}+{bind.chord}" if prefix else bind.chord
-    return normalize_chord(chord) + (bind.on_release,)
+    return normalize_chord(chord, mod) + (bind.on_release,)
 
 
 def _scan(bs: Iterable[Bind], where: str, layers, seen: dict,
-          prefix: str = "") -> list[str]:
+          prefix: str = "", mod: str = DEFAULT_MOD) -> list[str]:
     problems: list[str] = []
     for b in bs:
         try:
-            k = _key(b, prefix)
+            k = _key(b, prefix, mod)
         except BindError as e:
             problems.append(f"{where}: {e}")
             continue
@@ -209,7 +223,8 @@ def _scan(bs: Iterable[Bind], where: str, layers, seen: dict,
 
 
 def validate(binds: Iterable[Bind] = None,
-             layers: dict[str, Layer] = None) -> list[str]:
+             layers: dict[str, Layer] = None,
+             mod: str = DEFAULT_MOD) -> list[str]:
     """Return every problem found, as human-readable strings naming the chord.
 
     Empty list means the table is loadable. Reports ALL problems rather than
@@ -219,40 +234,43 @@ def validate(binds: Iterable[Bind] = None,
     binds = BINDS if binds is None else binds
     layers = LAYERS if layers is None else layers
 
-    problems = _scan(binds, "global", layers, {})
+    problems = _scan(binds, "global", layers, {}, mod=mod)
 
     for name, layer in layers.items():
         seen: dict = {}
-        problems += _scan(layer.binds, f"layer {name!r}", layers, seen)
-        for label, mod in layer.mods.items():
+        problems += _scan(layer.binds, f"layer {name!r}", layers, seen,
+                          mod=mod)
+        for label, mod_ in layer.mods.items():
             where = f"layer {name!r} mod {label!r}"
             try:
-                canon = MODIFIER_ALIASES.get(str(mod.modifier).strip().lower())
+                canon = MODIFIER_ALIASES.get(str(mod_.modifier).strip().lower())
             except Exception:  # pragma: no cover - defensive
                 canon = None
             if canon is None:
                 problems.append(
-                    f"{where}: unknown modifier {mod.modifier!r}")
+                    f"{where}: unknown modifier {mod_.modifier!r}")
                 continue
-            problems += _scan(mod.binds, where, layers, seen, prefix=canon)
+            problems += _scan(mod_.binds, where, layers, seen, prefix=canon,
+                              mod=mod)
         if not layer.exit_keys:
             problems.append(
                 f"layer {name!r} has no exit_keys — it could not be left")
         else:
             for k in layer.exit_keys:
                 try:
-                    parse_chord(k)
+                    parse_chord(k, mod)
                 except BindError as e:
                     problems.append(f"layer {name!r} exit key: {e}")
     return problems
 
 
 def load(binds: Iterable[Bind] = None,
-         layers: dict[str, Layer] = None) -> tuple[list[Bind], dict]:
+         layers: dict[str, Layer] = None,
+         mod: str = DEFAULT_MOD) -> tuple[list[Bind], dict]:
     """Validate and return the table, or raise BindError listing every problem."""
     binds = BINDS if binds is None else binds
     layers = LAYERS if layers is None else layers
-    problems = validate(binds, layers)
+    problems = validate(binds, layers, mod)
     if problems:
         raise BindError("\n".join(problems))
     return list(binds), layers
@@ -262,6 +280,7 @@ def load(binds: Iterable[Bind] = None,
 # the table
 # --------------------------------------------------------------------------
 
+# Used by the workspace group when it migrates (not yet — see BINDS below).
 WS_SWITCH = "~/.local/bin/ws-switch.nu"
 NAV_STEP = "5 px or 5 ppt"
 
@@ -317,19 +336,15 @@ LAYERS: dict[str, Layer] = {
 }
 
 BINDS: list[Bind] = [
-    # Entry into the nav layer.
-    Bind("Mod4+o", enter_layer("nav")),
-
-    # Focus / move — the always-available $mod versions.
-    *[Bind(f"Mod4+{k}", f"focus {d}") for k, (d, _) in _DIRS.items()],
-    *[Bind(f"Mod4+{a}", f"focus {_DIRS[k][0]}") for a, k in _ARROWS.items()],
-    *[Bind(f"Mod4+Shift+{k}", f"move {d}") for k, (d, _) in _DIRS.items()],
-    *[Bind(f"Mod4+Shift+{a}", f"move {_DIRS[k][0]}")
-      for a, k in _ARROWS.items()],
-
-    # Workspaces, by display position (ws-switch.nu owns named workspaces).
-    *[Bind(f"Mod4+{n}", run(f"{WS_SWITCH} {n}")) for n in range(1, 9)],
-    *[Bind(f"Mod4+Ctrl+{n}", run(f"{WS_SWITCH} {n} move")) for n in range(1, 9)],
-    *[Bind(f"Mod4+Shift+{n}", run(f"{WS_SWITCH} {n} follow"))
-      for n in range(1, 9)],
+    # SCOPED TO THE T6 CUTOVER, DELIBERATELY. sp020's anti-pattern is that a
+    # chord must not exist in both i3 and this table at any commit boundary —
+    # a chord bound in both double-fires. Only the nav entry chord is here,
+    # because nav is the group T6 migrates.
+    #
+    # The focus/move and workspace groups that used to sit here were removed:
+    # they are still live in i3/config.common, so listing them here meant the
+    # daemon would grab and serve them the moment autostart fired on :10, where
+    # $mod is Mod1 and the Mod4 forms were free. Reintroduce each group in the
+    # SAME commit that deletes it from the i3 config, never before.
+    Bind("$mod+o", enter_layer("nav")),
 ]

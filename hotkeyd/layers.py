@@ -65,12 +65,14 @@ class Event:
 
 class LayerEngine:
     def __init__(self, binds, layers, publisher=None, clock=None,
-                 guard_ms: int = RELEASE_GUARD_MS):
+                 guard_ms: int = RELEASE_GUARD_MS, mod: str = None):
         self.binds = list(binds)
         self.layers = layers
         self.publisher = publisher
         self.clock = clock or time.monotonic
         self.guard_ms = guard_ms
+        # What `$mod` resolves to on this display (Mod4 native, Mod1 on xrdp).
+        self.mod = mod or B.DEFAULT_MOD
 
         self._layer = DEFAULT_LAYER
         self._held: dict[str, float] = {}   # canonical modifier -> last seen at
@@ -176,12 +178,11 @@ class LayerEngine:
                 del self._held[canon]
 
     # -- matching ---------------------------------------------------------
-    @staticmethod
-    def _index(bs) -> dict:
+    def _index(self, bs) -> dict:
         out: dict = {}
         for b in bs:
             try:
-                key = B.normalize_chord(b.chord) + (b.on_release,)
+                key = B.normalize_chord(b.chord, self.mod) + (b.on_release,)
             except B.BindError:
                 continue                # validated at load; skip defensively
             out[key] = b

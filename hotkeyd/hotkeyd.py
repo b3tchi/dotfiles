@@ -60,6 +60,16 @@ class AlreadyRunning(RuntimeError):
     """Another daemon holds this display's lock."""
 
 
+class TableInvalid(Exception):
+    """A bind table that cannot be loaded — unreadable, unimportable, or
+    rejected by the validator.
+
+    Deliberately an Exception and NOT a SystemExit: the reload path catches
+    Exception to keep the old table, and SystemExit (a BaseException) sailed
+    straight through that handler and killed the daemon on a bad SIGHUP.
+    """
+
+
 # --------------------------------------------------------------------------
 # helpers
 # --------------------------------------------------------------------------
@@ -74,6 +84,34 @@ def lock_path(display: str | None = None) -> Path:
     display = display or os.environ.get("DISPLAY", ":0")
     tag = display.lstrip(":").split(".")[0]
     return _runtime_dir() / f"hotkeyd-{tag}.lock"
+
+
+def x_resource_mod(xdisp=None) -> str:
+    """What `$mod` means on THIS display.
+
+    Read from the `i3wm.mod` X resource — the same source i3 reads via
+    `set_from_resource $mod i3wm.mod Mod4` (ft003), with the same default. The
+    xrdp session entry merges `i3wm.mod: Mod1` before exec'ing i3, so the two
+    displays genuinely disagree and a table that hardcodes a modifier is wrong
+    on one of them.
+    """
+    if xdisp is None:
+        return default_binds.DEFAULT_MOD
+    try:
+        prop = xdisp.screen().root.get_full_property(
+            xdisp.intern_atom("RESOURCE_MANAGER"), 0)
+        if prop is None or not prop.value:
+            return default_binds.DEFAULT_MOD
+        raw = prop.value
+        text = raw.decode(errors="replace") if isinstance(
+            raw, (bytes, bytearray)) else str(raw)
+        for line in text.splitlines():
+            name, _, value = line.partition(":")
+            if name.strip() == "i3wm.mod" and value.strip():
+                return value.strip()
+    except Exception:                           # noqa: BLE001
+        pass
+    return default_binds.DEFAULT_MOD
 
 
 def to_event(kind: str, keysym: str, state: int) -> L.Event:
@@ -126,14 +164,15 @@ class GrabManager:
     `sync` — the real X display in production, a recorder in tests.
     """
 
-    def __init__(self, display):
+    def __init__(self, display, mod: str = None):
         self.d = display
+        self.mod = mod or default_binds.DEFAULT_MOD
         self.problems: list[str] = []
         self._active: dict[str, tuple[int, int]] = {}   # chord -> (code, mask)
 
     def _resolve(self, chord: str) -> tuple[int, int] | None:
         try:
-            mods, key = default_binds.parse_chord(chord)
+            mods, key = default_binds.parse_chord(chord, self.mod)
         except default_binds.BindError as e:
             self.problems.append(str(e))
             return None
@@ -195,7 +234,7 @@ class GrabManager:
     def keysym_for(self, keycode: int) -> str | None:
         for chord, (code, _) in self._active.items():
             if code == keycode:
-                return default_binds.parse_chord(chord)[1]
+                return default_binds.parse_chord(chord, self.mod)[1]
         return None
 
     def on_mapping_notify(self) -> bool:
@@ -230,12 +269,41 @@ HDR = struct.Struct("=6sII")
 RUN_COMMAND = 0
 
 
-def i3_socket_path() -> str:
-    env = os.environ.get("I3SOCK")
-    if env:
-        return env
+def i3_socket_path(display: str | None = None, xdisp=None) -> str:
+    """Resolve THIS display's i3 socket.
+
+    Deliberately ignores `$I3SOCK`. i3 exports it into the environment of every
+    process it execs, so a daemon started for `:10` by `:0`'s i3 inherits `:0`'s
+    socket and every dispatch lands on the WRONG window manager — press a chord
+    in the RDP session, a window moves on the native desktop. It also goes stale
+    across an i3 restart, after which the daemon can never reconnect.
+
+    Order: explicit `$HOTKEYD_I3SOCK` (an operator/test override that i3 never
+    injects, so it cannot mis-route a session) -> the `I3_SOCKET_PATH` root
+    property of our OWN X connection, which i3 rewrites on every restart ->
+    `i3 --get-socketpath` with DISPLAY pinned and I3SOCK scrubbed.
+    """
+    override = os.environ.get("HOTKEYD_I3SOCK")
+    if override:
+        return override
+
+    if xdisp is not None:
+        try:
+            prop = xdisp.screen().root.get_full_property(
+                xdisp.intern_atom("I3_SOCKET_PATH"), 0)
+            if prop is not None and prop.value:
+                value = prop.value
+                if isinstance(value, (bytes, bytearray)):
+                    return value.decode().rstrip("\x00")
+                return str(value).rstrip("\x00")
+        except Exception:                       # noqa: BLE001
+            pass                                # fall through to the CLI
+
+    env = {k: v for k, v in os.environ.items() if k != "I3SOCK"}
+    if display:
+        env["DISPLAY"] = display
     return subprocess.run(["i3", "--get-socketpath"], capture_output=True,
-                          text=True, check=True).stdout.strip()
+                          text=True, check=True, env=env).stdout.strip()
 
 
 class I3Client:
@@ -300,20 +368,48 @@ class I3Client:
 # table loading + --check
 # --------------------------------------------------------------------------
 
-def load_table(path: str | None):
+def load_table(path: str | None, validate: bool = True):
+    """Import a bind table and VALIDATE it before handing it over.
+
+    Validation lives here, not only in `--check`, because every path that loads
+    a table is a path where a broken one hurts: startup, SIGHUP, and the
+    escape-hatch restart. us019 AC4 asks for the bind set to be refused before
+    it is loaded — leaving that to whoever remembers to run `--check` is not
+    that. Everything that can go wrong raises TableInvalid, so a caller can keep
+    the table it already has.
+    """
     if not path:
-        return default_binds
-    p = Path(path).expanduser().resolve()
-    if not p.is_file():
-        raise SystemExit(f"hotkeyd: no such bind table: {p}")
-    spec = importlib.util.spec_from_file_location(f"hotkeyd_binds_{p.stem}", p)
-    if spec is None or spec.loader is None:
-        raise SystemExit(f"hotkeyd: cannot import bind table: {p}")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    for attr in ("BINDS", "LAYERS"):
-        if not hasattr(mod, attr):
-            raise SystemExit(f"hotkeyd: bind table {p} defines no {attr}")
+        mod = default_binds
+    else:
+        p = Path(path).expanduser().resolve()
+        if not p.is_file():
+            raise TableInvalid(f"no such bind table: {p}")
+        spec = importlib.util.spec_from_file_location(
+            f"hotkeyd_binds_{p.stem}", p)
+        if spec is None or spec.loader is None:
+            raise TableInvalid(f"cannot import bind table: {p}")
+        mod = importlib.util.module_from_spec(spec)
+        # Register BEFORE exec: dataclasses (and typing) resolve a class's
+        # module through sys.modules[cls.__module__], so a table module that
+        # defines its own dataclasses dies with "'NoneType' object has no
+        # attribute '__dict__'" if it is not there. Any table derived from
+        # binds.py hits this.
+        sys.modules[spec.name] = mod
+        try:
+            spec.loader.exec_module(mod)
+        except Exception as e:                  # noqa: BLE001
+            sys.modules.pop(spec.name, None)
+            raise TableInvalid(f"bind table {p} failed to import: {e}") from e
+        for attr in ("BINDS", "LAYERS"):
+            if not hasattr(mod, attr):
+                raise TableInvalid(f"bind table {p} defines no {attr}")
+
+    if validate:
+        problems = default_binds.validate(mod.BINDS, mod.LAYERS)
+        if problems:
+            raise TableInvalid(
+                f"{len(problems)} problem(s) in the bind table:\n  "
+                + "\n  ".join(problems))
     return mod
 
 
@@ -427,14 +523,25 @@ class Daemon:
     (and then testing the re-implementation).
     """
 
-    def __init__(self, table, d, publisher, i3=None):
+    def __init__(self, table, d, publisher, i3=None, display=None):
         self.table = table
         self.d = d
+        self.display = display or os.environ.get("DISPLAY")
         self.pub = publisher
-        self.i3 = i3 if i3 is not None else I3Client()
-        self.grabs = GrabManager(XAdapter(d, d.screen().root))
+        # Resolve i3's socket through OUR OWN X connection, re-read on every
+        # reconnect: that is what keeps a per-display daemon talking to its own
+        # window manager, and what lets it follow an i3 restart.
+        # BOTH arguments: xdisp for the root-property read, display for the CLI
+        # fallback's pinned env. Passing only xdisp meant that whenever the
+        # property was absent or unreadable the fallback inherited the AMBIENT
+        # DISPLAY — so a :10 daemon started from :0's session resolved :0's
+        # socket, which is the very bug this task exists to remove.
+        self.i3 = i3 if i3 is not None else I3Client(
+            lambda: i3_socket_path(display=self.display, xdisp=d))
+        self.mod = x_resource_mod(d)
+        self.grabs = GrabManager(XAdapter(d, d.screen().root), mod=self.mod)
         self.engine = L.LayerEngine(table.BINDS, table.LAYERS,
-                                    publisher=publisher)
+                                    publisher=publisher, mod=self.mod)
         self.grabs.sync_binds(chords_for(table))
 
     def resync_grabs(self):
@@ -504,7 +611,7 @@ def run_daemon(table, display_name: str | None) -> int:
     inst = SingleInstance(lock_path(disp_name))
     d = xdisplay.Display(disp_name)
     pub = L.StatePublisher(L.socket_path(disp_name))
-    dae = Daemon(table, d, pub)
+    dae = Daemon(table, d, pub, display=disp_name)
     dae._pending = []
     for p in dae.grabs.problems:
         print(f"hotkeyd: {p}", file=sys.stderr)
@@ -521,7 +628,8 @@ def run_daemon(table, display_name: str | None) -> int:
             return dae._pending.pop(0)
         return d.next_event() if d.pending_events() else None
 
-    print(f"hotkeyd: {len(dae.grabs.chords)} chords grabbed on {disp_name}",
+    print(f"hotkeyd: {len(dae.grabs.chords)} chords grabbed on {disp_name} "
+          f"($mod={dae.mod})",
           file=sys.stderr, flush=True)
     code = 0
     try:
@@ -533,9 +641,12 @@ def run_daemon(table, display_name: str | None) -> int:
                     fresh = load_table(getattr(table, "__file__", None))
                     dae.table = fresh
                     dae.engine = L.LayerEngine(fresh.BINDS, fresh.LAYERS,
-                                               publisher=pub)
+                                               publisher=pub, mod=dae.mod)
                     dae.resync_grabs()
                     print("hotkeyd: reloaded", file=sys.stderr, flush=True)
+                except TableInvalid as e:
+                    print(f"hotkeyd: reload REFUSED, keeping the running table"
+                          f"\n  {e}", file=sys.stderr, flush=True)
                 except Exception as e:                   # noqa: BLE001
                     print(f"hotkeyd: reload failed, keeping the old table: {e}",
                           file=sys.stderr, flush=True)
@@ -584,7 +695,13 @@ def main() -> int:
     ap.add_argument("--display", help="X display (default: $DISPLAY)")
     args = ap.parse_args()
 
-    table = load_table(args.binds)
+    try:
+        # --check does its own reporting, so it loads WITHOUT validating and
+        # then prints the full problem list; every other path wants the refusal.
+        table = load_table(args.binds, validate=not args.check)
+    except TableInvalid as e:
+        print(f"hotkeyd: {e}", file=sys.stderr)
+        return 1
     if args.check:
         return check(table)
     try:

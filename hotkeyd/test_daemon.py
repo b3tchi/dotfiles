@@ -404,14 +404,14 @@ def test_bare_layer_keys_are_not_grabbed_in_the_default_layer():
     for key in ("h", "j", "k", "l", "Left", "Escape", "Return", "q"):
         assert key not in default_set, \
             f"{key!r} grabbed in the default layer — eaten from every app"
-    assert "Mod4+o" in default_set, "the layer entry chord must still be grabbed"
+    assert "$mod+o" in default_set, "the layer entry chord must still be grabbed"
 
 
 def test_entering_a_layer_grabs_its_bare_keys():
     chords = H.chords_for(B, "nav")
     assert "h" in chords, "bare nav keys not grabbed while nav is active"
     assert "Left" in chords
-    assert "Mod4+o" in chords, "global binds stay grabbed inside a layer"
+    assert "$mod+o" in chords, "global binds stay grabbed inside a layer"
 
 
 def test_a_layer_grabs_the_modifier_keys_its_sublayers_need():
@@ -448,8 +448,36 @@ def test_modifier_sublayer_chords_are_grabbed_with_their_modifier():
 
 def test_global_binds_are_in_the_grab_set():
     chords = H.chords_for(B)
-    assert "Mod4+o" in chords
-    assert "Mod4+1" in chords
+    assert "$mod+o" in chords
+
+
+def test_the_mod_token_resolves_per_display_at_grab_time():
+    """One table, two displays (us019 AC3): the same `$mod+o` chord must grab
+    Super on :0 and Alt on the xrdp session, where i3wm.mod is Mod1."""
+    native = FakeDisplay(keymap={"o": 32})
+    rdp = FakeDisplay(keymap={"o": 32})
+    H.GrabManager(native, mod="Mod4").sync_binds(["$mod+o"])
+    H.GrabManager(rdp, mod="Mod1").sync_binds(["$mod+o"])
+    assert (32, H.MOD4) in native.grabs
+    assert (32, H.MOD1) in rdp.grabs
+    assert (32, H.MOD4) not in rdp.grabs, "RDP session grabbed Super, not Alt"
+
+
+def test_mod_defaults_to_mod4_when_the_resource_is_absent():
+    assert H.x_resource_mod(None) == "Mod4"
+
+
+def test_mod_is_read_from_the_i3wm_resource():
+    """Same source i3 reads (ft003). xrdp/xinitrc merges `i3wm.mod: Mod1`."""
+    xd = FakeXDisplay("")
+    xd.path = "i3wm.mod:\tMod1\nXft.dpi:\t96\n"
+    assert H.x_resource_mod(xd) == "Mod1"
+
+
+def test_an_unrelated_resource_database_leaves_the_default():
+    xd = FakeXDisplay("")
+    xd.path = "Xft.dpi:\t96\nXcursor.theme:\tAdwaita\n"
+    assert H.x_resource_mod(xd) == "Mod4"
 
 
 def test_the_grab_set_is_deduplicated():
@@ -540,3 +568,347 @@ def test_lock_bits_are_stripped_from_the_reported_modifiers():
     chord than Ctrl+h without it."""
     ev = H.to_event("press", "h", H.CTRL | H.MOD2 | H.LOCK)
     assert ev.mods == frozenset({"Ctrl"})
+
+
+# --------------------------------------------------------------------------
+# i3 socket resolution — must never trust an inherited I3SOCK (dotfiles-hwds.6)
+# --------------------------------------------------------------------------
+
+class FakeXDisplay:
+    """Just enough X to answer the I3_SOCKET_PATH root-window property."""
+
+    def __init__(self, path):
+        self.path = path
+        outer = self
+
+        class Prop:
+            def __init__(self, v):
+                self.value = v.encode()
+
+        class Root:
+            def get_full_property(self, atom, kind):
+                return Prop(outer.path) if outer.path else None
+
+        class Screen:
+            root = Root()
+
+        self._screen = Screen()
+
+    def intern_atom(self, name):
+        return 1
+
+    def screen(self):
+        return self._screen
+
+
+def test_socket_path_prefers_the_displays_own_root_property(monkeypatch):
+    """i3 exports I3SOCK into every child it execs, so a daemon started for :10
+    by :0's i3 inherits :0's socket and dispatches to the WRONG WM — a chord
+    pressed in the RDP session moves a window on the native desktop."""
+    monkeypatch.setenv("I3SOCK", "/tmp/some-other-session.sock")
+    xd = FakeXDisplay("/run/user/1000/i3/ipc-socket.RIGHT")
+    assert H.i3_socket_path(xdisp=xd) == "/run/user/1000/i3/ipc-socket.RIGHT"
+
+
+def test_socket_path_ignores_i3sock_even_with_no_x_display(monkeypatch):
+    monkeypatch.setenv("I3SOCK", "/tmp/inherited-and-wrong.sock")
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append((cmd, kw.get("env", {})))
+
+        class R:
+            stdout = "/run/user/1000/i3/ipc-socket.FROM-CLI\n"
+        return R()
+
+    monkeypatch.setattr(H.subprocess, "run", fake_run)
+    got = H.i3_socket_path(display=":10")
+    assert got == "/run/user/1000/i3/ipc-socket.FROM-CLI"
+    cmd, env = calls[0]
+    assert cmd[:1] == ["i3"]
+    assert env.get("DISPLAY") == ":10", "resolver must pin the target display"
+    assert "I3SOCK" not in env, "inherited I3SOCK must be scrubbed for the child"
+
+
+def test_explicit_override_is_honoured(monkeypatch):
+    """HOTKEYD_I3SOCK is an explicit operator/test override — unlike I3SOCK it is
+    never injected by i3, so trusting it cannot mis-route a session."""
+    monkeypatch.setenv("HOTKEYD_I3SOCK", "/tmp/explicit.sock")
+    monkeypatch.setenv("I3SOCK", "/tmp/inherited.sock")
+    assert H.i3_socket_path() == "/tmp/explicit.sock"
+
+
+def test_client_follows_the_property_across_an_i3_restart(tmp_path):
+    """The production resolver, not an injected lambda: i3 restarting rewrites
+    the root property, and the daemon must follow it."""
+    first = FakeI3(tmp_path / "i3-1.sock")
+    xd = FakeXDisplay(first.path)
+    c = H.I3Client(lambda: H.i3_socket_path(xdisp=xd))
+    c.command("nop one")
+    time.sleep(0.05)
+    assert first.commands == ["nop one"]
+    first.close()
+
+    second = FakeI3(tmp_path / "i3-2.sock")
+    xd.path = second.path                      # i3 restarted, property updated
+    c.command("nop two")
+    time.sleep(0.05)
+    assert second.commands == ["nop two"]
+    c.close()
+    second.close()
+
+
+def test_two_daemons_on_two_displays_resolve_different_sockets(tmp_path):
+    a = FakeXDisplay(str(tmp_path / "a.sock"))
+    b = FakeXDisplay(str(tmp_path / "b.sock"))
+    assert H.i3_socket_path(xdisp=a) != H.i3_socket_path(xdisp=b)
+
+
+# --------------------------------------------------------------------------
+# the load path must validate — not just --check (dotfiles-hwds.5)
+# --------------------------------------------------------------------------
+
+def write_table(tmp_path, body, name="t.py"):
+    f = tmp_path / name
+    f.write_text(f"import sys; sys.path.insert(0, {str(HERE)!r})\n"
+                 "from binds import Bind, Layer, Mod, run, enter_layer, exit_layer\n"
+                 + body)
+    return f
+
+
+def test_load_table_refuses_a_table_that_check_would_reject(tmp_path):
+    """us019 AC4 says the bind set is validated BEFORE it is loaded. Validation
+    lived only in --check, so a table with a duplicate chord loaded happily —
+    and post-T6 the escape-hatch restart takes exactly this path."""
+    bad = write_table(tmp_path,
+                      "BINDS = [Bind('Mod4+z', 'kill'), Bind('Mod4+z', 'nop')]\n"
+                      "LAYERS = {}\n")
+    with pytest.raises(H.TableInvalid) as ei:
+        H.load_table(str(bad))
+    assert "Mod4+z" in str(ei.value)
+
+
+def test_load_table_refuses_an_un_leavable_layer(tmp_path):
+    """The trap binds.py exists to catch: a layer with no exit keys. --check
+    refused it; the daemon loaded it."""
+    bad = write_table(tmp_path,
+                      "BINDS = [Bind('Mod4+o', enter_layer('trap'))]\n"
+                      "LAYERS = {'trap': Layer(binds=[Bind('h', 'focus left')],"
+                      " exit_keys=[])}\n")
+    with pytest.raises(H.TableInvalid) as ei:
+        H.load_table(str(bad))
+    assert "trap" in str(ei.value)
+
+
+def test_load_table_accepts_the_shipped_table():
+    assert H.load_table(None) is not None
+
+
+def test_load_table_reports_a_missing_binds_attribute_as_table_invalid(tmp_path):
+    """SIGHUP catches TableInvalid to keep the old table. This used to raise
+    SystemExit, which escaped the handler and KILLED the daemon."""
+    bad = write_table(tmp_path, "LAYERS = {}\n")
+    with pytest.raises(H.TableInvalid):
+        H.load_table(str(bad))
+
+
+def test_load_table_reports_a_missing_file_as_table_invalid(tmp_path):
+    with pytest.raises(H.TableInvalid):
+        H.load_table(str(tmp_path / "nope.py"))
+
+
+def test_load_table_reports_a_syntax_error_as_table_invalid(tmp_path):
+    bad = tmp_path / "broken.py"
+    bad.write_text("BINDS = [   # unterminated\n")
+    with pytest.raises(H.TableInvalid):
+        H.load_table(str(bad))
+
+
+def test_table_invalid_is_not_a_systemexit():
+    """SystemExit inherits BaseException, so `except Exception` does not catch
+    it — that is exactly how a bad reload killed the daemon."""
+    assert issubclass(H.TableInvalid, Exception)
+    assert not issubclass(H.TableInvalid, SystemExit)
+
+
+def test_reload_keeps_the_old_table_when_the_new_one_is_invalid(tmp_path):
+    """The promise the daemon logs. Exercised through the same helper the reload
+    path uses, so the two cannot drift."""
+    good = write_table(tmp_path, "BINDS = [Bind('Mod4+o', 'nop ok')]\n"
+                                 "LAYERS = {}\n", name="good.py")
+    table = H.load_table(str(good))
+    assert [b.chord for b in table.BINDS] == ["Mod4+o"]
+    bad = write_table(tmp_path, "BINDS = [Bind('Mod4+z', ''),]\n"
+                                "LAYERS = {}\n", name="bad.py")
+    try:
+        table = H.load_table(str(bad))
+        raise AssertionError("invalid table was accepted")
+    except H.TableInvalid:
+        pass
+    assert [b.chord for b in table.BINDS] == ["Mod4+o"], "old table was lost"
+
+
+def test_a_table_that_defines_dataclasses_loads(tmp_path):
+    """A real bind table is derived from binds.py and defines its own
+    dataclasses. Without registering the module in sys.modules before exec,
+    dataclasses resolves sys.modules[cls.__module__] to None and the import dies
+    with "'NoneType' object has no attribute '__dict__'" — so --binds was broken
+    for exactly the tables people would actually write."""
+    src = (HERE / "binds.py").read_text()
+    f = tmp_path / "derived.py"
+    f.write_text(src)
+    mod = H.load_table(str(f))
+    assert mod.BINDS and mod.LAYERS
+
+
+# --------------------------------------------------------------------------
+# composition wiring — each caught a mutant that passed everything else
+# --------------------------------------------------------------------------
+
+def test_engine_matches_the_mod_token_against_the_displays_modifier():
+    """M13: LayerEngine._index ignoring self.mod passed all 155 tests while
+    making the nav entry chord dead on :10. The per-display test injected mod=
+    directly; nothing checked the engine actually USES it."""
+    import layers as L                                   # noqa: PLC0415
+    binds = [B.Bind("$mod+o", B.enter_layer("nav"))]
+    layers = {"nav": B.Layer(binds=[B.Bind("h", "focus left")],
+                             exit_keys=["q"])}
+    rdp = L.LayerEngine(binds, layers, mod="Mod1")
+    rdp.handle(L.Event("press", "o", frozenset({"Mod1"})))
+    assert rdp.state["layer"] == "nav", "Alt+o did not enter nav where $mod is Alt"
+
+    rdp2 = L.LayerEngine(binds, layers, mod="Mod1")
+    rdp2.handle(L.Event("press", "o", frozenset({"Mod4"})))
+    assert rdp2.state["layer"] == "default", "Super+o entered nav where $mod is Alt"
+
+
+def test_daemon_resolves_the_display_mod_and_hands_it_to_the_grabs():
+    """M14: Daemon dropping mod= from GrabManager passed all 155 tests, so the
+    grab landed on Mod4 while the engine matched Mod1 — the chord grabbed on the
+    wrong modifier on the xrdp session."""
+
+    class XWithResource(FakeDisplay):
+        """An X-LIKE display: RESOURCE_MANAGER carrying the xrdp session's
+        i3wm.mod, and keysym_to_keycode taking an INTEGER keysym exactly as
+        python-xlib does — a fake that is easier to satisfy than X never
+        exercises the adapter under test."""
+
+        def __init__(self):
+            super().__init__(keymap={"o": 32})
+
+        def keysym_to_keycode(self, keysym):
+            from Xlib import XK                           # noqa: PLC0415
+            return 32 if keysym == XK.string_to_keysym("o") else 0
+
+        def intern_atom(self, name):
+            return 1
+
+        def screen(self):
+            outer = self
+
+            class Prop:
+                value = b"i3wm.mod:\tMod1\nXft.dpi:\t96\n"
+
+            class Root:
+                def get_full_property(self, atom, kind):
+                    return Prop()
+
+                def grab_key(self, code, mask, owner, pmode, kmode,
+                             onerror=None):
+                    outer.grabs.append((code, mask))
+
+                def ungrab_key(self, code, mask):
+                    outer.ungrabs.append((code, mask))
+
+            class Screen:
+                root = Root()
+
+            return Screen()
+
+    xd = XWithResource()
+    table = type("T", (), {"BINDS": [B.Bind("$mod+o", "nop x")], "LAYERS": {}})
+    pub = type("P", (), {"publish": lambda self, s: None,
+                         "close": lambda self: None,
+                         "poll": lambda self: None})()
+
+    class NullI3:
+        def command(self, c):
+            return True
+
+        def close(self):
+            pass
+
+    dae = H.Daemon(table, xd, pub, i3=NullI3(), display=":10")
+    assert dae.mod == "Mod1", "daemon did not read i3wm.mod from the display"
+    assert (32, H.MOD1) in xd.grabs, "grab did not land on the display's own $mod"
+    assert (32, H.MOD4) not in xd.grabs, "grabbed Super where $mod is Alt"
+
+
+def test_the_production_i3_resolver_pins_its_own_display(monkeypatch):
+    """The CLI fallback must not inherit the ambient DISPLAY: a :10 daemon
+    started from :0's session would otherwise resolve :0's socket whenever the
+    root property is unreadable — the hwds.6 defect by another route."""
+    monkeypatch.setenv("DISPLAY", ":0")
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen.update(kw.get("env", {}))
+
+        class R:
+            stdout = "/run/user/1000/i3/ipc-socket.X\n"
+        return R()
+
+    monkeypatch.setattr(H.subprocess, "run", fake_run)
+    H.i3_socket_path(display=":10", xdisp=FakeXDisplay(""))   # empty property
+    assert seen.get("DISPLAY") == ":10", \
+        f"fallback inherited the ambient display: {seen.get('DISPLAY')!r}"
+
+
+def test_the_daemons_own_resolver_pins_its_display(monkeypatch):
+    """Exercises the LAMBDA the Daemon actually builds, not the function it
+    wraps. Testing i3_socket_path directly left the wiring unguarded: dropping
+    `display=` from that lambda passed the whole suite while reintroducing
+    hwds.6 — a :10 daemon resolving :0's socket whenever the root property is
+    unreadable."""
+    monkeypatch.setenv("DISPLAY", ":0")            # the ambient, wrong one
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen.update(kw.get("env", {}))
+
+        class R:
+            stdout = "/run/user/1000/i3/ipc-socket.X\n"
+        return R()
+
+    monkeypatch.setattr(H.subprocess, "run", fake_run)
+
+    class XNoProperty(FakeDisplay):
+        """A display whose I3_SOCKET_PATH is absent, forcing the CLI fallback."""
+
+        def intern_atom(self, name):
+            return 1
+
+        def screen(self):
+            class Root:
+                def get_full_property(self, atom, kind):
+                    return None
+
+                def grab_key(self, *a, **kw):
+                    pass
+
+                def ungrab_key(self, *a, **kw):
+                    pass
+
+            class Screen:
+                root = Root()
+
+            return Screen()
+
+    table = type("T", (), {"BINDS": [], "LAYERS": {}})
+    pub = type("P", (), {"publish": lambda self, s: None,
+                         "close": lambda self: None,
+                         "poll": lambda self: None})()
+    dae = H.Daemon(table, XNoProperty(), pub, display=":10")
+    dae.i3._path_getter()                          # the wiring under test
+    assert seen.get("DISPLAY") == ":10", \
+        f"daemon resolver used the ambient display: {seen.get('DISPLAY')!r}"

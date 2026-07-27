@@ -49,7 +49,11 @@ need_runtime() {
 # than by a pidfile: a pidfile can go stale after a SIGKILL and then lie about a
 # daemon that is not there, which is the state the escape hatch exists for.
 daemon_pid() {
-    pgrep -f "hotkeyd\.py .*--display $DPY_BASE\$" 2>/dev/null | head -n 1
+    # Word-boundary match, NOT anchored to end of line: a daemon started by hand
+    # with flags after --display (--binds while testing a table) would otherwise
+    # be invisible to status and stop, and start would happily spawn a second
+    # one beside it.
+    pgrep -f "hotkeyd\.py .*--display $DPY_BASE( |\$)" 2>/dev/null | head -n 1
 }
 
 case "$VERB" in
@@ -64,8 +68,13 @@ case "$VERB" in
             die "already running on $DPY_BASE (pid $pid)" 3
         fi
         mkdir -p "$(dirname "$LOG")"
-        DISPLAY="$DPY_BASE" setsid "$DAEMON" --display "$DPY_BASE" \
-            >>"$LOG" 2>&1 &
+        # `env -u I3SOCK`: i3 exports its own socket into every process it
+        # execs, and both daemons are started from ONE session's exec_always, so
+        # the :10 daemon would inherit :0's socket. The daemon resolves the path
+        # itself from its own X connection (dotfiles-hwds.6) — this just removes
+        # the misleading value from the environment entirely.
+        env -u I3SOCK DISPLAY="$DPY_BASE" \
+            setsid "$DAEMON" --display "$DPY_BASE" >>"$LOG" 2>&1 &
         # Give it long enough to fail loudly (bad table, no X, lock held) rather
         # than reporting success for a process that died on startup.
         sleep 0.4
