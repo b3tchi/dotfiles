@@ -17,9 +17,10 @@ sections when status flips.
 
 ## spec
 
-- [[sp020|python-global-hotkey-layer]]
 
 ## ready
+
+- [[sp020|python-global-hotkey-layer]]
 
 
 
