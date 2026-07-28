@@ -74,6 +74,40 @@ LINK="$I3_CONFIG_D/zz-fallback-binds.conf"
 # socket the real way, from the root window of the DISPLAY it is handed.
 X11_UNIX="${HOTKEYD_X11_UNIX:-/tmp/.X11-unix}"
 
+# THE TEST-ONLY PROCESS FENCE (dotfiles-hwds.23). Unset — which is every
+# production path, and the guard in test-panic.sh asserts no shipped file sets
+# it — `scoped` is `cat` and this script behaves exactly as it did.
+#
+# Set, it is an allow-list of displays this invocation may touch. It exists
+# because the three overrides above fence only the FILES: HOME and
+# HOTKEYD_I3_CONFIG_D move the link, HOTKEYD_X11_UNIX moves the enumeration
+# `resume` reloads — and `target_displays` below reaches past all of them, by
+# design, into every hotkeyd.py on the machine. That is correct for recovery and
+# is NOT narrowed here: panic must stop every daemon or a later reload on
+# another display re-enters the contested state (the dotfiles-hwds.12
+# requirement-4 decision). It is wrong for a TEST, which then stops the caller's
+# live :0/:10 daemons — real since autostart was armed — and a sibling
+# worktree's besides (dotfiles-f2be).
+#
+# A FILTER, NOT A TARGET LIST. The enumeration still runs in full and still has
+# to DISCOVER each daemon by pgrep; the scope only decides which discoveries are
+# allowed through. So the suite's machine-wide cases stay real findings rather
+# than restatements of a list they handed in — a `HOTKEYD_TARGET_DISPLAYS` that
+# replaced the enumeration would make "panic stopped the daemon on the display
+# it was not called with" tautological.
+SCOPE="${HOTKEYD_PGREP_SCOPE:-}"
+
+# Filter a newline-separated display list on stdin. Identity when SCOPE is
+# unset, so production keeps a straight pipe through `cat`.
+scoped() {
+    if [ -z "$SCOPE" ]; then cat; return 0; fi
+    while read -r d; do
+        for s in $SCOPE; do
+            [ "$s" = "$d" ] && { printf '%s\n' "$d"; break; }
+        done
+    done
+}
+
 RUNTIME="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 # Which displays panic stopped, so resume restarts exactly those. Machine-wide
 # state for a machine-wide action; it lives in the runtime dir and is therefore
@@ -98,7 +132,7 @@ target_displays() {
         [ -n "$DPY_BASE" ] && printf '%s\n' "$DPY_BASE"
         pgrep -af 'hotkeyd\.py .*--display' 2>/dev/null \
             | sed -n 's/.*--display \(:[0-9][0-9]*\).*/\1/p'
-    } | sort -u
+    } | sort -u | scoped
 }
 
 # EVERY local X display, whether or not it ever ran a daemon — the blast radius
@@ -113,7 +147,7 @@ all_displays() {
         n="${s##*/X}"
         case "$n" in ''|*[!0-9]*) continue ;; esac
         printf ':%s\n' "$n"
-    done
+    done | scoped                        # no-op in production; see SCOPE above
 }
 
 # Best-effort per display: a display with no X server or no i3 is not an error
@@ -170,6 +204,12 @@ case "$VERB" in
         else
             targets="$DPY_BASE"
         fi
+        # Filtered as well, not merely inherited-clean. A state file written by
+        # an earlier, unscoped run — or a stale one left by another checkout in
+        # a shared runtime dir — would otherwise walk straight past the fence
+        # into `hotkeyd.sh start` on someone else's display. No-op in
+        # production, where SCOPE is unset.
+        targets="$(printf '%s\n' "$targets" | scoped)"
         [ -n "$targets" ] || die "no display: pass one, or set DISPLAY" 2
 
         # Unlink FIRST, then reload: i3 must have dropped the fallback's grabs

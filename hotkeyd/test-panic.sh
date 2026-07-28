@@ -52,6 +52,11 @@ probe_free_display() { # <start-number>
 cleanup() {
     pkill -f "hotkeyd\.py .*--display $XA" 2>/dev/null
     pkill -f "hotkeyd\.py .*--display $XB" 2>/dev/null
+    # The sentinel is ours — we started it, so we reap it. Per-display, never a
+    # bare `pkill -f hotkeyd.py`, which is the machine-wide reach this whole
+    # file exists to keep out.
+    pkill -f "hotkeyd\.py .*--display $XC" 2>/dev/null
+    [ -n "${FAKE_PID:-}" ] && kill "$FAKE_PID" 2>/dev/null
     for p in "${I3_PIDS[@]:-}"; do kill "$p" 2>/dev/null; done
     for p in "${XVFB_PIDS[@]:-}"; do kill "$p" 2>/dev/null; done
     rm -rf "$T"
@@ -64,6 +69,10 @@ fi
 
 XA="$(probe_free_display 81)"
 XB="$(probe_free_display "$(( ${XA#:} + 1 ))")"
+# XC is the OUT-OF-SCOPE display: a real X server and a real daemon this suite
+# is not entitled to touch, standing in for the caller's live :0/:10. See the
+# sentinel block below.
+XC="$(probe_free_display "$(( ${XB#:} + 1 ))")"
 trap cleanup EXIT
 
 # --- throwaway session -------------------------------------------------------
@@ -91,6 +100,27 @@ export HOTKEYD_X11_UNIX="$T/x11-unix"
 mkdir -p "$HOTKEYD_X11_UNIX"
 : > "$HOTKEYD_X11_UNIX/X${XA#:}"
 : > "$HOTKEYD_X11_UNIX/X${XB#:}"
+# $XC is deliberately absent from that directory AND from the scope below.
+
+# THE PROCESS HALF OF THE SANDBOX (dotfiles-hwds.23). Every override above
+# fences the FILES panic touches — the link, the fallback source, the display
+# enumeration `resume` reloads. None of them fences the PROCESSES it STOPS:
+# `target_displays` pgreps every `hotkeyd.py .*--display` on the box, which is
+# correct machine-wide recovery behaviour (the Task 10 / dotfiles-hwds.12
+# requirement-4 decision) and is therefore NOT narrowed in production — but it
+# reaches straight past HOME and X11_UNIX into the caller's live :0 and :10
+# daemons, and panic then runs `hotkeyd.sh stop` on each. With autostart armed
+# (a76e9a9) those daemons are real, so running this suite on the desktop ended
+# the user's own hotkeyd for the rest of the session. The same enumeration is
+# what makes two agent worktrees reap each other's daemons (dotfiles-f2be).
+#
+# HOTKEYD_PGREP_SCOPE is the allow-list of displays THIS RUN may touch. It is
+# read by hotkeyd-panic.sh and by nothing else; production never sets it, which
+# the guard near the end of this file asserts. It FILTERS the enumeration
+# rather than replacing it, so the machine-wide cases below (section 8: a daemon
+# on a display panic was not called with is still stopped) still have to
+# DISCOVER their target by pgrep and remain real findings.
+export HOTKEYD_PGREP_SCOPE="$XA $XB"
 
 printf 'bindsym Mod4+F10 workspace i3-owns-it\n' > "$HOTKEYD_FALLBACK_SRC"
 
@@ -158,7 +188,7 @@ include $HOTKEYD_I3_CONFIG_D/*.conf
 bindsym Mod4+Shift+r exec --no-startup-id $HERE/hotkeyd-panic.sh panic
 EOF
 
-for dpy in "$XA" "$XB"; do
+for dpy in "$XA" "$XB" "$XC"; do
     Xvfb "$dpy" -screen 0 640x480x24 >/dev/null 2>&1 &
     XVFB_PIDS+=($!)
 done
@@ -189,6 +219,36 @@ who_answers() {
     else                                   printf 'nobody\n'
     fi
 }
+
+# --- the OUT-OF-SCOPE SENTINEL (dotfiles-hwds.23) ----------------------------
+# A real hotkeyd daemon on a display this suite never declared. It stands in for
+# the user's live :0/:10 — and for a sibling worktree's daemons (dotfiles-f2be)
+# — and it is indistinguishable from them to `pgrep -af 'hotkeyd\.py
+# .*--display'`, which is the enumeration under test. It is absent from
+# HOTKEYD_PGREP_SCOPE and absent from HOTKEYD_X11_UNIX, so nothing in this file
+# is entitled to stop it or to reload it.
+#
+# It stays up for the WHOLE FILE, across every panic below, and the last section
+# asserts it is still up. That is the acceptance criterion of dotfiles-hwds.23
+# in miniature and it is testable without going near the real daemons: if this
+# survives, so does :0/:10.
+#
+# Started directly rather than through hotkeyd.sh, on its own XDG_RUNTIME_DIR:
+# it must not share a lock or a socket with the daemons the suite drives, and it
+# must not depend on the launcher this suite is simultaneously exercising.
+# HOTKEYD_I3SOCK points at nothing because there is no i3 on $XC.
+mkdir -p "$T/sentinel"
+env -u I3SOCK DISPLAY="$XC" XDG_RUNTIME_DIR="$T/sentinel" \
+    HOTKEYD_I3SOCK="$T/sentinel/no-i3.sock" \
+    setsid "$HERE/hotkeyd.py" --display "$XC" >"$T/sentinel.log" 2>&1 &
+for _t in 1 2 3 4 5 6 7 8 9 10; do
+    sleep 0.5
+    [ "$(daemons_on "$XC")" = 1 ] && break
+done
+echo "panic: an out-of-scope daemon (stands in for the live :0/:10)"
+[ "$(daemons_on "$XC")" = 1 ] \
+    && ok "a daemon is up on $XC, outside this suite's scope" \
+    || bad "setup: no sentinel daemon on $XC: $(tail -2 "$T/sentinel.log")"
 
 # --- 1: the daemon is ALIVE AND WRONG, holding the chord i3 wants ------------
 echo "panic: a daemon that is alive and holding the chord"
@@ -242,6 +302,24 @@ answer="$(who_answers)"
 [ "$answer" = i3 ] \
     && ok "I3 now answers Mod4+F10 — ownership actually transferred" \
     || bad "expected i3 to answer after panic, got: $answer"
+
+# --- 2b: and it reached NOTHING outside the scope (dotfiles-hwds.23) ---------
+# The first panic in this file has now run. $XC held a daemon throughout it and
+# is not in HOTKEYD_PGREP_SCOPE, so panic must not have seen it. Failing here
+# means the suite stops daemons it does not own — on the desktop that set is the
+# user's live :0 and :10.
+[ "$(daemons_on "$XC")" = 1 ] \
+    && ok "panic left the out-of-scope daemon on $XC running" \
+    || bad "panic stopped the daemon on $XC — on a real box that is the live \
+:0/:10 session losing hotkeyd mid-flight"
+# The state file drives resume's restart loop, so an out-of-scope display
+# recorded here is also a resume that tries to start a daemon that was never
+# ours — the exact dotfiles-f2be symptom, reported as a failure of THIS suite.
+if grep -q "^$XC\$" "$XDG_RUNTIME_DIR/hotkeyd-panic.displays" 2>/dev/null; then
+    bad "panic recorded $XC in its state file — resume will try to restart it"
+else
+    ok "and did not record $XC in the state file resume replays"
+fi
 
 # --- 3: no contested window --------------------------------------------------
 # i3 could only have taken that passive grab because the daemon had already
@@ -502,17 +580,22 @@ else
     [ "$answer" = i3 ] && ok "and $XB's i3 holds the fallback's grab" \
         || bad "setup: expected i3 on $XB to hold the chord, got: $answer"
 
-    # resume's EXIT CODE is deliberately not asserted here, the same choice
-    # section 8 makes above. `target_displays` pgreps every hotkeyd.py on the
-    # box — correct for a machine-wide recovery tool, but it means a daemon
-    # belonging to another checkout of this repo (a second agent running this
-    # very suite) lands in the state file, and resume then reports a real
-    # failure to restart a daemon that was never ours. Reproduced: a run whose
-    # XA/XB were :81/:82 tried to start on :87 and exited 1. The reload set is
-    # what this case is about and is asserted directly below; rc is reported in
-    # the failure text so a genuine breakage is still legible.
+    # resume's EXIT CODE IS asserted again (dotfiles-f2be, closed by
+    # dotfiles-hwds.23). It used to be deliberately unasserted: `target_displays`
+    # pgreps every hotkeyd.py on the box — correct for a machine-wide recovery
+    # tool — so a daemon belonging to another checkout of this repo (a second
+    # agent running this very suite) landed in the state file, and resume then
+    # reported a real failure to restart a daemon that was never ours.
+    # Reproduced: a run whose XA/XB were :81/:82 tried to start on :87 and
+    # exited 1. HOTKEYD_PGREP_SCOPE removes the cause rather than the assertion
+    # — the state file can now only ever name $XA/$XB — so a non-zero resume
+    # here is a genuine failure once more, and the sentinel on $XC proves the
+    # foreign-daemon case is handled rather than merely absent today.
     out="$(panic resume 2>&1)"; rc=$?
     sleep 1
+    [ "$rc" -eq 0 ] \
+        && ok "resume exits 0 — no foreign daemon can enter this suite's state" \
+        || bad "resume exited $rc: $out"
     if i3_config_b | grep -q 'workspace i3-owns-it'; then
         bad "$XB's loaded table still carries the fallback after resume (rc=$rc) \
 — the link is gone, its grabs are not, and the start latch went with it"
@@ -530,6 +613,66 @@ is fallback-free"
     DISPLAY="$XA" "$HERE/hotkeyd.sh" stop "$XA" >/dev/null 2>&1
     DISPLAY="$XB" "$HERE/hotkeyd.sh" stop "$XB" >/dev/null 2>&1
 fi
+
+# --- 8c: UNSCOPED, the enumeration is still machine-wide (dotfiles-hwds.23) ---
+# The other half of the fix, and the half that must never regress. Every case
+# above runs with HOTKEYD_PGREP_SCOPE set, so every case above exercises the
+# FILTERED path — and none of them would notice `scoped` dropping displays when
+# the variable is ABSENT, which is every production invocation. That failure
+# mode is a panic that quietly stops nothing: the direction dotfiles-hwds.12
+# forbids, because a daemon panic misses keeps holding grabs the fallback is
+# about to ask i3 for. "It is only a filter" has to be a finding, not a comment.
+#
+# Exercising it honestly means running panic UNSCOPED — which on a real box
+# reaches the caller's live :0/:10, i.e. the defect itself. So `pgrep` is stubbed
+# on PATH for this ONE invocation: the shipped script runs unmodified and with
+# no scope, but the only daemon it can discover is a `sleep` this section
+# started, on a display that does not exist. The real pgrep is never called, so
+# nothing real is reachable — the sandbox is the stub, not a narrowing of the
+# code under test.
+echo "panic: with no scope set, the enumeration is still machine-wide"
+FAKE_DPY=":9998"
+# Short-lived on purpose. It only has to outlive one panic (a second or two),
+# and it is killed twice over — at the end of this section and again in
+# cleanup — but a stand-in process that survives BOTH is a leak on a box that
+# already collects orphaned Xvfbs, so it also expires on its own.
+sleep 45 &
+FAKE_PID=$!
+mkdir -p "$T/stub"
+cat > "$T/stub/pgrep" <<EOF
+#!/bin/sh
+# hotkeyd-panic.sh asks with -af and no display; hotkeyd.sh asks per display.
+# Anything else is "no daemon", so no other display can be reached from here.
+case "\$*" in
+    *-af*)         printf '$FAKE_PID python3 hotkeyd.py --display $FAKE_DPY\n' ;;
+    *"$FAKE_DPY"*) printf '$FAKE_PID\n' ;;
+    *)             exit 1 ;;
+esac
+EOF
+chmod +x "$T/stub/pgrep"
+out="$(env -u HOTKEYD_PGREP_SCOPE PATH="$T/stub:$PATH" DISPLAY="$XA" \
+       "$HERE/hotkeyd-panic.sh" panic 2>&1)"; rc=$?
+sleep 0.5
+[ "$rc" -eq 0 ] || bad "unscoped panic exited $rc: $out"
+if kill -0 "$FAKE_PID" 2>/dev/null; then
+    bad "an unscoped panic did NOT stop the daemon on $FAKE_DPY — the scope \
+filter leaks into production and panic now misses daemons it must stop"
+else
+    ok "an unscoped panic still stops a daemon on a display it was not called \
+with — the machine-wide guarantee is intact"
+fi
+if grep -q "^$FAKE_DPY\$" "$XDG_RUNTIME_DIR/hotkeyd-panic.displays" 2>/dev/null
+then
+    ok "and records it, so resume brings that display back too"
+else
+    bad "$FAKE_DPY reached the stop loop but not the state file resume replays"
+fi
+# Cleaned up by hand rather than with `resume`: resume would run `hotkeyd.sh
+# start $FAKE_DPY` against a display that does not exist and report a failure
+# this case is not about.
+rm -f "$LINK" "$XDG_RUNTIME_DIR/hotkeyd-panic.displays"
+DISPLAY="$XA" i3-msg reload >/dev/null 2>&1
+kill "$FAKE_PID" 2>/dev/null
 
 # --- 9: degraded environments ------------------------------------------------
 echo "panic: degraded environments"
@@ -558,6 +701,32 @@ out="$(DISPLAY="$XA" "$HERE/hotkeyd-panic.sh" wat 2>&1)"; rc=$?
 DISPLAY="$XA" "$HERE/hotkeyd-panic.sh" status >/dev/null 2>&1 \
     && bad "status reports PANICKED with no link" \
     || ok "status exits non-zero when not panicked"
+
+# --- 10: the sentinel survived the WHOLE suite (dotfiles-hwds.23) ------------
+# THE ACCEPTANCE CRITERION. Every panic in this file — sections 2, 4, 7, 7b, 8,
+# 8b, 9 — ran with a real daemon alive on $XC. If the process sandbox holds, it
+# is still alive; if it does not, the suite has been stopping daemons it never
+# started, and on the desktop that set is the user's live :0 and :10. Asserted
+# at the END rather than only after the first panic, because it takes one
+# unscoped enumeration anywhere in the file to break the guarantee.
+echo "panic: nothing outside the scope was touched by any of the above"
+[ "$(daemons_on "$XC")" = 1 ] \
+    && ok "the out-of-scope daemon on $XC is still running after the full suite" \
+    || bad "the daemon on $XC did not survive the suite — running this on the \
+desktop stops the live :0/:10 daemons"
+
+# The override only sandboxes anything if PRODUCTION never sets it. A session
+# entry point, an i3 exec, or the launcher exporting it would silently narrow
+# the machine-wide guarantee panic exists to provide — the one fix direction
+# dotfiles-hwds.12 and dotfiles-f2be both rule out — and would do it invisibly,
+# because every case in this file would keep passing.
+scope_hits="$(grep -rl 'HOTKEYD_PGREP_SCOPE' "$HERE" "$HERE/../i3" 2>/dev/null \
+    | grep -Ev '/(hotkeyd-panic|test-panic|test-hotkeyd|test-launcher)\.sh$' \
+    || true)"
+[ -z "$scope_hits" ] \
+    && ok "no shipped file sets HOTKEYD_PGREP_SCOPE — it is test-only" \
+    || bad "HOTKEYD_PGREP_SCOPE is set outside the suite, which narrows panic \
+in production: $scope_hits"
 
 echo
 printf 'panic: %d passed, %d failed\n' "$PASS" "$FAIL"
