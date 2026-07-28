@@ -5,6 +5,7 @@
 # usage: qs-clip.sh [toggle]      open/close the picker on the active session
 #        qs-clip.sh list          print the history as "<id>\t<preview>" lines
 #        qs-clip.sh set <id>      put store entry <id> on the clipboard
+#        qs-clip.sh active-window print the title of the session's active window
 #
 # The picker itself is quickshell/config/ClipHistory.qml, hosted inside the
 # session's normal quickshell instance (config/shell.qml wires it in). This
@@ -246,6 +247,61 @@ cmd_set() {
   exec sh "$CLIP_SET" "$1" "${DISPLAY%.*}"
 }
 
+# ---------------------------------------------------------- active-window ---
+#
+# The TITLE of the window the window manager currently considers active
+# (`_NET_ACTIVE_WINDOW`), on this process's own session. Read-only, two X
+# round trips, no synthetic input, nothing mutated.
+#
+# WHY THIS EXISTS (dotfiles-hwds.31). The picker closes itself when the
+# session takes focus elsewhere, and Qt's window-deactivated signal is NOT
+# that signal. Any X client holding a PASSIVE grab on a key — hotkeyd's
+# per-chord XI2 grabs ([[ft011]]), i3's own binds, xbindkeys — puts the
+# server into an implicit ACTIVE grab for as long as that key is HELD. X
+# then sends `FocusOut(mode=NotifyGrab)` to whatever holds the input focus,
+# and Qt reports that window deactivated ~100 ms later — even though the
+# window never lost the input focus and no other window gained it. Hiding on
+# that signal alone is what made `$mod+v` and `$mod+n` dismiss themselves a
+# few seconds after opening: on the xrdp session `$mod` IS Mod1, hotkeyd's
+# nav layer grabs `Alt_L`/`Alt_R`, and so merely HOLDING `$mod` — what you do
+# to press any `$mod` chord — started a multi-second active grab.
+#
+# `_NET_ACTIVE_WINDOW` is the discriminator because a grab does not touch it
+# and a real focus change does. TIME cannot be the discriminator: the
+# deactivation lasts exactly as long as the key is held (measured: a 2.5 s
+# hold produced a 2.43 s deactivation, then the window re-activated by
+# itself), so no debounce can separate the two.
+#
+# EXIT CODE IS THE CONTRACT, and the failure direction is deliberate:
+#   0  the answer is known — the title is on stdout (possibly empty, which
+#      means an active window that has no title, i.e. still not the picker)
+#   1  the answer is NOT known (no DISPLAY, no xdotool, no window manager
+#      publishing _NET_ACTIVE_WINDOW, no active window at all)
+# The caller must hide on 0-and-different ONLY. A picker that outlives its
+# welcome is one Escape away; a picker that dismisses itself is unusable, and
+# that is the bug this verb exists to end — so "cannot tell" must never be
+# allowed to read as "someone else has focus".
+#
+# THE RAW `$DISPLAY` HERE IS DELIBERATE — do not "normalize" it. Everywhere
+# else in this script a display string is a SESSION KEY being compared against
+# another process's, so the screen suffix has to be stripped for `:10.0` and
+# `:10` to compare equal (store_dir does; cmd_toggle's failure to is its own
+# bug, dotfiles-sxg1). Here it is not a key and nothing is compared: it is
+# handed straight to xdotool as a connection string, and `:10.0` and `:10`
+# open the SAME X server. Stripping would be a no-op at best and would lose a
+# legitimate multi-screen target at worst.
+cmd_active_window() {
+  [ -n "${DISPLAY:-}" ] || return 1
+  command -v xdotool >/dev/null 2>&1 || return 1
+  _id="$(xdotool getactivewindow 2>/dev/null)" || return 1
+  [ -n "$_id" ] || return 1
+  # A window can vanish between the two calls; that is "cannot tell", not
+  # "somebody else", so it takes the 1 branch with the rest of them.
+  _name="$(xdotool getwindowname "$_id" 2>/dev/null)" || return 1
+  printf '%s\n' "$_name"
+  return 0
+}
+
 # ----------------------------------------------------------------- toggle ---
 
 # The session a pid belongs to, as a "VAR=value" key: X11 DISPLAY when the
@@ -328,8 +384,9 @@ cmd_toggle() {
 # ------------------------------------------------------------------- main ---
 
 case "${1:-toggle}" in
-  list)   cmd_list ;;
-  set)    shift; cmd_set "$@" ;;
-  toggle) cmd_toggle ;;
-  *)      die "usage: $PROG [toggle|list|set <id>]" ;;
+  list)          cmd_list ;;
+  set)           shift; cmd_set "$@" ;;
+  toggle)        cmd_toggle ;;
+  active-window) cmd_active_window ;;
+  *)             die "usage: $PROG [toggle|list|set <id>|active-window]" ;;
 esac

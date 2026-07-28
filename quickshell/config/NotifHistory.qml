@@ -65,7 +65,10 @@
 // not this file):
 //   QS_NOTIF_SH   path to qs-notif.sh (default ~/.dotfiles/quickshell/qs-notif.sh)
 //
-// Test: quickshell/test-notif-history.sh (PHASE 2, headless Xvfb + xdotool).
+// Test: quickshell/test-notif-history.sh (PHASE 2, headless Xvfb + xdotool),
+//       and quickshell/test-overlay-grab.sh for the focus-loss-close half
+//       (dotfiles-hwds.31) — that one needs a REAL i3, because the probe
+//       below only arms once the window has actually held focus.
 import Quickshell
 import Quickshell.Io
 import QtQuick
@@ -232,6 +235,53 @@ Scope {
         function close(): void { root.hide() }
     }
 
+    // ── Is the browser really out of focus, or is a grab active? ──
+    //
+    // ClipHistory's arrangement verbatim (dotfiles-hwds.31). Armed by the
+    // window going inactive, disarmed by it coming back. `triggeredOnStart`
+    // fires the first probe immediately so a REAL focus change closes within
+    // one process spawn; the repeat exists only for the grab case, where the
+    // window stays inactive for as long as the key is held.
+    Timer {
+        id: blurProbe
+        interval: 150
+        repeat: true
+        running: false
+        triggeredOnStart: true
+        onTriggered: {
+            if (activeWinProc.running) return
+            root._activeTitle = ""
+            activeWinProc.running = true
+        }
+    }
+
+    // First line of `qs-notif.sh active-window`, held between the read and
+    // the exit (the exit code is what says whether the line means anything).
+    property string _activeTitle: ""
+
+    Process {
+        id: activeWinProc
+        running: false
+        command: ["sh", root.notifSh, "active-window"]
+        stdout: SplitParser {
+            onRead: data => { if (root._activeTitle === "") root._activeTitle = data }
+        }
+        onExited: (exitCode, exitStatus) => {
+            var seen = root._activeTitle
+            root._activeTitle = ""
+            // Non-zero is "cannot tell" (no WM, no xdotool, the active window
+            // vanished mid-read) — never hide on that. Stop rather than
+            // re-ask, so a display that can never answer costs ONE probe per
+            // deactivation instead of an unbounded spawn loop.
+            if (exitCode !== 0) { blurProbe.stop(); return }
+            if (picker.active || !picker.visible) return
+            // Still the WM's active window, so the deactivation was a grab.
+            if (seen === picker.title) return
+            blurProbe.stop()
+            root.hide()
+        }
+    }
+
     // ── Window ──
 
     Window {
@@ -259,12 +309,28 @@ Scope {
         // picker has actually held focus (the ClipHistory everActive
         // pattern), so the not-yet-focused window that exists for a frame
         // between map and focus is not immediately hidden.
+        //
+        // A Qt DEACTIVATION IS NOT A FOCUS CHANGE (dotfiles-hwds.31) — the
+        // ClipHistory arrangement, verbatim, for the same reason. An X client
+        // holding a passive grab on a HELD key (hotkeyd's per-chord XI2
+        // grabs, [[ft011]]) makes X send FocusOut(mode=NotifyGrab) to the
+        // focused window; Qt reports it deactivated even though it kept the
+        // input focus, then re-activates it when the key comes up. So going
+        // inactive only ARMS the check below; the window manager is asked who
+        // it actually considers active before anything is hidden.
         property bool everActive: false
         onActiveChanged: {
-            if (active) everActive = true
-            else if (everActive && visible) root.hide()
+            if (active) {
+                everActive = true
+                blurProbe.stop()
+            } else if (everActive && visible) {
+                blurProbe.restart()
+            }
         }
-        onVisibleChanged: if (!visible) everActive = false
+        onVisibleChanged: if (!visible) {
+            everActive = false
+            blurProbe.stop()
+        }
 
         Column {
             anchors.fill: parent
