@@ -335,8 +335,23 @@ class LayerEngine:
             return []                   # modifiers never act on their own
 
         if ev.kind == "release":
-            self._down.pop(ev.key, None)
-            actions = self._match(ev, on_release=True)
+            was_down = self._down.pop(ev.key, None) is not None
+            # ORPHAN RELEASE (dotfiles-hwds.24). xrdp delivers every character on
+            # :10 as release-press-release, the leading release arriving before
+            # any press — measured on a live RDP client, all three inside 0.2 ms.
+            # An on_release bind matching that one fires twice per keypress.
+            #
+            # Guarded by what the engine SAW rather than by a time window: the
+            # burst shares one X timestamp, so a coalescer would have to guess a
+            # threshold, and the old pre-XI2 one was removed for good reasons
+            # (dotfiles-hwds.13). `_down` already tracks every non-modifier press
+            # for auto-repeat suppression, and a release for a key this engine
+            # never saw go down is not this engine's release — which also covers
+            # the daemon starting while a key is already held.
+            #
+            # Press binds are untouched, and so are exit_keys: those match on the
+            # press path, so a layer stays leavable no matter what releases do.
+            actions = self._match(ev, on_release=True) if was_down else []
         else:
             if self._is_repeat(ev.key, now):
                 # Publish before returning: expiry above may have changed the

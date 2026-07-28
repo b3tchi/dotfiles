@@ -165,6 +165,46 @@ def test_on_release_bind_fires_on_release_and_not_on_press():
     assert e.handle(release("d", ["Mod4", "Shift"])) == ["nop confirm"]
 
 
+def test_an_orphan_release_does_not_fire_an_on_release_bind():
+    """dotfiles-hwds.24. Measured on the live :10 xrdp session with a human at a
+    real RDP client: every character arrives as a THREE-event burst with a
+    spurious LEADING release —
+
+        release a   <- no press has happened yet
+        press   a
+        release a
+
+    all three inside 0.2 ms. An on_release bind matching the first one fires
+    twice per keypress. The engine already knows which keys it has seen pressed
+    (`_down`, kept for auto-repeat suppression), so the fix is to require that
+    knowledge rather than to time-window the burst: a release for a key this
+    engine never saw go down is not this engine's release."""
+    binds = [B.Bind("Mod4+Print", "nop shot", on_release=True)]
+    e, _, _ = engine(binds=binds, layers={})
+    assert e.handle(release("Print", ["Mod4"])) == []
+
+
+def test_the_xrdp_burst_fires_an_on_release_bind_exactly_once():
+    binds = [B.Bind("Mod4+Print", "nop shot", on_release=True)]
+    e, _, _ = engine(binds=binds, layers={})
+    fired = []
+    fired += e.handle(release("Print", ["Mod4"]))   # the spurious leading one
+    fired += e.handle(press("Print", ["Mod4"]))
+    fired += e.handle(release("Print", ["Mod4"]))   # the real one
+    assert fired == ["nop shot"]
+
+
+def test_suppressing_orphan_releases_does_not_break_a_normal_press_release():
+    binds = [B.Bind("Mod4+Print", "nop shot", on_release=True)]
+    e, _, _ = engine(binds=binds, layers={})
+    e.handle(press("Print", ["Mod4"]))
+    assert e.handle(release("Print", ["Mod4"])) == ["nop shot"]
+    # ...and the NEXT press-release pair fires again: the guard is per key-down,
+    # not a once-per-session latch.
+    e.handle(press("Print", ["Mod4"]))
+    assert e.handle(release("Print", ["Mod4"])) == ["nop shot"]
+
+
 def test_press_and_release_binds_on_one_chord_each_fire_on_their_own_event():
     binds = [B.Bind("Mod4+d", "nop press"),
              B.Bind("Mod4+d", "nop release", on_release=True)]
