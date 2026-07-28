@@ -289,14 +289,23 @@ else
     mkdir -p "$C10/.i3/config.d"
     ln -sfn "$HERE/.." "$C10/.dotfiles"
     ln -sfn "$HERE/../i3/config.d/native.conf" "$C10/.i3/config.d/native.conf"
-    # $mod+o is bound in i3/config.common — restating it is the exact mistake
-    # a fallback built from "the set i3 owns today" would make.
-    printf 'bindsym $mod+o mode "nav"\n' > "$C10/.i3/config.d/zz-dup.conf"
+    # Restating a bind i3 still owns is the exact mistake a fallback built from
+    # "the set i3 owns today" would make. The seed must be a chord i3 ACTUALLY
+    # owns right now, or this guard silently stops proving anything.
+    #
+    # It was $mod+o until the nav cutover (dotfiles-hwds.16) moved that chord
+    # out of i3 entirely, at which point the seed stopped being a duplicate and
+    # the guard fired correctly. Derived from config.common rather than
+    # hardcoded so the next cutover cannot quietly defang it the same way.
+    DUP_CHORD="$(grep -oE '^bindsym \$mod\+[A-Za-z0-9]+ ' "$HERE/../i3/config.common" \
+        | head -n1 | awk '{print $2}')"
+    [ -n "$DUP_CHORD" ] || bad "stage 10: found no i3-owned chord to seed with"
+    printf 'bindsym %s nop stage10-dup\n' "$DUP_CHORD" > "$C10/.i3/config.d/zz-dup.conf"
     out="$(HOME="$C10" i3 -C -c "$HERE/../i3/config" 2>&1)"
     if [ $? -ne 0 ] || printf '%s' "$out" | grep -qi 'duplicate'; then
         ok "a fallback restating a live i3 bind IS caught by this stage"
     else
-        bad "i3 -C accepted a duplicate keybinding — stage 10 proves nothing"
+        bad "i3 -C accepted a duplicate ($DUP_CHORD) — stage 10 proves nothing"
     fi
 fi
 
