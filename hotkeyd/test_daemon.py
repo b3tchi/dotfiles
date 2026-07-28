@@ -1143,8 +1143,13 @@ class FakeXServer(FakeDisplay):
         # is absent here resolves to keycode 0 and lands in grabs.problems, so
         # an incomplete fake keymap reads as a grab failure in tests that are
         # asking about something else entirely. `d` and `p` arrived with the
-        # entry-point cutover (dotfiles-hwds.33).
+        # entry-point cutover (dotfiles-hwds.33); the digit row with the
+        # workspace-group cutover (dotfiles-hwds.34), keycodes 10-17 as on a
+        # standard PC layout.
         super().__init__(keymap=keymap or {"o": 32, "h": 43, "q": 24,
+                                           "1": 10, "2": 11, "3": 12,
+                                           "4": 13, "5": 14, "6": 15,
+                                           "7": 16, "8": 17,
                                            "Escape": 9, "Return": 36,
                                            "Left": 113, "Right": 114,
                                            "Up": 111, "Down": 116,

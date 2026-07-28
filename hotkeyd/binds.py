@@ -411,7 +411,6 @@ def load(binds: Iterable[Bind] = None,
 # the table
 # --------------------------------------------------------------------------
 
-# Used by the workspace group when it migrates (not yet — see BINDS below).
 WS_SWITCH = "~/.local/bin/ws-switch.nu"
 NAV_STEP = "5 px or 5 ppt"
 
@@ -437,6 +436,29 @@ def _nav_binds(kind: str) -> list[Bind]:
                 out.append(Bind(k, f"move {dirn}"))
             else:
                 out.append(Bind(k, f"resize {resize} {NAV_STEP}"))
+    return out
+
+
+def _workspace_binds() -> list[Bind]:
+    """The workspace group: switch / move-container / move-and-follow, indexed
+    by DISPLAY POSITION rather than by i3 workspace name.
+
+    One loop rather than three literal rows because the three rows differ only
+    in the `ws-switch.nu` verb, and three hand-written blocks of eight is how
+    `$mod+Ctrl+5` ends up saying `5 move` while `$mod+Shift+5` says `6 follow`.
+    Same argument as `_nav_binds` above.
+
+    The index is a position, not a name: `ws-switch.nu` resolves Nth-in-bar
+    against the live workspace list, which is what makes named project
+    workspaces reachable from a number row at all. That indirection is the
+    reason these are `run()` and not i3 `workspace N` commands, and it is why
+    the group keeps a nushell hop on its dispatch path — the same hop i3 had.
+    """
+    out = []
+    for n in range(1, 9):
+        out.append(Bind(f"$mod+{n}", run(f"{WS_SWITCH} {n}")))
+        out.append(Bind(f"$mod+Ctrl+{n}", run(f"{WS_SWITCH} {n} move")))
+        out.append(Bind(f"$mod+Shift+{n}", run(f"{WS_SWITCH} {n} follow")))
     return out
 
 
@@ -525,4 +547,32 @@ BINDS: list[Bind] = [
     # on_release bind there could fire twice per press. The remaining
     # --release bind in the system, $mod+Print, is i3-owned and unaffected.
     # Re-adding any on_release bind here reopens that, unmeasured.
+
+    # ---- THE WORKSPACE GROUP (dotfiles-hwds.34) ---------------------------
+    # 26 chords: the number row in three rows (switch / move / move+follow),
+    # plus the two `workspace next|prev` arrows that share the group's
+    # `$mod+Ctrl` shape.
+    #
+    # GRAB-OWNERSHIP CLOSURE, checked under both `$mod` resolutions: nothing
+    # else in the i3 tree binds a digit or `$mod+Ctrl+Left|Right` under either
+    # Mod4 or Mod1. `$mod+0` is NOT in the group — it opens i3's
+    # `mode "$mode_system"`, so migrating it means porting a whole i3 mode to a
+    # layer, not moving a bind. It stays with i3 and the closure stops at 8.
+    #
+    # `$mod+Ctrl+Left|Right` are i3 commands, not `run()`: `workspace
+    # next|prev` needs no index resolution, so routing them through
+    # `ws-switch.nu` would add a nushell start to a bind that never needed one.
+    # They join the group because they collide with its `$mod+Ctrl` shape and
+    # a cutover is scoped by grab closure, not by action type.
+    #
+    # THE `$mod+Shift+<digit>` ROW IS THE RISK ROW ON :10. xrdp synthesises
+    # Shift around every character it sends, which is exactly why the nav layer
+    # uses Ctrl and not Shift as its move modifier. The difference here is that
+    # these are PASSIVE GRABS on (keycode, mask) rather than modifier-state
+    # reads — the same mechanism i3 has been serving this row with on :10 all
+    # along — so parity is expected, not assumed. It is the first thing to
+    # check on the live :10 session after the cutover.
+    *_workspace_binds(),
+    Bind("$mod+Ctrl+Right", "workspace next"),
+    Bind("$mod+Ctrl+Left", "workspace prev"),
 ]

@@ -78,14 +78,37 @@ def test_arrow_keys_do_the_same_thing_as_their_letter(arrow, letter):
     # so there is nothing to check here beyond the nav layers.
 
 
-def test_workspace_group_has_not_been_migrated_yet():
-    """Guards sp020's anti-pattern from the other side: the workspace chords are
-    still live in i3/config.common, so they must NOT be in this table. When they
-    migrate, the commit that adds them here is the commit that deletes them
-    there — and this test is what should be rewritten then, deliberately."""
-    ws = [b.chord for b in B.BINDS if isinstance(b.action, B.Run)
-          and "ws-switch" in b.action.cmd]
-    assert ws == [], f"workspace group migrated without deleting it from i3: {ws}"
+@pytest.mark.parametrize("n", range(1, 9))
+def test_every_workspace_index_has_all_three_verbs_on_the_right_chord(n):
+    """The workspace group carries the same index across three modifier shapes,
+    so the failure it is exposed to is a SILENT OFF-BY-ONE: `$mod+Ctrl+5`
+    running `5 move` while `$mod+Shift+5` runs `6 follow`. Nothing else in the
+    system would notice — both are valid commands and both move a container
+    somewhere.
+
+    This is the test that replaced `test_workspace_group_has_not_been_migrated_yet`
+    at the cutover (dotfiles-hwds.34). That one asserted the group was still in
+    i3 and was written to be rewritten here; the anti-pattern it stood in for is
+    covered generally, and derived rather than by roster, by
+    `test_no_chord_is_owned_by_both_i3_and_the_daemon` below.
+    """
+    cmds = {b.chord: b.action.cmd for b in B.BINDS
+            if isinstance(b.action, B.Run) and "ws-switch" in b.action.cmd}
+    assert cmds[f"$mod+{n}"].endswith(f" {n}")
+    assert cmds[f"$mod+Ctrl+{n}"].endswith(f" {n} move")
+    assert cmds[f"$mod+Shift+{n}"].endswith(f" {n} follow")
+
+
+def test_the_workspace_group_stops_at_8_because_mod_0_is_an_i3_mode():
+    """`$mod+0` opens i3's `mode "$mode_system"` (lock / exit / suspend /
+    reboot / shutdown). Extending the loop to `range(1, 11)` on the reasonable-
+    looking grounds that a number row has ten keys would grab it away from i3
+    and bind it to a tenth workspace that does not exist — losing the only
+    keyboard route to lock and shutdown, which is a bad thing to discover by
+    pressing it."""
+    ws_keys = {B.parse_chord(b.chord)[1] for b in B.BINDS
+               if isinstance(b.action, B.Run) and "ws-switch" in b.action.cmd}
+    assert ws_keys == set("12345678")
 
 
 @pytest.mark.parametrize("a,b", [
@@ -653,8 +676,16 @@ def test_the_i3_config_parser_actually_sees_binds():
     # stay there as cutovers move binds OUT of i3. It read `> 80` against 81
     # binds — one migration of any size away from failing for the right reason
     # in the wrong place, which is what the entry-point cutover
-    # (dotfiles-hwds.33, 81 -> 77) then did.
-    assert len(owned) > 50, f"only parsed {len(owned)} top-level i3 binds"
+    # (dotfiles-hwds.33, 81 -> 77) then did. Lowered to `> 50` at that point,
+    # which the very next cutover (the 26-chord workspace group,
+    # dotfiles-hwds.34, 77 -> 51) then came within ONE bind of tripping.
+    #
+    # So: a floor set relative to today's total is a tripwire on the next
+    # migration, not on the parser. Pinned at 10 instead — deep below anything a
+    # cutover will plausibly leave behind, and still an order of magnitude above
+    # the zero-or-two a broken parser returns. The two named sentinels above are
+    # the real assertions; this line only rules out silent emptiness.
+    assert len(owned) > 10, f"only parsed {len(owned)} top-level i3 binds"
 
 
 def test_nav_left_i3_and_lives_only_in_the_daemon():
