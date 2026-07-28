@@ -710,6 +710,42 @@ BINDS: list[Bind] = [
     # global spelling at all.
     *_directional_binds(),
 
+    # ---- THE SCREENSHOT GROUP (dotfiles-hwds.39) --------------------------
+    # Four chords: the three `i3-scrot` captures and the quickshell region
+    # picker. Closure checked under both `$mod` resolutions — nothing else in
+    # the i3 tree binds `Print` under any mask, and `$mod+Shift+s` is a
+    # different chord from the layout group's `$mod+s` (a passive grab matches
+    # its mask exactly, plus the lock variants).
+    #
+    # `Print` IS THE FIRST GLOBAL BIND WITH NO MODIFIER AT ALL. Its base mask is
+    # 0, and the four lock variants are grabbed off that — the same path a
+    # modifier chord takes, so NumLock does not hide it.
+    #
+    # THE TWO on_release BINDS. This table deliberately had none after
+    # `$mod+Shift+d` left (see the entry-point note above), because
+    # dotfiles-hwds.24 measured xrdp delivering every character on `:10` as
+    # release-press-release — a leading release with no press before it, which
+    # would fire an on_release bind twice per keypress. That is closed by
+    # construction now: the engine only matches a release for a key it saw go
+    # down (`layers.handle`), so the orphan release is dropped. Migrating these
+    # two is what made that guard worth building rather than a hypothetical.
+    #
+    # `--release` is kept rather than quietly converted to a press bind: these
+    # capture the screen, and firing while the user still has the key down is a
+    # different behaviour, not a tidier one.
+    #
+    # THE i3 MODES STAY WITH i3. `mode "screenshot"` / `"screenshot-drag"` are
+    # not a keybind group — qs-screenshot.sh and qs-region.py enter them over
+    # i3-msg so the bar paints a hint strip, and their only bindsyms are
+    # dead-overlay Escape/q fallbacks. Consequence worth stating: while either
+    # mode is up the engine refuses layer entry (`_i3_owns_the_keyboard`), so
+    # nav cannot be entered mid-capture. That is the correct arbitration — the
+    # region selector holds a pointer+keyboard grab and owns the keyboard.
+    Bind("Print", run("i3-scrot")),
+    Bind("$mod+Print", run("i3-scrot -w"), on_release=True),
+    Bind("$mod+Shift+Print", run("i3-scrot -s"), on_release=True),
+    Bind("$mod+Shift+s", run("~/.dotfiles/quickshell/qs-screenshot.sh")),
+
     # ---- THE SYSTEM MODE (dotfiles-hwds.38) -------------------------------
     # One chord, because the seven session actions behind it are a LAYER (see
     # LAYERS["system"] above) rather than seven global binds. i3 expressed the

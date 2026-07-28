@@ -90,9 +90,10 @@ bindsym $mod+Ctrl+t exec --no-startup-id picom -b
 # here — and nothing on this line depends on an overlay var, which would be
 # invisible across the include boundary anyway.
 bindsym $mod+v exec --no-startup-id ~/.dotfiles/quickshell/qs-clip.sh toggle
-bindsym Print exec --no-startup-id i3-scrot
-bindsym $mod+Print --release exec --no-startup-id i3-scrot -w
-bindsym $mod+Shift+Print --release exec --no-startup-id i3-scrot -s
+# The screenshot group (Print, $mod+Print, $mod+Shift+Print and the region
+# capture below) moved to hotkeyd/binds.py — sp020, dotfiles-hwds.39. Its i3
+# spelling lives in `config.d/zz-fallback-binds.conf`, which
+# `hotkeyd-panic.sh panic` links in when the daemon has to be stopped.
 # freed for `move left` (vim hjkl navigation)
 # bindsym $mod+Shift+h exec xdg-open /usr/share/doc/manjaro/i3_help.pdf
 # region screenshot — enters a "screenshot" i3 mode (shown in the bar like
@@ -143,7 +144,12 @@ mode "screenshot-drag" {
     bindsym Escape mode default
     bindsym q mode default
 }
-bindsym $mod+Shift+s exec --no-startup-id ~/.dotfiles/quickshell/qs-screenshot.sh
+# $mod+Shift+s (the region capture this mode paints hints for) is hotkeyd's —
+# see the screenshot-group note above. The two MODES stay here: they are not
+# keybind groups. qs-screenshot.sh / qs-region.py enter them over i3-msg purely
+# so Bar.qml paints its hint strip, and the Escape/q inside them are
+# dead-overlay fallbacks. Migrating those would mean the daemon holding grabs on
+# bare Escape and q for the length of a capture — the dotfiles-ux1 trap.
 bindsym $mod+Ctrl+x --release exec --no-startup-id xkill
 
 # focus_follows_mouse no

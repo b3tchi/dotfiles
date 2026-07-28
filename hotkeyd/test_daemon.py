@@ -1221,7 +1221,8 @@ class FakeXServer(FakeDisplay):
         # entry-point cutover (dotfiles-hwds.33); the digit row with the
         # workspace-group cutover (dotfiles-hwds.34), keycodes 10-17 as on a
         # standard PC layout; the layout group's letters and `minus` with
-        # dotfiles-hwds.36.
+        # dotfiles-hwds.36; `Print` with the screenshot group
+        # (dotfiles-hwds.39), keycode 107 as on a standard PC layout.
         super().__init__(keymap=keymap or {"o": 32, "h": 43, "q": 24,
                                            "1": 10, "2": 11, "3": 12,
                                            "4": 13, "5": 14, "6": 15,
@@ -1233,7 +1234,7 @@ class FakeXServer(FakeDisplay):
                                            "Left": 113, "Right": 114,
                                            "Up": 111, "Down": 116,
                                            "j": 44, "k": 45, "l": 46,
-                                           "d": 40, "p": 33,
+                                           "d": 40, "p": 33, "Print": 107,
                                            "Super_L": 133, "Control_L": 37,
                                            "Control_R": 105, "Alt_L": 64,
                                            "Alt_R": 108, "Meta_L": 205,
