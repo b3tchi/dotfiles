@@ -213,8 +213,14 @@ case "$VERB" in
         [ -n "$targets" ] || die "no display: pass one, or set DISPLAY" 2
 
         # Unlink FIRST, then reload: i3 must have dropped the fallback's grabs
-        # before a daemon is allowed to ask for them, or the start races i3 for
-        # chords it still owns and loses them to BadAccess.
+        # before a daemon is allowed to ask for them. NOT because the daemon
+        # would be refused if it asked first — dotfiles-f224 measured core and
+        # XI2 passive grabs into separate conflict domains, so the daemon's XI2
+        # request is granted regardless and simply wins delivery. Being granted
+        # is the problem: i3 would still hold the same chord, with no error
+        # raised on either side, which is the double ownership Task 10 exists to
+        # eliminate. Ordering is what keeps ownership single, because nothing in
+        # the protocol does it any more.
         rm -f "$LINK"
         rm -f "$STATE"
 

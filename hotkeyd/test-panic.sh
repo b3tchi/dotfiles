@@ -263,28 +263,110 @@ answer="$(who_answers)"
     || bad "expected the daemon to answer the chord, got: $answer"
 
 # --- 1b: the ordering is load-bearing, demonstrated ---------------------------
-# Reloading i3 with the fallback in place while the daemon is STILL ALIVE is
-# the contested state panic's stop-first ordering avoids: i3 asks for a chord
-# another client already holds, gets BadAccess, and silently does not own it.
-# Asserting that this DOES go wrong is what makes "no contested window" a
-# finding rather than a hope — without it, panic could reload before stopping
-# and every other case here would still pass.
+# Reloading i3 with the fallback in place while the daemon is STILL ALIVE is the
+# contested state panic's stop-first ordering exists to avoid. This case BUILDS
+# that state on purpose, which is what makes "no contested window" in section 3
+# a finding rather than a hope: an assertion that no second grab holder remains
+# says nothing unless a second grab holder is demonstrably reachable.
+#
+# WHAT THIS USED TO ASSERT, AND WHY IT WAS WRONG (dotfiles-1wti). The original
+# premise was "X refuses a second client the same chord", so a reload behind a
+# live daemon would earn BadAccess and the daemon would keep answering. That is
+# false and the assertion failed on a clean tree from the day it was written.
+# dotfiles-f224 measured why: the server keeps core and XI2 passive grabs in
+# SEPARATE conflict domains (`GrabMatchesSecond` compares grabtype) and the most
+# recently added grab takes delivery. The daemon grabs XI2 (e149aa76); i3 grabs
+# core on reload. So the reload DOES take the chord — from a client that still
+# holds one — and neither side is told anything.
+#
+# That makes the hazard WORSE, not absent. The BadAccess the old premise relied
+# on was the mid-cutover safety net: double ownership used to be self-limiting.
+# It is not any more, so panic's ordering is the only thing standing between a
+# recovery and two clients owning the same chord.
+#
+# Two owners cannot be read in a single keystroke — only the winner answers — so
+# the state is established in three steps against ONE unchanging daemon process:
+#   1. with the fallback linked, i3 reloads and TAKES the chord, while the daemon
+#      is still running and was never asked to release anything;
+#   2. i3's half is then dropped ALONE (unlink + reload; the daemon is not
+#      signalled, stopped or restarted) and the chord comes straight BACK to the
+#      daemon;
+#   3. the daemon's pid is identical before and after, so nothing re-took that
+#      grab in between.
+# A daemon whose grab had been revoked at step 1 answers "nobody" at step 2. It
+# answering "daemon" is only possible if the grab was live THROUGHOUT step 1 —
+# i.e. both clients held Mod4+F10 at once, silently. That is the contested
+# window, reproduced.
+#
+# WHAT THIS CASE DOES AND DOES NOT PROVE. It proves the contested state is
+# REACHABLE and observable, which is what makes section 3's "no second grab
+# holder" a finding: without a case that MAKES two owners, an assertion that none
+# remain could be passing because two owners are impossible. It does NOT detect
+# an inverted panic — the old comment here claimed it did, and that was never
+# true even under the old premise, because both orderings leave the same end
+# state. The ordering is asserted directly in section 2, on panic's own trace.
 echo "panic: the stop-before-reload ordering is load-bearing"
+pid_before="$(pgrep -f "hotkeyd\.py .*--display $XA" | head -1)"
 ln -sfn "$HOTKEYD_FALLBACK_SRC" "$LINK"
 DISPLAY="$XA" i3-msg reload >/dev/null 2>&1
 sleep 0.5
 answer="$(who_answers)"
-[ "$answer" = daemon ] \
-    && ok "reloading i3 while the daemon lives does NOT transfer the chord" \
-    || bad "expected the live daemon to keep the chord, got: $answer"
+[ "$answer" = i3 ] \
+    && ok "i3's reload takes the chord from a live daemon — separate grab \
+domains, no refusal (f224)" \
+    || bad "expected i3 to take the chord on reload, got: $answer"
+[ "$(daemons_on "$XA")" = 1 ] \
+    && ok "and the daemon is still up — nothing asked it to release anything" \
+    || bad "the daemon died during the reload; the contested state was never \
+built and the step below would prove nothing"
+
+# Drop i3's half only. The daemon is untouched between the two who_answers calls.
 rm -f "$LINK"
 DISPLAY="$XA" i3-msg reload >/dev/null 2>&1
 sleep 0.5
+pid_after="$(pgrep -f "hotkeyd\.py .*--display $XA" | head -1)"
+answer="$(who_answers)"
+[ "$answer" = daemon ] \
+    && ok "removing i3's bind hands the chord straight back — the daemon's grab \
+was live the whole time, so the reload left TWO owners" \
+    || bad "expected the daemon to answer once i3 dropped the bind, got: \
+$answer — its grab did not survive, and no contested window was demonstrated"
+[ -n "$pid_before" ] && [ "$pid_before" = "$pid_after" ] \
+    && ok "one unchanging daemon pid ($pid_before) across the window — the grab \
+was never re-taken, so the round trip really is grab SURVIVAL" \
+    || bad "daemon pid moved ($pid_before -> $pid_after): a restart re-grabs, so \
+the hand-back above proves nothing"
 
 # --- 2: panic transfers ownership --------------------------------------------
 echo "panic: ownership transfer"
 out="$(panic panic 2>&1)"; rc=$?
 [ "$rc" -eq 0 ] || bad "panic exited $rc: $out"
+
+# THE ORDERING ITSELF. 1b established what an inverted panic would PRODUCE; this
+# is the assertion that panic does not produce it, and it is deliberately read
+# from panic's own trace rather than from the session afterwards.
+#
+# That is a measured limitation, not a shortcut. With the stop loop moved after
+# `reload_i3` the END STATE is indistinguishable: the daemon is still gone, i3
+# still answers, and every WM-effect case in this file still passes — measured at
+# 14 passed / 0 failed across sections 1-3 with the two loops swapped. The
+# contested window an inverted panic opens is transient by construction, so the
+# order in which panic reports its two machine-wide steps is the only trace of it
+# that outlives the run. Asserted on the ORDER of two lines, never on their
+# wording carrying a behavioural claim: each line is emitted by the step it
+# names, so "stopped" preceding "reloaded" is the step order.
+stop_at="$(printf '%s\n' "$out" | grep -n "^hotkeyd: stopped on $XA\$" \
+    | head -1 | cut -d: -f1)"
+reload_at="$(printf '%s\n' "$out" | grep -n "^hotkeyd-panic: reloaded i3 on $XA\$" \
+    | head -1 | cut -d: -f1)"
+if [ -n "$stop_at" ] && [ -n "$reload_at" ] && [ "$stop_at" -lt "$reload_at" ]; then
+    ok "panic stopped the daemon BEFORE reloading i3 — no contested window was \
+opened in the first place"
+else
+    bad "panic's stop/reload order is inverted or unreported (stop=$stop_at \
+reload=$reload_at); the reload would hand i3 a chord a live daemon still \
+holds — 1b's state, created by the recovery itself: $out"
+fi
 sleep 1
 [ "$(daemons_on "$XA")" = 0 ] && ok "panic stopped the daemon on $XA" \
     || bad "daemon survived panic on $XA"
@@ -322,10 +404,17 @@ else
 fi
 
 # --- 3: no contested window --------------------------------------------------
-# i3 could only have taken that passive grab because the daemon had already
-# released it — X refuses a second client the same chord. Combined with 1b
-# (where the live daemon kept it), i3 answering is proof of the ordering, and
-# the daemon being gone is proof no second owner remains.
+# "i3 answers" is NOT by itself evidence that the daemon let go. 1b measured
+# exactly that: under separate core/XI2 grab domains (dotfiles-f224) i3 answers a
+# reload whether or not a daemon still holds the chord, and there is no
+# BadAccess left anywhere to notice the overlap.
+#
+# What rules a second owner out is the PROCESS. Passive grabs die with the
+# client that took them, so a daemon count of zero is the one reading that admits
+# no second holder — nothing else in this file can distinguish "one owner" from
+# "two owners, i3 grabbed last". Read against 1b, where the count was one and the
+# overlap was real and reproduced, this is a finding rather than a hope: the same
+# suite reaches both states and tells them apart.
 [ "$(daemons_on "$XA")" = 0 ] \
     && ok "no second grab holder is left anywhere on $XA" \
     || bad "a daemon survived panic and contends with the fallback"
