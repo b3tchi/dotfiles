@@ -208,61 +208,6 @@ Scope {
         }
     }
 
-    // ── Is the picker really out of focus, or is a grab active? ──
-    //
-    // Armed by the window going inactive (see picker.onActiveChanged) and
-    // disarmed by it coming back. `triggeredOnStart` makes the first probe
-    // fire immediately, so a REAL focus change closes the picker within one
-    // process spawn — the repeat only exists for the grab case, where the
-    // window stays inactive for as long as the key is held and must be
-    // re-examined until either it re-activates or the session genuinely
-    // moves on underneath the grab.
-    Timer {
-        id: blurProbe
-        interval: 150
-        repeat: true
-        running: false
-        triggeredOnStart: true
-        onTriggered: {
-            if (activeWinProc.running) return
-            root._activeTitle = ""
-            activeWinProc.running = true
-        }
-    }
-
-    // First line of `qs-clip.sh active-window`, held between the read and the
-    // exit (the exit code is what says whether the line means anything).
-    property string _activeTitle: ""
-
-    Process {
-        id: activeWinProc
-        running: false
-        command: ["sh", root.clipSh, "active-window"]
-        stdout: SplitParser {
-            onRead: data => { if (root._activeTitle === "") root._activeTitle = data }
-        }
-        onExited: (exitCode, exitStatus) => {
-            var seen = root._activeTitle
-            root._activeTitle = ""
-            // Non-zero is "cannot tell" — no window manager, no xdotool, the
-            // active window vanished mid-read. Never hide on that: a picker
-            // that lingers costs one Escape, a picker that dismisses itself
-            // is the bug (dotfiles-hwds.31). Stop rather than re-ask, so a
-            // display that can never answer costs ONE probe per deactivation
-            // instead of an unbounded spawn loop; the next deactivation
-            // re-arms it.
-            if (exitCode !== 0) { blurProbe.stop(); return }
-            // Re-activated (the grab ended) or already gone while the probe
-            // was in flight: nothing to decide.
-            if (picker.active || !picker.visible) return
-            // Still the active window as far as the WM is concerned, so the
-            // deactivation was a grab, not the user moving on.
-            if (seen === picker.title) return
-            blurProbe.stop()
-            root.hide()
-        }
-    }
-
     // ── Actions ──
 
     function show() {
@@ -336,35 +281,12 @@ Scope {
         // Close when the session takes focus elsewhere — but only once the
         // picker has actually held focus, so the not-yet-focused window that
         // exists for a frame between map and focus is not immediately hidden.
-        //
-        // A Qt DEACTIVATION IS NOT A FOCUS CHANGE (dotfiles-hwds.31). Any X
-        // client holding a passive grab on a key — hotkeyd's per-chord XI2
-        // grabs ([[ft011]]), i3's own binds, xbindkeys — puts the server into
-        // an implicit ACTIVE grab for as long as that key is HELD, and X then
-        // sends FocusOut(mode=NotifyGrab) to the focused window. Qt turns that
-        // into `active === false` about 100 ms later even though this window
-        // never lost the input focus, and re-activates it by itself the
-        // instant the key comes back up. Hiding straight off `active` is what
-        // made the picker dismiss itself seconds after opening.
-        //
-        // So `active === false` only ARMS the check; blurProbe/activeWinProc
-        // below ask the window manager who it thinks is active, and the hide
-        // happens only if the answer is somebody else. See qs-clip.sh's
-        // `active-window` for why that is the discriminator and why no
-        // timeout could be one.
         property bool everActive: false
         onActiveChanged: {
-            if (active) {
-                everActive = true
-                blurProbe.stop()
-            } else if (everActive && visible) {
-                blurProbe.restart()
-            }
+            if (active) everActive = true
+            else if (everActive && visible) root.hide()
         }
-        onVisibleChanged: if (!visible) {
-            everActive = false
-            blurProbe.stop()
-        }
+        onVisibleChanged: if (!visible) everActive = false
 
         Column {
             anchors.fill: parent
