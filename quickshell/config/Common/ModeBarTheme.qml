@@ -104,6 +104,18 @@ Singleton {
         if (mode === "nav") return "nav"
         if (mode === "nav-move") return "nav-move"       // synthetic (see hints)
         if (mode === "nav-resize") return "nav-resize"   // synthetic
+        // The system surface reaches this function under TWO names, and both
+        // have to keep working:
+        //   "system"  — the daemon's layer name, published on the state socket
+        //               since the cutover (sp020 / dotfiles-hwds.38).
+        //   "(l)ock, (e)xit, ..." — i3's mode name, which is the whole label
+        //               string. Still live: `hotkeyd-panic.sh panic` hands the
+        //               block back to i3 verbatim, and the mode event is what
+        //               the bar sees then.
+        // Dropping the substring arm would blank the hints in exactly the
+        // situation panic exists for. Matching on indexOf rather than equality
+        // is sp018 AC4's edge case.
+        if (mode === "system") return "system"
         if (mode.indexOf("(l)ock") !== -1) return "system"
         return ""
     }

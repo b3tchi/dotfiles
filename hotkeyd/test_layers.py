@@ -1186,3 +1186,89 @@ def test_held_is_exposed_so_the_idle_path_can_skip_the_x_round_trip():
     e.handle(press("o", ["Mod4"]))
     e.handle(press("Control_L"))
     assert e.held == frozenset({"Ctrl"})
+
+
+# --------------------------------------------------------------------------
+# ONE-SHOT layers (sp020 / dotfiles-hwds.38)
+# --------------------------------------------------------------------------
+# i3 spelled this as `, mode "default"` appended to EVERY bind in the block.
+# That is the layer being one-shot, not a per-bind choice, so it is declared
+# once on the Layer — a per-bind flag is a per-bind opportunity to forget it,
+# and forgetting it on the system layer leaves the keyboard in a state where a
+# bare `r` reboots the machine.
+
+def _oneshot_layers():
+    return {"os": B.Layer(binds=[B.Bind("a", B.run("echo a")),
+                                 B.Bind("b", "i3-cmd-b")],
+                          exit_keys=["q", "Escape"],
+                          one_shot=True),
+            "sticky": B.Layer(binds=[B.Bind("a", B.run("echo a"))],
+                              exit_keys=["q"])}
+
+
+def _oneshot_binds():
+    return [B.Bind("$mod+F1", B.enter_layer("os")),
+            B.Bind("$mod+F2", B.enter_layer("sticky"))]
+
+
+def oneshot_engine(**kw):
+    return engine(binds=_oneshot_binds(), layers=_oneshot_layers(), **kw)
+
+
+def test_a_one_shot_layer_exits_after_a_bind_fires():
+    e, _, _ = oneshot_engine()
+    e.handle(press("F1", ["Mod4"]))
+    assert e.state["layer"] == "os"
+    e.handle(press("a"))
+    assert e.state["layer"] == "default", \
+        "a one-shot layer must return to default after ONE bind"
+
+
+def test_a_one_shot_layer_still_dispatches_the_action_it_exits_on():
+    """The exit must not eat the action. Returning to default INSTEAD of running
+    the command would be a mode that silently does nothing."""
+    e, _, _ = oneshot_engine()
+    e.handle(press("F1", ["Mod4"]))
+    out = e.handle(press("b"))
+    assert out == ["i3-cmd-b"], out
+    assert e.state["layer"] == "default"
+
+
+def test_a_normal_layer_still_persists_after_a_bind_fires():
+    """The negative control: one-shot must be opt-in. nav would be unusable if
+    every layer exited after one motion."""
+    e, _, _ = oneshot_engine()
+    e.handle(press("F2", ["Mod4"]))
+    e.handle(press("a"))
+    assert e.state["layer"] == "sticky"
+
+
+def test_a_one_shot_layer_exit_publishes_exactly_one_line():
+    """Contract from dotfiles-hwds.2: one published line per state change. The
+    action and the exit happen in one event, so this must not cost two."""
+    e, pub, _ = oneshot_engine()
+    e.handle(press("F1", ["Mod4"]))
+    pub.lines.clear()
+    e.handle(press("a"))
+    assert pub.lines == [{"layer": "default", "mod": None}], pub.lines
+
+
+def test_a_key_that_matches_nothing_does_not_leave_a_one_shot_layer():
+    """Only a FIRED bind is one shot. A stray key that matches no bind is
+    swallowed by the layer, exactly as in a persistent one — otherwise a typo
+    silently drops you out of the mode you thought you were in."""
+    e, _, _ = oneshot_engine()
+    e.handle(press("F1", ["Mod4"]))
+    e.handle(press("z"))
+    assert e.state["layer"] == "os"
+
+
+def test_the_one_shot_exit_is_logged_as_a_transition():
+    e, _, lines = logged_engine(binds=_oneshot_binds(),
+                                layers=_oneshot_layers())
+    e.handle(xev("press", "F1", ["Mod4"], keycode=67, raw_state=0x40))
+    lines.clear()
+    e.handle(xev("press", "a", keycode=38, raw_state=0x0))
+    t = transitions(lines)
+    assert len(t) == 1, lines
+    assert "layer=os->default" in t[0] and "trigger=press:a" in t[0], t[0]

@@ -157,6 +157,14 @@ ShellRoot {
     //      indexOf("(l)ock"), NOT equality (an equality mutant fails here) ----
     emit("system-long-name-resolves", j(ModeBarTheme.hintsFor(sys)))
 
+    // ---- resolve: the DAEMON's layer name for the same surface. Since the
+    //      cutover (sp020 / dotfiles-hwds.38) hotkeyd owns \$mod+0 and
+    //      publishes layer "system" on the state socket, so the bar sees this
+    //      short name in normal operation and the long one only while
+    //      panicked. Both arms have to resolve, and dropping either blanks
+    //      the hints in one of the two states. ----
+    emit("system-layer-name-resolves", j(ModeBarTheme.hintsFor("system")))
+
     // ---- unknown mode -> fallback row [{key:"", label:<raw>}] ----
     emit("unknown-mode-fallback", j(ModeBarTheme.hintsFor("somefuture")))
 
@@ -227,6 +235,14 @@ assert_case "hints-system-verbatim" \
 scenario "resolve — full \$mode_system string routes to system via indexOf (AC4)"
 # An equality-match mutant returns the fallback row for the long name instead.
 assert_case "system-long-name-resolves" \
+  '[{"text":"lock","key":"l"},{"text":"exit","key":"e"},{"text":"switch-user","key":"u"},{"text":"suspend","key":"s"},{"text":"hibernate","key":"h"},{"text":"reboot","key":"r"},{"text":"poweroff","key":"p"},{"text":"quit","key":"q"}]'
+
+scenario "resolve — the daemon's short layer name 'system' routes there too (hwds.38)"
+# The cutover made this the name the bar sees in NORMAL operation; the long
+# string above is now the panicked-only path. Before the daemon owned $mod+0
+# this returned the unknown-mode fallback row [{"text":"system","key":""}] —
+# a strip with a pill and no key hints, which looks fine at a glance.
+assert_case "system-layer-name-resolves" \
   '[{"text":"lock","key":"l"},{"text":"exit","key":"e"},{"text":"switch-user","key":"u"},{"text":"suspend","key":"s"},{"text":"hibernate","key":"h"},{"text":"reboot","key":"r"},{"text":"poweroff","key":"p"},{"text":"quit","key":"q"}]'
 
 scenario "hintsFor — unknown + empty modes fall back verbatim (AC4)"

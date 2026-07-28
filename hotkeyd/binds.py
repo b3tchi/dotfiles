@@ -226,6 +226,17 @@ class Layer:
     binds: list[Bind] = field(default_factory=list)
     mods: dict[str, Mod] = field(default_factory=dict)
     exit_keys: list[str] = field(default_factory=list)
+    # Return to the default layer as soon as ANY bind here fires — a menu you
+    # answer once, rather than a mode you stand in. i3 spelled this by
+    # appending `, mode "default"` to every single bind in the block, which is
+    # the LAYER being one-shot rather than a per-bind choice; declared per bind
+    # it would be a per-bind opportunity to forget, and the layer this exists
+    # for is the one where forgetting leaves a bare `r` on `reboot`.
+    #
+    # Only a bind that actually FIRES ends the layer. A key matching nothing is
+    # swallowed exactly as in a persistent layer, so a typo does not silently
+    # drop you out of the mode you believe you are in.
+    one_shot: bool = False
 
 
 # --------------------------------------------------------------------------
@@ -504,6 +515,44 @@ LAYERS: dict[str, Layer] = {
         # the keysym regardless of held modifiers.
         exit_keys=["q", "Escape", "Return"],
     ),
+
+    # Session actions (was i3 `mode "$mode_system"`, dotfiles-hwds.38). Entered
+    # by `$mod+0`; one key, one action, back to default.
+    #
+    # ONE-SHOT because i3's block appended `, mode "default"` to every bind. A
+    # persistent version of THIS layer would leave the keyboard in a state
+    # where a bare `r` reboots the machine and a bare `p` powers it off.
+    #
+    # Verbatim from i3, including two things worth naming rather than quietly
+    # improving mid-cutover:
+    #   - `p` is shutdown, but the mode's own label promised `(Shift+s)hutdown`
+    #     and no Shift+s bind ever existed. The label has been wrong, not the
+    #     binding. Preserved as-is; the hint strip that shows it is the bar's,
+    #     and correcting the two together is its own change.
+    #   - every action is a `run()` of the system's `i3exit` script (Manjaro
+    #     ships it at /usr/bin/i3exit), not an i3 command. i3 dispatched these
+    #     through `exec` too, so nothing about them was ever WM-specific.
+    #
+    # BLAST RADIUS, stated because it is worse than any other layer's. Layer
+    # entry needs a matched `$mod+0`, and dotfiles-ukyj is an OPEN, UNEXPLAINED
+    # report of the daemon entering `nav` on :10 from an event nothing physical
+    # produced. The same mechanism aimed at this layer puts the next keystroke
+    # on a bare `r`/`p`. That exposure is not NEW — i3's mode had the identical
+    # shape and the identical bare keys — but it moves here with the binds, and
+    # ukyj's severity should be read in that light.
+    "system": Layer(
+        binds=[
+            Bind("l", run("i3exit lock")),
+            Bind("e", run("i3exit logout")),
+            Bind("u", run("i3exit switch_user")),
+            Bind("s", run("i3exit suspend")),
+            Bind("h", run("i3exit hibernate")),
+            Bind("r", run("i3exit reboot")),
+            Bind("p", run("i3exit shutdown")),
+        ],
+        exit_keys=["q", "Escape", "Return"],
+        one_shot=True,
+    ),
 }
 
 BINDS: list[Bind] = [
@@ -660,4 +709,13 @@ BINDS: list[Bind] = [
     # ergonomic point, and it also carries the resize sublayer that has no
     # global spelling at all.
     *_directional_binds(),
+
+    # ---- THE SYSTEM MODE (dotfiles-hwds.38) -------------------------------
+    # One chord, because the seven session actions behind it are a LAYER (see
+    # LAYERS["system"] above) rather than seven global binds. i3 expressed the
+    # same shape as `mode "$mode_system"`.
+    #
+    # `$mod+0` is why the workspace group stops at 8: the number row's tenth
+    # key has never been a workspace.
+    Bind("$mod+0", enter_layer("system")),
 ]

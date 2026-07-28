@@ -291,23 +291,29 @@ for_window [urgent=latest] focus
 # exit i3 (logs you out of your X session)
 bindsym $mod+Shift+e exec "i3-nagbar -t warning -m 'You pressed the exit shortcut. Do you really want to exit i3? This will end your X session.' -b 'Yes, exit i3' 'i3-msg exit'"
 
-# Set shut down, restart and locking features
-bindsym $mod+0 mode "$mode_system"
-set $mode_system (l)ock, (e)xit, switch_(u)ser, (s)uspend, (h)ibernate, (r)eboot, (Shift+s)hutdown
-mode "$mode_system" {
-    bindsym l exec --no-startup-id i3exit lock, mode "default"
-    bindsym s exec --no-startup-id i3exit suspend, mode "default"
-    bindsym u exec --no-startup-id i3exit switch_user, mode "default"
-    bindsym e exec --no-startup-id i3exit logout, mode "default"
-    bindsym h exec --no-startup-id i3exit hibernate, mode "default"
-    bindsym r exec --no-startup-id i3exit reboot, mode "default"
-    bindsym p exec --no-startup-id i3exit shutdown, mode "default"
-
-    # exit system mode: "Enter" or "Escape"
-    bindsym Return mode "default"
-    bindsym Escape mode "default"
-    bindsym q mode "default"
-}
+# THE SYSTEM MODE LEFT i3 (sp020 / dotfiles-hwds.38).
+#
+# $mod+0 and the whole `mode "$mode_system"` block — lock, logout, switch
+# user, suspend, hibernate, reboot, shutdown — are `hotkeyd/binds.py`'s now,
+# as a ONE-SHOT layer. i3 expressed one-shot by appending `, mode "default"`
+# to every bind in the block; the daemon declares it once on the layer, so it
+# cannot be forgotten on the bind where forgetting leaves a bare `r` on
+# reboot.
+#
+# The `set $mode_system ...` line went with it. It was the mode's NAME, which
+# is also the string the bar matched on to draw the hint strip — see the
+# fallback file, which keeps both together because an i3 variable does not
+# cross a file boundary.
+#
+# The label was already wrong before the move and is preserved wrong on the
+# i3 side: it promises `(Shift+s)hutdown`, but no Shift+s bind ever existed
+# and `p` is shutdown. Fixing the text is its own change, not a rider on a
+# cutover.
+#
+# The i3 spelling of the whole thing lives in
+# `config.d/zz-fallback-binds.conf` so `hotkeyd-panic.sh panic` gives back the
+# ability to lock and shut down when the daemon is dead or wrong. That
+# fallback matters more here than for any other group.
 # Rename workspace (relocated to $mod+Shift+o; $mod+Shift+n is now free —
 # the notification-history picker moved to the unshifted $mod+n above).
 bindsym $mod+Shift+o exec i3-input -f "xft:Iosevka" -F 'name workspace to "%s"' -P 'Workspace name: '

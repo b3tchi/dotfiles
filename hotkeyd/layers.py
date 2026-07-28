@@ -431,6 +431,14 @@ class LayerEngine:
         for b in table:
             if (b.chord == ev.key and b.on_release == on_release
                     and device_matches(b, ev)):
+                # A one-shot layer ends on the bind that fired, expressed as an
+                # ExitLayer APPENDED to the action rather than a `self._layer =`
+                # here. `_run` then does both in order — the command still
+                # dispatches, and the single `_publish` after it sees the final
+                # state, so the "one line per change" contract costs one line
+                # for an event that both acts and leaves.
+                if layer.one_shot:
+                    return [b.action, B.ExitLayer()]
                 return [b.action]
         return []
 
