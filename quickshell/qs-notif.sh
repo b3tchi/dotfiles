@@ -6,6 +6,7 @@
 # usage: qs-notif.sh [toggle]            open/close the browser on the active session
 #        qs-notif.sh list                print history as "<id>\t<preview>" lines
 #        qs-notif.sh dismiss <id|latest> ask the daemon to drop one entry
+#        qs-notif.sh active-window      print the session's active window title
 #
 # The browser itself is quickshell/config/NotifHistory.qml (task 6), hosted
 # inside the MAIN quickshell instance (config/shell.qml wires it in) beside
@@ -225,6 +226,28 @@ cmd_dismiss() {
   return 0
 }
 
+# ---------------------------------------------------------- active-window ---
+#
+# VERBATIM qs-clip.sh's `active-window` -- see its header for the full
+# rationale (dotfiles-hwds.31: an X PASSIVE grab held on a key makes Qt
+# report the focused window deactivated even though it never lost the input
+# focus, so `_NET_ACTIVE_WINDOW`, which a grab does not touch, is what tells
+# a grab blip apart from the session really moving on).
+#
+# Exit code is the contract: 0 = known (title on stdout), 1 = NOT known. The
+# caller hides on 0-and-different only; "cannot tell" must never read as
+# "somebody else has focus", because a browser that dismisses itself is
+# unusable while one that lingers is a single Escape away.
+cmd_active_window() {
+  [ -n "${DISPLAY:-}" ] || return 1
+  command -v xdotool >/dev/null 2>&1 || return 1
+  _id="$(xdotool getactivewindow 2>/dev/null)" || return 1
+  [ -n "$_id" ] || return 1
+  _name="$(xdotool getwindowname "$_id" 2>/dev/null)" || return 1
+  printf '%s\n' "$_name"
+  return 0
+}
+
 # ----------------------------------------------------------------- toggle ---
 #
 # VERBATIM qs-clip.sh's mechanism -- see its header for the full rationale.
@@ -304,8 +327,9 @@ cmd_toggle() {
 # ------------------------------------------------------------------- main ---
 
 case "${1:-toggle}" in
-  list)    cmd_list ;;
-  dismiss) shift; cmd_dismiss "$@" ;;
-  toggle)  cmd_toggle ;;
-  *)       die "usage: $PROG [toggle|list|dismiss <id|latest>]" ;;
+  list)          cmd_list ;;
+  dismiss)       shift; cmd_dismiss "$@" ;;
+  toggle)        cmd_toggle ;;
+  active-window) cmd_active_window ;;
+  *)             die "usage: $PROG [toggle|list|dismiss <id|latest>|active-window]" ;;
 esac
