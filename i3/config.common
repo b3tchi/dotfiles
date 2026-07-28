@@ -368,102 +368,27 @@ mode "resize" {
         bindsym q mode "default"
 }
 
-# Navigation mode (dotfiles-5u6m) — sticky hjkl focus without holding $mod.
-# $mod+o enters; hjkl / arrows focus, CTRL+hjkl move the focused window, ALT+hjkl
-# resize it (same 5px/5ppt steps as the standalone `resize` mode); q, Escape or
-# Enter leave (Ctrl+q and Shift+q too — q must work with a modifier still held).
+# Navigation mode — MIGRATED to hotkeyd (sp020, ft011, dotfiles-hwds.16).
 #
-# Three layers, one mode: the bare keys act, and a held modifier reinterprets
-# them. Both modifiers are keys the session actually reports as held (see the
-# Ctrl note below), and each has its own nop pair so the bar can name the
-# layer — "nav", "nav MOVE", "nav RESIZE".
+# $mod+o and the whole `mode "nav"` block (bare hjkl focus, Ctrl+hjkl move,
+# Alt+hjkl resize, q/Escape/Return to leave) now live in hotkeyd/binds.py as
+# LAYERS["nav"], together with the twelve `nop nav-*` marker binds that used to
+# publish held-modifier state to the bar. The daemon reports the modifier
+# directly on its state socket, so the markers have nothing left to encode.
 #
-# CTRL, not Shift, is the move modifier — and that is a portability decision,
-# not a taste one. xrdp synthesises Shift around every character it sends (xev
-# on the remote session shows Shift released on each letter press), so a HELD
-# Shift is not observable there at all: the indicator below could never tell
-# "still holding" from "let go". Ctrl and Alt cross the wire as real holds on
-# the same session, so Ctrl is the modifier both session types can actually
-# report. i3 itself was never confused — Shift+hjkl moved windows fine — but a
-# cue that lies is worse than no cue.
+# Why this cutover is safe when the first attempt was not (reverted fd9e9f2):
+# that attempt used core XGrabKey, and on :10 where $mod is Mod1 the nav resize
+# chords ARE i3's global $mod+hjkl focus binds — the daemon took BadAccess on
+# all eight and Alt+h fell through to i3. The daemon now grabs via XI2
+# (XIGrabKeycode), which the X server keeps in a SEPARATE conflict domain from
+# core grabs, and the later grabber wins. Layer chords are grabbed only while
+# the layer is active, so the daemon grabs at layer ENTRY — after i3 grabbed at
+# config load — and wins; on exit it ungrabs and i3's global focus binds work
+# again. Measured on a rebuilt :10 geometry: Alt+h inside nav resizes (width
+# 512 -> 461) instead of moving focus.
 #
-# The bar learns the modifier state from the two `nop` binds: i3 emits a
-# binding event for every executed bind, `nop` included and argument included,
-# so these are an explicit press/release signal that costs nothing at the WM
-# level (nop touches no layout, and binding the Ctrl keycode does not stop
-# Ctrl+hjkl from matching). quickshell Bar.qml reads the command string; the
-# hint strips live in Common/ModeBarTheme.qml — keep them in sync with these.
-#
-# This replaced a twin mode ("nav-move") that published the same fact as a mode
-# name and therefore had to duplicate every movement bind, so that a missed
-# release could not strand the session somewhere bare hjkl moved windows. A
-# signal carries no binding table and cannot be stranded in.
-#
-# bindCODE for the modifier keys, not bindsym: i3's parser reads the leading
-# "Control" of `bindsym Control_L` as a MODIFIER and then fails to translate
-# the "_L" remainder, silently dropping the bind (log-only — `i3 -C` stays
-# clean). 37/105 are Control_L/Control_R in every evdev X keymap (xmodmap -pm).
-# The release event still carries the Ctrl bit (X state is pre-event), so the
-# MASKED form is the one that fires; the bare pair is a keymap-quirk fallback.
-bindsym $mod+o mode "nav"
-mode "nav" {
-        bindsym h focus left
-        bindsym j focus down
-        bindsym k focus up
-        bindsym l focus right
-
-        bindsym Ctrl+h move left
-        bindsym Ctrl+j move down
-        bindsym Ctrl+k move up
-        bindsym Ctrl+l move right
-
-        # same bindings, but for the arrow keys
-        bindsym Left focus left
-        bindsym Down focus down
-        bindsym Up focus up
-        bindsym Right focus right
-
-        bindsym Ctrl+Left move left
-        bindsym Ctrl+Down move down
-        bindsym Ctrl+Up move up
-        bindsym Ctrl+Right move right
-
-        # ALT = resize layer. Directions match the standalone `resize` mode:
-        # h/l shrink/grow width, k/j shrink/grow height.
-        bindsym Mod1+h resize shrink width 5 px or 5 ppt
-        bindsym Mod1+j resize grow height 5 px or 5 ppt
-        bindsym Mod1+k resize shrink height 5 px or 5 ppt
-        bindsym Mod1+l resize grow width 5 px or 5 ppt
-
-        bindsym Mod1+Left resize shrink width 5 px or 5 ppt
-        bindsym Mod1+Down resize grow height 5 px or 5 ppt
-        bindsym Mod1+Up resize shrink height 5 px or 5 ppt
-        bindsym Mod1+Right resize grow width 5 px or 5 ppt
-
-        # Modifier down / up -> bar indicator only; no layout effect.
-        # 37/105 = Control_L/Control_R, 64/108 = Alt_L/Alt_R (xmodmap -pm).
-        bindcode 37 nop nav-move-on
-        bindcode 105 nop nav-move-on
-        bindcode --release Ctrl+37 nop nav-move-off
-        bindcode --release Ctrl+105 nop nav-move-off
-        bindcode --release 37 nop nav-move-off
-        bindcode --release 105 nop nav-move-off
-
-        bindcode 64 nop nav-resize-on
-        bindcode 108 nop nav-resize-on
-        bindcode --release Mod1+64 nop nav-resize-off
-        bindcode --release Mod1+108 nop nav-resize-off
-        bindcode --release 64 nop nav-resize-off
-        bindcode --release 108 nop nav-resize-off
-
-        # exit nav mode: Enter, Escape or q (with or without a modifier held)
-        bindsym Return mode "default"
-        bindsym Escape mode "default"
-        bindsym Ctrl+q mode "default"
-        bindsym Mod1+q mode "default"
-        bindsym Shift+q mode "default"
-        bindsym q mode "default"
-}
+# i3 keeps its global $mod+hjkl focus/move binds. They are NOT migrated and do
+# not need to be.
 # hotkeyd PANIC BIND (sp020 Task 10, ft011) — the one bind that never migrates.
 #
 # The Python hotkey layer owns its binds via per-key XGrabKey, and X grabs die

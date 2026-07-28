@@ -613,11 +613,34 @@ def test_the_fallback_never_binds_the_panic_chord():
 
 def test_the_i3_config_parser_actually_sees_binds():
     """Guard on the guard: a parser that silently returned nothing would make
-    every freshness assertion above vacuously true."""
+    every freshness assertion above vacuously true.
+
+    The sentinel was `$mod+o` until the nav cutover (dotfiles-hwds.16) moved it
+    out of i3 entirely. Pick chords i3 is expected to keep owning: `$mod+h` is
+    a global focus bind that the cutover deliberately does NOT migrate, and
+    `$mod+Shift+q` (kill) is not in any migration group.
+    """
     owned = i3_owned_chords("Mod4")
-    assert (("Mod4",), "o") in owned, "did not find $mod+o in i3/config.common"
-    assert (("Mod4",), "h") in owned
+    assert (("Mod4",), "h") in owned, "did not find $mod+h in i3/config.common"
+    assert (("Mod4", "Shift"), "q") in owned, "did not find $mod+Shift+q"
     assert len(owned) > 80, f"only parsed {len(owned)} top-level i3 binds"
+
+
+def test_nav_left_i3_and_lives_only_in_the_daemon():
+    """The cutover's invariant, asserted rather than assumed: nav's entry chord
+    is owned by binds.py and by nothing in i3's base config.
+
+    A regression here is the T6 shape — a chord live in both engines. It is no
+    longer a BadAccess (XI2 and core grabs do not collide), so nothing at
+    runtime would complain; this test is the thing that notices.
+    """
+    for mod in ("Mod4", "Mod1"):
+        entry = B.normalize_chord("$mod+o", mod)
+        assert entry not in i3_owned_chords(mod), (
+            f"$mod+o is back in i3/config.common with $mod={mod} — "
+            "nav is double-owned")
+        assert entry in {B.normalize_chord(b.chord, mod) for b in B.BINDS}, (
+            f"$mod+o missing from binds.py with $mod={mod}")
 
 
 # --------------------------------------------------------------------------
