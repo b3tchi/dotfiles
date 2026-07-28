@@ -446,10 +446,26 @@ bindsym $mod+Ctrl+Shift+r exec --no-startup-id ~/.dotfiles/hotkeyd/hotkeyd-panic
 # with separate grabs). The env pair is spelled out because config.common
 # cannot see i3/config's $qsbarenv — i3 scopes variables per file.
 #
-# `sh -c` with `;` follows the pattern config.d/native.conf already uses: i3
-# treats both `,` and `;` as command separators, so a multi-step shell command
-# has to be quoted or it is parsed as i3 commands.
-bindsym $mod+Shift+r reload, exec --no-startup-id sh -c '$HOME/.dotfiles/hotkeyd/hotkeyd.sh restart; env QS_BAR_INSET_BOTTOM=50 QS_BAR_INSET_AUTO=1 $HOME/.dotfiles/quickshell/qs-start.sh'
+# THE DOUBLE QUOTES AROUND `sh -c '...'` ARE LOad-BEARING. i3's command parser
+# treats `,` and `;` as command separators and does NOT recognise SINGLE quotes
+# as quoting — only double. Written with single quotes alone, i3 splits this
+# line at the `;`, runs the first half, and tries to parse `env QS_BAR_...` as
+# an i3 command, which fails at RUNTIME with "Expected one of these tokens".
+# MEASURED both ways: the binding fires either way (i3 stores the command
+# string verbatim and parses it on execution), so the symptom is a chord that
+# looks bound, logs a binding event, and does nothing.
+#
+# This bites BINDINGS ONLY. A config-level `exec_always` takes the rest of the
+# line, which is why config.d/native.conf's `sh -c 'nitrogen --restore; sleep 1;
+# ...'` is fine unquoted — do not "fix" that one by copying this.
+#
+# `;` and not `&&`: the bar restart must happen whether or not the daemon
+# restart succeeded. A wedged daemon is one of the reasons to press this, and
+# `&&` would skip the half most likely to still work.
+#
+# $HOME (not ~) inside the quotes: i3 substitutes only names declared with
+# `set`, so $HOME reaches sh untouched and sh expands it — verified end to end.
+bindsym $mod+Shift+r reload, exec --no-startup-id "sh -c '$HOME/.dotfiles/hotkeyd/hotkeyd.sh restart; env QS_BAR_INSET_BOTTOM=50 QS_BAR_INSET_AUTO=1 $HOME/.dotfiles/quickshell/qs-start.sh'"
 
 # Lock screen
 bindsym $mod+9 exec --no-startup-id blurlock
