@@ -504,6 +504,44 @@ assert_eq "and not on $DPY" "0" \
   "$(env DISPLAY="$DPY" "$XDOTOOL" search --onlyvisible --name '^qs-notif$' 2>/dev/null | wc -l | tr -d ' ')"
 close_stub "$DPY2"
 
+# --- dotfiles-sxg1: the screen suffix is not a different session -------------
+#
+# Same defect, same shape as qs-clip.sh's (this derivation block is copied
+# verbatim from it): an X display's screen suffix is optional, ":10" and
+# ":10.0" are one session, i3 execs the bind with the suffixed form while the
+# session's own quickshell carries the bare one -- so the exact compare matched
+# nothing and, with both sessions live, $mod+n refused instead of opening.
+# Only reproducible with TWO live instances; one instance masks it via the
+# one-candidate fallback.
+
+scenario "derivation: a screen-suffixed DISPLAY ($DPY.0 -- the form i3 execs with) resolves to the bare $DPY instance"
+close_stub "$DPY"; close_stub "$DPY2"
+out="$(env DISPLAY="$DPY.0" "${ISO[@]}" sh "$QS_NOTIF" toggle 2>&1)"; rc=$?
+assert_eq "exits 0 -- it did not refuse" "0" "$rc"
+assert_eq "and never claimed the display matched no running instance" "" \
+  "$(printf '%s' "$out" | grep -o 'matches no running instance' | head -1)"
+assert_ne "the browser opened on $DPY" "" "$(win_on "$DPY")"
+assert_eq "and NOT on $DPY2" "0" \
+  "$(env DISPLAY="$DPY2" "$XDOTOOL" search --onlyvisible --name '^qs-notif$' 2>/dev/null | wc -l | tr -d ' ')"
+close_stub "$DPY"
+
+scenario "derivation: the suffixed form picks the RIGHT session, not merely the first candidate"
+close_stub "$DPY"; close_stub "$DPY2"
+env DISPLAY="$DPY2.0" "${ISO[@]}" sh "$QS_NOTIF" toggle >/dev/null 2>&1
+assert_ne "the browser opened on $DPY2" "" "$(win_on "$DPY2")"
+assert_eq "and NOT on $DPY" "0" \
+  "$(env DISPLAY="$DPY" "$XDOTOOL" search --onlyvisible --name '^qs-notif$' 2>/dev/null | wc -l | tr -d ' ')"
+close_stub "$DPY2"
+
+scenario "derivation: normalizing the suffix does NOT soften the refusal -- a suffixed display matching nothing still declines"
+out="$(env DISPLAY=":987.0" "${ISO[@]}" sh "$QS_NOTIF" toggle 2>&1)"; rc=$?
+assert_ne "exits non-zero" "0" "$rc"
+assert_eq "no browser opened on $DPY"  "0" \
+  "$(env DISPLAY="$DPY"  "$XDOTOOL" search --onlyvisible --name '^qs-notif$' 2>/dev/null | wc -l | tr -d ' ')"
+assert_eq "no browser opened on $DPY2" "0" \
+  "$(env DISPLAY="$DPY2" "$XDOTOOL" search --onlyvisible --name '^qs-notif$' 2>/dev/null | wc -l | tr -d ' ')"
+assert_ne "and it still names the live sessions" "" "$(printf '%s' "$out" | grep -o 'DISPLAY=:9[56]' | head -1)"
+
 # ============================================================================
 # PHASE 1 boundary -- task .6 (dotfiles-c5fd.6) appends PHASE 2 (the real
 # NotifHistory.qml UI scenarios) below this line. Nothing above is to be
