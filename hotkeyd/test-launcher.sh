@@ -171,6 +171,50 @@ run "$XA" check >/dev/null 2>&1 && ok "check validates the shipped table" \
 DISPLAY= XDG_RUNTIME_DIR="$RUNTIME" "$HERE/hotkeyd.sh" check >/dev/null 2>&1 \
     && ok "check works with DISPLAY unset" || bad "check needs a display"
 
+# --- an IDLE daemon whose X server dies (dotfiles-hwds.28) ------------------
+# dotfiles-hwds.28 was filed on the hypothesis that adr0014 fail-fast is
+# implemented on the EVENT path only, so a daemon blocked waiting for an event
+# that will never come cannot learn its connection is gone. Measured across five
+# death modes (SIGTERM/SIGKILL, with and without a real i3, immediately and after
+# 15 s of idling), that is false: the daemon exits in about a second every time.
+#
+# It survives because the idle branch has TWO independent observers of the X
+# connection, and either one is enough: d.pending_events() answers a zero-timeout
+# select + recv on the X fd and raises ConnectionClosedError at EOF, and the fd
+# is also in the select() wait set, where d.fileno() re-raises the same stored
+# error. Confirmed by mutation — swallowing the first alone still exits; the
+# daemon only outlives its server once BOTH are removed.
+#
+# This case exists to keep it that way. Nothing else in the suite notices if the
+# idle path stops touching X, and that change looks like a harmless optimisation.
+echo "launcher: an idle daemon exits when its X server dies (adr0014)"
+XC="$(probe_free_display "$(( ${XB#:} + 1 ))")"
+Xvfb "$XC" -screen 0 640x480x24 >/dev/null 2>&1 &
+XC_PID=$!
+XVFB_PIDS+=("$XC_PID")
+sleep 1.5
+run "$XC" start >/dev/null 2>&1
+sleep 1
+idle_pid="$(pgrep -f "hotkeyd.py.*--display $XC" 2>/dev/null | head -1)"
+if [ -z "$idle_pid" ]; then
+    bad "no daemon started on $XC"
+else
+    # Deliberately NOTHING is injected: the whole claim is about a daemon that
+    # is not pumping events.
+    sleep 3
+    kill "$XC_PID" 2>/dev/null
+    waited=0
+    while [ "$waited" -lt 12 ] && kill -0 "$idle_pid" 2>/dev/null; do
+        sleep 1; waited=$((waited + 1))
+    done
+    if kill -0 "$idle_pid" 2>/dev/null; then
+        bad "the idle daemon outlived its X server by >${waited}s"
+        kill -9 "$idle_pid" 2>/dev/null
+    else
+        ok "the idle daemon exited ${waited}s after its X server died"
+    fi
+fi
+
 # --- degraded environments --------------------------------------------------
 echo "launcher: degraded environments"
 out="$(DISPLAY= XDG_RUNTIME_DIR="$RUNTIME" "$HERE/hotkeyd.sh" start 2>&1)"; rc=$?
