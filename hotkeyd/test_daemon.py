@@ -122,6 +122,16 @@ class XI2Root:
         self.outer = outer
         self.prop = prop
         self.selected_events = []
+        # What the SERVER says is held right now, and how many times anyone
+        # asked. The count is asserted on: the idle reconciliation (hwds.27
+        # item 4) is only defensible if it never runs on the key path and never
+        # runs at all while the engine believes nothing is held.
+        self.pointer_mask = 0
+        self.pointer_queries = 0
+
+    def query_pointer(self):
+        self.pointer_queries += 1
+        return SimpleNamespace(mask=self.pointer_mask)
 
     def get_full_property(self, atom, kind):
         return self.prop
@@ -1461,23 +1471,26 @@ def test_the_daemons_own_resolver_pins_its_display(monkeypatch):
 # ==========================================================================
 
 
+class _NullI3:
+    """An i3 with no event support at all — `wire_i3_mode` degrades to 'never
+    arbitrates', which is the embedder case the daemon documents."""
+
+    def __init__(self):
+        self.cmds = []
+
+    def command(self, cmd):
+        self.cmds.append(cmd)
+        return True
+
+    def close(self):
+        pass
+
+
 def xi2_daemon(table, xd=None, i3=None, pub=None):
     """The real Daemon over the XI2 fake server — the composition under test."""
     xd = xd or FakeXServer()
     pub = pub or Lines()
-
-    class NullI3:
-        def __init__(self):
-            self.cmds = []
-
-        def command(self, cmd):
-            self.cmds.append(cmd)
-            return True
-
-        def close(self):
-            pass
-
-    i3 = i3 or NullI3()
+    i3 = i3 or _NullI3()
     return H.Daemon(table, xd, pub, i3=i3, display=":0"), xd, pub, i3
 
 
@@ -1839,4 +1852,226 @@ def test_an_unflagged_repeat_press_of_one_key_still_fires_twice():
     assert dae.pump(key_press(32, H.MOD4, when=100)) == ["nop any"]
     dae.pump(xi_event(32, H.MOD4, kind="release", when=105))
     assert dae.pump(key_press(32, H.MOD4, when=110)) == ["nop any"]
+    dae.close()
+
+
+# ==========================================================================
+# hwds.27 — the daemon must be able to SAY why it changed layer
+# ==========================================================================
+# The live :10 daemon replayed `{"layer":"nav","mod":"resize"}` to the first bar
+# that connected, ~30 s after it started, with nothing pressed. It logged
+# nothing, so the recurrence would have been just as uninformative.
+#
+# The engine owns the log format (test_layers.py); what is asserted HERE is that
+# the daemon actually FILLS it — a log whose keycode, mask and sourceid are all
+# `none` in production is a log that cannot discriminate between the ticket's
+# candidate causes, and every one of those three values is only available on
+# this side of `to_event`.
+
+
+def logging_daemon(table, xd=None):
+    lines = []
+    dae, xd, pub, i3 = xi2_daemon(table, xd=xd)
+    dae.engine.log = lines.append
+    return dae, xd, pub, lines
+
+
+def transition_lines(lines):
+    return [ln for ln in lines if ln.startswith("transition ")]
+
+
+def test_pump_fills_the_transition_log_with_the_real_keycode_mask_and_source():
+    """The whole diagnostic value of the log is these three fields. `state` here
+    is Mod4 with CapsLock also on, because that is what the mask looks like in a
+    real session and the log must show what the SERVER sent, not the cleaned-up
+    version the matcher used."""
+    table = table_of([B.Bind("$mod+o", B.enter_layer("nav"))],
+                     {"nav": B.Layer(binds=[B.Bind("h", "focus left")],
+                                     exit_keys=["q"])})
+    dae, _, _, lines = logging_daemon(table)
+    dae.pump(key_press(32, H.MOD4 | H.LOCK, sourceid=12))
+    t = transition_lines(lines)
+    assert len(t) == 1, lines
+    line = t[0]
+    assert "layer=default->nav" in line, line
+    assert "keycode=32" in line, line
+    assert f"mask=0x{H.MOD4 | H.LOCK:04x}" in line, line
+    assert "mods=Mod4" in line, f"lock bits must not become a chord modifier: {line}"
+    assert "sourceid=12" in line, line
+    assert "AT Translated Set 2 keyboard" in line, line
+    dae.close()
+
+
+def test_an_injected_chord_is_logged_as_coming_from_the_xtest_device():
+    """The discriminator the ticket needs. `binds.IGNORE_DEVICES` ships EMPTY,
+    so an XTEST-injected `$mod+o` enters nav exactly like a typed one — the log
+    is the only thing that can tell the two apart after the fact."""
+    table = table_of([B.Bind("$mod+o", B.enter_layer("nav"))],
+                     {"nav": B.Layer(binds=[B.Bind("h", "focus left")],
+                                     exit_keys=["q"])})
+    dae, _, _, lines = logging_daemon(table)
+    dae.pump(key_press(32, H.MOD4, sourceid=5))     # 5 = the XTEST injector
+    line = transition_lines(lines)[0]
+    assert "sourceid=5" in line and "XTEST" in line, line
+    dae.close()
+
+
+def test_leaving_a_layer_through_the_daemon_is_logged_with_its_keycode():
+    table = table_of([B.Bind("$mod+o", B.enter_layer("nav"))],
+                     {"nav": B.Layer(binds=[B.Bind("h", "focus left")],
+                                     exit_keys=["q"])})
+    dae, _, _, lines = logging_daemon(table)
+    dae.pump(key_press(32, H.MOD4))
+    lines.clear()
+    dae.pump(key_press(24))                         # q
+    t = transition_lines(lines)
+    assert len(t) == 1, lines
+    assert "layer=nav->default" in t[0] and "keycode=24" in t[0], t[0]
+    dae.close()
+
+
+# -- ruling out cause 2: startup state served out of the replay buffer -----
+
+def test_a_freshly_started_daemon_replays_nothing_to_a_client(tmp_path):
+    """Cause 2 says the daemon may publish or compute an initial layer before it
+    has read real modifier state, with the replay buffer then serving it. Driven
+    through the REAL StatePublisher and a REAL socket client, because the claim
+    is about what a connecting bar receives, not about engine state."""
+    sock = tmp_path / "hotkeyd-test.sock"
+    pub = L.StatePublisher(sock)
+    xd = FakeXServer()
+    dae = H.Daemon(B, xd, pub, i3=_NullI3(), display=":0")
+    try:
+        c = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        c.connect(str(sock))
+        pub.poll()
+        c.settimeout(0.2)
+        with pytest.raises((socket.timeout, TimeoutError, BlockingIOError)):
+            c.recv(64)
+        c.close()
+    finally:
+        dae.close()
+
+
+def test_constructing_the_daemon_publishes_nothing_at_all():
+    xd = FakeXServer()
+    pub = Lines()
+    dae = H.Daemon(B, xd, pub, i3=_NullI3(), display=":0")
+    assert pub.lines == []
+    assert dae.engine.state == {"layer": "default", "mod": None}
+    dae.close()
+
+
+# -- ruling out cause 3: an i3 restart putting the daemon into a layer -----
+
+def test_no_i3_reconnect_or_mode_traffic_can_enter_a_layer():
+    """Cause 3 is an artifact of the i3 restart that first spawned the daemon.
+    `pump_i3` is the only thing that restart reaches, and it must be incapable
+    of ENTERING a layer — it may only ever force one shut."""
+    xd = FakeXServer()
+    pub = Lines()
+
+    class Restarting:
+        """An i3 that reports a fresh connection on every poll, i.e. the worst
+        case of a restarting window manager."""
+
+        def __init__(self):
+            self.modes = ["default", "resize", "default"]
+            self.cmds = []
+
+        def subscribe(self, events):
+            return True
+
+        def binding_state(self):
+            return self.modes.pop(0) if self.modes else "default"
+
+        def poll_events(self):
+            return True
+
+        def fileno(self):
+            return None
+
+        def command(self, cmd):
+            self.cmds.append(cmd)
+            return True
+
+        def close(self):
+            pass
+
+    dae = H.Daemon(B, xd, pub, i3=Restarting(), display=":0")
+    for _ in range(3):
+        dae.pump_i3()
+        assert dae.engine.state["layer"] == "default"
+    assert all(line["layer"] == "default" for line in pub.lines), pub.lines
+    dae.close()
+
+
+# -- item 4: reconciling held-modifier belief against the server ------------
+
+def test_the_idle_reconcile_costs_no_x_round_trip_when_nothing_is_held():
+    """The invariant is only defensible if it is free in the common case. An
+    unconditional `query_pointer` four times a second for the life of the
+    session buys nothing while `_held` is empty — there is no belief to check."""
+    dae, xd, _, _ = xi2_daemon(B)
+    for _ in range(10):
+        assert dae.reconcile_mods() is False
+    assert xd.screen().root.pointer_queries == 0
+    dae.close()
+
+
+def test_the_daemon_retracts_a_modifier_the_server_says_is_not_down():
+    """The observed state was `{"layer":"nav","mod":"resize"}` with a root
+    query_pointer reporting mask 0x0. That contradiction is checkable, and the
+    idle path is where it costs nothing to check it."""
+    dae, xd, pub, _ = xi2_daemon(B)
+    dae.pump(key_press(32, H.MOD4))                 # $mod+o -> nav
+    dae.pump(key_press(64))                         # Alt_L held
+    assert dae.engine.state == {"layer": "nav", "mod": "resize"}
+    xd.screen().root.pointer_mask = 0               # the server disagrees
+    pub.lines.clear()
+    assert dae.reconcile_mods() is True
+    assert dae.engine.state == {"layer": "nav", "mod": None}
+    assert pub.lines == [{"layer": "nav", "mod": None}]
+    assert xd.screen().root.pointer_queries == 1
+    dae.close()
+
+
+def test_the_daemon_keeps_a_modifier_the_server_confirms_is_down():
+    dae, xd, pub, _ = xi2_daemon(B)
+    dae.pump(key_press(32, H.MOD4))
+    dae.pump(key_press(64))
+    xd.screen().root.pointer_mask = H.MOD1 | H.LOCK  # lock bits are not layers
+    pub.lines.clear()
+    assert dae.reconcile_mods() is False
+    assert dae.engine.state == {"layer": "nav", "mod": "resize"}
+    assert pub.lines == []
+    dae.close()
+
+
+def test_the_reconcile_never_takes_the_layer_away():
+    """X has no opinion about `nav`. A reconciler that dropped the layer on a
+    mask mismatch would be inventing state from the other direction — and would
+    silently cancel a legitimate nav the user is standing in."""
+    dae, xd, _, _ = xi2_daemon(B)
+    dae.pump(key_press(32, H.MOD4))
+    dae.pump(key_press(64))
+    xd.screen().root.pointer_mask = 0
+    dae.reconcile_mods()
+    assert dae.engine.state["layer"] == "nav"
+    dae.close()
+
+
+def test_a_failing_pointer_query_does_not_take_the_daemon_down():
+    """adr0014: the idle path must not turn a transient X answer into a crash
+    on a daemon that is otherwise serving the keyboard fine."""
+    dae, xd, _, _ = xi2_daemon(B)
+    dae.pump(key_press(32, H.MOD4))
+    dae.pump(key_press(64))
+
+    def boom():
+        raise RuntimeError("BadWindow")
+
+    xd.screen().root.query_pointer = boom
+    assert dae.reconcile_mods() is False
+    assert dae.engine.state == {"layer": "nav", "mod": "resize"}
     dae.close()

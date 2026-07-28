@@ -12,6 +12,7 @@ is re-measured under XI2 rather than assumed to carry over.
 Prints `PASS <what>` / `FAIL <what>` lines; exits non-zero if anything failed.
 """
 import os
+import re
 import subprocess
 import sys
 import time
@@ -559,6 +560,85 @@ def main() -> int:
           str(fired_unignored))
 
     feed("q")
+
+    # -- 5d: the TRANSITION LOG — the evidence hwds.27 had none of ------------
+    # The live :10 daemon replayed {"layer":"nav","mod":"resize"} to the first
+    # bar that connected, with nothing pressed, and logged NOTHING — so the one
+    # observation could not be attributed to anything and a recurrence would
+    # have been just as uninformative.
+    #
+    # What is checked here is not that a line appears (test_layers.py does that
+    # against a fake) but that the three DISCRIMINATING fields are filled with
+    # real values off a real server: a keycode this keymap actually uses, the
+    # mask the server actually sent, and the device that actually produced the
+    # key. Each is `none` unless the whole XI2 -> to_event -> engine chain
+    # carries it, and each is `none` in a log written from engine state alone.
+    check(dae.engine.state["layer"] == "default",
+          "back in the default layer for the transition-log checks",
+          str(dae.engine.state))
+    log_lines = []
+    saved_log, dae.engine.log = dae.engine.log, log_lines.append
+    feed("o", mods=["Super_L"])
+    trans = [ln for ln in log_lines if ln.startswith("transition ")]
+    check(len(trans) == 1 and "layer=default->nav" in trans[0],
+          "entering nav on a real server emits exactly one transition line",
+          str(log_lines))
+    line = trans[0] if trans else ""
+    o_code = code_for(d, "o")
+    check(f"keycode={o_code}" in line,
+          f"the transition names the keycode the server sent ({o_code})", line)
+    seen_mask = re.search(r"mask=0x([0-9a-f]+)", line)
+    check(seen_mask is not None and int(seen_mask.group(1), 16) & H.MOD4,
+          "and the modifier mask the event arrived with", line)
+    check(f"device={xtest_name!r}" in line and "sourceid=none" not in line,
+          "and the SOURCE DEVICE — here the XTEST injector, which is the only "
+          "field that separates an injected $mod+o from a typed one after the "
+          "fact (IGNORE_DEVICES ships empty, so both reach the engine)", line)
+    log_lines.clear()
+    feed("q")
+    trans = [ln for ln in log_lines if ln.startswith("transition ")]
+    check(len(trans) == 1 and "layer=nav->default" in trans[0]
+          and f"keycode={code_for(d, 'q')}" in trans[0],
+          "and leaving nav names the key that did it", str(log_lines))
+    dae.engine.log = saved_log
+
+    # -- 5e: a phantom hold must not survive an IDLE daemon -------------------
+    # `_expire_stale_holds` runs only when an event ARRIVES. The observed
+    # failure was a state served out of the replay buffer by a daemon that was
+    # receiving nothing, so the guard could not fire and the belief stood until
+    # real keys resumed. The lost release is produced here by taking the
+    # modifier away WITHOUT letting the daemon see the release — which is what
+    # a lost release is — and then asking the server directly.
+    feed("o", mods=["Super_L"])
+    ctrl = code_for(d, "Control_L")
+    xtest.fake_input(d, X.KeyPress, ctrl)
+    d.sync()
+    time.sleep(0.1)
+    while d.pending_events():
+        dae.pump(d.next_event())
+    check(dae.engine.state["mod"] == "move",
+          "a really-held Ctrl is observed as the move sublayer",
+          str(dae.engine.state))
+    check(dae.reconcile_mods() is False,
+          "and the server CONFIRMS it, so the reconcile retracts nothing",
+          str(dae.engine.state))
+    xtest.fake_input(d, X.KeyRelease, ctrl)
+    d.sync()
+    time.sleep(0.1)
+    while d.pending_events():
+        d.next_event()                  # the release the daemon never sees
+    check(dae.engine.state["mod"] == "move",
+          "a LOST release leaves the phantom sublayer standing — the bug shape",
+          str(dae.engine.state))
+    retracted = dae.reconcile_mods()
+    check(retracted and dae.engine.state["mod"] is None,
+          "and the idle reconcile drops it against the server's own mask",
+          str(dae.engine.state))
+    check(dae.engine.state["layer"] == "nav",
+          "while the LAYER — which X has no opinion about — is untouched",
+          str(dae.engine.state))
+    feed("q")
+
     # Hand the grabs back before a second daemon opens on the same connection:
     # X would otherwise deliver this daemon's registrations to that one, and the
     # Mod1 checks below would be reading a grab set nobody under test made.

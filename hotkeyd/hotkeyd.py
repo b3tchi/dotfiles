@@ -155,18 +155,30 @@ def x_resource_mod(xdisp=None) -> str:
     return default_binds.DEFAULT_MOD
 
 
+def mods_from_mask(mask: int) -> frozenset[str]:
+    """Canonical modifier names in an X modifier mask, lock bits dropped.
+
+    NumLock and CapsLock ride in every mask but are not layer modifiers, so
+    leaving them in would make `Ctrl+h` with NumLock on a different chord than
+    `Ctrl+h` without it.
+    """
+    mask &= ~LOCK_BITS
+    return frozenset(name for bit, name in NAME_BY_MASK.items() if mask & bit)
+
+
 def to_event(kind: str, keysym: str, state: int,
              device: str | None = None,
-             device_id: int | None = None) -> L.Event:
+             device_id: int | None = None,
+             keycode: int | None = None) -> L.Event:
     """Translate an X key event into the engine's X-agnostic Event.
 
-    Lock bits are stripped: with NumLock on, `Ctrl+h` arrives with Mod2 set, and
-    leaving it in would make it a different chord than `Ctrl+h` without it.
+    `state` is carried through UNSTRIPPED as `raw_state` alongside the cleaned
+    `mods`, and the keycode alongside the keysym, purely so the engine's
+    transition log can say what X delivered rather than what the matcher made
+    of it (dotfiles-hwds.27). Nothing matches on either.
     """
-    state &= ~LOCK_BITS
-    mods = {name for mask, name in NAME_BY_MASK.items() if state & mask}
-    return L.Event(kind, keysym, frozenset(mods), device=device,
-                   device_id=device_id)
+    return L.Event(kind, keysym, mods_from_mask(state), device=device,
+                   device_id=device_id, keycode=keycode, raw_state=state)
 
 
 @dataclass(frozen=True)
@@ -989,6 +1001,35 @@ class Daemon:
         self.grabs.sync_binds(chords_for(self.table,
                                          self.engine.state["layer"]))
 
+    # -- belief vs. the server (dotfiles-hwds.27) --------------------------
+    def reconcile_mods(self) -> bool:
+        """Check the engine's held-modifier belief against the X server.
+
+        Called from the IDLE branch of the run loop only — never from `pump` —
+        so it costs nothing on the key path and at most one round-trip per
+        `select` timeout (~4/s). It short-circuits to zero round-trips whenever
+        the engine believes nothing is held, which is the whole session apart
+        from the seconds someone is standing in a sublayer.
+
+        The published state is supposed to be reconcilable against reality, and
+        the held-modifier half of it genuinely is: `query_pointer` reports what
+        the server currently has down, sampled outside any event, so it is not
+        the pre-event mask the engine deliberately distrusts. The LAYER half is
+        not reconcilable — X has no notion of `nav` — and `reconcile_holds` does
+        not touch it.
+
+        A failed query is swallowed. adr0014: the idle path must not turn a
+        transient X answer into a dead daemon that was otherwise serving the
+        keyboard fine.
+        """
+        if not self.engine.held:
+            return False
+        try:
+            mask = int(self.d.screen().root.query_pointer().mask)
+        except Exception:                               # noqa: BLE001
+            return False
+        return self.engine.reconcile_holds(mods_from_mask(mask))
+
     def pump(self, ev) -> list:
         """Handle one X event. Returns the actions dispatched."""
         from Xlib import X                               # noqa: PLC0415
@@ -1034,7 +1075,7 @@ class Daemon:
         before = self.engine.state["layer"]
         actions = self.engine.handle(
             to_event(k.kind, name, k.state, device=device,
-                     device_id=k.sourceid))
+                     device_id=k.sourceid, keycode=k.detail))
         for action in actions:
             _dispatch(self.i3, action)
         if self.engine.state["layer"] != before:
@@ -1103,6 +1144,10 @@ def run_daemon(table, display_name: str | None) -> int:
                           file=sys.stderr, flush=True)
             try:
                 if not d.pending_events():
+                    # Idle: nothing is arriving, which is exactly when a hold
+                    # the session stopped reporting would otherwise latch —
+                    # the guard window only ever runs on an event.
+                    dae.reconcile_mods()
                     # i3's socket is in the wait set too, so a mode change wakes
                     # the loop immediately instead of up to 250 ms later — the
                     # window in which both engines would think they own the keys.

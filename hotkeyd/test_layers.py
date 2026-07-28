@@ -945,3 +945,244 @@ def test_an_event_built_without_a_device_is_unchanged():
     mods) and must keep meaning 'any source'."""
     e = L.Event("press", "h", frozenset())
     assert e.device is None and e.device_id is None
+
+
+# --------------------------------------------------------------------------
+# layer-transition log (dotfiles-hwds.27)
+# --------------------------------------------------------------------------
+# A daemon that spontaneously believes it is in `nav` GRABS that layer's bare
+# keys — h/j/k/l, the arrows, q, Escape, Return — and swallows them from every
+# application until it changes its mind. That happened once on the live :10
+# session ~30 s after the first start, and the daemon logged NOTHING, so the
+# only evidence left was a replayed socket line.
+#
+# The log below is the evidence a recurrence has to leave behind. Every field is
+# there because it discriminates between the ticket's candidate causes: the
+# KEYCODE and MASK say whether the event looked like a real chord, and the
+# SOURCE DEVICE says whether anything physical produced it at all — an
+# XTEST-injected `$mod+o` and a typed one are otherwise indistinguishable, and
+# `binds.IGNORE_DEVICES` ships empty, so injection reaches the engine today.
+
+
+def logged_engine(**kw):
+    lines = []
+    e, pub, _clock = engine(log=lines.append, **kw)
+    return e, pub, lines
+
+
+def xev(kind, key, mods=(), keycode=None, raw_state=None,
+        device=None, device_id=None):
+    return L.Event(kind, key, frozenset(mods), device=device,
+                   device_id=device_id, keycode=keycode, raw_state=raw_state)
+
+
+def transitions(lines):
+    return [ln for ln in lines if ln.startswith("transition ")]
+
+
+def test_entering_a_layer_logs_one_transition_naming_the_triggering_event():
+    e, _, lines = logged_engine()
+    e.handle(xev("press", "o", ["Mod4"], keycode=32, raw_state=0x40,
+                 device="AT Translated Set 2 keyboard", device_id=12))
+    t = transitions(lines)
+    assert len(t) == 1, f"expected exactly one transition line, got {lines}"
+    line = t[0]
+    for want in ("layer=default->nav", "trigger=press:o", "keycode=32",
+                 "mask=0x0040", "mods=Mod4", "sourceid=12",
+                 "AT Translated Set 2 keyboard", "held=none"):
+        assert want in line, f"{want!r} missing from {line!r}"
+
+
+def test_leaving_a_layer_logs_the_transition_and_the_key_that_did_it():
+    e, _, lines = logged_engine()
+    e.handle(xev("press", "o", ["Mod4"], keycode=32, raw_state=0x40))
+    lines.clear()
+    e.handle(xev("press", "Escape", keycode=9, raw_state=0x0))
+    t = transitions(lines)
+    assert len(t) == 1, lines
+    assert "layer=nav->default" in t[0] and "keycode=9" in t[0], t[0]
+    assert "trigger=press:Escape" in t[0], t[0]
+
+
+def test_a_held_modifier_sublayer_change_is_logged_too():
+    """`mod` is half of what the socket publishes, and the live observation was
+    `{"layer":"nav","mod":"resize"}` — a log that recorded only the layer could
+    not tell that report apart from `{"layer":"nav","mod":null}`."""
+    e, _, lines = logged_engine()
+    e.handle(xev("press", "o", ["Mod4"], keycode=32, raw_state=0x40))
+    lines.clear()
+    e.handle(xev("press", "Alt_L", ["Mod4"], keycode=64, raw_state=0x40))
+    t = transitions(lines)
+    assert len(t) == 1, lines
+    assert "mod=none->resize" in t[0] and "keycode=64" in t[0], t[0]
+    assert "layer=nav->nav" in t[0], t[0]
+    assert "held=Mod1" in t[0], \
+        f"the log must show WHICH modifiers the engine believed held: {t[0]}"
+
+
+def test_an_event_that_changes_nothing_logs_no_transition():
+    """The log has to stay readable across a whole session or nobody will leave
+    it running, which is the entire point of adding it."""
+    e, _, lines = logged_engine()
+    e.handle(xev("press", "z", keycode=52, raw_state=0))
+    e.handle(xev("release", "z", keycode=52, raw_state=0))
+    assert transitions(lines) == [], lines
+
+
+def test_i3_forcing_a_layer_exit_logs_it_with_no_triggering_key():
+    e, _, lines = logged_engine()
+    e.handle(xev("press", "o", ["Mod4"], keycode=32, raw_state=0x40))
+    lines.clear()
+    e.set_i3_mode("resize")
+    t = transitions(lines)
+    assert len(t) == 1, lines
+    assert "layer=nav->default" in t[0], t[0]
+    assert "trigger=none" in t[0], \
+        "no key caused this; the log must not imply one"
+    assert "resize" in t[0], f"the note must name the i3 mode: {t[0]}"
+
+
+def test_an_unattributable_event_is_logged_as_unattributable_not_guessed():
+    """The XI2 lookup fails for a device that vanished between the press and the
+    query. A log that printed a plausible-looking device there would be worse
+    than no log at all: cause 1 in the ticket turns entirely on provenance."""
+    e, _, lines = logged_engine()
+    e.handle(xev("press", "o", ["Mod4"]))
+    t = transitions(lines)
+    assert len(t) == 1, lines
+    assert "keycode=none" in t[0] and "sourceid=none" in t[0], t[0]
+    assert "device=none" in t[0], t[0]
+
+
+def test_the_transition_log_names_the_i3_mode_the_engine_believed():
+    e, _, lines = logged_engine()
+    e.handle(xev("press", "o", ["Mod4"], keycode=32, raw_state=0x40))
+    assert "i3_mode=default" in transitions(lines)[0]
+
+
+# --------------------------------------------------------------------------
+# what CANNOT put the engine into a layer (hwds.27 causes 2 and 3)
+# --------------------------------------------------------------------------
+# The ticket names three candidates. Two of them — a startup state computed
+# before real modifier state is known, and an artifact of the i3 restart — are
+# claims about NON-KEY inputs putting the engine into `nav`. There are exactly
+# three such inputs, and none of them may ever move the layer away from
+# `default`: only a matched EnterLayer bind can.
+
+
+def test_no_amount_of_i3_mode_traffic_can_enter_a_layer():
+    e, pub, _ = engine()
+    for name in ("default", "resize", "default", "nav", "default", ""):
+        e.set_i3_mode(name)
+        assert e.state["layer"] == "default", name
+    assert pub.lines == [], "i3 mode traffic alone must publish nothing"
+
+
+def test_reconciling_holds_can_never_enter_a_layer():
+    e, pub, _ = engine()
+    e.reconcile_holds(frozenset({"Mod1", "Ctrl", "Shift"}))
+    assert e.state == {"layer": "default", "mod": None}
+    assert pub.lines == []
+
+
+def test_a_fresh_engine_publishes_nothing_at_all_before_the_first_key():
+    """Cause 2 in the ticket: a state computed before real input is known, then
+    served out of the replay buffer. A publisher that was never called cannot
+    have a buffer to serve."""
+    e, pub, _ = engine()
+    e.set_i3_mode("default")
+    e.reconcile_holds(frozenset())
+    assert pub.lines == []
+    assert e.state == {"layer": "default", "mod": None}
+
+
+# --------------------------------------------------------------------------
+# reconciling belief against the server (hwds.27 item 4)
+# --------------------------------------------------------------------------
+# `_expire_stale_holds` runs only when an event arrives, so a hold the session
+# stopped reporting survives an IDLE daemon indefinitely — and an idle daemon is
+# exactly what serves the replay buffer to a bar that connects late. The
+# reconciler closes that: given what the server says is down RIGHT NOW, it drops
+# beliefs the server does not corroborate.
+#
+# Deliberately RETRACT-ONLY. The server's mask is ground truth about what is
+# down, but `_held` is what the engine has actually OBSERVED, and adding a hold
+# it never saw pressed would manufacture a sublayer out of a modifier that
+# belongs to some other client's gesture.
+
+
+def test_reconcile_drops_a_hold_the_server_does_not_corroborate():
+    e, pub, _ = engine()
+    e.handle(press("o", ["Mod4"]))
+    e.handle(press("Alt_L"))
+    assert e.state == {"layer": "nav", "mod": "resize"}
+    pub.lines.clear()
+    changed = e.reconcile_holds(frozenset())
+    assert changed is True
+    assert e.state == {"layer": "nav", "mod": None}
+    assert pub.lines == [{"layer": "nav", "mod": None}]
+
+
+def test_reconcile_never_invents_a_hold_the_engine_never_observed():
+    e, pub, _ = engine()
+    e.handle(press("o", ["Mod4"]))
+    pub.lines.clear()
+    changed = e.reconcile_holds(frozenset({"Mod1", "Ctrl"}))
+    assert changed is False
+    assert e.state == {"layer": "nav", "mod": None}, \
+        "a sublayer was manufactured from the server mask alone"
+    assert pub.lines == []
+
+
+def test_reconcile_leaves_a_corroborated_hold_alone():
+    e, pub, _ = engine()
+    e.handle(press("o", ["Mod4"]))
+    e.handle(press("Control_L"))
+    assert e.state["mod"] == "move"
+    pub.lines.clear()
+    assert e.reconcile_holds(frozenset({"Ctrl"})) is False
+    assert e.state["mod"] == "move"
+    assert pub.lines == []
+
+
+def test_reconcile_refreshes_a_corroborated_hold_past_the_guard_window():
+    """A modifier genuinely held through a long idle must not be expired by the
+    next event's guard check just because no event refreshed it."""
+    e, _pub, clock = engine()
+    e.handle(press("o", ["Mod4"]))
+    e.handle(press("Control_L"))
+    clock.advance(5000)
+    e.reconcile_holds(frozenset({"Ctrl"}))
+    e.handle(press("h", ["Ctrl"]))
+    assert e.state["mod"] == "move", \
+        "a reconciled hold was expired anyway on the next event"
+
+
+def test_reconcile_logs_the_retraction():
+    e, _, lines = logged_engine()
+    e.handle(xev("press", "o", ["Mod4"], keycode=32, raw_state=0x40))
+    e.handle(xev("press", "Alt_L", ["Mod4"], keycode=64, raw_state=0x40))
+    lines.clear()
+    e.reconcile_holds(frozenset())
+    t = transitions(lines)
+    assert len(t) == 1, lines
+    assert "mod=resize->none" in t[0] and "reconcile" in t[0], t[0]
+
+
+def test_reconcile_does_not_leave_a_layer():
+    """Retracting a modifier belief is not evidence about the LAYER. X has no
+    opinion about `nav`, so a reconciler that also dropped the layer would be
+    inventing the exact state this ticket is about, from the other side."""
+    e, _, _ = engine()
+    e.handle(press("o", ["Mod4"]))
+    e.handle(press("Alt_L"))
+    e.reconcile_holds(frozenset())
+    assert e.state["layer"] == "nav"
+
+
+def test_held_is_exposed_so_the_idle_path_can_skip_the_x_round_trip():
+    e, _, _ = engine()
+    assert e.held == frozenset()
+    e.handle(press("o", ["Mod4"]))
+    e.handle(press("Control_L"))
+    assert e.held == frozenset({"Ctrl"})

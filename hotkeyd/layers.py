@@ -72,12 +72,79 @@ class Event:
     master in the event header. They are what a `Bind(device=...)` predicate is
     matched against. Both default to None so every X-free test and every
     unscoped bind behaves exactly as before the XI2 port.
+
+    `keycode` / `raw_state` are carried for the TRANSITION LOG and nothing else —
+    no matching decision reads them. They exist because dotfiles-hwds.27 needs
+    to know what an event physically was, not what the engine made of it:
+    `key` is already a keysym resolved through a keymap that the xrdp session
+    resets on every connect, and `mods` has had the lock bits stripped. Both
+    default to None, so an X-free caller keeps building the Event it always did
+    and the log says `none` rather than inventing a plausible number.
     """
     kind: str                       # "press" | "release"
     key: str                        # keysym name
     mods: frozenset[str] = field(default_factory=frozenset)
     device: str | None = None       # XI2 source device NAME
     device_id: int | None = None    # XI2 sourceid
+    keycode: int | None = None      # the raw keycode X delivered
+    raw_state: int | None = None    # the modifier mask X delivered, lock bits in
+
+
+def _or_none(v, fmt=str) -> str:
+    return "none" if v is None else fmt(v)
+
+
+def format_transition(prev: dict, new: dict, ev: Event | None = None,
+                      held=(), i3_mode: str | None = None,
+                      note: str | None = None) -> str:
+    """One line describing a published state change, and why it happened.
+
+    This is the whole deliverable of dotfiles-hwds.27. The live `:10` daemon
+    replayed `{"layer":"nav","mod":"resize"}` to the first bar that connected,
+    ~30 s after it started, with nothing pressed — and logged NOTHING, so the
+    single observation could not be attributed and a recurrence would have been
+    just as uninformative. While the daemon believes it is in a layer it grabs
+    that layer's BARE keys (`h j k l`, the arrows, `q`, `Escape`, `Return`), so
+    a spontaneous layer belief eats those keys from every application.
+
+    Every field earns its place by discriminating between the ticket's three
+    candidate causes:
+
+    - `keycode` / `mask` — what X actually delivered, BEFORE the keysym lookup
+      and BEFORE the lock bits were stripped. The xrdp session resets its keymap
+      on every connect, so `key` alone cannot say which physical key it was; and
+      a chord that matched on a mask nobody was holding is the cause-1 shape.
+    - `sourceid` / `device` — the only channel that separates a real keystroke
+      from an injected one, since injection shares the display with real input.
+      `binds.IGNORE_DEVICES` ships EMPTY (deliberately — XTEST is what every
+      harness in this repo injects with), so an injected `$mod+o` reaches the
+      engine and looks identical to a typed one in every field except this one.
+    - `held` / `i3_mode` — the two pieces of engine belief that decide which
+      sublayer is published and whether entry was allowed at all.
+
+    A field the daemon could not resolve prints `none`. Printing a plausible
+    stand-in instead would be worse than no log: cause 1 turns entirely on
+    provenance, and a log that guesses at provenance cannot settle it.
+    """
+    parts = ["transition",
+             f"layer={prev.get('layer')}->{new.get('layer')}",
+             f"mod={_or_none(prev.get('mod'))}->{_or_none(new.get('mod'))}"]
+    if ev is None:
+        parts.append("trigger=none")
+    else:
+        parts += [
+            f"trigger={ev.kind}:{ev.key}",
+            "keycode=" + _or_none(ev.keycode),
+            "mask=" + _or_none(ev.raw_state, lambda v: f"0x{v:04x}"),
+            "mods=" + (",".join(sorted(ev.mods)) or "none"),
+            "sourceid=" + _or_none(ev.device_id),
+            "device=" + _or_none(ev.device, repr),
+        ]
+    parts.append("held=" + (",".join(sorted(held)) or "none"))
+    parts.append(f"i3_mode={i3_mode}")
+    if note:
+        parts.append(f"note={note}")
+    return " ".join(parts)
 
 
 def device_matches(bind, ev: Event) -> bool:
@@ -145,6 +212,58 @@ class LayerEngine:
                 return label
         return None
 
+    # -- belief vs. the server (dotfiles-hwds.27) --------------------------
+    @property
+    def held(self) -> frozenset[str]:
+        """The modifiers the engine currently BELIEVES are down.
+
+        Exposed so the daemon's idle path can skip its reconciliation X
+        round-trip entirely when there is no belief to check — see
+        `reconcile_holds`.
+        """
+        return frozenset(self._held)
+
+    def reconcile_holds(self, mods_down, now=None) -> bool:
+        """Retract held-modifier beliefs the session does not corroborate.
+
+        `_expire_stale_holds` runs only when an EVENT arrives, which is correct
+        while keys are flowing and useless when they are not: an idle daemon
+        holding a phantom modifier keeps publishing (and REPLAYING to every bar
+        that connects) a sublayer nobody is standing in, with nothing scheduled
+        that would ever notice. dotfiles-hwds.27 was observed in exactly that
+        shape — a state served out of the replay buffer that corrected itself
+        only once real events resumed.
+
+        `mods_down` is what the SERVER says is down right now, sampled outside
+        any event. That distinction is the reason this is sound: the `state`
+        mask ON an event is pre-event in X (the release of Ctrl still carries
+        the Ctrl bit), which is precisely why the engine tracks holds from
+        MOD_KEYSYMS instead — but a standalone query has no event to be "pre".
+
+        RETRACT ONLY, never assert. A modifier the engine never observed being
+        pressed is not added here even when the server reports it down: `_held`
+        is what this daemon has SEEN, and manufacturing a sublayer out of a
+        modifier belonging to some other client's gesture would invent the very
+        class of state this method exists to remove.
+
+        The LAYER is deliberately untouched. X has no opinion about `nav`, so
+        there is nothing to reconcile it against, and a reconciler that dropped
+        the layer on a modifier mismatch would silently cancel a legitimate nav
+        the user is standing in.
+        """
+        now = self.clock() if now is None else now
+        dropped = sorted(c for c in self._held if c not in mods_down)
+        for canon in self._held:
+            if canon in mods_down:
+                self._held[canon] = now      # corroborated by the server
+        for canon in dropped:
+            del self._held[canon]
+        if not dropped:
+            return False
+        before = self._last_published
+        self._publish(note="reconcile:dropped=" + ",".join(dropped))
+        return self._last_published != before
+
     # -- i3-mode arbitration ----------------------------------------------
     @property
     def i3_mode(self) -> str:
@@ -167,20 +286,31 @@ class LayerEngine:
             return
         self._i3_mode = name
         if name != DEFAULT_I3_MODE and self._layer != DEFAULT_LAYER:
-            left, self._layer = self._layer, DEFAULT_LAYER
-            self.log(f"i3 entered mode {name!r} — left layer {left!r}")
+            self._layer = DEFAULT_LAYER
             # _publish is change-only, so a layer exit that raced this event
-            # costs one `default` line in total, not two.
-            self._publish()
+            # costs one `default` line in total, not two. No triggering key is
+            # passed because there ISN'T one — see format_transition on why the
+            # log must not imply otherwise.
+            self._publish(note=f"i3-entered-mode:{name}")
 
     def _i3_owns_the_keyboard(self) -> bool:
         return self._i3_mode != DEFAULT_I3_MODE
 
-    def _publish(self):
+    def _publish(self, ev: Event | None = None, note: str | None = None):
+        """Publish the state, and LOG the change with what caused it.
+
+        Logging lives here rather than at each of the four assignments that move
+        the layer because this is the one place that knows a change actually
+        reached the socket: what a bar was told is the thing a recurrence of
+        dotfiles-hwds.27 has to be explained against, and a refused layer entry
+        (which publishes nothing) must not appear as a transition.
+        """
         st = self.state
         if st == self._last_published:
             return                      # publish on CHANGE only
-        self._last_published = st
+        prev, self._last_published = self._last_published, st
+        self.log(format_transition(prev, st, ev, held=self._held,
+                                   i3_mode=self._i3_mode, note=note))
         if self.publisher is not None:
             self.publisher.publish(st)
 
@@ -201,7 +331,7 @@ class LayerEngine:
                 self._held[canon] = now
             else:
                 self._held.pop(canon, None)
-            self._publish()
+            self._publish(ev)
             return []                   # modifiers never act on their own
 
         if ev.kind == "release":
@@ -212,7 +342,7 @@ class LayerEngine:
                 # Publish before returning: expiry above may have changed the
                 # state, and swallowing it here left the bar showing a layer the
                 # engine had already left until the key was finally released.
-                self._publish()
+                self._publish(ev)
                 return []               # auto-repeat: one action per press
             self._down[ev.key] = now
             actions = self._match(ev, on_release=False)
@@ -221,7 +351,7 @@ class LayerEngine:
         # Publish ONCE, after the actions have moved the state. Publishing
         # before would emit the pre-action layer too, so entering a layer would
         # cost two lines instead of the one the contract promises.
-        self._publish()
+        self._publish(ev)
         return out
 
     def _is_repeat(self, key: str, now: float) -> bool:
