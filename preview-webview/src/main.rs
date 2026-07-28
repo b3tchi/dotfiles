@@ -18,6 +18,21 @@ use std::process::ExitCode;
 const DEFAULT_PORT: u16 = 4200;
 const WM_CLASS: &str = "preview-wv";
 
+// ctrl+scroll zoom bounds. Zoom is applied at the *webview* level
+// (webkit_web_view_set_zoom_level) rather than by injecting CSS into the page,
+// which is what makes it work on content preview-d cannot reach into: a d2
+// board renders as a cross-origin iframe of d2-router's own origin
+// ([[adr0009]]), so no amount of parent-page JS can scale it. Browser zoom has
+// no such restriction and covers every content type uniformly.
+//
+// wry 0.45's `with_hotkeys_zoom(true)` is NOT a substitute — that flag is
+// unwired on the WebKitGTK backend (wry's src/webkitgtk/mod.rs implements
+// `zoom` and nothing else), so it silently does nothing on Linux.
+const ZOOM_MIN: f64 = 0.25;
+const ZOOM_MAX: f64 = 5.0;
+const ZOOM_STEP: f64 = 1.1;
+const ZOOM_DEFAULT: f64 = 1.0;
+
 const USAGE: &str = "usage: preview-wv <N> [--port P]\n\n\
 N       window slot number (non-negative integer, required)\n\
 --port  daemon port (default: $PREVIEW_PORT, else 4200)\n";
@@ -26,6 +41,107 @@ N       window slot number (non-negative integer, required)\n\
 struct Config {
     n: u32,
     port: u16,
+}
+
+/// Clamp a zoom scale factor into the usable range. WebKit happily accepts
+/// absurd factors and renders the page unusably, so every level that reaches
+/// `set_zoom_level` goes through here.
+fn clamp_zoom(level: f64) -> f64 {
+    level.clamp(ZOOM_MIN, ZOOM_MAX)
+}
+
+/// One wheel notch of zoom: `direction` > 0 zooms in, < 0 out, 0 leaves the
+/// level alone (but still clamps, so a nonsense starting value is corrected).
+///
+/// Multiplicative rather than additive so a notch feels the same at 30% as at
+/// 300%, and so in-then-out is an exact round trip instead of drifting.
+fn next_zoom_level(current: f64, direction: i32) -> f64 {
+    let next = match direction {
+        d if d > 0 => current * ZOOM_STEP,
+        d if d < 0 => current / ZOOM_STEP,
+        _ => current,
+    };
+    clamp_zoom(next)
+}
+
+/// Map a GTK smooth-scroll y-delta onto a zoom direction. GTK reports
+/// y-negative for scrolling up / away from the user, which is zoom-in.
+fn scroll_delta_direction(delta_y: f64) -> i32 {
+    if delta_y < 0.0 {
+        1
+    } else if delta_y > 0.0 {
+        -1
+    } else {
+        0
+    }
+}
+
+/// Attach ctrl+scroll zoom to the underlying WebKitGTK widget.
+///
+/// The handler goes on the WebKit widget itself, not on the containing vbox:
+/// GTK delivers scroll to the deepest widget under the pointer, and WebKit
+/// consumes it to scroll the page, so a parent-level handler would never see
+/// it. Connecting here runs before WebKit's default handler, and returning
+/// `Propagation::Stop` on a ctrl+scroll keeps the page from also scrolling
+/// while zooming. Plain scroll returns `Proceed` and behaves normally.
+///
+/// The level is read back from the `zoom-level` GObject property rather than
+/// tracked in a local, so the widget stays the single source of truth. Using
+/// the property also avoids taking a direct `webkit2gtk` dependency just to
+/// reach `set_zoom_level` — the crate is already linked transitively by wry,
+/// and its version is pinned there (`=2.0.1`), so naming it here would risk a
+/// version skew for no gain.
+fn wire_ctrl_scroll_zoom(webview: &wry::WebView) {
+    use glib::prelude::ObjectExt;
+    use gtk::prelude::WidgetExt;
+    use wry::WebViewExtUnix;
+
+    const ZOOM_PROPERTY: &str = "zoom-level";
+
+    let wk = webview.webview();
+    let target = wk.clone();
+
+    wk.connect_scroll_event(move |_, event| {
+        if !event
+            .state()
+            .contains(gtk::gdk::ModifierType::CONTROL_MASK)
+        {
+            return glib::Propagation::Proceed;
+        }
+
+        // Discrete wheels report Up/Down; touchpads and newer mice report
+        // Smooth with a delta. Both reach us, so both are handled.
+        let direction = match event.direction() {
+            gtk::gdk::ScrollDirection::Up => 1,
+            gtk::gdk::ScrollDirection::Down => -1,
+            gtk::gdk::ScrollDirection::Smooth => scroll_delta_direction(event.delta().1),
+            _ => 0,
+        };
+        if direction == 0 {
+            // Still swallow it: a horizontal ctrl+scroll should not sneak
+            // through as a page scroll when the user meant to zoom.
+            return glib::Propagation::Stop;
+        }
+
+        let current = target.property::<f64>(ZOOM_PROPERTY);
+        target.set_property(ZOOM_PROPERTY, next_zoom_level(current, direction));
+
+        glib::Propagation::Stop
+    });
+
+    // ctrl+0 resets. Zoom with no way back is a trap — the window has no
+    // chrome, so there is no menu or button to recover with.
+    let reset_target = wk.clone();
+    wk.connect_key_press_event(move |_, event| {
+        let ctrl = event
+            .state()
+            .contains(gtk::gdk::ModifierType::CONTROL_MASK);
+        if ctrl && event.keyval() == gtk::gdk::keys::constants::_0 {
+            reset_target.set_property(ZOOM_PROPERTY, ZOOM_DEFAULT);
+            return glib::Propagation::Stop;
+        }
+        glib::Propagation::Proceed
+    });
 }
 
 /// Pure arg-parse: no I/O, no GTK, so it is unit-testable without a
@@ -314,13 +430,15 @@ fn run_window(cfg: &Config) -> ExitCode {
     // renders WebKitGTK's own connection-error page and the process stays
     // up (sp013 Task 1 edge case) — reconnect is the daemon-side
     // websocket's concern, not this binary's.
-    let _webview = match wry::WebViewBuilder::new_gtk(vbox).with_url(&url).build() {
+    let webview = match wry::WebViewBuilder::new_gtk(vbox).with_url(&url).build() {
         Ok(v) => v,
         Err(e) => {
             eprintln!("preview-wv: failed to create webview: {e}");
             return ExitCode::FAILURE;
         }
     };
+
+    wire_ctrl_scroll_zoom(&webview);
 
     // bo2 observability: mark that a live event loop was reached, and
     // precompute the close message so the 'static event-loop closure can log
@@ -350,6 +468,60 @@ mod tests {
 
     fn args(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn zoom_in_grows_and_out_shrinks() {
+        assert!(next_zoom_level(1.0, 1) > 1.0);
+        assert!(next_zoom_level(1.0, -1) < 1.0);
+    }
+
+    #[test]
+    fn zoom_direction_zero_is_a_no_op() {
+        assert_eq!(next_zoom_level(1.3, 0), 1.3);
+    }
+
+    #[test]
+    fn zoom_clamps_at_both_ends() {
+        // Walking far past either bound must settle exactly on it, never
+        // beyond — WebKit accepts absurd scale factors and renders unusably.
+        let mut hi = 1.0;
+        for _ in 0..200 {
+            hi = next_zoom_level(hi, 1);
+        }
+        assert_eq!(hi, ZOOM_MAX);
+
+        let mut lo = 1.0;
+        for _ in 0..200 {
+            lo = next_zoom_level(lo, -1);
+        }
+        assert_eq!(lo, ZOOM_MIN);
+    }
+
+    #[test]
+    fn zoom_in_then_out_returns_to_start() {
+        // A notch up followed by a notch down must land back where it started,
+        // or repeated wheel jitter would drift the level permanently.
+        let round_trip = next_zoom_level(next_zoom_level(1.0, 1), -1);
+        assert!(
+            (round_trip - 1.0).abs() < 1e-9,
+            "round trip drifted to {round_trip}"
+        );
+    }
+
+    #[test]
+    fn zoom_out_of_range_input_is_pulled_back_in() {
+        assert_eq!(next_zoom_level(99.0, 0), ZOOM_MAX);
+        assert_eq!(next_zoom_level(0.001, 0), ZOOM_MIN);
+    }
+
+    #[test]
+    fn scroll_delta_maps_to_a_direction() {
+        // GTK smooth-scroll deltas are y-negative for "up"/away from the user,
+        // which is the zoom-in gesture.
+        assert_eq!(scroll_delta_direction(-1.0), 1);
+        assert_eq!(scroll_delta_direction(1.0), -1);
+        assert_eq!(scroll_delta_direction(0.0), 0);
     }
 
     #[test]
