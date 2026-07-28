@@ -117,22 +117,57 @@ n=$(pgrep -f "hotkeyd.py.*--display $XA" 2>/dev/null | wc -l)
 # recovered a DEAD daemon and this bind exists just as much for one that is
 # alive and wrong. Asserting the old string would now pass only if the old,
 # insufficient bind were still there.
+# The CHORD is read from binds.PANIC_CHORD rather than written here, so this
+# check survives the chord moving — which it has done twice ($mod+Shift+F12 ->
+# $mod+Shift+r -> $mod+Ctrl+Shift+r, the last when the restart verbs
+# consolidated onto $mod+Shift+r as the hammer). A hardcoded chord makes this
+# assertion fail on the commit that MOVES the bind, which is noise, while
+# silently passing if the bind and the reservation ever disagree — the one
+# thing it exists to catch.
 COMMON="$HERE/../i3/config.common"
-BIND_LINE="$(grep -n 'bindsym $mod+Shift+r .*hotkeyd-panic\.sh panic' \
-             "$COMMON" || true)"
+PANIC_CHORD="$(cd "$HERE" && python3 -c 'import binds; print(binds.PANIC_CHORD)')"
+[ -n "$PANIC_CHORD" ] || bad "could not read binds.PANIC_CHORD"
+BIND_LINE="$(grep -nF "bindsym $PANIC_CHORD " "$COMMON" \
+             | grep 'hotkeyd-panic\.sh panic' || true)"
 if [ -n "$BIND_LINE" ]; then
-    ok "i3 base config binds \$mod+Shift+r to hotkeyd-panic.sh panic"
+    ok "i3 base config binds $PANIC_CHORD to hotkeyd-panic.sh panic"
 else
-    bad "no panic bind calling hotkeyd-panic.sh panic in i3/config.common"
+    bad "no panic bind calling hotkeyd-panic.sh panic on $PANIC_CHORD in i3/config.common"
 fi
 
-# And the superseded one must be GONE, not merely joined. Two escape hatches is
-# one too many: the restart bind would still be reachable, still reinstate the
-# table that broke the session, and still look like the recovery key.
-if grep -q '^[[:space:]]*bind\(sym\|code\).*hotkeyd\.sh restart' "$COMMON"; then
-    bad "the superseded 'hotkeyd.sh restart' escape hatch is still bound"
+# The hammer must NOT be the panic chord. They are opposite verbs — one
+# restarts the daemon, the other stops it and hands the keyboard back — and a
+# session where the same key does both has no way to recover from a daemon that
+# is alive and wrong.
+HAMMER_LINE="$(grep -n 'bindsym $mod+Shift+r ' "$COMMON" || true)"
+if printf '%s' "$HAMMER_LINE" | grep -q 'hotkeyd-panic\.sh panic'; then
+    bad "the hammer chord \$mod+Shift+r also runs panic — they must stay distinct"
 else
-    ok "the superseded restart escape hatch is gone from i3/config.common"
+    ok "the hammer chord is distinct from $PANIC_CHORD"
+fi
+
+# `hotkeyd.sh restart` MAY be bound — it is the hammer's first step — but never
+# on the panic chord.
+#
+# This used to demand that restart be bound NOWHERE. That was right while
+# restart was the superseded ESCAPE HATCH: two hatches is one too many, and the
+# restart bind would have looked like the recovery key while reinstating the
+# very table that broke the session. It stopped being right when the restart
+# verbs consolidated onto $mod+Shift+r as a convenience hammer and panic moved
+# to its own chord. The invariant that actually carries the original reasoning
+# is not "restart is unbound" but "restart and panic are never the same key" —
+# because the whole point of panic is that it works when restarting the daemon
+# would only reinstate the fault.
+RESTART_CHORDS="$(grep -E '^[[:space:]]*bind(sym|code) ' "$COMMON" \
+                  | grep 'hotkeyd\.sh restart' \
+                  | awk '{print $2}' || true)"
+if [ -z "$RESTART_CHORDS" ]; then
+    ok "no 'hotkeyd.sh restart' bind in i3/config.common"
+elif printf '%s\n' "$RESTART_CHORDS" | grep -qxF "$PANIC_CHORD"; then
+    bad "'hotkeyd.sh restart' is bound to the panic chord $PANIC_CHORD — \
+restarting a daemon that is alive and wrong reinstates the fault"
+else
+    ok "'hotkeyd.sh restart' is bound ($RESTART_CHORDS), and not on $PANIC_CHORD"
 fi
 
 # restart takes the display as an ARGUMENT — the i3 escape-hatch bind runs with

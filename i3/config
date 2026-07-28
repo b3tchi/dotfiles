@@ -61,26 +61,24 @@ include ~/.dotfiles/i3/config.common
 # qs bar env. MUST precede every use: i3 substitutes a variable only in lines
 # parsed AFTER its `set`, and leaves an earlier `$qsbarenv` in the string
 # verbatim — which `sh` then expands to nothing, silently dropping the env
-# rather than failing. This `set` used to sit BELOW the $mod+Shift+c bind, so
-# that bind had been restarting the bar with neither knob applied while the
-# exec_always below (parsed later) got both. Rationale for the knobs is at that
-# exec_always; the values are documented in quickshell/config/Common/Session.qml.
+# rather than failing. Used by the exec_always further down, which documents
+# the knobs; the values are documented in quickshell/config/Common/Session.qml.
 set $qsbarenv env QS_BAR_INSET_BOTTOM=50 QS_BAR_INSET_AUTO=1
 
-# reload the configuration file, AND restart the bar with it.
-# i3 runs exec_always on RESTART only — a plain `reload` re-reads the config
-# and leaves every exec_always process untouched (verified empirically:
-# exec_always ran once at start, still once after reload, twice after
-# restart). The bar is an exec_always, so a bare reload kept a quickshell
-# instance alive with whatever QML it started with — edits appeared to have
-# no effect, and a session could sit for hours on stale code while its
-# config was current. Chaining the restart onto the same bind keeps
-# "reload" meaning what it looks like it means.
+# Plain i3 restart — re-execs i3 in place, preserving the layout, which is the
+# one thing `reload` cannot do.
 #
-# Stays in i3 while $mod+Shift+d (the bare bar restart) moved to the daemon:
-# `reload` is the way back from a bad config, and a recovery key must not
-# depend on the process it may have to recover from.
-bindsym $mod+Shift+c reload, exec --no-startup-id $qsbarenv ~/.dotfiles/quickshell/qs-start.sh
+# This chord used to be `reload, exec ... qs-start.sh`. Both halves of that are
+# now in the $mod+Shift+r hammer (config.common), which reloads AND restarts
+# the bar AND the daemon, so keeping a second partial version of it here would
+# be a chord that does almost the same thing for no reason. Plain `restart` had
+# been on $mod+Ctrl+Shift+r, which panic now holds.
+#
+# i3 runs exec_always on RESTART only — a plain `reload` re-reads the config and
+# leaves every exec_always process untouched (verified empirically: exec_always
+# ran once at start, still once after reload, twice after restart). That is why
+# the hammer restarts the bar explicitly rather than trusting `reload` to.
+bindsym $mod+Shift+c restart
 
 # --- autostarts (the base never execs) ---------------------------------------
 

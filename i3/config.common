@@ -310,7 +310,8 @@ for_window [urgent=latest] focus
 # See the note there for why a bare reload is not enough.)
 
 # restart i3 inplace (preserves your layout/session, can be used to upgrade i3)
-# $mod+Shift+r is the PANIC bind (see below). Plain i3 restart:
+# Bound to $mod+Shift+c in i3/config. $mod+Shift+r is the HAMMER and
+# $mod+Ctrl+Shift+r is PANIC — see the block further down. Also available as
 #   i3-msg restart
 
 # exit i3 (logs you out of your X session)
@@ -410,7 +411,7 @@ mode "resize" {
 # modifier spelling ($mod, Mod4+, Mod1+) — see binds.RESERVED_CHORDS. A
 # display-agnostic token check alone would leave it stealable on one display.
 #
-# CHORD CHOICE: $mod+Shift+r, and reachability beats accident-resistance.
+# CHORD CHOICE: $mod+Ctrl+Shift+r, and reachability beats accident-resistance.
 #
 # This was $mod+Shift+F12, chosen to be awkward on the theory that a
 # comfortable emergency chord gets pressed by accident. That theory assumed a
@@ -419,18 +420,36 @@ mode "resize" {
 # the device most likely to need it. An emergency control that cannot be
 # pressed is not an emergency control.
 #
-# $mod+Shift+r previously ran i3 `restart`. That is a deliberate trade: panic
-# is strictly more useful than restart, it subsumes the "my session is wrong,
-# reset it" intent that made people reach for restart, and plain restart is
-# still available as `i3-msg restart` from any terminal — which is reachable
-# precisely BECAUSE panic hands the keyboard back to i3.
-bindsym $mod+Shift+r exec --no-startup-id ~/.dotfiles/hotkeyd/hotkeyd-panic.sh panic
+# $mod+Shift+r previously ran i3 `restart`, then panic, and now the hammer
+# below. Panic moved ONE MODIFIER OUT rather than away: it is still reachable
+# without an F12 row, which was the whole reason it left $mod+Shift+F12.
+bindsym $mod+Ctrl+Shift+r exec --no-startup-id ~/.dotfiles/hotkeyd/hotkeyd-panic.sh panic
 
-# Plain i3 restart. It lived on $mod+Shift+r until panic took that chord (the
-# Android RDP client has no F12 row, so the emergency control had to be
-# reachable). One modifier further out: same finger position, hard to hit by
-# accident, and no F12 involved so it works on the phone too.
-bindsym $mod+Ctrl+Shift+r restart
+# THE HAMMER. One chord for "my session is wrong, reset it" — the intent that
+# used to be spread across four chords (i3 restart, i3 reload + bar, bar alone,
+# daemon restart-by-terminal). Reload first, then this display's daemon, then
+# the bar.
+#
+# NOT the same thing as panic, which is why they are different chords rather
+# than one escalating chord: the hammer RESTARTS the daemon, panic STOPS it and
+# gives the keyboard back to i3. If the daemon is the problem, restarting it
+# reinstates the problem — that is exactly when you want the other chord, and
+# needing to press it is not the moment to discover it shares a key.
+#
+# i3-OWNED, and it must stay that way. A restart-everything bind that the
+# daemon owned could not restart a WEDGED daemon, which is most of why you
+# would reach for it. binds.py may not bind this chord for the same reason it
+# may not bind panic's.
+#
+# `hotkeyd.sh restart` takes no display: it falls back to $DISPLAY, so each
+# session's i3 restarts only its OWN daemon (:0 and :10 are separate daemons
+# with separate grabs). The env pair is spelled out because config.common
+# cannot see i3/config's $qsbarenv — i3 scopes variables per file.
+#
+# `sh -c` with `;` follows the pattern config.d/native.conf already uses: i3
+# treats both `,` and `;` as command separators, so a multi-step shell command
+# has to be quoted or it is parsed as i3 commands.
+bindsym $mod+Shift+r reload, exec --no-startup-id sh -c '$HOME/.dotfiles/hotkeyd/hotkeyd.sh restart; env QS_BAR_INSET_BOTTOM=50 QS_BAR_INSET_AUTO=1 $HOME/.dotfiles/quickshell/qs-start.sh'
 
 # Lock screen
 bindsym $mod+9 exec --no-startup-id blurlock

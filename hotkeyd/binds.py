@@ -70,7 +70,14 @@ DEFAULT_MOD = "Mod4"
 # The one chord i3 keeps forever (i3/config.common, `hotkeyd-panic.sh panic`).
 # Pressing it stops the daemon, links i3/config.d/zz-fallback-binds.conf and
 # reloads i3 — the way back from a daemon that is dead OR alive and wrong.
-PANIC_CHORD = "$mod+Shift+r"
+#
+# Moved from $mod+Shift+r when the restart verbs consolidated onto that chord
+# as the hammer. One modifier out, not away: reachability without an F12 row is
+# why panic left $mod+Shift+F12 in the first place, and $mod+Ctrl+Shift+r keeps
+# it. The hammer RESTARTS the daemon and panic STOPS it, so they must stay
+# separate chords — if the daemon is what is broken, restarting it reinstates
+# the fault, and that is precisely when the other chord is needed.
+PANIC_CHORD = "$mod+Ctrl+Shift+r"
 
 # Every modifier `$mod` resolves to on a display this repo runs on: Mod4 on the
 # native :0 session, Mod1 on the xrdp :10 session (xrdp/xinitrc merges
@@ -505,14 +512,17 @@ BINDS: list[Bind] = [
     Bind("$mod+Return", run("~/.local/bin/wm-launch-terminal st")),
     Bind("$mod+d", run("~/.dotfiles/quickshell/qs-overlay.sh launcher")),
     Bind("$mod+p", run("~/.dotfiles/quickshell/qs-overlay.sh projects")),
-    # The env pair rides the command because i3's `$qsbarenv` var does not
-    # survive the move (vars are per-file, and this file is not an i3 file at
-    # all). Same values, same position as the i3 spelling it replaces —
-    # quickshell/config/Common/Session.qml documents both knobs.
-    # on_release matches i3's `--release`: the restart fires when the chord is
-    # let go, so the keystroke is not still down while the bar is torn down.
-    Bind("$mod+Shift+d",
-         run("env QS_BAR_INSET_BOTTOM=50 QS_BAR_INSET_AUTO=1 "
-             "~/.dotfiles/quickshell/qs-start.sh"),
-         on_release=True),
+    # $mod+Shift+d (bar restart, on_release) was migrated here and then REMOVED
+    # when the restart verbs consolidated onto the $mod+Shift+r hammer, which
+    # restarts the bar as one of its three steps. A chord doing a strict subset
+    # of another chord's work is the kind of thing that survives for years
+    # because nobody is sure what still depends on it.
+    #
+    # Dropping it also took the daemon's ONLY on_release bind with it, which
+    # closes this table's exposure to dotfiles-hwds.24: xrdp may deliver each
+    # keystroke on :10 as release-press-release, and nothing in the engine
+    # dedups releases (`_is_repeat` guards the press path only), so an
+    # on_release bind there could fire twice per press. The remaining
+    # --release bind in the system, $mod+Print, is i3-owned and unaffected.
+    # Re-adding any on_release bind here reopens that, unmeasured.
 ]
