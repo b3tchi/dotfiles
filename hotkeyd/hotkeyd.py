@@ -393,6 +393,14 @@ class SingleInstance:
 # grabs
 # --------------------------------------------------------------------------
 
+def _grab_log(msg: str):
+    """Where a grab problem goes. Same stream as the layer transitions, so the
+    two sit in one ordered story in `~/.local/state/hotkeyd-<n>.log` — a chord
+    that stopped being served is only diagnosable next to what the engine
+    believed at the time."""
+    print(f"hotkeyd: {msg}", file=sys.stderr, flush=True)
+
+
 class GrabManager:
     """Owns the mapping chord -> (keycode, mask) and the grabs registered for it.
 
@@ -400,11 +408,21 @@ class GrabManager:
     `sync` — the real X display in production, a recorder in tests.
     """
 
-    def __init__(self, display, mod: str = None):
+    def __init__(self, display, mod: str = None, log=None):
         self.d = display
         self.mod = mod or default_binds.DEFAULT_MOD
         self.problems: list[str] = []
         self._active: dict[str, tuple[int, int]] = {}   # chord -> (code, mask)
+        # What the TABLE asks for, as opposed to what is currently grabbed.
+        # dotfiles-hwds.41: re-deriving the next grab set from `_active` made
+        # the set monotonic — a chord lost to one transient keymap could never
+        # return, because the thing that would have asked for it again was the
+        # very entry that got deleted.
+        self._wanted: list[str] = []
+        self.log = log or _grab_log
+        # Problems already reported, so a chord that stays unresolvable across a
+        # burst of MappingNotify is announced once rather than per event.
+        self._reported: set[str] = set()
 
     def _resolve(self, chord: str) -> tuple[int, int] | None:
         try:
@@ -445,23 +463,54 @@ class GrabManager:
         Only the difference moves: a chord present before and after keeps its
         grab untouched, so SIGHUP reload never drops a grab mid-gesture.
         """
-        wanted = list(dict.fromkeys(chords))
+        self._wanted = list(dict.fromkeys(chords))
+        self._apply()
+        self.d.sync()
+
+    def _apply(self) -> bool:
+        """Re-resolve THE WANTED SET against the live keymap and move only the
+        difference. Returns True if any grab actually changed.
+
+        Resolution is redone for every wanted chord, including the ones with no
+        current grab: that is what lets a chord return after the keymap that
+        hid it settles (dotfiles-hwds.41). A chord that still cannot resolve is
+        reported and stays wanted — never deleted from the set that will be
+        asked for again.
+        """
         self.problems = []
         resolved: dict[str, tuple[int, int]] = {}
-        for chord in wanted:
+        for chord in self._wanted:
             r = self._resolve(chord)
             if r is not None:
                 resolved[chord] = r
 
+        changed = False
         for chord, (code, mask) in list(self._active.items()):
             if resolved.get(chord) != (code, mask):
                 self._ungrab(code, mask)
                 del self._active[chord]
+                changed = True
 
         for chord, (code, mask) in resolved.items():
             if self._active.get(chord) != (code, mask):
                 self._grab(chord, code, mask)
-        self.d.sync()
+                changed = True
+        self._report_problems()
+        return changed
+
+    def _report_problems(self):
+        """Announce a problem the first time it appears.
+
+        Printing only at startup (which is what the daemon did) meant every
+        mid-session grab loss was discarded unread — the live :10 log showed
+        "59 chords grabbed", zero BadAccess and no error while the directional
+        group was already dead. Announcing on every MappingNotify instead would
+        spam a burst, so the report is edge-triggered on the problem TEXT.
+        """
+        current = set(self.problems)
+        for msg in sorted(current - self._reported):
+            self.log(msg)
+        self._reported = current
 
     @property
     def chords(self):
@@ -474,23 +523,19 @@ class GrabManager:
         return None
 
     def on_mapping_notify(self) -> bool:
-        """Compare-then-regrab. poc013 saw two spurious MappingNotify at every
-        daemon startup, so regrabbing unconditionally would churn every grab for
-        nothing; only a keycode that actually moved is re-registered."""
-        changed = False
-        self.problems = []
-        for chord, (code, mask) in list(self._active.items()):
-            r = self._resolve(chord)
-            if r is None:
-                self._ungrab(code, mask)
-                del self._active[chord]
-                changed = True
-                continue
-            new_code, new_mask = r
-            if (new_code, new_mask) != (code, mask):
-                self._ungrab(code, mask)
-                self._grab(chord, new_code, new_mask)
-                changed = True
+        """Compare-then-regrab against THE WANTED SET. poc013 saw two spurious
+        MappingNotify at every daemon startup, so regrabbing unconditionally
+        would churn every grab for nothing; `_apply` moves only what changed.
+
+        dotfiles-hwds.41: this used to walk `self._active` instead, which made
+        the grab set monotonic — a chord whose keysym momentarily resolved to 0
+        (routine on `:10`, where xrdp reprograms the keymap on every RDP
+        reconnect) was deleted, and the next notify iterated a set that no
+        longer mentioned it. Half the table could die with the daemon still
+        reporting healthy. Driving from `_wanted` makes every re-grab a chance
+        to recover rather than another chance to lose.
+        """
+        changed = self._apply()
         if changed:
             self.d.sync()
         return changed
@@ -1182,8 +1227,10 @@ def run_daemon(table, display_name: str | None) -> int:
     inst = SingleInstance(lock_path(disp_name))
     pub = L.StatePublisher(L.socket_path(disp_name))
     dae = Daemon(table, d, pub, display=disp_name)
-    for p in dae.grabs.problems:
-        print(f"hotkeyd: {p}", file=sys.stderr)
+    # Startup problems are already on the stream: GrabManager reports each one
+    # the first time it appears, at whatever sync produced it (dotfiles-hwds.41).
+    # Reprinting them here would double every line of the first sync while still
+    # saying nothing about the mid-session losses that were the actual bug.
 
     reload_wanted = {"flag": False}
     stop = {"flag": False}

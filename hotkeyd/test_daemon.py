@@ -292,6 +292,81 @@ def test_mapping_notify_that_removes_a_key_reports_it_and_keeps_running():
 
 
 # --------------------------------------------------------------------------
+# the grab set must not be MONOTONIC (dotfiles-hwds.41)
+#
+# xrdp reprograms the keymap on every RDP (re)connect, so `:10` sees
+# MappingNotify churn a native session never does. While the keymap is being
+# rebuilt a keysym can momentarily resolve to keycode 0 — and the old re-grab
+# path deleted such a chord from the grab set and re-derived the next set from
+# THE SURVIVORS, so the set could only ever shrink and the chord never came
+# back. Measured live on :10: `$mod+o` still fired while the whole directional
+# group was dead, with no BadAccess and no log line, until the daemon was
+# restarted.
+#
+# The rule these three assert: the wanted set is the TABLE's, never whatever
+# happens to still be grabbed.
+# --------------------------------------------------------------------------
+
+def test_a_keysym_that_comes_back_gets_its_chord_grabbed_again():
+    d = FakeDisplay()
+    g = H.GrabManager(d)
+    g.sync_binds(["Mod4+o", "Mod4+h"])
+    del d.keymap["o"]                       # keymap mid-rebuild
+    g.on_mapping_notify()
+    d.keymap["o"] = 32                      # ...and settled
+    d.grabs.clear()
+    g.on_mapping_notify()
+    assert grabs_for(d, 32), (
+        "chord was dropped on a transient keymap and never restored — "
+        "the re-grab re-derived from the survivors, not from the table")
+
+
+def test_a_chord_refused_at_startup_is_retried_on_the_next_notify():
+    """A refusal is a moment in time — i3 mid-restart still holding the chord —
+    not a property of the chord. The refusal happens at the FIRST sync here on
+    purpose: `_grab` returns before recording the chord, so it never reaches
+    `_active` at all, and a re-grab driven by the survivors has nothing left to
+    ask about. That is the shape that stranded a bind for a whole session.
+    """
+    d = FakeDisplay(fail_chords={32})       # contested from the start
+    g = H.GrabManager(d)
+    g.sync_binds(["Mod4+o"])
+    assert not grabs_for(d, 32)
+    d.fail_keycodes = set()                 # contender let go
+    g.on_mapping_notify()
+    assert grabs_for(d, 32), "a chord refused at startup was never retried"
+
+
+def test_a_grab_lost_mid_session_is_reported_when_it_happens():
+    """`problems` was printed only at startup, so every mid-session loss was
+    discarded unread — which is why the live log showed 59 chords grabbed and
+    no error while the chords were already gone."""
+    seen = []
+    d = FakeDisplay()
+    g = H.GrabManager(d, log=seen.append)
+    g.sync_binds(["Mod4+o", "Mod4+h"])
+    del d.keymap["o"]
+    g.on_mapping_notify()
+    assert any("o" in m for m in seen), (
+        f"grab loss was not reported when it happened: {seen}")
+
+
+def test_an_unchanged_problem_is_not_reported_twice():
+    """MappingNotify arrives in bursts; a chord that stays unresolvable must not
+    reprint on every one of them."""
+    seen = []
+    d = FakeDisplay()
+    g = H.GrabManager(d, log=seen.append)
+    g.sync_binds(["Mod4+o"])
+    del d.keymap["o"]
+    g.on_mapping_notify()
+    first = len(seen)
+    g.on_mapping_notify()
+    g.on_mapping_notify()
+    assert len(seen) == first, f"same problem reported {len(seen)} times: {seen}"
+
+
+# --------------------------------------------------------------------------
 # reload — SIGHUP must not drop a grab that exists in both tables
 # --------------------------------------------------------------------------
 
