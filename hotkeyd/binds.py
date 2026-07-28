@@ -471,4 +471,48 @@ BINDS: list[Bind] = [
     # $mod is Mod1 and the Mod4 forms were free. Reintroduce each group in the
     # SAME commit that deletes it from the i3 config, never before.
     Bind("$mod+o", enter_layer("nav")),
+
+    # ---- THE ENTRY-POINT GROUP (dotfiles-hwds.33) -------------------------
+    # The four binds `i3/config` carried itself rather than delegating to
+    # `config.common` — terminal, launcher, project picker, bar restart. They
+    # sat in the entry point because they are the ones whose COMMAND (not
+    # keysym) differs per session type, and an entry point was the only i3
+    # scope that could express that.
+    #
+    # SCOPE: the two sessions this host runs — native `:0` and the xrdp `:10`
+    # that `xrdp/xinitrc` starts with a bare `exec i3`. Both load `i3/config`,
+    # so both are served from here now. `i3/config-xrdp` is a SEPARATE entry
+    # point for proot Arch on Android and is deliberately untouched — it keeps
+    # its own four binds, and nothing double-fires because that session starts
+    # no daemon (it includes no `config.d` overlay, and `hotkeyd.sh start` is
+    # autostarted only from `native.conf` / `wsl.conf`). Migrating proot needs
+    # that autostart wired first; it is not in this change.
+    #
+    # Why the daemon rather than pushing them down into the config.d overlays:
+    # MEASURED, an i3 variable set in an included overlay is INVISIBLE to the
+    # file that included it — `gaps top $v` with `$v` set in the include fails
+    # byte-identically to a genuinely undefined var. A var and the binds using
+    # it must therefore share one file, and since i3 treats a duplicate
+    # keybinding as a config ERROR rather than last-wins, that would have meant
+    # a private copy of all four in native.conf AND wsl.conf. The daemon has no
+    # such limit: it resolves `$mod` per display at startup, so this one table
+    # means Super on :0 and Alt on :10.
+    #
+    # NOT MIGRATED, deliberately: `$mod+Shift+c` (`reload, exec ...`). It is a
+    # recovery key — the way back from a bad config — and putting i3 reload
+    # behind the daemon is the loss that 62075b7d just undid for `restart`.
+    # It stays in i3/config, where a dead daemon cannot take it away.
+    Bind("$mod+Return", run("~/.local/bin/wm-launch-terminal st")),
+    Bind("$mod+d", run("~/.dotfiles/quickshell/qs-overlay.sh launcher")),
+    Bind("$mod+p", run("~/.dotfiles/quickshell/qs-overlay.sh projects")),
+    # The env pair rides the command because i3's `$qsbarenv` var does not
+    # survive the move (vars are per-file, and this file is not an i3 file at
+    # all). Same values, same position as the i3 spelling it replaces —
+    # quickshell/config/Common/Session.qml documents both knobs.
+    # on_release matches i3's `--release`: the restart fires when the chord is
+    # let go, so the keystroke is not still down while the bar is torn down.
+    Bind("$mod+Shift+d",
+         run("env QS_BAR_INSET_BOTTOM=50 QS_BAR_INSET_AUTO=1 "
+             "~/.dotfiles/quickshell/qs-start.sh"),
+         on_release=True),
 ]

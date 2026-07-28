@@ -423,12 +423,28 @@ def test_the_shipped_table_uses_the_mod_token_not_a_hardcoded_modifier():
     assert hardcoded == [], f"hardcoded modifier in the table: {hardcoded}"
 
 
-def test_the_shipped_table_is_scoped_to_the_nav_cutover():
+@pytest.mark.parametrize("mod", ["Mod4", "Mod1"])
+def test_no_chord_is_owned_by_both_i3_and_the_daemon(mod):
     """sp020's anti-pattern: a chord must not exist in both i3 and the daemon at
-    any commit boundary. Groups whose cutover is not T6 belong to i3 until the
-    commit that deletes them from it."""
-    assert [b.chord for b in B.BINDS] == ["$mod+o"], \
-        "table carries groups that i3 still owns"
+    any commit boundary. Groups whose cutover has not landed belong to i3 until
+    the commit that deletes them from it.
+
+    This asserts the RULE, not a chord list. It was `== ["$mod+o"]` until the
+    entry-point cutover (dotfiles-hwds.33) added four more, and a hardcoded
+    roster fails every time the roster legitimately changes — which is the one
+    moment you need the anti-pattern check working, not rewritten. The same
+    argument the panic-chord fixtures below make for deriving from
+    B.PANIC_CHORD.
+
+    Checked under BOTH $mod resolutions because the collision is per-display:
+    a chord the daemon owns as Mod4 on :0 can still be live in i3 as Mod1 on
+    :10, and a single-resolution check sees neither half.
+    """
+    clash = binds_py_chords(mod) & i3_owned_chords(mod)
+    assert clash == set(), (
+        f"double-owned with $mod={mod}: {sorted(clash)} — a chord live in both "
+        "engines double-fires, and X raises no BadAccess to warn you (core and "
+        "XI2 passive grabs sit in separate conflict domains)")
 
 
 # --------------------------------------------------------------------------
@@ -632,7 +648,13 @@ def test_the_i3_config_parser_actually_sees_binds():
     owned = i3_owned_chords("Mod4")
     assert (("Mod4",), "h") in owned, "did not find $mod+h in i3/config.common"
     assert (("Mod4", "Shift"), "q") in owned, "did not find $mod+Shift+q"
-    assert len(owned) > 80, f"only parsed {len(owned)} top-level i3 binds"
+    # A floor, not a headcount: it exists to catch a parser that returned
+    # nothing (or almost nothing), so it must sit well below the real total and
+    # stay there as cutovers move binds OUT of i3. It read `> 80` against 81
+    # binds — one migration of any size away from failing for the right reason
+    # in the wrong place, which is what the entry-point cutover
+    # (dotfiles-hwds.33, 81 -> 77) then did.
+    assert len(owned) > 50, f"only parsed {len(owned)} top-level i3 binds"
 
 
 def test_nav_left_i3_and_lives_only_in_the_daemon():

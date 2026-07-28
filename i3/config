@@ -23,9 +23,18 @@
 set_from_resource $mod i3wm.mod Mod4
 
 # Platform overlay (ft003 i3-config-layering): rotz links exactly one of
-# i3/config.d/{native,wsl}.conf here. Overlay owns $term + all autostart
-# execs + bar; base owns keybinds/workspaces/modes/colors and never execs.
-# Include sits at top so overlay vars ($term) resolve before binds below.
+# i3/config.d/{native,wsl}.conf here. Overlay owns all autostart execs + bar;
+# base owns keybinds/workspaces/modes/colors and never execs.
+#
+# An overlay CANNOT hand this file a variable. MEASURED: `set $v ...` in an
+# included file then `gaps top $v` here fails byte-identically to a genuinely
+# undefined var — i3 scopes variables per file, and include position does not
+# change that. (This is the same limitation the $mod note above describes, which
+# is why $mod comes from xrdb and not from the overlay.) An earlier version of
+# this comment claimed the opposite — that the include sits at top "so overlay
+# vars ($term) resolve before binds below" — and planning against it is how the
+# entry-point cutover (dotfiles-hwds.33) nearly forked four binds three ways.
+# Nothing ever relied on it: $term is set by no file and read by no file.
 include ~/.i3/config.d/*.conf
 
 # Shared keymap + look. $mod being set above is the whole requirement:
@@ -34,22 +43,29 @@ include ~/.i3/config.d/*.conf
 include ~/.dotfiles/i3/config.common
 
 # --- entry-point-specific binds ----------------------------------------------
-# The ones config-xrdp deliberately answers differently: it launches plain st
-# and wraps every quickshell exec in its own QT_QUICK_BACKEND/QS_RDP env.
+# $mod+Return, $mod+d, $mod+p and $mod+Shift+d USED TO LIVE HERE and are now
+# owned by hotkeyd/binds.py (dotfiles-hwds.33). They sat in the entry point
+# because their COMMAND differs per session type, and an entry point was the
+# only i3 scope that could express that; the daemon expresses it better, since
+# it resolves $mod per display and one table then serves :0 and :10 alike.
+#
+# Do NOT re-add them here. A chord live in both engines double-fires (the X
+# server keeps core and XI2 passive grabs in separate conflict domains, so
+# nothing raises BadAccess to warn you) — hotkeyd/test_binds.py fails instead.
+# Their i3 spelling lives in config.d/zz-fallback-binds.conf, which
+# `hotkeyd-panic.sh panic` links in when the daemon has to be stopped.
+#
+# $mod+Shift+c stays below, deliberately: `reload` is the way back from a bad
+# config and must not sit behind the daemon.
 
-# start a terminal with pre-created tmux session
-bindsym $mod+Return exec ~/.local/bin/wm-launch-terminal st
-# bindsym $mod+Return exec wezterm-gui start --always-new-process
-
-# start program launcher
-# $mod+Shift+d is the quickshell RESTART bind (--release, further down). It was
-# also bound here to dmenu_recency on PRESS -- i3 accepts both because they are
-# different events, so one keystroke fired dmenu AND restarted quickshell.
-# dmenu_recency is the Manjaro default launcher; $mod+d below is the one in use.
-bindsym $mod+d exec ~/.dotfiles/quickshell/qs-overlay.sh launcher
-
-# Project workspace picker (quickshell overlay)
-bindsym $mod+p exec --no-startup-id ~/.dotfiles/quickshell/qs-overlay.sh projects
+# qs bar env. MUST precede every use: i3 substitutes a variable only in lines
+# parsed AFTER its `set`, and leaves an earlier `$qsbarenv` in the string
+# verbatim — which `sh` then expands to nothing, silently dropping the env
+# rather than failing. This `set` used to sit BELOW the $mod+Shift+c bind, so
+# that bind had been restarting the bar with neither knob applied while the
+# exec_always below (parsed later) got both. Rationale for the knobs is at that
+# exec_always; the values are documented in quickshell/config/Common/Session.qml.
+set $qsbarenv env QS_BAR_INSET_BOTTOM=50 QS_BAR_INSET_AUTO=1
 
 # reload the configuration file, AND restart the bar with it.
 # i3 runs exec_always on RESTART only — a plain `reload` re-reads the config
@@ -60,12 +76,11 @@ bindsym $mod+p exec --no-startup-id ~/.dotfiles/quickshell/qs-overlay.sh project
 # no effect, and a session could sit for hours on stale code while its
 # config was current. Chaining the restart onto the same bind keeps
 # "reload" meaning what it looks like it means.
+#
+# Stays in i3 while $mod+Shift+d (the bare bar restart) moved to the daemon:
+# `reload` is the way back from a bad config, and a recovery key must not
+# depend on the process it may have to recover from.
 bindsym $mod+Shift+c reload, exec --no-startup-id $qsbarenv ~/.dotfiles/quickshell/qs-start.sh
-
-# qs bar env — defined here (i3 vars must precede first use); rationale at
-# the exec_always further down
-set $qsbarenv env QS_BAR_INSET_BOTTOM=50 QS_BAR_INSET_AUTO=1
-bindsym $mod+Shift+d --release exec --no-startup-id $qsbarenv ~/.dotfiles/quickshell/qs-start.sh
 
 # --- autostarts (the base never execs) ---------------------------------------
 

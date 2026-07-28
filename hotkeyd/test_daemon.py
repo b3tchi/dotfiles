@@ -1139,11 +1139,17 @@ class FakeXServer(FakeDisplay):
     """
 
     def __init__(self, keymap=None, devices=None, xi2=True, fail_chords=()):
+        # Must cover every keysym the SHIPPED table binds: a chord whose keysym
+        # is absent here resolves to keycode 0 and lands in grabs.problems, so
+        # an incomplete fake keymap reads as a grab failure in tests that are
+        # asking about something else entirely. `d` and `p` arrived with the
+        # entry-point cutover (dotfiles-hwds.33).
         super().__init__(keymap=keymap or {"o": 32, "h": 43, "q": 24,
                                            "Escape": 9, "Return": 36,
                                            "Left": 113, "Right": 114,
                                            "Up": 111, "Down": 116,
                                            "j": 44, "k": 45, "l": 46,
+                                           "d": 40, "p": 33,
                                            "Super_L": 133, "Control_L": 37,
                                            "Control_R": 105, "Alt_L": 64,
                                            "Alt_R": 108, "Meta_L": 205,
