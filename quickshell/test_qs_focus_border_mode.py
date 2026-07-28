@@ -252,13 +252,16 @@ check("bar window::new hides then restores", "hide" in calls and "show" in calls
       and calls.index("hide") < calls.index("show"))
 
 # --- hotkeyd layer feed (dotfiles-hwds.9) -----------------------------------
-# The red "keys are captured" ring used to key off the i3 `nav` mode; that mode
-# left i3 in the sp020 T6 cutover, so the cue now follows the daemon's layer
-# feed. The four pixel-level scenarios in i3/test-nav-mode.sh prove it
-# end-to-end against a real daemon; these pin the mapping in isolation, which is
-# where a silent regression would otherwise hide.
+# The red "keys are captured" ring used to key off the i3 `nav` mode; nav left
+# i3 in the sp020 cutover, so the cue now follows the daemon's layer feed. These
+# pin the mapping in isolation, which is where a silent regression would hide.
 check("nav is no longer an i3 colouring mode", "nav" not in qsb.COLOR_MODES)
+# ...but screenshot still is: it is a mode i3 genuinely still owns, and the ring
+# doubles as "this is the window `w` would capture".
+check("screenshot is still an i3 colouring mode", "screenshot" in qsb.COLOR_MODES)
 
+qsb.i3_mode_colored = False
+qsb.layer_colored = False
 qsb.mode_colored = False
 qsb._set_layer_colored(True)
 check("entering a layer colours the ring", qsb.mode_colored is True)
@@ -274,6 +277,34 @@ check("leaving the layer clears the colour", qsb.mode_colored is False)
 # the daemon only publishes a layer when one is active, so anything that is not
 # "default" qualifies. Guards against someone hardcoding {'nav'} here later.
 check("any non-default layer counts", qsb.HOTKEYD_COLORS_ANY_LAYER is True)
+
+# --- the two colour sources must not clobber each other ---------------------
+# Colour now comes from an i3 mode (screenshot) OR a hotkeyd layer (nav), and
+# they are independent: an i3 "mode default" event fires on leaving screenshot,
+# and it must not blank a red the layer feed owns. Folding both into ONE flag —
+# the shape this file had while COLOR_MODES was empty — regresses exactly here.
+qsb.i3_mode_colored = False
+qsb.layer_colored = False
+qsb.mode_colored = False
+qsb._set_layer_colored(True)                       # in a nav layer
+qsb.handle_event('{"change":"screenshot"}')        # i3 mode on top of it
+check("an i3 colour mode on top of a layer stays red", qsb.mode_colored is True)
+qsb.handle_event('{"change":"default"}')           # i3 mode ends; layer persists
+check("leaving the i3 mode does not blank the layer's red",
+      qsb.mode_colored is True)
+qsb._set_layer_colored(False)
+check("clearing the layer with no i3 mode left clears the ring",
+      qsb.mode_colored is False)
+
+# ...and symmetrically: a layer ending must not blank an i3 mode's red.
+qsb.handle_event('{"change":"screenshot"}')
+check("an i3 colour mode alone colours the ring", qsb.mode_colored is True)
+qsb._set_layer_colored(True)
+qsb._set_layer_colored(False)
+check("a layer coming and going leaves the i3 mode's red intact",
+      qsb.mode_colored is True)
+qsb.handle_event('{"change":"default"}')
+check("both sources clear -> plain ring", qsb.mode_colored is False)
 
 print()
 if failures:

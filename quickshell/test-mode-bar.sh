@@ -85,6 +85,9 @@ cleanup() {
   # i3-msg subscribe reader (and the ws-subscribe sleep) die with it.
   [ -n "${BAR_PID:-}" ]  && kill -- -"$BAR_PID" 2>/dev/null
   [ -n "${BAR_PID:-}" ]  && kill "$BAR_PID"  2>/dev/null
+  [ -n "${FORK_PID:-}" ] && kill -- -"$FORK_PID" 2>/dev/null
+  [ -n "${FORK_PID:-}" ] && kill "$FORK_PID" 2>/dev/null
+  [ -n "${PUB_PID:-}" ]  && kill "$PUB_PID"  2>/dev/null
   [ -n "${QS_PID:-}" ]   && kill "$QS_PID"   2>/dev/null
   sleep 0.3
   [ -n "${XVFB_PID:-}" ] && kill "$XVFB_PID" 2>/dev/null
@@ -691,10 +694,20 @@ ShellRoot {
 HOST2EOF
 
 QS_BIN="$(command -v "$QUICKSHELL")"
+# QS_LAYER_FEED / HOTKEYD_DIR point at THIS worktree. Bar.qml's default is
+# $HOME/.dotfiles/hotkeyd/state-tail.py, which is whatever branch happens to be
+# checked out there — on a fresh clone it does not exist at all, and every layer
+# assertion below would read "default" because the reader failed to spawn, not
+# because the bar was wrong.
+HOTKEYD_DIR="$(cd -- "$SCRIPT_DIR/../hotkeyd" && pwd)"
+STATE_TAIL="$HOTKEYD_DIR/state-tail.py"
+[ -r "$STATE_TAIL" ] || { echo "FATAL: $STATE_TAIL missing" >&2; exit 1; }
+
 # setsid: own process group so cleanup reaps the blocking FIFO reader. PATH is
 # the sandbox ONLY (so wmMsg resolves to the stub); SWAYSOCK unset => i3 path.
 setsid env -u SWAYSOCK DISPLAY="$DPY" PATH="$PBIN2" \
     XDG_CONFIG_HOME="$CFG2" XDG_RUNTIME_DIR="$RUN2" XDG_CACHE_HOME="$CCH" \
+    QS_LAYER_FEED="$STATE_TAIL" \
     "$QS_BIN" -p "$CFG2" >"$TMP/qs2.out" 2>&1 &
 BAR_PID=$!
 
@@ -753,33 +766,81 @@ else
   # lets the bar be started before or after the publisher.
   PUB_FIFO="$TMP/pub.fifo"
   mkfifo "$PUB_FIFO"
+  # $1 command FIFO, $2 (optional) state to publish BEFORE anyone can connect —
+  # that is what makes the replay-on-connect path reachable on a restart.
+  #
+  # `poll()` runs on a 50ms tick rather than only after a published line: the
+  # publisher must ACCEPT a connecting bar promptly, otherwise the harness is
+  # racing the bar's 1s reconnect timer and the first layer assertion flakes.
+  # `CLIENTS <n>` is printed on every change so the harness can WAIT for the bar
+  # to be attached instead of sleeping and hoping.
+  #
+  # `RAW:<text>` writes text to the connected clients verbatim, bypassing
+  # json.dumps. Without it a "malformed line" scenario only proves the FIXTURE
+  # rejects garbage — the bytes never reach the bar, and a bar that blanked its
+  # state on a parse error would still pass.
   cat > "$TMP/statepub.py" <<'PUBEOF'
-import json, os, sys, time
-sys.path.insert(0, os.path.expanduser("~/.dotfiles/hotkeyd"))
+import json, os, select, sys
+sys.path.insert(0, os.environ["HOTKEYD_DIR"])
 import layers as L
+
 pub = L.StatePublisher(L.socket_path(os.environ.get("DISPLAY")))
-with open(sys.argv[1]) as fifo:
-    while True:
-        line = fifo.readline()
-        if not line:
-            time.sleep(0.05)
-            continue
-        line = line.strip()
+if len(sys.argv) > 2 and sys.argv[2]:
+    pub.publish(json.loads(sys.argv[2]))
+
+fd = os.open(sys.argv[1], os.O_RDWR)     # O_RDWR: never blocks, never sees EOF
+buf = b""
+seen = -1
+while True:
+    r, _, _ = select.select([fd], [], [], 0.05)
+    if r:
+        buf += os.read(fd, 4096)
+    while b"\n" in buf:
+        raw, buf = buf.split(b"\n", 1)
+        line = raw.decode(errors="replace").strip()
         if line == "QUIT":
-            break
+            pub.close()
+            sys.exit(0)
+        if line.startswith("RAW:"):
+            wire = (line[4:] + "\n").encode()
+            for c in list(pub._clients):
+                try:
+                    c.send(wire)
+                except OSError:
+                    pass
+            continue
         if line:
             try:
                 pub.publish(json.loads(line))
             except Exception as e:
                 print("statepub: %s" % e, file=sys.stderr, flush=True)
-        pub.poll()
-pub.close()
+    pub.poll()
+    if pub.client_count != seen:
+        seen = pub.client_count
+        print("CLIENTS %d" % seen, flush=True)
 PUBEOF
-  DISPLAY="$DPY" XDG_RUNTIME_DIR="$RUN2" python3 "$TMP/statepub.py" "$PUB_FIFO" \
-      >"$TMP/statepub.log" 2>&1 &
-  PUB_PID=$!
+
+  start_pub() { # <logfile> [initial-state-json]
+    DISPLAY="$DPY" XDG_RUNTIME_DIR="$RUN2" HOTKEYD_DIR="$HOTKEYD_DIR" \
+      python3 "$TMP/statepub.py" "$PUB_FIFO" "${2:-}" >"$1" 2>&1 &
+    PUB_PID=$!
+  }
+  # Wait until the publisher reports an attached client. Deterministic where a
+  # fixed sleep was racing the bar's 1s layerFeedRetry (observed: 1 spurious
+  # nav-on failure in 7 runs).
+  wait_client() { # <logfile>
+    local i
+    for i in $(seq 1 60); do
+      grep -q '^CLIENTS 1$' "$1" && return 0
+      sleep 0.25
+    done
+    return 1
+  }
+
+  start_pub "$TMP/statepub.log"
   exec 9>"$PUB_FIFO"          # hold the write end so the reader never sees EOF
-  sleep 0.6
+  wait_client "$TMP/statepub.log" \
+    || fail "the bar attached to the layer socket" "CLIENTS 1" "$(tr '\n' ' ' < "$TMP/statepub.log")"
 
   # Publish one state line and give the bar time to render it.
   pub() { printf '%s\n' "$1" >&9; sleep 0.45; }
@@ -801,10 +862,16 @@ PUBEOF
   pubdump '{"layer":"nav","mod":"wat"}' "nav-mod-unknown"
   # Leaving the layer.
   pubdump '{"layer":"default","mod":null}' "nav-off"
-  # A malformed line must be ignored rather than blanking the bar.
+  # A malformed line must be ignored rather than blanking the bar. The garbage
+  # goes on the wire RAW — routing it through pub.publish() would have it
+  # rejected by json.loads inside the FIXTURE, so the bar would never see it and
+  # a bar that reset its state on a parse error would still pass.
   pubdump '{"layer":"nav","mod":"move"}' "nav-before-garbage"
-  pub 'not json at all'
+  pub 'RAW:not json at all @@@'
   ipc2 call barprobe dumpc "nav-after-garbage" >/dev/null 2>&1; sleep 0.2
+  # ...and a well-formed line right after it must still land: the reader must
+  # have skipped one line, not desynced its stream.
+  pubdump '{"layer":"nav","mod":"resize"}' "nav-after-garbage-recovers"
   pub '{"layer":"default","mod":null}'
 
 
@@ -815,6 +882,28 @@ PUBEOF
   pubdump '{"layer":"nav","mod":"move"}' "nav-held-before-exit"
   pubdump '{"layer":"default","mod":null}' "nav-off-after-mod"
   pubdump '{"layer":"nav","mod":null}' "nav-reentry"
+
+  # --- mid-stream disconnect + replay-on-connect -----------------------------
+  # The daemon dying while the bar runs is the edge case that decides whether a
+  # STALE layer stays painted. Enter a layer, SIGKILL the publisher (no
+  # goodbye line — the socket just closes), and the bar must fall back to
+  # default on its own. Then bring a publisher back that is ALREADY in a layer
+  # and never publishes again: the only way the pill can repaint is the
+  # replay-the-current-state-on-connect half of the contract.
+  pubdump '{"layer":"nav","mod":"move"}' "disconnect-before"
+  exec 9>&-
+  kill -9 "$PUB_PID" 2>/dev/null; wait "$PUB_PID" 2>/dev/null
+  sleep 2.5                      # > the bar's 1s retry: it reconnects, fails, resets
+  ipc2 call barprobe dumpc "disconnect-after" >/dev/null 2>&1; sleep 0.2
+
+  start_pub "$TMP/statepub2.log" '{"layer":"nav","mod":"resize"}'
+  exec 9>"$PUB_FIFO"
+  wait_client "$TMP/statepub2.log" \
+    || fail "the bar re-attached after the daemon came back" "CLIENTS 1" \
+            "$(tr '\n' ' ' < "$TMP/statepub2.log")"
+  sleep 0.6
+  ipc2 call barprobe dumpc "reconnect-replay" >/dev/null 2>&1; sleep 0.2
+
   pub '{"layer":"default","mod":null}'
   exec 9>&-
   printf 'QUIT\n' > "$PUB_FIFO" 2>/dev/null || true
@@ -886,16 +975,260 @@ PUBEOF
   assert_case "nav-off.strip" "0"
   assert_case "nav-off.ws"    "1"
 
-  scenario "a malformed feed line is ignored rather than blanking the bar"
+  scenario "a malformed feed line (raw, on the wire) is ignored rather than blanking the bar"
+  # MUTANT PIN: make the reader's catch reset daemonLayer/daemonMod to default
+  # and nav-after-garbage.pill reads "nav" (or the strip vanishes) instead.
   assert_case "nav-before-garbage.pill" "nav MOVE"
   assert_case "nav-after-garbage.pill"  "nav MOVE"
   assert_case "nav-after-garbage.mode"  "nav"
+  # and the stream is not desynced by the skipped line
+  assert_case "nav-after-garbage-recovers.pill" "nav RESIZE"
 
   scenario "re-entry never inherits the modifier held when the layer was left"
   assert_case "nav-held-before-exit.pill" "nav MOVE"
   assert_case "nav-off-after-mod.strip"   "0"
   assert_case "nav-reentry.pill"          "nav"
+
+  scenario "the daemon dying mid-stream drops the layer instead of painting it stale"
+  # MUTANT PIN: delete the daemonLayer/daemonMod resets in Bar.qml's
+  # layerFeed.onExited and the bar keeps showing "nav MOVE" for a daemon that no
+  # longer exists — the "no stale layer painted" edge case, unpinned until now.
+  assert_case "disconnect-before.pill"  "nav MOVE"
+  assert_case "disconnect-after.mode"   "default"
+  assert_case "disconnect-after.strip"  "0"
+  assert_case "disconnect-after.ws"     "1"
+
+  scenario "a bar that reconnects to a daemon ALREADY in a layer paints it at once (replay-on-connect)"
+  # The restarted publisher published its state before the bar could attach and
+  # never publishes again, so this pill can only come from the replay.
+  assert_case "reconnect-replay.mode"  "nav"
+  assert_case "reconnect-replay.pill"  "nav RESIZE"
+  assert_case "reconnect-replay.strip" "1"
 fi
+
+# ============================================================================
+# PHASE 3 — the reader itself (hotkeyd/state-tail.py), the piece the bar spawns.
+#           Driven directly against a real StatePublisher, with no quickshell in
+#           the way, so the parts of the ft011 contract that are RACY through a
+#           1s-retry bar become deterministic here: replay-on-connect is the
+#           FIRST line the reader ever prints, a garbage line is passed through
+#           without ending the stream, each DISPLAY resolves its own socket, and
+#           an absent socket / absent parent directory exits non-zero instead of
+#           retrying internally ([[adr0014]] — the retry belongs to the host).
+# ============================================================================
+
+RUN3="$TMP/run3"; mkdir -p "$RUN3"; chmod 700 "$RUN3"
+
+cat > "$TMP/tailprobe.py" <<'TAILEOF'
+import json, os, select, subprocess, sys, time
+
+RUN, TAIL = sys.argv[1], sys.argv[2]
+os.environ["XDG_RUNTIME_DIR"] = RUN
+sys.path.insert(0, os.environ["HOTKEYD_DIR"])
+import layers as L                                     # noqa: E402
+
+
+def emit(name, payload):
+    print("CASE %s %s" % (name, payload), flush=True)
+
+
+def start_tail(display, runtime=RUN):
+    env = dict(os.environ, XDG_RUNTIME_DIR=runtime, DISPLAY=display)
+    return subprocess.Popen(
+        [sys.executable, TAIL], env=env, text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+
+
+def line_from(proc, pubs=(), timeout=8.0):
+    """One line from the reader, pumping the publishers' accept loop meanwhile."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for p in pubs:
+            p.poll()
+        r, _, _ = select.select([proc.stdout], [], [], 0.05)
+        if r:
+            line = proc.stdout.readline()
+            if not line:
+                return "<EOF>"
+            return line.strip()
+    return "<TIMEOUT>"
+
+
+def send_raw(pub, text):
+    for c in list(pub._clients):
+        c.send((text + "\n").encode())
+
+
+# --- replay-on-connect: the publisher is ALREADY in a layer, and never
+#     publishes again. Anything the reader prints can only be the replay.
+a = L.StatePublisher(L.socket_path(":191"))
+a.publish({"layer": "nav", "mod": "move"})
+ta = start_tail(":191")
+emit("tail-replay-first-line", line_from(ta, [a]))
+
+# --- a garbage line reaches the reader and does NOT end the stream: the next
+#     well-formed line still arrives. (The reader forwards bytes verbatim — it
+#     is the BAR that must tolerate the garbage, asserted in PHASE 2.)
+send_raw(a, "not json at all @@@")
+emit("tail-raw-passthrough", line_from(ta, [a]))
+a.publish({"layer": "nav", "mod": "resize"})
+emit("tail-survives-garbage", line_from(ta, [a]))
+
+# --- two displays, two sockets: each reader sees ONLY its own display's state.
+b = L.StatePublisher(L.socket_path(":192"))
+b.publish({"layer": "nav", "mod": "move"})
+tb = start_tail(":192")
+first_b = line_from(tb, [a, b])
+emit("tail-two-displays", json.dumps({
+    "sock191": L.socket_path(":191").name,
+    "sock192": L.socket_path(":192").name,
+    "b_first": first_b,
+}))
+# and a publish on :191 must not leak into :192's reader
+a.publish({"layer": "default", "mod": None})
+emit("tail-no-crosstalk", line_from(tb, [a, b], timeout=1.5))
+
+for p in (ta, tb):
+    p.kill()
+
+# --- the daemon goes away mid-stream: the reader EXITS (it does not retry).
+tc = start_tail(":191")
+line_from(tc, [a])                    # drain the replay so we know it is attached
+a.close()
+try:
+    emit("tail-exits-on-daemon-death", tc.wait(timeout=5))
+except subprocess.TimeoutExpired:
+    tc.kill()
+    emit("tail-exits-on-daemon-death", "HUNG")
+
+# --- socket absent, and socket's PARENT DIRECTORY absent: non-zero, promptly.
+t0 = time.time()
+td = start_tail(":193")
+try:
+    rc_absent = td.wait(timeout=5)
+except subprocess.TimeoutExpired:
+    td.kill(); rc_absent = "HUNG"
+gone = os.path.join(RUN, "does-not-exist")
+te = start_tail(":194", runtime=gone)
+try:
+    rc_nodir = te.wait(timeout=5)
+except subprocess.TimeoutExpired:
+    te.kill(); rc_nodir = "HUNG"
+emit("tail-absent-socket", json.dumps({
+    "rc_no_socket": rc_absent,
+    "rc_no_parent_dir": rc_nodir,
+    "prompt": (time.time() - t0) < 5,
+}))
+
+b.close()
+emit("PHASE3-DONE", "1")
+TAILEOF
+
+env HOTKEYD_DIR="$HOTKEYD_DIR" python3 "$TMP/tailprobe.py" "$RUN3" "$STATE_TAIL" \
+  >"$TMP/tail3.out" 2>"$TMP/tail3.err"
+grep -a '^CASE ' "$TMP/tail3.out" >> "$CASES"
+
+if ! grep -q '^CASE PHASE3-DONE 1$' "$CASES"; then
+  fail "PHASE 3 reader probe ran to completion" "PHASE3-DONE" \
+       "$(tail -5 "$TMP/tail3.err" | tr '\n' ' ')"
+else
+  scenario "replay-on-connect: a reader attaching to a daemon already in a layer gets that layer as its FIRST line (ft011)"
+  # This is the deterministic half of "a bar started while the daemon is already
+  # in a layer paints it at once" — nothing is published after the reader starts.
+  assert_case "tail-replay-first-line" '{"layer":"nav","mod":"move"}'
+
+  scenario "a malformed line is forwarded and does not end the stream"
+  assert_case "tail-raw-passthrough"  "not json at all @@@"
+  assert_case "tail-survives-garbage" '{"layer":"nav","mod":"resize"}'
+
+  scenario "two displays: each reader resolves and reads its OWN socket, no crosstalk"
+  assert_case "tail-two-displays" \
+    '{"sock191": "hotkeyd-191.sock", "sock192": "hotkeyd-192.sock", "b_first": "{\"layer\":\"nav\",\"mod\":\"move\"}"}'
+  # :191 moved to default while :192 stayed in nav — nothing arrives on :192.
+  assert_case "tail-no-crosstalk" "<TIMEOUT>"
+
+  scenario "adr0014: the reader exits when the daemon dies, rather than retrying inside itself"
+  assert_case "tail-exits-on-daemon-death" "0"
+
+  scenario "adr0014: an absent socket — and an absent parent directory — exit non-zero, promptly"
+  # A reader that retried internally would hang here, and the bar's bounded
+  # respawn (PHASE 4) would have nothing to bound.
+  assert_case "tail-absent-socket" '{"rc_no_socket": 1, "rc_no_parent_dir": 1, "prompt": true}'
+fi
+
+# ============================================================================
+# PHASE 4 — the fork guard ([[adr0014]], the d069180 shape). A bar whose layer
+#           socket can never be opened must cost ONE reader per retry interval,
+#           not a spin. Boot a real Bar with its socket's PARENT DIRECTORY
+#           removed, count how many times it spawns the reader over 5s, and
+#           require the count to be bounded — while the host is still alive, so
+#           a crashed bar cannot pass this by spawning nothing.
+# ============================================================================
+
+CFG4="$TMP/cfg4"; PBIN4="$TMP/pbin4"; RUN4="$TMP/run4"
+SPAWNS="$TMP/feed-spawns.log"
+mkdir -p "$CFG4" "$PBIN4" "$RUN4"
+chmod 700 "$RUN4"
+ln -s "$COMMON_DIR" "$CFG4/Common"
+ln -s "$SCRIPT_DIR/config/Bar.qml" "$CFG4/Bar.qml"
+python3 - "$PBIN2/i3-msg" "$PBIN4/i3-msg" <<'CPEOF'
+import shutil, sys
+shutil.copyfile(sys.argv[1], sys.argv[2])
+CPEOF
+chmod +x "$PBIN4/i3-msg"
+ln -sf "$PBIN4/i3-msg" "$PBIN4/swaymsg"
+for t in sh cat sleep tr awk df grep sed cut head; do
+  src="$(command -v "$t")" && ln -sf "$src" "$PBIN4/$t"
+done
+
+# The counting shim: every reader spawn appends one line, then runs the real
+# thing. This is the bar's ONLY use of python3 under $PBIN4, so the line count
+# IS the respawn count.
+: > "$SPAWNS"
+REAL_PY="$(command -v python3)"
+cat > "$PBIN4/python3" <<SHIMEOF
+#!/bin/sh
+echo spawn >> "$SPAWNS"
+exec "$REAL_PY" "\$@"
+SHIMEOF
+chmod +x "$PBIN4/python3"
+
+cat > "$CFG4/shell.qml" <<'HOST4EOF'
+import Quickshell
+import QtQuick
+import "./Common"
+
+ShellRoot {
+  Bar { screen: Quickshell.screens.length > 0 ? Quickshell.screens[0] : null }
+}
+HOST4EOF
+
+setsid env -u SWAYSOCK DISPLAY="$DPY" PATH="$PBIN4" \
+    XDG_CONFIG_HOME="$CFG4" XDG_RUNTIME_DIR="$RUN4" XDG_CACHE_HOME="$CCH" \
+    QS_LAYER_FEED="$STATE_TAIL" \
+    "$QS_BIN" -p "$CFG4" >"$TMP/qs4.out" 2>&1 &
+FORK_PID=$!
+
+# Let it boot and start spawning readers against a socket that does not exist.
+sleep 3
+rm -rf "$RUN4"            # the socket's PARENT DIRECTORY is now gone
+: > "$SPAWNS"             # count only the window with the directory removed
+sleep 5
+SPAWN_N="$(wc -l < "$SPAWNS" | tr -d ' ')"
+ALIVE="$(kill -0 "$FORK_PID" 2>/dev/null && echo yes || echo no)"
+kill -- -"$FORK_PID" 2>/dev/null; kill "$FORK_PID" 2>/dev/null
+
+scenario "fork guard: a permanently-missing layer socket costs a bounded number of readers over 5s (adr0014 / d069180)"
+# The retry Timer is 1000ms, so ~5 spawns are expected in a 5s window. The bound
+# is deliberately loose (any timer in the same order of magnitude passes) and
+# still catches the shape it exists for: respawning from onExited WITHOUT the
+# timer produces spawns as fast as python3 can start and exit — hundreds.
+a2 "the bar host survived losing the socket directory" "yes" "$ALIVE"
+a2 "reader respawns over 5s are bounded (<= 20, observed $SPAWN_N)" \
+   "yes" "$([ "${SPAWN_N:-0}" -le 20 ] && echo yes || echo no)"
+# ...and it did keep retrying: a bar that gave up entirely would also be "bounded".
+a2 "the bar kept retrying rather than giving up (>= 2, observed $SPAWN_N)" \
+   "yes" "$([ "${SPAWN_N:-0}" -ge 2 ] && echo yes || echo no)"
 
 # ============================================================================
 

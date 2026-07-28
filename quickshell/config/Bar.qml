@@ -282,9 +282,17 @@ PanelWindow {
     property string daemonLayer: "default"
     property string daemonMod: ""
 
+    // Overridable for the same reason QS_NOTIF_FILE / QS_STATS_FILE are: a
+    // harness has to drive the reader in ITS OWN tree, not whatever happens to
+    // be checked out at ~/.dotfiles. Without this the suite's layer assertions
+    // silently read "default" — not because the bar is wrong, but because the
+    // script it spawned did not exist.
+    readonly property string layerFeedCmd: Quickshell.env("QS_LAYER_FEED")
+        || (Quickshell.env("HOME") + "/.dotfiles/hotkeyd/state-tail.py")
+
     Process {
         id: layerFeed
-        command: ["python3", Quickshell.env("HOME") + "/.dotfiles/hotkeyd/state-tail.py"]
+        command: ["python3", root.layerFeedCmd]
         running: true
         stdout: SplitParser {
             onRead: data => {
@@ -658,10 +666,11 @@ PanelWindow {
         // ModeBar (sp018 / ft009). Same anchors + leftMargin as the old inline
         // overlay Row; the host keeps the mode-subscription Process above and
         // just feeds it root.currentMode.
-        // "nav-move"/"nav-resize" are SYNTHETIC mode names — i3 never enters
-        // them, it stays in "nav" for the whole gesture. Swapping the string
-        // fed to ModeBar is how each layer's face becomes visible without
-        // widening ft009's two-prop api_surface: the registry carries all rows.
+        // "nav-move"/"nav-resize" are REGISTRY KEYS, not states anyone enters:
+        // the daemon stays in layer "nav" for the whole gesture and reports the
+        // held modifier alongside it. Swapping the string fed to ModeBar is how
+        // each modifier's face becomes visible without widening ft009's
+        // two-prop api_surface — the registry carries all three rows.
         ModeBar {
             anchors { left: parent.left; top: parent.top; bottom: parent.bottom; leftMargin: 8 }
             mode: root.inNavMode ? root.navLayerSticky : root.currentMode
