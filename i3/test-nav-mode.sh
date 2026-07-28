@@ -37,16 +37,23 @@
 # daemon holds no grabs — because i3 still owned the chords and the daemon's
 # requests were refused — is a false pass, and this is what rules it out.
 #
-# ONE SHAPE ONLY, stated plainly because the difference matters. This harness
-# sets `$mod` to Mod4, which is the `:0` shape. The collision that reverted T6
-# is a Mod1 phenomenon: on `:10` `$mod` IS Mod1, so nav's Alt+hjkl resize chords
-# ARE i3's global `$mod+hjkl` focus binds, and the daemon took `BadAccess` on
-# all eight. On Mod4 those are distinct chords and always were. So zero
-# `BadAccess` here does NOT reproduce T6 — it pins the weaker, still worthwhile
-# claim that the daemon got every grab it asked for on this shape. sp020 T14
-# specifies the `:10`/Mod1 run of this same file; that is dotfiles-i7na, and
-# until it lands nothing here has been exercised against the display in daily
-# use.
+# BOTH SHAPES (dotfiles-i7na). `NAV_TEST_MOD` selects what `$mod` resolves to —
+# Mod4 is the native `:0` shape, Mod1 the xrdp `:10` shape — and `--both` (the
+# default when run with no argument) runs the whole file twice, once per shape,
+# on separate displays.
+#
+# THE Mod1 RUN IS THE ONE THAT MATTERS. With `$mod` = Mod1, nav's Alt+hjkl
+# resize chords ARE i3's global `$mod+hjkl` focus binds. That collision is what
+# reverted T6 (fd9e9f2): the daemon took `BadAccess` on all eight and Alt+h fell
+# through to i3 as a plain focus — which, on a directional chord, still LOOKS
+# exactly like nav working. Behaviour assertions cannot tell the two apart,
+# which is why the ownership oracle runs first and why this shape needed to
+# exist at all. On Mod4 those chords are distinct and always were, so the Mod4
+# run pins only the weaker claim that every grab was granted.
+#
+# Both engines must agree on `$mod` or the run is meaningless, so the harness
+# supplies it to i3 via `set $mod` AND to the daemon via the `i3wm.mod` X
+# resource — the same two sources a real session uses (ft003).
 #
 # Isolation matters here: i3-msg with no `-s` resolves the socket of whatever
 # i3 owns the X root atom, so an unsocketed harness would drive the developer's
@@ -65,7 +72,45 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 HOTKEYD_DIR="$SCRIPT_DIR/../hotkeyd"
 TMP="$(mktemp -d)"
-DPY="${NAV_TEST_DISPLAY:-:94}"
+# THE $mod SHAPE UNDER TEST (dotfiles-i7na). Mod4 is the native `:0` shape;
+# Mod1 is the xrdp `:10` shape, and it is the interesting one: with $mod=Mod1,
+# nav's RESIZE chords (Alt+hjkl) ARE i3's global $mod+hjkl focus binds. That
+# exact collision reverted T6 (fd9e9f2) — the daemon took BadAccess on all
+# eight and Alt+h fell through to i3 as a focus, which on a directional chord
+# still LOOKS like nav working. config.common claims the XI2 port resolves it
+# and cites a measurement, but that measurement was a one-off note in a
+# comment; this run is what re-asserts it.
+# Run BOTH shapes unless the caller pinned one. Re-exec rather than loop
+# in-process: every display, socket, temp dir and trap in this file is
+# per-invocation, so a second shape in the same process would have to unwind and
+# rebuild all of it — and a leaked Xvfb or i3 from run one would silently serve
+# run two. Two clean processes cost a few seconds and cannot do that.
+if [ -z "${NAV_TEST_MOD:-}" ] && [ "${1:-}" != "--one" ]; then
+  rc=0
+  for _m in Mod4 Mod1; do
+    printf '\n========== $mod=%s (%s shape) ==========\n' "$_m" \
+      "$([ "$_m" = Mod4 ] && echo ':0 native' || echo ':10 xrdp')"
+    # Absolute, via SCRIPT_DIR: "$0" is whatever the caller typed, and
+    # `bash test-nav-mode.sh` from inside i3/ makes it a bare relative name that
+    # is not on PATH.
+    NAV_TEST_MOD="$_m" bash "$SCRIPT_DIR/$(basename "$0")" --one || rc=1
+  done
+  [ "$rc" -eq 0 ] && printf '\nboth shapes passed\n' \
+                  || printf '\nAT LEAST ONE SHAPE FAILED\n'
+  exit "$rc"
+fi
+NAV_TEST_MOD="${NAV_TEST_MOD:-Mod4}"
+case "$NAV_TEST_MOD" in
+  Mod1|Mod4) ;;
+  *) echo "FATAL: NAV_TEST_MOD must be Mod1 or Mod4, got '$NAV_TEST_MOD'" >&2
+     exit 1 ;;
+esac
+# Per shape, so the two runs can never collide on a display or a socket.
+case "$NAV_TEST_MOD" in
+  Mod4) DPY_DEFAULT=":94" ;;
+  Mod1) DPY_DEFAULT=":95" ;;
+esac
+DPY="${NAV_TEST_DISPLAY:-$DPY_DEFAULT}"
 I3SOCK="$TMP/i3.sock"
 export I3SOCK
 PASS=0
@@ -99,15 +144,69 @@ done
 # $mod is set by the INCLUDING file in this repo's layering (ft003), so the
 # harness supplies it exactly as i3/config and i3/config-xrdp do.
 cat > "$TMP/harness.conf" <<CONFEOF
-set \$mod Mod4
+set \$mod $NAV_TEST_MOD
 ipc-socket $I3SOCK
 include $SCRIPT_DIR/config.common
 CONFEOF
 
-Xvfb "$DPY" -screen 0 1280x800x24 >"$TMP/xvfb.log" 2>&1 &
+# -noreset: an X server RESETS when its LAST client disconnects, discarding
+# every root-window property with it. The i3wm.mod resource below is written
+# by a short-lived python process that is, at that moment, the only client —
+# so without this the resource is wiped the instant it is written. MEASURED:
+# write, exit, read from a second process -> Mod4 every time. A real session
+# never sees this because i3 holds a connection throughout.
+Xvfb "$DPY" -noreset -screen 0 1280x800x24 >"$TMP/xvfb.log" 2>&1 &
 XVFB_PID=$!
 for _ in $(seq 1 20); do [ -e "/tmp/.X11-unix/X${DPY#:}" ] && break; sleep 0.5; done
 [ -e "/tmp/.X11-unix/X${DPY#:}" ] || { echo "FATAL: Xvfb $DPY did not start" >&2; exit 1; }
+
+# The daemon resolves `$mod` from the `i3wm.mod` X RESOURCE (ft003), the same
+# source i3 reads on a real session — xrdp/xinitrc merges `i3wm.mod: Mod1`, and
+# native merges nothing so the Mod4 default stands. The harness must supply it
+# the same way or the two engines disagree about what `$mod+o` even is: i3 grabs
+# Mod1+o from harness.conf while the daemon grabs Mod4+o, and the shape this run
+# claims to test does not exist.
+#
+# WRITTEN WITH python-xlib, NOT `xrdb -merge`. MEASURED on this box: against an
+# Xvfb display `xrdb -merge` EXITS 0 and writes nothing — `xrdb -query` comes
+# back empty and `xprop -root RESOURCE_MANAGER` reports "not found", with or
+# without -nocpp. A setup step that reports success and silently does nothing is
+# how the first version of this run passed 40/40 while the daemon was still on
+# Mod4. python-xlib is already the daemon's own dependency and its write is
+# verified below rather than trusted.
+python3 - "$DPY" "$NAV_TEST_MOD" <<'XRESEOF' || {
+import sys
+from Xlib import display as xdisplay, Xatom
+dpy, mod = sys.argv[1], sys.argv[2]
+d = xdisplay.Display(dpy)
+d.screen().root.change_property(
+    Xatom.RESOURCE_MANAGER, Xatom.STRING, 8,
+    ("i3wm.mod:\t%s\n" % mod).encode())
+d.sync()
+XRESEOF
+  echo "FATAL: could not set i3wm.mod on $DPY" >&2; exit 1; }
+
+# Read it back THROUGH THE DAEMON'S OWN RESOLVER. This is the guard on the
+# guard: if the resource does not land, every behaviour assertion below runs
+# against the wrong shape and still passes, which is precisely the false pass
+# this suite exists to rule out.
+RESOLVED="$(DISPLAY="$DPY" python3 -c "
+import sys; sys.path.insert(0, '$HOTKEYD_DIR')
+import hotkeyd as H
+from Xlib import display as xd
+print(H.x_resource_mod(xd.Display('$DPY')))
+" 2>/dev/null)"
+[ "$RESOLVED" = "$NAV_TEST_MOD" ] || {
+  echo "FATAL: daemon resolves \$mod=$RESOLVED but this run is $NAV_TEST_MOD" >&2
+  exit 1; }
+
+# What xdotool must press to produce $mod. The CONFIG side of the shape is not
+# enough on its own: the injected chord has to move with it, or a Mod1 run keeps
+# pressing Super and tests the Mod4 daemon it accidentally still has.
+case "$NAV_TEST_MOD" in
+  Mod4) XDO_MOD="super" ;;
+  Mod1) XDO_MOD="alt" ;;
+esac
 
 DISPLAY="$DPY" i3 -c "$TMP/harness.conf" >"$TMP/i3.log" 2>&1 &
 I3_PID=$!
@@ -197,7 +296,7 @@ LOADED="$(i3_config)"
 top_marker="$(printf '%s\n' "$LOADED" \
   | grep -cE '^[[:space:]]*ipc-socket[[:space:]]')"
 inc_marker="$(printf '%s\n' "$LOADED" \
-  | grep -cE '^[[:space:]]*bindsym[[:space:]]+(\$mod|Mod4)\+Shift\+r[[:space:]]')"
+  | grep -cE "^[[:space:]]*bindsym[[:space:]]+([$]mod|$NAV_TEST_MOD)[+]Shift[+]r[[:space:]]")"
 assert_eq "the GET_CONFIG reply arrived (top-level marker present)" \
   "$([ "$top_marker" -gt 0 ] && echo yes || echo no)" "yes"
 assert_eq "and it carries the INCLUDED config.common (panic bind present)" \
@@ -207,7 +306,7 @@ if [ "$top_marker" -gt 0 ] && [ "$inc_marker" -gt 0 ]; then
   assert_eq "i3's loaded config defines no \`mode \"nav\"\` block" \
     "$(printf '%s\n' "$LOADED" | grep -cE '^[[:space:]]*mode[[:space:]]+"nav"')" "0"
   assert_eq "i3's loaded config binds no entry chord for it" \
-    "$(printf '%s\n' "$LOADED" | grep -cE '^[[:space:]]*bindsym[[:space:]]+(\$mod|Mod4)\+o([[:space:]]|$)')" "0"
+    "$(printf '%s\n' "$LOADED" | grep -cE "^[[:space:]]*bindsym[[:space:]]+([$]mod|$NAV_TEST_MOD)[+]o([[:space:]]|$)")" "0"
   # Matched as a BIND STATEMENT, not as a string. The reply carries comments
   # verbatim and config.common's cutover note names the markers in prose, so a
   # bare `grep -c 'nop nav-'` reports 1 on a correctly cut-over tree — measured.
@@ -304,7 +403,7 @@ assert_eq "tree order is A B" "$(ids)" "$A $B"
 assert_eq "focus starts on B" "$(focused)" "$B"
 
 scenario "\$mod+o enters nav (and nav is sticky — no modifier held from here on)"
-xdotool key super+o; sleep 0.4
+xdotool key "$XDO_MOD+o"; sleep 0.4
 assert_eq "the daemon publishes layer=nav" "$(mode)" "nav"
 
 scenario "unshifted hjkl FOCUS"
@@ -326,7 +425,7 @@ assert_eq "focus follows the moved window" "$(focused)" "$B"
 # sees the modifier directly and publishes {"layer":"nav","mod":"move"}.
 scenario "Ctrl alone publishes the move layer, releasing it publishes back"
 xdotool keyup ctrl 2>/dev/null; sleep 0.3
-xdotool key q; sleep 0.3; xdotool key super+o; sleep 0.5
+xdotool key q; sleep 0.3; xdotool key "$XDO_MOD+o"; sleep 0.5
 LAYOUT_BEFORE="$(ids)"
 xdotool keydown ctrl; sleep 0.5
 MOD_WHILE_HELD="$(held_mod)"
@@ -435,7 +534,7 @@ else
   assert_eq "no red ring pixels yet" "$([ "${RED_DEFAULT:-0}" -gt 0 ] && echo yes || echo no)" "no"
 
   scenario "entering the nav LAYER repaints the SAME frame red (from the daemon feed)"
-  xdotool key super+o; sleep 1.5
+  xdotool key "$XDO_MOD+o"; sleep 1.5
   TEAL_NAV="$(ring_pixels 16A085)"
   RED_NAV="$(ring_pixels CB4B16)"
   assert_eq "red ring pixels present in nav" "$([ "${RED_NAV:-0}" -gt 0 ] && echo yes || echo no)" "yes"
@@ -456,7 +555,7 @@ else
 
   kill "$BORDER_PID" 2>/dev/null
   BORDER_PID=
-  xdotool key super+o; sleep 0.4    # the exit scenarios below expect nav
+  xdotool key "$XDO_MOD+o"; sleep 0.4    # the exit scenarios below expect nav
 fi
 
 # The old suite asserted i3's binding events reported the mods it matched — the
