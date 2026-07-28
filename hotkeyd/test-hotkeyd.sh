@@ -120,7 +120,11 @@ else
     I3_PID=$!
     sleep 1.5
 
-    if ! DISPLAY="$XD" i3-msg -t get_version >/dev/null 2>&1; then
+    # I3SOCK pinned: i3-msg follows the AMBIENT $I3SOCK, which on a developer
+    # machine points at their real session. Unpinned, this gate answers from
+    # that i3 and passes even when the test i3 failed to start -- a gate that
+    # cannot fail for its own reason (dotfiles-qvou).
+    if ! DISPLAY="$XD" I3SOCK="$XSOCK" i3-msg -t get_version >/dev/null 2>&1; then
         bad "live i3 did not start on $XD"
     else
         out="$(DISPLAY="$XD" XDG_RUNTIME_DIR="$TMPD" I3SOCK="$XSOCK" \
@@ -198,7 +202,12 @@ EOF
         bad "daemon did not start on $D8: $(tail -2 "$T8/d.log")"
     else
         ok "daemon started with a valid table"
-        if DISPLAY=$D8 XDG_RUNTIME_DIR="$T8" "$HERE/hotkeyd.sh" status >/dev/null 2>&1
+        # HOME/HOTKEYD_I3_CONFIG_D sandboxed: `status` consults the panic
+        # latch, and unsandboxed it reads the operator's REAL ~/.i3/config.d.
+        # A genuinely panicked session then flips this to a misleading
+        # diagnostic during an outage (dotfiles-iul2).
+        if DISPLAY=$D8 XDG_RUNTIME_DIR="$T8" HOME="$T8" \
+           HOTKEYD_I3_CONFIG_D="$T8/config.d" "$HERE/hotkeyd.sh" status >/dev/null 2>&1
         then ok "launcher finds a daemon started with extra flags"
         else bad "launcher's pgrep pattern misses a flag-carrying daemon"
         fi
