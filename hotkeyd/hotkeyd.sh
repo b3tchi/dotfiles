@@ -79,6 +79,25 @@ daemon_pid() {
     pgrep -f "hotkeyd\.py .*--display $DPY_BASE( |\$)" 2>/dev/null | head -n 1
 }
 
+# Is that daemon SERVING, or merely alive? (dotfiles-hwds.28)
+#
+# daemon_pid() answers "a process matches", which a daemon serving the keyboard
+# and one frozen mid-loop answer identically: both hold the flock, both keep the
+# state socket bound so connections still complete out of the listen backlog,
+# both match every pattern. Every verb below used to decide on that alone, so
+# `status` said "running" at exit 0 for a daemon serving nothing and `start`
+# refused to replace it — and since the nav cutover i3 no longer owns mode
+# "nav", so that display got no nav at all, silently.
+#
+# Codes come straight from hotkeyd.py: 0 serving, 6 the run loop has stopped
+# (reapable), 7 the display did not answer US (NOT reapable — see the constants
+# in hotkeyd.py for why that distinction is a safety boundary and not a
+# nicety). Output is relayed rather than reworded so there is one wording of the
+# diagnosis, in the place that measured it.
+health() {
+    "$DAEMON" --health --display "$DPY_BASE" 2>&1
+}
+
 case "$VERB" in
     start)
         need_display
@@ -197,6 +216,30 @@ run hotkeyd-panic.sh resume" 4
                 # there IS a daemon — a contested session is a different problem
                 # from an absent one and gets a different code.
                 exit 4
+            fi
+            # ALIVE IS NOT SERVING (dotfiles-hwds.28). Until now this branch
+            # printed "running" at exit 0 on the strength of daemon_pid() alone,
+            # which is a liveness check that cannot observe death: it answers
+            # identically for a daemon serving the keyboard and one frozen
+            # mid-loop. That is the dotfiles-hwds.19/.21 lesson a third time, and
+            # here it did active harm — the operator (and the live verification
+            # matrix) could not get the real answer out of the launcher, so they
+            # went looking for it with `xdpyinfo`, which was not installed,
+            # exited 127, and got read as a dead X server on a display whose
+            # Xorg had been up for eleven days.
+            hout="$(health)"; hrc=$?
+            if [ "$hrc" -ne 0 ]; then
+                # Name the pid as well as the reason: the cure is `start`, and
+                # whoever is about to run it wants to know which process is
+                # going to be replaced.
+                printf '%s (pid %s) — run hotkeyd.sh start %s\n' \
+                    "$hout" "$pid" "$DPY_BASE"
+                # 6, not 0 and not 1. 0 is the defect being fixed. 1 means "no
+                # daemon for this display" and callers read it that way
+                # (test-launcher.sh asserts on that path); here there IS a
+                # process, it is simply not serving — a different problem from
+                # an absent one, so a different code, matching hotkeyd.py's own.
+                exit 6
             fi
             printf 'hotkeyd: running on %s (pid %s, socket %s)\n' \
                 "$DPY_BASE" "$pid" "$SOCK"

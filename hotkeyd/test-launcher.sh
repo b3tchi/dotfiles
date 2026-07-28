@@ -215,6 +215,67 @@ else
     fi
 fi
 
+# --- a daemon that is ALIVE but NOT SERVING (dotfiles-hwds.28) --------------
+# `status` answered from daemon_pid() alone, which a daemon serving the keyboard
+# and one frozen mid-loop answer identically: both hold the flock, both keep the
+# state socket bound so connections still complete out of the listen backlog,
+# both match every process pattern. So it printed "running" at exit 0 for a
+# daemon serving nothing.
+#
+# That is a liveness check that cannot observe death, and here it did active
+# harm rather than merely being useless: the operator (and the live verification
+# matrix) could not get the real answer out of the launcher, so they went looking
+# for it with `xdpyinfo`, which was not installed on that machine, exited 127,
+# and got read as a dead X server — on a display whose Xorg had been up for
+# eleven days with a healthy daemon attached. dotfiles-hwds.19/.21, third time.
+#
+# The specimen is synthesised by FREEZING the daemon with SIGSTOP and then
+# replacing its X server, which is precisely the state pgrep cannot tell from
+# health. SIGSTOP targets the one pid this suite started; nothing here
+# pattern-kills (dotfiles-8xt).
+echo "launcher: a daemon that is alive but not serving"
+XD="$(probe_free_display "$(( ${XC#:} + 1 ))")"
+TAG_D="${XD#:}"
+Xvfb "$XD" -screen 0 640x480x24 >/dev/null 2>&1 &
+XD_PID=$!
+XVFB_PIDS+=("$XD_PID")
+sleep 1.5
+run "$XD" start >/dev/null 2>&1
+sleep 1
+stale_pid="$(pgrep -f "hotkeyd.py.*--display $XD" 2>/dev/null | head -1)"
+if [ -z "$stale_pid" ]; then
+    bad "no daemon started on $XD"
+else
+    kill -STOP "$stale_pid" 2>/dev/null
+    kill "$XD_PID" 2>/dev/null           # the session that daemon belonged to
+    sleep 1
+    Xvfb "$XD" -screen 0 640x480x24 >/dev/null 2>&1 &   # ... and the next one
+    XD_PID2=$!
+    XVFB_PIDS+=("$XD_PID2")
+    sleep 6                              # outlast the heartbeat window
+
+    out="$(run "$XD" status 2>&1)"; rc=$?
+    if [ "$rc" -ne 0 ]; then
+        ok "status is non-zero for a daemon that is not serving (rc=$rc)"
+    else
+        bad "status reported healthy (rc=0) for a frozen daemon: $out"
+    fi
+    # A bare non-zero exit during an outage ends the investigation instead of
+    # directing it, which is half of what the .19/.21 lesson is about.
+    if printf '%s' "$out" | grep -qi 'not serving'; then
+        ok "status names the condition rather than just failing"
+    else
+        bad "status gave no actionable reason: $out"
+    fi
+    if printf '%s' "$out" | grep -q "$stale_pid"; then
+        ok "status names the pid that is not serving"
+    else
+        bad "status did not name the offending pid: $out"
+    fi
+    kill -CONT "$stale_pid" 2>/dev/null
+    run "$XD" stop >/dev/null 2>&1
+fi
+
 # --- degraded environments --------------------------------------------------
 echo "launcher: degraded environments"
 out="$(DISPLAY= XDG_RUNTIME_DIR="$RUNTIME" "$HERE/hotkeyd.sh" start 2>&1)"; rc=$?

@@ -2075,3 +2075,189 @@ def test_a_failing_pointer_query_does_not_take_the_daemon_down():
     assert dae.reconcile_mods() is False
     assert dae.engine.state == {"layer": "nav", "mod": "resize"}
     dae.close()
+
+
+# --------------------------------------------------------------------------
+# is this daemon SERVING? (dotfiles-hwds.28)
+# --------------------------------------------------------------------------
+#
+# The defect this covers is a liveness check that cannot observe death. Before
+# hwds.28 the only question `hotkeyd.sh` could ask was "does a process match
+# --display :N", which is answered identically by a daemon serving the keyboard
+# and by one frozen mid-loop. An operator who needs the real answer therefore has
+# to reach for something outside the launcher — the live matrix reached for
+# `xdpyinfo`, which was not installed on that machine, read the 127 as "the X
+# server is gone", and filed a healthy :0 daemon as a zombie.
+#
+# So the probe has TWO hard requirements, and both are asserted below:
+#   1. it must distinguish "alive" from "serving" — hence the heartbeat, which
+#      is the only evidence that the run loop is actually turning;
+#   2. it must not depend on a binary that may not be installed. A liveness
+#      check that reports death when its own tool is missing is worse than no
+#      check at all, which is the whole hwds.19/.21 lesson and, here, the
+#      proximate cause of the bad report.
+
+def test_the_lock_file_carries_a_heartbeat(tmp_path):
+    """The loop's proof of life. flock alone cannot carry it: the kernel holds
+    the lock for a process that is frozen, SIGSTOPped or spinning on a wedged
+    syscall exactly as firmly as for one that is serving."""
+    inst = H.SingleInstance(tmp_path / "hb.lock")
+    try:
+        before = (tmp_path / "hb.lock").stat().st_mtime
+        os.utime(tmp_path / "hb.lock", (before - 60, before - 60))
+        inst.beat(now=time.monotonic() + 3600)
+        after = (tmp_path / "hb.lock").stat().st_mtime
+        assert after > before - 60
+    finally:
+        inst.release()
+
+
+def test_the_heartbeat_is_rate_limited_so_the_key_path_pays_nothing(tmp_path):
+    """Called from the top of the run loop, which turns ~4x a second while idle
+    and once per event otherwise. One utime per beat there would put a syscall
+    on the key path for no gain, so beats are on a clock."""
+    inst = H.SingleInstance(tmp_path / "hb.lock")
+    try:
+        calls = []
+        inst._utime = lambda: calls.append(1)
+        # Anchored past the beat the constructor already took, so this measures
+        # the rate limiter rather than racing the startup beat.
+        t0 = time.monotonic() + 10 * H.HEARTBEAT_PERIOD_S
+        inst.beat(now=t0)
+        inst.beat(now=t0 + 0.1)
+        inst.beat(now=t0 + 0.2)
+        assert len(calls) == 1, "a beat per loop turn is a syscall per keystroke"
+        inst.beat(now=t0 + H.HEARTBEAT_PERIOD_S + 0.01)
+        assert len(calls) == 2, "the heartbeat stopped beating"
+    finally:
+        inst.release()
+
+
+def test_health_says_not_serving_when_no_daemon_ever_ran(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    rc, msg = H.health(":77", probe_display=lambda _n: None)
+    assert rc == H.HEALTH_NOT_SERVING
+    assert "no daemon" in msg.lower(), msg
+
+
+def test_health_says_not_serving_when_the_heartbeat_has_stopped(
+        tmp_path, monkeypatch):
+    """A frozen daemon: the process is there, the flock is held, the state
+    socket still accepts connections out of the listen backlog — and nothing
+    turns. This is the shape the :0 report described, and pgrep calls it
+    healthy."""
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    lock = H.lock_path(":77")
+    lock.write_text("12345\n")
+    old = time.time() - (H.HEARTBEAT_STALE_S * 4)
+    os.utime(lock, (old, old))
+    rc, msg = H.health(":77", probe_display=lambda _n: None)
+    assert rc == H.HEALTH_NOT_SERVING
+    assert "heartbeat" in msg.lower(), msg
+
+
+def test_health_says_not_serving_when_the_display_is_unreachable(
+        tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    lock = H.lock_path(":77")
+    lock.write_text("12345\n")
+
+    def gone(_name):
+        return "cannot connect"
+
+    rc, msg = H.health(":77", probe_display=gone)
+    assert rc != H.HEALTH_OK
+    assert ":77" in msg and "cannot connect" in msg, msg
+
+
+def test_an_unreachable_display_is_not_the_code_start_reaps_on(
+        tmp_path, monkeypatch):
+    """The safety boundary. "Its loop stopped" is the daemon's own evidence
+    about itself and is reapable; "the display did not answer ME" is the
+    caller's evidence about the caller, and a `status` run from a tmux pane with
+    no XAUTHORITY produces it against a daemon that is serving the session
+    perfectly. Reaping on that would be this bug's own root cause — a missing
+    credential read as a dead server — rebuilt into the recovery path."""
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    H.lock_path(":77").write_text("12345\n")
+    unreachable, _ = H.health(":77", probe_display=lambda _n: "no protocol")
+    assert unreachable == H.HEALTH_DISPLAY_UNREACHABLE
+    assert unreachable != H.HEALTH_NOT_SERVING
+
+    stale = H.lock_path(":78")
+    stale.write_text("12345\n")
+    old = time.time() - (H.HEARTBEAT_STALE_S * 4)
+    os.utime(stale, (old, old))
+    dead, _ = H.health(":78", probe_display=lambda _n: None)
+    assert dead == H.HEALTH_NOT_SERVING
+
+
+def test_health_says_serving_when_the_loop_beats_and_the_display_answers(
+        tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    H.lock_path(":77").write_text("12345\n")
+    rc, msg = H.health(":77", probe_display=lambda _n: None)
+    assert rc == H.HEALTH_OK, msg
+    assert "serving" in msg.lower(), msg
+
+
+def test_health_never_shells_out(tmp_path, monkeypatch):
+    """The root cause of the bad hwds.28 report. `xdpyinfo` was not installed,
+    exited 127, and the 127 was read as a dead X server. Nothing on this path may
+    depend on a binary being present — python-xlib is already a hard runtime
+    dependency of the daemon itself, so the probe cannot be missing where the
+    daemon can run."""
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    monkeypatch.setenv("PATH", "")
+    H.lock_path(":77").write_text("12345\n")
+
+    def forbidden(*a, **kw):
+        raise AssertionError(f"health shelled out: {a!r}")
+
+    monkeypatch.setattr(H.subprocess, "run", forbidden)
+    monkeypatch.setattr(H.subprocess, "Popen", forbidden)
+    rc, _ = H.health(":77", probe_display=lambda _n: None)
+    assert rc == H.HEALTH_OK
+
+
+def test_the_real_display_probe_reports_a_display_that_is_not_there():
+    """The probe's own contract, against a display number nothing serves. Its
+    counterpart — a reachable display answering None — runs under Xvfb in
+    test-launcher.sh, where there is a real X server to answer."""
+    assert H.probe_display(":99") is not None
+
+
+def test_probe_display_needs_no_bind_table():
+    """--health has to work on a daemon whose table is the reason it is sick,
+    so the health path must not load or validate binds.py first."""
+    rc = H.main_argv(["--health", "--display", ":99"])
+    assert rc != H.HEALTH_OK
+
+
+def test_the_display_probe_gives_up_instead_of_blocking(monkeypatch):
+    """A HUNG X server never closes the connection, so python-xlib sits in
+    `select(..., timeout=None)` inside the handshake forever. `hotkeyd.sh start`
+    runs from i3's `exec_always`, so an unbounded probe there does not merely
+    delay a diagnostic — it stalls the session's startup, on the very path that
+    exists to get a keyboard back."""
+    import Xlib.display                             # noqa: PLC0415
+
+    def never_answers(_name):
+        time.sleep(30)
+
+    monkeypatch.setattr(H, "PROBE_TIMEOUT_S", 0.3)
+    monkeypatch.setattr(Xlib.display, "Display", never_answers)
+    t0 = time.monotonic()
+    why = H.probe_display(":99")
+    took = time.monotonic() - t0
+    assert took < 5, f"probe blocked for {took:.1f}s"
+    assert why is not None and "hung" in why.lower(), why
+
+
+def test_the_probe_leaves_no_alarm_armed_behind_it(monkeypatch):
+    """It arms SIGALRM. Anything left armed would fire later, inside whatever
+    the caller does next."""
+    import signal as sig                            # noqa: PLC0415
+    H.probe_display(":99")
+    assert sig.getitimer(sig.ITIMER_REAL) == (0.0, 0.0)
+    assert sig.getsignal(sig.SIGALRM) in (sig.SIG_DFL, sig.SIG_IGN)

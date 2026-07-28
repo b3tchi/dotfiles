@@ -115,6 +115,40 @@ class TableInvalid(Exception):
 # helpers
 # --------------------------------------------------------------------------
 
+#: How often the run loop records that it is still turning. Well under
+#: HEARTBEAT_STALE_S so an ordinary loop turn never looks late.
+HEARTBEAT_PERIOD_S = 1.0
+
+#: How old a heartbeat has to be before the daemon counts as NOT SERVING.
+#: Generous on purpose. The cost of calling a healthy daemon wedged is that
+#: `start` reaps it and respawns — a visible keyboard hiccup — so the window has
+#: to clear the worst legitimate stall on the loop, which is a blocking i3
+#: command reply, not the 1 s beat period.
+HEARTBEAT_STALE_S = 5.0
+
+#: `--health` exit codes. 0 keeps the shell idiom (`if hotkeyd.py --health`).
+#:
+#: 6 and 7 are deliberately DIFFERENT, and the difference is a safety boundary,
+#: not a nicety. 6 is the daemon's own evidence about itself — its run loop
+#: stopped — and it is the only verdict `start` is allowed to end a process on.
+#: 7 says the daemon looks fine but this display did not answer US, which can
+#: also mean the caller simply has no X authority (a `status` run from a tmux
+#: pane or an ssh session with no XAUTHORITY). Reaping on 7 would let a caller's
+#: own missing credential kill a daemon that is serving the session perfectly —
+#: the same shape of mistake as reading a missing `xdpyinfo` as a dead server,
+#: which is what produced this bug report in the first place.
+HEALTH_OK = 0
+HEALTH_NOT_SERVING = 6
+HEALTH_DISPLAY_UNREACHABLE = 7
+
+#: How long the display probe waits for the server to answer. A HUNG X server —
+#: as opposed to a dead one — never closes the connection, so an unguarded
+#: `Display()` blocks in the handshake forever. `hotkeyd.sh start` runs from
+#: i3's `exec_always`, so an unbounded probe there does not just delay a
+#: diagnostic, it stalls the session's startup.
+PROBE_TIMEOUT_S = 3.0
+
+
 def _runtime_dir() -> Path:
     return Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}")
 
@@ -291,7 +325,17 @@ class DeviceRegistry:
 class SingleInstance:
     """flock-based single instance, the `qs-focus-border.py` pattern. Held for
     the process lifetime; the kernel releases it even on SIGKILL, so a hard-
-    killed daemon does not lock its display out of a restart."""
+    killed daemon does not lock its display out of a restart.
+
+    The lock file doubles as the daemon's HEARTBEAT (dotfiles-hwds.28). The
+    flock answers "is a process alive", which is the same thing `pgrep` answers
+    and is not the question anyone actually has during an outage: the kernel
+    holds the lock just as firmly for a daemon frozen mid-loop as for one
+    serving the keyboard. The file's mtime answers the question that matters —
+    when did the run loop last turn — and it rides on a file that already
+    exists, is already per-display, and is already the thing `start` reasons
+    about, rather than inventing a second runtime artifact to leak.
+    """
 
     def __init__(self, path):
         self.path = Path(path)
@@ -307,6 +351,35 @@ class SingleInstance:
             raise
         self._fh.write(f"{os.getpid()}\n")
         self._fh.flush()
+        self._beat_at = 0.0
+        self.beat()
+
+    def _utime(self):
+        os.utime(self.path, None)
+
+    def beat(self, now: float | None = None):
+        """Record that the run loop is still turning.
+
+        Called from the TOP of the loop, so it covers the idle path and the
+        event path with one call site — a heartbeat that only ran while idle
+        would go stale during a burst of keystrokes, i.e. it would report
+        "wedged" exactly when the daemon was busiest.
+
+        Rate-limited on the monotonic clock: the loop turns ~4x a second idle
+        and once per event otherwise, and an unconditional `utime` here would
+        put a syscall on the key path to buy nothing.
+        """
+        now = time.monotonic() if now is None else now
+        if now - self._beat_at < HEARTBEAT_PERIOD_S:
+            return
+        self._beat_at = now
+        try:
+            self._utime()
+        except OSError:
+            # adr0014 again: a runtime dir that went read-only under us is not
+            # a reason to stop serving the keyboard. The beat going stale is
+            # itself the report.
+            pass
 
     def release(self):
         try:
@@ -1125,6 +1198,11 @@ def run_daemon(table, display_name: str | None) -> int:
     code = 0
     try:
         while not stop["flag"]:
+            # Proof that this loop is turning, for `hotkeyd.sh status` and for
+            # `start`'s decision about a daemon that is already there
+            # (dotfiles-hwds.28). Top of the loop so it covers the idle branch
+            # and the event branch alike; rate-limited inside beat().
+            inst.beat()
             pub.poll()
             dae.pump_i3()
             if reload_wanted["flag"]:
@@ -1186,14 +1264,117 @@ def _dispatch(i3: I3Client, action):
                   flush=True)
 
 
-def main() -> int:
+# --------------------------------------------------------------------------
+# is this daemon SERVING? (dotfiles-hwds.28)
+# --------------------------------------------------------------------------
+
+def probe_display(name: str) -> str | None:
+    """Can a fresh client open this display? Returns None when it can, or a
+    short reason when it cannot.
+
+    Uses python-xlib and NOTHING ELSE. dotfiles-hwds.28 was filed as a dead `:0`
+    on the strength of `xdpyinfo` failing, and `xdpyinfo` was simply not
+    installed on that machine — a 127 that read as "the X server is gone" while
+    Xorg had been up for eleven days and the daemon was serving normally. A
+    liveness probe that reports death when its own tool is missing is the
+    dotfiles-hwds.19/.21 lesson wearing a different hat. python-xlib cannot be
+    missing anywhere the daemon itself can run, because the daemon imports it.
+
+    Bounded by PROBE_TIMEOUT_S, via SIGALRM. Measured (frozen Xvfb, SIGSTOP):
+    python-xlib blocks in the connection handshake at
+    `protocol/display.py:561`, which is `select.select(..., timeout=None)` — so
+    a socket timeout does NOT bound it, because there is no socket call to time
+    out. An alarm whose handler raises does: Python re-raises out of the
+    interrupted `select`, and xlib's own `except select.error` for EINTR cannot
+    swallow it because it is not a select.error.
+
+    Safe here and nowhere else: this runs in the short-lived `--health` process,
+    on its main thread, never in the daemon.
+    """
+    def _too_slow(_sig, _frm):
+        raise TimeoutError(f"no answer in {PROBE_TIMEOUT_S:.0f}s "
+                           f"(server hung?)")
+
+    prev = signal.signal(signal.SIGALRM, _too_slow)
+    signal.setitimer(signal.ITIMER_REAL, PROBE_TIMEOUT_S)
+    try:
+        from Xlib import display as xdisplay        # noqa: PLC0415
+        d = xdisplay.Display(name)
+    except Exception as e:                          # noqa: BLE001
+        return f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, prev)
+    try:
+        d.close()
+    except Exception:                               # noqa: BLE001
+        pass
+    return None
+
+
+def health(display: str | None = None,
+           probe_display=probe_display) -> tuple[int, str]:
+    """Is the daemon on this display SERVING? Returns (exit code, one line).
+
+    Two probes, in the order that makes the answer actionable:
+
+    1. THE HEARTBEAT — has this display's run loop turned recently. This is the
+       one `pgrep` cannot answer and the one the outage needs: a frozen daemon
+       holds its flock, keeps its state socket bound (so connections still
+       complete out of the listen backlog) and matches every process pattern,
+       while serving nothing.
+    2. THE DISPLAY — can a fresh client reach it at all. A beating daemon on a
+       display nothing serves is a contradiction worth printing rather than
+       swallowing, and this is the probe `status` was missing entirely. It gets
+       its OWN exit code because it is the weaker evidence of the two — see
+       HEALTH_DISPLAY_UNREACHABLE.
+
+    The message names which probe failed, because a bare non-zero exit during an
+    outage ends the investigation instead of directing it.
+    """
+    lock = lock_path(display)
+    disp = display or os.environ.get("DISPLAY", ":0")
+    try:
+        age = time.time() - lock.stat().st_mtime
+    except OSError:
+        return (HEALTH_NOT_SERVING,
+                f"hotkeyd: {disp} — NOT SERVING: no daemon has run here "
+                f"(no lock at {lock})")
+    if age > HEARTBEAT_STALE_S:
+        return (HEALTH_NOT_SERVING,
+                f"hotkeyd: {disp} — NOT SERVING: last heartbeat {age:.0f}s ago "
+                f"(> {HEARTBEAT_STALE_S:.0f}s); the run loop has stopped "
+                f"turning")
+    why = probe_display(disp)
+    if why is not None:
+        return (HEALTH_DISPLAY_UNREACHABLE,
+                f"hotkeyd: {disp} — NOT SERVING: the display {disp} is "
+                f"unreachable — {why}")
+    return (HEALTH_OK,
+            f"hotkeyd: {disp} — serving (heartbeat {age:.1f}s ago, display "
+            f"reachable)")
+
+
+def main_argv(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="hotkeyd")
     ap.add_argument("--binds", help="path to a bind table module "
                                     "(default: the shipped binds.py)")
     ap.add_argument("--check", action="store_true",
                     help="validate the bind table and exit; no grabs, no X")
     ap.add_argument("--display", help="X display (default: $DISPLAY)")
-    args = ap.parse_args()
+    ap.add_argument("--health", action="store_true",
+                    help="report whether this display's daemon is SERVING "
+                         "(not merely alive); no grabs, no table")
+    args = ap.parse_args(argv)
+
+    if args.health:
+        # BEFORE load_table on purpose: a daemon whose table is the reason it is
+        # sick still has to be diagnosable, and a health probe that refuses to
+        # answer until binds.py validates is one more check that cannot observe
+        # the failure it exists for.
+        rc, msg = health(args.display)
+        print(msg)
+        return rc
 
     try:
         # --check does its own reporting, so it loads WITHOUT validating and
@@ -1215,6 +1396,10 @@ def main() -> int:
         # crashed". 5 is distinct from 3 (another daemon) and 4 (panic latch).
         print(f"hotkeyd: XI2 unavailable — {e}", file=sys.stderr)
         return 5
+
+
+def main() -> int:
+    return main_argv()
 
 
 if __name__ == "__main__":
