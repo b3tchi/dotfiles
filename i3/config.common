@@ -57,7 +57,6 @@ bindsym $mod+Shift+q kill
 
 
 # launch categorized menu
-bindsym $mod+m exec --no-startup-id morc_menu
 
 ################################################################################################
 ## sound-section - DO NOT EDIT if you wish to automatically upgrade Alsa -> Pulseaudio later! ##
@@ -77,10 +76,7 @@ bindsym $mod+Ctrl+m exec terminal -e 'alsamixer'
 
 # Start Applications
 # bindsym $mod+Ctrl+b exec terminal -e 'bmenu'
-bindsym $mod+F2 exec palemoon
-bindsym $mod+F3 exec pcmanfm
 # bindsym $mod+F3 exec ranger
-bindsym $mod+Shift+F3 exec pcmanfm_pkexec
 bindsym $mod+F5 exec terminal -e 'mocp'
 # bindsym $mod+t exec --no-startup-id pkill picom
 bindsym $mod+Ctrl+t exec --no-startup-id picom -b
@@ -429,6 +425,12 @@ mode "resize" {
 # still available as `i3-msg restart` from any terminal — which is reachable
 # precisely BECAUSE panic hands the keyboard back to i3.
 bindsym $mod+Shift+r exec --no-startup-id ~/.dotfiles/hotkeyd/hotkeyd-panic.sh panic
+
+# Plain i3 restart. It lived on $mod+Shift+r until panic took that chord (the
+# Android RDP client has no F12 row, so the emergency control had to be
+# reachable). One modifier further out: same finger position, hard to hit by
+# accident, and no F12 involved so it works on the phone too.
+bindsym $mod+Ctrl+Shift+r restart
 
 # Lock screen
 bindsym $mod+9 exec --no-startup-id blurlock
