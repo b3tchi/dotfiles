@@ -148,29 +148,31 @@ bindsym $mod+Ctrl+x --release exec --no-startup-id xkill
 
 # focus_follows_mouse no
 
-# change focus
-bindsym $mod+h focus left
-bindsym $mod+j focus down
-bindsym $mod+k focus up
-bindsym $mod+l focus right
-
-# alternatively, you can use the cursor keys:
-bindsym $mod+Left focus left
-bindsym $mod+Down focus down
-bindsym $mod+Up focus up
-bindsym $mod+Right focus right
-
-# move focused window
-bindsym $mod+Shift+h move left
-bindsym $mod+Shift+j move down
-bindsym $mod+Shift+k move up
-bindsym $mod+Shift+l move right
-
-# alternatively, you can use the cursor keys:
-bindsym $mod+Shift+Left move left
-bindsym $mod+Shift+Down move down
-bindsym $mod+Shift+Up move up
-bindsym $mod+Shift+Right move right
+# THE DIRECTIONAL GROUP LEFT i3 (sp020 / dotfiles-hwds.37).
+#
+# $mod+hjkl and $mod+arrows (focus), plus the $mod+Shift forms of both (move)
+# — 16 chords, owned by `hotkeyd/binds.py` now.
+#
+# THIS IS THE GROUP TASK 6 SHIPPED AND REVERTED (fd9e9f2). It failed because
+# the daemon's table hardcoded Mod4: on :10 $mod is Mod1, so the Mod4 forms
+# were FREE and the daemon grabbed and served them while i3 went on serving
+# the Mod1 forms — a split invisible on :0, where the two agree. The daemon
+# resolves $mod per display now, from this file's own `i3wm.mod` X resource,
+# so one table means Mod4 here and Mod1 over xrdp by construction.
+#
+# The $mod+Shift+<letter> half was the other open risk, since xrdp wraps every
+# character it sends in a synthetic Shift. Measured on the live :10 session
+# with a real RDP client (dotfiles-hwds.35): six presses, six dispatches, no
+# double-fire. A passive grab matches (keycode, mask); it is not a
+# modifier-state read, which is what the nav layer's Ctrl-not-Shift rule was
+# about.
+#
+# The `nav` layer is unaffected and still worth having: it does these same
+# motions with NO modifier held, and carries a resize sublayer that has no
+# global spelling.
+#
+# The i3 spelling of the whole group lives in `config.d/zz-fallback-binds.conf`
+# so `hotkeyd-panic.sh panic` gives it back when the daemon is dead or wrong.
 
 # workspace back and forth (with/without active container)
 workspace_auto_back_and_forth yes

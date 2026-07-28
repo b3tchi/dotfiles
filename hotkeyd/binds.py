@@ -462,6 +462,24 @@ def _workspace_binds() -> list[Bind]:
     return out
 
 
+def _directional_binds() -> list[Bind]:
+    """The global directional group: `$mod` + direction focuses, `$mod+Shift` +
+    direction moves, for the hjkl letters and the arrow keys alike.
+
+    Built from the SAME `_DIRS` / `_ARROWS` tables the nav layer uses, so the
+    two spellings of "left" cannot drift apart and neither can the global binds
+    and the layer that exists to do the same thing without a held modifier.
+    That sharing is the point: `_nav_binds` and this function disagreeing would
+    be invisible until someone used the one that was wrong.
+    """
+    out = []
+    for key, (dirn, _resize) in _DIRS.items():
+        for k in (key, *[a for a, d in _ARROWS.items() if d == key]):
+            out.append(Bind(f"$mod+{k}", f"focus {dirn}"))
+            out.append(Bind(f"$mod+Shift+{k}", f"move {dirn}"))
+    return out
+
+
 LAYERS: dict[str, Layer] = {
     # Navigation layer (was i3 `mode "nav"`, dotfiles-5u6m). Bare keys focus,
     # a held Ctrl moves, a held Alt resizes.
@@ -611,4 +629,35 @@ BINDS: list[Bind] = [
     Bind("$mod+a", "focus parent"),
     Bind("$mod+Shift+minus", "move scratchpad"),
     Bind("$mod+minus", "scratchpad show"),
+
+    # ---- THE DIRECTIONAL GROUP (dotfiles-hwds.37) -------------------------
+    # 16 chords: `$mod`+hjkl and `$mod`+arrows focus, the `$mod+Shift` forms of
+    # both move. THIS IS THE GROUP TASK 6 SHIPPED AND REVERTED (fd9e9f2), so it
+    # is worth being explicit about why it is safe now and was not then.
+    #
+    # T6 failed because the table HARDCODED Mod4. On :10 `$mod` is Mod1, so the
+    # Mod4 forms were free: the daemon grabbed and served them while i3 went on
+    # serving the Mod1 forms, and the split was invisible on :0 where the two
+    # agree. `$mod` resolves per display now (dotfiles-hwds.7), from the same
+    # `i3wm.mod` X resource i3 reads, so one table means Mod4 on :0 and Mod1 on
+    # :10 by construction rather than by hand.
+    #
+    # The `$mod+Shift+<letter>` half was the other open risk: xrdp wraps every
+    # character it sends in a synthetic Shift, which is exactly why the nav
+    # layer uses Ctrl and not Shift as its move modifier. MEASURED on the live
+    # :10 session with a real RDP client (dotfiles-hwds.35) — six presses of a
+    # `$mod+Shift+<char>` bind produced six dispatches, tightest gap 1.88s, no
+    # sub-100ms pair. A passive grab matches (keycode, mask) and is not a
+    # modifier-STATE read, which is what the nav layer's constraint was about.
+    #
+    # Closure checked under both resolutions: `$mod+Ctrl+Left|Right` is already
+    # this table's (workspace prev/next), nav's bare hjkl and arrows are
+    # layer-scoped rather than global, and nothing else in the i3 tree binds
+    # these keysyms.
+    #
+    # The nav LAYER stays exactly as it is. It is not made redundant by this:
+    # nav does the same motions with NO modifier held, which is the whole
+    # ergonomic point, and it also carries the resize sublayer that has no
+    # global spelling at all.
+    *_directional_binds(),
 ]

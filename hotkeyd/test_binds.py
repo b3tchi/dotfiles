@@ -663,13 +663,25 @@ def test_the_i3_config_parser_actually_sees_binds():
     """Guard on the guard: a parser that silently returned nothing would make
     every freshness assertion above vacuously true.
 
-    The sentinel was `$mod+o` until the nav cutover (dotfiles-hwds.16) moved it
-    out of i3 entirely. Pick chords i3 is expected to keep owning: `$mod+h` is
-    a global focus bind that the cutover deliberately does NOT migrate, and
-    `$mod+Shift+q` (kill) is not in any migration group.
+    Picking the sentinel is the hard part, and this test has now been repointed
+    twice for the same reason: `$mod+o` was the sentinel until the nav cutover
+    (dotfiles-hwds.16) moved it out of i3, and `$mod+h` replaced it under the
+    reasoning that the directional group "deliberately does NOT migrate" —
+    which dotfiles-hwds.37 then did.
+
+    A sentinel that is merely UNMIGRATED is a sentinel with an expiry date. Both
+    of these are chords i3 keeps by ARGUMENT, not by not having got to them yet:
+
+    - the panic chord, derived from `B.PANIC_CHORD` rather than spelled out. It
+      is reserved in the validator, so a table that binds it fails to load at
+      all — it cannot migrate without the rest of this file failing first.
+    - `$mod+Shift+q` (kill). Grabs die with the daemon, so the key for dealing
+      with an already-misbehaving window stays in the engine that cannot lose
+      its grabs — the same argument that keeps `$mod+Shift+c` (reload) in i3.
     """
     owned = i3_owned_chords("Mod4")
-    assert (("Mod4",), "h") in owned, "did not find $mod+h in i3/config.common"
+    assert B.normalize_chord(B.PANIC_CHORD, "Mod4") in owned, \
+        "did not find the panic chord in the i3 tree — it is i3-owned forever"
     assert (("Mod4", "Shift"), "q") in owned, "did not find $mod+Shift+q"
     # A floor, not a headcount: it exists to catch a parser that returned
     # nothing (or almost nothing), so it must sit well below the real total and
