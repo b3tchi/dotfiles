@@ -272,9 +272,20 @@ cmd_toggle() {
   [ -n "$_found" ] && _n="$(printf '%s\n' "$_found" | wc -l)" || _n=0
   [ "$_n" -gt 0 ] || die "no quickshell instance exposing '$TARGET' -- is the shell running?"
 
+  # Match on the CANONICAL session key, not the raw string (dotfiles-sxg1) --
+  # verbatim qs-clip.sh's fix, see its cmd_toggle for the full rationale. An X
+  # display's screen suffix is optional and ":10" / ":10.0" are one session, so
+  # an exact compare against i3's suffixed DISPLAY matched no instance and, with
+  # both sessions live, $mod+n refused instead of opening. Strips ONLY a
+  # trailing `.<digits>` (a host-qualified display keeps its dots);
+  # WAYLAND_DISPLAY names have no screen suffix and are compared verbatim.
   _pid=""
   if [ -n "$_want" ]; then
-    _pid="$(printf '%s\n' "$_found" | awk -v w="$_want" '$2 == w { print $1; exit }')"
+    _pid="$(printf '%s\n' "$_found" | awk -v w="$_want" '
+      function skey(k) { if (k ~ /^DISPLAY=/) sub(/\.[0-9]+$/, "", k); return k }
+      BEGIN { w = skey(w) }
+      skey($2) == w { print $1; exit }
+    ')"
   fi
 
   if [ -z "$_pid" ]; then

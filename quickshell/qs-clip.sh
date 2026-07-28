@@ -289,9 +289,27 @@ cmd_toggle() {
   [ -n "$_found" ] && _n="$(printf '%s\n' "$_found" | wc -l)" || _n=0
   [ "$_n" -gt 0 ] || die "no quickshell instance exposing '$TARGET' — is the shell running?"
 
+  # Match on the CANONICAL session key, not the raw string (dotfiles-sxg1).
+  # An X display's screen suffix is optional and ":10" / ":10.0" name the same
+  # session; i3 execs this script with the suffixed form while that session's
+  # own quickshell instance carries the bare one. An exact compare then matches
+  # nothing, and with both sessions live the refuse-rather-than-guess branch
+  # below fires on an ambiguity that was never real — $mod+v opening nothing at
+  # all. store_dir() has canonicalized the same way since dotfiles-3x85; this
+  # is the half of the script that never got the treatment.
+  #
+  # Strips ONLY a trailing `.<digits>`. The blunt `${v%.*}` idiom used
+  # elsewhere would maul a host-qualified display (`example.com:0` -> `example`)
+  # — harmless where the value is a store-path component, wrong here where two
+  # different hosts' displays must stay distinguishable. WAYLAND_DISPLAY names
+  # carry no screen suffix, so they are compared verbatim.
   _pid=""
   if [ -n "$_want" ]; then
-    _pid="$(printf '%s\n' "$_found" | awk -v w="$_want" '$2 == w { print $1; exit }')"
+    _pid="$(printf '%s\n' "$_found" | awk -v w="$_want" '
+      function skey(k) { if (k ~ /^DISPLAY=/) sub(/\.[0-9]+$/, "", k); return k }
+      BEGIN { w = skey(w) }
+      skey($2) == w { print $1; exit }
+    ')"
   fi
 
   if [ -z "$_pid" ]; then

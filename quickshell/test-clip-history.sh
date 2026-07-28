@@ -526,6 +526,52 @@ assert_eq "and not on $DPY" "0" \
   "$(env DISPLAY="$DPY" "$XDOTOOL" search --onlyvisible --name '^qs-clip$' 2>/dev/null | wc -l | tr -d ' ')"
 close_picker "$DPY2"
 
+# --- dotfiles-sxg1: the screen suffix is not a different session -------------
+#
+# An X display carries an OPTIONAL screen suffix, and ":10" / ":10.0" name the
+# same session. i3 on the xrdp session execs its binds with the suffixed form
+# while that session's own quickshell instance carries the bare one, so the
+# exact `$2 == w` compare matched NOTHING — and with both sessions live
+# cmd_toggle then took its refuse-rather-than-guess branch, so $mod+v never
+# opened anything at all. A single live instance masks it (the one-candidate
+# fallback hides the mismatch), which is why only the two-instance shape below
+# reproduces it — and why nobody caught it.
+#
+# All three scenarios run with BOTH instances live. That is the reproduction.
+
+scenario "derivation: a screen-suffixed DISPLAY ($DPY.0 — the form i3 execs with) resolves to the bare $DPY instance"
+close_picker "$DPY"; close_picker "$DPY2"
+out="$(env DISPLAY="$DPY.0" "${ISO[@]}" QS_CLIP_SET="$STUB" sh "$QS_CLIP" toggle 2>&1)"; rc=$?
+assert_eq "exits 0 — it did not refuse" "0" "$rc"
+assert_eq "and never claimed the display matched no running instance" "" \
+  "$(printf '%s' "$out" | grep -o 'matches no running instance' | head -1)"
+assert_ne "the picker opened on $DPY" "" "$(win_on "$DPY")"
+assert_eq "and NOT on $DPY2" "0" \
+  "$(env DISPLAY="$DPY2" "$XDOTOOL" search --onlyvisible --name '^qs-clip$' 2>/dev/null | wc -l | tr -d ' ')"
+close_picker "$DPY"
+
+scenario "derivation: the suffixed form picks the RIGHT session, not merely the first candidate"
+# Pins the fix to a real resolution: a mutant that strips the suffix and then
+# falls through to the one-candidate branch, or that matches whichever
+# instance comes first once the suffix is gone, opens on $DPY here — not $DPY2.
+close_picker "$DPY"; close_picker "$DPY2"
+env DISPLAY="$DPY2.0" "${ISO[@]}" QS_CLIP_SET="$STUB" sh "$QS_CLIP" toggle >/dev/null 2>&1
+assert_ne "the picker opened on $DPY2" "" "$(win_on "$DPY2")"
+assert_eq "and NOT on $DPY" "0" \
+  "$(env DISPLAY="$DPY" "$XDOTOOL" search --onlyvisible --name '^qs-clip$' 2>/dev/null | wc -l | tr -d ' ')"
+close_picker "$DPY2"
+
+scenario "derivation: normalizing the suffix does NOT soften the refusal — a suffixed display matching nothing still declines"
+# Refuse-rather-than-guess is correct on GENUINE ambiguity; sxg1 removed only
+# the manufactured kind. ':987.0' normalizes to ':987', still nobody's session.
+out="$(env DISPLAY=":987.0" "${ISO[@]}" sh "$QS_CLIP" toggle 2>&1)"; rc=$?
+assert_ne "exits non-zero" "0" "$rc"
+assert_eq "no picker opened on $DPY"  "0" \
+  "$(env DISPLAY="$DPY"  "$XDOTOOL" search --onlyvisible --name '^qs-clip$' 2>/dev/null | wc -l | tr -d ' ')"
+assert_eq "no picker opened on $DPY2" "0" \
+  "$(env DISPLAY="$DPY2" "$XDOTOOL" search --onlyvisible --name '^qs-clip$' 2>/dev/null | wc -l | tr -d ' ')"
+assert_ne "and it still names the live sessions" "" "$(printf '%s' "$out" | grep -o 'DISPLAY=:9[56]' | head -1)"
+
 # ============================================================================
 # PHASE 1.5 — end-to-end keyboard-driven publish (dotfiles-g5b regression)
 # ============================================================================
