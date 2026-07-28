@@ -155,7 +155,7 @@ cat > "$T/i3.conf" <<EOF
 font pango:monospace 10
 ipc-socket $SOCK_A
 include $HOTKEYD_I3_CONFIG_D/*.conf
-bindsym Mod4+Shift+F12 exec --no-startup-id $HERE/hotkeyd-panic.sh panic
+bindsym Mod4+Shift+r exec --no-startup-id $HERE/hotkeyd-panic.sh panic
 EOF
 
 for dpy in "$XA" "$XB"; do

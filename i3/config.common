@@ -314,7 +314,8 @@ for_window [urgent=latest] focus
 # See the note there for why a bare reload is not enough.)
 
 # restart i3 inplace (preserves your layout/session, can be used to upgrade i3)
-bindsym $mod+Shift+r restart
+# $mod+Shift+r is the PANIC bind (see below). Plain i3 restart:
+#   i3-msg restart
 
 # exit i3 (logs you out of your X session)
 bindsym $mod+Shift+e exec "i3-nagbar -t warning -m 'You pressed the exit shortcut. Do you really want to exit i3? This will end your X session.' -b 'Yes, exit i3' 'i3-msg exit'"
@@ -413,9 +414,21 @@ mode "resize" {
 # modifier spelling ($mod, Mod4+, Mod1+) — see binds.RESERVED_CHORDS. A
 # display-agnostic token check alone would leave it stealable on one display.
 #
-# $mod+Shift+F12 is deliberately awkward — it is an emergency control, and a
-# comfortable chord here is one that gets pressed by accident.
-bindsym $mod+Shift+F12 exec --no-startup-id ~/.dotfiles/hotkeyd/hotkeyd-panic.sh panic
+# CHORD CHOICE: $mod+Shift+r, and reachability beats accident-resistance.
+#
+# This was $mod+Shift+F12, chosen to be awkward on the theory that a
+# comfortable emergency chord gets pressed by accident. That theory assumed a
+# full keyboard. The primary :10 client is an Android RDP client with NO F12
+# key, so the one control that recovers a broken keyboard was unreachable on
+# the device most likely to need it. An emergency control that cannot be
+# pressed is not an emergency control.
+#
+# $mod+Shift+r previously ran i3 `restart`. That is a deliberate trade: panic
+# is strictly more useful than restart, it subsumes the "my session is wrong,
+# reset it" intent that made people reach for restart, and plain restart is
+# still available as `i3-msg restart` from any terminal — which is reachable
+# precisely BECAUSE panic hands the keyboard back to i3.
+bindsym $mod+Shift+r exec --no-startup-id ~/.dotfiles/hotkeyd/hotkeyd-panic.sh panic
 
 # Lock screen
 bindsym $mod+9 exec --no-startup-id blurlock

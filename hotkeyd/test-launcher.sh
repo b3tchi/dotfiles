@@ -118,10 +118,10 @@ n=$(pgrep -f "hotkeyd.py.*--display $XA" 2>/dev/null | wc -l)
 # alive and wrong. Asserting the old string would now pass only if the old,
 # insufficient bind were still there.
 COMMON="$HERE/../i3/config.common"
-BIND_LINE="$(grep -n 'bindsym $mod+Shift+F12 .*hotkeyd-panic\.sh panic' \
+BIND_LINE="$(grep -n 'bindsym $mod+Shift+r .*hotkeyd-panic\.sh panic' \
              "$COMMON" || true)"
 if [ -n "$BIND_LINE" ]; then
-    ok "i3 base config binds \$mod+Shift+F12 to hotkeyd-panic.sh panic"
+    ok "i3 base config binds \$mod+Shift+r to hotkeyd-panic.sh panic"
 else
     bad "no panic bind calling hotkeyd-panic.sh panic in i3/config.common"
 fi

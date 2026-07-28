@@ -438,10 +438,19 @@ def test_the_shipped_table_is_scoped_to_the_nav_cutover():
 # quietly take the only key that recovers a session from a daemon that is alive
 # and wrong. The validator is display-agnostic while `$mod` is not, so a
 # token-only check leaves the chord stealable on ONE display: a table spelling
-# `Mod1+Shift+F12` owns it on :10, `Mod4+Shift+F12` on :0, and neither matches a
+# `Mod1+<key>` owns it on :10, `Mod4+<key>` on :0, and neither matches a
 # `$mod` string compare. One fixture per spelling.
+#
+# DERIVED from B.PANIC_CHORD, never hardcoded. These were spelled out as
+# `...+F12` until the chord moved to $mod+Shift+r (the primary :10 client is an
+# Android RDP client with no F12 key), and eleven tests failed for naming the
+# chord rather than testing the rule. A test that hardcodes the chord breaks
+# every time the chord moves, which is exactly when you want it working.
 
-PANIC_SPELLINGS = ["$mod+Shift+F12", "Mod4+Shift+F12", "Mod1+Shift+F12"]
+_PANIC_TAIL = "+".join(B.PANIC_CHORD.split("+")[1:])   # e.g. "Shift+r"
+PANIC_SPELLINGS = [B.PANIC_CHORD,
+                   f"Mod4+{_PANIC_TAIL}",
+                   f"Mod1+{_PANIC_TAIL}"]
 
 
 @pytest.mark.parametrize("spelling", PANIC_SPELLINGS)
@@ -476,7 +485,7 @@ def test_a_layer_cannot_bind_the_panic_chord_either(spelling):
 
 def test_the_panic_chord_is_reserved_on_release_too():
     """`--release` is a different event but the same passive grab."""
-    assert B.validate([B.Bind("$mod+Shift+F12", "nop", on_release=True)], {})
+    assert B.validate([B.Bind(B.PANIC_CHORD, "nop", on_release=True)], {})
 
 
 def test_the_shipped_table_does_not_bind_the_panic_chord():
@@ -488,11 +497,11 @@ def test_check_exits_nonzero_on_a_table_that_binds_the_panic_chord(tmp_path):
     faulty.write_text(
         "import sys; sys.path.insert(0, %r)\n"
         "from binds import Bind\n"
-        "BINDS = [Bind('Mod1+Shift+F12', 'nop steal')]\n"
-        "LAYERS = {}\n" % str(HERE))
+        "BINDS = [Bind(%r, 'nop steal')]\n"
+        "LAYERS = {}\n" % (str(HERE), "Mod1+" + _PANIC_TAIL))
     r = run_check(faulty)
     assert r.returncode != 0
-    assert "Mod1+Shift+F12" in (r.stdout + r.stderr)
+    assert ("Mod1+" + _PANIC_TAIL) in (r.stdout + r.stderr)
 
 
 # --------------------------------------------------------------------------

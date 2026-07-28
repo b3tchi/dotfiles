@@ -70,7 +70,7 @@ DEFAULT_MOD = "Mod4"
 # The one chord i3 keeps forever (i3/config.common, `hotkeyd-panic.sh panic`).
 # Pressing it stops the daemon, links i3/config.d/zz-fallback-binds.conf and
 # reloads i3 — the way back from a daemon that is dead OR alive and wrong.
-PANIC_CHORD = "$mod+Shift+F12"
+PANIC_CHORD = "$mod+Shift+r"
 
 # Every modifier `$mod` resolves to on a display this repo runs on: Mod4 on the
 # native :0 session, Mod1 on the xrdp :10 session (xrdp/xinitrc merges
@@ -129,9 +129,9 @@ def normalize_chord(chord: str, mod: str = DEFAULT_MOD) -> tuple[tuple[str, ...]
 # The panic chord under EVERY spelling that reaches it, as normalised
 # identities. Reserving the literal `$mod` token alone leaves a hole, because
 # this validator is display-agnostic while `$mod` is not: a table that spells
-# `Mod1+Shift+F12` steals the chord on :10 and `Mod4+Shift+F12` steals it on :0,
+# `Mod1+Shift+r` steals the chord on :10 and `Mod4+Shift+r` steals it on :0,
 # and neither is a string match for `$mod`. Normalising the token under both
-# resolutions closes it in both directions — a `$mod+Shift+F12` in the table
+# resolutions closes it in both directions — a `$mod+Shift+r` in the table
 # normalises to whichever resolution the validator was called with, and both
 # are in the set. Alias folding (`Super`, `Alt`, `win`, case) comes free from
 # normalize_chord.
