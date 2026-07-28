@@ -1145,11 +1145,15 @@ class FakeXServer(FakeDisplay):
         # asking about something else entirely. `d` and `p` arrived with the
         # entry-point cutover (dotfiles-hwds.33); the digit row with the
         # workspace-group cutover (dotfiles-hwds.34), keycodes 10-17 as on a
-        # standard PC layout.
+        # standard PC layout; the layout group's letters and `minus` with
+        # dotfiles-hwds.36.
         super().__init__(keymap=keymap or {"o": 32, "h": 43, "q": 24,
                                            "1": 10, "2": 11, "3": 12,
                                            "4": 13, "5": 14, "6": 15,
                                            "7": 16, "8": 17,
+                                           "minus": 20, "e": 26, "t": 28,
+                                           "y": 29, "u": 30, "a": 38,
+                                           "s": 39, "z": 52, "b": 56,
                                            "Escape": 9, "Return": 36,
                                            "Left": 113, "Right": 114,
                                            "Up": 111, "Down": 116,

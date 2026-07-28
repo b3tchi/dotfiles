@@ -17,9 +17,8 @@ default_floating_border normal 4
 # Hide borders
 hide_edge_borders none
 
-# change borders
-bindsym $mod+u border none
-bindsym $mod+y border pixel 4
+# change borders — $mod+u (none) and $mod+y (pixel 4) left i3 with the rest of
+# the layout group (sp020 / dotfiles-hwds.36); hotkeyd/binds.py owns them.
 # notification-history picker (sp019) — quickshell browser over the persistent
 # notification store; the user-bus-singleton daemon owns the freedesktop
 # Notifications name. (border normal 4 dropped to free $mod+n.)
@@ -178,37 +177,31 @@ workspace_auto_back_and_forth yes
 # bindsym $mod+b workspace back_and_forth
 # bindsym $mod+Shift+b move container to workspace back_and_forth; workspace back_and_forth
 
-# split orientation
-bindsym $mod+s split h;exec notify-send 'tile side'
-bindsym $mod+b split v;exec notify-send 'tile bellow'
-bindsym $mod+q split toggle
-
-# toggle fullscreen mode for the focused container
-bindsym $mod+z fullscreen toggle
-
-# change container layout (stacked, tabbed, toggle split)
-# bindsym $mod+s layout stacking
-bindsym $mod+t layout tabbed
-bindsym $mod+e layout toggle split
-
-# toggle tiling / floating
-# bindsym $mod+Shift+space floating toggle
-
-# change focus between tiling / floating windows
-# bindsym $mod+space focus mode_toggle
-
-# toggle sticky (pinned — p, like tmux; $mod+Shift+s is the region screenshot)
-bindsym $mod+Shift+p sticky toggle
-
-# focus the parent container
-bindsym $mod+a focus parent
-
-# move the currently focused window to the scratchpad
-bindsym $mod+Shift+minus move scratchpad
-
-# Show the next scratchpad window or hide the focused scratchpad window.
-# If there are multiple scratchpad windows, this command cycles through them.
-bindsym $mod+minus scratchpad show
+# THE LAYOUT GROUP LEFT i3 (sp020 / dotfiles-hwds.36).
+#
+# Split orientation ($mod+s / $mod+b / $mod+q), fullscreen ($mod+z), layout
+# mode ($mod+t / $mod+e), sticky ($mod+Shift+p), focus parent ($mod+a) and
+# the scratchpad pair ($mod+minus / $mod+Shift+minus) are owned by
+# `hotkeyd/binds.py` now, together with the two border binds further up. A
+# chord bound here AND there double-fires with no BadAccess to warn, so the
+# block is deleted rather than commented into a state someone can uncomment.
+#
+# The commented-out `floating toggle` / `focus mode_toggle` lines that used to
+# sit in the middle of this block went with it. They had been dead for years
+# and neither engine binds those chords; leaving them behind would have
+# implied the group was still partly here.
+#
+# STILL i3's, on purpose: $mod+Shift+q (kill). Same argument as $mod+Shift+c
+# (reload) in the entry point — a key whose job is to deal with a window that
+# is ALREADY misbehaving belongs in the engine that cannot lose its grabs.
+#
+# Not in the group at all, despite sharing keysyms: $mod+Ctrl+t (picom),
+# $mod+Shift+e (exit) and $mod+Shift+s (region screenshot). A passive grab
+# matches its modifier mask exactly, so those are untouched by the daemon
+# grabbing the bare-$mod forms.
+#
+# The i3 spelling of the whole group lives in `config.d/zz-fallback-binds.conf`
+# so `hotkeyd-panic.sh panic` gives it back when the daemon is dead or wrong.
 
 # THE WORKSPACE GROUP LEFT i3 (sp020 / dotfiles-hwds.34).
 #

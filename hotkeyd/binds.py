@@ -575,4 +575,40 @@ BINDS: list[Bind] = [
     *_workspace_binds(),
     Bind("$mod+Ctrl+Right", "workspace next"),
     Bind("$mod+Ctrl+Left", "workspace prev"),
+
+    # ---- THE LAYOUT GROUP (dotfiles-hwds.36) ------------------------------
+    # How a container is ARRANGED: border style, split orientation, layout
+    # mode, fullscreen, sticky, scratchpad, and focus-parent. Twelve chords,
+    # every one a plain i3 command — no `run()`, no per-display value, so this
+    # group needs nothing from the daemon that i3 was not already giving it.
+    # It migrates because sp020 is moving the table, not because the daemon
+    # does these better.
+    #
+    # GRAB-OWNERSHIP CLOSURE, checked under both resolutions. Three i3 binds
+    # sit on the same KEYSYMS and are deliberately NOT here, because closure is
+    # by chord and a passive grab matches its mask exactly (plus the lock-bit
+    # variants): `$mod+Ctrl+t` (picom), `$mod+Shift+e` (exit nagbar) and
+    # `$mod+Shift+s` (region screenshot) are different chords from `$mod+t`,
+    # `$mod+e` and `$mod+s`, so i3 keeps serving them with no contest.
+    #
+    # `$mod+Shift+q` (kill) is NOT in the group, for the same reason
+    # `$mod+Shift+c` (reload) was left out of the entry-point one: it is a
+    # recovery key. Grabs die with the daemon, so a bind that exists to deal
+    # with a window that is already misbehaving is worth keeping in the engine
+    # that cannot lose its grabs. Killing a wedged fullscreen window must not
+    # depend on the daemon being healthy.
+    Bind("$mod+u", "border none"),
+    Bind("$mod+y", "border pixel 4"),
+    # Verbatim from i3, `bellow` typo and all. A cutover moves a bind; it does
+    # not quietly reword the notification the user has been reading for years.
+    Bind("$mod+s", "split h;exec notify-send 'tile side'"),
+    Bind("$mod+b", "split v;exec notify-send 'tile bellow'"),
+    Bind("$mod+q", "split toggle"),
+    Bind("$mod+z", "fullscreen toggle"),
+    Bind("$mod+t", "layout tabbed"),
+    Bind("$mod+e", "layout toggle split"),
+    Bind("$mod+Shift+p", "sticky toggle"),
+    Bind("$mod+a", "focus parent"),
+    Bind("$mod+Shift+minus", "move scratchpad"),
+    Bind("$mod+minus", "scratchpad show"),
 ]
