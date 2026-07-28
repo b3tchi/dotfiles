@@ -35,7 +35,18 @@
 # any behaviour is believed: zero `BadAccess` in the daemon's log, and no nav
 # bind left in i3's LOADED config. A green behaviour run on a display where the
 # daemon holds no grabs — because i3 still owned the chords and the daemon's
-# requests were refused — is the exact false pass that let T6 merge green.
+# requests were refused — is a false pass, and this is what rules it out.
+#
+# ONE SHAPE ONLY, stated plainly because the difference matters. This harness
+# sets `$mod` to Mod4, which is the `:0` shape. The collision that reverted T6
+# is a Mod1 phenomenon: on `:10` `$mod` IS Mod1, so nav's Alt+hjkl resize chords
+# ARE i3's global `$mod+hjkl` focus binds, and the daemon took `BadAccess` on
+# all eight. On Mod4 those are distinct chords and always were. So zero
+# `BadAccess` here does NOT reproduce T6 — it pins the weaker, still worthwhile
+# claim that the daemon got every grab it asked for on this shape. sp020 T14
+# specifies the `:10`/Mod1 run of this same file; that is dotfiles-i7na, and
+# until it lands nothing here has been exercised against the display in daily
+# use.
 #
 # Isolation matters here: i3-msg with no `-s` resolves the socket of whatever
 # i3 owns the X root atom, so an unsocketed harness would drive the developer's
@@ -140,7 +151,10 @@ print(d.get("config", ""))
 for inc in d.get("included_configs", []):
     print(inc.get("variable_replaced_contents") or inc.get("raw_contents", ""))
 PYEOF
-i3_config() { python3 "$TMP/getconfig.py" "$I3SOCK" 2>/dev/null; }
+# stderr is NOT swallowed. A read that fails must say why on the terminal; a
+# silent empty string is what made every negative assertion below pass over a
+# dead i3.
+i3_config() { python3 "$TMP/getconfig.py" "$I3SOCK"; }
 
 # --- oracle 2: OWNERSHIP, asserted before any behaviour is believed ----------
 #
@@ -148,7 +162,10 @@ i3_config() { python3 "$TMP/getconfig.py" "$I3SOCK" 2>/dev/null; }
 # binds.py at any commit boundary. It double-fires; migration is cutover, not
 # duplication." And its Task 14 criterion: "the daemon obtains every grab it
 # requests: zero BadAccess, asserted, not logged. This is the assertion whose
-# absence let the reverted cutover merge green."
+# absence let the reverted cutover merge green." That criterion names an
+# `:10`-shaped display and this harness is Mod4, so what follows is the
+# criterion's MECHANISM on the shape available here, not the criterion met —
+# see the shape note in the header.
 #
 # Both are read here, at startup, because every scenario below is meaningless
 # without them. If i3 still owned `mode "nav"`, `super+o` would enter i3's mode
@@ -156,16 +173,59 @@ i3_config() { python3 "$TMP/getconfig.py" "$I3SOCK" 2>/dev/null; }
 # which is exactly the state this file was in before the re-point.
 scenario "ownership: i3 has no nav left, and the daemon was refused nothing"
 LOADED="$(i3_config)"
-assert_eq "i3's loaded config defines no \`mode \"nav\"\` block" \
-  "$(printf '%s\n' "$LOADED" | grep -cE '^[[:space:]]*mode[[:space:]]+"nav"')" "0"
-assert_eq "i3's loaded config binds no entry chord for it" \
-  "$(printf '%s\n' "$LOADED" | grep -cE '^[[:space:]]*bindsym[[:space:]]+(\$mod|Mod4)\+o([[:space:]]|$)')" "0"
-# Matched as a BIND STATEMENT, not as a string. The reply carries comments
-# verbatim and config.common's cutover note names the markers in prose, so a
-# bare `grep -c 'nop nav-'` reports 1 on a correctly cut-over tree — measured.
-# What must be gone is a live marker bind, which is what this pattern reads.
-assert_eq "no \`nop nav-\` marker bind survives in i3's loaded config" \
-  "$(printf '%s\n' "$LOADED" | grep -cE '^[[:space:]]*bind(sym|code)[[:space:]].*nop[[:space:]]+nav-')" "0"
+
+# POSITIVE CONTROL, and it runs FIRST because the three assertions after it are
+# all NEGATIVE — each passes when a pattern is ABSENT, so an empty read
+# satisfies every one of them. That is not hypothetical: pointed at an
+# unreachable socket, `LOADED` is zero bytes and all three report 0, i.e. PASS,
+# on a session that is already broken. It was also hit live, on a run where the
+# harness i3 had died — four green ownership assertions over a dead WM. The
+# `-S "$I3SOCK"` gate at startup does not close it, because the socket FILE
+# outlives the process that bound it.
+#
+# Same discipline the layer reads get below, where a read that finds nothing
+# says `unpublished` instead of falling back to `default`: a read that returned
+# nothing must FAIL, not satisfy.
+#
+# Two markers, because there are two ways to read nothing useful. `ipc-socket`
+# comes from harness.conf and proves the reply arrived at all. The panic bind
+# comes from config.common and proves the INCLUDE was resolved — without it the
+# reply is well-formed but carries none of the text the negatives search, so
+# they would pass while looking at nothing. The panic bind is the right marker
+# because sp020 lists migrating it out of i3 as an auto-reject, so it is the one
+# line in that file guaranteed to stay put.
+top_marker="$(printf '%s\n' "$LOADED" \
+  | grep -cE '^[[:space:]]*ipc-socket[[:space:]]')"
+inc_marker="$(printf '%s\n' "$LOADED" \
+  | grep -cE '^[[:space:]]*bindsym[[:space:]]+(\$mod|Mod4)\+Shift\+r[[:space:]]')"
+assert_eq "the GET_CONFIG reply arrived (top-level marker present)" \
+  "$([ "$top_marker" -gt 0 ] && echo yes || echo no)" "yes"
+assert_eq "and it carries the INCLUDED config.common (panic bind present)" \
+  "$([ "$inc_marker" -gt 0 ] && echo yes || echo no)" "yes"
+
+if [ "$top_marker" -gt 0 ] && [ "$inc_marker" -gt 0 ]; then
+  assert_eq "i3's loaded config defines no \`mode \"nav\"\` block" \
+    "$(printf '%s\n' "$LOADED" | grep -cE '^[[:space:]]*mode[[:space:]]+"nav"')" "0"
+  assert_eq "i3's loaded config binds no entry chord for it" \
+    "$(printf '%s\n' "$LOADED" | grep -cE '^[[:space:]]*bindsym[[:space:]]+(\$mod|Mod4)\+o([[:space:]]|$)')" "0"
+  # Matched as a BIND STATEMENT, not as a string. The reply carries comments
+  # verbatim and config.common's cutover note names the markers in prose, so a
+  # bare `grep -c 'nop nav-'` reports 1 on a correctly cut-over tree — measured.
+  # What must be gone is a live marker bind, which is what this pattern reads.
+  assert_eq "no \`nop nav-\` marker bind survives in i3's loaded config" \
+    "$(printf '%s\n' "$LOADED" | grep -cE '^[[:space:]]*bind(sym|code)[[:space:]].*nop[[:space:]]+nav-')" "0"
+else
+  # Reported as failures, not skipped, and the count stays at five either way:
+  # "the pattern is absent from a config we could not read" is not a finding
+  # about ownership, and letting it score as one is the whole defect.
+  assert_eq "i3's loaded config defines no \`mode \"nav\"\` block" \
+    "unreadable config" "0"
+  assert_eq "i3's loaded config binds no entry chord for it" \
+    "unreadable config" "0"
+  assert_eq "no \`nop nav-\` marker bind survives in i3's loaded config" \
+    "unreadable config" "0"
+fi
+
 assert_eq "zero BadAccess in the daemon log at startup (every base grab taken)" \
   "$(grep -c 'BadAccess' "$TMP/hotkeyd.log")" "0"
 
@@ -418,10 +478,12 @@ assert_eq "bare h is inert once the layer is gone" "$(focused)" "$BEFORE"
 
 # Re-read at the END, after every layer entry and both sublayers. Layer chords
 # are grabbed at ENTRY, not at startup, so the startup check above cannot see a
-# refused `Ctrl+h` or `Alt+l`. A BadAccess on those is the T6 failure exactly:
-# the daemon asks, i3 already owns the chord, the request is refused, and the
+# refused `Ctrl+h` or `Alt+l`. A BadAccess on those is the T6 failure MODE: the
+# daemon asks, i3 already owns the chord, the request is refused, and the
 # keystroke falls through to i3 — which on a directional chord still LOOKS like
-# nav working.
+# nav working. On this Mod4 shape the specific T6 chords do not collide, so what
+# this catches is any OTHER refusal; the run that would reproduce T6 itself is
+# the Mod1 one (dotfiles-i7na).
 scenario "ownership: no grab was refused across the whole session"
 assert_eq "zero BadAccess in the daemon log after all three layers ran" \
   "$(grep -c 'BadAccess' "$TMP/hotkeyd.log")" "0"
