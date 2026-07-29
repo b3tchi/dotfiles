@@ -2,15 +2,30 @@
 
 The screenshot selector (quickshell/qs-region.py) is a GDK POPUP window —
 override-redirect. i3 emits NO window::new for override-redirect windows, so
-a hide keyed off that event (the old contract this suite used to encode)
-NEVER FIRES for the new overlay, and the focus ring lands in every live
-capture. The correct contract: the border (keep-above notification window)
-HIDES the moment the "screenshot" i3 MODE is entered, stays hidden and
-un-refreshed for the whole mode (so it can't restack above the live overlay),
-and REAPPEARS when the mode ends — on both the cancel and the save exit
-paths, which both funnel through the same i3 "mode default" transition, so
-from this module's perspective they are indistinguishable events and must
-both be covered. Other modes (resize) keep the live-refresh behavior.
+a hide keyed off that event NEVER FIRES for the overlay and the focus ring
+lands in every live capture. Suppression therefore hangs off the i3 MODE
+event, which is the only signal that arrives at all.
+
+WHICH mode is the part this suite got wrong for a while (dotfiles-5quz). The
+capture is TWO phases, and 29106e6 split them deliberately:
+
+  "screenshot"       AIMING. The ring stays UP and is RECOLOURED — while you
+                     are choosing what to capture, seeing which window is
+                     focused is the point. In COLOR_MODES, not SUPPRESS_MODES.
+  "screenshot-drag"  DRAWING. A synthetic mode qs-region.py enters from its own
+                     `_press` with a direct `i3-msg` (not a bindsym) the moment
+                     a region starts being drawn. The ring HIDES here and stays
+                     hidden and un-refreshed, so it cannot restack above the
+                     live overlay or be baked into the capture.
+
+This suite encoded the pre-29106e6 contract ("screenshot hides") for both
+phases and was 8-red on main until dotfiles-5quz re-pointed the suppression
+cases at screenshot-drag and added the aiming-phase colour assertions.
+
+Either phase REAPPEARS on the same i3 "mode default" transition, which both
+the cancel and the save exit paths funnel through — from this module they are
+indistinguishable events, so both are covered rather than one assumed from the
+other. Other modes (resize) keep the live-refresh behavior.
 
 Run: python3 quickshell/test_qs_focus_border_mode.py
 """
@@ -119,14 +134,28 @@ def check(name, cond):
 
 
 def enter_screenshot_mode():
-    """Simulate the two IPC events i3 actually emits for
-    `bindsym $mod+Shift+s mode "screenshot"; exec ...`: the binding event
-    first (arms suppression pre-emptively so an in-flight refresh can't
-    restack), then the mode-change event (the actual mode-enter signal that
-    must hide the border)."""
-    qsb.handle_event(json.dumps({"change": "run", "binding": {
-        "command": 'mode "screenshot"; exec --no-startup-id ~/x/qs-screenshot.sh'}}))
+    """The mode qs-screenshot.sh enters while the selector is being AIMED.
+
+    This mode does NOT hide the ring (dotfiles-5quz). Commit 29106e6 moved it
+    into COLOR_MODES instead: while you are choosing what to capture, the ring
+    stays up in the accent colour so you can see which window is focused.
+    Suppression moved to `screenshot-drag` below, which is entered the instant
+    a region is actually being drawn.
+    """
     qsb.handle_event('{"change":"screenshot", "pango_markup":false}')
+
+
+def enter_drag_mode():
+    """The synthetic mode qs-region.py switches into from its own `_press` the
+    moment the user starts drawing — an `i3-msg mode screenshot-drag`, not a
+    keybinding. THIS is where the ring must vanish: the capture is about to
+    happen and the border would be baked into it.
+
+    The overlay is a GDK POPUP (override-redirect), so i3 emits NO window::new
+    for it — a hide keyed off that event would never fire, which is why the
+    mode event carries the whole responsibility.
+    """
+    qsb.handle_event('{"change":"screenshot-drag", "pango_markup":false}')
 
 
 def leave_mode():
@@ -138,42 +167,63 @@ calls.clear()
 qsb.refresh_focused()
 check("baseline refresh shows border", "show" in calls)
 
-# The binding that enters the screenshot mode arrives BEFORE the mode event
-# and must already arm suppression instead of refreshing (no hide yet either
-# — the mode event, not the binding, is the mode-enter signal).
+# A binding whose command enters a SUPPRESS mode must arm suppression BEFORE
+# the mode event lands, or a refresh in flight between the two restacks the
+# border above the overlay.
+#
+# RE-POINTED at screenshot-drag (dotfiles-5quz): this used to send the
+# `mode "screenshot"` bind, which no longer suppresses anything. Two reasons
+# the arm branch is now DEFENSIVE rather than load-bearing, both worth stating
+# so nobody deletes it as dead: qs-region.py enters screenshot-drag with a
+# direct `i3-msg`, not a bindsym, and $mod+Shift+s left i3 entirely with the
+# screenshot group (dotfiles-hwds.39) so i3 emits no binding event for it at
+# all. The branch survives because the ordering hazard it guards returns the
+# moment anything binds a suppress mode again.
 calls.clear()
 qsb.handle_event(json.dumps({"change": "run", "binding": {
-    "command": 'mode "screenshot"; exec --no-startup-id ~/x/qs-screenshot.sh'}}))
-check("mode-enter binding arms suppression (no redraw)", not calls)
-
-# THE BUG THIS TASK FIXES: mode enter ("screenshot") must hide the border
-# immediately. The overlay is a GDK POPUP (override-redirect) — i3 emits NO
-# window::new for it, so a hide keyed off that event (the old contract)
-# never fires and the border would be captured live in every shot.
-calls.clear()
-qsb.handle_event('{"change":"screenshot", "pango_markup":false}')
-check("screenshot mode enter hides border", calls == ["hide"])
+    "command": 'mode "screenshot-drag"'}}))
+check("a suppress-mode binding arms suppression (no redraw)", not calls)
 leave_mode()
 
-# Isolate the mode branch's OWN responsibility for arming suppression —
-# send ONLY the mode event, with no preceding binding-arm event (which sets
-# mode_suppressed=True on its own and would otherwise mask this code path
-# via leftover module-global state from a prior test). Without the mode
-# branch's own "mode_suppressed = True", a refresh right after mode-enter
-# would slip through and restack the border above the live overlay.
+# THE CURRENT CONTRACT, half one: entering "screenshot" (aiming) does NOT hide
+# the ring — it RECOLOURS it. 29106e6 made the ring show which window is
+# focused while you choose what to capture.
 calls.clear()
 qsb.handle_event('{"change":"screenshot", "pango_markup":false}')
-check("mode-only entry (no binding) hides border", calls == ["hide"])
+check("screenshot mode enter does NOT hide the border", "hide" not in calls)
+check("screenshot mode enter colours the ring", qsb.mode_colored is True)
+check("screenshot mode enter leaves refreshes working",
+      qsb.mode_suppressed is False)
+leave_mode()
+check("leaving screenshot clears the colour", qsb.mode_colored is False)
+
+# Half two: "screenshot-drag" — the capture is imminent, the ring must go.
+calls.clear()
+enter_drag_mode()
+check("drag mode enter hides border", calls == ["hide"])
 calls.clear()
 qsb.refresh_focused()
-check("mode-only entry (no binding) still suppresses refresh", not calls)
+check("drag mode enter still suppresses refresh", not calls)
 leave_mode()
 
-# While the mode is active, binding/mouse-poll refreshes must do nothing —
-# the border stays hidden, it does not get redrawn/restacked above the
-# overlay.
+# The two are reached in sequence in real use (aim, then drag), so pin the
+# transition rather than only the states: a colour set on the way in must not
+# survive a drag that hides the ring, and the drag must suppress even though
+# the mode it came FROM was unsuppressed.
 calls.clear()
-enter_screenshot_mode()
+qsb.handle_event('{"change":"screenshot", "pango_markup":false}')
+enter_drag_mode()
+check("aim -> drag ends hidden and suppressed",
+      "hide" in calls and qsb.mode_suppressed is True)
+leave_mode()
+check("leaving after a drag redraws", qsb.mode_suppressed is False)
+
+# While the DRAG is active, binding/mouse-poll refreshes must do nothing —
+# the border stays hidden, it does not get redrawn/restacked above the
+# overlay. (Re-pointed from the aiming mode, which no longer suppresses:
+# dotfiles-5quz.)
+calls.clear()
+enter_drag_mode()
 calls.clear()
 qsb.refresh_focused()
 qsb.handle_event('{"change":"run", "binding":{"command":"nop"}}')
@@ -185,7 +235,7 @@ leave_mode()
 # "default" with no intervening window events, since the overlay never
 # wrote a file and closed without ever appearing in i3's tree.
 calls.clear()
-enter_screenshot_mode()
+enter_drag_mode()
 calls.clear()
 leave_mode()
 check("cancel path: mode leave redraws border", "show" in calls)
@@ -197,8 +247,8 @@ check("cancel path: mode leave redraws border", "show" in calls)
 # distinguishable from cancel at the i3-mode level, and must be covered
 # too, not assumed to work because cancel does.
 calls.clear()
-enter_screenshot_mode()
-check("save path: still hidden after mode entry", calls == ["hide"])
+enter_drag_mode()
+check("save path: still hidden after drag entry", calls == ["hide"])
 calls.clear()
 qsb.handle_event(json.dumps({"change": "close", "container": {
     "name": "term", "window_properties": {"class": "Alacritty"}}}))
@@ -214,8 +264,8 @@ check("save path: mode leave redraws border", "show" in calls)
 # window ever mapped) — the border must still return when the mode ends,
 # not stay hidden forever waiting for a window::new that will never come.
 calls.clear()
-enter_screenshot_mode()
-check("overlay-never-started: border hidden at mode enter", calls == ["hide"])
+enter_drag_mode()
+check("overlay-never-started: border hidden at drag enter", calls == ["hide"])
 calls.clear()
 leave_mode()
 check("overlay-never-started: border returns without ever seeing a window",
@@ -223,9 +273,9 @@ check("overlay-never-started: border returns without ever seeing a window",
 
 # Rapid mode enter/exit: no stuck-hidden or double-shown border.
 calls.clear()
-enter_screenshot_mode()
+enter_drag_mode()
 leave_mode()
-enter_screenshot_mode()
+enter_drag_mode()
 leave_mode()
 check("rapid enter/exit ends unsuppressed and visible", "show" in calls)
 check("rapid enter/exit does not leave border stuck hidden",
