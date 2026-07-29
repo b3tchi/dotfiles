@@ -803,12 +803,16 @@ BINDS: list[Bind] = [
     # It migrates because sp020 is moving the table, not because the daemon
     # does these better.
     #
-    # GRAB-OWNERSHIP CLOSURE, checked under both resolutions. Three i3 binds
-    # sit on the same KEYSYMS and are deliberately NOT here, because closure is
-    # by chord and a passive grab matches its mask exactly (plus the lock-bit
-    # variants): `$mod+Ctrl+t` (picom), `$mod+Shift+e` (exit nagbar) and
-    # `$mod+Shift+s` (region screenshot) are different chords from `$mod+t`,
-    # `$mod+e` and `$mod+s`, so i3 keeps serving them with no contest.
+    # GRAB-OWNERSHIP CLOSURE, checked under both resolutions. Three binds sat
+    # on the same KEYSYMS and were deliberately NOT in this group, because
+    # closure is by chord and a passive grab matches its mask exactly (plus the
+    # lock-bit variants): `$mod+Ctrl+t`, `$mod+Shift+e` and `$mod+Shift+s` are
+    # different chords from `$mod+t`, `$mod+e` and `$mod+s`. All three have
+    # since moved on their own terms — `$mod+Shift+s` with the screenshot group
+    # (dotfiles-hwds.39), `$mod+Shift+e` with the apps + session group
+    # (dotfiles-hwds.46), and `$mod+Ctrl+t` (picom) was DELETED rather than
+    # migrated (dotfiles-c57). The closure argument is what let each be decided
+    # separately instead of dragging them along with the letters.
     #
     # `$mod+Shift+q` (kill) is NOT in the group, for the same reason
     # `$mod+Shift+c` (reload) was left out of the entry-point one: it is a

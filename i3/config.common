@@ -83,8 +83,17 @@ bindsym $mod+Shift+q kill
 # bindsym $mod+F3 exec ranger
 # $mod+F5 (mocp) moved to hotkeyd/binds.py with the apps + session group —
 # sp020, dotfiles-hwds.46. It was already a no-op here: mocp is not installed.
-# bindsym $mod+t exec --no-startup-id pkill picom
-bindsym $mod+Ctrl+t exec --no-startup-id picom -b
+# $mod+Ctrl+t (`picom -b`) and its commented `pkill picom` twin were DELETED
+# here, not migrated — sp020, dotfiles-c57. This is the shared base, so every
+# session loaded it: on WSL and xrdp, which run deliberately WITHOUT a
+# compositor (config.d/wsl.conf, config.d/native.conf), the chord offered to
+# start one, and doing so is actively harmful there — it was picom on xrdp that
+# the compositor-free focus border replaced. The native session still runs
+# picom, but from its own autostart (config.d/native.conf, guarded on
+# XRDP_SESSION), which is where a per-session compositor belongs.
+#
+# No fallback entry and no binds.py entry: a deletion is not a cutover. The
+# chord is simply gone.
 # (router: moved to desktop config) bindsym $mod+Shift+d --release exec ~/.dotfiles/quickshell/qs-start.sh
 # clipboard-history picker (sp014) — opens the quickshell picker; choosing a
 # row puts that entry on the clipboard. It is a PICKER, not a paste tool:
@@ -212,10 +221,11 @@ workspace_auto_back_and_forth yes
 # (reload) in the entry point — a key whose job is to deal with a window that
 # is ALREADY misbehaving belongs in the engine that cannot lose its grabs.
 #
-# Not in the group at all, despite sharing keysyms: $mod+Ctrl+t (picom),
-# $mod+Shift+e (exit) and $mod+Shift+s (region screenshot). A passive grab
-# matches its modifier mask exactly, so those are untouched by the daemon
-# grabbing the bare-$mod forms.
+# Not in the group at all, despite sharing keysyms: $mod+Shift+s (region
+# screenshot, hotkeyd's) and $mod+Shift+e (exit, hotkeyd's since
+# dotfiles-hwds.46). A passive grab matches its modifier mask exactly, so those
+# are untouched by the daemon grabbing the bare-$mod forms. $mod+Ctrl+t was
+# listed here too until it was deleted outright (dotfiles-c57).
 #
 # The i3 spelling of the whole group lives in `config.d/zz-fallback-binds.conf`
 # so `hotkeyd-panic.sh panic` gives it back when the daemon is dead or wrong.

@@ -50,8 +50,13 @@ linux:
       # (then xrdp-chansrv → Windows). Without it nvim falls back to the idle
       # WSLg wayland-0 clipboard, which chansrv can't see (dotfiles-0ak).
       # imagemagick: clip-img-bridge.sh's bmp->png conversion.
+      # picom is NOT in this branch (dotfiles-9up): the WSL session runs
+      # without a compositor on purpose (config.d/wsl.conf), and the one thing
+      # its picom existed for — giving the focus border something to composite
+      # against — went away with the compositor-free border. The native branch
+      # below keeps it; that session actually runs one.
       if [ -d /mnt/c ]; then
-        sudo pacman -Syu --needed --noconfirm i3-wm xorg-xinput picom \
+        sudo pacman -Syu --needed --noconfirm i3-wm xorg-xinput \
           python-gobject python-cairo xclip imagemagick
       else
         sudo pacman -Syu --needed --noconfirm \
