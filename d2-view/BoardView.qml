@@ -10,6 +10,10 @@
 //
 // Interaction: wheel = zoom at cursor · drag = pan · 0 = 1:1 · f = fit
 //              1-9 = board · arrows = pan (shift = coarse) · r = reload
+//
+// Pass --debug to print geometry (natural size, zoom, content rect, image
+// status) on every rescan/apply — QML swallows console.log unless
+// QT_FORCE_STDERR_LOGGING=1, which the wrapper sets.
 
 import QtQuick
 import QtQuick.Controls
@@ -41,22 +45,26 @@ ApplicationWindow {
     readonly property var current: index >= 0 && index < boards.length
                                    ? boards[index] : null
 
-    // per-board view state, so switching tabs and coming back keeps your place
-    property var state: ({})
-
-    readonly property real zoom: current ? (state[current.file] || defaults()).k : 1
+    // Per-board view state, so switching tabs and coming back keeps your place.
+    // `zoom` is a plain property, NOT derived from the map: mutating a JS map
+    // and reassigning the same reference emits no change signal, so a derived
+    // binding silently keeps its old value (content then sits at 1:1 while the
+    // pan offsets assume the new scale — i.e. an apparently empty window).
+    property var saved: ({})
+    property real zoom: 1
 
     function defaults() { return {k: 1, x: 0, y: 0} }
 
     function viewOf(file) {
-        if (!state[file]) state[file] = defaults()
-        return state[file]
+        if (!saved[file]) saved[file] = defaults()
+        return saved[file]
     }
 
     function commit(v) {
-        // reassigning the map is what makes the bindings (zoom label) re-evaluate
-        const s = state; s[current.file] = v; state = s
-        content.x = v.x; content.y = v.y
+        saved[current.file] = v
+        zoom = v.k
+        content.x = v.x
+        content.y = v.y
     }
 
     // ---- board discovery ----------------------------------------------------
@@ -100,6 +108,7 @@ ApplicationWindow {
         }
         boards = found
         if (index >= boards.length) index = 0
+        log("rescan")
         if (current) fit()
     }
 
@@ -107,9 +116,25 @@ ApplicationWindow {
 
     // ---- zoom / pan ---------------------------------------------------------
 
+    readonly property bool debug: Qt.application.arguments.indexOf("--debug") >= 0
+
+    function log(where) {
+        if (!debug) return
+        console.log(where + ": boards=" + boards.length
+            + " idx=" + index
+            + (current ? " board=" + current.name + " nat=" + current.w + "x" + current.h : " board=none")
+            + " zoom=" + zoom.toFixed(3)
+            + " content=" + Math.round(content.width) + "x" + Math.round(content.height)
+            + " at=" + Math.round(content.x) + "," + Math.round(content.y)
+            + " stage=" + Math.round(stage.width) + "x" + Math.round(stage.height)
+            + " imgStatus=" + board.status + " painted="
+            + Math.round(board.paintedWidth) + "x" + Math.round(board.paintedHeight))
+    }
+
     function apply(k, x, y) {
         if (!current) return
         commit({k: Math.max(0.02, Math.min(16, k)), x: x, y: y})
+        log("apply")
     }
 
     function actual() {                                   // 1:1
@@ -142,8 +167,8 @@ ApplicationWindow {
         if (i < 0 || i >= boards.length) return
         index = i
         const v = viewOf(current.file)
-        content.x = v.x; content.y = v.y
         if (v.k === 1 && v.x === 0 && v.y === 0) fit()
+        else commit(v)
     }
 
     // ---- chrome -------------------------------------------------------------

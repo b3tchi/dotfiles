@@ -105,8 +105,12 @@ def main [
         error make { msg: $"d2-view: viewer missing: ($qml) — run 'rotz link nushell'" }
     }
 
+    # QML blocks XMLHttpRequest on local files by default; the viewer needs it
+    # to read each svg's viewBox (natural size) and to notice re-renders.
     try {
-        ^qml6 $qml -- $dir
+        with-env {QML_XHR_ALLOW_FILE_READ: "1", QT_FORCE_STDERR_LOGGING: "1"} {
+            ^qml6 $qml -- $dir
+        }
     } catch { |e|
         if $watcher != null { job kill $watcher }
         error make { msg: $"d2-view: qml6 failed — ($e.msg)" }
