@@ -1,0 +1,116 @@
+#!/usr/bin/env nu
+# d2-view — native QML viewer for a folder of d2 boards (pan/zoom + tab bar)
+#
+# Usage:
+#   d2-view                     # boards in the current directory
+#   d2-view <dir>               # boards in <dir>
+#   d2-view <file.d2>           # that folder, opening on that board
+#   d2-view <dir> --no-watch    # skip the re-render loop (view svgs as-is)
+#
+# Renders every stale <board>.d2 to <board>.svg, then launches the QML viewer
+# (~/.dotfiles/d2-view/BoardView.qml). While the window is open a background
+# job keeps re-rendering on edit; the viewer polls the svg and swaps it in
+# place, so zoom and pan survive.
+#
+# Complements `d2-router` + `preview` (which render one .d2 in the preview
+# window through a web page). This is the native path: QtSvg rasterises at the
+# displayed scale, so drag-pan and wheel-zoom are real, not transform maths.
+
+const QML_APP = "~/.dotfiles/d2-view/BoardView.qml"
+const LAYOUT  = "elk"
+
+# Render one .d2 to .svg. Returns true when d2 succeeded.
+def render-board [src: path]: nothing -> bool {
+    let out = ($src | str replace --regex '\.d2$' '.svg')
+    let r = (do { ^d2 --layout $LAYOUT $src $out } | complete)
+    if $r.exit_code != 0 {
+        print --stderr $"d2-view: ($src | path basename) failed to compile"
+        print --stderr ($r.stderr | lines | last 1 | str join)
+        # touch the svg so the watch loop does not spin on a broken source
+        if ($out | path exists) { ^touch $out }
+        false
+    } else {
+        true
+    }
+}
+
+# Every .d2 in dir whose .svg is missing or older than the source (or older
+# than _style.d2, which every board imports).
+def stale-boards [dir: path]: nothing -> list<path> {
+    let style = ($dir | path join "_style.d2")
+    let style_mtime = if ($style | path exists) {
+        ls $style | get 0.modified
+    } else {
+        ("1970-01-01T00:00:00Z" | into datetime)
+    }
+    glob ($dir | path join "*.d2")
+    | where { |f| ($f | path basename) !~ '^_' }
+    | where { |f|
+        let svg = ($f | str replace --regex '\.d2$' '.svg')
+        if not ($svg | path exists) {
+            true
+        } else {
+            let sm = (ls $svg | get 0.modified)
+            ((ls $f | get 0.modified) > $sm) or ($style_mtime > $sm)
+        }
+    }
+}
+
+def main [
+    target?: string        # directory, or a .d2/.svg file inside one
+    --no-watch             # do not re-render while the viewer is open
+] {
+    let raw = ($target | default ".")
+    let expanded = ($raw | path expand)
+
+    if not ($expanded | path exists) {
+        error make { msg: $"d2-view: no such path: ($expanded)" }
+    }
+
+    let dir = if ($expanded | path type) == "dir" {
+        $expanded
+    } else {
+        $expanded | path dirname
+    }
+
+    let sources = (glob ($dir | path join "*.d2")
+                   | where { |f| ($f | path basename) !~ '^_' })
+    if ($sources | is-empty) {
+        # a folder of pre-rendered svgs is still viewable
+        if (glob ($dir | path join "*.svg") | is-empty) {
+            error make { msg: $"d2-view: no .d2 or .svg boards in ($dir)" }
+        }
+    }
+
+    # first pass: bring every stale board up to date before the window opens
+    let stale = (stale-boards $dir)
+    if ($stale | is-not-empty) {
+        print $"d2-view: rendering ($stale | length) board\(s\) …"
+        $stale | each { |src| render-board $src } | ignore
+    }
+
+    let watcher = if $no_watch {
+        null
+    } else {
+        job spawn {
+            loop {
+                stale-boards $dir | each { |src| render-board $src } | ignore
+                sleep 1sec
+            }
+        }
+    }
+
+    let qml = ($QML_APP | path expand)
+    if not ($qml | path exists) {
+        error make { msg: $"d2-view: viewer missing: ($qml) — run 'rotz link nushell'" }
+    }
+
+    try {
+        ^qml6 $qml -- $dir
+    } catch { |e|
+        if $watcher != null { job kill $watcher }
+        error make { msg: $"d2-view: qml6 failed — ($e.msg)" }
+    }
+
+    if $watcher != null { job kill $watcher }
+}
