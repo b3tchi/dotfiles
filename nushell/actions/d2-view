@@ -73,6 +73,13 @@ def main [
         $expanded | path dirname
     }
 
+    # a file target opens on that board (matched by basename without extension)
+    let board = if ($expanded | path type) == "dir" {
+        ""
+    } else {
+        $expanded | path basename | str replace --regex '\.(d2|svg)$' ''
+    }
+
     let sources = (glob ($dir | path join "*.d2")
                    | where { |f| ($f | path basename) !~ '^_' })
     if ($sources | is-empty) {
@@ -109,7 +116,11 @@ def main [
     # to read each svg's viewBox (natural size) and to notice re-renders.
     try {
         with-env {QML_XHR_ALLOW_FILE_READ: "1", QT_FORCE_STDERR_LOGGING: "1"} {
-            ^qml6 $qml -- $dir
+            if ($board | is-empty) {
+                ^qml6 $qml -- $dir
+            } else {
+                ^qml6 $qml -- $dir $board
+            }
         }
     } catch { |e|
         if $watcher != null { job kill $watcher }

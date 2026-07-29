@@ -30,18 +30,15 @@ ApplicationWindow {
 
     // ---- inputs -------------------------------------------------------------
 
-    // last CLI arg that is not the qml file itself; default to cwd
-    readonly property string dir: {
-        const args = Qt.application.arguments
-        for (let i = args.length - 1; i > 0; i--) {
-            if (!args[i].endsWith(".qml") && !args[i].startsWith("-"))
-                return args[i]
-        }
-        return "."
-    }
+    // CLI: qml6 BoardView.qml -- <dir> [board-name] [--debug]
+    readonly property var argv: Qt.application.arguments.filter(
+        (a, i) => i > 0 && !a.endsWith(".qml") && !a.startsWith("-"))
+    readonly property string dir: argv.length > 0 ? argv[0] : "."
+    readonly property string wanted: argv.length > 1 ? argv[1] : ""
 
     property var boards: []            // [{file, name, w, h}]
     property int index: 0
+    property bool picked: false
     readonly property var current: index >= 0 && index < boards.length
                                    ? boards[index] : null
 
@@ -108,6 +105,13 @@ ApplicationWindow {
         }
         boards = found
         if (index >= boards.length) index = 0
+        // only once boards exist — the first rescan runs before the folder
+        // model has counted, and would otherwise burn the one-shot flag
+        if (wanted !== "" && !picked && boards.length > 0) {
+            const i = boards.findIndex(b => b.name === wanted)
+            if (i >= 0) index = i
+            picked = true
+        }
         log("rescan")
         if (current) fit()
     }
@@ -358,8 +362,8 @@ ApplicationWindow {
     Shortcut { sequence: "0"; onActivated: win.actual() }
     Shortcut { sequence: "f"; onActivated: win.fit() }
     Shortcut { sequence: "r"; onActivated: { win.rescan(); win.reloadToken++ } }
-    Shortcut { sequence: "q"; onActivated: Qt.quit() }
     Shortcut { sequence: "Ctrl+W"; onActivated: Qt.quit() }
+    Shortcut { sequence: "Ctrl+Q"; onActivated: Qt.quit() }
     Shortcut { sequence: "Left";  onActivated: win.nudge(80, 0) }
     Shortcut { sequence: "Right"; onActivated: win.nudge(-80, 0) }
     Shortcut { sequence: "Up";    onActivated: win.nudge(0, 80) }
