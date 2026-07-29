@@ -1059,21 +1059,67 @@ assert_eq "the fallback does not resurrect the deleted bind" \
 assert_eq "hotkeyd/binds.py does not carry \$mod+Shift+o" \
   "0" "$(grep -F -c 'Bind("\$mod+Shift+o"' "$SCRIPT_DIR/../hotkeyd/binds.py" || true)"
 
-scenario "reload-restarts-the-bar: \$mod+Shift+c chains a qs-start exec onto the reload"
-# i3 runs exec_always on RESTART only, never on reload (verified empirically),
-# so a bare `reload` leaves the running quickshell on the QML it started with.
-# Both entry points must therefore chain the bar restart onto the bind, each
-# with its OWN env prefix -- which is also why the bind cannot live in the
-# shared base (the base never execs, and the env vars are entry-point ones).
-for f in "$I3_BASE" "$I3_XRDP"; do
-  RELOAD_LINE="$(effective "$f" | grep -E '^bindsym \$mod\+Shift\+c ' | head -1)"
-  case "$RELOAD_LINE" in
-    *reload*qs-start.sh*) assert_eq "$(basename "$f") effective: reload also restarts the bar" "ok" "ok" ;;
-    *) assert_eq "$(basename "$f") effective: reload also restarts the bar" "$RELOAD_LINE" "reload + qs-start.sh exec" ;;
+scenario "shift-c-refreshes-the-bar: \$mod+Shift+c leaves a bar running the CURRENT QML"
+# THE REQUIREMENT, not the mechanism (dotfiles-ph03). i3 runs exec_always on
+# RESTART only, never on reload (verified empirically: exec_always ran once at
+# start, still once after reload, twice after restart), so a bare `reload`
+# leaves the running quickshell on the QML it started with. That is the trap
+# this scenario exists to catch.
+#
+# It used to assert the SHAPE `reload ... qs-start.sh`, which was the only
+# mechanism when it was written. i3/config then moved to a plain `restart`
+# (28ceeffc, when the restart verbs consolidated onto the $mod+Shift+r hammer),
+# which satisfies the requirement by a different route — re-exec re-runs
+# exec_always, and that is what launches the bar. The assertion had been red on
+# main ever since, blocking this suite as a merge gate while the config it
+# complained about was correct.
+#
+# So both routes are accepted, and each is checked for the thing that makes it
+# WORK rather than for its wording:
+#   restart        -> the same effective config must carry an `exec_always`
+#                     running qs-start.sh, or the re-exec refreshes nothing.
+#   reload + exec  -> the bind itself must chain the qs-start exec.
+# A bare `reload` matches neither and still fails, which is the whole point.
+bar_refresh_shape() {  # <bindsym line> <effective config text> -> restart|chained|""
+  case "$1" in
+    *reload*qs-start.sh*)  printf 'chained\n' ;;
+    *restart*)
+      case "$2" in
+        *exec_always*qs-start.sh*) printf 'restart\n' ;;
+        *)                         printf '\n' ;;
+      esac ;;
+    *) printf '\n' ;;
   esac
+}
+
+for f in "$I3_BASE" "$I3_XRDP"; do
+  EFF="$(effective "$f")"
+  RELOAD_LINE="$(printf '%s\n' "$EFF" | grep -E '^bindsym \$mod\+Shift\+c ' | head -1)"
+  SHAPE="$(bar_refresh_shape "$RELOAD_LINE" "$EFF")"
+  if [ -n "$SHAPE" ]; then
+    pass "$(basename "$f") effective: \$mod+Shift+c refreshes the bar (via $SHAPE)"
+  else
+    fail "$(basename "$f") effective: \$mod+Shift+c refreshes the bar" \
+      "restart + an exec_always qs-start.sh, or reload chained to a qs-start exec" \
+      "$RELOAD_LINE"
+  fi
   assert_eq "$(basename "$f") effective: exactly one \$mod+Shift+c bind" "1" \
-    "$(effective "$f" | grep -cE '^bindsym \$mod\+Shift\+c ' | tr -d ' ')"
+    "$(printf '%s\n' "$EFF" | grep -cE '^bindsym \$mod\+Shift\+c ' | tr -d ' ')"
 done
+
+# The detector itself, pinned against synthetic lines — the previous version of
+# this scenario went red for two weeks without anyone being able to tell from
+# its output whether the config or the assertion was wrong. These make the
+# answer readable: if these pass and the loop above fails, the config is wrong.
+EA='exec_always --no-startup-id $qsbarenv ~/.dotfiles/quickshell/qs-start.sh'
+assert_eq "detector: a bare reload is NOT enough" "" \
+  "$(bar_refresh_shape 'bindsym $mod+Shift+c reload' "$EA")"
+assert_eq "detector: restart counts, given an exec_always to re-run" "restart" \
+  "$(bar_refresh_shape 'bindsym $mod+Shift+c restart' "$EA")"
+assert_eq "detector: restart does NOT count without one" "" \
+  "$(bar_refresh_shape 'bindsym $mod+Shift+c restart' 'no autostart here')"
+assert_eq "detector: reload chained to the exec counts" "chained" \
+  "$(bar_refresh_shape 'bindsym $mod+Shift+c reload, exec --no-startup-id qs-start.sh' 'no autostart here')"
 # the shared base must NOT carry it (it would exec, and without the env)
 assert_eq "config.common has no \$mod+Shift+c bind" "0" \
   "$(grep -cE '^bindsym \$mod\+Shift\+c ' "$I3_COMMON" | tr -d ' ')"
