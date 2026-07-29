@@ -552,6 +552,23 @@ def _nav_binds(kind: str) -> list[Bind]:
     return out
 
 
+def _resize_layer_binds() -> list[Bind]:
+    """The standalone `resize` mode's table (dotfiles-hwds.48).
+
+    NOT `_nav_binds("resize")`, and the difference is the whole reason this
+    layer still exists next to nav's Alt sublayer: i3's `resize` mode moved the
+    LETTERS by 5 and the ARROWS by 10, a coarse/fine pair on one gesture. nav's
+    sublayer only ever had the 5. Folding them would silently halve the arrows,
+    so the two steps are carried explicitly here.
+    """
+    out = []
+    for key, (_dirn, resize) in _DIRS.items():
+        out.append(Bind(key, f"resize {resize} 5 px or 5 ppt"))
+    for arrow, key in _ARROWS.items():
+        out.append(Bind(arrow, f"resize {_DIRS[key][1]} 10 px or 10 ppt"))
+    return out
+
+
 def _workspace_binds() -> list[Bind]:
     """The workspace group: switch / move-container / move-and-follow, indexed
     by DISPLAY POSITION rather than by i3 workspace name.
@@ -615,6 +632,30 @@ LAYERS: dict[str, Layer] = {
         # q must work with a modifier still held — a layer you cannot leave
         # while holding Ctrl is a trap. The daemon matches exit keys against
         # the keysym regardless of held modifiers.
+        exit_keys=["q", "Escape", "Return"],
+    ),
+
+    # The standalone resize mode (was i3 `mode "resize"`, dotfiles-hwds.48).
+    # Entered by `$mod+r`, persistent, left with q / Escape / Return.
+    #
+    # WHY IT SURVIVES ALONGSIDE nav's Alt SUBLAYER, which resizes too: this one
+    # is a MODE, not a held-modifier gesture. You enter it, both hands are free,
+    # and it stays until you leave — which is what you want when fitting a
+    # window takes a dozen adjustments. nav's sublayer is for a correction made
+    # in passing while $mod is already down. Same verbs, different gesture; the
+    # i3 config carried both for the same reason.
+    #
+    # The 5/10 split (letters coarse-fine against arrows) comes with it — see
+    # `_resize_layer_binds`.
+    #
+    # THE BAR NEEDS NOTHING. ModeBarTheme.resolve already maps the string
+    # "resize" to its hint row, and the daemon publishes the layer name on the
+    # state socket, so the strip that i3's mode used to trigger keeps painting
+    # from the same registry entry. The layer is deliberately NAMED "resize"
+    # for that reason: a different name would have needed a second registry
+    # entry saying the same thing.
+    "resize": Layer(
+        binds=_resize_layer_binds(),
         exit_keys=["q", "Escape", "Return"],
     ),
 
@@ -1029,4 +1070,16 @@ BINDS: list[Bind] = [
         "i3-nagbar -t warning -m 'You pressed the exit shortcut. Do you really"
         " want to exit i3? This will end your X session.'"
         " -b 'Yes, exit i3' 'i3-msg exit'")),
+
+    # ---- THE RESIZE MODE (dotfiles-hwds.48) --------------------------------
+    # One chord, because the ten resize verbs behind it are LAYERS["resize"]
+    # (see there) rather than ten global binds — the same shape the system mode
+    # and nav took. i3 expressed it as `mode "resize"`.
+    #
+    # GRAB-OWNERSHIP CLOSURE, checked under both `$mod` resolutions: nothing
+    # else binds `r` under the bare `$mod` mask. `$mod+Shift+r` (the hammer)
+    # and `$mod+Ctrl+Shift+r` (panic) are different chords — a passive grab
+    # matches its mask exactly — and both stay i3's, which is what makes it
+    # safe for the daemon to own the unshifted one.
+    Bind("$mod+r", enter_layer("resize")),
 ]

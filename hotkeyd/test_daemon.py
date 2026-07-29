@@ -1233,6 +1233,9 @@ class FakeXServer(FakeDisplay):
         # `F5` with the apps + session group (dotfiles-hwds.46) — 18/58/71.
         # `9` is not part of the workspace row above: that row stops at 8 and
         # `$mod+0` opens the system layer, so the digit had never been needed.
+        # `r` with the resize mode (dotfiles-hwds.48) — 27. The layer's own
+        # keys (hjkl, the arrows, Escape/Return/q) were all already here from
+        # nav, which is the same key set by construction.
         super().__init__(keymap=keymap or {"o": 32, "h": 43, "q": 24,
                                            "Tab": 23, "ISO_Left_Tab": 23,
                                            "w": 25, "space": 65,
@@ -1249,6 +1252,7 @@ class FakeXServer(FakeDisplay):
                                            "d": 40, "p": 33, "Print": 107,
                                            "n": 57, "v": 55,
                                            "9": 18, "m": 58, "F5": 71,
+                                           "r": 27,
                                            "Super_L": 133, "Control_L": 37,
                                            "Control_R": 105, "Alt_L": 64,
                                            "Alt_R": 108, "Meta_L": 205,

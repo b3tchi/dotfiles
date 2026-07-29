@@ -1036,14 +1036,28 @@ assert_eq "hotkeyd/binds.py carries \$mod+n" \
 assert_eq "the fallback carries the i3 spelling for the panic path" \
   "1" "$(count_fixed_line "$SCRIPT_DIR/../i3/config.d/zz-fallback-binds.conf" "$NOTIF_TOGGLE_LINE")"
 
-scenario "shift-o-is-name-workspace: \$mod+Shift+o carries the relocated i3-input bind for BOTH entry points"
+scenario "shift-o-is-gone: the rename-workspace bind was DELETED, from both engines and the fallback"
+# sp019 relocated this bind from \$mod+Shift+n to \$mod+Shift+o to free the
+# unshifted \$mod+n for the notification picker — which is why the suite owned
+# it in the first place. dotfiles-hwds.49 then deleted it outright rather than
+# migrating it: named workspaces come from the project registry and are reached
+# positionally (ws-switch.nu, the \$mod+<n> row) or by the quickshell projects
+# picker, so an ad-hoc rename prompt named a workspace the number row would
+# address by position anyway.
+#
+# The assertion is INVERTED rather than deleted. What sp019 needs pinned is that
+# \$mod+Shift+n stayed free for the picker, and a deletion that silently took
+# the coverage with it would leave nothing watching that.
 for f in "$I3_BASE" "$I3_XRDP"; do
-  assert_eq "$(basename "$f") effective: exactly one name-workspace bindsym on \$mod+Shift+o" "1" "$(count_eff_line "$f" "$NAME_WS_LINE")"
+  assert_eq "$(basename "$f") effective: no name-workspace bindsym remains" "0" "$(count_eff_line "$f" "$NAME_WS_LINE")"
 done
-# The byte-identity assertion this replaces compared two hand-synced copies.
-# There is one copy now, so identity is structural — what is worth asserting
-# is that it stayed that way.
-assert_eq "the bind text lives ONLY in config.common" "0" "$(count_fixed_line "$I3_BASE" "$NAME_WS_LINE")"
+# ...and it did not reappear in the panic fallback: that file restores what the
+# DAEMON took, and this bind went to neither engine.
+assert_eq "the fallback does not resurrect the deleted bind" \
+  "0" "$(count_fixed_line "$SCRIPT_DIR/../i3/config.d/zz-fallback-binds.conf" "$NAME_WS_LINE")"
+# ...and hotkeyd did not quietly pick it up either.
+assert_eq "hotkeyd/binds.py does not carry \$mod+Shift+o" \
+  "0" "$(grep -F -c 'Bind("\$mod+Shift+o"' "$SCRIPT_DIR/../hotkeyd/binds.py" || true)"
 
 scenario "reload-restarts-the-bar: \$mod+Shift+c chains a qs-start exec onto the reload"
 # i3 runs exec_always on RESTART only, never on reload (verified empirically),
@@ -1130,24 +1144,35 @@ scenario "i3 -C: config-xrdp's include chain (config-xrdp -> the real, just-edit
 ERR="$(HOME="$I3CHK/xrdp" "$I3" -C -c "$I3_XRDP" 2>&1 | grep -F "$I3_ERR_MARKER" || true)"
 assert_eq "no ERROR lines from i3 -C on config-xrdp's include chain" "" "$ERR"
 
-# ---- MUTANT PIN: a wrong relocation (Shift+o bound in only ONE file) --------
+# ---- MUTANT PIN: a bind vanishing from the shared base ----------------------
 
-scenario "MUTANT PIN: dropping the bind from the shared base breaks BOTH entry points"
+scenario "MUTANT PIN: dropping a bind from the shared base breaks BOTH entry points"
 # Simulate the bug directly rather than trust the detector in the abstract.
 # Pre-refactor the mutant was "bound in one file only"; that failure mode no
 # longer exists -- there is one file. The live failure mode now is a bind
 # vanishing from the shared base, which must take BOTH entry points down (and
 # is exactly what the include buys: no way to fix one and forget the other).
+#
+# THE VEHICLE IS NOW $mod+Shift+q (kill), not the rename bind (dotfiles-hwds.49
+# deleted that one, which would have made this pin assert against a line no
+# file contains -- vacuously green forever). The kill bind is the right
+# replacement for the same reason the parser floor in hotkeyd/test_binds.py was
+# repointed at the recovery set: it is i3's by ARGUMENT, not by not having been
+# migrated yet. Grabs die with the daemon, so the key for dealing with an
+# already-misbehaving window stays in the engine that cannot lose its grabs
+# (i3/config.common states the rule above the bind). A vehicle with an expiry
+# date is how this pin ended up needing replacement in the first place.
+KILL_LINE='bindsym $mod+Shift+q kill'
 MUT_COMMON="$TMP/config.common.mut-dropped"
 MUT_ENTRY="$TMP/config.mut-entry"
-grep -F -x -v -- "$NAME_WS_LINE" "$I3_COMMON" > "$MUT_COMMON"
+grep -F -x -v -- "$KILL_LINE" "$I3_COMMON" > "$MUT_COMMON"
 sed "s|^include ~/.dotfiles/i3/config.common$|include $MUT_COMMON|" "$I3_BASE" > "$MUT_ENTRY"
-assert_eq "the mutant base no longer carries the bind" "0" "$(count_fixed_line "$MUT_COMMON" "$NAME_WS_LINE")"
-assert_eq "so the desktop entry point loses it too -- shift-o-is-name-workspace would FAIL here" \
-  "0" "$(count_eff_line "$MUT_ENTRY" "$NAME_WS_LINE")"
+assert_eq "the mutant base no longer carries the bind" "0" "$(count_fixed_line "$MUT_COMMON" "$KILL_LINE")"
+assert_eq "so the desktop entry point loses it too" \
+  "0" "$(count_eff_line "$MUT_ENTRY" "$KILL_LINE")"
 # and the unmutated entry point still has it, proving the probe discriminates
 assert_eq "the real entry point still resolves the bind through the include" "1" \
-  "$(count_eff_line "$I3_BASE" "$NAME_WS_LINE")"
+  "$(count_eff_line "$I3_BASE" "$KILL_LINE")"
 
 # ============================================================================
 # PHASE 3 END-TO-END -- real daemon + real bar/browser under Xvfb (AC1, AC4)

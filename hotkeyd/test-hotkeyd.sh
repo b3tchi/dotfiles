@@ -306,7 +306,16 @@ else
     # out of i3 entirely, at which point the seed stopped being a duplicate and
     # the guard fired correctly. Derived from config.common rather than
     # hardcoded so the next cutover cannot quietly defang it the same way.
-    DUP_CHORD="$(grep -oE '^bindsym \$mod\+[A-Za-z0-9]+ ' "$HERE/../i3/config.common" \
+    #
+    # THE PATTERN WIDENED at dotfiles-hwds.48/49: it read `\$mod\+[A-Za-z0-9]+`,
+    # i.e. single-segment chords only, and the last two of those in
+    # config.common ($mod+r and $mod+9) left with the resize migration and the
+    # apps group. Everything i3 still owns carries a second modifier
+    # ($mod+Shift+q, $mod+Shift+c, $mod+Shift+r, $mod+Ctrl+Shift+r), so the
+    # seed came up empty and the stage failed for the right reason in the wrong
+    # place — the third such expiry today. Allowing `+` inside the chord makes
+    # the derivation match what "a chord i3 owns" now looks like.
+    DUP_CHORD="$(grep -oE '^bindsym \$mod\+[A-Za-z0-9+]+ ' "$HERE/../i3/config.common" \
         | head -n1 | awk '{print $2}')"
     [ -n "$DUP_CHORD" ] || bad "stage 10: found no i3-owned chord to seed with"
     printf 'bindsym %s nop stage10-dup\n' "$DUP_CHORD" > "$C10/.i3/config.d/zz-dup.conf"

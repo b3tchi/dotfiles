@@ -168,7 +168,17 @@ mode "screenshot-drag" {
 # so Bar.qml paints its hint strip, and the Escape/q inside them are
 # dead-overlay fallbacks. Migrating those would mean the daemon holding grabs on
 # bare Escape and q for the length of a capture — the dotfiles-ux1 trap.
-bindsym $mod+Ctrl+x --release exec --no-startup-id xkill
+# $mod+Ctrl+x (xkill) was DELETED, not migrated — sp020, dotfiles-hwds.49.
+# xkill grabs the pointer and severs the X connection of whatever you click,
+# which killed the CLIENT rather than the process: a well-behaved app exits, a
+# detached one lives on with no window. It was the escalation for a window that
+# ignores $mod+Shift+q, and `--release` was there because its pointer grab races
+# a chord that is still physically down.
+#
+# Dropped by decision, against the recommendation to keep it as a fifth
+# recovery key: `pkill`/`kill -9` from any terminal does the same job with an
+# accurate target, and a crosshair that destroys whatever it touches is a poor
+# thing to have one modifier away from `$mod+Ctrl+m`.
 
 # focus_follows_mouse no
 
@@ -342,37 +352,33 @@ for_window [urgent=latest] focus
 # `config.d/zz-fallback-binds.conf` so `hotkeyd-panic.sh panic` gives back the
 # ability to lock and shut down when the daemon is dead or wrong. That
 # fallback matters more here than for any other group.
-# Rename workspace (relocated to $mod+Shift+o; $mod+Shift+n is now free —
-# the notification-history picker moved to the unshifted $mod+n above).
-bindsym $mod+Shift+o exec i3-input -f "xft:Iosevka" -F 'name workspace to "%s"' -P 'Workspace name: '
+# Rename workspace ($mod+Shift+o, `i3-input -F 'name workspace to "%s"'`) was
+# DELETED, not migrated — sp020, dotfiles-hwds.49. sp019 had relocated it here
+# from $mod+Shift+n to free that key for the notification picker; it is now
+# gone from both engines.
+#
+# What replaces it in practice: workspaces in this setup are NAMED by the
+# project registry and reached positionally through ws-switch.nu (the $mod+<n>
+# row) and the quickshell projects picker ($mod+p), so an ad-hoc rename prompt
+# named a workspace that the number row would then address by position anyway.
+# `i3-msg 'rename workspace to "x"'` remains for the rare case.
 
 # Project workspace picker (quickshell) moved to desktop config (router pattern)
 # bindsym $mod+p exec --no-startup-id ~/.dotfiles/quickshell/qs-overlay.sh projects
 
-# Resize window (you can also use the mouse for that)
-bindsym $mod+r mode "resize"
-mode "resize" {
-        # These bindings trigger as soon as you enter the resize mode.
-        # h/left  shrinks the window’s width, l/right grows it.
-        # k/up    shrinks the window’s height, j/down grows it.
-        # The bar's hint strip mirrors these keys — keep them in sync with
-        # quickshell/config/Common/ModeBarTheme.qml's `hints["resize"]`.
-        bindsym h resize shrink width 5 px or 5 ppt
-        bindsym j resize grow height 5 px or 5 ppt
-        bindsym k resize shrink height 5 px or 5 ppt
-        bindsym l resize grow width 5 px or 5 ppt
-
-        # same bindings, but for the arrow keys
-        bindsym Left resize shrink width 10 px or 10 ppt
-        bindsym Down resize grow height 10 px or 10 ppt
-        bindsym Up resize shrink height 10 px or 10 ppt
-        bindsym Right resize grow width 10 px or 10 ppt
-
-        # exit resize mode: Enter or Escape
-        bindsym Return mode "default"
-        bindsym Escape mode "default"
-        bindsym q mode "default"
-}
+# THE RESIZE MODE LEFT i3 (sp020 / dotfiles-hwds.48). `$mod+r` and the whole
+# `mode "resize"` block are hotkeyd's LAYERS["resize"] now — the same treatment
+# nav (dotfiles-hwds.16) and the system mode (dotfiles-hwds.38) got, and for the
+# same reason: a mode is a layer, and the daemon can express one without needing
+# i3 to hold bare h/j/k/l grabs.
+#
+# The 5/10 split survives the move (letters 5px, arrows 10px). The bar keeps
+# painting its hint strip unchanged: the layer is NAMED "resize", so
+# ModeBarTheme.resolve maps it to the same `hints["resize"]` row the i3 mode
+# triggered, now fed from the daemon's state socket instead of an i3 mode event.
+#
+# Its i3 spelling lives in `config.d/zz-fallback-binds.conf`, block and all, so
+# `hotkeyd-panic.sh panic` gives resize back when the daemon is dead or wrong.
 
 # Navigation mode — MIGRATED to hotkeyd (sp020, ft011, dotfiles-hwds.16).
 #
