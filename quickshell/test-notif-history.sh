@@ -96,6 +96,9 @@ count_eff_sub()  { effective "$1" | grep -F -c -- "$2" || true; }      # <entry>
 cleanup() {
   [ -n "${QS_PID:-}" ]    && kill "$QS_PID"    2>/dev/null
   [ -n "${QS2_PID:-}" ]   && kill "$QS2_PID"   2>/dev/null
+  # The extra suffixed-environ instance ($DPY2.0) is torn down inside its own
+  # scenario; this only catches an early/abnormal exit while it is up.
+  [ -n "${QS3_PID:-}" ]   && kill "$QS3_PID"   2>/dev/null
   [ -n "${NOTIF_PID:-}" ] && kill "$NOTIF_PID" 2>/dev/null
   [ -n "${FIFO_READER_PID:-}" ] && kill "$FIFO_READER_PID" 2>/dev/null
   # PHASE 3 (dotfiles-c5fd.7) E2E: the real daemon + real bar/browser both
@@ -471,6 +474,29 @@ gone_on() { # <display>
 
 pid_for() { case "$1" in "$DPY") printf '%s' "$QS_PID" ;; *) printf '%s' "$QS2_PID" ;; esac; }
 
+# The live-session name a refusal message is expected to carry, or empty.
+# Derived from $DPY/$DPY2 rather than hardcoded to ':9[56]' so the suite's
+# own documented TEST_DISPLAY/TEST_DISPLAY2 overrides actually work. The
+# optional (\.[0-9]+)? tolerates an instance whose environ carries the screen
+# suffix -- the message reports keys RAW, so a suffixed instance is named
+# with its suffix (pinned below).
+named_live_session() { # <message>
+  printf '%s' "$1" | grep -oE "DISPLAY=($DPY|$DPY2)(\.[0-9]+)?" | head -1
+}
+
+# Reap a pid for real. `wait` cannot be used on the stub instances: they were
+# started inside a $( ) command substitution, so they are children of that
+# SUBSHELL, not of this shell -- `wait $QS_PID` fails with "not a child of
+# this shell" and returns instantly, leaving the kill asynchronous.
+wait_pid_gone() { # <pid> [tries]
+  local p="$1" tries="${2:-100}" i
+  for i in $(seq 1 "$tries"); do
+    kill -0 "$p" 2>/dev/null || return 0
+    sleep 0.1
+  done
+  return 1
+}
+
 close_stub() { # <display>
   env "${ISO[@]}" "$QUICKSHELL" ipc --pid "$(pid_for "$1")" call notifhistory close >/dev/null 2>&1
   gone_on "$1"
@@ -493,7 +519,7 @@ assert_eq "no browser opened on $DPY"  "0" \
   "$(env DISPLAY="$DPY"  "$XDOTOOL" search --onlyvisible --name '^qs-notif$' 2>/dev/null | wc -l | tr -d ' ')"
 assert_eq "no browser opened on $DPY2" "0" \
   "$(env DISPLAY="$DPY2" "$XDOTOOL" search --onlyvisible --name '^qs-notif$' 2>/dev/null | wc -l | tr -d ' ')"
-assert_ne "and it says which sessions it found" "" "$(printf '%s' "$out" | grep -o 'DISPLAY=:9[56]' | head -1)"
+assert_ne "and it says which sessions it found" "" "$(named_live_session "$out")"
 
 scenario "derivation: an inherited DISPLAY that DOES match a live session is honoured"
 close_stub "$DPY2"
@@ -540,7 +566,38 @@ assert_eq "no browser opened on $DPY"  "0" \
   "$(env DISPLAY="$DPY"  "$XDOTOOL" search --onlyvisible --name '^qs-notif$' 2>/dev/null | wc -l | tr -d ' ')"
 assert_eq "no browser opened on $DPY2" "0" \
   "$(env DISPLAY="$DPY2" "$XDOTOOL" search --onlyvisible --name '^qs-notif$' 2>/dev/null | wc -l | tr -d ' ')"
-assert_ne "and it still names the live sessions" "" "$(printf '%s' "$out" | grep -o 'DISPLAY=:9[56]' | head -1)"
+assert_ne "and it still names the live sessions" "" "$(named_live_session "$out")"
+assert_ne "and echoes the REJECTED display back with its suffix intact" "" \
+  "$(printf '%s' "$out" | grep -o "'DISPLAY=:987\.0'" | head -1)"
+
+scenario "derivation: the refusal names live sessions VERBATIM -- a suffixed instance keeps its suffix in the message"
+# Canonicalization is a COMPARISON device and must not leak into what the user
+# is told is live: a normalized message would name a display string that no
+# process actually carries, and "set QS_NOTIF_DISPLAY to choose" would then
+# advise a value copied from a lie. Every other stub in this suite carries a
+# BARE key, so nothing else here would notice the leak.
+#
+# ":96.0" is screen 0 of the SAME Xvfb as ":96", so a suffixed-environ
+# instance costs one process, not another display. It is torn down (and the
+# teardown verified) before the next scenario, because while it is up the two
+# instances on $DPY2 canonicalize to ONE session key and any match there is
+# ambiguous by construction.
+QS3_PID="$(start_qs "$DPY2.0" "$TMP/qs3.log")"
+for i in $(seq 1 40); do
+  c="$(env "${ISO[@]}" "$QUICKSHELL" ipc --pid "$QS3_PID" show 2>/dev/null | grep -c 'notifhistory')"
+  [ "${c:-0}" -gt 0 ] && break
+  sleep 0.25
+done
+assert_ne "the suffixed-environ instance came up" "0" "${c:-0}"
+assert_eq "and its environ really carries the suffixed form" "DISPLAY=$DPY2.0" \
+  "$(tr '\0' '\n' < "/proc/$QS3_PID/environ" 2>/dev/null | grep '^DISPLAY=' | head -1)"
+out="$(env DISPLAY=":987" "${ISO[@]}" sh "$QS_NOTIF" toggle 2>&1)"
+assert_ne "the refusal names it as $DPY2.0, not canonicalized to $DPY2" "" \
+  "$(printf '%s' "$out" | grep -o "DISPLAY=$DPY2\.0" | head -1)"
+kill "$QS3_PID" 2>/dev/null
+assert_eq "and the extra instance is reaped before the next scenario" "gone" \
+  "$(wait_pid_gone "$QS3_PID" && echo gone || echo alive)"
+QS3_PID=""
 
 # ============================================================================
 # PHASE 1 boundary -- task .6 (dotfiles-c5fd.6) appends PHASE 2 (the real
@@ -567,8 +624,31 @@ assert_ne "and it still names the live sessions" "" "$(printf '%s' "$out" | grep
 NOTIF_HISTORY_QML="$SCRIPT_DIR/config/NotifHistory.qml"
 [ -r "$NOTIF_HISTORY_QML" ] || { echo "FATAL: $NOTIF_HISTORY_QML not readable" >&2; exit 1; }
 
-kill "$QS_PID"  2>/dev/null; wait "$QS_PID"  2>/dev/null; QS_PID=""
-kill "$QS2_PID" 2>/dev/null; wait "$QS2_PID" 2>/dev/null; QS2_PID=""
+# Reap the stubs for REAL before the real browser starts. The `wait` that
+# used to stand here was a silent no-op: the stubs are children of the $( )
+# subshell start_qs ran in, so `wait $QS_PID` failed with "not a child of
+# this shell" (rc 127, swallowed by 2>/dev/null) and returned instantly,
+# leaving the kill asynchronous. Measured: both stubs were STILL ALIVE at
+# this point and took ~500ms more to exit.
+#
+# That is not cosmetic. A surviving stub still answers `notifhistory` on
+# $DPY and still maps a window titled `qs-notif` -- the exact target
+# browser_toggle asks for and win_notif searches for. cmd_toggle's match
+# takes the FIRST candidate by pgrep order (ascending pid) and the stub was
+# started earlier, so it wins: the real browser never opens, PHASE 2 drives
+# the stub instead, and the UI scenarios fail in clusters whose size depends
+# on how long the loser took to die. This suite reported 112/14, 118/9 and
+# 126/1 on consecutive runs of the same tree because of it (dotfiles-sxg1).
+#
+# The race predates sxg1 -- PHASE 1 simply grew long enough to start losing
+# it. Waiting for the pids to actually go makes the handoff deterministic.
+kill "$QS_PID" "$QS2_PID" 2>/dev/null
+scenario "handoff: PHASE 1's stubs are fully reaped before PHASE 2 starts the real browser"
+assert_eq "the $DPY stub is gone"  "gone" "$(wait_pid_gone "$QS_PID"  && echo gone || echo alive)"
+assert_eq "the $DPY2 stub is gone" "gone" "$(wait_pid_gone "$QS2_PID" && echo gone || echo alive)"
+assert_eq "and no stale qs-notif window is left mapped on $DPY" "0" \
+  "$(env DISPLAY="$DPY" "$XDOTOOL" search --onlyvisible --name '^qs-notif$' 2>/dev/null | wc -l | tr -d ' ')"
+QS_PID=""; QS2_PID=""
 
 mkdir -p "$TMP/entry2"
 ln -sf "$NOTIF_HISTORY_QML" "$TMP/entry2/NotifHistory.qml"

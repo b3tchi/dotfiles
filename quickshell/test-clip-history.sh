@@ -515,7 +515,8 @@ assert_eq "no picker opened on $DPY"  "0" \
   "$(env DISPLAY="$DPY"  "$XDOTOOL" search --onlyvisible --name '^qs-clip$' 2>/dev/null | wc -l | tr -d ' ')"
 assert_eq "no picker opened on $DPY2" "0" \
   "$(env DISPLAY="$DPY2" "$XDOTOOL" search --onlyvisible --name '^qs-clip$' 2>/dev/null | wc -l | tr -d ' ')"
-assert_ne "and it says which sessions it found" "" "$(printf '%s' "$out" | grep -o 'DISPLAY=:9[56]' | head -1)"
+assert_ne "and it says which sessions it found" "" \
+  "$(printf '%s' "$out" | grep -oE "DISPLAY=($DPY|$DPY2)(\.[0-9]+)?" | head -1)"
 
 scenario "derivation: an inherited DISPLAY that DOES match a live session is honoured"
 close_picker "$DPY2"
@@ -570,7 +571,8 @@ assert_eq "no picker opened on $DPY"  "0" \
   "$(env DISPLAY="$DPY"  "$XDOTOOL" search --onlyvisible --name '^qs-clip$' 2>/dev/null | wc -l | tr -d ' ')"
 assert_eq "no picker opened on $DPY2" "0" \
   "$(env DISPLAY="$DPY2" "$XDOTOOL" search --onlyvisible --name '^qs-clip$' 2>/dev/null | wc -l | tr -d ' ')"
-assert_ne "and it still names the live sessions" "" "$(printf '%s' "$out" | grep -o 'DISPLAY=:9[56]' | head -1)"
+assert_ne "and it still names the live sessions" "" \
+  "$(printf '%s' "$out" | grep -oE "DISPLAY=($DPY|$DPY2)(\.[0-9]+)?" | head -1)"
 
 # ============================================================================
 # PHASE 1.5 — end-to-end keyboard-driven publish (dotfiles-g5b regression)
