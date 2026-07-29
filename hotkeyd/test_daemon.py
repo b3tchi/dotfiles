@@ -2257,7 +2257,7 @@ def test_health_says_not_serving_when_the_heartbeat_has_stopped(
     healthy."""
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
     lock = H.lock_path(":77")
-    lock.write_text("12345\n")
+    lock.write_text(f"12345\n{H.LOCK_MARKER}\n")
     old = time.time() - (H.HEARTBEAT_STALE_S * 4)
     os.utime(lock, (old, old))
     rc, msg = H.health(":77", probe_display=lambda _n: None)
@@ -2269,7 +2269,7 @@ def test_health_says_not_serving_when_the_display_is_unreachable(
         tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
     lock = H.lock_path(":77")
-    lock.write_text("12345\n")
+    lock.write_text(f"12345\n{H.LOCK_MARKER}\n")
 
     def gone(_name):
         return "cannot connect"
@@ -2288,13 +2288,13 @@ def test_an_unreachable_display_is_not_the_code_start_reaps_on(
     perfectly. Reaping on that would be this bug's own root cause — a missing
     credential read as a dead server — rebuilt into the recovery path."""
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
-    H.lock_path(":77").write_text("12345\n")
+    H.lock_path(":77").write_text(f"12345\n{H.LOCK_MARKER}\n")
     unreachable, _ = H.health(":77", probe_display=lambda _n: "no protocol")
     assert unreachable == H.HEALTH_DISPLAY_UNREACHABLE
     assert unreachable != H.HEALTH_NOT_SERVING
 
     stale = H.lock_path(":78")
-    stale.write_text("12345\n")
+    stale.write_text(f"12345\n{H.LOCK_MARKER}\n")
     old = time.time() - (H.HEARTBEAT_STALE_S * 4)
     os.utime(stale, (old, old))
     dead, _ = H.health(":78", probe_display=lambda _n: None)
@@ -2304,7 +2304,7 @@ def test_an_unreachable_display_is_not_the_code_start_reaps_on(
 def test_health_says_serving_when_the_loop_beats_and_the_display_answers(
         tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
-    H.lock_path(":77").write_text("12345\n")
+    H.lock_path(":77").write_text(f"12345\n{H.LOCK_MARKER}\n")
     rc, msg = H.health(":77", probe_display=lambda _n: None)
     assert rc == H.HEALTH_OK, msg
     assert "serving" in msg.lower(), msg
@@ -2327,7 +2327,7 @@ def test_health_says_serving_when_the_loop_beats_and_the_display_answers(
 def test_health_reports_a_foreign_keyboard_grab_rather_than_serving(
         tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
-    H.lock_path(":77").write_text("12345\n")
+    H.lock_path(":77").write_text(f"12345\n{H.LOCK_MARKER}\n")
     rc, msg = H.health(":77", probe_display=lambda _n: None,
                        probe_grab=lambda _n: "AlreadyGrabbed")
     assert rc == H.HEALTH_KEYBOARD_GRABBED, msg
@@ -2344,7 +2344,7 @@ def test_health_reports_a_foreign_keyboard_grab_rather_than_serving(
 
 def test_health_is_ok_when_nothing_holds_the_keyboard(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
-    H.lock_path(":77").write_text("12345\n")
+    H.lock_path(":77").write_text(f"12345\n{H.LOCK_MARKER}\n")
     rc, _ = H.health(":77", probe_display=lambda _n: None,
                      probe_grab=lambda _n: None)
     assert rc == H.HEALTH_OK
@@ -2358,7 +2358,7 @@ def test_the_grab_probe_runs_after_the_cheaper_ones(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
     called = []
     stale = H.lock_path(":77")
-    stale.write_text("12345\n")
+    stale.write_text(f"12345\n{H.LOCK_MARKER}\n")
     old = time.time() - (H.HEARTBEAT_STALE_S * 4)
     os.utime(stale, (old, old))
     rc, _ = H.health(":77", probe_display=lambda _n: None,
@@ -2366,7 +2366,7 @@ def test_the_grab_probe_runs_after_the_cheaper_ones(tmp_path, monkeypatch):
     assert rc == H.HEALTH_NOT_SERVING
     assert called == [], "a stale heartbeat must not be probed for a grab"
 
-    H.lock_path(":78").write_text("12345\n")
+    H.lock_path(":78").write_text(f"12345\n{H.LOCK_MARKER}\n")
     rc, _ = H.health(":78", probe_display=lambda _n: "no protocol",
                      probe_grab=lambda n: called.append(n))
     assert rc == H.HEALTH_DISPLAY_UNREACHABLE
@@ -2394,6 +2394,79 @@ def test_the_grab_probe_condemns_a_persistent_grab():
                                    _attempt=lambda _n: True)
     assert reason is not None
     assert "grab" in reason.lower(), reason
+
+
+# --- absence vs staleness (dotfiles-hwds.29) --------------------------------
+#
+# THE FOOTGUN THIS REMOVES. The heartbeat lands in the lock file's mtime, and a
+# daemon running the PREVIOUS build never touches that file after creating it.
+# So the moment the heartbeat shipped, `status` called both live, demonstrably
+# serving daemons wedged — "last heartbeat 2131s ago" — because it was reading
+# their START time. Every upgrade would do it again, on exactly the tool an
+# operator consults during an outage.
+#
+# Worse than the false alarm: the unmerged third commit of the hwds.28 series
+# makes `start` REAP a daemon whose heartbeat is stale. Landed together, the
+# upgrade would have killed two healthy daemons. A false alarm is survivable; a
+# false alarm wired to automatic recovery is not.
+#
+# "Never wrote a heartbeat" and "wedged before its first heartbeat" cannot be
+# told apart from an mtime alone, so the daemon now writes a MARKER the old
+# build never wrote. Absence of the marker means old code — a different verdict
+# from stale, and one nothing may reap on.
+
+def test_a_lock_without_the_marker_is_undetermined_not_wedged(
+        tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    lock = H.lock_path(":77")
+    lock.write_text("12345\n")               # exactly what the old build wrote
+    old = time.time() - (H.HEARTBEAT_STALE_S * 400)
+    os.utime(lock, (old, old))               # arbitrarily "stale"
+    rc, msg = H.health(":77", probe_display=lambda _n: None,
+                       probe_grab=lambda _n: None)
+    assert rc == H.HEALTH_UNKNOWN, msg
+    assert rc != H.HEALTH_NOT_SERVING, \
+        "NOT SERVING is the verdict `start` reaps on — an old daemon must not " \
+        "collect it merely for predating the heartbeat"
+    low = msg.lower()
+    assert "cannot determine" in low or "undetermined" in low, msg
+    assert "restart" in low, "say how to get a definite answer"
+
+
+def test_a_marked_lock_that_went_stale_is_still_wedged(tmp_path, monkeypatch):
+    """The marker must not become a blanket amnesty: a daemon of the CURRENT
+    build whose loop stopped is the case the heartbeat exists for."""
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    lock = H.lock_path(":77")
+    lock.write_text(f"12345\n{H.LOCK_MARKER}\n")
+    old = time.time() - (H.HEARTBEAT_STALE_S * 4)
+    os.utime(lock, (old, old))
+    rc, msg = H.health(":77", probe_display=lambda _n: None,
+                       probe_grab=lambda _n: None)
+    assert rc == H.HEALTH_NOT_SERVING, msg
+
+
+def test_the_marker_is_written_where_the_pid_is(tmp_path, monkeypatch):
+    """End to end through the real SingleInstance, so the marker cannot drift
+    out of the file the health check reads."""
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    inst = H.SingleInstance(H.lock_path(":77"))
+    try:
+        body = H.lock_path(":77").read_text()
+        assert str(os.getpid()) in body, body
+        assert H.LOCK_MARKER in body, body
+        assert H.lock_has_heartbeat(":77") is True
+    finally:
+        inst.release()
+
+
+def test_an_absent_lock_is_still_not_serving(tmp_path, monkeypatch):
+    """Absence of the LOCK is a different claim from absence of the marker: no
+    daemon ever ran here, which is knowable and actionable."""
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    rc, _ = H.health(":77", probe_display=lambda _n: None,
+                     probe_grab=lambda _n: None)
+    assert rc == H.HEALTH_NOT_SERVING
 
 
 # --- the grab set vs the table (dotfiles-hwds.42) ---------------------------
@@ -2445,7 +2518,9 @@ def test_the_grab_report_survives_a_chord_lost_after_the_fact(tmp_path):
 
 def test_health_says_degraded_when_grabs_are_missing(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
-    H.lock_path(":77").write_text("12345\n")
+    # The lock names THIS process, because write_grab_report stamps the report
+    # with the writer's pid and health only trusts a matching pair.
+    H.lock_path(":77").write_text(f"{os.getpid()}\n{H.LOCK_MARKER}\n")
     H.write_grab_report(":77", {"wanted": 9, "active": 7,
                                 "missing": ["$mod+h", "$mod+l"]})
     rc, msg = H.health(":77", probe_display=lambda _n: None,
@@ -2457,9 +2532,45 @@ def test_health_says_degraded_when_grabs_are_missing(tmp_path, monkeypatch):
         "name the missing chords — a count sends the operator to diff the table"
 
 
+def test_a_grab_report_from_another_daemon_is_ignored(tmp_path, monkeypatch):
+    """OBSERVED LIVE while building this: the :10 report read
+    {"wanted": 0, "active": 0} while the daemon held 72 grabs — a report left
+    by a different process on the same path, which then sat there as the last
+    word. A report is only evidence about the daemon that WROTE it, so it is
+    stamped with its pid and ignored when that does not match the pid in the
+    lock. Absence of trustworthy evidence lands on OK, not on a verdict — the
+    same rule as a daemon that publishes no report at all."""
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    H.lock_path(":77").write_text(f"12345\n{H.LOCK_MARKER}\n")
+    H.write_grab_report(":77", {"pid": 99999, "wanted": 9, "active": 0,
+                                "missing": ["$mod+h"]})
+    rc, msg = H.health(":77", probe_display=lambda _n: None,
+                       probe_grab=lambda _n: None)
+    assert rc == H.HEALTH_OK, msg
+    assert "$mod+h" not in msg, \
+        "a foreign report must not be quoted as this daemon's state"
+
+
+def test_a_grab_report_from_the_right_daemon_is_used(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    H.lock_path(":77").write_text(f"4242\n{H.LOCK_MARKER}\n")
+    H.write_grab_report(":77", {"pid": 4242, "wanted": 9, "active": 7,
+                                "missing": ["$mod+h"]})
+    rc, msg = H.health(":77", probe_display=lambda _n: None,
+                       probe_grab=lambda _n: None)
+    assert rc == H.HEALTH_DEGRADED, msg
+    assert "$mod+h" in msg
+
+
+def test_the_daemon_stamps_its_pid_on_the_report(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    H.write_grab_report(":77", {"wanted": 1, "active": 1, "missing": []})
+    assert H.read_grab_report(":77")["pid"] == os.getpid()
+
+
 def test_health_is_ok_when_the_grab_report_is_complete(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
-    H.lock_path(":77").write_text("12345\n")
+    H.lock_path(":77").write_text(f"{os.getpid()}\n{H.LOCK_MARKER}\n")
     H.write_grab_report(":77", {"wanted": 9, "active": 9, "missing": []})
     rc, _ = H.health(":77", probe_display=lambda _n: None,
                      probe_grab=lambda _n: None)
@@ -2473,7 +2584,7 @@ def test_health_tolerates_a_daemon_that_never_wrote_a_report(
     condemn every daemon that predates this feature — the dotfiles-hwds.29
     mistake (absence read as staleness) in a new place."""
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
-    H.lock_path(":77").write_text("12345\n")
+    H.lock_path(":77").write_text(f"12345\n{H.LOCK_MARKER}\n")
     rc, _ = H.health(":77", probe_display=lambda _n: None,
                      probe_grab=lambda _n: None)
     assert rc == H.HEALTH_OK
@@ -2486,7 +2597,7 @@ def test_a_degraded_report_outranks_nothing_but_is_outranked_by_the_rest(
     — the operator needs the cause, not the consequence."""
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
     stale = H.lock_path(":77")
-    stale.write_text("12345\n")
+    stale.write_text(f"12345\n{H.LOCK_MARKER}\n")
     H.write_grab_report(":77", {"wanted": 9, "active": 0, "missing": ["$mod+h"]})
     old = time.time() - (H.HEARTBEAT_STALE_S * 4)
     os.utime(stale, (old, old))
@@ -2494,7 +2605,7 @@ def test_a_degraded_report_outranks_nothing_but_is_outranked_by_the_rest(
                      probe_grab=lambda _n: None)
     assert rc == H.HEALTH_NOT_SERVING
 
-    H.lock_path(":78").write_text("12345\n")
+    H.lock_path(":78").write_text(f"12345\n{H.LOCK_MARKER}\n")
     H.write_grab_report(":78", {"wanted": 9, "active": 0, "missing": ["$mod+h"]})
     rc, _ = H.health(":78", probe_display=lambda _n: None,
                      probe_grab=lambda _n: "AlreadyGrabbed")
@@ -2519,7 +2630,7 @@ def test_health_never_shells_out(tmp_path, monkeypatch):
     daemon can run."""
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
     monkeypatch.setenv("PATH", "")
-    H.lock_path(":77").write_text("12345\n")
+    H.lock_path(":77").write_text(f"12345\n{H.LOCK_MARKER}\n")
 
     def forbidden(*a, **kw):
         raise AssertionError(f"health shelled out: {a!r}")

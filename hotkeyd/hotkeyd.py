@@ -125,7 +125,28 @@ HEARTBEAT_PERIOD_S = 1.0
 #: `start` reaps it and respawns — a visible keyboard hiccup — so the window has
 #: to clear the worst legitimate stall on the loop, which is a blocking i3
 #: command reply, not the 1 s beat period.
+#:
+#: MEASURED, not guessed (dotfiles-hwds.29 asked for a basis before anything
+#: automatic keys off this): sampling the live :10 daemon's lock mtime every
+#: 50 ms for 45 s while driving layer entry/exit — which makes it talk to i3
+#: over the blocking IPC socket — the worst observed gap was 1.22 s against the
+#: 1.0 s beat period. 5.0 s is ~4x that, which is the headroom this wants.
+#: Re-measure before lowering it, and especially before wiring any automatic
+#: reap to it: `I3Client._recv_reply` still has no timeout, so an i3 that stalls
+#: longer than this window makes a merely-slow daemon read as wedged.
 HEARTBEAT_STALE_S = 5.0
+
+#: Written as the lock file's second line by every build that beats. Its
+#: ABSENCE means the daemon predates the heartbeat, NOT that the heartbeat went
+#: stale (dotfiles-hwds.29).
+#:
+#: The two are indistinguishable from an mtime alone, and getting that wrong is
+#: not academic: when the heartbeat shipped, `status` called both live,
+#: demonstrably serving daemons wedged — it was reading their START time —
+#: because a daemon running the previous build never touches its lock again.
+#: Every upgrade would repeat it, on the tool an operator reaches for during an
+#: outage. A marker the old build never wrote is what separates them.
+LOCK_MARKER = "heartbeat=1"
 
 #: `--health` exit codes. 0 keeps the shell idiom (`if hotkeyd.py --health`).
 #:
@@ -163,6 +184,14 @@ GRAB_PROBE_DELAY_S = 0.3
 #: `hotkeyd.sh restart` is the fix rather than an investigation.
 HEALTH_DEGRADED = 9
 
+#: The daemon is there and its state cannot be determined — it predates the
+#: heartbeat (dotfiles-hwds.29). Deliberately NOT 6: 6 is the daemon's own
+#: evidence that its loop stopped and is the only verdict `start` may end a
+#: process on, and "I cannot tell" is not evidence of anything. The unmerged
+#: reap-on-stale commit would have killed two healthy daemons on upgrade day
+#: had these shared a code.
+HEALTH_UNKNOWN = 10
+
 #: How long the display probe waits for the server to answer. A HUNG X server —
 #: as opposed to a dead one — never closes the connection, so an unguarded
 #: `Display()` blocks in the handshake forever. `hotkeyd.sh start` runs from
@@ -181,6 +210,28 @@ def lock_path(display: str | None = None) -> Path:
     display = display or os.environ.get("DISPLAY", ":0")
     tag = display.lstrip(":").split(".")[0]
     return _runtime_dir() / f"hotkeyd-{tag}.lock"
+
+
+def lock_pid(display: str | None = None) -> int | None:
+    """The pid recorded in the lock's first line, or None if unreadable."""
+    try:
+        return int(lock_path(display).read_text().splitlines()[0].strip())
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def lock_has_heartbeat(display: str | None = None) -> bool:
+    """Does the daemon holding this lock beat? (dotfiles-hwds.29)
+
+    False for a lock written by a build that predates the heartbeat, whose
+    mtime is therefore its START time and says nothing about liveness. Also
+    False when the file cannot be read at all, which lands on the same honest
+    "cannot determine" rather than on a verdict.
+    """
+    try:
+        return LOCK_MARKER in lock_path(display).read_text()
+    except OSError:
+        return False
 
 
 def grab_report_path(display: str | None = None) -> Path:
@@ -205,7 +256,11 @@ def write_grab_report(display: str | None, report: dict) -> None:
     try:
         p = grab_report_path(display)
         tmp = p.with_suffix(".grabs.tmp")
-        tmp.write_text(json.dumps(report))
+        # STAMPED WITH THE WRITER'S PID. Observed live: a :10 report read
+        # {"wanted": 0, "active": 0} while the daemon held 72 grabs, left by a
+        # different process on the same path and then sitting there as the last
+        # word. A report is evidence only about the daemon that wrote it.
+        tmp.write_text(json.dumps({"pid": os.getpid(), **report}))
         tmp.replace(p)                      # atomic: no half-written report
     except OSError:
         pass
@@ -408,7 +463,11 @@ class SingleInstance:
                 raise AlreadyRunning(
                     f"another hotkeyd holds {self.path}") from e
             raise
-        self._fh.write(f"{os.getpid()}\n")
+        # pid first, then the marker: nothing parses this file for the pid
+        # (that is pgrep's job) but a human reading it during an outage wants
+        # the pid on line 1, and `lock_has_heartbeat` only asks whether the
+        # marker is present anywhere in it.
+        self._fh.write(f"{os.getpid()}\n{LOCK_MARKER}\n")
         self._fh.flush()
         self._beat_at = 0.0
         self.beat()
@@ -1724,6 +1783,19 @@ def health(display: str | None = None,
                 f"hotkeyd: {disp} — NOT SERVING: no daemon has run here "
                 f"(no lock at {lock})")
     if age > HEARTBEAT_STALE_S:
+        # ABSENCE IS NOT STALENESS (dotfiles-hwds.29). A daemon of an older
+        # build never touches its lock after creating it, so this age is its
+        # UPTIME, not a missed beat — and reading it as "the loop stopped"
+        # condemned two healthy daemons the day the heartbeat shipped. The
+        # marker is what tells the two apart; without it the only true
+        # statement is that nothing is known.
+        if not lock_has_heartbeat(display):
+            return (HEALTH_UNKNOWN,
+                    f"hotkeyd: {disp} — UNDETERMINED: this daemon does not "
+                    f"beat, so its {age:.0f}s-old lock is its start time and "
+                    f"not a missed heartbeat — it predates heartbeat support "
+                    f"(cannot determine whether it is serving). Restart it "
+                    f"(`hotkeyd.sh restart {disp}`) for a definite answer")
         return (HEALTH_NOT_SERVING,
                 f"hotkeyd: {disp} — NOT SERVING: last heartbeat {age:.0f}s ago "
                 f"(> {HEARTBEAT_STALE_S:.0f}s); the run loop has stopped "
@@ -1764,6 +1836,12 @@ def health(display: str | None = None,
     #    no report, and condemning it would repeat dotfiles-hwds.29's mistake of
     #    reading absence as staleness.
     report = read_grab_report(disp)
+    # Only THIS daemon's report counts. A mismatched pid means the file was
+    # left by something else — a previous daemon on the same display, a test
+    # harness sharing the runtime dir — and unverifiable evidence has to land
+    # on "no evidence", not on a verdict (the dotfiles-hwds.29 rule again).
+    if report is not None and report.get("pid") != lock_pid(display):
+        report = None
     if report and report.get("missing"):
         missing = report["missing"]
         shown = ", ".join(missing[:6]) + ("…" if len(missing) > 6 else "")

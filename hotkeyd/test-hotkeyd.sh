@@ -1000,6 +1000,71 @@ UNMAPEOF
     fi
 fi
 
+
+# ============================================================================
+# stage 16: an old daemon is UNDETERMINED, a beating one that stopped is WEDGED
+# ============================================================================
+#
+# dotfiles-hwds.29. The heartbeat lives in the lock file's mtime, and a daemon
+# running the PREVIOUS build never touches that file after creating it — so the
+# day the heartbeat shipped, `status` read two live, demonstrably serving
+# daemons' START times and called them wedged ("last heartbeat 2131s ago").
+# Every upgrade would repeat it, on the tool an operator consults during an
+# outage.
+#
+# Worse: the unmerged reap-on-stale change would have made `start` KILL both.
+# So the two verdicts must not share an exit code, and this stage pins that they
+# do not. No X server needed — the whole question is the lock file.
+echo "stage 16: heartbeat absence is not staleness"
+T16="$TMPD/t16"; mkdir -p "$T16"
+D16=":76"
+
+# An OLD daemon: pid only, no marker, mtime far in the past (which for it is
+# simply uptime).
+printf '12345\n' > "$T16/hotkeyd-76.lock"
+touch -d '2 hours ago' "$T16/hotkeyd-76.lock"
+out="$(XDG_RUNTIME_DIR="$T16" timeout 20 \
+       python3 "$HERE/hotkeyd.py" --health --display "$D16" 2>&1)"
+rc=$?
+if [ "$rc" -eq 10 ]; then
+    ok "an unmarked lock is UNDETERMINED (exit 10)"
+else
+    bad "an unmarked lock returned $rc: $out"
+fi
+if [ "$rc" -eq 6 ]; then
+    bad "…and it collected the REAPABLE verdict, which is the hwds.29 footgun"
+fi
+case "$out" in
+    *UNDETERMINED*) ok "the message says UNDETERMINED" ;;
+    *) bad "message did not say UNDETERMINED: $out" ;;
+esac
+case "$out" in
+    *restart*) ok "and says how to get a definite answer" ;;
+    *) bad "message offers no way forward: $out" ;;
+esac
+
+# A CURRENT daemon that actually stopped beating. The marker must not become a
+# blanket amnesty — this is the case the heartbeat exists for.
+printf '12345\nheartbeat=1\n' > "$T16/hotkeyd-76.lock"
+touch -d '2 hours ago' "$T16/hotkeyd-76.lock"
+out="$(XDG_RUNTIME_DIR="$T16" timeout 20 \
+       python3 "$HERE/hotkeyd.py" --health --display "$D16" 2>&1)"
+rc=$?
+if [ "$rc" -eq 6 ]; then
+    ok "a MARKED lock gone stale is still NOT SERVING (exit 6)"
+else
+    bad "a marked, stale lock returned $rc: $out"
+fi
+
+# And the marker is what the real daemon writes — not a constant that only the
+# tests agree on.
+printf '  ' >/dev/null
+if grep -q 'heartbeat=1' "$HERE/hotkeyd.py"; then
+    ok "the marker string is in the daemon, not only in the suite"
+else
+    bad "no marker in hotkeyd.py — the stage is testing a fiction"
+fi
+
 echo
 printf 'hotkeyd: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

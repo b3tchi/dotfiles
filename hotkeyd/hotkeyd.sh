@@ -251,6 +251,21 @@ run hotkeyd-panic.sh resume" 4
                 printf '%s (pid %s)\n' "$hout" "$pid"
                 exit 9
             fi
+            # UNDETERMINED (exit 10, dotfiles-hwds.29): a daemon that predates
+            # the heartbeat. Its lock mtime is its START time, so the staleness
+            # arithmetic above is meaningless for it — which is exactly how
+            # `status` came to call two healthy, serving daemons wedged the day
+            # the heartbeat shipped.
+            #
+            # Distinct from 6 because 6 is REAPABLE and this is not: "I cannot
+            # tell" is not evidence a daemon is dead, and the unmerged
+            # reap-on-stale change would have killed both of them. The message
+            # already says restart for a definite answer; that is advice, not a
+            # diagnosis, and the exit code has to keep the difference.
+            if [ "$hrc" -eq 10 ]; then
+                printf '%s (pid %s)\n' "$hout" "$pid"
+                exit 10
+            fi
             if [ "$hrc" -ne 0 ]; then
                 # Name the pid as well as the reason: the cure is `start`, and
                 # whoever is about to run it wants to know which process is
