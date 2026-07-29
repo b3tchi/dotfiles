@@ -979,10 +979,31 @@ BINDS: list[Bind] = [
     # masked forms of its keys (see hotkeyd.layer_chords for why) — of those,
     # only `$mod+Return` and `$mod+q` collide with anything, and both are THIS
     # table's own binds, shadowed by the layer exactly while it is up.
+    # `$mod+w` WAS A SECOND ENTRY CHORD AND IS GONE (dotfiles-hwds.50).
+    # USER-REPORTED: the switcher kept appearing during ordinary typing and
+    # then hanging on screen. It was not phantom input — the daemon's log
+    # attributed 35 presses to `xrdpKeyboard`, real keys from the RDP client.
+    #
+    # THE CAUSE IS THAT `$mod` IS NOT THE SAME KEY ON BOTH DISPLAYS. On `:0`
+    # this bind is Super+w and harmless; on `:10` `$mod` is Mod1, so it is
+    # literally ALT+W — `kill-ring-save` in emacs and readline, and a common
+    # chord in terminals generally. A global grab takes it before any
+    # application sees it, so typing it for its app meaning opened the
+    # switcher instead.
+    #
+    # It carried no weight of its own: it existed because qs-keymon.py treated
+    # keycodes 23 and 25 identically, and the cutover (dotfiles-hwds.40) moved
+    # that alias across without re-examining it. `$mod+Tab` is the gesture.
+    #
+    # Bare `w` STAYS inside LAYERS["switcher"] — that one is only grabbed while
+    # the layer is up, where cycling with the key under your finger is the
+    # point and nothing else can want it.
+    #
+    # A per-display bind would have kept it on `:0` only; the table cannot say
+    # that ($mod resolves to one modifier per display), which is the same
+    # limitation dotfiles-y2ju records for Alt+Tab.
     Bind("$mod+Tab", (run(f"{QS_OVERLAY} switcher"),
                       enter_layer("switcher"))),
-    Bind("$mod+w", (run(f"{QS_OVERLAY} switcher"),
-                    enter_layer("switcher"))),
 
     # ---- THE OVERLAY GROUP (dotfiles-hwds.43) -----------------------------
     # The last two everyday chords i3 still owned: the notification browser

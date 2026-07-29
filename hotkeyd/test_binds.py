@@ -885,17 +885,33 @@ def test_the_switcher_layer_holds_on_dollar_mod():
     assert B.LAYERS["switcher"].on_hold_release is not None
 
 
-def test_both_switcher_entry_chords_open_the_overlay_and_take_the_layer():
+def test_the_switcher_entry_chord_opens_the_overlay_and_takes_the_layer():
     """Entry is a TUPLE because the first press means two things: show the
     switcher, and start holding the gesture open. Either half alone is a broken
     feature — no overlay, or an overlay nothing will ever close."""
     entries = {b.chord: B.actions_of(b) for b in B.BINDS
-               if b.chord in ("$mod+Tab", "$mod+w")}
-    assert set(entries) == {"$mod+Tab", "$mod+w"}, entries
+               if b.chord == "$mod+Tab"}
+    assert set(entries) == {"$mod+Tab"}, entries
     for chord, acts in entries.items():
         assert any(isinstance(a, B.Run) and a.cmd.endswith("switcher")
                    for a in acts), (chord, acts)
         assert B.EnterLayer("switcher") in acts, (chord, acts)
+
+
+def test_mod_w_is_not_a_global_bind(mod="Mod1"):
+    """dotfiles-hwds.50. `$mod+w` was a second entry chord, inherited from
+    qs-keymon's keycode table, and on `:10` `$mod` is Mod1 — so it grabbed
+    ALT+W globally and ate a chord emacs and readline use for copy. The user's
+    report was the switcher opening during ordinary typing.
+
+    Asserted as an ABSENCE because that is the whole fix, and an absence with
+    no test is one refactor away from coming back."""
+    globals_ = {B.normalize_chord(b.chord, mod) for b in B.BINDS}
+    assert B.normalize_chord("$mod+w", mod) not in globals_
+    # ...while the LAYER keeps bare `w`: grabbed only while the switcher is up,
+    # where cycling with the key under your finger is the point.
+    layer_keys = {b.chord for b in B.LAYERS["switcher"].binds}
+    assert "w" in layer_keys, layer_keys
 
 
 def test_the_switcher_layer_never_leaves_without_telling_the_overlay():
