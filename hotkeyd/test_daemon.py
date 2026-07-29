@@ -2945,3 +2945,31 @@ def test_the_hold_modifiers_release_cannot_arrive_as_an_event(fake_i3):
     assert _cmds(dae.pump(_key_release(133, H.MOD4))) == []
     assert dae.engine.state["layer"] == SW, "only the server poll ends it"
     dae.close()
+
+
+# --- the daemon must not strand the overlay on the way out (hwds.51) --------
+
+def test_shutdown_hands_back_the_layers_on_exit(fake_i3):
+    """THE ROUTE THAT ACTUALLY STRANDED IT. `hotkeyd.sh restart` kills the
+    daemon; if it dies inside the switcher layer the grabs go with it and the
+    overlay — a focused window holding the keyboard — is left on screen with
+    nothing able to close it. Observed live as qs-switcher sitting there with
+    nothing held.
+
+    The daemon RETURNS the actions rather than running them, because the run
+    loop owns dispatch; `run_daemon`'s finally is what sends them."""
+    dae, _, _ = _switcher_daemon(fake_i3)                # already in the layer
+    assert dae.engine.state["layer"] == SW
+    assert any("switcher-cancel" in c
+               for c in _cmds(dae.shutdown_actions())), dae.shutdown_actions()
+    dae.close()
+
+
+def test_shutdown_outside_a_layer_hands_back_nothing(fake_i3):
+    """The floor must not fire on every exit: a daemon stopped while idle has
+    nothing to clean up, and a stray cancel would hide an overlay the user
+    opened by hand a moment earlier."""
+    dae, xd, pub = arbitration_daemon(fake_i3)           # NOT in a layer
+    assert dae.engine.state["layer"] == H.L.DEFAULT_LAYER
+    assert dae.shutdown_actions() == []
+    dae.close()

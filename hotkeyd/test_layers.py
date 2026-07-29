@@ -1492,3 +1492,96 @@ def test_the_exit_key_floor_still_leaves_a_hold_layer():
     e.handle(press("Tab", ["Mod4"]))
     assert e.handle(press("q")) == []
     assert e.state["layer"] == "default"
+
+
+# --- no exit route may strand the overlay (dotfiles-hwds.51) -----------------
+#
+# OBSERVED LIVE: qs-switcher sitting on screen with nothing held, found by a
+# verification script that saw it visible before pressing anything. The layer
+# commits on $mod RELEASE, and every route OUT of the layer that is not that
+# release left the overlay mapped — an overlay that is focused and holds the
+# keyboard, so the session swallows keys until the user finds Escape.
+#
+# `on_exit` is the floor: whatever ends the layer, the overlay is told. The
+# switcher's is `switcher-cancel`, which is `root.hide()` in Overlay.qml and so
+# idempotent — running it after a commit that already hid the window is a
+# no-op, which is what lets one rule cover every path.
+
+def _switcher_engine():
+    """A minimal hold layer wired like the shipped switcher."""
+    layer = B.Layer(
+        binds=[B.Bind("Tab", B.run("open"))],
+        exit_keys=["q"],
+        hold="Mod1",
+        on_hold_release=B.run("confirm"),
+        on_exit=B.run("cancel"),
+    )
+    return L.LayerEngine([B.Bind("Mod1+Tab", (B.run("open"),
+                                              B.enter_layer("sw")))],
+                         {"sw": layer}, publisher=Recorder(), mod="Mod1")
+
+
+def _cmds(actions):
+    return [a.cmd for a in actions if isinstance(a, B.Run)]
+
+
+def test_an_exit_key_deliberately_leaves_the_overlay_alone():
+    """The one route that does NOT get the floor, and it is a decision rather
+    than an oversight (dotfiles-hwds.40's `q`): an exit key is the user handing
+    the keyboard BACK to the overlay, which is focused and holds no grab, so
+    its own Escape and Return start working again. Cancelling it from under
+    them would remove the thing the hatch exists to reach."""
+    e = _switcher_engine()
+    e.handle(press("Tab", {"Mod1"}))
+    assert e.state["layer"] == "sw"
+    out = e.handle(press("q"))
+    assert e.state["layer"] == L.DEFAULT_LAYER
+    assert _cmds(out) == [], _cmds(out)
+
+
+def test_an_explicit_exit_action_tells_the_overlay():
+    e = _switcher_engine()
+    e.handle(press("Tab", {"Mod1"}))
+    out = e._run([B.ExitLayer()], None)
+    assert e.state["layer"] == L.DEFAULT_LAYER
+    assert "cancel" in _cmds(out), _cmds(out)
+
+
+def test_the_hold_release_commits_then_still_tells_the_overlay():
+    """Commit first, cancel after — the cancel is a hide on an already-hidden
+    window. Ordering asserted because the reverse would undo the commit."""
+    e = _switcher_engine()
+    e.handle(press("Tab", {"Mod1"}))
+    out = e.reconcile_hold_layer(mods_down=frozenset())
+    cmds = _cmds(out)
+    assert cmds.index("confirm") < cmds.index("cancel"), cmds
+
+
+def test_i3_taking_a_mode_tells_the_overlay():
+    """i3 entering a mode makes the daemon step back from its layer. That is an
+    exit like any other, and the overlay does not know i3 exists."""
+    e = _switcher_engine()
+    e.handle(press("Tab", {"Mod1"}))
+    out = e.set_i3_mode("resize")
+    assert e.state["layer"] == L.DEFAULT_LAYER
+    assert "cancel" in _cmds(out or []), out
+
+
+def test_leaving_the_layer_tells_the_overlay_exactly_once():
+    """One cancel per exit, not one per action in the tuple."""
+    e = _switcher_engine()
+    e.handle(press("Tab", {"Mod1"}))
+    out = e._run([B.run("something"), B.ExitLayer()], None)
+    assert _cmds(out).count("cancel") == 1, _cmds(out)
+
+
+def test_a_layer_without_on_exit_dispatches_nothing_extra():
+    """The floor is opt-in per layer: nav has no overlay to strand, and making
+    every layer emit a phantom action would be a new source of noise."""
+    e = L.LayerEngine([B.Bind("Mod4+o", B.enter_layer("nav"))],
+                      {"nav": B.Layer(binds=[B.Bind("h", "focus left")],
+                                      exit_keys=["q"])},
+                      publisher=Recorder())
+    e.handle(press("o", {"Mod4"}))
+    out = e.handle(press("q"))
+    assert out == []

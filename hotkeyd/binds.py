@@ -291,6 +291,26 @@ class Layer:
     hold: str | None = None
     on_hold_release: Actions | None = None
 
+    # DISPATCHED ON EVERY EXIT FROM THIS LAYER, whichever route ends it
+    # (dotfiles-hwds.51). The floor under a layer that owns something OUTSIDE
+    # the daemon — an overlay window — which cannot see the layer end.
+    #
+    # OBSERVED: qs-switcher sitting on screen with nothing held. The gesture
+    # closes it on the $mod release, and every other way out — an exit key, an
+    # explicit ExitLayer, i3 taking a mode, the daemon being restarted — left it
+    # mapped. A stranded overlay is focused and holds the keyboard, so the
+    # session swallows keys until the user finds Escape.
+    #
+    # The action must be IDEMPOTENT, because the commit paths run their own
+    # verb first and this one after: the switcher's is `switcher-cancel`, which
+    # is `root.hide()` in Overlay.qml, so hiding an already-hidden window is a
+    # no-op. That is what lets ONE rule cover every path instead of each path
+    # remembering to clean up — which is precisely the discipline that failed.
+    #
+    # Opt-in per layer: `nav` has no overlay to strand, and emitting a phantom
+    # action for every layer would be new noise on the dispatch path.
+    on_exit: Actions | None = None
+
 
 # --------------------------------------------------------------------------
 # validation
@@ -745,6 +765,18 @@ LAYERS: dict[str, Layer] = {
         hold="$mod",
         on_hold_release=run(f"{QS_OVERLAY} switcher-confirm"),
         exit_keys=["q"],
+        # THE FLOOR (dotfiles-hwds.51). Whatever ends this layer, the overlay
+        # is told. Without it the gesture's own release was the ONLY thing that
+        # closed the window, so `q`, an i3 mode taking the keyboard, or the
+        # daemon being restarted mid-gesture each left a focused overlay
+        # holding the keyboard with nothing held to end it — observed live as
+        # qs-switcher sitting on screen.
+        #
+        # `switcher-cancel` is `root.hide()` in Overlay.qml, so running it
+        # after a confirm that already hid the window costs nothing. That
+        # idempotence is what lets one declaration cover every path instead of
+        # each path remembering.
+        on_exit=run(f"{QS_OVERLAY} switcher-cancel"),
     ),
 }
 

@@ -1065,6 +1065,111 @@ else
     bad "no marker in hotkeyd.py — the stage is testing a fiction"
 fi
 
+
+# ============================================================================
+# stage 17: a daemon dying inside a hold layer hands the overlay back
+# ============================================================================
+#
+# dotfiles-hwds.51, and specifically the WIRING rather than the method. The unit
+# tests assert `Daemon.shutdown_actions()` returns the layer's on_exit; they
+# cannot see whether `run_daemon`'s finally actually dispatches it, and a
+# mutation that emptied that loop left them all green. This stage closes that:
+# a real daemon, a real hold layer, a real SIGTERM.
+#
+# The on_exit action is a `touch` rather than the shipped switcher-cancel, so
+# the assertion is a file on disk instead of an X window nobody is looking at.
+echo "stage 17: shutdown inside a layer runs on_exit"
+if ! command -v Xvfb >/dev/null || ! command -v xdotool >/dev/null; then
+    printf '  \033[33mSKIP\033[0m Xvfb or xdotool missing\n'
+else
+    D17=""
+    _b=$(( 40 + (($$ + 17) % 20) ))
+    for _o in 0 1 2 3 4 5 6 7 8 9; do
+        _n=$(( _b + _o ))
+        [ -e "/tmp/.X${_n}-lock" ] || { D17=":$_n"; break; }
+    done
+    T17="$TMPD/t17"; mkdir -p "$T17"
+    if [ -z "$D17" ]; then
+        bad "no free X display for the shutdown stage"
+    else
+        Xvfb "$D17" -screen 0 640x480x24 >/dev/null 2>&1 &
+        X17P=$!
+        sleep 1.5
+        MARK="$T17/on-exit-ran"
+        cat > "$T17/hold.py" <<EOF
+import sys; sys.path.insert(0, "$HERE")
+from binds import Bind, Layer, enter_layer, run
+BINDS = [Bind('Mod4+Tab', (run('true'), enter_layer('sw')))]
+LAYERS = {'sw': Layer(binds=[Bind('Tab', run('true'))],
+                      exit_keys=['q'],
+                      hold='Mod4',
+                      on_hold_release=run('true'),
+                      on_exit=run('touch $MARK'))}
+EOF
+        DISPLAY=$D17 XDG_RUNTIME_DIR="$T17" HOTKEYD_I3SOCK="$T17/no-i3.sock" \
+            python3 "$HERE/hotkeyd.py" --display "$D17" \
+            --binds "$T17/hold.py" >"$T17/d.log" 2>&1 &
+        d17=""
+        for _t in 1 2 3 4 5 6 7 8 9 10; do
+            sleep 0.5
+            d17="$(pgrep -f "hotkeyd.py --display $D17" | head -1)"
+            [ -n "$d17" ] && break
+        done
+        if [ -z "$d17" ]; then
+            bad "the daemon did not start: $(tail -3 "$T17/d.log")"
+        else
+            # Enter the layer and KEEP the modifier down, so the daemon is
+            # inside it when the signal arrives — the restart-mid-gesture shape.
+            DISPLAY=$D17 xdotool keydown super 2>/dev/null
+            DISPLAY=$D17 xdotool key Tab 2>/dev/null
+            sleep 1
+            if grep -q "layer=default->sw" "$T17/d.log"; then
+                ok "the daemon is inside the hold layer"
+            else
+                bad "never entered the layer — the stage proves nothing: $(tail -3 "$T17/d.log")"
+            fi
+            [ -e "$MARK" ] && bad "on_exit ran while the layer was still up"
+
+            kill -TERM "$d17" 2>/dev/null
+            _ran=""
+            for _t in 1 2 3 4 5 6 7 8 9 10; do
+                sleep 0.5
+                [ -e "$MARK" ] && { _ran=1; break; }
+            done
+            if [ -n "$_ran" ]; then
+                ok "SIGTERM inside the layer dispatched on_exit"
+            else
+                bad "the daemon exited without handing the overlay back"
+            fi
+            DISPLAY=$D17 xdotool keyup super 2>/dev/null
+        fi
+
+        # CONTROL: stopped while NOT in a layer, nothing must fire.
+        rm -f "$MARK"
+        DISPLAY=$D17 XDG_RUNTIME_DIR="$T17" HOTKEYD_I3SOCK="$T17/no-i3.sock" \
+            python3 "$HERE/hotkeyd.py" --display "$D17" \
+            --binds "$T17/hold.py" >"$T17/d2.log" 2>&1 &
+        d17b=""
+        for _t in 1 2 3 4 5 6 7 8 9 10; do
+            sleep 0.5
+            d17b="$(pgrep -f "hotkeyd.py --display $D17" | head -1)"
+            [ -n "$d17b" ] && break
+        done
+        if [ -n "$d17b" ]; then
+            kill -TERM "$d17b" 2>/dev/null
+            sleep 2
+            if [ -e "$MARK" ]; then
+                bad "on_exit fired for a daemon that was never in a layer"
+            else
+                ok "control: stopping an idle daemon dispatches nothing"
+            fi
+        else
+            bad "the control daemon did not start"
+        fi
+        kill "$X17P" 2>/dev/null
+    fi
+fi
+
 echo
 printf 'hotkeyd: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -1504,6 +1504,25 @@ class Daemon:
             self.resync_grabs()
         return actions
 
+    def shutdown_actions(self) -> list:
+        """What must be dispatched before this daemon goes away
+        (dotfiles-hwds.51).
+
+        A daemon killed inside a hold layer takes its grabs with it and leaves
+        the layer's overlay on screen — focused, holding the keyboard, with
+        nothing left able to close it. That is the shape observed live:
+        qs-switcher sitting there after a restart mid-gesture.
+
+        Returns rather than dispatches, because the run loop owns the dispatch
+        channel; `run_daemon`'s finally is what sends these. Empty when no layer
+        is up, so stopping an idle daemon stays silent — a stray cancel would
+        hide an overlay the user opened by hand.
+        """
+        layer = self.engine.state.get("layer")
+        if not layer or layer == L.DEFAULT_LAYER:
+            return []
+        return self.engine._exit_actions(layer)
+
     def close(self):
         self.pub.close()
         self.i3.close()
@@ -1597,6 +1616,12 @@ def run_daemon(table, display_name: str | None) -> int:
                 reload_wanted["flag"] = False
                 try:
                     fresh = load_table(getattr(table, "__file__", None))
+                    # A reload REPLACES the engine, so a layer that was up
+                    # simply ceases to exist — the same stranding as a restart
+                    # (dotfiles-hwds.51), and SIGHUP is how the shipped config
+                    # reloads. Hand the overlay back first.
+                    for _a in dae.shutdown_actions():
+                        _dispatch(dae.i3, _a)
                     dae.table = fresh
                     dae.engine = L.LayerEngine(fresh.BINDS, fresh.LAYERS,
                                                publisher=pub, mod=dae.mod)
@@ -1630,6 +1655,15 @@ def run_daemon(table, display_name: str | None) -> int:
                 code = 1
                 break
     finally:
+        # Hand the layer's overlay back BEFORE tearing anything down: the
+        # daemon dying inside a hold layer is what left qs-switcher on screen
+        # (dotfiles-hwds.51), and by the time close() has run there is no
+        # dispatch channel left to say so.
+        for _a in dae.shutdown_actions():
+            try:
+                _dispatch(dae.i3, _a)
+            except Exception:                            # noqa: BLE001, PERF203
+                pass                                     # never block the exit
         dae.close()
         inst.release()
     return code

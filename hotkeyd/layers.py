@@ -245,6 +245,20 @@ class LayerEngine:
             action if isinstance(action, (list, tuple)) else [action])
         return out + [B.ExitLayer()]
 
+    def _exit_actions(self, layer_name: str) -> list:
+        """The layer's `on_exit`, as a list (dotfiles-hwds.51).
+
+        Every route out of a layer funnels through this, so a layer that owns
+        something outside the daemon — the switcher's overlay — cannot be left
+        behind by a path that forgot to clean up. Which is what happened: the
+        gesture closed the overlay on the $mod release and nothing else did.
+        """
+        layer = self.layers.get(layer_name)
+        action = None if layer is None else getattr(layer, "on_exit", None)
+        if action is None:
+            return []
+        return list(action if isinstance(action, (list, tuple)) else [action])
+
     def reconcile_hold_layer(self, mods_down, note=None) -> list:
         """End a hold layer the SERVER says nobody is holding. Returns actions.
 
@@ -351,13 +365,21 @@ class LayerEngine:
         if name == self._i3_mode:
             return
         self._i3_mode = name
+        out = []
         if name != DEFAULT_I3_MODE and self._layer != DEFAULT_LAYER:
+            leaving = self._layer
             self._layer = DEFAULT_LAYER
+            # RETURNS the cleanup rather than running it: this is called from
+            # the i3 event path, which owns the dispatch channel. An overlay
+            # left mapped because i3 took a mode is the same stranding as any
+            # other route (dotfiles-hwds.51).
+            out = self._run(self._exit_actions(leaving), None)
             # _publish is change-only, so a layer exit that raced this event
             # costs one `default` line in total, not two. No triggering key is
             # passed because there ISN'T one — see format_transition on why the
             # log must not imply otherwise.
             self._publish(note=f"i3-entered-mode:{name}")
+        return out
 
     def _i3_owns_the_keyboard(self) -> bool:
         return self._i3_mode != DEFAULT_I3_MODE
@@ -505,6 +527,17 @@ class LayerEngine:
         # is still down. A layer you cannot leave one-handed is a trap.
         if not on_release and ev.key in layer.exit_keys:
             self._layer = DEFAULT_LAYER
+            # `on_exit` is deliberately NOT run here (dotfiles-hwds.51 stops
+            # short of this route). An exit key is the user consciously HANDING
+            # THE KEYBOARD BACK: the layer goes, the overlay stays, and because
+            # it is focused and holds no grab of its own its Escape and Return
+            # work normally again. That is the escape hatch for a layer that is
+            # somehow still up, and cancelling the overlay from under it would
+            # remove the thing the hatch exists to reach.
+            #
+            # The stranding hwds.51 fixes is the INVOLUNTARY exits — an i3 mode
+            # taking the keyboard, a daemon restart — where nobody chose to
+            # leave the overlay behind.
             return []
 
         # Layer chords are BARE keysyms, so this comparison is the whole match.
@@ -548,7 +581,18 @@ class LayerEngine:
                     continue
                 self._layer = a.layer
             elif isinstance(a, B.ExitLayer):
+                leaving = self._layer
                 self._layer = DEFAULT_LAYER
+                # Appended AFTER whatever the action tuple already ran, so a
+                # commit runs first and this only tidies up behind it — the
+                # switcher's confirm hides the overlay and the cancel that
+                # follows is a hide on an already-hidden window
+                # (dotfiles-hwds.51).
+                for extra in self._exit_actions(leaving):
+                    if callable(extra):
+                        extra(ev)
+                    else:
+                        out.append(extra)
             elif callable(a):
                 a(ev)                   # owns its own effect
             else:
