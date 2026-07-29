@@ -938,4 +938,46 @@ BINDS: list[Bind] = [
                       enter_layer("switcher"))),
     Bind("$mod+w", (run(f"{QS_OVERLAY} switcher"),
                     enter_layer("switcher"))),
+
+    # ---- THE OVERLAY GROUP (dotfiles-hwds.43) -----------------------------
+    # The last two everyday chords i3 still owned: the notification browser
+    # and the clipboard picker. Both toggle a quickshell overlay that TAKES
+    # KEYBOARD FOCUS, which is what kept them here until now and what makes
+    # them different from every group above.
+    #
+    # WHY THEY WENT LAST. dotfiles-hwds.31: a passive grab held on a key puts
+    # the server into an implicit active grab, X sends
+    # FocusOut(mode=NotifyGrab) to the focused window, and Qt reports that
+    # window deactivated ~100 ms later even though it never lost the input
+    # focus. Both overlays used to hide straight off that signal, so they
+    # dismissed themselves seconds after opening whenever `$mod` was held.
+    # Migrating them before that was fixed would have made it WORSE rather
+    # than equal: once the daemon owns `$mod+v`, the grab that produces the
+    # FocusOut is held by the very keystroke that opens the picker. The
+    # overlays now ask the window manager who it considers active
+    # (`qs-clip.sh active-window`) before hiding, so a grab blip is told apart
+    # from the session genuinely moving on.
+    #
+    # THE ORDER OF THE TWO FOCUS EVENTS IS THE THING TO KNOW HERE. With i3
+    # owning the chord the overlay was mapped first and met a held `$mod`
+    # later; with the daemon owning it, the overlay maps WHILE the grab is
+    # active. It still takes focus (the grab is the server's, not a focus
+    # change), and `everActive` only arms the blur probe after the window has
+    # actually held focus — so the tap and the hold both land in the
+    # already-fixed path rather than a new one. Measured live on :10 before
+    # this was committed: tap and 3 s hold, both overlays visible AND
+    # `_NET_ACTIVE_WINDOW` after release.
+    #
+    # GRAB-OWNERSHIP CLOSURE, checked under both `$mod` resolutions: nothing
+    # else in the i3 tree binds `n` or `v` under any mask. `$mod+Shift+n` was
+    # dropped when the browser moved to the unshifted key (sp019), and the nav
+    # layer's own grab set does not reach either key — `n`/`v` are not layer
+    # keys, so no shadowing question arises.
+    #
+    # NOT MIGRATED WITH THEM: the overlays' INTERNAL keys (Escape, Return, the
+    # filter row). Those are app keys served by the focused window, not global
+    # binds, and no global layer can own them — the same boundary sp020 draws
+    # for nvim and tmux.
+    Bind("$mod+n", run("~/.dotfiles/quickshell/qs-notif.sh toggle")),
+    Bind("$mod+v", run("~/.dotfiles/quickshell/qs-clip.sh toggle")),
 ]

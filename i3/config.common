@@ -22,7 +22,10 @@ hide_edge_borders none
 # notification-history picker (sp019) — quickshell browser over the persistent
 # notification store; the user-bus-singleton daemon owns the freedesktop
 # Notifications name. (border normal 4 dropped to free $mod+n.)
-bindsym $mod+n exec --no-startup-id ~/.dotfiles/quickshell/qs-notif.sh toggle
+#
+# $mod+n moved to hotkeyd/binds.py with the clipboard picker below — sp020,
+# dotfiles-hwds.43. Its i3 spelling lives in `config.d/zz-fallback-binds.conf`,
+# which `hotkeyd-panic.sh panic` links in when the daemon has to be stopped.
 
 # avoid leaving unfocuse with full screen
 popup_during_fullscreen smart
@@ -89,7 +92,10 @@ bindsym $mod+Ctrl+t exec --no-startup-id picom -b
 # session itself from the live quickshell instances, so no DISPLAY is passed
 # here — and nothing on this line depends on an overlay var, which would be
 # invisible across the include boundary anyway.
-bindsym $mod+v exec --no-startup-id ~/.dotfiles/quickshell/qs-clip.sh toggle
+# $mod+v moved to hotkeyd/binds.py with $mod+n — sp020, dotfiles-hwds.43. The
+# paragraph above still describes what the picker IS and why the binding is
+# platform-independent; what changed is only which engine grabs the key. The
+# i3 spelling lives in `config.d/zz-fallback-binds.conf` for the panic path.
 # The screenshot group (Print, $mod+Print, $mod+Shift+Print and the region
 # capture below) moved to hotkeyd/binds.py — sp020, dotfiles-hwds.39. Its i3
 # spelling lives in `config.d/zz-fallback-binds.conf`, which

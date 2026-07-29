@@ -1008,15 +1008,33 @@ OLD_BIND_SUBSTR='$mod+Shift+n exec i3-input'
 count_fixed_line() { grep -F -x -c -- "$2" "$1" 2>/dev/null || true; }  # <file> <whole-line>
 count_fixed_sub()  { grep -F -c -- "$2" "$1" 2>/dev/null || true; }     # <file> <substring>
 
-scenario "n-is-notif-toggle: \$mod+n binds the qs-notif.sh toggle exec for BOTH entry points"
-# Exactly one, not at-least-one: two copies would be the duplication this
-# refactor removed (and i3 would warn about the chord).
-for f in "$I3_BASE" "$I3_XRDP"; do
-  assert_eq "$(basename "$f") effective: exactly one notif-toggle bindsym line" "1" "$(count_eff_line "$f" "$NOTIF_TOGGLE_LINE")"
-done
-# ...and it is single-sourced: the line itself lives only in the shared base.
-assert_eq "the bind text lives ONLY in config.common (config no longer copies it)" \
-  "0" "$(count_fixed_line "$I3_BASE" "$NOTIF_TOGGLE_LINE")"
+scenario "n-is-notif-toggle: \$mod+n reaches the browser on BOTH entry points, from different engines"
+# RE-POINTED AT THE DAEMON (sp020, dotfiles-hwds.43), the way test-nav-mode.sh
+# was at 21fddab2. The coverage is NOT deleted — what changed is only which
+# engine is asserted to own the chord, and the two entry points now differ:
+#
+#   i3/config       native + WSL. hotkeyd owns $mod+n; the i3 line is GONE from
+#                   the effective tree, and a copy left behind would double-fire
+#                   with no BadAccess to warn you (test_binds.py asserts that
+#                   half under both $mod resolutions).
+#   i3/config-xrdp  proot Arch on Android. Starts NO daemon and includes no
+#                   config.d overlay, so it keeps the i3 bind — otherwise the
+#                   cutover would silently take the browser away from that
+#                   session, which is dotfiles-3qd's complaint about the
+#                   screenshot group.
+#
+# Exactly one, not at-least-one: two copies would be duplication i3 warns about.
+assert_eq "config-xrdp effective: exactly one notif-toggle bindsym line" \
+  "1" "$(count_eff_line "$I3_XRDP" "$NOTIF_TOGGLE_LINE")"
+assert_eq "config effective: the i3 notif-toggle bind is gone (hotkeyd owns it)" \
+  "0" "$(count_eff_line "$I3_BASE" "$NOTIF_TOGGLE_LINE")"
+# ...and the daemon really does carry it, so "gone from i3" means "moved", not
+# "lost". Matched on binds.py's own spelling of the chord.
+assert_eq "hotkeyd/binds.py carries \$mod+n" \
+  "1" "$(grep -F -c 'Bind("$mod+n"' "$SCRIPT_DIR/../hotkeyd/binds.py" || true)"
+# ...and panic restores it, so a stopped daemon does not leave a dead key.
+assert_eq "the fallback carries the i3 spelling for the panic path" \
+  "1" "$(count_fixed_line "$SCRIPT_DIR/../i3/config.d/zz-fallback-binds.conf" "$NOTIF_TOGGLE_LINE")"
 
 scenario "shift-o-is-name-workspace: \$mod+Shift+o carries the relocated i3-input bind for BOTH entry points"
 for f in "$I3_BASE" "$I3_XRDP"; do

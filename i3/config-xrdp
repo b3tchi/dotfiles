@@ -56,3 +56,21 @@ bindsym $mod+Shift+d --release exec --no-startup-id $qsenv ~/.dotfiles/quickshel
 # so a bare reload leaves the running quickshell on its old QML (see the same
 # note in i3/config).
 bindsym $mod+Shift+c reload, exec --no-startup-id $qsenv ~/.dotfiles/quickshell/qs-start.sh
+
+# The overlay group (notification browser, clipboard picker) kept HERE when it
+# left config.common for hotkeyd/binds.py — sp020, dotfiles-hwds.43.
+#
+# This entry point is proot Arch on Android over Termux:X11, and it starts no
+# daemon: `hotkeyd.sh start` is autostarted from `config.d/native.conf` /
+# `wsl.conf`, and this file includes no config.d overlay at all. So a bind that
+# moves to binds.py simply VANISHES from this session unless it is restated
+# here — which is what happened to the screenshot group at dotfiles-hwds.39 and
+# is filed as dotfiles-3qd. Restating them costs nothing: with no daemon there
+# is no second owner, so nothing double-fires.
+#
+# Deliberately WITHOUT the `$qsenv` prefix, unlike the four binds above. Those
+# LAUNCH quickshell components and need the software-GL env; these two speak to
+# the ALREADY-RUNNING instance over its socket (qs-notif.sh / qs-clip.sh derive
+# the session themselves), so the env would be inherited noise.
+bindsym $mod+n exec --no-startup-id ~/.dotfiles/quickshell/qs-notif.sh toggle
+bindsym $mod+v exec --no-startup-id ~/.dotfiles/quickshell/qs-clip.sh toggle
