@@ -228,6 +228,18 @@ run hotkeyd-panic.sh resume" 4
             # exited 127, and got read as a dead X server on a display whose
             # Xorg had been up for eleven days.
             hout="$(health)"; hrc=$?
+            # A FOREIGN KEYBOARD GRAB IS NOT OURS TO RESTART (exit 8,
+            # dotfiles-hwds.30). Every other health failure is the daemon's own
+            # and `start` is the cure; this one is another client holding an
+            # exclusive grab that bypasses every passive grab on the display,
+            # and restarting only re-registers chords that stay bypassed.
+            # Printing the "run start" suffix here would contradict the message
+            # itself, which says restarting cannot fix it — and send whoever
+            # reads it round a loop that never converges.
+            if [ "$hrc" -eq 8 ]; then
+                printf '%s (pid %s)\n' "$hout" "$pid"
+                exit 8
+            fi
             if [ "$hrc" -ne 0 ]; then
                 # Name the pid as well as the reason: the cure is `start`, and
                 # whoever is about to run it wants to know which process is

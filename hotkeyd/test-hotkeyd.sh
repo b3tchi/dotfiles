@@ -694,6 +694,163 @@ EOF
     kill "$X13P" 2>/dev/null
 fi
 
+
+# ============================================================================
+# stage 14: a foreign exclusive keyboard grab is reported, not swallowed
+# ============================================================================
+#
+# dotfiles-hwds.30. An exclusive keyboard grab (XGrabKeyboard) bypasses every
+# PASSIVE grab on the display, so while one is held no hotkeyd chord and no i3
+# bind fires — and every other signal still says healthy: the loop turns, the
+# display answers, the grabs are registered. On the real :0 that combination sat
+# unnoticed for days and an afternoon went into suspecting the daemon, which was
+# never the holder (it was a locked screensaver, which grabs by design).
+#
+# Two things are pinned here that the unit tests cannot reach, both being shell
+# wiring that was written and verified by hand once:
+#   1. `hotkeyd.sh status` exits 8 for this condition, not 0 and not 6.
+#   2. It does NOT tell the operator to run `start`. The message says restarting
+#      cannot fix it, so printing that suffix contradicts itself in one line and
+#      sends whoever reads it round a loop that never converges.
+echo "stage 14: a foreign keyboard grab is reported as NOT SERVING"
+if ! command -v Xvfb >/dev/null; then
+    printf '  \033[33mSKIP\033[0m Xvfb missing\n'
+else
+    D14=""
+    _b=$(( 40 + (($$ + 14) % 20) ))
+    for _o in 0 1 2 3 4 5 6 7 8 9; do
+        _n=$(( _b + _o ))
+        [ -e "/tmp/.X${_n}-lock" ] || { D14=":$_n"; break; }
+    done
+    T14="$TMPD/t14"; mkdir -p "$T14"
+    if [ -z "$D14" ]; then
+        bad "no free X display for the foreign-grab stage"
+    else
+        Xvfb "$D14" -screen 0 640x480x24 >/dev/null 2>&1 &
+        X14P=$!
+        sleep 1.5
+        # A stand-in for the locker: takes an exclusive keyboard grab and holds
+        # it until killed. Nothing else about it matters — X does not name the
+        # holder, so any client will do.
+        cat > "$T14/grabber.py" <<'GRABEOF'
+import sys, time
+from Xlib import X, display
+d = display.Display(sys.argv[1])
+r = d.screen().root.grab_keyboard(True, X.GrabModeAsync, X.GrabModeAsync,
+                                  X.CurrentTime)
+d.sync()
+print("grab result", r, flush=True)
+time.sleep(600)
+GRABEOF
+        # A fresh lock file so health sees a beating heartbeat: the point of the
+        # stage is that everything ELSE looks healthy while the keyboard is gone.
+        : > "$T14/hotkeyd-${D14#:}.lock"
+        out="$(XDG_RUNTIME_DIR="$T14" timeout 20 \
+               python3 "$HERE/hotkeyd.py" --health --display "$D14" 2>&1)"
+        rc=$?
+        if [ "$rc" -eq 0 ]; then
+            ok "control: an UNGRABBED display reports serving"
+        else
+            bad "control failed — the stage proves nothing (rc=$rc): $out"
+        fi
+
+        python3 "$T14/grabber.py" "$D14" >"$T14/grab.log" 2>&1 &
+        G14P=$!
+        sleep 1.5
+        if grep -q "grab result 0" "$T14/grab.log"; then
+            ok "the stand-in holds an exclusive keyboard grab"
+        else
+            bad "the stand-in did NOT get the grab: $(cat "$T14/grab.log")"
+        fi
+
+        out="$(XDG_RUNTIME_DIR="$T14" timeout 20 \
+               python3 "$HERE/hotkeyd.py" --health --display "$D14" 2>&1)"
+        rc=$?
+        if [ "$rc" -eq 8 ]; then
+            ok "--health exits 8 (keyboard grabbed) rather than 0"
+        else
+            bad "--health returned $rc for a grabbed keyboard: $out"
+        fi
+        case "$out" in
+            *"NOT SERVING"*) ok "--health says NOT SERVING" ;;
+            *) bad "--health did not say NOT SERVING: $out" ;;
+        esac
+        case "$out" in
+            *lock*|*LOCK*) ok "--health names the usual holder (a locked screen)" ;;
+            *) bad "--health gave no lead on who holds it: $out" ;;
+        esac
+
+        # A REAL daemon, started while the grab is already held. Two things ride
+        # on it: the STARTUP WARNING (a daemon that logs "N chords grabbed" and
+        # nothing else is the exact confident-and-inert line that misled the :0
+        # investigation), and `hotkeyd.sh status`, which resolves the daemon by
+        # pgrep against its argv — a stand-in process cannot stand in for that.
+        cat > "$T14/one.py" <<EOF
+import sys; sys.path.insert(0, "$HERE")
+from binds import Bind
+BINDS = [Bind('\$mod+F11', 'nop grabbed-stage')]
+LAYERS = {}
+EOF
+        rm -f "$T14/hotkeyd-${D14#:}.lock"
+        DISPLAY=$D14 XDG_RUNTIME_DIR="$T14" HOTKEYD_I3SOCK="$T14/no-i3.sock" \
+            python3 "$HERE/hotkeyd.py" --display "$D14" \
+            --binds "$T14/one.py" >"$T14/d.log" 2>&1 &
+        D14P=$!
+        d14=""
+        for _t in 1 2 3 4 5 6 7 8 9 10; do
+            sleep 0.5
+            d14="$(pgrep -f "hotkeyd.py --display $D14" | head -1)"
+            [ -n "$d14" ] && break
+        done
+        if [ -z "$d14" ]; then
+            bad "the daemon did not start on the grabbed display: $(tail -3 "$T14/d.log")"
+        else
+            ok "the daemon starts anyway (a grab is somebody else's and will end)"
+            # WAIT for it. The warning lands AFTER the grab line, not with it:
+            # the probe asks three times 300 ms apart before condemning, so a
+            # grep fired the instant pgrep sees the pid reads a log that is
+            # still one line short. Cost a false FAIL here before it was spotted.
+            _warned=""
+            for _t in 1 2 3 4 5 6 7 8 9 10; do
+                grep -q "WARNING on $D14" "$T14/d.log" && { _warned=1; break; }
+                sleep 0.5
+            done
+            if [ -n "$_warned" ]; then
+                ok "and WARNS at startup that its chords are bypassed"
+            else
+                bad "startup logged no warning about the grab: $(tail -3 "$T14/d.log")"
+            fi
+            if grep -q "chords grabbed on $D14" "$T14/d.log"; then
+                ok "control: it still reports the grabs it registered"
+            else
+                bad "no grab line at all — the stage is testing the wrong thing"
+            fi
+
+            sout="$(XDG_RUNTIME_DIR="$T14" timeout 25 \
+                    sh "$HERE/hotkeyd.sh" status "$D14" 2>&1)"
+            src=$?
+            if [ "$src" -eq 8 ]; then
+                ok "hotkeyd.sh status exits 8 too"
+            else
+                bad "hotkeyd.sh status returned $src: $sout"
+            fi
+            case "$sout" in
+                *"NOT SERVING"*) ok "status relays NOT SERVING rather than 'running'" ;;
+                *) bad "status did not say NOT SERVING: $sout" ;;
+            esac
+            case "$sout" in
+                *"hotkeyd.sh start"*)
+                    bad "status told the operator to run start, which cannot fix a foreign grab" ;;
+                *) ok "status does NOT suggest a restart that cannot help" ;;
+            esac
+            kill "$d14" 2>/dev/null
+        fi
+        kill "$D14P" 2>/dev/null
+        kill "$G14P" 2>/dev/null
+        kill "$X14P" 2>/dev/null
+    fi
+fi
+
 echo
 printf 'hotkeyd: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -2310,6 +2310,102 @@ def test_health_says_serving_when_the_loop_beats_and_the_display_answers(
     assert "serving" in msg.lower(), msg
 
 
+# --- a foreign exclusive keyboard grab (dotfiles-hwds.30) --------------------
+#
+# THE OUTAGE THIS ANSWERS. An exclusive keyboard grab (XGrabKeyboard) bypasses
+# every PASSIVE grab on the display, so while one is held no hotkeyd chord and
+# no i3 bind can fire — and the daemon cannot tell. It logs "N chords grabbed",
+# holds a fresh heartbeat, answers the display probe, and reports SERVING while
+# being completely inert. On :0 that state went unnoticed for days and cost an
+# afternoon of misattribution to hotkeyd, which was never the holder.
+#
+# The holder is usually mundane and the daemon should say so rather than accuse
+# itself: a locked screen. xfce4-screensaver active on :0 was this ticket's
+# actual cause, and a locker grabs the keyboard BY DESIGN — that is what makes
+# it a lock.
+
+def test_health_reports_a_foreign_keyboard_grab_rather_than_serving(
+        tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    H.lock_path(":77").write_text("12345\n")
+    rc, msg = H.health(":77", probe_display=lambda _n: None,
+                       probe_grab=lambda _n: "AlreadyGrabbed")
+    assert rc == H.HEALTH_KEYBOARD_GRABBED, msg
+    assert rc != H.HEALTH_OK
+    low = msg.lower()
+    assert "not serving" in low, msg
+    # The message has to point AWAY from the daemon, or it recreates the
+    # afternoon it exists to prevent.
+    assert "grab" in low and ":77" in msg, msg
+    assert "lock" in low or "screensaver" in low, \
+        "name the usual holder — an operator who is told only 'grabbed' " \
+        "starts by suspecting the daemon, which is what happened here"
+
+
+def test_health_is_ok_when_nothing_holds_the_keyboard(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    H.lock_path(":77").write_text("12345\n")
+    rc, _ = H.health(":77", probe_display=lambda _n: None,
+                     probe_grab=lambda _n: None)
+    assert rc == H.HEALTH_OK
+
+
+def test_the_grab_probe_runs_after_the_cheaper_ones(tmp_path, monkeypatch):
+    """Order matters for the message, not just for cost. A display that cannot
+    be opened cannot be probed for a grab, and a dead heartbeat is the daemon's
+    own fault while a grab is somebody else's — reporting the wrong one first
+    sends the investigation to the wrong machine."""
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    called = []
+    stale = H.lock_path(":77")
+    stale.write_text("12345\n")
+    old = time.time() - (H.HEARTBEAT_STALE_S * 4)
+    os.utime(stale, (old, old))
+    rc, _ = H.health(":77", probe_display=lambda _n: None,
+                     probe_grab=lambda n: called.append(n))
+    assert rc == H.HEALTH_NOT_SERVING
+    assert called == [], "a stale heartbeat must not be probed for a grab"
+
+    H.lock_path(":78").write_text("12345\n")
+    rc, _ = H.health(":78", probe_display=lambda _n: "no protocol",
+                     probe_grab=lambda n: called.append(n))
+    assert rc == H.HEALTH_DISPLAY_UNREACHABLE
+    assert called == [], "an unreachable display must not be probed for a grab"
+
+
+def test_the_grab_probe_retries_before_condemning():
+    """THE FALSE POSITIVE THIS MUST NOT PRODUCE. X promotes the daemon's OWN
+    per-chord passive grab to an implicit ACTIVE grab for as long as a grabbed
+    key is held (dotfiles-hwds.31), so a probe that fires while the user is
+    holding `$mod` sees AlreadyGrabbed from the daemon itself and would report
+    the daemon broken for doing its job.
+
+    An implicit grab ends on key release; a locker's does not. Retrying is what
+    tells them apart, so a single AlreadyGrabbed followed by a clear attempt
+    must NOT condemn."""
+    answers = iter([True, False, False])
+    reason = H.probe_keyboard_grab(":77", attempts=3, delay=0,
+                                   _attempt=lambda _n: next(answers))
+    assert reason is None
+
+
+def test_the_grab_probe_condemns_a_persistent_grab():
+    reason = H.probe_keyboard_grab(":77", attempts=3, delay=0,
+                                   _attempt=lambda _n: True)
+    assert reason is not None
+    assert "grab" in reason.lower(), reason
+
+
+def test_the_grab_probe_is_silent_when_it_cannot_ask():
+    """A probe that cannot open the display must not invent a grab: the display
+    probe above already owns that diagnosis, and two components reporting the
+    same fault in different words is how hwds.28 got misfiled."""
+    def boom(_n):
+        raise OSError("nope")
+    assert H.probe_keyboard_grab(":77", attempts=2, delay=0,
+                                 _attempt=boom) is None
+
+
 def test_health_never_shells_out(tmp_path, monkeypatch):
     """The root cause of the bad hwds.28 report. `xdpyinfo` was not installed,
     exited 127, and the 127 was read as a dead X server. Nothing on this path may

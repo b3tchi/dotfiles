@@ -141,6 +141,21 @@ HEARTBEAT_STALE_S = 5.0
 HEALTH_OK = 0
 HEALTH_NOT_SERVING = 6
 HEALTH_DISPLAY_UNREACHABLE = 7
+#: Someone else holds an EXCLUSIVE keyboard grab on this display, so every
+#: passive grab — the daemon's and i3's alike — is bypassed and nothing fires.
+#: Its own code because the cure is on the other client, not here: restarting
+#: the daemon cannot fix it, and 6 ("its loop stopped") would send whoever
+#: reads it to `start` (dotfiles-hwds.30).
+HEALTH_KEYBOARD_GRABBED = 8
+
+#: How many times the grab probe asks before condemning, and how long it waits
+#: between asks. Sized for the false positive it must not produce: the daemon's
+#: own passive grab is promoted to an implicit ACTIVE grab while a grabbed key
+#: is HELD (dotfiles-hwds.31), which looks identical to a foreign grab from
+#: outside. That state ends on key release, so a keystroke cannot survive three
+#: asks 300 ms apart, while a locker's grab survives all of them.
+GRAB_PROBE_ATTEMPTS = 3
+GRAB_PROBE_DELAY_S = 0.3
 
 #: How long the display probe waits for the server to answer. A HUNG X server —
 #: as opposed to a dead one — never closes the connection, so an unguarded
@@ -1393,6 +1408,29 @@ def run_daemon(table, display_name: str | None) -> int:
     print(f"hotkeyd: {len(dae.grabs.chords)} chords grabbed on {disp_name} "
           f"via XI2 ($mod={dae.mod})",
           file=sys.stderr, flush=True)
+    # "N chords grabbed" is TRUE AND MEANINGLESS while another client holds an
+    # exclusive keyboard grab: the grabs are registered, and every one of them
+    # is bypassed (dotfiles-hwds.30). On :0 that combination — a confident
+    # startup line above a completely inert daemon — is what sent an afternoon
+    # of debugging at hotkeyd, which was never the holder.
+    #
+    # Probed on a SEPARATE connection so the daemon's own passive grabs are not
+    # what is being asked about, and only at startup: nothing is held a
+    # millisecond after launch, so the dotfiles-hwds.31 implicit-grab false
+    # positive cannot fire here the way it could mid-session.
+    #
+    # A WARNING, never a refusal to start. The grab is somebody else's and it
+    # will end — a screen gets unlocked — and a daemon that exited here would
+    # need a human to notice and restart it at exactly the moment the user is
+    # returning to the machine.
+    _grabbed = probe_keyboard_grab(disp_name)
+    if _grabbed is not None:
+        print(f"hotkeyd: WARNING on {disp_name} — {_grabbed}. The chords above "
+              f"are registered but BYPASSED: an exclusive grab overrides every "
+              f"passive one, i3's included, so no bind fires here until it is "
+              f"released. Usual holder: a locked screen. Not a daemon fault "
+              f"and not fixable by restarting it (dotfiles-hwds.30)",
+              file=sys.stderr, flush=True)
     code = 0
     try:
         while not stop["flag"]:
@@ -1510,8 +1548,62 @@ def probe_display(name: str) -> str | None:
     return None
 
 
+def _grab_attempt(name: str) -> bool:
+    """Does somebody else hold an exclusive keyboard grab on `name`?
+
+    Asked the only way X answers it: try to take one. `AlreadyGrabbed` means
+    another client has it — the protocol offers no way to learn WHO, which is
+    why the message this feeds names the usual holder rather than the actual
+    one. Success is released immediately; holding it would be the very outage
+    being probed for.
+    """
+    from Xlib import X, display as xdisplay          # noqa: PLC0415
+    d = xdisplay.Display(name)
+    try:
+        r = d.screen().root.grab_keyboard(
+            True, X.GrabModeAsync, X.GrabModeAsync, X.CurrentTime)
+        if r == X.GrabSuccess:
+            d.ungrab_keyboard(X.CurrentTime)
+            d.sync()
+            return False
+        return True
+    finally:
+        try:
+            d.close()
+        except Exception:                            # noqa: BLE001
+            pass
+
+
+def probe_keyboard_grab(name: str,
+                        attempts: int = GRAB_PROBE_ATTEMPTS,
+                        delay: float = GRAB_PROBE_DELAY_S,
+                        _attempt=_grab_attempt) -> str | None:
+    """None when nothing foreign holds the keyboard, else a short reason.
+
+    RETRIES, and that is the whole design (dotfiles-hwds.31): the daemon's own
+    per-chord passive grab becomes an implicit ACTIVE grab while a grabbed key
+    is held, which is indistinguishable from a locker's grab in a single ask.
+    Held keys are transient and lockers are not, so ONE clear answer acquits.
+
+    Silent when it cannot ask at all. `probe_display` already owns "the display
+    did not answer", and two probes reporting one fault in different words is
+    how dotfiles-hwds.28 got misfiled as a dead X server.
+    """
+    for i in range(attempts):
+        try:
+            if not _attempt(name):
+                return None
+        except Exception:                            # noqa: BLE001
+            return None
+        if i + 1 < attempts and delay:
+            time.sleep(delay)
+    return (f"another client holds an exclusive keyboard grab "
+            f"({attempts} probes, {delay:.1f}s apart, all AlreadyGrabbed)")
+
+
 def health(display: str | None = None,
-           probe_display=probe_display) -> tuple[int, str]:
+           probe_display=probe_display,
+           probe_grab=probe_keyboard_grab) -> tuple[int, str]:
     """Is the daemon on this display SERVING? Returns (exit code, one line).
 
     Two probes, in the order that makes the answer actionable:
@@ -1548,9 +1640,28 @@ def health(display: str | None = None,
         return (HEALTH_DISPLAY_UNREACHABLE,
                 f"hotkeyd: {disp} — NOT SERVING: the display {disp} is "
                 f"unreachable — {why}")
+    # 3. THE KEYBOARD ITSELF (dotfiles-hwds.30). Everything above can be true
+    #    while not one chord fires: an exclusive keyboard grab bypasses every
+    #    PASSIVE grab on the display, so the daemon's and i3's alike are inert
+    #    until it is released. Nothing in the first two probes can see that —
+    #    the loop turns, the display answers, the grabs are registered — which
+    #    is exactly how :0 sat dead for days while `status` said "running".
+    #
+    #    The cure is on the OTHER client, so this must not read like the
+    #    daemon's own failure and must not point at `start`.
+    grabbed = probe_grab(disp)
+    if grabbed is not None:
+        return (HEALTH_KEYBOARD_GRABBED,
+                f"hotkeyd: {disp} — NOT SERVING: {grabbed}. Every chord on "
+                f"{disp} is bypassed until it releases — restarting the daemon "
+                f"cannot fix this. Usual holder: a LOCKED SCREEN (a screensaver "
+                f"or locker grabs the keyboard by design; try "
+                f"`xfce4-screensaver-command -q`), or a modal that took the "
+                f"keyboard and never gave it back. X names no holder, so this "
+                f"is the whole answer the protocol can give")
     return (HEALTH_OK,
             f"hotkeyd: {disp} — serving (heartbeat {age:.1f}s ago, display "
-            f"reachable)")
+            f"reachable, keyboard not grabbed elsewhere)")
 
 
 def main_argv(argv=None) -> int:
