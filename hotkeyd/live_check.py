@@ -35,6 +35,30 @@ def check(ok, what, detail=""):
           flush=True)
 
 
+def judged(precondition, ok, what, detail="", missing=""):
+    """A claim that can only be judged if the phenomenon actually occurred
+    (dotfiles-hwds.22).
+
+    THE FAILURE THIS PREVENTS: a live timing check whose subject never
+    materialised passes for free. "A held key fires ONCE despite the real
+    auto-repeat stream" is satisfied trivially by a run where no repeat stream
+    arrived — it would go green against a daemon with NO coalescing at all,
+    which is the coverage-gaming shape this suite exists to avoid. It was
+    reported as flaky-vacuous rather than always-vacuous, which is worse: it
+    passes for the wrong reason most of the time and occasionally for the right
+    one, so nobody notices.
+
+    A separate precondition check does not close it. Two independent lines mean
+    a run with no repeat stream prints one FAIL and one PASS, and the PASS is a
+    green line for a claim that was never tested. Coupling them here makes
+    vacuity impossible: no phenomenon, no pass.
+    """
+    if not precondition:
+        check(False, what, missing or f"CANNOT JUDGE — {detail}")
+        return
+    check(ok, what, detail)
+
+
 def code_for(d, name):
     return d.keysym_to_keycode(XK.string_to_keysym(name))
 
@@ -362,14 +386,25 @@ def main() -> int:
     n_press = sum(1 for k in raw if k.kind == "press")
     n_rel = sum(1 for k in raw if k.kind == "release")
     n_flag = sum(1 for k in raw if k.repeat)
-    check(n_press > 3 and n_flag == n_press - 1 and n_rel == 1,
+    # THE PRECONDITION, named as one (dotfiles-hwds.22): did the server
+    # actually deliver a repeat stream on this run? Measured here: 15 presses /
+    # 14 flagged / 1 release under the suite's Xvfb. A run where the hold
+    # produced a single press has not tested coalescing at all.
+    repeat_stream = n_press > 3 and n_flag == n_press - 1 and n_rel == 1
+    check(repeat_stream,
           "XI2 marks auto-repeat on the PRESS (XIKeyRepeat) and sends no "
           "synthetic release — so the flag, not a timestamp pair, is the "
           "discriminator",
           f"{n_press} presses / {n_flag} flagged / {n_rel} releases")
-    check(len(fired) == 1,
-          "a held key fires ONCE despite the real auto-repeat stream",
-          f"{len(fired)} dispatches")
+    # ...and the claim is GATED on it, rather than sitting beside it. Without
+    # the gate a repeat-less run prints this line green while proving nothing —
+    # the exact shape dotfiles-hwds.22 was filed about.
+    judged(repeat_stream, len(fired) == 1,
+           "a held key fires ONCE despite the real auto-repeat stream",
+           f"{len(fired)} dispatches from {n_press} presses",
+           missing=f"CANNOT JUDGE — no repeat stream this run "
+                   f"({n_press} presses / {n_flag} flagged), so 1 dispatch "
+                   f"would be free")
 
     # -- repeat-filter FAIRNESS: what the guard must NOT swallow --------------
     # The check above proves the filter eats auto-repeat. These prove it eats
