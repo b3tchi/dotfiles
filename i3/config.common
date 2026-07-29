@@ -65,7 +65,9 @@ bindsym $mod+Shift+q kill
 ################################################################################################
 
 # (volumeicon autostart → config.d/native.conf)
-bindsym $mod+Ctrl+m exec terminal -e 'alsamixer'
+# $mod+Ctrl+m (alsamixer) moved to hotkeyd/binds.py with the apps + session
+# group — sp020, dotfiles-hwds.46. Its i3 spelling lives in
+# `config.d/zz-fallback-binds.conf` for the panic path.
 #exec --no-startup-id pulseaudio
 #exec --no-startup-id pa-applet
 #bindsym $mod+Ctrl+m exec pavucontrol
@@ -79,7 +81,8 @@ bindsym $mod+Ctrl+m exec terminal -e 'alsamixer'
 # Start Applications
 # bindsym $mod+Ctrl+b exec terminal -e 'bmenu'
 # bindsym $mod+F3 exec ranger
-bindsym $mod+F5 exec terminal -e 'mocp'
+# $mod+F5 (mocp) moved to hotkeyd/binds.py with the apps + session group —
+# sp020, dotfiles-hwds.46. It was already a no-op here: mocp is not installed.
 # bindsym $mod+t exec --no-startup-id pkill picom
 bindsym $mod+Ctrl+t exec --no-startup-id picom -b
 # (router: moved to desktop config) bindsym $mod+Shift+d --release exec ~/.dotfiles/quickshell/qs-start.sh
@@ -301,7 +304,10 @@ for_window [urgent=latest] focus
 #   i3-msg restart
 
 # exit i3 (logs you out of your X session)
-bindsym $mod+Shift+e exec "i3-nagbar -t warning -m 'You pressed the exit shortcut. Do you really want to exit i3? This will end your X session.' -b 'Yes, exit i3' 'i3-msg exit'"
+# $mod+Shift+e (exit i3, behind the nagbar) moved to hotkeyd/binds.py with the
+# apps + session group — sp020, dotfiles-hwds.46. NOT a recovery key despite
+# ending the session: nothing about it helps when the WM is misbehaving, which
+# is the test $mod+Shift+q / $mod+Shift+c / $mod+Shift+r pass and this fails.
 
 # THE SYSTEM MODE LEFT i3 (sp020 / dotfiles-hwds.38).
 #
@@ -460,7 +466,9 @@ bindsym $mod+Ctrl+Shift+r exec --no-startup-id ~/.dotfiles/hotkeyd/hotkeyd-panic
 bindsym $mod+Shift+r reload, exec --no-startup-id "sh -c '$HOME/.dotfiles/hotkeyd/hotkeyd.sh restart; env QS_BAR_INSET_BOTTOM=50 QS_BAR_INSET_AUTO=1 $HOME/.dotfiles/quickshell/qs-start.sh'"
 
 # Lock screen
-bindsym $mod+9 exec --no-startup-id blurlock
+# $mod+9 (blurlock) moved to hotkeyd/binds.py with the apps + session group —
+# sp020, dotfiles-hwds.46. The system layer's `l` (i3exit lock) is the other
+# way to lock; both are the daemon's now, and the fallback restores this one.
 
 # polybar (replaced by quickshell)
 # exec_always --no-startup-id $HOME/.config/polybar/launch.sh

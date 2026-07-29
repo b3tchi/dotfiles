@@ -693,11 +693,23 @@ def test_the_i3_config_parser_actually_sees_binds():
     # dotfiles-hwds.34, 77 -> 51) then came within ONE bind of tripping.
     #
     # So: a floor set relative to today's total is a tripwire on the next
-    # migration, not on the parser. Pinned at 10 instead — deep below anything a
-    # cutover will plausibly leave behind, and still an order of magnitude above
-    # the zero-or-two a broken parser returns. The two named sentinels above are
-    # the real assertions; this line only rules out silent emptiness.
-    assert len(owned) > 10, f"only parsed {len(owned)} top-level i3 binds"
+    # migration, not on the parser. It was pinned at 10 on that reasoning —
+    # "deep below anything a cutover will plausibly leave behind" — and the
+    # apps + session cutover (dotfiles-hwds.46) took the total to 8, which is
+    # the third time this line has failed for the right reason in the wrong
+    # place. The premise was wrong: the migration is nearly complete, so
+    # "anything a cutover will plausibly leave behind" is no longer a large
+    # number, and no total-relative floor can survive the end of the project.
+    #
+    # Pinned to the RECOVERY SET instead, which is a floor by ARGUMENT rather
+    # than by counting: $mod+Shift+q (kill), $mod+Shift+c (reload),
+    # $mod+Shift+r (hammer) and the panic chord stay in i3 permanently, because
+    # grabs die with the daemon and a key for dealing with something already
+    # misbehaving cannot live in the thing that may be misbehaving. Two of the
+    # four are asserted by name above. A parser returning nothing still trips
+    # this; a future cutover cannot, because migrating any of the four would be
+    # a policy change that should break a test.
+    assert len(owned) >= 4, f"only parsed {len(owned)} top-level i3 binds"
 
 
 def test_nav_left_i3_and_lives_only_in_the_daemon():

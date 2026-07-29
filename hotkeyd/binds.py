@@ -980,4 +980,49 @@ BINDS: list[Bind] = [
     # for nvim and tmux.
     Bind("$mod+n", run("~/.dotfiles/quickshell/qs-notif.sh toggle")),
     Bind("$mod+v", run("~/.dotfiles/quickshell/qs-clip.sh toggle")),
+
+    # ---- THE APPS + SESSION GROUP (dotfiles-hwds.46) ----------------------
+    # Four plain spawns — no i3 state, no mode, no layer. The residue after
+    # every structural group left: a lock key, two application launchers and
+    # the exit-with-a-confirmation key.
+    #
+    # BARE COMMAND NAMES SURVIVE HERE, and that is measured rather than
+    # assumed. `Run` executes with shell=True from the DAEMON's environment,
+    # not i3's, so a bind that resolved through i3's PATH could quietly stop
+    # resolving through the daemon's. Checked /proc/<daemon>/environ: PATH
+    # carries /sbin, where `terminal`, `blurlock` and `i3-nagbar` all live.
+    # The entry-point group above spells absolute paths for the opposite
+    # reason — those targets are in ~/.local/bin, which is not on every
+    # session's PATH.
+    #
+    # `$mod+F5` IS ALREADY DEAD: mocp is not installed on this host, so the
+    # bind has been a no-op in i3 for some time. Migrated VERBATIM anyway — a
+    # cutover moves behaviour, it does not silently curate it, and a dead bind
+    # that disappears during a migration is indistinguishable from one the
+    # migration broke. Filed separately (dotfiles-hwds.47) so the decision to
+    # drop it is made on its own evidence.
+    #
+    # WHAT STAYS WITH i3, restated here because this is where someone will
+    # look for it: `$mod+Shift+q` (kill), `$mod+Shift+c` (reload),
+    # `$mod+Shift+r` (hammer) and `$mod+Ctrl+Shift+r` (panic). They are
+    # RECOVERY keys, and grabs die with the daemon — a key whose job is to
+    # deal with something already misbehaving cannot live in the thing that
+    # may be what is misbehaving. See i3/config.common's note above the kill
+    # bind for the original statement of the rule.
+    #
+    # SEMANTIC OVERLAP, noted not resolved: LAYERS["system"] already binds `e`
+    # to `i3exit logout`, and this group brings `$mod+Shift+e`, which is exit-
+    # i3-behind-a-nagbar. Two ways to end the session, both now the daemon's.
+    # Whether one should go is a product question, not a cutover question.
+    Bind("$mod+9", run("blurlock")),
+    Bind("$mod+Ctrl+m", run("terminal -e 'alsamixer'")),
+    Bind("$mod+F5", run("terminal -e 'mocp'")),
+    # The nagbar's own quoting, preserved exactly. i3 needed the outer double
+    # quotes to stop its parser splitting the command (b0c9f27e); through
+    # shell=True they are the shell's, and the inner single quotes keep the
+    # message and the two button arguments intact.
+    Bind("$mod+Shift+e", run(
+        "i3-nagbar -t warning -m 'You pressed the exit shortcut. Do you really"
+        " want to exit i3? This will end your X session.'"
+        " -b 'Yes, exit i3' 'i3-msg exit'")),
 ]

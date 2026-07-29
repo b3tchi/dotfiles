@@ -1229,7 +1229,10 @@ class FakeXServer(FakeDisplay):
         # shares Tab's keycode: it IS the shifted Tab key, which is why the
         # layer's `$mod+Shift+ISO_Left_Tab` grab is a different MASK on the same
         # code rather than a second key. `n` and `v` arrived with the overlay
-        # group (dotfiles-hwds.43) — 57/55, standard PC layout.
+        # group (dotfiles-hwds.43) — 57/55, standard PC layout. `9`, `m` and
+        # `F5` with the apps + session group (dotfiles-hwds.46) — 18/58/71.
+        # `9` is not part of the workspace row above: that row stops at 8 and
+        # `$mod+0` opens the system layer, so the digit had never been needed.
         super().__init__(keymap=keymap or {"o": 32, "h": 43, "q": 24,
                                            "Tab": 23, "ISO_Left_Tab": 23,
                                            "w": 25, "space": 65,
@@ -1245,6 +1248,7 @@ class FakeXServer(FakeDisplay):
                                            "j": 44, "k": 45, "l": 46,
                                            "d": 40, "p": 33, "Print": 107,
                                            "n": 57, "v": 55,
+                                           "9": 18, "m": 58, "F5": 71,
                                            "Super_L": 133, "Control_L": 37,
                                            "Control_R": 105, "Alt_L": 64,
                                            "Alt_R": 108, "Meta_L": 205,
