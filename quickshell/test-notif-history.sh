@@ -70,6 +70,19 @@ scenario() { printf '\n[%s]\n' "$1"; }
 # about the expansion; asserting per-file would now just re-encode the layout.
 # `~/.i3/config.d/*.conf` resolves through the LIVE symlinks, exactly as i3
 # would resolve it, and silently contributes nothing when unlinked.
+#
+# A RELATIVE include is resolved against the directory of the file that
+# contains it, not against cwd — that is what i3 itself does (measured against
+# i3 4.25.1, and it holds through a symlinked entry point and regardless of
+# where the suite is run from).
+#
+# No shipped config uses a relative include today, so this changes nothing now.
+# It was written for a generated bind fragment that config.common would have
+# reached that way (dotfiles-hwds.25, since closed as obsolete) — the fragment
+# never shipped, the expander bug would have. Kept because the failure it
+# prevents is silent in the worst way: a cwd-relative expander finds nothing,
+# every "is this bind present" assertion below reads ABSENT, and the suite
+# reports a config regression that does not exist.
 effective() { # <entry-point-config> -> the fully-included text
   python3 - "$1" <<'EXPANDPY'
 import sys, os, glob, re
@@ -78,11 +91,15 @@ def expand(path, seen):
     if path in seen or not os.path.exists(path):
         return ""
     seen.add(path)
+    here = os.path.dirname(path)
     out = []
     for line in open(path):
         m = re.match(r'^\s*include\s+(.+?)\s*$', line)
         if m:
-            for f in sorted(glob.glob(os.path.expanduser(m.group(1)))):
+            pat = os.path.expanduser(m.group(1))
+            if not os.path.isabs(pat):
+                pat = os.path.join(here, pat)
+            for f in sorted(glob.glob(pat)):
                 out.append(expand(f, seen))
         else:
             out.append(line)
