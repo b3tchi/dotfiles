@@ -11,11 +11,10 @@ mapfile -t f < <(
     (.context_window.used_percentage // ""),
     (.context_window.total_input_tokens // 0),
     (.context_window.total_output_tokens // 0),
-    (.context_window.context_window_size // 0),
-    (.workspace.current_dir // .cwd // "")
+    (.context_window.context_window_size // 0)
   ' <<<"$json"
 )
-model=${f[0]} used_pct=${f[1]} in_tok=${f[2]} out_tok=${f[3]} ctx_size=${f[4]} wd=${f[5]}
+model=${f[0]} used_pct=${f[1]} in_tok=${f[2]} out_tok=${f[3]} ctx_size=${f[4]}
 
 # Colors
 R=$'\033[0m'; B=$'\033[1m'; D=$'\033[2m'
@@ -57,12 +56,8 @@ case $acct in
   *)        acct_s="" ;;
 esac
 
-# Last updated: git last-commit relative time of current repo
-updated_s=""
-if [[ -n $wd ]]; then
-  rel=$(git -C "$wd" log -1 --format=%cr 2>/dev/null)
-  [[ -n $rel ]] && updated_s=" ${D}| updated ${rel}${R}"
-fi
+# Current datetime yymmdd-hhmm
+clock_s=" ${D}last: $(date +%y%m%d-%H%M)${R}"
 
 size_s=""; [[ -n $ctx_label ]] && size_s=" (${ctx_label})"
-printf ' %s%s%s%s%s %s%s \n' "$acct_s" "$model_s" "$D" "$size_s" "$R" "$ctx_s" "$updated_s"
+printf ' %s%s%s%s%s %s%s \n' "$acct_s" "$model_s" "$D" "$size_s" "$R" "$ctx_s" "$clock_s"
