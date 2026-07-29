@@ -31,3 +31,15 @@ akm-graph/akmgraph
 preview/preview
 preview/preview-d
 d2/d2router
+
+# Agent task worktrees (dotfiles-3c7). `work-do` checks each bd task out into
+# .worktrees/bd-<id>.<N>/, and the Claude Code harness makes its own under
+# .claude/worktrees/ — each is a WHOLE SECOND COPY of this repo.
+#
+# Untracked, they showed up in `git status`, and this repo is known to have
+# concurrent agent sessions, at least one of which does `git add -A` and
+# auto-commits. One such sweep with a worktree present commits the entire copy
+# into main, doubling the tree — recoverable, but silent and ugly, and it gets
+# likelier the more the pipeline is used.
+.worktrees/
+.claude/worktrees/
