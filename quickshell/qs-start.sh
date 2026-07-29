@@ -19,14 +19,22 @@ for _qs_pid in $(pgrep -x quickshell 2>/dev/null); do
     tr '\0' ' ' < "/proc/$_qs_pid/cmdline" 2>/dev/null | grep -qF -- "$QS_NOTIF_PROFILE_DIR" && continue
     kill "$_qs_pid" 2>/dev/null
 done
-# The overlay used to spawn a detached key-monitor helper via setsid. It no
-# longer does — hotkeyd owns the alt-tab gesture as a hold layer and
-# qs-keymon.py is deleted (sp020, dotfiles-hwds.40) — but the sweeps stay:
-# an upgrade lands this file long before the running quickshell is replaced,
-# and an orphaned raw-event listener from the old version would keep driving
-# the switcher alongside the daemon. Both the python helper and the older
-# xinput+awk pipeline are swept for the same reason.
-qs_kill_session -f 'qs-keymon.py'
+# The overlay used to spawn a detached key-monitor helper. It no longer does:
+# hotkeyd owns the alt-tab gesture as a hold layer and qs-keymon.py is deleted
+# (sp020, dotfiles-hwds.40), so there is nothing left here to reap and the
+# sweep for it went with the file.
+#
+# ONE-TIME UPGRADE STEP, and the only thing that sweep was still buying: on a
+# machine whose quickshell has NOT been restarted since this landed, the old
+# process still has its detached listener, and that listener keeps driving the
+# switcher alongside the daemon — every Tab cycles twice. Restarting quickshell
+# does not reap it (that is why the sweep existed). Kill it by hand once:
+#     pkill -f qs-keymon.py
+# A log out, or any reboot, does the same.
+#
+# The older xinput+awk pipeline sweep stays: it predates qs-keymon.py, was
+# never this cutover's to remove, and an orphan from that era is reaped by the
+# same argument.
 qs_kill_session -f 'xinput test-xi2'
 # focus helpers hold a flock — an orphan from a killed quickshell blocks
 # respawns silently (new instances exit at the lock), so reap them too
