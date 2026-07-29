@@ -273,6 +273,28 @@ check("a repeat of the same layer state does not redraw", calls == [])
 qsb._set_layer_colored(False)
 check("leaving the layer clears the colour", qsb.mode_colored is False)
 
+# --- SILENT layers (dotfiles-hwds.44) ---------------------------------------
+# "Anything that is not default captures keys, so colour the ring" was true
+# while every layer was modal. The alt-tab switcher is not: it is a held-modifier
+# gesture with its own full-screen overlay, and $mod+w has to feel like $mod+d
+# and $mod+p — open a thing, change nothing else. The red ring is a WARNING that
+# bare letters are now WM commands; firing it for a gesture that already shows
+# what it does is noise, and it trained the eye to ignore the real warning.
+#
+# Mirrors ModeBarTheme.silentModes, which suppresses the bar strip for the same
+# set. Two files because two languages; the comment in each names the other.
+check("the switcher layer does NOT colour the ring",
+      qsb.layer_colours_ring("switcher") is False)
+check("switcher is declared silent, not merely unhandled",
+      "switcher" in qsb.SILENT_LAYERS)
+check("a modal layer still colours the ring", qsb.layer_colours_ring("nav") is True)
+check("default never colours the ring", qsb.layer_colours_ring("default") is False)
+# An unknown future layer colours the ring: silence must be opted INTO, so a
+# layer nobody classified is treated as modal (the safe direction — a spurious
+# warning beats a missing one).
+check("an unclassified layer still colours the ring",
+      qsb.layer_colours_ring("somefuture") is True)
+
 # A layer name the helper has never heard of still means "keys are captured":
 # the daemon only publishes a layer when one is active, so anything that is not
 # "default" qualifies. Guards against someone hardcoding {'nav'} here later.

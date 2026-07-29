@@ -45,6 +45,29 @@ COLOR_MODES = {'screenshot'}
 # letters are WM commands, not input. Anything other than "default" qualifies —
 # a layer exists precisely because it captures keys.
 HOTKEYD_COLORS_ANY_LAYER = True
+
+# ...except the SILENT ones (dotfiles-hwds.44). The alt-tab switcher is a
+# held-modifier gesture that already puts a full-screen overlay on the display
+# saying what it will do, so colouring the ring adds no information and makes
+# `$mod+w` visually louder than `$mod+d` / `$mod+p`, which open an overlay and
+# change nothing else. The ring is a WARNING that bare letters have become WM
+# commands; spending it on a gesture that cannot surprise anyone is how a
+# warning stops being read.
+#
+# MIRRORS ModeBarTheme.silentModes (quickshell/config/Common/ModeBarTheme.qml),
+# which suppresses the bar's mode strip for the same set. Two files because two
+# languages — keep them in step; each names the other.
+#
+# Silence is opt-IN: an unclassified layer still colours the ring, because a
+# spurious warning is cheaper than a missing one.
+SILENT_LAYERS = {'switcher'}
+
+
+def layer_colours_ring(layer):
+    """Should the daemon's current layer paint the ring in MODE_BC?"""
+    return (HOTKEYD_COLORS_ANY_LAYER
+            and layer != 'default'
+            and layer not in SILENT_LAYERS)
 # Windows to never border (quickshell overlays, rofi, etc.)
 IGNORE_CLASSES = {'quickshell', 'Rofi', 'rofi'}
 IGNORE_TITLES = {'qs-focus-border', 'qs-focus-dim'}
@@ -343,8 +366,7 @@ def hotkeyd_layer_monitor():
                         layer = json.loads(line).get('layer') or 'default'
                     except Exception:
                         continue
-                    GLib.idle_add(_set_layer_colored,
-                                  HOTKEYD_COLORS_ANY_LAYER and layer != 'default')
+                    GLib.idle_add(_set_layer_colored, layer_colours_ring(layer))
         except OSError:
             pass
         finally:

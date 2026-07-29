@@ -317,8 +317,18 @@ PanelWindow {
     // whatever i3 mode is up. The two cannot both be meaningful — a chord
     // belongs to exactly one grabber — and if they ever disagree, the daemon's
     // layer is the one whose keys are live under your fingers.
-    readonly property string currentMode: daemonLayer !== "default" ? daemonLayer
+    readonly property string activeMode: daemonLayer !== "default" ? daemonLayer
                                        : i3Mode
+
+    // SILENT LAYERS READ AS "default" HERE (dotfiles-hwds.44), which is what
+    // makes them cost the bar nothing. `currentMode` is not only the ModeBar's
+    // input — the workspace strip, the notification ticker and the tray are all
+    // gated on it being "default", so a layer that merely rendered an invisible
+    // ModeBar would still blank half the bar for the length of the gesture.
+    // $mod+w has to behave like $mod+d and $mod+p: open an overlay, leave the
+    // bar alone.
+    readonly property string currentMode: ModeBarTheme.silent(activeMode)
+                                        ? "default" : activeMode
     readonly property bool inNavMode: daemonLayer === "nav"
 
     // Rendered layer name, straight from the feed. No sticky timer here: the

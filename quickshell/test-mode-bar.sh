@@ -168,6 +168,16 @@ ShellRoot {
     // ---- unknown mode -> fallback row [{key:"", label:<raw>}] ----
     emit("unknown-mode-fallback", j(ModeBarTheme.hintsFor("somefuture")))
 
+    // ---- the switcher layer (dotfiles-hwds.40 / hwds.44). It publishes on
+    //      the state socket like every other layer but must not be PAINTED:
+    //      \$mod+w and \$mod+Tab open an overlay, they do not put the user in a
+    //      mode worth announcing. Before this it fell through resolve() to ""
+    //      and through displayName() to the hardcoded "system". ----
+    emit("switcher-silent-predicate", ModeBarTheme.silent("switcher") ? "true" : "false")
+    emit("nav-not-silent",     ModeBarTheme.silent("nav") ? "true" : "false")
+    emit("unknown-not-silent", ModeBarTheme.silent("somefuture") ? "true" : "false")
+    emit("switcher-resolves", JSON.stringify(ModeBarTheme.resolve("switcher")))
+
     // ---- displayName ternary (resize/screenshot/nav pair else system) ----
     emit("display-names", JSON.stringify([
       ModeBarTheme.displayName("resize"),
@@ -249,8 +259,30 @@ scenario "hintsFor — unknown + empty modes fall back verbatim (AC4)"
 assert_case "unknown-mode-fallback" '[{"text":"somefuture","key":""}]'
 assert_case "empty-mode-fallback"   '[{"text":"","key":""}]'
 
-scenario "displayName — resize/screenshot else system (AC4)"
-assert_case "display-names" '["resize","screenshot","system","system","system"]'
+scenario "displayName — an UNKNOWN mode names itself, it does not claim to be 'system' (dotfiles-hwds.44)"
+# WAS: the ternary ended in a hardcoded `: "system"`, so every unrecognised
+# mode was painted with the system mode's pill. That is not a cosmetic default
+# — "system" carries reboot/poweroff/hibernate on single letters, so a layer
+# mislabelled as system invites a keystroke that shuts the machine down. The
+# switcher layer (dotfiles-hwds.40) is what surfaced it: the bar read
+# `[system] switcher` for the whole alt-tab gesture.
+#
+# The long `$mode_system` label string must STILL resolve to "system" — that
+# is i3's own name for the mode and what the bar sees while panicked.
+assert_case "display-names" '["resize","screenshot","system","somefuture",""]'
+
+scenario "silent modes — the switcher layer is declared unpaintable (dotfiles-hwds.44)"
+# `silent` is the registry's third answer, beside "known" and "unknown": a mode
+# the bar must not draw at all. The switcher is one because the gesture already
+# has a full-screen overlay saying what it is — a second announcement in the
+# bar is noise, and it costs the workspace row for the length of every alt-tab.
+assert_case "switcher-silent-predicate" "true"
+assert_case "nav-not-silent"            "false"
+assert_case "unknown-not-silent"        "false"
+# Still NOT a registered mode: nothing renders it, so hints/pill stay on the
+# unknown path. Pinned so a later "let's give it hints after all" has to
+# confront the silence decision rather than sidestep it.
+assert_case "switcher-resolves" '""'
 
 scenario "nav pair (dotfiles-5u6m) — registry + resolve + pill labels differ by held Shift"
 assert_case "hints-nav" \
@@ -465,6 +497,7 @@ flip1 "$SYS"       "system-long-name"
 flip1 "somefuture" "unknown-fallback"
 flip1 "nav"        "nav"
 flip1 "nav-move"   "nav-move"
+flip1 "switcher"   "switcher-silent"
 
 # fontSize propagation: the host passes a different size (phone/sway differ).
 setfont 22; sleep 0.2; flip1 "resize" "fontsize-22"; setfont 16; sleep 0.2
@@ -524,9 +557,18 @@ assert_case "nav.hints" \
 assert_case "nav-move.hints" \
   '[{"pre":"","key":"h","post":"","space":" ","tail":"move-←"},{"pre":"","key":"j","post":"","space":" ","tail":"move-↓"},{"pre":"","key":"k","post":"","space":" ","tail":"move-↑"},{"pre":"","key":"l","post":"","space":" ","tail":"move-→"},{"pre":"","key":"^","post":"","space":" ","tail":"moving"},{"pre":"","key":"q","post":"uit","space":"","tail":""}]'
 
-scenario "unknown-fallback: unknown mode -> pill 'system' + one raw-name hint row (AC4)"
+scenario "switcher-silent: the alt-tab layer paints NOTHING (dotfiles-hwds.44)"
+# $mod+w / $mod+Tab must leave the bar alone, exactly like $mod+d and $mod+p —
+# they open an overlay, they do not put the keyboard into a mode the user has
+# to be told about. The daemon still PUBLISHES layer=switcher on the state
+# socket (other consumers read it); what changed is that the bar declines to
+# paint it. Asserted at the RENDER level, not just on the predicate: a strip
+# that is merely empty still reserves width and steals the workspace row.
+assert_case "switcher-silent.visible" "0"
+
+scenario "unknown-fallback: unknown mode -> pill names ITSELF + one raw-name hint row (hwds.44)"
 assert_case "unknown-fallback.visible" "1"
-assert_case "unknown-fallback.pill"    "system"
+assert_case "unknown-fallback.pill"    "somefuture"
 # empty key -> fallback path with an empty hk span; the raw name renders as the
 # tail (space+tail layout, key span empty).
 assert_case "unknown-fallback.hints"   '[{"pre":"","key":"","post":"","space":" ","tail":"somefuture"}]'

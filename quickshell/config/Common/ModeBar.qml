@@ -26,7 +26,11 @@ Item {
     property string mode: "default"
     property int fontSize: 0
 
-    visible: mode !== "default"
+    // "default" => nothing to announce. A mode on ModeBarTheme.silentModes =>
+    // deliberately not announced (dotfiles-hwds.44): the switcher's own overlay
+    // already says what it is. Invisible AND zero-width — an empty strip would
+    // still reserve space and push the host's other widgets around.
+    visible: mode !== "default" && !ModeBarTheme.silent(mode)
     implicitWidth: strip.implicitWidth
     implicitHeight: strip.implicitHeight
 

@@ -120,19 +120,50 @@ Singleton {
         return ""
     }
 
-    // Pill label — verbatim from Bar.qml's display-name ternary: resize and
-    // screenshot show their own name, everything else (incl. the long system
-    // string and unknown/future modes) shows "system". The nav pair is the one
-    // addition (dotfiles-5u6m): the pill is where the held move modifier
-    // becomes visible, so nav-move reads "nav MOVE" — a different WORD, not
-    // just a different hint row, because the pill is what the eye lands on.
+    // Pill label. Derived from `resolve` so a mode cannot be registered in one
+    // place and missing from the other — that split is what produced
+    // dotfiles-hwds.44: the switcher layer had hints resolving to "" AND a pill
+    // reading "system", and the two failures together printed a strip that
+    // named the wrong mode confidently.
+    //
+    // AN UNKNOWN MODE NAMES ITSELF. The ternary this replaces ended in a
+    // hardcoded `: "system"`, so every future layer arrived pre-mislabelled.
+    // "system" is not a harmless default: it is the mode with reboot, poweroff
+    // and hibernate on single letters, so a strip claiming to be it invites a
+    // keystroke that ends the session. The raw name may be ugly; it is never a
+    // lie, and it says exactly what to add to this registry.
+    //
+    // The long `$mode_system` string still lands on "system" through `resolve`
+    // — that is i3's own name for the mode and what the bar sees while panicked.
+    // The nav pair keeps its bespoke labels (dotfiles-5u6m): the pill is where
+    // the held modifier becomes visible, so nav-move reads "nav MOVE" — a
+    // different WORD, not just a different hint row.
     function displayName(mode) {
-        return mode === "resize" ? "resize"
-             : mode === "screenshot" ? "screenshot"
-             : mode === "screenshot-drag" ? "screenshot"
-             : mode === "nav" ? "nav"
-             : mode === "nav-move" ? "nav MOVE"
-             : mode === "nav-resize" ? "nav RESIZE" : "system"
+        if (mode === "nav-move") return "nav MOVE"
+        if (mode === "nav-resize") return "nav RESIZE"
+        var key = resolve(mode)
+        return key !== "" ? key : mode
+    }
+
+    // Modes the bar must NOT paint at all (dotfiles-hwds.44). The registry's
+    // third answer, beside "known" and "unknown".
+    //
+    // A mode strip exists to say which keys are live under your fingers while
+    // the keyboard is in a state you cannot see. The alt-tab switcher is not
+    // that: it puts a full-screen overlay on the display listing exactly what
+    // it will do, so a second announcement in the bar tells you nothing and
+    // costs the workspace row for the length of every gesture. $mod+w and
+    // $mod+Tab should feel like $mod+d and $mod+p — open a thing, leave the
+    // bar alone — and they did before the cutover, when the whole gesture ran
+    // outside the mode channel in qs-keymon.py.
+    //
+    // Silence is a rendering decision, NOT a publishing one: hotkeyd still
+    // emits layer=switcher on the state socket, and other consumers still read
+    // it. Only the bar declines to draw it.
+    readonly property var silentModes: ["switcher"]
+
+    function silent(mode) {
+        return silentModes.indexOf(mode) !== -1
     }
 
     // Hint rows for a mode. Known modes return their registry rows; unknown
