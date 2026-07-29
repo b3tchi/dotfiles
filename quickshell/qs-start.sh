@@ -19,10 +19,13 @@ for _qs_pid in $(pgrep -x quickshell 2>/dev/null); do
     tr '\0' ' ' < "/proc/$_qs_pid/cmdline" 2>/dev/null | grep -qF -- "$QS_NOTIF_PROFILE_DIR" && continue
     kill "$_qs_pid" 2>/dev/null
 done
-# The overlay spawns a detached keymon helper via setsid; clean it up too so
-# $mod+Shift+d reloads don't leak helper processes across restarts. We sweep
-# both the current python helper and the legacy xinput+awk pipeline so a
-# partial upgrade or an orphan from an older quickshell version is cleaned up.
+# The overlay used to spawn a detached key-monitor helper via setsid. It no
+# longer does — hotkeyd owns the alt-tab gesture as a hold layer and
+# qs-keymon.py is deleted (sp020, dotfiles-hwds.40) — but the sweeps stay:
+# an upgrade lands this file long before the running quickshell is replaced,
+# and an orphaned raw-event listener from the old version would keep driving
+# the switcher alongside the daemon. Both the python helper and the older
+# xinput+awk pipeline are swept for the same reason.
 qs_kill_session -f 'qs-keymon.py'
 qs_kill_session -f 'xinput test-xi2'
 # focus helpers hold a flock — an orphan from a killed quickshell blocks

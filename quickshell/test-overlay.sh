@@ -203,11 +203,12 @@ done
 # setsid: quickshell becomes its own process-group leader so cleanup can reap
 # the whole tree (the blocking i3-msg subscribe sleep especially). PATH is the
 # sandbox ONLY; HOME is the sandbox home; SWAYSOCK unset => wmMsg is i3-msg and
-# fontSize is the deterministic i3 value; QS_NO_KEYMON=1 suppresses the keymon
-# respawn on this keyboard-less display; QS_RDP=1 mirrors the main-instance host.
+# fontSize is the deterministic i3 value; QS_RDP=1 mirrors the main-instance
+# host. (QS_NO_KEYMON is gone with qs-keymon.py — dotfiles-hwds.40 moved the
+# switcher gesture into hotkeyd, so nothing respawns on this display any more.)
 setsid env -u SWAYSOCK \
     DISPLAY="$DPY" HOME="$HOME_S" PATH="$PBIN" \
-    QS_RDP=1 QS_NO_KEYMON=1 \
+    QS_RDP=1 \
     XDG_CONFIG_HOME="$CFG" XDG_RUNTIME_DIR="$RUN" XDG_CACHE_HOME="$CCH" \
     "$QS_BIN" -p "$ENTRY" >"$TMP/qs.out" 2>&1 &
 QS_PID=$!
@@ -571,7 +572,6 @@ if [ ! -e "/tmp/.X11-unix/X${OV_DPY#:}" ]; then
 else
   setsid env -u SWAYSOCK -u QS_RDP \
       DISPLAY="$OV_DPY" HOME="$HOME_S" PATH="$PBIN" \
-      QS_NO_KEYMON=1 \
       XDG_CONFIG_HOME="$CFG" XDG_RUNTIME_DIR="$OV_RUN" XDG_CACHE_HOME="$OV_CCH" \
       "$QS_BIN" -p "$FAKE_LINK" >"$TMP/qs-ov.out" 2>&1 &
   OV_QS_PID=$!

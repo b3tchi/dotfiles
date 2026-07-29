@@ -158,7 +158,8 @@ def test_press_bind_fires_once_per_press_with_no_repeat_while_held():
 
 def test_on_release_bind_fires_on_release_and_not_on_press():
     """AC2. This is what the alt-tab switcher needed and i3 could not do —
-    the reason qs-keymon.py exists as a second event mechanism."""
+    the reason qs-keymon.py existed as a second event mechanism until
+    dotfiles-hwds.40 folded that gesture into a hold layer here."""
     binds = [B.Bind("Mod4+Shift+d", "nop confirm", on_release=True)]
     e, _, _ = engine(binds=binds, layers={})
     assert e.handle(press("d", ["Mod4", "Shift"])) == []
@@ -1312,3 +1313,182 @@ def test_the_one_shot_exit_is_logged_as_a_transition():
     t = transitions(lines)
     assert len(t) == 1, lines
     assert "layer=os->default" in t[0] and "trigger=press:a" in t[0], t[0]
+
+
+# --------------------------------------------------------------------------
+# tuple actions (dotfiles-hwds.40)
+# --------------------------------------------------------------------------
+# A bind whose action is a TUPLE dispatches every part. The switcher needs it
+# twice over: entry must both open the overlay AND take the layer, and Escape
+# must both cancel AND leave. Expressing either as two binds is impossible (one
+# chord, one bind) and expressing them with a per-bind `exits` flag would be a
+# second mechanism for something `ExitLayer` already is.
+
+def _tuple_layers():
+    return {"sw": B.Layer(
+        binds=[B.Bind("Tab", "next"),
+               B.Bind("Escape", ("cancel", B.exit_layer()))],
+        exit_keys=["q"])}
+
+
+def _tuple_binds():
+    return [B.Bind("$mod+Tab", ("open", B.enter_layer("sw")))]
+
+
+def test_a_tuple_action_dispatches_every_part_in_order():
+    e, _, _ = engine(binds=_tuple_binds(), layers=_tuple_layers())
+    assert e.handle(press("Tab", ["Mod4"])) == ["open"]
+    assert e.state["layer"] == "sw"
+
+
+def test_a_tuple_action_inside_a_layer_can_dispatch_and_exit():
+    e, _, _ = engine(binds=_tuple_binds(), layers=_tuple_layers())
+    e.handle(press("Tab", ["Mod4"]))
+    assert e.handle(press("Escape", ["Mod4"])) == ["cancel"]
+    assert e.state["layer"] == "default"
+
+
+def test_a_tuple_exit_publishes_exactly_one_line():
+    e, pub, _ = engine(binds=_tuple_binds(), layers=_tuple_layers())
+    e.handle(press("Tab", ["Mod4"]))
+    pub.lines.clear()
+    e.handle(press("Escape", ["Mod4"]))
+    assert pub.lines == [{"layer": "default", "mod": None}], pub.lines
+
+
+# --------------------------------------------------------------------------
+# hold layers — the modifier's RELEASE ends the layer (dotfiles-hwds.40)
+# --------------------------------------------------------------------------
+
+def _hold_layers(hold="$mod", action="commit"):
+    return {"sw": B.Layer(
+        binds=[B.Bind("Tab", "next"),
+               B.Bind("Escape", ("cancel", B.exit_layer()))],
+        hold=hold,
+        on_hold_release=action,
+        exit_keys=["q"])}
+
+
+def _hold_engine(mod="Mod4", hold="$mod", action="commit"):
+    """Built directly rather than through `engine()` because `mod` is the whole
+    point here — the same table must mean Mod4 on :0 and Mod1 on :10."""
+    return L.LayerEngine(_tuple_binds(), _hold_layers(hold, action),
+                         publisher=Recorder(), clock=FakeClock(), mod=mod)
+
+
+def test_observing_the_hold_modifier_release_commits_and_exits():
+    e = _hold_engine()
+    e.handle(press("Tab", ["Mod4"]))
+    assert e.state["layer"] == "sw"
+    assert e.handle(release("Super_L")) == ["commit"]
+    assert e.state["layer"] == "default"
+
+
+def test_the_commit_does_not_require_having_seen_the_press():
+    """HAZARD 2. `Super_L` is not grabbed in the default layer, so at layer
+    entry `_held` is empty and `reconcile_holds` is retract-only — it will
+    never assert the hold. Commit must therefore fire on OBSERVING the release,
+    never on believing the modifier was down."""
+    e = _hold_engine()
+    e.handle(press("Tab", ["Mod4"]))
+    assert e.held == frozenset(), e.held
+    assert e.handle(release("Super_L")) == ["commit"]
+
+
+def test_the_hold_modifier_resolves_per_display():
+    """HAZARD 1. `$mod` is Mod4 on :0 and Mod1 on the xrdp :10 session. A hold
+    that resolved through MODIFIER_ALIASES alone would be None on both."""
+    e = _hold_engine(mod="Mod1")
+    e.handle(press("Tab", ["Mod1"]))
+    assert e.handle(release("Super_L")) == []
+    assert e.state["layer"] == "sw"
+    assert e.handle(release("Alt_L")) == ["commit"]
+    assert e.state["layer"] == "default"
+
+
+def test_a_hold_release_with_no_action_just_exits():
+    e = _hold_engine(action=None)
+    e.handle(press("Tab", ["Mod4"]))
+    assert e.handle(release("Super_L")) == []
+    assert e.state["layer"] == "default"
+
+
+def test_another_modifiers_release_does_not_end_a_hold_layer():
+    e = _hold_engine()
+    e.handle(press("Tab", ["Mod4"]))
+    assert e.handle(release("Control_L")) == []
+    assert e.state["layer"] == "sw"
+
+
+def test_a_hold_release_outside_the_layer_dispatches_nothing():
+    e = _hold_engine()
+    assert e.handle(release("Super_L")) == []
+    assert e.state["layer"] == "default"
+
+
+def test_hold_modifier_reports_the_current_layers_hold():
+    e = _hold_engine()
+    assert e.hold_modifier is None
+    e.handle(press("Tab", ["Mod4"]))
+    assert e.hold_modifier == "Mod4"
+
+
+def test_a_layer_without_a_hold_reports_no_hold_modifier():
+    e, _, _ = engine()
+    e.handle(press("o", ["Mod4"]))
+    assert e.state["layer"] == "nav"
+    assert e.hold_modifier is None
+
+
+# -- HAZARD 3: the release-before-grab race ---------------------------------
+# A fast tap can release the modifier before the layer's grabs are installed;
+# that release is never delivered, so no key event will ever end the layer. The
+# server's own answer is the bounded fallback.
+
+def test_the_server_reporting_the_modifier_up_commits_and_exits():
+    e = _hold_engine()
+    e.handle(press("Tab", ["Mod4"]))
+    assert e.reconcile_hold_layer(frozenset()) == ["commit"]
+    assert e.state["layer"] == "default"
+
+
+def test_the_server_reporting_the_modifier_down_changes_nothing():
+    e = _hold_engine()
+    e.handle(press("Tab", ["Mod4"]))
+    assert e.reconcile_hold_layer(frozenset({"Mod4"})) == []
+    assert e.state["layer"] == "sw"
+
+
+def test_reconciling_never_cancels_a_layer_that_declares_no_hold():
+    """nav is stood in with nothing held. A reconciler that dropped any layer
+    the server has no modifier for would cancel it under the user's hands."""
+    e, _, _ = engine()
+    e.handle(press("o", ["Mod4"]))
+    assert e.reconcile_hold_layer(frozenset()) == []
+    assert e.state["layer"] == "nav"
+
+
+def test_reconciling_in_the_default_layer_is_a_no_op():
+    e = _hold_engine()
+    assert e.reconcile_hold_layer(frozenset()) == []
+    assert e.state["layer"] == "default"
+
+
+def test_the_reconciled_commit_publishes_one_line_and_logs_why():
+    e, _, lines = logged_engine(binds=_tuple_binds(), layers=_hold_layers())
+    e.handle(xev("press", "Tab", ["Mod4"], keycode=23, raw_state=0x40))
+    lines.clear()
+    e.reconcile_hold_layer(frozenset())
+    t = transitions(lines)
+    assert len(t) == 1, lines
+    assert "layer=sw->default" in t[0], t[0]
+    assert "hold-released" in t[0], t[0]
+
+
+def test_the_exit_key_floor_still_leaves_a_hold_layer():
+    """The last resort when the modifier's release was never delivered AND the
+    server answer never arrived: a bare exit key, dispatching nothing."""
+    e = _hold_engine()
+    e.handle(press("Tab", ["Mod4"]))
+    assert e.handle(press("q")) == []
+    assert e.state["layer"] == "default"

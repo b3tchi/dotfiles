@@ -133,6 +133,27 @@ def normalize_chord(chord: str, mod: str = DEFAULT_MOD) -> tuple[tuple[str, ...]
     return tuple(sorted(mods)), key
 
 
+def canon_modifier(name, mod: str = DEFAULT_MOD) -> str | None:
+    """Canonical name for a modifier written on its own, `$mod` resolved.
+
+    `MODIFIER_ALIASES` alone is not enough anywhere a modifier is named OUTSIDE
+    a chord — a `Mod` sublayer's `modifier`, a layer's `hold`. `parse_chord`
+    resolves the `$mod` token for chords, so `$mod+Tab` has always meant Super
+    on `:0` and Alt on the xrdp `:10` session; a bare `"$mod"` looked up in
+    `MODIFIER_ALIASES` resolves to None on BOTH, which is a feature that works
+    on neither display rather than one that works on the wrong one.
+
+    Returns None for anything unresolvable, so callers report the offender
+    themselves rather than guessing a modifier.
+    """
+    if not isinstance(name, str):
+        return None
+    n = name.strip().lower()
+    if n == MOD_TOKEN:
+        n = str(mod).strip().lower()
+    return MODIFIER_ALIASES.get(n)
+
+
 # The panic chord under EVERY spelling that reaches it, as normalised
 # identities. Reserving the literal `$mod` token alone leaves a hole, because
 # this validator is display-agnostic while `$mod` is not: a table that spells
@@ -180,6 +201,20 @@ def exit_layer() -> ExitLayer:
 
 Action = Union[str, Run, EnterLayer, ExitLayer, Callable]
 
+# A bind's action may also be a TUPLE of actions, dispatched in order. One
+# chord is one bind, so a gesture that both DOES something and moves the layer
+# has nowhere else to say so: the switcher's `$mod+Tab` must open the overlay
+# and take the layer, and its `Escape` must cancel the overlay and leave.
+# `one_shot` cannot express either — it is all-or-nothing per layer, and this
+# layer's `Tab` deliberately does NOT exit.
+Actions = Union[Action, tuple]
+
+
+def actions_of(bind) -> list:
+    """The action list of a bind, whether it declared one action or several."""
+    a = bind.action
+    return list(a) if isinstance(a, (list, tuple)) else [a]
+
 
 # --------------------------------------------------------------------------
 # table shape
@@ -188,7 +223,7 @@ Action = Union[str, Run, EnterLayer, ExitLayer, Callable]
 @dataclass(frozen=True)
 class Bind:
     chord: str
-    action: Action
+    action: Actions
     on_release: bool = False
     # Restrict this bind to ONE source device, by name as XI2 reports it
     # (`xinput list`). None — the default — means "any source". Core X11
@@ -238,17 +273,45 @@ class Layer:
     # drop you out of the mode you believe you are in.
     one_shot: bool = False
 
+    # A HOLD LAYER (dotfiles-hwds.40): the modifier whose RELEASE ends the
+    # layer, dispatching `on_hold_release` on the way out. `$mod` is accepted
+    # and resolves per display like a chord's does — see `canon_modifier`.
+    #
+    # This is what a layer needs to be an alt-tab switcher and what i3 could not
+    # express at all: cycle while the modifier stays down, commit when it comes
+    # up. It is NOT a `Mod` sublayer — a sublayer says "while this is held these
+    # OTHER binds apply" and never acts on its own; a hold says "this layer
+    # exists only while this is held", which is a lifetime, not a table.
+    #
+    # The modifier is held BEFORE the layer is entered ($mod+Tab enters it), so
+    # the engine never saw the press and `_held` is empty. Nothing here reads
+    # that belief: the layer ends when a release is OBSERVED, or when the server
+    # is asked directly and answers that the modifier is up
+    # (`LayerEngine.reconcile_hold_layer`).
+    hold: str | None = None
+    on_hold_release: Actions | None = None
+
 
 # --------------------------------------------------------------------------
 # validation
 # --------------------------------------------------------------------------
 
-def _command_problem(bind: Bind, where: str) -> str | None:
-    a = bind.action
+def _action_problem(a, where: str, what: str) -> str | None:
     if isinstance(a, str) and not a.strip():
-        return f"{where}: chord {bind.chord!r} has an empty command"
+        return f"{where}: {what} has an empty command"
     if isinstance(a, Run) and not a.cmd.strip():
-        return f"{where}: chord {bind.chord!r} has an empty run() command"
+        return f"{where}: {what} has an empty run() command"
+    return None
+
+
+def _command_problem(bind: Bind, where: str) -> str | None:
+    what = f"chord {bind.chord!r}"
+    if isinstance(bind.action, (list, tuple)) and not bind.action:
+        return f"{where}: {what} has an empty action tuple"
+    for a in actions_of(bind):
+        p = _action_problem(a, where, what)
+        if p:
+            return p
     return None
 
 
@@ -346,10 +409,45 @@ def _scan(bs: Iterable[Bind], where: str, layers, seen: dict,
         p = _device_problem(b, where)
         if p:
             problems.append(p)
-        if isinstance(b.action, EnterLayer) and b.action.layer not in layers:
+        for a in actions_of(b):
+            if isinstance(a, EnterLayer) and a.layer not in layers:
+                problems.append(
+                    f"{where}: chord {b.chord!r} enters layer "
+                    f"{a.layer!r}, which does not exist")
+    return problems
+
+
+def _hold_problems(name: str, layer, mod: str) -> list[str]:
+    """A hold layer's own declaration, checked under THIS display's `$mod`."""
+    where = f"layer {name!r}"
+    problems: list[str] = []
+    if layer.hold is None:
+        if layer.on_hold_release is not None:
             problems.append(
-                f"{where}: chord {b.chord!r} enters layer "
-                f"{b.action.layer!r}, which does not exist")
+                f"{where}: on_hold_release is declared with no hold modifier, "
+                "so nothing could ever dispatch it")
+        return problems
+    canon = canon_modifier(layer.hold, mod)
+    if canon is None:
+        problems.append(f"{where}: unknown hold modifier {layer.hold!r}")
+        return problems
+    if canon == "Shift":
+        # Not a style rule. xrdp synthesises Shift around every character it
+        # sends on `:10`, so a Shift HOLD is not observable in that session at
+        # all — the same measurement that made the nav layer use Ctrl and not
+        # Shift as its move modifier. A layer whose entire lifetime hangs off a
+        # Shift release would end at an arbitrary moment there.
+        problems.append(
+            f"{where}: hold modifier {layer.hold!r} resolves to Shift; xrdp "
+            "synthesises Shift around every character on :10, so a held Shift "
+            "is not observable there and the layer's lifetime would be random")
+    for a in ([] if layer.on_hold_release is None
+              else (list(layer.on_hold_release)
+                    if isinstance(layer.on_hold_release, (list, tuple))
+                    else [layer.on_hold_release])):
+        p = _action_problem(a, where, "on_hold_release")
+        if p:
+            problems.append(p)
     return problems
 
 
@@ -371,10 +469,11 @@ def validate(binds: Iterable[Bind] = None,
         seen: dict = {}
         problems += _scan(layer.binds, f"layer {name!r}", layers, seen,
                           mod=mod, bare=True)
+        problems += _hold_problems(name, layer, mod)
         for label, mod_ in layer.mods.items():
             where = f"layer {name!r} mod {label!r}"
             try:
-                canon = MODIFIER_ALIASES.get(str(mod_.modifier).strip().lower())
+                canon = canon_modifier(mod_.modifier, mod)
             except Exception:  # pragma: no cover - defensive
                 canon = None
             if canon is None:
@@ -424,6 +523,9 @@ def load(binds: Iterable[Bind] = None,
 
 WS_SWITCH = "~/.local/bin/ws-switch.nu"
 NAV_STEP = "5 px or 5 ppt"
+# The switcher speaks to quickshell over the verbs qs-overlay.sh ALREADY
+# exposes; the cutover adds no quickshell entry point (dotfiles-hwds.40).
+QS_OVERLAY = "~/.dotfiles/quickshell/qs-overlay.sh"
 
 # Direction -> (focus, move, resize) triples, shared by the letter keys and the
 # arrow keys so the two can never drift apart. Resize directions match the
@@ -552,6 +654,56 @@ LAYERS: dict[str, Layer] = {
         ],
         exit_keys=["q", "Escape", "Return"],
         one_shot=True,
+    ),
+
+    # Alt-tab switcher (was quickshell/qs-keymon.py + four `nop` grabs in i3,
+    # dotfiles-hwds.40). The marquee case for the whole daemon: the gesture
+    # carries STATE between a press and a release — cycle on repeated Tab while
+    # $mod stays down, commit when $mod comes up — which i3 cannot express in
+    # any form. The old answer was a second event mechanism running beside i3:
+    # a python-xlib XI2 RAW listener that saw every keystroke on the session
+    # and drove the overlay directly. This layer is that feature with one
+    # mechanism instead of two.
+    #
+    # WHAT ENDS THE LAYER, and why each one exists:
+    #   $mod release -> `on_hold_release`, the primary gesture. Observed by
+    #     asking the server, never by belief — see `hold` on `Layer` and
+    #     `LayerEngine.reconcile_hold_layer`.
+    #   Escape       -> cancels the overlay AND leaves. It cannot be an
+    #     exit_key: exit keys are matched before any bind and dispatch nothing,
+    #     so Escape would drop the layer and leave the overlay on screen.
+    #   Return       -> the same shape, committing instead of cancelling.
+    #   space        -> hands off to the overlay. Search means TYPING, and
+    #     typing means releasing $mod, which would otherwise commit instantly
+    #     and end the search before the first character. Leaving the layer
+    #     hands every subsequent key to the (focused) overlay, which is exactly
+    #     what the pre-cutover behaviour was: keymon's search branch was gated
+    #     to `mode === "switcher"`, so it stopped acting once search began.
+    #   q            -> the exit_keys FLOOR. Dispatches nothing and leaves the
+    #     overlay up, deliberately: it is the escape hatch for a layer that is
+    #     somehow still up with nothing held, and once the layer is gone the
+    #     overlay's own Escape (it is focused and holds no keyboard grab) works
+    #     normally again.
+    #
+    # `Tab` and `w` are both `switcher next` because they always were: keymon
+    # treated keycodes 23 and 25 identically. `ISO_Left_Tab` is what X delivers
+    # for Shift+Tab, and it is the least trustworthy bind in the group on the
+    # xrdp `:10` display, where Shift is synthesised around every character.
+    "switcher": Layer(
+        binds=[
+            Bind("Tab", run(f"{QS_OVERLAY} switcher")),
+            Bind("w", run(f"{QS_OVERLAY} switcher")),
+            Bind("ISO_Left_Tab", run(f"{QS_OVERLAY} switcher-prev")),
+            Bind("space", (run(f"{QS_OVERLAY} switcher-search"),
+                           exit_layer())),
+            Bind("Escape", (run(f"{QS_OVERLAY} switcher-cancel"),
+                            exit_layer())),
+            Bind("Return", (run(f"{QS_OVERLAY} switcher-confirm"),
+                            exit_layer())),
+        ],
+        hold="$mod",
+        on_hold_release=run(f"{QS_OVERLAY} switcher-confirm"),
+        exit_keys=["q"],
     ),
 }
 
@@ -754,4 +906,36 @@ BINDS: list[Bind] = [
     # `$mod+0` is why the workspace group stops at 8: the number row's tenth
     # key has never been a workspace.
     Bind("$mod+0", enter_layer("system")),
+
+    # ---- THE ALT-TAB SWITCHER (dotfiles-hwds.40) --------------------------
+    # Two chords, both entering LAYERS["switcher"] (see there for the whole
+    # gesture). The action is a TUPLE because entry has to do two things at
+    # once: open the overlay and take the layer. Opening it is what the first
+    # press means — `switcher next` on a hidden overlay shows it with the
+    # previous MRU window preselected, which is the classic alt-tab toggle.
+    #
+    # WHAT LEAVES i3 WITH THEM: four `nop` grabs. `native.conf` spelled them as
+    # Mod4+ and Mod1+ PAIRS and `wsl.conf` as the `$mod+` forms, because the
+    # grab existed only to stop the key leaking into the focused window while
+    # the raw listener did the real work — nothing was dispatched, so binding
+    # both modifiers cost nothing.
+    #
+    # THAT PAIR DOES NOT SURVIVE, and it is a real behaviour change on `:0`:
+    # `$mod` resolves to ONE modifier per display, so the native session serves
+    # Super+Tab and Alt+Tab now leaks to the focused window instead of opening
+    # the switcher. A static table cannot say "Mod1 as well, unless Mod1 is
+    # already what $mod means" — on `:10` the second form would be a duplicate
+    # chord and the validator would (correctly) refuse the table. Filed as
+    # dotfiles-y2ju rather than papered over.
+    #
+    # GRAB-OWNERSHIP CLOSURE, checked under both resolutions: after the four
+    # `nop` lines are deleted, nothing in the i3 tree binds Tab or w under any
+    # mask. The layer's own grab set adds `$mod+`-masked and `$mod+Shift+`
+    # masked forms of its keys (see hotkeyd.layer_chords for why) — of those,
+    # only `$mod+Return` and `$mod+q` collide with anything, and both are THIS
+    # table's own binds, shadowed by the layer exactly while it is up.
+    Bind("$mod+Tab", (run(f"{QS_OVERLAY} switcher"),
+                      enter_layer("switcher"))),
+    Bind("$mod+w", (run(f"{QS_OVERLAY} switcher"),
+                    enter_layer("switcher"))),
 ]

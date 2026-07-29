@@ -12,9 +12,10 @@ carries no device identity, so the daemon could not tell one keyboard from
 another — or a real keystroke from an injected one — and injection shares the
 display with real input. `XIDeviceEvent.sourceid` is the only channel that can.
 `python-xlib` 0.33 parses these events itself (`Xlib.ext.xinput` registers
-`DeviceEventData`); the hand-unpacking in `quickshell/qs-keymon.py` is needed
-only for XI2 *raw* events, which have no registered parser, and grabbed-keycode
-delivery is not raw.
+`DeviceEventData`); the hand-unpacking `quickshell/qs-keymon.py` used to do was
+needed only for XI2 *raw* events, which have no registered parser, and
+grabbed-keycode delivery is not raw. (That helper is deleted — dotfiles-hwds.40
+moved the alt-tab switcher it drove into this daemon.)
 
 Layer state and the bar feed live in `layers.py`; the bind table in `binds.py`.
 
@@ -280,8 +281,9 @@ class DeviceRegistry:
     the master keyboard in `deviceid` and the physical slave that actually
     produced the event in `sourceid`, so reading the header would make every
     keyboard on a display report as `Virtual core keyboard` and the whole
-    predicate would be a no-op. (`qs-keymon.py` reads the raw header because it
-    listens for RAW events, which have no grab and no meaningful sourceid split.)
+    predicate would be a no-op. (`qs-keymon.py`, now deleted, read the raw header
+    instead because it listened for RAW events, which have no grab and no
+    meaningful sourceid split.)
 
     The cache is dropped wholesale on an XI2 hierarchy or device change — a
     bluetooth keyboard powering off, a device plugged in after startup — because
@@ -401,6 +403,45 @@ def _grab_log(msg: str):
     print(f"hotkeyd: {msg}", file=sys.stderr, flush=True)
 
 
+# Keysym groups python-xlib does NOT preload. `Xlib.XK` ships latin1 and
+# miscellany only, so every other name it is asked about resolves to 0 — and a
+# keysym of 0 is reported by GrabManager as "not on the current keymap", i.e. a
+# chord that is silently never grabbed on a display where the key exists.
+#
+# MEASURED, not assumed: `XK.string_to_keysym("ISO_Left_Tab")` is 0 out of the
+# box and 0xfe20 after `load_keysym_group("xkb")`. ISO_Left_Tab is what X
+# delivers for Shift+Tab and is the switcher's cycle-backwards key
+# (dotfiles-hwds.40), so without this the bind loads, validates, reports no
+# problem in --check, and is dead on every real display. `xf86` is loaded for
+# the same reason — binds._KEYSYMS already lists the media keys, and they would
+# fail the same way the day something binds one.
+_KEYSYM_GROUPS = ("xkb", "xf86")
+_keysym_groups_loaded = False
+
+
+def keysym_by_name(name: str) -> int:
+    """Resolve a keysym NAME to its number, with the non-default groups loaded.
+
+    Loaded lazily and once: `Xlib.XK` is imported inside functions throughout
+    this module so `--check` works with no display, and `load_keysym_group`
+    mutates XK's module-level table, so doing it at import would drag Xlib into
+    every headless path for nothing.
+    """
+    global _keysym_groups_loaded
+    from Xlib import XK                                  # noqa: PLC0415
+    if not _keysym_groups_loaded:
+        for group in _KEYSYM_GROUPS:
+            try:
+                XK.load_keysym_group(group)
+            except Exception:                            # noqa: BLE001
+                # A python-xlib without that group is not a reason to refuse to
+                # start: every keysym it DOES know still resolves, and the ones
+                # it does not are reported per chord as they always were.
+                pass
+        _keysym_groups_loaded = True
+    return XK.string_to_keysym(name)
+
+
 class GrabManager:
     """Owns the mapping chord -> (keycode, mask) and the grabs registered for it.
 
@@ -479,10 +520,20 @@ class GrabManager:
         """
         self.problems = []
         resolved: dict[str, tuple[int, int]] = {}
+        # TWO CHORDS CAN RESOLVE TO ONE GRAB, and asking X for the same passive
+        # grab twice is a BadAccess against ourselves — reported as "already
+        # grabbed by another client?", which would be a lie about our own
+        # duplicate. `Tab` and `ISO_Left_Tab` are the shipped instance: they are
+        # the same physical key at two shift levels, so bare forms of both are
+        # (23, 0). First wanted chord wins; the loser is not a problem, it is
+        # the same grab under another name.
+        taken: dict[tuple[int, int], str] = {}
         for chord in self._wanted:
             r = self._resolve(chord)
-            if r is not None:
-                resolved[chord] = r
+            if r is None or r in taken:
+                continue
+            taken[r] = chord
+            resolved[chord] = r
 
         changed = False
         for chord, (code, mask) in list(self._active.items()):
@@ -516,7 +567,25 @@ class GrabManager:
     def chords(self):
         return list(self._active)
 
-    def keysym_for(self, keycode: int) -> str | None:
+    def keysym_for(self, keycode: int, state: int | None = None) -> str | None:
+        """What keysym an incoming event's keycode is, per THIS daemon's grabs.
+
+        `state` disambiguates two keysyms that share a keycode. `ISO_Left_Tab`
+        IS the shifted `Tab` key — one keycode, two names, and X delivers the
+        name for the level that was actually used. A code-only lookup answers
+        with whichever chord happens to sit first in the grab table, so the
+        switcher's cycle-BACKWARDS bind would resolve to `Tab` and cycle
+        forwards instead: a wrong direction, silently, with nothing logged.
+
+        The mask match is tried first and the code-only answer is the fallback,
+        so every chord that does not share a keycode with another resolves
+        exactly as it did before.
+        """
+        if state is not None:
+            want = state & ~LOCK_BITS
+            for chord, (code, mask) in self._active.items():
+                if code == keycode and mask == want:
+                    return default_binds.parse_chord(chord, self.mod)[1]
         for chord, (code, _) in self._active.items():
             if code == keycode:
                 return default_binds.parse_chord(chord, self.mod)[1]
@@ -847,8 +916,17 @@ def global_chords(table) -> list[str]:
 # layer_chords for which of the two routes each gets.
 EXIT_MODIFIERS = ("Shift", "Ctrl", "Mod1")
 
+# Keys whose SHIFTED level is a DIFFERENT keysym on a standard keymap. X names
+# an event after the level actually used, so when a layer binds both forms the
+# base key's Shift variant must not also be grabbed: `$mod+Shift+Tab` and
+# `$mod+Shift+ISO_Left_Tab` are one and the same (keycode, mask), and which of
+# the two names the daemon then gives an incoming event would come down to the
+# order they happen to sit in the grab table.
+SHIFTED_KEYSYM = {"Tab": "ISO_Left_Tab"}
 
-def layer_chords(table, name: str) -> list[str]:
+
+def layer_chords(table, name: str,
+                 mod: str = default_binds.DEFAULT_MOD) -> list[str]:
     """The extra chords a layer needs while it is ACTIVE: its bare keys, its exit
     keys (bare and modifier-held), its modifier-prefixed sublayer chords, and
     the modifier keys themselves (so held-modifier state is observable at all).
@@ -879,17 +957,46 @@ def layer_chords(table, name: str) -> list[str]:
     Deliberately NOT generalised to the layer's other binds: grabbing `Shift+h`
     would take a chord the daemon has no meaning for from every application for
     as long as the layer is up.
+
+    A HOLD LAYER (`Layer.hold`, dotfiles-hwds.40) is the one shape where the
+    bare grabs above are not enough, and where the modifier-keysym route is not
+    available at all. Its modifier is already DOWN when the layer is entered
+    (`$mod+Tab` is what enters it), and a passive grab installed while its key
+    is already held never activates — so grabbing `Super_L` here would deliver
+    neither the press nor the release, and the active grab the sublayer case
+    relies on never exists. Two consequences, both handled:
+
+    - every one of the layer's keys is grabbed with the hold modifier in the
+      mask as well as bare, because that is the mask they will actually arrive
+      with. Bare stays too: it is what makes the exit-key floor work in the one
+      state that needs a floor, when the layer is up with nothing held.
+    - the hold modifier's own keysyms are NOT grabbed. There is nothing to
+      catch, and the release is observed by asking the server instead
+      (`LayerEngine.reconcile_hold_layer`).
+
+    The Shift variants are added for the layer's BINDS and not its exit keys:
+    `$mod+Shift+<key>` is how xrdp delivers a shifted character on `:10` (it
+    synthesises Shift around every one), and `Shift+Tab` arrives as a different
+    keysym entirely — but `$mod+Shift+q` is i3's `kill`, and grabbing an exit
+    key's Shift variant would take it and log a BadAccess on every layer entry.
     """
     layer = table.LAYERS[name]
-    out = [b.chord for b in layer.binds] + list(layer.exit_keys)
+    keys = [b.chord for b in layer.binds]
+    out = keys + list(layer.exit_keys)
     routed = set()
-    for mod in layer.mods.values():
-        canon = default_binds.MODIFIER_ALIASES.get(
-            str(mod.modifier).lower(), mod.modifier)
-        out += [f"{canon}+{b.chord}" for b in mod.binds]
+    for mod_ in layer.mods.values():
+        canon = default_binds.canon_modifier(mod_.modifier, mod) \
+            or mod_.modifier
+        out += [f"{canon}+{b.chord}" for b in mod_.binds]
         out += MOD_KEYSYMS_BY_NAME.get(canon, [])
         if canon != "Shift":            # see the docstring: never routed
             routed.add(canon)
+    hold = default_binds.canon_modifier(getattr(layer, "hold", None), mod)
+    if hold is not None:
+        out += [f"{hold}+{c}" for c in keys + list(layer.exit_keys)]
+        out += [f"{hold}+Shift+{c}" for c in keys
+                if SHIFTED_KEYSYM.get(c) not in keys]
+        routed.add(hold)
     for canon in EXIT_MODIFIERS:
         if canon in routed:
             continue
@@ -897,20 +1004,27 @@ def layer_chords(table, name: str) -> list[str]:
     return list(dict.fromkeys(out))
 
 
-def chords_for(table, layer: str | None = None) -> list[str]:
-    """The grab set for the CURRENT state. Re-synced on every layer transition."""
+def chords_for(table, layer: str | None = None,
+               mod: str = default_binds.DEFAULT_MOD) -> list[str]:
+    """The grab set for the CURRENT state. Re-synced on every layer transition.
+
+    `mod` is what `$mod` resolves to on this display. The GrabManager resolves
+    the token again when it parses each chord, so it matters here only for the
+    modifier names a layer computes for itself — a `Mod` sublayer's and a hold
+    layer's — which are looked up by canonical name, not parsed.
+    """
     out = global_chords(table)
     if layer and layer != L.DEFAULT_LAYER and layer in table.LAYERS:
-        out = out + layer_chords(table, layer)
+        out = out + layer_chords(table, layer, mod)
     return list(dict.fromkeys(out))
 
 
-def all_chords(table) -> list[str]:
+def all_chords(table, mod: str = default_binds.DEFAULT_MOD) -> list[str]:
     """Every chord any state could grab — used for reporting by --check, not as
     a runtime grab set (see chords_for)."""
     out = global_chords(table)
     for name in table.LAYERS:
-        out += layer_chords(table, name)
+        out += layer_chords(table, name, mod)
     return list(dict.fromkeys(out))
 
 
@@ -983,8 +1097,7 @@ class XAdapter:
         self.xi_version = require_xi2(d)
 
     def keysym_to_keycode(self, name):
-        from Xlib import XK                              # noqa: PLC0415
-        ks = XK.string_to_keysym(name)
+        ks = keysym_by_name(name)
         return self.d.keysym_to_keycode(ks) if ks else 0
 
     def grab_key(self, code, mask):
@@ -1059,7 +1172,7 @@ class Daemon:
         self.engine = L.LayerEngine(table.BINDS, table.LAYERS,
                                     publisher=publisher, mod=self.mod)
         self.wire_i3_mode()
-        self.grabs.sync_binds(chords_for(table))
+        self.grabs.sync_binds(chords_for(table, mod=self.mod))
 
     @property
     def ignore_devices(self) -> frozenset:
@@ -1117,7 +1230,8 @@ class Daemon:
 
     def resync_grabs(self):
         self.grabs.sync_binds(chords_for(self.table,
-                                         self.engine.state["layer"]))
+                                         self.engine.state["layer"],
+                                         mod=self.mod))
 
     # -- belief vs. the server (dotfiles-hwds.27) --------------------------
     def reconcile_mods(self) -> bool:
@@ -1134,19 +1248,38 @@ class Daemon:
         the server currently has down, sampled outside any event, so it is not
         the pre-event mask the engine deliberately distrusts. The LAYER half is
         not reconcilable — X has no notion of `nav` — and `reconcile_holds` does
-        not touch it.
+        not touch it. A HOLD layer is the exception, and only because X does
+        have an opinion there: see below.
+
+        A HOLD LAYER (dotfiles-hwds.40) is the second reason to ask, and the
+        only one where the answer can DISPATCH. Its modifier goes down before
+        the layer is entered, so the engine never saw the press and
+        `self.engine.held` is empty — the short-circuit above would skip the
+        query in exactly the state that needs it most. While such a layer is up
+        the query is the ONLY channel that can observe the modifier coming up:
+        a passive grab installed on a key that is already held never activates,
+        so its release is delivered to the focused window and never here.
 
         A failed query is swallowed. adr0014: the idle path must not turn a
         transient X answer into a dead daemon that was otherwise serving the
         keyboard fine.
         """
-        if not self.engine.held:
+        hold = self.engine.hold_modifier
+        if not self.engine.held and hold is None:
             return False
         try:
             mask = int(self.d.screen().root.query_pointer().mask)
         except Exception:                               # noqa: BLE001
             return False
-        return self.engine.reconcile_holds(mods_from_mask(mask))
+        down = mods_from_mask(mask)
+        changed = self.engine.reconcile_holds(down)
+        before = self.engine.state["layer"]
+        for action in self.engine.reconcile_hold_layer(down):
+            _dispatch(self.i3, action)
+        if self.engine.state["layer"] != before:
+            self.resync_grabs()
+            changed = True
+        return changed
 
     def pump(self, ev) -> list:
         """Handle one X event. Returns the actions dispatched."""
@@ -1180,7 +1313,8 @@ class Daemon:
         if k.repeat:
             return []
 
-        name = self.grabs.keysym_for(k.detail) or _keysym_name(self.d, k.detail)
+        name = (self.grabs.keysym_for(k.detail, k.state)
+                or _keysym_name(self.d, k.detail))
         if name is None:
             return []
 
@@ -1206,6 +1340,23 @@ class Daemon:
     def close(self):
         self.pub.close()
         self.i3.close()
+
+
+# How long the idle branch may sleep. The default is the cost of noticing a
+# phantom held modifier (dotfiles-hwds.27) and nothing is waiting on it.
+IDLE_TIMEOUT_S = 0.25
+# ...but while a HOLD LAYER is up, that sleep IS the commit latency: the
+# modifier's release cannot be delivered as an event (its key was already down
+# when the layer's grabs went in, so no passive grab ever activated), so the
+# server poll is the only thing that will ever end the switcher. 20 ms is below
+# the threshold at which a released alt-tab feels delayed, and it costs ~50
+# query_pointer round-trips per second for the second or two a switcher is
+# open — never while the daemon is merely running.
+HOLD_TIMEOUT_S = 0.02
+
+
+def idle_timeout(dae) -> float:
+    return HOLD_TIMEOUT_S if dae.engine.hold_modifier else IDLE_TIMEOUT_S
 
 
 def run_daemon(table, display_name: str | None) -> int:
@@ -1280,7 +1431,7 @@ def run_daemon(table, display_name: str | None) -> int:
                     i3fd = dae.i3_fileno()
                     if i3fd is not None:
                         waits.append(i3fd)
-                    select.select(waits, [], [], 0.25)
+                    select.select(waits, [], [], idle_timeout(dae))
                     continue
                 ev = d.next_event()
                 dae.pump(ev)

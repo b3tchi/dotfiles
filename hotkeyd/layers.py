@@ -207,10 +207,76 @@ class LayerEngine:
         if layer is None:
             return None
         for label, mod in layer.mods.items():
-            canon = B.MODIFIER_ALIASES.get(str(mod.modifier).lower())
-            if canon in self._held:
+            canon = B.canon_modifier(mod.modifier, self.mod)
+            if canon is not None and canon in self._held:
                 return label
         return None
+
+    # -- hold layers (dotfiles-hwds.40) ------------------------------------
+    def _hold_canon(self, layer) -> str | None:
+        hold = getattr(layer, "hold", None)
+        return None if hold is None else B.canon_modifier(hold, self.mod)
+
+    @property
+    def hold_modifier(self) -> str | None:
+        """The modifier whose release ends the CURRENT layer, or None.
+
+        Exposed for the daemon: a hold layer is the one state where the engine
+        needs the SERVER's answer about a modifier it never saw pressed, so the
+        idle path has to know to ask (and to ask often — see `run_daemon`).
+        """
+        layer = self.layers.get(self._layer)
+        return None if layer is None else self._hold_canon(layer)
+
+    def _hold_release_actions(self, canon: str) -> list:
+        """What to do when `canon` comes up while a layer holds on it.
+
+        Deliberately reads NOTHING about whether the engine believed the
+        modifier was down. The modifier is pressed before the layer is entered
+        — `$mod+Tab` enters it — so `_held` is empty at that point and
+        `reconcile_holds` is retract-only by design (see its docstring). A
+        commit gated on belief would therefore never fire.
+        """
+        layer = self.layers.get(self._layer)
+        if layer is None or self._hold_canon(layer) != canon:
+            return []
+        action = getattr(layer, "on_hold_release", None)
+        out = [] if action is None else list(
+            action if isinstance(action, (list, tuple)) else [action])
+        return out + [B.ExitLayer()]
+
+    def reconcile_hold_layer(self, mods_down, note=None) -> list:
+        """End a hold layer the SERVER says nobody is holding. Returns actions.
+
+        THE RELEASE-BEFORE-GRAB RACE (hazard 3) is why this exists. A fast
+        `$mod+Tab` tap can release `$mod` before the layer's grabs are
+        installed; that release is then delivered to whoever had the focus and
+        never to this daemon, so no key event will ever end the layer. The layer
+        would stay up with nothing held — grabbing its bare keys away from every
+        application, with an overlay open that nothing will close.
+
+        `mods_down` is what the server reports right now, sampled OUTSIDE any
+        event, which is the same soundness argument `reconcile_holds` makes: the
+        `state` mask ON an event is pre-event in X, a standalone query has no
+        event to be "pre".
+
+        Distinct from `reconcile_holds`, which is retract-only and deliberately
+        never touches the layer, because "X has no opinion about `nav`". X does
+        have an opinion about THIS layer: a hold layer's lifetime is exactly the
+        modifier's, so the server is authoritative over it rather than silent.
+        """
+        layer = self.layers.get(self._layer)
+        if layer is None:
+            return []
+        canon = self._hold_canon(layer)
+        if canon is None or canon in mods_down:
+            return []
+        # No triggering event, and none is invented: a callable action is passed
+        # None, and the transition log says `trigger=none` — the server's answer
+        # is not a keystroke and `format_transition` must not imply it was.
+        out = self._run(self._hold_release_actions(canon), None)
+        self._publish(note=note or f"hold-released:{canon}")
+        return out
 
     # -- belief vs. the server (dotfiles-hwds.27) --------------------------
     @property
@@ -329,10 +395,16 @@ class LayerEngine:
         if canon is not None:
             if ev.kind == "press":
                 self._held[canon] = now
-            else:
-                self._held.pop(canon, None)
+                self._publish(ev)
+                return []               # modifiers never act on their own
+            self._held.pop(canon, None)
+            # ...with exactly one exception, and it is a LIFETIME rather than a
+            # bind: a hold layer ends when its modifier comes up, and says so
+            # with an action (the switcher commits its selection). Every other
+            # modifier release still returns [].
+            out = self._run(self._hold_release_actions(canon), ev)
             self._publish(ev)
-            return []                   # modifiers never act on their own
+            return out
 
         if ev.kind == "release":
             was_down = self._down.pop(ev.key, None) is not None
@@ -422,7 +494,7 @@ class LayerEngine:
         want = (tuple(sorted(ev.mods)), ev.key, on_release)
         for b in self._global.get(want, ()):
             if device_matches(b, ev):
-                return [b.action]
+                return B.actions_of(b)
         return []
 
     def _match_in_layer(self, layer, ev: Event, on_release: bool) -> list:
@@ -452,9 +524,14 @@ class LayerEngine:
                 # dispatches, and the single `_publish` after it sees the final
                 # state, so the "one line per change" contract costs one line
                 # for an event that both acts and leaves.
+                #
+                # A bind may also carry its own `exit_layer()` as part of a
+                # tuple action, which is how a layer that is NOT one-shot lets
+                # SOME of its binds end it — the switcher's Escape cancels and
+                # leaves, while its Tab cycles and stays.
                 if layer.one_shot:
-                    return [b.action, B.ExitLayer()]
-                return [b.action]
+                    return B.actions_of(b) + [B.ExitLayer()]
+                return B.actions_of(b)
         return []
 
     def _run(self, actions, ev) -> list:

@@ -1,8 +1,11 @@
 # Replaces: rofi (launcher), dunst (notifications), polybar/waybar (bar)
 # Requires: i3 or sway (WM)
 # Extras (X11/i3 only):
-#   python-xlib      — overlay/qs-keymon.py (XI2 raw-event listener for the
-#                      alt-tab switcher)
+#   python-xlib      — qs-focus-border.py / qs-focus-dim.py (X11 geometry +
+#                      shape queries). It was also qs-keymon.py's dependency
+#                      until hotkeyd took the alt-tab switcher and that helper
+#                      was deleted (dotfiles-hwds.40); the dep stays because
+#                      the focus helpers still need it.
 #   xorg-xinput      — dvorak keyboard lookup at i3 startup
 #   python-cairo,
 #   python-gobject,

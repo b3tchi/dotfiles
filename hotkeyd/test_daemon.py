@@ -1222,8 +1222,16 @@ class FakeXServer(FakeDisplay):
         # workspace-group cutover (dotfiles-hwds.34), keycodes 10-17 as on a
         # standard PC layout; the layout group's letters and `minus` with
         # dotfiles-hwds.36; `Print` with the screenshot group
-        # (dotfiles-hwds.39), keycode 107 as on a standard PC layout.
+        # (dotfiles-hwds.39), keycode 107 as on a standard PC layout; `Tab`,
+        # `w`, `ISO_Left_Tab` and `space` with the alt-tab switcher
+        # (dotfiles-hwds.40) — 23/25/23/65, the codes qs-keymon.py's INTERESTING
+        # set carried before the cutover deleted it. ISO_Left_Tab deliberately
+        # shares Tab's keycode: it IS the shifted Tab key, which is why the
+        # layer's `$mod+Shift+ISO_Left_Tab` grab is a different MASK on the same
+        # code rather than a second key.
         super().__init__(keymap=keymap or {"o": 32, "h": 43, "q": 24,
+                                           "Tab": 23, "ISO_Left_Tab": 23,
+                                           "w": 25, "space": 65,
                                            "1": 10, "2": 11, "3": 12,
                                            "4": 13, "5": 14, "6": 15,
                                            "7": 16, "8": 17, "0": 19,
@@ -2352,3 +2360,266 @@ def test_the_probe_leaves_no_alarm_armed_behind_it(monkeypatch):
     H.probe_display(":99")
     assert sig.getitimer(sig.ITIMER_REAL) == (0.0, 0.0)
     assert sig.getsignal(sig.SIGALRM) in (sig.SIG_DFL, sig.SIG_IGN)
+
+
+# --------------------------------------------------------------------------
+# the alt-tab switcher: a HOLD layer (dotfiles-hwds.40)
+# --------------------------------------------------------------------------
+# The switcher is the first layer whose modifier is already DOWN when the layer
+# is entered ($mod+Tab enters it). Everything below follows from that one fact,
+# and every one of these assertions is about a way the feature can be shipped
+# green and dead on a real display.
+
+SW = "switcher"
+
+
+def test_the_switcher_layer_grabs_its_keys_with_the_hold_modifier_masked():
+    """A passive grab on a bare key has mask 0, and every key pressed inside
+    this layer arrives with $mod in the mask, because $mod is what holds the
+    layer open. Bare-only grabs would deliver nothing after the entry chord."""
+    chords = H.chords_for(B, SW)
+    for k in ("Tab", "w", "space", "Escape", "Return"):
+        assert f"Mod4+{k}" in chords, \
+            f"{k} undeliverable while $mod is held — the layer would be inert"
+
+
+def test_the_switcher_layer_still_grabs_its_keys_bare():
+    """The floor. If the layer is somehow up with nothing held — the
+    release-before-grab race — the bare exit key is what ends it."""
+    chords = H.chords_for(B, SW)
+    assert "q" in chords, "the exit-key floor is undeliverable with nothing held"
+
+
+def test_the_switcher_layer_does_not_grab_the_hold_modifiers_own_keysyms():
+    """A passive grab installed on a key that is ALREADY HELD never activates,
+    so grabbing Super_L here would deliver neither the press nor the release —
+    it would only add a grab that does nothing. The release is observed by
+    asking the server instead (LayerEngine.reconcile_hold_layer)."""
+    chords = H.chords_for(B, SW)
+    for keysym in ("Super_L", "Super_R", "Alt_L", "Alt_R"):
+        assert keysym not in chords, \
+            f"{keysym} grabbed for a hold layer — it can never fire"
+
+
+def test_the_switcher_layer_never_grabs_the_shift_variant_of_its_exit_key():
+    """`$mod+Shift+q` is i3's `kill` (i3/config.common:47). Grabbing it would
+    log a BadAccess on every single switcher entry."""
+    for mod in ("Mod4", "Mod1"):
+        chords = H.chords_for(B, SW, mod=mod)
+        assert f"{mod}+Shift+q" not in chords
+        assert "$mod+Shift+q" not in chords
+
+
+def test_the_switcher_grabs_shift_tab_as_iso_left_tab_and_not_as_tab():
+    """Both spellings are the same (keycode, mask) — one physical key at two
+    shift levels — so grabbing both would make the daemon's answer to 'what key
+    was that' depend on grab-table order, and cycle-backwards would silently
+    cycle forwards."""
+    chords = H.chords_for(B, SW)
+    assert "Mod4+Shift+ISO_Left_Tab" in chords, "Shift+Tab cannot reach us"
+    assert "Mod4+Shift+Tab" not in chords, \
+        "the same grab under the forward-cycling name would shadow it"
+
+
+def test_the_hold_modifier_is_masked_per_display():
+    """One table, two displays: the layer's own grabs are computed from the
+    canonical modifier name, which `$mod` only resolves to per display."""
+    native = set(H.chords_for(B, SW, mod="Mod4"))
+    rdp = set(H.chords_for(B, SW, mod="Mod1"))
+    assert "Mod4+Escape" in native and "Mod1+Escape" not in native
+    assert "Mod1+Escape" in rdp and "Mod4+Escape" not in rdp
+
+
+def test_iso_left_tab_is_resolvable_at_all():
+    """python-xlib preloads latin1 + miscellany ONLY. Before the xkb group is
+    loaded `string_to_keysym("ISO_Left_Tab")` is 0, which GrabManager reports as
+    'not on the current keymap' — a bind that validates, reports no problem in
+    --check, and is dead on every display."""
+    assert H.keysym_by_name("ISO_Left_Tab") != 0
+    assert H.keysym_by_name("Tab") != 0
+
+
+def test_two_chords_on_one_keycode_and_mask_are_grabbed_once():
+    """Asking X for the same passive grab twice is a BadAccess against
+    ourselves, reported as 'already grabbed by another client?' — a lie about
+    our own duplicate. Tab and ISO_Left_Tab are the shipped instance."""
+    d = FakeDisplay(keymap={"Tab": 23, "ISO_Left_Tab": 23})
+    g = H.GrabManager(d, mod="Mod4")
+    g.sync_binds(["Tab", "ISO_Left_Tab"])
+    assert g.problems == [], g.problems
+    assert d.grabs.count((23, 0)) == 1, d.grabs
+
+
+def test_a_shifted_keycode_resolves_to_the_shifted_keysym():
+    """The reverse lookup, which is what names an incoming event. Code-only, it
+    answers 'Tab' for both and prev is dead."""
+    d = FakeDisplay(keymap={"Tab": 23, "ISO_Left_Tab": 23})
+    g = H.GrabManager(d, mod="Mod4")
+    g.sync_binds(["$mod+Tab", "$mod+Shift+ISO_Left_Tab"])
+    assert g.keysym_for(23, H.MOD4) == "Tab"
+    assert g.keysym_for(23, H.MOD4 | H.SHIFT) == "ISO_Left_Tab"
+
+
+def test_an_unmasked_lookup_still_answers_as_it_always_did():
+    """The fallback: a caller with no state, and a keycode nothing matches on
+    mask, gets the code-only answer rather than None."""
+    d = FakeDisplay(keymap={"o": 32})
+    g = H.GrabManager(d, mod="Mod4")
+    g.sync_binds(["$mod+o"])
+    assert g.keysym_for(32) == "o"
+    assert g.keysym_for(32, 0) == "o"
+
+
+# -- the daemon end of the hold release -------------------------------------
+
+def _switcher_daemon(fake):
+    dae, xd, pub = arbitration_daemon(fake)
+    dae.pump(key_press(23, H.MOD4))                 # $mod+Tab
+    return dae, xd, pub
+
+
+def test_the_entry_chord_opens_the_overlay_and_takes_the_layer(fake_i3):
+    dae, _, _ = _switcher_daemon(fake_i3)
+    assert dae.engine.state["layer"] == SW
+    dae.close()
+
+
+def test_reconcile_asks_the_server_even_with_no_held_belief(fake_i3):
+    """$mod goes down BEFORE the layer is entered, so the engine never saw the
+    press and `held` is empty. The short-circuit that skips the round-trip when
+    nothing is believed held would skip it in exactly this state."""
+    dae, xd, _ = _switcher_daemon(fake_i3)
+    assert dae.engine.held == frozenset(), dae.engine.held
+    xd.screen().root.pointer_mask = 0               # server: nothing is down
+    assert dae.reconcile_mods() is True
+    assert dae.engine.state["layer"] == "default"
+    dae.close()
+
+
+def test_the_server_still_holding_the_modifier_keeps_the_layer(fake_i3):
+    dae, xd, _ = _switcher_daemon(fake_i3)
+    xd.screen().root.pointer_mask = H.MOD4
+    assert dae.reconcile_mods() is False
+    assert dae.engine.state["layer"] == SW
+    dae.close()
+
+
+def test_the_reconciled_commit_is_dispatched_and_the_grabs_are_dropped(fake_i3):
+    """Ending the layer has to do BOTH: run the commit, and hand the layer's
+    keys back to applications. A commit with the grabs still installed leaves
+    Tab/Escape/Return eaten session-wide."""
+    dae, xd, _ = _switcher_daemon(fake_i3)
+    assert "Tab" in dae.grabs.chords
+    xd.screen().root.pointer_mask = 0
+    dae.reconcile_mods()
+    assert "Tab" not in dae.grabs.chords, "layer grabs outlived the layer"
+    dae.close()
+
+
+def test_the_idle_timeout_tightens_while_a_hold_layer_is_up(fake_i3):
+    """The select timeout IS the commit latency for a hold layer: no key event
+    can end it, so the poll is the only thing that will. 250 ms of lag on every
+    alt-tab release is what this exists to avoid."""
+    dae, _, _ = arbitration_daemon(fake_i3)
+    assert H.idle_timeout(dae) == H.IDLE_TIMEOUT_S
+    dae.pump(key_press(23, H.MOD4))
+    assert H.idle_timeout(dae) == H.HOLD_TIMEOUT_S
+    assert H.HOLD_TIMEOUT_S < H.IDLE_TIMEOUT_S
+    dae.close()
+
+
+def test_a_layer_without_a_hold_does_not_tighten_the_timeout(fake_i3):
+    """The negative control: nav is stood in for as long as the user likes, and
+    polling it at 50 Hz would be a round-trip per 20 ms for nothing."""
+    dae, _, _ = arbitration_daemon(fake_i3)
+    dae.pump(key_press(32, H.MOD4))                 # $mod+o -> nav
+    assert dae.engine.state["layer"] == "nav"
+    assert H.idle_timeout(dae) == H.IDLE_TIMEOUT_S
+    dae.close()
+
+
+def _key_release(detail, state=0, **kw):
+    return xi_event(detail, state, kind="release", **kw)
+
+
+def _cmds(actions):
+    return [getattr(a, "cmd", a) for a in actions]
+
+
+def test_tab_inside_the_layer_cycles_forwards(fake_i3):
+    """The second press of the gesture, arriving with $mod in the mask because
+    $mod is what is holding the layer open."""
+    dae, _, _ = _switcher_daemon(fake_i3)
+    dae.pump(_key_release(23, H.MOD4))
+    out = _cmds(dae.pump(key_press(23, H.MOD4)))
+    assert any(c.endswith("qs-overlay.sh switcher") for c in out), out
+    dae.close()
+
+
+def test_shift_tab_inside_the_layer_cycles_backwards(fake_i3):
+    """The end-to-end version of the keysym question: X delivers keycode 23
+    with ShiftMask, and everything downstream has to call that ISO_Left_Tab.
+    Resolve it as `Tab` anywhere along the way and the switcher cycles the
+    WRONG WAY with nothing logged."""
+    dae, _, _ = _switcher_daemon(fake_i3)
+    dae.pump(_key_release(23, H.MOD4))
+    out = _cmds(dae.pump(key_press(23, H.MOD4 | H.SHIFT)))
+    assert any(c.endswith("switcher-prev") for c in out), out
+    dae.close()
+
+
+def test_escape_inside_the_layer_cancels_and_leaves(fake_i3):
+    """Escape cannot be an exit_key: those are matched before any bind and
+    dispatch nothing, so the layer would end with the overlay still up."""
+    dae, _, _ = _switcher_daemon(fake_i3)
+    out = _cmds(dae.pump(key_press(9, H.MOD4)))
+    assert any(c.endswith("switcher-cancel") for c in out), out
+    assert dae.engine.state["layer"] == "default"
+    dae.close()
+
+
+def test_space_inside_the_layer_hands_off_to_the_overlay(fake_i3):
+    """Search means typing, and typing means releasing $mod — which would
+    commit instantly and end the search before its first character. Leaving the
+    layer hands every following key to the focused overlay, which is what the
+    pre-cutover behaviour did by gating keymon's search branch to `switcher`."""
+    dae, _, _ = _switcher_daemon(fake_i3)
+    out = _cmds(dae.pump(key_press(65, H.MOD4)))
+    assert any(c.endswith("switcher-search") for c in out), out
+    assert dae.engine.state["layer"] == "default", \
+        "still holding the layer: the next $mod release would commit over search"
+    dae.close()
+
+
+def test_the_exit_key_floor_dispatches_nothing(fake_i3):
+    """`q` is the escape hatch, not a gesture: it drops the layer and leaves the
+    overlay alone, which is what makes the overlay's own Escape work again."""
+    dae, _, _ = _switcher_daemon(fake_i3)
+    assert _cmds(dae.pump(key_press(24, H.MOD4))) == []
+    assert dae.engine.state["layer"] == "default"
+    dae.close()
+
+
+def test_the_hold_modifiers_release_cannot_arrive_as_an_event(fake_i3):
+    """WHY THE POLL EXISTS, pinned at daemon level rather than argued in a
+    comment. The engine commits on an OBSERVED release (test_layers.py) — this
+    daemon simply never observes one, for two independent reasons:
+
+    - no grab. A passive grab installed on a key that is already held never
+      activates, so grabbing Super_L would deliver neither edge; the layer
+      therefore does not ask for it.
+    - no name. Even fed the event directly, `_keysym_name` resolves a keycode
+      through `XK.keysym_to_string`, which maps printable latin-1 and returns
+      None for every modifier keysym — so the daemon could not say WHICH
+      modifier came up.
+
+    A future change that grabs the modifier anyway will find this test, not a
+    silently inert commit path.
+    """
+    dae, _, _ = _switcher_daemon(fake_i3)
+    for keysym in ("Super_L", "Alt_L"):
+        assert keysym not in dae.grabs.chords
+    assert H._keysym_name(FakeXServer(), 133) is None
+    assert _cmds(dae.pump(_key_release(133, H.MOD4))) == []
+    assert dae.engine.state["layer"] == SW, "only the server poll ends it"
+    dae.close()

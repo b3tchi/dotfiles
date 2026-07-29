@@ -221,64 +221,27 @@ Scope {
         running: false
     }
 
-    // ── Global key monitor via XI2 raw events ──
-    // Tracks Super/Alt/Tab press+release from the X server directly, bypassing
-    // Qt focus — necessary because when i3 fires the switcher the overlay window
-    // doesn't exist yet, so its Keys.onReleased never sees the Super release.
-    // Uses a Python helper with python-xlib that calls XISelectEvents on the
-    // root window for XI_RawKeyPress/Release; does NOT create a client window
-    // (the earlier `xinput test-xi2` approach did, leaving a 1115x1013 empty
-    // frame in the i3 tree).
-
-    property bool modHeld: false
-    property bool shiftHeld: false
-
-    Process {
-        id: keyMonitor
-        // X11 only (python-xlib XI2 events). QS_NO_KEYMON=1 suppresses the
-        // respawn entirely on headless test displays, where the python helper
-        // would churn against a keyboard-less Xvfb.
-        running: !root.isSway && Quickshell.env("QS_NO_KEYMON") !== "1"
-        command: ["sh", "-c", "exec python3 -u $HOME/.dotfiles/quickshell/qs-keymon.py"]
-        stdout: SplitParser {
-            onRead: data => {
-                var parts = data.trim().split(" ")
-                if (parts.length !== 2) return
-                var action = parts[0]  // "press" or "release"
-                var code = parseInt(parts[1])
-
-                // 64=Alt_L, 108=Alt_R, 133=Super_L, 134=Super_R
-                var isMod = (code === 64 || code === 108 || code === 133 || code === 134)
-                // 23=Tab, 25=W — both trigger the switcher
-                var isSwitcherKey = (code === 23 || code === 25)
-                // 50=Shift_L, 62=Shift_R
-                var isShift = (code === 50 || code === 62)
-
-                // 65=Space
-                var isSpace = (code === 65)
-
-                if (isShift) {
-                    root.shiftHeld = (action === "press")
-                } else if (isMod && action === "press") {
-                    root.modHeld = true
-                } else if (isMod && action === "release") {
-                    root.modHeld = false
-                    if (root.mode === "switcher" && overlay.visible)
-                        root.switcherCommit()
-                } else if (isSpace && action === "press" && root.modHeld && root.mode === "switcher") {
-                    root.switcherSearchMode()
-                } else if (isSwitcherKey && action === "press" && root.modHeld) {
-                    if (root.mode === "switcher" || root.mode === "switcher-search") {
-                        if (root.shiftHeld) root.switcherPrev()
-                        else root.switcherNext()
-                    } else {
-                        root.switcherShow()
-                    }
-                }
-            }
-        }
-        onExited: running = true  // restart if it dies
-    }
+    // ── The X11 switcher gesture lives in hotkeyd ──
+    // What used to be here: a `keyMonitor` Process wrapping qs-keymon.py, a
+    // python-xlib helper that selected XI2 RAW key events on the root window
+    // and streamed every Super/Alt/Tab/W/Shift/Space edge back over stdout,
+    // plus the modHeld/shiftHeld flags it drove. It existed because i3 fires a
+    // bindsym on PRESS only and cannot report modifier state, so nothing in i3
+    // could see the $mod RELEASE that commits the switcher.
+    //
+    // hotkeyd expresses that gesture directly now, as a layer whose lifetime is
+    // the held modifier's, and drives this overlay over the same IPC verbs
+    // qs-overlay.sh already exposed (switcher / -prev / -search / -confirm /
+    // -cancel). One event mechanism instead of two — a raw listener that saw
+    // EVERY keystroke on the session is gone with it (sp020, dotfiles-hwds.40).
+    //
+    // Also deleted with it, and deliberately not carried over: the helper's
+    // mouse btnpress/btnrelease lines. No consumer ever read them — the handler
+    // here dropped them through every branch.
+    //
+    // The SWAY path below (Keys.onReleased in switcherHost) is untouched: under
+    // Wayland the compositor delivers the release to the focused surface, and
+    // hotkeyd is X11-only.
 
     function switcherShow() {
         _scanBuffer = ""
@@ -320,8 +283,9 @@ Scope {
         hide()
     }
 
-    // Commit the current selection. All commit paths land here — mod release
-    // (X11 keyMonitor / sway Keys.onReleased) and IPC confirm. Routes through
+    // Commit the current selection. All commit paths land here — the sway mod
+    // release (Keys.onReleased) and IPC confirm, which on X11 is what hotkeyd
+    // sends when the held $mod comes up. Routes through
     // Combo.confirmCurrent() so the SELECTED filtered row's con id is focused;
     // the zero-window floor (empty filtered) is a no-op focus, just a hide.
     function switcherCommit() {
@@ -592,9 +556,11 @@ Scope {
             anchors.fill: parent
             visible: root.mode === "switcher" || root.mode === "switcher-search"
 
-            // Space while the modifier is held drops into search (X11 goes via
-            // keyMonitor; this covers the sway/Qt-focused path). Guarded to plain
-            // mode so Space types normally once searching.
+            // Space while the modifier is held drops into search. On X11 the
+            // hotkeyd switcher layer grabs $mod+space and sends the `search`
+            // IPC verb; this covers the sway/Qt-focused path, and on X11 it
+            // also catches a bare Space once the layer has handed off. Guarded
+            // to plain mode so Space types normally once searching.
             Keys.onPressed: event => {
                 if (event.key === Qt.Key_Space && root.mode === "switcher") {
                     root.switcherSearchMode()
@@ -602,8 +568,8 @@ Scope {
                 }
             }
             // Sway path: releasing the modifier (Alt, the sway $mod) while the
-            // switcher is up commits the selection. On X11 the keyMonitor (XI2
-            // raw events) handles this globally; under Wayland the compositor
+            // switcher is up commits the selection. On X11 hotkeyd owns that
+            // edge and sends `confirm` over IPC; under Wayland the compositor
             // delivers the release to the focused surface, so it bubbles here.
             Keys.onReleased: event => {
                 if (!root.isSway) return

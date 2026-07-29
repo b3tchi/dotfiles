@@ -783,3 +783,114 @@ def test_the_shipped_table_ignores_no_device():
     is unmeasured (sp020 Task 15). So the list ships empty, on purpose."""
     assert hasattr(B, "IGNORE_DEVICES")
     assert list(B.IGNORE_DEVICES) == []
+
+
+# --------------------------------------------------------------------------
+# tuple actions and hold layers (dotfiles-hwds.40)
+# --------------------------------------------------------------------------
+
+def test_a_tuple_action_is_validated_part_by_part():
+    """An empty command hidden in the second slot of a tuple is exactly the
+    thing that would otherwise reach a live display before anyone noticed."""
+    problems = B.validate([B.Bind("Mod4+o", ("focus left", "   "))], {})
+    assert any("empty command" in p and "Mod4+o" in p for p in problems), \
+        problems
+
+
+def test_an_empty_tuple_action_is_refused():
+    problems = B.validate([B.Bind("Mod4+o", ())], {})
+    assert any("empty action tuple" in p for p in problems), problems
+
+
+def test_every_enter_layer_in_a_tuple_is_checked():
+    problems = B.validate([B.Bind("Mod4+o", ("nop", B.enter_layer("ghost")))],
+                          {})
+    assert any("does not exist" in p for p in problems), problems
+
+
+def _hold_layer(hold="$mod", action="commit"):
+    return {"sw": B.Layer(binds=[B.Bind("Tab", "next")], hold=hold,
+                          on_hold_release=action, exit_keys=["q"])}
+
+
+@pytest.mark.parametrize("mod", ["Mod4", "Mod1"])
+def test_a_dollar_mod_hold_is_valid_under_both_resolutions(mod):
+    """`$mod` is Mod4 on :0 and Mod1 on the xrdp :10 session. Resolved through
+    MODIFIER_ALIASES alone it is None on BOTH — a feature dead everywhere."""
+    assert B.validate([], _hold_layer(), mod=mod) == []
+
+
+def test_an_unknown_hold_modifier_is_refused_naming_it():
+    problems = B.validate([], _hold_layer(hold="Hyper"))
+    assert any("unknown hold modifier" in p and "Hyper" in p
+               for p in problems), problems
+
+
+def test_a_shift_hold_is_refused():
+    """Not style. xrdp synthesises Shift around every character it sends on
+    :10, so a held Shift is not observable there and a layer whose lifetime is
+    a Shift release would end at an arbitrary moment."""
+    for spelling in ("Shift", "shift"):
+        problems = B.validate([], _hold_layer(hold=spelling))
+        assert any("Shift" in p and "xrdp" in p for p in problems), problems
+
+
+def test_an_on_hold_release_with_no_hold_is_refused():
+    layers = {"sw": B.Layer(binds=[B.Bind("Tab", "next")],
+                            on_hold_release="commit", exit_keys=["q"])}
+    assert any("no hold modifier" in p for p in B.validate([], layers))
+
+
+def test_an_empty_hold_release_command_is_refused():
+    assert any("on_hold_release" in p and "empty" in p
+               for p in B.validate([], _hold_layer(action=B.run("  "))))
+
+
+def test_a_hold_may_be_declared_with_no_action():
+    """A layer that only ENDS on the release is a legal shape — the action is
+    what the switcher happens to need, not what a hold means."""
+    assert B.validate([], _hold_layer(action=None)) == []
+
+
+def test_a_mod_sublayer_may_also_name_dollar_mod():
+    """The same resolution hole, in the place it was first noticed."""
+    layers = {"l": B.Layer(binds=[B.Bind("h", "focus left")],
+                           mods={"move": B.Mod("$mod",
+                                               (B.Bind("h", "move left"),))},
+                           exit_keys=["q"])}
+    assert B.validate([], layers) == []
+
+
+# -- the shipped switcher group --------------------------------------------
+
+@pytest.mark.parametrize("mod", ["Mod4", "Mod1"])
+def test_the_shipped_table_loads_with_the_switcher_group(mod):
+    assert B.validate(mod=mod) == []
+
+
+def test_the_switcher_layer_holds_on_dollar_mod():
+    assert B.LAYERS["switcher"].hold == "$mod"
+    assert B.LAYERS["switcher"].on_hold_release is not None
+
+
+def test_both_switcher_entry_chords_open_the_overlay_and_take_the_layer():
+    """Entry is a TUPLE because the first press means two things: show the
+    switcher, and start holding the gesture open. Either half alone is a broken
+    feature — no overlay, or an overlay nothing will ever close."""
+    entries = {b.chord: B.actions_of(b) for b in B.BINDS
+               if b.chord in ("$mod+Tab", "$mod+w")}
+    assert set(entries) == {"$mod+Tab", "$mod+w"}, entries
+    for chord, acts in entries.items():
+        assert any(isinstance(a, B.Run) and a.cmd.endswith("switcher")
+                   for a in acts), (chord, acts)
+        assert B.EnterLayer("switcher") in acts, (chord, acts)
+
+
+def test_the_switcher_layer_never_leaves_without_telling_the_overlay():
+    """Every key that ENDS the layer either dispatches something to quickshell
+    or is the bare exit-key floor. A silent exit with the overlay still up is
+    the hung-switcher failure this group must not ship."""
+    for b in B.LAYERS["switcher"].binds:
+        acts = B.actions_of(b)
+        if B.ExitLayer() in acts:
+            assert any(isinstance(a, B.Run) for a in acts), b

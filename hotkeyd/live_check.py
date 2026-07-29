@@ -645,6 +645,144 @@ def main() -> int:
     dae.grabs.sync_binds([])
     dae.close()
 
+    # -- 5f: the alt-tab HOLD layer, on a real server (dotfiles-hwds.40) -------
+    # The switcher is the first layer whose modifier is ALREADY DOWN when the
+    # layer is entered, and everything hard about it is a property of the real
+    # X server: whether the layer's grab set can actually be obtained, whether
+    # ISO_Left_Tab resolves at all, and what a passive grab does about a key
+    # that was already held when it was installed. A fake keymap answers all
+    # three by fiat.
+
+    # (a) the SHIPPED layer's grab set, obtained for real. No daemon and no
+    # dispatch — this is only asking the server whether these chords are ours.
+    sw = H.GrabManager(Adapter(), mod="Mod4")
+    want = H.chords_for(BT, "switcher", mod="Mod4")
+    sw.sync_binds(want)
+    check(not sw.problems,
+          "the shipped switcher layer's whole grab set is obtainable on a real "
+          "server — zero refusals, zero unresolvable keysyms", str(sw.problems))
+    for c in ("Mod4+Escape", "Mod4+Shift+ISO_Left_Tab", "q"):
+        check(c in sw.chords, f"{c} was actually GRABBED, not merely requested")
+    for c in ("Super_L", "Super_R", "Mod4+Shift+q"):
+        check(c not in sw.chords,
+              f"{c} is deliberately absent from a hold layer's grab set")
+
+    # (b) ISO_Left_Tab exists, is the same physical key as Tab, and the daemon
+    # tells the two apart by MASK. python-xlib does not preload the xkb keysym
+    # group, so before H.keysym_by_name this resolved to 0 and the chord was
+    # silently never grabbed.
+    tab_code = code_for(d, "Tab")
+    check(Adapter().keysym_to_keycode("ISO_Left_Tab") == tab_code != 0,
+          "ISO_Left_Tab resolves, and to the SAME keycode as Tab",
+          f"Tab={tab_code} ISO_Left_Tab="
+          f"{Adapter().keysym_to_keycode('ISO_Left_Tab')}")
+    check(sw.keysym_for(tab_code, H.MOD4) == "Tab",
+          "$mod+Tab is named Tab — cycle forwards")
+    check(sw.keysym_for(tab_code, H.MOD4 | H.SHIFT) == "ISO_Left_Tab",
+          "$mod+Shift+Tab is named ISO_Left_Tab — cycle BACKWARDS. Resolve it "
+          "by keycode alone and the switcher cycles the wrong way in silence")
+    sw.sync_binds([])
+
+    # (c) the gesture itself, through the REAL Daemon. The bind table is a
+    # stand-in with `nop` actions rather than the shipped one for one reason:
+    # the shipped switcher dispatches `run()` of qs-overlay.sh, and a live check
+    # must not spawn the user's shell scripts to prove the engine wiring. The
+    # SHAPE is the shipped shape — same hold, same keys, same tuple actions.
+    class RecordingI3:
+        def __init__(self):
+            self.cmds = []
+
+        def command(self, cmd):
+            self.cmds.append(cmd)
+            return True
+
+        def close(self):
+            pass
+
+    swmod = types.ModuleType("switcher_live")
+    swmod.BINDS = [BT.Bind("$mod+Tab", ("nop sw-open", BT.enter_layer("sw")))]
+    swmod.LAYERS = {"sw": BT.Layer(
+        binds=[BT.Bind("Tab", "nop sw-next"),
+               BT.Bind("ISO_Left_Tab", "nop sw-prev"),
+               BT.Bind("Escape", ("nop sw-cancel", BT.exit_layer()))],
+        hold="$mod", on_hold_release="nop sw-commit", exit_keys=["q"])}
+    swmod.IGNORE_DEVICES = []
+    rec = RecordingI3()
+    swd = H.Daemon(swmod, d, pub, i3=rec)
+
+    def sw_pump(settle=0.15):
+        time.sleep(settle)
+        out = []
+        while d.pending_events():
+            out += swd.pump(d.next_event())
+        return out
+
+    def sw_tap(keysym, mods=()):
+        code = code_for(d, keysym)
+        for m in mods:
+            xtest.fake_input(d, X.KeyPress, code_for(d, m))
+        xtest.fake_input(d, X.KeyPress, code)
+        xtest.fake_input(d, X.KeyRelease, code)
+        for m in reversed(mods):
+            xtest.fake_input(d, X.KeyRelease, code_for(d, m))
+        d.sync()
+        return sw_pump()
+
+    super_l = code_for(d, "Super_L")
+    xtest.fake_input(d, X.KeyPress, super_l)     # $mod goes down FIRST
+    d.sync()
+    sw_pump()
+    check(swd.engine.held == frozenset(),
+          "the daemon never saw the $mod press — Super_L is ungrabbed in the "
+          "default layer, which is why commit cannot be gated on belief",
+          str(swd.engine.held))
+
+    check(sw_tap("Tab") == ["nop sw-open"], "$mod+Tab opens the switcher")
+    check(swd.engine.state["layer"] == "sw", "and takes the layer",
+          str(swd.engine.state))
+    check("Super_L" not in swd.grabs.chords,
+          "entering the layer did NOT grab the held modifier's keysym — a "
+          "passive grab on a key that is already down never activates")
+    check(not swd.grabs.problems, "and the layer's grabs cost zero BadAccess",
+          str(swd.grabs.problems))
+
+    check(sw_tap("Tab") == ["nop sw-next"],
+          "a second Tab, still with $mod down, cycles forwards")
+    check(sw_tap("Tab", mods=["Shift_L"]) == ["nop sw-prev"],
+          "and Shift+Tab cycles BACKWARDS on a real server — the end-to-end "
+          "version of the keysym check above")
+
+    check(swd.reconcile_mods() is False,
+          "while $mod is genuinely down the server confirms it and nothing ends",
+          str(swd.engine.state))
+    check(swd.engine.state["layer"] == "sw", "the layer is still up")
+
+    # THE RELEASE-BEFORE-GRAB RACE, reproduced exactly: $mod comes up and the
+    # daemon is given every chance to see it. It cannot — there is no grab that
+    # could deliver it — so without the server poll the layer would stand here
+    # forever with the switcher open and its keys eaten session-wide.
+    xtest.fake_input(d, X.KeyRelease, super_l)
+    d.sync()
+    check(sw_pump() == [],
+          "the $mod release delivers NO event to the daemon at all")
+    check(swd.engine.state["layer"] == "sw",
+          "so on events alone the layer would be stuck up with nothing held",
+          str(swd.engine.state))
+    rec.cmds.clear()
+    check(swd.reconcile_mods() is True,
+          "asking the server ends it", str(swd.engine.state))
+    check(swd.engine.state["layer"] == "default", "the layer is down",
+          str(swd.engine.state))
+    check(rec.cmds == ["nop sw-commit"],
+          "and the commit was DISPATCHED, not merely implied by the exit",
+          str(rec.cmds))
+    check("Tab" not in swd.grabs.chords,
+          "the layer's bare keys went back to applications with it",
+          str(sorted(swd.grabs.chords)))
+
+    swd.grabs.sync_binds([])
+    swd.close()
+
     # -- 5b: the SAME daemon on a Mod1 display — the :10 shape ----------------
     # `$mod` is not a constant. The xrdp session entry merges `i3wm.mod: Mod1`
     # before exec'ing i3, because the RDP client captures the Win key, so :10
