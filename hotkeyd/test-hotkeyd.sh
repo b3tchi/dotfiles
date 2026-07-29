@@ -851,6 +851,155 @@ EOF
     fi
 fi
 
+
+# ============================================================================
+# stage 15: a daemon missing grabs reports DEGRADED, not "running"
+# ============================================================================
+#
+# dotfiles-hwds.42, split out of the hwds.41 outage: the :10 daemon had lost
+# the whole directional group and `hotkeyd.sh status` still printed
+# "running on :10 (pid …, socket …)". Liveness was true, serving was not, and
+# nothing in the tool could tell them apart — the loop turned, the display
+# answered, the heartbeat was fresh, and half the binds were dead.
+#
+# Driven with a REAL daemon whose table asks for a chord the keymap cannot
+# resolve, which is the same shape as a grab lost to an xrdp keymap reset: the
+# chord stays WANTED and simply is not active.
+echo "stage 15: missing grabs report DEGRADED"
+if ! command -v Xvfb >/dev/null; then
+    printf '  \033[33mSKIP\033[0m Xvfb missing\n'
+else
+    D15=""
+    _b=$(( 40 + (($$ + 15) % 20) ))
+    for _o in 0 1 2 3 4 5 6 7 8 9; do
+        _n=$(( _b + _o ))
+        [ -e "/tmp/.X${_n}-lock" ] || { D15=":$_n"; break; }
+    done
+    T15="$TMPD/t15"; mkdir -p "$T15"
+    if [ -z "$D15" ]; then
+        bad "no free X display for the degraded stage"
+    else
+        Xvfb "$D15" -screen 0 640x480x24 >/dev/null 2>&1 &
+        X15P=$!
+        sleep 1.5
+
+        # CONTROL FIRST: a table that resolves completely must NOT be degraded,
+        # or the stage cannot tell "detects damage" from "always complains".
+        cat > "$T15/whole.py" <<EOF
+import sys; sys.path.insert(0, "$HERE")
+from binds import Bind
+BINDS = [Bind('\$mod+F11', 'nop whole')]
+LAYERS = {}
+EOF
+        DISPLAY=$D15 XDG_RUNTIME_DIR="$T15" HOTKEYD_I3SOCK="$T15/no-i3.sock" \
+            python3 "$HERE/hotkeyd.py" --display "$D15" \
+            --binds "$T15/whole.py" >"$T15/whole.log" 2>&1 &
+        W15P=$!
+        w15=""
+        for _t in 1 2 3 4 5 6 7 8 9 10; do
+            sleep 0.5
+            w15="$(pgrep -f "hotkeyd.py --display $D15" | head -1)"
+            [ -n "$w15" ] && break
+        done
+        if [ -z "$w15" ]; then
+            bad "the control daemon did not start: $(tail -3 "$T15/whole.log")"
+        else
+            out="$(XDG_RUNTIME_DIR="$T15" timeout 25 \
+                   sh "$HERE/hotkeyd.sh" status "$D15" 2>&1)"
+            rc=$?
+            if [ "$rc" -eq 0 ]; then
+                ok "control: a fully-grabbed table reports running"
+            else
+                bad "control failed (rc=$rc) — the stage proves nothing: $out"
+            fi
+            kill "$w15" 2>/dev/null
+            sleep 1
+        fi
+        kill "$W15P" 2>/dev/null
+
+        # THE DAMAGED CASE, produced the way it actually happens. A typo in the
+        # table cannot be used: `--check` refuses an unknown keysym before the
+        # daemon starts, which is correct and means the config-error path never
+        # reaches this state. The real cause (dotfiles-hwds.41) is a KEYMAP that
+        # changes under a running daemon — routine on :10, where xrdp
+        # reprograms it on every reconnect — leaving a chord wanted, resolvable
+        # yesterday, and gone today.
+        #
+        # Reproduced by deleting F11's keysyms from the live server, which is a
+        # real ChangeKeyboardMapping and makes the server emit a real
+        # MappingNotify to every client, the daemon included.
+        cat > "$T15/unmap.py" <<'UNMAPEOF'
+import sys
+from Xlib import X, XK, display
+d = display.Display(sys.argv[1])
+code = d.keysym_to_keycode(XK.string_to_keysym("F11"))
+if not code:
+    print("no keycode for F11", flush=True)
+    raise SystemExit(1)
+per = d.display.info.max_keycode - d.display.info.min_keycode
+d.change_keyboard_mapping(code, [[X.NoSymbol] * 4])
+d.sync()
+print("unmapped F11 (keycode %d)" % code, flush=True)
+UNMAPEOF
+        rm -f "$T15/hotkeyd-${D15#:}.lock" "$T15/hotkeyd-${D15#:}.grabs"
+        DISPLAY=$D15 XDG_RUNTIME_DIR="$T15" HOTKEYD_I3SOCK="$T15/no-i3.sock" \
+            python3 "$HERE/hotkeyd.py" --display "$D15" \
+            --binds "$T15/whole.py" >"$T15/holed.log" 2>&1 &
+        H15P=$!
+        h15=""
+        for _t in 1 2 3 4 5 6 7 8 9 10; do
+            sleep 0.5
+            h15="$(pgrep -f "hotkeyd.py --display $D15" | head -1)"
+            [ -n "$h15" ] && break
+        done
+        if [ -z "$h15" ]; then
+            bad "the daemon did not start for the damaged case: $(tail -3 "$T15/holed.log")"
+        else
+            if [ -f "$T15/hotkeyd-${D15#:}.grabs" ]; then
+                ok "it published a grab report while healthy"
+            else
+                bad "no grab report was written — status has nothing to read"
+            fi
+
+            python3 "$T15/unmap.py" "$D15" >"$T15/unmap.log" 2>&1
+            if grep -q "unmapped F11" "$T15/unmap.log"; then
+                ok "the live keymap lost F11 under the running daemon"
+            else
+                bad "could not unmap F11: $(cat "$T15/unmap.log")"
+            fi
+            # The daemon re-resolves on MappingNotify and republishes; give the
+            # event a moment to land rather than racing it.
+            _deg=""
+            for _t in 1 2 3 4 5 6 7 8 9 10; do
+                sleep 0.5
+                grep -q 'nosuchkeysym\|F11' "$T15/hotkeyd-${D15#:}.grabs" 2>/dev/null \
+                    && { _deg=1; break; }
+            done
+
+            out="$(XDG_RUNTIME_DIR="$T15" timeout 25 \
+                   sh "$HERE/hotkeyd.sh" status "$D15" 2>&1)"
+            rc=$?
+            if [ "$rc" -eq 9 ]; then
+                ok "status exits 9 (DEGRADED) rather than 0"
+            else
+                bad "status returned $rc for a daemon that lost a grab: $out"
+            fi
+            case "$out" in
+                *DEGRADED*) ok "status says DEGRADED" ;;
+                *) bad "status did not say DEGRADED: $out" ;;
+            esac
+            case "$out" in
+                *F11*)
+                    ok "and NAMES the missing chord (a count means diffing the table by hand)" ;;
+                *) bad "status named no missing chord: $out" ;;
+            esac
+            kill "$h15" 2>/dev/null
+        fi
+        kill "$H15P" 2>/dev/null
+        kill "$X15P" 2>/dev/null
+    fi
+fi
+
 echo
 printf 'hotkeyd: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

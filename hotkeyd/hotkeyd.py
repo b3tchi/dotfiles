@@ -157,6 +157,12 @@ HEALTH_KEYBOARD_GRABBED = 8
 GRAB_PROBE_ATTEMPTS = 3
 GRAB_PROBE_DELAY_S = 0.3
 
+#: The daemon is up and serving SOME of its table — chords the table asks for
+#: are not grabbed (dotfiles-hwds.42). Its own code because the cure differs
+#: from every other failure here: the daemon is fine, the grab set is not, and
+#: `hotkeyd.sh restart` is the fix rather than an investigation.
+HEALTH_DEGRADED = 9
+
 #: How long the display probe waits for the server to answer. A HUNG X server —
 #: as opposed to a dead one — never closes the connection, so an unguarded
 #: `Display()` blocks in the handshake forever. `hotkeyd.sh start` runs from
@@ -175,6 +181,42 @@ def lock_path(display: str | None = None) -> Path:
     display = display or os.environ.get("DISPLAY", ":0")
     tag = display.lstrip(":").split(".")[0]
     return _runtime_dir() / f"hotkeyd-{tag}.lock"
+
+
+def grab_report_path(display: str | None = None) -> Path:
+    """Where the daemon publishes its grab report (dotfiles-hwds.42).
+
+    A sidecar rather than the lock file: the lock's MTIME is the heartbeat, so
+    writing the report there would beat the heart on every re-grab and make a
+    wedged daemon that still receives MappingNotify look alive.
+    """
+    display = display or os.environ.get("DISPLAY", ":0")
+    tag = display.lstrip(":").split(".")[0]
+    return _runtime_dir() / f"hotkeyd-{tag}.grabs"
+
+
+def write_grab_report(display: str | None, report: dict) -> None:
+    """Publish the report, best effort.
+
+    Never raises: a runtime dir that went read-only is not a reason to stop
+    serving the keyboard (adr0014), and a missing report is read as "this
+    daemon does not publish one" rather than as damage — see `health`.
+    """
+    try:
+        p = grab_report_path(display)
+        tmp = p.with_suffix(".grabs.tmp")
+        tmp.write_text(json.dumps(report))
+        tmp.replace(p)                      # atomic: no half-written report
+    except OSError:
+        pass
+
+
+def read_grab_report(display: str | None = None) -> dict | None:
+    """The daemon's last published report, or None when there is not one."""
+    try:
+        return json.loads(grab_report_path(display).read_text())
+    except (OSError, ValueError):
+        return None
 
 
 def x_resource_mod(xdisp=None) -> str:
@@ -464,8 +506,12 @@ class GrabManager:
     `sync` — the real X display in production, a recorder in tests.
     """
 
-    def __init__(self, display, mod: str = None, log=None):
+    def __init__(self, display, mod: str = None, log=None, on_report=None):
         self.d = display
+        # Called with grab_report() whenever the grab set is (re)computed, so
+        # `status` can answer SERVING rather than merely ALIVE
+        # (dotfiles-hwds.42). None in tests that do not care.
+        self.on_report = on_report
         self.mod = mod or default_binds.DEFAULT_MOD
         self.problems: list[str] = []
         self._active: dict[str, tuple[int, int]] = {}   # chord -> (code, mask)
@@ -522,6 +568,7 @@ class GrabManager:
         self._wanted = list(dict.fromkeys(chords))
         self._apply()
         self.d.sync()
+        self._publish()
 
     def _apply(self) -> bool:
         """Re-resolve THE WANTED SET against the live keymap and move only the
@@ -578,9 +625,48 @@ class GrabManager:
             self.log(msg)
         self._reported = current
 
+    def _publish(self):
+        if self.on_report is not None:
+            self.on_report(self.grab_report())
+
     @property
     def chords(self):
         return list(self._active)
+
+    def grab_report(self) -> dict:
+        """What the table ASKED for against what X actually granted.
+
+        The daemon has always known this — `_wanted` beside `_active` — and
+        never said it, which is dotfiles-hwds.42: during the hwds.41 outage the
+        :10 daemon had lost the whole directional group while `status` printed
+        "running (pid …, socket …)". Liveness was true, serving was not, and
+        the tool could not tell them apart.
+
+        `missing` is NAMED, not counted. A count says something is wrong and
+        leaves whoever is mid-outage diffing the table by hand, which is the
+        expensive half.
+
+        Chords that resolve to the SAME grab are not missing: `Tab` and
+        `ISO_Left_Tab` are one physical key at two shift levels, so the second
+        never gets its own entry in `_active` and never should (see `_apply`).
+        Those are excluded by comparing against what resolution produced rather
+        than against the raw wanted list.
+        """
+        taken: dict[tuple[int, int], str] = {}
+        missing: list[str] = []
+        for chord in self._wanted:
+            r = self._resolve(chord)
+            if r is None:
+                missing.append(chord)
+                continue
+            if r in taken:
+                continue                    # same grab under another name
+            taken[r] = chord
+            if chord not in self._active:
+                missing.append(chord)
+        return {"wanted": len(taken) + len(missing),
+                "active": len(self._active),
+                "missing": missing}
 
     def keysym_for(self, keycode: int, state: int | None = None) -> str | None:
         """What keysym an incoming event's keycode is, per THIS daemon's grabs.
@@ -622,6 +708,11 @@ class GrabManager:
         changed = self._apply()
         if changed:
             self.d.sync()
+        # PUBLISH UNCONDITIONALLY, not only when `changed`. A re-grab that
+        # changes nothing still confirms the current state, and the report is
+        # what `status` reads — a stale one after a keymap settled would name
+        # chords that have since come back (dotfiles-hwds.42).
+        self._publish()
         return changed
 
 
@@ -1181,7 +1272,9 @@ class Daemon:
             lambda: i3_socket_path(display=self.display, xdisp=d))
         self.mod = x_resource_mod(d)
         self.adapter = XAdapter(d, d.screen().root)
-        self.grabs = GrabManager(self.adapter, mod=self.mod)
+        self.grabs = GrabManager(
+            self.adapter, mod=self.mod,
+            on_report=lambda rep: write_grab_report(self.display, rep))
         self.devices = DeviceRegistry(d)
         self.adapter.watch_devices()
         self.engine = L.LayerEngine(table.BINDS, table.LAYERS,
@@ -1659,9 +1752,30 @@ def health(display: str | None = None,
                 f"`xfce4-screensaver-command -q`), or a modal that took the "
                 f"keyboard and never gave it back. X names no holder, so this "
                 f"is the whole answer the protocol can give")
+    # 4. THE GRAB SET ITSELF (dotfiles-hwds.42). Everything above can be true
+    #    while half the table is not grabbed: that is the hwds.41 outage, where
+    #    the directional group was gone and `status` said "running".
+    #
+    #    LAST on purpose. A stale heartbeat, an unreachable display and a
+    #    foreign grab each EXPLAIN missing grabs, and reporting the consequence
+    #    over the cause sends the operator to the wrong problem.
+    #
+    #    ABSENCE IS NOT DAMAGE. A daemon started before this feature publishes
+    #    no report, and condemning it would repeat dotfiles-hwds.29's mistake of
+    #    reading absence as staleness.
+    report = read_grab_report(disp)
+    if report and report.get("missing"):
+        missing = report["missing"]
+        shown = ", ".join(missing[:6]) + ("…" if len(missing) > 6 else "")
+        return (HEALTH_DEGRADED,
+                f"hotkeyd: {disp} — DEGRADED: {report.get('active')} of "
+                f"{report.get('wanted')} chords grabbed; missing: {shown}. The "
+                f"daemon is alive and these binds are dead — `hotkeyd.sh "
+                f"restart {disp}` re-resolves them against the current keymap")
     return (HEALTH_OK,
             f"hotkeyd: {disp} — serving (heartbeat {age:.1f}s ago, display "
-            f"reachable, keyboard not grabbed elsewhere)")
+            f"reachable, keyboard not grabbed elsewhere"
+            + (f", {report.get('active')} chords grabbed)" if report else ")"))
 
 
 def main_argv(argv=None) -> int:

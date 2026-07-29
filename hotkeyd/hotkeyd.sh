@@ -240,6 +240,17 @@ run hotkeyd-panic.sh resume" 4
                 printf '%s (pid %s)\n' "$hout" "$pid"
                 exit 8
             fi
+            # DEGRADED (exit 9, dotfiles-hwds.42): alive, serving part of the
+            # table, and some chords simply not grabbed — the hwds.41 outage,
+            # where `status` said "running" while the whole directional group
+            # was dead. Its own code because it is the one failure here that a
+            # RESTART actually fixes: re-resolving the wanted set against the
+            # current keymap is exactly what start does. The message already
+            # carries that advice, so no suffix is added.
+            if [ "$hrc" -eq 9 ]; then
+                printf '%s (pid %s)\n' "$hout" "$pid"
+                exit 9
+            fi
             if [ "$hrc" -ne 0 ]; then
                 # Name the pid as well as the reason: the cure is `start`, and
                 # whoever is about to run it wants to know which process is

@@ -2396,6 +2396,111 @@ def test_the_grab_probe_condemns_a_persistent_grab():
     assert "grab" in reason.lower(), reason
 
 
+# --- the grab set vs the table (dotfiles-hwds.42) ---------------------------
+#
+# THE OUTAGE THIS ANSWERS. During dotfiles-hwds.41 the :10 daemon had lost the
+# whole directional group and `status` still printed "running on :10 (pid …,
+# socket …)". Liveness was true and serving was not, and nothing in the tool
+# could tell them apart: the loop turned, the display answered, the heartbeat
+# was fresh. The user's only signal was binds quietly not working.
+#
+# The daemon already knows the answer — GrabManager keeps `_wanted` (what the
+# table asks for) beside `_active` (what X actually granted). It just never
+# told anyone.
+
+def test_the_grab_report_names_what_is_missing(tmp_path):
+    """A chord that cannot be grabbed must appear BY NAME. A count alone says
+    "something is wrong" and leaves the operator diffing the table by hand,
+    which during an outage is the whole cost."""
+    rec = FakeDisplay(keymap={"a": 38, "b": 56})
+    g = H.GrabManager(rec)
+    g.sync_binds(["Mod4+a", "Mod4+b", "Mod4+nosuchkey"])
+    report = g.grab_report()
+    assert report["wanted"] == 3
+    assert report["active"] == 2
+    assert report["missing"] == ["Mod4+nosuchkey"], report
+
+
+def test_the_grab_report_is_clean_when_everything_resolved(tmp_path):
+    rec = FakeDisplay(keymap={"a": 38})
+    g = H.GrabManager(rec)
+    g.sync_binds(["Mod4+a"])
+    report = g.grab_report()
+    assert report["missing"] == []
+    assert report["wanted"] == report["active"] == 1
+
+
+def test_the_grab_report_survives_a_chord_lost_after_the_fact(tmp_path):
+    """The hwds.41 shape exactly: the grabs were taken at startup and LOST
+    later (a keymap change, a refused grab). A report computed once at startup
+    would still say everything is fine."""
+    rec = FakeDisplay(keymap={"a": 38, "b": 56})
+    g = H.GrabManager(rec)
+    g.sync_binds(["Mod4+a", "Mod4+b"])
+    assert g.grab_report()["missing"] == []
+    rec.keymap.pop("b")                      # the key went away under us
+    g.on_mapping_notify()
+    assert g.grab_report()["missing"] == ["Mod4+b"], g.grab_report()
+
+
+def test_health_says_degraded_when_grabs_are_missing(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    H.lock_path(":77").write_text("12345\n")
+    H.write_grab_report(":77", {"wanted": 9, "active": 7,
+                                "missing": ["$mod+h", "$mod+l"]})
+    rc, msg = H.health(":77", probe_display=lambda _n: None,
+                       probe_grab=lambda _n: None)
+    assert rc == H.HEALTH_DEGRADED, msg
+    assert rc not in (H.HEALTH_OK, H.HEALTH_NOT_SERVING)
+    assert "7" in msg and "9" in msg, msg
+    assert "$mod+h" in msg and "$mod+l" in msg, \
+        "name the missing chords — a count sends the operator to diff the table"
+
+
+def test_health_is_ok_when_the_grab_report_is_complete(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    H.lock_path(":77").write_text("12345\n")
+    H.write_grab_report(":77", {"wanted": 9, "active": 9, "missing": []})
+    rc, _ = H.health(":77", probe_display=lambda _n: None,
+                     probe_grab=lambda _n: None)
+    assert rc == H.HEALTH_OK
+
+
+def test_health_tolerates_a_daemon_that_never_wrote_a_report(
+        tmp_path, monkeypatch):
+    """An older daemon still running across an upgrade has no report file. That
+    is not evidence of missing grabs, and reporting DEGRADED on absence would
+    condemn every daemon that predates this feature — the dotfiles-hwds.29
+    mistake (absence read as staleness) in a new place."""
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    H.lock_path(":77").write_text("12345\n")
+    rc, _ = H.health(":77", probe_display=lambda _n: None,
+                     probe_grab=lambda _n: None)
+    assert rc == H.HEALTH_OK
+
+
+def test_a_degraded_report_outranks_nothing_but_is_outranked_by_the_rest(
+        tmp_path, monkeypatch):
+    """Ordering: a stale heartbeat, an unreachable display and a foreign grab
+    all explain missing grabs, so each must be reported INSTEAD of degradation
+    — the operator needs the cause, not the consequence."""
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    stale = H.lock_path(":77")
+    stale.write_text("12345\n")
+    H.write_grab_report(":77", {"wanted": 9, "active": 0, "missing": ["$mod+h"]})
+    old = time.time() - (H.HEARTBEAT_STALE_S * 4)
+    os.utime(stale, (old, old))
+    rc, _ = H.health(":77", probe_display=lambda _n: None,
+                     probe_grab=lambda _n: None)
+    assert rc == H.HEALTH_NOT_SERVING
+
+    H.lock_path(":78").write_text("12345\n")
+    H.write_grab_report(":78", {"wanted": 9, "active": 0, "missing": ["$mod+h"]})
+    rc, _ = H.health(":78", probe_display=lambda _n: None,
+                     probe_grab=lambda _n: "AlreadyGrabbed")
+    assert rc == H.HEALTH_KEYBOARD_GRABBED
+
+
 def test_the_grab_probe_is_silent_when_it_cannot_ask():
     """A probe that cannot open the display must not invent a grab: the display
     probe above already owns that diagnosis, and two components reporting the
