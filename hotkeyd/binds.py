@@ -1093,12 +1093,12 @@ BINDS: list[Bind] = [
     # reason — those targets are in ~/.local/bin, which is not on every
     # session's PATH.
     #
-    # `$mod+F5` IS ALREADY DEAD: mocp is not installed on this host, so the
-    # bind has been a no-op in i3 for some time. Migrated VERBATIM anyway — a
-    # cutover moves behaviour, it does not silently curate it, and a dead bind
-    # that disappears during a migration is indistinguishable from one the
-    # migration broke. Filed separately (dotfiles-hwds.47) so the decision to
-    # drop it is made on its own evidence.
+    # `$mod+F5` (mocp) WAS HERE AND IS GONE (dotfiles-hwds.47). It came across
+    # with this group verbatim even though it was already dead — mocp is not
+    # installed — because a cutover moves behaviour rather than curating it,
+    # and a bind that vanishes mid-migration is indistinguishable from one the
+    # migration broke. That made the deadness visible as its own decision,
+    # which is the point; the decision was then to drop it. The key is free.
     #
     # WHAT STAYS WITH i3, restated here because this is where someone will
     # look for it: `$mod+Shift+q` (kill), `$mod+Shift+c` (reload),
@@ -1114,7 +1114,6 @@ BINDS: list[Bind] = [
     # Whether one should go is a product question, not a cutover question.
     Bind("$mod+9", run("blurlock")),
     Bind("$mod+Ctrl+m", run("terminal -e 'alsamixer'")),
-    Bind("$mod+F5", run("terminal -e 'mocp'")),
     # The nagbar's own quoting, preserved exactly. i3 needed the outer double
     # quotes to stop its parser splitting the command (b0c9f27e); through
     # shell=True they are the shell's, and the inner single quotes keep the
