@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -289,6 +291,40 @@ func TestPreviewWSPrimingFrameCarriesClassifiedType(t *testing.T) {
 	got := readRedraw(t, c, 2*time.Second)
 	if got.Path != "clip.mp4" || got.Type != "video" {
 		t.Fatalf("primed frame = {path:%q type:%q}, want {clip.mp4 video}", got.Path, got.Type)
+	}
+}
+
+// TestPreviewWSPrimingDegradesToNoneWhenFileDeleted proves the sp022 Task 2
+// edge case classifyStoredPath exists for: "path deleted between store and
+// classify -> classify against the stored root-relative path degrades to
+// none, broadcast still goes out (client shows fallback)". A path is
+// POSTed and stored while the fixture still exists (POST validates
+// existence at ingestion — dotfiles-joz), the underlying file is then
+// removed from disk, and only THEN does a window connect — so priming
+// (handlePreviewWS) calls classifyStoredPath against a stored path whose
+// resolveInRoot now fails. The frame must still arrive (not be swallowed)
+// with "type":"none", never an error or a dropped send.
+func TestPreviewWSPrimingDegradesToNoneWhenFileDeleted(t *testing.T) {
+	srv := newTestServer(t)
+	writeInRoot(t, srv, "vanishing.go")
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	postPreview(t, ts, 6, "vanishing.go")
+
+	if err := os.Remove(filepath.Join(srv.root, "vanishing.go")); err != nil {
+		t.Fatalf("remove fixture between store and classify: %v", err)
+	}
+
+	c := dialPreview(t, ts, 6)
+	defer c.Close()
+
+	got := readRedraw(t, c, 2*time.Second)
+	if got.Path != "vanishing.go" {
+		t.Fatalf("primed frame path = %q, want vanishing.go (path is still delivered so the client can show its fallback)", got.Path)
+	}
+	if got.Type != "none" {
+		t.Errorf("primed frame type = %q, want none (deleted-file degrade)", got.Type)
 	}
 }
 
