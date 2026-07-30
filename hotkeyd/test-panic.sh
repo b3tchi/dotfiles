@@ -22,6 +22,18 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Parity-testing seam (dotfiles-2ats), same contract as test-hotkeyd.sh: the two
+# hand-started daemons below (the out-of-scope sentinel and the CONTESTED-state
+# rig) and every pgrep/pkill that finds a daemon by its argv go through these,
+# so a future implementation can be pointed at without editing the suite.
+# Defaults reproduce today's python3 invocation and pgrep pattern
+# byte-for-byte. NOTE: most of this suite's daemon lifecycle goes through
+# hotkeyd.sh (start/stop/restart), which is NOT parameterized here — see
+# dotfiles-2ats's report for why that is a separate, blocking gap.
+HOTKEYD_BIN="${HOTKEYD_BIN:-python3 $HERE/hotkeyd.py}"
+HOTKEYD_PROC_PAT="${HOTKEYD_PROC_PAT:-hotkeyd\.py}"
+
 PASS=0
 FAIL=0
 ok()  { printf '  \033[32mPASS\033[0m %s\n' "$1"; PASS=$((PASS + 1)); }
@@ -50,12 +62,12 @@ probe_free_display() { # <start-number>
 }
 
 cleanup() {
-    pkill -f "hotkeyd\.py .*--display $XA" 2>/dev/null
-    pkill -f "hotkeyd\.py .*--display $XB" 2>/dev/null
+    pkill -f "$HOTKEYD_PROC_PAT .*--display $XA" 2>/dev/null
+    pkill -f "$HOTKEYD_PROC_PAT .*--display $XB" 2>/dev/null
     # The sentinel is ours — we started it, so we reap it. Per-display, never a
     # bare `pkill -f hotkeyd.py`, which is the machine-wide reach this whole
     # file exists to keep out.
-    pkill -f "hotkeyd\.py .*--display $XC" 2>/dev/null
+    pkill -f "$HOTKEYD_PROC_PAT .*--display $XC" 2>/dev/null
     [ -n "${FAKE_PID:-}" ] && kill "$FAKE_PID" 2>/dev/null
     for p in "${I3_PIDS[@]:-}"; do kill "$p" 2>/dev/null; done
     for p in "${XVFB_PIDS[@]:-}"; do kill "$p" 2>/dev/null; done
@@ -205,7 +217,7 @@ fi
 ws()         { DISPLAY="$XA" i3-msg -t get_workspaces 2>/dev/null; }
 tap()        { DISPLAY="$XA" python3 "$T/tap.py" "$1"; }
 i3_config()  { python3 "$T/getconfig.py" "$SOCK_A" 2>/dev/null; }
-daemons_on() { pgrep -f "hotkeyd\.py .*--display $1" 2>/dev/null | wc -l; }
+daemons_on() { pgrep -f "$HOTKEYD_PROC_PAT .*--display $1" 2>/dev/null | wc -l; }
 panic()      { DISPLAY="$XA" "$HERE/hotkeyd-panic.sh" "$@"; }
 
 # Park on a neutral workspace, press the chord, and report who answered.
@@ -240,7 +252,7 @@ who_answers() {
 mkdir -p "$T/sentinel"
 env -u I3SOCK DISPLAY="$XC" XDG_RUNTIME_DIR="$T/sentinel" \
     HOTKEYD_I3SOCK="$T/sentinel/no-i3.sock" \
-    setsid "$HERE/hotkeyd.py" --display "$XC" >"$T/sentinel.log" 2>&1 &
+    setsid $HOTKEYD_BIN --display "$XC" >"$T/sentinel.log" 2>&1 &
 for _t in 1 2 3 4 5 6 7 8 9 10; do
     sleep 0.5
     [ "$(daemons_on "$XC")" = 1 ] && break
@@ -306,7 +318,7 @@ answer="$(who_answers)"
 # true even under the old premise, because both orderings leave the same end
 # state. The ordering is asserted directly in section 2, on panic's own trace.
 echo "panic: the stop-before-reload ordering is load-bearing"
-pid_before="$(pgrep -f "hotkeyd\.py .*--display $XA" | head -1)"
+pid_before="$(pgrep -f "$HOTKEYD_PROC_PAT .*--display $XA" | head -1)"
 ln -sfn "$HOTKEYD_FALLBACK_SRC" "$LINK"
 DISPLAY="$XA" i3-msg reload >/dev/null 2>&1
 sleep 0.5
@@ -324,7 +336,7 @@ built and the step below would prove nothing"
 rm -f "$LINK"
 DISPLAY="$XA" i3-msg reload >/dev/null 2>&1
 sleep 0.5
-pid_after="$(pgrep -f "hotkeyd\.py .*--display $XA" | head -1)"
+pid_after="$(pgrep -f "$HOTKEYD_PROC_PAT .*--display $XA" | head -1)"
 answer="$(who_answers)"
 [ "$answer" = daemon ] \
     && ok "removing i3's bind hands the chord straight back — the daemon's grab \
@@ -472,7 +484,7 @@ esac
 # "running" at exit 0 is a worse diagnostic failure than the bare "not running"
 # .19 fixed, because it tells the operator to stop looking.
 echo "panic: status in the CONTESTED state (daemon alive behind the latch)"
-env -u I3SOCK DISPLAY="$XA" setsid "$HERE/hotkeyd.py" \
+env -u I3SOCK DISPLAY="$XA" setsid $HOTKEYD_BIN \
     --display "$XA" --binds "$HOTKEYD_BINDS" >/dev/null 2>&1 &
 sleep 1
 [ "$(daemons_on "$XA")" = 1 ] \
@@ -532,7 +544,7 @@ out="$(panic resume 2>&1)"; rc=$?
 
 # --- 7: panic with the daemon ALREADY DEAD -----------------------------------
 echo "panic: daemon already dead"
-pkill -9 -f "hotkeyd\.py .*--display $XA"
+pkill -9 -f "$HOTKEYD_PROC_PAT .*--display $XA"
 sleep 0.5
 [ "$(daemons_on "$XA")" = 0 ] || bad "daemon still alive after SIGKILL"
 out="$(panic panic 2>&1)"; rc=$?
