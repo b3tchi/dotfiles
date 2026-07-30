@@ -33,7 +33,7 @@ tier or a lazy web tier — never both live at once:
 | `type` | Tier | How it renders |
 |---|---|---|
 | `image` | native | Qt `Image`, fit<->1:1 toggle |
-| `svg` | native | Qt `Image` (vector), same toggle |
+| `svg` | native | Qt `Image` (vector), same toggle — reached by `.d2` sources only (see below) |
 | `md` | native | server-rendered HTML text, `?native` payload |
 | `code` | native | chroma-highlighted HTML text, `?native` payload |
 | `video` | native | Qt multimedia `VideoOutput` |
@@ -41,6 +41,12 @@ tier or a lazy web tier — never both live at once:
 | `html` | web (lazy) | `WebEngineView` loading `/file/<path>?native` (raw bytes) |
 | `akm` | web (lazy) | `WebEngineView` loading `/file/<path>?slot=<N>` (cross-origin akm-graph-d iframe embed, adr0009) |
 | `stl` | web (lazy) | `WebEngineView` loading `/file/<path>` (the kept orbit-viewer page + `/static/stl-viewer.js`) |
+
+The `svg` type is produced by **`.d2` sources only** — `classifyPath`'s
+`isD2Ext` branch, whose payload is the compiled+flattened svg relayed from
+[[ft002]]'s `/api/svg`. A checked-in `.svg` file is *not* svg-typed: no
+extension test claims it, so it falls through to chroma's lexer match and
+renders as `code` (syntax-highlighted XML). Measured E2E, sp022 Task 9.
 
 `import QtWebEngine` lives in exactly one file (`WebTier.qml`) and its
 `WebEngineView` is only instantiated the first time a web-tier type is
@@ -62,6 +68,15 @@ In 1:1 mode the view scrolls when the image is larger than the window.
 ## Docking
 
 Windows tile beside the frame they were launched from — never floating.
+
+**X11 only.** Both entry points capture the launching frame with
+`active-window-id`, which is `xdotool getactivewindow` — so under a Wayland
+compositor (the `meta-wsl-sway` session) there is no frame id, and *no dock
+runs at all*: the window still opens and renders every tier natively, it just
+lands wherever the compositor puts it. The `swaymsg [pid=…]` criterion in
+`window-criteria` is therefore unreachable from `show`/`window` today.
+Measured E2E on real sway 1.12 with `xwayland disable`, sp022 Task 9
+(dotfiles-8ryw).
 
 **`preview show`** picks the split direction from the image's shape:
 
