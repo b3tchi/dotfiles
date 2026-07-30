@@ -349,6 +349,20 @@ func TestHandleFileSymlinkEscapeViaFullMux(t *testing.T) {
 	}
 }
 
+// TestClassifyStoredPathEmptyDegradesToNone proves classifyStoredPath's
+// other degrade branch (sp022 Task 2 edge case): an empty stored path — the
+// "no POST has ever landed for this slot" state CurrentPath already
+// documents — classifies as "none" rather than erroring or panicking, the
+// same safe fallback the deleted-file branch produces (see
+// TestPreviewWSPrimingDegradesToNoneWhenFileDeleted in preview_test.go for
+// that companion branch through the full ws priming path).
+func TestClassifyStoredPathEmptyDegradesToNone(t *testing.T) {
+	root := t.TempDir()
+	if got := classifyStoredPath(root, ""); got != "none" {
+		t.Errorf("classifyStoredPath(root, \"\") = %q, want none", got)
+	}
+}
+
 // TestParseSlotQuery proves the sp009 Task 6 ?slot parsing contract: a
 // missing or non-numeric value returns nil (absent — slot is a routing
 // hint, never grounds for a 400), while a valid integer returns a pointer to

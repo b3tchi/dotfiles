@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -239,6 +241,90 @@ func TestPreviewWSPrimesBufferedPathOnConnect(t *testing.T) {
 
 	if got := readRedraw(t, c, 2*time.Second); got.Path != "buffered.go" {
 		t.Fatalf("primed path on connect = %q, want buffered.go", got.Path)
+	}
+}
+
+// TestPreviewWSBroadcastCarriesClassifiedType is the sp022 Task 2 test_plan
+// ws test: connect, POST an image path, assert the frame is
+// {"path":...,"type":"image"}; POST an md path next, assert the type swaps
+// to "md" in the very same connection — the QML client (T4) reads this
+// field to pick a delegate without re-fetching or sniffing HTML itself.
+func TestPreviewWSBroadcastCarriesClassifiedType(t *testing.T) {
+	srv := newTestServer(t)
+	writeInRoot(t, srv, "photo.png", "note.md")
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	c := dialPreview(t, ts, 1)
+	defer c.Close()
+
+	postPreview(t, ts, 1, "photo.png")
+	got := readRedraw(t, c, 2*time.Second)
+	if got.Path != "photo.png" || got.Type != "image" {
+		t.Fatalf("first push = {path:%q type:%q}, want {photo.png image}", got.Path, got.Type)
+	}
+
+	postPreview(t, ts, 1, "note.md")
+	got = readRedraw(t, c, 2*time.Second)
+	if got.Path != "note.md" || got.Type != "md" {
+		t.Fatalf("second push = {path:%q type:%q}, want {note.md md}", got.Path, got.Type)
+	}
+}
+
+// TestPreviewWSPrimingFrameCarriesClassifiedType proves the priming frame
+// (a POST that lands before any window has connected, buffered per sp008
+// Task 4) also carries the classified type once a window does connect —
+// not just the sequential-broadcast path exercised above (sp022 Task 2
+// test_plan: "priming test: POST before connect -> priming frame carries
+// type").
+func TestPreviewWSPrimingFrameCarriesClassifiedType(t *testing.T) {
+	srv := newTestServer(t)
+	writeInRoot(t, srv, "clip.mp4")
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	postPreview(t, ts, 4, "clip.mp4")
+
+	c := dialPreview(t, ts, 4)
+	defer c.Close()
+
+	got := readRedraw(t, c, 2*time.Second)
+	if got.Path != "clip.mp4" || got.Type != "video" {
+		t.Fatalf("primed frame = {path:%q type:%q}, want {clip.mp4 video}", got.Path, got.Type)
+	}
+}
+
+// TestPreviewWSPrimingDegradesToNoneWhenFileDeleted proves the sp022 Task 2
+// edge case classifyStoredPath exists for: "path deleted between store and
+// classify -> classify against the stored root-relative path degrades to
+// none, broadcast still goes out (client shows fallback)". A path is
+// POSTed and stored while the fixture still exists (POST validates
+// existence at ingestion — dotfiles-joz), the underlying file is then
+// removed from disk, and only THEN does a window connect — so priming
+// (handlePreviewWS) calls classifyStoredPath against a stored path whose
+// resolveInRoot now fails. The frame must still arrive (not be swallowed)
+// with "type":"none", never an error or a dropped send.
+func TestPreviewWSPrimingDegradesToNoneWhenFileDeleted(t *testing.T) {
+	srv := newTestServer(t)
+	writeInRoot(t, srv, "vanishing.go")
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	postPreview(t, ts, 6, "vanishing.go")
+
+	if err := os.Remove(filepath.Join(srv.root, "vanishing.go")); err != nil {
+		t.Fatalf("remove fixture between store and classify: %v", err)
+	}
+
+	c := dialPreview(t, ts, 6)
+	defer c.Close()
+
+	got := readRedraw(t, c, 2*time.Second)
+	if got.Path != "vanishing.go" {
+		t.Fatalf("primed frame path = %q, want vanishing.go (path is still delivered so the client can show its fallback)", got.Path)
+	}
+	if got.Type != "none" {
+		t.Errorf("primed frame type = %q, want none (deleted-file degrade)", got.Type)
 	}
 }
 
