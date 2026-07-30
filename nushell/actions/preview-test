@@ -86,6 +86,13 @@
 #      `xdotool search --pid`) leaves a clear "never mapped" log line within
 #      the bounded poll, and never touches the launching frame at all.
 #
+# dotfiles-14kr (xorgxrdp web-tier WebGL):
+#  31. `spawn-env-prefix` table-tested directly (module `use`, no real Xorg)
+#      — a native display gets no overrides; xorgxrdp gets the Qt software-GL
+#      pair AND the Chromium swiftshader flags the web tier needs for WebGL
+#      there; a caller-set QTWEBENGINE_CHROMIUM_FLAGS is left alone; the
+#      multi-word flag value stays quoted for the `bash -c` launch line.
+#
 # Run:  nu nushell/actions/preview-test
 # Pass: exits 0 and prints "PASS: N tests passed"
 # Fail: exits 1 and prints "FAIL: <description>"
@@ -100,6 +107,9 @@ const WRAPPER = (path self | path dirname | path join "preview")
 # can be called directly here with fabricated /proc-style cmdline lists,
 # no real Xorg or /proc required.
 use $WRAPPER is-xrdp-display
+# dotfiles-14kr: the launch-line env prefix is factored out for the same
+# reason — table-testable without a real xorgxrdp Xorg.
+use $WRAPPER spawn-env-prefix
 
 # ── setup ─────────────────────────────────────────────────────────────────────
 
@@ -1401,7 +1411,66 @@ for pid in $spawned_pids {
     }
 }
 
+# ── test 31: spawn-env-prefix — xrdp gets swiftshader WebGL flags too ──────
+#
+# dotfiles-14kr. Measured on a real xorgxrdp session: the Qt software-GL pair
+# alone is NOT enough for the web tier — QtWebEngine's Chromium GPU stack
+# blocklists WebGL independently, so the stl tier fails ("WebGL1/WebGL2
+# blocklisted") both with and without that pair. Only the Chromium
+# swiftshader flags fix it. This asserts the prefix carries all three on
+# xorgxrdp, nothing at all on a native display, and defers to a caller who
+# already set QTWEBENGINE_CHROMIUM_FLAGS.
+
+let env_prefix_cases = [
+    {desc: "native display gets no overrides at all",
+     xrdp: false, caller: "", want_qt: false, want_chromium: false},
+    {desc: "native display ignores a caller's chromium flags",
+     xrdp: false, caller: "--use-gl=egl", want_qt: false, want_chromium: false},
+    {desc: "xorgxrdp gets the Qt software-GL pair AND the swiftshader flags",
+     xrdp: true, caller: "", want_qt: true, want_chromium: true},
+    {desc: "xorgxrdp defers to a caller-set QTWEBENGINE_CHROMIUM_FLAGS",
+     xrdp: true, caller: "--use-gl=egl", want_qt: true, want_chromium: false},
+]
+
+for case in $env_prefix_cases {
+    let got = (spawn-env-prefix $case.xrdp $case.caller)
+    let has_backend = ($got | str contains "QT_QUICK_BACKEND=software")
+    let has_libgl = ($got | str contains "LIBGL_ALWAYS_SOFTWARE=1")
+    if $has_backend != $case.want_qt or $has_libgl != $case.want_qt {
+        print $"FAIL: spawn-env-prefix \(($case.desc)\): Qt software-GL pair present=($has_backend)/($has_libgl), want ($case.want_qt) — got: ($got)"
+        exit 1
+    }
+    let has_chromium = ($got | str contains "QTWEBENGINE_CHROMIUM_FLAGS=")
+    if $has_chromium != $case.want_chromium {
+        print $"FAIL: spawn-env-prefix \(($case.desc)\): QTWEBENGINE_CHROMIUM_FLAGS present=($has_chromium), want ($case.want_chromium) — got: ($got)"
+        exit 1
+    }
+    if $has_chromium {
+        # Every flag the measured-working configuration needs, and quoting
+        # that survives interpolation into window-spawn's `bash -c` line
+        # (the value has spaces — unquoted, bash would read the flags after
+        # the first as a command, not as part of the assignment).
+        for flag in ["--enable-unsafe-swiftshader" "--use-gl=angle" "--use-angle=swiftshader" "--disable-gpu-compositing"] {
+            if not ($got | str contains $flag) {
+                print $"FAIL: spawn-env-prefix \(($case.desc)\): missing chromium flag ($flag) — got: ($got)"
+                exit 1
+            }
+        }
+        if not ($got | str contains "QTWEBENGINE_CHROMIUM_FLAGS='") {
+            print $"FAIL: spawn-env-prefix \(($case.desc)\): multi-word flag value must be quoted for `bash -c` — got: ($got)"
+            exit 1
+        }
+    }
+    # The prefix is concatenated straight onto the launch line, so a
+    # non-empty prefix must end in a separator.
+    if ($got | is-not-empty) and not ($got | str ends-with " ") {
+        print $"FAIL: spawn-env-prefix \(($case.desc)\): non-empty prefix must end with a space — got: ($got)"
+        exit 1
+    }
+}
+print $"PASS: spawn-env-prefix table-tested \(($env_prefix_cases | length) cases\)"
+
 ^rm -rf $tmp
 print ""
-print "PASS: 30 tests passed"
+print "PASS: 31 tests passed"
 
