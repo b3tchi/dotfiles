@@ -349,6 +349,270 @@ func TestHandleFileSymlinkEscapeViaFullMux(t *testing.T) {
 	}
 }
 
+// --- sp022 Task 3: GET /file/<path>?native --------------------------------
+
+// TestHandleFileNativeMarkdownRawBytes proves ?native on a classified "md"
+// file serves the raw source bytes as text/plain (sp022 Task 3 success
+// criteria), not goldmark HTML — the QML client paints markdown itself.
+func TestHandleFileNativeMarkdownRawBytes(t *testing.T) {
+	root := t.TempDir()
+	src := "# Hello\n\nWorld\n"
+	if err := os.WriteFile(filepath.Join(root, "note.md"), []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	srv, err := NewServer(root, "4200")
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/file/note.md?native", nil)
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /file/note.md?native: status %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "text/plain; charset=utf-8" {
+		t.Errorf("content-type = %q, want text/plain; charset=utf-8", ct)
+	}
+	if rec.Body.String() != src {
+		t.Errorf("body = %q, want exact raw bytes %q", rec.Body.String(), src)
+	}
+}
+
+// TestHandleFileNativeCodeInlineStyles proves ?native on a classified
+// "code" file serves the chroma inline-styles fragment (no <html> wrapper),
+// suitable for Qt rich text.
+func TestHandleFileNativeCodeInlineStyles(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "sample.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	srv, err := NewServer(root, "4200")
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/file/sample.go?native", nil)
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /file/sample.go?native: status %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `style="color:`) {
+		t.Errorf("body missing inline style attribute: %s", body)
+	}
+	if strings.Contains(body, "<html") {
+		t.Errorf("body contains an <html> wrapper: %s", body)
+	}
+}
+
+// TestHandleFileNativeHTMLRawPassthrough proves ?native on a classified
+// "html" file serves the raw file bytes verbatim as text/html (sp022 Task 3
+// success criteria).
+func TestHandleFileNativeHTMLRawPassthrough(t *testing.T) {
+	root := t.TempDir()
+	src := "<!DOCTYPE html><html><body><p>hi</p></body></html>"
+	if err := os.WriteFile(filepath.Join(root, "page.html"), []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	srv, err := NewServer(root, "4200")
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/file/page.html?native", nil)
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /file/page.html?native: status %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "text/html") {
+		t.Errorf("content-type = %q, want text/html", ct)
+	}
+	if rec.Body.String() != src {
+		t.Errorf("body = %q, want exact raw bytes %q", rec.Body.String(), src)
+	}
+}
+
+// TestHandleFileNativeMarkdownCappedMarker proves the ?native markdown
+// payload carries the truncation marker for a file over maxRenderSize
+// (sp022 Task 3 edge case: "huge md -> capped + truncation marker").
+func TestHandleFileNativeMarkdownCappedMarker(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "huge.md")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create fixture: %v", err)
+	}
+	line := strings.Repeat("a", 1024) + "\n"
+	written := 0
+	for written < maxRenderSize+len(line) {
+		if _, err := f.WriteString(line); err != nil {
+			t.Fatalf("write fixture: %v", err)
+		}
+		written += len(line)
+	}
+	f.Close()
+
+	srv, err := NewServer(root, "4200")
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/file/huge.md?native", nil)
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "[preview truncated]") {
+		t.Errorf("huge native md response missing truncation marker")
+	}
+	if rec.Body.Len() > maxRenderSize*2 {
+		t.Errorf("huge native md body len=%d, want bounded near maxRenderSize=%d", rec.Body.Len(), maxRenderSize)
+	}
+}
+
+// TestHandleFileIgnoresNativeForTypesWithoutOne proves ?native has no
+// effect for types with no native payload — image, video, stl, akm, none
+// all serve EXACTLY their existing (no-param) response regardless (sp022
+// Task 3 success criteria: "no behavior change without the param anywhere").
+func TestHandleFileIgnoresNativeForTypesWithoutOne(t *testing.T) {
+	root := t.TempDir()
+
+	// A tiny valid 1x1 PNG so renderImage's decode path succeeds and
+	// exercises the real thumbnail branch, not just the decode-failure
+	// fallback.
+	pngBytes := []byte{
+		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+		0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00,
+		0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x62, 0x00, 0x01, 0x00, 0x00,
+		0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49,
+		0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+	}
+	if err := os.WriteFile(filepath.Join(root, "photo.png"), pngBytes, 0o644); err != nil {
+		t.Fatalf("write png fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "clip.mp4"), []byte("not a real video"), 0o644); err != nil {
+		t.Fatalf("write video fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "model.stl"), []byte("solid fixture"), 0o644); err != nil {
+		t.Fatalf("write stl fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "mystery.xyz123unknown"), []byte{0, 1, 2}, 0o644); err != nil {
+		t.Fatalf("write none fixture: %v", err)
+	}
+	notesDir := filepath.Join(root, "docs", "notes")
+	if err := os.MkdirAll(notesDir, 0o755); err != nil {
+		t.Fatalf("mkdir docs/notes: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(notesDir, "us099.md"), []byte("---\naliases: [x]\n---\n# hi\n"), 0o644); err != nil {
+		t.Fatalf("write akm fixture: %v", err)
+	}
+
+	srv, err := NewServer(root, "4200")
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	cases := []struct {
+		name    string
+		reqPath string
+	}{
+		{"image", "/file/photo.png"},
+		{"video", "/file/clip.mp4"},
+		{"stl", "/file/model.stl"},
+		{"akm", "/file/docs/notes/us099.md"},
+		{"none", "/file/mystery.xyz123unknown"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			recNative := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(recNative, httptest.NewRequest(http.MethodGet, tc.reqPath+"?native", nil))
+
+			recPlain := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(recPlain, httptest.NewRequest(http.MethodGet, tc.reqPath, nil))
+
+			if recNative.Code != recPlain.Code {
+				t.Errorf("%s: ?native status %d != no-param status %d", tc.name, recNative.Code, recPlain.Code)
+			}
+			if recNative.Body.String() != recPlain.Body.String() {
+				t.Errorf("%s: ?native body differs from no-param body despite no native payload for this type", tc.name)
+			}
+			if ctN, ctP := recNative.Header().Get("Content-Type"), recPlain.Header().Get("Content-Type"); ctN != ctP {
+				t.Errorf("%s: ?native content-type %q != no-param content-type %q", tc.name, ctN, ctP)
+			}
+		})
+	}
+}
+
+// TestHandleFileNativeOnDirectoryReturns404 proves the ?native param does
+// not change the existing 404 path for a directory (sp022 Task 3 edge case:
+// "?native on a directory ... -> existing 404 path unchanged").
+func TestHandleFileNativeOnDirectoryReturns404(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "adir"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	srv, err := NewServer(root, "4200")
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/file/adir?native", nil)
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("GET /file/adir?native: status %d, want 404 (body: %s)", rec.Code, rec.Body.String())
+	}
+}
+
+// TestHandleFileNativeOnMissingPathReturns404 proves the ?native param does
+// not change the existing 404 path for a missing file.
+func TestHandleFileNativeOnMissingPathReturns404(t *testing.T) {
+	srv := newTestServer(t)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/file/does-not-exist.md?native", nil)
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("GET /file/does-not-exist.md?native: status %d, want 404 (body: %s)", rec.Code, rec.Body.String())
+	}
+}
+
+// TestHandleFileNativeWithSlotIgnoresSlot proves ?native&slot=N does not
+// change the native payload — slot is a routing hint consumed only by the
+// akm iframe embed, never by a native payload (sp022 Task 3 edge case).
+func TestHandleFileNativeWithSlotIgnoresSlot(t *testing.T) {
+	root := t.TempDir()
+	src := "# Hello\n"
+	if err := os.WriteFile(filepath.Join(root, "note.md"), []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	srv, err := NewServer(root, "4200")
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	recNoSlot := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(recNoSlot, httptest.NewRequest(http.MethodGet, "/file/note.md?native", nil))
+
+	recSlot := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(recSlot, httptest.NewRequest(http.MethodGet, "/file/note.md?native&slot=3", nil))
+
+	if recNoSlot.Body.String() != recSlot.Body.String() {
+		t.Errorf("?native&slot=3 body differs from ?native alone: %q vs %q", recSlot.Body.String(), recNoSlot.Body.String())
+	}
+}
+
 // TestClassifyStoredPathEmptyDegradesToNone proves classifyStoredPath's
 // other degrade branch (sp022 Task 2 edge case): an empty stored path — the
 // "no POST has ever landed for this slot" state CurrentPath already
@@ -827,5 +1091,79 @@ func TestRegisterWithoutWorkspaceLeavesItEmpty(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &reg)
 	if got := srv.slots.Workspace(reg.Slot); got != "" {
 		t.Errorf("slot %d workspace = %q, want \"\" when none was sent", reg.Slot, got)
+	}
+}
+
+// --- sp022 Task 3: GET /preview<N> (non-ws) returns JSON, not shell.html --
+
+// TestHandlePreviewGetReturnsJSONShape proves a plain (non-websocket) GET
+// /preview<N> now serves {slot, path, type} JSON instead of the static
+// shell page — the shell moves into QML (T4); this daemon route only needs
+// to hand the client its current slot state (sp022 Task 3 success
+// criteria).
+func TestHandlePreviewGetReturnsJSONShape(t *testing.T) {
+	srv := newTestServer(t)
+	writeInRoot(t, srv, "note.md")
+
+	setRec := httptest.NewRecorder()
+	setBody := `{"path":"note.md"}`
+	srv.Handler().ServeHTTP(setRec, httptest.NewRequest(http.MethodPost, "/preview1", strings.NewReader(setBody)))
+	if setRec.Code != http.StatusOK {
+		t.Fatalf("POST /preview1: status %d, want 200 (body: %s)", setRec.Code, setRec.Body.String())
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/preview1", nil)
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /preview1: status %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Errorf("GET /preview1 content-type = %q, want application/json (not shell.html)", ct)
+	}
+	var got struct {
+		Slot int    `json:"slot"`
+		Path string `json:"path"`
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("GET /preview1 body is not the expected JSON shape: %v (body: %s)", err, rec.Body.String())
+	}
+	if got.Slot != 1 {
+		t.Errorf("GET /preview1 slot = %d, want 1", got.Slot)
+	}
+	if got.Path != "note.md" {
+		t.Errorf("GET /preview1 path = %q, want note.md", got.Path)
+	}
+	if got.Type != "md" {
+		t.Errorf("GET /preview1 type = %q, want md", got.Type)
+	}
+}
+
+// TestHandlePreviewGetJSONForUnsetSlot proves a slot that has never received
+// a POST still answers GET with valid JSON rather than an error — empty
+// path, "none" type (the same safe-degrade classifyStoredPath already uses
+// for the ws priming frame).
+func TestHandlePreviewGetJSONForUnsetSlot(t *testing.T) {
+	srv := newTestServer(t)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/preview7", nil)
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /preview7 (never set): status %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		Slot int    `json:"slot"`
+		Path string `json:"path"`
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("GET /preview7 body is not JSON: %v (body: %s)", err, rec.Body.String())
+	}
+	if got.Slot != 7 || got.Path != "" || got.Type != "none" {
+		t.Errorf("GET /preview7 = %+v, want {slot:7 path:\"\" type:none}", got)
 	}
 }

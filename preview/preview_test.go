@@ -15,12 +15,19 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// --- GET /preview<N> shell -----------------------------------------------
+// --- GET /preview<N> ------------------------------------------------------
 
-// TestPreviewShellServesHTML proves a plain GET /preview<N> (no websocket
-// upgrade headers) returns the shell HTML that opens a websocket and hosts
-// the hot-swap content frame (sp008 Task 4 success criteria).
-func TestPreviewShellServesHTML(t *testing.T) {
+// TestPreviewGetReturnsJSONNotShellHTML proves a plain GET /preview<N> (no
+// websocket upgrade headers) returns {slot, path, type} JSON, not the old
+// shell HTML — the shell moves into QML (sp022 Task 3 success criteria:
+// "GET /preview<N> non-ws returns JSON ... instead of shell.html"). This
+// test supersedes the pre-sp022 TestPreviewShellServesHTML, which asserted
+// exactly the contract this task replaces; server_test.go's
+// TestHandlePreviewGetReturnsJSONShape/TestHandlePreviewGetJSONForUnsetSlot
+// cover the JSON shape itself in more depth — this one just pins that the
+// route reached through the full mux at this exact path is no longer the
+// static shell.
+func TestPreviewGetReturnsJSONNotShellHTML(t *testing.T) {
 	srv := newTestServer(t)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/preview1", nil)
@@ -29,15 +36,23 @@ func TestPreviewShellServesHTML(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /preview1: status %d, want 200 (body: %s)", rec.Code, rec.Body.String())
 	}
-	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "text/html") {
-		t.Errorf("GET /preview1 content-type %q, want text/html", ct)
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Errorf("GET /preview1 content-type %q, want application/json", ct)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "app.js") {
-		t.Errorf("GET /preview1 body missing app.js script reference: %s", body)
+	if strings.Contains(body, "app.js") || strings.Contains(body, `id="content"`) {
+		t.Errorf("GET /preview1 body still looks like the old shell HTML: %s", body)
 	}
-	if !strings.Contains(body, `id="content"`) {
-		t.Errorf("GET /preview1 body missing hot-swap content element: %s", body)
+	var got struct {
+		Slot int    `json:"slot"`
+		Path string `json:"path"`
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("GET /preview1 body is not the {slot,path,type} JSON shape: %v (body: %s)", err, body)
+	}
+	if got.Slot != 1 {
+		t.Errorf("GET /preview1 slot = %d, want 1", got.Slot)
 	}
 }
 
