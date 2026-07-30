@@ -57,3 +57,11 @@ linux:
       else
         echo "preview: go toolchain not found — skipping daemon build (install go, then re-run 'rotz install preview')" >&2
       fi
+
+      # sp022 Task 8: the wry/WebKitGTK host (preview-webview crate, sp013)
+      # is retired — the QML client (preview/qml/*.qml, Tasks 4-6 above)
+      # covers every tier it used to. A stale ~/.local/bin/preview-wv from
+      # an install predating this change would otherwise linger forever
+      # (nothing else ever removes it) as a confusable next to preview-d —
+      # unconditional and silent so a host that never had it is a no-op.
+      rm -f ~/.local/bin/preview-wv
