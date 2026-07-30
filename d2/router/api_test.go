@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -1019,5 +1020,188 @@ func TestAPISvg_lastGoodSvgWhenEnsureFails(t *testing.T) {
 	}
 	if rr.Body.String() != string(want) {
 		t.Errorf("svg last-good: want %q, got %q", want, rr.Body.String())
+	}
+}
+
+// TestAPISvg_emptySourceNamesTheCause covers the empty-source path
+// (dotfiles-sytg). d2 v0.7.1 writes no svg at all for a source with no
+// statements, and exits 0 without a word on stdout or stderr, so /api/svg
+// cannot produce bytes. That part is correct and unavoidable; what was wrong
+// was the message. The bounded poll surfaced it as
+//
+//	svg not ready after 3s: open …/bravo.svg: no such file or directory
+//
+// which reads like a first-hit compile race. It cost a P1 misdiagnosis: the
+// fixture in that report (fixtures/walk/bravo.d2) is 0 bytes, and the
+// "race" was permanent. The response must now name the real cause.
+func TestAPISvg_emptySourceNamesTheCause(t *testing.T) {
+	origDeadline := svgPollDeadline
+	svgPollDeadline = 100 * time.Millisecond // no svg is ever coming; don't wait 3s
+	defer func() { svgPollDeadline = origDeadline }()
+
+	projDir := t.TempDir()
+	filePath := filepath.Join(projDir, "blank.d2")
+	if err := os.WriteFile(filePath, nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cacheDir := t.TempDir()
+	cm, stop := spawnFakeChildWithCache(t, "proj/blank.d2", filePath, cacheDir)
+	defer stop()
+
+	reg := Registry{"proj": projDir}
+	h := NewAPIHandler(cm, reg, "4800", cacheDir)
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/svg?path="+filePath, nil))
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("empty source: want 503, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "no d2 statements") {
+		t.Errorf("empty source: 503 must name the cause, got %s", body)
+	}
+	if !strings.Contains(body, filePath) {
+		t.Errorf("empty source: 503 must name the source file, got %s", body)
+	}
+	// The old misleading framing must be gone.
+	if strings.Contains(body, "not ready") || strings.Contains(body, "no such file or directory") {
+		t.Errorf("empty source: 503 still reads like a race/timeout, got %s", body)
+	}
+}
+
+// TestAPISvg_whitespaceAndCommentOnlySourcesNameTheCause extends the above to
+// the two other sources d2 v0.7.1 silently declines to compile: whitespace
+// only and comments only. Both were verified against the real binary to write
+// no output and exit 0, so both must get the same honest diagnostic as a
+// 0-byte file rather than the poll's "no such file" text.
+func TestAPISvg_whitespaceAndCommentOnlySourcesNameTheCause(t *testing.T) {
+	origDeadline := svgPollDeadline
+	svgPollDeadline = 100 * time.Millisecond
+	defer func() { svgPollDeadline = origDeadline }()
+
+	cases := map[string]string{
+		"whitespace-only": "   \n\n\t\n",
+		"comment-only":    "# just a note\n# and another\n",
+	}
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			projDir := t.TempDir()
+			filePath := filepath.Join(projDir, "quiet.d2")
+			if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			cacheDir := t.TempDir()
+			cm, stop := spawnFakeChildWithCache(t, "proj/quiet.d2", filePath, cacheDir)
+			defer stop()
+
+			h := NewAPIHandler(cm, Registry{"proj": projDir}, "4800", cacheDir)
+			rr := httptest.NewRecorder()
+			h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/svg?path="+filePath, nil))
+
+			if rr.Code != http.StatusServiceUnavailable {
+				t.Fatalf("want 503, got %d: %s", rr.Code, rr.Body.String())
+			}
+			if !strings.Contains(rr.Body.String(), "no d2 statements") {
+				t.Errorf("503 must name the cause, got %s", rr.Body.String())
+			}
+		})
+	}
+}
+
+// TestAPISvg_realD2WritesNonEmptyCacheFile is the assertion whose absence let
+// a bad diagnosis stand for two audits: it drives the REAL d2 binary through
+// the REAL production path and asserts the cache file exists and is NON-EMPTY.
+//
+// Every other /api/svg test writes Child.SVGPath itself before fetching, so
+// the suite proved "the route serves a file that is there" but never "the
+// production path puts a file there". The audits that verified this route
+// checked only the ABSENCE of a sibling .svg in the repo (dotfiles-eq8), never
+// the PRESENCE of bytes at the cache path — so a route producing nothing would
+// have passed both gates. This test closes that hole, and doubles as the
+// standing proof that "d2 --watch honours its explicit output path", the claim
+// dotfiles-sytg wrongly denied.
+//
+// Skipped when no real d2 is installed; the fake helper cannot stand in here,
+// because a fake that writes the file on request is precisely the blind spot.
+func TestAPISvg_realD2WritesNonEmptyCacheFile(t *testing.T) {
+	d2bin, err := exec.LookPath("d2")
+	if err != nil {
+		t.Skipf("real d2 not on PATH: %v", err)
+	}
+
+	projDir := t.TempDir()
+	filePath := filepath.Join(projDir, "real.d2")
+	if err := os.WriteFile(filePath, []byte("alpha -> beta\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cacheDir := t.TempDir()
+
+	cfg := config{
+		RouterPort:    "4800",
+		D2Bin:         d2bin,
+		ChildPortBase: fmt.Sprintf("%d", freePort(t)),
+		IdleTimeout:   "30m",
+		SvgCacheDir:   cacheDir,
+	}
+	cm := NewChildManager(cfg, os.Environ())
+	defer cm.StopAll()
+
+	key := "proj/real.d2"
+	if _, err := cm.Ensure(key, filePath); err != nil {
+		t.Fatalf("Ensure with real d2: %v", err)
+	}
+
+	outPath, err := svgOutputPath(cacheDir, "proj", filePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Nothing but the real d2 can create this file.
+	if _, err := os.Stat(outPath); !os.IsNotExist(err) {
+		t.Fatalf("precondition: %s must not exist before the fetch (stat err=%v)", outPath, err)
+	}
+
+	// A real compile takes ~80-450ms; allow generous headroom over the default.
+	origDeadline := svgPollDeadline
+	svgPollDeadline = 20 * time.Second
+	defer func() { svgPollDeadline = origDeadline }()
+
+	h := NewAPIHandler(cm, Registry{"proj": projDir}, "4800", cacheDir)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/svg?path="+filePath, nil))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("real d2 fetch: want 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "image/svg+xml" {
+		t.Errorf("real d2 fetch: want image/svg+xml, got %q", ct)
+	}
+	if rr.Body.Len() == 0 {
+		t.Fatal("real d2 fetch: 200 with an empty body")
+	}
+	if !strings.Contains(rr.Body.String(), "<svg") {
+		t.Errorf("real d2 fetch: body is not svg: %.120q", rr.Body.String())
+	}
+
+	// THE assertion: the production path actually wrote bytes to the cache.
+	info, statErr := os.Stat(outPath)
+	if statErr != nil {
+		t.Fatalf("production path wrote no svg: stat %s: %v", outPath, statErr)
+	}
+	if info.Size() == 0 {
+		t.Fatalf("production path wrote an EMPTY svg at %s", outPath)
+	}
+
+	// dotfiles-eq8: still nothing beside the source.
+	entries, err := os.ReadDir(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".svg") {
+			t.Errorf("dotfiles-eq8 regression: stray %s written beside the source", e.Name())
+		}
 	}
 }

@@ -10,6 +10,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -857,4 +858,199 @@ func TestSpawnLocked_ExplicitSVGOutputPath(t *testing.T) {
 		t.Errorf("found sibling svg(s) beside source: %v — dotfiles-eq8 regression", matches)
 	}
 	_ = m.Stop(key)
+}
+
+// ── Empty-source diagnostics (dotfiles-sytg) ─────────────────────────────────
+
+// TestSourceHasNoStatements pins the classifier against the three source
+// shapes d2 v0.7.1 silently declines to compile (verified against the real
+// binary: no output file, exit 0, empty stdout and stderr) versus sources it
+// does compile.
+func TestSourceHasNoStatements(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{"zero bytes", "", true},
+		{"whitespace only", "   \n\n\t\n  ", true},
+		{"comments only", "# a note\n#another\n", true},
+		{"comments and blanks", "\n# a note\n\n\t# more\n", true},
+		{"one statement", "x -> y", false},
+		{"statement after comment", "# heading\nx -> y\n", false},
+		{"indented statement", "  x -> y\n", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := filepath.Join(t.TempDir(), "s.d2")
+			if err := os.WriteFile(p, []byte(tc.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if got := sourceHasNoStatements(p); got != tc.want {
+				t.Errorf("sourceHasNoStatements(%q) = %v, want %v", tc.content, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSourceHasNoStatements_unreadable: an unreadable file is a different
+// failure and must not be reported as "empty" — claiming emptiness for it
+// would be the same class of misleading diagnostic this code removes.
+func TestSourceHasNoStatements_unreadable(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does-not-exist.d2")
+	if sourceHasNoStatements(missing) {
+		t.Error("a missing file must not be classified as statement-less")
+	}
+}
+
+// TestEmptySourceErr_reReadsSource is the staleness guarantee. A child spawned
+// on an empty file keeps running while the user types into it, and /api/svg
+// consults Child.LastError on every failed fetch — so the message must be
+// computed at read time, not frozen at spawn time. A cached "file is empty"
+// surviving after the file gained content would be its own misleading claim.
+func TestEmptySourceErr_reReadsSource(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "growing.d2")
+	if err := os.WriteFile(p, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := &emptySourceErr{path: p}
+
+	if !strings.Contains(err.Error(), "no d2 statements") {
+		t.Errorf("while empty: want the empty-source cause, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), p) {
+		t.Errorf("while empty: message must name the file, got %q", err.Error())
+	}
+
+	// User types into the file.
+	if err2 := os.WriteFile(p, []byte("x -> y\n"), 0o644); err2 != nil {
+		t.Fatal(err2)
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "no d2 statements") {
+		t.Errorf("after the file gained content, the message went stale: %q", msg)
+	}
+	if !strings.Contains(msg, "no svg compiled yet") {
+		t.Errorf("after the file gained content: want the not-yet-compiled message, got %q", msg)
+	}
+
+	// File removed entirely → a read error, not an emptiness claim.
+	if err3 := os.Remove(p); err3 != nil {
+		t.Fatal(err3)
+	}
+	if msg := err.Error(); !strings.Contains(msg, "cannot read source") {
+		t.Errorf("after removal: want a read error, got %q", msg)
+	}
+}
+
+// TestSpawnRecordsEmptySourceOnChild: spawning on a statement-less source
+// records the cause on the Child so /api/svg's existing LastError-preferring
+// branch surfaces it, and spawning on a real source records nothing. The
+// child is spawned either way — d2 --watch must stay live so it compiles as
+// soon as the user adds a statement.
+func TestSpawnRecordsEmptySourceOnChild(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		content   string
+		wantError bool
+	}{
+		{"empty source", "", true},
+		{"real source", "x -> y\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := makeHelperConfig(t, freePort(t))
+			cfg.SvgCacheDir = t.TempDir()
+			m := NewChildManager(cfg, helperEnv())
+			defer m.StopAll()
+
+			dir := t.TempDir()
+			p := filepath.Join(dir, "s.d2")
+			if err := os.WriteFile(p, []byte(tc.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			ch, err := m.Ensure("proj/s.d2", p)
+			if err != nil {
+				t.Fatalf("Ensure: %v", err)
+			}
+			if ch.PID == 0 {
+				t.Error("child must be spawned regardless of source content")
+			}
+			if tc.wantError {
+				if ch.LastError == nil {
+					t.Fatal("want LastError recorded for a statement-less source, got nil")
+				}
+				if !strings.Contains(ch.LastError.Error(), "no d2 statements") {
+					t.Errorf("want the empty-source cause, got %q", ch.LastError.Error())
+				}
+			} else if ch.LastError != nil {
+				t.Errorf("want no LastError for a real source, got %q", ch.LastError.Error())
+			}
+		})
+	}
+}
+
+// TestSnapshotClearsResolvedEmptySourceDiagnostic: the empty-source note is a
+// spawn-time observation, so once the file has content AND an svg exists, a
+// Snapshot must stop reporting it — otherwise /api/status shows a lastError on
+// a child that is serving fine, which is the same class of misleading
+// diagnostic the note was added to remove.
+//
+// Both halves are required, so the intermediate state (content added, but no
+// svg yet) must still report — a compile being possible is not a compile
+// having happened.
+func TestSnapshotClearsResolvedEmptySourceDiagnostic(t *testing.T) {
+	cfg := makeHelperConfig(t, freePort(t))
+	cacheDir := t.TempDir()
+	cfg.SvgCacheDir = cacheDir
+	m := NewChildManager(cfg, helperEnv())
+	defer m.StopAll()
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "s.d2")
+	if err := os.WriteFile(src, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	key := "proj/s.d2"
+	ch, err := m.Ensure(key, src)
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+
+	// 1. Empty source, no svg → diagnostic reported.
+	got := m.Snapshot()[key]
+	if got.LastError == nil || !strings.Contains(got.LastError.Error(), "no d2 statements") {
+		t.Fatalf("empty source: want the diagnostic in Snapshot, got %v", got.LastError)
+	}
+
+	// 2. Content added but still no svg → must STILL report (nothing compiled).
+	if err := os.WriteFile(src, []byte("x -> y\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got = m.Snapshot()[key]
+	if got.LastError == nil {
+		t.Error("content added but no svg yet: want the diagnostic retained, got nil")
+	}
+
+	// 3. An svg lands (the fake child never compiles, so stand in for it) →
+	//    the condition is fully resolved and must be cleared.
+	if err := os.WriteFile(ch.SVGPath, []byte("<svg>compiled</svg>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got = m.Snapshot()[key]
+	if got.LastError != nil {
+		t.Errorf("resolved: want a clear lastError, got %q", got.LastError.Error())
+	}
+
+	// A real crash error must never be swallowed by this filtering.
+	m.mu.RLock()
+	e := m.entries[key]
+	m.mu.RUnlock()
+	e.mu.Lock()
+	e.child.LastError = errors.New("exit status 3")
+	e.mu.Unlock()
+	if got := m.Snapshot()[key]; got.LastError == nil || got.LastError.Error() != "exit status 3" {
+		t.Errorf("crash error must survive Snapshot filtering, got %v", got.LastError)
+	}
 }
