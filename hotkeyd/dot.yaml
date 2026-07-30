@@ -22,6 +22,12 @@
 # so on a machine that already has the quickshell dot this adds no new package).
 # xorg-server-xvfb is test-only: hotkeyd/test-hotkeyd.sh and
 # hotkeyd/test-launcher.sh drive throwaway displays rather than the caller's.
+#
+# python-xlib is RETAINED here (sp021, dotfiles-ylmp.14) even though the Go
+# rewrite (./cmd/hotkeyd) now also builds below — hotkeyd.sh's per-display
+# engine table defaults every display to python and only the cutover commits
+# (dotfiles-ylmp.15 for :10, .16 for :0) flip individual displays to go. This
+# dot does not drop python-xlib until .16, per sp021's ## solution.
 linux:
   installs:
     cmd: |
@@ -34,3 +40,45 @@ linux:
       {{#if (eq whoami.distro "Arch Linux ARM")}}
       sudo pacman -S --needed --noconfirm python-xlib xorg-server-xvfb
       {{/if}}
+
+      # Go build of hotkeyd/hotkeyd from ./cmd/hotkeyd (sp021, dotfiles-ylmp.14).
+      # Guarded, not required: hotkeyd.sh's engine table (see its header) keeps
+      # every display on python until a cutover task explicitly flips one, so a
+      # host with no Go toolchain gets an actionable message here and stays on
+      # the python path above, untouched -- never a partial or failed install.
+      #
+      # Build to a TEMP file in the SAME directory, then rename over the final
+      # path -- never build IN PLACE. A `go build` that dies mid-`rotz install`
+      # (disk full, SIGINT, a bad module cache mid-download) must not leave a
+      # half-written `hotkeyd` binary sitting at the path hotkeyd.sh's `start`
+      # will exec next time it runs; a killed temp file is harmless and is
+      # overwritten (or left as debris, cleaned up) on the next run, while a
+      # killed `mv` within one filesystem cannot land a partial file at all.
+      if command -v go >/dev/null 2>&1; then
+        # Resolve the source dir via akm-root so a non-standard clone path
+        # (not ~/.dotfiles) still builds. Fall back to ~/.dotfiles, matching
+        # akm-graph/dot.yaml and preview/dot.yaml's own guarded go builds.
+        SRC="$HOME/.dotfiles/hotkeyd"
+        if command -v akm-root >/dev/null 2>&1; then
+          ROOT="$(akm-root 2>/dev/null || true)"
+          if [ -n "$ROOT" ] && [ -d "$ROOT/hotkeyd" ]; then
+            SRC="$ROOT/hotkeyd"
+          fi
+        fi
+        TMP="$(mktemp "$SRC/.hotkeyd.build.XXXXXX")"
+        if CGO_ENABLED=0 go build -C "$SRC" -o "$TMP" ./cmd/hotkeyd; then
+          mv -f "$TMP" "$SRC/hotkeyd"
+          echo "hotkeyd: built $SRC/hotkeyd from ./cmd/hotkeyd (go engine \
+      available -- still opt-in per hotkeyd.sh's engine table; python remains \
+      the default for every display)"
+        else
+          rm -f "$TMP"
+          echo "hotkeyd: go build failed -- $SRC/hotkeyd left unchanged, the \
+      python engine (hotkeyd.py) is unaffected" >&2
+        fi
+      else
+        echo "hotkeyd: no Go toolchain on PATH -- skipping the go build \
+      (install go, then re-run 'rotz install hotkeyd' to build the opt-in go \
+      engine). The python engine (hotkeyd.py, python-xlib above) is \
+      unaffected and remains the default for every display." >&2
+      fi
