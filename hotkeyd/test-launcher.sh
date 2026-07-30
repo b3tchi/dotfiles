@@ -8,6 +8,15 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Parity-testing seam (dotfiles-2ats), same contract as test-hotkeyd.sh: every
+# pgrep/pkill that finds a daemon by its argv goes through this. No HOTKEYD_BIN
+# here — every daemon this suite starts goes through hotkeyd.sh (`run()`
+# below), never a direct invocation, so there is nothing here to point at a
+# different binary. hotkeyd.sh itself hardcodes `DAEMON="$HERE/hotkeyd.py"`
+# and is out of this task's scope; see dotfiles-2ats's report.
+HOTKEYD_PROC_PAT="${HOTKEYD_PROC_PAT:-hotkeyd\.py}"
+
 PASS=0
 FAIL=0
 ok()  { printf '  \033[32mPASS\033[0m %s\n' "$1"; PASS=$((PASS + 1)); }
@@ -76,8 +85,8 @@ run "$XA" status >/dev/null 2>&1 && ok "status exits 0 while running" \
 echo "launcher: per-display scoping"
 run "$XB" start >/dev/null 2>&1
 sleep 1
-n_a=$(pgrep -f "hotkeyd.py.*--display $XA" 2>/dev/null | wc -l)
-n_b=$(pgrep -f "hotkeyd.py.*--display $XB" 2>/dev/null | wc -l)
+n_a=$(pgrep -f "$HOTKEYD_PROC_PAT.*--display $XA" 2>/dev/null | wc -l)
+n_b=$(pgrep -f "$HOTKEYD_PROC_PAT.*--display $XB" 2>/dev/null | wc -l)
 [ "$n_a" = 1 ] && ok "exactly one daemon on $XA" || bad "$n_a daemons on $XA"
 [ "$n_b" = 1 ] && ok "exactly one daemon on $XB" || bad "$n_b daemons on $XB"
 [ -e "$RUNTIME/hotkeyd-$TAG_A.sock" ] && [ -e "$RUNTIME/hotkeyd-$TAG_B.sock" ] \
@@ -90,7 +99,7 @@ n_b=$(pgrep -f "hotkeyd.py.*--display $XB" 2>/dev/null | wc -l)
 echo "launcher: start when already running"
 out="$(run "$XA" start 2>&1)"; rc=$?
 sleep 0.5
-n=$(pgrep -f "hotkeyd.py.*--display $XA" 2>/dev/null | wc -l)
+n=$(pgrep -f "$HOTKEYD_PROC_PAT.*--display $XA" 2>/dev/null | wc -l)
 [ "$n" = 1 ] && ok "second start did not spawn a duplicate" \
     || bad "$n daemons after a second start"
 [ "$rc" -ne 0 ] && ok "second start reports non-zero ($rc)" \
@@ -98,13 +107,13 @@ n=$(pgrep -f "hotkeyd.py.*--display $XA" 2>/dev/null | wc -l)
 
 # --- restart / escape hatch -------------------------------------------------
 echo "launcher: restart after SIGKILL (the escape-hatch path)"
-pkill -9 -f "hotkeyd.py.*--display $XA"
+pkill -9 -f "$HOTKEYD_PROC_PAT.*--display $XA"
 sleep 0.5
 run "$XA" status >/dev/null 2>&1 && bad "status still 0 after SIGKILL" \
     || ok "status reports the daemon is gone after SIGKILL"
 out="$(run "$XA" restart 2>&1)"; rc=$?
 sleep 1
-n=$(pgrep -f "hotkeyd.py.*--display $XA" 2>/dev/null | wc -l)
+n=$(pgrep -f "$HOTKEYD_PROC_PAT.*--display $XA" 2>/dev/null | wc -l)
 [ "$rc" -eq 0 ] && [ "$n" = 1 ] \
     && ok "restart recovers a SIGKILLed daemon" \
     || bad "restart rc=$rc daemons=$n: $out"
@@ -178,7 +187,7 @@ echo "launcher: restart honours an explicit display argument"
 DISPLAY= XDG_RUNTIME_DIR="$RUNTIME" "$HERE/hotkeyd.sh" restart "$XA" >/dev/null 2>&1
 rc=$?
 sleep 1
-n=$(pgrep -f "hotkeyd.py.*--display $XA" 2>/dev/null | wc -l)
+n=$(pgrep -f "$HOTKEYD_PROC_PAT.*--display $XA" 2>/dev/null | wc -l)
 [ "$rc" -eq 0 ] && [ "$n" = 1 ] \
     && ok "restart with an explicit display and no DISPLAY env" \
     || bad "restart rc=$rc daemons=$n with an explicit display argument"
@@ -187,11 +196,11 @@ n=$(pgrep -f "hotkeyd.py.*--display $XA" 2>/dev/null | wc -l)
 echo "launcher: stop"
 run "$XA" stop >/dev/null 2>&1
 sleep 0.5
-n=$(pgrep -f "hotkeyd.py.*--display $XA" 2>/dev/null | wc -l)
+n=$(pgrep -f "$HOTKEYD_PROC_PAT.*--display $XA" 2>/dev/null | wc -l)
 [ "$n" = 0 ] && ok "stop ends the daemon" || bad "$n daemons still running"
 [ ! -e "$RUNTIME/hotkeyd-$TAG_A.sock" ] && ok "stop leaves no stale socket" \
     || bad "stale socket left behind"
-n_b=$(pgrep -f "hotkeyd.py.*--display $XB" 2>/dev/null | wc -l)
+n_b=$(pgrep -f "$HOTKEYD_PROC_PAT.*--display $XB" 2>/dev/null | wc -l)
 [ "$n_b" = 1 ] && ok "stopping $XA left $XB alone" \
     || bad "stop crossed sessions: $n_b daemons on $XB"
 
@@ -230,7 +239,7 @@ XVFB_PIDS+=("$XC_PID")
 sleep 1.5
 run "$XC" start >/dev/null 2>&1
 sleep 1
-idle_pid="$(pgrep -f "hotkeyd.py.*--display $XC" 2>/dev/null | head -1)"
+idle_pid="$(pgrep -f "$HOTKEYD_PROC_PAT.*--display $XC" 2>/dev/null | head -1)"
 if [ -z "$idle_pid" ]; then
     bad "no daemon started on $XC"
 else
@@ -277,7 +286,7 @@ XVFB_PIDS+=("$XD_PID")
 sleep 1.5
 run "$XD" start >/dev/null 2>&1
 sleep 1
-stale_pid="$(pgrep -f "hotkeyd.py.*--display $XD" 2>/dev/null | head -1)"
+stale_pid="$(pgrep -f "$HOTKEYD_PROC_PAT.*--display $XD" 2>/dev/null | head -1)"
 if [ -z "$stale_pid" ]; then
     bad "no daemon started on $XD"
 else

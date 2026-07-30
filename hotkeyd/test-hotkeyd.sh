@@ -8,6 +8,16 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Parity-testing seam (dotfiles-2ats): every direct daemon invocation and every
+# `pgrep`/`pkill` that identifies a running daemon goes through these two, so a
+# future implementation (e.g. sp021's Go rewrite) can be pointed at by
+# overriding them instead of editing the suite. Defaults reproduce today's
+# python3 invocation and pgrep pattern byte-for-byte, so behaviour against the
+# shipped daemon is unchanged.
+HOTKEYD_BIN="${HOTKEYD_BIN:-python3 $HERE/hotkeyd.py}"
+HOTKEYD_PROC_PAT="${HOTKEYD_PROC_PAT:-hotkeyd\.py}"
+
 PASS=0
 FAIL=0
 
@@ -42,7 +52,7 @@ fi
 
 # --- stage 2: --check contract on the shipped table ------------------------
 echo "stage 2: --check on the shipped table"
-if out="$(python3 "$HERE/hotkeyd.py" --check 2>&1)"; then
+if out="$($HOTKEYD_BIN --check 2>&1)"; then
     ok "exits 0: $out"
 else
     bad "shipped table does not validate: $out"
@@ -60,7 +70,7 @@ BINDS = [Bind('Mod4+z', 'kill'), Bind('Mod4+z', 'nop dup'),
          Bind('Mod4+y', ''), Bind('Mod4+o', enter_layer('ghost'))]
 LAYERS = {}
 EOF
-out="$(python3 "$HERE/hotkeyd.py" --check --binds "$TMP/faulty.py" 2>&1)"
+out="$($HOTKEYD_BIN --check --binds "$TMP/faulty.py" 2>&1)"
 rc=$?
 if [ $rc -ne 0 ]; then
     ok "exits non-zero ($rc)"
@@ -77,7 +87,7 @@ done
 
 # --- stage 4: validation needs no X ---------------------------------------
 echo "stage 4: --check works with no DISPLAY"
-if out="$(env -u DISPLAY python3 "$HERE/hotkeyd.py" --check 2>&1)"; then
+if out="$(env -u DISPLAY $HOTKEYD_BIN --check 2>&1)"; then
     ok "headless: $out"
 else
     bad "needs an X display: $out"
@@ -89,7 +99,7 @@ fi
 # runs. :99 has no server, so this exercises the startup path and the adr0014
 # fail-fast exit without touching anything real.
 echo "stage 5: daemon fails fast on an unreachable display"
-out="$(DISPLAY=:99 timeout 10 python3 "$HERE/hotkeyd.py" --display :99 2>&1)"
+out="$(DISPLAY=:99 timeout 10 $HOTKEYD_BIN --display :99 2>&1)"
 rc=$?
 if [ "$rc" -eq 124 ]; then
     bad "daemon hung against a dead display instead of failing fast"
@@ -185,7 +195,7 @@ BINDS = [Bind('\$mod+o', enter_layer('trap'))]
 LAYERS = {'trap': Layer(binds=[Bind('h', 'focus left')], exit_keys=[])}
 EOF
     out="$(DISPLAY=$D8 XDG_RUNTIME_DIR="$T8" timeout 15 \
-           python3 "$HERE/hotkeyd.py" --display "$D8" --binds "$T8/trap.py" 2>&1)"
+           $HOTKEYD_BIN --display "$D8" --binds "$T8/trap.py" 2>&1)"
     rc=$?
     if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "exit_keys"; then
         ok "startup refuses an invalid table, naming the problem"
@@ -194,10 +204,10 @@ EOF
     fi
 
     cp "$HERE/binds.py" "$T8/live.py"
-    DISPLAY=$D8 XDG_RUNTIME_DIR="$T8" setsid python3 "$HERE/hotkeyd.py" \
+    DISPLAY=$D8 XDG_RUNTIME_DIR="$T8" setsid $HOTKEYD_BIN \
         --display "$D8" --binds "$T8/live.py" >"$T8/d.log" 2>&1 &
     sleep 2
-    dpid="$(pgrep -f "hotkeyd.py .*--display $D8" | head -1)"
+    dpid="$(pgrep -f "$HOTKEYD_PROC_PAT .*--display $D8" | head -1)"
     if [ -z "$dpid" ]; then
         bad "daemon did not start on $D8: $(tail -2 "$T8/d.log")"
     else
@@ -389,12 +399,12 @@ EOF
     then
         bad "live i3 did not start on $D11"
     else
-        DISPLAY="$D11" XDG_RUNTIME_DIR="$T11" setsid python3 "$HERE/hotkeyd.py" \
+        DISPLAY="$D11" XDG_RUNTIME_DIR="$T11" setsid $HOTKEYD_BIN \
             --display "$D11" >"$T11/d.log" 2>&1 &
         d11=""
         for _t in 1 2 3 4 5 6 7 8 9 10; do
             sleep 0.5
-            d11="$(pgrep -f "hotkeyd.py --display $D11" | head -1)"
+            d11="$(pgrep -f "$HOTKEYD_PROC_PAT --display $D11" | head -1)"
             [ -n "$d11" ] && break
         done
         # Read the state socket for the whole stage: the daemon's own claim
@@ -543,12 +553,12 @@ EOF
         # HOTKEYD_I3SOCK points at nothing: there is no i3 on this display, and
         # this keeps the daemon from shelling out to `i3 --get-socketpath`.
         DISPLAY="$D12" XDG_RUNTIME_DIR="$T12" HOTKEYD_I3SOCK="$T12/no-i3.sock" \
-            setsid python3 "$HERE/hotkeyd.py" --display "$D12" \
+            setsid $HOTKEYD_BIN --display "$D12" \
             --binds "$T12/plain.py" >"$T12/d.log" 2>&1 &
         d12=""
         for _t in 1 2 3 4 5 6 7 8 9 10; do
             sleep 0.5
-            d12="$(pgrep -f "hotkeyd.py --display $D12" | head -1)"
+            d12="$(pgrep -f "$HOTKEYD_PROC_PAT --display $D12" | head -1)"
             [ -n "$d12" ] && break
         done
         python3 -u -c '
@@ -643,7 +653,7 @@ EOF
     else
         out="$(DISPLAY=$D13 XDG_RUNTIME_DIR="$T13" PYTHONPATH="$T13" \
                HOTKEYD_I3SOCK="$T13/no-i3.sock" timeout 15 \
-               python3 "$HERE/hotkeyd.py" --display "$D13" 2>&1)"
+               $HOTKEYD_BIN --display "$D13" 2>&1)"
         rc=$?
         if [ "$rc" -eq 124 ]; then
             bad "daemon HUNG on a display without XI2"
@@ -675,12 +685,12 @@ EOF
         # otherwise every check above would pass on a daemon that is simply
         # broken.
         DISPLAY=$D13 XDG_RUNTIME_DIR="$T13" HOTKEYD_I3SOCK="$T13/no-i3.sock" \
-            setsid python3 "$HERE/hotkeyd.py" --display "$D13" \
+            setsid $HOTKEYD_BIN --display "$D13" \
             >"$T13/d.log" 2>&1 &
         d13=""
         for _t in 1 2 3 4 5 6 7 8 9 10; do
             sleep 0.5
-            d13="$(pgrep -f "hotkeyd.py --display $D13" | head -1)"
+            d13="$(pgrep -f "$HOTKEYD_PROC_PAT --display $D13" | head -1)"
             [ -n "$d13" ] && break
         done
         if [ -n "$d13" ] && grep -q "chords grabbed on $D13 via XI2" \
@@ -746,7 +756,7 @@ GRABEOF
         # stage is that everything ELSE looks healthy while the keyboard is gone.
         : > "$T14/hotkeyd-${D14#:}.lock"
         out="$(XDG_RUNTIME_DIR="$T14" timeout 20 \
-               python3 "$HERE/hotkeyd.py" --health --display "$D14" 2>&1)"
+               $HOTKEYD_BIN --health --display "$D14" 2>&1)"
         rc=$?
         if [ "$rc" -eq 0 ]; then
             ok "control: an UNGRABBED display reports serving"
@@ -764,7 +774,7 @@ GRABEOF
         fi
 
         out="$(XDG_RUNTIME_DIR="$T14" timeout 20 \
-               python3 "$HERE/hotkeyd.py" --health --display "$D14" 2>&1)"
+               $HOTKEYD_BIN --health --display "$D14" 2>&1)"
         rc=$?
         if [ "$rc" -eq 8 ]; then
             ok "--health exits 8 (keyboard grabbed) rather than 0"
@@ -793,13 +803,13 @@ LAYERS = {}
 EOF
         rm -f "$T14/hotkeyd-${D14#:}.lock"
         DISPLAY=$D14 XDG_RUNTIME_DIR="$T14" HOTKEYD_I3SOCK="$T14/no-i3.sock" \
-            python3 "$HERE/hotkeyd.py" --display "$D14" \
+            $HOTKEYD_BIN --display "$D14" \
             --binds "$T14/one.py" >"$T14/d.log" 2>&1 &
         D14P=$!
         d14=""
         for _t in 1 2 3 4 5 6 7 8 9 10; do
             sleep 0.5
-            d14="$(pgrep -f "hotkeyd.py --display $D14" | head -1)"
+            d14="$(pgrep -f "$HOTKEYD_PROC_PAT --display $D14" | head -1)"
             [ -n "$d14" ] && break
         done
         if [ -z "$d14" ]; then
@@ -892,13 +902,13 @@ BINDS = [Bind('\$mod+F11', 'nop whole')]
 LAYERS = {}
 EOF
         DISPLAY=$D15 XDG_RUNTIME_DIR="$T15" HOTKEYD_I3SOCK="$T15/no-i3.sock" \
-            python3 "$HERE/hotkeyd.py" --display "$D15" \
+            $HOTKEYD_BIN --display "$D15" \
             --binds "$T15/whole.py" >"$T15/whole.log" 2>&1 &
         W15P=$!
         w15=""
         for _t in 1 2 3 4 5 6 7 8 9 10; do
             sleep 0.5
-            w15="$(pgrep -f "hotkeyd.py --display $D15" | head -1)"
+            w15="$(pgrep -f "$HOTKEYD_PROC_PAT --display $D15" | head -1)"
             [ -n "$w15" ] && break
         done
         if [ -z "$w15" ]; then
@@ -943,13 +953,13 @@ print("unmapped F11 (keycode %d)" % code, flush=True)
 UNMAPEOF
         rm -f "$T15/hotkeyd-${D15#:}.lock" "$T15/hotkeyd-${D15#:}.grabs"
         DISPLAY=$D15 XDG_RUNTIME_DIR="$T15" HOTKEYD_I3SOCK="$T15/no-i3.sock" \
-            python3 "$HERE/hotkeyd.py" --display "$D15" \
+            $HOTKEYD_BIN --display "$D15" \
             --binds "$T15/whole.py" >"$T15/holed.log" 2>&1 &
         H15P=$!
         h15=""
         for _t in 1 2 3 4 5 6 7 8 9 10; do
             sleep 0.5
-            h15="$(pgrep -f "hotkeyd.py --display $D15" | head -1)"
+            h15="$(pgrep -f "$HOTKEYD_PROC_PAT --display $D15" | head -1)"
             [ -n "$h15" ] && break
         done
         if [ -z "$h15" ]; then
@@ -1024,7 +1034,7 @@ D16=":76"
 printf '12345\n' > "$T16/hotkeyd-76.lock"
 touch -d '2 hours ago' "$T16/hotkeyd-76.lock"
 out="$(XDG_RUNTIME_DIR="$T16" timeout 20 \
-       python3 "$HERE/hotkeyd.py" --health --display "$D16" 2>&1)"
+       $HOTKEYD_BIN --health --display "$D16" 2>&1)"
 rc=$?
 if [ "$rc" -eq 10 ]; then
     ok "an unmarked lock is UNDETERMINED (exit 10)"
@@ -1048,7 +1058,7 @@ esac
 printf '12345\nheartbeat=1\n' > "$T16/hotkeyd-76.lock"
 touch -d '2 hours ago' "$T16/hotkeyd-76.lock"
 out="$(XDG_RUNTIME_DIR="$T16" timeout 20 \
-       python3 "$HERE/hotkeyd.py" --health --display "$D16" 2>&1)"
+       $HOTKEYD_BIN --health --display "$D16" 2>&1)"
 rc=$?
 if [ "$rc" -eq 6 ]; then
     ok "a MARKED lock gone stale is still NOT SERVING (exit 6)"
@@ -1107,12 +1117,12 @@ LAYERS = {'sw': Layer(binds=[Bind('Tab', run('true'))],
                       on_exit=run('touch $MARK'))}
 EOF
         DISPLAY=$D17 XDG_RUNTIME_DIR="$T17" HOTKEYD_I3SOCK="$T17/no-i3.sock" \
-            python3 "$HERE/hotkeyd.py" --display "$D17" \
+            $HOTKEYD_BIN --display "$D17" \
             --binds "$T17/hold.py" >"$T17/d.log" 2>&1 &
         d17=""
         for _t in 1 2 3 4 5 6 7 8 9 10; do
             sleep 0.5
-            d17="$(pgrep -f "hotkeyd.py --display $D17" | head -1)"
+            d17="$(pgrep -f "$HOTKEYD_PROC_PAT --display $D17" | head -1)"
             [ -n "$d17" ] && break
         done
         if [ -z "$d17" ]; then
@@ -1147,12 +1157,12 @@ EOF
         # CONTROL: stopped while NOT in a layer, nothing must fire.
         rm -f "$MARK"
         DISPLAY=$D17 XDG_RUNTIME_DIR="$T17" HOTKEYD_I3SOCK="$T17/no-i3.sock" \
-            python3 "$HERE/hotkeyd.py" --display "$D17" \
+            $HOTKEYD_BIN --display "$D17" \
             --binds "$T17/hold.py" >"$T17/d2.log" 2>&1 &
         d17b=""
         for _t in 1 2 3 4 5 6 7 8 9 10; do
             sleep 0.5
-            d17b="$(pgrep -f "hotkeyd.py --display $D17" | head -1)"
+            d17b="$(pgrep -f "$HOTKEYD_PROC_PAT --display $D17" | head -1)"
             [ -n "$d17b" ] && break
         done
         if [ -n "$d17b" ]; then
