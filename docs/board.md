@@ -17,10 +17,11 @@ sections when status flips.
 
 ## spec
 
-- [[sp022|preview-qml-native-render-tiers]]
 
 
 ## ready
+
+- [[sp022|preview-qml-native-render-tiers]]
 
 - [[sp021|hotkeyd-go-zero-dep-rewrite]]
 
