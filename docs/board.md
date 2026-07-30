@@ -6,8 +6,6 @@ sections when status flips.
 
 ## idea
 
-- [[sp021|hotkeyd-go-zero-dep-rewrite]]
-
 - 🔥 hotfix [[sp015|gopass-clipboard-secret-marking]]
 
 
@@ -19,6 +17,7 @@ sections when status flips.
 
 ## spec
 
+- [[sp021|hotkeyd-go-zero-dep-rewrite]]
 
 ## ready
 
