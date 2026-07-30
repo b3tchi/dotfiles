@@ -54,6 +54,15 @@
 //	_match_in_layer                (*Engine).matchInLayer(bind.Layer, Event, bool) ([]bind.Action, *bind.Bind)
 //	_run                           (*Engine).run([]bind.Action, *bind.Bind) []bind.Action     see "callable actions" below
 //
+// One export beyond the 21: (*Engine).ShutdownActions() []bind.Action wraps
+// exitActions for cmd/hotkeyd's shutdown path, mirroring
+// Daemon.shutdown_actions (hotkeyd.py:1507-1524) — a method on Daemon, not
+// LayerEngine, in Python, where it could reach engine._exit_actions(layer)
+// directly across what was one module. Go's package boundary has no
+// equivalent to Python's "private but same-module" access, so this package
+// exports the one seam a caller outside it needs. See "on_exit and the
+// involuntary exit routes" below.
+//
 // Module-level functions (layers.py, not LayerEngine methods) ported
 // alongside the class because the engine cannot behave correctly without
 // them:
@@ -119,6 +128,50 @@
 // physical key fired cannot be expressed with today's bind.Func signature;
 // that is a pre-existing constraint of the landed bind package, not
 // something this task's files can change.
+//
+// # on_exit and the involuntary exit routes
+//
+// A layer's on_exit ([[ft011]]) fires on every INVOLUNTARY exit from that
+// layer, and NEVER on an exit key — an exit key is the user consciously
+// handing the keyboard back to whatever the layer put on screen (see
+// matchInLayer). There are exactly three involuntary routes in this port,
+// enumerated here rather than left implicit:
+//
+//  1. An explicit ExitLayer action reaches run() — via a bind's own action
+//     list, appended automatically for a one-shot layer's firing bind, or
+//     appended by holdReleaseActions when a hold layer commits.
+//  2. i3 takes a mode (SetI3Mode, when the new mode is non-default and a
+//     layer is active) — dotfiles-hwds.10.
+//  3. The daemon shuts down while a layer is active (ShutdownActions,
+//     called from cmd/hotkeyd's run-loop teardown, mirroring
+//     hotkeyd.py:1507-1524's Daemon.shutdown_actions) — dotfiles-hwds.51:
+//     a daemon killed inside a hold layer takes its grabs with it and
+//     leaves the layer's overlay on screen with nothing left able to close
+//     it.
+//
+// SIGHUP-triggered reload is explicitly NOT an involuntary exit route in
+// this port, though layers.py's on_exit docstring named it as one: the
+// Python daemon re-read its bind table live over SIGHUP, so a reload could
+// happen mid-layer. sp021's solution drops that capability — binds compile
+// into the source (dwm config.h style), so a "reload" is `go build` +
+// `hotkeyd.sh restart`: a fresh PROCESS, which is route 3 (shutdown)
+// followed by a new start, not a fourth in-process route. [[ft011]] is
+// amended to say this in sp021 Task 18 (bd dotfiles-ylmp.17); this
+// enumeration is the code-level statement this task's own success
+// criterion asks for ("the enumeration in code says so").
+//
+// The on_exit action list itself MUST BE IDEMPOTENT. Every commit path
+// runs its own verb FIRST and its on_exit cleanup SECOND (see
+// holdReleaseActions and run()'s bind.ExitLayer case): the switcher's
+// on_hold_release commits the selection, and the on_exit that follows in
+// the SAME call is a hide on a window the commit may already have hidden.
+// An on_exit action that is not safe to run twice — or to run when its
+// target is already in the state it asks for — will double-apply on that
+// path. Idempotency is a contract on the ACTION a table author supplies;
+// this package cannot enforce it (there is nothing to check — the engine
+// only ever RUNS the actions it is handed), so it is documented here as
+// the requirement it is, exactly as layers.py's _exit_actions docstring
+// stated it in prose.
 //
 // # 120 ms release fall-back guard — permanent, not a workaround
 //
@@ -406,6 +459,41 @@ func (e *Engine) exitActions(layerName string) []bind.Action {
 		return nil
 	}
 	return layer.OnExit
+}
+
+// ShutdownActions is involuntary exit route 3 (see the package doc's "on_exit
+// and the involuntary exit routes" section): what must be dispatched before
+// the daemon goes away, mirroring hotkeyd.py:1507-1524's
+// Daemon.shutdown_actions exactly, including what it deliberately does NOT
+// do:
+//
+//   - Returns rather than dispatches or runs. cmd/hotkeyd's run loop owns
+//     the dispatch channel — this is called from ITS shutdown path (a
+//     defer/teardown, python's `finally`) — and the actions are handed to
+//     the SAME dispatcher every other action goes through, not invoked
+//     here. In particular this does NOT go through run(): a bind.Func in
+//     an on_exit list is returned un-invoked, exactly as
+//     hotkeyd.py's _dispatch only understands Run and a bare i3 command
+//     string and silently drops anything else — a pre-existing property of
+//     the python shutdown path that this port preserves rather than
+//     widens.
+//   - Empty when no layer is up, or the current layer IS the default one,
+//     so stopping an idle daemon stays silent — a stray cancel would hide
+//     an overlay the user opened by hand.
+//   - Does not mutate engine state or publish: it is a pure query, called
+//     once, as the daemon is already on its way out.
+//
+// This is the one seam this package exports beyond the 21-method port
+// table above: hotkeyd.py's Daemon (a single module) could reach
+// engine._exit_actions(layer) directly; Go's package boundary forbids that
+// from cmd/hotkeyd, so this wraps exitActions with the exact
+// currently-active-layer selection Daemon.shutdown_actions performed
+// inline.
+func (e *Engine) ShutdownActions() []bind.Action {
+	if e.layerName == "" || e.layerName == DefaultLayer {
+		return nil
+	}
+	return e.exitActions(e.layerName)
 }
 
 // ReconcileHoldLayer ends the current hold layer when down is false — i.e.

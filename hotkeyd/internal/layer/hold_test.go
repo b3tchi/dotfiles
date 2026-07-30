@@ -344,6 +344,84 @@ func TestALayerWithoutOnExitDispatchesNothingExtra(t *testing.T) {
 	}
 }
 
+// -- ShutdownActions (involuntary exit route 3, dotfiles-hwds.51) ---------
+// Not a literal python test_layers.py scenario — shutdown_actions lives on
+// Daemon in hotkeyd.py, not LayerEngine, so it has no test in that file.
+// Ported from the METHOD's own contract (hotkeyd.py:1507-1524) instead,
+// since ShutdownActions is the one export this package adds beyond the
+// 21-method table to give cmd/hotkeyd a way to reach it.
+
+func TestShutdownActionsIsEmptyWhenTheDaemonIsIdle(t *testing.T) {
+	e, _, _ := defaultEngine() // default layer, nothing active
+	if out := e.ShutdownActions(); len(out) != 0 {
+		t.Fatalf("out = %+v, want empty (idle daemon)", out)
+	}
+}
+
+func TestShutdownActionsIsEmptyForALayerWithNoOnExit(t *testing.T) {
+	e, _, _ := defaultEngine()
+	e.Handle(press("o", "Mod4")) // nav has no on_exit
+	if e.State().Layer != "nav" {
+		t.Fatalf("state = %+v", e.State())
+	}
+	if out := e.ShutdownActions(); len(out) != 0 {
+		t.Fatalf("out = %+v, want empty (nav declares no on_exit)", out)
+	}
+}
+
+func TestShutdownActionsReturnsOnExitForTheActiveLayer(t *testing.T) {
+	e := switcherEngine()
+	e.Handle(press("Tab", "Mod1"))
+	if e.State().Layer != "sw" {
+		t.Fatalf("state = %+v", e.State())
+	}
+	out := e.ShutdownActions()
+	got := cmds(out)
+	found := false
+	for _, c := range got {
+		if c == "cancel" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("cancel missing: %v", got)
+	}
+	// A pure query: state must be untouched, unlike every OTHER exit route.
+	if e.State().Layer != "sw" {
+		t.Fatalf("ShutdownActions mutated engine state: %+v", e.State())
+	}
+}
+
+func TestShutdownActionsDoesNotInvokeAFuncOnExitAction(t *testing.T) {
+	// Mirrors hotkeyd.py's _dispatch, which only understands Run and a bare
+	// i3 command string — a callable in on_exit is silently un-invoked on
+	// the shutdown path in Python too. ShutdownActions must hand back the
+	// raw bind.Func for the CALLER's dispatcher to deal with, not invoke it
+	// itself (unlike run(), which invokes callables inline).
+	invoked := false
+	f := bind.Func(func(bind.Event) error { invoked = true; return nil })
+	e := NewEngine(
+		[]bind.Bind{{Chord: "Mod4+o", Actions: []bind.Action{bind.EnterLayer{Layer: "nav"}}}},
+		map[string]bind.Layer{"nav": {
+			Binds:    []bind.Bind{{Chord: "h", Actions: []bind.Action{bind.Command("focus left")}}},
+			ExitKeys: []string{"q"},
+			OnExit:   []bind.Action{f},
+		}},
+		Config{Publisher: &recorder{}, Clock: newFakeClock().Now},
+	)
+	e.Handle(press("o", "Mod4"))
+	out := e.ShutdownActions()
+	if invoked {
+		t.Fatalf("ShutdownActions invoked a Func action directly")
+	}
+	if len(out) != 1 {
+		t.Fatalf("out = %+v, want the raw Func passed through", out)
+	}
+	if _, ok := out[0].(bind.Func); !ok {
+		t.Fatalf("out[0] = %#v, want a bind.Func", out[0])
+	}
+}
+
 // -- PollIdle (hold.go) — the actual injected-ModifierDown mechanism ------
 // adr0016: a hold layer ends by ASKING THE SERVER, sampled standalone,
 // never by consulting the engine's own held-set. These tests drive the
