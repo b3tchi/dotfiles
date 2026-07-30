@@ -15,7 +15,9 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -42,6 +44,14 @@ func TestMain(m *testing.M) {
 //     that records LastError in children.go)
 func runTestHelperProcess() {
 	args := os.Args[1:]
+
+	// sp022 Task 1: when set, record the exact argv this process was spawned
+	// with, so spawn-args tests can assert the explicit svg output path is
+	// present without needing a real d2 binary to inspect.
+	if argvFile := os.Getenv("D2_ROUTER_TEST_ARGV_FILE"); argvFile != "" {
+		_ = os.WriteFile(argvFile, []byte(strings.Join(args, "\x00")), 0o644)
+	}
+
 	port := ""
 	crash := false
 	crashAfterReady := false
@@ -109,6 +119,13 @@ func helperBin(t *testing.T) string {
 // helperEnv returns the env for re-execution as the test helper.
 func helperEnv() []string {
 	return append(os.Environ(), "D2_ROUTER_TEST_HELPER=1")
+}
+
+// helperEnvWithArgvCapture is helperEnv plus a request that the helper record
+// its exact argv (NUL-joined) to argvFile — used by spawn-args tests to
+// verify the explicit svg output path children.go now passes (sp022 Task 1).
+func helperEnvWithArgvCapture(argvFile string) []string {
+	return append(helperEnv(), "D2_ROUTER_TEST_ARGV_FILE="+argvFile)
 }
 
 // makeHelperConfig builds a config where D2Bin points to this test binary.
@@ -639,8 +656,8 @@ func newCrashAfterReadyManager(t *testing.T, cfg config) *crashChildManager {
 
 // Silence unused-import warnings for packages used only indirectly.
 var (
-	_ = atomic.Int32{}   // sync/atomic — used in concurrent tests
-	_ = exec.Command     // os/exec — used via helperBin
+	_ = atomic.Int32{}     // sync/atomic — used in concurrent tests
+	_ = exec.Command       // os/exec — used via helperBin
 	_ = context.Background // context — used in StartReaper
 )
 
@@ -709,6 +726,135 @@ func TestReaperKeepsChildWhoseFileExists(t *testing.T) {
 
 	if _, found := m.Snapshot()[key]; !found {
 		t.Errorf("busy child with a present file was reaped — live preview would die")
+	}
+	_ = m.Stop(key)
+}
+
+// ── sp022 Task 1: explicit svg output path (dotfiles-eq8) ──────────────────
+
+// TestSvgOutputPath table-tests the pure path-computation helper: basename
+// (extension swapped to .svg, not appended), project subdir, and mkdir.
+func TestSvgOutputPath(t *testing.T) {
+	cacheDir := t.TempDir()
+
+	tests := []struct {
+		name     string
+		project  string
+		absPath  string
+		wantBase string
+	}{
+		{"simple", "proj", "/x/board.d2", "board.svg"},
+		{"path with spaces", "proj", "/x/my board.d2", "my board.svg"},
+		{"nested source dir", "proj", "/a/b/c/diagram.d2", "diagram.svg"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := svgOutputPath(cacheDir, tc.project, tc.absPath)
+			if err != nil {
+				t.Fatalf("svgOutputPath: %v", err)
+			}
+
+			wantDir := filepath.Join(cacheDir, tc.project)
+			if filepath.Dir(got) != wantDir {
+				t.Errorf("dir: want %q, got %q", wantDir, filepath.Dir(got))
+			}
+			if filepath.Base(got) != tc.wantBase {
+				t.Errorf("basename: want %q, got %q", tc.wantBase, filepath.Base(got))
+			}
+			if info, err := os.Stat(wantDir); err != nil || !info.IsDir() {
+				t.Errorf("expected cache dir %q to be created by svgOutputPath, stat err: %v", wantDir, err)
+			}
+		})
+	}
+}
+
+// TestSvgOutputPath_neverBesideSource is the direct dotfiles-eq8 regression
+// guard: the computed path must never share a directory with the source
+// file, for any cacheDir including a misconfigured empty one (which falls
+// back to os.TempDir(), never the source's own directory).
+func TestSvgOutputPath_neverBesideSource(t *testing.T) {
+	srcDir := t.TempDir()
+	absPath := filepath.Join(srcDir, "board.d2")
+
+	for _, cacheDir := range []string{t.TempDir(), ""} {
+		got, err := svgOutputPath(cacheDir, "proj", absPath)
+		if err != nil {
+			t.Fatalf("svgOutputPath(cacheDir=%q): %v", cacheDir, err)
+		}
+		if filepath.Dir(got) == srcDir {
+			t.Errorf("svgOutputPath(cacheDir=%q) = %q — lands beside the source dir %q (dotfiles-eq8 regression)",
+				cacheDir, got, srcDir)
+		}
+	}
+}
+
+// TestSpawnLocked_ExplicitSVGOutputPath is the test_plan's "spawn-args"
+// test: it spawns a real (fake-d2) child and asserts (a) the actual argv the
+// process received contains the explicit output path, and (b) no sibling
+// *.svg appears beside the source file — the two halves of the dotfiles-eq8
+// closure (explicit arg passed + repo write gone).
+func TestSpawnLocked_ExplicitSVGOutputPath(t *testing.T) {
+	srcDir := t.TempDir()
+	filePath := filepath.Join(srcDir, "board.d2")
+	if err := os.WriteFile(filePath, []byte("x -> y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cacheDir := t.TempDir()
+	argvFile := filepath.Join(t.TempDir(), "argv.txt")
+
+	cfg := makeHelperConfig(t, freePort(t))
+	cfg.SvgCacheDir = cacheDir
+	m := NewChildManager(cfg, helperEnvWithArgvCapture(argvFile))
+	defer m.StopAll()
+
+	key := "proj/board.d2"
+	ch, err := m.Ensure(key, filePath)
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+
+	wantDir := filepath.Join(cacheDir, "proj")
+	if filepath.Dir(ch.SVGPath) != wantDir {
+		t.Errorf("Child.SVGPath dir: want %q, got %q", wantDir, filepath.Dir(ch.SVGPath))
+	}
+	if filepath.Dir(ch.SVGPath) == srcDir {
+		t.Errorf("Child.SVGPath %q is beside the source — dotfiles-eq8 regression", ch.SVGPath)
+	}
+
+	// The helper process writes its argv once it starts; give it a brief
+	// moment (it does this before opening the listener the readiness probe
+	// waits on, but Ensure's return already implies the port opened, so the
+	// write is long done — this is just defensive against filesystem lag).
+	var argvBytes []byte
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		argvBytes, err = os.ReadFile(argvFile)
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("read argv capture %s: %v", argvFile, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	argv := strings.Split(string(argvBytes), "\x00")
+	found := false
+	for _, a := range argv {
+		if a == ch.SVGPath {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("spawned argv %v does not contain the explicit output path %q", argv, ch.SVGPath)
+	}
+
+	// dotfiles-eq8 regression guard: no sibling *.svg beside the source.
+	matches, _ := filepath.Glob(srcDir + "/*.svg")
+	if len(matches) != 0 {
+		t.Errorf("found sibling svg(s) beside source: %v — dotfiles-eq8 regression", matches)
 	}
 	_ = m.Stop(key)
 }

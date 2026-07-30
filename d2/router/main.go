@@ -25,6 +25,11 @@ type config struct {
 	ChildPortBase string
 	// IdleTimeout is the idle reaper duration.
 	IdleTimeout string
+	// SvgCacheDir is the directory under which each child's compiled svg is
+	// written (project subdir + basename.svg). Explicit — never the d2
+	// default of a sibling file next to the source (dotfiles-eq8: that write
+	// landed untracked inside the repo). sp022 Task 1.
+	SvgCacheDir string
 }
 
 func loadConfig() config {
@@ -34,6 +39,7 @@ func loadConfig() config {
 		D2Bin:         getenv("D2_ROUTER_D2_BIN", "d2"),
 		ChildPortBase: getenv("D2_ROUTER_CHILD_PORT_BASE", "4801"),
 		IdleTimeout:   getenv("D2_ROUTER_IDLE", "30m"),
+		SvgCacheDir:   getenv("D2_ROUTER_SVG_CACHE", defaultSvgCacheDir()),
 	}
 	return c
 }
@@ -53,6 +59,18 @@ func defaultRegistryPath() string {
 	return filepath.Join(home, ".config", "project", "projects.yaml")
 }
 
+// defaultSvgCacheDir mirrors the ft002 ~/.cache/d2-router/{pid,log}
+// convention. Returns "" if the home dir can't be resolved; svgOutputPath
+// then falls back to os.TempDir() so a spawn never lands beside the source
+// file even in that degraded case.
+func defaultSvgCacheDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".cache", "d2-router", "svg")
+}
+
 func main() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmsgprefix)
 	log.SetPrefix("d2-router: ")
@@ -66,7 +84,7 @@ func main() {
 
 	proxyHandler := NewProxyHandler(idx, reg, cm)
 	indexH := newIndexHandler(reg, registryMissing)
-	apiH := NewAPIHandler(cm, reg, cfg.RouterPort)
+	apiH := NewAPIHandler(cm, reg, cfg.RouterPort, cfg.SvgCacheDir)
 
 	mux := http.NewServeMux()
 	// /api/* → control API; "/" catch-all: index (path="/") vs proxy.
