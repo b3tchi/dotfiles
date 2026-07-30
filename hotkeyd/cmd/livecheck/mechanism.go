@@ -204,9 +204,22 @@ func runMechanism(rep *Reporter, rig *Rig, in *Injector, i3sock string) {
 	// daemon.
 	if injecting {
 		errs := in.Errors()
-		rep.Check(len(errs) == 0, "every key injection this run was accepted by xdotool",
-			strings.Join(errs, "; "))
+		// CHANNEL MATCH. The pass condition is an EMPTY error list, and a run
+		// that injected nothing at all has one too — "every injection was
+		// accepted" is vacuously true over an empty set. The attempt count is
+		// the injector's own same-channel positive.
+		rep.Judged(in.Attempts() > 0, len(errs) == 0,
+			"every key injection this run was accepted by xdotool",
+			fmt.Sprintf("%d injections, %d refused%s", in.Attempts(), len(errs), joinErrs(errs)),
+			"xdotool was on PATH but no injection was ever attempted, so an empty refusal list is vacuous")
 	}
+}
+
+func joinErrs(errs []string) string {
+	if len(errs) == 0 {
+		return ""
+	}
+	return ": " + strings.Join(errs, "; ")
 }
 
 func sortedKeys(m map[string][]uint32) []string {
@@ -232,7 +245,12 @@ func runCoreDomainChecks(rep *Reporter, rig *Rig, in *Injector, i3sock string, i
 		rep.Skip("and the LATER (XI2) grabber wins delivery outright", why)
 		return
 	}
-	rep.Check(true, "the core grabber (real i3) holds a core grab on $mod+F8", "from i3's own GET_CONFIG")
+	// `Check(true, ...)` stood here. The guard above makes it unreachable
+	// unless hasMarker, so it was never actually vacuous — but a pass
+	// expression that is a LITERAL cannot be read as evidence by anyone
+	// auditing this file, and the whole discipline here is that the verdict
+	// is computed from an observation. The observation is hasMarker.
+	rep.Check(hasMarker, "the core grabber (real i3) holds a core grab on $mod+F8", "from i3's own GET_CONFIG")
 
 	res, gerr := rig.Grab("f8", "F8", maskMod4)
 	rep.Check(gerr == nil && res.AllSucceeded(), what,
@@ -248,11 +266,19 @@ func runCoreDomainChecks(rep *Reporter, rig *Rig, in *Injector, i3sock string, i
 	rig.Drain(100 * time.Millisecond)
 	_ = in.TapN("super+F8", 3, 60*time.Millisecond)
 	gotXI := Presses(rig.Drain(drainWindow), f8)
-	marks, _ := i3msg(i3sock, rig.Display, "-t", "get_marks")
+	// CHANNEL MATCH. "i3 did NOT also get the key" is an ABSENCE read off
+	// i3's IPC, so the read itself has to have succeeded: i3msg's error was
+	// discarded here, and a failed i3-msg hands back its stderr, which
+	// contains no mark either — so a dead i3 channel made half this claim
+	// pass for free while the other half (gotXI, the X event stream) carried
+	// it. The X-channel positive gates the X-channel half; the i3-channel
+	// read gates the i3-channel half.
+	marks, marksErr := i3msg(i3sock, rig.Display, "-t", "get_marks")
 	gotCore := strings.Contains(marks, coreMarkerName)
-	rep.Check(gotXI == 3 && !gotCore,
+	rep.Judged(marksErr == nil, gotXI == 3 && !gotCore,
 		"and the LATER (XI2) grabber wins delivery outright",
-		fmt.Sprintf("xi2=%d/3 i3_marks=%s", gotXI, strings.TrimSpace(marks)))
+		fmt.Sprintf("xi2=%d/3 i3_marks=%s", gotXI, strings.TrimSpace(marks)),
+		fmt.Sprintf("i3's mark list could not be read at all (%v), so an absent mark says nothing about who got the key", marksErr))
 	_ = rig.Ungrab("f8")
 }
 

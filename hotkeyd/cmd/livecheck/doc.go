@@ -51,6 +51,33 @@
 // prevents. Injected input is itself such a precondition: without xdotool
 // on PATH every injection-dependent claim SKIPs.
 //
+// SAME RUN IS NOT ENOUGH — SAME CHANNEL. Five successive audits of this file
+// found the same bug five times, and the last four instances were all gated
+// on a genuine same-run positive, just not on the channel the claim's
+// EVIDENCE came from: a state-socket claim gated on a grab probe, an
+// action-log claim gated on the state socket, a grab-report claim gated on a
+// grab probe. Each of the four channels above can go silent independently, so
+// a positive on one says nothing about another. The rule this file now
+// applies to every claim is:
+//
+//	A claim whose PASS condition can be satisfied by SILENCE must gate on a
+//	positive read from EVERY channel its evidence is drawn from, on the same
+//	run. Two channels, two gates — which is why the held-Shift negative needs
+//	both `reEntered` (state socket) and `probeOwned` (grab probe).
+//
+// The corollary is about helpers. A helper whose FAILURE MODE EQUALS ITS PASS
+// CONDITION defeats any gate placed above it: DaemonRig.Actions returns nil
+// both for "nothing was dispatched" and for "the log could not be read", and
+// Rig.ProbeOwned answers owned=false both for "nobody holds it" and for "the
+// probe errored". Claims that pass on an EMPTY answer therefore go through
+// DaemonRig.ActionsOK and absentProbe, which report the read's own success
+// separately so it can be gated on.
+//
+// A claim whose pass condition requires a POSITIVE observation needs no such
+// gate: a silent channel makes it FAIL, which is the safe direction. That
+// asymmetry — not the presence of a gate — is what decides whether a line
+// here is sound.
+//
 // # THE INVENTORY
 //
 // live_check.py is 910 lines and contains 87 assertion call sites, being

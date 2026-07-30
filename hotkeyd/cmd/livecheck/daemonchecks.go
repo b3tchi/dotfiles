@@ -149,15 +149,19 @@ func runDaemonChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig) {
 	_ = in.Up("Control_L")
 	time.Sleep(settle)
 	downLanded, downWhy := leaveWatch.settled(grabSettleTimeout)
-	// THREE preconditions, all read off this run. The third is the one a
+	// FOUR preconditions, all read off this run. The third is the one a
 	// negative like this always needs: bare h has to have BEEN grabbed for
-	// "it is grabbed no longer" to say anything at all.
+	// "it is grabbed no longer" to say anything at all. The fourth is the
+	// probe's own liveness, which absentProbe reports rather than folding
+	// into a false "nobody holds it".
+	freeH, freeHGate := absentProbe(rig, "h", 0)
 	downPre, downPreWhy := gatedOn(
 		gate{leftHeld, "the layer never came down this run"},
 		gate{navHoldsBare, "nav's bare keys were never observed grabbed in the first place, so a granted rival grab now proves nothing"},
 		gate{downLanded, "the post-exit grab set was never observed to land — " + downWhy},
+		freeHGate,
 	)
-	rep.Judged(downPre, !probeOwned(rig, "h", 0), "leaving the layer RELEASED its bare keys again",
+	rep.Judged(downPre, freeH, "leaving the layer RELEASED its bare keys again",
 		"a rival grab on bare h is granted once the layer is down", downPreWhy)
 
 	// -- held Shift is not a sublayer ---------------------------------------
@@ -239,6 +243,24 @@ func gatedOn(gates ...gate) (bool, string) {
 func probeOwned(rig *Rig, key string, mask uint32) bool {
 	owned, _, err := rig.ProbeOwned(key, mask)
 	return err == nil && owned
+}
+
+// absentProbe is the NEGATIVE form of a grab probe, kept honest about its own
+// failure.
+//
+// rig.ProbeOwned answers owned=false BOTH when the chord is genuinely free and
+// when the probe could not be taken at all, so `!probeOwned(...)` grades a
+// broken probe as proof of absence — the helper's failure mode equalling its
+// pass condition, the same shape that made DaemonRig.Actions unsafe for an
+// empty-list claim. The returned gate is false when the probe errored, so the
+// claim SKIPs with the error visible instead of collecting a free PASS.
+func absentProbe(rig *Rig, key string, mask uint32) (free bool, g gate) {
+	owned, _, err := rig.ProbeOwned(key, mask)
+	if err != nil {
+		return false, gate{false, fmt.Sprintf(
+			"the rival grab probe for %q could not be taken at all (%v), so nothing was asked about its absence", key, err)}
+	}
+	return !owned, gate{true, ""}
 }
 
 func awaitCommand(p *I3Proxy, want string, timeout time.Duration) ([]string, bool) {
@@ -386,8 +408,17 @@ func runTransitionLogChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig)
 		return
 	}
 	_, back := d.State.Await(inDefault, stateWait)
-	rep.Check(back || len(d.State.States()) == 0, "back in the default layer for the transition-log checks",
-		describeStates(d.State.States()))
+	// `back || len(States()) == 0` used to stand here, which wrote
+	// ABSENCE OF EVIDENCE straight into the pass expression: a run whose state
+	// channel published nothing at all printed
+	// "PASS back in the default layer ... — no state was published at all".
+	// report.go:60-67 says that must never happen. The empty case is not a
+	// pass, it is a run that could not be asked, so it is the GATE — read off
+	// the same channel the claim's evidence comes from.
+	rep.Judged(len(d.State.States()) > 0, back,
+		"back in the default layer for the transition-log checks",
+		describeStates(d.State.States()),
+		"no state was published on this daemon's socket at all, so which layer it is in is unknown")
 
 	d.Log.Reset()
 	d.State.Reset()
@@ -503,16 +534,29 @@ func runSwitcherChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig) {
 				"before an UNowned key says anything about the table's intent)", grabbedEscape, grabbedQ)},
 	)
 
-	rep.Judged(setUp, !probeOwned(rig, "Super_L", 0),
+	freeSuperL, freeSuperLGate := absentProbe(rig, "Super_L", 0)
+	superLPre, superLWhy := gatedOn(gate{setUp, setUpWhy}, freeSuperLGate)
+	rep.Judged(superLPre, freeSuperL,
 		"entering the layer did NOT grab the held modifier's keysym — a passive grab on a key that is already down never activates",
-		"a rival grab on Super_L is still granted", setUpWhy)
+		"a rival grab on Super_L is still granted", superLWhy)
 
-	// Gated on the layer's set being INSTALLED, not merely on the layer being
-	// open: "the LAYER's grabs cost zero refusals" is a claim about a grab
-	// set, and a daemon that never installed one also refuses nothing.
+	// CHANNEL MATCH. This claim's EVIDENCE is the grab report on disk, so its
+	// gate needs a same-run positive off THE GRAB REPORT — `openLanded`, the
+	// observed republication that proves the switcher's own sync completed and
+	// wrote. `setUp` alone (two rival grab probes) does not supply one: the
+	// probes can be refused by a layer that is genuinely installed while the
+	// report on disk is still the DEFAULT layer's, not yet republished, and
+	// this line would then grade the default layer's numbers under the
+	// switcher's name. The grab-probe half stays as well, because the claim
+	// is about THE LAYER's grab set and a report published by a daemon that
+	// never installed one also refuses nothing.
+	reportPre, reportWhy := gatedOn(
+		gate{openLanded, "the switcher layer's grab report was never observed to be republished — " + openWhy},
+		gate{setUp, setUpWhy},
+	)
 	report, haveReport := proc.CurrentGrabReport(d.Display)
-	rep.Judged(setUp, haveReport && report.Wanted > 0 && len(report.Missing) == 0,
-		"and the layer's grabs cost zero refusals", describeReport(report, haveReport), setUpWhy)
+	rep.Judged(reportPre, haveReport && report.Wanted > 0 && len(report.Missing) == 0,
+		"and the layer's grabs cost zero refusals", describeReport(report, haveReport), reportWhy)
 
 	for _, c := range []struct {
 		owned bool
@@ -532,8 +576,10 @@ func runSwitcherChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig) {
 		{"Super_R", 0, "Super_R"},
 		{"q", maskMod4 | maskShift, "$mod+Shift+q"},
 	} {
-		rep.Judged(setUp, !probeOwned(rig, c.key, c.mask),
-			c.name+" is deliberately absent from a hold layer's grab set", "a rival grab on it is granted", setUpWhy)
+		free, freeGate := absentProbe(rig, c.key, c.mask)
+		pre, why := gatedOn(gate{setUp, setUpWhy}, freeGate)
+		rep.Judged(pre, free,
+			c.name+" is deliberately absent from a hold layer's grab set", "a rival grab on it is granted", why)
 	}
 
 	d.ResetActions()
@@ -558,7 +604,10 @@ func runSwitcherChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig) {
 	d.ResetActions()
 	time.Sleep(3 * IdleTickEquivalent)
 	cur, _ := d.State.Current()
-	heldDuring := d.Actions()
+	// ActionsOK, not Actions: the claim below PASSES on an empty list, and
+	// Actions returns an empty list for an unreadable log too. The read's own
+	// success is carried forward as a gate.
+	heldDuring, heldReadable := d.ActionsOK()
 	rep.Judged(up, cur.Layer == "switcher", "the layer is still up", cur.String(), upWhy)
 
 	// THE RELEASE-BEFORE-GRAB RACE: $mod comes up and the daemon cannot see
@@ -578,22 +627,40 @@ func runSwitcherChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig) {
 	// NOW the negative from above is judgeable: the layer coming down on a
 	// release no grab could deliver is the only available proof that the
 	// idle poll ran at all on this daemon, this run.
-	rep.Judged(endedByPoll, len(heldDuring) == 0,
+	//
+	// CHANNEL MATCH. `endedByPoll` is a STATE-SOCKET positive, and it is the
+	// right gate for "the poll ran". But this claim's EVIDENCE is the ACTION
+	// LOG, so it also needs a same-run positive off THAT channel — otherwise a
+	// dead action channel reads green here while its siblings at
+	// :475/:542/:547/:587 all go red, which is precisely the signature the
+	// comment above calls "the proof". `gotOpen` is the switcher layer's own
+	// dispatch, recorded through the same stub log earlier this run;
+	// `heldReadable` is the individual read that produced heldDuring.
+	pollPre, pollWhy := gatedOn(
+		gate{endedByPoll,
+			"the idle poll was never shown to run on this run (the layer did not come down on the $mod release), " +
+				"so a silent hold-release action is what a poll that never ran also produces"},
+		gate{gotOpen,
+			"the action log never recorded the switcher layer's OWN dispatch this run, so an empty log now is what a " +
+				"dead action channel also produces"},
+		gate{heldReadable, "the action log could not be read at the moment this claim was measured"},
+	)
+	rep.Judged(pollPre, len(heldDuring) == 0,
 		"while $mod is genuinely down the server confirms it and the hold-release action is NOT dispatched",
-		fmt.Sprintf("%v", heldDuring),
-		"the idle poll was never shown to run on this run (the layer did not come down on the $mod release), "+
-			"so a silent hold-release action is what a poll that never ran also produces")
+		fmt.Sprintf("%v", heldDuring), pollWhy)
 
 	acts, gotCommit := d.AwaitAction("switcher-confirm", dispatchGap)
 	rep.Judged(ended, gotCommit, "and the commit was DISPATCHED, not merely implied by the exit",
 		fmt.Sprintf("%v", acts), "the layer never came down this run")
 
+	freeTab, freeTabGate := absentProbe(rig, "Tab", 0)
 	teardown, teardownWhy := gatedOn(
 		gate{ended, "the layer never came down this run"},
 		gate{tabHeldWhileUp, "bare Tab was never grabbed while the layer was UP, so a granted rival grab now proves nothing"},
 		gate{relLanded, "the post-release grab set was never observed to land — " + relWhy},
+		freeTabGate,
 	)
-	rep.Judged(teardown, !probeOwned(rig, "Tab", 0),
+	rep.Judged(teardown, freeTab,
 		"the layer's bare keys went back to applications with it",
 		"a rival grab on bare Tab is granted again", teardownWhy)
 }
@@ -629,9 +696,12 @@ func runModOneChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig) {
 		return
 	}
 
-	// Super+o is what $mod+o means on :0 and NOTHING on :10. Checked first
+	// Super+o is what $mod+o means on :0 and NOTHING on :10. INJECTED FIRST,
 	// so a daemon that grabbed both modifiers cannot pass the next check by
-	// accident.
+	// accident — but only MEASURED here. The verdict waits, for the reason
+	// spelled out below; the same "measure now, judge once the gate exists"
+	// shape the hold-release negative in runSwitcherChecks uses.
+	const whatQuiet = "Super+o does NOT enter nav where $mod is Mod1"
 	d.State.Reset()
 	_ = in.Tap("super+o")
 	time.Sleep(settle + 300*time.Millisecond)
@@ -641,13 +711,10 @@ func runModOneChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig) {
 			sawNav = true
 		}
 	}
-	// Same gate: a daemon that is dead, or that grabbed nothing, also fails
-	// to enter nav. The precondition is that it really did obtain Alt+o on
-	// the Mod1 mask, asked on this run.
+	quietDetail := describeStates(d.State.States())
+	// HALF THE GATE: a daemon that is dead, or that grabbed nothing, also
+	// fails to enter nav, so it must really hold Alt+o on the Mod1 mask.
 	holdsAltO := probeOwned(rig, "o", maskMod1)
-	rep.Judged(holdsAltO, !sawNav, "Super+o does NOT enter nav where $mod is Mod1",
-		describeStates(d.State.States()),
-		"the daemon does not hold Alt+o on this display, so a quiet Super+o proves nothing")
 
 	// Alt+o has to survive BOTH hops — grabbed on the Mod1 mask, and then
 	// matched by an engine that also knows $mod is Mod1.
@@ -659,6 +726,24 @@ func runModOneChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig) {
 	navLanded, navWhy := navWatch.settled(grabSettleTimeout)
 	rep.Check(entered, "Alt+o DOES enter nav where $mod is Mod1 — grab set and engine agree on the display's own modifier",
 		describeStates(d.State.States()))
+
+	// CHANNEL MATCH, and THE OTHER HALF OF THE GATE. `sawNav` is read off the
+	// STATE SOCKET, so "no nav was published" is only evidence about Super+o
+	// once the state socket has been shown to publish AT ALL on this run —
+	// and this phase runs against a FRESH rig and a FRESH watcher
+	// (main.go:222,234), so nothing earlier in the process carries over. A
+	// silent state channel — the watcher connected to a stale socket, a
+	// publisher that never replays — would otherwise hand this negative a free
+	// PASS while `entered` above went red, the exact split the switcher
+	// section calls "the proof". `entered` is that same-channel positive, and
+	// it is the FIRST one this phase has; the grab-probe half stays because
+	// the two halves answer different questions.
+	quietPre, quietWhy := gatedOn(
+		gate{holdsAltO, "the daemon does not hold Alt+o on this display, so a quiet Super+o proves nothing"},
+		gate{entered, "this daemon's state socket never published nav at all this run, so a state list with no nav in it " +
+			"is what a silent state channel also produces, not evidence about Super+o"},
+	)
+	rep.Judged(quietPre, !sawNav, whatQuiet, quietDetail, quietWhy)
 	navUp, navUpWhy := gatedOn(
 		gate{entered, "the daemon never entered nav on the Mod1 display"},
 		gate{navLanded, "nav's grab set was never observed to land on the Mod1 display — " + navWhy},

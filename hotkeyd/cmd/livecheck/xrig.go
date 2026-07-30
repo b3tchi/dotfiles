@@ -244,9 +244,10 @@ func (r *Rig) DeviceNames() (map[uint16]string, error) {
 // Every invocation is env-pinned to the rig (childEnv), so an injector can
 // never land on the caller's session even if $DISPLAY says otherwise.
 type Injector struct {
-	display string
-	env     []string
-	errs    []string
+	display  string
+	env      []string
+	errs     []string
+	attempts int
 }
 
 func NewInjector(display string) *Injector {
@@ -263,6 +264,15 @@ func NewInjector(display string) *Injector {
 // so its failures are surfaced as their own verdict (see runMechanism).
 func (in *Injector) Errors() []string { return append([]string{}, in.errs...) }
 
+// Attempts is how many xdotool invocations this injector actually made.
+//
+// The "no injection was refused" claim is an ABSENCE, and an empty error list
+// is also what a run that never injected anything produces — "every injection
+// was accepted" is vacuously true over an empty set. The count is the same-run
+// positive on the injector's OWN channel that keeps the claim from grading a
+// silence.
+func (in *Injector) Attempts() int { return in.attempts }
+
 // Available reports whether xdotool is on PATH — a precondition, read off
 // this run, that every injection-dependent claim is gated on.
 func (in *Injector) Available() bool {
@@ -271,6 +281,7 @@ func (in *Injector) Available() bool {
 }
 
 func (in *Injector) run(args ...string) error {
+	in.attempts++
 	cmd := exec.Command("xdotool", args...)
 	cmd.Env = in.env
 	out, err := cmd.CombinedOutput()

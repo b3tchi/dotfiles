@@ -136,10 +136,23 @@ func (d *DaemonRig) GrabSummary() (int, string, bool) {
 
 // Actions returns every stubbed Run action recorded since the last
 // ResetActions.
+//
+// IT RETURNS NIL WHEN THE LOG CANNOT BE READ, which makes it unsafe for any
+// claim whose PASS condition is an EMPTY action list: "the daemon dispatched
+// nothing" and "this observer could not look" come back as the same value —
+// the helper's failure mode equalling its pass condition. Callers grading an
+// ABSENCE must use ActionsOK and gate on the read having succeeded.
 func (d *DaemonRig) Actions() []string {
+	acts, _ := d.ActionsOK()
+	return acts
+}
+
+// ActionsOK is Actions with the read's own success reported separately, so an
+// unreadable action log is distinguishable from a silent daemon.
+func (d *DaemonRig) ActionsOK() ([]string, bool) {
 	b, err := os.ReadFile(d.ActionLog)
 	if err != nil {
-		return nil
+		return nil, false
 	}
 	var out []string
 	for _, l := range strings.Split(string(b), "\n") {
@@ -147,7 +160,7 @@ func (d *DaemonRig) Actions() []string {
 			out = append(out, s)
 		}
 	}
-	return out
+	return out, true
 }
 
 func (d *DaemonRig) ResetActions() { _ = os.WriteFile(d.ActionLog, nil, 0o644) }
