@@ -148,6 +148,32 @@ func TestHealth_Verdict8_KeyboardGrabbedElsewhere(t *testing.T) {
 	}
 }
 
+// TestHealth_ProbePrecedence_GrabBeforeGrabReport pins adr0017's ordering
+// exactly: the exclusive-grab probe (8) is checked BEFORE the grab-report
+// probe (9), deliberately -- "LAST on purpose" in health.go's own doc,
+// because a foreign grab EXPLAINS missing chords and reporting the
+// consequence (degraded) over the cause (grabbed) sends the operator to
+// the wrong problem. Setting BOTH probeGrab=grabbed AND a non-empty
+// missing[] at once is the only way to prove the ordering -- either
+// verdict alone is individually correct in isolation, so a mutant that
+// swapped the two checks would still pass every OTHER verdict test.
+func TestHealth_ProbePrecedence_GrabBeforeGrabReport(t *testing.T) {
+	p := fixedProbes(time.Now())
+	p.probeGrab = func(string) (string, bool) {
+		return "another client holds an exclusive keyboard grab (3 probes, 0.3s apart, all AlreadyGrabbed)", true
+	}
+	p.grabReport = func(string) (*proc.GrabReport, bool) {
+		return &proc.GrabReport{PID: 99, Wanted: 10, Active: 0, Missing: []string{"$mod+q", "$mod+w"}}, true
+	}
+	code, msg := health(":0", p)
+	if code != HealthKeyboardGrabbed {
+		t.Fatalf("code = %d, want HealthKeyboardGrabbed (%d) -- the grab probe must win over a simultaneous degraded grab report: %s", code, HealthKeyboardGrabbed, msg)
+	}
+	if strings.Contains(msg, "DEGRADED") {
+		t.Errorf("message reads as the DEGRADED verdict despite an exclusive grab also being present -- wrong probe order: %q", msg)
+	}
+}
+
 // TestHealth_Verdict9_DegradedGrabReport: the daemon is alive, but its own
 // last-published grab report names chords the table wants that are not
 // currently held -- the cure IS a restart here (unlike 7/8), so the

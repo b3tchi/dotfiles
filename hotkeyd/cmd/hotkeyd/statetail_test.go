@@ -16,6 +16,18 @@ import (
 	"hotkeyd/internal/layer"
 )
 
+// statTailNoRetryBudget bounds TestStateTail_SocketMissing_ExitsOneImmediately's
+// elapsed-time guard. A single net.Dial against a nonexistent unix socket
+// path measures ~15 MICROSECONDS on this hardware (dial fails at the
+// kernel level, no handshake attempted) -- so this budget has roughly
+// 10,000x headroom over the real one-shot path while staying far below
+// ANY retry loop with a real backoff: even a single 200ms sleep between
+// two attempts (a mildly "bounded" adr0014 violation, not just an
+// unbounded one) blows past it. Deliberately NOT seconds: a multi-second
+// budget only catches an UNBOUNDED loop, which is a weaker guarantee than
+// "no internal retry at all" (adr0014's actual rule).
+const statTailNoRetryBudget = 100 * time.Millisecond
+
 // TestStateTail_SocketMissing_ExitsOneImmediately is the design's core
 // no-retry requirement made concrete: a socket that was never there must
 // fail FAST, once, with no internal loop -- adr0014 says the HOST owns the
@@ -38,8 +50,8 @@ func TestStateTail_SocketMissing_ExitsOneImmediately(t *testing.T) {
 	if stderr.Len() == 0 {
 		t.Error("stderr should name the failed connection, got nothing")
 	}
-	if elapsed > 2*time.Second {
-		t.Errorf("stateTail took %s to fail on a missing socket -- looks like an internal retry loop, which adr0014 forbids", elapsed)
+	if elapsed > statTailNoRetryBudget {
+		t.Errorf("stateTail took %s to fail on a missing socket (budget %s) -- looks like an internal retry loop, which adr0014 forbids", elapsed, statTailNoRetryBudget)
 	}
 }
 
@@ -96,6 +108,57 @@ func TestStateTail_PrintsLinesVerbatim_ThenExitsZeroOnClose(t *testing.T) {
 	}
 	if lines[1] != `{"layer":"nav","mod":null}` {
 		t.Errorf("line 2 = %q, not verbatim", lines[1])
+	}
+}
+
+// TestStateTail_SkipsBlankLines mirrors state-tail.py's own `if line:`
+// guard (state-tail.py: "line = line.strip(); if line: write") -- a blank
+// or whitespace-only line on the wire must not become a blank line on
+// stdout. Deliberately interleaved between two real payload lines so a
+// mutant that deleted the skip would corrupt the LINE COUNT (4 lines
+// instead of 2), not just leave trailing whitespace an earlier test could
+// miss.
+func TestStateTail_SkipsBlankLines(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_RUNTIME_DIR", dir)
+	display := ":56"
+
+	path := layer.SocketPath(display)
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatalf("listen: %s", err)
+	}
+	defer ln.Close()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		conn.Write([]byte("\n")) // blank line
+		conn.Write([]byte(`{"layer":"default","mod":null}` + "\n"))
+		conn.Write([]byte("   \n")) // whitespace-only line
+		conn.Write([]byte(`{"layer":"nav","mod":null}` + "\n"))
+	}()
+
+	var stdout, stderr bytes.Buffer
+	code := stateTail(display, &stdout, &stderr)
+	wg.Wait()
+
+	if code != 0 {
+		t.Fatalf("stateTail = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	got := stdout.String()
+	lines := strings.Split(strings.TrimRight(got, "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("got %d line(s), want exactly 2 (blank/whitespace-only lines must be skipped): %q", len(lines), got)
+	}
+	if lines[0] != `{"layer":"default","mod":null}` || lines[1] != `{"layer":"nav","mod":null}` {
+		t.Fatalf("unexpected lines: %q", got)
 	}
 }
 

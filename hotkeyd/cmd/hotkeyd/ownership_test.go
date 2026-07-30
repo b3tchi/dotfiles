@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"hotkeyd/internal/bind"
+	"hotkeyd/internal/i3"
 )
 
 // TestOwnerOf_AllFourOutcomes is the core classification the design names
@@ -208,6 +209,50 @@ func TestReportOwnership_NoCollisions_ReturnsZero(t *testing.T) {
 	var buf bytes.Buffer
 	if code := reportOwnership(&buf, i3Config, binds); code != 0 {
 		t.Fatalf("reportOwnership with no collisions = %d, want 0; output:\n%s", code, buf.String())
+	}
+}
+
+// TestRunOwnershipWith_ThreadsResolvedDisplayToClientFactory pins the
+// --display flag's path all the way to i3 client construction: a mutant
+// that silently drops the display argument (falling back to the ambient
+// $DISPLAY instead) would be invisible to any test that only inspects the
+// exit code, since a transport failure looks identical either way. Setting
+// $DISPLAY to a DIFFERENT value than the explicit argument and asserting
+// the client factory actually received the explicit one is the only way
+// to observe the threading itself.
+func TestRunOwnershipWith_ThreadsResolvedDisplayToClientFactory(t *testing.T) {
+	t.Setenv("DISPLAY", ":9") // ambient -- must NOT be what the factory sees
+
+	var gotDisplay string
+	code := runOwnershipWith(":77", func(resolved string) i3.Client {
+		gotDisplay = resolved
+		return &fakeI3Client{getConfigFn: func() (string, error) { return "", nil }}
+	})
+
+	if gotDisplay != ":77" {
+		t.Fatalf("client factory received display %q, want %q (the explicit --display arg, not ambient $DISPLAY)", gotDisplay, ":77")
+	}
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+}
+
+// TestRunOwnershipWith_FallsBackToAmbientDisplayWhenUnset is the
+// TestRunOwnershipWith_ThreadsResolvedDisplayToClientFactory twin: with NO
+// explicit display, resolveDisplay's normal $DISPLAY fallback must still
+// apply -- proving the factory seam does not accidentally bypass
+// resolveDisplay altogether.
+func TestRunOwnershipWith_FallsBackToAmbientDisplayWhenUnset(t *testing.T) {
+	t.Setenv("DISPLAY", ":9")
+
+	var gotDisplay string
+	runOwnershipWith("", func(resolved string) i3.Client {
+		gotDisplay = resolved
+		return &fakeI3Client{getConfigFn: func() (string, error) { return "", nil }}
+	})
+
+	if gotDisplay != ":9" {
+		t.Fatalf("client factory received display %q, want %q ($DISPLAY fallback)", gotDisplay, ":9")
 	}
 }
 

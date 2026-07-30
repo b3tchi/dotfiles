@@ -257,7 +257,22 @@ func reportOwnership(w io.Writer, i3Config string, binds []bind.Bind) int {
 // real daemon uses, so this never queries the WRONG i3 -- see main.go's
 // i3SocketResolver doc), fetch GET_CONFIG, and report.
 func runOwnership(display string) int {
-	client := i3.NewClient(i3SocketResolver(resolveDisplay(display)), nil)
+	return runOwnershipWith(display, func(resolvedDisplay string) i3.Client {
+		return i3.NewClient(i3SocketResolver(resolvedDisplay), nil)
+	})
+}
+
+// runOwnershipWith is runOwnership's testable body: newClient builds the
+// i3.Client GIVEN THE ALREADY-RESOLVED display, factored out so a test can
+// prove the --display flag actually reaches client construction rather
+// than being silently dropped in favour of the ambient $DISPLAY. Without
+// this seam, a mutant that replaced resolveDisplay(display) with
+// resolveDisplay("") would be invisible to every test here: GetConfig's
+// transport failure alone cannot distinguish "asked the wrong i3" from
+// "there is no i3 at all", so a test that only checks the exit code can
+// never catch it -- the resolved value itself has to be observable.
+func runOwnershipWith(display string, newClient func(resolvedDisplay string) i3.Client) int {
+	client := newClient(resolveDisplay(display))
 	defer client.Close()
 
 	cfg, err := client.GetConfig()

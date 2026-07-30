@@ -5,12 +5,44 @@ package main
 // dotfiles-ylmp.12).
 
 import (
+	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"hotkeyd/internal/bind"
 )
+
+// captureStderr redirects os.Stderr to a pipe for the duration of f,
+// returning f's result and everything written to stderr. Needed because
+// runStateTailCmd/runHealth print straight to os.Stderr/os.Stdout rather
+// than an injected writer (Dispatch's own signature is `[]string -> int`,
+// matching main()'s os.Exit(Dispatch(...)) contract) -- this is the seam
+// that lets a Dispatch-level test distinguish WHICH handler actually ran
+// by its message text, not just its exit code (two different code paths
+// can legitimately produce the same exit code for different reasons).
+func captureStderr(t *testing.T, f func() int) (code int, stderr string) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %s", err)
+	}
+	orig := os.Stderr
+	os.Stderr = w
+	defer func() { os.Stderr = orig }()
+
+	done := make(chan string, 1)
+	go func() {
+		buf, _ := io.ReadAll(r)
+		done <- string(buf)
+	}()
+
+	code = f()
+	w.Close()
+	stderr = <-done
+	return
+}
 
 // TestValidateAllResolutions_ValidTable_NoProblems proves --check validates
 // under EVERY $mod resolution this repo runs on (us020 AC2's headless
@@ -162,21 +194,52 @@ func TestDispatch_Health_RoutesToRunHealth(t *testing.T) {
 
 // TestDispatch_StateTail_RoutesToStateTailCmd proves the "state-tail"
 // leading argv token is actually routed to runStateTailCmd, not silently
-// falling through to flag parsing (which would try to interpret
-// "state-tail" as a bare positional arg to the daemon-start path). An
-// isolated XDG_RUNTIME_DIR guarantees no real socket exists, so a routed
-// call fails fast (exit 1, cannot connect) rather than hanging or trying
-// to open a real X display.
+// falling through to flag parsing.
+//
+// Exit code and elapsed time ALONE do not prove this: Go's flag package
+// treats a leading non-flag argument ("state-tail") as the end of parsing
+// and returns no error, so a Dispatch with the routing case DELETED falls
+// through to `default: return run(argv)` with argv=["state-tail", ":251"]
+// -- run()'s own FlagSet does the identical "stop at first non-flag arg,
+// no error" thing, so it proceeds to x11.Open(defaultDisplay), which ALSO
+// fails fast and returns 1 in a display-less test sandbox. That coincidence
+// is exactly what let this mutant survive a code+elapsed-only check
+// (confirmed by hand: deleting the routing case produced the same exit
+// code 1, and only hung this test when the test happened to run somewhere
+// with a live ambient $DISPLAY). The message text is what actually
+// differs and is what this test pins: only runStateTailCmd's failure path
+// says "state-tail: cannot connect to"; the daemon-start path's failure
+// message (daemonLog, main.go) says "hotkeyd: cannot open display".
 func TestDispatch_StateTail_RoutesToStateTailCmd(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_RUNTIME_DIR", dir)
+	// Pin the ambient display to a DEAD one. The correct code path never
+	// reads $DISPLAY at all (":251" is passed explicitly), so this cannot
+	// weaken the assertions -- it bounds the FALLTHROUGH path instead. Two
+	// reasons it must be here: (a) safety -- with the routing case deleted,
+	// Dispatch reaches run() with display="" and would otherwise open the
+	// DEVELOPER'S LIVE $DISPLAY and start a real daemon taking real grabs
+	// on their session; (b) determinism -- on such a machine the mutant
+	// HANGS (a started daemon never returns) instead of failing, so the
+	// kill below only reads as a clean assertion failure once the ambient
+	// display is guaranteed dead. :4242 is outside every display range this
+	// repo's Xvfb helpers allocate from (200-2199, 6000-7999).
+	t.Setenv("DISPLAY", ":4242")
 
 	start := time.Now()
-	code := Dispatch([]string{"state-tail", ":251"})
+	code, stderr := captureStderr(t, func() int {
+		return Dispatch([]string{"state-tail", ":251"})
+	})
 	elapsed := time.Since(start)
 
 	if code != 1 {
 		t.Fatalf("Dispatch([state-tail, :251]) = %d, want 1 (no socket present)", code)
+	}
+	if !strings.Contains(stderr, "state-tail: cannot connect to") {
+		t.Fatalf("stderr does not carry state-tail's own failure message (looks like it fell through to the daemon-start path instead of runStateTailCmd()): %q", stderr)
+	}
+	if strings.Contains(stderr, "hotkeyd: cannot open display") {
+		t.Fatalf("stderr carries the DAEMON-START failure message -- state-tail routing was bypassed: %q", stderr)
 	}
 	if elapsed > 2*time.Second {
 		t.Errorf("Dispatch([state-tail, ...]) took %s -- looks like it fell through to the daemon-start path instead of runStateTailCmd()", elapsed)
