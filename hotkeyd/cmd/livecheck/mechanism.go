@@ -78,6 +78,14 @@ func runMechanism(rep *Reporter, rig *Rig, in *Injector, i3sock string) {
 	// device grab: both deliver F10 here. What separates them is everything
 	// ELSE — F12 is in nobody's grab set, so silence on F12 while F10 fires
 	// is the discriminator.
+	//
+	// The two are one claim, not two lines: the file's own comment said so
+	// and the code did not enforce it. A dead injector (or a grab that was
+	// never obtained) delivers no F12 either, so the negative was collecting
+	// a PASS in exactly the run where its sibling went red. It is now GATED
+	// on the sibling, measured first, and reported in the same order as
+	// before ([[im009]]; report.go's Judged doc: splitting a precondition
+	// into its own line does not close the vacuity).
 	if !injecting {
 		skipNoInject("a key we did NOT grab is not delivered to us — the grab is per chord")
 		skipNoInject("while the chord we DID grab still arrives")
@@ -86,11 +94,13 @@ func runMechanism(rep *Reporter, rig *Rig, in *Injector, i3sock string) {
 		rig.Drain(100 * time.Millisecond)
 		_ = in.TapN("F12", 3, 30*time.Millisecond)
 		strays := Presses(rig.Drain(drainWindow), f12)
-		rep.Check(strays == 0,
-			"a key we did NOT grab is not delivered to us — the grab is per chord, never an exclusive device grab",
-			fmt.Sprintf("%d stray deliveries", strays))
 		_ = in.TapN("super+F10", 2, 50*time.Millisecond)
 		got := Presses(rig.Drain(drainWindow), f10)
+		rep.Judged(got == 2, strays == 0,
+			"a key we did NOT grab is not delivered to us — the grab is per chord, never an exclusive device grab",
+			fmt.Sprintf("%d stray deliveries", strays),
+			fmt.Sprintf("the chord we DID grab did not arrive either (%d/2), so silence on F12 is what a dead injector "+
+				"or an unobtained grab produces, not evidence about the grab's scope", got))
 		rep.Check(got == 2,
 			"while the chord we DID grab still arrives (else the check above is satisfied by a client that grabbed nothing)",
 			fmt.Sprintf("%d/2", got))
@@ -111,12 +121,17 @@ func runMechanism(rep *Reporter, rig *Rig, in *Injector, i3sock string) {
 				fmt.Sprintf("the rival client could not take $mod+F11 first (err=%v refused=%d)", rerr, len(rres.Failed)))
 		} else {
 			mine, err := rig.Grab("f11", "F11", maskMod4)
-			rep.Check(err == nil && len(mine.Failed) > 0,
+			refused := err == nil && len(mine.Failed) > 0
+			rep.Check(refused,
 				"a chord another XI2 client already grabbed is REFUSED and reported",
 				fmt.Sprintf("%d of 4 modifier variants refused (err=%v)", len(mine.Failed), err))
 			_, heldF11 := rig.held["f11"]
-			rep.Check(!heldF11, "a fully refused chord is not recorded as ours",
-				fmt.Sprintf("held=%v", sortedKeys(rig.held)))
+			// Gated on the refusal actually happening: a grab request that
+			// ERRORED records nothing either, and this negative would then be
+			// green about bookkeeping that was never exercised.
+			rep.Judged(refused, !heldF11, "a fully refused chord is not recorded as ours",
+				fmt.Sprintf("held=%v", sortedKeys(rig.held)),
+				"the second grab was not refused at all, so there is no refusal for the bookkeeping to have handled")
 			_, heldF10 := rig.held["f10"]
 			rep.Check(heldF10, "the other chord is still grabbed after a refusal",
 				fmt.Sprintf("held=%v", sortedKeys(rig.held)))

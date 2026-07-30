@@ -18,10 +18,28 @@ import (
 
 const pythonLiveCheck = "../../live_check.py"
 
-// pyAssertionLines re-derives the python assertion call sites from source:
+// pySite is one assertion call site: the 1-based line, and WHICH helper it
+// calls. The split matters because the package doc quotes it, and a figure
+// no test derives is the class of error this suite has been burned by twice.
+type pySite struct {
+	line int
+	call string // "check" or "judged"
+}
+
+func pyAssertionLines(t *testing.T) []int {
+	t.Helper()
+	sites := pyAssertionSites(t)
+	out := make([]int, 0, len(sites))
+	for _, s := range sites {
+		out = append(out, s.line)
+	}
+	return out
+}
+
+// pyAssertionSites re-derives the python assertion call sites from source:
 // every indented `check(` or `judged(` call, minus the two calls INSIDE the
 // judged() helper's own body (which are its implementation, not assertions).
-func pyAssertionLines(t *testing.T) []int {
+func pyAssertionSites(t *testing.T) []pySite {
 	t.Helper()
 	src, err := os.ReadFile(pythonLiveCheck)
 	if err != nil {
@@ -47,14 +65,14 @@ func pyAssertionLines(t *testing.T) []int {
 	}
 
 	call := regexp.MustCompile(`^\s+(check|judged)\(`)
-	var out []int
+	var out []pySite
 	for i, l := range lines {
 		n := i + 1
 		if n >= defStart && n < defEnd {
 			continue
 		}
-		if call.MatchString(l) {
-			out = append(out, n)
+		if m := call.FindStringSubmatch(l); m != nil {
+			out = append(out, pySite{line: n, call: m[1]})
 		}
 	}
 	return out
@@ -182,6 +200,26 @@ func TestInventory_DocFiguresMatchTheSource(t *testing.T) {
 		if !strings.Contains(text, claim) {
 			t.Errorf("the package doc does not state %q -- re-derive the figure rather than carrying one over", claim)
 		}
+	}
+
+	// THE SPLIT, derived. An audit caught the doc claiming "85 check( + 1
+	// judged(" against a measured 86 + 1: the total was pinned by the test
+	// above, the decomposition was not, so the only wrong number in the
+	// paragraph was the only one nothing derived. It is derived now.
+	var checks, judgeds int
+	for _, s := range pyAssertionSites(t) {
+		switch s.call {
+		case "check":
+			checks++
+		case "judged":
+			judgeds++
+		}
+	}
+	if checks+judgeds != sites {
+		t.Fatalf("split %d check + %d judged does not add up to %d sites", checks, judgeds, sites)
+	}
+	if want := fmt.Sprintf("%d `check(` + %d `judged(`", checks, judgeds); !strings.Contains(text, want) {
+		t.Errorf("the package doc does not state the derived split %q — every figure in that paragraph must come from the source", want)
 	}
 
 	inv := readInventory(t)

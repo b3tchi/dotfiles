@@ -172,6 +172,10 @@ func runDaemonPhase(rep *Reporter, rig *Rig, inj *Injector, bin []string, displa
 	defer d.Cleanup()
 	d.Proxy = proxy
 
+	// The baseline is taken BEFORE the daemon starts, so the startup grab
+	// sync is itself an observed PUBLICATION rather than an inference off a
+	// report that may not exist yet (settle.go).
+	startWatch := watchGrabs(display)
 	if err := d.Start(proxy.path, 15*time.Second); err != nil {
 		rep.Check(false, "the real daemon started and announced its grab set", err.Error())
 		return nil
@@ -182,7 +186,9 @@ func runDaemonPhase(rep *Reporter, rig *Rig, inj *Injector, bin []string, displa
 		return nil
 	}
 	d.State = sw
-	awaitGrabsSettled(display, 5*time.Second)
+	if ok, why := startWatch.settled(grabSettleTimeout); !ok {
+		fmt.Fprintln(os.Stderr, "livecheck: the daemon's startup grab set never settled:", why)
+	}
 
 	runDaemonChecks(rep, rig, inj, d)
 	runSingleInstanceCheck(rep, d)
@@ -220,6 +226,7 @@ func runModOnePhase(rep *Reporter, rig *Rig, inj *Injector, bin []string, displa
 	defer d.Cleanup()
 	d.Proxy = proxy
 
+	startWatch := watchGrabs(display)
 	if err := d.Start(proxy.path, 15*time.Second); err != nil {
 		rep.Check(false, "the daemon started on the Mod1 display", err.Error())
 		return nil
@@ -230,7 +237,9 @@ func runModOnePhase(rep *Reporter, rig *Rig, inj *Injector, bin []string, displa
 		return nil
 	}
 	d.State = sw
-	awaitGrabsSettled(display, 5*time.Second)
+	if ok, why := startWatch.settled(grabSettleTimeout); !ok {
+		fmt.Fprintln(os.Stderr, "livecheck: the Mod1 daemon's startup grab set never settled:", why)
+	}
 
 	runModOneChecks(rep, rig, inj, d)
 	d.Stop()

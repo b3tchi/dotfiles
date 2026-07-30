@@ -53,13 +53,16 @@
 //
 // # THE INVENTORY
 //
-// live_check.py is 910 lines and contains 87 assertion call sites (85
-// `check(` + 1 `judged(` + a two-armed try/except pair at py:900/902 that
-// emits exactly one line). At runtime it emits 91 PASS/FAIL lines, because
-// py:148 runs twice and py:700/702 run three times each while only one arm
-// of py:900/902 executes. All four figures were re-derived from the source
-// and from a live run of the python suite for this task; do not trust them
-// second-hand.
+// live_check.py is 910 lines and contains 87 assertion call sites, being
+// 86 `check(` + 1 `judged(`. (The `check(` figure is the EXTERNAL ones — the
+// two calls inside judged()'s own body are its implementation, not
+// assertions. py:900 and py:902 are the two arms of one try/except and are
+// two sites, listed as two rows below, of which exactly one runs.) At
+// runtime it emits 91 PASS/FAIL lines, because py:148 runs twice and
+// py:700/702 run three times each while only one arm of py:900/902
+// executes. Every figure here is re-derived from the source by
+// inventory_test.go — including the 86/1 split, which an audit caught wrong
+// (it said 85) precisely because it was the one number no test pinned.
 //
 // Every one of the 87 sites is accounted for below — 77 re-expressed in Go,
 // 10 python-only with a stated reason. inventory_test.go re-parses
@@ -186,7 +189,10 @@
 //	python arm only. A direct measurement showed both engines hold them —
 //	the probe was sampling a half-installed grab set, because both daemons
 //	publish the new layer state BEFORE finishing a one-chord-at-a-time
-//	sync, and python's 106-chord sync is slower. Fixed by
-//	awaitGrabsSettled (daemonchecks.go). A single-engine run would have
-//	shipped that bug as a green suite.
+//	sync, and python's 106-chord sync is slower. Closed by settle.go, which
+//	waits for the grab report to be PUBLISHED AGAIN since before the
+//	triggering input — a publication is proof a sync completed, whereas the
+//	first attempt (wait for the report to stop changing) settled happily on
+//	the stale pre-transition report and was merely slower. A single-engine
+//	run would have shipped the original bug as a green suite.
 package main
