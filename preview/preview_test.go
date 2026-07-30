@@ -19,8 +19,10 @@ import (
 
 // TestPreviewGetReturnsJSONNotShellHTML proves a plain GET /preview<N> (no
 // websocket upgrade headers) returns {slot, path, type} JSON, not the old
-// shell HTML — the shell moves into QML (sp022 Task 3 success criteria:
-// "GET /preview<N> non-ws returns JSON ... instead of shell.html"). This
+// browser-shell markup the retired wry host used to load — the shell moved
+// into QML (sp022 Task 3 success criteria: "GET /preview<N> non-ws returns
+// JSON ... instead of [the old static shell]"; sp022 Task 8 deleted that
+// static shell's files entirely once nothing served them anymore). This
 // test supersedes the pre-sp022 TestPreviewShellServesHTML, which asserted
 // exactly the contract this task replaces; server_test.go's
 // TestHandlePreviewGetReturnsJSONShape/TestHandlePreviewGetJSONForUnsetSlot
@@ -40,7 +42,7 @@ func TestPreviewGetReturnsJSONNotShellHTML(t *testing.T) {
 		t.Errorf("GET /preview1 content-type %q, want application/json", ct)
 	}
 	body := rec.Body.String()
-	if strings.Contains(body, "app.js") || strings.Contains(body, `id="content"`) {
+	if strings.Contains(body, `id="content"`) {
 		t.Errorf("GET /preview1 body still looks like the old shell HTML: %s", body)
 	}
 	var got struct {
@@ -53,22 +55,6 @@ func TestPreviewGetReturnsJSONNotShellHTML(t *testing.T) {
 	}
 	if got.Slot != 1 {
 		t.Errorf("GET /preview1 slot = %d, want 1", got.Slot)
-	}
-}
-
-// TestPreviewStaticAppJSServed proves /static/app.js (referenced by the
-// shell) is actually served from the embedded static FS.
-func TestPreviewStaticAppJSServed(t *testing.T) {
-	srv := newTestServer(t)
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/static/app.js", nil)
-	srv.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /static/app.js: status %d, want 200", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "WebSocket") {
-		t.Errorf("GET /static/app.js body missing WebSocket client code")
 	}
 }
 

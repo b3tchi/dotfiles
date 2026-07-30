@@ -113,9 +113,9 @@ func (s *Server) Handler() http.Handler {
 	return s.previewRouter(mux)
 }
 
-// noCache stops the browser caching the shell/app.js assets so a rebuilt
-// daemon's updated static files show on a normal refresh (akm-graph
-// noCache precedent).
+// noCache stops the browser caching the embedded static assets (the STL
+// viewer bundle, currently) so a rebuilt daemon's updated files show on a
+// normal refresh (akm-graph noCache precedent).
 func noCache(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
@@ -185,9 +185,10 @@ func (s *Server) handlePreview(n int, w http.ResponseWriter, r *http.Request) {
 }
 
 // handlePreviewInfo serves a plain (non-ws) GET /preview<N>: slot n's
-// current state as JSON — {slot, path, type} — replacing the static
-// shell.html page the wry host used to load (sp022 Task 3 success
-// criteria: "the shell moves into QML; static files delete in Task 8").
+// current state as JSON — {slot, path, type} — replacing the static shell
+// page the wry host used to load (sp022 Task 3 success criteria: "the
+// shell moves into QML; static files delete in Task 8" — Task 8 is where
+// that static shell page and its script were actually deleted).
 // PreviewView.qml (T4) discovers a slot's initial state either through this
 // route or through the ws priming frame handlePreviewWS already sends on
 // connect — both carry the identical {path, type} pair via

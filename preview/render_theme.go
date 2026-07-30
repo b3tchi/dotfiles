@@ -7,25 +7,27 @@ package main
 // It exists because those renderers previously shipped no presentation at
 // all. renderMarkdown emitted a bare `<html><body>` with zero CSS and
 // renderCode used chroma's light "github" style, so a text preview painted a
-// white page inside a webview shell that is otherwise #111 throughout
-// (static/shell.html, static/app.js's imageDoc, render_stl.go). Images and
-// STL already had a dark wrapper; text was the gap.
+// white page against everything else in this daemon's output, which is
+// #111 throughout (the STL viewer, render_stl.go). Text was the gap.
 //
-// It also adds keyboard zoom. static/app.js's imageDoc has carried a
-// fit<->1:1 toggle since sp008 Task 3, but text previews had no zoom control
-// of any kind. Scaling the root font-size is the text analogue: it moves
-// prose, tables and <pre> together, and unlike a CSS transform it reflows
-// rather than clipping.
+// It also adds keyboard zoom, the text analogue of the image tier's
+// fit<->1:1 toggle (now native QML, sp022 Tasks 4-5) — text previews had no
+// zoom control of any kind. Scaling the root font-size moves prose, tables
+// and <pre> together, and unlike a CSS transform it reflows rather than
+// clipping.
 //
-// Both live in the *served document* rather than in static/app.js on purpose.
-// The README's browser-fallback contract — "the daemon also serves
+// Both live in the *served document* on purpose: the README's
+// browser-fallback contract — "the daemon also serves
 // http://127.0.0.1:4200/file/<path>?full; open it in any browser if the GUI
-// window isn't available" — means the page has to be self-sufficient with no
-// shell wrapped around it.
+// window isn't available" — means the page has to be self-sufficient, with
+// no shell wrapped around it (sp022 Task 8 retired the wry host's own
+// shell/script pair entirely, so this was already the only place the dark
+// theme and zoom could live).
 
-// previewBG is the single background colour shared by the webview shell, the
-// image wrapper, the STL viewer and (now) every text preview. Named so the
-// value has one home; the tests assert against this constant rather than a
+// previewBG is the single background colour shared by the STL viewer and
+// every text preview (the QML native tiers paint their own dark background
+// directly, not through this served-document CSS). Named so the value has
+// one home; the tests assert against this constant rather than a
 // duplicated literal.
 const previewBG = "#111"
 

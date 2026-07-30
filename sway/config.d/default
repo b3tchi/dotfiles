@@ -50,9 +50,11 @@ for_window [title="qs-switcher"] floating enable, border none, move position cen
 for_window [title="qs-projects"] floating enable, border none, move position center, focus
 for_window [title="quickshell-notifications"] floating enable, border none, sticky enable
 
-# preview-webview client host (sp013): the chrome-less wry window
-# (WM_CLASS preview-wv, via XWayland — GDK forced to x11) tiles/docks
-# into the layout by design — no floating rule.
+# preview window (ft005, sp022): the native qml6 preview client tiles/docks
+# into the layout by design — no floating rule. sway exposes a native
+# [pid=…] criterion, which is how the `preview` wrapper resolves and moves
+# this window (qml6's WM_CLASS is shared by every qml6-hosted app in the
+# repo, so class/title matching was never viable here — sp022 Task 6).
 
 ### Output configuration
 #

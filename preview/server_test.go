@@ -1094,7 +1094,7 @@ func TestRegisterWithoutWorkspaceLeavesItEmpty(t *testing.T) {
 	}
 }
 
-// --- sp022 Task 3: GET /preview<N> (non-ws) returns JSON, not shell.html --
+// --- sp022 Task 3: GET /preview<N> (non-ws) returns JSON, not the old static shell --
 
 // TestHandlePreviewGetReturnsJSONShape proves a plain (non-websocket) GET
 // /preview<N> now serves {slot, path, type} JSON instead of the static
@@ -1120,7 +1120,7 @@ func TestHandlePreviewGetReturnsJSONShape(t *testing.T) {
 		t.Fatalf("GET /preview1: status %d, want 200 (body: %s)", rec.Code, rec.Body.String())
 	}
 	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
-		t.Errorf("GET /preview1 content-type = %q, want application/json (not shell.html)", ct)
+		t.Errorf("GET /preview1 content-type = %q, want application/json (not the old static shell)", ct)
 	}
 	var got struct {
 		Slot int    `json:"slot"`
