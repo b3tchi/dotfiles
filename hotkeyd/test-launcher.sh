@@ -194,10 +194,29 @@ n=$(pgrep -f "$HOTKEYD_PROC_PAT.*--display $XA" 2>/dev/null | wc -l)
 
 # --- stop -------------------------------------------------------------------
 echo "launcher: stop"
+# THE COUNT IS TAKEN BEFORE AS WELL (dotfiles-my14). "No daemon matches any
+# more" is a negative claim read through the pgrep pattern, and a negative claim
+# is satisfied for free by an instrument that can no longer see anything —
+# the ylmp.13 family, and the reason my14 swept this file. Probed rather than
+# assumed: run with HOTKEYD_PROC_PAT=ZZZ_MATCHES_NOTHING, nine assertions in
+# this suite fail loudly and this one alone kept reporting PASS, because a
+# pattern that matches nothing counts zero daemons whether `stop` worked or not.
+# Under a real engine cutover that is not a hypothetical — it is what a suite
+# still carrying the python-only pattern would report about a Go daemon it left
+# running. So the pattern has to be shown LIVE on this display one instant
+# earlier for its silence afterwards to mean anything.
+n_before=$(pgrep -f "$HOTKEYD_PROC_PAT.*--display $XA" 2>/dev/null | wc -l)
 run "$XA" stop >/dev/null 2>&1
 sleep 0.5
 n=$(pgrep -f "$HOTKEYD_PROC_PAT.*--display $XA" 2>/dev/null | wc -l)
-[ "$n" = 0 ] && ok "stop ends the daemon" || bad "$n daemons still running"
+if [ "$n_before" != 1 ]; then
+    bad "no daemon was visible on $XA before stop ($n_before matched) — this \
+pattern cannot observe whatever stop does next, so a zero after it is vacuous"
+elif [ "$n" = 0 ]; then
+    ok "stop ends the daemon (matched before, gone after)"
+else
+    bad "$n daemons still running"
+fi
 [ ! -e "$RUNTIME/hotkeyd-$TAG_A.sock" ] && ok "stop leaves no stale socket" \
     || bad "stale socket left behind"
 n_b=$(pgrep -f "$HOTKEYD_PROC_PAT.*--display $XB" 2>/dev/null | wc -l)

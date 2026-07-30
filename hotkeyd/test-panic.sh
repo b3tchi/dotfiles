@@ -870,6 +870,125 @@ fi
 hotkeyd-panic.sh matches '$pat_panic' — one of them cannot see a daemon the \
 other can, and panic is the one that must see all of them"
 
+# --- 8e: ... and on the argv TAIL, not only the core (dotfiles-my14) ----------
+# Everything above cuts both patterns at the FIRST SPACE, so it compares
+# `hotkeyd(\.py)?` and stops there. That is the half that drifted in ylmp.14, so
+# the guard catches the drift that actually happened — but it is not the half
+# that decides whether a daemon carrying flags after --display, or one on a
+# two-digit display, is discovered at all. A divergence anywhere in the
+# `.*--display …` TAIL sails straight through a check named "the two scripts
+# agree on the daemon argv", which is a narrower guarantee than the name
+# promises and the exact shape dotfiles-my14 was filed to sweep for.
+#
+# A full-string compare would be WRONG: the launcher's pattern is display-scoped
+# and the panic script's deliberately is not (panic is machine-wide by design —
+# the dotfiles-hwds.12 requirement-4 decision). The invariant that does hold is
+# BEHAVIOURAL: for every argv, panic must discover it on exactly the display the
+# launcher discovers it on. Both directions are live defects. Panic blind to a
+# daemon the launcher can stop links the fallback over a process still holding
+# its grabs (the ylmp.14 defect). Panic naming a display whose daemon
+# daemon_pid() cannot resolve makes the `hotkeyd.sh stop` panic runs on it a
+# silent no-op — the same CONTESTED end state reached by the other road.
+echo "panic: ... and they agree on the argv TAIL, not just the core"
+pat_launcher_full="$(sed -n 's/.*pgrep -f "\(.*\)" 2>.*/\1/p' "$HERE/hotkeyd.sh" \
+                     | head -1)"
+pat_panic_full="$(sed -n "s/.*pgrep -af '\(.*\)' 2>.*/\1/p" \
+                  "$HERE/hotkeyd-panic.sh" | head -1)"
+if [ -z "$pat_launcher_full" ] || [ -z "$pat_panic_full" ]; then
+    bad "could not read a FULL pgrep pattern out of one of the scripts \
+(launcher: '$pat_launcher_full', panic: '$pat_panic_full') — this guard has \
+gone blind"
+else
+    ok "both full pgrep patterns are readable (launcher: $pat_launcher_full, \
+panic: $pat_panic_full)"
+
+    # The launcher writes its pattern inside DOUBLE quotes with $DPY_BASE in it,
+    # so re-expanding the extracted text under the same rules reproduces what
+    # pgrep is actually handed, escapes included (`\$` -> `$`). Reading the
+    # shipped text rather than restating it is the whole point: a guard that
+    # carries its own copy of the pattern is testing itself.
+    launcher_pat_for() {           # <display> -> the pattern hotkeyd.sh uses
+        local DPY_BASE="$1" _r
+        eval "_r=\"$pat_launcher_full\""
+        printf '%s' "$_r"
+    }
+    matches() {                    # <pattern> <argv>
+        printf '%s\n' "$2" | grep -Eq -- "$1"
+    }
+
+    # `argv|display-it-belongs-to`. Both engines, one- and two-digit displays,
+    # and daemons carrying flags after --display (started by hand with --binds,
+    # which daemon_pid()'s comment says explicitly must stay visible).
+    drift=""
+    both=0
+    while IFS='|' read -r _argv _dpy; do
+        [ -n "$_argv" ] || continue
+        matches "$pat_panic_full" "$_argv" && _p=1 || _p=0
+        matches "$(launcher_pat_for "$_dpy")" "$_argv" && _l=1 || _l=0
+        [ "$_p" = 1 ] && [ "$_l" = 1 ] && both=$((both + 1))
+        [ "$_p" = "$_l" ] || drift="$drift; panic=$_p launcher=$_l on [$_argv]"
+    done <<'ARGVTABLE'
+python3 /opt/hotkeyd/hotkeyd.py --display :0|:0
+/usr/local/bin/hotkeyd --display :0|:0
+python3 /opt/hotkeyd/hotkeyd.py --display :10|:10
+/usr/local/bin/hotkeyd --display :10|:10
+python3 /opt/hotkeyd/hotkeyd.py --display :1 --binds /tmp/t.py|:1
+/usr/local/bin/hotkeyd --display :12 --binds /tmp/t.py|:12
+python3 /opt/hotkeyd/hotkeyd.py --binds /tmp/t.py --display :3|:3
+/usr/local/bin/hotkeyd --binds /tmp/t.py --display :4|:4
+ARGVTABLE
+    [ -z "$drift" ] \
+        && ok "every daemon argv is discovered by BOTH scripts on the same \
+display (both engines, 1- and 2-digit displays, with and without trailing flags)" \
+        || bad "argv TAIL drift — one script sees a daemon the other cannot$drift"
+    # A guard whose two patterns both matched NOTHING would report perfect
+    # agreement. That is the ZZZ_MATCHES_NOTHING lesson (dotfiles-pwaj) turned
+    # on the guard itself: an instrument has to be shown live before its silence
+    # means anything.
+    [ "$both" -eq 8 ] \
+        && ok "and all 8 synthetic daemons were actually matched — the \
+comparison is live, not two patterns agreeing on nothing" \
+        || bad "only $both/8 synthetic daemons matched BOTH patterns — the \
+agreement above is partly or wholly vacuous"
+
+    # The other way a pattern can agree with itself is by matching EVERYTHING.
+    # These are the near misses that share the directory or the basename: the
+    # shell wrappers panic itself execs (matching those would make panic loop on
+    # its own children), a sibling tool on the same display, and an unrelated X
+    # client that merely takes --display.
+    decoy_hits=""
+    while IFS='|' read -r _argv _dpy; do
+        [ -n "$_argv" ] || continue
+        matches "$pat_panic_full" "$_argv" \
+            && decoy_hits="$decoy_hits; panic matches [$_argv]"
+        matches "$(launcher_pat_for "$_dpy")" "$_argv" \
+            && decoy_hits="$decoy_hits; launcher matches [$_argv]"
+    done <<'DECOYTABLE'
+sh /opt/hotkeyd/hotkeyd.sh restart --display :10|:10
+sh /opt/hotkeyd/hotkeyd-panic.sh panic --display :10|:10
+python3 /opt/hotkeyd/live_check.py --display :10|:10
+/usr/bin/xterm --display :10|:10
+DECOYTABLE
+    [ -z "$decoy_hits" ] \
+        && ok "and neither pattern matches the shell wrappers, live_check, or \
+an unrelated X client on the same display" \
+        || bad "a non-daemon argv is taken for a daemon$decoy_hits"
+
+    # THE PREFIX COLLISION, which lives entirely in the tail. daemon_pid()'s
+    # `( |$)` boundary is the only thing standing between `--display :1` and a
+    # daemon on `:10` — and on this machine :10 is the LIVE session. Cutting the
+    # pattern at the first space, as the core check above does, cannot see this
+    # anchor at all: deleting it leaves the core token identical.
+    if matches "$(launcher_pat_for :1)" "/usr/local/bin/hotkeyd --display :10"
+    then
+        bad "the launcher's pattern for :1 also matches a daemon on :10 — \
+\`hotkeyd.sh stop :1\` would kill the :10 session's daemon"
+    else
+        ok "the launcher's pattern for :1 does NOT match a daemon on :10 (the \
+word boundary in the tail is intact)"
+    fi
+fi
+
 # --- 9: degraded environments ------------------------------------------------
 echo "panic: degraded environments"
 RO="$T/readonly"
