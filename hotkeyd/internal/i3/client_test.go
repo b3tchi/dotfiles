@@ -246,6 +246,62 @@ func TestClient_Command_TransportDeath_ThenReconnectSucceeds(t *testing.T) {
 	}
 }
 
+func TestClient_Command_EventArrivesBeforeReply_DoesNotDesyncTheReplyWait(t *testing.T) {
+	// The i3 IPC docs' core hazard: an event can land between a request and
+	// its reply on the same connection, and a client that treats the next
+	// message as its reply is "one message behind" for the rest of the
+	// session. recvReplyLocked (client.go) must skip past an interleaved
+	// event -- dispatching it -- rather than mistaking it for the reply.
+	//
+	// This is deliberately NOT the same path TestClient_PollEvents_
+	// DispatchesQueuedEvent exercises: that test drains an event during an
+	// IDLE PollEvents call, with no reply wait in flight. This test drives
+	// the event through the REPLY-WAIT path instead -- Command's
+	// recvReplyLocked, actively blocked on the RUN_COMMAND reply -- which
+	// is the path the docs actually warn about and the one this suite had
+	// left unpinned.
+	f := startFakeI3(t)
+
+	var mu sync.Mutex
+	eventCount := 0
+	handler := func(kind uint32, data map[string]any) {
+		mu.Lock()
+		defer mu.Unlock()
+		eventCount++
+	}
+	c := NewClient(pathFn(f), handler)
+	defer c.Close()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn := f.nextConn(t)
+		req := recvRequest(t, conn)
+		if req.mtype != MsgRunCommand {
+			t.Errorf("mtype = %d, want MsgRunCommand", req.mtype)
+		}
+		// The event lands FIRST, before the reply -- exactly the
+		// interleaving the i3 IPC docs describe.
+		sendEvent(t, conn, EventMode, []byte(`{"change":"resize"}`))
+		reply(t, conn, MsgRunCommand, []byte(`[{"success":true}]`))
+	}()
+
+	ok, i3Err, err := c.Command("workspace 2")
+	<-done
+	if err != nil {
+		t.Fatalf("Command: unexpected error: %v", err)
+	}
+	if !ok {
+		t.Errorf("ok = false, i3Err = %q -- the event ahead of the reply desynced the reply wait", i3Err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if eventCount != 1 {
+		t.Errorf("eventCount = %d, want exactly 1: the interleaved event must still be dispatched, not dropped", eventCount)
+	}
+}
+
 // --- GetConfig -----------------------------------------------------------
 
 func TestClient_GetConfig(t *testing.T) {
