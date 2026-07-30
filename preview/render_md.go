@@ -28,3 +28,23 @@ func renderMarkdown(w http.ResponseWriter, src []byte, truncated bool) {
 	}
 	fmt.Fprint(w, textPreviewScript()+`</body></html>`)
 }
+
+// renderMarkdownNative serves the GET /file/<path>?native payload for a
+// classified "md" file (sp022 Task 3 success criteria): the file's RAW
+// bytes as text/plain, not goldmark's rendered HTML. The QML client (T4)
+// paints markdown itself via Qt's own Text.MarkdownText delegate, so the
+// native tier's job is handing over source text, not pre-rendered markup —
+// the opposite of renderMarkdown above, which exists for the browser
+// fallback / non-native path and is left untouched.
+//
+// truncated appends the same literal "[preview truncated]" marker
+// renderPlainFallback uses elsewhere in this package, straight onto the raw
+// bytes (no HTML wrapper exists here to hold a styled <p> the way the
+// non-native renderer's marker does).
+func renderMarkdownNative(w http.ResponseWriter, src []byte, truncated bool) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = w.Write(src)
+	if truncated {
+		fmt.Fprint(w, "\n[preview truncated]")
+	}
+}
