@@ -48,10 +48,11 @@ type fakeI3Client struct {
 	filenoFn       func() (int, bool)
 	closeFn        func() error
 
-	commands       []string
-	pollEventCalls int
-	subscribed     []string
-	closed         bool
+	commands          []string
+	pollEventCalls    int
+	bindingStateCalls int
+	subscribed        []string
+	closed            bool
 }
 
 func (f *fakeI3Client) Command(cmd string) (bool, string, error) {
@@ -82,10 +83,19 @@ func (f *fakeI3Client) Subscribe(events ...string) error {
 }
 
 func (f *fakeI3Client) BindingState() (string, error) {
+	f.mu.Lock()
+	f.bindingStateCalls++
+	f.mu.Unlock()
 	if f.bindingStateFn != nil {
 		return f.bindingStateFn()
 	}
 	return layer.DefaultI3Mode, nil
+}
+
+func (f *fakeI3Client) bindingStateCallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.bindingStateCalls
 }
 
 func (f *fakeI3Client) PollEvents() (bool, error) {
@@ -487,29 +497,54 @@ func runWithTimeout(t *testing.T, h *harness, sig chan os.Signal, timeout time.D
 // exactly which call site it kills a mutant on.
 // ---------------------------------------------------------------------
 
+// minRepeatedTimeoutFires is the threshold TestRun_TimeoutBranch_* tests
+// require before accepting "the timer branch ran" as proven. Asserting
+// only `count > 0` is satisfied by the single timer ALREADY armed before
+// Run's loop starts (`time.NewTimer(d.idleTimeout())`, before the
+// `for`) even if `timer.Reset(...)` is deleted from the bottom of the
+// loop body — the timer would then never rearm, the loop would go
+// permanently idle after firing exactly once, and a hold-layer release
+// (or the heartbeat) would silently stop being observable, which is
+// adr0016's entire point (reviewer-found M16). Requiring several fires
+// inside the sleep window (tick=timeoutFiresTick=5ms, window=60ms — a
+// 12x margin) is what actually distinguishes "fired once" from "fires
+// repeatedly", and is the same class of fix already applied once to
+// TestRun_EventBranch_PumpsI3 (see newTimeoutHarness's doc) — this was
+// the second place it survived.
+const minRepeatedTimeoutFires = 3
+
 func TestRun_TimeoutBranch_PumpsI3(t *testing.T) {
-	// Kills: deleting d.pumpI3() from the timer.C case. Uses
-	// newTimeoutHarness (short ticks, no events sent) so the ONLY branch
-	// that can run during this test is the timer one — with the default
-	// (never-firing) harness this assertion would also be satisfied by
-	// an event-branch call, papering over a deleted timeout-branch call.
+	// Kills: deleting d.pumpI3() from the timer.C case, AND deleting
+	// timer.Reset(d.idleTimeout()) (M16) — the latter would still let
+	// PollEvents fire exactly once (the timer armed before the loop
+	// starts) and then never again, which a bare `count > 0` assertion
+	// cannot tell apart from "fires every tick". Uses newTimeoutHarness
+	// (short ticks, no events sent) so the ONLY branch that can run
+	// during this test is the timer one.
 	h := newTimeoutHarness(t)
 	sig := make(chan os.Signal, 1)
 	go func() {
-		time.Sleep(30 * time.Millisecond)
+		time.Sleep(60 * time.Millisecond)
 		sig <- syscall.SIGTERM
 	}()
 	runWithTimeout(t, h, sig, 2*time.Second)
-	if h.i3c.pollEventsCount() == 0 {
-		t.Fatal("PollEvents was never called from the timeout branch — pumpI3() wiring is missing")
+	if got := h.i3c.pollEventsCount(); got < minRepeatedTimeoutFires {
+		t.Fatalf("PollEvents fired %d times from the timeout branch over a %d-tick window, want >= %d — "+
+			"either pumpI3() wiring is missing, or the timer never rearms (deleted timer.Reset)",
+			got, int(60*time.Millisecond/timeoutFiresTick), minRepeatedTimeoutFires)
 	}
 }
 
 func TestRun_TimeoutBranch_PollsIdle_ActuallyQueriesWhenHoldLayerActive(t *testing.T) {
 	// Kills: deleting d.pollIdle() (and so d.newMod()) from the timer.C
-	// case. With a hold layer entered and no X events arriving, PollIdle
-	// MUST ask the server every idle tick — the ONLY channel that can
-	// observe the hold modifier's release (adr0016).
+	// case, AND deleting timer.Reset(...) (M16) — see
+	// minRepeatedTimeoutFires's doc for why a repeated-firing assertion
+	// is required rather than a bare "was called" one. With a hold layer
+	// entered and no X events arriving, PollIdle MUST ask the server
+	// EVERY idle tick — the ONLY channel that can observe the hold
+	// modifier's release (adr0016); a timer that fires once and then
+	// never rearms would make that release silently unobservable for the
+	// rest of the daemon's life.
 	h := newTimeoutHarness(t)
 	binds := []bind.Bind{{Chord: "$mod+Tab", Actions: []bind.Action{bind.EnterLayer{Layer: "sw"}}}}
 	layers := map[string]bind.Layer{
@@ -536,7 +571,7 @@ func TestRun_TimeoutBranch_PollsIdle_ActuallyQueriesWhenHoldLayerActive(t *testi
 
 	sig := make(chan os.Signal, 1)
 	go func() {
-		time.Sleep(30 * time.Millisecond)
+		time.Sleep(60 * time.Millisecond)
 		sig <- syscall.SIGTERM
 	}()
 	runWithTimeout(t, h, sig, 2*time.Second)
@@ -544,8 +579,10 @@ func TestRun_TimeoutBranch_PollsIdle_ActuallyQueriesWhenHoldLayerActive(t *testi
 	h.modQueryMu.Lock()
 	calls := h.modQueryCalls
 	h.modQueryMu.Unlock()
-	if calls == 0 {
-		t.Fatal("NewModQuery was never invoked from the timeout branch — pollIdle() wiring is missing")
+	if calls < minRepeatedTimeoutFires {
+		t.Fatalf("NewModQuery invoked %d times from the timeout branch over a 60ms window at a %s tick, want >= %d — "+
+			"either pollIdle() wiring is missing, or the timer never rearms (deleted timer.Reset)",
+			calls, timeoutFiresTick, minRepeatedTimeoutFires)
 	}
 }
 
@@ -577,6 +614,83 @@ func TestRun_EventBranch_BeatsHeartbeat(t *testing.T) {
 	runWithTimeout(t, h, sig, 2*time.Second)
 	if h.lock.beatCount() == 0 {
 		t.Fatal("Beat() was never called — heartbeat wiring is missing")
+	}
+}
+
+func TestRun_PumpI3_Reconnect_ResyncsI3Mode(t *testing.T) {
+	// Kills (reviewer-found M12): deleting the `if reconnected { d.syncI3Mode() }`
+	// call from pumpI3 — no prior test ever made PollEvents() return
+	// reconnected=true, so this branch had ZERO coverage on the daemon
+	// side despite being exactly the "i3 death while X lives" edge case
+	// (ylmp.8's behaviour matrix: "i3 restarts and comes back ... the
+	// caller's cue to re-read BindingState(), because a restarted i3 has
+	// reset its own mode — believing a remembered mode across a restart
+	// would refuse layer entries it should now allow"). NewDaemon's own
+	// wireI3Mode() already calls BindingState() once at construction, so
+	// this asserts the count increases AGAIN specifically from the
+	// reconnect branch, not just construction-time wiring.
+	h := newHarness(t)
+	afterConstruction := h.i3c.bindingStateCallCount()
+	if afterConstruction == 0 {
+		t.Fatal("fixture bug: wireI3Mode did not call BindingState at construction")
+	}
+
+	reconnectSignaled := false
+	h.i3c.pollEventsFn = func() (bool, error) {
+		if !reconnectSignaled {
+			reconnectSignaled = true
+			return true, nil // exactly one reconnect, matching PollEvents' own doc
+		}
+		return false, nil
+	}
+	h.events <- mappingNotifyEvent()
+
+	sig := make(chan os.Signal, 1)
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		sig <- syscall.SIGTERM
+	}()
+	runWithTimeout(t, h, sig, 2*time.Second)
+
+	if got := h.i3c.bindingStateCallCount(); got <= afterConstruction {
+		t.Fatalf("BindingState called %d times (was %d after construction) — syncI3Mode() was never invoked from the reconnect branch",
+			got, afterConstruction)
+	}
+}
+
+func TestRun_PumpI3_PollEventsError_LoggedAndLoopContinues(t *testing.T) {
+	// The other half of the ylmp.8 behaviour-matrix edge case: a
+	// transport error from PollEvents (i3 unreachable / dead) must be
+	// logged and must NOT take the daemon down — "a lost i3 must not
+	// take the keyboard layer down with it."
+	h := newHarness(t)
+	h.i3c.pollEventsFn = func() (bool, error) { return false, errors.New("i3 ipc: boom") }
+	h.grabs.wanted = []string{"a"}
+	h.grabs.active = map[string]GrabbedChord{"a": {Code: 38, Mask: 0}}
+	// A normal key event AFTER the error proves the loop is still
+	// turning, not just that it didn't panic before reaching it.
+	h.events <- xiKeyEvent(xiEvtKeyPress, 7, 38, 0, false)
+
+	sig := make(chan os.Signal, 1)
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		sig <- syscall.SIGTERM
+	}()
+	code := runWithTimeout(t, h, sig, 2*time.Second)
+	if code != 0 {
+		t.Fatalf("a PollEvents error took the daemon down: exit code = %d", code)
+	}
+	if !h.logger.contains("boom") {
+		t.Errorf("PollEvents error was not logged; log lines: %v", h.logger.all())
+	}
+	found := false
+	for _, c := range h.i3c.commandsSent() {
+		if c == "test command a" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("daemon stopped dispatching after a PollEvents error instead of continuing")
 	}
 }
 
@@ -613,11 +727,21 @@ func TestRun_KeyPress_LayerChange_ResyncsGrabs(t *testing.T) {
 	// Kills: deleting the `if d.engine.State().Layer != before { d.resyncGrabs() }`
 	// call from handleKeyEvent — a layer entered but never re-grabbed
 	// would leave its bare keys ungrabbed, silently dead
-	// (dotfiles-hwds.41's failure shape, one level up).
+	// (dotfiles-hwds.41's failure shape, one level up). ALSO kills
+	// (reviewer-found M14): deleting the d.publishGrabReport() call
+	// inside resyncGrabs() itself — only pinning SyncBinds proved the
+	// grab set moved, not that the --health-verdict-9 evidence
+	// (proc.WriteGrabReport) was ever republished after a LAYER-CHANGE
+	// resync specifically (as opposed to the MappingNotify branch's own,
+	// separately-pinned call). Before this fix that gap was caught only
+	// by the Xvfb-gated integration test — exactly the eez2 failure mode
+	// this task exists to close.
 	h := newHarness(t)
 	// testBinds' "$mod+o" enters the "nav" layer.
 	h.grabs.wanted = []string{"$mod+o"}
 	h.grabs.active = map[string]GrabbedChord{"$mod+o": {Code: 32, Mask: maskMod4}}
+	h.grabs.grabReportWanted, h.grabs.grabReportActive = 5, 1
+	h.grabs.grabReportMissing = []string{"h", "q"}
 
 	h.events <- xiKeyEvent(xiEvtKeyPress, 7, 32, maskMod4, false)
 
@@ -637,6 +761,14 @@ func TestRun_KeyPress_LayerChange_ResyncsGrabs(t *testing.T) {
 	last := h.grabs.syncBindsCalls[len(h.grabs.syncBindsCalls)-1]
 	if !containsStr(last, "h") {
 		t.Fatalf("resync after entering nav did not ask for its own bind %q; got %v", "h", last)
+	}
+
+	report, ok := proc.ReadGrabReport(":99")
+	if !ok {
+		t.Fatal("no grab report was published after a layer-change resync — publishGrabReport() wiring inside resyncGrabs() is missing")
+	}
+	if report.Wanted != 5 || report.Active != 1 || len(report.Missing) != 2 {
+		t.Fatalf("grab report after layer-change resync = %+v, want wanted=5 active=1 missing=[h q]", report)
 	}
 }
 
