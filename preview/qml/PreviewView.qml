@@ -5,11 +5,14 @@
 // engine reload, which is the epic's hard requirement (## problem: a cursor
 // move across a content-type boundary swaps content inside ONE window).
 //
-// Native tiers: image, svg, md, code, video, none. html|akm|stl fall back
-// to plain text here until Task 5 adds the lazy WebEngineView tier
-// (WebTier.qml) — this file must never `import QtWebEngine` itself; that
-// import is Task 5's job specifically so its ~240 MiB cost is paid only
-// once a web-tier frame actually arrives (poc018).
+// Native tiers: image, svg, md, code, video, none. html|akm|stl route to
+// the lazy WebEngineView tier (WebTier.qml, Task 5) — this file must
+// never `import QtWebEngine` itself; that import lives ONLY in
+// WebTier.qml so its ~240 MiB cost (poc018, deduped child-walk PSS) is
+// paid only once a web-tier frame actually arrives, and only once for the
+// life of the process (see webLoader below: sourceComponent is assigned
+// exactly once, at the first web frame, and never cleared — a later
+// native visit hides it, it does not destroy it).
 //
 // Launched by the `preview` nu wrapper (Task 6):
 //   qml6 PreviewView.qml -- <slot> <port>
@@ -297,18 +300,41 @@ ApplicationWindow {
         return "http://127.0.0.1:" + win.daemonPort + "/file/" + encoded
     }
 
-    // fallbackMessage covers three edge cases at once: no path ever set
-    // yet (empty window state), a classified "none" (unrenderable) file,
-    // and the not-yet-implemented web tier (html|akm|stl route here until
-    // Task 5) — plus any future type string this client doesn't recognise,
-    // which must degrade here rather than crash (sp022 Task 4 edge case).
+    // The three web-tier types, and the exact URL each needs — verified
+    // against preview-d's actual routing (server.go/proxy.go/render_stl.go):
+    //   html -> ?native is the ONLY way to get the raw file back; without
+    //           it .html falls through to chroma's own lexer and renders
+    //           as highlighted code instead (render.go's isHTMLExt must
+    //           run before lexers.Match).
+    //   stl  -> the bare path IS the kept orbit-viewer page (?native is a
+    //           no-op for stl; ?full would instead stream raw model
+    //           bytes, which is NOT what the web tier wants here).
+    //   akm  -> ?slot=<N> is what lets the returned cross-origin iframe
+    //           (adr0009) carry the slot down to akm-graph-d, which is
+    //           what makes the adr0007 reverse-channel open-in-nvim and
+    //           the sp011 highlight flow slot-aware.
+    readonly property var webTypes: ["html", "akm", "stl"]
+    function isWebType(t) { return win.webTypes.indexOf(t) !== -1 }
+
+    function webUrlFor(path, type) {
+        switch (type) {
+        case "html": return win.fileUrl(path) + "?native"
+        case "stl": return win.fileUrl(path)
+        case "akm": return win.fileUrl(path) + "?slot=" + win.slotN
+        default: return ""
+        }
+    }
+
+    // fallbackMessage covers the native Loader's own fallback cases: no
+    // path ever set yet (empty window state), a classified "none"
+    // (unrenderable) file, and any future type string this client
+    // doesn't recognise — which must degrade here rather than crash
+    // (sp022 Task 4 edge case). html|akm|stl never reach this: they are
+    // routed to webLoader below, not nativeLoader, so they never consult
+    // nativeDelegateFor's default branch.
     function fallbackMessage() {
         if (win.currentPath === "") return "preview " + win.slotN + " — waiting for a file…"
         switch (win.currentType) {
-        case "html":
-        case "akm":
-        case "stl":
-            return "content type \"" + win.currentType + "\" — web tier not wired up yet\n" + win.currentPath
         case "none":
             return "no preview available for\n" + win.currentPath
         default:
@@ -554,14 +580,15 @@ ApplicationWindow {
         }
     }
 
-    // delegateFor is the single dispatch point from a classified type
-    // string to a Loader component. Every branch not explicitly listed —
-    // "none", the not-yet-native "html"/"akm"/"stl" web tier, and any
-    // future type string this client has never seen — falls through to
+    // nativeDelegateFor is the dispatch point from a classified type
+    // string to a NATIVE Loader component. Web types (html/akm/stl) are
+    // deliberately absent from this switch — they are routed to webLoader
+    // below, never here — so "none" and any future type string this
+    // client has never seen are the only branches that fall through to
     // fallbackDelegate rather than crashing (sp022 Task 4 edge case: "ws
     // frame with unknown future type string -> fallback delegate, not a
     // crash").
-    function delegateFor(type) {
+    function nativeDelegateFor(type) {
         switch (type) {
         case "image": return imageDelegate
         case "svg": return svgDelegate
@@ -572,17 +599,66 @@ ApplicationWindow {
         }
     }
 
-    // The Loader itself is what makes hot-swapping ONE-window/no-respawn:
-    // sourceComponent only re-evaluates (and only then destroys/recreates
-    // the delegate item) when currentType actually changes; a same-type
-    // frame with a different (or identical) path just updates the live
-    // delegate's own url properties, never touching the Loader — so a
-    // same-path re-broadcast is idempotent (no flicker loop) and a type
-    // change is last-wins by construction (Loader never stacks two
-    // delegates).
+    // webDelegate wraps WebTier.qml (Task 5) — the file that carries the
+    // `import QtWebEngine` this file must never carry. WebTier resolves
+    // as a type here purely from being a sibling .qml file in the same
+    // directory (QML's implicit directory import), no explicit `import`
+    // statement needed or wanted: an explicit import would still only
+    // pull in the WebTier.qml *type declaration*, and QtWebEngine's own
+    // module import inside that file only executes when this Component is
+    // actually instantiated — i.e. at webLoader.sourceComponent
+    // assignment below, not at this file's parse time. sourceUrl is a
+    // live binding against win.currentPath/currentType, so switching
+    // between web types (html -> akm -> stl) while this delegate is
+    // already alive is just WebTier's own url property changing — no new
+    // Component, no new engine.
+    Component {
+        id: webDelegate
+        WebTier { sourceUrl: win.webUrlFor(win.currentPath, win.currentType) }
+    }
+
+    // onCurrentTypeChanged (currentType is win's own property, declared
+    // near the top of this file) is where the lazy assignment happens:
+    // webLoader.sourceComponent is set to webDelegate the FIRST time
+    // currentType becomes a web type, and the `=== null` guard means it
+    // is never reassigned after that — so every later web visit reuses
+    // the same WebEngineView instance/process instead of paying the
+    // ~240 MiB engine cost again (poc018).
+    onCurrentTypeChanged: {
+        if (win.isWebType(win.currentType) && webLoader.sourceComponent === null) {
+            webLoader.sourceComponent = webDelegate
+        }
+    }
+
+    // Two Loaders, never both visible, is what gives the native and web
+    // tiers independent lifetimes while still living in ONE window:
+    //
+    // - nativeLoader: sourceComponent only re-evaluates when currentType
+    //   actually changes (Loader semantics), and is explicitly nulled
+    //   out while a web type is current — so it never wastes a
+    //   fallbackDelegate instantiation behind an invisible web view, and
+    //   its native delegate is freed the moment the frame goes web (same
+    //   already-proven Task 4 hot-swap: no process respawn, last-wins by
+    //   construction, no stacked delegates).
+    // - webLoader: sourceComponent is assigned AT MOST ONCE (see
+    //   onCurrentTypeChanged above) and is NEVER nulled back out — this
+    //   is what makes the engine "stay warm": a native visit only flips
+    //   `visible` to false, it never destroys the WebEngineView, so an
+    //   akm -> md -> akm sweep reloads WebTier's url property (a plain
+    //   navigation), never spins up a new render process.
     Loader {
-        id: tierLoader
+        id: nativeLoader
         anchors.fill: parent
-        sourceComponent: win.delegateFor(win.currentType)
+        visible: !win.isWebType(win.currentType)
+        sourceComponent: win.isWebType(win.currentType) ? null : win.nativeDelegateFor(win.currentType)
+    }
+
+    Loader {
+        id: webLoader
+        anchors.fill: parent
+        visible: win.isWebType(win.currentType)
+        // sourceComponent starts unset (Loader.status === Loader.Null,
+        // no QtWebEngine module load, no engine cost) — assigned lazily
+        // by onCurrentTypeChanged above.
     }
 }
