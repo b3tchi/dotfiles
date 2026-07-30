@@ -34,6 +34,22 @@
 // engine, never a new process. sourceUrl is a live binding in the caller
 // (PreviewView.qml's webDelegate Component), so this file has no swap
 // logic of its own beyond reacting to that one property changing.
+//
+// MEMORY, and why there is deliberately no history/lifecycle handling here
+// (dotfiles-j5kq / sp022 T10 — full numbers in preview/README.md's
+// "Web-tier memory ceiling"): one long-lived view means one long-lived
+// renderer process, and each akm navigation leaves ~40 MB of dead JS that V8
+// keeps until its own old-space limit. The filed suspicion was retained
+// navigation history / back-forward cache, i.e. something this file would
+// have to clear per navigation. It is not: across 60 same-URL cycles the
+// browser process (which owns the navigation-entry store) stayed flat at
+// ~176 MB while the renderer went 136 MB -> 1266 MB, all of it in V8's own
+// pools — and capping V8's heap alone flattens the whole curve. So the fix
+// lives in the nu wrapper's QTWEBENGINE_CHROMIUM_FLAGS
+// (--js-flags=--max-old-space-size), NOT here: no history.clear() (would
+// break Back/Forward for nothing), no lifecycleState=Discarded (would
+// recycle the renderer process and break sp022's stable-engine-identity
+// requirement), no view recreation (would re-pay the ~240 MiB engine cost).
 
 import QtQuick
 import QtWebEngine

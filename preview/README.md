@@ -120,6 +120,104 @@ any signal is sent (never trust a bare pid — recycling is real).
   to sit beside that mark — live or freshly spawned, the same recipe either
   way, which is what makes re-docking a live window possible.
 
+## Web-tier memory ceiling
+
+The web tier (`html`/`akm`/`stl`) navigates **one** long-lived
+`WebEngineView`, so **one** Chromium renderer process serves every web visit
+for the whole life of a window. That is deliberate — it is what makes an
+`akm → md → akm` sweep a plain navigation instead of a ~240 MiB engine
+re-instantiation — but it means the renderer's memory is the window's
+memory, and V8 gets to decide how much of it to keep.
+
+**What V8 decides on its own is too much.** Each akm visit leaves ~40 MB of
+dead JS behind (the cross-origin akm-graph iframe re-parses ~1 MB of bundle
+and re-allocates the graph's typed arrays), and V8 does not collect it until
+its old-space limit is reached — a limit V8 derives from *host RAM*. On a
+24 GB host that limit is ~1.4 GB, so a window that keeps previewing zettels
+climbs past 1.4 GB before its first major GC. Measured on an xorgxrdp
+display (`page.html ↔ docs/notes/adr0009.md`, the same two URLs, 60 cycles):
+
+| navigation cycle | total PSS |
+|---|---|
+| 1 | 352 MB |
+| 10 | 700 MB |
+| 20 | 1093 MB |
+| 31 | 1480 MB ← V8's first major GC |
+| 40 | 1487 MB |
+| 60 | 1485 MB |
+
+This reads as an unbounded leak, and was filed as one (dotfiles-j5kq).
+It is not: the growth is uncollected garbage, it *does* plateau, and the
+plateau is simply V8's RAM-derived ceiling. Attribution: a deduped
+`/proc/<pid>/task/*/children` PSS walk puts 100% of the growth in the single
+renderer child (136 MB → 1266 MB) with the `qml6` browser process flat at
+~176 MB and the three zygotes flat; `smaps` puts it in V8's two pools (the
+sandbox anon region 510 MB, `[anon:v8]` 206 MB).
+
+**So the wrapper picks the ceiling instead** — `spawn-env-prefix` sets
+`--js-flags=--max-old-space-size=256` in `QTWEBENGINE_CHROMIUM_FLAGS` on
+**every** display (V8's limit has nothing to do with the display server, so
+this is not an xrdp-only fix; the swiftshader flags next to it still are).
+Same rig, same script, with the ceiling:
+
+| navigation cycle | total PSS |
+|---|---|
+| 1 | 399 MB |
+| 7 | 596 MB ← plateau |
+| 20 | 607 MB |
+| 80 (160 navigations) | 601 MB |
+
+**The guarantee: the four engine processes stay under ~440 MB PSS, flat from
+roughly the seventh web navigation onward, for the life of the window** —
+~610 MB total PSS for a window whose only tier is web. Window identity is
+untouched by this: one `qml6` pid, one X11 window id and the same four engine
+child pids across all 160 navigations, because a heap limit does not restart
+anything.
+
+The same numbers on the full seven-tier sweep
+(image→md→code→`.d2`→html→akm→stl→image, ×25), PSS split by process so the
+web tier's share is visible on its own:
+
+| arm | engine (4 children) | `qml6` | total |
+|---|---|---|---|
+| without the ceiling | 181 → **942 MB** | 262 → 623 MB | **1530 MB** |
+| with the ceiling | 181 → **434 MB**, flat from round 9 | 262 → 579 MB | **1002 MB** |
+
+The engine half is now a ceiling. The `qml6` half still climbs ~14 MB per
+round, and that is a **different** defect in a different process and a
+different tier — the native `.d2`/svg tier retains a full-resolution raster
+per visit (dotfiles-63rd, isolated by a native-only `pic.png ↔
+diagram.d2` ×20 loop in which the web tier is never instantiated at all:
+79 → 233 MB with no engine child process in existence). A V8 heap ceiling
+cannot and does not touch it.
+
+Not display-specific: on a non-xrdp X server (`Xvfb`, so `is-xrdp-display`
+is false and only the ceiling is applied, no GL overrides) the same loop goes
+422 → 682 MB over 8 cycles without the ceiling and plateaus at ~653 MB from
+cycle 6 with it.
+
+Notes and escape hatches:
+
+- 256 MB is ~2× the measured first-visit working set of the heaviest tier.
+  Tighter would trade the ceiling for GC thrash and eventually a renderer
+  OOM; the fallback for that is real but ugly (`WebTier.qml` reloads once,
+  then shows its crash text). Checked against a real graph, not just a
+  fixture: 101 nodes / 572 links renders in full at 570 MB total PSS and
+  stays there across 24 further navigations, with zero renderer
+  terminations in `wv-<N>.log`.
+- A caller who sets `QTWEBENGINE_CHROMIUM_FLAGS` explicitly owns the whole
+  Chromium command line, ceiling included — that is the way to raise or drop
+  it for one window.
+- `--js-flags` must stay a **single whitespace-free token**: QtWebEngine
+  splits `QTWEBENGINE_CHROMIUM_FLAGS` on whitespace with no quote handling,
+  so `--js-flags=--a --b` silently delivers only `--a` to V8.
+  `preview-test`'s `spawn-env-prefix` table asserts this.
+- Nothing is reclaimed by *idling* — V8 does not shrink a heap it is
+  allowed to keep, and parking the window on a native tier for 100 s
+  released <1 MB of what had accumulated. Closing and reopening the window
+  (`preview window <N> --close` then `preview window <N>`) still resets it to
+  ~53 MB; the ceiling is what makes that unnecessary rather than routine.
+
 ## Removed limitations (sp022 — retiring the wry host)
 
 The wry/WebKitGTK host (`preview-wv`, sp013) is gone: the whole
