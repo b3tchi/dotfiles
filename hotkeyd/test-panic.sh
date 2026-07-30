@@ -69,6 +69,7 @@ cleanup() {
     # file exists to keep out.
     pkill -f "$HOTKEYD_PROC_PAT .*--display $XC" 2>/dev/null
     [ -n "${FAKE_PID:-}" ] && kill "$FAKE_PID" 2>/dev/null
+    [ -n "${FAKE_PID_GO:-}" ] && kill "$FAKE_PID_GO" 2>/dev/null
     for p in "${I3_PIDS[@]:-}"; do kill "$p" 2>/dev/null; done
     for p in "${XVFB_PIDS[@]:-}"; do kill "$p" 2>/dev/null; done
     rm -rf "$T"
@@ -117,7 +118,8 @@ mkdir -p "$HOTKEYD_X11_UNIX"
 # THE PROCESS HALF OF THE SANDBOX (dotfiles-hwds.23). Every override above
 # fences the FILES panic touches — the link, the fallback source, the display
 # enumeration `resume` reloads. None of them fences the PROCESSES it STOPS:
-# `target_displays` pgreps every `hotkeyd.py .*--display` on the box, which is
+# `target_displays` pgreps every `hotkeyd(\.py)? .*--display` on the box — both
+# engines' argv shapes since dotfiles-pwaj — which is
 # correct machine-wide recovery behaviour (the Task 10 / dotfiles-hwds.12
 # requirement-4 decision) and is therefore NOT narrowed in production — but it
 # reaches straight past HOME and X11_UNIX into the caller's live :0 and :10
@@ -235,7 +237,7 @@ who_answers() {
 # --- the OUT-OF-SCOPE SENTINEL (dotfiles-hwds.23) ----------------------------
 # A real hotkeyd daemon on a display this suite never declared. It stands in for
 # the user's live :0/:10 — and for a sibling worktree's daemons (dotfiles-f2be)
-# — and it is indistinguishable from them to `pgrep -af 'hotkeyd\.py
+# — and it is indistinguishable from them to `pgrep -af 'hotkeyd(\.py)?
 # .*--display'`, which is the enumeration under test. It is absent from
 # HOTKEYD_PGREP_SCOPE and absent from HOTKEYD_X11_UNIX, so nothing in this file
 # is entitled to stop it or to reload it.
@@ -731,24 +733,66 @@ fi
 # started, on a display that does not exist. The real pgrep is never called, so
 # nothing real is reachable — the sandbox is the stub, not a narrowing of the
 # code under test.
+#
+# BOTH ARGV SHAPES, NOT JUST PYTHON'S (dotfiles-pwaj). The stub used to emit one
+# line, `python3 hotkeyd.py --display :9998`, which reproduced hotkeyd-panic.sh's
+# then-hardcoded `hotkeyd\.py .*--display` pattern byte-for-byte — so it asserted
+# the machine-wide guarantee only for the engine the script could already see,
+# and would have kept passing after a display was cut over to go with panic blind
+# to it. It now stands up one daemon of EACH shape: python's `hotkeyd.py
+# --display :N` and the Go rewrite's bare `hotkeyd --display :N` (sp021). Both
+# must be discovered, stopped and recorded, because engine_for() can name either
+# for any display and `target_displays` must not depend on which it names.
 echo "panic: with no scope set, the enumeration is still machine-wide"
 FAKE_DPY=":9998"
-# Short-lived on purpose. It only has to outlive one panic (a second or two),
-# and it is killed twice over — at the end of this section and again in
+FAKE_DPY_GO=":9997"
+# Short-lived on purpose. They only have to outlive one panic (a second or two),
+# and they are killed twice over — at the end of this section and again in
 # cleanup — but a stand-in process that survives BOTH is a leak on a box that
-# already collects orphaned Xvfbs, so it also expires on its own.
+# already collects orphaned Xvfbs, so they also expire on their own.
 sleep 45 &
 FAKE_PID=$!
+sleep 45 &
+FAKE_PID_GO=$!
 mkdir -p "$T/stub"
+# A REAL pgrep OVER A SYNTHETIC PROCESS TABLE, not a canned reply (dotfiles-pwaj).
+# The stub this replaced answered `-af` with a fixed pair of lines and never
+# looked at the pattern it was handed — so it could not tell a script that
+# matches both argv shapes from one that matches only python's, and the
+# cutover assertions below passed against the very defect they exist to catch
+# (verified: reverting hotkeyd-panic.sh to the python-only pattern left them
+# green). It now applies the caller's pattern with grep -E, which is what pgrep
+# -f does, to a two-row table it owns. The sandbox is the TABLE — only these two
+# stand-ins are reachable, nothing on the real box is — while the PATTERN under
+# test is genuinely exercised.
+#
+# The table carries one row per engine, exactly as a box mid-cutover would:
+# python's `hotkeyd.py --display :N` and the Go rewrite's bare `hotkeyd
+# --display :N`. Both callers are served: hotkeyd-panic.sh asks with -af (full
+# line out), hotkeyd.sh's daemon_pid() asks with -f (pid only).
 cat > "$T/stub/pgrep" <<EOF
 #!/bin/sh
-# hotkeyd-panic.sh asks with -af and no display; hotkeyd.sh asks per display.
-# Anything else is "no daemon", so no other display can be reached from here.
-case "\$*" in
-    *-af*)         printf '$FAKE_PID python3 hotkeyd.py --display $FAKE_DPY\n' ;;
-    *"$FAKE_DPY"*) printf '$FAKE_PID\n' ;;
-    *)             exit 1 ;;
-esac
+pat=""; full=0
+for a in "\$@"; do
+    case "\$a" in
+        -*) case "\$a" in *a*) full=1 ;; esac ;;
+        *)  pat="\$a" ;;
+    esac
+done
+[ -n "\$pat" ] || exit 1
+found=1
+while IFS='|' read -r p c; do
+    [ -n "\$p" ] || continue
+    printf '%s\n' "\$c" | grep -Eq -- "\$pat" || continue
+    found=0
+    if [ "\$full" = 1 ]; then printf '%s %s\n' "\$p" "\$c"
+    else                     printf '%s\n' "\$p"
+    fi
+done <<TABLE
+$FAKE_PID|python3 /opt/hotkeyd/hotkeyd.py --display $FAKE_DPY
+$FAKE_PID_GO|/opt/hotkeyd/hotkeyd --display $FAKE_DPY_GO
+TABLE
+exit \$found
 EOF
 chmod +x "$T/stub/pgrep"
 out="$(env -u HOTKEYD_PGREP_SCOPE PATH="$T/stub:$PATH" DISPLAY="$XA" \
@@ -768,12 +812,63 @@ then
 else
     bad "$FAKE_DPY reached the stop loop but not the state file resume replays"
 fi
+# THE CUTOVER CASE. A go daemon's argv has no `.py`, so the old pattern could not
+# see it at all: panic would link the fallback and reload i3 over a daemon still
+# holding the fallback's chords — the CONTESTED state, on precisely the display
+# that had just been cut over.
+if kill -0 "$FAKE_PID_GO" 2>/dev/null; then
+    bad "an unscoped panic did NOT stop the GO-engine daemon on $FAKE_DPY_GO — \
+target_displays is blind to the bare 'hotkeyd --display' argv, so panic links \
+the fallback over a daemon that still holds its grabs"
+else
+    ok "an unscoped panic stops a GO-engine daemon too — the blast radius does \
+not depend on which engine the table names"
+fi
+if grep -q "^$FAKE_DPY_GO\$" "$XDG_RUNTIME_DIR/hotkeyd-panic.displays" 2>/dev/null
+then
+    ok "and records the go display, so resume brings it back too"
+else
+    bad "$FAKE_DPY_GO reached the stop loop but not the state file resume replays"
+fi
 # Cleaned up by hand rather than with `resume`: resume would run `hotkeyd.sh
 # start $FAKE_DPY` against a display that does not exist and report a failure
 # this case is not about.
 rm -f "$LINK" "$XDG_RUNTIME_DIR/hotkeyd-panic.displays"
 DISPLAY="$XA" i3-msg reload >/dev/null 2>&1
 kill "$FAKE_PID" 2>/dev/null
+kill "$FAKE_PID_GO" 2>/dev/null
+
+# --- 8d: the two scripts' argv patterns must not drift (dotfiles-pwaj) --------
+# hotkeyd.sh's daemon_pid() and hotkeyd-panic.sh's target_displays() identify a
+# daemon by the same argv core, and they carry SEPARATE copies of it: the panic
+# script is the one that has to run when the session is already broken, so it
+# takes no dependency on a sourced sibling file (the same reasoning its header
+# gives for not putting nushell in front of it), exactly as `linked()` is
+# duplicated across the pair rather than factored (dotfiles-hwds.21).
+#
+# Duplication that nothing checks is duplication that drifts, and it already did
+# once: ylmp.14 taught daemon_pid() the go shape and left target_displays() on
+# the python-only pattern, which is the defect dotfiles-pwaj fixes. This guard is
+# what makes the mirroring a decision rather than a hope — it reads the core out
+# of both shipped files and fails if they stop agreeing, whatever the next engine
+# turns out to be.
+echo "panic: the launcher and the panic script agree on the daemon argv"
+pat_launcher="$(sed -n 's/.*pgrep -f "\([^ ]*\) .*/\1/p' "$HERE/hotkeyd.sh" \
+                | head -1)"
+pat_panic="$(sed -n "s/.*pgrep -af '\([^ ]*\) .*/\1/p" "$HERE/hotkeyd-panic.sh" \
+             | head -1)"
+if [ -n "$pat_launcher" ] && [ -n "$pat_panic" ]; then
+    ok "both scripts' pgrep patterns are readable (launcher: $pat_launcher, \
+panic: $pat_panic)"
+else
+    bad "could not read a pgrep pattern out of one of the scripts \
+(launcher: '$pat_launcher', panic: '$pat_panic') — this guard has gone blind"
+fi
+[ "$pat_launcher" = "$pat_panic" ] \
+    && ok "hotkeyd.sh and hotkeyd-panic.sh match the SAME daemon argv core" \
+    || bad "argv pattern drift: hotkeyd.sh matches '$pat_launcher' but \
+hotkeyd-panic.sh matches '$pat_panic' — one of them cannot see a daemon the \
+other can, and panic is the one that must see all of them"
 
 # --- 9: degraded environments ------------------------------------------------
 echo "panic: degraded environments"
