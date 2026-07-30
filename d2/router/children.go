@@ -8,7 +8,9 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -27,6 +29,12 @@ type Child struct {
 	Clients    int32     // active WebSocket clients (proxy increments/decrements)
 	LastActive time.Time // updated by AddClient, RemoveClient, and spawn
 	LastError  error     // set by the Wait goroutine on crash
+	// SVGPath is the explicit --output path passed to "d2 --watch" (sp022
+	// Task 1 / dotfiles-eq8): deterministic from (project, basename), so a
+	// crash+respawn of the same key keeps pointing at the same file and the
+	// last good compile survives a respawn or a compile error. Immutable
+	// after spawnLocked sets it — safe to read without e.mu.
+	SVGPath string
 }
 
 // childEntry is the internal mutable entry in the manager's map.
@@ -36,7 +44,7 @@ type childEntry struct {
 	mu    sync.Mutex
 	child *Child
 	cmd   *exec.Cmd
-	done  chan struct{} // closed when cmd.Wait() returns
+	done  chan struct{}      // closed when cmd.Wait() returns
 	stop  context.CancelFunc // cancels crash-cleanup goroutine on deliberate stop
 }
 
@@ -143,12 +151,19 @@ func (m *ChildManager) spawnLocked(e *childEntry, key, absPath string, port int)
 		}
 	}
 
+	project, _ := splitProjectFile(key)
+	svgPath, err := svgOutputPath(m.cfg.SvgCacheDir, project, absPath)
+	if err != nil {
+		return nil, fmt.Errorf("ensure %q: %w", key, err)
+	}
+
 	args := []string{
 		"--watch",
 		"--browser", "0",
 		"--host", "127.0.0.1",
 		"--port", strconv.Itoa(port),
 		absPath,
+		svgPath,
 	}
 	args = append(args, m.extraSpawnArgs...)
 
@@ -165,6 +180,7 @@ func (m *ChildManager) spawnLocked(e *childEntry, key, absPath string, port int)
 		Port:       port,
 		PID:        cmd.Process.Pid,
 		LastActive: time.Now(),
+		SVGPath:    svgPath,
 	}
 
 	done := make(chan struct{})
@@ -499,6 +515,35 @@ func (m *ChildManager) Snapshot() map[string]Child {
 		e.mu.Unlock()
 	}
 	return snap
+}
+
+// svgOutputPath computes the explicit --output path for a child's compiled
+// svg: <cacheDir>/<project>/<basename-without-ext>.svg. The directory is
+// created (MkdirAll) so the child can write into it immediately on spawn.
+//
+// dotfiles-eq8: without an explicit output arg, "d2 --watch" defaults to a
+// sibling "<name>.svg" next to the source file — an untracked write straight
+// into a checked-out repo. Passing this path instead moves the write outside
+// any working tree.
+//
+// cacheDir is normally cfg.SvgCacheDir (populated by loadConfig's
+// D2_ROUTER_SVG_CACHE / defaultSvgCacheDir default). If it is empty — a
+// misconfigured cfg, or defaultSvgCacheDir() failing to resolve $HOME — this
+// falls back to os.TempDir() rather than the empty string, which would
+// otherwise resolve relative to the process's cwd and risk writing beside
+// the source again (the exact bug being fixed).
+func svgOutputPath(cacheDir, project, absPath string) (string, error) {
+	if cacheDir == "" {
+		cacheDir = filepath.Join(os.TempDir(), "d2-router-svg-fallback")
+	}
+	base := filepath.Base(absPath)
+	base = strings.TrimSuffix(base, filepath.Ext(base)) + ".svg"
+
+	dir := filepath.Join(cacheDir, project)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("svgOutputPath: mkdir %s: %w", dir, err)
+	}
+	return filepath.Join(dir, base), nil
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
