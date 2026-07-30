@@ -98,6 +98,23 @@ ApplicationWindow {
         // fixedNatW/H unset path below) is safe there.
         property real fixedNatW: 0
         property real fixedNatH: 0
+        // deferSource: hold the Image sourceless while the caller is still
+        // deciding what fixedNatW/H will be. fixedNatW/H CANNOT carry that
+        // themselves — they are 0 at delegate-creation time on the svg path
+        // too (the viewBox has not been fetched yet), which is exactly the
+        // window in which the unwanted full-resolution decode is issued, so
+        // a `fixedNatW > 0` test is inert precisely when it is needed.
+        // Measured that way round first: the gate changed nothing, 3 of 4
+        // svg visits still logged the 728x7561 decode.
+        property bool deferSource: false
+        // fitted latches true the first time fitStage() actually computes a
+        // fit — i.e. once natW/natH AND zoom AND the stage's own on-screen
+        // size are all consistent. On the fixedNatW/H (svg) path the Image's
+        // `source` is withheld until then, which is what bounds
+        // dotfiles-63rd; see the source binding below for the measurement.
+        // Deliberately NOT reset by later fitStage() calls: it is a
+        // one-way bootstrap latch, not a "has been re-fitted" flag.
+        property bool fitted: false
         clip: true
 
         Component.onCompleted: {
@@ -119,6 +136,11 @@ ApplicationWindow {
             if (natW <= 0 || natH <= 0 || stage.width <= 0 || stage.height <= 0) return
             var k = Math.min(stage.width / natW, stage.height / natH) * 0.97
             apply(k, (stage.width - natW * k) / 2, (stage.height - natH * k) / 2)
+            // Last, never before apply(): everything the sourceSize binding
+            // reads (natW/natH via content's width/height, and zoom) is
+            // settled at this point, so the Image's first request on the
+            // fixedNatW/H path is already the on-screen-sized one.
+            fitted = true
         }
         function actualSize() {
             if (natW <= 0) return
@@ -141,7 +163,72 @@ ApplicationWindow {
             Image {
                 id: img
                 anchors.fill: parent
-                source: stage.imgUrl
+                // dotfiles-63rd — the per-visit raster retention, and why
+                // this is a `source` gate rather than a sourceSize tweak.
+                //
+                // MEASURED (own xorgxrdp :31, i3 4.25.1, fresh binaries,
+                // isolated HOME, ports 4791/4792/4795, deduped
+                // /proc/<pid>/task/*/children PSS walk; web tier NEVER
+                // instantiated, nchild=0 at all 120 checkpoints):
+                // pic.png <-> diagram.d2 x60 grew the qml6 process
+                // 101,992 kB -> 579,234 kB with no plateau. 100% of that is
+                // ANONYMOUS MMAP — the malloc heap is flat across the whole
+                // run (5,492 kB -> 6,472 kB) — and it arrives in units of
+                // exactly 21,504 kB, which is 728 x 7561 x 4 B (the
+                // fixture's own declared svg size, page-rounded): one
+                // retained full-resolution ARGB raster.
+                //
+                // Qt's own qt.quick.image category names the culprit
+                // request. Each svg visit can log TWO decodes of the SAME
+                // url:
+                //   ... QImageReader size QSize(728,7561) -> scSize QSize(728,7561)
+                //   ... QImageReader size QSize(728,7561) -> scSize QSize(72,743)
+                // The second is the on-screen-sized one we want. The first
+                // exists only because `sourceSize` is still 0 ("no
+                // override" => the document's own declared size) during the
+                // bootstrap window before the viewBox XHR latches
+                // fixedNatW/H — the race documented on the sourceSize
+                // binding below. Correlating the two instruments over 12
+                // cycles: 3 full-resolution decodes, +64,604 kB anon =
+                // 3.004 x 21,504 kB. ONE RETAINED RASTER PER
+                // FULL-RESOLUTION DECODE, and none at all for the
+                // on-screen-sized decodes.
+                //
+                // It is a LEAK, not a cache-size policy: every visit
+                // requests the identical url, so a cache would saturate at
+                // one entry — growth linear in the number of
+                // full-resolution decodes of one url cannot be a cache.
+                // `cache: false` (already set) and any QQuickPixmapCache /
+                // QML_DISK_CACHE knob are therefore no help; the only
+                // bound is to never issue that request. Which costs
+                // nothing: it was pure waste — rasterising 5.5 Mpx that is
+                // discarded milliseconds later by the on-screen-sized
+                // request that supersedes it.
+                //
+                // Withholding `source` (rather than clamping sourceSize) is
+                // what makes this quality-neutral: the surviving request is
+                // the SAME on-screen-sized one the tier already used, and
+                // zooming still re-decodes at the larger size, so the tall
+                // diagram is exactly as crisp as before at every zoom
+                // level. Nothing is downscaled that was not already.
+                //
+                // Raster tiers are untouched: they leave fixedNatW/H at 0
+                // (they have to decode once at intrinsic size to learn
+                // their natural size at all), so the gate is inert for them
+                // and `source` is bound straight through as before.
+                // Two terms, and both are needed:
+                //   deferSource — the caller has not settled fixedNatW/H
+                //     yet (svg: the viewBox GET is still in flight).
+                //   fixedNatW/H set but !fitted — the sizes landed but
+                //     fitStage() early-returned because the stage itself
+                //     has no on-screen size yet (unmapped / tabbed-away
+                //     window). zoom is still 1 there, so content would be
+                //     natW x natH and the request would go out at full
+                //     resolution again.
+                source: (stage.deferSource
+                         || (stage.fixedNatW > 0 && stage.fixedNatH > 0 && !stage.fitted))
+                    ? ""
+                    : stage.imgUrl
                 asynchronous: true
                 smooth: true
                 cache: false
@@ -168,6 +255,18 @@ ApplicationWindow {
                 // natW/natH latch onto that tiny size forever. 0 sidesteps the
                 // whole race. Once natW is known, switch to the precise
                 // on-screen size for crisp zoom.
+                //
+                // The 0 branch is still reachable, and still correct, for
+                // the RASTER tiers — they have no other way to learn their
+                // natural size. It is no longer reachable on the svg path:
+                // the `source` gate above keeps that Image sourceless until
+                // fitStage() has run, by which point natW/natH are the
+                // viewBox's and this binding is already on its on-screen
+                // branch. An unmapped/zero-sized window (fitStage()'s own
+                // early return) therefore now renders nothing until it is
+                // given a size, instead of decoding a full-resolution
+                // raster into a window that cannot show it — it self-heals
+                // on the first onWidthChanged.
                 sourceSize.width: stage.natW > 0
                     ? Math.min(8192, Math.max(1, Math.round(width)))
                     : 0
@@ -444,7 +543,23 @@ ApplicationWindow {
             // fit for the few ms until the new document's viewBox lands,
             // rather than collapsing to a 0x0 (blank) content item.
             property string _pendingUrl: ""
-            onBaseUrlChanged: { lastLen = -1; poll() }
+            // sizeSettled: false until the FIRST response for the current
+            // baseUrl has come back — whatever it said. While it is false
+            // the stage holds its Image sourceless (PannableStage's
+            // deferSource), which is what keeps the svg tier from ever
+            // issuing the sourceSize-0 request whose decoded raster is
+            // retained for the life of the process (dotfiles-63rd; the
+            // numbers are on PannableStage's `source` binding).
+            //
+            // It flips on ANY completed response, not only on a parseable
+            // viewBox, so the degenerate paths keep exactly the behaviour
+            // they have today: a non-200, or a document with no usable
+            // viewBox, leaves natW/natH at 0, so fixedNatW/H stay 0 and the
+            // stage falls back to its implicitWidth-driven sizing with the
+            // url handed over as before. The gate must never be able to
+            // strand a tier blank.
+            property bool sizeSettled: false
+            onBaseUrlChanged: { lastLen = -1; sizeSettled = false; poll() }
 
             // Parses the w/h out of an svg's viewBox attribute (BoardView's
             // readSize regex, unchanged). Returns null when the document
@@ -490,14 +605,17 @@ ApplicationWindow {
                         // guarded exactly the way NativeTextView.load()
                         // guards its own text responses.
                         if (url !== svgTier.baseUrl) return
-                        if (xhr.status !== 200) return
+                        if (xhr.status !== 200) { svgTier.sizeSettled = true; return }
                         var text = xhr.responseText || ""
                         var len = text.length
                         var size = svgTier.viewBoxSize(text)
                         if (svgTier.lastLen === -1) {
                             // First response for this url: establish the
-                            // natural size, no repaint token (the Image is
-                            // already fetching v=0 on its own).
+                            // natural size, no repaint token — the Image
+                            // has not fetched anything yet (it is held by
+                            // deferSource until sizeSettled below), so v=0
+                            // is still the right token and bumping it would
+                            // only add a redundant round trip.
                             if (size) { svgTier.natW = size.w; svgTier.natH = size.h }
                         } else if (len !== svgTier.lastLen) {
                             // The watched .d2 recompiled: bump the
@@ -509,6 +627,13 @@ ApplicationWindow {
                             if (size) { svgTier.natW = size.w; svgTier.natH = size.h }
                         }
                         svgTier.lastLen = len
+                        // LAST, after natW/natH: releasing the stage's
+                        // Image before the sizes are in would put it back
+                        // in the sourceSize-0 state this exists to avoid.
+                        // By here fixedNatW/H have propagated and
+                        // fitStage() has already run, so the one request
+                        // that goes out is the on-screen-sized one.
+                        svgTier.sizeSettled = true
                     } catch (e) { /* delegate torn down mid-flight; nothing to do */ }
                 }
                 // Third argument omitted => async. Never pass `false` here.
@@ -522,6 +647,11 @@ ApplicationWindow {
                 imgUrl: svgTier.baseUrl + "&v=" + svgTier.reloadToken
                 fixedNatW: svgTier.natW
                 fixedNatH: svgTier.natH
+                // Only for the bootstrap of each new document. Once
+                // sizeSettled latches, a live-reload token bump repaints
+                // immediately with no extra round trip — the poll's own
+                // response is what bumped it, so the size is already known.
+                deferSource: !svgTier.sizeSettled
             }
 
             // 1s poll of the watched .d2's compiled svg (sp022 Task 4

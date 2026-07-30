@@ -95,6 +95,13 @@
 #      multi-word flag value stays quoted for the `bash -c` launch line and
 #      --js-flags stays a single whitespace-free token.
 #
+# dotfiles-63rd (sp022 T11, the svg tier's retained rasters):
+#  32. The REAL PreviewView.qml, run offscreen against a stub daemon that
+#      pins the viewBox-vs-Image race, never decodes a tall svg at the size
+#      the document itself declares — the decode whose raster the qml6
+#      process retains forever. Needs a real qml6 + python3; skips loudly
+#      (and says so in the final count) when they are absent.
+#
 # Run:  nu nushell/actions/preview-test
 # Pass: exits 0 and prints "PASS: N tests passed"
 # Fail: exits 1 and prints "FAIL: <description>"
@@ -102,6 +109,11 @@
 # Self-locate the wrapper relative to this test so it survives merging out
 # of the author's worktree (no hardcoded paths).
 const WRAPPER = (path self | path dirname | path join "preview")
+# The real QML client, resolved the same self-locating way (test 32 drives
+# it for real). `path self` is parse-time only, hence a const up here rather
+# than a let at the point of use.
+const QML_VIEW = (path self | path dirname | path dirname | path dirname
+    | path join "preview" "qml" "PreviewView.qml")
 
 # sp022 T6 test_plan: "factor detection into a testable helper taking the
 # cmdline list ... and table-test it" — is-xrdp-display is exported from
@@ -1525,7 +1537,193 @@ for case in $env_prefix_cases {
 }
 print $"PASS: spawn-env-prefix table-tested \(($env_prefix_cases | length) cases\)"
 
+# ── test 32: the svg tier never decodes at the document's declared size ─────
+#
+# dotfiles-63rd (sp022 T11). PreviewView's svg delegate learns the diagram's
+# natural size from the document's own viewBox, fetched by an XHR that races
+# the PannableStage Image's own fetch of the same url. Lose that race and the
+# Image goes out with sourceSize 0 — "no override", i.e. the size the svg
+# document declares — and the resulting full-resolution ARGB raster is
+# RETAINED for the life of the process. Measured on a real xorgxrdp session
+# (own :31, i3 4.25.1, web tier never instantiated, nchild=0 at all 120
+# checkpoints): pic.png <-> diagram.d2 x60 grew the qml6 process
+# 101,992 kB -> 579,234 kB, entirely in anonymous mmap, in units of exactly
+# 21,504 kB = one 728x7561x4 B raster, one per full-resolution decode.
+#
+# This is the unit-scale guard for that: run the REAL PreviewView.qml
+# offscreen against a stub daemon serving a tall svg, and assert Qt's own
+# qt.quick.image log never reports a decode at the document's declared size.
+#
+# Three things make it a test rather than a coin flip:
+#   * the stub DELAYS the viewBox XHR (the bare `?native` GET) while
+#     answering the Image's `?native&v=<token>` GET immediately, so the
+#     losing side of the race is deterministic. Verified against the
+#     pre-fix file: it logs `-> scSize QSize(1000, 9000)` and this test
+#     fails; the fixed file logs only `-> scSize QSize(93, 834)`. Without
+#     the delay BOTH files pass — checked, and that is the tautology this
+#     paragraph exists to stop anyone reintroducing.
+#   * it demands at least one decode line, so a client that rendered
+#     nothing at all (a 404ing tier, a crashed engine) fails instead of
+#     vacuously passing.
+#   * it drives the real file, not a copy — no assertion about source text.
+#
+# Requires a real qml6 and python3. Both absent is a SKIP, printed loudly
+# and subtracted from the final count — never a silent pass.
+let qml6_bin = (do { ^bash -c "command -v qml6" } | complete)
+let py_bin = (do { ^bash -c "command -v python3" } | complete)
+mut svg_decode_tested = false
+
+if $qml6_bin.exit_code == 0 and $py_bin.exit_code == 0 {
+    let qml_view = $QML_VIEW
+    if not ($qml_view | path exists) {
+        print $"FAIL: test 32 cannot find the real PreviewView.qml at ($qml_view)"
+        exit 1
+    }
+
+    # A tall svg with an unambiguous declared size. 1000x9000 is far larger
+    # than any on-screen fit, so "decoded at the declared size" and "decoded
+    # at the on-screen size" can never be confused for one another.
+    let decl_w = 1000
+    let decl_h = 9000
+    let svg_body = (1..60 | each {|i|
+        let y = (20 + $i * 150)
+        $'<rect x="60" y="($y)" width="880" height="100" fill="#dde6ff" stroke="#334466" stroke-width="3"/><text x="500" y="($y + 60)" font-size="40" fill="#112233">node ($i)</text>'
+    } | str join "")
+    let svg_file = $"($tmp)/tall-fixture.svg"
+    ($'<?xml version="1.0" encoding="utf-8"?><svg width="($decl_w)" height="($decl_h)" viewBox="0 0 ($decl_w) ($decl_h)" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="($decl_w)" height="($decl_h)" fill="#ffffff"/>($svg_body)</svg>'
+        | save --force $svg_file)
+
+    # Dependency-free stand-in for preview-d: the websocket priming frame
+    # PreviewView needs to show anything at all, plus /file/<name>.
+    let stub_src = r#'
+import base64, hashlib, socket, sys, threading, time
+
+GUID = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+def text_frame(payload):
+    b = payload.encode()
+    return bytes([0x81, len(b)]) + b
+
+def serve(conn, svg, path):
+    try:
+        conn.settimeout(15)
+        data = b""
+        while b"\r\n\r\n" not in data:
+            chunk = conn.recv(4096)
+            if not chunk:
+                return
+            data += chunk
+        head = data.split(b"\r\n\r\n", 1)[0].decode("latin1")
+        lines = head.split("\r\n")
+        target = lines[0].split(" ")[1] if " " in lines[0] else "/"
+        hdrs = {}
+        for ln in lines[1:]:
+            if ":" in ln:
+                k, v = ln.split(":", 1)
+                hdrs[k.strip().lower()] = v.strip()
+        if "websocket" in hdrs.get("upgrade", "").lower():
+            key = hdrs.get("sec-websocket-key", "").encode()
+            acc = base64.b64encode(hashlib.sha1(key + GUID).digest())
+            conn.sendall(b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
+                         b"Connection: Upgrade\r\nSec-WebSocket-Accept: " + acc + b"\r\n\r\n")
+            conn.sendall(text_frame('{"path":"%s","type":"svg"}' % path))
+            conn.settimeout(None)
+            while conn.recv(4096):
+                pass
+            return
+        # The Image fetch carries the cache-busting token, the viewBox XHR
+        # does not. Delaying only the XHR pins the bootstrap race so an
+        # ungated Image is guaranteed to have decoded at the declared size
+        # by the time the natural size lands.
+        if target.startswith("/file/") and "v=" not in target:
+            time.sleep(0.4)
+        ok = target.startswith("/file/")
+        body = svg if ok else b"not found"
+        status = b"200 OK" if ok else b"404 Not Found"
+        conn.sendall(b"HTTP/1.1 " + status + b"\r\nContent-Type: image/svg+xml\r\nContent-Length: "
+                     + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body)
+    except Exception:
+        pass
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+port = int(sys.argv[1])
+svg = open(sys.argv[2], "rb").read()
+path = sys.argv[3]
+s = socket.socket()
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", port))
+s.listen(16)
+print("ready", flush=True)
+while True:
+    c, _ = s.accept()
+    threading.Thread(target=serve, args=(c, svg, path), daemon=True).start()
+'#
+    let stub_py = $"($tmp)/svgstub.py"
+    $stub_src | save --force $stub_py
+
+    # Its own port, not $test_port. A leftover squatter here would make the
+    # stub bind fail and the client talk to a stranger, so say so plainly
+    # rather than reporting it as a client regression (bd memories
+    # preview-test-port-58920-squatter).
+    let svg_port = "58921"
+    let squatter = (do { ^bash -c $"curl -sf --max-time 1 http://127.0.0.1:($svg_port)/" } | complete)
+    if $squatter.exit_code == 0 {
+        print $"FAIL: test 32: something is already serving 127.0.0.1:($svg_port) — that is not this suite. Free the port and re-run."
+        exit 1
+    }
+
+    let stub_log = $"($tmp)/svgstub.log"
+    let qml_log = $"($tmp)/svgqml.log"
+    let stub_pid = (^bash -c $"nohup python3 ($stub_py) ($svg_port) ($svg_file) /tall.d2 >($stub_log) 2>&1 & echo $!" | str trim)
+    # The client only speaks to 127.0.0.1:<port>, so nothing here can reach a
+    # real display or a real daemon: offscreen platform, own port, own tmp.
+    let qml_pid = (^bash -c $"cd ($tmp); QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software LIBGL_ALWAYS_SOFTWARE=1 QT_FORCE_STDERR_LOGGING=1 QT_LOGGING_RULES='qt.quick.image=true' nohup qml6 ($qml_view) -- 1 ($svg_port) >($qml_log) 2>&1 & echo $!" | str trim)
+
+    # Wait for the tier to have decoded something (or give up).
+    for _ in 1..60 {
+        if ($qml_log | path exists) and ((open --raw $qml_log) | str contains "qt.quick.image") { break }
+        sleep 300ms
+    }
+    sleep 1sec
+
+    # Guards precede both kills: only pids this block spawned, and only if
+    # /proc still says they are what we launched.
+    for spec in [[pid, want]; [$qml_pid, "PreviewView.qml"] [$stub_pid, "svgstub.py"]] {
+        let cmdline_file = $"/proc/($spec.pid)/cmdline"
+        if ($cmdline_file | path exists) {
+            let cmd = (open --raw $cmdline_file | decode utf-8 | split row (char -i 0) | str join " ")
+            if ($cmd | str contains $spec.want) {
+                ^kill -TERM $spec.pid
+            }
+        }
+    }
+
+    let out = (if ($qml_log | path exists) { open --raw $qml_log } else { "" })
+    let decodes = ($out | lines | where {|l| $l | str contains "qt.quick.image" })
+    if ($decodes | is-empty) {
+        print $"FAIL: test 32: the svg tier never decoded anything — the assertion below would pass vacuously. qml log:\n($out)\nstub log:\n(if ($stub_log | path exists) { open --raw $stub_log } else { '' })"
+        exit 1
+    }
+    let full_res = ($decodes | where {|l| $l | str contains $"-> scSize QSize\(($decl_w), ($decl_h)\)" })
+    if ($full_res | is-not-empty) {
+        print $"FAIL: test 32: the svg tier decoded the document at its own declared size ($decl_w)x($decl_h). Every such raster is retained for the life of the process \(dotfiles-63rd\). Offending lines:\n($full_res | str join (char newline))"
+        exit 1
+    }
+    print $"PASS: svg tier decodes only at the on-screen size, never at the document's declared ($decl_w)x($decl_h) \(($decodes | length) decode\(s\) observed\)"
+    $svg_decode_tested = true
+} else {
+    print "SKIP: test 32 (svg-tier decode size) needs a real qml6 and python3 — neither is faked, and a fake would test nothing."
+}
+
 ^rm -rf $tmp
 print ""
-print "PASS: 31 tests passed"
+if $svg_decode_tested {
+    print "PASS: 32 tests passed"
+} else {
+    print "PASS: 31 tests passed (1 skipped: test 32 needs qml6 + python3)"
+}
 
