@@ -18,6 +18,16 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOTKEYD_BIN="${HOTKEYD_BIN:-python3 $HERE/hotkeyd.py}"
 HOTKEYD_PROC_PAT="${HOTKEYD_PROC_PAT:-hotkeyd\.py}"
 
+# The same seam for stage 6's live-X suite (sp021 Task 14). Default is
+# today's python invocation byte-for-byte, so nothing changes until a caller
+# opts in with e.g.
+#   HOTKEYD_LIVECHECK=path/to/livecheck HOTKEYD_BIN=path/to/hotkeyd ./test-hotkeyd.sh
+# Stage 6 passes `--display`/`--i3sock` to whatever this names: cmd/livecheck
+# REQUIRES an explicit --display (it never inherits $DISPLAY, so it cannot
+# land on a live session), and live_check.py reads no argv at all, so the
+# same invocation drives either one.
+HOTKEYD_LIVECHECK="${HOTKEYD_LIVECHECK:-python3 $HERE/live_check.py}"
+
 PASS=0
 FAIL=0
 
@@ -121,7 +131,14 @@ else
     XSOCK="/tmp/i3-hotkeyd-test-$$.sock"
     XCFG="$TMPD/i3-live.conf"
     mkdir -p "$TMPD"
-    printf 'font pango:monospace 10\nipc-socket %s\nbindsym Mod4+F11 nop taken-by-i3\n' \
+    # Mod4+F8 is the CORE-grab marker (sp021 Task 14): i3 grabs its own binds
+    # with core XGrabKey, and `mark --add` makes it observable whether i3
+    # actually received the key. That is what lets a live check measure "core
+    # and XI2 passive grabs are separate conflict domains, and the later XI2
+    # grabber wins delivery" without installing a core grabber of its own --
+    # internal/x11 has no core GrabKey request and deliberately never will.
+    # Harmless to live_check.py, which uses F9/F11 and never reads marks.
+    printf 'font pango:monospace 10\nipc-socket %s\nbindsym Mod4+F11 nop taken-by-i3\nbindsym Mod4+F8 mark --add hotkeyd-live-i3-core\n' \
         "$XSOCK" > "$XCFG"
     Xvfb "$XD" -screen 0 800x600x24 >/dev/null 2>&1 &
     XVFB_PID=$!
@@ -138,20 +155,29 @@ else
         bad "live i3 did not start on $XD"
     else
         out="$(DISPLAY="$XD" XDG_RUNTIME_DIR="$TMPD" I3SOCK="$XSOCK" \
-               python3 "$HERE/live_check.py" 2>&1)"
+               HOTKEYD_BIN="$HOTKEYD_BIN" \
+               $HOTKEYD_LIVECHECK --display "$XD" --i3sock "$XSOCK" 2>&1)"
         rc=$?
         printf '%s\n' "$out" | while IFS= read -r line; do
             case "$line" in
                 PASS*) printf '  \033[32m%s\033[0m\n' "$line" ;;
                 FAIL*) printf '  \033[31m%s\033[0m\n' "$line" ;;
+                SKIP*) printf '  \033[33m%s\033[0m\n' "$line" ;;
                 *)     printf '    %s\n' "$line" ;;
             esac
         done
         n_pass=$(printf '%s' "$out" | grep -c '^PASS')
         n_fail=$(printf '%s' "$out" | grep -c '^FAIL')
+        # SKIP is cmd/livecheck's third verdict (im009: a claim whose
+        # precondition did not hold on this run is never PASS). Counted and
+        # announced separately -- never folded into PASS, which is the whole
+        # point, and never into FAIL, which would conflate "the rig lacks
+        # xdotool" with "the daemon is broken".
+        n_skip=$(printf '%s' "$out" | grep -c '^SKIP')
         PASS=$((PASS + n_pass))
         FAIL=$((FAIL + n_fail))
-        [ "$rc" -ne 0 ] && [ "$n_fail" -eq 0 ] && bad "live_check.py exited $rc"
+        [ "$n_skip" -gt 0 ] && printf '  \033[33m%s live claims were SKIPPED (precondition absent) — not passes\033[0m\n' "$n_skip"
+        [ "$rc" -ne 0 ] && [ "$n_fail" -eq 0 ] && bad "live check exited $rc"
     fi
     kill "$I3_PID" 2>/dev/null
     kill "$XVFB_PID" 2>/dev/null
