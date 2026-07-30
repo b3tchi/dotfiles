@@ -238,13 +238,49 @@ export def is-xrdp-display [display: string, xorg_cmdlines: list<string>] {
 # compositor does not also try for a hardware context.
 const XRDP_CHROMIUM_FLAGS = "--enable-unsafe-swiftshader --use-gl=angle --use-angle=swiftshader --disable-gpu-compositing"
 
+# Chromium flags that BOUND the web tier's per-navigation memory growth
+# (dotfiles-j5kq / sp022 T10). Applied on EVERY display, not just
+# xorgxrdp — nothing about the mechanism is display-specific.
+#
+# MECHANISM (measured, not guessed — full numbers in preview/README.md):
+# the web tier navigates ONE long-lived WebEngineView, so ONE renderer
+# process serves every html/akm/stl visit for the window's whole life. Each
+# akm visit leaves ~40 MB of dead JS (the cross-origin akm-graph iframe
+# re-parses ~1 MB of bundle and re-allocates the graph's typed arrays), and
+# V8 does not collect it until its own old-space limit is reached. V8 sizes
+# that limit from physical RAM, so on a 24 GB host the renderer climbed to
+# ~1.49 GB before its first major GC — which reads as an unbounded leak to
+# anyone who stops measuring first. It is not a leak: a 60-cycle
+# page.html <-> adr0009.md loop grew ~39 MB/cycle to 1.49 GB, then went
+# FLAT (+1.1 MB/cycle) for the remaining 28 cycles. A deduped
+# /proc/<pid>/task/*/children PSS walk put 100% of the growth in the single
+# renderer child (136 MB -> 1266 MB) with the qml6 browser process flat at
+# ~176 MB, and smaps put it in V8's two pools (the sandbox anon region
+# 510 MB + [anon:v8] 206 MB).
+#
+# So the fix is to choose the ceiling instead of letting V8 derive one from
+# host RAM: --max-old-space-size=256 moves the plateau to ~600 MB total PSS,
+# reached by navigation ~14 and flat after (proof by intervention — the same
+# loop, same rig, same scripts). 256 MB is ~2x the measured first-visit
+# working set of the heaviest tier, which is the headroom that keeps this a
+# ceiling rather than a GC-thrash / renderer-OOM trap.
+#
+# Passed as ONE token: QtWebEngine splits QTWEBENGINE_CHROMIUM_FLAGS on
+# whitespace with no quote handling, so a --js-flags value may not contain
+# spaces (multiple V8 flags would need a different transport).
+const MEMORY_CHROMIUM_FLAGS = "--js-flags=--max-old-space-size=256"
+
 # The `VAR=value ` prefix window-spawn prepends to its `bash -c` launch line,
 # given whether the target display is xorgxrdp and whatever
 # QTWEBENGINE_CHROMIUM_FLAGS the caller already has set (""=unset). Factored
 # out of window-spawn so preview-test can table-test it without a real Xorg
 # (the is-xrdp-display seam pattern).
 #
-# On a native display: empty — real GL, real GPU, no overrides.
+# On a native display: no Qt/GL overrides — real GL, real GPU — but the
+# Chromium memory ceiling still applies (MEMORY_CHROMIUM_FLAGS above: V8's
+# default old-space limit is derived from host RAM, not from the display
+# server, so the unbounded-looking growth of dotfiles-j5kq is not an
+# xrdp phenomenon and must not be fixed only there).
 #
 # On xorgxrdp, THREE things are needed, and dotfiles-14kr's 2x2 matrix on a
 # real xorgxrdp session settled which does what:
@@ -265,15 +301,22 @@ const XRDP_CHROMIUM_FLAGS = "--enable-unsafe-swiftshader --use-gl=angle --use-an
 #     explicit QTWEBENGINE_CHROMIUM_FLAGS in the environment is a
 #     deliberate override and wins (overriding it would make the var
 #     un-settable, since a duplicate assignment on the launch line would
-#     always shadow the inherited one).
+#     always shadow the inherited one). That deference covers the memory
+#     ceiling too: a caller who takes over the flag string owns the whole
+#     Chromium command line, ceiling included.
 export def spawn-env-prefix [xrdp: bool, caller_chromium_flags: string] {
-    if not $xrdp {
-        return ""
-    }
     let chromium = if ($caller_chromium_flags | is-not-empty) {
         ""
     } else {
-        $"QTWEBENGINE_CHROMIUM_FLAGS='($XRDP_CHROMIUM_FLAGS)' "
+        let flags = if $xrdp {
+            $"($XRDP_CHROMIUM_FLAGS) ($MEMORY_CHROMIUM_FLAGS)"
+        } else {
+            $MEMORY_CHROMIUM_FLAGS
+        }
+        $"QTWEBENGINE_CHROMIUM_FLAGS='($flags)' "
+    }
+    if not $xrdp {
+        return $chromium
     }
     $"QT_QUICK_BACKEND=software LIBGL_ALWAYS_SOFTWARE=1 ($chromium)"
 }
@@ -464,7 +507,9 @@ def window-spawn [n: int] {
     #    did — a GPU-less virtual Xorg wedges hardware GL (dotfiles-49j) —
     #    AND hands QtWebEngine's separate Chromium GPU stack the swiftshader
     #    flags the web tier needs for WebGL there (dotfiles-14kr). Native
-    #    displays (including no Xorg at all, e.g. sway) get none of them.
+    #    displays (including no Xorg at all, e.g. sway) get none of the GL
+    #    overrides — but they DO get the Chromium memory ceiling, which is
+    #    display-independent (MEMORY_CHROMIUM_FLAGS, dotfiles-j5kq).
     let dir = ($CACHE_DIR | path expand)
     if not ($dir | path exists) {
         mkdir $dir

@@ -88,10 +88,12 @@
 #
 # dotfiles-14kr (xorgxrdp web-tier WebGL):
 #  31. `spawn-env-prefix` table-tested directly (module `use`, no real Xorg)
-#      — a native display gets no overrides; xorgxrdp gets the Qt software-GL
-#      pair AND the Chromium swiftshader flags the web tier needs for WebGL
-#      there; a caller-set QTWEBENGINE_CHROMIUM_FLAGS is left alone; the
-#      multi-word flag value stays quoted for the `bash -c` launch line.
+#      — a native display gets the Chromium memory ceiling but no GL
+#      overrides; xorgxrdp gets the Qt software-GL pair AND the Chromium
+#      swiftshader flags the web tier needs for WebGL there AND the same
+#      ceiling; a caller-set QTWEBENGINE_CHROMIUM_FLAGS is left alone; the
+#      multi-word flag value stays quoted for the `bash -c` launch line and
+#      --js-flags stays a single whitespace-free token.
 #
 # Run:  nu nushell/actions/preview-test
 # Pass: exits 0 and prints "PASS: N tests passed"
@@ -1411,25 +1413,42 @@ for pid in $spawned_pids {
     }
 }
 
-# ── test 31: spawn-env-prefix — xrdp gets swiftshader WebGL flags too ──────
+# ── test 31: spawn-env-prefix — swiftshader WebGL + the memory ceiling ─────
 #
 # dotfiles-14kr. Measured on a real xorgxrdp session: the Qt software-GL pair
 # alone is NOT enough for the web tier — QtWebEngine's Chromium GPU stack
 # blocklists WebGL independently, so the stl tier fails ("WebGL1/WebGL2
 # blocklisted") both with and without that pair. Only the Chromium
 # swiftshader flags fix it. This asserts the prefix carries all three on
-# xorgxrdp, nothing at all on a native display, and defers to a caller who
-# already set QTWEBENGINE_CHROMIUM_FLAGS.
+# xorgxrdp, and defers to a caller who already set
+# QTWEBENGINE_CHROMIUM_FLAGS.
+#
+# dotfiles-j5kq / sp022 T10 adds the second half: the Chromium memory
+# ceiling (--js-flags=--max-old-space-size=...) must reach EVERY display, not
+# just xorgxrdp, because V8 derives its old-space limit from host RAM and not
+# from the display server. So a native display no longer gets an empty prefix
+# — it gets the ceiling and nothing else. want_flags/forbid_flags per case is
+# what keeps the two concerns from being conflated again.
 
 let env_prefix_cases = [
-    {desc: "native display gets no overrides at all",
-     xrdp: false, caller: "", want_qt: false, want_chromium: false},
+    {desc: "native display gets the memory ceiling and no GL overrides",
+     xrdp: false, caller: "", want_qt: false, want_chromium: true,
+     want_flags: ["--js-flags=--max-old-space-size="],
+     forbid_flags: ["--use-angle=swiftshader" "--enable-unsafe-swiftshader"],
+     want_non_js_tokens: []},
     {desc: "native display ignores a caller's chromium flags",
-     xrdp: false, caller: "--use-gl=egl", want_qt: false, want_chromium: false},
-    {desc: "xorgxrdp gets the Qt software-GL pair AND the swiftshader flags",
-     xrdp: true, caller: "", want_qt: true, want_chromium: true},
-    {desc: "xorgxrdp defers to a caller-set QTWEBENGINE_CHROMIUM_FLAGS",
-     xrdp: true, caller: "--use-gl=egl", want_qt: true, want_chromium: false},
+     xrdp: false, caller: "--use-gl=egl", want_qt: false, want_chromium: false,
+     want_flags: [], forbid_flags: [], want_non_js_tokens: []},
+    {desc: "xorgxrdp gets the Qt software-GL pair, the swiftshader flags AND the ceiling",
+     xrdp: true, caller: "", want_qt: true, want_chromium: true,
+     want_flags: ["--enable-unsafe-swiftshader" "--use-gl=angle" "--use-angle=swiftshader"
+                  "--disable-gpu-compositing" "--js-flags=--max-old-space-size="],
+     forbid_flags: [],
+     want_non_js_tokens: ["--enable-unsafe-swiftshader" "--use-gl=angle"
+                          "--use-angle=swiftshader" "--disable-gpu-compositing"]},
+    {desc: "xorgxrdp defers to a caller-set QTWEBENGINE_CHROMIUM_FLAGS (ceiling included)",
+     xrdp: true, caller: "--use-gl=egl", want_qt: true, want_chromium: false,
+     want_flags: [], forbid_flags: [], want_non_js_tokens: []},
 ]
 
 for case in $env_prefix_cases {
@@ -1445,19 +1464,55 @@ for case in $env_prefix_cases {
         print $"FAIL: spawn-env-prefix \(($case.desc)\): QTWEBENGINE_CHROMIUM_FLAGS present=($has_chromium), want ($case.want_chromium) — got: ($got)"
         exit 1
     }
-    if $has_chromium {
-        # Every flag the measured-working configuration needs, and quoting
-        # that survives interpolation into window-spawn's `bash -c` line
-        # (the value has spaces — unquoted, bash would read the flags after
-        # the first as a command, not as part of the assignment).
-        for flag in ["--enable-unsafe-swiftshader" "--use-gl=angle" "--use-angle=swiftshader" "--disable-gpu-compositing"] {
-            if not ($got | str contains $flag) {
-                print $"FAIL: spawn-env-prefix \(($case.desc)\): missing chromium flag ($flag) — got: ($got)"
-                exit 1
-            }
+    for flag in $case.want_flags {
+        if not ($got | str contains $flag) {
+            print $"FAIL: spawn-env-prefix \(($case.desc)\): missing chromium flag ($flag) — got: ($got)"
+            exit 1
         }
+    }
+    for flag in $case.forbid_flags {
+        if ($got | str contains $flag) {
+            print $"FAIL: spawn-env-prefix \(($case.desc)\): must NOT carry ($flag) — got: ($got)"
+            exit 1
+        }
+    }
+    if $has_chromium {
+        # Quoting that survives interpolation into window-spawn's `bash -c`
+        # line (the xrdp value has spaces — unquoted, bash would read the
+        # flags after the first as a command, not as part of the assignment).
         if not ($got | str contains "QTWEBENGINE_CHROMIUM_FLAGS='") {
             print $"FAIL: spawn-env-prefix \(($case.desc)\): multi-word flag value must be quoted for `bash -c` — got: ($got)"
+            exit 1
+        }
+        # QtWebEngine splits QTWEBENGINE_CHROMIUM_FLAGS on whitespace with no
+        # quote handling, so whatever V8 gets is ONE whitespace-delimited
+        # token and nothing more (dotfiles-j5kq). Asserting "exactly one
+        # token starts with --js-flags=" does NOT test that — a value written
+        # `--js-flags=--max-old-space-size=256 --trace-gc` still has exactly
+        # one such token while V8 silently receives only the first flag
+        # (mutation-verified: that assertion accepted it).
+        #
+        # What does test it is decomposing the value the way QtWebEngine
+        # will and demanding the token multiset be EXACTLY what this case
+        # expects: any word the author meant to be part of the --js-flags
+        # value but wrote after a space shows up here as a stray token with
+        # nowhere to belong.
+        let value = ($got | parse --regex "QTWEBENGINE_CHROMIUM_FLAGS='(?<v>[^']*)'" | get v.0)
+        let tokens = ($value | split row " " | where {|t| $t | is-not-empty })
+        let js_tokens = ($tokens | where {|t| $t | str starts-with "--js-flags=" })
+        let non_js_tokens = ($tokens | where {|t| not ($t | str starts-with "--js-flags=") })
+        if ($js_tokens | length) != 1 {
+            print $"FAIL: spawn-env-prefix \(($case.desc)\): want exactly one --js-flags token, got ($js_tokens | length) — value: ($value)"
+            exit 1
+        }
+        # The one token V8 actually receives must be a complete V8 flag on
+        # its own — not a truncated head of a longer intended value.
+        if not ($js_tokens.0 =~ '^--js-flags=--max-old-space-size=[0-9]+$') {
+            print $"FAIL: spawn-env-prefix \(($case.desc)\): the single --js-flags token V8 receives must be a complete --max-old-space-size=<N> flag, got ($js_tokens.0) — value: ($value)"
+            exit 1
+        }
+        if ($non_js_tokens | sort) != ($case.want_non_js_tokens | sort) {
+            print $"FAIL: spawn-env-prefix \(($case.desc)\): chromium flag tokens are not exactly the expected set — got ($non_js_tokens | sort), want ($case.want_non_js_tokens | sort). A stray token here usually means a whitespace crept into the --js-flags value, which QtWebEngine's whitespace split silently drops. value: ($value)"
             exit 1
         }
     }
