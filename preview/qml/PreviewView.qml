@@ -25,13 +25,26 @@
 // list; PreviewView has exactly one image at a time, so it can just wait
 // for Image.Ready and re-fit once).
 //
-// svg live-reload (the .d2 tier) ports BoardView's 1s poll / byte-length
-// compare / cache-busting token bump verbatim from file:// to an http GET —
-// same shape, different transport.
+// svg live-reload (the .d2 tier) takes BoardView's 1s poll / byte-length
+// compare / cache-busting token bump and re-points it from file:// to an
+// http GET. The poll SEMANTICS are BoardView's; the TRANSPORT is not, and
+// the difference is load-bearing: BoardView issues a *synchronous* XHR,
+// which is harmless against file:// (a local read that returns in
+// microseconds) but fatal against this relay. preview-d's /file/…?native
+// svg path proxies to the d2 router (preview/proxy.go d2SVGRelayTimeout =
+// 5s, wrapping d2/router/api.go svgPollDeadline = 3s), so a single GET can
+// legitimately block for seconds — and a sync XHR blocks the GUI thread
+// while it does. Repeated every 1s that killed the process outright: an
+// earlier revision of this file used sync XHR here and the client exited
+// rc=0 (window gone) within 1-4s of an svg frame, ~1 time in 3, measured
+// 4/12 over two content variants with image/video controls at 0/10.
+// Both svg-tier requests are therefore ASYNCHRONOUS, which measured 0
+// deaths. Async introduces an out-of-order-response race that the sync
+// version could not have, so the poll carries a last-wins url guard — the
+// same guard NativeTextView.load() already uses below.
 
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Layouts
 import QtWebSockets
 
 // ---- main window -------------------------------------------------------------
@@ -374,6 +387,13 @@ ApplicationWindow {
     Component {
         id: svgDelegate
         Item {
+            // Explicit id rather than `parent` for the self-references
+            // below. The non-visual Timer at the bottom is not an Item, so
+            // it has no `parent` property of its own; a bare `parent` there
+            // resolves up the scope chain to THIS Item's parent (the
+            // Loader), not to this Item. Naming the object removes the
+            // ambiguity for readers and for the QML resolver alike.
+            id: svgTier
             property string baseUrl: win.fileUrl(win.currentPath) + "?native"
             property int reloadToken: 0
             property int lastLen: -1
@@ -389,7 +409,16 @@ ApplicationWindow {
             // just echoes back whatever sourceSize was last requested.
             property real natW: 0
             property real natH: 0
-            onBaseUrlChanged: { lastLen = -1; fetchViewBox() }
+            // _pendingUrl is the url of the single in-flight GET, "" when
+            // idle. It is the anti-pile-up guard the sync version got for
+            // free: an async 1s poll against a relay that can take up to 5s
+            // would otherwise stack five concurrent requests per slow
+            // response. natW/natH are deliberately NOT reset when baseUrl
+            // changes — the stage keeps rendering the previous diagram's
+            // fit for the few ms until the new document's viewBox lands,
+            // rather than collapsing to a 0x0 (blank) content item.
+            property string _pendingUrl: ""
+            onBaseUrlChanged: { lastLen = -1; poll() }
 
             // Parses the w/h out of an svg's viewBox attribute (BoardView's
             // readSize regex, unchanged). Returns null when the document
@@ -403,57 +432,80 @@ ApplicationWindow {
                 return { w: p[2], h: p[3] }
             }
 
-            function fetchViewBox() {
-                var url = baseUrl
+            // One async GET serving both jobs: the first response for a url
+            // establishes the viewBox-derived natural size, every later one
+            // is the live-reload byte-length compare. ASYNC IS NOT
+            // COSMETIC — see the transport note in the file header: the
+            // synchronous form of this exact request killed the process on
+            // roughly a third of svg frames, because /file/…?native relays
+            // through the d2 router and can block the GUI thread for
+            // seconds.
+            function poll() {
+                var url = svgTier.baseUrl
+                if (url === "") return
+                // Same url already in flight → let it land; polling again
+                // would only queue duplicates behind a slow relay.
+                if (svgTier._pendingUrl === url) return
+                svgTier._pendingUrl = url
                 var xhr = new XMLHttpRequest()
-                try {
-                    xhr.open("GET", url, false)
-                    xhr.send()
-                    if (xhr.status === 200) {
-                        var size = viewBoxSize(xhr.responseText)
-                        if (size) { natW = size.w; natH = size.h }
-                        lastLen = (xhr.responseText || "").length
-                    }
-                } catch (e) { /* daemon down/mid-recompile; the poll below retries */ }
+                xhr.onreadystatechange = function () {
+                    if (xhr.readyState !== XMLHttpRequest.DONE) return
+                    try {
+                        // The Loader swapped this delegate away before the
+                        // response arrived: nothing left to update, and
+                        // touching a destroyed QML object throws.
+                        if (svgTier === null) return
+                        if (svgTier._pendingUrl === url) svgTier._pendingUrl = ""
+                        // LAST-WINS: a newer frame has already moved baseUrl
+                        // on (a different .d2 arrived in the same slot), so
+                        // this stale body must not overwrite the newer
+                        // document's size/length state. The sync version
+                        // could not have this race; async can, so it is
+                        // guarded exactly the way NativeTextView.load()
+                        // guards its own text responses.
+                        if (url !== svgTier.baseUrl) return
+                        if (xhr.status !== 200) return
+                        var text = xhr.responseText || ""
+                        var len = text.length
+                        var size = svgTier.viewBoxSize(text)
+                        if (svgTier.lastLen === -1) {
+                            // First response for this url: establish the
+                            // natural size, no repaint token (the Image is
+                            // already fetching v=0 on its own).
+                            if (size) { svgTier.natW = size.w; svgTier.natH = size.h }
+                        } else if (len !== svgTier.lastLen) {
+                            // The watched .d2 recompiled: bump the
+                            // cache-busting token so the Image refetches,
+                            // and re-read the viewBox in case the board's
+                            // own size shifted, so the fit recomputes and
+                            // not just the pixels.
+                            svgTier.reloadToken++
+                            if (size) { svgTier.natW = size.w; svgTier.natH = size.h }
+                        }
+                        svgTier.lastLen = len
+                    } catch (e) { /* delegate torn down mid-flight; nothing to do */ }
+                }
+                // Third argument omitted => async. Never pass `false` here.
+                xhr.open("GET", url)
+                xhr.send()
             }
-            Component.onCompleted: fetchViewBox()
+            Component.onCompleted: poll()
 
             PannableStage {
                 anchors.fill: parent
-                imgUrl: parent.baseUrl + "&v=" + parent.reloadToken
-                fixedNatW: parent.natW
-                fixedNatH: parent.natH
+                imgUrl: svgTier.baseUrl + "&v=" + svgTier.reloadToken
+                fixedNatW: svgTier.natW
+                fixedNatH: svgTier.natH
             }
 
-            // 1s poll of the watched .d2's compiled svg: byte-length
-            // compare, cache-busting token bump on change — the BoardView
-            // live-reload pattern ported from file:// to an http GET (sp022
-            // Task 4 success criteria: "an edit to the watched .d2 repaints
-            // without any window action"). A changed viewBox (the board's
-            // own size shifted) is re-parsed from the same response so the
-            // fit recomputes, not just the pixels.
+            // 1s poll of the watched .d2's compiled svg (sp022 Task 4
+            // success criteria: "an edit to the watched .d2 repaints without
+            // any window action").
             Timer {
                 interval: 1000
                 running: true
                 repeat: true
-                onTriggered: {
-                    var url = parent.baseUrl
-                    var xhr = new XMLHttpRequest()
-                    try {
-                        xhr.open("GET", url, false)
-                        xhr.send()
-                        if (xhr.status === 200 && url === parent.baseUrl) {
-                            var text = xhr.responseText || ""
-                            var len = text.length
-                            if (parent.lastLen !== -1 && len !== parent.lastLen) {
-                                parent.reloadToken++
-                                var size = parent.viewBoxSize(text)
-                                if (size) { parent.natW = size.w; parent.natH = size.h }
-                            }
-                            parent.lastLen = len
-                        }
-                    } catch (e) { /* daemon mid-recompile or down; try again next tick */ }
-                }
+                onTriggered: svgTier.poll()
             }
         }
     }
