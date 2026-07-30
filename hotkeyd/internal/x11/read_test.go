@@ -2,6 +2,7 @@ package x11
 
 import (
 	"encoding/binary"
+	"errors"
 	"io"
 	"testing"
 	"time"
@@ -178,6 +179,137 @@ func TestConn_ReadLoop_NormalEventIsFixed32Bytes(t *testing.T) {
 		t.Fatal("timed out waiting for event")
 	}
 	pw.Close()
+}
+
+// ---------------------------------------------------------------------
+// Connection loss (dotfiles-83j4). The X server dying mid-run is a FATAL,
+// OBSERVABLE event for every consumer of a Conn, not a quiet stop:
+//
+//   - the event stream must CLOSE, because a receive on a channel that is
+//     merely idle is indistinguishable from "no keys pressed yet" — that
+//     is exactly why the Go daemon outlived its dead Xvfb by >30s while
+//     hotkeyd.py exited in ~1s (adr0014 fail-fast),
+//   - every checked request already in flight must FAIL, because its
+//     reply can never arrive and `res := <-waiter` would otherwise block
+//     that goroutine forever,
+//   - and requests issued AFTER the loss must fail immediately rather
+//     than registering a waiter no read loop is left to answer.
+// ---------------------------------------------------------------------
+
+func TestConn_ReadLoop_ConnectionLost_ClosesEventsChannel(t *testing.T) {
+	pr, pw := io.Pipe()
+	c := newTestConn(pr)
+	go c.readLoop()
+
+	// The X server dies: its end of the socket goes away, so the read
+	// loop's next ReadFull returns EOF.
+	pw.Close()
+
+	select {
+	case _, ok := <-c.Events:
+		if ok {
+			t.Fatal("Events delivered a value after the connection died; want the channel CLOSED")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Events was still open 2s after the connection died — a consumer selecting on it " +
+			"cannot tell a dead X server from an idle one, so the daemon never fails fast (dotfiles-83j4)")
+	}
+}
+
+func TestConn_ReadLoop_ConnectionLost_FailsPendingCheckedRequest(t *testing.T) {
+	pr, pw := io.Pipe()
+	c := newTestConn(pr)
+	go c.readLoop()
+
+	// A checked request goes out and is waiting on a reply that the
+	// server, about to die, will never send.
+	type result struct {
+		reply []byte
+		err   error
+	}
+	res := make(chan result, 1)
+	go func() {
+		reply, err := c.doRequest(make([]byte, 4))
+		res <- result{reply, err}
+	}()
+
+	// Wait for the waiter to actually be registered, so this test cannot
+	// pass by racing the request in AFTER the read loop already ended
+	// (which is the separate "issued after the loss" case below).
+	deadline := time.Now().Add(2 * time.Second)
+	for c.seq.pendingCount() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the checked request never registered a waiter")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	pw.Close()
+
+	select {
+	case got := <-res:
+		if got.err == nil {
+			t.Fatalf("doRequest returned reply=%v err=nil after the connection died; want a named error", got.reply)
+		}
+		if !errors.Is(got.err, ErrConnLost) {
+			t.Fatalf("doRequest error = %v; want one matching ErrConnLost", got.err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a checked request in flight when the connection died never returned — " +
+			"it is blocked forever on a reply the dead server cannot send (dotfiles-83j4)")
+	}
+}
+
+func TestConn_RequestAfterConnectionLost_FailsImmediatelyNotHangs(t *testing.T) {
+	pr, pw := io.Pipe()
+	c := newTestConn(pr)
+	go c.readLoop()
+
+	pw.Close()
+	<-c.done // the read loop has ended; nothing will dispatch replies now
+
+	res := make(chan error, 1)
+	go func() {
+		_, err := c.doRequest(make([]byte, 4))
+		res <- err
+	}()
+
+	select {
+	case err := <-res:
+		if !errors.Is(err, ErrConnLost) {
+			t.Fatalf("doRequest error = %v; want one matching ErrConnLost", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a request issued after the connection died never returned — the sequencer " +
+			"registered a waiter no read loop is left to answer (dotfiles-83j4)")
+	}
+}
+
+func TestConn_UncheckedRequestAfterConnectionLost_FailsWithErrConnLost(t *testing.T) {
+	pr, pw := io.Pipe()
+	c := newTestConn(pr)
+	go c.readLoop()
+
+	pw.Close()
+	<-c.done // the read loop has ended; the sequencer is latched closed
+
+	// XISelectEvents is one of the two live SendUnchecked callers (the
+	// other is XIPassiveUngrabDevice). An unchecked request registers no
+	// waiter, so it cannot hang -- the failure mode here is the opposite
+	// one: reporting SUCCESS for a request that never reached a server.
+	// The transport cannot be relied on to say so, because a write to a
+	// socket whose peer has died routinely lands in the kernel buffer and
+	// returns nil (only a later write gets EPIPE) -- exactly what the
+	// discard writer underneath this Conn models. The latch is what makes
+	// the answer deterministic and named (dotfiles-83j4).
+	err := c.XISelectEvents(131, 0x2a, []EventMaskEntry{{DeviceID: 3, Mask: []uint32{1 << 2}}})
+	if err == nil {
+		t.Fatal("XISelectEvents returned nil after the connection died; want an error — " +
+			"an unchecked request that reports success was never sent to anything")
+	}
+	if !errors.Is(err, ErrConnLost) {
+		t.Fatalf("XISelectEvents error = %v; want one matching ErrConnLost", err)
+	}
 }
 
 // newTestConn builds a Conn over a discard writer and the given reader,

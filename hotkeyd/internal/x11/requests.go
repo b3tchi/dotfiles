@@ -51,6 +51,11 @@ func (c *Conn) doRequest(req []byte) ([]byte, error) {
 		return nil, err
 	}
 	res := <-waiter
+	if res.err != nil {
+		// The connection died before the server answered (see
+		// Sequencer.failAll) — a named failure, not a hang.
+		return nil, res.err
+	}
 	if res.isError {
 		return nil, res.xerr
 	}

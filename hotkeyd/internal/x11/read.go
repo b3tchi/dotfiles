@@ -2,9 +2,17 @@ package x11
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 )
+
+// ErrConnLost is what every consumer of a Conn sees once the read loop has
+// ended: the X server is gone, so no reply, error, or event can ever
+// arrive again. Wrapped (never returned bare) so the underlying transport
+// error stays readable in logs while `errors.Is(err, ErrConnLost)` still
+// answers the only question callers actually ask.
+var ErrConnLost = errors.New("x11: connection to the X server lost")
 
 // XError is a decoded X Error frame, correlated back to the request that
 // caused it via Seq (the reconstructed full sequence number, not the raw
@@ -52,8 +60,29 @@ type Conn struct {
 // readLoop reads frames from the connection until it hits an error or the
 // connection closes, dispatching replies/errors to their waiters via seq
 // and events to the Events channel. Run this in its own goroutine.
+//
+// However it ends, it ends LOUDLY (dotfiles-83j4): the Events channel is
+// closed and every pending checked request is failed with ErrConnLost. A
+// read loop that just returned left both looking exactly like an idle,
+// healthy connection — a consumer selecting on Events could not tell a
+// dead X server from a quiet keyboard, and the Go daemon consequently
+// outlived a SIGKILLed Xvfb by >30s where hotkeyd.py exits in ~1s. Closing
+// the channel IS the connection-loss signal (adr0014: fail fast, hand the
+// decision to the layer above; ft003's panic bind is the recovery route,
+// not a reconnect loop in here).
 func (c *Conn) readLoop() {
 	defer close(c.done)
+	defer func() {
+		err := c.readErr
+		if err == nil {
+			err = io.EOF
+		}
+		// Fail waiters BEFORE closing Events: a consumer woken by the
+		// closed channel may run a shutdown path that issues one last
+		// request, and the sequencer must already be refusing those.
+		c.seq.failAll(fmt.Errorf("%w: %w", ErrConnLost, err))
+		close(c.Events)
+	}()
 
 	for {
 		frame, err := readFrame(c.r)

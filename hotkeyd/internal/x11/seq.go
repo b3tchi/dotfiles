@@ -30,6 +30,12 @@ type pendingResult struct {
 	isError bool
 	reply   []byte // full reply bytes (32 + extra), only if !isError
 	xerr    XError // only if isError
+
+	// err is set only by failAll: the connection died before the server
+	// answered, so this waiter is being released rather than answered.
+	// Distinct from xerr, which is a real X protocol error the server
+	// DID send.
+	err error
 }
 
 // Sequencer allocates X11 request sequence numbers and correlates incoming
@@ -45,6 +51,12 @@ type Sequencer struct {
 	nextSeq uint64 // next full sequence number to assign; starts at 1
 	lastSeq uint64 // most recently assigned full sequence number
 	pending map[uint64]chan pendingResult
+
+	// lostErr latches the connection-loss error once failAll has run.
+	// Non-nil means no read loop is left to dispatch anything, so a new
+	// request must fail here rather than register a waiter nobody will
+	// ever answer (dotfiles-83j4).
+	lostErr error
 }
 
 // NewSequencer creates a Sequencer that writes requests to w.
@@ -66,6 +78,10 @@ func (s *Sequencer) SendChecked(req []byte) (seq uint64, waiter <-chan pendingRe
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if s.lostErr != nil {
+		return 0, nil, s.lostErr
+	}
 
 	seq = s.nextSeq
 	s.nextSeq++
@@ -89,12 +105,38 @@ func (s *Sequencer) SendUnchecked(req []byte) (seq uint64, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if s.lostErr != nil {
+		return 0, s.lostErr
+	}
+
 	seq = s.nextSeq
 	s.nextSeq++
 	s.lastSeq = seq
 
 	_, err = s.w.Write(req)
 	return seq, err
+}
+
+// failAll releases every waiting request with err and latches the
+// sequencer closed, so requests issued from here on fail immediately
+// instead of blocking on a reply no read loop is left to deliver. Called
+// once, by the read loop, on its way out (read.go) — the connection is
+// gone and nothing it was correlating can ever be answered.
+func (s *Sequencer) failAll(err error) {
+	s.mu.Lock()
+	if s.lostErr == nil {
+		s.lostErr = err
+	}
+	waiters := s.pending
+	s.pending = make(map[uint64]chan pendingResult)
+	s.mu.Unlock()
+
+	// Every waiter channel is buffered (cap 1) and read at most once, so
+	// this cannot block even if the requesting goroutine has already
+	// given up.
+	for _, ch := range waiters {
+		ch <- pendingResult{err: err}
+	}
 }
 
 // dispatch resolves a wire-level (16-bit) sequence number against the
