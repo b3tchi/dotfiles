@@ -38,8 +38,14 @@ const (
 	exitXI2Unavailable = 5
 )
 
+// main is the process entry point. It hands off to Dispatch (check.go,
+// sp021 Task 13 / bd dotfiles-ylmp.12) rather than calling run() directly:
+// Dispatch recognizes --check/--health/the "check"/"state-tail"
+// subcommands and falls through to run() unchanged for the plain
+// daemon-start path -- see Dispatch's own doc for why this keeps run()'s
+// flag surface exactly as thin as this file's package doc promises.
 func main() {
-	os.Exit(run(os.Args[1:]))
+	os.Exit(Dispatch(os.Args[1:]))
 }
 
 // run is main's testable body — daemon_test.go exercises the pure helpers
