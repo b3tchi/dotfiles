@@ -1434,18 +1434,21 @@ let env_prefix_cases = [
     {desc: "native display gets the memory ceiling and no GL overrides",
      xrdp: false, caller: "", want_qt: false, want_chromium: true,
      want_flags: ["--js-flags=--max-old-space-size="],
-     forbid_flags: ["--use-angle=swiftshader" "--enable-unsafe-swiftshader"]},
+     forbid_flags: ["--use-angle=swiftshader" "--enable-unsafe-swiftshader"],
+     want_non_js_tokens: []},
     {desc: "native display ignores a caller's chromium flags",
      xrdp: false, caller: "--use-gl=egl", want_qt: false, want_chromium: false,
-     want_flags: [], forbid_flags: []},
+     want_flags: [], forbid_flags: [], want_non_js_tokens: []},
     {desc: "xorgxrdp gets the Qt software-GL pair, the swiftshader flags AND the ceiling",
      xrdp: true, caller: "", want_qt: true, want_chromium: true,
      want_flags: ["--enable-unsafe-swiftshader" "--use-gl=angle" "--use-angle=swiftshader"
                   "--disable-gpu-compositing" "--js-flags=--max-old-space-size="],
-     forbid_flags: []},
+     forbid_flags: [],
+     want_non_js_tokens: ["--enable-unsafe-swiftshader" "--use-gl=angle"
+                          "--use-angle=swiftshader" "--disable-gpu-compositing"]},
     {desc: "xorgxrdp defers to a caller-set QTWEBENGINE_CHROMIUM_FLAGS (ceiling included)",
      xrdp: true, caller: "--use-gl=egl", want_qt: true, want_chromium: false,
-     want_flags: [], forbid_flags: []},
+     want_flags: [], forbid_flags: [], want_non_js_tokens: []},
 ]
 
 for case in $env_prefix_cases {
@@ -1482,12 +1485,34 @@ for case in $env_prefix_cases {
             exit 1
         }
         # QtWebEngine splits QTWEBENGINE_CHROMIUM_FLAGS on whitespace with no
-        # quote handling, so --js-flags must be exactly ONE whitespace-free
-        # token or V8 silently receives only its first flag (dotfiles-j5kq).
+        # quote handling, so whatever V8 gets is ONE whitespace-delimited
+        # token and nothing more (dotfiles-j5kq). Asserting "exactly one
+        # token starts with --js-flags=" does NOT test that — a value written
+        # `--js-flags=--max-old-space-size=256 --trace-gc` still has exactly
+        # one such token while V8 silently receives only the first flag
+        # (mutation-verified: that assertion accepted it).
+        #
+        # What does test it is decomposing the value the way QtWebEngine
+        # will and demanding the token multiset be EXACTLY what this case
+        # expects: any word the author meant to be part of the --js-flags
+        # value but wrote after a space shows up here as a stray token with
+        # nowhere to belong.
         let value = ($got | parse --regex "QTWEBENGINE_CHROMIUM_FLAGS='(?<v>[^']*)'" | get v.0)
-        let js_tokens = ($value | split row " " | where {|t| $t | str starts-with "--js-flags=" })
+        let tokens = ($value | split row " " | where {|t| $t | is-not-empty })
+        let js_tokens = ($tokens | where {|t| $t | str starts-with "--js-flags=" })
+        let non_js_tokens = ($tokens | where {|t| not ($t | str starts-with "--js-flags=") })
         if ($js_tokens | length) != 1 {
-            print $"FAIL: spawn-env-prefix \(($case.desc)\): want exactly one whitespace-free --js-flags token, got ($js_tokens | length) — value: ($value)"
+            print $"FAIL: spawn-env-prefix \(($case.desc)\): want exactly one --js-flags token, got ($js_tokens | length) — value: ($value)"
+            exit 1
+        }
+        # The one token V8 actually receives must be a complete V8 flag on
+        # its own — not a truncated head of a longer intended value.
+        if not ($js_tokens.0 =~ '^--js-flags=--max-old-space-size=[0-9]+$') {
+            print $"FAIL: spawn-env-prefix \(($case.desc)\): the single --js-flags token V8 receives must be a complete --max-old-space-size=<N> flag, got ($js_tokens.0) — value: ($value)"
+            exit 1
+        }
+        if ($non_js_tokens | sort) != ($case.want_non_js_tokens | sort) {
+            print $"FAIL: spawn-env-prefix \(($case.desc)\): chromium flag tokens are not exactly the expected set — got ($non_js_tokens | sort), want ($case.want_non_js_tokens | sort). A stray token here usually means a whitespace crept into the --js-flags value, which QtWebEngine's whitespace split silently drops. value: ($value)"
             exit 1
         }
     }

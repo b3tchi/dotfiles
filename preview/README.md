@@ -199,12 +199,29 @@ cycle 6 with it.
 Notes and escape hatches:
 
 - 256 MB is ~2× the measured first-visit working set of the heaviest tier.
-  Tighter would trade the ceiling for GC thrash and eventually a renderer
-  OOM; the fallback for that is real but ugly (`WebTier.qml` reloads once,
-  then shows its crash text). Checked against a real graph, not just a
-  fixture: 101 nodes / 572 links renders in full at 570 MB total PSS and
-  stays there across 24 further navigations, with zero renderer
-  terminations in `wv-<N>.log`.
+  Checked against a real graph, not just a fixture: 101 nodes / 572 links
+  renders in full at 570 MB total PSS and stays there across 24 further
+  navigations, with zero renderer terminations in `wv-<N>.log`.
+- **The ceiling has a cost, and it is not hypothetical.** Content whose
+  *live* JS heap sits between 256 MB and V8's RAM-derived default (~1.33 GB
+  on a 24 GB host) used to render and now OOMs the renderer instead. No
+  realistic AKM content comes close — the exposure is the `html` tier, which
+  serves arbitrary local HTML. What that looks like now, measured against a
+  page that loads fine and then grows ~640 MB of live JS: **two renderer
+  terminations, then the crash text below and a stopped window** — no
+  renderer is respawned, nothing spins. Raise the ceiling for such a page by
+  setting `QTWEBENGINE_CHROMIUM_FLAGS` yourself (the caller override above).
+- Getting that behavior needed a fix to the crash guard itself
+  (dotfiles-f532): `WebTier.qml` used to refund its one-reload budget on
+  every `LoadSucceededStatus`, and an OOM-*after*-load always follows one, so
+  the guard looped forever (measured pre-fix on the same page: 10
+  terminations in 45 s, a fresh renderer pid each time, the fallback text
+  unreachable, and the loop resumed after a window restart because preview-d
+  restores the slot's last URL). The budget is now refunded only after a load
+  has stood for 10 s. A genuine one-off crash still gets its free reload and
+  recovers (verified by `SIGKILL`ing the renderer on a healthy akm page:
+  exactly one termination, page back, no fallback — and again 10 s later,
+  proving the refund still happens).
 - A caller who sets `QTWEBENGINE_CHROMIUM_FLAGS` explicitly owns the whole
   Chromium command line, ceiling included — that is the way to raise or drop
   it for one window.
