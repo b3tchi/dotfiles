@@ -43,13 +43,12 @@ i3 config carries no float rule for `preview-wv`).
 | portrait (< 0.8) | split **left** of the frame |
 | square (0.8–1.25) | split **below**, or a **tab** if the frame is < 900px tall |
 
-Only a freshly-opened window docks; an already-open window stays where it is
-(moving a live webview would reparent and close it — see below). Re-run after
-closing the window (`preview window 1 --close`) to re-dock.
+Every `show` call re-docks — a window already open just moves to match the
+new image's shape (top → left → below → …), the same window, same pid,
+never closed and reopened. There is no "first open only" limitation.
 
 **`preview window`** / **nvim `:PreviewStart`** dock as a fixed **right-side
-split** beside the editor (no image shape is known at open time, and
-re-docking per file isn't possible).
+split** beside the editor (no image shape is known at open time).
 
 ## Notes
 
@@ -59,10 +58,12 @@ re-docking per file isn't possible).
   `http://127.0.0.1:4200/file/<path>?full`; open it in any browser if the GUI
   window isn't available (e.g. no graphical session).
 - **`$PREVIEW_PORT`** overrides the default port `4200`.
-- **Reparent hazard** — a mapped `wry`/WebKitGTK window self-closes when i3
-  reparents it (split/move after it maps) on xrdp's GL-limited Xorg. All
-  docking sets the split *before* the window maps and reorders by moving the
-  reparent-safe terminal, never the webview.
+- **Docking mechanism** — the preview window is a native `qml6` process,
+  which survives being split/moved/reparented after it has already mapped
+  (unlike an older WebKitGTK-based host, which self-closed on reparent). So
+  docking marks the launching frame, then moves the *preview window itself*
+  to sit beside that mark — live or freshly spawned, the same recipe either
+  way, which is what makes re-docking a live window possible.
 
 ## nvim integration
 
