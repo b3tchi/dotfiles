@@ -183,13 +183,11 @@ web tier's share is visible on its own:
 | without the ceiling | 181 → **942 MB** | 262 → 623 MB | **1530 MB** |
 | with the ceiling | 181 → **434 MB**, flat from round 9 | 262 → 579 MB | **1002 MB** |
 
-The engine half is now a ceiling. The `qml6` half still climbs ~14 MB per
-round, and that is a **different** defect in a different process and a
-different tier — the native `.d2`/svg tier retains a full-resolution raster
-per visit (dotfiles-63rd, isolated by a native-only `pic.png ↔
-diagram.d2` ×20 loop in which the web tier is never instantiated at all:
-79 → 233 MB with no engine child process in existence). A V8 heap ceiling
-cannot and does not touch it.
+The engine half is now a ceiling. The `qml6` half kept climbing ~14 MB per
+round, and that was a **different** defect in a different process and a
+different tier — the native `.d2`/svg tier, dotfiles-63rd. A V8 heap ceiling
+could not and did not touch it; it is fixed separately, in the section
+below, and both halves are ceilings now.
 
 Not display-specific: on a non-xrdp X server (`Xvfb`, so `is-xrdp-display`
 is false and only the ceiling is applied, no GL overrides) the same loop goes
@@ -234,6 +232,102 @@ Notes and escape hatches:
   released <1 MB of what had accumulated. Closing and reopening the window
   (`preview window <N> --close` then `preview window <N>`) still resets it to
   ~53 MB; the ceiling is what makes that unnecessary rather than routine.
+
+## Native svg-tier decode size
+
+The `.d2`/svg tier never decodes a diagram at the size the document itself
+declares. That sounds like a rendering detail; it is the whole of the second
+memory ceiling.
+
+**What went wrong.** The svg delegate learns a diagram's natural size from
+the document's own `viewBox`, fetched by an XHR — it cannot use
+`Image.implicitWidth` the way the raster tiers do, because an svg has no
+intrinsic pixel size and `implicitWidth` just echoes back whatever
+`sourceSize` was last asked for (a binding loop). That XHR races the
+`PannableStage` Image's own fetch of the same url. Lose the race and the
+Image goes out with `sourceSize` 0 — "no override", i.e. the declared size —
+and Qt rasterises the whole document before the on-screen-sized request
+supersedes it milliseconds later.
+
+**Each of those superseded rasters is retained for the life of the
+process.** Measured on an xorgxrdp display with the web tier never
+instantiated (`nchild=0` at all 120 checkpoints — no `QtWebEngineProcess`
+exists, so no V8 ceiling can be involved), `pic.png ↔ diagram.d2` ×60:
+
+| navigation cycle | `qml6` PSS, before | after |
+|---|---|---|
+| 1 | 102 MB | 83 MB |
+| 20 | 257 MB | 83 MB |
+| 40 | 450 MB | 83 MB |
+| 60 | **579 MB**, still climbing | **83 MB** |
+
+Before: +477 MB over 60 cycles, ~9 MB/cycle, no plateau and no negative
+deltas. After: **+505 kB over the same 60 cycles** — 8.4 kB/cycle.
+
+**Attribution, because "it's a leak" was not good enough here.** All of the
+growth is anonymous mmap; the malloc heap is flat across the whole run
+(5,492 → 6,472 kB), so it is not allocator retention. It arrives in units of
+exactly 21,504 kB, which is 728 × 7561 × 4 B page-rounded — the fixture's own
+declared size as one ARGB raster. Qt's `qt.quick.image` logging category
+names the request: each svg visit could log two decodes of the same url,
+`-> scSize QSize(728, 7561)` and `-> scSize QSize(72, 743)`. Correlating the
+two instruments over 12 cycles: 3 full-resolution decodes, +64,604 kB anon =
+3.004 × 21,504 kB. **One retained raster per full-resolution decode, none for
+the on-screen-sized ones.**
+
+It is a leak of the *superseded* request specifically, not a cache and not
+"large decodes are expensive":
+
+- Every visit requests the identical url, so a cache would saturate at one
+  entry. Growth linear in the count of full-resolution decodes of one url
+  cannot be a cache — `Image.cache: false` (already set) and any
+  `QQuickPixmapCache`-shaped knob are irrelevant to it.
+- A full-resolution decode that is actually *displayed* is released
+  normally: pressing `0` (actual size) on the same diagram six times costs
+  +21.5 MB while it is on screen and returns to the same 30.5 MB baseline
+  each time you press `f` (fit). Only the decode that is thrown away
+  unpainted is kept.
+
+**The fix is to never issue that request**, not to cap a size:
+`PannableStage` holds its Image sourceless until the caller's natural size
+has settled and the fit has been computed (`deferSource` + `fitted`). The
+surviving request is the on-screen-sized one the tier already used, so there
+is nothing to trade off — the full-resolution decode was pure waste,
+rasterising 5.5 Mpx that nothing ever painted. Verified rather than assumed:
+`import`-captured screenshots of the fitted diagram, the same diagram at 1:1
+(`0`), and a plain image are **byte-identical before and after** (`compare
+-metric AE` = 0 differing pixels on all three). Zooming still re-decodes at
+the larger size, clamped to 8192 as before.
+
+Seven-tier sweep (image→md→code→`.d2`→html→akm→stl→image, ×25) with T10's
+V8 ceiling active in both arms, same rig, same script, PSS split by process:
+
+| arm | engine (4 children) | `qml6` | total |
+|---|---|---|---|
+| V8 ceiling only | 424 MB | **537 MB**, +7.2 MB/round r10→r25 | **960 MB** |
+| + this fix | 423 MB | **320 MB**, +0.03 MB/round r10→r25 | **743 MB** |
+
+**The guarantee: a window that only ever previews native tiers stays under
+~85 MB PSS indefinitely, and the full seven-tier sweep stays under ~745 MB
+with both ceilings — the `qml6` half flat from roughly round 10.** Identity
+is untouched: one pid, one X11 window id (`6291463` throughout both 25-round
+sweeps) and the same four engine child pids from first web visit to last.
+
+`preview-test`'s test 32 guards it: it runs the real `PreviewView.qml`
+offscreen against a stub daemon that *pins* the race (the stub delays the
+viewBox XHR while answering the Image's fetch immediately) and fails if any
+decode comes back at the document's declared size. Without the delay both
+the fixed and the pre-fix file pass — the delay is what makes it a test.
+
+Two things a future reader will want to know:
+
+- An unmapped or zero-sized window now renders the svg tier blank until it
+  is given a size, rather than decoding a full-resolution raster into a
+  window that cannot show it. It self-heals on the first resize.
+- The raster tiers are deliberately untouched. They have no `viewBox` to
+  read, so their first decode at intrinsic size is the only way they can
+  learn their natural size at all. That decode is displayed, not superseded,
+  and is released normally.
 
 ## Removed limitations (sp022 — retiring the wry host)
 
