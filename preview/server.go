@@ -218,6 +218,33 @@ func slotPathIsAkm(root, p string) bool {
 	return isAkmZettel(root, resolved)
 }
 
+// classifyStoredPath classifies a slot's stored root-relative path p for
+// the /preview<N> websocket broadcast/priming payload's "type" field (sp022
+// Task 2). classifyPath (render.go) expects the ABSOLUTE resolveInRoot
+// output, not the root-relative form SlotManager stores, so p is resolved
+// back through resolveInRoot first — the same pattern slotPathIsAkm above
+// already uses for the akm-transition classification.
+//
+// An empty p (no path ever set for the slot) and any resolve failure
+// degrade to "none" rather than propagating an error: "none" is the exact
+// safe-fallback value classifyPath itself returns for an unclassifiable
+// path, so a path that was deleted between being stored and being
+// classified here (sp022 Task 2 edge case) produces the same client-visible
+// result as a path chroma/the image/video/stl/markdown/html detectors never
+// recognised in the first place — the broadcast still goes out, and the
+// client shows its fallback tier, rather than the send being silently
+// skipped or erroring.
+func classifyStoredPath(root, p string) string {
+	if p == "" {
+		return "none"
+	}
+	resolved, err := resolveInRoot(root, p)
+	if err != nil {
+		return "none"
+	}
+	return classifyPath(root, resolved)
+}
+
 // handlePreviewSet handles POST /preview<N> {"path": "..."}: it sets slot
 // n's current path and conditionally broadcasts a redraw to every window
 // currently connected to that slot (ft005 api_surface POST /preview<N>). A
@@ -304,7 +331,7 @@ func (s *Server) handlePreviewSet(n int, w http.ResponseWriter, r *http.Request)
 	// behavior rather than leaving a dead preview with no visible update
 	// at all (sp011 Task 3 success criteria).
 	if !(oldAkm && newAkm) || highlightErr != nil {
-		s.slots.Hub(n).Broadcast(redrawMessage(p))
+		s.slots.Hub(n).Broadcast(redrawMessage(p, classifyStoredPath(s.root, p)))
 	}
 
 	writeJSON(w, map[string]any{"slot": n, "path": p})
@@ -328,7 +355,7 @@ func (s *Server) handlePreviewWS(n int, w http.ResponseWriter, r *http.Request) 
 
 	if path := s.slots.CurrentPath(n); path != "" {
 		select {
-		case c.send <- redrawMessage(path):
+		case c.send <- redrawMessage(path, classifyStoredPath(s.root, path)):
 		default:
 		}
 	}

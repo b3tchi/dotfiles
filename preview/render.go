@@ -147,6 +147,80 @@ func isAkmZettel(root, resolved string) bool {
 	return strings.HasPrefix(resolved, notesDir)
 }
 
+// isHTMLExt reports whether path's extension is .html or .htm
+// (case-insensitive), the same detection style as
+// isImageExt/isVideoExt/isSTLExt/isD2Ext. sp022 Task 2: classifyPath needs
+// an explicit "html" type distinct from chroma's "code" so the QML client
+// (T4) can pick its lazy web tier for real HTML without also catching every
+// other chroma-recognised text format — chroma's own lexer DOES match
+// ".html"/".htm" by filename (confirmed live: lexers.Match("x.html") returns
+// the HTML lexer), so this check must run BEFORE the lexers.Match branch in
+// classifyPath or every html file would silently classify as "code" instead.
+func isHTMLExt(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".html", ".htm":
+		return true
+	default:
+		return false
+	}
+}
+
+// classifyPath returns the single type preview-d assigns to resolved for the
+// /preview<N> websocket's {path, type} payload (sp022 Task 2 — the
+// [[ft005]] api_surface widening that lets the QML client, T4, pick a
+// native/web delegate without re-fetching or sniffing HTML itself). The
+// return value is always exactly one of: image | svg | md | code | video |
+// html | akm | stl | none — that 9-value vocabulary is a contract with T3/T4
+// downstream, so no other value may ever be returned.
+//
+// resolved is an absolute filesystem path — typically path.go's
+// resolveInRoot output, but classifyPath itself never stats or opens it:
+// every detection helper below (isImageExt, isVideoExt, isSTLExt, isD2Ext,
+// isAkmZettel, isMarkdown, isHTMLExt, lexers.Match) decides purely from the
+// path string, never file content or existence. That is deliberate: it lets
+// a caller classify a path that may have been deleted between being stored
+// and being classified (sp022 Task 2 edge case) without erroring — the
+// degrade-to-"none" behavior for that case lives one layer up, in the
+// caller that resolves a STORED root-relative path back through
+// resolveInRoot before ever reaching classifyPath (see server.go's
+// classifyStoredPath); a path that fails to resolve never reaches here at
+// all.
+//
+// Precedence deliberately mirrors today's handleFile dispatch order (sp022
+// Task 2 success criteria): the three binary-content special cases
+// (image/video/stl) are checked first, exactly as renderFile checks them
+// before its text/markdown/chroma switch; then the two before-markdown/
+// chroma special-cases handleFile itself applies before ever calling
+// renderFile — d2 (-> "svg") and akm zettel (-> "akm") — so a .d2 file or a
+// docs/notes/**.md zettel is never miscategorised as "code" or "md" even
+// though isMarkdown and chroma's own markdown lexer would otherwise happily
+// match a zettel's .md extension too (verified precedence test:
+// TestClassifyPathPrecedence); then plain markdown; then explicit html
+// (also chroma-matched today, so it must precede the lexers.Match branch for
+// the same reason); then chroma's lexer match; else "none".
+func classifyPath(root, resolved string) string {
+	switch {
+	case isImageExt(resolved):
+		return "image"
+	case isVideoExt(resolved):
+		return "video"
+	case isSTLExt(resolved):
+		return "stl"
+	case isD2Ext(resolved):
+		return "svg"
+	case isAkmZettel(root, resolved):
+		return "akm"
+	case isMarkdown(resolved):
+		return "md"
+	case isHTMLExt(resolved):
+		return "html"
+	case lexers.Match(resolved) != nil:
+		return "code"
+	default:
+		return "none"
+	}
+}
+
 // readCapped reads up to maxRenderSize bytes of path's content, reporting
 // whether the file was longer than that (sp008 Task 2 edge case: huge
 // file must not be read/rendered in full).
