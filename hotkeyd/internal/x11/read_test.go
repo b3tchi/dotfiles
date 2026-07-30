@@ -285,6 +285,33 @@ func TestConn_RequestAfterConnectionLost_FailsImmediatelyNotHangs(t *testing.T) 
 	}
 }
 
+func TestConn_UncheckedRequestAfterConnectionLost_FailsWithErrConnLost(t *testing.T) {
+	pr, pw := io.Pipe()
+	c := newTestConn(pr)
+	go c.readLoop()
+
+	pw.Close()
+	<-c.done // the read loop has ended; the sequencer is latched closed
+
+	// XISelectEvents is one of the two live SendUnchecked callers (the
+	// other is XIPassiveUngrabDevice). An unchecked request registers no
+	// waiter, so it cannot hang -- the failure mode here is the opposite
+	// one: reporting SUCCESS for a request that never reached a server.
+	// The transport cannot be relied on to say so, because a write to a
+	// socket whose peer has died routinely lands in the kernel buffer and
+	// returns nil (only a later write gets EPIPE) -- exactly what the
+	// discard writer underneath this Conn models. The latch is what makes
+	// the answer deterministic and named (dotfiles-83j4).
+	err := c.XISelectEvents(131, 0x2a, []EventMaskEntry{{DeviceID: 3, Mask: []uint32{1 << 2}}})
+	if err == nil {
+		t.Fatal("XISelectEvents returned nil after the connection died; want an error — " +
+			"an unchecked request that reports success was never sent to anything")
+	}
+	if !errors.Is(err, ErrConnLost) {
+		t.Fatalf("XISelectEvents error = %v; want one matching ErrConnLost", err)
+	}
+}
+
 // newTestConn builds a Conn over a discard writer and the given reader,
 // for read-loop-focused tests that don't care what bytes get written.
 func newTestConn(r io.Reader) *Conn {
