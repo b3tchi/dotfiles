@@ -17,9 +17,10 @@ sections when status flips.
 
 ## spec
 
-- [[sp021|hotkeyd-go-zero-dep-rewrite]]
 
 ## ready
+
+- [[sp021|hotkeyd-go-zero-dep-rewrite]]
 
 
 
