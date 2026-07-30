@@ -63,6 +63,29 @@
 #      ":100" token-boundary case (mirrors preview-webview's own
 #      is_xrdp_display unit tests).
 #
+# sp022 T7 (docking collapse + live re-dock, dotfiles-zw0d.7) — the OLD
+# prepare-split/wait-preview-mapped/finalize-dock choreography is replaced by
+# a mark+move-to-mark recipe run on the PREVIEW window itself, which now
+# survives being moved after it maps ([[poc016]]):
+#  24. The deleted helpers (prepare-split, wait-preview-mapped, finalize-dock,
+#      window-open) are actually gone from the wrapper source, not just
+#      unreferenced.
+#  25. `show` docks a FRESH landscape image TOP: `[id=<orig>] mark <mark>`
+#      then `[id=<preview-xid>] move container to mark <mark>` + `move up`.
+#  26. `show` RE-DOCKS the SAME live window (identical pid, identical
+#      resolved criterion) from a second call with portrait dims — LEFT
+#      instead of top — the "docks only on first open" limitation removed.
+#  27. `window` docks a FRESH window to the right via the same mechanism,
+#      with no `move left`/`move up` reorder (right/below's default
+#      insertion order is already correct).
+#  28. No WM on PATH at all -> `window` still spawns, no error, dock
+#      silently skipped (Termux/headless stance).
+#  29. WM present but no xdotool on PATH -> same spawn-only degrade, with a
+#      clear "skipping dock" log line.
+#  30. A window that never maps (crashed qml6, simulated via a poisoned
+#      `xdotool search --pid`) leaves a clear "never mapped" log line within
+#      the bounded poll, and never touches the launching frame at all.
+#
 # Run:  nu nushell/actions/preview-test
 # Pass: exits 0 and prints "PASS: N tests passed"
 # Fail: exits 1 and prints "FAIL: <description>"
@@ -118,6 +141,19 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 time.sleep(float(os.environ.get('STARTUP_DELAY', '0')))
 port = int(os.environ.get('PREVIEW_PORT', '4200'))
 capture_file = os.environ.get('CAPTURE_FILE', '')
+# Echo the daemon's OWN --root argument in /status (sp022 T7: main-show's
+# ensure-daemon-slash restarts the daemon whenever the reported root isn't
+# "/" — a hardcoded '/fake' here would make EVERY `show` call restart the
+# daemon and close-all-windows, killing the very window a redock test is
+# trying to keep alive across two calls). Falls back to '/fake' if --root
+# is somehow absent, matching the old constant for any caller that never
+# passes it.
+root = '/fake'
+argv = sys.argv[1:]
+if '--root' in argv:
+    i = argv.index('--root')
+    if i + 1 < len(argv):
+        root = argv[i + 1]
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def do_GET(self):
@@ -128,7 +164,7 @@ class H(BaseHTTPRequestHandler):
             self.send_header('Content-Length', str(len(body))); self.end_headers()
             self.wfile.write(body)
         elif self.path == '/status':
-            body = json.dumps({'pid': os.getpid(), 'root': '/fake',
+            body = json.dumps({'pid': os.getpid(), 'root': root,
                                'port': str(port),
                                'started_at': '2026-01-01T00:00:00Z'}).encode()
             self.send_response(200); self.send_header('Content-Type','application/json')
@@ -222,23 +258,104 @@ exit 0
 $fake_i3_src | save --force $fake_i3
 ^chmod +x $fake_i3
 
-# Fake xdotool (sp022 T6): place-window's i3 path resolves a window's X11 id
-# via `xdotool search --pid <pid>` before building `[id=…]` criteria (i3 has
-# no native pid-match criteria, unlike sway's `[pid=…]`). This sandbox has no
+# Fake xdotool (sp022 T6/T7): place-window's and window-criteria's i3 path
+# resolve a window's X11 id via `xdotool search --pid <pid>` before building
+# `[id=…]` criteria (i3 has no native pid-match criteria — verified directly
+# against real i3 4.25.1 in dotfiles-zw0d.7's task notes: `[pid=N]` is a
+# parse error there — unlike sway's native `[pid=…]`). This sandbox has no
 # real X session behind the fake i3-msg, so `search --pid` is stubbed to
 # deterministically derive a fake numeric xid from the pid (prefixed "9" so
 # it's never empty/zero) — anything else exits nonzero, degrading exactly
 # like the real binary would with no display (best-effort, never fatal).
+#
+# T7 adds two MORE branches, both gated behind env vars that default absent
+# — existing tests never set them, so their xdotool behavior (and therefore
+# every pre-T7 test's assertions) is completely unchanged:
+#   - `getactivewindow` (active-window-id, the "launching frame" `show`/
+#     `window` dock against) answers with $FAKE_ACTIVE_WINDOW if set, else
+#     exits 1 — the same "no X session" degrade every other test already
+#     relies on.
+#   - `search --pid` exits 1 unconditionally when $FAKE_NEVER_MAP is set —
+#     simulates a window that spawned but never mapped (crashed qml6),
+#     regardless of which pid is being searched for, so the test doesn't
+#     need to predict a not-yet-spawned pid up front.
 let fake_xdotool = $"($fake_bin_dir)/xdotool"
 let fake_xdotool_src = "#!/bin/bash
 if [ \"$1\" = \"search\" ] && [ \"$2\" = \"--pid\" ]; then
+  if [ -n \"$FAKE_NEVER_MAP\" ]; then exit 1; fi
   echo \"9$3\"
   exit 0
+fi
+if [ \"$1\" = \"getactivewindow\" ]; then
+  if [ -n \"$FAKE_ACTIVE_WINDOW\" ]; then echo \"$FAKE_ACTIVE_WINDOW\"; exit 0; fi
+  exit 1
 fi
 exit 1
 "
 $fake_xdotool_src | save --force $fake_xdotool
 ^chmod +x $fake_xdotool
+
+# Fake identify (sp022 T7): image-dims prefers ImageMagick `identify -format
+# "%w %h" <path>` to learn the shape `show` docks by. Gated behind
+# $FAKE_IMG_W/$FAKE_IMG_H exactly like the xdotool additions above — absent
+# (every pre-T7 test), it exits 1 so image-dims falls through to `file`
+# (also absent from the test PATH), landing on the same "no dims, no dock"
+# degrade those tests already exercise.
+let fake_identify = $"($fake_bin_dir)/identify"
+let fake_identify_src = "#!/bin/bash
+if [ -n \"$FAKE_IMG_W\" ] && [ -n \"$FAKE_IMG_H\" ]; then
+  echo \"$FAKE_IMG_W $FAKE_IMG_H\"
+  exit 0
+fi
+exit 1
+"
+$fake_identify_src | save --force $fake_identify
+^chmod +x $fake_identify
+
+# Isolated system-utility dir for the "no WM at all" / "no xdotool" edge-case
+# tests below (sp022 T7 edge_cases: crashed qml6 / closed frame / headless
+# degrade must never hang or error). This host merges /bin, /usr/bin, /sbin
+# into ONE directory that ALSO contains the REAL i3-msg/swaymsg/xdotool — a
+# test PATH built from any of those merged dirs would fall through to the
+# REAL window manager controlling the REAL desktop the moment the fake dir
+# doesn't shadow a binary, which is exactly the live-session disruption this
+# suite must never risk. So these two tests get their OWN minimal PATH: only
+# copies of the specific real binaries the wrapper actually needs (bash for
+# its `^bash -c` detached spawns, kill, env, python3 for the fake daemon,
+# sleep for the fake qml6 stub) — never a directory that might also contain
+# a WM control binary.
+let safe_sys_dir = $"($tmp)/safe-sys"
+^mkdir -p $safe_sys_dir
+for bin in ["bash" "kill" "env" "python3" "sleep" "nohup"] {
+    # `type -P` (bash, not nu's own `which`) forces external-binary
+    # resolution — nu's `which` reports `kill`/`sleep` as its OWN built-ins
+    # with an empty path, since those are also nu commands; bash's `-P`
+    # ignores builtins/functions/aliases and searches PATH only.
+    let src = ((do { ^bash -c $"type -P ($bin)" } | complete).stdout | str trim)
+    if ($src | is-empty) {
+        print $"FAIL: could not resolve a real '($bin)' binary to seed the safe-sys test dir"
+        exit 1
+    }
+    ^cp $src $"($safe_sys_dir)/($bin)"
+}
+
+# PATH for "no WM at all": fake preview-d/qml6/xdotool/identify (everything
+# the spawn path needs) but NO i3-msg/swaymsg anywhere on PATH.
+let bin_no_wm = $"($tmp)/bin-no-wm"
+^mkdir -p $bin_no_wm
+for f in ["preview-d" "qml6" "xdotool" "identify"] {
+    ^cp $"($fake_bin_dir)/($f)" $"($bin_no_wm)/($f)"
+}
+let no_wm_path = $"($bin_no_wm):($safe_sys_dir)"
+
+# PATH for "WM present, no xdotool": fake preview-d/qml6/i3-msg/identify but
+# no xdotool anywhere on PATH.
+let bin_no_xdotool = $"($tmp)/bin-no-xdotool"
+^mkdir -p $bin_no_xdotool
+for f in ["preview-d" "qml6" "i3-msg" "identify"] {
+    ^cp $"($fake_bin_dir)/($f)" $"($bin_no_xdotool)/($f)"
+}
+let no_xdotool_path = $"($bin_no_xdotool):($safe_sys_dir)"
 
 # Path to window N's pidfile under the isolated cache dir (mirrors the
 # wrapper's own window-pid-file, but computed independently here so the
@@ -289,6 +406,15 @@ mut spawned_pids = []
 def run-wrapper [tmp: string, port: string, path: string, verb: string, extra_args: string = ""] {
     do {
         ^bash -c $"HOME=($tmp) PREVIEW_PORT=($port) PREVIEW_ROOT=($tmp) PATH=($path) /usr/bin/nu ($WRAPPER) ($verb) ($extra_args)"
+    } | complete
+}
+
+# Like run-wrapper, but with extra literal env assignments spliced in
+# (sp022 T7 docking tests: FAKE_ACTIVE_WINDOW / FAKE_IMG_W / FAKE_IMG_H /
+# FAKE_NEVER_MAP steer the fake xdotool/identify stubs above).
+def run-wrapper-env [tmp: string, port: string, path: string, extra_env: string, verb: string, extra_args: string = ""] {
+    do {
+        ^bash -c $"HOME=($tmp) PREVIEW_PORT=($port) PREVIEW_ROOT=($tmp) PATH=($path) ($extra_env) /usr/bin/nu ($WRAPPER) ($verb) ($extra_args)"
     } | complete
 }
 
@@ -993,6 +1119,278 @@ for case in $xrdp_cases {
 }
 print $"PASS: is-xrdp-display table-tested \(($xrdp_cases | length) cases\)"
 
+# ── test 24: the deleted docking helpers are actually gone ──────────────────
+# sp022 T7 success criteria: prepare-split, wait-preview-mapped, finalize-dock
+# and the window-open fresh-window-only guard are deleted, not just unused.
+
+let wrapper_src = (open $WRAPPER)
+for name in ["def prepare-split", "def wait-preview-mapped", "def finalize-dock", "def window-open"] {
+    if ($wrapper_src | str contains $name) {
+        print $"FAIL: deleted docking helper still present in the wrapper: ($name)"
+        exit 1
+    }
+}
+print "PASS: prepare-split, wait-preview-mapped, finalize-dock, window-open are gone"
+
+# ── test 25: `show` docks a FRESH landscape image TOP (mark+move-to-mark) ──
+#
+# sp022 T7: the window-open guard is gone — show docks on every call with a
+# resolvable frame + image shape, fresh window or not. Asserts the fake WM
+# saw `[id=<orig>] mark <mark>` and `[id=<preview-xid>] move container to
+# mark <mark>` + `move up` (landscape -> top).
+
+let show_win = 25
+let show_path = $"($tmp)/show-image.jpg"
+"fake jpg bytes" | save --force $show_path
+^rm -f $i3_calls_file
+
+let show_env_top = $"FAKE_ACTIVE_WINDOW=555 FAKE_IMG_W=1920 FAKE_IMG_H=1080 CAPTURE_FILE=($capture_file)"
+let r25 = (run-wrapper-env $tmp $test_port $test_path $show_env_top "show" $"($show_path) --window ($show_win)")
+if $r25.exit_code != 0 {
+    print $"FAIL: show \(landscape, fresh\) exited ($r25.exit_code)\n($r25.stdout)($r25.stderr)"
+    exit 1
+}
+let show_pid_file = (wv-pid-file $cache_dir $show_win)
+let show_pid_1 = (open $show_pid_file | str trim | into int)
+if not (wait-pid-alive $show_pid_1) {
+    print $"FAIL: show's spawned window ($show_win) pid ($show_pid_1) never came alive"
+    exit 1
+}
+$spawned_pids = ($spawned_pids | append $show_pid_1)
+let win_criteria_25 = $"[id=9($show_pid_1)]"
+let i3_calls_25 = (if ($i3_calls_file | path exists) { open $i3_calls_file } else { "<none>" })
+if not ($i3_calls_25 | str contains "[id=555] focus") {
+    print $"FAIL: landscape show did not focus the launching frame \(orig 555\):\n($i3_calls_25)"
+    exit 1
+}
+if not ($i3_calls_25 | str contains "split vertical") {
+    print $"FAIL: landscape show did not split vertical \(top dock\):\n($i3_calls_25)"
+    exit 1
+}
+if not ($i3_calls_25 | str contains "[id=555] mark preview-dock-anchor") {
+    print $"FAIL: landscape show did not mark the launching frame:\n($i3_calls_25)"
+    exit 1
+}
+if not ($i3_calls_25 | str contains $"($win_criteria_25) move container to mark preview-dock-anchor") {
+    print $"FAIL: landscape show did not move the preview window \(($win_criteria_25)\) to the mark:\n($i3_calls_25)"
+    exit 1
+}
+if not ($i3_calls_25 | str contains $"($win_criteria_25) move up") {
+    print $"FAIL: landscape show did not reorder the preview window to the TOP:\n($i3_calls_25)"
+    exit 1
+}
+if not ($"($r25.stdout)($r25.stderr)" | str contains $"docked window ($show_win) top") {
+    print $"FAIL: show did not report the top dock:\n($r25.stdout)($r25.stderr)"
+    exit 1
+}
+print "PASS: show docks a fresh landscape image TOP via mark+move-to-mark"
+
+# ── test 26: `show` RE-DOCKS the SAME live window — top, then left ─────────
+#
+# The central sp022 T7 capability: window 25 is still open (same pid, never
+# respawned). A second `show` call with PORTRAIT dims re-docks it LEFT
+# instead — the exact same `[id=<preview-xid>]` criterion as test 25, proving
+# it is the SAME window being moved, not a new one. This is what the README's
+# old "docks only on first open" limitation blocked.
+
+^rm -f $i3_calls_file
+let show_env_left = $"FAKE_ACTIVE_WINDOW=555 FAKE_IMG_W=1080 FAKE_IMG_H=1920 CAPTURE_FILE=($capture_file)"
+let r26 = (run-wrapper-env $tmp $test_port $test_path $show_env_left "show" $"($show_path) --window ($show_win)")
+if $r26.exit_code != 0 {
+    print $"FAIL: show \(portrait, redock\) exited ($r26.exit_code)\n($r26.stdout)($r26.stderr)"
+    exit 1
+}
+let show_pid_2 = (open $show_pid_file | str trim | into int)
+if $show_pid_2 != $show_pid_1 {
+    print $"FAIL: redock respawned the window \(pid ($show_pid_1) -> ($show_pid_2)\) — must be the SAME live window, not a new one"
+    exit 1
+}
+if not (pid-is-alive $show_pid_1) {
+    print $"FAIL: the original window's pid ($show_pid_1) died across the redock"
+    exit 1
+}
+let i3_calls_26 = (if ($i3_calls_file | path exists) { open $i3_calls_file } else { "<none>" })
+if not ($i3_calls_26 | str contains "split horizontal") {
+    print $"FAIL: portrait redock did not split horizontal \(left dock\):\n($i3_calls_26)"
+    exit 1
+}
+if not ($i3_calls_26 | str contains $"($win_criteria_25) move container to mark preview-dock-anchor") {
+    print $"FAIL: portrait redock did not move the SAME preview window \(($win_criteria_25)\) to the mark:\n($i3_calls_26)"
+    exit 1
+}
+if not ($i3_calls_26 | str contains $"($win_criteria_25) move left") {
+    print $"FAIL: portrait redock did not reorder the preview window LEFT:\n($i3_calls_26)"
+    exit 1
+}
+if not ($"($r26.stdout)($r26.stderr)" | str contains $"docked window ($show_win) left") {
+    print $"FAIL: show did not report the left redock:\n($r26.stdout)($r26.stderr)"
+    exit 1
+}
+run-wrapper $tmp $test_port $test_path "window" $"($show_win) --close" | ignore
+run-wrapper $tmp $test_port $test_path "stop" | ignore
+wait-port-free $test_port
+^rm -f $pid_file $launched_marker $i3_calls_file $capture_file $show_path
+print "PASS: show re-docks the SAME live window \(identical pid + criteria\) top then left"
+
+# ── test 27: `window` docks a FRESH window to the right, no reorder ────────
+#
+# sp022 T7: `window` uses the SAME mark+move-to-mark mechanism as `show`,
+# fixed to "right" (no image shape to choose from). right/below take the
+# default post-mark insertion order, so — unlike top/left — there must be NO
+# `move left`/`move up` reorder call.
+
+run-wrapper $tmp $test_port $test_path "start" | ignore
+for _ in 1..30 {
+    let up = (do { ^bash -c $"curl -sf --max-time 1 http://127.0.0.1:($test_port)/status" } | complete)
+    if $up.exit_code == 0 { break }
+    sleep 100ms
+}
+^rm -f $i3_calls_file
+
+let win27 = 27
+let r27 = (run-wrapper-env $tmp $test_port $test_path "FAKE_ACTIVE_WINDOW=555" "window" $"($win27)")
+if $r27.exit_code != 0 {
+    print $"FAIL: window ($win27) exited ($r27.exit_code)\n($r27.stdout)($r27.stderr)"
+    exit 1
+}
+let win27_pid_file = (wv-pid-file $cache_dir $win27)
+let win27_pid = (open $win27_pid_file | str trim | into int)
+if not (wait-pid-alive $win27_pid) {
+    print $"FAIL: window ($win27)'s spawned pid ($win27_pid) never came alive"
+    exit 1
+}
+$spawned_pids = ($spawned_pids | append $win27_pid)
+let win_criteria_27 = $"[id=9($win27_pid)]"
+let i3_calls_27 = (if ($i3_calls_file | path exists) { open $i3_calls_file } else { "<none>" })
+if not ($i3_calls_27 | str contains "split horizontal") {
+    print $"FAIL: window did not split horizontal \(right dock\):\n($i3_calls_27)"
+    exit 1
+}
+if not ($i3_calls_27 | str contains "[id=555] mark preview-dock-anchor") {
+    print $"FAIL: window did not mark the launching frame:\n($i3_calls_27)"
+    exit 1
+}
+if not ($i3_calls_27 | str contains $"($win_criteria_27) move container to mark preview-dock-anchor") {
+    print $"FAIL: window did not move the preview window \(($win_criteria_27)\) to the mark:\n($i3_calls_27)"
+    exit 1
+}
+if ($i3_calls_27 | str contains "move left") or ($i3_calls_27 | str contains "move up") {
+    print $"FAIL: right-dock should not reorder \(move left/up\) — default insertion is already correct:\n($i3_calls_27)"
+    exit 1
+}
+if not ($"($r27.stdout)($r27.stderr)" | str contains $"docked window ($win27) right") {
+    print $"FAIL: window did not report the right dock:\n($r27.stdout)($r27.stderr)"
+    exit 1
+}
+run-wrapper $tmp $test_port $test_path "window" $"($win27) --close" | ignore
+^rm -f $i3_calls_file
+print "PASS: window docks a fresh window to the right via mark+move-to-mark, no reorder"
+
+# ── test 28: no WM at all -> spawn-only, no error (headless degrade) ───────
+#
+# sp022 T7 success criteria: `window` still degrades gracefully headless.
+# no_wm_path carries fakes for preview-d/qml6/xdotool but NEVER i3-msg or
+# swaymsg (see the safe_sys_dir setup above for why this can't just be a
+# restricted slice of the real system PATH on this merged-usr host).
+
+let win28 = 28
+let r28 = (run-wrapper-env $tmp $test_port $no_wm_path "FAKE_ACTIVE_WINDOW=555" "window" $"($win28)")
+if $r28.exit_code != 0 {
+    print $"FAIL: window ($win28) with no WM on PATH should still spawn without error, got exit ($r28.exit_code):\n($r28.stdout)($r28.stderr)"
+    exit 1
+}
+let win28_pid_file = (wv-pid-file $cache_dir $win28)
+if not ($win28_pid_file | path exists) {
+    print $"FAIL: window ($win28) did not spawn \(no pidfile\) when the WM was absent — should be spawn-only, not skipped:\n($r28.stdout)($r28.stderr)"
+    exit 1
+}
+let win28_pid = (open $win28_pid_file | str trim | into int)
+if not (wait-pid-alive $win28_pid) {
+    print $"FAIL: window ($win28)'s spawned pid ($win28_pid) never came alive \(no-WM path\)"
+    exit 1
+}
+$spawned_pids = ($spawned_pids | append $win28_pid)
+run-wrapper $tmp $test_port $no_wm_path "window" $"($win28) --close" | ignore
+print "PASS: no WM on PATH -> window still spawns, no error, dock silently skipped"
+
+# ── test 29: WM present but no xdotool -> spawn-only, no error ─────────────
+#
+# sp022 T7 success criteria, second half of the same sentence. With xdotool
+# entirely absent, `active-window-id` itself degrades to null FIRST (it also
+# shells out to xdotool, to learn the launching frame to dock against) —
+# `main-window`'s own `orig != null` guard then skips docking upstream of
+# window-criteria's own null-return branch entirely (that branch is what
+# test 30 exercises instead, via an xdotool that's present but fails to
+# resolve one specific window). Both are real degrades: this one is what
+# Termux actually hits (no X session -> no xdotool at all).
+
+let win29 = 29
+let r29 = (run-wrapper-env $tmp $test_port $no_xdotool_path "FAKE_ACTIVE_WINDOW=555" "window" $"($win29)")
+if $r29.exit_code != 0 {
+    print $"FAIL: window ($win29) with no xdotool on PATH should still spawn without error, got exit ($r29.exit_code):\n($r29.stdout)($r29.stderr)"
+    exit 1
+}
+let win29_pid_file = (wv-pid-file $cache_dir $win29)
+if not ($win29_pid_file | path exists) {
+    print $"FAIL: window ($win29) did not spawn \(no pidfile\) when xdotool was absent — should be spawn-only, not skipped:\n($r29.stdout)($r29.stderr)"
+    exit 1
+}
+let win29_pid = (open $win29_pid_file | str trim | into int)
+if not (wait-pid-alive $win29_pid) {
+    print $"FAIL: window ($win29)'s spawned pid ($win29_pid) never came alive \(no-xdotool path\)"
+    exit 1
+}
+$spawned_pids = ($spawned_pids | append $win29_pid)
+if ($"($r29.stdout)($r29.stderr)" | str contains "docked window") {
+    print $"FAIL: window with no xdotool at all should never resolve a launching frame, so no dock should have run:\n($r29.stdout)($r29.stderr)"
+    exit 1
+}
+run-wrapper $tmp $test_port $no_xdotool_path "window" $"($win29) --close" | ignore
+print "PASS: WM present but no xdotool at all -> window still spawns, no error, no dock attempted"
+
+# ── test 30: window never maps (crashed qml6) -> bounded expiry, clear log ─
+#
+# sp022 T7 edge case: a window that spawns but never maps (FAKE_NEVER_MAP
+# makes the fake xdotool's `search --pid` fail unconditionally, standing in
+# for a qml6 that crashed before mapping) must leave a clear log line and
+# return within the bound — never hang, never error, and never touch the
+# launching frame at all (mark/move should never fire if the window can't be
+# resolved).
+
+^rm -f $i3_calls_file
+let win30 = 30
+let start_30 = (date now)
+let r30 = (run-wrapper-env $tmp $test_port $test_path "FAKE_ACTIVE_WINDOW=555 FAKE_NEVER_MAP=1" "window" $"($win30)")
+let elapsed_30 = ((date now) - $start_30)
+if $r30.exit_code != 0 {
+    print $"FAIL: window ($win30) that never maps should still exit 0 \(spawn succeeded, dock best-effort\), got ($r30.exit_code):\n($r30.stdout)($r30.stderr)"
+    exit 1
+}
+let win30_pid_file = (wv-pid-file $cache_dir $win30)
+let win30_pid = (open $win30_pid_file | str trim | into int)
+if not (wait-pid-alive $win30_pid) {
+    print $"FAIL: window ($win30)'s spawned pid ($win30_pid) never came alive"
+    exit 1
+}
+$spawned_pids = ($spawned_pids | append $win30_pid)
+if not ($"($r30.stdout)($r30.stderr)" | str contains "never mapped") {
+    print $"FAIL: a window that never maps should log a clear 'never mapped' line:\n($r30.stdout)($r30.stderr)"
+    exit 1
+}
+if ($i3_calls_file | path exists) and ((open $i3_calls_file) | str contains "mark") {
+    print $"FAIL: a window that never maps should never touch the launching frame \(no mark/move\):\n(open $i3_calls_file)"
+    exit 1
+}
+if $elapsed_30 > 15sec {
+    print $"FAIL: never-mapped window took ($elapsed_30) — bounded poll should cap this well under 15s"
+    exit 1
+}
+run-wrapper $tmp $test_port $test_path "window" $"($win30) --close" | ignore
+run-wrapper $tmp $test_port $test_path "stop" | ignore
+wait-port-free $test_port
+^rm -f $pid_file $launched_marker $i3_calls_file
+print "PASS: a window that never maps leaves a clear log line within the bound, never touches the frame"
+
 # ── cleanup ───────────────────────────────────────────────────────────────────
 
 # Reap any real qml6 stub pids still alive (deliberately orphaned ones from
@@ -1005,5 +1403,5 @@ for pid in $spawned_pids {
 
 ^rm -rf $tmp
 print ""
-print "PASS: 23 tests passed"
+print "PASS: 30 tests passed"
 

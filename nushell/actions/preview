@@ -34,7 +34,16 @@
 # native `[pid=…]` under sway) instead of by WM_CLASS — qml6's WM_CLASS is
 # the runtime's own identity ("qml6"/"Qml Runtime", poc016), shared with
 # every other qml6-hosted app in the repo (d2-view), so class matching was
-# never viable for this engine.
+# never viable for this engine. sp022 Task 7 collapses the docking mechanism
+# itself: [[poc016]] proved a qml6 window survives being split/moved/
+# reparented AFTER it has already mapped (the old wry host did not, hence
+# the pre-map split-then-move-the-terminal choreography), so docking is now
+# spawn -> resolve the window by pid (bounded poll) -> mark the launching
+# frame -> move the PREVIEW window's container to that mark + reorder —
+# ordinary i3/sway, applied identically whether the window is fresh or
+# already live. `show` re-docks a live window on every call (the "docks
+# only on first open" limitation is gone); `window` still docks a fresh
+# window to the right, same mechanism.
 
 const DAEMON_BIN = "preview-d"
 const QML_RUNTIME = "qml6"
@@ -531,16 +540,18 @@ def main-window [n: int, close: bool] {
     # the right), visible next to the editor — the design the i3 config
     # describes ("sits beside the editor like a split"), and the fix for nvim
     # :PreviewStart opening an invisible tab (dotfiles-nmp). No image shape is
-    # known at window-open (nvim previews many files, and re-docking per file
-    # would reparent the live webview and kill it), so the direction is fixed
-    # rather than shape-chosen as in `show`. Pre-split before the window maps
-    # to dodge the reparent-death (dotfiles-bfk); only for a fresh window with
-    # both a launching frame and a WM to talk to.
+    # known here (nvim previews many files), so the direction is fixed rather
+    # than shape-chosen as in `show`. Dock AFTER spawn (sp022 Task 7): a qml6
+    # window survives being moved post-map ([[poc016]]), so there is no need
+    # to pre-split before it maps the way the old wry host required.
+    # Degrades gracefully headless: no frame (no X session) -> window-spawn
+    # still runs, dock-window-into-place's own no-WM/no-pidfile guards handle
+    # the rest.
     let orig = (active-window-id)
-    if ($orig != null and (wm-bin) != null and not (window-open $n)) {
-        prepare-split $orig "right"
-    }
     window-spawn $n
+    if $orig != null {
+        dock-window-into-place $n $orig "right"
+    }
 }
 
 # Close every open window (wv-*.pid) — called by `stop` before it touches
@@ -737,79 +748,133 @@ def i3run [cmd: string] {
     do { ^env -u I3SOCK $bin $cmd } | complete | ignore
 }
 
-# Is window N already open? A fresh spawn is what docking hooks into; a
-# window that already exists is left where it is (re-docking would
-# reparent the live webview and kill it — see prepare-split).
-def window-open [n: int] {
-    let pid = (read-pidfile-at (window-pid-file $n))
-    if $pid == null { return false }
-    (pid-alive $pid) and (window-cmdline-matches $pid $n)
+# ── mark-based docking (sp022 Task 7, dotfiles-zw0d.7) ──────────────────
+#
+# [[poc016]] proved a qml6 window survives every i3 reparent operation
+# (split/move/move-to-mark, floating toggle, cross-workspace move) that made
+# a mapped wry/WebKitGTK window self-close (dotfiles-bfk) — so unlike the
+# webview host this replaces, the PREVIEW window itself can be split/moved
+# AFTER it has already mapped, live or fresh, with no pre-map choreography.
+# That collapses prepare-split + wait-preview-mapped + finalize-dock's
+# move-the-terminal inversion into one recipe run on the preview window:
+# mark the launching frame, move the preview window's container to that
+# mark, then reorder if the mode wants the preview BEFORE the frame.
+#
+# Spot-checked empirically against real i3 4.25.1 AND real sway 1.12
+# (dotfiles-zw0d.7 task notes carry the transcripts) on a throwaway
+# Xvfb/headless-sway session before this landed — i3 has no native `pid`
+# criterion (`[pid=N] focus` is a parse error: i3-msg's own error lists the
+# valid criteria and `pid` is not among them), confirming T6's claim rather
+# than assuming it; sway's `[pid=N]` IS native and needs no xdotool at all.
+# Both WMs accept identical `mark` / `move container to mark <mark>` /
+# `move up` / `move left` syntax. workspace_layout tabbed (a common i3
+# default, including this repo's own config) means a bare `move container to
+# mark` without first setting the frame's split direction lands the preview
+# as a TAB, not a split — dock-frame always sets the layout explicitly
+# rather than relying on whatever default the target WM/config carries.
+const DOCK_MARK = "preview-dock-anchor"
+
+# Resolve pid to the WM criterion used to target the PREVIEW window,
+# bounded-polling for the window to actually be mapped. i3: no native pid
+# criterion (measured above), so pid -> X11 id via `xdotool search --pid`
+# first, then `[id=<xid>]`; missing xdotool degrades immediately (no point
+# polling for a binary that will never appear). sway: `[pid=<pid>]` directly
+# — mapped-ness is bounded-retried by dock-window's own success-flag loop
+# instead, so no separate wait is needed here. null when the window never
+# resolves within PLACE_ATTEMPTS (crashed qml6, or xdotool absent) — the
+# caller logs why and skips the dock rather than hanging or erroring.
+def window-criteria [bin: string, pid: int] {
+    if $bin == "swaymsg" {
+        return $"[pid=($pid)]"
+    }
+    if (which xdotool | is-empty) { return null }
+    for _ in 1..($PLACE_ATTEMPTS) {
+        let xid = (window-xid-for-pid $pid)
+        if $xid != null { return $"[id=($xid)]" }
+        sleep $PLACE_POLL
+    }
+    null
 }
 
-# Set the launching frame's split orientation BEFORE the preview window maps,
-# so the webview opens directly into position. This is the crux of the whole
-# approach: reparenting an already-mapped wry/WebKitGTK window (i3
-# split/move/move-to-mark after the fact) makes it self-close with
-# CloseRequested on xrdp's GL-limited virtual Xorg (dotfiles-bfk — verified;
-# not fixed by software GL). A window that maps straight into its final
-# container is never reparented and survives. "tab" wants no split (the WM's
-# default drops the new window into orig's container as a tab).
-def prepare-split [orig: int, mode: string] {
+# Set the launching frame's split direction (or tabbed layout) and mark it —
+# done explicitly for every mode rather than relying on the WM's/config's
+# default layout (workspace_layout tabbed is common, including this repo's
+# own i3 config), so the dock is deterministic regardless of what the
+# frame's container defaulted to. `mark` targets the FOCUSED container after
+# `split`/`layout` — verified this stays on the frame's own leaf (splitting
+# wraps the leaf in a new parent, focus and the leaf itself are unaffected)
+# rather than the newly created wrapper.
+def dock-frame [orig: int, mode: string] {
+    i3run $"[id=($orig)] focus"
     match $mode {
-        "top" | "below" => {
-            i3run $"[id=($orig)] focus"
-            i3run "split vertical"
-        }
-        "left" | "right" => {
-            i3run $"[id=($orig)] focus"
-            i3run "split horizontal"
-        }
-        "tab" => {
-            # A frame short enough to hit this fallback is one sitting in a
-            # vertical split, so the WM default would stack the preview as yet
-            # another thin sibling — the opposite of what "too small to split"
-            # wants. Set the frame's container tabbed BEFORE the window maps so
-            # the preview joins as a full-size tab (mapping into a tabbed
-            # container, like the split cases, avoids the fatal post-map
-            # reparent).
-            i3run $"[id=($orig)] focus"
-            i3run "layout tabbed"
-        }
+        "top" | "below" => { i3run "split vertical" }
+        "left" | "right" => { i3run "split horizontal" }
+        "tab" => { i3run "layout tabbed" }
         _ => {}
     }
+    i3run $"[id=($orig)] mark ($DOCK_MARK)"
 }
 
-# Wait (bounded) for window N's qml6 process to actually map a window.
-# window-spawn spawns it detached and returns without waiting for the map
-# (place-window no-ops for a Claude/ad-hoc window with no registered
-# workspace), so a reorder issued immediately would find no sibling yet —
-# the exact bug that left "top" images docked at the bottom. sp022 Task 6:
-# polls by PID (xdotool search --pid), not class — qml6's WM_CLASS is the
-# runtime's own identity, shared with every other qml6-hosted app in the
-# repo (d2-view), so a class search here would match the wrong window.
-def wait-preview-mapped [n: int] {
-    if (which xdotool | is-empty) { return }
+# Move the PREVIEW window (already pid-resolved to `criteria`) to sit beside
+# the just-marked launching frame, then reorder for the modes that want the
+# preview BEFORE the frame in the split (top/left) — default insertion order
+# places the moved-in window AFTER the marked one, which is already correct
+# for below/right/tab and needs one extra `move` for top/left. Retried on the
+# body success flag — i3-msg/swaymsg exit 0 while reporting {"success":
+# false} for "nothing to move" (the dotfiles-816 lesson), so a window that
+# hasn't actually landed at the mark yet just costs a bounded wait rather
+# than a silent no-op. Returns whether the dock landed.
+def dock-window [bin: string, criteria: string, mode: string] {
+    mut docked = false
     for _ in 1..($PLACE_ATTEMPTS) {
-        let pid = (read-pidfile-at (window-pid-file $n))
-        if $pid != null {
-            let r = (do { ^xdotool search --pid $pid } | complete)
-            if $r.exit_code == 0 and ($r.stdout | str trim | is-not-empty) { return }
+        let r = (do {
+            ^env -u I3SOCK $bin $"($criteria) move container to mark ($DOCK_MARK)"
+        } | complete)
+        if $r.exit_code == 0 {
+            let ok = (try { $r.stdout | from json | get 0.success } catch { false })
+            if $ok { $docked = true; break }
         }
         sleep $PLACE_POLL
     }
+    if $docked {
+        match $mode {
+            "top" => { do { ^env -u I3SOCK $bin $"($criteria) move up" } | complete | ignore }
+            "left" => { do { ^env -u I3SOCK $bin $"($criteria) move left" } | complete | ignore }
+            _ => {}
+        }
+    }
+    $docked
 }
 
-# After the window has mapped (below/right of orig, per prepare-split's
-# split), reorder for the top/left modes by moving the LAUNCHING FRAME — a
-# normal terminal, safe to reparent — never the fragile webview. below/right
-# and tab need no reorder. The move waits for the window to map first, else it
-# runs before the split has two children and does nothing (leaving "top" at
-# the bottom).
-def finalize-dock [orig: int, mode: string, n: int] {
-    match $mode {
-        "top" => { wait-preview-mapped $n; i3run $"[id=($orig)] move down" }   # push frame down -> preview on top
-        "left" => { wait-preview-mapped $n; i3run $"[id=($orig)] move right" } # push frame right -> preview on left
-        _ => {}
+# Dock window N beside `orig` in `mode` ("top"/"left"/"below"/"right"/"tab"),
+# whether N was just spawned OR is already live — the SAME recipe re-docks a
+# live window, because (unlike the wry host this replaces) a qml6 window
+# survives being moved after it has already mapped ([[poc016]]). Best-effort
+# throughout: no-ops cleanly when there is no WM, no pidfile, or the window
+# never resolves to a criterion within PLACE_ATTEMPTS — each case prints why,
+# so a crashed qml6 or a closed launching frame surfaces in the log instead
+# of hanging or erroring `show`/`window`. Always unmarks the frame afterward
+# so a leftover mark never lingers to confuse the next dock.
+def dock-window-into-place [n: int, orig: int, mode: string] {
+    let bin = (wm-bin)
+    if $bin == null { return }
+    let pid = (read-pidfile-at (window-pid-file $n))
+    if $pid == null {
+        print $"preview: window ($n) has no pidfile — skipping dock"
+        return
+    }
+    let criteria = (window-criteria $bin $pid)
+    if $criteria == null {
+        print $"preview: window ($n) \(pid ($pid)\) never mapped within (($PLACE_ATTEMPTS * $PLACE_POLL)) — skipping dock, see (window-log-file $n)"
+        return
+    }
+    dock-frame $orig $mode
+    let ok = (dock-window $bin $criteria $mode)
+    i3run $"unmark ($DOCK_MARK)"
+    if $ok {
+        print $"preview: docked window ($n) ($mode) of frame ($orig)"
+    } else {
+        print $"preview: window ($n) \(pid ($pid)\) placement timed out — leaving it where the WM put it"
     }
 }
 
@@ -833,16 +898,16 @@ def main-show [path?: string, window: int = 1] {
     let orig = (active-window-id)
     let dims = (image-dims $abs)
     ensure-daemon-slash
-    # Dock only a FRESH image window: no frame/WM/dims -> no dock; a non-image
-    # (dims null) -> no dock; an already-open window is left in place (moving
-    # the live webview would reparent and kill it). Decide the mode, then set
-    # the split BEFORE the window maps.
-    let mode = if ($orig != null and $dims != null and not (window-open $window)) {
+    # Dock whenever there is a frame + WM + known image shape to dock
+    # against — no "is this window already open" guard: sp022 Task 7
+    # collapsed that check, because dock-window-into-place re-docks a LIVE
+    # window exactly as safely as a fresh one ([[poc016]]). No frame/dims
+    # (non-image, headless) -> no dock, same as before.
+    let mode = if ($orig != null and $dims != null) {
         (dock-mode $dims.w $dims.h $orig)
     } else {
         null
     }
-    if $mode != null { prepare-split $orig $mode }
     # Window spawn is best-effort GUI: on a headless host (Termux, no WM,
     # no qml6) the detached window just dies in its log — the daemon + URL
     # below still give a working browser-on-a-port preview, so this never
@@ -851,11 +916,10 @@ def main-show [path?: string, window: int = 1] {
     # The daemon (root=/) converts this absolute path abs->rel internally
     # (handlePreviewSet), so /file/<abs-minus-leading-slash> is the URL.
     main-send $abs $window
-    # Reorder for top/left by moving the launching frame (reparent-safe),
-    # never the webview.
+    # Dock (or re-dock) AFTER the window exists — spawned just now, or
+    # already live from a previous `show`/`window` call.
     if $mode != null {
-        finalize-dock $orig $mode $window
-        print $"preview: docked window ($window) ($mode) of frame ($orig)"
+        dock-window-into-place $window $orig $mode
     }
     let rel = ($abs | str trim --left --char '/')
     print $"preview: (api-base)/file/($rel)?full"
