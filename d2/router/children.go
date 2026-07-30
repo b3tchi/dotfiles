@@ -183,6 +183,18 @@ func (m *ChildManager) spawnLocked(e *childEntry, key, absPath string, port int)
 		SVGPath:    svgPath,
 	}
 
+	// dotfiles-sytg: a source with nothing to compile will never produce the
+	// svg at SVGPath, so record the real reason up front. api.go's svg handler
+	// already prefers Child.LastError over its own poll-timeout text, so this
+	// replaces the misleading "svg not ready after 3s: … no such file or
+	// directory" with a cause, without any request-path change. The child is
+	// still spawned — the user is expected to type into the file, and d2
+	// --watch compiles normally as soon as there is a statement.
+	if sourceHasNoStatements(absPath) {
+		ch.LastError = &emptySourceErr{path: absPath}
+		log.Printf("children: %q source %s has no d2 statements — d2 writes no svg until it does", key, absPath)
+	}
+
 	done := make(chan struct{})
 	stopCtx, stopCancel := context.WithCancel(context.Background())
 
@@ -510,7 +522,18 @@ func (m *ChildManager) Snapshot() map[string]Child {
 	for k, e := range m.entries {
 		e.mu.Lock()
 		if e.child != nil {
-			snap[k] = *e.child
+			c := *e.child
+			// dotfiles-sytg: the empty-source diagnostic is a spawn-time
+			// observation about a file the user is expected to keep editing.
+			// Once it has actually compiled, the condition is gone and holding
+			// it up as lastError would misreport a healthy child — which is the
+			// same misleading-diagnostic problem it was added to solve. Only
+			// the returned copy is adjusted; the stored child is untouched, so
+			// this stays a read path.
+			if ese, isEmptySrc := c.LastError.(*emptySourceErr); isEmptySrc && ese.resolved(c.SVGPath) {
+				c.LastError = nil
+			}
+			snap[k] = c
 		}
 		e.mu.Unlock()
 	}
@@ -544,6 +567,81 @@ func svgOutputPath(cacheDir, project, absPath string) (string, error) {
 		return "", fmt.Errorf("svgOutputPath: mkdir %s: %w", dir, err)
 	}
 	return filepath.Join(dir, base), nil
+}
+
+// ── Empty-source diagnostics (dotfiles-sytg) ─────────────────────────────────
+
+// sourceHasNoStatements reports whether absPath holds nothing d2 can compile —
+// only blank lines and/or "#" comments.
+//
+// d2 v0.7.1 answers such a source by writing NO output file and exiting 0 with
+// empty stdout AND stderr. Verified against v0.7.1 for a 0-byte source, a
+// whitespace-only source and a comment-only source, in both "d2 --watch <src>
+// <out>" and one-shot "d2 <src> <out>" form. There is no signal to relay: the
+// silence is the whole behaviour.
+//
+// An unreadable file returns false — that is a different failure with its own
+// message, and claiming "empty" for it would be the same kind of misleading
+// diagnostic this function exists to remove.
+//
+// The "#"-comment rule is a heuristic on d2's comment syntax, so it can in
+// principle misjudge a file that is nothing but a block whose every line
+// starts with "#". The cost is bounded to wording: the check only ever runs
+// when no svg exists, and emptySourceErr re-verifies before blaming the source.
+func sourceHasNoStatements(absPath string) bool {
+	data, err := os.ReadFile(absPath)
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// emptySourceErr is the Child.LastError recorded for a source that has no d2
+// statements, so a failed /api/svg fetch names the cause instead of reading
+// like a compile race. Mistaking the latter for the former is what sent
+// dotfiles-sytg after a byte-production bug that did not exist: the reported
+// "svg not ready after 3s: open …/bravo.svg: no such file or directory" came
+// from fixtures/walk/bravo.d2, which is 0 bytes.
+//
+// Error() re-reads the file rather than formatting a message once, because a
+// child spawned on an empty file keeps running while the user types into it.
+// By the time /api/svg consults this the source may well have content, and a
+// cached "file is empty" would then be its own stale, misleading claim.
+type emptySourceErr struct{ path string }
+
+func (e *emptySourceErr) Error() string {
+	if _, err := os.Stat(e.path); err != nil {
+		return fmt.Sprintf("cannot read source %s: %v", e.path, err)
+	}
+	if !sourceHasNoStatements(e.path) {
+		// Source gained content since spawn; the svg just is not there yet.
+		return fmt.Sprintf("no svg compiled yet for %s", e.path)
+	}
+	return fmt.Sprintf("source %s has no d2 statements (only blank lines and/or comments), "+
+		"so d2 compiles nothing and writes no svg — add content to the diagram", e.path)
+}
+
+// resolved reports whether the empty-source condition has passed: the source
+// now has statements AND an svg has actually been written to svgPath. Used by
+// Snapshot to stop surfacing the diagnostic on a child that is now healthy.
+//
+// Both halves are required. Statements alone only mean a compile is possible,
+// not that it happened — reporting "fine" then would recreate the original
+// bug's confusion in mirror image, claiming success while /api/svg still has
+// no bytes to serve.
+func (e *emptySourceErr) resolved(svgPath string) bool {
+	if sourceHasNoStatements(e.path) {
+		return false
+	}
+	info, err := os.Stat(svgPath)
+	return err == nil && info.Size() > 0
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
