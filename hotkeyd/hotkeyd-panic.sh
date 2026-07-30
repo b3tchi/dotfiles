@@ -82,7 +82,8 @@ X11_UNIX="${HOTKEYD_X11_UNIX:-/tmp/.X11-unix}"
 # because the three overrides above fence only the FILES: HOME and
 # HOTKEYD_I3_CONFIG_D move the link, HOTKEYD_X11_UNIX moves the enumeration
 # `resume` reloads — and `target_displays` below reaches past all of them, by
-# design, into every hotkeyd.py on the machine. That is correct for recovery and
+# design, into every hotkeyd daemon on the machine, of either engine. That is
+# correct for recovery and
 # is NOT narrowed here: panic must stop every daemon or a later reload on
 # another display re-enters the contested state (the dotfiles-hwds.12
 # requirement-4 decision). It is wrong for a TEST, which then stops the caller's
@@ -127,10 +128,35 @@ linked() { [ -L "$LINK" ] || [ -e "$LINK" ]; }
 # Identified from the daemon's own --display argument for the same reason
 # hotkeyd.sh does it: a pidfile can go stale and then lie about a daemon that is
 # not there, which is precisely the state this script exists for.
+#
+# DUAL ARGV SHAPE (dotfiles-pwaj), THE SAME CORE hotkeyd.sh's daemon_pid() USES.
+# The optional `(\.py)?` group matches EITHER python's `hotkeyd.py --display :N`
+# or the Go rewrite's bare `hotkeyd --display :N` (sp021), so the blast radius
+# panic computes does not depend on which engine hotkeyd.sh's per-display table
+# happens to name. Hardcoding the python shape here — which is what this line
+# used to do — made panic BLIND to a go daemon from the moment a display was cut
+# over: the stop loop below would skip that display, the fallback would be linked
+# and i3 reloaded over a daemon still holding its grabs, and the result is the
+# CONTESTED state (two clients, one chord) this entire script exists to prevent,
+# on the one display that had just been cut over. It is a live hazard the instant
+# engine_for() names `go` for any display, not before.
+#
+# MIRRORED, NOT FACTORED INTO A SHARED FILE, and deliberately. This is the one
+# script that has to run when the session is ALREADY BROKEN, so it takes no
+# dependency a sourced sibling would add to the recovery path — the same
+# reasoning the header gives for not putting a nushell hop in front of it. It is
+# also how `linked()` is handled across these two files (dotfiles-hwds.21):
+# factored WITHIN each file, mirrored ACROSS them. The drift that invites is
+# caught by a static guard in test-panic.sh which reads the argv core out of both
+# scripts and fails if they stop agreeing.
+#
+# Extraction is unchanged and needs no boundary anchor: no display appears in the
+# pattern, and `[0-9][0-9]*` is greedy, so `--display :10` yields `:10` and can
+# never be truncated to a colliding `:1`.
 target_displays() {
     {
         [ -n "$DPY_BASE" ] && printf '%s\n' "$DPY_BASE"
-        pgrep -af 'hotkeyd\.py .*--display' 2>/dev/null \
+        pgrep -af 'hotkeyd(\.py)? .*--display' 2>/dev/null \
             | sed -n 's/.*--display \(:[0-9][0-9]*\).*/\1/p'
     } | sort -u | scoped
 }
