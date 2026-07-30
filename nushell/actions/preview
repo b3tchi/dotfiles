@@ -225,6 +225,59 @@ export def is-xrdp-display [display: string, xorg_cmdlines: list<string>] {
     }
 }
 
+# Chromium command-line flags QtWebEngine needs before it will hand the web
+# tier a WebGL context on a GPU-less virtual Xorg. Measured on a real
+# xorgxrdp session (dotfiles-14kr): without these, the stl tier dies with
+# "ContextResult::kFatalFailure: WebGL1/WebGL2 blocklisted" ->
+# "THREE.WebGLRenderer: Error creating WebGL context." and the window shows
+# "failed to load STL: Error creating WebGL context." Chromium's own GPU
+# blocklist is what refuses, so the fix is Chromium-side: swiftshader as the
+# GL implementation (--use-gl=angle --use-angle=swiftshader),
+# --enable-unsafe-swiftshader to lift the blocklist that otherwise rejects
+# a software GL backend outright, and --disable-gpu-compositing so the
+# compositor does not also try for a hardware context.
+const XRDP_CHROMIUM_FLAGS = "--enable-unsafe-swiftshader --use-gl=angle --use-angle=swiftshader --disable-gpu-compositing"
+
+# The `VAR=value ` prefix window-spawn prepends to its `bash -c` launch line,
+# given whether the target display is xorgxrdp and whatever
+# QTWEBENGINE_CHROMIUM_FLAGS the caller already has set (""=unset). Factored
+# out of window-spawn so preview-test can table-test it without a real Xorg
+# (the is-xrdp-display seam pattern).
+#
+# On a native display: empty — real GL, real GPU, no overrides.
+#
+# On xorgxrdp, THREE things are needed, and dotfiles-14kr's 2x2 matrix on a
+# real xorgxrdp session settled which does what:
+#
+#   QT_QUICK_BACKEND=software + LIBGL_ALWAYS_SOFTWARE=1
+#     Qt Quick's own scenegraph, per [[adr0004]]/[[adr0005]] and the
+#     i3/config-xrdp precedent (a GPU-less virtual Xorg wedges hardware GL,
+#     dotfiles-49j). MEASURED ORTHOGONAL to the web tier: every tier
+#     (image/md/code/html/akm) renders identically with and without this
+#     pair, and the stl tier's WebGL failure reproduces with the pair
+#     ABSENT too — so the pair was never the web tier's problem, contrary
+#     to dotfiles-14kr's original hypothesis. It stays.
+#
+#   QTWEBENGINE_CHROMIUM_FLAGS=<XRDP_CHROMIUM_FLAGS>
+#     QtWebEngine's separate Chromium GPU stack, which has its own
+#     blocklist and does NOT consult either Qt var above. This is what
+#     actually fixes stl. Set only when the caller has not set it: an
+#     explicit QTWEBENGINE_CHROMIUM_FLAGS in the environment is a
+#     deliberate override and wins (overriding it would make the var
+#     un-settable, since a duplicate assignment on the launch line would
+#     always shadow the inherited one).
+export def spawn-env-prefix [xrdp: bool, caller_chromium_flags: string] {
+    if not $xrdp {
+        return ""
+    }
+    let chromium = if ($caller_chromium_flags | is-not-empty) {
+        ""
+    } else {
+        $"QTWEBENGINE_CHROMIUM_FLAGS='($XRDP_CHROMIUM_FLAGS)' "
+    }
+    $"QT_QUICK_BACKEND=software LIBGL_ALWAYS_SOFTWARE=1 ($chromium)"
+}
+
 # Space-joined argv of every running Xorg, read from /proc (mirrors
 # preview-webview's running_xorg_cmdlines). Empty on any read failure — a
 # detection miss degrades to "not xrdp" (no guard), never worse.
@@ -406,10 +459,12 @@ def window-spawn [n: int] {
     #    console.log/warn/error AND qml6's own usage-line stderr actually
     #    land in wv-<N>.log — without it both are silently swallowed
     #    (measured: bad args -> rc=2, zero output).
-    #    On an xorgxrdp display, force software GL the same way
-    #    preview-wv's is_xrdp_display guard did — a GPU-less virtual Xorg
-    #    wedges hardware GL (dotfiles-49j). Native displays (including no
-    #    Xorg at all, e.g. sway) get neither var.
+    #    On an xorgxrdp display, spawn-env-prefix forces software GL for the
+    #    Qt Quick scenegraph the same way preview-wv's is_xrdp_display guard
+    #    did — a GPU-less virtual Xorg wedges hardware GL (dotfiles-49j) —
+    #    AND hands QtWebEngine's separate Chromium GPU stack the swiftshader
+    #    flags the web tier needs for WebGL there (dotfiles-14kr). Native
+    #    displays (including no Xorg at all, e.g. sway) get none of them.
     let dir = ($CACHE_DIR | path expand)
     if not ($dir | path exists) {
         mkdir $dir
@@ -419,11 +474,9 @@ def window-spawn [n: int] {
 
     let display = ($env | get -o DISPLAY | default "")
     let xrdp = (is-xrdp-display $display (running-xorg-cmdlines))
-    let extra_env = if $xrdp {
-        print $"preview: xorgxrdp display ($display) — forcing software GL for window ($n)"
-        "QT_QUICK_BACKEND=software LIBGL_ALWAYS_SOFTWARE=1 "
-    } else {
-        ""
+    let extra_env = (spawn-env-prefix $xrdp ($env | get -o QTWEBENGINE_CHROMIUM_FLAGS | default ""))
+    if $xrdp {
+        print $"preview: xorgxrdp display ($display) — forcing software GL + swiftshader WebGL for window ($n)"
     }
 
     let pid_result = (do {
