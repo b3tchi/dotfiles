@@ -52,6 +52,27 @@ func TestI3EnteringAModeLeavesAnActiveLayerPublishingDefaultOnce(t *testing.T) {
 	}
 }
 
+func TestI3ForcingALayerExitLogsItWithNoTriggeringKey(t *testing.T) {
+	var lines []string
+	e, _, _ := buildEngine(engineOpts{log: func(m string) { lines = append(lines, m) }})
+	e.Handle(xev(Press, "o", []string{"Mod4"}, 32, 0x40, "", 0))
+	lines = nil
+	e.SetI3Mode("resize")
+	tr := transitions(lines)
+	if len(tr) != 1 {
+		t.Fatalf("lines: %v", lines)
+	}
+	if !contains(tr[0], "layer=nav->default") {
+		t.Fatalf("line: %q", tr[0])
+	}
+	if !contains(tr[0], "trigger=none") {
+		t.Fatalf("no key caused this; the log must not imply one: %q", tr[0])
+	}
+	if !contains(tr[0], "resize") {
+		t.Fatalf("the note must name the i3 mode: %q", tr[0])
+	}
+}
+
 func TestI3ModeTakeoverClearsAHeldSublayerToo(t *testing.T) {
 	e, pub, _ := defaultEngine()
 	e.Handle(press("o", "Mod4"))

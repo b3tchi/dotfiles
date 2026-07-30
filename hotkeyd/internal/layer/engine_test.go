@@ -728,6 +728,14 @@ func TestAnEventBuiltWithoutADeviceIsUnchanged(t *testing.T) {
 	}
 }
 
+func TestTheEventCarriesTheSourceIDAlongsideTheName(t *testing.T) {
+	id := 12
+	e := Event{Kind: Press, Key: "h", Mods: map[string]bool{}, Device: "Keyboard A", DeviceID: &id}
+	if e.Device != "Keyboard A" || e.DeviceID == nil || *e.DeviceID != 12 {
+		t.Fatalf("event = %+v", e)
+	}
+}
+
 // -- layer-transition log (dotfiles-hwds.27) -----------------------------
 // python: test_layers.py lines 991-1102
 
