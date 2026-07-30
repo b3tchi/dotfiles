@@ -377,7 +377,18 @@ func (h *APIHandler) handleSvg(w http.ResponseWriter, r *http.Request) {
 }
 
 // writeSVG writes data with a 200 and Content-Type: image/svg+xml.
+//
+// data is run through flattenD2SVG first (dotfiles-o3b7): d2 v0.7.1 always
+// emits an outer <svg> wrapping an inner <svg> that holds all the actual
+// content, which QtSvg's SVG Tiny 1.2 profile drops entirely (forbidden
+// nested <svg>), rendering blank for every Qt-based consumer. Flattening
+// here — the single place /api/svg ever writes bytes to a client, covering
+// both the normal compiled-svg path and the last-good-fallback read from
+// disk — means every consumer benefits uniformly, and the transform is a
+// no-op for anything that isn't d2's own nested shape (already-flat input,
+// non-svg bytes, malformed/truncated svg all pass through unchanged).
 func writeSVG(w http.ResponseWriter, data []byte) {
+	data = flattenD2SVG(data)
 	w.Header().Set("Content-Type", "image/svg+xml")
 	w.WriteHeader(http.StatusOK)
 	w.Write(data) //nolint:errcheck
