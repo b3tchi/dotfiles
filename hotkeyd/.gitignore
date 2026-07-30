@@ -1,0 +1,14 @@
+# Built by dot.yaml's go-guarded build step (sp021, dotfiles-ylmp.14): a
+# `CGO_ENABLED=0 go build ./cmd/hotkeyd` output, host/arch-specific and
+# rebuilt on every `rotz install hotkeyd`. Never commit it -- NO LINKS is
+# this dot's whole design (see dot.yaml's header), and a tracked binary here
+# would be a second, driftable copy of the daemon sitting next to the source
+# that actually defines it.
+#
+# Anchored (leading slash): matches only hotkeyd/hotkeyd itself, never
+# hotkeyd/cmd/hotkeyd/ (the tracked Go source package one level down).
+/hotkeyd
+
+# The build's own temp file (dot.yaml builds to this, then renames over
+# /hotkeyd) -- normally never left behind, but a killed build can leave one.
+.hotkeyd.build.*
