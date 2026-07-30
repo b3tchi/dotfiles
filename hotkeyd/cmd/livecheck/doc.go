@@ -156,13 +156,37 @@
 //
 // # What the Go suite checks that live_check.py does not
 //
-// The out-of-process shape buys three claims the in-process one cannot
-// make, and they are graded here rather than left implicit:
+// The out-of-process shape buys four claims the in-process one cannot make,
+// and they are graded here rather than left implicit:
 //
 //	the daemon's own grab report publishes an EMPTY `missing` list on a
 //	real server (py:696's external twin, read from the sidecar);
 //	`one connection survived 120+ dispatches` is checked as the same file
 //	descriptor before and after, not merely a non-nil socket;
 //	every "grabbed" claim is the SERVER refusing a rival grab, not the
-//	daemon's own record of what it asked for.
+//	daemon's own record of what it asked for;
+//	the INJECTOR itself is graded ("every key injection this run was
+//	accepted by xdotool"). This one is here because it was needed: a
+//	malformed xdotool option during development made every chord injection
+//	fail silently and turned thirteen claims red about the daemon while the
+//	fault was in the instrument.
+//
+// # Both engines, one suite
+//
+// The same binary drives hotkeyd.py: point $HOTKEYD_BIN at
+// `python3 hotkeyd.py` and every daemon-phase scenario runs against the
+// python engine instead. Running both is what produced the two findings
+// this tool has made so far, and only one of them was about the daemons:
+//
+//	REAL: the transition log's device= field is `"..."` from Go's %q and
+//	`'...'` from python's !r (bd dotfiles-n0r4). Both spellings are parsed
+//	so this tool stays engine-neutral; the decision belongs to the parity
+//	gate.
+//	NOT REAL: Shift+Escape / Shift+Return read as "not obtained" on the
+//	python arm only. A direct measurement showed both engines hold them —
+//	the probe was sampling a half-installed grab set, because both daemons
+//	publish the new layer state BEFORE finishing a one-chord-at-a-time
+//	sync, and python's 106-chord sync is slower. Fixed by
+//	awaitGrabsSettled (daemonchecks.go). A single-engine run would have
+//	shipped that bug as a green suite.
 package main

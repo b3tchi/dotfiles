@@ -74,6 +74,7 @@ func runDaemonChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig) {
 	_ = in.Tap("super+o")
 	_, entered := d.State.Await(inNav, stateWait)
 	rep.Check(entered, "$mod+o enters nav on a real server", describeStates(d.State.States()))
+	awaitGrabsSettled(d.Display, 5*time.Second)
 
 	rep.Judged(entered, probeOwned(rig, "h", 0), "entering nav GRABBED its bare keys",
 		"a rival grab on bare h is refused while the layer is up", "the daemon never entered nav this run")
@@ -124,6 +125,7 @@ func runDaemonChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig) {
 		describeStates(d.State.States()), "the move sublayer was never observed this run")
 	_ = in.Up("Control_L")
 	time.Sleep(settle)
+	awaitGrabsSettled(d.Display, 5*time.Second)
 	rep.Judged(leftHeld, !probeOwned(rig, "h", 0), "leaving the layer RELEASED its bare keys again",
 		"a rival grab on bare h is granted once the layer is down", "the layer never came down this run")
 
@@ -131,6 +133,7 @@ func runDaemonChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig) {
 	d.State.Reset()
 	_ = in.Tap("super+o")
 	_, reEntered := d.State.Await(inNav, stateWait)
+	awaitGrabsSettled(d.Display, 5*time.Second)
 	if !reEntered {
 		rep.Skip("held Shift does NOT become a sublayer", "could not re-enter nav")
 		rep.Skip("Shift+q leaves the layer", "could not re-enter nav")
@@ -173,6 +176,57 @@ func runDaemonChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig) {
 
 	// -- the alt-tab HOLD layer ----------------------------------------------
 	runSwitcherChecks(rep, rig, in, d)
+}
+
+// awaitGrabsSettled waits until the daemon's grab report stops changing.
+//
+// THE RACE THIS CLOSES, and how it was found. Both daemons publish the
+// layer's new state BEFORE the layer's grabs are installed (the engine
+// publishes inside Handle; the daemon calls resyncGrabs afterwards), and
+// both install the grab set ONE CHORD AT A TIME. A probe fired the instant
+// the state socket says "nav" therefore samples a half-installed grab set,
+// in the table's own order — so the exit keys near the end of the set read
+// as ungrabbed while the ones near the front read as grabbed.
+//
+// This was NOT theory: the first run of this suite against hotkeyd.py
+// reported Shift+Escape and Shift+Return "not obtained" while Shift+q was,
+// and it looked exactly like a parity divergence. A direct measurement
+// (daemon in nav, rival grab from a third client) showed BOTH engines hold
+// all three. The Go daemon simply finishes its 106-chord sync sooner than
+// python does, so only the python arm ever lost the race. Running both
+// engines is what turned an instrument bug into a visible one.
+//
+// Both engines write the grab report only AFTER the whole sync plus an X
+// round trip (hotkeyd.py's sync_binds: _apply -> d.sync() -> _publish;
+// daemon.go's resyncGrabs: SyncBinds -> publishGrabReport), so a report
+// that stops changing is the settle signal, and it is the same signal on
+// either daemon.
+func awaitGrabsSettled(display string, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	prev, ok := proc.CurrentGrabReport(display)
+	for time.Now().Before(deadline) {
+		time.Sleep(120 * time.Millisecond)
+		cur, curOK := proc.CurrentGrabReport(display)
+		if ok && curOK && sameReport(prev, cur) {
+			return
+		}
+		prev, ok = cur, curOK
+	}
+}
+
+func sameReport(a, b *proc.GrabReport) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if a.Wanted != b.Wanted || a.Active != b.Active || len(a.Missing) != len(b.Missing) {
+		return false
+	}
+	for i := range a.Missing {
+		if a.Missing[i] != b.Missing[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func probeOwned(rig *Rig, key string, mask uint32) bool {
@@ -394,6 +448,7 @@ func runSwitcherChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig) {
 	_ = in.Tap("Tab")
 	_, opened := d.State.Await(inSwitcher, stateWait)
 	rep.Check(opened, "$mod+Tab opens the switcher and takes the layer", describeStates(d.State.States()))
+	awaitGrabsSettled(d.Display, 5*time.Second)
 	acts, gotOpen := d.AwaitAction("switcher", dispatchGap)
 	rep.Judged(opened, gotOpen, "and DISPATCHES the layer's own action", fmt.Sprintf("%v", acts),
 		"the switcher layer never opened this run")
@@ -467,6 +522,7 @@ func runSwitcherChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig) {
 	d.State.Reset()
 	_ = in.Up("Super_L")
 	_, ended := d.State.Await(inDefault, stateWait)
+	awaitGrabsSettled(d.Display, 5*time.Second)
 	rep.Judged(opened, ended, "releasing $mod ends the layer — the server poll, not an event, is what ends a hold layer",
 		describeStates(d.State.States()), "the switcher layer never opened this run")
 	acts, gotCommit := d.AwaitAction("switcher-confirm", dispatchGap)
@@ -534,6 +590,7 @@ func runModOneChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig) {
 	d.Proxy.Reset()
 	_ = in.Tap("alt+o")
 	_, entered := d.State.Await(inNav, stateWait)
+	awaitGrabsSettled(d.Display, 5*time.Second)
 	rep.Check(entered, "Alt+o DOES enter nav where $mod is Mod1 — grab set and engine agree on the display's own modifier",
 		describeStates(d.State.States()))
 	rep.Judged(entered, probeOwned(rig, "h", 0), "and the layer's bare keys were grabbed on the way in",

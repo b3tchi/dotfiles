@@ -182,6 +182,7 @@ func runDaemonPhase(rep *Reporter, rig *Rig, inj *Injector, bin []string, displa
 		return nil
 	}
 	d.State = sw
+	awaitGrabsSettled(display, 5*time.Second)
 
 	runDaemonChecks(rep, rig, inj, d)
 	runSingleInstanceCheck(rep, d)
@@ -229,6 +230,7 @@ func runModOnePhase(rep *Reporter, rig *Rig, inj *Injector, bin []string, displa
 		return nil
 	}
 	d.State = sw
+	awaitGrabsSettled(display, 5*time.Second)
 
 	runModOneChecks(rep, rig, inj, d)
 	d.Stop()
