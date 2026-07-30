@@ -24,15 +24,18 @@
 #      sequence) cannot hit connection-refused (dotfiles-nbt).
 #
 # sp013 Task 2 (wrapper `window` verb + stop integration), against a fake
-# preview-wv (sleep stub on the same temp PATH as the fake preview-d):
-#  10. `preview window` (default N=1) spawns the stub detached and writes
-#      wv-1.pid.
+# qml6 (sleep stub on the same temp PATH as the fake preview-d — sp022 T6
+# replaced the preview-wv engine with `qml6 PreviewView.qml -- <N> <port>`,
+# so the stub now stands in for qml6, not preview-wv):
+#  10. `preview window` (default N=1) spawns the stub detached, passing
+#      `<qml-path> -- 1 <port>`, and writes wv-1.pid.
 #  11. A second `preview window` call is an idempotent no-op (same pid).
 #  12. A stale pidfile (dead pid) is cleaned up and the window respawned.
-#  13. A recycled pid (alive, but /proc/<pid>/cmdline does not contain
-#      preview-wv) is treated as stale and respawned WITHOUT ever
-#      signaling the foreign process (asserted alive after the call) —
-#      the sp013 plan's ship-blocker anti-pattern.
+#  13. A recycled pid (alive, but /proc/<pid>/cmdline carries no
+#      PreviewView.qml argument) is treated as stale and respawned WITHOUT
+#      ever signaling the foreign process (asserted alive after the call)
+#      — the sp013 plan's ship-blocker anti-pattern, now enforced by the
+#      sp022 T6 exact-argument check.
 #  14. `preview window --close` SIGTERMs the cmdline-verified stub and
 #      removes the pidfile.
 #  15. A second `--close` is an idempotent clean no-op message.
@@ -40,16 +43,40 @@
 #      exit 0.
 #  17. `preview stop` closes every open wv-*.pid window before it touches
 #      the daemon.
-#  18. Missing preview-wv binary → error names "rotz install preview-webview".
+#  18. Missing qml6 binary → error names the qt packages.
 #  19. Daemon not answering /status → error names "preview start".
+#  20. register captures the focused workspace and does not leak I3SOCK
+#      (dotfiles-816) — carried over unchanged.
+#  21. window places the spawned window on its slot's recorded workspace,
+#      now via a pid-resolved `[id=…]` i3 criterion (sp022 T6 success
+#      criteria: window resolution is pid-based everywhere class matching
+#      lived; no `class="preview-wv"` reference remains).
+#  22. NEEDLE (## problem regression): a live slot-2 qml6 process (cmdline
+#      `... -- 2 <port>`) does NOT validate slot 1's pidfile (mismatched
+#      slot number) — slot 1 is treated as stale and respawned — but DOES
+#      validate slot 2's own pidfile as a no-op. Proves the identity check
+#      keys on the exact slot argument, not the shared daemon port (every
+#      slot's cmdline carries the same port).
+#  23. `is-xrdp-display` table-tested directly (module `use`, no /proc) —
+#      xrdp Xorg on the exact display token, native display alongside an
+#      xrdp one, no Xorg at all (sway), empty DISPLAY, and the ":10" vs
+#      ":100" token-boundary case (mirrors preview-webview's own
+#      is_xrdp_display unit tests).
 #
 # Run:  nu nushell/actions/preview-test
-# Pass: exits 0 and prints "PASS: 19 tests passed"
+# Pass: exits 0 and prints "PASS: N tests passed"
 # Fail: exits 1 and prints "FAIL: <description>"
 
 # Self-locate the wrapper relative to this test so it survives merging out
 # of the author's worktree (no hardcoded paths).
 const WRAPPER = (path self | path dirname | path join "preview")
+
+# sp022 T6 test_plan: "factor detection into a testable helper taking the
+# cmdline list ... and table-test it" — is-xrdp-display is exported from
+# the wrapper (a plain `.nu` file, `use`able for its non-main defs) so it
+# can be called directly here with fabricated /proc-style cmdline lists,
+# no real Xorg or /proc required.
+use $WRAPPER is-xrdp-display
 
 # ── setup ─────────────────────────────────────────────────────────────────────
 
@@ -62,6 +89,17 @@ let launched_marker = $"($tmp)/daemon_launched"
 
 ^mkdir -p $fake_bin_dir
 ^mkdir -p $cache_dir
+
+# window-spawn resolves the QML view via akm-root, falling back to
+# ~/.dotfiles. The test's isolated PATH carries no akm-root, and HOME is
+# pinned to $tmp below, so every window-spawn call in this file resolves
+# through the ~/.dotfiles fallback to this fake repo layout — exercising
+# that fallback path for free on every test, plus the two tests below that
+# specifically assert the "missing QML file" and "akm-root present" shapes.
+let fake_dotfiles_qml_dir = $"($tmp)/.dotfiles/preview/qml"
+let fake_qml_file = $"($fake_dotfiles_qml_dir)/PreviewView.qml"
+^mkdir -p $fake_dotfiles_qml_dir
+"// fake PreviewView.qml for preview-test" | save --force $fake_qml_file
 
 # Test port far from the 4200 default and common services.
 let test_port = "58920"
@@ -85,7 +123,7 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/slots':
             body = json.dumps([{'slot': 1, 'nvim': '/tmp/nvim.fake.sock',
-                                'workspace': 'dotfiles', 'path': ''}]).encode()
+                                'workspace': 'editor-ws', 'path': ''}]).encode()
             self.send_response(200); self.send_header('Content-Type','application/json')
             self.send_header('Content-Length', str(len(body))); self.end_headers()
             self.wfile.write(body)
@@ -132,22 +170,29 @@ PY
 $fake_src | save --force $fake_daemon
 ^chmod +x $fake_daemon
 
-# Fake preview-wv (sp013 Task 2 test_plan: "fake preview-wv, sleep stub on
-# temp PATH, existing fake-daemon pattern"). Records every invocation's
-# args (so spawn tests can assert what N/--port it was launched with) and
-# then sleeps until it's SIGTERMed — no `exec`, so the recorded pid stays
-# the pid of *this* script (whose /proc/<pid>/cmdline therefore contains
-# "preview-wv"), not of the `sleep` it spawns as a plain child.
-let fake_wv = $"($fake_bin_dir)/preview-wv"
-let wv_calls_file = $"($tmp)/wv_calls"
-let fake_wv_src = "#!/bin/bash
-echo \"$@\" >> " + $wv_calls_file + "
+# Fake qml6 (sp022 T6 test_plan: "fake qml6, sleep stub echoing its args to
+# a file, temp-PATH pattern" — replaces the sp013 fake preview-wv now that
+# window-spawn launches `qml6 <qml-path> -- <N> <port>`). Records every
+# invocation's args (so spawn tests can assert the qml path + N/port it was
+# launched with) and then sleeps until it's SIGTERMed — no `exec`, so the
+# recorded pid stays the pid of *this bash script*, not of the `sleep` it
+# spawns as a plain child. Verified empirically (poc016's setsid/backgrounding
+# trap): the kernel's #!/bin/bash shebang rewrite makes this script's own
+# /proc/<pid>/cmdline read `/bin/bash <resolved-script-path> <qml-path> -- <N>
+# <port>` — the qml-path and N/port arguments survive as distinct cmdline
+# elements exactly as if a real qml6 had received them, which is what makes
+# the exact-argument identity check (window-cmdline-matches) testable against
+# this stub at all.
+let fake_qml6 = $"($fake_bin_dir)/qml6"
+let qml6_calls_file = $"($tmp)/qml6_calls"
+let fake_qml6_src = "#!/bin/bash
+echo \"$@\" >> " + $qml6_calls_file + "
 trap 'kill $! 2>/dev/null; exit 0' TERM
 sleep 3600 &
 wait
 "
-$fake_wv_src | save --force $fake_wv
-^chmod +x $fake_wv
+$fake_qml6_src | save --force $fake_qml6
+^chmod +x $fake_qml6
 
 # Fake i3-msg (dotfiles-816): answers `-t get_workspaces` with a focused
 # workspace and records every other invocation's argv, so tests can assert
@@ -176,6 +221,24 @@ exit 0
 "
 $fake_i3_src | save --force $fake_i3
 ^chmod +x $fake_i3
+
+# Fake xdotool (sp022 T6): place-window's i3 path resolves a window's X11 id
+# via `xdotool search --pid <pid>` before building `[id=…]` criteria (i3 has
+# no native pid-match criteria, unlike sway's `[pid=…]`). This sandbox has no
+# real X session behind the fake i3-msg, so `search --pid` is stubbed to
+# deterministically derive a fake numeric xid from the pid (prefixed "9" so
+# it's never empty/zero) — anything else exits nonzero, degrading exactly
+# like the real binary would with no display (best-effort, never fatal).
+let fake_xdotool = $"($fake_bin_dir)/xdotool"
+let fake_xdotool_src = "#!/bin/bash
+if [ \"$1\" = \"search\" ] && [ \"$2\" = \"--pid\" ]; then
+  echo \"9$3\"
+  exit 0
+fi
+exit 1
+"
+$fake_xdotool_src | save --force $fake_xdotool
+^chmod +x $fake_xdotool
 
 # Path to window N's pidfile under the isolated cache dir (mirrors the
 # wrapper's own window-pid-file, but computed independently here so the
@@ -511,7 +574,7 @@ wait-port-free $test_port
 ^rm -f $pid_file $launched_marker
 print "PASS: start blocks until the daemon answers, register-after-start is race-free"
 
-# ── test 10: window (default N=1) spawns preview-wv, writes wv-1.pid ─────────
+# ── test 10: window (default N=1) spawns qml6, writes wv-1.pid ──────────────
 
 run-wrapper $tmp $test_port $test_path "start" | ignore
 for _ in 1..30 {
@@ -535,13 +598,17 @@ if not (wait-pid-alive $win1_pid) {
     print $"FAIL: window spawn's recorded pid ($win1_pid) never came alive"
     exit 1
 }
-let wv_calls = (if ($wv_calls_file | path exists) { open $wv_calls_file } else { "<no calls file>" })
-if not ($wv_calls | str contains "1 --port 58920") {
-    print $"FAIL: preview-wv stub was not invoked with the expected args \(N=1 --port ($test_port)\):\n($wv_calls)"
+let qml6_calls = (if ($qml6_calls_file | path exists) { open $qml6_calls_file } else { "<no calls file>" })
+if not ($qml6_calls | str contains "PreviewView.qml") {
+    print $"FAIL: qml6 stub was not invoked with the PreviewView.qml path:\n($qml6_calls)"
+    exit 1
+}
+if not ($qml6_calls | str contains $"-- 1 ($test_port)") {
+    print $"FAIL: qml6 stub was not invoked with the expected args \(-- 1 ($test_port)\):\n($qml6_calls)"
     exit 1
 }
 $spawned_pids = ($spawned_pids | append $win1_pid)
-print "PASS: window (default N=1) spawns preview-wv detached and writes wv-1.pid"
+print "PASS: window (default N=1) spawns qml6 detached, passing '-- 1 <port>', and writes wv-1.pid"
 
 # ── test 11: second window call is an idempotent no-op ───────────────────────
 
@@ -601,7 +668,8 @@ if not (wait-pid-alive $bystander_pid) {
     exit 1
 }
 # Overwrite window 1's pidfile with the bystander's pid — same shape as a
-# recycled pid: alive, but not a preview-wv process.
+# recycled pid: alive, but its /proc/<pid>/cmdline carries no
+# PreviewView.qml argument at all.
 $bystander_pid | into string | save --force $win1_pid_file
 
 let r13 = (run-wrapper $tmp $test_port $test_path "window")
@@ -706,7 +774,18 @@ if not ((wait-pid-dead $win1_pid_v4) and (wait-pid-dead $win2_pid)) {
 ^rm -f $pid_file $launched_marker
 print "PASS: stop closes all windows before stopping the daemon"
 
-# ── test 18: missing preview-wv binary names 'rotz install preview-webview' ──
+# ── test 18: missing qml6 binary names the qt packages ───────────────────────
+#
+# Unlike preview-wv (a repo-only binary), qml6 is a real system Qt binary —
+# this dev host has a genuine /sbin/qml6, and /bin, /sbin and /usr/bin are
+# merged-usr symlinks to the SAME directory, so no directory-level PATH
+# restriction can shadow just qml6 while keeping bash/kill available.
+# window-spawn's binary check (`which $QML_RUNTIME`) is nu's own builtin
+# `which`, keyed purely off $env.PATH inside the subprocess, and fires
+# before any external process is invoked — so a PATH pointing at a
+# nonexistent directory is sufficient to simulate "missing" for exactly
+# this call, without needing bash/kill to resolve through it at all.
+let no_qml6_path = "/nonexistent-dir-for-preview-test"
 
 run-wrapper $tmp $test_port $test_path "start" | ignore
 for _ in 1..30 {
@@ -714,23 +793,19 @@ for _ in 1..30 {
     if $up.exit_code == 0 { break }
     sleep 100ms
 }
-^rm -f $fake_wv
-let r18 = (run-wrapper $tmp $test_port $test_path "window")
+let r18 = (run-wrapper $tmp $test_port $no_qml6_path "window")
 if $r18.exit_code == 0 {
-    print "FAIL: window spawn should fail when preview-wv is missing"
+    print "FAIL: window spawn should fail when qml6 is missing"
     exit 1
 }
-if not ($"($r18.stdout)($r18.stderr)" | str contains "rotz install preview-webview") {
-    print $"FAIL: missing-binary error does not name 'rotz install preview-webview':\n($r18.stdout)($r18.stderr)"
+if not ($"($r18.stdout)($r18.stderr)" | str contains "qt6-declarative") {
+    print $"FAIL: missing-binary error does not name the qt packages:\n($r18.stdout)($r18.stderr)"
     exit 1
 }
-# Restore the stub for any later use, then stop the daemon.
-$fake_wv_src | save --force $fake_wv
-^chmod +x $fake_wv
 run-wrapper $tmp $test_port $test_path "stop" | ignore
 wait-port-free $test_port
 ^rm -f $pid_file $launched_marker
-print "PASS: missing preview-wv binary names 'rotz install preview-webview'"
+print "PASS: missing qml6 binary names the qt packages"
 
 # ── test 19: daemon not answering /status names 'preview start' ─────────────
 
@@ -771,6 +846,16 @@ wait-port-free $test_port
 print "PASS: register captures the focused workspace and does not leak I3SOCK"
 
 # ── test 21: window moves the spawned window to its slot's workspace ─────────
+#
+# The fake /slots row above registers slot 1's workspace as "editor-ws",
+# deliberately DIFFERENT from the fake i3-msg's hardcoded focused workspace
+# ("dotfiles", test 20) — place-window no-ops when the target IS the
+# focused workspace (dotfiles-nmp), so same-name fakes would make this test
+# pass by accident without ever exercising the move path.
+#
+# sp022 T6 success criteria: window resolution is pid-based everywhere
+# class matching lived — the criteria must carry `[id=…]` (i3, resolved via
+# the fake xdotool's `search --pid`), never `[class="preview-wv" ...]`.
 
 start-with-capture $tmp $test_port $test_path $capture_file
 
@@ -784,12 +869,16 @@ if not ($i3_calls_file | path exists) {
     exit 1
 }
 let i3_calls = (open $i3_calls_file)
-if not ($i3_calls | str contains "move workspace dotfiles") {
+if not ($i3_calls | str contains "move workspace editor-ws") {
     print $"FAIL: window did not move the window to the slot's workspace:\n($i3_calls)"
     exit 1
 }
-if not ($i3_calls | str contains "preview 1") {
-    print $"FAIL: move criteria did not target slot 1's own window \(would move every preview-wv\):\n($i3_calls)"
+if not ($i3_calls | str contains "[id=") {
+    print $"FAIL: move criteria was not pid-resolved to an [id=…] criterion:\n($i3_calls)"
+    exit 1
+}
+if ($i3_calls | str contains "class=\"preview-wv\"") {
+    print $"FAIL: move criteria still references the removed class=\"preview-wv\" match:\n($i3_calls)"
     exit 1
 }
 run-wrapper $tmp $test_port $test_path "window" "--close" | ignore
@@ -798,10 +887,116 @@ wait-port-free $test_port
 ^rm -f $pid_file $launched_marker $capture_file $i3_calls_file
 print "PASS: window places the spawned window on its slot's recorded workspace"
 
+# ── test 22: NEEDLE — slot N is the identity key, not the shared port ───────
+#
+# ## problem regression: every slot's qml6 cmdline carries the SAME daemon
+# port (`... -- <N> <port>`), so an identity check keyed on the port would
+# validate any slot's pidfile against any other slot's live window. Prove
+# the opposite: slot 2's real live process must NOT validate slot 1's
+# pidfile (mismatched slot number), but DOES validate its own.
+
+run-wrapper $tmp $test_port $test_path "start" | ignore
+for _ in 1..30 {
+    let up = (do { ^bash -c $"curl -sf --max-time 1 http://127.0.0.1:($test_port)/status" } | complete)
+    if $up.exit_code == 0 { break }
+    sleep 100ms
+}
+
+let win2_pid_file_22 = (wv-pid-file $cache_dir 2)
+let r22a = (run-wrapper $tmp $test_port $test_path "window" "2")
+if $r22a.exit_code != 0 {
+    print $"FAIL: spawning slot 2 exited ($r22a.exit_code)\n($r22a.stdout)($r22a.stderr)"
+    exit 1
+}
+let slot2_pid = (open $win2_pid_file_22 | str trim | into int)
+if not (wait-pid-alive $slot2_pid) {
+    print $"FAIL: slot 2's spawned pid ($slot2_pid) never came alive"
+    exit 1
+}
+$spawned_pids = ($spawned_pids | append $slot2_pid)
+
+# Claim slot 1's pidfile is slot 2's live process — the exact shape of the
+# ## problem bug: same daemon, same port, different slot.
+let win1_pid_file_22 = (wv-pid-file $cache_dir 1)
+$slot2_pid | into string | save --force $win1_pid_file_22
+
+let r22b = (run-wrapper $tmp $test_port $test_path "window" "1")
+if $r22b.exit_code != 0 {
+    print $"FAIL: spawning slot 1 over slot 2's pid exited ($r22b.exit_code)\n($r22b.stdout)($r22b.stderr)"
+    exit 1
+}
+if not ($"($r22b.stdout)($r22b.stderr)" | str contains "stale") {
+    print $"FAIL: slot 1's pidfile pointing at slot 2's live pid was not treated as stale:\n($r22b.stdout)($r22b.stderr)"
+    exit 1
+}
+if not (pid-is-alive $slot2_pid) {
+    print $"FAIL: slot 2's live pid ($slot2_pid) was killed while respawning slot 1 — cross-slot signal"
+    exit 1
+}
+let slot1_pid_v2 = (open $win1_pid_file_22 | str trim | into int)
+if $slot1_pid_v2 == $slot2_pid or not (wait-pid-alive $slot1_pid_v2) {
+    print $"FAIL: slot 1 was not respawned with its own fresh pid \(got ($slot1_pid_v2)\)"
+    exit 1
+}
+$spawned_pids = ($spawned_pids | append $slot1_pid_v2)
+
+# Slot 2's own pidfile must still validate as a no-op — the identity check
+# recognizes its own slot's live process even though the same pid was just
+# proven NOT to validate slot 1.
+let r22c = (run-wrapper $tmp $test_port $test_path "window" "2")
+if $r22c.exit_code != 0 {
+    print $"FAIL: re-checking slot 2 exited ($r22c.exit_code)\n($r22c.stdout)($r22c.stderr)"
+    exit 1
+}
+if not ($"($r22c.stdout)($r22c.stderr)" | str contains "no-op") {
+    print $"FAIL: slot 2's own pidfile did not validate as a no-op:\n($r22c.stdout)($r22c.stderr)"
+    exit 1
+}
+
+run-wrapper $tmp $test_port $test_path "stop" | ignore
+wait-port-free $test_port
+^rm -f $pid_file $launched_marker
+print "PASS: slot identity keys on the exact slot number, not the shared daemon port"
+
+# ── test 23: is-xrdp-display table-tested directly (no /proc needed) ───────
+# sp022 T6 test_plan: "fake /proc not practical in nu — factor detection
+# into a testable helper taking the cmdline list ... and table-test it."
+# Cases mirror preview-webview's own is_xrdp_display unit tests.
+
+let xrdp_cases = [
+    {desc: "xrdp Xorg on :10 matches :10.0", display: ":10.0",
+     cmds: ["/usr/lib/Xorg :10 -auth .Xauthority -config xrdp/xorg.conf -noreset"], want: true},
+    {desc: "xrdp Xorg on :10 matches :10 exactly", display: ":10",
+     cmds: ["/usr/lib/Xorg :10 -auth .Xauthority -config xrdp/xorg.conf -noreset"], want: true},
+    {desc: "native :0 is not flagged even when xrdp :10 coexists", display: ":0",
+     cmds: ["/usr/lib/Xorg :0 vt2 -displayfd 3 -auth /run/x",
+            "/usr/lib/Xorg :10 -config xrdp/xorg.conf -noreset"], want: false},
+    {desc: "xrdp :10 still matches when native :0 coexists", display: ":10",
+     cmds: ["/usr/lib/Xorg :0 vt2 -displayfd 3 -auth /run/x",
+            "/usr/lib/Xorg :10 -config xrdp/xorg.conf -noreset"], want: true},
+    {desc: "no Xorg running at all (sway) is not xrdp", display: ":0",
+     cmds: [], want: false},
+    {desc: "empty DISPLAY is not xrdp even with a matching xrdp Xorg", display: "",
+     cmds: ["/usr/lib/Xorg :10 xrdp"], want: false},
+    {desc: "Xorg present but no xrdp mention is not xrdp", display: ":10",
+     cmds: ["/usr/lib/Xorg :10 -nolisten tcp"], want: false},
+    {desc: ":10 must not match :100 (exact token, not prefix)", display: ":10",
+     cmds: ["/usr/lib/Xorg :100 -config xrdp/xorg.conf"], want: false},
+]
+
+for case in $xrdp_cases {
+    let got = (is-xrdp-display $case.display $case.cmds)
+    if $got != $case.want {
+        print $"FAIL: is-xrdp-display \(($case.desc)\): got ($got), want ($case.want)"
+        exit 1
+    }
+}
+print $"PASS: is-xrdp-display table-tested \(($xrdp_cases | length) cases\)"
+
 # ── cleanup ───────────────────────────────────────────────────────────────────
 
-# Reap any real preview-wv stub pids still alive (deliberately orphaned
-# ones from the stale/recycled-pid tests).
+# Reap any real qml6 stub pids still alive (deliberately orphaned ones from
+# the stale/recycled-pid tests).
 for pid in $spawned_pids {
     if (pid-is-alive $pid) {
         ^kill -TERM $pid
@@ -810,5 +1005,5 @@ for pid in $spawned_pids {
 
 ^rm -rf $tmp
 print ""
-print "PASS: 21 tests passed"
+print "PASS: 23 tests passed"
 
