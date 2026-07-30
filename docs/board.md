@@ -17,6 +17,8 @@ sections when status flips.
 
 ## spec
 
+- [[sp022|preview-qml-native-render-tiers]]
+
 
 ## ready
 
