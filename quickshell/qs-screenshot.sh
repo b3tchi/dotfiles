@@ -80,4 +80,26 @@ set -e
 # the bar sits in "screenshot" forever (the dotfiles-ux1 failure class).
 wm_msg mode default >/dev/null 2>&1 || true
 
+# Same reset, for the OTHER signal the selector raises: hotkeyd's
+# "screenshot-drag" external layer (sp023). qs-region.py raises it when a drag
+# starts and deliberately does NOT clear it — that process can be killed
+# outright mid-drag, and this launcher is the one that outlives it, exactly as
+# with the i3 mode above.
+#
+# Unconditional, on every path: clearing when nothing is set is an ok no-op
+# (`set-layer default` exits 0 with nothing to clear), and a conditional clear
+# would need drag state this script does not have.
+#
+# `|| true` under `set -e` is load-bearing TWICE over. The signal is cosmetic
+# and the CAPTURE is what this script's exit status reports — a missing binary
+# (unbuilt tree, exit 127), an absent daemon (exit 3) or a refusal (exit 1)
+# must not turn a successful screenshot into a failed one, nor abort before
+# the `exit "$status"` below.
+#
+# Spelled the same way qs-region.py spells it (and Bar.qml:304 before both):
+# $HOME/.dotfiles/hotkeyd/hotkeyd, invoked directly with no wrapper script —
+# sp023's "Consumer spawn discipline". One spelling for both halves of one
+# signal, deliberately, rather than resolving this half through $QS_DIR.
+"$HOME/.dotfiles/hotkeyd/hotkeyd" set-layer default >/dev/null 2>&1 || true
+
 exit "$status"

@@ -269,6 +269,35 @@ var Layers = map[string]bind.Layer{
 		// stranded overlay never sits on screen holding the keyboard.
 		OnExit: runAction(qsOverlay + " switcher-cancel"),
 	},
+
+	// was i3 `mode "screenshot-drag"` (sp023, bd dotfiles-1m4t.5) — the
+	// FIFTH layer shape, and the only one no chord can reach.
+	//
+	// quickshell/qs-region.py raises this the instant the user starts
+	// drawing a region, so quickshell/qs-focus-border.py (a SEPARATE
+	// process, with no access to the overlay's in-memory drag state) can
+	// drop the red "this is what `w` would capture" highlight that goes
+	// stale the moment an arbitrary region is being drawn. It used to
+	// travel as a real i3 mode over `i3-msg mode screenshot-drag`, because
+	// i3's mode-change IPC event was the only channel already wired to
+	// both processes; the daemon's own layer feed is that channel now, so
+	// the i3 mode block is deleted rather than kept beside this (a signal
+	// in two channels is the double-fire class ft011 exists to kill).
+	//
+	// DECLARES NOTHING BUT THE FLAG, and that is the design, not brevity
+	// (sp023 plan decision 1; rule R28 refuses any behavioral field here
+	// by name). It holds zero grabs and does not shadow the global table
+	// while active: during a drag the overlay owns a seat grab over all
+	// input anyway, so daemon grabs would be inert — and a STRANDED
+	// external layer (both the overlay and its launcher dying without
+	// clearing) must therefore cost pixels, never keys (us019 AC5). The
+	// real keyboard escape in that case is i3's own surviving
+	// `mode "screenshot"` block and its Escape/q fallback.
+	//
+	// Entered and left ONLY by `hotkeyd set-layer <name>` / `set-layer
+	// default` — never by a keystroke, which is why the R20 "a layer with
+	// no ExitKeys can never be left" rule exempts this shape.
+	"screenshot-drag": {External: true},
 }
 
 // ---------------------------------------------------------------------------

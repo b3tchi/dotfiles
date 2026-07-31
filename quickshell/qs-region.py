@@ -88,6 +88,43 @@ BW = 2                      # outline stroke width
 MIN_SEL = 3                 # below this, a "drag" is really a stray click
 OUTDIR = os.path.expanduser('~/Pictures/screenshots')
 
+# The hotkeyd binary, invoked DIRECTLY (no wrapper script, no nushell hop) —
+# the same precedent Bar.qml's layer feed already sets, which spawns
+# `$HOME/.dotfiles/hotkeyd/hotkeyd state-tail` by this exact path
+# (Bar.qml:304). See [[sp023]]'s "Consumer spawn discipline".
+HOTKEYD = os.path.expanduser('~/.dotfiles/hotkeyd/hotkeyd')
+
+# The External (signal-only) layer this overlay raises while a region is
+# being drawn. Declared in hotkeyd/cmd/hotkeyd/config.go's Layers table;
+# `set-layer` refuses any name that table does not declare External, so
+# these two spellings are one contract.
+DRAG_LAYER = 'screenshot-drag'
+
+
+def signal_layer(name):
+    """Raise (or clear) hotkeyd's external-trigger layer. Fire-and-forget.
+
+    A screenshot must never fail because a SIGNAL failed: the layer exists
+    so another process can repaint, and nothing about the capture depends
+    on it. So every failure mode is swallowed here — a daemon that is not
+    running (the socket dial fails at once), a daemon that refuses, and an
+    unbuilt tree where ~/.dotfiles/hotkeyd/hotkeyd does not exist at all.
+    That last one is why this catches OSError rather than relying on the
+    exit code: a missing executable raises FileNotFoundError out of
+    subprocess, and an uncaught traceback here would abort the capture
+    while the pointer grab is still held.
+
+    Same discipline as the `i3-msg mode screenshot-drag` call this
+    replaces: DEVNULL, result ignored. `set-layer` makes exactly one
+    connect attempt and holds a single short deadline (adr0014 — no retry
+    loops in the client), so there is no unbounded wait to guard against.
+    """
+    try:
+        subprocess.run([HOTKEYD, 'set-layer', name],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        pass
+
 
 def normalise(x0, y0, x1, y1, sw, sh):
     """Two drag corners -> (x, y, w, h), always positive, always on-screen.
@@ -265,14 +302,22 @@ class Region:
             # COLOR_MODES) as a "this is what `w` would capture" cue. That
             # cue is now stale — the user is drawing an arbitrary region,
             # not capturing the highlighted window — so signal it away.
-            # Synthetic mode name, same trick as nav's nav-move/nav-resize
-            # dual face: i3 itself binds nothing under it (this grab already
-            # owns all input), it exists purely for qs-focus-border.py's
-            # SUPPRESS_MODES to react to. Fire-and-forget: a failed i3-msg
-            # (i3 not running, an already-torn-down socket) should not block
-            # or abort the capture itself.
-            subprocess.run(['i3-msg', 'mode', 'screenshot-drag'],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            #
+            # This used to travel as a REAL i3 mode (`i3-msg mode
+            # screenshot-drag`), for one reason only: qs-focus-border.py is
+            # a separate process with no access to this one's in-memory drag
+            # state, and i3's mode-change IPC event was the only channel
+            # already wired to both. hotkeyd's own layer feed is that channel
+            # now, so the signal moved to it and the i3 mode was retired in
+            # the same change (sp023) — carrying it in both would be the
+            # double-fire class ft011 exists to kill.
+            #
+            # Fires on the FIRST press only (the `clicks == 0` branch), which
+            # is exactly where the i3-msg call fired: in 2-tap mode corner A
+            # raises it and the second tap changes nothing. It is cleared by
+            # qs-screenshot.sh on every exit path, not here — this process
+            # can be killed outright, and the launcher outlives it.
+            signal_layer(DRAG_LAYER)
         else:
             self.x1, self.y1 = int(e.x_root), int(e.y_root)
         return True

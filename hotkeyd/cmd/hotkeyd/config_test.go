@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -252,6 +253,29 @@ func layerRepr(l bind.Layer) dumpLayer {
 
 // goldenDumpFromGoTable canonicalizes THIS package's real Binds/Layers vars
 // the same way the Python script canonicalizes binds.py's BINDS/LAYERS.
+//
+// EXTERNAL LAYERS ARE EXCLUDED (sp023 Task 5, bd dotfiles-1m4t.5), and the
+// reason is what keeps this an honest golden rather than a weakened one.
+// The claim this fixture defends is "the shipped KEYBOARD has not drifted
+// from the table Python shipped". An External layer is not part of any
+// keyboard: plan decision 1 makes it signal-only, and rule R28 makes that
+// structural — it may declare no Binds, Mods, ExitKeys, OneShot, Hold,
+// OnHoldRelease or OnExit, so there is literally nothing about it a
+// dumpLayer could carry except four empty collections and two false
+// booleans. It holds zero grabs and is unreachable by any chord (R29
+// forbids EnterLayer targeting it), so its presence changes no key.
+//
+// The alternative — writing an entry for it into
+// testdata/golden-dump-python.json — was rejected: that file is the dump
+// binds.py ACTUALLY produced at the moment it was deleted, and inventing a
+// layer Python never had would destroy exactly the provenance that makes it
+// worth comparing against.
+//
+// The exclusion cannot hide drift, and that is asserted rather than
+// asserted-by-comment: TestGoldenDumpExclusion_IsExactlyTheExternalLayers
+// below pins that every excluded layer is External AND behaviorally empty,
+// so marking a real chord-bearing layer External to duck this comparison
+// fails there (and at R28) instead of passing silently here.
 func goldenDumpFromGoTable() dumpTable {
 	binds := make([]dumpBind, len(Binds))
 	for i, b := range Binds {
@@ -259,6 +283,9 @@ func goldenDumpFromGoTable() dumpTable {
 	}
 	layers := map[string]dumpLayer{}
 	for name, l := range Layers {
+		if l.External {
+			continue
+		}
 		layers[name] = layerRepr(l)
 	}
 	return dumpTable{Binds: binds, Layers: layers}
@@ -375,6 +402,260 @@ func TestValidatorOverRealTable_BothModResolutions(t *testing.T) {
 			}
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// THE EXTERNAL (SIGNAL-ONLY) LAYER — sp023 Task 5's production cutover
+// (bd dotfiles-1m4t.5).
+//
+// "screenshot-drag" used to be a real i3 mode that quickshell/qs-region.py
+// switched into over `i3-msg mode screenshot-drag` the instant a drag began,
+// purely so qs-focus-border.py (a SEPARATE process with no access to the
+// overlay's in-memory drag state) could react to it. It is now a layer in
+// THIS table, entered over `hotkeyd set-layer screenshot-drag`. The tests
+// below pin the two properties that make that migration safe rather than
+// merely done: the layer is declared, and declaring it cost zero keys.
+// ---------------------------------------------------------------------------
+
+// externalLayerName is the one External layer the shipped table declares.
+// Named as a constant because three separate contracts spell it: this table,
+// quickshell/qs-region.py's set-layer call, and test-hotkeyd.sh's stage 18.
+const externalLayerName = "screenshot-drag"
+
+// TestRealTable_ScreenshotDragIsDeclaredExternal is the cutover's own
+// existence proof. `hotkeyd set-layer screenshot-drag` is refused BY NAME
+// unless the compiled table declares the layer External (setlayer.go's
+// client-side gate and control.go's daemon-side gate both call
+// validateControlLayer), so without this entry qs-region.py's new call is a
+// guaranteed exit-1 no-op on every drag — a silently dead signal, which is
+// precisely the failure this test exists to make loud.
+func TestRealTable_ScreenshotDragIsDeclaredExternal(t *testing.T) {
+	lay, ok := Layers[externalLayerName]
+	if !ok {
+		t.Fatalf("the shipped table declares no %q layer (have: %v) — "+
+			"qs-region.py's `set-layer %s` would be refused by name on every drag",
+			externalLayerName, sortedLayerNames(Layers), externalLayerName)
+	}
+	if !lay.External {
+		t.Fatalf("layer %q exists but is not declared External — set-layer only "+
+			"accepts External names (control.go validateControlLayer)", externalLayerName)
+	}
+	// The client-side gate is the one the overlay actually hits; assert
+	// through it rather than re-deriving the rule, so a change to the
+	// acceptance policy shows up here too.
+	if err := validateControlLayer(Layers, externalLayerName); err != nil {
+		t.Errorf("validateControlLayer(%q) = %v, want nil — the shipped table must "+
+			"accept the exact name qs-region.py sends", externalLayerName, err)
+	}
+}
+
+// TestRealTable_ExternalLayersAreSignalOnly walks EVERY field of bind.Layer
+// by reflection rather than listing the seven behavioral ones by hand: a
+// field added to bind.Layer later is behavioral until someone says otherwise,
+// and this test refuses it automatically instead of ignoring it.
+//
+// bind.Validate's R28 enforces the same rule over the same table, so this is
+// deliberately a second, independent statement of it at the shipped-table
+// level — R28 is a general rule that a future exemption could widen, whereas
+// this is a flat assertion about what actually ships.
+//
+// It also refuses to be VACUOUS: a table with no External layer at all fails
+// here, so this cannot quietly become a test of nothing if the declaration is
+// ever dropped.
+func TestRealTable_ExternalLayersAreSignalOnly(t *testing.T) {
+	externals := externalLayerNames(Layers)
+	if len(externals) == 0 {
+		t.Fatal("no External layer in the shipped table — this test would be vacuous; " +
+			"sp023 Task 5 declares screenshot-drag")
+	}
+
+	for _, name := range externals {
+		lay := Layers[name]
+		rv := reflect.ValueOf(lay)
+		rt := rv.Type()
+		for i := 0; i < rt.NumField(); i++ {
+			field := rt.Field(i)
+			if field.Name == "External" {
+				continue
+			}
+			if !rv.Field(i).IsZero() {
+				t.Errorf("External layer %q declares %s = %#v — an external-trigger "+
+					"layer declares NOTHING but the flag (sp023 plan decision 1, R28)",
+					name, field.Name, rv.Field(i).Interface())
+			}
+		}
+	}
+}
+
+// TestRealTable_ExternalLayerHoldsZeroGrabs is decision 1's "it holds zero
+// grabs" stated against the REAL grab-set function the daemon wires into its
+// GrabManager, not against the struct shape. layerChords is what a layer
+// costs in keys while it is ACTIVE; for an external layer that must be the
+// empty set under every $mod resolution, which is what makes a STRANDED
+// external layer cost pixels and never keys (us019 AC5).
+func TestRealTable_ExternalLayerHoldsZeroGrabs(t *testing.T) {
+	externals := externalLayerNames(Layers)
+	if len(externals) == 0 {
+		t.Fatal("no External layer in the shipped table — this test would be vacuous")
+	}
+	for _, name := range externals {
+		for _, mod := range bind.ModResolutions {
+			if got := layerChords(Layers[name], mod); len(got) != 0 {
+				t.Errorf("layerChords(%q, mod=%s) = %v, want none — an external layer "+
+					"must grab nothing", name, mod, got)
+			}
+		}
+	}
+}
+
+// TestRealTable_NoChordEntersAnExternalLayer closes the other way a signal-
+// only layer could start costing keys: not through the layer's own fields,
+// but through a GLOBAL bind that enters it. R29 forbids exactly this, and
+// this asserts it holds on the shipped table specifically — an `EnterLayer{
+// "screenshot-drag"}` bind would hand the daemon a grab for a layer whose
+// whole point is that the overlay's seat grab owns input during a drag.
+func TestRealTable_NoChordEntersAnExternalLayer(t *testing.T) {
+	external := map[string]bool{}
+	for _, name := range externalLayerNames(Layers) {
+		external[name] = true
+	}
+	if len(external) == 0 {
+		t.Fatal("no External layer in the shipped table — this test would be vacuous")
+	}
+	for _, b := range Binds {
+		for _, a := range b.Actions {
+			if el, ok := a.(bind.EnterLayer); ok && external[el.Layer] {
+				t.Errorf("global bind %q enters External layer %q — external layers are "+
+					"reachable only through `set-layer` (R29, sp023 plan decision 1)",
+					b.Chord, el.Layer)
+			}
+		}
+	}
+}
+
+// daemonOwnedChordCount is the size of the daemon's always-on grab set, per
+// $mod resolution, FROZEN AS A LITERAL — measured on the shipped table
+// immediately before sp023 Task 5 declared the screenshot-drag layer.
+//
+// A literal is the whole point. Task 5's success criterion is that
+// `check --ownership` output is UNCHANGED by declaring an external layer,
+// and any number re-derived from the same table it guards would satisfy that
+// no matter what the layer contributed. This one cannot: if a future edit
+// gives an "external" layer a chord — or slips an entry bind in beside it —
+// the count moves and this fails.
+//
+// Both resolutions carry the same count because no shipped bind is
+// DisplayMod-qualified yet (see config.go's package doc on us020); if that
+// changes, this map is where the divergence gets recorded deliberately.
+var daemonOwnedChordCount = map[string]int{
+	"Mod4": 70,
+	"Mod1": 70,
+}
+
+// TestOwnershipRowCount_UnmovedByTheExternalLayer is the ownership row-count
+// parity assertion Task 5's success criteria name, driven through the REAL
+// reportOwnership entry point (not just globalChords) so it measures the
+// rows a user would actually see from `check --ownership`.
+//
+// The i3 side is deliberately an EMPTY config: with no i3-owned chords in the
+// union, every row printed is a daemon-owned one, so the row count IS the
+// daemon's grab-set size and a single extra grab is visible as a single extra
+// row. (reportOwnership's behaviour against a populated i3 config, including
+// the BOTH-collision exit code, is ownership_test.go's own subject.)
+func TestOwnershipRowCount_UnmovedByTheExternalLayer(t *testing.T) {
+	var buf bytes.Buffer
+	if code := reportOwnership(&buf, "", Binds); code != 0 {
+		t.Fatalf("reportOwnership over an empty i3 config = %d, want 0 (nothing to "+
+			"collide with); output:\n%s", code, buf.String())
+	}
+
+	rows := map[string]int{}
+	current := ""
+	for _, line := range strings.Split(buf.String(), "\n") {
+		if strings.HasPrefix(line, "-- $mod=") {
+			current = strings.TrimSuffix(strings.TrimPrefix(line, "-- $mod="), " --")
+			continue
+		}
+		if strings.TrimSpace(line) == "" || current == "" {
+			continue
+		}
+		rows[current]++
+	}
+
+	for _, mod := range bind.ModResolutions {
+		want, ok := daemonOwnedChordCount[mod]
+		if !ok {
+			t.Fatalf("no frozen row count for $mod=%s — bind.ModResolutions grew and "+
+				"daemonOwnedChordCount did not", mod)
+		}
+		if rows[mod] != want {
+			t.Errorf("check --ownership printed %d rows for $mod=%s, want %d — "+
+				"declaring an External (signal-only) layer must not add or remove a "+
+				"single owned chord (sp023 Task 5)", rows[mod], mod, want)
+		}
+	}
+	if len(rows) != len(bind.ModResolutions) {
+		t.Errorf("ownership report covered %d $mod resolutions, want %d", len(rows), len(bind.ModResolutions))
+	}
+}
+
+// TestGoldenDumpExclusion_IsExactlyTheExternalLayers guards the exclusion
+// goldenDumpFromGoTable makes. Without this, "skip External layers" would be
+// an escape hatch: mark any layer External and its chords stop being compared
+// against the Python fixture. Here the excluded set must be exactly the
+// External layers, and each one must be behaviorally empty — so nothing with
+// keyboard behaviour can ever leave the comparison through that door.
+func TestGoldenDumpExclusion_IsExactlyTheExternalLayers(t *testing.T) {
+	dumped := goldenDumpFromGoTable().Layers
+
+	excluded := []string{}
+	for name, lay := range Layers {
+		if _, in := dumped[name]; in {
+			if lay.External {
+				t.Errorf("layer %q is External but was still dumped for golden comparison", name)
+			}
+			continue
+		}
+		excluded = append(excluded, name)
+		if !lay.External {
+			t.Errorf("layer %q was excluded from the golden dump but is NOT External — "+
+				"only signal-only layers may skip the parity comparison", name)
+		}
+		if rep := layerRepr(lay); !reflect.DeepEqual(rep, dumpLayer{Mods: map[string]dumpMod{},
+			Binds: []dumpBind{}, ExitKeys: []string{}, OnHoldRelease: []string{}, OnExit: []string{}}) {
+			t.Errorf("excluded layer %q is not behaviorally empty: %+v — excluding it "+
+				"would hide real keyboard behaviour from the golden dump", name, rep)
+		}
+	}
+	sort.Strings(excluded)
+	if !reflect.DeepEqual(excluded, externalLayerNames(Layers)) {
+		t.Errorf("excluded from golden dump = %v, External layers = %v — the two must "+
+			"be the same set", excluded, externalLayerNames(Layers))
+	}
+}
+
+// externalLayerNames returns every External-declared layer name, sorted, so
+// assertions over "the external layers" are deterministic.
+func externalLayerNames(m map[string]bind.Layer) []string {
+	out := []string{}
+	for name, lay := range m {
+		if lay.External {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// sortedLayerNames is externalLayerNames' unfiltered twin, for failure
+// messages that need to show what the table DOES declare.
+func sortedLayerNames(m map[string]bind.Layer) []string {
+	out := make([]string, 0, len(m))
+	for name := range m {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // ---------------------------------------------------------------------------
