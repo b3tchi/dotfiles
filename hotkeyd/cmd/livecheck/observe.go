@@ -107,6 +107,28 @@ func WatchState(path string) (*StateWatcher, error) {
 	return w, nil
 }
 
+// Describe renders every state published since the last Reset for a report
+// line, and NAMES a line the tail could not parse.
+//
+// The error exists because the tail must not stop on one bad line, but a
+// recorded-and-never-read error is the swallow-your-own-failure shape this
+// suite keeps closing: a parse failure leaves States() empty, and an empty
+// States() renders as "no state was published at all" — the OBSERVER's
+// failure printed as the daemon's. The verdicts are unaffected either way
+// (a claim gated on a state it never saw already SKIPs or FAILs); what
+// changes is that the operator reading it is told which of the two happened.
+func (w *StateWatcher) Describe() string {
+	states := w.States()
+	w.mu.Lock()
+	err := w.err
+	w.mu.Unlock()
+	if err != nil {
+		return describeStates(states) +
+			fmt.Sprintf(" (WARNING: a state line could not be parsed by this observer: %v)", err)
+	}
+	return describeStates(states)
+}
+
 // States returns every state published since the last Reset, in order.
 func (w *StateWatcher) States() []State {
 	w.mu.Lock()

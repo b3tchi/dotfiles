@@ -70,6 +70,7 @@ package main
 // daemon change at all and is exactly as sound on both.
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"syscall"
@@ -132,6 +133,74 @@ type grabWatch struct {
 // taken afterwards may already be the new report.
 func watchGrabs(display string) *grabWatch {
 	return &grabWatch{display: display, base: stampGrabReport(display)}
+}
+
+// baselineSet is the grab set the report DESCRIBED before the input this
+// watch covers — the parsed form of the baseline. ok is false when there
+// was no readable report then.
+//
+// # What settled() does NOT answer (dotfiles-ylmp.18)
+//
+// settled() answers a LATENCY question: has the report been published again
+// since the baseline? That is sound, and it is all it claims. It is NOT an
+// IDENTIFICATION: it does not show that the publication which landed is the
+// one describing the layer the input entered.
+//
+// Both daemons publish the report from the single run loop, so a resync
+// triggered BEFORE the baseline that has not written yet lands AFTER it,
+// arrives as a fresh inode, and satisfies settled() while still describing
+// the PREVIOUS layer. Measured, not theorised: with a 500 ms delay at the
+// head of the Go daemon's publishGrabReport — well inside the sync envelope
+// this file's header documents for the python engine, so a SLOWER daemon,
+// not a broken one — the switcher section graded the DEFAULT layer's
+// 70-chord report under the switcher's name in a fully green 80/0/0 run,
+// while the switcher's own 87 chords were demonstrably grabbed.
+//
+// The cure is to compare CONTENT against what this run already saw before
+// the transition, which is what this accessor is for: a report whose grab
+// set the run had already read BEFORE entering the layer cannot be evidence
+// about the layer it entered. Note that the baseline alone does not close
+// it — under lag the baseline is itself a stale report from two transitions
+// back (nav's, in the run above) and differs from the graded one. Every
+// pre-transition reading has to be ruled out; see notAPriorReport.
+//
+// # Why not just stamp the report
+//
+// Same answer as this file's header: hotkeyd.py would have to write the
+// same stamp or this suite stops grading the python engine, and running
+// both engines through one suite is what made this race visible at all.
+func (w *grabWatch) baselineSet() (proc.GrabReport, bool) {
+	if !w.base.present {
+		return proc.GrabReport{}, false
+	}
+	var r proc.GrabReport
+	if err := json.Unmarshal([]byte(w.base.body), &r); err != nil {
+		return proc.GrabReport{}, false
+	}
+	return r, true
+}
+
+// sameGrabSet reports whether two readings describe the SAME grab set —
+// counts and refusals, deliberately not the pid stamp or the publication.
+//
+// This is the exact opposite of the question settled() asks, and both are
+// needed: for LATENCY the write is the whole signal (an identical-content
+// republish still proves a sync completed), while for IDENTIFICATION only
+// the content can say which layer a report is about. Comparing publications
+// here would make every late-landing stale report look new, which is
+// dotfiles-ylmp.18. The pid is excluded because it is the same daemon
+// either way — proc.CurrentGrabReport has already refused a report whose
+// pid does not match the display's lock (adr0017).
+func sameGrabSet(a, b proc.GrabReport) bool {
+	if a.Wanted != b.Wanted || a.Active != b.Active || len(a.Missing) != len(b.Missing) {
+		return false
+	}
+	for i := range a.Missing {
+		if a.Missing[i] != b.Missing[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // settled waits for the grab report to be published again (proof that a

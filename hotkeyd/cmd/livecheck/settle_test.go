@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -153,6 +154,134 @@ func TestGrabWatch_RefusesAReportFromAnotherDaemon(t *testing.T) {
 	ok, detail := w.settled(2 * time.Second)
 	if ok {
 		t.Fatalf("settled() = true on a report belonging to another daemon (detail=%q)", detail)
+	}
+}
+
+// THE FOURTH-ROUND DEFECT (dotfiles-ylmp.18), kept as a test.
+//
+// settled() answers a LATENCY question — "was the report published again?"
+// — and a caller that grades the report's CONTENT under a layer's name
+// needs an IDENTIFICATION answer too. A resync triggered BEFORE the
+// baseline that has not written yet lands afterwards, arrives as a fresh
+// inode, and satisfies settled() while still describing the PREVIOUS
+// layer. Staged here exactly as measured on the rig: the baseline is a nav
+// report, the publication that lands is the pre-transition DEFAULT one, and
+// settled() is (correctly) true throughout.
+func TestGrabWatch_SettledDoesNotIdentifyWhichLayerTheReportDescribes(t *testing.T) {
+	const display = ":97"
+	stageDaemon(t, display, 106, 105) // nav's report, still on disk
+
+	w := watchGrabs(display)
+	go func() {
+		// The DEFAULT layer's resync, triggered before the baseline and
+		// still in flight when it was taken, finally writes.
+		time.Sleep(200 * time.Millisecond)
+		proc.WriteGrabReport(display, 70, 70, nil)
+	}()
+
+	ok, _ := w.settled(5 * time.Second)
+	if !ok {
+		t.Fatal("settled() = false; the in-flight publication did land, so the latency signal is right to say so")
+	}
+	got, okr := proc.CurrentGrabReport(display)
+	if !okr || got.Wanted != 70 {
+		t.Fatalf("report at return = %v (ok=%v); the staged in-flight publication is the 70-chord one", got, okr)
+	}
+	// The point: settled() being true says NOTHING about which layer this
+	// describes, so the caller must be able to reach the pre-input set and
+	// rule it out itself.
+	base, haveBase := w.baselineSet()
+	if !haveBase {
+		t.Fatal("baselineSet() reported nothing; the pre-input report was staged and readable")
+	}
+	if base.Wanted != 106 || base.Active != 105 {
+		t.Fatalf("baselineSet() = %+v, want the pre-input nav report (wanted=106 active=105)", base)
+	}
+}
+
+func TestGrabWatch_BaselineSetReportsNothingWhenNoReportExistedYet(t *testing.T) {
+	const display = ":98"
+	stageDaemon(t, display, -1, 0)
+	if got, ok := watchGrabs(display).baselineSet(); ok {
+		t.Fatalf("baselineSet() = %+v, ok=true with no report on disk", got)
+	}
+}
+
+// sameGrabSet compares EVIDENCE, not publications: settled() keys on the
+// write (see this file's header, and the identical-content republish test
+// above), and identification needs the exact opposite question asked.
+func TestSameGrabSet_ComparesWhatTheReportSaysNotWhoWroteIt(t *testing.T) {
+	base := proc.GrabReport{PID: 11, Wanted: 70, Active: 70, Missing: nil}
+	for _, tc := range []struct {
+		name string
+		with proc.GrabReport
+		want bool
+	}{
+		{"a republication of the same set by the same daemon", proc.GrabReport{PID: 11, Wanted: 70, Active: 70}, true},
+		{"the same set republished under a different pid", proc.GrabReport{PID: 12, Wanted: 70, Active: 70}, true},
+		{"a bigger set", proc.GrabReport{PID: 11, Wanted: 87, Active: 87}, false},
+		{"the same counts but a refusal", proc.GrabReport{PID: 11, Wanted: 70, Active: 69, Missing: []string{"Meta_R"}}, false},
+	} {
+		if got := sameGrabSet(base, tc.with); got != tc.want {
+			t.Errorf("%s: sameGrabSet = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// THE GATE ITSELF. A report whose content this run had ALREADY SEEN before
+// the transition is not evidence about the layer the transition entered,
+// and the claim that grades it must SKIP naming which earlier reading it
+// matched — not PASS on a real, correct report belonging to another layer.
+func TestNotAPriorReport_RefusesAReportTheRunSawBeforeTheTransition(t *testing.T) {
+	deflt := proc.GrabReport{PID: 7, Wanted: 70, Active: 70}
+	nav := proc.GrabReport{PID: 7, Wanted: 106, Active: 105, Missing: []string{"Meta_R"}}
+
+	graded := proc.GrabReport{PID: 7, Wanted: 70, Active: 70} // the DEFAULT set, republished late
+	g := notAPriorReport(&graded, true,
+		priorReport{"the DEFAULT layer's report", deflt, true},
+		priorReport{"the report on disk before this section", nav, true},
+	)
+	if g.ok {
+		t.Fatal("the gate held for a report identical to the pre-transition DEFAULT set — " +
+			"this is dotfiles-ylmp.18's green run")
+	}
+	if !strings.Contains(g.why, "DEFAULT layer's report") {
+		t.Errorf("the SKIP reason does not name WHICH earlier reading it matched: %q", g.why)
+	}
+}
+
+func TestNotAPriorReport_HoldsForTheLayersOwnSet(t *testing.T) {
+	deflt := proc.GrabReport{PID: 7, Wanted: 70, Active: 70}
+	nav := proc.GrabReport{PID: 7, Wanted: 106, Active: 105}
+	switcher := proc.GrabReport{PID: 7, Wanted: 87, Active: 87}
+
+	g := notAPriorReport(&switcher, true,
+		priorReport{"the DEFAULT layer's report", deflt, true},
+		priorReport{"the report on disk before this section", nav, true},
+	)
+	if !g.ok {
+		t.Fatalf("the gate refused the layer's OWN set — a healthy run would SKIP a real PASS (%s)", g.why)
+	}
+}
+
+// A prior this run never managed to read cannot rule anything out, and must
+// not be treated as an empty report that everything differs from OR as a
+// match that skips everything.
+func TestNotAPriorReport_IgnoresPriorsThisRunNeverRead(t *testing.T) {
+	graded := proc.GrabReport{}
+	g := notAPriorReport(&graded, true, priorReport{"a reading that failed", proc.GrabReport{}, false})
+	if !g.ok {
+		t.Fatalf("an unread prior blocked the gate: %s", g.why)
+	}
+}
+
+// No report at all is the DAEMON's failure, not a precondition gap: the
+// claim must stay judgeable so it FAILs, exactly as it did before this gate
+// existed.
+func TestNotAPriorReport_HoldsWhenThereIsNoReportAtAll(t *testing.T) {
+	deflt := proc.GrabReport{PID: 7, Wanted: 70, Active: 70}
+	if g := notAPriorReport(nil, false, priorReport{"the DEFAULT layer's report", deflt, true}); !g.ok {
+		t.Fatalf("a missing report was turned into a SKIP: %s", g.why)
 	}
 }
 

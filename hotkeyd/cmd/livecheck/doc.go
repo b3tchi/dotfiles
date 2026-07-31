@@ -222,4 +222,18 @@
 //	first attempt (wait for the report to stop changing) settled happily on
 //	the stale pre-transition report and was merely slower. A single-engine
 //	run would have shipped the original bug as a green suite.
+//
+// That settle signal answers LATENCY, and only latency. It proves a report
+// was published after the baseline; it never proved the publication
+// DESCRIBES the layer just entered, because a resync triggered before the
+// baseline lands after it and satisfies the signal while still describing
+// the previous layer (bd dotfiles-ylmp.18, reproduced on BOTH engines with a
+// 500 ms delay at the head of the report write — inside the sync envelope
+// settle.go documents for python, so a slower daemon, not a broken one:
+// "the layer's grabs cost zero refusals" PASSed on the DEFAULT layer's
+// 70-chord report inside a fully green run). Any claim that grades the
+// report's CONTENT under a layer's name therefore also passes
+// notAPriorReport, which refuses a grab set this run had already read
+// BEFORE the transition. Identification is content; latency is publication;
+// neither substitutes for the other.
 package main

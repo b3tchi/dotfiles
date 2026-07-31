@@ -1,9 +1,12 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
+
+var errUnparsableForTest = errors.New("junk on the wire")
 
 func TestParseStateLine_ReadsTheWireFormatTheDaemonActuallyEmits(t *testing.T) {
 	for _, tc := range []struct {
@@ -172,6 +175,32 @@ func TestParseTransition_AcceptsBothEnginesDeviceQuoting(t *testing.T) {
 		if tr.Device != "Virtual core XTEST keyboard" {
 			t.Errorf("%s: device=%q, want the unquoted name", name, tr.Device)
 		}
+	}
+}
+
+// SWALLOW-YOUR-OWN-FAILURE (flagged by the 3rd audit). The tail records a
+// parse failure and every state claim renders the recorded states — so a
+// line the OBSERVER could not read prints as "no state was published at
+// all", the daemon's failure. Describe is where that error surfaces.
+func TestStateWatcher_DescribeNamesALineTheTailCouldNotParse(t *testing.T) {
+	var w StateWatcher
+	if got := w.Describe(); got != "no state was published at all" {
+		t.Fatalf("a clean empty tail rendered as %q", got)
+	}
+	w.err = errUnparsableForTest
+	got := w.Describe()
+	if !strings.Contains(got, "could not be parsed") || !strings.Contains(got, "junk on the wire") {
+		t.Fatalf("Describe() = %q — a parse failure must be visible, not read as daemon silence", got)
+	}
+}
+
+// With no parse failure the rendering is byte-identical to describeStates',
+// so surfacing the error changes no detail line on a healthy run.
+func TestStateWatcher_DescribeMatchesDescribeStatesWhenNothingFailed(t *testing.T) {
+	var w StateWatcher
+	w.states = []State{{Layer: "default"}, {Layer: "nav", Mod: "move"}}
+	if got, want := w.Describe(), describeStates(w.States()); got != want {
+		t.Fatalf("Describe() = %q, describeStates() = %q", got, want)
 	}
 }
 

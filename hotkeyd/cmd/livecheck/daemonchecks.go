@@ -91,7 +91,7 @@ func runDaemonChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig) {
 	navWatch := watchGrabs(d.Display)
 	_ = in.Tap("super+o")
 	_, entered := d.State.Await(inNav, stateWait)
-	rep.Check(entered, "$mod+o enters nav on a real server", describeStates(d.State.States()))
+	rep.Check(entered, "$mod+o enters nav on a real server", d.State.Describe())
 	navLanded, navWhy := navWatch.settled(grabSettleTimeout)
 	navUp, navUpWhy := gatedOn(
 		gate{entered, "the daemon never entered nav this run"},
@@ -131,7 +131,7 @@ func runDaemonChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig) {
 	_ = in.Down("Control_L")
 	_, gotMove := d.State.Await(func(s State) bool { return s.Layer == "nav" && s.Mod == "move" }, stateWait)
 	rep.Judged(navUp, gotMove, "a really-held Ctrl is observed as the move sublayer",
-		describeStates(d.State.States()), navUpWhy)
+		d.State.Describe(), navUpWhy)
 
 	d.Proxy.Reset()
 	_ = in.Tap("h")
@@ -145,7 +145,7 @@ func runDaemonChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig) {
 	_ = in.Tap("q")
 	_, leftHeld := d.State.Await(inDefault, stateWait)
 	rep.Judged(gotMove, leftHeld, "q leaves the layer while Ctrl is still held",
-		describeStates(d.State.States()), "the move sublayer was never observed this run")
+		d.State.Describe(), "the move sublayer was never observed this run")
 	_ = in.Up("Control_L")
 	time.Sleep(settle)
 	downLanded, downWhy := leaveWatch.settled(grabSettleTimeout)
@@ -195,12 +195,12 @@ func runDaemonChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig) {
 		// green off an empty state list.)
 		stillUp := probeOwned(rig, "h", 0)
 		rep.Judged(stillUp, !gotSublayer, "held Shift does NOT become a sublayer",
-			describeStates(d.State.States()),
+			d.State.Describe(),
 			"the daemon was not holding nav's bare keys, so nothing was under test")
 		d.State.Reset()
 		_ = in.Tap("q")
 		_, leftShift := d.State.Await(inDefault, stateWait)
-		rep.Check(leftShift, "Shift+q leaves the layer", describeStates(d.State.States()))
+		rep.Check(leftShift, "Shift+q leaves the layer", d.State.Describe())
 		_ = in.Up("Shift_L")
 		time.Sleep(settle)
 	}
@@ -215,7 +215,25 @@ func runDaemonChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig) {
 	runTransitionLogChecks(rep, rig, in, d)
 
 	// -- the alt-tab HOLD layer ----------------------------------------------
-	runSwitcherChecks(rep, rig, in, d)
+	// The DEFAULT layer's report, read at the top of this function, is carried
+	// in: the switcher section grades a report under the switcher's name, and
+	// the set the daemon published for the layer it came FROM is what tells a
+	// late-landing previous publication from the switcher's own
+	// (notAPriorReport, dotfiles-ylmp.18).
+	runSwitcherChecks(rep, rig, in, d, priorReport{
+		what:   "the DEFAULT layer's report, read at the start of this daemon phase",
+		known:  haveReport && report != nil,
+		report: derefReport(report),
+	})
+}
+
+// derefReport is the nil-safe read of a report pointer, for callers that
+// carry a reading forward by value alongside its own `known` flag.
+func derefReport(r *proc.GrabReport) proc.GrabReport {
+	if r == nil {
+		return proc.GrabReport{}
+	}
+	return *r
 }
 
 // gate is one precondition plus the reason to print when it does not hold.
@@ -261,6 +279,54 @@ func absentProbe(rig *Rig, key string, mask uint32) (free bool, g gate) {
 			"the rival grab probe for %q could not be taken at all (%v), so nothing was asked about its absence", key, err)}
 	}
 	return !owned, gate{true, ""}
+}
+
+// priorReport is one grab-report reading this run took BEFORE the
+// transition under test, with the name to print when the graded report
+// turns out to be that same reading again. `known` is false for a reading
+// that could not be taken — an unread prior rules nothing out and must not
+// masquerade as an empty report.
+type priorReport struct {
+	what   string
+	report proc.GrabReport
+	known  bool
+}
+
+// notAPriorReport is the IDENTIFICATION gate for any claim that grades the
+// grab report's CONTENT under a layer's name.
+//
+// The settle signal (settle.go) proves a report was PUBLISHED after the
+// baseline. It does not prove the publication describes the layer just
+// entered, because a resync triggered before the baseline can land after
+// it — dotfiles-ylmp.18, reproduced with a 500 ms delay at the head of the
+// daemon's publishGrabReport, where the switcher claim PASSed on the
+// DEFAULT layer's 70-chord report.
+//
+// What identifies it, without asking the daemon for a stamp this suite's
+// python arm could not write: a report whose grab set this run had ALREADY
+// READ before entering the layer is not evidence about the layer it
+// entered. Every pre-transition reading is checked, not just the newest —
+// under lag the report on disk at section start is itself a stale one from
+// an earlier layer, so ruling out only that one leaves the defect open.
+//
+// A MISSING report is deliberately not a gap here: "the daemon published
+// nothing" is the daemon's failure and the claim must stay judgeable so it
+// FAILs, exactly as it did before this gate existed.
+func notAPriorReport(cur *proc.GrabReport, have bool, priors ...priorReport) gate {
+	if !have || cur == nil {
+		return gate{true, ""}
+	}
+	for _, p := range priors {
+		if !p.known || !sameGrabSet(*cur, p.report) {
+			continue
+		}
+		return gate{false, fmt.Sprintf(
+			"the report graded here (%s) is the SAME grab set as %s, so it is a publication about the PREVIOUS "+
+				"layer that landed late — the settle signal proves a report was published, not that it describes "+
+				"the layer this section entered",
+			describeReport(cur, true), p.what)}
+	}
+	return gate{true, ""}
 }
 
 func awaitCommand(p *I3Proxy, want string, timeout time.Duration) ([]string, bool) {
@@ -356,7 +422,7 @@ func runFairness(rep *Reporter, in *Injector, d *DaemonRig) {
 	d.State.Reset()
 	_ = in.Tap("super+o")
 	_, ok := d.State.Await(inNav, stateWait)
-	rep.Check(ok, "still in nav for the repeat-filter fairness checks", describeStates(d.State.States()))
+	rep.Check(ok, "still in nav for the repeat-filter fairness checks", d.State.Describe())
 	if !ok {
 		rep.Skip(whatDouble, "not in nav")
 		rep.Skip(whatRoll, "not in nav")
@@ -417,7 +483,7 @@ func runTransitionLogChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig)
 	// the same channel the claim's evidence comes from.
 	rep.Judged(len(d.State.States()) > 0, back,
 		"back in the default layer for the transition-log checks",
-		describeStates(d.State.States()),
+		d.State.Describe(),
 		"no state was published on this daemon's socket at all, so which layer it is in is unknown")
 
 	d.Log.Reset()
@@ -481,7 +547,7 @@ func rawOf(trs []Transition) []string {
 // Everything hard about it is a property of the real X server — whether the
 // grab set can be obtained, and what a passive grab does about a key that
 // was already held when it was installed.
-func runSwitcherChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig) {
+func runSwitcherChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig, defaultLayerReport priorReport) {
 	if !in.Available() {
 		rep.Skip("$mod+Tab opens the switcher and takes the layer", "xdotool is not on PATH")
 		return
@@ -495,7 +561,7 @@ func runSwitcherChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig) {
 	time.Sleep(settle)
 	_ = in.Tap("Tab")
 	_, opened := d.State.Await(inSwitcher, stateWait)
-	rep.Check(opened, "$mod+Tab opens the switcher and takes the layer", describeStates(d.State.States()))
+	rep.Check(opened, "$mod+Tab opens the switcher and takes the layer", d.State.Describe())
 	openLanded, openWhy := openWatch.settled(grabSettleTimeout)
 	up, upWhy := gatedOn(
 		gate{opened, "the switcher layer never opened this run"},
@@ -550,11 +616,35 @@ func runSwitcherChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig) {
 	// switcher's name. The grab-probe half stays as well, because the claim
 	// is about THE LAYER's grab set and a report published by a daemon that
 	// never installed one also refuses nothing.
+	//
+	// AND `openLanded` IS NOT ENOUGH ON ITS OWN (dotfiles-ylmp.18). It is a
+	// LATENCY signal: it proves A report was published after the baseline,
+	// never that the published one DESCRIBES the layer just entered. Both
+	// daemons publish from the single run loop, so a resync triggered before
+	// the baseline that has not written yet lands afterwards, arrives as a
+	// fresh inode, and satisfies it. Measured with a 500 ms delay at the head
+	// of publishGrabReport — inside the python sync envelope settle.go
+	// documents, so a slower engine, not a broken one — this line PASSed at
+	// `wanted=70`, the DEFAULT layer's set, while the switcher's own 87 chords
+	// were demonstrably grabbed by the very probes above.
+	//
+	// So the report is IDENTIFIED as well as awaited: a grab set this run had
+	// already read before the layer was entered — the default layer's report
+	// from the start of this phase, and whatever was on disk when this section
+	// began — is a late publication about the previous layer, not evidence
+	// about this one, and the claim SKIPs. Both readings are checked because
+	// under lag the section-start reading is ITSELF stale (it was nav's, two
+	// transitions back, in the measured run), so ruling out only that one
+	// leaves the defect exactly where it was.
+	report, haveReport := proc.CurrentGrabReport(d.Display)
+	baseSet, haveBaseSet := openWatch.baselineSet()
 	reportPre, reportWhy := gatedOn(
 		gate{openLanded, "the switcher layer's grab report was never observed to be republished — " + openWhy},
 		gate{setUp, setUpWhy},
+		notAPriorReport(report, haveReport,
+			defaultLayerReport,
+			priorReport{"the report on disk when this section began", baseSet, haveBaseSet}),
 	)
-	report, haveReport := proc.CurrentGrabReport(d.Display)
 	rep.Judged(reportPre, haveReport && report.Wanted > 0 && len(report.Missing) == 0,
 		"and the layer's grabs cost zero refusals", describeReport(report, haveReport), reportWhy)
 
@@ -622,7 +712,7 @@ func runSwitcherChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig) {
 	relLanded, relWhy := relWatch.settled(grabSettleTimeout)
 	endedByPoll := rep.Judged(up, ended,
 		"releasing $mod ends the layer — the server poll, not an event, is what ends a hold layer",
-		describeStates(d.State.States()), upWhy)
+		d.State.Describe(), upWhy)
 
 	// NOW the negative from above is judgeable: the layer coming down on a
 	// release no grab could deliver is the only available proof that the
@@ -711,7 +801,7 @@ func runModOneChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig) {
 			sawNav = true
 		}
 	}
-	quietDetail := describeStates(d.State.States())
+	quietDetail := d.State.Describe()
 	// HALF THE GATE: a daemon that is dead, or that grabbed nothing, also
 	// fails to enter nav, so it must really hold Alt+o on the Mod1 mask.
 	holdsAltO := probeOwned(rig, "o", maskMod1)
@@ -725,7 +815,7 @@ func runModOneChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig) {
 	_, entered := d.State.Await(inNav, stateWait)
 	navLanded, navWhy := navWatch.settled(grabSettleTimeout)
 	rep.Check(entered, "Alt+o DOES enter nav where $mod is Mod1 — grab set and engine agree on the display's own modifier",
-		describeStates(d.State.States()))
+		d.State.Describe())
 
 	// CHANNEL MATCH, and THE OTHER HALF OF THE GATE. `sawNav` is read off the
 	// STATE SOCKET, so "no nav was published" is only evidence about Super+o
@@ -758,7 +848,7 @@ func runModOneChecks(rep *Reporter, rig *Rig, in *Injector, d *DaemonRig) {
 	d.State.Reset()
 	_ = in.Tap("q")
 	_, left := d.State.Await(inDefault, stateWait)
-	rep.Judged(entered, left, "q leaves nav on the Mod1 display", describeStates(d.State.States()),
+	rep.Judged(entered, left, "q leaves nav on the Mod1 display", d.State.Describe(),
 		"the daemon never entered nav on the Mod1 display")
 }
 
