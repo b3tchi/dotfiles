@@ -85,7 +85,8 @@ IMG_GLOB='[0-9][0-9][0-9][0-9][0-9][0-9].img'
 ENTRY_RE='^[0-9]{6}\.(clip|img)$'
 
 # Overridable only so the headless suite can point at a stub / a worktree copy;
-# production leaves all three unset.
+# production leaves all three unset.  (QS_CLIP_IPC_TIMEOUT, defined with
+# candidates() below, bounds each instance probe — see dotfiles-03ym.)
 CLIP_SET="${QS_CLIP_SET:-$SELF_DIR/../i3/scripts/clip-set.sh}"
 CAP="${QS_CLIP_CAP:-200}"             # most entries the picker will ever show
 WIDTH="${QS_CLIP_PREVIEW:-120}"       # preview characters before truncation
@@ -308,6 +309,15 @@ cmd_active_window() {
 # process has one (native i3 and xrdp are both X11), else WAYLAND_DISPLAY
 # (sway). Empty when the process has neither.
 session_key_of() { # <pid>
+  # The readability test is NOT redundant with the `2>/dev/null` below: an
+  # unreadable /proc/<pid>/environ fails the SHELL's redirection, and the
+  # shell reports that on ITS stderr, which the redirection inside the
+  # substitution cannot suppress. Observed on this host as a bare
+  # "Permission denied" line surfacing out of a $mod+Shift+v press —
+  # a zombie quickshell (environ gone) and any instance belonging to another
+  # user both hit it. Both are non-candidates either way, so the only
+  # question is whether they scream on the way out.
+  [ -r "/proc/$1/environ" ] || return 1
   _e="$(tr '\0' '\n' < "/proc/$1/environ" 2>/dev/null)" || return 1
   _v="$(printf '%s\n' "$_e" | sed -n 's/^DISPLAY=//p' | head -1)"
   [ -n "$_v" ] && { printf 'DISPLAY=%s\n' "$_v"; return 0; }
@@ -320,10 +330,38 @@ session_key_of() { # <pid>
 # Asking each instance what it exposes — rather than pattern-matching its
 # command line — is what lets the picker be hosted anywhere (main shell today,
 # a dedicated instance tomorrow) without this script needing to know.
+#
+# EVERY PROBE IS BOUNDED, AND ipc CLIENTS ARE NOT CANDIDATES (dotfiles-03ym).
+# Asking costs a round trip to another process, and an instance can accept on
+# its socket and then never answer — `qs-start.sh` (the $mod+Shift+r hammer)
+# leaves such an instance behind. One unbounded probe is unrecoverable here:
+# this loop runs inside a `$(...)`, so cmd_toggle gets NO candidate list at
+# all, not a partial one, and the picker silently does nothing.
+#
+# Worse, it compounds. A stuck `quickshell ipc` client is itself a process
+# named `quickshell`, so pgrep hands it back on the next call: in production
+# one deaf instance grew into 26 parked clients and 43 wedged toggles, each
+# keypress slower than the last, with no path back short of killing them by
+# hand. So the clients are skipped explicitly — `ipc` is a one-shot CLI verb,
+# never a shell that could host the picker — and `timeout` bounds what is
+# left. A probe that does not answer in QS_CLIP_IPC_TIMEOUT is not a
+# candidate; that is the same "cannot tell is not a yes" rule cmd_active_window
+# already follows.
+IPC_T="${QS_CLIP_IPC_TIMEOUT:-3}"
+case "$IPC_T" in '' | *[!0-9]*) die "QS_CLIP_IPC_TIMEOUT must be a number, got '$IPC_T'" ;; esac
+
 candidates() {
   for _pid in $(pgrep -x quickshell 2>/dev/null); do
+    # `quickshell ipc ...` is a client invocation, not a shell — and skipping
+    # it BEFORE the environ read also keeps this script's own probes (which
+    # inherit a DISPLAY) from being probed recursively.
+    # `[ -r ]` for the same reason as in session_key_of: the shell, not `tr`,
+    # reports an unreadable /proc path, and it does so past the redirection.
+    [ -r "/proc/$_pid/cmdline" ] || continue
+    _cmd="$(tr '\0' ' ' < "/proc/$_pid/cmdline" 2>/dev/null)" || continue
+    case " $_cmd " in *' ipc '*) continue ;; esac
     _key="$(session_key_of "$_pid")" || continue
-    quickshell ipc --pid "$_pid" show 2>/dev/null \
+    timeout "$IPC_T" quickshell ipc --pid "$_pid" show 2>/dev/null \
       | grep -qx "target $TARGET" || continue
     printf '%s %s\n' "$_pid" "$_key"
   done

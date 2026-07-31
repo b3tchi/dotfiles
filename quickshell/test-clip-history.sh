@@ -103,6 +103,7 @@ scenario() { printf '\n[%s]\n' "$1"; }
 cleanup() {
   [ -n "${QS_PID:-}" ]  && kill "$QS_PID"  2>/dev/null
   [ -n "${QS2_PID:-}" ] && kill "$QS2_PID" 2>/dev/null
+  [ -n "${HANG_PID:-}" ] && kill "$HANG_PID" 2>/dev/null
   sleep 1
   [ -n "${XVFB_PID:-}" ]  && kill "$XVFB_PID"  2>/dev/null
   [ -n "${XVFB2_PID:-}" ] && kill "$XVFB2_PID" 2>/dev/null
@@ -517,6 +518,58 @@ assert_eq "no picker opened on $DPY2" "0" \
   "$(env DISPLAY="$DPY2" "$XDOTOOL" search --onlyvisible --name '^qs-clip$' 2>/dev/null | wc -l | tr -d ' ')"
 assert_ne "and it says which sessions it found" "" \
   "$(printf '%s' "$out" | grep -oE "DISPLAY=($DPY|$DPY2)(\.[0-9]+)?" | head -1)"
+
+scenario "derivation: an unresponsive quickshell instance cannot wedge the picker"
+# dotfiles-03ym, measured in production. candidates() asked EVERY process named
+# `quickshell` what it exposes. `qs-start.sh` (the $mod+Shift+r hammer) had left
+# an 18-hour-old instance behind whose ipc socket accepted but never answered,
+# so that one probe never returned -- and because the whole loop runs inside a
+# `$(...)`, cmd_toggle never got a candidate list at all. $mod+Shift+v did
+# nothing, the user pressed it repeatedly, and each press left two more shells
+# and a stuck client parked forever: 43 wedged toggles and 26 hung clients on
+# one session. The clients are themselves named `quickshell`, so every new
+# press had MORE corpses to probe than the last -- it could not recover on its
+# own.
+#
+# Two instruments, because the bug needs both to reproduce:
+#  * a process whose comm is exactly `quickshell` (pgrep -x's match) which is
+#    not a shell at all -- a copy of `sleep`, holding a DISPLAY in its environ
+#    so session_key_of() accepts it as a candidate;
+#  * a PATH shim named `quickshell` that hangs for `ipc --pid <that pid> show`
+#    and delegates every other invocation to the real binary, standing in for
+#    the deaf socket without needing to manufacture one.
+# The toggle is bounded by `timeout`: an unbounded call here would hang this
+# suite instead of reporting, which is exactly how the production bug read.
+close_picker "$DPY"
+mkdir -p "$TMP/hang" "$TMP/shim"
+cp "$(command -v sleep)" "$TMP/hang/quickshell"
+env DISPLAY="$DPY" "${ISO[@]}" "$TMP/hang/quickshell" 300 &
+HANG_PID=$!
+sleep 0.5
+cat > "$TMP/shim/quickshell" <<SHIMEOF
+#!/bin/sh
+# hang only for the deaf instance's probe; everything else is the real thing
+case " \$* " in
+  *" --pid $HANG_PID "*) exec sleep 300 ;;
+esac
+exec "$(command -v "$QUICKSHELL")" "\$@"
+SHIMEOF
+chmod +x "$TMP/shim/quickshell"
+
+assert_eq "the deaf instance is visible to pgrep -x (the instrument works)" "1" \
+  "$(pgrep -x quickshell 2>/dev/null | grep -cx "$HANG_PID")"
+
+t0=$SECONDS
+out="$(timeout 25 env PATH="$TMP/shim:$PATH" DISPLAY="$DPY" "${ISO[@]}" \
+       QS_CLIP_SET="$STUB" sh "$QS_CLIP" toggle 2>&1)"; rc=$?
+assert_ne "toggle returns instead of hanging on the deaf instance" "124" "$rc"
+assert_eq "and it opens on the live session anyway" "1" \
+  "$(win_on "$DPY" 8 >/dev/null 2>&1 && echo 1 || echo 0)"
+assert_eq "no stuck ipc client is left parked" "0" \
+  "$(pgrep -f "ipc --pid $HANG_PID" 2>/dev/null | wc -l | tr -d ' ')"
+[ "$rc" = "124" ] && printf '         (toggle output: %s)\n' "$out"
+kill "$HANG_PID" 2>/dev/null; HANG_PID=""
+close_picker "$DPY"
 
 scenario "derivation: an inherited DISPLAY that DOES match a live session is honoured"
 close_picker "$DPY2"
