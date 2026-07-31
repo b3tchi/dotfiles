@@ -100,7 +100,22 @@ Singleton {
     function resolve(mode) {
         if (mode === "resize") return "resize"
         if (mode === "screenshot") return "screenshot"
-        if (mode === "screenshot-drag") return "screenshot"   // synthetic — see qs-focus-border.py
+        // "screenshot-drag" is now a hotkeyd LAYER NAME, not an i3 mode
+        // (sp023, dotfiles-1m4t.6). It used to be a synthetic i3 mode declared
+        // in i3/config.common purely so the drag phase had a channel; that
+        // block is deleted and qs-region.py raises the layer instead
+        // (`hotkeyd set-layer screenshot-drag`). The name reaches this
+        // function unchanged because Bar.qml's `activeMode` PREFERS a
+        // non-default `daemonLayer` over the i3 mode — so during the drag it
+        // resolves the layer, and during the aiming phase before it, the real
+        // i3 "screenshot" mode above.
+        //
+        // KEEPING BOTH ARMS ON ONE REGISTRY KEY is the whole point: the strip
+        // must not flicker to a different pill (or to the raw-name fallback)
+        // half way through one gesture. i3 mode "screenshot" → layer
+        // "screenshot-drag" → back to default renders one unbroken
+        // "screenshot" strip from first keypress to saved capture.
+        if (mode === "screenshot-drag") return "screenshot"
         if (mode === "nav") return "nav"
         if (mode === "nav-move") return "nav-move"       // synthetic (see hints)
         if (mode === "nav-resize") return "nav-resize"   // synthetic

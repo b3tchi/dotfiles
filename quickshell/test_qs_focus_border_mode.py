@@ -1,35 +1,47 @@
-"""One-shot synthetic tests for qs-focus-border i3-mode suppression.
+"""One-shot synthetic tests for qs-focus-border colour + suppression.
 
-The screenshot selector (quickshell/qs-region.py) is a GDK POPUP window —
-override-redirect. i3 emits NO window::new for override-redirect windows, so
-a hide keyed off that event NEVER FIRES for the overlay and the focus ring
-lands in every live capture. Suppression therefore hangs off the i3 MODE
-event, which is the only signal that arrives at all.
+The screenshot capture is TWO phases, and since sp023 (dotfiles-1m4t.6) they
+arrive on TWO DIFFERENT CHANNELS:
 
-WHICH mode is the part this suite got wrong for a while (dotfiles-5quz). The
-capture is TWO phases, and 29106e6 split them deliberately:
+  "screenshot"       AIMING. A real i3 MODE, entered by qs-screenshot.sh. The
+                     ring stays UP and is RECOLOURED — while you are choosing
+                     what to capture, seeing which window is focused is the
+                     point. In COLOR_MODES. i3 still owns this mode and sp023
+                     did not touch it.
+  "screenshot-drag"  DRAWING. A hotkeyd EXTERNAL LAYER, raised by qs-region.py
+                     from its own `_press` (`hotkeyd set-layer screenshot-drag`)
+                     the moment a region starts being drawn, and cleared by
+                     qs-screenshot.sh on every exit path. The ring HIDES here
+                     and stays hidden and un-refreshed, so it cannot restack
+                     above the live overlay or be baked into the capture.
+                     In SUPPRESS_LAYERS.
 
-  "screenshot"       AIMING. The ring stays UP and is RECOLOURED — while you
-                     are choosing what to capture, seeing which window is
-                     focused is the point. In COLOR_MODES, not SUPPRESS_MODES.
-  "screenshot-drag"  DRAWING. A synthetic mode qs-region.py enters from its own
-                     `_press` with a direct `i3-msg` (not a bindsym) the moment
-                     a region starts being drawn. The ring HIDES here and stays
-                     hidden and un-refreshed, so it cannot restack above the
-                     live overlay or be baked into the capture.
+WHY THE DRAG PHASE LEFT i3. It used to be a synthetic i3 mode (`i3-msg mode
+screenshot-drag` plus a real `mode "screenshot-drag" {}` block in
+i3/config.common) for one reason only: qs-focus-border.py is a separate process
+from qs-region.py with no shared in-memory state, and i3's mode-change IPC event
+was the only channel already wired to both. hotkeyd's state socket is that
+channel now — it already carried the layer name to this file for the colour cue
+— so sp023 retired the i3 mode and the signal rides the feed instead
+([[us019]] AC1: state read from a feed, not inferred from mode/bind side
+effects; one state-feed pattern instead of two).
 
-This suite encoded the pre-29106e6 contract ("screenshot hides") for both
-phases and was 8-red on main until dotfiles-5quz re-pointed the suppression
-cases at screenshot-drag and added the aiming-phase colour assertions.
+WHAT THAT MEANS FOR THIS SUITE. The aiming-phase block below is UNCHANGED from
+the dotfiles-5quz revision — it drives the real i3 mode and must keep passing
+verbatim, which is the behaviour-preservation half of the change. The
+drag-phase cases are re-pointed at the layer feed: they hand a layer NAME to
+the main-thread entry point the reader thread calls, which is where colour AND
+suppression are now both decided.
 
-Either phase REAPPEARS on the same i3 "mode default" transition, which both
-the cancel and the save exit paths funnel through — from this module they are
-indistinguishable events, so both are covered rather than one assumed from the
-other. Other modes (resize) keep the live-refresh behavior.
+Either phase ENDS on its own channel's "default": the i3 mode goes back to
+"default" and the layer goes back to "default" — two subprocess calls from the
+same qs-screenshot.sh cleanup, with nothing ordering them. So BOTH ORDERS are
+pinned rather than one assumed from the other. Cancel and save are likewise
+indistinguishable from this module, so both are covered.
 
 Run: python3 quickshell/test_qs_focus_border_mode.py
 """
-import importlib.util, json, os, pathlib, sys, threading, types
+import importlib.util, json, os, pathlib, socket, sys, tempfile, threading, time, types
 
 calls = []
 
@@ -113,6 +125,12 @@ subprocess.check_output = lambda *a, **k: json.dumps(TREE).encode()
 
 # Fake display so the per-display lock doesn't collide with a live helper.
 os.environ["DISPLAY"] = ":99-qsb-test"
+# ...and our own runtime dir, for the same reason one level down: the WIRE
+# section at the bottom binds a REAL unix socket at the path
+# hotkeyd_layer_monitor computes, and that must not be a path a live daemon on
+# this machine is already serving (nor may the module's lock file collide).
+_RUNTIME = tempfile.mkdtemp(prefix="qsb-test-")
+os.environ["XDG_RUNTIME_DIR"] = _RUNTIME
 
 spec = importlib.util.spec_from_file_location(
     "qsb", pathlib.Path(__file__).parent / "qs-focus-border.py"
@@ -134,32 +152,61 @@ def check(name, cond):
 
 
 def enter_screenshot_mode():
-    """The mode qs-screenshot.sh enters while the selector is being AIMED.
+    """The i3 MODE qs-screenshot.sh enters while the selector is being AIMED.
 
     This mode does NOT hide the ring (dotfiles-5quz). Commit 29106e6 moved it
     into COLOR_MODES instead: while you are choosing what to capture, the ring
     stays up in the accent colour so you can see which window is focused.
-    Suppression moved to `screenshot-drag` below, which is entered the instant
-    a region is actually being drawn.
+    Suppression lives on the `screenshot-drag` LAYER below, raised the instant
+    a region is actually being drawn. i3 still owns this mode; sp023 did not
+    touch it, which is why every assertion in the aiming block is verbatim from
+    the pre-sp023 revision of this file.
     """
     qsb.handle_event('{"change":"screenshot", "pango_markup":false}')
 
 
-def enter_drag_mode():
-    """The synthetic mode qs-region.py switches into from its own `_press` the
-    moment the user starts drawing — an `i3-msg mode screenshot-drag`, not a
-    keybinding. THIS is where the ring must vanish: the capture is about to
-    happen and the border would be baked into it.
-
-    The overlay is a GDK POPUP (override-redirect), so i3 emits NO window::new
-    for it — a hide keyed off that event would never fire, which is why the
-    mode event carries the whole responsibility.
-    """
-    qsb.handle_event('{"change":"screenshot-drag", "pango_markup":false}')
-
-
 def leave_mode():
+    """i3 mode back to "default" — qs-screenshot.sh, on every exit path."""
     qsb.handle_event('{"change":"default", "pango_markup":false}')
+
+
+def drive_layer(name):
+    """One layer name off hotkeyd's state feed, delivered as the reader does.
+
+    The reader thread parses `{"layer": ...}` and hands the NAME to this
+    main-thread entry point, which is where colour AND suppression are now both
+    decided (sp023). Driving that function directly is the same in-process
+    style the rest of this suite uses; the WIRE section at the bottom
+    additionally drives the REAL reader over a REAL socket, so the JSON shape,
+    replay-on-connect and the parse guard are covered rather than assumed.
+
+    Tolerates the entry point being absent so a RED run reports WHICH contract
+    broke, by name, instead of dying on an AttributeError at the first drag
+    case. Its existence is asserted separately below — this fallback can never
+    make the suite green on a file that lacks it.
+    """
+    fn = getattr(qsb, "_set_layer_state", None)
+    if fn is None:
+        return
+    fn(name)
+
+
+def enter_drag_layer():
+    drive_layer("screenshot-drag")
+
+
+def leave_layer():
+    drive_layer("default")
+
+
+def reset_state():
+    """Both channels back to idle, all three colour flags cleared."""
+    drive_layer("default")
+    qsb.handle_event('{"change":"default", "pango_markup":false}')
+    qsb.i3_mode_colored = False
+    qsb.layer_colored = False
+    qsb.mode_colored = False
+    qsb.mode_suppressed = False
 
 
 # Baseline: a refresh with a focused window shows the border.
@@ -167,23 +214,10 @@ calls.clear()
 qsb.refresh_focused()
 check("baseline refresh shows border", "show" in calls)
 
-# A binding whose command enters a SUPPRESS mode must arm suppression BEFORE
-# the mode event lands, or a refresh in flight between the two restacks the
-# border above the overlay.
-#
-# RE-POINTED at screenshot-drag (dotfiles-5quz): this used to send the
-# `mode "screenshot"` bind, which no longer suppresses anything. Two reasons
-# the arm branch is now DEFENSIVE rather than load-bearing, both worth stating
-# so nobody deletes it as dead: qs-region.py enters screenshot-drag with a
-# direct `i3-msg`, not a bindsym, and $mod+Shift+s left i3 entirely with the
-# screenshot group (dotfiles-hwds.39) so i3 emits no binding event for it at
-# all. The branch survives because the ordering hazard it guards returns the
-# moment anything binds a suppress mode again.
-calls.clear()
-qsb.handle_event(json.dumps({"change": "run", "binding": {
-    "command": 'mode "screenshot-drag"'}}))
-check("a suppress-mode binding arms suppression (no redraw)", not calls)
-leave_mode()
+# === AIMING PHASE — the real i3 mode, UNCHANGED by sp023 =====================
+# Every assertion in this block is verbatim from the pre-sp023 revision. The
+# drag phase moved to the layer feed; the aiming phase did not move at all, and
+# these must pass identically before and after the change.
 
 # THE CURRENT CONTRACT, half one: entering "screenshot" (aiming) does NOT hide
 # the ring — it RECOLOURS it. 29106e6 made the ring show which window is
@@ -196,90 +230,6 @@ check("screenshot mode enter leaves refreshes working",
       qsb.mode_suppressed is False)
 leave_mode()
 check("leaving screenshot clears the colour", qsb.mode_colored is False)
-
-# Half two: "screenshot-drag" — the capture is imminent, the ring must go.
-calls.clear()
-enter_drag_mode()
-check("drag mode enter hides border", calls == ["hide"])
-calls.clear()
-qsb.refresh_focused()
-check("drag mode enter still suppresses refresh", not calls)
-leave_mode()
-
-# The two are reached in sequence in real use (aim, then drag), so pin the
-# transition rather than only the states: a colour set on the way in must not
-# survive a drag that hides the ring, and the drag must suppress even though
-# the mode it came FROM was unsuppressed.
-calls.clear()
-qsb.handle_event('{"change":"screenshot", "pango_markup":false}')
-enter_drag_mode()
-check("aim -> drag ends hidden and suppressed",
-      "hide" in calls and qsb.mode_suppressed is True)
-leave_mode()
-check("leaving after a drag redraws", qsb.mode_suppressed is False)
-
-# While the DRAG is active, binding/mouse-poll refreshes must do nothing —
-# the border stays hidden, it does not get redrawn/restacked above the
-# overlay. (Re-pointed from the aiming mode, which no longer suppresses:
-# dotfiles-5quz.)
-calls.clear()
-enter_drag_mode()
-calls.clear()
-qsb.refresh_focused()
-qsb.handle_event('{"change":"run", "binding":{"command":"nop"}}')
-check("refresh while suppressed is a no-op", not calls)
-leave_mode()
-
-# Mode leave: border comes back for the focused window. This is the CANCEL
-# path — Esc (or the launcher's fallback) drives the mode straight back to
-# "default" with no intervening window events, since the overlay never
-# wrote a file and closed without ever appearing in i3's tree.
-calls.clear()
-enter_drag_mode()
-calls.clear()
-leave_mode()
-check("cancel path: mode leave redraws border", "show" in calls)
-
-# SAVE path: capture succeeded, but other window/focus noise (e.g. the
-# overlay briefly re-focusing its caller, a close event) may arrive before
-# the mode-default transition lands. The border must still hide throughout
-# and reappear once the mode actually ends — the save path is not
-# distinguishable from cancel at the i3-mode level, and must be covered
-# too, not assumed to work because cancel does.
-calls.clear()
-enter_drag_mode()
-check("save path: still hidden after drag entry", calls == ["hide"])
-calls.clear()
-qsb.handle_event(json.dumps({"change": "close", "container": {
-    "name": "term", "window_properties": {"class": "Alacritty"}}}))
-# close unconditionally re-hides (idempotent, already hidden) but must not
-# redraw/restack the border above the live overlay while suppressed.
-check("save path: close noise during suppression does not redraw",
-      "show" not in calls)
-calls.clear()
-leave_mode()
-check("save path: mode leave redraws border", "show" in calls)
-
-# Edge case: mode entered but the overlay never starts (exec failed, no
-# window ever mapped) — the border must still return when the mode ends,
-# not stay hidden forever waiting for a window::new that will never come.
-calls.clear()
-enter_drag_mode()
-check("overlay-never-started: border hidden at drag enter", calls == ["hide"])
-calls.clear()
-leave_mode()
-check("overlay-never-started: border returns without ever seeing a window",
-      "show" in calls)
-
-# Rapid mode enter/exit: no stuck-hidden or double-shown border.
-calls.clear()
-enter_drag_mode()
-leave_mode()
-enter_drag_mode()
-leave_mode()
-check("rapid enter/exit ends unsuppressed and visible", "show" in calls)
-check("rapid enter/exit does not leave border stuck hidden",
-      calls[-1] == "show" if calls else False)
 
 # Non-suppress modes (resize) keep the live-refresh behavior — guards
 # against over-broad suppression leaking into unrelated modes.
@@ -301,26 +251,209 @@ qsb.handle_event(json.dumps({"change": "new", "container": {"name": "quickshell"
 check("bar window::new hides then restores", "hide" in calls and "show" in calls
       and calls.index("hide") < calls.index("show"))
 
-# --- hotkeyd layer feed (dotfiles-hwds.9) -----------------------------------
-# The red "keys are captured" ring used to key off the i3 `nav` mode; nav left
-# i3 in the sp020 cutover, so the cue now follows the daemon's layer feed. These
-# pin the mapping in isolation, which is where a silent regression would hide.
+# nav is no longer an i3 colouring mode...
 check("nav is no longer an i3 colouring mode", "nav" not in qsb.COLOR_MODES)
 # ...but screenshot still is: it is a mode i3 genuinely still owns, and the ring
-# doubles as "this is the window `w` would capture".
+# doubles as "this is the window `w` would capture". sp023 retired the DRAG
+# mode, not this one.
 check("screenshot is still an i3 colouring mode", "screenshot" in qsb.COLOR_MODES)
 
-qsb.i3_mode_colored = False
-qsb.layer_colored = False
-qsb.mode_colored = False
-qsb._set_layer_colored(True)
+# === i3-SIDE DRAG MACHINERY RETIRED (sp023) ==================================
+# The i3 mode block, the SUPPRESS_MODES set and the binding-event pre-arm
+# branch all go. These assert the retirement is a DELETION rather than a
+# bypass: a leftover set nothing writes would still match a stale event, and a
+# leftover pre-arm branch would arm a flag nothing can now disarm.
+check("SUPPRESS_MODES is retired, not merely emptied",
+      not hasattr(qsb, "SUPPRESS_MODES"))
+check("the layer feed has a name-carrying main-thread entry point",
+      hasattr(qsb, "_set_layer_state"))
+check("screenshot-drag is declared a suppress LAYER",
+      "screenshot-drag" in getattr(qsb, "SUPPRESS_LAYERS", set()))
+
+# A half-updated estate still running the old i3 config would emit a
+# screenshot-drag MODE event. The name is in no i3-mode set any more, so it
+# must be treated as any other unknown mode: no suppression, no colour, and the
+# refresh that every non-colouring mode gets.
+reset_state()
+calls.clear()
+qsb.handle_event('{"change":"screenshot-drag", "pango_markup":false}')
+check("a stale screenshot-drag i3 MODE event does not suppress",
+      qsb.mode_suppressed is False)
+check("a stale screenshot-drag i3 MODE event does not colour",
+      qsb.mode_colored is False)
+check("a stale screenshot-drag i3 MODE event still refreshes", "show" in calls)
+leave_mode()
+
+# The binding-event pre-arm branch goes with the mode. A binding whose command
+# names the old mode is now just a binding: it refreshes like any other and
+# must NOT arm suppression — nothing would ever disarm it, because the disarm
+# moved to the layer feed.
+reset_state()
+calls.clear()
+qsb.handle_event(json.dumps({"change": "run", "binding": {
+    "command": 'mode "screenshot-drag"'}}))
+check("a screenshot-drag binding no longer arms suppression",
+      qsb.mode_suppressed is False)
+check("a screenshot-drag binding refreshes like any other", "show" in calls)
+
+# === DRAG PHASE — the hotkeyd layer feed =====================================
+reset_state()
+calls.clear()
+enter_drag_layer()
+check("drag layer hides border", calls == ["hide"])
+check("drag layer arms suppression", qsb.mode_suppressed is True)
+calls.clear()
+qsb.refresh_focused()
+check("drag layer still suppresses refresh", not calls)
+leave_layer()
+
+# Suppression WINS over colour. Every other non-default, non-silent layer
+# paints the ring red; a suppress layer must not, because there is no ring to
+# paint and a flag left standing would survive into the redraw that follows the
+# layer clearing.
+reset_state()
+check("a suppress layer never colours the ring",
+      qsb.layer_colours_ring("screenshot-drag") is False)
+enter_drag_layer()
+check("entering the drag layer leaves the ring uncoloured",
+      qsb.mode_colored is False)
+leave_layer()
+
+# Suppress arrives while a refresh is already in flight: the geometry apply
+# lands AFTER the layer armed suppression, and apply_geom's own re-check is
+# what stops it restacking the border above the live overlay.
+reset_state()
+enter_drag_layer()
+calls.clear()
+qsb.apply_geom(TREE["nodes"][0], [])
+check("an in-flight geometry apply is dropped once the layer armed suppression",
+      not calls)
+leave_layer()
+
+# While the DRAG is active, binding/mouse-poll refreshes must do nothing — the
+# border stays hidden, it does not get redrawn/restacked above the overlay.
+reset_state()
+enter_drag_layer()
+calls.clear()
+qsb.refresh_focused()
+qsb.handle_event('{"change":"run", "binding":{"command":"nop"}}')
+check("refresh while layer-suppressed is a no-op", not calls)
+leave_layer()
+
+# Layer clear: border comes back for the focused window. This is the CANCEL
+# path — Esc (or the dead-overlay fallback) drives qs-screenshot.sh straight to
+# its cleanup with no intervening window events, since the overlay never wrote
+# a file and closed without ever appearing in i3's tree.
+reset_state()
+enter_drag_layer()
+calls.clear()
+leave_layer()
+check("cancel path: layer clear redraws border", "show" in calls)
+check("cancel path: layer clear unsuppresses", qsb.mode_suppressed is False)
+
+# SAVE path: capture succeeded, but other window/focus noise (e.g. the overlay
+# briefly re-focusing its caller, a close event) may arrive before the layer
+# clear lands. The border must still hide throughout and reappear once the
+# layer actually clears — the save path is not distinguishable from cancel at
+# this level, and must be covered too, not assumed to work because cancel does.
+reset_state()
+calls.clear()
+enter_drag_layer()
+check("save path: still hidden after drag entry", calls == ["hide"])
+calls.clear()
+qsb.handle_event(json.dumps({"change": "close", "container": {
+    "name": "term", "window_properties": {"class": "Alacritty"}}}))
+# close unconditionally re-hides (idempotent, already hidden) but must not
+# redraw/restack the border above the live overlay while suppressed.
+check("save path: close noise during suppression does not redraw",
+      "show" not in calls)
+calls.clear()
+leave_layer()
+check("save path: layer clear redraws border", "show" in calls)
+
+# Edge case: layer raised but the overlay never starts (exec failed, no window
+# ever mapped) — the border must still return when the layer clears, not stay
+# hidden forever waiting for a window::new that will never come.
+reset_state()
+calls.clear()
+enter_drag_layer()
+check("overlay-never-started: border hidden at drag entry", calls == ["hide"])
+calls.clear()
+leave_layer()
+check("overlay-never-started: border returns without ever seeing a window",
+      "show" in calls)
+
+# Rapid raise/clear: no stuck-hidden or double-shown border.
+reset_state()
+calls.clear()
+enter_drag_layer()
+leave_layer()
+enter_drag_layer()
+leave_layer()
+check("rapid raise/clear ends unsuppressed and visible", "show" in calls)
+check("rapid raise/clear does not leave border stuck hidden",
+      calls[-1] == "show" if calls else False)
+
+# === THE TWO CHANNELS BRACKET THE GESTURE — BOTH ORDERS ======================
+# One capture drives both channels: qs-screenshot.sh enters the i3 mode, the
+# overlay raises the layer, and on exit the SAME script clears both. Nothing
+# orders those two clears — they are two subprocess calls from one shell, one
+# through i3 IPC and one through hotkeyd's control socket — so the final state
+# must be identical whichever lands first. Asserting one order and inferring
+# the other is exactly how a stuck-hidden border ships.
+
+# Order A: the i3 mode clears FIRST, the layer second.
+reset_state()
+enter_screenshot_mode()
+check("order A: aiming colours the ring", qsb.mode_colored is True)
+calls.clear()
+enter_drag_layer()
+check("order A: drag hides and suppresses",
+      "hide" in calls and qsb.mode_suppressed is True)
+calls.clear()
+leave_mode()
+# THE LOAD-BEARING ONE. Suppression is the LAYER's to clear now. An i3 mode
+# event that still disarmed it would un-hide the border while the overlay is
+# demonstrably still up — the very frame this whole mechanism exists to keep
+# out of the capture.
+check("order A: the i3 mode clearing first does NOT unsuppress",
+      qsb.mode_suppressed is True)
+check("order A: no redraw while the layer is still up", "show" not in calls)
+calls.clear()
+leave_layer()
+check("order A: final state unsuppressed", qsb.mode_suppressed is False)
+check("order A: final state uncoloured", qsb.mode_colored is False)
+check("order A: final state border refreshed", "show" in calls)
+
+# Order B: the layer clears FIRST, the i3 mode second.
+reset_state()
+enter_screenshot_mode()
+enter_drag_layer()
+check("order B: drag suppresses", qsb.mode_suppressed is True)
+calls.clear()
+leave_layer()
+check("order B: the layer clearing first unsuppresses",
+      qsb.mode_suppressed is False)
+check("order B: the layer clearing first redraws", "show" in calls)
+calls.clear()
+leave_mode()
+check("order B: final state unsuppressed", qsb.mode_suppressed is False)
+check("order B: final state uncoloured", qsb.mode_colored is False)
+check("order B: final state border refreshed", "show" in calls)
+
+# === LAYER COLOUR MAPPING (dotfiles-hwds.9) ==================================
+# The red "keys are captured" ring used to key off the i3 `nav` mode; nav left
+# i3 in the sp020 cutover, so the cue follows the daemon's layer feed. These
+# pin the mapping in isolation, which is where a silent regression would hide.
+reset_state()
+drive_layer("nav")
 check("entering a layer colours the ring", qsb.mode_colored is True)
 
 calls.clear()
-qsb._set_layer_colored(True)
+drive_layer("nav")
 check("a repeat of the same layer state does not redraw", calls == [])
 
-qsb._set_layer_colored(False)
+drive_layer("default")
 check("leaving the layer clears the colour", qsb.mode_colored is False)
 
 # --- SILENT layers (dotfiles-hwds.44) ---------------------------------------
@@ -344,6 +477,14 @@ check("default never colours the ring", qsb.layer_colours_ring("default") is Fal
 # warning beats a missing one).
 check("an unclassified layer still colours the ring",
       qsb.layer_colours_ring("somefuture") is True)
+# Suppression is opted into from the OTHER side, and for the mirrored reason: a
+# layer nobody classified must never be able to hide the ring, because a hidden
+# ring has nothing left to warn with.
+reset_state()
+calls.clear()
+drive_layer("somefuture")
+check("an unclassified layer does not suppress the border",
+      qsb.mode_suppressed is False)
 
 # A layer name the helper has never heard of still means "keys are captured":
 # the daemon only publishes a layer when one is active, so anything that is not
@@ -351,32 +492,111 @@ check("an unclassified layer still colours the ring",
 check("any non-default layer counts", qsb.HOTKEYD_COLORS_ANY_LAYER is True)
 
 # --- the two colour sources must not clobber each other ---------------------
-# Colour now comes from an i3 mode (screenshot) OR a hotkeyd layer (nav), and
-# they are independent: an i3 "mode default" event fires on leaving screenshot,
-# and it must not blank a red the layer feed owns. Folding both into ONE flag —
-# the shape this file had while COLOR_MODES was empty — regresses exactly here.
-qsb.i3_mode_colored = False
-qsb.layer_colored = False
-qsb.mode_colored = False
-qsb._set_layer_colored(True)                       # in a nav layer
+# Colour comes from an i3 mode (screenshot) OR a hotkeyd layer (nav), and they
+# are independent: an i3 "mode default" event fires on leaving screenshot, and
+# it must not blank a red the layer feed owns. Folding both into ONE flag — the
+# shape this file had while COLOR_MODES was empty — regresses exactly here.
+reset_state()
+drive_layer("nav")                                 # in a nav layer
 qsb.handle_event('{"change":"screenshot"}')        # i3 mode on top of it
 check("an i3 colour mode on top of a layer stays red", qsb.mode_colored is True)
 qsb.handle_event('{"change":"default"}')           # i3 mode ends; layer persists
 check("leaving the i3 mode does not blank the layer's red",
       qsb.mode_colored is True)
-qsb._set_layer_colored(False)
+drive_layer("default")
 check("clearing the layer with no i3 mode left clears the ring",
       qsb.mode_colored is False)
 
 # ...and symmetrically: a layer ending must not blank an i3 mode's red.
 qsb.handle_event('{"change":"screenshot"}')
 check("an i3 colour mode alone colours the ring", qsb.mode_colored is True)
-qsb._set_layer_colored(True)
-qsb._set_layer_colored(False)
+drive_layer("nav")
+drive_layer("default")
 check("a layer coming and going leaves the i3 mode's red intact",
       qsb.mode_colored is True)
 qsb.handle_event('{"change":"default"}')
 check("both sources clear -> plain ring", qsb.mode_colored is False)
+
+# === THE WIRE: the real reader against a real socket =========================
+# Everything above drives the main-thread entry point directly. This block runs
+# hotkeyd_layer_monitor ITSELF against a real AF_UNIX socket at the path it
+# computes from DISPLAY + XDG_RUNTIME_DIR, so three things that exist only on
+# the wire are covered rather than assumed: the {"layer": ...} JSON shape,
+# replay-on-connect, and the parse guard, which must swallow a malformed line
+# WITHOUT touching suppression.
+reset_state()
+
+_SOCK = os.path.join(_RUNTIME, "hotkeyd-99-qsb-test.sock")
+_srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+_srv.bind(_SOCK)
+_srv.listen(1)
+_conn_box = []
+
+
+def _accept_once():
+    conn, _ = _srv.accept()
+    # REPLAY-ON-CONNECT: hotkeyd's state socket sends current state as the
+    # FIRST line to every new client. A border helper (re)started mid-drag —
+    # quickshell restarting it, or the user restarting the bar — therefore
+    # learns it is mid-drag before it draws anything, and there is no window in
+    # which it restacks above the live overlay.
+    conn.sendall(b'{"layer":"screenshot-drag","mod":null}\n')
+    _conn_box.append(conn)
+
+
+_acceptor = threading.Thread(target=_accept_once, daemon=True)
+_acceptor.start()
+
+
+def wait_for(pred, timeout=5.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if pred():
+            return True
+        time.sleep(0.01)
+    return pred()
+
+
+_reader = threading.Thread(target=qsb.hotkeyd_layer_monitor, daemon=True)
+_reader.start()
+
+check("replay-on-connect: a helper started mid-drag starts suppressed",
+      wait_for(lambda: qsb.mode_suppressed is True))
+check("replay-on-connect: it starts uncoloured too", qsb.mode_colored is False)
+
+# Malformed line mid-drag: skipped by the parse guard, suppression untouched.
+# A reader that reset state on garbage would un-hide the border into the middle
+# of a live capture.
+_acceptor.join(5)
+_conn = _conn_box[0]
+_conn.sendall(b'{not json at all\n')
+_conn.sendall(b'\n')
+time.sleep(0.2)
+check("a malformed feed line mid-drag leaves suppression armed",
+      qsb.mode_suppressed is True)
+
+# ...and a well-formed line after it proves the stream did not desync behind
+# the garbage — the guard skips one LINE, not the rest of the feed.
+_conn.sendall(b'{"layer":"nav","mod":null}\n')
+check("the feed keeps working after a malformed line",
+      wait_for(lambda: qsb.mode_suppressed is False))
+check("the layer after the malformed line is the one that was sent",
+      qsb.mode_colored is True)
+
+# FEED LOSS WHILE SUPPRESSED: the daemon dies mid-drag. Both suppression and
+# colour must clear on the socket-loss fallback. This is the worst outcome the
+# design can produce if it is wrong — a border hidden forever, with the one
+# channel that could ever bring it back now dead.
+_conn.sendall(b'{"layer":"screenshot-drag","mod":null}\n')
+check("feed loss: suppressed again before the kill",
+      wait_for(lambda: qsb.mode_suppressed is True))
+_conn.close()
+_srv.close()
+os.unlink(_SOCK)
+check("feed loss while suppressed unsuppresses the border",
+      wait_for(lambda: qsb.mode_suppressed is False))
+check("feed loss while suppressed also clears the colour",
+      qsb.mode_colored is False)
 
 print()
 if failures:

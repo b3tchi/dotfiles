@@ -34,11 +34,15 @@ BC = (0x16/255, 0xa0/255, 0x85/255)
 MODE_BC = (0xcb/255, 0x4b/255, 0x16/255)   # ModeBarTheme.highlight
 # i3 modes that still colour the frame. "screenshot" is here so the ring around
 # the currently-focused window doubles as "this is what `w` would capture" — it
-# changes again mid-gesture via "screenshot-drag" (see SUPPRESS_MODES below).
+# changes again mid-gesture, when the daemon's "screenshot-drag" layer comes up
+# and hides the ring outright (see SUPPRESS_LAYERS below).
 #
 # `nav` is NOT here any more: it left i3 entirely in the sp020 T7 cutover, and
 # the daemon's layer feed replaced it (see hotkeyd_layer_monitor below). Any i3
 # mode listed here still works the old way.
+#
+# This set is COLOUR ONLY. i3 modes no longer suppress the border at all —
+# suppression is the layer feed's, exclusively (sp023, dotfiles-1m4t.6).
 COLOR_MODES = {'screenshot'}
 
 # hotkeyd layers that mean the same thing as a colouring i3 mode did: bare
@@ -62,12 +66,51 @@ HOTKEYD_COLORS_ANY_LAYER = True
 # spurious warning is cheaper than a missing one.
 SILENT_LAYERS = {'switcher'}
 
+# ...and the SUPPRESSING ones (sp023, dotfiles-1m4t.6). These do not merely go
+# uncoloured — the border is HIDDEN outright and every refresh is blocked for
+# as long as the layer is up.
+#
+# "screenshot-drag" is a hotkeyd EXTERNAL layer: it holds no grabs and binds no
+# keys, it exists purely as a signal. quickshell/qs-region.py raises it
+# (`hotkeyd set-layer screenshot-drag`) from its own `_press` the moment the
+# user starts drawing a region, and quickshell/qs-screenshot.sh clears it on
+# every exit path — capture, cancel, or crash — because qs-region.py can be
+# killed outright mid-drag and the launcher is what outlives it.
+#
+# WHY THE BORDER MUST GO, not just recolour: the ring is a keep-above
+# NOTIFICATION window, so every refresh restacks it — and during a drag
+# refreshes fire constantly (binding events, the 100ms mouse poll). It would
+# restack above the live selector overlay and be baked into the capture. The
+# aiming-phase highlight ("screenshot" in COLOR_MODES) is also stale from this
+# point on: the user is selecting an arbitrary area, not capturing the window
+# that was highlighted.
+#
+# WHY THIS IS A LAYER AND NOT AN i3 MODE any more: it used to travel as a
+# synthetic `i3-msg mode screenshot-drag` against a real `mode
+# "screenshot-drag" {}` block, purely because i3's mode-change IPC was the only
+# channel already wired to both qs-region.py and this file. hotkeyd's state
+# socket is that channel now, so sp023 retired the i3 mode and the signal rides
+# the feed instead — one state-feed pattern instead of two. The daemon replays
+# current state on connect, so a helper (re)started mid-drag starts suppressed
+# rather than flashing a frame into the capture.
+#
+# SUPPRESSION IS THE FEED'S, EXCLUSIVELY. No i3 mode arms or disarms it. The
+# two channels bracket one gesture and their "default" events are unordered
+# (two subprocess calls from the same qs-screenshot.sh cleanup); letting an i3
+# "mode default" clear a layer-armed suppression would un-hide the border while
+# the overlay is still up.
+SUPPRESS_LAYERS = {'screenshot-drag'}
+
 
 def layer_colours_ring(layer):
     """Should the daemon's current layer paint the ring in MODE_BC?"""
     return (HOTKEYD_COLORS_ANY_LAYER
             and layer != 'default'
-            and layer not in SILENT_LAYERS)
+            and layer not in SILENT_LAYERS
+            # Suppression WINS over colour: there is no ring to paint while the
+            # border is hidden, and a red flag left standing here would survive
+            # into the redraw that follows the layer clearing.
+            and layer not in SUPPRESS_LAYERS)
 # Windows to never border (quickshell overlays, rofi, etc.)
 IGNORE_CLASSES = {'quickshell', 'Rofi', 'rofi'}
 IGNORE_TITLES = {'qs-focus-border', 'qs-focus-dim'}
@@ -76,32 +119,12 @@ IGNORE_TITLES = {'qs-focus-border', 'qs-focus-dim'}
 # between binding event and overlay grabbing focus, leaving a frame
 # visible around whatever was focused before mod+d / mod+p / mod+tab.
 SUPPRESS_WHEN_PRESENT_TITLES = {'qs-launcher', 'qs-projects', 'qs-switcher', 'qs-clip', 'qs-notif'}
-# i3 modes whose overlay covers the screen. That overlay
-# (quickshell/qs-region.py) is a GDK POPUP window — override-redirect — so
-# i3 emits NO window::new for it; a hide keyed off that event (the old
-# contract here) would never fire.
-#
-# "screenshot" itself is deliberately NOT in this set any more: entering it
-# now COLOURS the ring instead of hiding it (see COLOR_MODES) — a highlight
-# of the window `w` would capture, matching the crosshair overlay's own
-# accent colour. Suppression is deferred to the SYNTHETIC "screenshot-drag"
-# mode, entered by qs-region.py itself (subprocess i3-msg call, its own
-# `_press`) the moment the user actually starts drawing a region — the
-# highlight is stale from then on, the user is selecting an arbitrary area,
-# not capturing the ex-highlighted window. Same synthetic-mode-as-signal
-# trick as nav's nav-move/nav-resize (dotfiles-5u6m): i3 itself binds
-# nothing under "screenshot-drag" (the overlay's own grab already owns all
-# input by the time it fires), it exists purely for this file and
-# ModeBarTheme.resolve() to react to.
-#
-# Hide immediately at MODE ENTER (see the "change in SUPPRESS_MODES" branch
-# in handle_event below); refreshes stay blocked for the whole mode so the
-# border can't restack above the live overlay, and it reappears once the
-# mode ends — cancel and save both funnel through the same i3
-# "mode default" transition (fired by qs-screenshot.sh after the overlay
-# exits, regardless of which path it exited through), so both are covered
-# by the same code path.
-SUPPRESS_MODES = {'screenshot-drag'}
+# NO i3-MODE SUPPRESSION SET LIVES HERE ANY MORE (sp023, dotfiles-1m4t.6).
+# The screenshot selector (quickshell/qs-region.py) is a GDK POPUP window —
+# override-redirect — so i3 emits NO window::new for it and a hide keyed off
+# that event would never fire. That hide is real and still required; it just
+# hangs off the daemon's layer feed now instead of an i3 mode. See
+# SUPPRESS_LAYERS above and _set_layer_state below.
 
 
 class Border:
@@ -170,11 +193,16 @@ class Border:
 
 border = Border()
 
-# While a SUPPRESS_MODES mode is active the border (keep-above notification)
+# While a SUPPRESS_LAYERS layer is up the border (keep-above notification)
 # would restack above the overlay dock on every refresh — binding events and
 # the 100ms mouse-drag poll fire constantly during a selection drag. Block
-# all refreshes until the mode ends. Only touched on the GLib main thread
-# (all event/poll paths run there).
+# all refreshes until the layer clears. Only touched on the GLib main thread:
+# the layer feed's reader thread hands the name over via GLib.idle_add, and
+# every other event/poll path already runs there.
+#
+# Name kept as `mode_suppressed` although the trigger is now a LAYER — it is
+# read in apply_geom and refresh_focused, and the flag means the same thing it
+# always did ("something is covering the screen; do not draw").
 mode_suppressed = False
 
 # The ring goes red from TWO independent sources now, and they must not clobber
@@ -271,32 +299,35 @@ def handle_event(data):
             refresh_focused()
         return
     # i3 "mode" change. A mode event has only 'change' (the mode name) — no
-    # container/current/binding. Entering a SUPPRESS_MODES mode hides the
-    # border immediately AND arms suppression (see SUPPRESS_MODES comment —
-    # the overlay is an override-redirect POPUP, so a hide keyed off its
-    # window::new would never fire). Any other mode, including "default",
-    # unsuppresses and refreshes: leaving the screenshot mode must redraw
-    # because the overlay never emits a focus event, and modes like "resize"
-    # keep the live-refresh behavior.
+    # container/current/binding. Every mode is handled identically now: set the
+    # i3 half of the colour state, then refresh. Leaving a colouring mode must
+    # redraw because the screenshot overlay never emits a focus event, and
+    # modes like "resize" keep the live-refresh behavior.
+    #
+    # NO MODE SUPPRESSES, AND NO MODE UNSUPPRESSES (sp023, dotfiles-1m4t.6).
+    # `mode_suppressed` is the layer feed's alone. The refresh below is a
+    # deliberate no-op while a suppress layer is up (refresh_focused checks the
+    # flag first): the i3 mode and the daemon layer bracket one screenshot
+    # gesture and their two "default" events are unordered — two subprocess
+    # calls out of the same qs-screenshot.sh cleanup — so a mode event that
+    # cleared suppression would un-hide the border mid-capture whenever i3's
+    # clear happened to land first. A stale i3 config still emitting a
+    # `screenshot-drag` MODE event lands here too and is likewise inert: the
+    # name is in no i3-mode set any more.
     if 'container' not in e and 'current' not in e and 'binding' not in e:
-        global mode_suppressed, i3_mode_colored
+        global i3_mode_colored
         # Recolour BEFORE any redraw below, so the refresh that follows a mode
         # change paints the new colour rather than the previous one. Only the
         # i3 half of the colour state is touched — a hotkeyd layer that is up at
         # the same time keeps the ring red through this event.
         i3_mode_colored = change in COLOR_MODES
         recolored = _recompute_colored()
-        if change in SUPPRESS_MODES:
-            border.hide()
-            mode_suppressed = True
-        else:
-            mode_suppressed = False
-            refresh_focused()
-            # A mode swap that changes only the colour (screenshot -> default
-            # with focus unchanged) still needs the ring repainted:
-            # refresh_focused skips the GTK draw when geometry is identical.
-            if recolored:
-                border.win.queue_draw()
+        refresh_focused()
+        # A mode swap that changes only the colour (screenshot -> default
+        # with focus unchanged) still needs the ring repainted:
+        # refresh_focused skips the GTK draw when geometry is identical.
+        if recolored:
+            border.win.queue_draw()
         return
     c = e.get('container')
     if not c:
@@ -341,13 +372,22 @@ def handle_event(data):
 
 
 def hotkeyd_layer_monitor():
-    """Colour the ring from hotkeyd's layer feed (sp020 T7, dotfiles-hwds.9).
+    """Drive the ring from hotkeyd's layer feed (sp020 T7, dotfiles-hwds.9).
 
     The red "keys are captured" ring used to key off i3 mode events, which
     stopped existing for nav when the layer moved to the daemon. The daemon
     publishes {"layer": ..., "mod": ...} on a per-display unix socket and
     replays current state on connect, so a helper that starts late still paints
     correctly.
+
+    Since sp023 (dotfiles-1m4t.6) this feed carries BOTH cues: the colour, and
+    the SUPPRESSION that hides the border for the whole screenshot drag. The
+    line's layer NAME is what goes to the main thread — the reader no longer
+    decides anything itself, so a name can mean "colour" today and "hide" too
+    without this loop changing. Replay-on-connect is what makes suppression
+    safe to key off a feed at all: a helper (re)started mid-drag is told
+    `screenshot-drag` as its FIRST line and starts hidden, instead of drawing a
+    frame into the live capture before the next transition arrives.
 
     [[adr0014]] shape: a failed connect or a closed socket ends the attempt and
     the retry is a fixed sleep OUTSIDE the read loop, so a missing daemon costs
@@ -381,23 +421,52 @@ def hotkeyd_layer_monitor():
                     try:
                         layer = json.loads(line).get('layer') or 'default'
                     except Exception:
+                        # Malformed line: skip THIS line and keep reading. It
+                        # must not disturb the current state — a garbage byte
+                        # arriving mid-drag that reset suppression would
+                        # un-hide the border into a live capture.
                         continue
-                    GLib.idle_add(_set_layer_colored, layer_colours_ring(layer))
+                    GLib.idle_add(_set_layer_state, layer)
         except OSError:
             pass
         finally:
             c.close()
-        # The daemon went away or the socket broke: fall back to the plain
-        # colour rather than leaving the ring red for a layer nobody is in.
-        GLib.idle_add(_set_layer_colored, False)
+        # The daemon went away or the socket broke: fall back to the default
+        # layer rather than leaving the ring red for a layer nobody is in —
+        # and, since sp023, rather than leaving the border HIDDEN FOREVER for a
+        # drag nobody is in. The feed that would have cleared the suppression
+        # is the thing that just died, so this fallback is the only path left
+        # that can bring the border back.
+        GLib.idle_add(_set_layer_state, 'default')
         time.sleep(1)
 
 
-def _set_layer_colored(colored):
-    """Main-thread-only, same discipline as the mode flags."""
-    global layer_colored
-    layer_colored = colored
-    if _recompute_colored():
+def _set_layer_state(layer):
+    """Apply one layer NAME from the feed. Main-thread-only, same discipline
+    as the mode flags (the reader thread reaches it via GLib.idle_add).
+
+    Both cues the feed carries are decided here, in this order: suppression
+    first, because a suppress layer must never also colour (layer_colours_ring
+    already refuses to, and this is the second half of that contract).
+    """
+    global layer_colored, mode_suppressed
+    suppress = layer in SUPPRESS_LAYERS
+    layer_colored = layer_colours_ring(layer)
+    recolored = _recompute_colored()
+    if suppress:
+        # Arm BEFORE hiding: a refresh already in flight re-checks the flag in
+        # apply_geom, so arming first closes the window in which it could
+        # restack the border above the overlay after the hide.
+        mode_suppressed = True
+        border.hide()
+        return False
+    was_suppressed = mode_suppressed
+    mode_suppressed = False
+    # Leaving a suppress layer redraws even when nothing about the COLOUR
+    # changed: the border is hidden at that point and only a refresh brings it
+    # back. (Colour-only transitions still need the explicit queue_draw —
+    # refresh_focused skips the GTK draw when geometry is identical.)
+    if recolored or was_suppressed:
         refresh_focused()
         border.win.queue_draw()
     return False
@@ -477,19 +546,20 @@ _orig_handle_event = handle_event
 
 
 def handle_event(data):
-    global mode_suppressed
     try:
         e = json.loads(data)
         # Binding events — refresh after any keybinding (catches move/resize/layout)
+        #
+        # There used to be a pre-arm branch here, sniffing the binding's COMMAND
+        # for a suppress mode so suppression beat the mode event that followed
+        # it. It went with the mode (sp023, dotfiles-1m4t.6): the ordering
+        # hazard it guarded does not exist on the layer feed, which publishes
+        # the state itself rather than being inferred from a bind's side
+        # effects. Keeping it would be worse than dead code — it armed a flag
+        # only an i3 mode event could clear, and no i3 mode event clears
+        # suppression any more, so a stale bind would hide the border for good.
+        # The refresh below is a no-op while a suppress layer is up.
         if 'binding' in e:
-            cmd = (e.get('binding') or {}).get('command') or ''
-            # The binding that ENTERS a suppress mode arrives BEFORE the mode
-            # event — arm suppression here already, or this very refresh can
-            # land in between and restack the border above the overlay.
-            if any('mode "%s"' % m in cmd or 'mode %s' % m in cmd
-                   for m in SUPPRESS_MODES):
-                mode_suppressed = True
-                return
             refresh_focused()
             return
     except Exception:
