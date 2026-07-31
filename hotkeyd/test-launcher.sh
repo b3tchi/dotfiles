@@ -72,6 +72,95 @@ if ! command -v Xvfb >/dev/null; then
     exit 0
 fi
 
+# --- the per-display engine table (sp021, dotfiles-tz5e) --------------------
+# The :10 CUTOVER ARM. engine_for() in hotkeyd.sh is the one place that decides
+# which binary serves a display, and dotfiles-ylmp.15/.16 flip displays over one
+# arm at a time. Nothing else in this tree asserted the arm itself: the
+# mixed-estate suite rehearses the EDIT (it patches a copy of the launcher with
+# an arm for a throwaway display) and therefore passes just as happily against a
+# shipped table with no arms at all. So the cutover could — and did — sit
+# unlanded through a green matrix.
+#
+# NO X, NO DAEMON, NO GO BUILD. `check` resolves the same engine_for() `start`
+# does and execs that binary's --check, which is pure validation (see its arm in
+# hotkeyd.sh). HOTKEYD_GO_DAEMON — the seam test-panic.sh uses to swap in a
+# fixture daemon — points at a stub that prints a marker, so "which engine did
+# the table pick" is read from the exec that actually happened rather than from
+# output shape. That keeps this section runnable on a headless box and, more
+# importantly, keeps it from passing for the wrong reason on a machine where
+# $HERE/hotkeyd happens (or happens not) to be built.
+echo "launcher: the per-display engine table"
+ENGSTUB="$RUNTIME/engine-stub/hotkeyd"
+mkdir -p "$(dirname "$ENGSTUB")"
+cat > "$ENGSTUB" <<'STUB'
+#!/bin/sh
+printf 'GO-ENGINE-STUB %s\n' "$*"
+STUB
+chmod +x "$ENGSTUB"
+
+# eng_of <display> [engine-default] -> go | python | error(<rc>):<output>
+#
+# The default is passed through `env` rather than as an assignment prefix
+# because the value is only known after expansion, and a word produced by
+# expansion is not recognised as an assignment. `env -u` for the unset case:
+# the go-engine run of this suite exports HOTKEYD_ENGINE_DEFAULT=go
+# (dotfiles-ugdg), and an inherited value would make the "unpinned displays
+# still default to python" assertion below report on the caller's environment
+# instead of on the table.
+eng_of() {
+    local out rc
+    if [ -n "${2:-}" ]; then
+        out="$(env HOTKEYD_GO_DAEMON="$ENGSTUB" HOTKEYD_ENGINE_DEFAULT="$2" \
+               XDG_RUNTIME_DIR="$RUNTIME" DISPLAY= \
+               "$HERE/hotkeyd.sh" check "$1" 2>&1)"
+    else
+        out="$(env -u HOTKEYD_ENGINE_DEFAULT HOTKEYD_GO_DAEMON="$ENGSTUB" \
+               XDG_RUNTIME_DIR="$RUNTIME" DISPLAY= \
+               "$HERE/hotkeyd.sh" check "$1" 2>&1)"
+    fi
+    rc=$?
+    case "$out" in
+        *GO-ENGINE-STUB*) printf 'go'; return 0 ;;
+    esac
+    # python and "the launcher refused" are NOT folded together: a table that
+    # names an engine the launcher cannot resolve exits 78, and reporting that
+    # as "python" would read as a missing arm rather than a broken one.
+    [ "$rc" -eq 0 ] && printf 'python' || printf 'error(%s):%s' "$rc" "$out"
+}
+
+e="$(eng_of :10)"
+[ "$e" = go ] && ok ":10 resolves to the GO engine (the xrdp cutover, dotfiles-tz5e)" \
+    || bad ":10 resolved to '$e', want go — the ':10) printf go' arm is not in \
+engine_for(), so the xrdp session is still served by python"
+
+# xrdp presents DISPLAY=:10.0, and the launcher canonicalises to :10 before
+# consulting the table. An arm that only matched the bare form would leave the
+# LIVE session on python while every hand-run check said go — the exact
+# disagreement the ${VAR%.*} canonicalisation exists to prevent.
+e="$(eng_of :10.0)"
+[ "$e" = go ] && ok ":10.0 (the screen-suffixed form xrdp presents) resolves to GO too" \
+    || bad ":10.0 resolved to '$e', want go — the arm does not survive the \
+screen-suffix canonicalisation"
+
+# The arms outrank the catch-all's override. Documented in engine_for()'s
+# header; asserted here because the suites set HOTKEYD_ENGINE_DEFAULT freely
+# and a table where the env can quietly demote a cut-over display would make
+# every parity run a coin toss.
+e="$(eng_of :10 python)"
+[ "$e" = go ] && ok ":10 stays GO under HOTKEYD_ENGINE_DEFAULT=python (arms outrank the catch-all)" \
+    || bad ":10 resolved to '$e' under HOTKEYD_ENGINE_DEFAULT=python, want go"
+
+# The other half of the cutover contract, and the guard on the assertions
+# above: a blanket flip of every display would satisfy all three of them.
+e="$(eng_of "$XA")"
+[ "$e" = python ] && ok "$XA (unpinned) still defaults to python — the arm did not swallow every display" \
+    || bad "$XA resolved to '$e', want python — a display with no arm must \
+still reach engine_for()'s catch-all"
+
+e="$(eng_of "$XA" go)"
+[ "$e" = go ] && ok "$XA (unpinned) follows HOTKEYD_ENGINE_DEFAULT=go — the parity seam still works" \
+    || bad "$XA resolved to '$e' under HOTKEYD_ENGINE_DEFAULT=go, want go"
+
 for dpy in "$XA" "$XB"; do
     Xvfb "$dpy" -screen 0 640x480x24 >/dev/null 2>&1 &
     XVFB_PIDS+=($!)

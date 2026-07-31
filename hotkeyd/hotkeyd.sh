@@ -100,12 +100,31 @@ linked() { [ -L "$FALLBACK_LINK" ] || [ -e "$FALLBACK_LINK" ]; }
 # in the epic's staged rollout order. Nothing else in this file should need
 # to change at either cutover.
 #
+# :10 IS CUT OVER (dotfiles-tz5e, the live-estate half of ylmp.15). The xrdp
+# session runs the Go engine; :0 and everything else still reach the catch-all
+# and stay python until .16. The argument is the display BASE — DPY_BASE, with
+# the screen suffix already stripped — so the ":10.0" an RDP session presents
+# and the bare ":10" the i3 launcher passes hit this one arm, which is the
+# whole reason the canonicalisation happens before the lookup rather than
+# inside it.
+#
+# CONSEQUENCE FOR HOSTS WITH NO GO TOOLCHAIN: `start :10` now REFUSES with
+# exit 78 rather than silently running python, because resolve_daemon() never
+# falls back (dotfiles-ylmp.14). That is deliberate — a silent fallback
+# recreates the which-daemon-am-I-running question the rewrite exists to
+# kill — but it means hotkeyd/dot.yaml's go build is no longer merely opt-in
+# on a machine that serves :10; see that file's header.
+#
 # HOTKEYD_ENGINE_DEFAULT overrides the catch-all's default without touching
 # the arms above it — the seam test-launcher.sh's parameterised "run once
 # per engine default" (dotfiles-ylmp.14 test_plan) uses to exercise the go
-# engine end to end before any real display is cut over.
+# engine end to end before any real display is cut over. It therefore CANNOT
+# demote :10 back to python: a display that has been cut over is decided by
+# the table, not by the environment of whoever happened to invoke the
+# launcher (asserted in test-launcher.sh's engine-table section).
 engine_for() { # <display-base, e.g. ":0"> -> python|go
     case "$1" in
+        :10) printf 'go' ;;
         *) printf '%s' "${HOTKEYD_ENGINE_DEFAULT:-python}" ;;
     esac
 }

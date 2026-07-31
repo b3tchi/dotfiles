@@ -25,9 +25,17 @@
 #
 # python-xlib is RETAINED here (sp021, dotfiles-ylmp.14) even though the Go
 # rewrite (./cmd/hotkeyd) now also builds below — hotkeyd.sh's per-display
-# engine table defaults every display to python and only the cutover commits
-# (dotfiles-ylmp.15 for :10, .16 for :0) flip individual displays to go. This
-# dot does not drop python-xlib until .16, per sp021's ## solution.
+# engine table is cut over one display at a time, and :0 is still python
+# (dotfiles-ylmp.16 finishes the job). This dot does not drop python-xlib
+# until .16, per sp021's ## solution.
+#
+# :10 IS ON THE GO ENGINE (dotfiles-tz5e). That changes what the go build
+# below means on a machine that serves an xrdp session: it is no longer purely
+# opt-in there. hotkeyd.sh's resolve_daemon() refuses LOUDLY (exit 78) rather
+# than falling back to python when the table says go and the binary is not
+# built, so on such a host a missing Go toolchain costs :10 its daemon —
+# recoverable, named, and never a silent wrong-engine start, but not
+# invisible. :0 is unaffected either way.
 linux:
   installs:
     cmd: |
@@ -42,10 +50,13 @@ linux:
       {{/if}}
 
       # Go build of hotkeyd/hotkeyd from ./cmd/hotkeyd (sp021, dotfiles-ylmp.14).
-      # Guarded, not required: hotkeyd.sh's engine table (see its header) keeps
-      # every display on python until a cutover task explicitly flips one, so a
-      # host with no Go toolchain gets an actionable message here and stays on
-      # the python path above, untouched -- never a partial or failed install.
+      # Still GUARDED rather than required, so a host with no Go toolchain gets
+      # an actionable message here and a complete install -- never a partial or
+      # failed one. What changed at dotfiles-tz5e is the blast radius of
+      # skipping it: :10 is now cut over to go in hotkeyd.sh's engine table, so
+      # on a machine that serves an xrdp :10 session this build is what that
+      # session's daemon IS. :0 and every other display still fall through to
+      # python and are unaffected.
       #
       # Build to a TEMP file in the SAME directory, then rename over the final
       # path -- never build IN PLACE. A `go build` that dies mid-`rotz install`
@@ -68,9 +79,8 @@ linux:
         TMP="$(mktemp "$SRC/.hotkeyd.build.XXXXXX")"
         if CGO_ENABLED=0 go build -C "$SRC" -o "$TMP" ./cmd/hotkeyd; then
           mv -f "$TMP" "$SRC/hotkeyd"
-          echo "hotkeyd: built $SRC/hotkeyd from ./cmd/hotkeyd (go engine \
-      available -- still opt-in per hotkeyd.sh's engine table; python remains \
-      the default for every display)"
+          echo "hotkeyd: built $SRC/hotkeyd from ./cmd/hotkeyd (serves :10 per \
+      hotkeyd.sh's engine table; :0 and every other display remain python)"
         else
           rm -f "$TMP"
           echo "hotkeyd: go build failed -- $SRC/hotkeyd left unchanged, the \
@@ -78,7 +88,9 @@ linux:
         fi
       else
         echo "hotkeyd: no Go toolchain on PATH -- skipping the go build \
-      (install go, then re-run 'rotz install hotkeyd' to build the opt-in go \
-      engine). The python engine (hotkeyd.py, python-xlib above) is \
-      unaffected and remains the default for every display." >&2
+      (install go, then re-run 'rotz install hotkeyd'). The python engine \
+      (hotkeyd.py, python-xlib above) is unaffected and still serves :0. If \
+      this machine serves an xrdp :10 session, that display is cut over to go \
+      and 'hotkeyd.sh start :10' will REFUSE with exit 78 until the build \
+      succeeds -- by design, it never silently starts the other engine." >&2
       fi
