@@ -28,3 +28,21 @@ func LockPath(display string) string {
 func GrabReportPath(display string) string {
 	return filepath.Join(RuntimeDir(), fmt.Sprintf("hotkeyd-%s.grabs", NormalizeDisplay(display)))
 }
+
+// ControlPath returns the per-display CONTROL socket path for display, e.g.
+// "$XDG_RUNTIME_DIR/hotkeyd-10-ctl.sock" — the one request/one reply socket
+// the `set-layer` verb dials (sp023 Task 3, plan decision 2).
+//
+// Deliberately a SEPARATE socket from internal/layer's SocketPath
+// ("hotkeyd-10.sock"): [[adr0012]] frames the state feed as read-only, with
+// mutation never flowing back through it, and this port keeps that claim
+// LITERALLY true — the external-trigger exception is a new socket, not a
+// loosened old one. The state publisher still never calls Read on a client
+// connection.
+//
+// Shares NormalizeDisplay with LockPath / GrabReportPath (and, via
+// proc.NormalizeDisplay, with layer.SocketPath) — the "one helper, one test"
+// rule — so ":10.0" and ":10" address the identical daemon.
+func ControlPath(display string) string {
+	return filepath.Join(RuntimeDir(), fmt.Sprintf("hotkeyd-%s-ctl.sock", NormalizeDisplay(display)))
+}

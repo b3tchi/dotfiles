@@ -364,8 +364,44 @@ func testLayers() map[string]bind.Layer {
 			ExitKeys: []string{"q"},
 			OnExit:   []bind.Action{bind.Command("nav on_exit")},
 		},
+		// sp023's external-trigger kind: signal-only, declared with NOTHING
+		// but the flag (plan decision 1), reachable only through the control
+		// socket. Deliberately part of the shared fixture so the pure
+		// chord-set helpers are exercised against it too — an External layer
+		// that contributed grabs would fail TestChordsFor_ActiveExternal*.
+		"drag": {External: true},
 	}
 }
+
+// stateRecorder implements layer.Publisher, capturing what the ENGINE
+// published rather than what a test believes it did — the same
+// state-feed-shaped evidence ft009's consumers actually see.
+type stateRecorder struct {
+	mu     sync.Mutex
+	states []layer.State
+}
+
+func (r *stateRecorder) Publish(st layer.State) {
+	r.mu.Lock()
+	r.states = append(r.states, st)
+	r.mu.Unlock()
+}
+
+func (r *stateRecorder) all() []layer.State {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]layer.State(nil), r.states...)
+}
+
+func (r *stateRecorder) layers() []string {
+	out := []string{}
+	for _, st := range r.all() {
+		out = append(out, st.Layer)
+	}
+	return out
+}
+
+var _ layer.Publisher = (*stateRecorder)(nil)
 
 // harness bundles a Daemon with every fake it was built from, for
 // assertions.
@@ -380,6 +416,13 @@ type harness struct {
 	xConn   *fakeCloser
 	logger  *fakeLogger
 	engine  *layer.Engine
+
+	// control is the channel a ControlListener's connection goroutines
+	// would send on (sp023 Task 3); tests drive it directly, so Run's
+	// select case is exercised with zero sockets.
+	control   chan controlCmd
+	ctlCloser *fakeCloser
+	states    *stateRecorder
 
 	modQueryCalls int
 	modQueryMu    sync.Mutex
@@ -420,17 +463,20 @@ func newTimeoutHarness(t *testing.T) *harness {
 func newHarnessWithTicks(t *testing.T, idleTick, holdTick time.Duration) *harness {
 	t.Helper()
 	h := &harness{
-		events:  make(chan x11.Event, 8),
-		i3c:     &fakeI3Client{},
-		grabs:   &fakeGrabs{active: map[string]GrabbedChord{}, wanted: []string{}},
-		devices: &fakeDevices{},
-		lock:    &fakeLock{},
-		pub:     &fakeCloser{},
-		xConn:   &fakeCloser{},
-		logger:  &fakeLogger{},
-		modDown: map[string]bool{},
+		events:    make(chan x11.Event, 8),
+		i3c:       &fakeI3Client{},
+		grabs:     &fakeGrabs{active: map[string]GrabbedChord{}, wanted: []string{}},
+		devices:   &fakeDevices{},
+		lock:      &fakeLock{},
+		pub:       &fakeCloser{},
+		xConn:     &fakeCloser{},
+		logger:    &fakeLogger{},
+		modDown:   map[string]bool{},
+		control:   make(chan controlCmd),
+		ctlCloser: &fakeCloser{},
+		states:    &stateRecorder{},
 	}
-	h.engine = layer.NewEngine(testBinds(), testLayers(), layer.Config{Mod: "Mod4"})
+	h.engine = layer.NewEngine(testBinds(), testLayers(), layer.Config{Mod: "Mod4", Publisher: h.states})
 
 	newModQuery := func() layer.ModifierDown {
 		h.modQueryMu.Lock()
@@ -455,23 +501,25 @@ func newHarnessWithTicks(t *testing.T, idleTick, holdTick time.Duration) *harnes
 	}
 
 	h.dae = NewDaemon(DaemonConfig{
-		Events:      h.events,
-		I3:          h.i3c,
-		Grabs:       h.grabs,
-		Devices:     h.devices,
-		Engine:      h.engine,
-		Lock:        h.lock,
-		Publisher:   h.pub,
-		XConn:       h.xConn,
-		NewModQuery: newModQuery,
-		Run:         runFn,
-		Binds:       testBinds(),
-		Layers:      testLayers(),
-		Mod:         "Mod4",
-		Display:     ":99",
-		Log:         h.logger.log,
-		IdleTick:    idleTick,
-		HoldTick:    holdTick,
+		Events:        h.events,
+		I3:            h.i3c,
+		Grabs:         h.grabs,
+		Devices:       h.devices,
+		Engine:        h.engine,
+		Lock:          h.lock,
+		Publisher:     h.pub,
+		XConn:         h.xConn,
+		Control:       h.control,
+		ControlCloser: h.ctlCloser,
+		NewModQuery:   newModQuery,
+		Run:           runFn,
+		Binds:         testBinds(),
+		Layers:        testLayers(),
+		Mod:           "Mod4",
+		Display:       ":99",
+		Log:           h.logger.log,
+		IdleTick:      idleTick,
+		HoldTick:      holdTick,
 	})
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 	return h
@@ -1093,8 +1141,295 @@ func TestRun_RealOSSignal_SIGTERM_StopsViaProcessSelfSignal(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------
+// Run(): the control-socket case (sp023 Task 3). Same wiring-deletion
+// discipline as everything above — sendControl fails the test if Run's
+// select never receives, which is exactly what deleting the case does.
+// ---------------------------------------------------------------------
+
+// sendControl hands one command to Run the way a ControlListener connection
+// goroutine does — an unbuffered send, then a wait for the reply — and fails
+// the test rather than hanging if either half never happens. THIS is the
+// wiring-deletion assertion: with `case cmd := <-d.control:` removed from
+// Run's select, nothing receives and every test below fails on the first
+// t.Fatal here.
+func sendControl(t *testing.T, h *harness, name string) error {
+	t.Helper()
+	cmd := controlCmd{layer: name, reply: make(chan error, 1)}
+	select {
+	case h.control <- cmd:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run never received the control command — the control case is missing from Run's select (dotfiles-eez2 discipline)")
+	}
+	select {
+	case err := <-cmd.reply:
+		return err
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run received the control command but never replied — the handler must always answer")
+		return nil
+	}
+}
+
+func TestRun_ControlCase_AcceptedRequestEntersExternalLayer(t *testing.T) {
+	// Kills: deleting the control case from Run's select, and deleting the
+	// SetExternalLayer call from its handler.
+	h := newHarness(t)
+	sig := make(chan os.Signal, 1)
+	done := make(chan int, 1)
+	go func() { done <- h.dae.Run(sig) }()
+
+	if err := sendControl(t, h, "drag"); err != nil {
+		t.Fatalf("set-layer drag was refused: %v", err)
+	}
+	if got := h.engine.State().Layer; got != "drag" {
+		t.Fatalf("engine layer = %q after an accepted control request, want %q", got, "drag")
+	}
+	if err := sendControl(t, h, layer.DefaultLayer); err != nil {
+		t.Fatalf("clear was refused: %v", err)
+	}
+	if got := h.engine.State().Layer; got != layer.DefaultLayer {
+		t.Fatalf("engine layer = %q after a clear, want %q", got, layer.DefaultLayer)
+	}
+
+	sig <- syscall.SIGTERM
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return")
+	}
+}
+
+func TestRun_ControlCase_StateChangeVisibleOnTheStateFeed(t *testing.T) {
+	// The accepted request must reach ft009's consumers as an ordinary
+	// state line — the feed's wire shape is frozen, so this asserts the
+	// external layer travels the SAME channel every other layer does.
+	h := newHarness(t)
+	sig := make(chan os.Signal, 1)
+	done := make(chan int, 1)
+	go func() { done <- h.dae.Run(sig) }()
+
+	if err := sendControl(t, h, "drag"); err != nil {
+		t.Fatalf("set-layer drag: %v", err)
+	}
+	if err := sendControl(t, h, layer.DefaultLayer); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+
+	sig <- syscall.SIGTERM
+	<-done
+
+	got := h.states.layers()
+	if len(got) != 2 || got[0] != "drag" || got[1] != layer.DefaultLayer {
+		t.Fatalf("state feed published %v, want [drag default]", got)
+	}
+	for _, st := range h.states.all() {
+		if st.Mod != "" {
+			t.Errorf("external transition published Mod=%q, want empty", st.Mod)
+		}
+	}
+}
+
+func TestRun_ControlCase_IdempotentReSet_PublishesNothingExtra(t *testing.T) {
+	h := newHarness(t)
+	sig := make(chan os.Signal, 1)
+	done := make(chan int, 1)
+	go func() { done <- h.dae.Run(sig) }()
+
+	for i := 0; i < 3; i++ {
+		if err := sendControl(t, h, "drag"); err != nil {
+			t.Fatalf("set %d refused: %v", i, err)
+		}
+	}
+	sig <- syscall.SIGTERM
+	<-done
+
+	if got := h.states.layers(); len(got) != 1 {
+		t.Fatalf("state feed published %v for three identical requests, want exactly one line", got)
+	}
+}
+
+func TestRun_ControlCase_RefusalMatrix_NamedAndEngineUnchanged(t *testing.T) {
+	// The daemon validates against the COMPILED table regardless of what
+	// the CLI checked (us019 AC4 at the socket boundary). Every refusal
+	// names the offending layer and leaves engine state alone.
+	cases := []struct {
+		name    string
+		arg     string
+		wantErr error
+	}{
+		{"undeclared name", "does-not-exist", layer.ErrNoSuchLayer},
+		{"chord layer", "nav", layer.ErrNotExternalLayer},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			sig := make(chan os.Signal, 1)
+			done := make(chan int, 1)
+			go func() { done <- h.dae.Run(sig) }()
+
+			err := sendControl(t, h, tc.arg)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("reply error = %v, want %v", err, tc.wantErr)
+			}
+			if !strings.Contains(err.Error(), tc.arg) {
+				t.Errorf("error %q does not name the offending layer %q", err, tc.arg)
+			}
+			if got := h.engine.State().Layer; got != layer.DefaultLayer {
+				t.Errorf("engine layer = %q after a refusal, want it unchanged at %q", got, layer.DefaultLayer)
+			}
+
+			sig <- syscall.SIGTERM
+			<-done
+			if len(h.states.layers()) != 0 {
+				t.Errorf("a refused request published %v to the state feed", h.states.layers())
+			}
+		})
+	}
+}
+
+func TestRun_ControlCase_ChordLayerActive_RefusesAndLeavesTheUserWhereTheyAre(t *testing.T) {
+	// sp023 plan decision 3's authority policy, reached THROUGH the run
+	// loop: an external process may not evict a user who is standing in a
+	// chord-entered layer — not even with a clear.
+	h := newHarness(t)
+	h.engine.Handle(layer.Event{Kind: layer.Press, Key: "o", Mods: map[string]bool{"Mod4": true}})
+	if h.engine.State().Layer != "nav" {
+		t.Fatal("fixture bug: nav layer did not activate")
+	}
+
+	sig := make(chan os.Signal, 1)
+	done := make(chan int, 1)
+	go func() { done <- h.dae.Run(sig) }()
+
+	for _, arg := range []string{"drag", layer.DefaultLayer} {
+		err := sendControl(t, h, arg)
+		if !errors.Is(err, layer.ErrLayerActive) {
+			t.Fatalf("set-layer %q while nav is active: err = %v, want ErrLayerActive", arg, err)
+		}
+		if got := h.engine.State().Layer; got != "nav" {
+			t.Fatalf("engine layer = %q, want nav — a refusal must change nothing", got)
+		}
+	}
+
+	sig <- syscall.SIGTERM
+	<-done
+}
+
+func TestRun_ControlCase_ExternalTransitionsNeverResyncGrabs(t *testing.T) {
+	// The grab set is provably untouched by external transitions: an
+	// External layer is signal-only (plan decision 1), so entering and
+	// clearing it must not call SyncBinds at all. Kills a handler that
+	// copies handleKeyEvent's "layer changed -> resyncGrabs()" tail.
+	h := newHarness(t)
+	sig := make(chan os.Signal, 1)
+	done := make(chan int, 1)
+	go func() { done <- h.dae.Run(sig) }()
+
+	before := h.grabs.syncCount()
+	if err := sendControl(t, h, "drag"); err != nil {
+		t.Fatalf("set-layer drag: %v", err)
+	}
+	if err := sendControl(t, h, layer.DefaultLayer); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	sig <- syscall.SIGTERM
+	<-done
+
+	if got := h.grabs.syncCount(); got != before {
+		t.Fatalf("SyncBinds was called %d time(s) across an external entry+clear, want 0 — an external layer holds no grabs",
+			got-before)
+	}
+}
+
+func TestRun_ShutdownClosesTheControlListener(t *testing.T) {
+	// Kills: deleting the control-listener Close from shutdown(), which
+	// would leave a stale socket file at $XDG_RUNTIME_DIR for the next
+	// daemon to trip over.
+	h := newHarness(t)
+	sig := make(chan os.Signal, 1)
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		sig <- syscall.SIGTERM
+	}()
+	runWithTimeout(t, h, sig, 2*time.Second)
+	if !h.ctlCloser.wasClosed() {
+		t.Fatal("control listener was not closed on shutdown — the socket file would be left behind")
+	}
+}
+
+func TestRun_ControlChannelClosed_LoopKeepsServing(t *testing.T) {
+	// A closed command channel (the listener shut down, or was never
+	// bound) must retire the select case rather than spin it: a closed
+	// channel is ALWAYS ready, so a case that does not disable itself
+	// burns the CPU and starves nothing visibly — the exact failure a
+	// count-based assertion catches. Here: after closing the control
+	// channel the daemon must still serve X events and stop cleanly.
+	h := newHarness(t)
+	sig := make(chan os.Signal, 1)
+	done := make(chan int, 1)
+	go func() { done <- h.dae.Run(sig) }()
+
+	close(h.control)
+	time.Sleep(30 * time.Millisecond)
+	h.events <- mappingNotifyEvent()
+	deadline := time.After(2 * time.Second)
+	for h.grabs.mappingNotifyCount() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("daemon stopped serving X events after the control channel closed")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	sig <- syscall.SIGTERM
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after the control channel closed")
+	}
+}
+
+func TestRun_NoControlChannel_DaemonStillRuns(t *testing.T) {
+	// buildControl returning nil (bind failure) is a legal configuration:
+	// a nil channel is never ready, so the select case is simply inert.
+	h := newHarness(t)
+	h.dae = NewDaemon(DaemonConfig{
+		Events: h.events, I3: h.i3c, Grabs: h.grabs, Devices: h.devices,
+		Engine: h.engine, Lock: h.lock, Publisher: h.pub, XConn: h.xConn,
+		NewModQuery: func() layer.ModifierDown {
+			return func(string) (bool, error) { return false, nil }
+		},
+		Run:   func(string) error { return nil },
+		Binds: testBinds(), Layers: testLayers(), Mod: "Mod4", Display: ":99",
+		Log: h.logger.log, IdleTick: neverFiresTick, HoldTick: neverFiresTick,
+	})
+	sig := make(chan os.Signal, 1)
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		sig <- syscall.SIGTERM
+	}()
+	if code := runWithTimeout(t, h, sig, 2*time.Second); code != 0 {
+		t.Fatalf("exit code = %d, want 0 with no control socket", code)
+	}
+}
+
+// ---------------------------------------------------------------------
 // pure helpers — chord-set derivation, keysym resolution, mask decoding
 // ---------------------------------------------------------------------
+
+// TestChordsFor_ActiveExternalLayer_EqualsDefaultLayer is the "grab set
+// provably untouched" criterion in its pure form: whatever the daemon would
+// grab while an External layer is active is EXACTLY what it grabs in
+// default. Complements TestRun_ControlCase_ExternalTransitionsNeverResyncGrabs
+// (which proves no sync is even attempted) by proving the sync would be a
+// no-op if one ever were.
+func TestChordsFor_ActiveExternalLayer_EqualsDefaultLayer(t *testing.T) {
+	def := chordsFor(testBinds(), testLayers(), layer.DefaultLayer, "Mod4")
+	ext := chordsFor(testBinds(), testLayers(), "drag", "Mod4")
+	if !equalStrs(ext, def) {
+		t.Fatalf("chordsFor(drag) = %v, want it identical to chordsFor(default) = %v — an external layer holds zero grabs", ext, def)
+	}
+}
 
 func TestChordsFor_DefaultLayer_IsGlobalOnly(t *testing.T) {
 	got := chordsFor(testBinds(), testLayers(), layer.DefaultLayer, "Mod4")
@@ -1399,6 +1734,44 @@ func TestBuildPublisher_Success_ReturnsWorkingPublisher(t *testing.T) {
 	pub.Publish(layer.State{Layer: "nav"})
 	if _, err := os.Stat(layer.SocketPath(":124")); err != nil {
 		t.Errorf("socket file missing after a successful buildPublisher: %v", err)
+	}
+}
+
+func TestBuildControl_Unavailable_LogsAndReturnsNil(t *testing.T) {
+	// adr0014 + the best-effort policy: a vanished $XDG_RUNTIME_DIR under
+	// the control socket fails NAMED and the daemon serves without it.
+	logger := &fakeLogger{}
+	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(t.TempDir(), "does-not-exist"))
+	if ctl := buildControl(":123", logger.log); ctl != nil {
+		ctl.Close()
+		t.Fatal("buildControl(unavailable) returned a listener, want nil")
+	}
+	if !logger.contains("continuing without set-layer") {
+		t.Errorf("policy log line missing; got: %v", logger.all())
+	}
+	if !logger.contains("control socket unavailable") {
+		t.Errorf("failure was not named; got: %v", logger.all())
+	}
+}
+
+func TestBuildControl_Success_BindsThePerDisplayControlPath(t *testing.T) {
+	logger := &fakeLogger{}
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	ctl := buildControl(":124", logger.log)
+	if ctl == nil {
+		t.Fatalf("buildControl(available) = nil; log: %v", logger.all())
+	}
+	defer ctl.Close()
+	// The socket must be at proc.ControlPath — this is what makes :0 and
+	// :10 daemons independently addressable (us019 AC3).
+	if got, want := ctl.Path(), proc.ControlPath(":124"); got != want {
+		t.Errorf("listener bound %q, want %q", got, want)
+	}
+	if _, err := os.Stat(proc.ControlPath(":124")); err != nil {
+		t.Errorf("socket file missing after a successful buildControl: %v", err)
+	}
+	if _, err := net.Dial("unix", proc.ControlPath(":124")); err != nil {
+		t.Errorf("control socket does not accept connections: %v", err)
 	}
 }
 

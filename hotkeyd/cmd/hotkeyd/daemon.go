@@ -400,6 +400,21 @@ type DaemonConfig struct {
 	// layer.ErrChannelUnavailable.
 	Publisher io.Closer
 
+	// Control delivers accepted control-socket requests into Run's select
+	// (sp023 Task 3). nil is a legal, intentional configuration — a nil
+	// channel is never ready, so the select case is simply inert, which is
+	// what a daemon whose control socket failed to bind runs with (see
+	// buildControl's best-effort policy in main.go, inherited from
+	// buildPublisher). Tests drive this channel directly; production wires
+	// it from a *ControlListener's Commands().
+	Control <-chan controlCmd
+
+	// ControlCloser is the control listener, closed FIRST at shutdown so no
+	// further request is accepted while the engine is being torn down. Kept
+	// separate from Control because the channel is receive-only and a
+	// listener that failed to bind contributes neither.
+	ControlCloser io.Closer
+
 	// XConn is the X connection's own closer, closed at shutdown — this
 	// is what releases every outstanding passive grab (X server
 	// behaviour: grabs die with the client's connection), matching the
@@ -455,6 +470,12 @@ type Daemon struct {
 	newMod func() layer.ModifierDown
 	run    func(command string) error
 
+	// control is read ONLY by Run's own goroutine, and set to nil there
+	// when the channel closes (see Run's control case) — no other goroutine
+	// touches this field.
+	control   <-chan controlCmd
+	ctlCloser io.Closer
+
 	binds   []bind.Bind
 	layers  map[string]bind.Layer
 	mod     string
@@ -474,23 +495,25 @@ type Daemon struct {
 // successful connect (by any path) re-subscribes automatically.
 func NewDaemon(cfg DaemonConfig) *Daemon {
 	d := &Daemon{
-		events:   cfg.Events,
-		i3:       cfg.I3,
-		grabs:    cfg.Grabs,
-		devices:  cfg.Devices,
-		engine:   cfg.Engine,
-		lock:     cfg.Lock,
-		pub:      cfg.Publisher,
-		xConn:    cfg.XConn,
-		newMod:   cfg.NewModQuery,
-		run:      cfg.Run,
-		binds:    cfg.Binds,
-		layers:   cfg.Layers,
-		mod:      cfg.Mod,
-		display:  cfg.Display,
-		log:      cfg.Log,
-		idleTick: cfg.IdleTick,
-		holdTick: cfg.HoldTick,
+		events:    cfg.Events,
+		i3:        cfg.I3,
+		grabs:     cfg.Grabs,
+		devices:   cfg.Devices,
+		engine:    cfg.Engine,
+		lock:      cfg.Lock,
+		pub:       cfg.Publisher,
+		xConn:     cfg.XConn,
+		control:   cfg.Control,
+		ctlCloser: cfg.ControlCloser,
+		newMod:    cfg.NewModQuery,
+		run:       cfg.Run,
+		binds:     cfg.Binds,
+		layers:    cfg.Layers,
+		mod:       cfg.Mod,
+		display:   cfg.Display,
+		log:       cfg.Log,
+		idleTick:  cfg.IdleTick,
+		holdTick:  cfg.HoldTick,
 	}
 	if d.log == nil {
 		d.log = daemonLog
@@ -720,6 +743,41 @@ func (d *Daemon) handleKeyEvent(raw []byte) {
 	}
 }
 
+// handleControl applies ONE control-socket request. It runs on Run's own
+// goroutine and nowhere else — that single-threadedness is the whole reason
+// the listener hands names over a channel instead of calling the engine
+// itself (control.go's concurrency contract): layer.Engine has no internal
+// locking, and a connection goroutine touching it would be a data race with
+// every keystroke the loop is dispatching.
+//
+// The compiled table is consulted BEFORE the engine (validateControlLayer),
+// so "only External-declared names and the clear ever reach
+// SetExternalLayer" is a property of this function, provable here without
+// re-deriving the engine's internals. The engine then applies its own
+// authority policy on top (ErrLayerActive — a user standing in a chord
+// layer outranks any external request).
+//
+// Deliberately does NOT resync grabs. An External layer is signal-only
+// (sp023 plan decision 1): it contributes no chords, so chordsFor would
+// return exactly what is already grabbed, and calling SyncBinds here would
+// be pure churn on the X connection for every drag gesture. See
+// TestRun_ControlCase_ExternalTransitionsNeverResyncGrabs and
+// TestChordsFor_ActiveExternalLayer_EqualsDefaultLayer, which pin both
+// halves of that claim.
+//
+// The reply send cannot block: cmd.reply is buffered by construction, and
+// the run loop must never wait on a socket peer.
+func (d *Daemon) handleControl(cmd controlCmd) {
+	err := validateControlLayer(d.layers, cmd.layer)
+	if err == nil {
+		err = d.engine.SetExternalLayer(cmd.layer)
+	}
+	if err != nil {
+		d.log(fmt.Sprintf("control: set-layer %q refused: %s", cmd.layer, err))
+	}
+	cmd.reply <- err
+}
+
 // shutdown is run_daemon's `finally`: hand the layer's overlay back BEFORE
 // tearing anything down (dotfiles-hwds.51 — a daemon dying inside a hold
 // layer must not leave the overlay stranded on screen), then close the
@@ -728,6 +786,17 @@ func (d *Daemon) handleKeyEvent(raw []byte) {
 // single-instance lock. Ported from hotkeyd.py's run_daemon finally
 // block.
 func (d *Daemon) shutdown() {
+	// Control listener FIRST: stop accepting new set-layer requests before
+	// anything is torn down, and release any connection goroutine parked on
+	// the handoff to a run loop that has already left its select (it is
+	// answered with a named "shutting down" refusal — never left hanging).
+	// Close also unlinks the socket file, so the next daemon for this
+	// display binds a clean path.
+	if d.ctlCloser != nil {
+		if err := d.ctlCloser.Close(); err != nil {
+			d.log(fmt.Sprintf("control listener: close: %s", err))
+		}
+	}
 	for _, a := range d.engine.ShutdownActions() {
 		d.dispatch(a)
 	}
@@ -789,6 +858,26 @@ runLoop:
 			d.lock.Beat()
 			d.pumpI3()
 			d.handleXEvent(ev)
+		case cmd, ok := <-d.control:
+			if ok {
+				d.handleControl(cmd)
+			} else {
+				// The control listener shut down (or was never bound and
+				// something closed the channel). A closed channel is
+				// ALWAYS ready, so the case must retire itself or this
+				// select would spin at 100% CPU; a nil channel never is.
+				d.control = nil
+			}
+			// Deliberately skips the timer rearm below. A control request
+			// is not an idle-tick reason: rearming here would let a
+			// request flood push the timer branch — and with it the
+			// heartbeat, the i3 pump and adr0016's hold poll — out
+			// indefinitely, the starvation class
+			// TestRun_EventFlood_DoesNotStarveHeartbeat guards on the
+			// event side (where Beat() is called in-branch instead). The
+			// timer stays armed exactly as it was, so it still fires on
+			// schedule mid-flood.
+			continue
 		case <-timer.C:
 			d.lock.Beat()
 			d.pumpI3()

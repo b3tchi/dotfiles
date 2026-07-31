@@ -131,6 +131,11 @@ func run(argv []string) int {
 	pub, pubCloser := buildPublisher(display, daemonLog)
 	engine := layer.NewEngine(Binds, Layers, layer.Config{Publisher: pub, Mod: mod})
 
+	// Control socket: bound AFTER the lock (its stale-socket unlink is only
+	// safe under that guarantee — see NewControlListener) and best-effort
+	// like the state feed.
+	ctl := buildControl(display, daemonLog)
+
 	// dae is assigned below, before wireI3Mode (called from NewDaemon)
 	// ever drives a real Subscribe/PollEvents -- the onEvent closure reads
 	// dae at CALL time, not at closure-creation time.
@@ -139,7 +144,7 @@ func run(argv []string) int {
 		dae.onI3Event(kind, data)
 	})
 
-	dae = NewDaemon(DaemonConfig{
+	daeCfg := DaemonConfig{
 		Events:      conn.Events,
 		I3:          i3Client,
 		Grabs:       grabs,
@@ -154,7 +159,18 @@ func run(argv []string) int {
 		Mod:         mod,
 		Display:     display,
 		Log:         daemonLog,
-	})
+	}
+	// Assigned inside the guard, never unconditionally: a nil *ControlListener
+	// stored in an io.Closer field is a NON-nil interface holding a nil
+	// pointer, so `if d.ctlCloser != nil` would pass and shutdown would call
+	// Close on nil. The channel is left nil (and so permanently unready) when
+	// there is no listener, which is exactly the inert select case
+	// DaemonConfig.Control documents.
+	if ctl != nil {
+		daeCfg.Control = ctl.Commands()
+		daeCfg.ControlCloser = ctl
+	}
+	dae = NewDaemon(daeCfg)
 
 	// Initial grab set: the default layer's global chords. GrabManager
 	// reports each problem itself the first time it appears (grabs.go),
@@ -323,6 +339,30 @@ func buildPublisher(display string, log func(string)) (layer.Publisher, *layer.S
 		return nil, nil
 	}
 	return pub, pub
+}
+
+// buildControl constructs display's control-socket listener (control.go,
+// sp023 Task 3), or returns nil.
+//
+// Policy is buildPublisher's, deliberately: grabs are the daemon's job and
+// BOTH sockets are conveniences, so any failure to bind (a vanished
+// $XDG_RUNTIME_DIR — *ErrControlUnavailable — or anything else
+// NewControlListener returns) is LOGGED and the daemon serves without a
+// control socket. The `set-layer` verb then fails named at the client
+// (sp023's "known limitations"), which is a better outcome than refusing to
+// serve keys because an auxiliary socket could not be created.
+//
+// Returns the concrete *ControlListener rather than an interface so the
+// caller can distinguish "no listener" without the typed-nil trap — see the
+// guard at its call site in run().
+func buildControl(display string, log func(string)) *ControlListener {
+	ctl, err := NewControlListener(ControlConfig{Path: proc.ControlPath(display), Log: log})
+	if err != nil {
+		log(fmt.Sprintf("control socket unavailable, continuing without set-layer: %s", err))
+		return nil
+	}
+	log(fmt.Sprintf("control socket listening at %s", ctl.Path()))
+	return ctl
 }
 
 // pointerQuerier is the subset of *x11.Conn's behaviour
