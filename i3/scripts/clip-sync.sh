@@ -19,11 +19,18 @@
 # The last-seen state is SEEDED from the live selections before the loop runs,
 # and this is the whole point of the seed: an unseeded loop starts with both
 # last-seen values EMPTY, so its first tick finds PRIMARY "changed" (anything
-# differs from empty) and publishes that selection over the CLIPBOARD. Since
-# wsl.conf starts this from `exec_always`, that made every i3 config reload
-# revert the clipboard to whatever PRIMARY last held — measured live: a fresh
-# Windows copy replaced by an hours-old terminal selection one second after
-# the loop came up, which is the "paste gives old text" bug.
+# differs from empty) and publishes that selection over the CLIPBOARD —
+# measured live: a fresh Windows copy replaced by an hours-old terminal
+# selection one second after the loop came up. That is the "paste gives old
+# text" bug, and EVERY restart of this loop fired it.
+#
+# Which chord that is, measured rather than assumed: `exec_always` re-runs on
+# i3 `restart` ($mod+Shift+c, i3/config:81) but NOT on `reload`. Probed on this
+# host by dropping a temporary `exec_always ... touch <marker>` into
+# ~/.i3/config.d/ and reloading: the marker was never created. So the hammer
+# chord $mod+Shift+r — which is `reload` plus its own hotkeyd/quickshell execs
+# (i3/config.common:484) — leaves this loop alone, and the clobber came from
+# $mod+Shift+c and from hand/agent restarts of the daemon.
 #
 # WHICH SIDE WINS AT STARTUP: the CLIPBOARD. On the first observation no user
 # action has been seen, so the loop cannot know which side is newer, and it
@@ -49,9 +56,9 @@
 # syncing none.
 #
 # flock single-instance per display, for the same reason as clip-store.sh:
-# i3 `exec_always` re-runs autostarts on every config reload, and a second
-# loop would race the first for every change. Losing the race is the normal
-# case, not an error: exit 0. That guard is also what lets wsl.conf drop the
+# i3 `exec_always` re-runs autostarts on every config RESTART (see above —
+# not reload), and a second loop would race the first for every change.
+# Losing the race is the normal case, not an error: exit 0. That guard is also what lets wsl.conf drop the
 # `pkill -f 'clip-sync\.sh$'` it used to need — a pkill that could not tell a
 # production loop from any other, and killed across sessions.
 # Children close fd 9 (`9>&-`) so a forked xclip never holds the lock past

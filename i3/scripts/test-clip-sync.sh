@@ -7,11 +7,13 @@
 #
 #  * NO SEEDING.  The loop's last-seen state started EMPTY, so the very first
 #    tick read PRIMARY, found it "changed" (anything differs from empty) and
-#    published that stale selection over the CLIPBOARD.  wsl.conf starts the
-#    loop from `exec_always`, so every i3 config reload silently reverted the
-#    clipboard to whatever PRIMARY happened to hold — measured live: a fresh
-#    Windows copy was replaced by an hours-old terminal selection one second
-#    after the daemon came up.  That is the "paste gives old text" report.
+#    published that stale selection over the CLIPBOARD — measured live: a
+#    fresh Windows copy was replaced by an hours-old terminal selection one
+#    second after the daemon came up.  That is the "paste gives old text"
+#    report, and every restart of the loop reproduced it.  wsl.conf starts it
+#    from `exec_always`, which re-runs on i3 `restart` ($mod+Shift+c) but NOT
+#    on `reload` — probed on this host with a throwaway `exec_always ... touch
+#    <marker>` overlay, whose marker a reload never created.
 #  * NO DISPLAY ARGUMENT AND NO FLOCK.  The loop trusted an inherited
 #    $DISPLAY and nothing stopped a second copy running.  A test-harness
 #    instance left over on an Xvfb display (`DISPLAY=:89`) therefore OWNED
