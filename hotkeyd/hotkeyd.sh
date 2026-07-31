@@ -44,7 +44,13 @@ set -u
 
 HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 PY_DAEMON="$HERE/hotkeyd.py"
-GO_DAEMON="$HERE/hotkeyd"
+# HOTKEYD_GO_DAEMON is the go engine's analogue of HOTKEYD_BINDS below: with
+# the table compiled in (the dwm model), "a daemon carrying a different table"
+# IS a different binary, so the only seam that can express it is the path to
+# the binary. Used by test-panic.sh, which needs a daemon whose one bind is an
+# ownership marker i3 can be made to contest (dotfiles-ylmp.15); production
+# never sets it and gets $HERE/hotkeyd, the build dot.yaml produces.
+GO_DAEMON="${HOTKEYD_GO_DAEMON:-$HERE/hotkeyd}"
 CONFIG_GO="$HERE/cmd/hotkeyd/config.go"
 
 VERB="${1:-status}"

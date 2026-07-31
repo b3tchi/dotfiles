@@ -236,13 +236,51 @@ func (c *client) GetConfig() (string, error) {
 		c.closeLocked()
 		return "", err
 	}
+	// INCLUDED CONFIGS ARE PART OF THE ANSWER (dotfiles-ylmp.15). GET_CONFIG's
+	// `config` field carries ONLY the top-level file; every file i3 pulled in
+	// through an `include` glob comes back separately in `included_configs`.
+	//
+	// In this repo that is not a corner case, it is where the binds live: the
+	// i3 config is a common base plus a `~/.i3/config.d/*.conf` glob carrying
+	// the per-platform overlay AND `zz-fallback-binds.conf`, the panic
+	// fallback. A reader that takes `config` alone therefore cannot see the
+	// fallback at all — which made `check --ownership` answer "no chord is
+	// owned by BOTH" for a session where i3 had just been handed the daemon's
+	// entire chord set by a panic. That is the one verdict it exists to give
+	// and it was structurally unable to give it. (test-panic.sh's getconfig.py
+	// documents the same i3 behaviour and reads both halves; this is the Go
+	// side catching up.)
+	//
+	// `variable_replaced_contents` is preferred over `raw_contents` for the
+	// same reason ownership compares resolved chords: `bindsym $mod+h` and
+	// `bindsym Mod4+h` are the same bind, and only the replaced form says so.
 	var data struct {
-		Config string `json:"config"`
+		Config   string `json:"config"`
+		Included []struct {
+			Path     string `json:"path"`
+			Replaced string `json:"variable_replaced_contents"`
+			Raw      string `json:"raw_contents"`
+		} `json:"included_configs"`
 	}
 	if err := json.Unmarshal(payload, &data); err != nil {
 		return "", fmt.Errorf("i3 ipc: decoding GET_CONFIG reply: %w", err)
 	}
-	return data.Config, nil
+	var b strings.Builder
+	b.WriteString(data.Config)
+	for _, inc := range data.Included {
+		text := inc.Replaced
+		if text == "" {
+			text = inc.Raw
+		}
+		if text == "" {
+			continue
+		}
+		b.WriteString("\n# --- included: ")
+		b.WriteString(inc.Path)
+		b.WriteString("\n")
+		b.WriteString(text)
+	}
+	return b.String(), nil
 }
 
 func (c *client) Subscribe(events ...string) error {

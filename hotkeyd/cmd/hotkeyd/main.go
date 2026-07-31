@@ -161,12 +161,47 @@ func run(argv []string) int {
 	// so nothing further is printed here.
 	dae.resyncGrabs()
 	daemonLog(fmt.Sprintf("%d chords grabbed on %s via XI2 ($mod=%s)", len(grabs.Active()), display, mod))
+	warnIfKeyboardGrabbed(display, probeKeyboardGrab, daemonLog)
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
 	defer signal.Stop(sig)
 
 	return dae.Run(sig)
+}
+
+// warnIfKeyboardGrabbed is hotkeyd.py:1594-1604, which the port had dropped
+// (found by the sp021 parity gate, dotfiles-ylmp.15, against test-hotkeyd.sh
+// stage 14). A "N chords grabbed" line above a completely INERT daemon is the
+// exact confident-and-wrong signal that cost an afternoon of debugging in
+// dotfiles-hwds.30: an exclusive keyboard grab bypasses every passive grab on
+// the display, i3's included, so nothing fires while it is held and every
+// other liveness signal still reads healthy.
+//
+// A WARNING, never a refusal to start. The grab is somebody else's and it
+// will end — a screen gets unlocked — and a daemon that exited here would
+// need a human to notice and restart it at exactly the moment the user is
+// coming back to the machine.
+//
+// Probed on its OWN connection (probeKeyboardGrab opens one per attempt) so
+// what is being asked about is never the daemon's own passive grabs, and only
+// at startup: nothing is physically held a millisecond after launch, so the
+// dotfiles-hwds.31 implicit-grab false positive cannot fire here the way it
+// could mid-session. Silent when the question cannot be asked at all.
+// The probe is a parameter rather than a direct call so both arms are
+// testable without an X server holding a real grab -- run() itself cannot be
+// driven that way (see run's doc), and "the warning did not fire" is the
+// failure mode that has to stay covered.
+func warnIfKeyboardGrabbed(display string, probe func(string) (string, bool), logf func(string)) {
+	why, grabbed := probe(display)
+	if !grabbed {
+		return
+	}
+	logf(fmt.Sprintf("WARNING on %s — %s. The chords above are registered but "+
+		"BYPASSED: an exclusive grab overrides every passive one, i3's included, "+
+		"so no bind fires here until it is released. Usual holder: a locked "+
+		"screen. Not a daemon fault and not fixable by restarting it "+
+		"(dotfiles-hwds.30)", display, why))
 }
 
 // validateTable enforces us019's AC: an invalid table is refused BY NAME

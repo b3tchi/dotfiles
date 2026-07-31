@@ -28,6 +28,19 @@ HOTKEYD_PROC_PAT="${HOTKEYD_PROC_PAT:-hotkeyd\.py}"
 # same invocation drives either one.
 HOTKEYD_LIVECHECK="${HOTKEYD_LIVECHECK:-python3 $HERE/live_check.py}"
 
+# Stage 1 runs the daemon implementation's OWN unit suites. Default is
+# python's pytest trio; an engine with a different test runner names it here
+# (e.g. HOTKEYD_UNIT_CMD='go test ./...'). Left empty means "the python
+# default", so nothing changes for the shipped daemon.
+HOTKEYD_UNIT_CMD="${HOTKEYD_UNIT_CMD:-}"
+
+# The engine capability seam: HOTKEYD_HAS_BINDS_FLAG + table_daemon(), which
+# turn every `--binds <table>` stage below into "a daemon carrying THIS table",
+# however the engine under test happens to accept one. See test-engine.sh's
+# header for why a compiled-in-table engine gets a rebuilt binary rather than
+# a skip.
+. "$HERE/test-engine.sh"
+
 PASS=0
 FAIL=0
 
@@ -45,8 +58,20 @@ ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; PASS=$((PASS + 1)); }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; FAIL=$((FAIL + 1)); }
 
 # --- stage 1: loader + engine unit suites ----------------------------------
-echo "stage 1: bind table loader + layer engine (pytest)"
-if ! command -v python3 >/dev/null; then
+echo "stage 1: bind table loader + layer engine (unit suites)"
+if [ -n "$HOTKEYD_UNIT_CMD" ]; then
+    # A named runner for the engine under test. NOT optional and never
+    # skipped: an engine whose own unit suites do not run has not been
+    # measured by this stage at all, and the parity gate would be reading a
+    # blank where the other engine has 3 suites.
+    uout="$( cd "$HERE" && eval "$HOTKEYD_UNIT_CMD" 2>&1 )"
+    if [ $? -eq 0 ]; then
+        ok "engine unit suites ($HOTKEYD_UNIT_CMD)"
+    else
+        bad "engine unit suites failed ($HOTKEYD_UNIT_CMD)"
+        printf '%s\n' "$uout" | tail -25
+    fi
+elif ! command -v python3 >/dev/null; then
     bad "python3 missing"
 else
     for suite in test_binds.py test_layers.py test_daemon.py; do
@@ -80,20 +105,43 @@ BINDS = [Bind('Mod4+z', 'kill'), Bind('Mod4+z', 'nop dup'),
          Bind('Mod4+y', ''), Bind('Mod4+o', enter_layer('ghost'))]
 LAYERS = {}
 EOF
-out="$($HOTKEYD_BIN --check --binds "$TMP/faulty.py" 2>&1)"
-rc=$?
-if [ $rc -ne 0 ]; then
-    ok "exits non-zero ($rc)"
+# The SAME table for an engine that carries its table compiled in. Kept
+# beside the python one on purpose: two spellings of one fixture that drift
+# apart would make the two engines pass different tests while the summary
+# line claimed they passed the same one.
+cat > "$TMP/faulty.go" <<'EOF'
+package main
+
+import "hotkeyd/internal/bind"
+
+func init() {
+	Binds = []bind.Bind{
+		{Chord: "Mod4+z", Actions: cmdAction("kill")},
+		{Chord: "Mod4+z", Actions: cmdAction("nop dup")},
+		{Chord: "Mod4+y", Actions: cmdAction("")},
+		{Chord: "Mod4+o", Actions: []bind.Action{bind.EnterLayer{Layer: "ghost"}}},
+	}
+	Layers = map[string]bind.Layer{}
+}
+EOF
+if ! table_daemon "$TMP/faulty.py" "$TMP/faulty.go" "$TMP" faulty; then
+    bad "no daemon could be produced for the faulty table — stage 3 measured nothing"
 else
-    bad "faulty table validated clean — the validator is not load-bearing"
-fi
-for token in 'Mod4+z' 'Mod4+y' 'ghost'; do
-    if printf '%s' "$out" | grep -q -- "$token"; then
-        ok "names $token"
+    out="$($TBL_BIN --check $TBL_ARGS 2>&1)"
+    rc=$?
+    if [ $rc -ne 0 ]; then
+        ok "exits non-zero ($rc)"
     else
-        bad "does not name $token (a bare non-zero exit is not actionable)"
+        bad "faulty table validated clean — the validator is not load-bearing"
     fi
-done
+    for token in 'Mod4+z' 'Mod4+y' 'ghost'; do
+        if printf '%s' "$out" | grep -q -- "$token"; then
+            ok "names $token"
+        else
+            bad "does not name $token (a bare non-zero exit is not actionable)"
+        fi
+    done
+fi
 
 # --- stage 4: validation needs no X ---------------------------------------
 echo "stage 4: --check works with no DISPLAY"
@@ -220,18 +268,47 @@ from binds import Bind, Layer, enter_layer
 BINDS = [Bind('\$mod+o', enter_layer('trap'))]
 LAYERS = {'trap': Layer(binds=[Bind('h', 'focus left')], exit_keys=[])}
 EOF
-    out="$(DISPLAY=$D8 XDG_RUNTIME_DIR="$T8" timeout 15 \
-           $HOTKEYD_BIN --display "$D8" --binds "$T8/trap.py" 2>&1)"
-    rc=$?
-    if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "exit_keys"; then
-        ok "startup refuses an invalid table, naming the problem"
+    cat > "$T8/trap.go" <<'EOF'
+package main
+
+import "hotkeyd/internal/bind"
+
+func init() {
+	Binds = []bind.Bind{
+		{Chord: "$mod+o", Actions: []bind.Action{bind.EnterLayer{Layer: "trap"}}},
+	}
+	Layers = map[string]bind.Layer{
+		"trap": {Binds: []bind.Bind{{Chord: "h", Actions: cmdAction("focus left")}}},
+	}
+}
+EOF
+    if ! table_daemon "$T8/trap.py" "$T8/trap.go" "$T8" trap; then
+        bad "no daemon could be produced for the trap table — the startup-refusal case measured nothing"
     else
-        bad "startup accepted an invalid table (rc=$rc): $out"
+        out="$(DISPLAY=$D8 XDG_RUNTIME_DIR="$T8" timeout 15 \
+               $TBL_BIN --display "$D8" $TBL_ARGS 2>&1)"
+        rc=$?
+        if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "exit_keys"; then
+            ok "startup refuses an invalid table, naming the problem"
+        else
+            bad "startup accepted an invalid table (rc=$rc): $out"
+        fi
     fi
 
-    cp "$HERE/binds.py" "$T8/live.py"
-    DISPLAY=$D8 XDG_RUNTIME_DIR="$T8" setsid $HOTKEYD_BIN \
-        --display "$D8" --binds "$T8/live.py" >"$T8/d.log" 2>&1 &
+    # The live daemon below runs the SHIPPED table. On python that is a
+    # writable COPY of binds.py, because the SIGHUP cases mutate it; on an
+    # engine with the table compiled in there is nothing to copy and nothing
+    # to mutate, and the shipped binary is the shipped table.
+    if [ "$HOTKEYD_HAS_BINDS_FLAG" = 1 ]; then
+        cp "$HERE/binds.py" "$T8/live.py"
+        LIVE_BIN="$HOTKEYD_BIN"
+        LIVE_ARGS="--binds $T8/live.py"
+    else
+        LIVE_BIN="$HOTKEYD_BIN"
+        LIVE_ARGS=""
+    fi
+    DISPLAY=$D8 XDG_RUNTIME_DIR="$T8" setsid $LIVE_BIN \
+        --display "$D8" $LIVE_ARGS >"$T8/d.log" 2>&1 &
     sleep 2
     dpid="$(pgrep -f "$HOTKEYD_PROC_PAT .*--display $D8" | head -1)"
     if [ -z "$dpid" ]; then
@@ -248,26 +325,54 @@ EOF
         else bad "launcher's pgrep pattern misses a flag-carrying daemon"
         fi
 
-        echo "LAYERS = {}" > "$T8/live.py"
-        kill -HUP "$dpid" 2>/dev/null; sleep 1.5
-        if kill -0 "$dpid" 2>/dev/null; then
-            ok "survives SIGHUP with a table missing BINDS"
-        else
-            bad "SIGHUP with a broken table KILLED the daemon"
-        fi
+        # SIGHUP. The contract both engines owe is the same one — a SIGHUP
+        # that does NOT end up installing a table must leave the daemon alive
+        # and must SAY SO in the log — but the two get there by opposite
+        # routes, so the cases are spelled per engine rather than faked into
+        # one shape that would be honest about neither.
+        #
+        #   python: re-reads the table file, and refuses the read if it does
+        #           not import or does not validate ("reload REFUSED").
+        #   go:     the table is compiled in, so SIGHUP is a documented no-op
+        #           that says as much (cmd/hotkeyd/daemon.go sighupMessage).
+        #           There is no file to break, which is exactly why the two
+        #           broken-table cases below have no Go counterpart: nothing
+        #           outside the process can put a bad table in front of it,
+        #           and the rebuild-time equivalent is the trap fixture above.
+        if [ "$HOTKEYD_HAS_BINDS_FLAG" = 1 ]; then
+            echo "LAYERS = {}" > "$T8/live.py"
+            kill -HUP "$dpid" 2>/dev/null; sleep 1.5
+            if kill -0 "$dpid" 2>/dev/null; then
+                ok "survives SIGHUP with a table missing BINDS"
+            else
+                bad "SIGHUP with a broken table KILLED the daemon"
+            fi
 
-        cp "$HERE/binds.py" "$T8/live.py"
-        printf "\nBINDS = BINDS + [Bind('\$mod+o', 'nop dup')]\n" >> "$T8/live.py"
-        kill -HUP "$dpid" 2>/dev/null; sleep 1.5
-        if kill -0 "$dpid" 2>/dev/null; then
-            ok "survives SIGHUP with a validation-invalid table"
+            cp "$HERE/binds.py" "$T8/live.py"
+            printf "\nBINDS = BINDS + [Bind('\$mod+o', 'nop dup')]\n" >> "$T8/live.py"
+            kill -HUP "$dpid" 2>/dev/null; sleep 1.5
+            if kill -0 "$dpid" 2>/dev/null; then
+                ok "survives SIGHUP with a validation-invalid table"
+            else
+                bad "SIGHUP with a duplicate chord KILLED the daemon"
+            fi
+            if grep -q "reload REFUSED" "$T8/d.log"; then
+                ok "refused reloads say so and name the offender"
+            else
+                bad "no 'reload REFUSED' in the log: $(tail -3 "$T8/d.log")"
+            fi
         else
-            bad "SIGHUP with a duplicate chord KILLED the daemon"
-        fi
-        if grep -q "reload REFUSED" "$T8/d.log"; then
-            ok "refused reloads say so and name the offender"
-        else
-            bad "no 'reload REFUSED' in the log: $(tail -3 "$T8/d.log")"
+            kill -HUP "$dpid" 2>/dev/null; sleep 1.5
+            if kill -0 "$dpid" 2>/dev/null; then
+                ok "survives SIGHUP (compiled-in table: nothing to re-read)"
+            else
+                bad "SIGHUP KILLED the daemon"
+            fi
+            if grep -qi "SIGHUP is a no-op" "$T8/d.log"; then
+                ok "a SIGHUP that installs no table says so in the log"
+            else
+                bad "SIGHUP was silent — an operator expecting a reload gets no signal: $(tail -3 "$T8/d.log")"
+            fi
         fi
         kill "$dpid" 2>/dev/null
     fi
@@ -570,6 +675,23 @@ from binds import Bind, Layer, enter_layer
 BINDS = [Bind('\$mod+o', enter_layer('plain'))]
 LAYERS = {'plain': Layer(binds=[Bind('h', 'focus left')], exit_keys=['q'])}
 EOF
+    cat > "$T12/plain.go" <<'EOF'
+package main
+
+import "hotkeyd/internal/bind"
+
+func init() {
+	Binds = []bind.Bind{
+		{Chord: "$mod+o", Actions: []bind.Action{bind.EnterLayer{Layer: "plain"}}},
+	}
+	Layers = map[string]bind.Layer{
+		"plain": {
+			Binds:    []bind.Bind{{Chord: "h", Actions: cmdAction("focus left")}},
+			ExitKeys: []string{"q"},
+		},
+	}
+}
+EOF
     Xvfb "$D12" -screen 0 640x480x24 >/dev/null 2>&1 &
     X12P=$!
     sleep 1.5
@@ -578,9 +700,10 @@ EOF
     else
         # HOTKEYD_I3SOCK points at nothing: there is no i3 on this display, and
         # this keeps the daemon from shelling out to `i3 --get-socketpath`.
+        table_daemon "$T12/plain.py" "$T12/plain.go" "$T12" plain \
+            || bad "no daemon could be produced for the mods-less table"
         DISPLAY="$D12" XDG_RUNTIME_DIR="$T12" HOTKEYD_I3SOCK="$T12/no-i3.sock" \
-            setsid $HOTKEYD_BIN --display "$D12" \
-            --binds "$T12/plain.py" >"$T12/d.log" 2>&1 &
+            setsid $TBL_BIN --display "$D12" $TBL_ARGS >"$T12/d.log" 2>&1 &
         d12=""
         for _t in 1 2 3 4 5 6 7 8 9 10; do
             sleep 0.5
@@ -677,35 +800,56 @@ EOF
     if [ -z "$D13" ]; then
         bad "no free X display for the XI2-absence stage"
     else
-        out="$(DISPLAY=$D13 XDG_RUNTIME_DIR="$T13" PYTHONPATH="$T13" \
-               HOTKEYD_I3SOCK="$T13/no-i3.sock" timeout 15 \
-               $HOTKEYD_BIN --display "$D13" 2>&1)"
-        rc=$?
-        if [ "$rc" -eq 124 ]; then
-            bad "daemon HUNG on a display without XI2"
-        elif [ "$rc" -eq 0 ]; then
-            bad "daemon reported success on a display without XI2 — it fell "\
+        # THE SHIM IS PYTHON-SPECIFIC AND CANNOT BE MADE OTHERWISE. It works
+        # by monkeypatching python-xlib inside the daemon's own interpreter;
+        # there is no equivalent hook in a compiled binary, and the X server
+        # itself refuses to help — Xvfb answers `-extension XInputExtension`
+        # with "can not be disabled" (measured, dotfiles-ylmp.15), so no real
+        # server on this box can present XI2 as absent.
+        #
+        # Rather than skip the claim for the other engine, run the NAMED
+        # replacement that covers the same code path — requireXI2's three
+        # error arms, driven against a fake source — and FAIL if it is not
+        # there. That is sp021 Task 1's prescription for exactly this case,
+        # and it is not a skip: it is a different, executed test.
+        if [ "$HOTKEYD_HAS_BINDS_FLAG" = 1 ]; then
+            out="$(DISPLAY=$D13 XDG_RUNTIME_DIR="$T13" PYTHONPATH="$T13" \
+                   HOTKEYD_I3SOCK="$T13/no-i3.sock" timeout 15 \
+                   $HOTKEYD_BIN --display "$D13" 2>&1)"
+            rc=$?
+            if [ "$rc" -eq 124 ]; then
+                bad "daemon HUNG on a display without XI2"
+            elif [ "$rc" -eq 0 ]; then
+                bad "daemon reported success on a display without XI2 — it fell "\
 "back to core grabs, which carry no source device"
+            else
+                ok "exits non-zero ($rc) on a display without XI2"
+            fi
+            printf '%s' "$out" | grep -qi 'XI2 unavailable' \
+                && ok "the message names XI2" \
+                || bad "no 'XI2 unavailable' in the output: $out"
+            printf '%s' "$out" | grep -q 'XInputExtension' \
+                && ok "and names the missing extension" \
+                || bad "does not name the extension: $out"
+            if printf '%s' "$out" | grep -q 'Traceback'; then
+                bad "failed with a stack trace instead of a named error"
+            else
+                ok "no stack trace"
+            fi
+            # Nothing left behind to reap: the probe runs before the lock and
+            # the state socket exist.
+            if [ -e "$T13/hotkeyd-${D13#:}.sock" ]; then
+                bad "left a state socket behind after refusing to start"
+            else
+                ok "left no state socket behind"
+            fi
         else
-            ok "exits non-zero ($rc) on a display without XI2"
-        fi
-        printf '%s' "$out" | grep -qi 'XI2 unavailable' \
-            && ok "the message names XI2" \
-            || bad "no 'XI2 unavailable' in the output: $out"
-        printf '%s' "$out" | grep -q 'XInputExtension' \
-            && ok "and names the missing extension" \
-            || bad "does not name the extension: $out"
-        if printf '%s' "$out" | grep -q 'Traceback'; then
-            bad "failed with a stack trace instead of a named error"
-        else
-            ok "no stack trace"
-        fi
-        # Nothing left behind to reap: the probe runs before the lock and the
-        # state socket exist.
-        if [ -e "$T13/hotkeyd-${D13#:}.sock" ]; then
-            bad "left a state socket behind after refusing to start"
-        else
-            ok "left no state socket behind"
+            xout="$( cd "$HERE" && go test ./cmd/hotkeyd -run 'TestRequireXI2' -count=1 2>&1 )"
+            if [ $? -eq 0 ] && printf '%s' "$xout" | grep -q 'ok '; then
+                ok "XI2 absence is refused by name (go test -run TestRequireXI2)"
+            else
+                bad "the named XI2-absence replacement did not run clean: $xout"
+            fi
         fi
         # And the same tree on the SAME display, WITHOUT the shim, must start —
         # otherwise every check above would pass on a daemon that is simply
@@ -827,10 +971,21 @@ from binds import Bind
 BINDS = [Bind('\$mod+F11', 'nop grabbed-stage')]
 LAYERS = {}
 EOF
+        cat > "$T14/one.go" <<'EOF'
+package main
+
+import "hotkeyd/internal/bind"
+
+func init() {
+	Binds = []bind.Bind{{Chord: "$mod+F11", Actions: cmdAction("nop grabbed-stage")}}
+	Layers = map[string]bind.Layer{}
+}
+EOF
+        table_daemon "$T14/one.py" "$T14/one.go" "$T14" one \
+            || bad "no daemon could be produced for the one-bind table"
         rm -f "$T14/hotkeyd-${D14#:}.lock"
         DISPLAY=$D14 XDG_RUNTIME_DIR="$T14" HOTKEYD_I3SOCK="$T14/no-i3.sock" \
-            $HOTKEYD_BIN --display "$D14" \
-            --binds "$T14/one.py" >"$T14/d.log" 2>&1 &
+            $TBL_BIN --display "$D14" $TBL_ARGS >"$T14/d.log" 2>&1 &
         D14P=$!
         d14=""
         for _t in 1 2 3 4 5 6 7 8 9 10; do
@@ -927,9 +1082,20 @@ from binds import Bind
 BINDS = [Bind('\$mod+F11', 'nop whole')]
 LAYERS = {}
 EOF
+        cat > "$T15/whole.go" <<'EOF'
+package main
+
+import "hotkeyd/internal/bind"
+
+func init() {
+	Binds = []bind.Bind{{Chord: "$mod+F11", Actions: cmdAction("nop whole")}}
+	Layers = map[string]bind.Layer{}
+}
+EOF
+        table_daemon "$T15/whole.py" "$T15/whole.go" "$T15" whole \
+            || bad "no daemon could be produced for the whole table"
         DISPLAY=$D15 XDG_RUNTIME_DIR="$T15" HOTKEYD_I3SOCK="$T15/no-i3.sock" \
-            $HOTKEYD_BIN --display "$D15" \
-            --binds "$T15/whole.py" >"$T15/whole.log" 2>&1 &
+            $TBL_BIN --display "$D15" $TBL_ARGS >"$T15/whole.log" 2>&1 &
         W15P=$!
         w15=""
         for _t in 1 2 3 4 5 6 7 8 9 10; do
@@ -979,8 +1145,7 @@ print("unmapped F11 (keycode %d)" % code, flush=True)
 UNMAPEOF
         rm -f "$T15/hotkeyd-${D15#:}.lock" "$T15/hotkeyd-${D15#:}.grabs"
         DISPLAY=$D15 XDG_RUNTIME_DIR="$T15" HOTKEYD_I3SOCK="$T15/no-i3.sock" \
-            $HOTKEYD_BIN --display "$D15" \
-            --binds "$T15/whole.py" >"$T15/holed.log" 2>&1 &
+            $TBL_BIN --display "$D15" $TBL_ARGS >"$T15/holed.log" 2>&1 &
         H15P=$!
         h15=""
         for _t in 1 2 3 4 5 6 7 8 9 10; do
@@ -1142,9 +1307,29 @@ LAYERS = {'sw': Layer(binds=[Bind('Tab', run('true'))],
                       on_hold_release=run('true'),
                       on_exit=run('touch $MARK'))}
 EOF
+        cat > "$T17/hold.go" <<EOF
+package main
+
+import "hotkeyd/internal/bind"
+
+func init() {
+	Binds = []bind.Bind{{Chord: "Mod4+Tab", Actions: []bind.Action{
+		bind.Run{Cmd: "true"}, bind.EnterLayer{Layer: "sw"}}}}
+	Layers = map[string]bind.Layer{
+		"sw": {
+			Binds:         []bind.Bind{{Chord: "Tab", Actions: []bind.Action{bind.Run{Cmd: "true"}}}},
+			ExitKeys:      []string{"q"},
+			Hold:          "Mod4",
+			OnHoldRelease: []bind.Action{bind.Run{Cmd: "true"}},
+			OnExit:        []bind.Action{bind.Run{Cmd: "touch $MARK"}},
+		},
+	}
+}
+EOF
+        table_daemon "$T17/hold.py" "$T17/hold.go" "$T17" hold \
+            || bad "no daemon could be produced for the hold-layer table"
         DISPLAY=$D17 XDG_RUNTIME_DIR="$T17" HOTKEYD_I3SOCK="$T17/no-i3.sock" \
-            $HOTKEYD_BIN --display "$D17" \
-            --binds "$T17/hold.py" >"$T17/d.log" 2>&1 &
+            $TBL_BIN --display "$D17" $TBL_ARGS >"$T17/d.log" 2>&1 &
         d17=""
         for _t in 1 2 3 4 5 6 7 8 9 10; do
             sleep 0.5
@@ -1183,8 +1368,7 @@ EOF
         # CONTROL: stopped while NOT in a layer, nothing must fire.
         rm -f "$MARK"
         DISPLAY=$D17 XDG_RUNTIME_DIR="$T17" HOTKEYD_I3SOCK="$T17/no-i3.sock" \
-            $HOTKEYD_BIN --display "$D17" \
-            --binds "$T17/hold.py" >"$T17/d2.log" 2>&1 &
+            $TBL_BIN --display "$D17" $TBL_ARGS >"$T17/d2.log" 2>&1 &
         d17b=""
         for _t in 1 2 3 4 5 6 7 8 9 10; do
             sleep 0.5

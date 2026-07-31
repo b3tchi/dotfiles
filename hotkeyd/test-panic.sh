@@ -34,6 +34,11 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOTKEYD_BIN="${HOTKEYD_BIN:-python3 $HERE/hotkeyd.py}"
 HOTKEYD_PROC_PAT="${HOTKEYD_PROC_PAT:-hotkeyd\.py}"
 
+# The engine capability seam. Sourced HERE, before the $HOME sandbox below:
+# it snapshots the go build caches out of the real environment, and a fixture
+# build under the throwaway HOME would otherwise start cold.
+. "$HERE/test-engine.sh"
+
 PASS=0
 FAIL=0
 ok()  { printf '  \033[32mPASS\033[0m %s\n' "$1"; PASS=$((PASS + 1)); }
@@ -147,7 +152,40 @@ from binds import Bind
 BINDS = [Bind('Mod4+F10', 'workspace daemon-owns-it')]
 LAYERS = {}
 EOF
-export HOTKEYD_BINDS="$T/daemon-binds.py"
+# The same one-bind oracle for an engine whose table is compiled in. There is
+# no chord in the SHIPPED table that could stand in for it: who_answers()
+# needs a bind whose i3 command names its own author, and every shipped bind
+# either execs an external helper or issues a command ("workspace next") whose
+# result does not say who issued it. So the oracle is built, not borrowed.
+cat > "$T/daemon-binds.go" <<'EOF'
+package main
+
+import "hotkeyd/internal/bind"
+
+func init() {
+	Binds = []bind.Bind{{Chord: "Mod4+F10", Actions: cmdAction("workspace daemon-owns-it")}}
+	Layers = map[string]bind.Layer{}
+}
+EOF
+if [ "$HOTKEYD_HAS_BINDS_FLAG" = 1 ]; then
+    export HOTKEYD_BINDS="$T/daemon-binds.py"
+    ORACLE_BIN="$HOTKEYD_BIN"
+    ORACLE_ARGS="--binds $HOTKEYD_BINDS"
+else
+    # HOTKEYD_GO_DAEMON points hotkeyd.sh's `start` at the oracle for the
+    # launcher-driven daemons; HOTKEYD_BIN covers the two hand-started ones.
+    # HOTKEYD_BINDS stays UNSET on this path — the launcher refuses it by
+    # name when the engine is go (there is no --binds flag), and that refusal
+    # is correct behaviour we must not route around.
+    if ! go_table_daemon "$T/daemon-binds.go" "$T/oracle/hotkeyd"; then
+        echo "panic suite: could not build the ownership-oracle daemon — refusing to run"
+        exit 1
+    fi
+    export HOTKEYD_GO_DAEMON="$T/oracle/hotkeyd"
+    HOTKEYD_BIN="$T/oracle/hotkeyd"
+    ORACLE_BIN="$T/oracle/hotkeyd"
+    ORACLE_ARGS=""
+fi
 
 # XTEST injection. A real key through the real server is the only way to learn
 # who holds the passive grab; asking either side what it thinks it grabbed just
@@ -486,8 +524,8 @@ esac
 # "running" at exit 0 is a worse diagnostic failure than the bare "not running"
 # .19 fixed, because it tells the operator to stop looking.
 echo "panic: status in the CONTESTED state (daemon alive behind the latch)"
-env -u I3SOCK DISPLAY="$XA" setsid $HOTKEYD_BIN \
-    --display "$XA" --binds "$HOTKEYD_BINDS" >/dev/null 2>&1 &
+env -u I3SOCK DISPLAY="$XA" setsid $ORACLE_BIN \
+    --display "$XA" $ORACLE_ARGS >/dev/null 2>&1 &
 sleep 1
 [ "$(daemons_on "$XA")" = 1 ] \
     && ok "a hand-started daemon runs behind the fallback link" \
@@ -1036,7 +1074,7 @@ desktop stops the live :0/:10 daemons"
 # dotfiles-hwds.12 and dotfiles-f2be both rule out — and would do it invisibly,
 # because every case in this file would keep passing.
 scope_hits="$(grep -rl 'HOTKEYD_PGREP_SCOPE' "$HERE" "$HERE/../i3" 2>/dev/null \
-    | grep -Ev '/(hotkeyd-panic|test-panic|test-hotkeyd|test-launcher)\.sh$' \
+    | grep -Ev '/(hotkeyd-panic|test-panic|test-hotkeyd|test-launcher|test-mixed-estate)\.sh$' \
     || true)"
 [ -z "$scope_hits" ] \
     && ok "no shipped file sets HOTKEYD_PGREP_SCOPE — it is test-only" \

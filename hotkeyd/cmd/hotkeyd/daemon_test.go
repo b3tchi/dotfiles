@@ -1793,3 +1793,40 @@ func waitForGrabReportActive(display string, n int, timeout time.Duration) bool 
 	}
 	return false
 }
+
+// --- startup foreign-grab warning (sp021 parity gate, dotfiles-ylmp.15) -----
+//
+// hotkeyd.py:1594-1604 warns at startup when another client already holds an
+// exclusive keyboard grab; the port had dropped it, and test-hotkeyd.sh stage
+// 14 caught the gap. These pin both arms, because the one that actually bit
+// is the SILENT one -- a daemon that logs "N chords grabbed" and nothing else
+// while every chord is bypassed (dotfiles-hwds.30).
+
+func TestWarnIfKeyboardGrabbed_SilentWhenNotGrabbed(t *testing.T) {
+	var lines []string
+	warnIfKeyboardGrabbed(":98",
+		func(string) (string, bool) { return "", false },
+		func(s string) { lines = append(lines, s) })
+	if len(lines) != 0 {
+		t.Fatalf("warned with no grab held: %v", lines)
+	}
+}
+
+func TestWarnIfKeyboardGrabbed_NamesDisplayReasonAndConsequence(t *testing.T) {
+	var lines []string
+	warnIfKeyboardGrabbed(":98",
+		func(string) (string, bool) { return "another client holds an exclusive keyboard grab", true },
+		func(s string) { lines = append(lines, s) })
+	if len(lines) != 1 {
+		t.Fatalf("want exactly one warning, got %v", lines)
+	}
+	// `hotkeyd.sh status` and the operator both read this line; each token is
+	// a separate thing it has to answer -- which display, why, and that a
+	// restart is not the cure.
+	for _, want := range []string{"WARNING on :98", "exclusive keyboard grab",
+		"BYPASSED", "not fixable by restarting", "dotfiles-hwds.30"} {
+		if !strings.Contains(lines[0], want) {
+			t.Errorf("warning does not mention %q: %s", want, lines[0])
+		}
+	}
+}

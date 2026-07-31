@@ -751,3 +751,55 @@ func TestClient_PollEvents_FreshReconnectReportedEvenWhenCausedByAnotherCall(t *
 func TestClientInterface_Satisfied(t *testing.T) {
 	var _ Client = (*client)(nil)
 }
+
+// GET_CONFIG's `config` field is only the TOP-LEVEL file. In this repo the
+// binds that matter — the per-platform overlay and the panic fallback —
+// arrive through i3's `include ~/.i3/config.d/*.conf` glob and come back in
+// `included_configs` instead. A reader that drops them made `check
+// --ownership` report "no chord owned by BOTH" for a panicked session where
+// i3 held the daemon's entire chord set (dotfiles-ylmp.15).
+func TestClient_GetConfig_IncludesIncludedConfigs(t *testing.T) {
+	f := startFakeI3(t)
+	c := NewClient(pathFn(f), nil)
+	defer c.Close()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn := f.nextConn(t)
+		recvRequest(t, conn)
+		reply(t, conn, MsgGetConfig, []byte(`{"config":"bindsym $mod+a nop top",
+			"included_configs":[
+			  {"path":"/x/.i3/config.d/zz-fallback-binds.conf",
+			   "variable_replaced_contents":"bindsym Mod4+h focus left",
+			   "raw_contents":"bindsym $mod+h focus left"},
+			  {"path":"/x/.i3/config.d/native.conf",
+			   "raw_contents":"bindsym Mod4+z nop raw-only"}
+			]}`))
+	}()
+
+	cfg, err := c.GetConfig()
+	<-done
+	if err != nil {
+		t.Fatalf("GetConfig: %v", err)
+	}
+	if !strings.Contains(cfg, "bindsym $mod+a nop top") {
+		t.Errorf("top-level config missing: %q", cfg)
+	}
+	// The REPLACED form wins where i3 offers both: ownership compares
+	// resolved chords, and `$mod+h` would not compare equal to `Mod4+h`.
+	if !strings.Contains(cfg, "bindsym Mod4+h focus left") {
+		t.Errorf("included config's variable-replaced contents missing: %q", cfg)
+	}
+	if strings.Contains(cfg, "bindsym $mod+h focus left") {
+		t.Errorf("used raw_contents where variable_replaced_contents existed: %q", cfg)
+	}
+	// ...and raw is the fallback when i3 gives nothing else, rather than the
+	// file being dropped.
+	if !strings.Contains(cfg, "bindsym Mod4+z nop raw-only") {
+		t.Errorf("include with only raw_contents was dropped: %q", cfg)
+	}
+	if !strings.Contains(cfg, "zz-fallback-binds.conf") {
+		t.Errorf("included path is not named, so a problem cannot be located: %q", cfg)
+	}
+}
