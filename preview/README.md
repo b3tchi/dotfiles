@@ -204,22 +204,15 @@ Notes and escape hatches:
   *live* JS heap sits between 256 MB and V8's RAM-derived default (~1.33 GB
   on a 24 GB host) used to render and now OOMs the renderer instead. No
   realistic AKM content comes close — the exposure is the `html` tier, which
-  serves arbitrary local HTML. What that looks like now, measured against a
-  page that loads fine and then grows ~640 MB of live JS: **two renderer
+  serves arbitrary local HTML. What that looks like now: **two renderer
   terminations, then the crash text below and a stopped window** — no
-  renderer is respawned, nothing spins. Raise the ceiling for such a page by
-  setting `QTWEBENGINE_CHROMIUM_FLAGS` yourself (the caller override above).
-- Getting that behavior needed a fix to the crash guard itself
-  (dotfiles-f532): `WebTier.qml` used to refund its one-reload budget on
-  every `LoadSucceededStatus`, and an OOM-*after*-load always follows one, so
-  the guard looped forever (measured pre-fix on the same page: 10
-  terminations in 45 s, a fresh renderer pid each time, the fallback text
-  unreachable, and the loop resumed after a window restart because preview-d
-  restores the slot's last URL). The budget is now refunded only after a load
-  has stood for 10 s. A genuine one-off crash still gets its free reload and
-  recovers (verified by `SIGKILL`ing the renderer on a healthy akm page:
-  exactly one termination, page back, no fallback — and again 10 s later,
-  proving the refund still happens).
+  renderer is respawned, nothing spins. Measured on both shapes of such a
+  page: one that grows its heap the moment it loads (terminations at t=3 s
+  and t=7 s, then flat) and one that loads, idles 14 s, and only then grows
+  (terminations at t=17 s and t=35 s, then flat for the remaining 165 s of a
+  200 s run). Raise the ceiling for such a page by setting
+  `QTWEBENGINE_CHROMIUM_FLAGS` yourself (the caller override above) — the
+  crash text says so.
 - A caller who sets `QTWEBENGINE_CHROMIUM_FLAGS` explicitly owns the whole
   Chromium command line, ceiling included — that is the way to raise or drop
   it for one window.
@@ -232,6 +225,72 @@ Notes and escape hatches:
   released <1 MB of what had accumulated. Closing and reopening the window
   (`preview window <N> --close` then `preview window <N>`) still resets it to
   ~53 MB; the ceiling is what makes that unnecessary rather than routine.
+
+## Web-tier crash recovery
+
+`WebTier.qml` answers a dead renderer with a reload, and the rules for when
+it stops doing that live in `preview/qml/CrashPolicy.js` — a pure reducer,
+table-tested by `preview-test`'s test 33, because every interesting case
+takes tens of seconds of real Chromium to produce.
+
+Two rounds of this were needed and the second one (dotfiles-f532) is the
+interesting one:
+
+- sp022 T5 shipped "reload once, else fallback text". The budget was refunded
+  on `LoadSucceededStatus`, and an OOM-*after*-load always follows one, so
+  the guard looped forever the moment T10's ceiling made renderer OOM
+  reachable (measured pre-fix: 10 terminations in 45 s, a fresh renderer pid
+  each time, fallback unreachable, and it resumed after a window restart
+  because preview-d restores the slot's last URL).
+- T10 refunded the budget only after a load had **stood** for 10 s. That
+  bounds a page that dies *inside* those 10 s (the fast shape's cycle is 4 s:
+  terminations at t=3 s and t=7 s, then the fallback), but not one that idles
+  past them first: such a page gets its budget back before every OOM, and the
+  counter oscillates 0 → 1 → 0. Measured on the unfixed file: **11
+  terminations in 200 s, dead periodic at 17.8 s, no plateau, no fallback.**
+
+What separates a loop from a page that deserves another chance is **not**
+timing — a slow OOM loop and four external `SIGKILL`s 14 s apart are the same
+shape — but **who killed the renderer**. Measured on Qt 6.11.1 (these are
+observations; the enum names read backwards):
+
+| cause | `terminationStatus` | `exitCode` |
+|---|---|---|
+| V8 heap exhaustion (self-inflicted) | 3 `Killed` | 5 |
+| external `SIGKILL` on the renderer | 2 `Crashed` | 9 |
+| external `SIGTERM` | 2 `Crashed` | 61696 |
+| external `SIGABRT` | 1 `Abnormal` | 64000 |
+
+Chromium's "Killed" means *the process was terminated deliberately* (the V8
+OOM handler calls `TerminateCurrentProcessImmediately`); an unexpected signal
+death is "Crashed". So the status — not the exit code, which would tie the
+guard to one Chromium build — is the discriminator between "reloading reruns
+the same allocation and dies again" and "reloading will very likely work".
+
+Three budgets, all per-URL and all cleared by a new `sourceUrl` (any
+re-preview is an escape hatch):
+
+| budget | size | refunded by a 10 s probation? |
+|---|---|---|
+| self-inflicted OOMs | 1 | **no** — this is what stops the loop |
+| transient (sp022 T5's free reload) | 1 | yes |
+| lifetime, any cause | 8 | no — pure backstop |
+
+Reloads are spaced 0, 1, 2, 4, 8, 16, 30, 30 s, keyed on the lifetime count.
+The line: a URL still recovers from up to eight non-OOM terminations spaced
+further apart than the probation; it gives up on the second self-inflicted
+OOM, on a second crash inside one probation window, or on the ninth
+termination of any kind. The lifetime cap exists so "this guard cannot loop"
+holds even if the OOM classification stops matching on some future Qt —
+verified by forcing that degradation (with the classifier stubbed out, the
+same 200 s loop becomes 8 rate-limited reloads and then the fallback,
+instead of running forever).
+
+Verified against a real renderer, offscreen, ceiling active: one `SIGKILL` on
+a healthy page gives exactly one termination and the page comes back with no
+fallback; **four** `SIGKILL`s 14 s apart all recover (reload delays 0/1/2/4 s,
+`lifetime` reaches 4 of 8); a new `sourceUrl` on a window already showing the
+crash text clears every counter and renders.
 
 ## Native svg-tier decode size
 
