@@ -1322,6 +1322,127 @@ EOF
     fi
 fi
 
+# ============================================================================
+# stage 18: set-layer round trip (screenshot-drag -> state feed -> default)
+# ============================================================================
+#
+# sp023 Task 4 (bd dotfiles-1m4t.4): the CLIENT-side `set-layer` verb, driven
+# for real against a daemon carrying an External-declared layer. config.go's
+# shipped table only gets its own "screenshot-drag": {External: true} entry
+# at Task 5's cutover, so this stage builds its own tiny fixture table via
+# table_daemon(), the same seam stage 12/14/17 already use, rather than
+# waiting on that later task.
+#
+# The claim under test: `set-layer screenshot-drag` enters the layer over the
+# NEW control socket (control.go, Task 3) with no chord and no i3 involved at
+# all (HOTKEYD_I3SOCK points at nothing, matching stage 12's mods-less-layer
+# stage); a FRESH `state-tail` client's FIRST line is the replay of that
+# state (ft009's replay-on-connect contract, exercised here at the CLI);
+# `set-layer default` clears it the same way, and the feed reflects that too.
+# Every state-tail read is wrapped in `timeout`: state-tail blocks in Read()
+# forever on an otherwise-quiet socket once it has its one line, and this
+# stage only ever wants that first line per fresh connection.
+echo "stage 18: set-layer round trip (screenshot-drag -> state feed -> default)"
+if ! command -v Xvfb >/dev/null; then
+    printf '  \033[33mSKIP\033[0m Xvfb missing\n'
+else
+    D18=""
+    _b=$(( 40 + (($$ + 18) % 20) ))
+    for _o in 0 1 2 3 4 5 6 7 8 9; do
+        _n=$(( _b + _o ))
+        [ -e "/tmp/.X${_n}-lock" ] || { D18=":$_n"; break; }
+    done
+    T18="$TMPD/t18"; mkdir -p "$T18"
+    if [ -z "$D18" ]; then
+        bad "no free X display for the set-layer stage"
+    else
+        # A signal-only external layer and NOTHING else -- no Binds, no
+        # chords, matching plan decision 1 (Task 1/2's own fixtures).
+        cat > "$T18/extern.go" <<'EOF'
+package main
+
+import "hotkeyd/internal/bind"
+
+func init() {
+	Binds = nil
+	Layers = map[string]bind.Layer{
+		"screenshot-drag": {External: true},
+	}
+}
+EOF
+        Xvfb "$D18" -screen 0 640x480x24 >/dev/null 2>&1 &
+        X18P=$!
+        sleep 1.5
+        table_daemon "$T18/extern.go" "$T18" extern \
+            || bad "no daemon could be produced for the external-layer table"
+        # HOTKEYD_I3SOCK points at nothing: no i3 on this display, and this
+        # stage's whole point is that set-layer needs none (plan decision 4
+        # only matters once i3 IS in a mode, which this stage does not
+        # exercise -- stage 11 already covers that arbitration).
+        DISPLAY="$D18" XDG_RUNTIME_DIR="$T18" HOTKEYD_I3SOCK="$T18/no-i3.sock" \
+            setsid $TBL_BIN --display "$D18" >"$T18/d.log" 2>&1 &
+        D18P=$!
+        d18=""
+        for _t in 1 2 3 4 5 6 7 8 9 10; do
+            sleep 0.5
+            d18="$(pgrep -f "$HOTKEYD_PROC_PAT --display $D18" | head -1)"
+            [ -n "$d18" ] && break
+        done
+        if [ -z "$d18" ]; then
+            bad "the external-layer daemon did not start: $(tail -3 "$T18/d.log")"
+        else
+            out="$(XDG_RUNTIME_DIR="$T18" $TBL_BIN set-layer screenshot-drag --display "$D18" 2>&1)"
+            src=$?
+            if [ "$src" -eq 0 ]; then
+                ok "set-layer screenshot-drag exits 0"
+            else
+                bad "set-layer screenshot-drag failed (rc=$src): $out"
+            fi
+
+            l18="$(XDG_RUNTIME_DIR="$T18" timeout 5 $TBL_BIN state-tail "$D18" 2>/dev/null | head -1)"
+            if [ "$l18" = '{"layer":"screenshot-drag","mod":null}' ]; then
+                ok "a fresh state-tail client's FIRST line replays screenshot-drag"
+            else
+                bad "state-tail first line was: ${l18:-<empty>} (daemon log: $(tail -3 "$T18/d.log"))"
+            fi
+
+            out2="$(XDG_RUNTIME_DIR="$T18" $TBL_BIN set-layer default --display "$D18" 2>&1)"
+            src2=$?
+            if [ "$src2" -eq 0 ]; then
+                ok "set-layer default exits 0"
+            else
+                bad "set-layer default failed (rc=$src2): $out2"
+            fi
+
+            l18b="$(XDG_RUNTIME_DIR="$T18" timeout 5 $TBL_BIN state-tail "$D18" 2>/dev/null | head -1)"
+            if [ "$l18b" = '{"layer":"default","mod":null}' ]; then
+                ok "the feed returns default after set-layer default"
+            else
+                bad "state-tail first line after clear was: ${l18b:-<empty>}"
+            fi
+
+            # Client-side pre-validation (us019 AC4 / adr0021), proven
+            # end to end against the SAME live daemon: an undeclared name
+            # is refused BY NAME without ever touching the control socket.
+            out3="$(XDG_RUNTIME_DIR="$T18" $TBL_BIN set-layer not-a-real-layer --display "$D18" 2>&1)"
+            src3=$?
+            if [ "$src3" -eq 1 ]; then
+                ok "an undeclared name is refused (exit 1), not attempted"
+            else
+                bad "set-layer not-a-real-layer returned $src3, want 1: $out3"
+            fi
+            case "$out3" in
+                *"not-a-real-layer"*) ok "the refusal names the offending layer" ;;
+                *) bad "the refusal did not name the layer: $out3" ;;
+            esac
+
+            kill "$d18" 2>/dev/null
+        fi
+        kill "$D18P" 2>/dev/null
+        kill "$X18P" 2>/dev/null
+    fi
+fi
+
 echo
 printf 'hotkeyd: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

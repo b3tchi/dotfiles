@@ -245,3 +245,66 @@ func TestDispatch_StateTail_RoutesToStateTailCmd(t *testing.T) {
 		t.Errorf("Dispatch([state-tail, ...]) took %s -- looks like it fell through to the daemon-start path instead of runStateTailCmd()", elapsed)
 	}
 }
+
+// TestDispatch_SetLayer_RoutesToSetLayerCmd proves the "set-layer" leading
+// argv token is actually routed to runSetLayerCmd, not silently falling
+// through to flag parsing (which would treat "set-layer" as an unknown
+// flag/positional and either error or fall to the daemon-start path,
+// exactly the coincidence TestDispatch_StateTail_RoutesToStateTailCmd's
+// own comment documents for that verb). Uses an undeclared name so this
+// is fast and deterministic -- pre-validation refuses before any socket
+// I/O, so no Xvfb/daemon is needed to prove the routing line is load-bearing.
+func TestDispatch_SetLayer_RoutesToSetLayerCmd(t *testing.T) {
+	code, stderr := captureStderr(t, func() int {
+		return Dispatch([]string{"set-layer", "not-a-real-layer"})
+	})
+	if code != SetLayerRefused {
+		t.Fatalf("Dispatch([set-layer, not-a-real-layer]) = %d, want %d (SetLayerRefused)", code, SetLayerRefused)
+	}
+	if !strings.Contains(stderr, "set-layer:") {
+		t.Fatalf("stderr does not carry set-layer's own failure message: %q", stderr)
+	}
+	if !strings.Contains(stderr, "not-a-real-layer") {
+		t.Fatalf("stderr does not name the offending layer: %q", stderr)
+	}
+}
+
+// TestDispatch_SetLayer_NoName_UsageExitTwo pins the edge case: a missing
+// NAME argument is a usage error (exit 2), not a refusal or an
+// unreachable-socket error.
+func TestDispatch_SetLayer_NoName_UsageExitTwo(t *testing.T) {
+	code, stderr := captureStderr(t, func() int {
+		return Dispatch([]string{"set-layer"})
+	})
+	if code != 2 {
+		t.Fatalf("Dispatch([set-layer]) = %d, want 2", code)
+	}
+	if !strings.Contains(stderr, "set-layer") {
+		t.Fatalf("usage output does not mention set-layer: %q", stderr)
+	}
+}
+
+// TestUsageText_DocumentsSetLayerNarrownessAndExitCodes pins sp023 Task 4's
+// success criterion verbatim: usageText must document the set-layer verb,
+// its narrowness (only compile-time-declared external-trigger names, plus
+// default to clear), and its distinct exit codes -- the existing
+// usage-content test pattern (TestUsageText_NoBindsFlag_PointsAtGoBuild)
+// asserts on usageText()'s own return value directly.
+func TestUsageText_DocumentsSetLayerNarrownessAndExitCodes(t *testing.T) {
+	text := usageText()
+	if !strings.Contains(text, "set-layer") {
+		t.Fatalf("usage text does not mention set-layer at all: %q", text)
+	}
+	if !strings.Contains(text, "External") && !strings.Contains(text, "COMPILED table") && !strings.Contains(text, "compiled table") {
+		t.Errorf("usage text does not document set-layer's narrowness (compile-time-declared names only): %q", text)
+	}
+	if !strings.Contains(text, "default") {
+		t.Errorf("usage text does not mention NAME=default as the clear spelling: %q", text)
+	}
+	if !strings.Contains(text, "REFUSED") && !strings.Contains(text, "refused") {
+		t.Errorf("usage text does not document the refused-by-daemon-or-precheck exit code: %q", text)
+	}
+	if !strings.Contains(text, "UNREACHABLE") && !strings.Contains(text, "unreachable") {
+		t.Errorf("usage text does not document the daemon-unreachable exit code: %q", text)
+	}
+}

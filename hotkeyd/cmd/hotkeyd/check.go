@@ -53,6 +53,22 @@ func usageText() string {
         line verbatim, exiting the moment it is missing or closes --
         no internal retry (adr0014); drop-in for state-tail.py
 
+  hotkeyd set-layer NAME [--display DISPLAY]
+        set (or clear, with NAME=default) this display's
+        external-trigger layer over its per-display control socket
+        (sp023) -- NARROW ON PURPOSE: only names declared External in
+        the COMPILED table are accepted (e.g. screenshot-drag), plus
+        "default" to clear; every other layer stays chord-only and is
+        refused BY NAME before this client even dials the socket
+        (adr0021's compile-time discipline, checked here AND again by
+        the daemon). One connect attempt, no retry (adr0014). Exit
+        codes: 0 on {"ok":true}; 1 if REFUSED -- by this client's own
+        pre-check or by the daemon, either way a wrong request; 2 on a
+        usage error (no NAME, or a bad flag); 3 if the daemon is
+        UNREACHABLE -- no connection, no reply before the deadline, or
+        an unparseable reply -- distinct from 1 so a caller script can
+        tell "wrong request" from "no daemon"
+
 There is no --binds flag: unlike hotkeyd.py, the bind table is
 compiled into this binary (the dwm config.h model). To try a
 different table, edit cmd/hotkeyd/config.go and run 'go build'.
@@ -75,6 +91,8 @@ func Dispatch(argv []string) int {
 			return runStateTailCmd(argv[1:])
 		case "check":
 			return runCheckSubcommand(argv[1:])
+		case "set-layer":
+			return runSetLayerCmd(argv[1:])
 		}
 	}
 
