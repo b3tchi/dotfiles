@@ -808,10 +808,16 @@ EOF
         # server on this box can present XI2 as absent.
         #
         # Rather than skip the claim for the other engine, run the NAMED
-        # replacement that covers the same code path — requireXI2's three
-        # error arms, driven against a fake source — and FAIL if it is not
-        # there. That is sp021 Task 1's prescription for exactly this case,
-        # and it is not a skip: it is a different, executed test.
+        # replacements that cover the same code path — requireXI2's error
+        # arms driven against a fake source, PLUS the daemon-level
+        # fail-fast tests (cmd/hotkeyd/xi2_failfast_test.go), which drive
+        # the real Dispatch()/run() against a FAKE X SERVER that answers
+        # QueryExtension("XInputExtension") with present=0. That last file
+        # is where every python assertion below actually lands: exit 5 by
+        # name, the message naming XI2 and the extension, no stack trace,
+        # nothing left behind, and no hang. It is sp021 Task 1's
+        # prescription for exactly this case, and it is not a skip: it is a
+        # different, executed test.
         if [ "$HOTKEYD_HAS_BINDS_FLAG" = 1 ]; then
             out="$(DISPLAY=$D13 XDG_RUNTIME_DIR="$T13" PYTHONPATH="$T13" \
                    HOTKEYD_I3SOCK="$T13/no-i3.sock" timeout 15 \
@@ -844,11 +850,31 @@ EOF
                 ok "left no state socket behind"
             fi
         else
-            xout="$( cd "$HERE" && go test ./cmd/hotkeyd -run 'TestRequireXI2' -count=1 2>&1 )"
-            if [ $? -eq 0 ] && printf '%s' "$xout" | grep -q 'ok '; then
-                ok "XI2 absence is refused by name (go test -run TestRequireXI2)"
+            # GATE ON POSITIVE EVIDENCE THAT THE NAMED TESTS RAN. `go test
+            # -run X` prints "ok <pkg> 0.004s [no tests to run]" and exits 0
+            # when X matches NOTHING, so `rc -eq 0` plus a grep for 'ok '
+            # proves only that the package compiles: rename or delete these
+            # tests and the stage would still print PASS while measuring
+            # nothing. That is the vacuity this whole tree is written
+            # against (test-engine.sh:28-30 — a stage that does not
+            # exercise what it claims must FAIL), and the cutover gate is
+            # the worst place in the repo to put another instance of it
+            # (audit gap 1, dotfiles-ylmp.15). -v makes every test announce
+            # itself by name; count the PASS lines and require the full
+            # set.
+            xout="$( go -C "$HERE" test ./cmd/hotkeyd -count=1 -v \
+                     -run 'TestRequireXI2|TestRun_XI2' 2>&1 )"
+            xrc=$?
+            nhelper="$(printf '%s\n' "$xout" | grep -c -- '--- PASS: TestRequireXI2')"
+            ndaemon="$(printf '%s\n' "$xout" | grep -c -- '--- PASS: TestRun_XI2')"
+            if [ "$xrc" -eq 0 ] && [ "$nhelper" -ge 4 ] && [ "$ndaemon" -ge 3 ]; then
+                ok "XI2 absence is refused by name — $nhelper requireXI2 arms \
+and $ndaemon daemon-level fail-fast tests (fake XI2-less X server: exit 5 by \
+name, no stack trace, nothing left behind) ran and passed"
             else
-                bad "the named XI2-absence replacement did not run clean: $xout"
+                bad "the named XI2-absence replacement did not run clean — \
+rc=$xrc, $nhelper/4 '--- PASS: TestRequireXI2' lines, $ndaemon/3 \
+'--- PASS: TestRun_XI2' lines: $xout"
             fi
         fi
         # And the same tree on the SAME display, WITHOUT the shim, must start —

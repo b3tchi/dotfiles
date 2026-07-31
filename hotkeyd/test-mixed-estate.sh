@@ -69,6 +69,16 @@ probe_free_display() { # <start-number>
 # BOTH argv shapes, the same pattern hotkeyd-panic.sh's own sweep uses
 # (dotfiles-pwaj). A pattern that saw only one engine would make every
 # "stopped" assertion below true for the wrong reason.
+#
+# daemons_on() is deliberately ENGINE-BLIND — it counts daemons of either
+# shape, which is what the "how many are running" questions need. It is
+# therefore NOT sufficient on its own for any assertion whose LABEL names an
+# engine: "panic stopped the go daemon on :98" read through daemons_on()
+# alone passes just as happily when :98 is served by python, so a broken
+# cutover arm would be reported as a working one (audit gap 3,
+# dotfiles-ylmp.15 — measured: it understated the mutation's blast radius by
+# more than 3x). Every engine-named assertion below pairs the count with
+# engine_on().
 PAT='hotkeyd(\.py)?'
 daemons_on() { pgrep -f "$PAT .*--display $1" 2>/dev/null | wc -l; }
 engine_on()  { # <display> -> python|go|none
@@ -225,17 +235,25 @@ sout="$(DISPLAY="$XGO" "$GO_BIN" check --ownership --display "$XGO" 2>&1)"; src=
 # --- 3: panic stops BOTH engines --------------------------------------------
 # The counts are read BEFORE as well as after (dotfiles-ptd2): a "0 daemons"
 # claim read through a pattern that was never shown live is a tautology.
+# The ENGINE is read before as well, for the reason daemons_on()'s comment
+# gives: these two assertions are the ones that say "the python daemon" and
+# "the go daemon" out loud, so each has to have looked.
 echo "mixed estate: panic sweeps both argv shapes"
-before_py="$(daemons_on "$XPY")"; before_go="$(daemons_on "$XGO")"
+before_py="$(daemons_on "$XPY")"; before_py_eng="$(engine_on "$XPY")"
+before_go="$(daemons_on "$XGO")"; before_go_eng="$(engine_on "$XGO")"
 DISPLAY="$XPY" sh "$PANIC" panic >/dev/null 2>&1
 sleep 1
-[ "$before_py" = 1 ] && [ "$(daemons_on "$XPY")" = 0 ] \
-    && ok "panic stopped the python daemon on $XPY (1 -> 0)" \
-    || bad "python daemon on $XPY: $before_py -> $(daemons_on "$XPY"), want 1 -> 0"
-[ "$before_go" = 1 ] && [ "$(daemons_on "$XGO")" = 0 ] \
-    && ok "panic stopped the go daemon on $XGO (1 -> 0), a display it was \
+[ "$before_py" = 1 ] && [ "$before_py_eng" = python ] \
+    && [ "$(daemons_on "$XPY")" = 0 ] \
+    && ok "panic stopped the python daemon on $XPY (1 python -> 0)" \
+    || bad "daemon on $XPY: $before_py $before_py_eng -> $(daemons_on "$XPY") \
+$(engine_on "$XPY"), want 1 python -> 0 none"
+[ "$before_go" = 1 ] && [ "$before_go_eng" = go ] \
+    && [ "$(daemons_on "$XGO")" = 0 ] \
+    && ok "panic stopped the go daemon on $XGO (1 go -> 0), a display it was \
 not called with" \
-    || bad "go daemon on $XGO: $before_go -> $(daemons_on "$XGO"), want 1 -> 0"
+    || bad "daemon on $XGO: $before_go $before_go_eng -> $(daemons_on "$XGO") \
+$(engine_on "$XGO"), want 1 go -> 0 none"
 if [ -L "$LINK" ] || [ -e "$LINK" ]; then
     ok "the fallback is linked at $LINK"
 else

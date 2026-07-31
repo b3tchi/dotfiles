@@ -12,3 +12,10 @@
 # The build's own temp file (dot.yaml builds to this, then renames over
 # /hotkeyd) -- normally never left behind, but a killed build can leave one.
 .hotkeyd.build.*
+
+# cmd/livecheck's build output. test-hotkeyd.sh's documented go-engine
+# invocation is `HOTKEYD_LIVECHECK=$HERE/livecheck` (see its header), so
+# anyone following the instructions leaves a multi-MB binary here. Same
+# anchoring rule as /hotkeyd above: never hotkeyd/cmd/livecheck/, the
+# tracked source package.
+/livecheck
