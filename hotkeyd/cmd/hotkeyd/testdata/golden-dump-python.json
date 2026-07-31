@@ -1,0 +1,999 @@
+{
+  "binds": [
+    {
+      "actions": [
+        "enter:nav"
+      ],
+      "chord": "$mod+o",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.local/bin/wm-launch-terminal st"
+      ],
+      "chord": "$mod+Return",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.dotfiles/quickshell/qs-overlay.sh launcher"
+      ],
+      "chord": "$mod+d",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.dotfiles/quickshell/qs-overlay.sh projects"
+      ],
+      "chord": "$mod+p",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.local/bin/ws-switch.nu 1"
+      ],
+      "chord": "$mod+1",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.local/bin/ws-switch.nu 1 move"
+      ],
+      "chord": "$mod+Ctrl+1",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.local/bin/ws-switch.nu 1 follow"
+      ],
+      "chord": "$mod+Shift+1",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.local/bin/ws-switch.nu 2"
+      ],
+      "chord": "$mod+2",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.local/bin/ws-switch.nu 2 move"
+      ],
+      "chord": "$mod+Ctrl+2",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.local/bin/ws-switch.nu 2 follow"
+      ],
+      "chord": "$mod+Shift+2",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.local/bin/ws-switch.nu 3"
+      ],
+      "chord": "$mod+3",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.local/bin/ws-switch.nu 3 move"
+      ],
+      "chord": "$mod+Ctrl+3",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.local/bin/ws-switch.nu 3 follow"
+      ],
+      "chord": "$mod+Shift+3",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.local/bin/ws-switch.nu 4"
+      ],
+      "chord": "$mod+4",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.local/bin/ws-switch.nu 4 move"
+      ],
+      "chord": "$mod+Ctrl+4",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.local/bin/ws-switch.nu 4 follow"
+      ],
+      "chord": "$mod+Shift+4",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.local/bin/ws-switch.nu 5"
+      ],
+      "chord": "$mod+5",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.local/bin/ws-switch.nu 5 move"
+      ],
+      "chord": "$mod+Ctrl+5",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.local/bin/ws-switch.nu 5 follow"
+      ],
+      "chord": "$mod+Shift+5",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.local/bin/ws-switch.nu 6"
+      ],
+      "chord": "$mod+6",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.local/bin/ws-switch.nu 6 move"
+      ],
+      "chord": "$mod+Ctrl+6",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.local/bin/ws-switch.nu 6 follow"
+      ],
+      "chord": "$mod+Shift+6",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.local/bin/ws-switch.nu 7"
+      ],
+      "chord": "$mod+7",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.local/bin/ws-switch.nu 7 move"
+      ],
+      "chord": "$mod+Ctrl+7",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.local/bin/ws-switch.nu 7 follow"
+      ],
+      "chord": "$mod+Shift+7",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.local/bin/ws-switch.nu 8"
+      ],
+      "chord": "$mod+8",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.local/bin/ws-switch.nu 8 move"
+      ],
+      "chord": "$mod+Ctrl+8",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.local/bin/ws-switch.nu 8 follow"
+      ],
+      "chord": "$mod+Shift+8",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:workspace next"
+      ],
+      "chord": "$mod+Ctrl+Right",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:workspace prev"
+      ],
+      "chord": "$mod+Ctrl+Left",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:border none"
+      ],
+      "chord": "$mod+u",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:border pixel 4"
+      ],
+      "chord": "$mod+y",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:split h;exec notify-send 'tile side'"
+      ],
+      "chord": "$mod+s",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:split v;exec notify-send 'tile bellow'"
+      ],
+      "chord": "$mod+b",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:split toggle"
+      ],
+      "chord": "$mod+q",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:fullscreen toggle"
+      ],
+      "chord": "$mod+z",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:layout tabbed"
+      ],
+      "chord": "$mod+t",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:layout toggle split"
+      ],
+      "chord": "$mod+e",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:sticky toggle"
+      ],
+      "chord": "$mod+Shift+p",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:focus parent"
+      ],
+      "chord": "$mod+a",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:move scratchpad"
+      ],
+      "chord": "$mod+Shift+minus",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:scratchpad show"
+      ],
+      "chord": "$mod+minus",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:focus left"
+      ],
+      "chord": "$mod+h",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:move left"
+      ],
+      "chord": "$mod+Shift+h",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:focus left"
+      ],
+      "chord": "$mod+Left",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:move left"
+      ],
+      "chord": "$mod+Shift+Left",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:focus down"
+      ],
+      "chord": "$mod+j",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:move down"
+      ],
+      "chord": "$mod+Shift+j",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:focus down"
+      ],
+      "chord": "$mod+Down",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:move down"
+      ],
+      "chord": "$mod+Shift+Down",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:focus up"
+      ],
+      "chord": "$mod+k",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:move up"
+      ],
+      "chord": "$mod+Shift+k",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:focus up"
+      ],
+      "chord": "$mod+Up",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:move up"
+      ],
+      "chord": "$mod+Shift+Up",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:focus right"
+      ],
+      "chord": "$mod+l",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:move right"
+      ],
+      "chord": "$mod+Shift+l",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:focus right"
+      ],
+      "chord": "$mod+Right",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "cmd:move right"
+      ],
+      "chord": "$mod+Shift+Right",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:i3-scrot"
+      ],
+      "chord": "Print",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:i3-scrot -w"
+      ],
+      "chord": "$mod+Print",
+      "device": "",
+      "on_release": true
+    },
+    {
+      "actions": [
+        "run:i3-scrot -s"
+      ],
+      "chord": "$mod+Shift+Print",
+      "device": "",
+      "on_release": true
+    },
+    {
+      "actions": [
+        "run:~/.dotfiles/quickshell/qs-screenshot.sh"
+      ],
+      "chord": "$mod+Shift+s",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "enter:system"
+      ],
+      "chord": "$mod+0",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.dotfiles/quickshell/qs-overlay.sh switcher",
+        "enter:switcher"
+      ],
+      "chord": "$mod+Tab",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.dotfiles/quickshell/qs-notif.sh toggle"
+      ],
+      "chord": "$mod+n",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:~/.dotfiles/quickshell/qs-clip.sh toggle"
+      ],
+      "chord": "$mod+v",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:blurlock"
+      ],
+      "chord": "$mod+9",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:terminal -e 'alsamixer'"
+      ],
+      "chord": "$mod+Ctrl+m",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "run:i3-nagbar -t warning -m 'You pressed the exit shortcut. Do you really want to exit i3? This will end your X session.' -b 'Yes, exit i3' 'i3-msg exit'"
+      ],
+      "chord": "$mod+Shift+e",
+      "device": "",
+      "on_release": false
+    },
+    {
+      "actions": [
+        "enter:resize"
+      ],
+      "chord": "$mod+r",
+      "device": "",
+      "on_release": false
+    }
+  ],
+  "layers": {
+    "nav": {
+      "binds": [
+        {
+          "actions": [
+            "cmd:focus left"
+          ],
+          "chord": "h",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "cmd:focus left"
+          ],
+          "chord": "Left",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "cmd:focus down"
+          ],
+          "chord": "j",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "cmd:focus down"
+          ],
+          "chord": "Down",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "cmd:focus up"
+          ],
+          "chord": "k",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "cmd:focus up"
+          ],
+          "chord": "Up",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "cmd:focus right"
+          ],
+          "chord": "l",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "cmd:focus right"
+          ],
+          "chord": "Right",
+          "device": "",
+          "on_release": false
+        }
+      ],
+      "exit_keys": [
+        "q",
+        "Escape",
+        "Return"
+      ],
+      "hold": "",
+      "mods": {
+        "move": {
+          "binds": [
+            {
+              "actions": [
+                "cmd:move left"
+              ],
+              "chord": "h",
+              "device": "",
+              "on_release": false
+            },
+            {
+              "actions": [
+                "cmd:move left"
+              ],
+              "chord": "Left",
+              "device": "",
+              "on_release": false
+            },
+            {
+              "actions": [
+                "cmd:move down"
+              ],
+              "chord": "j",
+              "device": "",
+              "on_release": false
+            },
+            {
+              "actions": [
+                "cmd:move down"
+              ],
+              "chord": "Down",
+              "device": "",
+              "on_release": false
+            },
+            {
+              "actions": [
+                "cmd:move up"
+              ],
+              "chord": "k",
+              "device": "",
+              "on_release": false
+            },
+            {
+              "actions": [
+                "cmd:move up"
+              ],
+              "chord": "Up",
+              "device": "",
+              "on_release": false
+            },
+            {
+              "actions": [
+                "cmd:move right"
+              ],
+              "chord": "l",
+              "device": "",
+              "on_release": false
+            },
+            {
+              "actions": [
+                "cmd:move right"
+              ],
+              "chord": "Right",
+              "device": "",
+              "on_release": false
+            }
+          ],
+          "modifier": "Ctrl"
+        },
+        "resize": {
+          "binds": [
+            {
+              "actions": [
+                "cmd:resize shrink width 5 px or 5 ppt"
+              ],
+              "chord": "h",
+              "device": "",
+              "on_release": false
+            },
+            {
+              "actions": [
+                "cmd:resize shrink width 5 px or 5 ppt"
+              ],
+              "chord": "Left",
+              "device": "",
+              "on_release": false
+            },
+            {
+              "actions": [
+                "cmd:resize grow height 5 px or 5 ppt"
+              ],
+              "chord": "j",
+              "device": "",
+              "on_release": false
+            },
+            {
+              "actions": [
+                "cmd:resize grow height 5 px or 5 ppt"
+              ],
+              "chord": "Down",
+              "device": "",
+              "on_release": false
+            },
+            {
+              "actions": [
+                "cmd:resize shrink height 5 px or 5 ppt"
+              ],
+              "chord": "k",
+              "device": "",
+              "on_release": false
+            },
+            {
+              "actions": [
+                "cmd:resize shrink height 5 px or 5 ppt"
+              ],
+              "chord": "Up",
+              "device": "",
+              "on_release": false
+            },
+            {
+              "actions": [
+                "cmd:resize grow width 5 px or 5 ppt"
+              ],
+              "chord": "l",
+              "device": "",
+              "on_release": false
+            },
+            {
+              "actions": [
+                "cmd:resize grow width 5 px or 5 ppt"
+              ],
+              "chord": "Right",
+              "device": "",
+              "on_release": false
+            }
+          ],
+          "modifier": "Mod1"
+        }
+      },
+      "on_exit": [],
+      "on_hold_release": [],
+      "one_shot": false
+    },
+    "resize": {
+      "binds": [
+        {
+          "actions": [
+            "cmd:resize shrink width 5 px or 5 ppt"
+          ],
+          "chord": "h",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "cmd:resize grow height 5 px or 5 ppt"
+          ],
+          "chord": "j",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "cmd:resize shrink height 5 px or 5 ppt"
+          ],
+          "chord": "k",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "cmd:resize grow width 5 px or 5 ppt"
+          ],
+          "chord": "l",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "cmd:resize shrink width 10 px or 10 ppt"
+          ],
+          "chord": "Left",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "cmd:resize grow height 10 px or 10 ppt"
+          ],
+          "chord": "Down",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "cmd:resize shrink height 10 px or 10 ppt"
+          ],
+          "chord": "Up",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "cmd:resize grow width 10 px or 10 ppt"
+          ],
+          "chord": "Right",
+          "device": "",
+          "on_release": false
+        }
+      ],
+      "exit_keys": [
+        "q",
+        "Escape",
+        "Return"
+      ],
+      "hold": "",
+      "mods": {},
+      "on_exit": [],
+      "on_hold_release": [],
+      "one_shot": false
+    },
+    "switcher": {
+      "binds": [
+        {
+          "actions": [
+            "run:~/.dotfiles/quickshell/qs-overlay.sh switcher"
+          ],
+          "chord": "Tab",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "run:~/.dotfiles/quickshell/qs-overlay.sh switcher"
+          ],
+          "chord": "w",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "run:~/.dotfiles/quickshell/qs-overlay.sh switcher-prev"
+          ],
+          "chord": "ISO_Left_Tab",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "run:~/.dotfiles/quickshell/qs-overlay.sh switcher-search",
+            "exit"
+          ],
+          "chord": "space",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "run:~/.dotfiles/quickshell/qs-overlay.sh switcher-cancel",
+            "exit"
+          ],
+          "chord": "Escape",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "run:~/.dotfiles/quickshell/qs-overlay.sh switcher-confirm",
+            "exit"
+          ],
+          "chord": "Return",
+          "device": "",
+          "on_release": false
+        }
+      ],
+      "exit_keys": [
+        "q"
+      ],
+      "hold": "$mod",
+      "mods": {},
+      "on_exit": [
+        "run:~/.dotfiles/quickshell/qs-overlay.sh switcher-cancel"
+      ],
+      "on_hold_release": [
+        "run:~/.dotfiles/quickshell/qs-overlay.sh switcher-confirm"
+      ],
+      "one_shot": false
+    },
+    "system": {
+      "binds": [
+        {
+          "actions": [
+            "run:i3exit lock"
+          ],
+          "chord": "l",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "run:i3exit logout"
+          ],
+          "chord": "e",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "run:i3exit switch_user"
+          ],
+          "chord": "u",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "run:i3exit suspend"
+          ],
+          "chord": "s",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "run:i3exit hibernate"
+          ],
+          "chord": "h",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "run:i3exit reboot"
+          ],
+          "chord": "r",
+          "device": "",
+          "on_release": false
+        },
+        {
+          "actions": [
+            "run:i3exit shutdown"
+          ],
+          "chord": "p",
+          "device": "",
+          "on_release": false
+        }
+      ],
+      "exit_keys": [
+        "q",
+        "Escape",
+        "Return"
+      ],
+      "hold": "",
+      "mods": {},
+      "on_exit": [],
+      "on_hold_release": [],
+      "one_shot": true
+    }
+  }
+}

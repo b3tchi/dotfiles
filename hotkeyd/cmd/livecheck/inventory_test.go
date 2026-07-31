@@ -15,8 +15,22 @@ import (
 // tests re-derive the figures from live_check.py itself on every run, so a
 // new python assertion, a deleted one, or a renumbered file breaks the build
 // instead of quietly leaving a hole.
-
-const pythonLiveCheck = "../../live_check.py"
+//
+// THE SUBJECT IS NOW FROZEN (dotfiles-ylmp.16). live_check.py was deleted
+// from hotkeyd/ with the rest of Python; what these tests read is the exact
+// byte-for-byte copy taken at deletion, parked in testdata. The `.frozen`
+// suffix is deliberate — it is not importable, not runnable, and cannot be
+// mistaken for a live entry point by a reader or by python tooling.
+//
+// The tests are kept rather than deleted because their subject changed
+// character, not value: doc.go's inventory is the evidence that the Go
+// re-expression accounts for every assertion the Python one made, and that
+// claim is exactly as checkable against a frozen source as a live one. What
+// they no longer catch is drift in live_check.py (it cannot drift). What they
+// still catch is someone editing doc.go's mapping or figures to say something
+// the port never established — which is the failure mode the file was written
+// against, and the only one that survives the deletion.
+const pythonLiveCheck = "testdata/live_check.py.frozen"
 
 // pySite is one assertion call site: the 1-based line, and WHICH helper it
 // calls. The split matters because the package doc quotes it, and a figure

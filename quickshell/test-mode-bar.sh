@@ -653,11 +653,18 @@ mkfifo "$FIFO"
 SLEEP_BIN="$(command -v sleep)"
 # Every coreutil the Bar's Processes shell out to (stats/net/vol/bat probes
 # harmlessly no-op under the sandbox) plus sh for the get_workspaces wrapper.
-# python3 is in here because the Bar's layer feed is a python reader
-# (hotkeyd/state-tail.py — quickshell cannot open a unix socket itself and this
-# host has no socat). Without it the feed Process would fail to spawn and every
-# layer assertion would read "default" for the wrong reason.
-for t in sh cat sleep tr awk df grep sed cut head python3; do
+#
+# python3 is NO LONGER in this list (dotfiles-ylmp.16). It was here because the
+# Bar's layer feed used to be a python reader (hotkeyd/state-tail.py —
+# quickshell cannot open a unix socket itself and this host has no socat), so
+# without it the feed Process failed to spawn and every layer assertion read
+# "default" for the wrong reason. The reader is now `hotkeyd state-tail`, a
+# static binary the bar is handed by ABSOLUTE path through QS_LAYER_FEED, so it
+# does not need to resolve through $PBIN2 at all. Leaving python3 linked here
+# would be worse than useless: PHASE 4 counts reader spawns by shadowing the
+# feed executable, and a second way to reach an interpreter is a second way for
+# that count to be wrong.
+for t in sh cat sleep tr awk df grep sed cut head; do
   src="$(command -v "$t")" && ln -sf "$src" "$PBIN2/$t"
 done
 
@@ -753,13 +760,35 @@ HOST2EOF
 
 QS_BIN="$(command -v "$QUICKSHELL")"
 # QS_LAYER_FEED / HOTKEYD_DIR point at THIS worktree. Bar.qml's default is
-# $HOME/.dotfiles/hotkeyd/state-tail.py, which is whatever branch happens to be
-# checked out there — on a fresh clone it does not exist at all, and every layer
+# $HOME/.dotfiles/hotkeyd/hotkeyd, which is whatever branch happens to be
+# checked out there — on a fresh clone it is not built at all, and every layer
 # assertion below would read "default" because the reader failed to spawn, not
 # because the bar was wrong.
+#
+# THE READER IS THE DAEMON BINARY (dotfiles-ylmp.16). It was state-tail.py; it
+# is now `hotkeyd state-tail`, and QS_LAYER_FEED names the EXECUTABLE while
+# Bar.qml supplies the `state-tail` argument. Everything downstream that spawns
+# a reader must therefore spell it "$STATE_TAIL state-tail", not "$STATE_TAIL".
 HOTKEYD_DIR="$(cd -- "$SCRIPT_DIR/../hotkeyd" && pwd)"
-STATE_TAIL="$HOTKEYD_DIR/state-tail.py"
-[ -r "$STATE_TAIL" ] || { echo "FATAL: $STATE_TAIL missing" >&2; exit 1; }
+STATE_TAIL="$HOTKEYD_DIR/hotkeyd"
+[ -x "$STATE_TAIL" ] || {
+  echo "FATAL: $STATE_TAIL is not built — run 'rotz install hotkeyd', or" >&2
+  echo "       (cd $HOTKEYD_DIR && CGO_ENABLED=0 go build -o hotkeyd ./cmd/hotkeyd)" >&2
+  exit 1; }
+
+# The publisher fixture (hotkeyd/cmd/statepub). Built here rather than shipped:
+# it is a harness, and a harness binary sitting in the tree is one somebody
+# eventually starts on a real session. It drives the REAL internal/layer
+# StatePublisher — the same code the daemon publishes with — which is what
+# stops this suite from asserting against a second, drifting implementation of
+# the wire format. Its python ancestor got that property by importing
+# hotkeyd/layers.py (deleted at dotfiles-ylmp.16).
+STATE_PUB="$TMP/statepub"
+if ! ( cd "$HOTKEYD_DIR" && go build -o "$STATE_PUB" ./cmd/statepub ) 2>"$TMP/statepub.build"; then
+  echo "FATAL: could not build the publisher fixture (hotkeyd/cmd/statepub):" >&2
+  sed 's/^/       /' "$TMP/statepub.build" >&2
+  exit 1
+fi
 
 # setsid: own process group so cleanup reaps the blocking FIFO reader. PATH is
 # the sandbox ONLY (so wmMsg resolves to the stub); SWAYSOCK unset => i3 path.
@@ -819,68 +848,29 @@ else
   # --- hotkeyd layer feed fixture -------------------------------------------
   # The bar no longer infers the layer from binding events; it reads hotkeyd's
   # state socket (sp020 T7). This fixture publishes on that socket using the
-  # REAL StatePublisher from hotkeyd/layers.py, so the harness cannot drift from
-  # what the daemon actually writes — replay-on-connect included, which is what
-  # lets the bar be started before or after the publisher.
+  # REAL StatePublisher from hotkeyd/internal/layer, so the harness cannot drift
+  # from what the daemon actually writes — replay-on-connect included, which is
+  # what lets the bar be started before or after the publisher.
+  #
+  # The fixture is now the compiled hotkeyd/cmd/statepub ($STATE_PUB, built
+  # above) rather than an inline python script importing layers.py
+  # (dotfiles-ylmp.16). Its command protocol is unchanged, deliberately, so
+  # every caller below reads the same as it did: a JSON object publishes a
+  # state, `RAW:<text>` puts bytes on the wire verbatim, `QUIT` closes, and
+  # `CLIENTS <n>` is printed on every change so the harness can WAIT for the bar
+  # to attach instead of sleeping and hoping.
+  #
+  # `RAW:` is not decoration. Without it a "malformed line" scenario only proves
+  # the FIXTURE rejects garbage — the bytes never reach the bar, and a bar that
+  # blanked its state on a parse error would still pass.
   PUB_FIFO="$TMP/pub.fifo"
   mkfifo "$PUB_FIFO"
   # $1 command FIFO, $2 (optional) state to publish BEFORE anyone can connect —
   # that is what makes the replay-on-connect path reachable on a restart.
-  #
-  # `poll()` runs on a 50ms tick rather than only after a published line: the
-  # publisher must ACCEPT a connecting bar promptly, otherwise the harness is
-  # racing the bar's 1s reconnect timer and the first layer assertion flakes.
-  # `CLIENTS <n>` is printed on every change so the harness can WAIT for the bar
-  # to be attached instead of sleeping and hoping.
-  #
-  # `RAW:<text>` writes text to the connected clients verbatim, bypassing
-  # json.dumps. Without it a "malformed line" scenario only proves the FIXTURE
-  # rejects garbage — the bytes never reach the bar, and a bar that blanked its
-  # state on a parse error would still pass.
-  cat > "$TMP/statepub.py" <<'PUBEOF'
-import json, os, select, sys
-sys.path.insert(0, os.environ["HOTKEYD_DIR"])
-import layers as L
-
-pub = L.StatePublisher(L.socket_path(os.environ.get("DISPLAY")))
-if len(sys.argv) > 2 and sys.argv[2]:
-    pub.publish(json.loads(sys.argv[2]))
-
-fd = os.open(sys.argv[1], os.O_RDWR)     # O_RDWR: never blocks, never sees EOF
-buf = b""
-seen = -1
-while True:
-    r, _, _ = select.select([fd], [], [], 0.05)
-    if r:
-        buf += os.read(fd, 4096)
-    while b"\n" in buf:
-        raw, buf = buf.split(b"\n", 1)
-        line = raw.decode(errors="replace").strip()
-        if line == "QUIT":
-            pub.close()
-            sys.exit(0)
-        if line.startswith("RAW:"):
-            wire = (line[4:] + "\n").encode()
-            for c in list(pub._clients):
-                try:
-                    c.send(wire)
-                except OSError:
-                    pass
-            continue
-        if line:
-            try:
-                pub.publish(json.loads(line))
-            except Exception as e:
-                print("statepub: %s" % e, file=sys.stderr, flush=True)
-    pub.poll()
-    if pub.client_count != seen:
-        seen = pub.client_count
-        print("CLIENTS %d" % seen, flush=True)
-PUBEOF
 
   start_pub() { # <logfile> [initial-state-json]
-    DISPLAY="$DPY" XDG_RUNTIME_DIR="$RUN2" HOTKEYD_DIR="$HOTKEYD_DIR" \
-      python3 "$TMP/statepub.py" "$PUB_FIFO" "${2:-}" >"$1" 2>&1 &
+    DISPLAY="$DPY" XDG_RUNTIME_DIR="$RUN2" \
+      "$STATE_PUB" "$PUB_FIFO" "${2:-}" >"$1" 2>&1 &
     PUB_PID=$!
   }
   # Wait until the publisher reports an attached client. Deterministic where a
@@ -914,7 +904,8 @@ PUBEOF
   pubdump '{"layer":"nav","mod":"resize"}' "nav-mod-resize"
   # Switching straight between modifier layers must be immediate — no bar-side
   # debounce survives, because the daemon publishes on CHANGE only and already
-  # absorbs a stray release (its 120ms guard, tested in hotkeyd/test_layers.py).
+  # absorbs a stray release (its 120ms guard, layer.ReleaseGuardMS — tested by the fake-clock unit
+  # tests in hotkeyd/internal/layer/{i3mode,reconcile}_test.go).
   pubdump '{"layer":"nav","mod":"move"}' "nav-mod-switch"
   # An unknown mod value must degrade to plain nav, not to a blank pill.
   pubdump '{"layer":"nav","mod":"wat"}' "nav-mod-unknown"
@@ -1065,7 +1056,7 @@ PUBEOF
 fi
 
 # ============================================================================
-# PHASE 3 — the reader itself (hotkeyd/state-tail.py), the piece the bar spawns.
+# PHASE 3 — the reader itself (`hotkeyd state-tail`), the piece the bar spawns.
 #           Driven directly against a real StatePublisher, with no quickshell in
 #           the way, so the parts of the ft011 contract that are RACY through a
 #           1s-retry bar become deterministic here: replay-on-connect is the
@@ -1077,32 +1068,85 @@ fi
 
 RUN3="$TMP/run3"; mkdir -p "$RUN3"; chmod 700 "$RUN3"
 
+# The probe is a PROCESS DRIVER, not a hotkeyd component (dotfiles-ylmp.16).
+# It used to import hotkeyd/layers.py and hold the publishers in-process; with
+# python gone from hotkeyd it drives the compiled fixture ($STATE_PUB) and the
+# compiled reader (`hotkeyd state-tail`) as subprocesses instead. Every case it
+# emits, and every value the assertions below expect, is unchanged — only the
+# things under test moved from imports to processes, which if anything makes
+# the probe stricter: the reader is now exercised exactly as the bar spawns it.
 cat > "$TMP/tailprobe.py" <<'TAILEOF'
 import json, os, select, subprocess, sys, time
 
-RUN, TAIL = sys.argv[1], sys.argv[2]
+RUN, TAIL, PUB = sys.argv[1], sys.argv[2], sys.argv[3]
 os.environ["XDG_RUNTIME_DIR"] = RUN
-sys.path.insert(0, os.environ["HOTKEYD_DIR"])
-import layers as L                                     # noqa: E402
 
 
 def emit(name, payload):
     print("CASE %s %s" % (name, payload), flush=True)
 
 
+class Pub:
+    """One statepub process, addressed over its own command FIFO."""
+
+    def __init__(self, display, initial=None):
+        self.display = display
+        self.fifo = os.path.join(RUN, "pub-%s.fifo" % display.lstrip(":"))
+        os.mkfifo(self.fifo)
+        env = dict(os.environ, XDG_RUNTIME_DIR=RUN, DISPLAY=display)
+        self.proc = subprocess.Popen(
+            [PUB, self.fifo, json.dumps(initial) if initial else ""],
+            env=env, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        # O_RDWR so the fixture never sees EOF between commands.
+        self.fd = os.open(self.fifo, os.O_RDWR)
+        self._await_socket()
+
+    def _await_socket(self, timeout=5.0):
+        """Block until the socket is bound, so a reader cannot race the bind."""
+        path = os.path.join(RUN, "hotkeyd-%s.sock" % self.display.lstrip(":"))
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if os.path.exists(path):
+                return
+            time.sleep(0.02)
+
+    def send(self, line):
+        os.write(self.fd, (line + "\n").encode())
+        time.sleep(0.05)
+
+    def publish(self, state):
+        self.send(json.dumps(state))
+
+    def raw(self, text):
+        self.send("RAW:" + text)
+
+    def close(self):
+        self.send("QUIT")
+        try:
+            self.proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+        os.close(self.fd)
+
+    def sock_name(self):
+        path = os.path.join(RUN, "hotkeyd-%s.sock" % self.display.lstrip(":"))
+        return os.path.basename(path) if os.path.exists(path) else "MISSING"
+
+
 def start_tail(display, runtime=RUN):
+    """Spawn the reader exactly the way Bar.qml spawns it: <binary> state-tail."""
     env = dict(os.environ, XDG_RUNTIME_DIR=runtime, DISPLAY=display)
     return subprocess.Popen(
-        [sys.executable, TAIL], env=env, text=True,
+        [TAIL, "state-tail"], env=env, text=True,
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
 
-def line_from(proc, pubs=(), timeout=8.0):
-    """One line from the reader, pumping the publishers' accept loop meanwhile."""
+def line_from(proc, timeout=8.0):
+    """One line from the reader. No publisher pumping: the Go publisher accepts
+    on its own goroutine, where python's needed an explicit poll() tick."""
     deadline = time.time() + timeout
     while time.time() < deadline:
-        for p in pubs:
-            p.poll()
         r, _, _ = select.select([proc.stdout], [], [], 0.05)
         if r:
             line = proc.stdout.readline()
@@ -1112,46 +1156,39 @@ def line_from(proc, pubs=(), timeout=8.0):
     return "<TIMEOUT>"
 
 
-def send_raw(pub, text):
-    for c in list(pub._clients):
-        c.send((text + "\n").encode())
-
-
 # --- replay-on-connect: the publisher is ALREADY in a layer, and never
 #     publishes again. Anything the reader prints can only be the replay.
-a = L.StatePublisher(L.socket_path(":191"))
-a.publish({"layer": "nav", "mod": "move"})
+a = Pub(":191", {"layer": "nav", "mod": "move"})
 ta = start_tail(":191")
-emit("tail-replay-first-line", line_from(ta, [a]))
+emit("tail-replay-first-line", line_from(ta))
 
 # --- a garbage line reaches the reader and does NOT end the stream: the next
 #     well-formed line still arrives. (The reader forwards bytes verbatim — it
 #     is the BAR that must tolerate the garbage, asserted in PHASE 2.)
-send_raw(a, "not json at all @@@")
-emit("tail-raw-passthrough", line_from(ta, [a]))
+a.raw("not json at all @@@")
+emit("tail-raw-passthrough", line_from(ta))
 a.publish({"layer": "nav", "mod": "resize"})
-emit("tail-survives-garbage", line_from(ta, [a]))
+emit("tail-survives-garbage", line_from(ta))
 
 # --- two displays, two sockets: each reader sees ONLY its own display's state.
-b = L.StatePublisher(L.socket_path(":192"))
-b.publish({"layer": "nav", "mod": "move"})
+b = Pub(":192", {"layer": "nav", "mod": "move"})
 tb = start_tail(":192")
-first_b = line_from(tb, [a, b])
+first_b = line_from(tb)
 emit("tail-two-displays", json.dumps({
-    "sock191": L.socket_path(":191").name,
-    "sock192": L.socket_path(":192").name,
+    "sock191": a.sock_name(),
+    "sock192": b.sock_name(),
     "b_first": first_b,
 }))
 # and a publish on :191 must not leak into :192's reader
 a.publish({"layer": "default", "mod": None})
-emit("tail-no-crosstalk", line_from(tb, [a, b], timeout=1.5))
+emit("tail-no-crosstalk", line_from(tb, timeout=1.5))
 
 for p in (ta, tb):
     p.kill()
 
 # --- the daemon goes away mid-stream: the reader EXITS (it does not retry).
 tc = start_tail(":191")
-line_from(tc, [a])                    # drain the replay so we know it is attached
+line_from(tc)                         # drain the replay so we know it is attached
 a.close()
 try:
     emit("tail-exits-on-daemon-death", tc.wait(timeout=5))
@@ -1182,7 +1219,7 @@ b.close()
 emit("PHASE3-DONE", "1")
 TAILEOF
 
-env HOTKEYD_DIR="$HOTKEYD_DIR" python3 "$TMP/tailprobe.py" "$RUN3" "$STATE_TAIL" \
+python3 "$TMP/tailprobe.py" "$RUN3" "$STATE_TAIL" "$STATE_PUB" \
   >"$TMP/tail3.out" 2>"$TMP/tail3.err"
 grep -a '^CASE ' "$TMP/tail3.out" >> "$CASES"
 
@@ -1240,16 +1277,28 @@ for t in sh cat sleep tr awk df grep sed cut head; do
 done
 
 # The counting shim: every reader spawn appends one line, then runs the real
-# thing. This is the bar's ONLY use of python3 under $PBIN4, so the line count
-# IS the respawn count.
+# thing. The line count IS the respawn count.
+#
+# IT IS NOW REACHED THROUGH QS_LAYER_FEED, NOT $PATH (dotfiles-ylmp.16). The
+# shim used to shadow `python3` under $PBIN4 and rely on that being "the bar's
+# ONLY use of python3" — true then, and the reason python3 has since been
+# dropped from the $PBIN2/$PBIN4 allowlists. It cannot work now: the bar spawns
+# its reader by the ABSOLUTE path QS_LAYER_FEED gives it, so nothing about
+# $PATH is consulted and a PATH shim would count zero spawns while the
+# assertions below silently read SPAWN_N=0 as "bounded".
+#
+# Substituting the executable instead is the seam Bar.qml deliberately keeps
+# (see its layerFeedCmd comment): the shim receives `state-tail` as its own
+# argv[1] and forwards it untouched, so what runs is the real reader with the
+# real arguments — the shim is a counter, not a stub.
 : > "$SPAWNS"
-REAL_PY="$(command -v python3)"
-cat > "$PBIN4/python3" <<SHIMEOF
+FEED_SHIM="$TMP/feed-shim"
+cat > "$FEED_SHIM" <<SHIMEOF
 #!/bin/sh
 echo spawn >> "$SPAWNS"
-exec "$REAL_PY" "\$@"
+exec "$STATE_TAIL" "\$@"
 SHIMEOF
-chmod +x "$PBIN4/python3"
+chmod +x "$FEED_SHIM"
 
 cat > "$CFG4/shell.qml" <<'HOST4EOF'
 import Quickshell
@@ -1263,7 +1312,7 @@ HOST4EOF
 
 setsid env -u SWAYSOCK DISPLAY="$DPY" PATH="$PBIN4" \
     XDG_CONFIG_HOME="$CFG4" XDG_RUNTIME_DIR="$RUN4" XDG_CACHE_HOME="$CCH" \
-    QS_LAYER_FEED="$STATE_TAIL" \
+    QS_LAYER_FEED="$FEED_SHIM" \
     "$QS_BIN" -p "$CFG4" >"$TMP/qs4.out" 2>&1 &
 FORK_PID=$!
 

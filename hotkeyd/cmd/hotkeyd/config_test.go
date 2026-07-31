@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -14,14 +12,30 @@ import (
 	"hotkeyd/internal/bind"
 )
 
-// GOLDEN-DUMP REGENERATION COMMAND (sp021 Task 6 / bd dotfiles-ylmp.5).
+// THE GOLDEN DUMP IS NOW A FROZEN FIXTURE (dotfiles-ylmp.16).
 //
-// TestGoldenDumpParity below shells out to this exact script every run — it
-// is not a stored fixture, so there is nothing to "regenerate" by hand: the
-// comparison is always against whatever hotkeyd/binds.py says right now,
-// which is what makes it fail the moment either side drifts during the
-// parallel-run window. To inspect the dump by hand, run this from the
-// hotkeyd/ directory:
+// This used to shell out to python on every run and compare the Go table
+// against whatever hotkeyd/binds.py said right then — the live parity gate
+// for the epic's parallel-run window. binds.py is deleted, so the live
+// comparison has no second side; what remains is testdata/golden-dump-python.json,
+// the dump taken from binds.py at the moment it was removed.
+//
+// KEPT, NOT DELETED, and the distinction matters. A test that can only ever
+// skip is worth nothing and this one would have skipped forever (its old
+// os.Stat guard on binds.py). But the CLAIM it defends did not expire with
+// python: the shipped keyboard is supposed to be the table Python shipped,
+// and the compiled-in Go table is now the only copy of it. Frozen, this is
+// an ordinary golden test — it no longer proves the two engines agree (there
+// is one engine), it proves the surviving engine has not drifted from the
+// keyboard the user actually had. A deliberate table change updates the
+// fixture in the same commit, which is the point: the diff shows up in review
+// instead of arriving silently on someone's keyboard.
+//
+// The script below is retained verbatim as the RECORD of how the fixture was
+// produced — it is no longer executed. To regenerate it you would need
+// binds.py back out of git history (`git show <commit>^:hotkeyd/binds.py`),
+// which is the correct amount of friction for changing what this test
+// considers ground truth. Run from the hotkeyd/ directory:
 //
 //	python3 -c '
 //	import binds as B
@@ -82,8 +96,10 @@ import (
 //	print(json.dumps(dump))
 //	'
 //
-// goldenDumpScript below is byte-for-byte the same script quoted above —
-// keep them in sync if either changes.
+// goldenDumpScript below is byte-for-byte the same script quoted above. It is
+// dead as CODE (nothing executes it since dotfiles-ylmp.16) and live as
+// PROVENANCE: it is the definition of what the fixture's fields mean, and
+// deleting it would leave a JSON blob no one could re-derive or audit.
 const goldenDumpScript = `
 import binds as B
 import json
@@ -271,34 +287,33 @@ func normalizeDumpTable(d *dumpTable) {
 	}
 }
 
-// TestGoldenDumpParity is the load-bearing test for this task: it proves the
-// Go table matches hotkeyd/binds.py's REAL, LIVE table — not a snapshot
-// someone forgot to regenerate — chord for chord, action for action, layer
-// for layer. See the goldenDumpScript doc comment above for how to run the
-// same comparison by hand.
-func TestGoldenDumpParity(t *testing.T) {
-	pyBin, err := exec.LookPath("python3")
-	if err != nil {
-		t.Skip("python3 not on PATH; golden-dump parity check skipped")
-	}
-	hotkeydDir, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatalf("could not resolve hotkeyd/ directory: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(hotkeydDir, "binds.py")); err != nil {
-		t.Skipf("hotkeyd/binds.py not found at %s: %v", hotkeydDir, err)
-	}
+// goldenDumpFixture is the dump binds.py produced at the moment it was
+// deleted (dotfiles-ylmp.16), via goldenDumpScript above. Checked in, because
+// it is now the only surviving statement of the table the user's keyboard
+// actually had before the rewrite.
+const goldenDumpFixture = "testdata/golden-dump-python.json"
 
-	cmd := exec.Command(pyBin, "-c", goldenDumpScript)
-	cmd.Dir = hotkeydDir
-	out, err := cmd.CombinedOutput()
+// TestGoldenDumpParity proves the compiled-in Go table is chord for chord,
+// action for action, layer for layer the table Python shipped. It compared
+// against a LIVE python import until dotfiles-ylmp.16; it now compares against
+// the frozen dump taken when python was removed. See goldenDumpScript's doc
+// comment above for what the fixture's fields mean and how it was produced.
+//
+// A hard failure, never a skip. The old live version skipped when python3 was
+// absent, which was right when the fixture had to be computed; there is
+// nothing left to be absent, so a read error here is a broken checkout, not a
+// reason to pass.
+func TestGoldenDumpParity(t *testing.T) {
+	raw, err := os.ReadFile(goldenDumpFixture)
 	if err != nil {
-		t.Fatalf("python3 golden-dump script failed: %v\n%s", err, out)
+		t.Fatalf("cannot read the golden dump at %s -- this fixture IS the "+
+			"parity target now that binds.py is deleted, so a missing one is a "+
+			"hard failure, not a skip: %v", goldenDumpFixture, err)
 	}
 
 	var pyDump dumpTable
-	if err := json.Unmarshal(out, &pyDump); err != nil {
-		t.Fatalf("could not parse golden-dump JSON: %v\nraw: %s", err, out)
+	if err := json.Unmarshal(raw, &pyDump); err != nil {
+		t.Fatalf("could not parse golden-dump JSON at %s: %v", goldenDumpFixture, err)
 	}
 	goDump := goldenDumpFromGoTable()
 

@@ -3,9 +3,10 @@
 #
 # usage: hotkeyd.sh start|stop|restart|status|check [display]
 #
-# Every consumer goes through this script, never hotkeyd.py directly: the
-# session entry points call `start`, `hotkeyd-panic.sh` calls `stop`/`start`,
-# and `check` is the validation path for hooks and for a human editing binds.py.
+# Every consumer goes through this script, never the daemon binary directly:
+# the session entry points call `start`, `hotkeyd-panic.sh` calls
+# `stop`/`start`, and `check` is the validation path for hooks and for a human
+# editing the bind table in cmd/hotkeyd/config.go.
 #
 # THE i3 ESCAPE HATCH IS NO LONGER `restart` — it is `hotkeyd-panic.sh panic`,
 # which hands the keyboard back to i3 instead of trying the daemon again. A
@@ -27,23 +28,24 @@
 # the i3 launcher must resolve to the SAME daemon, or a restart leaks the old one
 # and two daemons fight over one keyboard.
 #
-# ENGINE SELECTION (sp021, dotfiles-ylmp.14) — this launcher can run either
-# python's hotkeyd.py or the Go rewrite at ./cmd/hotkeyd, per display, during
-# the epic's parallel-run window. engine_for() below is the ONE place that
-# decides which; the cutover commits (dotfiles-ylmp.15 for :10, .16 for :0)
-# touch ONLY that function. Every display defaults to python until then.
+# ONE ENGINE (sp021, dotfiles-ylmp.16) — the daemon is the Go build at
+# ./cmd/hotkeyd, on every display. The parallel-run window this script used to
+# straddle is closed: hotkeyd.py, binds.py and layers.py are DELETED from the
+# tree, so there is no second engine left to select and no per-display table
+# left to get wrong. `git log -- hotkeyd/hotkeyd.py` is where python went.
 #
-# Process identification (daemon_pid()) is INDEPENDENT of that table: it
-# matches EITHER argv shape (python `hotkeyd.py --display :N` or go's bare
-# `hotkeyd --display :N`), still keyed on `--display`, never a pidfile — a
-# stale table entry must never make an already-running daemon of the OTHER
-# engine invisible to `stop`/`status` (the whole point of a parallel-run
-# window is that both can be live on the machine at once, even though never
-# on the SAME display).
+# Process identification (daemon_pid()) deliberately still matches BOTH argv
+# shapes — python's `hotkeyd.py --display :N` as well as go's bare
+# `hotkeyd --display :N`. Not vestigial: this is a dotfiles repo that lands on
+# a machine by `git pull`, and deleting a file does not stop the process that
+# already has it open. A box that pulls this commit with a python daemon still
+# serving keeps that daemon (unlinked inode, still grabbing chords) until
+# something stops it, and `stop`/`status` are what have to see it. A pattern
+# narrowed to the go shape would make exactly that daemon invisible to the
+# only tool able to clear it.
 set -u
 
 HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-PY_DAEMON="$HERE/hotkeyd.py"
 # HOTKEYD_GO_DAEMON is the go engine's analogue of HOTKEYD_BINDS below: with
 # the table compiled in (the dwm model), "a daemon carrying a different table"
 # IS a different binary, so the only seam that can express it is the path to
@@ -90,71 +92,37 @@ need_runtime() {
 # so cannot disagree today; a predicate copied twice is one that eventually does.
 linked() { [ -L "$FALLBACK_LINK" ] || [ -e "$FALLBACK_LINK" ]; }
 
-# Per-display engine table (sp021 Task 15, dotfiles-ylmp.14). Consulted by
-# resolve_daemon() (start/check: which binary to run) and by
-# daemon_engine_of_pid() (stop/status/health: which binary a LIVE daemon
-# actually is) below.
+# Resolves $DAEMON — the binary start/check will exec — for $DPY_BASE.
 #
-# THE CUTOVER COMMITS EDIT ONLY THIS FUNCTION — dotfiles-ylmp.15 (:10) and
-# .16 (:0) each add exactly one `:N) printf 'go' ;;` arm above the catch-all,
-# in the epic's staged rollout order. Nothing else in this file should need
-# to change at either cutover.
+# THE PER-DISPLAY ENGINE TABLE IS GONE (dotfiles-ylmp.16). It existed to carry
+# the estate through the epic's staged rollout (:10 at ylmp.15, :0 here) and
+# had exactly one job: name the display whose engine differed from the
+# default. With python deleted there is no engine that can differ, so a table
+# mapping every display to the same answer would be a lookup whose result is
+# knowable without it — and a seam that still LOOKS switchable invites someone
+# to switch it back to a file that is not there. Every display gets $GO_DAEMON.
 #
-# :10 IS CUT OVER (dotfiles-tz5e, the live-estate half of ylmp.15). The xrdp
-# session runs the Go engine; :0 and everything else still reach the catch-all
-# and stay python until .16. The argument is the display BASE — DPY_BASE, with
-# the screen suffix already stripped — so the ":10.0" an RDP session presents
-# and the bare ":10" the i3 launcher passes hit this one arm, which is the
-# whole reason the canonicalisation happens before the lookup rather than
-# inside it.
+# HOTKEYD_ENGINE_DEFAULT is no longer read. It is left INERT rather than
+# rejected because dotfiles-ugdg documented `HOTKEYD_ENGINE_DEFAULT=go` as part
+# of the go-engine suite invocation and every caller (and every operator's
+# muscle memory) carries it; erroring on the value that used to be correct
+# would break those invocations for no gain. test-launcher.sh's engine-table
+# section asserts the inert behaviour in BOTH directions — `=go` still works,
+# and `=python` can no longer produce a python daemon on any display.
 #
-# CONSEQUENCE FOR HOSTS WITH NO GO TOOLCHAIN: `start :10` now REFUSES with
-# exit 78 rather than silently running python, because resolve_daemon() never
-# falls back (dotfiles-ylmp.14). That is deliberate — a silent fallback
-# recreates the which-daemon-am-I-running question the rewrite exists to
-# kill — but it means hotkeyd/dot.yaml's go build is no longer merely opt-in
-# on a machine that serves :10; see that file's header.
-#
-# HOTKEYD_ENGINE_DEFAULT overrides the catch-all's default without touching
-# the arms above it — the seam test-launcher.sh's parameterised "run once
-# per engine default" (dotfiles-ylmp.14 test_plan) uses to exercise the go
-# engine end to end before any real display is cut over. It therefore CANNOT
-# demote :10 back to python: a display that has been cut over is decided by
-# the table, not by the environment of whoever happened to invoke the
-# launcher (asserted in test-launcher.sh's engine-table section).
-engine_for() { # <display-base, e.g. ":0"> -> python|go
-    case "$1" in
-        :10) printf 'go' ;;
-        *) printf '%s' "${HOTKEYD_ENGINE_DEFAULT:-python}" ;;
-    esac
-}
-
-# Resolves $DAEMON (the binary start/check will exec) and $engine (its name,
-# for the staleness guard) for $DPY_BASE, per engine_for() above. Refuses
-# LOUDLY when the table says `go` but the binary was never built — NEVER a
-# silent fallback to python, which would recreate exactly the
-# which-daemon-am-I-running question this whole rewrite exists to kill
-# (dotfiles-ylmp.14 edge case). Exit 78 (EX_CONFIG, same convention
-# clip-store.sh uses) for both failure arms: a misconfigured engine table is
-# a config problem, not a runtime one, and neither code above is otherwise
-# used by this script's own die() calls.
+# Still refuses LOUDLY when the binary was never built — exit 78 (EX_CONFIG,
+# the convention clip-store.sh uses), never a silent fallback. Before .16 the
+# thing it refused to fall back TO was python; now there is nothing to fall
+# back to at all, which makes the refusal the only correct answer rather than
+# merely the principled one. What changed is the blast radius: this used to
+# cost a toolchain-less host its :10 session only, and now costs it every
+# display. hotkeyd/dot.yaml's header carries that consequence.
 resolve_daemon() {
-    engine="$(engine_for "$DPY_BASE")"
-    case "$engine" in
-        go)
-            [ -x "$GO_DAEMON" ] || die "engine table selects 'go' for \
-$DPY_BASE but $GO_DAEMON is not built -- run 'rotz install hotkeyd' with a \
-go toolchain on PATH, or fix the engine table in $0" 78
-            DAEMON="$GO_DAEMON"
-            ;;
-        python)
-            DAEMON="$PY_DAEMON"
-            ;;
-        *)
-            die "engine table returned unknown engine '$engine' for \
-$DPY_BASE (want python|go)" 78
-            ;;
-    esac
+    [ -x "$GO_DAEMON" ] || die "the hotkeyd daemon is not built at \
+$GO_DAEMON -- run 'rotz install hotkeyd' with a go toolchain on PATH \
+(python's hotkeyd.py was removed at dotfiles-ylmp.16; there is no other \
+engine to fall back to)" 78
+    DAEMON="$GO_DAEMON"
 }
 
 # The daemon's pid, or empty. Identified by its own --display argument rather
@@ -166,37 +134,26 @@ daemon_pid() {
     # be invisible to status and stop, and start would happily spawn a second
     # one beside it.
     #
-    # DUAL ARGV SHAPE (dotfiles-ylmp.14): the optional `(\.py)?` group matches
-    # EITHER python's `hotkeyd.py --display :N` or go's bare
-    # `hotkeyd --display :N` with ONE pgrep call, so whichever engine is
-    # actually live on this display is found regardless of what engine_for()
-    # currently says — a stale or just-flipped table entry must never hide a
-    # running daemon from stop/status during the parallel-run window.
+    # DUAL ARGV SHAPE (dotfiles-ylmp.14, RETAINED past the .16 cutover): the
+    # optional `(\.py)?` group matches EITHER python's
+    # `hotkeyd.py --display :N` or go's bare `hotkeyd --display :N` with ONE
+    # pgrep call. python is deleted from the tree, but a daemon that was
+    # already running when this commit landed keeps serving from an unlinked
+    # inode — see the header. `stop` is how such a daemon gets cleared, and it
+    # cannot clear what it cannot see.
     pgrep -f "hotkeyd(\.py)? .*--display $DPY_BASE( |\$)" 2>/dev/null | head -n 1
-}
-
-# Which engine actually produced a running pid, read from ITS OWN argv — not
-# from engine_for()'s table, which can disagree with what is really running
-# (the table was flipped without a restart, or vice versa). Used by health()
-# so a --health probe always targets the same binary that is actually
-# serving the keyboard, never the one the table merely wants there.
-daemon_engine_of_pid() { # <pid> -> python|go
-    case "$(ps -o args= -p "$1" 2>/dev/null)" in
-        *hotkeyd.py*) printf 'python' ;;
-        *)            printf 'go' ;;
-    esac
 }
 
 # Staleness guard (dotfiles-ylmp.14 success criterion): a Go binary with the
 # bind table compiled in that has drifted from config.go is the
 # compiled-table analogue of the wrong-binds.py hazard HOTKEYD_BINDS below
 # exists to recover from — except here a restart cannot fix it, only a
-# rebuild can, so `start` only WARNS (never refuses) and says so. Runs only
-# when $engine is go (set by resolve_daemon(), called first) and the binary
-# actually exists; the missing-binary case is resolve_daemon()'s own refusal,
-# already handled by the time this runs.
+# rebuild can, so `start` only WARNS (never refuses) and says so. Runs after
+# resolve_daemon(), so the binary is known to exist by the time this does; the
+# missing-binary case is resolve_daemon()'s own refusal. The `$engine is go`
+# guard this used to open with went with the engine table (dotfiles-ylmp.16) —
+# every daemon is a compiled-table binary now, so the check always applies.
 staleness_check() {
-    [ "$engine" = go ] || return 0
     [ -f "$CONFIG_GO" ] || return 0
     if [ "$CONFIG_GO" -nt "$GO_DAEMON" ]; then
         # Adjacent single-quoted strings, not a backslash-newline inside ONE
@@ -219,21 +176,19 @@ staleness_check() {
 # refused to replace it — and since the nav cutover i3 no longer owns mode
 # "nav", so that display got no nav at all, silently.
 #
-# Codes come straight from hotkeyd.py (or, per engine, the go binary — see
-# adr0017): 0 serving, 6 the run loop has stopped (reapable), 7 the display
-# did not answer US (NOT reapable — see the constants in hotkeyd.py for why
-# that distinction is a safety boundary and not a nicety). Output is relayed
-# rather than reworded so there is one wording of the diagnosis, in the place
-# that measured it.
+# Codes come from the daemon (adr0017): 0 serving, 6 the run loop has stopped
+# (reapable), 7 the display did not answer US (NOT reapable — that distinction
+# is a safety boundary, not a nicety). Output is relayed rather than reworded
+# so there is one wording of the diagnosis, in the place that measured it.
 #
-# ENGINE DISPATCH (dotfiles-ylmp.14): probes with whichever binary $pid's OWN
-# argv says produced it (daemon_engine_of_pid), not engine_for()'s table —
-# status has already found a live pid by the time this runs, and the probe
-# has to match THAT process, table agreement or not.
+# ONE PROBE BINARY (dotfiles-ylmp.16). This used to pick between the python and
+# go binaries by reading $pid's own argv, because the two engines answered for
+# themselves. There is one engine now. Note the probe is addressed to the
+# DISPLAY, not to the process — it reads that display's lock and socket — so it
+# still returns a truthful verdict about a leftover python daemon holding them,
+# which is the one case where prober and probed can still differ.
 health() {
-    hbin="$PY_DAEMON"
-    [ "$(daemon_engine_of_pid "$pid")" = go ] && hbin="$GO_DAEMON"
-    "$hbin" --health --display "$DPY_BASE" 2>&1
+    "$GO_DAEMON" --health --display "$DPY_BASE" 2>&1
 }
 
 case "$VERB" in
@@ -261,29 +216,25 @@ run hotkeyd-panic.sh resume" 4
         # the :10 daemon would inherit :0's socket. The daemon resolves the path
         # itself from its own X connection (dotfiles-hwds.6) — this just removes
         # the misleading value from the environment entirely.
-        # HOTKEYD_BINDS names an alternative table. The pgrep pattern above was
-        # already written for a daemon carrying flags after --display precisely
-        # so a hand-started `--binds` run stays visible to status/stop; this
-        # makes the same thing reachable through the launcher, which is what
-        # `hotkeyd-panic.sh resume` needs to bring back the table that was
-        # running before the panic rather than the shipped one.
+        # HOTKEYD_BINDS named an alternative table file, which only python
+        # could take (`--binds <file>`). The Go daemon compiles its table in,
+        # dwm-style, so "a daemon carrying a different table" IS a different
+        # binary — HOTKEYD_GO_DAEMON above is the seam that expresses it, and
+        # the one test-panic.sh uses to build an ownership oracle.
         #
-        # go has NO --binds flag (the table is compiled in, dwm-style) — refuse
-        # by name rather than let the go binary's own flag parser produce an
-        # opaque "flag provided but not defined" failure (dotfiles-ylmp.14).
+        # Refused BY NAME, still, rather than ignored: a caller who sets this
+        # is asking for a specific table, and silently serving the compiled one
+        # instead would hand them the shipped keyboard while they believe they
+        # are testing another. Naming HOTKEYD_GO_DAEMON in the message is what
+        # makes the refusal actionable instead of merely correct.
         if [ -n "${HOTKEYD_BINDS:-}" ]; then
-            if [ "$engine" = go ]; then
-                die "HOTKEYD_BINDS is set but $DPY_BASE's engine table \
-selects go, which has no --binds flag (compiled-in table) -- unset \
-HOTKEYD_BINDS, or select python for $DPY_BASE" 78
-            fi
-            env -u I3SOCK DISPLAY="$DPY_BASE" \
-                setsid "$DAEMON" --display "$DPY_BASE" \
-                --binds "$HOTKEYD_BINDS" >>"$LOG" 2>&1 &
-        else
-            env -u I3SOCK DISPLAY="$DPY_BASE" \
-                setsid "$DAEMON" --display "$DPY_BASE" >>"$LOG" 2>&1 &
+            die "HOTKEYD_BINDS is set, but the daemon compiles its bind table \
+in and has no --binds flag (python was removed at dotfiles-ylmp.16) -- unset \
+HOTKEYD_BINDS, or point HOTKEYD_GO_DAEMON at a binary built with the table \
+you want" 78
         fi
+        env -u I3SOCK DISPLAY="$DPY_BASE" \
+            setsid "$DAEMON" --display "$DPY_BASE" >>"$LOG" 2>&1 &
         # Give it long enough to fail loudly (bad table, no X, lock held) rather
         # than reporting success for a process that died on startup.
         sleep 0.4
@@ -296,12 +247,12 @@ HOTKEYD_BINDS, or select python for $DPY_BASE" 78
         need_display
         # No resolve_daemon() call here (dotfiles-ylmp.14) — stop only ever
         # needs a pid to signal, and daemon_pid()'s dual-argv match already
-        # finds whichever engine is ACTUALLY running, table agreement or not.
-        # Calling resolve_daemon()'s missing-binary refusal here would be
-        # actively wrong: it would block stopping a live go daemon left over
-        # from before an operator flipped the table back to python (or the
-        # go binary was since removed), which is exactly the daemon a stale
-        # table entry must not be allowed to hide.
+        # finds whatever is ACTUALLY running. Calling resolve_daemon()'s
+        # not-built refusal here would be actively wrong: it would block
+        # stopping a live daemon on a host where the binary was since removed
+        # or never rebuilt — including the leftover python daemon the .16
+        # cutover leaves behind on a machine that pulled mid-session, which is
+        # precisely the daemon `stop` exists to clear.
         pid="$(daemon_pid)"
         if [ -z "$pid" ]; then
             printf 'hotkeyd: not running on %s\n' "$DPY_BASE"
@@ -320,9 +271,10 @@ HOTKEYD_BINDS, or select python for $DPY_BASE" 78
         # cleanup: a graceful SIGTERM unlinks the socket itself, so this is a
         # no-op there. A daemon already dead when stop was called exits at the
         # "not running" branch above and never reaches here; THAT socket is
-        # reaped by the next daemon's own startup probe (layers.py
-        # _reap_stale_socket), which is what makes a restart after a SIGKILL
-        # work at all.
+        # reaped by the next daemon's own startup probe (the publisher
+        # unconditionally unlinks and rebinds a stale path,
+        # internal/layer/publisher.go NewStatePublisher), which is what makes
+        # a restart after a SIGKILL work at all.
         rm -f "$SOCK"
         printf 'hotkeyd: stopped on %s\n' "$DPY_BASE"
         ;;
@@ -343,8 +295,8 @@ HOTKEYD_BINDS, or select python for $DPY_BASE" 78
         if [ -n "$pid" ]; then
             # DAEMON + LATCH = CONTESTED, and it must not read as healthy
             # (dotfiles-hwds.21). The latch is not self-enforcing: `start`
-            # refuses behind it, but hotkeyd.py run directly bypasses this
-            # script entirely — and daemon_pid() above is deliberately written
+            # refuses behind it, but the daemon binary run directly bypasses
+            # this script entirely — and daemon_pid() above is written
             # to SEE such a daemon — while panic stops daemons and only THEN
             # links, so an `exec_always` firing in that window rearms a display
             # behind the fallback. Either ordering ends here: two X clients
@@ -435,7 +387,7 @@ HOTKEYD_BINDS, or select python for $DPY_BASE" 78
                 # daemon for this display" and callers read it that way
                 # (test-launcher.sh asserts on that path); here there IS a
                 # process, it is simply not serving — a different problem from
-                # an absent one, so a different code, matching hotkeyd.py's own.
+                # an absent one, so a different code, matching the daemon's own.
                 exit 6
             fi
             printf 'hotkeyd: running on %s (pid %s, socket %s)\n' \
@@ -464,10 +416,10 @@ HOTKEYD_BINDS, or select python for $DPY_BASE" 78
 
     check)
         # No display needed: validation is pure, which is what lets it run in a
-        # pre-commit hook and on a headless box. Still resolved against the
-        # engine table (dotfiles-ylmp.14) so `check` validates the SAME binary
-        # `start` would actually run for $DPY_BASE (empty DPY_BASE just hits
-        # engine_for()'s catch-all, same as every other unmapped display).
+        # pre-commit hook and on a headless box. Still goes through
+        # resolve_daemon() so `check` validates the SAME binary `start` would
+        # actually run, and inherits its not-built refusal (exit 78) rather
+        # than reporting a table as valid on a host that cannot run it.
         resolve_daemon
         exec "$DAEMON" --check
         ;;

@@ -286,13 +286,26 @@ PanelWindow {
     // harness has to drive the reader in ITS OWN tree, not whatever happens to
     // be checked out at ~/.dotfiles. Without this the suite's layer assertions
     // silently read "default" — not because the bar is wrong, but because the
-    // script it spawned did not exist.
+    // thing it spawned did not exist.
+    //
+    // QS_LAYER_FEED NAMES AN EXECUTABLE, NOT A SCRIPT (dotfiles-ylmp.16). It
+    // used to be a path handed to a hardcoded `python3`; hotkeyd is Go now and
+    // the reader is a subcommand of the daemon binary itself
+    // (`hotkeyd state-tail`, cmd/hotkeyd/statetail.go — a drop-in for the
+    // deleted state-tail.py, same argv contract, same one-line-per-change
+    // output, same exit-when-the-socket-goes behaviour).
+    //
+    // The override therefore substitutes a BINARY and still receives
+    // `state-tail` as argv[1], which is what lets quickshell/test-mode-bar.sh
+    // point it at a counting shim that execs the real thing. Dropping the
+    // interpreter from the command array is the whole point: with `python3`
+    // hardcoded, no value of QS_LAYER_FEED could have named a compiled reader.
     readonly property string layerFeedCmd: Quickshell.env("QS_LAYER_FEED")
-        || (Quickshell.env("HOME") + "/.dotfiles/hotkeyd/state-tail.py")
+        || (Quickshell.env("HOME") + "/.dotfiles/hotkeyd/hotkeyd")
 
     Process {
         id: layerFeed
-        command: ["python3", root.layerFeedCmd]
+        command: [root.layerFeedCmd, "state-tail"]
         running: true
         stdout: SplitParser {
             onRead: data => {

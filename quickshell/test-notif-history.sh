@@ -1112,8 +1112,9 @@ scenario "n-is-notif-toggle: \$mod+n reaches the browser on BOTH entry points, f
 #
 #   i3/config       native + WSL. hotkeyd owns $mod+n; the i3 line is GONE from
 #                   the effective tree, and a copy left behind would double-fire
-#                   with no BadAccess to warn you (test_binds.py asserts that
-#                   half under both $mod resolutions).
+#                   with no BadAccess to warn you (hotkeyd's own ownership
+#                   tests assert that half under both $mod resolutions —
+#                   cmd/hotkeyd/ownership_test.go).
 #   i3/config-xrdp  proot Arch on Android. Starts NO daemon and includes no
 #                   config.d overlay, so it keeps the i3 bind — otherwise the
 #                   cutover would silently take the browser away from that
@@ -1126,9 +1127,19 @@ assert_eq "config-xrdp effective: exactly one notif-toggle bindsym line" \
 assert_eq "config effective: the i3 notif-toggle bind is gone (hotkeyd owns it)" \
   "0" "$(count_eff_line "$I3_BASE" "$NOTIF_TOGGLE_LINE")"
 # ...and the daemon really does carry it, so "gone from i3" means "moved", not
-# "lost". Matched on binds.py's own spelling of the chord.
-assert_eq "hotkeyd/binds.py carries \$mod+n" \
-  "1" "$(grep -F -c 'Bind("$mod+n"' "$SCRIPT_DIR/../hotkeyd/binds.py" || true)"
+# "lost". Matched on the daemon table's own spelling of the chord — which is
+# now hotkeyd/cmd/hotkeyd/config.go, the compiled-in table that replaced
+# binds.py at dotfiles-ylmp.16.
+#
+# Still a SOURCE grep, and its one limit is worth naming: config.go builds some
+# chords programmatically (fmt.Sprintf("$mod+%d", n) for the workspace group),
+# so a grep cannot enumerate the whole table. It works here because $mod+n is a
+# literal. What backstops it is the daemon's own validation — `hotkeyd --check`
+# refuses a table with a duplicate or unresolvable chord — so this assertion
+# only has to answer "is the bind still declared", which is exactly the
+# moved-not-lost question the scenario is about.
+assert_eq "hotkeyd/cmd/hotkeyd/config.go carries \$mod+n" \
+  "1" "$(grep -F -c 'Chord: "$mod+n"' "$SCRIPT_DIR/../hotkeyd/cmd/hotkeyd/config.go" || true)"
 # ...and panic restores it, so a stopped daemon does not leave a dead key.
 assert_eq "the fallback carries the i3 spelling for the panic path" \
   "1" "$(count_fixed_line "$SCRIPT_DIR/../i3/config.d/zz-fallback-binds.conf" "$NOTIF_TOGGLE_LINE")"
@@ -1153,8 +1164,8 @@ done
 assert_eq "the fallback does not resurrect the deleted bind" \
   "0" "$(count_fixed_line "$SCRIPT_DIR/../i3/config.d/zz-fallback-binds.conf" "$NAME_WS_LINE")"
 # ...and hotkeyd did not quietly pick it up either.
-assert_eq "hotkeyd/binds.py does not carry \$mod+Shift+o" \
-  "0" "$(grep -F -c 'Bind("\$mod+Shift+o"' "$SCRIPT_DIR/../hotkeyd/binds.py" || true)"
+assert_eq "hotkeyd/cmd/hotkeyd/config.go does not carry \$mod+Shift+o" \
+  "0" "$(grep -F -c 'Chord: "$mod+Shift+o"' "$SCRIPT_DIR/../hotkeyd/cmd/hotkeyd/config.go" || true)"
 
 scenario "shift-c-refreshes-the-bar: \$mod+Shift+c leaves a bar running the CURRENT QML"
 # THE REQUIREMENT, not the mechanism (dotfiles-ph03). i3 runs exec_always on
@@ -1299,7 +1310,7 @@ scenario "MUTANT PIN: dropping a bind from the shared base breaks BOTH entry poi
 # THE VEHICLE IS NOW $mod+Shift+q (kill), not the rename bind (dotfiles-hwds.49
 # deleted that one, which would have made this pin assert against a line no
 # file contains -- vacuously green forever). The kill bind is the right
-# replacement for the same reason the parser floor in hotkeyd/test_binds.py was
+# replacement for the same reason the parser floor in hotkeyd's bind tests was
 # repointed at the recovery set: it is i3's by ARGUMENT, not by not having been
 # migrated yet. Grabs die with the daemon, so the key for dealing with an
 # already-misbehaving window stays in the engine that cannot lose its grabs

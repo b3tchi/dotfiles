@@ -13,19 +13,17 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # pgrep/pkill that finds a daemon by its argv goes through this. No HOTKEYD_BIN
 # here — every daemon this suite starts goes through hotkeyd.sh (`run()`
 # below), never a direct invocation, so there is nothing here to point at a
-# different binary. hotkeyd.sh itself hardcodes `DAEMON="$HERE/hotkeyd.py"`
-# and is out of this task's scope; see dotfiles-2ats's report.
+# different binary; hotkeyd.sh resolves the Go build itself.
 #
-# Because every daemon here starts through hotkeyd.sh, WHICH ENGINE runs is
-# decided by hotkeyd.sh's own engine_for() (HOTKEYD_ENGINE_DEFAULT, default
-# python) — a seam this file does not otherwise touch. HOTKEYD_PROC_PAT below
-# must agree with whatever engine_for() actually starts, or every pgrep/pkill
-# in this suite looks for the wrong argv (observed: HOTKEYD_ENGINE_DEFAULT=go
-# alone, without also setting HOTKEYD_PROC_PAT, starts the Go daemon but keeps
-# hunting for it with the python pattern — 20 passed/10 failed instead of
-# clean). The correct Go invocation sets both together:
-#   HOTKEYD_ENGINE_DEFAULT=go HOTKEYD_PROC_PAT=hotkeyd ./test-launcher.sh
-HOTKEYD_PROC_PAT="${HOTKEYD_PROC_PAT:-hotkeyd\.py}"
+# DEFAULT IS THE GO ARGV SHAPE (dotfiles-ylmp.16). It was `hotkeyd\.py` for as
+# long as there were two engines to disagree about, and the pairing with
+# HOTKEYD_ENGINE_DEFAULT that dotfiles-ugdg documented is what stopped a
+# go-engine run from hunting the Go daemon with the python pattern (observed:
+# 20 passed/10 failed instead of clean). Both halves of that trap are gone
+# with python: the launcher starts one binary, and this pattern names it. A
+# caller only needs to set this now to point the suite at a differently-named
+# daemon binary — `./test-launcher.sh` on its own is the correct invocation.
+HOTKEYD_PROC_PAT="${HOTKEYD_PROC_PAT:-hotkeyd}"
 
 PASS=0
 FAIL=0
@@ -128,37 +126,79 @@ eng_of() {
     [ "$rc" -eq 0 ] && printf 'python' || printf 'error(%s):%s' "$rc" "$out"
 }
 
-e="$(eng_of :10)"
-[ "$e" = go ] && ok ":10 resolves to the GO engine (the xrdp cutover, dotfiles-tz5e)" \
-    || bad ":10 resolved to '$e', want go — the ':10) printf go' arm is not in \
-engine_for(), so the xrdp session is still served by python"
+# THE ESTATE IS ALL-GO (dotfiles-ylmp.16). The parallel-run window is over:
+# python is deleted from the tree, so there is no longer a per-display table to
+# disagree with — EVERY display resolves to the Go binary, and the assertions
+# below are written to fail loudly if any path can still reach a python daemon.
+#
+# What each assertion is guarding, since "everything returns go" is trivially
+# satisfiable by a launcher that ignores its input entirely:
+#   - the two live displays (:0 native, :10 xrdp) each resolve to go;
+#   - the screen-suffixed forms resolve identically (canonicalisation intact);
+#   - a display nobody pinned resolves to go (no display is left behind);
+#   - HOTKEYD_ENGINE_DEFAULT=python cannot talk ANY of them back to python.
+# That last group is the one that matters: it is the difference between
+# "python is not the default" and "python is gone", and only the second is
+# what this task shipped.
 
-# xrdp presents DISPLAY=:10.0, and the launcher canonicalises to :10 before
-# consulting the table. An arm that only matched the bare form would leave the
-# LIVE session on python while every hand-run check said go — the exact
-# disagreement the ${VAR%.*} canonicalisation exists to prevent.
+e="$(eng_of :0)"
+[ "$e" = go ] && ok ":0 (the native session) resolves to the GO engine (dotfiles-ylmp.16)" \
+    || bad ":0 resolved to '$e', want go — the native display is still served \
+by python, so the .16 cutover did not land"
+
+# xrdp presents DISPLAY=:10.0 and the native session can present :0.0; the
+# launcher canonicalises before consulting the table. A table that only
+# matched the bare form would leave a LIVE session on the wrong engine while
+# every hand-run check said otherwise — the exact disagreement the ${VAR%.*}
+# canonicalisation exists to prevent.
+e="$(eng_of :0.0)"
+[ "$e" = go ] && ok ":0.0 (the screen-suffixed form) resolves to GO too" \
+    || bad ":0.0 resolved to '$e', want go — the resolution does not survive \
+the screen-suffix canonicalisation"
+
+e="$(eng_of :10)"
+[ "$e" = go ] && ok ":10 (the xrdp session) still resolves to the GO engine (dotfiles-tz5e)" \
+    || bad ":10 resolved to '$e', want go — the xrdp cutover regressed"
+
 e="$(eng_of :10.0)"
 [ "$e" = go ] && ok ":10.0 (the screen-suffixed form xrdp presents) resolves to GO too" \
-    || bad ":10.0 resolved to '$e', want go — the arm does not survive the \
-screen-suffix canonicalisation"
+    || bad ":10.0 resolved to '$e', want go"
 
-# The arms outrank the catch-all's override. Documented in engine_for()'s
-# header; asserted here because the suites set HOTKEYD_ENGINE_DEFAULT freely
-# and a table where the env can quietly demote a cut-over display would make
-# every parity run a coin toss.
+# No display is left behind. Before .16 this display reached a python
+# catch-all; a cutover that only pinned :0 and :10 by name would strand every
+# OTHER display (a second xrdp session, a Xvfb harness, :1 on a multiseat box)
+# on an engine whose source no longer exists — which is not a fallback, it is
+# an exit 78 the operator gets to debug during an outage.
+e="$(eng_of "$XA")"
+[ "$e" = go ] && ok "$XA (unpinned) resolves to GO — no display is left on a deleted engine" \
+    || bad "$XA resolved to '$e', want go — an unpinned display does not reach \
+the Go engine, so the cutover pinned displays by name instead of removing the \
+python path"
+
+# THE VACUITY CLOSERS. Every assertion above would still pass on a launcher
+# that merely changed its DEFAULT from python to go while keeping the python
+# branch reachable. These three prove the branch is GONE: the one environment
+# variable that used to select an engine can no longer produce a python daemon
+# on any display, pinned or not.
+e="$(eng_of :0 python)"
+[ "$e" = go ] && ok ":0 stays GO under HOTKEYD_ENGINE_DEFAULT=python (the python branch is gone, not merely un-defaulted)" \
+    || bad ":0 resolved to '$e' under HOTKEYD_ENGINE_DEFAULT=python, want go \
+— the env can still select python, so the engine table was re-defaulted rather \
+than cut over"
+
 e="$(eng_of :10 python)"
-[ "$e" = go ] && ok ":10 stays GO under HOTKEYD_ENGINE_DEFAULT=python (arms outrank the catch-all)" \
+[ "$e" = go ] && ok ":10 stays GO under HOTKEYD_ENGINE_DEFAULT=python" \
     || bad ":10 resolved to '$e' under HOTKEYD_ENGINE_DEFAULT=python, want go"
 
-# The other half of the cutover contract, and the guard on the assertions
-# above: a blanket flip of every display would satisfy all three of them.
-e="$(eng_of "$XA")"
-[ "$e" = python ] && ok "$XA (unpinned) still defaults to python — the arm did not swallow every display" \
-    || bad "$XA resolved to '$e', want python — a display with no arm must \
-still reach engine_for()'s catch-all"
+e="$(eng_of "$XA" python)"
+[ "$e" = go ] && ok "$XA (unpinned) stays GO under HOTKEYD_ENGINE_DEFAULT=python — the catch-all cannot be talked back to python either" \
+    || bad "$XA resolved to '$e' under HOTKEYD_ENGINE_DEFAULT=python, want go"
 
+# The suites still set HOTKEYD_ENGINE_DEFAULT=go (dotfiles-ugdg documented it
+# as part of the go invocation, and every caller's muscle memory carries it).
+# It is inert now rather than an error, so those invocations keep working.
 e="$(eng_of "$XA" go)"
-[ "$e" = go ] && ok "$XA (unpinned) follows HOTKEYD_ENGINE_DEFAULT=go — the parity seam still works" \
+[ "$e" = go ] && ok "$XA follows a now-inert HOTKEYD_ENGINE_DEFAULT=go — the documented go invocation still works" \
     || bad "$XA resolved to '$e' under HOTKEYD_ENGINE_DEFAULT=go, want go"
 
 for dpy in "$XA" "$XB"; do
@@ -225,16 +265,24 @@ n=$(pgrep -f "$HOTKEYD_PROC_PAT.*--display $XA" 2>/dev/null | wc -l)
 # recovered a DEAD daemon and this bind exists just as much for one that is
 # alive and wrong. Asserting the old string would now pass only if the old,
 # insufficient bind were still there.
-# The CHORD is read from binds.PANIC_CHORD rather than written here, so this
-# check survives the chord moving — which it has done twice ($mod+Shift+F12 ->
-# $mod+Shift+r -> $mod+Ctrl+Shift+r, the last when the restart verbs
-# consolidated onto $mod+Shift+r as the hammer). A hardcoded chord makes this
-# assertion fail on the commit that MOVES the bind, which is noise, while
-# silently passing if the bind and the reservation ever disagree — the one
-# thing it exists to catch.
+# The CHORD is read from the daemon's own source rather than written here, so
+# this check survives the chord moving — which it has done twice
+# ($mod+Shift+F12 -> $mod+Shift+r -> $mod+Ctrl+Shift+r, the last when the
+# restart verbs consolidated onto $mod+Shift+r as the hammer). A hardcoded
+# chord makes this assertion fail on the commit that MOVES the bind, which is
+# noise, while silently passing if the bind and the reservation ever
+# disagree — the one thing it exists to catch.
+#
+# READ FROM internal/bind/chord.go, not `import binds` (dotfiles-ylmp.16).
+# Matched on the const DECLARATION, so a comment or a test that merely mentions
+# the chord cannot satisfy it after a rename. sed rather than `go doc` because
+# this assertion must work on a checkout with no Go toolchain — the rest of the
+# suite needs one, but a grep-able source of truth costs nothing and this is
+# the assertion that says where the panic chord IS.
 COMMON="$HERE/../i3/config.common"
-PANIC_CHORD="$(cd "$HERE" && python3 -c 'import binds; print(binds.PANIC_CHORD)')"
-[ -n "$PANIC_CHORD" ] || bad "could not read binds.PANIC_CHORD"
+CHORD_GO="$HERE/internal/bind/chord.go"
+PANIC_CHORD="$(sed -n 's/^const PanicChord = "\(.*\)"$/\1/p' "$CHORD_GO")"
+[ -n "$PANIC_CHORD" ] || bad "could not read PanicChord from $CHORD_GO"
 BIND_LINE="$(grep -nF "bindsym $PANIC_CHORD " "$COMMON" \
              | grep 'hotkeyd-panic\.sh panic' || true)"
 if [ -n "$BIND_LINE" ]; then

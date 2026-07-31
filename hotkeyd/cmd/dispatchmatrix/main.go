@@ -106,6 +106,9 @@ func run(argv []string) int {
 	}
 	if *goBin == "" || *pyBin == "" || *hotkeydDir == "" {
 		fmt.Fprintln(os.Stderr, "dispatchmatrix: --go-hotkeyd, --py-hotkeyd and --hotkeyd-dir are all required")
+		fmt.Fprintln(os.Stderr, "dispatchmatrix: NOTE -- this is a two-arm python-vs-go differ, and python was")
+		fmt.Fprintln(os.Stderr, "  removed from hotkeyd/ at dotfiles-ylmp.16. There is no --py-hotkeyd to pass")
+		fmt.Fprintln(os.Stderr, "  unless you restore hotkeyd.py and binds.py from git history. See doc.go.")
 		return 2
 	}
 	for _, b := range []string{"Xvfb", "i3", "i3-msg", "xdotool"} {

@@ -44,14 +44,22 @@ include ~/.dotfiles/i3/config.common
 
 # --- entry-point-specific binds ----------------------------------------------
 # $mod+Return, $mod+d, $mod+p and $mod+Shift+d USED TO LIVE HERE and are now
-# owned by hotkeyd/binds.py (dotfiles-hwds.33). They sat in the entry point
+# owned by the daemon's bind table — hotkeyd/cmd/hotkeyd/config.go, compiled into
+# the binary dwm-style since dotfiles-ylmp.16 (was hotkeyd/binds.py when the move
+# happened at dotfiles-hwds.33). They sat in the entry point
 # because their COMMAND differs per session type, and an entry point was the
 # only i3 scope that could express that; the daemon expresses it better, since
 # it resolves $mod per display and one table then serves :0 and :10 alike.
 #
 # Do NOT re-add them here. A chord live in both engines double-fires (the X
 # server keeps core and XI2 passive grabs in separate conflict domains, so
-# nothing raises BadAccess to warn you) — hotkeyd/test_binds.py fails instead.
+# nothing raises BadAccess to warn you). What catches it now is
+# `hotkeyd check --ownership`, which diffs i3's live GET_CONFIG against the
+# compiled table and exits non-zero on any BOTH row
+# (hotkeyd/cmd/hotkeyd/ownership.go; unit-covered by ownership_test.go, asserted
+# against real i3s by hotkeyd/test-mixed-estate.sh). It reads a RUNNING i3, so
+# unlike the static test_binds.py check it replaced it also sees an overlay or a
+# hand-edited include the tree does not know about.
 # Their i3 spelling lives in config.d/zz-fallback-binds.conf, which
 # `hotkeyd-panic.sh panic` links in when the daemon has to be stopped.
 #

@@ -6,8 +6,11 @@
 //
 // It prints one `PASS` / `FAIL` / `SKIP` line per claim and exits non-zero
 // if anything FAILED. test-hotkeyd.sh's stage 6 routes to it through
-// $HOTKEYD_LIVECHECK (default: python3 live_check.py, so nothing changes
-// until a caller opts in).
+// $HOTKEYD_LIVECHECK, which since dotfiles-ylmp.16 defaults to EMPTY meaning
+// "build ./cmd/livecheck into the stage's scratch dir and use that" — it was
+// `python3 live_check.py` until python was removed. A build failure FAILS the
+// stage rather than skipping it: a stage 6 that measured no live grab must
+// never report green.
 //
 // # Safety: never the ambient display
 //
@@ -201,12 +204,15 @@
 //	fail silently and turned thirteen claims red about the daemon while the
 //	fault was in the instrument.
 //
-// # Both engines, one suite
+// # Both engines, one suite (HISTORICAL — one engine remains)
 //
-// The same binary drives hotkeyd.py: point $HOTKEYD_BIN at
-// `python3 hotkeyd.py` and every daemon-phase scenario runs against the
-// python engine instead. Running both is what produced the two findings
-// this tool has made so far, and only one of them was about the daemons:
+// This tool was written to drive EITHER daemon: pointing $HOTKEYD_BIN at
+// `python3 hotkeyd.py` ran every daemon-phase scenario against the python
+// engine instead. That is no longer possible — python was removed at
+// dotfiles-ylmp.16 — but running both is what produced the two findings below,
+// so the capability is recorded here as the provenance of the findings rather
+// than as something a reader can still exercise. Only one was about the
+// daemons:
 //
 //	REAL: the transition log's device= field is `"..."` from Go's %q and
 //	`'...'` from python's !r (bd dotfiles-n0r4). Both spellings are parsed

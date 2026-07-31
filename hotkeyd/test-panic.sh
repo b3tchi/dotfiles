@@ -23,27 +23,22 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Parity-testing seam (dotfiles-2ats), same contract as test-hotkeyd.sh: the two
-# hand-started daemons below (the out-of-scope sentinel and the CONTESTED-state
-# rig) and every pgrep/pkill that finds a daemon by its argv go through these,
-# so a future implementation can be pointed at without editing the suite.
-# Defaults reproduce today's python3 invocation and pgrep pattern
-# byte-for-byte. NOTE: most of this suite's daemon lifecycle goes through
+# Daemon-under-test seam (dotfiles-2ats), same contract as test-hotkeyd.sh: the
+# two hand-started daemons below (the out-of-scope sentinel and the
+# CONTESTED-state rig) and every pgrep/pkill that finds a daemon by its argv go
+# through these. NOTE: most of this suite's daemon lifecycle goes through
 # hotkeyd.sh (start/stop/restart), which is NOT parameterized here — see
 # dotfiles-2ats's report for why that is a separate, blocking gap.
 #
-# Because that lifecycle goes through hotkeyd.sh, HOTKEYD_BIN/HOTKEYD_PROC_PAT
-# alone do NOT select the Go engine here: hotkeyd.sh's `start`/`restart` pick
-# the engine per display via its own engine_for(), which falls back to python
-# unless HOTKEYD_ENGINE_DEFAULT=go is also set — and this suite's pgrep
-# pattern must agree with whichever one actually started. The correct Go
-# invocation sets all four together:
-#   HOTKEYD_ENGINE_DEFAULT=go HOTKEYD_BIN=path/to/hotkeyd \
-#     HOTKEYD_PROC_PAT=hotkeyd HOTKEYD_HAS_BINDS_FLAG=0 bash test-panic.sh
-HOTKEYD_BIN="${HOTKEYD_BIN:-python3 $HERE/hotkeyd.py}"
-HOTKEYD_PROC_PAT="${HOTKEYD_PROC_PAT:-hotkeyd\.py}"
+# CUT OVER TO GO AT dotfiles-ylmp.16. The python daemon is deleted and
+# hotkeyd.sh no longer chooses an engine, so the documented invocation is the
+# bare `bash test-panic.sh` with nothing exported. A caller that overrides
+# HOTKEYD_BIN must override HOTKEYD_PROC_PAT to match the argv that build
+# presents, or the hand-started daemons are invisible to this suite's own pgrep.
+HOTKEYD_BIN="${HOTKEYD_BIN:-$HERE/hotkeyd}"
+HOTKEYD_PROC_PAT="${HOTKEYD_PROC_PAT:-hotkeyd}"
 
-# The engine capability seam. Sourced HERE, before the $HOME sandbox below:
+# The bind-table fixture seam. Sourced HERE, before the $HOME sandbox below:
 # it snapshots the go build caches out of the real environment, and a fixture
 # build under the throwaway HOME would otherwise start cold.
 . "$HERE/test-engine.sh"
@@ -79,7 +74,7 @@ cleanup() {
     pkill -f "$HOTKEYD_PROC_PAT .*--display $XA" 2>/dev/null
     pkill -f "$HOTKEYD_PROC_PAT .*--display $XB" 2>/dev/null
     # The sentinel is ours — we started it, so we reap it. Per-display, never a
-    # bare `pkill -f hotkeyd.py`, which is the machine-wide reach this whole
+    # bare `pkill -f hotkeyd`, which is the machine-wide reach this whole
     # file exists to keep out.
     pkill -f "$HOTKEYD_PROC_PAT .*--display $XC" 2>/dev/null
     [ -n "${FAKE_PID:-}" ] && kill "$FAKE_PID" 2>/dev/null
@@ -105,10 +100,12 @@ trap cleanup EXIT
 # --- throwaway session -------------------------------------------------------
 # HOME is fake so the link lands in a temp config.d; the fallback SOURCE is a
 # test one that actually binds a chord. The shipped fallback is empty on
-# purpose (see its header: today binds.py owns only $mod+o and i3 still owns it
-# too), so using it here could not show ownership moving at all. Its CONTENT is
-# guarded elsewhere — test_binds.py diffs it against binds.py, and stage 10
-# runs `i3 -C` over the composed tree with it linked.
+# purpose (see its header: today the daemon's table owns only $mod+o and i3
+# still owns it too), so using it here could not show ownership moving at all.
+# Its CONTENT is guarded only by test-hotkeyd.sh's stage 10, which runs
+# `i3 -C` over the composed tree with it linked — the chord-set diff that
+# test_binds.py used to do went with the python suite and has no replacement
+# (dotfiles-ylmp.16; see stage 10's header).
 export HOME="$T/home"
 export XDG_RUNTIME_DIR="$T/run"
 export HOTKEYD_I3_CONFIG_D="$HOME/.i3/config.d"
@@ -152,17 +149,12 @@ export HOTKEYD_PGREP_SCOPE="$XA $XB"
 
 printf 'bindsym Mod4+F10 workspace i3-owns-it\n' > "$HOTKEYD_FALLBACK_SRC"
 
-# The daemon's table. Its action is an i3 command, so a keystroke the daemon
-# receives moves the session exactly the way i3's own bind would — one
-# observable, two possible authors, and the workspace name says which.
-cat > "$T/daemon-binds.py" <<EOF
-import sys; sys.path.insert(0, "$HERE")
-from binds import Bind
-BINDS = [Bind('Mod4+F10', 'workspace daemon-owns-it')]
-LAYERS = {}
-EOF
-# The same one-bind oracle for an engine whose table is compiled in. There is
-# no chord in the SHIPPED table that could stand in for it: who_answers()
+# The daemon's table, compiled into an oracle binary. Its action is an i3
+# command, so a keystroke the daemon receives moves the session exactly the way
+# i3's own bind would — one observable, two possible authors, and the workspace
+# name says which.
+#
+# There is no chord in the SHIPPED table that could stand in for it: who_answers()
 # needs a bind whose i3 command names its own author, and every shipped bind
 # either execs an external helper or issues a command ("workspace next") whose
 # result does not say who issued it. So the oracle is built, not borrowed.
@@ -176,25 +168,20 @@ func init() {
 	Layers = map[string]bind.Layer{}
 }
 EOF
-if [ "$HOTKEYD_HAS_BINDS_FLAG" = 1 ]; then
-    export HOTKEYD_BINDS="$T/daemon-binds.py"
-    ORACLE_BIN="$HOTKEYD_BIN"
-    ORACLE_ARGS="--binds $HOTKEYD_BINDS"
-else
-    # HOTKEYD_GO_DAEMON points hotkeyd.sh's `start` at the oracle for the
-    # launcher-driven daemons; HOTKEYD_BIN covers the two hand-started ones.
-    # HOTKEYD_BINDS stays UNSET on this path — the launcher refuses it by
-    # name when the engine is go (there is no --binds flag), and that refusal
-    # is correct behaviour we must not route around.
-    if ! go_table_daemon "$T/daemon-binds.go" "$T/oracle/hotkeyd"; then
-        echo "panic suite: could not build the ownership-oracle daemon — refusing to run"
-        exit 1
-    fi
-    export HOTKEYD_GO_DAEMON="$T/oracle/hotkeyd"
-    HOTKEYD_BIN="$T/oracle/hotkeyd"
-    ORACLE_BIN="$T/oracle/hotkeyd"
-    ORACLE_ARGS=""
+# HOTKEYD_GO_DAEMON points hotkeyd.sh's `start` at the oracle for the
+# launcher-driven daemons; HOTKEYD_BIN covers the two hand-started ones.
+#
+# HOTKEYD_BINDS STAYS UNSET, and that is deliberate rather than incidental: the
+# launcher refuses it by name (exit 78) because the daemon has no --binds flag —
+# its table is compiled in — and that refusal is correct behaviour this suite
+# must not route around by quietly exporting the variable anyway.
+if ! go_table_daemon "$T/daemon-binds.go" "$T/oracle/hotkeyd"; then
+    echo "panic suite: could not build the ownership-oracle daemon — refusing to run"
+    exit 1
 fi
+export HOTKEYD_GO_DAEMON="$T/oracle/hotkeyd"
+HOTKEYD_BIN="$T/oracle/hotkeyd"
+ORACLE_BIN="$T/oracle/hotkeyd"
 
 # XTEST injection. A real key through the real server is the only way to learn
 # who holds the passive grab; asking either side what it thinks it grabbed just
@@ -520,7 +507,7 @@ esac
 # has no daemon by construction" is overstated. Two reachable paths end with
 # daemon + link:
 #
-#   1. hotkeyd.py invoked directly bypasses the launcher's latch check entirely —
+#   1. the daemon binary invoked directly bypasses the launcher's latch check —
 #      and daemon_pid() is DELIBERATELY written to see such a daemon, so the repo
 #      already treats a hand-started run as expected usage;
 #   2. panic stops daemons and only THEN links, and `start` has its own window
@@ -534,7 +521,7 @@ esac
 # .19 fixed, because it tells the operator to stop looking.
 echo "panic: status in the CONTESTED state (daemon alive behind the latch)"
 env -u I3SOCK DISPLAY="$XA" setsid $ORACLE_BIN \
-    --display "$XA" $ORACLE_ARGS >/dev/null 2>&1 &
+    --display "$XA" >/dev/null 2>&1 &
 sleep 1
 [ "$(daemons_on "$XA")" = 1 ] \
     && ok "a hand-started daemon runs behind the fallback link" \
@@ -732,7 +719,7 @@ else
 
     # resume's EXIT CODE IS asserted again (dotfiles-f2be, closed by
     # dotfiles-hwds.23). It used to be deliberately unasserted: `target_displays`
-    # pgreps every hotkeyd.py on the box — correct for a machine-wide recovery
+    # pgreps every hotkeyd on the box — correct for a machine-wide recovery
     # tool — so a daemon belonging to another checkout of this repo (a second
     # agent running this very suite) landed in the state file, and resume then
     # reported a real failure to restart a daemon that was never ours.
@@ -781,15 +768,22 @@ fi
 # nothing real is reachable — the sandbox is the stub, not a narrowing of the
 # code under test.
 #
-# BOTH ARGV SHAPES, NOT JUST PYTHON'S (dotfiles-pwaj). The stub used to emit one
-# line, `python3 hotkeyd.py --display :9998`, which reproduced hotkeyd-panic.sh's
-# then-hardcoded `hotkeyd\.py .*--display` pattern byte-for-byte — so it asserted
-# the machine-wide guarantee only for the engine the script could already see,
-# and would have kept passing after a display was cut over to go with panic blind
-# to it. It now stands up one daemon of EACH shape: python's `hotkeyd.py
-# --display :N` and the Go rewrite's bare `hotkeyd --display :N` (sp021). Both
-# must be discovered, stopped and recorded, because engine_for() can name either
-# for any display and `target_displays` must not depend on which it names.
+# BOTH ARGV SHAPES, AND THE PYTHON ONE STAYS AFTER THE CUTOVER (dotfiles-pwaj,
+# re-argued at dotfiles-ylmp.16). The stub used to emit one line, `python3
+# hotkeyd.py --display :9998`, which reproduced hotkeyd-panic.sh's then-hardcoded
+# `hotkeyd\.py .*--display` pattern byte-for-byte — so it asserted the
+# machine-wide guarantee only for the engine the script could already see. It now
+# stands up one daemon of EACH shape: `hotkeyd.py --display :N` and the shipped
+# daemon's bare `hotkeyd --display :N`.
+#
+# The python row is NOT a leftover of the two-engine parallel-run window, which is
+# over. It is a LEFTOVER-DAEMON case: hotkeyd.sh's daemon_pid() and
+# hotkeyd-panic.sh's target_displays() both still match `hotkeyd(\.py)?` on
+# purpose, so that a box which pulled this cutover mid-session — python daemon
+# still resident on :0, new scripts on disk — is not left with a panic that
+# cannot see the very process holding the fallback's chords. This section is what
+# proves that reach is real; delete the row and the `(\.py)?` in both shipped
+# patterns becomes untested decoration that the next cleanup drops.
 echo "panic: with no scope set, the enumeration is still machine-wide"
 FAKE_DPY=":9998"
 FAKE_DPY_GO=":9997"
@@ -813,10 +807,11 @@ mkdir -p "$T/stub"
 # stand-ins are reachable, nothing on the real box is — while the PATTERN under
 # test is genuinely exercised.
 #
-# The table carries one row per engine, exactly as a box mid-cutover would:
-# python's `hotkeyd.py --display :N` and the Go rewrite's bare `hotkeyd
-# --display :N`. Both callers are served: hotkeyd-panic.sh asks with -af (full
-# line out), hotkeyd.sh's daemon_pid() asks with -f (pid only).
+# The table carries one row per argv shape, exactly as a box that pulled the
+# cutover mid-session would: a leftover `hotkeyd.py --display :N` and the shipped
+# daemon's bare `hotkeyd --display :N`. Both callers are served: hotkeyd-panic.sh
+# asks with -af (full line out), hotkeyd.sh's daemon_pid() asks with -f (pid
+# only).
 cat > "$T/stub/pgrep" <<EOF
 #!/bin/sh
 pat=""; full=0
@@ -859,10 +854,11 @@ then
 else
     bad "$FAKE_DPY reached the stop loop but not the state file resume replays"
 fi
-# THE CUTOVER CASE. A go daemon's argv has no `.py`, so the old pattern could not
-# see it at all: panic would link the fallback and reload i3 over a daemon still
-# holding the fallback's chords — the CONTESTED state, on precisely the display
-# that had just been cut over.
+# THE SHIPPED DAEMON'S OWN ARGV, which carries no `.py`: the pre-ylmp.14 pattern
+# could not see it at all, and panic would link the fallback and reload i3 over a
+# daemon still holding the fallback's chords — the CONTESTED state, on precisely
+# the display that had just been cut over. This is now the ONLY shape production
+# starts, so it is the one whose regression would be silent everywhere at once.
 if kill -0 "$FAKE_PID_GO" 2>/dev/null; then
     bad "an unscoped panic did NOT stop the GO-engine daemon on $FAKE_DPY_GO — \
 target_displays is blind to the bare 'hotkeyd --display' argv, so panic links \
@@ -963,9 +959,18 @@ panic: $pat_panic_full)"
         printf '%s\n' "$2" | grep -Eq -- "$1"
     }
 
-    # `argv|display-it-belongs-to`. Both engines, one- and two-digit displays,
-    # and daemons carrying flags after --display (started by hand with --binds,
-    # which daemon_pid()'s comment says explicitly must stay visible).
+    # `argv|display-it-belongs-to`. Both argv shapes the shipped patterns claim
+    # to match — the bare `hotkeyd --display :N` production starts today and the
+    # `hotkeyd.py --display :N` of a daemon left resident by a mid-session
+    # pull (dotfiles-ylmp.16) — across one- and two-digit displays, with and
+    # without trailing tokens after --display.
+    #
+    # The trailing token is spelled `--binds /tmp/t.py` because that is the argv
+    # a hand-started python daemon actually had; the shipped daemon has no such
+    # flag (its table is compiled in). What the four flag-carrying rows pin is
+    # the pattern's TAIL behaviour — that neither script requires --display to
+    # be the last token, and that it may appear anywhere in the argv — which is
+    # a property of the patterns, not of any flag either daemon happens to own.
     drift=""
     both=0
     while IFS='|' read -r _argv _dpy; do
@@ -1003,6 +1008,14 @@ agreement above is partly or wholly vacuous"
     # shell wrappers panic itself execs (matching those would make panic loop on
     # its own children), a sibling tool on the same display, and an unrelated X
     # client that merely takes --display.
+    #
+    # The sibling tool is `livecheck` since dotfiles-ylmp.16 — live_check.py is
+    # deleted and cmd/livecheck replaced it. It is a HARDER decoy than the file
+    # it replaces, not a softer one: it lives in the daemon's own directory, so
+    # its argv contains the literal `hotkeyd`, and only the space the patterns
+    # demand right after `hotkeyd`/`hotkeyd.py` keeps `/opt/hotkeyd/livecheck`
+    # out. Verified by hand against both shipped patterns before it was written
+    # down here.
     decoy_hits=""
     while IFS='|' read -r _argv _dpy; do
         [ -n "$_argv" ] || continue
@@ -1013,11 +1026,11 @@ agreement above is partly or wholly vacuous"
     done <<'DECOYTABLE'
 sh /opt/hotkeyd/hotkeyd.sh restart --display :10|:10
 sh /opt/hotkeyd/hotkeyd-panic.sh panic --display :10|:10
-python3 /opt/hotkeyd/live_check.py --display :10|:10
+/opt/hotkeyd/livecheck --display :10|:10
 /usr/bin/xterm --display :10|:10
 DECOYTABLE
     [ -z "$decoy_hits" ] \
-        && ok "and neither pattern matches the shell wrappers, live_check, or \
+        && ok "and neither pattern matches the shell wrappers, livecheck, or \
 an unrelated X client on the same display" \
         || bad "a non-daemon argv is taken for a daemon$decoy_hits"
 

@@ -9,7 +9,7 @@
 # NO LINKS. Every consumer runs the tree in place out of ~/.dotfiles/hotkeyd:
 # the i3 escape-hatch bind and both platform overlays call
 # ~/.dotfiles/hotkeyd/hotkeyd.sh directly. Linking a copy into ~/.config would
-# put a SECOND bind table on disk, and "which binds.py is the daemon actually
+# put a SECOND daemon binary on disk, and "which table is the daemon actually
 # running" is not a question worth having during a keyboard outage.
 #
 # X11 only (native :0, xrdp :10), and specifically X11 WITH XInput2 — the
@@ -17,46 +17,53 @@
 # falling back to core grabs, which would silently cost every event its source
 # device. Sway is out of scope — no X passive grabs on Wayland at all.
 #
-# Dependency: python-xlib, per adr0015 condition 1 (an X-ecosystem binding with
-# working prior art in this repo — quickshell's focus helpers use the same one,
-# so on a machine that already has the quickshell dot this adds no new package).
-# xorg-server-xvfb is test-only: hotkeyd/test-hotkeyd.sh and
+# NO RUNTIME DEPENDENCIES (sp021, dotfiles-ylmp.16). The daemon is a static Go
+# binary with its bind table compiled in; it needs no interpreter and no X
+# binding package at runtime. python-xlib was this dot's one library dependency
+# (adr0015 condition 1) for as long as the daemon was hotkeyd.py, and it is
+# DROPPED here now that python is deleted from hotkeyd/.
+#
+# Dropping it here does NOT uninstall it. quickshell/dot.yaml declares
+# python-xlib in its own right for qs-focus-border.py and qs-focus-dim.py,
+# which query X geometry and shape directly, and those are untouched by this
+# rewrite. On a machine that installs both dots the package stays; what changed
+# is that hotkeyd no longer *claims* it, so a host that wants hotkeyd without
+# quickshell no longer drags in a python X binding it never loads.
+#
+# xorg-server-xvfb stays, and stays TEST-ONLY: hotkeyd/test-hotkeyd.sh and
 # hotkeyd/test-launcher.sh drive throwaway displays rather than the caller's.
 #
-# python-xlib is RETAINED here (sp021, dotfiles-ylmp.14) even though the Go
-# rewrite (./cmd/hotkeyd) now also builds below — hotkeyd.sh's per-display
-# engine table is cut over one display at a time, and :0 is still python
-# (dotfiles-ylmp.16 finishes the job). This dot does not drop python-xlib
-# until .16, per sp021's ## solution.
+# THE GO BUILD BELOW IS NOW WHAT THE KEYBOARD IS, ON EVERY DISPLAY. Before
+# dotfiles-ylmp.16 a host that skipped it still had python serving :0, so the
+# build was opt-in (ylmp.14) and then load-bearing for :10 alone (tz5e). With
+# the engine table gone, hotkeyd.sh resolves this binary for every display and
+# refuses LOUDLY (exit 78) when it is absent — never a silent fallback, because
+# there is nothing left to fall back to. So on a host with no Go toolchain,
+# skipping this build costs EVERY display its daemon, not one.
 #
-# :10 IS ON THE GO ENGINE (dotfiles-tz5e). That changes what the go build
-# below means on a machine that serves an xrdp session: it is no longer purely
-# opt-in there. hotkeyd.sh's resolve_daemon() refuses LOUDLY (exit 78) rather
-# than falling back to python when the table says go and the binary is not
-# built, so on such a host a missing Go toolchain costs :10 its daemon —
-# recoverable, named, and never a silent wrong-engine start, but not
-# invisible. :0 is unaffected either way.
+# It is nevertheless still GUARDED rather than hard-failing, and that is a
+# deliberate trade the message below has to carry: `rotz install` staying
+# complete-or-actionable (never half-applied) is worth more than failing the
+# whole run here, because the failure mode is recoverable by one command and is
+# named at the moment it happens. The i3 session also has an escape hatch that
+# does not need this binary at all — hotkeyd-panic.sh hands the keyboard back
+# to i3's own bind table — so a host in this state is degraded, not locked out.
 linux:
   installs:
     cmd: |
       {{#if (eq whoami.distro "Manjaro Linux")}}
-      sudo pacman -S --needed --noconfirm python-xlib xorg-server-xvfb
+      sudo pacman -S --needed --noconfirm xorg-server-xvfb
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux")}}
-      sudo pacman -S --needed --noconfirm python-xlib xorg-server-xvfb
+      sudo pacman -S --needed --noconfirm xorg-server-xvfb
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux ARM")}}
-      sudo pacman -S --needed --noconfirm python-xlib xorg-server-xvfb
+      sudo pacman -S --needed --noconfirm xorg-server-xvfb
       {{/if}}
 
-      # Go build of hotkeyd/hotkeyd from ./cmd/hotkeyd (sp021, dotfiles-ylmp.14).
-      # Still GUARDED rather than required, so a host with no Go toolchain gets
-      # an actionable message here and a complete install -- never a partial or
-      # failed one. What changed at dotfiles-tz5e is the blast radius of
-      # skipping it: :10 is now cut over to go in hotkeyd.sh's engine table, so
-      # on a machine that serves an xrdp :10 session this build is what that
-      # session's daemon IS. :0 and every other display still fall through to
-      # python and are unaffected.
+      # Go build of hotkeyd/hotkeyd from ./cmd/hotkeyd (sp021; required for
+      # every display since dotfiles-ylmp.16 — see this file's header for why
+      # it is still guarded rather than fatal).
       #
       # Build to a TEMP file in the SAME directory, then rename over the final
       # path -- never build IN PLACE. A `go build` that dies mid-`rotz install`
@@ -79,18 +86,21 @@ linux:
         TMP="$(mktemp "$SRC/.hotkeyd.build.XXXXXX")"
         if CGO_ENABLED=0 go build -C "$SRC" -o "$TMP" ./cmd/hotkeyd; then
           mv -f "$TMP" "$SRC/hotkeyd"
-          echo "hotkeyd: built $SRC/hotkeyd from ./cmd/hotkeyd (serves :10 per \
-      hotkeyd.sh's engine table; :0 and every other display remain python)"
+          echo "hotkeyd: built $SRC/hotkeyd from ./cmd/hotkeyd (this binary is \
+      the daemon on EVERY display)"
         else
           rm -f "$TMP"
-          echo "hotkeyd: go build failed -- $SRC/hotkeyd left unchanged, the \
-      python engine (hotkeyd.py) is unaffected" >&2
+          echo "hotkeyd: go build FAILED -- $SRC/hotkeyd left unchanged. If it \
+      was never built, every display is now without a keybinding daemon and \
+      'hotkeyd.sh start' will refuse with exit 78 until this succeeds; i3's own \
+      binds still work via 'hotkeyd-panic.sh panic'." >&2
         fi
       else
         echo "hotkeyd: no Go toolchain on PATH -- skipping the go build \
-      (install go, then re-run 'rotz install hotkeyd'). The python engine \
-      (hotkeyd.py, python-xlib above) is unaffected and still serves :0. If \
-      this machine serves an xrdp :10 session, that display is cut over to go \
-      and 'hotkeyd.sh start :10' will REFUSE with exit 78 until the build \
-      succeeds -- by design, it never silently starts the other engine." >&2
+      (install go, then re-run 'rotz install hotkeyd'). Since dotfiles-ylmp.16 \
+      there is no python engine to fall back to, so until this build succeeds \
+      EVERY display is without a keybinding daemon and 'hotkeyd.sh start' will \
+      REFUSE with exit 78 -- by design, it never silently starts something \
+      else. i3's own bind table is still reachable via 'hotkeyd-panic.sh \
+      panic'." >&2
       fi

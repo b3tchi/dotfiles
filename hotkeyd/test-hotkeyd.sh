@@ -9,76 +9,72 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Parity-testing seam (dotfiles-2ats): every direct daemon invocation and every
-# `pgrep`/`pkill` that identifies a running daemon goes through these two, so a
-# future implementation (e.g. sp021's Go rewrite) can be pointed at by
-# overriding them instead of editing the suite. Defaults reproduce today's
-# python3 invocation and pgrep pattern byte-for-byte, so behaviour against the
-# shipped daemon is unchanged.
+# Daemon-under-test seam (dotfiles-2ats): every direct daemon invocation and
+# every `pgrep`/`pkill` that identifies a running daemon goes through these two.
 #
-# NOT SUFFICIENT ALONE for the launcher-driven stages in this file (those that
-# go through hotkeyd.sh, e.g. `hotkeyd.sh status`): those resolve the engine
-# via hotkeyd.sh's own engine_for(), which is separate from HOTKEYD_BIN and
-# falls through to its python default unless HOTKEYD_ENGINE_DEFAULT=go is ALSO
-# set. Point HOTKEYD_BIN/HOTKEYD_PROC_PAT at the Go build without setting
-# HOTKEYD_ENGINE_DEFAULT and the launcher-driven stages start a PYTHON daemon
-# while this suite's pgrep pattern is looking for the Go argv — a silent
-# mismatch, not a skip. See the full invocation below.
-HOTKEYD_BIN="${HOTKEYD_BIN:-python3 $HERE/hotkeyd.py}"
-HOTKEYD_PROC_PAT="${HOTKEYD_PROC_PAT:-hotkeyd\.py}"
+# CUT OVER TO GO AT dotfiles-ylmp.16. The python daemon is deleted from the tree
+# and hotkeyd.sh no longer has an engine to choose between, so the documented
+# invocation of this suite is now the bare
+#   ./test-hotkeyd.sh
+# with nothing exported. The two variables survive only so a build under test
+# can be pointed at from elsewhere (CI, a bisect) without editing the suite; a
+# caller that overrides HOTKEYD_BIN must override HOTKEYD_PROC_PAT to agree with
+# the argv that build actually presents, or this suite's pgrep hunts for a
+# process nothing started — a silent mismatch, not a skip.
+HOTKEYD_BIN="${HOTKEYD_BIN:-$HERE/hotkeyd}"
+HOTKEYD_PROC_PAT="${HOTKEYD_PROC_PAT:-hotkeyd}"
 
-# The same seam for stage 6's live-X suite (sp021 Task 14). Default is
-# today's python invocation byte-for-byte, so nothing changes until a caller
-# opts in with e.g., for the Go engine (all four vars REQUIRED together —
-# HOTKEYD_ENGINE_DEFAULT so hotkeyd.sh's engine_for() actually starts the Go
-# daemon on the launcher-driven stages, HOTKEYD_PROC_PAT so pgrep/pkill agree
-# with what that starts, and HOTKEYD_HAS_BINDS_FLAG=0 because the Go binary's
-# bind table is compiled in, not passed with `--binds`, per test-engine.sh):
-#   HOTKEYD_ENGINE_DEFAULT=go HOTKEYD_BIN=path/to/hotkeyd \
-#     HOTKEYD_PROC_PAT=hotkeyd HOTKEYD_HAS_BINDS_FLAG=0 \
-#     HOTKEYD_LIVECHECK=path/to/livecheck ./test-hotkeyd.sh
-# Stage 6 passes `--display`/`--i3sock` to whatever this names: cmd/livecheck
-# REQUIRES an explicit --display (it never inherits $DISPLAY, so it cannot
-# land on a live session), and live_check.py reads no argv at all, so the
-# same invocation drives either one.
-HOTKEYD_LIVECHECK="${HOTKEYD_LIVECHECK:-python3 $HERE/live_check.py}"
+# FAIL FAST, LOUDLY, HERE. Every stage below either runs $HOTKEYD_BIN directly
+# or goes through hotkeyd.sh (which resolves the same binary and dies 78 when it
+# is missing). Without this the first symptom is stage 2 printing a shell
+# "No such file or directory" and 40-odd stages failing for a reason none of
+# them names. The binary is a build artifact, not a checked-in file.
+if [ ! -x "${HOTKEYD_BIN%% *}" ]; then
+    printf 'test-hotkeyd: %s is not executable — build it first:\n' \
+        "${HOTKEYD_BIN%% *}" >&2
+    printf '  cd %s && CGO_ENABLED=0 go build -o hotkeyd ./cmd/hotkeyd\n' \
+        "$HERE" >&2
+    exit 78
+fi
 
-# Stage 1 runs the daemon implementation's OWN unit suites. Default is
-# python's pytest trio; an engine with a different test runner names it here
-# (e.g. HOTKEYD_UNIT_CMD='go test ./...'). Left empty means "the python
-# default", so nothing changes for the shipped daemon.
-HOTKEYD_UNIT_CMD="${HOTKEYD_UNIT_CMD:-}"
+# Stage 6's live-X suite (sp021 Task 14) drives cmd/livecheck, which takes
+# `--display`/`--i3sock` and REQUIRES the display explicitly — it never inherits
+# $DISPLAY, so it cannot land on a live session.
+#
+# Left empty on purpose (dotfiles-ylmp.16): cmd/livecheck is NOT built by
+# `rotz install hotkeyd` and is not a checked-in binary, so a default PATH would
+# be absent on every clean checkout and stage 6 would degrade into a skip — the
+# one outcome this tree refuses (test-engine.sh's header). Empty means "build it
+# on demand into this run's scratch dir", which is what stage 6 does, mirroring
+# how test-engine.sh builds its table fixtures. Set it to test a prebuilt one.
+HOTKEYD_LIVECHECK="${HOTKEYD_LIVECHECK:-}"
 
-# The engine capability seam: HOTKEYD_HAS_BINDS_FLAG + table_daemon(), which
-# turn every `--binds <table>` stage below into "a daemon carrying THIS table",
-# however the engine under test happens to accept one. See test-engine.sh's
-# header for why a compiled-in-table engine gets a rebuilt binary rather than
-# a skip.
+# Stage 1 runs the daemon's OWN unit suites. Parameterised so a caller can
+# narrow the run (e.g. HOTKEYD_UNIT_CMD='go test ./cmd/hotkeyd'); the default is
+# the whole module.
+HOTKEYD_UNIT_CMD="${HOTKEYD_UNIT_CMD:-go test ./...}"
+
+# The bind-table fixture seam: table_daemon(), which turns every "a daemon
+# carrying THIS table" stage below into a purpose-built binary, because the
+# daemon's table is compiled in and there is no way to hand it one at runtime.
+# See test-engine.sh's header for why that is a build rather than a skip.
 . "$HERE/test-engine.sh"
 
 PASS=0
 FAIL=0
-
-# No .pyc files. Python validates a cached module by (source mtime, size) with
-# ONE-SECOND granularity, so editing binds.py within the same second that its
-# bytecode was written makes the stale cache look fresh — and the suite then
-# tests the previous version of the code while reporting on the current one.
-# Hit during this task's own mutation testing: a restored file kept running the
-# mutant. A test suite that can silently grade the wrong source is worse than
-# no suite, and the cache buys nothing here.
-export PYTHONDONTWRITEBYTECODE=1
-rm -rf "$HERE/__pycache__"
 
 ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; PASS=$((PASS + 1)); }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; FAIL=$((FAIL + 1)); }
 
 # --- stage 1: loader + engine unit suites ----------------------------------
 echo "stage 1: bind table loader + layer engine (unit suites)"
-if [ -n "$HOTKEYD_UNIT_CMD" ]; then
-    # A named runner for the engine under test. NOT optional and never
-    # skipped: an engine whose own unit suites do not run has not been
-    # measured by this stage at all, and the parity gate would be reading a
-    # blank where the other engine has 3 suites.
+# NOT optional and never skipped: a daemon whose own unit suites do not run has
+# not been measured by this stage at all, and an empty runner would leave a
+# blank where the coverage is supposed to be. An operator who narrowed the
+# runner to nothing gets told so.
+if [ -z "$HOTKEYD_UNIT_CMD" ]; then
+    bad "HOTKEYD_UNIT_CMD is empty — the daemon's own unit suites did not run"
+else
     uout="$( cd "$HERE" && eval "$HOTKEYD_UNIT_CMD" 2>&1 )"
     if [ $? -eq 0 ]; then
         ok "engine unit suites ($HOTKEYD_UNIT_CMD)"
@@ -86,18 +82,6 @@ if [ -n "$HOTKEYD_UNIT_CMD" ]; then
         bad "engine unit suites failed ($HOTKEYD_UNIT_CMD)"
         printf '%s\n' "$uout" | tail -25
     fi
-elif ! command -v python3 >/dev/null; then
-    bad "python3 missing"
-else
-    for suite in test_binds.py test_layers.py test_daemon.py; do
-        out="$(cd "$HERE" && python3 -m pytest "$suite" -q 2>&1)"
-        if [ $? -eq 0 ]; then
-            ok "$suite ($(printf '%s' "$out" | tail -1))"
-        else
-            bad "$suite"
-            printf '%s\n' "$out" | tail -25
-        fi
-    done
 fi
 
 # --- stage 2: --check contract on the shipped table ------------------------
@@ -113,17 +97,9 @@ echo "stage 3: --check rejects a seeded fault"
 TMP="$(mktemp -d)"
 TMPD="$TMP"
 trap 'rm -rf "$TMP"' EXIT
-cat > "$TMP/faulty.py" <<EOF
-import sys; sys.path.insert(0, "$HERE")
-from binds import Bind, Layer, enter_layer
-BINDS = [Bind('Mod4+z', 'kill'), Bind('Mod4+z', 'nop dup'),
-         Bind('Mod4+y', ''), Bind('Mod4+o', enter_layer('ghost'))]
-LAYERS = {}
-EOF
-# The SAME table for an engine that carries its table compiled in. Kept
-# beside the python one on purpose: two spellings of one fixture that drift
-# apart would make the two engines pass different tests while the summary
-# line claimed they passed the same one.
+# Four faults in one table — a duplicate chord, an empty action, and a layer
+# entry naming a layer that does not exist — so the assertions below can check
+# that the diagnosis NAMES each one rather than just exiting non-zero.
 cat > "$TMP/faulty.go" <<'EOF'
 package main
 
@@ -139,10 +115,10 @@ func init() {
 	Layers = map[string]bind.Layer{}
 }
 EOF
-if ! table_daemon "$TMP/faulty.py" "$TMP/faulty.go" "$TMP" faulty; then
+if ! table_daemon "$TMP/faulty.go" "$TMP" faulty; then
     bad "no daemon could be produced for the faulty table — stage 3 measured nothing"
 else
-    out="$($TBL_BIN --check $TBL_ARGS 2>&1)"
+    out="$($TBL_BIN --check 2>&1)"
     rc=$?
     if [ $rc -ne 0 ]; then
         ok "exits non-zero ($rc)"
@@ -194,13 +170,28 @@ else
     XSOCK="/tmp/i3-hotkeyd-test-$$.sock"
     XCFG="$TMPD/i3-live.conf"
     mkdir -p "$TMPD"
+    # BUILD THE RIG (dotfiles-ylmp.16). cmd/livecheck is a test rig, not a
+    # shipped artifact — `rotz install hotkeyd` never builds it and it is not
+    # checked in — so this stage produces it rather than expecting it on disk.
+    # Into the run's scratch dir, never into the source tree, for the same
+    # reason test-engine.sh overlays its fixtures instead of writing them:
+    # a stray binary beside the daemon is a thing that gets committed.
+    # A build that fails FAILS the stage; it must never degrade into a skip,
+    # which would report a green run that checked no live grab at all.
+    if [ -z "$HOTKEYD_LIVECHECK" ]; then
+        if ( cd "$HERE" && go build -o "$TMPD/livecheck" ./cmd/livecheck ) \
+               >"$TMPD/livecheck-build.log" 2>&1; then
+            HOTKEYD_LIVECHECK="$TMPD/livecheck"
+        else
+            bad "could not build cmd/livecheck — stage 6 measured nothing: $(tail -5 "$TMPD/livecheck-build.log")"
+        fi
+    fi
     # Mod4+F8 is the CORE-grab marker (sp021 Task 14): i3 grabs its own binds
     # with core XGrabKey, and `mark --add` makes it observable whether i3
     # actually received the key. That is what lets a live check measure "core
     # and XI2 passive grabs are separate conflict domains, and the later XI2
     # grabber wins delivery" without installing a core grabber of its own --
     # internal/x11 has no core GrabKey request and deliberately never will.
-    # Harmless to live_check.py, which uses F9/F11 and never reads marks.
     printf 'font pango:monospace 10\nipc-socket %s\nbindsym Mod4+F11 nop taken-by-i3\nbindsym Mod4+F8 mark --add hotkeyd-live-i3-core\n' \
         "$XSOCK" > "$XCFG"
     Xvfb "$XD" -screen 0 800x600x24 >/dev/null 2>&1 &
@@ -214,7 +205,12 @@ else
     # machine points at their real session. Unpinned, this gate answers from
     # that i3 and passes even when the test i3 failed to start -- a gate that
     # cannot fail for its own reason (dotfiles-qvou).
-    if ! DISPLAY="$XD" I3SOCK="$XSOCK" i3-msg -t get_version >/dev/null 2>&1; then
+    if [ -z "$HOTKEYD_LIVECHECK" ]; then
+        # The build failure above is already a FAIL. Nothing more to say here —
+        # and nothing is quietly passed over.
+        :
+    elif ! DISPLAY="$XD" I3SOCK="$XSOCK" i3-msg -t get_version >/dev/null 2>&1;
+    then
         bad "live i3 did not start on $XD"
     else
         out="$(DISPLAY="$XD" XDG_RUNTIME_DIR="$TMPD" I3SOCK="$XSOCK" \
@@ -277,12 +273,8 @@ else
     sleep 1.5
     T8="$TMPD/t8"; mkdir -p "$T8"
 
-    cat > "$T8/trap.py" <<EOF
-import sys; sys.path.insert(0, "$HERE")
-from binds import Bind, Layer, enter_layer
-BINDS = [Bind('\$mod+o', enter_layer('trap'))]
-LAYERS = {'trap': Layer(binds=[Bind('h', 'focus left')], exit_keys=[])}
-EOF
+    # A layer with no exit_keys and no hold: entering it is a one-way door, so
+    # validation must refuse the table before the daemon ever grabs anything.
     cat > "$T8/trap.go" <<'EOF'
 package main
 
@@ -297,11 +289,11 @@ func init() {
 	}
 }
 EOF
-    if ! table_daemon "$T8/trap.py" "$T8/trap.go" "$T8" trap; then
+    if ! table_daemon "$T8/trap.go" "$T8" trap; then
         bad "no daemon could be produced for the trap table — the startup-refusal case measured nothing"
     else
         out="$(DISPLAY=$D8 XDG_RUNTIME_DIR="$T8" timeout 15 \
-               $TBL_BIN --display "$D8" $TBL_ARGS 2>&1)"
+               $TBL_BIN --display "$D8" 2>&1)"
         rc=$?
         if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "exit_keys"; then
             ok "startup refuses an invalid table, naming the problem"
@@ -310,20 +302,11 @@ EOF
         fi
     fi
 
-    # The live daemon below runs the SHIPPED table. On python that is a
-    # writable COPY of binds.py, because the SIGHUP cases mutate it; on an
-    # engine with the table compiled in there is nothing to copy and nothing
-    # to mutate, and the shipped binary is the shipped table.
-    if [ "$HOTKEYD_HAS_BINDS_FLAG" = 1 ]; then
-        cp "$HERE/binds.py" "$T8/live.py"
-        LIVE_BIN="$HOTKEYD_BIN"
-        LIVE_ARGS="--binds $T8/live.py"
-    else
-        LIVE_BIN="$HOTKEYD_BIN"
-        LIVE_ARGS=""
-    fi
-    DISPLAY=$D8 XDG_RUNTIME_DIR="$T8" setsid $LIVE_BIN \
-        --display "$D8" $LIVE_ARGS >"$T8/d.log" 2>&1 &
+    # The live daemon below runs the SHIPPED table, and the shipped binary IS
+    # the shipped table: it is compiled in, so there is no file to copy and
+    # nothing outside the process that could mutate it (dotfiles-ylmp.16).
+    DISPLAY=$D8 XDG_RUNTIME_DIR="$T8" setsid $HOTKEYD_BIN \
+        --display "$D8" >"$T8/d.log" 2>&1 &
     sleep 2
     dpid="$(pgrep -f "$HOTKEYD_PROC_PAT .*--display $D8" | head -1)"
     if [ -z "$dpid" ]; then
@@ -336,58 +319,31 @@ EOF
         # diagnostic during an outage (dotfiles-iul2).
         if DISPLAY=$D8 XDG_RUNTIME_DIR="$T8" HOME="$T8" \
            HOTKEYD_I3_CONFIG_D="$T8/config.d" "$HERE/hotkeyd.sh" status >/dev/null 2>&1
-        then ok "launcher finds a daemon started with extra flags"
-        else bad "launcher's pgrep pattern misses a flag-carrying daemon"
+        then ok "launcher's pgrep pattern finds a hand-started daemon"
+        else bad "launcher's pgrep pattern misses a hand-started daemon"
         fi
 
-        # SIGHUP. The contract both engines owe is the same one — a SIGHUP
-        # that does NOT end up installing a table must leave the daemon alive
-        # and must SAY SO in the log — but the two get there by opposite
-        # routes, so the cases are spelled per engine rather than faked into
-        # one shape that would be honest about neither.
+        # SIGHUP. The contract is that a SIGHUP which does NOT end up
+        # installing a table leaves the daemon alive and SAYS SO in the log —
+        # the failure it guards is a stock SIGHUP disposition, which terminates
+        # the process and takes every grab down with it.
         #
-        #   python: re-reads the table file, and refuses the read if it does
-        #           not import or does not validate ("reload REFUSED").
-        #   go:     the table is compiled in, so SIGHUP is a documented no-op
-        #           that says as much (cmd/hotkeyd/daemon.go sighupMessage).
-        #           There is no file to break, which is exactly why the two
-        #           broken-table cases below have no Go counterpart: nothing
-        #           outside the process can put a bad table in front of it,
-        #           and the rebuild-time equivalent is the trap fixture above.
-        if [ "$HOTKEYD_HAS_BINDS_FLAG" = 1 ]; then
-            echo "LAYERS = {}" > "$T8/live.py"
-            kill -HUP "$dpid" 2>/dev/null; sleep 1.5
-            if kill -0 "$dpid" 2>/dev/null; then
-                ok "survives SIGHUP with a table missing BINDS"
-            else
-                bad "SIGHUP with a broken table KILLED the daemon"
-            fi
-
-            cp "$HERE/binds.py" "$T8/live.py"
-            printf "\nBINDS = BINDS + [Bind('\$mod+o', 'nop dup')]\n" >> "$T8/live.py"
-            kill -HUP "$dpid" 2>/dev/null; sleep 1.5
-            if kill -0 "$dpid" 2>/dev/null; then
-                ok "survives SIGHUP with a validation-invalid table"
-            else
-                bad "SIGHUP with a duplicate chord KILLED the daemon"
-            fi
-            if grep -q "reload REFUSED" "$T8/d.log"; then
-                ok "refused reloads say so and name the offender"
-            else
-                bad "no 'reload REFUSED' in the log: $(tail -3 "$T8/d.log")"
-            fi
+        # The table is compiled in, so SIGHUP is a documented no-op that says as
+        # much (cmd/hotkeyd/daemon.go sighupMessage). Nothing outside the
+        # process can put a bad table in front of a running daemon, so there is
+        # no broken-table-reload case to write here at all; the equivalent —
+        # a bad table refused before any grab is taken — is the trap fixture
+        # above, at build time rather than at signal time (dotfiles-ylmp.16).
+        kill -HUP "$dpid" 2>/dev/null; sleep 1.5
+        if kill -0 "$dpid" 2>/dev/null; then
+            ok "survives SIGHUP (compiled-in table: nothing to re-read)"
         else
-            kill -HUP "$dpid" 2>/dev/null; sleep 1.5
-            if kill -0 "$dpid" 2>/dev/null; then
-                ok "survives SIGHUP (compiled-in table: nothing to re-read)"
-            else
-                bad "SIGHUP KILLED the daemon"
-            fi
-            if grep -qi "SIGHUP is a no-op" "$T8/d.log"; then
-                ok "a SIGHUP that installs no table says so in the log"
-            else
-                bad "SIGHUP was silent — an operator expecting a reload gets no signal: $(tail -3 "$T8/d.log")"
-            fi
+            bad "SIGHUP KILLED the daemon"
+        fi
+        if grep -qi "SIGHUP is a no-op" "$T8/d.log"; then
+            ok "a SIGHUP that installs no table says so in the log"
+        else
+            bad "SIGHUP was silent — an operator expecting a reload gets no signal: $(tail -3 "$T8/d.log")"
         fi
         kill "$dpid" 2>/dev/null
     fi
@@ -411,9 +367,17 @@ fi
 
 # --- stage 10: i3 -C over the composed tree, fallback linked ----------------
 # The fallback is a REAL i3 config file that i3 parses during an outage. A stub
-# that rots is worse than nothing, because it is discovered exactly then. Its
-# CONTENT is guarded by test_binds.py (it must be binds.py's chord set minus
-# i3's); this is the other half — that the composed tree i3 will actually load,
+# that rots is worse than nothing, because it is discovered exactly then.
+#
+# THIS STAGE ONLY GUARDS THAT IT PARSES, not what it says. Its CONTENT — that
+# it is the daemon's chord set minus i3's own — was guarded by test_binds.py,
+# which the python cutover deleted with the rest of that suite, and nothing in
+# the Go tree replaced it (dotfiles-ylmp.16: an open gap, deliberately recorded
+# here rather than papered over with a pointer to a file that no longer
+# exists). internal/i3/client_test.go only asserts that the panic link is
+# VISIBLE through the include glob, which is a different claim.
+#
+# What this half does prove is that the composed tree i3 will actually load,
 # WITH the fallback in it, still parses. The specific failure being guarded is
 # a duplicate keybinding: i3 treats one as a config ERROR rather than
 # last-wins, so a fallback restating a live bind breaks the config it was meant
@@ -498,7 +462,7 @@ else
     # fixed number collides with any other X server on the box (a second copy of
     # this suite, a parallel worktree), and a collision here does not look like
     # one: the two runs fight over the same grab, and — worse — a suite that
-    # cleans up with `pkill -f "hotkeyd.py.*--display :NN"` kills the other run's
+    # cleans up with `pkill -f "hotkeyd .*--display :NN"` kills the other run's
     # daemon, which reads as "the daemon did not start".
     D11=""
     _b=$(( 40 + ($$ % 20) ))
@@ -683,13 +647,9 @@ else
         [ -e "/tmp/.X${_n}-lock" ] || { D12=":$_n"; break; }
     done
     T12="$TMPD/t12"; mkdir -p "$T12"
-    cat > "$T12/plain.py" <<EOF
-import sys; sys.path.insert(0, "$HERE")
-from binds import Bind, Layer, enter_layer
-# No mods: the shape dotfiles-hwds.18 is about. validate() allows it.
-BINDS = [Bind('\$mod+o', enter_layer('plain'))]
-LAYERS = {'plain': Layer(binds=[Bind('h', 'focus left')], exit_keys=['q'])}
-EOF
+    # No mods on the layer: the shape dotfiles-hwds.18 is about. Validation
+    # allows it, so the passive mask variant is the only thing that can route
+    # the exit key.
     cat > "$T12/plain.go" <<'EOF'
 package main
 
@@ -715,10 +675,10 @@ EOF
     else
         # HOTKEYD_I3SOCK points at nothing: there is no i3 on this display, and
         # this keeps the daemon from shelling out to `i3 --get-socketpath`.
-        table_daemon "$T12/plain.py" "$T12/plain.go" "$T12" plain \
+        table_daemon "$T12/plain.go" "$T12" plain \
             || bad "no daemon could be produced for the mods-less table"
         DISPLAY="$D12" XDG_RUNTIME_DIR="$T12" HOTKEYD_I3SOCK="$T12/no-i3.sock" \
-            setsid $TBL_BIN --display "$D12" $TBL_ARGS >"$T12/d.log" 2>&1 &
+            setsid $TBL_BIN --display "$D12" >"$T12/d.log" 2>&1 &
         d12=""
         for _t in 1 2 3 4 5 6 7 8 9 10; do
             sleep 0.5
@@ -772,10 +732,19 @@ fi
 # fall back to core grabs, which would leave the daemon running with no device
 # attribution at all and nothing reporting it.
 #
-# The extension is refused through a sitecustomize shim on PYTHONPATH rather
-# than a flag in hotkeyd.py: a production switch that disables XI2 is exactly
-# the silent-fallback door this check exists to keep shut. The daemon runs as a
-# REAL process with REAL argv against a REAL server.
+# THE REFUSAL IS NOT EXERCISED HERE BY A REAL XI2-LESS SERVER, because there
+# isn't one to be had: Xvfb answers `-extension XInputExtension` with "can not
+# be disabled" (measured, dotfiles-ylmp.15), and the daemon deliberately offers
+# no flag to disable XI2 — a production switch for that is exactly the
+# silent-fallback door this check exists to keep shut. Until dotfiles-ylmp.16
+# the python daemon got there through a sitecustomize shim that monkeypatched
+# python-xlib inside the daemon's own interpreter; a compiled binary has no
+# equivalent hook, and that daemon is gone.
+#
+# So the claim is carried by NAMED tests instead of a skip, and this stage's job
+# is to prove those tests actually ran (below). What it still drives for real,
+# with a REAL process and REAL argv against a REAL server, is the control case:
+# the same daemon on the same display DOES start when XI2 is present.
 echo "stage 13: a display without XI2 fails fast"
 if ! command -v Xvfb >/dev/null; then
     printf '  \033[33mSKIP\033[0m Xvfb missing\n'
@@ -787,114 +756,51 @@ else
         [ -e "/tmp/.X${_n}-lock" ] || { D13=":$_n"; break; }
     done
     T13="$TMPD/t13"; mkdir -p "$T13"
-    cat > "$T13/sitecustomize.py" <<'EOF'
-# Make python-xlib see the server exactly as it would see one built without
-# XInput: absent from ListExtensions (which is the gate python-xlib itself
-# uses, so the extension is never initialised) and absent from QueryExtension.
-# Nothing in hotkeyd.py is touched.
-import Xlib.display
-
-_real_list = Xlib.display.Display.list_extensions
-_real_query = Xlib.display.Display.query_extension
-
-
-def _list(self):
-    return [e for e in _real_list(self) if e != "XInputExtension"]
-
-
-def _query(self, name):
-    return None if name == "XInputExtension" else _real_query(self, name)
-
-
-Xlib.display.Display.list_extensions = _list
-Xlib.display.Display.query_extension = _query
-EOF
     Xvfb "$D13" -screen 0 640x480x24 >/dev/null 2>&1 &
     X13P=$!
     sleep 1.5
     if [ -z "$D13" ]; then
         bad "no free X display for the XI2-absence stage"
     else
-        # THE SHIM IS PYTHON-SPECIFIC AND CANNOT BE MADE OTHERWISE. It works
-        # by monkeypatching python-xlib inside the daemon's own interpreter;
-        # there is no equivalent hook in a compiled binary, and the X server
-        # itself refuses to help — Xvfb answers `-extension XInputExtension`
-        # with "can not be disabled" (measured, dotfiles-ylmp.15), so no real
-        # server on this box can present XI2 as absent.
+        # THE NAMED REPLACEMENT for the XI2-less server nobody can build:
+        # requireXI2's error arms driven against a fake source, PLUS the
+        # daemon-level fail-fast tests (cmd/hotkeyd/xi2_failfast_test.go),
+        # which drive the real Dispatch()/run() against a FAKE X SERVER that
+        # answers QueryExtension("XInputExtension") with present=0. That file
+        # is where the whole claim lands: exit 5 by name, the message naming
+        # XI2 and the extension, no stack trace, nothing left behind, and no
+        # hang. It is sp021 Task 1's prescription for exactly this case, and it
+        # is not a skip: it is a different, executed test.
         #
-        # Rather than skip the claim for the other engine, run the NAMED
-        # replacements that cover the same code path — requireXI2's error
-        # arms driven against a fake source, PLUS the daemon-level
-        # fail-fast tests (cmd/hotkeyd/xi2_failfast_test.go), which drive
-        # the real Dispatch()/run() against a FAKE X SERVER that answers
-        # QueryExtension("XInputExtension") with present=0. That last file
-        # is where every python assertion below actually lands: exit 5 by
-        # name, the message naming XI2 and the extension, no stack trace,
-        # nothing left behind, and no hang. It is sp021 Task 1's
-        # prescription for exactly this case, and it is not a skip: it is a
-        # different, executed test.
-        if [ "$HOTKEYD_HAS_BINDS_FLAG" = 1 ]; then
-            out="$(DISPLAY=$D13 XDG_RUNTIME_DIR="$T13" PYTHONPATH="$T13" \
-                   HOTKEYD_I3SOCK="$T13/no-i3.sock" timeout 15 \
-                   $HOTKEYD_BIN --display "$D13" 2>&1)"
-            rc=$?
-            if [ "$rc" -eq 124 ]; then
-                bad "daemon HUNG on a display without XI2"
-            elif [ "$rc" -eq 0 ]; then
-                bad "daemon reported success on a display without XI2 — it fell "\
-"back to core grabs, which carry no source device"
-            else
-                ok "exits non-zero ($rc) on a display without XI2"
-            fi
-            printf '%s' "$out" | grep -qi 'XI2 unavailable' \
-                && ok "the message names XI2" \
-                || bad "no 'XI2 unavailable' in the output: $out"
-            printf '%s' "$out" | grep -q 'XInputExtension' \
-                && ok "and names the missing extension" \
-                || bad "does not name the extension: $out"
-            if printf '%s' "$out" | grep -q 'Traceback'; then
-                bad "failed with a stack trace instead of a named error"
-            else
-                ok "no stack trace"
-            fi
-            # Nothing left behind to reap: the probe runs before the lock and
-            # the state socket exist.
-            if [ -e "$T13/hotkeyd-${D13#:}.sock" ]; then
-                bad "left a state socket behind after refusing to start"
-            else
-                ok "left no state socket behind"
-            fi
-        else
-            # GATE ON POSITIVE EVIDENCE THAT THE NAMED TESTS RAN. `go test
-            # -run X` prints "ok <pkg> 0.004s [no tests to run]" and exits 0
-            # when X matches NOTHING, so `rc -eq 0` plus a grep for 'ok '
-            # proves only that the package compiles: rename or delete these
-            # tests and the stage would still print PASS while measuring
-            # nothing. That is the vacuity this whole tree is written
-            # against (test-engine.sh:28-30 — a stage that does not
-            # exercise what it claims must FAIL), and the cutover gate is
-            # the worst place in the repo to put another instance of it
-            # (audit gap 1, dotfiles-ylmp.15). -v makes every test announce
-            # itself by name; count the PASS lines and require the full
-            # set.
-            xout="$( go -C "$HERE" test ./cmd/hotkeyd -count=1 -v \
-                     -run 'TestRequireXI2|TestRun_XI2' 2>&1 )"
-            xrc=$?
-            nhelper="$(printf '%s\n' "$xout" | grep -c -- '--- PASS: TestRequireXI2')"
-            ndaemon="$(printf '%s\n' "$xout" | grep -c -- '--- PASS: TestRun_XI2')"
-            if [ "$xrc" -eq 0 ] && [ "$nhelper" -ge 4 ] && [ "$ndaemon" -ge 3 ]; then
-                ok "XI2 absence is refused by name — $nhelper requireXI2 arms \
+        # GATE ON POSITIVE EVIDENCE THAT THOSE TESTS RAN. `go test -run X`
+        # prints "ok <pkg> 0.004s [no tests to run]" and exits 0 when X matches
+        # NOTHING, so `rc -eq 0` plus a grep for 'ok ' proves only that the
+        # package compiles: rename or delete these tests and the stage would
+        # still print PASS while measuring nothing. That is the vacuity this
+        # whole tree is written against (test-engine.sh's header — a stage that
+        # does not exercise what it claims must FAIL), and a stage standing in
+        # for a mechanism that cannot be built is the worst place in the repo
+        # to put another instance of it (audit gap 1, dotfiles-ylmp.15). -v
+        # makes every test announce itself by name; count the PASS lines and
+        # require the full set.
+        xout="$( go -C "$HERE" test ./cmd/hotkeyd -count=1 -v \
+                 -run 'TestRequireXI2|TestRun_XI2' 2>&1 )"
+        xrc=$?
+        nhelper="$(printf '%s\n' "$xout" | grep -c -- '--- PASS: TestRequireXI2')"
+        ndaemon="$(printf '%s\n' "$xout" | grep -c -- '--- PASS: TestRun_XI2')"
+        if [ "$xrc" -eq 0 ] && [ "$nhelper" -ge 4 ] && [ "$ndaemon" -ge 3 ]; then
+            ok "XI2 absence is refused by name — $nhelper requireXI2 arms \
 and $ndaemon daemon-level fail-fast tests (fake XI2-less X server: exit 5 by \
 name, no stack trace, nothing left behind) ran and passed"
-            else
-                bad "the named XI2-absence replacement did not run clean — \
+        else
+            bad "the named XI2-absence replacement did not run clean — \
 rc=$xrc, $nhelper/4 '--- PASS: TestRequireXI2' lines, $ndaemon/3 \
 '--- PASS: TestRun_XI2' lines: $xout"
-            fi
         fi
-        # And the same tree on the SAME display, WITHOUT the shim, must start —
-        # otherwise every check above would pass on a daemon that is simply
-        # broken.
+        # THE CONTROL, and it is the reason this stage still needs a real X
+        # server: the same binary on the SAME display, with XI2 present, must
+        # start. Without it the gate above could pass over a daemon that is
+        # simply broken.
         DISPLAY=$D13 XDG_RUNTIME_DIR="$T13" HOTKEYD_I3SOCK="$T13/no-i3.sock" \
             setsid $HOTKEYD_BIN --display "$D13" \
             >"$T13/d.log" 2>&1 &
@@ -1006,12 +912,6 @@ GRABEOF
         # nothing else is the exact confident-and-inert line that misled the :0
         # investigation), and `hotkeyd.sh status`, which resolves the daemon by
         # pgrep against its argv — a stand-in process cannot stand in for that.
-        cat > "$T14/one.py" <<EOF
-import sys; sys.path.insert(0, "$HERE")
-from binds import Bind
-BINDS = [Bind('\$mod+F11', 'nop grabbed-stage')]
-LAYERS = {}
-EOF
         cat > "$T14/one.go" <<'EOF'
 package main
 
@@ -1022,11 +922,11 @@ func init() {
 	Layers = map[string]bind.Layer{}
 }
 EOF
-        table_daemon "$T14/one.py" "$T14/one.go" "$T14" one \
+        table_daemon "$T14/one.go" "$T14" one \
             || bad "no daemon could be produced for the one-bind table"
         rm -f "$T14/hotkeyd-${D14#:}.lock"
         DISPLAY=$D14 XDG_RUNTIME_DIR="$T14" HOTKEYD_I3SOCK="$T14/no-i3.sock" \
-            $TBL_BIN --display "$D14" $TBL_ARGS >"$T14/d.log" 2>&1 &
+            $TBL_BIN --display "$D14" >"$T14/d.log" 2>&1 &
         D14P=$!
         d14=""
         for _t in 1 2 3 4 5 6 7 8 9 10; do
@@ -1117,12 +1017,6 @@ else
 
         # CONTROL FIRST: a table that resolves completely must NOT be degraded,
         # or the stage cannot tell "detects damage" from "always complains".
-        cat > "$T15/whole.py" <<EOF
-import sys; sys.path.insert(0, "$HERE")
-from binds import Bind
-BINDS = [Bind('\$mod+F11', 'nop whole')]
-LAYERS = {}
-EOF
         cat > "$T15/whole.go" <<'EOF'
 package main
 
@@ -1133,10 +1027,10 @@ func init() {
 	Layers = map[string]bind.Layer{}
 }
 EOF
-        table_daemon "$T15/whole.py" "$T15/whole.go" "$T15" whole \
+        table_daemon "$T15/whole.go" "$T15" whole \
             || bad "no daemon could be produced for the whole table"
         DISPLAY=$D15 XDG_RUNTIME_DIR="$T15" HOTKEYD_I3SOCK="$T15/no-i3.sock" \
-            $TBL_BIN --display "$D15" $TBL_ARGS >"$T15/whole.log" 2>&1 &
+            $TBL_BIN --display "$D15" >"$T15/whole.log" 2>&1 &
         W15P=$!
         w15=""
         for _t in 1 2 3 4 5 6 7 8 9 10; do
@@ -1186,7 +1080,7 @@ print("unmapped F11 (keycode %d)" % code, flush=True)
 UNMAPEOF
         rm -f "$T15/hotkeyd-${D15#:}.lock" "$T15/hotkeyd-${D15#:}.grabs"
         DISPLAY=$D15 XDG_RUNTIME_DIR="$T15" HOTKEYD_I3SOCK="$T15/no-i3.sock" \
-            $TBL_BIN --display "$D15" $TBL_ARGS >"$T15/holed.log" 2>&1 &
+            $TBL_BIN --display "$D15" >"$T15/holed.log" 2>&1 &
         H15P=$!
         h15=""
         for _t in 1 2 3 4 5 6 7 8 9 10; do
@@ -1299,12 +1193,17 @@ else
 fi
 
 # And the marker is what the real daemon writes — not a constant that only the
-# tests agree on.
+# tests agree on. Re-pointed at the Go source at dotfiles-ylmp.16: the string
+# lives in internal/proc/lock.go as `LockMarker`, which AcquireLock writes as
+# line 2 of the lock file. The grep asks for the DECLARATION, not a bare
+# occurrence, so a comment mentioning the old spelling cannot keep this green
+# after the constant itself is renamed or its value changed.
 printf '  ' >/dev/null
-if grep -q 'heartbeat=1' "$HERE/hotkeyd.py"; then
+if grep -q 'LockMarker = "heartbeat=1"' "$HERE/internal/proc/lock.go"; then
     ok "the marker string is in the daemon, not only in the suite"
 else
-    bad "no marker in hotkeyd.py — the stage is testing a fiction"
+    bad "no 'LockMarker = \"heartbeat=1\"' in internal/proc/lock.go — the stage \
+is testing a fiction"
 fi
 
 
@@ -1313,10 +1212,12 @@ fi
 # ============================================================================
 #
 # dotfiles-hwds.51, and specifically the WIRING rather than the method. The unit
-# tests assert `Daemon.shutdown_actions()` returns the layer's on_exit; they
-# cannot see whether `run_daemon`'s finally actually dispatches it, and a
-# mutation that emptied that loop left them all green. This stage closes that:
-# a real daemon, a real hold layer, a real SIGTERM.
+# tests assert that the layer engine's ShutdownActions() returns the active
+# layer's on_exit (internal/layer/engine.go); they cannot see whether the
+# daemon's shutdown path actually DISPATCHES what it is handed
+# (cmd/hotkeyd/daemon.go, the `for _, a := range d.engine.ShutdownActions()`
+# loop), and a mutation that emptied that loop left them all green. This stage
+# closes that: a real daemon, a real hold layer, a real SIGTERM.
 #
 # The on_exit action is a `touch` rather than the shipped switcher-cancel, so
 # the assertion is a file on disk instead of an X window nobody is looking at.
@@ -1338,16 +1239,6 @@ else
         X17P=$!
         sleep 1.5
         MARK="$T17/on-exit-ran"
-        cat > "$T17/hold.py" <<EOF
-import sys; sys.path.insert(0, "$HERE")
-from binds import Bind, Layer, enter_layer, run
-BINDS = [Bind('Mod4+Tab', (run('true'), enter_layer('sw')))]
-LAYERS = {'sw': Layer(binds=[Bind('Tab', run('true'))],
-                      exit_keys=['q'],
-                      hold='Mod4',
-                      on_hold_release=run('true'),
-                      on_exit=run('touch $MARK'))}
-EOF
         cat > "$T17/hold.go" <<EOF
 package main
 
@@ -1367,10 +1258,10 @@ func init() {
 	}
 }
 EOF
-        table_daemon "$T17/hold.py" "$T17/hold.go" "$T17" hold \
+        table_daemon "$T17/hold.go" "$T17" hold \
             || bad "no daemon could be produced for the hold-layer table"
         DISPLAY=$D17 XDG_RUNTIME_DIR="$T17" HOTKEYD_I3SOCK="$T17/no-i3.sock" \
-            $TBL_BIN --display "$D17" $TBL_ARGS >"$T17/d.log" 2>&1 &
+            $TBL_BIN --display "$D17" >"$T17/d.log" 2>&1 &
         d17=""
         for _t in 1 2 3 4 5 6 7 8 9 10; do
             sleep 0.5
@@ -1409,7 +1300,7 @@ EOF
         # CONTROL: stopped while NOT in a layer, nothing must fire.
         rm -f "$MARK"
         DISPLAY=$D17 XDG_RUNTIME_DIR="$T17" HOTKEYD_I3SOCK="$T17/no-i3.sock" \
-            $TBL_BIN --display "$D17" $TBL_ARGS >"$T17/d2.log" 2>&1 &
+            $TBL_BIN --display "$D17" >"$T17/d2.log" 2>&1 &
         d17b=""
         for _t in 1 2 3 4 5 6 7 8 9 10; do
             sleep 0.5

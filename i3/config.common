@@ -18,14 +18,20 @@ default_floating_border normal 4
 hide_edge_borders none
 
 # change borders — $mod+u (none) and $mod+y (pixel 4) left i3 with the rest of
-# the layout group (sp020 / dotfiles-hwds.36); hotkeyd/binds.py owns them.
+# the layout group (sp020 / dotfiles-hwds.36); the daemon's bind table owns them.
+#
+# WHERE THAT TABLE IS. hotkeyd/cmd/hotkeyd/config.go — compiled into the binary,
+# dwm config.h style, since dotfiles-ylmp.16. It was hotkeyd/binds.py, a
+# runtime-loaded module, while these groups were migrating; that file is gone and
+# every "moved to hotkeyd/cmd/hotkeyd/config.go" note below means the Go table.
 # notification-history picker (sp019) — quickshell browser over the persistent
 # notification store; the user-bus-singleton daemon owns the freedesktop
 # Notifications name. (border normal 4 dropped to free $mod+n.)
 #
-# $mod+n moved to hotkeyd/binds.py with the clipboard picker below — sp020,
-# dotfiles-hwds.43. Its i3 spelling lives in `config.d/zz-fallback-binds.conf`,
-# which `hotkeyd-panic.sh panic` links in when the daemon has to be stopped.
+# $mod+n moved to hotkeyd/cmd/hotkeyd/config.go with the clipboard picker
+# below — sp020, dotfiles-hwds.43. Its i3 spelling lives in
+# `config.d/zz-fallback-binds.conf`, which `hotkeyd-panic.sh panic` links in
+# when the daemon has to be stopped.
 
 # avoid leaving unfocuse with full screen
 popup_during_fullscreen smart
@@ -65,8 +71,8 @@ bindsym $mod+Shift+q kill
 ################################################################################################
 
 # (volumeicon autostart → config.d/native.conf)
-# $mod+Ctrl+m (alsamixer) moved to hotkeyd/binds.py with the apps + session
-# group — sp020, dotfiles-hwds.46. Its i3 spelling lives in
+# $mod+Ctrl+m (alsamixer) moved to hotkeyd/cmd/hotkeyd/config.go with the
+# apps + session group — sp020, dotfiles-hwds.46. Its i3 spelling lives in
 # `config.d/zz-fallback-binds.conf` for the panic path.
 #exec --no-startup-id pulseaudio
 #exec --no-startup-id pa-applet
@@ -81,8 +87,9 @@ bindsym $mod+Shift+q kill
 # Start Applications
 # bindsym $mod+Ctrl+b exec terminal -e 'bmenu'
 # bindsym $mod+F3 exec ranger
-# $mod+F5 (mocp) moved to hotkeyd/binds.py with the apps + session group —
-# sp020, dotfiles-hwds.46. It was already a no-op here: mocp is not installed.
+# $mod+F5 (mocp) moved to hotkeyd/cmd/hotkeyd/config.go with the apps + session
+# group — sp020, dotfiles-hwds.46. It was already a no-op here: mocp is not
+# installed.
 # $mod+Ctrl+t (`picom -b`) and its commented `pkill picom` twin were DELETED
 # here, not migrated — sp020, dotfiles-c57. This is the shared base, so every
 # session loaded it: on WSL and xrdp, which run deliberately WITHOUT a
@@ -92,7 +99,7 @@ bindsym $mod+Shift+q kill
 # picom, but from its own autostart (config.d/native.conf, guarded on
 # XRDP_SESSION), which is where a per-session compositor belongs.
 #
-# No fallback entry and no binds.py entry: a deletion is not a cutover. The
+# No fallback entry and no daemon-table entry: a deletion is not a cutover. The
 # chord is simply gone.
 # (router: moved to desktop config) bindsym $mod+Shift+d --release exec ~/.dotfiles/quickshell/qs-start.sh
 # clipboard-history picker (sp014) — opens the quickshell picker; choosing a
@@ -104,14 +111,16 @@ bindsym $mod+Shift+q kill
 # session itself from the live quickshell instances, so no DISPLAY is passed
 # here — and nothing on this line depends on an overlay var, which would be
 # invisible across the include boundary anyway.
-# $mod+v moved to hotkeyd/binds.py with $mod+n — sp020, dotfiles-hwds.43. The
-# paragraph above still describes what the picker IS and why the binding is
-# platform-independent; what changed is only which engine grabs the key. The
-# i3 spelling lives in `config.d/zz-fallback-binds.conf` for the panic path.
+# $mod+v moved to hotkeyd/cmd/hotkeyd/config.go with $mod+n — sp020,
+# dotfiles-hwds.43. The paragraph above still describes what the picker IS and
+# why the binding is platform-independent; what changed is only which engine
+# grabs the key. The i3 spelling lives in `config.d/zz-fallback-binds.conf` for
+# the panic path.
 # The screenshot group (Print, $mod+Print, $mod+Shift+Print and the region
-# capture below) moved to hotkeyd/binds.py — sp020, dotfiles-hwds.39. Its i3
-# spelling lives in `config.d/zz-fallback-binds.conf`, which
-# `hotkeyd-panic.sh panic` links in when the daemon has to be stopped.
+# capture below) moved to hotkeyd/cmd/hotkeyd/config.go — sp020,
+# dotfiles-hwds.39. Its i3 spelling lives in
+# `config.d/zz-fallback-binds.conf`, which `hotkeyd-panic.sh panic` links in
+# when the daemon has to be stopped.
 # freed for `move left` (vim hjkl navigation)
 # bindsym $mod+Shift+h exec xdg-open /usr/share/doc/manjaro/i3_help.pdf
 # region screenshot — enters a "screenshot" i3 mode (shown in the bar like
@@ -185,7 +194,7 @@ mode "screenshot-drag" {
 # THE DIRECTIONAL GROUP LEFT i3 (sp020 / dotfiles-hwds.37).
 #
 # $mod+hjkl and $mod+arrows (focus), plus the $mod+Shift forms of both (move)
-# — 16 chords, owned by `hotkeyd/binds.py` now.
+# — 16 chords, owned by `hotkeyd/cmd/hotkeyd/config.go` now.
 #
 # THIS IS THE GROUP TASK 6 SHIPPED AND REVERTED (fd9e9f2). It failed because
 # the daemon's table hardcoded Mod4: on :10 $mod is Mod1, so the Mod4 forms
@@ -218,9 +227,10 @@ workspace_auto_back_and_forth yes
 # Split orientation ($mod+s / $mod+b / $mod+q), fullscreen ($mod+z), layout
 # mode ($mod+t / $mod+e), sticky ($mod+Shift+p), focus parent ($mod+a) and
 # the scratchpad pair ($mod+minus / $mod+Shift+minus) are owned by
-# `hotkeyd/binds.py` now, together with the two border binds further up. A
-# chord bound here AND there double-fires with no BadAccess to warn, so the
-# block is deleted rather than commented into a state someone can uncomment.
+# `hotkeyd/cmd/hotkeyd/config.go` now, together with the two border binds
+# further up. A chord bound here AND there double-fires with no BadAccess to
+# warn, so the block is deleted rather than commented into a state someone can
+# uncomment.
 #
 # The commented-out `floating toggle` / `focus mode_toggle` lines that used to
 # sit in the middle of this block went with it. They had been dead for years
@@ -244,8 +254,8 @@ workspace_auto_back_and_forth yes
 #
 # `$mod+1..8` (switch), `$mod+Ctrl+1..8` (move container), `$mod+Shift+1..8`
 # (move and follow) and the `$mod+Ctrl+Left|Right` next/prev pair are owned by
-# `hotkeyd/binds.py` now — 26 chords, plus the `set $ws_switch` that only
-# these lines used. A chord bound here AND there double-fires with no
+# `hotkeyd/cmd/hotkeyd/config.go` now — 26 chords, plus the `set $ws_switch`
+# that only these lines used. A chord bound here AND there double-fires with no
 # BadAccess to warn, so this block is deleted rather than commented into a
 # state someone can uncomment.
 #
@@ -326,16 +336,18 @@ for_window [urgent=latest] focus
 #   i3-msg restart
 
 # exit i3 (logs you out of your X session)
-# $mod+Shift+e (exit i3, behind the nagbar) moved to hotkeyd/binds.py with the
-# apps + session group — sp020, dotfiles-hwds.46. NOT a recovery key despite
+# $mod+Shift+e (exit i3, behind the nagbar) moved to
+# hotkeyd/cmd/hotkeyd/config.go with the apps + session group — sp020,
+# dotfiles-hwds.46. NOT a recovery key despite
 # ending the session: nothing about it helps when the WM is misbehaving, which
 # is the test $mod+Shift+q / $mod+Shift+c / $mod+Shift+r pass and this fails.
 
 # THE SYSTEM MODE LEFT i3 (sp020 / dotfiles-hwds.38).
 #
 # $mod+0 and the whole `mode "$mode_system"` block — lock, logout, switch
-# user, suspend, hibernate, reboot, shutdown — are `hotkeyd/binds.py`'s now,
-# as a ONE-SHOT layer. i3 expressed one-shot by appending `, mode "default"`
+# user, suspend, hibernate, reboot, shutdown — are
+# `hotkeyd/cmd/hotkeyd/config.go`'s now, as a ONE-SHOT layer. i3 expressed
+# one-shot by appending `, mode "default"`
 # to every bind in the block; the daemon declares it once on the layer, so it
 # cannot be forgotten on the bind where forgetting leaves a bare `r` on
 # reboot.
@@ -369,7 +381,7 @@ for_window [urgent=latest] focus
 # bindsym $mod+p exec --no-startup-id ~/.dotfiles/quickshell/qs-overlay.sh projects
 
 # THE RESIZE MODE LEFT i3 (sp020 / dotfiles-hwds.48). `$mod+r` and the whole
-# `mode "resize"` block are hotkeyd's LAYERS["resize"] now — the same treatment
+# `mode "resize"` block are hotkeyd's `Layers["resize"]` now — the same treatment
 # nav (dotfiles-hwds.16) and the system mode (dotfiles-hwds.38) got, and for the
 # same reason: a mode is a layer, and the daemon can express one without needing
 # i3 to hold bare h/j/k/l grabs.
@@ -385,8 +397,9 @@ for_window [urgent=latest] focus
 # Navigation mode — MIGRATED to hotkeyd (sp020, ft011, dotfiles-hwds.16).
 #
 # $mod+o and the whole `mode "nav"` block (bare hjkl focus, Ctrl+hjkl move,
-# Alt+hjkl resize, q/Escape/Return to leave) now live in hotkeyd/binds.py as
-# LAYERS["nav"], together with the twelve `nop nav-*` marker binds that used to
+# Alt+hjkl resize, q/Escape/Return to leave) now live in
+# hotkeyd/cmd/hotkeyd/config.go as `Layers["nav"]`, together with the twelve
+# `nop nav-*` marker binds that used to
 # publish held-modifier state to the bar. The daemon reports the modifier
 # directly on its state socket, so the markers have nothing left to encode.
 #
@@ -423,8 +436,10 @@ for_window [urgent=latest] focus
 # hotkeyd/test-launcher.sh asserts this exact string exists here, so the bind
 # and the script cannot drift apart and be discovered mid-outage.
 #
-# binds.py's validator REFUSES any table that binds this chord, under every
-# modifier spelling ($mod, Mod4+, Mod1+) — see binds.RESERVED_CHORDS. A
+# The daemon's validator REFUSES any table that binds this chord, under every
+# modifier spelling ($mod, Mod4+, Mod1+) — see `bind.ReservedChords` in
+# hotkeyd/internal/bind/chord.go and its check in validate.go (this was
+# `binds.RESERVED_CHORDS` before the Go cutover, dotfiles-ylmp.16). A
 # display-agnostic token check alone would leave it stealable on one display.
 #
 # CHORD CHOICE: $mod+Ctrl+Shift+r, and reachability beats accident-resistance.
@@ -454,8 +469,8 @@ bindsym $mod+Ctrl+Shift+r exec --no-startup-id ~/.dotfiles/hotkeyd/hotkeyd-panic
 #
 # i3-OWNED, and it must stay that way. A restart-everything bind that the
 # daemon owned could not restart a WEDGED daemon, which is most of why you
-# would reach for it. binds.py may not bind this chord for the same reason it
-# may not bind panic's.
+# would reach for it. The daemon's table (hotkeyd/cmd/hotkeyd/config.go) may not
+# bind this chord for the same reason it may not bind panic's.
 #
 # `hotkeyd.sh restart` takes no display: it falls back to $DISPLAY, so each
 # session's i3 restarts only its OWN daemon (:0 and :10 are separate daemons
@@ -484,9 +499,10 @@ bindsym $mod+Ctrl+Shift+r exec --no-startup-id ~/.dotfiles/hotkeyd/hotkeyd-panic
 bindsym $mod+Shift+r reload, exec --no-startup-id "sh -c '$HOME/.dotfiles/hotkeyd/hotkeyd.sh restart; env QS_BAR_INSET_BOTTOM=50 QS_BAR_INSET_AUTO=1 $HOME/.dotfiles/quickshell/qs-start.sh'"
 
 # Lock screen
-# $mod+9 (blurlock) moved to hotkeyd/binds.py with the apps + session group —
-# sp020, dotfiles-hwds.46. The system layer's `l` (i3exit lock) is the other
-# way to lock; both are the daemon's now, and the fallback restores this one.
+# $mod+9 (blurlock) moved to hotkeyd/cmd/hotkeyd/config.go with the apps +
+# session group — sp020, dotfiles-hwds.46. The system layer's `l` (i3exit lock)
+# is the other way to lock; both are the daemon's now, and the fallback restores
+# this one.
 
 # polybar (replaced by quickshell)
 # exec_always --no-startup-id $HOME/.config/polybar/launch.sh

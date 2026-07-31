@@ -9,8 +9,10 @@
 #
 # WHAT CHANGED, AND WHY THIS FILE IS A RE-POINT RATHER THAN A REWRITE
 # (dotfiles-8qju). nav used to be an i3 `mode "nav"` in config.common. The T14
-# cutover (71f6c4a8, dotfiles-hwds.16) moved it wholesale into
-# hotkeyd/binds.py's `LAYERS["nav"]`, and the daemon serves it over XI2 grabs.
+# cutover (71f6c4a8, dotfiles-hwds.16) moved it wholesale into the daemon's
+# `LAYERS["nav"]` — then hotkeyd/binds.py, now the compiled-in `Layers` of
+# hotkeyd/cmd/hotkeyd/config.go (dotfiles-ylmp.16) — and the daemon serves it
+# over XI2 grabs.
 # Every assertion here that read the MECHANISM went stale with it — i3's binding
 # state, and the twelve `nop nav-*` marker binds that faked held-modifier
 # reporting — and the suite sat at 17 passed / 15 failed on main.
@@ -118,8 +120,8 @@ FAIL=0
 
 cleanup() {
   [ -n "${BORDER_PID:-}" ] && kill "$BORDER_PID" 2>/dev/null
-  # Reaped by PID, never `pkill -f hotkeyd.py`: the developer's own :0/:10
-  # daemons match that pattern, and so do sibling checkouts running this file.
+  # Reaped by PID, never `pkill -f hotkeyd`: the developer's own :0/:10 daemons
+  # match that pattern, and so do sibling checkouts running this file.
   [ -n "${HOTKEYD_PID:-}" ] && kill "$HOTKEYD_PID" 2>/dev/null
   [ -n "${I3_PID:-}" ] && kill "$I3_PID" 2>/dev/null
   [ -n "${XVFB_PID:-}" ] && kill "$XVFB_PID" 2>/dev/null
@@ -137,9 +139,27 @@ assert_eq() { # <label> <actual> <expected>
   fi
 }
 
+# python3 stays on this list. The daemon is Go now (dotfiles-ylmp.16), but every
+# OTHER python3 use below is a generic helper — the i3 GET_CONFIG speaker, the
+# get_tree readers, the state-socket reader, the X-resource writer — and none of
+# them ever imported a hotkeyd module. Dropping it would only make those fail
+# later and less legibly.
 for bin in Xvfb xdotool i3 i3-msg st python3; do
   command -v "$bin" >/dev/null || { echo "FATAL: $bin not found" >&2; exit 1; }
 done
+
+# THE DAEMON IS A BUILT BINARY NOW (dotfiles-ylmp.16), not a script the
+# interpreter finds for free. Checked HERE, next to the other binaries and
+# before an Xvfb/i3/two-st fixture is spent, because a missing build must not
+# reach the behaviour assertions: every one of them would fail at once and the
+# run would read as "the nav layer is broken" when nothing was ever serving it.
+HOTKEYD_BIN="$HOTKEYD_DIR/hotkeyd"
+[ -x "$HOTKEYD_BIN" ] || {
+  echo "FATAL: no hotkeyd binary at $HOTKEYD_BIN (the nav layer has no server)." >&2
+  echo "       This suite does not build it. Either:" >&2
+  echo "         rotz install hotkeyd            # what a real session gets" >&2
+  echo "         (cd $HOTKEYD_DIR && go build -o hotkeyd ./cmd/hotkeyd)" >&2
+  exit 1; }
 
 # $mod is set by the INCLUDING file in this repo's layering (ft003), so the
 # harness supplies it exactly as i3/config and i3/config-xrdp do.
@@ -172,8 +192,11 @@ for _ in $(seq 1 20); do [ -e "/tmp/.X11-unix/X${DPY#:}" ] && break; sleep 0.5; 
 # back empty and `xprop -root RESOURCE_MANAGER` reports "not found", with or
 # without -nocpp. A setup step that reports success and silently does nothing is
 # how the first version of this run passed 40/40 while the daemon was still on
-# Mod4. python-xlib is already the daemon's own dependency and its write is
-# verified below rather than trusted.
+# Mod4. python-xlib was the daemon's own dependency when this was written; the
+# Go daemon speaks X11 itself and depends on nothing here (dotfiles-ylmp.16), so
+# python-xlib is now purely a harness dependency — python3 is on the preflight
+# list above for the other helpers regardless. Its write is verified below
+# rather than trusted.
 python3 - "$DPY" "$NAV_TEST_MOD" <<'XRESEOF' || {
 import sys
 from Xlib import display as xdisplay, Xatom
@@ -186,19 +209,11 @@ d.sync()
 XRESEOF
   echo "FATAL: could not set i3wm.mod on $DPY" >&2; exit 1; }
 
-# Read it back THROUGH THE DAEMON'S OWN RESOLVER. This is the guard on the
-# guard: if the resource does not land, every behaviour assertion below runs
-# against the wrong shape and still passes, which is precisely the false pass
-# this suite exists to rule out.
-RESOLVED="$(DISPLAY="$DPY" python3 -c "
-import sys; sys.path.insert(0, '$HOTKEYD_DIR')
-import hotkeyd as H
-from Xlib import display as xd
-print(H.x_resource_mod(xd.Display('$DPY')))
-" 2>/dev/null)"
-[ "$RESOLVED" = "$NAV_TEST_MOD" ] || {
-  echo "FATAL: daemon resolves \$mod=$RESOLVED but this run is $NAV_TEST_MOD" >&2
-  exit 1; }
+# The resource must be read back THROUGH THE DAEMON'S OWN RESOLVER — if it does
+# not land, every behaviour assertion below runs against the wrong shape and
+# still passes, which is precisely the false pass this suite exists to rule out.
+# That read-back now happens AFTER the daemon starts; see the $mod agreement
+# gate below the daemon launch (dotfiles-ylmp.16).
 
 # What xdotool must press to produce $mod. The CONFIG side of the shape is not
 # enough on its own: the injected chord has to move with it, or a Mod1 run keeps
@@ -218,15 +233,62 @@ export DISPLAY="$DPY"
 # runtime dir, and point it at the harness i3 explicitly — HOTKEYD_I3SOCK is the
 # one override the resolver trusts (dotfiles-hwds.6), precisely so a test can
 # aim a daemon at a specific WM without the ambient environment deciding.
+#
+# No --binds: the table is COMPILED INTO the binary, dwm config.h style
+# (hotkeyd/cmd/hotkeyd/check.go's package doc), so the shipped table is the only
+# one there is and this suite runs exactly what a session runs.
 export XDG_RUNTIME_DIR="$TMP"
 HOTKEYD_SOCK="$TMP/hotkeyd-${DPY#:}.sock"
 HOTKEYD_I3SOCK="$I3SOCK" DISPLAY="$DPY" \
-  python3 "$HOTKEYD_DIR/hotkeyd.py" --display "$DPY" >"$TMP/hotkeyd.log" 2>&1 &
+  "$HOTKEYD_BIN" --display "$DPY" >"$TMP/hotkeyd.log" 2>&1 &
 HOTKEYD_PID=$!
 for _ in $(seq 1 20); do [ -S "$HOTKEYD_SOCK" ] && break; sleep 0.3; done
 [ -S "$HOTKEYD_SOCK" ] || {
   echo "FATAL: hotkeyd did not come up on $DPY" >&2
   tail -5 "$TMP/hotkeyd.log" >&2; exit 1; }
+
+# --- the $mod agreement gate (dotfiles-ylmp.16) ------------------------------
+#
+# WHAT THIS REPLACED, AND WHY IT MOVED. This used to run BEFORE i3 and the
+# daemon, as a preflight: it imported hotkeyd.py and called `x_resource_mod` to
+# RE-DERIVE what the daemon would resolve. The Go daemon has the same resolver
+# (`ResolveMod`, hotkeyd/cmd/hotkeyd/grabs.go:537, called from main.go:105) but
+# does not expose it on the CLI, and nothing else does either: `--check` is
+# headless by contract so it has no display to resolve against, and
+# `check --ownership` deliberately reports EVERY entry in bind.ModResolutions
+# rather than this display's one (hotkeyd/cmd/hotkeyd/ownership.go:239). So
+# there is no out-of-process way to re-derive it.
+#
+# Reading the daemon's own startup line is strictly BETTER than re-deriving,
+# and would have been the right shape even while hotkeyd.py existed: it reports
+# what the running daemon ACTUALLY resolved and then grabbed with, so a resolver
+# that drifted from the copy the harness re-implemented — or a daemon that read
+# the resource before the harness wrote it — cannot slip through. The cost is
+# that it can only be asserted once the daemon is up, which is why it sits here
+# rather than at the top.
+#
+# The line is emitted by daemonLog (hotkeyd/cmd/hotkeyd/main.go:163) and reads:
+#   hotkeyd: 70 chords grabbed on :94 via XI2 ($mod=Mod4)
+# It is printed AFTER the state socket is bound (buildPublisher, main.go:131),
+# so the socket wait above does not imply the line has landed — hence its own
+# wait rather than a bare grep.
+#
+# Still FATAL, never a warning: a run whose daemon resolved the other $mod is
+# testing a shape it does not claim to test, and on the Mod1 shape that is
+# exactly the T6 false pass (Alt+h falling through to i3's focus bind) the
+# suite exists to catch.
+for _ in $(seq 1 20); do
+  grep -q 'chords grabbed on .* via XI2 (\$mod=' "$TMP/hotkeyd.log" && break
+  sleep 0.3
+done
+RESOLVED="$(sed -n 's/.*via XI2 (\$mod=\([^)]*\)).*/\1/p' "$TMP/hotkeyd.log" | head -1)"
+[ -n "$RESOLVED" ] || {
+  echo "FATAL: the daemon never logged its grab summary on $DPY, so what it" >&2
+  echo "       resolved \$mod to is unknown — refusing to run $NAV_TEST_MOD blind" >&2
+  tail -5 "$TMP/hotkeyd.log" >&2; exit 1; }
+[ "$RESOLVED" = "$NAV_TEST_MOD" ] || {
+  echo "FATAL: daemon resolves \$mod=$RESOLVED but this run is $NAV_TEST_MOD" >&2
+  exit 1; }
 
 # i3's config AS LOADED, including everything the include pulled in. `i3-msg -t
 # get_config` drops the `included_configs` array from the reply and config.common
@@ -257,9 +319,11 @@ i3_config() { python3 "$TMP/getconfig.py" "$I3SOCK"; }
 
 # --- oracle 2: OWNERSHIP, asserted before any behaviour is believed ----------
 #
-# sp020's anti-pattern list: "A chord present in both i3/config.common and
-# binds.py at any commit boundary. It double-fires; migration is cutover, not
-# duplication." And its Task 14 criterion: "the daemon obtains every grab it
+# sp020's anti-pattern list, quoted as written (the table it calls binds.py is
+# hotkeyd/cmd/hotkeyd/config.go since dotfiles-ylmp.16; the rule is unchanged):
+# "A chord present in both i3/config.common and binds.py at any commit
+# boundary. It double-fires; migration is cutover, not duplication."
+# And its Task 14 criterion: "the daemon obtains every grab it
 # requests: zero BadAccess, asserted, not logged. This is the assertion whose
 # absence let the reverted cutover merge green." That criterion names an
 # `:10`-shaped display and this harness is Mod4, so what follows is the
@@ -564,7 +628,8 @@ fi
 # publishes modifier state as state rather than as a side effect of a bind.
 # What replaces it is the pair of scenarios above, which read that state
 # directly, plus the daemon suite's own coverage of the guard that expires a
-# hold whose release was lost (hotkeyd/test_layers.py).
+# hold whose release was lost (hotkeyd/internal/layer/reconcile_test.go, the Go
+# port of test_layers.py's reconciliation block — dotfiles-ylmp.16).
 
 scenario "q exits — including with Ctrl physically held down"
 xdotool keydown ctrl; sleep 0.2

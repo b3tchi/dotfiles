@@ -1,5 +1,25 @@
 // Package main — dispatchmatrix's findings and the run of record.
 //
+// FROZEN INSTRUMENT — THIS TOOL CAN NO LONGER RUN (dotfiles-ylmp.16).
+//
+// dispatchmatrix is a TWO-ARM differ: it presses every chord in the shipped
+// table against the Go daemon and against the Python daemon on one private X
+// display, and diffs what each dispatched. hotkeyd.py and binds.py were
+// deleted when the estate cut over to Go, so one arm no longer exists and
+// LoadDump's `import binds` cannot resolve. Running it now stops at the
+// required-flags check with a message naming this.
+//
+// It is retained rather than deleted because what it produced is EVIDENCE, not
+// code: the run of record below (and testdata/run-of-record.txt) is the
+// measurement that let the cutover proceed, and deleting the instrument would
+// leave the finding with nothing to describe how it was taken. To run it again
+// you would need binds.py and hotkeyd.py back out of git history
+// (`git log -- hotkeyd/binds.py`), which is the correct amount of friction.
+//
+// Its removal is proposed separately — see the bd issue filed from
+// dotfiles-ylmp.16 — because deleting a documented instrument is a decision
+// about the record, not a loose end of the cutover.
+//
 // main.go documents what the tool IS. This file documents what it FOUND, so
 // the evidence ships with the instrument rather than in a chat log. Written
 // for bd dotfiles-ws5b, ahead of dotfiles-ylmp.15's parity gate.

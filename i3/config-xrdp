@@ -58,12 +58,14 @@ bindsym $mod+Shift+d --release exec --no-startup-id $qsenv ~/.dotfiles/quickshel
 bindsym $mod+Shift+c reload, exec --no-startup-id $qsenv ~/.dotfiles/quickshell/qs-start.sh
 
 # The overlay group (notification browser, clipboard picker) kept HERE when it
-# left config.common for hotkeyd/binds.py — sp020, dotfiles-hwds.43.
+# left config.common for the daemon's bind table — sp020, dotfiles-hwds.43. That
+# table is hotkeyd/cmd/hotkeyd/config.go, compiled into the binary since
+# dotfiles-ylmp.16 (it was hotkeyd/binds.py when the group moved).
 #
 # This entry point is proot Arch on Android over Termux:X11, and it starts no
 # daemon: `hotkeyd.sh start` is autostarted from `config.d/native.conf` /
 # `wsl.conf`, and this file includes no config.d overlay at all. So a bind that
-# moves to binds.py simply VANISHES from this session unless it is restated
+# moves to that table simply VANISHES from this session unless it is restated
 # here — which is what happened to the screenshot group at dotfiles-hwds.39 and
 # is filed as dotfiles-3qd. Restating them costs nothing: with no daemon there
 # is no second owner, so nothing double-fires.
