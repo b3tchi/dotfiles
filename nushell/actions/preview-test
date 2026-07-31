@@ -102,6 +102,15 @@
 #      process retains forever. Needs a real qml6 + python3; skips loudly
 #      (and says so in the final count) when they are absent.
 #
+# dotfiles-f532 (the web tier's crash guard):
+#  33. The REAL preview/qml/CrashPolicy.js — the pure reducer WebTier.qml
+#      delegates its "renderer died, now what?" decision to — table-tested
+#      through qml6 over event sequences no wall-clock test could produce
+#      cheaply: a slow OOM loop that satisfies probation before every crash,
+#      four external kills 14 s apart that must ALL recover, the lifetime cap
+#      that bounds a loop even if the OOM classification stops matching.
+#      Needs a real qml6; skips loudly (and says so in the final count).
+#
 # Run:  nu nushell/actions/preview-test
 # Pass: exits 0 and prints "PASS: N tests passed"
 # Fail: exits 1 and prints "FAIL: <description>"
@@ -114,6 +123,10 @@ const WRAPPER = (path self | path dirname | path join "preview")
 # than a let at the point of use.
 const QML_VIEW = (path self | path dirname | path dirname | path dirname
     | path join "preview" "qml" "PreviewView.qml")
+# The web tier's crash-decision seam (test 33 drives this exact file, not a
+# copy of it — dotfiles-f532).
+const CRASH_POLICY = (path self | path dirname | path dirname | path dirname
+    | path join "preview" "qml" "CrashPolicy.js")
 
 # sp022 T6 test_plan: "factor detection into a testable helper taking the
 # cmdline list ... and table-test it" — is-xrdp-display is exported from
@@ -1719,11 +1732,236 @@ while True:
     print "SKIP: test 32 (svg-tier decode size) needs a real qml6 and python3 — neither is faked, and a fake would test nothing."
 }
 
+# ── test 33: the web tier's crash policy — the decision, table-tested ───────
+#
+# dotfiles-f532. WebTier.qml's guard is a state machine over three events
+# (renderer terminated / a load survived its probation / a new sourceUrl),
+# and every interesting case takes tens of seconds of real renderer to
+# produce: the bug that reopened this was a page that loads, idles PAST the
+# 10 s probation, and only then exhausts the heap — measured at 11
+# terminations in 200 s, dead periodic at 17.8 s, fallback never shown.
+# Reproducing that end-to-end costs 200 s and a Chromium; reproducing the
+# decision costs nothing, so the decision is factored into CrashPolicy.js and
+# this table drives it.
+#
+# The two halves of the problem look alike ON PURPOSE and that is why the
+# table matters: case "slow OOM loop" and case "R4 four external kills" have
+# the SAME event timing (a crash, a satisfied probation, another crash) and
+# must come out differently — the first must give up, the second must
+# recover every time. Only the termination status separates them, and the
+# statuses below are measured on Qt 6.11.1, not read off the enum docs:
+# a V8 OOM is status=3 code=5, an external SIGKILL is status=2 code=9,
+# SIGTERM status=2 code=61696, SIGABRT status=1 code=64000.
+#
+# Three things keep this from being decoration:
+#   * it drives the real preview/qml/CrashPolicy.js by absolute URL — no
+#     copy, no assertion about source text;
+#   * every case pins the full ACTION SEQUENCE including backoff delays and
+#     the final counter triple, so a policy that reaches the right verdict by
+#     the wrong route still fails;
+#   * it asserts the reducer is pure (same input state -> same decision, and
+#     the input is not mutated), which is the property that makes the table
+#     equivalent to the real thing.
+#
+# Needs a real qml6 (the same one the client runs under). Absent is a loud
+# SKIP subtracted from the final count — never a silent pass.
+
+let policy_cases = [
+    {desc: "a single external kill reloads immediately",
+     events: ["term:2:9"],
+     want: ["reload:0"],
+     want_state: {transient: 1, oom: 0, lifetime: 1}},
+
+    {desc: "two crashes inside ONE probation window trip the fallback (sp022 T5's bound, preserved)",
+     events: ["term:2:9" "term:2:9"],
+     want: ["reload:0" "fail:transient"],
+     want_state: {transient: 2, oom: 0, lifetime: 2}},
+
+    {desc: "R3: a kill, then a load that stands its probation, leaves a clean transient budget",
+     events: ["term:2:9" "probation"],
+     want: ["reload:0" "probation"],
+     want_state: {transient: 0, oom: 0, lifetime: 1}},
+
+    {desc: "R4: four external kills, each after a completed probation, ALL recover",
+     events: ["term:2:9" "probation" "term:2:9" "probation" "term:2:9" "probation" "term:2:9"],
+     want: ["reload:0" "probation" "reload:1000" "probation" "reload:2000" "probation" "reload:4000"],
+     want_state: {transient: 1, oom: 0, lifetime: 4}},
+
+    {desc: "THE BUG: the slow OOM loop satisfies probation before every crash and still stops at the second OOM",
+     events: ["term:3:5" "probation" "term:3:5"],
+     want: ["reload:0" "probation" "fail:oom"],
+     want_state: {transient: 1, oom: 2, lifetime: 2}},
+
+    {desc: "the fast OOM loop still stops at the second termination (sp022 T10's result)",
+     events: ["term:3:5" "term:3:5"],
+     want: ["reload:0" "fail:oom"],
+     want_state: {transient: 2, oom: 2, lifetime: 2}},
+
+    {desc: "R1: a new sourceUrl clears every budget, the OOM one included",
+     events: ["term:3:5" "probation" "term:3:5" "nav" "term:3:5"],
+     want: ["reload:0" "probation" "fail:oom" "reset" "reload:0"],
+     want_state: {transient: 1, oom: 1, lifetime: 1}},
+
+    {desc: "an external kill never spends the OOM budget, however many times it lands",
+     events: ["term:2:9" "probation" "term:2:9" "probation" "term:2:9" "probation" "term:2:9" "probation" "term:2:9"],
+     want: ["reload:0" "probation" "reload:1000" "probation" "reload:2000" "probation" "reload:4000" "probation" "reload:8000"],
+     want_state: {transient: 1, oom: 0, lifetime: 5}},
+
+    {desc: "the lifetime cap bounds the loop even if the OOM classification stops matching entirely",
+     events: ["term:1:64000" "probation" "term:1:64000" "probation" "term:1:64000" "probation"
+              "term:1:64000" "probation" "term:1:64000" "probation" "term:1:64000" "probation"
+              "term:1:64000" "probation" "term:1:64000" "probation" "term:1:64000"],
+     want: ["reload:0" "probation" "reload:1000" "probation" "reload:2000" "probation"
+            "reload:4000" "probation" "reload:8000" "probation" "reload:16000" "probation"
+            "reload:30000" "probation" "reload:30000" "probation" "fail:lifetime"],
+     want_state: {transient: 1, oom: 0, lifetime: 9}},
+
+    {desc: "the STATUS is the discriminator, not the exit code — any Killed status is self-inflicted",
+     events: ["term:3:999" "probation" "term:3:0"],
+     want: ["reload:0" "probation" "fail:oom"],
+     want_state: {transient: 1, oom: 2, lifetime: 2}},
+
+    {desc: "a non-Killed status is external however alarming its exit code (SIGABRT then SIGTERM)",
+     events: ["term:1:64000" "probation" "term:2:61696"],
+     want: ["reload:0" "probation" "reload:1000"],
+     want_state: {transient: 1, oom: 0, lifetime: 2}},
+]
+
+mut policy_tested = false
+if $qml6_bin.exit_code == 0 {
+    if not ($CRASH_POLICY | path exists) {
+        print $"FAIL: test 33 cannot find the real CrashPolicy.js at ($CRASH_POLICY)"
+        exit 1
+    }
+    let probe_src = r#'
+import QtQuick
+import "__POLICY_URL__" as Policy
+
+QtObject {
+    Component.onCompleted: {
+        var script = __CASES__;
+        for (var i = 0; i < script.length; i++) {
+            var st = Policy.newState();
+            var acts = [];
+            var evs = script[i];
+            for (var j = 0; j < evs.length; j++) {
+                var e = evs[j];
+                if (e === "nav") {
+                    st = Policy.newState();
+                    acts.push("reset");
+                } else if (e === "probation") {
+                    st = Policy.onProbationElapsed(st);
+                    acts.push("probation");
+                } else {
+                    var p = e.split(":");
+                    var d = Policy.onTerminated(st, parseInt(p[1]), parseInt(p[2]));
+                    st = d.state;
+                    acts.push(d.action === "reload" ? ("reload:" + d.delayMs)
+                                                    : ("fail:" + d.reason));
+                }
+            }
+            console.warn("RESULT " + i + " " + JSON.stringify({actions: acts, state: st}));
+        }
+        var base = Policy.newState();
+        var a = JSON.stringify(Policy.onTerminated(base, 3, 5));
+        var b = JSON.stringify(Policy.onTerminated(base, 3, 5));
+        console.warn("PURE " + JSON.stringify({
+            repeatable: a === b,
+            input_untouched: JSON.stringify(base) === JSON.stringify(Policy.newState())}));
+        console.warn("TEXT " + JSON.stringify({
+            oom: Policy.failText("oom", "THE-URL"),
+            other: Policy.failText("transient", "THE-URL")}));
+        Qt.exit(0);
+    }
+}
+'#
+    let cases_json = ($policy_cases | each {|c| $c.events } | to json --raw)
+    let probe_qml = $"($tmp)/policyprobe.qml"
+    ($probe_src
+        | str replace "__POLICY_URL__" $"file://($CRASH_POLICY)"
+        | str replace "__CASES__" $cases_json
+        | save --force $probe_qml)
+
+    let probe_log = $"($tmp)/policyprobe.log"
+    # Offscreen, no display, no daemon, no network — the reducer is pure, so
+    # qml6 is here purely as the JS engine the real client uses.
+    let run = (do {
+        ^bash -c $"QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 qml6 ($probe_qml) >($probe_log) 2>&1"
+    } | complete)
+    let probe_out = (if ($probe_log | path exists) { open --raw $probe_log } else { "" })
+    let result_lines = ($probe_out | lines | where {|l| $l | str contains "RESULT " })
+    if ($result_lines | length) != ($policy_cases | length) {
+        print $"FAIL: test 33: the probe emitted ($result_lines | length) results for ($policy_cases | length) cases — the assertions below would be vacuous. qml6 exit=($run.exit_code), log:\n($probe_out)"
+        exit 1
+    }
+    for i in 0..(($policy_cases | length) - 1) {
+        let case = ($policy_cases | get $i)
+        let line = ($result_lines | get $i)
+        let got = ($line | str replace --regex '^.*RESULT [0-9]+ ' "" | from json)
+        if ($got.actions | to json --raw) != ($case.want | to json --raw) {
+            print $"FAIL: test 33 \(($case.desc)\): action sequence is ($got.actions | to json --raw), want ($case.want | to json --raw)"
+            exit 1
+        }
+        for field in ["transient" "oom" "lifetime"] {
+            let g = ($got.state | get $field)
+            let w = ($case.want_state | get $field)
+            if $g != $w {
+                print $"FAIL: test 33 \(($case.desc)\): final ($field) counter is ($g), want ($w) — full state ($got.state | to json --raw)"
+                exit 1
+            }
+        }
+    }
+    let pure_line = ($probe_out | lines | where {|l| $l | str contains "PURE " })
+    if ($pure_line | is-empty) {
+        print $"FAIL: test 33: no purity report from the probe. log:\n($probe_out)"
+        exit 1
+    }
+    let pure = ($pure_line | first | str replace --regex '^.*PURE ' "" | from json)
+    if not $pure.repeatable {
+        print "FAIL: test 33: onTerminated is not deterministic — the same state and status gave two different decisions, so this whole table proves nothing about the real guard."
+        exit 1
+    }
+    if not $pure.input_untouched {
+        print "FAIL: test 33: onTerminated mutates the state it is handed. WebTier.qml assigns decision.state back onto a property, so an in-place mutation makes the counters advance twice per crash."
+        exit 1
+    }
+    let text_line = ($probe_out | lines | where {|l| $l | str contains "TEXT " })
+    if ($text_line | is-empty) {
+        print $"FAIL: test 33: no fallback-text report from the probe. log:\n($probe_out)"
+        exit 1
+    }
+    let texts = ($text_line | first | str replace --regex '^.*TEXT ' "" | from json)
+    # "never a dead window" is the whole point of the fallback, so both
+    # give-up paths must name the url, and the OOM one must name its remedy.
+    for pair in [[label, body]; ["oom", $texts.oom] ["other", $texts.other]] {
+        if not ($pair.body | str contains "THE-URL") {
+            print $"FAIL: test 33: the ($pair.label) fallback text does not name the url — got: ($pair.body)"
+            exit 1
+        }
+    }
+    if not ($texts.oom | str contains "QTWEBENGINE_CHROMIUM_FLAGS") {
+        print $"FAIL: test 33: the OOM fallback text must point at the ceiling override, which is the only remedy for it — got: ($texts.oom)"
+        exit 1
+    }
+    if ($texts.other | str contains "QTWEBENGINE_CHROMIUM_FLAGS") {
+        print $"FAIL: test 33: a non-OOM give-up must NOT blame the memory ceiling — got: ($texts.other)"
+        exit 1
+    }
+    print $"PASS: crash policy table-tested against the real CrashPolicy.js \(($policy_cases | length) cases, pure\)"
+    $policy_tested = true
+} else {
+    print "SKIP: test 33 (web tier crash policy) needs a real qml6 — the reducer is pure, but faking the engine that runs it would test nothing."
+}
+
 ^rm -rf $tmp
 print ""
-if $svg_decode_tested {
-    print "PASS: 32 tests passed"
+let skipped = ([
+    (if $svg_decode_tested { null } else { "32 needs qml6 + python3" })
+    (if $policy_tested { null } else { "33 needs qml6" })
+] | compact)
+if ($skipped | is-empty) {
+    print "PASS: 33 tests passed"
 } else {
-    print "PASS: 31 tests passed (1 skipped: test 32 needs qml6 + python3)"
+    print $"PASS: (33 - ($skipped | length)) tests passed \(($skipped | length) skipped: ($skipped | str join '; ')\)"
 }
 

@@ -53,43 +53,44 @@
 
 import QtQuick
 import QtWebEngine
+import "CrashPolicy.js" as CrashPolicy
 
 Item {
     id: root
     property string sourceUrl: ""
 
-    // _crashCount tracks renderer terminations for the CURRENT sourceUrl
-    // only — reset whenever a new frame arrives (a genuinely new URL), so a
-    // crash on an old, already-superseded document can never poison the
-    // next one. _failed flips permanently for this url once the one allowed
-    // auto-reload also crashes; the Text fallback below is what makes
-    // that state visible rather than a dead/blank window (task edge case:
-    // "Engine crash (renderer OOM) -> renderProcessTerminated -> reload
-    // once, else fallback text, never a dead window").
+    // WHAT HAPPENS WHEN THE RENDERER DIES lives in CrashPolicy.js — a pure
+    // reducer over (terminated / probation-elapsed / new-url) events, so the
+    // decision is table-testable without a renderer, a display, or a 20 s
+    // wait (preview-test test 33). Read that file for the measured
+    // termination-status table, the three budgets, and where the line
+    // between "still recovers" and "gives up" sits. This file only wires the
+    // Qt signals to it and owns the two timers, because timers are the part
+    // that cannot be pure.
     //
-    // The counter is ALSO reset by a load that then stays up — but only
-    // after it has stayed up for stableTimer.interval, never on the
-    // LoadSucceededStatus signal itself. That distinction is the whole of
-    // dotfiles-f532: a renderer that OOMs *after* the page loads always
-    // emits LoadSucceeded first, so resetting there made _crashCount
-    // oscillate 0 -> 1 -> 0 forever, _failed unreachable, and the window an
-    // endless reload loop (measured against a page that loads and then grows
-    // ~640 MB of live JS: 10 terminations in 45 s with a fresh renderer pid
-    // each time and no end in sight — 59 and climbing on the reviewer's rig
-    // — fallback text never shown, and it resumed after a window restart
-    // because preview-d restores the slot's last URL). Requiring the page
-    // to survive a while before the crash budget is refunded keeps both
-    // behaviours: a genuine one-off crash still gets its free reload and
-    // then a clean slate, while a crash-on-a-timer trips the fallback on
-    // the second termination and stops.
+    // The short version: state is per-URL and cleared on a genuinely new
+    // sourceUrl (a crash on a superseded document can never poison the next
+    // one). sp022 T10's one free reload is refunded only after a load has
+    // STOOD for _stableMs, never on the LoadSucceededStatus signal itself —
+    // an OOM *after* load always follows a LoadSucceeded, so refunding there
+    // made the guard loop forever (dotfiles-f532). On top of that, a
+    // self-inflicted OOM (Chromium's own KilledTerminationStatus, measured
+    // as status=3 code=5 — an external SIGKILL is status=2 code=9) is never
+    // refunded at all, which is what stops the SLOW loop that survived T10:
+    // a page that idles past probation and only then exhausts the heap got
+    // its budget back before every OOM and ran at ~1 termination per 18 s
+    // indefinitely.
     readonly property int _stableMs: 10000
-    property int _crashCount: 0
+    property var _policy: CrashPolicy.newState()
     property bool _failed: false
+    property string _failReason: ""
 
     onSourceUrlChanged: {
         stableTimer.stop()
-        root._crashCount = 0
+        reloadTimer.stop()
+        root._policy = CrashPolicy.newState()
         root._failed = false
+        root._failReason = ""
     }
 
     WebEngineView {
@@ -112,23 +113,35 @@ Item {
         // nu wrapper sets, per PreviewView.qml's file header) rather than
         // only inferred from the fallback text appearing.
         onRenderProcessTerminated: (terminationStatus, exitCode) => {
-            console.warn("preview: web tier renderer terminated (status="
-                + terminationStatus + " code=" + exitCode + ") url="
-                + root.sourceUrl)
             // This load did not survive its probation, so it must not
             // refund the crash budget a moment from now (dotfiles-f532).
             stableTimer.stop()
-            root._crashCount++
-            if (root._crashCount <= 1) {
-                // Deferred to the next event-loop turn rather than
-                // reloading inline from inside the crash signal itself:
-                // Qt WebEngine's own guidance is that the view may not
-                // have finished tearing down the dead render process yet
-                // when this signal fires, so an inline reload() call here
-                // is unreliable. A 0-length single-shot timer is the
-                // standard defer-to-next-turn idiom.
-                reloadTimer.start()
+            const decision = CrashPolicy.onTerminated(
+                root._policy, terminationStatus, exitCode)
+            root._policy = decision.state
+            console.warn("preview: web tier renderer terminated (status="
+                + terminationStatus + " code=" + exitCode + ") "
+                + decision.action
+                + (decision.action === "reload"
+                    ? " in " + decision.delayMs + "ms"
+                    : " (" + decision.reason + ")")
+                + " transient=" + decision.state.transient
+                + " oom=" + decision.state.oom
+                + " lifetime=" + decision.state.lifetime
+                + " url=" + root.sourceUrl)
+            if (decision.action === "reload") {
+                // Deferred to a timer rather than reloading inline from
+                // inside the crash signal itself: Qt WebEngine's own
+                // guidance is that the view may not have finished tearing
+                // down the dead render process yet when this signal fires,
+                // so an inline reload() call here is unreliable. A
+                // 0-length single-shot timer is the standard
+                // defer-to-next-turn idiom, and a longer one is the policy's
+                // backoff.
+                reloadTimer.interval = decision.delayMs
+                reloadTimer.restart()
             } else {
+                root._failReason = decision.reason
                 root._failed = true
             }
         }
@@ -141,16 +154,17 @@ Item {
     }
 
     // Probation for the current load: only a page that has been up this
-    // long earns its crash budget back (dotfiles-f532). Comfortably longer
-    // than the measured OOM-after-load cycle (~4.5 s at the wrapper's 256 MB
-    // ceiling, i.e. load + regrow + die) and far shorter than any session
-    // where a second, unrelated crash would deserve its own free reload
-    // (verified both ways: two terminations 4.5 s apart trip the fallback,
-    // two SIGKILLs 10+ s apart each get their reload and recover).
+    // long earns its TRANSIENT crash budget back (dotfiles-f532; the OOM and
+    // lifetime budgets are never refunded — see CrashPolicy.js). Comfortably
+    // longer than the measured OOM-after-load cycle (~4.5 s at the wrapper's
+    // 256 MB ceiling, i.e. load + regrow + die) and far shorter than any
+    // session where a second, unrelated crash would deserve its own free
+    // reload (verified both ways: two terminations 4.5 s apart trip the
+    // fallback, four SIGKILLs 14 s apart each get their reload and recover).
     Timer {
         id: stableTimer
         interval: root._stableMs
-        onTriggered: root._crashCount = 0
+        onTriggered: root._policy = CrashPolicy.onProbationElapsed(root._policy)
     }
 
     Text {
@@ -161,6 +175,6 @@ Item {
         color: "#8b93a3"
         font.pixelSize: 16
         visible: root._failed
-        text: "preview: web content crashed and did not recover after one reload\n" + root.sourceUrl
+        text: CrashPolicy.failText(root._failReason, root.sourceUrl)
     }
 }
