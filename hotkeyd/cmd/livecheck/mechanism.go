@@ -150,7 +150,7 @@ func runMechanism(rep *Reporter, rig *Rig, in *Injector, i3sock string) {
 	// -- 2b: core and XI2 are separate conflict domains ---------------------
 	// live_check.py installs its own core grabber with python-xlib's
 	// grab_key. internal/x11 has no core GrabKey request and deliberately
-	// never will (adr0018: XI2 only, never a core fallback), so the core
+	// never will (adr0021: XI2 only, never a core fallback), so the core
 	// grabber here is the REAL i3 — which grabs the chords in its config
 	// with core XGrabKey. The rig's i3 config carries a marker binding for
 	// exactly this: `bindsym Mod4+F8 mark --add i3-got-f8`.

@@ -483,7 +483,7 @@ func (c *client) closeLocked() error {
 }
 
 // fdOf extracts the raw file descriptor from a Unix domain socket
-// connection, stdlib-only (no golang.org/x/sys/unix -- adr0018's
+// connection, stdlib-only (no golang.org/x/sys/unix -- adr0021's
 // zero-dependency invariant). Returns ok=false for any connection type
 // this package did not itself create as a Unix socket.
 func fdOf(conn net.Conn) (int, bool) {

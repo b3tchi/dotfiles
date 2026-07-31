@@ -30,7 +30,7 @@ import (
 )
 
 // Startup exit codes distinct from exitXConnLost (daemon.go) — named,
-// never a silent fallback (adr0018's anti-pattern list: "core XGrabKey
+// never a silent fallback (adr0021's anti-pattern list: "core XGrabKey
 // fallback when XI2 is missing (exit 5, named — never silent
 // degradation)").
 const (
@@ -196,7 +196,7 @@ var _ xiVersionSource = (*x11.Conn)(nil)
 
 // requireXI2 asserts this display can do XI2, or returns a named error --
 // fail fast at startup (exit 5, see run()) rather than a silent fallback
-// to core XGrabKey (adr0018's anti-pattern list) or a stack trace at the
+// to core XGrabKey (adr0021's anti-pattern list) or a stack trace at the
 // first keypress. Ported from hotkeyd.py's require_xi2.
 func requireXI2(x xiVersionSource) (x11.ExtensionInfo, error) {
 	ext, err := x.QueryExtension("XInputExtension")
