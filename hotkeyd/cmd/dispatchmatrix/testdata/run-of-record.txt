@@ -1,0 +1,137 @@
+dispatchmatrix run of record
+
+display        :72 (private Xvfb + real i3, started and torn down by the harness)
+$mod           Mod4
+engines        go = cmd/hotkeyd binary   |   python = hotkeyd.py under python3
+table          70 top-level binds + 4 layers, enumerated at run time from binds.py
+plan           127 trials
+verdict        127/127 identical on both engines, 0 divergences
+
+TRIAL                                          GO            PYTHON        DISPATCHED (identical on both unless noted)
+default|$mod+o                                 layer-change  layer-change  state:nav
+default|$mod+Return                            dispatched    dispatched    run:~/.local/bin/wm-launch-terminal|st
+default|$mod+d                                 dispatched    dispatched    run:~/.dotfiles/quickshell/qs-overlay.sh|launcher
+default|$mod+p                                 dispatched    dispatched    run:~/.dotfiles/quickshell/qs-overlay.sh|projects
+default|$mod+1                                 dispatched    dispatched    run:~/.local/bin/ws-switch.nu|1
+default|$mod+Ctrl+1                            dispatched    dispatched    run:~/.local/bin/ws-switch.nu|1 move
+default|$mod+Shift+1                           dispatched    dispatched    run:~/.local/bin/ws-switch.nu|1 follow
+default|$mod+2                                 dispatched    dispatched    run:~/.local/bin/ws-switch.nu|2
+default|$mod+Ctrl+2                            dispatched    dispatched    run:~/.local/bin/ws-switch.nu|2 move
+default|$mod+Shift+2                           dispatched    dispatched    run:~/.local/bin/ws-switch.nu|2 follow
+default|$mod+3                                 dispatched    dispatched    run:~/.local/bin/ws-switch.nu|3
+default|$mod+Ctrl+3                            dispatched    dispatched    run:~/.local/bin/ws-switch.nu|3 move
+default|$mod+Shift+3                           dispatched    dispatched    run:~/.local/bin/ws-switch.nu|3 follow
+default|$mod+4                                 dispatched    dispatched    run:~/.local/bin/ws-switch.nu|4
+default|$mod+Ctrl+4                            dispatched    dispatched    run:~/.local/bin/ws-switch.nu|4 move
+default|$mod+Shift+4                           dispatched    dispatched    run:~/.local/bin/ws-switch.nu|4 follow
+default|$mod+5                                 dispatched    dispatched    run:~/.local/bin/ws-switch.nu|5
+default|$mod+Ctrl+5                            dispatched    dispatched    run:~/.local/bin/ws-switch.nu|5 move
+default|$mod+Shift+5                           dispatched    dispatched    run:~/.local/bin/ws-switch.nu|5 follow
+default|$mod+6                                 dispatched    dispatched    run:~/.local/bin/ws-switch.nu|6
+default|$mod+Ctrl+6                            dispatched    dispatched    run:~/.local/bin/ws-switch.nu|6 move
+default|$mod+Shift+6                           dispatched    dispatched    run:~/.local/bin/ws-switch.nu|6 follow
+default|$mod+7                                 dispatched    dispatched    run:~/.local/bin/ws-switch.nu|7
+default|$mod+Ctrl+7                            dispatched    dispatched    run:~/.local/bin/ws-switch.nu|7 move
+default|$mod+Shift+7                           dispatched    dispatched    run:~/.local/bin/ws-switch.nu|7 follow
+default|$mod+8                                 dispatched    dispatched    run:~/.local/bin/ws-switch.nu|8
+default|$mod+Ctrl+8                            dispatched    dispatched    run:~/.local/bin/ws-switch.nu|8 move
+default|$mod+Shift+8                           dispatched    dispatched    run:~/.local/bin/ws-switch.nu|8 follow
+default|$mod+Ctrl+Right                        dispatched    dispatched    i3:workspace next
+default|$mod+Ctrl+Left                         dispatched    dispatched    i3:workspace prev
+default|$mod+u                                 dispatched    dispatched    i3:border none
+default|$mod+y                                 dispatched    dispatched    i3:border pixel 4
+default|$mod+s                                 dispatched    dispatched    i3:split h;exec notify-send 'tile side'
+default|$mod+b                                 dispatched    dispatched    i3:split v;exec notify-send 'tile bellow'
+default|$mod+q                                 dispatched    dispatched    i3:split toggle
+default|$mod+z                                 dispatched    dispatched    i3:fullscreen toggle
+default|$mod+t                                 dispatched    dispatched    i3:layout tabbed
+default|$mod+e                                 dispatched    dispatched    i3:layout toggle split
+default|$mod+Shift+p                           dispatched    dispatched    i3:sticky toggle
+default|$mod+a                                 dispatched    dispatched    i3:focus parent
+default|$mod+Shift+minus                       dispatched    dispatched    i3:move scratchpad
+default|$mod+minus                             dispatched    dispatched    i3:scratchpad show
+default|$mod+h                                 dispatched    dispatched    i3:focus left
+default|$mod+Shift+h                           dispatched    dispatched    i3:move left
+default|$mod+Left                              dispatched    dispatched    i3:focus left
+default|$mod+Shift+Left                        dispatched    dispatched    i3:move left
+default|$mod+j                                 dispatched    dispatched    i3:focus down
+default|$mod+Shift+j                           dispatched    dispatched    i3:move down
+default|$mod+Down                              dispatched    dispatched    i3:focus down
+default|$mod+Shift+Down                        dispatched    dispatched    i3:move down
+default|$mod+k                                 dispatched    dispatched    i3:focus up
+default|$mod+Shift+k                           dispatched    dispatched    i3:move up
+default|$mod+Up                                dispatched    dispatched    i3:focus up
+default|$mod+Shift+Up                          dispatched    dispatched    i3:move up
+default|$mod+l                                 dispatched    dispatched    i3:focus right
+default|$mod+Shift+l                           dispatched    dispatched    i3:move right
+default|$mod+Right                             dispatched    dispatched    i3:focus right
+default|$mod+Shift+Right                       dispatched    dispatched    i3:move right
+default|Print                                  dispatched    dispatched    run:~/.local/bin/i3-scrot|
+default|$mod+Print                             dispatched    dispatched    run:~/.local/bin/i3-scrot|-w
+default|$mod+Shift+Print                       dispatched    dispatched    run:~/.local/bin/i3-scrot|-s
+default|$mod+Shift+s                           dispatched    dispatched    run:~/.dotfiles/quickshell/qs-screenshot.sh|
+default|$mod+0                                 layer-change  layer-change  state:system
+default|$mod+Tab                               dispatched    dispatched    run:~/.dotfiles/quickshell/qs-overlay.sh|switcher; run:~/.dotfiles/quickshell/qs-overlay.sh|switcher-cancel; run:~/.dotfiles/quickshell/qs-overlay.sh|switcher-confirm; state:switcher; state:default
+default|$mod+n                                 dispatched    dispatched    run:~/.dotfiles/quickshell/qs-notif.sh|toggle
+default|$mod+v                                 dispatched    dispatched    run:~/.dotfiles/quickshell/qs-clip.sh|toggle
+default|$mod+9                                 dispatched    dispatched    run:~/.local/bin/blurlock|
+default|$mod+Ctrl+m                            dispatched    dispatched    run:~/.local/bin/terminal|-e alsamixer
+default|$mod+Shift+e                           dispatched    dispatched    run:~/.local/bin/i3-nagbar|-t warning -m You pressed the exit shortcut. Do you really want to exit i3? This will end your X session. -b Yes, exit i3 i3-msg exit
+default|$mod+r                                 layer-change  layer-change  state:resize
+layer:nav|h                                    dispatched    dispatched    i3:focus left
+layer:nav|Left                                 dispatched    dispatched    i3:focus left
+layer:nav|j                                    dispatched    dispatched    i3:focus down
+layer:nav|Down                                 dispatched    dispatched    i3:focus down
+layer:nav|k                                    dispatched    dispatched    i3:focus up
+layer:nav|Up                                   dispatched    dispatched    i3:focus up
+layer:nav|l                                    dispatched    dispatched    i3:focus right
+layer:nav|Right                                dispatched    dispatched    i3:focus right
+layer:nav/move|Ctrl+h                          dispatched    dispatched    i3:move left; state:nav/move; state:nav
+layer:nav/move|Ctrl+Left                       dispatched    dispatched    i3:move left; state:nav/move; state:nav
+layer:nav/move|Ctrl+j                          dispatched    dispatched    i3:move down; state:nav/move; state:nav
+layer:nav/move|Ctrl+Down                       dispatched    dispatched    i3:move down; state:nav/move; state:nav
+layer:nav/move|Ctrl+k                          dispatched    dispatched    i3:move up; state:nav/move; state:nav
+layer:nav/move|Ctrl+Up                         dispatched    dispatched    i3:move up; state:nav/move; state:nav
+layer:nav/move|Ctrl+l                          dispatched    dispatched    i3:move right; state:nav/move; state:nav
+layer:nav/move|Ctrl+Right                      dispatched    dispatched    i3:move right; state:nav/move; state:nav
+layer:nav/resize|Mod1+h                        dispatched    dispatched    i3:resize shrink width 5 px or 5 ppt; state:nav/resize; state:nav
+layer:nav/resize|Mod1+Left                     dispatched    dispatched    i3:resize shrink width 5 px or 5 ppt; state:nav/resize; state:nav
+layer:nav/resize|Mod1+j                        dispatched    dispatched    i3:resize grow height 5 px or 5 ppt; state:nav/resize; state:nav
+layer:nav/resize|Mod1+Down                     dispatched    dispatched    i3:resize grow height 5 px or 5 ppt; state:nav/resize; state:nav
+layer:nav/resize|Mod1+k                        dispatched    dispatched    i3:resize shrink height 5 px or 5 ppt; state:nav/resize; state:nav
+layer:nav/resize|Mod1+Up                       dispatched    dispatched    i3:resize shrink height 5 px or 5 ppt; state:nav/resize; state:nav
+layer:nav/resize|Mod1+l                        dispatched    dispatched    i3:resize grow width 5 px or 5 ppt; state:nav/resize; state:nav
+layer:nav/resize|Mod1+Right                    dispatched    dispatched    i3:resize grow width 5 px or 5 ppt; state:nav/resize; state:nav
+layer:nav|exit:q                               layer-change  layer-change  state:default
+layer:nav|exit:Escape                          layer-change  layer-change  state:default
+layer:nav|exit:Return                          layer-change  layer-change  state:default
+layer:resize|h                                 dispatched    dispatched    i3:resize shrink width 5 px or 5 ppt
+layer:resize|j                                 dispatched    dispatched    i3:resize grow height 5 px or 5 ppt
+layer:resize|k                                 dispatched    dispatched    i3:resize shrink height 5 px or 5 ppt
+layer:resize|l                                 dispatched    dispatched    i3:resize grow width 5 px or 5 ppt
+layer:resize|Left                              dispatched    dispatched    i3:resize shrink width 10 px or 10 ppt
+layer:resize|Down                              dispatched    dispatched    i3:resize grow height 10 px or 10 ppt
+layer:resize|Up                                dispatched    dispatched    i3:resize shrink height 10 px or 10 ppt
+layer:resize|Right                             dispatched    dispatched    i3:resize grow width 10 px or 10 ppt
+layer:resize|exit:q                            layer-change  layer-change  state:default
+layer:resize|exit:Escape                       layer-change  layer-change  state:default
+layer:resize|exit:Return                       layer-change  layer-change  state:default
+layer:switcher|Tab                             dispatched    dispatched    run:~/.dotfiles/quickshell/qs-overlay.sh|switcher
+layer:switcher|w                               dispatched    dispatched    run:~/.dotfiles/quickshell/qs-overlay.sh|switcher
+layer:switcher|ISO_Left_Tab                    dispatched    dispatched    run:~/.dotfiles/quickshell/qs-overlay.sh|switcher-prev
+layer:switcher|space                           dispatched    dispatched    run:~/.dotfiles/quickshell/qs-overlay.sh|switcher-cancel; run:~/.dotfiles/quickshell/qs-overlay.sh|switcher-search; state:default
+layer:switcher|Escape                          dispatched    dispatched    run:~/.dotfiles/quickshell/qs-overlay.sh|switcher-cancel; run:~/.dotfiles/quickshell/qs-overlay.sh|switcher-cancel; state:default
+layer:switcher|Return                          dispatched    dispatched    run:~/.dotfiles/quickshell/qs-overlay.sh|switcher-cancel; run:~/.dotfiles/quickshell/qs-overlay.sh|switcher-confirm; state:default
+layer:switcher|exit:q                          layer-change  layer-change  state:default
+layer:system|l                                 dispatched    dispatched    run:~/.local/bin/i3exit|lock; state:default
+layer:system|e                                 dispatched    dispatched    run:~/.local/bin/i3exit|logout; state:default
+layer:system|u                                 dispatched    dispatched    run:~/.local/bin/i3exit|switch_user; state:default
+layer:system|s                                 dispatched    dispatched    run:~/.local/bin/i3exit|suspend; state:default
+layer:system|h                                 dispatched    dispatched    run:~/.local/bin/i3exit|hibernate; state:default
+layer:system|r                                 dispatched    dispatched    run:~/.local/bin/i3exit|reboot; state:default
+layer:system|p                                 dispatched    dispatched    run:~/.local/bin/i3exit|shutdown; state:default
+layer:system|exit:q                            layer-change  layer-change  state:default
+layer:system|exit:Escape                       layer-change  layer-change  state:default
+layer:system|exit:Return                       layer-change  layer-change  state:default
+precedence:nav|Ctrl+Mod1+h                     dispatched    dispatched    i3:move left; state:nav/move; state:nav
+negative|$mod+F12                              silent        silent        (nothing)
