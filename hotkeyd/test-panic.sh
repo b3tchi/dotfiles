@@ -31,6 +31,15 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # byte-for-byte. NOTE: most of this suite's daemon lifecycle goes through
 # hotkeyd.sh (start/stop/restart), which is NOT parameterized here — see
 # dotfiles-2ats's report for why that is a separate, blocking gap.
+#
+# Because that lifecycle goes through hotkeyd.sh, HOTKEYD_BIN/HOTKEYD_PROC_PAT
+# alone do NOT select the Go engine here: hotkeyd.sh's `start`/`restart` pick
+# the engine per display via its own engine_for(), which falls back to python
+# unless HOTKEYD_ENGINE_DEFAULT=go is also set — and this suite's pgrep
+# pattern must agree with whichever one actually started. The correct Go
+# invocation sets all four together:
+#   HOTKEYD_ENGINE_DEFAULT=go HOTKEYD_BIN=path/to/hotkeyd \
+#     HOTKEYD_PROC_PAT=hotkeyd HOTKEYD_HAS_BINDS_FLAG=0 bash test-panic.sh
 HOTKEYD_BIN="${HOTKEYD_BIN:-python3 $HERE/hotkeyd.py}"
 HOTKEYD_PROC_PAT="${HOTKEYD_PROC_PAT:-hotkeyd\.py}"
 

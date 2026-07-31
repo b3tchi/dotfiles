@@ -15,13 +15,28 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # overriding them instead of editing the suite. Defaults reproduce today's
 # python3 invocation and pgrep pattern byte-for-byte, so behaviour against the
 # shipped daemon is unchanged.
+#
+# NOT SUFFICIENT ALONE for the launcher-driven stages in this file (those that
+# go through hotkeyd.sh, e.g. `hotkeyd.sh status`): those resolve the engine
+# via hotkeyd.sh's own engine_for(), which is separate from HOTKEYD_BIN and
+# falls through to its python default unless HOTKEYD_ENGINE_DEFAULT=go is ALSO
+# set. Point HOTKEYD_BIN/HOTKEYD_PROC_PAT at the Go build without setting
+# HOTKEYD_ENGINE_DEFAULT and the launcher-driven stages start a PYTHON daemon
+# while this suite's pgrep pattern is looking for the Go argv — a silent
+# mismatch, not a skip. See the full invocation below.
 HOTKEYD_BIN="${HOTKEYD_BIN:-python3 $HERE/hotkeyd.py}"
 HOTKEYD_PROC_PAT="${HOTKEYD_PROC_PAT:-hotkeyd\.py}"
 
 # The same seam for stage 6's live-X suite (sp021 Task 14). Default is
 # today's python invocation byte-for-byte, so nothing changes until a caller
-# opts in with e.g.
-#   HOTKEYD_LIVECHECK=path/to/livecheck HOTKEYD_BIN=path/to/hotkeyd ./test-hotkeyd.sh
+# opts in with e.g., for the Go engine (all four vars REQUIRED together —
+# HOTKEYD_ENGINE_DEFAULT so hotkeyd.sh's engine_for() actually starts the Go
+# daemon on the launcher-driven stages, HOTKEYD_PROC_PAT so pgrep/pkill agree
+# with what that starts, and HOTKEYD_HAS_BINDS_FLAG=0 because the Go binary's
+# bind table is compiled in, not passed with `--binds`, per test-engine.sh):
+#   HOTKEYD_ENGINE_DEFAULT=go HOTKEYD_BIN=path/to/hotkeyd \
+#     HOTKEYD_PROC_PAT=hotkeyd HOTKEYD_HAS_BINDS_FLAG=0 \
+#     HOTKEYD_LIVECHECK=path/to/livecheck ./test-hotkeyd.sh
 # Stage 6 passes `--display`/`--i3sock` to whatever this names: cmd/livecheck
 # REQUIRES an explicit --display (it never inherits $DISPLAY, so it cannot
 # land on a live session), and live_check.py reads no argv at all, so the

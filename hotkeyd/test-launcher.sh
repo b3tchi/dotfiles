@@ -15,6 +15,16 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # below), never a direct invocation, so there is nothing here to point at a
 # different binary. hotkeyd.sh itself hardcodes `DAEMON="$HERE/hotkeyd.py"`
 # and is out of this task's scope; see dotfiles-2ats's report.
+#
+# Because every daemon here starts through hotkeyd.sh, WHICH ENGINE runs is
+# decided by hotkeyd.sh's own engine_for() (HOTKEYD_ENGINE_DEFAULT, default
+# python) — a seam this file does not otherwise touch. HOTKEYD_PROC_PAT below
+# must agree with whatever engine_for() actually starts, or every pgrep/pkill
+# in this suite looks for the wrong argv (observed: HOTKEYD_ENGINE_DEFAULT=go
+# alone, without also setting HOTKEYD_PROC_PAT, starts the Go daemon but keeps
+# hunting for it with the python pattern — 20 passed/10 failed instead of
+# clean). The correct Go invocation sets both together:
+#   HOTKEYD_ENGINE_DEFAULT=go HOTKEYD_PROC_PAT=hotkeyd ./test-launcher.sh
 HOTKEYD_PROC_PAT="${HOTKEYD_PROC_PAT:-hotkeyd\.py}"
 
 PASS=0

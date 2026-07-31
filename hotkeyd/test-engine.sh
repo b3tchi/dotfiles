@@ -31,6 +31,20 @@
 #
 # Sourced, never executed. Callers must have $HERE (the hotkeyd dir) and
 # $HOTKEYD_BIN set before sourcing.
+#
+# HOTKEYD_HAS_BINDS_FLAG below is ONE of three vars a caller must set TOGETHER
+# to select the Go engine — it says how to hand the daemon under test a bind
+# table, but it says nothing about which engine hotkeyd.sh actually STARTS on
+# the launcher-driven stages (test-hotkeyd.sh, test-panic.sh) or what pgrep
+# pattern finds it. Those are separate seams (hotkeyd.sh's own engine_for(),
+# and HOTKEYD_PROC_PAT), and all three must agree or the suite starts one
+# engine while looking for another's argv:
+#   HOTKEYD_ENGINE_DEFAULT=go HOTKEYD_BIN=path/to/hotkeyd \
+#     HOTKEYD_PROC_PAT=hotkeyd HOTKEYD_HAS_BINDS_FLAG=0 ./test-hotkeyd.sh
+# (same four vars for test-panic.sh). HOTKEYD_ENGINE_DEFAULT is read directly
+# by hotkeyd.sh's engine_for() — not by this file — because the launcher
+# resolves the engine per display, independent of how the fixture below hands
+# it a table.
 
 # 1 = the daemon under test accepts `--binds <file>` (hotkeyd.py). 0 = it does
 # not (the Go build). Default 1 so the python path is byte-for-byte what it
