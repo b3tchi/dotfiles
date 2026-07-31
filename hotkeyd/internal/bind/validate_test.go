@@ -440,6 +440,220 @@ func TestValidate_DisplayQualifiedBindCannotEvadeReservedChords(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// R28a-g: an External layer declares NOTHING but the flag — every
+// behavioral field is refused by name, naming the layer AND the offending
+// field (sp023 Task 1, bd dotfiles-1m4t.1, plan decision 1).
+// ---------------------------------------------------------------------------
+
+func TestValidate_R28a_ExternalLayerDeclaresBinds(t *testing.T) {
+	layers := map[string]Layer{
+		"screenshot-drag": {
+			External: true,
+			Binds:    []Bind{{Chord: "h", Actions: []Action{Command("focus left")}}},
+		},
+	}
+	p := Validate(nil, layers, "Mod4")
+	mustHaveProblemContaining(t, p, `layer "screenshot-drag"`)
+	mustHaveProblemContaining(t, p, "Binds")
+}
+
+func TestValidate_R28b_ExternalLayerDeclaresMods(t *testing.T) {
+	layers := map[string]Layer{
+		"screenshot-drag": {
+			External: true,
+			Mods: map[string]Mod{
+				"move": {Modifier: "Ctrl", Binds: []Bind{{Chord: "h", Actions: []Action{Command("move left")}}}},
+			},
+		},
+	}
+	p := Validate(nil, layers, "Mod4")
+	mustHaveProblemContaining(t, p, `layer "screenshot-drag"`)
+	mustHaveProblemContaining(t, p, "Mods")
+}
+
+func TestValidate_R28c_ExternalLayerDeclaresExitKeys(t *testing.T) {
+	layers := map[string]Layer{
+		"screenshot-drag": {External: true, ExitKeys: []string{"q"}},
+	}
+	p := Validate(nil, layers, "Mod4")
+	mustHaveProblemContaining(t, p, `layer "screenshot-drag"`)
+	mustHaveProblemContaining(t, p, "ExitKeys")
+}
+
+func TestValidate_R28d_ExternalLayerDeclaresOneShot(t *testing.T) {
+	layers := map[string]Layer{
+		"screenshot-drag": {External: true, OneShot: true},
+	}
+	p := Validate(nil, layers, "Mod4")
+	mustHaveProblemContaining(t, p, `layer "screenshot-drag"`)
+	mustHaveProblemContaining(t, p, "OneShot")
+}
+
+func TestValidate_R28e_ExternalLayerDeclaresHold(t *testing.T) {
+	// Named explicitly in the task's edge_cases: an external hold layer
+	// would contradict adr0016's ask-the-server lifetime, and the message
+	// must name Hold specifically (not a generic "behavioral field").
+	layers := map[string]Layer{
+		"screenshot-drag": {External: true, Hold: "Ctrl"},
+	}
+	p := Validate(nil, layers, "Mod4")
+	mustHaveProblemContaining(t, p, `layer "screenshot-drag"`)
+	mustHaveProblemContaining(t, p, "Hold")
+}
+
+func TestValidate_R28f_ExternalLayerDeclaresOnHoldRelease(t *testing.T) {
+	layers := map[string]Layer{
+		"screenshot-drag": {
+			External:      true,
+			OnHoldRelease: []Action{Command("confirm")},
+		},
+	}
+	p := Validate(nil, layers, "Mod4")
+	mustHaveProblemContaining(t, p, `layer "screenshot-drag"`)
+	mustHaveProblemContaining(t, p, "OnHoldRelease")
+}
+
+func TestValidate_R28g_ExternalLayerDeclaresOnExit(t *testing.T) {
+	layers := map[string]Layer{
+		"screenshot-drag": {
+			External: true,
+			OnExit:   []Action{Command("cleanup")},
+		},
+	}
+	p := Validate(nil, layers, "Mod4")
+	mustHaveProblemContaining(t, p, `layer "screenshot-drag"`)
+	mustHaveProblemContaining(t, p, "OnExit")
+}
+
+// ---------------------------------------------------------------------------
+// R20 exemption: External layers never need ExitKeys — asserted in BOTH
+// directions so the exemption cannot silently widen to all layers (the
+// task's own mutation-check instruction).
+// ---------------------------------------------------------------------------
+
+func TestValidate_Accept_ExternalLayerBareIsExemptFromR20(t *testing.T) {
+	layers := map[string]Layer{
+		"screenshot-drag": {External: true},
+	}
+	mustBeEmpty(t, Validate(nil, layers, "Mod4"))
+}
+
+func TestValidate_R20_IdenticalShapeWithoutExternalStillTripsR20(t *testing.T) {
+	// The mutation twin: same bare layer shape, minus the flag. If this
+	// ever stops failing R20, the exemption silently widened to every
+	// layer instead of staying scoped to External.
+	layers := map[string]Layer{
+		"screenshot-drag": {},
+	}
+	p := Validate(nil, layers, "Mod4")
+	mustHaveProblemContaining(t, p, "has no exit_keys")
+}
+
+// ---------------------------------------------------------------------------
+// R29: an EnterLayer action cannot target an External layer — external
+// layers are set-layer-only, chord layers stay chord-only (plan decision 3,
+// compile-time half).
+// ---------------------------------------------------------------------------
+
+func TestValidate_R29_EnterLayerTargetsExternalLayer(t *testing.T) {
+	binds := []Bind{{Chord: "$mod+d", Actions: []Action{EnterLayer{Layer: "screenshot-drag"}}}}
+	layers := map[string]Layer{
+		"screenshot-drag": {External: true},
+	}
+	p := Validate(binds, layers, "Mod4")
+	mustHaveProblemContaining(t, p, `enters layer "screenshot-drag"`)
+	mustHaveProblemContaining(t, p, "External")
+}
+
+func TestValidate_EnterLayerTable_ExternalRefused_PersistentAccepted(t *testing.T) {
+	cases := []struct {
+		name       string
+		layerName  string
+		layer      Layer
+		wantProb   bool
+		wantSubstr string
+	}{
+		{
+			name:       "external target refused",
+			layerName:  "screenshot-drag",
+			layer:      Layer{External: true},
+			wantProb:   true,
+			wantSubstr: "External",
+		},
+		{
+			name:      "persistent target accepted",
+			layerName: "nav",
+			layer: Layer{
+				Binds:    []Bind{{Chord: "h", Actions: []Action{Command("focus left")}}},
+				ExitKeys: []string{"q"},
+			},
+			wantProb: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			binds := []Bind{{Chord: "$mod+d", Actions: []Action{EnterLayer{Layer: tc.layerName}}}}
+			layers := map[string]Layer{tc.layerName: tc.layer}
+			p := Validate(binds, layers, "Mod4")
+			if tc.wantProb {
+				mustHaveProblems(t, p)
+				mustHaveProblemContaining(t, p, tc.wantSubstr)
+			} else {
+				mustBeEmpty(t, p)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// R30: a layer named "default" declaring External is refused — the clear
+// verb ("set-layer default") must stay unambiguous.
+// ---------------------------------------------------------------------------
+
+func TestValidate_R30_DefaultNamedLayerDeclaresExternal(t *testing.T) {
+	layers := map[string]Layer{
+		"default": {External: true},
+	}
+	p := Validate(nil, layers, "Mod4")
+	mustHaveProblemContaining(t, p, `"default"`)
+	mustHaveProblemContaining(t, p, "External")
+}
+
+// ---------------------------------------------------------------------------
+// Edge case: an External layer that no bind references at all is VALID —
+// reachability comes from the set-layer verb, not a chord.
+// ---------------------------------------------------------------------------
+
+func TestValidate_Accept_ExternalLayerWithNoReferencingBindIsValid(t *testing.T) {
+	layers := map[string]Layer{
+		"screenshot-drag": {External: true},
+	}
+	mustBeEmpty(t, Validate(nil, layers, "Mod4"))
+}
+
+// Rule messages must be identical under BOTH $mod resolutions — the
+// validator runs per resolution in --check, and a resolution-dependent
+// refusal message would leak which display produced it.
+func TestValidate_NewExternalRules_SameMessageUnderBothModResolutions(t *testing.T) {
+	binds := []Bind{{Chord: "$mod+d", Actions: []Action{EnterLayer{Layer: "screenshot-drag"}}}}
+	layers := map[string]Layer{
+		"screenshot-drag": {External: true, Hold: "Ctrl"},
+		"default":         {External: true},
+	}
+	p4 := Validate(binds, layers, "Mod4")
+	p1 := Validate(binds, layers, "Mod1")
+	if len(p4) != len(p1) {
+		t.Fatalf("problem count differs across resolutions: Mod4=%d Mod1=%d", len(p4), len(p1))
+	}
+	for i := range p4 {
+		if p4[i] != p1[i] {
+			t.Fatalf("problem %d differs across resolutions:\nMod4: %s\nMod1: %s", i, p4[i], p1[i])
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Edge case: chord referencing a layer that does not exist, from a LAYER's
 // own binds (not just the global table) — EnterLayer target checking is
 // shared code (scan), but this proves it fires from within a layer too.

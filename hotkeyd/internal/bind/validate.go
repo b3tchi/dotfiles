@@ -181,13 +181,62 @@ func scan(bs []Bind, where string, layers map[string]Layer, seen map[dupKey]stri
 		}
 		for _, a := range b.Actions {
 			if el, ok := a.(EnterLayer); ok {
-				if _, exists := layers[el.Layer]; !exists {
+				target, exists := layers[el.Layer]
+				if !exists {
 					problems = append(problems, Problem(fmt.Sprintf(
 						"%s: chord %q enters layer %q, which does not exist",
 						where, b.Chord, el.Layer)))
+				} else if target.External {
+					// R29: external-trigger layers are set-layer-only —
+					// chord layers stay chord-only (plan decision 3,
+					// compile-time half).
+					problems = append(problems, Problem(fmt.Sprintf(
+						"%s: chord %q enters layer %q via EnterLayer, but %q "+
+							"is declared External — external-trigger layers "+
+							"can only be entered via the set-layer verb, "+
+							"never a chord",
+						where, b.Chord, el.Layer, el.Layer)))
 				}
 			}
 		}
+	}
+	return problems
+}
+
+// externalProblems refuses every behavioral field an External layer
+// declares, naming both the layer and the offending field so a stray field
+// is refused rather than silently ignored (rule R28, sp023 Task 1, plan
+// decision 1: an external-trigger layer declares nothing but the flag). Not
+// called at all for a non-External layer.
+func externalProblems(name string, layer Layer) []Problem {
+	where := fmt.Sprintf("layer %q", name)
+	var problems []Problem
+	note := func(field string) {
+		problems = append(problems, Problem(fmt.Sprintf(
+			"%s: declared External but also declares %s — an external-trigger "+
+				"layer is signal-only and must declare nothing but the flag",
+			where, field)))
+	}
+	if len(layer.Binds) > 0 {
+		note("Binds")
+	}
+	if len(layer.Mods) > 0 {
+		note("Mods")
+	}
+	if len(layer.ExitKeys) > 0 {
+		note("ExitKeys")
+	}
+	if layer.OneShot {
+		note("OneShot")
+	}
+	if layer.Hold != "" {
+		note("Hold")
+	}
+	if len(layer.OnHoldRelease) > 0 {
+		note("OnHoldRelease")
+	}
+	if len(layer.OnExit) > 0 {
+		note("OnExit")
 	}
 	return problems
 }
@@ -255,6 +304,22 @@ func Validate(binds []Bind, layers map[string]Layer, mod string) []Problem {
 		layer := layers[name]
 		seen := map[dupKey]string{}
 		where := fmt.Sprintf("layer %q", name)
+
+		if layer.External {
+			// R28: an External layer declares nothing but the flag.
+			problems = append(problems, externalProblems(name, layer)...)
+			if name == "default" {
+				// R30: "default" is the clear verb's own target name — a
+				// layer declaring External there would make the clear
+				// verb ambiguous.
+				problems = append(problems, Problem(fmt.Sprintf(
+					"layer %q declares External, but %q is the reserved "+
+						"clear-verb name — an external-trigger layer cannot "+
+						"be named %q",
+					name, name, name)))
+			}
+		}
+
 		problems = append(problems, scan(layer.Binds, where, layers, seen, "", mod, true)...)
 		problems = append(problems, holdProblems(name, layer, mod)...)
 
@@ -280,6 +345,14 @@ func Validate(binds []Bind, layers map[string]Layer, mod string) []Problem {
 		}
 
 		if len(layer.ExitKeys) == 0 {
+			if layer.External {
+				// R20 exemption: an External layer is left the same way it
+				// was entered — the set-layer verb, never a keystroke — so
+				// requiring ExitKeys here would be meaningless. Scoped to
+				// this flag only; see the R20 mutation tests proving the
+				// identical shape WITHOUT External still trips this rule.
+				continue
+			}
 			problems = append(problems, Problem(fmt.Sprintf(
 				"layer %q has no exit_keys — it could not be left", name)))
 			continue

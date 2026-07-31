@@ -165,4 +165,33 @@ type Layer struct {
 	// per layer). Not itself checked by Validate — binds.py's validator
 	// does not inspect on_exit either.
 	OnExit []Action
+
+	// External marks a fifth, SIGNAL-ONLY layer shape: an external-trigger
+	// layer with no chord binding at all, reachable only through the
+	// `set-layer` CLI/socket verb (sp023, [[us019]] AC4) instead of a
+	// keystroke — e.g. a screenshot overlay process signalling its own
+	// drag phase. An External layer declares NOTHING but this flag: no
+	// Binds, Mods, ExitKeys, OneShot, Hold, OnHoldRelease, or OnExit —
+	// Validate rejects any of those by name (rule R28), naming both the
+	// layer and the offending field, so a stray behavioral field is
+	// refused rather than silently ignored. It holds zero grabs and does
+	// not shadow the global bind table while active — a signal costs
+	// pixels, never keys, so a STRANDED external layer (the process that
+	// was supposed to clear it dies) leaves the session fully usable.
+	// Exempt from rule R20 (a layer with no ExitKeys could never be left):
+	// an External layer is left the same way it was entered, by the verb
+	// (`set-layer default`), never by a keystroke, so requiring ExitKeys
+	// here would be meaningless — the exemption is scoped to this flag
+	// only, never to layers in general (see Validate's R20 mutation
+	// tests). Cannot be targeted by EnterLayer (rule R29) or be named
+	// "default" (rule R30, the clear verb must stay unambiguous).
+	//
+	// This is a narrow, NAMED exception to [[adr0012]]'s read-only-consumer
+	// framing for the daemon's state channel — the state socket itself
+	// still never reads client bytes; the new write surface is one
+	// separate control socket, and it only ever accepts a name declared
+	// External here at compile time, never an arbitrary layer. Every
+	// other layer shape keeps adr0012's framing exactly as before.
+	// false — the zero value — is every layer that exists today.
+	External bool
 }

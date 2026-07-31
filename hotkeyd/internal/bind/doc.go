@@ -52,12 +52,30 @@
 // [[us020]]) — binds.py has no display qualifier yet (us020 is still
 // `status: draft`), so there is no Python source line to cite for it.
 //
-// Total: 35 named tests in this package's *_test.go files, rule id in each
-// test name (grep `func Test.*_R[0-9]` to enumerate). This is DIFFERENT from
-// the task's stated "42" — the discrepancy and the full branch-by-branch
-// working is recorded in this task's bd notes rather than re-litigated here,
-// since a doc comment is not the place to re-derive it every time someone
-// reads the package.
+// Three further rules (28-30) are also NOT from binds.py: they validate the
+// External declaration kind [[sp023]] Task 1 (bd dotfiles-1m4t.1) adds —
+// a signal-only layer entered via a new `set-layer` verb instead of a
+// chord, with no Python source line to cite since binds.py has no such
+// concept. Rule 28 (an External layer declaring a behavioral field) is
+// expanded into 7 named per-field tests (28a-28g), one per field the task's
+// own success_criteria enumerates, because the edge_cases explicitly
+// require Hold to be named on its own in the message ([[adr0016]]'s
+// ask-the-server hold lifetime) rather than folded into a generic
+// "behavioral field" rejection. Rule 29 (EnterLayer targeting an External
+// layer) and rule 30 (a layer named "default" declaring External) are each
+// one named test — 9 new tests total for rules 28-30. Rule 20 (a layer with
+// no ExitKeys) also gains a SECOND test for the same task: the identical
+// bare-layer shape WITHOUT External still trips it, proving the new R28
+// exemption stayed scoped to the flag rather than silently widening to
+// every layer (the task's own mutation-check instruction) — 1 more test
+// under an existing rule, not a new rule.
+//
+// Total: 45 named tests in this package's *_test.go files, rule id in each
+// test name (grep `func Test.*_R[0-9]` to enumerate). The 35-rule figure is
+// DIFFERENT from binds.py task's stated "42" — the discrepancy and the full
+// branch-by-branch working is recorded in that task's bd notes rather than
+// re-litigated here, since a doc comment is not the place to re-derive it
+// every time someone reads the package.
 //
 // Rule id : binds.py site : Go site : one-line description
 //
@@ -88,7 +106,7 @@
 //	R17 : binds.py:320-321 : holdProblems          : OnHoldRelease Command action is empty/whitespace
 //	R18 : binds.py:322-323 : holdProblems          : OnHoldRelease Run action has an empty/whitespace cmd
 //	R19 : binds.py:500-501 : Validate (sublayer)   : a Mod sublayer's Modifier field is unknown
-//	R20 : binds.py:505-507 : Validate (layer)      : a layer declares no ExitKeys (could never be left)
+//	R20 : binds.py:505-507 : Validate (layer)      : a layer declares no ExitKeys (could never be left); exempt when Layer.External is set (rule 28)
 //	R21 : binds.py:102     : Validate (exit key)   : exit key chord is empty
 //	R22 : binds.py:106     : Validate (exit key)   : exit key chord has no key after the last '+'
 //	R23 : binds.py:111-113 : Validate (exit key)   : exit key chord is a bare multi-digit keycode
@@ -96,6 +114,9 @@
 //	R25 : binds.py:124-126 : Validate (exit key)   : exit key chord has an unknown keysym
 //	R26 : binds.py:515-524 : Validate (exit key)   : exit key carries a modifier (must be a bare keysym)
 //	R27 : (new, no Python site) : canonDisplayMod  : DisplayMod is set to an unrecognised modifier name
+//	R28 : (new, no Python site) : externalProblems : an External layer declares a behavioral field (Binds/Mods/ExitKeys/OneShot/Hold/OnHoldRelease/OnExit)
+//	R29 : (new, no Python site) : scan (EnterLayer) : an EnterLayer action targets a layer declared External
+//	R30 : (new, no Python site) : Validate (layer)  : a layer named "default" declares External
 //
 // # Display qualifier (us020, day-one design constraint)
 //
