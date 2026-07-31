@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"os"
@@ -112,9 +113,9 @@ func (s *Server) Handler() http.Handler {
 	return s.previewRouter(mux)
 }
 
-// noCache stops the browser caching the shell/app.js assets so a rebuilt
-// daemon's updated static files show on a normal refresh (akm-graph
-// noCache precedent).
+// noCache stops the browser caching the embedded static assets (the STL
+// viewer bundle, currently) so a rebuilt daemon's updated files show on a
+// normal refresh (akm-graph noCache precedent).
 func noCache(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
@@ -174,7 +175,7 @@ func (s *Server) handlePreview(n int, w http.ResponseWriter, r *http.Request) {
 			s.handlePreviewWS(n, w, r)
 			return
 		}
-		s.handlePreviewShell(w, r)
+		s.handlePreviewInfo(n, w, r)
 	case http.MethodPost:
 		s.handlePreviewSet(n, w, r)
 	default:
@@ -183,20 +184,23 @@ func (s *Server) handlePreview(n int, w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handlePreviewShell serves the static shell page for a plain (non-ws) GET
-// /preview<N>. The shell is slot-agnostic HTML/JS: it discovers which slot
-// it belongs to client-side from window.location.pathname (sp008 Task 4
-// success criteria: shell opens a websocket and loads the current
-// /file/<path>).
-func (s *Server) handlePreviewShell(w http.ResponseWriter, r *http.Request) {
-	raw, err := fs.ReadFile(s.static, "shell.html")
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	_, _ = w.Write(raw)
+// handlePreviewInfo serves a plain (non-ws) GET /preview<N>: slot n's
+// current state as JSON — {slot, path, type} — replacing the static shell
+// page the wry host used to load (sp022 Task 3 success criteria: "the
+// shell moves into QML; static files delete in Task 8" — Task 8 is where
+// that static shell page and its script were actually deleted).
+// PreviewView.qml (T4) discovers a slot's initial state either through this
+// route or through the ws priming frame handlePreviewWS already sends on
+// connect — both carry the identical {path, type} pair via
+// classifyStoredPath, so a client observes the same state whichever path it
+// used to learn it.
+func (s *Server) handlePreviewInfo(n int, w http.ResponseWriter, r *http.Request) {
+	path := s.slots.CurrentPath(n)
+	writeJSON(w, map[string]any{
+		"slot": n,
+		"path": path,
+		"type": classifyStoredPath(s.root, path),
+	})
 }
 
 // slotPathIsAkm classifies a slot's stored root-relative path p as an akm
@@ -216,6 +220,33 @@ func slotPathIsAkm(root, p string) bool {
 		return false
 	}
 	return isAkmZettel(root, resolved)
+}
+
+// classifyStoredPath classifies a slot's stored root-relative path p for
+// the /preview<N> websocket broadcast/priming payload's "type" field (sp022
+// Task 2). classifyPath (render.go) expects the ABSOLUTE resolveInRoot
+// output, not the root-relative form SlotManager stores, so p is resolved
+// back through resolveInRoot first — the same pattern slotPathIsAkm above
+// already uses for the akm-transition classification.
+//
+// An empty p (no path ever set for the slot) and any resolve failure
+// degrade to "none" rather than propagating an error: "none" is the exact
+// safe-fallback value classifyPath itself returns for an unclassifiable
+// path, so a path that was deleted between being stored and being
+// classified here (sp022 Task 2 edge case) produces the same client-visible
+// result as a path chroma/the image/video/stl/markdown/html detectors never
+// recognised in the first place — the broadcast still goes out, and the
+// client shows its fallback tier, rather than the send being silently
+// skipped or erroring.
+func classifyStoredPath(root, p string) string {
+	if p == "" {
+		return "none"
+	}
+	resolved, err := resolveInRoot(root, p)
+	if err != nil {
+		return "none"
+	}
+	return classifyPath(root, resolved)
 }
 
 // handlePreviewSet handles POST /preview<N> {"path": "..."}: it sets slot
@@ -304,7 +335,7 @@ func (s *Server) handlePreviewSet(n int, w http.ResponseWriter, r *http.Request)
 	// behavior rather than leaving a dead preview with no visible update
 	// at all (sp011 Task 3 success criteria).
 	if !(oldAkm && newAkm) || highlightErr != nil {
-		s.slots.Hub(n).Broadcast(redrawMessage(p))
+		s.slots.Hub(n).Broadcast(redrawMessage(p, classifyStoredPath(s.root, p)))
 	}
 
 	writeJSON(w, map[string]any{"slot": n, "path": p})
@@ -328,7 +359,7 @@ func (s *Server) handlePreviewWS(n int, w http.ResponseWriter, r *http.Request) 
 
 	if path := s.slots.CurrentPath(n); path != "" {
 		select {
-		case c.send <- redrawMessage(path):
+		case c.send <- redrawMessage(path, classifyStoredPath(s.root, path)):
 		default:
 		}
 	}
@@ -451,32 +482,107 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 		renderVideoLive(w, reqPath)
 		return
 	}
-	// sp008 Task 7 (DEVIATION flagged per task instructions, same pattern as
-	// Task 8's ?live special-case immediately above): a .d2 file or an akm
-	// zettel (docs/notes/**.md) resolves to an iframe embed of ft002/ft004
-	// respectively, rather than the plain code/markdown render the switch
-	// below would otherwise give it. Special-cased here, before the
-	// renderFile dispatch, because renderD2Embed needs the resolved abs path
-	// (to ask d2-router's /api/resolve which URL serves it) and
-	// renderAkmEmbed needs s.root (to spawn akm-graph-d with the matching
-	// --root) — neither is available inside renderFile's signature
-	// (path.go/render.go's dispatcher only ever receives the resolved
-	// filesystem path), the exact same constraint that put the ?live case
-	// here instead of inside renderFile.
+	// sp022 Task 3: a .d2 file's response — default AND ?native alike, svg
+	// has exactly one payload shape — is now the compiled SVG bytes relayed
+	// from [[ft002]]'s GET /api/svg, replacing the cross-origin <iframe>
+	// embed of d2-router's own live-watch page (renderD2Embed/resolveD2URL,
+	// deleted). Special-cased here, before both the renderFile dispatch AND
+	// the ?native switch below, because relayD2SVG needs the resolved abs
+	// path to forward as ft002's ?path query — the same constraint that put
+	// the akm/?live special-cases here originally.
 	if isD2Ext(resolved) {
-		renderD2Embed(w, resolved)
+		relayD2SVG(w, resolved)
 		return
 	}
+	// sp008 Task 7 (DEVIATION flagged per task instructions, same pattern as
+	// Task 8's ?live special-case above): an akm zettel (docs/notes/**.md)
+	// resolves to an iframe embed of ft004 rather than the plain markdown
+	// render the switch below would otherwise give it. Special-cased here,
+	// before the renderFile dispatch, because renderAkmEmbed needs s.root
+	// (to spawn akm-graph-d with the matching --root) — not available
+	// inside renderFile's signature (path.go/render.go's dispatcher only
+	// ever receives the resolved filesystem path).
 	if isAkmZettel(s.root, resolved) {
 		renderAkmEmbed(w, s.root, parseSlotQuery(r))
 		return
 	}
+
+	// sp022 Task 3: ?native selects the Qt-native-tier payload for the
+	// three classified types that have one — md, code, html (ft005
+	// api_surface /file/<path> rows). Every other type (image, video, stl,
+	// none; svg and akm are already dispatched above and never reach this
+	// switch) has no native payload and falls straight through to the
+	// EXACT SAME renderFile call below as if ?native were absent — "no
+	// behavior change without a matching native payload anywhere" (success
+	// criteria).
+	if r.URL.Query().Has("native") {
+		switch classifyPath(s.root, resolved) {
+		case "md":
+			if src, truncated, ok := readNativeTextPayload(w, resolved); ok {
+				renderMarkdownNative(w, src, truncated)
+			}
+			return
+		case "code":
+			if src, truncated, ok := readNativeTextPayload(w, resolved); ok {
+				renderCodeNative(w, resolved, src, truncated)
+			}
+			return
+		case "html":
+			serveHTMLNative(w, resolved)
+			return
+		}
+	}
+
 	// sp008 Task 3: ?full selects the full-res tier (image row of the ft005
 	// api_surface); its presence, not its value, is what matters (e.g.
 	// "?full" or "?full=1" both count). Minimal, necessary one-line
 	// passthrough — the query lives only on r, which render.go's dispatch
 	// has no other way to see.
 	renderFile(w, resolved, r.URL.Query().Has("full"))
+}
+
+// readNativeTextPayload stats resolved and reads it capped (readCapped,
+// render.go) — the shared stat+read step behind both the "md" and "code"
+// ?native branches above. On any I/O failure it writes the 500 response
+// itself and returns ok=false so the caller returns immediately without
+// double-writing a response (sp008-wide anti-pattern: no panic, no writing
+// past a failed read).
+func readNativeTextPayload(w http.ResponseWriter, resolved string) (src []byte, truncated bool, ok bool) {
+	fi, err := os.Stat(resolved)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return nil, false, false
+	}
+	src, truncated, err = readCapped(resolved, fi.Size())
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return nil, false, false
+	}
+	return src, truncated, true
+}
+
+// serveHTMLNative serves the GET /file/<path>?native payload for a
+// classified "html" file (sp022 Task 3 success criteria): the raw file
+// bytes as text/html, unmodified — no goldmark, no chroma, since the
+// content already IS what the client wants to render. Streamed the same
+// way serveOriginalImage/serveOriginalVideo stream their full-res bytes: no
+// re-encoding, no size cap (an .html file is trusted repo/local content,
+// same trust level as an image's ?full byte-stream).
+func serveHTMLNative(w http.ResponseWriter, resolved string) {
+	f, err := os.Open(resolved)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Length", strconv.FormatInt(fi.Size(), 10))
+	_, _ = io.Copy(w, f)
 }
 
 // parseSlotQuery reads the optional ?slot=N query parameter off r (sp009

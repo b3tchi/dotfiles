@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -107,27 +109,29 @@ func (s *Server) handleOpen(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"opened": resolved})
 }
 
-// ── akm/d2 iframe embed + lazy-spawn (sp008 Task 7; revised by adr0009) ─────
+// ── akm iframe embed + lazy-spawn (sp008 Task 7; revised by adr0009) ───────
 //
-// BOTH akm zettels and .d2 files embed their backing daemon as a plain
-// cross-origin <iframe> — renderAkmEmbed points at akm-graph, renderD2Embed
-// at d2-router's resolved URL. preview-d proxies neither.
+// An akm zettel embeds akm-graph as a plain cross-origin <iframe> —
+// renderAkmEmbed points directly at its resolved URL. preview-d proxies
+// nothing.
 //
-// sp008 Task 7 originally routed .d2 through a same-origin /d2embed/ proxy
-// that stripped frame-blocking headers, because poc006 flagged d2-router's
-// `d2 --watch` page as never run-tested for them. Running it finally
-// (dotfiles-ars) settled both halves of that guess, in opposite directions:
-// the page emits NO frame-blocking headers, so the proxy defended against
-// nothing — while the proxy itself BROKE the embed. `d2 --watch` serves an
-// empty #d2-svg-container and pushes the SVG over a websocket watch.js opens
-// at a root-relative /{project}/{file}/watch, next to root-relative
-// /{project}/{file}/static/* assets. Fronting only the document left both
-// resolving against preview-d, which serves neither, so the diagram rendered
-// blank with no error at all.
+// sp008 Task 7 originally routed .d2 the same way, through a same-origin
+// /d2embed/ proxy that stripped frame-blocking headers, because poc006
+// flagged d2-router's `d2 --watch` page as never run-tested for them.
+// Running it finally (dotfiles-ars) settled both halves of that guess, in
+// opposite directions: the page emits NO frame-blocking headers, so the
+// proxy defended against nothing — while the proxy itself BROKE the embed.
+// `d2 --watch` serves an empty #d2-svg-container and pushes the SVG over a
+// websocket watch.js opens at a root-relative /{project}/{file}/watch, next
+// to root-relative /{project}/{file}/static/* assets. Fronting only the
+// document left both resolving against preview-d, which serves neither, so
+// the diagram rendered blank with no error at all.
 //
-// Proxying the document alone cannot work, and proxying the rest would mean
-// carrying d2-router's whole asset + websocket surface — exactly what
-// poc006 warned against. The origin has to be d2-router's own. See adr0009.
+// sp022 Task 3 removes .d2 from this iframe world entirely: it now relays
+// compiled SVG bytes from ft002's GET /api/svg (see relayD2SVG below,
+// proxy.go's other half) instead of embedding d2-router's live-watch page at
+// all — the QML native tier (T4) paints an <Image>/QtSvg, not a browser
+// frame, so there is no iframe to defend or break for this type anymore.
 
 // daemonHealthTimeout bounds a single /api/status health probe so a
 // half-dead daemon (accepting TCP but never responding) can't stall a
@@ -371,39 +375,76 @@ func appendSlotQuery(src string, slot int) string {
 	return u.String()
 }
 
-// renderD2Embed serves the /file/<path> response for a .d2 file: a page
-// embedding an <iframe> pointed DIRECTLY at d2-router's own resolved URL,
-// the same plain cross-origin embed renderAkmEmbed uses (adr0009).
+// d2SVGRelayTimeout bounds the /api/svg round-trip preview-d makes to
+// [[ft002]] when relaying a .d2 file's compiled SVG bytes (sp022 Task 3).
+// Generous relative to daemonHealthTimeout/highlightForwardTimeout because
+// ft002's own /api/svg handler already bounds a first-compile wait up to its
+// own svgPollDeadline (3s, d2/router/api.go) before ever answering — this
+// client timeout must comfortably exceed that INNER wait, not race it.
+const d2SVGRelayTimeout = 5 * time.Second
+
+// relayD2SVG serves the /file/<path> response for a .d2 file — BOTH the
+// default (no-?native) response and the ?native one, since svg has exactly
+// one payload shape (sp022 Task 3) — as the compiled SVG bytes relayed from
+// [[ft002]]'s GET /api/svg?path=<abs>, replacing the cross-origin <iframe>
+// embed of d2-router's own live-watch page renderD2Embed used to serve
+// (deleted; adr0009 narrows further — .d2 is no longer a peer-embed case at
+// all). d2-router's child/watch/recompile machinery is reused as-is: this
+// is a plain HTTP GET forwarding absPath (already root-validated by
+// handleFile's resolveInRoot call) as the query, nothing more.
 //
-// The origin is the whole point. `d2 --watch` serves an empty
-// #d2-svg-container and pushes the SVG over a websocket watch.js opens at a
-// root-relative /{project}/{file}/watch, alongside root-relative
-// /{project}/{file}/static/* assets. Every one of those resolves against the
-// iframe's own origin, so only d2-router can answer them. Fronting the
-// document with a preview-d proxy left the assets and the socket pointed at
-// preview-d, which served neither — the page loaded and the diagram rendered
-// blank, with no error anywhere (dotfiles-ars).
+// absPath must be the already-root-validated filesystem path, the same
+// precondition renderAkmEmbed's resolved-path argument carries.
 //
-// absPath must be the already-root-validated filesystem path (handleFile
-// resolves it through resolveInRoot before dispatching here), since it is
-// handed straight to d2-router's /api/resolve.
-func renderD2Embed(w http.ResponseWriter, absPath string) {
+// ft002's own status codes are honoured across the relay: 404 (path outside
+// every registered project) passes straight through as 404 — a
+// client-visible "this .d2 isn't tracked", not a server failure (sp022 Task
+// 3 edge case). Every OTHER failure — ensureD2RouterRunning never settling,
+// a network error making the request, a body read failure, or any other
+// non-200/404 status — maps to 502 with a plain-text cause, a deliberate
+// departure from render.go's "never error, always 200" idiom: that idiom
+// exists so a broken iframe never shows a dead page to a browser fallback,
+// but this route also feeds the QML native fetch (T4), which needs a real
+// failure status to detect and show its own fallback tier rather than
+// silently treating an empty 200 body as a valid diagram (sp022 Task 3
+// success criteria: "a deliberate, documented deviation ... which exists
+// for iframe display, not native fetches").
+func relayD2SVG(w http.ResponseWriter, absPath string) {
 	if err := ensureD2RouterRunning(); err != nil {
-		renderBackendUnavailable(w, "d2-router", err)
+		http.Error(w, "d2-router relay failed: "+err.Error(), http.StatusBadGateway)
 		return
 	}
-	src, err := resolveD2URL(absPath)
+
+	client := http.Client{Timeout: d2SVGRelayTimeout}
+	q := url.Values{"path": {absPath}}
+	resp, err := client.Get("http://127.0.0.1:" + d2RouterPort() + "/api/svg?" + q.Encode())
 	if err != nil {
-		renderBackendUnavailable(w, "d2-router", err)
+		http.Error(w, "d2-router relay failed: "+err.Error(), http.StatusBadGateway)
 		return
 	}
-	writeIframeEmbed(w, src)
+	defer resp.Body.Close()
+
+	body, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		http.Error(w, "d2-router relay failed: "+readErr.Error(), http.StatusBadGateway)
+		return
+	}
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		w.Header().Set("Content-Type", "image/svg+xml")
+		_, _ = w.Write(body)
+	case http.StatusNotFound:
+		http.Error(w, "not found", http.StatusNotFound)
+	default:
+		http.Error(w, fmt.Sprintf("d2-router relay failed: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body))), http.StatusBadGateway)
+	}
 }
 
 // writeIframeEmbed serves a minimal full-viewport HTML wrapper embedding an
-// <iframe> at src — shared by renderAkmEmbed and renderD2Embed, the only
-// difference between them being whether src is cross-origin (akm) or a
-// preview-d-owned proxy route (d2).
+// <iframe> at src — renderAkmEmbed's cross-origin embed of akm-graph's own
+// URL. The .d2 counterpart (renderD2Embed) is gone as of sp022 Task 3: a
+// .d2 file's response is now relayD2SVG's relayed bytes, not an iframe.
 func writeIframeEmbed(w http.ResponseWriter, src string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprintf(w, `<!DOCTYPE html><html><head><meta charset="utf-8"></head>`+
@@ -411,28 +452,4 @@ func writeIframeEmbed(w http.ResponseWriter, src string) {
 		`<iframe src="%s" style="position:fixed;inset:0;width:100%%;height:100%%;border:0" title="embedded preview"></iframe>`+
 		`</body></html>`,
 		html.EscapeString(src))
-}
-
-// resolveD2URL asks the (already-healthy) d2-router daemon which URL serves
-// absPath, via ft002's GET /api/resolve?path=<abs> (ft002 api_surface:
-// "map an absolute file path to its route"). Bounded by daemonHealthTimeout
-// — this is a single fast local API call, not a page render.
-func resolveD2URL(absPath string) (string, error) {
-	client := http.Client{Timeout: daemonHealthTimeout}
-	q := url.Values{"path": {absPath}}
-	resp, err := client.Get("http://127.0.0.1:" + d2RouterPort() + "/api/resolve?" + q.Encode())
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("d2-router resolve: status %d", resp.StatusCode)
-	}
-	var body struct {
-		URL string `json:"url"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return "", err
-	}
-	return body.URL, nil
 }

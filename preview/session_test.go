@@ -6,6 +6,25 @@ import (
 	"testing"
 )
 
+// TestRedrawMessageCarriesPathAndType proves the sp022 Task 2 wire-shape
+// widening: redrawMessage marshals BOTH path and the classified type into
+// the /preview<N> websocket frame, {"path":...,"type":...} — the contract
+// T4's QML client switches its render tier on.
+func TestRedrawMessageCarriesPathAndType(t *testing.T) {
+	raw := redrawMessage("diagram.d2", "svg")
+
+	var got redrawMsg
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode redrawMessage output: %v", err)
+	}
+	if got.Path != "diagram.d2" {
+		t.Errorf("Path = %q, want diagram.d2", got.Path)
+	}
+	if got.Type != "svg" {
+		t.Errorf("Type = %q, want svg", got.Type)
+	}
+}
+
 // --- Hub broadcast / slow-client drop (ported akm-graph watch_test.go
 // pattern — sp008 Task 4 plan: "ws hub uses a bounded send buffer and drops
 // slow clients") ------------------------------------------------------------
@@ -86,7 +105,7 @@ func TestSlotManagerIndependentHubs(t *testing.T) {
 	// per-slot Hub broadcast). Exercises the same primitives rather than the
 	// removed SetPath convenience.
 	sm.SwapPath(2, "c.md")
-	sm.Hub(2).Broadcast(redrawMessage("c.md"))
+	sm.Hub(2).Broadcast(redrawMessage("c.md", "md"))
 
 	select {
 	case msg := <-c2.send:
@@ -96,6 +115,9 @@ func TestSlotManagerIndependentHubs(t *testing.T) {
 		}
 		if got.Path != "c.md" {
 			t.Errorf("slot 2 client got path %q, want c.md", got.Path)
+		}
+		if got.Type != "md" {
+			t.Errorf("slot 2 client got type %q, want md (sp022 Task 2: redrawMsg carries type)", got.Type)
 		}
 	default:
 		t.Fatal("slot 2 client received nothing after SwapPath + broadcast")

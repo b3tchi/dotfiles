@@ -10,12 +10,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -42,6 +45,14 @@ func TestMain(m *testing.M) {
 //     that records LastError in children.go)
 func runTestHelperProcess() {
 	args := os.Args[1:]
+
+	// sp022 Task 1: when set, record the exact argv this process was spawned
+	// with, so spawn-args tests can assert the explicit svg output path is
+	// present without needing a real d2 binary to inspect.
+	if argvFile := os.Getenv("D2_ROUTER_TEST_ARGV_FILE"); argvFile != "" {
+		_ = os.WriteFile(argvFile, []byte(strings.Join(args, "\x00")), 0o644)
+	}
+
 	port := ""
 	crash := false
 	crashAfterReady := false
@@ -109,6 +120,13 @@ func helperBin(t *testing.T) string {
 // helperEnv returns the env for re-execution as the test helper.
 func helperEnv() []string {
 	return append(os.Environ(), "D2_ROUTER_TEST_HELPER=1")
+}
+
+// helperEnvWithArgvCapture is helperEnv plus a request that the helper record
+// its exact argv (NUL-joined) to argvFile — used by spawn-args tests to
+// verify the explicit svg output path children.go now passes (sp022 Task 1).
+func helperEnvWithArgvCapture(argvFile string) []string {
+	return append(helperEnv(), "D2_ROUTER_TEST_ARGV_FILE="+argvFile)
 }
 
 // makeHelperConfig builds a config where D2Bin points to this test binary.
@@ -639,8 +657,8 @@ func newCrashAfterReadyManager(t *testing.T, cfg config) *crashChildManager {
 
 // Silence unused-import warnings for packages used only indirectly.
 var (
-	_ = atomic.Int32{}   // sync/atomic — used in concurrent tests
-	_ = exec.Command     // os/exec — used via helperBin
+	_ = atomic.Int32{}     // sync/atomic — used in concurrent tests
+	_ = exec.Command       // os/exec — used via helperBin
 	_ = context.Background // context — used in StartReaper
 )
 
@@ -711,4 +729,328 @@ func TestReaperKeepsChildWhoseFileExists(t *testing.T) {
 		t.Errorf("busy child with a present file was reaped — live preview would die")
 	}
 	_ = m.Stop(key)
+}
+
+// ── sp022 Task 1: explicit svg output path (dotfiles-eq8) ──────────────────
+
+// TestSvgOutputPath table-tests the pure path-computation helper: basename
+// (extension swapped to .svg, not appended), project subdir, and mkdir.
+func TestSvgOutputPath(t *testing.T) {
+	cacheDir := t.TempDir()
+
+	tests := []struct {
+		name     string
+		project  string
+		absPath  string
+		wantBase string
+	}{
+		{"simple", "proj", "/x/board.d2", "board.svg"},
+		{"path with spaces", "proj", "/x/my board.d2", "my board.svg"},
+		{"nested source dir", "proj", "/a/b/c/diagram.d2", "diagram.svg"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := svgOutputPath(cacheDir, tc.project, tc.absPath)
+			if err != nil {
+				t.Fatalf("svgOutputPath: %v", err)
+			}
+
+			wantDir := filepath.Join(cacheDir, tc.project)
+			if filepath.Dir(got) != wantDir {
+				t.Errorf("dir: want %q, got %q", wantDir, filepath.Dir(got))
+			}
+			if filepath.Base(got) != tc.wantBase {
+				t.Errorf("basename: want %q, got %q", tc.wantBase, filepath.Base(got))
+			}
+			if info, err := os.Stat(wantDir); err != nil || !info.IsDir() {
+				t.Errorf("expected cache dir %q to be created by svgOutputPath, stat err: %v", wantDir, err)
+			}
+		})
+	}
+}
+
+// TestSvgOutputPath_neverBesideSource is the direct dotfiles-eq8 regression
+// guard: the computed path must never share a directory with the source
+// file, for any cacheDir including a misconfigured empty one (which falls
+// back to os.TempDir(), never the source's own directory).
+func TestSvgOutputPath_neverBesideSource(t *testing.T) {
+	srcDir := t.TempDir()
+	absPath := filepath.Join(srcDir, "board.d2")
+
+	for _, cacheDir := range []string{t.TempDir(), ""} {
+		got, err := svgOutputPath(cacheDir, "proj", absPath)
+		if err != nil {
+			t.Fatalf("svgOutputPath(cacheDir=%q): %v", cacheDir, err)
+		}
+		if filepath.Dir(got) == srcDir {
+			t.Errorf("svgOutputPath(cacheDir=%q) = %q — lands beside the source dir %q (dotfiles-eq8 regression)",
+				cacheDir, got, srcDir)
+		}
+	}
+}
+
+// TestSpawnLocked_ExplicitSVGOutputPath is the test_plan's "spawn-args"
+// test: it spawns a real (fake-d2) child and asserts (a) the actual argv the
+// process received contains the explicit output path, and (b) no sibling
+// *.svg appears beside the source file — the two halves of the dotfiles-eq8
+// closure (explicit arg passed + repo write gone).
+func TestSpawnLocked_ExplicitSVGOutputPath(t *testing.T) {
+	srcDir := t.TempDir()
+	filePath := filepath.Join(srcDir, "board.d2")
+	if err := os.WriteFile(filePath, []byte("x -> y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cacheDir := t.TempDir()
+	argvFile := filepath.Join(t.TempDir(), "argv.txt")
+
+	cfg := makeHelperConfig(t, freePort(t))
+	cfg.SvgCacheDir = cacheDir
+	m := NewChildManager(cfg, helperEnvWithArgvCapture(argvFile))
+	defer m.StopAll()
+
+	key := "proj/board.d2"
+	ch, err := m.Ensure(key, filePath)
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+
+	wantDir := filepath.Join(cacheDir, "proj")
+	if filepath.Dir(ch.SVGPath) != wantDir {
+		t.Errorf("Child.SVGPath dir: want %q, got %q", wantDir, filepath.Dir(ch.SVGPath))
+	}
+	if filepath.Dir(ch.SVGPath) == srcDir {
+		t.Errorf("Child.SVGPath %q is beside the source — dotfiles-eq8 regression", ch.SVGPath)
+	}
+
+	// The helper process writes its argv once it starts; give it a brief
+	// moment (it does this before opening the listener the readiness probe
+	// waits on, but Ensure's return already implies the port opened, so the
+	// write is long done — this is just defensive against filesystem lag).
+	var argvBytes []byte
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		argvBytes, err = os.ReadFile(argvFile)
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("read argv capture %s: %v", argvFile, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	argv := strings.Split(string(argvBytes), "\x00")
+	found := false
+	for _, a := range argv {
+		if a == ch.SVGPath {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("spawned argv %v does not contain the explicit output path %q", argv, ch.SVGPath)
+	}
+
+	// dotfiles-eq8 regression guard: no sibling *.svg beside the source.
+	matches, _ := filepath.Glob(srcDir + "/*.svg")
+	if len(matches) != 0 {
+		t.Errorf("found sibling svg(s) beside source: %v — dotfiles-eq8 regression", matches)
+	}
+	_ = m.Stop(key)
+}
+
+// ── Empty-source diagnostics (dotfiles-sytg) ─────────────────────────────────
+
+// TestSourceHasNoStatements pins the classifier against the three source
+// shapes d2 v0.7.1 silently declines to compile (verified against the real
+// binary: no output file, exit 0, empty stdout and stderr) versus sources it
+// does compile.
+func TestSourceHasNoStatements(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{"zero bytes", "", true},
+		{"whitespace only", "   \n\n\t\n  ", true},
+		{"comments only", "# a note\n#another\n", true},
+		{"comments and blanks", "\n# a note\n\n\t# more\n", true},
+		{"one statement", "x -> y", false},
+		{"statement after comment", "# heading\nx -> y\n", false},
+		{"indented statement", "  x -> y\n", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := filepath.Join(t.TempDir(), "s.d2")
+			if err := os.WriteFile(p, []byte(tc.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if got := sourceHasNoStatements(p); got != tc.want {
+				t.Errorf("sourceHasNoStatements(%q) = %v, want %v", tc.content, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSourceHasNoStatements_unreadable: an unreadable file is a different
+// failure and must not be reported as "empty" — claiming emptiness for it
+// would be the same class of misleading diagnostic this code removes.
+func TestSourceHasNoStatements_unreadable(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does-not-exist.d2")
+	if sourceHasNoStatements(missing) {
+		t.Error("a missing file must not be classified as statement-less")
+	}
+}
+
+// TestEmptySourceErr_reReadsSource is the staleness guarantee. A child spawned
+// on an empty file keeps running while the user types into it, and /api/svg
+// consults Child.LastError on every failed fetch — so the message must be
+// computed at read time, not frozen at spawn time. A cached "file is empty"
+// surviving after the file gained content would be its own misleading claim.
+func TestEmptySourceErr_reReadsSource(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "growing.d2")
+	if err := os.WriteFile(p, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := &emptySourceErr{path: p}
+
+	if !strings.Contains(err.Error(), "no d2 statements") {
+		t.Errorf("while empty: want the empty-source cause, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), p) {
+		t.Errorf("while empty: message must name the file, got %q", err.Error())
+	}
+
+	// User types into the file.
+	if err2 := os.WriteFile(p, []byte("x -> y\n"), 0o644); err2 != nil {
+		t.Fatal(err2)
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "no d2 statements") {
+		t.Errorf("after the file gained content, the message went stale: %q", msg)
+	}
+	if !strings.Contains(msg, "no svg compiled yet") {
+		t.Errorf("after the file gained content: want the not-yet-compiled message, got %q", msg)
+	}
+
+	// File removed entirely → a read error, not an emptiness claim.
+	if err3 := os.Remove(p); err3 != nil {
+		t.Fatal(err3)
+	}
+	if msg := err.Error(); !strings.Contains(msg, "cannot read source") {
+		t.Errorf("after removal: want a read error, got %q", msg)
+	}
+}
+
+// TestSpawnRecordsEmptySourceOnChild: spawning on a statement-less source
+// records the cause on the Child so /api/svg's existing LastError-preferring
+// branch surfaces it, and spawning on a real source records nothing. The
+// child is spawned either way — d2 --watch must stay live so it compiles as
+// soon as the user adds a statement.
+func TestSpawnRecordsEmptySourceOnChild(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		content   string
+		wantError bool
+	}{
+		{"empty source", "", true},
+		{"real source", "x -> y\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := makeHelperConfig(t, freePort(t))
+			cfg.SvgCacheDir = t.TempDir()
+			m := NewChildManager(cfg, helperEnv())
+			defer m.StopAll()
+
+			dir := t.TempDir()
+			p := filepath.Join(dir, "s.d2")
+			if err := os.WriteFile(p, []byte(tc.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			ch, err := m.Ensure("proj/s.d2", p)
+			if err != nil {
+				t.Fatalf("Ensure: %v", err)
+			}
+			if ch.PID == 0 {
+				t.Error("child must be spawned regardless of source content")
+			}
+			if tc.wantError {
+				if ch.LastError == nil {
+					t.Fatal("want LastError recorded for a statement-less source, got nil")
+				}
+				if !strings.Contains(ch.LastError.Error(), "no d2 statements") {
+					t.Errorf("want the empty-source cause, got %q", ch.LastError.Error())
+				}
+			} else if ch.LastError != nil {
+				t.Errorf("want no LastError for a real source, got %q", ch.LastError.Error())
+			}
+		})
+	}
+}
+
+// TestSnapshotClearsResolvedEmptySourceDiagnostic: the empty-source note is a
+// spawn-time observation, so once the file has content AND an svg exists, a
+// Snapshot must stop reporting it — otherwise /api/status shows a lastError on
+// a child that is serving fine, which is the same class of misleading
+// diagnostic the note was added to remove.
+//
+// Both halves are required, so the intermediate state (content added, but no
+// svg yet) must still report — a compile being possible is not a compile
+// having happened.
+func TestSnapshotClearsResolvedEmptySourceDiagnostic(t *testing.T) {
+	cfg := makeHelperConfig(t, freePort(t))
+	cacheDir := t.TempDir()
+	cfg.SvgCacheDir = cacheDir
+	m := NewChildManager(cfg, helperEnv())
+	defer m.StopAll()
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "s.d2")
+	if err := os.WriteFile(src, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	key := "proj/s.d2"
+	ch, err := m.Ensure(key, src)
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+
+	// 1. Empty source, no svg → diagnostic reported.
+	got := m.Snapshot()[key]
+	if got.LastError == nil || !strings.Contains(got.LastError.Error(), "no d2 statements") {
+		t.Fatalf("empty source: want the diagnostic in Snapshot, got %v", got.LastError)
+	}
+
+	// 2. Content added but still no svg → must STILL report (nothing compiled).
+	if err := os.WriteFile(src, []byte("x -> y\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got = m.Snapshot()[key]
+	if got.LastError == nil {
+		t.Error("content added but no svg yet: want the diagnostic retained, got nil")
+	}
+
+	// 3. An svg lands (the fake child never compiles, so stand in for it) →
+	//    the condition is fully resolved and must be cleared.
+	if err := os.WriteFile(ch.SVGPath, []byte("<svg>compiled</svg>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got = m.Snapshot()[key]
+	if got.LastError != nil {
+		t.Errorf("resolved: want a clear lastError, got %q", got.LastError.Error())
+	}
+
+	// A real crash error must never be swallowed by this filtering.
+	m.mu.RLock()
+	e := m.entries[key]
+	m.mu.RUnlock()
+	e.mu.Lock()
+	e.child.LastError = errors.New("exit status 3")
+	e.mu.Unlock()
+	if got := m.Snapshot()[key]; got.LastError == nil || got.LastError.Error() != "exit status 3" {
+		t.Errorf("crash error must survive Snapshot filtering, got %v", got.LastError)
+	}
 }

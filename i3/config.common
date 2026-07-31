@@ -275,9 +275,11 @@ for_window [title="qs-switcher"] floating enable, border none, move position cen
 for_window [title="qs-projects"] floating enable, border none, move position center
 for_window [title="qs-clip"] floating enable, border none, move position center
 for_window [title="qs-notif"] floating enable, border none, move position center
-# preview-webview client host (sp013): the chrome-less wry window
-# (WM_CLASS preview-wv) tiles/docks into the layout by design — no
-# floating rule; it sits beside the editor like a split.
+# preview window (ft005, sp022): the native qml6 preview client tiles/docks
+# into the layout by design — no floating rule; it sits beside the editor
+# like a split. No for_window criteria either: qml6's WM_CLASS is shared by
+# every qml6-hosted app in the repo, so the `preview` wrapper resolves and
+# moves its window by pid instead (sp022 Task 6).
 # No for_window rule for the region selector: qs-region.py is a GTK POPUP =
 # override-redirect, so i3 never manages it and no criteria could ever match.
 # (The rule that used to sit here matched title="qs-region" against the OLD

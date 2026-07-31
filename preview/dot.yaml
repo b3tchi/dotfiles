@@ -1,13 +1,43 @@
-# preview — build + install the preview-d daemon (ft005 file-preview-daemon).
+# preview — build + install the preview-d daemon (ft005 file-preview-daemon)
+# and declare the system Qt6 modules its QML client (preview/qml/*.qml,
+# sp022 Tasks 4-5) needs at RUN time — qml6 itself is qt6-declarative, which
+# is assumed already present (nushell/dot.yaml's territory), but WebEngine
+# and WebSockets are not guaranteed to ride along with a bare qt6-base
+# install and are specific to this client.
 #
 # The nushell wrapper (`preview`) and its ~/.local/bin link live in
 # nushell/dot.yaml, mirroring akm-graph/dot.yaml + d2/dot.yaml. This dot only
-# builds the Go daemon binary. Linux-only: the daemon serves a localhost
-# HTTP surface and is consumed by the nu wrapper, a Core-UX (Linux) tool.
+# builds the Go daemon binary and declares the QML client's system deps —
+# it never builds or links the .qml files themselves (qml6 interprets them
+# directly, no build step). Linux-only: the daemon serves a localhost HTTP
+# surface, and the client is a Qt Quick window — both Core-UX (Linux) tools.
 
 linux:
   installs:
     cmd: |
+      # sp022 Task 5: qt6-webengine (backs `import QtWebEngine` in
+      # WebTier.qml — the html/akm/stl tiers) and qt6-websockets (backs
+      # `import QtWebSockets` in PreviewView.qml — the slot connection
+      # every tier depends on) are the QML client's own system deps, not
+      # the Go daemon's. Same runtime-guard idiom the deleted
+      # preview-webview dot used for webkit2gtk-4.1 (dotfiles-nqx/8jz): a
+      # pkg-config short-circuit keeps re-runs from shelling out to
+      # pacman, and a non-pacman host gets an actionable message instead
+      # of a client that silently can't launch (dotfiles-7k3e: websockets
+      # specifically went undeclared here once already and had to be
+      # installed by hand mid-sprint — this closes that gap for both
+      # modules at once). Arch-family only, matching the webkit2gtk
+      # precedent's reasoning: identical package names on Arch/Manjaro/Arch
+      # ARM, so a runtime pacman guard beats branching whoami.distro three
+      # times for two lines.
+      if ! pkg-config --exists Qt6WebEngineQuick Qt6WebSockets 2>/dev/null; then
+        if command -v pacman >/dev/null 2>&1; then
+          sudo pacman -S --needed --noconfirm qt6-webengine qt6-websockets
+        else
+          echo "preview: Qt6 WebEngine/WebSockets libs missing and no pacman found — install your distro's qt6-webengine + qt6-websockets packages, then re-run 'rotz install preview'" >&2
+        fi
+      fi
+
       # Build the preview-d daemon. Guarded on the go toolchain so linking
       # (done by `rotz link`) still lands on hosts without go — the wrapper
       # then reports "rotz install preview" until the binary exists.
@@ -27,3 +57,11 @@ linux:
       else
         echo "preview: go toolchain not found — skipping daemon build (install go, then re-run 'rotz install preview')" >&2
       fi
+
+      # sp022 Task 8: the wry/WebKitGTK host (preview-webview crate, sp013)
+      # is retired — the QML client (preview/qml/*.qml, Tasks 4-6 above)
+      # covers every tier it used to. A stale ~/.local/bin/preview-wv from
+      # an install predating this change would otherwise linger forever
+      # (nothing else ever removes it) as a confusable next to preview-d —
+      # unconditional and silent so a host that never had it is a no-op.
+      rm -f ~/.local/bin/preview-wv

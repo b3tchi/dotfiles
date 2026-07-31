@@ -7,7 +7,7 @@ Preview the file `$ARGUMENTS` for the user by running the preview wrapper:
 
 `preview show "$ARGUMENTS"`
 
-This ensures a `/`-rooted `preview-d` daemon is up, opens the preview-wv
+This ensures a `/`-rooted `preview-d` daemon is up, opens the QML preview
 window, sends the file, and prints a `http://127.0.0.1:4200/file/...?full`
 URL. Report that URL back to the user (it's the browser-on-a-port fallback if
 the GUI window doesn't appear — e.g. no graphical session).

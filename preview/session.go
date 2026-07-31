@@ -91,18 +91,26 @@ func (h *Hub) Broadcast(msg []byte) {
 
 // redrawMsg is the websocket payload pushed to a /preview<N> window telling
 // it which file to hot-swap to. path is relative to the daemon root — the
-// same string the client re-requests as GET /file/<path>.
+// same string the client re-requests as GET /file/<path>. typ is the
+// classified render type (render.go's classifyPath output: image | svg |
+// md | code | video | html | akm | stl | none — sp022 Task 2) so the QML
+// client (T4) can pick a delegate without re-fetching or sniffing HTML
+// itself.
 type redrawMsg struct {
 	Path string `json:"path"`
+	Type string `json:"type"`
 }
 
-// redrawMessage marshals a redrawMsg. Marshal of a struct with a single
-// string field cannot practically fail, but the fallback keeps the
-// sp008-wide anti-pattern (no panic in handlers / hub) true here too.
-func redrawMessage(path string) []byte {
-	b, err := json.Marshal(redrawMsg{Path: path})
+// redrawMessage marshals a redrawMsg. Marshal of a struct with two string
+// fields cannot practically fail, but the fallback keeps the sp008-wide
+// anti-pattern (no panic in handlers / hub) true here too — "none" is the
+// same safe fallback classifyPath itself returns for an unclassifiable
+// path, so a marshal failure degrades to exactly what an unknown type would
+// have produced anyway.
+func redrawMessage(path, typ string) []byte {
+	b, err := json.Marshal(redrawMsg{Path: path, Type: typ})
 	if err != nil {
-		return []byte(`{"path":""}`)
+		return []byte(`{"path":"","type":"none"}`)
 	}
 	return b
 }

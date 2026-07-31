@@ -8,25 +8,47 @@
 #   preview show <path> [--window N]       # one-shot: /-rooted daemon + window + send + print URL
 #   preview send <path> [--window N]       # POST {path} to /preview<N> (default window 1)
 #   preview register <addr> [--slot N]     # POST {nvim, slot?} to /register, prints assigned slot
-#   preview window [N] [--close]           # idempotent preview-wv window spawn/close (default N=1)
+#   preview window [N] [--close]           # idempotent native qml6 window spawn/close (default N=1)
 #
 # Mirrors nushell/actions/akm-graph + nushell/actions/d2-router (adr0001
-# nushell-first surface, adr0003 mandatory-wrapper mandate — the preview-d
-# and preview-wv binaries are engines, not interfaces; no consumer calls
-# either directly). sp008 Task 1 wired start/stop/status; sp008 Task 5 adds
-# `send` (the editor/nnn cursor-signal path) without changing this shape.
-# The `open` verb (reverse channel) lands in sp008 Task 6. sp009 Task 3
-# adds `register` so each nvim instance can claim its own slot instead of
-# every instance defaulting to window 1 (nvim/plugins/preview.lua calls
-# this on `:PreviewStart`). sp013 Task 2 adds `window` — lifecycle control
-# for the preview-wv webview client host (sp013 Task 1) — with the same
-# probe/pidfile discipline `start` already uses, plus mandatory
+# nushell-first surface, adr0003 mandatory-wrapper mandate — preview-d and
+# the qml6-hosted PreviewView.qml client are engines, not interfaces; no
+# consumer calls either directly). sp008 Task 1 wired start/stop/status;
+# sp008 Task 5 adds `send` (the editor/nnn cursor-signal path) without
+# changing this shape. The `open` verb (reverse channel) lands in sp008
+# Task 6. sp009 Task 3 adds `register` so each nvim instance can claim its
+# own slot instead of every instance defaulting to window 1
+# (nvim/plugins/preview.lua calls this on `:PreviewStart`). sp013 Task 2
+# adds `window` — lifecycle control for the webview client host — with the
+# same probe/pidfile discipline `start` already uses, plus mandatory
 # /proc/<pid>/cmdline verification before any SIGTERM (pid recycling is a
-# ship-blocker anti-pattern per the sp013 plan). `stop` now closes all
-# open windows before touching the daemon.
+# ship-blocker anti-pattern per the sp013 plan). `stop` now closes all open
+# windows before touching the daemon. sp022 Task 6 replaces the preview-wv
+# GTK/WebKit engine with `qml6 PreviewView.qml -- <N> <port>` (one native
+# Qt Quick process per slot — sp022's hard requirement) and, with it,
+# window IDENTITY: the daemon-style substring cmdline check could not tell
+# slot 1's pidfile from slot 2's live window (## problem, sp022.md), so
+# window identity is now an exact-argument check on /proc/<pid>/cmdline
+# (window-cmdline-matches) instead, and window PLACEMENT (place-window)
+# resolves windows by pid (`xdotool search --pid` -> `[id=…]` under i3,
+# native `[pid=…]` under sway) instead of by WM_CLASS — qml6's WM_CLASS is
+# the runtime's own identity ("qml6"/"Qml Runtime", poc016), shared with
+# every other qml6-hosted app in the repo (d2-view), so class matching was
+# never viable for this engine. sp022 Task 7 collapses the docking mechanism
+# itself: [[poc016]] proved a qml6 window survives being split/moved/
+# reparented AFTER it has already mapped (the old wry host did not, hence
+# the pre-map split-then-move-the-terminal choreography), so docking is now
+# spawn -> resolve the window by pid (bounded poll) -> mark the launching
+# frame -> move the PREVIEW window's container to that mark + reorder —
+# ordinary i3/sway, applied identically whether the window is fresh or
+# already live. `show` re-docks a live window on every call (the "docks
+# only on first open" limitation is gone); `window` still docks a fresh
+# window to the right, same mechanism.
 
 const DAEMON_BIN = "preview-d"
-const WEBVIEW_BIN = "preview-wv"
+const QML_RUNTIME = "qml6"
+const QML_REL_DIR = "preview/qml"
+const QML_FILE = "PreviewView.qml"
 
 # How long place-window waits for a detached window to be mapped before
 # giving up (dotfiles-816). 20 × 150ms ≈ 3s — comfortably longer than a
@@ -103,21 +125,220 @@ def pid-alive [pid: int] {
     (do { ^kill -0 $pid } | complete | get exit_code) == 0
 }
 
-# Verify /proc/<pid>/cmdline contains the expected binary name before any
-# SIGTERM is sent — the anti-pattern sp013's plan calls a ship-blocker: a
-# recycled pid could otherwise belong to an unrelated process. Returns
-# false (never throws) so callers can treat "can't verify" the same as
-# "doesn't match" — i.e. never kill.
-def pid-cmdline-matches [pid: int, needle: string] {
+# /proc/<pid>/cmdline as a list of argv elements, split on the NUL bytes
+# the kernel separates them with. [] on any read failure (pid gone, no
+# permission, ...) — never throws, mirroring the old pid-cmdline-matches
+# contract of "can't verify == doesn't match".
+def cmdline-args [pid: int] {
     let cmdline_path = $"/proc/($pid)/cmdline"
     if not ($cmdline_path | path exists) {
-        return false
+        return []
     }
     try {
-        (open $cmdline_path) | str contains $needle
+        (open --raw $cmdline_path) | split row (char -i 0)
     } catch {
-        false
+        []
     }
+}
+
+# Verify /proc/<pid>/cmdline is actually slot N's qml6 window before any
+# SIGTERM is sent — the anti-pattern sp013's plan calls a ship-blocker: a
+# recycled pid could otherwise belong to an unrelated process. sp022 Task 6
+# replaces the old daemon-binary-name substring check with an EXACT-argument
+# check: require an argv element ending in PreviewView.qml AND an argv
+# element exactly equal to N. Substring-on-binary-name was not enough once
+# every slot invokes the same `qml6 PreviewView.qml -- <N> <port>` shape —
+# it could not tell slot 1's pidfile from slot 2's live window (the ##
+# problem bug: both cmdlines contain "PreviewView.qml", and both share the
+# daemon's port, so neither is a safe needle — only the slot number is
+# unique per window). Never throws: unreadable/missing cmdline degrades to
+# false, same "can't verify == doesn't match" contract as before.
+def window-cmdline-matches [pid: int, n: int] {
+    let args = (cmdline-args $pid)
+    if ($args | is-empty) {
+        return false
+    }
+    let has_qml = ($args | any {|a| $a | str ends-with $QML_FILE })
+    let has_n = ($args | any {|a| $a == ($n | into string) })
+    $has_qml and $has_n
+}
+
+# Resolve the absolute path to PreviewView.qml: akm-root (falling back to
+# ~/.dotfiles when it fails or is missing) joined with preview/qml/. Loud
+# error naming the resolved path if the file isn't there (sp022 Task 6 edge
+# case: akm-root failing -> ~/.dotfiles fallback; QML file missing there ->
+# loud error naming the path).
+def qml-view-path [] {
+    let resolved = if (which akm-root | is-empty) {
+        null
+    } else {
+        (do { ^akm-root } | complete)
+    }
+    let root = if $resolved != null and $resolved.exit_code == 0 and ($resolved.stdout | str trim | is-not-empty) {
+        $resolved.stdout | str trim
+    } else {
+        "~/.dotfiles" | path expand
+    }
+    let qml = ($root | path join $QML_REL_DIR $QML_FILE)
+    if not ($qml | path exists) {
+        error make { msg: $"preview: ($QML_FILE) not found at ($qml)" }
+    }
+    $qml
+}
+
+# The X display number from a DISPLAY value: ":10.0" -> "10", ":0" -> "0".
+# null when DISPLAY is empty, remote ("host:10"), or otherwise malformed
+# (mirrors preview-webview's display_number, the Rust seam this ports).
+def display-number [display: string] {
+    if not ($display | str starts-with ":") {
+        return null
+    }
+    let rest = ($display | str substring 1..)
+    let num = ($rest | split row "." | first)
+    if ($num | is-empty) {
+        return null
+    }
+    try {
+        $num | into int | ignore
+        $num
+    } catch {
+        null
+    }
+}
+
+# Reports whether `display` (":10.0" style) is served by an xorgxrdp
+# virtual Xorg, matched by finding a running Xorg whose cmdline carries
+# this display's EXACT token (":N") and mentions xrdp. xorg_cmdlines is
+# injected so this is unit-testable without /proc — mirrors
+# preview-webview's is_xrdp_display/running_xorg_cmdlines seam
+# ([[adr0004]]/[[adr0005]]; preview-test table-tests this directly via
+# `use`). Deliberately per-display: a desktop can run native :0 (real GPU)
+# alongside xrdp :10, and only the latter needs software GL.
+export def is-xrdp-display [display: string, xorg_cmdlines: list<string>] {
+    let n = (display-number $display)
+    if $n == null {
+        return false
+    }
+    let tok = $":($n)"
+    $xorg_cmdlines | any {|c|
+        ($c | str contains --ignore-case "xrdp") and (($c | split row " ") | any {|t| $t == $tok })
+    }
+}
+
+# Chromium command-line flags QtWebEngine needs before it will hand the web
+# tier a WebGL context on a GPU-less virtual Xorg. Measured on a real
+# xorgxrdp session (dotfiles-14kr): without these, the stl tier dies with
+# "ContextResult::kFatalFailure: WebGL1/WebGL2 blocklisted" ->
+# "THREE.WebGLRenderer: Error creating WebGL context." and the window shows
+# "failed to load STL: Error creating WebGL context." Chromium's own GPU
+# blocklist is what refuses, so the fix is Chromium-side: swiftshader as the
+# GL implementation (--use-gl=angle --use-angle=swiftshader),
+# --enable-unsafe-swiftshader to lift the blocklist that otherwise rejects
+# a software GL backend outright, and --disable-gpu-compositing so the
+# compositor does not also try for a hardware context.
+const XRDP_CHROMIUM_FLAGS = "--enable-unsafe-swiftshader --use-gl=angle --use-angle=swiftshader --disable-gpu-compositing"
+
+# Chromium flags that BOUND the web tier's per-navigation memory growth
+# (dotfiles-j5kq / sp022 T10). Applied on EVERY display, not just
+# xorgxrdp — nothing about the mechanism is display-specific.
+#
+# MECHANISM (measured, not guessed — full numbers in preview/README.md):
+# the web tier navigates ONE long-lived WebEngineView, so ONE renderer
+# process serves every html/akm/stl visit for the window's whole life. Each
+# akm visit leaves ~40 MB of dead JS (the cross-origin akm-graph iframe
+# re-parses ~1 MB of bundle and re-allocates the graph's typed arrays), and
+# V8 does not collect it until its own old-space limit is reached. V8 sizes
+# that limit from physical RAM, so on a 24 GB host the renderer climbed to
+# ~1.49 GB before its first major GC — which reads as an unbounded leak to
+# anyone who stops measuring first. It is not a leak: a 60-cycle
+# page.html <-> adr0009.md loop grew ~39 MB/cycle to 1.49 GB, then went
+# FLAT (+1.1 MB/cycle) for the remaining 28 cycles. A deduped
+# /proc/<pid>/task/*/children PSS walk put 100% of the growth in the single
+# renderer child (136 MB -> 1266 MB) with the qml6 browser process flat at
+# ~176 MB, and smaps put it in V8's two pools (the sandbox anon region
+# 510 MB + [anon:v8] 206 MB).
+#
+# So the fix is to choose the ceiling instead of letting V8 derive one from
+# host RAM: --max-old-space-size=256 moves the plateau to ~600 MB total PSS,
+# reached by navigation ~14 and flat after (proof by intervention — the same
+# loop, same rig, same scripts). 256 MB is ~2x the measured first-visit
+# working set of the heaviest tier, which is the headroom that keeps this a
+# ceiling rather than a GC-thrash / renderer-OOM trap.
+#
+# Passed as ONE token: QtWebEngine splits QTWEBENGINE_CHROMIUM_FLAGS on
+# whitespace with no quote handling, so a --js-flags value may not contain
+# spaces (multiple V8 flags would need a different transport).
+const MEMORY_CHROMIUM_FLAGS = "--js-flags=--max-old-space-size=256"
+
+# The `VAR=value ` prefix window-spawn prepends to its `bash -c` launch line,
+# given whether the target display is xorgxrdp and whatever
+# QTWEBENGINE_CHROMIUM_FLAGS the caller already has set (""=unset). Factored
+# out of window-spawn so preview-test can table-test it without a real Xorg
+# (the is-xrdp-display seam pattern).
+#
+# On a native display: no Qt/GL overrides — real GL, real GPU — but the
+# Chromium memory ceiling still applies (MEMORY_CHROMIUM_FLAGS above: V8's
+# default old-space limit is derived from host RAM, not from the display
+# server, so the unbounded-looking growth of dotfiles-j5kq is not an
+# xrdp phenomenon and must not be fixed only there).
+#
+# On xorgxrdp, THREE things are needed, and dotfiles-14kr's 2x2 matrix on a
+# real xorgxrdp session settled which does what:
+#
+#   QT_QUICK_BACKEND=software + LIBGL_ALWAYS_SOFTWARE=1
+#     Qt Quick's own scenegraph, per [[adr0004]]/[[adr0005]] and the
+#     i3/config-xrdp precedent (a GPU-less virtual Xorg wedges hardware GL,
+#     dotfiles-49j). MEASURED ORTHOGONAL to the web tier: every tier
+#     (image/md/code/html/akm) renders identically with and without this
+#     pair, and the stl tier's WebGL failure reproduces with the pair
+#     ABSENT too — so the pair was never the web tier's problem, contrary
+#     to dotfiles-14kr's original hypothesis. It stays.
+#
+#   QTWEBENGINE_CHROMIUM_FLAGS=<XRDP_CHROMIUM_FLAGS>
+#     QtWebEngine's separate Chromium GPU stack, which has its own
+#     blocklist and does NOT consult either Qt var above. This is what
+#     actually fixes stl. Set only when the caller has not set it: an
+#     explicit QTWEBENGINE_CHROMIUM_FLAGS in the environment is a
+#     deliberate override and wins (overriding it would make the var
+#     un-settable, since a duplicate assignment on the launch line would
+#     always shadow the inherited one). That deference covers the memory
+#     ceiling too: a caller who takes over the flag string owns the whole
+#     Chromium command line, ceiling included.
+export def spawn-env-prefix [xrdp: bool, caller_chromium_flags: string] {
+    let chromium = if ($caller_chromium_flags | is-not-empty) {
+        ""
+    } else {
+        let flags = if $xrdp {
+            $"($XRDP_CHROMIUM_FLAGS) ($MEMORY_CHROMIUM_FLAGS)"
+        } else {
+            $MEMORY_CHROMIUM_FLAGS
+        }
+        $"QTWEBENGINE_CHROMIUM_FLAGS='($flags)' "
+    }
+    if not $xrdp {
+        return $chromium
+    }
+    $"QT_QUICK_BACKEND=software LIBGL_ALWAYS_SOFTWARE=1 ($chromium)"
+}
+
+# Space-joined argv of every running Xorg, read from /proc (mirrors
+# preview-webview's running_xorg_cmdlines). Empty on any read failure — a
+# detection miss degrades to "not xrdp" (no guard), never worse.
+def running-xorg-cmdlines [] {
+    if not ("/proc" | path exists) {
+        return []
+    }
+    let entries = (try { ls /proc } catch { [] })
+    $entries
+    | each {|e|
+        let pid = (try { ($e.name | path basename) | into int } catch { null })
+        if $pid == null {
+            ""
+        } else {
+            (cmdline-args $pid) | str join " "
+        }
+    }
+    | where {|c| $c | str contains "Xorg" }
 }
 
 # Ensure cache dir and write the daemon pidfile.
@@ -203,12 +424,14 @@ def main-start [root_override?: string] {
 }
 
 # Close window N: SIGTERM the pidfile's pid, but only after
-# /proc/<pid>/cmdline confirms it is actually a preview-wv process — a
-# recycled pid (alive, but now belongs to something else) is treated as
-# stale and is never signaled (sp013 Task 2 edge case). Always removes the
-# pidfile on the way out so this is safe to call repeatedly (double
-# `--close` is a clean idempotent no-op) and safe to call on a window that
-# was never opened (no pidfile -> clean message, exit 0).
+# /proc/<pid>/cmdline confirms it is actually slot N's qml6 window — a
+# recycled pid (alive, but now belongs to something else, OR belongs to a
+# DIFFERENT slot's qml6 window) is treated as stale and is never signaled
+# (sp013 Task 2 edge case, tightened by sp022 Task 6's exact-argument
+# check). Always removes the pidfile on the way out so this is safe to call
+# repeatedly (double `--close` is a clean idempotent no-op) and safe to
+# call on a window that was never opened (no pidfile -> clean message,
+# exit 0).
 def window-close [n: int] {
     let pid_file = (window-pid-file $n)
     let pid = (read-pidfile-at $pid_file)
@@ -216,29 +439,32 @@ def window-close [n: int] {
         print $"preview: window ($n) not open — nothing to close"
         return
     }
-    if (pid-alive $pid) and (pid-cmdline-matches $pid $WEBVIEW_BIN) {
+    if (pid-alive $pid) and (window-cmdline-matches $pid $n) {
         ^kill -TERM $pid
         print $"preview: closed window ($n) \(pid ($pid)\)"
     } else if (pid-alive $pid) {
-        print $"preview: window ($n) pidfile pid ($pid) is alive but is not ($WEBVIEW_BIN) \(recycled pid\) — leaving it running, cleaning up stale pidfile"
+        print $"preview: window ($n) pidfile pid ($pid) is alive but is not slot ($n)'s ($QML_RUNTIME) window \(recycled pid\) — leaving it running, cleaning up stale pidfile"
     } else {
         print $"preview: window ($n) pidfile stale \(pid ($pid) dead\) — cleaning up"
     }
     rm --force $pid_file
 }
 
-# Idempotent spawn of window N's preview-wv process, guarded by a per-window
+# Idempotent spawn of window N's qml6 process, guarded by a per-window
 # pidfile — the same probe/pidfile discipline `main-start` uses for the
-# daemon (sp013 Task 2 success criteria).
+# daemon (sp013 Task 2 success criteria). sp022 Task 6: the engine is now
+# `qml6 PreviewView.qml -- <N> <port>` (one native Qt Quick process per
+# slot) instead of the GTK/WebKit preview-wv binary.
 def window-spawn [n: int] {
     let pid_file = (window-pid-file $n)
 
     # 1. Existing pidfile check — alive + cmdline-verified -> no-op. Alive
-    #    but mismatched (recycled pid) or dead -> stale, clean the pidfile
-    #    but never signal the foreign process, then fall through to spawn.
+    #    but mismatched (recycled pid, or another slot's live window) or
+    #    dead -> stale, clean the pidfile but never signal the foreign
+    #    process, then fall through to spawn.
     let existing = (read-pidfile-at $pid_file)
     if $existing != null {
-        if (pid-alive $existing) and (pid-cmdline-matches $existing $WEBVIEW_BIN) {
+        if (pid-alive $existing) and (window-cmdline-matches $existing $n) {
             print $"preview: window ($n) already open \(pid ($existing)\) — no-op"
             return
         } else {
@@ -247,10 +473,12 @@ def window-spawn [n: int] {
         }
     }
 
-    # 2. Binary check — fail loud with an actionable message.
-    if (which $WEBVIEW_BIN | is-empty) {
+    # 2. Binary check — fail loud, naming the qt packages qml6 ships in
+    #    (rather than a `rotz install` target: qml6 is a system Qt binary,
+    #    not one of this repo's own build outputs).
+    if (which $QML_RUNTIME | is-empty) {
         error make {
-            msg: $"preview: '($WEBVIEW_BIN)' not found on PATH — run: rotz install preview-webview"
+            msg: $"preview: '($QML_RUNTIME)' not found on PATH — install qt6-base qt6-declarative qt6-svg qt6-websockets \(rotz install preview\), then retry"
         }
     }
 
@@ -263,9 +491,25 @@ def window-spawn [n: int] {
         }
     }
 
-    # 4. Detached spawn, inheriting the caller's environment
+    # 4. Resolve the QML client file — akm-root with ~/.dotfiles fallback,
+    #    loud error naming the path if missing there either.
+    let qml = (qml-view-path)
+
+    # 5. Detached spawn, inheriting the caller's environment
     #    (DISPLAY/XAUTHORITY carry through automatically; PREVIEW_PORT is
     #    set explicitly to mirror main-start's convention).
+    #    QT_FORCE_STDERR_LOGGING=1 (d2-view precedent) is what makes
+    #    console.log/warn/error AND qml6's own usage-line stderr actually
+    #    land in wv-<N>.log — without it both are silently swallowed
+    #    (measured: bad args -> rc=2, zero output).
+    #    On an xorgxrdp display, spawn-env-prefix forces software GL for the
+    #    Qt Quick scenegraph the same way preview-wv's is_xrdp_display guard
+    #    did — a GPU-less virtual Xorg wedges hardware GL (dotfiles-49j) —
+    #    AND hands QtWebEngine's separate Chromium GPU stack the swiftshader
+    #    flags the web tier needs for WebGL there (dotfiles-14kr). Native
+    #    displays (including no Xorg at all, e.g. sway) get none of the GL
+    #    overrides — but they DO get the Chromium memory ceiling, which is
+    #    display-independent (MEMORY_CHROMIUM_FLAGS, dotfiles-j5kq).
     let dir = ($CACHE_DIR | path expand)
     if not ($dir | path exists) {
         mkdir $dir
@@ -273,8 +517,15 @@ def window-spawn [n: int] {
     let log  = (window-log-file $n)
     let port = (preview-port)
 
+    let display = ($env | get -o DISPLAY | default "")
+    let xrdp = (is-xrdp-display $display (running-xorg-cmdlines))
+    let extra_env = (spawn-env-prefix $xrdp ($env | get -o QTWEBENGINE_CHROMIUM_FLAGS | default ""))
+    if $xrdp {
+        print $"preview: xorgxrdp display ($display) — forcing software GL + swiftshader WebGL for window ($n)"
+    }
+
     let pid_result = (do {
-        ^bash -c $"PREVIEW_PORT=($port) nohup ($WEBVIEW_BIN) ($n) --port ($port) >>($log) 2>&1 & echo $!"
+        ^bash -c $"PREVIEW_PORT=($port) QT_FORCE_STDERR_LOGGING=1 ($extra_env)nohup ($QML_RUNTIME) ($qml) -- ($n) ($port) >>($log) 2>&1 & echo $!"
     } | complete)
 
     if $pid_result.exit_code != 0 {
@@ -300,6 +551,20 @@ def slot-workspace [n: int] {
     ($row | get 0.workspace)
 }
 
+# Window N's X11 id, resolved via `xdotool search --pid` — needed only
+# under i3, which has no native pid-match criteria (sway's `[pid=…]`
+# criterion needs no xdotool at all, see place-window below). null when
+# xdotool is missing, the pid has no mapped window yet, or the search
+# fails.
+def window-xid-for-pid [pid: int] {
+    if (which xdotool | is-empty) { return null }
+    let r = (do { ^xdotool search --pid $pid } | complete)
+    if $r.exit_code != 0 { return null }
+    let out = ($r.stdout | str trim)
+    if ($out | is-empty) { return null }
+    try { $out | lines | first | into int } catch { null }
+}
+
 # Move window n to the workspace its nvim registered from (dotfiles-816), so
 # the preview lands beside the editor driving it rather than wherever the
 # spawning shell happened to be focused.
@@ -308,11 +573,14 @@ def slot-workspace [n: int] {
 # placement is the correct fallback, and inventing a workspace would be
 # worse than leaving it alone.
 #
-# The criteria carry BOTH class and title. Every slot's window shares
-# WM_CLASS "preview-wv", so class alone would drag every open preview window
-# onto this workspace; the per-slot title ("preview <n>") is what makes the
-# match specific. I3SOCK is unset for the same wrong-session reason as
-# current-workspace.
+# sp022 Task 6: resolution is pid-based, not class-based. qml6's WM_CLASS is
+# the RUNTIME's own identity ("qml6"/"Qml Runtime", poc016) — shared by
+# every qml6-hosted app in the repo (d2-view included) — so a class (or
+# class+title) criterion was never viable for this engine the way it was
+# for the old dedicated preview-wv binary. sway has a native `[pid=…]`
+# criterion; i3 does not, so the i3 branch resolves the pid to an X11 id via
+# xdotool first and matches on `[id=…]`. I3SOCK is unset for the same
+# wrong-session reason as current-workspace.
 def place-window [n: int] {
     let ws = (slot-workspace $n)
     if ($ws | is-empty) { return }
@@ -324,7 +592,8 @@ def place-window [n: int] {
     # the dotfiles-816 "preview follows the editor to another workspace" case
     # keeps working.
     if $ws == (current-workspace) { return }
-    let criteria = $"[class=\"preview-wv\" title=\"^preview ($n)$\"]"
+    let pid = (read-pidfile-at (window-pid-file $n))
+    if $pid == null { return }
     for bin in [swaymsg i3-msg] {
         if (which $bin | is-empty) { continue }
         # The window was spawned DETACHED, so it is usually not mapped yet
@@ -335,6 +604,16 @@ def place-window [n: int] {
         # broken. Poll on the body's success flag instead, bounded, so a
         # window that never appears costs a bounded wait rather than a hang.
         for attempt in 1..($PLACE_ATTEMPTS) {
+            let criteria = if $bin == "swaymsg" {
+                $"[pid=($pid)]"
+            } else {
+                let xid = (window-xid-for-pid $pid)
+                if $xid == null {
+                    sleep $PLACE_POLL
+                    continue
+                }
+                $"[id=($xid)]"
+            }
             let r = (do {
                 ^env -u I3SOCK $bin $"($criteria) move workspace ($ws)"
             } | complete)
@@ -359,16 +638,18 @@ def main-window [n: int, close: bool] {
     # the right), visible next to the editor — the design the i3 config
     # describes ("sits beside the editor like a split"), and the fix for nvim
     # :PreviewStart opening an invisible tab (dotfiles-nmp). No image shape is
-    # known at window-open (nvim previews many files, and re-docking per file
-    # would reparent the live webview and kill it), so the direction is fixed
-    # rather than shape-chosen as in `show`. Pre-split before the window maps
-    # to dodge the reparent-death (dotfiles-bfk); only for a fresh window with
-    # both a launching frame and a WM to talk to.
+    # known here (nvim previews many files), so the direction is fixed rather
+    # than shape-chosen as in `show`. Dock AFTER spawn (sp022 Task 7): a qml6
+    # window survives being moved post-map ([[poc016]]), so there is no need
+    # to pre-split before it maps the way the old wry host required.
+    # Degrades gracefully headless: no frame (no X session) -> window-spawn
+    # still runs, dock-window-into-place's own no-WM/no-pidfile guards handle
+    # the rest.
     let orig = (active-window-id)
-    if ($orig != null and (wm-bin) != null and not (window-open $n)) {
-        prepare-split $orig "right"
-    }
     window-spawn $n
+    if $orig != null {
+        dock-window-into-place $n $orig "right"
+    }
 }
 
 # Close every open window (wv-*.pid) — called by `stop` before it touches
@@ -478,7 +759,8 @@ def ensure-daemon-slash [] {
 # instead of tabbing into whatever i3 container has focus. Split direction
 # follows image shape: landscape -> above (top), portrait -> left, square ->
 # below (or a tab when the frame is too short to usefully split). Always
-# tiled, never floating (the i3 config carries no float rule for preview-wv).
+# tiled, never floating (the i3 config carries no float rule for the
+# preview window).
 
 # Aspect bands: w/h > SQUARE_HI is landscape, < SQUARE_LO is portrait, in
 # between is square. SQUARE_MIN_H is the launching frame height (px) below
@@ -564,81 +846,140 @@ def i3run [cmd: string] {
     do { ^env -u I3SOCK $bin $cmd } | complete | ignore
 }
 
-# Is preview-wv window N already open? A fresh spawn is what docking hooks
-# into; a window that already exists is left where it is (re-docking would
-# reparent the live webview and kill it — see prepare-split).
-def window-open [n: int] {
-    let pid = (read-pidfile-at (window-pid-file $n))
-    if $pid == null { return false }
-    (pid-alive $pid) and (pid-cmdline-matches $pid $WEBVIEW_BIN)
-}
+# ── mark-based docking (sp022 Task 7, dotfiles-zw0d.7) ──────────────────
+#
+# [[poc016]] proved a qml6 window survives every i3 reparent operation
+# (split/move/move-to-mark, floating toggle, cross-workspace move) that made
+# a mapped wry/WebKitGTK window self-close (dotfiles-bfk) — so unlike the
+# webview host this replaces, the PREVIEW window itself can be split/moved
+# AFTER it has already mapped, live or fresh, with no pre-map choreography.
+# That collapses prepare-split + wait-preview-mapped + finalize-dock's
+# move-the-terminal inversion into one recipe run on the preview window:
+# mark the launching frame, move the preview window's container to that
+# mark, then reorder if the mode wants the preview BEFORE the frame.
+#
+# Spot-checked empirically against real i3 4.25.1 AND real sway 1.12
+# (dotfiles-zw0d.7 task notes carry the transcripts) on a throwaway
+# Xvfb/headless-sway session before this landed — i3 has no native `pid`
+# criterion (`[pid=N] focus` is a parse error: i3-msg's own error lists the
+# valid criteria and `pid` is not among them), confirming T6's claim rather
+# than assuming it; sway's `[pid=N]` IS native and needs no xdotool at all.
+# Both WMs accept identical `mark` / `move container to mark <mark>` /
+# `move up` / `move left` syntax. workspace_layout tabbed (a common i3
+# default, including this repo's own config) means a bare `move container to
+# mark` without first setting the frame's split direction lands the preview
+# as a TAB, not a split — dock-frame always sets the layout explicitly
+# rather than relying on whatever default the target WM/config carries.
+const DOCK_MARK = "preview-dock-anchor"
 
-# Set the launching frame's split orientation BEFORE the preview window maps,
-# so the webview opens directly into position. This is the crux of the whole
-# approach: reparenting an already-mapped wry/WebKitGTK window (i3
-# split/move/move-to-mark after the fact) makes it self-close with
-# CloseRequested on xrdp's GL-limited virtual Xorg (dotfiles-bfk — verified;
-# not fixed by software GL). A window that maps straight into its final
-# container is never reparented and survives. "tab" wants no split (the WM's
-# default drops the new window into orig's container as a tab).
-def prepare-split [orig: int, mode: string] {
-    match $mode {
-        "top" | "below" => {
-            i3run $"[id=($orig)] focus"
-            i3run "split vertical"
-        }
-        "left" | "right" => {
-            i3run $"[id=($orig)] focus"
-            i3run "split horizontal"
-        }
-        "tab" => {
-            # A frame short enough to hit this fallback is one sitting in a
-            # vertical split, so the WM default would stack the preview as yet
-            # another thin sibling — the opposite of what "too small to split"
-            # wants. Set the frame's container tabbed BEFORE the window maps so
-            # the preview joins as a full-size tab (mapping into a tabbed
-            # container, like the split cases, avoids the fatal post-map
-            # reparent).
-            i3run $"[id=($orig)] focus"
-            i3run "layout tabbed"
-        }
-        _ => {}
+# Resolve pid to the WM criterion used to target the PREVIEW window,
+# bounded-polling for the window to actually be mapped. i3: no native pid
+# criterion (measured above), so pid -> X11 id via `xdotool search --pid`
+# first, then `[id=<xid>]`; missing xdotool degrades immediately (no point
+# polling for a binary that will never appear). sway: `[pid=<pid>]` directly
+# — mapped-ness is bounded-retried by dock-window's own success-flag loop
+# instead, so no separate wait is needed here. null when the window never
+# resolves within PLACE_ATTEMPTS (crashed qml6, or xdotool absent) — the
+# caller logs why and skips the dock rather than hanging or erroring.
+def window-criteria [bin: string, pid: int] {
+    if $bin == "swaymsg" {
+        return $"[pid=($pid)]"
     }
-}
-
-# Wait (bounded) for a preview-wv window to actually map. window-spawn spawns
-# the webview detached and returns without waiting for the map (place-window
-# no-ops for a Claude/ad-hoc window with no registered workspace), so a
-# reorder issued immediately would find no sibling yet — the exact bug that
-# left "top" images docked at the bottom. Polls by class (reliable; the
-# xdotool --name title match is flaky for this window).
-def wait-preview-mapped [] {
-    if (which xdotool | is-empty) { return }
+    if (which xdotool | is-empty) { return null }
     for _ in 1..($PLACE_ATTEMPTS) {
-        let r = (do { ^xdotool search --class $WEBVIEW_BIN } | complete)
-        if $r.exit_code == 0 and ($r.stdout | str trim | is-not-empty) { return }
+        let xid = (window-xid-for-pid $pid)
+        if $xid != null { return $"[id=($xid)]" }
         sleep $PLACE_POLL
     }
+    null
 }
 
-# After the window has mapped (below/right of orig, per prepare-split's
-# split), reorder for the top/left modes by moving the LAUNCHING FRAME — a
-# normal terminal, safe to reparent — never the fragile webview. below/right
-# and tab need no reorder. The move waits for the window to map first, else it
-# runs before the split has two children and does nothing (leaving "top" at
-# the bottom).
-def finalize-dock [orig: int, mode: string] {
+# Set the launching frame's split direction (or tabbed layout) and mark it —
+# done explicitly for every mode rather than relying on the WM's/config's
+# default layout (workspace_layout tabbed is common, including this repo's
+# own i3 config), so the dock is deterministic regardless of what the
+# frame's container defaulted to. `mark` targets the FOCUSED container after
+# `split`/`layout` — verified this stays on the frame's own leaf (splitting
+# wraps the leaf in a new parent, focus and the leaf itself are unaffected)
+# rather than the newly created wrapper.
+def dock-frame [orig: int, mode: string] {
+    i3run $"[id=($orig)] focus"
     match $mode {
-        "top" => { wait-preview-mapped; i3run $"[id=($orig)] move down" }   # push frame down -> preview on top
-        "left" => { wait-preview-mapped; i3run $"[id=($orig)] move right" } # push frame right -> preview on left
+        "top" | "below" => { i3run "split vertical" }
+        "left" | "right" => { i3run "split horizontal" }
+        "tab" => { i3run "layout tabbed" }
         _ => {}
+    }
+    i3run $"[id=($orig)] mark ($DOCK_MARK)"
+}
+
+# Move the PREVIEW window (already pid-resolved to `criteria`) to sit beside
+# the just-marked launching frame, then reorder for the modes that want the
+# preview BEFORE the frame in the split (top/left) — default insertion order
+# places the moved-in window AFTER the marked one, which is already correct
+# for below/right/tab and needs one extra `move` for top/left. Retried on the
+# body success flag — i3-msg/swaymsg exit 0 while reporting {"success":
+# false} for "nothing to move" (the dotfiles-816 lesson), so a window that
+# hasn't actually landed at the mark yet just costs a bounded wait rather
+# than a silent no-op. Returns whether the dock landed.
+def dock-window [bin: string, criteria: string, mode: string] {
+    mut docked = false
+    for _ in 1..($PLACE_ATTEMPTS) {
+        let r = (do {
+            ^env -u I3SOCK $bin $"($criteria) move container to mark ($DOCK_MARK)"
+        } | complete)
+        if $r.exit_code == 0 {
+            let ok = (try { $r.stdout | from json | get 0.success } catch { false })
+            if $ok { $docked = true; break }
+        }
+        sleep $PLACE_POLL
+    }
+    if $docked {
+        match $mode {
+            "top" => { do { ^env -u I3SOCK $bin $"($criteria) move up" } | complete | ignore }
+            "left" => { do { ^env -u I3SOCK $bin $"($criteria) move left" } | complete | ignore }
+            _ => {}
+        }
+    }
+    $docked
+}
+
+# Dock window N beside `orig` in `mode` ("top"/"left"/"below"/"right"/"tab"),
+# whether N was just spawned OR is already live — the SAME recipe re-docks a
+# live window, because (unlike the wry host this replaces) a qml6 window
+# survives being moved after it has already mapped ([[poc016]]). Best-effort
+# throughout: no-ops cleanly when there is no WM, no pidfile, or the window
+# never resolves to a criterion within PLACE_ATTEMPTS — each case prints why,
+# so a crashed qml6 or a closed launching frame surfaces in the log instead
+# of hanging or erroring `show`/`window`. Always unmarks the frame afterward
+# so a leftover mark never lingers to confuse the next dock.
+def dock-window-into-place [n: int, orig: int, mode: string] {
+    let bin = (wm-bin)
+    if $bin == null { return }
+    let pid = (read-pidfile-at (window-pid-file $n))
+    if $pid == null {
+        print $"preview: window ($n) has no pidfile — skipping dock"
+        return
+    }
+    let criteria = (window-criteria $bin $pid)
+    if $criteria == null {
+        print $"preview: window ($n) \(pid ($pid)\) never mapped within (($PLACE_ATTEMPTS * $PLACE_POLL)) — skipping dock, see (window-log-file $n)"
+        return
+    }
+    dock-frame $orig $mode
+    let ok = (dock-window $bin $criteria $mode)
+    i3run $"unmark ($DOCK_MARK)"
+    if $ok {
+        print $"preview: docked window ($n) ($mode) of frame ($orig)"
+    } else {
+        print $"preview: window ($n) \(pid ($pid)\) placement timed out — leaving it where the WM put it"
     }
 }
 
 # One-shot preview: ensure a /-rooted daemon, open window N, send the file,
 # and print its localhost URL (the browser-on-a-port fallback). This is the
 # verb Claude Code's /preview slash command and any ad-hoc caller uses to
-# throw an arbitrary image/file into the preview-wv window in one command
+# throw an arbitrary image/file into the preview window in one command
 # (dotfiles-ad7). A missing/nonexistent path is a loud error, mirroring
 # `send`'s guard.
 def main-show [path?: string, window: int = 1] {
@@ -655,28 +996,28 @@ def main-show [path?: string, window: int = 1] {
     let orig = (active-window-id)
     let dims = (image-dims $abs)
     ensure-daemon-slash
-    # Dock only a FRESH image window: no frame/WM/dims -> no dock; a non-image
-    # (dims null) -> no dock; an already-open window is left in place (moving
-    # the live webview would reparent and kill it). Decide the mode, then set
-    # the split BEFORE the window maps.
-    let mode = if ($orig != null and $dims != null and not (window-open $window)) {
+    # Dock whenever there is a frame + WM + known image shape to dock
+    # against — no "is this window already open" guard: sp022 Task 7
+    # collapsed that check, because dock-window-into-place re-docks a LIVE
+    # window exactly as safely as a fresh one ([[poc016]]). No frame/dims
+    # (non-image, headless) -> no dock, same as before.
+    let mode = if ($orig != null and $dims != null) {
         (dock-mode $dims.w $dims.h $orig)
     } else {
         null
     }
-    if $mode != null { prepare-split $orig $mode }
-    # Window spawn is best-effort GUI: on a headless host (Termux, no WM) the
-    # detached preview-wv just dies in its log — the daemon + URL below still
-    # give a working browser-on-a-port preview, so this never gates the send.
+    # Window spawn is best-effort GUI: on a headless host (Termux, no WM,
+    # no qml6) the detached window just dies in its log — the daemon + URL
+    # below still give a working browser-on-a-port preview, so this never
+    # gates the send.
     window-spawn $window
     # The daemon (root=/) converts this absolute path abs->rel internally
     # (handlePreviewSet), so /file/<abs-minus-leading-slash> is the URL.
     main-send $abs $window
-    # Reorder for top/left by moving the launching frame (reparent-safe),
-    # never the webview.
+    # Dock (or re-dock) AFTER the window exists — spawned just now, or
+    # already live from a previous `show`/`window` call.
     if $mode != null {
-        finalize-dock $orig $mode
-        print $"preview: docked window ($window) ($mode) of frame ($orig)"
+        dock-window-into-place $window $orig $mode
     }
     let rel = ($abs | str trim --left --char '/')
     print $"preview: (api-base)/file/($rel)?full"
@@ -779,7 +1120,7 @@ def main [
             print "  show <path> [--window N]     — one-shot: /-rooted daemon + window + send + URL (default 1)"
             print "  send <path> [--window N]     — push path to window N (default 1)"
             print "  register <addr> [--slot N]   — bind nvim server addr to a slot, print the slot"
-            print "  window [N] [--close]         — open (or close) preview-wv window N (default 1)"
+            print "  window [N] [--close]         — open (or close) preview window N (default 1)"
             print ""
             print "Image window: fit-to-window by default; click or z / 1 / space toggles 1:1."
             print "Docking: show picks top/left/below/tab by image shape; window docks right."

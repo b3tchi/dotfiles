@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -13,12 +15,21 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// --- GET /preview<N> shell -----------------------------------------------
+// --- GET /preview<N> ------------------------------------------------------
 
-// TestPreviewShellServesHTML proves a plain GET /preview<N> (no websocket
-// upgrade headers) returns the shell HTML that opens a websocket and hosts
-// the hot-swap content frame (sp008 Task 4 success criteria).
-func TestPreviewShellServesHTML(t *testing.T) {
+// TestPreviewGetReturnsJSONNotShellHTML proves a plain GET /preview<N> (no
+// websocket upgrade headers) returns {slot, path, type} JSON, not the old
+// browser-shell markup the retired wry host used to load — the shell moved
+// into QML (sp022 Task 3 success criteria: "GET /preview<N> non-ws returns
+// JSON ... instead of [the old static shell]"; sp022 Task 8 deleted that
+// static shell's files entirely once nothing served them anymore). This
+// test supersedes the pre-sp022 TestPreviewShellServesHTML, which asserted
+// exactly the contract this task replaces; server_test.go's
+// TestHandlePreviewGetReturnsJSONShape/TestHandlePreviewGetJSONForUnsetSlot
+// cover the JSON shape itself in more depth — this one just pins that the
+// route reached through the full mux at this exact path is no longer the
+// static shell.
+func TestPreviewGetReturnsJSONNotShellHTML(t *testing.T) {
 	srv := newTestServer(t)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/preview1", nil)
@@ -27,31 +38,23 @@ func TestPreviewShellServesHTML(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /preview1: status %d, want 200 (body: %s)", rec.Code, rec.Body.String())
 	}
-	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "text/html") {
-		t.Errorf("GET /preview1 content-type %q, want text/html", ct)
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Errorf("GET /preview1 content-type %q, want application/json", ct)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "app.js") {
-		t.Errorf("GET /preview1 body missing app.js script reference: %s", body)
+	if strings.Contains(body, `id="content"`) {
+		t.Errorf("GET /preview1 body still looks like the old shell HTML: %s", body)
 	}
-	if !strings.Contains(body, `id="content"`) {
-		t.Errorf("GET /preview1 body missing hot-swap content element: %s", body)
+	var got struct {
+		Slot int    `json:"slot"`
+		Path string `json:"path"`
+		Type string `json:"type"`
 	}
-}
-
-// TestPreviewStaticAppJSServed proves /static/app.js (referenced by the
-// shell) is actually served from the embedded static FS.
-func TestPreviewStaticAppJSServed(t *testing.T) {
-	srv := newTestServer(t)
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/static/app.js", nil)
-	srv.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /static/app.js: status %d, want 200", rec.Code)
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("GET /preview1 body is not the {slot,path,type} JSON shape: %v (body: %s)", err, body)
 	}
-	if !strings.Contains(rec.Body.String(), "WebSocket") {
-		t.Errorf("GET /static/app.js body missing WebSocket client code")
+	if got.Slot != 1 {
+		t.Errorf("GET /preview1 slot = %d, want 1", got.Slot)
 	}
 }
 
@@ -239,6 +242,90 @@ func TestPreviewWSPrimesBufferedPathOnConnect(t *testing.T) {
 
 	if got := readRedraw(t, c, 2*time.Second); got.Path != "buffered.go" {
 		t.Fatalf("primed path on connect = %q, want buffered.go", got.Path)
+	}
+}
+
+// TestPreviewWSBroadcastCarriesClassifiedType is the sp022 Task 2 test_plan
+// ws test: connect, POST an image path, assert the frame is
+// {"path":...,"type":"image"}; POST an md path next, assert the type swaps
+// to "md" in the very same connection — the QML client (T4) reads this
+// field to pick a delegate without re-fetching or sniffing HTML itself.
+func TestPreviewWSBroadcastCarriesClassifiedType(t *testing.T) {
+	srv := newTestServer(t)
+	writeInRoot(t, srv, "photo.png", "note.md")
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	c := dialPreview(t, ts, 1)
+	defer c.Close()
+
+	postPreview(t, ts, 1, "photo.png")
+	got := readRedraw(t, c, 2*time.Second)
+	if got.Path != "photo.png" || got.Type != "image" {
+		t.Fatalf("first push = {path:%q type:%q}, want {photo.png image}", got.Path, got.Type)
+	}
+
+	postPreview(t, ts, 1, "note.md")
+	got = readRedraw(t, c, 2*time.Second)
+	if got.Path != "note.md" || got.Type != "md" {
+		t.Fatalf("second push = {path:%q type:%q}, want {note.md md}", got.Path, got.Type)
+	}
+}
+
+// TestPreviewWSPrimingFrameCarriesClassifiedType proves the priming frame
+// (a POST that lands before any window has connected, buffered per sp008
+// Task 4) also carries the classified type once a window does connect —
+// not just the sequential-broadcast path exercised above (sp022 Task 2
+// test_plan: "priming test: POST before connect -> priming frame carries
+// type").
+func TestPreviewWSPrimingFrameCarriesClassifiedType(t *testing.T) {
+	srv := newTestServer(t)
+	writeInRoot(t, srv, "clip.mp4")
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	postPreview(t, ts, 4, "clip.mp4")
+
+	c := dialPreview(t, ts, 4)
+	defer c.Close()
+
+	got := readRedraw(t, c, 2*time.Second)
+	if got.Path != "clip.mp4" || got.Type != "video" {
+		t.Fatalf("primed frame = {path:%q type:%q}, want {clip.mp4 video}", got.Path, got.Type)
+	}
+}
+
+// TestPreviewWSPrimingDegradesToNoneWhenFileDeleted proves the sp022 Task 2
+// edge case classifyStoredPath exists for: "path deleted between store and
+// classify -> classify against the stored root-relative path degrades to
+// none, broadcast still goes out (client shows fallback)". A path is
+// POSTed and stored while the fixture still exists (POST validates
+// existence at ingestion — dotfiles-joz), the underlying file is then
+// removed from disk, and only THEN does a window connect — so priming
+// (handlePreviewWS) calls classifyStoredPath against a stored path whose
+// resolveInRoot now fails. The frame must still arrive (not be swallowed)
+// with "type":"none", never an error or a dropped send.
+func TestPreviewWSPrimingDegradesToNoneWhenFileDeleted(t *testing.T) {
+	srv := newTestServer(t)
+	writeInRoot(t, srv, "vanishing.go")
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	postPreview(t, ts, 6, "vanishing.go")
+
+	if err := os.Remove(filepath.Join(srv.root, "vanishing.go")); err != nil {
+		t.Fatalf("remove fixture between store and classify: %v", err)
+	}
+
+	c := dialPreview(t, ts, 6)
+	defer c.Close()
+
+	got := readRedraw(t, c, 2*time.Second)
+	if got.Path != "vanishing.go" {
+		t.Fatalf("primed frame path = %q, want vanishing.go (path is still delivered so the client can show its fallback)", got.Path)
+	}
+	if got.Type != "none" {
+		t.Errorf("primed frame type = %q, want none (deleted-file degrade)", got.Type)
 	}
 }
 

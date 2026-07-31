@@ -717,51 +717,49 @@ func d2FileServer(t *testing.T) (srv *Server, reqPath, absPath string) {
 	return s, "/file/diagram.d2", abs
 }
 
-// startStubD2Router binds a stub d2-router to port answering /api/status
-// (health) and /api/resolve?path=<abs> (ft002 api_surface) with the given
-// resolved URL, so tests can drive the full lazy-spawn + resolve +
-// iframe-target chain without a real d2-router-d binary.
-func startStubD2Router(t *testing.T, port, wantAbsPath, resolvedURL string) {
+// startStubFt002SVG binds a stub ft002 (d2-router) to port answering
+// /api/status (health) and /api/svg?path=<abs> (sp022 Task 1's new route)
+// with a canned status/body, capturing every /api/svg request's raw query
+// so tests can assert relayD2SVG built the exact URL ft002's real handler
+// expects — without a real d2-router-d binary.
+func startStubFt002SVG(t *testing.T, port string, svgStatus int, svgBody string) (gotQueries *sync.Map) {
 	t.Helper()
+	gotQueries = &sync.Map{}
 	ln, err := net.Listen("tcp", "127.0.0.1:"+port)
 	if err != nil {
-		t.Fatalf("bind stub d2-router on port %s: %v", port, err)
+		t.Fatalf("bind stub ft002 on port %s: %v", port, err)
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	mux.HandleFunc("/api/resolve", func(w http.ResponseWriter, r *http.Request) {
-		if got := r.URL.Query().Get("path"); got != wantAbsPath {
-			http.Error(w, "unexpected path", http.StatusNotFound)
-			return
+	mux.HandleFunc("/api/svg", func(w http.ResponseWriter, r *http.Request) {
+		gotQueries.Store(r.URL.Query().Get("path"), true)
+		if svgStatus == http.StatusOK {
+			w.Header().Set("Content-Type", "image/svg+xml")
 		}
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"project":"dotfiles","file":"diagram.d2","url":%q}`, resolvedURL)
+		w.WriteHeader(svgStatus)
+		fmt.Fprint(w, svgBody)
 	})
 	srv := &http.Server{Handler: mux}
 	go func() { _ = srv.Serve(ln) }()
 	t.Cleanup(func() { _ = srv.Close() })
+	return gotQueries
 }
 
-// TestHandleFileD2FileEmbedsD2RouterDirectly proves the .d2 embed points
-// DIRECTLY at d2-router's own resolved URL, exactly as renderAkmEmbed does
-// for akm zettels — preview-d proxies nothing.
-//
-// This is what makes live preview work. `d2 --watch` ships an empty
-// #d2-svg-container and pushes the SVG over a websocket that watch.js opens
-// at a root-relative /{project}/{file}/watch. Only a same-origin iframe can
-// reach it, so the document, watch.js and that socket must all share
-// d2-router's origin. Routing the document through a preview-d proxy stranded
-// the assets and the socket on the wrong origin and rendered the diagram
-// blank (dotfiles-ars).
-func TestHandleFileD2FileEmbedsD2RouterDirectly(t *testing.T) {
+// TestHandleFileD2RelaysSVGBytesFromFt002 proves the sp022 Task 3 core
+// case: GET /file/<path>.d2 (no ?native — svg has exactly one payload
+// shape) relays the compiled SVG bytes straight from ft002's GET
+// /api/svg?path=<abs>, byte-for-byte, with the abs path this test's
+// d2FileServer fixture resolves to as the query — replacing the old
+// cross-origin <iframe> embed of d2-router's live-watch page.
+func TestHandleFileD2RelaysSVGBytesFromFt002(t *testing.T) {
 	port := freePort(t)
 	t.Setenv("D2_ROUTER_PORT", port)
 
 	srv, reqPath, absPath := d2FileServer(t)
-	resolved := "http://127.0.0.1:" + port + "/dotfiles/diagram.d2"
-	startStubD2Router(t, port, absPath, resolved)
+	const wantSVG = `<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>`
+	gotQueries := startStubFt002SVG(t, port, http.StatusOK, wantSVG)
 
 	withD2RouterSpawn(t, func() error {
 		t.Fatal("d2-router spawn invoked despite daemon already healthy")
@@ -775,21 +773,97 @@ func TestHandleFileD2FileEmbedsD2RouterDirectly(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET %s: status %d, want 200 (body: %s)", reqPath, rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), `<iframe src="`+resolved+`"`) {
-		t.Errorf("body missing direct cross-origin iframe at %s; body=%s", resolved, rec.Body.String())
+	if ct := rec.Header().Get("Content-Type"); ct != "image/svg+xml" {
+		t.Errorf("content-type = %q, want image/svg+xml", ct)
 	}
-	if strings.Contains(rec.Body.String(), "/d2embed/") {
-		t.Errorf("body still points at the removed same-origin proxy route: %s", rec.Body.String())
+	if rec.Body.String() != wantSVG {
+		t.Errorf("body = %q, want relayed bytes %q", rec.Body.String(), wantSVG)
+	}
+	if _, ok := gotQueries.Load(absPath); !ok {
+		t.Errorf("ft002 stub never saw a /api/svg?path=%s request", absPath)
 	}
 }
 
+// TestHandleFileD2NativeSameAsDefault proves ?native produces the identical
+// relayed response as the default (no-param) request for a .d2 file — svg
+// has exactly one payload shape, so the param makes no difference (sp022
+// Task 3 success criteria).
+func TestHandleFileD2NativeSameAsDefault(t *testing.T) {
+	port := freePort(t)
+	t.Setenv("D2_ROUTER_PORT", port)
 
+	srv, reqPath, _ := d2FileServer(t)
+	const wantSVG = `<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>`
+	startStubFt002SVG(t, port, http.StatusOK, wantSVG)
 
-// TestHandleFileD2BackendUnavailableWhenSpawnFails proves the same "backend
-// unavailable, not a broken iframe" edge case as the akm test, but for the
-// d2 side: spawn fails -> /file/<path>.d2 returns a graceful 200 preview
-// with no iframe at all.
-func TestHandleFileD2BackendUnavailableWhenSpawnFails(t *testing.T) {
+	recDefault := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(recDefault, httptest.NewRequest(http.MethodGet, reqPath, nil))
+
+	recNative := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(recNative, httptest.NewRequest(http.MethodGet, reqPath+"?native", nil))
+
+	if recDefault.Body.String() != recNative.Body.String() {
+		t.Errorf("default body %q != ?native body %q", recDefault.Body.String(), recNative.Body.String())
+	}
+	if recDefault.Code != recNative.Code {
+		t.Errorf("default status %d != ?native status %d", recDefault.Code, recNative.Code)
+	}
+}
+
+// TestHandleFileD2RelayNotFoundPassesThrough404 proves the sp022 Task 3 edge
+// case: a .d2 outside every registry project — ft002 answers /api/svg with
+// its own 404 — surfaces to the client as 404, NOT the generic 502 every
+// other relay failure maps to.
+func TestHandleFileD2RelayNotFoundPassesThrough404(t *testing.T) {
+	port := freePort(t)
+	t.Setenv("D2_ROUTER_PORT", port)
+
+	srv, reqPath, _ := d2FileServer(t)
+	startStubFt002SVG(t, port, http.StatusNotFound, "path is outside all registered local projects")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, reqPath, nil)
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("GET %s: status %d, want 404 (body: %s)", reqPath, rec.Code, rec.Body.String())
+	}
+}
+
+// TestHandleFileD2RelayNon200MapsTo502 proves any OTHER non-200 status from
+// ft002 (a 503 "child unavailable", in this case) maps to 502 with a
+// plain-text cause — the deliberate deviation from render.go's
+// always-200 idiom (sp022 Task 3 success criteria).
+func TestHandleFileD2RelayNon200MapsTo502(t *testing.T) {
+	port := freePort(t)
+	t.Setenv("D2_ROUTER_PORT", port)
+
+	srv, reqPath, _ := d2FileServer(t)
+	startStubFt002SVG(t, port, http.StatusServiceUnavailable, "child unavailable: spawn timed out")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, reqPath, nil)
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("GET %s: status %d, want 502 (body: %s)", reqPath, rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "text/plain") {
+		t.Errorf("502 content-type = %q, want text/plain", ct)
+	}
+	if !strings.Contains(rec.Body.String(), "child unavailable") {
+		t.Errorf("502 body missing the relayed cause: %s", rec.Body.String())
+	}
+}
+
+// TestHandleFileD2RelayMapsSpawnFailureTo502 proves the other half of the
+// "relay failure -> 502" success criteria: d2-router itself never comes up
+// (ensureD2RouterRunning fails, "down past spawn deadline") maps to 502
+// with a plain-text cause — a deliberate departure from the old
+// renderD2Embed/renderBackendUnavailable idiom, which returned 200 for this
+// exact case because it existed for iframe display, not a native fetch that
+// needs a real failure status to detect.
+func TestHandleFileD2RelayMapsSpawnFailureTo502(t *testing.T) {
 	port := freePort(t)
 	t.Setenv("D2_ROUTER_PORT", port)
 	withD2RouterSpawn(t, func() error {
@@ -801,14 +875,11 @@ func TestHandleFileD2BackendUnavailableWhenSpawnFails(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, reqPath, nil)
 	srv.Handler().ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (graceful fallback, body: %s)", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 (body: %s)", rec.Code, rec.Body.String())
 	}
-	if strings.Contains(rec.Body.String(), "<iframe") {
-		t.Errorf("body contains an iframe despite backend being unavailable: %s", rec.Body.String())
-	}
-	if !strings.Contains(strings.ToLower(rec.Body.String()), "unavailable") {
-		t.Errorf("body missing 'unavailable' marker: %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "not found on PATH") {
+		t.Errorf("502 body missing the spawn-failure cause: %s", rec.Body.String())
 	}
 }
 

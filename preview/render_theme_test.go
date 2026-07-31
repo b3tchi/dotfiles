@@ -1,7 +1,6 @@
 package main
 
 import (
-	"io"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -13,7 +12,7 @@ import (
 // (markdown, syntax-highlighted code, and both plain fallbacks) carries the
 // shared dark palette. Before this, renderMarkdown emitted no CSS at all and
 // renderCode used chroma's light "github" style, so a preview flashed a white
-// page inside an otherwise dark webview shell (static/shell.html is #111).
+// page against everything else this daemon renders, which is #111.
 func TestTextPreviewsAreDark(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -45,9 +44,9 @@ func TestTextPreviewsAreDark(t *testing.T) {
 }
 
 // TestTextPreviewsZoom asserts text previews ship the keyboard zoom script.
-// The image wrapper (static/app.js imageDoc) has had a fit<->1:1 toggle since
-// sp008 Task 3, but text previews had no zoom at all — font-size scaling is
-// the text analogue.
+// The native QML image tier has had a fit<->1:1 toggle since sp008 Task 3
+// (sp022 Tasks 4-5 ported it off the old webview shell), but text previews
+// had no zoom at all — font-size scaling is the text analogue.
 func TestTextPreviewsZoom(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -99,31 +98,6 @@ func TestCodePreviewUsesDarkChromaStyle(t *testing.T) {
 	if !strings.Contains(body, "#f85149") && !strings.Contains(body, "#ff7b72") {
 		t.Errorf("code preview does not look like a dark chroma style\n%s",
 			truncateForLog(body))
-	}
-}
-
-// TestShellIframeIsNotWhite guards the webview shell itself: the #content
-// iframe had `background: #fff`, which painted a white rectangle over the
-// dark shell for the instant before (and the whole time, for a transparent
-// document) the framed page rendered.
-func TestShellIframeIsNotWhite(t *testing.T) {
-	f, err := staticFS.Open("static/shell.html")
-	if err != nil {
-		t.Fatalf("open embedded shell.html: %v", err)
-	}
-	defer f.Close()
-
-	raw, err := io.ReadAll(f)
-	if err != nil {
-		t.Fatalf("read embedded shell.html: %v", err)
-	}
-	shell := string(raw)
-
-	if strings.Contains(shell, "background: #fff") || strings.Contains(shell, "background:#fff") {
-		t.Errorf("shell.html still paints an element white:\n%s", shell)
-	}
-	if !strings.Contains(shell, previewBG) {
-		t.Errorf("shell.html does not use the shared dark background %q:\n%s", previewBG, shell)
 	}
 }
 

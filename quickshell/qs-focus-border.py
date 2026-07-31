@@ -223,14 +223,30 @@ def apply_geom(c, parents):
         return
     r = c.get('rect', {})
     deco_h = c.get('deco_rect', {}).get('height', 0)
-    # rect starts below title bar — extend upward to include it.
-    # Skip the extension when leaf is inside splith/splitv that is itself
-    # inside tabbed/stacked: i3 reports deco_h=24 for the leaf even though
-    # no per-leaf title is actually rendered (the tab strip belongs to the
-    # splith intermediate, not this leaf).
+    # WHERE the title bar sits relative to `rect` is not constant, so deco_h
+    # alone cannot say whether to extend upward. i3 answers it in
+    # `window_rect.y` — the client area's offset INSIDE `rect` (dotfiles-5wod):
+    #
+    #   window_rect.y == 0       Title drawn ABOVE `rect`. The strip belongs to
+    #                            the parent (a tabbed container's tab bar), so
+    #                            `rect` is the client only and must grow upward.
+    #   window_rect.y == deco_h  Title already INSIDE `rect` — a leaf in a plain
+    #                            split, where `rect` spans title + client. The
+    #                            frame IS `rect`; extending overshoots by deco_h
+    #                            and the ring floats above the window.
+    #
+    # The second shape was unhandled until dotfiles-5wod, so every window NOT in
+    # a tabbed container got a ring 24px too high and 24px too tall.
+    #
+    # The tabbed check below stays for a third shape window_rect.y cannot name:
+    # a leaf inside a splith/splitv that is itself inside tabbed/stacked. i3
+    # reports deco_h=24 for that leaf even though no per-leaf title is rendered
+    # (the tab strip belongs to the splith intermediate, not this leaf).
     in_tabbed = any(p.get('layout') in ('tabbed', 'stacked') for p in parents)
     direct_in_tabbed = parents and parents[-1].get('layout') in ('tabbed', 'stacked')
-    if in_tabbed and not direct_in_tabbed:
+    if c.get('window_rect', {}).get('y', 0) > 0:
+        deco_h = 0
+    elif in_tabbed and not direct_in_tabbed:
         deco_h = 0
     x = r.get('x', 0)
     y = r.get('y', 0) - deco_h
