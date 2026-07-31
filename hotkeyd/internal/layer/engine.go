@@ -54,7 +54,22 @@
 //	_match_in_layer                (*Engine).matchInLayer(bind.Layer, Event, bool) ([]bind.Action, *bind.Bind)
 //	_run                           (*Engine).run([]bind.Action, *bind.Bind) []bind.Action     see "callable actions" below
 //
-// One export beyond the 21: (*Engine).ShutdownActions() []bind.Action wraps
+// Exports beyond the 21. The port table above is the reconciliation against
+// layers.py and deliberately does not grow entries for capabilities Python
+// never had:
+//
+//   - (*Engine).ShutdownActions — a Daemon method in Python, not a
+//     LayerEngine one; detailed immediately below.
+//   - (*Engine).PollIdle (hold.go, sp021) — [[adr0016]]'s ask-the-server
+//     seam. Python's daemon built the down-set itself and called
+//     reconcile_hold_layer directly, so there was nothing to export.
+//   - (*Engine).SetExternalLayer (sp023 Task 2) — the external-trigger
+//     layer kind, which layers.py had no equivalent of at all: every
+//     Python layer was chord-entered. See its own doc for the
+//     signal-only semantics and the deliberate divergence from
+//     EnterLayer's i3-mode arbitration.
+//
+// (*Engine).ShutdownActions() []bind.Action wraps
 // exitActions for cmd/hotkeyd's shutdown path, mirroring
 // Daemon.shutdown_actions (hotkeyd.py:1507-1524) — a method on Daemon, not
 // LayerEngine, in Python, where it could reach engine._exit_actions(layer)
@@ -187,6 +202,7 @@
 package layer
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -619,6 +635,113 @@ func (e *Engine) i3OwnsKeyboard() bool {
 	return e.i3Mode != DefaultI3Mode
 }
 
+// -- external-trigger layers (sp023) --------------------------------------
+
+// The named refusals SetExternalLayer answers with. Every one of them is a
+// REFUSAL, never a silent no-op ([[us019]] AC4: refused by name): the caller
+// is another process, and a request the daemon declines must be
+// distinguishable at the socket boundary from one it honoured. Wrapped with
+// the offending name via fmt.Errorf, so callers can match the class with
+// errors.Is and still report which layer was at fault.
+var (
+	// ErrNoSuchLayer: the name is in no compiled table at all.
+	ErrNoSuchLayer = errors.New("layer: no such layer")
+	// ErrNotExternalLayer: the name IS a layer, but a chord-entered one.
+	// Chord layers stay chord-only — the runtime half of sp023 plan
+	// decision 3, mirroring internal/bind's compile-time R29.
+	ErrNotExternalLayer = errors.New("layer: not an external-trigger layer")
+	// ErrLayerActive: a chord-entered layer is currently active, so an
+	// external process may not touch layer state at all — not even to
+	// clear. See SetExternalLayer's doc.
+	ErrLayerActive = errors.New("layer: a chord-entered layer is active")
+)
+
+// isExternal reports whether name is a declared signal-only layer. An
+// unknown name is not external (the caller refuses it separately).
+func (e *Engine) isExternal(name string) bool {
+	layer, ok := e.layers[name]
+	return ok && layer.External
+}
+
+// SetExternalLayer enters a declared External layer, or clears one when name
+// is DefaultLayer — the runtime half of sp023's external-trigger kind, and
+// the ONLY route into a layer that has no chord. The daemon's control socket
+// (sp023 Task 3) is its only caller; every other layer stays chord-only.
+//
+// Accepts exactly two shapes, refusing everything else by name:
+//
+//   - a name declared External in the compiled table (enter)
+//   - DefaultLayer (clear)
+//
+// and refuses ANY request while a chord-entered layer is active, so an
+// external process can never kick the user out of a layer they are standing
+// in (sp023 plan decision 3). That guard is checked FIRST, and deliberately
+// covers the clear too: a remote `set-layer default` mid-nav would otherwise
+// be exactly the eviction the policy exists to forbid. External -> external
+// is allowed (the current layer is the daemon's own signal, not the user's
+// place), as is entering from default.
+//
+// Refusals mutate nothing and publish nothing — the engine is provably in
+// the state it was in before the call.
+//
+// # Divergence from EnterLayer while i3 owns a mode (sp023 plan decision 4)
+//
+// run()'s bind.EnterLayer case REFUSES while i3OwnsKeyboard(), because a
+// chord layer's passive grabs would collide with the ones i3's mode already
+// holds (dotfiles-hwds.10). SetExternalLayer deliberately does NOT make that
+// check, and the divergence is load-bearing rather than an oversight:
+// qs-screenshot.sh puts i3 into the real "screenshot" mode for the bar's
+// hint strip BEFORE the overlay process starts, so the drag signal ALWAYS
+// arrives with i3Mode == "screenshot". Refusing here would make the feature
+// unreachable in the only flow it exists for. It is safe because an External
+// layer is SIGNAL-ONLY (sp023 plan decision 1): it holds zero grabs and does
+// not shadow the global table (see match()), so there is nothing for i3's
+// mode to collide WITH — the arbitration EnterLayer performs has no subject
+// here.
+//
+// The reverse direction is unchanged: i3 ENTERING a new non-default mode
+// while an external layer is active still force-exits it through SetI3Mode
+// (involuntary exit route 2), because that route is about i3 taking the
+// keyboard, not about grab arbitration.
+func (e *Engine) SetExternalLayer(name string) error {
+	if name == "" {
+		name = DefaultLayer
+	}
+
+	// Authority guard first: a layer the USER entered outranks any external
+	// request, including a clear.
+	if e.layerName != DefaultLayer && !e.isExternal(e.layerName) {
+		return fmt.Errorf("%w: %q is active", ErrLayerActive, e.layerName)
+	}
+
+	if name == DefaultLayer {
+		if e.layerName == DefaultLayer {
+			return nil // ok no-op: callers clear unconditionally on every exit path
+		}
+		leaving := e.layerName
+		e.layerName = DefaultLayer
+		// No exitActions: an External layer has no OnExit by construction
+		// (internal/bind's R28), so there is nothing to run and no new
+		// teardown path to own — see ShutdownActions.
+		e.publish(nil, "external-layer-cleared:"+leaving)
+		return nil
+	}
+
+	layer, ok := e.layers[name]
+	if !ok {
+		return fmt.Errorf("%w: %q", ErrNoSuchLayer, name)
+	}
+	if !layer.External {
+		return fmt.Errorf("%w: %q", ErrNotExternalLayer, name)
+	}
+	if e.layerName == name {
+		return nil // idempotent re-set; publish-on-change would swallow it anyway
+	}
+	e.layerName = name
+	e.publish(nil, "external-layer-set:"+name)
+	return nil
+}
+
 // -- publish --------------------------------------------------------------
 
 // publish emits the state IF it changed, and logs the transition with what
@@ -771,8 +894,18 @@ func chordKeyFromEvent(key string, mods map[string]bool) bind.ChordKey {
 // single Bind pointer is meaningful — matchInLayer always returns one when
 // it returns actions). While a layer is active, only ITS table is
 // consulted — i3-mode-style shadowing of the global table.
+//
+// EXCEPT for an External layer (sp023 plan decision 1), which is SIGNAL-ONLY
+// and falls through to the global index exactly as the default layer does.
+// It has no table to consult — internal/bind's R28 refuses an External layer
+// that declares Binds at all — so routing it through matchInLayer would not
+// merely be pointless, it would make every global chord dead for as long as
+// the layer is up. That is the stranded-external-layer hazard [[us019]] AC5
+// forbids ("if the process owning the binds stops, the session remains
+// usable"): the layer is cleared by a verb from a process that may have
+// died, so its cost must be pixels (a border cue), never keys.
 func (e *Engine) match(ev Event, onRelease bool) ([]bind.Action, *bind.Bind) {
-	if layer, ok := e.layers[e.layerName]; ok {
+	if layer, ok := e.layers[e.layerName]; ok && !layer.External {
 		return e.matchInLayer(layer, ev, onRelease)
 	}
 	key := indexKey{chord: chordKeyFromEvent(ev.Key, ev.Mods), onRelease: onRelease}
@@ -863,6 +996,18 @@ func (e *Engine) run(actions []bind.Action, srcBind *bind.Bind) []bind.Action {
 	for _, a := range actions {
 		switch v := a.(type) {
 		case bind.EnterLayer:
+			if e.isExternal(v.Layer) {
+				// Defense in depth (sp023 plan decision 3): internal/bind's
+				// R29 already refuses this table at load time, so this is
+				// unreachable on anything --check accepted. Kept because the
+				// consequence of it being wrong is silent — a chord would
+				// enter a layer that holds no grabs and matches no keys —
+				// and because the engine is also driven by tests and future
+				// callers that never went through Validate. Logged like the
+				// i3-mode refusal below rather than swallowed.
+				e.log(fmt.Sprintf("refusing to enter layer %q by chord: it is an external-trigger layer (set-layer only)", v.Layer))
+				continue
+			}
 			if e.i3OwnsKeyboard() {
 				// The layer's grabs would be refused by X anyway; not
 				// entering means the daemon never asks for them, so its
