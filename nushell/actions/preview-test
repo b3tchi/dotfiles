@@ -1953,6 +1953,75 @@ QtObject {
     print "SKIP: test 33 (web tier crash policy) needs a real qml6 — the reducer is pure, but faking the engine that runs it would test nothing."
 }
 
+# ── test 34: QML view resolves from the root that HOLDS it, not the first ─────
+# root that resolves. akm-root answers with the AKM root of the CURRENT dir,
+# which is the dotfiles checkout only when you happen to stand in it. Running
+# `preview show` from any other AKM repo used to build
+# <that-repo>/preview/qml/PreviewView.qml and hard-error, so preview was
+# unusable everywhere except dotfiles.
+
+# the suite stops the daemon in test 11; `window` needs one answering
+$fake_src | save --force $fake_daemon
+^chmod +x $fake_daemon
+let start34 = (run-wrapper $tmp $test_port $test_path "start")
+if $start34.exit_code != 0 {
+    print $"FAIL: could not start fake daemon for test 34:\n($start34.stdout)($start34.stderr)"
+    exit 1
+}
+
+let other_repo = $"($tmp)/repos/some-project"
+^mkdir -p $other_repo
+let fake_akm_root = $"($fake_bin_dir)/akm-root"
+$"#!/bin/bash\necho '($other_repo)'\n" | save --force $fake_akm_root
+^chmod +x $fake_akm_root
+
+# akm-root points at a repo with no preview/qml — must fall back to ~/.dotfiles
+# (the fake layout at $tmp/.dotfiles) and spawn, not error.
+let r34 = (run-wrapper $tmp $test_port $test_path "window" "2")
+if $r34.exit_code != 0 {
+    print $"FAIL: window should fall back to ~/.dotfiles when akm-root lacks the view:\n($r34.stdout)($r34.stderr)"
+    exit 1
+}
+if ($"($r34.stdout)($r34.stderr)" | str contains "not found") {
+    print $"FAIL: resolver errored instead of falling back:\n($r34.stdout)($r34.stderr)"
+    exit 1
+}
+
+# akm-root pointing at a root that DOES hold the view wins over the fallback
+let akm_qml_dir = $"($other_repo)/preview/qml"
+^mkdir -p $akm_qml_dir
+"// akm-root copy" | save --force $"($akm_qml_dir)/PreviewView.qml"
+let r34b = (run-wrapper $tmp $test_port $test_path "window" "3")
+if $r34b.exit_code != 0 {
+    print $"FAIL: window should spawn when akm-root holds the view:\n($r34b.stdout)($r34b.stderr)"
+    exit 1
+}
+# the fake qml6 appends its argv to $qml6_calls_file — the last line is ours
+let last_call = (open $qml6_calls_file | lines | last)
+if not ($last_call | str contains $"($akm_qml_dir)/PreviewView.qml") {
+    print $"FAIL: expected the akm-root view to win, qml6 got: ($last_call)"
+    exit 1
+}
+
+# neither root holds it -> loud error naming every path tried
+^rm -f $"($akm_qml_dir)/PreviewView.qml" $fake_qml_file
+let r34c = (run-wrapper $tmp $test_port $test_path "window" "4")
+if $r34c.exit_code == 0 {
+    print "FAIL: window should fail when no candidate root holds the view"
+    exit 1
+}
+# nu's error renderer hard-wraps long paths across lines with "| " gutters,
+# so flatten whitespace and gutters before matching
+let msg34 = ($"($r34c.stdout)($r34c.stderr)" | str replace --all --regex '[\s|]+' '')
+if not (($msg34 | str contains $other_repo) and ($msg34 | str contains ".dotfiles")) {
+    print $"FAIL: error should name every path tried:\n[($msg34)]"
+    exit 1
+}
+"// fake PreviewView.qml for preview-test" | save --force $fake_qml_file
+^rm -f $fake_akm_root
+run-wrapper $tmp $test_port $test_path "stop" | ignore
+print "PASS: QML view resolves from the root that holds it, error names all tried"
+
 ^rm -rf $tmp
 print ""
 let skipped = ([
@@ -1960,8 +2029,8 @@ let skipped = ([
     (if $policy_tested { null } else { "33 needs qml6" })
 ] | compact)
 if ($skipped | is-empty) {
-    print "PASS: 33 tests passed"
+    print "PASS: 34 tests passed"
 } else {
-    print $"PASS: (33 - ($skipped | length)) tests passed \(($skipped | length) skipped: ($skipped | str join '; ')\)"
+    print $"PASS: (34 - ($skipped | length)) tests passed \(($skipped | length) skipped: ($skipped | str join '; ')\)"
 }
 

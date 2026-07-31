@@ -163,27 +163,40 @@ def window-cmdline-matches [pid: int, n: int] {
     $has_qml and $has_n
 }
 
-# Resolve the absolute path to PreviewView.qml: akm-root (falling back to
-# ~/.dotfiles when it fails or is missing) joined with preview/qml/. Loud
-# error naming the resolved path if the file isn't there (sp022 Task 6 edge
-# case: akm-root failing -> ~/.dotfiles fallback; QML file missing there ->
-# loud error naming the path).
+# Resolve the absolute path to PreviewView.qml by trying every candidate root
+# and taking the first that actually HOLDS the file: akm-root's answer, then
+# ~/.dotfiles.
+#
+# Why "first that holds it" and not "first that resolves": akm-root returns the
+# AKM root of the CURRENT directory, which is only the dotfiles checkout when
+# you happen to be standing in it. Run `preview show` from any other AKM repo
+# and akm-root answers with that repo — e.g. ~/repos/b3tchi/auctions — so the
+# old code built ~/repos/b3tchi/auctions/preview/qml/PreviewView.qml and
+# hard-errored, making preview unusable from every project except dotfiles.
+# The ~/.dotfiles fallback existed but was unreachable, because akm-root had
+# succeeded; success of the command is not evidence the view is there.
+#
+# Still loud when nothing has it, and now names every path tried.
 def qml-view-path [] {
     let resolved = if (which akm-root | is-empty) {
         null
     } else {
         (do { ^akm-root } | complete)
     }
-    let root = if $resolved != null and $resolved.exit_code == 0 and ($resolved.stdout | str trim | is-not-empty) {
+    let akm_root = if $resolved != null and $resolved.exit_code == 0 and ($resolved.stdout | str trim | is-not-empty) {
         $resolved.stdout | str trim
     } else {
-        "~/.dotfiles" | path expand
+        null
     }
-    let qml = ($root | path join $QML_REL_DIR $QML_FILE)
-    if not ($qml | path exists) {
-        error make { msg: $"preview: ($QML_FILE) not found at ($qml)" }
+    let candidates = ([$akm_root ("~/.dotfiles" | path expand)]
+        | where {|r| $r != null }
+        | each {|r| $r | path join $QML_REL_DIR $QML_FILE }
+        | uniq)
+    let found = ($candidates | where {|q| $q | path exists })
+    if ($found | is-empty) {
+        error make { msg: $"preview: ($QML_FILE) not found — tried ($candidates | str join ', ')" }
     }
-    $qml
+    $found | first
 }
 
 # The X display number from a DISPLAY value: ":10.0" -> "10", ":0" -> "0".
