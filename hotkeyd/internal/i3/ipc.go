@@ -1,6 +1,6 @@
 // Package i3 is a zero-dependency, stdlib-only client for the i3 IPC
 // protocol (https://i3wm.org/docs/ipc.html), ported from hotkeyd.py's
-// I3Client class. See adr0018 for why this repo owns its own protocol
+// I3Client class. See adr0021 for why this repo owns its own protocol
 // clients instead of importing one.
 package i3
 

@@ -1,7 +1,7 @@
 // Package x11 is a zero-dependency, stdlib-only client for the X11 wire
 // protocol, ported from the poc015 spike (docs/notes/lab/poc015.md). It owns
 // only the requests hotkeyd needs: connection setup/auth, sequence
-// correlation, and the read loop. See adr0018 for why this exists instead of
+// correlation, and the read loop. See adr0021 for why this exists instead of
 // a vendored xgb fork.
 package x11
 

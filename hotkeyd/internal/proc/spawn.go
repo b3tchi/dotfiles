@@ -72,7 +72,7 @@ func closeOnExecOpenFDs() {
 		}
 		// syscall.FcntlInt does not exist in the stdlib syscall
 		// package (only in golang.org/x/sys/unix, a third-party
-		// dependency adr0018 forbids) -- call SYS_FCNTL directly,
+		// dependency adr0021 forbids) -- call SYS_FCNTL directly,
 		// the same raw syscall the unexported stdlib fcntl() helper
 		// itself makes.
 		_, _, _ = syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), uintptr(syscall.F_SETFD), uintptr(syscall.FD_CLOEXEC))
