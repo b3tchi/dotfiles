@@ -5,6 +5,8 @@ Shipped workstreams. Specs (`sp###`) at `status: done` after
 
 ## done
 
+- [[sp021|hotkeyd-go-zero-dep-rewrite]]
+
 - [[sp022|preview-qml-native-render-tiers]]
 
 - [[sp020|python-global-hotkey-layer]]

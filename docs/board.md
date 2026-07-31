@@ -22,7 +22,6 @@ sections when status flips.
 
 - [[sp023|hotkeyd-external-layer-trigger]]
 
-- [[sp021|hotkeyd-go-zero-dep-rewrite]]
 
 
 
