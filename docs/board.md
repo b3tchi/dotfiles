@@ -20,7 +20,6 @@ sections when status flips.
 
 ## ready
 
-- [[sp023|hotkeyd-external-layer-trigger]]
 
 
 
