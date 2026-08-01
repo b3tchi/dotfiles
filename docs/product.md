@@ -23,7 +23,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[us015|picker-overlay-visual-parity]] (done) >> [[im006]]
 - [[us017|recall-clipboard-history]] (draft)
 - [[us018|clip-picker-esc-instant-close-rdp]] (draft)
-- [[us019|programmable-global-keybinds]] >> [[im009]]
+- [[us019|programmable-global-keybinds]] (done) >> [[im010]]
 - [[us020|per-display-bind-expression]]
 
 ## Features
