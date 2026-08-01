@@ -302,6 +302,44 @@ func sortDumpBinds(bs []dumpBind) {
 // normalizeDumpTable sorts every bind slice into a stable order (by chord
 // identity) so the comparison is over the SET/multiset the success criteria
 // asks for, not over incidental construction order on either side.
+// intentionalDivergences records every bind whose behavior DELIBERATELY no
+// longer matches what Python shipped, with the reason and the issue that
+// changed it. The golden dump is a truthful historical record of the table the
+// user's keyboard actually had before the rewrite — editing the fixture to
+// match a later deliberate change would turn that record into a lie, and the
+// next person reading it would believe Python behaved a way it never did.
+//
+// So the fixture stays frozen and divergence becomes explicit HERE, where it
+// has to be named and justified. An accidental behavior change still fails the
+// parity test, which is the property that matters; only a change someone chose
+// and wrote down passes.
+//
+// Keep this list short. A long one means the parity contract has stopped
+// meaning anything and should be retired deliberately rather than eroded.
+var intentionalDivergences = map[string]string{
+	// dotfiles-b3d4: Python fired this on PRESS. A held chord therefore
+	// relaunched the launcher for as long as it was down; each launch killed
+	// the previous SELECTOR but not the previous LAUNCHER, which then ran its
+	// unconditional clear and wiped the layer the newer launch had raised —
+	// the aiming strip and ring flickered in and out. Release fires once per
+	// physical gesture, matching the two sibling screenshot binds
+	// ($mod+Print, $mod+Shift+Print) that already carried OnRelease.
+	"$mod+Shift+s": "OnRelease: fires once per gesture instead of per repeat",
+}
+
+// applyIntentionalDivergences rewrites the PYTHON side to the behavior we
+// deliberately chose afterwards, so the comparison still covers chord, device
+// and actions for those binds — only the named field stops being asserted.
+// Applied to the python dump rather than the go one so an unexpected go-side
+// change still shows up as a mismatch.
+func applyIntentionalDivergences(d *dumpTable) {
+	for i, b := range d.Binds {
+		if _, ok := intentionalDivergences[b.Chord]; ok {
+			d.Binds[i].OnRelease = true
+		}
+	}
+}
+
 func normalizeDumpTable(d *dumpTable) {
 	sortDumpBinds(d.Binds)
 	for name, l := range d.Layers {
@@ -330,6 +368,62 @@ const goldenDumpFixture = "testdata/golden-dump-python.json"
 // absent, which was right when the fixture had to be computed; there is
 // nothing left to be absent, so a read error here is a broken checkout, not a
 // reason to pass.
+// TestIntentionalDivergencesAreLive keeps the allowlist above honest. An entry
+// that no longer describes a real divergence is WORSE than no entry at all: it
+// silently stops asserting OnRelease for that chord, so a later accidental
+// change to the same bind would sail through the parity test that exists to
+// catch exactly that.
+//
+// Every entry must therefore name a chord that (a) still exists in the frozen
+// python dump, and (b) still actually differs — python false, go true. Revert
+// the go-side change and this test tells you to drop the entry.
+func TestIntentionalDivergencesAreLive(t *testing.T) {
+	raw, err := os.ReadFile(goldenDumpFixture)
+	if err != nil {
+		t.Fatalf("cannot read the golden dump at %s: %v", goldenDumpFixture, err)
+	}
+	var pyDump dumpTable
+	if err := json.Unmarshal(raw, &pyDump); err != nil {
+		t.Fatalf("could not parse golden-dump JSON at %s: %v", goldenDumpFixture, err)
+	}
+	goDump := goldenDumpFromGoTable()
+
+	pyByChord := map[string]dumpBind{}
+	for _, b := range pyDump.Binds {
+		pyByChord[b.Chord] = b
+	}
+	goByChord := map[string]dumpBind{}
+	for _, b := range goDump.Binds {
+		goByChord[b.Chord] = b
+	}
+
+	for chord, reason := range intentionalDivergences {
+		py, ok := pyByChord[chord]
+		if !ok {
+			t.Errorf("intentionalDivergences names %q (%s), but no such chord "+
+				"exists in the frozen python dump — the entry is stale and is "+
+				"masking nothing; drop it", chord, reason)
+			continue
+		}
+		got, ok := goByChord[chord]
+		if !ok {
+			t.Errorf("intentionalDivergences names %q (%s), but the go table no "+
+				"longer declares that chord; drop the entry", chord, reason)
+			continue
+		}
+		if py.OnRelease {
+			t.Errorf("intentionalDivergences names %q (%s), but python ALREADY "+
+				"had OnRelease=true — there is no divergence to allow; drop it",
+				chord, reason)
+		}
+		if !got.OnRelease {
+			t.Errorf("intentionalDivergences names %q (%s), but the go table has "+
+				"OnRelease=false — the divergence was reverted, so the entry now "+
+				"silently disables parity for this bind; drop it", chord, reason)
+		}
+	}
+}
+
 func TestGoldenDumpParity(t *testing.T) {
 	raw, err := os.ReadFile(goldenDumpFixture)
 	if err != nil {
@@ -344,6 +438,7 @@ func TestGoldenDumpParity(t *testing.T) {
 	}
 	goDump := goldenDumpFromGoTable()
 
+	applyIntentionalDivergences(&pyDump)
 	normalizeDumpTable(&pyDump)
 	normalizeDumpTable(&goDump)
 

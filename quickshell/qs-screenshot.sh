@@ -75,6 +75,25 @@ export GDK_BACKEND
 # grab. Scoped to our session: an overlay on another display is left alone.
 qs_kill_session -f 'qs-region\.py'
 
+# CLAIM THE LAYER (dotfiles-b3d4). The kill above replaces the previous
+# SELECTOR, but the previous LAUNCHER outlives it by design (see the no-exec
+# note in the header) and would then run its unconditional clear at the bottom
+# — wiping the layer THIS launch is about to raise. Two overlapping launches
+# therefore flickered the strip and ring in and out.
+#
+# A pid token settles who owns the layer: the newest launch writes its own pid
+# here, and only the launcher still named by the token clears on exit. An
+# older, superseded launcher reads a pid that is not its own and declines. No
+# extra kill is involved — widening qs_kill_session to match this script would
+# match THIS process too, and pgrep-based self-slaughter is exactly the class
+# of guard that goes wrong quietly.
+#
+# Session-scoped like every other runtime file here ($QS_SID, dotfiles-8xt), so
+# native :0 and xrdp :10 never share a token. A crashed launcher leaves a stale
+# token, which is harmless: the next launch overwrites it unconditionally.
+QS_SHOT_OWNER="${XDG_RUNTIME_DIR:-/tmp}/qs-shot-owner.$QS_SID"
+printf '%s\n' "$$" > "$QS_SHOT_OWNER" 2>/dev/null || true
+
 # Raise the AIMING layer so the bar shows the hint strip and the focus ring
 # goes red, then run the selector. Same spelling and the same `|| true`
 # discipline as the clear at the bottom — see that comment for why both are
@@ -116,6 +135,15 @@ set -e
 # sp023's "Consumer spawn discipline". ONE spelling across all three call
 # sites of this signal (the raise above, this clear, and qs-region.py's drag
 # raise), deliberately, rather than resolving the local ones through $QS_DIR.
-"$HOME/.dotfiles/hotkeyd/hotkeyd" set-layer default >/dev/null 2>&1 || true
+#
+# GUARDED BY THE OWNERSHIP TOKEN (dotfiles-b3d4). "Every exit path" still holds
+# for the launcher that OWNS the layer; a superseded one skips the clear
+# entirely, because the pid in the token is the newer launcher's and clearing
+# here would strip the layer out from under a live selector. The owner removes
+# the token as it clears, so the file never outlives the gesture it describes.
+if [ "$(cat "$QS_SHOT_OWNER" 2>/dev/null || true)" = "$$" ]; then
+    "$HOME/.dotfiles/hotkeyd/hotkeyd" set-layer default >/dev/null 2>&1 || true
+    rm -f "$QS_SHOT_OWNER" 2>/dev/null || true
+fi
 
 exit "$status"

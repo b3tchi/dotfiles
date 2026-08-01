@@ -402,7 +402,13 @@ func buildBinds() []bind.Bind {
 		bind.Bind{Chord: "Print", Actions: runAction("i3-scrot")},
 		bind.Bind{Chord: "$mod+Print", Actions: runAction("i3-scrot -w"), OnRelease: true},
 		bind.Bind{Chord: "$mod+Shift+Print", Actions: runAction("i3-scrot -s"), OnRelease: true},
-		bind.Bind{Chord: "$mod+Shift+s", Actions: runAction(qsScreenshot)},
+		// OnRelease like its two siblings above (dotfiles-b3d4). On PRESS a
+		// held chord relaunches the launcher for as long as it is down: each
+		// launch kills the previous SELECTOR but not the previous LAUNCHER,
+		// which then runs its unconditional `set-layer default` and clears
+		// the layer the newer launch just raised — the aiming strip and ring
+		// flicker in and out. Release fires once per physical gesture.
+		bind.Bind{Chord: "$mod+Shift+s", Actions: runAction(qsScreenshot), OnRelease: true},
 	)
 
 	// ---- THE SYSTEM MODE (dotfiles-hwds.38) -------------------------------
