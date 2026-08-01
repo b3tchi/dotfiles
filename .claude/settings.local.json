@@ -268,7 +268,8 @@
       "Bash(DISPLAY=:0 ~/.dotfiles/i3/scripts/qs-title-trim.sh)",
       "Bash(pkill -f qs-title-trim)",
       "Bash(bd --version)",
-      "Bash(bd bootstrap:*)"
+      "Bash(bd bootstrap:*)",
+      "Bash(preview start *)"
     ]
   }
 }
