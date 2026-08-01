@@ -17,6 +17,7 @@ sections when status flips.
 
 ## spec
 
+- [[sp024|hotkeyd-screenshot-aiming-layer-trigger]]
 
 ## ready
 
