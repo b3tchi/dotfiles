@@ -270,6 +270,40 @@ var Layers = map[string]bind.Layer{
 		OnExit: runAction(qsOverlay + " switcher-cancel"),
 	},
 
+	// was i3 `mode "screenshot"` (sp024, bd dotfiles-0tv1.2) — the AIMING
+	// phase of the screenshot gesture, and the SECOND External layer.
+	//
+	// quickshell/qs-screenshot.sh raises this before it starts the selector,
+	// so Bar.qml paints its hint strip (`w` = whole screen, Esc = cancel) and
+	// qs-focus-border.py reddens the ring around the focused window — "this
+	// is what `w` would capture". Cleared by the launcher's single
+	// unconditional `set-layer default` on every exit path, which covers this
+	// layer and "screenshot-drag" alike (whichever is up when the capture
+	// ends).
+	//
+	// It travelled as a real i3 mode until sp024, for the same reason the
+	// drag phase did: i3's mode-change IPC was the only channel already wired
+	// to every consumer. The daemon's layer feed is that channel now, and
+	// Bar.qml:333 already prefers ANY non-default daemon layer over i3Mode,
+	// so the i3 `mode "screenshot" {}` block is DELETED in the same commit
+	// this declaration arrives — never left beside it (a signal in two
+	// channels is the double-fire class ft011 exists to kill).
+	//
+	// Its Escape/q bindsyms went with the block, and that is safe rather than
+	// merely tidy: i3 now stays in `default` for the whole capture, so there
+	// is no stuck MODE for Escape to unstick — the dotfiles-ux1 failure class
+	// dissolves rather than needing a replacement. A stranded layer (launcher
+	// SIGKILLed mid-aiming) costs a stuck hint strip and a red ring and
+	// NOTHING ELSE, because an External layer holds zero grabs; `hotkeyd.sh
+	// restart` clears it. While the selector is alive its own seat grab owns
+	// the keys in-process, which is why the keyboard is never at stake here.
+	//
+	// KNOWN LIMITATION, accepted at sp024: with the daemon absent (panic
+	// linked, sway session, hotkeyd dead) the launcher's `set-layer` fails
+	// under `|| true` and NOTHING paints — no strip, no ring. The capture
+	// still works. Pixels, never keys.
+	"screenshot": {External: true},
+
 	// was i3 `mode "screenshot-drag"` (sp023, bd dotfiles-1m4t.5) — the
 	// FIFTH layer shape, and the only one no chord can reach.
 	//
@@ -290,9 +324,12 @@ var Layers = map[string]bind.Layer{
 	// while active: during a drag the overlay owns a seat grab over all
 	// input anyway, so daemon grabs would be inert — and a STRANDED
 	// external layer (both the overlay and its launcher dying without
-	// clearing) must therefore cost pixels, never keys (us019 AC5). The
-	// real keyboard escape in that case is i3's own surviving
-	// `mode "screenshot"` block and its Escape/q fallback.
+	// clearing) must therefore cost pixels, never keys (us019 AC5). There is
+	// no keyboard escape to name any more and none is needed: sp024 deleted
+	// the `mode "screenshot"` block that used to be one, i3 stays in
+	// `default` through the whole gesture, and a stranded layer leaves the
+	// full global bind table reachable. `hotkeyd.sh restart` clears the
+	// pixels.
 	//
 	// Entered and left ONLY by `hotkeyd set-layer <name>` / `set-layer
 	// default` — never by a keystroke, which is why the R20 "a layer with

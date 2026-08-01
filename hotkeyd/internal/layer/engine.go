@@ -689,15 +689,26 @@ func (e *Engine) isExternal(name string) bool {
 // run()'s bind.EnterLayer case REFUSES while i3OwnsKeyboard(), because a
 // chord layer's passive grabs would collide with the ones i3's mode already
 // holds (dotfiles-hwds.10). SetExternalLayer deliberately does NOT make that
-// check, and the divergence is load-bearing rather than an oversight:
-// qs-screenshot.sh puts i3 into the real "screenshot" mode for the bar's
-// hint strip BEFORE the overlay process starts, so the drag signal ALWAYS
-// arrives with i3Mode == "screenshot". Refusing here would make the feature
-// unreachable in the only flow it exists for. It is safe because an External
-// layer is SIGNAL-ONLY (sp023 plan decision 1): it holds zero grabs and does
-// not shadow the global table (see match()), so there is nothing for i3's
-// mode to collide WITH — the arbitration EnterLayer performs has no subject
-// here.
+// check, and the divergence is load-bearing rather than an oversight.
+//
+// Its ORIGINAL motivating example is gone as of sp024: qs-screenshot.sh used
+// to put i3 into a real "screenshot" mode for the bar's hint strip before the
+// overlay process started, so the drag signal ALWAYS arrived with
+// i3Mode == "screenshot" and refusing here would have made the feature
+// unreachable in the only flow it existed for. The aiming phase is its own
+// External layer now and that i3 mode block is deleted, so the whole gesture
+// runs with i3 sitting in "default" — the two set-layer calls the flow makes
+// are external -> external.
+//
+// The divergence STAYS, because what it protects outlives that flow: i3 can
+// still own a mode when an external signal arrives. The panic path is the
+// live case (hotkeyd stopped, config.d/zz-fallback-binds.conf linked in, the
+// user standing in a real nav/resize/$mode_system mode), and a mode i3 owns
+// must not make a signal-only layer unreachable. It is safe for the same
+// reason it always was: an External layer is SIGNAL-ONLY (sp023 plan
+// decision 1) — it holds zero grabs and does not shadow the global table (see
+// match()), so there is nothing for i3's mode to collide WITH, and the
+// arbitration EnterLayer performs has no subject here.
 //
 // The reverse direction is unchanged: i3 ENTERING a new non-default mode
 // while an external layer is active still force-exits it through SetI3Mode

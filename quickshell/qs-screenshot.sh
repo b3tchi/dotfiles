@@ -1,6 +1,6 @@
 #!/bin/sh
-# Region screenshot launcher — enters the i3 "screenshot" mode, runs the live
-# selector (qs-region.py), then resets the mode when it exits.
+# Region screenshot launcher — raises hotkeyd's "screenshot" layer, runs the
+# live selector (qs-region.py), then clears the layer when it exits.
 #
 # Bound to $mod+Shift+s. The selector shapes its window down to a rubber-band
 # outline over the LIVE desktop: no frozen grab, no dim, and no opaque
@@ -16,10 +16,21 @@
 # gone — it was shared by every display and clobbered across sessions
 # (dotfiles-8xt).
 #
-# The i3 mode exists ONLY so the bar paints its hint strip (Bar.qml modeHints).
-# The keys are handled inside the selector, which holds a pointer+keyboard
-# grab. That is also why we do NOT exec: the mode must be reset once the
-# selector exits, so this script has to outlive it.
+# The "screenshot" LAYER exists ONLY so the bar paints its hint strip (Bar.qml
+# modeHints) and qs-focus-border.py reddens the ring. It binds no keys and
+# holds no grabs — the keys are handled inside the selector, which holds a
+# pointer+keyboard grab of its own. That is also why we do NOT exec: the layer
+# must be cleared once the selector exits, so this script has to outlive it.
+#
+# It was an i3 MODE until sp024 (`i3-msg mode screenshot` against a real
+# `mode "screenshot" {}` block). One channel now, hotkeyd's, for both phases
+# of the gesture — see the cleanup comment near the bottom.
+#
+# KNOWN LIMITATION, accepted at sp024: with the daemon unreachable (panic
+# config linked, sway session, hotkeyd dead) the raise fails under `|| true`
+# and NOTHING paints — no hint strip, no red ring, because no i3 mode exists
+# to paint them either any more. The capture itself is unaffected: the
+# selector's own seat grab owns the keys in-process. Pixels, never keys.
 set -eu
 
 # Session scoping (QS_SID / qs_same_session / qs_kill_session). Sourced, never
@@ -64,27 +75,31 @@ export GDK_BACKEND
 # grab. Scoped to our session: an overlay on another display is left alone.
 qs_kill_session -f 'qs-region\.py'
 
-wm_msg() {
-    if [ -n "${SWAYSOCK:-}" ]; then swaymsg "$@"; else i3-msg "$@"; fi
-}
-
-# Enter the mode so the bar shows the hint strip, then run the selector.
-wm_msg mode screenshot >/dev/null 2>&1 || true
+# Raise the AIMING layer so the bar shows the hint strip and the focus ring
+# goes red, then run the selector. Same spelling and the same `|| true`
+# discipline as the clear at the bottom — see that comment for why both are
+# load-bearing.
+#
+# The `wm_msg()` swaymsg/i3-msg shim that used to live here went with the i3
+# mode (sp024): nothing in this script talks to the WM any more.
+"$HOME/.dotfiles/hotkeyd/hotkeyd" set-layer screenshot >/dev/null 2>&1 || true
 
 set +e
 "$QS_DIR/qs-region.py" "$@"
 status=$?
 set -e
 
-# Reset the mode on EVERY exit path — capture, cancel, or crash. Without this
-# the bar sits in "screenshot" forever (the dotfiles-ux1 failure class).
-wm_msg mode default >/dev/null 2>&1 || true
-
-# Same reset, for the OTHER signal the selector raises: hotkeyd's
-# "screenshot-drag" external layer (sp023). qs-region.py raises it when a drag
-# starts and deliberately does NOT clear it — that process can be killed
-# outright mid-drag, and this launcher is the one that outlives it, exactly as
-# with the i3 mode above.
+# Clear on EVERY exit path — capture, cancel, or crash. Without this the bar
+# sits in "screenshot" forever, and the ring stays red.
+#
+# ONE call clears BOTH phases of the gesture (sp024). The selector raises a
+# SECOND layer of its own, "screenshot-drag" (sp023), from its `_press` the
+# moment a drag starts, and deliberately does NOT clear it — that process can
+# be killed outright mid-drag, and this launcher is the one that outlives it.
+# `set-layer default` clears whichever of the two is up: external -> external
+# is a permitted transition and the clear does not name a layer, so no
+# bookkeeping is needed here (pinned by internal/layer's
+# TestExternalToExternalHandoff / "clear from second").
 #
 # Unconditional, on every path: clearing when nothing is set is an ok no-op
 # (`set-layer default` exits 0 with nothing to clear), and a conditional clear
@@ -98,8 +113,9 @@ wm_msg mode default >/dev/null 2>&1 || true
 #
 # Spelled the same way qs-region.py spells it (and Bar.qml:304 before both):
 # $HOME/.dotfiles/hotkeyd/hotkeyd, invoked directly with no wrapper script —
-# sp023's "Consumer spawn discipline". One spelling for both halves of one
-# signal, deliberately, rather than resolving this half through $QS_DIR.
+# sp023's "Consumer spawn discipline". ONE spelling across all three call
+# sites of this signal (the raise above, this clear, and qs-region.py's drag
+# raise), deliberately, rather than resolving the local ones through $QS_DIR.
 "$HOME/.dotfiles/hotkeyd/hotkeyd" set-layer default >/dev/null 2>&1 || true
 
 exit "$status"

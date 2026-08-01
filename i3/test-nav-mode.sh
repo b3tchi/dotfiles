@@ -562,10 +562,12 @@ assert_eq "Right focuses the right-hand window" "$(focused)" "$LEFT"
 #
 # quickshell/qs-focus-border.py draws the focus ring and now follows HOTKEYD's
 # layer feed rather than i3 mode events (dotfiles-hwds.9): nav left i3 in the
-# cutover, so the "you are in a key-capturing mode" cue had to move with it —
-# `COLOR_MODES` is `{'screenshot'}` now, and any non-default LAYER colours the
-# ring. Asserted HERE because this is the only harness with a real i3, real
-# windows to draw around, AND a real daemon publishing layers.
+# cutover, so the "you are in a key-capturing mode" cue had to move with it.
+# The feed is the SOLE source since sp024 (dotfiles-0tv1.2) retired the last
+# i3-mode colour set, `COLOR_MODES = {'screenshot'}`, along with the aiming
+# mode itself — any non-default LAYER colours the ring and nothing else does.
+# Asserted HERE because this is the only harness with a real i3, real windows
+# to draw around, AND a real daemon publishing layers.
 #
 # The assertion is on actual PIXELS (adr0002 — UI observed through sh-visible
 # effects): screenshot the root window and count the ring's colour. Skipped

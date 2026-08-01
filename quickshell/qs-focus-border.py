@@ -32,18 +32,16 @@ BC = (0x16/255, 0xa0/255, 0x85/255)
 # under the cursor. The bar's mode pill says the same thing, but the frame is
 # where the eye already is while navigating.
 MODE_BC = (0xcb/255, 0x4b/255, 0x16/255)   # ModeBarTheme.highlight
-# i3 modes that still colour the frame. "screenshot" is here so the ring around
-# the currently-focused window doubles as "this is what `w` would capture" — it
-# changes again mid-gesture, when the daemon's "screenshot-drag" layer comes up
-# and hides the ring outright (see SUPPRESS_LAYERS below).
+# NO i3-MODE COLOUR SET LIVES HERE ANY MORE (sp024, dotfiles-0tv1.2), just as
+# no i3-mode SUPPRESSION set has since sp023. There used to be a COLOR_MODES
+# containing 'screenshot' — the aiming phase of a capture, which i3 owned as a
+# real mode. It is a hotkeyd EXTERNAL LAYER now (see hotkeyd_layer_monitor
+# below), so the general layer rule already colours it and a dedicated i3 set
+# would be the same signal on a second channel.
 #
-# `nav` is NOT here any more: it left i3 entirely in the sp020 T7 cutover, and
-# the daemon's layer feed replaced it (see hotkeyd_layer_monitor below). Any i3
-# mode listed here still works the old way.
-#
-# This set is COLOUR ONLY. i3 modes no longer suppress the border at all —
-# suppression is the layer feed's, exclusively (sp023, dotfiles-1m4t.6).
-COLOR_MODES = {'screenshot'}
+# `nav` had left the same way one cutover earlier (sp020 T7). Nothing i3 emits
+# colours the frame today: the feed is the SOLE source, and `layer_colored` is
+# the only flag Border._draw reads.
 
 # hotkeyd layers that mean the same thing as a colouring i3 mode did: bare
 # letters are WM commands, not input. Anything other than "default" qualifies —
@@ -81,9 +79,9 @@ SILENT_LAYERS = {'switcher'}
 # NOTIFICATION window, so every refresh restacks it — and during a drag
 # refreshes fire constantly (binding events, the 100ms mouse poll). It would
 # restack above the live selector overlay and be baked into the capture. The
-# aiming-phase highlight ("screenshot" in COLOR_MODES) is also stale from this
-# point on: the user is selecting an arbitrary area, not capturing the window
-# that was highlighted.
+# aiming-phase highlight (the "screenshot" LAYER, which this one supersedes at
+# mouse-press time) is also stale from this point on: the user is selecting an
+# arbitrary area, not capturing the window that was highlighted.
 #
 # WHY THIS IS A LAYER AND NOT AN i3 MODE any more: it used to travel as a
 # synthetic `i3-msg mode screenshot-drag` against a real `mode
@@ -94,11 +92,12 @@ SILENT_LAYERS = {'switcher'}
 # current state on connect, so a helper (re)started mid-drag starts suppressed
 # rather than flashing a frame into the capture.
 #
-# SUPPRESSION IS THE FEED'S, EXCLUSIVELY. No i3 mode arms or disarms it. The
-# two channels bracket one gesture and their "default" events are unordered
-# (two subprocess calls from the same qs-screenshot.sh cleanup); letting an i3
-# "mode default" clear a layer-armed suppression would un-hide the border while
-# the overlay is still up.
+# BOTH CUES ARE THE FEED'S, EXCLUSIVELY. No i3 mode arms or disarms suppression
+# (sp023) and none colours the ring either (sp024) — the aiming phase that used
+# to be the last i3 mode in the gesture is now the "screenshot" LAYER, so both
+# phases arrive in order on ONE channel and the whole clobber class (an i3
+# "mode default" un-hiding the border while the overlay is still up) is gone
+# rather than defended against.
 SUPPRESS_LAYERS = {'screenshot-drag'}
 
 
@@ -119,7 +118,8 @@ IGNORE_TITLES = {'qs-focus-border', 'qs-focus-dim'}
 # between binding event and overlay grabbing focus, leaving a frame
 # visible around whatever was focused before mod+d / mod+p / mod+tab.
 SUPPRESS_WHEN_PRESENT_TITLES = {'qs-launcher', 'qs-projects', 'qs-switcher', 'qs-clip', 'qs-notif'}
-# NO i3-MODE SUPPRESSION SET LIVES HERE ANY MORE (sp023, dotfiles-1m4t.6).
+# NO i3-MODE SUPPRESSION SET LIVES HERE ANY MORE (sp023, dotfiles-1m4t.6), and
+# since sp024 (dotfiles-0tv1.2) no i3-mode COLOUR set either — see MODE_BC.
 # The screenshot selector (quickshell/qs-region.py) is a GDK POPUP window —
 # override-redirect — so i3 emits NO window::new for it and a hide keyed off
 # that event would never fire. That hide is real and still required; it just
@@ -173,7 +173,7 @@ class Border:
 
     def _draw(self, widget, cr):
         # The shape clips everything but the ring — solid fill is enough.
-        cr.set_source_rgb(*(MODE_BC if mode_colored else BC))
+        cr.set_source_rgb(*(MODE_BC if layer_colored else BC))
         cr.paint()
 
     def update(self, x, y, w, h):
@@ -205,26 +205,18 @@ border = Border()
 # always did ("something is covering the screen; do not draw").
 mode_suppressed = False
 
-# The ring goes red from TWO independent sources now, and they must not clobber
-# each other: an i3 mode in COLOR_MODES (screenshot), and a non-default hotkeyd
-# layer (nav — no longer an i3 mode at all). Keeping one flag per source means a
-# "mode default" event on leaving screenshot cannot blank a red that the layer
-# feed owns, and vice versa. `mode_colored` is the derived OR, read by
-# Border._draw. All three are main-thread-only, same discipline as
-# mode_suppressed.
-i3_mode_colored = False
+# The ring goes red from ONE source: a non-default, non-silent, non-suppressed
+# hotkeyd layer. Read directly by Border._draw. Main-thread-only, same
+# discipline as mode_suppressed.
+#
+# There were THREE flags here until sp024 (dotfiles-0tv1.2): `i3_mode_colored`
+# for the i3 half (COLOR_MODES), `layer_colored` for the feed half, and a
+# derived `mode_colored` OR-fold recomputed by `_recompute_colored`. The fold
+# existed purely so an i3 "mode default" event on leaving the aiming phase
+# could not blank a red the layer feed owned, and vice versa. The aiming phase
+# is a LAYER now, so there is no second source to fold, and the whole clobber
+# class it defended against cannot arise — see MODE_BC.
 layer_colored = False
-mode_colored = False
-
-
-def _recompute_colored():
-    """Fold the two colour sources into mode_colored. True if it changed."""
-    global mode_colored
-    want = i3_mode_colored or layer_colored
-    if want == mode_colored:
-        return False
-    mode_colored = want
-    return True
 
 
 def should_ignore(c):
@@ -242,8 +234,9 @@ def should_ignore(c):
 
 def apply_geom(c, parents):
     # mode_suppressed re-checked here: a refresh already in flight when the
-    # mode started must not restack the border. It was already hidden at
-    # mode-enter (see handle_event's mode branch) — just bail.
+    # suppress layer came up must not restack the border. It was already hidden
+    # when the layer arrived (see _set_layer_state) — just bail. The flag keeps
+    # its historical name; the trigger has been a LAYER since sp023.
     if mode_suppressed:
         return
     if should_ignore(c):
@@ -298,37 +291,27 @@ def handle_event(data):
         if nodes:
             refresh_focused()
         return
-    # i3 "mode" change. A mode event has only 'change' (the mode name) — no
-    # container/current/binding. Every mode is handled identically now: set the
-    # i3 half of the colour state, then refresh. Leaving a colouring mode must
-    # redraw because the screenshot overlay never emits a focus event, and
-    # modes like "resize" keep the live-refresh behavior.
+    # THERE IS NO i3 "mode" BRANCH ANY MORE (sp024, dotfiles-0tv1.2), and
+    # "mode" is off the subscribe list below, so one should not even arrive.
     #
-    # NO MODE SUPPRESSES, AND NO MODE UNSUPPRESSES (sp023, dotfiles-1m4t.6).
-    # `mode_suppressed` is the layer feed's alone. The refresh below is a
-    # deliberate no-op while a suppress layer is up (refresh_focused checks the
-    # flag first): the i3 mode and the daemon layer bracket one screenshot
-    # gesture and their two "default" events are unordered — two subprocess
-    # calls out of the same qs-screenshot.sh cleanup — so a mode event that
-    # cleared suppression would un-hide the border mid-capture whenever i3's
-    # clear happened to land first. A stale i3 config still emitting a
-    # `screenshot-drag` MODE event lands here too and is likewise inert: the
-    # name is in no i3-mode set any more.
-    if 'container' not in e and 'current' not in e and 'binding' not in e:
-        global i3_mode_colored
-        # Recolour BEFORE any redraw below, so the refresh that follows a mode
-        # change paints the new colour rather than the previous one. Only the
-        # i3 half of the colour state is touched — a hotkeyd layer that is up at
-        # the same time keeps the ring red through this event.
-        i3_mode_colored = change in COLOR_MODES
-        recolored = _recompute_colored()
-        refresh_focused()
-        # A mode swap that changes only the colour (screenshot -> default
-        # with focus unchanged) still needs the ring repainted:
-        # refresh_focused skips the GTK draw when geometry is identical.
-        if recolored:
-            border.win.queue_draw()
-        return
+    # It used to set the i3 half of the colour state (COLOR_MODES) and refresh.
+    # Both halves moved: the colour comes off the layer feed, and the refresh +
+    # queue_draw that went with it are carried by _set_layer_state, which does
+    # exactly the same pair whenever the colour flips or a suppression lifts.
+    # quickshell/test_qs_focus_border_mode.py pins that (aiming-enter and
+    # aiming-clear both assert refresh AND queue_draw) rather than assuming it.
+    #
+    # A mode-shaped event can still reach here on a half-updated estate — an i3
+    # that has not reloaded since the mode blocks were deleted from
+    # i3/config.common. It has only 'change', so it falls straight through the
+    # container check below and is FULLY INERT: no colour, no suppression, no
+    # refresh. That is the point. A second channel that still moved the border
+    # would be the double-fire class the migration exists to kill.
+    #
+    # What that costs: under the panic config (hotkeyd stopped,
+    # zz-fallback-binds.conf linked in) i3's real nav/resize/$mode_system modes
+    # no longer drive a refresh each. Accepted — COLOR_MODES never held those
+    # names, so no colour is lost, and window/binding events still refresh.
     c = e.get('container')
     if not c:
         return
@@ -338,10 +321,11 @@ def handle_event(data):
         # title reports the default name "quickshell"). It may cover the
         # screen and the border would float above it — hide now, before the
         # follow-up refresh restores it. NOT used for the screenshot
-        # selector (quickshell/qs-region.py): that overlay hides on i3 MODE
-        # ENTER (see the mode branch above), not here — it is a GDK POPUP
-        # (override-redirect), and i3 never emits window::new for
-        # override-redirect windows, so this branch would never see it.
+        # selector (quickshell/qs-region.py): that overlay hides when the
+        # "screenshot-drag" LAYER arrives (see _set_layer_state), not here —
+        # it is a GDK POPUP (override-redirect), and i3 never emits
+        # window::new for override-redirect windows, so this branch would
+        # never see it.
         name = c.get('name') or ''
         cls = (c.get('window_properties') or {}).get('class') or ''
         if name.startswith('qs-') or name == 'quickshell' or cls == 'quickshell':
@@ -379,6 +363,11 @@ def hotkeyd_layer_monitor():
     publishes {"layer": ..., "mod": ...} on a per-display unix socket and
     replays current state on connect, so a helper that starts late still paints
     correctly.
+
+    Since sp024 (dotfiles-0tv1.2) this feed is the ONLY input either cue has:
+    the last i3 colouring mode, the screenshot AIMING phase, became the
+    "screenshot" layer, so both phases of a capture now arrive here in order
+    (screenshot -> screenshot-drag -> default) on one channel.
 
     Since sp023 (dotfiles-1m4t.6) this feed carries BOTH cues: the colour, and
     the SUPPRESSION that hides the border for the whole screenshot drag. The
@@ -443,16 +432,23 @@ def hotkeyd_layer_monitor():
 
 def _set_layer_state(layer):
     """Apply one layer NAME from the feed. Main-thread-only, same discipline
-    as the mode flags (the reader thread reaches it via GLib.idle_add).
+    as mode_suppressed (the reader thread reaches it via GLib.idle_add).
 
     Both cues the feed carries are decided here, in this order: suppression
     first, because a suppress layer must never also colour (layer_colours_ring
     already refuses to, and this is the second half of that contract).
+
+    Since sp024 this is the ONLY thing that colours or refreshes off a phase
+    change — the i3 mode branch that used to do it for the aiming phase is
+    gone, and its refresh_focused() + queue_draw() pair is the one below.
     """
     global layer_colored, mode_suppressed
     suppress = layer in SUPPRESS_LAYERS
-    layer_colored = layer_colours_ring(layer)
-    recolored = _recompute_colored()
+    # Recolour BEFORE any redraw below, so the refresh that follows paints the
+    # new colour rather than the previous one.
+    want_colored = layer_colours_ring(layer)
+    recolored = want_colored != layer_colored
+    layer_colored = want_colored
     if suppress:
         # Arm BEFORE hiding: a refresh already in flight re-checks the flag in
         # apply_geom, so arming first closes the window in which it could
@@ -477,7 +473,11 @@ def subscribe():
     while True:
         try:
             proc = subprocess.Popen(
-                ['i3-msg', '-t', 'subscribe', '-m', '["window","workspace","binding","mode"]'],
+                # "mode" left this list with the mode branch (sp024): nothing
+                # in this file reacts to an i3 mode any more, and subscribing
+                # to an event with no handler is how a dead channel quietly
+                # comes back to life.
+                ['i3-msg', '-t', 'subscribe', '-m', '["window","workspace","binding"]'],
                 stdout=subprocess.PIPE, text=True
             )
             for line in proc.stdout:

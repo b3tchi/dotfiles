@@ -259,10 +259,16 @@ func TestAChordLayerStillShadowsTheGlobalTable(t *testing.T) {
 // -- i3 arbitration (plan decision 4) -------------------------------------
 
 func TestSetExternalLayerIsAllowedWhileI3IsInAMode(t *testing.T) {
-	// The exact sequence the real flow produces: qs-screenshot.sh puts i3
-	// into the real "screenshot" mode for the bar's hint strip BEFORE the
-	// overlay starts, so the drag signal ALWAYS arrives with
-	// i3Mode == "screenshot". Diverges from EnterLayer, which refuses here.
+	// The divergence from EnterLayer, which refuses here. This USED to be the
+	// exact sequence the real flow produced — qs-screenshot.sh put i3 into a
+	// real "screenshot" mode for the bar's hint strip before the overlay
+	// started — but sp024 moved the aiming phase onto its own External layer
+	// and deleted that block, so the shipped flow now runs with i3 in
+	// "default" throughout. The property is still load-bearing for the case
+	// that outlives it: i3 owning a PANIC mode (zz-fallback-binds.conf's
+	// nav/resize/$mode_system) must not make a signal-only layer unreachable.
+	// The mode name is kept verbatim so the historical sequence stays
+	// exercised too.
 	e, pub, _ := externalEngine()
 	e.SetI3Mode("screenshot")
 	pub.lines = nil

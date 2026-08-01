@@ -123,67 +123,71 @@ bindsym $mod+Shift+q kill
 # when the daemon has to be stopped.
 # freed for `move left` (vim hjkl navigation)
 # bindsym $mod+Shift+h exec xdg-open /usr/share/doc/manjaro/i3_help.pdf
-# region screenshot — enters a "screenshot" i3 mode (shown in the bar like
-# resize) and launches the live selector: a GDK window shaped down to the
-# rubber-band outline, so the real desktop shows through and nothing is frozen
-# or dimmed. Drag or tap two corners; the crop lands in ~/Pictures/screenshots
-# and its PATH goes on the clipboard.
+# region screenshot ($mod+Shift+s) — launches the live selector: a GDK window
+# shaped down to the rubber-band outline, so the real desktop shows through and
+# nothing is frozen or dimmed. Drag or tap two corners; the crop lands in
+# ~/Pictures/screenshots and its PATH goes on the clipboard.
 # See quickshell/qs-screenshot.sh + quickshell/qs-region.py.
 #
 # Base, not the platform overlay: every X11 session gets it (native :0, WSL and
 # desktop xrdp :10) — stranding the bind in native.conf left WSL unable to
 # reach it at all (dotfiles-13q).
 #
-# The mode exists ONLY so the bar paints its hint strip (Bar.qml modeHints).
-# qs-screenshot.sh enters it and resets it on every exit path, so the bind does
-# NOT set the mode itself — a bind-set mode would be redundant with the
-# launcher's, and the launcher is the one that can guarantee the reset.
+# NOTHING FOR i3 IS LEFT HERE — this paragraph is a record, not a binding. The
+# bind itself is hotkeyd's (see the screenshot-group note above; its panic
+# spelling lives in config.d/zz-fallback-binds.conf), and since sp024
+# (dotfiles-0tv1.2) NEITHER PHASE of the gesture is an i3 mode either. Kept
+# because "put a mode block back" is the obvious wrong fix if the hint strip
+# ever stops painting.
 #
-# The selector holds a pointer+keyboard grab, so it receives the keys directly;
-# there are no `w` / drag bindings here. The old ones — and the IPC shim script
-# they called — existed only because the retired quickshell dock layer could not
-# receive arbitrary keys. Both are gone.
+# BOTH mode blocks used to sit right here, and neither was ever a keybind
+# group:
 #
-# Escape stays as a DEAD-OVERLAY FALLBACK: while the selector lives its grab
-# swallows Esc, so this never fires. If the selector dies or never starts, the
-# grab is gone, Esc reaches i3, and the mode unsticks instead of trapping the
-# session (the dotfiles-ux1 failure class).
-mode "screenshot" {
-    bindsym Escape mode default
-    bindsym q mode default
-}
-# "screenshot-drag" IS NO LONGER AN i3 MODE (sp023, dotfiles-1m4t.5).
+#   mode "screenshot"       AIMING. qs-screenshot.sh entered it over `i3-msg
+#                           mode screenshot` before starting the selector,
+#                           purely so Bar.qml painted its hint strip and
+#                           qs-focus-border.py reddened the focus ring. Its
+#                           Escape/q were dead-overlay fallbacks, never the
+#                           selector's keys — the selector holds a
+#                           pointer+keyboard grab and receives keys directly.
+#   mode "screenshot-drag"  DRAWING. qs-region.py's own `_press` switched into
+#                           it (never a keybind) the instant a region started
+#                           being drawn, so qs-focus-border.py — a SEPARATE
+#                           process with no access to the overlay's in-memory
+#                           drag state — could drop the now-stale "this is what
+#                           `w` would capture" highlight.
 #
-# There used to be a SECOND mode block right here, which qs-region.py's own
-# `_press` switched into over `i3-msg mode screenshot-drag` (never a keybind)
-# the instant the user started drawing a region. It had to be a real i3 mode
-# for exactly one reason: qs-focus-border.py is a SEPARATE process with no
-# access to qs-region.py's in-memory drag state, and i3's mode-change IPC
-# event was the only channel already wired to both of them — so the drag
-# phase borrowed i3's mode machinery purely as a message bus, and the block
-# existed only because i3 silently ignores `mode <name>` for a name never
-# declared with its own `mode "<name>" {}`.
+# Both existed for one reason: i3's mode-change IPC event was the only channel
+# already wired to every consumer, and i3 silently ignores `mode <name>` for a
+# name never declared with its own `mode "<name>" {}` block. The two phases
+# borrowed i3's mode machinery purely as a message bus.
 #
-# hotkeyd now carries that signal on its own layer feed: "screenshot-drag" is
-# an External (signal-only) LAYER in hotkeyd/cmd/hotkeyd/config.go, raised
-# with `hotkeyd set-layer screenshot-drag` and cleared by qs-screenshot.sh on
-# every exit path. The mode is DELETED rather than kept in parallel — one
-# signal in two channels is the double-fire class that migration exists to
-# kill.
+# hotkeyd's own layer feed is that channel now. "screenshot" and
+# "screenshot-drag" are External (signal-only) LAYERS in
+# hotkeyd/cmd/hotkeyd/config.go, raised with `hotkeyd set-layer <name>` and
+# cleared by qs-screenshot.sh's single unconditional `set-layer default` on
+# every exit path. sp023 moved the drag phase, sp024 the aiming phase; each
+# mode was DELETED in the same commit its layer arrived, never kept in
+# parallel — one signal in two channels is the double-fire class that
+# migration exists to kill.
 #
-# Its Escape/q went with it, and that is safe rather than merely tidy: the
-# external layer holds ZERO grabs and shadows nothing (sp023 plan decision
-# 1), so a stranded one costs pixels, never keys. The keyboard escape from a
-# dead overlay is the "screenshot" block ABOVE, which qs-screenshot.sh is
-# still in for the whole capture — that block and its Escape/q fallback stay.
+# THE Escape/q FALLBACK WENT WITH THEM, and that is safe rather than merely
+# tidy. It read as the escape hatch from a dead overlay (the dotfiles-ux1
+# failure class: a stuck mode trapping the session), and the standing objection
+# to migrating it was that the daemon would then hold grabs on bare Escape and
+# q for the length of a capture. Neither half survives the move: an External
+# layer holds ZERO grabs and shadows nothing (sp023 plan decision 1), so the
+# daemon grabs nothing new — AND i3 never leaves `default` for the whole
+# gesture, so there is no stuck MODE for Escape to unstick. The trap dissolved
+# rather than needing a replacement. A stranded layer (launcher SIGKILLed
+# mid-capture) is a stuck hint strip and a red ring and NOTHING ELSE — pixels,
+# never keys, with the full global bind table still live; `hotkeyd.sh restart`
+# clears it.
 #
-# $mod+Shift+s (the region capture the mode above paints hints for) is
-# hotkeyd's — see the screenshot-group note above. The "screenshot" MODE
-# stays here: it is not a keybind group. qs-screenshot.sh enters it over
-# i3-msg purely so Bar.qml paints its hint strip, and the Escape/q inside it
-# are dead-overlay fallbacks. Migrating those would mean the daemon holding
-# grabs on bare Escape and q for the length of a capture — the dotfiles-ux1
-# trap.
+# Cost, accepted at sp024: with hotkeyd unreachable (panic config linked, sway
+# session, daemon dead) a capture runs STRIPLESS — no hint strip, no ring —
+# because no i3 mode is left to paint them either. The capture itself is
+# unaffected; the selector's own seat grab owns the keys in-process.
 # $mod+Ctrl+x (xkill) was DELETED, not migrated — sp020, dotfiles-hwds.49.
 # xkill grabs the pointer and severs the X connection of whatever you click,
 # which killed the CLIENT rather than the process: a well-behaved app exits, a

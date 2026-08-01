@@ -405,48 +405,73 @@ func TestValidatorOverRealTable_BothModResolutions(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// THE EXTERNAL (SIGNAL-ONLY) LAYER — sp023 Task 5's production cutover
-// (bd dotfiles-1m4t.5).
+// THE EXTERNAL (SIGNAL-ONLY) LAYERS — sp023 Task 5's cutover (bd
+// dotfiles-1m4t.5) and sp024 Task 2's (bd dotfiles-0tv1.2).
 //
-// "screenshot-drag" used to be a real i3 mode that quickshell/qs-region.py
-// switched into over `i3-msg mode screenshot-drag` the instant a drag began,
-// purely so qs-focus-border.py (a SEPARATE process with no access to the
-// overlay's in-memory drag state) could react to it. It is now a layer in
-// THIS table, entered over `hotkeyd set-layer screenshot-drag`. The tests
-// below pin the two properties that make that migration safe rather than
-// merely done: the layer is declared, and declaring it cost zero keys.
+// BOTH phases of one screenshot gesture used to be real i3 modes, switched
+// into over `i3-msg mode <name>` purely so quickshell/qs-focus-border.py and
+// Bar.qml (SEPARATE processes with no access to the overlay's in-memory
+// state) could react to them: "screenshot" while the user AIMS, entered by
+// qs-screenshot.sh, and "screenshot-drag" the instant a region starts being
+// DRAWN, entered by qs-region.py's own `_press`. Both are layers in THIS
+// table now, entered over `hotkeyd set-layer <name>`; neither i3 mode block
+// survives (sp024 deleted the last of them). The tests below pin the two
+// properties that make those migrations safe rather than merely done: each
+// layer is declared, and declaring them cost zero keys.
 // ---------------------------------------------------------------------------
 
-// externalLayerName is the one External layer the shipped table declares.
-// Named as a constant because three separate contracts spell it: this table,
-// quickshell/qs-region.py's set-layer call, and test-hotkeyd.sh's stage 18.
-const externalLayerName = "screenshot-drag"
+// The two External layers the shipped table declares — the two phases of one
+// gesture, handed off external → external at mouse-press time (pinned by
+// internal/layer's TestExternalToExternalHandoff). Named as constants because
+// several separate contracts spell each one: this table, the shell/python
+// consumers below, and test-hotkeyd.sh's stage 18.
+const (
+	aimingLayerName = "screenshot"      // quickshell/qs-screenshot.sh (sp024)
+	dragLayerName   = "screenshot-drag" // quickshell/qs-region.py    (sp023)
+)
 
-// TestRealTable_ScreenshotDragIsDeclaredExternal is the cutover's own
-// existence proof. `hotkeyd set-layer screenshot-drag` is refused BY NAME
-// unless the compiled table declares the layer External (setlayer.go's
-// client-side gate and control.go's daemon-side gate both call
-// validateControlLayer), so without this entry qs-region.py's new call is a
-// guaranteed exit-1 no-op on every drag — a silently dead signal, which is
-// precisely the failure this test exists to make loud.
-func TestRealTable_ScreenshotDragIsDeclaredExternal(t *testing.T) {
-	lay, ok := Layers[externalLayerName]
+// assertDeclaredExternal is the existence proof both cutovers need. `hotkeyd
+// set-layer <name>` is refused BY NAME unless the compiled table declares the
+// layer External (setlayer.go's client-side gate and control.go's daemon-side
+// gate both call validateControlLayer), so without the entry the consumer's
+// call is a guaranteed exit-1 no-op every time — a silently dead signal, which
+// is precisely the failure these tests exist to make loud.
+func assertDeclaredExternal(t *testing.T, name, consumer string) {
+	t.Helper()
+	lay, ok := Layers[name]
 	if !ok {
 		t.Fatalf("the shipped table declares no %q layer (have: %v) — "+
-			"qs-region.py's `set-layer %s` would be refused by name on every drag",
-			externalLayerName, sortedLayerNames(Layers), externalLayerName)
+			"%s's `set-layer %s` would be refused by name every time",
+			name, sortedLayerNames(Layers), consumer, name)
 	}
 	if !lay.External {
 		t.Fatalf("layer %q exists but is not declared External — set-layer only "+
-			"accepts External names (control.go validateControlLayer)", externalLayerName)
+			"accepts External names (control.go validateControlLayer)", name)
 	}
-	// The client-side gate is the one the overlay actually hits; assert
+	// The client-side gate is the one the consumer actually hits; assert
 	// through it rather than re-deriving the rule, so a change to the
 	// acceptance policy shows up here too.
-	if err := validateControlLayer(Layers, externalLayerName); err != nil {
+	if err := validateControlLayer(Layers, name); err != nil {
 		t.Errorf("validateControlLayer(%q) = %v, want nil — the shipped table must "+
-			"accept the exact name qs-region.py sends", externalLayerName, err)
+			"accept the exact name %s sends", name, err, consumer)
 	}
+}
+
+// TestRealTable_ScreenshotDragIsDeclaredExternal is sp023's existence proof:
+// the DRAWING phase, raised by the overlay at press time.
+func TestRealTable_ScreenshotDragIsDeclaredExternal(t *testing.T) {
+	assertDeclaredExternal(t, dragLayerName, "qs-region.py")
+}
+
+// TestRealTable_ScreenshotAimingIsDeclaredExternal is sp024's — the AIMING
+// phase, raised by the launcher before the selector starts. It is the whole
+// gate of that cutover: i3's `mode "screenshot" {}` block is DELETED in the
+// same commit that adds this declaration, so if the name were missing here
+// the hint strip and the ring would have no channel left at all (us019 AC1,
+// AC4). Deliberately a second, separately-named test rather than a loop, so a
+// dropped declaration names the phase it broke.
+func TestRealTable_ScreenshotAimingIsDeclaredExternal(t *testing.T) {
+	assertDeclaredExternal(t, aimingLayerName, "qs-screenshot.sh")
 }
 
 // TestRealTable_ExternalLayersAreSignalOnly walks EVERY field of bind.Layer
