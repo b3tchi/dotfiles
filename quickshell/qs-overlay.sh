@@ -14,7 +14,7 @@ OVERLAY="$HOME/.dotfiles/quickshell/overlay"
 #
 # DISCOVERED, NOT DECLARED (dotfiles-hwds.45). This used to branch on the
 # QS_RDP env var, which made the answer depend on WHO SPAWNED THE CALLER rather
-# than on what is running. i3/config-xrdp sets QS_RDP only as the `$qsenv`
+# than on what is running. i3/config-proot-xrdp sets QS_RDP only as the `$qsenv`
 # prefix on its own bindsym lines, so once hotkeyd owned the overlay chords
 # (dotfiles-hwds.40) every daemon-dispatched verb arrived with QS_RDP unset,
 # took the desktop branch, and failed with "no quickshell instance" on a

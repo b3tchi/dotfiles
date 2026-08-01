@@ -3,7 +3,7 @@
 
 # $mod is set by the including file BEFORE `include config.common`:
 #   config      (desktop) -> set $mod Mod4  (Super)
-#   config-xrdp (RDP)      -> set $mod Mod1  (Alt; native over RDP, survives
+#   config-proot-xrdp (RDP)      -> set $mod Mod1  (Alt; native over RDP, survives
 #                            xrdp's per-connect keymap reset, no xmodmap needed)
 
 # set default desktop layout (default is tiling)
@@ -50,13 +50,13 @@ tiling_drag modifier titlebar
 # start a terminal with pre-created tmux session
 # terminal binding moved to per-variant config (router pattern):
 #   config (desktop) -> wm-launch-terminal st (tmux/project wrapper)
-#   config-xrdp (RDP) -> plain st
+#   config-proot-xrdp (RDP) -> plain st
 
 # kill focused window
 bindsym $mod+Shift+q kill
 
 # program launcher moved to per-variant config (router pattern):
-#   config (desktop) -> quickshell ; config-xrdp (RDP) -> rofi/dmenu
+#   config (desktop) -> quickshell ; config-proot-xrdp (RDP) -> rofi/dmenu
 # (also $mod+p, $mod+Shift+d --release, and the Tab/w switcher grabs below)
 
 # old rofi launcher (replaced by quickshell AppLauncher)

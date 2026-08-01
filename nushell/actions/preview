@@ -300,7 +300,7 @@ const MEMORY_CHROMIUM_FLAGS = "--js-flags=--max-old-space-size=256"
 #
 #   QT_QUICK_BACKEND=software + LIBGL_ALWAYS_SOFTWARE=1
 #     Qt Quick's own scenegraph, per [[adr0004]]/[[adr0005]] and the
-#     i3/config-xrdp precedent (a GPU-less virtual Xorg wedges hardware GL,
+#     i3/config-proot-xrdp precedent (a GPU-less virtual Xorg wedges hardware GL,
 #     dotfiles-49j). MEASURED ORTHOGONAL to the web tier: every tier
 #     (image/md/code/html/akm) renders identically with and without this
 #     pair, and the stl tier's WebGL failure reproduces with the pair

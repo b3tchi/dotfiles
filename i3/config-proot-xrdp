@@ -1,9 +1,22 @@
-# i3 config — XRDP / remote variant (proot i3 over Xvnc:2 + xrdp).
+# i3 config — PROOT/Android entry point (proot Arch under Termux, i3 over
+# Xvnc:2 + xrdp).
+#
+# Named config-proot-xrdp, not config-xrdp: the old name read as "the xrdp
+# config" and invited the assumption that the WSL/desktop xrdp :10 session
+# uses it. It does not. That session goes through i3/config plus the
+# config.d/ platform overlay (ft003 i3-config-layering) like the native one —
+# `xrdp` here describes how the PHONE reaches its proot session, not the
+# desktop's :10 display.
+#
 # Shares all bindings/theme from config.common; drops the desktop-only
 # autostarts (quickshell/GPU bar, picom compositor, tray applets, xautolock,
 # physical-keyboard xinput remap, xborders) that are broken or pointless
-# over RDP. Launch via: i3 -c ~/.dotfiles/i3/config-xrdp
-# (start-i3-xrdp.sh passes this with -c).
+# over RDP.
+#
+# ONE caller, which passes it with -c:
+#   scripts/termux/start-xorg-rdp-proot.sh
+# (An earlier comment here named a start-i3-xrdp.sh; no such script exists in
+# the tree — it was renamed to the above and this line was left behind.)
 
 # Alt is natively Mod1 in the keymap xrdp programs on every (re)connect, so
 # $mod=Mod1 makes Alt the modifier with NO xmodmap and survives reconnects.

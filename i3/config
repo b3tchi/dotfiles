@@ -4,7 +4,7 @@
 # THIS FILE IS THE DESKTOP ENTRY POINT, NOT THE KEYMAP.
 # Every platform-neutral bind, mode, workspace, colour and for_window rule
 # lives in config.common, included below and shared verbatim with the other
-# entry point (config-xrdp). What stays here is only what genuinely differs
+# entry point (config-proot-xrdp). What stays here is only what genuinely differs
 # per entry point: the $mod source, the platform overlay, the binds that
 # depend on an env var or on which terminal/launcher this desktop uses, and
 # the autostart execs (the base never execs — ft003 i3-config-layering).

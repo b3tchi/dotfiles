@@ -4,7 +4,7 @@
 # WHAT BROKE AND WHY THIS EXISTS. qs_target_pid used to branch on the QS_RDP env
 # var: set => the overlay lives in the main instance, unset => look for a
 # separate `quickshell -p .../overlay` process. That made the answer depend on
-# who spawned the CALLER instead of on what is actually running. i3/config-xrdp
+# who spawned the CALLER instead of on what is actually running. i3/config-proot-xrdp
 # sets QS_RDP only as the `$qsenv` prefix on its own bindsym lines, so once
 # hotkeyd owned $mod+Tab / $mod+w / $mod+d / $mod+p (dotfiles-hwds.40) every
 # verb the daemon dispatched on the xrdp session arrived with QS_RDP unset, took

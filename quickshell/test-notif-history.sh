@@ -66,7 +66,7 @@ scenario() { printf '\n[%s]\n' "$1"; }
 # Expand `include` directives so assertions run against what i3 EFFECTIVELY
 # loads for an entry point, not against one file's text. Since the ~140 shared
 # binds collapsed behind an include (config -> config.common, same as
-# config-xrdp), "is this bind present for this session type" is a question
+# config-proot-xrdp), "is this bind present for this session type" is a question
 # about the expansion; asserting per-file would now just re-encode the layout.
 # `~/.i3/config.d/*.conf` resolves through the LIVE symlinks, exactly as i3
 # would resolve it, and silently contributes nothing when unlinked.
@@ -1068,7 +1068,7 @@ assert_eq "config/shell.qml contains NotifHistory {}" "1" \
 scenario "wiring: BOTH i3 entry points float qs-notif the same way they float qs-clip"
 # Asserted on the EFFECTIVE config (the rule is single-sourced in
 # config.common now); the question is whether each session type gets it.
-for f in "$SCRIPT_DIR/../i3/config" "$SCRIPT_DIR/../i3/config-xrdp"; do
+for f in "$SCRIPT_DIR/../i3/config" "$SCRIPT_DIR/../i3/config-proot-xrdp"; do
   assert_eq "$(basename "$f") effective: has the qs-notif for_window float rule" "1" \
     "$(effective "$f" | grep -c '^for_window \[title="qs-notif"\] floating enable, border none, move position center$' | tr -d ' ')"
 done
@@ -1087,7 +1087,7 @@ kill "$NOTIF_PID" 2>/dev/null; wait "$NOTIF_PID" 2>/dev/null; NOTIF_PID=""
 
 I3_BASE="$SCRIPT_DIR/../i3/config"
 I3_COMMON="$SCRIPT_DIR/../i3/config.common"
-I3_XRDP="$SCRIPT_DIR/../i3/config-xrdp"
+I3_XRDP="$SCRIPT_DIR/../i3/config-proot-xrdp"
 I3="${I3:-i3}"
 
 for f in "$I3_BASE" "$I3_COMMON" "$I3_XRDP"; do
@@ -1115,14 +1115,14 @@ scenario "n-is-notif-toggle: \$mod+n reaches the browser on BOTH entry points, f
 #                   with no BadAccess to warn you (hotkeyd's own ownership
 #                   tests assert that half under both $mod resolutions —
 #                   cmd/hotkeyd/ownership_test.go).
-#   i3/config-xrdp  proot Arch on Android. Starts NO daemon and includes no
+#   i3/config-proot-xrdp  proot Arch on Android. Starts NO daemon and includes no
 #                   config.d overlay, so it keeps the i3 bind — otherwise the
 #                   cutover would silently take the browser away from that
 #                   session, which is dotfiles-3qd's complaint about the
 #                   screenshot group.
 #
 # Exactly one, not at-least-one: two copies would be duplication i3 warns about.
-assert_eq "config-xrdp effective: exactly one notif-toggle bindsym line" \
+assert_eq "config-proot-xrdp effective: exactly one notif-toggle bindsym line" \
   "1" "$(count_eff_line "$I3_XRDP" "$NOTIF_TOGGLE_LINE")"
 assert_eq "config effective: the i3 notif-toggle bind is gone (hotkeyd owns it)" \
   "0" "$(count_eff_line "$I3_BASE" "$NOTIF_TOGGLE_LINE")"
@@ -1277,7 +1277,7 @@ done
 # parser. `i3 -C` needs no running X server (verified separately: it exits 0
 # with DISPLAY unset). i3/config's `include ~/.i3/config.d/*.conf` is
 # stubbed with an EMPTY dir (an i3 include glob with no matches parses
-# clean -- verified separately, too); config-xrdp's own
+# clean -- verified separately, too); config-proot-xrdp's own
 # `include ~/.dotfiles/i3/config.common` is resolved for REAL, against the
 # actual file this task just edited, by symlinking a fake $HOME/.dotfiles at
 # the real repo root -- so this proves the MERGE-TIME truth (the edge case
@@ -1294,9 +1294,9 @@ scenario "i3 -C: i3/config (with an empty config.d/ include dir) validates with 
 ERR="$(HOME="$I3CHK/native" "$I3" -C -c "$I3CHK/native/.i3/config" 2>&1 | grep -F "$I3_ERR_MARKER" || true)"
 assert_eq "no ERROR lines from i3 -C on i3/config" "" "$ERR"
 
-scenario "i3 -C: config-xrdp's include chain (config-xrdp -> the real, just-edited config.common) validates with no errors"
+scenario "i3 -C: config-proot-xrdp's include chain (config-proot-xrdp -> the real, just-edited config.common) validates with no errors"
 ERR="$(HOME="$I3CHK/xrdp" "$I3" -C -c "$I3_XRDP" 2>&1 | grep -F "$I3_ERR_MARKER" || true)"
-assert_eq "no ERROR lines from i3 -C on config-xrdp's include chain" "" "$ERR"
+assert_eq "no ERROR lines from i3 -C on config-proot-xrdp's include chain" "" "$ERR"
 
 # ---- MUTANT PIN: a bind vanishing from the shared base ----------------------
 

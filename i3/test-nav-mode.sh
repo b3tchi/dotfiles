@@ -162,7 +162,7 @@ HOTKEYD_BIN="$HOTKEYD_DIR/hotkeyd"
   exit 1; }
 
 # $mod is set by the INCLUDING file in this repo's layering (ft003), so the
-# harness supplies it exactly as i3/config and i3/config-xrdp do.
+# harness supplies it exactly as i3/config and i3/config-proot-xrdp do.
 cat > "$TMP/harness.conf" <<CONFEOF
 set \$mod $NAV_TEST_MOD
 ipc-socket $I3SOCK

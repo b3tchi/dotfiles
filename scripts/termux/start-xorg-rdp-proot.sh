@@ -77,7 +77,7 @@ export MOZ_DISABLE_RDD_SANDBOX=1
 export MOZ_DISABLE_SOCKET_PROCESS_SANDBOX=1
 
 # dbus-run-session keeps the session bus alive as i3's parent.
-exec dbus-run-session -- i3 -c "/home/jan/.dotfiles/i3/config-xrdp"
+exec dbus-run-session -- i3 -c "/home/jan/.dotfiles/i3/config-proot-xrdp"
 EOF
 chmod +x /etc/xrdp/startwm.sh
 echo ">> startwm.sh ensured (dbus-run-session)"
