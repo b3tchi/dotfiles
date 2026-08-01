@@ -362,6 +362,171 @@ func TestReconcileHoldsLeavesAnActiveExternalLayerUntouched(t *testing.T) {
 	}
 }
 
+// -- two-External fixture (sp024 Task 1, bd dotfiles-0tv1.1) ---------------
+//
+// Every test above declares exactly ONE External layer ("screenshot-drag").
+// SetExternalLayer's authority guard (engine.go ~713:
+// `e.layerName != DefaultLayer && !e.isExternal(e.layerName)`) checks only
+// the CURRENT layer's KIND, so external -> external was already permitted by
+// construction — but no fixture ever declared two External layers, so
+// nothing exercised it. sp024 needs qs-region.py's unmodified press-time
+// "screenshot" -> "screenshot-drag" handoff to keep working once a second
+// External layer ("screenshot", the aiming phase) joins the compiled table
+// in Task 2; this section pins that property FIRST, against the engine as
+// shipped, with no production change. See docs/notes/spec/sp024.md ##
+// tasks / Task 1.
+
+// twoExternalLayers is the nav fixture plus BOTH signal-only layers the real
+// aiming -> drag gesture will hand off between post-cutover.
+func twoExternalLayers() map[string]bind.Layer {
+	layers := navLayers()
+	layers["screenshot"] = bind.Layer{External: true}
+	layers["screenshot-drag"] = bind.Layer{External: true}
+	return layers
+}
+
+func twoExternalEngine() (*Engine, *recorder, *fakeClock) {
+	return buildEngine(engineOpts{binds: externalBinds(), layers: twoExternalLayers()})
+}
+
+// TestExternalToExternalHandoff is table-driven over the four success
+// criteria this task pins (sp024 Task 1 test_plan names them: handoff
+// order, clear-from-second, guard-unchanged, idempotent-reset). Each
+// subtest builds its own engine so the scenarios stay independent.
+func TestExternalToExternalHandoff(t *testing.T) {
+	t.Run("handoff order", func(t *testing.T) {
+		// us019 AC6: qs-region.py performs this exact transition, unmodified,
+		// at mouse-press time. Both calls must succeed and the publisher must
+		// see the two layers in order — never coalesced, never reordered.
+		e, pub, _ := twoExternalEngine()
+		if err := e.SetExternalLayer("screenshot"); err != nil {
+			t.Fatalf("SetExternalLayer(screenshot): %v", err)
+		}
+		if err := e.SetExternalLayer("screenshot-drag"); err != nil {
+			t.Fatalf("SetExternalLayer(screenshot-drag): %v", err)
+		}
+		if got := e.State(); got != (State{Layer: "screenshot-drag"}) {
+			t.Fatalf("state = %+v", got)
+		}
+		want := []State{{Layer: "screenshot"}, {Layer: "screenshot-drag"}}
+		if len(pub.lines) != len(want) {
+			t.Fatalf("published: %+v, want %+v", pub.lines, want)
+		}
+		for i := range want {
+			if pub.lines[i] != want[i] {
+				t.Fatalf("published[%d] = %+v, want %+v", i, pub.lines[i], want[i])
+			}
+		}
+	})
+
+	t.Run("clear from second", func(t *testing.T) {
+		// qs-screenshot.sh:103's clear on exit is unconditional — it never
+		// checks which of the two layers is up, so a clear issued from the
+		// SECOND external layer must behave exactly like one from the first.
+		e, pub, _ := twoExternalEngine()
+		mustSetExternal(t, e, "screenshot")
+		mustSetExternal(t, e, "screenshot-drag")
+		pub.lines = nil
+		if err := e.SetExternalLayer(DefaultLayer); err != nil {
+			t.Fatalf("clear: %v", err)
+		}
+		if got := e.State(); got != (State{Layer: "default"}) {
+			t.Fatalf("state = %+v", got)
+		}
+		if len(pub.lines) != 1 || pub.lines[0] != (State{Layer: "default"}) {
+			t.Fatalf("published: %+v", pub.lines)
+		}
+	})
+
+	t.Run("guard unchanged", func(t *testing.T) {
+		// us019 AC4: a second External declaration must not weaken the
+		// authority guard — a chord-entered layer still outranks any
+		// external request, refused by name, never silently ignored.
+		e, pub, _ := twoExternalEngine()
+		e.Handle(press("o", "Mod4"))
+		if got := e.State(); got != (State{Layer: "nav"}) {
+			t.Fatalf("fixture precondition: state = %+v", got)
+		}
+		pub.lines = nil
+		err := e.SetExternalLayer("screenshot")
+		if err == nil {
+			t.Fatal("entering an external layer over a chord layer must be refused")
+		}
+		if !errors.Is(err, ErrLayerActive) {
+			t.Fatalf("refusal must be a NAMED error: %v", err)
+		}
+		if !contains(err.Error(), "nav") {
+			t.Fatalf("refusal must name the layer standing in the way: %q", err)
+		}
+		assertUnchanged(t, e, pub, State{Layer: "nav"})
+	})
+
+	t.Run("idempotent reset", func(t *testing.T) {
+		// Also the edge case "publish-on-change: screenshot -> screenshot
+		// re-set emits no line" — the feed never duplicates state, whichever
+		// of the two external layers is being re-set.
+		e, pub, _ := twoExternalEngine()
+		mustSetExternal(t, e, "screenshot")
+		pub.lines = nil
+		if err := e.SetExternalLayer("screenshot"); err != nil {
+			t.Fatalf("re-set must be an ok no-op: %v", err)
+		}
+		if got := e.State(); got != (State{Layer: "screenshot"}) {
+			t.Fatalf("state = %+v", got)
+		}
+		if len(pub.lines) != 0 {
+			t.Fatalf("idempotent re-set must publish nothing: %+v", pub.lines)
+		}
+	})
+}
+
+// TestClientConnectingMidHandoffIsReplayedOnlyTheCurrentLayer is the
+// replay-on-connect edge case, driven against a REAL StatePublisher (not the
+// in-memory recorder) so the assertion is about the wire contract a late bar
+// client actually observes: connecting between the two SetExternalLayer
+// calls of a handoff must replay the CURRENT layer only, never the layer it
+// superseded.
+func TestClientConnectingMidHandoffIsReplayedOnlyTheCurrentLayer(t *testing.T) {
+	path := sockPath(t)
+	p, err := NewStatePublisher(path, State{Layer: DefaultLayer})
+	if err != nil {
+		t.Fatalf("NewStatePublisher: %v", err)
+	}
+	defer p.Close()
+
+	e := NewEngine(externalBinds(), twoExternalLayers(), Config{
+		Publisher: p, Clock: newFakeClock().Now, Mod: "Mod4",
+	})
+	mustSetExternal(t, e, "screenshot")
+	mustSetExternal(t, e, "screenshot-drag")
+
+	c := dial(t, path)
+	defer c.Close()
+	got := readLine(t, c)
+	want := `{"layer":"screenshot-drag","mod":null}` + "\n"
+	if got != want {
+		t.Fatalf("replay line = %q, want %q (only the CURRENT layer, not the handoff history)", got, want)
+	}
+}
+
+// TestI3EnteringANewModeForceExitsTheFirstExternalLayerInATwoExternalTable is
+// the edge case "SetI3Mode to a non-default mode while 'screenshot' is
+// active force-exits it (involuntary route 2, existing behavior)" —
+// re-asserted with two External layers declared, since involuntary route 2
+// (SetI3Mode) is keyed on "a layer is active", not on which External name.
+func TestI3EnteringANewModeForceExitsTheFirstExternalLayerInATwoExternalTable(t *testing.T) {
+	e, pub, _ := twoExternalEngine()
+	mustSetExternal(t, e, "screenshot")
+	pub.lines = nil
+	e.SetI3Mode("resize")
+	if got := e.State(); got != (State{Layer: "default"}) {
+		t.Fatalf("state = %+v", got)
+	}
+	if len(pub.lines) != 1 || pub.lines[0] != (State{Layer: "default"}) {
+		t.Fatalf("published: %+v", pub.lines)
+	}
+}
+
 // -- helpers ---------------------------------------------------------------
 
 func mustSetExternal(t *testing.T, e *Engine, name string) {
