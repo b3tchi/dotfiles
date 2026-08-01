@@ -52,9 +52,54 @@ POLL="${CLIP_BRIDGE_POLL:-0.5}"
 WPOLL="${CLIP_BRIDGE_WIN_POLL:-700}"
 T="${CLIP_BRIDGE_TIMEOUT:-1}"
 LOCK="${CLIP_BRIDGE_LOCK:-/tmp/clip-win-bridge.$(id -u).lock}"
-PS=powershell.exe
+# ------------------------------------------------------ THE STARTUP GATE ---
+#
+# Resolution does NOT trust the inherited PATH alone (dotfiles-7hf8). On this
+# host powershell.exe is a symlink in ~/.local/bin/win/, which the login
+# `profile` adds to PATH but i3 does not — i3's PATH is
+# /home/jan/.local/bin:/sbin:/bin:/usr/bin:... So the wsl.conf autostart
+# resolved nothing, took the old `|| exit 0` branch, and this bridge never ran
+# from i3 AT ALL. It only ever ran when a human or an agent started it from an
+# interactive shell, which is exactly why "clipboard from Windows is broken
+# again" kept coming back after every reboot and every i3 restart, and why
+# poking at it by hand always seemed to fix it.
+#
+# And the two cases the old gate conflated are now separate, because only one
+# of them is a non-event:
+#   not WSL           -> exit 0, silent. Nothing to bridge; native i3
+#                        autostarts this script too and must not be nagged.
+#   WSL, no interop   -> exit 69 (EX_UNAVAILABLE), loudly. Here the bridge is
+#                        expected to work, so exiting 0 is a lie that reads as
+#                        "started fine" in every ps/pgrep check.
+#
+# Test: i3/scripts/test-clip-win-bridge.sh (no X, no WSL, no powershell —
+# the gate is exercised with stubs and a fake WSL marker).
+WSL_MARK="${CLIP_BRIDGE_WSL_MARK:-/mnt/c}"
 
-command -v "$PS" >/dev/null 2>&1 || exit 0   # not WSL / interop off
+PS="${CLIP_BRIDGE_PS:-}"
+if [ -z "$PS" ]; then
+  if command -v powershell.exe >/dev/null 2>&1; then
+    PS=powershell.exe
+  elif [ -x "$HOME/.local/bin/win/powershell.exe" ]; then
+    # Where this repo installs the interop shims (see the win/ bin dir the
+    # profile puts on PATH); the symlink points into /mnt/c.
+    PS="$HOME/.local/bin/win/powershell.exe"
+  else
+    # Last resort: the canonical Windows path itself, rooted at the SAME
+    # marker the WSL check uses rather than a second hardcoded /mnt/c — one
+    # knob, so the suite can model a WSL box with no interop by pointing the
+    # marker at an empty dir. DrvFs is case insensitive, so one spelling
+    # covers WINDOWS/Windows.
+    _c="$WSL_MARK/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+    [ -x "$_c" ] && PS="$_c"
+  fi
+fi
+
+if [ -z "$PS" ]; then
+  [ -d "$WSL_MARK" ] || exit 0            # not WSL — nothing to bridge
+  echo "clip-win-bridge.sh: powershell.exe not found (looked on PATH, in \$HOME/.local/bin/win, and under /mnt/c) — Windows clipboard interop unavailable" >&2
+  exit 69
+fi
 
 exec 9>"$LOCK" || exit 1
 flock -n 9 || exit 0
