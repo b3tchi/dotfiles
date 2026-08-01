@@ -25,7 +25,6 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[us018|clip-picker-esc-instant-close-rdp]] (draft)
 - [[us019|programmable-global-keybinds]] (done) >> [[im010]]
 - [[us020|per-display-bind-expression]]
-- [[us022|compiled-binds-deploy-visibility]] (draft)
 
 ## Features
 
