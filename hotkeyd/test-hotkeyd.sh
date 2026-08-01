@@ -1323,26 +1323,39 @@ EOF
 fi
 
 # ============================================================================
-# stage 18: set-layer round trip (screenshot-drag -> state feed -> default)
+# stage 18: set-layer round trip (screenshot -> screenshot-drag -> default)
 # ============================================================================
 #
 # sp023 Task 4 (bd dotfiles-1m4t.4): the CLIENT-side `set-layer` verb, driven
-# for real against a daemon carrying an External-declared layer. config.go's
-# shipped table only gets its own "screenshot-drag": {External: true} entry
-# at Task 5's cutover, so this stage builds its own tiny fixture table via
+# for real against a daemon carrying External-declared layers. config.go's
+# shipped table only gets its own "screenshot"/"screenshot-drag":
+# {External: true} entries at sp023 Task 5 and sp024 Task 2's cutovers
+# respectively, so this stage builds its own tiny fixture table via
 # table_daemon(), the same seam stage 12/14/17 already use, rather than
-# waiting on that later task.
+# waiting on those later tasks.
 #
-# The claim under test: `set-layer screenshot-drag` enters the layer over the
-# NEW control socket (control.go, Task 3) with no chord and no i3 involved at
-# all (HOTKEYD_I3SOCK points at nothing, matching stage 12's mods-less-layer
-# stage); a FRESH `state-tail` client's FIRST line is the replay of that
-# state (ft009's replay-on-connect contract, exercised here at the CLI);
-# `set-layer default` clears it the same way, and the feed reflects that too.
-# Every state-tail read is wrapped in `timeout`: state-tail blocks in Read()
-# forever on an otherwise-quiet socket once it has its one line, and this
-# stage only ever wants that first line per fresh connection.
-echo "stage 18: set-layer round trip (screenshot-drag -> state feed -> default)"
+# EXTENDED at sp024 Task 3 (bd dotfiles-0tv1.3) to cover the FULL gesture, not
+# just the drag half: `set-layer screenshot` (the aiming phase, formerly an i3
+# mode -- sp024 Task 2 deleted `mode "screenshot" {}` from i3/config.common and
+# moved the signal onto this same External-layer channel) -> `set-layer
+# screenshot-drag` (an external-to-external HANDOFF over the control socket,
+# the exact press-time transition qs-region.py performs and
+# hotkeyd/internal/layer/external_test.go pins at the unit level, sp024 Task
+# 1) -> `set-layer default`. Each step is asserted against the state feed, so
+# the ORDER the daemon actually published in is what is checked, not just each
+# call's own exit code.
+#
+# The claim under test: each `set-layer` enters/leaves its layer over the NEW
+# control socket (control.go, Task 3 of sp023) with no chord and no i3
+# involved at all (HOTKEYD_I3SOCK points at nothing, matching stage 12's
+# mods-less-layer stage); a FRESH `state-tail` client's FIRST line is the
+# replay of the CURRENT state after each call (ft009's replay-on-connect
+# contract, exercised here at the CLI -- including while "screenshot" is up,
+# the late-starting-bar edge case). Every state-tail read is wrapped in
+# `timeout`: state-tail blocks in Read() forever on an otherwise-quiet socket
+# once it has its one line, and this stage only ever wants that first line per
+# fresh connection.
+echo "stage 18: set-layer round trip (screenshot -> screenshot-drag -> default)"
 if ! command -v Xvfb >/dev/null; then
     printf '  \033[33mSKIP\033[0m Xvfb missing\n'
 else
@@ -1356,8 +1369,11 @@ else
     if [ -z "$D18" ]; then
         bad "no free X display for the set-layer stage"
     else
-        # A signal-only external layer and NOTHING else -- no Binds, no
-        # chords, matching plan decision 1 (Task 1/2's own fixtures).
+        # TWO signal-only external layers and NOTHING else -- no Binds, no
+        # chords, matching plan decision 1 (Task 1/2's own fixtures). Both
+        # names so the daemon under test compiles the same two-name table
+        # sp024 Task 2 shipped for real, and the handoff below exercises the
+        # external->external transition Task 1 pinned at the unit level.
         cat > "$T18/extern.go" <<'EOF'
 package main
 
@@ -1366,6 +1382,7 @@ import "hotkeyd/internal/bind"
 func init() {
 	Binds = nil
 	Layers = map[string]bind.Layer{
+		"screenshot":      {External: true},
 		"screenshot-drag": {External: true},
 	}
 }
@@ -1391,21 +1408,41 @@ EOF
         if [ -z "$d18" ]; then
             bad "the external-layer daemon did not start: $(tail -3 "$T18/d.log")"
         else
+            # -- leg 1: entry. The aiming phase, formerly i3's own mode. -------
+            out0="$(XDG_RUNTIME_DIR="$T18" $TBL_BIN set-layer screenshot --display "$D18" 2>&1)"
+            src0=$?
+            if [ "$src0" -eq 0 ]; then
+                ok "set-layer screenshot exits 0"
+            else
+                bad "set-layer screenshot failed (rc=$src0): $out0"
+            fi
+
+            l18a="$(XDG_RUNTIME_DIR="$T18" timeout 5 $TBL_BIN state-tail "$D18" 2>/dev/null | head -1)"
+            if [ "$l18a" = '{"layer":"screenshot","mod":null}' ]; then
+                ok "a fresh state-tail client's FIRST line replays screenshot (late-starting-bar case)"
+            else
+                bad "state-tail first line was: ${l18a:-<empty>} (daemon log: $(tail -3 "$T18/d.log"))"
+            fi
+
+            # -- leg 2: the press-time handoff, external->external over the ----
+            #    REAL control socket (Task 1 pinned this at the unit level;
+            #    this is the same transition proven end to end at the CLI).
             out="$(XDG_RUNTIME_DIR="$T18" $TBL_BIN set-layer screenshot-drag --display "$D18" 2>&1)"
             src=$?
             if [ "$src" -eq 0 ]; then
-                ok "set-layer screenshot-drag exits 0"
+                ok "set-layer screenshot-drag exits 0 (external->external handoff)"
             else
                 bad "set-layer screenshot-drag failed (rc=$src): $out"
             fi
 
             l18="$(XDG_RUNTIME_DIR="$T18" timeout 5 $TBL_BIN state-tail "$D18" 2>/dev/null | head -1)"
             if [ "$l18" = '{"layer":"screenshot-drag","mod":null}' ]; then
-                ok "a fresh state-tail client's FIRST line replays screenshot-drag"
+                ok "a fresh state-tail client's FIRST line replays screenshot-drag after the handoff"
             else
                 bad "state-tail first line was: ${l18:-<empty>} (daemon log: $(tail -3 "$T18/d.log"))"
             fi
 
+            # -- leg 3: clear. -----------------------------------------------
             out2="$(XDG_RUNTIME_DIR="$T18" $TBL_BIN set-layer default --display "$D18" 2>&1)"
             src2=$?
             if [ "$src2" -eq 0 ]; then

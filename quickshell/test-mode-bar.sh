@@ -732,6 +732,18 @@ ShellRoot {
     }
     return null
   }
+  // Every descendant matching objectName, not just the first (used to COUNT the
+  // rendered hint rows — the "4 verbatim rows" claim in the screenshot-layer
+  // case below is otherwise unverifiable through this host).
+  function findAllByName(item, name, out) {
+    if (!item) return
+    var kids = item.children
+    for (var i = 0; i < kids.length; i++) {
+      var c = kids[i]
+      if (c.objectName === name) out.push(c)
+      findAllByName(c, name, out)
+    }
+  }
   // Effective visibility: an item renders iff it and every ancestor are visible.
   function effVis(it) { var n = it; while (n) { if (n.visible === false) return false; n = n.parent } return true }
 
@@ -739,10 +751,13 @@ ShellRoot {
     var r    = rootOf(bar)
     var pill = findByName(r, "pillLabel")   // ModeBar's name-pill label
     var ws   = findByText(r, "wsprobe")     // the workspace tab text
+    var rows = []
+    findAllByName(r, "hintRow", rows)
     emit(name + ".mode",  bar.currentMode)
     emit(name + ".strip", (pill && effVis(pill)) ? "1" : "0")
     emit(name + ".pill",  pill ? pill.text : "?")
     emit(name + ".ws",    (ws && effVis(ws)) ? "1" : "0")
+    emit(name + ".hintCount", rows.length)
   }
 
   IpcHandler {
@@ -932,6 +947,26 @@ else
   pubdump '{"layer":"default","mod":null}' "nav-off-after-mod"
   pubdump '{"layer":"nav","mod":null}' "nav-reentry"
 
+  # --- the aiming-phase layer, driven ENTIRELY off the daemon layer feed
+  #     (sp024 T2/T3, dotfiles-0tv1.3) ------------------------------------
+  # Before the cutover, "screenshot" only ever reached this bar as an i3
+  # mode-change event on the ["mode"] subscription (i3's own `mode
+  # "screenshot" {}` block, deleted in sp024 T2); the only place this suite
+  # exercised the name at all was PHASE 1's flip1, which sets ModeBar's `mode`
+  # prop directly and never touches Bar.qml's activeMode resolution. Neither
+  # proves the REAL bar paints "screenshot" when it arrives the new way: as a
+  # daemon layer, with i3 never entering any mode for it at all.
+  #
+  # i3Mode is pinned "default" for this entire PHASE-2 block (the last
+  # mode_emit was the reset before the nav cases began, and nothing below
+  # touches the mode FIFO), so this case reaches the strip through ONE path
+  # only: Bar.qml:333's `activeMode: daemonLayer !== "default" ? daemonLayer :
+  # i3Mode`. If that preference were ever reverted to i3Mode-first, i3Mode is
+  # "default" here and the strip would stay hidden — this case would FAIL
+  # (mutation-verified; see the task's bd notes).
+  pubdump '{"layer":"screenshot","mod":null}' "screenshot-on"
+  pubdump '{"layer":"default","mod":null}'    "screenshot-off"
+
   # --- mid-stream disconnect + replay-on-connect -----------------------------
   # The daemon dying while the bar runs is the edge case that decides whether a
   # STALE layer stays painted. Enter a layer, SIGKILL the publisher (no
@@ -1037,6 +1072,24 @@ else
   assert_case "nav-held-before-exit.pill" "nav MOVE"
   assert_case "nav-off-after-mod.strip"   "0"
   assert_case "nav-reentry.pill"          "nav"
+
+  scenario "aiming-phase layer, no i3 mode involved: the daemon's 'screenshot' layer paints the strip alone (sp024 T3 / us019 AC1)"
+  # i3Mode is pinned "default" the whole time (see the pubdump call above), so
+  # every field below can only have come from daemonLayer via Bar.qml:333's
+  # activeMode preference — there is no i3 mode-change event anywhere in this
+  # scenario for a reverted, i3Mode-first activeMode to fall back on.
+  assert_case "screenshot-on.mode"      "screenshot"
+  assert_case "screenshot-on.strip"     "1"
+  assert_case "screenshot-on.pill"      "screenshot"
+  assert_case "screenshot-on.ws"        "0"
+  # the 4-row ft009 registry (hints-screenshot-verbatim, PHASE 0/1) rendered
+  # from the layer feed alone, not just a pill with the right label.
+  assert_case "screenshot-on.hintCount" "4"
+
+  scenario "leaving the aiming-phase layer hides the strip and returns the workspaces"
+  assert_case "screenshot-off.mode"  "default"
+  assert_case "screenshot-off.strip" "0"
+  assert_case "screenshot-off.ws"    "1"
 
   scenario "the daemon dying mid-stream drops the layer instead of painting it stale"
   # MUTANT PIN: delete the daemonLayer/daemonMod resets in Bar.qml's
