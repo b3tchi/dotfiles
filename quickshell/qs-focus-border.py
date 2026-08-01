@@ -460,8 +460,20 @@ def _set_layer_state(layer):
     mode_suppressed = False
     # Leaving a suppress layer redraws even when nothing about the COLOUR
     # changed: the border is hidden at that point and only a refresh brings it
-    # back. (Colour-only transitions still need the explicit queue_draw —
-    # refresh_focused skips the GTK draw when geometry is identical.)
+    # back.
+    #
+    # The explicit queue_draw is NOT redundant with refresh_focused, because
+    # refresh_focused may decline to repaint at all: it returns immediately
+    # while mode_suppressed is set, and its worker bails on _refresh_lock
+    # contention or hides the border outright when _has_overlay_present. The
+    # synchronous draw is what guarantees the colour flip lands in those cases.
+    #
+    # An earlier version of this comment claimed refresh_focused "skips the GTK
+    # draw when geometry is identical". No such short-circuit exists — apply_geom
+    # calls border.update() unconditionally, and update() ends in its own
+    # queue_draw. Corrected at dotfiles-0tv1.4, which also made the test
+    # assertions here discriminate (they previously passed with this line
+    # deleted, because update()'s draw masked its absence).
     if recolored or was_suppressed:
         refresh_focused()
         border.win.queue_draw()

@@ -46,11 +46,28 @@ Run: python3 quickshell/test_qs_focus_border_mode.py
 import importlib.util, json, os, pathlib, socket, sys, tempfile, threading, time, types
 
 calls = []
-# queue_draw is recorded SEPARATELY rather than into `calls`. It is the second
-# half of constraint 2's evidence (a colour flip with unchanged geometry needs
-# an explicit GTK redraw, because refresh_focused skips the draw when the
-# geometry is identical) — and folding it into `calls` would perturb every
-# existing ordering assertion, since border.update() queues a draw of its own.
+# queue_draw is recorded SEPARATELY rather than into `calls`, because folding
+# it in would perturb every existing ordering assertion — border.update()
+# queues a draw of its own (qs-focus-border.py:188).
+#
+# It is the second half of constraint 2's evidence: _set_layer_state's
+# EXPLICIT queue_draw. That call is load-bearing because refresh_focused is
+# ASYNC and can decline to repaint at all — it returns early while
+# mode_suppressed, and its worker bails on _refresh_lock contention or when
+# _has_overlay_present hides the border instead. In each of those cases the
+# synchronous draw is the only repaint the colour flip gets.
+#
+# An earlier version of this comment justified it by claiming refresh_focused
+# "skips the GTK draw when the geometry is identical". There is no such
+# geometry short-circuit anywhere in qs-focus-border.py — apply_geom calls
+# border.update() unconditionally. The claim predates sp024 (it was inherited
+# verbatim from main) and is corrected here rather than propagated.
+#
+# NOTE ON ASSERTING THIS: `draws != []` alone does NOT pin the explicit call.
+# Any refresh that reaches apply_geom populates `draws` via update()'s own
+# queue_draw, so the bare assertion passes even with the explicit call deleted
+# (mutation-verified, dotfiles-0tv1.4). Use explicit_draws_from() below, which
+# removes that second source.
 draws = []
 
 
@@ -219,6 +236,32 @@ def reset_state():
     qsb.mode_suppressed = False
 
 
+def explicit_draws_from(transition):
+    """Run `transition` with refresh_focused neutered; return what it drew.
+
+    ISOLATES _set_layer_state's own queue_draw. There are two sources of
+    `draws` in production: the explicit call in _set_layer_state, and
+    border.update()'s trailing queue_draw (qs-focus-border.py:188) reached via
+    refresh_focused -> apply_geom. Asserting `draws != []` therefore cannot
+    tell them apart, and passes even when the explicit call is deleted.
+    Stubbing refresh_focused removes the second source, so anything recorded
+    here can only be the first.
+
+    Deliberately a SECOND run of the transition rather than a replacement for
+    the real one: the real run still asserts the refresh happened ("show" in
+    calls). Both halves of the pair need pinning, and each needs the other's
+    source removed to be seen.
+    """
+    real = qsb.refresh_focused
+    qsb.refresh_focused = lambda *a, **k: None
+    try:
+        draws.clear()
+        transition()
+        return list(draws)
+    finally:
+        qsb.refresh_focused = real
+
+
 # Baseline: a refresh with a focused window shows the border.
 calls.clear()
 qsb.refresh_focused()
@@ -248,8 +291,17 @@ check("aiming-enter: leaves refreshes working", qsb.mode_suppressed is False)
 # the GTK draw when the geometry is identical. Assumed rather than shown, this
 # is a ring that turns red only on the next unrelated window event.
 check("aiming-enter: refreshes the focused window", "show" in calls)
-check("aiming-enter: queues an explicit redraw for the colour flip", draws != [])
+# ISOLATED: refresh_focused stubbed, so this can only be _set_layer_state's own
+# queue_draw — see explicit_draws_from's docstring for why `draws != []` after
+# a plain run proves nothing.
+reset_state()
+check("aiming-enter: queues an EXPLICIT redraw for the colour flip",
+      explicit_draws_from(enter_aiming_layer) != [])
 
+reset_state()
+calls.clear()
+draws.clear()
+enter_aiming_layer()
 calls.clear()
 draws.clear()
 leave_layer()
@@ -258,7 +310,11 @@ check("aiming-clear: clears the colour", qsb.layer_colored is False)
 # also a pure colour flip (the overlay never emitted a focus event of its own),
 # so nothing else would repaint the ring back to plain.
 check("aiming-clear: refreshes the focused window", "show" in calls)
-check("aiming-clear: queues an explicit redraw", draws != [])
+# ISOLATED, same reasoning as the enter case above.
+reset_state()
+enter_aiming_layer()
+check("aiming-clear: queues an EXPLICIT redraw",
+      explicit_draws_from(leave_layer) != [])
 
 # Bar restart: a plain quickshell window::new (default name "quickshell",
 # e.g. the bar process restarting) outside any layer still hides then
@@ -471,7 +527,15 @@ leave_layer()
 check("handoff: the clear unsuppresses", qsb.mode_suppressed is False)
 check("handoff: the clear leaves the ring uncoloured", qsb.layer_colored is False)
 check("handoff: the clear brings the border back", "show" in calls)
-check("handoff: the clear queues a redraw", draws != [])
+# ISOLATED. This one leaves a SUPPRESSED layer, so it exercises the
+# was_suppressed arm of _set_layer_state rather than the colour-flip arm — and
+# that arm is where the explicit draw matters most: refresh_focused returns
+# immediately while mode_suppressed is still set on entry to the transition.
+reset_state()
+enter_aiming_layer()
+enter_drag_layer()
+check("handoff: the clear queues an EXPLICIT redraw",
+      explicit_draws_from(leave_layer) != [])
 
 # The reverse trip is real too: Esc during AIMING never reaches the drag layer,
 # so the clear arrives straight from "screenshot". The launcher does not know
