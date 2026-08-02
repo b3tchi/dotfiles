@@ -6,6 +6,8 @@ sections when status flips.
 
 ## idea
 
+- [[sp025|agent-inbox]]
+
 - 🔥 hotfix [[sp015|gopass-clipboard-secret-marking]]
 
 
