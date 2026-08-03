@@ -50,6 +50,18 @@ ApplicationWindow {
     property var saved: ({})
     property real zoom: 1
 
+    // Scale the current raster was decoded at. Kept >= zoom so the bitmap is
+    // never upscaled (blurry); refreshed on a debounce, never per wheel tick.
+    property real rasterScale: 1
+    property real pendingScale: 1
+    property bool showA: true
+    // Raster memory ceiling. A 3135x3362 board at scale 8 would decode to
+    // 8192x8192 ≈ 268 MB of RGBA; past this the bitmap is smooth-scaled up
+    // instead (slightly soft text at extreme zoom, but no OOM and no stall).
+    readonly property real pixelBudget: 60e6
+    readonly property var frontImg: showA ? imgA : imgB
+    readonly property var backImg: showA ? imgB : imgA
+
     function defaults() { return {k: 1, x: 0, y: 0} }
 
     function viewOf(file) {
@@ -62,6 +74,51 @@ ApplicationWindow {
         zoom = v.k
         content.x = v.x
         content.y = v.y
+        rasterTimer.restart()
+    }
+
+    // Re-decode only when the current raster no longer fits the zoom: too
+    // coarse (upscaled, blurry) or needlessly fine (memory, slow decode).
+    function refreshRaster() {
+        if (!current) return
+        const k = zoom
+        // in range: current pixmap is at least as fine as the zoom (never
+        // upscaled) and not wastefully finer
+        if (k <= rasterScale && k > rasterScale / 3) return
+        const target = clampScale(k)
+        if (Math.abs(target - rasterScale) < 0.01) return
+        pendingScale = target
+        const back = backImg
+        back.sourceSize.width = Math.min(8192, Math.round(current.w * target))
+        back.sourceSize.height = Math.min(8192, Math.round(current.h * target))
+        back.source = boardUrl()
+        if (back.status === Image.Ready) swapBuffers()      // cache hit
+    }
+
+    function clampScale(k) {
+        const budget = Math.sqrt(pixelBudget / (current.w * current.h))
+        return Math.min(8, budget, Math.max(0.25, k))
+    }
+
+    function swapBuffers() {
+        rasterScale = pendingScale
+        showA = !showA
+    }
+
+    function boardUrl() {
+        return current ? "file://" + current.path + "?v=" + reloadToken : ""
+    }
+
+    // load the front buffer from scratch: board switch, or a live re-render
+    function loadFront(scale) {
+        if (!current) return
+        showA = true
+        rasterScale = scale
+        pendingScale = scale
+        imgB.source = ""
+        imgA.sourceSize.width = Math.min(8192, Math.round(current.w * scale))
+        imgA.sourceSize.height = Math.min(8192, Math.round(current.h * scale))
+        imgA.source = boardUrl()
     }
 
     // ---- board discovery ----------------------------------------------------
@@ -113,7 +170,7 @@ ApplicationWindow {
             picked = true
         }
         log("rescan")
-        if (current) fit()
+        if (current) { fit(); loadFront(clampScale(zoom)) }
     }
 
     Component.onCompleted: rescan()
@@ -131,8 +188,9 @@ ApplicationWindow {
             + " content=" + Math.round(content.width) + "x" + Math.round(content.height)
             + " at=" + Math.round(content.x) + "," + Math.round(content.y)
             + " stage=" + Math.round(stage.width) + "x" + Math.round(stage.height)
-            + " imgStatus=" + board.status + " painted="
-            + Math.round(board.paintedWidth) + "x" + Math.round(board.paintedHeight))
+            + " raster=" + rasterScale.toFixed(2)
+            + " imgStatus=" + frontImg.status + " painted="
+            + Math.round(frontImg.paintedWidth) + "x" + Math.round(frontImg.paintedHeight))
     }
 
     function apply(k, x, y) {
@@ -173,6 +231,7 @@ ApplicationWindow {
         const v = viewOf(current.file)
         if (v.k === 1 && v.x === 0 && v.y === 0) fit()
         else commit(v)
+        loadFront(clampScale(zoom))
     }
 
     // ---- chrome -------------------------------------------------------------
@@ -278,22 +337,46 @@ ApplicationWindow {
         anchors.fill: parent
         clip: true
 
+        // Zooming is a scale transform on an already-rasterised sheet, NOT a
+        // re-decode. Binding sourceSize straight to the displayed size blinks:
+        // every wheel tick changes it, Qt drops the pixmap and re-decodes the
+        // svg, and the item is empty until that finishes — one blank frame per
+        // tick. So the visible zoom is instant (scale), and the raster is
+        // refreshed on a debounce, into a hidden second Image that only becomes
+        // visible once it is Ready. Nothing ever shows an empty frame.
         Item {
             id: content
             width: current ? current.w * win.zoom : 0
             height: current ? current.h * win.zoom : 0
 
-            Image {
-                id: board
-                anchors.fill: parent
-                source: current ? "file://" + current.path + "?v=" + reloadToken : ""
-                // rasterise the vector at the displayed size, so text stays
-                // crisp instead of scaling a fixed-size bitmap
-                sourceSize.width: Math.min(8192, Math.round(width))
-                sourceSize.height: Math.min(8192, Math.round(height))
-                cache: false
-                smooth: true
-                asynchronous: true
+            Item {
+                id: sheet
+                width: current ? current.w : 0
+                height: current ? current.h : 0
+                transformOrigin: Item.TopLeft
+                scale: current ? win.zoom : 1
+
+                // A/B buffers. The visible one keeps painting its existing
+                // pixmap while the other decodes at the new scale; on Ready we
+                // just flip which is visible, so no frame is ever empty.
+                Image {
+                    id: imgA
+                    anchors.fill: parent
+                    visible: win.showA
+                    smooth: true
+                    asynchronous: true
+                    onStatusChanged: if (status === Image.Ready && win.showA === false
+                                         && win.pendingScale !== win.rasterScale) win.swapBuffers()
+                }
+                Image {
+                    id: imgB
+                    anchors.fill: parent
+                    visible: !win.showA
+                    smooth: true
+                    asynchronous: true
+                    onStatusChanged: if (status === Image.Ready && !win.showA === false
+                                         && win.pendingScale !== win.rasterScale) win.swapBuffers()
+                }
             }
         }
 
@@ -348,6 +431,7 @@ ApplicationWindow {
                 if (lastLen !== 0 && len !== lastLen) {
                     win.rescan()                 // viewBox may have changed too
                     reloadToken++
+                    loadFront(clampScale(zoom))
                     reloadFlash.restart()
                 }
                 lastLen = len
@@ -356,6 +440,13 @@ ApplicationWindow {
     }
 
     Timer { id: reloadFlash; interval: 700 }
+
+    // debounce: one re-decode after the wheel settles, not one per tick
+    Timer {
+        id: rasterTimer
+        interval: 200
+        onTriggered: win.refreshRaster()
+    }
 
     // ---- keys ---------------------------------------------------------------
 
