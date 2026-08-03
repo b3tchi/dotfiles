@@ -124,13 +124,9 @@ def reply_of(text: str) -> str:
 
 
 def question_of(p: Path) -> str:
-    """Body of the question, frontmatter and headers removed. Tolerates files
-    written before frontmatter existed (the old `from:` line form)."""
+    """Body of the question, frontmatter and header removed."""
     head = strip_frontmatter(p.read_text()).split("# reply")[0]
-    head = head.replace("# question", "")
-    return "\n".join(
-        l for l in head.splitlines() if l.strip() and not l.startswith("from:")
-    ).strip()
+    return head.replace("# question", "").strip()
 
 
 def pending(d: Path):
