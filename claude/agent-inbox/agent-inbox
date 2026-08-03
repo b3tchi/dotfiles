@@ -133,8 +133,9 @@ def cmd_ask(a) -> int:
         return 0
     if not a.quiet:
         print(f"[agent-inbox] waiting for operator ({f.name})", file=sys.stderr)
-    mt, deadline = f.stat().st_mtime, time.time() + a.timeout
-    while time.time() < deadline:
+    mt = f.stat().st_mtime
+    deadline = time.time() + a.timeout if a.timeout else None   # 0 = no timeout
+    while deadline is None or time.time() < deadline:
         try:
             cur = f.stat().st_mtime
         except FileNotFoundError:
@@ -148,6 +149,48 @@ def cmd_ask(a) -> int:
             mt = cur
         time.sleep(0.4)
     print(f"TIMEOUT: no operator reply within {a.timeout}s", file=sys.stderr)
+    return 2
+
+
+def tell_dir(d: Path, aid: str) -> Path:
+    p = d / "tell" / aid
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def cmd_tell(a) -> int:
+    """Operator -> agent, unprompted. Reaches an agent that is not asking."""
+    d = store()
+    td = tell_dir(d, a.agent)
+    (td / f"{int(time.time() * 1000)}.md").write_text(a.text.rstrip() + "\n")
+    print(f"queued for {a.agent}")
+    return 0
+
+
+def cmd_listen(a) -> int:
+    """Park until the operator sends this agent a message, print it, exit.
+
+    NO timeout by default: a listener is meant to sit for hours. The harness
+    wakes the agent when this command exits (proven in poc020 -- an idle agent
+    with a parked background call resumed on exit with no nudge), which is what
+    makes an agent reachable while it is not asking anything.
+    """
+    d = store()
+    aid = agent_id()
+    td = tell_dir(d, aid)
+    if not a.quiet:
+        print(f"[agent-inbox] {aid} listening", file=sys.stderr)
+    deadline = time.time() + a.timeout if a.timeout else None
+    while deadline is None or time.time() < deadline:
+        msgs = sorted(td.glob("*.md"))
+        if msgs:
+            p = msgs[0]
+            text = p.read_text().strip()
+            p.rename(d / "sent" / f"tell-{aid}-{p.stem}.md")
+            print(text)
+            return 0
+        time.sleep(0.4)
+    print(f"TIMEOUT: no message within {a.timeout}s", file=sys.stderr)
     return 2
 
 
@@ -267,6 +310,18 @@ def main() -> int:
     s.add_argument("id")
     s.add_argument("text")
     s.set_defaults(fn=cmd_answer)
+
+    s = sub.add_parser("listen", help="agent side: park until the operator tells you something")
+    # 0 = no timeout. A listener is meant to sit for hours; it must not expire
+    # silently, or the agent becomes unreachable while appearing reachable.
+    s.add_argument("--timeout", type=int, default=0)
+    s.add_argument("--quiet", action="store_true")
+    s.set_defaults(fn=cmd_listen)
+
+    s = sub.add_parser("tell", help="operator: send an agent a message unprompted")
+    s.add_argument("agent")
+    s.add_argument("text")
+    s.set_defaults(fn=cmd_tell)
 
     a = ap.parse_args()
     return a.fn(a)

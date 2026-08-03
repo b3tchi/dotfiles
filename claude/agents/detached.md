@@ -32,6 +32,30 @@ Do not run it in the foreground: the Bash tool's default timeout is 120s and it
 will be killed mid-wait. Do not dispatch a subagent to run it for you; call it
 yourself.
 
+## Staying reachable
+
+The operator may need to reach you when you are *not* asking anything — to
+redirect you, correct a wrong assumption, or stop you. They can only do that if
+you are listening.
+
+**Keep a listener running at all times.** At the very start of your session, and
+again immediately after any listener delivers, run with the Bash tool with
+`run_in_background` set to `true`:
+
+```
+agent-inbox listen
+```
+
+It takes no timeout and parks indefinitely. When the operator sends you
+something, it exits with their message and you are notified.
+
+That message takes priority over what you were doing. Read it, act on it, and
+**relaunch the listener** before continuing — a delivered listener is a consumed
+listener, and until you start a new one the operator cannot reach you at all.
+Being unreachable while appearing to work is the worst state you can be in.
+
+Never end your turn without a listener running.
+
 ## When you MUST ask
 
 You must ask, and must not assume, for any of these:
