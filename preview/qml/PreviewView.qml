@@ -115,15 +115,110 @@ ApplicationWindow {
         // Deliberately NOT reset by later fitStage() calls: it is a
         // one-way bootstrap latch, not a "has been re-fitted" flag.
         property bool fitted: false
+        // Zoom is a scale transform on an already-decoded pixmap; the decode
+        // is refreshed on a debounce into whichever of two Images is hidden,
+        // and they swap only once the new one is Ready.
+        //
+        // Before this, sourceSize was bound straight to the on-screen size:
+        // every wheel tick changed it, Qt dropped the pixmap and re-decoded,
+        // and the item painted EMPTY until the decode finished — one blank
+        // frame per tick, seen as the viewer blinking while zooming. With
+        // `cache: false` (kept — see the retention note on `source`) even
+        // returning to a previous zoom re-decoded.
+        //
+        // rasterScale is in diagram pixels per source pixel; 0 means "no
+        // override", the bootstrap request a raster tier needs to learn its
+        // own natural size.
+        property real rasterScale: 0
+        property real pendingScale: 0
+        property bool showA: true
+        readonly property var frontImg: showA ? imgA : imgB
+        readonly property var backImg: showA ? imgB : imgA
+        // ~60 Mpx of ARGB ≈ 240 MB; past this the pixmap is smooth-scaled up
+        // rather than decoded larger.
+        readonly property real pixelBudget: 60e6
         clip: true
 
-        Component.onCompleted: {
+        Timer {
+            id: rasterTimer
+            interval: 200
+            onTriggered: stage.refreshRaster()
+        }
+
+        // The existing gate: hold every request until the caller has settled
+        // fixedNatW/H and the stage has an on-screen size, so the only decode
+        // ever issued is an on-screen-sized one (dotfiles-63rd).
+        function sourceGateOpen() {
+            return !(deferSource || (fixedNatW > 0 && fixedNatH > 0 && !fitted))
+        }
+
+        function targetScale(k) {
+            var budget = Math.sqrt(pixelBudget / Math.max(1, natW * natH))
+            return Math.min(16, budget, Math.max(0.02, k))
+        }
+
+        function setSize(img, scale) {
+            if (scale > 0 && natW > 0) {
+                img.sourceSize.width = Math.min(8192, Math.max(1, Math.round(natW * scale)))
+                img.sourceSize.height = Math.min(8192, Math.max(1, Math.round(natH * scale)))
+            } else {
+                img.sourceSize.width = 0
+                img.sourceSize.height = 0
+            }
+        }
+
+        function loadFront(scale) {
+            showA = true
+            rasterScale = scale
+            pendingScale = scale
+            imgB.source = ""
+            setSize(imgA, scale)
+            imgA.source = sourceGateOpen() ? imgUrl : ""
+        }
+
+        function refreshRaster() {
+            if (!sourceGateOpen() || natW <= 0 || imgUrl === "") return
+            var k = zoom
+            if (rasterScale > 0 && k <= rasterScale && k > rasterScale / 3) return
+            var target = targetScale(k)
+            if (rasterScale > 0 && Math.abs(target - rasterScale) < 0.01) return
+            pendingScale = target
+            var back = backImg
+            setSize(back, target)
+            back.source = imgUrl
+            if (back.status === Image.Ready) swapBuffers()
+        }
+
+        function swapBuffers() {
+            rasterScale = pendingScale
+            showA = !showA
+        }
+
+        function bootstrapLoad() {
             if (fixedNatW > 0 && fixedNatH > 0) {
                 natW = fixedNatW
                 natH = fixedNatH
                 fitStage()
+            } else {
+                loadFront(0)          // raster tier: decode once at intrinsic size
             }
         }
+        onImgUrlChanged: bootstrapLoad()
+
+        // `source` used to be a binding, so it re-evaluated by itself the
+        // moment the gate opened (deferSource cleared, or fitted latched).
+        // Driving it imperatively means those transitions have to be watched
+        // explicitly — without this the svg tier never issues its request at
+        // all, because the gate is still shut when fixedNatW/H land.
+        function maybeLoad() {
+            if (!sourceGateOpen() || imgUrl === "") return
+            if (frontImg.source != "") return
+            loadFront(natW > 0 ? targetScale(zoom) : 0)
+        }
+        onDeferSourceChanged: maybeLoad()
+        onFittedChanged: maybeLoad()
+
+        Component.onCompleted: bootstrapLoad()
         onFixedNatWChanged: if (fixedNatW > 0 && fixedNatH > 0) { natW = fixedNatW; natH = fixedNatH; fitStage() }
         onFixedNatHChanged: if (fixedNatW > 0 && fixedNatH > 0) { natW = fixedNatW; natH = fixedNatH; fitStage() }
 
@@ -131,6 +226,7 @@ ApplicationWindow {
             zoom = Math.max(0.02, Math.min(16, k))
             content.x = x
             content.y = y
+            rasterTimer.restart()
         }
         function fitStage() {
             if (natW <= 0 || natH <= 0 || stage.width <= 0 || stage.height <= 0) return
@@ -141,6 +237,11 @@ ApplicationWindow {
             // settled at this point, so the Image's first request on the
             // fixedNatW/H path is already the on-screen-sized one.
             fitted = true
+            // First fit is what opens the gate on the svg path: issue the
+            // one on-screen-sized request here. Later fits (resize) only
+            // nudge the debounce, so a drag-resize does not thrash decodes.
+            if (frontImg.source == "") loadFront(natW > 0 ? targetScale(zoom) : 0)
+            else rasterTimer.restart()
         }
         function actualSize() {
             if (natW <= 0) return
@@ -160,139 +261,64 @@ ApplicationWindow {
             width: stage.natW * stage.zoom
             height: stage.natH * stage.zoom
 
-            Image {
-                id: img
-                anchors.fill: parent
-                // dotfiles-63rd — the per-visit raster retention, and why
-                // this is a `source` gate rather than a sourceSize tweak.
-                //
-                // MEASURED (own xorgxrdp :31, i3 4.25.1, fresh binaries,
-                // isolated HOME, ports 4791/4792/4795, deduped
-                // /proc/<pid>/task/*/children PSS walk; web tier NEVER
-                // instantiated, nchild=0 at all 120 checkpoints):
-                // pic.png <-> diagram.d2 x60 grew the qml6 process
-                // 101,992 kB -> 579,234 kB with no plateau. 100% of that is
-                // ANONYMOUS MMAP — the malloc heap is flat across the whole
-                // run (5,492 kB -> 6,472 kB) — and it arrives in units of
-                // exactly 21,504 kB, which is 728 x 7561 x 4 B (the
-                // fixture's own declared svg size, page-rounded): one
-                // retained full-resolution ARGB raster.
-                //
-                // Qt's own qt.quick.image category names the culprit
-                // request. Each svg visit can log TWO decodes of the SAME
-                // url:
-                //   ... QImageReader size QSize(728,7561) -> scSize QSize(728,7561)
-                //   ... QImageReader size QSize(728,7561) -> scSize QSize(72,743)
-                // The second is the on-screen-sized one we want. The first
-                // exists only because `sourceSize` is still 0 ("no
-                // override" => the document's own declared size) during the
-                // bootstrap window before the viewBox XHR latches
-                // fixedNatW/H — the race documented on the sourceSize
-                // binding below. Correlating the two instruments over 12
-                // cycles: 3 full-resolution decodes, +64,604 kB anon =
-                // 3.004 x 21,504 kB. ONE RETAINED RASTER PER
-                // FULL-RESOLUTION DECODE, and none at all for the
-                // on-screen-sized decodes.
-                //
-                // It is a LEAK, not a cache-size policy: every visit
-                // requests the identical url, so a cache would saturate at
-                // one entry — growth linear in the number of
-                // full-resolution decodes of one url cannot be a cache.
-                // `cache: false` (already set) and any QQuickPixmapCache /
-                // QML_DISK_CACHE knob are therefore no help; the only
-                // bound is to never issue that request. Which costs
-                // nothing: it was pure waste — rasterising 5.5 Mpx that is
-                // discarded milliseconds later by the on-screen-sized
-                // request that supersedes it.
-                //
-                // Withholding `source` (rather than clamping sourceSize) is
-                // what makes this quality-neutral: the surviving request is
-                // the SAME on-screen-sized one the tier already used, and
-                // zooming still re-decodes at the larger size, so the tall
-                // diagram is exactly as crisp as before at every zoom
-                // level. Nothing is downscaled that was not already.
-                //
-                // Raster tiers are untouched: they leave fixedNatW/H at 0
-                // (they have to decode once at intrinsic size to learn
-                // their natural size at all), so the gate is inert for them
-                // and `source` is bound straight through as before.
-                // Two terms, and both are needed:
-                //   deferSource — the caller has not settled fixedNatW/H
-                //     yet (svg: the viewBox GET is still in flight).
-                //   fixedNatW/H set but !fitted — the sizes landed but
-                //     fitStage() early-returned because the stage itself
-                //     has no on-screen size yet (unmapped / tabbed-away
-                //     window). zoom is still 1 there, so content would be
-                //     natW x natH and the request would go out at full
-                //     resolution again.
-                source: (stage.deferSource
-                         || (stage.fixedNatW > 0 && stage.fixedNatH > 0 && !stage.fitted))
-                    ? ""
-                    : stage.imgUrl
-                asynchronous: true
-                smooth: true
-                cache: false
-                fillMode: Image.Stretch
-                // Rasterise at the on-screen pixel size, clamped to 8192 (the
-                // BoardView precedent — sp022 Task 4 edge case: "Image larger
-                // than 8192px -> sourceSize clamp") so a large diagram or photo
-                // stays crisp at zoom without ever decoding past a sane cap.
-                //
-                // Bootstrap chicken-and-egg: `width` (via anchors.fill: content)
-                // is itself derived from stage.natW, which is only known AFTER
-                // this very Image reports its implicit size — so sourceSize
-                // can't key off `width` until natW is set at least once.
-                // Before that, 0 means "no override" (Qt reverts to the
-                // source's own default/intrinsic size) — for a raster image
-                // that's its true pixel size regardless of what's requested;
-                // for an intrinsically-scalable source (svg) it's the size the
-                // document itself declares. Keying the fallback off the
-                // stage's on-screen size instead (an earlier attempt) breaks
-                // svg specifically: an svg has no fixed pixel size, so
-                // implicitWidth just echoes back whatever sourceSize was
-                // requested — if the window was unmapped/zero-sized at first
-                // load (verified live: a tabbed-container hidden window),
-                // natW/natH latch onto that tiny size forever. 0 sidesteps the
-                // whole race. Once natW is known, switch to the precise
-                // on-screen size for crisp zoom.
-                //
-                // The 0 branch is still reachable, and still correct, for
-                // the RASTER tiers — they have no other way to learn their
-                // natural size. It is no longer reachable on the svg path:
-                // the `source` gate above keeps that Image sourceless until
-                // fitStage() has run, by which point natW/natH are the
-                // viewBox's and this binding is already on its on-screen
-                // branch. An unmapped/zero-sized window (fitStage()'s own
-                // early return) therefore now renders nothing until it is
-                // given a size, instead of decoding a full-resolution
-                // raster into a window that cannot show it — it self-heals
-                // on the first onWidthChanged.
-                sourceSize.width: stage.natW > 0
-                    ? Math.min(8192, Math.max(1, Math.round(width)))
-                    : 0
-                sourceSize.height: stage.natH > 0
-                    ? Math.min(8192, Math.max(1, Math.round(height)))
-                    : 0
-                // implicitWidth/Height (the source's true natural size for a
-                // RASTER image) are driven by their own binding independent of
-                // the status signal — reading them synchronously inside
-                // onStatusChanged can race and see a stale 0 (verified live:
-                // status===Ready fired with implicitWidth/Height still 0), so
-                // natural size is captured here instead, on the properties
-                // that actually carry it. Never runs when the caller supplied
-                // fixedNatW/H (the svg path) — implicitWidth/Height are not a
-                // stable signal there (see the fixedNatW/H comment above).
-                function syncNaturalSize() {
-                    if (stage.fixedNatW > 0 && stage.fixedNatH > 0) return
-                    if (implicitWidth > 0 && implicitHeight > 0
-                            && (implicitWidth !== stage.natW || implicitHeight !== stage.natH)) {
-                        stage.natW = implicitWidth
-                        stage.natH = implicitHeight
-                        stage.fitStage()
+            // The pixmap lives at natural size and is SCALED to the zoom; only
+            // the debounced re-decode changes sourceSize, and it lands in the
+            // hidden buffer. See the rasterScale note on the stage above.
+            Item {
+                id: sheet
+                width: stage.natW
+                height: stage.natH
+                transformOrigin: Item.TopLeft
+                scale: stage.zoom
+
+                Image {
+                    id: imgA
+                    anchors.fill: parent
+                    visible: stage.showA
+                    asynchronous: true
+                    smooth: true
+                    // kept: each full-resolution decode of an svg retains one
+                    // ARGB raster for the life of the process (dotfiles-63rd),
+                    // and a cache cannot bound growth that is linear in
+                    // decodes of ONE url. The gate + the debounce are what
+                    // keep the decode count down now.
+                    cache: false
+                    fillMode: Image.Stretch
+                    onStatusChanged: if (status === Image.Ready && !stage.showA
+                                         && stage.pendingScale !== stage.rasterScale)
+                                         stage.swapBuffers()
+
+                    // Raster tiers have no other way to learn their natural
+                    // size than decoding once at intrinsic size — that is the
+                    // rasterScale === 0 bootstrap. Once a scale is in force,
+                    // implicitWidth just echoes the requested size, so syncing
+                    // from it then would corrupt natW/natH.
+                    function syncNaturalSize() {
+                        if (stage.fixedNatW > 0 && stage.fixedNatH > 0) return
+                        if (stage.rasterScale > 0) return
+                        if (implicitWidth > 0 && implicitHeight > 0
+                                && (implicitWidth !== stage.natW || implicitHeight !== stage.natH)) {
+                            stage.natW = implicitWidth
+                            stage.natH = implicitHeight
+                            stage.fitStage()
+                        }
                     }
+                    onImplicitWidthChanged: syncNaturalSize()
+                    onImplicitHeightChanged: syncNaturalSize()
                 }
-                onImplicitWidthChanged: syncNaturalSize()
-                onImplicitHeightChanged: syncNaturalSize()
+
+                Image {
+                    id: imgB
+                    anchors.fill: parent
+                    visible: !stage.showA
+                    asynchronous: true
+                    smooth: true
+                    cache: false
+                    fillMode: Image.Stretch
+                    onStatusChanged: if (status === Image.Ready && stage.showA
+                                         && stage.pendingScale !== stage.rasterScale)
+                                         stage.swapBuffers()
+                }
             }
         }
 
