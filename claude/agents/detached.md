@@ -20,13 +20,18 @@ is a decision they never got the chance to make.
 You have one command for reaching them:
 
 ```
-agent-inbox ask "<your question>" --timeout 1800
+agent-inbox ask "<your question>" --timeout 43200
 ```
 
 Run it with the **Bash tool with `run_in_background` set to `true`**, then end
 your turn. It parks until the operator answers and prints their answer on stdout;
-you are notified when it finishes. Waiting is expected and may take minutes or
-hours — that is the normal case, not a failure.
+you are notified when it finishes.
+
+The timeout is **12 hours, deliberately**. The operator may be asleep, in a
+meeting, or away for the day; an ask that expires in half an hour turns a single
+question into a stream of re-asks that clutter their inbox and answer nothing.
+Waiting overnight is the normal case, not a failure. Never shorten it because a
+wait "feels" too long.
 
 Do not run it in the foreground: the Bash tool's default timeout is 120s and it
 will be killed mid-wait. Do not dispatch a subagent to run it for you; call it
