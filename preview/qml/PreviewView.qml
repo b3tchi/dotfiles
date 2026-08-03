@@ -178,7 +178,10 @@ ApplicationWindow {
 
         function refreshRaster() {
             if (!sourceGateOpen() || natW <= 0 || imgUrl === "") return
-            var k = zoom
+            // 1:1 is the floor — never trade detail away just because the
+            // current framing is zoomed out; that is what made zooming in
+            // look like progressive sharpening.
+            var k = Math.max(zoom, 1)
             if (rasterScale > 0 && k <= rasterScale && k > rasterScale / 3) return
             var target = targetScale(k)
             if (rasterScale > 0 && Math.abs(target - rasterScale) < 0.01) return
@@ -195,10 +198,11 @@ ApplicationWindow {
         }
 
         function bootstrapLoad() {
+            userAdjusted = false
             if (fixedNatW > 0 && fixedNatH > 0) {
                 natW = fixedNatW
                 natH = fixedNatH
-                fitStage()
+                initialView()
             } else {
                 loadFront(0)          // raster tier: decode once at intrinsic size
             }
@@ -219,8 +223,8 @@ ApplicationWindow {
         onFittedChanged: maybeLoad()
 
         Component.onCompleted: bootstrapLoad()
-        onFixedNatWChanged: if (fixedNatW > 0 && fixedNatH > 0) { natW = fixedNatW; natH = fixedNatH; fitStage() }
-        onFixedNatHChanged: if (fixedNatW > 0 && fixedNatH > 0) { natW = fixedNatW; natH = fixedNatH; fitStage() }
+        onFixedNatWChanged: if (fixedNatW > 0 && fixedNatH > 0) { natW = fixedNatW; natH = fixedNatH; initialView() }
+        onFixedNatHChanged: if (fixedNatW > 0 && fixedNatH > 0) { natW = fixedNatW; natH = fixedNatH; initialView() }
 
         function apply(k, x, y) {
             zoom = Math.max(0.02, Math.min(16, k))
@@ -228,6 +232,25 @@ ApplicationWindow {
             content.y = y
             rasterTimer.restart()
         }
+        // userAdjusted latches on the first deliberate zoom/pan, after which
+        // a resize must not yank the view back to the initial framing.
+        property bool userAdjusted: false
+
+        // Opening view: framed to fit, but decoded at 100% detail. Framing
+        // and raster quality are separate concerns — fitting the FRAME is
+        // what you want to see, decoding at the FIT scale is not: that first
+        // pixmap is downscaled, and every zoom-in supersedes it, which reads
+        // as the picture progressively sharpening. Decoding at 1:1 up front
+        // means zooming to 100% needs no new decode at all.
+        function initialView() {
+            if (natW <= 0 || natH <= 0 || stage.width <= 0 || stage.height <= 0) return
+            var k = Math.min(stage.width / natW, stage.height / natH) * 0.97
+            apply(k, (stage.width - natW * k) / 2, (stage.height - natH * k) / 2)
+            fitted = true
+            if (frontImg.source == "") loadFront(targetScale(1))
+            else rasterTimer.restart()
+        }
+
         function fitStage() {
             if (natW <= 0 || natH <= 0 || stage.width <= 0 || stage.height <= 0) return
             var k = Math.min(stage.width / natW, stage.height / natH) * 0.97
@@ -245,16 +268,18 @@ ApplicationWindow {
         }
         function actualSize() {
             if (natW <= 0) return
+            userAdjusted = true
             apply(1, (stage.width - natW) / 2, (stage.height - natH) / 2)
         }
         function zoomAt(factor, cx, cy) {
             if (natW <= 0) return
+            userAdjusted = true
             var k = Math.max(0.02, Math.min(16, zoom * factor))
             apply(k, cx - (cx - content.x) * (k / zoom), cy - (cy - content.y) * (k / zoom))
         }
 
-        onWidthChanged: fitStage()
-        onHeightChanged: fitStage()
+        onWidthChanged: if (!userAdjusted) initialView()
+        onHeightChanged: if (!userAdjusted) initialView()
 
         Item {
             id: content
@@ -300,7 +325,7 @@ ApplicationWindow {
                                 && (implicitWidth !== stage.natW || implicitHeight !== stage.natH)) {
                             stage.natW = implicitWidth
                             stage.natH = implicitHeight
-                            stage.fitStage()
+                            stage.initialView()
                         }
                     }
                     onImplicitWidthChanged: syncNaturalSize()
@@ -332,7 +357,7 @@ ApplicationWindow {
         TapHandler { onDoubleTapped: stage.actualSize() }
 
         Shortcut { sequence: "0"; onActivated: stage.actualSize() }
-        Shortcut { sequence: "f"; onActivated: stage.fitStage() }
+        Shortcut { sequence: "f"; onActivated: { stage.userAdjusted = true; stage.fitStage() } }
     }
 
     // ---- reusable native-text view (md + code tiers) ---------------------------

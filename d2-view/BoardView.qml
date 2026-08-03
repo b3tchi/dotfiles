@@ -103,7 +103,9 @@ ApplicationWindow {
     // coarse (upscaled, blurry) or needlessly fine (memory, slow decode).
     function refreshRaster() {
         if (!current) return
-        const k = zoom
+        // 1:1 is the floor: fit framing still gets a full-detail pixmap, so
+        // zooming in does not stage through progressively sharper decodes
+        const k = Math.max(zoom, 1)
         // in range: current pixmap is at least as fine as the zoom (never
         // upscaled) and not wastefully finer
         if (k <= rasterScale && k > rasterScale / 3) return
@@ -194,7 +196,7 @@ ApplicationWindow {
             picked = true
         }
         log("rescan")
-        if (current) { fit(); loadFront(clampScale(zoom)) }
+        if (current) { fit(); loadFront(clampScale(1)) }
     }
 
     Component.onCompleted: rescan()
@@ -283,7 +285,7 @@ ApplicationWindow {
         const v = viewOf(current.file)
         if (v.k === 1 && v.x === 0 && v.y === 0) fit()
         else commit(v)
-        loadFront(clampScale(zoom))
+        loadFront(clampScale(Math.max(zoom, 1)))
     }
 
     // ---- chrome -------------------------------------------------------------
@@ -483,7 +485,7 @@ ApplicationWindow {
                 if (lastLen !== 0 && len !== lastLen) {
                     win.rescan()                 // viewBox may have changed too
                     reloadToken++
-                    loadFront(clampScale(zoom))
+                    loadFront(clampScale(Math.max(zoom, 1)))
                     reloadFlash.restart()
                 }
                 lastLen = len
