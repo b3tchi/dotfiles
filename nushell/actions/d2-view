@@ -18,6 +18,42 @@
 
 const QML_APP = "~/.dotfiles/d2-view/BoardView.qml"
 const LAYOUT  = "elk"
+const CACHE   = "~/.cache/d2-view"
+
+# Qt cannot render d2's svg output (nested <svg> + CSS classes — QtSvg is Tiny
+# 1.2, and QtQuick.VectorImage is no better: both report Ready and paint
+# nothing). So each board is rasterised with rsvg-convert, which handles them,
+# and the viewer displays that bitmap. RASTER is how many device pixels per
+# diagram pixel: 2 keeps text sharp up to 200% zoom, past which Qt smooth-
+# scales the bitmap.
+const RASTER  = 2
+
+# Cache dir for one board folder: ~/.cache/d2-view/<flattened-abs-path>.
+def cache-dir-for [dir: path]: nothing -> path {
+    let key = ($dir | str replace --all --regex '[^A-Za-z0-9]+' '-' | str trim --char '-')
+    ($CACHE | path expand | path join $key)
+}
+
+# Rasterise <board>.svg -> <cache>/<board>@<RASTER>x.png when the png is
+# missing or older. Skipped with a warning if rsvg-convert is absent.
+def render-raster [svg: path, cache: path]: nothing -> bool {
+    let name = ($svg | path basename | str replace --regex '\.svg$' '')
+    let png = ($cache | path join $"($name)@($RASTER)x.png")
+    if ($png | path exists) and ((ls $png | get 0.modified) >= (ls $svg | get 0.modified)) {
+        return true
+    }
+    if (which rsvg-convert | is-empty) {
+        print --stderr "d2-view: rsvg-convert not found — install librsvg (boards will not render)"
+        return false
+    }
+    let r = (do { ^rsvg-convert -z $RASTER $svg -o $png } | complete)
+    if $r.exit_code != 0 {
+        print --stderr $"d2-view: rasterising ($name) failed: ($r.stderr | str trim)"
+        false
+    } else {
+        true
+    }
+}
 
 # Render one .d2 to .svg. Returns true when d2 succeeded.
 def render-board [src: path]: nothing -> bool {
@@ -89,12 +125,19 @@ def main [
         }
     }
 
+    let cache = (cache-dir-for $dir)
+    ^mkdir -p $cache
+
     # first pass: bring every stale board up to date before the window opens
     let stale = (stale-boards $dir)
     if ($stale | is-not-empty) {
         print $"d2-view: rendering ($stale | length) board\(s\) …"
         $stale | each { |src| render-board $src } | ignore
     }
+    glob ($dir | path join "*.svg")
+    | where { |f| ($f | path basename) !~ '^_' }
+    | each { |svg| render-raster $svg $cache }
+    | ignore
 
     let watcher = if $no_watch {
         null
@@ -102,6 +145,10 @@ def main [
         job spawn {
             loop {
                 stale-boards $dir | each { |src| render-board $src } | ignore
+                glob ($dir | path join "*.svg")
+                | where { |f| ($f | path basename) !~ '^_' }
+                | each { |svg| render-raster $svg $cache }
+                | ignore
                 sleep 1sec
             }
         }
@@ -117,9 +164,9 @@ def main [
     try {
         with-env {QML_XHR_ALLOW_FILE_READ: "1", QT_FORCE_STDERR_LOGGING: "1"} {
             if ($board | is-empty) {
-                ^qml6 $qml -- $dir
+                ^qml6 $qml -- $dir $"--cache=($cache)" $"--raster=($RASTER)"
             } else {
-                ^qml6 $qml -- $dir $board
+                ^qml6 $qml -- $dir $board $"--cache=($cache)" $"--raster=($RASTER)"
             }
         }
     } catch { |e|

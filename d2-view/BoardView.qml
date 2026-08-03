@@ -1,9 +1,17 @@
 // d2-view — native QML viewer for a folder of d2-rendered .svg boards.
 //
 // Why QML and not a web page: the diagrams are 5000-7000px wide, so the whole
-// interaction is pan and zoom. In a browser that means transform maths plus
-// fighting native text-drag; here QtSvg rasterises the vector at whatever
-// scale we ask for, and DragHandler/WheelHandler/PinchHandler are native.
+// interaction is pan and zoom, and DragHandler/WheelHandler/PinchHandler are
+// native here instead of transform maths fighting native text-drag.
+//
+// Why PNG and not the svg directly: Qt cannot render d2's output. Both
+// QtSvg (Image) and QtQuick.VectorImage load the file, report Ready, and
+// paint nothing — d2 nests <svg> elements ("Skipping a nested svg element,
+// because SVG Document must not contain nested svg elements in Svg Tiny 1.2")
+// and styles everything through CSS classes, neither of which Qt's Tiny 1.2
+// renderer supports. So the wrapper rasterises each board with rsvg-convert
+// (correct, ~1s) into ~/.cache/d2-view and this shows that bitmap; the svg is
+// still the source of truth for natural size and for change detection.
 //
 // Launched by the `d2-view` nu wrapper:  qml6 BoardView.qml -- <dir>
 // The wrapper also keeps <board>.svg fresh from <board>.d2 while this runs.
@@ -30,11 +38,25 @@ ApplicationWindow {
 
     // ---- inputs -------------------------------------------------------------
 
-    // CLI: qml6 BoardView.qml -- <dir> [board-name] [--debug]
+    // CLI: qml6 BoardView.qml -- <dir> [board-name] [--cache=<dir>]
+    //      [--raster=<n>] [--debug] [--grab=<png>]
     readonly property var argv: Qt.application.arguments.filter(
         (a, i) => i > 0 && !a.endsWith(".qml") && !a.startsWith("-"))
     readonly property string dir: argv.length > 0 ? argv[0] : "."
     readonly property string wanted: argv.length > 1 ? argv[1] : ""
+
+    function flag(name, fallback) {
+        const a = Qt.application.arguments.find(x => x.startsWith("--" + name + "="))
+        return a ? a.substring(name.length + 3) : fallback
+    }
+
+    // where the wrapper puts <board>@<n>x.png, and the scale it rendered at
+    readonly property string cacheDir: flag("cache", dir)
+    readonly property real rasterFactor: Number(flag("raster", "2"))
+
+    function pngFor(board) {
+        return "file://" + cacheDir + "/" + board.name + "@" + rasterFactor + "x.png"
+    }
 
     property var boards: []            // [{file, name, w, h}]
     property int index: 0
@@ -95,9 +117,11 @@ ApplicationWindow {
         if (back.status === Image.Ready) swapBuffers()      // cache hit
     }
 
+    // never ask for more pixels than the cached png actually has, and stay
+    // inside the memory budget
     function clampScale(k) {
         const budget = Math.sqrt(pixelBudget / (current.w * current.h))
-        return Math.min(8, budget, Math.max(0.25, k))
+        return Math.min(rasterFactor, budget, Math.max(0.25, k))
     }
 
     function swapBuffers() {
@@ -106,7 +130,7 @@ ApplicationWindow {
     }
 
     function boardUrl() {
-        return current ? "file://" + current.path + "?v=" + reloadToken : ""
+        return current ? pngFor(current) + "?v=" + reloadToken : ""
     }
 
     // load the front buffer from scratch: board switch, or a live re-render
@@ -178,6 +202,34 @@ ApplicationWindow {
     // ---- zoom / pan ---------------------------------------------------------
 
     readonly property bool debug: Qt.application.arguments.indexOf("--debug") >= 0
+
+    // --grab=<png>: render one frame headless and exit. The only way to check
+    // what this actually paints without a display; needs
+    // QT_QUICK_BACKEND=software with the offscreen platform.
+    readonly property string grabPath: {
+        const a = Qt.application.arguments.find(x => x.startsWith("--grab="))
+        return a ? a.substring(7) : ""
+    }
+
+    Timer {
+        interval: 2500
+        running: win.grabPath !== ""
+        onTriggered: {
+            console.log("grab-state: showA=" + win.showA
+                + " A[status=" + imgA.status + " src=" + imgA.source
+                + " ss=" + imgA.sourceSize.width + "x" + imgA.sourceSize.height
+                + " painted=" + imgA.paintedWidth + "x" + imgA.paintedHeight
+                + " vis=" + imgA.visible + "]"
+                + " B[status=" + imgB.status + " vis=" + imgB.visible + "]"
+                + " sheet=" + sheet.width + "x" + sheet.height + " scale=" + sheet.scale
+                + " content=" + content.width + "x" + content.height
+                + " at=" + content.x + "," + content.y)
+            stage.grabToImage(function (res) {
+                console.log("grab saved=" + res.saveToFile(win.grabPath))
+                Qt.exit(0)
+            })
+        }
+    }
 
     function log(where) {
         if (!debug) return
