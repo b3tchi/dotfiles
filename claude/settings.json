@@ -1,6 +1,9 @@
 {
   "permissions": {
-    "defaultMode": "auto"
+    "defaultMode": "auto",
+    "allow": [
+      "Bash(agent-inbox:*)"
+    ]
   },
   "model": "opus[1m]",
   "hooks": {
