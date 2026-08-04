@@ -1,0 +1,23 @@
+[
+  {"query": "i left a claude agent running on the xrdp config overnight and it just picked YAML for the config without asking me. how do i make it actually ask next time instead of guessing", "should_trigger": true},
+  {"query": "who's waiting on me right now? i've had agents running in a few repos today and i think at least one of them is parked", "should_trigger": true},
+  {"query": "how do i answer the question the webshop agent parked yesterday - do i have to attach to its tmux session or is there another way", "should_trigger": true},
+  {"query": "i need to tell the telemetry agent to drop the _total suffix, it's already halfway through the work and i don't want to kill it", "should_trigger": true},
+  {"query": "what is agent-inbox and how does the ask/park/resume thing actually work", "should_trigger": true},
+  {"query": "im about to go out for a few hours. the agent will hit a decision about the file format at some point - i want it to wait for me rather than pick something", "should_trigger": true},
+  {"query": "there's a request sitting in ~/.local/state/agent-inbox from an agent called 192 that's about 9 hours old. what do i do with it", "should_trigger": true},
+  {"query": "can a background agent reach me if it isn't currently asking anything? like if i want to redirect it mid-task", "should_trigger": true},
+  {"query": "my detached worker finished its turn without a pending ask and now nothing is running - is it stuck and how would i even tell", "should_trigger": true},
+  {"query": "set up the claude agent so that when it hits something only i can decide, it writes the question to a file somewhere and blocks until i reply", "should_trigger": true},
+
+  {"query": "add a note about the xrdp cert rotation to my zettelkasten inbox at wiki/notes/inbox.md so i can process it later", "should_trigger": false},
+  {"query": "check my gmail for anything from the landlord about the boiler service, i think it came in last week", "should_trigger": false},
+  {"query": "i want a desktop notification via the quickshell notif daemon when the nightly rotz install finishes, ft010 style", "should_trigger": false},
+  {"query": "you're about to refactor the gwt module and i'm sitting right here watching - just ask me before you touch the branch-linking function", "should_trigger": false},
+  {"query": "list every claude session running on this box, i think there are a bunch of stale ones from yesterday eating memory", "should_trigger": false},
+  {"query": "what bd issues are open and blocked on me? run bd ready and show me what's unassigned", "should_trigger": false},
+  {"query": "the worker is stuck on a 'do you want to proceed' permission dialog in its tmux pane and i can't get past it from here", "should_trigger": false},
+  {"query": "set up claude --channels with the slack plugin so i can @claude from the team workspace", "should_trigger": false},
+  {"query": "write a nushell script that watches ~/Maildir for new mail and pipes the subject lines into my status bar", "should_trigger": false},
+  {"query": "the tmux-waiting.sh hook isn't firing when claude needs input - can you check the Stop hook config in settings.json", "should_trigger": false}
+]
