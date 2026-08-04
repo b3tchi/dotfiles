@@ -1,0 +1,172 @@
+#!/usr/bin/env nu
+# Watch a Maildir for new mail and emit a status-bar line per change.
+#
+# Streams forever by default (polybar `type = custom/script` + `tail = true`).
+# Use --once for interval-polled bars (i3blocks, polybar without tail).
+#
+#   mail-watch                      # stream bar lines
+#   mail-watch --once               # single line, exit
+#   mail-watch --format json        # waybar
+#   mail-watch --format list        # table of unread subjects (debugging)
+
+# Bytes of each message read while looking for the header block.
+const HEADER_BYTES = 16384
+
+def main [
+    --maildir: string = "~/Maildir"  # Maildir root, scanned recursively for */new
+    --once                           # print one line and exit
+    --format: string = "bar"         # bar | json | list
+    --max-len: int = 60              # truncate the subject at this many chars
+    --icon: string = "M"             # prefix glyph for the bar format
+] {
+    let root = ($maildir | path expand)
+
+    if not ($root | path exists) {
+        render [] $format $max_len $icon | print
+        error make --unspanned { msg: $"maildir not found: ($root)" }
+    }
+
+    render (scan $root) $format $max_len $icon | print
+
+    if $once { return }
+
+    # Filter in Nu rather than with `watch --glob`: a single glob can't cover
+    # both dirs that matter. `new/` is where the MDA drops mail, and `cur/`
+    # matters too, since reading a message renames it out of `new/` and the
+    # count has to follow.
+    watch $root --recursive true --quiet --debounce 400ms
+    | where {|ev| mail-event $ev }
+    | each {|_| render (scan $root) $format $max_len $icon | print }
+    | ignore
+}
+
+# True when either side of the event sits directly in a `new/` or `cur/` dir.
+def mail-event [ev: record]: nothing -> bool {
+    [$ev.path, $ev.new_path]
+    | compact
+    | any {|p| ($p | path dirname | path basename) in ["new", "cur"] }
+}
+
+# Unread messages, newest first.
+def scan [root: path]: nothing -> table {
+    glob ($root | path join "**/new/*") --no-dir
+    | each {|f|
+        {
+            file: $f
+            modified: (ls -l $f | get 0.modified)
+            subject: (subject-of $f)
+        }
+    }
+    | sort-by modified --reverse
+}
+
+def render [mail: table, format: string, max_len: int, icon: string]: nothing -> string {
+    let count = ($mail | length)
+    let latest = (if $count > 0 { $mail | first | get subject } else { "" })
+
+    match $format {
+        "json" => ({
+            text: (if $count > 0 { $"($count)" } else { "" })
+            tooltip: ($mail | get subject | str join "\n")
+            class: (if $count > 0 { "unread" } else { "empty" })
+            alt: (if $count > 0 { "unread" } else { "empty" })
+        } | to json --raw)
+        "list" => ($mail | select modified subject | table --width 200)
+        _ => (if $count == 0 {
+            $"($icon) 0"
+        } else {
+            $"($icon) ($count)  (truncate $latest $max_len)"
+        })
+    }
+}
+
+def truncate [s: string, max: int]: nothing -> string {
+    if ($s | str length) <= $max { $s } else { ($s | str substring 0..($max - 1)) + "…" }
+}
+
+# Subject of a single RFC 5322 message, MIME-words decoded.
+def subject-of [file: path]: nothing -> string {
+    let head = (read-header $file)
+    if ($head | is-empty) { return "(no subject)" }
+
+    # Unfold continuation lines before matching, so wrapped subjects survive.
+    let unfolded = ($head | str replace --all --regex '\r?\n[ \t]+' ' ')
+    let raw = (
+        $unfolded
+        | lines
+        | where {|l| $l =~ '(?i)^subject:' }
+        | get -o 0
+        | default ""
+        | str replace --regex '(?i)^subject:\s*' ''
+        | str trim
+    )
+
+    if ($raw | is-empty) { "(no subject)" } else { mime-decode $raw }
+}
+
+# First HEADER_BYTES of the file, cut at the header/body separator.
+def read-header [file: path]: nothing -> string {
+    let bytes = (do --ignore-errors { open --raw $file | first $HEADER_BYTES })
+    if ($bytes | is-empty) { return "" }
+
+    # A truncated read can split a multi-byte char; fall back to a
+    # single-byte encoding rather than losing the whole header.
+    let text = (
+        do --ignore-errors { $bytes | decode utf-8 }
+        | default (do --ignore-errors { $bytes | decode windows-1252 })
+        | default ""
+    )
+
+    $text | split row --regex '\r?\n\r?\n' | get -o 0 | default ""
+}
+
+# Decode every =?charset?B|Q?data?= word in a header value.
+def mime-decode [s: string]: nothing -> string {
+    $s
+    | parse --regex '(?<whole>=\?(?<charset>[^?]+)\?(?<enc>[bBqQ])\?(?<data>[^?]*)\?=)'
+    | uniq
+    | reduce --fold $s {|w, acc|
+        $acc | str replace --all $w.whole (decode-word $w.charset $w.enc $w.data)
+    }
+    # Adjacent encoded words are separated by whitespace that must be dropped.
+    | str replace --all --regex '\s+' ' '
+    | str trim
+}
+
+def decode-word [charset: string, enc: string, data: string]: nothing -> string {
+    let bytes = (match ($enc | str lowercase) {
+        "b" => (do --ignore-errors { $data | decode base64 })
+        _ => (do --ignore-errors { q-decode $data })
+    })
+    if ($bytes | is-empty) { return $data }
+
+    let cs = (match ($charset | str lowercase) {
+        "iso-8859-1" | "latin1" | "us-ascii" => "windows-1252"
+        $other => $other
+    })
+
+    do --ignore-errors { $bytes | decode $cs }
+    | default (do --ignore-errors { $bytes | decode utf-8 })
+    | default $data
+}
+
+# RFC 2047 quoted-printable ("Q") word -> bytes, via a hex round-trip.
+def q-decode [s: string]: nothing -> binary {
+    let chars = ($s | str replace --all "_" " " | split chars)
+    let n = ($chars | length)
+    mut hex = ""
+    mut i = 0
+
+    while $i < $n {
+        let c = ($chars | get $i)
+        if $c == "=" and ($i + 2) < $n {
+            $hex = $hex + ($chars | get ($i + 1)) + ($chars | get ($i + 2))
+            $i = $i + 3
+        } else {
+            $hex = $hex + ($c | encode hex)
+            $i = $i + 1
+        }
+    }
+
+    $hex | decode hex
+}
