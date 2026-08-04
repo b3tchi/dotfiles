@@ -1,0 +1,17 @@
+# Nightly `rotz install` as a systemd --user timer, reporting the outcome
+# through the ft010 notification stack (quickshell -p notif daemon).
+#
+# Requires: passwordless sudo for the package managers the other dots call,
+# otherwise every run is skipped with a critical notification saying so --
+# see rotz-nightly.sh's SUDO section.
+linux:
+  links:
+    rotz-nightly.sh: ~/.local/bin/rotz-nightly
+    rotz-nightly.service: ~/.config/systemd/user/rotz-nightly.service
+    rotz-nightly.timer: ~/.config/systemd/user/rotz-nightly.timer
+
+  installs:
+    cmd: |
+      rotz link rotz-nightly --force
+      systemctl --user daemon-reload
+      systemctl --user enable --now rotz-nightly.timer

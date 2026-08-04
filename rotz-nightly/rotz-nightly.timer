@@ -1,0 +1,17 @@
+[Unit]
+Description=Nightly rotz install
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+RandomizedDelaySec=30min
+
+# Persistent=true is what makes the notification actually reachable: at
+# 03:00 the machine is usually off or logged out, and ft010's daemon only
+# exists inside a graphical session -- a notification emitted then lands
+# nowhere. With Persistent, a missed run fires shortly after the user
+# manager comes back up, i.e. while a session (and the notif daemon) is
+# live, so the result reaches the bars and the history store.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

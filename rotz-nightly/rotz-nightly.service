@@ -1,0 +1,16 @@
+[Unit]
+Description=Nightly rotz install (ft010 notification on finish)
+Documentation=file:%h/.dotfiles/rotz-nightly/rotz-nightly.sh
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/rotz-nightly
+
+# The install may pull a whole package set on a slow mirror; a hung pacman
+# must still end in a notification, so the run is bounded rather than
+# left to sit forever holding the timer's next trigger.
+TimeoutStartSec=45min
+
+# Environment=ROTZ_NIGHTLY_TARGET=meta-linux   # default: every dot
+Environment=ROTZ_NIGHTLY_SUDO_CHECK=1

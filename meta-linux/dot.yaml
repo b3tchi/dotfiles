@@ -18,6 +18,7 @@ depends:
   - i3
   - hotkeyd
   - quickshell
+  - rotz-nightly
   - xterm
   - emacs
   - logseq
