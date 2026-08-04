@@ -11,6 +11,7 @@ linux:
     akm/akm-root: ~/.local/bin/akm-root
     agent-inbox/agent-inbox: ~/.local/bin/agent-inbox
     agents/detached.md: ~/.claude/agents/detached.md
+    skills/agent-inbox: ~/.claude/skills/agent-inbox
     commands/epic-create.md: ~/.claude/commands/epic-create.md
     commands/preview.md: ~/.claude/commands/preview.md
 
