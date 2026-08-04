@@ -1,5 +1,7 @@
 ---
 name: detached
+model: opus
+permission-mode: auto
 description: |
   Run when nobody is watching your output. Instead of guessing at decisions the
   operator never got to make, you ask them through the agent-inbox channel and
