@@ -19,10 +19,10 @@ sections when status flips.
 
 ## spec
 
-- [[sp026|agent-census-per-project]]
-
 
 ## ready
+
+- [[sp026|agent-census-per-project]]
 
 
 
