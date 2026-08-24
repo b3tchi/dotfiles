@@ -12,40 +12,130 @@
 # nothing.
 
 use ../../nushell/actions/agent-census *
+use harness.nu *
 
-const FIXTURE_ROOT = "/home/dev"
-
-def fixtures [] { $env.FILE_PWD | path join "fixtures" }
-def load-json [name: string] { open --raw (fixtures | path join $name) | from json }
-def load-lines [name: string] {
-    open --raw (fixtures | path join $name)
-    | lines
-    | each {|l| $l | str replace --regex '\r$' '' }
-    | where {|l| not ($l | str starts-with "#") }
-    | where {|l| ($l | str length) > 0 }
-}
-
-def assert-eq [actual, expected, msg: string = ""] {
-    if $actual != $expected {
-        error make {msg: $"expected ($expected | to nuon), got ($actual | to nuon). ($msg)"}
-    }
-}
-def assert-true [cond: bool, msg: string] {
-    if not $cond { error make {msg: $"assertion failed: ($msg)"} }
-}
-def run-case [name: string, body: closure] {
-    try { do $body; {name: $name, status: "pass", detail: ""} } catch {|e| {name: $name, status: "FAIL", detail: $e.msg} }
-}
-
-let personal = (load-json "agents-personal.json")
-let work     = (load-json "agents-work.json")
+let personal = (load-json $env.FILE_PWD "agents-personal.json")
+let work     = (load-json $env.FILE_PWD "agents-work.json")
 let agents   = ($personal | each {|r| $r | insert account "personal"}) ++ ($work | each {|r| $r | insert account "work"})
-let ps       = (parse-ps-table (load-lines "ps.txt"))
-let panes    = (build-pane-index (load-lines "panes.txt"))
-let registry = (open (fixtures | path join "projects.yaml") | get projects)
+let ps       = (parse-ps-table (load-lines $env.FILE_PWD "ps.txt"))
+let panes    = (build-pane-index (load-lines $env.FILE_PWD "panes.txt"))
+let registry = (open (fixture-dir $env.FILE_PWD | path join "projects.yaml") | get projects)
 
 let results = [
     # ---- bucket-state ---------------------------------------------------
+    
+    (run-case "fixtures/both-accounts-parse-and-differ" {
+        assert-eq ($personal | length) 7 "personal account record count"
+        assert-eq ($work | length) 6 "work account record count"
+        # Distinct accounts, else the dual-account fan-out case proves nothing.
+        let pc = ($personal | get sessionId | sort)
+        let wc = ($work | get sessionId | sort)
+        assert-true ($pc != $wc) "the two account fixtures must not be the same capture"
+    })
+
+    (run-case "fixtures/state-spread-covers-every-bucket" {
+        let all = ($personal ++ $work | each {|r| $r | get -o state | default ($r | get -o status) })
+        for s in [busy idle blocked failed done] {
+            assert-true ($s in $all) $"fixtures must contain at least one '($s)' agent"
+        }
+    })
+
+    (run-case "fixtures/both-agent-shapes-present" {
+        let all = ($personal ++ $work)
+        assert-true (($all | where kind == "interactive" | length) > 0) "need interactive records"
+        assert-true (($all | where kind == "background"  | length) > 0) "need background records"
+        # The shape split that drives attribution: pid present vs absent.
+        assert-true (($all | where {|r| ($r | get -o pid) != null} | length) > 0) "need pid-bearing records"
+        assert-true (($all | where {|r| ($r | get -o pid) == null} | length) > 0) "need pid-less records"
+    })
+
+    (run-case "fixtures/ancestry-resolves-to-a-pane" {
+        # The load-bearing property: an agent pid reaches its pane via ppid.
+        let resolved = ($personal ++ $work
+            | where {|r| ($r | get -o pid) != null}
+            | each {|r| (resolve-project {pid: $r.pid, cwd: ""} $panes $ps {} | get project) }
+            | where {|p| $p != "unknown"})
+        assert-true (($resolved | length) >= 3) "at least 3 agents must resolve to a pane"
+        assert-true ("dotfiles" in $resolved) "the dotfiles project must be reachable by ancestry"
+    })
+
+    (run-case "fixtures/ancestry-dead-end-is-represented" {
+        # A pid whose walk hits init with no pane — the fall-through-to-cwd case.
+        let dead = ($personal ++ $work
+            | where {|r| ($r | get -o pid) != null}
+            | where {|r| ((resolve-project {pid: $r.pid, cwd: ""} $panes $ps {}) | get how) != "pane" })
+        assert-true (($dead | length) >= 1) "need one pid-bearing agent with no owning pane"
+    })
+
+    (run-case "fixtures/registry-has-a-path-collision" {
+        # Two names, one path: cwd alone cannot decide, so the census must not guess.
+        let paths = ($registry | columns | each {|n| $registry | get $n | get path })
+        let dupes = ($paths | uniq --repeated)
+        assert-true (($dupes | length) >= 1) "registry must reproduce the two-names-one-path hazard"
+    })
+
+    (run-case "fixtures/registry-has-a-prefix-sibling" {
+        # portfolio-old must not be swallowed by a raw string-prefix match on portfolio.
+        let p = ($registry | get portfolio | get path)
+        let old = ($registry | get portfolio-old | get path)
+        assert-true ($old | str starts-with $p) "the sibling must share a string prefix"
+        assert-true ($old != $p) "but must be a different path"
+    })
+
+    (run-case "fixtures/worktree-job-reports-origin-cwd" {
+        # A background job running inside .claude/worktrees/<branch> still reports
+        # the repo root. This is why cwd matching is sound at all.
+        let roots = ($personal | where kind == "background" | get cwd)
+        assert-true ($"($FIXTURE_ROOT)/.dotfiles" in $roots) "need a background job reporting the repo root"
+        assert-true (($personal ++ $work | get cwd | where {|c| $c =~ '\.claude/worktrees'} | length) == 0) "no record should report a worktree path as cwd"
+    })
+
+    (run-case "fixtures/unknown-states-present-in-both-fields" {
+        let u = (load-json $env.FILE_PWD "agents-unknown-state.json")
+        let states = ($u | each {|r| $r | get -o state | default ($r | get -o status) })
+        assert-true ("hibernating" in $states) "need an unknown value in `state`"
+        assert-true ("compacting" in $states) "need an unknown value in `status`"
+    })
+
+    (run-case "fixtures/empty-inputs-are-empty-not-missing" {
+        assert-eq (load-json $env.FILE_PWD "agents-empty.json") [] "agents-empty must parse to an empty list"
+        assert-eq (load-lines $env.FILE_PWD "panes-empty.txt") [] "panes-empty must yield no pane lines"
+    })
+
+    (run-case "fixtures/ungrouped-session-yields-no-project" {
+        # Two shapes of "no group": trailing space, and no second field at all.
+        let p = (build-pane-index (load-lines $env.FILE_PWD "panes-ungrouped.txt"))
+        assert-true ("99001" not-in ($p | columns)) "a pid with a blank group must not map to a project"
+        assert-true ("99002" not-in ($p | columns)) "a pid with no group field must not map to a project"
+        assert-eq ($p | get "4598") "proj-bravo" "a grouped pane in the same file still maps"
+    })
+
+    (run-case "fixtures/crlf-does-not-leak-into-project-names" {
+        let p = (build-pane-index (load-lines $env.FILE_PWD "panes-crlf.txt"))
+        assert-eq ($p | get "788390") "dotfiles" "a CR must not stay glued to the project name"
+    })
+
+    (run-case "fixtures/headers-are-stripped-not-parsed" {
+        let raw = (open --raw (fixture-dir $env.FILE_PWD | path join "panes.txt") | lines)
+        assert-true (($raw | first | str starts-with "#")) "panes.txt must carry a provenance header"
+        assert-true (((load-lines $env.FILE_PWD "panes.txt") | where {|l| $l | str starts-with "#"} | length) == 0) "loader must strip headers"
+    })
+
+    (run-case "fixtures/carry-no-real-identifiers" {
+        # Regression guard. The repo is public; the raw captures held real
+        # project names and task descriptions. If a future re-capture lands
+        # unsanitised, this goes red before it reaches a commit.
+        let leaked = (ls (fixture-dir $env.FILE_PWD)
+            | where type == file
+            | each {|f|
+                let t = (open --raw $f.name)
+                ["/home/jan" "b3tchi" "copacks" "asahi" "mindtime" "auctions" "samples-demo"]
+                | where {|tok| $t =~ $tok }
+                | each {|tok| $"($f.name | path basename): ($tok)" } }
+            | flatten)
+        assert-eq $leaked [] "fixtures must contain no real project names or home paths"
+    })
+
     (run-case "transform/bucket-state maps every documented state" {
         assert-eq (bucket-state {kind: "interactive", status: "busy"})    "working"
         assert-eq (bucket-state {kind: "background",  state:  "working"}) "working"
@@ -80,7 +170,7 @@ let results = [
     })
 
     (run-case "transform/build-pane-index drops ungrouped panes" {
-        let p = (build-pane-index (load-lines "panes-ungrouped.txt"))
+        let p = (build-pane-index (load-lines $env.FILE_PWD "panes-ungrouped.txt"))
         assert-true ("99001" not-in ($p | columns)) "pid with blank group must not map"
         assert-true ("99002" not-in ($p | columns)) "pid with no group field must not map"
         assert-eq ($p | get "4598") "proj-bravo" "a grouped pane in the same file still maps"
@@ -89,19 +179,19 @@ let results = [
     (run-case "transform/build-pane-index falls back to session name when group is empty" {
         # Third field is the session name; an ungrouped session has no group,
         # and `foo_3` -> `foo`. Requires Task 3 to emit session_name.
-        let p = (build-pane-index (load-lines "panes-ungrouped-named.txt"))
+        let p = (build-pane-index (load-lines $env.FILE_PWD "panes-ungrouped-named.txt"))
         assert-eq ($p | get "99003") "scratch" "ungrouped session name, _N stripped"
         assert-eq ($p | get "99004") "adhoc"   "ungrouped session name with no _N suffix"
         assert-eq ($p | get "4598")  "proj-bravo" "a real group still beats the name"
     })
 
     (run-case "transform/build-pane-index strips CR from project names" {
-        let p = (build-pane-index (load-lines "panes-crlf.txt"))
+        let p = (build-pane-index (load-lines $env.FILE_PWD "panes-crlf.txt"))
         assert-eq ($p | get "788390") "dotfiles"
     })
 
     (run-case "transform/build-pane-index on no panes yields an empty index" {
-        assert-eq (build-pane-index (load-lines "panes-empty.txt")) {}
+        assert-eq (build-pane-index (load-lines $env.FILE_PWD "panes-empty.txt")) {}
     })
 
     # ---- resolve-project -------------------------------------------------

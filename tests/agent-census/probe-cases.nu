@@ -9,43 +9,10 @@
 # Emits results as JSON on stdout; run-tests.nu invokes it as a subprocess.
 
 use ../../nushell/actions/agent-census *
+use harness.nu *
 
-def assert-eq [actual, expected, msg: string = ""] {
-    if $actual != $expected {
-        error make {msg: $"expected ($expected | to nuon), got ($actual | to nuon). ($msg)"}
-    }
-}
-def assert-true [cond: bool, msg: string] {
-    if not $cond { error make {msg: $"assertion failed: ($msg)"} }
-}
-def run-case [name: string, body: closure] {
-    try { do $body; {name: $name, status: "pass", detail: ""} } catch {|e| {name: $name, status: "FAIL", detail: $e.msg} }
-}
-
-# Build a throwaway tree of stub executables and fake account dirs.
-def make-sandbox [tag: string]: nothing -> string {
-    let root = ([$nu.temp-dir $"agent-census-probe-($tag)"] | path join)
-    rm -rf $root
-    mkdir ($root | path join "bin")
-    $root
-}
-
-def write-stub [root: string, name: string, body: string] {
-    let p = ([$root "bin" $name] | path join)
-    $"#!/bin/bash\n($body)\n" | save -f $p
-    chmod +x $p
-}
-
-# Run a closure with ONLY the sandbox bin on PATH, so a probe that reaches for
-# the real claude/tmux/ps finds the stub or nothing at all.
-#
-# Deliberately does NOT add nushell's own directory: nu lives in /usr/sbin on
-# this system, which also holds tmux and ps, so including it would quietly
-# hand the probes the real binaries and make the "tmux is absent" case pass
-# for the wrong reason. nu is already running; it does not need to be on PATH.
-def with-stub-path [root: string, body: closure] {
-    with-env {PATH: [([$root "bin"] | path join)]} { do $body }
-}
+# A probe sandbox: stub bin plus whatever account dirs the case creates.
+def make-probe-sandbox [tag: string]: nothing -> string { make-sandbox "probe" $tag }
 
 let results = [
     # ---- account discovery ----------------------------------------------
@@ -53,7 +20,7 @@ let results = [
         # ~/.claude is commonly a symlink to one of the suffixed account dirs
         # (it is on this machine). Probing both would double-count every agent
         # in that account.
-        let s = (make-sandbox "accounts")
+        let s = (make-probe-sandbox "accounts")
         mkdir ($s | path join ".claude-personal")
         mkdir ($s | path join ".claude-work")
         ln -s ($s | path join ".claude-work") ($s | path join ".claude")
@@ -63,7 +30,7 @@ let results = [
     })
 
     (run-case "probe/discover-accounts skips non-directories" {
-        let s = (make-sandbox "accountfiles")
+        let s = (make-probe-sandbox "accountfiles")
         mkdir ($s | path join ".claude-personal")
         "not a dir" | save -f ($s | path join ".claude-backup.tar")
         let found = (discover-accounts --home $s)
@@ -71,13 +38,13 @@ let results = [
     })
 
     (run-case "probe/discover-accounts finds nothing when there is nothing" {
-        let s = (make-sandbox "noaccounts")
+        let s = (make-probe-sandbox "noaccounts")
         assert-eq (discover-accounts --home $s) []
     })
 
     # ---- agent probe: degradation ---------------------------------------
     (run-case "probe/one broken account does not abort the others" {
-        let s = (make-sandbox "brokenacct")
+        let s = (make-probe-sandbox "brokenacct")
         mkdir ($s | path join ".claude-personal")
         mkdir ($s | path join ".claude-work")
         # Fail loudly for one account, succeed for the other.
@@ -91,7 +58,7 @@ echo "[{\"kind\":\"background\",\"state\":\"done\",\"cwd\":\"/home/dev/.dotfiles
     (run-case "probe/non-JSON output yields no rows instead of crashing" {
         # A version mismatch or an auth prompt prints prose on stdout with a
         # zero exit. Parsing that must not take the census down.
-        let s = (make-sandbox "notjson")
+        let s = (make-probe-sandbox "notjson")
         mkdir ($s | path join ".claude-personal")
         write-stub $s "claude" $': > "($s)/ran"; echo "Please run claude login to continue."'
         let rows = (with-stub-path $s { collect-agents (discover-accounts --home $s) })
@@ -102,7 +69,7 @@ echo "[{\"kind\":\"background\",\"state\":\"done\",\"cwd\":\"/home/dev/.dotfiles
     })
 
     (run-case "probe/zero agents is an empty list, not an error" {
-        let s = (make-sandbox "zeroagents")
+        let s = (make-probe-sandbox "zeroagents")
         mkdir ($s | path join ".claude-personal")
         write-stub $s "claude" $': > "($s)/ran"; echo "[]"'
         assert-eq (with-stub-path $s { collect-agents (discover-accounts --home $s) }) []
@@ -110,7 +77,7 @@ echo "[{\"kind\":\"background\",\"state\":\"done\",\"cwd\":\"/home/dev/.dotfiles
     })
 
     (run-case "probe/rows are tagged with the account they came from" {
-        let s = (make-sandbox "tagging")
+        let s = (make-probe-sandbox "tagging")
         mkdir ($s | path join ".claude-personal")
         mkdir ($s | path join ".claude-work")
         write-stub $s "claude" 'n="${CLAUDE_CONFIG_DIR##*/}"
@@ -123,7 +90,7 @@ echo "[{\"kind\":\"background\",\"state\":\"done\",\"cwd\":\"/x/$n\",\"sessionId
     (run-case "probe/accounts are probed concurrently, not serially" {
         # Measured, not read off the source: a par-each that silently
         # serialises passes code review and fails this.
-        let s = (make-sandbox "timing")
+        let s = (make-probe-sandbox "timing")
         mkdir ($s | path join ".claude-personal")
         mkdir ($s | path join ".claude-work")
         write-stub $s "claude" '/bin/sleep 0.5; echo "[]"'
@@ -138,21 +105,21 @@ echo "[{\"kind\":\"background\",\"state\":\"done\",\"cwd\":\"/x/$n\",\"sessionId
 
     # ---- tmux + ps + registry -------------------------------------------
     (run-case "probe/no tmux server yields an empty pane index" {
-        let s = (make-sandbox "notmux")
+        let s = (make-probe-sandbox "notmux")
         write-stub $s "tmux" 'echo "no server running on /tmp/tmux-1000/default" >&2; exit 1'
         assert-eq (with-stub-path $s { probe-panes }) {}
     })
 
     (run-case "probe/tmux absent entirely yields an empty pane index" {
         # Not the same as a failing tmux: the binary is not on PATH at all.
-        let s = (make-sandbox "tmuxgone")
+        let s = (make-probe-sandbox "tmuxgone")
         assert-eq (with-stub-path $s { probe-panes }) {}
     })
 
     (run-case "probe/pane probe requests session_name as a third field" {
         # Task 2's build-pane-index needs the session NAME to label an
         # ungrouped session. A two-field probe silently loses those panes.
-        let s = (make-sandbox "panefields")
+        let s = (make-probe-sandbox "panefields")
         write-stub $s "tmux" 'echo "$@" > /dev/stderr; echo "4598 proj-bravo proj-bravo_0"
 echo "99003  scratch_3"'
         let idx = (with-stub-path $s { probe-panes })
@@ -161,25 +128,25 @@ echo "99003  scratch_3"'
     })
 
     (run-case "probe/ps failure yields an empty table" {
-        let s = (make-sandbox "nops")
+        let s = (make-probe-sandbox "nops")
         write-stub $s "ps" 'exit 1'
         assert-eq (with-stub-path $s { probe-ps }) []
     })
 
     (run-case "probe/missing registry yields an empty record" {
-        let s = (make-sandbox "noregistry")
+        let s = (make-probe-sandbox "noregistry")
         assert-eq (probe-registry ($s | path join "does-not-exist.yaml")) {}
     })
 
     (run-case "probe/registry without a projects key yields an empty record" {
-        let s = (make-sandbox "emptyregistry")
+        let s = (make-probe-sandbox "emptyregistry")
         let f = ($s | path join "projects.yaml")
         "other: {}\n" | save -f $f
         assert-eq (probe-registry $f) {}
     })
 
     (run-case "probe/registry is read when present" {
-        let s = (make-sandbox "goodregistry")
+        let s = (make-probe-sandbox "goodregistry")
         let f = ($s | path join "projects.yaml")
         "projects:\n  alpha:\n    path: /tmp/alpha\n" | save -f $f
         assert-eq (probe-registry $f) {alpha: {path: "/tmp/alpha"}}

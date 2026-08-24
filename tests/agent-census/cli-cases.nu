@@ -6,28 +6,16 @@
 # contract — flags, output shape, exit status — rather than about internals
 # the other two suites already cover.
 
-const ACTION = "../../nushell/actions/agent-census"
+use harness.nu *
 
-def assert-eq [actual, expected, msg: string = ""] {
-    if $actual != $expected {
-        error make {msg: $"expected ($expected | to nuon), got ($actual | to nuon). ($msg)"}
-    }
-}
-def assert-true [cond: bool, msg: string] {
-    if not $cond { error make {msg: $"assertion failed: ($msg)"} }
-}
-def run-case [name: string, body: closure] {
-    try { do $body; {name: $name, status: "pass", detail: ""} } catch {|e| {name: $name, status: "FAIL", detail: $e.msg} }
-}
+const ACTION = "../../nushell/actions/agent-census"
 
 def action-path [] { $env.FILE_PWD | path join $ACTION | path expand }
 
 # A sandbox whose stubs report a known, fixed world:
 #   two accounts, five agents, one pane, one registry collision.
 def make-world [tag: string]: nothing -> string {
-    let root = ([$nu.temp-dir $"agent-census-cli-($tag)"] | path join)
-    rm -rf $root
-    mkdir ($root | path join "bin")
+    let root = (make-sandbox "cli" $tag)
     mkdir ($root | path join ".claude-personal")
     mkdir ($root | path join ".claude-work")
 
@@ -65,12 +53,6 @@ def make-mixed-world [tag: string]: nothing -> string {
     $work | save -f ($root | path join "work.json")
     write-stub $root "ps" 'echo "4242 4200"'
     $root
-}
-
-def write-stub [root: string, name: string, body: string] {
-    let p = ([$root "bin" $name] | path join)
-    $"#!/bin/bash\n($body)\n" | save -f $p
-    chmod +x $p
 }
 
 # Invoke the action the way a consumer would: one exec, bare PATH, its own
