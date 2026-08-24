@@ -238,9 +238,17 @@ let fixture_cases = [
 ]
 
 # --- Task 2's pure layer -------------------------------------------------
+# Driven as a subprocess so this file still parses when the action is absent:
+# `use` resolves at parse time, and a missing module would take the whole
+# suite down instead of reporting three pending cases.
 let action_path = ($env.FILE_PWD | path dirname | path dirname | path join $CENSUS_ACTION)
 let transform_cases = if ($action_path | path exists) {
-    [(pending "transform/*" $"($CENSUS_ACTION) exists — wire its cases in per Task 2's test_plan")]
+    let out = (do { ^$nu.current-exe ($env.FILE_PWD | path join "transform-cases.nu") } | complete)
+    if $out.exit_code == 0 {
+        $out.stdout | from json
+    } else {
+        [{name: "transform/<suite crashed>", status: "FAIL", detail: ($out.stderr | str substring 0..600)}]
+    }
 } else {
     [(pending "transform/bucket-state" "Task 2 (dotfiles-ubc4.2) has not written the pure layer yet")
      (pending "transform/resolve-project" "Task 2 (dotfiles-ubc4.2) has not written the pure layer yet")

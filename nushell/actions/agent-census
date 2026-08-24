@@ -1,0 +1,211 @@
+#!/usr/bin/env nu
+# agent-census — how many claude agents, in which state, per project.
+#
+# ft012 / sp026. Two layers, and the split is the whole design:
+#
+#   probe layer      shells out (claude / tmux / ps / the ft001 registry)
+#   transform layer  takes those structures as arguments, returns rows
+#
+# Nothing in the transform layer reaches for the world. That is what makes it
+# testable from fixtures — arranging a live agent into `blocked` on demand is
+# not repeatable, so a suite that needed it would only ever run on one machine.
+# See tests/agent-census/.
+#
+# Language is settled by adr0001 (structured pipeline in the workflow-tooling
+# layer, completes and exits), with no adr0002 bash trigger and no adr0003
+# daemon case.
+#
+# This file is Task 2: the transform layer only. The probe layer is Task 3 and
+# the CLI surface is Task 4.
+
+# ---------------------------------------------------------------- constants
+
+# Upstream reports interactive agents under `status` and background agents
+# under `state`. Anything absent from this table buckets as `other` and stays
+# in the totals — a state we have never seen is a signal to update the census,
+# not a reason to under-count (adr0017: absence of evidence is not evidence of
+# absence).
+const BUCKETS = {
+    busy: "working", working: "working",
+    idle: "idle", shell: "idle",
+    waiting: "blocked", blocked: "blocked", failed: "blocked",
+    done: "done",
+}
+
+# Ancestor-walk ceiling. A malformed ps table can contain a ppid cycle, and an
+# unbounded walk would hang the census rather than fail it.
+const MAX_ANCESTRY_DEPTH = 12
+
+# ------------------------------------------------------- transform: buckets
+
+# Normalise one agent record to a bucket name.
+export def bucket-state [rec: record]: nothing -> string {
+    let raw = ($rec | get -o state | default ($rec | get -o status) | default "")
+    $BUCKETS | get -o $raw | default "other"
+}
+
+# --------------------------------------------------- transform: pane lookup
+
+# Build `pane_pid -> project` from `tmux list-panes` output.
+#
+# Accepts two field shapes:
+#   "<pane_pid> <session_group>"                 grouped session
+#   "<pane_pid> <session_group> <session_name>"  group may be empty
+#
+# An ungrouped session reports an EMPTY session_group, so the session name is
+# the only label left; tmux-start numbers sessions `<project>_<N>`, so a
+# trailing _<N> is stripped. With neither, the pane contributes nothing rather
+# than a made-up project.
+export def build-pane-index [lines: list<string>]: nothing -> record {
+    $lines | reduce --fold {} {|line, acc|
+        let clean = ($line | str replace --regex '\r$' '')
+        let f = ($clean | split row " ")
+        let pid = ($f | get -o 0 | default "" | str trim)
+        let group = ($f | get -o 1 | default "" | str trim)
+        let sname = ($f | skip 2 | str join " " | str trim)
+        let project = if ($group | is-not-empty) {
+            $group
+        } else if ($sname | is-not-empty) {
+            $sname | str replace --regex '_\d+$' ''
+        } else {
+            ""
+        }
+        if ($pid | is-empty) or ($project | is-empty) { $acc } else { $acc | upsert $pid $project }
+    }
+}
+
+# Parse `ps -eo pid=,ppid=` into a table.
+export def parse-ps-table [lines: list<string>]: nothing -> table {
+    $lines | each {|l|
+        let f = ($l | str trim | split row --regex '\s+' | where {|x| ($x | str length) > 0})
+        {pid: ($f | get 0 | into int), ppid: ($f | get 1 | into int)}
+    }
+}
+
+# Walk a pid's ancestors until one of them owns a tmux pane. Returns the
+# pane's project, or null when the chain ends at init, leaves the ps table,
+# or exceeds the depth ceiling.
+def walk-to-pane [pid: int, panes: record, ps: table]: nothing -> any {
+    let keys = ($panes | columns)
+    mut cur = $pid
+    for _ in 1..$MAX_ANCESTRY_DEPTH {
+        let row = ($ps | where pid == $cur)
+        if ($row | is-empty) { return null }
+        let parent = ($row | first | get ppid)
+        let pkey = ($parent | into string)
+        if ($pkey in $keys) { return ($panes | get $pkey) }
+        if $parent <= 1 { return null }
+        $cur = $parent
+    }
+    null
+}
+
+# ------------------------------------------------ transform: cwd attribution
+
+def path-parts [p: string]: nothing -> list<string> {
+    $p | split row "/" | where {|x| ($x | str length) > 0}
+}
+
+# Match a cwd against the ft001 registry by PATH COMPONENTS, never by string
+# prefix: `/repos/acme/portfolio-old` shares a string prefix with
+# `/repos/acme/portfolio` but is a different project entirely.
+#
+# Longest match wins, so a solution directory registered inside a monorepo
+# beats the monorepo root. When two registry names tie at the deepest match
+# — the real registry does this twice — the answer is `unknown`, not a coin
+# flip. adr0017: "I cannot tell" is a first-class verdict.
+def match-cwd [cwd: string, registry: record]: nothing -> record {
+    if ($cwd | is-empty) { return {project: "unknown", how: "unmatched", cwd: $cwd} }
+    let cp = (path-parts $cwd)
+    let cands = ($registry | columns | each {|name|
+        let rp = (path-parts ($registry | get $name | get path))
+        let n = ($rp | length)
+        if ($n <= ($cp | length)) and (($cp | first $n) == $rp) { {name: $name, depth: $n} } else { null }
+    } | where {|x| $x != null})
+
+    if ($cands | is-empty) { return {project: "unknown", how: "unmatched", cwd: $cwd} }
+    let deepest = ($cands | get depth | math max)
+    let winners = ($cands | where depth == $deepest)
+    if ($winners | length) > 1 {
+        {project: "unknown", how: "ambiguous", cwd: $cwd}
+    } else {
+        {project: ($winners | first | get name), how: "cwd", cwd: $cwd}
+    }
+}
+
+# Attribute one agent to a project.
+#
+# tmux first: an agent with a live pid resolves through its pane, which is
+# authoritative and separates two projects that share a filesystem path. Only
+# without a pane does the cwd get matched against the registry — and a tie or
+# a miss there lands in `unknown` with the path preserved.
+export def resolve-project [
+    rec: record         # one agent record
+    panes: record       # pane_pid -> project
+    ps: table           # pid/ppid
+    registry: record    # ft001 projects
+]: nothing -> record {
+    let pid = ($rec | get -o pid)
+    let via_pane = if $pid != null { walk-to-pane $pid $panes $ps } else { null }
+    if $via_pane != null {
+        {project: $via_pane, how: "pane", cwd: ($rec | get -o cwd | default "")}
+    } else {
+        match-cwd ($rec | get -o cwd | default "") $registry
+    }
+}
+
+# ---------------------------------------------------- transform: row shaping
+
+# Fold attributed agents into one row per project.
+#
+# Zero agents yields an EMPTY table, not a row of zeros: a fabricated zero row
+# would make a consumer render a project that has nothing running in it.
+export def shape-rows [
+    agents: list        # agent records, each tagged with `account`
+    panes: record
+    ps: table
+    registry: record
+]: nothing -> table {
+    if ($agents | is-empty) { return [] }
+    let known = ($registry | columns)
+
+    let attributed = ($agents | each {|a|
+        let r = (resolve-project $a $panes $ps $registry)
+        {
+            project: $r.project
+            bucket: (bucket-state $a)
+            account: ($a | get -o account | default "personal")
+            cwd: ($a | get -o cwd | default "")
+            attributed: ($r.how != "ambiguous" and $r.how != "unmatched")
+        }
+    })
+
+    $attributed | group-by project | items {|project, rows|
+        {
+            project: $project
+            path: (if $project in $known { $registry | get $project | get path } else { null })
+            idle:    ($rows | where bucket == "idle"    | length)
+            working: ($rows | where bucket == "working" | length)
+            blocked: ($rows | where bucket == "blocked" | length)
+            done:    ($rows | where bucket == "done"    | length)
+            other:   ($rows | where bucket == "other"   | length)
+            total:   ($rows | length)
+            accounts: {
+                personal: ($rows | where account == "personal" | length)
+                work:     ($rows | where account == "work"     | length)
+            }
+            # Populated only where attribution failed, so the gap is visible
+            # instead of being silently folded into a named project.
+            cwds: (if $project == "unknown" { $rows | get cwd | uniq | sort } else { [] })
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# The probe layer (Task 3, dotfiles-ubc4.3) and the CLI surface (Task 4,
+# dotfiles-ubc4.4) land here. Until then this file is a module only.
+def main [] {
+    print "agent-census: transform layer only (sp026 Task 2)."
+    print "The probe layer (Task 3) and CLI flags (Task 4) are not written yet."
+    exit 2
+}
