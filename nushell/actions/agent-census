@@ -201,6 +201,10 @@ export def shape-rows [
     }
 }
 
+# States that mean the agent has FINISHED. A record in one of these is not
+# something you can go and work with, even while its process lingers.
+const TERMINAL_STATES = ["done", "failed"]
+
 # Keep only agents whose process actually exists.
 #
 # `claude agents --all --json` returns HISTORICAL job records alongside
@@ -209,15 +213,24 @@ export def shape-rows [
 # exist", not "how many agents are running" -- on a real machine that was 13
 # versus 6, with the extra seven aged 25 to 101 days.
 #
-# A record is live iff it carries a pid AND that pid is in the ps table the
-# census already probes, so this costs no extra probe. Note a background agent
-# whose state is `done` but whose process is still resident DOES count: it is
-# running and resumable, and its pid is in ps.
+# A record is running iff it carries a pid that is in the ps table the census
+# already probes AND its state is not terminal.
+#
+# The pid test alone is not enough: a background job that has FINISHED stays
+# resident under `claude bg-pty-host`, so it passes the liveness test while
+# having no tmux window and nothing left to do. On this machine that was one
+# extra agent in `dotfiles` against two actual claude windows.
+#
+# Window-less agents are deliberately NOT excluded as a class. us022 exists
+# because background agents that are BLOCKED are invisible until you walk the
+# sessions by hand -- a window-less blocked agent is precisely what the census
+# is for. Only the terminal ones drop out.
 export def live-agents [agents: list, ps: table]: nothing -> list {
     let pids = ($ps | get pid)
     $agents | where {|a|
         let pid = ($a | get -o pid)
-        $pid != null and ($pid in $pids)
+        let state = ($a | get -o state | default ($a | get -o status) | default "")
+        $pid != null and ($pid in $pids) and ($state not-in $TERMINAL_STATES)
     }
 }
 

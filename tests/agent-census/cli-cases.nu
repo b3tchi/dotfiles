@@ -26,16 +26,18 @@ def make-world [tag: string]: nothing -> string {
     # redirection: stub bodies run on a PATH containing only this sandbox, so
     # `cat` is unavailable, and embedding the JSON inline gets brace-expanded
     # by bash once nu's string interpolation has eaten the quoting.
-    let personal = '[{"pid":4242,"kind":"interactive","status":"busy","cwd":"/w/alpha","sessionId":"p1","name":"alpha work"},{"pid":4243,"kind":"background","state":"done","cwd":"/w/tied","sessionId":"p2","name":"tied job"}]'
+    let personal = '[{"pid":4242,"kind":"interactive","status":"busy","cwd":"/w/alpha","sessionId":"p1","name":"alpha work"},{"pid":4243,"kind":"background","state":"working","cwd":"/w/tied","sessionId":"p2","name":"tied job"}]'
     $personal | save -f ($root | path join "personal.json")
-    let work = '[{"pid":4244,"kind":"background","state":"blocked","cwd":"/w/alpha","sessionId":"w1","name":"blocked one"},{"pid":4245,"kind":"background","state":"failed","cwd":"/w/alpha","sessionId":"w2","name":"failed one"},{"pid":4246,"kind":"background","state":"hibernating","cwd":"/w/beta","sessionId":"w3","name":"odd state"}]'
+    let work = '[{"pid":4244,"kind":"background","state":"blocked","cwd":"/w/alpha","sessionId":"w1","name":"blocked one"},{"pid":4245,"kind":"background","state":"waiting","cwd":"/w/alpha","sessionId":"w2","name":"failed one"},{"pid":4246,"kind":"background","state":"hibernating","cwd":"/w/beta","sessionId":"w3","name":"odd state"}]'
     $work | save -f ($root | path join "work.json")
     let body = ('if [[ "$CLAUDE_CONFIG_DIR" == *personal ]]; then printf "%s" "$(<' + $root + '/personal.json)"; else printf "%s" "$(<' + $root + '/work.json)"; fi')
     write-stub $root "claude" $body
 
     write-stub $root "tmux" 'echo "4200 alpha alpha_0"'
     # 4242 hangs off the pane; the rest are live but parentless. All five are
-    # RUNNING -- liveness is exercised by make-mixed-world, not here.
+    # RUNNING and none is in a terminal state, so the liveness and
+    # terminal-state filters leave this world alone -- those are exercised by
+    # make-mixed-world and the dedicated cases below.
     write-stub $root "ps" 'echo "4242 4200"; echo "4243 1"; echo "4244 1"; echo "4245 1"; echo "4246 1"'
 
     $"projects:\n  alpha:\n    path: /w/alpha\n  beta:\n    path: /w/beta\n  tied:\n    path: /w/tied\n  tied-py:\n    path: /w/tied\n" | save -f ($root | path join "projects.yaml")
@@ -182,6 +184,34 @@ let results = [
         let rows = ((run-action (make-mixed-world "live") "--json").stdout | from json)
         assert-eq ($rows | get total | math sum) 1 "only the pid-bearing record is running"
         assert-eq ($rows | get project) ["alpha"] "and it belongs to alpha via its pane"
+    })
+
+    (run-case "cli/a finished agent with a live process is not counted" {
+        # The reported bug: a done background job stays resident under the
+        # daemon, so a pid check alone keeps counting it. It has no tmux
+        # window and nothing left to do.
+        let w = (make-mixed-world "terminal")
+        let personal = '[{"pid":4242,"kind":"interactive","status":"busy","cwd":"/w/alpha","sessionId":"p1","name":"running"},{"pid":4243,"kind":"background","state":"done","cwd":"/w/alpha","sessionId":"p2","name":"finished but resident"}]'
+        $personal | save -f ($w | path join "personal.json")
+        '[]' | save -f ($w | path join "work.json")
+        write-stub $w "ps" 'echo "4242 4200"; echo "4243 1"'
+        let live = ((run-action $w "--json").stdout | from json | get total | math sum)
+        assert-eq $live 1 "the done-but-resident agent must not count"
+        let all = ((run-action $w "--json" "--all").stdout | from json | get total | math sum)
+        assert-eq $all 2 "--all still shows it"
+    })
+
+    (run-case "cli/a window-less blocked agent is still counted" {
+        # The regression that would gut the feature: us022 exists because
+        # blocked background agents are invisible until you walk the sessions.
+        let w = (make-mixed-world "orphanblocked")
+        let personal = '[{"pid":4243,"kind":"background","state":"blocked","cwd":"/w/alpha","sessionId":"p1","name":"blocked, no window"}]'
+        $personal | save -f ($w | path join "personal.json")
+        '[]' | save -f ($w | path join "work.json")
+        write-stub $w "ps" 'echo "4243 1"'
+        let rows = ((run-action $w "--json").stdout | from json)
+        assert-eq ($rows | get total | math sum) 1 "no tmux window must not mean uncounted"
+        assert-eq ($rows | first | get blocked) 1
     })
 
     (run-case "cli/--all restores the historical records" {

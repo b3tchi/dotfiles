@@ -261,7 +261,7 @@ let results = [
         # that was 13 records for 6 running agents.
         let live = (live-agents $agents $ps)
         assert-eq ($agents | length) 13 "fixtures carry the full record set"
-        assert-eq ($live | length) 6 "only the pid-bearing, ps-present records are running"
+        assert-eq ($live | length) 5 "pid-bearing, ps-present, and not finished"
         assert-true (($live | all {|a| ($a | get -o pid) != null})) "every live record has a pid"
     })
 
@@ -274,12 +274,26 @@ let results = [
         assert-eq (live-agents [$real] $ps | length) 1
     })
 
-    (run-case "transform/live-agents keeps a done background agent still resident" {
-        # state=done but the process is alive: finished, resumable, and running.
-        # Excluding it by state rather than by liveness would lose it.
+    (run-case "transform/live-agents drops a finished agent that is still resident" {
+        # A background job that has FINISHED stays resident under
+        # `claude bg-pty-host`, so it passes the pid test while having no tmux
+        # window and nothing left to do. It is not an agent you can work with.
         let live = (live-agents $agents $ps)
-        let done_resident = ($live | where {|a| ($a | get -o state) == "done"})
-        assert-true (($done_resident | length) >= 1) "a resident done agent must survive the filter"
+        assert-eq ($live | where {|a| ($a | get -o state) in ["done" "failed"]}) [] "terminal states must not count as running"
+        # The fixtures DO contain such a record, so this is not vacuous.
+        let resident_done = ($agents | where {|a| ($a | get -o state) == "done" and ($a | get -o pid) != null})
+        assert-true (($resident_done | length) >= 1) "fixtures must contain a resident done agent for this to mean anything"
+    })
+
+    (run-case "transform/live-agents keeps a window-less blocked agent" {
+        # THE regression that would gut the feature. us022 exists because
+        # background agents that are blocked are invisible until you walk the
+        # sessions by hand. Having no tmux window must never exclude one.
+        let orphan = {pid: 4242, kind: "background", state: "blocked", cwd: "/x", account: "personal"}
+        let ps_with = ($ps ++ [{pid: 4242, ppid: 1}])
+        assert-eq (live-agents [$orphan] $ps_with | length) 1 "a blocked background agent with no pane must still count"
+        let working = ($orphan | update state "working")
+        assert-eq (live-agents [$working] $ps_with | length) 1 "so must a working one"
     })
 
     (run-case "transform/live-agents on an empty ps table keeps nothing" {
