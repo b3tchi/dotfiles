@@ -255,49 +255,71 @@ let results = [
     })
 
     # ---- live-agents -----------------------------------------------------
-    (run-case "transform/live-agents keeps only records whose process exists" {
-        # The real hazard: `claude agents --all --json` returns historical job
-        # records with no pid at all. On the machine this was captured from
-        # that was 13 records for 6 running agents.
-        let live = (live-agents $agents $ps)
-        assert-eq ($agents | length) 13 "fixtures carry the full record set"
-        assert-eq ($live | length) 5 "pid-bearing, ps-present, and not finished"
-        assert-true (($live | all {|a| ($a | get -o pid) != null})) "every live record has a pid"
+    (run-case "transform/status presence and pid presence agree on every fixture" {
+        # The invariant liveness now rests on. If upstream ever emits `status`
+        # without a pid (or vice versa), this fails instead of the census
+        # silently miscounting.
+        for a in $agents {
+            let has_status = (($a | get -o status) != null)
+            let has_pid = (($a | get -o pid) != null)
+            assert-eq $has_status $has_pid $"($a.name): status and pid must appear together"
+        }
+        assert-eq ($agents | where {|a| ($a | get -o status) != null} | length) 6 "six fixture records have a process"
     })
 
-    (run-case "transform/live-agents drops a pid that is not in the ps table" {
-        # A record can carry a pid whose process has since exited.
-        let ghost = {pid: 99999999, kind: "interactive", status: "busy", cwd: "/x", account: "personal"}
-        assert-eq (live-agents [$ghost] $ps) [] "a pid absent from ps is not running"
-        # ...and the same record with a pid that IS in ps survives.
-        let real = ($agents | where {|a| ($a | get -o pid) != null} | first)
-        assert-eq (live-agents [$real] $ps | length) 1
+    (run-case "transform/live-agents keeps only records whose process exists" {
+        let live = (live-agents $agents)
+        assert-eq ($agents | length) 13 "fixtures carry the full record set"
+        assert-eq ($live | length) 5 "process present, and not finished"
+    })
+
+    (run-case "transform/live-agents drops a record with no process" {
+        # No `status` field at all: a historical job record.
+        let historical = {kind: "background", state: "blocked", cwd: "/x", account: "personal"}
+        assert-eq (live-agents [$historical]) [] "no status means no process means not running"
+        let running = {kind: "background", state: "blocked", status: "idle", cwd: "/x", account: "personal"}
+        assert-eq (live-agents [$running] | length) 1 "the same job WITH a process counts"
     })
 
     (run-case "transform/live-agents drops a finished agent that is still resident" {
         # A background job that has FINISHED stays resident under
-        # `claude bg-pty-host`, so it passes the pid test while having no tmux
-        # window and nothing left to do. It is not an agent you can work with.
-        let live = (live-agents $agents $ps)
+        # `claude bg-pty-host`: it has a process and nothing left to do.
+        let live = (live-agents $agents)
         assert-eq ($live | where {|a| ($a | get -o state) in ["done" "failed"]}) [] "terminal states must not count as running"
-        # The fixtures DO contain such a record, so this is not vacuous.
-        let resident_done = ($agents | where {|a| ($a | get -o state) == "done" and ($a | get -o pid) != null})
+        let resident_done = ($agents | where {|a| ($a | get -o state) == "done" and ($a | get -o status) != null})
         assert-true (($resident_done | length) >= 1) "fixtures must contain a resident done agent for this to mean anything"
     })
 
     (run-case "transform/live-agents keeps a window-less blocked agent" {
-        # THE regression that would gut the feature. us022 exists because
-        # background agents that are blocked are invisible until you walk the
-        # sessions by hand. Having no tmux window must never exclude one.
-        let orphan = {pid: 4242, kind: "background", state: "blocked", cwd: "/x", account: "personal"}
-        let ps_with = ($ps ++ [{pid: 4242, ppid: 1}])
-        assert-eq (live-agents [$orphan] $ps_with | length) 1 "a blocked background agent with no pane must still count"
-        let working = ($orphan | update state "working")
-        assert-eq (live-agents [$working] $ps_with | length) 1 "so must a working one"
+        # THE regression that would gut the feature: us022 exists because
+        # blocked background agents are invisible until you walk the sessions.
+        let orphan = {pid: 4242, kind: "background", state: "blocked", status: "idle", cwd: "/x", account: "personal"}
+        assert-eq (live-agents [$orphan] | length) 1 "a blocked background agent with no pane must still count"
+        assert-eq (live-agents [($orphan | update state "working" | update status "busy")] | length) 1 "so must a working one"
     })
 
-    (run-case "transform/live-agents on an empty ps table keeps nothing" {
-        assert-eq (live-agents $agents []) [] "with no process table, nothing can be shown to be running"
+    # ---- the two axes ----------------------------------------------------
+    (run-case "transform/bucket-state reads the job axis, not the process axis" {
+        # status=idle + state=blocked is ALIVE AND WAITING ON YOU. Bucketing it
+        # as idle from the process axis would bury the row us022 is for.
+        assert-eq (bucket-state {kind: "background", state: "blocked", status: "idle"}) "blocked"
+        assert-eq (bucket-state {kind: "background", state: "working", status: "busy"}) "working"
+        assert-eq (bucket-state {kind: "background", state: "done", status: "idle"}) "done"
+    })
+
+    (run-case "transform/bucket-state uses the process axis for interactive agents" {
+        # Interactive records carry no job axis at all.
+        assert-eq (bucket-state {kind: "interactive", status: "busy"}) "working"
+        assert-eq (bucket-state {kind: "interactive", status: "idle"}) "idle"
+    })
+
+    (run-case "transform/detail rows surface both axes separately" {
+        let rows = (detail-rows $agents $panes $ps $registry)
+        let cols = ($rows | first | columns)
+        assert-true ("state" in $cols) "the job axis must be its own column"
+        assert-true ("status" in $cols) "so must the process axis"
+        let resident_done = ($rows | where state == "done" and status == "idle")
+        assert-true (($resident_done | length) >= 1) "the idle+done pair must be visible, not merged away"
     })
 
     # ---- shape-rows ------------------------------------------------------

@@ -26,9 +26,9 @@ def make-world [tag: string]: nothing -> string {
     # redirection: stub bodies run on a PATH containing only this sandbox, so
     # `cat` is unavailable, and embedding the JSON inline gets brace-expanded
     # by bash once nu's string interpolation has eaten the quoting.
-    let personal = '[{"pid":4242,"kind":"interactive","status":"busy","cwd":"/w/alpha","sessionId":"p1","name":"alpha work"},{"pid":4243,"kind":"background","state":"working","cwd":"/w/tied","sessionId":"p2","name":"tied job"}]'
+    let personal = '[{"pid":4242,"kind":"interactive","status":"busy","cwd":"/w/alpha","sessionId":"p1","name":"alpha work"},{"pid":4243,"kind":"background","state":"working","status":"busy","cwd":"/w/tied","sessionId":"p2","name":"tied job"}]'
     $personal | save -f ($root | path join "personal.json")
-    let work = '[{"pid":4244,"kind":"background","state":"blocked","cwd":"/w/alpha","sessionId":"w1","name":"blocked one"},{"pid":4245,"kind":"background","state":"waiting","cwd":"/w/alpha","sessionId":"w2","name":"failed one"},{"pid":4246,"kind":"background","state":"hibernating","cwd":"/w/beta","sessionId":"w3","name":"odd state"}]'
+    let work = '[{"pid":4244,"kind":"background","state":"blocked","status":"idle","cwd":"/w/alpha","sessionId":"w1","name":"blocked one"},{"pid":4245,"kind":"background","state":"waiting","status":"idle","cwd":"/w/alpha","sessionId":"w2","name":"failed one"},{"pid":4246,"kind":"background","state":"hibernating","status":"idle","cwd":"/w/beta","sessionId":"w3","name":"odd state"}]'
     $work | save -f ($root | path join "work.json")
     let body = ('if [[ "$CLAUDE_CONFIG_DIR" == *personal ]]; then printf "%s" "$(<' + $root + '/personal.json)"; else printf "%s" "$(<' + $root + '/work.json)"; fi')
     write-stub $root "claude" $body
@@ -45,8 +45,9 @@ def make-world [tag: string]: nothing -> string {
 }
 
 # A world shaped like the real machine: one RUNNING agent plus historical job
-# records that carry no pid at all, which is what `claude agents --all --json`
-# returns for jobs that finished or died long ago.
+# records. The historical ones deliberately carry NEITHER pid NOR status --
+# upstream emits `status` only while a process exists, so its absence is what
+# marks a record as a leftover rather than a running agent.
 def make-mixed-world [tag: string]: nothing -> string {
     let root = (make-world $tag)
     let personal = '[{"pid":4242,"kind":"interactive","status":"busy","cwd":"/w/alpha","sessionId":"p1","name":"running"},{"kind":"background","state":"blocked","cwd":"/w/alpha","sessionId":"p2","name":"stale blocked"}]'
@@ -191,7 +192,7 @@ let results = [
         # daemon, so a pid check alone keeps counting it. It has no tmux
         # window and nothing left to do.
         let w = (make-mixed-world "terminal")
-        let personal = '[{"pid":4242,"kind":"interactive","status":"busy","cwd":"/w/alpha","sessionId":"p1","name":"running"},{"pid":4243,"kind":"background","state":"done","cwd":"/w/alpha","sessionId":"p2","name":"finished but resident"}]'
+        let personal = '[{"pid":4242,"kind":"interactive","status":"busy","cwd":"/w/alpha","sessionId":"p1","name":"running"},{"pid":4243,"kind":"background","state":"done","status":"idle","cwd":"/w/alpha","sessionId":"p2","name":"finished but resident"}]'
         $personal | save -f ($w | path join "personal.json")
         '[]' | save -f ($w | path join "work.json")
         write-stub $w "ps" 'echo "4242 4200"; echo "4243 1"'
@@ -205,7 +206,7 @@ let results = [
         # The regression that would gut the feature: us022 exists because
         # blocked background agents are invisible until you walk the sessions.
         let w = (make-mixed-world "orphanblocked")
-        let personal = '[{"pid":4243,"kind":"background","state":"blocked","cwd":"/w/alpha","sessionId":"p1","name":"blocked, no window"}]'
+        let personal = '[{"pid":4243,"kind":"background","state":"blocked","status":"idle","cwd":"/w/alpha","sessionId":"p1","name":"blocked, no window"}]'
         $personal | save -f ($w | path join "personal.json")
         '[]' | save -f ($w | path join "work.json")
         write-stub $w "ps" 'echo "4243 1"'
@@ -232,9 +233,11 @@ let results = [
     })
 
     (run-case "cli/no running agents yields an empty table, exit 0" {
-        # Every record historical: nothing is running, which is an answer.
+        # Every record historical -- none carries `status`, so none has a
+        # process. Nothing running is an answer, not an error.
         let w = (make-mixed-world "nolive")
-        write-stub $w "ps" 'echo "1 0"'
+        '[{"kind":"background","state":"blocked","cwd":"/w/alpha","sessionId":"p1","name":"leftover"}]' | save -f ($w | path join "personal.json")
+        '[]' | save -f ($w | path join "work.json")
         let out = (run-action $w "--json")
         assert-eq $out.exit_code 0
         assert-eq ($out.stdout | from json) []

@@ -20,11 +20,31 @@
 
 # ---------------------------------------------------------------- constants
 
-# Upstream reports interactive agents under `status` and background agents
-# under `state`. Anything absent from this table buckets as `other` and stays
-# in the totals — a state we have never seen is a signal to update the census,
-# not a reason to under-count (adr0017: absence of evidence is not evidence of
-# absence).
+# `claude agents --all --json` carries TWO axes, not one:
+#
+#   state   the JOB's lifecycle -- working / blocked / done / failed. Durable,
+#           survives the process. Background records only.
+#   status  the PROCESS's activity -- busy / idle. Present ONLY while a
+#           process exists. Both kinds carry it.
+#
+# The pairs that matter, and what the census does with each:
+#
+#   status   state     meaning                              bucket
+#   ------   -------   ----------------------------------   -------
+#   busy     working   actively running                     working
+#   idle     blocked   alive, WAITING ON YOU                blocked
+#   idle     done      alive, finished, parked              (dropped: terminal)
+#   busy     --        interactive session, running         working
+#   idle     --        interactive session, at a prompt     idle
+#   absent   any       historical record, process gone      (dropped: not live)
+#
+# The job axis wins for bucketing when both are present: a background agent
+# with state=blocked and status=idle is BLOCKED ON YOU, and reporting it as
+# idle would bury exactly the row us022 exists to surface.
+#
+# Anything absent from this table buckets as `other` and stays in the totals --
+# a state we have never seen is a signal to update the census, not a reason to
+# under-count (adr0017: absence of evidence is not evidence of absence).
 const BUCKETS = {
     busy: "working", working: "working",
     idle: "idle", shell: "idle",
@@ -40,8 +60,12 @@ const MAX_ANCESTRY_DEPTH = 12
 
 # Normalise one agent record to a bucket name.
 export def bucket-state [rec: record]: nothing -> string {
-    let raw = ($rec | get -o state | default ($rec | get -o status) | default "")
-    $BUCKETS | get -o $raw | default "other"
+    let job = ($rec | get -o state)          # background only
+    let proc = ($rec | get -o status)        # both kinds, only while alive
+    # Job axis first: it says what the agent is DOING; the process axis only
+    # says whether it is currently burning CPU.
+    let key = if $job != null { $job } else { $proc | default "" }
+    $BUCKETS | get -o $key | default "other"
 }
 
 # --------------------------------------------------- transform: pane lookup
@@ -213,24 +237,34 @@ const TERMINAL_STATES = ["done", "failed"]
 # exist", not "how many agents are running" -- on a real machine that was 13
 # versus 6, with the extra seven aged 25 to 101 days.
 #
-# A record is running iff it carries a pid that is in the ps table the census
-# already probes AND its state is not terminal.
+# A record is running iff a PROCESS exists for it AND its job state is not
+# terminal.
 #
-# The pid test alone is not enough: a background job that has FINISHED stays
-# resident under `claude bg-pty-host`, so it passes the liveness test while
-# having no tmux window and nothing left to do. On this machine that was one
-# extra agent in `dotfiles` against two actual claude windows.
+# Liveness comes from the presence of `status`: upstream only emits that field
+# while a process exists, so it is the same signal as looking the pid up in ps,
+# from the supported command, with no window between two probes for the process
+# to die in. Verified 13/13 on the live system and 13/13 in the fixtures --
+# has(status) <=> has(pid), every such pid alive. A fixture case asserts the
+# invariant so a future decoupling upstream surfaces as a failure rather than a
+# silent miscount.
+#
+# Presence is trustworthy; the VALUE is not. An abandoned session can sit at
+# status=busy for hours with zero CPU, so `busy` is not proof of activity --
+# only proof that something is there.
+#
+# The terminal check is separate and necessary: a finished background job stays
+# resident under `claude bg-pty-host`, so it has a live process and nothing
+# left to do.
 #
 # Window-less agents are deliberately NOT excluded as a class. us022 exists
 # because background agents that are BLOCKED are invisible until you walk the
 # sessions by hand -- a window-less blocked agent is precisely what the census
 # is for. Only the terminal ones drop out.
-export def live-agents [agents: list, ps: table]: nothing -> list {
-    let pids = ($ps | get pid)
+export def live-agents [agents: list]: nothing -> list {
     $agents | where {|a|
-        let pid = ($a | get -o pid)
-        let state = ($a | get -o state | default ($a | get -o status) | default "")
-        $pid != null and ($pid in $pids) and ($state not-in $TERMINAL_STATES)
+        let alive = (($a | get -o status) != null)
+        let job = ($a | get -o state | default "")
+        $alive and ($job not-in $TERMINAL_STATES)
     }
 }
 
@@ -249,7 +283,8 @@ export def detail-rows [
             project: $r.project
             account: ($a | get -o account | default "personal")
             kind:    ($a | get -o kind | default "")
-            state:   ($a | get -o state | default ($a | get -o status) | default "")
+            state:   ($a | get -o state | default "")    # job axis (background only)
+            status:  ($a | get -o status | default "")   # process axis
             bucket:  (bucket-state $a)
             name:    ($a | get -o name | default "")
             cwd:     ($a | get -o cwd | default "")
@@ -391,7 +426,7 @@ export def probe-all []: nothing -> record {
 # Live agents only by default; pass --all to include historical job records.
 export def census [--all]: nothing -> table {
     let p = (probe-all)
-    let agents = if $all { $p.agents } else { live-agents $p.agents $p.ps }
+    let agents = if $all { $p.agents } else { live-agents $p.agents }
     shape-rows $agents $p.panes $p.ps $p.registry | sort-by project
 }
 
@@ -407,12 +442,23 @@ def main [
     --all                     # include historical job records whose process is gone
 ] {
     let p = (probe-all)
-    let agents = if $all { $p.agents } else { live-agents $p.agents $p.ps }
+    let agents = if $all { $p.agents } else { live-agents $p.agents }
     let rows = if $detail {
         detail-rows $agents $p.panes $p.ps $p.registry | sort-by project account
     } else {
         shape-rows $agents $p.panes $p.ps $p.registry | sort-by project
     }
     let out = if $project != null { $rows | where project == $project } else { $rows }
-    if $json { $out | to json } else { $out }
+    if $json {
+        $out | to json
+    } else if (is-terminal --stdout) {
+        $out
+    } else {
+        # nushell colours its table even when stdout is a pipe, so a consumer
+        # capturing this would be handed control characters. Render and strip
+        # explicitly rather than trusting $env.config, which is scoped to this
+        # function and would not reach the rendering that happens after it
+        # returns.
+        $out | table | ansi strip
+    }
 }
