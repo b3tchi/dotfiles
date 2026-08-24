@@ -38,17 +38,32 @@ def make-world [tag: string]: nothing -> string {
     # redirection: stub bodies run on a PATH containing only this sandbox, so
     # `cat` is unavailable, and embedding the JSON inline gets brace-expanded
     # by bash once nu's string interpolation has eaten the quoting.
-    let personal = '[{"pid":4242,"kind":"interactive","status":"busy","cwd":"/w/alpha","sessionId":"p1","name":"alpha work"},{"kind":"background","state":"done","cwd":"/w/tied","sessionId":"p2","name":"tied job"}]'
+    let personal = '[{"pid":4242,"kind":"interactive","status":"busy","cwd":"/w/alpha","sessionId":"p1","name":"alpha work"},{"pid":4243,"kind":"background","state":"done","cwd":"/w/tied","sessionId":"p2","name":"tied job"}]'
     $personal | save -f ($root | path join "personal.json")
-    let work = '[{"kind":"background","state":"blocked","cwd":"/w/alpha","sessionId":"w1","name":"blocked one"},{"kind":"background","state":"failed","cwd":"/w/alpha","sessionId":"w2","name":"failed one"},{"kind":"background","state":"hibernating","cwd":"/w/beta","sessionId":"w3","name":"odd state"}]'
+    let work = '[{"pid":4244,"kind":"background","state":"blocked","cwd":"/w/alpha","sessionId":"w1","name":"blocked one"},{"pid":4245,"kind":"background","state":"failed","cwd":"/w/alpha","sessionId":"w2","name":"failed one"},{"pid":4246,"kind":"background","state":"hibernating","cwd":"/w/beta","sessionId":"w3","name":"odd state"}]'
     $work | save -f ($root | path join "work.json")
     let body = ('if [[ "$CLAUDE_CONFIG_DIR" == *personal ]]; then printf "%s" "$(<' + $root + '/personal.json)"; else printf "%s" "$(<' + $root + '/work.json)"; fi')
     write-stub $root "claude" $body
 
     write-stub $root "tmux" 'echo "4200 alpha alpha_0"'
-    write-stub $root "ps" 'echo "4242 4200"'
+    # 4242 hangs off the pane; the rest are live but parentless. All five are
+    # RUNNING -- liveness is exercised by make-mixed-world, not here.
+    write-stub $root "ps" 'echo "4242 4200"; echo "4243 1"; echo "4244 1"; echo "4245 1"; echo "4246 1"'
 
     $"projects:\n  alpha:\n    path: /w/alpha\n  beta:\n    path: /w/beta\n  tied:\n    path: /w/tied\n  tied-py:\n    path: /w/tied\n" | save -f ($root | path join "projects.yaml")
+    $root
+}
+
+# A world shaped like the real machine: one RUNNING agent plus historical job
+# records that carry no pid at all, which is what `claude agents --all --json`
+# returns for jobs that finished or died long ago.
+def make-mixed-world [tag: string]: nothing -> string {
+    let root = (make-world $tag)
+    let personal = '[{"pid":4242,"kind":"interactive","status":"busy","cwd":"/w/alpha","sessionId":"p1","name":"running"},{"kind":"background","state":"blocked","cwd":"/w/alpha","sessionId":"p2","name":"stale blocked"}]'
+    $personal | save -f ($root | path join "personal.json")
+    let work = '[{"kind":"background","state":"done","cwd":"/w/beta","sessionId":"w1","name":"stale done"},{"kind":"background","state":"failed","cwd":"/w/beta","sessionId":"w2","name":"stale failed"}]'
+    $work | save -f ($root | path join "work.json")
+    write-stub $root "ps" 'echo "4242 4200"'
     $root
 }
 
@@ -177,6 +192,40 @@ let results = [
         # Everything unattributable, but nothing lost.
         assert-eq ($rows | get total | math sum) 5
         assert-eq ($rows | get project) ["unknown"]
+    })
+
+    (run-case "cli/default counts only running agents" {
+        # The stub world's five records: one carries pid 4242, which the ps
+        # stub reports. The other four have no pid -- historical job records.
+        let rows = ((run-action (make-mixed-world "live") "--json").stdout | from json)
+        assert-eq ($rows | get total | math sum) 1 "only the pid-bearing record is running"
+        assert-eq ($rows | get project) ["alpha"] "and it belongs to alpha via its pane"
+    })
+
+    (run-case "cli/--all restores the historical records" {
+        let w = (make-mixed-world "allflag")
+        let live = ((run-action $w "--json").stdout | from json | get total | math sum)
+        let all = ((run-action $w "--json" "--all").stdout | from json | get total | math sum)
+        assert-eq $live 1
+        assert-eq $all 4 "--all brings back the three record-only agents"
+        assert-true ($all > $live) "the two views must actually differ"
+    })
+
+    (run-case "cli/--all composes with --detail" {
+        let w = (make-mixed-world "alldetail")
+        let d = ((run-action $w "--json" "--detail").stdout | from json)
+        let da = ((run-action $w "--json" "--detail" "--all").stdout | from json)
+        assert-eq ($d | length) 1
+        assert-eq ($da | length) 4
+    })
+
+    (run-case "cli/no running agents yields an empty table, exit 0" {
+        # Every record historical: nothing is running, which is an answer.
+        let w = (make-mixed-world "nolive")
+        write-stub $w "ps" 'echo "1 0"'
+        let out = (run-action $w "--json")
+        assert-eq $out.exit_code 0
+        assert-eq ($out.stdout | from json) []
     })
 
     (run-case "cli/piped output carries no ANSI escapes" {

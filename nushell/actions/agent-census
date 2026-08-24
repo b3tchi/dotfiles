@@ -201,6 +201,26 @@ export def shape-rows [
     }
 }
 
+# Keep only agents whose process actually exists.
+#
+# `claude agents --all --json` returns HISTORICAL job records alongside
+# running ones: a background job that finished or died months ago keeps its
+# record, with no `pid` at all. Counting those answers "how many agent records
+# exist", not "how many agents are running" -- on a real machine that was 13
+# versus 6, with the extra seven aged 25 to 101 days.
+#
+# A record is live iff it carries a pid AND that pid is in the ps table the
+# census already probes, so this costs no extra probe. Note a background agent
+# whose state is `done` but whose process is still resident DOES count: it is
+# running and resumable, and its pid is in ps.
+export def live-agents [agents: list, ps: table]: nothing -> list {
+    let pids = ($ps | get pid)
+    $agents | where {|a|
+        let pid = ($a | get -o pid)
+        $pid != null and ($pid in $pids)
+    }
+}
+
 # One row per AGENT rather than per project. Same attribution and the same
 # bucketing as shape-rows, so the two views can never disagree about what an
 # agent is -- the count view is this view folded up.
@@ -355,9 +375,11 @@ export def probe-all []: nothing -> record {
     }
 }
 
-export def census []: nothing -> table {
+# Live agents only by default; pass --all to include historical job records.
+export def census [--all]: nothing -> table {
     let p = (probe-all)
-    shape-rows $p.agents $p.panes $p.ps $p.registry | sort-by project
+    let agents = if $all { $p.agents } else { live-agents $p.agents $p.ps }
+    shape-rows $agents $p.panes $p.ps $p.registry | sort-by project
 }
 
 # ============================================================== CLI SURFACE
@@ -369,12 +391,14 @@ def main [
     --json                    # emit JSON instead of a table, for consumers
     --project: string         # restrict to one project
     --detail                  # one row per agent instead of per-project counts
+    --all                     # include historical job records whose process is gone
 ] {
     let p = (probe-all)
+    let agents = if $all { $p.agents } else { live-agents $p.agents $p.ps }
     let rows = if $detail {
-        detail-rows $p.agents $p.panes $p.ps $p.registry | sort-by project account
+        detail-rows $agents $p.panes $p.ps $p.registry | sort-by project account
     } else {
-        shape-rows $p.agents $p.panes $p.ps $p.registry | sort-by project
+        shape-rows $agents $p.panes $p.ps $p.registry | sort-by project
     }
     let out = if $project != null { $rows | where project == $project } else { $rows }
     if $json { $out | to json } else { $out }

@@ -164,6 +164,38 @@ let results = [
         assert-eq $r.project "unknown" "a cycle must terminate, not hang"
     })
 
+    # ---- live-agents -----------------------------------------------------
+    (run-case "transform/live-agents keeps only records whose process exists" {
+        # The real hazard: `claude agents --all --json` returns historical job
+        # records with no pid at all. On the machine this was captured from
+        # that was 13 records for 6 running agents.
+        let live = (live-agents $agents $ps)
+        assert-eq ($agents | length) 13 "fixtures carry the full record set"
+        assert-eq ($live | length) 6 "only the pid-bearing, ps-present records are running"
+        assert-true (($live | all {|a| ($a | get -o pid) != null})) "every live record has a pid"
+    })
+
+    (run-case "transform/live-agents drops a pid that is not in the ps table" {
+        # A record can carry a pid whose process has since exited.
+        let ghost = {pid: 99999999, kind: "interactive", status: "busy", cwd: "/x", account: "personal"}
+        assert-eq (live-agents [$ghost] $ps) [] "a pid absent from ps is not running"
+        # ...and the same record with a pid that IS in ps survives.
+        let real = ($agents | where {|a| ($a | get -o pid) != null} | first)
+        assert-eq (live-agents [$real] $ps | length) 1
+    })
+
+    (run-case "transform/live-agents keeps a done background agent still resident" {
+        # state=done but the process is alive: finished, resumable, and running.
+        # Excluding it by state rather than by liveness would lose it.
+        let live = (live-agents $agents $ps)
+        let done_resident = ($live | where {|a| ($a | get -o state) == "done"})
+        assert-true (($done_resident | length) >= 1) "a resident done agent must survive the filter"
+    })
+
+    (run-case "transform/live-agents on an empty ps table keeps nothing" {
+        assert-eq (live-agents $agents []) [] "with no process table, nothing can be shown to be running"
+    })
+
     # ---- shape-rows ------------------------------------------------------
     (run-case "transform/shape-rows loses and duplicates no agent" {
         let rows = (shape-rows $agents $panes $ps $registry)
