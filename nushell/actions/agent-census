@@ -201,6 +201,31 @@ export def shape-rows [
     }
 }
 
+# One row per AGENT rather than per project. Same attribution and the same
+# bucketing as shape-rows, so the two views can never disagree about what an
+# agent is -- the count view is this view folded up.
+export def detail-rows [
+    agents: list
+    panes: record
+    ps: table
+    registry: record
+]: nothing -> table {
+    $agents | each {|a|
+        let r = (resolve-project $a $panes $ps $registry)
+        {
+            project: $r.project
+            account: ($a | get -o account | default "personal")
+            kind:    ($a | get -o kind | default "")
+            state:   ($a | get -o state | default ($a | get -o status) | default "")
+            bucket:  (bucket-state $a)
+            name:    ($a | get -o name | default "")
+            cwd:     ($a | get -o cwd | default "")
+            pid:     ($a | get -o pid)
+            how:     $r.how
+        }
+    }
+}
+
 # ============================================================ PROBE LAYER
 # Everything below shells out. Every probe degrades to its empty value rather
 # than aborting: a census that dies because tmux is not running is useless in
@@ -305,7 +330,10 @@ export def probe-ps []: nothing -> table {
 # `projects` key all yield {} — every agent then lands in `unknown` with its
 # cwd shown, which is the honest answer rather than a fabricated attribution.
 export def probe-registry [path?: string]: nothing -> record {
-    let p = ($path | default $REGISTRY_PATH | path expand)
+    # ft001's module exports $env.PROJECT_CONFIG_PATH on load; honour it so the
+    # census reads whatever registry the project module is actually using,
+    # rather than assuming the default location.
+    let p = ($path | default ($env | get -o PROJECT_CONFIG_PATH) | default $REGISTRY_PATH | path expand)
     if not ($p | path exists) { return {} }
     let doc = (try { open $p } catch { null })
     if ($doc | describe | str starts-with "record") {
@@ -315,16 +343,39 @@ export def probe-registry [path?: string]: nothing -> record {
     }
 }
 
-# One full sample: probe everything, attribute, and shape into rows.
-export def census []: nothing -> table {
+# One full sample of the world. Both views are built from a SINGLE pass, so
+# `--detail` and the count view can never describe different instants.
+export def probe-all []: nothing -> record {
     let accounts = (discover-accounts)
-    let agents = (collect-agents $accounts)
-    shape-rows $agents (probe-panes) (probe-ps) (probe-registry)
+    {
+        agents:   (collect-agents $accounts)
+        panes:    (probe-panes)
+        ps:       (probe-ps)
+        registry: (probe-registry)
+    }
 }
 
-# ---------------------------------------------------------------------------
-# The CLI surface — flags, output shaping, the PATH link — is Task 4
-# (dotfiles-ubc4.4). For now `main` runs one census and prints the table.
-def main [] {
-    census
+export def census []: nothing -> table {
+    let p = (probe-all)
+    shape-rows $p.agents $p.panes $p.ps $p.registry | sort-by project
+}
+
+# ============================================================== CLI SURFACE
+#
+# Exit status is 0 for every census that completes, INCLUDING an empty one.
+# "no agents running" and "no such project" are answers, not errors; a
+# non-zero status is reserved for the action being unable to run at all.
+def main [
+    --json                    # emit JSON instead of a table, for consumers
+    --project: string         # restrict to one project
+    --detail                  # one row per agent instead of per-project counts
+] {
+    let p = (probe-all)
+    let rows = if $detail {
+        detail-rows $p.agents $p.panes $p.ps $p.registry | sort-by project account
+    } else {
+        shape-rows $p.agents $p.panes $p.ps $p.registry | sort-by project
+    }
+    let out = if $project != null { $rows | where project == $project } else { $rows }
+    if $json { $out | to json } else { $out }
 }

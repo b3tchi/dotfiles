@@ -253,7 +253,7 @@ def run-subsuite [label: string, file: string] {
 }
 
 let transform_cases = if ($action_path | path exists) {
-    (run-subsuite "transform" "transform-cases.nu") ++ (run-subsuite "probe" "probe-cases.nu")
+    (run-subsuite "transform" "transform-cases.nu") ++ (run-subsuite "probe" "probe-cases.nu") ++ (run-subsuite "cli" "cli-cases.nu")
 } else {
     [(pending "transform/bucket-state" "Task 2 (dotfiles-ubc4.2) has not written the pure layer yet")
      (pending "transform/resolve-project" "Task 2 (dotfiles-ubc4.2) has not written the pure layer yet")
