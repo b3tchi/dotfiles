@@ -1,0 +1,7 @@
+# hand-written 2026-08-24
+# an ungrouped tmux session reports an EMPTY session_group.
+# line 1 grouped; line 2 pid + trailing space; line 3 pid with no field at all.
+4598 proj-bravo
+99001 
+99002
+788390 dotfiles

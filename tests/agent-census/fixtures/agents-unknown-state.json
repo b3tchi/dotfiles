@@ -1,0 +1,20 @@
+[
+  {
+    "id": "aaaa1111",
+    "cwd": "/home/dev/.dotfiles",
+    "kind": "background",
+    "startedAt": 1787308391288,
+    "sessionId": "aaaa1111-0000-4000-8000-000000000001",
+    "name": "state the census has never seen",
+    "state": "hibernating"
+  },
+  {
+    "pid": 788567,
+    "cwd": "/home/dev/.dotfiles",
+    "kind": "interactive",
+    "startedAt": 1787308391288,
+    "sessionId": "aaaa1111-0000-4000-8000-000000000002",
+    "name": "status the census has never seen",
+    "status": "compacting"
+  }
+]

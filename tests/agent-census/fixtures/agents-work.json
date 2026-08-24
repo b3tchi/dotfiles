@@ -1,0 +1,56 @@
+[
+  {
+    "id": "65c2bd86",
+    "cwd": "/home/dev/repos/acme/proj-delta",
+    "kind": "background",
+    "startedAt": 1785143668376,
+    "sessionId": "65c2bd86-f66b-4d78-a4d9-14656aa63cbe",
+    "name": "Set up boilerplate for build migration",
+    "state": "done"
+  },
+  {
+    "id": "4913a244",
+    "cwd": "/home/dev/repos/acme/portfolio/solution/proj-bravo",
+    "kind": "background",
+    "startedAt": 1785330269619,
+    "sessionId": "4913a244-8dd9-4ad9-9479-f5869ceb30cb",
+    "name": "Debug E2E test failures in staging",
+    "state": "done"
+  },
+  {
+    "id": "5c5fcae9",
+    "cwd": "/home/dev/repos/acme/portfolio/solution/proj-bravo",
+    "kind": "background",
+    "startedAt": 1785418782528,
+    "sessionId": "5c5fcae9-b217-4018-b648-02f69ae4e9cd",
+    "name": "Run proj-bravo dev e2e",
+    "state": "blocked"
+  },
+  {
+    "pid": 4771,
+    "cwd": "/home/dev/repos/acme/portfolio/solution/proj-bravo",
+    "kind": "interactive",
+    "startedAt": 1787239369169,
+    "sessionId": "f243fb0c-83ff-4549-97a8-b3d0e6388c0c",
+    "name": "proj-bravo-bd",
+    "status": "idle"
+  },
+  {
+    "pid": 31548,
+    "cwd": "/home/dev/repos/acme/portfolio/solution/proj-bravo",
+    "kind": "interactive",
+    "startedAt": 1787240364569,
+    "sessionId": "93fd1f72-772e-4a4f-b830-d25700f5d9a1",
+    "name": "proj-bravo-18",
+    "status": "idle"
+  },
+  {
+    "pid": 3282182,
+    "cwd": "/home/dev/repos/acme/portfolio/solution/proj-charlie",
+    "kind": "interactive",
+    "startedAt": 1787564144429,
+    "sessionId": "d05a0160-ce03-4865-ad9e-5befd63b67f6",
+    "name": "proj-charlie-85",
+    "status": "idle"
+  }
+]

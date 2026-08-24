@@ -1,0 +1,25 @@
+# fixture: stand-in for ~/.config/project/projects.yaml (ft001 registry)
+# produced: hand-written 2026-08-24, modelled on the real registry
+# Reproduces the two hazards the real registry contains:
+#   - two names -> one identical path (proj-delta / proj-delta-py)
+#   - a sibling whose name is a string-prefix of another (portfolio-old)
+projects:
+  dotfiles:
+    path: /home/dev/.dotfiles
+  proj-alpha:
+    path: /home/dev/repos/acme/proj-alpha
+  proj-bravo:
+    path: /home/dev/repos/acme/portfolio/solution/proj-bravo
+  proj-charlie:
+    path: /home/dev/repos/acme/portfolio/solution/proj-charlie
+  portfolio:
+    path: /home/dev/repos/acme/portfolio
+  portfolio-old:
+    path: /home/dev/repos/acme/portfolio-old
+  proj-delta:
+    path: /home/dev/repos/acme/proj-delta
+  proj-delta-py:
+    path: /home/dev/repos/acme/proj-delta
+  remote-box:
+    path: /srv/work/proj-foxtrot
+    ssh: workstation

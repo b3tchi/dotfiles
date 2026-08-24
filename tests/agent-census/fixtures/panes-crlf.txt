@@ -1,0 +1,5 @@
+# hand-written 2026-08-24
+# CRLF line endings, as captured through a Windows-side pipe.
+# a naive split must not leave \r glued to the project name.
+4598 proj-bravo
+788390 dotfiles
