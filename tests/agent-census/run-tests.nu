@@ -242,13 +242,18 @@ let fixture_cases = [
 # `use` resolves at parse time, and a missing module would take the whole
 # suite down instead of reporting three pending cases.
 let action_path = ($env.FILE_PWD | path dirname | path dirname | path join $CENSUS_ACTION)
-let transform_cases = if ($action_path | path exists) {
-    let out = (do { ^$nu.current-exe ($env.FILE_PWD | path join "transform-cases.nu") } | complete)
+
+def run-subsuite [label: string, file: string] {
+    let out = (do { ^$nu.current-exe ($env.FILE_PWD | path join $file) } | complete)
     if $out.exit_code == 0 {
         $out.stdout | from json
     } else {
-        [{name: "transform/<suite crashed>", status: "FAIL", detail: ($out.stderr | str substring 0..600)}]
+        [{name: $"($label)/<suite crashed>", status: "FAIL", detail: ($out.stderr | str substring 0..600)}]
     }
+}
+
+let transform_cases = if ($action_path | path exists) {
+    (run-subsuite "transform" "transform-cases.nu") ++ (run-subsuite "probe" "probe-cases.nu")
 } else {
     [(pending "transform/bucket-state" "Task 2 (dotfiles-ubc4.2) has not written the pure layer yet")
      (pending "transform/resolve-project" "Task 2 (dotfiles-ubc4.2) has not written the pure layer yet")
