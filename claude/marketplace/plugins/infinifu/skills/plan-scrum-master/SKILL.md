@@ -15,7 +15,7 @@ Orchestrate bd-driven development by reading the ready queue, dispatching implem
 
 ## Execution Model
 
-The main Claude session is the scrum-master — the user invokes the skill directly (`/plan-dispatch-fnf` or equivalent) and talks to the orchestrator as themselves. Workers (implementers + reviewers) are dispatched as background subagents via the `Agent` tool with `run_in_background: true`. Each implementer creates its own worktree at `bd-<id>.<N>` as part of work-do Step 2 (the previous `isolation: "worktree"` shortcut was dropped because the auto-generated dir name was opaque and broke the dir-to-task mapping). Main Claude reacts to completion notifications; it does not poll or sleep.
+The main Claude session is the scrum-master — the user invokes the skill directly (`/plan-dispatch-fnf` or equivalent) and talks to the orchestrator as themselves. Workers (implementers + reviewers) are dispatched as **named** background subagents via the `Agent` tool. Every dispatch passes `name` — `impl-<bd-id>` for implementers, `rev-<bd-id>` for reviewers — and that name is the agent's address for `SendMessage`, `ListAgents`, and `TaskStop`. Subagents always run in the background; there is no `run_in_background` parameter on the `Agent` tool (nor on `SendMessage`) — do not pass one. Each implementer creates its own worktree at `bd-<id>.<N>` as part of work-do Step 2 (the previous `isolation: "worktree"` shortcut was dropped because the auto-generated dir name was opaque and broke the dir-to-task mapping). Main Claude reacts to completion notifications; it does not poll or sleep.
 
 For the rationale (why a wrapper agent cannot do this) and the full dispatch contract, see `references/architecture.md`.
 
@@ -228,7 +228,7 @@ Skip this if the epic is already `in_progress` / P1 (e.g., resumed session). Do 
 
 ### Dispatch the task
 
-For each task, run `bd show <id>` and dispatch an `Agent` tool call with `run_in_background: true` (no `isolation: "worktree"` — that auto-generates an opaque dir name; the implementer creates its own worktree at the right name per work-do Step 2). The dispatch payload contains:
+For each task, run `bd show <id>` and dispatch an `Agent` tool call with `name: "impl-<bd-id>"` (no `run_in_background` — subagents are background by default; no `isolation: "worktree"` — that auto-generates an opaque dir name; the implementer creates its own worktree at the right name per work-do Step 2). The dispatch payload contains:
 
 1. **Task ID and title**
 2. **Full design text** from `bd show` (paste it — don't make agent query bd)
@@ -246,10 +246,11 @@ For each task, run `bd show <id>` and dispatch an `Agent` tool call with `run_in
 - Marking blocked if it can't proceed: `bd update <id> --status blocked`
 - **NEVER use `cd ... &&` in bash commands** — use absolute paths instead (triggers extra user confirmation, breaks background flow)
 
-**Dispatch up to `max_parallel` agents in a single message**, all with `run_in_background: true`. Do NOT poll or sleep — you will be automatically notified when each agent completes. While waiting, you may report status or respond to the human.
+**Dispatch up to `max_parallel` agents in a single message**, each with its own `name`. Do NOT poll or sleep — you will be automatically notified when each agent completes. While waiting, you may report status or respond to the human.
 
 **Save agent session metadata** after each `Agent` call returns:
-- **Agent ID / session ID** — for resuming the agent via `SendMessage`
+- **Agent name** (`impl-<bd-id>`) — the address for `SendMessage` / `TaskStop`. Names keep working after the agent completes; a send resumes it from its transcript.
+- **Agent ID** (`a...-...`) — fallback address only, for when a name was not set or a newer agent took the name (latest wins)
 - **Worktree path** — for reviewers to inspect the code
 - **Branch name** — for reviewers to merge
 
@@ -259,7 +260,7 @@ This enables resuming agents on rejection instead of dispatching fresh ones — 
 
 ## Step 4: Relay to Reviewer
 
-When notified that an implementer has completed, dispatch a reviewer agent with `run_in_background: true`:
+When notified that an implementer has completed, dispatch a reviewer agent with `name: "rev-<bd-id>"` and `subagent_type: "infinifu:code-reviewer"`:
 
 1. **Task spec** — the original design text from bd
 2. **Implementer's full report** — pass through as-is, including any metadata (paths, branches, etc.)
@@ -284,7 +285,7 @@ The retry rule covers three failure modes: reviewer rejection, implementer error
    - If a reviewer rejection: reviewer updates bd with `--design` (new conditions) and `--notes` (rejection reason).
    - If an implementer error or `blocked`: log the implementer's reason to `--notes`.
    - **Model upgrade:** if the original `worker_model` was `sonnet` or `haiku`, the retry uses `opus` (see "Failure-escalation rule" in Configuration). If it was already `opus` or `auto`, keep the same model.
-   - **Resume the original implementer** via `SendMessage` (with `run_in_background: true`) using the saved agent ID — pass the failure details. The agent retains its full context and is already in the worktree. Resume preserves cheap context; only dispatch a fresh agent if the original session cannot be resumed (e.g., expired) or if the model is being upgraded across providers and a session swap is required.
+   - **Resume the original implementer** via `SendMessage({to: "impl-<bd-id>", message: ...})` using its saved name — pass the failure details. The agent retains its full context and is already in the worktree. Resume preserves cheap context; only dispatch a fresh agent if the original session cannot be resumed (e.g., expired) or if the model is being upgraded across providers and a session swap is required.
    - When notified of completion, dispatch reviewer again (also in background).
 2. **Second failure on the same task:** Escalate to human — the task needs human attention. Do not retry a third time silently.
 
