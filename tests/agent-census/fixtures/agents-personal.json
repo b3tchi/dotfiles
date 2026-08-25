@@ -1,0 +1,67 @@
+[
+  {
+    "id": "462e7625",
+    "cwd": "/home/dev/.dotfiles",
+    "kind": "background",
+    "startedAt": 1778836718210,
+    "sessionId": "462e7625-eedb-49ef-aee6-8911ea0358a2",
+    "name": "skills cache validation",
+    "state": "blocked"
+  },
+  {
+    "id": "e60b12cf",
+    "cwd": "/home/dev/repos/acme/proj-alpha",
+    "kind": "background",
+    "startedAt": 1779349969215,
+    "sessionId": "e60b12cf-b4d9-4272-a050-8568ad2fa2a8",
+    "name": "vertical-slice-im003",
+    "state": "blocked"
+  },
+  {
+    "id": "c061c0a4",
+    "cwd": "/home/dev/repos/acme/proj-alpha",
+    "kind": "background",
+    "startedAt": 1780066851028,
+    "sessionId": "c061c0a4-2d6b-45b0-8c6d-bd93fb20e027",
+    "name": "dispatch orchestration coordinator",
+    "state": "blocked"
+  },
+  {
+    "id": "f3733a98",
+    "cwd": "/home/dev/repos/acme/proj-alpha",
+    "kind": "background",
+    "startedAt": 1780140962466,
+    "sessionId": "f3733a98-6abc-4112-85fb-4b8af07a5e6a",
+    "name": "Pull latest changes",
+    "state": "failed"
+  },
+  {
+    "pid": 788567,
+    "cwd": "/home/dev/.dotfiles",
+    "kind": "interactive",
+    "startedAt": 1787308391288,
+    "sessionId": "17a64e8d-6a8b-49db-a769-c4ffdf41ae72",
+    "name": "dotfiles-07",
+    "status": "busy"
+  },
+  {
+    "pid": 3100639,
+    "id": "79ab82f7",
+    "cwd": "/home/dev/.dotfiles",
+    "kind": "background",
+    "startedAt": 1787557442273,
+    "sessionId": "79ab82f7-27de-45e9-b9aa-770acfcff923",
+    "name": "POC019-021 mcp_agent_mail",
+    "status": "idle",
+    "state": "done"
+  },
+  {
+    "pid": 3290937,
+    "cwd": "/home/dev/.dotfiles",
+    "kind": "interactive",
+    "startedAt": 1787564371656,
+    "sessionId": "6c806a79-371a-4076-a7cd-34a56ac60b97",
+    "name": "dotfiles-1f",
+    "status": "busy"
+  }
+]

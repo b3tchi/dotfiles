@@ -1,0 +1,38 @@
+# capture: tmux list-panes -a -F "#{pane_pid} #{session_group}"
+# date: 2026-08-24  host: this workstation
+# sanitised: session_group names remapped to neutral labels; pane pids unchanged
+3281988 proj-charlie
+3282424 proj-charlie
+3325671 proj-charlie
+3281988 proj-charlie
+3282424 proj-charlie
+3325671 proj-charlie
+3281988 proj-charlie
+3282424 proj-charlie
+3325671 proj-charlie
+4598 proj-bravo
+31321 proj-bravo
+85421 proj-bravo
+4598 proj-bravo
+31321 proj-bravo
+85421 proj-bravo
+4598 proj-bravo
+31321 proj-bravo
+85421 proj-bravo
+788390 dotfiles
+794140 dotfiles
+3101351 dotfiles
+3290465 dotfiles
+788390 dotfiles
+794140 dotfiles
+3101351 dotfiles
+3290465 dotfiles
+788390 dotfiles
+794140 dotfiles
+3101351 dotfiles
+3290465 dotfiles
+788390 dotfiles
+794140 dotfiles
+3101351 dotfiles
+3290465 dotfiles
+3938 local

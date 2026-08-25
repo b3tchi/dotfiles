@@ -1,0 +1,464 @@
+#!/usr/bin/env nu
+# agent-census — how many claude agents, in which state, per project.
+#
+# ft012 / sp026. Two layers, and the split is the whole design:
+#
+#   probe layer      shells out (claude / tmux / ps / the ft001 registry)
+#   transform layer  takes those structures as arguments, returns rows
+#
+# Nothing in the transform layer reaches for the world. That is what makes it
+# testable from fixtures — arranging a live agent into `blocked` on demand is
+# not repeatable, so a suite that needed it would only ever run on one machine.
+# See tests/agent-census/.
+#
+# Language is settled by adr0001 (structured pipeline in the workflow-tooling
+# layer, completes and exits), with no adr0002 bash trigger and no adr0003
+# daemon case.
+#
+# Transform layer (Task 2) + probe layer (Task 3). The CLI surface -- flags,
+# output shaping, the PATH link -- is Task 4.
+
+# ---------------------------------------------------------------- constants
+
+# `claude agents --all --json` carries TWO axes, not one:
+#
+#   state   the JOB's lifecycle -- working / blocked / done / failed. Durable,
+#           survives the process. Background records only.
+#   status  the PROCESS's activity -- busy / idle. Present ONLY while a
+#           process exists. Both kinds carry it.
+#
+# The pairs that matter, and what the census does with each:
+#
+#   status   state     meaning                              bucket
+#   ------   -------   ----------------------------------   -------
+#   busy     working   actively running                     working
+#   idle     blocked   alive, WAITING ON YOU                blocked
+#   idle     done      alive, finished, parked              (dropped: terminal)
+#   busy     --        interactive session, running         working
+#   idle     --        interactive session, at a prompt     idle
+#   absent   any       historical record, process gone      (dropped: not live)
+#
+# The job axis wins for bucketing when both are present: a background agent
+# with state=blocked and status=idle is BLOCKED ON YOU, and reporting it as
+# idle would bury exactly the row us022 exists to surface.
+#
+# Anything absent from this table buckets as `other` and stays in the totals --
+# a state we have never seen is a signal to update the census, not a reason to
+# under-count (adr0017: absence of evidence is not evidence of absence).
+const BUCKETS = {
+    busy: "working", working: "working",
+    idle: "idle", shell: "idle",
+    waiting: "blocked", blocked: "blocked", failed: "blocked",
+    done: "done",
+}
+
+# Ancestor-walk ceiling. A malformed ps table can contain a ppid cycle, and an
+# unbounded walk would hang the census rather than fail it.
+const MAX_ANCESTRY_DEPTH = 12
+
+# ------------------------------------------------------- transform: buckets
+
+# Normalise one agent record to a bucket name.
+export def bucket-state [rec: record]: nothing -> string {
+    let job = ($rec | get -o state)          # background only
+    let proc = ($rec | get -o status)        # both kinds, only while alive
+    # Job axis first: it says what the agent is DOING; the process axis only
+    # says whether it is currently burning CPU.
+    let key = if $job != null { $job } else { $proc | default "" }
+    $BUCKETS | get -o $key | default "other"
+}
+
+# --------------------------------------------------- transform: pane lookup
+
+# Build `pane_pid -> project` from `tmux list-panes` output.
+#
+# Accepts two field shapes:
+#   "<pane_pid> <session_group>"                 grouped session
+#   "<pane_pid> <session_group> <session_name>"  group may be empty
+#
+# An ungrouped session reports an EMPTY session_group, so the session name is
+# the only label left; tmux-start numbers sessions `<project>_<N>`, so a
+# trailing _<N> is stripped. With neither, the pane contributes nothing rather
+# than a made-up project.
+export def build-pane-index [lines: list<string>]: nothing -> record {
+    $lines | reduce --fold {} {|line, acc|
+        let clean = ($line | str replace --regex '\r$' '')
+        let f = ($clean | split row " ")
+        let pid = ($f | get -o 0 | default "" | str trim)
+        let group = ($f | get -o 1 | default "" | str trim)
+        let sname = ($f | skip 2 | str join " " | str trim)
+        let project = if ($group | is-not-empty) {
+            $group
+        } else if ($sname | is-not-empty) {
+            $sname | str replace --regex '_\d+$' ''
+        } else {
+            ""
+        }
+        if ($pid | is-empty) or ($project | is-empty) { $acc } else { $acc | upsert $pid $project }
+    }
+}
+
+# Parse `ps -eo pid=,ppid=` into a table.
+export def parse-ps-table [lines: list<string>]: nothing -> table {
+    $lines | each {|l|
+        let f = ($l | str trim | split row --regex '\s+' | where {|x| ($x | str length) > 0})
+        {pid: ($f | get 0 | into int), ppid: ($f | get 1 | into int)}
+    }
+}
+
+# Walk a pid's ancestors until one of them owns a tmux pane. Returns the
+# pane's project, or null when the chain ends at init, leaves the ps table,
+# or exceeds the depth ceiling.
+def walk-to-pane [pid: int, panes: record, ps: table]: nothing -> any {
+    let keys = ($panes | columns)
+    mut cur = $pid
+    for _ in 1..$MAX_ANCESTRY_DEPTH {
+        let row = ($ps | where pid == $cur)
+        if ($row | is-empty) { return null }
+        let parent = ($row | first | get ppid)
+        let pkey = ($parent | into string)
+        if ($pkey in $keys) { return ($panes | get $pkey) }
+        if $parent <= 1 { return null }
+        $cur = $parent
+    }
+    null
+}
+
+# ------------------------------------------------ transform: cwd attribution
+
+def path-parts [p: string]: nothing -> list<string> {
+    $p | split row "/" | where {|x| ($x | str length) > 0}
+}
+
+# Match a cwd against the ft001 registry by PATH COMPONENTS, never by string
+# prefix: `/repos/acme/portfolio-old` shares a string prefix with
+# `/repos/acme/portfolio` but is a different project entirely.
+#
+# Longest match wins, so a solution directory registered inside a monorepo
+# beats the monorepo root. When two registry names tie at the deepest match
+# — the real registry does this twice — the answer is `unknown`, not a coin
+# flip. adr0017: "I cannot tell" is a first-class verdict.
+def match-cwd [cwd: string, registry: record]: nothing -> record {
+    if ($cwd | is-empty) { return {project: "unknown", how: "unmatched", cwd: $cwd} }
+    let cp = (path-parts $cwd)
+    let cands = ($registry | columns | each {|name|
+        let rp = (path-parts ($registry | get $name | get path))
+        let n = ($rp | length)
+        if ($n <= ($cp | length)) and (($cp | first $n) == $rp) { {name: $name, depth: $n} } else { null }
+    } | where {|x| $x != null})
+
+    if ($cands | is-empty) { return {project: "unknown", how: "unmatched", cwd: $cwd} }
+    let deepest = ($cands | get depth | math max)
+    let winners = ($cands | where depth == $deepest)
+    if ($winners | length) > 1 {
+        {project: "unknown", how: "ambiguous", cwd: $cwd}
+    } else {
+        {project: ($winners | first | get name), how: "cwd", cwd: $cwd}
+    }
+}
+
+# Attribute one agent to a project.
+#
+# tmux first: an agent with a live pid resolves through its pane, which is
+# authoritative and separates two projects that share a filesystem path. Only
+# without a pane does the cwd get matched against the registry — and a tie or
+# a miss there lands in `unknown` with the path preserved.
+export def resolve-project [
+    rec: record         # one agent record
+    panes: record       # pane_pid -> project
+    ps: table           # pid/ppid
+    registry: record    # ft001 projects
+]: nothing -> record {
+    let pid = ($rec | get -o pid)
+    let via_pane = if $pid != null { walk-to-pane $pid $panes $ps } else { null }
+    if $via_pane != null {
+        {project: $via_pane, how: "pane", cwd: ($rec | get -o cwd | default "")}
+    } else {
+        match-cwd ($rec | get -o cwd | default "") $registry
+    }
+}
+
+# ---------------------------------------------------- transform: row shaping
+
+# Fold attributed agents into one row per project.
+#
+# Zero agents yields an EMPTY table, not a row of zeros: a fabricated zero row
+# would make a consumer render a project that has nothing running in it.
+export def shape-rows [
+    agents: list        # agent records, each tagged with `account`
+    panes: record
+    ps: table
+    registry: record
+]: nothing -> table {
+    if ($agents | is-empty) { return [] }
+    let known = ($registry | columns)
+
+    let attributed = ($agents | each {|a|
+        let r = (resolve-project $a $panes $ps $registry)
+        {
+            project: $r.project
+            bucket: (bucket-state $a)
+            account: ($a | get -o account | default "personal")
+            cwd: ($a | get -o cwd | default "")
+            attributed: ($r.how != "ambiguous" and $r.how != "unmatched")
+        }
+    })
+
+    $attributed | group-by project | items {|project, rows|
+        {
+            project: $project
+            path: (if $project in $known { $registry | get $project | get path } else { null })
+            idle:    ($rows | where bucket == "idle"    | length)
+            working: ($rows | where bucket == "working" | length)
+            blocked: ($rows | where bucket == "blocked" | length)
+            done:    ($rows | where bucket == "done"    | length)
+            other:   ($rows | where bucket == "other"   | length)
+            total:   ($rows | length)
+            accounts: {
+                personal: ($rows | where account == "personal" | length)
+                work:     ($rows | where account == "work"     | length)
+            }
+            # Populated only where attribution failed, so the gap is visible
+            # instead of being silently folded into a named project.
+            cwds: (if $project == "unknown" { $rows | get cwd | uniq | sort } else { [] })
+        }
+    }
+}
+
+# States that mean the agent has FINISHED. A record in one of these is not
+# something you can go and work with, even while its process lingers.
+const TERMINAL_STATES = ["done", "failed"]
+
+# Keep only agents whose process actually exists.
+#
+# `claude agents --all --json` returns HISTORICAL job records alongside
+# running ones: a background job that finished or died months ago keeps its
+# record, with no `pid` at all. Counting those answers "how many agent records
+# exist", not "how many agents are running" -- on a real machine that was 13
+# versus 6, with the extra seven aged 25 to 101 days.
+#
+# A record is running iff a PROCESS exists for it AND its job state is not
+# terminal.
+#
+# Liveness comes from the presence of `status`: upstream only emits that field
+# while a process exists, so it is the same signal as looking the pid up in ps,
+# from the supported command, with no window between two probes for the process
+# to die in. Verified 13/13 on the live system and 13/13 in the fixtures --
+# has(status) <=> has(pid), every such pid alive. A fixture case asserts the
+# invariant so a future decoupling upstream surfaces as a failure rather than a
+# silent miscount.
+#
+# Presence is trustworthy; the VALUE is not. An abandoned session can sit at
+# status=busy for hours with zero CPU, so `busy` is not proof of activity --
+# only proof that something is there.
+#
+# The terminal check is separate and necessary: a finished background job stays
+# resident under `claude bg-pty-host`, so it has a live process and nothing
+# left to do.
+#
+# Window-less agents are deliberately NOT excluded as a class. us022 exists
+# because background agents that are BLOCKED are invisible until you walk the
+# sessions by hand -- a window-less blocked agent is precisely what the census
+# is for. Only the terminal ones drop out.
+export def live-agents [agents: list]: nothing -> list {
+    $agents | where {|a|
+        let alive = (($a | get -o status) != null)
+        let job = ($a | get -o state | default "")
+        $alive and ($job not-in $TERMINAL_STATES)
+    }
+}
+
+# One row per AGENT rather than per project. Same attribution and the same
+# bucketing as shape-rows, so the two views can never disagree about what an
+# agent is -- the count view is this view folded up.
+export def detail-rows [
+    agents: list
+    panes: record
+    ps: table
+    registry: record
+]: nothing -> table {
+    $agents | each {|a|
+        let r = (resolve-project $a $panes $ps $registry)
+        {
+            project: $r.project
+            account: ($a | get -o account | default "personal")
+            kind:    ($a | get -o kind | default "")
+            state:   ($a | get -o state | default "")    # job axis (background only)
+            status:  ($a | get -o status | default "")   # process axis
+            bucket:  (bucket-state $a)
+            name:    ($a | get -o name | default "")
+            cwd:     ($a | get -o cwd | default "")
+            pid:     ($a | get -o pid)
+            how:     $r.how
+        }
+    }
+}
+
+# ============================================================ PROBE LAYER
+# Everything below shells out. Every probe degrades to its empty value rather
+# than aborting: a census that dies because tmux is not running is useless in
+# exactly the situation you most want it — a headless box, a fresh login, one
+# account logged out.
+
+const REGISTRY_PATH = "~/.config/project/projects.yaml"
+
+# Strip the config-dir prefix to a short account label.
+#   ~/.claude-work -> work        ~/.claude -> default
+def account-name [dir: string]: nothing -> string {
+    let base = ($dir | path basename)
+    if $base == ".claude" { "default" } else { $base | str replace --regex '^\.claude-' '' }
+}
+
+# Find every claude config directory that could hold agents.
+#
+# Candidates are $CLAUDE_CONFIG_DIR, the `~/.claude-*` suffixed dirs, and bare
+# `~/.claude`. They are deduplicated by CANONICAL path, because `~/.claude` is
+# commonly a symlink to one of the suffixed dirs — following both would count
+# every agent in that account twice. Non-directories are skipped.
+export def discover-accounts [
+    --home: string   # scan this root instead of $HOME; also suppresses
+                     # $CLAUDE_CONFIG_DIR, so the flag scopes discovery
+                     # completely rather than leaving the ambient account
+                     # bleeding into whatever is being inspected.
+]: nothing -> list<record> {
+    let scoped = ($home != null)
+    let h = ($home | default $nu.home-dir)
+    let explicit = if $scoped { null } else { $env | get -o CLAUDE_CONFIG_DIR }
+    let candidates = ([$explicit]
+        ++ (glob ($h | path join ".claude-*"))
+        ++ [($h | path join ".claude")])
+
+    $candidates
+    | where {|p| $p != null }
+    | where {|p| ($p | path exists) and (($p | path expand) | path type) == "dir" }
+    | reduce --fold [] {|p, acc|
+        let real = ($p | path expand)
+        if ($acc | any {|a| $a.path == $real}) { $acc } else {
+            $acc | append {name: (account-name $real), path: $real}
+        }
+    }
+}
+
+# Ask one account for its agents. A non-zero exit, a missing binary, or output
+# that is not JSON all yield zero rows — never an abort, and never a partial
+# census that looks complete.
+export def probe-agents [account: record]: nothing -> list {
+    # A binary that is not on PATH at all makes `complete` itself raise, so the
+    # whole call is wrapped: "missing" and "failed" must degrade identically.
+    let r = (try {
+        with-env {CLAUDE_CONFIG_DIR: $account.path} {
+            do --ignore-errors { ^claude agents --all --json } | complete
+        }
+    } catch { {exit_code: 1, stdout: "", stderr: ""} })
+    if ($r | get -o exit_code | default 1) != 0 { return [] }
+    let parsed = (try { $r.stdout | from json } catch { null })
+    # `describe` says `table<...>` when the rows are uniform and `list<...>`
+    # when they are not -- and agent records ARE uniform in the common case,
+    # so a `list`-only guard silently discards every healthy response.
+    let shape = ($parsed | describe)
+    if ($shape | str starts-with "list") or ($shape | str starts-with "table") {
+        $parsed | each {|row| $row | insert account $account.name }
+    } else {
+        []
+    }
+}
+
+# Fan out across accounts concurrently. `claude agents --all --json` costs
+# ~600ms per account and is scoped to ONE config dir, so the accounts must
+# be probed separately — and there is no reason to pay for them in sequence.
+export def collect-agents [accounts: list<record>]: nothing -> list {
+    if ($accounts | is-empty) { return [] }
+    $accounts | par-each {|a| probe-agents $a } | flatten
+}
+
+# Pane pid -> project, from the live tmux server.
+#
+# Asks for session_name as a THIRD field: an ungrouped session reports an
+# empty session_group, and the name is then the only label available (see
+# build-pane-index). A two-field probe silently loses those panes.
+export def probe-panes []: nothing -> record {
+    let r = (try {
+        do --ignore-errors {
+            ^tmux list-panes -a -F "#{pane_pid} #{session_group} #{session_name}"
+        } | complete
+    } catch { {exit_code: 1, stdout: "", stderr: ""} })
+    if ($r | get -o exit_code | default 1) != 0 { return {} }
+    build-pane-index ($r.stdout | lines | where {|l| ($l | str trim | str length) > 0})
+}
+
+export def probe-ps []: nothing -> table {
+    let r = (try { do --ignore-errors { ^ps -eo pid=,ppid= } | complete } catch { {exit_code: 1, stdout: "", stderr: ""} })
+    if ($r | get -o exit_code | default 1) != 0 { return [] }
+    try {
+        parse-ps-table ($r.stdout | lines | where {|l| ($l | str trim | str length) > 0})
+    } catch { [] }
+}
+
+# The ft001 registry. Absent file, unreadable yaml, or a document with no
+# `projects` key all yield {} — every agent then lands in `unknown` with its
+# cwd shown, which is the honest answer rather than a fabricated attribution.
+export def probe-registry [path?: string]: nothing -> record {
+    # ft001's module exports $env.PROJECT_CONFIG_PATH on load; honour it so the
+    # census reads whatever registry the project module is actually using,
+    # rather than assuming the default location.
+    let p = ($path | default ($env | get -o PROJECT_CONFIG_PATH) | default $REGISTRY_PATH | path expand)
+    if not ($p | path exists) { return {} }
+    let doc = (try { open $p } catch { null })
+    if ($doc | describe | str starts-with "record") {
+        $doc | get -o projects | default {}
+    } else {
+        {}
+    }
+}
+
+# One full sample of the world. Both views are built from a SINGLE pass, so
+# `--detail` and the count view can never describe different instants.
+export def probe-all []: nothing -> record {
+    let accounts = (discover-accounts)
+    {
+        agents:   (collect-agents $accounts)
+        panes:    (probe-panes)
+        ps:       (probe-ps)
+        registry: (probe-registry)
+    }
+}
+
+# Live agents only by default; pass --all to include historical job records.
+export def census [--all]: nothing -> table {
+    let p = (probe-all)
+    let agents = if $all { $p.agents } else { live-agents $p.agents }
+    shape-rows $agents $p.panes $p.ps $p.registry | sort-by project
+}
+
+# ============================================================== CLI SURFACE
+#
+# Exit status is 0 for every census that completes, INCLUDING an empty one.
+# "no agents running" and "no such project" are answers, not errors; a
+# non-zero status is reserved for the action being unable to run at all.
+def main [
+    --json                    # emit JSON instead of a table, for consumers
+    --project: string         # restrict to one project
+    --detail                  # one row per agent instead of per-project counts
+    --all                     # include historical job records whose process is gone
+] {
+    let p = (probe-all)
+    let agents = if $all { $p.agents } else { live-agents $p.agents }
+    let rows = if $detail {
+        detail-rows $agents $p.panes $p.ps $p.registry | sort-by project account
+    } else {
+        shape-rows $agents $p.panes $p.ps $p.registry | sort-by project
+    }
+    let out = if $project != null { $rows | where project == $project } else { $rows }
+    if $json {
+        $out | to json
+    } else if (is-terminal --stdout) {
+        $out
+    } else {
+        # nushell colours its table even when stdout is a pipe, so a consumer
+        # capturing this would be handed control characters. Render and strip
+        # explicitly rather than trusting $env.config, which is scoped to this
+        # function and would not reach the rendering that happens after it
+        # returns.
+        $out | table | ansi strip
+    }
+}

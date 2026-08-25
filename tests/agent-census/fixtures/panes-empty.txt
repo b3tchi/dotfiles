@@ -1,0 +1,2 @@
+# hand-written 2026-08-24
+# tmux server not running: the command produces no pane lines at all.

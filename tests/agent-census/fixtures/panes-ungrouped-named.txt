@@ -1,0 +1,8 @@
+# hand-written 2026-08-24
+# three-field form: "<pane_pid> <session_group> <session_name>".
+# An ungrouped session has an EMPTY group, so the session name is the only
+# label available; a trailing _<N> is the tmux-start numbering and is stripped.
+# Requires the probe (Task 3) to emit session_name as a third field.
+4598 proj-bravo proj-bravo_0
+99003  scratch_3
+99004  adhoc
