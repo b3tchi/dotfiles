@@ -25,6 +25,8 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[us018|clip-picker-esc-instant-close-rdp]] (draft)
 - [[us019|programmable-global-keybinds]] (done) >> [[im010]]
 - [[us020|per-display-bind-expression]]
+- [[us022|agent-counts-per-project]] (done) >> [[im011]]
+- [[us023|agent-counts-where-i-already-look]] (draft)
 
 ## Features
 
@@ -39,6 +41,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[ft009|mode-bar-control]]
 - [[ft010|notification-service]] >> [[im008]]
 - [[ft011|global-hotkey-layer]]
+- [[ft012|agent-census]] >> [[im011]]
 
 ## Architecture Decision Records
 

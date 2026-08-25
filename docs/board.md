@@ -22,8 +22,6 @@ sections when status flips.
 
 ## ready
 
-- [[sp026|agent-census-per-project]]
-
 
 
 

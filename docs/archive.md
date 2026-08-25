@@ -5,6 +5,8 @@ Shipped workstreams. Specs (`sp###`) at `status: done` after
 
 ## done
 
+- [[sp026|agent-census-per-project]]
+
 - [[sp024|hotkeyd-screenshot-aiming-layer-trigger]]
 
 - [[sp023|hotkeyd-external-layer-trigger]]
