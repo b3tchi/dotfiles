@@ -1,3 +1,4 @@
+singleton Census 1.0 Census.qml
 singleton Session 1.0 Session.qml
 singleton Fuzzy 1.0 Fuzzy.qml
 singleton DialogTheme 1.0 DialogTheme.qml
