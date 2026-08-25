@@ -298,6 +298,42 @@ let results = [
         assert-eq (live-agents [($orphan | update state "working" | update status "busy")] | length) 1 "so must a working one"
     })
 
+    # ---- dedupe-sessions -------------------------------------------------
+    (run-case "transform/dedupe-sessions keeps the live twin of a resumed session" {
+        # Upstream emits one sessionId twice when a session is resumed: a live
+        # record plus a historical leftover. Counting both inflated --all.
+        let live = {sessionId: "s1", pid: 42, kind: "interactive", status: "busy", cwd: "/x"}
+        let leftover = {sessionId: "s1", kind: "background", state: "done", cwd: "/x"}
+        let out = (dedupe-sessions [$leftover $live])
+        assert-eq ($out | length) 1 "one session must yield one record"
+        assert-eq ($out | first | get status) "busy" "the LIVE twin must win, whichever order they arrive in"
+        # ...and the same holds with the arguments the other way round.
+        assert-eq (dedupe-sessions [$live $leftover] | first | get status) "busy"
+    })
+
+    (run-case "transform/dedupe-sessions never merges two sessions sharing a name" {
+        # The near-miss: POC019-021 exists under TWO sessionIds on the real
+        # machine. Deduping by name would silently lose a real agent.
+        let a = {sessionId: "s1", pid: 1, kind: "background", state: "blocked", status: "idle", cwd: "/x", name: "same name"}
+        let b = {sessionId: "s2", pid: 2, kind: "background", state: "blocked", status: "idle", cwd: "/y", name: "same name"}
+        assert-eq (dedupe-sessions [$a $b] | length) 2 "distinct sessions must both survive"
+    })
+
+    (run-case "transform/dedupe-sessions keeps records that have no sessionId" {
+        # Unmatched records cannot be paired up, so none may be dropped.
+        let x = {kind: "background", state: "blocked", cwd: "/x"}
+        let y = {kind: "background", state: "blocked", cwd: "/y"}
+        assert-eq (dedupe-sessions [$x $y] | length) 2
+    })
+
+    (run-case "transform/dedupe-sessions leaves already-unique input alone" {
+        # The real fixtures contain one duplicated sessionId or none; either
+        # way the count must equal the distinct-sessionId count.
+        let out = (dedupe-sessions $agents)
+        let distinct = ($agents | get sessionId | uniq | length)
+        assert-eq ($out | length) $distinct "output must have exactly one record per session"
+    })
+
     # ---- the two axes ----------------------------------------------------
     (run-case "transform/bucket-state reads the job axis, not the process axis" {
         # status=idle + state=blocked is ALIVE AND WAITING ON YOU. Bucketing it
