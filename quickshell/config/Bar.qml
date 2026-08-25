@@ -243,11 +243,17 @@ PanelWindow {
     // matching census row simply gets no badge rather than a fabricated zero.
     //
     // Polled, not tailed: the census is a completes-and-exits action
-    // (adr0001), ~0.8s wall for every account in parallel. A 15s cadence is
-    // slow enough that the cost is invisible and fast enough that "this tab is
-    // waiting on you" surfaces while you still care. Deliberately NOT chained
-    // to workspace events — agent state changes with no i3 event at all, which
-    // is exactly the blindness us022 exists to fix.
+    // (adr0001), ~0.8s wall for every account in parallel. The timer restarts
+    // in onExited rather than free-running, so probes can never stack: the
+    // real cycle is 10s + however long the census took, and a slow census
+    // stretches the gap instead of piling up processes. Deliberately NOT
+    // chained to workspace events — agent state changes with no i3 event at
+    // all, which is exactly the blindness us022 exists to fix.
+    //
+    // The poller lives in Bar.qml, which shell.qml instantiates PER SCREEN —
+    // so this is one census process per monitor. Fine at one or two; past
+    // that, hoist it to a state-file daemon and tail it, the way qs-stats
+    // already does (daemonMode above).
     //
     // Overridable for the reason QS_LAYER_FEED is: a harness must be able to
     // point the bar at a fixture emitter in its own tree instead of whatever
@@ -262,7 +268,13 @@ PanelWindow {
     Process {
         id: censusProc
         running: true
-        command: [root.censusCmd, "--json"]
+        // --fast reads the accounts' state files instead of spawning the
+        // claude CLI twice: 1.55 CPU-s per run becomes ~0.1, which is what
+        // makes polling this at all defensible. It depends on an internal
+        // layout, and tests/agent-census/probe-cases.nu holds a parity case
+        // against the CLI so a reshaped layout fails loudly there rather than
+        // silently blanking these badges.
+        command: [root.censusCmd, "--fast", "--json"]
         stdout: SplitParser {
             property string buf: ""
             onRead: data => { censusProc.stdout.buf += data }
@@ -283,7 +295,7 @@ PanelWindow {
             censusTimer.restart()
         }
     }
-    Timer { id: censusTimer; interval: 15000; onTriggered: censusProc.running = true }
+    Timer { id: censusTimer; interval: 10000; onTriggered: censusProc.running = true }
 
     // Total agents for a workspace, and the colour that total is worth.
     //

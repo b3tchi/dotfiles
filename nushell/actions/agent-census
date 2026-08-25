@@ -363,6 +363,177 @@ export def probe-agents [account: record]: nothing -> list {
     }
 }
 
+# ------------------------------------------------- fast probe: state files
+#
+# `claude agents --all --json` costs ~0.65 CPU-seconds per account, essentially
+# all of it Node startup -- 1.55 CPU-s for a two-account census, against 0.025
+# to read the same facts off disk. That is 62x, and it is the difference
+# between a bar badge polling for free and one burning a fifth of a core
+# forever (the quickshell consumer, Bar.qml, polls this on a timer).
+#
+# The CLI's output is assembled from two places inside a config dir:
+#
+#   sessions/<pid>.json     one per session process, `kind` interactive or bg.
+#                           Carries pid / procStart / cwd / sessionId / name /
+#                           status, and for a bg session a `jobId`. Rewritten
+#                           on every status change.
+#   jobs/<id>/state.json    the durable job record: `state` (working / blocked
+#                           / done), name, cwd, sessionId. Survives the
+#                           process, which is exactly why it has no pid.
+#
+# THIS IS AN INTERNAL LAYOUT AND NOTHING UPSTREAM PROMISES IT. That is the
+# whole risk of this path and the reason it is opt-in rather than the default:
+# `agent-census` run by a human still asks the supported command. What keeps
+# the risk visible is the parity case in tests/agent-census/probe-cases.nu --
+# it runs both probes against the live machine and fails when they disagree,
+# so a reshaped layout surfaces as a red suite instead of a bar that has
+# quietly gone blank. A silent wrong answer is the only outcome worth
+# engineering against here; being loudly broken is recoverable.
+
+# Extract a process's start time from a /proc stat line.
+#
+# Field 22 is `starttime`, but the comm field (2) is parenthesised and may
+# itself contain spaces AND parentheses, so the line cannot simply be split on
+# whitespace. Splitting on the LAST ") " lands past comm, where field 3
+# (state) begins -- making starttime index 19 from there.
+#
+# Returns null for anything that does not parse, so a truncated read is a
+# "cannot confirm" rather than a fabricated match.
+export def parse-proc-start [stat_line: string]: nothing -> any {
+    let tail = ($stat_line | split row ") " | last | split row " ")
+    if ($tail | length) <= 19 { return null }
+    $tail | get 19
+}
+
+# Keep only session records whose PROCESS is still the one that wrote them.
+#
+# `starts` maps pid -> /proc starttime. A pid alone is not enough: pids are
+# reused, and a stale sessions/<pid>.json whose pid now belongs to something
+# else would be counted as a live agent. procStart is stored precisely so the
+# two can be compared, so both must match.
+export def live-sessions [sessions: list, starts: record]: nothing -> list {
+    $sessions | where {|s|
+        let pid = ($s | get -o pid)
+        if $pid == null { return false }
+        let actual = ($starts | get -o ($pid | into string))
+        ($actual != null) and ($actual == ($s | get -o procStart))
+    }
+}
+
+# Assemble CLI-shaped agent records from the two state-file sources.
+#
+# The shapes must match `probe-agents` exactly, because everything downstream
+# -- bucket-state, live-agents, resolve-project -- reads these fields by name
+# and cannot tell which probe produced them.
+#
+#   interactive  emitted from the live session record alone: pid + status, no
+#                `state`, because an interactive session has no job lifecycle.
+#   background   emitted from the JOB record, which is what survives the
+#                process. A live bg session for that job contributes its pid
+#                and status on top; without one the row keeps `state` and no
+#                status, which is how live-agents drops it as historical.
+#
+# Job records are the outer loop, not sessions: a finished job whose process
+# is long gone must still appear under --all, and it exists only in jobs/.
+export def shape-fast-agents [live: list, jobs: list]: nothing -> list {
+    # bg sessions join to their job; `jobId` is the upstream key, with
+    # sessionId as the fallback for a record that predates it.
+    let bg = ($live | where {|s| ($s | get -o kind) == "bg"})
+
+    let bg_rows = ($jobs | each {|j|
+        let jid = ($j | get -o id)
+        let sid = ($j | get -o sessionId)
+        let hits = ($bg | where {|b|
+            let by_job = ($jid != null and ($b | get -o jobId) == $jid)
+            let by_sid = ($sid != null and ($b | get -o sessionId) == $sid)
+            $by_job or $by_sid
+        })
+        # `first` raises on an empty list, and a job with no live session is
+        # the COMMON case here -- every finished job is one.
+        let s = (if ($hits | is-empty) { null } else { $hits | first })
+
+        # A job whose stored state says `working` with NO process behind it did
+        # not finish -- it died mid-run, and the CLI reports it as `failed`.
+        # The state file cannot record this itself: whatever was going to write
+        # the terminal state is exactly what stopped running. Verified against
+        # `claude agents --all --json` on this machine (job f3733a98, stored
+        # `working`, reported `failed`).
+        #
+        # ONLY `working` is remapped. `blocked` with no process stays blocked
+        # (the CLI keeps it, and it is still a job someone must come back to),
+        # and a state we have not seen the CLI remap is passed through
+        # untouched -- adr0017 again, a guess here would be a fabricated
+        # verdict rather than a missing one.
+        let raw_state = ($j | get -o state | default "")
+        let state = if ($s == null and $raw_state == "working") { "failed" } else { $raw_state }
+        {
+            id:        $jid
+            pid:       (if $s != null { $s | get -o pid } else { null })
+            cwd:       ($j | get -o cwd | default "")
+            kind:      "background"
+            startedAt: ($j | get -o createdAt)
+            sessionId: $sid
+            name:      ($j | get -o name | default "")
+            state:     $state
+            status:    (if $s != null { $s | get -o status } else { null })
+        }
+    })
+
+    let ia_rows = ($live | where {|s| ($s | get -o kind) != "bg"} | each {|s|
+        {
+            pid:       ($s | get -o pid)
+            cwd:       ($s | get -o cwd | default "")
+            kind:      ($s | get -o kind | default "interactive")
+            startedAt: ($s | get -o startedAt)
+            sessionId: ($s | get -o sessionId)
+            name:      ($s | get -o name | default "")
+            status:    ($s | get -o status)
+        }
+    })
+
+    $ia_rows ++ $bg_rows
+}
+
+# Read /proc for the given pids. Absent or unreadable entries are simply
+# missing from the map, which live-sessions reads as "not alive".
+export def probe-proc-starts [pids: list]: nothing -> record {
+    $pids | reduce --fold {} {|pid, acc|
+        let p = $"/proc/($pid)/stat"
+        if not ($p | path exists) { return $acc }
+        let line = (try { open --raw $p } catch { null })
+        if $line == null { return $acc }
+        let st = (parse-proc-start $line)
+        if $st == null { $acc } else { $acc | upsert ($pid | into string) $st }
+    }
+}
+
+# Ask one account for its agents WITHOUT shelling out. Degrades exactly like
+# probe-agents: a missing directory or an unparseable file yields fewer rows,
+# never an abort.
+export def probe-agents-fast [account: record]: nothing -> list {
+    let sessions = (try {
+        glob ($account.path | path join "sessions" "*.json")
+        | each {|f| try { open --raw $f | from json } catch { null } }
+        | compact
+    } catch { [] })
+
+    let jobs = (try {
+        glob ($account.path | path join "jobs" "*" "state.json")
+        | each {|f|
+            try {
+                # The job id is the DIRECTORY name -- state.json does not carry
+                # it, and it is what a bg session's `jobId` joins against.
+                open --raw $f | from json | insert id ($f | path dirname | path basename)
+            } catch { null }
+        }
+        | compact
+    } catch { [] })
+
+    let starts = (probe-proc-starts ($sessions | each {|s| $s | get -o pid } | compact))
+    shape-fast-agents (live-sessions $sessions $starts) $jobs
+    | each {|row| $row | insert account $account.name }
+}
+
 # Collapse records that describe the SAME session.
 #
 # Upstream can emit one sessionId twice: a live record plus a historical
@@ -389,10 +560,18 @@ export def dedupe-sessions [agents: list]: nothing -> list {
 # Fan out across accounts concurrently. `claude agents --all --json` costs
 # ~600ms per account and is scoped to ONE config dir, so the accounts must
 # be probed separately — and there is no reason to pay for them in sequence.
-export def collect-agents [accounts: list<record>]: nothing -> list {
+export def collect-agents [
+    accounts: list<record>
+    --fast    # read the accounts' state files instead of asking the CLI
+]: nothing -> list {
     if ($accounts | is-empty) { return [] }
     # Deduped here rather than in the live filter, so `--all` benefits too.
-    dedupe-sessions ($accounts | par-each {|a| probe-agents $a } | flatten)
+    # Both probes need it equally: the fast path joins the same sessionId from
+    # sessions/ and jobs/, so a resumed bg session can double just as it does
+    # through the CLI.
+    dedupe-sessions ($accounts | par-each {|a|
+        if $fast { probe-agents-fast $a } else { probe-agents $a }
+    } | flatten)
 }
 
 # Pane pid -> project, from the live tmux server.
@@ -437,10 +616,10 @@ export def probe-registry [path?: string]: nothing -> record {
 
 # One full sample of the world. Both views are built from a SINGLE pass, so
 # `--detail` and the count view can never describe different instants.
-export def probe-all []: nothing -> record {
+export def probe-all [--fast]: nothing -> record {
     let accounts = (discover-accounts)
     {
-        agents:   (collect-agents $accounts)
+        agents:   (collect-agents $accounts --fast=$fast)
         panes:    (probe-panes)
         ps:       (probe-ps)
         registry: (probe-registry)
@@ -448,8 +627,8 @@ export def probe-all []: nothing -> record {
 }
 
 # Live agents only by default; pass --all to include historical job records.
-export def census [--all]: nothing -> table {
-    let p = (probe-all)
+export def census [--all, --fast]: nothing -> table {
+    let p = (probe-all --fast=$fast)
     let agents = if $all { $p.agents } else { live-agents $p.agents }
     shape-rows $agents $p.panes $p.ps $p.registry | sort-by project
 }
@@ -464,8 +643,12 @@ def main [
     --project: string         # restrict to one project
     --detail                  # one row per agent instead of per-project counts
     --all                     # include historical job records whose process is gone
+    --fast                    # read the state files directly instead of calling
+                              # `claude agents` -- ~60x cheaper, at the cost of
+                              # depending on an internal layout (see the fast
+                              # probe section). For polling consumers.
 ] {
-    let p = (probe-all)
+    let p = (probe-all --fast=$fast)
     let agents = if $all { $p.agents } else { live-agents $p.agents }
     let rows = if $detail {
         detail-rows $agents $p.panes $p.ps $p.registry | sort-by project account
