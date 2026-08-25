@@ -795,8 +795,8 @@ def "main delete" [
     if $has_board_entry {
       print -e $"  ($board) entry for ($id)"
     }
-    let ans = (input "Proceed? [y/N]: ")
-    if ($ans | str lowercase) != "y" {
+    let reply = (input "Proceed? [y/N]: ")
+    if ($reply | str lowercase) != "y" {
       print -e "Aborted"
       return
     }
@@ -2417,8 +2417,8 @@ def "main bd import" [
   if not $force {
     print -e $"Will replay ($jsonl) into local bd Dolt."
     print -e "This can resurrect closed issues if the jsonl is older than Dolt."
-    let ans = (input "Proceed? [y/N]: ")
-    if ($ans | str lowercase) != "y" {
+    let reply = (input "Proceed? [y/N]: ")
+    if ($reply | str lowercase) != "y" {
       print -e "Aborted"
       return
     }
@@ -2461,8 +2461,8 @@ def "main bd archive create" [
   $to_archive | select id title closed_at | table | print
 
   if not $yes {
-    let ans = (input "Proceed? [y/N]: ")
-    if ($ans | str lowercase) != "y" {
+    let reply = (input "Proceed? [y/N]: ")
+    if ($reply | str lowercase) != "y" {
       print -e "Aborted"
       return
     }
