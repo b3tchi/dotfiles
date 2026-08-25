@@ -235,6 +235,75 @@ PanelWindow {
         onExited: running = true
     }
 
+    // ------------------------------------------------------- agent census ---
+    // Per-project claude-agent counts (ft012 / `agent-census`), rendered as a
+    // badge on the workspace tab that carries the same name. Workspace names
+    // ARE project names here — tmux-start/i3 name a workspace after the
+    // project — so the join is by name and nothing else; a workspace with no
+    // matching census row simply gets no badge rather than a fabricated zero.
+    //
+    // Polled, not tailed: the census is a completes-and-exits action
+    // (adr0001), ~0.8s wall for every account in parallel. A 15s cadence is
+    // slow enough that the cost is invisible and fast enough that "this tab is
+    // waiting on you" surfaces while you still care. Deliberately NOT chained
+    // to workspace events — agent state changes with no i3 event at all, which
+    // is exactly the blindness us022 exists to fix.
+    //
+    // Overridable for the reason QS_LAYER_FEED is: a harness must be able to
+    // point the bar at a fixture emitter in its own tree instead of whatever
+    // is checked out at ~/.dotfiles.
+    readonly property string censusCmd: Quickshell.env("QS_CENSUS_CMD")
+        || (Quickshell.env("HOME") + "/.dotfiles/nushell/actions/agent-census")
+
+    // project name -> census row. Empty until the first successful probe, so
+    // a missing/failed census renders exactly like "no agents": no badges.
+    property var censusByProject: ({})
+
+    Process {
+        id: censusProc
+        running: true
+        command: [root.censusCmd, "--json"]
+        stdout: SplitParser {
+            property string buf: ""
+            onRead: data => { censusProc.stdout.buf += data }
+        }
+        onExited: {
+            try {
+                var rows = JSON.parse(censusProc.stdout.buf)
+                var m = {}
+                for (var i = 0; i < rows.length; i++) m[rows[i].project] = rows[i]
+                root.censusByProject = m
+            } catch (err) {
+                // A non-zero exit, a half-written pipe, or nu not on this box:
+                // keep the LAST good map rather than blanking every badge on
+                // one bad sample. A genuinely dead census freezes the badges,
+                // which the 15s retry below then corrects as soon as it works.
+            }
+            censusProc.stdout.buf = ""
+            censusTimer.restart()
+        }
+    }
+    Timer { id: censusTimer; interval: 15000; onTriggered: censusProc.running = true }
+
+    // Total agents for a workspace, and the colour that total is worth.
+    //
+    // Priority is blocked > working > idle: a tab with one blocked agent and
+    // four idle ones is a tab that needs you, and averaging that into a calm
+    // grey would bury the one row that matters. `other` (a bucket the census
+    // has never seen) counts toward the total but never claims a colour — an
+    // unknown state is not evidence of urgency.
+    function censusTotal(wsName) {
+        var r = root.censusByProject[wsName]
+        return r ? r.total : 0
+    }
+    function censusColor(wsName) {
+        var r = root.censusByProject[wsName]
+        if (!r) return "transparent"
+        if (r.blocked > 0) return "#cb4b16"   // same orange as an urgent tab
+        if (r.working > 0) return "#16a085"   // same teal as the focused underline
+        return "#707880"                      // idle: the dim-tab grey
+    }
+
     // --- Mode tracking ---
     // `currentMode` is derived further down, from the i3 mode plus hotkeyd's
     // layer feed — there is no writable mode property any more.
@@ -647,7 +716,7 @@ PanelWindow {
 
                 Rectangle {
                     required property var modelData
-                    width: wsText.implicitWidth + 14
+                    width: wsLabel.implicitWidth + 14
                     height: leftSide.height
                     // Focused tab uses the same highlight as the mod+d launcher
                     // input/selection (#152024, Overlay.qml).
@@ -655,18 +724,52 @@ PanelWindow {
                          : modelData.focused ? "#152024"
                          : "transparent"
 
-                    Text {
-                        id: wsText
+                    // Name + agent badge share one baseline-aligned Row, so the
+                    // tab widens by exactly the badge and the name stays put.
+                    Row {
+                        id: wsLabel
                         anchors.horizontalCenter: parent.horizontalCenter
                         anchors.bottom: parent.bottom
                         anchors.bottomMargin: 1
-                        text: modelData.name
-                        // Focused/urgent tab bright; other project tabs dimmed.
-                        color: (modelData.focused || modelData.urgent) ? "#fdf6e3" : "#707880"
-                        font.family: root.fontFamily
-                        font.pixelSize: root.fontSize
-                        font.bold: modelData.focused
-                        renderType: root.nativeRender
+                        spacing: 4
+
+                        Text {
+                            id: wsText
+                            text: modelData.name
+                            // Focused/urgent tab bright; other project tabs dimmed.
+                            color: (modelData.focused || modelData.urgent) ? "#fdf6e3" : "#707880"
+                            font.family: root.fontFamily
+                            font.pixelSize: root.fontSize
+                            font.bold: modelData.focused
+                            renderType: root.nativeRender
+                        }
+
+                        // Live-agent badge for the project this tab is named
+                        // after: a dot, plus a digit ONLY once there is more
+                        // than one agent. The dot carries the state (which is
+                        // what you scan the bar for) and the digit carries the
+                        // count (which you only need when it is not the obvious
+                        // one) — a bare "1" on every busy tab is the same
+                        // information as the dot, printed twice.
+                        //
+                        // Hidden at zero rather than rendered as "0": a
+                        // permanent 0 on every tab trains the eye to skip the
+                        // column the badge exists to draw it to.
+                        Text {
+                            objectName: "wsAgentBadge"
+                            visible: root.censusTotal(modelData.name) > 0
+                            text: root.censusTotal(modelData.name) > 1
+                                ? "●" + root.censusTotal(modelData.name)
+                                : "●"
+                            // Colour is the census's own priority (blocked >
+                            // working > idle) and ignores focus/urgency, so the
+                            // badge means the same thing on every tab.
+                            color: root.censusColor(modelData.name)
+                            font.family: root.fontFamily
+                            font.pixelSize: root.fontSize
+                            font.bold: true
+                            renderType: root.nativeRender
+                        }
                     }
 
                     Rectangle {
