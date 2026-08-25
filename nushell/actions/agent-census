@@ -363,12 +363,36 @@ export def probe-agents [account: record]: nothing -> list {
     }
 }
 
+# Collapse records that describe the SAME session.
+#
+# Upstream can emit one sessionId twice: a live record plus a historical
+# leftover, which happens when a session is resumed. Observed 13 records for
+# 12 distinct sessionIds, so `--all` counted the resumed session twice.
+#
+# The live record wins -- it carries `status`, which upstream emits only while
+# a process exists.
+#
+# Keys on sessionId ONLY. Two genuinely different sessions can share a `name`
+# (POC019-021 exists under two sessionIds on this machine), so deduping by name
+# would silently merge distinct agents -- a fix that looks right and loses data.
+# Records without a sessionId cannot be matched up and are all kept.
+export def dedupe-sessions [agents: list]: nothing -> list {
+    let keyed = ($agents | where {|a| ($a | get -o sessionId) != null})
+    let unkeyed = ($agents | where {|a| ($a | get -o sessionId) == null})
+    let collapsed = ($keyed | group-by sessionId | items {|sid, rows|
+        let live = ($rows | where {|r| ($r | get -o status) != null})
+        if ($live | is-empty) { $rows | first } else { $live | first }
+    })
+    $unkeyed ++ $collapsed
+}
+
 # Fan out across accounts concurrently. `claude agents --all --json` costs
 # ~600ms per account and is scoped to ONE config dir, so the accounts must
 # be probed separately — and there is no reason to pay for them in sequence.
 export def collect-agents [accounts: list<record>]: nothing -> list {
     if ($accounts | is-empty) { return [] }
-    $accounts | par-each {|a| probe-agents $a } | flatten
+    # Deduped here rather than in the live filter, so `--all` benefits too.
+    dedupe-sessions ($accounts | par-each {|a| probe-agents $a } | flatten)
 }
 
 # Pane pid -> project, from the live tmux server.
