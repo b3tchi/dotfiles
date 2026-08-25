@@ -614,6 +614,88 @@ export def probe-registry [path?: string]: nothing -> record {
     }
 }
 
+# ------------------------------------------------------ change detection
+#
+# A polling consumer (the quickshell bar) asks this action once a second, and
+# the honest answer is almost always "nothing moved". Even the --fast probe
+# costs ~0.115 CPU-s a run; the state files it reads are rewritten only when an
+# agent actually changes, so most of that is spent re-deriving an answer that
+# is already on the consumer's screen.
+#
+# The gate is a TOKEN over those same files -- cheap enough (~0.005 CPU-s for
+# 85 files, one `ls` per pattern rather than one per file) that computing it and
+# stopping beats doing the work.
+#
+# Deliberately NOT a daemon that holds the answer in memory and pushes updates:
+# adr0003 sends long-running processes to Go, and adr0001 keeps this action in
+# the completes-and-exits shape. The gate buys most of the saving while leaving
+# both intact.
+
+# How long a matching token may suppress a real run.
+#
+# The token covers the claude state files and NOTHING ELSE, but the output also
+# depends on tmux panes and the ft001 registry: move an agent's pane between
+# tmux sessions and its project attribution changes with no state file touched.
+# A ceiling bounds how long such a change can stay invisible, so the gate can
+# only ever make the answer late -- never permanently wrong.
+const GATE_MAX_STALE_SEC = 30
+
+# A fingerprint of every state file across the given accounts.
+#
+# Both halves matter. The max mtime catches a rewrite (the common case: a
+# session flipping busy -> idle rewrites its file in place). The COUNT catches
+# a deletion, which removes a file without touching any survivor and can only
+# LOWER the max -- a token built on mtime alone would call that "unchanged".
+#
+# Any failure yields a token that cannot match a stored one, so an unreadable
+# directory degrades to "always run" rather than "never run again".
+export def state-token [accounts: list<record>]: nothing -> string {
+    let pats = ($accounts | each {|a| [
+        ($a.path | path join "sessions" "*.json")
+        ($a.path | path join "jobs" "*" "state.json")
+    ]} | flatten)
+    if ($pats | is-empty) { return "none" }
+    # Per pattern, NOT one `ls` over all of them: nushell raises when a glob
+    # matches nothing, and an account with no jobs/ dir is entirely normal. A
+    # single combined call therefore threw on healthy machines and collapsed the
+    # whole token to one constant -- which still MATCHED itself every run, so
+    # the gate suppressed everything and detected no change at all. A gate that
+    # fails closed like that is worse than no gate.
+    $pats | each {|p|
+        # `into glob` is load-bearing: a plain string variable is a LITERAL
+        # path to `ls`, so every pattern threw and the token collapsed to one
+        # constant that matched itself forever -- suppressing every run while
+        # detecting nothing.
+        let r = (try { ls -D ($p | into glob) } catch { null })
+        if $r == null {
+            "e"                       # absent or unreadable: nothing to watch here
+        } else if ($r | is-empty) {
+            "0:0"
+        } else {
+            $"($r | length):($r | get modified | math max | into int)"
+        }
+    } | str join "|"
+}
+
+# Decide whether a real census is worth running, given a stamp file.
+#
+# Kept as a pure function over (token, stamp contents, now) so the decision is
+# testable without arranging real files and real clocks -- the same split the
+# rest of this action is built on.
+#
+# `stamp` is the two-line body written by the last full run: token, then the
+# unix seconds at which it ran. Anything unparseable means run.
+export def gate-decide [token: string, stamp: any, now: int]: nothing -> bool {
+    if $stamp == null { return true }
+    let lines = ($stamp | lines)
+    if ($lines | length) < 2 { return true }
+    if ($lines | get 0) != $token { return true }
+    let at = (try { $lines | get 1 | into int } catch { return true })
+    # A clock that jumped backwards must not be able to suppress runs forever.
+    let age = ($now - $at)
+    ($age < 0) or ($age >= $GATE_MAX_STALE_SEC)
+}
+
 # One full sample of the world. Both views are built from a SINGLE pass, so
 # `--detail` and the count view can never describe different instants.
 export def probe-all [--fast]: nothing -> record {
@@ -647,7 +729,35 @@ def main [
                               # `claude agents` -- ~60x cheaper, at the cost of
                               # depending on an internal layout (see the fast
                               # probe section). For polling consumers.
+    --if-changed: string      # path to a stamp file: print NOTHING and exit 0
+                              # when no state file has moved since the last run
+                              # recorded there. For a consumer polling faster
+                              # than agents actually change.
 ] {
+    # The gate runs before any probing, which is the entire point -- a suppressed
+    # run must cost a token sweep and nothing else.
+    #
+    # Silence means "unchanged", never "no agents": a consumer that redrew from
+    # empty output would blank itself every tick. Bar.qml's SplitParser treats
+    # an empty read as "keep the last map" for exactly this reason.
+    if $if_changed != null {
+        let token = (state-token (discover-accounts))
+        let stamp = (try { open --raw $if_changed } catch { null })
+        if not (gate-decide $token $stamp (date now | format date "%s" | into int)) {
+            return
+        }
+        # Written BEFORE the census rather than after, so a run that dies partway
+        # cannot leave the stamp claiming a state it never reported. The cost of
+        # being wrong in this direction is one skipped update; the other
+        # direction is a permanently stale badge.
+        try {
+            $"($token)\n(date now | format date '%s')\n" | save -f $if_changed
+        } catch {
+            # An unwritable stamp path degrades to "gate does nothing" -- every
+            # run proceeds, which is the old behaviour, not a failure.
+        }
+    }
+
     let p = (probe-all --fast=$fast)
     let agents = if $all { $p.agents } else { live-agents $p.agents }
     let rows = if $detail {

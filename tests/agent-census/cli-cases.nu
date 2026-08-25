@@ -250,6 +250,52 @@ let results = [
         assert-true (not ($out.stdout | str contains "\u{1b}")) "piped table must be plain text"
     })
 
+    (run-case "cli/--if-changed emits once, then goes quiet" {
+        # The contract a polling consumer depends on: SILENCE means "nothing
+        # moved", never "no agents". A consumer that redrew from empty output
+        # would blank itself on every suppressed tick.
+        let w = (make-world "gatecli")
+        let stamp = ($w | path join "stamp")
+
+        let first = (run-action $w "--json" "--if-changed" $stamp)
+        assert-eq $first.exit_code 0
+        assert-true (($first.stdout | str trim | str length) > 0) "the first run has no stamp to match, so it must report"
+
+        let second = (run-action $w "--json" "--if-changed" $stamp)
+        assert-eq $second.exit_code 0 "a suppressed run is a success, not an error"
+        assert-eq ($second.stdout | str trim) "" "nothing moved, so nothing is said"
+    })
+
+    (run-case "cli/--if-changed reports again once a state file moves" {
+        # The negative control for the case above: a gate that never reopens is
+        # indistinguishable from a broken census.
+        let w = (make-world "gatecliwake")
+        let stamp = ($w | path join "stamp")
+        let sessions = ($w | path join ".claude-personal" "sessions")
+        mkdir $sessions
+        {pid: 1, procStart: "1", kind: "interactive", sessionId: "x"} | to json | save -f ($sessions | path join "s1.json")
+
+        run-action $w "--json" "--if-changed" $stamp | ignore
+        assert-eq ((run-action $w "--json" "--if-changed" $stamp).stdout | str trim) "" "baseline: quiet"
+
+        sleep 20ms
+        {pid: 1, procStart: "1", kind: "interactive", sessionId: "x", status: "busy"} | to json | save -f ($sessions | path join "s1.json")
+        let woken = (run-action $w "--json" "--if-changed" $stamp)
+        assert-true (($woken.stdout | str trim | str length) > 0) "a rewritten state file must reopen the gate"
+    })
+
+    (run-case "cli/an unwritable stamp path degrades to no gate at all" {
+        # Failing OPEN matters: a census that cannot record where it got to must
+        # keep answering, not fall silent.
+        let w = (make-world "gatecliunwritable")
+        let stamp = ($w | path join "no-such-dir" "stamp")
+        let a = (run-action $w "--json" "--if-changed" $stamp)
+        let b = (run-action $w "--json" "--if-changed" $stamp)
+        assert-eq $a.exit_code 0
+        assert-true (($a.stdout | str trim | str length) > 0) "first run reports"
+        assert-true (($b.stdout | str trim | str length) > 0) "and so does the next -- no stamp, no suppression"
+    })
+
     (run-case "cli/json output is parseable and not pretty-printed into a table" {
         let out = (run-action (make-world "jsonshape") "--json")
         let parsed = (try { $out.stdout | from json } catch { null })

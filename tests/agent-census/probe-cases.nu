@@ -342,6 +342,89 @@ echo "99003  scratch_3"'
         assert-eq (key $fast) (key $slow) "the fast probe must see exactly what the CLI reports"
     })
 
+    # ---- change-detection gate ------------------------------------------
+    (run-case "gate/no stamp means run" {
+        assert-eq (gate-decide "tok" null 100) true
+    })
+
+    (run-case "gate/a different token means run" {
+        assert-eq (gate-decide "new" "old\n100\n" 101) true
+    })
+
+    (run-case "gate/a matching fresh token means SKIP" {
+        assert-eq (gate-decide "tok" "tok\n100\n" 101) false
+    })
+
+    (run-case "gate/a matching token goes stale and runs anyway" {
+        # The token covers the claude state files only. Attribution also depends
+        # on tmux panes and the registry, so an unchanged token must never be
+        # able to suppress runs forever -- it may make the answer late, not
+        # permanently wrong.
+        assert-eq (gate-decide "tok" "tok\n100\n" 130) true
+    })
+
+    (run-case "gate/a backwards clock cannot suppress forever" {
+        # now < stamped time yields a negative age, which a naive `age < max`
+        # would read as "very fresh" and skip on every subsequent run.
+        assert-eq (gate-decide "tok" "tok\n500\n" 100) true
+    })
+
+    (run-case "gate/a malformed stamp means run" {
+        assert-eq (gate-decide "tok" "tok" 100) true "a one-line stamp carries no timestamp"
+        assert-eq (gate-decide "tok" "tok\nnot-a-number\n" 100) true
+        assert-eq (gate-decide "tok" "" 100) true
+    })
+
+    (run-case "gate/state-token changes when a state file is rewritten" {
+        let a = (make-account "tokenrewrite")
+        write-session $a "s1" {pid: 1, procStart: "1", kind: "interactive", sessionId: "x"}
+        let before = (state-token [$a])
+        sleep 20ms
+        write-session $a "s1" {pid: 1, procStart: "1", kind: "interactive", sessionId: "x", status: "busy"}
+        assert-true ((state-token [$a]) != $before) "a status flip rewrites the file in place"
+    })
+
+    (run-case "gate/state-token changes when a state file is DELETED" {
+        # The trap this case exists for: a deletion touches no surviving file
+        # and can only LOWER the newest mtime, so a token built on mtime alone
+        # calls it "unchanged". The count is what catches it.
+        let a = (make-account "tokendelete")
+        write-session $a "s1" {pid: 1, procStart: "1", kind: "interactive", sessionId: "x"}
+        write-session $a "s2" {pid: 2, procStart: "2", kind: "interactive", sessionId: "y"}
+        let before = (state-token [$a])
+        rm ($a.path | path join "sessions" "s2.json")
+        assert-true ((state-token [$a]) != $before) "the file count must be part of the token"
+    })
+
+    (run-case "gate/state-token is stable when nothing moves" {
+        let a = (make-account "tokenstable")
+        write-session $a "s1" {pid: 1, procStart: "1", kind: "interactive", sessionId: "x"}
+        assert-eq (state-token [$a]) (state-token [$a])
+    })
+
+    (run-case "gate/state-token survives an account with no state dirs" {
+        # An account with no jobs/ directory is entirely normal, and a glob
+        # matching nothing RAISES in nushell. A token that collapses to one
+        # constant on that path still matches itself every run -- suppressing
+        # every census while detecting nothing, which is worse than no gate.
+        let root = (make-probe-sandbox "tokenbare")
+        let acct = ($root | path join ".claude-bare")
+        mkdir ($acct | path join "sessions")
+        let t = (state-token [{name: "bare", path: $acct}])
+        assert-true ($t != "unreadable") "an absent jobs/ dir must not poison the whole token"
+
+        # ...and the sessions half must still track changes.
+        {pid: 1, procStart: "1"} | to json | save -f ($acct | path join "sessions" "s1.json")
+        assert-true ((state-token [{name: "bare", path: $acct}]) != $t) "the readable half must still register"
+    })
+
+    (run-case "gate/state-token distinguishes an empty account from a populated one" {
+        let a = (make-account "tokenempty")
+        let empty = (state-token [$a])
+        write-session $a "s1" {pid: 1, procStart: "1", kind: "interactive", sessionId: "x"}
+        assert-true ((state-token [$a]) != $empty) "an account gaining its first session must change the token"
+    })
+
     (run-case "probe/registry is read when present" {
         let s = (make-probe-sandbox "goodregistry")
         let f = ($s | path join "projects.yaml")

@@ -31,6 +31,12 @@ Singleton {
     readonly property int intervalMs:
         parseInt(Quickshell.env("QS_CENSUS_INTERVAL") || "1000", 10) || 1000
 
+    // Stamp file for --if-changed. Per quickshell instance, under the runtime
+    // dir so it dies with the session rather than persisting a stale token
+    // across a reboot.
+    readonly property string stampFile:
+        (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/qs-census.stamp"
+
     // project name -> census row. Empty until the first successful probe, so a
     // missing or failed census renders exactly like "no agents".
     property var byProject: ({})
@@ -61,7 +67,15 @@ Singleton {
     // so a reshaped layout fails loudly there rather than silently blanking
     // every badge.
     //
-    // Polled, not tailed: the census is a completes-and-exits action (adr0001).
+    // --if-changed makes most of those runs cost a token sweep and stop: the
+    // census prints NOTHING when no state file has moved since the stamp, which
+    // is the common case at a 1s cadence. ~0.115 CPU-s a run becomes ~0.045
+    // whenever nothing is happening. Silence means "unchanged", never "no
+    // agents" — see the empty-buffer branch in onExited.
+    //
+    // Polled, not tailed: the census is a completes-and-exits action (adr0001),
+    // and adr0003 sends long-running processes to Go, so the cheap thing to do
+    // is make each run decide quickly that it has nothing to say.
     // The timer restarts in onExited rather than free-running, so probes can
     // never stack — the real cycle is intervalMs PLUS however long the census
     // took, and a slow census stretches the gap instead of piling up processes.
@@ -71,12 +85,21 @@ Singleton {
     Process {
         id: proc
         running: true
-        command: [census.cmd, "--fast", "--json"]
+        command: [census.cmd, "--fast", "--if-changed", census.stampFile, "--json"]
         stdout: SplitParser {
             property string buf: ""
             onRead: data => { proc.stdout.buf += data }
         }
         onExited: {
+            // Empty output is the gate saying "nothing moved" — the OVERWHELMING
+            // majority of runs. Handled before the parse so the common path
+            // neither throws nor touches byProject (which would re-evaluate
+            // every badge binding for no reason).
+            if (proc.stdout.buf.trim() === "") {
+                proc.stdout.buf = ""
+                timer.restart()
+                return
+            }
             try {
                 var rows = JSON.parse(proc.stdout.buf)
                 var m = {}
