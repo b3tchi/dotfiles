@@ -1,0 +1,116 @@
+# open-design — build + install the OpenDesign packaged *headless* runtime
+# (dotfiles-uvmd). Linux-only, and source-only: upstream publishes mac/win
+# release assets but no Linux AppImage/deb/rpm, so `gh release download` has
+# nothing to fetch here and building from the checkout is the only path.
+#
+# Why headless rather than the Electron shell or `pnpm tools-dev`:
+#   next dev (webpack)  ~3.3 GB resident, 27 s cold route compiles
+#   next dev (turbopack) ~2.5 GB
+#   packaged headless    ~545 MB, 14 ms page loads, no Electron at all
+# The UI is a localhost web app either way — the Electron window buys nothing
+# on a machine that already has a browser, and on a software-GL host (xorgxrdp
+# / WSLg) it costs a core to render. `--headless` starts only the supervisor +
+# daemon + web sidecars on the bundled node.
+#
+# --dir pins the tools-pack root (tools/pack/src/config/index.ts:396) and BOTH
+# the build output and the runtime data root hang off it. Default is the
+# checkout's .tmp/tools-pack, which puts projects/app.sqlite one `git clean
+# -xdf` away from gone — so this dot pins it under ~/.local/share instead.
+# Consequence: every tools-pack lifecycle call must pass the SAME --dir or it
+# resolves a different runtime root and reports "nothing running". The
+# od-headless wrapper written below bakes it in; use that, not bare tools-pack.
+#
+# Idempotent: re-running skips the (long, Electron-downloading) build when the
+# artifact is already newer than HEAD. Force with OD_REBUILD=1.
+
+linux:
+  installs:
+    cmd: |
+      # Repo location is not knowable from the dotfiles tree — this dot builds
+      # a checkout it does not own. Honour $OD_REPO, else the conventional
+      # ~/repos/open-design. Soft-exit (not failure) when absent, matching the
+      # go-toolchain guard idiom in akm-graph/dot.yaml + preview/dot.yaml: a
+      # host without the checkout should still complete `rotz install`.
+      OD_REPO="${OD_REPO:-$HOME/repos/open-design}"
+      if [ ! -f "$OD_REPO/pnpm-workspace.yaml" ]; then
+        echo "open-design: no checkout at $OD_REPO — clone nexu-io/open-design there (or set OD_REPO), then re-run 'rotz install open-design'" >&2
+        exit 0
+      fi
+
+      # engines pins node ~24 and better-sqlite3 has no prebuilt for it on some
+      # hosts; pnpm is the only supported package manager (corepack pin in
+      # package.json). Both are the user's env to provide — fnm/nushell's
+      # territory, not this dot's.
+      if ! command -v pnpm >/dev/null 2>&1; then
+        echo "open-design: pnpm not found — install pnpm@10.33.2 (corepack enable, or npm i -g pnpm), then re-run 'rotz install open-design'" >&2
+        exit 0
+      fi
+      NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
+      if [ "$NODE_MAJOR" != "24" ]; then
+        echo "open-design: node 24 required (engines: ~24), found ${NODE_MAJOR:-none} — switch with fnm, then re-run 'rotz install open-design'" >&2
+        exit 0
+      fi
+
+      # Runtime + build root outside the checkout, per the header note.
+      PACK_DIR="$HOME/.local/share/open-design"
+      APPIMAGE="$PACK_DIR/out/linux/namespaces/default/builder/Open Design-default.AppImage"
+      LAUNCHER="$HOME/.local/bin/open-design-headless-default"
+      mkdir -p "$PACK_DIR" "$HOME/.local/bin"
+
+      # Skip the ~10 min Electron-downloading rebuild when the artifact already
+      # postdates the checked-out commit. HEAD's commit date (not mtime) is the
+      # comparand so a `git pull` that rewinds still triggers a rebuild.
+      NEEDS_BUILD=1
+      if [ -z "$OD_REBUILD" ] && [ -f "$APPIMAGE" ] && [ -f "$LAUNCHER" ]; then
+        HEAD_EPOCH="$(git -C "$OD_REPO" log -1 --format=%ct 2>/dev/null || echo 0)"
+        ART_EPOCH="$(stat -c %Y "$APPIMAGE" 2>/dev/null || echo 0)"
+        if [ "$ART_EPOCH" -gt "$HEAD_EPOCH" ]; then
+          NEEDS_BUILD=0
+          echo "open-design: AppImage newer than HEAD — skipping build (OD_REBUILD=1 to force)"
+        fi
+      fi
+
+      if [ "$NEEDS_BUILD" = "1" ]; then
+        # Workspace deps first: postinstall builds every tool dist, including
+        # tools-pack itself, so this cannot be skipped on a fresh clone.
+        ( cd "$OD_REPO" && pnpm install --frozen-lockfile ) || {
+          echo "open-design: pnpm install failed — see output above" >&2; exit 1; }
+
+        # --to appimage also assembles the app tree that the headless entry
+        # (packaged/dist/headless.mjs) and the bundled node live in; the
+        # AppImage itself is a by-product the headless path never launches.
+        ( cd "$OD_REPO" && pnpm tools-pack linux build --to appimage --dir "$PACK_DIR" ) || {
+          echo "open-design: tools-pack build failed — see output above" >&2; exit 1; }
+      fi
+
+      # Writes $LAUNCHER with OD_PACKAGED_NAMESPACE / OD_DATA_DIR / OD_RESOURCE_ROOT
+      # baked in, pointing at $PACK_DIR. Re-run cheaply; it only rewrites the script.
+      ( cd "$OD_REPO" && pnpm tools-pack linux install --headless --dir "$PACK_DIR" ) || {
+        echo "open-design: tools-pack install --headless failed — see output above" >&2; exit 1; }
+
+      # Lifecycle wrapper. tools-pack start/stop/logs need the checkout AND the
+      # matching --dir; forgetting either silently addresses a different runtime
+      # root. Baking both here is the whole point of the wrapper.
+      cat > "$HOME/.local/bin/od-headless" <<WRAPPER
+      #!/bin/sh
+      # Generated by rotz install open-design (dotfiles-uvmd) — do not edit.
+      # OpenDesign packaged headless lifecycle. Ports are assigned per start;
+      # 'start' prints the URL, 'url' reprints it for an already-running instance.
+      set -e
+      OD_REPO="\${OD_REPO:-$OD_REPO}"
+      PACK_DIR="$PACK_DIR"
+      case "\${1:-start}" in
+        start)  cd "\$OD_REPO" && exec pnpm tools-pack linux start   --headless --dir "\$PACK_DIR" ;;
+        stop)   cd "\$OD_REPO" && exec pnpm tools-pack linux stop    --headless --dir "\$PACK_DIR" ;;
+        logs)   cd "\$OD_REPO" && exec pnpm tools-pack linux logs               --dir "\$PACK_DIR" ;;
+        status) cd "\$OD_REPO" && exec pnpm tools-pack linux inspect --headless --dir "\$PACK_DIR" ;;
+        # The live port is written to web-root.json by the web sidecar;
+        # headless-root.json carries the supervisor pid but no URL.
+        url)    sed -n 's/.*"url": "\\(http[^"]*\\)".*/\\1/p' "\$PACK_DIR/runtime/linux/namespaces/default/runtime/web-root.json" 2>/dev/null || echo "not running" ;;
+        *) echo "usage: od-headless {start|stop|logs|status|url}" >&2; exit 2 ;;
+      esac
+      WRAPPER
+      chmod 755 "$HOME/.local/bin/od-headless"
+
+      echo "open-design: headless installed — 'od-headless start' to run, 'od-headless url' for the port"
+      echo "open-design: data root $PACK_DIR/runtime/linux/namespaces/default/data"
