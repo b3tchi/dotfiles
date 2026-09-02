@@ -1,0 +1,13 @@
+linux:
+  links:
+    settings.json: ~/.pi/agent/settings.json
+
+  installs:
+    cmd: |
+      mkdir -p ~/.local/bin ~/.pi/agent
+      if command -v pi >/dev/null 2>&1; then
+        pi update --self
+      else
+        curl -fsSL https://pi.dev/install.sh | sh
+      fi
+      rotz link pi --force

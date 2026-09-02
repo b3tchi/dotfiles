@@ -10,6 +10,7 @@ depends:
   - d2
   - ssh
   - opencode
+  - pi
   - i3
   - hotkeyd
   - quickshell

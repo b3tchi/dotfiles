@@ -10,3 +10,4 @@ depends:
   - ssh
   - claude
   - opencode
+  - pi
