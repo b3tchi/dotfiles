@@ -42,6 +42,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[ft010|notification-service]] >> [[im008]]
 - [[ft011|global-hotkey-layer]]
 - [[ft012|agent-census]] >> [[im011]]
+- [[ft013|infinifu-runtime-neutral-lifecycle]]
 
 ## Architecture Decision Records
 

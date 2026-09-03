@@ -19,6 +19,7 @@ sections when status flips.
 
 ## spec
 
+- [[sp027|infinifu-dual-runtime-lifecycle]]
 
 ## ready
 
