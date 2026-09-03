@@ -11,3 +11,4 @@ linux:
         curl -fsSL https://pi.dev/install.sh | sh
       fi
       rotz link pi --force
+      pi update --extensions

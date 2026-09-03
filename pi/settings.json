@@ -1,5 +1,17 @@
 {
   "theme": "dark",
   "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.5"
+  "defaultModel": "gpt-5.5",
+  "packages": [
+    "npm:@vanillagreen/pi-caveman@2.0.0"
+  ],
+  "kendex": {
+    "extensionManager": {
+      "config": {
+        "@vanillagreen/pi-caveman": {
+          "mode": "full"
+        }
+      }
+    }
+  }
 }
