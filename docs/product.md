@@ -43,6 +43,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[ft011|global-hotkey-layer]]
 - [[ft012|agent-census]] >> [[im011]]
 - [[ft013|infinifu-runtime-neutral-lifecycle]]
+- [[ft014|pi-visible-tmux-worker-orchestration]]
 
 ## Architecture Decision Records
 
