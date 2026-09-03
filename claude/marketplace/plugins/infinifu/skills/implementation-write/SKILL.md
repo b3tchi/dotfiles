@@ -1,6 +1,8 @@
 ---
 name: implementation-write
-description: Use when the user wants to record *how* a story will be solved — write an implementation card, log how we'll build us###, record the solution shape for the X story, im### for that backlog item, "draft the implementation for us014", "how are we going to do this story", "compose the features for that work". Emits a new `docs/notes/im###.md` AKM zettel with frontmatter (aliases/status/created), an H1 carrying one-or-more `[[cat###]]` categories, a mandatory `solves: [[us###]]` back-link, consumed `[[ft###]]` Features, and the body sections (approach / data_model / api_surface / components / specs). This skill owns the Implementation schema (frontmatter shape, body, lifecycle); shared styling (atomicity, 80-char wrap, link discipline) is enforced by `infinifu:zettel-write`; `docs/notes/akm.md` carries only the top-level AKM model overview. Distinct from `story-write` (the *problem* in Connextra form), `spec-writing` (the transient execution *plan* on the board), and `feature-write` (the *reusable capabilities* this card consumes). Pick this whenever a story is `ready` and you're choosing the solution shape *before* anyone flips an `sp###` from `idea` to `spec`. Invoke aggressively — spec-writing without a backing `im###` is a smell.
+description: >-
+  Use when recording how a user story will be solved. Writes or updates a `docs/notes/im###.md` AKM Implementation zettel that links its story, consumed Features, approach, API surface, data model, samples, and concrete component paths. Trigger on "write an implementation", "record how us### is solved", or "create an implementation card". Pick this over feature-write for story-specific solutions, story-write for the requirement itself, and adr-write for strategic decisions.
+
 ---
 
 <skill_overview>

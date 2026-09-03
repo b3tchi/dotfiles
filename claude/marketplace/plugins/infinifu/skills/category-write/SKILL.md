@@ -1,6 +1,8 @@
 ---
 name: category-write
-description: Use when the user wants to create a new ADR taxonomy bucket — a Category zettel (`cat###.md`) that ADRs file under via their H1 `[[cat###]]` link and that any zettel can reuse as a tag. Emits a new `docs/notes/cat###.md` AKM zettel with the minimal Category schema (frontmatter `aliases`/`status: stable`/`created`, body `## name` and `## summary`, `Index: [[product]]` footer). This skill owns the Category schema (frontmatter shape, body, lifecycle); shared styling (atomicity, 80-char wrap, link discipline) is enforced by `infinifu:zettel-write`; `docs/notes/akm.md` carries only the top-level AKM model overview. Invoke this whenever someone says "create a category", "add a new ADR taxonomy bucket", "we need a `cat###` for X", "register a category for security/data/infra/...", "make a new tag bucket", or otherwise wants to mint the taxonomy bucket itself rather than apply existing tags. Pick this over `infinifu:tag-manage` (which manages H1 tag wikilinks on existing zettels — a different concept, not a bucket-minting tool) and over `infinifu:adr-write` (which *consumes* categories rather than creating them). Categories are stable, slow-changing, append-only — there is no draft/superseded lifecycle, just `stable` from birth.
+description: >-
+  Use when creating a new ADR taxonomy bucket or `cat###` Category zettel. Writes `docs/notes/cat###.md` with the canonical Category schema and stable lifecycle. Trigger on "create a category", "add an ADR taxonomy bucket", "we need a cat### for X", or "register a security/data/infra category". Pick this over tag-manage, which applies existing free-form tags, and over adr-write, which consumes categories. Use zettel-write for shared styling rules.
+
 ---
 
 <skill_overview>

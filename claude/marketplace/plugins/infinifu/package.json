@@ -1,0 +1,25 @@
+{
+  "name": "dotfiles-infinifu",
+  "version": "2.19.0",
+  "private": true,
+  "description": "Infinifu lifecycle skills for Claude Code, OpenCode, and Pi",
+  "pi": {
+    "extensions": [
+      "./extensions/pi.ts"
+    ],
+    "skills": [
+      "./skills/*/SKILL.md"
+    ],
+    "prompts": [
+      "./commands/*.md"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  }
+}

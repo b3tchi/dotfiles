@@ -1,6 +1,13 @@
 ---
 name: tag-manage
-description: Use when the user wants to manage tag wikilinks on user stories — list the current tag taxonomy with usage counts, add or remove H1 tag wikilinks on a specific story by id, or propose tags for a new/draft story based on the existing taxonomy. AKM model: story tags live as `[[tag-slug]]` wikilinks in the H1 of `docs/notes/us###.md` (excluding the structural `[[product]]` link). Invoke this whenever someone asks "what tags do we have", "add tag X to story Y", "remove tag X from Y", "tag this story as Z", "what should I tag this as", or otherwise wants to inspect or modify the tag layer separately from creating a story.
+description: >-
+  Use when the user wants to manage tag wikilinks on user stories — list the current tag taxonomy with
+  usage counts, add or remove H1 tag wikilinks on a specific story by id, or propose tags for a
+  new/draft story based on the existing taxonomy. AKM model: story tags live as `[[tag-slug]]`
+  wikilinks in the H1 of `docs/notes/us###.md` (excluding the structural `[[product]]` link). Invoke
+  this whenever someone asks "what tags do we have", "add tag X to story Y", "remove tag X from Y",
+  "tag this story as Z", "what should I tag this as", or otherwise wants to inspect or modify the tag
+  layer separately from creating a story.
 ---
 
 # Tag Manage

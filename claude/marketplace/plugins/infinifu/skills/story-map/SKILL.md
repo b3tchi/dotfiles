@@ -1,6 +1,14 @@
 ---
 name: story-map
-description: Use when the user wants to index repository items (source files, directories, modules) to user stories — establishing traceability between code and the backlog. In the AKM model the mapping is carried by Implementation zettels (`docs/notes/im###.md`): each Implementation has a `## solves [[us###]]` back-link to one story and a `## components` list of code paths. Supports two query directions ("which stories touch this file?" and "which files implement this story?") plus an edit mode to attach/remove paths on the Implementation. Invoke this whenever someone asks "which stories cover src/X", "where is story Y implemented", "map this file to a story", "what code touches the auth backlog item", or otherwise wants to bridge code locations and stories.
+description: >-
+  Use when the user wants to index repository items (source files, directories, modules) to user
+  stories — establishing traceability between code and the backlog. In the AKM model the mapping is
+  carried by Implementation zettels (`docs/notes/im###.md`): each Implementation has a `## solves
+  [[us###]]` back-link to one story and a `## components` list of code paths. Supports two query
+  directions ("which stories touch this file?" and "which files implement this story?") plus an edit
+  mode to attach/remove paths on the Implementation. Invoke this whenever someone asks "which stories
+  cover src/X", "where is story Y implemented", "map this file to a story", "what code touches the
+  auth backlog item", or otherwise wants to bridge code locations and stories.
 ---
 
 # Story Map

@@ -1,6 +1,13 @@
 ---
 name: work-audit
-description: Use when auditing a single bd task after the implementer reported ready (task still `in_progress` with implementation notes) — compare the design and success criteria against what was actually shipped, verify tests catch real bugs, and catch dead code left from refactoring. This is the per-task verification gate invoked by reviewer agents (and by solo devs after `work-do`). You own the `in_progress → closed` transition: approved → you call `bd close` with audit evidence; rejected → add gap notes and leave `in_progress` for the implementer to retry. Epic-level completeness is just every task passing its own audit.
+description: >-
+  Use when auditing a single bd task after the implementer reported ready (task still `in_progress`
+  with implementation notes) — compare the design and success criteria against what was actually
+  shipped, verify tests catch real bugs, and catch dead code left from refactoring. This is the
+  per-task verification gate invoked by reviewer agents (and by solo devs after `work-do`). You own
+  the `in_progress → closed` transition: approved → you call `bd close` with audit evidence; rejected
+  → add gap notes and leave `in_progress` for the implementer to retry. Epic-level completeness is
+  just every task passing its own audit.
 ---
 
 <skill_overview>

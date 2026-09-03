@@ -1,6 +1,8 @@
 ---
 name: plan-scrum-master
-description: Use to run, dispatch, orchestrate, kick off, or execute multi-agent work on a bd task queue — spawns implementer + reviewer subagents in parallel background worktrees, relays reports, retries failures (sonnet→opus upgrade on rejection/error/blocked), respects a concurrency cap, and supports modes like auto / waves / only-blockers plus worker_model selection (sonnet/opus/haiku/auto). Trigger on any phrasing that asks for automated agent execution of bd tasks or an epic's children: "dispatch the agents", "kick off the queue", "run the pipeline", "execute the spec / epic", "process bd ready", "orchestrate the implementation", "start the scrum master", "/plan-dispatch-fnf", or requests mentioning max_parallel, waves mode, worker_model, isolated worktrees per agent, reviewer hand-off, or background execution. Pick this over `plan-supervised` for fully-automated orchestration with an automated reviewer; pick `plan-supervised` for human-in-the-loop batches. Do NOT use for creating bd tasks, writing specs, single-task work, brainstorming, or test audits.
+description: >-
+  Use when running or orchestrating multi-agent work from a bd task queue or epic. Dispatches implementer and reviewer agents in isolated worktrees, retries failures, respects concurrency limits, and supports auto, waves, blockers-only, and worker-model choices. Trigger on "dispatch agents", "run the pipeline", "execute the epic", "process bd ready", "start scrum master", or `/plan-dispatch-fnf`. Pick plan-supervised for human-reviewed batches. Do not use for task creation, specs, brainstorming, or one solo task.
+
 ---
 
 # Scrum Master — Pipeline Orchestrator

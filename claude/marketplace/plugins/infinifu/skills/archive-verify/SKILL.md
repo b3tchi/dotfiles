@@ -1,6 +1,8 @@
 ---
 name: archive-verify
-description: Use when the user wants to check, audit, or clean up archiving state across the AKM workspace — "what's not archived yet", "verify archiving", "which done specs are still on the board", "find archive drift", "did I forget to archive anything", "is the bd snapshot stale", "audit the archive". Cross-checks every AKM object's terminal status (sp### done, im### accepted/superseded, ft###/adr superseded, bd closed) against where it should actually live (docs/archive.md, the footer Index link, superseded_by back-links, issues-snapshot.jsonl), reports the drift grouped by type, and offers to fix each item. Invoke this whenever someone suspects shipped/closed work hasn't been moved to its archived home, or wants a single pass that surfaces everything terminal-but-not-archived. Reach for it over spec-read (which only notes board/archive drift in passing for specs) when the goal is a full archiving audit, and over spec-retro/work-merge (which archive one spec at a time as part of shipping) when the goal is catching what those steps missed after the fact.
+description: >-
+  Use when auditing or cleaning archive state across the AKM workspace: "what is not archived", "verify archiving", "find archive drift", or "is the bd snapshot stale". Cross-checks terminal statuses for specs, implementations, features, ADRs, and bd issues against docs/archive.md, footer indexes, superseded_by links, and issues-snapshot.jsonl. Pick this over spec-read for a full archive audit and over spec-retro/work-merge when checking work those flows may have missed.
+
 ---
 
 # Archive Verify

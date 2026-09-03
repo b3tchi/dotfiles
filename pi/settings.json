@@ -3,7 +3,8 @@
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.5",
   "packages": [
-    "npm:@vanillagreen/pi-caveman@2.0.0"
+    "npm:@vanillagreen/pi-caveman@2.0.0",
+    "~/.dotfiles/claude/marketplace/plugins/infinifu"
   ],
   "kendex": {
     "extensionManager": {
@@ -13,5 +14,6 @@
         }
       }
     }
-  }
+  },
+  "lastChangelogVersion": "0.84.4"
 }

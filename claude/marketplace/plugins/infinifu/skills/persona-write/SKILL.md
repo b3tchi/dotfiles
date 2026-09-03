@@ -1,6 +1,8 @@
 ---
 name: persona-write
-description: Use when the user wants to create, add, register, or define a Persona — a user role the system serves — and emit a new `docs/notes/pn###.md` AKM zettel with frontmatter (aliases/status/created) and body sections (name/summary/primary_goals/open_questions). This skill owns the Persona schema (frontmatter shape, body, lifecycle); shared styling (atomicity, 80-char wrap, link discipline) is enforced by `infinifu:zettel-write`; `docs/notes/akm.md` carries only the top-level AKM model overview. Invoke this whenever someone says "create a persona", "add a new user role", "register persona X", "we have a new actor type", "who is the requestor", "pn### for X", or describes a fresh role/actor that stories will reference via `[[pn###|alias]]`. Pick this over `infinifu:story-write` when the request is about the role itself (not a want from that role) and over `infinifu:zettel-write` when the user has already named "persona" as the artifact — `zettel-write` is the routing orchestrator that delegates here for persona shapes.
+description: >-
+  Use when creating or defining a Persona: a user role the system serves. Writes `docs/notes/pn###.md` with aliases, status, created date, name, summary, primary goals, and open questions. Trigger on "create a persona", "add a user role", "register persona X", "new actor type", or "pn### for X". Pick this over story-write when defining the role rather than what it wants, and over generic zettel-write when the Persona artifact type is already known.
+
 ---
 
 <skill_overview>
