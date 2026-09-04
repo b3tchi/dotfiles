@@ -67,6 +67,56 @@ func allowed(attrs map[string]string) bool {
 	return attrs["Product"] == "PowerAppsCanvasMcp"
 }
 
+// defaultPeers restricts which processes may read or delete secrets. The
+// Secret Service spec has no caller authentication at all, so without this
+// any process running as the user could ask for the token cache and get it
+// in cleartext. Matched against the basename of the caller's
+// /proc/<pid>/exe. Override with GOPASS_SECRETSERVICE_PEERS (comma
+// separated); "*" allows any caller, which is what secret-tool needs.
+//
+// This is a speed bump, not a boundary: a same-user attacker can copy the
+// permitted binary, and pid-based identification races against pid reuse.
+// It exists so the tokens are not trivially readable by anything on the bus.
+var defaultPeers = []string{"CanvasAuthoringMcpServer"}
+
+var allowPeers = defaultPeers
+
+// authorize resolves the calling connection to a pid, then to an executable,
+// and reports whether that executable may touch secrets.
+func (s *store) authorize(op string, sender dbus.Sender) *dbus.Error {
+	for _, p := range allowPeers {
+		if p == "*" {
+			return nil
+		}
+	}
+	var pid uint32
+	err := s.conn.BusObject().Call("org.freedesktop.DBus.GetConnectionUnixProcessID", 0,
+		string(sender)).Store(&pid)
+	if err != nil {
+		log.Printf("%s denied: cannot resolve sender %q: %v", op, sender, err)
+		return dbus.NewError("org.freedesktop.DBus.Error.AccessDenied",
+			[]interface{}{"caller could not be identified"})
+	}
+	exe, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
+	if err != nil {
+		log.Printf("%s denied: pid %d exe unreadable: %v", op, pid, err)
+		return dbus.NewError("org.freedesktop.DBus.Error.AccessDenied",
+			[]interface{}{"caller could not be identified"})
+	}
+	base := exe
+	if i := strings.LastIndex(base, "/"); i >= 0 {
+		base = base[i+1:]
+	}
+	for _, p := range allowPeers {
+		if base == p {
+			return nil
+		}
+	}
+	log.Printf("%s denied: pid %d (%s) not in peer allowlist %v", op, pid, base, allowPeers)
+	return dbus.NewError("org.freedesktop.DBus.Error.AccessDenied",
+		[]interface{}{"caller not permitted by this provider"})
+}
+
 // validID guards every store path this daemon builds. IDs are sha256
 // prefixes we mint ourselves, so anything else -- most importantly a
 // traversal like "../canva_client_secret" arriving as a D-Bus object path --
@@ -250,7 +300,10 @@ func (v *service) OpenSession(algorithm string, input dbus.Variant) (dbus.Varian
 	return dbus.MakeVariant(""), sp, nil
 }
 
-func (v *service) SearchItems(attrs map[string]string) ([]dbus.ObjectPath, []dbus.ObjectPath, *dbus.Error) {
+func (v *service) SearchItems(sender dbus.Sender, attrs map[string]string) ([]dbus.ObjectPath, []dbus.ObjectPath, *dbus.Error) {
+	if err := v.s.authorize("Service.SearchItems", sender); err != nil {
+		return nil, nil, err
+	}
 	return v.s.matching(attrs), []dbus.ObjectPath{}, nil
 }
 
@@ -262,7 +315,10 @@ func (v *service) Lock(paths []dbus.ObjectPath) ([]dbus.ObjectPath, dbus.ObjectP
 	return paths, "/", nil
 }
 
-func (v *service) GetSecrets(items []dbus.ObjectPath, sess dbus.ObjectPath) (map[dbus.ObjectPath]Secret, *dbus.Error) {
+func (v *service) GetSecrets(sender dbus.Sender, items []dbus.ObjectPath, sess dbus.ObjectPath) (map[dbus.ObjectPath]Secret, *dbus.Error) {
+	if err := v.s.authorize("Service.GetSecrets", sender); err != nil {
+		return nil, err
+	}
 	res := map[dbus.ObjectPath]Secret{}
 	for _, p := range items {
 		it, err := v.s.load(idFromPath(p))
@@ -292,7 +348,10 @@ func (v *service) SetAlias(name string, coll dbus.ObjectPath) *dbus.Error { retu
 
 type collection struct{ s *store }
 
-func (c *collection) CreateItem(props map[string]dbus.Variant, secret Secret, replace bool) (dbus.ObjectPath, dbus.ObjectPath, *dbus.Error) {
+func (c *collection) CreateItem(sender dbus.Sender, props map[string]dbus.Variant, secret Secret, replace bool) (dbus.ObjectPath, dbus.ObjectPath, *dbus.Error) {
+	if err := c.s.authorize("Collection.CreateItem", sender); err != nil {
+		return "/", "/", err
+	}
 	attrs := map[string]string{}
 	label := ""
 	if v, ok := props["org.freedesktop.Secret.Item.Attributes"]; ok {
@@ -337,7 +396,10 @@ func (c *collection) CreateItem(props map[string]dbus.Variant, secret Secret, re
 	return p, "/", nil
 }
 
-func (c *collection) SearchItems(attrs map[string]string) ([]dbus.ObjectPath, *dbus.Error) {
+func (c *collection) SearchItems(sender dbus.Sender, attrs map[string]string) ([]dbus.ObjectPath, *dbus.Error) {
+	if err := c.s.authorize("Collection.SearchItems", sender); err != nil {
+		return nil, err
+	}
 	return c.s.matching(attrs), nil
 }
 
@@ -350,7 +412,10 @@ type itemObj struct {
 	id string
 }
 
-func (i *itemObj) GetSecret(sess dbus.ObjectPath) (Secret, *dbus.Error) {
+func (i *itemObj) GetSecret(sender dbus.Sender, sess dbus.ObjectPath) (Secret, *dbus.Error) {
+	if err := i.s.authorize("Item.GetSecret", sender); err != nil {
+		return Secret{}, err
+	}
 	it, err := i.s.load(i.id)
 	if err != nil {
 		return Secret{}, dbus.NewError("org.freedesktop.Secret.Error.NoSuchObject", []interface{}{err.Error()})
@@ -360,7 +425,10 @@ func (i *itemObj) GetSecret(sess dbus.ObjectPath) (Secret, *dbus.Error) {
 	return Secret{Session: sess, Parameters: []byte{}, Value: val, ContentType: it.ContentType}, nil
 }
 
-func (i *itemObj) SetSecret(secret Secret) *dbus.Error {
+func (i *itemObj) SetSecret(sender dbus.Sender, secret Secret) *dbus.Error {
+	if err := i.s.authorize("Item.SetSecret", sender); err != nil {
+		return err
+	}
 	if len(secret.Value) > maxSecretBytes {
 		log.Printf("SetSecret refused: %d bytes exceeds %d", len(secret.Value), maxSecretBytes)
 		return dbus.NewError("org.freedesktop.DBus.Error.LimitsExceeded",
@@ -379,7 +447,10 @@ func (i *itemObj) SetSecret(secret Secret) *dbus.Error {
 	return nil
 }
 
-func (i *itemObj) Delete() (dbus.ObjectPath, *dbus.Error) {
+func (i *itemObj) Delete(sender dbus.Sender) (dbus.ObjectPath, *dbus.Error) {
+	if err := i.s.authorize("Item.Delete", sender); err != nil {
+		return "/", err
+	}
 	p, err := gopassPath(i.id)
 	if err != nil {
 		log.Printf("Delete refused: %v", err)
@@ -461,6 +532,14 @@ func main() {
 			}
 		}
 	}
+	if a := strings.TrimSpace(os.Getenv("GOPASS_SECRETSERVICE_PEERS")); a != "" {
+		allowPeers = nil
+		for _, p := range strings.Split(a, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				allowPeers = append(allowPeers, p)
+			}
+		}
+	}
 	conn, err := dbus.ConnectSessionBus()
 	if err != nil {
 		log.Fatalf("session bus: %v", err)
@@ -502,7 +581,7 @@ func main() {
 		s.exportItem(id)
 	}
 
-	log.Printf("gopass-secretservice up: %s (store %s/, allow %v, pid %d)",
-		svcName, gopassDir, allowPrefixes, os.Getpid())
+	log.Printf("gopass-secretservice up: %s (store %s/, schemas %v, peers %v, pid %d)",
+		svcName, gopassDir, allowPrefixes, allowPeers, os.Getpid())
 	select {}
 }
