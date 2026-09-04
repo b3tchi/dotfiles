@@ -17,6 +17,12 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 
 **In other environments:** Check your platform's documentation for how skills are loaded.
 
+## Runtime Adapter
+
+Runtime-specific lifecycle behavior follows `infinifu:meta-patterns` reference
+`runtime-adapter.md`. Use that shared contract for Pi, Claude-native, and
+unsupported-runtime branches instead of duplicating the full rule in each skill.
+
 # Using Skills
 
 ## The Rule

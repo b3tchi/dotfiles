@@ -18,7 +18,8 @@ const piMapping = `
 - Load a skill by reading its listed \`SKILL.md\`, or let the user invoke \`/skill:<name>\`.
 - \`TodoWrite\`, \`TaskCreate\`, and \`TaskUpdate\` → use the \`bd\` CLI. Never create markdown TODO lists.
 - \`Read\`, \`Write\`, \`Edit\`, \`Bash\`, \`Glob\`, and \`Grep\` → use Pi's native read, write, edit, bash, find, and grep tools.
-- Claude \`Agent\`/\`Task\` subagents are not built into Pi. Use independent Pi processes in tmux when parallel agents are required; otherwise execute sequentially. Never pretend a subagent was dispatched.
+- Runtime-specific lifecycle behavior follows \`infinifu:meta-patterns/runtime-adapter.md\`: \`AI_AGENT=pi\` selects Pi, Claude's native Agent/Task surface selects Claude behavior, and unknown runtimes fail closed.
+- Claude \`Agent\`/\`Task\` subagents are not built into Pi. Use independent Pi processes in tmux only when a Pi runtime adapter provides a direct messaging contract; otherwise execute sequentially. Never pretend a subagent was dispatched.
 
 **bd task tracking:**
 Use \`bd\` for multi-step work. Start with \`bd prime\` for current commands and workflow. Track status and discovered work in bd; follow the repository's AGENTS.md completion protocol.
