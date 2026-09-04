@@ -19,9 +19,9 @@ sections when status flips.
 
 ## spec
 
-- [[sp028|pi-visible-tmux-workers]]
-
 ## ready
+
+- [[sp028|pi-visible-tmux-workers]]
 
 - [[sp027|infinifu-dual-runtime-lifecycle]]
 
