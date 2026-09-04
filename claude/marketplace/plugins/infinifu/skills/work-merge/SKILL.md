@@ -1,6 +1,6 @@
 ---
 name: work-merge
-description: "Use this when work-audit has just APPROVED a single bd task — auto-triggered from work-audit on the approved verdict, or invoked manually as 'merge bd-42', 'land task bd-7'. Per-task local landing: merges branch `bd-<id>.<N>` into base, runs tests, removes the worktree. If the closed task was the last open child of its parent epic, the skill also runs the epic finale — flips `us###.status: ready → done`, `im###.status: proposed → accepted`, `sp###.status: ready → done` + footer `Index: [[board]] → [[archive]]`, relocates the spec file `docs/notes/spec/ → docs/notes/archive/spec/`, moves `[[sp###]]` from `docs/board.md` to `docs/archive.md ## done`, and closes the bd epic. All operations are LOCAL — no push, no PR. Remote sync is `spec-retro`'s job. Does NOT rewrite `im###` body, NOT mint new ADRs, NOT mint new draft stories — those are `spec-retro` scope."
+description: "Use this when work-audit has just APPROVED a single bd task — auto-triggered from work-audit on the approved verdict, or invoked manually as 'merge bd-42', 'land task bd-7'. Per-task local landing: merges branch `bd-<id>.<N>` into base, runs tests, removes the worktree. If the closed task was the last open child of its parent epic, the skill also runs the epic finale. Story-backed finales flip `us###.status: ready → done`, `im###.status: proposed → accepted`, and `sp###.status: ready → done`; feature-add finales flip the proposed `ft###.status → accepted` and `sp###.status: ready → done` without requiring `us###` or `im###`; mixed finales flip all applicable artifacts. The finale relocates the spec file `docs/notes/spec/ → docs/notes/archive/spec/`, moves `[[sp###]]` from `docs/board.md` to `docs/archive.md ## done`, and closes the bd epic. All operations are LOCAL — no push, no PR. Remote sync is `spec-retro`'s job. Does NOT rewrite `im###` body, NOT mint new ADRs, NOT mint new draft stories — those are `spec-retro` scope."
 ---
 
 # Work Merge (per-task local land + epic finale)
@@ -16,7 +16,9 @@ Two operations, gated by whether this task was the last open child of its parent
    - Run the post-merge test command **derived from the task's own `success_criteria`** — see "Choosing `<test-command>`" in Step 2. Never invent a repo-wide quality command the task didn't claim; a gate that is already red on base can never certify the merge. Failure rolls the merge back and reopens the task as `in_progress` with a `POST-MERGE FAIL` note.
    - Remove the worktree (`git worktree remove`, no `--force`) and the local branch (`git branch -d`).
 2. **Conditional — epic finale** (only if `bd list --parent <epic-id>` shows no open/in_progress/blocked children left):
-   - Flip `us###.status: ready → done`, `im###.status: proposed → accepted`, `sp###.status: ready → done` + footer `Index: [[board]] → [[archive]]`.
+   - Classify the lifecycle shape before mutation: story-backed (`us###` + `im###`), feature-add (one proposed `ft###` deliverable), or mixed (both).
+   - Fail before any board/archive/status mutation if the shape is unsupported or ambiguous (for example, only `us###`, only `im###`, no proposed feature for a feature-add spec, or multiple proposed `ft###` deliverables).
+   - Flip applicable statuses: story-backed `us###.status: ready → done` and `im###.status: proposed → accepted`; feature-add `ft###.status: proposed → accepted`; always `sp###.status: ready → done` + footer `Index: [[board]] → [[archive]]`.
    - Remove `[[sp###]]` from `$AKM_ROOT/docs/board.md`. Add to `$AKM_ROOT/docs/archive.md ## done`.
    - Close the bd epic with `bd close <epic-id>`.
    - Commit on `$AKM_ROOT`: `feat(akm): archive sp<NNN>`.
@@ -59,13 +61,13 @@ Stage 7 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`).
 
 - bd task `<id>` (status, parent epic id, design / criteria from work-audit's evidence).
 - `bd list --parent <epic-id>` — to determine whether this is the last open child.
-- On epic finale: `sp###`, `us###`, `im###` frontmatter; `docs/board.md`; `docs/archive.md`.
+- On epic finale: `sp###` frontmatter/body; story-backed `us###` and `im###` frontmatter when present; feature-add proposed `ft###` frontmatter when present; `docs/board.md`; `docs/archive.md`.
 
 **Writes:**
 
 - Local merge commit on base: `merge: bd-<id>.<N>`.
 - Worktree removal + local branch deletion.
-- On epic finale: `sp###.md` / `us###.md` / `im###.md` frontmatter, spec file relocated `docs/notes/spec/ → docs/notes/archive/spec/`, `board.md`, `archive.md`, one `feat(akm): archive sp<NNN>` commit on `$AKM_ROOT`.
+- On epic finale: applicable `sp###.md` / `us###.md` / `im###.md` / `ft###.md` frontmatter, spec file relocated `docs/notes/spec/ → docs/notes/archive/spec/`, `board.md`, `archive.md`, one `feat(akm): archive sp<NNN>` commit on `$AKM_ROOT`.
 - `bd close <epic-id>` on epic finale.
 
 ## Trigger contract
@@ -150,16 +152,19 @@ OPEN_CHILDREN=$(bd list --parent "$EPIC" --status open,in_progress,blocked --jso
 ### Step 4 — Epic finale (last child only)
 
 ```bash
-# Resolve us/im ids from the spec body
-US="$(grep -oE 'solves: \[\[us[0-9]+' "$AKM_ROOT/docs/notes/spec/$SP.md" | grep -oE 'us[0-9]+')"
-IM="$(grep -oE 'implements: \[\[im[0-9]+' "$AKM_ROOT/docs/notes/spec/$SP.md" | grep -oE 'im[0-9]+')"
+# Resolve story ids when present. Feature-add specs may intentionally leave
+# these blank; archive-epic.sh validates the lifecycle shape and resolves the
+# proposed ft### deliverable from the spec before mutating anything.
+US="$(grep -oE '\[\[us[0-9]+' "$AKM_ROOT/docs/notes/spec/$SP.md" | head -1 | sed 's/^\[\[//' || true)"
+IM="$(grep -oE '\[\[im[0-9]+' "$AKM_ROOT/docs/notes/spec/$SP.md" | head -1 | sed 's/^\[\[//' || true)"
 
 bash <skill-path>/work-merge/scripts/archive-epic.sh "$SP" "$US" "$IM" "$EPIC" "$AKM_ROOT"
 ```
 
 Script behavior (`scripts/archive-epic.sh`):
 
-- Flips `us###.status: ready → done`, `im###.status: proposed → accepted`, `sp###.status: ready → done`.
+- Validates lifecycle shape before mutation: story-backed (`us###` + `im###`), feature-add (unique proposed `ft###`), or mixed (both). Unsupported or ambiguous shapes abort with no file changes.
+- Flips applicable statuses: story-backed `us###.status: ready → done` and `im###.status: proposed → accepted`; feature-add `ft###.status: proposed → accepted`; always `sp###.status: ready → done`.
 - Flips `sp###` footer line `Index: [[board]] → [[archive]]`.
 - `git mv`s the delivered spec `docs/notes/spec/sp###.md → docs/notes/archive/spec/sp###.md` (the archive mirror; `spec/` then holds only active specs). akm id-allocation + alias lookup span both dirs, so the id stays reserved and the spec stays findable via `akm read`.
 - Removes `[[sp###...]]` line from `$AKM_ROOT/docs/board.md`.
@@ -190,7 +195,7 @@ work-merge: TASK_LANDED + EPIC_DONE bd-<id>.<N>
 Base: <base-branch> (local, +1 merge commit)
 Worktree: removed
 Branch: deleted (bd-<id>.<N>)
-AKM flip: us### → done, im### → accepted, sp### → done
+AKM flip: story-backed us### → done + im### → accepted, feature-add ft### → accepted, sp### → done (only applicable artifacts)
 Board → archive: sp### moved
 Epic <epic-id>: closed
 Local commits pending push: <count from git log @{u}..HEAD if upstream, else N>
@@ -205,6 +210,8 @@ Next: run spec-retro for sp### — it refreshes the AKM graph and pushes everyth
 - **Post-merge tests fail** → script rolls back, reopens task, returns REJECTED. work-audit (or the user) re-dispatches the implementer.
 - **Worktree has uncommitted changes** → `git worktree remove` refuses. Investigate before forcing — usually an in-flight discovery that wasn't filed as a separate task. File it, commit / stash / discard, then re-run.
 - **Epic finale fires but `sp###` id can't be resolved from epic notes** → escalate; finale needs the spec id to flip statuses. Manual recovery: provide the id, re-run with explicit sp.
+- **Feature-add finale cannot resolve exactly one proposed `ft###` deliverable** → block before mutation and route back to spec refinement; do not invent `us###` or `im###` lineage.
+- **Story-backed finale has only one of `us###` / `im###`** → block before mutation; the existing story-backed contract is unchanged.
 
 ## Key Principles
 

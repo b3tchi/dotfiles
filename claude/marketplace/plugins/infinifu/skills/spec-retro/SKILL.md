@@ -1,6 +1,6 @@
 ---
 name: spec-retro
-description: "You MUST use this after work-merge completes — 'retro sp007', 'run the retrospective for the rotate-credentials spec', 'sp001 just merged, refresh the AKM graph', or any phrasing that asks for the post-merge knowledge-graph pass on a `sp###` whose status flipped to `done`. Stage 8 (final) of the AKM lifecycle. Reads the shipped diff plus the touched `im###` / `ft###` / `adr####`, then rewrites `im###` body to match shipped reality (the `accepted` card becomes source of truth), mints new `adr####` for decisions that shifted during execution (ADRs are immutable — supersede via new entry, never edit), updates `ft###` whose surface or constraints widened (or supersede via `## superseded_by`), drafts new `us###` for follow-up scope discovered, and closes the bd epic. Does NOT flip statuses (work-merge did that), NOT touch board.md / archive.md (work-merge did that), NOT run tests (work-merge did that)."
+description: "You MUST use this after work-merge completes — 'retro sp007', 'run the retrospective for the rotate-credentials spec', 'sp001 just merged, refresh the AKM graph', or any phrasing that asks for the post-merge knowledge-graph pass on a `sp###` whose status flipped to `done`. Stage 8 (final) of the AKM lifecycle. Reads the shipped diff plus the touched `im###` / `ft###` / `adr####`. Story-backed retros rewrite `im###` body to match shipped reality; feature-add retros update the shipped `ft###` surface directly without inventing `us###` or `im###` lineage. Also mints new `adr####` for decisions that shifted, updates consumed `ft###` whose surface or constraints widened (or supersedes via `## superseded_by`), drafts new `us###` for follow-up scope discovered, and closes the bd epic. Does NOT flip statuses (work-merge did that), NOT touch board.md / archive.md (work-merge did that), NOT run tests (work-merge did that)."
 ---
 
 # Spec Retro (post-merge knowledge-graph refresh)
@@ -11,9 +11,9 @@ Stage 8 of the AKM lifecycle — the final pass. The work has shipped (`sp###.st
 
 **Four lifecycle writes:**
 
-1. **Rewrite `im###` body** — `## approach`, `## components`, `## data_model`, `## api_surface` get rewritten to describe what shipped. The `accepted` card is the persistent solution record; the `proposed`-stage narrative was a sketch.
+1. **Refresh the delivered solution artifact** — story-backed retros rewrite `im###` body (`## approach`, `## components`, `## data_model`, `## api_surface`) to describe what shipped. Feature-add retros instead refresh the delivered `ft###` (`## providing`, `## api_surface`, `## data_model`, `## sample`, `## components`) because the Feature is the shipped artifact and there may intentionally be no `us###` or `im###`.
 2. **Mint new `adr####`** for each decision that shifted during execution. ADRs are append-only in spirit — if you discover a decision was made (or unmade), file a *new* ADR rather than editing an existing one. If the new ADR overturns an `Accepted` one, set the old ADR `status: Superseded` and add a `## superseded_by` back-link to the new id.
-3. **Update `ft###`** where the consumed feature's surface or constraints actually widened during execution. Wider `## api_surface` or `## providing` → update in place if the feature already covers it; if the contract genuinely changed (incompatible signature, removed behavior), supersede via `## superseded_by` chain instead.
+3. **Update other consumed `ft###`** where a feature's surface or constraints actually widened during execution. Wider `## api_surface` or `## providing` → update in place if the feature already covers it; if the contract genuinely changed (incompatible signature, removed behavior), supersede via `## superseded_by` chain instead.
 4. **Draft new `us###`** for any follow-up scope discovered during execution — bugs the team chose to defer, capabilities the implementation made tractable, edge cases that became visible. These land at `status: draft` so the next `idea-implement` cycle can pick them up.
 
 Then close the bd epic.
@@ -34,7 +34,7 @@ Then close the bd epic.
 
 ## AKM Workspace Resolution
 
-The implementation card, new ADRs, updated features, new story drafts, and the product hub are shared knowledge — they live on **main**, even though the diff being analyzed shipped on a feature branch. Resolve before any read or write:
+The delivered implementation or feature card, new ADRs, updated features, new story drafts, and the product hub are shared knowledge — they live on **main**, even though the diff being analyzed shipped on a feature branch. Resolve before any read or write:
 
 ```bash
 AKM_ROOT="$(akm-root)"
@@ -59,14 +59,15 @@ Stage 8 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Read shipped r
 
 - **Shipped diff** — `git log` and `git diff <merge-base>..HEAD` for the merge commit. The actual code change is the source of truth for the rewrite.
 - `sp###` — the just-archived spec (now at `status: done`). Read `## solution`, `## plan`, `## tasks` to compare against what shipped.
-- `im###` — the implementation card whose body needs refreshing. Currently at `status: accepted` per work-merge.
-- `ft###` — every feature consumed by the spec. Read `## api_surface`, `## providing`, `## data_model` to know what may need updating.
+- Story-backed `im###` — the implementation card whose body needs refreshing. Currently at `status: accepted` per work-merge.
+- `ft###` — every feature consumed by the spec, and the delivered Feature for feature-add specs. Read `## api_surface`, `## providing`, `## data_model` to know what may need updating.
 - `adr####` — every Accepted ADR under the spec's categories. Decisions may have shifted; surface candidates for new ADRs.
 - bd epic + closed tasks — task notes carry the implementer's deviations and the auditor's findings, both of which feed the retro.
 
 **Writes:**
 
-- `$AKM_ROOT/docs/notes/im###.md` — rewrite `## approach` / `## components` / `## data_model` / `## api_surface` body sections. Keep the frontmatter (`status: accepted`); only the narrative changes. **Reference discipline:** every consumed `ft###`, binding `adr####`, and source `us###` continues to appear as wikilinks.
+- Story-backed: `$AKM_ROOT/docs/notes/im###.md` — rewrite `## approach` / `## components` / `## data_model` / `## api_surface` body sections. Keep the frontmatter (`status: accepted`); only the narrative changes. **Reference discipline:** every consumed `ft###`, binding `adr####`, and source `us###` continues to appear as wikilinks.
+- Feature-add: `$AKM_ROOT/docs/notes/ft###.md` — refresh `## providing` / `## api_surface` / `## data_model` / `## sample` / `## components` to match the shipped capability. Keep the frontmatter status that work-merge set to `accepted`. Do not fabricate a source `us###` or `im###` just to fit the story-backed path.
 - `$AKM_ROOT/docs/notes/adr####.md` — mint a *new* ADR file (four-digit zero-padded next id) per decision that shifted. If the new ADR supersedes an Accepted one, flip the old ADR's `status: Accepted → Superseded` (in its own `$AKM_ROOT/docs/notes/adr####.md`) and append `## superseded_by` with the new wikilink.
 - `$AKM_ROOT/docs/notes/ft###.md` — update body sections in place when the feature's surface widened compatibly. If incompatible, mint a new `ft###` and supersede the old one via `## superseded_by`.
 - `$AKM_ROOT/docs/notes/us###.md` — draft new stories (`status: draft`) for follow-up scope. Use `story-write` to ensure the schema is right (frontmatter aliases / status / created, body role / want / because / acceptance_criteria).
@@ -79,9 +80,9 @@ Stage 8 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Read shipped r
 2. **Identify target sp###.** Verify `$AKM_ROOT/docs/notes/archive/spec/sp###.md` shows `status: done` and the spec is listed under `$AKM_ROOT/docs/archive.md ## done` (work-merge relocated the delivered spec into the archive mirror and moved the board entry). If the file is still at `docs/notes/spec/sp###.md` or status is anything but `done`, work-merge hasn't run — route back to `work-merge`.
 3. **Read the shipped diff.** `git log <merge-base>..HEAD --oneline` and `git diff <merge-base>..HEAD` for files under `src/` plus any moved AKM zettels. The diff is the ground truth.
 4. **Compare diff vs spec.** Walk the `sp###.## tasks` blocks against the actual code change. For each task, note the file/function it landed in vs what the design predicted. Discrepancies feed the rewrite.
-5. **Re-read `$AKM_ROOT/docs/notes/im###.md`.** Confirm the `## approach` / `## components` / `## data_model` / `## api_surface` reflect shipped reality. List the sections that need rewriting.
-6. **Re-read each consumed `$AKM_ROOT/docs/notes/ft###.md`.** For each, check whether its `## api_surface` or `## providing` matches what the implementation actually called / consumed. List the features needing update.
-7. **Cross-scan other `im###` for actual reuse, then propose Feature-extraction candidates** (pragmatic, not aggressive — see Key Principles). The goal: detect when code, modules, or capabilities written for *this* `im###` are *already* present in (or named by) at least one other shipped/in-flight Implementation — that's the evidence threshold for proposing a `ft###`. Speculative "feels reusable" doesn't qualify; concrete overlap with named, on-disk `im###` does.
+5. **Resolve the delivered artifact shape.** If the archived spec has complete `us###` + `im###` lineage, run the story-backed path: re-read `$AKM_ROOT/docs/notes/im###.md` and list the `## approach` / `## components` / `## data_model` / `## api_surface` sections needing rewrite. If the archived spec is feature-add with no story/implementation lineage, resolve the accepted `ft###` deliverable from the spec and run the Feature path instead. If lineage is partial, missing, or ambiguous, block; do not invent `us###` or `im###` links.
+6. **Re-read each relevant `$AKM_ROOT/docs/notes/ft###.md`.** For feature-add, the delivered Feature is the primary surface to update from shipped reality. For story-backed specs, check every consumed Feature to see whether its `## api_surface` or `## providing` matches what the implementation actually called / consumed. List the features needing update.
+7. **Cross-scan other `im###` for actual reuse, then propose Feature-extraction candidates** (story-backed path only; pragmatic, not aggressive — see Key Principles). The goal: detect when code, modules, or capabilities written for *this* `im###` are *already* present in (or named by) at least one other shipped/in-flight Implementation — that's the evidence threshold for proposing a `ft###`. Feature-add retros already have a delivered Feature surface; update that surface instead of inventing implementation lineage. Speculative "feels reusable" doesn't qualify; concrete overlap with named, on-disk `im###` does.
 
    **Procedure:**
 
@@ -125,7 +126,7 @@ Stage 8 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Read shipped r
    **Why this matters.** Without the cross-scan, "would another im### consume this?" is a guess that drifts toward over-extraction (every helper looks reusable in the abstract). With the cross-scan, the proposal is grounded in named, on-disk evidence — the human sees *which* other Implementations would consume the extracted Feature, and the decision becomes concrete instead of speculative.
 8. **Re-read every Accepted `$AKM_ROOT/docs/notes/adr####.md` under the spec's categories.** For each, check whether the implementation respected the decision. If a decision shifted, draft a new ADR.
 9. **Mine bd notes for discovered scope.** `bd show <epic-id>` and `bd list --parent <epic-id>`. Walk each closed task's notes for "Discovered:" entries, deviation logs, and BLOCKED-then-resolved sequences. Each unique discovery becomes either a new `us###` draft or a follow-up task (filed at this stage if not already).
-10. **Write the rewrites + new entries on main**, every path under `$AKM_ROOT`, in this order: ADRs first (decisions bind the rest), `ft###` updates next, `im###` rewrite next, `us###` drafts last, then `$AKM_ROOT/docs/product.md` to attach `>> [[im###]]` to the shipped story bullet. Feature-extraction candidates flagged in step 7 stay as a summary block for the human — do NOT mint `ft###` from a candidate without confirmation.
+10. **Write the rewrites + new entries on main**, every path under `$AKM_ROOT`, in this order: ADRs first (decisions bind the rest), `ft###` updates next (including the delivered Feature for feature-add specs), `im###` rewrite next only for story-backed specs, `us###` drafts last, then `$AKM_ROOT/docs/product.md` to attach `>> [[im###]]` to the shipped story bullet only when a source story exists. Feature-extraction candidates flagged in step 7 stay as a summary block for the human — do NOT mint `ft###` from a candidate without confirmation.
 11. **Commit on main.** Stage every retro-touched file together and commit as one retrospective:
     ```bash
     git -C "$AKM_ROOT" add docs/notes/im<NNN>.md docs/notes/adr<NNNN>.md docs/notes/ft<NNN>.md docs/notes/us<NNN>.md docs/product.md
@@ -172,7 +173,7 @@ Stage 8 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Read shipped r
 
 ## Key Principles (entry-specific)
 
-- **Diff is ground truth, spec is history.** When the shipped code differs from the spec, the retro updates the `im###` body to match shipped — not the other way around. The spec is the historical record of what was planned; the implementation is what runs.
+- **Diff is ground truth, spec is history.** When shipped code differs from the spec, story-backed retros update the `im###` body to match shipped and feature-add retros update the delivered `ft###` surface to match shipped — not the other way around. The spec is the historical record of what was planned; the shipped implementation or Feature is what future work consumes.
 - **ADRs are immutable.** New decisions = new ADRs (next sequential id, four-digit). Decisions that overturn old ones = new ADR + supersede the old one via the body section. Never edit an Accepted ADR's `## decision`.
 - **Feature widening: update in place; feature changing: supersede.** If the feature's `## providing` covers the new use, just widen the `## api_surface`. If the consumer needed something the feature genuinely didn't offer, that's a supersession candidate (new `ft###` + `## superseded_by` chain on the old one).
 - **ADR vs Feature — where does the finding go?** When execution surfaces something new, classify before writing. ADRs sit at the *strategic* level (vendor / paradigm / security stance / language-stack / cross-cutting policy — commitments that close off alternatives and are expensive to reverse). Features sit at the *implementation-near reusable* level (a concrete capability with `## api_surface`, `## data_model`, `## sample`, `## components` — building blocks many Implementations consume). Use this discriminator:
@@ -212,13 +213,14 @@ Stage 8 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Read shipped r
 
 - `git log <merge-base>..HEAD` / `git diff` — shipped reality.
 - `infinifu:spec-read` — fetch the archived sp###.
-- `infinifu:implementation-read` — re-read im### body to identify rewrite targets.
-- `infinifu:feature-read` — survey consumed ft### surfaces.
+- `infinifu:implementation-read` — story-backed path: re-read im### body to identify rewrite targets.
+- `infinifu:feature-read` — survey consumed ft### surfaces and the delivered ft### for feature-add retros.
 - `infinifu:adr-read` — survey binding ADRs.
 - `infinifu:story-write` — emit new `us###` drafts for discovered scope.
 - `infinifu:adr-write` — mint new ADRs.
 - `infinifu:feature-write` — update ft### bodies or supersede.
-- `infinifu:implementation-write` — re-emit im### (same id, refreshed body).
+- `infinifu:implementation-write` — story-backed path: re-emit im### (same id, refreshed body).
+- `infinifu:feature-write` — feature-add path: re-emit the delivered ft### surface (same id, refreshed body) when shipped reality differs.
 - `bd show <epic-id>` / `bd list --parent <epic-id>` — mine task notes for discoveries.
 - `bd close <epic-id> --reason "..."` — close the epic.
 
