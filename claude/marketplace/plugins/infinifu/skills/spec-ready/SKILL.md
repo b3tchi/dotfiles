@@ -51,7 +51,7 @@ Stage 4 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Lifecycle: rea
 **Reads:**
 
 - `sp###` — target spec at `status: spec`. Read `## plan` and `## tasks`. Every `### Task N` block must already carry `#### type`, `#### effort`, `#### depends`, `#### files_touched`, `#### success_criteria`, `#### edge_cases`, `#### test_plan`. None should already carry `#### bd <id>`.
-- Source `us###` and consumed `[[im###]]` — only for the epic design text (one-line summary).
+- Lineage via `akm read sp###`: story-backed specs read source `us###` and consumed `[[im###]]` for the epic design text; feature-add specs read the proposed `ft###` deliverable instead. Do not fabricate missing `us###` / `im###` links for feature-add specs.
 
 **Writes:**
 
@@ -71,28 +71,31 @@ Stage 4 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Lifecycle: rea
 3. **Verify status.** Must be `status: spec`. Apply Disambiguation if not.
 4. **Read `## tasks` block.** Confirm every `### Task N` has the full H4 property set. If any block is missing properties or carries placeholder text, block — route back to `spec-refinement`.
 5. **Confirm no `#### bd` annotations exist yet.** If any task already has a `#### bd <id>` line, the spec has already been processed — Disambiguation applies.
-6. **Verify `bd` is initialized** in the workspace. If `.beads/` doesn't exist, run `bd init` once.
-7. **Mint the epic.** One `bd create --type epic` for the whole spec. Title format: `Epic: <spec alias> [sp###]`. Use `--design` to embed the one-line goal + spec path.
-8. **Mint each task** in `## tasks` order. For each `### Task N`:
+6. **Resolve lineage for epic text via `akm read`.** Story-backed specs still require a source `us###` and consumed `im###`; feature-add specs require the proposed `ft###` deliverable. Mixed specs keep both. A feature-add spec with no story/implementation is valid; no fake links are added.
+7. **Verify `bd` is initialized** in the workspace. If `.beads/` doesn't exist, run `bd init` once.
+8. **Mint the epic.** One `bd create --type epic` for the whole spec. Title format: `Epic: <spec alias> [sp###]`. For story-backed specs, include the `us###` / `im###` summary; for feature-add specs, include the proposed `ft###` summary. Use `--design` to embed the one-line goal + spec path.
+9. **Mint each task** in `## tasks` order. For each `### Task N`:
    - `bd create "<task title>" --type task --parent <epic-id> --design "<H4 properties as design text>"`.
    - Capture the new bd id.
-9. **Wire blocking deps.** For each `### Task N`, read its `#### depends` H4. For every dependency reference, call `bd dep add <this-task-id> <earlier-task-id>`.
-10. **Annotate the spec.** For each `### Task N` in `$AKM_ROOT/docs/notes/spec/sp###.md`, append `#### bd <task-id>` (matching the new bd id). Preserve all other H4 properties; the annotation is additive.
-11. **Flip status.** `sp###.status: spec → ready` (in the same `$AKM_ROOT/docs/notes/spec/sp###.md` file).
-12. **Move board entry.** Remove `[[sp###]]` line from `## spec` in `$AKM_ROOT/docs/board.md`; add it under `## ready`. Same wikilink, same label.
-13. **Commit on main.** Stage and commit both touched files together — this is the lifecycle commit for the `spec → ready` transition:
+10. **Wire blocking deps.** For each `### Task N`, read its `#### depends` H4. For every dependency reference, call `bd dep add <this-task-id> <earlier-task-id>`.
+11. **Annotate the spec.** For each `### Task N` in `$AKM_ROOT/docs/notes/spec/sp###.md`, append `#### bd <task-id>` (matching the new bd id). Preserve all other H4 properties; the annotation is additive.
+12. **Flip status.** `sp###.status: spec → ready` (in the same `$AKM_ROOT/docs/notes/spec/sp###.md` file).
+13. **Move board entry.** Remove `[[sp###]]` line from `## spec` in `$AKM_ROOT/docs/board.md`; add it under `## ready`. Same wikilink, same label.
+14. **Commit on main.** Stage and commit both touched files together — this is the lifecycle commit for the `spec → ready` transition:
     ```bash
     git -C "$AKM_ROOT" add docs/notes/spec/sp<NNN>.md docs/board.md
     git -C "$AKM_ROOT" commit -m "feat(akm): ready sp<NNN> with <N> bd tasks"
     ```
     `<N>` is the total task count just minted under the epic.
-14. **Verify.** `bd list --parent <epic-id>` shows every task; `bd ready` shows root tasks (no `#### depends` → unblocked at start); commit landed on main (`git -C "$AKM_ROOT" log -1 --oneline` matches the convention above); file paths confirmed under `$AKM_ROOT`.
+15. **Verify.** `bd list --parent <epic-id>` shows every task; `bd ready` shows root tasks (no `#### depends` → unblocked at start); commit landed on main (`git -C "$AKM_ROOT" log -1 --oneline` matches the convention above); file paths confirmed under `$AKM_ROOT`.
 
 ## Disambiguation
 
 - **`sp###` does not exist** → block; nothing to ready.
 - **`sp###` at `status: idea`** → route to `spec-writing`.
 - **`sp###` at `status: spec` but `## tasks` missing or incomplete** → route to `spec-refinement`. spec-ready cannot invent tasks.
+- **Story-backed spec missing source `us###` or consumed `im###`** → block; the epic context cannot be generated safely.
+- **Feature-add spec missing proposed `ft###`** → block; the Feature is the deliverable. Do not fabricate story or implementation links.
 - **`sp###` at `status: spec` but tasks already carry `#### bd` annotations** → spec has been processed before; either close the matter or route to `work-do` (execution).
 - **`sp###` at `status: ready`** → already done. Route to `work-do`.
 - **`sp###` at `status: done`** → shipped. Nothing to do.
@@ -101,6 +104,7 @@ Stage 4 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Lifecycle: rea
 
 - **One epic per spec.** The bd epic represents the spec's deliverable workstream. Tasks are children. No nested epics.
 - **Tasks come from `## tasks`, not from invention.** This skill mints ids for an *already-written* breakdown. If the breakdown is missing or sketchy, block — fixing it is `spec-refinement`'s job.
+- **Lineage is typed.** story-backed specs keep the source `us###` and consumed `im###` requirement; feature-add specs use the proposed `ft###` as the deliverable and do not need fake story or implementation links.
 - **Blocking deps from `#### depends`.** Don't guess execution order; the property is there for exactly this reason. Walk every task's `#### depends` once and call `bd dep add` for each edge.
 - **`#### bd <id>` is additive.** Do not delete or reformat the other H4 properties. The annotation lives alongside `#### type`, `#### effort`, etc.
 - **Atomic operation.** Mint epic + tasks + deps + annotations + status flip + board move = one logical commit. If any step fails midway, roll back rather than leaving partial state.

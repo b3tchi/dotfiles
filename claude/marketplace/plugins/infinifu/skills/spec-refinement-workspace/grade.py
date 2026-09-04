@@ -258,7 +258,55 @@ def grade_eval3(run_dir: Path) -> list[dict]:
     return results
 
 
-GRADERS = {0: grade_eval0, 1: grade_eval1, 2: grade_eval2, 3: grade_eval3}
+def grade_eval4(run_dir: Path) -> list[dict]:
+    text = gather_text(run_dir)
+    art = gather_artifacts(run_dir)
+    body = art["sp001_body"]
+    results = []
+
+    feature_add = bool(re.search(r"feature[- ]add|proposed\s+\[\[ft003|ft003.{0,80}deliverable|deliverable.{0,80}ft003", text, re.I | re.S))
+    results.append({"text": "Agent recognized feature-add ft003 deliverable",
+                    "passed": feature_add,
+                    "evidence": "feature-add + ft003/deliverable"})
+
+    akm_access = bool(re.search(r"akm\s+read\s+(sp001|ft003|adr0003)|akm.{0,40}(artifact|access|read)", text, re.I))
+    results.append({"text": "Agent named akm read/access instructions",
+                    "passed": akm_access,
+                    "evidence": "akm read"})
+
+    fabricated_story = bool(re.search(r"\[\[us\d{3}", body)) or bool(re.search(r"created.{0,40}us\d{3}|fabricat.{0,40}us\d{3}", text, re.I))
+    fabricated_im = bool(re.search(r"\[\[im\d{3}", body)) or bool(re.search(r"created.{0,40}im\d{3}|fabricat.{0,40}im\d{3}", text, re.I))
+    results.append({"text": "No fabricated us### / im### links",
+                    "passed": not fabricated_story and not fabricated_im,
+                    "evidence": f"fabricated_story={fabricated_story} fabricated_im={fabricated_im}"})
+
+    criteria_bound = bool(re.search(r"success_criteria[\s\S]{0,1200}(\[\[ft003|ft003)[\s\S]{0,600}(\[\[sp001|sp001)", body, re.I)) or bool(re.search(r"(ft003|\[\[ft003)[\s\S]{0,600}(sp001|\[\[sp001)[\s\S]{0,600}(success|criteria)", text, re.I))
+    no_us_ac_binding = not bool(re.search(r"us\d{3}\.?(AC|acceptance_criteria|acceptance criteria)", text, re.I))
+    results.append({"text": "Task success criteria bind to ft003/sp001, not us### AC",
+                    "passed": criteria_bound and no_us_ac_binding,
+                    "evidence": f"criteria_bound={criteria_bound} no_us_ac_binding={no_us_ac_binding}"})
+
+    matrix_source = text + "\n" + body
+    has_matrix = bool(re.search(r"(per-task SRE evidence matrix|Task\s+1[\s\S]{0,500}(granularity|implementability)[\s\S]{0,500}(test meaningfulness|red flags))", matrix_source, re.I))
+    generic_only = bool(re.search(r"SRE PASS", matrix_source, re.I)) and not has_matrix
+    results.append({"text": "Per-task SRE evidence matrix present; generic SRE PASS alone rejected",
+                    "passed": has_matrix and not generic_only,
+                    "evidence": f"has_matrix={has_matrix} generic_only={generic_only}"})
+
+    adr_feature = bool(re.search(r"adr0003", matrix_source, re.I)) and bool(re.search(r"Feature sanity|api_surface|providing|ft003", matrix_source, re.I))
+    results.append({"text": "ADR and Feature sanity performed",
+                    "passed": adr_feature,
+                    "evidence": "adr0003 + feature surface"})
+
+    vague_rejected = bool(re.search(r"reject|revise|unsafe|vague|auto-reject|not executable", text, re.I)) or bool(re.search(r"(files_touched|test_plan)[\s\S]{0,300}(src/lib/notifications.py|test_notifications|outbox)", body, re.I))
+    results.append({"text": "Unsafe/vague task breakdown rejected or revised to concrete mechanics",
+                    "passed": vague_rejected,
+                    "evidence": "reject/revise or concrete mechanics"})
+
+    return results
+
+
+GRADERS = {0: grade_eval0, 1: grade_eval1, 2: grade_eval2, 3: grade_eval3, 4: grade_eval4}
 
 
 def main(iter_dir: Path):

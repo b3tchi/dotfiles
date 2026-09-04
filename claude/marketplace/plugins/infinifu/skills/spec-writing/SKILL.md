@@ -40,18 +40,22 @@ See the per-stage commit table in `docs/notes/akm.md#workspace-resolution`.
 
 Stage 2 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Lifecycle goals: propose solution for the problem at high level, ensure solution is in line with features and ADRs, ensure no duplication or propose possible made solution.
 
+**Access:** use AKM commands for AKM artifacts (for example, `akm read sp###`, `akm read us###`, `akm read ft###`, or the typed read skills backed by `akm`). Do not bypass the AKM layer with ad-hoc raw zettel reads when resolving ids.
+
 **Reads** (per lifecycle contract):
 
-- `sp###` — the target spec at `status: idea`. Read `## solves [[us###]]` + `## problem` to know what's being solved.
-- `us###.acceptance_criteria` — the testable criteria the solution must satisfy. The spec's solution shape is constrained by these AC.
+- `sp###` — the target spec at `status: idea`. Read `## problem` and classify the entry type.
+- Story-backed specs: `## solves [[us###]]` plus `us###.acceptance_criteria` are required; the solution shape is constrained by those AC.
+- Feature-add specs: no source `us###` is required. Read the capability boundary from `## problem`; spec-writing mints `ft###` (or identifies an existing proposed `ft###`) as the deliverable and binds the solution to that Feature's intended `## providing` / `## api_surface`.
 - `cat###` (`category-read`) — taxonomy buckets the spec lives under (read from the spec's H1 wikilinks).
-- `ft###` (`feature-read`) — capabilities the solution might consume. Bind concretely here (not just candidates as in idea-*).
+- `ft###` (`feature-read`) — capabilities the solution might consume, plus the proposed feature for feature-add specs. Bind concretely here (not just candidates as in idea-*).
 - `adr####` (`adr-read --category <picks>`) — decisions binding the chosen categories. Solution must align with `Accepted` ADRs in scope; if it conflicts, surface as a supersession candidate, do not silently violate.
 
 **Writes** (all paths anchored on `$AKM_ROOT`):
 
-- `$AKM_ROOT/docs/notes/spec/sp###.md` — append `## solution` body section. **Reference discipline:** every relevant id appears as a wikilink in `## solution` — `[[ft###]]` for consumed features, `[[adr####]]` for binding decisions, `[[cat###]]` for taxonomy alignment. Prose-only solutions break the graph for spec-refinement downstream. Also flip frontmatter `status: idea → spec`.
-- `$AKM_ROOT/docs/notes/us###.md` — flip the source story's frontmatter `status: draft → ready` (the spec being written *is* the act of readying that story).
+- `$AKM_ROOT/docs/notes/spec/sp###.md` — append `## solution` body section. **Reference discipline:** every relevant id appears as a wikilink in `## solution` — `[[ft###]]` for consumed or proposed features, `[[adr####]]` for binding decisions, `[[cat###]]` for taxonomy alignment. Prose-only solutions break the graph for spec-refinement downstream. Also flip frontmatter `status: idea → spec`.
+- Feature-add specs: mint the proposed `ft###` card through `akm ft write` (or the feature writer backed by `akm`) once the user approves the capability boundary; link that `[[ft###]]` from `## solution`. Do not fabricate a `us###` just to satisfy the story-backed path.
+- Story-backed specs: flip the source story's frontmatter `status: draft → ready` (the spec being written *is* the act of readying that story).
 - `$AKM_ROOT/docs/board.md` — move the `[[sp###]]` entry from `## idea` to `## spec`.
 
 ## Flow
@@ -95,26 +99,28 @@ digraph spec_writing {
 1. **Resolve AKM root.** `AKM_ROOT="$(akm-root)"` — every subsequent path anchors on it. Abort with the helper's stderr if it errors.
 2. **Identify target spec.** User must name a `sp###` (by id or alias). Verify `$AKM_ROOT/docs/notes/spec/sp###.md` exists.
 3. **Verify status.** Read frontmatter `status`. Must be `idea`. Apply Disambiguation if not.
-4. **Read the spec.** Confirm `## solves [[us###]]` and `## problem` are populated. If `## problem` is missing or empty, block — route back to the originating idea-* skill.
-5. **Re-read source us###.AC.** Fetch `$AKM_ROOT/docs/notes/us<NNN>.md`; re-read `## acceptance_criteria`. If AC are vague or empty, block — route back to `idea-implement` (or `idea-extend`) for AC refinement. The solution shape is meaningless against shifting criteria.
-6. **Survey categories** named in the spec's H1 — `category-read` on each (resolved under `$AKM_ROOT/docs/notes/cat*.md`).
-7. **Survey binding ADRs** under those categories via `adr-read`. Identify which ones constrain the approach; flag any conflict between the natural solution and an `Accepted` ADR.
-8. **Survey features** the solution will consume via `feature-read`. Where the problem mentioned candidate `[[ft###]]` ids, decide which actually bind; identify any new ones.
-9. **Dedup check.** Does an existing `im###` already solve this story (or an adjacent one) in a way the new spec is about to duplicate? If yes, surface the duplicate and ask whether to extend the existing solution shape rather than mint a new one. Lifecycle goal: "ensure no duplication or propose possible made solution".
-10. **Propose `## solution`.** One paragraph naming the approach + ADR refs + bound `[[ft###]]` consumed + the trade-offs taken. Surface this as the design-approval question — the user owns whether the proposed shape is the right one.
-11. **On approval, write the solution.** Append `## solution` to `$AKM_ROOT/docs/notes/spec/sp<NNN>.md` with the wikilink reference discipline; flip its frontmatter `status: idea → spec`; flip the source story `$AKM_ROOT/docs/notes/us<NNN>.md` `status: draft → ready`; move the `[[sp###]]` entry in `$AKM_ROOT/docs/board.md` from `## idea` to `## spec`. The solution now exists on disk at `status: spec`.
-12. **Commit on main.** spec-writing is the first lifecycle transition that commits — it picks up the idea-phase staged files (the originating `sp###.Problem`, any newly-referenced draft stories) and bundles them with this skill's writes into a single commit on main:
+4. **Read the spec via `akm read sp###`.** Confirm `## problem` is populated. If `## problem` is missing or empty, block — route back to the originating idea-* skill.
+5. **Classify lineage.** Story-backed specs have `## solves [[us###]]`; feature-add specs name a proposed horizontal capability / `ft###` deliverable; mixed specs may have both and must satisfy both sets of checks.
+6. **Story-backed gate.** Re-read source `us###.AC` via `akm read us###`. If AC are vague or empty, block — route back to `idea-implement` (or `idea-extend`) for AC refinement. Story-backed specs still require the source story; feature-add specs do not.
+7. **Feature-add gate.** Mint or identify the proposed `ft###` via `akm ft write` / `feature-write` before committing the solution, and link it from `## solution`. A feature-add spec missing its proposed `ft###` blocks; do not invent `us###` / `im###` links.
+8. **Survey categories** named in the spec's H1 — `category-read` on each (resolved through `akm`).
+9. **Survey binding ADRs** under those categories via `adr-read`. Identify which ones constrain the approach; flag any conflict between the natural solution and an `Accepted` ADR.
+10. **Survey features** the solution will consume via `feature-read`. Where the problem mentioned candidate `[[ft###]]` ids, decide which actually bind; identify any new ones.
+11. **Dedup check.** For story-backed specs, does an existing `im###` already solve this story (or an adjacent one) in a way the new spec is about to duplicate? For feature-add specs, does an existing `ft###` already provide the same API surface? Surface duplicates and ask whether to extend the existing artifact rather than mint a new one.
+12. **Propose `## solution`.** One paragraph naming the approach + ADR refs + bound `[[ft###]]` consumed/proposed + the trade-offs taken. Surface this as the design-approval question — the user owns whether the proposed shape is the right one.
+13. **On approval, write the solution.** Append `## solution` to `$AKM_ROOT/docs/notes/spec/sp<NNN>.md` with the wikilink reference discipline; flip its frontmatter `status: idea → spec`; for story-backed specs, flip the source story `$AKM_ROOT/docs/notes/us<NNN>.md` `status: draft → ready`; for feature-add specs, write the proposed `ft###` deliverable and link it. Move the `[[sp###]]` entry in `$AKM_ROOT/docs/board.md` from `## idea` to `## spec`. The solution now exists on disk at `status: spec`.
+14. **Commit on main.** spec-writing is the first lifecycle transition that commits — it picks up the idea-phase staged files (the originating `sp###.Problem`, any newly-referenced draft stories or feature cards) and bundles them with this skill's writes into a single commit on main:
     ```bash
-    git -C "$AKM_ROOT" add docs/notes/spec/sp<NNN>.md docs/board.md docs/notes/us<NNN>.md
+    git -C "$AKM_ROOT" add docs/notes/spec/sp<NNN>.md docs/board.md docs/notes/us<NNN>.md docs/notes/ft<NNN>.md
     git -C "$AKM_ROOT" commit -m "feat(akm): spec sp<NNN> <title>"
     ```
-    `<title>` is the spec's `aliases[0]` (kebab-case acceptable). If additional draft stories were referenced in the spec, stage their files too — the commit captures the full idea-then-spec lineage as one atomic transition.
-13. **Confidence gate — is the written solution proven?** With `## solution` now on disk (`status: spec`), ask whether there is clear proof the approach actually *works*. If it rests on an unproven assumption — a library you haven't seen do this, a tool integration nobody has tried here, a perf budget you're guessing at — do **not** hand a guess to spec-refinement. Branch to `infinifu:idea-poc` to de-risk it: a throwaway isolated experiment, `--informs sp<NNN>` (the solution exists, so the back-link resolves), returning a `poc###` verdict. This is an optional **loop**:
+    `<title>` is the spec's `aliases[0]` (kebab-case acceptable). Stage only the lineage files that apply — story-backed specs include `us###`, feature-add specs include the proposed `ft###`; mixed specs include both.
+15. **Confidence gate — is the written solution proven?** With `## solution` now on disk (`status: spec`), ask whether there is clear proof the approach actually *works*. If it rests on an unproven assumption — a library you haven't seen do this, a tool integration nobody has tried here, a perf budget you're guessing at — do **not** hand a guess to spec-refinement. Branch to `infinifu:idea-poc` to de-risk it: a throwaway isolated experiment, `--informs sp<NNN>` (the solution exists, so the back-link resolves), returning a `poc###` verdict. This is an optional **loop**:
     - **validated** → append `[[poc###]]` to `## solution` as the evidence, commit that touch-up, and hand to `spec-refinement`.
     - **invalidated** → that approach is dead. Revise `## solution` to a different approach (commit the revision; status stays `spec`), then re-run the gate — a new PoC if the new approach is also unproven. Loop until one validates (or stop if the problem proves intractable as framed).
 
     Skip the gate only when the approach is already proven (cite where). De-risking *here* — after the solution is written but before spec-refinement invests in a task plan — is the cheapest place to kill a bad approach.
-14. **Confirm.** Show: spec id + absolute path under `$AKM_ROOT`, status flips (`sp###: idea→spec`, `us###: draft→ready`), board move, commit sha(s) on main, and the gate outcome (→ `spec-refinement`, or → `idea-poc` on `sp<NNN>` with a `[[poc###]]` pending). Ask once: "Anything to revise?"
+16. **Confirm.** Show: spec id + absolute path under `$AKM_ROOT`, status flips (`sp###: idea→spec`, `us###: draft→ready` when story-backed, `ft###` minted/identified when feature-add), board move, commit sha(s) on main, and the gate outcome (→ `spec-refinement`, or → `idea-poc` on `sp<NNN>` with a `[[poc###]]` pending). Ask once: "Anything to revise?"
 
 Walk the shared process around this checklist (load `idea-brainstorming` for cadence + hard-gate basics — same conventions apply at every lifecycle stage).
 
@@ -125,7 +131,7 @@ Before reporting complete:
 - [ ] Every file path written/read is under `$AKM_ROOT` (resolved via `akm-root`, not the current cwd)
 - [ ] `sp###.md` `## solution` populated with `[[ft###]]` / `[[adr####]]` / `[[cat###]]` wikilinks (no prose-only solutions)
 - [ ] `sp###.md` frontmatter flipped `status: idea → spec`
-- [ ] `us###.md` source story flipped `status: draft → ready`
+- [ ] Story-backed `us###.md` source story flipped `status: draft → ready`; feature-add specs instead link the proposed `ft###` deliverable
 - [ ] `board.md` entry moved from `## idea` to `## spec`
 - [ ] `git log -1` on main shows a new commit titled `feat(akm): spec sp<NNN> <title>`
 - [ ] Commit covers the spec file, the story file, and `board.md` (plus any idea-phase staged files)
@@ -138,13 +144,14 @@ Before reporting complete:
 - **`sp###` at `status: ready`** → already refined and queued. Route to `work-do`.
 - **`sp###` at `status: done`** → shipped; nothing to write.
 - **`sp###` at `status: idea` but `## problem` is empty / missing** → block; route back to the originating idea-* skill to populate the problem first.
-- **Source `us###.acceptance_criteria` is empty / vague** → block; route back to `idea-implement` (or `idea-extend`) to refine AC. Spec-writing cannot bind a solution to shifting criteria.
-- **Existing `im###` already solves the same `us###`** → surface the duplicate; if the user wants a new approach, file the existing `im###` as a supersession candidate and continue; if not, stop.
+- **Story-backed source `us###.acceptance_criteria` is empty / vague** → block; route back to `idea-implement` (or `idea-extend`) to refine AC. Spec-writing cannot bind a story-backed solution to shifting criteria.
+- **Feature-add spec has no proposed `ft###` after solution approval** → block; spec-writing must mint or identify the Feature deliverable, not fabricate a story or implementation link.
+- **Existing `im###` already solves the same story-backed `us###`** → surface the duplicate; if the user wants a new approach, file the existing `im###` as a supersession candidate and continue; if not, stop.
 
 ## Key Principles (entry-specific)
 
 - **Solution shape only — no task plumbing.** The output is `## solution`. File trees, task lists, bd ids belong downstream. Putting them here means the user has to approve them along with the solution, which conflates two decisions and slows iteration.
-- **AC bind the solution.** A solution proposed against vague AC is a guess. The skill blocks at step 4 for exactly this reason.
+- **Acceptance source binds the solution.** Story-backed specs bind to `us###.acceptance_criteria`; feature-add specs bind to the proposed `ft###` surface plus `sp###.## problem` / `## solution`. A solution proposed against vague acceptance criteria or an undefined feature surface is a guess.
 - **ADRs constrain, don't reinvent.** An `Accepted` ADR under the picked categories binds the approach. If the natural solution conflicts, name it as a supersession candidate; never silently violate.
 - **Feature consumption commits here.** Idea-* listed candidates; spec-writing picks the actual `[[ft###]]` set the solution will consume. Spec-refinement will design tasks against that set.
 - **Dedup before mint.** If an existing `im###` already solves the same story, the new spec needs to either supersede it (named decision) or stop (don't duplicate). The lifecycle explicitly carries this goal at stage 2.
