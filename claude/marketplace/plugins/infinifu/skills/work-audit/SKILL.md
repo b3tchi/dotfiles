@@ -80,8 +80,16 @@ Stage 6 of the AKM lifecycle — see `claude/akm/akm-lifecycle.md` for the full 
 
 **Reads:**
 
-- `us###.acceptance_criteria` — the binding contract. Audit against this, not just the bd task body. A task can be technically "done" against the bd description but still fail the story AC; that is a rejection.
-- `sp###.tasks` block matching `#### bd <task-id>` — `#### success_criteria`, `#### edge_cases`, and `#### test_plan` are the assertions the implementation must satisfy.
+- `sp###.tasks` block matching `#### bd <task-id>` —
+  `#### success_criteria`, `#### edge_cases`, and `#### test_plan` are the
+  assertions the implementation must satisfy.
+- Story-backed audit: `us###.acceptance_criteria` is the binding contract.
+  Audit against this, not just the bd task body. A task can be technically
+  "done" against the bd description but still fail the story AC; that is a
+  rejection. The linked `im###` supplies expected approach/components.
+- Feature-add audit: verify criteria against the owning ready `sp###` and
+  `ft###`; this does not require a story acceptance-criteria file or an
+  implementation card when the spec is explicitly a feature-add deliverable.
 
 **Writes:** none. Audit evidence belongs in the bd task notes; `bd close` (approval) or gap notes (rejection) is the only state transition this skill owns.
 
@@ -98,6 +106,20 @@ Also check what the implementer recorded:
 ```bash
 bd show <id>   # includes notes/deviations logged during work-do
 ```
+
+Resolve lineage before auditing source:
+
+1. Find the owning ready `sp###` from `bd show`, the parent epic, or the task's
+   `#### bd <id>` block.
+2. For story-backed specs, require the source `us###` and expected `im###`; the
+   source story acceptance criteria remain binding.
+3. For feature-add specs, require the owning/proposed `ft###` and bind success
+   criteria to the Feature surface plus the spec problem/solution/task block.
+4. Ambiguous lineage gate: if a ticket links to a missing or non-ready spec, a
+   story-backed task lacks `us###` or `im###`, a feature-add task lacks `ft###`,
+   or mixed deliverables cannot be separated, reject before reading source
+   changes, closing, merging, or editing AKM. Record an `AUDITED: REJECTED`
+   note with the missing lineage evidence.
 
 If the implementer logged a DEVIATION note, that's not automatically a rejection — they surfaced it honestly. Verify the deviation is still acceptable (design still fulfilled in spirit) or reject if the deviation invalidates the criterion.
 
@@ -155,6 +177,14 @@ Every hit is a finding. Dead code left from a refactor is not a nit — the refa
 ## Step 4 — Verify success criteria with evidence
 
 For each criterion in the task, run a verification command and paste the real output. Don't assume — verify.
+
+- Story-backed tasks must include evidence that the source story acceptance
+  criteria are still satisfied.
+- Feature-add tasks must include evidence that the owning ready `sp###` and
+  `ft###` criteria/surface are satisfied; absence of `us###`/`im###` is not a
+  gap for explicit feature-add delivery.
+- Mixed specs must verify each deliverable against its own binding source and
+  reject if a task's lineage cannot be classified.
 
 ```
 Criterion: "All tests passing"

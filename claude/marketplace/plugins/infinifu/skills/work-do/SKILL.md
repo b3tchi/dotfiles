@@ -7,9 +7,18 @@ description: Use when you are an agent that has been handed a single bd task ID 
 
 ## Overview
 
-Execute one bd task end-to-end: read the spec, do the work, verify, close with evidence, report back. This is the per-task protocol that agents follow when a dispatcher hands them a task ID — it is not for creating tasks (use `spec-ready`) or for deciding which tasks to run (use `plan-scrum-master` or `plan-supervised`).
+Execute one bd task end-to-end: receive only a bd task ID, read the
+contract with `bd show <id>`, do the work, verify, record evidence, and
+report back. This is the per-task protocol that agents follow when a
+dispatcher hands them a task ID — it is not for creating tasks (use
+`spec-ready`) or for deciding which tasks to run (use `plan-scrum-master` or
+`plan-supervised`).
 
-**Core principle:** The bd task is the contract. You implement exactly what the task says, close it with evidence a reviewer can verify, and report back clearly. Discoveries become new bd tasks — you don't silently expand scope.
+**Core principle:** The bd task is the contract. Direct work content is only
+the bd task ID, and the worker must resolve the contract with `bd show <id>`.
+You implement exactly what the task says, record evidence a reviewer can
+verify, and report back clearly. Discoveries become new bd tasks — you don't
+silently expand scope.
 
 **Announce at start:** "I'm using the work-do skill to implement bd task `<id>`."
 
@@ -25,9 +34,17 @@ Stage 5 of the AKM lifecycle — see `claude/akm/akm-lifecycle.md` for the full 
 
 **Reads:**
 
-- `us###.acceptance_criteria` — the ground-truth contract. When the bd task body is ambiguous, the story AC wins.
-- `im###` (`approach`, `components`, `api_surface`, `data_model`) — solution shape for orientation.
-- `sp###.tasks` block matching `#### bd <task-id>` — the structured task definition (effort, files_touched, edge_cases, test_plan) that informs execution.
+- `sp###.tasks` block matching `#### bd <task-id>` — the structured task
+  definition (effort, files_touched, success_criteria, edge_cases, test_plan)
+  that informs execution.
+- Story-backed task lineage: source `us###.acceptance_criteria` plus the
+  consumed `im###` (`approach`, `components`, `api_surface`, `data_model`). A
+  Story-backed task must bind to its source `us###.acceptance_criteria`, and a
+  missing source story or implementation is ambiguous lineage.
+- Feature-add task lineage: the owning ready `sp###` plus the proposed or
+  owning `ft###` provide the success source. Do not require
+  `us###.acceptance_criteria` or `im###` when the spec is explicitly a
+  feature-add deliverable.
 
 **Writes:** none. All execution state lives in beads task notes; no zettel mutation in this stage.
 
@@ -54,6 +71,20 @@ Also check:
 ```bash
 bd dep tree <id>   # anything upstream that must be verified first?
 ```
+
+Resolve lineage before source or AKM mutation:
+
+1. Locate the owning ready `sp###` from `bd show`, the parent epic, or the
+   matching `#### bd <id>` task block.
+2. If the spec is story-backed, read the linked `us###` and `im###`; the story
+   acceptance criteria are binding and the implementation card orients the
+   work.
+3. If the spec is feature-add, read the linked/proposed `ft###`; the feature
+   surface plus the spec problem/solution/task criteria are binding. Do not
+   fabricate `us###` or `im###` links.
+4. If lineage is mixed, missing, non-ready, or otherwise ambiguous, block before
+   source edits or AKM mutation and record a `BLOCKED` note explaining the
+   missing source.
 
 ### Step 2: Claim, then create the worktree and branch at the right name
 
@@ -130,10 +161,13 @@ Then continue with the current task. Discovered work gets picked up later by a d
 
 Before reporting back, produce evidence the task is done:
 
-- All task success criteria satisfied — cite them explicitly
-- Tests green — paste the test runner output
-- No regressions — run the broader suite if applicable
-- `domain-verification` checklist applied if relevant
+- All task success criteria satisfied — cite them explicitly.
+- Story-backed tasks: source story acceptance criteria still satisfied.
+- Feature-add tasks: owning spec and Feature success criteria/surface satisfied
+  without requiring story acceptance criteria.
+- Tests green — paste the test runner output.
+- No regressions — run the broader suite if applicable.
+- `domain-verification` checklist applied if relevant.
 
 ### Step 7: Commit to the branch — the work does not exist until you do
 
