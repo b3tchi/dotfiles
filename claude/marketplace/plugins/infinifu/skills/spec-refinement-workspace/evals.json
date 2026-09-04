@@ -16,6 +16,18 @@
         {"text": "No task was marked closed or in_progress — execution not started"},
         {"text": "Epic still exists and still has (original 4 tasks + any new subtasks) as parent-child children"}
       ]
+    },
+    {
+      "id": 4,
+      "eval_name": "feature-add-no-story-im",
+      "prompt": "sp001 is a feature-add spec at spec stage with proposed ft003 and no us### and no im###. Run spec-refinement using akm access, bind task criteria to ft003 + sp001, and do not fabricate story or implementation links. Reject any proposal that only claims a generic SRE PASS without per-task evidence.",
+      "assertions": [
+        {"text": "Feature-add spec with no us### and no im### is refined instead of blocked"},
+        {"text": "AKM access instructions name akm"},
+        {"text": "No fabricated story or implementation links appear"},
+        {"text": "Success criteria bind to ft003 and sp001"},
+        {"text": "Generic SRE PASS assertion without per-task evidence is rejected"}
+      ]
     }
   ]
 }

@@ -13,8 +13,9 @@ Stage 3 of the AKM lifecycle. A spec is at `status: spec` with `## solution` pop
 
 1. **`## plan`** — file tree, conventions, anti-patterns, known limitations. The execution context every task inherits.
 2. **`## tasks`** — H3 per task (`### Task N: <name>`) with H4 properties (`#### type`, `#### effort`, `#### depends`, `#### files_touched`, `#### success_criteria`, `#### edge_cases`, `#### test_plan`). No `#### bd` ids — those land in `spec-ready`.
-3. **Sanity check** against binding `[[adr####]]` and consumed `[[ft###]]` — the solution shape from stage 2 was a *proposal*; here we verify the breakdown actually respects every ADR's `## decision` and matches every Feature's `## api_surface`. Find conflicts now, before tasks ship.
-4. **Finalize `## specs` back-link on the consumed `[[im###]]`** — close the graph so `spec-retro` can find the trail.
+3. **Per-task SRE evidence matrix** — every task must show the 8-category verdict (granularity, implementability, success criteria, dependencies, safety, edge cases, red flags, test meaningfulness). A generic "SRE PASS" assertion is rejected even if the H4 skeleton is present.
+4. **Sanity check** against binding `[[adr####]]` and consumed / proposed `[[ft###]]` — the solution shape from stage 2 was a *proposal*; here we verify the breakdown actually respects every ADR's `## decision` and matches every Feature's `## api_surface`. Find conflicts now, before tasks ship.
+5. **Finalize `## specs` back-link on the consumed `[[im###]]` for story-backed specs** — close the graph so `spec-retro` can find the trail. Feature-add specs may refine without a source `us###` and without a consumed `im###` when the proposed `ft###` is the deliverable; Do not fabricate story or implementation links.
 
 **Out of scope (deliberately deferred):**
 
@@ -49,13 +50,17 @@ Append ` + ft<NNN>` to the message when a Feature is part of the commit. See the
 
 Stage 3 of the AKM lifecycle (see `claude/akm/akm-lifecycle.md`). Lifecycle goal: ensure deliverable workable — SRE 8-category pass.
 
+**Access:** use AKM commands for AKM artifacts (for example, `akm read sp###`, `akm read us###`, `akm read im###`, `akm read ft###`, or the typed read skills backed by `akm`). Do not bypass the AKM layer with ad-hoc raw zettel reads when resolving ids.
+
 **Reads** (per lifecycle contract):
 
-- `sp###` — target spec at `status: spec`. Read frontmatter, `## solves [[us###]]`, `## solution`, the H1 categories.
-- `us###` — re-read source story's `## acceptance_criteria`. Every task's `#### success_criteria` should map to one or more AC. (Reading the story is required to validate that the breakdown actually delivers AC, not invented criteria.)
-- `im###` — the implementation card this spec implements. Its `## approach`, `## features`, `## components` constrain the breakdown. Finalize `## specs` back-link.
+- `sp###` — target spec at `status: spec`. Read frontmatter, lineage (`## solves`, `## implements`, or proposed `ft###` deliverable), `## solution`, and the H1 categories.
+- story-backed specs still require `us###`: re-read source story's `## acceptance_criteria`. Every task's `#### success_criteria` should map to one or more AC. (Reading the story is required to validate that the breakdown actually delivers AC, not invented criteria.)
+- Story-backed specs still require `im###`: read the implementation card this spec implements. Its `## approach`, `## features`, `## components` constrain the breakdown. Finalize `## specs` back-link.
+- Feature-add specs: a proposed `ft###` is required and is the deliverable. Bind each task's success criteria to `sp###.## problem` / `## solution` plus that Feature's `## providing` / `## api_surface`. A feature-add spec may have no `us###` or `im###`; that is not a blocker.
+- Mixed specs: if both story/implementation and feature artifacts are present, keep all applicable checks.
 - `adr####` (`adr-read --category <picks>`) — every `Accepted` ADR under the spec's categories. The task list must not violate any `## decision`; if it does, name a supersession candidate (do not silently violate).
-- `ft###` (`feature-read`) — every `[[ft###]]` listed in the spec's `## solution`. Each task that consumes a feature must call its `## api_surface` exactly; document any deviation as a Feature-extension request.
+- `ft###` (`feature-read`) — every `[[ft###]]` listed in the spec's `## solution`, including a feature-add deliverable. Each task that consumes or creates a feature must match its `## api_surface` exactly or explicitly plan an approved Feature extension.
 
 **Writes** (all paths anchored on `$AKM_ROOT`):
 
@@ -132,26 +137,27 @@ digraph spec_refinement {
 1. **Resolve AKM root.** `AKM_ROOT="$(akm-root)"` — every subsequent path anchors on it. Abort with the helper's stderr if it errors.
 2. **Identify target spec.** User names a `sp###`. Verify `$AKM_ROOT/docs/notes/spec/sp###.md` exists.
 3. **Verify status.** Must be `status: spec`. Apply Disambiguation if not.
-4. **Read the spec body** — `## solves`, `## solution`, H1 categories.
-5. **Re-read source `us###.acceptance_criteria`** from `$AKM_ROOT/docs/notes/us<NNN>.md`. Every task's success criteria will map here.
-6. **Read consumed `[[im###]]`** from `$AKM_ROOT/docs/notes/im<NNN>.md` — `## approach`, `## features`, `## components` constrain the breakdown.
-7. **Survey ADRs** under the spec's categories (`$AKM_ROOT/docs/notes/adr*.md`). Note `Accepted` decisions that bind.
-8. **Survey Features** in `## solution` (`$AKM_ROOT/docs/notes/ft*.md`). Note `## api_surface` + `## providing` per feature.
-9. **Draft `## plan`** — file tree, conventions, anti-patterns, known limitations.
-10. **Draft `## tasks`** — H3 per task with the H4 property set (`type`, `effort`, `depends`, `files_touched`, `success_criteria`, `edge_cases`, `test_plan`). No bd ids.
-11. **Apply SRE 8-category pass** to every task. Reject and rewrite if any auto-reject row trips.
-12. **ADR sanity pass.** Flag any conflict; add supersession task if needed.
-13. **Feature sanity pass.** Flag api-surface mismatches; route Feature extensions through `idea-extend` (or, if minor and user-approved, widen the `ft###` in place and include it in the commit).
-14. **Surface as design-approval gate** to the user — the breakdown is a commitment, not a proposal. User approves before continuing.
-15. **On approval:** write `## plan` + `## tasks` into `$AKM_ROOT/docs/notes/spec/sp<NNN>.md`; append `## specs - [[sp###]]` to `$AKM_ROOT/docs/notes/im<NNN>.md`; if Feature widening happened, write the updated `$AKM_ROOT/docs/notes/ft<NNN>.md` too.
-16. **Commit on main.** Only this skill's writes are in scope — the idea-then-spec lineage was already committed by spec-writing:
+4. **Read the spec body via `akm read sp###`** — lineage (`## solves`, `## implements`, proposed `ft###`), `## solution`, H1 categories.
+5. **Classify lineage.** Story-backed specs have `## solves [[us###]]` and consumed `[[im###]]`; feature-add specs name a proposed `ft###` deliverable; mixed specs satisfy both.
+6. **Story-backed gate.** Re-read source `us###.acceptance_criteria` via `akm read us###`; every task's success criteria will map here. Read consumed `[[im###]]` via `akm read im###` — `## approach`, `## features`, `## components` constrain the breakdown. Missing `us###` or `im###` blocks only on the story-backed path.
+7. **Feature-add gate.** Re-read the proposed `[[ft###]]` via `akm read ft###`; bind success criteria to `[[ft###]]` and `[[sp###]]`. A feature-add spec missing its proposed `ft###` blocks; feature-add specs may refine without source `us###` or consumed `im###` when the proposed `ft###` is the deliverable.
+8. **Survey ADRs** under the spec's categories (`akm read adr####` / `adr-read`). Note `Accepted` decisions that bind.
+9. **Survey Features** in `## solution` (`akm read ft###` / `feature-read`). Note `## api_surface` + `## providing` per feature.
+10. **Draft `## plan`** — file tree, conventions, anti-patterns, known limitations.
+11. **Draft `## tasks`** — H3 per task with the H4 property set (`type`, `effort`, `depends`, `files_touched`, `success_criteria`, `edge_cases`, `test_plan`). No bd ids.
+12. **Apply the per-task SRE evidence matrix** to every task. Reject and rewrite if any auto-reject row trips; reject a generic "SRE PASS" assertion that does not show task-by-task evidence.
+13. **ADR sanity pass.** Flag any conflict; add supersession task if needed.
+14. **Feature sanity pass.** Flag api-surface mismatches; route Feature extensions through `idea-extend` (or, if minor and user-approved, widen the `ft###` in place and include it in the commit).
+15. **Surface as design-approval gate** to the user — the breakdown is a commitment, not a proposal. User approves before continuing.
+16. **On approval:** write `## plan` + `## tasks` into `$AKM_ROOT/docs/notes/spec/sp<NNN>.md`; for story-backed specs append `## specs - [[sp###]]` to `$AKM_ROOT/docs/notes/im<NNN>.md`; for feature-add specs verify the proposed `ft###` remains linked; if Feature widening happened, write the updated `$AKM_ROOT/docs/notes/ft<NNN>.md` too.
+17. **Commit on main.** Only this skill's writes are in scope — the idea-then-spec lineage was already committed by spec-writing:
     ```bash
     git -C "$AKM_ROOT" add docs/notes/spec/sp<NNN>.md docs/notes/im<NNN>.md
     # add docs/notes/ft<NNN>.md too if a Feature was minted/widened
     git -C "$AKM_ROOT" commit -m "feat(akm): refine sp<NNN> with im<NNN>"
     ```
     Append ` + ft<NNN>` to the message when a Feature is in the commit.
-17. **Confirm.** Show: spec id + absolute path under `$AKM_ROOT`, im### back-link landed, any ft### touched, commit sha on main. Ask once: "Anything to revise?"
+18. **Confirm.** Show: spec id + absolute path under `$AKM_ROOT`, lineage path (story-backed `im###` back-link or feature-add `ft###` deliverable), any ft### touched, commit sha on main. Ask once: "Anything to revise?"
 
 ## Verification
 
@@ -159,10 +165,10 @@ Before reporting complete:
 
 - [ ] Every file path written/read is under `$AKM_ROOT` (resolved via `akm-root`, not the current cwd)
 - [ ] `sp###.md` has `## plan` + `## tasks` populated; every task's H4 properties present (`type`, `effort`, `depends`, `files_touched`, `success_criteria`, `edge_cases`, `test_plan`); no `#### bd` ids
-- [ ] SRE 8-category pass clean on every task; no auto-reject row trips
+- [ ] Per-task SRE evidence matrix is present and clean on every task; no auto-reject row trips; no generic unsupported "SRE PASS" assertion
 - [ ] ADR sanity: no task silently violates an `Accepted` `[[adr####]]`; supersession task filed if conflict named
 - [ ] Feature sanity: every consumed `[[ft###]]` matches its `## api_surface`; extensions routed via `idea-extend` or widened in-commit
-- [ ] `im###.md` has `## specs - [[sp###]]` back-link appended
+- [ ] Story-backed `im###.md` has `## specs - [[sp###]]` back-link appended; feature-add specs without `im###` instead cite the proposed `ft###` deliverable and do not fabricate an implementation link
 - [ ] If a Feature was widened in-place, `ft###.md` updated and included in the commit
 - [ ] `sp###.status` still `spec` (status promotion belongs to spec-ready)
 - [ ] `board.md` untouched (board move belongs to spec-ready)
@@ -176,13 +182,14 @@ Before reporting complete:
 - **`sp###` at `status: ready`** → already refined and queued. Route to `work-do` (or `spec-retro` after merge).
 - **`sp###` at `status: done`** → shipped. Nothing to refine.
 - **`sp###` at `status: spec` but `## solution` missing/empty** → block. Route back to `spec-writing` to populate solution first.
-- **Source `us###.AC` empty or vague** → block. Route back to `idea-implement` / `idea-extend` for AC refinement. Tasks cannot map to AC that don't exist.
-- **No `[[im###]]` referenced in `## solution`** → block. Spec-writing should have either named the consumed `im###` or marked dedup against an existing one; either way the back-link can't be finalized here without it.
+- **Story-backed source `us###.AC` empty or vague** → block. Route back to `idea-implement` / `idea-extend` for AC refinement. Story-backed tasks cannot map to AC that don't exist.
+- **Story-backed spec has no `[[im###]]` referenced in `## solution` / `## implements`** → block. Spec-writing should have either named the consumed `im###` or marked dedup against an existing one; either way the back-link can't be finalized here without it.
+- **Feature-add spec missing its proposed `ft###`** → block. The Feature is the acceptance source and deliverable; do not fabricate missing story or implementation links.
 
 ## Key Principles (entry-specific)
 
 - **SRE pass is the deliverable.** Without the 8-category check, the breakdown is just a task list — the discipline is what makes it executable by a junior engineer who reads only the spec.
-- **AC bind every task.** Each task's `#### success_criteria` ties back to one or more lines from `us###.## acceptance_criteria`. A task whose success criteria don't trace back to AC is either out of scope or AC are incomplete (block).
+- **Acceptance source binds every task.** Story-backed task criteria tie back to `us###.## acceptance_criteria`; feature-add task criteria tie back to the proposed `ft###` plus `sp###.## problem` / `## solution`. A task whose success criteria don't trace back to the applicable source is either out of scope or the source is incomplete (block).
 - **ADR sanity, not just survey.** Knowing the ADRs exist isn't enough — walk every task and verify the chosen approach respects each `Accepted` decision. Silent ADR violation is the #1 source of post-merge rework.
 - **Feature surface, not feature intent.** Tasks must call `## api_surface` exactly. If the spec needs functionality outside the Feature's `## providing`, that's a Feature extension via `idea-extend`, not a silent over-reach in the task list.
 - **No bd ids at this stage.** Annotating `#### bd <id>` is `spec-ready`'s job. Doing it here couples task structure to bd state machine and slows iteration.

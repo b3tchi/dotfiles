@@ -780,6 +780,88 @@ body = re.sub(r'(## solution.*?)(\n---)', r'\1' + addendum + r'\2', body, flags=
 p.write_text(body)
 PY
     ;;
+  4)
+    # eval-4 feature-add: proposed ft003 is the deliverable. There is no
+    # source story and no implementation card; spec-refinement should bind
+    # the breakdown to ft003 + sp001, not fabricate us### or im### links.
+    rm -f docs/notes/us003.md docs/notes/im002.md
+    cat > docs/notes/ft003.md <<'EOF'
+---
+aliases:
+  - notification-router
+status: proposed
+created: 2026-04-29
+---
+# Feature [[cat003]] [[cat004]] [[product]]
+
+## providing
+Shared notification routing for internal services. Consumers submit an event
+with recipient, channel, template key, and payload; the feature handles retry,
+deduplication, and delivery metrics.
+
+## api_surface
+```python
+from acme.lib.notifications import notify
+notify(recipient="ops", channel="email", template="report-ready", payload={})
+```
+
+## data_model
+Owns `notification_outbox` rows keyed by idempotency key, status, attempts,
+last_error, and delivered_at.
+
+## sample
+Reports, metrics, and auth can replace their ad-hoc smtplib paths with
+`notify(...)` calls.
+
+## components
+- `src/lib/notifications.py`
+- `src/services/notifications/worker.py`
+
+---
+
+Index: [[product]]
+EOF
+    cat > docs/notes/spec/sp001.md <<'EOF'
+---
+aliases:
+  - notification-router-feature
+status: spec
+created: 2026-04-29
+---
+# Spec [[cat003]] [[cat004]] [[board]]
+
+## problem
+Acme services duplicate ad-hoc email and alert sending. Reports, metrics, and
+auth need one shared notification router with retries, deduplication, and
+metrics. This is a feature-add lifecycle entry whose deliverable is
+[[ft003|notification-router]], not a story-specific implementation.
+
+## solution
+Mint [[ft003|notification-router]] as the reusable capability. Replace the
+three ad-hoc smtplib call sites with calls to `notify(...)`, backed by a
+Postgres outbox worker. Bind [[adr0003]] as a compatibility constraint: the
+first version still sends through the internal MTA rather than introducing an
+external SMTP relay. Categories [[cat003]] infrastructure and [[cat004]]
+observability apply.
+
+---
+
+Index: [[board]]
+EOF
+    cat > docs/board.md <<'EOF'
+# Board
+
+One feature-add spec in flight at spec stage.
+
+## idea
+
+## spec
+
+- [[sp001|notification-router-feature]]
+
+## ready
+EOF
+    ;;
 esac
 
 # ----- Commit baseline + manifest -----------------------------------------
