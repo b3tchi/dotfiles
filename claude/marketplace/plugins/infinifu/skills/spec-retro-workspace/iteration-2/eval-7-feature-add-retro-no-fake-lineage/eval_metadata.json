@@ -1,0 +1,14 @@
+{
+  "eval_id": 7,
+  "eval_name": "feature-add-retro-no-fake-lineage",
+  "prompt": "sp027 just merged as a feature-add lifecycle spec. Run spec-retro to refresh the AKM graph. The archived spec delivered ft013 directly and intentionally has no us### or im### lineage. Working dir is the seeded sandbox; task/epic ids are in .work-do-task-ids.json.",
+  "fixture": "Post-merge feature-add state: docs/notes/archive/spec/sp027.md is status: done and references the delivered ft013; docs/notes/ft013.md is status: accepted but its api_surface still reflects proposed-stage text. No us### or im### source exists for this spec.",
+  "expected_behavior": "Refresh docs/notes/ft013.md so the Feature surface matches shipped reality, close the bd epic, and do not create or rewrite any us### or im### as fake lineage. Product story implementation annotations are skipped because this is not story-backed.",
+  "assertions": [
+    {"text": "Agent ran git log / git diff or otherwise cited shipped reality"},
+    {"text": "Feature-add retro refreshed the delivered ft### surface"},
+    {"text": "Feature-add retro creates no fake us###/im### lineage"},
+    {"text": "Feature-add retro did not rewrite an im### as if story-backed"},
+    {"text": "Agent closed the bd epic"}
+  ]
+}

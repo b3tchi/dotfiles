@@ -402,8 +402,52 @@ def grade_eval6(run_dir: Path) -> list[dict]:
     return results
 
 
+def grade_eval7(run_dir: Path) -> list[dict]:
+    """feature-add-retro-no-fake-lineage: delivered ft### is the artifact.
+
+    Skill MUST refresh the delivered Feature surface and MUST NOT invent us###
+    or im### lineage just to satisfy story-backed retro assumptions.
+    """
+    art = gather_artifacts(run_dir)
+    text = art["text_all"]
+    status_text = (run_dir / "outputs" / "git-status.txt").read_text(errors="ignore") \
+        if (run_dir / "outputs" / "git-status.txt").exists() else ""
+    results = []
+
+    git_used = bool(re.search(r"(git log|git diff|merge-base|HEAD|shipped reality)", text, re.I))
+    results.append({"text": "Agent ran git log / git diff or otherwise cited shipped reality",
+                    "passed": git_used, "evidence": "git/shipped-reality evidence"})
+
+    delivered_ft_touched = bool(re.search(r"(^|\n)\s*(M|MM|AM)\s+docs/notes/ft\d{3}\.md\b", status_text))
+    ft_surface_refresh = bool(re.search(
+        r"(feature-add|delivered feature|ft\d{3}).{0,120}(surface|api_surface|providing|components|sample|refreshed|updated)",
+        text, re.I | re.S))
+    results.append({"text": "Feature-add retro refreshed the delivered ft### surface",
+                    "passed": delivered_ft_touched and ft_surface_refresh,
+                    "evidence": f"delivered_ft_touched={delivered_ft_touched} ft_surface_refresh={ft_surface_refresh}"})
+
+    invented_story = bool(re.search(r"(^|\n)\s*(A|AM|\?\?)\s+docs/notes/us\d{3}\.md\b", status_text))
+    invented_im = bool(re.search(r"(^|\n)\s*(A|AM|\?\?)\s+docs/notes/im\d{3}\.md\b", status_text))
+    fake_lineage_text = bool(re.search(r"(fake|invent|fabricat).{0,40}(us\d{3}|im\d{3}|story|implementation)", text, re.I | re.S))
+    no_fake_lineage = not (invented_story or invented_im or fake_lineage_text)
+    results.append({"text": "Feature-add retro creates no fake us###/im### lineage",
+                    "passed": no_fake_lineage,
+                    "evidence": f"invented_story={invented_story} invented_im={invented_im} fake_lineage_text={fake_lineage_text}"})
+
+    story_backed_rewrite = bool(re.search(r"(^|\n)\s*(M|MM|AM)\s+docs/notes/im\d{3}\.md\b", status_text))
+    results.append({"text": "Feature-add retro did not rewrite an im### as if story-backed",
+                    "passed": not story_backed_rewrite,
+                    "evidence": f"story_backed_rewrite={story_backed_rewrite}"})
+
+    results.append({"text": "Agent closed the bd epic",
+                    "passed": art["epic_status"] in ("closed", "done"),
+                    "evidence": f"epic_status={art['epic_status']}"})
+
+    return results
+
+
 GRADERS = {0: grade_eval0, 1: grade_eval1, 2: grade_eval2, 3: grade_eval3,
-           4: grade_eval4, 5: grade_eval5, 6: grade_eval6}
+           4: grade_eval4, 5: grade_eval5, 6: grade_eval6, 7: grade_eval7}
 
 
 def main(iter_dir: Path):
