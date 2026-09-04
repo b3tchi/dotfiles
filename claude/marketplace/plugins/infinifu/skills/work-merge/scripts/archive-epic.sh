@@ -126,10 +126,14 @@ if [ "$HAS_FEATURE" -eq 1 ]; then
   TOUCH_PATHS+=("$FT_FILE")
 fi
 
+START_HEAD="$(git -C "$AKM_ROOT" rev-parse HEAD)"
 BACKUP_DIR="$(mktemp -d)"
 rollback () {
   local code=$?
   trap - ERR
+  if [ "$(git -C "$AKM_ROOT" rev-parse HEAD 2>/dev/null || true)" != "$START_HEAD" ]; then
+    git -C "$AKM_ROOT" reset --hard -q "$START_HEAD" 2>/dev/null || true
+  fi
   for path in "${TOUCH_PATHS[@]}"; do
     rel="${path#$AKM_ROOT/}"
     if [ -f "$BACKUP_DIR/$rel" ]; then
@@ -189,15 +193,15 @@ else
   echo "WARN: $SP not found in $BOARD — board may have been hand-edited" >&2
 fi
 
-# Close the bd epic after all file mutations have succeeded. If bd close fails,
-# the ERR trap restores the files and index before exiting.
-bd close "$EPIC" --reason "Merged via $SP. All child tasks closed by work-audit." >/dev/null
-
-# Commit the lifecycle flip as one AKM admin commit on main.
+# Commit the lifecycle flip as one AKM admin commit on main before closing bd.
+# If the commit fails, bd state remains untouched. If bd close fails afterward,
+# the ERR trap resets this local commit and restores the file snapshot.
 git -C "$AKM_ROOT" add "$SP_ARCHIVE" "$BOARD" "$ARCHIVE"
 [ "$HAS_STORY" -eq 0 ] || git -C "$AKM_ROOT" add "$US_FILE" "$IM_FILE"
 [ "$HAS_FEATURE" -eq 0 ] || git -C "$AKM_ROOT" add "$FT_FILE"
 git -C "$AKM_ROOT" commit -m "feat(akm): archive $SP"
+
+bd close "$EPIC" --reason "Merged via $SP. All child tasks closed by work-audit." >/dev/null
 
 trap - ERR
 rm -rf "$BACKUP_DIR"

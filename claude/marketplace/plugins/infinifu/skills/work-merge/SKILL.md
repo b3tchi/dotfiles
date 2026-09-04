@@ -20,8 +20,8 @@ Two operations, gated by whether this task was the last open child of its parent
    - Fail before any board/archive/status mutation if the shape is unsupported or ambiguous (for example, only `us###`, only `im###`, no proposed feature for a feature-add spec, or multiple proposed `ft###` deliverables).
    - Flip applicable statuses: story-backed `us###.status: ready → done` and `im###.status: proposed → accepted`; feature-add `ft###.status: proposed → accepted`; always `sp###.status: ready → done` + footer `Index: [[board]] → [[archive]]`.
    - Remove `[[sp###]]` from `$AKM_ROOT/docs/board.md`. Add to `$AKM_ROOT/docs/archive.md ## done`.
-   - Close the bd epic with `bd close <epic-id>`.
    - Commit on `$AKM_ROOT`: `feat(akm): archive sp<NNN>`.
+   - Close the bd epic with `bd close <epic-id>` only after the file edits and commit succeed. If commit fails, bd is not touched; if bd close fails, the local archive commit is reset and files are restored.
 
 **LOCAL ONLY.** This skill never pushes, never opens a PR, never touches a remote. `spec-retro` pushes the AKM commits, archive move, and any new branches/refs once it has refreshed the knowledge graph.
 
@@ -169,8 +169,8 @@ Script behavior (`scripts/archive-epic.sh`):
 - `git mv`s the delivered spec `docs/notes/spec/sp###.md → docs/notes/archive/spec/sp###.md` (the archive mirror; `spec/` then holds only active specs). akm id-allocation + alias lookup span both dirs, so the id stays reserved and the spec stays findable via `akm read`.
 - Removes `[[sp###...]]` line from `$AKM_ROOT/docs/board.md`.
 - Inserts `[[sp###...]]` under `$AKM_ROOT/docs/archive.md ## done`.
-- `bd close <epic-id> --reason "Merged via sp###. All child tasks closed by work-audit."`
 - `git -C "$AKM_ROOT" add ... && git commit -m "feat(akm): archive sp<NNN>"`.
+- `bd close <epic-id> --reason "Merged via sp###. All child tasks closed by work-audit."` only after the archive commit succeeds.
 
 All local. No push.
 
@@ -219,7 +219,7 @@ Next: run spec-retro for sp### — it refreshes the AKM graph and pushes everyth
 - **Per-task land, not per-spec.** Each `bd-<id>.<N>` lands as it passes audit. Worktrees are ephemeral — they vanish before the next task starts, so the stale-worktree problem doesn't exist.
 - **`--no-ff` preserves bd boundaries.** `git log --first-parent <base>` shows one commit per bd task — readable history.
 - **Test gate before cleanup.** Worktree is the only place to recover from a bad merge. Remove it only after post-merge tests pass.
-- **No partial epic finale.** If the AKM flip starts and any of the file edits / bd close fails, the script aborts; nothing is left half-flipped. Recovery is manual (rare; the operations are simple file edits + one bd command).
+- **No partial epic finale.** If the AKM flip starts and any file edit or archive commit fails, the script aborts before bd close and restores the file snapshot. If bd close fails after the archive commit, the script resets that local commit and restores the same snapshot before exiting.
 - **Spec-retro is the next caller.** On epic finale, the report points the human/dispatcher at spec-retro for graph refresh + push. work-merge does not call spec-retro itself.
 
 ## Integration

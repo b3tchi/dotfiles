@@ -48,6 +48,7 @@ def init_workspace(root: Path) -> Path:
         root / "bd",
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
+        "if [ \"$1\" = close ]; then printf 'close %s\\n' \"$2\" >> bd.log; fi\n"
         "if [ \"${BD_FAIL_CLOSE:-0}\" = 1 ] && [ \"$1\" = close ]; then exit 42; fi\n"
         "exit 0\n",
     )
@@ -143,6 +144,7 @@ class ArchiveEpicTests(unittest.TestCase):
 
     def test_failure_during_archive_rolls_back_file_mutations(self) -> None:
         self.write_spec("ship feature", "## problem\nShip proposed [[ft001]].")
+        self.commit_spec("feature spec")
         before = self.docs_snapshot()
 
         result = run_archive(self.root, "sp001", "", "", "epic-1", fail_close=True)
@@ -151,6 +153,22 @@ class ArchiveEpicTests(unittest.TestCase):
         self.assertIn("rolled back", (result.stderr + result.stdout).lower())
         self.assertEqual(self.docs_snapshot(), before)
         self.assertFalse((self.root / "docs/notes/archive/spec/sp001.md").exists())
+
+    def test_commit_failure_rolls_back_files_without_closing_epic(self) -> None:
+        self.write_spec("ship feature", "## problem\nShip proposed [[ft001]].")
+        self.commit_spec("feature spec")
+        before = self.docs_snapshot()
+        hook = self.root / ".git/hooks/pre-commit"
+        hook.write_text("#!/usr/bin/env bash\necho forced commit failure >&2\nexit 43\n")
+        hook.chmod(0o755)
+
+        result = run_archive(self.root, "sp001", "", "", "epic-1")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("rolled back", (result.stderr + result.stdout).lower())
+        self.assertEqual(self.docs_snapshot(), before)
+        self.assertFalse((self.root / "docs/notes/archive/spec/sp001.md").exists())
+        self.assertFalse((self.root / "bd.log").exists(), "bd close must not run before a successful commit")
 
 
 if __name__ == "__main__":
