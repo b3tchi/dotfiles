@@ -1,4 +1,14 @@
+# gopass — password store (age backend), plus a gopass-backed Secret Service
+# provider so libsecret/MSAL clients get a real keyring on WSL (ft015).
 linux:
+  links:
+    # WSL-only. Runtime path check, not env.WSL_DISTRO_NAME — that var is
+    # unset in sessions spawned outside wsl.exe (tmux server, WSLg, ssh).
+    {{#if (eval "test -d /mnt/c && echo wsl || true")}}
+    wsl/gopass-secretservice.service: ~/.config/systemd/user/gopass-secretservice.service
+    wsl/canvas-mcp-relay.service: ~/.config/systemd/user/canvas-mcp-relay.service
+    {{/if}}
+
   installs:
     cmd: |
       {{#if (eq whoami.distro "Arch Linux")}}
@@ -32,4 +42,33 @@ linux:
           chmod 600 "$GOPASS_PW_FILE"
         fi
         echo "Passphrase saved to $GOPASS_PW_FILE"
+      fi
+
+      # ---- Secret Service provider + canvas MCP relay (WSL only, ft015) ----
+      # WSL has no gnome-keyring, so nothing owns org.freedesktop.secrets and
+      # MSAL cannot persist its token cache — every call demands an
+      # interactive sign-in. These two daemons fix that; both are userspace,
+      # no sudo, no extra packages beyond go.
+      if [ -d /mnt/c ]; then
+        DOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+        mkdir -p "$HOME/.local/bin"
+
+        # gopass-secretservice: implements org.freedesktop.Secret.{Service,
+        # Collection,Item,Session} (plain algorithm) and stores every item in
+        # gopass under the "secretservice/" namespace — GPG/age-encrypted at
+        # rest, and scoped so the daemon never reads the rest of the store.
+        (cd "$DOT_DIR/secretservice" && go build -o "$HOME/.local/bin/gopass-secretservice" .)
+
+        # canvas-mcp-relay: the canvas-authoring MCP server binds its OAuth
+        # redirect listener on [::1] only, while WSL forwards Windows
+        # localhost over IPv4 — the browser lands on nothing and connect
+        # hangs forever. MSAL picks a fresh port per sign-in, so this watches
+        # for new listeners and bridges 127.0.0.1:<port> -> [::1]:<port>.
+        # Only ports owned by the canvas process are bridged.
+        (cd "$DOT_DIR/relay" && go build -o "$HOME/.local/bin/canvas-mcp-relay" .)
+
+        # Run without an interactive login, and start now.
+        sudo loginctl enable-linger "{{ whoami.username }}" || true
+        systemctl --user daemon-reload
+        systemctl --user enable --now gopass-secretservice canvas-mcp-relay
       fi
