@@ -38,6 +38,35 @@ const (
 // GOPASS_SECRETSERVICE_PREFIX; nested paths ("svc/secrets") are fine.
 var gopassDir = defaultPrefix
 
+// maxSecretBytes caps a single item. The MSAL cache is ~4 KiB; the cap only
+// stops a misbehaving client writing unbounded data into the store.
+const maxSecretBytes = 1 << 20
+
+// defaultAllow limits which callers may store secrets here, so this daemon
+// holds canvas MCP tokens and nothing else. Matched as a prefix against the
+// item's "xdg:schema" attribute (libsecret's schema name), with "Product" as
+// a fallback for clients that omit it. Prefix rather than exact match on
+// purpose: MSAL writes a sibling schema for its own persistence self-check,
+// and refusing that would silently break sign-in. Override with
+// GOPASS_SECRETSERVICE_ALLOW (comma-separated prefixes); "*" allows all.
+var defaultAllow = []string{"com.microsoft.powerapps.canvasmcp"}
+
+var allowPrefixes = defaultAllow
+
+// allowed reports whether an item's attributes match the allowlist.
+func allowed(attrs map[string]string) bool {
+	for _, p := range allowPrefixes {
+		if p == "*" {
+			return true
+		}
+		if s := attrs["xdg:schema"]; s != "" && strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	// Fallback for clients that set no xdg:schema.
+	return attrs["Product"] == "PowerAppsCanvasMcp"
+}
+
 // validID guards every store path this daemon builds. IDs are sha256
 // prefixes we mint ourselves, so anything else -- most importantly a
 // traversal like "../canva_client_secret" arriving as a D-Bus object path --
@@ -276,6 +305,18 @@ func (c *collection) CreateItem(props map[string]dbus.Variant, secret Secret, re
 			label = s
 		}
 	}
+	if !allowed(attrs) {
+		log.Printf("CreateItem refused: schema %q product %q not in allowlist %v",
+			attrs["xdg:schema"], attrs["Product"], allowPrefixes)
+		return "/", "/", dbus.NewError("org.freedesktop.DBus.Error.AccessDenied",
+			[]interface{}{"attributes not permitted by this provider"})
+	}
+	if len(secret.Value) > maxSecretBytes {
+		log.Printf("CreateItem refused: %d bytes exceeds %d", len(secret.Value), maxSecretBytes)
+		return "/", "/", dbus.NewError("org.freedesktop.DBus.Error.LimitsExceeded",
+			[]interface{}{fmt.Sprintf("secret exceeds %d bytes", maxSecretBytes)})
+	}
+
 	id := attrID(attrs)
 	now := uint64(time.Now().Unix())
 	it := &item{
@@ -320,6 +361,11 @@ func (i *itemObj) GetSecret(sess dbus.ObjectPath) (Secret, *dbus.Error) {
 }
 
 func (i *itemObj) SetSecret(secret Secret) *dbus.Error {
+	if len(secret.Value) > maxSecretBytes {
+		log.Printf("SetSecret refused: %d bytes exceeds %d", len(secret.Value), maxSecretBytes)
+		return dbus.NewError("org.freedesktop.DBus.Error.LimitsExceeded",
+			[]interface{}{fmt.Sprintf("secret exceeds %d bytes", maxSecretBytes)})
+	}
 	it, err := i.s.load(i.id)
 	if err != nil {
 		it = &item{Attributes: map[string]string{}}
@@ -407,6 +453,14 @@ func main() {
 	if p := strings.Trim(os.Getenv("GOPASS_SECRETSERVICE_PREFIX"), "/ "); p != "" {
 		gopassDir = p
 	}
+	if a := strings.TrimSpace(os.Getenv("GOPASS_SECRETSERVICE_ALLOW")); a != "" {
+		allowPrefixes = nil
+		for _, p := range strings.Split(a, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				allowPrefixes = append(allowPrefixes, p)
+			}
+		}
+	}
 	conn, err := dbus.ConnectSessionBus()
 	if err != nil {
 		log.Fatalf("session bus: %v", err)
@@ -448,6 +502,7 @@ func main() {
 		s.exportItem(id)
 	}
 
-	log.Printf("gopass-secretservice up: %s (store %s/, pid %d)", svcName, gopassDir, os.Getpid())
+	log.Printf("gopass-secretservice up: %s (store %s/, allow %v, pid %d)",
+		svcName, gopassDir, allowPrefixes, os.Getpid())
 	select {}
 }
