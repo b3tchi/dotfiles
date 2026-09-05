@@ -1,19 +1,41 @@
 ---
 name: plan-supervised
-description: Use when executing an approved plan in batches with the user reviewing each batch before the next — the agent does the implementation, reports at each checkpoint, waits for user feedback before continuing. Pick this for human-in-the-loop supervised execution; pick plan-scrum-master for fully automated agent orchestration with an automated reviewer.
+description: Use when executing an approved plan in batches with the user reviewing each batch before the next. Under Pi, this is the sequential lifecycle path when no explicit multi-worker adapter is installed; under Claude's native branch, workers may still use the existing agent dispatch/resume semantics. Pick this for human-in-the-loop supervised execution; pick plan-scrum-master for fully automated Claude-native agent orchestration or future adapter-backed multi-worker orchestration.
 ---
 
 # Supervised Plan Execution
 
 ## Overview
 
-Load plan, review critically, execute tasks in batches, report for user review between batches.
+Load plan, review critically, execute tasks in runtime-appropriate batches, report for user review between batches.
 
 **Core principle:** Batch execution with human checkpoints — the user reviews each batch before the next one starts.
 
 **Announce at start:** "I'm using the plan-supervised skill to implement this plan."
 
 ## Prerequisites
+
+### Runtime adapter gate
+
+Follow the shared runtime-selection contract in
+`../meta-patterns/runtime-adapter.md` before starting a batch.
+
+- **Claude native branch:** if Claude's native agent surface is available, keep
+  the existing background-worker path used by the Claude lifecycle: workers may
+  be named, resumed, notified, audited, and merged through the Claude adapter.
+- **Pi branch (`AI_AGENT=pi`):** when no explicit Pi multi-worker adapter is
+  installed, run the batch sequentially in the current conversation: perform
+  `work-do`, then `work-audit`, then let approved audits trigger `work-merge`
+  before selecting the next task. Do not claim that Claude `Agent` subagents
+  were dispatched, do not infer worker completion from tmux panes, and do not
+  simulate Claude completion notifications.
+- **Unsupported runtime:** if neither branch is available, stop with
+  `unsupported-runtime` and name the lifecycle operation that cannot proceed.
+
+A future Pi multi-worker adapter may replace the sequential Pi behavior only
+when it explicitly provides worker dispatch, direct messaging, completion
+notification, resume, and stop semantics without changing the bd/Git/AKM state
+model.
 
 Before using this skill, TWO mandatory gates must have been passed:
 
@@ -35,9 +57,9 @@ If either gate was not passed, STOP and go back. Do NOT start execution without 
 ### Step 2: Execute Batch
 **Default: First 3 tasks**
 
-For each task, follow the **`work-do`** per-task protocol: `bd show` → claim → name branch `bd-<id>` → implement via `domain-tdd` → log deviations immediately → record evidence in notes → report ready. `work-do` has the full checklist; don't reinvent it inline.
+For each task, follow the **`work-do`** per-task protocol: `bd show` → claim → name branch `bd-<id>.<N>` → implement via `domain-tdd` → log deviations immediately → record evidence in notes → report ready. `work-do` has the full checklist; don't reinvent it inline.
 
-After the implementer reports ready, run **`work-audit`** to verify. On APPROVED, work-audit closes the task and auto-fires **`work-merge`** — per-task local land (merge `bd-<id>` into base, post-merge test, remove worktree, delete branch). If the just-closed task was the last open child of the epic, work-merge also runs the epic finale (AKM status flips + board→archive + bd close epic). All local — push is deferred to spec-retro.
+After the implementer reports ready, run **`work-audit`** to verify. On APPROVED, work-audit closes the task and auto-fires **`work-merge`** — per-task local land (merge `bd-<id>.<N>` into base, post-merge test, remove worktree, delete branch). If the just-closed task was the last open child of the epic, work-merge also runs the epic finale (AKM status flips + board→archive + bd close epic). All local — push is deferred to spec-retro.
 
 After each task lands, run `bd ready` to find the next unblocked task.
 

@@ -1,5 +1,10 @@
 # Architecture: why scrum-master runs inline
 
+This reference documents the **Claude native branch** of the scrum-master
+runtime adapter. It is not a Pi runtime detector, and it must not be applied
+under `AI_AGENT=pi` unless a Pi adapter explicitly maps each operation below to
+its own supported surface.
+
 The main Claude session is the scrum-master. The user invokes the skill directly (`/plan-dispatch-fnf` or equivalent) and talks to the orchestrator as themselves. No wrapper agent.
 
 - Main Claude holds the dispatch loop, shows summaries, asks confirmations, handles waves feedback, reports progress — all in the live conversation.
@@ -14,6 +19,8 @@ Claude Code's harness does not allow sub-agents to dispatch further sub-agents (
 If you see the deprecated `infinifu:scrum-master` wrapper agent referenced anywhere, use the inline pattern (this skill in main Claude) instead.
 
 ## Worker dispatch contract
+
+Claude native branch only:
 
 - **No `isolation: "worktree"`** — the implementer creates its own git worktree at `bd-<id>.<N>` (matching branch name) so `git worktree list` is self-documenting and the cleanup sweeps in work-merge + spec-retro can map dir → task mechanically.
 - `name` — **required on every dispatch.** `impl-<bd-id>` for implementers, `rev-<bd-id>` for reviewers. Names must match `[A-Za-z0-9][A-Za-z0-9_-]{0,63}` (no dots — do NOT append the worktree iteration `.N`). On a fresh retry dispatch that must coexist with the original, suffix `-r2`.
@@ -37,3 +44,17 @@ Naming the workers is what makes the pipeline a team rather than a set of fire-a
 A worker can also reach the orchestrator mid-run with `SendMessage({to: "main", ...})` — that is the channel for a blocked implementer that wants a decision without ending its turn. Worker prose is not visible to anyone else; only `SendMessage` crosses the boundary.
 
 Names survive completion: a send to a completed agent's name resumes it from its transcript, which is exactly what the rejection-retry path in Step 5 relies on. Use the raw `agentId` only when no name was set, or when a newer agent has taken the name (latest wins).
+
+## Future Pi multi-worker adapter insertion point
+
+The Pi branch starts sequential and unsupported for visible multi-worker
+scrum-master dispatch. A later adapter may replace that behavior only if it
+implements named worker dispatch, direct messaging, completion notification,
+resume, and stop semantics with Pi-native commands. It must also keep the same
+durable state model: bd for task contracts and notes, Git for source branches
+and worktrees, and AKM for knowledge artifacts.
+
+The adapter's runtime gate must be explicit (`AI_AGENT=pi` or a future declared
+Pi capability flag). It does not use [[ft012]] or Claude census output as
+runtime detection, and tmux remains only a process/display host unless the Pi
+adapter separately documents a message bus.

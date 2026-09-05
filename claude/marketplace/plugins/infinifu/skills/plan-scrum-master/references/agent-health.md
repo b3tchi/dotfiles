@@ -1,5 +1,13 @@
 # Agent health monitoring
 
+This reference has two runtime branches. **Claude native branch only:** use
+Claude worker names plus `ListAgents` / `TaskStop` as described below. **Pi
+branch:** do not call `ListAgents` or `TaskStop` unless an installed Pi adapter
+maps those operations to Pi-native commands; use the installed Pi adapter health
+surface instead. Without that adapter, visible multi-worker health monitoring is
+unsupported and the scrum-master must fail clearly or use sequential
+`plan-supervised` execution.
+
 **Alert the user immediately** when any agent shows signs of struggling. Do not wait for the agent to finish or fail — early warning saves time and money, and a stuck agent burns tokens until killed.
 
 ## Signals to watch
@@ -26,7 +34,7 @@ Suggestion: [kill and reassign | wait longer | split task | human intervention]
 
 ## Checking on live workers
 
-`ListAgents` is the cheap read: every row leads with the worker's `name [ref]` and says whether it is busy or idle right now. Use it to build the health picture instead of guessing from elapsed time alone.
+Claude native branch only: `ListAgents` is the cheap read: every row leads with the worker's `name [ref]` and says whether it is busy or idle right now. Use it to build the health picture instead of guessing from elapsed time alone. This is Claude agent-surface health, not a Pi runtime detector.
 
 - **Never poll it in a loop, and never send "are you done?"** — completion notifications arrive on their own.
 - To hear when a worker goes quiet, prefer the one-shot subscription over repeated checks.
