@@ -276,7 +276,7 @@ bd list --parent <epic-id> --status open --json | jq -r '.[].id' \
 
 Skip this if the epic is already `in_progress` / P1 (e.g., resumed session). Do this once per epic, not per task. If some child tasks already have a higher-priority override (P0 — urgent), leave those alone.
 
-### Dispatch the task
+### Dispatch the task (Claude native branch)
 
 Claude native branch only: for each task, run `bd show <id>` and dispatch an `Agent` tool call with `name: "impl-<bd-id>"` (no `run_in_background` — subagents are background by default; no `isolation: "worktree"` — that auto-generates an opaque dir name; the implementer creates its own worktree at the right name per work-do Step 2). In Pi, do not use this section unless a Pi multi-worker adapter has replaced the Claude tool names with its own supported surface. The dispatch payload contains:
 

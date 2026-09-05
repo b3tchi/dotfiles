@@ -115,6 +115,8 @@ Resolve lineage before auditing source:
    source story acceptance criteria remain binding.
 3. For feature-add specs, require the owning/proposed `ft###` and bind success
    criteria to the Feature surface plus the spec problem/solution/task block.
+   Do not fabricate a source `us###` or a consumed `im###` to make the task look
+   story-backed; their absence is the shape, not a gap.
 4. Ambiguous lineage gate: if a ticket links to a missing or non-ready spec, a
    story-backed task lacks `us###` or `im###`, a feature-add task lacks `ft###`,
    or mixed deliverables cannot be separated, reject before reading source

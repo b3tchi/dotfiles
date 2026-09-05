@@ -18,7 +18,7 @@ Claude Code's harness does not allow sub-agents to dispatch further sub-agents (
 
 If you see the deprecated `infinifu:scrum-master` wrapper agent referenced anywhere, use the inline pattern (this skill in main Claude) instead.
 
-## Worker dispatch contract
+## Worker dispatch contract (Claude native branch)
 
 Claude native branch only:
 
@@ -30,7 +30,7 @@ Claude native branch only:
 
 The orchestrator does **not** poll or sleep — it reacts to completion notifications.
 
-## Agent teams: the addressing contract
+## Agent teams: the addressing contract (Claude native branch)
 
 Naming the workers is what makes the pipeline a team rather than a set of fire-and-forget calls:
 

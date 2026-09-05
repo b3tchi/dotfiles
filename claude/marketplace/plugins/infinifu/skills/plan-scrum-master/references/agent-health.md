@@ -32,7 +32,7 @@ Detail:     [what was observed — agent quotes if available]
 Suggestion: [kill and reassign | wait longer | split task | human intervention]
 ```
 
-## Checking on live workers
+## Checking on live workers (Claude native branch)
 
 Claude native branch only: `ListAgents` is the cheap read: every row leads with the worker's `name [ref]` and says whether it is busy or idle right now. Use it to build the health picture instead of guessing from elapsed time alone. This is Claude agent-surface health, not a Pi runtime detector.
 
