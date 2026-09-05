@@ -60,6 +60,29 @@ for Pi. That adapter still uses bd as the task contract, Git as the source
 contract, and AKM as the knowledge contract; it does not use [[ft012]] or
 Claude agent-census output as runtime detection.
 
+##### Transport boundary (binds any Pi adapter)
+
+[[ft014]] hosts Pi workers as named windows in an existing linked tmux project
+group. Tmux is the display and process host and nothing more. It is **not** the
+bus: no adapter may use `tmux send-keys`, `tmux wait-for`, pane or window
+options, or `display-message` to carry a message, a completion signal, a status,
+or any coordination state.
+
+The shortcut is tempting because both verbs appear to work — `wait-for` really
+does block until a worker signals, `send-keys` really does deliver a string.
+Neither can be versioned, sequenced, addressed, or replayed after a crash, and
+`send-keys` types its text into whatever now occupies a stale target: a shell, a
+different Pi session, somebody's editor. Messages travel only as versioned JSON
+envelopes under `$XDG_RUNTIME_DIR/infinifu-worker/<run-id>/<worker-uid>/`.
+
+Legitimate tmux calls are window and process lifecycle only — `new-window`,
+`list-windows`, `kill-window`. Completion is never inferred from an idle prompt,
+an exited pane, or assistant prose; a worker that settles without writing a
+typed result envelope is recorded as `protocol_error`, never as complete.
+Missing process, bus, or transcript evidence yields `unknown`, which is an
+observation and never licenses stopping, accepting, or deleting anything
+([[adr0017]]).
+
 #### Unsupported runtime
 
 If neither `AI_AGENT=pi` nor the Claude native branch is available, stop with
