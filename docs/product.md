@@ -57,6 +57,8 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[adr0011|bespoke clipnotify file store over vendor clipboard managers]]
 - [[adr0015|Python is an allowed language for X-ecosystem clients and prototypes]]
 - [[adr0026|AKM lineage is declared by section, never inferred from a prose mention]]
+- [[adr0027|A delegated stage's completion is read from a typed field, never from its prose]]
+- [[adr0028|tmux hosts and displays agent workers; it never carries their messages]]
 
 ### [[cat002|display-platform]]
 
