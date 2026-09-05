@@ -21,7 +21,6 @@ sections when status flips.
 
 ## ready
 
-- [[sp028|pi-visible-tmux-workers]]
 
 
 - [[sp012|live-region-xshape-overlay]]

@@ -5,6 +5,8 @@ Shipped workstreams. Specs (`sp###`) at `status: done` after
 
 ## done
 
+- [[sp028|pi-visible-tmux-workers]]
+
 - [[sp027|infinifu-dual-runtime-lifecycle]]
 
 - [[sp026|agent-census-per-project]]
