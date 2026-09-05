@@ -294,3 +294,309 @@ export def settled-without-result [run: string, uid: string, sequence: int, crea
         }
     }
 }
+
+# ============================================================== message bus
+#
+# Layout, one directory per addressee:
+#
+#   $XDG_RUNTIME_DIR/infinifu-worker/<run-id>/<worker-uid>/
+#       inbox/<sequence>.json     messages to the worker
+#       outbox/<sequence>.json    results from the worker
+#       outbox/<sequence>.ack     delivery receipt, written by the initiator
+#
+# Addressing is the directory path, which is what makes cross-run isolation
+# structural rather than a filter someone can forget: a reader scoped to
+# run-1 cannot form a path into run-2.
+#
+# Two durability rules hold everything together:
+#
+#   1. Every envelope is written to a scratch name and renamed into place.
+#      rename(2) is atomic, so a reader sees the whole envelope or no file at
+#      all. An interrupted write leaves a `.tmp.` file, which no reader looks
+#      at.
+#   2. A sequence slot is claimed with link(2), which fails if the target
+#      exists. Two writers racing for the same slot cannot both win, so the
+#      loser retries instead of silently overwriting the winner.
+#
+# `wait` is deliberately non-destructive: it reports the oldest unacknowledged
+# result and leaves it in place. Only `ack` marks it delivered, so an initiator
+# that dies between reading and acknowledging sees the same result again.
+# Acknowledgement is a delivery receipt and nothing more — it never means the
+# work was accepted.
+
+const BUS_DIRNAME = "infinifu-worker"
+const MAX_SEQUENCE_ATTEMPTS = 64
+
+# Root of the bus tree. Keyed entirely off XDG_RUNTIME_DIR so a test — or a
+# second user on the same machine — gets a wholly separate universe.
+export def bus-root []: nothing -> string {
+    let base = ($env | get -o XDG_RUNTIME_DIR | default "")
+    if ($base | is-empty) {
+        error make {msg: "XDG_RUNTIME_DIR is unset: the worker bus has no runtime directory to address"}
+    }
+    $base | path join $BUS_DIRNAME
+}
+
+def run-dir [run: string]: nothing -> string { bus-root | path join $run }
+def worker-dir [run: string, uid: string]: nothing -> string { run-dir $run | path join $uid }
+
+# Refuse a bus tree we do not own or that others can read.
+#
+# $XDG_RUNTIME_DIR is normally private, but it is not guaranteed to be, and a
+# bus tree planted under a world-writable path by someone else would otherwise
+# be used as if it were ours. Envelopes carry task ids, session ids and resume
+# commands; they are not for other users.
+export def bus-assert-owned [dir: string] {
+    if not ($dir | path exists) {
+        error make {msg: $"bus directory does not exist: ($dir)"}
+    }
+    let owner = (^stat -c "%u" $dir | str trim | into int)
+    let me = (^id -u | str trim | into int)
+    if $owner != $me {
+        error make {msg: $"refusing to use ($dir): owner uid ($owner) is not this user (($me))"}
+    }
+    let mode = (^stat -c "%a" $dir | str trim)
+    if $mode != "700" {
+        error make {msg: $"refusing to use ($dir): mode ($mode) is not 0700, so another user could read worker envelopes"}
+    }
+}
+
+# Create a directory chain private to this user, verifying each level.
+#
+# `mkdir -m 700` rather than mkdir-then-chmod: the two-step version leaves the
+# directory at the umask mode (0755 on a default umask) for a moment, and a
+# concurrent writer that checks it in that window correctly refuses to use it.
+# That is not theoretical — three racing writers hit it on the first run of the
+# concurrency case. `-p` makes losing the create race a no-op instead of an
+# error.
+def ensure-dir [dir: string] {
+    if not ($dir | path exists) {
+        ^mkdir -m 700 -p $dir
+    }
+    bus-assert-owned $dir
+}
+
+def ensure-worker-dirs [run: string, uid: string] {
+    ensure-dir (bus-root)
+    ensure-dir (run-dir $run)
+    ensure-dir (worker-dir $run $uid)
+    for box in ["inbox" "outbox"] {
+        ensure-dir (worker-dir $run $uid | path join $box)
+    }
+}
+
+# Write `envelope` into `dir` at the next free sequence.
+#
+# The scratch file is created with the final mode BEFORE it is linked into
+# place, so an envelope is never briefly readable by anyone else. link(2)
+# claims the slot; if another writer got there first, the next sequence is
+# tried. The scratch file is removed in both outcomes.
+def claim-slot [dir: string, envelope: record] {
+    let scratch = ($dir | path join $".tmp.(random chars --length 10)")
+
+    mut seq = ((next-sequence $dir) - 1)
+    mut attempts = 0
+    loop {
+        $seq = $seq + 1
+        $attempts = $attempts + 1
+        if $attempts > $MAX_SEQUENCE_ATTEMPTS {
+            rm -f $scratch
+            error make {msg: $"could not claim a sequence in ($dir) after ($MAX_SEQUENCE_ATTEMPTS) attempts"}
+        }
+
+        let sealed = ($envelope | update sequence $seq)
+        validate-envelope $sealed
+        $sealed | to json | save -f $scratch
+        chmod 600 $scratch
+
+        let target = ($dir | path join $"($seq).json")
+        let linked = (do { ^ln $scratch $target } | complete)
+        if $linked.exit_code == 0 {
+            rm -f $scratch
+            return $sealed
+        }
+        # Slot taken by a concurrent writer: try the next one.
+    }
+}
+
+# Lowest unused sequence in a box. Sequences start at 1 so that a missing file
+# and sequence zero can never be confused.
+def next-sequence [dir: string]: nothing -> int {
+    let used = (
+        ls $dir
+        | get name
+        | where {|n| ($n | path basename | str ends-with ".json") }
+        | each {|n| $n | path basename | str replace ".json" "" | into int }
+    )
+    if ($used | is-empty) { 1 } else { ($used | math max) + 1 }
+}
+
+# Read every envelope in a box, oldest first.
+#
+# Scratch files are skipped by name: an interrupted write leaves `.tmp.<rand>`,
+# which is not a sequence file, so a partial envelope is structurally invisible
+# rather than filtered out after parsing.
+#
+# A file that IS named like an envelope but does not parse or does not validate
+# is an error, never a skip. Silently passing over it would let a completion
+# disappear, which is strictly worse than stopping: the operator can fix a
+# named file, but cannot notice a result that was never reported.
+# NOTE ON THE LOOP: this is a `for` accumulating into a mut, not the `each`
+# pipeline it visually wants to be. In nushell 0.115 an `error make` raised
+# inside an `each` closure is SWALLOWED — the element is passed through and the
+# pipeline completes as if nothing happened. Measured directly:
+#
+#   [1 2] | each {|x| if $x == 2 { error make {msg: "boom"} }; $x } | length
+#   => 2      (no error surfaces)
+#
+# The same body inside `for` raises correctly. That difference is the whole
+# reason this reads the way it does: with `each`, a corrupt envelope was
+# delivered to the initiator as a bare string with no error anywhere — the
+# exact silent-failure mode "fail closed" exists to prevent. Do not "simplify"
+# this back into `each` without re-measuring that behavior.
+def read-box [dir: string]: nothing -> list<record> {
+    if not ($dir | path exists) { return [] }
+    let files = (
+        ls $dir
+        | get name
+        | where {|n| ($n | path basename | str ends-with ".json") }
+        | sort-by {|n| $n | path basename | str replace ".json" "" | into int }
+    )
+
+    mut envelopes = []
+    for n in $files {
+        let raw = (open --raw $n)
+        let parsed = (try { $raw | from json } catch {
+            error make {msg: $"unparseable envelope ($n | path basename) in ($dir): the bus fails closed rather than skipping a message"}
+        })
+        # `from json` is lenient: given bare text it returns that text as a
+        # string instead of raising, so the shape has to be checked explicitly.
+        if not (($parsed | describe) | str starts-with "record") {
+            error make {msg: $"unparseable envelope ($n | path basename) in ($dir): expected a JSON object, got ($parsed | describe)"}
+        }
+        try { validate-envelope $parsed } catch {|e|
+            error make {msg: $"invalid envelope ($n | path basename) in ($dir): ($e.msg)"}
+        }
+        $envelopes = ($envelopes | append $parsed)
+    }
+    $envelopes
+}
+
+def now-stamp []: nothing -> string { date now | format date "%Y-%m-%dT%H:%M:%S%.6fZ" }
+
+def envelope-for [run: string, uid: string, kind: string, payload: record]: nothing -> record {
+    {
+        protocol: $PROTOCOL_VERSION
+        sequence: 0
+        run: $run
+        uid: $uid
+        kind: $kind
+        created: (now-stamp)
+        payload: $payload
+    }
+}
+
+# --------------------------------------------------------------- commands
+
+# Address a message to one worker's inbox.
+export def bus-send [
+    uid: string
+    --run: string
+    --payload: record
+]: nothing -> record {
+    # Validate before creating anything: a rejected message must leave no trace
+    # in the runtime directory, not even an empty worker tree.
+    validate-envelope (envelope-for $run $uid "inbox" $payload)
+    ensure-worker-dirs $run $uid
+    claim-slot (worker-dir $run $uid | path join "inbox") (envelope-for $run $uid "inbox" $payload)
+}
+
+# Write a worker's outcome to its outbox.
+export def bus-result [
+    uid: string
+    --run: string
+    --result: record
+]: nothing -> record {
+    validate-envelope (envelope-for $run $uid "result" $result)
+    ensure-worker-dirs $run $uid
+    claim-slot (worker-dir $run $uid | path join "outbox") (envelope-for $run $uid "result" $result)
+}
+
+# Everything addressed to one worker.
+export def bus-inbox [uid: string, --run: string]: nothing -> list<record> {
+    read-box (worker-dir $run $uid | path join "inbox")
+}
+
+def ack-path [run: string, uid: string, sequence: int]: nothing -> string {
+    worker-dir $run $uid | path join "outbox" $"($sequence).ack"
+}
+
+# Every unacknowledged result in a run, oldest first, across all its workers.
+export def bus-pending [run: string]: nothing -> list<record> {
+    let dir = (run-dir $run)
+    if not ($dir | path exists) { return [] }
+    let workers = (ls $dir | where type == dir | get name | sort)
+
+    # `for`, not `each`, for the same reason as read-box: an `each` here would
+    # swallow the read-box rejection it is supposed to surface.
+    mut pending = []
+    for w in $workers {
+        let uid = ($w | path basename)
+        let unacked = (
+            read-box ($w | path join "outbox")
+            | where {|e| not (ack-path $run $uid $e.sequence | path exists) }
+        )
+        $pending = ($pending | append $unacked)
+    }
+    $pending | sort-by created
+}
+
+# The oldest unacknowledged result in a run, or nothing.
+#
+# Non-destructive by design: an initiator that dies between reading this and
+# acknowledging it must see the same envelope on restart. Delivery state is the
+# `.ack` file on disk, never anything held in the reader.
+export def bus-wait [--run: string, --json]: nothing -> any {
+    let pending = (bus-pending $run)
+    if ($pending | is-empty) { return null }
+    let next = ($pending | first)
+    if $json { $next | to json } else { $next }
+}
+
+# Record delivery of one result. This is a receipt, NOT acceptance: the work
+# still needs review, and the worker stays visible until it is explicitly
+# accepted.
+export def bus-ack [--run: string, --uid: string, --sequence: int] {
+    let envelope = (worker-dir $run $uid | path join "outbox" $"($sequence).json")
+    if not ($envelope | path exists) {
+        error make {msg: $"cannot acknowledge ($run)/($uid) sequence ($sequence): no such result envelope"}
+    }
+    let marker = (ack-path $run $uid $sequence)
+    let scratch = ($marker + $".tmp.(random chars --length 10)")
+    (now-stamp) | save -f $scratch
+    chmod 600 $scratch
+    mv -f $scratch $marker
+}
+
+# What is known about one worker.
+#
+# `state` is the status of its latest result. A worker with no evidence at all
+# reports `unknown` — an observation, not a persisted state, and per adr0017
+# never a licence to stop, accept, or delete anything.
+export def bus-status [uid: string, --run: string]: nothing -> record {
+    let dir = (worker-dir $run $uid)
+    if not ($dir | path exists) {
+        return {run: $run, uid: $uid, state: "unknown", unacked: 0, results: 0, inbox: 0}
+    }
+    let results = (read-box ($dir | path join "outbox"))
+    let unacked = ($results | where {|e| not (ack-path $run $uid $e.sequence | path exists) })
+    let state = if ($results | is-empty) { "running" } else { ($results | last | get payload.status) }
+    {
+        run: $run
+        uid: $uid
+        state: $state
+        unacked: ($unacked | length)
+        results: ($results | length)
+        inbox: (read-box ($dir | path join "inbox") | length)
+    }
+}

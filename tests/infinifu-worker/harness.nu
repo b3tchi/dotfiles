@@ -96,3 +96,35 @@ export def sample-envelope [kind: string]: nothing -> record {
     }
     $base | insert payload $payload
 }
+
+# --------------------------------------------------------- bus sandboxes
+
+# Every bus suite runs against its own XDG_RUNTIME_DIR. The bus keys entirely
+# off that variable, so an isolated one gives each case a private universe —
+# no shared state between cases, and nothing written near the real runtime dir
+# of a live session.
+export def make-runtime [tag: string]: nothing -> string {
+    let root = ([$nu.temp-dir $"infinifu-worker-test-($tag)-(random chars --length 6)"] | path join)
+    rm -rf $root
+    mkdir $root
+    chmod 700 $root
+    $root
+}
+
+export def with-runtime [root: string, body: closure] {
+    with-env {XDG_RUNTIME_DIR: $root} { do $body }
+}
+
+# File mode as the `rwx` string nushell reports, e.g. "rw-------".
+export def mode-of [path: string]: nothing -> string {
+    ls -l $path | get 0.mode
+}
+
+# `ls -ld` returns nothing on this nushell, so a directory's own mode has to be
+# read from its parent's listing.
+export def dir-mode-of [path: string]: nothing -> string {
+    let parent = ($path | path dirname)
+    let entry = (ls -l $parent | where name == $path)
+    if ($entry | is-empty) { error make {msg: $"no such directory: ($path)"} }
+    $entry | get 0.mode
+}

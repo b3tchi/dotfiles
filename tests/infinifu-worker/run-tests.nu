@@ -6,12 +6,12 @@
 # Exit status is 0 when every case passes and 1 when any case fails, so this is
 # usable as a merge gate.
 #
-# Every case here is pure: schemas, the state table, and static reads of shipped
-# files. No tmux server, no Pi process, no runtime directory — those arrive with
-# the bus implementation in sp028 T2-T4 and get their own suites. Keeping T1's
-# gate free of live processes is deliberate: a contract suite that needs a tmux
-# server only runs on one machine, and a protocol nobody can check is a protocol
-# that drifts.
+# No tmux server and no Pi process is required. The schema, transition and
+# static suites are pure; the bus suite does real filesystem IO but each case
+# runs against its own XDG_RUNTIME_DIR under the temp dir, so the suite never
+# touches a live session's runtime directory and cases cannot leak into each
+# other. A gate that needed a live tmux server would only ever run on one
+# machine, and a protocol nobody can check is a protocol that drifts.
 #
 # Suites run as subprocesses so a module that fails to PARSE reports as one
 # failed suite instead of taking the runner down with it.
@@ -23,6 +23,7 @@ const SUITES = [
     ["schema",     "schema-cases.nu"]
     ["transition", "transition-cases.nu"]
     ["static",     "static-cases.nu"]
+    ["bus",        "bus-cases.nu"]
 ]
 
 def run-subsuite [label: string, file: string] {
