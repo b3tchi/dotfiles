@@ -39,7 +39,7 @@ export const MAX_ENVELOPE_BYTES = 65536
 # worker window and the Pi JSONL.
 export const MAX_SUMMARY_BYTES = 4096
 
-export const ENVELOPE_KINDS = ["inbox" "result" "error"]
+export const ENVELOPE_KINDS = ["inbox" "result" "error" "identity"]
 
 # Persisted worker states.
 export const WORKER_STATES = [
@@ -220,6 +220,20 @@ def validate-result-payload [payload: record] {
     }
 }
 
+# Identity ties a worker UID to where it runs, what resumes it, and where it is
+# visible. Every field is required: an identity missing its cwd or session is
+# exactly the record that cannot be acted on later.
+def validate-identity [payload: record] {
+    for required in ["role" "cwd" "branch" "session" "skill" "window"] {
+        if $required not-in ($payload | columns) {
+            error make {msg: $"identity payload must carry ($required)"}
+        }
+        if ($payload | get $required | is-empty) {
+            error make {msg: $"identity payload field '($required)' must not be empty"}
+        }
+    }
+}
+
 def validate-error-payload [payload: record] {
     for required in ["code" "detail"] {
         if $required not-in ($payload | columns) {
@@ -272,6 +286,7 @@ export def validate-envelope [envelope: record] {
         "inbox" => { validate-inbox-payload $envelope.payload }
         "result" => { validate-result-payload $envelope.payload }
         "error" => { validate-error-payload $envelope.payload }
+        "identity" => { validate-identity $envelope.payload }
     }
 }
 
@@ -599,4 +614,213 @@ export def bus-status [uid: string, --run: string]: nothing -> record {
         results: ($results | length)
         inbox: (read-box ($dir | path join "inbox") | length)
     }
+}
+
+# ========================================================= worker worktrees
+#
+# Each worker gets its own git worktree at `<repo>/.worktrees/bd-<task>.<N>`
+# on a branch of the same name. Directory and branch share a name so
+# `git worktree list` is self-documenting and a later sweep can map a directory
+# back to its task mechanically.
+#
+# The whole layer is biased toward refusing. Allocation must never hand back a
+# worktree that already holds someone's work, and cleanup must never delete
+# work that was not both committed and accepted. A false refusal costs a retry;
+# a false deletion costs the work, and `git worktree remove` is the last thing
+# standing between an uncommitted change and oblivion.
+
+const WORKTREE_SUBDIR = ".worktrees"
+const MAX_ITERATION_ATTEMPTS = 64
+
+def worktrees-dir [repo: string]: nothing -> string { $repo | path join $WORKTREE_SUBDIR }
+
+# Every branch git knows about, whether or not it has a directory.
+#
+# Checking directories on disk is not enough: a swept iteration leaves its
+# branch behind, and handing that branch to a new worker would stack two
+# attempts' history on one ref.
+def known-branches [repo: string]: nothing -> list<string> {
+    ^git -C $repo branch --list --format "%(refname:short)"
+    | lines
+    | each {|b| $b | str trim }
+    | where {|b| ($b | str length) > 0 }
+}
+
+# `git worktree list --porcelain` as records of {path, branch, locked}.
+def registered-worktrees [repo: string]: nothing -> list<record> {
+    let out = (^git -C $repo worktree list --porcelain | lines)
+    mut entries = []
+    mut current = {path: "", branch: "", locked: false}
+    for line in $out {
+        if ($line | str starts-with "worktree ") {
+            if ($current.path | is-not-empty) { $entries = ($entries | append $current) }
+            $current = {path: ($line | str substring 9..), branch: "", locked: false}
+        } else if ($line | str starts-with "branch ") {
+            $current = ($current | update branch ($line | str substring 7.. | str replace "refs/heads/" ""))
+        } else if ($line | str starts-with "locked") {
+            $current = ($current | update locked true)
+        }
+    }
+    if ($current.path | is-not-empty) { $entries = ($entries | append $current) }
+    $entries
+}
+
+# True when the worktree at `path` has any change git would lose.
+#
+# `--porcelain` with untracked files included: an untracked scratch file is
+# exactly as unrecoverable as an unstaged edit, and is the likelier of the two
+# to be someone's notes.
+def worktree-dirty? [path: string]: nothing -> bool {
+    (^git -C $path status --porcelain --untracked-files=all | str trim | is-not-empty)
+}
+
+# Allocate the next free `bd-<task>.<N>` worktree.
+#
+# Serialisation reuses the bus's link(2) idiom rather than a lock file with a
+# timeout: creating the branch is itself the claim. `git branch` fails if the
+# ref already exists, so two racing allocators cannot both take an iteration —
+# the loser sees the failure and moves to the next number. There is no window
+# in which both believe they own it, and no lock to leak if a process dies.
+export def worktree-allocate [--repo: string, --task: string] {
+    let base = (worktrees-dir $repo)
+    if not ($base | path exists) { mkdir $base }
+
+    # First of two independent guards against reusing an occupied ref. This
+    # scan skips past iterations that already exist; `git worktree add -b`
+    # below refuses an existing branch outright. Either alone is sufficient,
+    # and they fail differently — the scan cannot see a ref created a
+    # microsecond later, and the atomic create cannot tell a lost race from a
+    # real error without retrying. Keeping both is deliberate, not redundant.
+    # Mutating either one on its own leaves the suite green; the invariant they
+    # jointly protect (an existing branch is never moved or reset) is asserted
+    # directly instead.
+    let taken = (known-branches $repo)
+    mut n = (
+        $taken
+        | where {|b| $b | str starts-with $"bd-($task)." }
+        | each {|b| try { $b | split row "." | last | into int } catch { -1 } }
+        | append (-1)
+        | math max
+    )
+
+    mut attempts = 0
+    loop {
+        $n = $n + 1
+        $attempts = $attempts + 1
+        if $attempts > $MAX_ITERATION_ATTEMPTS {
+            error make {msg: $"could not allocate a worktree for ($task) after ($MAX_ITERATION_ATTEMPTS) attempts"}
+        }
+
+        let branch = $"bd-($task).($n)"
+        let path = ($base | path join $branch)
+        if ($path | path exists) { continue }
+
+        # `git worktree add -b` creates the branch and the directory in one
+        # step and fails if the branch already exists — that failure IS the
+        # lost race, so it is a retry rather than an error.
+        let added = (do { ^git -C $repo worktree add --quiet -b $branch $path } | complete)
+        if $added.exit_code == 0 {
+            return {branch: $branch, path: $path, iteration: $n, repo: $repo}
+        }
+    }
+}
+
+# Confirm a worktree is this worker's and is safe to use.
+#
+# Four separate refusals, because they mean different things to whoever reads
+# the error: not registered (git does not know it), wrong branch (someone
+# else's), locked (deliberately held), dirty (holds work).
+export def worktree-validate [--repo: string, --path: string, --branch: string] {
+    if not ($path | path exists) {
+        error make {msg: $"worktree path does not exist: ($path)"}
+    }
+    let entry = (registered-worktrees $repo | where path == $path)
+    if ($entry | is-empty) {
+        error make {msg: $"($path) is not registered as a worktree of ($repo): git does not know about it"}
+    }
+    let found = ($entry | first)
+    if $found.branch != $branch {
+        error make {msg: $"worktree ($path) is on branch ($found.branch), not ($branch): it belongs to another worker"}
+    }
+    if $found.locked {
+        error make {msg: $"worktree ($path) is locked: someone is deliberately holding it"}
+    }
+    if (worktree-dirty? $path) {
+        error make {msg: $"worktree ($path) holds uncommitted work"}
+    }
+}
+
+# Remove a worker's worktree and branch — only with evidence that the work is
+# finished with.
+#
+# Two independent gates, and both must pass:
+#
+#   1. Evidence. Either an explicit `--accepted` (a human or a reviewer said
+#      so) or `--merged-into <base>`, which is VERIFIED against git rather than
+#      believed: the branch must actually be an ancestor of that base. A caller
+#      that merges, fails, and cleans up anyway would otherwise delete the only
+#      copy of the work.
+#   2. Cleanliness. Uncommitted or untracked files block removal regardless of
+#      evidence. Acceptance is a statement about the reported result, not about
+#      whatever is sitting unstaged in the directory.
+#
+# `git worktree remove` and `git branch -d` are both used WITHOUT their force
+# flags on purpose: they are the last safety net, and a refusal here is
+# information, not an obstacle to route around.
+export def worktree-cleanup [
+    --repo: string
+    --path: string
+    --branch: string
+    --accepted
+    --merged-into: string = ""
+] {
+    if not $accepted and ($merged_into | is-empty) {
+        error make {msg: $"refusing to clean up ($path): no acceptance or merge evidence. A completed worker stays visible until something explicitly says the work is done with"}
+    }
+
+    if ($merged_into | is-not-empty) {
+        let merged = (do { ^git -C $repo merge-base --is-ancestor $branch $merged_into } | complete)
+        if $merged.exit_code != 0 {
+            error make {msg: $"refusing to clean up ($branch): it is not merged into ($merged_into). The merge claim is verified against git, not taken on the caller's word"}
+        }
+    }
+
+    if ($path | path exists) and (worktree-dirty? $path) {
+        error make {msg: $"refusing to clean up ($path): it holds uncommitted work, which acceptance does not license deleting"}
+    }
+
+    if ($path | path exists) {
+        let removed = (do { ^git -C $repo worktree remove $path } | complete)
+        if $removed.exit_code != 0 {
+            error make {msg: $"could not remove worktree ($path): ($removed.stderr | str trim)"}
+        }
+    }
+
+    let deleted = (do { ^git -C $repo branch -d $branch } | complete)
+    if $deleted.exit_code != 0 {
+        error make {msg: $"worktree ($path) removed, but branch ($branch) was not deleted: ($deleted.stderr | str trim). Bus metadata is intact; finish by hand"}
+    }
+}
+
+# --------------------------------------------------------------- identity
+#
+# The identity envelope is what ties a worker UID to the worktree it runs in,
+# the Pi session that can resume it, and the tmux window that displays it. It
+# lives on the bus, NOT inside the worktree, so it outlives cleanup: an
+# accepted worker whose directory is gone must still be resumable from its
+# session id.
+
+export def bus-identity [uid: string, --run: string, --identity: record]: nothing -> record {
+    validate-identity $identity
+    ensure-worker-dirs $run $uid
+    ensure-dir (worker-dir $run $uid | path join "identity")
+    claim-slot (worker-dir $run $uid | path join "identity") (envelope-for $run $uid "identity" $identity)
+}
+
+# The worker's current identity, or nothing if it was never recorded.
+export def bus-identity-of [uid: string, --run: string]: nothing -> any {
+    let dir = (worker-dir $run $uid | path join "identity")
+    let records = (read-box $dir)
+    if ($records | is-empty) { return null }
+    $records | last | get payload
 }

@@ -128,3 +128,26 @@ export def dir-mode-of [path: string]: nothing -> string {
     if ($entry | is-empty) { error make {msg: $"no such directory: ($path)"} }
     $entry | get 0.mode
 }
+
+# ------------------------------------------------------- git repo fixtures
+
+# A throwaway repository with one commit on `main`. Worktree allocation is only
+# meaningful against a real repo — `git worktree` has enough behavior of its own
+# (locks, prunable registrations, branch-without-directory) that faking it would
+# test the fake.
+export def make-repo [tag: string]: nothing -> string {
+    let root = ([$nu.temp-dir $"infinifu-worker-repo-($tag)-(random chars --length 6)"] | path join)
+    rm -rf $root
+    mkdir $root
+    ^git -C $root init -q -b main
+    ^git -C $root config user.email "test@example.com"
+    ^git -C $root config user.name "Test"
+    "seed\n" | save -f ($root | path join "README.md")
+    ^git -C $root add -A
+    ^git -C $root commit -q -m "seed"
+    $root
+}
+
+export def git-in [repo: string, ...args: string]: nothing -> string {
+    ^git -C $repo ...$args | str trim
+}

@@ -24,6 +24,7 @@ const SUITES = [
     ["transition", "transition-cases.nu"]
     ["static",     "static-cases.nu"]
     ["bus",        "bus-cases.nu"]
+    ["worktree",   "worktree-cases.nu"]
 ]
 
 def run-subsuite [label: string, file: string] {
