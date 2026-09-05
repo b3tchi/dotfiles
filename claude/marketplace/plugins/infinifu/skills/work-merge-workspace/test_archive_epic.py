@@ -132,6 +132,40 @@ class ArchiveEpicTests(unittest.TestCase):
         self.assertEqual(status(self.root / "docs/notes/ft001.md"), "proposed")
         self.assertEqual(status(self.root / "docs/notes/archive/spec/sp001.md"), "done")
 
+    def test_feature_add_spec_citing_an_unrelated_story_or_implementation(self) -> None:
+        # A feature-add spec routinely names an im###/us### in prose to say it is
+        # NOT a dependency (the survey discipline asks for exactly that). Those
+        # mentions carry no lineage: only ## solves / ## implements do.
+        self.write_spec(
+            "ship feature",
+            "## problem\nShip proposed [[ft001]]. [[im001]] and its story [[us001]]\n"
+            "solve a different problem and are surveyed non-dependencies.",
+        )
+        self.commit_spec("feature spec citing a non-dependency")
+
+        result = run_archive(self.root, "sp001", "", "", "epic-1")
+
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(status(self.root / "docs/notes/ft001.md"), "accepted")
+        self.assertEqual(status(self.root / "docs/notes/us001.md"), "ready")
+        self.assertEqual(status(self.root / "docs/notes/im001.md"), "proposed")
+        self.assertEqual(status(self.root / "docs/notes/archive/spec/sp001.md"), "done")
+
+    def test_blank_lineage_args_still_infer_from_solves_and_implements(self) -> None:
+        # Inference is not removed, only narrowed to the role-bearing sections.
+        self.write_spec(
+            "ship story",
+            "## solves\n[[us001]]\n\n## implements\n[[im001]]\n\n"
+            "## problem\nAlso mentions [[ft001]] as a consumed feature.",
+        )
+        self.commit_spec("story spec")
+
+        result = run_archive(self.root, "sp001", "", "", "epic-1")
+
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(status(self.root / "docs/notes/us001.md"), "done")
+        self.assertEqual(status(self.root / "docs/notes/im001.md"), "accepted")
+
     def test_ambiguous_lineage_fails_before_any_archive_mutation(self) -> None:
         self.write_spec("ambiguous", "## solves\n[[us001]]\n\n## problem\nMissing implementation and feature deliverable.")
         before = self.docs_snapshot()

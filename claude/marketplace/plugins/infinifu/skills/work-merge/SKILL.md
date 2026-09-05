@@ -152,11 +152,15 @@ OPEN_CHILDREN=$(bd list --parent "$EPIC" --status open,in_progress,blocked --jso
 ### Step 4 — Epic finale (last child only)
 
 ```bash
-# Resolve story ids when present. Feature-add specs may intentionally leave
-# these blank; archive-epic.sh validates the lifecycle shape and resolves the
-# proposed ft### deliverable from the spec before mutating anything.
-US="$(grep -oE '\[\[us[0-9]+' "$AKM_ROOT/docs/notes/spec/$SP.md" | head -1 | sed 's/^\[\[//' || true)"
-IM="$(grep -oE '\[\[im[0-9]+' "$AKM_ROOT/docs/notes/spec/$SP.md" | head -1 | sed 's/^\[\[//' || true)"
+# Feature-add specs have no story lineage — pass the slots empty and let
+# archive-epic.sh classify the shape and resolve the proposed ft### deliverable.
+# Story lineage lives ONLY in the spec's ## solves / ## implements sections;
+# never grep the whole body for the first [[us###]] / [[im###]], because specs
+# cite unrelated ids in prose to record them as surveyed NON-dependencies, and
+# reading one of those as lineage archives the spec under the wrong shape (and
+# flips another story's status). archive-epic.sh infers the same way when the
+# slots are blank, so passing "" "" is the normal call for both shapes.
+US="" ; IM=""
 
 bash <skill-path>/work-merge/scripts/archive-epic.sh "$SP" "$US" "$IM" "$EPIC" "$AKM_ROOT"
 ```

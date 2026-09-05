@@ -35,9 +35,19 @@ for f in "$SP_FILE" "$BOARD" "$ARCHIVE"; do
 done
 [ ! -e "$SP_ARCHIVE" ] || { echo "ERROR: archive target already exists: $SP_ARCHIVE" >&2; exit 1; }
 
-extract_first_link () {
-  local prefix="$1" file="$2"
-  grep -oE "\[\[$prefix[0-9]+" "$file" | head -1 | sed 's/^\[\[//' || true
+# Lineage is declared by the spec's ## solves (story) and ## implements
+# (implementation) sections — not by any mention of the id. A spec routinely
+# cites an unrelated im###/us### in prose to record it as a surveyed
+# NON-dependency, and reading the first match anywhere in the body turned such
+# a citation into lineage: a feature-add spec then archived as story-backed and
+# flipped somebody else's story to done. Scope the scan to the owning section.
+extract_section_link () {
+  local section="$1" prefix="$2" file="$3"
+  awk -v section="## $section" '
+    $0 == section { in_section = 1; next }
+    /^## / { in_section = 0 }
+    in_section { print }
+  ' "$file" | grep -oE "\[\[$prefix[0-9]+" | head -1 | sed 's/^\[\[//' || true
 }
 
 status_of () {
@@ -55,10 +65,10 @@ require_status () {
   }
 }
 
-# Allow callers to pass story lineage explicitly, but infer it from the spec
-# when old manual invocations leave the slots blank.
-SPEC_US="$(extract_first_link us "$SP_FILE")"
-SPEC_IM="$(extract_first_link im "$SP_FILE")"
+# Allow callers to pass story lineage explicitly, but infer it from the spec's
+# declared lineage sections when the slots are blank.
+SPEC_US="$(extract_section_link solves us "$SP_FILE")"
+SPEC_IM="$(extract_section_link implements im "$SP_FILE")"
 US="${US:-$SPEC_US}"
 IM="${IM:-$SPEC_IM}"
 
