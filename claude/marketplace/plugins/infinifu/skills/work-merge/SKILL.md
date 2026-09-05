@@ -140,6 +140,23 @@ Script behavior (`scripts/land-bd-task.sh`):
 
 No push. The base branch has a new merge commit; it stays local until spec-retro.
 
+### Pi runtime: accepting the worker after a successful land
+
+Under Pi with [[ft014]], the per-task land above is unchanged — it merges the
+branch, gates on tests, and removes the worktree. What it does NOT do is close
+the worker's tmux window, because a completed worker stays inspectable until
+something explicitly accepts it.
+
+After `land-bd-task.sh` succeeds, the dispatcher runs
+`worker-accept <uid> --run <id> --repo <path>` for that task's worker and no
+other. Acceptance refuses a worker that is not `complete`, and refuses one whose
+worktree still holds uncommitted work, so a successful merge never licenses
+deleting something nobody reviewed. If the land FAILED, do not accept: the
+window and worktree are what the retry needs.
+
+A cleanup that fails midway is reported, and the worker's identity and result
+stay readable on the bus — finish by hand from `worker-inspect <uid>`.
+
 ### Step 3 — Last-child check
 
 ```bash

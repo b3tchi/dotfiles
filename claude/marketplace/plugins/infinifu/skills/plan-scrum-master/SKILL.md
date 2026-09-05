@@ -83,6 +83,46 @@ Missing process, bus, or transcript evidence yields `unknown`, which is an
 observation and never licenses stopping, accepting, or deleting anything
 ([[adr0017]]).
 
+##### Pi worker pipeline (available once [[ft014]] is installed)
+
+With the worker CLI present, the Pi branch runs the same
+implementer → reviewer → merge loop as Claude, driven entirely by
+`infinifu-worker` commands. Claude's native path is untouched; nothing below
+uses `Agent`, `SendMessage`, `ListAgents` or `TaskStop`.
+
+| Step | Pi command | Claude equivalent |
+|---|---|---|
+| Dispatch | `worker-spawn --run <id> --uid impl-<bd-id> --role impl --skill work-do --task <bd-id>` | `Agent` with `name: impl-<bd-id>` |
+| Send work | `bus-send impl-<bd-id> --run <id> --payload {stage: work-do, task: <bd-id>}` | dispatch payload |
+| Await | `bus-wait --run <id> --json` | completion notification |
+| Confirm receipt | `bus-ack --run <id> --uid <uid> --sequence <n>` | — (implicit) |
+| Reject / retry | `worker-resume <uid> --run <id> --feedback "<gaps>"` | `SendMessage({to: ...})` |
+| Accept + clean | `worker-accept <uid> --run <id> --repo <path>` | worktree sweep in work-merge |
+| Tear down | `worker-stop <uid> --run <id>` | `TaskStop` |
+| Inspect | `worker-inspect <uid> --run <id>` / `run-workers <id>` | `ListAgents` |
+
+Rules that differ from a notification-driven runtime, and why:
+
+- **`wait` is not a subscription.** It reports the oldest unacknowledged result
+  and leaves it in place. Acknowledge only after you have acted on it, so an
+  orchestrator that dies mid-handling sees the result again on restart.
+- **`ack` is a delivery receipt, never acceptance.** A completed worker stays
+  visible and keeps its worktree until `worker-accept`, so a reviewer can still
+  read it.
+- **Rejection resumes, it does not redispatch.** `worker-resume` sends feedback
+  to the original Pi session, which still holds the context and the worktree.
+  The second rejection returns `escalate: true` and parks the worker at
+  `waiting_human` — stop and ask the human rather than retrying a third time.
+- **Restart is free.** `run-workers <run-id>` reconstructs every worker, its
+  state, its undelivered results and its resume command from the bus. Never
+  keep run state only in the conversation.
+- **Cleanup is addressed.** `worker-accept` resolves the window and worktree
+  from that worker's own identity record, so it cannot reach another run's
+  workers even by mistake.
+- **Missing evidence is not permission.** A worker with no identity on the bus
+  reports `unknown`, and `unknown` never licenses stopping, accepting, or
+  deleting anything ([[adr0017]]).
+
 #### Unsupported runtime
 
 If neither `AI_AGENT=pi` nor the Claude native branch is available, stop with

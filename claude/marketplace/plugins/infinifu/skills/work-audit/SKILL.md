@@ -273,6 +273,20 @@ Land result: <TASK_LANDED | TASK_LANDED + EPIC_DONE>
 Epic <epic-id>: <N open children remaining | closed — run spec-retro for sp###>
 ```
 
+#### Pi runtime
+
+The verdict is the same; only the plumbing differs. On approval the dispatcher
+runs `worker-accept <uid> --run <id> --repo <path>`, which closes the window and
+removes the worktree — so approve only when you would be content never to look
+at that worktree again. On rejection the dispatcher runs
+`worker-resume <uid> --run <id> --feedback "<your gaps>"`, which reaches the
+original Pi session rather than starting a fresh worker; write the gaps so they
+are actionable by someone who already has the context. A second rejection
+escalates to the human automatically.
+
+Until acceptance the worker's window stays open, so you can read the full
+transcript instead of relying on the compact envelope.
+
 ### Rejected
 
 One or more gaps found. Leave the task `in_progress` (do NOT close — the work isn't done) and record the rejection on the task itself so the next implementer dispatch has the evidence:

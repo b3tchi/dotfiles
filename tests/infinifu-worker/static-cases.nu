@@ -60,6 +60,28 @@ def comment-blocks [path: string, prefix: string]: nothing -> list<string> {
     $blocks
 }
 
+# Paragraphs tagged with the heading that owns them, so a case can ask where a
+# phrase appears and not merely whether it appears.
+def blocks-of [path: string]: nothing -> list<record> {
+    mut out = []
+    mut section = ""
+    mut buffer = []
+    for line in (open --raw $path | lines) {
+        if ($line | str starts-with "#") {
+            if ($buffer | is-not-empty) { $out = ($out | append {section: $section, text: ($buffer | str join " ")}) }
+            $buffer = []
+            $section = ($line | str trim --left --char "#" | str trim)
+        } else if ($line | str trim | is-empty) {
+            if ($buffer | is-not-empty) { $out = ($out | append {section: $section, text: ($buffer | str join " ")}) }
+            $buffer = []
+        } else {
+            $buffer = ($buffer | append $line)
+        }
+    }
+    if ($buffer | is-not-empty) { $out = ($out | append {section: $section, text: ($buffer | str join " ")}) }
+    $out
+}
+
 def code-lines [path: string, comment_prefix: string]: nothing -> list<string> {
     open --raw $path
     | lines
@@ -156,6 +178,57 @@ let cases = [
         # workers invisible, which is the whole point of ft014.
         let text = (open --raw $worker | str lowercase)
         assert-true ($ALLOWED_TMUX | any {|v| $text | str contains $v }) "window lifecycle verbs must stay documented as allowed"
+    })
+
+    # --------------------------------- the Pi pipeline exists AND stays scoped
+    (run-case "static/skill-documents-the-pi-worker-pipeline" {
+        let text = (open --raw $skill)
+        for verb in ["worker-spawn" "bus-wait" "bus-ack" "worker-resume" "worker-accept" "worker-stop"] {
+            assert-true ($text | str contains $verb) $"plan-scrum-master must document ($verb)"
+        }
+    })
+
+    (run-case "static/claude-native-orchestration-is-not-regressed" {
+        # Adding the Pi pipeline must not quietly replace the Claude branch.
+        # Each of these is a Claude-only capability the native path depends on.
+        let text = (open --raw $skill)
+        for claude in ["`Agent`" "SendMessage" "TaskStop" "Claude native branch"] {
+            assert-true ($text | str contains $claude) $"the Claude native path lost ($claude)"
+        }
+    })
+
+    (run-case "static/pi-verbs-never-appear-on-the-claude-branch" {
+        # A worker CLI command described inside a Claude-scoped section would
+        # read as instructions to a Claude orchestrator that has no such CLI.
+        let offenders = (
+            blocks-of $skill
+            | where {|b| ($b.text | str contains "worker-spawn") or ($b.text | str contains "worker-accept") }
+            | where {|b| ($b.section | str contains "Claude native branch") }
+        )
+        assert-eq ($offenders | each {|b| $b.section }) [] "Pi verbs leaked into a Claude-only section"
+    })
+
+    (run-case "static/work-skills-document-the-pi-runtime" {
+        for name in ["work-do" "work-audit" "work-merge"] {
+            let path = (repo-root $env.FILE_PWD | path join "claude" "marketplace" "plugins" "infinifu" "skills" $name "SKILL.md")
+            let text = (open --raw $path)
+            assert-true ($text | str contains "Pi runtime") $"($name) has no Pi runtime section"
+            # And keeps its runtime-neutral core.
+            assert-true ($text | str contains "bd ") $"($name) lost its bd contract wording"
+        }
+    })
+
+    (run-case "static/acceptance-is-never-described-as-automatic" {
+        # The rule the whole visibility design rests on: a completed worker is
+        # not cleaned up until something explicitly accepts it.
+        let text = (open --raw $skill | str lowercase)
+        assert-true ($text | str contains "worker-accept") ""
+        let claims_auto = (
+            open --raw $skill
+            | lines
+            | any {|l| ($l | str lowercase | str contains "automatically clean") or ($l | str lowercase | str contains "auto-accept") }
+        )
+        assert-true (not $claims_auto) "acceptance must never be described as automatic"
     })
 
     # ------------------------------------------------ no copied task bodies

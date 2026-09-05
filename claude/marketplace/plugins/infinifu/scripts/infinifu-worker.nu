@@ -605,7 +605,30 @@ export def bus-status [uid: string, --run: string]: nothing -> record {
     }
     let results = (read-box ($dir | path join "outbox"))
     let unacked = ($results | where {|e| not (ack-path $run $uid $e.sequence | path exists) })
-    let state = if ($results | is-empty) { "running" } else { ($results | last | get payload.status) }
+    # Externally granted states win over anything the worker reported: a
+    # reviewer's acceptance or an operator's teardown is later, and more
+    # authoritative, than the worker's own last word about itself.
+    #
+    # `reopened` is the subtle one. A rejected worker's last envelope still
+    # says `complete` — that report was true when it was written — so the
+    # marker records WHICH result was sent back. While it covers the newest
+    # result, the worker is running again; once the worker reports afresh, the
+    # newer sequence outranks the marker and its real outcome shows through.
+    let reopened_after = (marker-value $run $uid "reopened")
+    let newest = (if ($results | is-empty) { 0 } else { $results | last | get sequence })
+    let state = if (marker-path $run $uid "accepted" | path exists) {
+        "accepted"
+    } else if (marker-path $run $uid "stopped" | path exists) {
+        "stopped"
+    } else if (marker-path $run $uid "waiting_human" | path exists) {
+        "waiting_human"
+    } else if (($reopened_after | is-not-empty) and (($reopened_after | into int) >= $newest)) {
+        "running"
+    } else if ($results | is-empty) {
+        "running"
+    } else {
+        $results | last | get payload.status
+    }
     {
         run: $run
         uid: $uid
@@ -957,4 +980,182 @@ export def worker-spawn [
         resume: $"pi --session ($session)"
         live: (worker-live? $window --socket $socket)
     }
+}
+
+# ================================================== orchestration verbs (T5)
+#
+# The scrum-master's Pi branch drives the pipeline through these and nothing
+# else. Each one is a state transition validated against the T1 table before
+# anything is touched, so an illegal move is refused rather than half-applied.
+#
+# Two markers carry the states no result envelope can express, because they are
+# granted from outside the worker: `accepted` (a reviewer or a successful merge
+# said the work is done with) and `stopped` (someone tore it down). They live
+# beside the worker's envelopes, so a restarted initiator reads them the same
+# way it reads everything else.
+
+def marker-path [run: string, uid: string, name: string]: nothing -> string {
+    worker-dir $run $uid | path join $"($name).marker"
+}
+
+def write-marker [run: string, uid: string, name: string, value: string = ""] {
+    let marker = (marker-path $run $uid $name)
+    let scratch = ($marker + $".tmp.(random chars --length 10)")
+    (if ($value | is-empty) { now-stamp } else { $value }) | save -f $scratch
+    chmod 600 $scratch
+    mv -f $scratch $marker
+}
+
+def marker-value [run: string, uid: string, name: string]: nothing -> string {
+    let marker = (marker-path $run $uid $name)
+    if not ($marker | path exists) { return "" }
+    open --raw $marker | str trim
+}
+
+def marker-set? [run: string, uid: string, name: string]: nothing -> bool {
+    marker-path $run $uid $name | path exists
+}
+
+# Count how many times this worker has been sent back. Rejections are derived
+# from the messages actually on the bus rather than tracked in the
+# orchestrator, so the count survives a restart.
+def rejection-count [run: string, uid: string]: nothing -> int {
+    bus-inbox $uid --run $run
+    | where {|e| ($e.payload | get -o stage) == "rejection" }
+    | length
+}
+
+# Everything known about one worker, without consuming anything.
+export def worker-inspect [uid: string, --run: string]: nothing -> record {
+    let identity = (bus-identity-of $uid --run $run)
+    if $identity == null {
+        error make {msg: $"unknown worker ($run)/($uid): no identity on the bus. Absent evidence is not permission to act \(adr0017)"}
+    }
+    let results = (read-box (worker-dir $run $uid | path join "outbox"))
+    {
+        run: $run
+        uid: $uid
+        identity: $identity
+        state: (bus-status $uid --run $run | get state)
+        last_result: (if ($results | is-empty) { null } else { $results | last | get payload })
+        rejections: (rejection-count $run $uid)
+        resume: $"pi --session ($identity.session)"
+    }
+}
+
+# Every worker in a run, reconstructed from the bus alone.
+#
+# This is what makes an initiator restartable: no part of a run's shape lives
+# in the orchestrator's memory, so a fresh process can list the workers, their
+# states, their undelivered results and their resume commands.
+export def run-workers [run: string]: nothing -> list<record> {
+    let dir = (bus-root | path join $run)
+    if not ($dir | path exists) { return [] }
+    ls $dir | where type == dir | get name | sort | each {|w|
+        let uid = ($w | path basename)
+        let status = (bus-status $uid --run $run)
+        let identity = (bus-identity-of $uid --run $run)
+        {
+            run: $run
+            uid: $uid
+            state: $status.state
+            unacked: $status.unacked
+            window: (if $identity == null { "" } else { $identity.window })
+            resume: (if $identity == null { "" } else { $"pi --session ($identity.session)" })
+        }
+    }
+}
+
+# Send a worker back with reviewer feedback, resuming its ORIGINAL session.
+#
+# Resuming rather than dispatching fresh is the point of a stable session id:
+# the worker still has its context and its worktree, so the second attempt
+# starts from the first rather than from nothing. The feedback travels as an
+# AKM-shaped message — it is prose, and a work payload may carry only a ticket
+# id.
+#
+# A second rejection sets `escalate` and parks the worker at `waiting_human`.
+# A third silent retry would burn another model turn on the same
+# misunderstanding; at that point a person needs to look.
+export def worker-resume [
+    uid: string
+    --run: string
+    --feedback: string
+    --socket: string = ""
+]: nothing -> record {
+    let seen = (worker-inspect $uid --run $run)
+    let rejections = ($seen.rejections + 1)
+
+    bus-send $uid --run $run --payload {
+        stage: "rejection"
+        instructions: $feedback
+        artifacts: []
+    }
+
+    # Reopening is always the first move: `complete -> running` is a legal edge
+    # precisely so a rejected result can be sent back without inventing a new
+    # worker. Escalation is then a SECOND legal step, `running -> waiting_human`
+    # — walking the table rather than adding a `complete -> waiting_human` edge
+    # that would let a worker be parked without ever being reopened.
+    validate-transition $seen.state "running"
+    rm -f (marker-path $run $uid "waiting_human")
+    let newest = (
+        read-box (worker-dir $run $uid | path join "outbox")
+        | each {|e| $e.sequence }
+        | append 0
+        | math max
+    )
+    write-marker $run $uid "reopened" ($newest | into string)
+
+    if $rejections >= 2 {
+        validate-transition "running" "waiting_human"
+        write-marker $run $uid "waiting_human"
+    }
+
+    {
+        run: $run
+        uid: $uid
+        session: $seen.identity.session
+        window: $seen.identity.window
+        rejections: $rejections
+        escalate: ($rejections >= 2)
+        state: (bus-status $uid --run $run | get state)
+    }
+}
+
+# Accept a completed worker: close its window and clean its worktree.
+#
+# The gates are deliberately stacked. Only a `complete` worker may be accepted
+# (the T1 table's single edge into `accepted`), the worktree must hold no
+# uncommitted work, and both the window and the worktree are addressed through
+# this run's own identity record — so an acceptance can only ever reach the
+# worker it names, never another run's.
+export def worker-accept [
+    uid: string
+    --run: string
+    --repo: string
+    --socket: string = ""
+] {
+    let seen = (worker-inspect $uid --run $run)
+    validate-transition $seen.state "accepted"
+
+    # The window closes first: it is recoverable (spawn again from the session
+    # id), whereas the worktree is not, so the irreversible step goes last.
+    do { ^tmux ...(tmux-args $socket) kill-window -t $seen.identity.window } | complete | ignore
+
+    worktree-cleanup --repo $repo --path $seen.identity.cwd --branch $seen.identity.branch --accepted
+    write-marker $run $uid "accepted"
+}
+
+# Tear a worker down without accepting its work.
+#
+# Stopping closes the window and nothing else. The worktree may hold unmerged
+# commits, so it stays until something explicitly says the work is finished
+# with — `stopped` is terminal, and a stopped worker can never become
+# `accepted`.
+export def worker-stop [uid: string, --run: string, --socket: string = ""] {
+    let seen = (worker-inspect $uid --run $run)
+    validate-transition $seen.state "stopped"
+    do { ^tmux ...(tmux-args $socket) kill-window -t $seen.identity.window } | complete | ignore
+    write-marker $run $uid "stopped"
 }

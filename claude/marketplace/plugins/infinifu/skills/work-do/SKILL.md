@@ -206,6 +206,26 @@ Evidence:
 
 Why you don't close: if you close, `closed` just means "implementer thinks it's done" — which is the same information as `in_progress` + implementation notes. The reviewer owns the `in_progress → closed` transition so `closed` means "reviewed and approved". That gate collapses if the implementer grabs the close too.
 
+### Pi runtime: reporting through the result tool
+
+Under `AI_AGENT=pi` with [[ft014]] installed, you are running as a named worker
+in a tmux window and the steps above are unchanged — same branch naming, same
+commit discipline, same bd notes. Two differences:
+
+- **Your work content is the bd task id and nothing else.** Everything you need
+  is behind `bd show <id>`; there is no prose in the message because a copied
+  task body would drift from bd on the next edit.
+- **You finish by calling the typed result tool, not by ending your turn.**
+  Settling without it is recorded as `protocol_error`, not success — completion
+  is never inferred from an idle prompt or an exited pane. Report `complete`
+  only with your validation verdict; otherwise report `blocked`,
+  `waiting_human`, or `failed` and say why. Your window stays visible either
+  way, so detail belongs there and in the transcript rather than in the 4 KiB
+  summary.
+
+Rejection arrives as a follow-up message in the SAME session — you keep your
+context and your worktree, so fix the named gaps rather than restarting.
+
 ### Step 9: Report back
 
 Return a short report to whoever dispatched you:
