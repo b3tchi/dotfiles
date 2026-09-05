@@ -824,3 +824,137 @@ export def bus-identity-of [uid: string, --run: string]: nothing -> any {
     if ($records | is-empty) { return null }
     $records | last | get payload
 }
+
+# ====================================================== visible Pi workers
+#
+# A worker is a Pi process in a named tmux window inside the existing linked
+# project group. tmux's ONLY jobs here are to display the process and to keep
+# it alive; see the transport-boundary note at the top of this file. Spawning
+# uses `new-window` and liveness uses `list-windows` — no send-keys, no
+# wait-for, no pane options.
+
+# Skills a worker may be configured with, and whether the stage takes a bd task
+# contract. An unrecognised skill is refused rather than launched: a worker with
+# no contract to follow would burn a model turn and report nothing useful.
+const WORKER_SKILLS = [
+    [skill, kind];
+    ["work-do", "work"]
+    ["work-audit", "work"]
+    ["work-merge", "work"]
+    ["spec-writing", "akm"]
+    ["spec-refinement", "akm"]
+    ["spec-ready", "akm"]
+    ["spec-retro", "akm"]
+]
+
+# The name an operator scans a window list for: `<role>-<subject>@<project>`.
+# Subject is the bd task id for work stages and the artifact id otherwise.
+export def worker-window-name [role: string, subject: string, project: string]: nothing -> string {
+    $"($role)-($subject)@($project)"
+}
+
+def tmux-args [socket: string]: nothing -> list<string> {
+    if ($socket | is-empty) { [] } else { ["-L" $socket] }
+}
+
+# Whether a window with this name currently exists.
+#
+# Reports what was observed and nothing more: a missing window means "not
+# found", which per adr0017 is a fact to act on carefully, never a licence to
+# clean up the worker's worktree or evidence.
+export def worker-live? [window: string, --socket: string = ""]: nothing -> bool {
+    let listed = (do { ^tmux ...(tmux-args $socket) list-windows -a -F "#{window_name}" } | complete)
+    if $listed.exit_code != 0 { return false }
+    $window in ($listed.stdout | lines | each {|w| $w | str trim })
+}
+
+# Start a visible, resumable Pi worker.
+#
+# Order matters. The worktree is allocated and the identity envelope is written
+# BEFORE the process starts, so a worker that dies during startup still leaves
+# a resume command and a cwd behind. Evidence first, process second: the
+# reverse order loses exactly the information needed to diagnose a failed
+# start.
+export def worker-spawn [
+    --run: string
+    --uid: string
+    --role: string
+    --subject: string
+    --project: string
+    --repo: string
+    --task: string = ""
+    --session: string
+    --skill: string
+    --socket: string = ""
+] {
+    let configured = ($WORKER_SKILLS | where skill == $skill)
+    if ($configured | is-empty) {
+        error make {msg: $"unknown skill '($skill)': not one of ($WORKER_SKILLS | get skill | str join ', '). A worker with no contract to follow is not launched"}
+    }
+    if (($configured | first | get kind) == "work") and ($task | is-empty) {
+        error make {msg: $"skill '($skill)' is a work stage and needs a bd task id: the worker reads its contract with `bd show <id>`"}
+    }
+
+    # Fail before allocating anything if the display host is unreachable.
+    let reachable = (do { ^tmux ...(tmux-args $socket) list-sessions } | complete)
+    if $reachable.exit_code != 0 {
+        let which = (if ($socket | is-empty) { "default" } else { $socket })
+        error make {msg: $"cannot reach tmux server \(socket: ($which)): ($reachable.stderr | str trim)"}
+    }
+
+    let window = (worker-window-name $role $subject $project)
+    # NOT `$task | default $subject`. `default` substitutes for null, not for an
+    # empty string, so an AKM stage with no task would have allocated a worktree
+    # named `bd-.0`; worse, nushell raises on `default` applied to a plain string
+    # and reports it as the entirely unrelated "External command failed", which
+    # is how this sat hidden behind a passing-looking spawn.
+    let subject_for_branch = (if ($task | is-empty) { $subject } else { $task })
+    let tree = (worktree-allocate --repo $repo --task $subject_for_branch)
+
+    bus-identity $uid --run $run --identity {
+        role: $role
+        cwd: $tree.path
+        branch: $tree.branch
+        session: $session
+        skill: $skill
+        window: $window
+    }
+
+    # `remain-on-exit on` keeps a crashed or finished worker's window in place.
+    # Without it a Pi that fails during startup takes its own error message off
+    # the screen, and the operator is left with a missing window and no reason.
+    # The worker's identity reaches the extension as environment, not as a
+    # message: the extension needs to know which inbox is its own BEFORE any
+    # message can be delivered, and a bootstrap message would have nowhere to
+    # arrive. `new-window -e` sets these on the window's own environment only,
+    # so nothing leaks into the operator's other windows.
+    let worker_env = [
+        "-e" $"INFINIFU_RUN=($run)"
+        "-e" $"INFINIFU_UID=($uid)"
+        "-e" $"INFINIFU_ROLE=($role)"
+        "-e" $"INFINIFU_BRANCH=($tree.branch)"
+        "-e" $"INFINIFU_SESSION=($session)"
+        "-e" $"INFINIFU_SKILL=($skill)"
+        "-e" $"INFINIFU_WINDOW=($window)"
+    ]
+    let created = (do {
+        ^tmux ...(tmux-args $socket) new-window -d -t $project -n $window -c $tree.path ...$worker_env "pi" "--session" $session
+    } | complete)
+    if $created.exit_code != 0 {
+        error make {msg: $"tmux could not create window ($window): ($created.stderr | str trim)"}
+    }
+    do { ^tmux ...(tmux-args $socket) set-option -t $window remain-on-exit on } | complete | ignore
+
+    {
+        run: $run
+        uid: $uid
+        role: $role
+        window: $window
+        cwd: $tree.path
+        branch: $tree.branch
+        session: $session
+        skill: $skill
+        resume: $"pi --session ($session)"
+        live: (worker-live? $window --socket $socket)
+    }
+}

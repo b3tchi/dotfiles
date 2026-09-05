@@ -100,13 +100,32 @@ let cases = [
     (run-case "static/no-pane-option-mailbox" {
         # Pane/window options are per-target key-value storage — a mailbox in
         # everything but name, with no sequence, no addressing and no replay.
-        # Reading a pinning marker is fine; writing coordination state is not.
+        #
+        # The line between banned and allowed is what the option DOES, not
+        # whether an option is set at all. `remain-on-exit` changes how tmux
+        # displays a finished window, which is squarely tmux's job here; a
+        # user option like `@worker_state` would be coordination state living
+        # somewhere that cannot be replayed after a crash. Anything not on the
+        # display allowlist stays banned, so a new option write has to be
+        # justified here before it can ship.
+        let display_options = ["remain-on-exit"]
         let offenders = (
             code-lines $worker "#"
             | where {|l| $l | str contains "tmux" }
             | where {|l| ($l | str contains "set-option") or ($l | str contains "setw") or ($l | str contains "set-window-option") }
+            | where {|l| not ($display_options | any {|o| $l | str contains $o }) }
         )
         assert-eq $offenders [] "tmux options must not be used as a mailbox"
+    })
+
+    (run-case "static/user-options-are-never-written" {
+        # A tmux user option (`@name`) is the mailbox shape specifically: it
+        # exists only to hold arbitrary values on a target.
+        let offenders = (
+            code-lines $worker "#"
+            | where {|l| ($l | str contains "tmux") and ($l | str contains "@") }
+        )
+        assert-eq $offenders [] "tmux user options are storage, not display"
     })
 
     # ---------------------------------------- the boundary is written down

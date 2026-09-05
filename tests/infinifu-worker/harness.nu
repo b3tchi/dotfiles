@@ -42,8 +42,25 @@ export def assert-rejects [body: closure, expect: string, msg: string] {
 
 # ----------------------------------------------------------- case running
 
+# A failing case has to say WHY. Nushell renders an external-command failure as
+# the bare string "External command failed", which names neither the command nor
+# its stderr — useless in a suite that shells out to git and tmux. When the
+# message is that unhelpful, fall back to the structured error record.
 export def run-case [name: string, body: closure] {
-    try { do $body; {name: $name, status: "pass", detail: ""} } catch {|e| {name: $name, status: "FAIL", detail: $e.msg} }
+    try {
+        do $body
+        {name: $name, status: "pass", detail: ""}
+    } catch {|e|
+        # The fallback must never throw: an assertion that fails while reporting
+        # a failure would hide the case it was reporting on.
+        let detail = if ($e.msg | str contains "External command failed") {
+            let extra = (try { $e | to nuon | str substring 0..500 } catch { "" })
+            $"($e.msg) | ($extra)"
+        } else {
+            $e.msg
+        }
+        {name: $name, status: "FAIL", detail: $detail}
+    }
 }
 
 export def pending [name: string, why: string] {
