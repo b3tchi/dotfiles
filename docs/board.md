@@ -23,6 +23,5 @@ sections when status flips.
 
 - [[sp028|pi-visible-tmux-workers]]
 
-- [[sp027|infinifu-dual-runtime-lifecycle]]
 
 - [[sp012|live-region-xshape-overlay]]
