@@ -168,3 +168,17 @@ export def make-repo [tag: string]: nothing -> string {
 export def git-in [repo: string, ...args: string]: nothing -> string {
     ^git -C $repo ...$args | str trim
 }
+
+# Run `body`, then `cleanup`, even when the body fails.
+#
+# This exists because the obvious shape is wrong in a way that only shows up
+# later: putting teardown as the last statement of a case means a FAILING
+# assertion skips it. The pi-bridge suite was written that way and leaked a
+# live tmux server per failed case — 21 of them survived a single afternoon,
+# each holding a process and a socket. A test suite that leaks on the failure
+# path leaks precisely when it is being used most.
+export def guarded [body: closure, cleanup: closure] {
+    let outcome = (try { do $body; null } catch {|e| $e })
+    do $cleanup
+    if $outcome != null { error make {msg: $outcome.msg} }
+}

@@ -23,7 +23,17 @@ def sample-result-args []: nothing -> record {
     }
 }
 
+# A result now requires the worker to have an identity, because that is where
+# its stage gate comes from (T6). In production worker-spawn always records one
+# before the process starts, so these cases record one too rather than
+# exercising a state that cannot occur.
 def put-result [run: string, uid: string, overrides: record = {}]: nothing -> record {
+    if (bus-identity-of $uid --run $run) == null {
+        bus-identity $uid --run $run --identity {
+            role: "impl", cwd: "/tmp/nowhere", branch: $"bd-($uid).0"
+            session: $"sid-($uid)", skill: "work-do", window: $"($uid)@dotfiles"
+        }
+    }
     bus-result $uid --run $run --result ((sample-result-args) | merge $overrides)
 }
 

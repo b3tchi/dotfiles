@@ -27,6 +27,8 @@ const SUITES = [
     ["worktree",   "worktree-cases.nu"]
     ["pi-bridge",  "pi-bridge-cases.nu"]
     ["pipeline",   "pipeline-cases.nu"]
+    ["completion", "completion-cases.nu"]
+    ["live-tmux",  "live-tmux-cases.nu"]
 ]
 
 def run-subsuite [label: string, file: string] {

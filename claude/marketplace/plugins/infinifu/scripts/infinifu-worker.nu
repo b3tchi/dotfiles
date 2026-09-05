@@ -532,6 +532,17 @@ export def bus-result [
     --run: string
     --result: record
 ]: nothing -> record {
+    # The stage gate is applied here rather than at the caller, so a worker
+    # cannot dodge it by taking a different code path. The stage comes from the
+    # identity the orchestrator recorded at spawn; a worker with no identity
+    # cannot say which stage it is, so its completion is refused outright
+    # instead of being waved through ungated.
+    let identity = (bus-identity-of $uid --run $run)
+    if $identity == null {
+        error make {msg: $"refusing a result from ($run)/($uid): no identity on the bus, so its stage gate cannot be applied"}
+    }
+    validate-completion $identity.skill $result
+
     validate-envelope (envelope-for $run $uid "result" $result)
     ensure-worker-dirs $run $uid
     claim-slot (worker-dir $run $uid | path join "outbox") (envelope-for $run $uid "result" $result)
@@ -982,6 +993,45 @@ export def worker-spawn [
     }
 }
 
+# ==================================================== stage completion gates
+#
+# A stage may report `complete` only when it carries the verdict its own
+# discipline produces. The verdict is read from the typed `validation` field
+# and NEVER from the summary: an assistant writing "SRE PASS" in prose is the
+# exact forgery this design exists to refuse, and text is the one thing a
+# model can always produce.
+#
+# spec-refinement is called out by name because its verdict is a specific
+# token its own skill defines. Every other stage needs a non-empty verdict —
+# whatever evidence that stage actually produces — because "complete with no
+# verdict" is how an unvalidated result reaches the pipeline.
+
+const STAGE_VERDICTS = [
+    [skill, pattern, describes];
+    ["spec-refinement", "SRE PASS", "the SRE review verdict spec-refinement produces"]
+]
+
+# The verdict a stage must carry, or null when any non-empty verdict will do.
+export def required-verdict [skill: string]: nothing -> any {
+    let row = ($STAGE_VERDICTS | where skill == $skill)
+    if ($row | is-empty) { null } else { $row | first | get pattern }
+}
+
+# Refuse a completion whose verdict does not satisfy its stage.
+export def validate-completion [skill: string, payload: record] {
+    if ($payload | get -o status) != "complete" { return }
+
+    let verdict = ($payload | get -o validation)
+    if ($verdict | is-empty) {
+        error make {msg: $"stage '($skill)' cannot report complete without a validation verdict: completion is never inferred from prose"}
+    }
+
+    let required = (required-verdict $skill)
+    if $required != null and (not ($verdict | str contains $required)) {
+        error make {msg: $"stage '($skill)' requires the verdict '($required)' in its validation field, got '($verdict)'. A summary mentioning it is not a verdict"}
+    }
+}
+
 # ================================================== orchestration verbs (T5)
 #
 # The scrum-master's Pi branch drives the pipeline through these and nothing
@@ -1158,4 +1208,20 @@ export def worker-stop [uid: string, --run: string, --socket: string = ""] {
     validate-transition $seen.state "stopped"
     do { ^tmux ...(tmux-args $socket) kill-window -t $seen.identity.window } | complete | ignore
     write-marker $run $uid "stopped"
+}
+
+# Every result a worker has reported, oldest first. Envelopes are append-only,
+# so a later completion does not erase an earlier failure — the history stays
+# auditable rather than being overwritten by the latest word.
+export def read-results [uid: string, --run: string]: nothing -> list<record> {
+    read-box (worker-dir $run $uid | path join "outbox") | each {|e| $e.payload }
+}
+
+# Record acceptance without touching tmux or git. worker-accept is the verb an
+# orchestrator uses; this is the state half on its own, for callers that have
+# already done the cleanup (and for tests that need the state without a repo).
+export def mark-accepted [uid: string, --run: string] {
+    let state = (bus-status $uid --run $run | get state)
+    validate-transition $state "accepted"
+    write-marker $run $uid "accepted"
 }
