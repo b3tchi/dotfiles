@@ -56,6 +56,7 @@ Central hub for this PKM. Every typed zettel is reachable from here.
 - [[adr0010|the clipboard picker publishes to the clipboard, it never synthesizes a paste]]
 - [[adr0011|bespoke clipnotify file store over vendor clipboard managers]]
 - [[adr0015|Python is an allowed language for X-ecosystem clients and prototypes]]
+- [[adr0026|AKM lineage is declared by section, never inferred from a prose mention]]
 
 ### [[cat002|display-platform]]
 
