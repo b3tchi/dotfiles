@@ -119,6 +119,151 @@ cd ~/infinifu && git pull
 
 Removes symlinks and hooks from all detected targets.
 
+## Pi Worker Orchestration (ft014)
+
+Under Pi, infinifu runs its implementer/reviewer pipeline as **visible tmux
+workers**: each worker is a Pi process in a named window inside your existing
+linked project group, so you can watch it work and read its transcript. Claude
+Code keeps its native `Agent` path and is unaffected.
+
+    ./install.sh worker        # links the CLI + Pi extension
+    infinifu-worker doctor     # checks nushell, tmux, XDG_RUNTIME_DIR, pi
+
+### Authority boundaries
+
+Four stores, one owner each. Nothing duplicates another's job:
+
+| Owns | Store |
+|---|---|
+| Task state, dependencies, notes | `bd` |
+| Source, branches, worktrees | Git |
+| Knowledge artifacts | `akm` |
+| Conversation history | Pi JSONL |
+| Message transport (transient) | the bus, under `$XDG_RUNTIME_DIR` |
+
+**tmux owns none of it.** It hosts and displays worker processes and nothing
+more. No `send-keys`, no `wait-for`, no pane options, no `display-message` —
+none of those can be versioned, sequenced, addressed, or replayed after a
+crash, and `send-keys` types its text into whatever now occupies a stale
+target. Messages travel only as versioned JSON envelopes under
+`$XDG_RUNTIME_DIR/infinifu-worker/<run>/<worker>/`.
+
+### Commands
+
+    infinifu-worker spawn  --run <id> --uid <uid> --role impl --subject <t> \
+                           --project <group> --repo <path> --session <sid> \
+                           --skill work-do --task <bd-id>
+    infinifu-worker send    <uid> --run <id> --stage work-do --task <bd-id>
+    infinifu-worker wait    --run <id>          # oldest unacknowledged result
+    infinifu-worker ack     --run <id> --uid <uid> --sequence <n>
+    infinifu-worker status  <uid> --run <id>
+    infinifu-worker inspect <uid> --run <id>
+    infinifu-worker workers --run <id>          # whole run, from the bus alone
+    infinifu-worker resume  <uid> --run <id> --feedback "<gaps>"
+    infinifu-worker accept  <uid> --run <id> --repo <path>
+    infinifu-worker stop    <uid> --run <id>
+
+### Inspecting a running worker
+
+Workers appear as `<role>-<subject>@<project>` in your window list, so
+`impl-dotfiles-963w.4@dotfiles` is an implementer on that task. Switch to the
+window and you are looking at the live session. A worker that crashes during
+startup keeps its window (`remain-on-exit`), so its error stays on screen
+instead of vanishing with the process.
+
+`infinifu-worker workers --run <id>` reconstructs the whole run — every worker,
+its state, its undelivered results, its resume command — from the bus alone.
+Nothing about a run lives only in the orchestrator's conversation, so an
+orchestrator that dies can be replaced by a new one.
+
+### Delivery, acceptance, and cleanup
+
+Three distinct things that are easy to conflate:
+
+- **`wait` is not a subscription.** It reports the oldest unacknowledged result
+  and leaves it in place, redelivering until you `ack`. An initiator that dies
+  between reading a completion and acting on it sees the same completion again.
+- **`ack` is a delivery receipt, not acceptance.** After `ack` the worker is
+  still `complete`, its window is still open, and its worktree still exists —
+  because a reviewer may still need to read them.
+- **`accept` is what cleans up.** It closes the window and removes the
+  worktree, and it refuses a worker that is not `complete`, one holding
+  uncommitted work, or one with no identity on the bus. `stop` closes the
+  window but *keeps* the worktree, since a stopped worker may hold unmerged
+  commits.
+
+Absent evidence is never permission: a worker with no identity reports
+`unknown`, and `unknown` never licenses stopping, accepting, or deleting
+anything.
+
+### Resume
+
+Every result carries the exact command that resumes its worker:
+
+    pi --session <session-id>
+
+The session id is stable and recorded before the process starts, so it survives
+a crashed startup and outlives cleanup. Rejection uses it:
+`infinifu-worker resume` sends reviewer feedback to the **original** session,
+which still holds the context and the worktree, rather than dispatching a fresh
+worker. A second rejection returns `escalate: true` and parks the worker at
+`waiting_human` — at that point a person should look rather than a third retry
+burning another turn on the same misunderstanding.
+
+### Completion cannot be forged
+
+A stage reports `complete` only with the verdict its own discipline produces,
+read from the typed `validation` field and never from the summary —
+`spec-refinement` must carry `SRE PASS`. An agent that ends its turn without
+calling the result tool is recorded as `protocol_error`, never as success:
+completion is never inferred from an idle prompt, an exited pane, or prose
+claiming it.
+
+### Tests
+
+    nu tests/infinifu-worker/run-tests.nu
+
+Runs schema, state-machine, static-boundary, bus, worktree, Pi-bridge,
+pipeline, completion-safety, live-tmux and packaging suites, and exits nonzero
+on any failure. Live tmux cases use private sockets (`tmux -L`), so they never
+touch a real session.
+
+### Live operator acceptance run
+
+The automated suite exercises the bus, the stage gate, the window lifecycle and
+the cleanup against a stub worker. It does **not** exercise Pi itself — the Pi
+package is not a dependency of this repo, so Pi's event names, its
+`sendUserMessage` signature and its agent-state vocabulary are carried from
+[[ft014]] and have not been compiled against anything. The extension
+feature-detects every host call and goes inert with a log line rather than
+throwing, and unknown agent states defer rather than deliver, so a wrong
+assumption costs a redelivery instead of a corrupted turn. Reconciling them is
+this checklist's job. Run it once on a machine with Pi installed:
+
+1. `infinifu-worker doctor` — every line `ok`, including `pi`.
+2. `./install.sh worker`, then confirm Pi loads the extension (it must trust the
+   project first). Look for infinifu's system-prompt block in a new session.
+3. In a linked tmux project group, delegate a refinement:
+
+       infinifu-worker spawn --run acc-1 --uid rev-sp028 --role rev \
+         --subject sp028 --project <your-group> --repo <repo> \
+         --session $(uuidgen) --skill spec-refinement
+       infinifu-worker send rev-sp028 --run acc-1 --stage spec-refinement \
+         --instructions "refine sp028" --artifacts sp028
+
+4. Watch `rev-sp028@<group>` appear and the message arrive **as a user turn**.
+   Record what Pi called the agent state while it was streaming — that is the
+   value `decideDelivery` needs to match.
+5. `infinifu-worker wait --run acc-1` returns a compact envelope carrying
+   `SRE PASS`, while the window still shows the full reasoning.
+6. `infinifu-worker resume rev-sp028 --run acc-1 --feedback "..."` reaches the
+   **same** session (check the transcript continues rather than restarting).
+7. `infinifu-worker accept rev-sp028 --run acc-1 --repo <repo>` closes the
+   window and removes the worktree; `pi --session <id>` still resumes it.
+
+Any mismatch in steps 2, 4 or 6 is an assumption to correct in
+`extensions/pi.ts`, not a defect in the bus.
+
 ## Slash Commands
 
 | Command | Description | Stage |

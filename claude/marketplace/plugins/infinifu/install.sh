@@ -6,6 +6,7 @@ set -euo pipefail
 #
 # Usage:
 #   ./install.sh              # Auto-detect and install for all available targets
+#   ./install.sh worker       # Only the Pi worker CLI + extension (ft014)
 #   ./install.sh uninstall    # Uninstall from all targets
 
 # Resolve to the main worktree so the path stays valid after worktrees are cleaned up.
@@ -226,8 +227,64 @@ unlink_scripts() {
 }
 
 # ============================================================================
+# Helpers — Pi worker orchestration (ft014 / sp028)
+# ============================================================================
+
+# Dependencies the worker CLI cannot run without.
+#
+# Checked BEFORE anything is linked. A half-install that puts a CLI on PATH
+# which then dies on its first invocation is worse than no install: the operator
+# has to discover the cause at the point of use rather than at the point of
+# setup. `pi` is deliberately NOT required — a Claude-only box installs the
+# rest of infinifu perfectly well without it.
+check_worker_deps() {
+    local missing=""
+    command -v nu >/dev/null 2>&1 || missing="$missing nu(nushell)"
+    command -v tmux >/dev/null 2>&1 || missing="$missing tmux"
+    if [ -n "$missing" ]; then
+        echo "  ERROR: worker orchestration needs:$missing" >&2
+        echo "  Nothing was linked. Install the above, then re-run." >&2
+        return 1
+    fi
+    return 0
+}
+
+link_pi_extension() {
+    local pi_dir="${PI_CONFIG_DIR:-$HOME/.config/pi}"
+    if [ ! -d "$pi_dir" ]; then
+        echo "  Pi not detected ($pi_dir absent) — skipping Pi extension."
+        echo "  Claude-only installations need nothing further."
+        return 0
+    fi
+    mkdir -p "$pi_dir/extensions"
+    local target="$pi_dir/extensions/infinifu.ts"
+    ln -sfn "$INFINIFU_DIR/extensions/pi.ts" "$target"
+    echo "  Linked extension: ${target/#$HOME/~} -> ${INFINIFU_DIR#$HOME/}/extensions/pi.ts"
+    echo "  NOTE: Pi must trust this project before it will load a local extension."
+}
+
+install_worker() {
+    echo "Installing Pi worker orchestration..."
+    check_worker_deps || return 1
+    # link_scripts already globs scripts/*.nu, so the worker CLI rides the
+    # existing convention rather than getting a bespoke path.
+    link_scripts
+    link_pi_extension
+    echo ""
+    echo "  Verify with: infinifu-worker doctor"
+    return 0
+}
+
+# ============================================================================
 # Uninstall
 # ============================================================================
+
+# --- Worker-only install (also the testable entry point for the worker step) ---
+if [ "$ACTION" = "worker" ]; then
+    install_worker || exit 1
+    echo "Worker orchestration installed."
+    exit 0
+fi
 
 if [ "$ACTION" = "uninstall" ] || [ "$ACTION" = "--uninstall" ]; then
     echo "Uninstalling infinifu..."

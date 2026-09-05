@@ -26,7 +26,7 @@ def make-server [tag: string]: nothing -> record {
 }
 
 def drop-server [t: record] {
-    do { ^tmux -L $t.socket kill-server } | complete | ignore
+    drop-tmux-server $t.socket
     rm -rf $t.bin
 }
 

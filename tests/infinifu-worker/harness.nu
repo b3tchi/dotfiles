@@ -182,3 +182,15 @@ export def guarded [body: closure, cleanup: closure] {
     do $cleanup
     if $outcome != null { error make {msg: $outcome.msg} }
 }
+
+# Tear down a private tmux server AND its socket file.
+#
+# `kill-server` stops the process but leaves the socket inode behind, so a
+# suite that only kills accumulates one dead socket per case — 32 per full run
+# here, which is how /tmp/tmux-*/ ends up with hundreds of them. Cleaning both
+# is what makes "run the suite twice and compare" a meaningful check.
+export def drop-tmux-server [socket: string] {
+    do { ^tmux -L $socket kill-server } | complete | ignore
+    let path = ([($env | get -o TMUX_TMPDIR | default "/tmp") $"tmux-(^id -u | str trim)" $socket] | path join)
+    rm -f $path
+}

@@ -29,7 +29,7 @@ def make-tmux [tag: string, pi_body: string]: nothing -> record {
 
 def drop-tmux [t: record] {
     # Only ever the private server this case created.
-    do { ^tmux -L $t.socket kill-server } | complete | ignore
+    drop-tmux-server $t.socket
     rm -rf $t.bin
 }
 

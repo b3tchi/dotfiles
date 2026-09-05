@@ -1225,3 +1225,140 @@ export def mark-accepted [uid: string, --run: string] {
     validate-transition $state "accepted"
     write-marker $run $uid "accepted"
 }
+
+# ============================================================== CLI entry point
+#
+# The installer links this file into ~/.local/bin/infinifu-worker, so it has to
+# work as a command and not only as an imported module. Every verb below is a
+# thin wrapper over the exported function of the same name: the CLI is a
+# surface, never a second implementation that could drift from the one the
+# tests drive.
+#
+# Output is JSON, because every consumer is another program — the scrum-master
+# skill, a shell conditional, or a test.
+
+def usage []: nothing -> string {
+    [
+        "infinifu-worker — visible Pi worker orchestration (ft014)"
+        ""
+        "USAGE"
+        "  infinifu-worker <verb> [flags]"
+        ""
+        "VERBS"
+        "  spawn    --run --uid --role --subject --project --repo --session --skill [--task] [--socket]"
+        "  send     <uid> --run --stage [--task | --instructions] [--artifacts]"
+        "  wait     --run                       oldest unacknowledged result, or nothing"
+        "  ack      --run --uid --sequence      delivery receipt; NOT acceptance"
+        "  status   <uid> --run                 one worker's state"
+        "  inspect  <uid> --run                 identity, last result, resume command"
+        "  workers  --run                       every worker in a run, from the bus alone"
+        "  resume   <uid> --run --feedback      send back to the ORIGINAL session"
+        "  accept   <uid> --run --repo          close the window, remove the worktree"
+        "  stop     <uid> --run                 close the window, KEEP the worktree"
+        "  doctor                               check dependencies"
+        ""
+        "NOTES"
+        "  wait is non-destructive: it redelivers until ack, so an initiator that"
+        "  dies mid-handling sees the result again. ack confirms delivery only —"
+        "  a completed worker stays visible until accept."
+    ] | str join "\n"
+}
+
+# The rest parameter exists so an unrecognised verb produces a useful message.
+# Without it nushell reports "Extra positional argument", which names neither
+# what was asked for nor what is available — the two things the operator needs.
+def main [...args: string] {
+    if ($args | is-empty) {
+        print (usage)
+        return
+    }
+    print --stderr $"infinifu-worker: unknown verb '($args | first)'"
+    print --stderr ""
+    print --stderr (usage)
+    exit 2
+}
+
+def "main spawn" [
+    --run: string, --uid: string, --role: string, --subject: string
+    --project: string, --repo: string, --session: string, --skill: string
+    --task: string = "", --socket: string = ""
+] {
+    worker-spawn --run $run --uid $uid --role $role --subject $subject --project $project --repo $repo --task $task --session $session --skill $skill --socket $socket
+    | to json
+    | print
+}
+
+def "main send" [
+    uid: string, --run: string, --stage: string
+    --task: string = "", --instructions: string = "", --artifacts: string = ""
+] {
+    let payload = if ($task | is-empty) {
+        {stage: $stage, instructions: $instructions, artifacts: ($artifacts | split row "," | where {|a| ($a | str trim | is-not-empty) })}
+    } else {
+        {stage: $stage, task: $task}
+    }
+    bus-send $uid --run $run --payload $payload | to json | print
+}
+
+# Prints nothing when there is no mail, so `if (infinifu-worker wait --run r |
+# is-empty)` works in a script. Silence is the answer, not an error.
+def "main wait" [--run: string] {
+    let next = (bus-wait --run $run)
+    if $next != null { print ($next | to json) }
+}
+
+def "main ack" [--run: string, --uid: string, --sequence: int] {
+    bus-ack --run $run --uid $uid --sequence $sequence
+}
+
+def "main status" [uid: string, --run: string] { bus-status $uid --run $run | to json | print }
+def "main inspect" [uid: string, --run: string] { worker-inspect $uid --run $run | to json | print }
+def "main workers" [--run: string] { run-workers $run | to json | print }
+
+def "main resume" [uid: string, --run: string, --feedback: string, --socket: string = ""] {
+    worker-resume $uid --run $run --feedback $feedback --socket $socket | to json | print
+}
+
+def "main accept" [uid: string, --run: string, --repo: string, --socket: string = ""] {
+    worker-accept $uid --run $run --repo $repo --socket $socket
+}
+
+def "main stop" [uid: string, --run: string, --socket: string = ""] {
+    worker-stop $uid --run $run --socket $socket
+}
+
+# Report on each dependency SEPARATELY. A single "something is missing" tells
+# an operator nothing they can act on; naming the one that is absent turns a
+# support question into a one-line fix.
+def "main doctor" [] {
+    let checks = [
+        {
+            name: "nushell"
+            ok: true
+            detail: $"($nu.current-exe) (version | get version)"
+        }
+        {
+            name: "tmux"
+            ok: ((do { ^tmux -V } | complete | get exit_code) == 0)
+            detail: (do { ^tmux -V } | complete | get stdout | str trim)
+        }
+        {
+            name: "XDG_RUNTIME_DIR"
+            ok: (($env | get -o XDG_RUNTIME_DIR | default "" | is-not-empty))
+            detail: ($env | get -o XDG_RUNTIME_DIR | default "unset — export it, e.g. /run/user/$(id -u)")
+        }
+        {
+            name: "pi"
+            ok: ((do { ^pi --version } | complete | get exit_code) == 0)
+            detail: (do { ^pi --version } | complete | get stdout | str trim)
+        }
+    ]
+    for c in $checks {
+        let mark = (if $c.ok { "ok  " } else { "MISS" })
+        print $"($mark) ($c.name): ($c.detail)"
+    }
+    if ($checks | where {|c| not $c.ok and $c.name != "pi" } | is-not-empty) {
+        # `pi` absent is fine on a Claude-only box; the rest are not.
+        error make {msg: "required dependencies are missing (see MISS lines above)"}
+    }
+}
