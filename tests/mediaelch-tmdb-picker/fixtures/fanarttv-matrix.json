@@ -1,0 +1,10 @@
+{
+  "name": "The Matrix",
+  "tmdb_id": "603",
+  "hdmovielogo": [{"url": "https://assets.fanart.tv/logo.png"}],
+  "movieclearart": [{"url": "https://assets.fanart.tv/clearart.png"}],
+  "moviedisc": [{"url": "https://assets.fanart.tv/disc.png"}],
+  "moviebanner": [{"url": "https://assets.fanart.tv/banner.jpg"}],
+  "moviethumb": [{"url": "https://assets.fanart.tv/thumb.jpg"}],
+  "moviebackground": [{"url": "https://assets.fanart.tv/background1.jpg"}, {"url": "https://assets.fanart.tv/background2.jpg"}]
+}

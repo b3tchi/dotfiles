@@ -1,0 +1,130 @@
+#!/usr/bin/env nu
+# Single-movie TMDb scraper that writes Kodi/MediaElch sidecars beside a movie.
+#
+# Full-rescrape policy: overwrites known generated sidecar names for the chosen
+# movie stem, and replaces extrafanart/fanart*.jpg. Never touches the movie file,
+# subtitles, or unknown files.
+
+const mediaelch_tmdb_mod = '~/.config/nushell/scripts/mediaelch-tmdb/mod.nu'
+use $mediaelch_tmdb_mod *
+
+const VIDEO_EXTS = [mkv mp4 avi mov m4v wmv mpg mpeg ts iso]
+
+export def main [
+    target: string,
+    name?: string,
+    year?: int,
+    --locale: string = $DEFAULT_LOCALE,
+    --api-key: string = $DEFAULT_TMDB_API_KEY,
+    --fanarttv-api-key: string = "",
+    --fanarttv-client-key: string = "",
+    --dry-run,
+    --no-art,
+    --no-extra-fanart,
+    --no-actors, # currently only suppresses actor thumb URLs in future extension; NFO actors stay
+    --first,
+] {
+    let movie = (resolve-movie-file $target)
+    let query = if ($name | is-empty) { infer-title $movie } else { $name }
+
+    print $"Search: ($query)(if ($year | is-empty) { '' } else { ' ' + ($year | into string) })"
+    let results = (search-tmdb $query --year $year --api-key $api_key --locale $locale)
+    if ($results | is-empty) { error make {msg: $"no TMDb results for ($query)"} }
+
+    let chosen = if $first {
+        $results.0
+    } else if (which fzf | is-not-empty) {
+        let selected = ($results | get display | to text | fzf --prompt "TMDb movie> " --height 40% --layout reverse | complete)
+        if $selected.exit_code != 0 or ($selected.stdout | str trim | is-empty) {
+            error make {msg: "no movie selected"}
+        }
+        let id = (line-to-id ($selected.stdout | str trim) | str replace "id" "")
+        $results | where tmdb_id == $id | first
+    } else {
+        print "fzf not found; showing numbered results."
+        $results | enumerate | each {|r| print $"($r.index + 1)) ($r.item.display)" }
+        let answer = (input "Pick number: " | str trim | into int)
+        let idx = $answer - 1
+        if $idx < 0 or $idx >= ($results | length) { error make {msg: "selection out of range"} }
+        $results | get $idx
+    }
+
+    let detail = (fetch-detail $chosen.tmdb_id --api-key $api_key --locale $locale)
+    let paths = (sidecar-plan $movie)
+    let nfo = (render-nfo $detail)
+    let tmdb_art = if $no_art { [] } else { artwork-plan $detail $movie }
+    let resolved_fanart_key = if ($fanarttv_api_key | is-not-empty) { $fanarttv_api_key } else { $env.FANARTTV_API_KEY? | default "" }
+    let resolved_client_key = if ($fanarttv_client_key | is-not-empty) { $fanarttv_client_key } else { $env.FANARTTV_CLIENT_KEY? | default "" }
+    let fanart_art = if (not $no_art) and ($resolved_fanart_key | is-not-empty) {
+        try {
+            let fanart = (fetch-fanarttv $chosen.tmdb_id $resolved_fanart_key $resolved_client_key)
+            fanarttv-artwork-plan $fanart $movie
+        } catch {|e|
+            print $"fanart.tv skipped: ($e.msg)"
+            []
+        }
+    } else { [] }
+    let art_all = (merge-artwork-plans $tmdb_art $fanart_art)
+    let art = if $no_extra_fanart { $art_all | where kind != "extra_fanart" } else { $art_all }
+    let extra_dir = $paths.extra_fanart_dir
+    let old_extra = if ($extra_dir | path exists) { glob ($extra_dir | path join "fanart*.jpg") } else { [] }
+
+    if $dry_run {
+        print $"Movie: ($movie)"
+        print $"NFO:   ($paths.nfo)"
+        if not $no_art {
+            print "Artwork:"
+            $art | each {|a| print $"  ($a.kind): ($a.path) <- ($a.url)" }
+            if ($old_extra | length) > 0 {
+                print "Replace extra fanart:"
+                $old_extra | each {|p| print $"  delete ($p)" }
+            }
+        }
+        return
+    }
+
+    $nfo | save -f $paths.nfo
+    print $"wrote ($paths.nfo)"
+
+    if not $no_art {
+        if not $no_extra_fanart and (($art | where kind == "extra_fanart" | length) > 0) {
+            mkdir $extra_dir
+            $old_extra | each {|p| rm -f $p }
+        }
+        for a in $art {
+            let parent = ($a.path | path dirname)
+            mkdir $parent
+            download-file $a.url $a.path
+            print $"wrote ($a.path)"
+        }
+    }
+
+    print $"MediaElch/Kodi scrape complete: ($chosen.mediaelch_id) ($chosen.title) (($chosen.year))"
+}
+
+export def resolve-movie-file [target: string] {
+    let p = ($target | path expand)
+    if not ($p | path exists) { error make {msg: $"target not found: ($target)"} }
+    let meta = (ls $p | first)
+    if $meta.type == "file" { return $p }
+    let candidates = (ls $p | where type == file | where {|f| ($f.name | path parse | get extension | str lowercase) in $VIDEO_EXTS } | sort-by name)
+    if ($candidates | is-empty) { error make {msg: $"no video file in folder: ($target)"} }
+    $candidates.0.name
+}
+
+export def infer-title [movie_path: string] {
+    let stem = (movie-stem $movie_path)
+    $stem
+    | str replace --all "." " "
+    | str replace --all "_" " "
+    | str replace --regex '\\b(19|20)\\d{2}\\b.*$' ""
+    | str replace --regex '\\b(2160p|1080p|720p|480p|bluray|brrip|webrip|web-dl|x264|x265|h264|h265|hevc)\\b.*$' ""
+    | str trim
+}
+
+export def download-file [url: string, dest: string] {
+    let result = (curl -L --fail --silent --show-error --output $dest $url | complete)
+    if $result.exit_code != 0 {
+        error make {msg: $"download failed for ($url): ($result.stderr)"}
+    }
+}

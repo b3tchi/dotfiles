@@ -49,6 +49,7 @@ linux:
     actions/akm-graph: ~/.local/bin/akm-graph
     actions/preview: ~/.local/bin/preview
     actions/mediaelch-tmdb: ~/.local/bin/mediaelch-tmdb
+    actions/mediaelch-scrape: ~/.local/bin/mediaelch-scrape
   installs:
     cmd: |
       {{#if (eq env.HOME "/data/data/com.termux/files/home")}}
@@ -89,6 +90,7 @@ linux:
       chmod +x ~/.dotfiles/nushell/actions/d2-view
       chmod +x ~/.dotfiles/nushell/actions/preview
       chmod +x ~/.dotfiles/nushell/actions/mediaelch-tmdb
+      chmod +x ~/.dotfiles/nushell/actions/mediaelch-scrape
       # WSL: curated Windows exe symlinks — env.nu puts ~/.local/bin/win on
       # PATH instead of System32 (4000+ files would pollute completions).
       # Runtime kernel check, not env.WSL_DISTRO_NAME — that var is unset in
