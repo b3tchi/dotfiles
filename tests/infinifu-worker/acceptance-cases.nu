@@ -102,7 +102,14 @@ let cases = [
 
                     worker-accept "rev-sp028" --run "acceptance" --repo $repo --socket $t.socket
                     assert-true (not ($w.window in (windows-on $t.socket))) "acceptance closes the window"
-                    assert-true (not ($w.cwd | path exists)) "and removes the worktree"
+
+                    # spec-refinement is an AKM stage, so this worker runs in
+                    # the MAIN worktree (dotfiles-ptba) — shared with the
+                    # operator and nobody's to delete. This assertion used to
+                    # read "and removes the worktree", which passed only because
+                    # AKM stages were wrongly given one of their own.
+                    assert-eq $w.cwd $repo "an AKM stage ran in the main worktree"
+                    assert-true ($w.cwd | path exists) "which acceptance must never remove"
 
                     # 6. The evidence outlives the cleanup.
                     let seen = (worker-inspect "rev-sp028" --run "acceptance")

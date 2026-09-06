@@ -857,6 +857,15 @@ export def worktree-cleanup [
         }
     }
 
+    # The main worktree is never a worker's to delete. An AKM stage RUNS there
+    # (dotfiles-ptba), so `worker-accept` reaches here with identity.cwd set to
+    # it. git refuses on its own — but only after the accept sequence has
+    # already killed the window, and with a message about working trees rather
+    # than about what the caller did wrong.
+    if $path == (main-worktree $repo) {
+        error make {msg: $"refusing to clean up ($path): that is the main worktree, not a worker's. An AKM stage runs there and shares it with the operator; only its own isolated worktree is a worker's to remove"}
+    }
+
     if ($path | path exists) and (worktree-dirty? $path) {
         error make {msg: $"refusing to clean up ($path): it holds uncommitted work, which acceptance does not license deleting"}
     }
@@ -918,6 +927,64 @@ const WORKER_SKILLS = [
     ["spec-ready", "akm"]
     ["spec-retro", "akm"]
 ]
+
+# The main worktree of a repo — the one git lists first, and the only one AKM
+# may be read or written from.
+export def main-worktree [repo: string]: nothing -> string {
+    let listed = (do { ^git -C $repo worktree list --porcelain } | complete)
+    if $listed.exit_code != 0 {
+        error make {msg: $"cannot list worktrees for ($repo): ($listed.stderr | str trim)"}
+    }
+    let first = (
+        $listed.stdout
+        | lines
+        | where {|l| $l | str starts-with "worktree " }
+        | first
+    )
+    $first | str replace "worktree " "" | str trim
+}
+
+# Where a worker runs, and on which branch.
+#
+# dotfiles-ptba: every worker used to get an isolated `bd-<subject>.<N>`
+# worktree, AKM stages included — but `akm-root` refuses to serve any worktree
+# but the main one, and says so in its own words:
+#
+#   AKM artifacts describe shared product knowledge and live on the default
+#   branch. Any AKM operation must happen from the main worktree so reads see
+#   the canonical state and writes commit on the canonical branch. Feature
+#   worktrees exist only for code work.
+#
+# So an AKM worker was placed somewhere it could not do its job, and the
+# guard's own remedy ("cd <main> and retry") instructed it to walk out of its
+# isolation. Observed live in the sp028 T7 run: it did exactly that and
+# continued in the main worktree, where it shared a working tree with the
+# operator and with every other worker — the precise hazard the worktree
+# existed to prevent, arrived at silently.
+#
+# Placement now follows what akm-root already asserts rather than fighting it:
+# an AKM stage belongs in the main worktree on the default branch, and gets no
+# task branch because its writes belong on the canonical one. A work stage is
+# unchanged — code work stays isolated.
+export def worker-placement [
+    --repo: string
+    --skill: string
+    --subject: string
+]: nothing -> record {
+    let configured = ($WORKER_SKILLS | where skill == $skill)
+    if ($configured | is-empty) {
+        error make {msg: $"unknown skill '($skill)': not one of ($WORKER_SKILLS | get skill | str join ', ')"}
+    }
+
+    if (($configured | first | get kind) == "akm" ) {
+        let main = (main-worktree $repo)
+        let branch = (^git -C $main rev-parse --abbrev-ref HEAD | str trim)
+        return {path: $main, branch: $branch, isolated: false}
+    }
+
+    let tree = (worktree-allocate --repo $repo --task $subject)
+    {path: $tree.path, branch: $tree.branch, isolated: true}
+}
 
 # The name an operator scans a window list for: `<role>-<subject>@<project>`.
 # Subject is the bd task id for work stages and the artifact id otherwise.
@@ -981,7 +1048,10 @@ export def worker-spawn [
     # and reports it as the entirely unrelated "External command failed", which
     # is how this sat hidden behind a passing-looking spawn.
     let subject_for_branch = (if ($task | is-empty) { $subject } else { $task })
-    let tree = (worktree-allocate --repo $repo --task $subject_for_branch)
+    # Placement is stage-dependent: code work gets an isolated worktree, AKM
+    # work runs in the main worktree because that is the only place akm-root
+    # will serve (dotfiles-ptba).
+    let tree = (worker-placement --repo $repo --skill $skill --subject $subject_for_branch)
 
     bus-identity $uid --run $run --identity {
         role: $role
@@ -1241,7 +1311,12 @@ export def worker-accept [
     # id), whereas the worktree is not, so the irreversible step goes last.
     do { ^tmux ...(tmux-args $socket) kill-window -t $seen.identity.window } | complete | ignore
 
-    worktree-cleanup --repo $repo --path $seen.identity.cwd --branch $seen.identity.branch --accepted
+    # An AKM stage runs IN the main worktree, which is shared with the operator
+    # and is nobody's to delete. There is no isolated directory or task branch
+    # to reclaim, so acceptance is the marker alone.
+    if $seen.identity.cwd != (main-worktree $repo) {
+        worktree-cleanup --repo $repo --path $seen.identity.cwd --branch $seen.identity.branch --accepted
+    }
     write-marker $run $uid "accepted"
 }
 

@@ -374,6 +374,55 @@ let cases = [
         }
         rm -rf $root; rm -rf $repo
     })
+    # ------------------------------------------- AKM stages and the main tree
+    #
+    # dotfiles-ptba: every worker used to get an isolated `bd-<subject>.<N>`
+    # worktree, AKM stages included. But `akm-root` refuses to serve any
+    # worktree but the main one — deliberately, because "AKM artifacts describe
+    # shared product knowledge and live on the default branch... feature
+    # worktrees exist only for code work". So an AKM worker could not do its
+    # job where it was put, and the guard's own advice ("cd <main> and retry")
+    # told it to leave. Observed live: it did, and the isolation the worktree
+    # existed to provide evaporated silently.
+    #
+    # The fix follows what akm-root already asserts rather than fighting it.
+
+    (run-case "worktree/an-akm-stage-is-placed-in-the-main-worktree" {
+        let repo = (make-repo "akm-place")
+        let placed = (worker-placement --repo $repo --skill "spec-refinement" --subject "sp028")
+
+        assert-eq $placed.path $repo "an AKM stage runs where AKM can be read and written"
+        assert-true (not ($placed.branch | str starts-with "bd-")) $"no task branch for an AKM stage, got ($placed.branch)"
+        assert-eq $placed.branch "main" "it works on the default branch, which is where AKM lives"
+        assert-true (not (($repo | path join ".worktrees") | path exists)) "and allocates nothing"
+        rm -rf $repo
+    })
+
+    (run-case "worktree/a-work-stage-still-gets-its-own-isolated-worktree" {
+        # The regression guard for the above: code work must stay isolated.
+        let repo = (make-repo "work-place")
+        let placed = (worker-placement --repo $repo --skill "work-do" --subject "dotfiles-963w.4")
+
+        assert-eq $placed.branch "bd-dotfiles-963w.4.0" "a work stage gets its task branch"
+        assert-true ($placed.path != $repo) "in a directory of its own"
+        assert-true ($placed.path | path exists) "which exists on disk"
+        rm -rf $repo
+    })
+
+    (run-case "worktree/cleanup-refuses-to-remove-the-main-worktree" {
+        # Defense in depth. An AKM worker's cwd IS the main worktree, and
+        # `worker-accept` cleans up `identity.cwd`. git would refuse the removal
+        # on its own, but it would refuse confusingly, at the end of a sequence
+        # that has already killed the window.
+        let repo = (make-repo "no-main-rm")
+        assert-rejects {
+            worktree-cleanup --repo $repo --path $repo --branch "main" --accepted
+        } "main worktree" "cleanup must never target the main worktree"
+        assert-true ($repo | path exists) "and it survives"
+        rm -rf $repo
+    })
+
+
 ]
 
 $cases | to json

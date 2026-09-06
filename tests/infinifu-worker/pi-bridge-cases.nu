@@ -127,11 +127,16 @@ let cases = [
         rm -f $marker; drop-tmux $t; rm -rf $root; rm -rf $repo
     })
 
-    (run-case "spawn/an-akm-stage-spawns-without-a-bd-task" {
-        # AKM stages carry an artifact id, not a ticket. This path had no
-        # coverage and was broken: the branch name fell back through a filter
-        # that raises on a plain string, and the failure surfaced as an
-        # unrelated "External command failed".
+    (run-case "spawn/an-akm-stage-spawns-in-the-main-worktree-without-a-bd-task" {
+        # AKM stages carry an artifact id, not a ticket.
+        #
+        # This case used to assert the branch was `bd-t1.0` and the cwd an
+        # isolated worktree. That was the bug (dotfiles-ptba), not the contract:
+        # akm-root refuses to serve any worktree but the main one, so a worker
+        # placed in `bd-t1.0` could not read or write the AKM it was spawned to
+        # edit, and the guard's own advice sent it back to the main worktree
+        # anyway — abandoning the isolation silently. Placement now matches what
+        # akm-root asserts.
         let repo = (make-repo "akm")
         let root = (make-runtime "akm")
         let t = (make-tmux "akm" "sleep 30")
@@ -139,8 +144,9 @@ let cases = [
             with-env {PATH: ([$t.bin] ++ $env.PATH)} {
                 let got = (spawn-worker $t $repo --task "" --skill "spec-refinement" --session "sid-akm")
                 assert-eq $got.window "impl-t1@dotfiles" ""
-                assert-eq $got.branch "bd-t1.0" "the branch falls back to the subject, not an empty name"
-                assert-true ($got.cwd | path exists) ""
+                assert-eq $got.cwd $repo "an AKM stage runs where AKM can be read and written"
+                assert-eq $got.branch "main" "on the default branch, where AKM lives"
+                assert-true (not (($repo | path join ".worktrees") | path exists)) "and allocates no task worktree"
             }
         }
         drop-tmux $t; rm -rf $root; rm -rf $repo

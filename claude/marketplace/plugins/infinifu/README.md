@@ -181,6 +181,22 @@ its state, its undelivered results, its resume command — from the bus alone.
 Nothing about a run lives only in the orchestrator's conversation, so an
 orchestrator that dies can be replaced by a new one.
 
+### Where a worker runs
+
+Placement depends on the stage, because AKM access does:
+
+- **Work stages** (`work-do`, `work-audit`) get an isolated `bd-<id>.<N>`
+  worktree on a task branch. Code work stays off everyone else's tree.
+- **AKM stages** (`spec-writing`, `spec-refinement`, `spec-ready`,
+  `spec-retro`) run in the **main worktree**, on the default branch, and get no
+  task branch at all. This is not a shortcut: `akm-root` refuses to serve any
+  other worktree, because "AKM artifacts describe shared product knowledge and
+  live on the default branch". A worker given its own worktree could not read
+  or write the AKM it was spawned to edit.
+
+So `accept` removes a worktree only when the worker had one of its own. An AKM
+worker's cwd is shared with the operator and is never a worker's to delete.
+
 ### Delivery, acceptance, and cleanup
 
 Three distinct things that are easy to conflate:
@@ -192,8 +208,9 @@ Three distinct things that are easy to conflate:
   still `complete`, its window is still open, and its worktree still exists —
   because a reviewer may still need to read them.
 - **`accept` is what cleans up.** It closes the window and removes the
-  worktree, and it refuses a worker that is not `complete`, one holding
-  uncommitted work, or one with no identity on the bus. `stop` closes the
+  worker's own worktree (AKM stages have none — see above), and it refuses a
+  worker that is not `complete`, one holding uncommitted work, or one with no
+  identity on the bus. `stop` closes the
   window but *keeps* the worktree, since a stopped worker may hold unmerged
   commits.
 
