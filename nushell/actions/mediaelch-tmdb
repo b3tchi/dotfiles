@@ -1,0 +1,83 @@
+#!/usr/bin/env nu
+# Search TMDb with clean query parameters and print MediaElch-friendly `idNNN`.
+#
+# Usage:
+#   mediaelch-tmdb [name] [year]
+#   mediaelch-tmdb "The Matrix" 1999 --copy
+#   mediaelch-tmdb --locale en-US
+
+const mediaelch_tmdb_mod = '~/.config/nushell/scripts/mediaelch-tmdb/mod.nu'
+use $mediaelch_tmdb_mod *
+
+export def main [
+    name?: string,
+    year?: int,
+    --locale: string = $DEFAULT_LOCALE,
+    --api-key: string = $DEFAULT_TMDB_API_KEY,
+    --copy,
+    --json,
+    --first,
+] {
+    let query = if ($name | is-empty) {
+        input "Movie name: " | str trim
+    } else {
+        $name | str trim
+    }
+
+    if ($query | is-empty) {
+        error make {msg: "movie name required"}
+    }
+
+    let rows = (search-tmdb $query --year $year --api-key $api_key --locale $locale)
+
+    if ($rows | is-empty) {
+        error make {msg: $"no TMDb results for ($query)"}
+    }
+
+    if $json {
+        print ($rows | to json)
+        return
+    }
+
+    let chosen_line = if $first {
+        $rows.0.display
+    } else if (which fzf | is-not-empty) {
+        let selected = ($rows | get display | to text | fzf --prompt "TMDb movie> " --height 40% --layout reverse | complete)
+        if $selected.exit_code != 0 or ($selected.stdout | str trim | is-empty) {
+            error make {msg: "no movie selected"}
+        }
+        $selected.stdout | str trim
+    } else {
+        print "fzf not found; showing numbered results."
+        $rows | enumerate | each {|r| print $"($r.index + 1)) ($r.item.display)" }
+        let answer = (input "Pick number: " | str trim | into int)
+        let idx = $answer - 1
+        if $idx < 0 or $idx >= ($rows | length) {
+            error make {msg: "selection out of range"}
+        }
+        $rows | get $idx | get display
+    }
+
+    let id = (line-to-id $chosen_line)
+    if ($id | is-empty) {
+        error make {msg: $"could not extract MediaElch id from selection: ($chosen_line)"}
+    }
+
+    if $copy {
+        copy-to-clipboard $id
+    }
+
+    print $id
+}
+
+def copy-to-clipboard [text: string] {
+    if (which wl-copy | is-not-empty) {
+        $text | wl-copy
+    } else if (which xclip | is-not-empty) {
+        $text | xclip -selection clipboard
+    } else if (which xsel | is-not-empty) {
+        $text | xsel --clipboard --input
+    } else {
+        error make {msg: "--copy requested but no wl-copy, xclip, or xsel found"}
+    }
+}
