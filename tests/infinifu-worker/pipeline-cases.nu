@@ -84,8 +84,16 @@ let cases = [
     })
 
     (run-case "pipeline/accept-keeps-the-session-and-result-readable" {
-        # Cleanup must not destroy the evidence trail: the resume command and
-        # the reported result are what a later question is answered from.
+        # Cleanup must not destroy the evidence trail: the session id and the
+        # reported result are what a later question is answered from.
+        #
+        # This case used to assert `resume` was still `pi --session sid-impl-a`
+        # after acceptance. That was the false promise in dotfiles-lr2w: Pi
+        # binds a session to the directory it was created in, and accept has
+        # just removed it, so that command refuses to start. The id and the
+        # result do outlive the worktree — the command to reach them does not.
+        let empty_sessions = ([$nu.temp-dir $"infinifu-nosessions-(random chars --length 6)"] | path join)
+        mkdir $empty_sessions
         with-pipeline "evidence" {|t, repo|
             launch $t $repo "impl-a" "impl"
             complete-with "impl-a" "implemented"
@@ -93,11 +101,12 @@ let cases = [
             bus-ack --run "run-1" --uid "impl-a" --sequence $done.sequence
             worker-accept "impl-a" --run "run-1" --repo $repo --socket $t.socket
 
-            let seen = (worker-inspect "impl-a" --run "run-1")
+            let seen = (worker-inspect "impl-a" --run "run-1" --sessions-dir $empty_sessions)
             assert-eq $seen.identity.session "sid-impl-a" "the session id outlives the worktree"
-            assert-eq $seen.last_result.status "complete" ""
-            assert-eq $seen.resume "pi --session sid-impl-a" ""
+            assert-eq $seen.last_result.status "complete" "as does the reported result"
+            assert-true ($seen.resume | str contains "no longer exists") $"and the hint admits the directory is gone, got ($seen.resume)"
         }
+        rm -rf $empty_sessions
     })
 
     (run-case "pipeline/only-a-complete-worker-may-be-accepted" {

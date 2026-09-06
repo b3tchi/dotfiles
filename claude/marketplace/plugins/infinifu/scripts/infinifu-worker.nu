@@ -1297,7 +1297,7 @@ def rejection-count [run: string, uid: string]: nothing -> int {
 }
 
 # Everything known about one worker, without consuming anything.
-export def worker-inspect [uid: string, --run: string]: nothing -> record {
+export def worker-inspect [uid: string, --run: string, --sessions-dir: string = ""]: nothing -> record {
     let identity = (bus-identity-of $uid --run $run)
     if $identity == null {
         error make {msg: $"unknown worker ($run)/($uid): no identity on the bus. Absent evidence is not permission to act \(adr0017)"}
@@ -1310,8 +1310,60 @@ export def worker-inspect [uid: string, --run: string]: nothing -> record {
         state: (bus-status $uid --run $run | get state)
         last_result: (if ($results | is-empty) { null } else { $results | last | get payload })
         rejections: (rejection-count $run $uid)
-        resume: $"pi --session ($identity.session)"
+        resume: (resume-hint $identity --sessions-dir $sessions_dir)
+        transcript: (pi-session-file $identity.session --sessions-dir $sessions_dir)
     }
+}
+
+# Where Pi stores a session's transcript, or null when it cannot be found.
+#
+# Pi files sessions under one directory per project slug, named
+# `<timestamp>_<uuid>.jsonl`. The timestamp is Pi's to choose, so the path
+# cannot be predicted at spawn — it is located by id when someone asks.
+#
+# Returns null rather than a constructed path: sending an operator to a file
+# that is not there is worse than telling them it is missing.
+export def pi-session-file [session: string, --sessions-dir: string = ""]: nothing -> any {
+    let base = (if ($sessions_dir | is-empty) {
+        $env.HOME? | default "" | path join ".pi" "agent" "sessions"
+    } else { $sessions_dir })
+    if not ($base | path exists) { return null }
+
+    let hits = (
+        do { ^find $base -type f -name $"*_($session).jsonl" } | complete
+        | if $in.exit_code == 0 { $in.stdout | lines } else { [] }
+        | where {|l| ($l | str trim | is-not-empty) }
+        | sort
+    )
+    if ($hits | is-empty) { null } else { $hits | first | str trim }
+}
+
+# How to get back into a worker's conversation, answered for the world as it is
+# right now.
+#
+# dotfiles-lr2w: every result envelope carries `pi --session <id>`, and the T7
+# checklist promised that command still works after `accept`. It does not. Pi
+# binds a session to the directory it was created in and refuses to start once
+# that directory is gone:
+#
+#   Stored session working directory does not exist: .../bd-t1.0
+#
+# Naming the session file instead of the id does not help — same refusal. The
+# transcript survives, so nothing is lost, but the documented command cannot
+# reach it. `pi --fork <file>` can, from any valid directory, which is the
+# honest answer once a work stage's worktree has been reclaimed.
+#
+# Derived, never stored: the truth changes when the worktree is removed, and a
+# recorded string would go stale at exactly that moment.
+export def resume-hint [identity: record, --sessions-dir: string = ""]: nothing -> string {
+    if ($identity.cwd | path exists) {
+        return $"pi --session ($identity.session)"
+    }
+    let transcript = (pi-session-file $identity.session --sessions-dir $sessions_dir)
+    if $transcript == null {
+        return $"cannot resume: the worker's directory ($identity.cwd) no longer exists and no transcript for session ($identity.session) was found"
+    }
+    $"pi --fork ($transcript)"
 }
 
 # Every worker in a run, reconstructed from the bus alone.

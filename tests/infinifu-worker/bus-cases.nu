@@ -37,6 +37,20 @@ def put-result [run: string, uid: string, overrides: record = {}]: nothing -> re
     bus-result $uid --run $run --result ((sample-result-args) | merge $overrides)
 }
 
+# A stand-in for ~/.pi/agent/sessions: one directory per project slug, each
+# holding `<timestamp>_<uuid>.jsonl` transcripts.
+def fake-sessions [tag: string, layout: record]: nothing -> string {
+    let root = ([$nu.temp-dir $"infinifu-sessions-($tag)-(random chars --length 6)"] | path join)
+    rm -rf $root
+    mkdir $root
+    for slug in ($layout | columns) {
+        let dir = ($root | path join $slug)
+        mkdir $dir
+        for f in ($layout | get $slug) { "{}\n" | save -f ($dir | path join $f) }
+    }
+    $root
+}
+
 let cases = [
     # ------------------------------------------------------ addressed round trip
     (run-case "bus/send-then-worker-reads-its-own-inbox" {
@@ -443,6 +457,91 @@ let cases = [
             assert-eq ((read-results "impl-a" --run "r1") | length) 1 "still one envelope"
         }
         rm -rf $root
+    })
+
+
+    # ------------------------------------------------- resume after cleanup
+    #
+    # dotfiles-lr2w: every result envelope carries `resume: pi --session <id>`,
+    # and the README promised that command still works after `accept`. It does
+    # not. Pi binds a session to the directory it was created in and refuses to
+    # start when that directory is gone:
+    #
+    #   Stored session working directory does not exist: .../bd-t1.0
+    #
+    # Naming the session FILE instead of the id does not help — same refusal.
+    # The transcript is not lost, but the documented command cannot reach it;
+    # `pi --fork <file>` can, from any valid directory.
+    #
+    # So the hint has to be time-aware: correct while the worktree stands,
+    # correct once it is gone. Nothing is stored to achieve that — the honest
+    # answer is derived when asked.
+
+    (run-case "bus/the-transcript-is-located-by-session-id" {
+        let sessions = (fake-sessions "found" {
+            "--tmp-wt--": ["2026-09-06T10-00-00-000Z_aaaa1111-2222-3333-4444-555566667777.jsonl"]
+        })
+        let found = (pi-session-file "aaaa1111-2222-3333-4444-555566667777" --sessions-dir $sessions)
+        assert-true ($found | str ends-with "_aaaa1111-2222-3333-4444-555566667777.jsonl") $"got ($found)"
+        rm -rf $sessions
+    })
+
+    (run-case "bus/an-absent-transcript-is-null-not-a-guess" {
+        # A path we invented would send an operator to a file that is not there.
+        let sessions = (fake-sessions "missing" {})
+        assert-eq (pi-session-file "aaaa1111-2222-3333-4444-555566667777" --sessions-dir $sessions) null "no transcript, no claim"
+        rm -rf $sessions
+    })
+
+    (run-case "bus/resume-is-a-plain-resume-while-the-worktree-stands" {
+        let root = (make-runtime "resume-live")
+        let repo = (make-repo "resume-live")
+        with-runtime $root {
+            bus-identity "impl-a" --run "r1" --identity {
+                role: "impl", cwd: $repo, branch: "bd-t1.0"
+                session: "aaaa1111-2222-3333-4444-555566667777", skill: "work-do", window: "impl-a@dotfiles"
+            }
+            let seen = (worker-inspect "impl-a" --run "r1")
+            assert-eq $seen.resume "pi --session aaaa1111-2222-3333-4444-555566667777" "the ordinary case is unchanged"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "bus/resume-becomes-a-fork-once-the-worktree-is-gone" {
+        # After `accept`, `pi --session <id>` cannot start. Handing an operator
+        # a command that refuses is worse than handing them none.
+        let root = (make-runtime "resume-gone")
+        let sessions = (fake-sessions "gone" {
+            "--tmp-wt--": ["2026-09-06T10-00-00-000Z_aaaa1111-2222-3333-4444-555566667777.jsonl"]
+        })
+        with-runtime $root {
+            bus-identity "impl-a" --run "r1" --identity {
+                role: "impl", cwd: "/nonexistent/bd-t1.0", branch: "bd-t1.0"
+                session: "aaaa1111-2222-3333-4444-555566667777", skill: "work-do", window: "impl-a@dotfiles"
+            }
+            let seen = (worker-inspect "impl-a" --run "r1" --sessions-dir $sessions)
+
+            assert-true ($seen.resume | str starts-with "pi --fork ") $"a fork is the only thing that works, got ($seen.resume)"
+            assert-true ($seen.resume | str contains "aaaa1111") "naming the right transcript"
+            assert-true ($seen.transcript | str ends-with ".jsonl") "and the file itself is reported"
+        }
+        rm -rf $root; rm -rf $sessions
+    })
+
+    (run-case "bus/a-vanished-worktree-with-no-transcript-says-so-plainly" {
+        # Both gone: report the loss rather than a command that cannot work.
+        let root = (make-runtime "resume-none")
+        let sessions = (fake-sessions "none" {})
+        with-runtime $root {
+            bus-identity "impl-a" --run "r1" --identity {
+                role: "impl", cwd: "/nonexistent/bd-t1.0", branch: "bd-t1.0"
+                session: "aaaa1111-2222-3333-4444-555566667777", skill: "work-do", window: "impl-a@dotfiles"
+            }
+            let seen = (worker-inspect "impl-a" --run "r1" --sessions-dir $sessions)
+            assert-eq $seen.transcript null "no transcript found"
+            assert-true ($seen.resume | str contains "no longer exists") $"say what happened, got ($seen.resume)"
+        }
+        rm -rf $root; rm -rf $sessions
     })
 
 

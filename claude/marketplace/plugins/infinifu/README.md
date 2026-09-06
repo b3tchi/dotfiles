@@ -210,7 +210,9 @@ Three distinct things that are easy to conflate:
 - **`accept` is what cleans up.** It closes the window and removes the
   worker's own worktree (AKM stages have none — see above), and it refuses a
   worker that is not `complete`, one holding uncommitted work, or one with no
-  identity on the bus. `stop` closes the
+  identity on the bus. Removing the worktree also ends plain `--session`
+  resumption, since Pi ties a session to its directory; `inspect` then reports
+  a `pi --fork <transcript>` instead. `stop` closes the
   window but *keeps* the worktree, since a stopped worker may hold unmerged
   commits.
 
@@ -285,7 +287,12 @@ this checklist's job. Run it once on a machine with Pi installed:
 6. `infinifu-worker resume rev-sp028 --run acc-1 --feedback "..."` reaches the
    **same** session (check the transcript continues rather than restarting).
 7. `infinifu-worker accept rev-sp028 --run acc-1 --repo <repo>` closes the
-   window and removes the worktree; `pi --session <id>` still resumes it.
+   window and removes the worktree (an AKM stage has none — it ran in the main
+   worktree). The transcript survives, but `pi --session <id>` does NOT resume
+   it afterwards: Pi binds a session to the directory it was created in and
+   refuses once that is gone. Ask `infinifu-worker inspect` for the hint that
+   is true at the time — a plain resume while the worktree stands, a
+   `pi --fork <transcript>` once it does not.
 
 Any mismatch in steps 2, 4 or 6 is an assumption to correct in
 `extensions/pi.ts`, not a defect in the bus.
