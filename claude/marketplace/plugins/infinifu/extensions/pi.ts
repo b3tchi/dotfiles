@@ -178,6 +178,93 @@ export function decideDelivery(state: AgentState, _envelope: Envelope): Delivery
   }
 }
 
+// ---------------------------------------------------------------------------
+// Agent state, derived from events (dotfiles-zxzj).
+//
+// Pi's ExtensionAPI exposes NO state getter. An earlier build of this bridge
+// called `host.agentState()` — an API that looks like it ought to exist and
+// does not — so every poll fell through to the literal string "unknown",
+// `decideDelivery` correctly refused to guess, and a live worker deferred the
+// same message once a second forever without ever receiving it.
+//
+// The state machine was right; the source it read from was imaginary. So the
+// vocabulary below is unchanged and only its origin moves: subscribe to the
+// lifecycle events Pi really publishes and keep the last one seen.
+//
+// Every event name here appears on `ExtensionAPI.on()` in
+// @earendil-works/pi-coding-agent/dist/core/extensions/types.d.ts (0.84.4),
+// checked against the installed package rather than assumed.
+
+/** The subset of ExtensionAPI the tracker needs: just event subscription. */
+export interface StateEventSource {
+  on(event: string, handler: (event: unknown) => unknown): void;
+}
+
+export interface AgentStateTracker {
+  current(): AgentState;
+}
+
+/**
+ * Track what the agent is doing by watching its lifecycle events.
+ *
+ * Starting state is `idle`, not `unknown`: a freshly spawned worker sits at a
+ * prompt with nothing running, and that is precisely when the orchestrator
+ * sends its first message. Starting at `unknown` is what turned a missing API
+ * into a permanent stall rather than a transient one.
+ *
+ * `agent_settled` — not `agent_end` — is what returns us to `idle`. Pi
+ * documents settled as "after an agent run has fully settled and no automatic
+ * retry, compaction, or queued continuation will run"; `agent_end` merely ends
+ * the loop and may be followed by any of those three. Treating `agent_end` as
+ * idle would deliver a user turn into a run that is about to resume.
+ *
+ * Compaction clears on either outcome. Leaving a failed compaction latched
+ * would make the worker defer everything for the rest of its life, and the
+ * hazard `decideDelivery` guards — a turn racing the history rewrite — is over
+ * once compaction stops either way. If a continuation does follow,
+ * `agent_start` says so and delivery becomes a steer.
+ *
+ * `shutting_down` is terminal: a late event must not make a dying session look
+ * deliverable again.
+ */
+export function createAgentStateTracker(source: StateEventSource): AgentStateTracker {
+  let state: AgentState = "idle";
+
+  const set = (next: AgentState) => () => {
+    if (state === "shutting_down") return;
+    state = next;
+  };
+
+  const transitions: Array<[string, () => void]> = [
+    ["agent_start", set("streaming")],
+    ["agent_settled", set("idle")],
+    ["session_before_compact", set("compacting")],
+    ["session_compact", set("idle")],
+    ["session_compact_failed", set("idle")],
+    [
+      "session_shutdown",
+      () => {
+        state = "shutting_down";
+      },
+    ],
+  ];
+
+  for (const [event, handler] of transitions) {
+    // Subscribe defensively. A Pi that renamed or dropped one of these events
+    // costs precision in one signal; an exception thrown while the host is
+    // loading extensions would take the entire worker down, which is strictly
+    // worse than a worker that occasionally defers a message it could have
+    // delivered.
+    try {
+      source.on(event, handler);
+    } catch {
+      // Nothing to recover: the signal simply will not arrive.
+    }
+  }
+
+  return { current: () => state };
+}
+
 function isWorkStage(stage: string): stage is (typeof WORK_STAGES)[number] {
   return (WORK_STAGES as readonly string[]).includes(stage);
 }
@@ -345,7 +432,21 @@ export interface WatcherIO {
 export interface WatcherHost {
   /** Current agent state, if the host exposes one. */
   agentState?: () => AgentState;
-  sendUserMessage?: (text: string, options?: { mode?: string }) => unknown;
+  /**
+   * Pi's real signature (0.84.4):
+   *   sendUserMessage(content, { deliverAs?: "steer" | "followUp",
+   *                              expandPromptTemplates?: boolean })
+   *
+   * The option key is `deliverAs`. An earlier build passed `{ mode }`; Pi
+   * ignores an unrecognised key, so the call succeeded and quietly used
+   * default delivery — a steer intended to land mid-turn queued as an
+   * ordinary follow-up instead. Silent, and invisible to a fake that mirrored
+   * the same wrong key.
+   */
+  sendUserMessage?: (
+    text: string,
+    options?: { deliverAs?: "steer" | "followUp"; expandPromptTemplates?: boolean },
+  ) => unknown;
 }
 
 export interface InboxWatcher {
@@ -410,7 +511,12 @@ export function createInboxWatcher(
           mark = envelope.sequence; // never retried; the bus reader reports it
           continue;
         }
-        host.sendUserMessage(text, { mode: decision.mode });
+        // `decision.mode` is this bridge's vocabulary; `deliverAs` is Pi's
+        // parameter name. Only followUp and steer reach here — defer breaks
+        // out of the loop above — so the cast is exhaustive by construction.
+        host.sendUserMessage(text, {
+          deliverAs: decision.mode as "steer" | "followUp",
+        });
         mark = envelope.sequence;
         sent.push(envelope.sequence);
       }
@@ -480,7 +586,16 @@ export default function infinifu(pi: ExtensionAPI): void {
     window: process.env.INFINIFU_WINDOW ?? "",
   };
 
-  const host = pi as unknown as WatcherHost;
+  // Pi publishes lifecycle events but exposes no state getter, so the state
+  // the watcher needs is derived here and handed in. This is the correction of
+  // the ft014 assumption that a `host.agentState()` existed: the watcher's
+  // contract is unchanged, its data source is now real.
+  const tracker = createAgentStateTracker(pi as unknown as StateEventSource);
+  const api = pi as unknown as WatcherHost;
+  const host: WatcherHost = {
+    sendUserMessage: api.sendUserMessage?.bind(pi),
+    agentState: () => tracker.current(),
+  };
   if (typeof host.sendUserMessage !== "function") {
     io.log(
       "infinifu: this Pi build exposes no sendUserMessage; worker inbox delivery is inert. Reconcile against the live API (sp028 T7).",

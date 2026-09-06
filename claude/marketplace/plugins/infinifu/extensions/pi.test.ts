@@ -22,6 +22,7 @@ import {
   resultEnvelopeFrom,
   settledWithoutResult,
   unreadAfter,
+  createAgentStateTracker,
   MAX_SUMMARY_BYTES,
 } from "./pi.ts";
 
@@ -233,6 +234,133 @@ describe("resume without duplicate turns", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Agent state derivation (dotfiles-zxzj).
+//
+// Pi's ExtensionAPI has NO state getter. The original bridge called a
+// host.agentState() that does not exist, so every poll read the literal string
+// "unknown" and deferred forever — a live worker logged
+// "deferring seq 1 — unknown agent state 'unknown'" once a second and never
+// received its message. State has to be DERIVED by subscribing to events.
+//
+// These cases pin the derivation against the event names in
+// @earendil-works/pi-coding-agent/dist/core/extensions/types.d.ts (v0.84.4).
+
+describe("agent state tracker", () => {
+  function fakeSource() {
+    const handlers = new Map<string, (e: unknown) => unknown>();
+    return {
+      fire: (event: string, payload: unknown = {}) => {
+        const h = handlers.get(event);
+        if (!h) throw new Error(`nothing subscribed to '${event}'`);
+        h(payload);
+      },
+      subscribed: () => [...handlers.keys()],
+      source: {
+        on: (event: string, handler: (e: unknown) => unknown) => {
+          handlers.set(event, handler);
+        },
+      },
+    };
+  }
+
+  test("a fresh session is idle before any event fires", () => {
+    // A worker is spawned and sits at its prompt. Nothing has run yet, so
+    // there is no event to learn from — and this is exactly the moment the
+    // orchestrator sends the first message. Starting at "unknown" is what made
+    // the bug permanent rather than transient.
+    const { source } = fakeSource();
+    expect(createAgentStateTracker(source).current()).toBe("idle");
+  });
+
+  test("agent_start begins a turn and agent_settled ends it", () => {
+    const { source, fire } = fakeSource();
+    const t = createAgentStateTracker(source);
+
+    fire("agent_start");
+    expect(t.current()).toBe("streaming");
+    fire("agent_settled");
+    expect(t.current()).toBe("idle");
+  });
+
+  test("agent_end alone does NOT mean idle", () => {
+    // agent_end fires when the loop ends; a retry, a compaction or a queued
+    // continuation may still follow. Only agent_settled promises none will
+    // ("fired after an agent run has fully settled"). Treating agent_end as
+    // idle would deliver into a turn that is about to resume.
+    const { source, fire } = fakeSource();
+    const t = createAgentStateTracker(source);
+
+    fire("agent_start");
+    expect(() => fire("agent_end", { messages: [] })).toThrow();
+    expect(t.current()).toBe("streaming");
+  });
+
+  test("compaction is observed and cleared", () => {
+    // Delivering mid-compaction races the history being rewritten.
+    const { source, fire } = fakeSource();
+    const t = createAgentStateTracker(source);
+
+    fire("session_before_compact");
+    expect(t.current()).toBe("compacting");
+    fire("session_compact");
+    expect(t.current()).toBe("idle");
+  });
+
+  test("a failed compaction still clears, so a worker cannot wedge", () => {
+    // If a failure left the tracker compacting forever the worker would defer
+    // every message for the rest of its life. The history rewrite is over
+    // either way; if a continuation follows, agent_start says so.
+    const { source, fire } = fakeSource();
+    const t = createAgentStateTracker(source);
+
+    fire("session_before_compact");
+    fire("session_compact_failed");
+    expect(t.current()).toBe("idle");
+  });
+
+  test("shutdown is terminal", () => {
+    const { source, fire } = fakeSource();
+    const t = createAgentStateTracker(source);
+
+    fire("session_shutdown", { reason: "quit" });
+    expect(t.current()).toBe("shutting_down");
+    // Nothing reopens a shutting-down session: a late agent_settled must not
+    // make it look deliverable again.
+    fire("agent_settled");
+    expect(t.current()).toBe("shutting_down");
+  });
+
+  test("it subscribes only to events Pi actually publishes", () => {
+    // The whole bug was a plausible-looking API that did not exist. Pin the
+    // names: every one below appears on ExtensionAPI.on() in the shipped
+    // types for 0.84.4.
+    const { source, subscribed } = fakeSource();
+    createAgentStateTracker(source);
+
+    expect(subscribed().sort()).toEqual([
+      "agent_settled",
+      "agent_start",
+      "session_before_compact",
+      "session_compact",
+      "session_compact_failed",
+      "session_shutdown",
+    ]);
+  });
+
+  test("a source that rejects an unknown event does not break startup", () => {
+    // An older or newer Pi may not publish one of these. Losing one signal
+    // costs precision; throwing during extension load would take the whole
+    // worker down.
+    const source = {
+      on: (event: string) => {
+        if (event === "session_compact_failed") throw new Error("no such event");
+      },
+    };
+    expect(() => createAgentStateTracker(source).current()).not.toThrow();
+  });
+});
+
 describe("inbox watcher against a fake Pi", () => {
   function fakeIO(files: Record<string, unknown>) {
     const logs: string[] = [];
@@ -252,13 +380,23 @@ describe("inbox watcher against a fake Pi", () => {
   }
 
   function fakeHost(state: AgentStateName = "idle") {
-    const sent: Array<{ text: string; mode?: string }> = [];
+    // Records `deliverAs`, the option key on Pi's real signature:
+    //   sendUserMessage(content, { deliverAs?: "steer" | "followUp", ... })
+    // An earlier build passed `{ mode }`. Pi ignores an unrecognised key, so
+    // the call succeeded and silently used default delivery — a steer meant to
+    // land mid-turn would instead queue as an ordinary follow-up. A fake that
+    // mirrored the wrong key made that invisible, which is why this records
+    // BOTH and asserts the wrong one is never sent.
+    const sent: Array<{ text: string; deliverAs?: string; mode?: string }> = [];
     return {
       sent,
       host: {
         agentState: () => state,
-        sendUserMessage: (text: string, options?: { mode?: string }) => {
-          sent.push({ text, mode: options?.mode });
+        sendUserMessage: (
+          text: string,
+          options?: { deliverAs?: string; mode?: string },
+        ) => {
+          sent.push({ text, deliverAs: options?.deliverAs, mode: options?.mode });
         },
       },
     };
@@ -281,7 +419,9 @@ describe("inbox watcher against a fake Pi", () => {
     const w = createInboxWatcher(host, identity, "/inbox", io);
 
     expect(w.poll()).toEqual([1]);
-    expect(sent).toEqual([{ text: "dotfiles-963w.4", mode: "followUp" }]);
+    expect(sent).toEqual([
+      { text: "dotfiles-963w.4", deliverAs: "followUp", mode: undefined },
+    ]);
   });
 
   test("delivers an AKM message as instructions plus artifacts", () => {
@@ -299,7 +439,8 @@ describe("inbox watcher against a fake Pi", () => {
     const { io } = fakeIO({ "1.json": envelope(1, { stage: "work-do", task: "t" }) });
     const { host, sent } = fakeHost("streaming");
     createInboxWatcher(host, identity, "/inbox", io).poll();
-    expect(sent[0].mode).toBe("steer");
+    expect(sent[0].deliverAs).toBe("steer");
+    expect(sent[0].mode).toBeUndefined();
   });
 
   test("delivers nothing while compacting, and delivers it later", () => {
