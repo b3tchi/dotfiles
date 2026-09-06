@@ -112,16 +112,6 @@ export def resolve-movie-file [target: string] {
     $candidates.0.name
 }
 
-export def infer-title [movie_path: string] {
-    let stem = (movie-stem $movie_path)
-    $stem
-    | str replace --all "." " "
-    | str replace --all "_" " "
-    | str replace --regex '\\b(19|20)\\d{2}\\b.*$' ""
-    | str replace --regex '\\b(2160p|1080p|720p|480p|bluray|brrip|webrip|web-dl|x264|x265|h264|h265|hevc)\\b.*$' ""
-    | str trim
-}
-
 export def download-file [url: string, dest: string] {
     let result = (curl -L --fail --silent --show-error --output $dest $url | complete)
     if $result.exit_code != 0 {

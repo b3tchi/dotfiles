@@ -76,6 +76,19 @@ export def movie-dir [movie_path: string] {
     $movie_path | path dirname
 }
 
+export def infer-title [movie_path: string] {
+    let stem = (movie-stem $movie_path)
+    $stem
+    | str replace --all "+" " "
+    | str replace --all "." " "
+    | str replace --all "_" " "
+    | str replace --regex '\(?\b(19|20)\d{2}\b\)?.*$' ""
+    | str replace --regex '\b(CZ|EN|SK|dab|dub|sub|titulky)\b.*$' ""
+    | str replace --regex '\b(2160p|1080p|720p|480p|bluray|brrip|webrip|web-dl|x264|x265|h264|h265|hevc)\b.*$' ""
+    | str replace --regex '\s+' " "
+    | str trim
+}
+
 export def sidecar-plan [movie_path: string] {
     let dir = (movie-dir $movie_path)
     let stem = (movie-stem $movie_path)

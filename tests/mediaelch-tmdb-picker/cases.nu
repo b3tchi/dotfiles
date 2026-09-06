@@ -23,6 +23,9 @@ let cases = [
     (run-case "movie-stem/uses-video-complete-base-name" {
         assert-eq (movie-stem "/movies/The.Matrix.1999.mkv") "The.Matrix.1999"
     })
+    (run-case "infer-title/decodes-plus-and-strips-year-and-dub-tags" {
+        assert-eq (infer-title "./Na+skok+do+divočiny+(2026)+CZ+dab.mp4") "Na skok do divočiny"
+    })
     (run-case "sidecar-plan/mediaelch-kodi-names-by-stem" {
         let plan = (sidecar-plan "/movies/The.Matrix.1999.mkv")
         assert-eq $plan.nfo "/movies/The.Matrix.1999.nfo"
