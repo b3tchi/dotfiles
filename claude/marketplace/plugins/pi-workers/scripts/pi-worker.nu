@@ -1356,6 +1356,45 @@ export def run-workers [run: string]: nothing -> list<record> {
     }
 }
 
+# Every worker the bus knows about, across every run.
+#
+# The question an operator actually asks is "what is running and where do I
+# find it?", and answering it used to require knowing the run id first. This
+# carries only what locating a worker needs — who it is, whether it is alive,
+# the window to look at, the command to open its transcript — and leaves the
+# envelopes, counts and history to `inspect`.
+#
+# `liveness` needs tmux; when tmux cannot be reached it reports `unknown`
+# rather than guessing, so a roster is still useful without a display host.
+export def worker-roster [--run: string = "", --socket: string = ""]: nothing -> list<record> {
+    let root = (bus-root)
+    if not ($root | path exists) { return [] }
+
+    let runs = (if ($run | is-empty) {
+        ls $root | where type == dir | get name | sort | each {|d| $d | path basename }
+    } else { [$run] })
+
+    $runs | each {|r|
+        let dir = ($root | path join $r)
+        if not ($dir | path exists) { [] } else {
+            ls $dir | where type == dir | get name | sort | each {|w|
+                let uid = ($w | path basename)
+                let identity = (bus-identity-of $uid --run $r)
+                let window = (if $identity == null { "" } else { $identity.window })
+                {
+                    run: $r
+                    uid: $uid
+                    role: (if $identity == null { "" } else { $identity.role })
+                    state: (bus-status $uid --run $r | get state)
+                    liveness: (if ($window | is-empty) { "unknown" } else { worker-liveness $window --socket $socket | get verdict })
+                    window: $window
+                    resume: (if $identity == null { "" } else { resume-hint $identity })
+                }
+            }
+        }
+    } | flatten
+}
+
 # Send a worker back with reviewer feedback, resuming its ORIGINAL session.
 #
 # Resuming rather than dispatching fresh is the point of a stable session id:
@@ -1519,6 +1558,7 @@ def usage []: nothing -> string {
         "  status   <uid> --run                 one worker's state, from the bus"
         "  liveness <uid> --run [--socket]      live | exited | unknown, from tmux"
         "  inspect  <uid> --run                 identity, last result, resume command"
+        "  ps       [--run] [--socket]          every worker, where it is and whether it lives"
         "  workers  --run                       every worker in a run, from the bus alone"
         "  resume   <uid> --run --feedback      send back to the ORIGINAL session"
         "  accept   <uid> --run --repo          close the window, remove the worktree"
@@ -1633,6 +1673,10 @@ def "main liveness" [uid: string, --run: string, --socket: string = ""] {
 
 def "main status" [uid: string, --run: string] { bus-status $uid --run $run | to json | print }
 def "main inspect" [uid: string, --run: string] { worker-inspect $uid --run $run | to json | print }
+def "main ps" [--run: string = "", --socket: string = ""] {
+    worker-roster --run $run --socket $socket | to json | print
+}
+
 def "main workers" [--run: string] { run-workers $run | to json | print }
 
 def "main resume" [uid: string, --run: string, --feedback: string, --socket: string = ""] {

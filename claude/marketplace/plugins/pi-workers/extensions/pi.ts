@@ -660,6 +660,7 @@ const RESULT_TOOL_PARAMETERS = {
 
 /** The verbs an initiator drives. `result` and `settled` are a worker's, not an initiator's. */
 export const INITIATOR_VERBS = [
+  "ps",
   "spawn",
   "send",
   "wait",
@@ -711,6 +712,7 @@ export interface InitiatorTool {
 
 /** Flags each verb accepts, in the order the CLI documents them. */
 const VERB_FLAGS: Record<string, readonly string[]> = {
+  ps: ["run", "socket"],
   spawn: ["run", "uid", "role", "subject", "project", "repo", "session", "skill", "task", "socket"],
   send: ["run", "stage", "task", "instructions", "artifacts"],
   wait: ["run"],
@@ -854,7 +856,7 @@ export default function piWorker(pi: ExtensionAPI): void {
         name: "pi_worker",
         label: "Worker bus",
         description:
-          "Drive Pi workers: spawn one as a visible tmux window, check its liveness, send it a message, wait for its typed result, resume it with feedback, then accept or stop it. Verbs: " +
+          "Drive Pi workers: `ps` lists every worker, whether it is alive and which tmux window to look at. Also: spawn one as a visible tmux window, check its liveness, send it a message, wait for its typed result, resume it with feedback, then accept or stop it. Verbs: " +
           INITIATOR_VERBS.join(", ") +
           ". Stages must be declared in the stage registry.",
         promptSnippet: "pi_worker — spawn, watch and message Pi workers",

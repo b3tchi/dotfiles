@@ -545,6 +545,47 @@ let cases = [
     })
 
 
+    (run-case "bus/the-roster-lists-every-worker-across-every-run" {
+        # "Which agents are running and where do I find them?" is the question
+        # an operator actually asks, and answering it used to mean knowing the
+        # run id first. The roster spans runs and carries only what locating a
+        # worker needs.
+        let root = (make-runtime "roster")
+        with-runtime $root {
+            for pair in [["r1" "a"] ["r1" "b"] ["r2" "c"]] {
+                bus-identity ($pair | get 1) --run ($pair | get 0) --identity {
+                    # A real directory, so the resume hint is the plain form;
+                    # the vanished-worktree case is covered separately.
+                    role: "impl", cwd: $nu.temp-dir, branch: "wk-t.0"
+                    session: $"sid-($pair | get 1)", skill: "wk-build"
+                    window: $"impl-($pair | get 1)@dotfiles"
+                }
+            }
+            let roster = (worker-roster)
+            assert-eq ($roster | length) 3 "every worker in every run"
+            assert-eq ($roster | get run | uniq | sort) ["r1" "r2"] "spanning both runs"
+
+            let one = ($roster | where uid == "c" | first)
+            assert-eq $one.run "r2" ""
+            assert-eq $one.window "impl-c@dotfiles" "where to look for it"
+            assert-eq $one.resume "pi --session sid-c" "how to get into its transcript"
+            assert-true ("liveness" in ($one | columns)) "and whether it is actually running"
+
+            # Scoped when asked.
+            assert-eq ((worker-roster --run "r1") | length) 2 "a single run can still be asked for"
+        }
+        rm -rf $root
+    })
+
+    (run-case "bus/the-roster-is-empty-rather-than-failing-when-nothing-runs" {
+        let root = (make-runtime "roster-empty")
+        with-runtime $root {
+            assert-eq (worker-roster) [] "no runs is not an error"
+        }
+        rm -rf $root
+    })
+
+
 ]
 
 $cases | to json
