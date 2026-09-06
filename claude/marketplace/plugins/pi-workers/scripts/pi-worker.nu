@@ -1057,7 +1057,12 @@ def tmux-args [socket: string]: nothing -> list<string> {
 # stop, accept, or delete anything. Neither is `exited` — knowing a process
 # stopped is not knowing the work is finished.
 export def worker-liveness [window: string, --socket: string = ""]: nothing -> record {
-    let listed = (do { ^tmux ...(tmux-args $socket) list-panes -a -F "#{window_name}\t#{pane_dead}" } | complete)
+    # A window_id (@N) is matched exactly; a name is matched as before, so an
+    # identity written before ids were recorded is still addressable rather than
+    # stranded.
+    let by_id = ($window | str starts-with "@")
+    let fmt = (if $by_id { "#{window_id}\t#{pane_dead}" } else { "#{window_name}\t#{pane_dead}" })
+    let listed = (do { ^tmux ...(tmux-args $socket) list-panes -a -F $fmt } | complete)
     # A caller that could not reach tmux has learned nothing about the worker.
     # Reporting "exited" here would be the caller's failure misattributed to the
     # component — the exact confusion adr0017 forbids.
@@ -1092,6 +1097,14 @@ export def worker-liveness [window: string, --socket: string = ""]: nothing -> r
 # mean different things, and only `worker-liveness` can tell them apart.
 export def worker-live? [window: string, --socket: string = ""]: nothing -> bool {
     (worker-liveness $window --socket $socket | get verdict) == "live"
+}
+
+# How to address a worker's window: its id when one was recorded, its name
+# otherwise. Callers use this rather than reaching for identity.window, so an
+# older identity keeps working and a newer one is never addressed ambiguously.
+export def window-target [identity: record]: nothing -> string {
+    let id = ($identity | get -o window_id | default "")
+    if ($id | is-empty) { $identity.window } else { $id }
 }
 
 # Start a visible, resumable Pi worker.
@@ -1176,19 +1189,44 @@ export def worker-spawn [
         "-e" $"PI_WORKER_SKILL=($skill)"
         "-e" $"PI_WORKER_WINDOW=($window)"
     ]
+    # `-P -F #{window_id}` makes new-window print the id it assigned. That id is
+    # how every later operation addresses this worker: a NAME is ambiguous the
+    # moment two runs share a role and subject, and tmux then targets whichever
+    # window it finds first — which is how a stop closed the wrong worker
+    # (dotfiles-idzp). An id is also free of the `.` that made a ticket-shaped
+    # subject unparseable (dotfiles-pnxw).
     let created = (do {
-        ^tmux ...(tmux-args $socket) new-window -d -t $target -n $window -c $tree.path ...$worker_env "pi" "--session-id" $session
+        ^tmux ...(tmux-args $socket) new-window -d -P -F "#{window_id}" -t $target -n $window -c $tree.path ...$worker_env "pi" "--session-id" $session
     } | complete)
     if $created.exit_code != 0 {
         error make {msg: $"tmux could not create window ($window): ($created.stderr | str trim)"}
     }
-    do { ^tmux ...(tmux-args $socket) set-option -t $window remain-on-exit on } | complete | ignore
+    let window_id = ($created.stdout | str trim)
+    # FIRST, before anything slower: a worker whose command fails instantly is
+    # exactly the one whose error must stay on screen, and every millisecond
+    # between creating the window and setting this is a window in which a fast
+    # exit destroys it and takes the reason with it.
+    do { ^tmux ...(tmux-args $socket) set-option -t $window_id remain-on-exit on } | complete | ignore
+
+    # Re-record the identity now that the id exists. Written twice rather than
+    # deferred: the first write is what leaves a resume handle behind when the
+    # window never gets created at all.
+    bus-identity $uid --run $run --identity {
+        role: $role
+        cwd: $tree.path
+        branch: $tree.branch
+        session: $session
+        skill: $skill
+        window: $window
+        window_id: $window_id
+    }
 
     {
         run: $run
         uid: $uid
         role: $role
         window: $window
+        window_id: $window_id
         cwd: $tree.path
         branch: $tree.branch
         session: $session
@@ -1200,8 +1238,8 @@ export def worker-spawn [
         # snapshot taken moments after new-window, so a process that dies during
         # startup may still read `live` here; a later probe is what tells the
         # truth, which is why nothing downstream trusts this field.
-        live: (worker-live? $window --socket $socket)
-        liveness: (worker-liveness $window --socket $socket | get verdict)
+        live: (worker-live? $window_id --socket $socket)
+        liveness: (worker-liveness $window_id --socket $socket | get verdict)
     }
 }
 
@@ -1381,12 +1419,13 @@ export def worker-roster [--run: string = "", --socket: string = ""]: nothing ->
                 let uid = ($w | path basename)
                 let identity = (bus-identity-of $uid --run $r)
                 let window = (if $identity == null { "" } else { $identity.window })
+                let target = (if $identity == null { "" } else { window-target $identity })
                 {
                     run: $r
                     uid: $uid
                     role: (if $identity == null { "" } else { $identity.role })
                     state: (bus-status $uid --run $r | get state)
-                    liveness: (if ($window | is-empty) { "unknown" } else { worker-liveness $window --socket $socket | get verdict })
+                    liveness: (if ($target | is-empty) { "unknown" } else { worker-liveness $target --socket $socket | get verdict })
                     window: $window
                     resume: (if $identity == null { "" } else { resume-hint $identity })
                 }
@@ -1475,7 +1514,7 @@ export def worker-accept [
 
     # The window closes first: it is recoverable (spawn again from the session
     # id), whereas the worktree is not, so the irreversible step goes last.
-    do { ^tmux ...(tmux-args $socket) kill-window -t $seen.identity.window } | complete | ignore
+    do { ^tmux ...(tmux-args $socket) kill-window -t (window-target $seen.identity) } | complete | ignore
 
     # An isolation=main stage runs IN the main worktree, shared with the operator
     # and is nobody's to delete. There is no isolated directory or task branch
@@ -1509,7 +1548,7 @@ export def worker-stop [uid: string, --run: string, --socket: string = ""]: noth
         return {run: $run, uid: $uid, state: "stopped", changed: false, reason: "already stopped"}
     }
     validate-transition $seen.state "stopped"
-    do { ^tmux ...(tmux-args $socket) kill-window -t $seen.identity.window } | complete | ignore
+    do { ^tmux ...(tmux-args $socket) kill-window -t (window-target $seen.identity) } | complete | ignore
     write-marker $run $uid "stopped"
     {run: $run, uid: $uid, state: "stopped", changed: true}
 }
@@ -1668,7 +1707,10 @@ def "main liveness" [uid: string, --run: string, --socket: string = ""] {
     if $identity == null {
         error make {msg: $"unknown worker ($run)/($uid): no identity on the bus. Absent evidence is not permission to act \(adr0017)"}
     }
-    worker-liveness $identity.window --socket $socket | to json | print
+    # Probe by id (unambiguous), report the NAME (what an operator scans a
+    # window list for), and carry the id so a caller can act on it.
+    let seen = (worker-liveness (window-target $identity) --socket $socket)
+    $seen | merge {window: $identity.window, window_id: ($identity | get -o window_id | default "")} | to json | print
 }
 
 def "main status" [uid: string, --run: string] { bus-status $uid --run $run | to json | print }

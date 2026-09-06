@@ -347,6 +347,72 @@ let cases = [
         }
     })
 
+    # ------------------------------------------------- addressing by window id
+    #
+    # dotfiles-idzp: `<role>-<subject>@<project>` carries nothing identifying
+    # the run or the worker, so two workers with the same role and subject in
+    # different runs got identical window names. Observed live: three stopped
+    # workers reported `live` because the probe matched a different worker's
+    # window, and `stop` ran kill-window against an ambiguous name, closing at
+    # most one and orphaning the rest. A teardown that hits the wrong worker is
+    # the worst thing this transport can do.
+    #
+    # tmux hands out a window_id (@N) at creation. It is unique, stable, and has
+    # no '.' to be misparsed — which also settles dotfiles-pnxw. The name stays
+    # as the human label; every -t operation uses the id.
+
+    (run-case "live/spawn-records-the-window-id-tmux-assigned" {
+        with-server "wid" {|t, repo|
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+
+            assert-true ($w.window_id | str starts-with "@") $"a tmux window id looks like @N, got ($w.window_id)"
+            let recorded = (worker-inspect "impl-a" --run "run-1" | get identity.window_id)
+            assert-eq $recorded $w.window_id "and it is on the bus, so a restarted initiator can still address it"
+        }
+    })
+
+    (run-case "live/two-workers-sharing-a-name-are-independently-addressable" {
+        # The exact shape that broke: same role, same subject, different runs.
+        with-server "collide" {|t, repo|
+            let a = (worker-spawn --run "run-a" --uid "w1" --role "rev" --subject "demo" --project "dotfiles" --repo $repo --task "demo" --session "sid-a" --skill "wk-build" --socket $t.socket)
+            let b = (worker-spawn --run "run-b" --uid "w1" --role "rev" --subject "demo" --project "dotfiles" --repo $repo --task "demo" --session "sid-b" --skill "wk-build" --socket $t.socket)
+
+            assert-eq $a.window $b.window "they really do share a display name"
+            assert-true ($a.window_id != $b.window_id) "but not an id"
+
+            # Stopping one must leave the other running.
+            worker-stop "w1" --run "run-a" --socket $t.socket
+            assert-eq (bus-status "w1" --run "run-b" | get state) "running" "the other worker is untouched"
+            assert-eq (worker-liveness $b.window_id --socket $t.socket | get verdict) "live" "and still alive"
+            assert-eq (worker-liveness $a.window_id --socket $t.socket | get verdict) "unknown" "while the stopped one's window is gone"
+        }
+    })
+
+    (run-case "live/a-dotted-subject-spawns-probes-and-stops-cleanly" {
+        # dotfiles-pnxw. A ticket id like `dotfiles-963w.4` is the normal shape
+        # for a ticket-payload stage, and tmux parses `.4` as a pane index, so
+        # every -t operation against the NAME misparsed it. Addressing by id
+        # sidesteps the grammar entirely.
+        with-server "dotted" {|t, repo|
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1.4" --project "dotfiles" --repo $repo --task "t1.4" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            assert-true ($w.window | str contains ".4") "the display name keeps the real subject"
+            assert-eq (worker-liveness $w.window_id --socket $t.socket | get verdict) "live" "liveness works despite the dot"
+
+            worker-stop "impl-a" --run "run-1" --socket $t.socket
+            let names = (^tmux -L $t.socket list-windows -a -F "#{window_name}" | lines | each {|x| $x | str trim })
+            assert-true (not ($w.window in $names)) "and the window is actually closed, not orphaned"
+        }
+    })
+
+    (run-case "live/an-identity-without-a-window-id-still-resolves-by-name" {
+        # Identities written before ids were recorded must not become
+        # unaddressable: absent evidence is not a reason to strand a worker.
+        with-server "legacy" {|t, repo|
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            assert-eq (worker-liveness $w.window --socket $t.socket | get verdict) "live" "a name still resolves"
+        }
+    })
+
     (run-case "live/a-dead-window-does-not-make-a-worker-cleanable" {
         # A missing window is missing evidence, not proof the work is done.
         # The worktree must survive, because it may hold the only copy.
