@@ -577,14 +577,17 @@ describe("initiator tool", () => {
   });
 
   test("wait takes only a run and returns what the bus said", async () => {
-    const { exec, calls } = fakeExec({ stdout: '{"kind":"result"}' });
+    const { exec, calls } = fakeExec({
+      stdout: '{"kind":"result","sequence":1,"run":"t1","uid":"w1","payload":{"status":"complete","summary":"done"}}',
+    });
     const tool = createInitiatorTool({ exec });
 
     const out = await tool.invoke({ verb: "wait", run: "t1" });
 
     expect(calls[0].args).toEqual(["wait", "--run", "t1"]);
     expect(out.ok).toBe(true);
-    expect(out.detail).toContain('"kind":"result"');
+    // Summarised, not passed through — see the summarisation cases below.
+    expect(out.detail).toContain("complete");
   });
 
   test("an empty wait is success with nothing, not a failure", async () => {
@@ -596,6 +599,65 @@ describe("initiator tool", () => {
     const out = await tool.invoke({ verb: "wait", run: "t1" });
     expect(out.ok).toBe(true);
     expect(out.detail).toContain("no unacknowledged");
+  });
+
+  test("results come back as one line, not a JSON dump", async () => {
+    // The tool result is rendered in the transcript, so whatever it returns is
+    // what the operator reads. Handing back the CLI's full envelope buried the
+    // one fact they wanted — is it alive, what did it say — in fifteen lines of
+    // addressing they already know.
+    const spawn = fakeExec({
+      stdout: JSON.stringify({
+        run: "x1", uid: "w1", window: "rev-demo@dotfiles", window_id: "@185",
+        cwd: "/repo", branch: "main", session: "sid-1", skill: "probe",
+        resume: "pi --session sid-1", live: true, liveness: "live",
+      }),
+    });
+    const out = await createInitiatorTool({ exec: spawn.exec }).invoke({
+      verb: "spawn", run: "x1", uid: "w1",
+    });
+
+    expect(out.detail.split("\n")).toHaveLength(1);
+    expect(out.detail).toContain("x1/w1");
+    expect(out.detail).toContain("rev-demo@dotfiles");
+    expect(out.detail).toContain("@185");
+  });
+
+  test("a result envelope is summarised down to its verdict", async () => {
+    const { exec } = fakeExec({
+      stdout: JSON.stringify({
+        protocol: 1, sequence: 3, run: "x1", uid: "w1", kind: "result",
+        created: "2026-09-06T18:58:00Z",
+        payload: { status: "blocked", summary: "could not reach the fixture", window: "w", session: "s", resume: "r" },
+      }),
+    });
+    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "x1" });
+
+    expect(out.detail.split("\n")).toHaveLength(1);
+    expect(out.detail).toContain("blocked");
+    expect(out.detail).toContain("could not reach the fixture");
+    expect(out.detail).toContain("seq 3");
+  });
+
+  test("a protocol error is summarised as one, not as a result", async () => {
+    // Different kind, different meaning: the worker said nothing at all.
+    const { exec } = fakeExec({
+      stdout: JSON.stringify({
+        protocol: 1, sequence: 1, run: "x1", uid: "w1", kind: "error",
+        created: "t", payload: { code: "protocol_error", detail: "settled without reporting" },
+      }),
+    });
+    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "x1" });
+    expect(out.detail).toContain("protocol_error");
+  });
+
+  test("inspect and status keep their full output", async () => {
+    // These are the verbs you reach for WHEN you want the detail; summarising
+    // them would leave no way to get it.
+    const full = JSON.stringify({ run: "x1", uid: "w1", state: "blocked", identity: { a: 1 } }, null, 2);
+    const { exec } = fakeExec({ stdout: full });
+    const out = await createInitiatorTool({ exec }).invoke({ verb: "inspect", run: "x1", uid: "w1" });
+    expect(out.detail).toBe(full);
   });
 
   test("a verb outside the closed set never reaches the shell", async () => {

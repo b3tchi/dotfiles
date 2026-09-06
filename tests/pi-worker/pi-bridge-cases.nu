@@ -307,6 +307,47 @@ let cases = [
         }
         drop-tmux $t; rm -rf $root; rm -rf $repo
     })
+    (run-case "spawn/refuses-a-uid-that-already-has-state-in-this-run" {
+        # Reusing an address silently inherited the previous occupant's mail.
+        # Observed live: a fresh spawn into run x1 / uid w1 got sequence 3 for
+        # its first message, `wait` handed back a result envelope written half
+        # an hour earlier by a different worker, and `stop` reported "already
+        # stopped" from a stale marker. The agent reported that stale result as
+        # its own. An occupied address must be refused, not quietly moved into.
+        let repo = (make-repo "occupied")
+        let root = (make-runtime "occupied")
+        let t = (make-tmux "occupied" "sleep 30")
+        with-runtime $root {
+            with-env {PATH: ([$t.bin] ++ $env.PATH)} {
+                spawn-worker $t $repo --task "t1" --skill "wk-build" --session "sid-1"
+                assert-rejects {
+                    spawn-worker $t $repo --task "t1" --skill "wk-build" --session "sid-2"
+                } "already" "the second spawn is refused"
+                # And it names the address, so the fix is obvious.
+                assert-rejects {
+                    spawn-worker $t $repo --task "t1" --skill "wk-build" --session "sid-2"
+                } "impl-a" "naming the uid"
+            }
+        }
+        drop-tmux $t; rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "spawn/a-different-uid-in-the-same-run-is-fine" {
+        # Runs hold many workers; only the address has to be free.
+        let repo = (make-repo "sibling")
+        let root = (make-runtime "sibling")
+        let t = (make-tmux "sibling" "sleep 30")
+        with-runtime $root {
+            with-env {PATH: ([$t.bin] ++ $env.PATH)} {
+                spawn-worker $t $repo --task "t1" --skill "wk-build" --session "sid-1"
+                let b = (worker-spawn --run "run-1" --uid "impl-b" --role "impl" --subject "t2" --project "dotfiles" --repo $repo --task "t2" --session "sid-2" --skill "wk-build" --socket $t.socket)
+                assert-eq $b.uid "impl-b" "a free address spawns normally"
+            }
+        }
+        drop-tmux $t; rm -rf $root; rm -rf $repo
+    })
+
+
 ]
 
 $cases | to json

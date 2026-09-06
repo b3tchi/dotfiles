@@ -1126,6 +1126,21 @@ export def worker-spawn [
     --skill: string
     --socket: string = ""
 ] {
+    # An address is claimed once. Spawning onto an occupied one used to inherit
+    # the previous occupant's mail: the first message got a sequence continuing
+    # someone else's, `wait` returned THEIR result envelope, and a stale
+    # `stopped` marker made teardown a no-op. The initiator then reported a
+    # result its worker never produced, which is the worst kind of wrong — it
+    # looks like success.
+    #
+    # Refused rather than cleared: the old envelopes may be the only record of
+    # what the previous worker did, and deleting evidence to make room is not
+    # this command's call.
+    let existing = (worker-dir $run $uid)
+    if ($existing | path exists) {
+        error make {msg: $"($run)/($uid) already exists: that address has been used, and spawning onto it would inherit its mail and markers. Use a different uid, or remove ($existing) if you are sure it is finished with"}
+    }
+
     let stage = (stage-for $skill)
     if ($stage.payload == "ticket") and ($task | is-empty) {
         error make {msg: $"stage '($skill)' takes a ticket payload and so needs a ticket id; the worker resolves the work from it"}

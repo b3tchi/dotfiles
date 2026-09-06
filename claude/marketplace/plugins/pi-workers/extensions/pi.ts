@@ -726,6 +726,67 @@ const VERB_FLAGS: Record<string, readonly string[]> = {
   stop: ["run", "socket"],
 };
 
+/**
+ * Compress a verb's output to the one fact its caller wanted.
+ *
+ * The tool result is rendered in the transcript, so whatever this returns is
+ * what the operator reads. Handing back the CLI's full JSON buried the answer —
+ * is it alive, what did it say — under addressing they already knew.
+ *
+ * `inspect` and `status` are exempt: those are the verbs you reach for WHEN you
+ * want the detail, and summarising them would leave no way to get it.
+ */
+function summarise(verb: string, stdout: string): string {
+  const raw = stdout.trim();
+  if (verb === "inspect" || verb === "status") return raw;
+  if (raw.length === 0) return raw;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return raw; // not JSON; the caller sees whatever the CLI said
+  }
+  const o = parsed as Record<string, unknown>;
+
+  switch (verb) {
+    case "spawn":
+      return `spawned ${o.run}/${o.uid} — ${o.window} (${o.window_id}), ${o.liveness}, cwd ${o.cwd}, session ${o.session}`;
+    case "liveness":
+      return `${o.verdict} — ${o.window} (${o.window_id}): ${o.reason}`;
+    case "send": {
+      const payload = (o.payload ?? {}) as Record<string, unknown>;
+      return `sent seq ${o.sequence} to ${o.run}/${o.uid} (stage ${payload.stage})`;
+    }
+    case "wait": {
+      const payload = (o.payload ?? {}) as Record<string, unknown>;
+      // kind distinguishes "the worker answered" from "the worker said nothing
+      // at all", which are not the same outcome and must not read the same.
+      if (o.kind === "error") {
+        return `seq ${o.sequence} from ${o.run}/${o.uid}: ${payload.code} — ${payload.detail}`;
+      }
+      return `seq ${o.sequence} from ${o.run}/${o.uid}: ${payload.status} — ${payload.summary}`;
+    }
+    case "stop":
+    case "accept":
+      return o.changed
+        ? `${o.state} ${o.run}/${o.uid}`
+        : `${o.run}/${o.uid} was ${o.reason ?? "already in that state"}`;
+    case "ps":
+    case "workers": {
+      const rows = Array.isArray(parsed) ? (parsed as Record<string, unknown>[]) : [];
+      if (rows.length === 0) return "no workers";
+      return rows
+        .map((r) => `${r.run}/${r.uid} ${r.state}/${r.liveness ?? "?"} ${r.window}`)
+        .join("\n");
+    }
+    case "resume":
+      return `resumed ${o.run}/${o.uid} (rejection ${o.rejections}${o.escalate ? ", escalated" : ""})`;
+    default:
+      return raw;
+  }
+}
+
 export function createInitiatorTool(opts: { exec: ExecFn; cwd?: string }): InitiatorTool {
   return {
     invoke: async (args) => {
@@ -763,7 +824,7 @@ export function createInitiatorTool(opts: { exec: ExecFn; cwd?: string }): Initi
           // it as failure would make an idle run look broken.
           return { ok: true, detail: "no unacknowledged results in this run" };
         }
-        return { ok: true, detail: stdout };
+        return { ok: true, detail: summarise(args.verb, stdout) };
       } catch (err) {
         return { ok: false, detail: String(err) };
       }
