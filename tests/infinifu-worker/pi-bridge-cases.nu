@@ -27,6 +27,30 @@ def make-tmux [tag: string, pi_body: string]: nothing -> record {
     {socket: $socket, bin: $sandbox}
 }
 
+# A `tmux` that answers every read but REFUSES new-window, delegating the rest
+# to the real binary on the private socket.
+#
+# The evidence-before-process case used to force its failure with a bad
+# `--project`, but that is now caught up front (dotfiles-k5vt) — a caller error
+# detectable before anything is allocated, so nothing is left to recover. The
+# invariant it guards is about the OTHER kind of failure: tmux reachable, the
+# target valid, and window creation failing anyway. Injecting that needs a
+# real refusal from new-window rather than a proxy for one.
+def stub-tmux-refusing-new-window [tag: string, bin: string, real: string] {
+    let script = ([
+        "#!/bin/bash"
+        "for a in \"$@\"; do"
+        "  if [ \"$a\" = new-window ]; then"
+        "    echo 'create window failed: injected' >&2"
+        "    exit 1"
+        "  fi"
+        "done"
+        $"exec ($real) \"$@\""
+    ] | str join "\n")
+    $script | save -f ($bin | path join "tmux")
+    chmod +x ($bin | path join "tmux")
+}
+
 def drop-tmux [t: record] {
     # Only ever the private server this case created.
     drop-tmux-server $t.socket
@@ -218,12 +242,15 @@ let cases = [
         let repo = (make-repo "order")
         let root = (make-runtime "order")
         let t = (make-tmux "order" "sleep 30")
+        # The server is reachable and the target resolves; new-window itself
+        # refuses, so everything before it has already succeeded. A bad
+        # --project no longer reaches this point — it is refused before any
+        # allocation (dotfiles-k5vt) — so the failure is injected directly.
+        stub-tmux-refusing-new-window "order" $t.bin (^which tmux | str trim)
         with-runtime $root {
             with-env {PATH: ([$t.bin] ++ $env.PATH)} {
-                # The server is reachable; the target session is not there, so
-                # new-window fails while everything before it has succeeded.
                 assert-rejects {
-                    worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "no-such-session" --repo $repo --task "t1" --session "sid-o" --skill "work-do" --socket $t.socket
+                    worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-o" --skill "work-do" --socket $t.socket
                 } "window" "the window failure is reported"
 
                 let identity = (bus-identity-of "impl-a" --run "run-1")

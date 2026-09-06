@@ -267,7 +267,9 @@ this checklist's job. Run it once on a machine with Pi installed:
    `already registered`); `pi list` must show the plugin's resolved path. Then
    confirm Pi loads the extension (it must trust the project first). Look for
    infinifu's system-prompt block in a new session.
-3. In a linked tmux project group, delegate a refinement:
+3. In a linked tmux project group, delegate a refinement. `--project` takes a
+   session GROUP (what the window suffix shows) or an exact session name; a
+   group resolves to one of its members, since grouped sessions share windows:
 
        infinifu-worker spawn --run acc-1 --uid rev-sp028 --role rev \
          --subject sp028 --project <your-group> --repo <repo> \

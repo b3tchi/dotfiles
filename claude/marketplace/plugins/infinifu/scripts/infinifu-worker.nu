@@ -986,6 +986,48 @@ export def worker-placement [
     {path: $tree.path, branch: $tree.branch, isolated: true}
 }
 
+# The tmux session to create a worker's window in, given a project name.
+#
+# dotfiles-k5vt: `--project` is documented as a session GROUP, and that is the
+# right model — grouped sessions share windows, so a worker window created in
+# any member appears in all of them, and `<role>-<subject>@<group>` is what an
+# operator scans a window list for. But `tmux -t` neither resolves groups nor
+# matches them: it PREFIX-matches session names. So `-t dotfiles` against a
+# group holding `dotfiles_7` alone matches by accident and looks correct, while
+# the same command against `dotfiles_3 .. dotfiles_36` is ambiguous and fails
+# with "can't find window: dotfiles" — which is what the live run hit.
+#
+# Accidental prefix uniqueness is worse than an outright failure: it works
+# until the operator opens a second view. So the group is resolved explicitly.
+#
+# An exact session name wins over a group of the same name: it is unambiguous,
+# and it is what an operator reaches for to pin one view out of many.
+export def resolve-project-session [project: string, --socket: string = ""] {
+    let listed = (do { ^tmux ...(tmux-args $socket) list-sessions -F "#{session_name}\t#{session_group}" } | complete)
+    if $listed.exit_code != 0 {
+        error make {msg: $"cannot list tmux sessions: ($listed.stderr | str trim)"}
+    }
+
+    let sessions = (
+        $listed.stdout
+        | lines
+        | each {|l| $l | split row "\t" }
+        | where {|r| ($r | length) >= 1 and (($r | first | str trim) | is-not-empty) }
+        | each {|r| {name: ($r | first | str trim), group: (if ($r | length) >= 2 { $r | get 1 | str trim } else { "" })} }
+    )
+
+    let exact = ($sessions | where name == $project)
+    if ($exact | is-not-empty) { return ($exact | first | get name) }
+
+    # Any member will do — grouped sessions share their window list, so the
+    # window appears in every view either way. Sorted for determinism: the same
+    # project must resolve to the same session across calls.
+    let members = ($sessions | where group == $project | sort-by name)
+    if ($members | is-not-empty) { return ($members | first | get name) }
+
+    error make {msg: $"no tmux session or session group named '($project)'. Known sessions: ($sessions | get name | sort | str join ', ')"}
+}
+
 # The name an operator scans a window list for: `<role>-<subject>@<project>`.
 # Subject is the bd task id for work stages and the artifact id otherwise.
 export def worker-window-name [role: string, subject: string, project: string]: nothing -> string {
@@ -1090,6 +1132,11 @@ export def worker-spawn [
         error make {msg: $"cannot reach tmux server \(socket: ($which)): ($reachable.stderr | str trim)"}
     }
 
+    # Resolved BEFORE anything is allocated. A wrong --project used to fail at
+    # new-window, after the worktree and identity envelope had been written,
+    # leaving a branch to prune by hand (hit on the first live run).
+    let target = (resolve-project-session $project --socket $socket)
+
     let window = (worker-window-name $role $subject $project)
     # NOT `$task | default $subject`. `default` substitutes for null, not for an
     # empty string, so an AKM stage with no task would have allocated a worktree
@@ -1139,7 +1186,7 @@ export def worker-spawn [
         "-e" $"INFINIFU_WINDOW=($window)"
     ]
     let created = (do {
-        ^tmux ...(tmux-args $socket) new-window -d -t $project -n $window -c $tree.path ...$worker_env "pi" "--session-id" $session
+        ^tmux ...(tmux-args $socket) new-window -d -t $target -n $window -c $tree.path ...$worker_env "pi" "--session-id" $session
     } | complete)
     if $created.exit_code != 0 {
         error make {msg: $"tmux could not create window ($window): ($created.stderr | str trim)"}

@@ -279,6 +279,74 @@ let cases = [
         }
     })
 
+    # ----------------------------------------------------- project resolution
+    #
+    # dotfiles-k5vt: the README documents `--project <your-group>`, and that is
+    # the right mental model — grouped sessions SHARE windows, so a worker
+    # window created in any session of a group appears in all of them, and
+    # `<role>-<subject>@<group>` is what an operator scans for. But
+    # `tmux new-window -t` takes a SESSION, so the documented command failed
+    # with "can't find window: dotfiles" on a machine whose sessions are
+    # dotfiles_3 .. dotfiles_36.
+    #
+    # The shape is the one this repo's own tmux-start produces:
+    #   tmux new-session -d -t <name> -s <name>_<n>
+    # The eponymous session establishes the group, later views join it, and once
+    # it is gone the group has no session named after it at all.
+
+    (run-case "live/a-session-group-name-resolves-to-one-of-its-sessions" {
+        with-server "group" {|t, repo|
+            # Build the real-world shape: a group with NO session of its name
+            # and MORE THAN ONE member.
+            #
+            # Two matters. tmux `-t` prefix-matches SESSION names; it does not
+            # resolve groups. With a single member `-t dotfiles` matches
+            # `dotfiles_7` by accident and appears to work — which is why this
+            # case first passed against the unfixed code. Add a second view and
+            # the prefix is ambiguous, producing the operator-hostile
+            # "can't find window: dotfiles" seen on the live run. Relying on
+            # accidental uniqueness is worse than failing: it works until
+            # someone opens a second view.
+            ^tmux -L $t.socket new-session -d -t "dotfiles" -s "dotfiles_7"
+            ^tmux -L $t.socket new-session -d -t "dotfiles" -s "dotfiles_8"
+            ^tmux -L $t.socket kill-session -t "dotfiles"
+            let groups = (^tmux -L $t.socket list-sessions -F "#{session_name}|#{session_group}" | lines)
+            assert-true ("dotfiles_7|dotfiles" in $groups) $"fixture must be a group with no eponymous session, got ($groups)"
+            assert-true ("dotfiles_8|dotfiles" in $groups) $"and more than one member, got ($groups)"
+
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "work-do" --socket $t.socket)
+
+            assert-eq $w.window "impl-t1@dotfiles" "the window is named for the GROUP, which is what an operator scans for"
+            assert-eq (worker-liveness $w.window --socket $t.socket | get verdict) "live" "and it really started"
+        }
+    })
+
+    (run-case "live/an-exact-session-name-still-resolves" {
+        # Naming one session directly must keep working: it is unambiguous, and
+        # it is what an operator reaches for when a group has many views.
+        with-server "exact" {|t, repo|
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "work-do" --socket $t.socket)
+            assert-eq $w.window "impl-t1@dotfiles" ""
+            assert-eq (worker-liveness $w.window --socket $t.socket | get verdict) "live" ""
+        }
+    })
+
+    (run-case "live/an-unknown-project-is-refused-before-anything-is-allocated" {
+        # The first live run hit this: a wrong --project failed at new-window,
+        # AFTER the worktree and identity envelope had been written, leaving a
+        # bd-sp028.0 branch to prune by hand. Resolution now happens before any
+        # allocation, so a typo costs nothing.
+        with-server "nogroup" {|t, repo|
+            assert-rejects {
+                worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "nosuchproject" --repo $repo --task "t1" --session "sid-1" --skill "work-do" --socket $t.socket
+            } "nosuchproject" "the refusal must name what could not be found"
+
+            assert-true (not (($repo | path join ".worktrees" "bd-t1.0") | path exists)) "and allocate nothing"
+            let branches = (^git -C $repo branch --list "bd-*" | str trim)
+            assert-eq $branches "" $"nor leave a branch behind, got ($branches)"
+        }
+    })
+
     (run-case "live/a-dead-window-does-not-make-a-worker-cleanable" {
         # A missing window is missing evidence, not proof the work is done.
         # The worktree must survive, because it may hold the only copy.
