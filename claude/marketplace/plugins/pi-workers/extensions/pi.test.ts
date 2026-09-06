@@ -36,6 +36,8 @@ import {
   createInitiatorTool,
   rosterFrame,
   transcriptLines,
+  resultComponent,
+  callComponent,
   MAX_SUMMARY_BYTES,
 } from "./pi.ts";
 
@@ -819,6 +821,35 @@ describe("roster frame", () => {
 // full; hiding a line from the operator must never hide it from the agent.
 
 describe("transcript lines", () => {
+  test("the call itself renders nothing — the result line speaks for it", () => {
+    // renderShell: "self" removed the box around the RESULT, but the tool's
+    // name label is drawn by the call, so a suppressed result still left a bare
+    // `pi_worker` with nothing under it — six of them in one run.
+    const c = callComponent();
+    expect(c.render(80)).toEqual([]);
+    expect(typeof c.invalidate).toBe("function");
+  });
+
+  test("the rendered component satisfies pi-tui's Component contract", () => {
+    // `invalidate()` is REQUIRED, not optional. Returning only `render` was
+    // enough for a fresh draw and broke `/reload`: re-rendering history calls
+    // invalidate on every component, and a session with pi_worker results in
+    // its transcript died with "this.child.invalidate is not a function".
+    const c = resultComponent("wait", true, "seq 1 from x/y: blocked — nope");
+    expect(typeof c.render).toBe("function");
+    expect(typeof c.invalidate).toBe("function");
+    expect(() => c.invalidate()).not.toThrow();
+    expect(c.render(80)).toEqual(["seq 1 from x/y: blocked — nope"]);
+  });
+
+  test("a suppressed result still renders as a real component, not nothing", () => {
+    // The component is built even when it has no lines; returning undefined
+    // would put the same hole in the render tree that the missing invalidate did.
+    const c = resultComponent("spawn", true, "spawned x/y");
+    expect(c.render(80)).toEqual([]);
+    expect(typeof c.invalidate).toBe("function");
+  });
+
   test("verbs whose state the frame already shows print nothing", () => {
     for (const verb of ["spawn", "liveness", "ps", "stop", "accept", "send", "resume", "workers"]) {
       expect(transcriptLines(verb, true, "anything")).toEqual([]);

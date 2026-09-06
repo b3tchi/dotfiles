@@ -856,6 +856,49 @@ export function transcriptLines(verb: string, ok: boolean, detail: string): stri
 }
 
 /**
+ * The transcript component for the CALL.
+ *
+ * Renders nothing. `renderShell: "self"` suppresses the box around a result but
+ * not the tool's name label, which the call draws — so a run whose results were
+ * all suppressed still printed six bare `pi_worker` lines with nothing beneath
+ * them. Every line that matters is carried by the result: a worker's answer
+ * names its own run and uid, and a failure carries its own message.
+ */
+export function callComponent(): {
+  render: (width: number) => string[];
+  invalidate: () => void;
+} {
+  return { render: () => [], invalidate: () => {} };
+}
+
+/**
+ * The transcript component for one tool result.
+ *
+ * pi-tui's `Component` requires `invalidate()` as well as `render()` — it is
+ * called whenever the UI re-renders from scratch, which includes `/reload`.
+ * Returning only `render` worked for a first draw and then killed reload in any
+ * session that had a pi_worker result in its history:
+ *
+ *     Error: Reload failed: this.child.invalidate is not a function
+ *
+ * Always a real component, even with no lines: returning nothing would leave
+ * the same hole in the render tree.
+ */
+export function resultComponent(
+  verb: string,
+  ok: boolean,
+  detail: string,
+): { render: (width: number) => string[]; invalidate: () => void } {
+  const lines = transcriptLines(verb, ok, detail);
+  return {
+    render: () => lines,
+    invalidate: () => {
+      // Nothing is cached; the lines were computed once when the call returned.
+    },
+  };
+}
+
+/**
  * Reduce a nushell error to the message it carries.
  *
  * The CLI is a nu script, so `error make` renders the message alongside a
@@ -1111,14 +1154,10 @@ export default function piWorker(pi: ExtensionAPI): void {
         // suppressed result still leaves a `pi_worker` label behind, which is
         // the noise this removes.
         renderShell: "self",
+        renderCall: () => callComponent(),
         renderResult: (result: { details?: unknown }) => {
           const outcome = (result.details ?? {}) as { ok?: boolean; detail?: string };
-          const lines = transcriptLines(
-            lastVerb,
-            outcome.ok !== false,
-            outcome.detail ?? "",
-          );
-          return { render: () => lines };
+          return resultComponent(lastVerb, outcome.ok !== false, outcome.detail ?? "");
         },
         execute: async (
           _id: string,
