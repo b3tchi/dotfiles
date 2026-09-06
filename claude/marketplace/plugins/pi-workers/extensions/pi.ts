@@ -641,6 +641,158 @@ const RESULT_TOOL_PARAMETERS = {
   additionalProperties: false,
 } as const;
 
+// ---------------------------------------------------------------------------
+// The initiator tool.
+//
+// The other half of the bridge. `createResultTool` is what a WORKER uses to
+// report; this is what the session ORCHESTRATING workers uses to drive them.
+// Without it an initiator running under Pi had no tools at all — the extension
+// only woke up in worker mode — so driving the bus meant shelling out by hand.
+//
+// One dispatch tool rather than eleven separate ones. Every session pays for
+// the tool list in its prompt, and eleven near-identical entries crowd out the
+// tools the agent is actually there to use. The verb stays a closed enum, so
+// the model still picks from a fixed set rather than composing a command line.
+//
+// Thin over `pi-worker`, for the same reason the result tool is: the bus has
+// one implementation, in the CLI. This contributes a typed surface and nothing
+// else.
+
+/** The verbs an initiator drives. `result` and `settled` are a worker's, not an initiator's. */
+export const INITIATOR_VERBS = [
+  "spawn",
+  "send",
+  "wait",
+  "ack",
+  "status",
+  "inspect",
+  "workers",
+  "liveness",
+  "resume",
+  "accept",
+  "stop",
+] as const;
+
+export type InitiatorVerb = (typeof INITIATOR_VERBS)[number];
+
+/** Verbs whose uid is positional rather than a flag, matching the CLI. */
+const UID_IS_POSITIONAL: readonly string[] = [
+  "send",
+  "status",
+  "inspect",
+  "liveness",
+  "resume",
+  "accept",
+  "stop",
+];
+
+export interface InitiatorArgs {
+  verb: InitiatorVerb;
+  run?: string;
+  uid?: string;
+  role?: string;
+  subject?: string;
+  project?: string;
+  repo?: string;
+  session?: string;
+  skill?: string;
+  task?: string;
+  stage?: string;
+  instructions?: string;
+  artifacts?: string;
+  feedback?: string;
+  sequence?: number;
+  socket?: string;
+}
+
+export interface InitiatorTool {
+  invoke(args: InitiatorArgs): Promise<ReportOutcome>;
+}
+
+/** Flags each verb accepts, in the order the CLI documents them. */
+const VERB_FLAGS: Record<string, readonly string[]> = {
+  spawn: ["run", "uid", "role", "subject", "project", "repo", "session", "skill", "task", "socket"],
+  send: ["run", "stage", "task", "instructions", "artifacts"],
+  wait: ["run"],
+  ack: ["run", "uid", "sequence"],
+  status: ["run"],
+  inspect: ["run"],
+  workers: ["run"],
+  liveness: ["run", "socket"],
+  resume: ["run", "feedback", "socket"],
+  accept: ["run", "repo", "socket"],
+  stop: ["run", "socket"],
+};
+
+export function createInitiatorTool(opts: { exec: ExecFn; cwd?: string }): InitiatorTool {
+  return {
+    invoke: async (args) => {
+      // Checked before anything is spawned: the verb is the one field that
+      // decides what runs, so an unrecognised one must never reach a shell.
+      if (!(INITIATOR_VERBS as readonly string[]).includes(args.verb)) {
+        return {
+          ok: false,
+          detail: `'${args.verb}' is not an initiator verb; expected one of ${INITIATOR_VERBS.join(", ")}`,
+        };
+      }
+
+      const argv: string[] = [args.verb];
+      if (UID_IS_POSITIONAL.includes(args.verb) && args.uid) argv.push(args.uid);
+
+      for (const flag of VERB_FLAGS[args.verb] ?? []) {
+        const value = (args as unknown as Record<string, unknown>)[flag];
+        // Absent stays ABSENT. An empty flag is not the same as no flag: the
+        // CLI reads an empty --task as "this stage has a ticket id" and then
+        // fails on a shape the caller never asked for.
+        if (value === undefined || value === null || value === "") continue;
+        argv.push(`--${flag}`, String(value));
+      }
+
+      try {
+        const out = await opts.exec("pi-worker", argv, { cwd: opts.cwd });
+        if (out.code !== 0) {
+          // The CLI's refusals name what is wrong and list what exists;
+          // swallowing them would leave the agent guessing.
+          return { ok: false, detail: (out.stderr || out.stdout).trim() };
+        }
+        const stdout = out.stdout.trim();
+        if (args.verb === "wait" && stdout.length === 0) {
+          // Silence from `wait` means an empty mailbox, not a fault. Reporting
+          // it as failure would make an idle run look broken.
+          return { ok: true, detail: "no unacknowledged results in this run" };
+        }
+        return { ok: true, detail: stdout };
+      } catch (err) {
+        return { ok: false, detail: String(err) };
+      }
+    },
+  };
+}
+
+const INITIATOR_TOOL_PARAMETERS = {
+  type: "object",
+  properties: {
+    verb: { type: "string", enum: [...INITIATOR_VERBS], description: "which bus operation to run" },
+    run: { type: "string", description: "the run id grouping these workers" },
+    uid: { type: "string", description: "the worker's id within the run" },
+    role: { type: "string", description: "spawn: shown in the window name, e.g. impl or rev" },
+    subject: { type: "string", description: "spawn: what the worker is working on; shown in the window name. Avoid '.'" },
+    project: { type: "string", description: "spawn: tmux session group or session name to host the window" },
+    repo: { type: "string", description: "spawn/accept: the git repository" },
+    session: { type: "string", description: "spawn: a fresh uuid for the worker's Pi session" },
+    skill: { type: "string", description: "spawn: a stage name declared in the stage registry" },
+    task: { type: "string", description: "spawn/send: ticket id, for stages whose payload is a ticket" },
+    stage: { type: "string", description: "send: the stage this message belongs to" },
+    instructions: { type: "string", description: "send: prose, for stages whose payload is instructions" },
+    artifacts: { type: "string", description: "send: comma-separated artifact ids" },
+    feedback: { type: "string", description: "resume: why the work is being sent back" },
+    sequence: { type: "number", description: "ack: which result envelope is being acknowledged" },
+    socket: { type: "string", description: "an alternate tmux socket; omit for the default server" },
+  },
+  required: ["verb"],
+  additionalProperties: false,
+} as const;
+
 /**
  * Filesystem-backed IO for the inbox watcher.
  *
@@ -686,6 +838,42 @@ export default function piWorker(pi: ExtensionAPI): void {
   // logged no-op, because an extension that throws during host startup takes
   // the whole worker down — strictly worse than one that says what it cannot
   // do.
+  const exec = (pi as unknown as { exec?: ExecFn }).exec?.bind(pi);
+  const registerTool = (pi as unknown as { registerTool?: (t: unknown) => void })
+    .registerTool?.bind(pi);
+
+  // The initiator half, registered in EVERY session. Orchestrating workers is
+  // what most sessions using this package are for, and a session that had to
+  // shell out to drive the bus was the gap this closes. A worker gets it too:
+  // a worker that dispatches its own workers is the caller's business, not the
+  // transport's.
+  if (exec && typeof registerTool === "function") {
+    const initiator = createInitiatorTool({ exec });
+    try {
+      registerTool({
+        name: "pi_worker",
+        label: "Worker bus",
+        description:
+          "Drive Pi workers: spawn one as a visible tmux window, check its liveness, send it a message, wait for its typed result, resume it with feedback, then accept or stop it. Verbs: " +
+          INITIATOR_VERBS.join(", ") +
+          ". Stages must be declared in the stage registry.",
+        promptSnippet: "pi_worker — spawn, watch and message Pi workers",
+        parameters: INITIATOR_TOOL_PARAMETERS,
+        execute: async (_id: string, params: InitiatorArgs) => {
+          const outcome = await initiator.invoke(params);
+          return {
+            content: [{ type: "text", text: outcome.detail || (outcome.ok ? "ok" : "failed") }],
+            details: outcome,
+          };
+        },
+      });
+    } catch (err) {
+      nodeWatcherIO().log(`pi-worker: could not register the initiator tool: ${err}`);
+    }
+  }
+
+  // Worker mode below. Only active when an orchestrator set PI_WORKER_RUN/UID,
+  // so an ordinary session is unaffected by any of it.
   const inboxDir = workerInboxDir(process.env as Record<string, string | undefined>);
   if (!inboxDir) return;
 
@@ -721,7 +909,6 @@ export default function piWorker(pi: ExtensionAPI): void {
   // The worker's way back to the initiator (dotfiles-87bt). Registered BEFORE
   // the inbox watcher starts: a message may arrive on the first poll, and a
   // worker asked to work before it can report is the exact silence this fixes.
-  const exec = (pi as unknown as { exec?: ExecFn }).exec?.bind(pi);
   const reporter = exec
     ? createResultTool({ run, uid, identity, exec })
     : null;
@@ -731,8 +918,6 @@ export default function piWorker(pi: ExtensionAPI): void {
       "pi-worker: this Pi build exposes no exec; the worker cannot report an outcome. Reconcile against the live API.",
     );
   } else {
-    const registerTool = (pi as unknown as { registerTool?: (t: unknown) => void })
-      .registerTool?.bind(pi);
     if (typeof registerTool !== "function") {
       io.log("pi-worker: this Pi build exposes no registerTool; the typed result tool is unavailable");
     } else {
