@@ -856,6 +856,46 @@ export function transcriptLines(verb: string, ok: boolean, detail: string): stri
 }
 
 /**
+ * Wrap lines to the viewport width.
+ *
+ * pi-tui throws an UNCAUGHT exception when a custom component returns a line
+ * wider than the terminal, which takes the whole editor down:
+ *
+ *     Error: Rendered line 67 exceeds terminal width (205 > 118)
+ *
+ * So `render(width)` must honour the width it is handed. Wrapped rather than
+ * truncated because the lines that overflow are the ones that matter — an
+ * error message is ~200 characters precisely because it is explaining what to
+ * do, and cutting it at the viewport edge throws away the instruction.
+ *
+ * Breaks on spaces where it can; a single long token (a path, typically) is
+ * cut, because exceeding the width is not an option.
+ */
+export function wrapToWidth(lines: string[], width: number): string[] {
+  // A zero or negative width would make the loop below never advance.
+  if (!Number.isFinite(width) || width <= 0) return lines;
+
+  const out: string[] = [];
+  for (const line of lines) {
+    let rest = line;
+    if (rest.length === 0) {
+      out.push(rest);
+      continue;
+    }
+    while (rest.length > width) {
+      const window = rest.slice(0, width + 1);
+      const brk = window.lastIndexOf(" ");
+      // No space to break on: hard-cut rather than overflow.
+      const cut = brk > 0 ? brk : width;
+      out.push(rest.slice(0, cut));
+      rest = rest.slice(brk > 0 ? cut + 1 : cut);
+    }
+    out.push(rest);
+  }
+  return out;
+}
+
+/**
  * The transcript component for the CALL.
  *
  * Renders nothing. `renderShell: "self"` suppresses the box around a result but
@@ -891,7 +931,9 @@ export function resultComponent(
 ): { render: (width: number) => string[]; invalidate: () => void } {
   const lines = transcriptLines(verb, ok, detail);
   return {
-    render: () => lines,
+    // Honours the width it is given; see wrapToWidth for why that is not
+    // optional.
+    render: (width: number) => wrapToWidth(lines, width),
     invalidate: () => {
       // Nothing is cached; the lines were computed once when the call returned.
     },

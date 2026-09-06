@@ -38,6 +38,7 @@ import {
   transcriptLines,
   resultComponent,
   callComponent,
+  wrapToWidth,
   MAX_SUMMARY_BYTES,
 } from "./pi.ts";
 
@@ -821,6 +822,45 @@ describe("roster frame", () => {
 // full; hiding a line from the operator must never hide it from the agent.
 
 describe("transcript lines", () => {
+  test("a long line is wrapped to the viewport, never emitted over it", () => {
+    // pi-tui throws an UNCAUGHT exception when a custom component returns a
+    // line wider than the terminal, taking the whole editor down with it:
+    //
+    //   Error: Rendered line 67 exceeds terminal width (205 > 118).
+    //
+    // The occupied-address refusal is ~205 characters, and `messageOnly` joins
+    // nu's already-wrapped message back into one line, so the first time a
+    // spawn was refused in a narrow terminal it killed the session.
+    const long =
+      "x1/w1 already exists: that address has been used, and spawning onto it would inherit its mail and markers. " +
+      "Use a different uid, or remove /run/user/1000/pi-worker/x1/w1 if you are sure it is finished with";
+    const lines = wrapToWidth([long], 60);
+
+    expect(lines.length).toBeGreaterThan(1);
+    for (const l of lines) expect(l.length).toBeLessThanOrEqual(60);
+    // Wrapped, not truncated: an error you cannot read is no better than one
+    // you cannot see.
+    expect(lines.join(" ")).toContain("if you are sure it is finished with");
+  });
+
+  test("wrapping breaks on spaces, and falls back to a hard cut for one long token", () => {
+    expect(wrapToWidth(["alpha beta gamma"], 11)).toEqual(["alpha beta", "gamma"]);
+    // A path with no spaces cannot be broken politely; it must still not exceed.
+    const cut = wrapToWidth(["/a/very/long/path/with/no/spaces/at/all"], 10);
+    for (const l of cut) expect(l.length).toBeLessThanOrEqual(10);
+    expect(cut.join("")).toBe("/a/very/long/path/with/no/spaces/at/all");
+  });
+
+  test("a width of zero or less is ignored rather than looping forever", () => {
+    // Defensive: a zero width would otherwise make the wrap loop never advance.
+    expect(wrapToWidth(["abc"], 0)).toEqual(["abc"]);
+  });
+
+  test("the result component wraps at the width it is given", () => {
+    const c = resultComponent("wait", false, "x".repeat(300));
+    for (const l of c.render(80)) expect(l.length).toBeLessThanOrEqual(80);
+  });
+
   test("the call itself renders nothing — the result line speaks for it", () => {
     // renderShell: "self" removed the box around the RESULT, but the tool's
     // name label is drawn by the call, so a suppressed result still left a bare
