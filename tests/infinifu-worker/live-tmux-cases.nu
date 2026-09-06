@@ -170,6 +170,40 @@ let cases = [
             assert-true ($w.cwd | path exists) "and its worktree survives"
         }
     })
+    (run-case "live/the-worker-is-launched-with-a-create-if-missing-session-flag" {
+        # Pi distinguishes the two session flags:
+        #   --session <path|id>  resume an EXISTING session; errors if absent
+        #   --session-id <id>    use this exact id, CREATING it if missing
+        #
+        # spawn mints a fresh uuid, so that session cannot exist yet and
+        # `--session` is always wrong there. A live run caught this: Pi printed
+        # "No session found matching '<uuid>'" and exited, leaving a dead pane
+        # while spawn still reported live: true (worker-live? matches on the
+        # window NAME, and remain-on-exit keeps a dead window listed).
+        #
+        # The stub `pi` in this harness is `sleep 30`, which accepts any argv,
+        # so the flag itself has to be asserted -- otherwise the suite stays
+        # green while the launched command never starts.
+        with-server "sessionflag" {|t, repo|
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "work-do" --socket $t.socket)
+
+            let start = (
+                ^tmux -L $t.socket list-panes -a -F "#{window_name}\t#{pane_start_command}"
+                | lines
+                | where {|l| $l | str starts-with $"($w.window)\t" }
+                | first
+                | split row "\t"
+                | last
+            )
+            assert-true ($start | str contains "--session-id") $"spawn must create-if-missing, got: ($start)"
+            assert-true (not ($start | str contains "--session ")) $"a bare --session cannot resume an unborn session: ($start)"
+            assert-true ($start | str contains "sid-1") $"the session id must reach pi: ($start)"
+
+            # Resume is the opposite case: by then the session exists, so the
+            # documented resume command is the plain --session form.
+            assert-eq $w.resume "pi --session sid-1" "the resume hint resumes rather than creates"
+        }
+    })
 ]
 
 $cases | to json

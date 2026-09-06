@@ -954,6 +954,16 @@ export def worker-spawn [
         window: $window
     }
 
+    # `--session-id`, NOT `--session`. Pi's two session flags are not aliases:
+    # `--session <path|id>` RESUMES an existing session and exits with "No
+    # session found matching '<id>'" when it is absent, while `--session-id`
+    # uses that exact id and creates it if missing. spawn mints a fresh uuid,
+    # so the session cannot exist yet and the resuming flag is always wrong
+    # here. A live run against Pi 0.84.4 hit exactly that: the pane died at
+    # startup while spawn still reported live: true. The resume hint below is
+    # the opposite case -- by then the session exists, so plain `--session` is
+    # correct there.
+    #
     # `remain-on-exit on` keeps a crashed or finished worker's window in place.
     # Without it a Pi that fails during startup takes its own error message off
     # the screen, and the operator is left with a missing window and no reason.
@@ -972,7 +982,7 @@ export def worker-spawn [
         "-e" $"INFINIFU_WINDOW=($window)"
     ]
     let created = (do {
-        ^tmux ...(tmux-args $socket) new-window -d -t $project -n $window -c $tree.path ...$worker_env "pi" "--session" $session
+        ^tmux ...(tmux-args $socket) new-window -d -t $project -n $window -c $tree.path ...$worker_env "pi" "--session-id" $session
     } | complete)
     if $created.exit_code != 0 {
         error make {msg: $"tmux could not create window ($window): ($created.stderr | str trim)"}
