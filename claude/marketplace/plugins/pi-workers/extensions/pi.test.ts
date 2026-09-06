@@ -595,6 +595,28 @@ describe("initiator tool", () => {
     expect(out.detail).toContain("complete");
   });
 
+  test("wait scopes to a worker when one is named", async () => {
+    // A run that still holds a finished worker with an unacked envelope would
+    // otherwise hand its answer to whoever asked next — which is exactly what
+    // happened live: a spawn of r2/x1 was answered with r2/w1's stale result.
+    const { exec, calls } = fakeExec();
+    await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "r2", uid: "x1" });
+    expect(calls[0].args).toEqual(["wait", "--run", "r2", "--uid", "x1"]);
+  });
+
+  test("wait without a uid still drains the whole run", async () => {
+    // The orchestrator's use: whatever finished first, whoever it was.
+    const { exec, calls } = fakeExec();
+    await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "r2" });
+    expect(calls[0].args).toEqual(["wait", "--run", "r2"]);
+  });
+
+  test("rm releases one address", async () => {
+    const { exec, calls } = fakeExec();
+    await createInitiatorTool({ exec }).invoke({ verb: "rm", run: "r2", uid: "x1" });
+    expect(calls[0].args).toEqual(["rm", "--run", "r2", "--uid", "x1"]);
+  });
+
   test("an empty wait is success with nothing, not a failure", async () => {
     // `wait` prints nothing when there is no mail. Reporting that as an error
     // would make an idle run look broken.

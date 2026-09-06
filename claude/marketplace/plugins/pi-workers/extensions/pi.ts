@@ -664,6 +664,7 @@ export const INITIATOR_VERBS = [
   "spawn",
   "send",
   "wait",
+  "rm",
   "ack",
   "status",
   "inspect",
@@ -715,7 +716,8 @@ const VERB_FLAGS: Record<string, readonly string[]> = {
   ps: ["run", "socket"],
   spawn: ["run", "uid", "role", "subject", "project", "repo", "session", "skill", "task", "socket"],
   send: ["run", "stage", "task", "instructions", "artifacts"],
-  wait: ["run"],
+  wait: ["run", "uid"],
+  rm: ["run", "uid"],
   ack: ["run", "uid", "sequence"],
   status: ["run"],
   inspect: ["run"],
@@ -835,6 +837,7 @@ const FRAME_COVERED_VERBS: readonly string[] = [
   "accept",
   "send",
   "resume",
+  "rm",
 ];
 
 export function transcriptLines(verb: string, ok: boolean, detail: string): string[] {
@@ -1013,6 +1016,8 @@ function summarise(verb: string, stdout: string): string {
       }
       return `seq ${o.sequence} from ${o.run}/${o.uid}: ${payload.status} — ${payload.summary}`;
     }
+    case "rm":
+      return o.removed ? `released ${o.run}/${o.uid}` : `${o.run}/${o.uid}: ${o.reason}`;
     case "stop":
     case "accept":
       return o.changed
@@ -1083,7 +1088,7 @@ const INITIATOR_TOOL_PARAMETERS = {
   properties: {
     verb: { type: "string", enum: [...INITIATOR_VERBS], description: "which bus operation to run" },
     run: { type: "string", description: "the run id grouping these workers" },
-    uid: { type: "string", description: "the worker's id within the run" },
+    uid: { type: "string", description: "the worker's id within the run. On `wait`, scopes to that worker instead of the whole run" },
     role: { type: "string", description: "spawn: shown in the window name, e.g. impl or rev" },
     subject: { type: "string", description: "spawn: what the worker is working on; shown in the window name. Avoid '.'" },
     project: { type: "string", description: "spawn: tmux session group or session name to host the window" },

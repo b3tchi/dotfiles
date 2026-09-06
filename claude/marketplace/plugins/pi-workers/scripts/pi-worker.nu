@@ -618,8 +618,15 @@ export def bus-pending [run: string]: nothing -> list<record> {
 # Non-destructive by design: an initiator that dies between reading this and
 # acknowledging it must see the same envelope on restart. Delivery state is the
 # `.ack` file on disk, never anything held in the reader.
-export def bus-wait [--run: string, --json]: nothing -> any {
-    let pending = (bus-pending $run)
+export def bus-wait [--run: string, --uid: string = "", --json]: nothing -> any {
+    # Unscoped, this is the oldest unacknowledged result ACROSS the run, which
+    # is what an orchestrator draining many workers wants. `--uid` narrows it to
+    # one, which is what anyone waiting on a PARTICULAR worker wants: a run that
+    # still holds a finished worker with an unacked envelope would otherwise
+    # hand its answer to whoever asked next (dotfiles-idzp's stale-state shape,
+    # in the mailbox rather than the window list).
+    let all = (bus-pending $run)
+    let pending = (if ($uid | is-empty) { $all } else { $all | where uid == $uid })
     if ($pending | is-empty) { return null }
     let next = ($pending | first)
     if $json { $next | to json } else { $next }
@@ -1449,6 +1456,31 @@ export def worker-roster [--run: string = "", --socket: string = ""]: nothing ->
     } | flatten
 }
 
+# Let go of a finished worker's address.
+#
+# The occupied-address guard claims an address for the life of the run
+# directory, so repeating a run otherwise needs a fresh id every time. This is
+# the deliberate way to reuse one.
+#
+# Refused while the worker is unfinished: its envelopes may be the only record
+# of what it did, and `running`, `blocked` or `waiting_human` all mean something
+# may still be waiting on it. Only a terminal worker is discardable.
+export def worker-release [--run: string, --uid: string]: nothing -> record {
+    let dir = (worker-dir $run $uid)
+    if not ($dir | path exists) {
+        return {run: $run, uid: $uid, removed: false, reason: "no such worker"}
+    }
+    let state = (bus-status $uid --run $run | get state)
+    if $state not-in ["stopped" "accepted"] {
+        error make {msg: $"refusing to release ($run)/($uid): it is ($state), and its envelopes may be the only record of what it did. Stop or accept it first"}
+    }
+    rm -rf $dir
+    # A run directory with nothing left in it is just clutter.
+    let run_dir = (run-dir $run)
+    if ($run_dir | path exists) and ((ls $run_dir | length) == 0) { rm -rf $run_dir }
+    {run: $run, uid: $uid, removed: true, state: $state}
+}
+
 # Send a worker back with reviewer feedback, resuming its ORIGINAL session.
 #
 # Resuming rather than dispatching fresh is the point of a stable session id:
@@ -1607,7 +1639,8 @@ def usage []: nothing -> string {
         "  send     <uid> --run --stage [--task | --instructions] [--artifacts]"
         "  result   <uid> --run --status --summary [--validation]   report an outcome"
         "  settled  <uid> --run                 report settling with nothing to show"
-        "  wait     --run                       oldest unacknowledged result, or nothing"
+        "  wait     --run [--uid]               oldest unacknowledged result, or nothing"
+        "  rm       --run --uid                 release a finished worker's address"
         "  ack      --run --uid --sequence      delivery receipt; NOT acceptance"
         "  status   <uid> --run                 one worker's state, from the bus"
         "  liveness <uid> --run [--socket]      live | exited | unknown, from tmux"
@@ -1664,8 +1697,8 @@ def "main send" [
 
 # Prints nothing when there is no mail, so `if (pi-worker wait --run r |
 # is-empty)` works in a script. Silence is the answer, not an error.
-def "main wait" [--run: string] {
-    let next = (bus-wait --run $run)
+def "main wait" [--run: string, --uid: string = ""] {
+    let next = (bus-wait --run $run --uid $uid)
     if $next != null { print ($next | to json) }
 }
 
@@ -1730,6 +1763,10 @@ def "main liveness" [uid: string, --run: string, --socket: string = ""] {
 
 def "main status" [uid: string, --run: string] { bus-status $uid --run $run | to json | print }
 def "main inspect" [uid: string, --run: string] { worker-inspect $uid --run $run | to json | print }
+def "main rm" [--run: string, --uid: string] {
+    worker-release --run $run --uid $uid | to json | print
+}
+
 def "main ps" [--run: string = "", --socket: string = ""] {
     worker-roster --run $run --socket $socket | to json | print
 }

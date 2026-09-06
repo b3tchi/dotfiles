@@ -586,6 +586,85 @@ let cases = [
     })
 
 
+    (run-case "bus/wait-can-be-scoped-to-one-worker" {
+        # `wait --run` returns the oldest unacknowledged result ACROSS the run,
+        # which is right for an orchestrator draining many workers and wrong for
+        # anyone waiting on a particular one. Observed live: a run still held a
+        # finished worker with an unacked envelope, so a freshly spawned worker's
+        # initiator was handed the previous one's answer — the same stale-state
+        # trap as reusing an address.
+        let root = (make-runtime "wait-scoped")
+        with-runtime $root {
+            for u in ["old" "new"] {
+                bus-identity $u --run "r1" --identity {
+                    role: "impl", cwd: $nu.temp-dir, branch: "wk-t.0"
+                    session: $"sid-($u)", skill: "wk-build", window: $"impl-($u)@dotfiles"
+                }
+            }
+            bus-result "old" --run "r1" --result {
+                status: "blocked", summary: "stale", window: "w", session: "s", resume: "r"
+            }
+            bus-result "new" --run "r1" --result {
+                status: "complete", summary: "fresh", window: "w", session: "s", resume: "r"
+            }
+
+            # Unscoped keeps its meaning: oldest first, across the run.
+            assert-eq (bus-wait --run "r1" | get uid) "old" "the run-wide wait is unchanged"
+            # Scoped answers about the worker asked about.
+            assert-eq (bus-wait --run "r1" --uid "new" | get payload.summary) "fresh" "scoped to the worker"
+            assert-eq (bus-wait --run "r1" --uid "old" | get payload.summary) "stale" ""
+        }
+        rm -rf $root
+    })
+
+    (run-case "bus/a-scoped-wait-on-a-quiet-worker-returns-nothing" {
+        let root = (make-runtime "wait-quiet")
+        with-runtime $root {
+            bus-identity "a" --run "r1" --identity {
+                role: "impl", cwd: $nu.temp-dir, branch: "wk-t.0"
+                session: "sid-a", skill: "wk-build", window: "impl-a@dotfiles"
+            }
+            assert-eq (bus-wait --run "r1" --uid "a") null "silence, not someone else's mail"
+        }
+        rm -rf $root
+    })
+
+    (run-case "bus/a-finished-worker-can-be-released-for-reuse" {
+        # The occupied-address guard means an address is claimed for the life of
+        # the run directory, so repeating a run needs either a new id every time
+        # or a way to let one go.
+        let root = (make-runtime "release")
+        with-runtime $root {
+            bus-identity "a" --run "r1" --identity {
+                role: "impl", cwd: $nu.temp-dir, branch: "wk-t.0"
+                session: "sid-a", skill: "wk-build", window: "impl-a@dotfiles"
+            }
+            # Through the public verb: kill-window tolerates a missing tmux, so
+            # this needs no display host.
+            worker-stop "a" --run "r1"
+
+            let released = (worker-release --run "r1" --uid "a")
+            assert-true $released.removed "the address is freed"
+            assert-eq (worker-roster --run "r1") [] "and the worker is gone from the roster"
+        }
+        rm -rf $root
+    })
+
+    (run-case "bus/an-unfinished-worker-is-not-released" {
+        # Releasing throws away the only record of what a worker did, so it is
+        # refused while anything might still be waiting on it.
+        let root = (make-runtime "release-busy")
+        with-runtime $root {
+            bus-identity "a" --run "r1" --identity {
+                role: "impl", cwd: $nu.temp-dir, branch: "wk-t.0"
+                session: "sid-a", skill: "wk-build", window: "impl-a@dotfiles"
+            }
+            assert-rejects { worker-release --run "r1" --uid "a" } "running" "a live worker is not discarded"
+        }
+        rm -rf $root
+    })
+
+
 ]
 
 $cases | to json
