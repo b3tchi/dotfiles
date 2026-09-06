@@ -35,6 +35,7 @@ import {
   createResultTool,
   createInitiatorTool,
   rosterFrame,
+  transcriptLines,
   MAX_SUMMARY_BYTES,
 } from "./pi.ts";
 
@@ -803,6 +804,51 @@ describe("roster frame", () => {
   test("one worker is singular", () => {
     expect(rosterFrame([rows[0]])[0]).toContain("1 worker");
     expect(rosterFrame([rows[0]])[0]).not.toContain("1 workers");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// What reaches the transcript.
+//
+// The frame above the editor now carries live state, so echoing it again per
+// call is duplication that scrolls. What the frame CANNOT show is what a worker
+// actually said, and anything that failed — those still belong in the
+// transcript, because they are history rather than status.
+//
+// This only affects DISPLAY. The tool's content still goes to the model in
+// full; hiding a line from the operator must never hide it from the agent.
+
+describe("transcript lines", () => {
+  test("verbs whose state the frame already shows print nothing", () => {
+    for (const verb of ["spawn", "liveness", "ps", "stop", "accept", "send", "resume", "workers"]) {
+      expect(transcriptLines(verb, true, "anything")).toEqual([]);
+    }
+  });
+
+  test("what a worker said always prints — the frame cannot show it", () => {
+    const lines = transcriptLines("wait", true, "seq 1 from x3/w1: blocked — could not reach the fixture");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("could not reach the fixture");
+  });
+
+  test("an empty mailbox prints nothing rather than a line saying so", () => {
+    // "no unacknowledged results" was the noisiest line of a polling loop and
+    // told the operator nothing the frame does not.
+    expect(transcriptLines("wait", true, "no unacknowledged results in this run")).toEqual([]);
+  });
+
+  test("a failure always prints, whatever the verb", () => {
+    // Suppressing a spawn's success must never suppress its refusal: an
+    // operator who cannot see the failure has no idea why nothing happened.
+    const lines = transcriptLines("spawn", false, "x1/w1 already exists");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("already exists");
+  });
+
+  test("the detail verbs keep every line they produced", () => {
+    const detail = "{\n  \"run\": \"x1\"\n}";
+    expect(transcriptLines("inspect", true, detail)).toEqual(detail.split("\n"));
+    expect(transcriptLines("status", true, detail)).toEqual(detail.split("\n"));
   });
 });
 

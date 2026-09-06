@@ -816,6 +816,46 @@ export function startRosterFrame(opts: {
 }
 
 /**
+ * What a verb puts in the TRANSCRIPT, as opposed to what it returns.
+ *
+ * The frame above the editor carries live state, so echoing it again per call
+ * is duplication that scrolls away. What the frame cannot show is what a worker
+ * actually SAID, and anything that failed — those are history rather than
+ * status, so they stay.
+ *
+ * Display only. The tool's content still reaches the model in full: hiding a
+ * line from the operator must never hide it from the agent.
+ */
+const FRAME_COVERED_VERBS: readonly string[] = [
+  "spawn",
+  "liveness",
+  "ps",
+  "workers",
+  "stop",
+  "accept",
+  "send",
+  "resume",
+];
+
+export function transcriptLines(verb: string, ok: boolean, detail: string): string[] {
+  // A failure always prints, whatever the verb. Suppressing a spawn's success
+  // must never suppress its refusal — an operator who cannot see the failure
+  // has no idea why nothing happened.
+  if (!ok) return [detail];
+
+  // `inspect` and `status` are asked precisely for their detail.
+  if (verb === "inspect" || verb === "status") return detail.split("\n");
+
+  if (FRAME_COVERED_VERBS.includes(verb)) return [];
+
+  // An empty mailbox was the noisiest line of a polling loop and says nothing
+  // the frame does not.
+  if (verb === "wait" && detail.startsWith("no unacknowledged")) return [];
+
+  return detail.length > 0 ? [detail] : [];
+}
+
+/**
  * Reduce a nushell error to the message it carries.
  *
  * The CLI is a nu script, so `error make` renders the message alongside a
@@ -1033,6 +1073,10 @@ export default function piWorker(pi: ExtensionAPI): void {
   // transport's.
   if (exec && typeof registerTool === "function") {
     const initiator = createInitiatorTool({ exec });
+    // renderResult receives the result, not the arguments, so the verb that
+    // produced it is remembered here. Calls render in order, so the latest is
+    // the one being drawn.
+    let lastVerb = "";
 
     // The live frame. Armed from the first event that carries a UI context,
     // because `ui` reaches an extension through ExtensionContext rather than
@@ -1063,6 +1107,19 @@ export default function piWorker(pi: ExtensionAPI): void {
           ". Stages must be declared in the stage registry.",
         promptSnippet: "pi_worker — spawn, watch and message Pi workers",
         parameters: INITIATOR_TOOL_PARAMETERS,
+        // `self` so Pi draws no header box around an empty body: without it a
+        // suppressed result still leaves a `pi_worker` label behind, which is
+        // the noise this removes.
+        renderShell: "self",
+        renderResult: (result: { details?: unknown }) => {
+          const outcome = (result.details ?? {}) as { ok?: boolean; detail?: string };
+          const lines = transcriptLines(
+            lastVerb,
+            outcome.ok !== false,
+            outcome.detail ?? "",
+          );
+          return { render: () => lines };
+        },
         execute: async (
           _id: string,
           params: InitiatorArgs,
@@ -1070,6 +1127,7 @@ export default function piWorker(pi: ExtensionAPI): void {
           _onUpdate: unknown,
           ctx: ExtensionContext,
         ) => {
+          lastVerb = params.verb;
           const outcome = await initiator.invoke(params);
           // Redraw immediately rather than waiting out the interval: the verb
           // that just ran is usually the thing that changed the roster.
