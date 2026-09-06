@@ -34,6 +34,7 @@ import {
   createAgentStateTracker,
   createResultTool,
   createInitiatorTool,
+  rosterFrame,
   MAX_SUMMARY_BYTES,
 } from "./pi.ts";
 
@@ -669,6 +670,47 @@ describe("initiator tool", () => {
     expect(calls).toHaveLength(0);
   });
 
+  test("a nushell error is reduced to its message, not its stack frame", async () => {
+    // The CLI is a nu script, so `error make` renders the message together with
+    // a source frame: the file, the line, the surrounding code and a caret run
+    // wide enough to wrap several times. All of it lands in the transcript, and
+    // none of it tells the operator anything they can act on — the message
+    // already named the address and what to do about it.
+    const { exec } = fakeExec({
+      code: 1,
+      stderr: [
+        "Error: nu::shell::error",
+        "",
+        "  x x1/w1 already exists: that address has been used, and spawning onto it",
+        "  | would inherit its mail and markers. Use a different uid, or remove",
+        "  | /run/user/1000/pi-worker/x1/w1 if you are sure it is finished with",
+        "      ,-[/home/jan/.local/bin/pi-worker:1141:20]",
+        " 1140 |     if ($existing | path exists) {",
+        " 1141 |         error make {msg: $\"($run)/($uid) already exists...\"}",
+        "      :                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+        " 1142 |     }",
+        "      `----",
+      ].join("\n"),
+    });
+
+    const out = await createInitiatorTool({ exec }).invoke({ verb: "spawn", run: "x1", uid: "w1" });
+
+    expect(out.ok).toBe(false);
+    expect(out.detail).toBe(
+      "x1/w1 already exists: that address has been used, and spawning onto it would inherit its mail and markers. Use a different uid, or remove /run/user/1000/pi-worker/x1/w1 if you are sure it is finished with",
+    );
+    expect(out.detail).not.toContain("pi-worker:1141");
+    expect(out.detail).not.toContain("^^^");
+  });
+
+  test("an error that is not nushell-shaped is passed through untouched", async () => {
+    // Only nu's framing is stripped. A plain message from anywhere else must
+    // survive, or a real failure could be reduced to nothing.
+    const { exec } = fakeExec({ code: 1, stderr: "tmux: no server running on /tmp/tmux-1000/default" });
+    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "x1" });
+    expect(out.detail).toBe("tmux: no server running on /tmp/tmux-1000/default");
+  });
+
   test("a refusal from the bus is returned verbatim, not swallowed", async () => {
     // The CLI's errors name what is wrong — an unknown stage lists the ones
     // that exist. Losing that leaves the agent guessing.
@@ -689,6 +731,78 @@ describe("initiator tool", () => {
     const out = await tool.invoke({ verb: "wait", run: "t1" });
     expect(out.ok).toBe(false);
     expect(out.detail).toContain("ENOENT");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The live frame.
+//
+// One keyed widget refreshed in place, instead of a tool-result block appended
+// per call. Pi's setWidget takes a key, so writing the same key repeatedly
+// updates the same lines rather than accumulating them.
+
+describe("roster frame", () => {
+  const rows = [
+    { run: "x2", uid: "w1", role: "rev", state: "running", liveness: "live", window: "rev-demo@dotfiles" },
+    { run: "x2", uid: "w2", role: "impl", state: "blocked", liveness: "exited", window: "impl-t4@dotfiles" },
+  ];
+
+  test("one line per worker, aligned so the columns can be read down", () => {
+    const frame = rosterFrame(rows);
+    expect(frame).toHaveLength(3); // a heading plus the two workers
+    const [heading, first, second] = frame;
+    expect(heading).toContain("2 workers");
+    // The run/uid column is padded to a common width, so uid `w1` and `w2`
+    // line up rather than drifting with the length of the run id.
+    expect(first.indexOf("running")).toBe(second.indexOf("blocked"));
+    expect(first).toContain("rev-demo@dotfiles");
+  });
+
+  test("a worker whose state and liveness disagree is what the frame is for", () => {
+    // `blocked` with `exited` means it reported and its process is gone;
+    // `running` with `exited` would mean it died without reporting. Showing
+    // both side by side is the whole point of the frame.
+    const frame = rosterFrame(rows);
+    expect(frame[2]).toContain("blocked");
+    expect(frame[2]).toContain("exited");
+  });
+
+  test("finished workers leave the frame, unfinished ones stay", () => {
+    // The frame answers "what is running", so a stopped or accepted worker has
+    // no business holding a row — and a run whose workers are all done should
+    // give the terminal space back entirely. A `blocked` worker is NOT done:
+    // it is waiting for someone, which is exactly what a status panel is for.
+    const mixed = [
+      { run: "a", uid: "1", role: "rev", state: "running", liveness: "live", window: "w1" },
+      { run: "a", uid: "2", role: "rev", state: "blocked", liveness: "live", window: "w2" },
+      { run: "old", uid: "1", role: "rev", state: "stopped", liveness: "unknown", window: "w3" },
+      { run: "old", uid: "2", role: "rev", state: "accepted", liveness: "unknown", window: "w4" },
+    ];
+    const frame = rosterFrame(mixed);
+    expect(frame).toHaveLength(3);
+    expect(frame[0]).toContain("2 workers");
+    expect(frame.join("\n")).not.toContain("w3");
+    expect(frame.join("\n")).not.toContain("w4");
+    expect(frame.join("\n")).toContain("blocked");
+  });
+
+  test("a roster of only finished workers shows no frame", () => {
+    expect(
+      rosterFrame([
+        { run: "old", uid: "1", role: "rev", state: "stopped", liveness: "unknown", window: "w3" },
+      ]),
+    ).toBeUndefined();
+  });
+
+  test("no workers means no frame at all, not an empty box", () => {
+    // A widget occupies terminal rows permanently. An idle session should get
+    // them back rather than stare at a header with nothing under it.
+    expect(rosterFrame([])).toBeUndefined();
+  });
+
+  test("one worker is singular", () => {
+    expect(rosterFrame([rows[0]])[0]).toContain("1 worker");
+    expect(rosterFrame([rows[0]])[0]).not.toContain("1 workers");
   });
 });
 

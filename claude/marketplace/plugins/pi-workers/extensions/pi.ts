@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -726,6 +726,127 @@ const VERB_FLAGS: Record<string, readonly string[]> = {
   stop: ["run", "socket"],
 };
 
+// ---------------------------------------------------------------------------
+// The live frame.
+//
+// A tool-result block per call means the answer to "what is running right now?"
+// is scattered across the transcript, oldest first, with the current truth
+// somewhere at the bottom. This is the same information as one keyed widget:
+// Pi's setWidget takes a key, so writing the same key repeatedly refreshes
+// those lines in place instead of appending more.
+
+export interface RosterRow {
+  run: string;
+  uid: string;
+  role: string;
+  state: string;
+  liveness: string;
+  window: string;
+}
+
+/**
+ * The frame's lines, or undefined when there is nothing to show.
+ *
+ * Undefined rather than an empty box: a widget holds terminal rows for as long
+ * as it is set, and an idle session should get them back.
+ *
+ * State and liveness are shown side by side because their disagreement is the
+ * interesting case — `blocked`/`exited` is a worker that reported and then
+ * finished, while `running`/`exited` is one that died without reporting.
+ */
+/** States meaning the worker is finished with; nothing is waiting on it. */
+const FINISHED_STATES: readonly string[] = ["stopped", "accepted"];
+
+export function rosterFrame(all: RosterRow[]): string[] | undefined {
+  // The frame answers "what is running", so a finished worker has no business
+  // holding a row. `blocked` and `waiting_human` are NOT finished — they are
+  // waiting for someone, which is precisely what a status panel is for.
+  const rows = all.filter((r) => !FINISHED_STATES.includes(r.state));
+  if (rows.length === 0) return undefined;
+
+  const addr = rows.map((r) => `${r.run}/${r.uid}`);
+  // Padded to a common width so the columns read down the frame rather than
+  // drifting with the length of each run id.
+  const addrWidth = Math.max(...addr.map((a) => a.length));
+  const stateWidth = Math.max(...rows.map((r) => r.state.length));
+  const liveWidth = Math.max(...rows.map((r) => r.liveness.length));
+
+  const heading = `pi-workers · ${rows.length} worker${rows.length === 1 ? "" : "s"}`;
+  const lines = rows.map((r, i) =>
+    [
+      addr[i].padEnd(addrWidth),
+      r.state.padEnd(stateWidth),
+      r.liveness.padEnd(liveWidth),
+      r.window,
+    ].join("  "),
+  );
+  return [heading, ...lines];
+}
+
+/**
+ * Keep the frame current.
+ *
+ * Polls rather than subscribing: the bus is a directory of files written by
+ * other processes, and liveness comes from tmux, so there is nothing to
+ * subscribe to. The interval is slow on purpose — this is a status panel, not
+ * an animation, and each refresh costs a `pi-worker ps`.
+ */
+export function startRosterFrame(opts: {
+  exec: ExecFn;
+  setWidget: (key: string, content: string[] | undefined) => void;
+  intervalMs?: number;
+}): { refresh: () => Promise<void>; stop: () => void } {
+  const refresh = async () => {
+    try {
+      const out = await opts.exec("pi-worker", ["ps"], {});
+      if (out.code !== 0) return;
+      const rows = JSON.parse(out.stdout || "[]") as RosterRow[];
+      opts.setWidget("pi-workers", rosterFrame(rows));
+    } catch {
+      // A frame that cannot be drawn is not worth breaking a session over.
+    }
+  };
+
+  const timer = setInterval(() => void refresh(), opts.intervalMs ?? 5000);
+  if (typeof timer === "object" && timer && "unref" in timer) {
+    (timer as { unref: () => void }).unref(); // never hold the process open
+  }
+  void refresh();
+  return { refresh, stop: () => clearInterval(timer) };
+}
+
+/**
+ * Reduce a nushell error to the message it carries.
+ *
+ * The CLI is a nu script, so `error make` renders the message alongside a
+ * source frame: file and line, the surrounding code, and a caret run wide
+ * enough to wrap several times. All of it reaches the transcript and none of it
+ * is actionable — the message already said what was wrong and what to do.
+ *
+ * Only nu's framing is stripped. Anything not shaped like it passes through
+ * untouched, or a real failure from elsewhere could be reduced to nothing.
+ */
+function messageOnly(text: string): string {
+  const lines = text.split("\n");
+  const message: string[] = [];
+  for (const line of lines) {
+    const started = /^\s{2}x\s+(.*)$/.exec(line);
+    if (started) {
+      message.push(started[1].trim());
+      continue;
+    }
+    // Continuation lines of the same message are `  | ...`; the frame that
+    // follows starts with `,-[` or a line number, so it ends the capture.
+    const cont = /^\s{2}\|\s?(.*)$/.exec(line);
+    if (message.length > 0 && cont) {
+      message.push(cont[1].trim());
+      continue;
+    }
+    if (message.length > 0) break;
+  }
+  return message.length > 0 ? message.join(" ") : text.trim();
+}
+
 /**
  * Compress a verb's output to the one fact its caller wanted.
  *
@@ -816,7 +937,7 @@ export function createInitiatorTool(opts: { exec: ExecFn; cwd?: string }): Initi
         if (out.code !== 0) {
           // The CLI's refusals name what is wrong and list what exists;
           // swallowing them would leave the agent guessing.
-          return { ok: false, detail: (out.stderr || out.stdout).trim() };
+          return { ok: false, detail: messageOnly(out.stderr || out.stdout) };
         }
         const stdout = out.stdout.trim();
         if (args.verb === "wait" && stdout.length === 0) {
@@ -912,6 +1033,26 @@ export default function piWorker(pi: ExtensionAPI): void {
   // transport's.
   if (exec && typeof registerTool === "function") {
     const initiator = createInitiatorTool({ exec });
+
+    // The live frame. Armed from the first event that carries a UI context,
+    // because `ui` reaches an extension through ExtensionContext rather than
+    // the API object. Guarded on tui mode: a widget is terminal rows, and
+    // there are none to claim in print, json or rpc mode.
+    let frame: { refresh: () => Promise<void>; stop: () => void } | null = null;
+    const armFrame = (ctx: ExtensionContext) => {
+      if (frame || ctx.mode !== "tui" || !ctx.hasUI) return;
+      frame = startRosterFrame({
+        exec,
+        setWidget: (key, content) =>
+          ctx.ui.setWidget(key, content, { placement: "aboveEditor" }),
+      });
+    };
+    try {
+      pi.on("session_start", (_event, ctx) => armFrame(ctx));
+    } catch {
+      // An older build without the event simply gets no frame.
+    }
+
     try {
       registerTool({
         name: "pi_worker",
@@ -922,8 +1063,18 @@ export default function piWorker(pi: ExtensionAPI): void {
           ". Stages must be declared in the stage registry.",
         promptSnippet: "pi_worker — spawn, watch and message Pi workers",
         parameters: INITIATOR_TOOL_PARAMETERS,
-        execute: async (_id: string, params: InitiatorArgs) => {
+        execute: async (
+          _id: string,
+          params: InitiatorArgs,
+          _signal: AbortSignal | undefined,
+          _onUpdate: unknown,
+          ctx: ExtensionContext,
+        ) => {
           const outcome = await initiator.invoke(params);
+          // Redraw immediately rather than waiting out the interval: the verb
+          // that just ran is usually the thing that changed the roster.
+          armFrame(ctx);
+          if (frame) await frame.refresh();
           return {
             content: [{ type: "text", text: outcome.detail || (outcome.ok ? "ok" : "failed") }],
             details: outcome,
