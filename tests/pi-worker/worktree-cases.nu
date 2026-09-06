@@ -423,6 +423,31 @@ let cases = [
     })
 
 
+    (run-case "worktree/a-tilde-prefixed-repo-is-expanded-not-passed-through" {
+        # An agent driving the tool writes `~/.dotfiles` because that is how a
+        # human writes it. Nothing expands a tilde on the way to git, so it
+        # arrived literally and git failed with "cannot change to '~/.dotfiles'"
+        # — a confusing error for a correct-looking argument.
+        # The repo must live under $HOME for a tilde to mean anything, so this
+        # case makes its own there rather than in the temp dir.
+        let home = ($env.HOME | path expand)
+        let repo = ($home | path join $"pi-worker-tilde-(random chars --length 6)")
+        rm -rf $repo; mkdir $repo
+        ^git -C $repo init -q -b main
+        ^git -C $repo config user.email "test@example.com"
+        ^git -C $repo config user.name "Test"
+        "seed\n" | save -f ($repo | path join "README.md")
+        ^git -C $repo add -A
+        ^git -C $repo commit -q -m seed
+
+        let tilded = ($repo | str replace $home "~")
+        assert-true ($tilded | str starts-with "~") $"fixture must be tilde-prefixed, got ($tilded)"
+        assert-eq (main-worktree $tilded) $repo "a ~ path resolves to the same worktree"
+        assert-eq (main-worktree $repo) $repo "an absolute path still works"
+        rm -rf $repo
+    })
+
+
 ]
 
 $cases | to json

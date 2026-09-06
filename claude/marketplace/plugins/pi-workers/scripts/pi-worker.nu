@@ -760,6 +760,7 @@ def worktree-dirty? [path: string]: nothing -> bool {
 # the loser sees the failure and moves to the next number. There is no window
 # in which both believe they own it, and no lock to leak if a process dies.
 export def worktree-allocate [--repo: string, --task: string] {
+    let repo = (expand-path $repo)
     let base = (worktrees-dir $repo)
     if not ($base | path exists) { mkdir $base }
 
@@ -852,6 +853,8 @@ export def worktree-cleanup [
     --accepted
     --merged-into: string = ""
 ] {
+    let repo = (expand-path $repo)
+    let path = (expand-path $path)
     if not $accepted and ($merged_into | is-empty) {
         error make {msg: $"refusing to clean up ($path): no acceptance or merge evidence. A completed worker stays visible until something explicitly says the work is done with"}
     }
@@ -921,9 +924,21 @@ export def bus-identity-of [uid: string, --run: string]: nothing -> any {
 # wait-for, no pane options.
 
 
+# Expand a path argument before anything is done with it.
+#
+# An agent driving this tool writes `~/.dotfiles`, because that is how a human
+# writes it. Nothing on the way to git expands a tilde, so it used to arrive
+# literally and fail with "cannot change to '~/.dotfiles'" — a confusing error
+# for an argument that looks correct. Expanding once, at the edge, keeps every
+# interior path absolute.
+export def expand-path [path: string]: nothing -> string {
+    if ($path | is-empty) { $path } else { $path | path expand }
+}
+
 # The main worktree of a repo — the one git lists first, and where a stage
 # declared isolation=main runs.
-export def main-worktree [repo: string]: nothing -> string {
+export def main-worktree [repo_in: string]: nothing -> string {
+    let repo = (expand-path $repo_in)
     let listed = (do { ^git -C $repo worktree list --porcelain } | complete)
     if $listed.exit_code != 0 {
         error make {msg: $"cannot list worktrees for ($repo): ($listed.stderr | str trim)"}
@@ -956,6 +971,7 @@ export def worker-placement [
     --skill: string
     --subject: string
 ]: nothing -> record {
+    let repo = (expand-path $repo)
     if (stage-for $skill | get isolation) == "main" {
         let main = (main-worktree $repo)
         let branch = (^git -C $main rev-parse --abbrev-ref HEAD | str trim)
