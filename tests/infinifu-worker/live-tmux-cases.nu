@@ -15,14 +15,29 @@
 use harness.nu *
 use ../../claude/marketplace/plugins/infinifu/scripts/infinifu-worker.nu *
 
-def make-server [tag: string]: nothing -> record {
+# `--stub` is the body of the fake `pi`. The default outlives a case; a case
+# that needs a DEAD worker passes something that exits, which is the only way
+# to exercise a pane that spawn's `remain-on-exit on` keeps listed after its
+# process is gone (dotfiles-yii5).
+def make-server [tag: string, --stub: string = "sleep 30"]: nothing -> record {
     let socket = $"infinifu-t6-($tag)-(random chars --length 6)"
     let sandbox = ([$nu.temp-dir $"infinifu-t6-bin-($tag)-(random chars --length 6)"] | path join)
     mkdir $sandbox
-    "#!/bin/bash\nsleep 30\n" | save -f ($sandbox | path join "pi")
+    $"#!/bin/bash\n($stub)\n" | save -f ($sandbox | path join "pi")
     chmod +x ($sandbox | path join "pi")
     ^tmux -L $socket new-session -d -s "dotfiles" -n "main"
     {socket: $socket, bin: $sandbox}
+}
+
+# Wait for a pane to report dead. The stub exits immediately, but tmux updates
+# `pane_dead` asynchronously, so asserting straight after spawn races it.
+def wait-for-dead [socket: string, window: string] {
+    for _ in 0..50 {
+        let dead = (do { ^tmux -L $socket list-panes -t $window -F "#{pane_dead}" } | complete)
+        if ($dead.exit_code == 0) and (($dead.stdout | lines | first | str trim) == "1") { return }
+        sleep 100ms
+    }
+    error make {msg: $"pane for ($window) never reported dead"}
 }
 
 def drop-server [t: record] {
@@ -38,8 +53,8 @@ def pane-text [socket: string, target: string]: nothing -> string {
     if $out.exit_code != 0 { "" } else { $out.stdout }
 }
 
-def with-server [tag: string, body: closure] {
-    let t = (make-server $tag)
+def with-server [tag: string, body: closure, --stub: string = "sleep 30"] {
+    let t = (make-server $tag --stub $stub)
     let root = (make-runtime $tag)
     let repo = (make-repo $tag)
     let outcome = (try {
@@ -153,6 +168,114 @@ let cases = [
             assert-true (not ($w.window in $windows)) "the accepted worker's window is closed"
             assert-true ($other.window in $windows) "its sibling is untouched"
             assert-true ("main" in $windows) "as is the seed window"
+        }
+    })
+
+    # ------------------------------------------------------------- liveness
+    #
+    # dotfiles-yii5: `worker-live?` matched on the window NAME alone. spawn
+    # sets `remain-on-exit on` deliberately, so a worker whose process died at
+    # startup keeps its window listed forever — and spawn reported live: true
+    # for a worker that never ran. That is how the --session/--session-id bug
+    # (dotfiles-4xtz) stayed invisible: every worker was dead and the tool said
+    # they were fine.
+    #
+    # adr0017 governs the shape of the fix. "I cannot tell" is a first-class
+    # verdict, distinct from "it is dead", and absence of evidence must never
+    # be encoded as evidence of absence. A bool cannot say both, so the probe
+    # returns three verdicts and the bool means strictly "observably running".
+
+    (run-case "live/a-running-worker-is-live" {
+        with-server "verdict-live" {|t, repo|
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "work-do" --socket $t.socket)
+
+            assert-eq (worker-liveness $w.window --socket $t.socket | get verdict) "live" "its process is running"
+            assert-eq (worker-live? $w.window --socket $t.socket) true ""
+        }
+    })
+
+    (run-case "live/a-window-whose-process-exited-reports-exited-not-live" {
+        # The worker's OWN evidence about ITSELF: the process it was given ran
+        # and stopped. Per adr0017 that is reportable, unlike an absent window.
+        with-server "verdict-exited" --stub "exit 3" {|t, repo|
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "work-do" --socket $t.socket)
+            wait-for-dead $t.socket $w.window
+
+            let seen = (worker-liveness $w.window --socket $t.socket)
+            assert-eq $seen.verdict "exited" "a dead pane is observably not running"
+            assert-eq (worker-live? $w.window --socket $t.socket) false "so it is not live"
+            let listed = (^tmux -L $t.socket list-windows -a -F "#{window_name}" | lines | each {|x| $x | str trim })
+            assert-true ($w.window in $listed) "though remain-on-exit keeps the window for inspection"
+        }
+    })
+
+    (run-case "live/a-missing-window-reports-unknown-not-exited" {
+        # The distinction adr0017 exists to protect: nobody watched this
+        # worker stop, so nothing observed it stopping. Reporting "exited" here
+        # would be evidence of absence dressed as absence of evidence.
+        with-server "verdict-unknown" {|t, repo|
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "work-do" --socket $t.socket)
+            ^tmux -L $t.socket kill-window -t $w.window
+
+            let seen = (worker-liveness $w.window --socket $t.socket)
+            assert-eq $seen.verdict "unknown" "a window nobody can find answers nothing"
+            assert-eq (worker-live? $w.window --socket $t.socket) false "not live either way"
+        }
+    })
+
+    (run-case "live/an-unreachable-tmux-server-is-unknown-not-a-dead-worker" {
+        # The caller's own failure to reach tmux says nothing about the worker.
+        # adr0017: "a caller's missing X authority must never read as a dead
+        # server" — same shape, same rule.
+        let seen = (worker-liveness "impl-a@dotfiles" --socket "infinifu-t6-no-such-server")
+        assert-eq $seen.verdict "unknown" "we could not look, so we do not know"
+    })
+
+    (run-case "live/an-exited-worker-is-still-not-cleanable" {
+        # Knowing a process stopped is not knowing the work is finished. The
+        # verdict is reportable; it licenses nothing.
+        with-server "verdict-noclean" --stub "exit 1" {|t, repo|
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "work-do" --socket $t.socket)
+            wait-for-dead $t.socket $w.window
+
+            assert-rejects {
+                worker-accept "impl-a" --run "run-1" --repo $repo --socket $t.socket
+            } "running" "an exited worker that never reported cannot be accepted"
+            assert-true ($w.cwd | path exists) "and its worktree survives"
+        }
+    })
+
+    (run-case "live/spawn-does-not-claim-a-worker-is-live-when-it-died-at-startup" {
+        # The regression this whole issue is about. A worker whose command is
+        # wrong dies immediately, and spawn must say so rather than report
+        # health it did not observe.
+        with-server "verdict-spawn" --stub "exit 127" {|t, repo|
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "work-do" --socket $t.socket)
+            wait-for-dead $t.socket $w.window
+
+            assert-eq (worker-liveness $w.window --socket $t.socket | get verdict) "exited" "the pane is dead"
+            # spawn's own record is a snapshot taken before the process could
+            # fail, so it may legitimately read live: true. What must NOT
+            # happen is a later probe agreeing with that stale snapshot.
+            assert-eq (worker-live? $w.window --socket $t.socket) false "a fresh probe reports the truth"
+        }
+    })
+
+    (run-case "live/the-liveness-verb-answers-for-a-worker-by-uid" {
+        # The operator-facing half of dotfiles-yii5. Being told `live: true` at
+        # spawn and having no way to ask again later is how a whole run of dead
+        # workers went unnoticed. `inspect` cannot answer this — it is
+        # deliberately bus-only, so that a restarted initiator can rebuild a run
+        # without tmux — which is exactly why the probe needs its own verb.
+        with-server "verb" --stub "exit 5" {|t, repo|
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "work-do" --socket $t.socket)
+            wait-for-dead $t.socket $w.window
+
+            let out = (^$nu.current-exe (repo-root $env.FILE_PWD | path join "claude" "marketplace" "plugins" "infinifu" "scripts" "infinifu-worker.nu") "liveness" "impl-a" "--run" "run-1" "--socket" $t.socket | complete)
+            assert-eq $out.exit_code 0 $"($out.stderr)"
+            let seen = ($out.stdout | from json)
+            assert-eq $seen.verdict "exited" "the operator can ask, and gets the truth"
+            assert-eq $seen.window $w.window "about the right window"
         }
     })
 

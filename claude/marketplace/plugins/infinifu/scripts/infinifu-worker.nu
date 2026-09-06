@@ -996,15 +996,64 @@ def tmux-args [socket: string]: nothing -> list<string> {
     if ($socket | is-empty) { [] } else { ["-L" $socket] }
 }
 
-# Whether a window with this name currently exists.
+# What can be observed about a worker's process, as one of three verdicts.
 #
-# Reports what was observed and nothing more: a missing window means "not
-# found", which per adr0017 is a fact to act on carefully, never a licence to
-# clean up the worker's worktree or evidence.
+# dotfiles-yii5: this probe used to match on the window NAME alone and return a
+# bool. But spawn sets `remain-on-exit on` deliberately — a crashed worker's
+# window stays listed so its error stays on screen — so a worker whose process
+# died at startup still had its name in the list, and the tool reported it
+# healthy. Every worker was dead for the whole of the dotfiles-4xtz bug while
+# `live: true` came back each time.
+#
+# adr0017 dictates the shape. "I cannot tell" is a first-class verdict, distinct
+# from "it is dead", and absence of evidence must never be encoded as evidence
+# of absence. A bool cannot carry both, so:
+#
+#   live     the pane exists and its process is running
+#   exited   the pane exists and its process is gone — the worker's OWN
+#            evidence about ITSELF, and therefore reportable
+#   unknown  no such window, or tmux could not be reached — nobody watched, so
+#            nothing was observed
+#
+# `unknown` is an OBSERVATIONAL verdict: never persisted, never a licence to
+# stop, accept, or delete anything. Neither is `exited` — knowing a process
+# stopped is not knowing the work is finished.
+export def worker-liveness [window: string, --socket: string = ""]: nothing -> record {
+    let listed = (do { ^tmux ...(tmux-args $socket) list-panes -a -F "#{window_name}\t#{pane_dead}" } | complete)
+    # A caller that could not reach tmux has learned nothing about the worker.
+    # Reporting "exited" here would be the caller's failure misattributed to the
+    # component — the exact confusion adr0017 forbids.
+    if $listed.exit_code != 0 {
+        return {verdict: "unknown", window: $window, reason: "tmux could not be reached"}
+    }
+
+    let panes = (
+        $listed.stdout
+        | lines
+        | each {|l| $l | split row "\t" }
+        | where {|p| ($p | length) >= 2 and (($p | first | str trim) == $window) }
+    )
+    if ($panes | is-empty) {
+        return {verdict: "unknown", window: $window, reason: "no window by that name"}
+    }
+
+    # Grouped sessions list the same window once per session, so a window may
+    # appear several times. Any live pane means the worker is running.
+    let any_alive = ($panes | any {|p| ($p | get 1 | str trim) != "1" })
+    if $any_alive {
+        {verdict: "live", window: $window, reason: "its process is running"}
+    } else {
+        {verdict: "exited", window: $window, reason: "the window remains but its process is gone"}
+    }
+}
+
+# Whether a worker is OBSERVABLY RUNNING.
+#
+# Strictly `verdict == "live"`. Both other verdicts are false, and callers must
+# not read that false as permission to clean anything up: "exited" and "unknown"
+# mean different things, and only `worker-liveness` can tell them apart.
 export def worker-live? [window: string, --socket: string = ""]: nothing -> bool {
-    let listed = (do { ^tmux ...(tmux-args $socket) list-windows -a -F "#{window_name}" } | complete)
-    if $listed.exit_code != 0 { return false }
-    $window in ($listed.stdout | lines | each {|w| $w | str trim })
+    (worker-liveness $window --socket $socket | get verdict) == "live"
 }
 
 # Start a visible, resumable Pi worker.
@@ -1107,7 +1156,14 @@ export def worker-spawn [
         session: $session
         skill: $skill
         resume: $"pi --session ($session)"
+        # Both, because they answer different questions. `live` is the bool an
+        # operator skims; `liveness` is the verdict adr0017 requires when the
+        # answer might be "I cannot tell" — see worker-liveness. Note this is a
+        # snapshot taken moments after new-window, so a process that dies during
+        # startup may still read `live` here; a later probe is what tells the
+        # truth, which is why nothing downstream trusts this field.
         live: (worker-live? $window --socket $socket)
+        liveness: (worker-liveness $window --socket $socket | get verdict)
     }
 }
 
@@ -1374,7 +1430,8 @@ def usage []: nothing -> string {
         "  settled  <uid> --run                 report settling with nothing to show"
         "  wait     --run                       oldest unacknowledged result, or nothing"
         "  ack      --run --uid --sequence      delivery receipt; NOT acceptance"
-        "  status   <uid> --run                 one worker's state"
+        "  status   <uid> --run                 one worker's state, from the bus"
+        "  liveness <uid> --run [--socket]      live | exited | unknown, from tmux"
         "  inspect  <uid> --run                 identity, last result, resume command"
         "  workers  --run                       every worker in a run, from the bus alone"
         "  resume   <uid> --run --feedback      send back to the ORIGINAL session"
@@ -1474,6 +1531,18 @@ def "main result" [
 
 def "main settled" [uid: string, --run: string] {
     bus-settled $uid --run $run | to json | print
+}
+
+# The tmux-side probe, kept OFF `inspect` and `status` on purpose: those two
+# rebuild a run from the bus alone, without tmux, which is what lets a restarted
+# initiator recover. This verb is the one that needs a display host, so it is
+# the one that carries the --socket.
+def "main liveness" [uid: string, --run: string, --socket: string = ""] {
+    let identity = (bus-identity-of $uid --run $run)
+    if $identity == null {
+        error make {msg: $"unknown worker ($run)/($uid): no identity on the bus. Absent evidence is not permission to act \(adr0017)"}
+    }
+    worker-liveness $identity.window --socket $socket | to json | print
 }
 
 def "main status" [uid: string, --run: string] { bus-status $uid --run $run | to json | print }
