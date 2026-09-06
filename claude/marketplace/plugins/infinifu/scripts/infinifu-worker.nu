@@ -548,6 +548,36 @@ export def bus-result [
     claim-slot (worker-dir $run $uid | path join "outbox") (envelope-for $run $uid "result" $result)
 }
 
+# Report that a worker's agent settled without reporting anything.
+#
+# dotfiles-87bt: this writer was missing, so `settled-without-result` above
+# built an envelope nothing ever persisted. A worker that finished its turn
+# without calling the result tool therefore produced SILENCE — state stayed
+# `running`, `wait` returned nothing, and an initiator could not distinguish
+# "still working" from "gave up and went quiet". The absence of a result is
+# itself the report, which is the whole point of SETTLED_WITHOUT_RESULT.
+#
+# Reported at most once per worker, and never when a real result already
+# exists: `agent_settled` fires again on every subsequent turn, and the normal
+# successful path is "worker called the tool, THEN its turn settled". Emitting
+# an error there would turn every healthy worker into a failed one, and
+# stacking one error per settle would bury the first real outcome.
+export def bus-settled [uid: string, --run: string]: nothing -> record {
+    ensure-worker-dirs $run $uid
+    let existing = (read-box (worker-dir $run $uid | path join "outbox"))
+    if ($existing | is-not-empty) {
+        return {reported: false, reason: "an outcome was already reported", run: $run, uid: $uid}
+    }
+
+    let envelope = (envelope-for $run $uid "error" {
+        code: "protocol_error"
+        detail: "agent settled without calling the typed result tool; completion is never inferred from an idle prompt, an exited pane, or assistant prose"
+    })
+    validate-envelope $envelope
+    let written = (claim-slot (worker-dir $run $uid | path join "outbox") $envelope)
+    {reported: true, run: $run, uid: $uid, sequence: $written.sequence}
+}
+
 # Everything addressed to one worker.
 export def bus-inbox [uid: string, --run: string]: nothing -> list<record> {
     read-box (worker-dir $run $uid | path join "inbox")
@@ -638,7 +668,15 @@ export def bus-status [uid: string, --run: string]: nothing -> record {
     } else if ($results | is-empty) {
         "running"
     } else {
-        $results | last | get payload.status
+        # Dispatch on KIND, not on a field. An outbox holds `result` envelopes
+        # (payload.status) and `error` envelopes (payload.code) — different
+        # shapes — so reading `payload.status` off whatever came last crashed
+        # with "column 'status' is missing" the first time a worker actually
+        # settled without reporting. `protocol_error` was already a declared
+        # WORKER_STATE; nothing had ever derived it, because dotfiles-87bt meant
+        # no error envelope was ever written.
+        let latest = ($results | last)
+        if $latest.kind == "error" { $latest.payload.code } else { $latest.payload.status }
     }
     {
         run: $run
@@ -1257,6 +1295,8 @@ def usage []: nothing -> string {
         "VERBS"
         "  spawn    --run --uid --role --subject --project --repo --session --skill [--task] [--socket]"
         "  send     <uid> --run --stage [--task | --instructions] [--artifacts]"
+        "  result   <uid> --run --status --summary [--validation]   report an outcome"
+        "  settled  <uid> --run                 report settling with nothing to show"
         "  wait     --run                       oldest unacknowledged result, or nothing"
         "  ack      --run --uid --sequence      delivery receipt; NOT acceptance"
         "  status   <uid> --run                 one worker's state"
@@ -1319,6 +1359,46 @@ def "main wait" [--run: string] {
 
 def "main ack" [--run: string, --uid: string, --sequence: int] {
     bus-ack --run $run --uid $uid --sequence $sequence
+}
+
+# The worker's own side of the bus (dotfiles-87bt).
+#
+# `bus-result` and the settle reporter had no CLI surface, and the extension
+# registered no tool, so a worker had no way to report an outcome by ANY route
+# while work-do/SKILL.md instructed it to "finish by calling the typed result
+# tool". These two verbs are that path. The extension's typed tool is a thin
+# wrapper over `result`, so the envelope shape and the stage gate have exactly
+# one implementation instead of one per runtime.
+def "main result" [
+    uid: string, --run: string, --status: string, --summary: string
+    --validation: string = ""
+] {
+    # The worker supplies its OUTCOME; window, session and resume come from the
+    # identity the orchestrator recorded at spawn. A worker cannot be trusted to
+    # say where it lives or how to reach it — that is the initiator's only route
+    # back to it, and a worker that could rewrite it could point the initiator
+    # at someone else's session.
+    let identity = (bus-identity-of $uid --run $run)
+    if $identity == null {
+        error make {msg: $"refusing a result from ($run)/($uid): no identity on the bus, so there is nothing to report against"}
+    }
+
+    let base = {
+        status: $status
+        summary: $summary
+        window: $identity.window
+        session: $identity.session
+        resume: $"pi --session ($identity.session)"
+    }
+    # An absent verdict must stay ABSENT rather than become "": the gate reads
+    # emptiness, and a present-but-empty field is the shape a caller uses to
+    # look compliant without having validated anything.
+    let payload = (if ($validation | is-empty) { $base } else { $base | merge {validation: $validation} })
+    bus-result $uid --run $run --result $payload | to json | print
+}
+
+def "main settled" [uid: string, --run: string] {
+    bus-settled $uid --run $run | to json | print
 }
 
 def "main status" [uid: string, --run: string] { bus-status $uid --run $run | to json | print }

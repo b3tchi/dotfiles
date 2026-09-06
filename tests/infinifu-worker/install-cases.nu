@@ -10,6 +10,7 @@
 # ~/.local/bin or ~/.claude.
 
 use harness.nu *
+use ../../claude/marketplace/plugins/infinifu/scripts/infinifu-worker.nu *
 
 def worker-cli []: nothing -> string { worker-script $env.FILE_PWD }
 
@@ -141,6 +142,120 @@ let cases = [
     })
 
     # ------------------------------------------------------------- installer
+    # ------------------------------------------- the return path is reachable
+    #
+    # dotfiles-87bt: `bus-result` and the settle reporter existed as nu
+    # functions with no CLI surface, and the extension registered no tool, so a
+    # worker had NO way to report an outcome by any route — while
+    # work-do/SKILL.md instructed every worker to "finish by calling the typed
+    # result tool". These cases pin the CLI half: whatever the extension does,
+    # a worker or a stub must be able to report from a shell.
+
+    (run-case "cli/result-writes-an-outcome-a-waiting-initiator-can-read" {
+        let root = (make-runtime "cli-result")
+        with-runtime $root {
+            bus-identity "impl-a" --run "r1" --identity {
+                role: "impl", cwd: "/tmp/nowhere", branch: "bd-t1.0"
+                session: "sid-1", skill: "work-do", window: "impl-a@dotfiles"
+            }
+        }
+        let out = (run-cli "result" "impl-a" "--run" "r1" "--status" "complete"
+            "--summary" "did the thing" "--validation" "TESTS PASS" --runtime $root)
+        assert-eq $out.exit_code 0 $"($out.stderr)"
+
+        # The initiator's own verb must see it — reporting that only the writer
+        # can read is not reporting.
+        let waited = (run-cli "wait" "--run" "r1" --runtime $root)
+        assert-eq $waited.exit_code 0 $"($waited.stderr)"
+        let envelope = ($waited.stdout | from json)
+        assert-eq $envelope.kind "result" "wait returns the result envelope"
+        assert-eq $envelope.payload.status "complete" "carrying the reported status"
+        assert-eq $envelope.payload.validation "TESTS PASS" "and its verdict"
+        rm -rf $root
+    })
+
+    (run-case "cli/result-applies-the-stage-gate-rather-than-trusting-the-caller" {
+        # The gate must live behind the CLI too, or the CLI becomes the way to
+        # dodge it: a work-do worker reporting complete with no verdict.
+        let root = (make-runtime "cli-gate")
+        with-runtime $root {
+            bus-identity "impl-a" --run "r1" --identity {
+                role: "impl", cwd: "/tmp/nowhere", branch: "bd-t1.0"
+                session: "sid-1", skill: "work-do", window: "impl-a@dotfiles"
+            }
+        }
+        let out = (run-cli "result" "impl-a" "--run" "r1" "--status" "complete"
+            "--summary" "trust me" --runtime $root)
+
+        assert-true ($out.exit_code != 0) "an ungated completion must be refused"
+        assert-true ((($out.stdout + $out.stderr) | str contains "validation")) $"and say why: ($out.stderr)"
+        rm -rf $root
+    })
+
+    (run-case "cli/result-refuses-a-status-only-the-initiator-may-grant" {
+        # adr0017 / T6: `accepted` is the initiator's verdict. A worker that
+        # could self-accept could close its own task.
+        let root = (make-runtime "cli-accept")
+        with-runtime $root {
+            bus-identity "impl-a" --run "r1" --identity {
+                role: "impl", cwd: "/tmp/nowhere", branch: "bd-t1.0"
+                session: "sid-1", skill: "work-do", window: "impl-a@dotfiles"
+            }
+        }
+        let out = (run-cli "result" "impl-a" "--run" "r1" "--status" "accepted"
+            "--summary" "I accept myself" --runtime $root)
+
+        assert-true ($out.exit_code != 0) "self-acceptance must be refused"
+        rm -rf $root
+    })
+
+    (run-case "cli/settled-turns-a-silent-worker-into-a-readable-protocol-error" {
+        # The failure this exists to prevent: a worker settles having reported
+        # nothing, and the initiator waits forever on a worker that is done.
+        let root = (make-runtime "cli-settled")
+        with-runtime $root {
+            bus-identity "impl-a" --run "r1" --identity {
+                role: "impl", cwd: "/tmp/nowhere", branch: "bd-t1.0"
+                session: "sid-1", skill: "work-do", window: "impl-a@dotfiles"
+            }
+        }
+        let out = (run-cli "settled" "impl-a" "--run" "r1" --runtime $root)
+        assert-eq $out.exit_code 0 $"($out.stderr)"
+
+        let waited = (run-cli "wait" "--run" "r1" --runtime $root)
+        let envelope = ($waited.stdout | from json)
+        assert-eq $envelope.kind "error" "the initiator learns it settled empty"
+        assert-eq $envelope.payload.code "protocol_error" "as a protocol error"
+        rm -rf $root
+    })
+
+    (run-case "cli/settled-after-a-real-result-stays-quiet" {
+        let root = (make-runtime "cli-settled-ok")
+        with-runtime $root {
+            bus-identity "impl-a" --run "r1" --identity {
+                role: "impl", cwd: "/tmp/nowhere", branch: "bd-t1.0"
+                session: "sid-1", skill: "work-do", window: "impl-a@dotfiles"
+            }
+        }
+        run-cli "result" "impl-a" "--run" "r1" "--status" "blocked" "--summary" "stuck" --runtime $root
+        let out = (run-cli "settled" "impl-a" "--run" "r1" --runtime $root)
+        assert-eq $out.exit_code 0 $"($out.stderr)"
+
+        with-runtime $root {
+            assert-eq ((read-results "impl-a" --run "r1") | length) 1 "the real outcome is not buried"
+        }
+        rm -rf $root
+    })
+
+    (run-case "cli/usage-lists-the-reporting-verbs" {
+        # A verb absent from usage is a verb nobody finds. The whole bug was an
+        # unreachable path; the usage text is part of reachability.
+        let out = (run-cli)
+        for verb in ["result" "settled"] {
+            assert-true ($out.stdout | str contains $verb) $"usage must list '($verb)'"
+        }
+    })
+
     (run-case "install/links-the-worker-cli-into-local-bin" {
         let home = (fake-home "link")
         let out = (run-installer $home)

@@ -525,6 +525,114 @@ export function createInboxWatcher(
   };
 }
 
+// ---------------------------------------------------------------------------
+// The typed result tool (dotfiles-87bt).
+//
+// `work-do/SKILL.md` tells every worker: "You finish by calling the typed
+// result tool, not by ending your turn. Settling without it is recorded as
+// protocol_error, not success." No such tool was ever registered, and the nu
+// CLI had no `result` verb either, so the worker->initiator direction had no
+// reachable implementation by ANY route. A worker did the work, settled, and
+// the initiator saw `results: 0` with state stuck at `running` forever.
+//
+// This is deliberately a THIN shell over `infinifu-worker result`. The
+// envelope shape, the stage gate (`validate-completion`) and the adr0017
+// status rules stay in the nu CLI, with one implementation instead of a second
+// copy in TS that drifts. The tool contributes the typed surface and nothing
+// else — that is why it asserts on the command it issues rather than on the
+// bus.
+
+/** Just the exec shape the reporter needs, so it is testable without Pi. */
+export type ExecFn = (
+  command: string,
+  args: string[],
+  options?: { cwd?: string; timeout?: number },
+) => Promise<{ stdout: string; stderr: string; code: number; killed: boolean }>;
+
+export interface ReportOutcome {
+  ok: boolean;
+  detail: string;
+}
+
+export interface ResultTool {
+  report(input: { status: string; summary: string; validation?: string }): Promise<ReportOutcome>;
+  reportSettled(): Promise<ReportOutcome>;
+}
+
+export function createResultTool(opts: {
+  run: string;
+  uid: string;
+  identity: WorkerIdentity;
+  exec: ExecFn;
+}): ResultTool {
+  const run = async (args: string[]): Promise<ReportOutcome> => {
+    try {
+      const out = await opts.exec("infinifu-worker", args, { cwd: opts.identity.cwd });
+      if (out.code === 0) return { ok: true, detail: out.stdout.trim() };
+      // The refusal reason must reach the agent. The gate's message is how a
+      // worker learns to report correctly on its next attempt; swallowing it
+      // is how a worker ends up believing it reported when it did not.
+      return { ok: false, detail: (out.stderr || out.stdout).trim() };
+    } catch (err) {
+      // A missing CLI, a spawn failure: reported, never thrown. An exception
+      // raised inside a tool call or an event handler damages the very session
+      // this extension exists to serve.
+      return { ok: false, detail: String(err) };
+    }
+  };
+
+  return {
+    report: (input) => {
+      const args = [
+        "result",
+        opts.uid,
+        "--run",
+        opts.run,
+        "--status",
+        input.status,
+        "--summary",
+        input.summary,
+      ];
+      // Omitted, not empty. The gate tests for emptiness, so `--validation ""`
+      // would present the shape of a verdict without one — precisely what a
+      // worker looking compliant without having validated anything would send.
+      if (input.validation) args.push("--validation", input.validation);
+      return run(args);
+    },
+    reportSettled: () => run(["settled", opts.uid, "--run", opts.run]),
+  };
+}
+
+/**
+ * TypeBox schemas are plain JSON Schema objects at runtime, and `typebox`
+ * lives inside Pi's own node_modules rather than anywhere this extension can
+ * import from. So the schema is written as a literal and cast: no dependency
+ * to resolve, and the extension still loads if Pi moves the package.
+ */
+const RESULT_TOOL_PARAMETERS = {
+  type: "object",
+  properties: {
+    status: {
+      type: "string",
+      enum: [...RESULT_STATUSES],
+      description:
+        "complete only with a passing validation verdict; otherwise blocked, waiting_human or failed",
+    },
+    summary: {
+      type: "string",
+      description:
+        "at most 4 KiB. The initiator reads this inline; detail belongs in your window and transcript",
+    },
+    validation: {
+      type: "string",
+      description:
+        "your stage's required verdict. Mandatory when status is complete; a summary mentioning it is not a verdict",
+    },
+  },
+  required: ["status", "summary"],
+  additionalProperties: false,
+} as const;
+
 /**
  * Filesystem-backed IO for the inbox watcher.
  *
@@ -566,17 +674,19 @@ export default function infinifu(pi: ExtensionAPI): void {
   // Worker mode. Only active when the orchestrator set INFINIFU_RUN/UID, so an
   // ordinary interactive session is completely unaffected.
   //
-  // Every host call below is feature-detected. The Pi package is not installed
-  // in this repo, so the event name and the sendUserMessage signature are
-  // assumptions carried from ft014 rather than anything a compiler has checked;
-  // sp028 T7's operator run is where they get reconciled against the real API.
-  // Until then a mismatch must degrade to a logged no-op — an extension that
-  // throws during host startup would take the whole worker down, which is
-  // strictly worse than one that delivers nothing and says so.
+  // Every host call below is feature-detected. The event names, the
+  // sendUserMessage signature and the tool/exec surfaces were reconciled
+  // against the installed Pi 0.84.4 types in the sp028 T7 operator run
+  // (dotfiles-ea0g), but feature detection stays: a mismatch must degrade to a
+  // logged no-op, because an extension that throws during host startup takes
+  // the whole worker down — strictly worse than one that says what it cannot
+  // do.
   const inboxDir = workerInboxDir(process.env as Record<string, string | undefined>);
   if (!inboxDir) return;
 
   const io = nodeWatcherIO();
+  const run = process.env.INFINIFU_RUN ?? "";
+  const uid = process.env.INFINIFU_UID ?? "";
   const identity = {
     role: process.env.INFINIFU_ROLE ?? "worker",
     cwd: process.cwd(),
@@ -601,6 +711,73 @@ export default function infinifu(pi: ExtensionAPI): void {
       "infinifu: this Pi build exposes no sendUserMessage; worker inbox delivery is inert. Reconcile against the live API (sp028 T7).",
     );
     return;
+  }
+
+  // The worker's way back to the initiator (dotfiles-87bt). Registered BEFORE
+  // the inbox watcher starts: a message may arrive on the first poll, and a
+  // worker asked to work before it can report is the exact silence this fixes.
+  const exec = (pi as unknown as { exec?: ExecFn }).exec?.bind(pi);
+  const reporter = exec
+    ? createResultTool({ run, uid, identity, exec })
+    : null;
+
+  if (!reporter) {
+    io.log(
+      "infinifu: this Pi build exposes no exec; the worker cannot report an outcome. Reconcile against the live API.",
+    );
+  } else {
+    const registerTool = (pi as unknown as { registerTool?: (t: unknown) => void })
+      .registerTool?.bind(pi);
+    if (typeof registerTool !== "function") {
+      io.log("infinifu: this Pi build exposes no registerTool; the typed result tool is unavailable");
+    } else {
+      try {
+        registerTool({
+          name: "infinifu_result",
+          label: "Report result",
+          description:
+            "Report this worker's outcome to the orchestrator. Call this to finish; ending your turn without it is recorded as a protocol error, never as success.",
+          promptSnippet: "infinifu_result — report your outcome to the orchestrator",
+          parameters: RESULT_TOOL_PARAMETERS,
+          execute: async (
+            _id: string,
+            params: { status: string; summary: string; validation?: string },
+          ) => {
+            const outcome = await reporter.report(params);
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: outcome.ok
+                    ? `reported: ${params.status}`
+                    : `NOT reported — ${outcome.detail}`,
+                },
+              ],
+              details: outcome,
+              // Stop after a successful report: the worker is done and its
+              // window stays open for inspection. A refusal does NOT terminate,
+              // so the worker can read the reason and try again.
+              terminate: outcome.ok,
+            };
+          },
+        });
+      } catch (err) {
+        io.log(`infinifu: could not register the result tool: ${err}`);
+      }
+    }
+
+    // A settle with nothing reported is itself the report. Without this the
+    // initiator cannot tell "still working" from "finished and went quiet",
+    // and waits forever on a worker that is done.
+    try {
+      pi.on("agent_settled", () => {
+        void reporter.reportSettled().then((outcome) => {
+          if (!outcome.ok) io.log(`infinifu: settle report failed: ${outcome.detail}`);
+        });
+      });
+    } catch (err) {
+      io.log(`infinifu: could not subscribe to agent_settled: ${err}`);
+    }
   }
 
   const watcher = createInboxWatcher(host, identity, inboxDir, io);

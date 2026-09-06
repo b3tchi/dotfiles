@@ -7,11 +7,18 @@
 # open and inspectable.
 #
 # The worker here is a STUB standing in for Pi — it writes its result through
-# the same `infinifu-worker result` path a real worker uses. That makes this a
-# real exercise of the bus, the stage gate, the window lifecycle and the
-# acceptance cleanup, but NOT of Pi itself. The live-Pi half is a documented
-# manual run (see README and the T7 notes); this suite is what can be proven
-# on any machine, every time.
+# the same `infinifu-worker result` verb Pi's typed result tool shells out to.
+# That makes this a real exercise of the bus, the stage gate, the window
+# lifecycle and the acceptance cleanup, but NOT of Pi itself. The live-Pi half
+# is a documented manual run (see README and the T7 notes); this suite is what
+# can be proven on any machine, every time.
+#
+# dotfiles-87bt: this comment used to say the same thing while the case called
+# `bus-result` directly through the module — and no `infinifu-worker result`
+# verb existed at all. So the headline assertion ("a delegated refinement
+# returns a compact SRE-PASS envelope") was proven against a path no worker
+# could take, and the comment asserting otherwise is why nobody looked. The
+# stub now goes through the CLI, which is what makes the sentence above true.
 
 use harness.nu *
 use ../../claude/marketplace/plugins/infinifu/scripts/infinifu-worker.nu *
@@ -58,14 +65,20 @@ let cases = [
                     })
                     assert-eq $wrote.exit_code 0 $"send failed: ($wrote.stderr)"
 
-                    bus-result "rev-sp028" --run "acceptance" --result {
-                        status: "complete"
-                        summary: "sp028 refined into 7 tasks; dependency graph acyclic; every task under 16h"
-                        validation: "SRE PASS"
-                        window: $w.window
-                        session: "sid-acceptance"
-                        resume: "pi --session sid-acceptance"
-                    }
+                    # Through the CLI verb, exactly as the typed result tool
+                    # does. window/session/resume are NOT passed: the CLI fills
+                    # them from the identity recorded at spawn, so a worker
+                    # cannot misreport how to reach it.
+                    let report_args = [
+                        "result" "rev-sp028" "--run" "acceptance"
+                        "--status" "complete"
+                        "--summary" "sp028 refined into 7 tasks; dependency graph acyclic; every task under 16h"
+                        "--validation" "SRE PASS"
+                    ]
+                    let reported = (with-env {XDG_RUNTIME_DIR: $root} {
+                        ^$nu.current-exe (cli) ...$report_args | complete
+                    })
+                    assert-eq $reported.exit_code 0 $"result failed: ($reported.stderr)"
 
                     # 3. The initiator receives a COMPACT envelope, via the CLI.
                     let waited = (with-env {XDG_RUNTIME_DIR: $root} {

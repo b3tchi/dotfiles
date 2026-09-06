@@ -23,6 +23,7 @@ import {
   settledWithoutResult,
   unreadAfter,
   createAgentStateTracker,
+  createResultTool,
   MAX_SUMMARY_BYTES,
 } from "./pi.ts";
 
@@ -358,6 +359,134 @@ describe("agent state tracker", () => {
       },
     };
     expect(() => createAgentStateTracker(source).current()).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The typed result tool (dotfiles-87bt).
+//
+// work-do/SKILL.md tells every worker "You finish by calling the typed result
+// tool, not by ending your turn." No such tool was ever registered, so a
+// compliant worker could not comply: it did the work, settled, and the
+// initiator saw `results: 0` with state stuck at `running` forever.
+//
+// The tool is deliberately a thin shell over `infinifu-worker result`. The
+// envelope shape, the stage gate and the adr0017 status rules then have ONE
+// implementation in the nu CLI rather than a second, drifting copy in TS.
+// These cases assert the command it issues, not the bus's behaviour — that is
+// already covered against the real CLI in tests/infinifu-worker.
+
+describe("typed result tool", () => {
+  const identity = {
+    role: "impl",
+    cwd: "/tmp/wt",
+    branch: "bd-t1.0",
+    session: "sid-1",
+    skill: "work-do",
+    window: "impl-a@dotfiles",
+  };
+
+  function fakeExec() {
+    const calls: Array<{ command: string; args: string[] }> = [];
+    return {
+      calls,
+      exec: async (command: string, args: string[]) => {
+        calls.push({ command, args });
+        return { stdout: "{}", stderr: "", code: 0, killed: false };
+      },
+    };
+  }
+
+  test("it reports through the CLI, passing the worker's own address", async () => {
+    const { exec, calls } = fakeExec();
+    const tool = createResultTool({ run: "r1", uid: "impl-a", identity, exec });
+
+    const out = await tool.report({
+      status: "complete",
+      summary: "did the thing",
+      validation: "TESTS PASS",
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].command).toBe("infinifu-worker");
+    expect(calls[0].args).toEqual([
+      "result",
+      "impl-a",
+      "--run",
+      "r1",
+      "--status",
+      "complete",
+      "--summary",
+      "did the thing",
+      "--validation",
+      "TESTS PASS",
+    ]);
+    expect(out.ok).toBe(true);
+  });
+
+  test("an absent verdict is omitted, not sent as an empty string", () => {
+    // The gate tests for emptiness. Passing --validation "" would present the
+    // shape of a verdict without one, which is exactly what a worker looking
+    // compliant without having validated anything would send.
+    const { exec, calls } = fakeExec();
+    const tool = createResultTool({ run: "r1", uid: "impl-a", identity, exec });
+
+    tool.report({ status: "blocked", summary: "stuck on a missing fixture" });
+
+    expect(calls[0].args).not.toContain("--validation");
+    expect(calls[0].args).not.toContain("");
+  });
+
+  test("a refusal from the CLI is returned to the agent, not swallowed", async () => {
+    // The worker must SEE the gate's reason so it can report correctly on its
+    // next attempt. A silent failure here is how a worker ends up believing it
+    // reported when it did not.
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const tool = createResultTool({
+      run: "r1",
+      uid: "impl-a",
+      identity,
+      exec: async (command: string, args: string[]) => {
+        calls.push({ command, args });
+        return {
+          stdout: "",
+          stderr: "a 'complete' result must carry its validation verdict",
+          code: 1,
+          killed: false,
+        };
+      },
+    });
+
+    const out = await tool.report({ status: "complete", summary: "trust me" });
+
+    expect(out.ok).toBe(false);
+    expect(out.detail).toContain("validation verdict");
+  });
+
+  test("the settle reporter is a separate verb on the same path", async () => {
+    const { exec, calls } = fakeExec();
+    const tool = createResultTool({ run: "r1", uid: "impl-a", identity, exec });
+
+    await tool.reportSettled();
+
+    expect(calls[0].args).toEqual(["settled", "impl-a", "--run", "r1"]);
+  });
+
+  test("a missing CLI is reported rather than thrown at the host", async () => {
+    // An extension that throws inside a tool call or an event handler damages
+    // the session it is trying to serve.
+    const tool = createResultTool({
+      run: "r1",
+      uid: "impl-a",
+      identity,
+      exec: async () => {
+        throw new Error("spawn infinifu-worker ENOENT");
+      },
+    });
+
+    const out = await tool.report({ status: "failed", summary: "gave up" });
+    expect(out.ok).toBe(false);
+    expect(out.detail).toContain("ENOENT");
   });
 });
 

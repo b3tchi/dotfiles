@@ -356,6 +356,96 @@ let cases = [
         }
         rm -rf $root
     })
+    (run-case "bus/a-settled-worker-reports-state-protocol-error-not-a-crash" {
+        # `protocol_error` was already a declared WORKER_STATE, but bus-status
+        # derived state as `results | last | get payload.status` — which only
+        # exists on a RESULT payload. No error envelope was ever written before
+        # dotfiles-87bt, so the reader never met one; the first real settle
+        # crashed it with "column 'status' is missing". The envelope's KIND is
+        # what says which shape its payload has.
+        let root = (make-runtime "settled-state")
+        with-runtime $root {
+            bus-identity "impl-a" --run "r1" --identity {
+                role: "impl", cwd: "/tmp/nowhere", branch: "bd-t1.0"
+                session: "sid-1", skill: "work-do", window: "impl-a@dotfiles"
+            }
+            bus-settled "impl-a" --run "r1"
+
+            let status = (bus-status "impl-a" --run "r1")
+            assert-eq $status.state "protocol_error" "a silent settle is a protocol error, not a crash"
+            assert-eq $status.results 1 "and it counts as an outcome"
+            assert-eq $status.unacked 1 "the initiator has not seen it yet"
+        }
+        rm -rf $root
+    })
+
+    # ------------------------------------------- settling without a result
+    #
+    # dotfiles-87bt: a worker that finishes its turn without reporting used to
+    # produce SILENCE — state stayed `running`, `wait` returned nothing, and an
+    # initiator could not tell "still working" from "gave up". The absence of a
+    # result is itself the report.
+
+    (run-case "bus/a-settle-with-no-result-is-reported-as-a-protocol-error" {
+        let root = (make-runtime "settled-none")
+        with-runtime $root {
+            bus-identity "impl-a" --run "r1" --identity {
+                role: "impl", cwd: "/tmp/nowhere", branch: "bd-t1.0"
+                session: "sid-1", skill: "work-do", window: "impl-a@dotfiles"
+            }
+
+            let written = (bus-settled "impl-a" --run "r1")
+            assert-true $written.reported "a settle with nothing to show must be reported"
+
+            # read-results yields payloads; the envelope kind is read off disk
+            # so the test proves an `error` envelope was written, not a
+            # `result` one carrying an error-shaped payload.
+            let results = (read-results "impl-a" --run "r1")
+            assert-eq ($results | length) 1 "exactly one outcome"
+            let payload = ($results | first)
+            assert-eq $payload.code "protocol_error" "with the protocol_error code"
+            assert-true ($payload.detail | str contains "never inferred") "carrying the reason"
+
+            let file = (ls ($env.XDG_RUNTIME_DIR | path join "infinifu-worker" "r1" "impl-a" "outbox") | where name =~ '\.json$' | first | get name)
+            assert-eq (open $file | get kind) "error" "it is an error envelope, not a result"
+        }
+        rm -rf $root
+    })
+
+    (run-case "bus/a-settle-after-a-real-result-reports-nothing" {
+        # The normal path: the worker called the tool, THEN its turn settled.
+        # Emitting a protocol error here would turn every successful worker
+        # into a failed one.
+        let root = (make-runtime "settled-after")
+        with-runtime $root {
+            put-result "r1" "impl-a"
+            let written = (bus-settled "impl-a" --run "r1")
+
+            assert-true (not $written.reported) "a reported worker settles quietly"
+            assert-eq ((read-results "impl-a" --run "r1") | length) 1 "and nothing is appended"
+        }
+        rm -rf $root
+    })
+
+    (run-case "bus/settling-twice-does-not-stack-protocol-errors" {
+        # agent_settled can fire more than once in a session's life. One
+        # unanswered turn is one protocol error, not one per settle.
+        let root = (make-runtime "settled-twice")
+        with-runtime $root {
+            bus-identity "impl-a" --run "r1" --identity {
+                role: "impl", cwd: "/tmp/nowhere", branch: "bd-t1.0"
+                session: "sid-1", skill: "work-do", window: "impl-a@dotfiles"
+            }
+            bus-settled "impl-a" --run "r1"
+            let second = (bus-settled "impl-a" --run "r1")
+
+            assert-true (not $second.reported) "the second settle adds nothing"
+            assert-eq ((read-results "impl-a" --run "r1") | length) 1 "still one envelope"
+        }
+        rm -rf $root
+    })
+
+
 ]
 
 $cases | to json
