@@ -295,6 +295,48 @@ let cases = [
             assert-eq $seen.last_result.status "complete" ""
         }
     })
+    (run-case "pipeline/tearing-down-twice-is-a-no-op-not-an-error" {
+        # Teardown is idempotent. An agent that retries `stop` — after a
+        # timeout, or because it lost track — must not be told it did something
+        # illegal for asking to stop something already stopped. `stopped` is
+        # terminal, so the second call has nothing to do and says so.
+        with-pipeline "idempotent-stop" {|t, repo|
+            launch $t $repo "impl-a" "impl"
+            worker-stop "impl-a" --run "run-1" --socket $t.socket
+            let again = (worker-stop "impl-a" --run "run-1" --socket $t.socket)
+
+            assert-eq (bus-status "impl-a" --run "run-1" | get state) "stopped" "still stopped"
+            assert-true (not $again.changed) "the second call changed nothing"
+        }
+    })
+
+    (run-case "pipeline/accepting-twice-is-a-no-op-not-an-error" {
+        with-pipeline "idempotent-accept" {|t, repo|
+            launch $t $repo "impl-a" "impl"
+            complete-with "impl-a" "done"
+            worker-accept "impl-a" --run "run-1" --repo $repo --socket $t.socket
+            let again = (worker-accept "impl-a" --run "run-1" --repo $repo --socket $t.socket)
+
+            assert-eq (bus-status "impl-a" --run "run-1" | get state) "accepted" "still accepted"
+            assert-true (not $again.changed) "the second call changed nothing"
+        }
+    })
+
+    (run-case "pipeline/an-accepted-worker-still-cannot-be-stopped" {
+        # Idempotence is not permission. Acceptance is terminal and means the
+        # work was taken; letting a later stop overwrite it would rewrite the
+        # record of what happened.
+        with-pipeline "no-stop-after-accept" {|t, repo|
+            launch $t $repo "impl-a" "impl"
+            complete-with "impl-a" "done"
+            worker-accept "impl-a" --run "run-1" --repo $repo --socket $t.socket
+            assert-rejects {
+                worker-stop "impl-a" --run "run-1" --socket $t.socket
+            } "accepted" "an accepted worker is not stoppable"
+        }
+    })
+
+
 ]
 
 $cases | to json

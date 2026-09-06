@@ -1425,8 +1425,13 @@ export def worker-accept [
     --run: string
     --repo: string
     --socket: string = ""
-] {
+]: nothing -> record {
     let seen = (worker-inspect $uid --run $run)
+    # Idempotent for the same reason stop is: a retried acceptance has nothing
+    # left to do, and the worktree it would have reclaimed is already gone.
+    if $seen.state == "accepted" {
+        return {run: $run, uid: $uid, state: "accepted", changed: false, reason: "already accepted"}
+    }
     validate-transition $seen.state "accepted"
 
     # The window closes first: it is recoverable (spawn again from the session
@@ -1440,6 +1445,7 @@ export def worker-accept [
         worktree-cleanup --repo $repo --path $seen.identity.cwd --branch $seen.identity.branch --accepted
     }
     write-marker $run $uid "accepted"
+    {run: $run, uid: $uid, state: "accepted", changed: true}
 }
 
 # Tear a worker down without accepting its work.
@@ -1448,11 +1454,25 @@ export def worker-accept [
 # commits, so it stays until something explicitly says the work is finished
 # with — `stopped` is terminal, and a stopped worker can never become
 # `accepted`.
-export def worker-stop [uid: string, --run: string, --socket: string = ""] {
+# Tear a worker down without accepting its work.
+#
+# Idempotent. An initiator that retries — after a timeout, or because it lost
+# track of what it had already torn down — must not be told it did something
+# illegal for asking to stop something already stopped. The state is terminal,
+# so the second call has nothing to do.
+#
+# That is not permission to re-enter a terminal state: an ACCEPTED worker still
+# refuses to be stopped, because acceptance records that the work was taken and
+# a later stop would rewrite what happened.
+export def worker-stop [uid: string, --run: string, --socket: string = ""]: nothing -> record {
     let seen = (worker-inspect $uid --run $run)
+    if $seen.state == "stopped" {
+        return {run: $run, uid: $uid, state: "stopped", changed: false, reason: "already stopped"}
+    }
     validate-transition $seen.state "stopped"
     do { ^tmux ...(tmux-args $socket) kill-window -t $seen.identity.window } | complete | ignore
     write-marker $run $uid "stopped"
+    {run: $run, uid: $uid, state: "stopped", changed: true}
 }
 
 # Every result a worker has reported, oldest first. Envelopes are append-only,
@@ -1620,11 +1640,11 @@ def "main resume" [uid: string, --run: string, --feedback: string, --socket: str
 }
 
 def "main accept" [uid: string, --run: string, --repo: string, --socket: string = ""] {
-    worker-accept $uid --run $run --repo $repo --socket $socket
+    worker-accept $uid --run $run --repo $repo --socket $socket | to json | print
 }
 
 def "main stop" [uid: string, --run: string, --socket: string = ""] {
-    worker-stop $uid --run $run --socket $socket
+    worker-stop $uid --run $run --socket $socket | to json | print
 }
 
 # Report on each dependency SEPARATELY. A single "something is missing" tells
