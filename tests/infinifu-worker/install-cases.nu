@@ -25,6 +25,47 @@ def run-cli [...args: string, --runtime: string = "", --path: string = ""]: noth
     }
 }
 
+# A hermetic PATH: the coreutils the installer needs, plus whichever of nu /
+# tmux / pi the case wants present. Nothing here touches a real Pi install --
+# the `pi` stub records its argv so a case can assert on the CONTRACT the
+# installer uses rather than on a live Pi's side effects.
+def stub-bin [
+    tag: string
+    --tools: list<string> = []
+    --record-pi
+    --pi-already-installed
+]: nothing -> string {
+    let bin = ([$nu.temp-dir $"infinifu-t7-bin-($tag)-(random chars --length 6)"] | path join)
+    rm -rf $bin
+    mkdir $bin
+    let base = ["bash" "ln" "mkdir" "readlink" "basename" "dirname" "rm" "git" "awk" "sed" "grep" "cat" "which" "env" "sort" "head" "tail" "tr" "cut" "cp" "mv" "test" "printf" "echo"]
+    for tool in ($base | append $tools) {
+        let found = (do { ^which $tool } | complete)
+        if $found.exit_code == 0 { ^ln -sf ($found.stdout | str trim) ($bin | path join $tool) }
+    }
+    if $record_pi {
+        let log = ($bin | path join "pi-calls.log")
+        touch $log
+        # `pi list` reports the resolved absolute path on its own line, which is
+        # what an idempotence check can match against.
+        let listed = if $pi_already_installed {
+            $"  ../../infinifu\n    (repo-root $env.FILE_PWD | path join 'claude' 'marketplace' 'plugins' 'infinifu')"
+        } else { "" }
+        let script = ([
+            "#!/usr/bin/env bash"
+            $"echo \"$*\" >> '($log)'"
+            "if [ \"${1:-}\" = list ]; then"
+            "  echo 'User packages:'"
+            $"  printf '%b\\n' '($listed)'"
+            "fi"
+            "exit 0"
+        ] | str join "\n")
+        $script | save -f ($bin | path join "pi")
+        ^chmod +x ($bin | path join "pi")
+    }
+    $bin
+}
+
 def fake-home [tag: string]: nothing -> string {
     let home = ([$nu.temp-dir $"infinifu-t7-home-($tag)-(random chars --length 6)"] | path join)
     rm -rf $home
@@ -144,29 +185,71 @@ let cases = [
         rm -rf $home
     })
 
-    (run-case "install/links-the-pi-extension-only-when-pi-is-present" {
-        # Claude-only installations must be unaffected: no Pi config directory
-        # means no Pi artifacts, and no failure either.
+    (run-case "install/skips-the-pi-package-when-the-pi-binary-is-absent" {
+        # Claude-only installations must be unaffected: no `pi` on PATH means
+        # no Pi artifacts, and no failure either. The probe is the BINARY --
+        # a config directory is not the signal, because Pi creates ~/.pi
+        # lazily and never creates ~/.config/pi at all.
         let home = (fake-home "nopi")
-        let out = (run-installer $home)
+        let bin = (stub-bin "nopi" --tools ["nu" "tmux"])
+        let out = (run-installer $home --path-dirs [$bin])
         assert-eq $out.exit_code 0 "a Claude-only install still succeeds"
-        assert-true (not (($home | path join ".config" "pi") | path exists)) "and creates no Pi config"
         assert-true (($out.stdout | str contains "Pi not detected") or ($out.stdout | str contains "skipping Pi")) "but says why it skipped"
-        rm -rf $home
+        assert-true (not (($home | path join ".config" "pi") | path exists)) "and invents no Pi config dir"
+        rm -rf $home; rm -rf $bin
     })
 
-    (run-case "install/links-the-pi-extension-when-pi-config-exists" {
+    (run-case "install/registers-the-plugin-as-a-pi-package-when-pi-is-present" {
+        # Pi 0.84.4 has no extension drop-directory. A package is registered
+        # with `pi install <source>`, which appends to `packages[]` in
+        # ~/.pi/agent/settings.json. Dropping a symlink in ~/.config/pi
+        # installs nothing at all.
         let home = (fake-home "withpi")
-        mkdir ($home | path join ".config" "pi")
-        let out = (run-installer $home)
-        assert-eq $out.exit_code 0 $"($out.stderr)"
+        let bin = (stub-bin "withpi" --tools ["nu" "tmux"] --record-pi)
+        let out = (run-installer $home --path-dirs [$bin])
+        assert-eq $out.exit_code 0 $"($out.stdout)($out.stderr)"
 
-        let ext = ($home | path join ".config" "pi" "extensions" "infinifu.ts")
-        assert-true ($ext | path exists) "the extension is linked"
-        let target = (^readlink $ext | str trim)
-        assert-true ($target | str ends-with "claude/marketplace/plugins/infinifu/extensions/pi.ts") $"unexpected extension target: ($target)"
-        assert-true (not ($target | str contains ".worktrees")) "anchored outside any feature worktree"
-        rm -rf $home
+        let log = ($bin | path join "pi-calls.log")
+        assert-true ($log | path exists) "the installer must invoke pi"
+        let calls = (open $log | lines | where {|l| ($l | str trim | is-not-empty) })
+        let installs = ($calls | where {|c| $c starts-with "install " })
+        assert-eq ($installs | length) 1 $"exactly one `pi install`, got: ($calls | str join '; ')"
+
+        let src = ($installs | first | str replace "install " "" | str trim)
+        assert-true ($src | path exists) $"the source must be a real path: ($src)"
+        assert-true (($src | path join "package.json") | path exists) $"the source must be the plugin package root: ($src)"
+        assert-true (not ($src | str contains ".worktrees")) "anchored outside any feature worktree"
+        rm -rf $home; rm -rf $bin
+    })
+
+    (run-case "install/registering-the-pi-package-twice-does-not-duplicate-it" {
+        # `pi install` is run on every worker install. If the package is
+        # already in packages[], re-running must be a no-op rather than a
+        # second entry that `pi remove` then only half-clears.
+        let home = (fake-home "twicepi")
+        let bin = (stub-bin "twicepi" --tools ["nu" "tmux"] --record-pi --pi-already-installed)
+        let out = (run-installer $home --path-dirs [$bin])
+        assert-eq $out.exit_code 0 $"($out.stdout)($out.stderr)"
+
+        let calls = (open ($bin | path join "pi-calls.log") | lines | where {|l| ($l | str trim | is-not-empty) })
+        let installs = ($calls | where {|c| $c starts-with "install " })
+        assert-eq ($installs | length) 0 $"already registered, so no re-install; got: ($calls | str join '; ')"
+        assert-true ($out.stdout | str contains "already") "and says it was already registered"
+        rm -rf $home; rm -rf $bin
+    })
+
+    (run-case "install/uninstall-removes-the-pi-package" {
+        # Uninstall that leaves packages[] pointing at a path it just unlinked
+        # gives Pi a broken package on the next start.
+        let home = (fake-home "unpi")
+        let bin = (stub-bin "unpi" --tools ["nu" "tmux"] --record-pi --pi-already-installed)
+        let out = (with-env {HOME: $home, PATH: [$bin]} { ^bash (installer) uninstall | complete })
+        assert-eq $out.exit_code 0 $"($out.stdout)($out.stderr)"
+
+        let calls = (open ($bin | path join "pi-calls.log") | lines | where {|l| ($l | str trim | is-not-empty) })
+        let removes = ($calls | where {|c| $c starts-with "remove " })
+        assert-eq ($removes | length) 1 $"exactly one `pi remove`, got: ($calls | str join '; ')"
+        rm -rf $home; rm -rf $bin
     })
 
     (run-case "install/warns-when-local-bin-is-not-on-path" {

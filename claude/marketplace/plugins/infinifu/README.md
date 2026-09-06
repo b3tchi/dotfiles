@@ -126,8 +126,13 @@ workers**: each worker is a Pi process in a named window inside your existing
 linked project group, so you can watch it work and read its transcript. Claude
 Code keeps its native `Agent` path and is unaffected.
 
-    ./install.sh worker        # links the CLI + Pi extension
+    ./install.sh worker        # links the CLI, registers the Pi package
     infinifu-worker doctor     # checks nushell, tmux, XDG_RUNTIME_DIR, pi
+
+Pi has no extension drop-directory: the plugin is registered as a Pi package
+(`pi install <plugin dir>`, recorded in `packages[]` in `~/.pi/agent/settings.json`).
+`install.sh worker` does this for you when `pi` is on PATH, and is idempotent.
+`./install.sh uninstall` deregisters it again.
 
 ### Authority boundaries
 
@@ -241,8 +246,10 @@ assumption costs a redelivery instead of a corrupted turn. Reconciling them is
 this checklist's job. Run it once on a machine with Pi installed:
 
 1. `infinifu-worker doctor` — every line `ok`, including `pi`.
-2. `./install.sh worker`, then confirm Pi loads the extension (it must trust the
-   project first). Look for infinifu's system-prompt block in a new session.
+2. `./install.sh worker` — expect `Registered Pi package: <plugin dir>` (or
+   `already registered`); `pi list` must show the plugin's resolved path. Then
+   confirm Pi loads the extension (it must trust the project first). Look for
+   infinifu's system-prompt block in a new session.
 3. In a linked tmux project group, delegate a refinement:
 
        infinifu-worker spawn --run acc-1 --uid rev-sp028 --role rev \

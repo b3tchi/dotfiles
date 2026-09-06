@@ -249,18 +249,65 @@ check_worker_deps() {
     return 0
 }
 
-link_pi_extension() {
-    local pi_dir="${PI_CONFIG_DIR:-$HOME/.config/pi}"
-    if [ ! -d "$pi_dir" ]; then
-        echo "  Pi not detected ($pi_dir absent) — skipping Pi extension."
+# Register the plugin as a Pi package.
+#
+# Pi has NO extension drop-directory. A package is registered with
+# `pi install <source>`, which appends to `packages[]` in the Pi settings file
+# (~/.pi/agent/settings.json on 0.84.4). An earlier version of this function
+# probed ${PI_CONFIG_DIR:-$HOME/.config/pi} and symlinked an extensions/ entry;
+# that directory does not exist on a real Pi install, so the probe always
+# failed and a working Pi box was told "nothing further is needed" while the
+# Pi half of ft014 was silently never installed.
+#
+# The probe is the BINARY, not a directory: Pi creates its config lazily, so a
+# freshly-installed Pi has a working `pi` on PATH and no config dir yet.
+#
+# The plugin's package.json already declares pi.extensions/skills/prompts, so
+# `pi install` on the plugin directory is the whole delivery.
+# True when `pi list` already reports this plugin directory.
+pi_lists_plugin() {
+    pi list 2>/dev/null \
+        | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+        | grep -qxF "$INFINIFU_DIR"
+}
+
+register_pi_package() {
+    if ! command -v pi >/dev/null 2>&1; then
+        echo "  Pi not detected (no 'pi' on PATH) — skipping Pi package."
         echo "  Claude-only installations need nothing further."
         return 0
     fi
-    mkdir -p "$pi_dir/extensions"
-    local target="$pi_dir/extensions/infinifu.ts"
-    ln -sfn "$INFINIFU_DIR/extensions/pi.ts" "$target"
-    echo "  Linked extension: ${target/#$HOME/~} -> ${INFINIFU_DIR#$HOME/}/extensions/pi.ts"
-    echo "  NOTE: Pi must trust this project before it will load a local extension."
+
+    # `pi list` prints the resolved absolute path of each package on its own
+    # line. Matching that keeps the check honest whether the entry was recorded
+    # relative or absolute. Indentation is stripped rather than matched: it is
+    # cosmetic output that Pi is free to change, and an exact-column match here
+    # would silently degrade into "never registered" and re-install every run.
+    if pi_lists_plugin; then
+        echo "  Pi package already registered — nothing to do."
+        echo "  Registered: $INFINIFU_DIR"
+        return 0
+    fi
+
+    if pi install "$INFINIFU_DIR" 2>&1 | sed 's/^/  /'; then
+        echo "  Registered Pi package: $INFINIFU_DIR"
+        echo "  NOTE: Pi must trust this project before it will load a local extension."
+    else
+        echo "  WARNING: 'pi install' failed — the Pi half of ft014 is not installed." >&2
+        echo "  Register it manually with: pi install $INFINIFU_DIR" >&2
+    fi
+    return 0
+}
+
+# Undo register_pi_package. Leaving the entry behind points Pi at a package the
+# uninstall just disowned, which surfaces as a load error on Pi's next start
+# rather than here where it can be explained.
+unregister_pi_package() {
+    command -v pi >/dev/null 2>&1 || return 0
+    pi_lists_plugin || return 0
+    pi remove "$INFINIFU_DIR" 2>&1 | sed 's/^/  /'
+    echo "  Removed Pi package: $INFINIFU_DIR"
+    return 0
 }
 
 install_worker() {
@@ -269,7 +316,7 @@ install_worker() {
     # link_scripts already globs scripts/*.nu, so the worker CLI rides the
     # existing convention rather than getting a bespoke path.
     link_scripts
-    link_pi_extension
+    register_pi_package
     echo ""
     echo "  Verify with: infinifu-worker doctor"
     return 0
@@ -294,6 +341,7 @@ if [ "$ACTION" = "uninstall" ] || [ "$ACTION" = "--uninstall" ]; then
     # --- Shell scripts ---
     echo "Shell scripts:"
     unlink_scripts
+    unregister_pi_package
     echo ""
 
     # --- Claude Code ---
