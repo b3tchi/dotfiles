@@ -11,11 +11,11 @@
 # a cleanup that reaches into another run.
 
 use harness.nu *
-use ../../claude/marketplace/plugins/infinifu/scripts/infinifu-worker.nu *
+use ../../claude/marketplace/plugins/pi-workers/scripts/pi-worker.nu *
 
 def make-tmux [tag: string]: nothing -> record {
-    let socket = $"infinifu-t5-($tag)-(random chars --length 6)"
-    let sandbox = ([$nu.temp-dir $"infinifu-t5-bin-($tag)-(random chars --length 6)"] | path join)
+    let socket = $"piw-t5-($tag)-(random chars --length 6)"
+    let sandbox = ([$nu.temp-dir $"piw-t5-bin-($tag)-(random chars --length 6)"] | path join)
     mkdir $sandbox
     "#!/bin/bash\nsleep 30\n" | save -f ($sandbox | path join "pi")
     chmod +x ($sandbox | path join "pi")
@@ -32,7 +32,7 @@ def windows-on [socket: string]: nothing -> list<string> {
     ^tmux -L $socket list-windows -a -F "#{window_name}" | lines | each {|w| $w | str trim }
 }
 
-def launch [t: record, repo: string, uid: string, role: string, skill: string = "work-do"] {
+def launch [t: record, repo: string, uid: string, role: string, skill: string = "wk-build"] {
     worker-spawn --run "run-1" --uid $uid --role $role --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session $"sid-($uid)" --skill $skill --socket $t.socket
 }
 
@@ -187,7 +187,7 @@ let cases = [
     (run-case "pipeline/simultaneous-completions-are-both-delivered" {
         with-pipeline "both" {|t, repo|
             launch $t $repo "impl-a" "impl"
-            launch $t $repo "rev-a" "rev" "work-audit"
+            launch $t $repo "rev-a" "rev" "wk-review"
             complete-with "impl-a" "impl done"
             complete-with "rev-a" "review done"
 
@@ -207,7 +207,7 @@ let cases = [
         # to resume them, from the bus, git and tmux.
         with-pipeline "restart" {|t, repo|
             launch $t $repo "impl-a" "impl"
-            launch $t $repo "rev-a" "rev" "work-audit"
+            launch $t $repo "rev-a" "rev" "wk-review"
             complete-with "impl-a" "done"
 
             let script = ([$nu.temp-dir $"t5-restart-(random chars --length 6).nu"] | path join)
@@ -229,7 +229,7 @@ let cases = [
     (run-case "pipeline/acceptance-cannot-reach-another-runs-worker" {
         with-pipeline "isolation" {|t, repo|
             let mine = (launch $t $repo "impl-a" "impl")
-            let theirs = (worker-spawn --run "run-2" --uid "impl-b" --role "impl" --subject "t2" --project "dotfiles" --repo $repo --task "t2" --session "sid-impl-b" --skill "work-do" --socket $t.socket)
+            let theirs = (worker-spawn --run "run-2" --uid "impl-b" --role "impl" --subject "t2" --project "dotfiles" --repo $repo --task "t2" --session "sid-impl-b" --skill "wk-build" --socket $t.socket)
             complete-with "impl-a" "mine done"
 
             let done = (bus-wait --run "run-1")

@@ -10,12 +10,12 @@
 # ~/.local/bin or ~/.claude.
 
 use harness.nu *
-use ../../claude/marketplace/plugins/infinifu/scripts/infinifu-worker.nu *
+use ../../claude/marketplace/plugins/pi-workers/scripts/pi-worker.nu *
 
 def worker-cli []: nothing -> string { worker-script $env.FILE_PWD }
 
 def installer []: nothing -> string {
-    repo-root $env.FILE_PWD | path join "claude" "marketplace" "plugins" "infinifu" "install.sh"
+    repo-root $env.FILE_PWD | path join "claude" "marketplace" "plugins" "pi-workers" "install.sh"
 }
 
 # Run the CLI as a subprocess, the way the linked binary is run.
@@ -36,7 +36,7 @@ def stub-bin [
     --record-pi
     --pi-already-installed
 ]: nothing -> string {
-    let bin = ([$nu.temp-dir $"infinifu-t7-bin-($tag)-(random chars --length 6)"] | path join)
+    let bin = ([$nu.temp-dir $"piw-t7-bin-($tag)-(random chars --length 6)"] | path join)
     rm -rf $bin
     mkdir $bin
     let base = ["bash" "ln" "mkdir" "readlink" "basename" "dirname" "rm" "git" "awk" "sed" "grep" "cat" "which" "env" "sort" "head" "tail" "tr" "cut" "cp" "mv" "test" "printf" "echo"]
@@ -50,7 +50,7 @@ def stub-bin [
         # `pi list` reports the resolved absolute path on its own line, which is
         # what an idempotence check can match against.
         let listed = if $pi_already_installed {
-            $"  ../../infinifu\n    (repo-root $env.FILE_PWD | path join 'claude' 'marketplace' 'plugins' 'infinifu')"
+            $"  ../../pi-workers\n    (repo-root $env.FILE_PWD | path join 'claude' 'marketplace' 'plugins' 'pi-workers')"
         } else { "" }
         let script = ([
             "#!/usr/bin/env bash"
@@ -68,7 +68,7 @@ def stub-bin [
 }
 
 def fake-home [tag: string]: nothing -> string {
-    let home = ([$nu.temp-dir $"infinifu-t7-home-($tag)-(random chars --length 6)"] | path join)
+    let home = ([$nu.temp-dir $"piw-t7-home-($tag)-(random chars --length 6)"] | path join)
     rm -rf $home
     mkdir $home
     $home
@@ -78,7 +78,7 @@ def fake-home [tag: string]: nothing -> string {
 def run-installer [home: string, --path-dirs: list<string> = []]: nothing -> record {
     let path = (if ($path_dirs | is-empty) { $env.PATH } else { $path_dirs })
     with-env {HOME: $home, PATH: $path} {
-        ^bash (installer) worker | complete
+        ^bash (installer) | complete
     }
 }
 
@@ -147,7 +147,7 @@ let cases = [
     # dotfiles-87bt: `bus-result` and the settle reporter existed as nu
     # functions with no CLI surface, and the extension registered no tool, so a
     # worker had NO way to report an outcome by any route — while
-    # work-do/SKILL.md instructed every worker to "finish by calling the typed
+    # wk-build/SKILL.md instructed every worker to "finish by calling the typed
     # result tool". These cases pin the CLI half: whatever the extension does,
     # a worker or a stub must be able to report from a shell.
 
@@ -155,8 +155,8 @@ let cases = [
         let root = (make-runtime "cli-result")
         with-runtime $root {
             bus-identity "impl-a" --run "r1" --identity {
-                role: "impl", cwd: "/tmp/nowhere", branch: "bd-t1.0"
-                session: "sid-1", skill: "work-do", window: "impl-a@dotfiles"
+                role: "impl", cwd: "/tmp/nowhere", branch: "wk-t1.0"
+                session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
             }
         }
         let out = (run-cli "result" "impl-a" "--run" "r1" "--status" "complete"
@@ -174,32 +174,14 @@ let cases = [
         rm -rf $root
     })
 
-    (run-case "cli/result-applies-the-stage-gate-rather-than-trusting-the-caller" {
-        # The gate must live behind the CLI too, or the CLI becomes the way to
-        # dodge it: a work-do worker reporting complete with no verdict.
-        let root = (make-runtime "cli-gate")
-        with-runtime $root {
-            bus-identity "impl-a" --run "r1" --identity {
-                role: "impl", cwd: "/tmp/nowhere", branch: "bd-t1.0"
-                session: "sid-1", skill: "work-do", window: "impl-a@dotfiles"
-            }
-        }
-        let out = (run-cli "result" "impl-a" "--run" "r1" "--status" "complete"
-            "--summary" "trust me" --runtime $root)
-
-        assert-true ($out.exit_code != 0) "an ungated completion must be refused"
-        assert-true ((($out.stdout + $out.stderr) | str contains "validation")) $"and say why: ($out.stderr)"
-        rm -rf $root
-    })
-
-    (run-case "cli/result-refuses-a-status-only-the-initiator-may-grant" {
+        (run-case "cli/result-refuses-a-status-only-the-initiator-may-grant" {
         # adr0017 / T6: `accepted` is the initiator's verdict. A worker that
         # could self-accept could close its own task.
         let root = (make-runtime "cli-accept")
         with-runtime $root {
             bus-identity "impl-a" --run "r1" --identity {
-                role: "impl", cwd: "/tmp/nowhere", branch: "bd-t1.0"
-                session: "sid-1", skill: "work-do", window: "impl-a@dotfiles"
+                role: "impl", cwd: "/tmp/nowhere", branch: "wk-t1.0"
+                session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
             }
         }
         let out = (run-cli "result" "impl-a" "--run" "r1" "--status" "accepted"
@@ -215,8 +197,8 @@ let cases = [
         let root = (make-runtime "cli-settled")
         with-runtime $root {
             bus-identity "impl-a" --run "r1" --identity {
-                role: "impl", cwd: "/tmp/nowhere", branch: "bd-t1.0"
-                session: "sid-1", skill: "work-do", window: "impl-a@dotfiles"
+                role: "impl", cwd: "/tmp/nowhere", branch: "wk-t1.0"
+                session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
             }
         }
         let out = (run-cli "settled" "impl-a" "--run" "r1" --runtime $root)
@@ -233,8 +215,8 @@ let cases = [
         let root = (make-runtime "cli-settled-ok")
         with-runtime $root {
             bus-identity "impl-a" --run "r1" --identity {
-                role: "impl", cwd: "/tmp/nowhere", branch: "bd-t1.0"
-                session: "sid-1", skill: "work-do", window: "impl-a@dotfiles"
+                role: "impl", cwd: "/tmp/nowhere", branch: "wk-t1.0"
+                session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
             }
         }
         run-cli "result" "impl-a" "--run" "r1" "--status" "blocked" "--summary" "stuck" --runtime $root
@@ -261,13 +243,13 @@ let cases = [
         let out = (run-installer $home)
         assert-eq $out.exit_code 0 $"installer failed: ($out.stderr)"
 
-        let linked = ($home | path join ".local" "bin" "infinifu-worker")
+        let linked = ($home | path join ".local" "bin" "pi-worker")
         assert-true ($linked | path exists) "the CLI is linked"
         # install.sh resolves to the main worktree on purpose, so the link
         # keeps working after a feature worktree is removed. Assert that
         # contract rather than this branch's path.
         let target = (^readlink $linked | str trim)
-        assert-true ($target | str ends-with "claude/marketplace/plugins/infinifu/scripts/infinifu-worker.nu") $"unexpected link target: ($target)"
+        assert-true ($target | str ends-with "claude/marketplace/plugins/pi-workers/scripts/pi-worker.nu") $"unexpected link target: ($target)"
         assert-true ($target | str starts-with "/") "the link is absolute"
         assert-true (not ($target | str contains ".worktrees")) "and anchored outside any feature worktree"
         rm -rf $home
@@ -278,7 +260,7 @@ let cases = [
         # or the shell reports 'permission denied' and the link looks fine.
         let home = (fake-home "exec")
         run-installer $home
-        let linked = ($home | path join ".local" "bin" "infinifu-worker")
+        let linked = ($home | path join ".local" "bin" "pi-worker")
         assert-true ($linked | path exists) "the link exists"
         # Executability is a property of the target file in THIS branch; the
         # link itself resolves to the main worktree, whose copy only carries
@@ -293,10 +275,10 @@ let cases = [
     (run-case "install/is-idempotent" {
         let home = (fake-home "twice")
         run-installer $home
-        let first = (^readlink ($home | path join ".local" "bin" "infinifu-worker") | str trim)
+        let first = (^readlink ($home | path join ".local" "bin" "pi-worker") | str trim)
         let out = (run-installer $home)
         assert-eq $out.exit_code 0 "a second run succeeds"
-        assert-eq (^readlink ($home | path join ".local" "bin" "infinifu-worker") | str trim) $first "and changes nothing"
+        assert-eq (^readlink ($home | path join ".local" "bin" "pi-worker") | str trim) $first "and changes nothing"
         rm -rf $home
     })
 
@@ -380,7 +362,7 @@ let cases = [
         # Missing dependency must fail BEFORE creating anything: a half-install
         # that links a CLI which cannot run is worse than no install.
         let home = (fake-home "nonu")
-        let stub = ([$nu.temp-dir $"infinifu-t7-emptybin-(random chars --length 6)"] | path join)
+        let stub = ([$nu.temp-dir $"piw-t7-emptybin-(random chars --length 6)"] | path join)
         mkdir $stub
         # A PATH with neither nu nor tmux, but with the coreutils the script needs.
         for tool in ["bash" "ln" "mkdir" "readlink" "basename" "dirname" "command" "rm" "git" "awk" "sed"] {
@@ -391,7 +373,7 @@ let cases = [
 
         assert-true ($out.exit_code != 0) "it must refuse"
         assert-true ((($out.stdout + $out.stderr) | str contains "nu")) "and name the missing dependency"
-        assert-true (not (($home | path join ".local" "bin" "infinifu-worker") | path exists)) "and link nothing"
+        assert-true (not (($home | path join ".local" "bin" "pi-worker") | path exists)) "and link nothing"
         rm -rf $home; rm -rf $stub
     })
 ]

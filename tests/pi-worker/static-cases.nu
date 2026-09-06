@@ -208,17 +208,7 @@ let cases = [
         assert-eq ($offenders | each {|b| $b.section }) [] "Pi verbs leaked into a Claude-only section"
     })
 
-    (run-case "static/work-skills-document-the-pi-runtime" {
-        for name in ["work-do" "work-audit" "work-merge"] {
-            let path = (repo-root $env.FILE_PWD | path join "claude" "marketplace" "plugins" "infinifu" "skills" $name "SKILL.md")
-            let text = (open --raw $path)
-            assert-true ($text | str contains "Pi runtime") $"($name) has no Pi runtime section"
-            # And keeps its runtime-neutral core.
-            assert-true ($text | str contains "bd ") $"($name) lost its bd contract wording"
-        }
-    })
-
-    (run-case "static/acceptance-is-never-described-as-automatic" {
+        (run-case "static/acceptance-is-never-described-as-automatic" {
         # The rule the whole visibility design rests on: a completed worker is
         # not cleaned up until something explicitly accepts it.
         let text = (open --raw $skill | str lowercase)
@@ -232,10 +222,6 @@ let cases = [
     })
 
     # ------------------------------------------------ no copied task bodies
-    (run-case "static/work-stage-payload-contract-is-documented" {
-        let text = (open --raw $worker)
-        assert-true ($text | str contains "bd show") "the module must point work stages at bd show"
-    })
-]
+    ]
 
 $cases | to json

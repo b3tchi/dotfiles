@@ -12,7 +12,7 @@
 # false deletion costs the work.
 
 use harness.nu *
-use ../../claude/marketplace/plugins/infinifu/scripts/infinifu-worker.nu *
+use ../../claude/marketplace/plugins/pi-workers/scripts/pi-worker.nu *
 
 def dirty-it [repo: string, path: string] {
     "uncommitted\n" | save -f ($path | path join "scratch.txt")
@@ -25,8 +25,8 @@ let cases = [
         let root = (make-runtime "alloc")
         with-runtime $root {
             let got = (worktree-allocate --repo $repo --task "dotfiles-963w.3")
-            assert-eq $got.branch "bd-dotfiles-963w.3.0" "first attempt is iteration 0"
-            assert-eq ($got.path | path basename) "bd-dotfiles-963w.3.0" "directory name matches the branch"
+            assert-eq $got.branch "wk-dotfiles-963w.3.0" "first attempt is iteration 0"
+            assert-eq ($got.path | path basename) "wk-dotfiles-963w.3.0" "directory name matches the branch"
             assert-true ($got.path | path exists) "the worktree is on disk"
             assert-eq (git-in $repo "rev-parse" "--abbrev-ref" "HEAD" --) "main" "the main worktree is left on its own branch"
         }
@@ -56,10 +56,10 @@ let cases = [
             let first = (worktree-allocate --repo $repo --task "t1")
             ^git -C $repo worktree remove --force $first.path
             assert-true (not ($first.path | path exists)) "directory is gone"
-            assert-true ((git-in $repo "branch" "--list" "bd-t1.0") | is-not-empty) "but the branch remains"
+            assert-true ((git-in $repo "branch" "--list" "wk-t1.0") | is-not-empty) "but the branch remains"
 
             let next = (worktree-allocate --repo $repo --task "t1")
-            assert-eq $next.branch "bd-t1.1" "allocation steps past the orphaned branch"
+            assert-eq $next.branch "wk-t1.1" "allocation steps past the orphaned branch"
         }
         rm -rf $root; rm -rf $repo
     })
@@ -73,18 +73,18 @@ let cases = [
         let repo = (make-repo "preexisting")
         let root = (make-runtime "preexisting")
         with-runtime $root {
-            for n in 0..3 { ^git -C $repo branch $"bd-t1.($n)" }
+            for n in 0..3 { ^git -C $repo branch $"wk-t1.($n)" }
             let before = (
                 git-in $repo "branch" "--list" "--format" "%(refname:short)"
                 | lines
                 | each {|b| $b | str trim }
-                | where {|b| $b | str starts-with "bd-t1." }
+                | where {|b| $b | str starts-with "wk-t1." }
                 | sort
             )
 
             let got = (worktree-allocate --repo $repo --task "t1")
             assert-true ($got.branch not-in $before) $"($got.branch) must not be one of the pre-existing refs"
-            assert-eq $got.branch "bd-t1.4" "allocation lands past every existing iteration"
+            assert-eq $got.branch "wk-t1.4" "allocation lands past every existing iteration"
             # Nothing that already existed was moved or checked out.
             for b in $before {
                 assert-eq (git-in $repo "rev-parse" $b) (git-in $repo "rev-parse" "main") $"($b) is untouched"
@@ -106,12 +106,12 @@ let cases = [
             "rejected attempt\n" | save -f ($first.path | path join "attempt.txt")
             ^git -C $first.path add -A
             ^git -C $first.path commit -q -m "rejected work"
-            let kept = (git-in $repo "rev-parse" "bd-t1.0")
+            let kept = (git-in $repo "rev-parse" "wk-t1.0")
             ^git -C $repo worktree remove --force $first.path
 
             let next = (worktree-allocate --repo $repo --task "t1")
-            assert-true ($next.branch != "bd-t1.0") "the occupied ref is not handed out again"
-            assert-eq (git-in $repo "rev-parse" "bd-t1.0") $kept "and its commit is exactly where it was"
+            assert-true ($next.branch != "wk-t1.0") "the occupied ref is not handed out again"
+            assert-eq (git-in $repo "rev-parse" "wk-t1.0") $kept "and its commit is exactly where it was"
         }
         rm -rf $root; rm -rf $repo
     })
@@ -150,7 +150,7 @@ let cases = [
                 cwd: $got.path
                 branch: $got.branch
                 session: "sid-1"
-                skill: "work-do"
+                skill: "wk-build"
                 window: "impl-a@dotfiles"
             }
             let recorded = (bus-identity-of "impl-a" --run "run-1")
@@ -191,7 +191,7 @@ let cases = [
         with-runtime $root {
             let got = (worktree-allocate --repo $repo --task "t1")
             assert-rejects {
-                worktree-validate --repo $repo --path $got.path --branch "bd-someone-else.0"
+                worktree-validate --repo $repo --path $got.path --branch "wk-someone-else.0"
             } "branch" "a worktree checked out on another branch is not this worker's"
         }
         rm -rf $root; rm -rf $repo
@@ -204,7 +204,7 @@ let cases = [
             let stray = ($repo | path join "not-a-worktree")
             mkdir $stray
             assert-rejects {
-                worktree-validate --repo $repo --path $stray --branch "bd-t1.0"
+                worktree-validate --repo $repo --path $stray --branch "wk-t1.0"
             } "registered" "a directory git does not know about is not a worktree"
         }
         rm -rf $root; rm -rf $repo
@@ -328,7 +328,7 @@ let cases = [
             let got = (worktree-allocate --repo $repo --task "t1")
             bus-identity "impl-a" --run "run-1" --identity {
                 role: "impl", cwd: $got.path, branch: $got.branch
-                session: "sid-9", skill: "work-do", window: "impl-a@dotfiles"
+                session: "sid-9", skill: "wk-build", window: "impl-a@dotfiles"
             }
             bus-result "impl-a" --run "run-1" --result {
                 status: "complete", summary: "done", validation: "PASS"
@@ -356,7 +356,7 @@ let cases = [
             let got = (worktree-allocate --repo $repo --task "t1")
             bus-identity "impl-a" --run "run-1" --identity {
                 role: "impl", cwd: $got.path, branch: $got.branch
-                session: "sid-p", skill: "work-do", window: "impl-a@dotfiles"
+                session: "sid-p", skill: "wk-build", window: "impl-a@dotfiles"
             }
             # An unmerged commit makes `git branch -d` refuse, so removal of the
             # directory succeeds while branch deletion fails.
@@ -389,10 +389,10 @@ let cases = [
 
     (run-case "worktree/an-akm-stage-is-placed-in-the-main-worktree" {
         let repo = (make-repo "akm-place")
-        let placed = (worker-placement --repo $repo --skill "spec-refinement" --subject "sp028")
+        let placed = (worker-placement --repo $repo --skill "doc-plan" --subject "sp028")
 
         assert-eq $placed.path $repo "an AKM stage runs where AKM can be read and written"
-        assert-true (not ($placed.branch | str starts-with "bd-")) $"no task branch for an AKM stage, got ($placed.branch)"
+        assert-true (not ($placed.branch | str starts-with "wk-")) $"no task branch for an AKM stage, got ($placed.branch)"
         assert-eq $placed.branch "main" "it works on the default branch, which is where AKM lives"
         assert-true (not (($repo | path join ".worktrees") | path exists)) "and allocates nothing"
         rm -rf $repo
@@ -401,9 +401,9 @@ let cases = [
     (run-case "worktree/a-work-stage-still-gets-its-own-isolated-worktree" {
         # The regression guard for the above: code work must stay isolated.
         let repo = (make-repo "work-place")
-        let placed = (worker-placement --repo $repo --skill "work-do" --subject "dotfiles-963w.4")
+        let placed = (worker-placement --repo $repo --skill "wk-build" --subject "dotfiles-963w.4")
 
-        assert-eq $placed.branch "bd-dotfiles-963w.4.0" "a work stage gets its task branch"
+        assert-eq $placed.branch "wk-dotfiles-963w.4.0" "a work stage gets its task branch"
         assert-true ($placed.path != $repo) "in a directory of its own"
         assert-true ($placed.path | path exists) "which exists on disk"
         rm -rf $repo

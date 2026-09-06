@@ -1,5 +1,8 @@
 #!/usr/bin/env nu
-# infinifu-worker — the Pi worker message bus (ft014 / sp028).
+# pi-worker — a message bus for visible Pi workers.
+#
+# Transport only. What a stage is allowed to do is declared by the consumer in
+# a stage registry; see scripts/stage-registry.nu.
 #
 # This file currently carries the PROTOCOL only: envelope schemas, the caps,
 # and the worker state machine. The commands that move bytes (`spawn`, `send`,
@@ -20,9 +23,11 @@
 # sequenced, addressed, or replayed after a crash, and `send-keys` in
 # particular types text into whatever now occupies a stale target — a shell,
 # somebody else's editor. Messages travel as envelopes under
-# $XDG_RUNTIME_DIR/infinifu-worker/<run-id>/<worker-uid>/ and nowhere else.
+# $XDG_RUNTIME_DIR/pi-worker/<run-id>/<worker-uid>/ and nowhere else.
 # The only legitimate tmux calls are window/process lifecycle: new-window,
 # list-windows, kill-window.
+
+use stage-registry.nu *
 
 # ------------------------------------------------------------------ constants
 
@@ -32,7 +37,7 @@ export const PROTOCOL_VERSION = 1
 
 # Envelope cap: a bus message is an address plus a pointer, never a payload of
 # record. Anything approaching this size means prose is being copied that
-# belongs in bd, Git, or AKM.
+# belongs in the consumer's own stores.
 export const MAX_ENVELOPE_BYTES = 65536
 
 # Summary cap: what the initiator reads inline. Detail stays in the visible
@@ -65,11 +70,10 @@ export const OBSERVATIONAL_VERDICTS = ["unknown"]
 # is something a worker can claim about itself.
 export const RESULT_STATUSES = ["complete" "waiting_human" "blocked" "failed"]
 
-# Stages whose entire work content is a bd ticket id (ft013). The worker
-# resolves its contract with `bd show <id>`; the payload never carries task
-# prose, because a copied body is a second source of truth that drifts from bd
-# the moment the task is updated.
-export const WORK_STAGES = ["work-do" "work-audit" "work-merge"]
+# A stage whose payload is "ticket" carries only an address: its message may
+# name the stage and one ticket id and nothing else. The worker resolves the
+# work itself from that id, so prose here would be a second source of truth
+# that drifts from the first the moment either is edited.
 
 # Fields that betray a copied task body in a work-stage payload.
 const WORK_PAYLOAD_ALLOWED = ["stage" "task"]
@@ -160,6 +164,11 @@ def text-bytes [value: string]: nothing -> int {
     $value | into binary | bytes length
 }
 
+# Stages the BUS itself authors, which therefore need no consumer declaration.
+# `resume` sends one of these to reopen a worker, so requiring the consumer to
+# register it would make the bus depend on its own caller.
+const RESERVED_STAGES = ["rejection"]
+
 # --------------------------------------------------------- payload contracts
 
 def validate-inbox-payload [payload: record] {
@@ -169,20 +178,22 @@ def validate-inbox-payload [payload: record] {
     let stage = $payload.stage
     let fields = ($payload | columns)
 
-    if $stage in $WORK_STAGES {
+    # A bus-authored stage carries instructions by construction.
+    let shape = (if $stage in $RESERVED_STAGES { "instructions" } else { stage-for $stage | get payload })
+    if $shape == "ticket" {
         if "task" not-in $fields {
-            error make {msg: $"work-stage payload for '($stage)' must carry its bd task id"}
+            error make {msg: $"payload for '($stage)' must carry its ticket id"}
         }
         let extra = ($fields | where {|f| $f not-in $WORK_PAYLOAD_ALLOWED })
         if ($extra | is-not-empty) {
-            error make {msg: $"work-stage payload for '($stage)' may carry only stage and task; found ($extra | str join ', '). The worker resolves its contract with `bd show`, so a copied task body is a second source of truth"}
+            error make {msg: $"payload for '($stage)' may carry only stage and task; found ($extra | str join ', '). A ticket payload is an address, so any copied body is a second source of truth"}
         }
     } else {
         if "task" in $fields {
-            error make {msg: $"AKM-stage payload for '($stage)' must not carry a bd task id: non-work stages receive direct instructions and artifact ids"}
+            error make {msg: $"payload for '($stage)' must not carry a ticket id: this stage receives direct instructions and artifact ids"}
         }
         if "instructions" not-in $fields {
-            error make {msg: $"AKM-stage payload for '($stage)' must carry direct instructions"}
+            error make {msg: $"payload for '($stage)' must carry direct instructions"}
         }
     }
 }
@@ -210,14 +221,6 @@ def validate-result-payload [payload: record] {
         error make {msg: $"result summary exceeds the 4 KiB summary cap; detail belongs in the worker window and the Pi transcript, not the envelope"}
     }
 
-    # ft013: completion is gated on the stage's own validation. A worker that
-    # finished its turn without a verdict is `blocked`, not `complete`.
-    if $status == "complete" {
-        let verdict = ($payload | get -o validation)
-        if ($verdict | is-empty) {
-            error make {msg: "a 'complete' result must carry its validation verdict: completion cannot be reported before the stage's required validation passes"}
-        }
-    }
 }
 
 # Identity ties a worker UID to where it runs, what resumes it, and where it is
@@ -314,7 +317,7 @@ export def settled-without-result [run: string, uid: string, sequence: int, crea
 #
 # Layout, one directory per addressee:
 #
-#   $XDG_RUNTIME_DIR/infinifu-worker/<run-id>/<worker-uid>/
+#   $XDG_RUNTIME_DIR/pi-worker/<run-id>/<worker-uid>/
 #       inbox/<sequence>.json     messages to the worker
 #       outbox/<sequence>.json    results from the worker
 #       outbox/<sequence>.ack     delivery receipt, written by the initiator
@@ -339,7 +342,11 @@ export def settled-without-result [run: string, uid: string, sequence: int, crea
 # Acknowledgement is a delivery receipt and nothing more — it never means the
 # work was accepted.
 
-const BUS_DIRNAME = "infinifu-worker"
+const BUS_DIRNAME = "pi-worker"
+
+# The bus owns the branches it creates, so it owns their namespace. A worker
+# branch is throwaway and must never collide with one a human made.
+const BRANCH_PREFIX = "wk-"
 const MAX_SEQUENCE_ATTEMPTS = 64
 
 # Root of the bus tree. Keyed entirely off XDG_RUNTIME_DIR so a test — or a
@@ -541,7 +548,6 @@ export def bus-result [
     if $identity == null {
         error make {msg: $"refusing a result from ($run)/($uid): no identity on the bus, so its stage gate cannot be applied"}
     }
-    validate-completion $identity.skill $result
 
     validate-envelope (envelope-for $run $uid "result" $result)
     ensure-worker-dirs $run $uid
@@ -690,7 +696,7 @@ export def bus-status [uid: string, --run: string]: nothing -> record {
 
 # ========================================================= worker worktrees
 #
-# Each worker gets its own git worktree at `<repo>/.worktrees/bd-<task>.<N>`
+# Each worker gets its own git worktree at `<repo>/.worktrees/wk-<task>.<N>`
 # on a branch of the same name. Directory and branch share a name so
 # `git worktree list` is self-documenting and a later sweep can map a directory
 # back to its task mechanically.
@@ -746,7 +752,7 @@ def worktree-dirty? [path: string]: nothing -> bool {
     (^git -C $path status --porcelain --untracked-files=all | str trim | is-not-empty)
 }
 
-# Allocate the next free `bd-<task>.<N>` worktree.
+# Allocate the next free `wk-<task>.<N>` worktree.
 #
 # Serialisation reuses the bus's link(2) idiom rather than a lock file with a
 # timeout: creating the branch is itself the claim. `git branch` fails if the
@@ -769,7 +775,7 @@ export def worktree-allocate [--repo: string, --task: string] {
     let taken = (known-branches $repo)
     mut n = (
         $taken
-        | where {|b| $b | str starts-with $"bd-($task)." }
+        | where {|b| $b | str starts-with $"($BRANCH_PREFIX)($task)." }
         | each {|b| try { $b | split row "." | last | into int } catch { -1 } }
         | append (-1)
         | math max
@@ -783,7 +789,7 @@ export def worktree-allocate [--repo: string, --task: string] {
             error make {msg: $"could not allocate a worktree for ($task) after ($MAX_ITERATION_ATTEMPTS) attempts"}
         }
 
-        let branch = $"bd-($task).($n)"
+        let branch = $"($BRANCH_PREFIX)($task).($n)"
         let path = ($base | path join $branch)
         if ($path | path exists) { continue }
 
@@ -857,13 +863,13 @@ export def worktree-cleanup [
         }
     }
 
-    # The main worktree is never a worker's to delete. An AKM stage RUNS there
+    # The main worktree is never a worker's to delete. A stage declared
     # (dotfiles-ptba), so `worker-accept` reaches here with identity.cwd set to
     # it. git refuses on its own — but only after the accept sequence has
     # already killed the window, and with a message about working trees rather
     # than about what the caller did wrong.
     if $path == (main-worktree $repo) {
-        error make {msg: $"refusing to clean up ($path): that is the main worktree, not a worker's. An AKM stage runs there and shares it with the operator; only its own isolated worktree is a worker's to remove"}
+        error make {msg: $"refusing to clean up ($path): that is the main worktree, not a worker's. A stage declared isolation=main runs there and shares it with the operator; only its own isolated worktree is a worker's to remove"}
     }
 
     if ($path | path exists) and (worktree-dirty? $path) {
@@ -914,22 +920,9 @@ export def bus-identity-of [uid: string, --run: string]: nothing -> any {
 # uses `new-window` and liveness uses `list-windows` — no send-keys, no
 # wait-for, no pane options.
 
-# Skills a worker may be configured with, and whether the stage takes a bd task
-# contract. An unrecognised skill is refused rather than launched: a worker with
-# no contract to follow would burn a model turn and report nothing useful.
-const WORKER_SKILLS = [
-    [skill, kind];
-    ["work-do", "work"]
-    ["work-audit", "work"]
-    ["work-merge", "work"]
-    ["spec-writing", "akm"]
-    ["spec-refinement", "akm"]
-    ["spec-ready", "akm"]
-    ["spec-retro", "akm"]
-]
 
-# The main worktree of a repo — the one git lists first, and the only one AKM
-# may be read or written from.
+# The main worktree of a repo — the one git lists first, and where a stage
+# declared isolation=main runs.
 export def main-worktree [repo: string]: nothing -> string {
     let listed = (do { ^git -C $repo worktree list --porcelain } | complete)
     if $listed.exit_code != 0 {
@@ -946,37 +939,24 @@ export def main-worktree [repo: string]: nothing -> string {
 
 # Where a worker runs, and on which branch.
 #
-# dotfiles-ptba: every worker used to get an isolated `bd-<subject>.<N>`
-# worktree, AKM stages included — but `akm-root` refuses to serve any worktree
-# but the main one, and says so in its own words:
+# Declared per stage in the registry, because only the consumer knows which of
+# its stages can tolerate an isolated checkout:
 #
-#   AKM artifacts describe shared product knowledge and live on the default
-#   branch. Any AKM operation must happen from the main worktree so reads see
-#   the canonical state and writes commit on the canonical branch. Feature
-#   worktrees exist only for code work.
+#   isolation=worktree  its own throwaway `wk-<subject>.<N>` worktree and
+#                       branch, so concurrent workers never share a tree
+#   isolation=main      the repo's main worktree on the default branch, and no
+#                       task branch — for stages whose tooling refuses to run
+#                       anywhere else, or whose writes belong on the canonical
+#                       branch
 #
-# So an AKM worker was placed somewhere it could not do its job, and the
-# guard's own remedy ("cd <main> and retry") instructed it to walk out of its
-# isolation. Observed live in the sp028 T7 run: it did exactly that and
-# continued in the main worktree, where it shared a working tree with the
-# operator and with every other worker — the precise hazard the worktree
-# existed to prevent, arrived at silently.
-#
-# Placement now follows what akm-root already asserts rather than fighting it:
-# an AKM stage belongs in the main worktree on the default branch, and gets no
-# task branch because its writes belong on the canonical one. A work stage is
-# unchanged — code work stays isolated.
+# `main` means the worker shares a tree with the operator and with every other
+# such worker, so a consumer that declares it owns the serialisation problem.
 export def worker-placement [
     --repo: string
     --skill: string
     --subject: string
 ]: nothing -> record {
-    let configured = ($WORKER_SKILLS | where skill == $skill)
-    if ($configured | is-empty) {
-        error make {msg: $"unknown skill '($skill)': not one of ($WORKER_SKILLS | get skill | str join ', ')"}
-    }
-
-    if (($configured | first | get kind) == "akm" ) {
+    if (stage-for $skill | get isolation) == "main" {
         let main = (main-worktree $repo)
         let branch = (^git -C $main rev-parse --abbrev-ref HEAD | str trim)
         return {path: $main, branch: $branch, isolated: false}
@@ -1029,7 +1009,7 @@ export def resolve-project-session [project: string, --socket: string = ""] {
 }
 
 # The name an operator scans a window list for: `<role>-<subject>@<project>`.
-# Subject is the bd task id for work stages and the artifact id otherwise.
+# Subject is the ticket id for ticket-payload stages and the artifact id otherwise.
 export def worker-window-name [role: string, subject: string, project: string]: nothing -> string {
     $"($role)-($subject)@($project)"
 }
@@ -1117,12 +1097,9 @@ export def worker-spawn [
     --skill: string
     --socket: string = ""
 ] {
-    let configured = ($WORKER_SKILLS | where skill == $skill)
-    if ($configured | is-empty) {
-        error make {msg: $"unknown skill '($skill)': not one of ($WORKER_SKILLS | get skill | str join ', '). A worker with no contract to follow is not launched"}
-    }
-    if (($configured | first | get kind) == "work") and ($task | is-empty) {
-        error make {msg: $"skill '($skill)' is a work stage and needs a bd task id: the worker reads its contract with `bd show <id>`"}
+    let stage = (stage-for $skill)
+    if ($stage.payload == "ticket") and ($task | is-empty) {
+        error make {msg: $"stage '($skill)' takes a ticket payload and so needs a ticket id; the worker resolves the work from it"}
     }
 
     # Fail before allocating anything if the display host is unreachable.
@@ -1139,14 +1116,12 @@ export def worker-spawn [
 
     let window = (worker-window-name $role $subject $project)
     # NOT `$task | default $subject`. `default` substitutes for null, not for an
-    # empty string, so an AKM stage with no task would have allocated a worktree
-    # named `bd-.0`; worse, nushell raises on `default` applied to a plain string
+    # empty string, so a stage with no task would have allocated a worktree
+    # named `wk-.0`; worse, nushell raises on `default` applied to a plain string
     # and reports it as the entirely unrelated "External command failed", which
     # is how this sat hidden behind a passing-looking spawn.
     let subject_for_branch = (if ($task | is-empty) { $subject } else { $task })
-    # Placement is stage-dependent: code work gets an isolated worktree, AKM
-    # work runs in the main worktree because that is the only place akm-root
-    # will serve (dotfiles-ptba).
+    # Placement is stage-dependent; the registry says which (dotfiles-ptba).
     let tree = (worker-placement --repo $repo --skill $skill --subject $subject_for_branch)
 
     bus-identity $uid --run $run --identity {
@@ -1177,13 +1152,13 @@ export def worker-spawn [
     # arrive. `new-window -e` sets these on the window's own environment only,
     # so nothing leaks into the operator's other windows.
     let worker_env = [
-        "-e" $"INFINIFU_RUN=($run)"
-        "-e" $"INFINIFU_UID=($uid)"
-        "-e" $"INFINIFU_ROLE=($role)"
-        "-e" $"INFINIFU_BRANCH=($tree.branch)"
-        "-e" $"INFINIFU_SESSION=($session)"
-        "-e" $"INFINIFU_SKILL=($skill)"
-        "-e" $"INFINIFU_WINDOW=($window)"
+        "-e" $"PI_WORKER_RUN=($run)"
+        "-e" $"PI_WORKER_UID=($uid)"
+        "-e" $"PI_WORKER_ROLE=($role)"
+        "-e" $"PI_WORKER_BRANCH=($tree.branch)"
+        "-e" $"PI_WORKER_SESSION=($session)"
+        "-e" $"PI_WORKER_SKILL=($skill)"
+        "-e" $"PI_WORKER_WINDOW=($window)"
     ]
     let created = (do {
         ^tmux ...(tmux-args $socket) new-window -d -t $target -n $window -c $tree.path ...$worker_env "pi" "--session-id" $session
@@ -1218,7 +1193,7 @@ export def worker-spawn [
 #
 # A stage may report `complete` only when it carries the verdict its own
 # discipline produces. The verdict is read from the typed `validation` field
-# and NEVER from the summary: an assistant writing "SRE PASS" in prose is the
+# and NEVER from the summary: an assistant writing its verdict in prose is the
 # exact forgery this design exists to refuse, and text is the one thing a
 # model can always produce.
 #
@@ -1227,31 +1202,7 @@ export def worker-spawn [
 # whatever evidence that stage actually produces — because "complete with no
 # verdict" is how an unvalidated result reaches the pipeline.
 
-const STAGE_VERDICTS = [
-    [skill, pattern, describes];
-    ["spec-refinement", "SRE PASS", "the SRE review verdict spec-refinement produces"]
-]
 
-# The verdict a stage must carry, or null when any non-empty verdict will do.
-export def required-verdict [skill: string]: nothing -> any {
-    let row = ($STAGE_VERDICTS | where skill == $skill)
-    if ($row | is-empty) { null } else { $row | first | get pattern }
-}
-
-# Refuse a completion whose verdict does not satisfy its stage.
-export def validate-completion [skill: string, payload: record] {
-    if ($payload | get -o status) != "complete" { return }
-
-    let verdict = ($payload | get -o validation)
-    if ($verdict | is-empty) {
-        error make {msg: $"stage '($skill)' cannot report complete without a validation verdict: completion is never inferred from prose"}
-    }
-
-    let required = (required-verdict $skill)
-    if $required != null and (not ($verdict | str contains $required)) {
-        error make {msg: $"stage '($skill)' requires the verdict '($required)' in its validation field, got '($verdict)'. A summary mentioning it is not a verdict"}
-    }
-}
 
 # ================================================== orchestration verbs (T5)
 #
@@ -1346,7 +1297,7 @@ export def pi-session-file [session: string, --sessions-dir: string = ""]: nothi
 # binds a session to the directory it was created in and refuses to start once
 # that directory is gone:
 #
-#   Stored session working directory does not exist: .../bd-t1.0
+#   Stored session working directory does not exist: .../wk-t1.0
 #
 # Naming the session file instead of the id does not help — same refusal. The
 # transcript survives, so nothing is lost, but the documented command cannot
@@ -1394,7 +1345,7 @@ export def run-workers [run: string]: nothing -> list<record> {
 # Resuming rather than dispatching fresh is the point of a stable session id:
 # the worker still has its context and its worktree, so the second attempt
 # starts from the first rather than from nothing. The feedback travels as an
-# AKM-shaped message — it is prose, and a work payload may carry only a ticket
+# instruction-shaped message — it is prose, and a ticket payload carries only an id
 # id.
 #
 # A second rejection sets `escalate` and parks the worker at `waiting_human`.
@@ -1466,7 +1417,7 @@ export def worker-accept [
     # id), whereas the worktree is not, so the irreversible step goes last.
     do { ^tmux ...(tmux-args $socket) kill-window -t $seen.identity.window } | complete | ignore
 
-    # An AKM stage runs IN the main worktree, which is shared with the operator
+    # An isolation=main stage runs IN the main worktree, shared with the operator
     # and is nobody's to delete. There is no isolated directory or task branch
     # to reclaim, so acceptance is the marker alone.
     if $seen.identity.cwd != (main-worktree $repo) {
@@ -1506,7 +1457,7 @@ export def mark-accepted [uid: string, --run: string] {
 
 # ============================================================== CLI entry point
 #
-# The installer links this file into ~/.local/bin/infinifu-worker, so it has to
+# The installer links this file into ~/.local/bin/pi-worker, so it has to
 # work as a command and not only as an imported module. Every verb below is a
 # thin wrapper over the exported function of the same name: the CLI is a
 # surface, never a second implementation that could drift from the one the
@@ -1517,10 +1468,10 @@ export def mark-accepted [uid: string, --run: string] {
 
 def usage []: nothing -> string {
     [
-        "infinifu-worker — visible Pi worker orchestration (ft014)"
+        "pi-worker — visible Pi worker orchestration (ft014)"
         ""
         "USAGE"
-        "  infinifu-worker <verb> [flags]"
+        "  pi-worker <verb> [flags]"
         ""
         "VERBS"
         "  spawn    --run --uid --role --subject --project --repo --session --skill [--task] [--socket]"
@@ -1553,7 +1504,7 @@ def main [...args: string] {
         print (usage)
         return
     }
-    print --stderr $"infinifu-worker: unknown verb '($args | first)'"
+    print --stderr $"pi-worker: unknown verb '($args | first)'"
     print --stderr ""
     print --stderr (usage)
     exit 2
@@ -1581,7 +1532,7 @@ def "main send" [
     bus-send $uid --run $run --payload $payload | to json | print
 }
 
-# Prints nothing when there is no mail, so `if (infinifu-worker wait --run r |
+# Prints nothing when there is no mail, so `if (pi-worker wait --run r |
 # is-empty)` works in a script. Silence is the answer, not an error.
 def "main wait" [--run: string] {
     let next = (bus-wait --run $run)

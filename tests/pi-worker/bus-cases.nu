@@ -10,7 +10,7 @@
 # another's mail.
 
 use harness.nu *
-use ../../claude/marketplace/plugins/infinifu/scripts/infinifu-worker.nu *
+use ../../claude/marketplace/plugins/pi-workers/scripts/pi-worker.nu *
 
 def sample-result-args []: nothing -> record {
     {
@@ -30,8 +30,8 @@ def sample-result-args []: nothing -> record {
 def put-result [run: string, uid: string, overrides: record = {}]: nothing -> record {
     if (bus-identity-of $uid --run $run) == null {
         bus-identity $uid --run $run --identity {
-            role: "impl", cwd: "/tmp/nowhere", branch: $"bd-($uid).0"
-            session: $"sid-($uid)", skill: "work-do", window: $"($uid)@dotfiles"
+            role: "impl", cwd: "/tmp/nowhere", branch: $"wk-($uid).0"
+            session: $"sid-($uid)", skill: "wk-build", window: $"($uid)@dotfiles"
         }
     }
     bus-result $uid --run $run --result ((sample-result-args) | merge $overrides)
@@ -40,7 +40,7 @@ def put-result [run: string, uid: string, overrides: record = {}]: nothing -> re
 # A stand-in for ~/.pi/agent/sessions: one directory per project slug, each
 # holding `<timestamp>_<uuid>.jsonl` transcripts.
 def fake-sessions [tag: string, layout: record]: nothing -> string {
-    let root = ([$nu.temp-dir $"infinifu-sessions-($tag)-(random chars --length 6)"] | path join)
+    let root = ([$nu.temp-dir $"pi-worker-sessions-($tag)-(random chars --length 6)"] | path join)
     rm -rf $root
     mkdir $root
     for slug in ($layout | columns) {
@@ -56,7 +56,7 @@ let cases = [
     (run-case "bus/send-then-worker-reads-its-own-inbox" {
         let root = (make-runtime "roundtrip")
         with-runtime $root {
-            bus-send "impl-a" --run "run-1" --payload {stage: "work-do", task: "dotfiles-963w.2"}
+            bus-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "dotfiles-963w.2"}
             let pending = (bus-inbox "impl-a" --run "run-1")
             assert-eq ($pending | length) 1 "the worker sees exactly its own message"
             assert-eq $pending.0.payload.task "dotfiles-963w.2" "payload survives the round trip"
@@ -68,7 +68,7 @@ let cases = [
     (run-case "bus/sequences-are-monotonic-per-worker" {
         let root = (make-runtime "seq")
         with-runtime $root {
-            for i in 1..4 { bus-send "impl-a" --run "run-1" --payload {stage: "work-do", task: $"t-($i)"} }
+            for i in 1..4 { bus-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: $"t-($i)"} }
             let seqs = (bus-inbox "impl-a" --run "run-1" | get sequence)
             assert-eq $seqs [1 2 3 4] "sequences increase by one and arrive in order"
         }
@@ -79,7 +79,7 @@ let cases = [
     (run-case "bus/runtime-directories-are-0700" {
         let root = (make-runtime "perm-dir")
         with-runtime $root {
-            bus-send "impl-a" --run "run-1" --payload {stage: "work-do", task: "t"}
+            bus-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "t"}
             for dir in [(bus-root) (bus-root | path join "run-1") (bus-root | path join "run-1" "impl-a")] {
                 assert-eq (dir-mode-of $dir) "rwx------" $"($dir) must not be readable by other users"
             }
@@ -90,7 +90,7 @@ let cases = [
     (run-case "bus/envelope-files-are-0600" {
         let root = (make-runtime "perm-file")
         with-runtime $root {
-            bus-send "impl-a" --run "run-1" --payload {stage: "work-do", task: "t"}
+            bus-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "t"}
             put-result "run-1" "impl-a"
             let files = (glob ((bus-root) + "/run-1/impl-a/**/*.json"))
             assert-true (($files | length) >= 2) "both an inbox and an outbox envelope exist"
@@ -234,7 +234,7 @@ let cases = [
         let root = (make-runtime "race")
         with-runtime $root {
             let script = ([$root "writer.nu"] | path join)
-            $"use (worker-script $env.FILE_PWD) *\nlet n = \$env.WRITER_N\nfor i in 1..10 { bus-send \"impl-a\" --run \"run-1\" --payload {stage: \"work-do\", task: \$\"t-\(\$n)-\(\$i)\"} }" | save -f $script
+            $"use (worker-script $env.FILE_PWD) *\nlet n = \$env.WRITER_N\nfor i in 1..10 { bus-send \"impl-a\" --run \"run-1\" --payload {stage: \"wk-build\", task: \$\"t-\(\$n)-\(\$i)\"} }" | save -f $script
 
             let procs = ([1 2 3] | par-each {|n|
                 with-env {XDG_RUNTIME_DIR: $root, WRITER_N: ($n | into string)} {
@@ -256,8 +256,8 @@ let cases = [
         let root = (make-runtime "malformed-write")
         with-runtime $root {
             assert-rejects {
-                bus-send "impl-a" --run "run-1" --payload {stage: "work-do", task: "t", design: "copied prose"}
-            } "work-do" "a payload violating the protocol never reaches the runtime dir"
+                bus-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "t", design: "copied prose"}
+            } "wk-build" "a payload violating the protocol never reaches the runtime dir"
             let written = (glob ((bus-root) + "/**/*.json"))
             assert-eq $written [] "nothing was written"
         }
@@ -299,7 +299,7 @@ let cases = [
         with-runtime $root {
             # Let the bus create its own tree — a plain mkdir here would apply
             # the umask and the case would be judging its own 0755 directory.
-            bus-send "impl-a" --run "run-1" --payload {stage: "work-do", task: "t"}
+            bus-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "t"}
             # /proc is root-owned and always present; standing in for a planted tree.
             assert-rejects { bus-assert-owned "/proc" } "owner" "a directory owned by another user is refused"
             bus-assert-owned (bus-root)
@@ -310,7 +310,7 @@ let cases = [
     (run-case "bus/rejects-a-loosened-runtime-directory" {
         let root = (make-runtime "loose")
         with-runtime $root {
-            bus-send "impl-a" --run "run-1" --payload {stage: "work-do", task: "t"}
+            bus-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "t"}
             chmod 755 (bus-root)
             assert-rejects { bus-assert-owned (bus-root) } "0700" "a group- or world-readable bus directory is refused"
         }
@@ -346,7 +346,7 @@ let cases = [
     (run-case "bus/status-reports-a-worker-without-consuming-its-mail" {
         let root = (make-runtime "status")
         with-runtime $root {
-            bus-send "impl-a" --run "run-1" --payload {stage: "work-do", task: "t"}
+            bus-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "t"}
             put-result "run-1" "impl-a" {status: "blocked", validation: null, summary: "needs a decision"}
 
             let s = (bus-status "impl-a" --run "run-1")
@@ -380,8 +380,8 @@ let cases = [
         let root = (make-runtime "settled-state")
         with-runtime $root {
             bus-identity "impl-a" --run "r1" --identity {
-                role: "impl", cwd: "/tmp/nowhere", branch: "bd-t1.0"
-                session: "sid-1", skill: "work-do", window: "impl-a@dotfiles"
+                role: "impl", cwd: "/tmp/nowhere", branch: "wk-t1.0"
+                session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
             }
             bus-settled "impl-a" --run "r1"
 
@@ -404,8 +404,8 @@ let cases = [
         let root = (make-runtime "settled-none")
         with-runtime $root {
             bus-identity "impl-a" --run "r1" --identity {
-                role: "impl", cwd: "/tmp/nowhere", branch: "bd-t1.0"
-                session: "sid-1", skill: "work-do", window: "impl-a@dotfiles"
+                role: "impl", cwd: "/tmp/nowhere", branch: "wk-t1.0"
+                session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
             }
 
             let written = (bus-settled "impl-a" --run "r1")
@@ -420,7 +420,7 @@ let cases = [
             assert-eq $payload.code "protocol_error" "with the protocol_error code"
             assert-true ($payload.detail | str contains "never inferred") "carrying the reason"
 
-            let file = (ls ($env.XDG_RUNTIME_DIR | path join "infinifu-worker" "r1" "impl-a" "outbox") | where name =~ '\.json$' | first | get name)
+            let file = (ls ($env.XDG_RUNTIME_DIR | path join "pi-worker" "r1" "impl-a" "outbox") | where name =~ '\.json$' | first | get name)
             assert-eq (open $file | get kind) "error" "it is an error envelope, not a result"
         }
         rm -rf $root
@@ -447,8 +447,8 @@ let cases = [
         let root = (make-runtime "settled-twice")
         with-runtime $root {
             bus-identity "impl-a" --run "r1" --identity {
-                role: "impl", cwd: "/tmp/nowhere", branch: "bd-t1.0"
-                session: "sid-1", skill: "work-do", window: "impl-a@dotfiles"
+                role: "impl", cwd: "/tmp/nowhere", branch: "wk-t1.0"
+                session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
             }
             bus-settled "impl-a" --run "r1"
             let second = (bus-settled "impl-a" --run "r1")
@@ -467,7 +467,7 @@ let cases = [
     # not. Pi binds a session to the directory it was created in and refuses to
     # start when that directory is gone:
     #
-    #   Stored session working directory does not exist: .../bd-t1.0
+    #   Stored session working directory does not exist: .../wk-t1.0
     #
     # Naming the session FILE instead of the id does not help — same refusal.
     # The transcript is not lost, but the documented command cannot reach it;
@@ -498,8 +498,8 @@ let cases = [
         let repo = (make-repo "resume-live")
         with-runtime $root {
             bus-identity "impl-a" --run "r1" --identity {
-                role: "impl", cwd: $repo, branch: "bd-t1.0"
-                session: "aaaa1111-2222-3333-4444-555566667777", skill: "work-do", window: "impl-a@dotfiles"
+                role: "impl", cwd: $repo, branch: "wk-t1.0"
+                session: "aaaa1111-2222-3333-4444-555566667777", skill: "wk-build", window: "impl-a@dotfiles"
             }
             let seen = (worker-inspect "impl-a" --run "r1")
             assert-eq $seen.resume "pi --session aaaa1111-2222-3333-4444-555566667777" "the ordinary case is unchanged"
@@ -516,8 +516,8 @@ let cases = [
         })
         with-runtime $root {
             bus-identity "impl-a" --run "r1" --identity {
-                role: "impl", cwd: "/nonexistent/bd-t1.0", branch: "bd-t1.0"
-                session: "aaaa1111-2222-3333-4444-555566667777", skill: "work-do", window: "impl-a@dotfiles"
+                role: "impl", cwd: "/nonexistent/wk-t1.0", branch: "wk-t1.0"
+                session: "aaaa1111-2222-3333-4444-555566667777", skill: "wk-build", window: "impl-a@dotfiles"
             }
             let seen = (worker-inspect "impl-a" --run "r1" --sessions-dir $sessions)
 
@@ -534,8 +534,8 @@ let cases = [
         let sessions = (fake-sessions "none" {})
         with-runtime $root {
             bus-identity "impl-a" --run "r1" --identity {
-                role: "impl", cwd: "/nonexistent/bd-t1.0", branch: "bd-t1.0"
-                session: "aaaa1111-2222-3333-4444-555566667777", skill: "work-do", window: "impl-a@dotfiles"
+                role: "impl", cwd: "/nonexistent/wk-t1.0", branch: "wk-t1.0"
+                session: "aaaa1111-2222-3333-4444-555566667777", skill: "wk-build", window: "impl-a@dotfiles"
             }
             let seen = (worker-inspect "impl-a" --run "r1" --sessions-dir $sessions)
             assert-eq $seen.transcript null "no transcript found"

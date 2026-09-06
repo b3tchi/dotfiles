@@ -13,13 +13,13 @@
 # the bus, and a crashed worker still visible rather than silently gone.
 
 use harness.nu *
-use ../../claude/marketplace/plugins/infinifu/scripts/infinifu-worker.nu *
+use ../../claude/marketplace/plugins/pi-workers/scripts/pi-worker.nu *
 
 # A private tmux server plus a stub `pi`. The stub is what makes the case
 # hermetic: a real Pi would need a model, a network, and minutes.
 def make-tmux [tag: string, pi_body: string]: nothing -> record {
-    let socket = $"infinifu-t4-($tag)-(random chars --length 6)"
-    let sandbox = ([$nu.temp-dir $"infinifu-t4-bin-($tag)-(random chars --length 6)"] | path join)
+    let socket = $"piw-t4-($tag)-(random chars --length 6)"
+    let sandbox = ([$nu.temp-dir $"piw-t4-bin-($tag)-(random chars --length 6)"] | path join)
     mkdir $sandbox
     $"#!/bin/bash\n($pi_body)\n" | save -f ($sandbox | path join "pi")
     chmod +x ($sandbox | path join "pi")
@@ -67,7 +67,7 @@ def windows-on [socket: string]: nothing -> list<string> {
 def spawn-worker [
     t: record
     repo: string
-    --skill: string = "work-do"
+    --skill: string = "wk-build"
     --task: string = "t1"
     --socket: string = ""
     --session: string = "sid-1"
@@ -89,7 +89,7 @@ let cases = [
         let t = (make-tmux "spawn" "sleep 30")
         with-runtime $root {
             with-env {PATH: ([$t.bin] ++ $env.PATH)} {
-                let got = (spawn-worker $t $repo --task "t1" --session "sid-1" --skill "work-do" --socket $t.socket)
+                let got = (spawn-worker $t $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
                 assert-eq $got.window "impl-t1@dotfiles" ""
                 assert-true ($got.window in (windows-on $t.socket)) "the window is really there"
                 # The seed window is untouched: spawn adds, it does not take over.
@@ -105,10 +105,10 @@ let cases = [
         let t = (make-tmux "cwd" "sleep 30")
         with-runtime $root {
             with-env {PATH: ([$t.bin] ++ $env.PATH)} {
-                let got = (spawn-worker $t $repo --task "t1" --session "sid-1" --skill "work-do" --socket $t.socket)
-                assert-eq ($got.cwd | path basename) "bd-t1.0" "the worker starts in its own worktree"
+                let got = (spawn-worker $t $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+                assert-eq ($got.cwd | path basename) "wk-t1.0" "the worker starts in its own worktree"
                 assert-true ($got.cwd | path exists) ""
-                worktree-validate --repo $repo --path $got.cwd --branch "bd-t1.0"
+                worktree-validate --repo $repo --path $got.cwd --branch "wk-t1.0"
             }
         }
         drop-tmux $t; rm -rf $root; rm -rf $repo
@@ -120,12 +120,12 @@ let cases = [
         let t = (make-tmux "ident" "sleep 30")
         with-runtime $root {
             with-env {PATH: ([$t.bin] ++ $env.PATH)} {
-                spawn-worker $t $repo --task "t1" --session "sid-42" --skill "work-do"
+                spawn-worker $t $repo --task "t1" --session "sid-42" --skill "wk-build"
 
                 let identity = (bus-identity-of "impl-a" --run "run-1")
                 assert-eq $identity.session "sid-42" "the resume handle is recorded before anything can fail"
                 assert-eq $identity.window "impl-t1@dotfiles" ""
-                assert-eq $identity.skill "work-do" ""
+                assert-eq $identity.skill "wk-build" ""
                 assert-eq $identity.role "impl" ""
             }
         }
@@ -137,11 +137,11 @@ let cases = [
         # it has to actually reach the process, not just the identity record.
         let repo = (make-repo "sid")
         let root = (make-runtime "sid")
-        let marker = ([$nu.temp-dir $"infinifu-t4-argv-(random chars --length 6)"] | path join)
+        let marker = ([$nu.temp-dir $"piw-t4-argv-(random chars --length 6)"] | path join)
         let t = (make-tmux "sid" $"echo \"$@\" > ($marker); sleep 30")
         with-runtime $root {
             with-env {PATH: ([$t.bin] ++ $env.PATH)} {
-                spawn-worker $t $repo --task "t1" --session "sid-77" --skill "work-do"
+                spawn-worker $t $repo --task "t1" --session "sid-77" --skill "wk-build"
                 sleep 400ms
                 let argv = (open --raw $marker)
                 assert-true ($argv | str contains "--session") "pi is invoked with a session flag"
@@ -154,10 +154,10 @@ let cases = [
     (run-case "spawn/an-akm-stage-spawns-in-the-main-worktree-without-a-bd-task" {
         # AKM stages carry an artifact id, not a ticket.
         #
-        # This case used to assert the branch was `bd-t1.0` and the cwd an
+        # This case used to assert the branch was `wk-t1.0` and the cwd an
         # isolated worktree. That was the bug (dotfiles-ptba), not the contract:
         # akm-root refuses to serve any worktree but the main one, so a worker
-        # placed in `bd-t1.0` could not read or write the AKM it was spawned to
+        # placed in `wk-t1.0` could not read or write the AKM it was spawned to
         # edit, and the guard's own advice sent it back to the main worktree
         # anyway — abandoning the isolation silently. Placement now matches what
         # akm-root asserts.
@@ -166,7 +166,7 @@ let cases = [
         let t = (make-tmux "akm" "sleep 30")
         with-runtime $root {
             with-env {PATH: ([$t.bin] ++ $env.PATH)} {
-                let got = (spawn-worker $t $repo --task "" --skill "spec-refinement" --session "sid-akm")
+                let got = (spawn-worker $t $repo --task "" --skill "doc-plan" --session "sid-akm")
                 assert-eq $got.window "impl-t1@dotfiles" ""
                 assert-eq $got.cwd $repo "an AKM stage runs where AKM can be read and written"
                 assert-eq $got.branch "main" "on the default branch, where AKM lives"
@@ -182,14 +182,14 @@ let cases = [
         # a bootstrap message that would have nowhere to land.
         let repo = (make-repo "env")
         let root = (make-runtime "env")
-        let marker = ([$nu.temp-dir $"infinifu-t4-env-(random chars --length 6)"] | path join)
-        let t = (make-tmux "env" $"env | grep INFINIFU_ > ($marker); sleep 30")
+        let marker = ([$nu.temp-dir $"piw-t4-env-(random chars --length 6)"] | path join)
+        let t = (make-tmux "env" $"env | grep PI_WORKER_ > ($marker); sleep 30")
         with-runtime $root {
             with-env {PATH: ([$t.bin] ++ $env.PATH)} {
-                spawn-worker $t $repo --task "t1" --session "sid-env" --skill "work-do"
+                spawn-worker $t $repo --task "t1" --session "sid-env" --skill "wk-build"
                 sleep 500ms
                 let seen = (open --raw $marker)
-                for pair in ["INFINIFU_RUN=run-1" "INFINIFU_UID=impl-a" "INFINIFU_ROLE=impl" "INFINIFU_SESSION=sid-env" "INFINIFU_SKILL=work-do" "INFINIFU_WINDOW=impl-t1@dotfiles" "INFINIFU_BRANCH=bd-t1.0"] {
+                for pair in ["PI_WORKER_RUN=run-1" "PI_WORKER_UID=impl-a" "PI_WORKER_ROLE=impl" "PI_WORKER_SESSION=sid-env" "PI_WORKER_SKILL=wk-build" "PI_WORKER_WINDOW=impl-t1@dotfiles" "PI_WORKER_BRANCH=wk-t1.0"] {
                     assert-true ($seen | str contains $pair) $"the worker window carries ($pair)"
                 }
             }
@@ -207,7 +207,7 @@ let cases = [
         let t = (make-tmux "crash" "echo 'pi failed to start' >&2; exit 3")
         with-runtime $root {
             with-env {PATH: ([$t.bin] ++ $env.PATH)} {
-                let got = (spawn-worker $t $repo --task "t1" --session "sid-1" --skill "work-do" --socket $t.socket)
+                let got = (spawn-worker $t $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
                 sleep 400ms
                 assert-true ($got.window in (windows-on $t.socket)) "the dead worker's window is still inspectable"
                 assert-eq (bus-identity-of "impl-a" --run "run-1" | get session) "sid-1" "and its identity survives"
@@ -224,7 +224,7 @@ let cases = [
         let t = (make-tmux "live" "sleep 30")
         with-runtime $root {
             with-env {PATH: ([$t.bin] ++ $env.PATH)} {
-                let got = (spawn-worker $t $repo --task "t1" --session "sid-1" --skill "work-do" --socket $t.socket)
+                let got = (spawn-worker $t $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
                 assert-eq $got.live true "a running worker reports live"
 
                 ^tmux -L $t.socket kill-window -t $got.window
@@ -250,7 +250,7 @@ let cases = [
         with-runtime $root {
             with-env {PATH: ([$t.bin] ++ $env.PATH)} {
                 assert-rejects {
-                    worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-o" --skill "work-do" --socket $t.socket
+                    worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-o" --skill "wk-build" --socket $t.socket
                 } "window" "the window failure is reported"
 
                 let identity = (bus-identity-of "impl-a" --run "run-1")
@@ -268,10 +268,10 @@ let cases = [
         # behind claiming to exist.
         let repo = (make-repo "notmux")
         let root = (make-runtime "notmux")
-        let t = {socket: "infinifu-t4-does-not-exist", bin: ""}
+        let t = {socket: "piw-t4-does-not-exist", bin: ""}
         with-runtime $root {
             assert-rejects {
-                spawn-worker $t $repo --task "t1" --session "sid-1" --skill "work-do"
+                spawn-worker $t $repo --task "t1" --session "sid-1" --skill "wk-build"
             } "tmux" "an unreachable tmux server is named in the failure"
         }
         rm -rf $root; rm -rf $repo
@@ -301,8 +301,8 @@ let cases = [
         with-runtime $root {
             with-env {PATH: ([$t.bin] ++ $env.PATH)} {
                 assert-rejects {
-                    spawn-worker $t $repo --task "" --session "sid-1" --skill "work-do"
-                } "task" "a work stage without a bd task id has no contract to read"
+                    spawn-worker $t $repo --task "" --session "sid-1" --skill "wk-build"
+                } "ticket" "a ticket-payload stage without an id has no contract to read"
             }
         }
         drop-tmux $t; rm -rf $root; rm -rf $repo

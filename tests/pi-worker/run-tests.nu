@@ -27,7 +27,6 @@ const SUITES = [
     ["worktree",   "worktree-cases.nu"]
     ["pi-bridge",  "pi-bridge-cases.nu"]
     ["pipeline",   "pipeline-cases.nu"]
-    ["completion", "completion-cases.nu"]
     ["live-tmux",  "live-tmux-cases.nu"]
     ["install",    "install-cases.nu"]
     ["acceptance", "acceptance-cases.nu"]

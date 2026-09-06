@@ -10,7 +10,7 @@
 # Emits a JSON case list on stdout; run-tests.nu aggregates.
 
 use harness.nu *
-use ../../claude/marketplace/plugins/infinifu/scripts/infinifu-worker.nu *
+use ../../claude/marketplace/plugins/pi-workers/scripts/pi-worker.nu *
 
 # 1 KiB of filler, used to build oversized payloads without a literal blob.
 def filler [bytes: int]: nothing -> string {
@@ -33,7 +33,7 @@ let cases = [
         # ticket. Both payload shapes are legal; they are not interchangeable.
         validate-envelope (
             sample-envelope "inbox"
-            | update payload {stage: "spec-refinement", instructions: "refine the spec", artifacts: ["sp028"]}
+            | update payload {stage: "doc-plan", instructions: "refine the spec", artifacts: ["sp028"]}
         )
     })
 
@@ -73,7 +73,7 @@ let cases = [
         assert-rejects {
             validate-envelope (
                 sample-envelope "inbox"
-                | update payload {stage: "spec-refinement", instructions: (filler 70000), artifacts: []}
+                | update payload {stage: "doc-plan", instructions: (filler 70000), artifacts: []}
             )
         } "64 KiB" "envelope cap must be enforced and named"
     })
@@ -95,14 +95,14 @@ let cases = [
         assert-rejects {
             validate-envelope (
                 sample-envelope "inbox"
-                | update payload {stage: "work-do", task: "dotfiles-963w.1", design: "implement the thing"}
+                | update payload {stage: "wk-build", task: "dotfiles-963w.1", design: "implement the thing"}
             )
-        } "work-do" "a work payload carrying prose must be rejected"
+        } "wk-build" "a work payload carrying prose must be rejected"
     })
     (run-case "schema/rejects-work-payload-without-task" {
         assert-rejects {
-            validate-envelope (sample-envelope "inbox" | update payload {stage: "work-audit"})
-        } "task" "a work payload must carry its bd task id"
+            validate-envelope (sample-envelope "inbox" | update payload {stage: "wk-review"})
+        } "ticket" "a ticket payload must carry its id"
     })
     (run-case "schema/rejects-non-work-payload-carrying-a-task" {
         # The two shapes stay distinct (ft013). An AKM stage addressed with a
@@ -110,20 +110,13 @@ let cases = [
         assert-rejects {
             validate-envelope (
                 sample-envelope "inbox"
-                | update payload {stage: "spec-retro", task: "dotfiles-963w.1", instructions: "retro", artifacts: []}
+                | update payload {stage: "doc-retro", task: "dotfiles-963w.1", instructions: "retro", artifacts: []}
             )
-        } "spec-retro" "an AKM-stage payload must not carry a bd task id"
+        } "doc-retro" "an AKM-stage payload must not carry a bd task id"
     })
 
     # ------------------------------------------------- result payload contract
-    (run-case "schema/rejects-complete-without-validation-verdict" {
-        # ft013: a delegated stage may not report completion before its own
-        # required validation passes.
-        assert-rejects {
-            validate-envelope (sample-envelope "result" | update payload.validation null)
-        } "validation" "complete without a verdict must be rejected"
-    })
-    (run-case "schema/rejects-result-without-resume-command" {
+        (run-case "schema/rejects-result-without-resume-command" {
         assert-rejects {
             validate-envelope (sample-envelope "result" | reject payload.resume)
         } "resume" "a result must carry its exact resume command"

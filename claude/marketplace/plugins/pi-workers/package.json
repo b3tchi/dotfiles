@@ -1,0 +1,19 @@
+{
+  "name": "pi-workers",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Spawn Pi agents as visible tmux windows, watch their state, and message them over a file bus",
+  "pi": {
+    "extensions": [
+      "./extensions/pi.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  }
+}

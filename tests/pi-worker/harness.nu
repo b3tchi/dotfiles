@@ -13,6 +13,13 @@
 
 # ------------------------------------------------------------- assertions
 
+# Every suite runs against a fixture registry, never a real installation. The
+# names are deliberately not any consumer's: the bus treats them as opaque, and
+# a suite that spoke one framework's vocabulary would quietly re-couple them.
+export-env {
+    $env.PI_WORKER_STAGES = ($env.FILE_PWD | path join "stages.test.json")
+}
+
 export def assert-eq [actual, expected, msg: string = ""] {
     if $actual != $expected {
         error make {msg: $"expected ($expected | to nuon), got ($actual | to nuon). ($msg)"}
@@ -77,12 +84,12 @@ export def repo-root [caller_dir: string]: nothing -> string {
 
 export def worker-script [caller_dir: string]: nothing -> string {
     repo-root $caller_dir
-    | path join "claude" "marketplace" "plugins" "infinifu" "scripts" "infinifu-worker.nu"
+    | path join "claude" "marketplace" "plugins" "pi-workers" "scripts" "pi-worker.nu"
 }
 
 export def pi-extension [caller_dir: string]: nothing -> string {
     repo-root $caller_dir
-    | path join "claude" "marketplace" "plugins" "infinifu" "extensions" "pi.ts"
+    | path join "claude" "marketplace" "plugins" "pi-workers" "extensions" "pi.ts"
 }
 
 # ------------------------------------------------------------- envelopes
@@ -99,7 +106,7 @@ export def sample-envelope [kind: string]: nothing -> record {
         created: "2026-09-05T10:00:00Z"
     }
     let payload = match $kind {
-        "inbox" => {stage: "work-do", task: "dotfiles-963w.1"}
+        "inbox" => {stage: "wk-build", task: "dotfiles-963w.1"}
         "result" => {
             status: "complete"
             summary: "protocol module landed"
@@ -121,7 +128,7 @@ export def sample-envelope [kind: string]: nothing -> record {
 # no shared state between cases, and nothing written near the real runtime dir
 # of a live session.
 export def make-runtime [tag: string]: nothing -> string {
-    let root = ([$nu.temp-dir $"infinifu-worker-test-($tag)-(random chars --length 6)"] | path join)
+    let root = ([$nu.temp-dir $"pi-worker-test-($tag)-(random chars --length 6)"] | path join)
     rm -rf $root
     mkdir $root
     chmod 700 $root
@@ -153,7 +160,7 @@ export def dir-mode-of [path: string]: nothing -> string {
 # (locks, prunable registrations, branch-without-directory) that faking it would
 # test the fake.
 export def make-repo [tag: string]: nothing -> string {
-    let root = ([$nu.temp-dir $"infinifu-worker-repo-($tag)-(random chars --length 6)"] | path join)
+    let root = ([$nu.temp-dir $"pi-worker-repo-($tag)-(random chars --length 6)"] | path join)
     rm -rf $root
     mkdir $root
     ^git -C $root init -q -b main
