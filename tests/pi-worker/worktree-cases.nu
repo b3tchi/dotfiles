@@ -553,6 +553,43 @@ let cases = [
         rm -rf $root; rm -rf $repo
     })
 
+    (run-case "reclaim/never-sweeps-a-tree-a-live-process-is-sitting-in" {
+        # Observed live, and the reason this guard exists: two workers at
+        # `complete` had their directories swept out from under pi processes
+        # still running in them (pids 1790504 and 1927259, windows @271/@272).
+        # Bus state cannot answer "is anything alive in here" — a worker that
+        # has reported keeps its process until something kills its window — so
+        # the guard asks the operating system, and a process's cwd is evidence
+        # rather than an opinion.
+        #
+        # Deliberately immune to --force: that flag means "I know what is in
+        # these files", not "take the floor out from under a running process".
+        #
+        # The holder is the sweep's OWN process, which makes this the same case
+        # as an operator running `reclaim` from inside a worktree. A
+        # backgrounded sleep would be the obvious fixture and is not a reliable
+        # one: a detached child is reaped in some sandboxes, leaving a case that
+        # passes while the guard does nothing. Note that nushell `cd` moves
+        # $env.PWD and not this process's cwd — only a CHILD gets the new one,
+        # which is exactly what running the CLI here buys.
+        let repo = (make-repo "gc-inuse")
+        let root = (make-runtime "gc-inuse")
+        let here = $env.PWD
+        with-runtime $root {
+            let one = (worktree-allocate --repo $repo --task "t1")
+            cd $one.path
+            let out = (^$nu.current-exe (worker-script $env.FILE_PWD) reclaim --repo $repo --force | complete)
+            cd $here
+            assert-eq $out.exit_code 0 $"reclaim failed: ($out.stderr)"
+            let got = ($out.stdout | from json)
+            assert-eq ($got.removed | length) 0 "a directory in use is not swept, --force or not"
+            assert-true ($one.path | path exists) ""
+            assert-true (($got.kept | first | get reason) | str contains "in use") "and the report names it as in use"
+        }
+        cd $here
+        rm -rf $root; rm -rf $repo
+    })
+
     (run-case "reclaim/keeps-a-dirty-tree-and-says-why" {
         let repo = (make-repo "gc-dirty")
         let root = (make-runtime "gc-dirty")

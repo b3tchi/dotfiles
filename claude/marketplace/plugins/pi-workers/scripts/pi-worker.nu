@@ -1165,6 +1165,7 @@ def bus-claims []: nothing -> list<record> {
                     state: (bus-status $uid --run $run | get state)
                     cwd: (expand-path $identity.cwd)
                     branch: $identity.branch
+                    window: (window-target $identity)
                 }]
             }
         } | flatten
@@ -1187,6 +1188,61 @@ def bus-claims []: nothing -> list<record> {
 # `stop` or `result` does on its own.
 const WORKING_STATES = ["created" "running" "waiting_human" "blocked"]
 
+# Every directory a live process is currently sitting in.
+#
+# The bus says what a worker REPORTED; this says what is actually running, and
+# the two disagree in the case that cost real work: a worker at `complete` has
+# reported and been forgotten, but its pi process keeps running until something
+# kills its window. Sweeping its tree deleted the directory out from under a
+# live process (observed: pids 1790504 and 1927259 in wk-timestamp-md.0 and .1).
+#
+# /proc is Linux-only. Elsewhere this returns nothing and the bus and dirty
+# guards carry the sweep on their own — a missing probe must not read as
+# "nothing is running", so the caller is told which guards it got.
+def cwds-in-use []: nothing -> list<string> {
+    if not ("/proc" | path exists) { return [] }
+    ls /proc
+    | get name
+    | where {|d| ($d | path basename) =~ '^[0-9]+$' }
+    | each {|d|
+        # A pid that exits mid-scan, or one owned by another user, answers with
+        # an error rather than a path. Neither is a finding.
+        let link = (do { ^readlink ($d | path join "cwd") } | complete)
+        if $link.exit_code == 0 { [($link.stdout | str trim)] } else { [] }
+    }
+    | flatten
+    | uniq
+}
+
+# Every worker window tmux is holding open for a process that has exited.
+#
+# `spawn` sets `remain-on-exit on` deliberately: a crashed worker's error stays
+# on screen instead of vanishing with its pane. Nothing ever reaps those, so
+# they accumulate — 23 dead worker windows were listed in this repo's session
+# group, one round of smoke tests' worth. A sweep is the moment to take them:
+# the process is gone, and the only thing lost is text nobody is reading any
+# more.
+#
+# Returns {dead, live} window ids. tmux being unreachable is neither, and the
+# caller reports it rather than treating silence as "no windows".
+def worker-window-corpses [windows: list<string>, socket: string]: nothing -> record {
+    if ($windows | is-empty) { return {dead: [], live: [], reachable: true} }
+    let listed = (do { ^tmux ...(tmux-args $socket) list-windows -a -F "#{window_id}\t#{pane_dead}" } | complete)
+    if $listed.exit_code != 0 { return {dead: [], live: [], reachable: false} }
+    let rows = (
+        $listed.stdout
+        | lines
+        | each {|l| $l | split row "\t" }
+        | where {|p| ($p | length) >= 2 }
+        | each {|p| {id: ($p | first | str trim), dead: (($p | get 1 | str trim) == "1")} }
+    )
+    {
+        dead: ($rows | where {|r| $r.dead and $r.id in $windows } | get id)
+        live: ($rows | where {|r| (not $r.dead) and $r.id in $windows } | get id)
+        reachable: true
+    }
+}
+
 # Reclaim every worker worktree in a project that no live worker owns.
 #
 # `worker-stop` leaves the tree and the branch behind deliberately: they may
@@ -1202,20 +1258,23 @@ const WORKING_STATES = ["created" "running" "waiting_human" "blocked"]
 #
 #   live      a worker with work in flight owns it — created, running,
 #             waiting_human or blocked
+#   in use    some process is sitting in the directory, whatever the bus says
 #   locked    someone held it deliberately
 #   dirty     uncommitted work, which nothing here licenses deleting
 #   unmerged  commits the base does not have (the DIRECTORY still goes; a
 #             worktree is re-creatable from a branch, commits are not
 #             re-creatable from anything)
 #
-# `--force` overrides dirty and unmerged and nothing else. A live worker's tree
-# is never swept, whatever the flag says: the flag means "I know what is in
-# these files", which is not a claim anyone can make about a running agent.
+# `--force` overrides dirty and unmerged and nothing else. A tree that a live
+# worker owns or that a process is sitting in is never swept, whatever the flag
+# says: the flag means "I know what is in these files", which is not a claim
+# anyone can make about a running process.
 export def worktrees-reclaim [
     --repo: string
     # The branch a commit must be in to count as merged. Defaults to whatever
     # the main worktree is on, which is the branch work lands in.
     --base: string = ""
+    --socket: string = ""
     --force
     --dry-run
 ]: nothing -> record {
@@ -1227,6 +1286,7 @@ export def worktrees-reclaim [
     let trees_dir = (worktrees-dir $repo)
     let claims = (bus-claims)
     let held = ($claims | where state in $WORKING_STATES)
+    let in_use = (cwds-in-use)
 
     # Only ours: under .worktrees/, on a `wk-` branch, and not the main tree. A
     # worktree a person made for their own reasons is not a sweep's business.
@@ -1250,6 +1310,13 @@ export def worktrees-reclaim [
         if ($owner | is-not-empty) {
             let o = ($owner | first)
             $kept = ($kept | append {path: $path, branch: $w.branch, reason: $"($o.run)/($o.uid) is ($o.state)"})
+            continue
+        }
+        # Anything running IN the tree, not just AT its root: a shell that has
+        # cd'd into a subdirectory is using the tree just as much.
+        let users = ($in_use | where {|c| $c == $path or ($c | str starts-with $"($path)/") })
+        if ($users | is-not-empty) {
+            $kept = ($kept | append {path: $path, branch: $w.branch, reason: $"in use: a process is running in ($users | first)"})
             continue
         }
         if $w.locked {
@@ -1309,6 +1376,31 @@ export def worktrees-reclaim [
 
     if not $dry_run { do { ^git -C $repo worktree prune } | complete | ignore }
 
+    # Windows are swept for THIS repo's workers only, by window id from their
+    # identity envelopes. Matching on the name instead would reach into another
+    # project's session group, where a same-named window is somebody else's.
+    let ours = ($claims | where {|c| $c.cwd == $repo or ($c.cwd | str starts-with $"($repo)/") })
+    let corpses = (worker-window-corpses ($ours | get window | where {|w| $w | str starts-with "@" }) $socket)
+    mut windows_killed = []
+    mut windows_kept = []
+    for id in $corpses.dead {
+        if not $dry_run {
+            let out = (do { ^tmux ...(tmux-args $socket) kill-window -t $id } | complete)
+            if $out.exit_code != 0 {
+                $windows_kept = ($windows_kept | append {window: $id, reason: ($out.stderr | str trim)})
+                continue
+            }
+        }
+        $windows_killed = ($windows_killed | append $id)
+    }
+    # A live window is named rather than silently skipped: after a tree has
+    # been swept, a still-running worker in it is exactly what an operator
+    # needs to know about.
+    for id in $corpses.live {
+        let owner = ($ours | where window == $id | first)
+        $windows_kept = ($windows_kept | append {window: $id, reason: $"($owner.run)/($owner.uid) is still running"})
+    }
+
     {
         repo: $repo
         base: $base
@@ -1317,6 +1409,9 @@ export def worktrees-reclaim [
         kept: $kept
         branches_deleted: $branches_deleted
         branches_kept: $branches_kept
+        windows_killed: $windows_killed
+        windows_kept: $windows_kept
+        tmux_reachable: $corpses.reachable
     }
 }
 
@@ -2417,9 +2512,10 @@ def usage []: nothing -> string {
         "  resume   <uid> --run --feedback      send back to the ORIGINAL session"
         "  accept   <uid> --run --repo          close the window, remove the worktree"
         "  stop     <uid> --run                 close the window, KEEP the worktree"
-        "  reclaim  --repo [--base] [--force] [--dry-run]"
+        "  reclaim  --repo [--base] [--socket] [--force] [--dry-run]"
         "                                       sweep a PROJECT: every worker tree no"
-        "                                       live worker owns. Session ids survive"
+        "                                       live worker owns, plus the dead worker"
+        "                                       windows tmux still lists. Session ids survive"
         "  doctor                               check dependencies"
         ""
         "NOTES"
@@ -2695,8 +2791,9 @@ def "main stop" [uid: string, --run: string, --socket: string = ""] {
     worker-stop $uid --run $run --socket $socket | to json | print
 }
 
-def "main reclaim" [--repo: string, --base: string = "", --force, --dry-run] {
-    worktrees-reclaim --repo $repo --base $base --force=$force --dry-run=$dry_run | to json | print
+def "main reclaim" [--repo: string, --base: string = "", --socket: string = "", --force, --dry-run] {
+    (worktrees-reclaim --repo $repo --base $base --socket $socket
+        --force=$force --dry-run=$dry_run) | to json | print
 }
 
 # Report on each dependency SEPARATELY. A single "something is missing" tells

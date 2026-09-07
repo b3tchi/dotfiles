@@ -271,6 +271,57 @@ let cases = [
         }
     })
 
+    # ------------------------------------------------------- the corpse sweep
+    #
+    # `remain-on-exit on` is deliberate: a worker that died at startup keeps
+    # its window so the error stays readable. Nothing ever reaps those, so they
+    # pile up — 23 dead worker windows were listed in this repo's session group
+    # after one round of smoke tests, which is the leftover an operator sees
+    # long before they notice the disk.
+
+    (run-case "live/reclaim-reaps-a-dead-worker-window" {
+        with-server "gc-dead" --stub (dies-with 3) {|t, repo|
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            wait-for-dead $t.socket $w.window_id
+
+            let got = (worktrees-reclaim --repo $repo --socket $t.socket)
+            assert-true $got.tmux_reachable "tmux answered"
+            assert-eq $got.windows_killed [$w.window_id] "the corpse is reaped"
+            let windows = (^tmux -L $t.socket list-windows -a -F "#{window_id}" | lines)
+            assert-true (not ($w.window_id in $windows)) "and it is gone from the window list"
+            let names = (^tmux -L $t.socket list-windows -a -F "#{window_name}" | lines)
+            assert-true ("main" in $names) "the seed window is untouched"
+        }
+    })
+
+    (run-case "live/reclaim-leaves-a-running-workers-window-and-names-it" {
+        # The other half of the observed incident: after the trees were swept,
+        # two pi processes were still running and nothing said so. A sweep that
+        # kills a live worker's window destroys work; one that says nothing
+        # about it leaves an operator with orphans they cannot see.
+        with-server "gc-alive" {|t, repo|
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+
+            let got = (worktrees-reclaim --repo $repo --socket $t.socket)
+            assert-eq $got.windows_killed [] "a live window is never reaped"
+            assert-true ($w.window_id in (^tmux -L $t.socket list-windows -a -F "#{window_id}" | lines)) ""
+            assert-eq ($got.windows_kept | first | get reason) "run-1/impl-a is still running" "and the report names who is in it"
+        }
+    })
+
+    (run-case "live/a-sweep-with-no-tmux-says-so-rather-than-reporting-no-windows" {
+        # Absence of evidence is not evidence of absence (adr0017). A sweep run
+        # where tmux cannot be reached must not report an empty window list as
+        # though it had looked.
+        with-server "gc-notmux" {|t, repo|
+            worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket
+
+            let got = (worktrees-reclaim --repo $repo --socket $"($t.socket)-nowhere")
+            assert-eq $got.tmux_reachable false "the report says the probe could not be made"
+            assert-eq $got.windows_killed [] "and nothing was reaped on a guess"
+        }
+    })
+
     # ------------------------------------------------------------- liveness
     #
     # dotfiles-yii5: `worker-live?` matched on the window NAME alone. spawn
