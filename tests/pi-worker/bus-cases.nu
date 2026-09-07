@@ -559,6 +559,7 @@ let cases = [
                     role: "impl", cwd: $nu.temp-dir, branch: "wk-t.0"
                     session: $"sid-($pair | get 1)", skill: "wk-build"
                     window: $"impl-($pair | get 1)@dotfiles"
+                    window_id: $"@($pair | get 1)"
                 }
             }
             let roster = (worker-roster)
@@ -568,6 +569,17 @@ let cases = [
             let one = ($roster | where uid == "c" | first)
             assert-eq $one.run "r2" ""
             assert-eq $one.window "impl-c@dotfiles" "where to look for it"
+            # The frame wears this as a suffix on the address — `r2/c@c` — so a
+            # row carries one name instead of two, and the operator can still
+            # `select-window -t` what it names.
+            assert-eq $one.window_id "@c" "the window id to jump to"
+            # Absent, not invented, for an identity written before the id was
+            # recorded: the frame renders a bare address for those.
+            bus-identity "old" --run "r3" --identity {
+                role: "impl", cwd: $nu.temp-dir, branch: "wk-t.0"
+                session: "sid-old", skill: "wk-build", window: "impl-old@dotfiles"
+            }
+            assert-eq ((worker-roster --run "r3") | first | get window_id) "" "no id recorded, no id reported"
             assert-eq $one.resume "pi --session sid-c" "how to get into its transcript"
             assert-true ("liveness" in ($one | columns)) "and whether it is actually running"
 

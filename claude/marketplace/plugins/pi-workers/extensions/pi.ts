@@ -841,6 +841,19 @@ export interface RosterRow {
   state: string;
   liveness: string;
   window: string;
+  /**
+   * The tmux window id (`@7`), worn as a suffix on the address.
+   *
+   * The row used to carry the window NAME as its own cell, so a worker had two
+   * names on screen — `r32/impl-1` and `impl-timestamp-md@dotfiles` — and the
+   * redundant one was the widest cell on the row. The id is not a second
+   * identifier: it is where this one is on screen, and it is what
+   * `tmux select-window -t` takes. The name is still on `pi-worker ps`, which
+   * is the lookup table.
+   *
+   * "" for an identity written before the id was recorded.
+   */
+  window_id?: string;
   /** When the worker was spawned, from its identity envelope. "" if unknown. */
   started?: string;
   /**
@@ -1112,7 +1125,7 @@ export function rosterFrame(
     return opts.holdEmpty === true ? [heading] : undefined;
   }
 
-  const addr = rows.map((r) => `${r.run}/${r.uid}`);
+  const addr = rows.map((r) => `${r.run}/${r.uid}${r.window_id ?? ""}`);
   const label = rows.map((r) => stateLabel(r.state));
   // A column is carried only when it says something the state does not. A row
   // reading `created  8s  live` is one fact and two restatements of it, and
@@ -1124,8 +1137,6 @@ export function rosterFrame(
   });
   const live = rows.map((r) => (UNREMARKABLE_LIVENESS.includes(r.liveness) ? "" : r.liveness));
   const doing = rows.map((r) => r.doing ?? "");
-  const anyDoing = doing.some((d) => d.length > 0);
-  const windowWidth = Math.max(...rows.map((r) => r.window.length));
   // Padded to a common width so the columns read down the frame rather than
   // drifting with the length of each run id.
   const addrWidth = Math.max(...addr.map((a) => a.length));
@@ -1146,10 +1157,9 @@ export function rosterFrame(
   // it is both the longest and the least structured thing on the row. Every
   // other cell is an identifier or a state and means nothing cut in half.
   const fixedWidth =
-    addrWidth + 2 + stateWidth + 2 +
+    addrWidth + 2 + stateWidth +
     (ageWidth > 0 ? ageWidth + 2 : 0) +
-    (liveWidth > 0 ? liveWidth + 2 : 0) +
-    (anyDoing ? windowWidth : Math.max(...rows.map((r) => r.window.length)));
+    (liveWidth > 0 ? liveWidth + 2 : 0);
   const doingBudget =
     opts.width === undefined || !Number.isFinite(opts.width)
       ? Number.POSITIVE_INFINITY
@@ -1162,25 +1172,32 @@ export function rosterFrame(
     return `${d.slice(0, doingBudget - 1)}…`;
   });
 
-  const lines = rows.map((r, i) =>
-    [
-      addr[i].padEnd(addrWidth),
-      // Padded BEFORE painting. A tone is escape codes, and every width here —
-      // this padding and wrapToWidth's — counts bytes, so a painted cell
-      // measured as text would push the rest of the row out of column.
-      paint(stateTone(r.state), label[i].padEnd(stateWidth)),
+  const lines = rows.map((r, i) => {
+    const cells: { text: string; width: number; tone?: Tone }[] = [
+      { text: addr[i], width: addrWidth },
+      { text: label[i], width: stateWidth, tone: stateTone(r.state) },
       // An empty column would still cost two spaces, so a CLI too old to
       // report `started` keeps precisely the layout it had.
-      ...(ageWidth > 0 ? [age[i].padEnd(ageWidth)] : []),
-      ...(liveWidth > 0 ? [live[i].padEnd(liveWidth)] : []),
-      // Padded only when something follows it. The window was the last cell
-      // until now, and padding a trailing cell just puts spaces at the end of
-      // every line.
-      anyDoing ? r.window.padEnd(windowWidth) : r.window,
-      // Last, and unpadded for the same reason.
-      ...(fitted[i].length > 0 ? [paint("muted", fitted[i])] : []),
-    ].join("  "),
-  );
+      ...(ageWidth > 0 ? [{ text: age[i], width: ageWidth }] : []),
+      ...(liveWidth > 0 ? [{ text: live[i], width: liveWidth }] : []),
+      ...(fitted[i].length > 0 ? [{ text: fitted[i], width: fitted[i].length, tone: "muted" as Tone }] : []),
+    ];
+    // A trailing cell is neither padded nor kept when it is empty: padding one
+    // just puts spaces at the end of every line, and an empty one puts two
+    // there. Every cell BEFORE the last is padded even when empty, because
+    // that is what holds the column for the rows that filled it.
+    while (cells.length > 0 && cells[cells.length - 1].text.length === 0) cells.pop();
+    const last = cells.length - 1;
+    return cells
+      .map((c, j) => {
+        // Padded BEFORE painting. A tone is escape codes, and every width here
+        // — this padding and fitToWidth's — counts bytes, so a painted cell
+        // measured as text would push the rest of the row out of column.
+        const text = j === last ? c.text : c.text.padEnd(c.width);
+        return c.tone === undefined ? text : paint(c.tone, text);
+      })
+      .join("  ");
+  });
   return [heading, ...lines];
 }
 

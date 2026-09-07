@@ -1840,6 +1840,12 @@ export def worker-roster [--run: string = "", --socket: string = ""]: nothing ->
                     state: $state
                     liveness: (if ($target | is-empty) { "unknown" } else { worker-liveness $target --socket $socket | get verdict })
                     window: $window
+                    # The frame wears this as a suffix on the address —
+                    # `r32/impl-1@7` — so a row carries ONE name for a worker
+                    # rather than the address and the window name side by side.
+                    # Empty for an identity written before the id was recorded;
+                    # the row then reads as the bare address.
+                    window_id: (if $identity == null { "" } else { $identity | get -o window_id | default "" })
                     # When the worker was spawned. Empty rather than a
                     # substitute when no identity was ever written: a made-up
                     # start time would read as an idle worker.

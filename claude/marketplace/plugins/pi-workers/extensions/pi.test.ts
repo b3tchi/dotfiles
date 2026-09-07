@@ -889,8 +889,8 @@ describe("initiator tool", () => {
 
 describe("roster frame", () => {
   const rows = [
-    { run: "x2", uid: "w1", role: "rev", state: "running", liveness: "live", window: "rev-demo@dotfiles" },
-    { run: "x2", uid: "w2", role: "impl", state: "blocked", liveness: "exited", window: "impl-t4@dotfiles" },
+    { run: "x2", uid: "w1", role: "rev", state: "running", liveness: "live", window: "rev-demo@dotfiles", window_id: "@7" },
+    { run: "x2", uid: "w2", role: "impl", state: "blocked", liveness: "exited", window: "impl-t4@dotfiles", window_id: "@11" },
   ];
 
   test("one line per worker, aligned so the columns can be read down", () => {
@@ -901,7 +901,29 @@ describe("roster frame", () => {
     // The run/uid column is padded to a common width, so uid `w1` and `w2`
     // line up rather than drifting with the length of the run id.
     expect(first.indexOf("running")).toBe(second.indexOf("blocked"));
-    expect(first).toContain("rev-demo@dotfiles");
+    expect(first).toContain("x2/w1@7");
+  });
+
+  test("one name per worker: the bus address, wearing its tmux window id", () => {
+    // A row used to carry `x2/w1` AND `rev-demo@dotfiles` — two names for one
+    // worker, the redundant one the widest cell on the row. The address is
+    // what every verb takes; the window id is what `select-window -t` takes.
+    // Suffixed rather than columned, because `@7` is not a second identifier,
+    // it is where this one is on screen.
+    const frame = rosterFrame(rows);
+    expect(frame[1]).toContain("x2/w1@7");
+    expect(frame[2]).toContain("x2/w2@11");
+    expect(frame.join("\n")).not.toContain("rev-demo@dotfiles");
+    expect(frame.join("\n")).not.toContain("impl-t4@dotfiles");
+  });
+
+  test("a worker whose window id was never recorded keeps the bare address", () => {
+    // An identity written by an older CLI has a window NAME and no id. An
+    // address is not padded out with a guessed `@?`: the row says what is
+    // known and nothing more.
+    const frame = rosterFrame([{ ...rows[0], window_id: "" }]);
+    expect(frame[1]).toContain("x2/w1 ");
+    expect(frame[1]).not.toContain("@");
   });
 
   test("a worker whose state and liveness disagree is what the frame is for", () => {
@@ -981,27 +1003,32 @@ describe("roster frame", () => {
     expect(frame[1]).toContain("1m");
     expect(frame[2]).not.toContain("0s");
     // The blank is padded, so the column after it still lines up. Compared on
-    // the window cell, which both rows have — the liveness column here holds
-    // `live` on one row and `exited` on the other, and `live` is dropped.
-    // Compared on where each window cell STARTS. `indexOf("@dotfiles")` would
-    // drift with the length of the window name, not the column.
-    expect(frame[1].indexOf("rev-demo@dotfiles")).toBe(frame[2].indexOf("impl-t4@dotfiles"));
+    // the activity cell, which both rows are given here — the liveness column
+    // holds `live` on one row and `exited` on the other, and `live` is
+    // dropped, so it is not a column both rows share.
+    const aligned = rosterFrame(
+      [
+        { ...rows[0], started, doing: "bash: a" },
+        { ...rows[1], started: "", doing: "bash: b" },
+      ],
+      { now },
+    );
+    expect(aligned[1].indexOf("bash: a")).toBe(aligned[2].indexOf("bash: b"));
   });
 
   test("a young age and a live worker carry no column at all", () => {
     // The row the operator actually asked for:
-    //     r1/impl-1  warming-up  impl-tsfile0707@dotfiles
+    //     r1/impl-1@7  warming-up
     // `8s` and `live` beside a working state are one fact and two
     // restatements of it.
     const started = "2026-09-07T12:00:00.000000Z";
     const frame = rosterFrame(
-      [{ run: "r1", uid: "impl-1", role: "impl", state: "created", liveness: "live", window: "impl-tsfile0707@dotfiles", started }],
+      [{ run: "r1", uid: "impl-1", role: "impl", state: "created", liveness: "live", window: "impl-tsfile0707@dotfiles", window_id: "@7", started }],
       { now: Date.parse(started) + 8_000 },
     );
     expect(frame[1].split(/\s+/).filter(Boolean)).toEqual([
-      "r1/impl-1",
+      "r1/impl-1@7",
       "warming-up",
-      "impl-tsfile0707@dotfiles",
     ]);
   });
 
@@ -1046,10 +1073,10 @@ describe("roster frame", () => {
     const frame = rosterFrame(rows, { paint });
     expect(frame[1]).toContain("<accent>running</accent>");
     expect(frame[2]).toContain("<warning>blocked</warning>");
-    // The window cell carries no markup. (Liveness is `live` on both rows
+    // The address cell carries no markup. (Liveness is `live` on both rows
     // here, so it has no column to check — see the column-rule tests above.)
-    expect(frame[1]).toContain("rev-demo@dotfiles");
-    expect(frame[1]).not.toContain("<accent>rev-demo");
+    expect(frame[1]).toContain("x2/w1@7");
+    expect(frame[1]).not.toContain("<accent>x2/w1");
   });
 
   test("colour does not move the columns", () => {
@@ -2177,7 +2204,7 @@ describe("what a worker is doing", () => {
   // column is the only one that moves while a worker is thinking.
   const base = {
     run: "r29", uid: "impl-1", role: "impl", state: "created",
-    liveness: "live", window: "impl-timestamp-md@dotfiles",
+    liveness: "live", window: "impl-timestamp-md@dotfiles", window_id: "@31",
   };
 
   test("it rides the end of the row, where it can be read", () => {
@@ -2186,11 +2213,11 @@ describe("what a worker is doing", () => {
     expect(frame[1].trimEnd().endsWith("bash: git status --short")).toBe(true);
   });
 
-  test("the window is padded only when something follows it", () => {
+  test("the address is padded only when something follows it", () => {
     // Padding a trailing cell just puts spaces at the end of every line.
     const withDoing = rosterFrame([
       { ...base, doing: "bash: x" },
-      { ...base, uid: "rev-1", window: "rev@dotfiles", doing: "write: y" },
+      { ...base, uid: "rev-1", window: "rev@dotfiles", window_id: "@9", doing: "write: y" },
     ], { now: Date.now() });
     // Both activity cells start at the same column.
     expect(withDoing[1].indexOf("bash: x")).toBe(withDoing[2].indexOf("write: y"));
@@ -2202,7 +2229,7 @@ describe("what a worker is doing", () => {
   test("no activity means no cell, not an empty one", () => {
     const frame = rosterFrame([base], { now: Date.now() });
     expect(frame[1].trimEnd()).toBe(frame[1]);
-    expect(frame[1]).toContain("impl-timestamp-md@dotfiles");
+    expect(frame[1]).toContain("r29/impl-1@31");
   });
 });
 
@@ -2216,7 +2243,7 @@ describe("the frame fits rather than wraps", () => {
   const paint = (_tone: string, text: string) => `\u001b[90m${text}\u001b[39m`;
   const row = {
     run: "r31", uid: "worker-1", role: "impl", state: "created",
-    liveness: "live", window: "worker-timestamp-md@dotfiles",
+    liveness: "live", window: "worker-timestamp-md@dotfiles", window_id: "@42",
     doing: "bash: tmpdir=$(mktemp -d /tmp/timestamp-md.XXXXXX)",
   };
 
@@ -2255,8 +2282,8 @@ describe("the frame fits rather than wraps", () => {
   test("with no room to say anything, the activity cell is dropped", () => {
     // An ellipsis stub is worse than nothing: it costs the same columns and
     // carries none of the answer.
-    const narrow = rosterFrame([row], { now: Date.now(), width: 60 })!;
+    const narrow = rosterFrame([row], { now: Date.now(), width: 24 })!;
     expect(narrow[1]).not.toContain("bash");
-    expect(narrow[1]).toContain("worker-timestamp-md@dotfiles");
+    expect(narrow[1]).toContain("r31/worker-1@42");
   });
 });
