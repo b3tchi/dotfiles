@@ -743,6 +743,7 @@ export const INITIATOR_VERBS = [
   "ack",
   "status",
   "inspect",
+  "timeline",
   "workers",
   "liveness",
   "resume",
@@ -757,6 +758,7 @@ const UID_IS_POSITIONAL: readonly string[] = [
   "send",
   "status",
   "inspect",
+  "timeline",
   "liveness",
   "resume",
   "accept",
@@ -798,6 +800,7 @@ const VERB_FLAGS: Record<string, readonly string[]> = {
   ack: ["run", "uid", "sequence"],
   status: ["run"],
   inspect: ["run"],
+  timeline: ["run"],
   workers: ["run"],
   liveness: ["run", "socket"],
   resume: ["run", "feedback", "socket"],
@@ -1396,7 +1399,7 @@ const FRAME_COVERED_VERBS: readonly string[] = [
 ];
 
 /** The two verbs whose whole purpose is detail, so they collapse rather than hide. */
-const DETAIL_VERBS: readonly string[] = ["inspect", "status"];
+const DETAIL_VERBS: readonly string[] = ["inspect", "status", "timeline"];
 
 /**
  * One line standing in for a whole `inspect` or `status` body.
@@ -1425,6 +1428,18 @@ export function collapsedStateLine(detail: string): string {
   if (parsed === null || typeof parsed !== "object") {
     const first = raw.split("\n")[0] ?? "";
     return first.length > 0 ? `${first} · ${hint}` : `(no output) · ${hint}`;
+  }
+
+  // A list, not a record: `timeline` answers with a series of events. Falling
+  // through to the record branch below would find no `run` or `state` and
+  // collapse the whole history to `[`.
+  if (Array.isArray(parsed)) {
+    if (parsed.length === 0) return `no events recorded · ${hint}`;
+    const last = parsed[parsed.length - 1] as Record<string, unknown>;
+    const span = last["+s"];
+    const latest = typeof last.event === "string" ? last.event : "";
+    const over = typeof span === "number" ? ` over ${span}s` : "";
+    return `${parsed.length} events${over}, latest: ${latest} · ${hint}`;
   }
 
   const o = parsed as Record<string, unknown>;
@@ -1924,6 +1939,7 @@ export default function piWorker(pi: ExtensionAPI): void {
         label: "Worker bus",
         description:
           "Drive Pi workers: `ps` lists every worker, whether it is alive and which tmux window to look at. Also: spawn one as a visible tmux window, check its liveness, send it a message, `wait` for its typed result (pass uid to wait on that worker rather than the whole run), resume it with feedback, then accept or stop it. " +
+"`timeline` shows what happened to one worker and when, with the gap between each step — reach for it when a worker took longer than expected and you want to know where the time went. " +
           "To learn that a worker finished, call `wait` with block true — it returns the moment a result lands. A worker's tmux window is there for a PERSON to look at: never read it, capture it, or treat anything in it as a completion signal, and never generate ids for spawn — omit run, uid and session and they are minted for you. " +
           "An address is claimed once: to reuse a run/uid after stopping or accepting it, call `rm` with that run and uid — that is the normal way to recycle one, and it refuses while the worker is still unfinished, so it is safe to try. Verbs: " +
           INITIATOR_VERBS.join(", ") +
