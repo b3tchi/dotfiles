@@ -37,6 +37,7 @@ import {
   createInitiatorTool,
   rosterFrame,
   collapsedStateLine,
+  EMPTY_GRACE_MS,
   AGE_WORTH_SHOWING_MS,
   activityLine,
   ACTIVITY_TTL_MS,
@@ -1984,5 +1985,79 @@ describe("the frame shows this session's runs, not the whole box", () => {
     await frame.refresh();
     frame.stop();
     expect(drawn().join("\n")).toContain("r5/x1");
+  });
+});
+
+describe("the frame appears once and stays until the work is done", () => {
+  // It used to strobe. `note` marks a call in flight and mounts; the call
+  // returns and clears the activity; and for the moment before the next `ps`
+  // lists the worker it just created, the roster is empty — so the widget was
+  // torn down and rebuilt, once per verb, each rebuild a fresh component for
+  // Pi to lay out. The operator saw the bar blink several times per spawn.
+
+  const harness = (rows: unknown[]) => {
+    let clock = 1_000_000;
+    const events: string[] = [];
+    const frame = startRosterFrame({
+      exec: (async () => ({ code: 0, stdout: JSON.stringify(rows), stderr: "" })) as never,
+      setWidget: (_key, content) => {
+        events.push(content === undefined ? "unmount" : "mount");
+        if (typeof content === "function") {
+          (content as (t: unknown, th: unknown) => unknown)({ requestRender: () => {} }, {});
+        }
+      },
+      intervalMs: 1_000_000,
+      now: () => clock,
+    });
+    return { frame, events, advance: (ms: number) => { clock += ms; } };
+  };
+
+  test("a verb that clears its activity does not tear the frame down", async () => {
+    const { frame, events, advance } = harness([]);
+    await frame.refresh();
+
+    frame.note({ verb: "spawn", at: 1_000_000 });
+    expect(events).toEqual(["mount"]);
+
+    // The call succeeds; its activity clears; `ps` has not caught up yet.
+    advance(200);
+    frame.note({ verb: "spawn", ok: true, at: 1_000_200 });
+    await frame.refresh();
+
+    // No unmount. This is the whole bug.
+    expect(events).toEqual(["mount"]);
+    frame.stop();
+  });
+
+  test("several verbs in a row mount exactly once", async () => {
+    const { frame, events, advance } = harness([]);
+    await frame.refresh();
+    for (const verb of ["spawn", "send", "wait", "accept"]) {
+      frame.note({ verb, at: 1_000_000 });
+      advance(150);
+      frame.note({ verb, ok: true, at: 1_000_000 });
+      await frame.refresh();
+      advance(150);
+    }
+    expect(events).toEqual(["mount"]);
+    frame.stop();
+  });
+
+  test("but an idle frame does give its rows back eventually", async () => {
+    // Holding forever would leave an idle session staring at a widget with
+    // nothing to say.
+    const { frame, events, advance } = harness([]);
+    await frame.refresh();
+    frame.note({ verb: "spawn", at: 1_000_000 });
+    frame.note({ verb: "spawn", ok: true, at: 1_000_000 });
+
+    advance(EMPTY_GRACE_MS - 1);
+    await frame.refresh();
+    expect(events).toEqual(["mount"]);
+
+    advance(2);
+    await frame.refresh();
+    expect(events).toEqual(["mount", "unmount"]);
+    frame.stop();
   });
 });
