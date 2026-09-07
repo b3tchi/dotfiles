@@ -1840,14 +1840,19 @@ describe("frame activity", () => {
     expect(activityLine(undefined, 1000)).toBeUndefined();
   });
 
-  test("the activity line sits under the rows it concerns", () => {
+  test("the activity rides the heading, so every later line is one worker", () => {
+    // It used to be appended after the rows, which put a refusal underneath
+    // workers it was not about and meant the operator could not tell how many
+    // lines were agents without reading them. Line one is the frame's own
+    // state; lines two onward are exactly one worker each.
     const frame = rosterFrame(rows, {
       now: 1000,
       activity: { verb: "send", ok: false, detail: "stage 'build' takes a ticket payload", at: 1000 },
     });
-    expect(frame).toHaveLength(3); // heading, the worker, the refusal
+    expect(frame).toHaveLength(2); // the heading (carrying the refusal), and the worker
+    expect(frame[0]).toContain("1 worker");
+    expect(frame[0]).toContain("takes a ticket payload");
     expect(frame[1]).toContain("impl-1");
-    expect(frame[2]).toContain("takes a ticket payload");
   });
 
   test("with no workers yet the frame is one line, and says what it is", () => {
