@@ -363,7 +363,7 @@ export function userPayloadFor(envelope: Envelope): string {
  * typed it. Keeping them out of the user message is what makes the work
  * payload's "just the ticket id" rule meaningful.
  */
-export function systemContextFor(identity: WorkerIdentity): string {
+export function systemContextFor(identity: WorkerIdentity, isolation?: string): string {
   return [
     `You are a pi-worker.`,
     `role: ${identity.role}`,
@@ -372,6 +372,18 @@ export function systemContextFor(identity: WorkerIdentity): string {
     `branch: ${identity.branch}`,
     `session: ${identity.session}`,
     `window: ${identity.window}`,
+    // An isolated worker's tree is thrown away when its work is accepted, and
+    // the branch is what gets merged — so uncommitted work is not "nearly
+    // done", it is lost. The bus refuses a `complete` from a dirty worktree
+    // for that reason; being told here means not learning it from a refusal.
+    ...(isolation === "worktree"
+      ? [
+          `Your work lives on branch ${identity.branch} and nowhere else. COMMIT it`,
+          `before you report complete: this worktree is deleted when the work is`,
+          `accepted, and an uncommitted branch merges as a no-op, so an uncommitted`,
+          `complete loses everything you did. A complete from a dirty tree is refused.`,
+        ]
+      : []),
     `Report your outcome by calling the result tool. Finishing your turn without`,
     `calling it is recorded as a protocol error, not a success.`,
   ].join("\n");
@@ -396,8 +408,8 @@ export function systemContextFor(identity: WorkerIdentity): string {
  * One line per bullet, and the text comes from systemContextFor rather than
  * being restated, so there is one source for the contract.
  */
-export function workerPromptGuidelines(identity: WorkerIdentity): string[] {
-  return systemContextFor(identity).split("\n");
+export function workerPromptGuidelines(identity: WorkerIdentity, isolation?: string): string[] {
+  return systemContextFor(identity, isolation).split("\n");
 }
 
 export interface WorkerIdentity {
@@ -1952,7 +1964,17 @@ export default function piWorker(pi: ExtensionAPI): void {
           // The briefing that was built and never delivered. In the system
           // prompt rather than only in this description, because a worker has
           // to know it must report BEFORE it decides it has finished.
-          promptGuidelines: workerPromptGuidelines(identity),
+          // The stage's isolation decides whether this worker owns a throwaway
+          // branch it has to commit to. Read defensively: a registry that
+          // cannot be loaded must cost the worker one paragraph of guidance,
+          // not its whole session.
+          promptGuidelines: workerPromptGuidelines(identity, (() => {
+            try {
+              return loadStages().find((s) => s.name === identity.skill)?.isolation;
+            } catch {
+              return undefined;
+            }
+          })()),
           parameters: RESULT_TOOL_PARAMETERS,
           execute: async (
             _id: string,

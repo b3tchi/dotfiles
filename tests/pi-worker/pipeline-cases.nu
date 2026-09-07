@@ -124,12 +124,41 @@ let cases = [
     (run-case "pipeline/accept-refuses-a-worker-with-uncommitted-work" {
         with-pipeline "dirty" {|t, repo|
             let impl = (launch $t $repo "impl-a" "impl")
-            "unsaved\n" | save -f ($impl.cwd | path join "notes.txt")
+            # Dirtied AFTER the report, because reporting `complete` from a
+            # dirty worktree is now refused at the report itself — in front of
+            # the worker, which can still fix it. This case is the guard BEHIND
+            # that one: a tree can go dirty after a clean completion, and
+            # acceptance must still not delete unsaved work.
             complete-with "impl-a" "implemented"
+            "unsaved\n" | save -f ($impl.cwd | path join "notes.txt")
             assert-rejects {
                 worker-accept "impl-a" --run "run-1" --repo $repo --socket $t.socket
             } "uncommitted" "acceptance does not license deleting unsaved work"
             assert-true ($impl.cwd | path exists) ""
+        }
+    })
+
+    (run-case "pipeline/complete-is-refused-while-the-worktree-is-dirty" {
+        # The refusal the operator hit at the wrong moment:
+        #
+        #     accept refused: refusing to clean up .../wk-timestamp-file.1: it
+        #     holds uncommitted work, which acceptance does not license deleting
+        #
+        # Right refusal, too late — the worker had already declared success and
+        # gone quiet, leaving a finished worker that cannot be accepted and a
+        # worktree that cannot be cleaned. Refused at the report instead, while
+        # the only party who can commit is still working.
+        with-pipeline "dirty-report" {|t, repo|
+            let impl = (launch $t $repo "impl-a" "impl")
+            "unsaved\n" | save -f ($impl.cwd | path join "notes.txt")
+            assert-rejects { complete-with "impl-a" "implemented" } "uncommitted" "a complete that would be deleted is refused"
+            # And the worker can still say it is stuck, which is the whole
+            # reason only `complete` is gated.
+            bus-result "impl-a" --run "run-1" --result {
+                status: "blocked", summary: "cannot commit", window: "w", session: "s"
+                resume: "pi --session s", validation: "n/a"
+            }
+            assert-eq (bus-status "impl-a" --run "run-1" | get state) "blocked" "blocked is not gated"
         }
     })
 
