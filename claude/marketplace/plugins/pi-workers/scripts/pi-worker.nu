@@ -1681,6 +1681,79 @@ export def pi-session-file [session: string, --sessions-dir: string = ""]: nothi
     if ($hits | is-empty) { null } else { $hits | first | str trim }
 }
 
+# What a worker is doing right now, as one short phrase.
+#
+# The bus only learns anything when a worker REPORTS, so `state` sits at
+# `created` for almost the whole of a worker's life — accurate, and useless as
+# an answer to "is it getting anywhere". The operator watching a row that says
+# `warming-up` for two minutes has no way to tell work from a wedge.
+#
+# The worker's activity IS observable without changing the protocol: Pi writes
+# its session as JSONL, and the identity already records which session. So this
+# reads the last tool call out of the worker's own transcript.
+#
+# The worker's OWN evidence about ITSELF, which is the kind adr0017 trusts —
+# and read-only observation, not coordination: nothing is written, and no
+# decision is taken on it. If it cannot be read or parsed, the answer is
+# nothing, and the row is exactly as informative as it was before.
+#
+# Only the tail is read. A long session's transcript grows without bound and
+# this runs once per worker per poll; the last call is always at the end.
+export def worker-activity [uid: string, --run: string, --sessions-dir: string = ""]: nothing -> string {
+    let identity = (bus-identity-of $uid --run $run)
+    if $identity == null { return "" }
+    let file = (pi-session-file ($identity | get -o session | default "") --sessions-dir $sessions_dir)
+    if $file == null { return "" }
+
+    let tail = (do { ^tail -c 65536 $file } | complete)
+    if $tail.exit_code != 0 { return "" }
+
+    let calls = (
+        $tail.stdout
+        | lines
+        | where {|l| ($l | str trim | str starts-with "{") }
+        | each {|l| try { $l | from json } catch { null } }
+        | where {|d| $d != null }
+        | each {|d|
+            # `describe` is NOT the test here. nu reports a homogeneous list of
+            # records as `table<...>`, not `list<...>`, so a check for "list"
+            # rejected every entry and this returned nothing at all. What
+            # matters is whether it can be filtered, so try it.
+            let content = ($d | get -o message.content | default [])
+            try {
+                $content | where {|c| ($c | get -o type | default "") == "toolCall" }
+            } catch { [] }
+        }
+        | flatten
+    )
+    if ($calls | is-empty) { return "" }
+
+    # The reporting call itself is dropped. It IS the last thing the worker
+    # did, and it is already the loudest thing on the row: the state column
+    # says `complete`, and the result's summary is one `inspect` away. Showing
+    # `pi_worker_result` beside `complete` is the same column-restates-the-state
+    # noise that the age and liveness columns were trimmed for.
+    let substantive = ($calls | where {|c| ($c | get -o name | default "") != "pi_worker_result" })
+    if ($substantive | is-empty) { return "" }
+    let last = ($substantive | last)
+    let name = ($last | get -o name | default "")
+    let args = ($last | get -o arguments | default {})
+    # The argument that says WHAT, per tool. A bare tool name answers half the
+    # question: `bash` and `bash: git status --short` are not the same news.
+    let hint = (
+        ["command" "path" "file_path" "pattern" "query" "url"]
+        | each {|k| $args | get -o $k | default "" }
+        | where {|v| ($v | describe) == "string" and ($v | is-not-empty) }
+        | get 0?
+        | default ""
+    )
+    let short = (if ($hint | is-empty) { "" } else {
+        let one = ($hint | str replace --all "\n" " " | str trim)
+        if ($one | str length) > 44 { $"($one | str substring 0..43)…" } else { $one }
+    })
+    if ($short | is-empty) { $name } else { $"($name): ($short)" }
+}
+
 # How to get back into a worker's conversation, answered for the world as it is
 # right now.
 #
@@ -1759,17 +1832,27 @@ export def worker-roster [--run: string = "", --socket: string = ""]: nothing ->
                 let identity = (if $envelope == null { null } else { $envelope.payload })
                 let window = (if $identity == null { "" } else { $identity.window })
                 let target = (if $identity == null { "" } else { window-target $identity })
+                let state = (bus-status $uid --run $r | get state)
                 {
                     run: $r
                     uid: $uid
                     role: (if $identity == null { "" } else { $identity.role })
-                    state: (bus-status $uid --run $r | get state)
+                    state: $state
                     liveness: (if ($target | is-empty) { "unknown" } else { worker-liveness $target --socket $socket | get verdict })
                     window: $window
                     # When the worker was spawned. Empty rather than a
                     # substitute when no identity was ever written: a made-up
                     # start time would read as an idle worker.
                     started: (if $envelope == null { "" } else { $envelope.created })
+                    # What it is doing, for workers that have not reported yet.
+                    #
+                    # Computed only for those, and deliberately: resolving a
+                    # session file runs `find` over ~/.pi/agent/sessions, and
+                    # this whole roster is rebuilt every five seconds by the
+                    # frame. A worker that has already reported has a state and
+                    # a summary saying more than its last tool call, so paying
+                    # for one would buy nothing.
+                    doing: (if $state in ["created" "running"] { worker-activity $uid --run $r } else { "" })
                     resume: (if $identity == null { "" } else { resume-hint $identity })
                 }
             }

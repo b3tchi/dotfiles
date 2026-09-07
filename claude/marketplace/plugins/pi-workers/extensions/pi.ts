@@ -843,6 +843,16 @@ export interface RosterRow {
   window: string;
   /** When the worker was spawned, from its identity envelope. "" if unknown. */
   started?: string;
+  /**
+   * The worker's last tool call, while it has not reported yet.
+   *
+   * `state` is a fact about the BUS — `created` means "has never reported" —
+   * so it sits unchanged for almost the whole of a worker's life, and an
+   * operator watching `warming-up` for two minutes cannot tell work from a
+   * wedge. This is read from the worker's own Pi transcript, and it is the
+   * only column that moves while a worker is thinking.
+   */
+  doing?: string;
 }
 
 /**
@@ -1102,6 +1112,9 @@ export function rosterFrame(
     return now - started >= AGE_WORTH_SHOWING_MS ? formatElapsed(r.started, now) : "";
   });
   const live = rows.map((r) => (UNREMARKABLE_LIVENESS.includes(r.liveness) ? "" : r.liveness));
+  const doing = rows.map((r) => r.doing ?? "");
+  const anyDoing = doing.some((d) => d.length > 0);
+  const windowWidth = Math.max(...rows.map((r) => r.window.length));
   // Padded to a common width so the columns read down the frame rather than
   // drifting with the length of each run id.
   const addrWidth = Math.max(...addr.map((a) => a.length));
@@ -1129,7 +1142,12 @@ export function rosterFrame(
       // report `started` keeps precisely the layout it had.
       ...(ageWidth > 0 ? [age[i].padEnd(ageWidth)] : []),
       ...(liveWidth > 0 ? [live[i].padEnd(liveWidth)] : []),
-      r.window,
+      // Padded only when something follows it. The window was the last cell
+      // until now, and padding a trailing cell just puts spaces at the end of
+      // every line.
+      anyDoing ? r.window.padEnd(windowWidth) : r.window,
+      // Last, and unpadded for the same reason.
+      ...(doing[i].length > 0 ? [paint("muted", doing[i])] : []),
     ].join("  "),
   );
   return [heading, ...lines];

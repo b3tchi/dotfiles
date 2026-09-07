@@ -2167,3 +2167,39 @@ describe("the frame appears once and stays until the work is done", () => {
     frame.stop();
   });
 });
+
+describe("what a worker is doing", () => {
+  // `state` is a fact about the BUS: `created` means "has never reported", so
+  // it sits unchanged for almost the whole of a worker's life. An operator
+  // watching `warming-up` for two minutes cannot tell work from a wedge. This
+  // column is the only one that moves while a worker is thinking.
+  const base = {
+    run: "r29", uid: "impl-1", role: "impl", state: "created",
+    liveness: "live", window: "impl-timestamp-md@dotfiles",
+  };
+
+  test("it rides the end of the row, where it can be read", () => {
+    const frame = rosterFrame([{ ...base, doing: "bash: git status --short" }], { now: Date.now() });
+    expect(frame[1]).toContain("bash: git status --short");
+    expect(frame[1].trimEnd().endsWith("bash: git status --short")).toBe(true);
+  });
+
+  test("the window is padded only when something follows it", () => {
+    // Padding a trailing cell just puts spaces at the end of every line.
+    const withDoing = rosterFrame([
+      { ...base, doing: "bash: x" },
+      { ...base, uid: "rev-1", window: "rev@dotfiles", doing: "write: y" },
+    ], { now: Date.now() });
+    // Both activity cells start at the same column.
+    expect(withDoing[1].indexOf("bash: x")).toBe(withDoing[2].indexOf("write: y"));
+
+    const without = rosterFrame([base], { now: Date.now() });
+    expect(without[1]).toBe(without[1].trimEnd());
+  });
+
+  test("no activity means no cell, not an empty one", () => {
+    const frame = rosterFrame([base], { now: Date.now() });
+    expect(frame[1].trimEnd()).toBe(frame[1]);
+    expect(frame[1]).toContain("impl-timestamp-md@dotfiles");
+  });
+});
