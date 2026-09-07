@@ -875,6 +875,59 @@ export def bus-ack [--run: string, --uid: string, --sequence: int] {
 # `state` is the status of its latest result. A worker with no evidence at all
 # reports `unknown` — an observation, not a persisted state, and per adr0017
 # never a licence to stop, accept, or delete anything.
+# The one place a worker's state is decided.
+#
+# Extracted from bus-status so the timeline can say what the state was after
+# each event without a second implementation of these rules. Two copies of a
+# precedence table is two answers to "what is this worker" the first time
+# someone edits one — and the whole reason the timeline is worth having is
+# that it agrees with the frame.
+#
+# Pure: takes the evidence, returns the verdict, touches no disk.
+#
+# `markers` is {accepted?: bool, stopped?: bool, waiting_human?: bool,
+# reopened?: string}; `results` is the outbox, oldest first.
+export def derive-state [results: list<record>, markers: record]: nothing -> string {
+    # Externally granted states win over anything the worker reported: a
+    # reviewer's acceptance or an operator's teardown is later, and more
+    # authoritative, than the worker's own last word about itself.
+    if ($markers | get -o accepted | default false) { return "accepted" }
+    if ($markers | get -o stopped | default false) { return "stopped" }
+    if ($markers | get -o waiting_human | default false) { return "waiting_human" }
+
+    let newest = (if ($results | is-empty) { 0 } else { $results | last | get sequence })
+    # `reopened` is the subtle one. A rejected worker's last envelope still
+    # says `complete` — that report was true when it was written — so the
+    # marker records WHICH result was sent back. While it covers the newest
+    # result, the worker is running again; once the worker reports afresh, the
+    # newer sequence outranks the marker and its real outcome shows through.
+    let reopened = ($markers | get -o reopened | default "")
+    if ($reopened | is-not-empty) and (($reopened | into int) >= $newest) { return "running" }
+
+    # Spawned and has never reported. `created` is the declared WORKER_STATE
+    # for exactly this: alive and has not said anything yet, which needs a
+    # different response from "reported once and was sent back to work".
+    if ($results | is-empty) { return "created" }
+
+    # Dispatch on KIND, not on a field. An outbox holds `result` envelopes
+    # (payload.status) and `error` envelopes (payload.code) — different shapes
+    # — so reading `payload.status` off whatever came last crashed with
+    # "column 'status' is missing" the first time a worker settled without
+    # reporting.
+    let latest = ($results | last)
+    if $latest.kind == "error" { $latest.payload.code } else { $latest.payload.status }
+}
+
+# The markers that bear on a worker's state, as derive-state wants them.
+def state-markers [run: string, uid: string]: nothing -> record {
+    {
+        accepted: (marker-path $run $uid "accepted" | path exists)
+        stopped: (marker-path $run $uid "stopped" | path exists)
+        waiting_human: (marker-path $run $uid "waiting_human" | path exists)
+        reopened: (marker-value $run $uid "reopened")
+    }
+}
+
 export def bus-status [uid: string, --run: string]: nothing -> record {
     let dir = (worker-dir $run $uid)
     if not ($dir | path exists) {
@@ -882,48 +935,8 @@ export def bus-status [uid: string, --run: string]: nothing -> record {
     }
     let results = (read-box ($dir | path join "outbox"))
     let unacked = ($results | where {|e| not (ack-path $run $uid $e.sequence | path exists) })
-    # Externally granted states win over anything the worker reported: a
-    # reviewer's acceptance or an operator's teardown is later, and more
-    # authoritative, than the worker's own last word about itself.
-    #
-    # `reopened` is the subtle one. A rejected worker's last envelope still
-    # says `complete` — that report was true when it was written — so the
-    # marker records WHICH result was sent back. While it covers the newest
-    # result, the worker is running again; once the worker reports afresh, the
-    # newer sequence outranks the marker and its real outcome shows through.
-    let reopened_after = (marker-value $run $uid "reopened")
-    let newest = (if ($results | is-empty) { 0 } else { $results | last | get sequence })
-    let state = if (marker-path $run $uid "accepted" | path exists) {
-        "accepted"
-    } else if (marker-path $run $uid "stopped" | path exists) {
-        "stopped"
-    } else if (marker-path $run $uid "waiting_human" | path exists) {
-        "waiting_human"
-    } else if (($reopened_after | is-not-empty) and (($reopened_after | into int) >= $newest)) {
-        "running"
-    } else if ($results | is-empty) {
-        # Spawned and has never reported. `created` is a declared WORKER_STATE
-        # that nothing derived — the same dead-vocabulary shape as
-        # `protocol_error` before dotfiles-87bt gave it a writer — and this is
-        # the case it describes.
-        #
-        # It used to report `running`, which collapsed "alive and has not said
-        # anything yet" into the same word as "reported once and was sent back
-        # to work". Those need different responses: the first is waited on, the
-        # second is chased. `created -> running` and `created -> stopped` are
-        # both already legal, so resume and stop are unaffected.
-        "created"
-    } else {
-        # Dispatch on KIND, not on a field. An outbox holds `result` envelopes
-        # (payload.status) and `error` envelopes (payload.code) — different
-        # shapes — so reading `payload.status` off whatever came last crashed
-        # with "column 'status' is missing" the first time a worker actually
-        # settled without reporting. `protocol_error` was already a declared
-        # WORKER_STATE; nothing had ever derived it, because dotfiles-87bt meant
-        # no error envelope was ever written.
-        let latest = ($results | last)
-        if $latest.kind == "error" { $latest.payload.code } else { $latest.payload.status }
-    }
+    # The precedence rules, and the reasoning for them, live with derive-state.
+    let state = (derive-state $results (state-markers $run $uid))
     {
         run: $run
         uid: $uid
@@ -1775,6 +1788,9 @@ export def worker-timeline [uid: string, --run: string]: nothing -> list<record>
         | each {|e|
             {
                 at: $e.item.created
+                class: "identity"
+                envelope: null
+                value: ""
                 event: (if $e.index == 0 { "spawned" } else { "identity" })
                 detail: (
                     if $e.index == 0 {
@@ -1797,7 +1813,7 @@ export def worker-timeline [uid: string, --run: string]: nothing -> list<record>
             } else {
                 $"($payload | get -o instructions | default '' | str length) chars of instructions"
             })
-            {at: $e.created, event: $"sent seq ($e.sequence)", detail: $"stage ($payload.stage) · ($what)"}
+            {at: $e.created, class: "inbox", envelope: null, value: "", event: $"sent seq ($e.sequence)", detail: $"stage ($payload.stage) · ($what)"}
         }
     )
 
@@ -1810,7 +1826,7 @@ export def worker-timeline [uid: string, --run: string]: nothing -> list<record>
             } else {
                 $"($payload | get -o status | default '?') — ($payload | get -o summary | default '')"
             })
-            {at: $e.created, event: $"reported seq ($e.sequence)", detail: $verdict}
+            {at: $e.created, class: "result", envelope: $e, value: "", event: $"reported seq ($e.sequence)", detail: $verdict}
         }
     )
 
@@ -1820,6 +1836,9 @@ export def worker-timeline [uid: string, --run: string]: nothing -> list<record>
         | each {|f|
             {
                 at: (open --raw $f | str trim)
+                class: "ack"
+                envelope: null
+                value: ""
                 event: $"acked seq ($f | path basename | str replace '.ack' '')"
                 detail: "receipt, not acceptance"
             }
@@ -1835,7 +1854,7 @@ export def worker-timeline [uid: string, --run: string]: nothing -> list<record>
             # it has no time of its own to sort by; the file's mtime is the
             # honest answer for it.
             let stamped = (if ($body =~ '^\d{4}-\d{2}-\d{2}T') { $body } else { ls $f | get 0.modified | format date "%Y-%m-%dT%H:%M:%S%.6fZ" })
-            {at: $stamped, event: $name, detail: (if $body == $stamped { "" } else { $"covers seq ($body)" })}
+            {at: $stamped, class: "marker", envelope: null, value: $body, event: $name, detail: (if $body == $stamped { "" } else { $"covers seq ($body)" })}
         }
     )
 
@@ -1843,14 +1862,39 @@ export def worker-timeline [uid: string, --run: string]: nothing -> list<record>
     if ($events | is-empty) { return [] }
 
     let first = ($events | first | get at | into datetime)
-    $events | each {|e|
+
+    # The state column is REPLAYED, not recorded: the evidence up to each event
+    # is handed to the same derive-state the frame asks. So the timeline cannot
+    # disagree with the row above it — and where it changes state is where the
+    # frame changed too, which is the whole point of putting them side by side.
+    #
+    # A `reopened` marker is the one event whose position in time is a guess
+    # (its body holds a sequence, not a stamp, so the file's mtime stands in),
+    # and it is also the one that can move state backwards to `running`. Worth
+    # knowing when reading a rejected worker's history.
+    $events
+    | reduce --fold {results: [], markers: {}, out: []} {|e, acc|
+        let results = (if $e.class == "result" { $acc.results | append $e.envelope } else { $acc.results })
+        let markers = (if $e.class == "marker" {
+            if $e.event == "reopened" {
+                $acc.markers | upsert reopened $e.value
+            } else {
+                $acc.markers | upsert $e.event true
+            }
+        } else { $acc.markers })
         {
-            at: $e.at
-            "+s": (((($e.at | into datetime) - $first) / 1sec | math round --precision 1))
-            event: $e.event
-            detail: $e.detail
+            results: $results
+            markers: $markers
+            out: ($acc.out | append {
+                at: $e.at
+                "+s": (((($e.at | into datetime) - $first) / 1sec | math round --precision 1))
+                event: $e.event
+                state: (derive-state $results $markers)
+                detail: $e.detail
+            })
         }
     }
+    | get out
 }
 
 # Let go of a finished worker's address.
@@ -2294,7 +2338,7 @@ def "main timeline" [uid: string, --run: string, --json] {
     } else if ($events | is-empty) {
         print $"no events recorded for ($run)/($uid)"
     } else {
-        $events | select "+s" event detail | print
+        $events | select "+s" event state detail | print
     }
 }
 def "main rm" [--run: string, --uid: string] {

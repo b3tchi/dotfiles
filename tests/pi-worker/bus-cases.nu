@@ -577,6 +577,59 @@ let cases = [
         rm -rf $root
     })
 
+    (run-case "bus/the-timeline-and-the-status-cannot-disagree" {
+        # The reason derive-state was extracted rather than reimplemented. The
+        # frame shows a worker's state; the timeline shows the state after each
+        # event. Two copies of the precedence table would be two answers to
+        # "what is this worker" the first time someone edited one, and the
+        # whole value of putting them side by side is that they agree.
+        #
+        # This walks a worker through the interesting transitions and asserts
+        # the invariant after each: the LAST state in the timeline is the state
+        # `status` reports.
+        let root = (make-runtime "timeline-agrees")
+        with-runtime $root {
+            bus-identity "w1" --run "r1" --identity {
+                role: "impl", cwd: $nu.temp-dir, branch: "wk-t.0"
+                # `doc-draft` from the fixture registry: an instructions stage
+                # in the main worktree, so neither the payload shape nor the
+                # commit gate is what this case is testing.
+                session: "s", skill: "doc-draft", window: "w1@dotfiles"
+            }
+            let agrees = {||
+                let tl = (worker-timeline "w1" --run "r1")
+                let last = (if ($tl | is-empty) { "none" } else { $tl | last | get state })
+                assert-eq $last (bus-status "w1" --run "r1" | get state) "timeline's last state is the status"
+            }
+
+            do $agrees   # created
+            bus-send "w1" --run "r1" --payload {stage: "doc-draft", instructions: "do the thing"}
+            do $agrees   # still created: being sent work is not reporting
+
+            bus-result "w1" --run "r1" --result {
+                status: "complete", summary: "did it", window: "w1@dotfiles"
+                session: "s", resume: "pi --session s", validation: "checked"
+            }
+            do $agrees   # complete
+
+            # Rejected and sent back: the newest result still says complete, so
+            # only the marker's precedence gets this right.
+            #
+            # The marker file is written directly because the only writer is
+            # inside worker-resume, which needs a live tmux server — and this
+            # case is about the derivation, not about tmux.
+            "1" | save -f (bus-root | path join "r1" "w1" "reopened.marker")
+            do $agrees   # running
+
+            bus-result "w1" --run "r1" --result {
+                status: "blocked", summary: "stuck", window: "w1@dotfiles"
+                session: "s", resume: "pi --session s", validation: "n/a"
+            }
+            do $agrees   # blocked: the newer sequence outranks the marker
+        }
+        rm -rf $root
+    })
+
     (run-case "bus/an-address-is-minted-when-none-is-given" {
         # An agent that must supply a uid and has no way to make one shells out
         # to `uuidgen`, which lands a bare 36-character id in the operator's
