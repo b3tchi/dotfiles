@@ -1080,6 +1080,17 @@ export function rosterFrame(
      * The caller decides, because only it knows whether a run is under way.
      */
     holdEmpty?: boolean;
+    /**
+     * The viewport width, so a row can be made to FIT rather than wrap.
+     *
+     * Without it the activity cell pushed rows past the edge and wrapToWidth
+     * split them, so one worker occupied two lines and the promise that every
+     * line after the heading is exactly one agent quietly stopped holding.
+     *
+     * Optional: callers that only want the text (tests, the CLI) pass nothing
+     * and get it untruncated.
+     */
+    width?: number;
   } = {},
 ): string[] | undefined {
   // The frame answers "what is running", so a finished worker has no business
@@ -1131,6 +1142,26 @@ export function rosterFrame(
   // the heading keeps the list a list.
   const count = `pi-workers · ${rows.length} worker${rows.length === 1 ? "" : "s"}`;
   const heading = activity === undefined ? count : `${count}  ${activity}`;
+  // The activity cell is budgeted last and truncated to what is left, because
+  // it is both the longest and the least structured thing on the row. Every
+  // other cell is an identifier or a state and means nothing cut in half.
+  const fixedWidth =
+    addrWidth + 2 + stateWidth + 2 +
+    (ageWidth > 0 ? ageWidth + 2 : 0) +
+    (liveWidth > 0 ? liveWidth + 2 : 0) +
+    (anyDoing ? windowWidth : Math.max(...rows.map((r) => r.window.length)));
+  const doingBudget =
+    opts.width === undefined || !Number.isFinite(opts.width)
+      ? Number.POSITIVE_INFINITY
+      : opts.width - fixedWidth - 2;
+  const fitted = doing.map((d) => {
+    if (d.length === 0 || d.length <= doingBudget) return d;
+    // Under about a dozen columns there is no room to say anything useful, so
+    // the cell is dropped rather than shown as an ellipsis.
+    if (doingBudget < 12) return "";
+    return `${d.slice(0, doingBudget - 1)}…`;
+  });
+
   const lines = rows.map((r, i) =>
     [
       addr[i].padEnd(addrWidth),
@@ -1147,7 +1178,7 @@ export function rosterFrame(
       // every line.
       anyDoing ? r.window.padEnd(windowWidth) : r.window,
       // Last, and unpadded for the same reason.
-      ...(doing[i].length > 0 ? [paint("muted", doing[i])] : []),
+      ...(fitted[i].length > 0 ? [paint("muted", fitted[i])] : []),
     ].join("  "),
   );
   return [heading, ...lines];
@@ -1257,8 +1288,11 @@ export function startRosterFrame(opts: {
             render: (width: number) => {
               try {
                 paint ??= themePaint(theme);
-                return wrapToWidth(
-                  rosterFrame(rows, { now: clock(), paint, activity, holdEmpty: holdEmpty() }) ?? [],
+                // fitToWidth, not wrapToWidth: a wrapped row would put one
+                // worker on two lines. The transcript still wraps, because
+                // there a cut error message loses the instruction.
+                return fitToWidth(
+                  rosterFrame(rows, { now: clock(), paint, activity, holdEmpty: holdEmpty(), width }) ?? [],
                   width,
                 );
               } catch {
@@ -1559,6 +1593,61 @@ export function transcriptLines(
   if (verb === "wait" && detail.startsWith("no unacknowledged")) return [];
 
   return detail.length > 0 ? [detail] : [];
+}
+
+/** SGR escape sequences, which occupy no columns. */
+const SGR_PATTERN = /\u001b\[[0-9;]*m/g;
+
+/** Columns a string actually occupies, ignoring colour. */
+export function visibleWidth(text: string): number {
+  return text.replace(SGR_PATTERN, "").length;
+}
+
+/**
+ * Truncate lines to the viewport width, counting columns rather than bytes.
+ *
+ * The frame must never wrap: every line after its heading is exactly one
+ * worker, and a wrapped row silently makes that untrue — one worker on two
+ * lines, which is what the operator saw.
+ *
+ * Counting COLUMNS is the other half, and it is why the row wrapped in the
+ * first place. wrapToWidth measures string length, so the escape codes in a
+ * painted cell count toward the width: a row of about a hundred visible
+ * columns with two coloured cells measures about a hundred and twenty and was
+ * split at a hundred and eighteen. It fitted, and was wrapped anyway.
+ *
+ * A cut is followed by a reset, because the cut may land inside a styled
+ * region and would otherwise leak that colour into the rest of the terminal.
+ */
+export function fitToWidth(lines: string[], width: number): string[] {
+  if (!Number.isFinite(width) || width <= 0) return lines;
+  return lines.map((line) => {
+    if (visibleWidth(line) <= width) return line;
+    let out = "";
+    let seen = 0;
+    // Walk the line, letting escapes through free and counting the rest.
+    const parts = line.split(/(\u001b\[[0-9;]*m)/g);
+    for (const part of parts) {
+      if (part.length === 0) continue;
+      if (SGR_PATTERN.test(part)) {
+        SGR_PATTERN.lastIndex = 0;
+        out += part;
+        continue;
+      }
+      SGR_PATTERN.lastIndex = 0;
+      const room = width - seen;
+      if (room <= 0) break;
+      if (part.length <= room) {
+        out += part;
+        seen += part.length;
+      } else {
+        out += part.slice(0, room);
+        seen = width;
+        break;
+      }
+    }
+    return `${out}\u001b[0m`;
+  });
 }
 
 /**

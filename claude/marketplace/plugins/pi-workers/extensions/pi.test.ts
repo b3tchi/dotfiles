@@ -49,6 +49,8 @@ import {
   resultComponent,
   callComponent,
   wrapToWidth,
+  fitToWidth,
+  visibleWidth,
   MAX_SUMMARY_BYTES,
 } from "./pi.ts";
 
@@ -2201,5 +2203,60 @@ describe("what a worker is doing", () => {
     const frame = rosterFrame([base], { now: Date.now() });
     expect(frame[1].trimEnd()).toBe(frame[1]);
     expect(frame[1]).toContain("impl-timestamp-md@dotfiles");
+  });
+});
+
+describe("the frame fits rather than wraps", () => {
+  // Observed live: a row of about a hundred visible columns wrapped at a
+  // hundred and eighteen, putting one worker on two lines and quietly ending
+  // the promise that every line after the heading is exactly one agent.
+  //
+  // It fitted. wrapToWidth measures string LENGTH, so the escape codes in two
+  // coloured cells counted toward the width — 110 columns measured as 130.
+  const paint = (_tone: string, text: string) => `\u001b[90m${text}\u001b[39m`;
+  const row = {
+    run: "r31", uid: "worker-1", role: "impl", state: "created",
+    liveness: "live", window: "worker-timestamp-md@dotfiles",
+    doing: "bash: tmpdir=$(mktemp -d /tmp/timestamp-md.XXXXXX)",
+  };
+
+  test("colour does not count toward the width", () => {
+    const painted = `\u001b[90mhello\u001b[39m`;
+    expect(visibleWidth(painted)).toBe(5);
+    expect(painted.length).toBeGreaterThan(5);
+    // And a line that fits in columns is left alone, however many bytes it is.
+    expect(fitToWidth([painted], 5)).toEqual([painted]);
+  });
+
+  test("a row too wide is cut, not wrapped", () => {
+    const wide = rosterFrame([row], { now: Date.now(), paint, width: 60 })!;
+    const fitted = fitToWidth(wide, 60);
+    expect(fitted).toHaveLength(2); // heading plus exactly one worker
+    for (const line of fitted) expect(visibleWidth(line)).toBeLessThanOrEqual(60);
+  });
+
+  test("one worker never becomes two lines, at any width", () => {
+    for (const width of [200, 118, 100, 80, 60, 40, 24]) {
+      const frame = rosterFrame([row], { now: Date.now(), paint, width })!;
+      const fitted = fitToWidth(frame, width);
+      expect(fitted.length).toBe(2);
+      for (const line of fitted) {
+        expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+      }
+    }
+  });
+
+  test("a cut is closed off, so colour cannot leak past it", () => {
+    const [cut] = fitToWidth([`\u001b[90m${"x".repeat(50)}\u001b[39m`], 10);
+    expect(visibleWidth(cut)).toBeLessThanOrEqual(10);
+    expect(cut.endsWith("\u001b[0m")).toBe(true);
+  });
+
+  test("with no room to say anything, the activity cell is dropped", () => {
+    // An ellipsis stub is worse than nothing: it costs the same columns and
+    // carries none of the answer.
+    const narrow = rosterFrame([row], { now: Date.now(), width: 60 })!;
+    expect(narrow[1]).not.toContain("bash");
+    expect(narrow[1]).toContain("worker-timestamp-md@dotfiles");
   });
 });
