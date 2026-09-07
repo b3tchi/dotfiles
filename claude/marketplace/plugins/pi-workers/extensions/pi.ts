@@ -924,7 +924,13 @@ export function startRosterFrame(opts: {
             render: (width: number) =>
               wrapToWidth(rosterFrame(rows, { now: clock(), paint }) ?? [], width),
             invalidate: () => {
-              // Nothing is cached; render reads the latest snapshot.
+              // The theme was captured when this factory ran, so a session
+              // that switches theme would keep painting the old palette
+              // forever. Pi calls invalidate on a from-scratch re-render,
+              // which is exactly when a fresh capture is available: drop the
+              // registration and let the next draw hand over a new factory.
+              mounted = false;
+              if (tui === (hostTui as FrameTui)) tui = undefined;
             },
             dispose: () => {
               // Only disown the handle we were given: a later mount may

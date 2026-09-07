@@ -1017,6 +1017,42 @@ describe("roster widget", () => {
     expect(renders).toBeGreaterThan(0);
   });
 
+  test("invalidate re-registers, so a theme switch is not painted stale", async () => {
+    // The factory captures the theme it was handed. Pi calls invalidate on a
+    // from-scratch re-render — a theme change among them — so treating it as a
+    // no-op leaves the frame in the old palette for the rest of the session.
+    const factories: ((tui: unknown, theme: unknown) => {
+      render: (width: number) => string[];
+      invalidate: () => void;
+    })[] = [];
+    const frame = startRosterFrame({
+      exec: psExec(psRows) as never,
+      setWidget: (_key, content) => {
+        if (typeof content === "function") {
+          factories.push(content as (typeof factories)[number]);
+        }
+      },
+      intervalMs: 1_000_000,
+    });
+
+    await frame.refresh();
+    expect(factories).toHaveLength(1);
+    const first = factories[0]({ requestRender: () => {} }, {
+      fg: (_t: string, text: string) => `[old]${text}`,
+    });
+    expect(first.render(200).join("\n")).toContain("[old]running");
+
+    first.invalidate();
+    await frame.refresh();
+    frame.stop();
+
+    expect(factories).toHaveLength(2);
+    const second = factories[1]({ requestRender: () => {} }, {
+      fg: (_t: string, text: string) => `[new]${text}`,
+    });
+    expect(second.render(200).join("\n")).toContain("[new]running");
+  });
+
   test("a host that refuses a factory still gets a frame, in the array form", async () => {
     // An older Pi whose setWidget only accepts lines. A colourless frame is
     // strictly better than no frame, and strictly better than an exception
