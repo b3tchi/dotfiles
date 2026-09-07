@@ -1207,42 +1207,39 @@ describe("roster widget", () => {
     expect(renders).toBeGreaterThan(0);
   });
 
-  test("invalidate re-registers, so a theme switch is not painted stale", async () => {
-    // The factory captures the theme it was handed. Pi calls invalidate on a
-    // from-scratch re-render — a theme change among them — so treating it as a
-    // no-op leaves the frame in the old palette for the rest of the session.
-    const factories: ((tui: unknown, theme: unknown) => {
-      render: (width: number) => string[];
-      invalidate: () => void;
-    })[] = [];
+  test("invalidate does NOT re-register, or the bar blinks all turn", async () => {
+    // This asserted the opposite until the bar was seen blinking through every
+    // turn. It was written to fix a theme switch leaving the frame on the old
+    // palette, and it read half of Pi's contract: invalidate is "called when
+    // theme changes OR when component needs to re-render from scratch", and
+    // that second clause fires constantly while output streams. A rare
+    // cosmetic problem had been traded for a permanent one.
+    const factories: unknown[] = [];
     const frame = startRosterFrame({
       exec: psExec(psRows) as never,
       setWidget: (_key, content) => {
-        if (typeof content === "function") {
-          factories.push(content as (typeof factories)[number]);
-        }
+        if (typeof content === "function") factories.push(content);
       },
       intervalMs: 1_000_000,
-      // These exercise mount and repaint mechanics, not scoping.
       allRuns: true,
     });
-
     await frame.refresh();
     expect(factories).toHaveLength(1);
-    const first = factories[0]({ requestRender: () => {} }, {
-      fg: (_t: string, text: string) => `[old]${text}`,
-    });
-    expect(first.render(200).join("\n")).toContain("[old]running");
 
-    first.invalidate();
+    const component = (factories[0] as (t: unknown, th: unknown) => {
+      render: (w: number) => string[];
+      invalidate: () => void;
+    })({ requestRender: () => {} }, {});
+
+    component.invalidate();
     await frame.refresh();
     frame.stop();
 
-    expect(factories).toHaveLength(2);
-    const second = factories[1]({ requestRender: () => {} }, {
-      fg: (_t: string, text: string) => `[new]${text}`,
-    });
-    expect(second.render(200).join("\n")).toContain("[new]running");
+    // Still one registration: the component was never dropped, so there was
+    // nothing to hand over again.
+    expect(factories).toHaveLength(1);
+    // And it still draws — nothing is cached for invalidate to clear.
+    expect(component.render(200).join("\n")).toContain("running");
   });
 
   test("a host that refuses a factory still gets a frame, in the array form", async () => {
