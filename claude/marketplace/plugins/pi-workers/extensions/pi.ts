@@ -867,18 +867,79 @@ export function formatElapsed(started: string | undefined, now: number): string 
 /** States meaning the worker is finished with; nothing is waiting on it. */
 const FINISHED_STATES: readonly string[] = ["stopped", "accepted"];
 
+/**
+ * What the extension is doing right now, as opposed to what the bus knows.
+ *
+ * The bus cannot supply this. A refused spawn leaves nothing behind to list,
+ * and a call still in flight has not written anything yet — so the setup
+ * chatter that used to scroll past as transcript text has no representation
+ * there. `createInitiatorTool` sees every call and its outcome, and this is
+ * where it says so.
+ */
+export interface FrameActivity {
+  verb: string;
+  /** undefined while the call is in flight. */
+  ok?: boolean;
+  /** The refusal, when there was one. */
+  detail?: string;
+  /** When it happened, for ageing a refusal out. */
+  at: number;
+}
+
+/**
+ * How long a refusal keeps its line.
+ *
+ * A refusal that blinks past on the next poll is worse than one printed
+ * inline, because the operator has no way to go back and read it. It stays
+ * until a later call succeeds, or until this elapses — long enough to read and
+ * short enough that yesterday's mistake is not still on screen.
+ */
+export const ACTIVITY_TTL_MS = 90_000;
+
+/**
+ * The activity line, or undefined when there is nothing to say.
+ *
+ * In flight is muted: it is a progress note, not news. A refusal is painted as
+ * one and carries its own text, because "spawn failed" without the reason is
+ * the same dead end as printing nothing. A success says nothing at all — the
+ * rows below are the success.
+ */
+export function activityLine(
+  activity: FrameActivity | undefined,
+  now: number,
+  paint: PaintFn = NO_PAINT,
+): string | undefined {
+  if (!activity) return undefined;
+  if (activity.ok === undefined) {
+    return paint("muted", `${activity.verb}…`);
+  }
+  if (activity.ok) return undefined;
+  if (now - activity.at > ACTIVITY_TTL_MS) return undefined;
+  const detail = (activity.detail ?? "").trim();
+  const text = detail.length > 0 ? `${activity.verb} refused: ${detail}` : `${activity.verb} refused`;
+  return paint("error", text);
+}
+
 export function rosterFrame(
   all: RosterRow[],
-  opts: { now?: number; paint?: PaintFn } = {},
+  opts: { now?: number; paint?: PaintFn; activity?: FrameActivity } = {},
 ): string[] | undefined {
   // The frame answers "what is running", so a finished worker has no business
   // holding a row. `blocked` and `waiting_human` are NOT finished — they are
   // waiting for someone, which is precisely what a status panel is for.
   const rows = all.filter((r) => !FINISHED_STATES.includes(r.state));
-  if (rows.length === 0) return undefined;
 
   const now = opts.now ?? Date.now();
   const paint = opts.paint ?? NO_PAINT;
+  const activity = activityLine(opts.activity, now, paint);
+
+  // No workers is not necessarily nothing to show: the interesting moment is
+  // precisely the one before the first worker exists, when the agent is still
+  // finding its footing. With neither rows nor activity the widget goes away
+  // and gives its terminal rows back.
+  if (rows.length === 0) {
+    return activity === undefined ? undefined : [paint("muted", "pi-workers · warming up"), activity];
+  }
 
   const addr = rows.map((r) => `${r.run}/${r.uid}`);
   const age = rows.map((r) => formatElapsed(r.started, now));
@@ -904,7 +965,7 @@ export function rosterFrame(
       r.window,
     ].join("  "),
   );
-  return [heading, ...lines];
+  return activity === undefined ? [heading, ...lines] : [heading, ...lines, activity];
 }
 
 /**
@@ -927,9 +988,14 @@ export function startRosterFrame(opts: {
   setWidget: (key: string, content: unknown) => void;
   intervalMs?: number;
   now?: () => number;
-}): { refresh: () => Promise<void>; stop: () => void } {
+}): {
+  refresh: () => Promise<void>;
+  note: (activity: FrameActivity | undefined) => void;
+  stop: () => void;
+} {
   const clock = opts.now ?? (() => Date.now());
   let rows: RosterRow[] = [];
+  let activity: FrameActivity | undefined;
   let mounted = false;
   let tui: FrameTui | undefined;
   // Whether the host takes a component factory. Assumed until one is refused;
@@ -967,7 +1033,7 @@ export function startRosterFrame(opts: {
             render: (width: number) => {
               try {
                 paint ??= themePaint(theme);
-                return wrapToWidth(rosterFrame(rows, { now: clock(), paint }) ?? [], width);
+                return wrapToWidth(rosterFrame(rows, { now: clock(), paint, activity }) ?? [], width);
               } catch {
                 return [];
               }
@@ -995,7 +1061,7 @@ export function startRosterFrame(opts: {
         factoryForm = false;
       }
     }
-    opts.setWidget(ROSTER_WIDGET_KEY, rosterFrame(rows, { now: clock() }));
+    opts.setWidget(ROSTER_WIDGET_KEY, rosterFrame(rows, { now: clock(), activity }));
     mounted = true;
   };
 
@@ -1003,7 +1069,7 @@ export function startRosterFrame(opts: {
     // Emptiness is decided on the plain frame: an unpainted render is cheap at
     // roster size, and a widget must be dropped rather than left as an empty
     // box holding terminal rows.
-    if (rosterFrame(rows, { now: clock() }) === undefined) {
+    if (rosterFrame(rows, { now: clock(), activity }) === undefined) {
       if (mounted) {
         opts.setWidget(ROSTER_WIDGET_KEY, undefined);
         mounted = false;
@@ -1031,12 +1097,27 @@ export function startRosterFrame(opts: {
     }
   };
 
+  /**
+   * Record what the extension is doing, and redraw at once.
+   *
+   * Immediate rather than on the next poll: the whole point is that a refusal
+   * appears where the operator is already looking, and a five-second delay
+   * would have them reading a stale frame while the transcript stays silent.
+   *
+   * A success clears the line instead of setting one, so the frame does not
+   * accumulate a log — the rows below ARE the success.
+   */
+  const note = (next: FrameActivity | undefined) => {
+    activity = next?.ok === true ? undefined : next;
+    draw();
+  };
+
   const timer = setInterval(() => void refresh(), opts.intervalMs ?? 5000);
   if (typeof timer === "object" && timer && "unref" in timer) {
     (timer as { unref: () => void }).unref(); // never hold the process open
   }
   void refresh();
-  return { refresh, stop: () => clearInterval(timer) };
+  return { refresh, note, stop: () => clearInterval(timer) };
 }
 
 /**
@@ -1118,19 +1199,40 @@ export function collapsedStateLine(detail: string): string {
   return `${parts.join("  ")} · ${hint}`;
 }
 
+/** How the transcript should be rendered for one result. */
+export interface TranscriptView {
+  /**
+   * Collapsed is the DEFAULT view: the agent picks the verb and the operator
+   * pays the screen, so detail has to be asked for rather than arrive.
+   */
+  expanded?: boolean;
+  /**
+   * Whether the roster frame is actually mounted and being drawn.
+   *
+   * This gates refusal suppression, and it has to be a real observation rather
+   * than an assumption. The rule in this file has always been that an operator
+   * who cannot see a failure has no idea why nothing happened — and that is
+   * still true. What changed is that the frame is now a place to see it. In
+   * print, json or rpc mode, or with no UI, there is no frame, so nothing is
+   * suppressed.
+   */
+  frameLive?: boolean;
+}
+
 export function transcriptLines(
   verb: string,
   ok: boolean,
   detail: string,
-  // Collapsed is the DEFAULT view: the agent picks the verb and the operator
-  // pays the screen, so detail has to be asked for rather than arrive.
-  expanded = false,
+  view: TranscriptView = {},
 ): string[] {
-  // A failure always prints, whatever the verb. Suppressing a spawn's success
-  // must never suppress its refusal — an operator who cannot see the failure
-  // has no idea why nothing happened. Nor is a refusal ever collapsed: hiding
-  // it behind a click is the same mistake wearing a hat.
-  if (!ok) return [detail];
+  const expanded = view.expanded === true;
+
+  // A refusal must always be READABLE. Where it is readable depends on whether
+  // there is a frame: with one live it is drawn there, painted and held for a
+  // while, next to the rows it concerns — which is where the operator is
+  // already looking, and keeps a run's warming-up chatter out of the history.
+  // With no frame it prints here, as it always did.
+  if (!ok) return view.frameLive === true ? [] : [detail];
 
   // `inspect` and `status` are asked precisely for their detail — so it is
   // reachable, not printed unbidden.
@@ -1253,7 +1355,7 @@ export function resultComponent(
   verb: string,
   ok: boolean,
   detail: string,
-  opts: ResultViewOptions = {},
+  opts: ResultViewOptions & TranscriptView = {},
 ): {
   render: (width: number) => string[];
   invalidate: () => void;
@@ -1264,7 +1366,10 @@ export function resultComponent(
   // Either source expands it, so the expand key and the click cannot fight:
   // whichever the operator reached for, the detail appears.
   const expanded = opts.expanded === true || clicked;
-  const lines = transcriptLines(verb, ok, detail, expanded);
+  const lines = transcriptLines(verb, ok, detail, {
+    expanded,
+    ...(opts.frameLive === true ? { frameLive: true } : {}),
+  });
 
   const collapsible = ok && DETAIL_VERBS.includes(verb) && lines.length > 0;
 
@@ -1592,6 +1697,9 @@ export default function piWorker(pi: ExtensionAPI): void {
           const outcome = (result.details ?? {}) as { ok?: boolean; detail?: string };
           return resultComponent(lastVerb, outcome.ok !== false, outcome.detail ?? "", {
             expanded: options?.expanded === true,
+            // Observed, not assumed: a refusal is only kept out of the
+            // transcript when there is a frame drawing it instead.
+            frameLive: frame !== null,
             // No context means no per-row state to remember a click in, so the
             // component simply offers no click target rather than pretending.
             ...(context?.state ? { state: context.state } : {}),
@@ -1606,10 +1714,22 @@ export default function piWorker(pi: ExtensionAPI): void {
           ctx: ExtensionContext,
         ) => {
           lastVerb = params.verb;
+          // Armed BEFORE the call, so the very first spawn of a session has a
+          // frame to warm up in. Arming afterwards meant the one moment worth
+          // watching — before any worker exists — had nowhere to show.
+          armFrame(ctx);
+          frame?.note({ verb: params.verb, at: Date.now() });
+
           const outcome = await initiator.invoke(params);
+
+          frame?.note({
+            verb: params.verb,
+            ok: outcome.ok !== false,
+            ...(outcome.detail ? { detail: outcome.detail } : {}),
+            at: Date.now(),
+          });
           // Redraw immediately rather than waiting out the interval: the verb
           // that just ran is usually the thing that changed the roster.
-          armFrame(ctx);
           if (frame) await frame.refresh();
           return {
             content: [{ type: "text", text: outcome.detail || (outcome.ok ? "ok" : "failed") }],
