@@ -731,6 +731,29 @@ describe("initiator tool", () => {
     expect(argv).toContain("--role impl");
   });
 
+  test("respawn brings a reclaimed worker back, with the uid positional", async () => {
+    // `accept` is the reclaim point — window, tree and branch — and this is the
+    // way back from it, so an orchestrator that tears down promptly can still
+    // get a worker again. The CLI takes the uid positionally, like every other
+    // per-worker verb.
+    const { exec, calls } = fakeExec({ stdout: JSON.stringify({
+      run: "r32", uid: "impl-2", from: "impl-1", session: "sid-1",
+      window: "impl-t@dotfiles", window_id: "@318",
+      cwd: "/repo/.worktrees/wk-t.1", branch: "wk-t.1",
+      reused_branch: false, live: true,
+    }) });
+    const out = await createInitiatorTool({ exec }).invoke({
+      verb: "respawn", run: "r32", uid: "impl-1", repo: "/repo",
+    });
+    expect(calls[0].args).toEqual(["respawn", "impl-1", "--run", "r32", "--repo", "/repo"]);
+    expect(out.ok).toBe(true);
+    // The summary has to say BOTH addresses: the old one is what the caller
+    // asked about, the new one is what it must talk to from now on.
+    expect(out.detail).toContain("impl-1");
+    expect(out.detail).toContain("r32/impl-2");
+    expect(out.detail).toContain("sid-1");
+  });
+
   test("rm releases one address", async () => {
     const { exec, calls } = fakeExec();
     await createInitiatorTool({ exec }).invoke({ verb: "rm", run: "r2", uid: "x1" });

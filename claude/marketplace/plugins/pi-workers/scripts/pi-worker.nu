@@ -1703,6 +1703,85 @@ export def window-target [identity: record]: nothing -> string {
     if ($id | is-empty) { $identity.window } else { $id }
 }
 
+# Open a worker's window and protect it, and hand back its id.
+#
+# Shared by spawn and respawn so the two cannot drift: everything here is
+# ordering that was learned the hard way, and a second copy of it would be a
+# second place to get that ordering wrong.
+#
+# `--resume` picks the Pi session flag, and the two are NOT aliases:
+# `--session <path|id>` RESUMES an existing session and exits with "No session
+# found matching '<id>'" when it is absent, while `--session-id` uses that
+# exact id and creates it if missing. spawn mints a fresh uuid, so the session
+# cannot exist yet and the resuming flag is always wrong there; respawn
+# continues a session that does exist, where creating would fork a second
+# transcript under the same id. A live run against Pi 0.84.4 hit the first half
+# of that: the pane died at startup while spawn still reported live: true.
+def open-worker-window [
+    --target: string        # the tmux session (group member) to create it in
+    --name: string          # the window name an operator scans for
+    --cwd: string
+    --session: string
+    --window-env: list<string>   # `-e` pairs, already assembled
+    --socket: string = ""
+    --resume                # continue an existing session rather than create one
+]: nothing -> string {
+    let flag = (if $resume { "--session" } else { "--session-id" })
+    # `-P -F #{window_id}` makes new-window print the id it assigned. That id is
+    # how every later operation addresses this worker: a NAME is ambiguous the
+    # moment two runs share a role and subject, and tmux then targets whichever
+    # window it finds first — which is how a stop closed the wrong worker
+    # (dotfiles-idzp). An id is also free of the `.` that made a ticket-shaped
+    # subject unparseable (dotfiles-pnxw).
+    let created = (do {
+        ^tmux ...(tmux-args $socket) new-window -d -P -F "#{window_id}" -t $target -n $name -c $cwd ...$window_env "pi" $flag $session
+    } | complete)
+    if $created.exit_code != 0 {
+        error make {msg: $"tmux could not create window ($name): ($created.stderr | str trim)"}
+    }
+    let window_id = ($created.stdout | str trim)
+    # FIRST, before anything slower: a worker whose command fails instantly is
+    # exactly the one whose error must stay on screen, and every millisecond
+    # between creating the window and setting this is a window in which a fast
+    # exit destroys it and takes the reason with it.
+    #
+    # `remain-on-exit on` keeps a crashed or finished worker's window in place.
+    # Without it a Pi that fails during startup takes its own error message off
+    # the screen, and the operator is left with a missing window and no reason.
+    do { ^tmux ...(tmux-args $socket) set-option -t $window_id remain-on-exit on } | complete | ignore
+
+    # Pin the pane, or this repo's own housekeeping deletes the worker.
+    #
+    # `nushell/actions/tmux-cleanup` reaps unattached windows that have no pane
+    # with `@pinned` set to "1", and a worker window is created with
+    # `new-window -d` — detached by definition, since the whole point is that
+    # the operator is working elsewhere. Observed in ~/.tmux.log:
+    #
+    #     04:44:52 - Killing unattached window - no pinned panes: @223
+    #     04:55:39 - Killing unattached window - no pinned panes: @229
+    #
+    # The worker died mid-task, its window vanished, and because liveness has
+    # no way to distinguish that from "tmux could not be asked", the bus left
+    # it `running` forever. The operator saw a worker running for five minutes
+    # with no window anywhere on the machine.
+    #
+    # [[poc022]] said this before sp028 shipped: "Match the existing
+    # `tmux-start` group construction, identify workers through explicit pane
+    # options". `tmux-start` sets `@pinned` on every pane it creates; this is
+    # the same convention, applied by the one thing that also creates panes.
+    #
+    # Not a transport-boundary violation: `@pinned` carries no message, no
+    # completion signal and no coordination state. It tells the DISPLAY host
+    # not to reap a window — which is exactly the "tmux hosts and displays
+    # workers" half of that rule, not the bus half.
+    #
+    # Set immediately after remain-on-exit, and before anything slower, for the
+    # same reason: the gap between creating a window and protecting it is a gap
+    # in which it can be destroyed.
+    do { ^tmux ...(tmux-args $socket) set-option -p -t $window_id "@pinned" "1" } | complete | ignore
+    $window_id
+}
+
 # Start a visible, resumable Pi worker.
 #
 # Order matters. The worktree is allocated and the identity envelope is written
@@ -1773,19 +1852,6 @@ export def worker-spawn [
         window: $window
     }
 
-    # `--session-id`, NOT `--session`. Pi's two session flags are not aliases:
-    # `--session <path|id>` RESUMES an existing session and exits with "No
-    # session found matching '<id>'" when it is absent, while `--session-id`
-    # uses that exact id and creates it if missing. spawn mints a fresh uuid,
-    # so the session cannot exist yet and the resuming flag is always wrong
-    # here. A live run against Pi 0.84.4 hit exactly that: the pane died at
-    # startup while spawn still reported live: true. The resume hint below is
-    # the opposite case -- by then the session exists, so plain `--session` is
-    # correct there.
-    #
-    # `remain-on-exit on` keeps a crashed or finished worker's window in place.
-    # Without it a Pi that fails during startup takes its own error message off
-    # the screen, and the operator is left with a missing window and no reason.
     # The worker's identity reaches the extension as environment, not as a
     # message: the extension needs to know which inbox is its own BEFORE any
     # message can be delivered, and a bootstrap message would have nowhere to
@@ -1812,54 +1878,12 @@ export def worker-spawn [
         "-e" $"PI_WORKER_SKILL=($skill)"
         "-e" $"PI_WORKER_WINDOW=($window)"
     ] ++ $commit_guard)
-    # `-P -F #{window_id}` makes new-window print the id it assigned. That id is
-    # how every later operation addresses this worker: a NAME is ambiguous the
-    # moment two runs share a role and subject, and tmux then targets whichever
-    # window it finds first — which is how a stop closed the wrong worker
-    # (dotfiles-idzp). An id is also free of the `.` that made a ticket-shaped
-    # subject unparseable (dotfiles-pnxw).
-    let created = (do {
-        ^tmux ...(tmux-args $socket) new-window -d -P -F "#{window_id}" -t $target -n $window -c $tree.path ...$worker_env "pi" "--session-id" $session
-    } | complete)
-    if $created.exit_code != 0 {
-        error make {msg: $"tmux could not create window ($window): ($created.stderr | str trim)"}
-    }
-    let window_id = ($created.stdout | str trim)
-    # FIRST, before anything slower: a worker whose command fails instantly is
-    # exactly the one whose error must stay on screen, and every millisecond
-    # between creating the window and setting this is a window in which a fast
-    # exit destroys it and takes the reason with it.
-    do { ^tmux ...(tmux-args $socket) set-option -t $window_id remain-on-exit on } | complete | ignore
-
-    # Pin the pane, or this repo's own housekeeping deletes the worker.
-    #
-    # `nushell/actions/tmux-cleanup` reaps unattached windows that have no pane
-    # with `@pinned` set to "1", and a worker window is created with
-    # `new-window -d` — detached by definition, since the whole point is that
-    # the operator is working elsewhere. Observed in ~/.tmux.log:
-    #
-    #     04:44:52 - Killing unattached window - no pinned panes: @223
-    #     04:55:39 - Killing unattached window - no pinned panes: @229
-    #
-    # The worker died mid-task, its window vanished, and because liveness has
-    # no way to distinguish that from "tmux could not be asked", the bus left
-    # it `running` forever. The operator saw a worker running for five minutes
-    # with no window anywhere on the machine.
-    #
-    # [[poc022]] said this before sp028 shipped: "Match the existing
-    # `tmux-start` group construction, identify workers through explicit pane
-    # options". `tmux-start` sets `@pinned` on every pane it creates; this is
-    # the same convention, applied by the one thing that also creates panes.
-    #
-    # Not a transport-boundary violation: `@pinned` carries no message, no
-    # completion signal and no coordination state. It tells the DISPLAY host
-    # not to reap a window — which is exactly the "tmux hosts and displays
-    # workers" half of that rule, not the bus half.
-    #
-    # Set immediately after remain-on-exit, and before anything slower, for the
-    # same reason: the gap between creating a window and protecting it is a gap
-    # in which it can be destroyed.
-    do { ^tmux ...(tmux-args $socket) set-option -p -t $window_id "@pinned" "1" } | complete | ignore
+    # Creating the session, not resuming one: this uid is new and its uuid was
+    # minted moments ago.
+    let window_id = (
+        open-worker-window --target $target --name $window --cwd $tree.path
+            --session $session --window-env $worker_env --socket $socket
+    )
 
     # Re-record the identity now that the id exists. Written twice rather than
     # deferred: the first write is what leaves a resume handle behind when the
@@ -2408,6 +2432,21 @@ export def worker-resume [
     let seen = (worker-inspect $uid --run $run)
     let rejections = ($seen.rejections + 1)
 
+    # Feedback goes to a PROCESS. A worker whose window is gone — accepted,
+    # stopped, swept, or crashed — has nothing reading its inbox, and the
+    # rejection used to land there anyway: the state flipped to `running`, the
+    # verb reported success, and nobody was working. Refused rather than
+    # silently queued, and the refusal names the verb that can bring the worker
+    # back on the same session.
+    #
+    # `unknown` is not a refusal. adr0017: absence of evidence about tmux is
+    # not evidence the worker is gone, and refusing on it would break resume
+    # whenever the display host cannot be reached.
+    let alive = (worker-liveness (window-target $seen.identity) --socket $socket)
+    if $alive.verdict not-in ["live" "unknown"] {
+        error make {msg: $"cannot resume ($run)/($uid): its window ($seen.identity.window) is ($alive.verdict), so nothing would read the feedback. Bring it back on its own session first: `respawn ($uid) --run ($run) --repo <repo>`"}
+    }
+
     bus-send $uid --run $run --payload {
         stage: "rejection"
         instructions: $feedback
@@ -2478,6 +2517,148 @@ export def worker-accept [
     }
     write-marker $run $uid "accepted"
     {run: $run, uid: $uid, state: "accepted", changed: true}
+}
+
+# Bring a reclaimed worker back, on the same Pi session, under a new address.
+#
+# `accept` reclaims a verified worker's window, worktree and branch and keeps
+# its identity envelope, so the session id — the whole of what a restore needs
+# — outlives the resources. This is the way back, and it is what makes that
+# teardown safe to do the moment the work is judged correct.
+#
+# A NEW uid rather than a revival of the old one. `accepted` has no outgoing
+# edge in the transition table on purpose: it records that the work was taken
+# and closed, and a state a worker can leave records nothing. So the history
+# stays literally true — the old worker was accepted, and a new one continues
+# its transcript — with the lineage written on the new identity as
+# `respawned_from` so the graph can be walked either way.
+#
+# The tree is reconstructed, not resurrected: on the recorded branch when that
+# ref still exists (a stopped worker keeps its branch, and it may hold the only
+# copy of its commits), and off base when it was deleted as merged, because
+# then the work is in the base and a fresh iteration is the honest answer. The
+# report says which happened rather than leaving the caller to diff it.
+export def worker-respawn [
+    uid: string
+    --run: string
+    --repo: string
+    --socket: string = ""
+]: nothing -> record {
+    let old = (bus-identity-of $uid --run $run)
+    if $old == null {
+        error make {msg: $"cannot respawn ($run)/($uid): no identity on the bus for it, so there is no session to continue. Absent evidence is not permission to invent one \(adr0017)"}
+    }
+
+    # A live worker is not respawned: two Pi processes on one session id means
+    # two writers on one transcript, and the window it already has is the
+    # answer to whatever prompted the call.
+    let seen = (worker-liveness (window-target $old) --socket $socket)
+    if $seen.verdict == "live" {
+        error make {msg: $"($run)/($uid) is still live in window ($old.window); respawn continues a worker whose process is gone. Look at the window it has, or stop it first"}
+    }
+
+    let repo = (expand-path $repo)
+    # `<role>-<subject>@<project>` is the naming worker-window-name applies, so
+    # it is also where the subject and project can be read back from. Parsed
+    # off the END for the project: a subject may contain `-`, and a ticket-shaped
+    # one contains `.`, but `@` separates exactly once by construction.
+    let parts = ($old.window | split row "@")
+    let project = ($parts | last)
+    let subject = (
+        $parts
+        | drop 1
+        | str join "@"
+        | str replace $"($old.role)-" ""
+    )
+    # Resolved before anything is allocated, exactly as spawn does: a wrong or
+    # gone session group must not leave a worktree behind to prune by hand.
+    let target = (resolve-project-session $project --socket $socket)
+
+    let new_uid = (mint-uid $run $old.role)
+    let main = (main-worktree $repo)
+    let reuse = (
+        ($old.branch in (known-branches $repo)) and
+        ((registered-worktrees $repo | where branch == $old.branch) | is-empty)
+    )
+    let tree = (if (expand-path $old.cwd) == $main {
+        # An isolation=main worker shares the operator's tree; there was never
+        # a directory of its own to rebuild.
+        {path: $main, branch: $old.branch, isolated: false}
+    } else if $reuse {
+        let path = (worktrees-dir $repo | path join $old.branch)
+        let added = (do { ^git -C $repo worktree add --quiet $path $old.branch } | complete)
+        if $added.exit_code != 0 {
+            error make {msg: $"could not re-create a worktree for ($old.branch): ($added.stderr | str trim)"}
+        }
+        {path: $path, branch: $old.branch, isolated: true}
+    } else {
+        worker-placement --repo $repo --skill $old.skill --subject $subject
+    })
+
+    let window = (worker-window-name $old.role $subject $project)
+    bus-identity $new_uid --run $run --identity {
+        role: $old.role
+        cwd: $tree.path
+        branch: $tree.branch
+        session: $old.session
+        skill: $old.skill
+        window: $window
+        respawned_from: $uid
+    }
+
+    let commit_guard = (if not $tree.isolated {
+        let hooks = (write-commit-guard $run $new_uid $old.skill $tree.branch)
+        [
+            "-e" "GIT_CONFIG_COUNT=1"
+            "-e" "GIT_CONFIG_KEY_0=core.hooksPath"
+            "-e" $"GIT_CONFIG_VALUE_0=($hooks)"
+        ]
+    } else { [] })
+    let worker_env = ([
+        "-e" $"PI_WORKER_RUN=($run)"
+        "-e" $"PI_WORKER_UID=($new_uid)"
+        "-e" $"PI_WORKER_ROLE=($old.role)"
+        "-e" $"PI_WORKER_BRANCH=($tree.branch)"
+        "-e" $"PI_WORKER_SESSION=($old.session)"
+        "-e" $"PI_WORKER_SKILL=($old.skill)"
+        "-e" $"PI_WORKER_WINDOW=($window)"
+    ] ++ $commit_guard)
+
+    # Resuming, not creating: the session exists and holds the transcript this
+    # worker is being brought back for.
+    let window_id = (
+        open-worker-window --target $target --name $window --cwd $tree.path
+            --session $old.session --window-env $worker_env --socket $socket --resume
+    )
+    bus-identity $new_uid --run $run --identity {
+        role: $old.role
+        cwd: $tree.path
+        branch: $tree.branch
+        session: $old.session
+        skill: $old.skill
+        window: $window
+        window_id: $window_id
+        respawned_from: $uid
+    }
+
+    {
+        run: $run
+        uid: $new_uid
+        from: $uid
+        role: $old.role
+        session: $old.session
+        window: $window
+        window_id: $window_id
+        cwd: $tree.path
+        branch: $tree.branch
+        # From the DECISION, not from comparing names: allocation hands out the
+        # lowest free iteration, so a deleted `wk-t1.0` is handed out again and
+        # a name comparison would call a fresh ref a reused one.
+        reused_branch: $reuse
+        resume: $"pi --session ($old.session)"
+        live: (worker-live? $window_id --socket $socket)
+        liveness: (worker-liveness $window_id --socket $socket | get verdict)
+    }
 }
 
 # Tear a worker down without accepting its work.
@@ -2556,6 +2737,8 @@ def usage []: nothing -> string {
         "  workers  --run                       every worker in a run, from the bus alone"
         "  resume   <uid> --run --feedback      send back to the ORIGINAL session"
         "  accept   <uid> --run --repo          close the window, remove the worktree"
+        "  respawn  <uid> --run --repo          bring a reclaimed worker back: a NEW uid"
+        "                                       on the SAME Pi session, tree rebuilt"
         "  stop     <uid> --run                 close the window, KEEP the worktree"
         "  reclaim  --repo [--base] [--socket] [--force] [--dry-run]"
         "                                       sweep a PROJECT: every worker tree no"
@@ -2570,6 +2753,8 @@ def usage []: nothing -> string {
         "  stop keeps a tree because it may hold unmerged commits; reclaim is the"
         "  per-project sweep for when a round of work is done with. Nothing a"
         "  resume needs lives in a tree — the session id is on the bus."
+        "  So accept as soon as the work is judged correct, and respawn if the"
+        "  worker is wanted again: same transcript, new address, rebuilt tree."
     ] | str join "\n"
 }
 
@@ -2826,6 +3011,10 @@ def "main workers" [--run: string] { run-workers $run | to json | print }
 
 def "main resume" [uid: string, --run: string, --feedback: string, --socket: string = ""] {
     worker-resume $uid --run $run --feedback $feedback --socket $socket | to json | print
+}
+
+def "main respawn" [uid: string, --run: string, --repo: string, --socket: string = ""] {
+    worker-respawn $uid --run $run --repo $repo --socket $socket | to json | print
 }
 
 def "main accept" [uid: string, --run: string, --repo: string, --socket: string = ""] {

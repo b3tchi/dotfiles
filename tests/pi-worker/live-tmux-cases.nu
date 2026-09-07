@@ -158,6 +158,21 @@ def dies-with [code: int]: nothing -> string {
     $"sleep 0.4; exit ($code)"
 }
 
+# A stub `pi` that records its argv and then stays up.
+#
+# The two Pi session flags are not aliases — `--session` resumes an existing
+# session, `--session-id` creates one with that id — and using the resuming one
+# on a fresh session killed a pane at startup while spawn still reported
+# live: true. The distinction is only observable in what the product actually
+# executed, so the stub writes it down.
+def records-argv [log: string]: nothing -> string {
+    $"echo \"$@\" >> '($log)'\nsleep 30"
+}
+
+def argv-log [tag: string]: nothing -> string {
+    ([$nu.temp-dir $"piw-argv-($tag)-(random chars --length 6).log"] | path join)
+}
+
 def with-server [tag: string, body: closure, --stub: string = "sleep 30"] {
     let t = (make-server $tag --stub $stub)
     let root = (make-runtime $tag)
@@ -268,6 +283,132 @@ let cases = [
             assert-true (not ($w.window in $windows)) "the accepted worker's window is closed"
             assert-true ($other.window in $windows) "its sibling is untouched"
             assert-true ("main" in $windows) "as is the seed window"
+        }
+    })
+
+    # ------------------------------------------------------------- respawn
+    #
+    # `accept` reclaims a verified worker's window, tree and branch and keeps
+    # its identity envelope — so the session id, which is the whole of what a
+    # restore needs, outlives the resources. What was missing was the way back:
+    # `resume` writes a rejection into an inbox, and on a reclaimed worker no
+    # process is reading it. Respawn is that way back, and it mints a NEW uid
+    # rather than reviving the old one: `accepted` records that the work was
+    # taken, and a state nothing leaves is worth more than one address.
+
+    (run-case "live/respawn-continues-the-accepted-workers-session-under-a-new-uid" {
+        let log = (argv-log "respawn")
+        with-server "respawn" --stub (records-argv $log) {|t, repo|
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            bus-result "impl-a" --run "run-1" --result {
+                status: "complete", summary: "done", validation: "green"
+                window: $w.window, session: "sid-1", resume: "pi --session sid-1"
+            }
+            worker-accept "impl-a" --run "run-1" --repo $repo --socket $t.socket
+            assert-true (not ($w.cwd | path exists)) "acceptance reclaimed the tree"
+
+            let back = (worker-respawn "impl-a" --run "run-1" --repo $repo --socket $t.socket)
+            assert-eq $back.from "impl-a" "the report says who it continues"
+            assert-true ($back.uid != "impl-a") "a new address, because accepted is terminal"
+            assert-eq $back.session "sid-1" "and the SAME Pi session, so the transcript continues"
+            assert-eq (bus-status "impl-a" --run "run-1" | get state) "accepted" "the old worker is left as it was"
+            assert-eq (bus-status $back.uid --run "run-1" | get state) "created" "the new one has said nothing yet"
+
+            let identity = (bus-identity-of $back.uid --run "run-1")
+            assert-eq $identity.session "sid-1" ""
+            assert-eq ($identity | get -o respawned_from) "impl-a" "the lineage is on the bus, not only in the report"
+            assert-eq (worker-liveness $back.window_id --socket $t.socket | get verdict) "live" "and it is actually running"
+
+            # The flag distinction, read off what was executed: the first
+            # window CREATED the session, the second RESUMED it.
+            let argv = (open $log | lines | where {|l| $l | str contains "sid-1" })
+            assert-true (($argv | first) | str contains "--session-id sid-1") $"spawn must create the session, got ($argv)"
+            assert-true (($argv | last) | str contains "--session sid-1") $"respawn must resume it, got ($argv)"
+            assert-true (not (($argv | last) | str contains "--session-id")) "and resuming is not creating"
+        }
+        rm -f $log
+    })
+
+    (run-case "live/respawn-reuses-the-branch-when-it-still-exists" {
+        # A stopped worker keeps its branch (it may hold unmerged commits) and
+        # `reclaim` takes only the directory. Coming back must land on the same
+        # ref: forking a new one off base would silently drop the work.
+        with-server "respawn-branch" {|t, repo|
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            "work\n" | save -f ($w.cwd | path join "work.txt")
+            ^git -C $w.cwd add -A
+            ^git -C $w.cwd commit -q -m "work nobody merged"
+            worker-stop "impl-a" --run "run-1" --socket $t.socket
+            worktrees-reclaim --repo $repo --socket $t.socket
+            assert-true (not ($w.cwd | path exists)) "the tree is gone"
+            assert-true ((git-in $repo "branch" "--list" $w.branch) | is-not-empty) "the ref is not"
+
+            let back = (worker-respawn "impl-a" --run "run-1" --repo $repo --socket $t.socket)
+            assert-eq $back.branch $w.branch "back on the branch that holds the work"
+            assert-eq $back.reused_branch true ""
+            assert-true ($back.cwd | path exists) "with a tree to work in"
+            assert-eq (git-in $back.cwd "rev-parse" "--abbrev-ref" "HEAD" --) $w.branch ""
+            assert-true (($back.cwd | path join "work.txt") | path exists) "and the commits are there"
+        }
+    })
+
+    (run-case "live/respawn-forks-a-fresh-branch-when-the-old-one-was-reclaimed" {
+        # An accepted worker's branch is deleted because it was merged, so the
+        # work is in the base. Reconstructing off base is then the honest
+        # answer, and the report says which happened.
+        with-server "respawn-fork" {|t, repo|
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            bus-result "impl-a" --run "run-1" --result {
+                status: "complete", summary: "done", validation: "green"
+                window: $w.window, session: "sid-1", resume: "pi --session sid-1"
+            }
+            worker-accept "impl-a" --run "run-1" --repo $repo --socket $t.socket
+            assert-true ((git-in $repo "branch" "--list" $w.branch) | is-empty) "acceptance took the ref too"
+
+            let back = (worker-respawn "impl-a" --run "run-1" --repo $repo --socket $t.socket)
+            assert-eq $back.reused_branch false "the ref was not reused, it was minted"
+            assert-true ($back.cwd | path exists) ""
+            # Allocation hands out the lowest free iteration, so the NAME can
+            # be the deleted one's again — which is why the report answers from
+            # the decision rather than from a name comparison. What matters is
+            # where the ref points: at base, where the accepted work now lives.
+            let base_head = (git-in $repo "rev-parse" "HEAD" --)
+            assert-eq (git-in $back.cwd "rev-parse" "HEAD" --) $base_head "forked off base"
+        }
+    })
+
+    (run-case "live/respawn-refuses-while-the-worker-is-still-running" {
+        # Respawning a live worker would put two Pi processes on one session
+        # and one transcript. The window it already has is the answer.
+        with-server "respawn-live" {|t, repo|
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            assert-rejects {
+                worker-respawn "impl-a" --run "run-1" --repo $repo --socket $t.socket
+            } "still live" "a running worker is not respawned"
+            assert-true ($w.window_id in (^tmux -L $t.socket list-windows -a -F "#{window_id}" | lines)) "and its window is untouched"
+        }
+    })
+
+    (run-case "live/respawn-refuses-an-address-with-no-identity" {
+        with-server "respawn-unknown" {|t, repo|
+            assert-rejects {
+                worker-respawn "nobody" --run "run-1" --repo $repo --socket $t.socket
+            } "no identity" "there is nothing to continue"
+        }
+    })
+
+    (run-case "live/resume-refuses-a-worker-with-no-live-window-and-names-respawn" {
+        # The silent failure this pairs with: resume writes a rejection into an
+        # inbox, and a reclaimed worker has no process reading it. It looked
+        # like feedback had been delivered.
+        with-server "resume-dead" --stub (dies-with 3) {|t, repo|
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            wait-for-dead $t.socket $w.window_id
+
+            assert-rejects {
+                worker-resume "impl-a" --run "run-1" --feedback "try again" --socket $t.socket
+            } "respawn" "the refusal names the verb that can bring it back"
+            assert-eq ((bus-inbox "impl-a" --run "run-1") | length) 0 "and nothing was written to a dead inbox"
         }
     })
 

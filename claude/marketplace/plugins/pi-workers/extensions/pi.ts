@@ -764,6 +764,7 @@ export const INITIATOR_VERBS = [
   "resume",
   "accept",
   "stop",
+  "respawn",
 ] as const;
 
 export type InitiatorVerb = (typeof INITIATOR_VERBS)[number];
@@ -778,6 +779,7 @@ const UID_IS_POSITIONAL: readonly string[] = [
   "resume",
   "accept",
   "stop",
+  "respawn",
 ];
 
 export interface InitiatorArgs {
@@ -823,6 +825,7 @@ const VERB_FLAGS: Record<string, readonly string[]> = {
   resume: ["run", "feedback", "socket"],
   accept: ["run", "repo", "socket"],
   stop: ["run", "socket"],
+  respawn: ["run", "repo", "socket"],
 };
 
 // ---------------------------------------------------------------------------
@@ -1903,6 +1906,14 @@ function summarise(verb: string, stdout: string): string {
       return o.changed
         ? `${o.state} ${o.run}/${o.uid}`
         : `${o.run}/${o.uid} was ${o.reason ?? "already in that state"}`;
+    // Both addresses, deliberately: the caller asked about the old one and
+    // must talk to the new one from here on, and the session id is what says
+    // the transcript is the same one.
+    case "respawn":
+      return (
+        `${o.from} → ${o.run}/${o.uid} on session ${o.session} — ${o.window} (${o.window_id}), ` +
+        `${o.reused_branch ? "back on" : "forked"} ${o.branch}, cwd ${o.cwd}`
+      );
     case "ps":
     case "workers": {
       const rows = Array.isArray(parsed) ? (parsed as Record<string, unknown>[]) : [];
@@ -2092,7 +2103,8 @@ export default function piWorker(pi: ExtensionAPI): void {
           "Drive Pi workers: `ps` lists every worker, whether it is alive and which tmux window to look at. Also: spawn one as a visible tmux window, check its liveness, send it a message, `wait` for its typed result (pass uid to wait on that worker rather than the whole run), resume it with feedback, then accept or stop it. " +
 "`timeline` shows what happened to one worker and when, with the gap between each step — reach for it when a worker took longer than expected and you want to know where the time went. " +
           "To learn that a worker finished, call `wait` with block true — it returns the moment a result lands. A worker's tmux window is there for a PERSON to look at: never read it, capture it, or treat anything in it as a completion signal, and never generate ids for spawn — omit run, uid and session and they are minted for you. " +
-          "An address is claimed once: to reuse a run/uid after stopping or accepting it, call `rm` with that run and uid — that is the normal way to recycle one, and it refuses while the worker is still unfinished, so it is safe to try. Verbs: " +
+          "An address is claimed once: to reuse a run/uid after stopping or accepting it, call `rm` with that run and uid — that is the normal way to recycle one, and it refuses while the worker is still unfinished, so it is safe to try. " +
+          "Accept as soon as you judge the work correct: that reclaims the window, the worktree and the branch, and the session id it leaves on the bus is all a restore needs. If you want that worker again afterwards, call `respawn` with its uid — you get a NEW uid continuing the SAME Pi transcript, with its worktree rebuilt, so tearing down promptly costs you nothing. Verbs: " +
           INITIATOR_VERBS.join(", ") +
           `. Stages: ${describeStages()}.`,
         promptSnippet: "pi_worker — spawn, watch and message Pi workers",
