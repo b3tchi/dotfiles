@@ -616,6 +616,58 @@ describe("initiator tool", () => {
     expect(calls[0].args).toEqual(["wait", "--run", "r2"]);
   });
 
+  test("a switch is passed as a bare flag, not as `--block true`", async () => {
+    // nu's `--block` takes no value. Rendering the boolean with String() would
+    // emit `--block true` and nu would read `true` as an extra positional.
+    const calls: string[][] = [];
+    const tool = createInitiatorTool({
+      exec: async (_cmd, argv) => {
+        calls.push(argv);
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    await tool.invoke({ verb: "wait", run: "r1", uid: "w1", block: true, timeout: 30 });
+    expect(calls[0]).toEqual(["wait", "--run", "r1", "--uid", "w1", "--block", "--timeout", "30"]);
+  });
+
+  test("a switch left false is omitted entirely", async () => {
+    // `--block false` is not how nu spells "do not block"; absence is.
+    const calls: string[][] = [];
+    const tool = createInitiatorTool({
+      exec: async (_cmd, argv) => {
+        calls.push(argv);
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    await tool.invoke({ verb: "wait", run: "r1", block: false });
+    expect(calls[0]).toEqual(["wait", "--run", "r1"]);
+  });
+
+  test("spawn omits the ids it is not given, so the CLI can mint them", async () => {
+    // The tool used to ask the model for a fresh uuid, which is why a bare
+    // `uuidgen` kept appearing in the operator's transcript.
+    const calls: string[][] = [];
+    const tool = createInitiatorTool({
+      exec: async (_cmd, argv) => {
+        calls.push(argv);
+        return { code: 0, stdout: "{}", stderr: "" };
+      },
+    });
+    await tool.invoke({
+      verb: "spawn",
+      role: "impl",
+      subject: "timestamp",
+      project: "dotfiles",
+      repo: "/home/jan/.dotfiles",
+      skill: "probe",
+    });
+    const argv = calls[0].join(" ");
+    expect(argv).not.toContain("--uid");
+    expect(argv).not.toContain("--run");
+    expect(argv).not.toContain("--session");
+    expect(argv).toContain("--role impl");
+  });
+
   test("rm releases one address", async () => {
     const { exec, calls } = fakeExec();
     await createInitiatorTool({ exec }).invoke({ verb: "rm", run: "r2", uid: "x1" });

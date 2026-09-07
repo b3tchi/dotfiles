@@ -627,18 +627,99 @@ export def bus-pending [run: string]: nothing -> list<record> {
 # Non-destructive by design: an initiator that dies between reading this and
 # acknowledging it must see the same envelope on restart. Delivery state is the
 # `.ack` file on disk, never anything held in the reader.
-export def bus-wait [--run: string, --uid: string = "", --json]: nothing -> any {
-    # Unscoped, this is the oldest unacknowledged result ACROSS the run, which
-    # is what an orchestrator draining many workers wants. `--uid` narrows it to
-    # one, which is what anyone waiting on a PARTICULAR worker wants: a run that
-    # still holds a finished worker with an unacked envelope would otherwise
-    # hand its answer to whoever asked next (dotfiles-idzp's stale-state shape,
-    # in the mailbox rather than the window list).
-    let all = (bus-pending $run)
-    let pending = (if ($uid | is-empty) { $all } else { $all | where uid == $uid })
-    if ($pending | is-empty) { return null }
-    let next = ($pending | first)
-    if $json { $next | to json } else { $next }
+# ------------------------------------------------------------- minting
+#
+# An agent that must supply an address and has no way to produce one shells out
+# for it — observed live as a bare `uuidgen` line in the operator's transcript,
+# which is 36 characters of noise that buys nothing to look at. The tool mints
+# the address instead.
+#
+# `<role>-<n>` rather than a uuid because this name is worn in public: it is
+# the tmux window, the frame's row, and the thing an operator says out loud.
+# `impl-2` survives all three; `0a77b1d8-3eed-4ff0-8bda-78159973b144` does not.
+
+# The lowest free `<role>-<n>` in a run.
+export def mint-uid [run: string, role: string]: nothing -> string {
+    let prefix = (if ($role | is-empty) { "w" } else { $role })
+    let dir = (bus-root | path join $run)
+    let taken = (if ($dir | path exists) {
+        ls $dir | where type == dir | get name | each {|d| $d | path basename }
+    } else { [] })
+    mut n = 1
+    while $"($prefix)-($n)" in $taken { $n = $n + 1 }
+    $"($prefix)-($n)"
+}
+
+# A fresh id for the worker's Pi session.
+#
+# Passed to `pi --session-id` to CREATE a session, so it only has to be unique
+# — there is nothing to look up and nothing for a caller to know. The tool
+# parameter used to be documented as "a fresh uuid for the worker's Pi
+# session", which is an instruction to go and find one: the agent shelled out
+# to `uuidgen` and the operator got a bare 36-character line for their trouble.
+export def mint-session []: nothing -> string {
+    random uuid
+}
+
+# The lowest free `r<n>` at the bus root.
+#
+# Directories that are not shaped `r<n>` are ignored rather than parsed: a run
+# an operator named `x4` says nothing about which `r<n>` is free, and reading a
+# number out of it would hand back an address already in use.
+export def mint-run []: nothing -> string {
+    let root = (bus-root)
+    let taken = (if ($root | path exists) {
+        ls $root | where type == dir | get name | each {|d| $d | path basename }
+    } else { [] })
+    mut n = 1
+    while $"r($n)" in $taken { $n = $n + 1 }
+    $"r($n)"
+}
+
+# Poll interval for a blocking wait. Short enough that a worker finishing feels
+# immediate, long enough that a directory listing four times a second is not
+# what the machine is doing with its life.
+const WAIT_POLL = 250ms
+
+export def bus-wait [
+    --run: string
+    --uid: string = ""
+    --json
+    # Without --block this peeks and answers at once, which is what a script
+    # doing its own loop needs. WITH it, the verb does what its name says.
+    #
+    # It did not, and that had a cost: an agent told to "`wait` for its typed
+    # result" called it, got nothing, decided out loud that it needed a polling
+    # mechanism, and polled the worker's tmux pane — the one thing the
+    # transport boundary forbids as a completion signal. A verb named `wait`
+    # that does not wait sends the caller looking for a channel that is not the
+    # bus.
+    --block
+    # Bounded, and bounded low: this runs inside a host tool call, and a wait
+    # that outlives the host's own timeout is indistinguishable from a hang.
+    --timeout: duration = 60sec
+]: nothing -> any {
+    let deadline = (date now) + $timeout
+    loop {
+        # Unscoped, this is the oldest unacknowledged result ACROSS the run,
+        # which is what an orchestrator draining many workers wants. `--uid`
+        # narrows it to one, which is what anyone waiting on a PARTICULAR
+        # worker wants: a run that still holds a finished worker with an unacked
+        # envelope would otherwise hand its answer to whoever asked next
+        # (dotfiles-idzp's stale-state shape, in the mailbox rather than the
+        # window list).
+        let all = (bus-pending $run)
+        let pending = (if ($uid | is-empty) { $all } else { $all | where uid == $uid })
+        if ($pending | is-not-empty) {
+            let next = ($pending | first)
+            return (if $json { $next | to json } else { $next })
+        }
+        if not $block { return null }
+        # Checked before sleeping, so a timeout of zero returns at once rather
+        # than costing one interval.
+        if (date now) >= $deadline { return null }
+        sleep $WAIT_POLL
+    }
 }
 
 # Record delivery of one result. This is a receipt, NOT acceptance: the work
@@ -1699,14 +1780,38 @@ def main [...args: string] {
     exit 2
 }
 
+# `--run` and `--uid` are optional and minted when absent; the result names
+# what was chosen, so a caller spawning siblings reads the run back off its
+# first spawn instead of inventing one.
 def "main spawn" [
-    --run: string, --uid: string, --role: string, --subject: string
-    --project: string, --repo: string, --session: string, --skill: string
+    --run: string = "", --uid: string = "", --role: string = "", --subject: string
+    --project: string, --repo: string, --session: string = "", --skill: string
     --task: string = "", --socket: string = ""
 ] {
-    worker-spawn --run $run --uid $uid --role $role --subject $subject --project $project --repo $repo --task $task --session $session --skill $skill --socket $socket
-    | to json
-    | print
+    let run = (if ($run | is-empty) { mint-run } else { $run })
+    let session = (if ($session | is-empty) { mint-session } else { $session })
+    let minted = ($uid | is-empty)
+
+    # Retried only when the address was MINTED. Two spawns racing for the same
+    # run can each mint the same lowest-free uid, and the occupied-address
+    # guard is the thing that notices. An explicitly passed uid gets no retry:
+    # its refusal is the answer the caller asked for, and quietly spawning
+    # somewhere else would be worse than failing.
+    mut attempt = 0
+    loop {
+        let uid = (if $minted { mint-uid $run $role } else { $uid })
+        let outcome = (try {
+            {ok: true, value: (worker-spawn --run $run --uid $uid --role $role --subject $subject --project $project --repo $repo --task $task --session $session --skill $skill --socket $socket)}
+        } catch {|e|
+            {ok: false, error: $e}
+        })
+        if $outcome.ok {
+            $outcome.value | to json | print
+            return
+        }
+        $attempt = $attempt + 1
+        if (not $minted) or $attempt >= 5 { error make $outcome.error.raw }
+    }
 }
 
 def "main send" [
@@ -1723,9 +1828,25 @@ def "main send" [
 
 # Prints nothing when there is no mail, so `if (pi-worker wait --run r |
 # is-empty)` works in a script. Silence is the answer, not an error.
-def "main wait" [--run: string, --uid: string = ""] {
-    let next = (bus-wait --run $run --uid $uid)
-    if $next != null { print ($next | to json) }
+#
+# `--block` waits for one instead of peeking, which is how a caller finds out a
+# worker finished. Reading its tmux window is NOT how: that window exists to be
+# looked at by a person, and it carries no completion signal.
+#
+# `--timeout` is in seconds here rather than a duration, because the caller is
+# usually a model writing flags and `--timeout 30` is harder to get wrong than
+# `--timeout 30sec`.
+def "main wait" [--run: string, --uid: string = "", --block, --timeout: int = 60] {
+    let next = (bus-wait --run $run --uid $uid --block=$block --timeout ($timeout * 1sec))
+    if $next != null {
+        print ($next | to json)
+    } else if $block {
+        # A worker still working is not a failure, so this exits 0 and says so
+        # in words the caller can act on rather than returning bare silence
+        # that looks the same as "finished with nothing to say".
+        let who = (if ($uid | is-empty) { "any worker" } else { $uid })
+        print $"no result from ($run)/($who) after ($timeout)s; it may still be working"
+    }
 }
 
 def "main ack" [--run: string, --uid: string, --sequence: int] {
