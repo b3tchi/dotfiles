@@ -1066,11 +1066,6 @@ export function rosterFrame(
   // finding its footing. With neither rows nor activity the widget goes away
   // and gives its terminal rows back.
   if (rows.length === 0) {
-    // One line, not two. With nothing underneath it, a heading and an activity
-    // line are two rows saying one thing, and this is the state the operator
-    // stares at longest — the whole warm-up of a run. `warming-up` matches the
-    // word a row uses for the same idea, so the vocabulary does not change
-    // when the first worker appears beneath it.
     const heading = paint("muted", "pi-workers · warming-up");
     if (activity !== undefined) return [`${heading}  ${activity}`];
     return opts.holdEmpty === true ? [heading] : undefined;
@@ -1096,7 +1091,13 @@ export function rosterFrame(
   const ageWidth = Math.max(...age.map((a) => a.length));
   const liveWidth = Math.max(...live.map((l) => l.length));
 
-  const heading = `pi-workers · ${rows.length} worker${rows.length === 1 ? "" : "s"}`;
+  // Line one is the frame's own state; every line after it is exactly one
+  // worker. The activity used to be appended AFTER the rows, which put a
+  // refusal below the workers it was not about and meant the operator could
+  // not tell how many lines were agents without reading them. Carrying it on
+  // the heading keeps the list a list.
+  const count = `pi-workers · ${rows.length} worker${rows.length === 1 ? "" : "s"}`;
+  const heading = activity === undefined ? count : `${count}  ${activity}`;
   const lines = rows.map((r, i) =>
     [
       addr[i].padEnd(addrWidth),
@@ -1111,7 +1112,7 @@ export function rosterFrame(
       r.window,
     ].join("  "),
   );
-  return activity === undefined ? [heading, ...lines] : [heading, ...lines, activity];
+  return [heading, ...lines];
 }
 
 /**
