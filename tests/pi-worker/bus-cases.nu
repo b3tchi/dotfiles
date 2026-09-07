@@ -577,6 +577,30 @@ let cases = [
         rm -rf $root
     })
 
+    (run-case "bus/the-roster-says-when-each-worker-started" {
+        # `running` says nothing about whether that is eight seconds or forty
+        # minutes, and only one of those is worth interrupting. The stamp comes
+        # from the identity envelope, which is written once at spawn — reading
+        # only its payload, as the roster used to, throws the stamp away.
+        let root = (make-runtime "roster-started")
+        with-runtime $root {
+            bus-identity "a" --run "r1" --identity {
+                role: "impl", cwd: $nu.temp-dir, branch: "wk-t.0"
+                session: "sid-a", skill: "wk-build", window: "impl-a@dotfiles"
+            }
+            # A worker that has been addressed but never spawned: `send` creates
+            # its directory before anything is recorded about a process.
+            bus-send "b" --run "r1" --payload {stage: "wk-build", task: "t"}
+
+            let roster = (worker-roster --run "r1")
+            let a = ($roster | where uid == "a" | first)
+            assert-true (($a.started | into datetime) <= (date now)) "a real stamp, not a placeholder"
+            let b = ($roster | where uid == "b" | first)
+            assert-eq $b.started "" "an empty cell rather than a guess when nothing was recorded"
+        }
+        rm -rf $root
+    })
+
     (run-case "bus/the-roster-is-empty-rather-than-failing-when-nothing-runs" {
         let root = (make-runtime "roster-empty")
         with-runtime $root {

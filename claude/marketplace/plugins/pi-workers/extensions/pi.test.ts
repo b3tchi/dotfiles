@@ -35,6 +35,10 @@ import {
   createResultTool,
   createInitiatorTool,
   rosterFrame,
+  formatElapsed,
+  stateTone,
+  themePaint,
+  startRosterFrame,
   transcriptLines,
   resultComponent,
   callComponent,
@@ -829,6 +833,223 @@ describe("roster frame", () => {
   test("one worker is singular", () => {
     expect(rosterFrame([rows[0]])[0]).toContain("1 worker");
     expect(rosterFrame([rows[0]])[0]).not.toContain("1 workers");
+  });
+
+  // ---------------------------------------------------------------- elapsed
+  //
+  // `running` is the same word after eight seconds and after forty minutes,
+  // and only one of those is a worker worth interrupting.
+
+  test("elapsed is rendered from the worker's start stamp", () => {
+    const started = "2026-09-07T12:00:00.000000Z";
+    const now = Date.parse(started) + 4 * 60_000 + 30_000;
+    const frame = rosterFrame([{ ...rows[0], started }], { now });
+    expect(frame[1]).toContain("4m");
+  });
+
+  test("a worker with no start stamp gets a blank cell, not a zero", () => {
+    // "" is what the CLI reports for a worker whose identity envelope was
+    // never written. `0s` would read as one that had only just started.
+    const started = "2026-09-07T12:00:00.000000Z";
+    const now = Date.parse(started) + 12_000;
+    const frame = rosterFrame(
+      [
+        { ...rows[0], started },
+        { ...rows[1], started: "" },
+      ],
+      { now },
+    );
+    expect(frame[1]).toContain("12s");
+    expect(frame[2]).not.toContain("0s");
+    // The blank is padded, so the column after it still lines up.
+    expect(frame[1].indexOf("live")).toBe(frame[2].indexOf("exited"));
+  });
+
+  test("a garbage stamp is a blank cell rather than NaN on screen", () => {
+    const frame = rosterFrame([{ ...rows[0], started: "whenever" }], {
+      now: Date.parse("2026-09-07T12:00:00Z"),
+    });
+    expect(frame[1]).not.toContain("NaN");
+  });
+
+  test("formatElapsed reads at a glance at every scale", () => {
+    const t0 = Date.parse("2026-09-07T12:00:00Z");
+    const at = (ms: number) => formatElapsed("2026-09-07T12:00:00Z", t0 + ms);
+    expect(at(8_000)).toBe("8s");
+    expect(at(59_000)).toBe("59s");
+    expect(at(4 * 60_000)).toBe("4m");
+    expect(at(72 * 60_000)).toBe("1h12m");
+    // A clock that went backwards is not a negative age.
+    expect(at(-5_000)).toBe("0s");
+    expect(formatElapsed("", t0)).toBe("");
+  });
+
+  // ------------------------------------------------------------------ colour
+  //
+  // A failed worker should be visibly failed rather than a word in a column.
+  // Colour is applied to the STATE cell only, and after the layout is
+  // computed: wrapToWidth counts ANSI bytes as width, so painting first would
+  // mis-wrap every row.
+
+  test("the state cell is painted and nothing else is", () => {
+    const paint = (tone: string, text: string) => `<${tone}>${text}</${tone}>`;
+    const frame = rosterFrame(rows, { paint });
+    expect(frame[1]).toContain("<accent>running</accent>");
+    expect(frame[2]).toContain("<warning>blocked</warning>");
+    // The window and liveness cells carry no markup.
+    expect(frame[1]).toContain("live");
+    expect(frame[1]).not.toContain("<accent>live");
+  });
+
+  test("colour does not move the columns", () => {
+    const paint = (tone: string, text: string) => `\u001b[31m${text}\u001b[39m`;
+    const plain = rosterFrame(rows);
+    const painted = rosterFrame(rows, { paint });
+    const stripped = painted.map((line) =>
+      line.replaceAll("\u001b[31m", "").replaceAll("\u001b[39m", ""),
+    );
+    expect(stripped).toEqual(plain);
+  });
+
+  test("a state tone is chosen by what the operator must do about it", () => {
+    expect(stateTone("running")).toBe("accent");
+    expect(stateTone("complete")).toBe("success");
+    expect(stateTone("failed")).toBe("error");
+    expect(stateTone("protocol_error")).toBe("error");
+    expect(stateTone("blocked")).toBe("warning");
+    expect(stateTone("waiting_human")).toBe("warning");
+    expect(stateTone("created")).toBe("muted");
+    // An unrecognised state is still shown — just uncoloured. Inventing a
+    // tone for it would assert something the bus never said.
+    expect(stateTone("something-new")).toBe("plain");
+  });
+
+  test("a theme without fg degrades to no colour rather than throwing", () => {
+    expect(themePaint(undefined)("error", "failed")).toBe("failed");
+    expect(themePaint({})("error", "failed")).toBe("failed");
+    expect(
+      themePaint({ fg: (tone: string, text: string) => `[${tone}]${text}` })("error", "failed"),
+    ).toBe("[error]failed");
+    // `plain` never reaches the theme: there is no such colour role.
+    expect(themePaint({ fg: (t: string, s: string) => `[${t}]${s}` })("plain", "x")).toBe("x");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Mounting the frame.
+//
+// Pi's setWidget takes either an array of lines or a component FACTORY. The
+// factory form is what carries a theme and a `requestRender`, so it is what
+// the frame wants; the array form is the fallback for a host that will not
+// take a function.
+
+describe("roster widget", () => {
+  const psRows = [
+    {
+      run: "x2",
+      uid: "w1",
+      role: "rev",
+      state: "running",
+      liveness: "live",
+      window: "rev-demo@dotfiles",
+      started: "2026-09-07T12:00:00.000000Z",
+    },
+  ];
+  const psExec = (rows: unknown[]) => async () => ({
+    code: 0,
+    stdout: JSON.stringify(rows),
+    stderr: "",
+  });
+
+  test("it mounts a component factory, which is what carries the theme", async () => {
+    const set: { key: string; content: unknown }[] = [];
+    const frame = startRosterFrame({
+      exec: psExec(psRows) as never,
+      setWidget: (key, content) => set.push({ key, content }),
+      intervalMs: 1_000_000,
+    });
+    await frame.refresh();
+    frame.stop();
+
+    const last = set.at(-1);
+    expect(last?.key).toBe("pi-workers");
+    expect(typeof last?.content).toBe("function");
+
+    // The factory is handed a tui and a theme, and returns a real component:
+    // render honours its width, and invalidate exists — a component without it
+    // breaks /reload.
+    const factory = last!.content as (tui: unknown, theme: unknown) => {
+      render: (width: number) => string[];
+      invalidate: () => void;
+      dispose?: () => void;
+    };
+    const component = factory({ requestRender: () => {} }, {
+      fg: (tone: string, text: string) => `[${tone}]${text}`,
+    });
+    expect(typeof component.invalidate).toBe("function");
+    const lines = component.render(200);
+    expect(lines.join("\n")).toContain("[accent]running");
+    expect(Math.max(...lines.map((l) => l.length))).toBeLessThanOrEqual(200);
+  });
+
+  test("a refresh repaints through the tui instead of re-mounting", async () => {
+    const set: unknown[] = [];
+    let renders = 0;
+    const frame = startRosterFrame({
+      exec: psExec(psRows) as never,
+      setWidget: (_key, content) => {
+        set.push(content);
+        if (typeof content === "function") {
+          (content as (tui: unknown, theme: unknown) => unknown)(
+            { requestRender: () => { renders += 1; } },
+            {},
+          );
+        }
+      },
+      intervalMs: 1_000_000,
+    });
+    await frame.refresh();
+    await frame.refresh();
+    frame.stop();
+
+    // Mounted once; the second refresh asked the tui to repaint.
+    expect(set.filter((c) => typeof c === "function")).toHaveLength(1);
+    expect(renders).toBeGreaterThan(0);
+  });
+
+  test("a host that refuses a factory still gets a frame, in the array form", async () => {
+    // An older Pi whose setWidget only accepts lines. A colourless frame is
+    // strictly better than no frame, and strictly better than an exception
+    // thrown into host startup.
+    const set: unknown[] = [];
+    const frame = startRosterFrame({
+      exec: psExec(psRows) as never,
+      setWidget: (_key, content) => {
+        if (typeof content === "function") throw new TypeError("content must be an array");
+        set.push(content);
+      },
+      intervalMs: 1_000_000,
+    });
+    await frame.refresh();
+    frame.stop();
+
+    const last = set.at(-1) as string[];
+    expect(Array.isArray(last)).toBe(true);
+    expect(last.join("\n")).toContain("running");
+    // No theme reached it, so no escape codes were invented.
+    expect(last.join("\n")).not.toContain("\u001b[");
+  });
+
+  test("an empty roster gives the terminal rows back", async () => {
+    const set: unknown[] = [];
+    const frame = startRosterFrame({
+      exec: psExec([]) as never,
+      setWidget: (_key, content) => set.push(content),
+      intervalMs: 1_000_000,
+    });
+    await frame.refresh();
+    frame.stop();
+    expect(set.at(-1)).toBeUndefined();
   });
 });
 
