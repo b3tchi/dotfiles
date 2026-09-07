@@ -1894,6 +1894,36 @@ def "main spawn" [
         error make {msg: $"spawn's --subject may not contain whitespace: it names a tmux window and a git branch. Pass a slug like 'timestamp-file'; the instructions go in the message"}
     }
 
+    # `--task` names the branch when it is given (see subject_for_branch in
+    # worker-spawn), so it is under exactly the same constraint as --subject
+    # and was under none of it. Observed: an agent put its whole instruction
+    # prose here and got
+    #
+    #     could not allocate a worktree for Create a new text file in
+    #     /home/jan/.dotfiles whose filename is the current timestamp ...
+    #     after 64 attempts
+    #
+    # which is git refusing 64 candidate branch names and saying so at the
+    # wrong altitude entirely.
+    #
+    # And the reason the prose went HERE is worth refusing separately: this
+    # stage takes instructions, spawn has nowhere to put instructions, and
+    # `--task` was the only field that looked like it accepted prose. Being
+    # told which verb carries instructions is the answer the caller needed;
+    # being told the branch allocator gave up is not.
+    if ($task | is-not-empty) {
+        let payload_kind = (stage-for $skill | get payload)
+        if $payload_kind != "ticket" {
+            error make {msg: $"spawn's --task is a TICKET ID and stage '($skill)' takes instructions, not a ticket. Spawn the worker without --task, then give it the work with `send --stage ($skill) --instructions '...'`"}
+        }
+        if ($task | str length) > $MAX_SUBJECT_CHARS {
+            error make {msg: $"spawn's --task is ($task | str length) characters; it names the worker's git branch, so it must be a ticket id, not a description. What the worker should DO belongs in the message"}
+        }
+        if ($task =~ '\s') {
+            error make {msg: $"spawn's --task may not contain whitespace: it names the worker's git branch. Pass a ticket id like 'dotfiles-2mzv'; the instructions go in `send --instructions`"}
+        }
+    }
+
     let run = (if ($run | is-empty) { mint-run } else { $run })
     let session = (if ($session | is-empty) { mint-session } else { $session })
     let minted = ($uid | is-empty)
