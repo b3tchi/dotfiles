@@ -580,6 +580,41 @@ export def bus-result [
         error make {msg: $"refusing a result from ($run)/($uid): no identity on the bus, so its stage gate cannot be applied"}
     }
 
+    # A `complete` from an isolated worktree must be COMMITTED.
+    #
+    # Observed: a worker created its file, reported `complete`, and acceptance
+    # then refused —
+    #
+    #     accept refused: refusing to clean up .../wk-timestamp-file.1: it
+    #     holds uncommitted work, which acceptance does not license deleting
+    #
+    # — which is the right refusal at the wrong moment. By then the worker has
+    # already declared success and gone quiet, so the operator is left holding
+    # a finished worker that cannot be accepted and a worktree that cannot be
+    # cleaned. Refusing at the REPORT puts the problem in front of the only
+    # party that can fix it, while it is still working.
+    #
+    # This is the same failure work-do's Step 7 exists for: work-merge merges
+    # the branch, not the worktree, so an uncommitted worktree is a branch with
+    # zero commits and a merge that silently does nothing. The work survives
+    # only because `git worktree remove` refuses to delete dirty state.
+    #
+    # Only `complete` is gated. `blocked`, `failed` and `waiting_human` are
+    # exactly the statuses a worker should be able to report with a messy tree,
+    # and refusing those would leave it no way to say so.
+    #
+    # A tree we cannot inspect is NOT refused: git missing, or a cwd that is not
+    # a repository, is our failure to observe rather than the worker's failure
+    # to commit, and accept's own guard still stands behind this. adr0017's
+    # rule, applied to a gate rather than a verdict.
+    if (($result | get -o status) == "complete") and ((stage-for $identity.skill | get isolation) == "worktree") {
+        let dirty = (do { ^git -C $identity.cwd status --porcelain } | complete)
+        if $dirty.exit_code == 0 and ($dirty.stdout | str trim | is-not-empty) {
+            let files = ($dirty.stdout | lines | each {|l| $l | str trim } | first 5 | str join ", ")
+            error make {msg: $"refusing `complete` from ($run)/($uid): ($identity.cwd) holds uncommitted work \(($files)). Commit it on ($identity.branch) first — acceptance deletes this worktree, and an uncommitted branch merges as a no-op, so reporting complete now loses the work"}
+        }
+    }
+
     validate-envelope (envelope-for $run $uid "result" $result)
     ensure-worker-dirs $run $uid
     claim-slot (worker-dir $run $uid | path join "outbox") (envelope-for $run $uid "result" $result)
