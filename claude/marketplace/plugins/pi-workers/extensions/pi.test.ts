@@ -2084,6 +2084,62 @@ describe("the frame appears once and stays until the work is done", () => {
     frame.stop();
   });
 
+  test("a completed run leaves nothing behind", async () => {
+    // Reported: after the work finished and no workers remained, the bar sat
+    // there reading `pi-workers · warming up`. Holding an empty heading is
+    // right DURING a run and a leftover after one.
+    let clock = 1_000_000;
+    const events: string[] = [];
+    const frame = startRosterFrame({
+      exec: (async () => ({ code: 0, stdout: "[]", stderr: "" })) as never,
+      setWidget: (_key, content) => events.push(content === undefined ? "unmount" : "mount"),
+      intervalMs: 1_000_000,
+      now: () => clock,
+    });
+    await frame.refresh();
+
+    // A whole run, ending in acceptance, with the worker already off the bus.
+    for (const verb of ["spawn", "send", "wait", "accept"]) {
+      frame.note({ verb, at: clock });
+      clock += 100;
+      frame.note({ verb, ok: true, at: clock });
+      await frame.refresh();
+      clock += 100;
+    }
+    expect(events).toEqual(["mount"]);
+
+    // One poll after the grace, and it is gone.
+    clock += EMPTY_GRACE_MS;
+    await frame.refresh();
+    expect(events).toEqual(["mount", "unmount"]);
+    frame.stop();
+  });
+
+  test("a failed ps does not freeze the frame forever", async () => {
+    // `refresh` used to return early on a non-zero exit, without drawing —
+    // and draw() is what ages an empty view out. One failed poll and the
+    // heading was on screen for good, with no path back to unmounting.
+    let clock = 1_000_000;
+    let code = 0;
+    const events: string[] = [];
+    const frame = startRosterFrame({
+      exec: (async () => ({ code, stdout: code === 0 ? "[]" : "", stderr: "boom" })) as never,
+      setWidget: (_key, content) => events.push(content === undefined ? "unmount" : "mount"),
+      intervalMs: 1_000_000,
+      now: () => clock,
+    });
+    await frame.refresh();
+    frame.note({ verb: "spawn", at: clock });
+    frame.note({ verb: "spawn", ok: true, at: clock });
+    expect(events).toEqual(["mount"]);
+
+    code = 1;
+    clock += EMPTY_GRACE_MS + 1;
+    await frame.refresh();
+    expect(events).toEqual(["mount", "unmount"]);
+    frame.stop();
+  });
+
   test("but an idle frame does give its rows back eventually", async () => {
     // Holding forever would leave an idle session staring at a widget with
     // nothing to say.
