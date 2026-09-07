@@ -9,10 +9,23 @@ set -euo pipefail
 
 # Resolve to the main worktree so the path stays valid after worktrees are
 # cleaned up.
+#
+# Asked of git directly rather than by parsing `worktree list --porcelain`. The
+# listing was piped into an `awk` that exits on the first record, and past one
+# write buffer git is still writing when awk closes the pipe: SIGPIPE, which
+# `set -euo pipefail` turns into this script's exit status. Measured: 3891 bytes
+# of listing installed fine, 6135 bytes failed every time — so the installer
+# worked in a quiet repo and refused, with a bare `141` and no message, in a
+# busy one. It cost a day of looking at it as a flaky test.
+#
+# `--git-common-dir` is the same question without the pipe: every linked
+# worktree shares the main worktree's git dir, so its parent IS the main
+# worktree. The `--is-inside-work-tree` guard above means this is never asked of
+# a bare repo, where the common dir is the repository itself and has no worktree
+# to be the parent of.
 _SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 if command -v git &>/dev/null && git -C "$_SCRIPT_DIR" rev-parse --is-inside-work-tree &>/dev/null 2>&1; then
-    _MAIN_WORKTREE="$(git -C "$_SCRIPT_DIR" worktree list --porcelain \
-        | awk 'BEGIN{RS=""} !/\nbare(\n|$)/ {sub(/^worktree /, ""); sub(/\n.*/, ""); print; exit}')"
+    _MAIN_WORKTREE="$(dirname "$(git -C "$_SCRIPT_DIR" rev-parse --path-format=absolute --git-common-dir)")"
     _REPO_ROOT="$(git -C "$_SCRIPT_DIR" rev-parse --show-toplevel)"
     _REL_PATH="${_SCRIPT_DIR#"$_REPO_ROOT"}"
     PKG_DIR="${_MAIN_WORKTREE:-$_REPO_ROOT}${_REL_PATH}"
@@ -68,8 +81,25 @@ unlink_cli() {
 # Pi has no extension drop-directory: a package is registered with
 # `pi install <source>`, which appends to packages[] in Pi's settings. The probe
 # is the BINARY, not a config dir, because Pi creates its config lazily.
+#
+# Captured whole and matched in the shell, NOT piped into `grep -qxF`: grep
+# exits at the match, and everything upstream of it then takes a SIGPIPE for
+# the rest of the list. Under `set -euo pipefail` that is 141, which reads as
+# "not registered" — so a long package list made this register the package a
+# second time. A wrong answer is worse than an abort, because nothing reports
+# it. (Same defect as the worktree listing above, one function along.)
 pi_lists_package() {
-    pi list 2>/dev/null | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep -qxF "$PKG_DIR"
+    local listed line
+    listed="$(pi list 2>/dev/null || true)"
+    while IFS= read -r line; do
+        # Trim with parameter expansion rather than a subprocess per line:
+        # strip the longest leading run of non-space (leaving the indent), then
+        # remove that indent — and the mirror image for the trailing side.
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        [ "$line" = "$PKG_DIR" ] && return 0
+    done <<<"$listed"
+    return 1
 }
 
 register_pi_package() {

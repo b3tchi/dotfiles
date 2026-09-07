@@ -35,6 +35,9 @@ def stub-bin [
     --tools: list<string> = []
     --record-pi
     --pi-already-installed
+    # Bytes of extra package lines for `pi list` to print. A real Pi install
+    # lists every package, and the probe has to survive a long list.
+    --noise: int = 0
 ]: nothing -> string {
     let bin = ([$nu.temp-dir $"piw-t7-bin-($tag)-(random chars --length 6)"] | path join)
     rm -rf $bin
@@ -49,11 +52,24 @@ def stub-bin [
         touch $log
         # `pi list` reports the resolved absolute path on its own line, which is
         # what an idempotence check can match against.
+        # Filler lines AFTER the real entry: that is the shape that breaks a
+        # probe which stops reading at the match, because the commands upstream
+        # of it still have the rest of the list to write.
+        let filler = (
+            if $noise <= 0 { "" } else {
+                let line = $"    /home/someone/.pi/packages/(random chars --length 40)"
+                (0..(($noise / (($line | str length) + 1)) | into int))
+                | each {|i| $"    /home/someone/.pi/packages/package-($i)-(random chars --length 30)" }
+                | str join "\n"
+                | append "\n"
+                | str join ""
+            }
+        )
         let listed = if $pi_already_installed {
             # The path install.sh will actually use, asked of git rather than
             # predicted from where this test happens to live.
-            $"  ../../pi-workers\n    (main-package-dir)"
-        } else { "" }
+            $"  ../../pi-workers\n    (main-package-dir)\n($filler)"
+        } else { $filler }
         let script = ([
             "#!/usr/bin/env bash"
             $"echo \"$*\" >> '($log)'"
@@ -82,6 +98,44 @@ def run-installer [home: string, --path-dirs: list<string> = []]: nothing -> rec
     with-env {HOME: $home, PATH: $path} {
         ^bash (installer) | complete
     }
+}
+
+# A throwaway repo holding a copy of this plugin, busy enough that
+# `git worktree list --porcelain` needs more than one write to report it.
+#
+# That size is the point, and it is measured rather than assumed. install.sh
+# resolves the main worktree so its link survives a feature worktree being
+# removed, and it did that by piping the porcelain listing into an `awk` that
+# exits on the first record. Past one write buffer git is still writing when awk
+# closes the pipe, which is a SIGPIPE, and under `set -euo pipefail` git's 141
+# becomes the installer's exit status.
+#
+# Measured on this box: 3891 bytes of listing passed 8/8 runs, 6135 bytes failed
+# 8/8 — a 4 KiB buffer. Calibrating on BYTES rather than on a worktree count is
+# deliberate: the record length depends on how long $TMPDIR happens to be, so a
+# fixed count of 32 worktrees straddled the threshold and made a real installer
+# bug look like a flaky test. This repo carried 31 entries the day it was found.
+def repo-with-worktrees [tag: string, bytes: int]: nothing -> record {
+    let repo = ([$nu.temp-dir $"piw-t7-repo-($tag)-(random chars --length 6)"] | path join)
+    let plugins = ($repo | path join "claude" "marketplace" "plugins")
+    let plugin = ($plugins | path join "pi-workers")
+    rm -rf $repo
+    mkdir $plugins
+    cp -r (main-package-dir) $plugins
+    ^git init -q -b main $repo
+    ^git -C $repo config user.email "test@example.com"
+    ^git -C $repo config user.name "Test"
+    ^git -C $repo add -A
+    ^git -C $repo commit -q -m "the plugin, as installed from"
+    # Grown until the listing is past the target, so the fixture holds however
+    # many worktrees THIS machine's paths need to get there.
+    mut i = 0
+    while (^git -C $repo worktree list --porcelain | str length) < $bytes {
+        $i = $i + 1
+        if $i > 500 { error make {msg: $"could not grow the listing past ($bytes) bytes"} }
+        ^git -C $repo worktree add -q -b $"wt-($i)" ($repo | path join ".worktrees" $"wt-($i)")
+    }
+    {repo: $repo, installer: ($plugin | path join "install.sh"), worktrees: $i}
 }
 
 let cases = [
@@ -272,6 +326,44 @@ let cases = [
         assert-eq $out.exit_code 0 "and runs as a command"
         assert-true ($out.stdout | str contains "spawn") ""
         rm -rf $home
+    })
+
+    (run-case "install/runs-in-a-repo-with-many-worktrees" {
+        # The installer resolves the main worktree before it links anything, so
+        # a repo busy enough to make that resolution fail is a repo it cannot
+        # install in at all. 8 KiB of listing is comfortably past the 4 KiB
+        # write buffer where the old pipeline took a SIGPIPE every time.
+        let fx = (repo-with-worktrees "busy" 8192)
+        let home = (fake-home "busy")
+        # `guarded`, because this fixture is ~26 MB of git worktrees and the
+        # first RED runs of this very case left three of them in /tmp.
+        guarded {
+            let out = (with-env {HOME: $home} { ^bash $fx.installer | complete })
+            assert-eq $out.exit_code 0 $"installer failed in a repo with ($fx.worktrees) worktrees: exit ($out.exit_code), stderr: ($out.stderr | str trim)"
+
+            let linked = ($home | path join ".local" "bin" "pi-worker")
+            assert-true ($linked | path exists) "and it still links the CLI"
+            let target = (^readlink $linked | str trim)
+            assert-true ($target | str starts-with $fx.repo) $"the link must point into the repo it was run from: ($target)"
+            assert-true (not ($target | str contains ".worktrees")) "anchored in the main worktree, not a feature one"
+        } { rm -rf $home; rm -rf $fx.repo }
+    })
+
+    (run-case "install/does-not-re-register-when-pi-lists-many-packages" {
+        # The same defect class as the worktree listing, one function along:
+        # `pi list | sed | grep -qxF` has grep exit on the first match, so past
+        # one write buffer the upstream commands take a SIGPIPE and pipefail
+        # reports 141 — which reads as "not registered" and installs the
+        # package a second time. A wrong answer, not an abort, which is worse.
+        let home = (fake-home "pi-many")
+        let bin = (stub-bin "pi-many" --tools ["nu" "tmux"] --record-pi --pi-already-installed --noise 6144)
+        guarded {
+            let out = (run-installer $home --path-dirs [$bin])
+            assert-eq $out.exit_code 0 $"installer failed: ($out.stderr | str trim)"
+            assert-true ($out.stdout | str contains "already registered") $"expected the probe to see the package, got: ($out.stdout)"
+            let calls = (open ($bin | path join "pi-calls.log") | lines | where {|l| $l | str starts-with "install" })
+            assert-eq ($calls | length) 0 $"nothing should have been installed again, got ($calls)"
+        } { rm -rf $home; rm -rf $bin }
     })
 
     (run-case "install/is-idempotent" {
