@@ -2040,6 +2040,50 @@ describe("the frame appears once and stays until the work is done", () => {
     frame.stop();
   });
 
+  test("a mounted frame never renders zero lines mid-run", async () => {
+    // The symptom that survived the first two fixes. Staying mounted stopped
+    // the widget being torn down, but with no workers on the bus yet, clearing
+    // a verb's activity left rosterFrame with nothing to return — so the
+    // component rendered zero lines, which on screen is indistinguishable from
+    // having vanished. The next verb brought it back. That is the blink.
+    let clock = 1_000_000;
+    let component: { render: (w: number) => string[] } | undefined;
+    const frame = startRosterFrame({
+      exec: (async () => ({ code: 0, stdout: "[]", stderr: "" })) as never,
+      setWidget: (_key, content) => {
+        if (typeof content === "function") {
+          component = (content as (t: unknown, th: unknown) => { render: (w: number) => string[] })(
+            { requestRender: () => {} },
+            {},
+          );
+        }
+      },
+      intervalMs: 1_000_000,
+      now: () => clock,
+    });
+    await frame.refresh();
+
+    frame.note({ verb: "spawn", at: clock });
+    expect(component!.render(200).length).toBeGreaterThan(0);
+
+    // The verb succeeds and its activity clears, while `ps` still lists
+    // nothing. This is the exact moment the bar used to go dark.
+    clock += 200;
+    frame.note({ verb: "spawn", ok: true, at: clock });
+    await frame.refresh();
+    expect(component!.render(200).length).toBeGreaterThan(0);
+    expect(component!.render(200)[0]).toContain("warming up");
+
+    // Same for the gap between any two later verbs.
+    clock += 200;
+    frame.note({ verb: "wait", at: clock });
+    clock += 200;
+    frame.note({ verb: "wait", ok: true, at: clock });
+    await frame.refresh();
+    expect(component!.render(200).length).toBeGreaterThan(0);
+    frame.stop();
+  });
+
   test("but an idle frame does give its rows back eventually", async () => {
     // Holding forever would leave an idle session staring at a widget with
     // nothing to say.
