@@ -744,6 +744,112 @@ export interface RosterRow {
   state: string;
   liveness: string;
   window: string;
+  /** When the worker was spawned, from its identity envelope. "" if unknown. */
+  started?: string;
+}
+
+/**
+ * Colour roles the frame asks for, named by what they mean rather than by a
+ * colour: the theme decides what `error` looks like.
+ *
+ * `plain` is the honest answer for a state the frame does not recognise —
+ * inventing a tone for it would assert something the bus never said.
+ */
+export type Tone = "accent" | "success" | "error" | "warning" | "muted" | "plain";
+
+/** Applies a tone. The identity function when there is no theme to ask. */
+export type PaintFn = (tone: Tone, text: string) => string;
+
+const NO_PAINT: PaintFn = (_tone, text) => text;
+
+/**
+ * A tone per state, chosen by what the operator has to DO about it.
+ *
+ * `blocked` and `waiting_human` are warnings because something is waiting on a
+ * person; `failed` and `protocol_error` are errors because the worker is not
+ * coming back. `created` is muted: nothing has happened yet.
+ */
+export function stateTone(state: string): Tone {
+  switch (state) {
+    case "running":
+      return "accent";
+    case "complete":
+      return "success";
+    case "failed":
+    case "protocol_error":
+      return "error";
+    case "blocked":
+    case "waiting_human":
+      return "warning";
+    case "created":
+      return "muted";
+    default:
+      return "plain";
+  }
+}
+
+/**
+ * A PaintFn backed by a Pi theme, or the identity function if there is none.
+ *
+ * Feature-detected rather than typed: the theme reaches the frame through
+ * setWidget's component factory, and a host that hands over something without
+ * `fg` must cost the frame its colour and nothing else.
+ *
+ * Two things here are load-bearing, and both were learned by taking Pi down.
+ *
+ * `fg` is called AS A METHOD. Pi's implementation reads `this.fgColors`, so a
+ * detached reference — `const fg = theme.fg; fg(tone, text)` — throws:
+ *
+ *     TypeError: Cannot read properties of undefined (reading 'fgColors')
+ *
+ * A test stub written as an arrow function does not notice, because an arrow
+ * has no `this` to lose.
+ *
+ * And the call is GUARDED. This runs inside a component's render(), which Pi
+ * invokes from a timer: anything thrown there is an uncaughtException that
+ * exits the whole session, so a theme that misbehaves must cost the frame its
+ * colour, not the operator their Pi. The first failure disables painting for
+ * the life of this PaintFn rather than throwing sixty times a second.
+ */
+export function themePaint(theme: unknown): PaintFn {
+  const host = theme as { fg?: (tone: string, text: string) => string } | undefined;
+  if (typeof host?.fg !== "function") return NO_PAINT;
+  let usable = true;
+  return (tone, text) => {
+    if (!usable || tone === "plain") return text;
+    try {
+      const painted = host.fg!(tone, text);
+      // A theme that returns nothing would blank the cell; treat that as
+      // unusable rather than rendering an empty column.
+      if (typeof painted !== "string") {
+        usable = false;
+        return text;
+      }
+      return painted;
+    } catch {
+      usable = false;
+      return text;
+    }
+  };
+}
+
+/**
+ * How long a worker has been around, from its start stamp.
+ *
+ * Coarse on purpose: the question is "has this been sitting there", and a
+ * seconds-precise reading of a forty-minute worker answers it no better than
+ * `40m`. An absent or unparseable stamp yields "" rather than a number —
+ * `0s` would read as a worker that had only just started.
+ */
+export function formatElapsed(started: string | undefined, now: number): string {
+  if (!started) return "";
+  const at = Date.parse(started);
+  if (!Number.isFinite(at)) return "";
+  const seconds = Math.max(0, Math.round((now - at) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  return `${Math.floor(minutes / 60)}h${minutes % 60}m`;
 }
 
 /**
@@ -759,25 +865,39 @@ export interface RosterRow {
 /** States meaning the worker is finished with; nothing is waiting on it. */
 const FINISHED_STATES: readonly string[] = ["stopped", "accepted"];
 
-export function rosterFrame(all: RosterRow[]): string[] | undefined {
+export function rosterFrame(
+  all: RosterRow[],
+  opts: { now?: number; paint?: PaintFn } = {},
+): string[] | undefined {
   // The frame answers "what is running", so a finished worker has no business
   // holding a row. `blocked` and `waiting_human` are NOT finished — they are
   // waiting for someone, which is precisely what a status panel is for.
   const rows = all.filter((r) => !FINISHED_STATES.includes(r.state));
   if (rows.length === 0) return undefined;
 
+  const now = opts.now ?? Date.now();
+  const paint = opts.paint ?? NO_PAINT;
+
   const addr = rows.map((r) => `${r.run}/${r.uid}`);
+  const age = rows.map((r) => formatElapsed(r.started, now));
   // Padded to a common width so the columns read down the frame rather than
   // drifting with the length of each run id.
   const addrWidth = Math.max(...addr.map((a) => a.length));
   const stateWidth = Math.max(...rows.map((r) => r.state.length));
+  const ageWidth = Math.max(...age.map((a) => a.length));
   const liveWidth = Math.max(...rows.map((r) => r.liveness.length));
 
   const heading = `pi-workers · ${rows.length} worker${rows.length === 1 ? "" : "s"}`;
   const lines = rows.map((r, i) =>
     [
       addr[i].padEnd(addrWidth),
-      r.state.padEnd(stateWidth),
+      // Padded BEFORE painting. A tone is escape codes, and every width here —
+      // this padding and wrapToWidth's — counts bytes, so a painted cell
+      // measured as text would push the rest of the row out of column.
+      paint(stateTone(r.state), r.state.padEnd(stateWidth)),
+      // An empty column would still cost two spaces, so a CLI too old to
+      // report `started` keeps precisely the layout it had.
+      ...(ageWidth > 0 ? [age[i].padEnd(ageWidth)] : []),
       r.liveness.padEnd(liveWidth),
       r.window,
     ].join("  "),
@@ -793,17 +913,117 @@ export function rosterFrame(all: RosterRow[]): string[] | undefined {
  * subscribe to. The interval is slow on purpose — this is a status panel, not
  * an animation, and each refresh costs a `pi-worker ps`.
  */
+export const ROSTER_WIDGET_KEY = "pi-workers";
+
+/** What the frame needs from the host's tui handle, and nothing more. */
+interface FrameTui {
+  requestRender(): void;
+}
+
 export function startRosterFrame(opts: {
   exec: ExecFn;
-  setWidget: (key: string, content: string[] | undefined) => void;
+  setWidget: (key: string, content: unknown) => void;
   intervalMs?: number;
+  now?: () => number;
 }): { refresh: () => Promise<void>; stop: () => void } {
+  const clock = opts.now ?? (() => Date.now());
+  let rows: RosterRow[] = [];
+  let mounted = false;
+  let tui: FrameTui | undefined;
+  // Whether the host takes a component factory. Assumed until one is refused;
+  // see mount() for why a refusal is not fatal.
+  let factoryForm = true;
+
+  /**
+   * Hand the host a component factory.
+   *
+   * The factory form is the one that carries a theme and a `requestRender`, so
+   * it is what the frame wants. A host that will not take a function is an
+   * older Pi, not a broken one: it gets the array form instead, which costs
+   * the frame its colour and nothing else. Throwing here would put the failure
+   * in host startup, which takes the whole worker down — strictly worse than a
+   * frame with no colour.
+   */
+  const mount = () => {
+    if (factoryForm) {
+      try {
+        opts.setWidget(ROSTER_WIDGET_KEY, (hostTui: unknown, theme: unknown) => {
+          tui = hostTui as FrameTui;
+          // Resolved on first render, INSIDE the guard below, and remembered.
+          // Reading the theme is itself something a host can make throw — an
+          // accessor, a proxy — and doing it out here would put that throw in
+          // the factory, where there is nothing to catch it.
+          let paint: PaintFn | undefined;
+          return {
+            // Rendered on demand, so the lines are computed against the
+            // clock at draw time rather than at poll time.
+            //
+            // Guarded as a whole for the same reason themePaint guards its
+            // call: Pi renders from a timer, and a throw here is an
+            // uncaughtException that exits the session. A status panel is
+            // never worth that, so a frame that cannot be drawn draws nothing.
+            render: (width: number) => {
+              try {
+                paint ??= themePaint(theme);
+                return wrapToWidth(rosterFrame(rows, { now: clock(), paint }) ?? [], width);
+              } catch {
+                return [];
+              }
+            },
+            invalidate: () => {
+              // The theme was captured when this factory ran, so a session
+              // that switches theme would keep painting the old palette
+              // forever. Pi calls invalidate on a from-scratch re-render,
+              // which is exactly when a fresh capture is available: drop the
+              // registration and let the next draw hand over a new factory.
+              mounted = false;
+              if (tui === (hostTui as FrameTui)) tui = undefined;
+            },
+            dispose: () => {
+              // Only disown the handle we were given: a later mount may
+              // already have replaced it.
+              if (tui === (hostTui as FrameTui)) tui = undefined;
+              mounted = false;
+            },
+          };
+        });
+        mounted = true;
+        return;
+      } catch {
+        factoryForm = false;
+      }
+    }
+    opts.setWidget(ROSTER_WIDGET_KEY, rosterFrame(rows, { now: clock() }));
+    mounted = true;
+  };
+
+  const draw = () => {
+    // Emptiness is decided on the plain frame: an unpainted render is cheap at
+    // roster size, and a widget must be dropped rather than left as an empty
+    // box holding terminal rows.
+    if (rosterFrame(rows, { now: clock() }) === undefined) {
+      if (mounted) {
+        opts.setWidget(ROSTER_WIDGET_KEY, undefined);
+        mounted = false;
+        tui = undefined;
+      }
+      return;
+    }
+    if (!mounted || !factoryForm) {
+      mount();
+      return;
+    }
+    // Already mounted as a component: ask for a repaint instead of handing
+    // over a second factory, which would leave the first one's handle stale.
+    tui?.requestRender();
+  };
+
   const refresh = async () => {
     try {
       const out = await opts.exec("pi-worker", ["ps"], {});
       if (out.code !== 0) return;
-      const rows = JSON.parse(out.stdout || "[]") as RosterRow[];
-      opts.setWidget("pi-workers", rosterFrame(rows));
+      rows = JSON.parse(out.stdout || "[]") as RosterRow[];
+      draw();
     } catch {
       // A frame that cannot be drawn is not worth breaking a session over.
     }
@@ -1177,8 +1397,16 @@ export default function piWorker(pi: ExtensionAPI): void {
       if (frame || ctx.mode !== "tui" || !ctx.hasUI) return;
       frame = startRosterFrame({
         exec,
+        // `content` is either a line array or a component factory; which one
+        // is startRosterFrame's decision, made once against what this host
+        // will accept. Cast because the two overloads differ per Pi version
+        // and the frame must compile against either.
         setWidget: (key, content) =>
-          ctx.ui.setWidget(key, content, { placement: "aboveEditor" }),
+          (ctx.ui.setWidget as (k: string, c: unknown, o?: unknown) => void)(
+            key,
+            content,
+            { placement: "aboveEditor" },
+          ),
       });
     };
     try {

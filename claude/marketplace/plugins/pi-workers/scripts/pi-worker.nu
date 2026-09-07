@@ -923,12 +923,24 @@ export def bus-identity [uid: string, --run: string, --identity: record]: nothin
     claim-slot (worker-dir $run $uid | path join "identity") (envelope-for $run $uid "identity" $identity)
 }
 
-# The worker's current identity, or nothing if it was never recorded.
-export def bus-identity-of [uid: string, --run: string]: nothing -> any {
+# The worker's current identity ENVELOPE, or nothing if none was recorded.
+#
+# Separate from `bus-identity-of` because the envelope carries the `created`
+# stamp and the payload does not. That stamp is the only record of when a
+# worker was spawned, so anything asking "how long has this been running"
+# needs the envelope rather than what is inside it.
+export def bus-identity-envelope [uid: string, --run: string]: nothing -> any {
     let dir = (worker-dir $run $uid | path join "identity")
     let records = (read-box $dir)
     if ($records | is-empty) { return null }
-    $records | last | get payload
+    $records | last
+}
+
+# The worker's current identity, or nothing if it was never recorded.
+export def bus-identity-of [uid: string, --run: string]: nothing -> any {
+    let envelope = (bus-identity-envelope $uid --run $run)
+    if $envelope == null { return null }
+    $envelope | get payload
 }
 
 # ====================================================== visible Pi workers
@@ -1448,7 +1460,8 @@ export def worker-roster [--run: string = "", --socket: string = ""]: nothing ->
         if not ($dir | path exists) { [] } else {
             ls $dir | where type == dir | get name | sort | each {|w|
                 let uid = ($w | path basename)
-                let identity = (bus-identity-of $uid --run $r)
+                let envelope = (bus-identity-envelope $uid --run $r)
+                let identity = (if $envelope == null { null } else { $envelope.payload })
                 let window = (if $identity == null { "" } else { $identity.window })
                 let target = (if $identity == null { "" } else { window-target $identity })
                 {
@@ -1458,6 +1471,10 @@ export def worker-roster [--run: string = "", --socket: string = ""]: nothing ->
                     state: (bus-status $uid --run $r | get state)
                     liveness: (if ($target | is-empty) { "unknown" } else { worker-liveness $target --socket $socket | get verdict })
                     window: $window
+                    # When the worker was spawned. Empty rather than a
+                    # substitute when no identity was ever written: a made-up
+                    # start time would read as an idle worker.
+                    started: (if $envelope == null { "" } else { $envelope.created })
                     resume: (if $identity == null { "" } else { resume-hint $identity })
                 }
             }
