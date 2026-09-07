@@ -49,24 +49,75 @@ export def assert-rejects [body: closure, expect: string, msg: string] {
 
 # ----------------------------------------------------------- case running
 
+# Run one case: report it, and leave nothing behind either way.
+export def run-case [name: string, body: closure] {
+    # Every case gets a sandbox, and it is reaped whether the case passes or
+    # fails. Teardown as the last statement of a case is skipped by a failing
+    # assertion, so a suite leaks precisely when it is being used most: this
+    # box was holding 42 live tmux servers, 40 dead sockets and 67 MB of git
+    # worktrees from one afternoon of red runs. `guarded` fixes that one case
+    # at a time and only where someone remembered; this fixes the class.
+    let sandbox = ([$nu.temp-dir $"piw-case-(random chars --length 8)"] | path join)
+    mkdir $sandbox
+    let outcome = (try {
+        with-env {PIW_CASE_TMP: $sandbox} { do $body }
+        null
+    } catch {|e| $e })
+    reap-sandbox $sandbox
+    if $outcome == null { return {name: $name, status: "pass", detail: ""} }
+    let e = $outcome
+    {name: $name, status: "FAIL", detail: (case-detail $e)}
+}
+
+# Where a fixture belongs: this case's sandbox when there is one, the temp dir
+# otherwise, so a helper called outside a case still works.
+export def fixture-base []: nothing -> string {
+    $env | get -o PIW_CASE_TMP | default $nu.temp-dir
+}
+
+# Mint a private tmux socket name AND record it, so the harness can kill the
+# server even when the case that made it died mid-assertion. A socket lives in
+# /tmp/tmux-<uid>/ rather than in the sandbox, so the name has to be written
+# down for it to be findable.
+export def new-tmux-socket [tag: string]: nothing -> string {
+    let socket = $"piw-($tag)-(random chars --length 6)"
+    let registry = ((fixture-base) | path join ".tmux-sockets")
+    $"($socket)\n" | save --append --raw $registry
+    $socket
+}
+
+# Kill anything the case registered, then remove the sandbox. Never throws:
+# reaping runs on the failure path, and an error here would replace the case's
+# own diagnosis with a cleanup error.
+def reap-sandbox [sandbox: string] {
+    let registry = ($sandbox | path join ".tmux-sockets")
+    if ($registry | path exists) {
+        for socket in (try { open $registry | lines } catch { [] }) {
+            let name = ($socket | str trim)
+            if ($name | is-not-empty) { do { drop-tmux-server $name } | ignore }
+        }
+    }
+    do { rm -rf $sandbox } | ignore
+}
+
+# The detail a failing case reports.
+#
 # A failing case has to say WHY. Nushell renders an external-command failure as
 # the bare string "External command failed", which names neither the command nor
 # its stderr — useless in a suite that shells out to git and tmux. When the
 # message is that unhelpful, fall back to the structured error record.
-export def run-case [name: string, body: closure] {
-    try {
-        do $body
-        {name: $name, status: "pass", detail: ""}
-    } catch {|e|
-        # The fallback must never throw: an assertion that fails while reporting
-        # a failure would hide the case it was reporting on.
-        let detail = if ($e.msg | str contains "External command failed") {
-            let extra = (try { $e | to nuon | str substring 0..500 } catch { "" })
-            $"($e.msg) | ($extra)"
-        } else {
-            $e.msg
-        }
-        {name: $name, status: "FAIL", detail: $detail}
+#
+# Must never throw: it runs on the failure path, and an error while reporting a
+# failure would hide the case it was reporting on.
+def case-detail [e: any]: nothing -> string {
+    let msg = (try { $e.msg } catch { "" })
+    if ($msg | str contains "External command failed") {
+        let extra = (try { $e | to nuon | str substring 0..500 } catch { "" })
+        $"($msg) | ($extra)"
+    } else if ($msg | is-empty) {
+        (try { $e | to nuon | str substring 0..500 } catch { "unreportable failure" })
+    } else {
+        $msg
     }
 }
 
@@ -162,7 +213,7 @@ export def sample-envelope [kind: string]: nothing -> record {
 # no shared state between cases, and nothing written near the real runtime dir
 # of a live session.
 export def make-runtime [tag: string]: nothing -> string {
-    let root = ([$nu.temp-dir $"pi-worker-test-($tag)-(random chars --length 6)"] | path join)
+    let root = ([(fixture-base) $"pi-worker-test-($tag)-(random chars --length 6)"] | path join)
     rm -rf $root
     mkdir $root
     chmod 700 $root
@@ -194,7 +245,7 @@ export def dir-mode-of [path: string]: nothing -> string {
 # (locks, prunable registrations, branch-without-directory) that faking it would
 # test the fake.
 export def make-repo [tag: string]: nothing -> string {
-    let root = ([$nu.temp-dir $"pi-worker-repo-($tag)-(random chars --length 6)"] | path join)
+    let root = ([(fixture-base) $"pi-worker-repo-($tag)-(random chars --length 6)"] | path join)
     rm -rf $root
     mkdir $root
     ^git -C $root init -q -b main

@@ -28,7 +28,7 @@ def dirty-it [repo: string, path: string] {
 # train.
 def with-remote [tag: string]: nothing -> record {
     let repo = (make-repo $tag)
-    let remote = ([$nu.temp-dir $"piw-remote-($tag)-(random chars --length 6)"] | path join)
+    let remote = ([(fixture-base) $"piw-remote-($tag)-(random chars --length 6)"] | path join)
     ^git init -q --bare $remote
     ^git -C $repo remote add origin $remote
 

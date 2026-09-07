@@ -20,7 +20,7 @@ use ../../claude/marketplace/plugins/pi-workers/scripts/stage-registry.nu *
 use harness.nu *
 
 def fixture [tag: string, body: string]: nothing -> string {
-    let path = ([$nu.temp-dir $"pi-worker-stages-($tag)-(random chars --length 6).json"] | path join)
+    let path = ([(fixture-base) $"pi-worker-stages-($tag)-(random chars --length 6).json"] | path join)
     $body | save -f $path
     $path
 }
@@ -50,7 +50,7 @@ let cases = [
         # Not an empty registry — an ABSENT one. Treating that as "no stages
         # configured, allow anything" would silently drop every gate the
         # consumer declared.
-        let path = ([$nu.temp-dir $"pi-worker-absent-(random chars --length 6).json"] | path join)
+        let path = ([(fixture-base) $"pi-worker-absent-(random chars --length 6).json"] | path join)
         assert-rejects { load-stages --path $path } "no stage registry" "it says what is missing"
         assert-rejects { load-stages --path $path } $path "naming the path it looked at"
     })

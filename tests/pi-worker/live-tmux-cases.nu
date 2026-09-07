@@ -20,8 +20,8 @@ use ../../claude/marketplace/plugins/pi-workers/scripts/pi-worker.nu *
 # to exercise a pane that spawn's `remain-on-exit on` keeps listed after its
 # process is gone (dotfiles-yii5).
 def make-server [tag: string, --stub: string = "sleep 30"]: nothing -> record {
-    let socket = $"piw-t6-($tag)-(random chars --length 6)"
-    let sandbox = ([$nu.temp-dir $"piw-t6-bin-($tag)-(random chars --length 6)"] | path join)
+    let socket = (new-tmux-socket $"t6-($tag)")
+    let sandbox = ([(fixture-base) $"piw-t6-bin-($tag)-(random chars --length 6)"] | path join)
     mkdir $sandbox
     $"#!/bin/bash\n($stub)\n" | save -f ($sandbox | path join "pi")
     chmod +x ($sandbox | path join "pi")
@@ -170,7 +170,7 @@ def records-argv [log: string]: nothing -> string {
 }
 
 def argv-log [tag: string]: nothing -> string {
-    ([$nu.temp-dir $"piw-argv-($tag)-(random chars --length 6).log"] | path join)
+    ([(fixture-base) $"piw-argv-($tag)-(random chars --length 6).log"] | path join)
 }
 
 def with-server [tag: string, body: closure, --stub: string = "sleep 30"] {

@@ -26,8 +26,8 @@ use ../../claude/marketplace/plugins/pi-workers/scripts/pi-worker.nu *
 def cli []: nothing -> string { worker-script $env.FILE_PWD }
 
 def make-server [tag: string]: nothing -> record {
-    let socket = $"piw-t7-($tag)-(random chars --length 6)"
-    let sandbox = ([$nu.temp-dir $"piw-t7-bin-($tag)-(random chars --length 6)"] | path join)
+    let socket = (new-tmux-socket $"t7-($tag)")
+    let sandbox = ([(fixture-base) $"piw-t7-bin-($tag)-(random chars --length 6)"] | path join)
     mkdir $sandbox
     # A stub worker that prints the sort of detail a real refinement produces,
     # then keeps its window alive so it can be inspected.

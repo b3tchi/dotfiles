@@ -14,8 +14,8 @@ use harness.nu *
 use ../../claude/marketplace/plugins/pi-workers/scripts/pi-worker.nu *
 
 def make-tmux [tag: string]: nothing -> record {
-    let socket = $"piw-t5-($tag)-(random chars --length 6)"
-    let sandbox = ([$nu.temp-dir $"piw-t5-bin-($tag)-(random chars --length 6)"] | path join)
+    let socket = (new-tmux-socket $"t5-($tag)")
+    let sandbox = ([(fixture-base) $"piw-t5-bin-($tag)-(random chars --length 6)"] | path join)
     mkdir $sandbox
     "#!/bin/bash\nsleep 30\n" | save -f ($sandbox | path join "pi")
     chmod +x ($sandbox | path join "pi")
@@ -92,7 +92,7 @@ let cases = [
         # binds a session to the directory it was created in, and accept has
         # just removed it, so that command refuses to start. The id and the
         # result do outlive the worktree — the command to reach them does not.
-        let empty_sessions = ([$nu.temp-dir $"infinifu-nosessions-(random chars --length 6)"] | path join)
+        let empty_sessions = ([(fixture-base) $"infinifu-nosessions-(random chars --length 6)"] | path join)
         mkdir $empty_sessions
         with-pipeline "evidence" {|t, repo|
             launch $t $repo "impl-a" "impl"
@@ -239,7 +239,7 @@ let cases = [
             launch $t $repo "rev-a" "rev" "wk-review"
             complete-with "impl-a" "done"
 
-            let script = ([$nu.temp-dir $"t5-restart-(random chars --length 6).nu"] | path join)
+            let script = ([(fixture-base) $"t5-restart-(random chars --length 6).nu"] | path join)
             $"use (worker-script $env.FILE_PWD) *\nrun-workers \"run-1\" | to json" | save -f $script
             let out = (^$nu.current-exe $script | complete)
             assert-eq $out.exit_code 0 $"restart probe failed: ($out.stderr)"

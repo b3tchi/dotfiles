@@ -40,7 +40,7 @@ def put-result [run: string, uid: string, overrides: record = {}]: nothing -> re
 # A stand-in for ~/.pi/agent/sessions: one directory per project slug, each
 # holding `<timestamp>_<uuid>.jsonl` transcripts.
 def fake-sessions [tag: string, layout: record]: nothing -> string {
-    let root = ([$nu.temp-dir $"pi-worker-sessions-($tag)-(random chars --length 6)"] | path join)
+    let root = ([(fixture-base) $"pi-worker-sessions-($tag)-(random chars --length 6)"] | path join)
     rm -rf $root
     mkdir $root
     for slug in ($layout | columns) {
@@ -599,7 +599,7 @@ let cases = [
         # is helpful will commit — so git enforces it, and this asserts that
         # git actually does.
         let root = (make-runtime "commit-guard")
-        let repo = ([$nu.temp-dir $"piw-guard-(random chars --length 6)"] | path join)
+        let repo = ([(fixture-base) $"piw-guard-(random chars --length 6)"] | path join)
         rm -rf $repo; mkdir $repo
         ^git -C $repo init -q
         ^git -C $repo config user.email "t@t"; ^git -C $repo config user.name "t"

@@ -18,8 +18,8 @@ use ../../claude/marketplace/plugins/pi-workers/scripts/pi-worker.nu *
 # A private tmux server plus a stub `pi`. The stub is what makes the case
 # hermetic: a real Pi would need a model, a network, and minutes.
 def make-tmux [tag: string, pi_body: string]: nothing -> record {
-    let socket = $"piw-t4-($tag)-(random chars --length 6)"
-    let sandbox = ([$nu.temp-dir $"piw-t4-bin-($tag)-(random chars --length 6)"] | path join)
+    let socket = (new-tmux-socket $"t4-($tag)")
+    let sandbox = ([(fixture-base) $"piw-t4-bin-($tag)-(random chars --length 6)"] | path join)
     mkdir $sandbox
     $"#!/bin/bash\n($pi_body)\n" | save -f ($sandbox | path join "pi")
     chmod +x ($sandbox | path join "pi")
@@ -227,7 +227,7 @@ let cases = [
         # it has to actually reach the process, not just the identity record.
         let repo = (make-repo "sid")
         let root = (make-runtime "sid")
-        let marker = ([$nu.temp-dir $"piw-t4-argv-(random chars --length 6)"] | path join)
+        let marker = ([(fixture-base) $"piw-t4-argv-(random chars --length 6)"] | path join)
         let t = (make-tmux "sid" $"echo \"$@\" > ($marker); sleep 30")
         with-runtime $root {
             with-env {PATH: ([$t.bin] ++ $env.PATH)} {
@@ -272,7 +272,7 @@ let cases = [
         # a bootstrap message that would have nowhere to land.
         let repo = (make-repo "env")
         let root = (make-runtime "env")
-        let marker = ([$nu.temp-dir $"piw-t4-env-(random chars --length 6)"] | path join)
+        let marker = ([(fixture-base) $"piw-t4-env-(random chars --length 6)"] | path join)
         let t = (make-tmux "env" $"env | grep PI_WORKER_ > ($marker); sleep 30")
         with-runtime $root {
             with-env {PATH: ([$t.bin] ++ $env.PATH)} {

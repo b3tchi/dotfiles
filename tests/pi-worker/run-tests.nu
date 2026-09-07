@@ -56,6 +56,49 @@ let harness_cases = [
     (run-case "harness/assert-rejects-needs-a-throw" {
         assert-throws { assert-rejects {|| 1 } "reason" "x" } "assert-rejects must fail when nothing throws"
     })
+    # A suite that leaks on the failure path leaks precisely when it is being
+    # used most: this box was found holding 42 live tmux servers, 40 dead
+    # sockets and 67 MB of git worktrees from one afternoon of red runs, because
+    # teardown written as the last statement of a case is skipped by a failing
+    # assertion. run-case now sandboxes and reaps, so the leak is impossible
+    # rather than remembered.
+    (run-case "harness/a-failing-case-leaves-no-fixtures-behind" {
+        # The inner case's path is written OUT of the closure through a file,
+        # because the assertion has to run after the reaping.
+        let witness = ([$nu.temp-dir $"piw-witness-(random chars --length 6)"] | path join)
+        let inner = (run-case "inner/deliberately-fails" {
+            let repo = (make-repo "leak-probe")
+            let runtime = (make-runtime "leak-probe")
+            [$repo $runtime] | str join "\n" | save -f $witness
+            assert-eq 1 2 "this case is meant to fail"
+        })
+        assert-eq $inner.status "FAIL" "the inner case must have failed"
+        let paths = (open $witness | lines)
+        rm -f $witness
+        assert-eq ($paths | length) 2 ""
+        for p in $paths {
+            assert-true (not ($p | path exists)) $"($p) survived a failing case"
+            assert-true ($p | str contains "piw-case") $"($p) was not created in a sandbox"
+        }
+    })
+
+    (run-case "harness/a-failing-case-leaves-no-tmux-server-behind" {
+        # The expensive half of the leak: a socket lives outside the sandbox, so
+        # the harness can only kill what was registered through new-tmux-socket.
+        let witness = ([$nu.temp-dir $"piw-witness-(random chars --length 6)"] | path join)
+        let inner = (run-case "inner/leaves-a-server" {
+            let socket = (new-tmux-socket "leak-probe")
+            ^tmux -L $socket new-session -d -s "probe" -n "main"
+            $socket | save -f $witness
+            assert-eq 1 2 "this case is meant to fail"
+        })
+        assert-eq $inner.status "FAIL" ""
+        let socket = (open $witness | str trim)
+        rm -f $witness
+        let alive = (do { ^tmux -L $socket list-sessions } | complete | get exit_code)
+        assert-true ($alive != 0) $"the server on ($socket) survived a failing case"
+    })
+
     (run-case "harness/assert-rejects-checks-the-reason" {
         # A validator that throws the wrong reason is as bad as one that does
         # not throw: the operator still cannot tell what to fix.

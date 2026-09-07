@@ -39,7 +39,7 @@ def stub-bin [
     # lists every package, and the probe has to survive a long list.
     --noise: int = 0
 ]: nothing -> string {
-    let bin = ([$nu.temp-dir $"piw-t7-bin-($tag)-(random chars --length 6)"] | path join)
+    let bin = ([(fixture-base) $"piw-t7-bin-($tag)-(random chars --length 6)"] | path join)
     rm -rf $bin
     mkdir $bin
     let base = ["bash" "ln" "mkdir" "readlink" "basename" "dirname" "rm" "git" "awk" "sed" "grep" "cat" "which" "env" "sort" "head" "tail" "tr" "cut" "cp" "mv" "test" "printf" "echo"]
@@ -86,7 +86,7 @@ def stub-bin [
 }
 
 def fake-home [tag: string]: nothing -> string {
-    let home = ([$nu.temp-dir $"piw-t7-home-($tag)-(random chars --length 6)"] | path join)
+    let home = ([(fixture-base) $"piw-t7-home-($tag)-(random chars --length 6)"] | path join)
     rm -rf $home
     mkdir $home
     $home
@@ -116,7 +116,7 @@ def run-installer [home: string, --path-dirs: list<string> = []]: nothing -> rec
 # fixed count of 32 worktrees straddled the threshold and made a real installer
 # bug look like a flaky test. This repo carried 31 entries the day it was found.
 def repo-with-worktrees [tag: string, bytes: int]: nothing -> record {
-    let repo = ([$nu.temp-dir $"piw-t7-repo-($tag)-(random chars --length 6)"] | path join)
+    let repo = ([(fixture-base) $"piw-t7-repo-($tag)-(random chars --length 6)"] | path join)
     let plugins = ($repo | path join "claude" "marketplace" "plugins")
     let plugin = ($plugins | path join "pi-workers")
     rm -rf $repo
@@ -456,7 +456,7 @@ let cases = [
         # Missing dependency must fail BEFORE creating anything: a half-install
         # that links a CLI which cannot run is worse than no install.
         let home = (fake-home "nonu")
-        let stub = ([$nu.temp-dir $"piw-t7-emptybin-(random chars --length 6)"] | path join)
+        let stub = ([(fixture-base) $"piw-t7-emptybin-(random chars --length 6)"] | path join)
         mkdir $stub
         # A PATH with neither nu nor tmux, but with the coreutils the script needs.
         for tool in ["bash" "ln" "mkdir" "readlink" "basename" "dirname" "command" "rm" "git" "awk" "sed"] {
