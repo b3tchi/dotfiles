@@ -1060,14 +1060,81 @@ const FRAME_COVERED_VERBS: readonly string[] = [
   "rm",
 ];
 
-export function transcriptLines(verb: string, ok: boolean, detail: string): string[] {
+/** The two verbs whose whole purpose is detail, so they collapse rather than hide. */
+const DETAIL_VERBS: readonly string[] = ["inspect", "status"];
+
+/**
+ * One line standing in for a whole `inspect` or `status` body.
+ *
+ * What an operator wants at a glance is the same three facts the frame shows —
+ * who, what state, where to look — so the collapsed line is those, parsed out
+ * of the JSON rather than sliced off the top of it. The first line of that JSON
+ * is `{`, which tells nobody anything.
+ *
+ * Never empty. A body that will not parse falls back to its own first line: the
+ * CLI is a nu script and a future verb may print something that is not JSON,
+ * and collapsing that to nothing would hide the fact that the call answered at
+ * all.
+ */
+export function collapsedStateLine(detail: string): string {
+  const raw = detail.trim();
+  const hint = "click or expand-key for detail";
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    const first = raw.split("\n")[0] ?? "";
+    return first.length > 0 ? `${first} · ${hint}` : `(no output) · ${hint}`;
+  }
+  if (parsed === null || typeof parsed !== "object") {
+    const first = raw.split("\n")[0] ?? "";
+    return first.length > 0 ? `${first} · ${hint}` : `(no output) · ${hint}`;
+  }
+
+  const o = parsed as Record<string, unknown>;
+  const identity = (o.identity ?? {}) as Record<string, unknown>;
+  const last = (o.last_result ?? null) as Record<string, unknown> | null;
+
+  const parts: string[] = [];
+  // Either half of the address is worth printing on its own: `status` answers
+  // for a whole run and carries no uid, and requiring both dropped it to the
+  // useless `{` fallback.
+  const addr = [o.run, o.uid].filter((v) => typeof v === "string" && v.length > 0);
+  if (addr.length > 0) parts.push(addr.join("/"));
+  if (typeof o.state === "string") parts.push(o.state);
+  // The last reported status only earns a place when it disagrees with the
+  // state — otherwise it is the same word twice.
+  if (last && typeof last.status === "string" && last.status !== o.state) {
+    parts.push(`reported ${last.status}`);
+  }
+  if (typeof identity.window === "string" && identity.window.length > 0) {
+    parts.push(identity.window);
+  }
+  if (parts.length === 0) parts.push(raw.split("\n")[0] ?? "(no output)");
+
+  return `${parts.join("  ")} · ${hint}`;
+}
+
+export function transcriptLines(
+  verb: string,
+  ok: boolean,
+  detail: string,
+  // Collapsed is the DEFAULT view: the agent picks the verb and the operator
+  // pays the screen, so detail has to be asked for rather than arrive.
+  expanded = false,
+): string[] {
   // A failure always prints, whatever the verb. Suppressing a spawn's success
   // must never suppress its refusal — an operator who cannot see the failure
-  // has no idea why nothing happened.
+  // has no idea why nothing happened. Nor is a refusal ever collapsed: hiding
+  // it behind a click is the same mistake wearing a hat.
   if (!ok) return [detail];
 
-  // `inspect` and `status` are asked precisely for their detail.
-  if (verb === "inspect" || verb === "status") return detail.split("\n");
+  // `inspect` and `status` are asked precisely for their detail — so it is
+  // reachable, not printed unbidden.
+  if (DETAIL_VERBS.includes(verb)) {
+    return expanded ? detail.split("\n") : [collapsedStateLine(detail)];
+  }
 
   if (FRAME_COVERED_VERBS.includes(verb)) return [];
 
@@ -1135,6 +1202,34 @@ export function callComponent(): {
 }
 
 /**
+ * What Pi hands renderResult beyond the result itself.
+ *
+ * `expanded` is Pi's own view state, driven by the configured expand key.
+ * `state` is the shared per-row object Pi keeps for a tool execution, which is
+ * where the click toggle has to live: Pi rebuilds the component on every
+ * redraw, so a flag held in the closure would be forgotten the moment the
+ * click caused a redraw. `invalidate` repaints that one row.
+ *
+ * All three optional, so a caller with no Pi context still gets a component.
+ */
+export interface ResultViewOptions {
+  expanded?: boolean;
+  state?: Record<string, unknown>;
+  invalidate?: () => void;
+}
+
+/** Where the click toggle is parked on the row's shared state. */
+const CLICK_EXPANDED_KEY = "piWorkerClickExpanded";
+
+/** A minimal shape of pi-tui's TuiMouseEvent — only what the hit test reads. */
+interface MouseEventish {
+  type: string;
+  button: string;
+  y: number;
+  height: number;
+}
+
+/**
  * The transcript component for one tool result.
  *
  * pi-tui's `Component` requires `invalidate()` as well as `render()` — it is
@@ -1146,14 +1241,36 @@ export function callComponent(): {
  *
  * Always a real component, even with no lines: returning nothing would leave
  * the same hole in the render tree.
+ *
+ * `handleMouse` is offered only when there is something to expand. A handler
+ * over zero rows would swallow clicks meant for whatever Pi draws next, and a
+ * handler on a verb with no hidden detail would toggle nothing while claiming
+ * the click.
  */
 export function resultComponent(
   verb: string,
   ok: boolean,
   detail: string,
-): { render: (width: number) => string[]; invalidate: () => void } {
-  const lines = transcriptLines(verb, ok, detail);
-  return {
+  opts: ResultViewOptions = {},
+): {
+  render: (width: number) => string[];
+  invalidate: () => void;
+  handleMouse?: (event: MouseEventish) => { handled: boolean } | undefined;
+} {
+  const state = opts.state;
+  const clicked = state?.[CLICK_EXPANDED_KEY] === true;
+  // Either source expands it, so the expand key and the click cannot fight:
+  // whichever the operator reached for, the detail appears.
+  const expanded = opts.expanded === true || clicked;
+  const lines = transcriptLines(verb, ok, detail, expanded);
+
+  const collapsible = ok && DETAIL_VERBS.includes(verb) && lines.length > 0;
+
+  const component: {
+    render: (width: number) => string[];
+    invalidate: () => void;
+    handleMouse?: (event: MouseEventish) => { handled: boolean } | undefined;
+  } = {
     // Honours the width it is given; see wrapToWidth for why that is not
     // optional.
     render: (width: number) => wrapToWidth(lines, width),
@@ -1161,6 +1278,24 @@ export function resultComponent(
       // Nothing is cached; the lines were computed once when the call returned.
     },
   };
+
+  if (collapsible && state) {
+    component.handleMouse = (event) => {
+      // Coordinates are local to this component, so a row inside it is
+      // 0 <= y < height. Anything else belongs to a sibling — claiming it
+      // would eat clicks this component never drew.
+      if (event.y < 0 || event.y >= event.height) return undefined;
+      if (event.button !== "left") return undefined;
+      // Toggle on press only. Acting on press AND release would fire twice per
+      // click and land back where it started.
+      if (event.type !== "press") return undefined;
+      state[CLICK_EXPANDED_KEY] = !clicked;
+      opts.invalidate?.();
+      return { handled: true };
+    };
+  }
+
+  return component;
 }
 
 /**
@@ -1431,9 +1566,25 @@ export default function piWorker(pi: ExtensionAPI): void {
         // the noise this removes.
         renderShell: "self",
         renderCall: () => callComponent(),
-        renderResult: (result: { details?: unknown }) => {
+        // Pi passes its own view state and a per-row context here, and both
+        // were being dropped on the floor — which is why `inspect` printed its
+        // whole body every time regardless of the expand key. `options` and
+        // `context` are typed loosely on purpose: their shapes differ across
+        // Pi versions, and the frame must load against either.
+        renderResult: (
+          result: { details?: unknown },
+          options?: { expanded?: boolean },
+          _theme?: unknown,
+          context?: { state?: Record<string, unknown>; invalidate?: () => void },
+        ) => {
           const outcome = (result.details ?? {}) as { ok?: boolean; detail?: string };
-          return resultComponent(lastVerb, outcome.ok !== false, outcome.detail ?? "");
+          return resultComponent(lastVerb, outcome.ok !== false, outcome.detail ?? "", {
+            expanded: options?.expanded === true,
+            // No context means no per-row state to remember a click in, so the
+            // component simply offers no click target rather than pretending.
+            ...(context?.state ? { state: context.state } : {}),
+            ...(context?.invalidate ? { invalidate: context.invalidate } : {}),
+          });
         },
         execute: async (
           _id: string,

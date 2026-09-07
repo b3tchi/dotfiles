@@ -35,6 +35,7 @@ import {
   createResultTool,
   createInitiatorTool,
   rosterFrame,
+  collapsedStateLine,
   formatElapsed,
   stateTone,
   themePaint,
@@ -1258,10 +1259,17 @@ describe("transcript lines", () => {
     expect(lines[0]).toContain("already exists");
   });
 
-  test("the detail verbs keep every line they produced", () => {
+  test("the detail verbs keep every line they produced — once expanded", () => {
+    // This used to assert the body printed unconditionally. It does not any
+    // more: the agent chooses the verb and the operator pays the screen, so
+    // the detail is reachable rather than unbidden. What must not change is
+    // that expanding loses nothing.
     const detail = "{\n  \"run\": \"x1\"\n}";
-    expect(transcriptLines("inspect", true, detail)).toEqual(detail.split("\n"));
-    expect(transcriptLines("status", true, detail)).toEqual(detail.split("\n"));
+    expect(transcriptLines("inspect", true, detail, true)).toEqual(detail.split("\n"));
+    expect(transcriptLines("status", true, detail, true)).toEqual(detail.split("\n"));
+    // And collapsed, each is a single line that still names the worker.
+    expect(transcriptLines("inspect", true, detail, false)).toHaveLength(1);
+    expect(transcriptLines("inspect", true, detail, false)[0]).toContain("x1");
   });
 });
 
@@ -1429,5 +1437,204 @@ describe("inbox watcher against a fake Pi", () => {
     const { host, sent } = fakeHost();
     expect(createInboxWatcher({ sendUserMessage: host.sendUserMessage }, identity, "/inbox", io).poll()).toEqual([]);
     expect(sent).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Collapsing inspect and status.
+//
+// Those two verbs exist to carry detail, so they cannot be suppressed the way
+// the frame-covered verbs are. But the AGENT picks the verb and the OPERATOR
+// pays the screen: an agent probing a hang called `inspect` twice and printed
+// two identical twenty-line JSON blobs nobody asked for. So the body collapses
+// to one line and is available on demand.
+
+const INSPECT_BODY = JSON.stringify(
+  {
+    run: "x3",
+    uid: "w1",
+    identity: {
+      role: "impl",
+      cwd: "/home/jan/.dotfiles",
+      branch: "main",
+      session: "2b9d7b5e-4c6d-4adf-b3ff-b459f6a3f2a",
+      skill: "probe",
+      window: "impl-timestamp-file@dotfiles",
+      window_id: "@219",
+    },
+    state: "running",
+    last_result: null,
+    rejections: 0,
+    resume: "pi --session 2b9d7b5e-4c6d-4adf-b3ff-b459f6a3f2a",
+    transcript: "/home/jan/.pi/agent/sessions/x/y.jsonl",
+  },
+  null,
+  2,
+);
+
+describe("collapsed state line", () => {
+  test("it names the address, the state and the window", () => {
+    const line = collapsedStateLine(INSPECT_BODY);
+    expect(line).toContain("x3/w1");
+    expect(line).toContain("running");
+    expect(line).toContain("impl-timestamp-file@dotfiles");
+    // One line, whatever the body.
+    expect(line.split("\n")).toHaveLength(1);
+  });
+
+  test("it carries the last reported status when there is one", () => {
+    const body = JSON.stringify({
+      run: "x2",
+      uid: "w1",
+      identity: { window: "impl-a@dotfiles" },
+      state: "complete",
+      last_result: { status: "complete", summary: "Created timestamp.txt" },
+    });
+    const line = collapsedStateLine(body);
+    expect(line).toContain("x2/w1");
+    expect(line).toContain("complete");
+  });
+
+  test("output that will not parse still yields a line, never nothing", () => {
+    // The CLI is a nu script; a future verb could print something that is not
+    // JSON at all. Collapsing to an empty line would hide the fact that the
+    // call returned anything.
+    expect(collapsedStateLine("not json at all").length).toBeGreaterThan(0);
+    expect(collapsedStateLine("not json at all")).toContain("not json at all");
+    expect(collapsedStateLine("").length).toBeGreaterThan(0);
+  });
+
+  test("it says it can be expanded, or the affordance is invisible", () => {
+    expect(collapsedStateLine(INSPECT_BODY).toLowerCase()).toContain("expand");
+  });
+});
+
+describe("transcriptLines expansion", () => {
+  test("a collapsed inspect is one line, not the whole body", () => {
+    const lines = transcriptLines("inspect", true, INSPECT_BODY, false);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("x3/w1");
+    expect(lines[0]).not.toContain("transcript");
+  });
+
+  test("an expanded inspect is byte-identical to the old full body", () => {
+    expect(transcriptLines("inspect", true, INSPECT_BODY, true)).toEqual(
+      INSPECT_BODY.split("\n"),
+    );
+  });
+
+  test("status collapses the same way", () => {
+    expect(transcriptLines("status", true, INSPECT_BODY, false)).toHaveLength(1);
+    expect(transcriptLines("status", true, INSPECT_BODY, true).length).toBeGreaterThan(1);
+  });
+
+  test("a failure is never collapsed, whatever the verb or the expand state", () => {
+    // An operator who cannot read the refusal has no idea why nothing
+    // happened, and hiding it behind a click makes that worse, not better.
+    const err = "refusing to spawn x3/w1: address occupied";
+    expect(transcriptLines("inspect", false, err, false)).toEqual([err]);
+    expect(transcriptLines("status", false, err, false)).toEqual([err]);
+  });
+
+  test("the other verbs are unaffected by the expand state", () => {
+    // Regression guard: collapsing must not leak into the verbs the frame
+    // already covers, nor un-suppress them when expanded.
+    for (const expanded of [false, true]) {
+      expect(transcriptLines("spawn", true, "spawned x3/w1", expanded)).toEqual([]);
+      expect(transcriptLines("wait", true, "no unacknowledged results", expanded)).toEqual([]);
+      expect(transcriptLines("ack", true, "acked seq 1", expanded)).toEqual(["acked seq 1"]);
+    }
+  });
+
+  test("omitting the expand state collapses, because that is the default view", () => {
+    expect(transcriptLines("inspect", true, INSPECT_BODY)).toHaveLength(1);
+  });
+});
+
+describe("click to expand", () => {
+  // Pi hands renderResult an options object with its own `expanded` flag and a
+  // context carrying per-row state plus invalidate(). Both are real inputs, so
+  // the stubs here are objects, not arrow functions standing in for them.
+  const mouseEvent = (over: { x: number; y: number }) => ({
+    type: "press" as const,
+    button: "left" as const,
+    x: over.x,
+    y: over.y,
+    screenX: over.x,
+    screenY: over.y,
+    width: 80,
+    height: 1,
+    shift: false,
+    alt: false,
+    ctrl: false,
+  });
+
+  test("a click inside the component expands it and redraws just that row", () => {
+    let invalidated = 0;
+    const state: Record<string, unknown> = {};
+    const component = resultComponent("inspect", true, INSPECT_BODY, {
+      expanded: false,
+      state,
+      invalidate: () => { invalidated += 1; },
+    });
+
+    expect(component.render(200)).toHaveLength(1);
+
+    const result = component.handleMouse!(mouseEvent({ x: 3, y: 0 }));
+    expect(result?.handled).toBe(true);
+    expect(invalidated).toBe(1);
+
+    // The toggle lives in the row's shared state, so the component Pi builds
+    // on the next render sees it.
+    const redrawn = resultComponent("inspect", true, INSPECT_BODY, {
+      expanded: false,
+      state,
+      invalidate: () => {},
+    });
+    expect(redrawn.render(200).length).toBeGreaterThan(1);
+  });
+
+  test("a second click collapses it again", () => {
+    const state: Record<string, unknown> = {};
+    const opts = { expanded: false, state, invalidate: () => {} };
+    resultComponent("inspect", true, INSPECT_BODY, opts).handleMouse!(mouseEvent({ x: 1, y: 0 }));
+    resultComponent("inspect", true, INSPECT_BODY, opts).handleMouse!(mouseEvent({ x: 1, y: 0 }));
+    expect(resultComponent("inspect", true, INSPECT_BODY, opts).render(200)).toHaveLength(1);
+  });
+
+  test("a click outside the component's bounds is not ours to handle", () => {
+    let invalidated = 0;
+    const component = resultComponent("inspect", true, INSPECT_BODY, {
+      expanded: false,
+      state: {},
+      invalidate: () => { invalidated += 1; },
+    });
+    expect(component.handleMouse!(mouseEvent({ x: 3, y: 40 }))).toBeUndefined();
+    expect(invalidated).toBe(0);
+  });
+
+  test("Pi's own expand key wins even with no click", () => {
+    const component = resultComponent("inspect", true, INSPECT_BODY, {
+      expanded: true,
+      state: {},
+      invalidate: () => {},
+    });
+    expect(component.render(200).length).toBeGreaterThan(1);
+  });
+
+  test("a verb with nothing to show offers no click target", () => {
+    // `spawn` renders no lines at all; a mouse handler over zero rows would
+    // swallow clicks meant for whatever Pi draws next.
+    const component = resultComponent("spawn", true, "spawned x3/w1", {
+      expanded: false,
+      state: {},
+      invalidate: () => {},
+    });
+    expect(component.render(200)).toEqual([]);
+    expect(component.handleMouse?.(mouseEvent({ x: 0, y: 0 }))).toBeUndefined();
+  });
+
+  test("the old two-argument call still works, for callers that have no context", () => {
+    expect(resultComponent("inspect", true, INSPECT_BODY).render(200)).toHaveLength(1);
   });
 });
