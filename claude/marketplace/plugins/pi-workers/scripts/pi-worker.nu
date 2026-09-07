@@ -1272,6 +1272,81 @@ def worker-window-corpses [
     }
 }
 
+# Sweep worker branches off a remote.
+#
+# A worker that pushes its branch leaves a ref behind, and the local sweep
+# cannot see it: origin carried wk-timestamp-file.2/.3/.4 and wk-timestamp-md.3
+# long after every local trace was gone, and `.4` belonged to a worktree this
+# machine never had.
+#
+# Opt-in per call, and never a side effect of the local sweep, because this is
+# the one part of reclaim that reaches past this machine: a ref on a shared
+# remote may be the only copy of work, or another person's checkout's upstream.
+#
+# `git fetch` first, always. The merged check needs the objects, and answering
+# it from stale local knowledge is how a sweep deletes a ref whose new commits
+# it never saw. A remote that cannot be reached is REPORTED as such (adr0017):
+# an empty answer from a probe that never ran would read as a clean remote.
+def remote-reclaim [
+    repo: string
+    remote: string
+    base: string
+    held: list<record>      # workers with work in flight, from the bus
+    force: bool
+    dry_run: bool
+]: nothing -> record {
+    let fetched = (do { ^git -C $repo fetch --quiet --prune $remote } | complete)
+    if $fetched.exit_code != 0 {
+        return {reachable: false, deleted: [], kept: [{branch: "", reason: $"could not reach ($remote): ($fetched.stderr | str trim)"}]}
+    }
+    # Every head, filtered HERE. Asking ls-remote for `refs/heads/wk-*` would
+    # filter server-side and leave the scope guard below unexercised — a
+    # mutation that deleted it kept the whole suite green. One guard that is
+    # tested beats two where the tested one hides the other.
+    let listed = (do { ^git -C $repo ls-remote --heads $remote } | complete)
+    if $listed.exit_code != 0 {
+        return {reachable: false, deleted: [], kept: [{branch: "", reason: $"could not list ($remote): ($listed.stderr | str trim)"}]}
+    }
+    # Only `wk-` refs are listed for, because a remote holds branches from
+    # every machine and every person who pushes to it.
+    let refs = (
+        $listed.stdout
+        | lines
+        | each {|l| $l | split row "\t" }
+        | where {|p| ($p | length) >= 2 }
+        | each {|p| {sha: ($p | first | str trim), branch: (($p | get 1) | str replace "refs/heads/" "" | str trim)} }
+        | where {|r| $r.branch | str starts-with $BRANCH_PREFIX }
+    )
+
+    mut deleted = []
+    mut kept = []
+    for r in $refs {
+        let owner = ($held | where branch == $r.branch)
+        if ($owner | is-not-empty) {
+            let o = ($owner | first)
+            $kept = ($kept | append {branch: $r.branch, reason: $"($o.run)/($o.uid) is ($o.state)"})
+            continue
+        }
+        # Against the REMOTE base, not the local one: what matters is whether
+        # the remote already holds these commits somewhere it will keep them.
+        let target = $"refs/remotes/($remote)/($base)"
+        let merged = (do { ^git -C $repo merge-base --is-ancestor $r.sha $target } | complete | get exit_code) == 0
+        if not $merged and not $force {
+            $kept = ($kept | append {branch: $r.branch, reason: $"not merged into ($remote)/($base); --force to delete it anyway"})
+            continue
+        }
+        if not $dry_run {
+            let pushed = (do { ^git -C $repo push --quiet $remote --delete $r.branch } | complete)
+            if $pushed.exit_code != 0 {
+                $kept = ($kept | append {branch: $r.branch, reason: ($pushed.stderr | str trim)})
+                continue
+            }
+        }
+        $deleted = ($deleted | append $r.branch)
+    }
+    {reachable: true, deleted: $deleted, kept: $kept}
+}
+
 # Reclaim every worker worktree in a project that no live worker owns.
 #
 # `worker-stop` leaves the tree and the branch behind deliberately: they may
@@ -1304,6 +1379,10 @@ export def worktrees-reclaim [
     # the main worktree is on, which is the branch work lands in.
     --base: string = ""
     --socket: string = ""
+    # The remote to sweep worker branches off, e.g. `origin`. Absent means the
+    # sweep stays on this machine: deleting a shared ref is the one thing here
+    # that reaches past it, so it is asked for explicitly every time.
+    --remote: string = ""
     --force
     --dry-run
 ]: nothing -> record {
@@ -1446,6 +1525,12 @@ export def worktrees-reclaim [
         $windows_kept = ($windows_kept | append {window: $w.id, reason: $"dead, but no identity on the bus for it \(($w.name)); kill it by hand"})
     }
 
+    let remote_swept = (if ($remote | is-empty) {
+        {reachable: true, deleted: [], kept: []}
+    } else {
+        remote-reclaim $repo $remote $base $held $force $dry_run
+    })
+
     {
         repo: $repo
         base: $base
@@ -1457,6 +1542,10 @@ export def worktrees-reclaim [
         windows_killed: $windows_killed
         windows_kept: $windows_kept
         tmux_reachable: $corpses.reachable
+        remote: $remote
+        remote_deleted: $remote_swept.deleted
+        remote_kept: $remote_swept.kept
+        remote_reachable: $remote_swept.reachable
     }
 }
 
@@ -2815,10 +2904,13 @@ def usage []: nothing -> string {
         "  respawn  <uid> --run --repo          bring a reclaimed worker back: a NEW uid"
         "                                       on the SAME Pi session, tree rebuilt"
         "  stop     <uid> --run                 close the window, KEEP the worktree"
-        "  reclaim  --repo [--base] [--socket] [--force] [--dry-run]"
+        "  reclaim  --repo [--base] [--socket] [--remote] [--force] [--dry-run]"
         "                                       sweep a PROJECT: every worker tree no"
         "                                       live worker owns, plus the dead worker"
-        "                                       windows tmux still lists. Session ids survive"
+        "                                       windows tmux still lists. Session ids survive."
+        "                                       --remote <name> also sweeps pushed wk- refs"
+        "                                       off that remote; without it nothing leaves"
+        "                                       this machine"
         "  doctor                               check dependencies"
         ""
         "NOTES"
@@ -3084,8 +3176,11 @@ def "main stop" [uid: string, --run: string, --socket: string = ""] {
     worker-stop $uid --run $run --socket $socket | to json | print
 }
 
-def "main reclaim" [--repo: string, --base: string = "", --socket: string = "", --force, --dry-run] {
-    (worktrees-reclaim --repo $repo --base $base --socket $socket
+def "main reclaim" [
+    --repo: string, --base: string = "", --socket: string = "", --remote: string = ""
+    --force, --dry-run
+] {
+    (worktrees-reclaim --repo $repo --base $base --socket $socket --remote $remote
         --force=$force --dry-run=$dry_run) | to json | print
 }
 

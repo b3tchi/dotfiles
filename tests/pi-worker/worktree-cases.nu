@@ -18,6 +18,45 @@ def dirty-it [repo: string, path: string] {
     "uncommitted\n" | save -f ($path | path join "scratch.txt")
 }
 
+# A repo with a bare "origin" carrying three refs: the base, a merged worker
+# branch, and one with a commit of its own. Local worker branches are deleted
+# afterwards, which is the real situation — the local sweep has already run and
+# only the remote copies are left.
+#
+# A bare repo on disk rather than a network remote: `git push` speaks the same
+# protocol to both, and a case that needs the network is a case that fails on a
+# train.
+def with-remote [tag: string]: nothing -> record {
+    let repo = (make-repo $tag)
+    let remote = ([$nu.temp-dir $"piw-remote-($tag)-(random chars --length 6)"] | path join)
+    ^git init -q --bare $remote
+    ^git -C $repo remote add origin $remote
+
+    ^git -C $repo branch wk-merged.0
+    ^git -C $repo checkout -q -b wk-unmerged.0
+    "work\n" | save -f ($repo | path join "remote-work.txt")
+    ^git -C $repo add -A
+    ^git -C $repo commit -q -m "work only the remote will hold"
+    ^git -C $repo checkout -q -b feature-someone-elses
+    ^git -C $repo checkout -q main
+    ^git -C $repo push -q origin main wk-merged.0 wk-unmerged.0 feature-someone-elses
+    # Local copies gone: what is being tested is the sweep of the REMOTE.
+    ^git -C $repo branch -q -D wk-merged.0 wk-unmerged.0 feature-someone-elses
+    ^git -C $repo fetch -q origin
+
+    {repo: $repo, remote: $remote, runtime: (make-runtime $tag)}
+}
+
+def drop-remote [fx: record] {
+    rm -rf $fx.runtime; rm -rf $fx.repo; rm -rf $fx.remote
+}
+
+def remote-branches [repo: string]: nothing -> list<string> {
+    ^git -C $repo ls-remote --heads origin
+    | lines
+    | each {|l| $l | split row "\t" | last | str replace "refs/heads/" "" | str trim }
+}
+
 let cases = [
     # ------------------------------------------------------------ allocation
     (run-case "worktree/allocates-the-first-iteration" {
@@ -669,6 +708,117 @@ let cases = [
             ^git -C $repo worktree remove --force $outside
         }
         rm -rf $root; rm -rf $repo
+    })
+
+    # --------------------------------------------------- the remote leftover
+    #
+    # A worker that pushes its branch leaves a ref on the remote, and nothing
+    # swept those: origin carried wk-timestamp-file.2/.3/.4 and wk-timestamp-md.3
+    # long after every local trace was gone, one of them (`.4`) for a worktree
+    # this machine never had. Deleting a remote branch is outward-facing, so it
+    # is opt-in per call and never a side effect of the local sweep.
+
+    (run-case "reclaim/leaves-the-remote-alone-unless-asked" {
+        let fx = (with-remote "gc-optin")
+        with-runtime $fx.runtime {
+            let got = (worktrees-reclaim --repo $fx.repo)
+            assert-eq ($got | get -o remote_deleted | default []) [] "no remote work without --remote"
+            # main, wk-merged.0, wk-unmerged.0, feature-someone-elses.
+            assert-eq (remote-branches $fx.repo | length) 4 "and the refs are all still there"
+        }
+        drop-remote $fx
+    })
+
+    (run-case "reclaim/deletes-a-merged-remote-worker-ref" {
+        let fx = (with-remote "gc-remote-merged")
+        with-runtime $fx.runtime {
+            let got = (worktrees-reclaim --repo $fx.repo --remote "origin")
+            assert-true $got.remote_reachable "the remote answered"
+            assert-eq $got.remote_deleted ["wk-merged.0"] "the merged ref is reclaimed"
+            let left = (remote-branches $fx.repo)
+            assert-true ("wk-merged.0" not-in $left) ""
+            assert-true ("wk-unmerged.0" in $left) "and the one carrying work is not"
+        }
+        drop-remote $fx
+    })
+
+    (run-case "reclaim/keeps-an-unmerged-remote-ref-and-names-it" {
+        # The remote copy may be the only copy: this machine deleted its local
+        # branch, and another machine may never have had it.
+        let fx = (with-remote "gc-remote-unmerged")
+        with-runtime $fx.runtime {
+            let got = (worktrees-reclaim --repo $fx.repo --remote "origin")
+            let named = ($got.remote_kept | where branch == "wk-unmerged.0")
+            assert-eq ($named | length) 1 $"the unmerged ref must be reported, got ($got.remote_kept)"
+            assert-true (($named | first | get reason) | str contains "not merged") ""
+
+            # --force is the operator saying they have looked.
+            let forced = (worktrees-reclaim --repo $fx.repo --remote "origin" --force)
+            assert-eq $forced.remote_deleted ["wk-unmerged.0"] "--force takes it"
+            assert-eq ((remote-branches $fx.repo) | where {|b| $b | str starts-with "wk-" }) [] "the remote is clear of worker refs"
+        }
+        drop-remote $fx
+    })
+
+    (run-case "reclaim/never-touches-a-remote-ref-that-is-not-a-workers" {
+        # `wk-` is the only naming this owns. A remote holds branches from every
+        # machine and every person who pushes to it.
+        let fx = (with-remote "gc-remote-scope")
+        with-runtime $fx.runtime {
+            let got = (worktrees-reclaim --repo $fx.repo --remote "origin" --force)
+            let left = (remote-branches $fx.repo)
+            assert-true ("main" in $left) "the base survives"
+            assert-true ("feature-someone-elses" in $left) "and so does anything not wk-"
+            assert-true ("feature-someone-elses" not-in $got.remote_deleted) ""
+        }
+        drop-remote $fx
+    })
+
+    (run-case "reclaim/keeps-a-remote-ref-whose-worker-is-still-in-flight" {
+        # The same rule as locally, applied to the ref: a worker with work in
+        # flight owns its branch, wherever a copy of it lives.
+        let fx = (with-remote "gc-remote-live")
+        with-runtime $fx.runtime {
+            bus-identity "impl-1" --run "r1" --identity {
+                role: "impl", cwd: $nu.temp-dir, branch: "wk-merged.0"
+                session: "sid-1", skill: "wk-build", window: "impl-live@dotfiles"
+            }
+            let got = (worktrees-reclaim --repo $fx.repo --remote "origin" --force)
+            # The held ref survives --force; its sibling, which nobody holds,
+            # does not. An in-flight worker's branch is not a judgement about
+            # the other refs on the remote.
+            assert-eq $got.remote_deleted ["wk-unmerged.0"] "only the ref nobody holds"
+            assert-true ("wk-merged.0" in (remote-branches $fx.repo)) "the held ref is still on the remote"
+            let named = ($got.remote_kept | where branch == "wk-merged.0" | first)
+            assert-eq $named.reason "r1/impl-1 is created" "and the report names who has it"
+        }
+        drop-remote $fx
+    })
+
+    (run-case "reclaim/a-remote-dry-run-deletes-nothing" {
+        let fx = (with-remote "gc-remote-dry")
+        with-runtime $fx.runtime {
+            let got = (worktrees-reclaim --repo $fx.repo --remote "origin" --force --dry-run)
+            assert-eq ($got.remote_deleted | sort) ["wk-merged.0" "wk-unmerged.0"] "it reports what it would take"
+            let left = (remote-branches $fx.repo)
+            assert-true ("wk-merged.0" in $left) "and takes nothing"
+            assert-true ("wk-unmerged.0" in $left) ""
+        }
+        drop-remote $fx
+    })
+
+    (run-case "reclaim/an-unreachable-remote-is-reported-not-guessed-at" {
+        # adr0017: a probe that could not be made is not an empty answer. A
+        # sweep that reported "no remote refs" for a remote it never reached
+        # would read as a clean remote.
+        let fx = (with-remote "gc-remote-down")
+        rm -rf $fx.remote
+        with-runtime $fx.runtime {
+            let got = (worktrees-reclaim --repo $fx.repo --remote "origin")
+            assert-eq $got.remote_reachable false "the report says the probe failed"
+            assert-eq $got.remote_deleted [] "and nothing was deleted on a guess"
+        }
+        drop-remote $fx
     })
 
     (run-case "reclaim/dry-run-reports-without-touching-anything" {
