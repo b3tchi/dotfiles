@@ -577,6 +577,111 @@ let cases = [
         rm -rf $root
     })
 
+    (run-case "bus/an-address-is-minted-when-none-is-given" {
+        # An agent that must supply a uid and has no way to make one shells out
+        # to `uuidgen`, which lands a bare 36-character id in the operator's
+        # transcript for no reason. Minting it here removes the need, and a
+        # `<role>-<n>` id is legible in a window name and in the frame, which a
+        # uuid is not.
+        let root = (make-runtime "mint-uid")
+        with-runtime $root {
+            assert-eq (mint-uid "r1" "impl") "impl-1" "the first of a role"
+            bus-identity "impl-1" --run "r1" --identity {
+                role: "impl", cwd: $nu.temp-dir, branch: "wk-t.0"
+                session: "s", skill: "wk-build", window: "impl-1@dotfiles"
+            }
+            assert-eq (mint-uid "r1" "impl") "impl-2" "the next one skips the taken address"
+            assert-eq (mint-uid "r1" "rev") "rev-1" "counted per role, not per run"
+            assert-eq (mint-uid "r2" "impl") "impl-1" "and per run, not globally"
+        }
+        rm -rf $root
+    })
+
+    (run-case "bus/a-pi-session-id-is-minted-when-none-is-given" {
+        # The `session` tool parameter was documented as "a fresh uuid for the
+        # worker's Pi session", so the agent did the only thing it could: it
+        # shelled out to `uuidgen` and put 36 characters of noise in the
+        # operator's transcript. The id is passed straight to `pi --session-id`
+        # to CREATE a session, so nothing about it needs to come from outside.
+        assert-true ((mint-session) != (mint-session)) "a fresh one each time"
+        assert-eq ((mint-session) | str length) 36 "shaped like the uuid pi expects"
+        assert-true ((mint-session) =~ '^[0-9a-f]{8}-[0-9a-f]{4}-') "and actually a uuid"
+    })
+
+    (run-case "bus/a-run-is-minted-when-none-is-given" {
+        let root = (make-runtime "mint-run")
+        with-runtime $root {
+            assert-eq (mint-run) "r1" "the first run of an empty bus"
+            bus-send "w" --run "r1" --payload {stage: "wk-build", task: "t"}
+            assert-eq (mint-run) "r2" "the next free one"
+            # A run whose name is not `r<N>` must not confuse the counter.
+            bus-send "w" --run "custom" --payload {stage: "wk-build", task: "t"}
+            assert-eq (mint-run) "r2" "names outside the pattern are ignored, not parsed"
+        }
+        rm -rf $root
+    })
+
+    (run-case "bus/wait-can-block-until-a-result-lands" {
+        # `wait` peeked and returned nothing, so an agent told to "wait for its
+        # typed result" concluded it needed a polling mechanism and read the
+        # worker's tmux pane — the one thing the transport boundary forbids as
+        # a completion signal. Blocking here is what removes that reason.
+        let root = (make-runtime "wait-block")
+        with-runtime $root {
+            bus-identity "w1" --run "r1" --identity {
+                role: "impl", cwd: $nu.temp-dir, branch: "wk-t.0"
+                session: "s", skill: "wk-build", window: "w1@dotfiles"
+            }
+            # Write the result from another process a moment from now, so the
+            # blocking wait has something to actually wait FOR.
+            let script = ($root | path join "late-result.nu")
+            # Single-quoted so the record's own double quotes need no escaping.
+            let body = ('use ' + (worker-script $env.FILE_PWD) + ' *
+sleep 1200ms
+bus-result "w1" --run "r1" --result {status: "complete", summary: "done", window: "w1@dotfiles", session: "s", resume: "pi --session s", validation: "checked"}')
+            $body | save -f $script
+            # Started in the background so the result lands WHILE the wait
+            # below is blocking, rather than before it begins.
+            job spawn { ^nu $script | ignore }
+
+            let started = (date now)
+            let got = (bus-wait --run "r1" --uid "w1" --block --timeout 10sec)
+            let waited = ((date now) - $started)
+
+            assert-true ($got != null) "it came back with the result, not with nothing"
+            assert-eq $got.payload.status "complete" "and it is the worker's own report"
+            assert-true ($waited > 500ms) "it actually waited rather than peeking once"
+            assert-true ($waited < 9sec) "and returned as soon as the result landed"
+        }
+        rm -rf $root
+    })
+
+    (run-case "bus/a-blocking-wait-gives-up-instead-of-hanging-forever" {
+        let root = (make-runtime "wait-timeout")
+        with-runtime $root {
+            bus-send "w1" --run "r1" --payload {stage: "wk-build", task: "t"}
+            let started = (date now)
+            let got = (bus-wait --run "r1" --uid "w1" --block --timeout 2sec)
+            let waited = ((date now) - $started)
+            assert-eq $got null "nothing to report is not an error"
+            assert-true ($waited >= 2sec) "it honoured the timeout"
+            assert-true ($waited < 6sec) "and did not sit there past it"
+        }
+        rm -rf $root
+    })
+
+    (run-case "bus/wait-without-block-still-peeks-and-returns" {
+        # Regression guard: scripts rely on `wait` answering immediately.
+        let root = (make-runtime "wait-peek")
+        with-runtime $root {
+            bus-send "w1" --run "r1" --payload {stage: "wk-build", task: "t"}
+            let started = (date now)
+            assert-eq (bus-wait --run "r1" --uid "w1") null "still nothing pending"
+            assert-true (((date now) - $started) < 500ms) "and it did not block to say so"
+        }
+        rm -rf $root
+    })
+
     (run-case "bus/the-roster-says-when-each-worker-started" {
         # `running` says nothing about whether that is eight seconds or forty
         # minutes, and only one of those is worth interrupting. The stamp comes

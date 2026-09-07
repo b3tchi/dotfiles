@@ -704,6 +704,8 @@ export interface InitiatorArgs {
   artifacts?: string;
   feedback?: string;
   sequence?: number;
+  block?: boolean;
+  timeout?: number;
   socket?: string;
 }
 
@@ -716,7 +718,7 @@ const VERB_FLAGS: Record<string, readonly string[]> = {
   ps: ["run", "socket"],
   spawn: ["run", "uid", "role", "subject", "project", "repo", "session", "skill", "task", "socket"],
   send: ["run", "stage", "task", "instructions", "artifacts"],
-  wait: ["run", "uid"],
+  wait: ["run", "uid", "block", "timeout"],
   rm: ["run", "uid"],
   ack: ["run", "uid", "sequence"],
   status: ["run"],
@@ -1414,6 +1416,13 @@ export function createInitiatorTool(opts: { exec: ExecFn; cwd?: string }): Initi
         // CLI reads an empty --task as "this stage has a ticket id" and then
         // fails on a shape the caller never asked for.
         if (value === undefined || value === null || value === "") continue;
+        // A switch carries no value. `--block true` would hand nu `true` as an
+        // extra positional, and `--block false` is not how nu spells "don't":
+        // absence is.
+        if (typeof value === "boolean") {
+          if (value) argv.push(`--${flag}`);
+          continue;
+        }
         argv.push(`--${flag}`, String(value));
       }
 
@@ -1442,13 +1451,13 @@ const INITIATOR_TOOL_PARAMETERS = {
   type: "object",
   properties: {
     verb: { type: "string", enum: [...INITIATOR_VERBS], description: "which bus operation to run" },
-    run: { type: "string", description: "the run id grouping these workers" },
-    uid: { type: "string", description: "the worker's id within the run. On `wait`, scopes to that worker instead of the whole run" },
+    run: { type: "string", description: "the run id grouping these workers. On spawn, omit it and one is minted; reuse what spawn reports for sibling workers" },
+    uid: { type: "string", description: "the worker's id within the run. On spawn, omit it and one is minted from the role. On `wait`, scopes to that worker instead of the whole run" },
     role: { type: "string", description: "spawn: shown in the window name, e.g. impl or rev" },
     subject: { type: "string", description: "spawn: what the worker is working on; shown in the window name. Avoid '.'" },
     project: { type: "string", description: "spawn: tmux session group or session name to host the window" },
     repo: { type: "string", description: "spawn/accept: the git repository" },
-    session: { type: "string", description: "spawn: a fresh uuid for the worker's Pi session" },
+    session: { type: "string", description: "spawn: omit this. The worker's Pi session id is minted for you — do not generate one" },
     skill: { type: "string", description: "spawn: a stage name declared in the stage registry" },
     task: { type: "string", description: "spawn/send: ticket id, for stages whose payload is a ticket" },
     stage: { type: "string", description: "send: the stage this message belongs to" },
@@ -1456,6 +1465,8 @@ const INITIATOR_TOOL_PARAMETERS = {
     artifacts: { type: "string", description: "send: comma-separated artifact ids" },
     feedback: { type: "string", description: "resume: why the work is being sent back" },
     sequence: { type: "number", description: "ack: which result envelope is being acknowledged" },
+    block: { type: "boolean", description: "wait: block until a result arrives instead of peeking. This is how you learn a worker finished" },
+    timeout: { type: "number", description: "wait: seconds to block before giving up, default 60. Giving up is not a failure — the worker may still be working" },
     socket: { type: "string", description: "an alternate tmux socket; omit for the default server" },
   },
   required: ["verb"],
@@ -1556,6 +1567,7 @@ export default function piWorker(pi: ExtensionAPI): void {
         label: "Worker bus",
         description:
           "Drive Pi workers: `ps` lists every worker, whether it is alive and which tmux window to look at. Also: spawn one as a visible tmux window, check its liveness, send it a message, `wait` for its typed result (pass uid to wait on that worker rather than the whole run), resume it with feedback, then accept or stop it. " +
+          "To learn that a worker finished, call `wait` with block true — it returns the moment a result lands. A worker's tmux window is there for a PERSON to look at: never read it, capture it, or treat anything in it as a completion signal, and never generate ids for spawn — omit run, uid and session and they are minted for you. " +
           "An address is claimed once: to reuse a run/uid after stopping or accepting it, call `rm` with that run and uid — that is the normal way to recycle one, and it refuses while the worker is still unfinished, so it is safe to try. Verbs: " +
           INITIATOR_VERBS.join(", ") +
           ". Stages must be declared in the stage registry.",
