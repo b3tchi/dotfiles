@@ -1121,13 +1121,16 @@ export const ROSTER_WIDGET_KEY = "pi-workers";
 /**
  * How long the frame holds an empty view before giving its rows back.
  *
- * Long enough to span the gaps WITHIN a run — between a verb clearing its
- * activity line and the next `ps` listing what it just created, which is one
- * subprocess and well under a second — so the bar appears once and stays put
- * until the work is done. Short enough that an idle session is not left
- * staring at a widget that has nothing to say.
+ * The only gap this has to cover is between a verb clearing its activity line
+ * and the next `ps` listing what it just created — one subprocess, well under
+ * a second. It was ten seconds, which covered that and then left
+ * `pi-workers · warming up` sitting on screen for ten seconds after the work
+ * was done, which reads as a leftover rather than as status.
+ *
+ * Two seconds spans the gap with room to spare and disappears promptly when
+ * there is genuinely nothing to report.
  */
-export const EMPTY_GRACE_MS = 10_000;
+export const EMPTY_GRACE_MS = 2_000;
 
 /** What the frame needs from the host's tui handle, and nothing more. */
 interface FrameTui {
@@ -1318,9 +1321,16 @@ export function startRosterFrame(opts: {
   const refresh = async () => {
     try {
       const out = await opts.exec("pi-worker", ["ps"], {});
-      if (out.code !== 0) return;
-      const all = JSON.parse(out.stdout || "[]") as RosterRow[];
-      rows = opts.allRuns === true ? all : all.filter((r) => ownRuns.has(r.run));
+      if (out.code === 0) {
+        const all = JSON.parse(out.stdout || "[]") as RosterRow[];
+        rows = opts.allRuns === true ? all : all.filter((r) => ownRuns.has(r.run));
+      }
+      // Drawn even when `ps` failed, and that is the point: draw() is what
+      // ages an empty view out. Returning early on a bad exit left the frame
+      // frozen in whatever it last showed, with no path back to unmounting —
+      // one failed poll and `warming up` was on screen for good. The stale
+      // rows are kept rather than blanked: a poll that could not answer has
+      // not learned that the workers are gone.
       draw();
     } catch {
       // A frame that cannot be drawn is not worth breaking a session over.
