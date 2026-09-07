@@ -1066,8 +1066,14 @@ export function rosterFrame(
   // finding its footing. With neither rows nor activity the widget goes away
   // and gives its terminal rows back.
   if (rows.length === 0) {
-    if (activity !== undefined) return [paint("muted", "pi-workers · warming up"), activity];
-    return opts.holdEmpty === true ? [paint("muted", "pi-workers · warming up")] : undefined;
+    // One line, not two. With nothing underneath it, a heading and an activity
+    // line are two rows saying one thing, and this is the state the operator
+    // stares at longest — the whole warm-up of a run. `warming-up` matches the
+    // word a row uses for the same idea, so the vocabulary does not change
+    // when the first worker appears beneath it.
+    const heading = paint("muted", "pi-workers · warming-up");
+    if (activity !== undefined) return [`${heading}  ${activity}`];
+    return opts.holdEmpty === true ? [heading] : undefined;
   }
 
   const addr = rows.map((r) => `${r.run}/${r.uid}`);
