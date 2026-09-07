@@ -1116,6 +1116,8 @@ describe("roster widget", () => {
       exec: psExec(psRows) as never,
       setWidget: (key, content) => set.push({ key, content }),
       intervalMs: 1_000_000,
+      // These exercise mount and repaint mechanics, not scoping.
+      allRuns: true,
     });
     await frame.refresh();
     frame.stop();
@@ -1156,6 +1158,8 @@ describe("roster widget", () => {
         }
       },
       intervalMs: 1_000_000,
+      // These exercise mount and repaint mechanics, not scoping.
+      allRuns: true,
     });
     await frame.refresh();
     await frame.refresh();
@@ -1182,6 +1186,8 @@ describe("roster widget", () => {
         }
       },
       intervalMs: 1_000_000,
+      // These exercise mount and repaint mechanics, not scoping.
+      allRuns: true,
     });
 
     await frame.refresh();
@@ -1214,6 +1220,8 @@ describe("roster widget", () => {
         set.push(content);
       },
       intervalMs: 1_000_000,
+      // These exercise mount and repaint mechanics, not scoping.
+      allRuns: true,
     });
     await frame.refresh();
     frame.stop();
@@ -1234,6 +1242,8 @@ describe("roster widget", () => {
       exec: psExec(psRows) as never,
       setWidget: (_key, content) => set.push(content),
       intervalMs: 1_000_000,
+      // These exercise mount and repaint mechanics, not scoping.
+      allRuns: true,
     });
     await frame.refresh();
     frame.stop();
@@ -1257,6 +1267,8 @@ describe("roster widget", () => {
       exec: psExec([]) as never,
       setWidget: (_key, content) => set.push(content),
       intervalMs: 1_000_000,
+      // These exercise mount and repaint mechanics, not scoping.
+      allRuns: true,
     });
     await frame.refresh();
     frame.stop();
@@ -1840,6 +1852,8 @@ describe("frame activity", () => {
         }
       },
       intervalMs: 1_000_000,
+      // These exercise mount and repaint mechanics, not scoping.
+      allRuns: true,
     });
     await frame.refresh();
     expect(component).toBeDefined();
@@ -1877,5 +1891,62 @@ describe("refusals move to the frame, but only when there is one", () => {
   test("resultComponent honours frameLive too", () => {
     expect(resultComponent("spawn", false, refusal, { frameLive: true }).render(200)).toEqual([]);
     expect(resultComponent("spawn", false, refusal, {}).render(200)).toEqual([refusal]);
+  });
+});
+
+describe("the frame shows this session's runs, not the whole box", () => {
+  // The bus is per-user, not per-session, so `pi-worker ps` answers for
+  // everything on the machine — right for a CLI, wrong for a widget. A
+  // session's frame was showing other sessions' workers and leftovers from
+  // previous ones, and `2 workers` gave the operator no way to tell which were
+  // theirs.
+  const mine = { run: "r9", uid: "impl-1", role: "impl", state: "running", liveness: "live", window: "impl-1@dotfiles" };
+  const theirs = { run: "r5", uid: "x1", role: "rev", state: "running", liveness: "live", window: "rev-demo@dotfiles" };
+
+  const frameOver = (rows: unknown[], opts: { allRuns?: boolean } = {}) => {
+    let component: { render: (w: number) => string[] } | undefined;
+    const frame = startRosterFrame({
+      exec: (async () => ({ code: 0, stdout: JSON.stringify(rows), stderr: "" })) as never,
+      setWidget: (_key, content) => {
+        if (typeof content === "function") {
+          component = (content as (t: unknown, th: unknown) => { render: (w: number) => string[] })(
+            { requestRender: () => {} },
+            {},
+          );
+        } else if (content === undefined) {
+          component = undefined;
+        }
+      },
+      intervalMs: 1_000_000,
+      ...opts,
+    });
+    return { frame, drawn: () => component?.render(200) ?? [] };
+  };
+
+  test("a run this session never touched stays out of its frame", async () => {
+    const { frame, drawn } = frameOver([mine, theirs]);
+    frame.own("r9");
+    await frame.refresh();
+    frame.stop();
+    const text = drawn().join("\n");
+    expect(text).toContain("r9/impl-1");
+    expect(text).not.toContain("r5/x1");
+    expect(text).toContain("1 worker");
+  });
+
+  test("having touched no run shows nothing, rather than everything", async () => {
+    // Showing everything is the bug. Showing nothing is honest, and the global
+    // view is one `ps` call away.
+    const { frame, drawn } = frameOver([theirs]);
+    await frame.refresh();
+    frame.stop();
+    expect(drawn()).toEqual([]);
+  });
+
+  test("allRuns brings the whole bus back for anyone who wants it", async () => {
+    const { frame, drawn } = frameOver([mine, theirs], { allRuns: true });
+    await frame.refresh();
+    frame.stop();
+    expect(drawn().join("\n")).toContain("r5/x1");
   });
 });

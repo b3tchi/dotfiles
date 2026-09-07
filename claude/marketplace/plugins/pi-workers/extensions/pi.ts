@@ -1051,15 +1051,37 @@ export function startRosterFrame(opts: {
   setWidget: (key: string, content: unknown) => void;
   intervalMs?: number;
   now?: () => number;
+  /** Show every run on the bus, not just this session's. Off by default. */
+  allRuns?: boolean;
 }): {
   refresh: () => Promise<void>;
   note: (activity: FrameActivity | undefined) => void;
+  own: (run: string) => void;
   stop: () => void;
 } {
   const clock = opts.now ?? (() => Date.now());
   let rows: RosterRow[] = [];
   let activity: FrameActivity | undefined;
   let mounted = false;
+
+  /**
+   * The runs this session is driving.
+   *
+   * `pi-worker ps` answers for the whole bus, which is right for a CLI and
+   * wrong for a widget: the bus is per-user, not per-session, so a session's
+   * frame was showing workers that belonged to other sessions — and, worse,
+   * leftovers from previous ones. An operator reading `2 workers` had no way
+   * to tell which were theirs to care about.
+   *
+   * A session earns a run by ADDRESSING it through the tool: spawning into it,
+   * or asking about it. That is a better signal than the spawn alone, since a
+   * session handed an existing run to drive is legitimately driving it.
+   *
+   * Empty means show nothing rather than show everything: a session that has
+   * touched no run has no business claiming other sessions' workers, and the
+   * global view is a `ps` call away.
+   */
+  const ownRuns = new Set<string>();
   let tui: FrameTui | undefined;
   // Whether the host takes a component factory. Assumed until one is refused;
   // see mount() for why a refusal is not fatal.
@@ -1153,7 +1175,8 @@ export function startRosterFrame(opts: {
     try {
       const out = await opts.exec("pi-worker", ["ps"], {});
       if (out.code !== 0) return;
-      rows = JSON.parse(out.stdout || "[]") as RosterRow[];
+      const all = JSON.parse(out.stdout || "[]") as RosterRow[];
+      rows = opts.allRuns === true ? all : all.filter((r) => ownRuns.has(r.run));
       draw();
     } catch {
       // A frame that cannot be drawn is not worth breaking a session over.
@@ -1175,12 +1198,17 @@ export function startRosterFrame(opts: {
     draw();
   };
 
+  /** Claim a run for this session, so its workers reach the frame. */
+  const own = (run: string) => {
+    if (run.length > 0) ownRuns.add(run);
+  };
+
   const timer = setInterval(() => void refresh(), opts.intervalMs ?? 5000);
   if (typeof timer === "object" && timer && "unref" in timer) {
     (timer as { unref: () => void }).unref(); // never hold the process open
   }
   void refresh();
-  return { refresh, note, stop: () => clearInterval(timer) };
+  return { refresh, note, own, stop: () => clearInterval(timer) };
 }
 
 /**
@@ -1781,10 +1809,22 @@ export default function piWorker(pi: ExtensionAPI): void {
           // frame to warm up in. Arming afterwards meant the one moment worth
           // watching — before any worker exists — had nowhere to show.
           armFrame(ctx);
+          // Claimed BEFORE the call, so a spawn's own worker is in scope by
+          // the time the first poll runs. For a minted run the id is not known
+          // until spawn answers, which is why the outcome is read for it too.
+          if (params.run) frame?.own(params.run);
           frame?.note({ verb: params.verb, at: Date.now() });
 
           const outcome = await initiator.invoke(params);
 
+          // A spawn with no run given had one minted for it, and the only
+          // record of which is the answer: "spawned r3/impl-1 — ...". Without
+          // this the session's own first worker would be filtered out of its
+          // own frame.
+          if (outcome.ok !== false && outcome.detail) {
+            const spawned = /\bspawned\s+([^/\s]+)\//.exec(outcome.detail);
+            if (spawned) frame?.own(spawned[1]);
+          }
           frame?.note({
             verb: params.verb,
             ok: outcome.ok !== false,
