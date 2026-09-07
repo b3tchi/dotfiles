@@ -193,12 +193,30 @@ def stages-taking [shape: string]: nothing -> string {
     }
 }
 
-def validate-inbox-payload [payload: record] {
+def validate-inbox-payload [payload: record, --stored] {
     if "stage" not-in ($payload | columns) {
         error make {msg: "inbox payload must name its stage"}
     }
     let stage = $payload.stage
     let fields = ($payload | columns)
+
+    # A STORED envelope is history, and history is not re-litigated against
+    # today's registry.
+    #
+    # This was found the hard way: renaming a stage in the registry made every
+    # envelope written under the old name unreadable, because read-box
+    # re-validates on read and validation resolved the stage. `inspect`,
+    # `wait` and `ps` all died on a worker whose only crime was predating the
+    # rename —
+    #
+    #     invalid envelope 1.json in .../inbox: unknown stage 'task': not one
+    #     of probe, work, build
+    #
+    # Editing a config file must not corrupt the record of what already
+    # happened. Validating a payload's SHAPE needs the registry, so that check
+    # belongs where the envelope is written — where the gate can still refuse —
+    # and not where it is read back.
+    if $stored { return }
 
     # A bus-authored stage carries instructions by construction.
     let shape = (if $stage in $RESERVED_STAGES { "instructions" } else { stage-for $stage | get payload })
@@ -272,7 +290,7 @@ def validate-error-payload [payload: record] {
 # The single gate every envelope passes before it is written or acted on.
 # Rejections name the offending field so an operator reading a log knows what
 # to fix without reverse-engineering the validator.
-export def validate-envelope [envelope: record] {
+export def validate-envelope [envelope: record, --stored] {
     let fields = ($envelope | columns)
 
     for required in $ENVELOPE_REQUIRED {
@@ -308,7 +326,7 @@ export def validate-envelope [envelope: record] {
     }
 
     match $envelope.kind {
-        "inbox" => { validate-inbox-payload $envelope.payload }
+        "inbox" => { validate-inbox-payload $envelope.payload --stored=$stored }
         "result" => { validate-result-payload $envelope.payload }
         "error" => { validate-error-payload $envelope.payload }
         "identity" => { validate-identity $envelope.payload }
@@ -518,7 +536,9 @@ def read-box [dir: string]: nothing -> list<record> {
         if not (($parsed | describe) | str starts-with "record") {
             error make {msg: $"unparseable envelope ($n | path basename) in ($dir): expected a JSON object, got ($parsed | describe)"}
         }
-        try { validate-envelope $parsed } catch {|e|
+        # `--stored`: the structure is still checked, but the stage is not
+        # re-resolved against a registry that may have changed since.
+        try { validate-envelope $parsed --stored } catch {|e|
             error make {msg: $"invalid envelope ($n | path basename) in ($dir): ($e.msg)"}
         }
         $envelopes = ($envelopes | append $parsed)
@@ -1732,6 +1752,107 @@ export def worker-roster [--run: string = "", --socket: string = ""]: nothing ->
     } | flatten
 }
 
+# Everything that happened to one worker, in order.
+#
+# Reconstructed, not recorded: every envelope already carries a `created`
+# stamp and every marker's CONTENT is a stamp, so the history is on the bus
+# already and this only reads it. Nothing new is written, which matters — a
+# timeline that needed its own log would be a second source of truth about
+# what happened, and would disagree with the envelopes the moment one was
+# written and the other was not.
+#
+# The deltas are the point. A worker's wall-clock life is easy to see in the
+# frame; where the time WENT is not, and the answer is usually one gap —
+# thirty seconds between `sent` and `reported` is the agent thinking, thirty
+# seconds between `reported` and `acked` is the orchestrator not listening.
+export def worker-timeline [uid: string, --run: string]: nothing -> list<record> {
+    let dir = (worker-dir $run $uid)
+    if not ($dir | path exists) { return [] }
+
+    let identity = (
+        read-box ($dir | path join "identity")
+        | enumerate
+        | each {|e|
+            {
+                at: $e.item.created
+                event: (if $e.index == 0 { "spawned" } else { "identity" })
+                detail: (
+                    if $e.index == 0 {
+                        $"($e.item.payload.window) · branch ($e.item.payload.branch) · ($e.item.payload.cwd)"
+                    } else {
+                        # The re-record exists to add the window id tmux chose.
+                        $"window_id ($e.item.payload | get -o window_id | default '?')"
+                    }
+                )
+            }
+        }
+    )
+
+    let inbox = (
+        read-box ($dir | path join "inbox")
+        | each {|e|
+            let payload = $e.payload
+            let what = (if ("task" in ($payload | columns)) {
+                $"ticket ($payload.task)"
+            } else {
+                $"($payload | get -o instructions | default '' | str length) chars of instructions"
+            })
+            {at: $e.created, event: $"sent seq ($e.sequence)", detail: $"stage ($payload.stage) · ($what)"}
+        }
+    )
+
+    let outbox = (
+        read-box ($dir | path join "outbox")
+        | each {|e|
+            let payload = $e.payload
+            let verdict = (if $e.kind == "error" {
+                $"($payload | get -o code | default 'error'): ($payload | get -o detail | default '')"
+            } else {
+                $"($payload | get -o status | default '?') — ($payload | get -o summary | default '')"
+            })
+            {at: $e.created, event: $"reported seq ($e.sequence)", detail: $verdict}
+        }
+    )
+
+    # An ack is a file whose name is the sequence and whose body is the stamp.
+    let acks = (
+        glob ($dir | path join "outbox" "*.ack")
+        | each {|f|
+            {
+                at: (open --raw $f | str trim)
+                event: $"acked seq ($f | path basename | str replace '.ack' '')"
+                detail: "receipt, not acceptance"
+            }
+        }
+    )
+
+    let markers = (
+        glob ($dir | path join "*.marker")
+        | each {|f|
+            let name = ($f | path basename | str replace ".marker" "")
+            let body = (open --raw $f | str trim)
+            # `reopened` stores the sequence it covers rather than a stamp, so
+            # it has no time of its own to sort by; the file's mtime is the
+            # honest answer for it.
+            let stamped = (if ($body =~ '^\d{4}-\d{2}-\d{2}T') { $body } else { ls $f | get 0.modified | format date "%Y-%m-%dT%H:%M:%S%.6fZ" })
+            {at: $stamped, event: $name, detail: (if $body == $stamped { "" } else { $"covers seq ($body)" })}
+        }
+    )
+
+    let events = ([$identity $inbox $outbox $acks $markers] | flatten | sort-by at)
+    if ($events | is-empty) { return [] }
+
+    let first = ($events | first | get at | into datetime)
+    $events | each {|e|
+        {
+            at: $e.at
+            "+s": (((($e.at | into datetime) - $first) / 1sec | math round --precision 1))
+            event: $e.event
+            detail: $e.detail
+        }
+    }
+}
+
 # Let go of a finished worker's address.
 #
 # The occupied-address guard claims an address for the life of the run
@@ -2159,6 +2280,7 @@ def "main liveness" [uid: string, --run: string, --socket: string = ""] {
 
 def "main status" [uid: string, --run: string] { bus-status $uid --run $run | to json | print }
 def "main inspect" [uid: string, --run: string] { worker-inspect $uid --run $run | to json | print }
+def "main timeline" [uid: string, --run: string] { worker-timeline $uid --run $run | to json | print }
 def "main rm" [--run: string, --uid: string] {
     worker-release --run $run --uid $uid | to json | print
 }
