@@ -31,13 +31,27 @@ def make-server [tag: string, --stub: string = "sleep 30"]: nothing -> record {
 
 # Wait for a pane to report dead. The stub exits immediately, but tmux updates
 # `pane_dead` asynchronously, so asserting straight after spawn races it.
-def wait-for-dead [socket: string, window: string] {
-    for _ in 0..50 {
+def wait-for-dead [socket: string, window: string, --deadline: duration = 15sec] {
+    # Was a fixed 50 x 100ms with a message that named the window and nothing
+    # else — so when it did time out on a loaded box, the report said only
+    # that it had, not what tmux was reporting instead. A probe that fails
+    # without saying what it saw ends an investigation rather than directing
+    # it (adr0017's second obligation).
+    let give_up = ((date now) + $deadline)
+    mut last = "never answered"
+    loop {
         let dead = (do { ^tmux -L $socket list-panes -t $window -F "#{pane_dead}" } | complete)
-        if ($dead.exit_code == 0) and (($dead.stdout | lines | first | str trim) == "1") { return }
-        sleep 100ms
+        if $dead.exit_code == 0 {
+            $last = ($dead.stdout | lines | first | default "" | str trim)
+            if $last == "1" { return }
+        } else {
+            $last = $"tmux exit ($dead.exit_code): ($dead.stderr | str trim)"
+        }
+        if (date now) >= $give_up {
+            error make {msg: $"pane for ($window) never reported dead within ($deadline). pane_dead last read as: ($last)"}
+        }
+        sleep 50ms
     }
-    error make {msg: $"pane for ($window) never reported dead"}
 }
 
 def drop-server [t: record] {
@@ -51,6 +65,97 @@ def drop-server [t: record] {
 def pane-text [socket: string, target: string]: nothing -> string {
     let out = (do { ^tmux -L $socket capture-pane -p -t $target } | complete)
     if $out.exit_code != 0 { "" } else { $out.stdout }
+}
+
+# Wait until a pane stops changing, and return what it settled on.
+#
+# Every flaky case in this suite did `sleep 600ms` and then snapshotted a
+# pane. That is a bet on how long nushell takes to draw a prompt, and on a
+# loaded machine it loses: the baseline gets captured mid-draw, the rest of
+# the prompt arrives afterwards, and a case asserting "nothing changed" sees
+# the prompt finish and calls it an injection.
+#
+# The honest baseline is not "after a while" but "once it has stopped moving".
+def settled-pane-text [
+    socket: string
+    target: string
+    --quiet: duration = 300ms      # unchanged for this long counts as settled
+    --deadline: duration = 15sec
+    # No return-type annotation: nu will not type-check a `loop` whose exits
+    # are `return`s against one.
+] {
+    let give_up = ((date now) + $deadline)
+    mut last = (pane-text $socket $target)
+    mut since = (date now)
+    loop {
+        sleep 50ms
+        let seen = (pane-text $socket $target)
+        if $seen != $last {
+            $last = $seen
+            $since = (date now)
+        } else if ($last | str trim | is-not-empty) and (((date now) - $since) >= $quiet) {
+            # An EMPTY pane is not a settled one — it is a shell that has not
+            # drawn anything yet, and on this box nushell can take longer than
+            # the quiet period to produce its first byte. Accepting empty as
+            # settled was the first version of this helper, and it turned the
+            # race it was written to remove into the same race with better
+            # error text: the baseline came back "", the prompt arrived after,
+            # and the case reported the prompt as an injection.
+            return $last
+        }
+        if (date now) >= $give_up {
+            error make {msg: $"pane ($target) never showed settled content within ($deadline). Last read: '(($last | str substring 0..160))'"}
+        }
+    }
+}
+
+# Assert a pane does not change, for a while.
+#
+# Strictly stronger than sleeping once and comparing. A single late sample can
+# miss an injection that lands before it and after the sleep; sampling
+# throughout the window catches anything that appears at any point in it. It
+# also degrades the right way under load — a slow machine takes MORE samples,
+# not a later one.
+def assert-pane-unchanged [
+    socket: string
+    target: string
+    before: string
+    --watch: duration = 1500ms
+] {
+    let until = ((date now) + $watch)
+    loop {
+        let seen = (pane-text $socket $target)
+        if $seen != $before {
+            error make {msg: $"pane ($target) changed, where nothing may be written.\n  before: (($before | str substring 0..200))\n  after:  (($seen | str substring 0..200))"}
+        }
+        if (date now) >= $until { return }
+        sleep 100ms
+    }
+}
+
+# A stub `pi` that runs briefly and then exits with a given code.
+#
+# The pause is load-bearing, not padding. `remain-on-exit` cannot be set
+# atomically with `new-window` — tmux has no flag for it, and `-d` leaves the
+# active window unchanged so a following `set-option` with no target would hit
+# the wrong window — so worker-spawn sets it on the very next line and says so
+# in a comment. A stub that exits in that same instant races a gap the product
+# cannot close, and tmux destroys the window before anything can ask about it.
+#
+# That is not theoretical. Four cases here used a bare `exit N`, and under load
+# one of them failed with
+#
+#     pane_dead last read as: tmux exit 1: can't find window: impl-t1@dotfiles
+#
+# — the window was gone, not undead, so no amount of waiting could have helped.
+# It took a better error message to see that, having first tried a longer
+# timeout.
+#
+# What these cases are for is the contract: a worker whose process dies is
+# observably not running, and its window stays for inspection. The width of
+# tmux's gap is not the subject.
+def dies-with [code: int]: nothing -> string {
+    $"sleep 0.4; exit ($code)"
 }
 
 def with-server [tag: string, body: closure, --stub: string = "sleep 30"] {
@@ -105,17 +210,14 @@ let cases = [
 
             # Something else now occupies the slot the worker had.
             ^tmux -L $t.socket new-window -d -t "dotfiles" -n "someone-elses-shell" $nu.current-exe
-            sleep 600ms
-            let before = (pane-text $t.socket "someone-elses-shell")
+            let before = (settled-pane-text $t.socket "someone-elses-shell")
 
             bus-result "impl-a" --run "run-1" --result {
                 status: "complete", summary: "done", validation: "tests green"
                 window: $w.window, session: "sid-1", resume: "pi --session sid-1"
             }
-            sleep 600ms
+            assert-pane-unchanged $t.socket "someone-elses-shell" $before
             let after = (pane-text $t.socket "someone-elses-shell")
-
-            assert-eq $after $before "the stale target's pane content is untouched by a completion"
             for trace in ["complete" "tests green" "sid-1" "impl-a"] {
                 assert-true (not ($after | str contains $trace)) $"'($trace)' leaked into a pane"
             }
@@ -133,8 +235,7 @@ let cases = [
         # completion, but the whole surface.
         with-server "surface" {|t, repo|
             ^tmux -L $t.socket new-window -d -t "dotfiles" -n "bystander" $nu.current-exe
-            sleep 600ms
-            let before = (pane-text $t.socket "bystander")
+            let before = (settled-pane-text $t.socket "bystander")
 
             let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
             bus-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "t1"}
@@ -147,9 +248,8 @@ let cases = [
             worker-inspect "impl-a" --run "run-1"
             run-workers "run-1"
             worker-accept "impl-a" --run "run-1" --repo $repo --socket $t.socket
-            sleep 400ms
 
-            assert-eq (pane-text $t.socket "bystander") $before "no verb in the pipeline writes to another pane"
+            assert-pane-unchanged $t.socket "bystander" $before
             assert-true ("bystander" in (^tmux -L $t.socket list-windows -a -F "#{window_name}" | lines)) "and the bystander window survives an acceptance"
         }
     })
@@ -197,7 +297,7 @@ let cases = [
     (run-case "live/a-window-whose-process-exited-reports-exited-not-live" {
         # The worker's OWN evidence about ITSELF: the process it was given ran
         # and stopped. Per adr0017 that is reportable, unlike an absent window.
-        with-server "verdict-exited" --stub "exit 3" {|t, repo|
+        with-server "verdict-exited" --stub (dies-with 3) {|t, repo|
             let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
             wait-for-dead $t.socket $w.window
 
@@ -247,7 +347,7 @@ let cases = [
     (run-case "live/an-exited-worker-is-still-not-cleanable" {
         # Knowing a process stopped is not knowing the work is finished. The
         # verdict is reportable; it licenses nothing.
-        with-server "verdict-noclean" --stub "exit 1" {|t, repo|
+        with-server "verdict-noclean" --stub (dies-with 1) {|t, repo|
             let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
             wait-for-dead $t.socket $w.window
 
@@ -262,7 +362,7 @@ let cases = [
         # The regression this whole issue is about. A worker whose command is
         # wrong dies immediately, and spawn must say so rather than report
         # health it did not observe.
-        with-server "verdict-spawn" --stub "exit 127" {|t, repo|
+        with-server "verdict-spawn" --stub (dies-with 127) {|t, repo|
             let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
             wait-for-dead $t.socket $w.window
 
@@ -280,7 +380,7 @@ let cases = [
         # workers went unnoticed. `inspect` cannot answer this — it is
         # deliberately bus-only, so that a restarted initiator can rebuild a run
         # without tmux — which is exactly why the probe needs its own verb.
-        with-server "verb" --stub "exit 5" {|t, repo|
+        with-server "verb" --stub (dies-with 5) {|t, repo|
             let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
             wait-for-dead $t.socket $w.window
 

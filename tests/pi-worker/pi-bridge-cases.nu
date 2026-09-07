@@ -198,17 +198,38 @@ let cases = [
     })
 
     # ------------------------------------------------------------ visibility
-    (run-case "spawn/a-worker-that-exits-immediately-stays-visible" {
+    (run-case "spawn/a-worker-that-dies-at-startup-stays-visible" {
         # Pi exiting before it initialises must not erase the evidence. The
         # window stays so an operator can read why, and the identity is already
         # on the bus.
+        #
+        # The stub pauses before exiting, and that is deliberate rather than a
+        # fudge. `remain-on-exit` cannot be set atomically with `new-window`:
+        # tmux has no flag for it, and `-d` leaves the active window unchanged
+        # so a following `set-option` with no target would hit the wrong one.
+        # worker-spawn therefore sets it on the very next line and says so, and
+        # a stub that exits in the same instant is racing a gap the product
+        # cannot close. This case used to run `exit 3` with no pause and pass
+        # by usually winning that race; under load it lost, which is how it
+        # became one of four cases that took turns failing.
+        #
+        # What is worth pinning is the contract — a worker that dies during
+        # startup leaves its window and its identity behind — not the width of
+        # a gap tmux owns.
         let repo = (make-repo "crash")
         let root = (make-runtime "crash")
-        let t = (make-tmux "crash" "echo 'pi failed to start' >&2; exit 3")
+        let t = (make-tmux "crash" "sleep 0.4; echo 'pi failed to start' >&2; exit 3")
         with-runtime $root {
             with-env {PATH: ([$t.bin] ++ $env.PATH)} {
                 let got = (spawn-worker $t $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
-                sleep 400ms
+                # Wait for the death, rather than for a duration. The old
+                # `sleep 400ms` was simultaneously too long (the process was
+                # already gone) and too short (on a loaded box it was not).
+                for _ in 0..300 {
+                    let dead = (do { ^tmux -L $t.socket list-panes -t $got.window -F "#{pane_dead}" } | complete)
+                    if ($dead.exit_code == 0) and (($dead.stdout | lines | first | default "" | str trim) == "1") { break }
+                    sleep 50ms
+                }
                 assert-true ($got.window in (windows-on $t.socket)) "the dead worker's window is still inspectable"
                 assert-eq (bus-identity-of "impl-a" --run "run-1" | get session) "sid-1" "and its identity survives"
             }

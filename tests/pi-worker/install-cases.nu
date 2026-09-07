@@ -50,7 +50,9 @@ def stub-bin [
         # `pi list` reports the resolved absolute path on its own line, which is
         # what an idempotence check can match against.
         let listed = if $pi_already_installed {
-            $"  ../../pi-workers\n    (repo-root $env.FILE_PWD | path join 'claude' 'marketplace' 'plugins' 'pi-workers')"
+            # The path install.sh will actually use, asked of git rather than
+            # predicted from where this test happens to live.
+            $"  ../../pi-workers\n    (main-package-dir)"
         } else { "" }
         let script = ([
             "#!/usr/bin/env bash"
