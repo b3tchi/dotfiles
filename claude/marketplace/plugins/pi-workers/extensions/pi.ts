@@ -258,10 +258,50 @@ function isTicketStage(stage: string): boolean {
   throw new Error(`unknown stage '${stage}': not declared in the stage registry`);
 }
 
-interface StageEntry {
+export interface StageEntry {
   name: string;
   isolation: string;
   payload: string;
+}
+
+/**
+ * The declared stages, for the tool description.
+ *
+ * Live: an agent tried `default`, then `work-do`, then `build`, and never
+ * tried `probe` — the one it wanted. Every guess cost a turn and a refusal,
+ * and the refusals were the third place it learned the names rather than the
+ * first. A stage is a required argument with a closed set of values; nothing
+ * is served by making the model discover that set by being told no.
+ *
+ * The payload kind is carried too, because knowing the name is not enough:
+ * after landing on `build` the agent was refused again for having no ticket
+ * id. Name plus payload is the whole decision.
+ *
+ * One line, because this goes in a tool description. An empty registry says so
+ * explicitly — a tool that lists nothing reads as a tool that accepts
+ * anything.
+ */
+export function stageCatalogue(stages: StageEntry[]): string {
+  if (stages.length === 0) {
+    return "no stages are declared, so nothing can be spawned until the registry has one";
+  }
+  return stages.map((s) => `${s.name} (${s.payload})`).join(", ");
+}
+
+/**
+ * The stage catalogue, or a note that it could not be read.
+ *
+ * Used to build a tool description, which is evaluated during registration —
+ * so this must not throw. A missing or malformed registry is a real condition
+ * (the consumer has not installed one yet) and saying so in the description is
+ * more use to the caller than taking the extension down.
+ */
+function describeStages(): string {
+  try {
+    return stageCatalogue(loadStages());
+  } catch {
+    return "the stage registry could not be read; run `pi-worker doctor`";
+  }
 }
 
 /** The consumer's stage registry, located the same way the CLI locates it. */
@@ -1586,7 +1626,7 @@ const INITIATOR_TOOL_PARAMETERS = {
     project: { type: "string", description: "spawn: tmux session group or session name to host the window" },
     repo: { type: "string", description: "spawn/accept: the git repository" },
     session: { type: "string", description: "spawn: omit this. The worker's Pi session id is minted for you — do not generate one" },
-    skill: { type: "string", description: "spawn: a stage name declared in the stage registry" },
+    skill: { type: "string", description: `spawn: which stage this worker runs. One of: ${describeStages()}. The payload kind in brackets says what else to pass — 'ticket' needs task, 'instructions' needs instructions` },
     task: { type: "string", description: "spawn/send: ticket id, for stages whose payload is a ticket" },
     stage: { type: "string", description: "send: the stage this message belongs to" },
     instructions: { type: "string", description: "send: prose, for stages whose payload is instructions" },
@@ -1698,7 +1738,7 @@ export default function piWorker(pi: ExtensionAPI): void {
           "To learn that a worker finished, call `wait` with block true — it returns the moment a result lands. A worker's tmux window is there for a PERSON to look at: never read it, capture it, or treat anything in it as a completion signal, and never generate ids for spawn — omit run, uid and session and they are minted for you. " +
           "An address is claimed once: to reuse a run/uid after stopping or accepting it, call `rm` with that run and uid — that is the normal way to recycle one, and it refuses while the worker is still unfinished, so it is safe to try. Verbs: " +
           INITIATOR_VERBS.join(", ") +
-          ". Stages must be declared in the stage registry.",
+          `. Stages: ${describeStages()}.`,
         promptSnippet: "pi_worker — spawn, watch and message Pi workers",
         parameters: INITIATOR_TOOL_PARAMETERS,
         // `self` so Pi draws no header box around an empty body: without it a
