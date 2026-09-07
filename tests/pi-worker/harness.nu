@@ -82,6 +82,40 @@ export def repo-root [caller_dir: string]: nothing -> string {
     $caller_dir | path dirname | path dirname
 }
 
+# The package directory as install.sh will resolve it: the MAIN worktree.
+#
+# install.sh deliberately anchors to the main worktree so the path it records
+# in Pi's settings survives a feature worktree being removed. A test that
+# predicts that path from its OWN location therefore disagrees with it in
+# every worktree — which is why two install cases failed deterministically
+# there and passed on main, and why "the two known install failures" became
+# background noise for a whole session.
+#
+# So this asks git rather than guessing: both sides now read the same source
+# of truth instead of one predicting the other.
+export def main-package-dir []: nothing -> string {
+    let listed = (do { ^git worktree list --porcelain } | complete)
+    let root = (if $listed.exit_code == 0 {
+        # First non-bare entry, matching install.sh's awk. Blocks are separated
+        # by a blank line and the output ends with one, so empties are dropped
+        # before anything reads their first line.
+        let candidates = (
+            $listed.stdout
+            | split row "\n\n"
+            | where {|b| ($b | str trim | is-not-empty) }
+            | where {|b| not ($b | lines | any {|l| ($l | str trim) == "bare" }) }
+            | each {|b| $b | lines | where {|l| $l | str starts-with "worktree " } | get 0? | default "" }
+            | each {|w| $w | str replace "worktree " "" | str trim }
+            | where {|w| $w | is-not-empty }
+        )
+        if ($candidates | is-empty) { "" } else { $candidates | first }
+    } else { "" })
+    let base = (if ($root | is-empty) {
+        (do { ^git rev-parse --show-toplevel } | complete | get stdout | str trim)
+    } else { $root })
+    $base | path join "claude" "marketplace" "plugins" "pi-workers"
+}
+
 export def worker-script [caller_dir: string]: nothing -> string {
     repo-root $caller_dir
     | path join "claude" "marketplace" "plugins" "pi-workers" "scripts" "pi-worker.nu"
