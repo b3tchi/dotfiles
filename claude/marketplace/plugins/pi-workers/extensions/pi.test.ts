@@ -37,6 +37,7 @@ import {
   createInitiatorTool,
   rosterFrame,
   collapsedStateLine,
+  AGE_WORTH_SHOWING_MS,
   activityLine,
   ACTIVITY_TTL_MS,
   formatElapsed,
@@ -962,8 +963,11 @@ describe("roster frame", () => {
   test("a worker with no start stamp gets a blank cell, not a zero", () => {
     // "" is what the CLI reports for a worker whose identity envelope was
     // never written. `0s` would read as one that had only just started.
+    //
+    // The age has to clear AGE_WORTH_SHOWING_MS to appear at all now, so this
+    // uses an age that does.
     const started = "2026-09-07T12:00:00.000000Z";
-    const now = Date.parse(started) + 12_000;
+    const now = Date.parse(started) + AGE_WORTH_SHOWING_MS + 12_000;
     const frame = rosterFrame(
       [
         { ...rows[0], started },
@@ -971,10 +975,41 @@ describe("roster frame", () => {
       ],
       { now },
     );
-    expect(frame[1]).toContain("12s");
+    expect(frame[1]).toContain("1m");
     expect(frame[2]).not.toContain("0s");
-    // The blank is padded, so the column after it still lines up.
-    expect(frame[1].indexOf("live")).toBe(frame[2].indexOf("exited"));
+    // The blank is padded, so the column after it still lines up. Compared on
+    // the window cell, which both rows have — the liveness column here holds
+    // `live` on one row and `exited` on the other, and `live` is dropped.
+    // Compared on where each window cell STARTS. `indexOf("@dotfiles")` would
+    // drift with the length of the window name, not the column.
+    expect(frame[1].indexOf("rev-demo@dotfiles")).toBe(frame[2].indexOf("impl-t4@dotfiles"));
+  });
+
+  test("a young age and a live worker carry no column at all", () => {
+    // The row the operator actually asked for:
+    //     r1/impl-1  warming-up  impl-tsfile0707@dotfiles
+    // `8s` and `live` beside a working state are one fact and two
+    // restatements of it.
+    const started = "2026-09-07T12:00:00.000000Z";
+    const frame = rosterFrame(
+      [{ run: "r1", uid: "impl-1", role: "impl", state: "created", liveness: "live", window: "impl-tsfile0707@dotfiles", started }],
+      { now: Date.parse(started) + 8_000 },
+    );
+    expect(frame[1].split(/\s+/).filter(Boolean)).toEqual([
+      "r1/impl-1",
+      "warming-up",
+      "impl-tsfile0707@dotfiles",
+    ]);
+  });
+
+  test("a liveness that complicates the state keeps its column", () => {
+    // `gone` beside a working state is a worker that died without reporting —
+    // the row that needs a human, and the reason the column exists.
+    const frame = rosterFrame(
+      [{ run: "r1", uid: "impl-1", role: "impl", state: "running", liveness: "gone", window: "impl-1@dotfiles" }],
+      { now: Date.now() },
+    );
+    expect(frame[1]).toContain("gone");
   });
 
   test("a garbage stamp is a blank cell rather than NaN on screen", () => {
@@ -1008,9 +1043,10 @@ describe("roster frame", () => {
     const frame = rosterFrame(rows, { paint });
     expect(frame[1]).toContain("<accent>running</accent>");
     expect(frame[2]).toContain("<warning>blocked</warning>");
-    // The window and liveness cells carry no markup.
-    expect(frame[1]).toContain("live");
-    expect(frame[1]).not.toContain("<accent>live");
+    // The window cell carries no markup. (Liveness is `live` on both rows
+    // here, so it has no column to check — see the column-rule tests above.)
+    expect(frame[1]).toContain("rev-demo@dotfiles");
+    expect(frame[1]).not.toContain("<accent>rev-demo");
   });
 
   test("colour does not move the columns", () => {

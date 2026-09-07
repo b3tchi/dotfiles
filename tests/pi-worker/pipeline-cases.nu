@@ -238,7 +238,8 @@ let cases = [
 
             assert-true ($theirs.window in (windows-on $t.socket)) "the other run's window is untouched"
             assert-true ($theirs.cwd | path exists) "as is its worktree"
-            assert-eq (bus-status "impl-b" --run "run-2" | get state) "running" ""
+            # Never reported, so `created` rather than `running`.
+            assert-eq (bus-status "impl-b" --run "run-2" | get state) "created" ""
         }
     })
 

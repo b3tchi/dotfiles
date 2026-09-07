@@ -788,7 +788,9 @@ bus-result "w1" --run "r1" --result {status: "complete", summary: "done", window
                 role: "impl", cwd: $nu.temp-dir, branch: "wk-t.0"
                 session: "sid-a", skill: "wk-build", window: "impl-a@dotfiles"
             }
-            assert-rejects { worker-release --run "r1" --uid "a" } "running" "a live worker is not discarded"
+            # `created` since bus-status learned to derive it: this worker was
+            # spawned and has never reported. Still unfinished, still refused.
+            assert-rejects { worker-release --run "r1" --uid "a" } "created" "a live worker is not discarded"
         }
         rm -rf $root
     })

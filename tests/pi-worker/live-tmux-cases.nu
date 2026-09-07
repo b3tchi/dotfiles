@@ -253,7 +253,7 @@ let cases = [
 
             assert-rejects {
                 worker-accept "impl-a" --run "run-1" --repo $repo --socket $t.socket
-            } "running" "an exited worker that never reported cannot be accepted"
+            } "created" "an exited worker that never reported cannot be accepted"
             assert-true ($w.cwd | path exists) "and its worktree survives"
         }
     })
@@ -395,7 +395,7 @@ let cases = [
 
             # Stopping one must leave the other running.
             worker-stop "w1" --run "run-a" --socket $t.socket
-            assert-eq (bus-status "w1" --run "run-b" | get state) "running" "the other worker is untouched"
+            assert-eq (bus-status "w1" --run "run-b" | get state) "created" "the other worker is untouched"
             assert-eq (worker-liveness $b.window_id --socket $t.socket | get verdict) "live" "and still alive"
             # This assertion's own message said "gone" while expecting
             # `unknown`: the prose had the right word before the verdict
@@ -439,7 +439,7 @@ let cases = [
             assert-eq (worker-live? $w.window --socket $t.socket) false "the window is gone"
             assert-rejects {
                 worker-accept "impl-a" --run "run-1" --repo $repo --socket $t.socket
-            } "running" "a worker that never reported cannot be accepted just because its window died"
+            } "created" "a worker that never reported cannot be accepted just because its window died"
             assert-true ($w.cwd | path exists) "and its worktree survives"
         }
     })
