@@ -800,7 +800,9 @@ const VERB_FLAGS: Record<string, readonly string[]> = {
   ack: ["run", "uid", "sequence"],
   status: ["run"],
   inspect: ["run"],
-  timeline: ["run"],
+  // `--json` because the CLI answers a person with columns by default; the
+  // extension needs the structure to summarise it.
+  timeline: ["run", "json"],
   workers: ["run"],
   liveness: ["run", "socket"],
   resume: ["run", "feedback", "socket"],
@@ -1435,11 +1437,21 @@ export function collapsedStateLine(detail: string): string {
   // collapse the whole history to `[`.
   if (Array.isArray(parsed)) {
     if (parsed.length === 0) return `no events recorded · ${hint}`;
-    const last = parsed[parsed.length - 1] as Record<string, unknown>;
-    const span = last["+s"];
-    const latest = typeof last.event === "string" ? last.event : "";
-    const over = typeof span === "number" ? ` over ${span}s` : "";
-    return `${parsed.length} events${over}, latest: ${latest} · ${hint}`;
+    // The SHAPE, not a count. "5 events over 32.7s" says a history exists;
+    // `spawned → sent +5s → reported +33s` is the history, and it is the
+    // question the verb was reached for — where did the time go.
+    const steps = parsed
+      .map((e) => {
+        const row = e as Record<string, unknown>;
+        const event = typeof row.event === "string" ? row.event : "?";
+        const at = typeof row["+s"] === "number" ? (row["+s"] as number) : undefined;
+        // The identity re-record is bookkeeping, not a step in the story.
+        if (event === "identity") return undefined;
+        const label = event.replace(/ seq \d+$/, "");
+        return at === undefined || at === 0 ? label : `${label} +${Math.round(at)}s`;
+      })
+      .filter((x): x is string => x !== undefined);
+    return `${steps.join(" → ")} · ${hint}`;
   }
 
   const o = parsed as Record<string, unknown>;

@@ -2280,7 +2280,23 @@ def "main liveness" [uid: string, --run: string, --socket: string = ""] {
 
 def "main status" [uid: string, --run: string] { bus-status $uid --run $run | to json | print }
 def "main inspect" [uid: string, --run: string] { worker-inspect $uid --run $run | to json | print }
-def "main timeline" [uid: string, --run: string] { worker-timeline $uid --run $run | to json | print }
+# A table by default, JSON on request.
+#
+# Every other verb answers a machine, so JSON was the obvious default here too
+# — and it is the wrong one. This verb exists to be READ: a human asking where
+# a worker's time went, handed 60 lines of pretty-printed JSON, has been given
+# the data and not the answer. The extension asks for --json; a person at a
+# prompt gets columns.
+def "main timeline" [uid: string, --run: string, --json] {
+    let events = (worker-timeline $uid --run $run)
+    if $json {
+        $events | to json | print
+    } else if ($events | is-empty) {
+        print $"no events recorded for ($run)/($uid)"
+    } else {
+        $events | select "+s" event detail | print
+    }
+}
 def "main rm" [--run: string, --uid: string] {
     worker-release --run $run --uid $uid | to json | print
 }
