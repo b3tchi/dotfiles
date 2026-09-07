@@ -337,6 +337,29 @@ export function systemContextFor(identity: WorkerIdentity): string {
   ].join("\n");
 }
 
+/**
+ * The worker's briefing, as prompt-guideline bullets.
+ *
+ * `systemContextFor` above produced exactly the right words and nothing ever
+ * called it — grep returned one line, its own definition. So no worker was
+ * ever told to report, every worker settled, and every settle was recorded as
+ * a protocol error. It had two passing tests; both asserted what it returned
+ * and neither asserted that anything delivered it.
+ *
+ * `promptGuidelines` on a ToolDefinition is the delivery route, and its
+ * scoping is the reason to prefer it: `pi_worker_result` is registered ONLY in
+ * worker mode, so these bullets reach a worker's system prompt and can never
+ * leak into an ordinary session. A tool DESCRIPTION would not do — that is
+ * read once the model is already considering the tool, and answers "what does
+ * this do" rather than "must I call something before finishing".
+ *
+ * One line per bullet, and the text comes from systemContextFor rather than
+ * being restated, so there is one source for the contract.
+ */
+export function workerPromptGuidelines(identity: WorkerIdentity): string[] {
+  return systemContextFor(identity).split("\n");
+}
+
 export interface WorkerIdentity {
   role: string;
   cwd: string;
@@ -1798,6 +1821,10 @@ export default function piWorker(pi: ExtensionAPI): void {
           description:
             "Report this worker's outcome to the orchestrator. Call this to finish; ending your turn without it is recorded as a protocol error, never as success.",
           promptSnippet: "pi_worker_result — report your outcome to the orchestrator",
+          // The briefing that was built and never delivered. In the system
+          // prompt rather than only in this description, because a worker has
+          // to know it must report BEFORE it decides it has finished.
+          promptGuidelines: workerPromptGuidelines(identity),
           parameters: RESULT_TOOL_PARAMETERS,
           execute: async (
             _id: string,

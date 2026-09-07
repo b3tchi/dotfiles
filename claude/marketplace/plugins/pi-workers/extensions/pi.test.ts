@@ -28,6 +28,7 @@ import {
   decideDelivery,
   userPayloadFor,
   systemContextFor,
+  workerPromptGuidelines,
   resultEnvelopeFrom,
   settledWithoutResult,
   unreadAfter,
@@ -399,6 +400,62 @@ describe("agent state tracker", () => {
 // implementation in the nu CLI rather than a second, drifting copy in TS.
 // These cases assert the command it issues, not the bus's behaviour — that is
 // already covered against the real CLI in tests/pi-worker.
+
+describe("the worker is told to report", () => {
+  // systemContextFor built exactly the right briefing and NOTHING called it:
+  // grep returned only its own definition. It had two passing tests, both
+  // asserting what it returns and neither asserting that anything delivers it
+  // — so a worker was never told to report, did the work, settled, and was
+  // recorded as a protocol_error. A green test over a path production never
+  // reaches is worse than no test: it is a claim nobody re-checks.
+  //
+  // These assert DELIVERY.
+  test("the result tool carries the finish contract as a prompt guideline", () => {
+    // A tool description is read when the model is already considering that
+    // tool: it answers "what does this do", not "must I call something before
+    // finishing". promptGuidelines lands in the system prompt unconditionally.
+    const guidance = workerPromptGuidelines({
+      role: "impl",
+      cwd: "/repo",
+      branch: "main",
+      session: "sid",
+      skill: "probe",
+      window: "impl-1@dotfiles",
+    });
+    const text = guidance.join("\n");
+    expect(guidance.length).toBeGreaterThan(0);
+    expect(text).toContain("protocol error");
+    expect(text.toLowerCase()).toContain("result tool");
+  });
+
+  test("the guidance carries the worker's own identity, not a generic blurb", () => {
+    const text = workerPromptGuidelines({
+      role: "rev",
+      cwd: "/repo/wk-t.0",
+      branch: "wk-t.0",
+      session: "sid-r",
+      skill: "wk-review",
+      window: "rev-a@dotfiles",
+    }).join("\n");
+    expect(text).toContain("rev");
+    expect(text).toContain("wk-review");
+    expect(text).toContain("wk-t.0");
+  });
+
+  test("it is built from systemContextFor, so the two cannot drift", () => {
+    // The briefing existed and was correct; only its delivery was missing.
+    // Rewriting the words here would leave two sources for one contract.
+    const identity = {
+      role: "impl",
+      cwd: "/repo",
+      branch: "main",
+      session: "sid",
+      skill: "probe",
+      window: "impl-1@dotfiles",
+    };
+    expect(workerPromptGuidelines(identity).join("\n")).toBe(systemContextFor(identity));
+  });
+});
 
 describe("typed result tool", () => {
   const identity = {
