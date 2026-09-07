@@ -834,6 +834,23 @@ const NO_PAINT: PaintFn = (_tone, text) => text;
  * person; `failed` and `protocol_error` are errors because the worker is not
  * coming back. `created` is muted: nothing has happened yet.
  */
+/**
+ * What a state is called in the frame.
+ *
+ * Only `created` is renamed. The bus's word is right for the bus — the worker
+ * was created and has reported nothing — but an operator reading a row wants
+ * to know what it means for them, and "created" does not say "it is alive and
+ * working, it just has not answered yet". The frame already heads its
+ * pre-first-worker view "warming up", so the row uses the same word for the
+ * same idea.
+ *
+ * Every other state is shown verbatim. A display vocabulary that renames
+ * things freely becomes a second set of names to learn.
+ */
+export function stateLabel(state: string): string {
+  return state === "created" ? "warming-up" : state;
+}
+
 export function stateTone(state: string): Tone {
   switch (state) {
     case "running":
@@ -847,6 +864,7 @@ export function stateTone(state: string): Tone {
     case "waiting_human":
       return "warning";
     case "created":
+      // Alive and not yet anyone's problem.
       return "muted";
     default:
       return "plain";
@@ -927,6 +945,25 @@ export function formatElapsed(started: string | undefined, now: number): string 
  * interesting case — `blocked`/`exited` is a worker that reported and then
  * finished, while `running`/`exited` is one that died without reporting.
  */
+/**
+ * Liveness verdicts that add nothing to the state beside them.
+ *
+ * `live` next to `created` or `running` is the same fact twice. The verdict
+ * earns its column when it COMPLICATES the state: `gone` or `exited` beside a
+ * working state is a worker that died without reporting, and `unknown` means
+ * the question could not be asked. Those are the rows worth a second look.
+ */
+const UNREMARKABLE_LIVENESS: readonly string[] = ["live"];
+
+/**
+ * Below this, an age is noise.
+ *
+ * A worker eight seconds old tells the operator nothing they did not just
+ * watch happen. One that has been at it for minutes is the whole reason the
+ * column exists.
+ */
+export const AGE_WORTH_SHOWING_MS = 60_000;
+
 /** States meaning the worker is finished with; nothing is waiting on it. */
 const FINISHED_STATES: readonly string[] = ["stopped", "accepted"];
 
@@ -1005,13 +1042,24 @@ export function rosterFrame(
   }
 
   const addr = rows.map((r) => `${r.run}/${r.uid}`);
-  const age = rows.map((r) => formatElapsed(r.started, now));
+  const label = rows.map((r) => stateLabel(r.state));
+  // A column is carried only when it says something the state does not. A row
+  // reading `created  8s  live` is one fact and two restatements of it, and
+  // every column that never varies makes the row that matters harder to find.
+  const age = rows.map((r) => {
+    const started = r.started ? Date.parse(r.started) : NaN;
+    if (!Number.isFinite(started)) return "";
+    return now - started >= AGE_WORTH_SHOWING_MS ? formatElapsed(r.started, now) : "";
+  });
+  const live = rows.map((r) => (UNREMARKABLE_LIVENESS.includes(r.liveness) ? "" : r.liveness));
   // Padded to a common width so the columns read down the frame rather than
   // drifting with the length of each run id.
   const addrWidth = Math.max(...addr.map((a) => a.length));
-  const stateWidth = Math.max(...rows.map((r) => r.state.length));
+  // Measured on the LABEL, not the state: `warming-up` is wider than
+  // `created`, and padding to the shorter one puts the next column inside it.
+  const stateWidth = Math.max(...label.map((l) => l.length));
   const ageWidth = Math.max(...age.map((a) => a.length));
-  const liveWidth = Math.max(...rows.map((r) => r.liveness.length));
+  const liveWidth = Math.max(...live.map((l) => l.length));
 
   const heading = `pi-workers · ${rows.length} worker${rows.length === 1 ? "" : "s"}`;
   const lines = rows.map((r, i) =>
@@ -1020,11 +1068,11 @@ export function rosterFrame(
       // Padded BEFORE painting. A tone is escape codes, and every width here —
       // this padding and wrapToWidth's — counts bytes, so a painted cell
       // measured as text would push the rest of the row out of column.
-      paint(stateTone(r.state), r.state.padEnd(stateWidth)),
+      paint(stateTone(r.state), label[i].padEnd(stateWidth)),
       // An empty column would still cost two spaces, so a CLI too old to
       // report `started` keeps precisely the layout it had.
       ...(ageWidth > 0 ? [age[i].padEnd(ageWidth)] : []),
-      r.liveness.padEnd(liveWidth),
+      ...(liveWidth > 0 ? [live[i].padEnd(liveWidth)] : []),
       r.window,
     ].join("  "),
   );

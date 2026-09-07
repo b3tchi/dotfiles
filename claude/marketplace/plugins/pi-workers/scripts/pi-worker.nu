@@ -65,6 +65,11 @@ export const WORKER_STATES = [
 # bus, or transcript evidence is a reason to look again, not to delete.
 export const OBSERVATIONAL_VERDICTS = ["unknown" "gone"]
 
+# A subject is worn as a tmux window name and a git branch name, so it is an
+# address rather than a description. Long enough to be meaningful, short enough
+# that `impl-<subject>@<project>` still reads in a window list.
+export const MAX_SUBJECT_CHARS = 40
+
 # Statuses a worker may report in a result envelope. `accepted` is the
 # initiator's verdict on the work and `stopped` is an external act, so neither
 # is something a worker can claim about itself.
@@ -769,7 +774,17 @@ export def bus-status [uid: string, --run: string]: nothing -> record {
     } else if (($reopened_after | is-not-empty) and (($reopened_after | into int) >= $newest)) {
         "running"
     } else if ($results | is-empty) {
-        "running"
+        # Spawned and has never reported. `created` is a declared WORKER_STATE
+        # that nothing derived — the same dead-vocabulary shape as
+        # `protocol_error` before dotfiles-87bt gave it a writer — and this is
+        # the case it describes.
+        #
+        # It used to report `running`, which collapsed "alive and has not said
+        # anything yet" into the same word as "reported once and was sent back
+        # to work". Those need different responses: the first is waited on, the
+        # second is chased. `created -> running` and `created -> stopped` are
+        # both already legal, so resume and stop are unaffected.
+        "created"
     } else {
         # Dispatch on KIND, not on a field. An outbox holds `result` envelopes
         # (payload.status) and `error` envelopes (payload.code) — different
@@ -1834,6 +1849,51 @@ def "main spawn" [
     --project: string, --repo: string, --session: string = "", --skill: string
     --task: string = "", --socket: string = ""
 ] {
+    # Required arguments, refused BY NAME.
+    #
+    # These were declared `string` with no default, so omitting one propagated
+    # a null inward until some helper died on it:
+    #
+    #     Error: nu::shell::cant_convert
+    #       x Can't convert to string.
+    #
+    # which names no verb, no argument, and no remedy. An agent driving this
+    # tool burned turns on it. A refusal has to say what is missing and what it
+    # is for, or it is just a slower way of saying no.
+    for required in [
+        [flag       value       what];
+        ["--role"   $role       "the worker's role, e.g. impl or rev; it appears in the window name"]
+        ["--subject" $subject   "a short slug naming the work; it appears in the window name and the branch"]
+        ["--project" $project   "the tmux session group to host the window, e.g. dotfiles"]
+        ["--repo"    $repo      "the git repository the worker works in"]
+        ["--skill"   $skill     "which stage this worker runs; `pi-worker doctor` lists them"]
+    ] {
+        if ($required.value | is-empty) {
+            error make {msg: $"spawn needs ($required.flag): ($required.what)"}
+        }
+    }
+
+    # A subject becomes a tmux window name and a git branch, so it has to be a
+    # NAME. Observed: an agent passed its entire task description —
+    #
+    #     "Create timestamp-named text file with header in /home/jan/.dotfiles.
+    #      Filename must be current timestamp in safe format like ..."
+    #
+    # — and worktree-allocate spent 64 attempts failing to build a branch out
+    # of it before giving up. The refusal was honest and the diagnosis was
+    # impossible: nothing said the prose was the problem.
+    #
+    # Refused rather than slugified. Truncating would produce a window and a
+    # branch named after the first few words of an instruction, which is worse
+    # than being told: the caller meant that prose to reach the worker, and it
+    # belongs in the message, not in an address.
+    if ($subject | str length) > $MAX_SUBJECT_CHARS {
+        error make {msg: $"spawn's --subject is ($subject | str length) characters; it names a tmux window and a git branch, so keep it under ($MAX_SUBJECT_CHARS). What the worker should DO belongs in the message, not in its address"}
+    }
+    if ($subject =~ '\s') {
+        error make {msg: $"spawn's --subject may not contain whitespace: it names a tmux window and a git branch. Pass a slug like 'timestamp-file'; the instructions go in the message"}
+    }
+
     let run = (if ($run | is-empty) { mint-run } else { $run })
     let session = (if ($session | is-empty) { mint-session } else { $session })
     let minted = ($uid | is-empty)
