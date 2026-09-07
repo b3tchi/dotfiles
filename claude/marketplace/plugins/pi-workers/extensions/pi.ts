@@ -384,6 +384,21 @@ export function systemContextFor(identity: WorkerIdentity, isolation?: string): 
           `complete loses everything you did. A complete from a dirty tree is refused.`,
         ]
       : []),
+    // The mirror image, and the more surprising one. A main-isolation worker
+    // is standing in the operator's own checkout on their branch, where the
+    // ordinary instinct of a coding agent — finish, commit — is the wrong
+    // move. Six such commits reached this repo's main in one evening. git
+    // refuses them now; saying so here means not spending a turn finding out.
+    ...(isolation === "main"
+      ? [
+          `You are in the operator's OWN working tree, on their branch`,
+          `(${identity.branch}). Do not commit and do not push: both are refused by`,
+          `a hook, because a commit here lands on their branch rather than one of`,
+          `your own. Leave your changes in the tree and report what you did. If the`,
+          `work genuinely needs its own commit, it needs a stage declared with`,
+          `isolation: worktree — say so by reporting blocked.`,
+        ]
+      : []),
     `Report your outcome by calling the result tool. Finishing your turn without`,
     `calling it is recorded as a protocol error, not a success.`,
   ].join("\n");

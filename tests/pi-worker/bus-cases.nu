@@ -577,6 +577,45 @@ let cases = [
         rm -rf $root
     })
 
+    (run-case "bus/a-main-isolation-worker-cannot-commit-to-the-operators-tree" {
+        # Six worker commits reached this repo's own main in one evening, five
+        # files of them tracked and pushed, because a stage with
+        # isolation: main puts the worker in the operator's checkout on their
+        # branch and nothing stopped it doing what a coding agent does.
+        #
+        # Guidance was not going to hold it — a worker that decides committing
+        # is helpful will commit — so git enforces it, and this asserts that
+        # git actually does.
+        let root = (make-runtime "commit-guard")
+        let repo = ([$nu.temp-dir $"piw-guard-(random chars --length 6)"] | path join)
+        rm -rf $repo; mkdir $repo
+        ^git -C $repo init -q
+        ^git -C $repo config user.email "t@t"; ^git -C $repo config user.name "t"
+        "x\n" | save -f ($repo | path join "f.txt")
+        ^git -C $repo add f.txt
+
+        with-runtime $root {
+            let hooks = (write-commit-guard "r1" "w1" "probe" "main")
+
+            # Exactly what spawn puts in a main-isolation worker's window.
+            let refused = (with-env {
+                GIT_CONFIG_COUNT: "1"
+                GIT_CONFIG_KEY_0: "core.hooksPath"
+                GIT_CONFIG_VALUE_0: $hooks
+            } { do { ^git -C $repo commit -m "worker commit" } | complete })
+
+            assert-true ($refused.exit_code != 0) "the commit is refused"
+            assert-true ($refused.stderr | str contains "operator's own working tree") "and says why"
+            assert-true ($refused.stderr | str contains "isolation: worktree") "and what would work instead"
+            assert-eq (^git -C $repo log --oneline | complete | get exit_code) 128 "nothing was committed"
+
+            # The operator, with no such environment, is untouched.
+            let allowed = (do { ^git -C $repo commit -m "operator commit" } | complete)
+            assert-eq $allowed.exit_code 0 $"the operator can still commit: ($allowed.stderr)"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
     (run-case "bus/the-timeline-and-the-status-cannot-disagree" {
         # The reason derive-state was extracted rather than reimplemented. The
         # frame shows a worker's state; the timeline shows the state after each
