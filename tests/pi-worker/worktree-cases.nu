@@ -448,6 +448,207 @@ let cases = [
     })
 
 
+    # ------------------------------------------------------- project sweep
+    #
+    # `stop` leaves a worker's worktree and branch behind on purpose: they may
+    # hold unmerged commits, and the tree is the only place to look at what a
+    # stopped worker did. That is right per WORKER and wrong per PROJECT — a
+    # smoke-test round left 29 trees and 953 MB in this very repo before
+    # anything swept them. `worktrees-reclaim` is the project-scoped sweep, and
+    # what survives it is the session id on the bus, which is all a resume
+    # needs.
+
+    (run-case "reclaim/sweeps-a-worktree-no-live-worker-owns" {
+        let repo = (make-repo "gc-orphan")
+        let root = (make-runtime "gc-orphan")
+        with-runtime $root {
+            let one = (worktree-allocate --repo $repo --task "t1")
+            let got = (worktrees-reclaim --repo $repo)
+            assert-eq ($got.removed | length) 1 "the orphan tree is reclaimed"
+            assert-true (not ($one.path | path exists)) "and it is gone from disk"
+            assert-eq $got.branches_deleted [$one.branch] "its branch goes with it"
+            assert-true ((git-in $repo "branch" "--list" $one.branch) | is-empty) "really gone"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "reclaim/never-sweeps-a-worktree-a-live-worker-is-in" {
+        # The refusal that matters: a sweep that takes the tree out from under
+        # a working agent destroys work in progress, and --force is no licence
+        # for it either.
+        let repo = (make-repo "gc-live")
+        let root = (make-runtime "gc-live")
+        with-runtime $root {
+            let mine = (worktree-allocate --repo $repo --task "live")
+            bus-identity "impl-1" --run "r1" --identity {
+                role: "impl", cwd: $mine.path, branch: $mine.branch
+                session: "sid-1", skill: "wk-build", window: "impl-live@dotfiles"
+            }
+            let got = (worktrees-reclaim --repo $repo --force)
+            assert-eq ($got.removed | length) 0 "nothing reclaimed"
+            assert-true ($mine.path | path exists) "the live worker keeps its tree"
+            assert-eq ($got.kept | first | get reason) "r1/impl-1 is created" "and the report names who has it"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "reclaim/sweeps-a-reported-workers-tree" {
+        # Where the leftovers actually came from: 26 of the 29 trees in this
+        # repo belonged to workers at `complete` — reported, never accepted,
+        # holding a directory forever. A worker that has reported is done with
+        # its files; what it waits for is a decision, and a decision does not
+        # need a directory. Its session id — on the bus, not in the tree — is
+        # what a restore uses.
+        let repo = (make-repo "gc-terminal")
+        let root = (make-runtime "gc-terminal")
+        with-runtime $root {
+            let done = (worktree-allocate --repo $repo --task "done")
+            bus-identity "impl-1" --run "r1" --identity {
+                role: "impl", cwd: $done.path, branch: $done.branch
+                session: "sid-1", skill: "wk-build", window: "impl-done@dotfiles"
+            }
+            bus-result "impl-1" --run "r1" --result {
+                status: "complete", summary: "did the thing"
+                window: "impl-done@dotfiles", session: "sid-1", resume: "pi --session sid-1"
+            }
+            assert-eq (bus-status "impl-1" --run "r1" | get state) "complete" "reported, not accepted"
+            let got = (worktrees-reclaim --repo $repo)
+            assert-eq ($got.removed | length) 1 "a reported worker's tree is reclaimed"
+            assert-true (not ($done.path | path exists)) ""
+            # The bus keeps what a restore needs, and only that.
+            assert-eq (bus-identity-of "impl-1" --run "r1" | get session) "sid-1" "the session id survives the sweep"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "reclaim/every-in-flight-state-protects-its-tree" {
+        # created, running, waiting_human, blocked: four ways of having work in
+        # flight, and the sweep must recognise all of them. A tree taken out
+        # from under a working agent destroys work nothing can recover.
+        let repo = (make-repo "gc-inflight")
+        let root = (make-runtime "gc-inflight")
+        with-runtime $root {
+            # `running` is derived from a `reopened` marker that only
+            # worker-resume writes (and resume needs tmux), so it is asserted
+            # by the transition suite rather than re-staged here; the three
+            # below are the ones a bus fixture can reach.
+            for state in ["created" "waiting_human" "blocked"] {
+                let tree = (worktree-allocate --repo $repo --task $state)
+                bus-identity $"impl-($state)" --run "r1" --identity {
+                    role: "impl", cwd: $tree.path, branch: $tree.branch
+                    session: $"sid-($state)", skill: "wk-build", window: $"impl-($state)@dotfiles"
+                }
+                if $state != "created" {
+                    bus-result $"impl-($state)" --run "r1" --result {
+                        status: $state, summary: $"it is ($state)"
+                        window: $"impl-($state)@dotfiles", session: $"sid-($state)", resume: "pi --session x"
+                    }
+                }
+                assert-eq (bus-status $"impl-($state)" --run "r1" | get state) $state ""
+            }
+            let got = (worktrees-reclaim --repo $repo --force)
+            assert-eq ($got.removed | length) 0 $"no in-flight tree may be swept, got ($got.removed)"
+            assert-eq ($got.kept | length) 3 "and each is reported with its owner"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "reclaim/keeps-a-dirty-tree-and-says-why" {
+        let repo = (make-repo "gc-dirty")
+        let root = (make-runtime "gc-dirty")
+        with-runtime $root {
+            let one = (worktree-allocate --repo $repo --task "t1")
+            dirty-it $repo $one.path
+            let got = (worktrees-reclaim --repo $repo)
+            assert-eq ($got.removed | length) 0 "uncommitted work is not swept"
+            assert-true ($one.path | path exists) ""
+            assert-true (($got.kept | first | get reason) | str contains "uncommitted") "and the report says why"
+
+            # --force is the operator saying they know. It exists because the
+            # alternative is a person running `rm -rf` by hand, which takes the
+            # live trees with it.
+            let forced = (worktrees-reclaim --repo $repo --force)
+            assert-eq ($forced.removed | length) 1 "--force takes it"
+            assert-true (not ($one.path | path exists)) ""
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "reclaim/keeps-a-branch-that-carries-unmerged-commits" {
+        # The tree is re-creatable from the branch; the commits are not
+        # re-creatable from anything. So the directory goes and the ref stays,
+        # and the report names it rather than leaving it to be discovered.
+        let repo = (make-repo "gc-unmerged")
+        let root = (make-runtime "gc-unmerged")
+        with-runtime $root {
+            let one = (worktree-allocate --repo $repo --task "t1")
+            "work\n" | save -f ($one.path | path join "work.txt")
+            ^git -C $one.path add -A
+            ^git -C $one.path commit -q -m "work nobody merged"
+            let got = (worktrees-reclaim --repo $repo)
+            assert-eq ($got.removed | length) 1 "the directory is reclaimed"
+            assert-true (not ($one.path | path exists)) ""
+            assert-eq $got.branches_deleted [] "but the branch is not"
+            assert-true ((git-in $repo "branch" "--list" $one.branch) | is-not-empty) "the commits survive on the ref"
+            assert-true (($got.branches_kept | first | get reason) | str contains "not merged") "and the report says so"
+
+            # Named so the operator can act: with --force the ref goes too.
+            let forced = (worktrees-reclaim --repo $repo --force)
+            assert-eq $forced.branches_deleted [$one.branch] "--force takes the ref"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "reclaim/deletes-a-merged-branch-whose-directory-is-already-gone" {
+        # The other half of the leftover: a swept directory whose branch stayed
+        # behind. Allocation steps past those refs, so they accumulate silently
+        # and nothing ever names them.
+        let repo = (make-repo "gc-bare-ref")
+        let root = (make-runtime "gc-bare-ref")
+        with-runtime $root {
+            let one = (worktree-allocate --repo $repo --task "t1")
+            ^git -C $repo worktree remove --force $one.path
+            let got = (worktrees-reclaim --repo $repo)
+            assert-eq ($got.removed | length) 0 "there is no directory to remove"
+            assert-eq $got.branches_deleted [$one.branch] "the bare ref is what is left to reclaim"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "reclaim/leaves-the-main-worktree-and-anything-not-a-workers-alone" {
+        # The main worktree is the operator's, and a worktree outside
+        # .worktrees/ was made by a person for their own reasons. Neither is a
+        # sweep's business, and `wk-` is the only naming this owns.
+        let repo = (make-repo "gc-scope")
+        let root = (make-runtime "gc-scope")
+        with-runtime $root {
+            let outside = ($repo | path dirname | path join $"outside-(random chars --length 6)")
+            ^git -C $repo worktree add --quiet -b mine $outside
+            let got = (worktrees-reclaim --repo $repo)
+            assert-eq ($got.removed | length) 0 "nothing to sweep"
+            assert-true ($repo | path exists) "the main worktree survives"
+            assert-true ($outside | path exists) "and so does a hand-made one"
+            assert-eq $got.branches_deleted [] "a branch that is not wk- is not touched"
+            ^git -C $repo worktree remove --force $outside
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "reclaim/dry-run-reports-without-touching-anything" {
+        # A sweep is irreversible and this one is project-wide, so there is a
+        # way to read the plan before it runs.
+        let repo = (make-repo "gc-dry")
+        let root = (make-runtime "gc-dry")
+        with-runtime $root {
+            let one = (worktree-allocate --repo $repo --task "t1")
+            let got = (worktrees-reclaim --repo $repo --dry-run)
+            assert-eq ($got.removed | length) 1 "it reports what it would take"
+            assert-true ($one.path | path exists) "and takes nothing"
+            assert-true ((git-in $repo "branch" "--list" $one.branch) | is-not-empty) ""
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
 ]
 
 $cases | to json

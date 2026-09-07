@@ -1145,6 +1145,181 @@ export def worktree-cleanup [
     }
 }
 
+# Every worker the bus knows, with the tree and branch it claimed.
+#
+# Cheaper than `worker-roster` on purpose: no tmux probe. A sweep asks "does
+# anyone still own this directory", and tmux cannot answer that — a worker
+# whose window was killed still owns its tree until its state says otherwise.
+def bus-claims []: nothing -> list<record> {
+    let root = (bus-root)
+    if not ($root | path exists) { return [] }
+    ls $root | where type == dir | get name | each {|run_dir|
+        let run = ($run_dir | path basename)
+        ls $run_dir | where type == dir | get name | each {|worker_dir|
+            let uid = ($worker_dir | path basename)
+            let identity = (bus-identity-of $uid --run $run)
+            if $identity == null { [] } else {
+                [{
+                    run: $run
+                    uid: $uid
+                    state: (bus-status $uid --run $run | get state)
+                    cwd: (expand-path $identity.cwd)
+                    branch: $identity.branch
+                }]
+            }
+        } | flatten
+    } | flatten
+}
+
+# The states in which a worker still has work in flight, and its directory is
+# therefore nobody else's.
+#
+# NOT the terminal set. `complete` is where the leftovers actually came from: a
+# worker reports, nobody accepts, and its tree lives forever — 26 of the 29
+# trees in this repo were `complete`. A worker that has reported is done with
+# its files; what it is waiting for is a decision, and a decision does not need
+# a directory. `failed` and `protocol_error` are the same: reported and
+# waiting on a person.
+#
+# The consequence, stated rather than hidden: sweeping a reported-but-unaccepted
+# worker means a later `accept` finds no tree to reclaim. That is why this is a
+# verb an operator runs when a round of work is done with, and never something
+# `stop` or `result` does on its own.
+const WORKING_STATES = ["created" "running" "waiting_human" "blocked"]
+
+# Reclaim every worker worktree in a project that no live worker owns.
+#
+# `worker-stop` leaves the tree and the branch behind deliberately: they may
+# hold unmerged commits, and a stopped worker's directory is the only place to
+# look at what it did. That is the right default per WORKER and the wrong one
+# per PROJECT — a round of smoke tests left 29 trees and 953 MB of them in this
+# repo before anything swept, and every one of those workers was resumable from
+# its session id the whole time. This is the project-scoped sweep: it takes the
+# directories, and what survives is the identity envelope on the bus, which is
+# where the session id lives.
+#
+# Four reasons to keep something, in the order a reader cares about:
+#
+#   live      a worker with work in flight owns it — created, running,
+#             waiting_human or blocked
+#   locked    someone held it deliberately
+#   dirty     uncommitted work, which nothing here licenses deleting
+#   unmerged  commits the base does not have (the DIRECTORY still goes; a
+#             worktree is re-creatable from a branch, commits are not
+#             re-creatable from anything)
+#
+# `--force` overrides dirty and unmerged and nothing else. A live worker's tree
+# is never swept, whatever the flag says: the flag means "I know what is in
+# these files", which is not a claim anyone can make about a running agent.
+export def worktrees-reclaim [
+    --repo: string
+    # The branch a commit must be in to count as merged. Defaults to whatever
+    # the main worktree is on, which is the branch work lands in.
+    --base: string = ""
+    --force
+    --dry-run
+]: nothing -> record {
+    let repo = (expand-path $repo)
+    let main = (main-worktree $repo)
+    let base = (if ($base | is-not-empty) { $base } else {
+        do { ^git -C $main rev-parse --abbrev-ref HEAD } | complete | get stdout | str trim
+    })
+    let trees_dir = (worktrees-dir $repo)
+    let claims = (bus-claims)
+    let held = ($claims | where state in $WORKING_STATES)
+
+    # Only ours: under .worktrees/, on a `wk-` branch, and not the main tree. A
+    # worktree a person made for their own reasons is not a sweep's business.
+    let mine = (
+        registered-worktrees $repo
+        | where {|w|
+            let path = (expand-path $w.path)
+            let ours = ($path | str starts-with $"($trees_dir)/")
+            $path != $main and $ours and ($w.branch | str starts-with $BRANCH_PREFIX)
+        }
+    )
+
+    mut removed = []
+    mut kept = []
+    mut branches_deleted = []
+    mut branches_kept = []
+
+    for w in $mine {
+        let path = (expand-path $w.path)
+        let owner = ($held | where cwd == $path)
+        if ($owner | is-not-empty) {
+            let o = ($owner | first)
+            $kept = ($kept | append {path: $path, branch: $w.branch, reason: $"($o.run)/($o.uid) is ($o.state)"})
+            continue
+        }
+        if $w.locked {
+            $kept = ($kept | append {path: $path, branch: $w.branch, reason: "locked"})
+            continue
+        }
+        let dirty = (($path | path exists) and (worktree-dirty? $path))
+        if $dirty and not $force {
+            $kept = ($kept | append {path: $path, branch: $w.branch, reason: "holds uncommitted work; --force to take it anyway"})
+            continue
+        }
+        if not $dry_run {
+            # --force on the git call only when the caller asked for it: a
+            # plain remove is the second guard behind worktree-dirty?, and a
+            # dirty tree git refuses is a tree this code was wrong about.
+            let args = (if $force { ["--force"] } else { [] })
+            let out = (do { ^git -C $repo worktree remove ...$args $path } | complete)
+            if $out.exit_code != 0 {
+                $kept = ($kept | append {path: $path, branch: $w.branch, reason: ($out.stderr | str trim)})
+                continue
+            }
+        }
+        $removed = ($removed | append {path: $path, branch: $w.branch, dirty: $dirty})
+    }
+
+    # The other half of the leftover: a branch whose directory is already gone.
+    # Allocation steps past those refs rather than reusing them, so they pile up
+    # silently and nothing ever names them.
+    let swept_paths = ($removed | get path)
+    let still_registered = (
+        registered-worktrees $repo
+        | where {|w| (expand-path $w.path) not-in $swept_paths }
+        | get branch
+    )
+    let candidates = (
+        known-branches $repo
+        | where {|b| $b | str starts-with $BRANCH_PREFIX }
+        | where {|b| $b not-in $still_registered }
+        | where {|b| $b not-in ($held | get branch) }
+    )
+    for b in $candidates {
+        let merged = (do { ^git -C $repo merge-base --is-ancestor $b $base } | complete | get exit_code) == 0
+        if not $merged and not $force {
+            $branches_kept = ($branches_kept | append {branch: $b, reason: $"not merged into ($base); --force to delete it anyway"})
+            continue
+        }
+        if not $dry_run {
+            let flag = (if $merged { "-d" } else { "-D" })
+            let out = (do { ^git -C $repo branch $flag $b } | complete)
+            if $out.exit_code != 0 {
+                $branches_kept = ($branches_kept | append {branch: $b, reason: ($out.stderr | str trim)})
+                continue
+            }
+        }
+        $branches_deleted = ($branches_deleted | append $b)
+    }
+
+    if not $dry_run { do { ^git -C $repo worktree prune } | complete | ignore }
+
+    {
+        repo: $repo
+        base: $base
+        dry_run: $dry_run
+        removed: $removed
+        kept: $kept
+        branches_deleted: $branches_deleted
+        branches_kept: $branches_kept
+    }
+}
+
 # --------------------------------------------------------------- identity
 #
 # The identity envelope is what ties a worker UID to the worktree it runs in,
@@ -2242,12 +2417,18 @@ def usage []: nothing -> string {
         "  resume   <uid> --run --feedback      send back to the ORIGINAL session"
         "  accept   <uid> --run --repo          close the window, remove the worktree"
         "  stop     <uid> --run                 close the window, KEEP the worktree"
+        "  reclaim  --repo [--base] [--force] [--dry-run]"
+        "                                       sweep a PROJECT: every worker tree no"
+        "                                       live worker owns. Session ids survive"
         "  doctor                               check dependencies"
         ""
         "NOTES"
         "  wait is non-destructive: it redelivers until ack, so an initiator that"
         "  dies mid-handling sees the result again. ack confirms delivery only —"
         "  a completed worker stays visible until accept."
+        "  stop keeps a tree because it may hold unmerged commits; reclaim is the"
+        "  per-project sweep for when a round of work is done with. Nothing a"
+        "  resume needs lives in a tree — the session id is on the bus."
     ] | str join "\n"
 }
 
@@ -2512,6 +2693,10 @@ def "main accept" [uid: string, --run: string, --repo: string, --socket: string 
 
 def "main stop" [uid: string, --run: string, --socket: string = ""] {
     worker-stop $uid --run $run --socket $socket | to json | print
+}
+
+def "main reclaim" [--repo: string, --base: string = "", --force, --dry-run] {
+    worktrees-reclaim --repo $repo --base $base --force=$force --dry-run=$dry_run | to json | print
 }
 
 # Report on each dependency SEPARATELY. A single "something is missing" tells
