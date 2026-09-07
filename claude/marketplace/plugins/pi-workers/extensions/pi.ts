@@ -1198,13 +1198,26 @@ export function startRosterFrame(opts: {
               }
             },
             invalidate: () => {
-              // The theme was captured when this factory ran, so a session
-              // that switches theme would keep painting the old palette
-              // forever. Pi calls invalidate on a from-scratch re-render,
-              // which is exactly when a fresh capture is available: drop the
-              // registration and let the next draw hand over a new factory.
-              mounted = false;
-              if (tui === (hostTui as FrameTui)) tui = undefined;
+              // Deliberately does NOT unmount, and that reverses an earlier
+              // decision here.
+              //
+              // The earlier reasoning: the theme is captured when this factory
+              // runs, so a session that switches theme would keep painting the
+              // old palette; Pi calls invalidate when a fresh capture is
+              // available, so drop the registration and re-register.
+              //
+              // What that missed is the rest of Pi's own contract for
+              // invalidate — "called when theme changes OR when component
+              // needs to re-render from scratch". The second clause fires
+              // constantly during a streaming turn, so dropping the
+              // registration here made the bar blink through every turn. A
+              // rare cosmetic problem was traded for a permanent one.
+              //
+              // Nothing here is cached: render reads `rows` and `activity`
+              // live, so there is genuinely nothing to invalidate. The cost is
+              // that a `/theme` switch leaves this one widget on the old
+              // palette until it next remounts — which happens on reload, or
+              // after it has been idle long enough to release its rows.
             },
             dispose: () => {
               // Only disown the handle we were given: a later mount may
