@@ -924,6 +924,43 @@ describe("roster frame", () => {
     expect(stateTone("something-new")).toBe("plain");
   });
 
+  test("fg is called as a method, because Pi's reads `this`", () => {
+    // Observed live: pulling `fg` off the theme and calling it detached exits
+    // the whole Pi session with
+    //     TypeError: Cannot read properties of undefined (reading 'fgColors')
+    // An arrow-function stub cannot catch this — it has no `this` to lose — so
+    // the stub here is shaped like Pi's own theme.
+    class HostTheme {
+      private fgColors: Record<string, string> = { error: "31" };
+      fg(tone: string, text: string): string {
+        return `<${this.fgColors[tone] ?? "0"}>${text}`;
+      }
+    }
+    const theme = new HostTheme();
+    expect(themePaint(theme)("error", "failed")).toBe("<31>failed");
+  });
+
+  test("a theme that throws costs the frame its colour, never the session", () => {
+    // themePaint is called from inside a component's render(), which Pi drives
+    // from a timer: a throw there is an uncaughtException that exits Pi.
+    let calls = 0;
+    const paint = themePaint({
+      fg: () => {
+        calls += 1;
+        throw new TypeError("Cannot read properties of undefined (reading 'fgColors')");
+      },
+    });
+    expect(paint("error", "failed")).toBe("failed");
+    // And it stops trying, rather than throwing sixty times a second.
+    expect(paint("error", "failed again")).toBe("failed again");
+    expect(calls).toBe(1);
+  });
+
+  test("a theme that returns a non-string does not blank the cell", () => {
+    const paint = themePaint({ fg: (() => undefined) as never });
+    expect(paint("warning", "blocked")).toBe("blocked");
+  });
+
   test("a theme without fg degrades to no colour rather than throwing", () => {
     expect(themePaint(undefined)("error", "failed")).toBe("failed");
     expect(themePaint({})("error", "failed")).toBe("failed");
@@ -1074,6 +1111,32 @@ describe("roster widget", () => {
     expect(last.join("\n")).toContain("running");
     // No theme reached it, so no escape codes were invented.
     expect(last.join("\n")).not.toContain("\u001b[");
+  });
+
+  test("a render that would throw yields no lines, not an exception", async () => {
+    // Pi calls render from a timer, so a throw is an uncaughtException that
+    // exits the session — verified the hard way. Nothing a status panel does
+    // is worth that.
+    const set: unknown[] = [];
+    const frame = startRosterFrame({
+      exec: psExec(psRows) as never,
+      setWidget: (_key, content) => set.push(content),
+      intervalMs: 1_000_000,
+    });
+    await frame.refresh();
+    frame.stop();
+
+    const factory = set.at(-1) as (tui: unknown, theme: unknown) => {
+      render: (width: number) => string[];
+    };
+    // A width that makes wrapToWidth's arithmetic meaningless is the cheapest
+    // way to reach the guard without stubbing internals.
+    const component = factory({ requestRender: () => {} }, {
+      get fg() {
+        throw new TypeError("theme exploded during property access");
+      },
+    });
+    expect(() => component.render(200)).not.toThrow();
   });
 
   test("an empty roster gives the terminal rows back", async () => {

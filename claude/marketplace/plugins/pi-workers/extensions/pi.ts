@@ -794,11 +794,43 @@ export function stateTone(state: string): Tone {
  * Feature-detected rather than typed: the theme reaches the frame through
  * setWidget's component factory, and a host that hands over something without
  * `fg` must cost the frame its colour and nothing else.
+ *
+ * Two things here are load-bearing, and both were learned by taking Pi down.
+ *
+ * `fg` is called AS A METHOD. Pi's implementation reads `this.fgColors`, so a
+ * detached reference — `const fg = theme.fg; fg(tone, text)` — throws:
+ *
+ *     TypeError: Cannot read properties of undefined (reading 'fgColors')
+ *
+ * A test stub written as an arrow function does not notice, because an arrow
+ * has no `this` to lose.
+ *
+ * And the call is GUARDED. This runs inside a component's render(), which Pi
+ * invokes from a timer: anything thrown there is an uncaughtException that
+ * exits the whole session, so a theme that misbehaves must cost the frame its
+ * colour, not the operator their Pi. The first failure disables painting for
+ * the life of this PaintFn rather than throwing sixty times a second.
  */
 export function themePaint(theme: unknown): PaintFn {
-  const fg = (theme as { fg?: (tone: string, text: string) => string } | undefined)?.fg;
-  if (typeof fg !== "function") return NO_PAINT;
-  return (tone, text) => (tone === "plain" ? text : fg(tone, text));
+  const host = theme as { fg?: (tone: string, text: string) => string } | undefined;
+  if (typeof host?.fg !== "function") return NO_PAINT;
+  let usable = true;
+  return (tone, text) => {
+    if (!usable || tone === "plain") return text;
+    try {
+      const painted = host.fg!(tone, text);
+      // A theme that returns nothing would blank the cell; treat that as
+      // unusable rather than rendering an empty column.
+      if (typeof painted !== "string") {
+        usable = false;
+        return text;
+      }
+      return painted;
+    } catch {
+      usable = false;
+      return text;
+    }
+  };
 }
 
 /**
@@ -917,12 +949,27 @@ export function startRosterFrame(opts: {
       try {
         opts.setWidget(ROSTER_WIDGET_KEY, (hostTui: unknown, theme: unknown) => {
           tui = hostTui as FrameTui;
-          const paint = themePaint(theme);
+          // Resolved on first render, INSIDE the guard below, and remembered.
+          // Reading the theme is itself something a host can make throw — an
+          // accessor, a proxy — and doing it out here would put that throw in
+          // the factory, where there is nothing to catch it.
+          let paint: PaintFn | undefined;
           return {
             // Rendered on demand, so the lines are computed against the
             // clock at draw time rather than at poll time.
-            render: (width: number) =>
-              wrapToWidth(rosterFrame(rows, { now: clock(), paint }) ?? [], width),
+            //
+            // Guarded as a whole for the same reason themePaint guards its
+            // call: Pi renders from a timer, and a throw here is an
+            // uncaughtException that exits the session. A status panel is
+            // never worth that, so a frame that cannot be drawn draws nothing.
+            render: (width: number) => {
+              try {
+                paint ??= themePaint(theme);
+                return wrapToWidth(rosterFrame(rows, { now: clock(), paint }) ?? [], width);
+              } catch {
+                return [];
+              }
+            },
             invalidate: () => {
               // The theme was captured when this factory ran, so a session
               // that switches theme would keep painting the old palette
