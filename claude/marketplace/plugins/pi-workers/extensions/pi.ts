@@ -1101,6 +1101,17 @@ export function rosterFrame(
  */
 export const ROSTER_WIDGET_KEY = "pi-workers";
 
+/**
+ * How long the frame holds an empty view before giving its rows back.
+ *
+ * Long enough to span the gaps WITHIN a run — between a verb clearing its
+ * activity line and the next `ps` listing what it just created, which is one
+ * subprocess and well under a second — so the bar appears once and stays put
+ * until the work is done. Short enough that an idle session is not left
+ * staring at a widget that has nothing to say.
+ */
+export const EMPTY_GRACE_MS = 10_000;
+
 /** What the frame needs from the host's tui handle, and nothing more. */
 interface FrameTui {
   requestRender(): void;
@@ -1142,6 +1153,9 @@ export function startRosterFrame(opts: {
    * global view is a `ps` call away.
    */
   const ownRuns = new Set<string>();
+
+  /** When the frame first had nothing to draw, or undefined while it has. */
+  let emptySince: number | undefined;
   let tui: FrameTui | undefined;
   // Whether the host takes a component factory. Assumed until one is refused;
   // see mount() for why a refusal is not fatal.
@@ -1212,16 +1226,37 @@ export function startRosterFrame(opts: {
 
   const draw = () => {
     // Emptiness is decided on the plain frame: an unpainted render is cheap at
-    // roster size, and a widget must be dropped rather than left as an empty
-    // box holding terminal rows.
-    if (rosterFrame(rows, { now: clock(), activity }) === undefined) {
-      if (mounted) {
-        opts.setWidget(ROSTER_WIDGET_KEY, undefined);
-        mounted = false;
-        tui = undefined;
+    // roster size.
+    const empty = rosterFrame(rows, { now: clock(), activity }) === undefined;
+
+    if (empty) {
+      if (!mounted) return;
+      // Do NOT unmount on the first empty draw. The frame used to, and it
+      // flickered through every single verb: `note` marks a call in flight and
+      // mounts, the call returns and clears the activity, and for the moment
+      // before the next `ps` lists the new worker the roster is empty — so the
+      // widget was torn down and rebuilt, once per verb, each rebuild a fresh
+      // component for Pi to lay out again. What the operator saw was the bar
+      // blinking several times per spawn.
+      //
+      // A mounted component with nothing to show renders zero lines, so it
+      // holds no terminal rows while it waits. Staying mounted through the
+      // gaps costs nothing and is the difference between a bar that appears
+      // once and stays until the work is done, and one that strobes.
+      const now = clock();
+      emptySince ??= now;
+      if (now - emptySince < EMPTY_GRACE_MS) {
+        tui?.requestRender();
+        return;
       }
+      opts.setWidget(ROSTER_WIDGET_KEY, undefined);
+      mounted = false;
+      tui = undefined;
+      emptySince = undefined;
       return;
     }
+
+    emptySince = undefined;
     if (!mounted || !factoryForm) {
       mount();
       return;
