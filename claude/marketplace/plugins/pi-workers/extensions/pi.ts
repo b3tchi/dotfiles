@@ -1034,7 +1034,23 @@ export function activityLine(
 
 export function rosterFrame(
   all: RosterRow[],
-  opts: { now?: number; paint?: PaintFn; activity?: FrameActivity } = {},
+  opts: {
+    now?: number;
+    paint?: PaintFn;
+    activity?: FrameActivity;
+    /**
+     * Draw the heading even with nothing else to say.
+     *
+     * Zero lines is indistinguishable from gone. Staying MOUNTED across the
+     * gaps stopped the widget being torn down, but a mounted widget rendering
+     * nothing still reads as one that vanished — so during a run, where the
+     * roster is briefly empty between a verb succeeding and its worker
+     * appearing on the bus, the bar was still seen blinking.
+     *
+     * The caller decides, because only it knows whether a run is under way.
+     */
+    holdEmpty?: boolean;
+  } = {},
 ): string[] | undefined {
   // The frame answers "what is running", so a finished worker has no business
   // holding a row. `blocked` and `waiting_human` are NOT finished — they are
@@ -1050,7 +1066,8 @@ export function rosterFrame(
   // finding its footing. With neither rows nor activity the widget goes away
   // and gives its terminal rows back.
   if (rows.length === 0) {
-    return activity === undefined ? undefined : [paint("muted", "pi-workers · warming up"), activity];
+    if (activity !== undefined) return [paint("muted", "pi-workers · warming up"), activity];
+    return opts.holdEmpty === true ? [paint("muted", "pi-workers · warming up")] : undefined;
   }
 
   const addr = rows.map((r) => `${r.run}/${r.uid}`);
@@ -1192,7 +1209,10 @@ export function startRosterFrame(opts: {
             render: (width: number) => {
               try {
                 paint ??= themePaint(theme);
-                return wrapToWidth(rosterFrame(rows, { now: clock(), paint, activity }) ?? [], width);
+                return wrapToWidth(
+                  rosterFrame(rows, { now: clock(), paint, activity, holdEmpty: holdEmpty() }) ?? [],
+                  width,
+                );
               } catch {
                 return [];
               }
@@ -1233,13 +1253,29 @@ export function startRosterFrame(opts: {
         factoryForm = false;
       }
     }
-    opts.setWidget(ROSTER_WIDGET_KEY, rosterFrame(rows, { now: clock(), activity }));
+    opts.setWidget(
+      ROSTER_WIDGET_KEY,
+      rosterFrame(rows, { now: clock(), activity, holdEmpty: holdEmpty() }),
+    );
     mounted = true;
   };
+
+  /**
+   * Whether to keep drawing a heading with nothing under it.
+   *
+   * True once the frame has been shown and while it is inside its grace
+   * window: that is exactly the span of a run, and a bar that renders zero
+   * lines between two verbs reads as one that disappeared.
+   */
+  const holdEmpty = () => mounted;
 
   const draw = () => {
     // Emptiness is decided on the plain frame: an unpainted render is cheap at
     // roster size.
+    // Deliberately WITHOUT holdEmpty: this decides whether there is anything
+    // to say, and holdEmpty is about how an empty view is drawn. Mixing them
+    // makes the frame immortal — it would never see itself as empty, so it
+    // would never give its rows back.
     const empty = rosterFrame(rows, { now: clock(), activity }) === undefined;
 
     if (empty) {
