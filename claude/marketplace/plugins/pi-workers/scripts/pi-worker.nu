@@ -655,6 +655,62 @@ export def mint-uid [run: string, role: string]: nothing -> string {
     $"($prefix)-($n)"
 }
 
+# The tmux session group to host a worker's window.
+#
+# Derived rather than demanded. The orchestrator is itself running in a tmux
+# session, and that session's group is where the operator is already looking —
+# which is the only sensible place to put a window they are meant to see. It
+# was a required argument, and the refusal for omitting it was the last piece
+# of ceremony left in a spawn call:
+#
+#     spawn refused: spawn needs --project: the tmux session group to host the
+#     window, e.g. dotfiles
+#
+# Nothing about that is a decision the caller was making.
+#
+# Found from $TMUX_PANE via `list-panes`, deliberately NOT via
+# `display-message`. That verb is on the forbidden list because `-p` makes it a
+# read channel that could carry state, and the static guard enforces it — the
+# right answer is not to argue for an exception but to use the probe that is
+# already allowed and already used by worker-liveness.
+#
+# Keyed on the pane rather than on "the current session", because tmux ANSWERS
+# either way: asked from outside, it reports whichever session was most
+# recently active, which is a guess. A worker window placed in a guessed group
+# is one the operator will not find. No $TMUX_PANE means no derivation, and the
+# caller is told which flag to pass.
+#
+# A grouped session lists its pane once per member, all with the same group, so
+# the first row is as good as any. An ungrouped session reports an empty group
+# and its own name is the host.
+export def current-session-group []: nothing -> string {
+    let pane = ($env | get -o TMUX_PANE | default "")
+    if ($pane | is-empty) { return "" }
+    let listed = (do { ^tmux list-panes -a -F "#{pane_id}\t#{session_group}\t#{session_name}" } | complete)
+    if $listed.exit_code != 0 { return "" }
+    let mine = (
+        $listed.stdout
+        | lines
+        | each {|l| $l | split row "\t" }
+        | where {|r| ($r | length) >= 3 and ($r | first | str trim) == $pane }
+    )
+    if ($mine | is-empty) { return "" }
+    let row = ($mine | first)
+    let group = ($row | get 1 | str trim)
+    if ($group | is-not-empty) { $group } else { $row | get 2 | str trim }
+}
+
+# The git repository enclosing the current directory.
+#
+# Same reasoning as the session group: the orchestrator is standing in a
+# repository, and that is the one it means. Empty when it is not, so the caller
+# gets a named refusal rather than a worker pointed somewhere arbitrary.
+export def current-repo []: nothing -> string {
+    let top = (do { ^git rev-parse --show-toplevel } | complete)
+    if $top.exit_code != 0 { return "" }
+    $top.stdout | str trim
+}
+
 # A fresh id for the worker's Pi session.
 #
 # Passed to `pi --session-id` to CREATE a session, so it only has to be unique
@@ -1846,9 +1902,14 @@ def main [...args: string] {
 # first spawn instead of inventing one.
 def "main spawn" [
     --run: string = "", --uid: string = "", --role: string = "", --subject: string
-    --project: string, --repo: string, --session: string = "", --skill: string
+    --project: string = "", --repo: string = "", --session: string = "", --skill: string
     --task: string = "", --socket: string = ""
 ] {
+    # Derived before the check below, so the caller is only asked for what
+    # cannot be worked out from where it is standing.
+    let project = (if ($project | is-empty) { current-session-group } else { $project })
+    let repo = (if ($repo | is-empty) { current-repo } else { $repo })
+
     # Required arguments, refused BY NAME.
     #
     # These were declared `string` with no default, so omitting one propagated
@@ -1864,8 +1925,8 @@ def "main spawn" [
         [flag       value       what];
         ["--role"   $role       "the worker's role, e.g. impl or rev; it appears in the window name"]
         ["--subject" $subject   "a short slug naming the work; it appears in the window name and the branch"]
-        ["--project" $project   "the tmux session group to host the window, e.g. dotfiles"]
-        ["--repo"    $repo      "the git repository the worker works in"]
+        ["--project" $project   "the tmux session group to host the window. Normally derived from the session you are in — pass it only when running outside tmux"]
+        ["--repo"    $repo      "the git repository the worker works in. Normally derived from the current directory — pass it only when that is not a repository"]
         ["--skill"   $skill     "which stage this worker runs; `pi-worker doctor` lists them"]
     ] {
         if ($required.value | is-empty) {
