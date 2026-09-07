@@ -130,7 +130,23 @@ let cases = [
         # somewhere that cannot be replayed after a crash. Anything not on the
         # display allowlist stays banned, so a new option write has to be
         # justified here before it can ship.
-        let display_options = ["remain-on-exit"]
+        #
+        # `@pinned` is justified as follows. This repo's own housekeeping,
+        # `nushell/actions/tmux-cleanup`, deletes unattached windows that have
+        # no pane with `@pinned` set — and a worker window is created with
+        # `new-window -d`, unattached by definition, because the point is that
+        # the operator is working elsewhere. Observed in ~/.tmux.log:
+        #
+        #     Killing unattached window - no pinned panes: @223
+        #
+        # so workers were being reaped mid-task. `@pinned` holds no value of
+        # its own beyond "do not delete this": the bus never reads it, nothing
+        # replays it, and no worker behaviour depends on it. It is the same
+        # category as `remain-on-exit` — an instruction to the display host
+        # about a window's lifetime — and it is the convention `tmux-start`
+        # already uses for every pane it creates, which [[poc022]] told sp028
+        # to match.
+        let display_options = ["remain-on-exit" "@pinned"]
         let offenders = (
             code-lines $worker "#"
             | where {|l| $l | str contains "tmux" }
@@ -143,9 +159,20 @@ let cases = [
     (run-case "static/user-options-are-never-written" {
         # A tmux user option (`@name`) is the mailbox shape specifically: it
         # exists only to hold arbitrary values on a target.
+        #
+        # `@pinned` is the one exception, justified in the case above: it is an
+        # instruction to the display host about a window's lifetime, read by
+        # this repo's tmux-cleanup and by nothing else. Listing it by name
+        # keeps every OTHER user option banned — the ban is on storage, and one
+        # named lifetime flag does not open the door to `@worker_state`.
+        let allowed = ["@pinned"]
         let offenders = (
             code-lines $worker "#"
             | where {|l| ($l | str contains "tmux") and ($l | str contains "@") }
+            | where {|l| not ($allowed | any {|o| $l | str contains $o }) }
+            # `@` also appears in window NAMES (`impl-a@dotfiles`) and in
+            # window ids (`@219`), neither of which is an option write.
+            | where {|l| ($l | str contains "set-option") or ($l | str contains "setw") or ($l | str contains "set-window-option") }
         )
         assert-eq $offenders [] "tmux user options are storage, not display"
     })

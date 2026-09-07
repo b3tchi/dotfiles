@@ -63,7 +63,7 @@ export const WORKER_STATES = [
 # deliberately absent from WORKER_STATES. Per adr0017 it must never be
 # persisted, reported by a worker, or used to license cleanup: missing process,
 # bus, or transcript evidence is a reason to look again, not to delete.
-export const OBSERVATIONAL_VERDICTS = ["unknown"]
+export const OBSERVATIONAL_VERDICTS = ["unknown" "gone"]
 
 # Statuses a worker may report in a result envelope. `accepted` is the
 # initiator's verdict on the work and `stopped` is an external act, so neither
@@ -1159,12 +1159,26 @@ def tmux-args [socket: string]: nothing -> list<string> {
 #   live     the pane exists and its process is running
 #   exited   the pane exists and its process is gone — the worker's OWN
 #            evidence about ITSELF, and therefore reportable
-#   unknown  no such window, or tmux could not be reached — nobody watched, so
-#            nothing was observed
+#   gone     tmux answered, and there is no such window
+#   unknown  tmux could not be reached — nobody watched, so nothing was
+#            observed
 #
-# `unknown` is an OBSERVATIONAL verdict: never persisted, never a licence to
-# stop, accept, or delete anything. Neither is `exited` — knowing a process
-# stopped is not knowing the work is finished.
+# `gone` and `unknown` were one verdict, and that was the bug adr0017 exists to
+# prevent: "sharing a code between 'dead' and 'cannot tell' is precisely the
+# bug this prevents". A worker whose window had been reaped read the same as
+# one on a box where tmux was down, and since `unknown` correctly never
+# licenses cleanup, it sat at `running` forever. Splitting them makes
+# `running`/`gone` legible as "died without reporting" — the case that needs a
+# human — where before it was indistinguishable from "ask again later".
+#
+# `unknown` and `gone` are both OBSERVATIONAL verdicts: never persisted, never
+# reportable by a worker about itself. Neither licenses automatic cleanup —
+# `gone` is tmux's evidence about a window, not the worker's about its work,
+# and adr0017 reserves automatic recovery for the latter. So `gone` is
+# REPORTED, and a human decides.
+#
+# Nor is `exited` a licence — knowing a process stopped is not knowing the work
+# is finished.
 export def worker-liveness [window: string, --socket: string = ""]: nothing -> record {
     # A window_id (@N) is matched exactly; a name is matched as before, so an
     # identity written before ids were recorded is still addressable rather than
@@ -1186,7 +1200,9 @@ export def worker-liveness [window: string, --socket: string = ""]: nothing -> r
         | where {|p| ($p | length) >= 2 and (($p | first | str trim) == $window) }
     )
     if ($panes | is-empty) {
-        return {verdict: "unknown", window: $window, reason: "no window by that name"}
+        # tmux ANSWERED. That the window is absent is a finding, not a failure
+        # to observe, and calling it `unknown` threw that away.
+        return {verdict: "gone", window: $window, reason: "tmux has no such window; it was closed or reaped"}
     }
 
     # Grouped sessions list the same window once per session, so a window may
@@ -1331,6 +1347,36 @@ export def worker-spawn [
     # between creating the window and setting this is a window in which a fast
     # exit destroys it and takes the reason with it.
     do { ^tmux ...(tmux-args $socket) set-option -t $window_id remain-on-exit on } | complete | ignore
+
+    # Pin the pane, or this repo's own housekeeping deletes the worker.
+    #
+    # `nushell/actions/tmux-cleanup` reaps unattached windows that have no pane
+    # with `@pinned` set to "1", and a worker window is created with
+    # `new-window -d` — detached by definition, since the whole point is that
+    # the operator is working elsewhere. Observed in ~/.tmux.log:
+    #
+    #     04:44:52 - Killing unattached window - no pinned panes: @223
+    #     04:55:39 - Killing unattached window - no pinned panes: @229
+    #
+    # The worker died mid-task, its window vanished, and because liveness has
+    # no way to distinguish that from "tmux could not be asked", the bus left
+    # it `running` forever. The operator saw a worker running for five minutes
+    # with no window anywhere on the machine.
+    #
+    # [[poc022]] said this before sp028 shipped: "Match the existing
+    # `tmux-start` group construction, identify workers through explicit pane
+    # options". `tmux-start` sets `@pinned` on every pane it creates; this is
+    # the same convention, applied by the one thing that also creates panes.
+    #
+    # Not a transport-boundary violation: `@pinned` carries no message, no
+    # completion signal and no coordination state. It tells the DISPLAY host
+    # not to reap a window — which is exactly the "tmux hosts and displays
+    # workers" half of that rule, not the bus half.
+    #
+    # Set immediately after remain-on-exit, and before anything slower, for the
+    # same reason: the gap between creating a window and protecting it is a gap
+    # in which it can be destroyed.
+    do { ^tmux ...(tmux-args $socket) set-option -p -t $window_id "@pinned" "1" } | complete | ignore
 
     # Re-record the identity now that the id exists. Written twice rather than
     # deferred: the first write is what leaves a resume handle behind when the
