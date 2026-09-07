@@ -1166,6 +1166,7 @@ def bus-claims []: nothing -> list<record> {
                     cwd: (expand-path $identity.cwd)
                     branch: $identity.branch
                     window: (window-target $identity)
+                    window_name: $identity.window
                 }]
             }
         } | flatten
@@ -1225,20 +1226,48 @@ def cwds-in-use []: nothing -> list<string> {
 #
 # Returns {dead, live} window ids. tmux being unreachable is neither, and the
 # caller reports it rather than treating silence as "no windows".
-def worker-window-corpses [windows: list<string>, socket: string]: nothing -> record {
-    if ($windows | is-empty) { return {dead: [], live: [], reachable: true} }
-    let listed = (do { ^tmux ...(tmux-args $socket) list-windows -a -F "#{window_id}\t#{pane_dead}" } | complete)
-    if $listed.exit_code != 0 { return {dead: [], live: [], reachable: false} }
+def worker-window-corpses [
+    windows: list<string>
+    socket: string
+    # The projects this repo's workers actually used, read off their window
+    # names (`<role>-<subject>@<project>`). A dead window that is shaped like a
+    # worker's in one of those projects but has no identity on the bus is
+    # REPORTED and never killed: without a bus record there is no evidence it
+    # is this repo's, and a session group can be shared. No claims means no
+    # known project, and then nothing is reported rather than guessed at.
+    projects: list<string> = []
+]: nothing -> record {
+    let listed = (do { ^tmux ...(tmux-args $socket) list-windows -a -F "#{window_id}\t#{pane_dead}\t#{window_name}" } | complete)
+    if $listed.exit_code != 0 { return {dead: [], live: [], orphaned: [], reachable: false} }
+    # Deduplicated by id, because a grouped session lists its windows once per
+    # MEMBER: this repo's group has eleven, so a first cut reported 242 windows
+    # to reap where there were 22, and would have said `kill` eleven times for
+    # each of them.
     let rows = (
         $listed.stdout
         | lines
         | each {|l| $l | split row "\t" }
         | where {|p| ($p | length) >= 2 }
-        | each {|p| {id: ($p | first | str trim), dead: (($p | get 1 | str trim) == "1")} }
+        | each {|p| {
+            id: ($p | first | str trim)
+            dead: (($p | get 1 | str trim) == "1")
+            name: ($p | get 2 | str trim)
+        } }
+        | uniq-by id
     )
+    let suffixes = ($projects | each {|p| $"@($p)" })
     {
         dead: ($rows | where {|r| $r.dead and $r.id in $windows } | get id)
         live: ($rows | where {|r| (not $r.dead) and $r.id in $windows } | get id)
+        orphaned: (
+            $rows
+            | where {|r|
+                let ours = ($r.id in $windows)
+                let shaped = ($suffixes | any {|sfx| $r.name | str ends-with $sfx })
+                $r.dead and (not $ours) and $shaped
+            }
+            | select id name
+        )
         reachable: true
     }
 }
@@ -1380,7 +1409,18 @@ export def worktrees-reclaim [
     # identity envelopes. Matching on the name instead would reach into another
     # project's session group, where a same-named window is somebody else's.
     let ours = ($claims | where {|c| $c.cwd == $repo or ($c.cwd | str starts-with $"($repo)/") })
-    let corpses = (worker-window-corpses ($ours | get window | where {|w| $w | str starts-with "@" }) $socket)
+    let corpses = (
+        worker-window-corpses
+            ($ours | get window | where {|w| $w | str starts-with "@" })
+            $socket
+            (
+                $ours
+                | get window_name
+                | where {|n| $n | str contains "@" }
+                | each {|n| $n | split row "@" | last }
+                | uniq
+            )
+    )
     mut windows_killed = []
     mut windows_kept = []
     for id in $corpses.dead {
@@ -1399,6 +1439,11 @@ export def worktrees-reclaim [
     for id in $corpses.live {
         let owner = ($ours | where window == $id | first)
         $windows_kept = ($windows_kept | append {window: $id, reason: $"($owner.run)/($owner.uid) is still running"})
+    }
+    # Named, never killed. A bus record is what proves a window is this
+    # project's; without one the sweep can only tell the operator it is there.
+    for w in $corpses.orphaned {
+        $windows_kept = ($windows_kept | append {window: $w.id, reason: $"dead, but no identity on the bus for it \(($w.name)); kill it by hand"})
     }
 
     {

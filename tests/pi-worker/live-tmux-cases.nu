@@ -309,6 +309,53 @@ let cases = [
         }
     })
 
+    (run-case "live/a-session-group-does-not-multiply-the-sweep" {
+        # `list-windows -a` reports every window once per session MEMBER, and a
+        # worker window is created in a GROUP so the operator sees it whichever
+        # member they are looking at. This repo's group has eleven members, so
+        # the first cut of the report claimed 242 windows to reap where there
+        # were 22, and would have issued eleven kills for each.
+        with-server "gc-group" --stub (dies-with 3) {|t, repo|
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            wait-for-dead $t.socket $w.window_id
+            # Two more views onto the same window list.
+            ^tmux -L $t.socket new-session -d -t "dotfiles" -s "dotfiles_2"
+            ^tmux -L $t.socket new-session -d -t "dotfiles" -s "dotfiles_3"
+
+            let got = (worktrees-reclaim --repo $repo --socket $t.socket --dry-run)
+            assert-eq $got.windows_killed [$w.window_id] "one window, named once"
+        }
+    })
+
+    (run-case "live/a-dead-window-with-no-bus-record-is-named-not-killed" {
+        # Observed after the first real sweep: @232 and @234 were dead worker
+        # windows whose bus records were gone, so nothing matched them and
+        # nothing mentioned them either. A bus record is what proves a window
+        # belongs to this project — a session group can be shared — so the
+        # sweep reports these and leaves them, rather than killing on a guess
+        # or staying silent about them.
+        with-server "gc-noident" {|t, repo|
+            # A real worker first: its window name is what tells the sweep which
+            # project's naming to recognise. With no workers at all there is no
+            # known project, and the sweep says nothing rather than guessing at
+            # window names.
+            worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket
+            ^tmux -L $t.socket new-window -d -n "impl-stray@dotfiles" -t "dotfiles" "sh -c 'exit 3'"
+            ^tmux -L $t.socket set-option -t "impl-stray@dotfiles" remain-on-exit on
+            # remain-on-exit has to be set BEFORE the process exits to hold the
+            # window, so the pane is re-run once the option is on.
+            ^tmux -L $t.socket respawn-pane -k -t "impl-stray@dotfiles" "sh -c 'exit 3'"
+            wait-for-dead $t.socket "impl-stray@dotfiles"
+
+            let got = (worktrees-reclaim --repo $repo --socket $t.socket)
+            assert-eq $got.windows_killed [] "a window the bus cannot vouch for is not killed"
+            let named = ($got.windows_kept | where {|w| $w.reason | str contains "no identity on the bus" })
+            assert-eq ($named | length) 1 $"the stray window must be reported, got ($got.windows_kept)"
+            let names = (^tmux -L $t.socket list-windows -a -F "#{window_name}" | lines)
+            assert-true ("impl-stray@dotfiles" in $names) "and it is still there for the operator to look at"
+        }
+    })
+
     (run-case "live/a-sweep-with-no-tmux-says-so-rather-than-reporting-no-windows" {
         # Absence of evidence is not evidence of absence (adr0017). A sweep run
         # where tmux cannot be reached must not report an empty window list as
