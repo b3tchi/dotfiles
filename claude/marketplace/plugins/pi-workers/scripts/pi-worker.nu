@@ -1145,7 +1145,7 @@ export def worker-spawn [
     # this command's call.
     let existing = (worker-dir $run $uid)
     if ($existing | path exists) {
-        error make {msg: $"($run)/($uid) already exists: that address has been used, and spawning onto it would inherit its mail and markers. Use a different uid, or remove ($existing) if you are sure it is finished with"}
+        error make {msg: $"($run)/($uid) already exists: that address has been used, and spawning onto it would inherit its mail and markers. Use a different uid, or release this one with `rm --run ($run) --uid ($uid)` once it is finished with"}
     }
 
     let stage = (stage-for $skill)

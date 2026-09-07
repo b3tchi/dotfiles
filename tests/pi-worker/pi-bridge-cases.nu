@@ -327,6 +327,13 @@ let cases = [
                 assert-rejects {
                     spawn-worker $t $repo --task "t1" --skill "wk-build" --session "sid-2"
                 } "impl-a" "naming the uid"
+                # And naming the VERB that resolves it. Observed live: an agent
+                # restricted to the tool read "remove <path>", had no way to
+                # remove a path, and gave up — the remedy has to be offered in
+                # the vocabulary the caller actually has.
+                assert-rejects {
+                    spawn-worker $t $repo --task "t1" --skill "wk-build" --session "sid-2"
+                } "rm --run" "pointing at the verb, not the filesystem"
             }
         }
         drop-tmux $t; rm -rf $root; rm -rf $repo
