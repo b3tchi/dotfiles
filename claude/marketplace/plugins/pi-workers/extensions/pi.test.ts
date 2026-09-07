@@ -36,6 +36,8 @@ import {
   createInitiatorTool,
   rosterFrame,
   collapsedStateLine,
+  activityLine,
+  ACTIVITY_TTL_MS,
   formatElapsed,
   stateTone,
   themePaint,
@@ -1317,11 +1319,11 @@ describe("transcript lines", () => {
     // the detail is reachable rather than unbidden. What must not change is
     // that expanding loses nothing.
     const detail = "{\n  \"run\": \"x1\"\n}";
-    expect(transcriptLines("inspect", true, detail, true)).toEqual(detail.split("\n"));
-    expect(transcriptLines("status", true, detail, true)).toEqual(detail.split("\n"));
+    expect(transcriptLines("inspect", true, detail, { expanded: true })).toEqual(detail.split("\n"));
+    expect(transcriptLines("status", true, detail, { expanded: true })).toEqual(detail.split("\n"));
     // And collapsed, each is a single line that still names the worker.
-    expect(transcriptLines("inspect", true, detail, false)).toHaveLength(1);
-    expect(transcriptLines("inspect", true, detail, false)[0]).toContain("x1");
+    expect(transcriptLines("inspect", true, detail, { expanded: false })).toHaveLength(1);
+    expect(transcriptLines("inspect", true, detail, { expanded: false })[0]).toContain("x1");
   });
 });
 
@@ -1563,29 +1565,29 @@ describe("collapsed state line", () => {
 
 describe("transcriptLines expansion", () => {
   test("a collapsed inspect is one line, not the whole body", () => {
-    const lines = transcriptLines("inspect", true, INSPECT_BODY, false);
+    const lines = transcriptLines("inspect", true, INSPECT_BODY, { expanded: false });
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain("x3/w1");
     expect(lines[0]).not.toContain("transcript");
   });
 
   test("an expanded inspect is byte-identical to the old full body", () => {
-    expect(transcriptLines("inspect", true, INSPECT_BODY, true)).toEqual(
+    expect(transcriptLines("inspect", true, INSPECT_BODY, { expanded: true })).toEqual(
       INSPECT_BODY.split("\n"),
     );
   });
 
   test("status collapses the same way", () => {
-    expect(transcriptLines("status", true, INSPECT_BODY, false)).toHaveLength(1);
-    expect(transcriptLines("status", true, INSPECT_BODY, true).length).toBeGreaterThan(1);
+    expect(transcriptLines("status", true, INSPECT_BODY, { expanded: false })).toHaveLength(1);
+    expect(transcriptLines("status", true, INSPECT_BODY, { expanded: true }).length).toBeGreaterThan(1);
   });
 
   test("a failure is never collapsed, whatever the verb or the expand state", () => {
     // An operator who cannot read the refusal has no idea why nothing
     // happened, and hiding it behind a click makes that worse, not better.
     const err = "refusing to spawn x3/w1: address occupied";
-    expect(transcriptLines("inspect", false, err, false)).toEqual([err]);
-    expect(transcriptLines("status", false, err, false)).toEqual([err]);
+    expect(transcriptLines("inspect", false, err, { expanded: false })).toEqual([err]);
+    expect(transcriptLines("status", false, err, { expanded: false })).toEqual([err]);
   });
 
   test("the other verbs are unaffected by the expand state", () => {
@@ -1688,5 +1690,135 @@ describe("click to expand", () => {
 
   test("the old two-argument call still works, for callers that have no context", () => {
     expect(resultComponent("inspect", true, INSPECT_BODY).render(200)).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The frame carries the warming up.
+//
+// Getting one worker running used to cost a screenful of failed guesses and
+// stage refusals. None of that is history worth keeping — it is the agent
+// finding its footing, which is state, which is what the frame is for.
+
+describe("frame activity", () => {
+  const rows = [
+    { run: "r1", uid: "impl-1", role: "impl", state: "running", liveness: "live", window: "impl-1@dotfiles" },
+  ];
+
+  test("a call in flight is a muted progress note, not news", () => {
+    const line = activityLine({ verb: "spawn", at: 1000 }, 1000, (tone, text) => `<${tone}>${text}`);
+    expect(line).toBe("<muted>spawn…");
+  });
+
+  test("a refusal is painted as one and carries its reason", () => {
+    // "spawn failed" without the reason is the same dead end as printing
+    // nothing: the stage refusal names the alternatives, and that is the whole
+    // value of it.
+    const line = activityLine(
+      { verb: "spawn", ok: false, detail: "unknown stage 'default': not one of probe, build", at: 1000 },
+      1000,
+      (tone, text) => `<${tone}>${text}`,
+    );
+    expect(line).toContain("<error>");
+    expect(line).toContain("not one of probe, build");
+  });
+
+  test("a success says nothing — the rows below are the success", () => {
+    expect(activityLine({ verb: "spawn", ok: true, at: 1000 }, 1000)).toBeUndefined();
+  });
+
+  test("a refusal ages out rather than sitting there tomorrow", () => {
+    const refusal = { verb: "spawn", ok: false, detail: "nope", at: 1000 };
+    expect(activityLine(refusal, 1000 + ACTIVITY_TTL_MS - 1)).toBeDefined();
+    expect(activityLine(refusal, 1000 + ACTIVITY_TTL_MS + 1)).toBeUndefined();
+  });
+
+  test("no activity is no line at all", () => {
+    expect(activityLine(undefined, 1000)).toBeUndefined();
+  });
+
+  test("the activity line sits under the rows it concerns", () => {
+    const frame = rosterFrame(rows, {
+      now: 1000,
+      activity: { verb: "send", ok: false, detail: "stage 'build' takes a ticket payload", at: 1000 },
+    });
+    expect(frame).toHaveLength(3); // heading, the worker, the refusal
+    expect(frame[1]).toContain("impl-1");
+    expect(frame[2]).toContain("takes a ticket payload");
+  });
+
+  test("with no workers yet the frame still draws, and says what it is", () => {
+    // This is the interesting moment: before the first worker exists, while
+    // the agent is still finding its footing. Claiming `0 workers` would be a
+    // count nobody asked for.
+    const frame = rosterFrame([], { now: 1000, activity: { verb: "spawn", at: 1000 } });
+    expect(frame).toHaveLength(2);
+    expect(frame[0]).toContain("warming up");
+    expect(frame[0]).not.toContain("0 worker");
+    expect(frame[1]).toContain("spawn");
+  });
+
+  test("neither rows nor activity gives the terminal rows back", () => {
+    expect(rosterFrame([], { now: 1000 })).toBeUndefined();
+    expect(rosterFrame([], { now: 1000, activity: { verb: "spawn", ok: true, at: 1000 } })).toBeUndefined();
+  });
+
+  test("note() draws immediately, and a success clears the line", async () => {
+    // On the next poll would be five seconds of the operator reading a stale
+    // frame while the transcript stays silent.
+    // Mounted once, then repainted through the tui — so the component is held
+    // and re-rendered, which is what Pi does with it. A note that only landed
+    // on the next re-registration would leave the operator reading a stale
+    // frame while the transcript stayed silent.
+    let component: { render: (w: number) => string[] } | undefined;
+    let repaints = 0;
+    const frame = startRosterFrame({
+      exec: (async () => ({ code: 0, stdout: JSON.stringify(rows), stderr: "" })) as never,
+      setWidget: (_key, content) => {
+        if (typeof content === "function") {
+          component = (content as (t: unknown, th: unknown) => { render: (w: number) => string[] })(
+            { requestRender: () => { repaints += 1; } },
+            {},
+          );
+        }
+      },
+      intervalMs: 1_000_000,
+    });
+    await frame.refresh();
+    expect(component).toBeDefined();
+
+    frame.note({ verb: "spawn", ok: false, detail: "unknown stage 'default'", at: Date.now() });
+    expect(repaints).toBeGreaterThan(0);
+    expect(component!.render(200).join("\n")).toContain("unknown stage 'default'");
+
+    frame.note({ verb: "spawn", ok: true, at: Date.now() });
+    expect(component!.render(200).join("\n")).not.toContain("unknown stage");
+    frame.stop();
+  });
+});
+
+describe("refusals move to the frame, but only when there is one", () => {
+  const refusal = "unknown stage 'default': not one of probe, build";
+
+  test("with the frame live, a refusal prints nothing inline", () => {
+    expect(transcriptLines("spawn", false, refusal, { frameLive: true })).toEqual([]);
+  });
+
+  test("with no frame, a refusal prints in full — as it always did", () => {
+    // print, json and rpc mode, and any session without a UI. Suppressing here
+    // would mean the operator cannot see the failure ANYWHERE, which is the
+    // thing this file has always refused to do.
+    expect(transcriptLines("spawn", false, refusal, { frameLive: false })).toEqual([refusal]);
+    expect(transcriptLines("spawn", false, refusal, {})).toEqual([refusal]);
+    expect(transcriptLines("spawn", false, refusal)).toEqual([refusal]);
+  });
+
+  test("expanding never resurrects a suppressed refusal, or it would double up", () => {
+    expect(transcriptLines("inspect", false, refusal, { frameLive: true, expanded: true })).toEqual([]);
+  });
+
+  test("resultComponent honours frameLive too", () => {
+    expect(resultComponent("spawn", false, refusal, { frameLive: true }).render(200)).toEqual([]);
+    expect(resultComponent("spawn", false, refusal, {}).render(200)).toEqual([refusal]);
   });
 });
