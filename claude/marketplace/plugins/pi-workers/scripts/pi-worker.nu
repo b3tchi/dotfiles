@@ -176,6 +176,23 @@ const RESERVED_STAGES = ["rejection"]
 
 # --------------------------------------------------------- payload contracts
 
+# Stages that take the other kind of payload, for a refusal to point at.
+#
+# A refusal is where the caller actually learns the vocabulary — observed all
+# evening: an agent tried stage `default`, then `work-do`, then `build`, and
+# learned the real names only from being told no. Saying "this stage wants a
+# ticket" without saying which stage wants prose leaves the caller to guess
+# again, and there may be no such stage at all — which is worth knowing,
+# because then the registry is the thing to fix, not the call.
+def stages-taking [shape: string]: nothing -> string {
+    let matching = (load-stages | where payload == $shape | get name)
+    if ($matching | is-empty) {
+        $"no stage in the registry takes ($shape); the registry needs one"
+    } else {
+        $matching | str join ", "
+    }
+}
+
 def validate-inbox-payload [payload: record] {
     if "stage" not-in ($payload | columns) {
         error make {msg: "inbox payload must name its stage"}
@@ -187,7 +204,7 @@ def validate-inbox-payload [payload: record] {
     let shape = (if $stage in $RESERVED_STAGES { "instructions" } else { stage-for $stage | get payload })
     if $shape == "ticket" {
         if "task" not-in $fields {
-            error make {msg: $"payload for '($stage)' must carry its ticket id"}
+            error make {msg: $"payload for '($stage)' must carry its ticket id. If the work has no ticket and is prose, it needs a stage that takes instructions: (stages-taking 'instructions')"}
         }
         let extra = ($fields | where {|f| $f not-in $WORK_PAYLOAD_ALLOWED })
         if ($extra | is-not-empty) {
@@ -195,7 +212,7 @@ def validate-inbox-payload [payload: record] {
         }
     } else {
         if "task" in $fields {
-            error make {msg: $"payload for '($stage)' must not carry a ticket id: this stage receives direct instructions and artifact ids"}
+            error make {msg: $"payload for '($stage)' must not carry a ticket id: this stage receives direct instructions and artifact ids. Stages that take a ticket: (stages-taking 'ticket')"}
         }
         if "instructions" not-in $fields {
             error make {msg: $"payload for '($stage)' must carry direct instructions"}
