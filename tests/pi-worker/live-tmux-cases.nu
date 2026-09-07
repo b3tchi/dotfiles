@@ -209,16 +209,29 @@ let cases = [
         }
     })
 
-    (run-case "live/a-missing-window-reports-unknown-not-exited" {
-        # The distinction adr0017 exists to protect: nobody watched this
-        # worker stop, so nothing observed it stopping. Reporting "exited" here
-        # would be evidence of absence dressed as absence of evidence.
-        with-server "verdict-unknown" {|t, repo|
+    (run-case "live/a-missing-window-is-gone-not-unknown-and-not-exited" {
+        # This case used to expect `unknown`, on the reasoning that "nobody
+        # watched this worker stop". That reasoning was wrong here: tmux WAS
+        # asked, and answered that the window does not exist. Absence of the
+        # window is a finding.
+        #
+        # Sharing one verdict with "tmux could not be reached" is the bug
+        # adr0017 names in its own consequences — "sharing a code between
+        # 'dead' and 'cannot tell' is precisely the bug this prevents". It cost
+        # a real worker: reaped mid-task, its window gone, and because
+        # `unknown` correctly never licenses cleanup, the bus left it `running`
+        # for five minutes with nothing able to move it.
+        #
+        # `exited` is still wrong — that means the pane survived and its
+        # process did not, which is the worker's own evidence about itself.
+        # The genuinely unobservable case is the next one along.
+        with-server "verdict-gone" {|t, repo|
             let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
             ^tmux -L $t.socket kill-window -t $w.window
 
             let seen = (worker-liveness $w.window --socket $t.socket)
-            assert-eq $seen.verdict "unknown" "a window nobody can find answers nothing"
+            assert-eq $seen.verdict "gone" "tmux answered: there is no such window"
+            assert-true ($seen.reason | str contains "no such window") "and says which finding it is"
             assert-eq (worker-live? $w.window --socket $t.socket) false "not live either way"
         }
     })
@@ -384,7 +397,10 @@ let cases = [
             worker-stop "w1" --run "run-a" --socket $t.socket
             assert-eq (bus-status "w1" --run "run-b" | get state) "running" "the other worker is untouched"
             assert-eq (worker-liveness $b.window_id --socket $t.socket | get verdict) "live" "and still alive"
-            assert-eq (worker-liveness $a.window_id --socket $t.socket | get verdict) "unknown" "while the stopped one's window is gone"
+            # This assertion's own message said "gone" while expecting
+            # `unknown`: the prose had the right word before the verdict
+            # vocabulary did.
+            assert-eq (worker-liveness $a.window_id --socket $t.socket | get verdict) "gone" "while the stopped one's window is gone"
         }
     })
 
