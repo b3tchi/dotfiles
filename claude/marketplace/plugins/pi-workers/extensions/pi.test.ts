@@ -1850,15 +1850,19 @@ describe("frame activity", () => {
     expect(frame[2]).toContain("takes a ticket payload");
   });
 
-  test("with no workers yet the frame still draws, and says what it is", () => {
+  test("with no workers yet the frame is one line, and says what it is", () => {
     // This is the interesting moment: before the first worker exists, while
     // the agent is still finding its footing. Claiming `0 workers` would be a
     // count nobody asked for.
+    //
+    // One line, not two: with nothing underneath, a heading plus an activity
+    // line is two rows saying one thing, and this is the state that is on
+    // screen longest.
     const frame = rosterFrame([], { now: 1000, activity: { verb: "spawn", at: 1000 } });
-    expect(frame).toHaveLength(2);
-    expect(frame[0]).toContain("warming up");
+    expect(frame).toHaveLength(1);
+    expect(frame[0]).toContain("warming-up");
+    expect(frame[0]).toContain("spawn");
     expect(frame[0]).not.toContain("0 worker");
-    expect(frame[1]).toContain("spawn");
   });
 
   test("neither rows nor activity gives the terminal rows back", () => {
@@ -2072,7 +2076,7 @@ describe("the frame appears once and stays until the work is done", () => {
     frame.note({ verb: "spawn", ok: true, at: clock });
     await frame.refresh();
     expect(component!.render(200).length).toBeGreaterThan(0);
-    expect(component!.render(200)[0]).toContain("warming up");
+    expect(component!.render(200)[0]).toContain("warming-up");
 
     // Same for the gap between any two later verbs.
     clock += 200;
