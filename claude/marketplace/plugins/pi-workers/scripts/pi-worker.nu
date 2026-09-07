@@ -1604,6 +1604,73 @@ export def resolve-project-session [project: string, --socket: string = ""] {
     error make {msg: $"no tmux session or session group named '($project)'. Known sessions: ($sessions | get name | sort | str join ', ')"}
 }
 
+# Turn whatever the caller called the work into something that can be a name.
+#
+# A subject is worn as a tmux window name AND a git branch, so it has to be a
+# name in both. Observed live, window @234 in this repo's session group:
+#
+#     impl-Create timestamp-named text file with header in
+#     /home/jan/.dotfiles. Filename must be safe.@dotfiles
+#
+# An agent had passed its whole instruction as --subject. The window list
+# became unreadable, and `.` and `/` are hostile in a ref — worktree-allocate
+# spent 64 attempts failing to build a branch out of prose and then reported
+# that git had refused, which is the truth at the wrong altitude entirely.
+#
+# Slugified rather than refused, and that is a change of policy: the earlier
+# code refused prose outright on the grounds that truncating produces an
+# address named after the first few words of an instruction. It does — and an
+# orchestrator stopped mid-round by a cosmetic complaint about a window name is
+# worse. The address is for finding the worker; the instructions carry the
+# meaning, and they travel in the message either way.
+#
+# Everything outside [a-z0-9] becomes a separator, runs collapse, and the cut
+# to MAX_SUBJECT_CHARS never leaves one trailing. A subject with nothing usable
+# in it is still refused: slugifying is not a licence to invent an address, and
+# a worker called `impl-@dotfiles` is worse than being told.
+export def slugify-subject [subject: string]: nothing -> string {
+    let cleaned = (
+        $subject
+        | str lowercase
+        | str replace --all --regex '[^a-z0-9]+' "-"
+        | str trim --char "-"
+    )
+    # Cut at a word boundary. A hard cut at the character limit produced
+    # `create-timestamp-named-text-file-with-he`, and a name is meant to be
+    # read.
+    #
+    # The fitter STOPS at the first word that does not fit rather than skipping
+    # it: taking every word that happens to fit turned "...text file with
+    # header in /home/jan/.dotfiles" into `...-file-with-in`, welding `in` onto
+    # `with` across the `header` it had dropped. A name assembled from
+    # non-adjacent words says something the caller did not.
+    let fitted = (
+        $cleaned
+        | split row "-"
+        | reduce --fold {text: "", full: false} {|word, acc|
+            if $acc.full { $acc } else {
+                let candidate = (if ($acc.text | is-empty) { $word } else { $"($acc.text)-($word)" })
+                if ($candidate | str length) <= $MAX_SUBJECT_CHARS {
+                    {text: $candidate, full: false}
+                } else {
+                    {text: $acc.text, full: true}
+                }
+            }
+        }
+        | get text
+    )
+    # Empty means the very first word is longer than the whole budget: there is
+    # no boundary to find, so it is cut hard.
+    let slug = (
+        if ($fitted | is-empty) { $cleaned | str substring 0..($MAX_SUBJECT_CHARS - 1) } else { $fitted }
+        | str trim --char "-"
+    )
+    if ($slug | is-empty) {
+        error make {msg: $"'($subject)' has no usable characters for a name, and it has to be one: a subject is worn as a tmux window name and a git branch. Pass a slug like 'timestamp-file'; what the worker should DO belongs in the message"}
+    }
+    $slug
+}
+
 # The name an operator scans a window list for: `<role>-<subject>@<project>`.
 # Subject is the ticket id for ticket-payload stages and the artifact id otherwise.
 export def worker-window-name [role: string, subject: string, project: string]: nothing -> string {
@@ -1833,6 +1900,11 @@ export def worker-spawn [
     # leaving a branch to prune by hand (hit on the first live run).
     let target = (resolve-project-session $project --socket $socket)
 
+    # Inside worker-spawn, not in the CLI wrapper where this guard used to
+    # live: every nu caller — the scrum-master skill, the tests, the next verb
+    # — went straight past the wrapper, which is how prose reached a window
+    # name in the first place.
+    let subject = (slugify-subject $subject)
     let window = (worker-window-name $role $subject $project)
     # NOT `$task | default $subject`. `default` substitutes for null, not for an
     # empty string, so a stage with no task would have allocated a worktree
@@ -1902,6 +1974,9 @@ export def worker-spawn [
         run: $run
         uid: $uid
         role: $role
+        # What the address became. A caller that passed prose gets to see the
+        # name it actually got rather than diffing it out of the window.
+        subject: $subject
         window: $window
         window_id: $window_id
         cwd: $tree.path
@@ -2799,7 +2874,7 @@ def "main spawn" [
     for required in [
         [flag       value       what];
         ["--role"   $role       "the worker's role, e.g. impl or rev; it appears in the window name"]
-        ["--subject" $subject   "a short slug naming the work; it appears in the window name and the branch"]
+        ["--subject" $subject   "a short name for the work; it becomes the window name and the branch, slugified if it is not already a slug"]
         ["--project" $project   "the tmux session group to host the window. Normally derived from the session you are in — pass it only when running outside tmux"]
         ["--repo"    $repo      "the git repository the worker works in. Normally derived from the current directory — pass it only when that is not a repository"]
         ["--skill"   $skill     "which stage this worker runs; `pi-worker doctor` lists them"]
@@ -2809,26 +2884,10 @@ def "main spawn" [
         }
     }
 
-    # A subject becomes a tmux window name and a git branch, so it has to be a
-    # NAME. Observed: an agent passed its entire task description —
-    #
-    #     "Create timestamp-named text file with header in /home/jan/.dotfiles.
-    #      Filename must be current timestamp in safe format like ..."
-    #
-    # — and worktree-allocate spent 64 attempts failing to build a branch out
-    # of it before giving up. The refusal was honest and the diagnosis was
-    # impossible: nothing said the prose was the problem.
-    #
-    # Refused rather than slugified. Truncating would produce a window and a
-    # branch named after the first few words of an instruction, which is worse
-    # than being told: the caller meant that prose to reach the worker, and it
-    # belongs in the message, not in an address.
-    if ($subject | str length) > $MAX_SUBJECT_CHARS {
-        error make {msg: $"spawn's --subject is ($subject | str length) characters; it names a tmux window and a git branch, so keep it under ($MAX_SUBJECT_CHARS). What the worker should DO belongs in the message, not in its address"}
-    }
-    if ($subject =~ '\s') {
-        error make {msg: $"spawn's --subject may not contain whitespace: it names a tmux window and a git branch. Pass a slug like 'timestamp-file'; the instructions go in the message"}
-    }
+    # --subject is no longer refused for being prose: worker-spawn slugifies it
+    # (see slugify-subject, which also explains why that is now the policy) and
+    # reports the name it produced. --task below is a different matter — it is
+    # an ID, and an id that has been mangled to fit is not that id any more.
 
     # `--task` names the branch when it is given (see subject_for_branch in
     # worker-spawn), so it is under exactly the same constraint as --subject

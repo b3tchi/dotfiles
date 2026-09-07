@@ -1988,7 +1988,7 @@ const INITIATOR_TOOL_PARAMETERS = {
     run: { type: "string", description: "the run id grouping these workers. On spawn, omit it and one is minted; reuse what spawn reports for sibling workers" },
     uid: { type: "string", description: "the worker's id within the run. On spawn, omit it and one is minted from the role. On `wait`, scopes to that worker instead of the whole run" },
     role: { type: "string", description: "spawn: shown in the window name, e.g. impl or rev" },
-    subject: { type: "string", description: "spawn: a short slug naming the work, under 40 chars with no spaces — it becomes the tmux window name and the git branch, e.g. 'timestamp-file'. Not a description of the task" },
+    subject: { type: "string", description: "spawn: a short NAME for the work — it becomes the tmux window name and the git branch, e.g. 'timestamp-file'. Prose is slugified and capped rather than refused, so passing a whole instruction here gets you a window called 'impl-create-timestamp-named-text-file@…' and the instruction goes nowhere: what the worker should DO travels in `send --instructions`" },
     project: { type: "string", description: "spawn: omit this. The tmux session group is derived from the session you are in, which is where the operator is looking. Pass it only when running outside tmux" },
     repo: { type: "string", description: "spawn/accept: on spawn, omit it — the repository is derived from the current directory. Pass it only when that is not a repository, or for accept" },
     session: { type: "string", description: "spawn: omit this. The worker's Pi session id is minted for you — do not generate one" },

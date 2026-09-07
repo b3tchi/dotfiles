@@ -750,8 +750,16 @@ let cases = [
         # sidesteps the grammar entirely.
         with-server "dotted" {|t, repo|
             let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1.4" --project "dotfiles" --repo $repo --task "t1.4" --session "sid-1" --skill "wk-build" --socket $t.socket)
-            assert-true ($w.window | str contains ".4") "the display name keeps the real subject"
-            assert-eq (worker-liveness $w.window_id --socket $t.socket | get verdict) "live" "liveness works despite the dot"
+            # The dot no longer reaches the window name at all: slugify-subject
+            # turns it into a separator, which is a stronger fix than tolerating
+            # it and addressing around it. The ticket is still recognisable in a
+            # window list, and the BRANCH keeps the id exactly — that comes from
+            # --task, which is an id and is never mangled to fit.
+            assert-eq $w.window "impl-t1-4@dotfiles" "the display name is a name"
+            assert-eq $w.branch "wk-t1.4.0" "and the branch carries the ticket id verbatim"
+            # Addressing by id remains the mechanism, because a NAME is
+            # ambiguous the moment two runs share a role and subject.
+            assert-eq (worker-liveness $w.window_id --socket $t.socket | get verdict) "live" "liveness works by id"
 
             worker-stop "impl-a" --run "run-1" --socket $t.socket
             let names = (^tmux -L $t.socket list-windows -a -F "#{window_name}" | lines | each {|x| $x | str trim })

@@ -83,6 +83,96 @@ let cases = [
         assert-eq (worker-window-name "rev" "sp028" "akm") "rev-sp028@akm" ""
     })
 
+    (run-case "spawn/a-subject-is-slugified-into-a-name" {
+        # A subject is worn as a tmux window name AND a git branch, so it has
+        # to be a name. Observed live: window @234 in this repo's group was
+        # called
+        #
+        #     impl-Create timestamp-named text file with header in
+        #     /home/jan/.dotfiles. Filename must be safe.@dotfiles
+        #
+        # because an agent passed its whole instruction as --subject. The
+        # window list became unreadable, `.` and `/` are hostile in a branch
+        # name, and worktree-allocate spent 64 attempts failing to build a ref
+        # out of it.
+        assert-eq (slugify-subject "timestamp-file") "timestamp-file" "a slug is already a slug"
+        assert-eq (slugify-subject "Create timestamp-named text file") "create-timestamp-named-text-file" "prose becomes a name"
+        assert-eq (slugify-subject "dotfiles-963w.4") "dotfiles-963w-4" "a dot is hostile in a ref and reads badly in a window list"
+        assert-eq (slugify-subject "feat/add thing") "feat-add-thing" "so is a slash"
+        assert-eq (slugify-subject "  spaced  out  ") "spaced-out" "no leading, trailing or doubled separators"
+        assert-eq (slugify-subject "--dashes--") "dashes" ""
+        # Capped, because the name has to be readable in a window list — which
+        # also means cutting at a word boundary rather than at the character
+        # limit: a hard cut gave `create-timestamp-named-text-file-with-he`.
+        let long = (slugify-subject "Create a new text file whose filename is the current timestamp in a safe format")
+        assert-true (($long | str length) <= $MAX_SUBJECT_CHARS) $"($long) is longer than ($MAX_SUBJECT_CHARS)"
+        assert-true (not ($long | str ends-with "-")) $"($long) ends with a separator"
+        assert-eq $long "create-a-new-text-file-whose-filename-is" "whole words only"
+        # The cut STOPS at the first word that does not fit. Taking every word
+        # that happens to fit produced `create-timestamp-named-text-file-with-in`
+        # from "...text file with header in /home/jan/.dotfiles": `header` was
+        # skipped for being too long and `in` was welded on after it, so the
+        # name read as words the caller never put next to each other.
+        assert-eq (
+            slugify-subject "Create timestamp-named text file with header in /home/jan/.dotfiles"
+        ) "create-timestamp-named-text-file-with" "no words welded across a skipped one"
+        # No boundary to find: one word longer than the whole budget is cut
+        # hard, because the alternative is an empty name.
+        let unbroken = (slugify-subject ("z" | fill --width 60 --character "z"))
+        assert-eq ($unbroken | str length) $MAX_SUBJECT_CHARS "cut hard when there is nothing to cut at"
+    })
+
+    (run-case "spawn/a-subject-with-nothing-usable-in-it-is-refused" {
+        # Slugifying is not a licence to invent an address. Punctuation alone
+        # leaves nothing to name a window after, and a worker called `impl-@`
+        # is worse than a refusal.
+        assert-rejects { slugify-subject "!!! ???" } "no usable characters" "there is no name in there"
+        assert-rejects { slugify-subject "" } "no usable characters" ""
+    })
+
+    (run-case "spawn/prose-cannot-reach-a-window-name-through-the-module-either" {
+        # The guard used to live in the CLI wrapper alone, so every nu caller
+        # of worker-spawn — the scrum-master skill, the tests, a future verb —
+        # bypassed it. Slugifying inside worker-spawn is what makes the naming
+        # a property of spawning rather than of one entry point.
+        let repo = (make-repo "slug-spawn")
+        let root = (make-runtime "slug-spawn")
+        let t = (make-tmux "slug-spawn" "sleep 30")
+        with-runtime $root {
+            with-env {PATH: ([$t.bin] ++ $env.PATH)} {
+                let got = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "Create timestamp-named text file" --project "dotfiles" --repo $repo --session "sid-1" --skill "doc-draft" --socket $t.socket)
+                assert-eq $got.window "impl-create-timestamp-named-text-file@dotfiles" "the window is named, not narrated"
+                assert-eq $got.subject "create-timestamp-named-text-file" "and the report says what the address became"
+                assert-true ($got.window in (windows-on $t.socket)) ""
+            }
+        }
+        drop-tmux $t; rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "spawn/the-cli-takes-prose-and-names-the-window-anyway" {
+        # The CLI used to refuse a --subject containing whitespace. An agent
+        # that had already written its instruction into the wrong flag then got
+        # a lecture instead of a worker, mid-round. Now the address is derived
+        # and the run continues; the instruction still has to travel by `send`,
+        # which the stage gate enforces separately.
+        let repo = (make-repo "slug-cli")
+        let root = (make-runtime "slug-cli")
+        let t = (make-tmux "slug-cli" "sleep 30")
+        let cli = (worker-script $env.FILE_PWD)
+        let out = (with-env {XDG_RUNTIME_DIR: $root, PATH: ([$t.bin] ++ $env.PATH)} {
+            (^$nu.current-exe $cli spawn
+                --run "run-1" --uid "impl-a" --role "impl"
+                --subject "Create timestamp-named text file with header"
+                --project "dotfiles" --repo $repo
+                --session "sid-1" --skill "doc-draft" --socket $t.socket) | complete
+        })
+        assert-eq $out.exit_code 0 $"spawn refused prose: ($out.stderr | str trim)"
+        let got = ($out.stdout | from json)
+        assert-eq $got.subject "create-timestamp-named-text-file-with" "capped at a readable length, on a word boundary"
+        assert-eq $got.window "impl-create-timestamp-named-text-file-with@dotfiles" ""
+        drop-tmux $t; rm -rf $root; rm -rf $repo
+    })
+
     (run-case "spawn/creates-a-named-window-in-the-project-group" {
         let repo = (make-repo "spawn")
         let root = (make-runtime "spawn")
