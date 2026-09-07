@@ -146,6 +146,30 @@ let cases = [
             | update payload.validation null
         )
     })
+    (run-case "schema/created-is-real-utc-not-local-time-wearing-a-Z" {
+        # `created` ended in Z while carrying LOCAL wall clock, so every
+        # envelope was off by the machine's UTC offset. Ordering still looked
+        # right on one host — bus-pending sorts these — and would invert the
+        # moment two hosts in different zones wrote to the same run. A
+        # timestamp that lies about its zone is worse than none.
+        let root = (make-runtime "utc")
+        with-runtime $root {
+            bus-identity "a" --run "r1" --identity {
+                role: "impl", cwd: $nu.temp-dir, branch: "wk-t.0"
+                session: "sid-a", skill: "wk-build", window: "impl-a@dotfiles"
+            }
+            let written = (bus-send "a" --run "r1" --payload {stage: "doc-plan", instructions: "go", artifacts: []})
+
+            # Parsed as UTC because of the Z, then compared with real UTC now.
+            let stamped = ($written.created | into datetime)
+            let skew = ((date now) - $stamped | into int | math abs)
+            # Within a minute if the zone is right; an hour or more if not.
+            assert-true ($skew < 60_000_000_000) $"created is ($written.created), which is ($skew / 1_000_000_000) seconds from now — check the timezone"
+        }
+        rm -rf $root
+    })
+
+
 ]
 
 $cases | to json

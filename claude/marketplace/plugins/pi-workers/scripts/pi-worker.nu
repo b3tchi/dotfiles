@@ -504,7 +504,16 @@ def read-box [dir: string]: nothing -> list<record> {
     $envelopes
 }
 
-def now-stamp []: nothing -> string { date now | format date "%Y-%m-%dT%H:%M:%S%.6fZ" }
+# The `Z` means UTC, so the value has to BE UTC.
+#
+# Without `to-timezone UTC` this formatted local wall clock and labelled it Z,
+# putting every envelope out by the machine's offset. Ordering still looked
+# right on one host — bus-pending sorts on this field — and would invert the
+# moment two hosts in different zones wrote into the same run. A timestamp that
+# lies about its zone is worse than no timestamp.
+def now-stamp []: nothing -> string {
+    date now | date to-timezone UTC | format date "%Y-%m-%dT%H:%M:%S%.6fZ"
+}
 
 def envelope-for [run: string, uid: string, kind: string, payload: record]: nothing -> record {
     {

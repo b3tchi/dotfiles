@@ -1192,7 +1192,8 @@ export default function piWorker(pi: ExtensionAPI): void {
         name: "pi_worker",
         label: "Worker bus",
         description:
-          "Drive Pi workers: `ps` lists every worker, whether it is alive and which tmux window to look at. Also: spawn one as a visible tmux window, check its liveness, send it a message, wait for its typed result, resume it with feedback, then accept or stop it. Verbs: " +
+          "Drive Pi workers: `ps` lists every worker, whether it is alive and which tmux window to look at. Also: spawn one as a visible tmux window, check its liveness, send it a message, `wait` for its typed result (pass uid to wait on that worker rather than the whole run), resume it with feedback, then accept or stop it. " +
+          "An address is claimed once: to reuse a run/uid after stopping or accepting it, call `rm` with that run and uid — that is the normal way to recycle one, and it refuses while the worker is still unfinished, so it is safe to try. Verbs: " +
           INITIATOR_VERBS.join(", ") +
           ". Stages must be declared in the stage registry.",
         promptSnippet: "pi_worker — spawn, watch and message Pi workers",
