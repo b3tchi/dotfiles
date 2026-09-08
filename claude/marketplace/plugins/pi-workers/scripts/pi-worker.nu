@@ -3239,11 +3239,41 @@ def "main resume" [uid: string, --run: string, --feedback: string, --socket: str
     worker-resume $uid --run $run --feedback $feedback --socket $socket | to json | print
 }
 
+# The repository a verb works in: what the caller passed, or where it stands.
+#
+# Observed live, on the operator's screen:
+#
+#     accept refused: Can't convert to string.
+#
+# `--repo` was declared `string` with no default in accept, respawn and
+# reclaim, so omitting it propagated a NULL inward until expand-path died on
+# it. `main spawn` documents that exact failure and guards against it; these
+# three never got the same treatment, and the message names no verb, no flag
+# and no remedy — the operator watched a `complete` worker sit in the frame
+# while its orchestrator retried.
+#
+# Derived rather than demanded, for the same reason spawn derives it: which
+# repository the caller is standing in is not a decision it was making. When
+# there is nothing to derive, the refusal names the flag and what it is for.
+#
+# Resolved BEFORE the bus is asked anything, so a caller error is reported as
+# one instead of surfacing four calls deeper.
+def repo-or-refuse [verb: string, repo: any]: nothing -> string {
+    let given = (if $repo == null { "" } else { $repo })
+    let resolved = (if ($given | is-empty) { current-repo } else { $given })
+    if ($resolved | is-empty) {
+        error make {msg: $"($verb) needs --repo: the git repository the worker works in. Normally derived from the current directory — pass it only when that is not a repository"}
+    }
+    $resolved
+}
+
 def "main respawn" [uid: string, --run: string, --repo: string, --socket: string = ""] {
+    let repo = (repo-or-refuse "respawn" $repo)
     worker-respawn $uid --run $run --repo $repo --socket $socket | to json | print
 }
 
 def "main accept" [uid: string, --run: string, --repo: string, --socket: string = ""] {
+    let repo = (repo-or-refuse "accept" $repo)
     worker-accept $uid --run $run --repo $repo --socket $socket | to json | print
 }
 
@@ -3255,6 +3285,7 @@ def "main reclaim" [
     --repo: string, --base: string = "", --socket: string = "", --remote: string = ""
     --force, --dry-run
 ] {
+    let repo = (repo-or-refuse "reclaim" $repo)
     (worktrees-reclaim --repo $repo --base $base --socket $socket --remote $remote
         --force=$force --dry-run=$dry_run) | to json | print
 }
