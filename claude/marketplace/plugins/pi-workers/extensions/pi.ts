@@ -907,8 +907,41 @@ const NO_PAINT: PaintFn = (_tone, text) => text;
  * Every other state is shown verbatim. A display vocabulary that renames
  * things freely becomes a second set of names to learn.
  */
+/**
+ * States the worker has REPORTED from, and is therefore done working in.
+ *
+ * Its process is released on ack, so `gone` beside one of these is the normal
+ * end of a worker's life rather than the death-mid-task the liveness column
+ * exists to flag.
+ */
+const REPORTED_STATES: readonly string[] = [
+  "complete",
+  "failed",
+  "blocked",
+  "waiting_human",
+  "protocol_error",
+];
+
+/**
+ * What the row says the state IS.
+ *
+ * The frame's rule from the start: say what is happening, not what the bus
+ * calls it — `created` means "spawned and has never spoken", which reads to an
+ * operator as warming up. `complete` had the same problem from the other end.
+ * Observed live, after everything had worked:
+ *
+ *     pi-workers · 1 worker
+ *     r6/impl-1@291  complete  1m  gone
+ *
+ * and the operator asked "it not clear when complete?" — because `complete` is
+ * the worker's last word about ITSELF, and what the row needs to say is whose
+ * turn it is now. Nothing else is going to happen to that worker until someone
+ * accepts it.
+ */
 export function stateLabel(state: string): string {
-  return state === "created" ? "warming-up" : state;
+  if (state === "created") return "warming-up";
+  if (state === "complete") return "needs accept";
+  return state;
 }
 
 export function stateTone(state: string): Tone {
@@ -1140,7 +1173,15 @@ export function rosterFrame(
     if (!Number.isFinite(started)) return "";
     return now - started >= AGE_WORTH_SHOWING_MS ? formatElapsed(r.started, now) : "";
   });
-  const live = rows.map((r) => (UNREMARKABLE_LIVENESS.includes(r.liveness) ? "" : r.liveness));
+  // `gone` earns its column by CONTRADICTING the state — a worker that died
+  // mid-task. Once `ack` releases a reported worker, its window and process
+  // are supposed to be gone, so carrying the word there turns the frame's
+  // alarm into the normal case and buries the row that means something.
+  const live = rows.map((r) => {
+    if (UNREMARKABLE_LIVENESS.includes(r.liveness)) return "";
+    if (r.liveness === "gone" && REPORTED_STATES.includes(r.state)) return "";
+    return r.liveness;
+  });
   const doing = rows.map((r) => r.doing ?? "");
   // Padded to a common width so the columns read down the frame rather than
   // drifting with the length of each run id.
@@ -1156,7 +1197,13 @@ export function rosterFrame(
   // refusal below the workers it was not about and meant the operator could
   // not tell how many lines were agents without reading them. Carrying it on
   // the heading keeps the list a list.
-  const count = `pi-workers · ${rows.length} worker${rows.length === 1 ? "" : "s"}`;
+  // `2 workers` reads as work in flight. When every row has reported and is
+  // only waiting on a decision, saying so is the difference between "still
+  // going" and "your turn" — which is exactly what the operator could not tell.
+  const waiting = rows.every((r) => REPORTED_STATES.includes(r.state));
+  const count = waiting
+    ? `pi-workers · ${rows.length} waiting for you`
+    : `pi-workers · ${rows.length} worker${rows.length === 1 ? "" : "s"}`;
   const heading = activity === undefined ? count : `${count}  ${activity}`;
   // The activity cell is budgeted last and truncated to what is left, because
   // it is both the longest and the least structured thing on the row. Every
