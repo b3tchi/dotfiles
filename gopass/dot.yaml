@@ -53,6 +53,10 @@ linux:
       if [ -d /mnt/c ]; then
         DOT_DIR="$(cd "$(dirname "$0")" && pwd)"
         mkdir -p "$HOME/.local/bin"
+        # rotz links org.freedesktop.secrets.service in here; on a fresh box
+        # the directory does not exist yet, and without the file libsecret
+        # reports "The name is not activatable" whenever the daemon is down.
+        mkdir -p "$HOME/.local/share/dbus-1/services"
 
         # gopass-secretservice: implements org.freedesktop.Secret.{Service,
         # Collection,Item,Session} (plain algorithm) and stores every item in
@@ -71,5 +75,8 @@ linux:
         # Run without an interactive login, and start now.
         sudo loginctl enable-linger "{{ whoami.username }}" || true
         systemctl --user daemon-reload
+        # Pick up a newly linked D-Bus activation file without a re-login.
+        dbus-send --session --dest=org.freedesktop.DBus --type=method_call \
+          /org/freedesktop/DBus org.freedesktop.DBus.ReloadConfig || true
         systemctl --user enable --now gopass-secretservice canvas-mcp-relay
       fi
