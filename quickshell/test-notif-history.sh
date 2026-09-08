@@ -1378,9 +1378,64 @@ QMLDIR_DAEMON="$SCRIPT_DIR/notif"
 STORESH="$SCRIPT_DIR/qs-notif-store.sh"
 [ -r "$QMLDIR_DAEMON/shell.qml" ] || { echo "FATAL: daemon profile not found at $QMLDIR_DAEMON/shell.qml" >&2; exit 1; }
 [ -r "$STORESH" ] || { echo "FATAL: store script not found at $STORESH" >&2; exit 1; }
-for tool in dbus-run-session dbus-send notify-send; do
+for tool in dbus-run-session dbus-send; do
   command -v "$tool" >/dev/null 2>&1 || { echo "FATAL: $tool not found" >&2; exit 1; }
 done
+
+# notify-send, or a gdbus stand-in for it (dotfiles-qa5m). libnotify is not
+# installed on every host this repo runs on — absent on the WSL box, where
+# this whole suite FATAL'd here and never ran. `gdbus` ships with glib2, which
+# Qt/quickshell already pull in, so the stand-in needs no new package. The real
+# notify-send is preferred whenever present; the stand-in speaks the same argv
+# shape, so the call sites below are unchanged, and E2E_PATH (built just after
+# this) inherits it.
+NOTIFY_BIN="$TMP/notify-bin"
+mkdir -p "$NOTIFY_BIN"
+if command -v notify-send >/dev/null 2>&1; then
+  NOTIFY_IMPL="notify-send"
+elif command -v gdbus >/dev/null 2>&1; then
+  NOTIFY_IMPL="gdbus stand-in"
+  cat > "$NOTIFY_BIN/notify-send" <<'NOTIFYEOF'
+#!/bin/sh
+# notify-send(1) stand-in over gdbus — enough of the CLI for this suite:
+# -u low|normal|critical becomes the urgency hint, the first two positionals
+# are summary and body, and the option-with-value flags this repo does not
+# assert on are accepted and dropped.
+set -u
+_urg=1
+_app=notify-send
+_sum=""
+_body=""
+_have_sum=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -u|--urgency)
+      case "${2:-}" in low) _urg=0 ;; critical) _urg=2 ;; *) _urg=1 ;; esac
+      shift 2 || shift ;;
+    -a|--app-name) _app="${2:-notify-send}"; shift 2 || shift ;;
+    -i|--icon|-t|--expire-time|-c|--category|-h|--hint) shift 2 || shift ;;
+    --) shift ;;
+    -*) shift ;;
+    *)
+      if [ "$_have_sum" -eq 0 ]; then _sum="$1"; _have_sum=1; else _body="$1"; fi
+      shift ;;
+  esac
+done
+exec gdbus call --session \
+  --dest org.freedesktop.Notifications \
+  --object-path /org/freedesktop/Notifications \
+  --method org.freedesktop.Notifications.Notify \
+  "$_app" 0 "" "$_sum" "$_body" "@as []" "{'urgency': <byte $_urg>}" 5000 \
+  >/dev/null
+NOTIFYEOF
+  chmod +x "$NOTIFY_BIN/notify-send"
+else
+  echo "FATAL: neither notify-send nor gdbus found — nothing can send a notification" >&2
+  exit 1
+fi
+PATH="$NOTIFY_BIN:$PATH"
+export PATH
+echo "notify client: $NOTIFY_IMPL"
 
 SLEEP_GUARD_COUNT="$(grep -c 'sleep 0.2' "$QMLDIR_DAEMON/shell.qml" 2>/dev/null || true)"
 if [ "${SLEEP_GUARD_COUNT:-0}" != "1" ]; then

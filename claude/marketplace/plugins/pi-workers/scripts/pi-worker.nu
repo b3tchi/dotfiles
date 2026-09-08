@@ -858,7 +858,30 @@ export def bus-wait [
 # Record delivery of one result. This is a receipt, NOT acceptance: the work
 # still needs review, and the worker stays visible until it is explicitly
 # accepted.
-export def bus-ack [--run: string, --uid: string, --sequence: int] {
+# Acknowledge a result AND release the worker that reported it.
+#
+# A worker that has reported is done working, and it used to go on holding a pi
+# process and a tmux window until something accepted it. Twenty-nine workers
+# were doing exactly that on this box, one per smoke run — the expensive
+# leftover, next to which the directories were nothing.
+#
+# The ack is the right moment because it is the initiator saying it HAS the
+# result: before that the envelope is still being redelivered and a live worker
+# is still the thing being talked about. What is released is the DISPLAY half —
+# the window, and the process inside it. The worktree and the branch hold the
+# work and stay until `accept` or a sweep; the identity envelope holds the
+# session id and stays for good, which is what makes the worker respawnable
+# with no window, no process and no directory of its own.
+#
+# The receipt is written FIRST and the release is best effort. An unreachable
+# tmux must not cost the initiator its ack, or `wait` hands it the same
+# envelope forever — so the outcome is reported rather than thrown.
+export def bus-ack [
+    --run: string
+    --uid: string
+    --sequence: int
+    --socket: string = ""
+]: nothing -> record {
     let envelope = (worker-dir $run $uid | path join "outbox" $"($sequence).json")
     if not ($envelope | path exists) {
         error make {msg: $"cannot acknowledge ($run)/($uid) sequence ($sequence): no such result envelope"}
@@ -868,6 +891,24 @@ export def bus-ack [--run: string, --uid: string, --sequence: int] {
     (now-stamp) | save -f $scratch
     chmod 600 $scratch
     mv -f $scratch $marker
+
+    let identity = (bus-identity-of $uid --run $run)
+    if $identity == null {
+        return {run: $run, uid: $uid, sequence: $sequence, released: false, reason: "no identity on the bus, so there is nothing to release"}
+    }
+    let target = (window-target $identity)
+    let seen = (worker-liveness $target --socket $socket)
+    if $seen.verdict == "gone" {
+        return {run: $run, uid: $uid, sequence: $sequence, released: false, reason: $"window ($identity.window) is already gone"}
+    }
+    if $seen.verdict == "unknown" {
+        return {run: $run, uid: $uid, sequence: $sequence, released: false, reason: $"could not reach the display host to release ($identity.window): ($seen.reason? | default "tmux did not answer")"}
+    }
+    let killed = (do { ^tmux ...(tmux-args $socket) kill-window -t $target } | complete)
+    if $killed.exit_code != 0 {
+        return {run: $run, uid: $uid, sequence: $sequence, released: false, reason: $"could not release ($identity.window): ($killed.stderr | str trim)"}
+    }
+    {run: $run, uid: $uid, sequence: $sequence, released: true, window: $identity.window}
 }
 
 # What is known about one worker.
@@ -2136,10 +2177,32 @@ def marker-set? [run: string, uid: string, name: string]: nothing -> bool {
 # Count how many times this worker has been sent back. Rejections are derived
 # from the messages actually on the bus rather than tracked in the
 # orchestrator, so the count survives a restart.
+# Rejections against this worker AND against the ones it continues.
+#
+# `resume` refuses a worker with no live window and names `respawn`, which mints
+# a new uid — so a count kept per uid resets on every respawn, and the
+# escalate-after-two-rejections rule stops working precisely in the flow that
+# needs it. The lineage is on the bus as `respawned_from`, so it is walked.
+#
+# Depth-capped: a cycle cannot occur, because each respawn's ancestor already
+# existed when it was written, but a corrupt envelope must not spin forever.
 def rejection-count [run: string, uid: string]: nothing -> int {
-    bus-inbox $uid --run $run
-    | where {|e| ($e.payload | get -o stage) == "rejection" }
-    | length
+    mut total = 0
+    mut at = $uid
+    mut hops = 0
+    loop {
+        $total = $total + (
+            bus-inbox $at --run $run
+            | where {|e| ($e.payload | get -o stage) == "rejection" }
+            | length
+        )
+        let identity = (bus-identity-of $at --run $run)
+        let from = (if $identity == null { "" } else { $identity | get -o respawned_from | default "" })
+        $hops = $hops + 1
+        if ($from | is-empty) or $hops > 64 { break }
+        $at = $from
+    }
+    $total
 }
 
 # Everything known about one worker, without consuming anything.
@@ -2740,14 +2803,20 @@ export def worker-respawn [
 
     let new_uid = (mint-uid $run $old.role)
     let main = (main-worktree $repo)
-    let reuse = (
-        ($old.branch in (known-branches $repo)) and
-        ((registered-worktrees $repo | where branch == $old.branch) | is-empty)
-    )
+    # The branch is what a respawn wants to land on, and its directory too when
+    # one is still registered: a released-but-unaccepted worker leaves both
+    # behind, and allocating a fresh iteration beside the work would be the one
+    # outcome nobody asked for. Its own directory is only re-created when the
+    # ref survived without one (a swept tree).
+    let registered = (registered-worktrees $repo | where branch == $old.branch)
+    let reuse = ($old.branch in (known-branches $repo))
     let tree = (if (expand-path $old.cwd) == $main {
         # An isolation=main worker shares the operator's tree; there was never
         # a directory of its own to rebuild.
         {path: $main, branch: $old.branch, isolated: false}
+    } else if $reuse and ($registered | is-not-empty) {
+        # Still on disk and still registered: walk back into it.
+        {path: (expand-path ($registered | first | get path)), branch: $old.branch, isolated: true}
     } else if $reuse {
         let path = (worktrees-dir $repo | path join $old.branch)
         let added = (do { ^git -C $repo worktree add --quiet $path $old.branch } | complete)
@@ -3072,8 +3141,8 @@ def "main wait" [--run: string, --uid: string = "", --block, --timeout: int = 60
     }
 }
 
-def "main ack" [--run: string, --uid: string, --sequence: int] {
-    bus-ack --run $run --uid $uid --sequence $sequence
+def "main ack" [--run: string, --uid: string, --sequence: int, --socket: string = ""] {
+    bus-ack --run $run --uid $uid --sequence $sequence --socket $socket | to json | print
 }
 
 # The worker's own side of the bus (dotfiles-87bt).

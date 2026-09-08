@@ -11,6 +11,11 @@
 #   python-gobject,
 #   libwnck3, gtk3   — dependencies of quickshell/xborders-patched, our
 #                      local fork of xborders that skips frameless windows
+#   libnotify        — `notify-send`, the honest client for the notification
+#                      daemon this package ships, and what its two suites
+#                      drive it with. Not load-bearing: both fall back to a
+#                      gdbus stand-in where it is absent (dotfiles-qa5m), so
+#                      this buys realism on a desktop, not runnability.
 linux:
   links:
     config: ~/.config/quickshell
@@ -22,18 +27,18 @@ linux:
       sudo pacman -S --needed --noconfirm \
         quickshell python-xlib xorg-xinput \
         python-cairo python-gobject libwnck3 gtk3 \
-        scrot imagemagick xclip
+        scrot imagemagick xclip libnotify
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux")}}
       sudo pacman -S --needed --noconfirm \
         quickshell python-xlib xorg-xinput \
         python-cairo python-gobject libwnck3 gtk3 \
-        scrot imagemagick xclip
+        scrot imagemagick xclip libnotify
       {{/if}}
       {{#if (eq whoami.distro "Arch Linux ARM")}}
       sudo pacman -S --needed --noconfirm \
         quickshell python-xlib xorg-xinput \
         python-cairo python-gobject libwnck3 gtk3 \
-        scrot imagemagick xclip
+        scrot imagemagick xclip libnotify
       {{/if}}
       rotz link quickshell --force

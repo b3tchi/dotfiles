@@ -51,6 +51,21 @@ cleanup() {
   [ -n "$BAR_READER_PID" ] && kill "$BAR_READER_PID" 2>/dev/null
   [ -n "$BAR_QS_PID" ]     && kill "$BAR_QS_PID"     2>/dev/null
   [ -n "$BAR_XVFB_PID" ]   && kill "$BAR_XVFB_PID"   2>/dev/null
+  # Every launch-phase stub `quickshell`, from EVERY sandbox. Each stub records
+  # its own pid into <sandbox>/launch.log.pids, and cleanup_sb_pids() reaps one
+  # sandbox at a time — but two of the launch scenarios never call it and a
+  # third spawns stubs after its call, so three of them survived every run
+  # (observed live, still sleeping under a $TMP that had already been deleted).
+  # Sweeping the pid files here catches all of them, and stays pid-precise for
+  # the reason cleanup_sb_pids explains: these stubs' argv[0] is the bare
+  # "quickshell", so any pattern kill would reach a real desktop's bar.
+  for _pf in "$TMP"/*/launch.log.pids; do
+    [ -f "$_pf" ] || continue
+    while read -r _p; do
+      case "$_p" in '' | *[!0-9]*) continue ;; esac
+      kill "$_p" 2>/dev/null
+    done < "$_pf"
+  done
   [ -n "${KEEP_TMP:-}" ] || rm -rf "$TMP"
 }
 trap cleanup EXIT
@@ -61,6 +76,70 @@ mkdir -p "$TMP"
 [ -f "$QMLDIR/shell.qml" ] || { echo "FATAL: daemon profile not found at $QMLDIR/shell.qml" >&2; exit 1; }
 command -v dbus-run-session >/dev/null 2>&1 || { echo "FATAL: dbus-run-session not found" >&2; exit 1; }
 command -v quickshell >/dev/null 2>&1 || { echo "FATAL: quickshell not found on PATH" >&2; exit 1; }
+# ------------------------------------------------- notify-send, or a stand-in ---
+#
+# The suites drive the daemon the way a real client does: `notify-send`. It
+# ships in libnotify, which is NOT installed everywhere this repo runs — on the
+# WSL host it is absent, and with no preflight for it this suite ran anyway and
+# reported 12 assertion failures ("nothing landed in the store") for a missing
+# binary (dotfiles-qa5m). One FATAL would have been honest; twelve red
+# assertions pointing at the daemon were not.
+#
+# Rather than add a package dependency for one method call, a stand-in is
+# written into the suite's own PATH when the real thing is missing: `gdbus`
+# comes with glib2, which Qt/quickshell already pull in, so every host that can
+# run this suite at all can send a Notify. The real notify-send is still
+# preferred when present — it is the honest client — and the stand-in speaks
+# the same argv shape (`-u critical`, summary, body), so no call site changes.
+NOTIFY_BIN="$TMP/notify-bin"
+mkdir -p "$NOTIFY_BIN"
+if command -v notify-send >/dev/null 2>&1; then
+  NOTIFY_IMPL="notify-send"
+elif command -v gdbus >/dev/null 2>&1; then
+  NOTIFY_IMPL="gdbus stand-in"
+  cat > "$NOTIFY_BIN/notify-send" <<'NOTIFYEOF'
+#!/bin/sh
+# notify-send(1) stand-in over gdbus — enough of the CLI for this suite:
+# -u low|normal|critical becomes the urgency hint, the first two positionals
+# are summary and body, and the option-with-value flags this repo does not
+# assert on are accepted and dropped. Exit code and silence match
+# notify-send's: nothing on stdout, nonzero only if the call itself fails.
+set -u
+_urg=1
+_app=notify-send
+_sum=""
+_body=""
+_have_sum=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -u|--urgency)
+      case "${2:-}" in low) _urg=0 ;; critical) _urg=2 ;; *) _urg=1 ;; esac
+      shift 2 || shift ;;
+    -a|--app-name) _app="${2:-notify-send}"; shift 2 || shift ;;
+    -i|--icon|-t|--expire-time|-c|--category|-h|--hint) shift 2 || shift ;;
+    --) shift ;;
+    -*) shift ;;
+    *)
+      if [ "$_have_sum" -eq 0 ]; then _sum="$1"; _have_sum=1; else _body="$1"; fi
+      shift ;;
+  esac
+done
+exec gdbus call --session \
+  --dest org.freedesktop.Notifications \
+  --object-path /org/freedesktop/Notifications \
+  --method org.freedesktop.Notifications.Notify \
+  "$_app" 0 "" "$_sum" "$_body" "@as []" "{'urgency': <byte $_urg>}" 5000 \
+  >/dev/null
+NOTIFYEOF
+  chmod +x "$NOTIFY_BIN/notify-send"
+else
+  echo "FATAL: neither notify-send nor gdbus found — nothing can send a notification" >&2
+  exit 1
+fi
+PATH="$NOTIFY_BIN:$PATH"
+export PATH
+echo "notify client: $NOTIFY_IMPL"
+
 
 # --------------------------------------------------------------- helpers ---
 
@@ -646,10 +725,19 @@ a3 "shell.qml: no dismissNotif/dismissNotifSilent/tickerFinished signal wiring r
   "0" "$(grep -cE 'onDismissNotif|onTickerFinished' "$SHELL_QML" | tr -d ' ')"
 a3 "Bar.qml: the dismissNotif/dismissNotifSilent/tickerFinished signals are gone (their props were only fed externally)" \
   "0" "$(grep -cE 'signal dismissNotif|signal tickerFinished' "$BAR_QML" | tr -d ' ')"
-a3 "Bar.qml: derives its notif state from tail -F on QS_NOTIF_FILE" \
-  "1" "$(grep -cE 'QS_NOTIF_FILE' "$BAR_QML" | tr -d ' ')"
-a3 "Bar.qml: writes dismisses to QS_NOTIF_FIFO, not back to shell.qml" \
-  "1" "$(grep -cE 'QS_NOTIF_FIFO' "$BAR_QML" | tr -d ' ')"
+# ASSERTED ON THE BINDINGS, NOT ON A COUNT OF MENTIONS (dotfiles-qa5m). These
+# two used to require the string to appear EXACTLY ONCE in the file, which made
+# them fail the moment a comment elsewhere in Bar.qml mentioned QS_NOTIF_FILE —
+# a documentation edit reported as a broken consumer contract, with nothing
+# actually wrong. What the contract is about is that the bar READS its state
+# from that file (env binding + a tail -F over it) and writes dismisses to the
+# FIFO, so that is what is checked.
+a3 "Bar.qml: binds QS_NOTIF_FILE" "yes" \
+  "$(grep -qE 'Quickshell\.env\("QS_NOTIF_FILE"\)' "$BAR_QML" && echo yes || echo no)"
+a3 "Bar.qml: derives its notif state from tail -F over that file" "yes" \
+  "$(grep -qE 'tail -n \+1 -F" \+ root\.notifFile|tail -n \+1 -F " \+ root\.notifFile' "$BAR_QML" && echo yes || echo no)"
+a3 "Bar.qml: writes dismisses to QS_NOTIF_FIFO, not back to shell.qml" "yes" \
+  "$(grep -qE 'Quickshell\.env\("QS_NOTIF_FIFO"\)' "$BAR_QML" && echo yes || echo no)"
 
 BAR_XVFB_BIN="${XVFB:-Xvfb}"
 BAR_QS_BIN_NAME="${QUICKSHELL:-quickshell}"

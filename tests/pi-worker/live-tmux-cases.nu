@@ -286,6 +286,131 @@ let cases = [
         }
     })
 
+    # ------------------------------------------------------ release on ack
+    #
+    # A worker that has reported is done working, and until something accepted
+    # it it went on holding a pi process and a tmux window: 29 workers were
+    # doing precisely that on this box, one per smoke run. `ack` is the
+    # initiator saying it HAS the result, which is the moment the display
+    # resources stop having a purpose. The worktree, the branch and the
+    # identity envelope stay — the work is in the first two and the session id
+    # in the third.
+
+    (run-case "live/ack-releases-the-worker-that-reported" {
+        with-server "ack-release" {|t, repo|
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            bus-result "impl-a" --run "run-1" --result {
+                status: "complete", summary: "done", validation: "green"
+                window: $w.window, session: "sid-1", resume: "pi --session sid-1"
+            }
+            assert-eq (worker-liveness $w.window_id --socket $t.socket | get verdict) "live" "still running before the ack"
+
+            let out = (bus-ack --run "run-1" --uid "impl-a" --sequence 1 --socket $t.socket)
+            assert-eq $out.released true "the report says it released the worker"
+            assert-eq (worker-liveness $w.window_id --socket $t.socket | get verdict) "gone" "window and process are gone"
+            # Everything a restore needs survives.
+            assert-true ($w.cwd | path exists) "the worktree is untouched — it holds the work"
+            assert-true ((git-in $repo "branch" "--list" $w.branch) | is-not-empty) "so is the branch"
+            assert-eq (bus-identity-of "impl-a" --run "run-1" | get session) "sid-1" "and the session id"
+            # The state is the worker's own last word, not a consequence of
+            # being released: `complete` still means it reported complete.
+            assert-eq (bus-status "impl-a" --run "run-1" | get state) "complete" ""
+        }
+    })
+
+    (run-case "live/a-second-ack-is-not-an-error" {
+        # Idempotent for the same reason stop is: an initiator that retries
+        # after a crash must not be told it did something illegal, and there is
+        # no window left to kill the second time.
+        with-server "ack-twice" {|t, repo|
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            bus-result "impl-a" --run "run-1" --result {
+                status: "complete", summary: "done", validation: "green"
+                window: $w.window, session: "sid-1", resume: "pi --session sid-1"
+            }
+            bus-ack --run "run-1" --uid "impl-a" --sequence 1 --socket $t.socket
+            let again = (bus-ack --run "run-1" --uid "impl-a" --sequence 1 --socket $t.socket)
+            assert-eq $again.released false "nothing left to release"
+            assert-true ($again.reason | str contains "gone") $"the reason should say why: ($again.reason)"
+        }
+    })
+
+    (run-case "live/an-ack-still-acks-when-tmux-cannot-be-reached" {
+        # The ack is a BUS fact and the release is a display side effect. A
+        # display host that cannot be reached must not cost the initiator its
+        # delivery receipt, or `wait` will hand it the same envelope forever.
+        with-server "ack-notmux" {|t, repo|
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            bus-result "impl-a" --run "run-1" --result {
+                status: "complete", summary: "done", validation: "green"
+                window: $w.window, session: "sid-1", resume: "pi --session sid-1"
+            }
+            let out = (bus-ack --run "run-1" --uid "impl-a" --sequence 1 --socket $"($t.socket)-nowhere")
+            assert-eq $out.released false ""
+            assert-true ($out.reason | str contains "could not") $"the reason should name the failure: ($out.reason)"
+            # The receipt is what matters: the envelope must not be redelivered.
+            assert-true ((bus-wait --run "run-1") == null) "an acked result is not redelivered"
+            assert-eq (worker-liveness $w.window_id --socket $t.socket | get verdict) "live" "and the worker is untouched"
+        }
+    })
+
+    (run-case "live/respawn-lands-back-in-the-tree-a-released-worker-left" {
+        # The point of releasing early: the work is still on disk, so bringing
+        # the worker back must land IN it rather than allocating a fresh
+        # iteration beside it.
+        with-server "ack-respawn" {|t, repo|
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            # Committed, because reporting `complete` with a dirty tree is
+            # refused by the stage gate — and rightly: an uncommitted branch
+            # merges as a no-op.
+            "work\n" | save -f ($w.cwd | path join "work.txt")
+            ^git -C $w.cwd add -A
+            ^git -C $w.cwd commit -q -m "the work a respawn must land back on"
+            bus-result "impl-a" --run "run-1" --result {
+                status: "complete", summary: "done", validation: "green"
+                window: $w.window, session: "sid-1", resume: "pi --session sid-1"
+            }
+            bus-ack --run "run-1" --uid "impl-a" --sequence 1 --socket $t.socket
+
+            let back = (worker-respawn "impl-a" --run "run-1" --repo $repo --socket $t.socket)
+            assert-eq $back.cwd $w.cwd "back in the same directory"
+            assert-eq $back.branch $w.branch "on the same branch"
+            assert-eq $back.reused_branch true ""
+            assert-true (($back.cwd | path join "work.txt") | path exists) "with the work still in it"
+            assert-eq $back.session "sid-1" "and the same transcript"
+        }
+    })
+
+    (run-case "live/rejections-are-counted-along-the-respawn-lineage" {
+        # resume refuses a released worker and names respawn, which mints a new
+        # uid — so a per-uid rejection count would reset on every respawn and
+        # the escalate-after-two-rejections rule would silently stop working.
+        # The count follows the lineage instead.
+        with-server "ack-lineage" {|t, repo|
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            bus-result "impl-a" --run "run-1" --result {
+                status: "complete", summary: "first attempt", validation: "green"
+                window: $w.window, session: "sid-1", resume: "pi --session sid-1"
+            }
+            # One rejection against the original, delivered while it is live.
+            let first = (worker-resume "impl-a" --run "run-1" --feedback "not good enough" --socket $t.socket)
+            assert-eq $first.rejections 1 ""
+            assert-eq $first.escalate false "one rejection is not an escalation"
+
+            bus-ack --run "run-1" --uid "impl-a" --sequence 1 --socket $t.socket
+            let back = (worker-respawn "impl-a" --run "run-1" --repo $repo --socket $t.socket)
+            assert-eq (worker-inspect $back.uid --run "run-1" | get rejections) 1 "the new uid inherits what was already rejected"
+
+            bus-result $back.uid --run "run-1" --result {
+                status: "complete", summary: "second attempt", validation: "green"
+                window: $back.window, session: "sid-1", resume: "pi --session sid-1"
+            }
+            let second = (worker-resume $back.uid --run "run-1" --feedback "still not right" --socket $t.socket)
+            assert-eq $second.rejections 2 "the second rejection counts as the second"
+            assert-eq $second.escalate true "and escalates, which is the whole point of counting"
+        }
+    })
+
     # ------------------------------------------------------------- respawn
     #
     # `accept` reclaims a verified worker's window, tree and branch and keeps
