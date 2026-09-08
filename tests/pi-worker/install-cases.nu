@@ -151,6 +151,51 @@ let cases = [
         }
     })
 
+    (run-case "cli/repo-is-derived-when-omitted-rather-than-arriving-as-null" {
+        # Observed live, on the operator's own screen:
+        #
+        #     accept refused: Can't convert to string.
+        #
+        # `--repo` was declared `string` with no default, so omitting it
+        # propagated a NULL inward until expand-path died on it — the exact
+        # failure `main spawn` already documents and guards against, in three
+        # verbs that never got the same treatment. The message names no verb,
+        # no flag and no remedy, and the worker sat `complete` in the frame
+        # while its orchestrator retried.
+        #
+        # Derived from the cwd, like spawn does: it is not a decision the
+        # caller was making.
+        let root = (make-runtime "derive-repo")
+        for verb in [["accept" ["accept" "nobody" "--run" "r1"]] ["respawn" ["respawn" "nobody" "--run" "r1"]]] {
+            let out = (run-cli ...($verb | get 1) --runtime $root)
+            assert-true ($out.exit_code != 0) $"($verb | get 0) should refuse an unknown worker"
+            let err = ($out.stderr | str trim)
+            assert-true (not ($err | str contains "Can't convert")) $"($verb | get 0) leaked a null: ($err)"
+            # It got far enough to ask the bus, which is the proof the repo was
+            # resolved rather than passed on as null.
+            assert-true ($err | str contains "no identity") $"($verb | get 0) should fail on the worker, not the flag: ($err)"
+        }
+        # reclaim takes no uid, so a derived repo means it runs and reports.
+        let swept = (run-cli "reclaim" "--dry-run" --runtime $root)
+        assert-eq $swept.exit_code 0 $"reclaim should have derived its repo: ($swept.stderr | str trim)"
+        assert-true (($swept.stdout | from json | get repo) | is-not-empty) "and say which repo it swept"
+    })
+
+    (run-case "cli/a-verb-that-cannot-derive-a-repo-refuses-by-name" {
+        # Outside a repository there is nothing to derive, and THAT is worth a
+        # refusal — one that names the flag and what it is for, rather than a
+        # type error from four calls deeper.
+        let root = (make-runtime "no-repo")
+        let outside = ((fixture-base) | path join $"outside-(random chars --length 6)")
+        mkdir $outside
+        cd $outside
+        let out = (run-cli "accept" "nobody" "--run" "r1" --runtime $root)
+        assert-true ($out.exit_code != 0) ""
+        let err = ($out.stderr | str trim)
+        assert-true ($err | str contains "--repo") $"the refusal must name the flag: ($err)"
+        assert-true (not ($err | str contains "Can't convert")) $"and must not be a type error: ($err)"
+    })
+
     (run-case "cli/status-of-an-unknown-worker-is-json-not-a-crash" {
         let root = (make-runtime "cli-status")
         let out = (run-cli "status" "nobody" "--run" "r1" --runtime $root)
