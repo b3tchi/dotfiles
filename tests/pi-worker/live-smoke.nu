@@ -134,31 +134,6 @@ def newest-sequence [uid: string, run: string, socket: string]: nothing -> int {
     cli ["status" $uid "--run" $run] $socket | get results
 }
 
-# Block until a worker writes a result NEWER than one already on the bus.
-#
-# `wait` cannot express this and should not be asked to: the earlier envelope
-# is unacknowledged, so it IS the honest answer to "what is pending", and the
-# one thing that clears it — `ack` — also releases the worker, which would
-# leave nobody to run the follow-up round. Filed as dotfiles-i0hz, along with
-# the reason this polls `status` rather than reading the outbox: `timeline
-# --json` returns the rendered table rows, not the envelopes, so the sequence
-# and kind a machine wants are not in any JSON the CLI emits.
-#
-# Returns the new sequence. The verdict comes from `status.state`, which is the
-# bus's own derivation over the envelope — no shape-sniffing a payload to guess
-# whether it was a result or an error.
-# `-> any`, not `-> int`: nushell types a `loop` as outputting nothing, so an
-# int annotation on a function that returns from inside one will not parse.
-def wait-past [uid: string, run: string, after: int, timeout: int, socket: string]: nothing -> any {
-    let deadline = ((date now) + ($timeout * 1sec))
-    loop {
-        let seq = (newest-sequence $uid $run $socket)
-        if $seq > $after { return $seq }
-        if (date now) >= $deadline { return 0 }
-        sleep 2sec
-    }
-}
-
 # ------------------------------------------------------------ table reading
 #
 # The workers write markdown, so the checks read markdown. Bold, backticks and
@@ -209,6 +184,15 @@ def check-ranked-table-with-total [file: string, label: string] {
 #
 # One corpus, small by default, because every row here is tokens: a task big
 # enough to be real and small enough that a failed run is cheap to repeat.
+#
+# Enumerated and counted in the WORKER'S OWN worktree, not the operator's. A
+# worker's tree is created at HEAD, so any uncommitted edit in the operator's
+# tree makes the two disagree — and the operator's tree is uncommitted almost
+# by definition while the bus is being worked on. Observed: a check failed with
+# 3537 against 3510 lines for `pi-worker.nu`, which is exactly the +27 lines
+# sitting unstaged at the time. The preflight below still counts the
+# operator's tree, because all it asks is whether the corpus is big enough to
+# be worth describing.
 
 def glob-files [repo: string, pattern: string]: nothing -> list<string> {
     ^git -C $repo ls-files -- $pattern | lines | where {|f| ($f | is-not-empty) }
@@ -347,12 +331,17 @@ def main [
         # worker holding real mail while the other's is superseded.
         check-ranked-table-with-total ([$b.cwd "smoke/lines.md"] | path join) "lines.md"
         let reported = (table-rows ([$b.cwd "smoke/lines.md"] | path join) | skip 1 | drop 1)
-        let expected = ($corpus | each {|f| {file: $f, lines: (line-count $repo $f)} } | sort-by lines --reverse)
+        # Its tree, its numbers.
+        let expected = (
+            glob-files $b.cwd $glob
+            | each {|f| {file: $f, lines: (line-count $b.cwd $f)} }
+            | sort-by lines --reverse
+        )
         check-eq ($reported | length) ($expected | length) $"lines.md lists all ($expected | length) files"
         check-eq ($reported | each {|r| as-int ($r | last) }) ($expected | get lines) "lines.md line counts match git + wc"
         let dirs_file = ([$a.cwd "smoke/dirs.md"] | path join)
         check ($dirs_file | path exists) "dirs.md exists"
-        let named = ($dirs | get dir)
+        let named = (dirs-with-matches (glob-files $a.cwd $glob) | get dir)
         let listed = (open --raw $dirs_file | lines | each {|l| $l | str trim } | where {|l| $l in $named })
         check-eq ($listed | sort) ($named | sort) $"dirs.md names all ($named | length) directories the corpus spans"
 
@@ -388,24 +377,30 @@ def main [
         check-reported $second $a.uid "the second round"
         check-ranked-table-with-total ([$a.cwd "smoke/dirs.md"] | path join) "dirs.md"
         let dir_rows = (table-rows ([$a.cwd "smoke/dirs.md"] | path join) | skip 1 | drop 1)
-        check-eq ($dir_rows | each {|r| {dir: ($r | first), files: (as-int ($r | last))} }) $dirs "dirs.md counts and order match git"
+        let dirs_expected = (dirs-with-matches (glob-files $a.cwd $glob))
+        check-eq ($dir_rows | each {|r| {dir: ($r | first), files: (as-int ($r | last))} }) $dirs_expected "dirs.md counts and order match git"
 
         let dirs_md = ([$a.cwd "smoke/dirs.md"] | path join)
         let wanted = "# Top-level directories"
         mut latest = $second.sequence
         if ((open --raw $dirs_md | lines | first) != $wanted) {
             step "that round had already closed — the instruction becomes a round of its own"
-            let third = (wait-past $a.uid $run $second.sequence $timeout $socket)
-            check ($third > 0) $"($a.uid) reported again within ($timeout)s"
-            check-eq $third ($second.sequence + 1) "as the next sequence on the same worker"
-            check-eq (cli ["status" $a.uid "--run" $run] $socket | get state) "complete" "and the follow-up round completed"
-            $latest = $third
+            # `--after` is what makes this askable (dotfiles-i0hz): the round-2
+            # envelope is still unacknowledged, so a plain wait would hand it
+            # straight back, and acking it to clear the way would release the
+            # worker that owes the follow-up.
+            let third = (cli ["wait" "--run" $run "--uid" $a.uid "--after" ($second.sequence | into string) "--block" "--timeout" ($timeout | into string)] $socket)
+            check ($third != null) $"($a.uid) reported again within ($timeout)s"
+            check-eq $third.sequence ($second.sequence + 1) "as the next sequence on the same worker"
+            check-reported $third $a.uid "the follow-up round"
+            check-eq (newest-sequence $a.uid $run $socket) $third.sequence "and the count still tracks the newest sequence"
+            $latest = $third.sequence
         }
         check-eq (open --raw $dirs_md | lines | first) $wanted "the instruction sent mid-round was acted on"
         # Still the same table underneath: an extra instruction is not licence
         # to rewrite what the round already got right.
         check-ranked-table-with-total $dirs_md "dirs.md"
-        check-eq (table-rows $dirs_md | skip 1 | drop 1 | each {|r| {dir: ($r | first), files: (as-int ($r | last))} }) $dirs "dirs.md still matches git"
+        check-eq (table-rows $dirs_md | skip 1 | drop 1 | each {|r| {dir: ($r | first), files: (as-int ($r | last))} }) $dirs_expected "dirs.md still matches git"
 
         # ------------------------------------------------------------- ack
         print ""
