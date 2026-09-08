@@ -731,6 +731,36 @@ describe("initiator tool", () => {
     expect(argv).toContain("--role impl");
   });
 
+  test("ack passes the socket, because it is what releases the worker", async () => {
+    // The ack is also the release: it kills the worker's window and the pi
+    // process in it. A verb that touches tmux needs the display host, and
+    // dropping `socket` from its flag list would silently ack against the
+    // default server while the worker sits on a private one.
+    const { exec, calls } = fakeExec({ stdout: JSON.stringify({
+      run: "r32", uid: "impl-1", sequence: 1, released: true, window: "impl-t@dotfiles",
+    }) });
+    const out = await createInitiatorTool({ exec }).invoke({
+      verb: "ack", run: "r32", uid: "impl-1", sequence: 1, socket: "piw-1",
+    });
+    expect(calls[0].args).toEqual(["ack", "--run", "r32", "--uid", "impl-1", "--sequence", "1", "--socket", "piw-1"]);
+    expect(out.ok).toBe(true);
+    // The summary says what happened to the worker, not just that a receipt
+    // was written: the release is the part with a consequence.
+    expect(out.detail).toContain("r32/impl-1");
+    expect(out.detail).toContain("released");
+  });
+
+  test("an ack that could not release says so rather than claiming it did", async () => {
+    const { exec } = fakeExec({ stdout: JSON.stringify({
+      run: "r32", uid: "impl-1", sequence: 1, released: false,
+      reason: "could not reach the display host to release impl-t@dotfiles",
+    }) });
+    const out = await createInitiatorTool({ exec }).invoke({ verb: "ack", run: "r32", uid: "impl-1", sequence: 1 });
+    expect(out.ok).toBe(true);
+    expect(out.detail).toContain("acked");
+    expect(out.detail).toContain("could not reach the display host");
+  });
+
   test("respawn brings a reclaimed worker back, with the uid positional", async () => {
     // `accept` is the reclaim point — window, tree and branch — and this is the
     // way back from it, so an orchestrator that tears down promptly can still
