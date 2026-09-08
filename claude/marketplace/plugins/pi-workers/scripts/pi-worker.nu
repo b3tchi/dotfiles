@@ -990,9 +990,20 @@ export def bus-status [uid: string, --run: string]: nothing -> record {
         return {run: $run, uid: $uid, state: "unknown", unacked: 0, results: 0, inbox: 0}
     }
     let results = (read-box ($dir | path join "outbox"))
-    let unacked = ($results | where {|e| not (ack-path $run $uid $e.sequence | path exists) })
     # The precedence rules, and the reasoning for them, live with derive-state.
-    let state = (derive-state $results (state-markers $run $uid))
+    let markers = (state-markers $run $uid)
+    let state = (derive-state $results $markers)
+    # `unacked` counts what DELIVERY would hand over, which is why it reads the
+    # `reopened` marker the way bus-pending does (dotfiles-ycvl). It is the
+    # field an orchestrator skims to decide whether to call `wait` at all, so
+    # counting a result that was already sent back sends it looking for mail
+    # that is not there. `results` stays the raw count: that one is history.
+    let answered = (if ($markers.reopened | is-empty) { 0 } else { $markers.reopened | into int })
+    let unacked = (
+        $results
+        | where {|e| $e.sequence > $answered }
+        | where {|e| not (ack-path $run $uid $e.sequence | path exists) }
+    )
     {
         run: $run
         uid: $uid

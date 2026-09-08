@@ -254,6 +254,29 @@ let cases = [
         }
     })
 
+    (run-case "pipeline/a-resumed-workers-mailbox-reads-empty-in-the-frame-too" {
+        # dotfiles-ycvl, seen on the smoke run that verified the fix above:
+        # `wait` correctly delivered nothing, while `workers` said
+        #
+        #     impl-1 complete unacked 2
+        #     impl-2 complete unacked 1
+        #
+        # `unacked` is what an orchestrator skims to decide whether to call
+        # `wait` at all, so counting envelopes delivery will never hand over
+        # sends it looking for mail that is not there.
+        with-pipeline "reopened-count" {|t, repo|
+            launch $t $repo "impl-a" "impl"
+            complete-with "impl-a" "first attempt"
+            worker-resume "impl-a" --run "run-1" --feedback "again please" --socket $t.socket
+
+            assert-eq (bus-status "impl-a" --run "run-1" | get unacked) 0 "a sent-back result is not waiting to be acknowledged"
+            assert-eq (bus-status "impl-a" --run "run-1" | get results) 1 "the envelope is still on the bus, and still counted as history"
+
+            complete-with "impl-a" "second attempt"
+            assert-eq (bus-status "impl-a" --run "run-1" | get unacked) 1 "the fresh report is the one waiting"
+        }
+    })
+
     (run-case "pipeline/resuming-one-worker-does-not-hide-anothers-result" {
         # The other half of dotfiles-nig0: skipping a superseded envelope must
         # not turn into skipping the run. A sibling's unacknowledged result is
