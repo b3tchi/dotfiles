@@ -814,7 +814,9 @@ const VERB_FLAGS: Record<string, readonly string[]> = {
   send: ["run", "stage", "task", "instructions", "artifacts"],
   wait: ["run", "uid", "block", "timeout"],
   rm: ["run", "uid"],
-  ack: ["run", "uid", "sequence"],
+  // `socket` because ack is also the RELEASE: it kills the worker's window and
+  // the pi process in it, and a verb that touches tmux needs the display host.
+  ack: ["run", "uid", "sequence", "socket"],
   status: ["run"],
   inspect: ["run"],
   // `--json` because the CLI answers a person with columns by default; the
@@ -1901,6 +1903,13 @@ function summarise(verb: string, stdout: string): string {
     }
     case "rm":
       return o.removed ? `released ${o.run}/${o.uid}` : `${o.run}/${o.uid}: ${o.reason}`;
+    // The receipt is the boring half. What the caller needs to know is whether
+    // the worker's window and process are gone, because that is the part with
+    // a consequence — and when they are not, why.
+    case "ack":
+      return o.released
+        ? `acked seq ${o.sequence} from ${o.run}/${o.uid} — released ${o.window} (window and pi gone; worktree, branch and session id kept)`
+        : `acked seq ${o.sequence} from ${o.run}/${o.uid} — not released: ${o.reason}`;
     case "stop":
     case "accept":
       return o.changed
@@ -2104,6 +2113,7 @@ export default function piWorker(pi: ExtensionAPI): void {
 "`timeline` shows what happened to one worker and when, with the gap between each step — reach for it when a worker took longer than expected and you want to know where the time went. " +
           "To learn that a worker finished, call `wait` with block true — it returns the moment a result lands. A worker's tmux window is there for a PERSON to look at: never read it, capture it, or treat anything in it as a completion signal, and never generate ids for spawn — omit run, uid and session and they are minted for you. " +
           "An address is claimed once: to reuse a run/uid after stopping or accepting it, call `rm` with that run and uid — that is the normal way to recycle one, and it refuses while the worker is still unfinished, so it is safe to try. " +
+          "ACK EVERY RESULT you have handled: the ack is what releases the worker's tmux window and its pi process, so a run that never acks leaves one idle agent per worker sitting on the machine. Its worktree, branch and session id survive the release, so nothing is lost and `respawn` can bring the worker back on the same transcript. " +
           "Accept as soon as you judge the work correct: that reclaims the window, the worktree and the branch, and the session id it leaves on the bus is all a restore needs. If you want that worker again afterwards, call `respawn` with its uid — you get a NEW uid continuing the SAME Pi transcript, with its worktree rebuilt, so tearing down promptly costs you nothing. Verbs: " +
           INITIATOR_VERBS.join(", ") +
           `. Stages: ${describeStages()}.`,
