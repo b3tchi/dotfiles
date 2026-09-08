@@ -13,6 +13,10 @@
 # other. A gate that needed a live tmux server would only ever run on one
 # machine, and a protocol nobody can check is a protocol that drifts.
 #
+# The live half is `live-smoke.nu`, run by hand: two real Pi workers, real
+# tmux, real worktrees, real tokens. It is deliberately absent from SUITES —
+# a gate that spends money is a gate people learn to skip.
+#
 # Suites run as subprocesses so a module that fails to PARSE reports as one
 # failed suite instead of taking the runner down with it.
 

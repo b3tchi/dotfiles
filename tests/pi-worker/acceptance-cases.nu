@@ -10,7 +10,8 @@
 # the same `infinifu-worker result` verb Pi's typed result tool shells out to.
 # That makes this a real exercise of the bus, the stage gate, the window
 # lifecycle and the acceptance cleanup, but NOT of Pi itself. The live-Pi half
-# is a documented manual run (see README and the T7 notes); this suite is what
+# is `live-smoke.nu` beside this file, which drives the same flow against two
+# real Pi agents and is opt-in because it costs tokens; this suite is what
 # can be proven on any machine, every time.
 #
 # dotfiles-87bt: this comment used to say the same thing while the case called
