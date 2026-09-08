@@ -89,9 +89,23 @@ describe("delivery decisions", () => {
     expect(d.mode).toBe("followUp");
   });
 
-  test("a streaming agent is steered rather than interrupted blindly", () => {
+  test("a streaming agent defers, because a steer cannot be confirmed", () => {
+    // dotfiles-nhit: this returned `steer`, and poll() advances its mark on the
+    // sendUserMessage call. Pi reports nothing back, so a steer it does not
+    // surface is consumed and never redelivered — observed live, with the
+    // instruction absent from the worker's whole transcript while the
+    // initiator waited for a round that could not come.
     const d = decideDelivery("streaming", workEnvelope);
-    expect(d.mode).toBe("steer");
+    expect(d.mode).toBe("defer");
+    expect(d.reason).toMatch(/confirm|idle/i);
+  });
+
+  test("no state yields a steer, since nothing can verify one landed", () => {
+    // `steer` stays in the vocabulary because it is Pi's parameter, not this
+    // bridge's invention. Nothing may choose it until Pi says whether it took.
+    for (const state of ["idle", "streaming", "compacting", "shutting_down", "???"]) {
+      expect(decideDelivery(state, workEnvelope).mode).not.toBe("steer");
+    }
   });
 
   test("compaction defers instead of delivering", () => {
@@ -1791,12 +1805,20 @@ describe("inbox watcher against a fake Pi", () => {
     expect(sent[0].text).toContain("sp028");
   });
 
-  test("steers rather than follows up while the agent is streaming", () => {
-    const { io } = fakeIO({ "1.json": envelope(1, { stage: "wk-build", task: "t" }) });
-    const { host, sent } = fakeHost("streaming");
-    createInboxWatcher(host, identity, "/inbox", io).poll();
-    expect(sent[0].deliverAs).toBe("steer");
-    expect(sent[0].mode).toBeUndefined();
+  test("holds a message back while the agent is streaming, and delivers it once idle", () => {
+    // dotfiles-nhit. This asserted a steer, and the mark advances on the call:
+    // a steer Pi drops is gone, with no redelivery and nothing to check. The
+    // message now waits for the turn to end and arrives as an ordinary one —
+    // one poll later, and actually there.
+    const files = { "1.json": envelope(1, { stage: "wk-build", task: "t" }) };
+    const { io } = fakeIO(files);
+    const busy = createInboxWatcher({ agentState: () => "streaming", sendUserMessage: () => {} }, identity, "/inbox", io);
+    expect(busy.poll()).toEqual([]);
+
+    const { host, sent } = fakeHost("idle");
+    expect(createInboxWatcher(host, identity, "/inbox", io).poll()).toEqual([1]);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].deliverAs).toBe("followUp");
   });
 
   test("delivers nothing while compacting, and delivers it later", () => {
@@ -1831,8 +1853,43 @@ describe("inbox watcher against a fake Pi", () => {
     });
     const { host, sent } = fakeHost("idle");
     const w = createInboxWatcher(host, identity, "/inbox", io);
-    expect(w.poll()).toEqual([1, 2]);
+    // One per poll, in order — see the stale-state case below for why.
+    expect(w.poll()).toEqual([1]);
+    expect(w.poll()).toEqual([2]);
     expect(w.poll()).toEqual([]);
+    expect(sent).toHaveLength(2);
+  });
+
+  test("two messages owed at once are not both judged against one state reading", () => {
+    // dotfiles-c4kh. The state was sampled once per poll and reused for every
+    // envelope owed, but a delivery is what starts a turn: the second message
+    // went out as a follow-up into an agent its predecessor had just set
+    // streaming, and Pi dropped it. Live, that was a `resume` feedback plus an
+    // instruction sent a second later — the feedback landed, the instruction
+    // appeared nowhere in the worker's transcript, and the initiator waited
+    // for a round that could not come.
+    const { io } = fakeIO({
+      "1.json": envelope(1, { stage: "wk-build", task: "one" }),
+      "2.json": envelope(2, { stage: "wk-build", task: "two" }),
+    });
+    let state: AgentStateName = "idle";
+    const sent: string[] = [];
+    const host = {
+      agentState: () => state,
+      // What a real host does: accepting a turn puts the agent to work.
+      sendUserMessage: (text: string) => {
+        sent.push(text);
+        state = "streaming";
+      },
+    };
+    const w = createInboxWatcher(host, identity, "/inbox", io);
+
+    expect(w.poll()).toEqual([1]);
+    expect(w.poll()).toEqual([]); // streaming now: the second waits
+    expect(sent).toHaveLength(1);
+
+    state = "idle";
+    expect(w.poll()).toEqual([2]);
     expect(sent).toHaveLength(2);
   });
 

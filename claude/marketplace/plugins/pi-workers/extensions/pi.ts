@@ -134,13 +134,32 @@ export interface DeliveryDecision {
  * acknowledged, so declining now costs one more poll; delivering at the wrong
  * moment costs a corrupted turn. Anything not positively known to be safe
  * therefore defers, including states this build has never heard of.
+ *
+ * A streaming agent defers too, and `steer` is therefore returned by nothing
+ * (dotfiles-nhit). It used to be returned here, and the consequence was a lost
+ * message: `poll()` advances its high-water mark on the sendUserMessage CALL,
+ * Pi returns nothing to check, and a steer Pi does not surface is consumed
+ * with no redelivery. Two live runs an hour apart took this path — in one the
+ * steered instruction landed mid-round, in the other it appeared nowhere in
+ * the worker's transcript and the initiator waited 300s for a round that
+ * could not come. The bridge cannot tell those apart, which is what makes the
+ * mode unusable rather than merely unlucky.
+ *
+ * Deferring costs the message one poll interval: it lands as a normal user
+ * turn the moment the agent settles, which is a delay, not a loss. `steer`
+ * stays in the vocabulary because it is Pi's — see WatcherHost — and becomes
+ * usable the day Pi tells a caller whether a steer was accepted.
  */
 export function decideDelivery(state: AgentState, _envelope: Envelope): DeliveryDecision {
   switch (state) {
     case "idle":
       return { mode: "followUp", reason: "agent is idle; deliver as a normal user turn" };
     case "streaming":
-      return { mode: "steer", reason: "agent is mid-turn; steer rather than interrupt blindly" };
+      return {
+        mode: "defer",
+        reason:
+          "agent is mid-turn; a steer cannot be confirmed and is silently consumed if Pi drops it, so wait for idle",
+      };
     case "compacting":
       return {
         mode: "defer",
@@ -590,10 +609,23 @@ export function createInboxWatcher(
         io.log("pi-worker: host exposes no sendUserMessage; inbox delivery is inert");
         return [];
       }
-      const state: AgentState = host.agentState ? host.agentState() : "unknown";
       const sent: number[] = [];
 
       for (const envelope of unreadAfter(mark, load())) {
+        // Re-read per envelope, and deliver at most one per poll (see the
+        // break at the end of this loop). The state used to be sampled ONCE,
+        // outside the loop, and then used for every message owed — but a
+        // delivery is what STARTS a turn, so the second message of any pair
+        // was judged against an `idle` reading that its predecessor had just
+        // invalidated, and went out as a follow-up into a streaming agent.
+        //
+        // Observed live (dotfiles-c4kh): a `resume` feedback envelope and an
+        // instruction sent one second later were owed together; the feedback
+        // landed and the instruction appeared nowhere in the worker's
+        // transcript. The same two messages, arriving in separate polls,
+        // deliver correctly every time — which is what made this look like a
+        // steering problem rather than a batching one.
+        const state: AgentState = host.agentState ? host.agentState() : "unknown";
         const decision = decideDelivery(state, envelope);
         if (decision.mode === "defer") {
           // Stop at the first deferral rather than skipping ahead: delivering
@@ -617,6 +649,9 @@ export function createInboxWatcher(
         });
         mark = envelope.sequence;
         sent.push(envelope.sequence);
+        // One per poll. Whatever is still owed goes out on the next tick, a
+        // second later, once the state reading means something again.
+        break;
       }
       return sent;
     },
