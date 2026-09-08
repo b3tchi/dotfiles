@@ -49,6 +49,12 @@ const maxSecretBytes = 1 << 20
 // purpose: MSAL writes a sibling schema for its own persistence self-check,
 // and refusing that would silently break sign-in. Override with
 // GOPASS_SECRETSERVICE_ALLOW (comma-separated prefixes); "*" allows all.
+// Only the canvas MCP server's own cache is stored here. The MSAL runtime
+// broker (libmsalruntime.so, bundled with that server) probes a second
+// schema, com.microsoft.identity.secret, several times per connect but never
+// writes to the Secret Service at all -- it keeps its cache in
+// ~/.local/.IdentityService/msal.cache -- so allowing that schema buys
+// nothing and only widens what may be stored.
 var defaultAllow = []string{"com.microsoft.powerapps.canvasmcp"}
 
 var allowPrefixes = defaultAllow
@@ -150,6 +156,16 @@ type store struct {
 	// enumerates that property to find a cached secret, and a stale empty
 	// value makes every lookup miss even though SearchItems would match.
 	collProps []*prop.Properties
+	// items and idList memoize the decrypted store. Every SearchItems used to
+	// spawn one gopass per id -- twice over, since the log line re-ran the
+	// match -- and the canvas MCP server issues ~9 searches per connect, so
+	// most of a minute went into decrypting the same single item. This daemon
+	// is the only writer, so the memo is authoritative; save and Delete keep
+	// it current. A secret edited behind the daemon's back (gopass edit) is
+	// not noticed until restart.
+	items  map[string]*item
+	idList []string
+	warm   bool
 }
 
 func gopassPath(id string) (string, error) {
@@ -221,11 +237,21 @@ func gopassRun(args []string, stdin string) (string, error) {
 	return out.String(), nil
 }
 
+// load returns the item, decrypting it through gopass only on a memo miss.
+// The returned pointer is the memoized one: callers read it, they do not
+// mutate it in place.
 func (s *store) load(id string) (*item, error) {
 	p, err := gopassPath(id)
 	if err != nil {
 		return nil, err
 	}
+	s.mu.Lock()
+	if it, ok := s.items[id]; ok {
+		s.mu.Unlock()
+		return it, nil
+	}
+	s.mu.Unlock()
+
 	out, err := gopassRun([]string{"cat", p}, "")
 	if err != nil {
 		return nil, err
@@ -234,6 +260,12 @@ func (s *store) load(id string) (*item, error) {
 	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &it); err != nil {
 		return nil, err
 	}
+	s.mu.Lock()
+	if s.items == nil {
+		s.items = map[string]*item{}
+	}
+	s.items[id] = &it
+	s.mu.Unlock()
 	return &it, nil
 }
 
@@ -246,13 +278,41 @@ func (s *store) save(id string, it *item) error {
 	if err != nil {
 		return err
 	}
-	_, err = gopassRun([]string{"cat", p}, string(b))
-	return err
+	if _, err = gopassRun([]string{"cat", p}, string(b)); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	if s.items == nil {
+		s.items = map[string]*item{}
+	}
+	s.items[id] = it
+	if s.warm {
+		known := false
+		for _, k := range s.idList {
+			if k == id {
+				known = true
+				break
+			}
+		}
+		if !known {
+			s.idList = append(s.idList, id)
+		}
+	}
+	s.mu.Unlock()
+	return nil
 }
 
 // ids lists only the namespace, so the daemon never enumerates the rest of
 // the store -- not even secret names.
 func (s *store) ids() []string {
+	s.mu.Lock()
+	if s.warm {
+		out := append([]string(nil), s.idList...)
+		s.mu.Unlock()
+		return out
+	}
+	s.mu.Unlock()
+
 	out, err := gopassRun([]string{"ls", "--flat", gopassDir}, "")
 	if err != nil {
 		return nil
@@ -265,6 +325,10 @@ func (s *store) ids() []string {
 			ids = append(ids, l)
 		}
 	}
+	s.mu.Lock()
+	s.idList = ids
+	s.warm = true
+	s.mu.Unlock()
 	return ids
 }
 
@@ -505,8 +569,23 @@ func (i *itemObj) Delete(sender dbus.Sender) (dbus.ObjectPath, *dbus.Error) {
 		return "/", dbus.NewError("org.freedesktop.Secret.Error.NoSuchObject", []interface{}{err.Error()})
 	}
 	gopassRun([]string{"delete", "--force", p}, "")
+	i.s.forget(i.id)
 	i.s.refreshItems()
 	return "/", nil
+}
+
+// forget drops an id from the memo after it leaves the store.
+func (s *store) forget(id string) {
+	s.mu.Lock()
+	delete(s.items, id)
+	kept := s.idList[:0]
+	for _, k := range s.idList {
+		if k != id {
+			kept = append(kept, k)
+		}
+	}
+	s.idList = kept
+	s.mu.Unlock()
 }
 
 type session struct{}
