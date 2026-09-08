@@ -52,6 +52,7 @@ import {
   fitToWidth,
   visibleWidth,
   MAX_SUMMARY_BYTES,
+  oneLine,
 } from "./pi.ts";
 
 const workEnvelope = {
@@ -774,7 +775,46 @@ describe("initiator tool", () => {
       payload: { status: "complete", summary: "noted BASALT-7", window: "w", session: "s", resume: "r" },
     }) });
     const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "r1" });
-    expect(out.detail).toBe("seq 1 from r1/impl-1: complete — noted BASALT-7");
+    // Ordered like a frame row — address, state, then the prose — and using
+    // the frame's own separator, so the transcript and the widget read as one
+    // thing. The sequence stays: it is what `ack` needs, and this line is all
+    // the caller gets.
+    expect(out.detail).toBe("seq 1 · r1/impl-1 complete · noted BASALT-7");
+  });
+
+  test("a summary is cut at its first sentence, which is the outcome", () => {
+    // Observed live, wrapping across two lines in the operator's terminal:
+    //
+    //   seq 1 from r4/impl-1: complete — Created and verified Markdown file at
+    //   /tmp/tmp.b8LweM44cL/20260908T111021Z.md. Repository worktree remains
+    //   clean; no commit needed because …
+    //
+    // The first sentence is the outcome; everything after it is the worker
+    // justifying itself, which is what `inspect` is for. A period inside a
+    // path is not a sentence boundary — `tmp.b8LweM44cL` must survive.
+    const summary =
+      "Created and verified Markdown file at /tmp/tmp.b8LweM44cL/20260908T111021Z.md. " +
+      "Repository worktree remains clean; no commit needed because the file lives in /tmp.";
+    expect(oneLine(summary)).toBe(
+      "Created and verified Markdown file at /tmp/tmp.b8LweM44cL/20260908T111021Z.md. …",
+    );
+  });
+
+  test("a whole result line fits a narrow terminal", () => {
+    const summary =
+      "Created and verified Markdown file at /tmp/tmp.b8LweM44cL/20260908T111021Z.md. " +
+      "Repository worktree remains clean; no commit needed because the file lives in /tmp.";
+    const { exec } = fakeExec({ stdout: JSON.stringify({
+      run: "r4", uid: "impl-1", sequence: 1, kind: "result",
+      payload: { status: "complete", summary, window: "w", session: "s", resume: "r" },
+    }) });
+    return createInitiatorTool({ exec }).invoke({ verb: "wait", run: "r4" }).then((out) => {
+      expect(out.detail.split("\n")).toHaveLength(1);
+      expect(out.detail.length).toBeLessThanOrEqual(120);
+      // The sequence survives the trimming: without it the caller cannot ack.
+      expect(out.detail).toContain("seq 1");
+      expect(out.detail).toContain("r4/impl-1 complete");
+    });
   });
 
   test("ack passes the socket, because it is what releases the worker", async () => {
