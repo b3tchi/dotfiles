@@ -758,14 +758,18 @@ describe("initiator tool", () => {
     expect(out.detail).not.toContain("```");
   });
 
-  test("a long single-line summary is cut, not wrapped across the transcript", async () => {
+  test("an unbroken blob wraps into the block and stops there", async () => {
+    // Nothing to break on and nothing worth reading: it still may not run off
+    // the side of the terminal or past the three-line budget.
     const summary = "x".repeat(400);
     const { exec } = fakeExec({ stdout: JSON.stringify({
       run: "r1", uid: "impl-1", sequence: 1, kind: "result",
       payload: { status: "complete", summary, window: "w", session: "s", resume: "r" },
     }) });
     const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "r1" });
-    expect(out.detail.length).toBeLessThan(200);
+    const lines = out.detail.split("\n");
+    expect(lines.length).toBeLessThanOrEqual(4);
+    for (const line of lines) expect(line.length).toBeLessThanOrEqual(100);
     expect(out.detail).toContain("…");
   });
 
@@ -780,6 +784,58 @@ describe("initiator tool", () => {
     // thing. The sequence stays: it is what `ack` needs, and this line is all
     // the caller gets.
     expect(out.detail).toBe("seq 1 · r1/impl-1 complete · noted BASALT-7");
+  });
+
+  test("a result that does not fit one line becomes a block, with the path intact", async () => {
+    // Observed live, and it cost the operator a `find`:
+    //
+    //   seq 1 · r5/impl-1 complete · Created and committed timestamp markdown
+    //   file with H1 header: /home/jan/.dotfiles/.…
+    //
+    // The PATH was the answer and the cut landed in the middle of it. A result
+    // is the substance of the whole exchange — unlike an ack, which now says
+    // nothing — so it gets the room it needs: the address and state on their
+    // own line, the prose wrapped under it. Wrapped, never truncated, because
+    // half a path is worse than no path.
+    const summary =
+      "Created and committed timestamp markdown file with H1 header: " +
+      "/home/jan/.dotfiles/.worktrees/wk-timestamp-md.1/temp-timestamp.Z6eOPR/20260908T113849Z.md";
+    const { exec } = fakeExec({ stdout: JSON.stringify({
+      run: "r5", uid: "impl-1", sequence: 1, kind: "result",
+      payload: { status: "complete", summary, window: "w", session: "s", resume: "r" },
+    }) });
+    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "r5" });
+    const lines = out.detail.split("\n");
+    expect(lines.length).toBeGreaterThan(1);
+    expect(lines[0]).toBe("seq 1 · r5/impl-1 complete");
+    // The path survives whole, on one of the lines — that is the point.
+    expect(lines.some((l) => l.includes("/temp-timestamp.Z6eOPR/20260908T113849Z.md"))).toBe(true);
+    expect(out.detail).not.toContain("…");
+    for (const line of lines) expect(line.length).toBeLessThanOrEqual(100);
+  });
+
+  test("a result that fits stays on one line", async () => {
+    // A block for two words would be ceremony. The break is earned by length.
+    const { exec } = fakeExec({ stdout: JSON.stringify({
+      run: "r1", uid: "impl-1", sequence: 1, kind: "result",
+      payload: { status: "complete", summary: "noted BASALT-7", window: "w", session: "s", resume: "r" },
+    }) });
+    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "r1" });
+    expect(out.detail).toBe("seq 1 · r1/impl-1 complete · noted BASALT-7");
+  });
+
+  test("a summary long enough to need a block is still capped", async () => {
+    // Room, not a licence: a worker that writes an essay does not get to own
+    // the transcript. The envelope is on the bus; `inspect` is the way in.
+    const summary = Array.from({ length: 40 }, (_, i) => `sentence number ${i} about the work done`).join(". ");
+    const { exec } = fakeExec({ stdout: JSON.stringify({
+      run: "r1", uid: "impl-1", sequence: 1, kind: "result",
+      payload: { status: "complete", summary, window: "w", session: "s", resume: "r" },
+    }) });
+    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "r1" });
+    const lines = out.detail.split("\n");
+    expect(lines.length).toBeLessThanOrEqual(4);
+    expect(out.detail).toContain("…");
   });
 
   test("a summary is cut at its first sentence, which is the outcome", () => {
@@ -800,7 +856,7 @@ describe("initiator tool", () => {
     );
   });
 
-  test("a whole result line fits a narrow terminal", () => {
+  test("no result line ever runs off the side of the terminal", async () => {
     const summary =
       "Created and verified Markdown file at /tmp/tmp.b8LweM44cL/20260908T111021Z.md. " +
       "Repository worktree remains clean; no commit needed because the file lives in /tmp.";
@@ -808,13 +864,14 @@ describe("initiator tool", () => {
       run: "r4", uid: "impl-1", sequence: 1, kind: "result",
       payload: { status: "complete", summary, window: "w", session: "s", resume: "r" },
     }) });
-    return createInitiatorTool({ exec }).invoke({ verb: "wait", run: "r4" }).then((out) => {
-      expect(out.detail.split("\n")).toHaveLength(1);
-      expect(out.detail.length).toBeLessThanOrEqual(120);
-      // The sequence survives the trimming: without it the caller cannot ack.
-      expect(out.detail).toContain("seq 1");
-      expect(out.detail).toContain("r4/impl-1 complete");
-    });
+    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "r4" });
+    const lines = out.detail.split("\n");
+    for (const line of lines) expect(line.length).toBeLessThanOrEqual(100);
+    // The sequence survives: without it the caller cannot ack.
+    expect(lines[0]).toContain("seq 1");
+    expect(lines[0]).toContain("r4/impl-1 complete");
+    // And the whole path is readable, not cut in half.
+    expect(out.detail).toContain("/tmp/tmp.b8LweM44cL/20260908T111021Z.md");
   });
 
   test("ack passes the socket, because it is what releases the worker", async () => {
