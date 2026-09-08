@@ -680,6 +680,17 @@ def ack-path [run: string, uid: string, sequence: int]: nothing -> string {
 }
 
 # Every unacknowledged result in a run, oldest first, across all its workers.
+#
+# Superseded envelopes are not pending (dotfiles-nig0). `resume` writes a
+# `reopened` marker holding the sequence it sent back, and `derive-state`
+# already reads it: while the marker covers a result, that result has been
+# answered and the worker is running again. Delivery has to agree, or `wait`
+# hands an orchestrator a `complete` envelope for work it rejected seconds ago
+# and there is no way to tell it from a fresh report.
+#
+# An ack cannot substitute for this. Acking is what stops redelivery, and
+# `bus-ack` releases the worker's window — the window `resume` requires alive —
+# so "ack it, then send it back" is not an available ordering.
 export def bus-pending [run: string]: nothing -> list<record> {
     let dir = (run-dir $run)
     if not ($dir | path exists) { return [] }
@@ -690,8 +701,12 @@ export def bus-pending [run: string]: nothing -> list<record> {
     mut pending = []
     for w in $workers {
         let uid = ($w | path basename)
+        let reopened = (marker-value $run $uid "reopened")
+        # 0 covers nothing: sequences start at 1.
+        let answered = (if ($reopened | is-empty) { 0 } else { $reopened | into int })
         let unacked = (
             read-box ($w | path join "outbox")
+            | where {|e| $e.sequence > $answered }
             | where {|e| not (ack-path $run $uid $e.sequence | path exists) }
         )
         $pending = ($pending | append $unacked)

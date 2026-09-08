@@ -228,6 +228,49 @@ let cases = [
         }
     })
 
+    (run-case "pipeline/a-resumed-worker-has-no-result-left-to-deliver" {
+        # dotfiles-nig0, observed live: impl-1 reported, was resumed with
+        # feedback, and `wait --run` handed the SAME `complete` envelope back
+        # instantly while `status` said `running`. An orchestrator draining a
+        # run cannot tell that from a fresh report, so it acts on a result it
+        # has already rejected — and there is no ordering that avoids it, since
+        # `ack` is what clears delivery and `ack` releases the worker `resume`
+        # needs alive.
+        #
+        # `reopened` already records which result was sent back; delivery has
+        # to read it too, or the frame and the mailbox disagree.
+        with-pipeline "reopened-wait" {|t, repo|
+            launch $t $repo "impl-a" "impl"
+            complete-with "impl-a" "first attempt"
+            worker-resume "impl-a" --run "run-1" --feedback "criterion 2 is unmet" --socket $t.socket
+
+            assert-eq (bus-wait --run "run-1") null "the superseded result is not pending"
+            assert-eq (bus-wait --run "run-1" --uid "impl-a") null "nor when the worker is asked about directly"
+
+            complete-with "impl-a" "second attempt"
+            let fresh = (bus-wait --run "run-1")
+            assert-eq $fresh.payload.summary "second attempt" "what arrives is the round the worker just reported"
+            assert-eq $fresh.sequence 2 ""
+        }
+    })
+
+    (run-case "pipeline/resuming-one-worker-does-not-hide-anothers-result" {
+        # The other half of dotfiles-nig0: skipping a superseded envelope must
+        # not turn into skipping the run. A sibling's unacknowledged result is
+        # exactly what the orchestrator called `wait` for.
+        with-pipeline "reopened-sibling" {|t, repo|
+            launch $t $repo "impl-a" "impl"
+            launch $t $repo "impl-b" "impl"
+            complete-with "impl-a" "sent back"
+            worker-resume "impl-a" --run "run-1" --feedback "not yet" --socket $t.socket
+            complete-with "impl-b" "sibling done"
+
+            let got = (bus-wait --run "run-1")
+            assert-eq $got.uid "impl-b" "the run-wide wait skips the superseded envelope, not the run"
+            assert-eq $got.payload.summary "sibling done" ""
+        }
+    })
+
     (run-case "pipeline/second-rejection-escalates-to-a-human" {
         # Two failures on the same task is the point where a human decides.
         # Looping a third time silently burns tokens on the same misunderstanding.
