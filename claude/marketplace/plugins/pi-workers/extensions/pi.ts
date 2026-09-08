@@ -1618,24 +1618,41 @@ export function transcriptLines(
 }
 
 /**
- * A worker's prose, as one line.
+ * A worker's prose, as one line: its first sentence.
  *
- * Observed live: a worker reported a summary containing a fenced markdown
- * block, and `wait` printed the fence, the blank lines and all — six lines of
- * transcript for one result, in a loop that runs once per worker. The envelope
- * is on the bus whatever this shows; `inspect` and `timeline` are how the full
- * text is asked for.
+ * Two live observations shaped this. One worker reported a summary containing
+ * a fenced markdown block and `wait` printed the fence, the blank lines and
+ * all — six lines of transcript for one result, in a loop that runs once per
+ * worker. Another reported
  *
- * Says there is more rather than cutting silently: a summary that stops
- * mid-sentence with no mark reads as the whole answer.
+ *   Created and verified Markdown file at /tmp/tmp.b8LweM44cL/2026…Z.md.
+ *   Repository worktree remains clean; no commit needed because …
+ *
+ * which wrapped across the operator's terminal. The first sentence is the
+ * OUTCOME; what follows is the worker justifying itself, and `inspect` and
+ * `timeline` are where that belongs — the envelope is on the bus whatever this
+ * shows.
+ *
+ * A period inside a path is not a sentence boundary: `tmp.b8LweM44cL` has to
+ * survive, so a boundary is a period followed by a space or the end of the
+ * text. And there is always a mark when something was dropped — prose that
+ * stops with no ellipsis reads as the whole answer.
  */
-export function oneLine(text: unknown, limit = 140): string {
+export function oneLine(text: unknown, limit = 84): string {
   const raw = typeof text === "string" ? text : String(text ?? "");
-  const [first = "", ...rest] = raw.split("\n");
-  const trimmed = first.trim();
-  const hasMore = rest.some((line) => line.trim().length > 0);
-  if (trimmed.length > limit) return `${trimmed.slice(0, limit - 1)}…`;
-  return hasMore ? `${trimmed} …` : trimmed;
+  // Folded first, so a sentence that spans a line break is still one sentence
+  // and a fence becomes ordinary words rather than a shape.
+  const folded = raw.replace(/\s+/g, " ").trim();
+  // A fenced block is detail by definition, and folding turned one into
+  // ``` ```markdown # x.md ``` ``` — words in the shape of nothing. Cut at the
+  // fence and let the sentence rule work on the prose before it.
+  const fence = folded.indexOf("```");
+  const collapsed = fence > 0 ? folded.slice(0, fence).trim() : folded;
+  const boundary = collapsed.match(/^(.*?[.!?])(?:\s|$)/);
+  const head = boundary?.[1] ?? collapsed;
+  const dropped = head.length < collapsed.length || collapsed.length < folded.length;
+  if (head.length > limit) return `${head.slice(0, limit - 1)}…`;
+  return dropped ? `${head} …` : head;
 }
 
 /** SGR escape sequences, which occupy no columns. */
@@ -1917,10 +1934,14 @@ function summarise(verb: string, stdout: string): string {
       const payload = (o.payload ?? {}) as Record<string, unknown>;
       // kind distinguishes "the worker answered" from "the worker said nothing
       // at all", which are not the same outcome and must not read the same.
+      // Ordered like a frame row — address, state, prose — and separated the
+      // way the frame's own heading is, so the transcript and the widget read
+      // as one thing rather than two conventions. The sequence leads because
+      // it is what `ack` needs, and this line is all the caller gets.
       if (o.kind === "error") {
-        return `seq ${o.sequence} from ${o.run}/${o.uid}: ${payload.code} — ${oneLine(payload.detail)}`;
+        return `seq ${o.sequence} · ${o.run}/${o.uid} ${payload.code} · ${oneLine(payload.detail)}`;
       }
-      return `seq ${o.sequence} from ${o.run}/${o.uid}: ${payload.status} — ${oneLine(payload.summary)}`;
+      return `seq ${o.sequence} · ${o.run}/${o.uid} ${payload.status} · ${oneLine(payload.summary)}`;
     }
     case "rm":
       return o.removed ? `released ${o.run}/${o.uid}` : `${o.run}/${o.uid}: ${o.reason}`;
