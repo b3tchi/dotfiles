@@ -72,6 +72,7 @@ SPEC_IM="$(extract_section_link implements im "$SP_FILE")"
 US="${US:-$SPEC_US}"
 IM="${IM:-$SPEC_IM}"
 
+LINEAGE_MODE=""
 HAS_STORY=0
 if [ -n "$US" ] || [ -n "$IM" ]; then
   if [ -z "$US" ] || [ -z "$IM" ]; then
@@ -125,9 +126,26 @@ if [ "$HAS_STORY" -eq 1 ]; then
   for f in "$US_FILE" "$IM_FILE"; do
     [ -f "$f" ] || { echo "ERROR: missing $f" >&2; exit 1; }
   done
-  require_status "$US_FILE" "ready"
-  require_status "$IM_FILE" "proposed"
-  TOUCH_PATHS+=("$US_FILE" "$IM_FILE")
+  # Two valid story-backed lineage modes:
+  #   owned    — this spec DELIVERS the story: us###=ready, im###=proposed.
+  #              Both get flipped by the finale below.
+  #   consumed — the story already shipped under an earlier spec and this one
+  #              only consumes it, moving no acceptance criterion. Typical of a
+  #              removal / decommission spec: us###=done and im###=accepted
+  #              already, so there is nothing to flip and forcing a flip would
+  #              regress another spec's artifacts.
+  # Anything else is genuinely ambiguous and aborts before any mutation.
+  US_STATUS="$(status_of "$US_FILE")"
+  IM_STATUS="$(status_of "$IM_FILE")"
+  if [ "$US_STATUS" = "ready" ] && [ "$IM_STATUS" = "proposed" ]; then
+    LINEAGE_MODE=owned
+    TOUCH_PATHS+=("$US_FILE" "$IM_FILE")
+  elif [ "$US_STATUS" = "done" ] && [ "$IM_STATUS" = "accepted" ]; then
+    LINEAGE_MODE=consumed
+  else
+    echo "ERROR: ambiguous story-backed lineage for $SP: expected ($US=ready, $IM=proposed) to deliver the story, or ($US=done, $IM=accepted) to consume it; got ($US=${US_STATUS:-missing}, $IM=${IM_STATUS:-missing})" >&2
+    exit 1
+  fi
 fi
 if [ "$HAS_FEATURE" -eq 1 ]; then
   FT_FILE="$AKM_ROOT/docs/notes/$FT.md"
@@ -172,10 +190,12 @@ flip_status () {
   sed -i "1,20{s/^status: ${from}\$/status: ${to}/;}" "$file"
 }
 
-[ "$HAS_STORY" -eq 0 ] || {
+# Only the `owned` mode flips story lineage; `consumed` leaves the earlier
+# spec's already-terminal us###/im### exactly as they are.
+if [ "$HAS_STORY" -eq 1 ] && [ "$LINEAGE_MODE" = "owned" ]; then
   flip_status "$US_FILE" "ready" "done"
   flip_status "$IM_FILE" "proposed" "accepted"
-}
+fi
 [ "$HAS_FEATURE" -eq 0 ] || flip_status "$FT_FILE" "proposed" "accepted"
 flip_status "$SP_FILE" "ready" "done"
 
@@ -217,10 +237,20 @@ trap - ERR
 rm -rf "$BACKUP_DIR"
 
 echo "---"
+# Describe story lineage truthfully: `consumed` mode performs no flip, so
+# claiming one in the summary would misreport what happened on disk.
+story_summary () {
+  if [ "$LINEAGE_MODE" = "consumed" ]; then
+    printf '%s + %s consumed (already done/accepted, not flipped)' "$US" "$IM"
+  else
+    printf '%s → done, %s → accepted' "$US" "$IM"
+  fi
+}
+
 if [ "$HAS_STORY" -eq 1 ] && [ "$HAS_FEATURE" -eq 1 ]; then
-  echo "Archived: $SP → done ($SP_ARCHIVE), $US → done, $IM → accepted, $FT → accepted. Board → archive. Epic $EPIC closed."
+  echo "Archived: $SP → done ($SP_ARCHIVE), $(story_summary), $FT → accepted. Board → archive. Epic $EPIC closed."
 elif [ "$HAS_STORY" -eq 1 ]; then
-  echo "Archived: $SP → done ($SP_ARCHIVE), $US → done, $IM → accepted. Board → archive. Epic $EPIC closed."
+  echo "Archived: $SP → done ($SP_ARCHIVE), $(story_summary). Board → archive. Epic $EPIC closed."
 else
   echo "Archived: $SP → done ($SP_ARCHIVE), $FT → accepted. Board → archive. Epic $EPIC closed."
 fi
