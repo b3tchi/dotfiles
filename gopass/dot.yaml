@@ -7,6 +7,7 @@ linux:
     {{#if (eval "test -d /mnt/c && echo wsl || true")}}
     wsl/gopass-secretservice.service: ~/.config/systemd/user/gopass-secretservice.service
     wsl/canvas-mcp-relay.service: ~/.config/systemd/user/canvas-mcp-relay.service
+    wsl/org.freedesktop.secrets.service: ~/.local/share/dbus-1/services/org.freedesktop.secrets.service
     {{/if}}
 
   installs:

@@ -145,6 +145,11 @@ type store struct {
 	mu    sync.Mutex
 	conn  *dbus.Conn
 	props *prop.Properties
+	// collProps are the exported Collection property sets. Collection.Items
+	// has to be refreshed through them whenever the store changes: libsecret
+	// enumerates that property to find a cached secret, and a stale empty
+	// value makes every lookup miss even though SearchItems would match.
+	collProps []*prop.Properties
 }
 
 func gopassPath(id string) (string, error) {
@@ -286,6 +291,46 @@ func (s *store) matching(attrs map[string]string) []dbus.ObjectPath {
 
 func idFromPath(p dbus.ObjectPath) string { return strings.TrimPrefix(string(p), itemBase) }
 
+// itemPaths lists every item in the namespace as a D-Bus object path.
+func (s *store) itemPaths() []dbus.ObjectPath {
+	ids := s.ids()
+	ps := make([]dbus.ObjectPath, 0, len(ids))
+	for _, id := range ids {
+		ps = append(ps, dbus.ObjectPath(itemBase+id))
+	}
+	return ps
+}
+
+// refreshItems republishes Collection.Items on every exported collection.
+// Callers must invoke it after any change to the store, otherwise a client
+// that reads the property instead of calling SearchItems sees an empty
+// collection -- which is what made MSAL re-authenticate on every start
+// despite its cache being written here.
+func (s *store) refreshItems() {
+	ps := s.itemPaths()
+	for _, pr := range s.collProps {
+		if pr == nil {
+			continue
+		}
+		pr.SetMust("org.freedesktop.Secret.Collection", "Items", ps)
+	}
+}
+
+// logSearch records every lookup and whether it matched. Successful searches
+// were previously silent, which made a lookup that simply found nothing look
+// identical to a client that never searched at all.
+func (s *store) logSearch(op string, attrs map[string]string) {
+	got := s.matching(attrs)
+	log.Printf("%s query=%v -> %d match(es)", op, attrs, len(got))
+	if len(got) == 0 {
+		for _, id := range s.ids() {
+			if it, err := s.load(id); err == nil {
+				log.Printf("  stored %s attrs=%v label=%q", id, it.Attributes, it.Label)
+			}
+		}
+	}
+}
+
 // ---------- Service ----------
 
 type service struct{ s *store }
@@ -304,6 +349,7 @@ func (v *service) SearchItems(sender dbus.Sender, attrs map[string]string) ([]db
 	if err := v.s.authorize("Service.SearchItems", sender); err != nil {
 		return nil, nil, err
 	}
+	defer func() { v.s.logSearch("Service.SearchItems", attrs) }()
 	return v.s.matching(attrs), []dbus.ObjectPath{}, nil
 }
 
@@ -392,11 +438,13 @@ func (c *collection) CreateItem(sender dbus.Sender, props map[string]dbus.Varian
 	}
 	p := dbus.ObjectPath(itemBase + id)
 	c.s.exportItem(id)
+	c.s.refreshItems()
 	log.Printf("CreateItem %s (label=%q attrs=%d)", id, label, len(attrs))
 	return p, "/", nil
 }
 
 func (c *collection) SearchItems(sender dbus.Sender, attrs map[string]string) ([]dbus.ObjectPath, *dbus.Error) {
+	defer func() { c.s.logSearch("Collection.SearchItems", attrs) }()
 	if err := c.s.authorize("Collection.SearchItems", sender); err != nil {
 		return nil, err
 	}
@@ -457,6 +505,7 @@ func (i *itemObj) Delete(sender dbus.Sender) (dbus.ObjectPath, *dbus.Error) {
 		return "/", dbus.NewError("org.freedesktop.Secret.Error.NoSuchObject", []interface{}{err.Error()})
 	}
 	gopassRun([]string{"delete", "--force", p}, "")
+	i.s.refreshItems()
 	return "/", nil
 }
 
@@ -548,14 +597,6 @@ func main() {
 
 	s := &store{conn: conn}
 
-	reply, err := conn.RequestName(svcName, dbus.NameFlagDoNotQueue)
-	if err != nil {
-		log.Fatalf("RequestName: %v", err)
-	}
-	if reply != dbus.RequestNameReplyPrimaryOwner {
-		log.Fatalf("%s already owned by another process", svcName)
-	}
-
 	conn.Export(&service{s: s}, svcPath, "org.freedesktop.Secret.Service")
 	conn.Export(introspect.Introspectable(svcIntro), svcPath, "org.freedesktop.DBus.Introspectable")
 	prop.Export(conn, svcPath, prop.Map{
@@ -564,23 +605,48 @@ func main() {
 		},
 	})
 
+	seed := s.itemPaths()
 	for _, cp := range []dbus.ObjectPath{collPath, aliasPath} {
 		conn.Export(&collection{s: s}, cp, "org.freedesktop.Secret.Collection")
 		conn.Export(introspect.Introspectable(collIntro), cp, "org.freedesktop.DBus.Introspectable")
-		prop.Export(conn, cp, prop.Map{
+		cpr, err := prop.Export(conn, cp, prop.Map{
 			"org.freedesktop.Secret.Collection": {
-				"Items":    {Value: []dbus.ObjectPath{}, Writable: false, Emit: prop.EmitFalse},
+				"Items":    {Value: seed, Writable: false, Emit: prop.EmitFalse},
 				"Label":    {Value: "login", Writable: true, Emit: prop.EmitFalse},
 				"Locked":   {Value: false, Writable: false, Emit: prop.EmitFalse},
 				"Created":  {Value: uint64(0), Writable: false, Emit: prop.EmitFalse},
 				"Modified": {Value: uint64(0), Writable: false, Emit: prop.EmitFalse},
 			},
 		})
+		if err != nil {
+			log.Fatalf("export collection props %s: %v", cp, err)
+		}
+		s.collProps = append(s.collProps, cpr)
 	}
 	for _, id := range s.ids() {
 		s.exportItem(id)
 	}
 
+	for _, id := range s.ids() {
+		if it, err := s.load(id); err == nil {
+			log.Printf("stored item %s attrs=%v label=%q", id, it.Attributes, it.Label)
+		}
+	}
+
+	// Claim the name last. Under D-Bus activation the activating client's
+	// pending call is delivered the moment the name appears, so requesting it
+	// before Export races: the caller reaches an unexported path and libsecret
+	// reports "Object does not implement the interface
+	// org.freedesktop.Secret.Collection". Loading the store first also keeps
+	// the first SearchItems from missing items that gopass had not decrypted
+	// yet (~3s of gpg on a cold cache).
+	reply, err := conn.RequestName(svcName, dbus.NameFlagDoNotQueue)
+	if err != nil {
+		log.Fatalf("RequestName: %v", err)
+	}
+	if reply != dbus.RequestNameReplyPrimaryOwner {
+		log.Fatalf("%s already owned by another process", svcName)
+	}
 	log.Printf("gopass-secretservice up: %s (store %s/, schemas %v, peers %v, pid %d)",
 		svcName, gopassDir, allowPrefixes, allowPeers, os.Getpid())
 	select {}
