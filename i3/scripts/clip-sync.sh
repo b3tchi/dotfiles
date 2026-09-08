@@ -112,8 +112,39 @@ A="$(mktemp)"; B="$(mktemp)"; NEW="$(mktemp)"
 trap 'rm -f "$A" "$B" "$NEW"' EXIT
 : > "$A"; : > "$B"   # last-seen PRIMARY ($A) and CLIPBOARD ($B)
 
-# read a selection ($1) into $NEW; returns nonzero on timeout/empty/error
-get() { timeout "$T" env DISPLAY="$DPY" xclip -selection "$1" -o > "$NEW" 2>/dev/null 9>&- && [ -s "$NEW" ]; }
+# Is selection $1 owned by something offering an IMAGE and no text at all?
+#
+# THE MIRROR MUST NOT LAUNDER A PICTURE INTO TEXT (dotfiles-9i56). `get` below
+# is a plain text read, and xclip — which owns the selection behind every
+# picture this repo publishes (clip-set.sh for a $mod+v pick, qs-region.py for
+# a screenshot) — answers ANY target request with its payload. So a text read
+# of an image/png selection returns the raw PNG file, and `put`ting that on
+# the other selection creates a UTF8_STRING whose content is a PNG. Measured
+# on the deployed :10 session: a picture pick was image/png at t+1s and
+# UTF8_STRING for good at t+2s — one poll interval — so every paste yielded
+# the literal bytes "\211PNG\r\n" and the publish itself looked perfect.
+#
+# The test is deliberately NARROW: refuse only when an image target is
+# advertised AND no text one is. An owner that offers both (some toolkits do)
+# still has text to mirror, and an owner that answers TARGETS with nothing at
+# all — or not at all — is treated exactly as before rather than newly
+# skipped, so no client that used to sync stops syncing.
+image_only() { # <selection>
+  _t="$(timeout "$T" env DISPLAY="$DPY" xclip -selection "$1" -t TARGETS -o \
+        2>/dev/null 9>&-)" || return 1
+  printf '%s\n' "$_t" | grep -qiE '^image/' || return 1
+  printf '%s\n' "$_t" | grep -qiE '^(UTF8_STRING|STRING|TEXT|COMPOUND_TEXT|text/)' \
+    && return 1
+  return 0
+}
+
+# read a selection ($1) into $NEW; returns nonzero on timeout/empty/error, and
+# for an image-only owner (see above) — which is NOT recorded as last-seen
+# either, so the next real text copy is still seen as a change.
+get() {
+  image_only "$1" && return 1
+  timeout "$T" env DISPLAY="$DPY" xclip -selection "$1" -o > "$NEW" 2>/dev/null 9>&- && [ -s "$NEW" ]
+}
 # set a selection ($1) from $NEW; guarded so a hung owner can't wedge the loop
 put() { timeout "$T" env DISPLAY="$DPY" xclip -selection "$1" -i < "$NEW" 2>/dev/null 9>&-; }
 

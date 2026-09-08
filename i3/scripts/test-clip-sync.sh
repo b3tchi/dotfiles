@@ -150,6 +150,27 @@ get_sel() { # <sel>
   timeout 2 env DISPLAY="$DPY" xclip -selection "$1" -o 2>/dev/null
 }
 
+# Own selection <sel> as an IMAGE (target image/png), the shape clip-set.sh
+# publishes a picture pick with and qs-region.py a screenshot. Same live-owner
+# discipline as set_sel: xclip forks and serves until something else claims it.
+set_sel_img() { # <sel> <png-file>
+  env DISPLAY="$DPY" xclip -selection "$1" -t image/png -i < "$2" &
+  OWNERS="$OWNERS $!"
+  sleep 0.3
+}
+
+# The target list the current owner of <sel> advertises, space separated.
+targets_of() { # <sel>
+  timeout 2 env DISPLAY="$DPY" xclip -selection "$1" -t TARGETS -o 2>/dev/null | tr '\n' ' '
+}
+
+# What an IMAGE-unaware consumer gets: the first bytes of a plain text read.
+# xclip-as-owner answers any target with its payload, so this is how the raw
+# PNG reached a paste in the first place (dotfiles-9i56).
+first_bytes() { # <sel>
+  timeout 2 env DISPLAY="$DPY" xclip -selection "$1" -o 2>/dev/null | head -c 4 | od -An -c | tr -s ' '
+}
+
 # How many loops are alive under $SYNCSH — counted from /proc, scoped to the
 # full script path so a production loop at ~/.i3/scripts/clip-sync.sh is
 # never mistaken for one of this suite's.
@@ -204,6 +225,67 @@ set_sel primary "selected-third"
 sleep 2
 assert_eq "CLIPBOARD follows the selection" "selected-third" "$(get_sel clipboard)"
 assert_eq "PRIMARY unchanged by the mirror" "selected-third" "$(get_sel primary)"
+
+stop_loop
+
+# ----------------------------------------- images are not text (dotfiles-9i56) ---
+# THE MIRROR MUST NOT LAUNDER A PICTURE INTO TEXT. `get` is a bare `xclip -o`,
+# and xclip-as-owner answers ANY target request with its payload — so a text
+# read of an image/png selection hands back the raw PNG file, and `put`ting
+# that on the other selection creates a UTF8_STRING whose content is a PNG.
+# Measured on the deployed :10 session before the fix: a $mod+v picture pick
+# was image/png at t+1s and UTF8_STRING for good at t+2s, one poll interval
+# later, so every paste produced the literal bytes "\211PNG\r\n" and every
+# check that ran immediately after the publish passed.
+#
+# A 1x1 PNG is enough: what is asserted is the TARGET the selection carries,
+# never the pixels.
+printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==' \
+  | base64 -d > "$TMP/one.png"
+assert_eq "fixture is a real PNG" " 211 P N G" "$(head -c 4 "$TMP/one.png" | od -An -c | tr -s ' ')"
+
+scenario "image: an image/png CLIPBOARD is left alone, not republished as text"
+
+set_sel primary   "TEXT-PRIMARY-before-the-image"
+set_sel clipboard "TEXT-CLIPBOARD-before-the-image"
+start_loop "$DPY"
+set_sel_img clipboard "$TMP/one.png"
+sleep 3           # >= 4 poll intervals: the clobber landed within one
+
+assert_eq "CLIPBOARD still advertises the image target" "yes" \
+  "$(case "$(targets_of clipboard)" in *image/png*) echo yes ;; *) echo no ;; esac)"
+assert_eq "CLIPBOARD does NOT advertise a text target" "no" \
+  "$(case "$(targets_of clipboard)" in *UTF8_STRING*|*' STRING '*) echo yes ;; *) echo no ;; esac)"
+# The PRIMARY side is where the laundering showed up first: the mirror read the
+# image as text and wrote those bytes onto the other selection. Asserted on the
+# FIRST BYTES rather than the whole value, for two reasons: the startup seed is
+# entitled to have replaced PRIMARY's own text with the CLIPBOARD's (that is
+# the documented clipboard-authoritative seed), and a command substitution
+# carrying real PNG bytes drops NULs with a warning, so a full compare would
+# report the failure in a mangled form. Either text marker starts "TEXT"; the
+# clobber starts "\211PNG".
+assert_eq "PRIMARY still holds text, not the PNG bytes" " T E X T" \
+  "$(first_bytes primary)"
+
+scenario "image: a real text copy after an image still mirrors (the skip must not wedge the loop)"
+
+set_sel clipboard "TEXT-AFTER-THE-IMAGE"
+sleep 2
+assert_eq "PRIMARY follows the text copy" "TEXT-AFTER-THE-IMAGE" "$(get_sel primary)"
+assert_eq "CLIPBOARD unchanged by the mirror" "TEXT-AFTER-THE-IMAGE" "$(get_sel clipboard)"
+
+scenario "image: an image on PRIMARY is left alone too"
+
+set_sel clipboard "TEXT-CLIPBOARD-second-round"
+sleep 2
+set_sel_img primary "$TMP/one.png"
+sleep 3
+assert_eq "PRIMARY still advertises the image target" "yes" \
+  "$(case "$(targets_of primary)" in *image/png*) echo yes ;; *) echo no ;; esac)"
+assert_eq "CLIPBOARD still holds text, not the PNG bytes" " T E X T" \
+  "$(first_bytes clipboard)"
+assert_eq "and it is still the copy that was there" "TEXT-CLIPBOARD-second-round" \
+  "$(get_sel clipboard)"
 
 stop_loop
 

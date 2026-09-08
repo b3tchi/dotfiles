@@ -127,6 +127,28 @@ set_win() {
 }
 nap() { sleep "$1" 9>&-; }
 
+# Does the CURRENT target list ($TGT, as written by targets()) describe an
+# IMAGE selection — an image target advertised and no text one?
+#
+# THE BRIDGE IS TEXT-ONLY AND MUST ACT LIKE IT (dotfiles-9i56). read_x is a
+# plain text read, and xclip — the owner behind every picture this repo
+# publishes (clip-set.sh for a $mod+v pick, qs-region.py for a screenshot) —
+# answers ANY target request with its payload. So a picture was read as text
+# and pushed into the WINDOWS clipboard as text (measured: Get-Clipboard came
+# back with the PNG header), after which the Win->X watcher wrote it back onto
+# the X clipboard as UTF8_STRING — a picture pick pasted as "\211PNG\r\n"
+# about a second after it was set. Windows has its own image clipboard format
+# and this bridge has never spoken it; there is nothing here to forward.
+#
+# NARROW ON PURPOSE: only an image target AND no text target skips. An owner
+# offering both still has text to bridge, and an owner that answers TARGETS
+# with nothing is treated exactly as before.
+image_only_tgt() {
+  grep -qiE '^image/' "$TGT" || return 1
+  grep -qiE '^(UTF8_STRING|STRING|TEXT|COMPOUND_TEXT|text/)' "$TGT" && return 1
+  return 0
+}
+
 # --- Win -> X reader (background) -------------------------------------------
 # The watcher powershell never exits on its own; if interop hiccups and it
 # dies, the outer loop respawns it after a beat.
@@ -162,14 +184,23 @@ trap 'rm -rf "$D"; pkill -P "$WPID" 2>/dev/null; kill "$WPID" 2>/dev/null' EXIT
 
 # --- X -> Win poller (foreground) -------------------------------------------
 while :; do
-  # SECURITY GATE — before the payload is ever read; see header.
-  if targets && grep -qFx 'application/x-kde-passwordManagerHint' "$TGT"; then
-    nap "$POLL"; continue
+  # SECURITY GATE, and the IMAGE GATE beside it — both before the payload is
+  # ever read; see the header and image_only_tgt. One TARGETS round trip
+  # serves both: `targets` writes $TGT and each gate only greps it, so adding
+  # the image case costs no extra X traffic per tick.
+  if targets; then
+    if grep -qFx 'application/x-kde-passwordManagerHint' "$TGT"; then
+      nap "$POLL"; continue
+    fi
+    if image_only_tgt; then
+      nap "$POLL"; continue
+    fi
   fi
   if read_x && ! cmp -s "$NEW" "$LAST"; then
     # TOCTOU re-check, clip-feed.sh style: the payload may come from a
     # different owner than the one the gate passed on. Fails closed.
-    if ! targets || grep -qFx 'application/x-kde-passwordManagerHint' "$TGT"; then
+    if ! targets || grep -qFx 'application/x-kde-passwordManagerHint' "$TGT" \
+       || image_only_tgt; then
       nap "$POLL"; continue
     fi
     cp "$NEW" "$LAST"
