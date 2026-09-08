@@ -91,6 +91,31 @@
 #   server is gone, the socket is stale) is skipped silently — that is a dead
 #   session, not an error. If NO display accepts it, that is exit 1.
 #
+#   HOW "EVERY LIVE DISPLAY" IS ENUMERATED — FILE *AND* ABSTRACT SOCKETS
+#   (dotfiles-pjcw). An X server's unix socket lives in either or both of two
+#   namespaces: a FILE at /tmp/.X11-unix/X<n>, and an ABSTRACT name
+#   @/tmp/.X11-unix/X<n> that exists only in the kernel's socket table
+#   (/proc/net/unix) and leaves no directory entry at all. Enumerating the
+#   directory alone was silently wrong on this very host: /tmp/.X11-unix is a
+#   READ-ONLY tmpfs WSLg bind-mounts from /mnt/wslg, holding WSLg's own X0 and
+#   nothing else, so xrdp's Xorg on :10 — the session the human is actually
+#   looking at — could never create a file there and bound only the abstract
+#   socket. Every publish then wrote WSLg's unattended :0, reported exit 0
+#   (WROTE was 1), and left :10's clipboard untouched. Text got away with it
+#   by accident (the :0 write leaks to the Windows clipboard through WSLg's own
+#   text sharing, and clip-win-bridge.sh hauls it back onto :10); an image/png
+#   pick has no such detour and simply vanished, which is how the bug was
+#   found.
+#
+#   So both sources are read and merged, deduped by display number. The
+#   abstract half is matched against "@$SOCKET_DIR/X<digits>" — the same
+#   directory the file half lists — so a socket belonging to some other
+#   directory can never become a target, and overriding CLIP_SET_SOCKET_DIR
+#   for a test still excludes the host's live sessions from BOTH halves.
+#   An unreadable/absent /proc/net/unix degrades to the file listing rather
+#   than failing: fewer targets is the same situation as a session that is
+#   simply not up.
+#
 # WHICH STORE THE ID IS READ FROM — THE ONE NEW RESOLUTION THIS TASK ADDS,
 # AND WHY IT IS *ALSO* "NEVER INHERITED, NEVER GUESSED"
 #
@@ -134,10 +159,13 @@ set -u
 T=5                          # seconds before a single xclip call is abandoned
 PROG="${0##*/}"
 
-# Where X display sockets are enumerated from for the WRITE fan-out.
-# Overridable only so the test harness can present a controlled set of
-# displays instead of the host's live ones -- production never sets it.
+# Where X display sockets are enumerated from for the WRITE fan-out: the
+# directory holding the socket FILES, and the kernel socket table listing the
+# ABSTRACT ones (see the enumeration note in the header). Both are overridable
+# only so the test harness can present a controlled set of displays instead of
+# the host's live ones -- production never sets either.
 SOCKET_DIR="${CLIP_SET_SOCKET_DIR:-/tmp/.X11-unix}"
+UNIX_PROC="${CLIP_SET_UNIX_PROC:-/proc/net/unix}"
 
 # exit 1 -- nothing has been written yet.
 die() { printf '%s: %s\n' "$PROG" "$1" >&2; exit 1; }
@@ -252,9 +280,37 @@ settled_on() { # <display>
 
 WROTE=0
 
-for SOCK in "$SOCKET_DIR"/X*; do
-  [ -e "$SOCK" ] || continue
-  DPY=":${SOCK##*/X}"
+# Every display named by either socket namespace, once each, in the order
+# first seen. A name counts only as "$SOCKET_DIR/X" followed by digits and
+# nothing else: "Xfoo", a bare "X", and a socket under another directory are
+# not display numbers. Matching is literal (index(), not a regex), so a
+# SOCKET_DIR containing regex metacharacters -- ".X11-unix" does -- cannot
+# widen the match.
+live_displays() {
+  {
+    for _sock in "$SOCKET_DIR"/X*; do
+      [ -e "$_sock" ] || continue
+      _n="${_sock##*/X}"
+      case "$_n" in '' | *[!0-9]*) continue ;; esac
+      printf ':%s\n' "$_n"
+    done
+    if [ -r "$UNIX_PROC" ]; then
+      awk -v pfx="@$SOCKET_DIR/X" '
+        {
+          for (i = NF; i >= 1; i--) {
+            if (index($i, pfx) == 1) {
+              n = substr($i, length(pfx) + 1)
+              if (n ~ /^[0-9]+$/) print ":" n
+              break
+            }
+          }
+        }
+      ' "$UNIX_PROC" 2>/dev/null
+    fi
+  } | awk '!seen[$0]++'
+}
+
+for DPY in $(live_displays); do
 
   # The CLIPBOARD write doubles as the liveness probe: a display we cannot
   # hand the entry to is a display there is no point reporting on. Failing

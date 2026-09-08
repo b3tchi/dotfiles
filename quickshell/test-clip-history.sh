@@ -411,7 +411,7 @@ assert_eq "exits 1, not 78" "1" "$rc"
 # matters most on a host where a wrong guess opens a picker (which can hold a
 # password) where nobody is looking.
 
-for tool in "$XVFB" "$XDOTOOL" "$QUICKSHELL"; do
+for tool in "$XVFB" "$XDOTOOL" "$QUICKSHELL" xprop; do
   command -v "$tool" >/dev/null 2>&1 \
     || { echo "FATAL: $tool not found (XVFB=/XDOTOOL=/QUICKSHELL= to override)" >&2; exit 1; }
 done
@@ -431,18 +431,38 @@ ENTRYEOF
 
 ISO=(XDG_CONFIG_HOME="$CFG" XDG_DATA_HOME="$DAT" XDG_CACHE_HOME="$CCH" XDG_RUNTIME_DIR="$RUN")
 
+# Is <display> serving? Probed by TALKING to it, never by looking for
+# /tmp/.X11-unix/X<n> (dotfiles-pjcw): on a WSLg host that directory is a
+# read-only tmpfs bind-mounted from /mnt/wslg holding WSLg's own X0 only, so
+# an Xvfb started here can bind nothing but its ABSTRACT socket and no file
+# ever appears. The old file check timed out on every start, and because
+# start_xvfb runs inside a command substitution its `exit 1` killed only that
+# SUBSHELL -- the suite carried on with an empty XVFB_PID, so the display was
+# live (over the abstract socket), every X assertion still passed, and the
+# Xvfb was leaked past cleanup instead of being killed.
+dpy_up() { # <display>
+  env DISPLAY="$1" timeout 3 xprop -root >/dev/null 2>&1
+}
+
 start_xvfb() { # <display> <logfile>
   "$XVFB" "$1" -screen 0 1280x800x24 >"$2" 2>&1 &
   local pid=$! i
   for i in $(seq 1 20); do
-    [ -e "/tmp/.X11-unix/X${1#:}" ] && break
+    dpy_up "$1" && break
     sleep 0.5
   done
-  [ -e "/tmp/.X11-unix/X${1#:}" ] || { echo "FATAL: Xvfb $1 did not start" >&2; exit 1; }
+  # A failure here must not be swallowed by the caller's $(...) subshell: the
+  # pid is printed either way and the caller checks it, so the FATAL is
+  # reported by code running in the main shell.
+  dpy_up "$1" || printf 'FATAL: Xvfb %s did not start\n' "$1" >&2
   printf '%s' "$pid"
 }
 XVFB_PID="$(start_xvfb "$DPY"  "$TMP/xvfb.log")"
 XVFB2_PID="$(start_xvfb "$DPY2" "$TMP/xvfb2.log")"
+# Checked HERE, in the main shell, so the exit actually ends the suite -- and
+# after both pids are captured, so cleanup() still kills whatever did come up.
+dpy_up "$DPY"  || exit 1
+dpy_up "$DPY2" || exit 1
 
 start_qs() { # <display> <logfile>
   env DISPLAY="$1" "${ISO[@]}" \
@@ -863,8 +883,13 @@ scenario "e2e: keyboard-driven pick publishes the entry byte-exact onto the test
 # clip-set.sh relative to its own location, i.e. THIS worktree's real script
 # -- and CLIP_SET_SOCKET_DIR scopes the fan-out to this suite's Xvfb only.
 kill "$QS_PID" 2>/dev/null; wait "$QS_PID" 2>/dev/null
+# A PLAIN FILE, not a symlink into /tmp/.X11-unix: clip-set.sh reads only the
+# NAME to build ":95", and on a host where the server never got to create a
+# socket file (see dpy_up) a symlink there dangles, clip-set's own `[ -e ]`
+# skips it, and this scenario failed with "no live X display" -- the fixture
+# must not depend on a file the kernel may never have made.
 mkdir -p "$TMP/socks"
-ln -sf "/tmp/.X11-unix/X${DPY#:}" "$TMP/socks/X${DPY#:}"
+: > "$TMP/socks/X${DPY#:}"
 QS_PID="$(env DISPLAY="$DPY" "${ISO[@]}" \
               QS_CLIP_SH="$QS_CLIP" CLIP_SET_SOCKET_DIR="$TMP/socks" \
               "$QUICKSHELL" -p "$TMP/entry" >"$TMP/qs-e2e.log" 2>&1 & printf '%s' $!)"

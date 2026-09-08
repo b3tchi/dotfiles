@@ -73,6 +73,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Is <display> actually serving? Probed by TALKING to it, never by looking
+# for /tmp/.X11-unix/X<n> (dotfiles-pjcw). On a WSLg host that directory is a
+# READ-ONLY tmpfs bind-mounted from /mnt/wslg holding WSLg's own X0 and
+# nothing else, so no locally started server -- xrdp's Xorg, or this suite's
+# Xvfb -- can create a socket file there at all; each binds only the ABSTRACT
+# socket (@/tmp/.X11-unix/X<n>, visible in /proc/net/unix). A file check
+# therefore reports every live display as dead and this suite could not start
+# on such a host.
+dpy_up() { # <display>
+  env DISPLAY="$1" timeout 3 xprop -root >/dev/null 2>&1
+}
+
 sel_on() { # <display> <clipboard|primary>
   env DISPLAY="$1" timeout 10 xclip -selection "$2" -o 2>/dev/null
 }
@@ -168,13 +180,22 @@ seed_content() { # <display> <content-file>
 #     consulted as a fallback -- see clip-set.sh's own header).
 #   CLIP_SET_ENV_XDG      -- $XDG_RUNTIME_DIR value. "UNSET" is a sentinel
 #     meaning: do not export it at all (the one scenario that needs this).
+#   CLIP_SET_ENV_PROC     -- CLIP_SET_UNIX_PROC override, i.e. the file the
+#     ABSTRACT half of the display enumeration is read from
+#     (/proc/net/unix in production). ALWAYS pinned, defaulting to an EMPTY
+#     fixture: left at the real /proc/net/unix, the enumeration would find
+#     the host's own live sessions and this suite would publish test entries
+#     onto the developer's real clipboard. Only the abstract-socket
+#     scenarios point it at a crafted fixture.
 CLIP_SET_ENV_DISPLAY=":987"
 CLIP_SET_ENV_SRC="$DPY"
 CLIP_SET_ENV_XDG="$XDGRUN"
+CLIP_SET_ENV_PROC=""       # "" = the empty fixture (see above)
 
 run_set_in() { # <socket-dir> <id...>
   local dir="$1"; shift
-  local -a envargs=(DISPLAY="$CLIP_SET_ENV_DISPLAY" CLIP_SET_SOCKET_DIR="$dir")
+  local -a envargs=(DISPLAY="$CLIP_SET_ENV_DISPLAY" CLIP_SET_SOCKET_DIR="$dir"
+                    CLIP_SET_UNIX_PROC="${CLIP_SET_ENV_PROC:-$TMP/unix-empty}")
   [ -n "$CLIP_SET_ENV_SRC" ] && envargs+=(CLIP_SET_SRC_DISPLAY="$CLIP_SET_ENV_SRC")
   if [ "$CLIP_SET_ENV_XDG" = "UNSET" ]; then
     env -u XDG_RUNTIME_DIR "${envargs[@]}" sh "$CLIP_SET" "$@" 2>"$TMP/set.err"
@@ -193,29 +214,35 @@ command -v "$XVFB" >/dev/null 2>&1 || { echo "FATAL: Xvfb not found (set XVFB=)"
 command -v xclip   >/dev/null 2>&1 || { echo "FATAL: xclip not found" >&2; exit 1; }
 [ -r "$CLIP_SET" ] || { echo "FATAL: $CLIP_SET not readable" >&2; exit 1; }
 
+command -v xprop >/dev/null 2>&1 || { echo "FATAL: xprop not found" >&2; exit 1; }
+
 "$XVFB" "$DPY" -screen 0 800x600x24 >"$TMP/xvfb.log" 2>&1 &
 XVFB_PID=$!
 for i in $(seq 1 20); do
-  [ -e "/tmp/.X11-unix/X${DPY#:}" ] && break
+  dpy_up "$DPY" && break
   sleep 0.5
 done
-[ -e "/tmp/.X11-unix/X${DPY#:}" ] || { echo "FATAL: Xvfb $DPY did not start" >&2; exit 1; }
+dpy_up "$DPY" || { echo "FATAL: Xvfb $DPY did not start" >&2; exit 1; }
 
 "$XVFB" "$DPY2" -screen 0 800x600x24 >"$TMP/xvfb2.log" 2>&1 &
 XVFB2_PID=$!
 for i in $(seq 1 20); do
-  [ -e "/tmp/.X11-unix/X${DPY2#:}" ] && break
+  dpy_up "$DPY2" && break
   sleep 0.5
 done
-[ -e "/tmp/.X11-unix/X${DPY2#:}" ] || { echo "FATAL: Xvfb $DPY2 did not start" >&2; exit 1; }
+dpy_up "$DPY2" || { echo "FATAL: Xvfb $DPY2 did not start" >&2; exit 1; }
 
 # The controlled socket directory handed to clip-set.sh via
-# CLIP_SET_SOCKET_DIR. Symlinks, not copies -- the script only reads the NAMES
-# to build ":93" / ":94"; the X connection itself still goes through the real
-# socket. This keeps the host's live :0 / :10 out of the test.
+# CLIP_SET_SOCKET_DIR. PLAIN EMPTY FILES, not copies or symlinks -- the script
+# only reads the NAMES to build ":93" / ":94", and the X connection itself
+# goes to whatever is serving that display number (abstract socket included).
+# This keeps the host's live :0 / :10 out of the test. Symlinks into
+# /tmp/.X11-unix would dangle on a host where the server never got to create
+# a socket file (see dpy_up) and clip-set's own `[ -e ]` would skip them --
+# the fixture must not depend on a file the kernel may never have made.
 mkdir -p "$TMP/x11"
-ln -sf "/tmp/.X11-unix/X${DPY#:}"  "$TMP/x11/X${DPY#:}"
-ln -sf "/tmp/.X11-unix/X${DPY2#:}" "$TMP/x11/X${DPY2#:}"
+: > "$TMP/x11/X${DPY#:}"
+: > "$TMP/x11/X${DPY2#:}"
 
 # A display number that is NOT live -- checked at runtime, not hardcoded.
 # Sibling suites in this same spec (test-clip-store.sh :96, test-clip-history
@@ -225,14 +252,37 @@ ln -sf "/tmp/.X11-unix/X${DPY2#:}" "$TMP/x11/X${DPY2#:}"
 # given run -- this suite hit exactly that flakily (a real Xvfb was up on
 # :95 from a sibling's run while this hardcoded :95 as its own dead filler).
 # Scanned well clear of the low numbers every suite in this repo uses.
+# Liveness is probed, and the lock file is consulted too: an X server that
+# only bound an abstract socket still takes /tmp/.X<n>-lock, and a sibling
+# suite's Xvfb may be starting up in the window between the two.
 DEAD_NUM=195
-while [ -e "/tmp/.X11-unix/X$DEAD_NUM" ] || [ -e "/tmp/.X${DEAD_NUM}-lock" ]; do
+while [ -e "/tmp/.X${DEAD_NUM}-lock" ] || dpy_up ":$DEAD_NUM"; do
   DEAD_NUM=$((DEAD_NUM + 1))
 done
 
 # An empty socket dir, and one holding nothing but a dead socket name.
 mkdir -p "$TMP/x11-empty" "$TMP/x11-dead"
 : > "$TMP/x11-dead/X$DEAD_NUM"
+
+# The default (empty) stand-in for /proc/net/unix -- see CLIP_SET_ENV_PROC.
+: > "$TMP/unix-empty"
+
+# Write a /proc/net/unix-shaped fixture naming the given ABSTRACT socket
+# paths, in the real kernel's column layout (the name is the last field of
+# each line, prefixed with "@"). One line per argument; a real /proc lists
+# a display's abstract socket once per connection, which the enumeration
+# must dedupe, so callers pass a name twice where that matters.
+seed_proc() { # <outfile> <abstract-name...>
+  local out="$1"; shift
+  {
+    printf 'Num       RefCount Protocol Flags    Type St Inode Path\n'
+    local n
+    for n in "$@"; do
+      printf '0000000000000000: 00000002 00000000 00010000 0001 01 %s %s\n' \
+        "$((RANDOM + 100000))" "$n"
+    done
+  } > "$out"
+}
 
 echo "clip-set: $CLIP_SET"
 echo "displays: $DPY $DPY2"
@@ -418,14 +468,82 @@ CLIP_SET_ENV_SRC="$_saved_src"
 
 scenario "dead-socket-among-live: a stale socket name is skipped, not fatal"
 mkdir -p "$TMP/x11-mixed"
-ln -sf "/tmp/.X11-unix/X${DPY#:}"  "$TMP/x11-mixed/X${DPY#:}"
-ln -sf "/tmp/.X11-unix/X${DPY2#:}" "$TMP/x11-mixed/X${DPY2#:}"
+: > "$TMP/x11-mixed/X${DPY#:}"
+: > "$TMP/x11-mixed/X${DPY2#:}"
 : > "$TMP/x11-mixed/X$DEAD_NUM"
 reset_selections
 ID="$(seed_content "$DPY" "$TMP/plain.src")"
 run_set_in "$TMP/x11-mixed" "$ID"; rc=$?
 assert_eq "exits 0 despite the dead display" "0" "$rc"
 assert_on_both "with a dead socket present" "$PLAIN"
+
+# ============ PHASE 2A: displays reachable ONLY through an abstract socket ===
+#
+# dotfiles-pjcw. xrdp's Xorg (:10 on the deployed host, adr0004) binds its
+# unix socket in the ABSTRACT namespace: /proc/net/unix carries
+# "@/tmp/.X11-unix/X10" and /tmp/.X11-unix holds no X10 file at all. A
+# fan-out enumerated from socket FILES therefore skipped that session
+# entirely -- every publish reported exit 0 having written only the other
+# display, and an image pick (which, unlike text, has no accidental
+# WSLg/Windows detour back onto :10) simply never reached the clipboard.
+#
+# The socket dir is part of the match, not just the file listing: the
+# abstract name must start with "@<socket-dir>/X" to count, which is what
+# keeps a foreign directory's socket out of the enumeration (and, in this
+# suite, keeps the host's real "@/tmp/.X11-unix/X10" out while the socket
+# dir under test is a fixture).
+
+scenario "abstract-only-display-receives: a display with NO socket file but a live abstract socket is published to"
+reset_selections
+seed_proc "$TMP/unix-abstract-93" "@$TMP/x11-empty/X${DPY#:}"
+ID="$(seed_content "$DPY" "$TMP/plain.src")"
+CLIP_SET_ENV_PROC="$TMP/unix-abstract-93"
+run_set_in "$TMP/x11-empty" "$ID"; rc=$?
+CLIP_SET_ENV_PROC=""
+assert_eq "exits 0" "0" "$rc"
+assert_eq "$DPY clipboard holds the entry" "$PLAIN" "$(sel_on "$DPY" clipboard)"
+assert_eq "$DPY primary holds the entry" "$PLAIN" "$(sel_on "$DPY" primary)"
+assert_eq "$DPY2 (not enumerated) untouched" "$SENTINEL" "$(sel_on "$DPY2" clipboard)"
+
+scenario "abstract-plus-file-deduped: a display named by BOTH sources is published to once, and both displays still get it"
+reset_selections
+seed_proc "$TMP/unix-both" \
+  "@$TMP/x11/X${DPY#:}" "@$TMP/x11/X${DPY#:}" "@$TMP/x11/X${DPY2#:}"
+ID="$(seed_content "$DPY" "$TMP/plain.src")"
+CLIP_SET_ENV_PROC="$TMP/unix-both"
+run_set "$ID"; rc=$?
+CLIP_SET_ENV_PROC=""
+assert_eq "exits 0" "0" "$rc"
+assert_on_both "file+abstract sources merged" "$PLAIN"
+
+scenario "abstract-foreign-dir-ignored: an abstract socket under a DIFFERENT directory is not a target"
+reset_selections
+seed_proc "$TMP/unix-foreign" "@/somewhere/else/X${DPY#:}"
+ID="$(seed_content "$DPY" "$TMP/plain.src")"
+CLIP_SET_ENV_PROC="$TMP/unix-foreign"
+run_set_in "$TMP/x11-empty" "$ID"; rc=$?
+CLIP_SET_ENV_PROC=""
+assert_eq "exits 1 -- no display was enumerated" "1" "$rc"
+assert_untouched "abstract-foreign-dir"
+
+scenario "abstract-nonnumeric-ignored: an abstract name whose suffix is not a display number is not a target"
+reset_selections
+seed_proc "$TMP/unix-junk" "@$TMP/x11-empty/Xfoo" "@$TMP/x11-empty/X"
+ID="$(seed_content "$DPY" "$TMP/plain.src")"
+CLIP_SET_ENV_PROC="$TMP/unix-junk"
+run_set_in "$TMP/x11-empty" "$ID"; rc=$?
+CLIP_SET_ENV_PROC=""
+assert_eq "exits 1 -- no display was enumerated" "1" "$rc"
+assert_untouched "abstract-nonnumeric"
+
+scenario "abstract-source-missing: an unreadable /proc/net/unix degrades to the file listing, it does not fail"
+reset_selections
+ID="$(seed_content "$DPY" "$TMP/plain.src")"
+CLIP_SET_ENV_PROC="$TMP/does-not-exist"
+run_set "$ID"; rc=$?
+CLIP_SET_ENV_PROC=""
+assert_eq "exits 0 on the file-listed displays alone" "0" "$rc"
+assert_on_both "abstract source absent" "$PLAIN"
 
 scenario "survivor-display-still-succeeds: one session dying does not stop the other"
 # Last of the "displays that are not there" phase, because it tears $DPY2
@@ -436,11 +554,11 @@ kill "$XVFB2_PID" 2>/dev/null
 wait "$XVFB2_PID" 2>/dev/null
 XVFB2_PID=""
 for i in $(seq 1 20); do
-  env DISPLAY="$DPY2" timeout 2 xclip -selection clipboard -o >/dev/null 2>&1 || break
+  dpy_up "$DPY2" || break
   sleep 0.5
 done
 assert_eq "$DPY2 really is gone" "gone" \
-  "$(env DISPLAY="$DPY2" timeout 2 xclip -selection clipboard -o >/dev/null 2>&1 && echo alive || echo gone)"
+  "$(dpy_up "$DPY2" && echo alive || echo gone)"
 run_set "$ID"; rc=$?
 assert_eq "exits 0 on the survivor alone" "0" "$rc"
 assert_eq "$DPY clipboard holds the entry" "$PLAIN" "$(sel_on "$DPY" clipboard)"
