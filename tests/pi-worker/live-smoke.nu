@@ -102,6 +102,63 @@ def cli-refuses [args: list<string>, expect: string, socket: string = ""]: nothi
     if ($spoken | is-empty) { $reason } else { $spoken | first | str trim | str substring 2.. | str trim }
 }
 
+# ------------------------------------------------------------- envelopes
+#
+# An outbox holds two shapes, and the bus's own state machine says so: `result`
+# envelopes carry `payload.status`, `error` envelopes carry `payload.code` and
+# `payload.detail`. Reading `.payload.status` off whatever arrived is how this
+# script once failed with `Cannot find column 'status'` — a nushell error that
+# names neither the worker, the envelope, nor the protocol error it was holding
+# in its hand. A live run meets error envelopes: a worker's agent settling
+# without calling the result tool is recorded as one, and that is a finding to
+# report, not a crash to suffer.
+def check-reported [envelope: any, uid: string, label: string] {
+    check ($envelope != null) $"($uid) reported ($label)"
+    if $envelope.kind == "error" {
+        let code = ($envelope.payload | get -o code | default "?")
+        let detail = ($envelope.payload | get -o detail | default "")
+        print $"  (ansi red)FAIL(ansi reset) ($uid) reported an error envelope for ($label)"
+        print $"       code:   ($code)"
+        print $"       detail: ($detail)"
+        error make {msg: $"($uid) reported ($code) instead of a result for ($label): ($detail)"}
+    }
+    check-eq ($envelope.payload | get -o status | default "") "complete" $"($uid) reported complete for ($label)"
+    check (($envelope.payload | get -o validation | default "" | is-not-empty)) $"($uid) carried a verdict, which the stage gate requires"
+}
+
+# How many results a worker has written, which is also its newest sequence:
+# `next-sequence` hands out the LOWEST unused slot, so an outbox is 1..n with
+# no gaps and the count is the top. The script asserts that rather than
+# trusting it — see "the result count is the newest sequence" below.
+def newest-sequence [uid: string, run: string, socket: string]: nothing -> int {
+    cli ["status" $uid "--run" $run] $socket | get results
+}
+
+# Block until a worker writes a result NEWER than one already on the bus.
+#
+# `wait` cannot express this and should not be asked to: the earlier envelope
+# is unacknowledged, so it IS the honest answer to "what is pending", and the
+# one thing that clears it — `ack` — also releases the worker, which would
+# leave nobody to run the follow-up round. Filed as dotfiles-i0hz, along with
+# the reason this polls `status` rather than reading the outbox: `timeline
+# --json` returns the rendered table rows, not the envelopes, so the sequence
+# and kind a machine wants are not in any JSON the CLI emits.
+#
+# Returns the new sequence. The verdict comes from `status.state`, which is the
+# bus's own derivation over the envelope — no shape-sniffing a payload to guess
+# whether it was a result or an error.
+# `-> any`, not `-> int`: nushell types a `loop` as outputting nothing, so an
+# int annotation on a function that returns from inside one will not parse.
+def wait-past [uid: string, run: string, after: int, timeout: int, socket: string]: nothing -> any {
+    let deadline = ((date now) + ($timeout * 1sec))
+    loop {
+        let seq = (newest-sequence $uid $run $socket)
+        if $seq > $after { return $seq }
+        if (date now) >= $deadline { return 0 }
+        sleep 2sec
+    }
+}
+
 # ------------------------------------------------------------ table reading
 #
 # The workers write markdown, so the checks read markdown. Bold, backticks and
@@ -283,9 +340,7 @@ def main [
 
         for w in [$a $b] {
             let got = (cli ["wait" "--run" $run "--uid" $w.uid "--block" "--timeout" ($timeout | into string)] $socket)
-            check ($got != null) $"($w.uid) reported within ($timeout)s"
-            check ($got.payload.status == "complete") $"($w.uid) reported complete"
-            check (($got.payload.validation | default "" | is-not-empty)) $"($w.uid) carried a verdict, which the stage gate requires"
+            check-reported $got $w.uid $"its first round within ($timeout)s"
         }
 
         # Neither is acked yet, on purpose: the delivery checks below need one
@@ -305,7 +360,7 @@ def main [
         print ""
         step "send one worker back for another round"
         let sent_back = (cli ["resume" $a.uid "--run" $run "--feedback" $"Improvement round: make smoke/dirs.md a markdown table with two columns, the directory and how many corpus files it holds \(same corpus as before: `git ls-files -- '($glob)'`\). Sort the DIRECTORY rows by that count descending, ties alphabetical. The totals row is not one of the ranked rows: append it after sorting, as the final row, labelled TOTAL. Commit and report again with validation."] $socket)
-        check ($sent_back.state == "running") $"($a.uid) is running again"
+        check-eq $sent_back.state "running" $"($a.uid) is running again"
 
         # dotfiles-nig0: this returned the rejected `complete` envelope.
         check ((cli ["wait" "--run" $run "--uid" $a.uid] $socket) == null) "the result that was sent back is no longer delivered"
@@ -313,7 +368,8 @@ def main [
         check ((cli ["status" $a.uid "--run" $run] $socket | get unacked) == 0) "nor counted as unacknowledged"
         # The other half: skipping one envelope must not skip the run.
         let sibling = (cli ["wait" "--run" $run] $socket)
-        check ($sibling != null and $sibling.uid == $b.uid) $"the run-wide wait still hands over ($b.uid)'s report"
+        check ($sibling != null) "the run-wide wait still has mail to hand over"
+        check-eq $sibling.uid $b.uid "and it is the sibling's report, not the superseded one"
 
         # A message sent to a worker that is already working. Whether it is
         # folded into the round in flight or handled as a round of its own
@@ -326,8 +382,10 @@ def main [
         cli ["send" $a.uid "--run" $run "--stage" $stage "--instructions" "Additional instruction: give smoke/dirs.md a first line reading exactly `# Top-level directories`. Fold it into the round you are doing; if you have already reported that round, make the change now, commit, and report again."] $socket | ignore
 
         let second = (cli ["wait" "--run" $run "--uid" $a.uid "--block" "--timeout" ($timeout | into string)] $socket)
-        check ($second != null and $second.sequence == 2) "what arrives is the second round, not the first"
-        check ($second.payload.status == "complete") $"($a.uid) completed the second round"
+        check ($second != null) $"($a.uid) reported the second round within ($timeout)s"
+        check-eq $second.sequence 2 "what arrives is the second round, not the first"
+        check-eq (newest-sequence $a.uid $run $socket) $second.sequence "the result count is the newest sequence"
+        check-reported $second $a.uid "the second round"
         check-ranked-table-with-total ([$a.cwd "smoke/dirs.md"] | path join) "dirs.md"
         let dir_rows = (table-rows ([$a.cwd "smoke/dirs.md"] | path join) | skip 1 | drop 1)
         check-eq ($dir_rows | each {|r| {dir: ($r | first), files: (as-int ($r | last))} }) $dirs "dirs.md counts and order match git"
@@ -337,10 +395,11 @@ def main [
         mut latest = $second.sequence
         if ((open --raw $dirs_md | lines | first) != $wanted) {
             step "that round had already closed — the instruction becomes a round of its own"
-            let third = (cli ["wait" "--run" $run "--uid" $a.uid "--block" "--timeout" ($timeout | into string)] $socket)
-            check ($third != null) $"($a.uid) reported again within ($timeout)s"
-            check ($third.sequence == ($second.sequence + 1)) "as the next sequence on the same worker"
-            $latest = $third.sequence
+            let third = (wait-past $a.uid $run $second.sequence $timeout $socket)
+            check ($third > 0) $"($a.uid) reported again within ($timeout)s"
+            check-eq $third ($second.sequence + 1) "as the next sequence on the same worker"
+            check-eq (cli ["status" $a.uid "--run" $run] $socket | get state) "complete" "and the follow-up round completed"
+            $latest = $third
         }
         check-eq (open --raw $dirs_md | lines | first) $wanted "the instruction sent mid-round was acted on"
         # Still the same table underneath: an extra instruction is not licence
@@ -350,14 +409,35 @@ def main [
 
         # ------------------------------------------------------------- ack
         print ""
-        step "acknowledge both reports"
-        # A's sequence is whatever its last round turned out to be, not a
-        # literal: the extra instruction may have added one.
-        for pair in [[$a.uid, $latest], [$b.uid, 1]] {
-            let acked = (cli ["ack" "--run" $run "--uid" ($pair | first) "--sequence" ($pair | last | into string)] $socket)
-            check $acked.released $"($pair | first) released its window on ack"
+        # Drained the way an orchestrator drains a run — ask what is pending,
+        # acknowledge that, repeat — rather than acking a list of sequences the
+        # script thinks it should have. It thought wrong: with a follow-up round
+        # `impl-1` holds TWO unacked results, and acking only the latest left
+        # the run's mailbox non-empty while the check below said it was drained.
+        # Asking is also the only version that stays right whichever way the
+        # mid-round instruction fell.
+        step "acknowledge every report"
+        mut drained = []
+        loop {
+            let next = (cli ["wait" "--run" $run] $socket)
+            if $next == null { break }
+            cli ["ack" "--run" $run "--uid" $next.uid "--sequence" ($next.sequence | into string)] $socket | ignore
+            $drained = ($drained | append $"($next.uid)#($next.sequence)")
+            # An ack that does not clear delivery would spin here forever.
+            if ($drained | length) > 8 {
+                error make {msg: $"ack is not clearing the mailbox: ($drained | str join ', ')"}
+            }
         }
+        print $"  (ansi grey)acknowledged ($drained | str join ', ')(ansi reset)"
+        check (($drained | any {|d| $d == $"($a.uid)#($latest)" })) $"($a.uid)'s last round was acknowledged"
+        check (($drained | any {|d| $d == $"($b.uid)#1" })) $"($b.uid)'s report was acknowledged"
         check ((cli ["wait" "--run" $run] $socket) == null) "the run's mailbox is drained"
+        # The first ack for a worker releases it; later ones for the same worker
+        # correctly report `released: false` because the window is already gone.
+        # So the property is asserted where it is true — of the worker, once.
+        let live_windows = (do { ^tmux ...(if ($socket | is-empty) { [] } else { ["-L" $socket] }) list-windows -a -F "#{window_name}" } | complete | get stdout | lines)
+        check ($a.window not-in $live_windows) $"($a.uid)'s window was released"
+        check ($b.window not-in $live_windows) $"($b.uid)'s window was released"
 
         # --------------------------------------------------- accept (pwxf)
         print ""
@@ -371,7 +451,7 @@ def main [
         $keepsake = $"smoke-keepsake-($tag)"
         ^git -C $repo branch $keepsake $a.branch
         let accepted = (cli ["accept" $a.uid "--run" $run "--repo" $repo] $socket)
-        check ($accepted.state == "accepted") "the retry lands once the work is preserved"
+        check-eq $accepted.state "accepted" "the retry lands once the work is preserved"
         check (not ($a.cwd | path exists)) "the worktree is reclaimed"
         check ((^git -C $repo branch --list $a.branch | str trim | is-empty)) "the worker's branch is deleted"
         check ((^git -C $repo branch --list $keepsake | str trim | is-not-empty)) "the ref that preserves the work is left alone"
