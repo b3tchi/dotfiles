@@ -1610,11 +1610,66 @@ export function transcriptLines(
 
   if (FRAME_COVERED_VERBS.includes(verb)) return [];
 
+  // A result may be a block (see resultBlock), so lines are lines here rather
+  // than one string with newlines buried in it — the host renders what it is
+  // given, and a caller counting lines should get the truth.
+
   // An empty mailbox was the noisiest line of a polling loop and says nothing
   // the frame does not.
   if (verb === "wait" && detail.startsWith("no unacknowledged")) return [];
 
-  return detail.length > 0 ? [detail] : [];
+  return detail.length > 0 ? detail.split("\n") : [];
+}
+
+/** How wide a result line is allowed to be before it wraps. */
+const RESULT_WIDTH = 100;
+
+/** How many wrapped lines of a worker's prose the transcript will carry. */
+const RESULT_PROSE_LINES = 3;
+
+/**
+ * A result, given the room it earns.
+ *
+ * Observed live, and it cost the operator a `find`:
+ *
+ *   seq 1 · r5/impl-1 complete · Created and committed timestamp markdown file
+ *   with H1 header: /home/jan/.dotfiles/.…
+ *
+ * The PATH was the answer and the cut landed in the middle of it. A result is
+ * the substance of the whole exchange — an ack now says nothing, a spawn says
+ * nothing, the frame carries the state — so this is the one place worth more
+ * than a line, and half a path is worse than no path.
+ *
+ * So: one line while it fits, and a block when it does not, wrapped rather
+ * than truncated. Capped at three lines of prose, because room is not a
+ * licence — a worker that writes an essay does not get to own the transcript,
+ * and `inspect` is the way into the full envelope either way.
+ */
+export function resultBlock(head: string, prose: unknown): string {
+  const raw = typeof prose === "string" ? prose : String(prose ?? "");
+  const all = raw.replace(/\s+/g, " ").trim();
+  // A fenced block is detail by definition, and folding one gives
+  // ``` ```markdown # x.md ``` ``` — words in the shape of nothing. Cut at the
+  // fence and say so; the envelope keeps the whole thing.
+  const fence = all.indexOf("```");
+  const folded = fence > 0 ? `${all.slice(0, fence).trim()} …` : all;
+  if (folded.length === 0) return head;
+
+  const single = `${head} · ${folded}`;
+  if (single.length <= RESULT_WIDTH) return single;
+
+  // Indented under the head, so a block reads as one result rather than as
+  // several. Two columns of indent, hence the narrower wrap.
+  const wrapped = wrapToWidth([folded], RESULT_WIDTH - 2);
+  const kept = wrapped.slice(0, RESULT_PROSE_LINES);
+  if (wrapped.length > RESULT_PROSE_LINES) {
+    // The mark is BUDGETED, not appended: adding " …" to a line already at the
+    // wrap width pushed it two columns past the limit the wrap exists to keep.
+    const room = RESULT_WIDTH - 2 - 2;
+    const last = kept[kept.length - 1] ?? "";
+    kept[kept.length - 1] = `${last.length > room ? last.slice(0, room).trimEnd() : last} …`;
+  }
+  return [head, ...kept.map((line) => `  ${line}`)].join("\n");
 }
 
 /**
@@ -1937,11 +1992,9 @@ function summarise(verb: string, stdout: string): string {
       // Ordered like a frame row — address, state, prose — and separated the
       // way the frame's own heading is, so the transcript and the widget read
       // as one thing rather than two conventions. The sequence leads because
-      // it is what `ack` needs, and this line is all the caller gets.
-      if (o.kind === "error") {
-        return `seq ${o.sequence} · ${o.run}/${o.uid} ${payload.code} · ${oneLine(payload.detail)}`;
-      }
-      return `seq ${o.sequence} · ${o.run}/${o.uid} ${payload.status} · ${oneLine(payload.summary)}`;
+      // it is what `ack` needs, and this is all the caller gets.
+      const head = `seq ${o.sequence} · ${o.run}/${o.uid} ${o.kind === "error" ? payload.code : payload.status}`;
+      return resultBlock(head, o.kind === "error" ? payload.detail : payload.summary);
     }
     case "rm":
       return o.removed ? `released ${o.run}/${o.uid}` : `${o.run}/${o.uid}: ${o.reason}`;
