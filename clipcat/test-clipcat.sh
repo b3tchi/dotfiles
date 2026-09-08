@@ -411,13 +411,25 @@ command -v "$XVFB"       >/dev/null 2>&1 || { echo "FATAL: Xvfb not found (set X
 command -v xclip         >/dev/null 2>&1 || { echo "FATAL: xclip not found" >&2; exit 1; }
 python3 -c 'import Xlib' 2>/dev/null    || { echo "FATAL: python-xlib missing" >&2; exit 1; }
 
+# Is display <1> up? BOTH SOCKET NAMESPACES (dotfiles-4ai2). An X server binds
+# a socket FILE at /tmp/.X11-unix/X<n>, an ABSTRACT name @/tmp/.X11-unix/X<n>
+# that lives only in the kernel socket table, or both -- and which it gets is
+# not its choice: where /tmp/.X11-unix is a read-only mount (a WSLg host
+# bind-mounts it from /mnt/wslg with WSLg's own X0 inside and nothing else) a
+# server can create no file and binds the abstract socket alone. Waiting on the
+# file therefore never succeeded there and this suite could not start at all.
+dpy_up() { # <display>
+  [ -e "/tmp/.X11-unix/X${1#:}" ] && return 0
+  grep -q "@/tmp/\.X11-unix/X${1#:}\$" /proc/net/unix 2>/dev/null
+}
+
 "$XVFB" "$DPY" -screen 0 800x600x24 >"$TMP/xvfb.log" 2>&1 &
 XVFB_PID=$!
 for i in $(seq 1 20); do
-  [ -e "/tmp/.X11-unix/X${DPY#:}" ] && break
+  dpy_up "$DPY" && break
   sleep 0.5
 done
-[ -e "/tmp/.X11-unix/X${DPY#:}" ] || { echo "FATAL: Xvfb $DPY did not start" >&2; exit 1; }
+dpy_up "$DPY" || { echo "FATAL: Xvfb $DPY did not start" >&2; exit 1; }
 
 echo "clipcatd: $("$CLIPCATD" --version 2>/dev/null | head -1)"
 echo "display: $DPY   config: $CFG   runtime: $RUN"
@@ -639,7 +651,7 @@ mut_dpy=":$(( ${DPY#:} + 1 ))"
 "$XVFB" "$mut_dpy" -screen 0 800x600x24 >"$TMP/mutant-xvfb.log" 2>&1 &
 MUTANT_XVFB_PID=$!
 for i in $(seq 1 20); do
-  [ -e "/tmp/.X11-unix/X${mut_dpy#:}" ] && break
+  dpy_up "$mut_dpy" && break
   sleep 0.5
 done
 saved_dpy="$DPY"

@@ -894,12 +894,27 @@ stop_feeder
 # the other still dropping this copy and the control would assert nothing.
 # The re-check's own isolated control is the raced scenario below, which
 # strips ONLY the re-check.
-awk '/SECURITY GATE/,/^  fi$/ {next} /TOCTOU RE-CHECK/,/^    fi$/ {next} {print}' \
+#
+# THE MUTATION NEUTRALISES THE CONDITIONS, IT DOES NOT DELETE LINE RANGES
+# (dotfiles-60uf). This used to `awk` out everything between the marker
+# comments and the next `fi` at a fixed indent, which drifted twice over as the
+# feeder grew an image branch: the second re-check (image kind) carries no
+# marker and survived the strip, so this control FATAL'd out of the suite
+# before it ran -- taking phases 4 and 5 with it -- and the text range ended at
+# the 4-space `fi` closing `if read_src ...`, which swallowed the branch's
+# `feed_dst` call along with the check it meant to remove. Rewriting the two
+# CONDITIONS leaves every structure and every feed path exactly where the
+# shipped script has it, and covers both kinds because it matches the condition
+# rather than a comment.
+sed -e 's/^  if hinted; then$/  if false; then/' \
+    -e 's/if ! targets || hinted; then/if ! targets; then/' \
   "$FEEDER" > "$TMP/clip-feed-nohint.sh"
-grep -qE 'if hinted|\|\| hinted' "$TMP/clip-feed-nohint.sh" \
+grep -qE 'if hinted;|\|\| hinted' "$TMP/clip-feed-nohint.sh" \
   && { echo "FATAL: patched feeder still calls the gate" >&2; exit 1; }
-grep -qF 'feed_dst' "$TMP/clip-feed-nohint.sh" \
-  || { echo "FATAL: patched feeder lost its feed path" >&2; exit 1; }
+grep -qF 'if feed_dst; then' "$TMP/clip-feed-nohint.sh" \
+  || { echo "FATAL: patched feeder lost its text feed path" >&2; exit 1; }
+grep -qF 'if feed_dst_img; then' "$TMP/clip-feed-nohint.sh" \
+  || { echo "FATAL: patched feeder lost its image feed path" >&2; exit 1; }
 rm -f "$TMP/feed.lock"
 start_feeder "$TMP/clip-feed-nohint.sh"
 before="$(store_count)"
@@ -930,13 +945,17 @@ scenario "CONTROL recheck-is-load-bearing: the raced secret IS fed without the p
 # The phase-1 race scenario would pass just as well if the drop were coming
 # from the FIRST gate rather than the re-check.  Strip only the re-check --
 # leaving the first gate intact -- and the same race must leak.
-awk '/TOCTOU RE-CHECK/,/^    fi$/ {next} {print}' "$FEEDER" > "$TMP/clip-feed-norecheck.sh"
-grep -qF 'TOCTOU RE-CHECK' "$TMP/clip-feed-norecheck.sh" \
-  && { echo "FATAL: patched feeder still contains the re-check" >&2; exit 1; }
-grep -qF 'SECURITY GATE' "$TMP/clip-feed-norecheck.sh" \
+# Same condition-rewriting mutation as the control above (dotfiles-60uf), with
+# only the re-check's condition touched -- so the marker comment stays in the
+# copy and the guard below asks about the CALL, not the comment.
+sed -e 's/if ! targets || hinted; then/if ! targets; then/' \
+  "$FEEDER" > "$TMP/clip-feed-norecheck.sh"
+grep -qF '|| hinted' "$TMP/clip-feed-norecheck.sh" \
+  && { echo "FATAL: patched feeder still calls the re-check" >&2; exit 1; }
+grep -qE '^  if hinted; then$' "$TMP/clip-feed-norecheck.sh" \
   || { echo "FATAL: patched feeder lost the FIRST gate too; control would prove nothing" >&2; exit 1; }
-grep -qF 'feed_dst' "$TMP/clip-feed-norecheck.sh" \
-  || { echo "FATAL: patched feeder lost its feed path" >&2; exit 1; }
+grep -qF 'if feed_dst; then' "$TMP/clip-feed-norecheck.sh" \
+  || { echo "FATAL: patched feeder lost its text feed path" >&2; exit 1; }
 rm -f "$TMP/feed.lock"
 start_feeder "$TMP/clip-feed-norecheck.sh"
 before="$(store_count)"

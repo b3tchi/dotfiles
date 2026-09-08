@@ -94,6 +94,19 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Is display <1> up? BOTH SOCKET NAMESPACES (dotfiles-4ai2). An X server binds
+# a socket FILE at /tmp/.X11-unix/X<n>, an ABSTRACT name @/tmp/.X11-unix/X<n>
+# that lives only in the kernel socket table, or both -- and which it gets is
+# not its choice: where /tmp/.X11-unix is a read-only mount (a WSLg host
+# bind-mounts it from /mnt/wslg with WSLg's own X0 inside and nothing else) a
+# server can create no file and binds the abstract socket alone. Waiting on the
+# file therefore never succeeded here, and this suite's own Xvfb looked like it
+# had failed to start while serving perfectly.
+dpy_up() { # <display>
+  [ -e "/tmp/.X11-unix/X${1#:}" ] && return 0
+  grep -q "@/tmp/\.X11-unix/X${1#:}\$" /proc/net/unix 2>/dev/null
+}
+
 for tool in "$XVFB" "$XDOTOOL" "$QUICKSHELL" "$I3BIN"; do
   command -v "$tool" >/dev/null 2>&1 \
     || { echo "FATAL: $tool not found (XVFB=/XDOTOOL=/QUICKSHELL=/I3= to override)" >&2; exit 1; }
@@ -155,7 +168,7 @@ CFGEOF
 
   "$XVFB" "$LOAD_DPY" -screen 0 1280x800x24 >"$TMP/xvfb-load.log" 2>&1 &
   LOADX_PID=$!
-  for i in $(seq 1 40); do [ -e "/tmp/.X11-unix/X${LOAD_DPY#:}" ] && break; sleep 0.25; done
+  for i in $(seq 1 40); do dpy_up "$LOAD_DPY" && break; sleep 0.25; done
   sleep 0.5
 
   env DISPLAY="$LOAD_DPY" "${ISO[@]}" \
@@ -232,8 +245,8 @@ EOF
 
 "$XVFB" "$DPY" -screen 0 1280x800x24 >"$TMP/xvfb.log" 2>&1 &
 XVFB_PID=$!
-for i in $(seq 1 40); do [ -e "/tmp/.X11-unix/X${DPY#:}" ] && break; sleep 0.25; done
-[ -e "/tmp/.X11-unix/X${DPY#:}" ] || { echo "FATAL: Xvfb $DPY did not start" >&2; exit 1; }
+for i in $(seq 1 40); do dpy_up "$DPY" && break; sleep 0.25; done
+dpy_up "$DPY" || { echo "FATAL: Xvfb $DPY did not start" >&2; exit 1; }
 sleep 0.5
 
 DISPLAY="$DPY" "$I3BIN" -c "$TMP/i3.conf" >"$TMP/i3.log" 2>&1 &

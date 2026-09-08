@@ -144,6 +144,19 @@ assert_eq() { # <label> <actual> <expected>
 # get_tree readers, the state-socket reader, the X-resource writer — and none of
 # them ever imported a hotkeyd module. Dropping it would only make those fail
 # later and less legibly.
+# Is display <1> up? BOTH SOCKET NAMESPACES (dotfiles-4ai2). An X server binds
+# a socket FILE at /tmp/.X11-unix/X<n>, an ABSTRACT name @/tmp/.X11-unix/X<n>
+# that lives only in the kernel socket table, or both -- and which it gets is
+# not its choice: where /tmp/.X11-unix is a read-only mount (a WSLg host
+# bind-mounts it from /mnt/wslg with WSLg's own X0 inside and nothing else) a
+# server can create no file and binds the abstract socket alone. Waiting on the
+# file therefore never succeeded here, and this suite's own Xvfb looked like it
+# had failed to start while serving perfectly.
+dpy_up() { # <display>
+  [ -e "/tmp/.X11-unix/X${1#:}" ] && return 0
+  grep -q "@/tmp/\.X11-unix/X${1#:}\$" /proc/net/unix 2>/dev/null
+}
+
 for bin in Xvfb xdotool i3 i3-msg st python3; do
   command -v "$bin" >/dev/null || { echo "FATAL: $bin not found" >&2; exit 1; }
 done
@@ -177,8 +190,8 @@ CONFEOF
 # never sees this because i3 holds a connection throughout.
 Xvfb "$DPY" -noreset -screen 0 1280x800x24 >"$TMP/xvfb.log" 2>&1 &
 XVFB_PID=$!
-for _ in $(seq 1 20); do [ -e "/tmp/.X11-unix/X${DPY#:}" ] && break; sleep 0.5; done
-[ -e "/tmp/.X11-unix/X${DPY#:}" ] || { echo "FATAL: Xvfb $DPY did not start" >&2; exit 1; }
+for _ in $(seq 1 20); do dpy_up "$DPY" && break; sleep 0.5; done
+dpy_up "$DPY" || { echo "FATAL: Xvfb $DPY did not start" >&2; exit 1; }
 
 # The daemon resolves `$mod` from the `i3wm.mod` X RESOURCE (ft003), the same
 # source i3 reads on a real session — xrdp/xinitrc merges `i3wm.mod: Mod1`, and

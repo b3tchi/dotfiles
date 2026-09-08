@@ -749,18 +749,37 @@ ShellRoot {
 }
 HOSTEOF
 
+# Is display <1> up? BOTH SOCKET NAMESPACES (dotfiles-4ai2). An X server binds
+# a socket FILE at /tmp/.X11-unix/X<n>, an ABSTRACT name @/tmp/.X11-unix/X<n>
+# that lives only in the kernel socket table, or both -- and which it gets is
+# not its choice: where /tmp/.X11-unix is a read-only mount (a WSLg host
+# bind-mounts it from /mnt/wslg with WSLg's own X0 inside and nothing else) a
+# server can create no file and binds the abstract socket alone. Waiting on the
+# file therefore never succeeded there, and because the wait below runs inside
+# a command substitution its `exit 1` killed only that SUBSHELL: the suite ran
+# on with an empty pid, every assertion still passed over the abstract socket,
+# and the Xvfb was LEAKED past cleanup. So the readiness verdict is now
+# reported to stderr here and ASSERTED by the caller, in the main shell.
+dpy_up() { # <display>
+  [ -e "/tmp/.X11-unix/X${1#:}" ] && return 0
+  grep -q "@/tmp/\.X11-unix/X${1#:}\$" /proc/net/unix 2>/dev/null
+}
+
 start_xvfb_bar() { # <display> <logfile>
   "$BAR_XVFB_BIN" "$1" -screen 0 1280x800x24 >"$2" 2>&1 &
   _pid=$!
   _i=0
   while [ "$_i" -lt 40 ]; do
-    [ -e "/tmp/.X11-unix/X${1#:}" ] && break
+    dpy_up "$1" && break
     _i=$((_i + 1)); sleep 0.5
   done
-  [ -e "/tmp/.X11-unix/X${1#:}" ] || { echo "FATAL: Xvfb $1 did not start" >&2; exit 1; }
+  dpy_up "$1" || printf 'FATAL: Xvfb %s did not start\n' "$1" >&2
   printf '%s' "$_pid"
 }
 BAR_XVFB_PID="$(start_xvfb_bar "$BARDPY" "$TMP/bar-xvfb.log")"
+# Asserted HERE, in the main shell, so the exit ends the run -- and after the
+# pid is captured, so cleanup still reaps whatever did come up.
+dpy_up "$BARDPY" || exit 1
 
 # Persistent background reader on the harness FIFO -- mirrors the daemon's
 # own reader shape (read line-wise in a loop) so a dismiss write from

@@ -306,9 +306,16 @@ fi
 # Free test displays, probed rather than hardcoded: sibling suites in this
 # repo run their own Xvfbs on fixed low numbers (:93-:98) and may be running
 # concurrently.
+# A display can be LIVE with neither a socket file nor a lock file: xrdp's Xorg
+# binds only an abstract socket (@/tmp/.X11-unix/X<n>, in the kernel socket
+# table and nowhere on disk -- dotfiles-4ai2) and takes no /tmp/.X<n>-lock, and
+# where /tmp/.X11-unix is a read-only mount no server can create a file there at
+# all. Claiming such a number would stand this suite's Xvfb up on top of a real
+# session, so the socket table is consulted too.
 probe_free_display() { # <start-number>
   local n="$1"
-  while [ -e "/tmp/.X11-unix/X$n" ] || [ -e "/tmp/.X${n}-lock" ]; do
+  while [ -e "/tmp/.X11-unix/X$n" ] || [ -e "/tmp/.X${n}-lock" ] \
+        || grep -q "@/tmp/\.X11-unix/X$n\$" /proc/net/unix 2>/dev/null; do
     n=$((n + 1))
   done
   printf ':%s' "$n"

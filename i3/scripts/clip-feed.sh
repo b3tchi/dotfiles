@@ -149,6 +149,10 @@
 #        CLIP_FEED_TIMEOUT=1 seconds before a single xclip call is
 #                            abandoned
 #        CLIP_FEED_LOCK=...  single-instance lock file
+#        CLIP_FEED_X11_UNIX=/tmp/.X11-unix   where SRC's socket FILE would be
+#        CLIP_FEED_UNIX_PROC=/proc/net/unix  kernel socket table, where an
+#                            ABSTRACT socket is the only trace of a live
+#                            display (see src_up)
 #        MAGICK              convert binary for image capture (default:
 #                            magick, falling back to convert)
 set -u
@@ -166,6 +170,8 @@ POLL="${CLIP_FEED_POLL:-0.5}"
 IDLE="${CLIP_FEED_IDLE:-5}"
 T="${CLIP_FEED_TIMEOUT:-1}"
 LOCK="${CLIP_FEED_LOCK:-/tmp/clip-feed.$(id -u).lock}"
+X11_UNIX="${CLIP_FEED_X11_UNIX:-/tmp/.X11-unix}"
+UNIX_PROC="${CLIP_FEED_UNIX_PROC:-/proc/net/unix}"
 
 # Daemon-era plumbing, refused loudly rather than silently ignored (sp016
 # task 7 edge case).  A feeder that quietly dropped this would look like it
@@ -229,10 +235,37 @@ trap 'rm -f "$NEW" "$LAST" "$TGT" "$ERR" "$NEW_IMG" "$NEW_IMG_RAW" "$LAST_IMG"' 
 : > "$LAST_IMG"      # last image successfully fed, for dedup (own kind, own dedup)
 
 # Is the source X server there at all?  Checked before every poll so that a
-# torn-down :10 costs one stat(2) and a long sleep rather than a process spawn
+# torn-down :10 costs a stat(2) and a long sleep rather than an X round trip
 # every tick — this is what keeps the daemon at ~0% CPU while xrdp is down,
 # and what lets it pick straight back up when the session returns.
-src_up() { [ -e "/tmp/.X11-unix/X${SRC#:}" ]; }
+#
+# BOTH SOCKET NAMESPACES (dotfiles-4ai2). The socket FILE is only one of the
+# two places a live server appears; the other is an ABSTRACT name
+# @$X11_UNIX/X<n> that exists solely in the kernel socket table and leaves no
+# directory entry. Which one a server gets is not its own choice: on a WSLg
+# host $X11_UNIX is a read-only tmpfs bind-mounted from /mnt/wslg carrying
+# WSLg's own X0 and nothing else, so xrdp's Xorg on :10 — the display this
+# feeder exists to watch — can create no file and binds only the abstract
+# socket. The file check alone therefore declared a fully live SRC absent
+# for good: the feeder napped at IDLE forever and fed nothing, while looking
+# perfectly healthy (alive, quiescent, no errors).
+#
+# The file is checked FIRST and the socket table only if it is missing, so a
+# host where the file exists still pays nothing but the stat(2). Where it
+# never exists the fallback costs one `awk` per tick — an order of magnitude
+# below the xclip round trip a poll makes anyway, and once per IDLE while SRC
+# is down. The name is compared for exact equality as a whole awk field — not
+# as a regex, since ".X11-unix" carries metacharacters — and is keyed to
+# $X11_UNIX, so a socket under another directory can never read as this
+# display.
+src_up() {
+  [ -e "$X11_UNIX/X${SRC#:}" ] && return 0
+  [ -r "$UNIX_PROC" ] || return 1
+  awk -v want="@$X11_UNIX/X${SRC#:}" '
+    { for (i = NF; i >= 1; i--) if ($i == want) { found = 1; exit } }
+    END { exit(found ? 0 : 1) }
+  ' "$UNIX_PROC" 2>/dev/null 9>&-
+}
 
 # The MIME targets the current SRC owner advertises.  Cheap, and for a
 # selection that turns out to be a secret it is the ONLY thing ever read.

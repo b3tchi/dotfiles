@@ -62,9 +62,16 @@ T="$(mktemp -d)"
 XVFB_PIDS=()
 I3_PIDS=()
 
+# A display can be LIVE with neither a socket file nor a lock file: xrdp's Xorg
+# binds only an abstract socket (@/tmp/.X11-unix/X<n>, in the kernel socket
+# table and nowhere on disk -- dotfiles-4ai2) and takes no /tmp/.X<n>-lock, and
+# where /tmp/.X11-unix is a read-only mount no server can create a file there at
+# all. Claiming such a number would stand this suite's Xvfb up on top of a real
+# session, so the socket table is consulted too.
 probe_free_display() { # <start-number>
     local n="$1"
-    while [ -e "/tmp/.X11-unix/X$n" ] || [ -e "/tmp/.X${n}-lock" ]; do
+    while [ -e "/tmp/.X11-unix/X$n" ] || [ -e "/tmp/.X${n}-lock" ] \
+          || grep -q "@/tmp/\.X11-unix/X$n\$" /proc/net/unix 2>/dev/null; do
         n=$((n + 1))
     done
     printf ':%s' "$n"
@@ -747,6 +754,85 @@ is fallback-free"
         && ok "and nobody holds the chord on $XB — the stale grabs are gone" \
         || bad "expected no owner on $XB after resume (rc=$rc), got: $answer"
 
+    DISPLAY="$XA" "$HERE/hotkeyd.sh" stop "$XA" >/dev/null 2>&1
+    DISPLAY="$XB" "$HERE/hotkeyd.sh" stop "$XB" >/dev/null 2>&1
+fi
+
+# --- 8b2: a display whose server bound only an ABSTRACT socket (dotfiles-4ai2) -
+# `resume`'s reload set comes from all_displays(), which read the socket-FILE
+# listing alone. A display can be fully live and have no such file: on a WSLg
+# host /tmp/.X11-unix is a read-only tmpfs bind-mounted from /mnt/wslg carrying
+# WSLg's own X0 and nothing else, so xrdp's Xorg on :10 creates no file and
+# binds only @/tmp/.X11-unix/X10 in the kernel socket table. resume then
+# reloaded WSLg's unattended :0 and left the session the human uses holding the
+# fallback's grabs with the start latch gone — 8b's failure, on the display
+# that matters most.
+#
+# Same real-effect oracle as 8b (i3's LOADED table plus who answers the chord),
+# and it reuses 8b's i3 on $XB, so it only runs when that came up. $XB's socket
+# FILE is removed from the fixture directory for the whole section: the display
+# is then visible to all_displays through the socket table or not at all, which
+# is exactly the deployed shape. The NEGATIVE half runs first with an EMPTY
+# socket table, so "resume reloaded it" cannot pass for some other reason.
+if DISPLAY="$XB" i3-msg -t get_version >/dev/null 2>&1; then
+    echo "panic: resume reloads a display that has no socket FILE, only an abstract socket"
+    rm -f "$HOTKEYD_X11_UNIX/X${XB#:}"
+    : > "$T/unix-empty"
+    printf 'Num       RefCount Protocol Flags    Type St Inode Path\n' > "$T/unix-abstract"
+    printf '0000000000000000: 00000002 00000000 00010000 0001 01 123456 @%s/X%s\n' \
+        "$HOTKEYD_X11_UNIX" "${XB#:}" >> "$T/unix-abstract"
+
+    # NEGATIVE CONTROL: nothing but the file listing to go on.
+    export HOTKEYD_UNIX_PROC="$T/unix-empty"
+    DISPLAY="$XA" "$HERE/hotkeyd.sh" start "$XA" >/dev/null 2>&1
+    sleep 1
+    panic panic >/dev/null 2>&1
+    sleep 0.5
+    DISPLAY="$XB" i3-msg reload >/dev/null 2>&1
+    sleep 0.5
+    if i3_config_b | grep -q 'workspace i3-owns-it'; then
+        ok "setup: $XB pulled in the fallback again (no socket file of its own)"
+    else
+        bad "setup: $XB did not pick up the fallback on its own reload"
+    fi
+    out="$(panic resume 2>&1)"; rc=$?
+    sleep 1
+    [ "$rc" -eq 0 ] || bad "resume exited $rc with an empty socket table: $out"
+    if i3_config_b | grep -q 'workspace i3-owns-it'; then
+        ok "with an empty socket table $XB is NOT in the reload set — the \
+abstract source is what finds it, not a coincidence"
+    else
+        bad "$XB was reloaded with no socket file AND no socket-table entry — \
+the positive case below would prove nothing"
+    fi
+
+    # THE REAL SHAPE: the display appears only as an abstract socket.
+    export HOTKEYD_UNIX_PROC="$T/unix-abstract"
+    panic panic >/dev/null 2>&1
+    sleep 0.5
+    DISPLAY="$XB" i3-msg reload >/dev/null 2>&1
+    sleep 0.5
+    i3_config_b | grep -q 'workspace i3-owns-it' \
+        || bad "setup: $XB does not carry the fallback going into the positive case"
+    out="$(panic resume 2>&1)"; rc=$?
+    sleep 1
+    [ "$rc" -eq 0 ] \
+        && ok "resume exits 0 with the abstract socket table" \
+        || bad "resume exited $rc: $out"
+    if i3_config_b | grep -q 'workspace i3-owns-it'; then
+        bad "$XB still carries the fallback: a live display with no socket FILE \
+was never reloaded (rc=$rc)"
+    else
+        ok "resume reloaded $XB, found only as @$HOTKEYD_X11_UNIX/X${XB#:} — its \
+loaded table is fallback-free"
+    fi
+    answer="$(who_answers_b)"
+    [ "$answer" = nobody ] \
+        && ok "and nobody holds the chord on $XB — the stale grabs are gone" \
+        || bad "expected no owner on $XB after resume (rc=$rc), got: $answer"
+
+    unset HOTKEYD_UNIX_PROC
+    : > "$HOTKEYD_X11_UNIX/X${XB#:}"   # the rest of the suite expects it back
     DISPLAY="$XA" "$HERE/hotkeyd.sh" stop "$XA" >/dev/null 2>&1
     DISPLAY="$XB" "$HERE/hotkeyd.sh" stop "$XB" >/dev/null 2>&1
 fi

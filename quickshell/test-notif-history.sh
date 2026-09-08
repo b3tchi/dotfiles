@@ -441,18 +441,38 @@ ENTRYEOF
 ISO=(XDG_CONFIG_HOME="$TMP/cfg" XDG_DATA_HOME="$TMP/data" XDG_CACHE_HOME="$TMP/cache" XDG_RUNTIME_DIR="$RUN")
 mkdir -p "$TMP/cfg" "$TMP/data" "$TMP/cache"
 
+# Is display <1> up? BOTH SOCKET NAMESPACES (dotfiles-4ai2). An X server binds
+# a socket FILE at /tmp/.X11-unix/X<n>, an ABSTRACT name @/tmp/.X11-unix/X<n>
+# that lives only in the kernel socket table, or both -- and which it gets is
+# not its choice: where /tmp/.X11-unix is a read-only mount (a WSLg host
+# bind-mounts it from /mnt/wslg with WSLg's own X0 inside and nothing else) a
+# server can create no file and binds the abstract socket alone. Waiting on the
+# file therefore never succeeded there, and because the wait below runs inside
+# a command substitution its `exit 1` killed only that SUBSHELL: the suite ran
+# on with an empty pid, every assertion still passed over the abstract socket,
+# and the Xvfb was LEAKED past cleanup. So the readiness verdict is now
+# reported to stderr here and ASSERTED by the caller, in the main shell.
+dpy_up() { # <display>
+  [ -e "/tmp/.X11-unix/X${1#:}" ] && return 0
+  grep -q "@/tmp/\.X11-unix/X${1#:}\$" /proc/net/unix 2>/dev/null
+}
+
 start_xvfb() { # <display> <logfile>
   "$XVFB" "$1" -screen 0 1280x800x24 >"$2" 2>&1 &
   local pid=$! i
   for i in $(seq 1 20); do
-    [ -e "/tmp/.X11-unix/X${1#:}" ] && break
+    dpy_up "$1" && break
     sleep 0.5
   done
-  [ -e "/tmp/.X11-unix/X${1#:}" ] || { echo "FATAL: Xvfb $1 did not start" >&2; exit 1; }
+  dpy_up "$1" || printf 'FATAL: Xvfb %s did not start\n' "$1" >&2
   printf '%s' "$pid"
 }
 XVFB_PID="$(start_xvfb "$DPY"  "$TMP/xvfb.log")"
 XVFB2_PID="$(start_xvfb "$DPY2" "$TMP/xvfb2.log")"
+# Asserted HERE, in the main shell, so the exit ends the run -- and after both
+# pids are captured, so cleanup still reaps whatever did come up.
+dpy_up "$DPY"  || exit 1
+dpy_up "$DPY2" || exit 1
 
 start_qs() { # <display> <logfile>
   env DISPLAY="$1" "${ISO[@]}" "$QUICKSHELL" -p "$TMP/entry" >"$2" 2>&1 &
@@ -1436,13 +1456,14 @@ start_xvfb_e2e() { # <display> <logfile>
   "$XVFB" "$1" -screen 0 1280x800x24 >"$2" 2>&1 &
   local pid=$! i
   for i in $(seq 1 40); do
-    [ -e "/tmp/.X11-unix/X${1#:}" ] && break
+    dpy_up "$1" && break
     sleep 0.25
   done
-  [ -e "/tmp/.X11-unix/X${1#:}" ] || { echo "FATAL: Xvfb $1 did not start" >&2; exit 1; }
+  dpy_up "$1" || printf 'FATAL: Xvfb %s did not start\n' "$1" >&2
   printf '%s' "$pid"
 }
 E2E_XVFB_PID="$(start_xvfb_e2e "$E2E_DPY" "$E2E/xvfb.log")"
+dpy_up "$E2E_DPY" || exit 1
 
 # The body sourced INSIDE the dbus-run-session cannot hand results back as
 # shell state -- the session is a child process this script waits on

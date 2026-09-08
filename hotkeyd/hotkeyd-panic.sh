@@ -74,6 +74,13 @@ LINK="$I3_CONFIG_D/zz-fallback-binds.conf"
 # socket the real way, from the root window of the DISPLAY it is handed.
 X11_UNIX="${HOTKEYD_X11_UNIX:-/tmp/.X11-unix}"
 
+# The kernel socket table, where a display whose server bound only an ABSTRACT
+# socket is the ONLY place it can be seen (dotfiles-4ai2). Overridable for the
+# same reason X11_UNIX is: a suite must be able to name its own displays
+# without the enumeration reaching the caller's live sessions. Both halves are
+# keyed to X11_UNIX, so overriding that alone already fences this one.
+UNIX_PROC="${HOTKEYD_UNIX_PROC:-/proc/net/unix}"
+
 # THE TEST-ONLY PROCESS FENCE (dotfiles-hwds.23). Unset — which is every
 # production path, and the guard in test-panic.sh asserts no shipped file sets
 # it — `scoped` is `cat` and this script behaves exactly as it did.
@@ -167,13 +174,47 @@ target_displays() {
 # daemons on; this is the set a config change must be RELOADED on, and they are
 # not the same set. Best-effort by construction: a display with no i3, or one
 # belonging to another user, just fails its `i3-msg` and is skipped.
+# BOTH SOCKET NAMESPACES, OR THE LIVE SESSION IS MISSED (dotfiles-4ai2). An X
+# server's unix socket is a FILE at $X11_UNIX/X<n>, an ABSTRACT name
+# @$X11_UNIX/X<n> that exists only in /proc/net/unix, or both — and which one
+# it gets is not the server's choice: on a WSLg host $X11_UNIX is a read-only
+# tmpfs bind-mounted from /mnt/wslg holding WSLg's own X0 and nothing else, so
+# xrdp's Xorg on :10 — the session with the human in front of it — can create
+# no file and binds only the abstract socket. Enumerating the directory alone
+# reloaded WSLg's unattended :0 and left :10 holding the very grabs `resume`
+# exists to retract: the silent-miss direction dotfiles-hwds.12 forbids.
+#
+# The abstract half is matched LITERALLY as "@$X11_UNIX/X<digits>" (index(),
+# not a regex — ".X11-unix" carries metacharacters), so a socket under any
+# other directory is not a display here, and a suite that redirects X11_UNIX
+# still excludes the caller's real sessions from BOTH halves. An unreadable
+# /proc/net/unix degrades to the file listing: fewer displays reloaded is the
+# same situation as a session that is simply not up.
+abstract_displays() {
+    [ -r "$UNIX_PROC" ] || return 0
+    awk -v pfx="@$X11_UNIX/X" '
+        {
+            for (i = NF; i >= 1; i--) {
+                if (index($i, pfx) == 1) {
+                    n = substr($i, length(pfx) + 1)
+                    if (n ~ /^[0-9]+$/) print ":" n
+                    break
+                }
+            }
+        }
+    ' "$UNIX_PROC" 2>/dev/null
+}
+
 all_displays() {
-    for s in "$X11_UNIX"/X*; do
-        [ -e "$s" ] || continue          # empty glob leaves the pattern itself
-        n="${s##*/X}"
-        case "$n" in ''|*[!0-9]*) continue ;; esac
-        printf ':%s\n' "$n"
-    done | scoped                        # no-op in production; see SCOPE above
+    {
+        for s in "$X11_UNIX"/X*; do
+            [ -e "$s" ] || continue      # empty glob leaves the pattern itself
+            n="${s##*/X}"
+            case "$n" in ''|*[!0-9]*) continue ;; esac
+            printf ':%s\n' "$n"
+        done
+        abstract_displays
+    } | sort -u | scoped                 # no-op in production; see SCOPE above
 }
 
 # Best-effort per display: a display with no X server or no i3 is not an error
