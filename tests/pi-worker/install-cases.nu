@@ -151,6 +151,71 @@ let cases = [
         }
     })
 
+    (run-case "cli/every-verb-names-the-flag-it-is-missing" {
+        # `--run` and friends were declared `string` with no default across the
+        # whole surface, so omitting one propagated a NULL inward until some
+        # helper died on it:
+        #
+        #     Error: nu::shell::cant_convert
+        #       x Can't convert to string.
+        #
+        # which names no verb, no flag and no remedy. `main spawn` documents
+        # exactly this and guards against it; a sweep found 15 of 17 verbs did
+        # not, and one of them cost an operator a stuck worker and a retry loop
+        # (dotfiles-kuw5).
+        #
+        # Data-driven on purpose: the invariant is about the SURFACE, so a new
+        # verb that forgets the guard fails here rather than in a live run.
+        let root = (make-runtime "flag-refusals")
+        let probes = [
+            [verb, args];
+            ["send"     ["send" "w1"]]
+            ["wait"     ["wait"]]
+            ["ack"      ["ack"]]
+            ["result"   ["result" "w1"]]
+            ["settled"  ["settled" "w1"]]
+            ["liveness" ["liveness" "w1"]]
+            ["status"   ["status" "w1"]]
+            ["inspect"  ["inspect" "w1"]]
+            ["timeline" ["timeline" "w1"]]
+            ["rm"       ["rm"]]
+            ["workers"  ["workers"]]
+            ["resume"   ["resume" "w1"]]
+            ["respawn"  ["respawn" "w1"]]
+            ["accept"   ["accept" "w1"]]
+            ["stop"     ["stop" "w1"]]
+            ["spawn"    ["spawn" "--role" "impl"]]
+        ]
+        for p in $probes {
+            let out = (run-cli ...$p.args --runtime $root)
+            assert-true ($out.exit_code != 0) $"($p.verb) with nothing passed should refuse"
+            let err = ($out.stderr | str trim)
+            assert-true (not ($err | str contains "Can't convert")) $"($p.verb) leaked a null instead of refusing: ($err)"
+            assert-true ($err | str contains $"($p.verb) needs --") $"($p.verb) must name the flag it wants: ($err)"
+        }
+    })
+
+    (run-case "cli/a-worker-reporting-from-its-own-window-needs-no-address" {
+        # `result` and `settled` are the WORKER's verbs, and a worker runs with
+        # PI_WORKER_RUN and PI_WORKER_UID in its environment — spawn puts them
+        # there. Making it pass its own address back is ceremony, and getting it
+        # wrong is how a report lands on someone else's mail.
+        let root = (make-runtime "worker-env")
+        with-env {XDG_RUNTIME_DIR: $root} {
+            bus-identity "impl-1" --run "r1" --identity {
+                role: "impl", cwd: $nu.temp-dir, branch: "wk-t.0"
+                session: "sid-1", skill: "doc-draft", window: "impl-t@dotfiles"
+            }
+        }
+        let out = (with-env {PI_WORKER_RUN: "r1", PI_WORKER_UID: "impl-1"} {
+            run-cli "result" "--status" "complete" "--summary" "reported without an address" --runtime $root
+        })
+        assert-eq $out.exit_code 0 $"result should derive its address: ($out.stderr | str trim)"
+        with-env {XDG_RUNTIME_DIR: $root} {
+            assert-eq (bus-status "impl-1" --run "r1" | get state) "complete" "and the report lands on the right worker"
+        }
+    })
+
     (run-case "cli/repo-is-derived-when-omitted-rather-than-arriving-as-null" {
         # Observed live, on the operator's own screen:
         #

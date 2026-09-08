@@ -2948,6 +2948,35 @@ export def mark-accepted [uid: string, --run: string] {
 # Output is JSON, because every consumer is another program — the scrum-master
 # skill, a shell conditional, or a test.
 
+# Refuse a missing flag BY NAME, saying what it is for.
+#
+# A flag declared `string` with no default arrives as null when omitted, and
+# nushell reports the consequence four calls deeper:
+#
+#     Error: nu::shell::cant_convert
+#       x Can't convert to string.
+#
+# which names no verb, no flag and no remedy. `main spawn` has guarded against
+# that from the start; a sweep of the surface found fifteen of seventeen verbs
+# did not, and one of them cost an operator a worker stuck at `complete` while
+# its orchestrator retried a call that could never succeed (dotfiles-kuw5).
+#
+# A refusal has to say what is missing and what it is for, or it is just a
+# slower way of saying no.
+def require-flags [verb: string, wanted: table<flag: string, value: any, what: string>] {
+    for w in $wanted {
+        let given = (if $w.value == null { "" } else { $w.value | into string })
+        if ($given | is-empty) {
+            error make {msg: $"($verb) needs ($w.flag): ($w.what)"}
+        }
+    }
+}
+
+# What a verb calls the run and the worker it acts on. One wording, because it
+# is the answer the caller needs and three variants of it would drift.
+const RUN_IS = "the run id the worker belongs to. `ps` lists what is on the bus"
+const UID_IS = "the worker's id within its run, e.g. impl-1. `ps` lists them"
+
 def usage []: nothing -> string {
     [
         "pi-worker — visible Pi worker orchestration (ft014)"
@@ -3116,6 +3145,11 @@ def "main send" [
     uid: string, --run: string, --stage: string
     --task: string = "", --instructions: string = "", --artifacts: string = ""
 ] {
+    require-flags "send" [
+        [flag, value, what];
+        ["--run" $run $RUN_IS]
+        ["--stage" $stage "which stage this message carries; `doctor` lists them, and the stage decides whether it takes --task or --instructions"]
+    ]
     let payload = if ($task | is-empty) {
         {stage: $stage, instructions: $instructions, artifacts: ($artifacts | split row "," | where {|a| ($a | str trim | is-not-empty) })}
     } else {
@@ -3135,6 +3169,7 @@ def "main send" [
 # usually a model writing flags and `--timeout 30` is harder to get wrong than
 # `--timeout 30sec`.
 def "main wait" [--run: string, --uid: string = "", --block, --timeout: int = 60] {
+    require-flags "wait" [[flag, value, what]; ["--run" $run $RUN_IS]]
     let next = (bus-wait --run $run --uid $uid --block=$block --timeout ($timeout * 1sec))
     if $next != null {
         print ($next | to json)
@@ -3148,6 +3183,12 @@ def "main wait" [--run: string, --uid: string = "", --block, --timeout: int = 60
 }
 
 def "main ack" [--run: string, --uid: string, --sequence: int, --socket: string = ""] {
+    require-flags "ack" [
+        [flag, value, what];
+        ["--run" $run $RUN_IS]
+        ["--uid" $uid $UID_IS]
+        ["--sequence" $sequence "the sequence number of the result being acknowledged, as `wait` reported it"]
+    ]
     bus-ack --run $run --uid $uid --sequence $sequence --socket $socket | to json | print
 }
 
@@ -3160,9 +3201,22 @@ def "main ack" [--run: string, --uid: string, --sequence: int, --socket: string 
 # wrapper over `result`, so the envelope shape and the stage gate have exactly
 # one implementation instead of one per runtime.
 def "main result" [
-    uid: string, --run: string, --status: string, --summary: string
+    uid?: string, --run: string, --status: string, --summary: string
     --validation: string = ""
 ] {
+    # A worker reports from inside the window spawn made for it, and spawn put
+    # PI_WORKER_RUN and PI_WORKER_UID in that window's environment. Making the
+    # worker pass its own address back is ceremony, and a worker that gets it
+    # wrong reports onto someone else's mail.
+    let run = (if ($run | is-empty) { $env | get -o PI_WORKER_RUN | default "" } else { $run })
+    let uid = (if ($uid | is-empty) { $env | get -o PI_WORKER_UID | default "" } else { $uid })
+    require-flags "result" [
+        [flag, value, what];
+        ["--run" $run $"($RUN_IS). Omit it inside a worker window: PI_WORKER_RUN is already there"]
+        ["<uid>" $uid $"($UID_IS). Omit it inside a worker window: PI_WORKER_UID is already there"]
+        ["--status" $status $"the outcome, one of ($RESULT_STATUSES | str join ', ')"]
+        ["--summary" $summary "what happened, in a line or two; detail belongs in the worker window and the Pi transcript"]
+    ]
     # The worker supplies its OUTCOME; window, session and resume come from the
     # identity the orchestrator recorded at spawn. A worker cannot be trusted to
     # say where it lives or how to reach it — that is the initiator's only route
@@ -3188,6 +3242,7 @@ def "main result" [
 }
 
 def "main settled" [uid: string, --run: string] {
+    require-flags "settled" [[flag, value, what]; ["--run" $run $RUN_IS]]
     bus-settled $uid --run $run | to json | print
 }
 
@@ -3196,6 +3251,7 @@ def "main settled" [uid: string, --run: string] {
 # initiator recover. This verb is the one that needs a display host, so it is
 # the one that carries the --socket.
 def "main liveness" [uid: string, --run: string, --socket: string = ""] {
+    require-flags "liveness" [[flag, value, what]; ["--run" $run $RUN_IS]]
     let identity = (bus-identity-of $uid --run $run)
     if $identity == null {
         error make {msg: $"unknown worker ($run)/($uid): no identity on the bus. Absent evidence is not permission to act \(adr0017)"}
@@ -3206,8 +3262,14 @@ def "main liveness" [uid: string, --run: string, --socket: string = ""] {
     $seen | merge {window: $identity.window, window_id: ($identity | get -o window_id | default "")} | to json | print
 }
 
-def "main status" [uid: string, --run: string] { bus-status $uid --run $run | to json | print }
-def "main inspect" [uid: string, --run: string] { worker-inspect $uid --run $run | to json | print }
+def "main status" [uid: string, --run: string] {
+    require-flags "status" [[flag, value, what]; ["--run" $run $RUN_IS]]
+    bus-status $uid --run $run | to json | print
+}
+def "main inspect" [uid: string, --run: string] {
+    require-flags "inspect" [[flag, value, what]; ["--run" $run $RUN_IS]]
+    worker-inspect $uid --run $run | to json | print
+}
 # A table by default, JSON on request.
 #
 # Every other verb answers a machine, so JSON was the obvious default here too
@@ -3216,6 +3278,7 @@ def "main inspect" [uid: string, --run: string] { worker-inspect $uid --run $run
 # the data and not the answer. The extension asks for --json; a person at a
 # prompt gets columns.
 def "main timeline" [uid: string, --run: string, --json] {
+    require-flags "timeline" [[flag, value, what]; ["--run" $run $RUN_IS]]
     let events = (worker-timeline $uid --run $run)
     if $json {
         $events | to json | print
@@ -3226,6 +3289,11 @@ def "main timeline" [uid: string, --run: string, --json] {
     }
 }
 def "main rm" [--run: string, --uid: string] {
+    require-flags "rm" [
+        [flag, value, what];
+        ["--run" $run $RUN_IS]
+        ["--uid" $uid $UID_IS]
+    ]
     worker-release --run $run --uid $uid | to json | print
 }
 
@@ -3233,9 +3301,17 @@ def "main ps" [--run: string = "", --socket: string = ""] {
     worker-roster --run $run --socket $socket | to json | print
 }
 
-def "main workers" [--run: string] { run-workers $run | to json | print }
+def "main workers" [--run: string] {
+    require-flags "workers" [[flag, value, what]; ["--run" $run $RUN_IS]]
+    run-workers $run | to json | print
+}
 
 def "main resume" [uid: string, --run: string, --feedback: string, --socket: string = ""] {
+    require-flags "resume" [
+        [flag, value, what];
+        ["--run" $run $RUN_IS]
+        ["--feedback" $feedback "what the worker got wrong and what to do instead; it reaches its inbox as a rejection"]
+    ]
     worker-resume $uid --run $run --feedback $feedback --socket $socket | to json | print
 }
 
@@ -3268,16 +3344,19 @@ def repo-or-refuse [verb: string, repo: any]: nothing -> string {
 }
 
 def "main respawn" [uid: string, --run: string, --repo: string, --socket: string = ""] {
+    require-flags "respawn" [[flag, value, what]; ["--run" $run $RUN_IS]]
     let repo = (repo-or-refuse "respawn" $repo)
     worker-respawn $uid --run $run --repo $repo --socket $socket | to json | print
 }
 
 def "main accept" [uid: string, --run: string, --repo: string, --socket: string = ""] {
+    require-flags "accept" [[flag, value, what]; ["--run" $run $RUN_IS]]
     let repo = (repo-or-refuse "accept" $repo)
     worker-accept $uid --run $run --repo $repo --socket $socket | to json | print
 }
 
 def "main stop" [uid: string, --run: string, --socket: string = ""] {
+    require-flags "stop" [[flag, value, what]; ["--run" $run $RUN_IS]]
     worker-stop $uid --run $run --socket $socket | to json | print
 }
 
