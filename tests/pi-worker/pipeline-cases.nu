@@ -138,6 +138,39 @@ let cases = [
         }
     })
 
+    (run-case "pipeline/a-refused-acceptance-can-be-retried-once-the-work-is-preserved" {
+        # dotfiles-pwxf, observed on a live two-worker run: both workers
+        # committed on their own branches and reported complete, and `accept`
+        # removed each worktree and THEN declined to delete the branch. State
+        # stayed `complete` with the tree already gone, every retry re-ran the
+        # same refusal, and `rm` refuses anything not accepted or stopped — so
+        # the address could only be freed by `stop`, which records a teardown
+        # that did not happen.
+        #
+        # What makes it recoverable is that the refusal costs nothing: the
+        # window, the tree and the branch all survive, and the same acceptance
+        # succeeds once the work is somewhere else.
+        with-pipeline "accept-retry" {|t, repo|
+            let impl = (launch $t $repo "impl-a" "impl")
+            "work\n" | save -f ($impl.cwd | path join "work.txt")
+            ^git -C $impl.cwd add -A
+            ^git -C $impl.cwd commit -q -m "work only this branch holds"
+            complete-with "impl-a" "implemented"
+
+            assert-rejects {
+                worker-accept "impl-a" --run "run-1" --repo $repo --socket $t.socket
+            } "no other ref" "unpreserved work is not accepted away"
+            assert-true ($impl.cwd | path exists) "the tree survives the refusal"
+            assert-eq (bus-status "impl-a" --run "run-1" | get state) "complete" "and so does the state that can still be accepted"
+            assert-true ($impl.window in (windows-on $t.socket)) "the window is still there to be looked at"
+
+            ^git -C $repo merge --no-ff -q -m "land it" $impl.branch
+            let done = (worker-accept "impl-a" --run "run-1" --repo $repo --socket $t.socket)
+            assert-eq $done.state "accepted" "the retry lands once the work is preserved"
+            assert-true (not ($impl.cwd | path exists)) "and the tree is reclaimed"
+        }
+    })
+
     (run-case "pipeline/complete-is-refused-while-the-worktree-is-dirty" {
         # The refusal the operator hit at the wrong moment:
         #

@@ -1123,24 +1123,45 @@ export def worktree-validate [--repo: string, --path: string, --branch: string] 
     }
 }
 
-# Remove a worker's worktree and branch — only with evidence that the work is
-# finished with.
+# Refs OTHER than this branch that already contain its tip.
 #
-# Two independent gates, and both must pass:
+# This is the question `git branch -d` is really asking, asked properly. `-d`
+# compares the branch against HEAD and its upstream and nothing else, so it
+# declines a branch whose commits are perfectly safe on a third ref — and,
+# worse for a bus that deletes things, it answers "not merged" for the one case
+# where deleting really would end the only copy AND for several where it would
+# not. `--contains` separates them: a non-empty answer names somewhere else the
+# work survives.
 #
-#   1. Evidence. Either an explicit `--accepted` (a human or a reviewer said
-#      so) or `--merged-into <base>`, which is VERIFIED against git rather than
-#      believed: the branch must actually be an ancestor of that base. A caller
-#      that merges, fails, and cleans up anyway would otherwise delete the only
-#      copy of the work.
-#   2. Cleanliness. Uncommitted or untracked files block removal regardless of
-#      evidence. Acceptance is a statement about the reported result, not about
-#      whatever is sitting unstaged in the directory.
+# refs/heads and refs/remotes only. A tag is not a place work continues to be
+# reachable from a branch's point of view, and refs/dolt (this repo's issue
+# database) is nobody's evidence about source history.
+def refs-containing [repo: string, branch: string]: nothing -> list<string> {
+    let out = (do {
+        ^git -C $repo for-each-ref --contains $branch --format "%(refname)" refs/heads refs/remotes
+    } | complete)
+    if $out.exit_code != 0 { return [] }
+    $out.stdout
+    | lines
+    | each {|l| $l | str trim }
+    | where {|r| ($r | is-not-empty) and $r != $"refs/heads/($branch)" }
+}
+
+def branch-exists? [repo: string, branch: string]: nothing -> bool {
+    (do { ^git -C $repo rev-parse --verify --quiet $"refs/heads/($branch)" } | complete).exit_code == 0
+}
+
+# Everything that would stop a cleanup, asked BEFORE anything is touched.
 #
-# `git worktree remove` and `git branch -d` are both used WITHOUT their force
-# flags on purpose: they are the last safety net, and a refusal here is
-# information, not an obstacle to route around.
-export def worktree-cleanup [
+# Separated from the destructive half because the order used to be fatal
+# (dotfiles-pwxf): `git worktree remove` ran, `git branch -d` then declined,
+# and the caller was left with the irreversible half done, no acceptance
+# marker, and a retry that could only re-run the same refusal. A refusal has to
+# cost nothing, which means every question is asked while everything still
+# stands.
+#
+# `worker-accept` calls this before it kills the window, for the same reason.
+export def worktree-cleanup-guard [
     --repo: string
     --path: string
     --branch: string
@@ -1173,6 +1194,48 @@ export def worktree-cleanup [
         error make {msg: $"refusing to clean up ($path): it holds uncommitted work, which acceptance does not license deleting"}
     }
 
+    # Acceptance says the RESULT was taken. It does not say the commits went
+    # anywhere, and on this bus they usually have not: a worker commits to its
+    # own branch and something else lands it later. So the branch is only
+    # deletable once its tip is reachable from another ref, and the refusal
+    # names the ways out rather than leaving the operator to invent one.
+    if (branch-exists? $repo $branch) and ((refs-containing $repo $branch) | is-empty) {
+        error make {msg: $"refusing to clean up ($branch): its commits are on no other ref, so deleting it would end the only copy. Nothing has been touched. Land it first \(merge, cherry-pick or push it\) and clean up again, or `stop` the worker to keep both the tree and the branch"}
+    }
+}
+
+# Remove a worker's worktree and branch — only with evidence that the work is
+# finished with.
+#
+# Three independent gates, all of them in `worktree-cleanup-guard` above and
+# all asked before the first destructive call: evidence (`--accepted`, or a
+# `--merged-into` claim verified against git), cleanliness (uncommitted or
+# untracked files block removal regardless of evidence), and preservation (the
+# branch's commits must be reachable from some other ref).
+#
+# `git worktree remove` keeps its safety flags off: it is the last net under
+# the dirty check. The branch delete is `-D` BECAUSE the guard has already
+# proven what `-d` only approximates — that another ref contains this tip. `-d`
+# here would re-ask a weaker version of the same question and decline work that
+# is demonstrably safe on a third ref.
+#
+# Idempotent by design: a tree already gone and a branch already deleted are
+# the finished state, not an error. The old code raised on a missing branch,
+# which meant a cleanup that had partly happened — by hand, or by a previous
+# attempt — could never be completed, and the worker could never reach
+# `accepted`.
+export def worktree-cleanup [
+    --repo: string
+    --path: string
+    --branch: string
+    --accepted
+    --merged-into: string = ""
+] {
+    let repo = (expand-path $repo)
+    let path = (expand-path $path)
+    (worktree-cleanup-guard --repo $repo --path $path --branch $branch
+        --accepted=$accepted --merged-into $merged_into)
+
     if ($path | path exists) {
         let removed = (do { ^git -C $repo worktree remove $path } | complete)
         if $removed.exit_code != 0 {
@@ -1180,9 +1243,11 @@ export def worktree-cleanup [
         }
     }
 
-    let deleted = (do { ^git -C $repo branch -d $branch } | complete)
-    if $deleted.exit_code != 0 {
-        error make {msg: $"worktree ($path) removed, but branch ($branch) was not deleted: ($deleted.stderr | str trim). Bus metadata is intact; finish by hand"}
+    if (branch-exists? $repo $branch) {
+        let deleted = (do { ^git -C $repo branch -D $branch } | complete)
+        if $deleted.exit_code != 0 {
+            error make {msg: $"worktree ($path) removed, but branch ($branch) was not deleted: ($deleted.stderr | str trim). Bus metadata is intact; finish by hand"}
+        }
     }
 }
 
@@ -2732,14 +2797,27 @@ export def worker-accept [
     }
     validate-transition $seen.state "accepted"
 
+    # An isolation=main stage runs IN the main worktree, shared with the operator
+    # and is nobody's to delete. There is no isolated directory or task branch
+    # to reclaim, so acceptance is the marker alone.
+    let isolated = ($seen.identity.cwd != (main-worktree $repo))
+
+    # Every refusal is collected BEFORE the window dies (dotfiles-pwxf). The
+    # comment below is true — a window is recoverable from the session id and a
+    # worktree is not — but it only holds once the cleanup is known to be
+    # possible: an acceptance that closed the window and then declined to
+    # finish left the operator without the one place the work was visible, for
+    # nothing.
+    if $isolated {
+        (worktree-cleanup-guard --repo $repo --path $seen.identity.cwd
+            --branch $seen.identity.branch --accepted)
+    }
+
     # The window closes first: it is recoverable (spawn again from the session
     # id), whereas the worktree is not, so the irreversible step goes last.
     do { ^tmux ...(tmux-args $socket) kill-window -t (window-target $seen.identity) } | complete | ignore
 
-    # An isolation=main stage runs IN the main worktree, shared with the operator
-    # and is nobody's to delete. There is no isolated directory or task branch
-    # to reclaim, so acceptance is the marker alone.
-    if $seen.identity.cwd != (main-worktree $repo) {
+    if $isolated {
         worktree-cleanup --repo $repo --path $seen.identity.cwd --branch $seen.identity.branch --accepted
     }
     write-marker $run $uid "accepted"

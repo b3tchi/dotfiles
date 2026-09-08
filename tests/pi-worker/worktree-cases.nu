@@ -339,6 +339,74 @@ let cases = [
         rm -rf $root; rm -rf $repo
     })
 
+    (run-case "worktree/cleanup-refuses-an-unpreserved-branch-before-touching-the-tree" {
+        # dotfiles-pwxf. The refusal used to arrive AFTER `git worktree remove`
+        # had already run: `git branch -d` is the last statement in the
+        # cleanup, and it declines a branch nothing else contains — which is
+        # the ordinary shape of an accepted worker whose commits were never
+        # merged. So the irreversible half happened, the acceptance marker
+        # never did, and every retry re-ran the same refusal against a tree
+        # that was already gone.
+        #
+        # A refusal must therefore cost nothing: whatever the cleanup declines
+        # to finish, it must not have started.
+        let repo = (make-repo "unpreserved")
+        let root = (make-runtime "unpreserved")
+        with-runtime $root {
+            let got = (worktree-allocate --repo $repo --task "t1")
+            "work\n" | save -f ($got.path | path join "work.txt")
+            ^git -C $got.path add -A
+            ^git -C $got.path commit -q -m "work no other ref holds"
+
+            assert-rejects {
+                worktree-cleanup --repo $repo --path $got.path --branch $got.branch --accepted
+            } "no other ref" "a branch whose commits exist nowhere else is not deleted"
+            assert-true ($got.path | path exists) "the tree the refusal was about still stands"
+            assert-true ((git-in $repo "branch" "--list" $got.branch) | is-not-empty) "and so does its branch"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "worktree/cleanup-is-a-no-op-once-the-tree-and-branch-are-gone" {
+        # The other half of dotfiles-pwxf: an absent branch used to be an error
+        # ("branch not found"), so a cleanup could never be COMPLETED after it
+        # had partly happened — by hand or by a previous attempt. Teardown is
+        # idempotent or it is not resumable.
+        let repo = (make-repo "twice")
+        let root = (make-runtime "twice")
+        with-runtime $root {
+            let got = (worktree-allocate --repo $repo --task "t1")
+            worktree-cleanup --repo $repo --path $got.path --branch $got.branch --accepted
+            worktree-cleanup --repo $repo --path $got.path --branch $got.branch --accepted
+            assert-true (not ($got.path | path exists)) "still removed"
+            assert-true ((git-in $repo "branch" "--list" $got.branch) | is-empty) "still deleted"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "worktree/a-branch-preserved-on-another-ref-is-cleaned-up" {
+        # Preservation is what the gate is actually about, and a merge into the
+        # base is only the common way of achieving it. A worker branch someone
+        # cherry-picked, tagged onto another branch, or pushed is preserved too,
+        # and holding its directory open forever helps nobody.
+        let repo = (make-repo "preserved")
+        let root = (make-runtime "preserved")
+        with-runtime $root {
+            let got = (worktree-allocate --repo $repo --task "t1")
+            "work\n" | save -f ($got.path | path join "work.txt")
+            ^git -C $got.path add -A
+            ^git -C $got.path commit -q -m "work"
+            # Not merged into main, not pushed — just recorded on a second ref.
+            ^git -C $repo branch keepsake $got.branch
+
+            worktree-cleanup --repo $repo --path $got.path --branch $got.branch --accepted
+            assert-true (not ($got.path | path exists)) "the tree is reclaimed"
+            assert-true ((git-in $repo "branch" "--list" $got.branch) | is-empty) "and the worker's branch with it"
+            assert-true ((git-in $repo "branch" "--list" "keepsake") | is-not-empty) "the ref that preserves the work is left alone"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
     (run-case "worktree/cleanup-refuses-unverified-merge-claim" {
         let repo = (make-repo "unmerged")
         let root = (make-runtime "unmerged")
@@ -385,10 +453,10 @@ let cases = [
         rm -rf $root; rm -rf $repo
     })
 
-    (run-case "worktree/partial-cleanup-leaves-metadata-intact" {
-        # Failure injection: the directory removal succeeds and the branch
-        # deletion fails. The worker's evidence must still be readable, because
-        # that is what the operator needs in order to finish the job by hand.
+    (run-case "worktree/a-refused-cleanup-leaves-metadata-intact" {
+        # A branch carrying commits no other ref holds cannot be cleaned up.
+        # The worker's evidence must still be readable afterwards, because that
+        # is what the operator needs in order to finish the job by hand.
         let repo = (make-repo "partial")
         let root = (make-runtime "partial")
         with-runtime $root {
@@ -397,8 +465,8 @@ let cases = [
                 role: "impl", cwd: $got.path, branch: $got.branch
                 session: "sid-p", skill: "wk-build", window: "impl-a@dotfiles"
             }
-            # An unmerged commit makes `git branch -d` refuse, so removal of the
-            # directory succeeds while branch deletion fails.
+            # A commit no other ref contains: deleting the branch would end the
+            # only copy, so the cleanup is refused.
             "work\n" | save -f ($got.path | path join "work.txt")
             ^git -C $got.path add -A
             ^git -C $got.path commit -q -m "work"
@@ -408,8 +476,8 @@ let cases = [
                 "no error"
             } catch {|e| $e.msg })
 
-            assert-true ($outcome != "no error") "an unmergeable branch surfaces the failure"
-            assert-eq (bus-identity-of "impl-a" --run "run-1" | get session) "sid-p" "metadata survives a partial cleanup"
+            assert-true ($outcome != "no error") "an unpreserved branch surfaces the failure"
+            assert-eq (bus-identity-of "impl-a" --run "run-1" | get session) "sid-p" "metadata survives a refused cleanup"
         }
         rm -rf $root; rm -rf $repo
     })
