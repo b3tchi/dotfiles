@@ -1617,6 +1617,27 @@ export function transcriptLines(
   return detail.length > 0 ? [detail] : [];
 }
 
+/**
+ * A worker's prose, as one line.
+ *
+ * Observed live: a worker reported a summary containing a fenced markdown
+ * block, and `wait` printed the fence, the blank lines and all — six lines of
+ * transcript for one result, in a loop that runs once per worker. The envelope
+ * is on the bus whatever this shows; `inspect` and `timeline` are how the full
+ * text is asked for.
+ *
+ * Says there is more rather than cutting silently: a summary that stops
+ * mid-sentence with no mark reads as the whole answer.
+ */
+export function oneLine(text: unknown, limit = 140): string {
+  const raw = typeof text === "string" ? text : String(text ?? "");
+  const [first = "", ...rest] = raw.split("\n");
+  const trimmed = first.trim();
+  const hasMore = rest.some((line) => line.trim().length > 0);
+  if (trimmed.length > limit) return `${trimmed.slice(0, limit - 1)}…`;
+  return hasMore ? `${trimmed} …` : trimmed;
+}
+
 /** SGR escape sequences, which occupy no columns. */
 const SGR_PATTERN = /\u001b\[[0-9;]*m/g;
 
@@ -1897,19 +1918,22 @@ function summarise(verb: string, stdout: string): string {
       // kind distinguishes "the worker answered" from "the worker said nothing
       // at all", which are not the same outcome and must not read the same.
       if (o.kind === "error") {
-        return `seq ${o.sequence} from ${o.run}/${o.uid}: ${payload.code} — ${payload.detail}`;
+        return `seq ${o.sequence} from ${o.run}/${o.uid}: ${payload.code} — ${oneLine(payload.detail)}`;
       }
-      return `seq ${o.sequence} from ${o.run}/${o.uid}: ${payload.status} — ${payload.summary}`;
+      return `seq ${o.sequence} from ${o.run}/${o.uid}: ${payload.status} — ${oneLine(payload.summary)}`;
     }
     case "rm":
       return o.removed ? `released ${o.run}/${o.uid}` : `${o.run}/${o.uid}: ${o.reason}`;
-    // The receipt is the boring half. What the caller needs to know is whether
-    // the worker's window and process are gone, because that is the part with
-    // a consequence — and when they are not, why.
+    // A successful ack says nothing. The worker's row leaves the frame, which
+    // is the whole message, and this verb runs once per result in a polling
+    // loop — a live run printed `acked seq 1 from r1/impl-1 — released
+    // impl-timestamp-md@dotfiles (window and pi gone; worktree, branch and
+    // session id kept)` every time round.
+    //
+    // A release that did NOT happen is the interesting case and does print: an
+    // idle agent nobody knows about is the leak the release exists to prevent.
     case "ack":
-      return o.released
-        ? `acked seq ${o.sequence} from ${o.run}/${o.uid} — released ${o.window} (window and pi gone; worktree, branch and session id kept)`
-        : `acked seq ${o.sequence} from ${o.run}/${o.uid} — not released: ${o.reason}`;
+      return o.released ? "" : `${o.run}/${o.uid} acked, not released: ${o.reason}`;
     case "stop":
     case "accept":
       return o.changed

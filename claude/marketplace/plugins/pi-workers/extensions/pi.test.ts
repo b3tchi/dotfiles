@@ -731,6 +731,52 @@ describe("initiator tool", () => {
     expect(argv).toContain("--role impl");
   });
 
+  test("a multi-line result summary collapses to one line in the transcript", async () => {
+    // Observed live. A worker reported
+    //
+    //     Created `/tmp/20260908-111738.md` with exact content:
+    //
+    //     ```markdown
+    //     # 20260908-111738.md
+    //     ```
+    //
+    // and `wait` printed all of it, fence and blank lines included. The full
+    // envelope is on the bus either way — `inspect` and `timeline` are how you
+    // ask for it — so the transcript carries the first line and says there is
+    // more.
+    const summary = "Created `/tmp/x.md` with exact content:\n\n```markdown\n# x.md\n```";
+    const { exec } = fakeExec({ stdout: JSON.stringify({
+      run: "r1", uid: "impl-1", sequence: 1, kind: "result",
+      payload: { status: "complete", summary, window: "w", session: "s", resume: "r" },
+    }) });
+    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "r1" });
+    expect(out.detail.split("\n")).toHaveLength(1);
+    expect(out.detail).toContain("complete");
+    expect(out.detail).toContain("Created `/tmp/x.md` with exact content:");
+    expect(out.detail).toContain("…");
+    expect(out.detail).not.toContain("```");
+  });
+
+  test("a long single-line summary is cut, not wrapped across the transcript", async () => {
+    const summary = "x".repeat(400);
+    const { exec } = fakeExec({ stdout: JSON.stringify({
+      run: "r1", uid: "impl-1", sequence: 1, kind: "result",
+      payload: { status: "complete", summary, window: "w", session: "s", resume: "r" },
+    }) });
+    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "r1" });
+    expect(out.detail.length).toBeLessThan(200);
+    expect(out.detail).toContain("…");
+  });
+
+  test("a one-line summary is passed through untouched", async () => {
+    const { exec } = fakeExec({ stdout: JSON.stringify({
+      run: "r1", uid: "impl-1", sequence: 1, kind: "result",
+      payload: { status: "complete", summary: "noted BASALT-7", window: "w", session: "s", resume: "r" },
+    }) });
+    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "r1" });
+    expect(out.detail).toBe("seq 1 from r1/impl-1: complete — noted BASALT-7");
+  });
+
   test("ack passes the socket, because it is what releases the worker", async () => {
     // The ack is also the release: it kills the worker's window and the pi
     // process in it. A verb that touches tmux needs the display host, and
@@ -744,10 +790,12 @@ describe("initiator tool", () => {
     });
     expect(calls[0].args).toEqual(["ack", "--run", "r32", "--uid", "impl-1", "--sequence", "1", "--socket", "piw-1"]);
     expect(out.ok).toBe(true);
-    // The summary says what happened to the worker, not just that a receipt
-    // was written: the release is the part with a consequence.
-    expect(out.detail).toContain("r32/impl-1");
-    expect(out.detail).toContain("released");
+    // And it says NOTHING. An ack that released its worker takes that
+    // worker's row out of the frame, which is the whole message; a line
+    // repeating it is one more thing to read in a polling loop. Observed in a
+    // live run: `acked seq 1 from r1/impl-1 — released impl-timestamp-md@dotfiles
+    // (window and pi gone; worktree, branch and session id kept)` on every ack.
+    expect(out.detail).toBe("");
   });
 
   test("an ack that could not release says so rather than claiming it did", async () => {
@@ -757,7 +805,10 @@ describe("initiator tool", () => {
     }) });
     const out = await createInitiatorTool({ exec }).invoke({ verb: "ack", run: "r32", uid: "impl-1", sequence: 1 });
     expect(out.ok).toBe(true);
-    expect(out.detail).toContain("acked");
+    // The release that did NOT happen is the interesting one: an idle agent
+    // nobody knows about is the leak the release exists to prevent.
+    expect(out.detail).toContain("r32/impl-1");
+    expect(out.detail).toContain("not released");
     expect(out.detail).toContain("could not reach the display host");
   });
 
