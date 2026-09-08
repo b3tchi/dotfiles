@@ -1127,6 +1127,63 @@ describe("roster frame", () => {
     expect(frame[1]).not.toContain("@");
   });
 
+  test("a reported worker says what it is waiting for, not just what it did", async () => {
+    // Observed live. Everything had worked — the file was made, the result
+    // came back, the ack released the worker — and the frame still read
+    //
+    //     pi-workers · 1 worker
+    //     r6/impl-1@291  complete  1m  gone
+    //
+    // The operator asked: "it not clear when complete?". Fairly: `1 worker`
+    // reads as work in flight, `complete` is the worker's last word about
+    // itself rather than what happens next, and `gone` — which the frame uses
+    // for a worker that DIED without reporting — is now the normal state of a
+    // released one.
+    const now = Date.now();
+    const frame = rosterFrame(
+      [{
+        run: "r6", uid: "impl-1", role: "impl", state: "complete", liveness: "gone",
+        window: "impl-t@dotfiles", window_id: "@291",
+        started: new Date(now - 60_000).toISOString(),
+      }],
+      { now },
+    );
+    // Whose turn it is, in the state cell.
+    expect(frame[1]).toContain("needs accept");
+    expect(frame[1]).not.toContain("complete");
+    // `gone` is expected once a reported worker has been released, so it stops
+    // being the column that means "something went wrong".
+    expect(frame[1]).not.toContain("gone");
+    // And the heading says the run is not working, it is waiting.
+    expect(frame[0]).toContain("waiting for you");
+    expect(frame[0]).not.toContain("1 worker");
+  });
+
+  test("a worker that died without reporting still shows gone, loudly", () => {
+    // The distinction that must survive the change above: `gone` beside a
+    // WORKING state is a worker that died mid-task, which is the row the
+    // liveness column exists for.
+    const frame = rosterFrame(
+      [{ run: "r1", uid: "impl-1", role: "impl", state: "running", liveness: "gone", window: "w", window_id: "@1" }],
+      { now: Date.now() },
+    );
+    expect(frame[1]).toContain("gone");
+    expect(frame[0]).toContain("1 worker");
+  });
+
+  test("a run with work in flight is still counted as workers", () => {
+    const frame = rosterFrame(
+      [
+        { run: "r1", uid: "impl-1", role: "impl", state: "running", liveness: "live", window: "w1", window_id: "@1" },
+        { run: "r1", uid: "impl-2", role: "impl", state: "complete", liveness: "gone", window: "w2", window_id: "@2" },
+      ],
+      { now: Date.now() },
+    );
+    // Something is still working, so the heading counts rather than waits.
+    expect(frame[0]).toContain("2 workers");
+    expect(frame[0]).not.toContain("waiting for you");
+  });
+
   test("a worker whose state and liveness disagree is what the frame is for", () => {
     // `blocked` with `exited` means it reported and its process is gone;
     // `running` with `exited` would mean it died without reporting. Showing
