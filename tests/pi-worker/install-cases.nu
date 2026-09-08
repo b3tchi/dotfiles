@@ -279,6 +279,29 @@ let cases = [
         rm -rf $root
     })
 
+    (run-case "cli/wait-after-an-unscoped-sequence-is-refused-by-name" {
+        # dotfiles-i0hz. The flag is per worker because sequences are, and the
+        # refusal has to say so at the CLI too: an orchestrator learns the
+        # vocabulary from being told no.
+        let root = (make-runtime "cli-wait-after")
+        let out = (run-cli "wait" "--run" "r1" "--after" "2" --runtime $root)
+        assert-true ($out.exit_code != 0) "an unscoped --after must not silently pick a worker"
+        let said = ($out.stdout + $out.stderr)
+        assert-true ($said | str contains "--uid") "the refusal names the flag that fixes it"
+        assert-true ($said | str contains "per worker") "and why"
+        rm -rf $root
+    })
+
+    (run-case "cli/a-blocking-wait-after-says-which-sequence-it-heard-nothing-past" {
+        # "no result" and "no result you have not already read" are different
+        # sentences, and only one of them means the worker has been quiet.
+        let root = (make-runtime "cli-wait-after-quiet")
+        let out = (run-cli "wait" "--run" "r1" "--uid" "w1" "--after" "3" "--block" "--timeout" "0" --runtime $root)
+        assert-eq $out.exit_code 0 "giving up is not a failure"
+        assert-true ($out.stdout | str contains "sequence 3") $"the message names the sequence: ($out.stdout)"
+        rm -rf $root
+    })
+
     (run-case "cli/an-unknown-verb-fails-loudly-and-names-the-verbs" {
         let out = (run-cli "teleport")
         assert-true ($out.exit_code != 0) "an unknown verb must not exit 0"

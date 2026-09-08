@@ -846,7 +846,29 @@ export def bus-wait [
     # Bounded, and bounded low: this runs inside a host tool call, and a wait
     # that outlives the host's own timeout is indistinguishable from a hang.
     --timeout: duration = 60sec
+    # Skip results the caller has already read (dotfiles-i0hz).
+    #
+    # An initiator that hands a reported-but-unacked worker more work could not
+    # learn when the NEW work was done. `wait` keeps handing over the earlier
+    # envelope — rightly, because unacknowledged IS pending — and `ack`, the
+    # only thing that clears it, releases the worker that was supposed to do
+    # the follow-up. Neither order works, so the caller says what it has seen.
+    #
+    # Deliberately NOT an implicit ack. The earlier result is still owed one:
+    # this says "not the answer I am waiting for", not "I am done with it".
+    # `--after 0`, the default, is the flag's absence.
+    --after: int = 0
 ]: nothing -> any {
+    if $after < 0 {
+        error make {msg: $"wait --after ($after) is not a sequence: sequences start at 1, and 0 means everything"}
+    }
+    # Sequences are numbered PER WORKER, so `--after 2` across a run would name
+    # a different envelope for each of them — and skipping another worker's
+    # sequence 1 because this one is on 2 is exactly the stale-mail confusion
+    # the flag exists to prevent. Refused rather than interpreted.
+    if $after > 0 and ($uid | is-empty) {
+        error make {msg: $"wait --after needs --uid: sequences are numbered per worker, so an unscoped --after would mean a different envelope for each of them and could skip mail this caller has never seen"}
+    }
     let deadline = (date now) + $timeout
     loop {
         # Unscoped, this is the oldest unacknowledged result ACROSS the run,
@@ -857,7 +879,8 @@ export def bus-wait [
         # (dotfiles-idzp's stale-state shape, in the mailbox rather than the
         # window list).
         let all = (bus-pending $run)
-        let pending = (if ($uid | is-empty) { $all } else { $all | where uid == $uid })
+        let scoped = (if ($uid | is-empty) { $all } else { $all | where uid == $uid })
+        let pending = (if $after > 0 { $scoped | where sequence > $after } else { $scoped })
         if ($pending | is-not-empty) {
             let next = ($pending | first)
             return (if $json { $next | to json } else { $next })
@@ -3272,9 +3295,9 @@ def "main send" [
 # `--timeout` is in seconds here rather than a duration, because the caller is
 # usually a model writing flags and `--timeout 30` is harder to get wrong than
 # `--timeout 30sec`.
-def "main wait" [--run: string, --uid: string = "", --block, --timeout: int = 60] {
+def "main wait" [--run: string, --uid: string = "", --after: int = 0, --block, --timeout: int = 60] {
     require-flags "wait" [[flag, value, what]; ["--run" $run $RUN_IS]]
-    let next = (bus-wait --run $run --uid $uid --block=$block --timeout ($timeout * 1sec))
+    let next = (bus-wait --run $run --uid $uid --after $after --block=$block --timeout ($timeout * 1sec))
     if $next != null {
         print ($next | to json)
     } else if $block {
@@ -3282,7 +3305,11 @@ def "main wait" [--run: string, --uid: string = "", --block, --timeout: int = 60
         # in words the caller can act on rather than returning bare silence
         # that looks the same as "finished with nothing to say".
         let who = (if ($uid | is-empty) { "any worker" } else { $uid })
-        print $"no result from ($run)/($who) after ($timeout)s; it may still be working"
+        # Naming the sequence matters here: "no result" and "no result you have
+        # not already read" are different sentences, and only one of them means
+        # the worker has been quiet.
+        let since = (if $after > 0 { $" past sequence ($after)" } else { "" })
+        print $"no result from ($run)/($who)($since) after ($timeout)s; it may still be working"
     }
 }
 

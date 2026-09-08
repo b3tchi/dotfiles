@@ -847,7 +847,7 @@ const VERB_FLAGS: Record<string, readonly string[]> = {
   ps: ["run", "socket"],
   spawn: ["run", "uid", "role", "subject", "project", "repo", "session", "skill", "task", "socket"],
   send: ["run", "stage", "task", "instructions", "artifacts"],
-  wait: ["run", "uid", "block", "timeout"],
+  wait: ["run", "uid", "after", "block", "timeout"],
   rm: ["run", "uid"],
   // `socket` because ack is also the RELEASE: it kills the worker's window and
   // the pi process in it, and a verb that touches tmux needs the display host.
@@ -2188,6 +2188,11 @@ const INITIATOR_TOOL_PARAMETERS = {
     artifacts: { type: "string", description: "send: comma-separated artifact ids" },
     feedback: { type: "string", description: "resume: why the work is being sent back" },
     sequence: { type: "number", description: "ack: which result envelope is being acknowledged" },
+    after: {
+      type: "number",
+      description:
+        "wait: the sequence you have already read, so this returns only what came after it. Needs uid. Use it when you have given a worker more work while its previous report is still unacknowledged — a plain wait would hand that report back, since unacknowledged is what pending means. It is not an ack: the earlier result still needs one",
+    },
     block: { type: "boolean", description: "wait: block until a result arrives instead of peeking. This is how you learn a worker finished" },
     timeout: { type: "number", description: "wait: seconds to block before giving up, default 60. Giving up is not a failure — the worker may still be working" },
     socket: { type: "string", description: "an alternate tmux socket; omit for the default server" },

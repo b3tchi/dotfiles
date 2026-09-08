@@ -850,6 +850,83 @@ bus-result "w1" --run "r1" --result {status: "complete", summary: "done", window
         rm -rf $root
     })
 
+    (run-case "bus/a-wait-after-a-sequence-skips-what-the-caller-has-seen" {
+        # dotfiles-i0hz. An initiator that gives a reported-but-unacked worker
+        # more work had no way to learn when the NEW work was done: `wait`
+        # rightly keeps handing over the earlier envelope, because it is
+        # unacknowledged and therefore is what is pending — and `ack`, the only
+        # thing that clears it, releases the very worker that was supposed to do
+        # the follow-up. So the caller says which sequence it has already seen.
+        let root = (make-runtime "wait-after")
+        with-runtime $root {
+            put-result "run-1" "impl-a" {summary: "first round"}
+
+            assert-eq (bus-wait --run "run-1" --uid "impl-a" --after 1) null "nothing newer than what the caller has seen"
+            assert-eq (bus-wait --run "run-1" --uid "impl-a" | get sequence) 1 "and the earlier envelope is still pending for anyone asking plainly"
+
+            put-result "run-1" "impl-a" {summary: "second round"}
+            let newer = (bus-wait --run "run-1" --uid "impl-a" --after 1)
+            assert-eq $newer.sequence 2 "the round the caller had not seen"
+            assert-eq $newer.payload.summary "second round" ""
+            assert-eq (bus-wait --run "run-1" --uid "impl-a" | get sequence) 1 "the plain wait is unchanged: oldest unacked first"
+        }
+        rm -rf $root
+    })
+
+    (run-case "bus/wait-after-zero-is-the-same-as-not-asking" {
+        # Sequences start at 1, so 0 covers nothing. The default has to behave
+        # exactly like the flag's absence or every existing caller changes
+        # meaning the day the flag lands.
+        let root = (make-runtime "wait-after-zero")
+        with-runtime $root {
+            put-result "run-1" "impl-a"
+            assert-eq (bus-wait --run "run-1" --uid "impl-a" --after 0 | get sequence) 1 ""
+            assert-eq (bus-wait --run "run-1" --uid "impl-a" | get sequence) 1 ""
+        }
+        rm -rf $root
+    })
+
+    (run-case "bus/wait-after-refuses-to-guess-which-workers-sequence-it-means" {
+        # Sequences are per worker: `--after 2` across a run would mean a
+        # different thing for each one, and silently skipping another worker's
+        # sequence 1 or 2 is exactly the stale-mail bug this flag exists to
+        # avoid. So it is refused rather than interpreted.
+        let root = (make-runtime "wait-after-unscoped")
+        with-runtime $root {
+            put-result "run-1" "impl-a"
+            assert-rejects {
+                bus-wait --run "run-1" --after 1
+            } "per worker" "an unscoped --after has no single meaning"
+        }
+        rm -rf $root
+    })
+
+    (run-case "bus/a-blocking-wait-after-returns-when-the-new-round-lands" {
+        # The shape an orchestrator actually uses: hand a worker more work while
+        # its previous report is still unacknowledged, then block for the new
+        # one.
+        let root = (make-runtime "wait-after-block")
+        with-runtime $root {
+            put-result "run-1" "impl-a" {summary: "first round"}
+            let script = ($root | path join "second-round.nu")
+            let body = ('use ' + (worker-script $env.FILE_PWD) + ' *
+sleep 1200ms
+bus-result "impl-a" --run "run-1" --result {status: "complete", summary: "second round", window: "impl-a@dotfiles", session: "sid-impl-a", resume: "pi --session sid-impl-a", validation: "checked"}')
+            $body | save -f $script
+            job spawn { ^nu $script | ignore }
+
+            let started = (date now)
+            let got = (bus-wait --run "run-1" --uid "impl-a" --after 1 --block --timeout 10sec)
+            let waited = ((date now) - $started)
+
+            assert-true ($got != null) "the blocking wait came back with the new round"
+            assert-eq $got.sequence 2 ""
+            assert-eq $got.payload.summary "second round" ""
+            assert-true ($waited > 500ms) "it waited rather than returning the envelope it was told to skip"
+        }
+        rm -rf $root
+    })
+
     (run-case "bus/a-scoped-wait-on-a-quiet-worker-returns-nothing" {
         let root = (make-runtime "wait-quiet")
         with-runtime $root {

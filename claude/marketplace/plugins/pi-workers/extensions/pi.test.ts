@@ -694,6 +694,34 @@ describe("initiator tool", () => {
     expect(calls[0].args).toEqual(["wait", "--run", "r2"]);
   });
 
+  test("wait forwards the sequence the caller has already read", async () => {
+    // dotfiles-i0hz. An orchestrator that gave a reported-but-unacked worker
+    // more work had no way to ask for the NEW report: a plain wait hands the
+    // old one back, since unacknowledged IS pending, and acking to clear it
+    // releases the worker that owes the follow-up.
+    const { exec, calls } = fakeExec();
+    await createInitiatorTool({ exec }).invoke({
+      verb: "wait",
+      run: "r1",
+      uid: "w1",
+      after: 2,
+      block: true,
+      timeout: 90,
+    });
+    expect(calls[0].args).toEqual([
+      "wait", "--run", "r1", "--uid", "w1", "--after", "2", "--block", "--timeout", "90",
+    ]);
+  });
+
+  test("an absent --after is not sent as zero", async () => {
+    // The flag's default IS its absence, and a caller that omits it must get
+    // exactly the old command line — otherwise adding the flag changes what
+    // every existing orchestrator runs.
+    const { exec, calls } = fakeExec();
+    await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "r1", uid: "w1" });
+    expect(calls[0].args).toEqual(["wait", "--run", "r1", "--uid", "w1"]);
+  });
+
   test("a switch is passed as a bare flag, not as `--block true`", async () => {
     // nu's `--block` takes no value. Rendering the boolean with String() would
     // emit `--block true` and nu would read `true` as an extra positional.
