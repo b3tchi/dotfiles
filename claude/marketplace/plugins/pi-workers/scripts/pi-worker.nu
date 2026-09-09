@@ -639,6 +639,124 @@ export def ensure-bus-dirs []: nothing -> nothing {
     ensure-dir ($dir | path join "queue")
 }
 
+# ------------------------------------------------ durable placement (sp029 T6)
+#
+# A `wk-*` worktree outlives the login session that spawned it, while
+# `$XDG_RUNTIME_DIR` is wiped at logout. If the only record of which worktree a
+# worker holds lived there, an orphaned tree would become indistinguishable
+# from an occupied one the moment a session ends — and `accept`/`reclaim`
+# DELETE trees on that evidence. So the placement record (identity, plus the
+# `accepted`/`stopped` verdicts granted from outside the worker) lives under
+# `$XDG_STATE_HOME` instead, which is the adr0013 precedent applied here.
+#
+# `waiting_human` and `reopened` stay where they are (the legacy `run`/`uid`
+# tree): they are not placement evidence — they are review-flow bookkeeping
+# that `main resume`'s rejection counting still writes, and retiring THAT
+# writer is sp029 T8's job, not this one's. Moving their storage now without
+# also removing the writer would either duplicate the marker across two trees
+# or break `main resume`'s own tests out from under a task that never touches
+# `worker-resume`. See the comment on `state-markers` below.
+export def state-root []: nothing -> string {
+    let base = ($env | get -o XDG_STATE_HOME | default "")
+    if ($base | is-not-empty) {
+        return ($base | path join $BUS_DIRNAME)
+    }
+    # XDG's own fallback, not an invention: the basedir spec defines
+    # `$HOME/.local/state` as what `$XDG_STATE_HOME` means when it is unset.
+    let home = ($env | get -o HOME | default "")
+    if ($home | is-empty) {
+        error make {msg: "XDG_STATE_HOME is unset and HOME is unset: the worker placement record has no durable directory to address"}
+    }
+    $home | path join ".local" "state" $BUS_DIRNAME
+}
+
+# The SAME slug `project-dir` uses (`project-slug` of the main worktree), so
+# the runtime bus and the durable placement record agree on which project a
+# worker belongs to without a second implementation to drift out of step.
+#
+# Falls back to slugging `cwd` verbatim when it is not inside a real git
+# repository. That is deliberate, not a workaround: plenty of existing bus
+# fixtures (schema/protocol cases in particular) plant an identity at a
+# throwaway path like `/tmp/nowhere` that was never meant to resolve to a
+# repo, and `main-worktree` erroring there would make identity storage a
+# harder requirement than identity itself (`validate-identity` only requires
+# `cwd` to be non-empty, never that it exists). A real worktree still
+# resolves through `main-worktree` and groups correctly with its siblings;
+# an unresolvable one just gets an isolated bucket of its own, which is
+# never asked to group with anything.
+def resolve-project-slug [cwd: string]: nothing -> string {
+    let resolved = (try { main-worktree $cwd } catch { "" })
+    project-slug (if ($resolved | is-empty) { $cwd } else { $resolved })
+}
+
+# Nested one level deeper than the spec's own `agents/<uid>/` — `agents/<run>/
+# <uid>/` — and DELIBERATELY: `run` still exists pre-T9, and a uid is only
+# ever unique WITHIN its own run (`mint-uid` scopes its search to one run
+# directory). `live/two-workers-sharing-a-name-are-independently-addressable`
+# spawns "w1" in "run-a" and a SEPARATE "w1" in "run-b" against the very same
+# repo and requires stopping one to leave the other untouched — collapsing
+# `<uid>` alone to the project level would file both under the identical
+# state-home path and one worker's `stopped` marker would silently apply to
+# the other. Once T9 retires `run` this nesting is a single-element path
+# component and collapses to the letter of the spec on its own.
+def agent-state-dir [slug: string, run: string, uid: string]: nothing -> string {
+    state-root | path join $slug "agents" $run $uid
+}
+
+# One `ensure-dir` call per level, for the reason `ensure-bus-dirs` above
+# documents: `mkdir -m -p` only applies the mode to the final path component,
+# and every ancestor `-p` silently creates is left at the umask mode instead.
+def ensure-state-dirs [slug: string, run: string, uid: string] {
+    let root = (state-root)
+    let project_dir = ($root | path join $slug)
+    let agents_dir = ($project_dir | path join "agents")
+    let run_dir = ($agents_dir | path join $run)
+    let uid_dir = ($run_dir | path join $uid)
+    ensure-dir $root
+    ensure-dir $project_dir
+    ensure-dir $agents_dir
+    ensure-dir $run_dir
+    ensure-dir $uid_dir
+}
+
+# `bus-identity`/marker readers have only `(run, uid)` in hand — every
+# existing call site already addresses a worker that way, and none of them
+# know its `cwd` up front, which is exactly what would be needed to
+# recompute the slug above. So the slug is recorded once, at write time, in
+# a tiny durable pointer keyed by the one thing every caller does have.
+def agent-index-path [run: string, uid: string]: nothing -> string {
+    state-root | path join ".index" $run $uid
+}
+
+def record-agent-slug [run: string, uid: string, slug: string] {
+    let path = (agent-index-path $run $uid)
+    ensure-dir ($path | path dirname)
+    let scratch = ($path + $".tmp.(random chars --length 10)")
+    $slug | save -f $scratch
+    chmod 600 $scratch
+    mv -f $scratch $path
+}
+
+# The project slug this (run, uid) was last recorded under, or null if it was
+# never recorded — an unknown worker, never durably placed at all.
+def resolve-agent-slug [run: string, uid: string]: nothing -> any {
+    let path = (agent-index-path $run $uid)
+    if not ($path | path exists) { return null }
+    let slug = (open --raw $path | str trim)
+    if ($slug | is-empty) { null } else { $slug }
+}
+
+# Where a worker's identity LOG lives, or null when it was never recorded.
+# Kept as its own lookup (rather than folded into `bus-identity-envelope`)
+# because `worker-timeline` needs the whole log — every re-record, not just
+# the latest — and used to read it straight off the runtime tree before this
+# task moved identity off it.
+def identity-log-dir [run: string, uid: string]: nothing -> any {
+    let slug = (resolve-agent-slug $run $uid)
+    if $slug == null { return null }
+    agent-state-dir $slug $run $uid | path join "identity"
+}
+
 # Write `envelope` into `dir` at the next free sequence.
 #
 # The scratch file is created with the final mode BEFORE it is linked into
@@ -1182,6 +1300,14 @@ export def bus-ack [
 #
 # `markers` is {accepted?: bool, stopped?: bool, waiting_human?: bool,
 # reopened?: string}; `results` is the outbox, oldest first.
+#
+# `accepted`/`stopped` are read off the durable placement record (sp029 T6),
+# so this precedence holds even when `results` is empty because the runtime
+# bus tree was wiped out from under a worker that was already decided — which
+# is the property the wipe-survival case in `worktree-cases.nu` exists to
+# prove. `waiting_human`/`reopened` still come off the legacy runtime tree
+# (see the comment on `marker-path`); they read as absent post-wipe, which
+# only ever demotes a worker toward `created`, never toward a false verdict.
 export def derive-state [results: list<record>, markers: record]: nothing -> string {
     # Externally granted states win over anything the worker reported: a
     # reviewer's acceptance or an operator's teardown is later, and more
@@ -1224,11 +1350,20 @@ def state-markers [run: string, uid: string]: nothing -> record {
 }
 
 export def bus-status [uid: string, --run: string]: nothing -> record {
+    # Resolved unconditionally, and BEFORE the identity check: `worker-dir`
+    # is what raises the actionable "XDG_RUNTIME_DIR is unset" error, and
+    # every caller of this verb must still see that failure rather than a
+    # silently successful "unknown" answered from durable state alone.
     let dir = (worker-dir $run $uid)
-    if not ($dir | path exists) {
+    # Identity, not the runtime directory, is the EXISTENCE check now (sp029
+    # T6): identity is durable, so "unknown" means no identity was ever
+    # recorded — never "the runtime bus tree happens to be gone right now",
+    # which would misreport a wiped-but-real worker as if it never existed.
+    let identity = (bus-identity-of $uid --run $run)
+    if $identity == null {
         return {run: $run, uid: $uid, state: "unknown", unacked: 0, results: 0, inbox: 0}
     }
-    let results = (read-box ($dir | path join "outbox"))
+    let results = (if ($dir | path exists) { read-box ($dir | path join "outbox") } else { [] })
     # The precedence rules, and the reasoning for them, live with derive-state.
     let markers = (state-markers $run $uid)
     let state = (derive-state $results $markers)
@@ -1249,7 +1384,7 @@ export def bus-status [uid: string, --run: string]: nothing -> record {
         state: $state
         unacked: ($unacked | length)
         results: ($results | length)
-        inbox: (read-box ($dir | path join "inbox") | length)
+        inbox: (if ($dir | path exists) { read-box ($dir | path join "inbox") | length } else { 0 })
     }
 }
 
@@ -1521,15 +1656,29 @@ export def worktree-cleanup [
 # Cheaper than `worker-roster` on purpose: no tmux probe. A sweep asks "does
 # anyone still own this directory", and tmux cannot answer that — a worker
 # whose window was killed still owns its tree until its state says otherwise.
-def bus-claims []: nothing -> list<record> {
-    let root = (bus-root)
-    if not ($root | path exists) { return [] }
-    ls $root | where type == dir | get name | each {|run_dir|
+#
+# Enumerated from the DURABLE placement record (sp029 T6), keyed by `repo`
+# directly, never from the runtime bus tree: that tree is exactly what may be
+# gone by the time a sweep runs (a wiped login session, or one that never
+# happened on this machine at all), and a sweep that could only see live
+# claims when the runtime tree happens to still exist would treat every
+# worker as unclaimed the moment it does not — which is precisely the
+# scenario `accept`/`reclaim` must not get wrong, since both delete trees on
+# this evidence.
+def bus-claims [repo: string]: nothing -> list<record> {
+    let slug = (project-slug (main-worktree $repo))
+    let dir = (state-root | path join $slug "agents")
+    if not ($dir | path exists) { return [] }
+    # `agents/<run>/<uid>/` — see the comment on `agent-state-dir` for why the
+    # `run` level exists: a uid is only unique within its own run pre-T9.
+    ls $dir | where type == dir | get name | each {|run_dir|
         let run = ($run_dir | path basename)
-        ls $run_dir | where type == dir | get name | each {|worker_dir|
-            let uid = ($worker_dir | path basename)
-            let identity = (bus-identity-of $uid --run $run)
-            if $identity == null { [] } else {
+        ls $run_dir | where type == dir | get name | each {|uid_dir|
+            let uid = ($uid_dir | path basename)
+            let records = (read-box ($uid_dir | path join "identity"))
+            if ($records | is-empty) { [] } else {
+                let envelope = ($records | last)
+                let identity = $envelope.payload
                 [{
                     run: $run
                     uid: $uid
@@ -1763,7 +1912,7 @@ export def worktrees-reclaim [
         do { ^git -C $main rev-parse --abbrev-ref HEAD } | complete | get stdout | str trim
     })
     let trees_dir = (worktrees-dir $repo)
-    let claims = (bus-claims)
+    let claims = (bus-claims $repo)
     let held = ($claims | where state in $WORKING_STATES)
     let in_use = (cwds-in-use)
 
@@ -1924,15 +2073,27 @@ export def worktrees-reclaim [
 #
 # The identity envelope is what ties a worker UID to the worktree it runs in,
 # the Pi session that can resume it, and the tmux window that displays it. It
-# lives on the bus, NOT inside the worktree, so it outlives cleanup: an
-# accepted worker whose directory is gone must still be resumable from its
-# session id.
+# lives under `state-root` (sp029 T6), NOT inside the worktree and NOT on the
+# runtime bus, so it outlives both cleanup AND a logout: an accepted worker
+# whose directory is gone, in a session that has long since ended, must still
+# be resumable from its session id.
 
 export def bus-identity [uid: string, --run: string, --identity: record]: nothing -> record {
     validate-identity $identity
+    # Still claims the runtime worker directory, unchanged: that is the
+    # occupied-address guard `worker-spawn` checks BEFORE ever calling this,
+    # and `bus-send`/`bus-result` still address inbox/outbox there too — this
+    # task moves the placement record, not the legacy message tree.
     ensure-worker-dirs $run $uid
-    ensure-dir (worker-dir $run $uid | path join "identity")
-    claim-slot (worker-dir $run $uid | path join "identity") (envelope-for $run $uid "identity" $identity)
+    let slug = (resolve-project-slug $identity.cwd)
+    ensure-state-dirs $slug $run $uid
+    let dir = (agent-state-dir $slug $run $uid | path join "identity")
+    ensure-dir $dir
+    let sealed = (claim-slot $dir (envelope-for $run $uid "identity" $identity))
+    # Recorded AFTER the write succeeds: a caller resolving `(run, uid)` back
+    # to a slug must never find a pointer to a record that is not there yet.
+    record-agent-slug $run $uid $slug
+    $sealed
 }
 
 # The worker's current identity ENVELOPE, or nothing if none was recorded.
@@ -1942,7 +2103,8 @@ export def bus-identity [uid: string, --run: string, --identity: record]: nothin
 # worker was spawned, so anything asking "how long has this been running"
 # needs the envelope rather than what is inside it.
 export def bus-identity-envelope [uid: string, --run: string]: nothing -> any {
-    let dir = (worker-dir $run $uid | path join "identity")
+    let dir = (identity-log-dir $run $uid)
+    if $dir == null { return null }
     let records = (read-box $dir)
     if ($records | is-empty) { return null }
     $records | last
@@ -1953,6 +2115,86 @@ export def bus-identity-of [uid: string, --run: string]: nothing -> any {
     let envelope = (bus-identity-envelope $uid --run $run)
     if $envelope == null { return null }
     $envelope | get payload
+}
+
+# ------------------------------------------------------- v1 import (sp029 T6)
+#
+# v1 wrote identity under the RUNTIME bus tree
+# ($XDG_RUNTIME_DIR/pi-worker/<run>/<uid>/identity), which is wiped at logout.
+# A worktree it names can outlive that wipe, so this is the one-way bridge
+# onto durable storage for whatever v1 identity is still sitting on the bus
+# when this lands.
+#
+# Keyed by each record's own `cwd`, not by `(run, uid)`: a v1 uid was only
+# ever unique within its OWN run, so two independent runs may have minted the
+# same uid for two different worktrees, and importing by uid alone would let
+# the second overwrite the first's placement record without either side ever
+# refusing. `cwd` is what `accept`/`reclaim` actually act on, and only one
+# live worktree can hold it.
+#
+# Idempotent by construction rather than by a separate ledger: a `(run, uid)`
+# that already resolves a slug was either imported by a previous call or
+# written natively, and either way there is nothing left for THIS call to do.
+export def import-v1-identities []: nothing -> record {
+    let root = (bus-root)
+    if not ($root | path exists) {
+        return {imported: [], already: []}
+    }
+
+    let found = (
+        ls $root | where type == dir | get name | each {|run_dir|
+            let run = ($run_dir | path basename)
+            ls $run_dir | where type == dir | get name | each {|worker_dir|
+                let uid = ($worker_dir | path basename)
+                let records = (read-box ($worker_dir | path join "identity"))
+                if ($records | is-empty) {
+                    []
+                } else {
+                    [{run: $run, uid: $uid, payload: ($records | last | get payload)}]
+                }
+            } | flatten
+        } | flatten
+    )
+
+    if ($found | is-empty) {
+        return {imported: [], already: []}
+    }
+
+    # Every refusal collected BEFORE anything is touched — the same
+    # discipline `worktree-cleanup-guard` uses, and for the same reason: an
+    # import is not the moment to guess which of two conflicting records is
+    # the real one.
+    let cwds = ($found | get payload.cwd | uniq)
+    mut conflicts = []
+    for cwd in $cwds {
+        let group = ($found | where {|r| $r.payload.cwd == $cwd })
+        if ($group | length) > 1 {
+            let names = ($group | each {|r| $"($r.run)/($r.uid)" } | str join " and ")
+            $conflicts = ($conflicts | append $"($names) both hold an identity for cwd ($cwd)")
+        }
+    }
+    if ($conflicts | is-not-empty) {
+        error make {msg: $"refusing to import v1 identities: ($conflicts | str join '; '). Remove the one that is not current by hand and import again"}
+    }
+
+    mut imported = []
+    mut already = []
+    for rec in $found {
+        if (resolve-agent-slug $rec.run $rec.uid) != null {
+            $already = ($already | append {run: $rec.run, uid: $rec.uid})
+            continue
+        }
+        bus-identity $rec.uid --run $rec.run --identity $rec.payload
+        # Never silently dropped: a worktree that no longer exists is still
+        # imported as a record, with that fact named rather than hidden.
+        $imported = ($imported | append {
+            run: $rec.run
+            uid: $rec.uid
+            cwd: $rec.payload.cwd
+            worktree_exists: ($rec.payload.cwd | path exists)
+        })
+    }
+    {imported: $imported, already: $already}
 }
 
 # ====================================================== visible Pi workers
@@ -2496,11 +2738,32 @@ export def worker-spawn [
 # Two markers carry the states no result envelope can express, because they are
 # granted from outside the worker: `accepted` (a reviewer or a successful merge
 # said the work is done with) and `stopped` (someone tore it down). They live
-# beside the worker's envelopes, so a restarted initiator reads them the same
-# way it reads everything else.
-
+# beside the placement record now (sp029 T6), not the worker's envelopes, so
+# they survive exactly as long as the identity that makes them addressable —
+# past a runtime wipe, and past the worktree they describe being reclaimed.
+#
+# `waiting_human` and `reopened` are NOT part of that move. Both are still
+# written from `worker-resume` — one on a second rejection, escalating the
+# worker to `waiting_human` on ITS behalf, the other recording which result a
+# rejection answered — and that is exactly the "granted from outside" writer
+# sp029 T8 retires, per the spec's own account of the split (T8: "no
+# rejection counting, no `escalate`, no `reopened`"). Relocating their
+# STORAGE here without T8 having yet removed the writer would either
+# duplicate a marker across two trees or change what `pipeline-cases.nu`'s
+# `pipeline/second-rejection-escalates-to-a-human` and the `reopened-*` cases
+# observe, out from under a task that never touches `worker-resume`. So they
+# stay on the legacy runtime tree until T8 lands; see the bd notes on this
+# task for the deviation this records.
 def marker-path [run: string, uid: string, name: string]: nothing -> string {
-    worker-dir $run $uid | path join $"($name).marker"
+    if $name in ["accepted" "stopped"] {
+        let slug = (resolve-agent-slug $run $uid)
+        if $slug == null {
+            error make {msg: $"cannot address the ($name) marker for ($run)/($uid): no identity recorded, so there is no durable placement to mark against \(adr0017)"}
+        }
+        agent-state-dir $slug $run $uid | path join $"($name).marker"
+    } else {
+        worker-dir $run $uid | path join $"($name).marker"
+    }
 }
 
 def write-marker [run: string, uid: string, name: string, value: string = ""] {
@@ -2846,8 +3109,12 @@ export def worker-timeline [uid: string, --run: string]: nothing -> list<record>
     let dir = (worker-dir $run $uid)
     if not ($dir | path exists) { return [] }
 
+    # Identity itself lives off the runtime tree now (sp029 T6); the log of
+    # every re-record is read from its durable location via the same
+    # `(run, uid)` index `bus-identity-envelope` uses.
+    let idir = (identity-log-dir $run $uid)
     let identity = (
-        read-box ($dir | path join "identity")
+        (if $idir == null { [] } else { read-box $idir })
         | enumerate
         | each {|e|
             {

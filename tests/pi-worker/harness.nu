@@ -59,8 +59,21 @@ export def run-case [name: string, body: closure] {
     # at a time and only where someone remembered; this fixes the class.
     let sandbox = ([$nu.temp-dir $"piw-case-(random chars --length 8)"] | path join)
     mkdir $sandbox
+    # `XDG_STATE_HOME` is sandboxed HERE, for every case, rather than per-suite
+    # via something like `with-runtime`: sp029 T6 put the worker placement
+    # record (identity, `accepted`/`stopped`) under `$XDG_STATE_HOME`, and a
+    # case that forgot to sandbox it would write into this machine's real
+    # `~/.local/state/pi-worker` — worse, SILENTLY, since most cases never
+    # assert anything about that directory directly. Measured directly: a
+    # fixture cwd shared by many cases (`$nu.temp-dir`, used where the actual
+    # path does not matter) resolves to the same durable project bucket for
+    # all of them, so uids like "a" or "impl-a" accumulated identity envelopes
+    # ACROSS cases and across whole suite runs before this existed. A case
+    # that needs the true unset-XDG_STATE_HOME fallback overrides this back
+    # out with its own `with-env`.
+    let state_home = ($sandbox | path join "state")
     let outcome = (try {
-        with-env {PIW_CASE_TMP: $sandbox} { do $body }
+        with-env {PIW_CASE_TMP: $sandbox, XDG_STATE_HOME: $state_home} { do $body }
         null
     } catch {|e| $e })
     reap-sandbox $sandbox

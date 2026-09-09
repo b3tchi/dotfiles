@@ -20,6 +20,13 @@
 # returns a compact SRE-PASS envelope") was proven against a path no worker
 # could take, and the comment asserting otherwise is why nobody looked. The
 # stub now goes through the CLI, which is what makes the sentence above true.
+#
+# sp029 T6: `worker-accept` and the identity/session evidence it reads now
+# resolve through the durable placement record under `$XDG_STATE_HOME`
+# rather than the runtime bus tree. This case is unmodified — it is the
+# existing acceptance regression re-run against the new location, proving
+# the guard set (only `complete` accepted, the window closes, the evidence
+# outlives the cleanup) unchanged rather than assumed.
 
 use harness.nu *
 use ../../claude/marketplace/plugins/pi-workers/scripts/pi-worker.nu *

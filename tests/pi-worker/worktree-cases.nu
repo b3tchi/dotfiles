@@ -18,6 +18,38 @@ def dirty-it [repo: string, path: string] {
     "uncommitted\n" | save -f ($path | path join "scratch.txt")
 }
 
+# Fixtures that plant a directory straight under a durable/runtime bus root
+# (a v1 identity, an orphaned project bucket) have to build it the same way
+# `ensure-dir` does — 0700 at EVERY level, not just the leaf — or the next
+# real `ensure-dir` call up the same chain refuses it as a stray
+# world-readable directory left by someone else. A plain `mkdir -p` leaves
+# every ancestor it creates at the umask mode instead.
+def mkdir-0700-chain [dirs: list<string>] {
+    for d in $dirs {
+        if not ($d | path exists) { mkdir $d }
+        chmod 700 $d
+    }
+}
+
+# A v1 identity: written straight onto the legacy runtime tree the way a
+# worker spawned before sp029 T6 did, bypassing the durable write entirely.
+# Built by hand rather than through `bus-identity` — that function IS the T6
+# write path, so using it here would test nothing about the import.
+def seed-v1-identity [run: string, uid: string, payload: record] {
+    let idir = (bus-root | path join $run $uid "identity")
+    mkdir-0700-chain [
+        (bus-root)
+        (bus-root | path join $run)
+        (bus-root | path join $run $uid)
+        $idir
+    ]
+    {
+        protocol: 1, sequence: 1, run: $run, uid: $uid, kind: "identity"
+        created: "2026-01-01T00:00:00.000000Z"
+        payload: $payload
+    } | to json | save -f ($idir | path join "1.json")
+}
+
 # A repo with a bare "origin" carrying three refs: the base, a merged worker
 # branch, and one with a commit of its own. Local worker branches are deleted
 # afterwards, which is the real situation — the local sweep has already run and
@@ -847,8 +879,13 @@ let cases = [
         # flight owns its branch, wherever a copy of it lives.
         let fx = (with-remote "gc-remote-live")
         with-runtime $fx.runtime {
+            # `cwd` must be a real worktree of `$fx.repo`, not an arbitrary
+            # path: `worktrees-reclaim`/`bus-claims` now resolve claims off the
+            # DURABLE placement record keyed by the repo's own project slug
+            # (sp029 T6), so an identity filed under an unrelated cwd would be
+            # invisible to this reclaim call rather than held by it.
             bus-identity "impl-1" --run "r1" --identity {
-                role: "impl", cwd: $nu.temp-dir, branch: "wk-merged.0"
+                role: "impl", cwd: $fx.repo, branch: "wk-merged.0"
                 session: "sid-1", skill: "wk-build", window: "impl-live@dotfiles"
             }
             let got = (worktrees-reclaim --repo $fx.repo --remote "origin" --force)
@@ -902,6 +939,185 @@ let cases = [
             assert-true ((git-in $repo "branch" "--list" $one.branch) | is-not-empty) ""
         }
         rm -rf $root; rm -rf $repo
+    })
+
+    # ---------------------------------------------- durable placement (sp029 T6)
+    #
+    # Identity and the `accepted`/`stopped` markers now live under
+    # `$XDG_STATE_HOME`, keyed by the same project slug `project-dir` uses
+    # (see `resolve-project-slug`), so they survive the runtime bus tree being
+    # wiped — the property a `wk-*` worktree needs, since it can outlive the
+    # login session that spawned it.
+
+    (run-case "worktree/a-created-workers-tree-is-protected-identically-before-and-after-the-runtime-bus-is-wiped" {
+        let repo = (make-repo "wipe-created")
+        let root = (make-runtime "wipe-created")
+        with-runtime $root {
+            let tree = (worktree-allocate --repo $repo --task "t1")
+            bus-identity "impl-1" --run "r1" --identity {
+                role: "impl", cwd: $tree.path, branch: $tree.branch
+                session: "sid-1", skill: "wk-build", window: "impl-1@dotfiles"
+            }
+
+            let before = (worktrees-reclaim --repo $repo --force)
+            assert-eq ($before.removed | length) 0 "a created worker's tree is not swept"
+            assert-eq (($before.kept | first).reason) "r1/impl-1 is created" "named before the wipe"
+
+            # The entire runtime bus tree, gone — what a logout does.
+            rm -rf $root
+            mkdir $root
+            chmod 700 $root
+
+            let after = (worktrees-reclaim --repo $repo --force)
+            assert-eq ($after.removed | length) 0 "still refuses after the runtime tree is wiped"
+            assert-eq (($after.kept | first).reason) "r1/impl-1 is created" "the same reason, from durable evidence alone"
+            assert-true ($tree.path | path exists) "the tree itself survives both times"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "worktree/an-accepted-verdict-survives-a-wiped-runtime-tree" {
+        let repo = (make-repo "wipe-accepted")
+        let root = (make-runtime "wipe-accepted")
+        with-runtime $root {
+            let tree = (worktree-allocate --repo $repo --task "t1")
+            bus-identity "impl-1" --run "r1" --identity {
+                role: "impl", cwd: $tree.path, branch: $tree.branch
+                session: "sid-1", skill: "wk-build", window: "impl-1@dotfiles"
+            }
+            # Only `complete -> accepted` is a legal edge, so the worker has
+            # to report in before it can be marked accepted.
+            bus-result "impl-1" --run "r1" --result {
+                status: "complete", summary: "done", validation: "PASS"
+                window: "impl-1@dotfiles", session: "sid-1", resume: "pi --session sid-1"
+            }
+            mark-accepted "impl-1" --run "r1"
+            assert-eq (bus-status "impl-1" --run "r1" | get state) "accepted" "accepted before the wipe"
+
+            rm -rf $root; mkdir $root; chmod 700 $root
+
+            assert-eq (bus-status "impl-1" --run "r1" | get state) "accepted" "and still accepted after the runtime bus tree is gone"
+            # `accept` is idempotent on an already-accepted worker and needs
+            # nothing from the wiped runtime tree to say so.
+            let result = (worker-accept "impl-1" --run "r1" --repo $repo)
+            assert-eq $result.changed false "unchanged — exactly what it would have said before the wipe"
+            assert-eq $result.state "accepted" ""
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "worktree/an-orphaned-projects-state-home-does-not-interfere-with-a-live-one" {
+        # A repository this machine once worked in and later deleted leaves
+        # its state-home bucket behind — inert, and never asked to answer for
+        # a DIFFERENT `--repo`.
+        let repo = (make-repo "state-orphan-live")
+        let root = (make-runtime "state-orphan-live")
+        with-runtime $root {
+            let state_root = ($env.XDG_STATE_HOME | path join "pi-worker")
+            let orphan = ($state_root | path join "long-gone-repo-deadbeef" "agents" "r1" "ghost")
+            mkdir-0700-chain [
+                $state_root
+                ($state_root | path join "long-gone-repo-deadbeef")
+                ($state_root | path join "long-gone-repo-deadbeef" "agents")
+                ($state_root | path join "long-gone-repo-deadbeef" "agents" "r1")
+                $orphan
+            ]
+            "junk, not an envelope" | save -f ($orphan | path join "identity-looking-but-isnt")
+
+            let tree = (worktree-allocate --repo $repo --task "t1")
+            bus-identity "impl-1" --run "r1" --identity {
+                role: "impl", cwd: $tree.path, branch: $tree.branch
+                session: "sid-1", skill: "wk-build", window: "impl-1@dotfiles"
+            }
+            let got = (worktrees-reclaim --repo $repo --force)
+            assert-eq ($got.removed | length) 0 "the live project's worker is still protected"
+            assert-true ((($got.kept | first).reason) | str contains "impl-1") "and the orphan project never surfaces here"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    # ------------------------------------------------------- v1 import (sp029 T6)
+
+    (run-case "worktree/v1-identity-import-is-idempotent" {
+        let repo = (make-repo "v1-import")
+        let root = (make-runtime "v1-import")
+        with-runtime $root {
+            let tree = (worktree-allocate --repo $repo --task "t1")
+            seed-v1-identity "r1" "impl-1" {
+                role: "impl", cwd: $tree.path, branch: $tree.branch
+                session: "sid-1", skill: "wk-build", window: "impl-1@dotfiles"
+            }
+
+            assert-eq (bus-identity-of "impl-1" --run "r1") null "not on durable storage before the import"
+
+            let first = (import-v1-identities)
+            assert-eq ($first.imported | length) 1 "the v1 identity is imported"
+            assert-eq ($first.imported.0.worktree_exists) true "the worktree it names is still there"
+            assert-eq (bus-identity-of "impl-1" --run "r1" | get session) "sid-1" "and now readable durably"
+
+            let snapshot = (bus-identity-envelope "impl-1" --run "r1")
+            let second = (import-v1-identities)
+            assert-eq ($second.imported | length) 0 "nothing left to import the second time"
+            assert-eq ($second.already | length) 1 "the existing record is recognised, not re-imported"
+            assert-eq (bus-identity-envelope "impl-1" --run "r1") $snapshot "byte-identical: no duplicate record, no re-write"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "worktree/v1-import-keeps-a-record-whose-worktree-no-longer-exists" {
+        let root = (make-runtime "v1-gone")
+        with-runtime $root {
+            seed-v1-identity "r1" "impl-1" {
+                role: "impl", cwd: "/nonexistent/v1-gone-worktree", branch: "wk-t1.0"
+                session: "sid-1", skill: "wk-build", window: "impl-1@dotfiles"
+            }
+
+            let got = (import-v1-identities)
+            assert-eq ($got.imported | length) 1 "imported as a record, not silently dropped"
+            assert-eq ($got.imported.0.worktree_exists) false "and the gap is named rather than hidden"
+            assert-eq (bus-identity-of "impl-1" --run "r1" | get branch) "wk-t1.0" "the record itself is durably readable"
+        }
+        rm -rf $root
+    })
+
+    (run-case "worktree/v1-import-refuses-two-identities-for-one-cwd" {
+        let repo = (make-repo "v1-conflict")
+        let root = (make-runtime "v1-conflict")
+        with-runtime $root {
+            let tree = (worktree-allocate --repo $repo --task "t1")
+            for pair in [["r1" "impl-1"] ["r2" "impl-2"]] {
+                let run = ($pair | get 0)
+                let uid = ($pair | get 1)
+                seed-v1-identity $run $uid {
+                    role: "impl", cwd: $tree.path, branch: $tree.branch
+                    session: $"sid-($uid)", skill: "wk-build", window: $"($uid)@dotfiles"
+                }
+            }
+
+            assert-rejects { import-v1-identities } "r1/impl-1" "the refusal names the first conflicting identity"
+            assert-eq (bus-identity-of "impl-1" --run "r1") null "nothing was written for either side"
+            assert-eq (bus-identity-of "impl-2" --run "r2") null ""
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "worktree/xdg-state-home-unset-falls-back-to-local-state-under-home" {
+        let repo = (make-repo "state-fallback")
+        let root = (make-runtime "state-fallback")
+        let fake_home = ([(fixture-base) $"piw-fake-home-(random chars --length 6)"] | path join)
+        mkdir $fake_home
+        with-runtime $root {
+            with-env {XDG_STATE_HOME: "", HOME: $fake_home} {
+                let tree = (worktree-allocate --repo $repo --task "t1")
+                bus-identity "impl-1" --run "r1" --identity {
+                    role: "impl", cwd: $tree.path, branch: $tree.branch
+                    session: "sid-1", skill: "wk-build", window: "impl-1@dotfiles"
+                }
+                assert-eq (bus-identity-of "impl-1" --run "r1" | get session) "sid-1" "readable via the XDG fallback"
+                assert-true (($fake_home | path join ".local" "state" "pi-worker") | path exists) "written under ~/.local/state, not somewhere invented"
+            }
+        }
+        rm -rf $root; rm -rf $repo; rm -rf $fake_home
     })
 
 ]
