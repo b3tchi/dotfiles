@@ -67,18 +67,18 @@ let cases = [
                     assert-eq $w.window "rev-sp028@dotfiles" "the operator sees a named window"
                     assert-true ($w.window in (windows-on $t.socket)) ""
 
-                    # 2. The worker reports through the CLI, as Pi's result tool does.
-                    let wrote = (with-env {XDG_RUNTIME_DIR: $root} {
-                        ^$nu.current-exe (cli) "send" "rev-sp028" "--run" "acceptance" "--stage" "doc-plan" "--instructions" "refine sp028" "--artifacts" "sp028" | complete
-                    })
-                    assert-eq $wrote.exit_code 0 $"send failed: ($wrote.stderr)"
-
-                    # Through the CLI verb, exactly as the typed result tool
-                    # does. window/session/resume are NOT passed: the CLI fills
-                    # them from the identity recorded at spawn, so a worker
-                    # cannot misreport how to reach it.
+                    # 2. The worker reports through the CLI, as Pi's result tool
+                    # does. sp029 T9: `send` is now generic peer messaging
+                    # (--as/--to/--content), not a way to hand a worker its
+                    # task — that legacy ticket/instructions shape retired
+                    # with the stage registry (T8), so there is no CLI step
+                    # here delivering "refine sp028" any more; the stub's own
+                    # command line already carries what it does. window/
+                    # session/resume are NOT passed to `result`: the CLI
+                    # fills them from the identity recorded at spawn, so a
+                    # worker cannot misreport how to reach it.
                     let report_args = [
-                        "result" "rev-sp028" "--run" "acceptance"
+                        "result" "--as" "rev-sp028"
                         "--status" "complete"
                         "--summary" "sp028 refined into 7 tasks; dependency graph acyclic; every task under 16h"
                         "--validation" "SRE PASS"
@@ -89,24 +89,31 @@ let cases = [
                     assert-eq $reported.exit_code 0 $"result failed: ($reported.stderr)"
 
                     # 3. The initiator receives a COMPACT envelope, via the CLI.
+                    # worker-spawn records the run as the commissioner (sp029
+                    # T5), so `wait --as` that same address is how the result
+                    # arrives — a project-addressed queue read, not "the
+                    # oldest unacknowledged result across the run".
                     let waited = (with-env {XDG_RUNTIME_DIR: $root} {
-                        ^$nu.current-exe (cli) "wait" "--run" "acceptance" | complete
+                        ^$nu.current-exe (cli) "wait" "--as" "acceptance" | complete
                     })
                     assert-eq $waited.exit_code 0 $"wait failed: ($waited.stderr)"
-                    let envelope = ($waited.stdout | from json)
-                    assert-eq $envelope.payload.validation "SRE PASS" "the verdict arrives in the typed field"
-                    assert-eq $envelope.payload.resume "pi --session sid-acceptance" "with an exact resume command"
+                    let envelope = ($waited.stdout | from json | first)
+                    assert-eq $envelope.content.validation "SRE PASS" "the verdict arrives in the typed field"
+                    assert-eq $envelope.content.resume "pi --session sid-acceptance" "with an exact resume command"
                     assert-true ((envelope-bytes $envelope) < 2048) $"the envelope must stay compact, got (envelope-bytes $envelope) bytes"
 
                     # 4. Meanwhile the DETAIL is still in the window, not the envelope.
                     let pane = (^tmux -L $t.socket capture-pane -p -t $w.window | str trim)
                     assert-true ($pane | str contains "SRE review") "the worker's detail is on screen"
-                    assert-true (not ($envelope.payload.summary | str contains "granularity")) "and not copied into the envelope"
+                    assert-true (not ($envelope.content.summary | str contains "granularity")) "and not copied into the envelope"
                     assert-true ($w.window in (windows-on $t.socket)) "the window remains inspectable after completion"
 
-                    # 5. Acceptance is the only thing that cleans up.
-                    legacy-bus-ack --run "acceptance" --uid "rev-sp028" --sequence $envelope.sequence
-                    assert-true ($w.window in (windows-on $t.socket)) "ack alone does not close it"
+                    # 5. Acceptance is the only thing that cleans up. sp029 T9:
+                    # there is no ack step any more — `wait` above already
+                    # marked the row read as it delivered it — and the window
+                    # survives regardless, since nothing short of accept/stop
+                    # ever closes it.
+                    assert-true ($w.window in (windows-on $t.socket)) "a delivered result alone does not close the window"
 
                     worker-accept "rev-sp028" --run "acceptance" --repo $repo --socket $t.socket
                     assert-true (not ($w.window in (windows-on $t.socket))) "acceptance closes the window"

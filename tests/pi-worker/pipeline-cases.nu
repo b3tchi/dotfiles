@@ -37,6 +37,10 @@ def launch [t: record, repo: string, uid: string, role: string, skill: string = 
     worker-spawn --run "run-1" --uid $uid --role $role --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session $"sid-($uid)" --skill $skill --isolation "worktree" --socket $t.socket
 }
 
+# sp029 T9's CLI subprocess cases below (`cli-t9`, not `cli`, so it does not
+# collide with any other suite's own local of the same name).
+def cli-t9 []: nothing -> string { worker-script $env.FILE_PWD }
+
 def complete-with [uid: string, summary: string, status: string = "complete"] {
     let verdict = (if $status == "complete" { "PASS" } else { null })
     bus-result $uid --run "run-1" --result {
@@ -607,6 +611,126 @@ let cases = [
             let written = (bus-settled "impl-a" --run "run-1")
             assert-true (not $written.reported) "no commissioner key at all is uncommissioned, not a legacy default"
         }
+        rm -rf $root
+    })
+
+    # ------------------------------- sp029 T9: CLI and orchestrator tool surface
+
+    # Enumerated over EVERY verb that still has a genuinely required FLAG
+    # (as opposed to a required POSITIONAL, whose missing-argument message is
+    # nushell's own business, or a flag `repo-or-refuse` can derive from the
+    # cwd) — the re-proof, across the rewired surface, of "every verb names
+    # the flag it is missing" (dotfiles-kuw5's original guard).
+    (run-case "pipeline/every-verb-with-a-required-flag-names-it-when-missing" {
+        let root = (make-runtime "t9-missing-flags")
+        let probes = [
+            [verb, args];
+            ["spawn"   ["spawn"]]
+            ["send"    ["send"]]
+            ["wait"    ["wait"]]
+            ["result"  ["result"]]
+            ["settled" ["settled"]]
+            ["rm"      ["rm"]]
+            ["resume"  ["resume" "w1"]]
+        ]
+        for p in $probes {
+            let out = (with-env {XDG_RUNTIME_DIR: $root} {
+                ^$nu.current-exe (cli-t9) ...$p.args | complete
+            })
+            assert-true ($out.exit_code != 0) $"($p.verb) with nothing passed should refuse"
+            let err = ($out.stderr | str trim)
+            assert-true (not ($err | str contains "Can't convert")) $"($p.verb) leaked a null instead of refusing: ($err)"
+            assert-true ($err | str contains $"($p.verb) needs --") $"($p.verb) must name the flag it wants: ($err)"
+        }
+        rm -rf $root
+    })
+
+    # A verb invoked with `--as` naming an address that is not this session's
+    # own is allowed for OBSERVATION (status) and refused for the one verb
+    # that WRITES — marking a row read.
+    (run-case "pipeline/wait-refuses-to-mark-another-agents-row-read-but-status-may-observe-it" {
+        let root = (make-runtime "t9-wait-ownership")
+        with-runtime $root {
+            bus-send --to ["someone-else"] --from "orchestrator" --content "hello"
+        }
+        let cli = (cli-t9)
+        let waited = (with-env {XDG_RUNTIME_DIR: $root, PI_WORKER_UID: "impl-a"} {
+            ^$nu.current-exe $cli wait --as "someone-else" | complete
+        })
+        assert-true ($waited.exit_code != 0) "wait must refuse to read+mark another agent's queue"
+        assert-true (($waited.stderr | str trim) | str contains "not this session's own address") $"refusal must name the ownership rule: ($waited.stderr)"
+
+        # The mail is untouched by the refusal: it is still there for its
+        # actual owner to read.
+        let owner_read = (with-env {XDG_RUNTIME_DIR: $root} {
+            ^$nu.current-exe $cli wait --as "someone-else" | complete
+        })
+        assert-eq $owner_read.exit_code 0 ""
+        assert-true (($owner_read.stdout | from json | length) == 1) "the refused read did not mark the row"
+
+        # Observation is unaffected: status may still ask about ANY uid,
+        # regardless of this session's own claimed address.
+        let status_out = (with-env {XDG_RUNTIME_DIR: $root, PI_WORKER_UID: "impl-a"} {
+            ^$nu.current-exe $cli status "someone-else" | complete
+        })
+        assert-eq $status_out.exit_code 0 "status may observe any uid regardless of session identity"
+        rm -rf $root
+    })
+
+    # Golden JSON shape cases (sp029 T9's `## edge_cases`: "JSON output shape
+    # stability for consumers that parse it") for the three verbs a script
+    # actually parses: `send`, `wait`, `result`.
+    (run-case "pipeline/send-output-is-a-stable-envelope-shape" {
+        let root = (make-runtime "t9-send-shape")
+        let out = (with-env {XDG_RUNTIME_DIR: $root} {
+            ^$nu.current-exe (cli-t9) send --as "impl-a" --to "orchestrator-1" --content "done" | complete
+        })
+        assert-eq $out.exit_code 0 $"($out.stderr)"
+        let envelope = ($out.stdout | from json)
+        assert-eq ($envelope | columns | sort) ["content" "created" "from" "id" "kind" "protocol" "to"] "send's JSON shape is exactly these fields"
+        assert-eq $envelope.from "impl-a" ""
+        assert-eq $envelope.to ["orchestrator-1"] ""
+        assert-eq $envelope.content "done" ""
+        rm -rf $root
+    })
+
+    (run-case "pipeline/wait-output-is-a-json-array-that-goes-empty-once-marked-read" {
+        let root = (make-runtime "t9-wait-shape")
+        let cli = (cli-t9)
+        with-env {XDG_RUNTIME_DIR: $root} {
+            ^$nu.current-exe $cli send --as "impl-a" --to "orchestrator-1" --content "done" | complete
+        } | ignore
+        let out = (with-env {XDG_RUNTIME_DIR: $root} { ^$nu.current-exe $cli wait --as "orchestrator-1" | complete })
+        assert-eq $out.exit_code 0 $"($out.stderr)"
+        let mail = ($out.stdout | from json)
+        assert-eq ($mail | length) 1 "one message waiting"
+        assert-eq $mail.0.content "done" ""
+        assert-eq ($mail.0 | columns | sort) ["content" "created" "from" "id" "kind" "protocol" "to"] ""
+
+        # `wait` marks what it returns: reading again finds nothing, and
+        # prints nothing rather than `[]`, so a shell conditional still works.
+        let again = (with-env {XDG_RUNTIME_DIR: $root} { ^$nu.current-exe $cli wait --as "orchestrator-1" | complete })
+        assert-eq $again.exit_code 0 ""
+        assert-eq ($again.stdout | str trim) "" "wait prints nothing once its mail is already marked read"
+        rm -rf $root
+    })
+
+    (run-case "pipeline/result-output-is-a-stable-envelope-shape" {
+        let root = (make-runtime "t9-result-shape")
+        with-runtime $root {
+            bus-identity "impl-a" --run "r1" --identity {
+                role: "impl", cwd: "/tmp/nowhere", branch: "wk-t.0"
+                session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
+            }
+        }
+        let out = (with-env {XDG_RUNTIME_DIR: $root} {
+            ^$nu.current-exe (cli-t9) result --as "impl-a" --status "complete" --summary "done" --validation "PASS" | complete
+        })
+        assert-eq $out.exit_code 0 $"($out.stderr)"
+        let written = ($out.stdout | from json)
+        assert-eq ($written | columns | sort) ["content" "created" "from" "kind" "payload" "protocol" "run" "sequence" "to" "uid"] "result's JSON shape is exactly these fields"
+        assert-eq $written.payload.status "complete" ""
+        assert-eq $written.payload.validation "PASS" ""
         rm -rf $root
     })
 

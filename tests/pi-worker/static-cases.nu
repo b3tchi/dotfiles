@@ -293,6 +293,85 @@ let cases = [
         # previously-fixed bug.
         assert-true (not ($worker_text | str contains 'write-marker $run $uid "waiting_human"')) "resume must not write a waiting_human marker"
     })
+
+    # ------------------------------------------- sp029 T9: CLI addressing
+
+    (run-case "static/run-sequence-and-ack-are-absent-from-the-cli-verbs" {
+        # The literal success criterion: every `main <verb>` definition must
+        # neither declare a `--run`/`--sequence` flag nor exist as `main ack`
+        # any more. Checked against the VERB DEFINITIONS themselves (the
+        # `def "main ..."  [...]` parameter lists), not the whole file, so a
+        # comment explaining the retirement (this very suite is full of them)
+        # can say the word "run" without tripping the guard.
+        let text = (open --raw $worker)
+        let verb_defs = (
+            $text
+            | str replace --all --regex '(?s)\r\n' "\n"
+            | split row "\ndef \"main "
+            | skip 1
+            | each {|block|
+                # A verb def's own parameter list runs from the block's start
+                # to its first `] {`, which is where the body begins.
+                let close = ($block | str index-of "] {")
+                if $close < 0 { $block } else { $block | str substring 0..$close }
+            }
+        )
+        for signature in $verb_defs {
+            assert-true (not ($signature | str contains "--run")) $"a main verb signature still declares --run: ($signature | str substring 0..80)"
+            assert-true (not ($signature | str contains "--sequence")) $"a main verb signature still declares --sequence: ($signature | str substring 0..80)"
+        }
+        assert-true (not ($text | str contains 'def "main ack"')) "the ack verb must not exist on the CLI"
+    })
+
+    (run-case "static/help-mentions-the-project-scope-rather-than-a-run-id" {
+        let text = (open --raw $worker)
+        let usage_start = ($text | str index-of "def usage")
+        assert-true ($usage_start >= 0) "the usage function must exist"
+        let usage_end = ($text | str index-of --range $usage_start.. "\n}\n")
+        let usage_text = ($text | str substring $usage_start..$usage_end)
+        assert-true ($usage_text | str contains "project") "usage must describe the project scope"
+        # The VERBS block is what documents each verb's own flags — the prose
+        # around it is free to explain the retirement in words that mention
+        # "run id" (as this very usage text does), so only THAT block, and
+        # only per-verb lines, are held to "no run id left to pass".
+        let verbs_start = ($usage_text | str index-of "VERBS")
+        let verbs_end = ($usage_text | str index-of --range $verbs_start.. "NOTES")
+        let verbs_block = ($usage_text | str substring $verbs_start..$verbs_end)
+        assert-true (not ($verbs_block | str contains "--run")) "no verb line may still document a --run flag"
+        assert-true (not ($verbs_block | str contains "run id")) "no verb line may still describe a run id"
+    })
+
+    (run-case "static/pi-worker-tool-verbs-match-the-cli-verb-set" {
+        # sp029 T9's drift guard: the `pi_worker` tool's verb enum must be
+        # exactly the CLI's `main <verb>` set, minus the worker-only verbs
+        # (`result`/`settled`, which have their own tool) and the two
+        # deliberately excluded from any LLM-facing surface (`reclaim`,
+        # `doctor`). A verb added to one side and not the other is exactly
+        # the failure this plugin has already had once — two halves of one
+        # contract disagreeing silently.
+        let worker_text = (open --raw $worker)
+        let cli_verbs = (
+            $worker_text
+            | lines
+            | where {|l| $l | str starts-with 'def "main ' }
+            | each {|l| $l | str replace 'def "main ' "" | split row '"' | get 0 }
+        )
+        let not_initiator = ["result" "settled" "reclaim" "doctor"]
+        let expected_tool_verbs = ($cli_verbs | where {|v| $v not-in $not_initiator } | sort)
+
+        let extension_text = (open --raw $extension)
+        let block_start = ($extension_text | str index-of "export const INITIATOR_VERBS")
+        assert-true ($block_start >= 0) "pi.ts must declare INITIATOR_VERBS"
+        let block_end = ($extension_text | str index-of --range $block_start.. "] as const")
+        let block = ($extension_text | str substring $block_start..$block_end)
+        let tool_verbs = (
+            $block
+            | parse --regex '"([a-z]+)"'
+            | get capture0
+            | sort
+        )
+        assert-eq $tool_verbs $expected_tool_verbs "pi_worker's INITIATOR_VERBS must match the CLI's verb set exactly (minus result/settled/reclaim/doctor)"
+    })
     ]
 
 $cases | to json

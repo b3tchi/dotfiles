@@ -146,9 +146,12 @@ let cases = [
         # module: it had exported functions and no entry point.
         let out = (run-cli)
         assert-eq $out.exit_code 0 $"usage should succeed: ($out.stderr)"
-        for verb in ["spawn" "send" "wait" "ack" "status" "inspect" "resume" "accept" "stop"] {
+        # sp029 T9: `ack` retired — there is no ack file any more, and `wait`
+        # marks what it delivers read by itself.
+        for verb in ["spawn" "send" "wait" "status" "inspect" "resume" "accept" "stop"] {
             assert-true ($out.stdout | str contains $verb) $"usage must list '($verb)'"
         }
+        assert-true (not ($out.stdout | str contains "\n  ack ")) "usage must not list a retired ack verb"
     })
 
     (run-case "cli/spawn-refuses-without-isolation-naming-both-legal-values" {
@@ -194,24 +197,30 @@ let cases = [
         #
         # Data-driven on purpose: the invariant is about the SURFACE, so a new
         # verb that forgets the guard fails here rather than in a live run.
+        #
+        # sp029 T9: `--run` retired from every verb, and with it most of these
+        # probes' REASON for refusing — a verb that only ever needed `--run`
+        # (liveness/status/inspect/timeline/workers) now has no required FLAG
+        # left at all (only a positional uid, or none), so it no longer
+        # refuses "nothing passed" the way this case checks; its own honest
+        # "unknown worker"/empty-list answer is covered elsewhere (bus-cases,
+        # install's own status/wait cases below). `accept`/`respawn` lost
+        # their reason for a DIFFERENT one: `--repo` is derivable from this
+        # test's own cwd (a real repo), so they now get far enough to ask the
+        # bus about the uid and refuse on THAT, not on a missing flag. `ack`
+        # is gone outright. What remains — `send`/`wait`/`result`/`settled`
+        # (all need `--as`), `rm` (`--uid`), `resume` (`--feedback`), `spawn`
+        # (`--role` etc) — is exactly the set with a real required flag left,
+        # re-proven as an enumerated case in pipeline-cases.nu too.
         let root = (make-runtime "flag-refusals")
         let probes = [
             [verb, args];
-            ["send"     ["send" "w1"]]
+            ["send"     ["send"]]
             ["wait"     ["wait"]]
-            ["ack"      ["ack"]]
-            ["result"   ["result" "w1"]]
-            ["settled"  ["settled" "w1"]]
-            ["liveness" ["liveness" "w1"]]
-            ["status"   ["status" "w1"]]
-            ["inspect"  ["inspect" "w1"]]
-            ["timeline" ["timeline" "w1"]]
+            ["result"   ["result"]]
+            ["settled"  ["settled"]]
             ["rm"       ["rm"]]
-            ["workers"  ["workers"]]
             ["resume"   ["resume" "w1"]]
-            ["respawn"  ["respawn" "w1"]]
-            ["accept"   ["accept" "w1"]]
-            ["stop"     ["stop" "w1"]]
             ["spawn"    ["spawn" "--role" "impl"]]
         ]
         for p in $probes {
@@ -259,7 +268,7 @@ let cases = [
         # Derived from the cwd, like spawn does: it is not a decision the
         # caller was making.
         let root = (make-runtime "derive-repo")
-        for verb in [["accept" ["accept" "nobody" "--run" "r1"]] ["respawn" ["respawn" "nobody" "--run" "r1"]]] {
+        for verb in [["accept" ["accept" "nobody"]] ["respawn" ["respawn" "nobody"]]] {
             let out = (run-cli ...($verb | get 1) --runtime $root)
             assert-true ($out.exit_code != 0) $"($verb | get 0) should refuse an unknown worker"
             let err = ($out.stderr | str trim)
@@ -282,7 +291,7 @@ let cases = [
         let outside = ((fixture-base) | path join $"outside-(random chars --length 6)")
         mkdir $outside
         cd $outside
-        let out = (run-cli "accept" "nobody" "--run" "r1" --runtime $root)
+        let out = (run-cli "accept" "nobody" --runtime $root)
         assert-true ($out.exit_code != 0) ""
         let err = ($out.stderr | str trim)
         assert-true ($err | str contains "--repo") $"the refusal must name the flag: ($err)"
@@ -291,44 +300,27 @@ let cases = [
 
     (run-case "cli/status-of-an-unknown-worker-is-json-not-a-crash" {
         let root = (make-runtime "cli-status")
-        let out = (run-cli "status" "nobody" "--run" "r1" --runtime $root)
+        let out = (run-cli "status" "nobody" --runtime $root)
         assert-eq $out.exit_code 0 $"($out.stderr)"
         let parsed = ($out.stdout | from json)
         assert-eq $parsed.state "unknown" "an unknown worker reports unknown"
         rm -rf $root
     })
 
-    (run-case "cli/wait-on-an-empty-run-exits-cleanly-with-no-output" {
+    (run-case "cli/wait-on-an-empty-queue-exits-cleanly-with-no-output" {
         # Scripting the pipeline means `wait` has to be usable in a conditional.
         let root = (make-runtime "cli-wait")
-        let out = (run-cli "wait" "--run" "r1" --runtime $root)
+        let out = (run-cli "wait" "--as" "orchestrator-1" --runtime $root)
         assert-eq $out.exit_code 0 "no mail is not a failure"
         assert-eq ($out.stdout | str trim) "" "and produces nothing to parse"
         rm -rf $root
     })
 
-    (run-case "cli/wait-after-an-unscoped-sequence-is-refused-by-name" {
-        # dotfiles-i0hz. The flag is per worker because sequences are, and the
-        # refusal has to say so at the CLI too: an orchestrator learns the
-        # vocabulary from being told no.
-        let root = (make-runtime "cli-wait-after")
-        let out = (run-cli "wait" "--run" "r1" "--after" "2" --runtime $root)
-        assert-true ($out.exit_code != 0) "an unscoped --after must not silently pick a worker"
-        let said = ($out.stdout + $out.stderr)
-        assert-true ($said | str contains "--uid") "the refusal names the flag that fixes it"
-        assert-true ($said | str contains "per worker") "and why"
-        rm -rf $root
-    })
-
-    (run-case "cli/a-blocking-wait-after-says-which-sequence-it-heard-nothing-past" {
-        # "no result" and "no result you have not already read" are different
-        # sentences, and only one of them means the worker has been quiet.
-        let root = (make-runtime "cli-wait-after-quiet")
-        let out = (run-cli "wait" "--run" "r1" "--uid" "w1" "--after" "3" "--block" "--timeout" "0" --runtime $root)
-        assert-eq $out.exit_code 0 "giving up is not a failure"
-        assert-true ($out.stdout | str contains "sequence 3") $"the message names the sequence: ($out.stdout)"
-        rm -rf $root
-    })
+    # sp029 T9: the sequence-scoped `--after`/`--uid` shape (dotfiles-i0hz)
+    # retired along with `--run` and `ack` — there is no sequence number left
+    # to skip past, so the two cases that used to prove it are gone rather
+    # than adapted; `wait --as` addresses one agent's queue directly, which is
+    # the property `--after` used to have to be told about explicitly.
 
     (run-case "cli/an-unknown-verb-fails-loudly-and-names-the-verbs" {
         let out = (run-cli "teleport")
@@ -341,7 +333,7 @@ let cases = [
     (run-case "cli/a-missing-runtime-directory-is-an-actionable-error" {
         # XDG_RUNTIME_DIR unset is a real state on a bare ssh session, and the
         # message has to say what to set rather than failing deep in a path join.
-        let out = (with-env {XDG_RUNTIME_DIR: null} { ^$nu.current-exe (worker-cli) "status" "u" "--run" "r1" | complete })
+        let out = (with-env {XDG_RUNTIME_DIR: null} { ^$nu.current-exe (worker-cli) "status" "u" | complete })
         assert-true ($out.exit_code != 0) "it must fail, not guess a directory"
         assert-true (($out.stdout + $out.stderr) | str contains "XDG_RUNTIME_DIR") "and name the variable"
     })
@@ -374,20 +366,23 @@ let cases = [
             bus-identity "impl-a" --run "r1" --identity {
                 role: "impl", cwd: "/tmp/nowhere", branch: "wk-t1.0"
                 session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
+                commissioner: "orchestrator-1"
             }
         }
-        let out = (run-cli "result" "impl-a" "--run" "r1" "--status" "complete"
+        let out = (run-cli "result" "--as" "impl-a" "--status" "complete"
             "--summary" "did the thing" "--validation" "TESTS PASS" --runtime $root)
         assert-eq $out.exit_code 0 $"($out.stderr)"
 
         # The initiator's own verb must see it — reporting that only the writer
-        # can read is not reporting.
-        let waited = (run-cli "wait" "--run" "r1" --runtime $root)
+        # can read is not reporting. sp029 T9: `wait` is now addressed by the
+        # COMMISSIONER's own uid, not the run — `worker-spawn` sets it to the
+        # run by default, but a hand-built identity (as here) names it
+        # explicitly.
+        let waited = (run-cli "wait" "--as" "orchestrator-1" --runtime $root)
         assert-eq $waited.exit_code 0 $"($waited.stderr)"
-        let envelope = ($waited.stdout | from json)
-        assert-eq $envelope.kind "result" "wait returns the result envelope"
-        assert-eq $envelope.payload.status "complete" "carrying the reported status"
-        assert-eq $envelope.payload.validation "TESTS PASS" "and its verdict"
+        let envelope = ($waited.stdout | from json | first)
+        assert-eq $envelope.content.status "complete" "carrying the reported status"
+        assert-eq $envelope.content.validation "TESTS PASS" "and its verdict"
         rm -rf $root
     })
 
@@ -401,7 +396,7 @@ let cases = [
                 session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
             }
         }
-        let out = (run-cli "result" "impl-a" "--run" "r1" "--status" "accepted"
+        let out = (run-cli "result" "--as" "impl-a" "--status" "accepted"
             "--summary" "I accept myself" --runtime $root)
 
         assert-true ($out.exit_code != 0) "self-acceptance must be refused"
@@ -411,6 +406,12 @@ let cases = [
     (run-case "cli/settled-turns-a-silent-worker-into-a-readable-protocol-error" {
         # The failure this exists to prevent: a worker settles having reported
         # nothing, and the initiator waits forever on a worker that is done.
+        #
+        # sp029 T9: `main wait` moved onto the project-addressed bus, and
+        # `bus-settled` does not forward its protocol_error there the way
+        # `bus-result` forwards a real report (dotfiles-8y9s, filed) — so this
+        # asserts through `status`, which still reads the legacy outbox
+        # `bus-settled` writes to either way.
         let root = (make-runtime "cli-settled")
         with-runtime $root {
             bus-identity "impl-a" --run "r1" --identity {
@@ -419,13 +420,12 @@ let cases = [
                 commissioner: "r1"
             }
         }
-        let out = (run-cli "settled" "impl-a" "--run" "r1" --runtime $root)
+        let out = (run-cli "settled" "--as" "impl-a" --runtime $root)
         assert-eq $out.exit_code 0 $"($out.stderr)"
 
-        let waited = (run-cli "wait" "--run" "r1" --runtime $root)
-        let envelope = ($waited.stdout | from json)
-        assert-eq $envelope.kind "error" "the initiator learns it settled empty"
-        assert-eq $envelope.payload.code "protocol_error" "as a protocol error"
+        let status_out = (run-cli "status" "impl-a" --runtime $root)
+        assert-eq $status_out.exit_code 0 $"($status_out.stderr)"
+        assert-eq ($status_out.stdout | from json | get state) "protocol_error" "settling silently is a readable protocol error"
         rm -rf $root
     })
 
@@ -438,8 +438,8 @@ let cases = [
                 commissioner: "r1"
             }
         }
-        run-cli "result" "impl-a" "--run" "r1" "--status" "blocked" "--summary" "stuck" --runtime $root
-        let out = (run-cli "settled" "impl-a" "--run" "r1" --runtime $root)
+        run-cli "result" "--as" "impl-a" "--status" "blocked" "--summary" "stuck" --runtime $root
+        let out = (run-cli "settled" "--as" "impl-a" --runtime $root)
         assert-eq $out.exit_code 0 $"($out.stderr)"
 
         with-runtime $root {

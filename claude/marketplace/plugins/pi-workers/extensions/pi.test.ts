@@ -519,6 +519,8 @@ describe("typed result tool", () => {
   }
 
   test("it reports through the CLI, passing the worker's own address", async () => {
+    // sp029 T9: `result` takes `--as`, never a positional uid or `--run` — a
+    // uid is looked up in the caller's own project now.
     const { exec, calls } = fakeExec();
     const tool = createResultTool({ run: "r1", uid: "impl-a", identity, exec });
 
@@ -532,9 +534,8 @@ describe("typed result tool", () => {
     expect(calls[0].command).toBe("pi-worker");
     expect(calls[0].args).toEqual([
       "result",
+      "--as",
       "impl-a",
-      "--run",
-      "r1",
       "--status",
       "complete",
       "--summary",
@@ -590,7 +591,7 @@ describe("typed result tool", () => {
 
     await tool.reportSettled();
 
-    expect(calls[0].args).toEqual(["settled", "impl-a", "--run", "r1"]);
+    expect(calls[0].args).toEqual(["settled", "--as", "impl-a"]);
   });
 
   test("a missing CLI is reported rather than thrown at the host", async () => {
@@ -645,12 +646,13 @@ describe("initiator tool", () => {
   }
 
   test("spawn passes every flag the CLI needs, and omits the ones not given", async () => {
+    // sp029 T9: `--run` is gone from spawn's CLI surface — it is minted
+    // internally, never a flag a caller passes.
     const { exec, calls } = fakeExec();
     const tool = createInitiatorTool({ exec });
 
     await tool.invoke({
       verb: "spawn",
-      run: "t1",
       uid: "w1",
       role: "rev",
       subject: "demo",
@@ -662,7 +664,7 @@ describe("initiator tool", () => {
 
     expect(calls[0].command).toBe("pi-worker");
     expect(calls[0].args).toEqual([
-      "spawn", "--run", "t1", "--uid", "w1", "--role", "rev",
+      "spawn", "--uid", "w1", "--role", "rev",
       "--subject", "demo", "--project", "dotfiles", "--repo", "/repo",
       "--session", "sid-1", "--skill", "probe",
     ]);
@@ -673,74 +675,43 @@ describe("initiator tool", () => {
   });
 
   test("a positional verb puts the uid where the CLI expects it", async () => {
-    // `send`, `status`, `resume` and friends take the uid positionally, not as
-    // a flag. Getting that wrong fails at the CLI, but only at runtime.
+    // `status`, `resume` and friends take the uid positionally, not as a
+    // flag. Getting that wrong fails at the CLI, but only at runtime.
     const { exec, calls } = fakeExec();
     const tool = createInitiatorTool({ exec });
 
-    await tool.invoke({ verb: "send", run: "t1", uid: "w1", stage: "probe", instructions: "go" });
+    await tool.invoke({ verb: "status", uid: "w1" });
 
-    expect(calls[0].args).toEqual([
-      "send", "w1", "--run", "t1", "--stage", "probe", "--instructions", "go",
-    ]);
+    expect(calls[0].args).toEqual(["status", "w1"]);
   });
 
-  test("wait takes only a run and returns what the bus said", async () => {
+  test("send addresses a message by --as/--to/--content, not a positional uid", async () => {
+    // sp029 T9: `send` is peer-addressed now — the retired ticket/
+    // instructions work-payload shape (`--stage`/`--task`/`--instructions`/
+    // `--artifacts`) is gone from the tool along with `--run`.
+    const { exec, calls } = fakeExec();
+    const tool = createInitiatorTool({ exec });
+
+    await tool.invoke({ verb: "send", as: "orchestrator-1", to: "impl-a", content: "go" });
+
+    expect(calls[0].args).toEqual(["send", "--as", "orchestrator-1", "--to", "impl-a", "--content", "go"]);
+  });
+
+  test("wait is addressed by --as, and returns what the bus said", async () => {
+    // sp029 T9: `wait` takes `--as` (whose queue) — never `--run`/`--uid`/
+    // `--after`, which retired with the sequence-numbered ack path — and its
+    // JSON is a LIST of messages, not one oldest-unacknowledged envelope.
     const { exec, calls } = fakeExec({
-      stdout: '{"kind":"result","sequence":1,"run":"t1","uid":"w1","payload":{"status":"complete","summary":"done"}}',
+      stdout: '[{"id":"01ABC","from":"w1","to":["orchestrator-1"],"content":{"status":"complete","summary":"done"}}]',
     });
     const tool = createInitiatorTool({ exec });
 
-    const out = await tool.invoke({ verb: "wait", run: "t1" });
+    const out = await tool.invoke({ verb: "wait", as: "orchestrator-1" });
 
-    expect(calls[0].args).toEqual(["wait", "--run", "t1"]);
+    expect(calls[0].args).toEqual(["wait", "--as", "orchestrator-1"]);
     expect(out.ok).toBe(true);
     // Summarised, not passed through — see the summarisation cases below.
     expect(out.detail).toContain("complete");
-  });
-
-  test("wait scopes to a worker when one is named", async () => {
-    // A run that still holds a finished worker with an unacked envelope would
-    // otherwise hand its answer to whoever asked next — which is exactly what
-    // happened live: a spawn of r2/x1 was answered with r2/w1's stale result.
-    const { exec, calls } = fakeExec();
-    await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "r2", uid: "x1" });
-    expect(calls[0].args).toEqual(["wait", "--run", "r2", "--uid", "x1"]);
-  });
-
-  test("wait without a uid still drains the whole run", async () => {
-    // The orchestrator's use: whatever finished first, whoever it was.
-    const { exec, calls } = fakeExec();
-    await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "r2" });
-    expect(calls[0].args).toEqual(["wait", "--run", "r2"]);
-  });
-
-  test("wait forwards the sequence the caller has already read", async () => {
-    // dotfiles-i0hz. An orchestrator that gave a reported-but-unacked worker
-    // more work had no way to ask for the NEW report: a plain wait hands the
-    // old one back, since unacknowledged IS pending, and acking to clear it
-    // releases the worker that owes the follow-up.
-    const { exec, calls } = fakeExec();
-    await createInitiatorTool({ exec }).invoke({
-      verb: "wait",
-      run: "r1",
-      uid: "w1",
-      after: 2,
-      block: true,
-      timeout: 90,
-    });
-    expect(calls[0].args).toEqual([
-      "wait", "--run", "r1", "--uid", "w1", "--after", "2", "--block", "--timeout", "90",
-    ]);
-  });
-
-  test("an absent --after is not sent as zero", async () => {
-    // The flag's default IS its absence, and a caller that omits it must get
-    // exactly the old command line — otherwise adding the flag changes what
-    // every existing orchestrator runs.
-    const { exec, calls } = fakeExec();
-    await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "r1", uid: "w1" });
-    expect(calls[0].args).toEqual(["wait", "--run", "r1", "--uid", "w1"]);
   });
 
   test("a switch is passed as a bare flag, not as `--block true`", async () => {
@@ -753,8 +724,8 @@ describe("initiator tool", () => {
         return { code: 0, stdout: "", stderr: "" };
       },
     });
-    await tool.invoke({ verb: "wait", run: "r1", uid: "w1", block: true, timeout: 30 });
-    expect(calls[0]).toEqual(["wait", "--run", "r1", "--uid", "w1", "--block", "--timeout", "30"]);
+    await tool.invoke({ verb: "wait", as: "orchestrator-1", block: true, timeout: 30 });
+    expect(calls[0]).toEqual(["wait", "--as", "orchestrator-1", "--block", "--timeout", "30"]);
   });
 
   test("a switch left false is omitted entirely", async () => {
@@ -766,8 +737,8 @@ describe("initiator tool", () => {
         return { code: 0, stdout: "", stderr: "" };
       },
     });
-    await tool.invoke({ verb: "wait", run: "r1", block: false });
-    expect(calls[0]).toEqual(["wait", "--run", "r1"]);
+    await tool.invoke({ verb: "wait", as: "orchestrator-1", block: false });
+    expect(calls[0]).toEqual(["wait", "--as", "orchestrator-1"]);
   });
 
   test("spawn omits the ids it is not given, so the CLI can mint them", async () => {
@@ -807,13 +778,14 @@ describe("initiator tool", () => {
     // and `wait` printed all of it, fence and blank lines included. The full
     // envelope is on the bus either way — `inspect` and `timeline` are how you
     // ask for it — so the transcript carries the first line and says there is
-    // more.
+    // more. sp029 T9: `wait` returns a LIST of messages now, each carrying an
+    // opaque `content` — a typed result's `status`/`summary` still live there.
     const summary = "Created `/tmp/x.md` with exact content:\n\n```markdown\n# x.md\n```";
-    const { exec } = fakeExec({ stdout: JSON.stringify({
-      run: "r1", uid: "impl-1", sequence: 1, kind: "result",
-      payload: { status: "complete", summary, window: "w", session: "s", resume: "r" },
-    }) });
-    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "r1" });
+    const { exec } = fakeExec({ stdout: JSON.stringify([{
+      id: "01ABC", from: "impl-1", to: ["orchestrator-1"],
+      content: { status: "complete", summary, window: "w", session: "s", resume: "r" },
+    }]) });
+    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", as: "orchestrator-1" });
     expect(out.detail.split("\n")).toHaveLength(1);
     expect(out.detail).toContain("complete");
     expect(out.detail).toContain("Created `/tmp/x.md` with exact content:");
@@ -825,11 +797,11 @@ describe("initiator tool", () => {
     // Nothing to break on and nothing worth reading: it still may not run off
     // the side of the terminal or past the three-line budget.
     const summary = "x".repeat(400);
-    const { exec } = fakeExec({ stdout: JSON.stringify({
-      run: "r1", uid: "impl-1", sequence: 1, kind: "result",
-      payload: { status: "complete", summary, window: "w", session: "s", resume: "r" },
-    }) });
-    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "r1" });
+    const { exec } = fakeExec({ stdout: JSON.stringify([{
+      id: "01ABC", from: "impl-1", to: ["orchestrator-1"],
+      content: { status: "complete", summary, window: "w", session: "s", resume: "r" },
+    }]) });
+    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", as: "orchestrator-1" });
     const lines = out.detail.split("\n");
     expect(lines.length).toBeLessThanOrEqual(4);
     for (const line of lines) expect(line.length).toBeLessThanOrEqual(100);
@@ -837,16 +809,15 @@ describe("initiator tool", () => {
   });
 
   test("a one-line summary is passed through untouched", async () => {
-    const { exec } = fakeExec({ stdout: JSON.stringify({
-      run: "r1", uid: "impl-1", sequence: 1, kind: "result",
-      payload: { status: "complete", summary: "noted BASALT-7", window: "w", session: "s", resume: "r" },
-    }) });
-    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "r1" });
+    const { exec } = fakeExec({ stdout: JSON.stringify([{
+      id: "01ABC", from: "impl-1", to: ["orchestrator-1"],
+      content: { status: "complete", summary: "noted BASALT-7", window: "w", session: "s", resume: "r" },
+    }]) });
+    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", as: "orchestrator-1" });
     // Ordered like a frame row — address, state, then the prose — and using
     // the frame's own separator, so the transcript and the widget read as one
-    // thing. The sequence stays: it is what `ack` needs, and this line is all
-    // the caller gets.
-    expect(out.detail).toBe("seq 1 · r1/impl-1 complete · noted BASALT-7");
+    // thing.
+    expect(out.detail).toBe("01ABC · from impl-1 complete · noted BASALT-7");
   });
 
   test("a result that does not fit one line becomes a block, with the path intact", async () => {
@@ -856,21 +827,21 @@ describe("initiator tool", () => {
     //   file with H1 header: /home/jan/.dotfiles/.…
     //
     // The PATH was the answer and the cut landed in the middle of it. A result
-    // is the substance of the whole exchange — unlike an ack, which now says
-    // nothing — so it gets the room it needs: the address and state on their
-    // own line, the prose wrapped under it. Wrapped, never truncated, because
-    // half a path is worse than no path.
+    // is the substance of the whole exchange — there is no separate ack line
+    // any more either — so it gets the room it needs: the address and state
+    // on their own line, the prose wrapped under it. Wrapped, never
+    // truncated, because half a path is worse than no path.
     const summary =
       "Created and committed timestamp markdown file with H1 header: " +
       "/home/jan/.dotfiles/.worktrees/wk-timestamp-md.1/temp-timestamp.Z6eOPR/20260908T113849Z.md";
-    const { exec } = fakeExec({ stdout: JSON.stringify({
-      run: "r5", uid: "impl-1", sequence: 1, kind: "result",
-      payload: { status: "complete", summary, window: "w", session: "s", resume: "r" },
-    }) });
-    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "r5" });
+    const { exec } = fakeExec({ stdout: JSON.stringify([{
+      id: "01XYZ", from: "impl-1", to: ["orchestrator-1"],
+      content: { status: "complete", summary, window: "w", session: "s", resume: "r" },
+    }]) });
+    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", as: "orchestrator-1" });
     const lines = out.detail.split("\n");
     expect(lines.length).toBeGreaterThan(1);
-    expect(lines[0]).toBe("seq 1 · r5/impl-1 complete");
+    expect(lines[0]).toBe("01XYZ · from impl-1 complete");
     // The path survives whole, on one of the lines — that is the point.
     expect(lines.some((l) => l.includes("/temp-timestamp.Z6eOPR/20260908T113849Z.md"))).toBe(true);
     expect(out.detail).not.toContain("…");
@@ -879,23 +850,23 @@ describe("initiator tool", () => {
 
   test("a result that fits stays on one line", async () => {
     // A block for two words would be ceremony. The break is earned by length.
-    const { exec } = fakeExec({ stdout: JSON.stringify({
-      run: "r1", uid: "impl-1", sequence: 1, kind: "result",
-      payload: { status: "complete", summary: "noted BASALT-7", window: "w", session: "s", resume: "r" },
-    }) });
-    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "r1" });
-    expect(out.detail).toBe("seq 1 · r1/impl-1 complete · noted BASALT-7");
+    const { exec } = fakeExec({ stdout: JSON.stringify([{
+      id: "01ABC", from: "impl-1", to: ["orchestrator-1"],
+      content: { status: "complete", summary: "noted BASALT-7", window: "w", session: "s", resume: "r" },
+    }]) });
+    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", as: "orchestrator-1" });
+    expect(out.detail).toBe("01ABC · from impl-1 complete · noted BASALT-7");
   });
 
   test("a summary long enough to need a block is still capped", async () => {
     // Room, not a licence: a worker that writes an essay does not get to own
     // the transcript. The envelope is on the bus; `inspect` is the way in.
     const summary = Array.from({ length: 40 }, (_, i) => `sentence number ${i} about the work done`).join(". ");
-    const { exec } = fakeExec({ stdout: JSON.stringify({
-      run: "r1", uid: "impl-1", sequence: 1, kind: "result",
-      payload: { status: "complete", summary, window: "w", session: "s", resume: "r" },
-    }) });
-    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "r1" });
+    const { exec } = fakeExec({ stdout: JSON.stringify([{
+      id: "01ABC", from: "impl-1", to: ["orchestrator-1"],
+      content: { status: "complete", summary, window: "w", session: "s", resume: "r" },
+    }]) });
+    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", as: "orchestrator-1" });
     const lines = out.detail.split("\n");
     expect(lines.length).toBeLessThanOrEqual(4);
     expect(out.detail).toContain("…");
@@ -923,60 +894,32 @@ describe("initiator tool", () => {
     const summary =
       "Created and verified Markdown file at /tmp/tmp.b8LweM44cL/20260908T111021Z.md. " +
       "Repository worktree remains clean; no commit needed because the file lives in /tmp.";
-    const { exec } = fakeExec({ stdout: JSON.stringify({
-      run: "r4", uid: "impl-1", sequence: 1, kind: "result",
-      payload: { status: "complete", summary, window: "w", session: "s", resume: "r" },
-    }) });
-    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "r4" });
+    const { exec } = fakeExec({ stdout: JSON.stringify([{
+      id: "01DEF", from: "impl-1", to: ["orchestrator-1"],
+      content: { status: "complete", summary, window: "w", session: "s", resume: "r" },
+    }]) });
+    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", as: "orchestrator-1" });
     const lines = out.detail.split("\n");
     for (const line of lines) expect(line.length).toBeLessThanOrEqual(100);
-    // The sequence survives: without it the caller cannot ack.
-    expect(lines[0]).toContain("seq 1");
-    expect(lines[0]).toContain("r4/impl-1 complete");
+    // The message id survives: it is what a caller correlates against.
+    expect(lines[0]).toContain("01DEF");
+    expect(lines[0]).toContain("from impl-1 complete");
     // And the whole path is readable, not cut in half.
     expect(out.detail).toContain("/tmp/tmp.b8LweM44cL/20260908T111021Z.md");
   });
 
-  test("ack passes the socket, because it is what releases the worker", async () => {
-    // The ack is also the release: it kills the worker's window and the pi
-    // process in it. A verb that touches tmux needs the display host, and
-    // dropping `socket` from its flag list would silently ack against the
-    // default server while the worker sits on a private one.
-    const { exec, calls } = fakeExec({ stdout: JSON.stringify({
-      run: "r32", uid: "impl-1", sequence: 1, released: true, window: "impl-t@dotfiles",
-    }) });
-    const out = await createInitiatorTool({ exec }).invoke({
-      verb: "ack", run: "r32", uid: "impl-1", sequence: 1, socket: "piw-1",
-    });
-    expect(calls[0].args).toEqual(["ack", "--run", "r32", "--uid", "impl-1", "--sequence", "1", "--socket", "piw-1"]);
-    expect(out.ok).toBe(true);
-    // And it says NOTHING. An ack that released its worker takes that
-    // worker's row out of the frame, which is the whole message; a line
-    // repeating it is one more thing to read in a polling loop. Observed in a
-    // live run: `acked seq 1 from r1/impl-1 — released impl-timestamp-md@dotfiles
-    // (window and pi gone; worktree, branch and session id kept)` on every ack.
-    expect(out.detail).toBe("");
-  });
-
-  test("an ack that could not release says so rather than claiming it did", async () => {
-    const { exec } = fakeExec({ stdout: JSON.stringify({
-      run: "r32", uid: "impl-1", sequence: 1, released: false,
-      reason: "could not reach the display host to release impl-t@dotfiles",
-    }) });
-    const out = await createInitiatorTool({ exec }).invoke({ verb: "ack", run: "r32", uid: "impl-1", sequence: 1 });
-    expect(out.ok).toBe(true);
-    // The release that did NOT happen is the interesting one: an idle agent
-    // nobody knows about is the leak the release exists to prevent.
-    expect(out.detail).toContain("r32/impl-1");
-    expect(out.detail).toContain("not released");
-    expect(out.detail).toContain("could not reach the display host");
-  });
+  // sp029 T9: `ack` is gone from both the CLI and the tool's verb enum — there
+  // is no ack file any more, and `wait` marks what it delivers read by
+  // itself. The two cases that used to cover it ("ack passes the socket...",
+  // "an ack that could not release says so...") tested a verb that no longer
+  // exists on either surface.
 
   test("respawn brings a reclaimed worker back, with the uid positional", async () => {
     // `accept` is the reclaim point — window, tree and branch — and this is the
     // way back from it, so an orchestrator that tears down promptly can still
     // get a worker again. The CLI takes the uid positionally, like every other
-    // per-worker verb.
+    // per-worker verb. sp029 T9: no `--run` — a uid is looked up wherever this
+    // project last recorded it.
     const { exec, calls } = fakeExec({ stdout: JSON.stringify({
       run: "r32", uid: "impl-2", from: "impl-1", session: "sid-1",
       window: "impl-t@dotfiles", window_id: "@318",
@@ -984,9 +927,9 @@ describe("initiator tool", () => {
       reused_branch: false, live: true,
     }) });
     const out = await createInitiatorTool({ exec }).invoke({
-      verb: "respawn", run: "r32", uid: "impl-1", repo: "/repo",
+      verb: "respawn", uid: "impl-1", repo: "/repo",
     });
-    expect(calls[0].args).toEqual(["respawn", "impl-1", "--run", "r32", "--repo", "/repo"]);
+    expect(calls[0].args).toEqual(["respawn", "impl-1", "--repo", "/repo"]);
     expect(out.ok).toBe(true);
     // The summary has to say BOTH addresses: the old one is what the caller
     // asked about, the new one is what it must talk to from now on.
@@ -997,19 +940,19 @@ describe("initiator tool", () => {
 
   test("rm releases one address", async () => {
     const { exec, calls } = fakeExec();
-    await createInitiatorTool({ exec }).invoke({ verb: "rm", run: "r2", uid: "x1" });
-    expect(calls[0].args).toEqual(["rm", "--run", "r2", "--uid", "x1"]);
+    await createInitiatorTool({ exec }).invoke({ verb: "rm", uid: "x1" });
+    expect(calls[0].args).toEqual(["rm", "--uid", "x1"]);
   });
 
   test("an empty wait is success with nothing, not a failure", async () => {
     // `wait` prints nothing when there is no mail. Reporting that as an error
-    // would make an idle run look broken.
+    // would make an idle worker look broken.
     const { exec } = fakeExec({ stdout: "" });
     const tool = createInitiatorTool({ exec });
 
-    const out = await tool.invoke({ verb: "wait", run: "t1" });
+    const out = await tool.invoke({ verb: "wait", as: "orchestrator-1" });
     expect(out.ok).toBe(true);
-    expect(out.detail).toContain("no unacknowledged");
+    expect(out.detail).toContain("no mail");
   });
 
   test("results come back as one line, not a JSON dump", async () => {
@@ -1025,7 +968,7 @@ describe("initiator tool", () => {
       }),
     });
     const out = await createInitiatorTool({ exec: spawn.exec }).invoke({
-      verb: "spawn", run: "x1", uid: "w1",
+      verb: "spawn", uid: "w1",
     });
 
     expect(out.detail.split("\n")).toHaveLength(1);
@@ -1035,30 +978,33 @@ describe("initiator tool", () => {
   });
 
   test("a result envelope is summarised down to its verdict", async () => {
+    // sp029 T9: `wait` returns a LIST of opaque-content messages now, not one
+    // run/uid/sequence-addressed result envelope.
     const { exec } = fakeExec({
-      stdout: JSON.stringify({
-        protocol: 1, sequence: 3, run: "x1", uid: "w1", kind: "result",
-        created: "2026-09-06T18:58:00Z",
-        payload: { status: "blocked", summary: "could not reach the fixture", window: "w", session: "s", resume: "r" },
-      }),
+      stdout: JSON.stringify([{
+        id: "01GHI", from: "w1", to: ["x1"],
+        content: { status: "blocked", summary: "could not reach the fixture", window: "w", session: "s", resume: "r" },
+      }]),
     });
-    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "x1" });
+    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", as: "x1" });
 
     expect(out.detail.split("\n")).toHaveLength(1);
     expect(out.detail).toContain("blocked");
     expect(out.detail).toContain("could not reach the fixture");
-    expect(out.detail).toContain("seq 3");
+    expect(out.detail).toContain("01GHI");
   });
 
   test("a protocol error is summarised as one, not as a result", async () => {
-    // Different kind, different meaning: the worker said nothing at all.
+    // Different kind, different meaning: the worker said nothing at all. Its
+    // content still carries whatever shape the sender gave it — here the
+    // legacy error code, opaque to the bus either way.
     const { exec } = fakeExec({
-      stdout: JSON.stringify({
-        protocol: 1, sequence: 1, run: "x1", uid: "w1", kind: "error",
-        created: "t", payload: { code: "protocol_error", detail: "settled without reporting" },
-      }),
+      stdout: JSON.stringify([{
+        id: "01JKL", from: "w1", to: ["x1"],
+        content: { code: "protocol_error", detail: "settled without reporting" },
+      }]),
     });
-    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "x1" });
+    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", as: "x1" });
     expect(out.detail).toContain("protocol_error");
   });
 
@@ -1067,7 +1013,7 @@ describe("initiator tool", () => {
     // them would leave no way to get it.
     const full = JSON.stringify({ run: "x1", uid: "w1", state: "blocked", identity: { a: 1 } }, null, 2);
     const { exec } = fakeExec({ stdout: full });
-    const out = await createInitiatorTool({ exec }).invoke({ verb: "inspect", run: "x1", uid: "w1" });
+    const out = await createInitiatorTool({ exec }).invoke({ verb: "inspect", uid: "w1" });
     expect(out.detail).toBe(full);
   });
 
@@ -1075,7 +1021,7 @@ describe("initiator tool", () => {
     const { exec, calls } = fakeExec();
     const tool = createInitiatorTool({ exec });
 
-    const out = await tool.invoke({ verb: "rm -rf /" as never, run: "t1" });
+    const out = await tool.invoke({ verb: "rm -rf /" as never, uid: "w1" });
     expect(out.ok).toBe(false);
     expect(calls).toHaveLength(0);
   });
@@ -1103,7 +1049,7 @@ describe("initiator tool", () => {
       ].join("\n"),
     });
 
-    const out = await createInitiatorTool({ exec }).invoke({ verb: "spawn", run: "x1", uid: "w1" });
+    const out = await createInitiatorTool({ exec }).invoke({ verb: "spawn", uid: "w1" });
 
     expect(out.ok).toBe(false);
     expect(out.detail).toBe(
@@ -1117,7 +1063,7 @@ describe("initiator tool", () => {
     // Only nu's framing is stripped. A plain message from anywhere else must
     // survive, or a real failure could be reduced to nothing.
     const { exec } = fakeExec({ code: 1, stderr: "tmux: no server running on /tmp/tmux-1000/default" });
-    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", run: "x1" });
+    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", as: "x1" });
     expect(out.detail).toBe("tmux: no server running on /tmp/tmux-1000/default");
   });
 
@@ -1127,7 +1073,7 @@ describe("initiator tool", () => {
     const { exec } = fakeExec({ code: 1, stderr: "unknown stage 'nope': not one of probe, build" });
     const tool = createInitiatorTool({ exec });
 
-    const out = await tool.invoke({ verb: "spawn", run: "t1", uid: "w1", skill: "nope" });
+    const out = await tool.invoke({ verb: "spawn", uid: "w1", skill: "nope" });
     expect(out.ok).toBe(false);
     expect(out.detail).toContain("not one of probe, build");
   });
@@ -1138,7 +1084,7 @@ describe("initiator tool", () => {
         throw new Error("spawn pi-worker ENOENT");
       },
     });
-    const out = await tool.invoke({ verb: "wait", run: "t1" });
+    const out = await tool.invoke({ verb: "wait", as: "t1" });
     expect(out.ok).toBe(false);
     expect(out.detail).toContain("ENOENT");
   });

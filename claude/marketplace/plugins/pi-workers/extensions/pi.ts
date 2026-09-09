@@ -988,23 +988,16 @@ export function createResultTool(opts: {
 
   return {
     report: (input) => {
-      const args = [
-        "result",
-        opts.uid,
-        "--run",
-        opts.run,
-        "--status",
-        input.status,
-        "--summary",
-        input.summary,
-      ];
+      // sp029 T9: `result`/`settled` take `--as`, never a positional uid or
+      // `--run` — a uid is looked up in the caller's own project now.
+      const args = ["result", "--as", opts.uid, "--status", input.status, "--summary", input.summary];
       // Omitted, not empty. The gate tests for emptiness, so `--validation ""`
       // would present the shape of a verdict without one — precisely what a
       // worker looking compliant without having validated anything would send.
       if (input.validation) args.push("--validation", input.validation);
       return run(args);
     },
-    reportSettled: () => run(["settled", opts.uid, "--run", opts.run]),
+    reportSettled: () => run(["settled", "--as", opts.uid]),
   };
 }
 
@@ -1055,14 +1048,22 @@ const RESULT_TOOL_PARAMETERS = {
 // one implementation, in the CLI. This contributes a typed surface and nothing
 // else.
 
-/** The verbs an initiator drives. `result` and `settled` are a worker's, not an initiator's. */
+/**
+ * The verbs an initiator drives. `result` and `settled` are a worker's, not
+ * an initiator's.
+ *
+ * sp029 T9: `ack` is gone — there is no ack file any more, and `wait` marks
+ * what it delivers read as part of delivering it. This list must match the
+ * CLI's own `main <verb>` set (minus `result`/`settled`, the worker verbs,
+ * and `reclaim`/`doctor`, deliberately excluded from the tool surface) — see
+ * `static/pi-worker-tool-verbs-match-the-cli` for the drift guard.
+ */
 export const INITIATOR_VERBS = [
   "ps",
   "spawn",
   "send",
   "wait",
   "rm",
-  "ack",
   "status",
   "inspect",
   "timeline",
@@ -1078,7 +1079,6 @@ export type InitiatorVerb = (typeof INITIATOR_VERBS)[number];
 
 /** Verbs whose uid is positional rather than a flag, matching the CLI. */
 const UID_IS_POSITIONAL: readonly string[] = [
-  "send",
   "status",
   "inspect",
   "timeline",
@@ -1091,8 +1091,10 @@ const UID_IS_POSITIONAL: readonly string[] = [
 
 export interface InitiatorArgs {
   verb: InitiatorVerb;
-  run?: string;
   uid?: string;
+  as?: string;
+  to?: string;
+  content?: string;
   role?: string;
   subject?: string;
   project?: string;
@@ -1100,11 +1102,7 @@ export interface InitiatorArgs {
   session?: string;
   skill?: string;
   task?: string;
-  stage?: string;
-  instructions?: string;
-  artifacts?: string;
   feedback?: string;
-  sequence?: number;
   block?: boolean;
   timeout?: number;
   socket?: string;
@@ -1114,27 +1112,30 @@ export interface InitiatorTool {
   invoke(args: InitiatorArgs): Promise<ReportOutcome>;
 }
 
-/** Flags each verb accepts, in the order the CLI documents them. */
+/**
+ * Flags each verb accepts, in the order the CLI documents them.
+ *
+ * sp029 T9: `run` is gone from every entry — a uid is looked up in the
+ * caller's own project now, never named by the caller. `send`/`wait` carry
+ * `as`/`to` instead of the retired ticket/instructions work-payload shape.
+ */
 const VERB_FLAGS: Record<string, readonly string[]> = {
-  ps: ["run", "socket"],
-  spawn: ["run", "uid", "role", "subject", "project", "repo", "session", "skill", "task", "socket"],
-  send: ["run", "stage", "task", "instructions", "artifacts"],
-  wait: ["run", "uid", "after", "block", "timeout"],
-  rm: ["run", "uid"],
-  // `socket` because ack is also the RELEASE: it kills the worker's window and
-  // the pi process in it, and a verb that touches tmux needs the display host.
-  ack: ["run", "uid", "sequence", "socket"],
-  status: ["run"],
-  inspect: ["run"],
+  ps: ["socket"],
+  spawn: ["uid", "role", "subject", "project", "repo", "session", "skill", "task", "socket"],
+  send: ["as", "to", "content"],
+  wait: ["as", "block", "timeout"],
+  rm: ["uid"],
+  status: [],
+  inspect: [],
   // `--json` because the CLI answers a person with columns by default; the
   // extension needs the structure to summarise it.
-  timeline: ["run", "json"],
-  workers: ["run"],
-  liveness: ["run", "socket"],
-  resume: ["run", "feedback", "socket"],
-  accept: ["run", "repo", "socket"],
-  stop: ["run", "socket"],
-  respawn: ["run", "repo", "socket"],
+  timeline: ["json"],
+  workers: [],
+  liveness: ["socket"],
+  resume: ["feedback", "socket"],
+  accept: ["repo", "socket"],
+  stop: ["socket"],
+  respawn: ["repo", "socket"],
 };
 
 // ---------------------------------------------------------------------------
@@ -1217,9 +1218,11 @@ const NO_PAINT: PaintFn = (_tone, text) => text;
 /**
  * States the worker has REPORTED from, and is therefore done working in.
  *
- * Its process is released on ack, so `gone` beside one of these is the normal
- * end of a worker's life rather than the death-mid-task the liveness column
- * exists to flag.
+ * Its process is released at `accept`/`stop` (sp029 T9: there is no earlier
+ * `ack` release point any more — dropping acks was an accepted cost of the
+ * peer-addressed bus, see sp029.md's `## costs accepted`), so `gone` beside
+ * one of these still means the normal end of a worker's life once that
+ * happens, rather than the death-mid-task the liveness column exists to flag.
  */
 const REPORTED_STATES: readonly string[] = [
   "complete",
@@ -1481,9 +1484,10 @@ export function rosterFrame(
     return now - started >= AGE_WORTH_SHOWING_MS ? formatElapsed(r.started, now) : "";
   });
   // `gone` earns its column by CONTRADICTING the state — a worker that died
-  // mid-task. Once `ack` releases a reported worker, its window and process
-  // are supposed to be gone, so carrying the word there turns the frame's
-  // alarm into the normal case and buries the row that means something.
+  // mid-task. Once `accept`/`stop` releases a reported worker, its window and
+  // process are supposed to be gone, so carrying the word there turns the
+  // frame's alarm into the normal case and buries the row that means
+  // something.
   const live = rows.map((r) => {
     if (UNREMARKABLE_LIVENESS.includes(r.liveness)) return "";
     if (r.liveness === "gone" && REPORTED_STATES.includes(r.state)) return "";
@@ -2335,33 +2339,39 @@ function summarise(verb: string, stdout: string): string {
       return `spawned ${o.run}/${o.uid} — ${o.window} (${o.window_id}), ${o.liveness}, cwd ${o.cwd}, session ${o.session}`;
     case "liveness":
       return `${o.verdict} — ${o.window} (${o.window_id}): ${o.reason}`;
-    case "send": {
-      const payload = (o.payload ?? {}) as Record<string, unknown>;
-      return `sent seq ${o.sequence} to ${o.run}/${o.uid} (stage ${payload.stage})`;
-    }
+    case "send":
+      return `sent ${o.id} from ${o.from} to ${Array.isArray(o.to) ? (o.to as string[]).join(", ") : o.to}`;
     case "wait": {
-      const payload = (o.payload ?? {}) as Record<string, unknown>;
-      // kind distinguishes "the worker answered" from "the worker said nothing
-      // at all", which are not the same outcome and must not read the same.
-      // Ordered like a frame row — address, state, prose — and separated the
-      // way the frame's own heading is, so the transcript and the widget read
-      // as one thing rather than two conventions. The sequence leads because
-      // it is what `ack` needs, and this is all the caller gets.
-      const head = `seq ${o.sequence} · ${o.run}/${o.uid} ${o.kind === "error" ? payload.code : payload.status}`;
-      return resultBlock(head, o.kind === "error" ? payload.detail : payload.summary);
+      // sp029 T9: `wait` now returns a LIST — every unread message addressed
+      // to `as`, not "the oldest unacknowledged result across the run" — and
+      // marks each one read as it delivers it, so there is no sequence or ack
+      // step left to report. `content` is opaque to the bus; a typed result
+      // still carries `status`/`summary` inside it, which is the one shape
+      // worth special-casing for a readable line.
+      const rows = Array.isArray(parsed) ? (parsed as Record<string, unknown>[]) : [];
+      if (rows.length === 0) return "no mail";
+      return rows
+        .map((m) => {
+          const content = (m.content ?? {}) as Record<string, unknown>;
+          // `status` is the typed-result shape; `code` is the bus-authored
+          // `error` shape (dotfiles-87bt's protocol_error) — a worker that
+          // settled without reporting is a different kind of news and must
+          // not read the same as silence.
+          const label = content.status ?? content.code;
+          const head = `${m.id} · from ${m.from}${label ? ` ${label}` : ""}`;
+          // `summary` is the typed-result shape; `detail` is the bus-authored
+          // `error` shape (dotfiles-87bt's protocol_error). Anything else is
+          // truly opaque content from an arbitrary peer message, so it is
+          // rendered as JSON rather than `[object Object]`.
+          const prose = content.summary ?? content.detail ?? (
+            typeof content === "string" ? content : JSON.stringify(content)
+          );
+          return resultBlock(head, prose);
+        })
+        .join("\n\n");
     }
     case "rm":
-      return o.removed ? `released ${o.run}/${o.uid}` : `${o.run}/${o.uid}: ${o.reason}`;
-    // A successful ack says nothing. The worker's row leaves the frame, which
-    // is the whole message, and this verb runs once per result in a polling
-    // loop — a live run printed `acked seq 1 from r1/impl-1 — released
-    // impl-timestamp-md@dotfiles (window and pi gone; worktree, branch and
-    // session id kept)` every time round.
-    //
-    // A release that did NOT happen is the interesting case and does print: an
-    // idle agent nobody knows about is the leak the release exists to prevent.
-    case "ack":
-      return o.released ? "" : `${o.run}/${o.uid} acked, not released: ${o.reason}`;
+      return o.removed ? `released ${o.uid}` : `${o.uid}: ${o.reason}`;
     case "stop":
     case "accept":
       return o.changed
@@ -2433,8 +2443,8 @@ export function createInitiatorTool(opts: { exec: ExecFn; cwd?: string }): Initi
         const stdout = out.stdout.trim();
         if (args.verb === "wait" && stdout.length === 0) {
           // Silence from `wait` means an empty mailbox, not a fault. Reporting
-          // it as failure would make an idle run look broken.
-          return { ok: true, detail: "no unacknowledged results in this run" };
+          // it as failure would make an idle worker look broken.
+          return { ok: true, detail: "no mail" };
         }
         return { ok: true, detail: summarise(args.verb, stdout) };
       } catch (err) {
@@ -2444,16 +2454,24 @@ export function createInitiatorTool(opts: { exec: ExecFn; cwd?: string }): Initi
   };
 }
 
+// sp029 T9: `run`/`sequence`/`after` are gone. A uid is looked up in the
+// caller's own project now — nobody names a run any more — and there is no
+// ack file for a sequence to identify: `wait` marks what it returns as read
+// by itself. `send` carries `as`/`to`/`content` in place of the retired
+// ticket/instructions work-payload shape (that gate moved to the consumer's
+// own instructions per sp029 T8/T10).
 const INITIATOR_TOOL_PARAMETERS = {
   type: "object",
   properties: {
     verb: { type: "string", enum: [...INITIATOR_VERBS], description: "which bus operation to run" },
-    run: { type: "string", description: "the run id grouping these workers. On spawn, omit it and one is minted; reuse what spawn reports for sibling workers" },
-    uid: { type: "string", description: "the worker's id within the run. On spawn, omit it and one is minted from the role. On `wait`, scopes to that worker instead of the whole run" },
+    uid: { type: "string", description: "the worker's id in this project. On spawn, omit it and one is minted from the role. Every other verb below looks it up wherever this project last recorded it — there is no run id to pass" },
+    as: { type: "string", description: "send/wait: who you are acting as. Omit it inside a worker window (PI_WORKER_UID is already set); an orchestrating session names its own claimed address" },
+    to: { type: "string", description: "send: one or more recipient addresses, comma-separated" },
+    content: { type: "string", description: "send: the message body. The bus interprets none of it — it is delivered opaque" },
     role: { type: "string", description: "spawn: shown in the window name, e.g. impl or rev" },
-    subject: { type: "string", description: "spawn: a short NAME for the work — it becomes the tmux window name and the git branch, e.g. 'timestamp-file'. Prose is slugified and capped rather than refused, so passing a whole instruction here gets you a window called 'impl-create-timestamp-named-text-file@…' and the instruction goes nowhere: what the worker should DO travels in `send --instructions`" },
+    subject: { type: "string", description: "spawn: a short NAME for the work — it becomes the tmux window name and the git branch, e.g. 'timestamp-file'. Prose is slugified and capped rather than refused, so passing a whole instruction here gets you a window called 'impl-create-timestamp-named-text-file@…' and the instruction goes nowhere: what the worker should DO travels in `send --content`" },
     project: { type: "string", description: "spawn: omit this. The tmux session group is derived from the session you are in, which is where the operator is looking. Pass it only when running outside tmux" },
-    repo: { type: "string", description: "spawn/accept: on spawn, omit it — the repository is derived from the current directory. Pass it only when that is not a repository, or for accept" },
+    repo: { type: "string", description: "spawn/accept/respawn: on spawn, omit it — the repository is derived from the current directory. Pass it only when that is not a repository" },
     session: { type: "string", description: "spawn: omit this. The worker's Pi session id is minted for you — do not generate one" },
     skill: { type: "string", description: "spawn: a label for what this worker does, e.g. wk-build or doc-plan. Travels as identity, not a lookup key — it does not decide isolation or payload shape" },
     isolation: {
@@ -2462,18 +2480,9 @@ const INITIATOR_TOOL_PARAMETERS = {
       description:
         "spawn: REQUIRED, no default. 'worktree' gives the worker its own throwaway worktree and branch; 'main' runs it in the repo's main worktree, shared with the operator. Nothing lands in the shared tree without this being typed",
     },
-    task: { type: "string", description: "spawn/send: a ticket ID and nothing else. It names the worker's git branch, so it must be short and have no spaces. To give a worker prose, use `send` with instructions — never this" },
-    stage: { type: "string", description: "send: the stage this message belongs to" },
-    instructions: { type: "string", description: "send: the actual work, as prose. This is the ONLY field that takes a description of the task; spawn has none, so spawn the worker first and send this second" },
-    artifacts: { type: "string", description: "send: comma-separated artifact ids" },
+    task: { type: "string", description: "spawn: a ticket ID and nothing else. It names the worker's git branch, so it must be short and have no spaces. To give a worker prose, use `send` with content — never this" },
     feedback: { type: "string", description: "resume: why the work is being sent back" },
-    sequence: { type: "number", description: "ack: which result envelope is being acknowledged" },
-    after: {
-      type: "number",
-      description:
-        "wait: the sequence you have already read, so this returns only what came after it. Needs uid. Use it when you have given a worker more work while its previous report is still unacknowledged — a plain wait would hand that report back, since unacknowledged is what pending means. It is not an ack: the earlier result still needs one",
-    },
-    block: { type: "boolean", description: "wait: block until a result arrives instead of peeking. This is how you learn a worker finished" },
+    block: { type: "boolean", description: "wait: block until mail arrives instead of peeking. This is how you learn a worker finished" },
     timeout: { type: "number", description: "wait: seconds to block before giving up, default 60. Giving up is not a failure — the worker may still be working" },
     socket: { type: "string", description: "an alternate tmux socket; omit for the default server" },
   },
@@ -2574,11 +2583,10 @@ export default function piWorker(pi: ExtensionAPI): void {
         name: "pi_worker",
         label: "Worker bus",
         description:
-          "Drive Pi workers: `ps` lists every worker, whether it is alive and which tmux window to look at. Also: spawn one as a visible tmux window, check its liveness, send it a message, `wait` for its typed result (pass uid to wait on that worker rather than the whole run), resume it with feedback, then accept or stop it. " +
-"`timeline` shows what happened to one worker and when, with the gap between each step — reach for it when a worker took longer than expected and you want to know where the time went. " +
-          "To learn that a worker finished, call `wait` with block true — it returns the moment a result lands. A worker's tmux window is there for a PERSON to look at: never read it, capture it, or treat anything in it as a completion signal, and never generate ids for spawn — omit run, uid and session and they are minted for you. " +
-          "An address is claimed once: to reuse a run/uid after stopping or accepting it, call `rm` with that run and uid — that is the normal way to recycle one, and it refuses while the worker is still unfinished, so it is safe to try. " +
-          "ACK EVERY RESULT you have handled: the ack is what releases the worker's tmux window and its pi process, so a run that never acks leaves one idle agent per worker sitting on the machine. Its worktree, branch and session id survive the release, so nothing is lost and `respawn` can bring the worker back on the same transcript. " +
+          "Drive Pi workers: `ps` lists every worker, whether it is alive and which tmux window to look at. Also: spawn one as a visible tmux window, check its liveness, `send` it a message (addressed by `to`, opaque `content`), `wait` for mail addressed to you (`as`), resume a worker with feedback, then accept or stop it. " +
+          "`timeline` shows what happened to one worker and when, with the gap between each step — reach for it when a worker took longer than expected and you want to know where the time went. " +
+          "To learn that a worker finished, call `wait` with block true — it returns the moment mail lands. A worker's tmux window is there for a PERSON to look at: never read it, capture it, or treat anything in it as a completion signal, and never generate ids for spawn — omit uid and session and they are minted for you; there is no run id to invent or pass anywhere. " +
+          "An address is claimed once: to reuse a uid after stopping or accepting it, call `rm` with that uid — that is the normal way to recycle one, and it refuses while the worker is still unfinished, so it is safe to try. `wait` marks what it delivers as read by itself; there is no separate ack step, and it may only be called `as` your own claimed address. " +
           "Accept as soon as you judge the work correct: that reclaims the window, the worktree and the branch, and the session id it leaves on the bus is all a restore needs. If you want that worker again afterwards, call `respawn` with its uid — you get a NEW uid continuing the SAME Pi transcript, with its worktree rebuilt, so tearing down promptly costs you nothing. Verbs: " +
           INITIATOR_VERBS.join(", ") +
           ".",
@@ -2624,10 +2632,11 @@ export default function piWorker(pi: ExtensionAPI): void {
           // frame to warm up in. Arming afterwards meant the one moment worth
           // watching — before any worker exists — had nowhere to show.
           armFrame(ctx);
-          // Claimed BEFORE the call, so a spawn's own worker is in scope by
-          // the time the first poll runs. For a minted run the id is not known
-          // until spawn answers, which is why the outcome is read for it too.
-          if (params.run) frame?.own(params.run);
+          // sp029 T9: `run` retired from InitiatorArgs — a caller never names
+          // one any more, so there is nothing to claim before the call. A
+          // spawn's own run is claimed AFTER it answers, below, which is now
+          // the only path (it always was the only path that mattered: a
+          // minted run's id is never known until spawn reports it).
           frame?.note({ verb: params.verb, at: Date.now() });
 
           const outcome = await initiator.invoke(params);

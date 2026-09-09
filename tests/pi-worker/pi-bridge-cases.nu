@@ -160,8 +160,10 @@ let cases = [
         let t = (make-tmux "slug-cli" "sleep 30")
         let cli = (worker-script $env.FILE_PWD)
         let out = (with-env {XDG_RUNTIME_DIR: $root, PATH: ([$t.bin] ++ $env.PATH)} {
+            # sp029 T9: spawn no longer takes --run — it is minted internally
+            # and no longer surfaced as a flag at all.
             (^$nu.current-exe $cli spawn
-                --run "run-1" --uid "impl-a" --role "impl"
+                --uid "impl-a" --role "impl"
                 --subject "Create timestamp-named text file with header"
                 --project "dotfiles" --repo $repo
                 --session "sid-1" --skill "doc-draft" --isolation "main" --socket $t.socket) | complete

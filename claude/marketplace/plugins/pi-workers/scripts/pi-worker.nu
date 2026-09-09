@@ -45,11 +45,15 @@ export const ISOLATIONS = ["worktree" "main"]
 # v1 pipeline (legacy-inbox-send/bus-result/bus-settled/identity, all still
 # `claim-slot`-based) but are no longer part of what a v2 reader requires. T3
 # gives `send` its own project/queue-addressed path (`bus-send`, `queue-append`)
-# alongside this legacy one, which `worker-resume` and the `main send` CLI verb
-# still call until T7-T9 move them onto real peer addressing; `claim-slot`
-# itself retires once T5 (bus-result/bus-settled) and T6 (identity) migrate.
-# No migration: the bus lives in $XDG_RUNTIME_DIR, so the bump costs at most an
-# in-flight project thread.
+# alongside this legacy one; T9 moved the `main send`/`main wait` CLI verbs
+# onto it (`--as`/`--to`, no `--run`), but `worker-resume`'s own inbox write
+# still calls `legacy-inbox-send` directly — that is a task-instruction path
+# to a worker's OWN inbox, not the peer bus, and out of scope for the CLI
+# rewire. `claim-slot` itself does not retire here: dotfiles-v1zt tracks the
+# four sites (`legacy-inbox-send`, `bus-result`, `bus-settled`'s error path,
+# `bus-identity`) still pinning it, none of which this task's file scope
+# touches. No migration: the bus lives in $XDG_RUNTIME_DIR, so the bump costs
+# at most an in-flight project thread.
 export const PROTOCOL_VERSION = 2
 
 # Envelope cap: a bus message is an address plus a pointer, never a payload of
@@ -883,19 +887,27 @@ def now-stamp []: nothing -> string {
 }
 
 # sp029 T2 bridge: the v1 pipeline (legacy-inbox-send/bus-result/bus-settled/
-# identity, all still `run`/`uid`-addressed pending T5/T6/T7's real peer
-# addressing) still calls this with a run and a worker uid, not a resolved
-# peer list. It derives a v2-shaped `from`/`to` from the direction the kind
-# already implies — `inbox` travels initiator-to-worker, everything else
-# worker-to-initiator — so every envelope this module writes satisfies the v2
-# validator without every caller needing to know an address it cannot yet
-# supply. `content` mirrors `payload`: T3's own peer-addressed `bus-send`
-# (below) does not call this bridge at all — it builds a real `from`/`to`/
-# `content` envelope directly — so the mirroring here still only serves the
-# v1 callers. It survives past T3 on purpose: retiring it is T5's job
-# (bus-result/bus-settled move onto `content` for real), not a rename this
-# task can do safely underneath T5's still-open validate-result-payload
-# contract.
+# identity, all still `run`/`uid`-addressed) still calls this with a run and a
+# worker uid, not a resolved peer list. It derives a v2-shaped `from`/`to`
+# from the direction the kind already implies — `inbox` travels
+# initiator-to-worker, everything else worker-to-initiator — so every
+# envelope this module writes satisfies the v2 validator without every caller
+# needing to know an address it cannot yet supply. `content` mirrors
+# `payload`: T3's own peer-addressed `bus-send` (below) does not call this
+# bridge at all — it builds a real `from`/`to`/`content` envelope directly —
+# so the mirroring here still only serves the v1 callers.
+#
+# It survives past T5/T6/T9 landing, and NOT because retiring it is any one
+# of their job — dotfiles-6nvx.19 named T5 for this, which was wrong: T5 (this
+# module's `bus-result`/`bus-settled`) and T6 (`bus-identity`) both migrated
+# their OUTPUT (a real peer message is now sent alongside), but their v1
+# callers still exist and still call this bridge for the legacy outbox/inbox
+# write underneath, and T9 (this task) did not touch that call graph either —
+# CLI verbs move to new addressing, the internal v1 functions they used to
+# call directly do not. This bridge retires only when `legacy-inbox-send`,
+# `bus-result`, `bus-settled`'s error path and `bus-identity` — the same four
+# sites dotfiles-v1zt already tracks for `claim-slot`/`next-sequence` — stop
+# writing the v1 shape at all.
 def envelope-for [run: string, uid: string, kind: string, payload: record]: nothing -> record {
     let addressing = if $kind == "inbox" { {from: $run, to: [$uid]} } else { {from: $uid, to: [$run]} }
     {
@@ -1410,15 +1422,28 @@ export def bus-inbox [uid: string, --run: string]: nothing -> list<record> {
 }
 
 # sp029 T4: this whole run/uid, ack-file-addressed result path is LEGACY.
-# `bus-status`'s `unacked` count and the `main wait`/`main ack` CLI verbs
-# still depend on it — both are out of this task's scope (bus-status's result
-# tracking moves once T5 turns a result into an ordinary queued message;
-# `main wait`/`main ack` are T9's CLI surface) — so `legacy-ack-path`,
-# `legacy-bus-pending` and `legacy-bus-ack` below keep their shape. The real
-# T4 deliverable is the project/queue-addressed `bus-wait` further down,
-# reading `queue-rows` against `bus/messages/` with no ack file at all: a row
-# is marked in place by `queue-mark-read` instead. Tracked for removal as
-# dotfiles-hp6v, once T5 and T9 land.
+# T9 moved `main wait`/`main result`/`main settled` onto the project-addressed
+# bus (`bus-wait`, `bus-result`'s forwarding), and `ack` is gone from the CLI
+# entirely, so `legacy-bus-wait` and `legacy-bus-ack` below have NO production
+# caller left in this module. They are kept, deliberately, for two reasons: (1)
+# `bus-result` still ALSO writes to this legacy, sequence-numbered outbox
+# (dotfiles-v1zt: additive, not migrated), and a clutch of regression tests —
+# dotfiles-nig0/ycvl/pwxf, the `reopened`-marker guards on `worker-resume` —
+# read it back through exactly these functions to prove that legacy write path
+# still behaves; (2) `bus-status`'s `unacked` count still depends on
+# `legacy-ack-path` (kept, still called, NOT dead) for the same reason: T5
+# additively forwards a commissioned result to the new bus, it does not tell
+# `bus-status` how to count "unacked" against a queue instead of an ack file,
+# and that correlation (which queued message id corresponds to which legacy
+# outbox sequence) has no clean answer without a design of its own. Judged for
+# dotfiles-hp6v: NOT closed. `legacy-bus-wait`/`legacy-bus-pending`/
+# `legacy-bus-ack` are unreachable from any CLI verb now, but retiring them
+# means either accepting the regression tests above lose their probe or
+# rewriting each to read the legacy outbox some other way, AND still leaves
+# `legacy-ack-path` standing for `bus-status`. Follow-up needed: design what
+# `bus-status.unacked` means once a result is a queued message, migrate the
+# regression tests off `legacy-bus-wait`/`legacy-bus-ack` accordingly, and only
+# then drop all four together.
 def legacy-ack-path [run: string, uid: string, sequence: int]: nothing -> string {
     worker-dir $run $uid | path join "outbox" $"($sequence).ack"
 }
@@ -1578,9 +1603,10 @@ export def next-run-id []: nothing -> string {
 }
 
 # sp029 T4: LEGACY — run/uid-addressed, reads the outbox via legacy-bus-
-# pending. `main wait` still calls this (T9's CLI surface migrates it); the
-# T4 deliverable is the project/queue-addressed `bus-wait` further down.
-# Tracked for removal as dotfiles-hp6v.
+# pending. `main wait` moved onto the project/queue-addressed `bus-wait`
+# further down (T9); this has no CLI caller left, kept only for the
+# regression tests reading the legacy outbox directly — see the comment
+# above `legacy-ack-path` for the full dotfiles-hp6v judgment (not closed).
 export def legacy-bus-wait [
     --run: string
     --uid: string = ""
@@ -3761,14 +3787,18 @@ export def worker-release [--run: string, --uid: string]: nothing -> record {
 # The `reopened` MARKER survives, and deliberately does not follow the
 # vocabulary it used to ride with. It is not escalation policy — it is the
 # thing that keeps a resumed worker's stale `complete` report from being
-# re-served as if it were fresh (dotfiles-nig0/ycvl). `main wait`/`main
-# status` still resolve to `legacy-bus-wait`/`legacy-bus-pending`, which still
-# read this marker for exactly that — T4 (sp029) added a project-addressed
-# `bus-wait --as` alongside them, but has not moved the CLI onto it (that is
-# T9's job), and a worker's typed RESULT does not travel through it either
-# (that migration is T5, sp029, not yet landed). Dropping the write now would
-# reopen a previously-fixed bug with its guarding tests still in the suite,
-# for a vocabulary reason that does not apply to it.
+# re-served as if it were fresh (dotfiles-nig0/ycvl). `main status` still
+# reads it via `bus-status`'s `derive-state`/`unacked` precedence, which is
+# unchanged by T9 — that read path is `bus-status`'s own, not the CLI's, and
+# migrating it needs the same "what does unacked mean once a result is a
+# queued message" design the comment on `legacy-ack-path` defers. `main wait`
+# itself no longer touches this marker at all post-T9 (it reads the
+# commissioner's queue, addressed by `--as`, with no notion of "the run's
+# pending results" to skip past) — but `legacy-bus-wait`/`legacy-bus-pending`
+# still read it, for the regression tests that exercise them directly.
+# Dropping the write now would reopen a previously-fixed bug with its
+# guarding tests still in the suite, for a vocabulary reason that does not
+# apply to it.
 export def worker-resume [
     uid: string
     --run: string
@@ -4112,10 +4142,12 @@ def require-flags [verb: string, wanted: table<flag: string, value: any, what: s
     }
 }
 
-# What a verb calls the run and the worker it acts on. One wording, because it
-# is the answer the caller needs and three variants of it would drift.
-const RUN_IS = "the run id the worker belongs to. `ps` lists what is on the bus"
-const UID_IS = "the worker's id within its run, e.g. impl-1. `ps` lists them"
+# What a verb calls the worker it acts on. sp029 T9: there is no more "run the
+# worker belongs to" concept on the CLI — every verb below resolves its own
+# worker's project scope from the repository the caller is standing in
+# (`resolve-run`), so there is nothing left for a caller to type or drift
+# across three copies of the wording.
+const UID_IS = "the worker's id in this project, e.g. impl-1. `ps`/`workers` list them"
 
 def usage []: nothing -> string {
     [
@@ -4124,28 +4156,29 @@ def usage []: nothing -> string {
         "USAGE"
         "  pi-worker <verb> [flags]"
         ""
+        "  Every verb operates on the CURRENT PROJECT: the repository the caller"
+        "  is standing in, derived the same way spawn already derives --repo."
+        "  There is no run id to mint, pass, or look up — a uid is looked up"
+        "  wherever this project last recorded it."
+        ""
         "VERBS"
-        "  spawn    --run --uid --role --subject --project --repo --session --skill"
+        "  spawn    --uid --role --subject --project --repo --session --skill"
         "           --isolation worktree|main (no default) [--task] [--socket]"
-        "  send     <uid> --run --stage [--task | --instructions] [--artifacts]"
-        "  result   <uid> --run --status --summary [--validation]   report an outcome"
-        "  settled  <uid> --run                 report settling with nothing to show"
-        "  wait     --run [--uid]               oldest unacknowledged result, or nothing"
-        "  rm       --run --uid                 release a finished worker's address"
-        "  ack      --run --uid --sequence [--socket]"
-        "                                       delivery receipt; NOT acceptance. Also"
-        "                                       RELEASES the worker: window and pi go,"
-        "                                       worktree, branch and session id stay"
-        "  status   <uid> --run                 one worker's state, from the bus"
-        "  liveness <uid> --run [--socket]      live | exited | unknown, from tmux"
-        "  inspect  <uid> --run                 identity, last result, resume command"
-        "  ps       [--run] [--socket]          every worker, where it is and whether it lives"
-        "  workers  --run                       every worker in a run, from the bus alone"
-        "  resume   <uid> --run --feedback      send back to the ORIGINAL session"
-        "  accept   <uid> --run --repo          close the window, remove the worktree"
-        "  respawn  <uid> --run --repo          bring a reclaimed worker back: a NEW uid"
+        "  send     --as --to --content         address a message to one or more agents"
+        "  result   --as --status --summary [--validation]   report an outcome"
+        "  settled  --as                         report settling with nothing to show"
+        "  wait     --as [--block] [--timeout]  mail addressed to --as, or nothing"
+        "  rm       --uid                        release a finished worker's address"
+        "  status   <uid>                        one worker's state, from the bus"
+        "  liveness <uid> [--socket]             live | exited | unknown, from tmux"
+        "  inspect  <uid>                        identity, last result, resume command"
+        "  ps       [--socket]                   every worker, where it is and whether it lives"
+        "  workers                               every worker in this project, from the bus alone"
+        "  resume   <uid> --feedback             send back to the ORIGINAL session"
+        "  accept   <uid> --repo                 close the window, remove the worktree"
+        "  respawn  <uid> --repo                 bring a reclaimed worker back: a NEW uid"
         "                                       on the SAME Pi session, tree rebuilt"
-        "  stop     <uid> --run                 close the window, KEEP the worktree"
+        "  stop     <uid>                        close the window, KEEP the worktree"
         "  reclaim  --repo [--base] [--socket] [--remote] [--force] [--dry-run]"
         "                                       sweep a PROJECT: every worker tree no"
         "                                       live worker owns, plus the dead worker"
@@ -4156,10 +4189,11 @@ def usage []: nothing -> string {
         "  doctor                               check dependencies"
         ""
         "NOTES"
-        "  wait is non-destructive: it redelivers until ack, so an initiator that"
-        "  dies mid-handling sees the result again. ack is the receipt AND the"
-        "  release: a worker that has reported is done working, and holding its"
-        "  pi process until someone accepts it left 29 idle agents on this box."
+        "  wait both reads AND marks: there is no separate ack step any more, so"
+        "  --as may only name this session's own address (PI_WORKER_UID, when"
+        "  set) — reading and marking someone else's queue crosses the one"
+        "  ownership line the bus enforces. Observe another agent's mail with"
+        "  `status`/`inspect` instead, which take any uid freely."
         "  The work stays in the worktree and the branch; `accept` reclaims"
         "  those, and `respawn` brings the worker back on its session id."
         "  stop keeps a tree because it may hold unmerged commits; reclaim is the"
@@ -4184,11 +4218,14 @@ def main [...args: string] {
     exit 2
 }
 
-# `--run` and `--uid` are optional and minted when absent; the result names
-# what was chosen, so a caller spawning siblings reads the run back off its
-# first spawn instead of inventing one.
+# sp029 T9: `--run` retired from the CLI entirely. A run was always minted
+# when omitted (`next-run-id`), so every spawn already had this shape; the
+# only change is that there is no flag left pretending an explicit value was
+# ever load-bearing here. `--uid` is still optional and minted when absent;
+# the result names what was chosen, so a caller spawning siblings reads the
+# uid back off its first spawn instead of inventing one.
 def "main spawn" [
-    --run: string = "", --uid: string = "", --role: string = "", --subject: string
+    --uid: string = "", --role: string = "", --subject: string
     --project: string = "", --repo: string = "", --session: string = "", --skill: string
     --isolation: string, --task: string = "", --socket: string = ""
 ] {
@@ -4256,7 +4293,7 @@ def "main spawn" [
         }
     }
 
-    let run = (if ($run | is-empty) { next-run-id } else { $run })
+    let run = (next-run-id)
     let session = (if ($session | is-empty) { mint-session } else { $session })
     let minted = ($uid | is-empty)
 
@@ -4282,59 +4319,113 @@ def "main spawn" [
     }
 }
 
-def "main send" [
-    uid: string, --run: string, --stage: string
-    --task: string = "", --instructions: string = "", --artifacts: string = ""
-] {
-    require-flags "send" [
-        [flag, value, what];
-        ["--run" $run $RUN_IS]
-        ["--stage" $stage "which stage this message carries; `doctor` lists them, and the stage decides whether it takes --task or --instructions"]
-    ]
-    let payload = if ($task | is-empty) {
-        {stage: $stage, instructions: $instructions, artifacts: ($artifacts | split row "," | where {|a| ($a | str trim | is-not-empty) })}
-    } else {
-        {stage: $stage, task: $task}
+# ------------------------------------------------------------ sp029 T9: CLI addressing
+#
+# `--run` is gone from every verb below. It used to be a caller-minted id
+# threading `send`/`wait`/`ack`/`result`/`settled`/`status`/... through one flat
+# per-run tree; the peer-addressed bus (T3/T4) already dropped it for
+# `send`/`wait` — `resolve-run` below is what lets the orchestration verbs
+# (`status`, `accept`, `resume`, ...) keep calling the still-run-shaped
+# internal functions (`bus-identity-of`, `worker-inspect`, ...) without a
+# caller ever typing one, by scanning the durable placement tree (T6's
+# `$XDG_STATE_HOME`, never the ephemeral runtime bus) for the one run that
+# recorded a given uid.
+#
+# Deliberately NOT scoped to "the project the caller is standing in": a
+# worker's placement record is keyed by the SLUG OF ITS OWN cwd (recorded at
+# `bus-identity` time), which for a real spawned worker matches the project
+# the orchestrator is standing in — but nothing requires the caller to BE
+# standing anywhere in particular to ask about a uid it already knows, and a
+# fixture (or a worker whose repo has since moved) may legitimately record an
+# identity under a cwd that resolves to a different slug than the caller's
+# own. Scanning every slug this user's state-root holds costs a handful of
+# directory listings and finds the uid regardless of where either side stands;
+# `$XDG_STATE_HOME` is already private to this user (adr0013), so this is a
+# lookup convenience, not a boundary the bus depends on for isolation.
+#
+# An unknown uid resolves to "" rather than refusing here: the downstream
+# identity check (already run/uid-shaped) reports "unknown" on ANY run value
+# that does not resolve, so a wrong-but-harmless "" reaches the same honest
+# answer instead of this helper duplicating that judgment.
+def resolve-run [uid: string]: nothing -> string {
+    let root = (state-root)
+    if not ($root | path exists) { return "" }
+    let slugs = (ls $root | where type == dir | get name | each {|d| $d | path basename })
+    for slug in $slugs {
+        let agents_dir = ($root | path join $slug "agents")
+        if not ($agents_dir | path exists) { continue }
+        let matches = (
+            ls $agents_dir
+            | where type == dir
+            | get name
+            | each {|d| $d | path basename }
+            | where {|run| (($agents_dir | path join $run $uid) | path exists) }
+        )
+        # More than one run recording the same uid (even within one slug) is
+        # the one genuinely ambiguous case — the first match is picked rather
+        # than refused, since every caller of this helper already has its own
+        # "unknown worker" refusal for the case that matters (nothing found).
+        if ($matches | is-not-empty) { return ($matches | first) }
     }
-    legacy-inbox-send $uid --run $run --payload $payload | to json | print
+    ""
 }
 
-# Prints nothing when there is no mail, so `if (pi-worker wait --run r |
+# Whose queue/outbox a verb acts as, absent an explicit `--as`. Mirrors
+# PI_WORKER_UID, already set on every spawned worker's window (`worker-spawn`).
+def self-uid []: nothing -> string { $env | get -o PI_WORKER_UID | default "" }
+
+# Peer-addressed send (sp029 T3/T9): a message to one or more agents' queues,
+# opaque content, no run, no sequence. The legacy ticket/instructions work
+# payload this verb used to carry retired with the stage registry (T8) — that
+# shape lives in `worker-resume`'s own inbox write now, not in a CLI verb.
+# `--to` is a comma-separated string, not a nushell list flag: every other
+# multi-value CLI flag here (`spawn --task`, the retired `send --artifacts`)
+# used the same shape, and it is what a shell (or a subprocess argv built by
+# the Pi extension, which cannot hand nu a list literal across several argv
+# entries) can pass without ceremony.
+def "main send" [--as: string = "", --to: string = "", --content: string = ""] {
+    let as_ = (if ($as | is-empty) { self-uid } else { $as })
+    if ($as_ | is-empty) {
+        error make {msg: "send needs --as: who is sending; pass it explicitly, or run inside a worker window where PI_WORKER_UID is already set"}
+    }
+    let recipients = ($to | split row "," | each {|a| $a | str trim } | where {|a| $a | is-not-empty })
+    if ($recipients | is-empty) {
+        error make {msg: "send needs --to: one or more recipient addresses, comma-separated, e.g. --to orchestrator-1"}
+    }
+    if ($content | is-empty) {
+        error make {msg: "send needs --content: the message body; the bus interprets none of it"}
+    }
+    bus-send --to $recipients --from $as_ --content $content | to json | print
+}
+
+# Prints nothing when there is no mail, so `if (pi-worker wait --as me |
 # is-empty)` works in a script. Silence is the answer, not an error.
 #
-# `--block` waits for one instead of peeking, which is how a caller finds out a
-# worker finished. Reading its tmux window is NOT how: that window exists to be
-# looked at by a person, and it carries no completion signal.
+# `--as` doubles as both "whose mail" and "who may mark it read" (sp029 T9):
+# `wait` is the one verb that WRITES to a queue (it marks every row it returns,
+# folding the old `ack` into delivery itself — there is no ack file any more).
+# A session that has already claimed an address (PI_WORKER_UID) may still ask
+# to observe another agent's mail through `status`/`inspect`, but may not use
+# `wait` to consume it: reading AND marking someone else's queue crosses the
+# one ownership line this bus enforces.
 #
 # `--timeout` is in seconds here rather than a duration, because the caller is
 # usually a model writing flags and `--timeout 30` is harder to get wrong than
 # `--timeout 30sec`.
-def "main wait" [--run: string, --uid: string = "", --after: int = 0, --block, --timeout: int = 60] {
-    require-flags "wait" [[flag, value, what]; ["--run" $run $RUN_IS]]
-    let next = (legacy-bus-wait --run $run --uid $uid --after $after --block=$block --timeout ($timeout * 1sec))
-    if $next != null {
-        print ($next | to json)
-    } else if $block {
-        # A worker still working is not a failure, so this exits 0 and says so
-        # in words the caller can act on rather than returning bare silence
-        # that looks the same as "finished with nothing to say".
-        let who = (if ($uid | is-empty) { "any worker" } else { $uid })
-        # Naming the sequence matters here: "no result" and "no result you have
-        # not already read" are different sentences, and only one of them means
-        # the worker has been quiet.
-        let since = (if $after > 0 { $" past sequence ($after)" } else { "" })
-        print $"no result from ($run)/($who)($since) after ($timeout)s; it may still be working"
+def "main wait" [--as: string = "", --block, --timeout: int = 60] {
+    let as_ = (if ($as | is-empty) { self-uid } else { $as })
+    if ($as_ | is-empty) {
+        error make {msg: "wait needs --as: whose queue to read; pass it explicitly, or run inside a worker window where PI_WORKER_UID is already set"}
     }
-}
-
-def "main ack" [--run: string, --uid: string, --sequence: int, --socket: string = ""] {
-    require-flags "ack" [
-        [flag, value, what];
-        ["--run" $run $RUN_IS]
-        ["--uid" $uid $UID_IS]
-        ["--sequence" $sequence "the sequence number of the result being acknowledged, as `wait` reported it"]
-    ]
-    legacy-bus-ack --run $run --uid $uid --sequence $sequence --socket $socket | to json | print
+    let self = (self-uid)
+    if ($self | is-not-empty) and ($self != $as_) {
+        error make {msg: $"wait refused: --as ($as_) is not this session's own address \(($self)); reading and marking another agent's mail crosses an ownership line. Use `status`/`inspect` to observe it instead"}
+    }
+    let mail = (bus-wait --as $as_ --block=$block --timeout ($timeout * 1sec))
+    if ($mail | is-not-empty) {
+        for m in $mail { queue-mark-read $as_ $m.id }
+        print ($mail | to json)
+    }
 }
 
 # The worker's own side of the bus (dotfiles-87bt).
@@ -4345,31 +4436,27 @@ def "main ack" [--run: string, --uid: string, --sequence: int, --socket: string 
 # tool". These two verbs are that path. The extension's typed tool is a thin
 # wrapper over `result`, so the envelope shape and the stage gate have exactly
 # one implementation instead of one per runtime.
-def "main result" [
-    uid?: string, --run: string, --status: string, --summary: string
-    --validation: string = ""
-] {
+def "main result" [--as: string = "", --status: string = "", --summary: string = "", --validation: string = ""] {
     # A worker reports from inside the window spawn made for it, and spawn put
-    # PI_WORKER_RUN and PI_WORKER_UID in that window's environment. Making the
-    # worker pass its own address back is ceremony, and a worker that gets it
-    # wrong reports onto someone else's mail.
-    let run = (if ($run | is-empty) { $env | get -o PI_WORKER_RUN | default "" } else { $run })
-    let uid = (if ($uid | is-empty) { $env | get -o PI_WORKER_UID | default "" } else { $uid })
+    # PI_WORKER_UID in that window's environment. Making the worker pass its
+    # own address back is ceremony, and a worker that gets it wrong reports
+    # onto someone else's mail.
+    let as_ = (if ($as | is-empty) { self-uid } else { $as })
     require-flags "result" [
         [flag, value, what];
-        ["--run" $run $"($RUN_IS). Omit it inside a worker window: PI_WORKER_RUN is already there"]
-        ["<uid>" $uid $"($UID_IS). Omit it inside a worker window: PI_WORKER_UID is already there"]
+        ["--as" $as_ "who is reporting. Omit it inside a worker window: PI_WORKER_UID is already there"]
         ["--status" $status $"the outcome, one of ($RESULT_STATUSES | str join ', ')"]
         ["--summary" $summary "what happened, in a line or two; detail belongs in the worker window and the Pi transcript"]
     ]
+    let run = (resolve-run $as_)
     # The worker supplies its OUTCOME; window, session and resume come from the
     # identity the orchestrator recorded at spawn. A worker cannot be trusted to
     # say where it lives or how to reach it — that is the initiator's only route
     # back to it, and a worker that could rewrite it could point the initiator
     # at someone else's session.
-    let identity = (bus-identity-of $uid --run $run)
+    let identity = (bus-identity-of $as_ --run $run)
     if $identity == null {
-        error make {msg: $"refusing a result from ($run)/($uid): no identity on the bus, so there is nothing to report against"}
+        error make {msg: $"refusing a result from ($as_): no identity on the bus, so there is nothing to report against"}
     }
 
     let base = {
@@ -4383,23 +4470,28 @@ def "main result" [
     # emptiness, and a present-but-empty field is the shape a caller uses to
     # look compliant without having validated anything.
     let payload = (if ($validation | is-empty) { $base } else { $base | merge {validation: $validation} })
-    bus-result $uid --run $run --result $payload | to json | print
+    bus-result $as_ --run $run --result $payload | to json | print
 }
 
-def "main settled" [uid: string, --run: string] {
-    require-flags "settled" [[flag, value, what]; ["--run" $run $RUN_IS]]
-    bus-settled $uid --run $run | to json | print
+def "main settled" [--as: string = ""] {
+    let as_ = (if ($as | is-empty) { self-uid } else { $as })
+    if ($as_ | is-empty) {
+        error make {msg: "settled needs --as: which agent settled. Omit it inside a worker window: PI_WORKER_UID is already there"}
+    }
+    let run = (resolve-run $as_)
+    bus-settled $as_ --run $run | to json | print
 }
 
 # The tmux-side probe, kept OFF `inspect` and `status` on purpose: those two
-# rebuild a run from the bus alone, without tmux, which is what lets a restarted
-# initiator recover. This verb is the one that needs a display host, so it is
-# the one that carries the --socket.
-def "main liveness" [uid: string, --run: string, --socket: string = ""] {
-    require-flags "liveness" [[flag, value, what]; ["--run" $run $RUN_IS]]
+# rebuild a worker from the bus alone, without tmux, which is what lets a
+# restarted initiator recover. This verb is the one that needs a display host,
+# so it is the one that carries the --socket. Free to observe ANY uid — the
+# ownership line `wait` enforces is about marking mail read, not about looking.
+def "main liveness" [uid: string, --socket: string = ""] {
+    let run = (resolve-run $uid)
     let identity = (bus-identity-of $uid --run $run)
     if $identity == null {
-        error make {msg: $"unknown worker ($run)/($uid): no identity on the bus. Absent evidence is not permission to act \(adr0017)"}
+        error make {msg: $"unknown worker ($uid): no identity on the bus. Absent evidence is not permission to act \(adr0017)"}
     }
     # Probe by id (unambiguous), report the NAME (what an operator scans a
     # window list for), and carry the id so a caller can act on it.
@@ -4407,12 +4499,12 @@ def "main liveness" [uid: string, --run: string, --socket: string = ""] {
     $seen | merge {window: $identity.window, window_id: ($identity | get -o window_id | default "")} | to json | print
 }
 
-def "main status" [uid: string, --run: string] {
-    require-flags "status" [[flag, value, what]; ["--run" $run $RUN_IS]]
+def "main status" [uid: string] {
+    let run = (resolve-run $uid)
     bus-status $uid --run $run | to json | print
 }
-def "main inspect" [uid: string, --run: string] {
-    require-flags "inspect" [[flag, value, what]; ["--run" $run $RUN_IS]]
+def "main inspect" [uid: string] {
+    let run = (resolve-run $uid)
     worker-inspect $uid --run $run | to json | print
 }
 # A table by default, JSON on request.
@@ -4422,41 +4514,46 @@ def "main inspect" [uid: string, --run: string] {
 # a worker's time went, handed 60 lines of pretty-printed JSON, has been given
 # the data and not the answer. The extension asks for --json; a person at a
 # prompt gets columns.
-def "main timeline" [uid: string, --run: string, --json] {
-    require-flags "timeline" [[flag, value, what]; ["--run" $run $RUN_IS]]
+def "main timeline" [uid: string, --json] {
+    let run = (resolve-run $uid)
     let events = (worker-timeline $uid --run $run)
     if $json {
         $events | to json | print
     } else if ($events | is-empty) {
-        print $"no events recorded for ($run)/($uid)"
+        print $"no events recorded for ($uid) in this project"
     } else {
         $events | select "+s" event state detail | print
     }
 }
-def "main rm" [--run: string, --uid: string] {
-    require-flags "rm" [
-        [flag, value, what];
-        ["--run" $run $RUN_IS]
-        ["--uid" $uid $UID_IS]
-    ]
+def "main rm" [--uid: string = ""] {
+    require-flags "rm" [[flag, value, what]; ["--uid" $uid $UID_IS]]
+    let run = (resolve-run $uid)
     worker-release --run $run --uid $uid | to json | print
 }
 
-def "main ps" [--run: string = "", --socket: string = ""] {
-    worker-roster --run $run --socket $socket | to json | print
+def "main ps" [--socket: string = ""] {
+    worker-roster --run "" --socket $socket | to json | print
 }
 
-def "main workers" [--run: string] {
-    require-flags "workers" [[flag, value, what]; ["--run" $run $RUN_IS]]
-    run-workers $run | to json | print
+# Every worker in the CURRENT PROJECT, from the bus alone — no tmux, so this is
+# what a restarted initiator reconstructs from. `--run` used to scope this to
+# one caller-minted run; every run under the runtime bus tree is now read and
+# flattened, since the project (derived, never typed) is the only scope a CLI
+# caller has left to ask for.
+def "main workers" [] {
+    let root = (bus-root)
+    let runs = (if ($root | path exists) {
+        ls $root | where type == dir | get name | each {|d| $d | path basename }
+    } else { [] })
+    ($runs | each {|r| run-workers $r } | flatten) | to json | print
 }
 
-def "main resume" [uid: string, --run: string, --feedback: string, --socket: string = ""] {
+def "main resume" [uid: string, --feedback: string = "", --socket: string = ""] {
     require-flags "resume" [
         [flag, value, what];
-        ["--run" $run $RUN_IS]
         ["--feedback" $feedback "what the worker got wrong and what to do instead; it reaches its inbox as an ordinary message"]
     ]
+    let run = (resolve-run $uid)
     worker-resume $uid --run $run --feedback $feedback --socket $socket | to json | print
 }
 
@@ -4488,20 +4585,20 @@ def repo-or-refuse [verb: string, repo: any]: nothing -> string {
     $resolved
 }
 
-def "main respawn" [uid: string, --run: string, --repo: string, --socket: string = ""] {
-    require-flags "respawn" [[flag, value, what]; ["--run" $run $RUN_IS]]
+def "main respawn" [uid: string, --repo: string, --socket: string = ""] {
     let repo = (repo-or-refuse "respawn" $repo)
+    let run = (resolve-run $uid)
     worker-respawn $uid --run $run --repo $repo --socket $socket | to json | print
 }
 
-def "main accept" [uid: string, --run: string, --repo: string, --socket: string = ""] {
-    require-flags "accept" [[flag, value, what]; ["--run" $run $RUN_IS]]
+def "main accept" [uid: string, --repo: string, --socket: string = ""] {
     let repo = (repo-or-refuse "accept" $repo)
+    let run = (resolve-run $uid)
     worker-accept $uid --run $run --repo $repo --socket $socket | to json | print
 }
 
-def "main stop" [uid: string, --run: string, --socket: string = ""] {
-    require-flags "stop" [[flag, value, what]; ["--run" $run $RUN_IS]]
+def "main stop" [uid: string, --socket: string = ""] {
+    let run = (resolve-run $uid)
     worker-stop $uid --run $run --socket $socket | to json | print
 }
 
