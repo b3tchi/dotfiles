@@ -914,12 +914,15 @@ def envelope-for [run: string, uid: string, kind: string, payload: record]: noth
 
 # Address a message to one worker's inbox.
 #
-# sp029 T3: this is the LEGACY, run/uid-addressed sender. `worker-resume`'s
-# rejection resend and the `main send` CLI verb still call it — both are T8/T9
-# territory (flow vocabulary, CLI surface) and out of scope here — so it keeps
-# its name and shape rather than being deleted out from under them. The real
-# T3 deliverable is `bus-send` below, addressed by `to`/`from` against the
-# project-scoped bus rather than a run.
+# sp029 T3: this is the LEGACY, run/uid-addressed, `claim-slot`-based sender —
+# two path regimes live in this module now. `worker-resume`'s rejection
+# resend and the `main send` CLI verb still call it, both T8/T9 territory
+# (flow vocabulary, CLI surface) and out of scope here, so it keeps its name
+# and shape rather than being deleted out from under them. The real T3
+# deliverable is `bus-send` below, addressed by `to`/`from` against the
+# project-scoped bus rather than a run. This function, `claim-slot` and
+# `next-sequence` retire together, tracked as dotfiles-v1zt, once T5
+# (bus-result/bus-settled) and T6 (identity) stop needing them.
 export def legacy-inbox-send [
     uid: string
     --run: string
@@ -1001,6 +1004,18 @@ def message-path [msg_id: string]: nothing -> string {
     project-dir | path join "messages" $msg_id
 }
 
+# Whether `uid`'s queue already holds the unread row `bus-stage-message` wrote
+# for `msg_id`. A straight substring check on the row's own fixed 32-byte
+# text: rows are append-only and never edited except in place by T4's
+# `queue-mark-read` (a 5-byte suffix rewrite, so the id-plus-unread-suffix
+# prefix this checks for is untouched by that), so if the exact bytes
+# `queue-append` wrote are anywhere in the file, they are still there.
+def queue-has-row [uid: string, msg_id: string]: nothing -> bool {
+    let path = (queue-path $uid)
+    if not ($path | path exists) { return false }
+    (open --raw $path) | str contains (queue-row $msg_id)
+}
+
 # Stage a message: mint its id, append every recipient's queue row, THEN write
 # the envelope to a scratch name. The message is not yet visible to any reader
 # — nothing in `bus/messages/` carries this id until `bus-publish-message`
@@ -1066,7 +1081,21 @@ export def bus-stage-message [
 # Publish a staged message: the atomic step. `rename(2)` (`mv`, same
 # filesystem) is what makes the message appear whole or not at all to a
 # reader resolving a queue row's id against `bus/messages/`.
+#
+# Structural, not advisory: this refuses to publish unless every recipient in
+# `staged.envelope.to` already has its row, so "publish a message before its
+# fan-out completes" — the anti-pattern `## plan` names — cannot happen by
+# calling these two functions in the wrong order or with a hand-built staged
+# record. `bus-send` never hits this refusal, because `bus-stage-message`
+# always finishes the fan-out first; it exists for a caller that reaches for
+# `bus-publish-message` directly (T5's result-as-message move is the likely
+# one) and gets the row count wrong.
 export def bus-publish-message [staged: record]: nothing -> record {
+    for uid in $staged.envelope.to {
+        if not (queue-has-row $uid $staged.msg_id) {
+            error make {msg: $"refusing to publish message ($staged.msg_id): no queue row for ($uid) — publishing before fan-out completes would address a message nobody is told about"}
+        }
+    }
     mv $staged.scratch (message-path $staged.msg_id)
     $staged.envelope
 }

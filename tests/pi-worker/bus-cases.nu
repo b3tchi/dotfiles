@@ -106,7 +106,11 @@ let cases = [
         rm -rf $root
     })
 
-    (run-case "bus/sequences-are-monotonic-per-worker" {
+    (run-case "legacy/sequences-are-monotonic-per-worker" {
+        # sp029 T3: `legacy-inbox-send`'s own sequence numbering (dotfiles-
+        # v1zt tracks its removal once T5/T6 land) — the new peer-addressed
+        # `bus-send` mints an unordered-across-processes id instead; see
+        # schema-cases.nu's `mint-msg-id` property cases for that guarantee.
         let root = (make-runtime "seq")
         with-runtime $root {
             for i in 1..4 { legacy-inbox-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: $"t-($i)"} }
@@ -268,7 +272,17 @@ let cases = [
         rm -rf $root
     })
 
-    (run-case "bus/concurrent-writers-never-share-a-sequence" {
+    (run-case "legacy/concurrent-writers-never-share-a-sequence" {
+        # sp029 T3: this is the no-gap SEQUENCE invariant, and it is retired
+        # for the NEW peer-addressed path — `bus-send` has no sequence to
+        # contend for; see "send/concurrent-senders-produce-well-formed-
+        # non-interleaved-rows" below for that path's own concurrency proof
+        # (fixed-width rows, no interleaving, no shared ids). What remains
+        # here is real regression coverage for `legacy-inbox-send`, which
+        # still uses `claim-slot`'s sequence-claiming for `worker-resume` and
+        # the `main send` CLI verb — tracked for removal as dotfiles-v1zt,
+        # pending T5/T6.
+        #
         # Sequence allocation must serialise. Two writers racing for the same
         # slot is the interesting case: the loser retries rather than silently
         # overwriting the winner's envelope.
@@ -1194,6 +1208,50 @@ bus-result "impl-a" --run "run-1" --result {status: "complete", summary: "second
 
             let deliverable = (do { cd $repo; deliverable-mail "a" })
             assert-true ($deliverable | is-empty) "a reader resolving the row against messages/ sees clean zero mail, not an error"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "send/publish-refuses-when-some-recipients-rows-are-missing" {
+        # `bus-publish-message` is structural, not advisory: even called
+        # directly (not through `bus-send`) on a staged handle whose fan-out
+        # never reached every recipient — a future caller getting the row
+        # count wrong, not just a crash — it must refuse rather than make the
+        # message visible to no one for that recipient. Here `a` has its row
+        # and `b` does not: a PARTIAL fan-out.
+        let repo = (make-repo "send-publish-guard-partial")
+        let root = (make-runtime "send-publish-guard-partial")
+        with-runtime $root {
+            let staged = (do { cd $repo; bus-stage-message --to ["a" "b"] --from "sender-1" --content "hi" })
+            let dir = (do { cd $repo; project-dir })
+            rm -f ($dir | path join "queue" "b")
+
+            assert-rejects {
+                do { cd $repo; bus-publish-message $staged }
+            } $staged.msg_id "publish refuses, naming the message id, when a recipient's row never landed"
+
+            assert-eq (ls ($dir | path join "messages") | length) 0 "the refused publish leaves no message file"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "send/publish-refuses-when-no-recipients-rows-were-appended" {
+        # The other end of the same guard: NEITHER recipient's row landed —
+        # standing in for a caller that skipped fan-out entirely, not merely
+        # got interrupted partway through it.
+        let repo = (make-repo "send-publish-guard-none")
+        let root = (make-runtime "send-publish-guard-none")
+        with-runtime $root {
+            let staged = (do { cd $repo; bus-stage-message --to ["a" "b"] --from "sender-1" --content "hi" })
+            let dir = (do { cd $repo; project-dir })
+            rm -f ($dir | path join "queue" "a")
+            rm -f ($dir | path join "queue" "b")
+
+            assert-rejects {
+                do { cd $repo; bus-publish-message $staged }
+            } $staged.msg_id "publish refuses, naming the message id, when no recipient's row landed"
+
+            assert-eq (ls ($dir | path join "messages") | length) 0 "the refused publish leaves no message file"
         }
         rm -rf $root; rm -rf $repo
     })
