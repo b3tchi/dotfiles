@@ -1374,17 +1374,16 @@ export def bus-result [
 export def bus-settled [uid: string, --run: string]: nothing -> record {
     # sp029 T5: only a COMMISSIONED agent owes anyone a report — "an
     # uncommissioned peer that finishes a turn is simply done talking"
-    # (## solution). Absence of the `commissioner` key is the backward-
-    # compatible default: every identity recorded before this task predates
-    # the concept and was, in spirit, always spawned for someone. An
-    # explicit null/empty `commissioner` is the new, genuinely uncommissioned
-    # case — reachable today only by constructing an identity that says so
-    # directly, since nothing yet self-registers without one (sp029 T7).
+    # (## solution). `worker-spawn` now records `commissioner` on every
+    # identity it creates, so ABSENCE of the field is the honest signal that
+    # nothing commissioned this agent (a future T7 self-registering agent
+    # never goes through worker-spawn, so it never gets one) — not a
+    # backward-compatibility shim. A present-but-empty value is refused the
+    # same way: recorded-and-blank is not a real address either.
     let identity = (bus-identity-of $uid --run $run)
     let uncommissioned = (
         $identity != null
-        and ("commissioner" in ($identity | columns))
-        and ($identity.commissioner | is-empty)
+        and (($identity | get -o commissioner) | is-empty)
     )
     if $uncommissioned {
         return {reported: false, reason: "no commissioner recorded; an uncommissioned agent settling has nothing to report", run: $run, uid: $uid}
@@ -3150,6 +3149,14 @@ export def worker-spawn [
         skill: $skill
         isolation: $isolation
         window: $window
+        # sp029 T5: every worker `worker-spawn` places was spawned FOR
+        # something — the run it was placed into. `run` is the closest thing
+        # to a resolvable address an initiator has before T7/T9 land real
+        # peer addressing, so it doubles as the commissioner. A future
+        # self-registering agent (T7) never goes through worker-spawn at
+        # all, so it never gets this field — which is exactly what leaves it
+        # uncommissioned by the same absent-key convention bus-settled reads.
+        commissioner: $run
     }
 
     # The worker's identity reaches the extension as environment, not as a
@@ -3198,6 +3205,7 @@ export def worker-spawn [
         isolation: $isolation
         window: $window
         window_id: $window_id
+        commissioner: $run
     }
 
     {
@@ -3952,6 +3960,10 @@ export def worker-respawn [
     let isolation = ($old | get -o isolation | default (if $tree.isolated { "worktree" } else { "main" }))
 
     let window = (worker-window-name $old.role $subject $project)
+    # sp029 T5: carries the prior identity's commissioner forward — a
+    # respawn continues the same worker under a new uid, so it still owes
+    # its result to whoever the original spawn commissioned it for.
+    let commissioner = ($old | get -o commissioner | default $run)
     bus-identity $new_uid --run $run --identity {
         role: $old.role
         cwd: $tree.path
@@ -3961,6 +3973,7 @@ export def worker-respawn [
         isolation: $isolation
         window: $window
         respawned_from: $uid
+        commissioner: $commissioner
     }
 
     let commit_guard = (if not $tree.isolated {
@@ -3998,6 +4011,7 @@ export def worker-respawn [
         window: $window
         window_id: $window_id
         respawned_from: $uid
+        commissioner: $commissioner
     }
 
     {

@@ -593,21 +593,38 @@ let cases = [
         rm -rf $root
     })
 
-    (run-case "pipeline/settled-still-reports-when-no-commissioner-key-is-recorded-at-all" {
-        # Backward compatible default: an identity predating this concept
-        # (no `commissioner` key whatsoever — every worker spawned before
-        # T7/T9 wire commissioning through spawn) must not be silently
-        # reinterpreted as uncommissioned.
-        let root = (make-runtime "t5-settled-legacy-identity")
+    (run-case "pipeline/settled-produces-nothing-when-no-commissioner-key-is-recorded-at-all" {
+        # Absence IS the honest uncommissioned signal (not a backward-compat
+        # default): a hand-built identity that never records a commissioner
+        # reads exactly like a future T7 self-registering agent, which never
+        # goes through worker-spawn at all and so never gets one either.
+        let root = (make-runtime "t5-settled-no-commissioner-key")
         with-runtime $root {
             bus-identity "impl-a" --run "run-1" --identity {
                 role: "impl", cwd: "/tmp/nowhere", branch: "wk-t.0"
                 session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
             }
             let written = (bus-settled "impl-a" --run "run-1")
-            assert-true $written.reported "no commissioner key at all still reports, for backward compatibility"
+            assert-true (not $written.reported) "no commissioner key at all is uncommissioned, not a legacy default"
         }
         rm -rf $root
+    })
+
+    (run-case "pipeline/worker-spawn-records-the-run-as-commissioner-so-a-real-spawned-worker-is-commissioned" {
+        # The actual wiring this task adds: worker-spawn (not a hand-built
+        # bus-identity fixture) records `commissioner: <run>` on every
+        # identity it creates, so a genuinely spawned worker settling
+        # silently still produces its protocol_error in production — the
+        # property T5's success criteria are about, proven end to end
+        # through spawn rather than through a fixture that asserts it.
+        with-pipeline "spawn-records-commissioner" {|t, repo|
+            launch $t $repo "impl-a" "impl"
+            let identity = (bus-identity-of "impl-a" --run "run-1")
+            assert-eq $identity.commissioner "run-1" "spawn records the run as the commissioner"
+
+            let written = (bus-settled "impl-a" --run "run-1")
+            assert-true $written.reported "a genuinely spawned worker settling silently is still a protocol error"
+        }
     })
 
 ]

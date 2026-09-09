@@ -414,11 +414,11 @@ export interface WorkerIdentity {
   window: string;
   /**
    * sp029 T5: who this agent owes its typed result to, mirroring the same
-   * optional field on the nu-side identity record. Not wired into spawn yet
-   * (T7/T9's job) — every identity recorded today omits this key, which is
-   * the backward-compatible "commissioned" default: absence must not
-   * silently reinterpret an existing worker as uncommissioned. Present and
-   * null/empty is the new, genuinely uncommissioned case.
+   * field on the nu-side identity record, where `worker-spawn` records the
+   * run as the commissioner for every worker it creates. Absence (or an
+   * explicit null/empty value) means genuinely uncommissioned — the shape a
+   * future T7 self-registering agent has, since it never goes through
+   * worker-spawn at all.
    */
   commissioner?: string | null;
 }
@@ -472,12 +472,11 @@ export function resultEnvelopeFrom(
  * The error envelope payload for an agent that settled without reporting —
  * `null` for an agent nobody commissioned, which owes no result and so
  * settling silently is simply done talking, not a protocol error (sp029 T5,
- * mirrors the nu-side `bus-settled` gate). Absence of `commissioner` on the
- * identity is the backward-compatible default (commissioned); present and
- * null/empty is the new uncommissioned case.
+ * mirrors the nu-side `bus-settled` gate). Absent, null, or empty
+ * `commissioner` are all the same uncommissioned case.
  */
 export function settledWithoutResult(identity: WorkerIdentity) {
-  if ("commissioner" in identity && !identity.commissioner) {
+  if (!identity.commissioner) {
     return null;
   }
   return { ...SETTLED_WITHOUT_RESULT };

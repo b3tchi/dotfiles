@@ -416,6 +416,7 @@ let cases = [
             bus-identity "impl-a" --run "r1" --identity {
                 role: "impl", cwd: "/tmp/nowhere", branch: "wk-t1.0"
                 session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
+                commissioner: "r1"
             }
         }
         let out = (run-cli "settled" "impl-a" "--run" "r1" --runtime $root)
@@ -434,6 +435,7 @@ let cases = [
             bus-identity "impl-a" --run "r1" --identity {
                 role: "impl", cwd: "/tmp/nowhere", branch: "wk-t1.0"
                 session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
+                commissioner: "r1"
             }
         }
         run-cli "result" "impl-a" "--run" "r1" "--status" "blocked" "--summary" "stuck" --runtime $root

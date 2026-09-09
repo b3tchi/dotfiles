@@ -245,18 +245,16 @@ describe("typed result envelope", () => {
 });
 
 describe("settling without the result tool", () => {
-  test("produces a protocol error for an identity with no commissioner key at all (backward compatible)", () => {
-    const env = settledWithoutResult(identity);
-    expect(env).not.toBeNull();
-    expect(env!.code).toBe("protocol_error");
-    expect(env!.detail).toMatch(/result tool/i);
-    expect(JSON.stringify(env)).not.toContain("complete");
+  test("produces nothing for an identity with no commissioner key at all — absence is uncommissioned, not a legacy default", () => {
+    expect(settledWithoutResult(identity)).toBeNull();
   });
 
   test("produces a protocol error for an identity with a recorded commissioner", () => {
     const env = settledWithoutResult({ ...identity, commissioner: "orchestrator-1" });
     expect(env).not.toBeNull();
     expect(env!.code).toBe("protocol_error");
+    expect(env!.detail).toMatch(/result tool/i);
+    expect(JSON.stringify(env)).not.toContain("complete");
   });
 
   test("produces nothing for an identity explicitly marked uncommissioned", () => {

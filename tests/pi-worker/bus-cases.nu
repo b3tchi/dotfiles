@@ -428,6 +428,7 @@ let cases = [
             bus-identity "impl-a" --run "r1" --identity {
                 role: "impl", cwd: "/tmp/nowhere", branch: "wk-t1.0"
                 session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
+                commissioner: "r1"
             }
             bus-settled "impl-a" --run "r1"
 
@@ -452,6 +453,7 @@ let cases = [
             bus-identity "impl-a" --run "r1" --identity {
                 role: "impl", cwd: "/tmp/nowhere", branch: "wk-t1.0"
                 session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
+                commissioner: "r1"
             }
 
             let written = (bus-settled "impl-a" --run "r1")
@@ -478,6 +480,15 @@ let cases = [
         # into a failed one.
         let root = (make-runtime "settled-after")
         with-runtime $root {
+            # commissioner recorded explicitly (not via put-result's shared
+            # default identity), so this exercises the "already reported"
+            # branch of bus-settled specifically, rather than passing
+            # vacuously because nobody commissioned this worker either way.
+            bus-identity "impl-a" --run "r1" --identity {
+                role: "impl", cwd: "/tmp/nowhere", branch: "wk-t1.0"
+                session: "sid-impl-a", skill: "wk-build", window: "impl-a@dotfiles"
+                commissioner: "r1"
+            }
             put-result "r1" "impl-a"
             let written = (bus-settled "impl-a" --run "r1")
 
@@ -495,6 +506,7 @@ let cases = [
             bus-identity "impl-a" --run "r1" --identity {
                 role: "impl", cwd: "/tmp/nowhere", branch: "wk-t1.0"
                 session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
+                commissioner: "r1"
             }
             bus-settled "impl-a" --run "r1"
             let second = (bus-settled "impl-a" --run "r1")
