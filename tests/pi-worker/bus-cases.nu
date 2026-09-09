@@ -712,10 +712,24 @@ let cases = [
         assert-true ((mint-session) =~ '^[0-9a-f]{8}-[0-9a-f]{4}-') "and actually a uuid"
     })
 
-    # `mint-run` is retired by sp029 T1 (project scoping replaces run
-    # scoping); `spawn`'s own minted-run behavior is CLI surface owned by T9
-    # and out of scope here. See the `project/*` cases below for what
-    # replaces it.
+    (run-case "bus/a-run-is-minted-when-none-is-given" {
+        # `mint-run` is retired by sp029 T1 (project scoping replaces run
+        # scoping as the bus's address) and renamed to `next-run-id`, but the
+        # logic itself is still live production code reached from `main spawn`
+        # whenever `--run` is omitted, pending T9's CLI redesign — so it stays
+        # covered under its new name rather than only reachable through a CLI
+        # round trip.
+        let root = (make-runtime "next-run-id")
+        with-runtime $root {
+            assert-eq (next-run-id) "r1" "the first run of an empty bus"
+            bus-send "w" --run "r1" --payload {stage: "wk-build", task: "t"}
+            assert-eq (next-run-id) "r2" "the next free one"
+            # A run whose name is not `r<N>` must not confuse the counter.
+            bus-send "w" --run "custom" --payload {stage: "wk-build", task: "t"}
+            assert-eq (next-run-id) "r2" "names outside the pattern are ignored, not parsed"
+        }
+        rm -rf $root
+    })
 
     (run-case "bus/wait-can-block-until-a-result-lands" {
         # `wait` peeked and returned nothing, so an agent told to "wait for its
@@ -1033,6 +1047,29 @@ bus-result "impl-a" --run "run-1" --result {status: "complete", summary: "second
                 let d = ($dir | path join $sub)
                 assert-true ($d | path exists) $"($d) must exist"
                 assert-eq (dir-mode-of $d) "rwx------" $"($d) must be 0700"
+            }
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "project/every-ancestor-of-bus-is-0700-not-just-the-leaf" {
+        # `mkdir -m MODE -p` applies MODE only to the FINAL path component;
+        # `pi-worker/` and `pi-worker/<slug>/` are ancestors `-p` creates
+        # along the way to `bus/`, so a single `ensure-dir (project-dir)`
+        # call leaves them at the umask mode (0755 here) instead of 0700 —
+        # leaking the slug, and so the repo's identity, to every local user.
+        # `make-runtime` hands every case its own fresh XDG_RUNTIME_DIR, so
+        # neither ancestor can already exist from an earlier case.
+        let repo = (make-repo "proj-perm-ancestors")
+        let root = (make-runtime "proj-perm-ancestors")
+        with-runtime $root {
+            do { cd $repo; ensure-bus-dirs }
+            let dir = (do { cd $repo; project-dir })
+            let project_root = ($dir | path dirname)
+            let pi_worker_root = ($project_root | path dirname)
+            assert-eq $pi_worker_root ($root | path join "pi-worker") "sanity: this is the pi-worker root, not some other ancestor"
+            for d in [$pi_worker_root $project_root $dir] {
+                assert-eq (dir-mode-of $d) "rwx------" $"($d) must be 0700, not the umask default"
             }
         }
         rm -rf $root; rm -rf $repo

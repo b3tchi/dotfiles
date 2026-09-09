@@ -505,10 +505,24 @@ export def project-dir []: nothing -> string {
 # legacy run/uid tree, nothing here is scoped to a worker address, so there
 # is no id to thread through: T2-T4 populate these once envelopes and queue
 # rows exist to put in them.
+#
+# One `ensure-dir` call PER LEVEL, exactly like `ensure-worker-dirs` above —
+# not `ensure-dir (project-dir)` alone. `mkdir -m MODE -p` only applies MODE
+# to the final path component; every ancestor `-p` creates along the way
+# keeps the umask mode (0755 by default). Calling it once on the 3-level
+# `pi-worker/<slug>/bus` path would leave `pi-worker/` and `pi-worker/<slug>/`
+# world-readable — the slug, and so the repo's identity, visible to every
+# local user — the moment either does not already exist, which is the normal
+# case right after `$XDG_RUNTIME_DIR` is wiped at logout.
 export def ensure-bus-dirs []: nothing -> nothing {
-    ensure-dir (project-dir)
-    ensure-dir (project-dir | path join "messages")
-    ensure-dir (project-dir | path join "queue")
+    let dir = (project-dir)
+    let project_root = ($dir | path dirname)
+    let pi_worker_root = ($project_root | path dirname)
+    ensure-dir $pi_worker_root
+    ensure-dir $project_root
+    ensure-dir $dir
+    ensure-dir ($dir | path join "messages")
+    ensure-dir ($dir | path join "queue")
 }
 
 # Write `envelope` into `dir` at the next free sequence.
@@ -879,14 +893,15 @@ export def mint-session []: nothing -> string {
 # so this is a placeholder, not a design: `spawn` still threads a `run`
 # string down to `worker-dir` until T9 redesigns the CLI to address by
 # `--to` instead. Deliberately renamed off the old allocator's name — sp029
-# T1 retires that name from the module's exported surface — and deliberately
-# not exported: nothing outside `main spawn` should grow a new dependency on
-# it.
+# T1 retires that name from the module's exported surface — but still
+# exported: this is live production logic reached from `main spawn` with no
+# `--run` given, not dead code, so it stays directly testable rather than
+# only reachable through a CLI round trip.
 #
 # Directories that are not shaped `r<n>` are ignored rather than parsed: a run
 # an operator named `x4` says nothing about which `r<n>` is free, and reading a
 # number out of it would hand back an address already in use.
-def next-run-id []: nothing -> string {
+export def next-run-id []: nothing -> string {
     let root = (bus-root)
     let taken = (if ($root | path exists) {
         ls $root | where type == dir | get name | each {|d| $d | path basename }
