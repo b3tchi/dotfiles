@@ -85,11 +85,45 @@ export def fixture-base []: nothing -> string {
 # server even when the case that made it died mid-assertion. A socket lives in
 # /tmp/tmux-<uid>/ rather than in the sandbox, so the name has to be written
 # down for it to be findable.
+#
+# Every case already got its own random suffix, so two concurrent full-suite
+# runs could never see or list-windows into each other's sockets — that part
+# was never the bug (dotfiles-6nvx.17). The bug is volume: a full run spins up
+# a real tmux server PER CASE, so two concurrent runs have several hundred
+# real tmux daemons live at once, and a case with a fixed wait (spawn a stub,
+# sleep 400ms, read what it wrote) starts missing that window under the
+# resulting CPU/fork pressure — measured directly as
+# `live/respawn-continues-the-accepted-workers-session-under-a-new-uid` and
+# `live/a-dead-window-with-no-bus-record-is-named-not-killed` failing in 3 of 4
+# concurrent runs, on suites a passing run never touched.
+#
+# `PIW_RUN_ID` (minted once, in run-tests.nu's own process, before it spawns
+# any subsuite subprocess — see there) makes every socket this run mints
+# self-describing: `pi-worker-test-<run id>-<tag>-<random>`. It does not
+# reduce the server count, but it means a leaked server names the run that
+# owns it, so `sweep-run-sockets` can find and kill exactly this run's own
+# servers and nothing another run is using.
 export def new-tmux-socket [tag: string]: nothing -> string {
-    let socket = $"piw-($tag)-(random chars --length 6)"
+    let run_id = ($env | get -o PIW_RUN_ID | default "standalone")
+    let socket = $"pi-worker-test-($run_id)-($tag)-(random chars --length 6)"
     let registry = ((fixture-base) | path join ".tmux-sockets")
     $"($socket)\n" | save --append --raw $registry
     $socket
+}
+
+# Kill every tmux server THIS run minted that a case's own teardown missed —
+# belt-and-braces after the whole suite finishes, whatever the verdict. Scoped
+# to `run_id` so it only ever touches servers this run named; a concurrent
+# run's sockets carry a different id and are invisible to this scan. Never
+# throws: it runs after the suite is already done reporting, and an error here
+# must not mask the real result.
+export def sweep-run-sockets [run_id: string]: nothing -> nothing {
+    let dir = ([($env | get -o TMUX_TMPDIR | default "/tmp") $"tmux-(^id -u | str trim)"] | path join)
+    if not ($dir | path exists) { return }
+    let leaked = (try {
+        ls $dir | get name | path basename | where {|n| $n | str starts-with $"pi-worker-test-($run_id)-" }
+    } catch { [] })
+    for name in $leaked { do { drop-tmux-server $name } | ignore }
 }
 
 # Kill anything the case registered, then remove the sandbox. Never throws:

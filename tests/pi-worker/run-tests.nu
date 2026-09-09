@@ -22,6 +22,13 @@
 
 use harness.nu *
 
+# One id for this whole run — minted here, in run-tests.nu's OWN process,
+# before any subsuite subprocess is spawned below, so every suite inherits the
+# same id via ordinary process env inheritance rather than each subsuite
+# subprocess minting its own (which would make it a per-suite-file id, not a
+# per-run one). See harness.nu's new-tmux-socket and sweep-run-sockets.
+$env.PIW_RUN_ID = (random chars --length 10)
+
 const SUITES = [
     [label, file];
     ["schema",     "schema-cases.nu"]
@@ -46,6 +53,7 @@ def run-subsuite [label: string, file: string] {
 }
 
 print $"(ansi cyan)infinifu-worker protocol suite(ansi reset)"
+print $"(ansi dark_gray)run id: ($env.PIW_RUN_ID) — an interrupted run's leftover servers are named pi-worker-test-($env.PIW_RUN_ID)-*(ansi reset)"
 print ""
 
 # The assertions guard everything else, so they are checked first.
@@ -129,6 +137,10 @@ for r in $results {
 let passed = ($results | where status == "pass" | length)
 let failed = ($results | where status == "FAIL" | length)
 let pend   = ($results | where status == "PENDING" | length)
+
+# Belt-and-braces beyond run-case's per-case reap: whatever this run leaked,
+# under its own id, dies here — pass or fail, before exit.
+sweep-run-sockets $env.PIW_RUN_ID
 
 print ""
 print $"($passed) passed, ($failed) failed, ($pend) pending"
