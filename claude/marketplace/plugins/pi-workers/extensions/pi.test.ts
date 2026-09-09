@@ -15,6 +15,7 @@
 
 import { expect, test, describe } from "bun:test";
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
 
 // Stage shape is read from the consumer's registry now, so the suite supplies
 // one. Same fixture the nu suite uses, so both halves agree on the vocabulary.
@@ -53,10 +54,11 @@ import {
   visibleWidth,
   MAX_SUMMARY_BYTES,
   oneLine,
+  PROTOCOL_VERSION,
 } from "./pi.ts";
 
 const workEnvelope = {
-  protocol: 1 as const,
+  protocol: 2 as const,
   sequence: 3,
   run: "run-1",
   uid: "impl-a",
@@ -2628,5 +2630,24 @@ describe("the frame fits rather than wraps", () => {
     const narrow = rosterFrame([row], { now: Date.now(), width: 24 })!;
     expect(narrow[1]).not.toContain("bash");
     expect(narrow[1]).toContain("r31/worker-1@42");
+  });
+});
+
+describe("protocol version agrees with the nushell module (sp029 T2)", () => {
+  // The two halves of this contract have drifted silently before — see the
+  // drift case named in T9's own design. Reading the nu source as text rather
+  // than shelling out to `nu` keeps this check meaningful in any CI image
+  // that has bun but not nushell, and it fails the moment either side is
+  // edited without the other.
+  test("PROTOCOL_VERSION is the same literal on both sides", () => {
+    const nuSource = readFileSync(
+      join(import.meta.dir, "../scripts/pi-worker.nu"),
+      "utf8",
+    );
+    const match = nuSource.match(/^export const PROTOCOL_VERSION = (\d+)/m);
+    if (!match) {
+      throw new Error("could not find `export const PROTOCOL_VERSION = <n>` in pi-worker.nu");
+    }
+    expect(PROTOCOL_VERSION).toBe(Number(match[1]));
   });
 });

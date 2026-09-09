@@ -33,7 +33,13 @@ use stage-registry.nu *
 
 # Bumped only for an incompatible envelope change. A reader that meets an
 # unknown version fails closed rather than guessing at the fields.
-export const PROTOCOL_VERSION = 1
+#
+# 1 -> 2 (sp029 T2): the envelope becomes peer-addressed. `from`/`to`/`content`
+# join the schema; `sequence`/`run`/`uid`/`payload` stay on the wire for the
+# v1 pipeline (bus-send/bus-result/claim-slot, retired in T3/T4) but are no
+# longer part of what a v2 reader requires. No migration: the bus lives in
+# $XDG_RUNTIME_DIR, so the bump costs at most an in-flight project thread.
+export const PROTOCOL_VERSION = 2
 
 # Envelope cap: a bus message is an address plus a pointer, never a payload of
 # record. Anything approaching this size means prose is being copied that
@@ -83,7 +89,12 @@ export const RESULT_STATUSES = ["complete" "waiting_human" "blocked" "failed"]
 # Fields that betray a copied task body in a work-stage payload.
 const WORK_PAYLOAD_ALLOWED = ["stage" "task"]
 
-const ENVELOPE_REQUIRED = ["protocol" "sequence" "run" "uid" "kind" "created" "payload"]
+# v2: addressing (`from`/`to`) and opaque `content` replace `sequence`/`run`/
+# `uid`/`payload` as what a reader is guaranteed. The legacy fields still ride
+# along on every envelope the v1 pipeline writes (bus-send, bus-result, ...,
+# retired in T3/T4) for their own bookkeeping, but a v2 validator no longer
+# requires them.
+const ENVELOPE_REQUIRED = ["protocol" "kind" "from" "to" "created" "content"]
 
 # ------------------------------------------------------------ state machine
 
@@ -169,6 +180,128 @@ def text-bytes [value: string]: nothing -> int {
     $value | into binary | bytes length
 }
 
+# Byte size of a message's content specifically, not the enclosing envelope. A
+# 64 KiB content field wrapped in {protocol, from, to, created, ...} JSON is
+# already over 64 KiB total, so the cap this protects has to be measured on
+# content alone — otherwise the boundary at exactly 64 KiB would be refused
+# for the wrapper's overhead, not for anything the sender actually wrote.
+def content-bytes [content: any]: nothing -> int {
+    if ($content | describe) == "string" {
+        text-bytes $content
+    } else {
+        $content | to json --raw | into binary | bytes length
+    }
+}
+
+# ------------------------------------------------------------- message ids
+#
+# sp029 T2: a message id is a sortable timestamp plus a random suffix, not a
+# claimed slot. Concurrent posters never contend, because nothing is shared —
+# each id is minted independently and the fan-out that will use it (T3) has no
+# `link(2)` race to lose.
+#
+# Shape is ULID-like: 10 Crockford-base32 characters encode a monotonic
+# millisecond timestamp (26 chars total with the 16-character random tail),
+# and Crockford's alphabet is itself ASCII-ascending, so two fixed-width ids
+# compare correctly with plain string `<`/`sort` — no decoding required.
+export const MSG_ID_CHARS = 26
+const CROCKFORD_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+const CROCKFORD_TS_WIDTH = 10
+const CROCKFORD_RAND_WIDTH = 16
+
+def crockford-chars []: nothing -> list<string> {
+    $CROCKFORD_ALPHABET | split chars
+}
+
+# Encode a non-negative integer as fixed-width Crockford base32, zero-padded
+# on the left so equal-width encodings sort the same way their integers do.
+def crockford-encode [n: int, width: int]: nothing -> string {
+    let chars = (crockford-chars)
+    mut value = $n
+    mut digits = []
+    if $value == 0 {
+        $digits = [0]
+    } else {
+        while $value > 0 {
+            $digits = ([($value mod 32)] | append $digits)
+            $value = ($value // 32)
+        }
+    }
+    let s = ($digits | each {|d| $chars | get $d } | str join "")
+    let pad = ($width - ($s | str length))
+    if $pad > 0 {
+        (0..<$pad | each {|_| "0" } | str join "") + $s
+    } else {
+        $s
+    }
+}
+
+def crockford-random [width: int]: nothing -> string {
+    let chars = (crockford-chars)
+    (0..<$width) | each {|_| $chars | get (random int 0..31) } | str join ""
+}
+
+# Add 1 to a Crockford string, treated as big-endian base32 digits. Used to
+# keep ids strictly increasing when two mints land in the same millisecond.
+#
+# A carry past the leftmost digit is dropped rather than widening the string:
+# it needs the timestamp component to also be exhausted (2^80 mints in one
+# millisecond), which is not a case that occurs. Documented rather than
+# handled, per the edge case this function exists for.
+def crockford-increment [s: string]: nothing -> string {
+    let chars = (crockford-chars)
+    let digits = ($s | split chars | each {|c|
+        $chars | enumerate | where {|it| $it.item == $c } | get 0.index
+    })
+    mut carry = 1
+    mut result = []
+    for d in ($digits | reverse) {
+        let v = ($d + $carry)
+        if $v >= 32 {
+            $result = ([($v - 32)] | append $result)
+            $carry = 1
+        } else {
+            $result = ([$v] | append $result)
+            $carry = 0
+        }
+    }
+    $result | each {|i| $chars | get $i } | str join ""
+}
+
+# Mint a 26-character message id: monotonic within this process, unique
+# across concurrent ones.
+#
+# `--env` is load-bearing: it is what lets the timestamp/random state persist
+# from one call to the next WITHIN one nu process (env mutations made inside a
+# `def --env` propagate back to the caller's scope), which is what makes
+# 10,000 sequential mints come out strictly increasing regardless of clock
+# resolution. Across processes there is no shared state at all — uniqueness
+# there rests entirely on the 80 bits of randomness in the tail, which is
+# enough that a collision among thousands of concurrent ids is not a
+# practical concern.
+#
+# A clock that steps backwards is handled by clamping forward: the minted
+# timestamp never drops below the last one this process minted, and the
+# random tail increments instead of re-randomizing. Ids stay unique and
+# non-decreasing even across a backward step; they simply stop tracking wall
+# time exactly until it catches back up. That is the "ordering is best-effort"
+# the design accepts — this function goes further and keeps it monotonic
+# per-process, but no id anywhere promises a total order across processes.
+export def --env mint-msg-id []: nothing -> string {
+    let now_ms = (date now | format date "%s%3f" | into int)
+    let last_ts = ($env | get -o PI_WORKER_LAST_MSG_TS | default "-1" | into int)
+    let last_rand = ($env | get -o PI_WORKER_LAST_MSG_RAND | default "")
+
+    let advancing = ($now_ms > $last_ts) or ($last_rand | is-empty)
+    let ts = if $advancing { $now_ms } else { $last_ts }
+    let rand = if $advancing { (crockford-random $CROCKFORD_RAND_WIDTH) } else { (crockford-increment $last_rand) }
+
+    $env.PI_WORKER_LAST_MSG_TS = ($ts | into string)
+    $env.PI_WORKER_LAST_MSG_RAND = $rand
+
+    (crockford-encode $ts $CROCKFORD_TS_WIDTH) + $rand
+}
+
 # Stages the BUS itself authors, which therefore need no consumer declaration.
 # `resume` sends one of these to reopen a worker, so requiring the consumer to
 # register it would make the bus depend on its own caller.
@@ -193,60 +326,30 @@ def stages-taking [shape: string]: nothing -> string {
     }
 }
 
-def validate-inbox-payload [payload: record, --stored] {
-    if "stage" not-in ($payload | columns) {
-        error make {msg: "inbox payload must name its stage"}
-    }
-    let stage = $payload.stage
-    let fields = ($payload | columns)
-
-    # A STORED envelope is history, and history is not re-litigated against
-    # today's registry.
-    #
-    # This was found the hard way: renaming a stage in the registry made every
-    # envelope written under the old name unreadable, because read-box
-    # re-validates on read and validation resolved the stage. `inspect`,
-    # `wait` and `ps` all died on a worker whose only crime was predating the
-    # rename —
-    #
-    #     invalid envelope 1.json in .../inbox: unknown stage 'task': not one
-    #     of probe, work, build
-    #
-    # Editing a config file must not corrupt the record of what already
-    # happened. Validating a payload's SHAPE needs the registry, so that check
-    # belongs where the envelope is written — where the gate can still refuse —
-    # and not where it is read back.
-    if $stored { return }
-
-    # A bus-authored stage carries instructions by construction.
-    let shape = (if $stage in $RESERVED_STAGES { "instructions" } else { stage-for $stage | get payload })
-    if $shape == "ticket" {
-        if "task" not-in $fields {
-            error make {msg: $"payload for '($stage)' must carry its ticket id. If the work has no ticket and is prose, it needs a stage that takes instructions: (stages-taking 'instructions')"}
-        }
-        let extra = ($fields | where {|f| $f not-in $WORK_PAYLOAD_ALLOWED })
-        if ($extra | is-not-empty) {
-            error make {msg: $"payload for '($stage)' may carry only stage and task; found ($extra | str join ', '). A ticket payload is an address, so any copied body is a second source of truth"}
-        }
-    } else {
-        if "task" in $fields {
-            error make {msg: $"payload for '($stage)' must not carry a ticket id: this stage receives direct instructions and artifact ids. Stages that take a ticket: (stages-taking 'ticket')"}
-        }
-        if "instructions" not-in $fields {
-            error make {msg: $"payload for '($stage)' must carry direct instructions"}
-        }
+# sp029 T2: a message's content is opaque to the transport — "carries any
+# consumer's vocabulary and interprets none of it". The stage/ticket/
+# instructions shape that used to live here moved to the consumer (ft013):
+# the bus no longer knows what a stage is, so the only thing left to check is
+# the one thing the transport actually owns, the size cap. `--stored` is
+# accepted and ignored: a v1 caller (read-box) still passes it, and a content
+# size check has nothing to re-litigate against a registry that may have
+# changed, so stored and fresh envelopes are checked identically now.
+def validate-inbox-payload [content: any, --stored] {
+    let size = (content-bytes $content)
+    if $size > $MAX_ENVELOPE_BYTES {
+        error make {msg: $"message content is ($size) bytes, over the 64 KiB cap: a bus message addresses work, it does not carry it"}
     }
 }
 
-def validate-result-payload [payload: record] {
-    let fields = ($payload | columns)
+def validate-result-payload [content: record] {
+    let fields = ($content | columns)
     for required in ["status" "summary" "window" "session" "resume"] {
         if $required not-in $fields {
             error make {msg: $"result payload must carry ($required)"}
         }
     }
 
-    let status = $payload.status
+    let status = $content.status
     if $status in $OBSERVATIONAL_VERDICTS {
         error make {msg: $"'($status)' is an observational verdict and can never be reported as a result status \(adr0017)"}
     }
@@ -257,7 +360,7 @@ def validate-result-payload [payload: record] {
         error make {msg: $"unknown result status '($status)': not one of ($RESULT_STATUSES | str join ', ')"}
     }
 
-    if (text-bytes $payload.summary) > $MAX_SUMMARY_BYTES {
+    if (text-bytes $content.summary) > $MAX_SUMMARY_BYTES {
         error make {msg: $"result summary exceeds the 4 KiB summary cap; detail belongs in the worker window and the Pi transcript, not the envelope"}
     }
 
@@ -307,26 +410,33 @@ export def validate-envelope [envelope: record, --stored] {
         error make {msg: $"unknown envelope kind '($envelope.kind)': not one of ($ENVELOPE_KINDS | str join ', ')"}
     }
 
-    if ($envelope.sequence | describe) != "int" {
-        error make {msg: "envelope sequence must be an integer"}
-    }
-    if $envelope.sequence < 0 {
-        error make {msg: $"envelope sequence must be non-negative, got ($envelope.sequence)"}
+    if ($envelope.from | describe) != "string" or ($envelope.from | is-empty) {
+        error make {msg: "envelope field 'from' must be a non-empty address"}
     }
 
-    for addressed in ["run" "uid" "created"] {
-        if ($envelope | get $addressed | is-empty) {
-            error make {msg: $"envelope field '($addressed)' must not be empty"}
-        }
+    # `to` is a list of at least one address. Duplicates (including the
+    # sender addressing itself) are legal — fan-out (T3) dedupes rather than
+    # refusing, since re-sending to an address already in the list is a
+    # sender mistake worth ignoring, not a protocol violation.
+    if not ($envelope.to | describe | str starts-with "list") {
+        error make {msg: "envelope field 'to' must be a list of addresses"}
+    }
+    if ($envelope.to | is-empty) {
+        error make {msg: "envelope field 'to' must name at least one address"}
+    }
+    if ($envelope.to | any {|addr| ($addr | describe) != "string" or ($addr | is-empty) }) {
+        error make {msg: "envelope field 'to' must contain only non-empty addresses"}
     }
 
-    let size = (envelope-bytes $envelope)
-    if $size > $MAX_ENVELOPE_BYTES {
-        error make {msg: $"envelope is ($size) bytes, over the 64 KiB envelope cap: a bus message addresses work, it does not carry it"}
+    if ($envelope.created | is-empty) {
+        error make {msg: "envelope field 'created' must not be empty"}
+    }
+    if not (try { $envelope.created | into datetime; true } catch { false }) {
+        error make {msg: $"envelope field 'created' must be an ISO timestamp, got '($envelope.created)'"}
     }
 
     match $envelope.kind {
-        "inbox" => { validate-inbox-payload $envelope.payload --stored=$stored }
+        "inbox" => { validate-inbox-payload $envelope.content --stored=$stored }
         "result" => { validate-result-payload $envelope.payload }
         "error" => { validate-error-payload $envelope.payload }
         "identity" => { validate-identity $envelope.payload }
@@ -339,6 +449,10 @@ export def validate-envelope [envelope: record, --stored] {
 # failure this envelope exists to prevent, so the absence of a result is itself
 # reported, as a protocol error.
 export def settled-without-result [run: string, uid: string, sequence: int, created: string]: nothing -> record {
+    let payload = {
+        code: "protocol_error"
+        detail: "agent settled without calling the typed result tool; completion is never inferred from an idle prompt, an exited pane, or assistant prose"
+    }
     {
         protocol: $PROTOCOL_VERSION
         sequence: $sequence
@@ -346,10 +460,10 @@ export def settled-without-result [run: string, uid: string, sequence: int, crea
         uid: $uid
         kind: "error"
         created: $created
-        payload: {
-            code: "protocol_error"
-            detail: "agent settled without calling the typed result tool; completion is never inferred from an idle prompt, an exited pane, or assistant prose"
-        }
+        from: $uid
+        to: [$run]
+        content: $payload
+        payload: $payload
     }
 }
 
@@ -635,7 +749,19 @@ def now-stamp []: nothing -> string {
     date now | date to-timezone UTC | format date "%Y-%m-%dT%H:%M:%S%.6fZ"
 }
 
+# sp029 T2 bridge: the v1 pipeline (bus-send/bus-result/bus-settled/identity,
+# all still `run`/`uid`-addressed pending T3/T4/T7's real peer addressing)
+# still calls this with a run and a worker uid, not a resolved peer list. It
+# derives a v2-shaped `from`/`to` from the direction the kind already implies
+# — `inbox` travels initiator-to-worker, everything else worker-to-initiator —
+# so every envelope this module writes satisfies the v2 validator without
+# every caller needing to know an address it cannot yet supply. `content`
+# mirrors `payload`: T3-T5 are what actually move a kind's data off `payload`
+# and onto `content` for good; until then both names carry the same value so
+# neither a v1 reader (`.payload...`) nor the v2 validator (`.content`) sees a
+# missing field.
 def envelope-for [run: string, uid: string, kind: string, payload: record]: nothing -> record {
+    let addressing = if $kind == "inbox" { {from: $run, to: [$uid]} } else { {from: $uid, to: [$run]} }
     {
         protocol: $PROTOCOL_VERSION
         sequence: 0
@@ -643,6 +769,9 @@ def envelope-for [run: string, uid: string, kind: string, payload: record]: noth
         uid: $uid
         kind: $kind
         created: (now-stamp)
+        from: $addressing.from
+        to: $addressing.to
+        content: $payload
         payload: $payload
     }
 }

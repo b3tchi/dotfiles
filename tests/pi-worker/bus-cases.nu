@@ -252,12 +252,19 @@ let cases = [
     })
 
     # ------------------------------------------------------------ fail closed
-    (run-case "bus/rejects-a-malformed-envelope-on-write" {
+    #
+    # sp029 T2: the stage/ticket shape check this case used to exercise is
+    # retired — a bus that cannot interpret `content` cannot gate its shape,
+    # so `{stage: "wk-build", task: "t", design: "copied prose"}` is now a
+    # legal (if opaque) message body. What the bus still owns is the size
+    # cap, so that is what "fail closed on write" now asserts here.
+    (run-case "bus/rejects-an-oversized-payload-on-write" {
         let root = (make-runtime "malformed-write")
         with-runtime $root {
+            let huge = ("x" | fill --width 70000 --character "x")
             assert-rejects {
-                bus-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "t", design: "copied prose"}
-            } "wk-build" "a payload violating the protocol never reaches the runtime dir"
+                bus-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: $huge}
+            } "64 KiB" "content violating the size cap never reaches the runtime dir"
             let written = (glob ((bus-root) + "/**/*.json"))
             assert-eq $written [] "nothing was written"
         }
@@ -284,7 +291,10 @@ let cases = [
         with-runtime $root {
             put-result "run-1" "impl-a"
             let dir = ((bus-root) | path join "run-1" "impl-a" "outbox")
-            {protocol: 99, sequence: 2, run: "run-1", uid: "impl-a", kind: "result", created: "2026-09-05T10:00:00Z", payload: {}}
+            {
+                protocol: 99, sequence: 2, run: "run-1", uid: "impl-a", kind: "result"
+                created: "2026-09-05T10:00:00Z", from: "impl-a", to: ["run-1"], content: {}, payload: {}
+            }
             | to json | save -f ($dir | path join "2.json")
 
             assert-rejects { bus-pending "run-1" } "protocol" "an unknown protocol version fails closed on read"

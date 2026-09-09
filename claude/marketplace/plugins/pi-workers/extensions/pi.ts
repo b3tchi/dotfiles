@@ -16,8 +16,13 @@ import { fileURLToPath } from "node:url";
 // display-message to carry a message, a completion signal, or any coordination
 // state. Envelopes travel through the runtime directory and nowhere else.
 
-/** Bumped only for an incompatible envelope change; unknown versions fail closed. */
-export const PROTOCOL_VERSION = 1;
+/**
+ * Bumped only for an incompatible envelope change; unknown versions fail
+ * closed. Must equal the nushell module's own `$PROTOCOL_VERSION` — see the
+ * cross-language check in pi.test.ts, which is what catches the two halves
+ * drifting silently (sp029 T2).
+ */
+export const PROTOCOL_VERSION = 2;
 
 /** A bus message addresses work — it never carries it. */
 export const MAX_ENVELOPE_BYTES = 65536;
@@ -55,6 +60,15 @@ export type ResultStatus = (typeof RESULT_STATUSES)[number];
 /** Stages the bus authors itself; they need no consumer declaration. */
 export const RESERVED_STAGES = ["rejection"] as const;
 
+/**
+ * v2 (sp029 T2): `from`/`to`/`content` are what the bus itself validates now;
+ * `sequence`/`run`/`uid`/`payload` are what the v1 pipeline (bus-send et al,
+ * retired in T3/T4) still writes on the wire. Both sets ride on one envelope
+ * during the transition, so they are typed optional here rather than one
+ * replacing the other outright — nothing in this extension reads `from`/`to`/
+ * `content` yet (that lands with T7's self-addressing), so making them
+ * required would be typing a promise this file does not keep.
+ */
 export interface Envelope<P = unknown> {
   protocol: typeof PROTOCOL_VERSION;
   sequence: number;
@@ -63,6 +77,9 @@ export interface Envelope<P = unknown> {
   kind: EnvelopeKind;
   created: string;
   payload: P;
+  from?: string;
+  to?: string[];
+  content?: P;
 }
 
 /**

@@ -179,19 +179,27 @@ export def pi-extension [caller_dir: string]: nothing -> string {
 
 # ------------------------------------------------------------- envelopes
 
-# A minimal well-formed envelope of each kind. Cases mutate one field at a
+# A minimal well-formed v2 envelope of each kind. Cases mutate one field at a
 # time so a rejection is attributable to that field and nothing else.
+#
+# `content` and `payload` carry the same value on purpose, mirroring the
+# bridge `envelope-for` builds in the v1 pipeline (sp029 T2): `result`/
+# `error`/`identity` are still validated off `.payload`, `inbox` off
+# `.content`, and a sample usable against either dispatch path needs both
+# names present.
 export def sample-envelope [kind: string]: nothing -> record {
     let base = {
-        protocol: 1
+        protocol: 2
         sequence: 1
         run: "run-42"
         uid: "impl-dotfiles-963w.1-a1"
         kind: $kind
+        from: "impl-dotfiles-963w.1-a1"
+        to: ["run-42"]
         created: "2026-09-05T10:00:00Z"
     }
     let payload = match $kind {
-        "inbox" => {stage: "wk-build", task: "dotfiles-963w.1"}
+        "inbox" => "do the thing"
         "result" => {
             status: "complete"
             summary: "protocol module landed"
@@ -201,9 +209,13 @@ export def sample-envelope [kind: string]: nothing -> record {
             resume: "pi --session 0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
         }
         "error" => {code: "protocol_error", detail: "agent settled without calling the result tool"}
+        "identity" => {
+            role: "impl", cwd: "/tmp/nowhere", branch: "wk-t.0"
+            session: "sid-a", skill: "wk-build", window: "impl-a@dotfiles"
+        }
         _ => {}
     }
-    $base | insert payload $payload
+    $base | insert content $payload | insert payload $payload
 }
 
 # --------------------------------------------------------- bus sandboxes
