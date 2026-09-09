@@ -6,6 +6,7 @@ sections when status flips.
 
 ## idea
 
+
 - [[sp025|agent-inbox]]
 
 - 🔥 hotfix [[sp015|gopass-clipboard-secret-marking]]
@@ -18,6 +19,8 @@ sections when status flips.
 - [[sp003|fix-categories]]
 
 ## spec
+
+- [[sp029|pi-worker-peer-addressed-bus]]
 
 ## ready
 
