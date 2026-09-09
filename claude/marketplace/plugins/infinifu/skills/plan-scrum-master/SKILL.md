@@ -85,43 +85,113 @@ observation and never licenses stopping, accepting, or deleting anything
 
 ##### Pi worker pipeline (available once [[ft014]] is installed)
 
-With the worker CLI present, the Pi branch runs the same
-implementer → reviewer → merge loop as Claude, driven entirely by
-`infinifu-worker` commands. Claude's native path is untouched; nothing below
-uses `Agent`, `SendMessage`, `ListAgents` or `TaskStop`.
+With the `pi-worker` CLI present, the Pi branch runs the same
+implementer → reviewer → merge loop as Claude, driven entirely by `pi-worker`
+commands (sp029 T9's peer-addressed surface). Claude's native path is
+untouched; nothing below uses `Agent`, `SendMessage`, `ListAgents` or
+`TaskStop`.
 
 | Step | Pi command | Claude equivalent |
 |---|---|---|
-| Dispatch | `worker-spawn --run <id> --uid impl-<bd-id> --role impl --skill work-do --task <bd-id>` | `Agent` with `name: impl-<bd-id>` |
-| Send work | `bus-send impl-<bd-id> --run <id> --payload {stage: work-do, task: <bd-id>}` | dispatch payload |
-| Await | `bus-wait --run <id> --json` | completion notification |
-| Confirm receipt | `bus-ack --run <id> --uid <uid> --sequence <n>` | — (implicit) |
-| Reject / retry | `worker-resume <uid> --run <id> --feedback "<gaps>"` | `SendMessage({to: ...})` |
-| Accept + clean | `worker-accept <uid> --run <id> --repo <path>` | worktree sweep in work-merge |
-| Tear down | `worker-stop <uid> --run <id>` | `TaskStop` |
-| Inspect | `worker-inspect <uid> --run <id>` / `run-workers <id>` | `ListAgents` |
+| Dispatch | `pi-worker spawn --role impl --subject <bd-id> --task <bd-id> --skill work-do --isolation worktree` | `Agent` with `name: impl-<bd-id>` |
+| Send work | `pi-worker send --as $RUN --to <worker-uid> --content "work-do bd-<id>"` | dispatch payload |
+| Await | `pi-worker wait --as $RUN --block --timeout 60` | completion notification |
+| Reject / retry | `pi-worker resume <worker-uid> --feedback "<gaps>"` | `SendMessage({to: ...})` |
+| Accept + clean | `pi-worker accept <worker-uid> --repo <path>` | worktree sweep in work-merge |
+| Tear down | `pi-worker stop <worker-uid>` | `TaskStop` |
+| Inspect | `pi-worker inspect <worker-uid>` / `pi-worker workers` | `ListAgents` |
+
+`$RUN` is not a stable dispatcher identity — it is the `run` field `spawn`'s
+own JSON reply carries back for THAT worker, and it is what `worker-spawn`
+records as the worker's `commissioner`, so it is also the address its
+`result` arrives at. Every `spawn` call mints a fresh one; a dispatcher
+running several workers at once tracks one `$RUN` per worker (e.g.
+`impl_run`, `rev_run`) and calls `wait --as` once per worker it wants an
+answer from, not one call shared across the batch.
+
+None of these commands take a sequence number or a redelivery window, and
+none of them acknowledge delivery as a separate step — sp029 T9 dropped that
+whole shape from the CLI, and T8 evicted rejection-counting and escalation
+from the transport before it. See "Rejection policy now lives here" below
+for where that judgment moved.
 
 Rules that differ from a notification-driven runtime, and why:
 
-- **`wait` is not a subscription.** It reports the oldest unacknowledged result
-  and leaves it in place. Acknowledge only after you have acted on it, so an
-  orchestrator that dies mid-handling sees the result again on restart.
-- **`ack` is a delivery receipt, never acceptance.** A completed worker stays
-  visible and keeps its worktree until `worker-accept`, so a reviewer can still
-  read it.
-- **Rejection resumes, it does not redispatch.** `worker-resume` sends feedback
-  to the original Pi session, which still holds the context and the worktree.
-  The second rejection returns `escalate: true` and parks the worker at
-  `waiting_human` — stop and ask the human rather than retrying a third time.
-- **Restart is free.** `run-workers <run-id>` reconstructs every worker, its
-  state, its undelivered results and its resume command from the bus. Never
-  keep run state only in the conversation.
-- **Cleanup is addressed.** `worker-accept` resolves the window and worktree
-  from that worker's own identity record, so it cannot reach another run's
-  workers even by mistake.
+- **`wait` marks what it delivers, in the same call.** There is no separate
+  acknowledgment step: `wait --as $RUN` returns every unread row addressed to
+  that address and marks it read before it returns. An orchestrator that dies
+  mid-handling does not get the message re-served by `wait` — recovery instead
+  comes from `inspect <uid>` / `workers`, which rebuild a worker's state and
+  its last reported result directly from its identity record, never from
+  "what wasn't yet marked read."
+- **A completed worker stays inspectable until accepted.** Reporting `complete`
+  does not close the window or remove the worktree; `accept` does that, and
+  only after `land-bd-task.sh` has actually merged the branch. Until then a
+  reviewer can still read the live worktree and transcript.
+- **Rejection resumes, it does not redispatch.** `pi-worker resume <uid>
+  --feedback "<gaps>"` sends the feedback to the original Pi session as an
+  ordinary addressed message — same session, same worktree, same context. It
+  is otherwise unremarkable: no rejection count, no escalation, nothing
+  written about it to the bus.
+- **Rejection policy now lives here, not in the CLI.** The bus no longer
+  counts rejections or parks a worker at `waiting_human` on its own (sp029
+  T8). `work-audit`'s Pi runtime section owns the second-rejection rule now:
+  it counts prior `AUDITED: REJECTED` notes on the bd task itself before
+  deciding whether to `resume` again or stop and hand the task to the human.
+  The review flow a user sees (two strikes, then a human looks at it) is
+  unchanged; only the mechanism that enforces it moved from the transport to
+  the reviewer's own instructions.
+- **Restart is free.** `pi-worker workers` reconstructs every worker in the
+  current project, its state, its last reported result and its resume command
+  from the bus alone. Never keep worker state only in the conversation.
+- **Cleanup is project-scoped.** `accept`/`resume`/`stop` resolve the worker's
+  project from the caller's own cwd, scoped to exactly one project — never a
+  cross-project scan — so a call made from inside one project cannot reach a
+  same-named uid living in another.
 - **Missing evidence is not permission.** A worker with no identity on the bus
-  reports `unknown`, and `unknown` never licenses stopping, accepting, or
-  deleting anything ([[adr0017]]).
+  is refused by name (naming the uid and the project searched), and that
+  refusal never licenses stopping, accepting, or deleting anything
+  ([[adr0017]]).
+
+##### Brainstorm stage: a worker that consults the human, not the dispatcher
+
+Not every Pi worker executes a bd task. Some are spawned to have a
+conversation — design review, requirements gathering, "what should this API
+look like" — where the human is the counterparty and the dispatcher must not
+relay a single word of it. This is the motivating case sp029 exists for: the
+transport had no way for such a worker's report to reach a dispatcher who
+was not sitting there polling.
+
+Dispatch it exactly like an implementer, with two differences: `--isolation
+main` (nothing about a conversation belongs in a disposable worktree — see
+"Known Issues" in `references/architecture.md` if that seems backwards), and
+the instruction sent via `send --content` is the brainstorm stage instruction
+in full — see `references/brainstorm-stage.md` for the instruction text
+itself and what it must and must not let the agent decide alone.
+
+```
+SPAWNED=(pi-worker spawn --role brainstorm --subject <slug> --skill idea-brainstorming --isolation main | from json)
+# $SPAWNED.run is the address this worker's result will arrive at — capture
+# it now, there is no other way to get it back later.
+pi-worker send --as $SPAWNED.run --to $SPAWNED.uid --content "<brainstorm-stage instruction + the question to brainstorm>"
+pi-worker wait --as $SPAWNED.run --block --timeout 60   # repeat; the human may take a while
+```
+
+`wait` returns nothing while the human and the worker are still talking — that
+silence is correct, not a failure, and polling again costs nothing. When the
+worker judges the conversation finished, `wait` returns its typed result:
+
+```
+pi-worker result --as <brainstorm-uid> --status complete --summary "<decision>" --validation "<how it was validated>"
+```
+
+The dispatcher reads `content.status`/`content.summary` off that message and
+proceeds — no human relayed anything, and none of the reading requires
+inferring completion from a transcript or a prompt going idle ([[adr0027]]).
+A `status` other than `complete` (`blocked`, `waiting_human`, `failed`) means
+proceed no further than reporting it onward; see
+`references/brainstorm-stage.md` for what each one means for a brainstorm
+specifically.
 
 #### Unsupported runtime
 

@@ -844,6 +844,143 @@ let cases = [
         }
     })
 
+    # ------------------------------------------------ sp029 T10: consumer side
+
+    # The literal success criterion: no consumer skill may invoke the retired
+    # verb/flags at all, checked over every non-workspace `.md` in the
+    # infinifu skills tree (workspace dirs hold eval fixtures/history, not
+    # instructions an agent follows). `ack` is word-boundaried so legitimate
+    # English ("acknowledge", "backup") does not trip it; the flags are
+    # dash-prefixed already and need no such care.
+    (run-case "pipeline/t10-consumer-skills-never-invoke-retired-verbs-or-flags" {
+        let skills_dir = (
+            repo-root $env.FILE_PWD
+            | path join "claude" "marketplace" "plugins" "infinifu" "skills"
+        )
+        let files = (
+            glob ($skills_dir | path join "**" "*.md")
+            | where {|p| $p !~ "-workspace" }
+        )
+        assert-true (($files | length) > 0) "sanity: the skills tree must actually be found by the glob"
+
+        for f in $files {
+            let text = (open --raw $f)
+            assert-true (not ($text =~ '\back\b')) $"($f) must not invoke the retired `ack` verb"
+            assert-true (not ($text | str contains "--run")) $"($f) must not pass the retired --run flag"
+            assert-true (not ($text | str contains "--sequence")) $"($f) must not pass the retired --sequence flag"
+            assert-true (not ($text | str contains "--after")) $"($f) must not pass the retired --after flag"
+        }
+    })
+
+    # sp029 T10's own success criterion: given a finished brainstorm, an
+    # orchestrating skill reads the typed result and proceeds with nobody
+    # relaying anything by hand. Driven through the REAL `pi-worker` CLI
+    # (subprocess, not the internal nu functions the rest of this suite
+    # calls directly), because this is exactly the surface
+    # `references/brainstorm-stage.md` documents a consumer using.
+    (run-case "pipeline/t10-brainstorm-worker-reports-through-the-bus-with-no-human-relay" {
+        with-pipeline "brainstorm" {|t, repo|
+            let cli = (cli-t9)
+            let spawned = (do { cd $repo
+                let out = (^$nu.current-exe $cli spawn --role "brainstorm" --subject "design-review" --project "dotfiles" --repo $repo --skill "idea-brainstorming" --isolation "main" --socket $t.socket | complete)
+                assert-eq $out.exit_code 0 $"spawn failed: ($out.stderr)"
+                $out.stdout | from json
+            })
+            assert-eq $spawned.isolation "main" "the motivating case never lands a brainstorm in a disposable worktree"
+
+            # The dispatcher hands over the brainstorm-stage instruction. $RUN
+            # (spawned.run) is the address its result will arrive at — not a
+            # stable identity of the dispatcher's own, minted fresh by this
+            # spawn call (sp029 T9: there is no way to pass an existing run in).
+            let sent = (do { cd $repo
+                ^$nu.current-exe $cli send --as $spawned.run --to $spawned.uid --content "converse with the human; report when finished" | complete
+            })
+            assert-eq $sent.exit_code 0 $"send failed: ($sent.stderr)"
+
+            # While the human and the worker are still talking, there is
+            # nothing to read. Silence is the correct answer, never a
+            # fabricated conclusion.
+            let quiet = (do { cd $repo; ^$nu.current-exe $cli wait --as $spawned.run | complete })
+            assert-eq $quiet.exit_code 0 $"($quiet.stderr)"
+            assert-eq ($quiet.stdout | str trim) "" "no result yet while the conversation is still running"
+
+            # The brainstorm agent judges the conversation finished and
+            # reports — from inside its own window, as itself.
+            let reported = (do { cd $repo
+                ^$nu.current-exe $cli result --as $spawned.uid --status "complete" --summary "use format X" --validation "the human said yes explicitly" | complete
+            })
+            assert-eq $reported.exit_code 0 $"result failed: ($reported.stderr)"
+
+            # The dispatcher reads it straight off the bus. Nobody relayed
+            # anything: this is the CLI's own delivery, not a transcript a
+            # human typed back in.
+            let mail = (do { cd $repo; ^$nu.current-exe $cli wait --as $spawned.run | complete })
+            assert-eq $mail.exit_code 0 $"($mail.stderr)"
+            let delivered = ($mail.stdout | from json)
+            assert-eq ($delivered | length) 1 "exactly the brainstorm's own report, nothing hand-relayed alongside it"
+            assert-eq $delivered.0.from $spawned.uid ""
+            assert-eq $delivered.0.content.status "complete" "the commissioner reads a typed status"
+            assert-eq $delivered.0.content.summary "use format X" "and proceeds on the decision itself, not a paraphrase of it"
+            assert-eq $delivered.0.content.validation "the human said yes explicitly" "complete carries the verdict that makes it trustworthy (adr0027)"
+        }
+    })
+
+    # The failure mode the brainstorm instruction exists to prevent: an agent
+    # that wants to look finished reports `complete` anyway. The CLI refuses
+    # the mechanically-detectable half of that (an empty summary) and the
+    # honest path (a non-complete status) must still be exactly what a
+    # reader sees — never `complete` dressed up with nothing said.
+    (run-case "pipeline/t10-inconclusive-brainstorm-reports-honestly-not-as-complete" {
+        with-pipeline "inconclusive" {|t, repo|
+            let cli = (cli-t9)
+            let spawned = (do { cd $repo
+                let out = (^$nu.current-exe $cli spawn --role "brainstorm" --subject "inconclusive-review" --project "dotfiles" --repo $repo --skill "idea-brainstorming" --isolation "main" --socket $t.socket | complete)
+                assert-eq $out.exit_code 0 $"spawn failed: ($out.stderr)"
+                $out.stdout | from json
+            })
+
+            # Mechanically impossible to fake completion with nothing said.
+            let empty_summary = (do { cd $repo
+                ^$nu.current-exe $cli result --as $spawned.uid --status "complete" --summary "" --validation "yes" | complete
+            })
+            assert-true ($empty_summary.exit_code != 0) "an empty summary is refused outright, whatever the status"
+
+            # The human went quiet mid-discussion. Honest reporting is a
+            # non-complete status that says so plainly.
+            let honest = (do { cd $repo
+                ^$nu.current-exe $cli result --as $spawned.uid --status "waiting_human" --summary "human went quiet mid-discussion; no decision reached" | complete
+            })
+            assert-eq $honest.exit_code 0 $"($honest.stderr)"
+
+            let mail = (do { cd $repo; ^$nu.current-exe $cli wait --as $spawned.run | complete })
+            assert-eq $mail.exit_code 0 $"($mail.stderr)"
+            let delivered = ($mail.stdout | from json)
+            assert-eq ($delivered | length) 1 ""
+            assert-eq $delivered.0.content.status "waiting_human" "an inconclusive brainstorm reports itself honestly, never as complete"
+            assert-true (($delivered.0.content | get -o validation | default null) == null) "no verdict is fabricated for a status that was never complete"
+        }
+    })
+
+    # sp029 T10's half-migration edge case: an old-style caller still passing
+    # the retired shape must fail loudly at the first call, never silently
+    # no-op or land on some fallback behavior.
+    (run-case "pipeline/t10-half-migrated-caller-fails-loudly-not-silently" {
+        let root = (make-runtime "t10-half-migration")
+        let cli = (cli-t9)
+
+        let with_run = (with-env {XDG_RUNTIME_DIR: $root} {
+            ^$nu.current-exe $cli send --as "a" --to "b" --content "x" --run "run-1" | complete
+        })
+        assert-true ($with_run.exit_code != 0) "a --run flag on `send` must fail loudly, never be silently accepted"
+
+        let ack_call = (with-env {XDG_RUNTIME_DIR: $root} {
+            ^$nu.current-exe $cli ack --run "run-1" --uid "a" --sequence 1 | complete
+        })
+        assert-true ($ack_call.exit_code != 0) "the `ack` verb is gone: calling it must fail, not silently no-op"
+
+        rm -rf $root
+    })
+
 ]
 
 $cases | to json

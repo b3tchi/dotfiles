@@ -208,9 +208,16 @@ let cases = [
     })
 
     # --------------------------------- the Pi pipeline exists AND stays scoped
+    #
+    # sp029 T10: the CLI these verbs named is `pi-worker <verb>`, not the
+    # internal nu function names (`worker-spawn`, `bus-wait`, ...) this list
+    # used to check for — those were never what a consumer actually types.
+    # `bus-ack`/`ack` has no replacement (T8/T9 retired the verb outright), so
+    # it drops from the list rather than being swapped for a same-shaped
+    # stand-in; `pi-worker send` takes its old dispatch-payload slot.
     (run-case "static/skill-documents-the-pi-worker-pipeline" {
         let text = (open --raw $skill)
-        for verb in ["worker-spawn" "bus-wait" "bus-ack" "worker-resume" "worker-accept" "worker-stop"] {
+        for verb in ["pi-worker spawn" "pi-worker send" "pi-worker wait" "pi-worker resume" "pi-worker accept" "pi-worker stop"] {
             assert-true ($text | str contains $verb) $"plan-scrum-master must document ($verb)"
         }
     })
@@ -229,7 +236,7 @@ let cases = [
         # read as instructions to a Claude orchestrator that has no such CLI.
         let offenders = (
             blocks-of $skill
-            | where {|b| ($b.text | str contains "worker-spawn") or ($b.text | str contains "worker-accept") }
+            | where {|b| ($b.text | str contains "pi-worker spawn") or ($b.text | str contains "pi-worker accept") }
             | where {|b| ($b.section | str contains "Claude native branch") }
         )
         assert-eq ($offenders | each {|b| $b.section }) [] "Pi verbs leaked into a Claude-only section"
@@ -239,7 +246,7 @@ let cases = [
         # The rule the whole visibility design rests on: a completed worker is
         # not cleaned up until something explicitly accepts it.
         let text = (open --raw $skill | str lowercase)
-        assert-true ($text | str contains "worker-accept") ""
+        assert-true ($text | str contains "pi-worker accept") ""
         let claims_auto = (
             open --raw $skill
             | lines

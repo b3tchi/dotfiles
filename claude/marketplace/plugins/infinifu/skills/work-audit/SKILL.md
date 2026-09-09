@@ -276,13 +276,24 @@ Epic <epic-id>: <N open children remaining | closed — run spec-retro for sp###
 #### Pi runtime
 
 The verdict is the same; only the plumbing differs. On approval the dispatcher
-runs `worker-accept <uid> --run <id> --repo <path>`, which closes the window and
+runs `pi-worker accept <uid> --repo <path>`, which closes the window and
 removes the worktree — so approve only when you would be content never to look
 at that worktree again. On rejection the dispatcher runs
-`worker-resume <uid> --run <id> --feedback "<your gaps>"`, which reaches the
+`pi-worker resume <uid> --feedback "<your gaps>"`, which reaches the
 original Pi session rather than starting a fresh worker; write the gaps so they
-are actionable by someone who already has the context. A second rejection
-escalates to the human automatically.
+are actionable by someone who already has the context.
+
+**The second-rejection rule is now yours to enforce, not the bus's.** sp029 T8
+retired rejection-counting and the automatic `waiting_human` park from the
+transport — `resume` is an ordinary message now, with no count and no
+escalation field attached. So before calling `resume` again, count how many
+prior notes on this task already start `AUDITED: REJECTED` (`bd show <id>` —
+they accumulate in the task's own notes history). One prior rejection: resume
+as above. Two or more: do NOT resume a third time — stop, record `AUDITED:
+REJECTED (second time) — needs a human, not a third retry` on the task, and
+report to the dispatcher that this task needs a person rather than another
+pass. This reproduces the old CLI behavior exactly (two strikes, then a
+human), just enforced in this skill instead of inside `resume`.
 
 Until acceptance the worker's window stays open, so you can read the full
 transcript instead of relying on the compact envelope.
