@@ -20,9 +20,10 @@ sections when status flips.
 
 ## spec
 
-- [[sp029|pi-worker-peer-addressed-bus]]
 
 ## ready
+
+- [[sp029|pi-worker-peer-addressed-bus]]
 
 
 
