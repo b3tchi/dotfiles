@@ -14,7 +14,8 @@
 // operator run.
 
 import { expect, test, describe } from "bun:test";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   createInboxWatcher,
@@ -47,6 +48,15 @@ import {
   MAX_SUMMARY_BYTES,
   oneLine,
   PROTOCOL_VERSION,
+  createBusWatcher,
+  createFsIo,
+  parseQueueRows,
+  peerMessageText,
+  claimSelfAddress,
+  resolveProjectBusDir,
+  startWatcherLoop,
+  MSG_ID_CHARS,
+  QUEUE_SUFFIX_CHARS,
 } from "./pi.ts";
 
 const workEnvelope = {
@@ -1977,6 +1987,405 @@ describe("inbox watcher against a fake Pi", () => {
     const { host, sent } = fakeHost();
     expect(createInboxWatcher({ sendUserMessage: host.sendUserMessage }, identity, "/inbox", io).poll()).toEqual([]);
     expect(sent).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Self-claimed address and the project bus (sp029 T7).
+//
+// A session with no PI_WORKER_UID was not spawned; it claims its own address
+// and watches the project bus instead of the legacy run/uid/inbox scratch
+// files above. The decision functions (decideDelivery, agent state) are
+// reused unchanged — only the gating and the mark-read mechanism are new.
+
+describe("self-claimed address", () => {
+  test("looks like an address, not a run-scoped uid", () => {
+    expect(claimSelfAddress()).toMatch(/^self-[0-9a-f]{12}$/);
+  });
+
+  test("two thousand claims in a row do not collide", () => {
+    // Not a lock — see ## solution. 48 bits of randomness is the guarantee.
+    const seen = new Set(Array.from({ length: 2000 }, () => claimSelfAddress()));
+    expect(seen.size).toBe(2000);
+  });
+});
+
+describe("resolving the project bus directory", () => {
+  test("returns the trimmed path the nu module reports", async () => {
+    const exec = async () => ({ stdout: "/run/pi-worker/dotfiles/bus\n", stderr: "", code: 0, killed: false });
+    expect(await resolveProjectBusDir(exec, "/path/to/pi-worker.nu")).toBe("/run/pi-worker/dotfiles/bus");
+  });
+
+  test("a session outside any project claims nothing and throws nothing", async () => {
+    const exec = async () => ({ stdout: "", stderr: "no project could be resolved", code: 1, killed: false });
+    expect(await resolveProjectBusDir(exec, "/path/to/pi-worker.nu")).toBeNull();
+  });
+
+  test("an exec that throws outright is treated the same as a refusal", async () => {
+    const exec = async () => {
+      throw new Error("nu not found");
+    };
+    expect(await resolveProjectBusDir(exec, "/path/to/pi-worker.nu")).toBeNull();
+  });
+});
+
+describe("parsing queue rows", () => {
+  test("reads unread and read rows by their suffix", () => {
+    const a = "a".repeat(MSG_ID_CHARS);
+    const b = "b".repeat(MSG_ID_CHARS);
+    const raw = `${a}${" ".repeat(QUEUE_SUFFIX_CHARS)}\n${b}-read\n`;
+    expect(parseQueueRows(raw)).toEqual([
+      { id: a, read: false },
+      { id: b, read: true },
+    ]);
+  });
+
+  test("an empty queue has no rows", () => {
+    expect(parseQueueRows("")).toEqual([]);
+  });
+
+  test("a truncated row is skipped, not misparsed", () => {
+    // Mirrors the nu reader's own re-sync-on-newline behaviour (sp029 T3/T4):
+    // a partial row must not shift every row that follows it.
+    const a = "a".repeat(MSG_ID_CHARS);
+    const raw = `${a}${" ".repeat(QUEUE_SUFFIX_CHARS)}\ntruncated\n`;
+    expect(parseQueueRows(raw)).toEqual([{ id: a, read: false }]);
+  });
+});
+
+describe("peer message text", () => {
+  test("a string content travels verbatim, named by its sender", () => {
+    expect(
+      peerMessageText({ protocol: 2, kind: "inbox", id: "x", from: "peer-b", to: ["self-a"], created: "t", content: "hello" }),
+    ).toBe("From peer-b: hello");
+  });
+
+  test("non-string content is serialised rather than printed as [object Object]", () => {
+    const text = peerMessageText({
+      protocol: 2,
+      kind: "inbox",
+      id: "x",
+      from: "peer-b",
+      to: ["self-a"],
+      created: "t",
+      content: { stage: "review" },
+    });
+    expect(text).toContain("peer-b");
+    expect(text).toContain('"stage":"review"');
+  });
+});
+
+describe("delivery decision table (sp029 T7: reused, not rewritten)", () => {
+  test("every known state plus an unknown one resolves to deliver or defer", () => {
+    const table: Array<[string, "followUp" | "defer"]> = [
+      ["idle", "followUp"],
+      ["streaming", "defer"],
+      ["compacting", "defer"],
+      ["shutting_down", "defer"],
+      ["totally-unheard-of", "defer"],
+    ];
+    for (const [state, mode] of table) {
+      expect(decideDelivery(state).mode).toBe(mode);
+    }
+  });
+});
+
+describe("bus watcher against a fake Pi", () => {
+  const rowId = (s: string) => s.padEnd(MSG_ID_CHARS, "0").slice(0, MSG_ID_CHARS);
+  const envelope = (from: string, content: unknown, to: string[] = ["self-a"]) =>
+    JSON.stringify({ protocol: 2, kind: "inbox", id: "x", from, to, created: "2026-09-05T10:00:00Z", content });
+
+  function fakeBusIo(opts: {
+    rows?: Array<{ id: string; read?: boolean }>;
+    messages?: Record<string, string>;
+    queueMissing?: boolean;
+  }) {
+    const state = new Map((opts.rows ?? []).map((r) => [r.id, r.read ?? false]));
+    const marks: Array<{ uid: string; msgId: string }> = [];
+    const logs: string[] = [];
+    return {
+      marks,
+      logs,
+      io: {
+        readQueue: (_uid: string) => {
+          if (opts.queueMissing) return null;
+          if (state.size === 0) return "";
+          return (
+            [...state.entries()]
+              .map(([id, read]) => `${id}${read ? "-read" : " ".repeat(QUEUE_SUFFIX_CHARS)}`)
+              .join("\n") + "\n"
+          );
+        },
+        readMessage: (msgId: string) => opts.messages?.[msgId] ?? null,
+        markRead: async (uid: string, msgId: string) => {
+          state.set(msgId, true);
+          marks.push({ uid, msgId });
+        },
+        log: (line: string) => logs.push(line),
+      },
+    };
+  }
+
+  function fakeHost(state: string = "idle") {
+    const sent: Array<{ text: string; deliverAs?: string }> = [];
+    return {
+      sent,
+      host: {
+        agentState: () => state,
+        sendUserMessage: (text: string, options?: { deliverAs?: string }) => {
+          sent.push({ text, deliverAs: options?.deliverAs });
+        },
+      },
+    };
+  }
+
+  test("delivers a peer message and marks its row read", async () => {
+    const a = rowId("a1");
+    const { io, marks } = fakeBusIo({ rows: [{ id: a }], messages: { [a]: envelope("peer-b", "hello") } });
+    const { host, sent } = fakeHost("idle");
+
+    expect(await createBusWatcher(host, "self-a", io).poll()).toEqual([a]);
+    expect(sent).toEqual([{ text: "From peer-b: hello", deliverAs: "followUp" }]);
+    expect(marks).toEqual([{ uid: "self-a", msgId: a }]);
+  });
+
+  test("a row is marked read at the sendUserMessage call, so a throw does not cost a redelivery", async () => {
+    // sp029 T7 success criterion: a message lost mid-turn must not be
+    // redelivered — the mark has to survive the host call blowing up.
+    const a = rowId("a1");
+    const { io, marks } = fakeBusIo({ rows: [{ id: a }], messages: { [a]: envelope("peer-b", "hello") } });
+    const host = {
+      agentState: () => "idle",
+      sendUserMessage: () => {
+        throw new Error("host exploded mid-turn");
+      },
+    };
+
+    await expect(createBusWatcher(host, "self-a", io).poll()).resolves.toEqual([a]);
+    expect(marks).toEqual([{ uid: "self-a", msgId: a }]);
+  });
+
+  test("defers while streaming, and marks nothing", async () => {
+    const a = rowId("a1");
+    const { io, marks } = fakeBusIo({ rows: [{ id: a }], messages: { [a]: envelope("peer-b", "hello") } });
+    const { host, sent } = fakeHost("streaming");
+
+    expect(await createBusWatcher(host, "self-a", io).poll()).toEqual([]);
+    expect(sent).toHaveLength(0);
+    expect(marks).toHaveLength(0);
+  });
+
+  test("an unrecognised agent state defers rather than guessing", async () => {
+    const a = rowId("a1");
+    const { io, marks } = fakeBusIo({ rows: [{ id: a }], messages: { [a]: envelope("peer-b", "hi") } });
+    const { host, sent } = fakeHost("compiling-a-thesis");
+
+    expect(await createBusWatcher(host, "self-a", io).poll()).toEqual([]);
+    expect(sent).toHaveLength(0);
+    expect(marks).toHaveLength(0);
+  });
+
+  test("a host with no sendUserMessage is inert and says so, rather than throwing", async () => {
+    const a = rowId("a1");
+    const { io, logs } = fakeBusIo({ rows: [{ id: a }], messages: { [a]: envelope("peer-b", "hi") } });
+
+    expect(await createBusWatcher({}, "self-a", io).poll()).toEqual([]);
+    expect(logs.join(" ")).toMatch(/inert/i);
+  });
+
+  test("an already-read row is never redelivered", async () => {
+    const a = rowId("a1");
+    const { io } = fakeBusIo({ rows: [{ id: a, read: true }], messages: { [a]: envelope("peer-b", "hi") } });
+    const { host, sent } = fakeHost("idle");
+
+    expect(await createBusWatcher(host, "self-a", io).poll()).toEqual([]);
+    expect(sent).toHaveLength(0);
+  });
+
+  test("an absent queue file is zero mail, not an error — a session that placed nothing", async () => {
+    const { io, logs } = fakeBusIo({ queueMissing: true });
+    const { host, sent } = fakeHost("idle");
+
+    expect(await createBusWatcher(host, "self-a", io).poll()).toEqual([]);
+    expect(sent).toHaveLength(0);
+    expect(logs).toHaveLength(0);
+  });
+
+  test("an inert row (no resolvable message) is skipped, not treated as mail", async () => {
+    // A crashed fan-out or a pruned message: `## solution` calls this inert.
+    const a = rowId("a1");
+    const b = rowId("a2");
+    const { io, marks } = fakeBusIo({
+      rows: [{ id: a }, { id: b }],
+      messages: { [b]: envelope("peer-b", "real") },
+    });
+    const { host, sent } = fakeHost("idle");
+
+    expect(await createBusWatcher(host, "self-a", io).poll()).toEqual([b]);
+    expect(sent[0].text).toContain("real");
+    expect(marks).toEqual([{ uid: "self-a", msgId: b }]);
+  });
+
+  test("a corrupt envelope is marked read and does not block real mail behind it", async () => {
+    // Mirrors createInboxWatcher's own case: skipping the corrupt row is not
+    // a deferral, so the real mail behind it still goes out on the SAME poll.
+    const a = rowId("a1");
+    const b = rowId("a2");
+    const { io, marks, logs } = fakeBusIo({
+      rows: [{ id: a }, { id: b }],
+      messages: { [a]: "not json at all", [b]: envelope("peer-b", "real") },
+    });
+    const { host, sent } = fakeHost("idle");
+    const w = createBusWatcher(host, "self-a", io);
+
+    expect(await w.poll()).toEqual([b]);
+    expect(sent[0].text).toContain("real");
+    expect(marks).toEqual([
+      { uid: "self-a", msgId: a },
+      { uid: "self-a", msgId: b },
+    ]);
+    expect(logs.join(" ")).toMatch(/unreadable/i);
+  });
+});
+
+describe("filesystem-backed bus IO", () => {
+  test("reads queue and message files straight from disk", () => {
+    const dir = mkdtempSync(join(tmpdir(), "piw-bus-"));
+    mkdirSync(join(dir, "queue"), { recursive: true });
+    mkdirSync(join(dir, "messages"), { recursive: true });
+    const a = "a".repeat(MSG_ID_CHARS);
+    writeFileSync(join(dir, "queue", "self-a"), `${a}${" ".repeat(QUEUE_SUFFIX_CHARS)}\n`);
+    writeFileSync(
+      join(dir, "messages", a),
+      JSON.stringify({ protocol: 2, kind: "inbox", id: a, from: "peer-b", to: ["self-a"], created: "t", content: "hi" }),
+    );
+    const exec = async () => ({ stdout: "", stderr: "", code: 0, killed: false });
+    const io = createFsIo(dir, exec, "/mod.nu");
+
+    expect(io.readQueue("self-a")).toContain(a);
+    expect(io.readMessage(a)).toContain("hi");
+    expect(io.readQueue("nobody-yet")).toBeNull();
+    expect(io.readMessage("missing-id")).toBeNull();
+  });
+
+  test("marking read drives the nu module's own queue-mark-read, not a reimplemented write", async () => {
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const exec = async (command: string, args: string[]) => {
+      calls.push({ command, args });
+      return { stdout: "", stderr: "", code: 0, killed: false };
+    };
+    const io = createFsIo("/bus", exec, "/mod.nu");
+
+    await io.markRead("self-a", "a".repeat(MSG_ID_CHARS));
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].command).toBe("nu");
+    expect(calls[0].args.join(" ")).toContain("queue-mark-read");
+    expect(calls[0].args.join(" ")).toContain("self-a");
+  });
+
+  test("refuses to mark read with an unsafe address or id, never reaching exec", async () => {
+    let called = false;
+    const exec = async () => {
+      called = true;
+      return { stdout: "", stderr: "", code: 0, killed: false };
+    };
+    const io = createFsIo("/bus", exec, "/mod.nu");
+
+    await io.markRead("self-a'; rm -rf /", "a".repeat(MSG_ID_CHARS));
+
+    expect(called).toBe(false);
+  });
+});
+
+describe("the watcher loop, bounded per adr0014", () => {
+  // A fake timer, since real ones would make the fork-bomb regression case
+  // either flaky (racing wall-clock time) or slow (actually waiting a
+  // second). Exactly one timer is ever pending, because startWatcherLoop only
+  // ever schedules its next tick after the current one finishes.
+  function fakeClock() {
+    let pending: { fn: () => void; ms: number } | null = null;
+    return {
+      clock: {
+        setTimeout: (fn: () => void, ms: number) => {
+          pending = { fn, ms };
+          return pending;
+        },
+        clearTimeout: (handle: unknown) => {
+          if (pending === handle) pending = null;
+        },
+      },
+      fire(): number {
+        if (!pending) throw new Error("nothing scheduled");
+        const { fn, ms } = pending;
+        pending = null;
+        fn();
+        return ms;
+      },
+    };
+  }
+
+  test("adr0014 fork-bomb regression: a vanished project directory does not spin", () => {
+    // The historical failure this reproduces (adr0014): 2814 forks/sec once
+    // the reader's runtime directory vanished. The fix costs one check per
+    // interval, not a tight retry.
+    const { clock, fire } = fakeClock();
+    let iterations = 0;
+    const loop = startWatcherLoop({
+      checkAlive: () => {
+        iterations++;
+        return false; // the project directory is gone from the first check
+      },
+      tick: () => {
+        throw new Error("must never run while checkAlive is false");
+      },
+      intervalMs: 250,
+      clock,
+    });
+
+    let elapsed = 0;
+    while (elapsed < 1000) elapsed += fire();
+
+    expect(iterations).toBeLessThanOrEqual(6);
+    loop.stop();
+  });
+
+  test("every iteration reaches exactly one schedule call, success or failure alike", () => {
+    const { clock, fire } = fakeClock();
+    let ticks = 0;
+    const loop = startWatcherLoop({ checkAlive: () => true, tick: () => { ticks++; }, intervalMs: 100, clock });
+
+    fire();
+    fire();
+    fire();
+    expect(ticks).toBe(3);
+
+    loop.stop();
+    expect(() => fire()).toThrow();
+  });
+
+  test("a throwing tick still reaches its sleep floor instead of retrying inline", () => {
+    const errors: unknown[] = [];
+    const { clock, fire } = fakeClock();
+    let ticks = 0;
+    const loop = startWatcherLoop({
+      checkAlive: () => true,
+      tick: () => {
+        ticks++;
+        throw new Error("boom");
+      },
+      intervalMs: 100,
+      clock,
+      onError: (err) => errors.push(err),
+    });
+
+    fire();
+    expect(ticks).toBe(1);
+    expect(errors).toHaveLength(1);
+
+    fire();
+    expect(ticks).toBe(2);
+    loop.stop();
   });
 });
 

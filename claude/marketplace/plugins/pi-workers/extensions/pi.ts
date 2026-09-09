@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -177,7 +178,7 @@ export interface DeliveryDecision {
  * stays in the vocabulary because it is Pi's — see WatcherHost — and becomes
  * usable the day Pi tells a caller whether a steer was accepted.
  */
-export function decideDelivery(state: AgentState, _envelope: Envelope): DeliveryDecision {
+export function decideDelivery(state: AgentState, _envelope?: unknown): DeliveryDecision {
   switch (state) {
     case "idle":
       return { mode: "followUp", reason: "agent is idle; deliver as a normal user turn" };
@@ -631,6 +632,300 @@ export function createInboxWatcher(
         break;
       }
       return sent;
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Self-claimed address and the project bus (sp029 T7).
+//
+// A session with no PI_WORKER_UID was not spawned by anything, but it is
+// still an address on the project bus (## solution): env cannot be injected
+// into a live session after the fact, so it claims one for itself and starts
+// the same watcher a spawned worker gets. It writes no placement record — it
+// placed nothing, so there is nothing to record.
+//
+// This reads the NEW project bus (T1-T4: `bus/queue/<uid>` fixed-width rows
+// resolved against `bus/messages/<id>`), which is a different wire format
+// from the legacy `run/<uid>/inbox/*.json` scratch files `createInboxWatcher`
+// above still reads for a spawned worker (unchanged: "a session with
+// PI_WORKER_UID set behaves as today").
+
+export interface PeerEnvelope {
+  protocol: number;
+  kind: string;
+  id: string;
+  from: string;
+  to: string[];
+  created: string;
+  content: unknown;
+}
+
+/**
+ * The user-visible text for a peer message.
+ *
+ * Content is opaque — the transport interprets none of it (## solution) — so
+ * this only decides how to SHOW it, never what it means. A string travels
+ * verbatim; anything else is serialised, because the alternative is
+ * `[object Object]`. The sender is named because a self-claimed session may
+ * have several contacts, and which one spoke is not something the transport
+ * can infer for the agent.
+ */
+export function peerMessageText(envelope: PeerEnvelope): string {
+  const body =
+    typeof envelope.content === "string" ? envelope.content : JSON.stringify(envelope.content);
+  return `From ${envelope.from}: ${body}`;
+}
+
+/** The id and suffix widths T2/T3 fixed the queue row's shape around. */
+export const MSG_ID_CHARS = 26;
+export const QUEUE_SUFFIX_CHARS = 5;
+
+export interface QueueRow {
+  id: string;
+  read: boolean;
+}
+
+/**
+ * Parse a queue file's fixed-width rows (sp029 T3/T4).
+ *
+ * Newline-delimited, matching the nu reader (`queue-rows`) rather than fixed
+ * byte offsets: splitting on the row's own trailing newline re-syncs after a
+ * malformed row (a disk-full mid-append) instead of misreading every row
+ * behind it at a shifted offset. A row that is not exactly
+ * `MSG_ID_CHARS + QUEUE_SUFFIX_CHARS` characters is skipped, never misparsed.
+ */
+export function parseQueueRows(raw: string): QueueRow[] {
+  const width = MSG_ID_CHARS + QUEUE_SUFFIX_CHARS;
+  const trimmed = raw.replace(/\n+$/, "");
+  if (trimmed.length === 0) return [];
+  return trimmed
+    .split("\n")
+    .filter((line) => line.length === width)
+    .map((line) => ({
+      id: line.slice(0, MSG_ID_CHARS),
+      read: line.slice(MSG_ID_CHARS) === "-read",
+    }));
+}
+
+export interface BusWatcherIO {
+  /** Raw queue file contents for `uid`, or null if there is no queue yet. */
+  readQueue(uid: string): string | null;
+  /** Raw message contents for `id`, or null — an inert row (pruned, or a crashed fan-out). */
+  readMessage(id: string): string | null;
+  /** Mark a row read, driving T4's `queue-mark-read` — never a second marking path. */
+  markRead(uid: string, id: string): Promise<void>;
+  log(line: string): void;
+}
+
+/**
+ * Filesystem-backed bus IO.
+ *
+ * Reads go straight through node:fs — a poll every second cannot afford to
+ * fork a nu process just to look at two files. Marking a row read is the one
+ * write this makes, and it drives T4's `queue-mark-read` (a single `dd`
+ * syscall at a known offset) through a nu one-liner against the untouched
+ * module, rather than reimplementing the byte-offset math here: two
+ * independent writers to the same fixed-width row is exactly the hazard
+ * `## conventions` calls out.
+ */
+export function createFsIo(busDir: string, exec: ExecFn, modulePath: string): BusWatcherIO {
+  // uid and id are ours to generate or come from the bus's own vocabulary
+  // (crockford characters); refusing anything else keeps a malformed queue
+  // row from ever reaching a shell argument.
+  const safe = /^[A-Za-z0-9._-]+$/;
+  return {
+    readQueue: (uid) => {
+      try {
+        return readFileSync(join(busDir, "queue", uid), "utf8");
+      } catch {
+        return null; // no queue yet is not an error — nobody has sent to this address
+      }
+    },
+    readMessage: (id) => {
+      try {
+        return readFileSync(join(busDir, "messages", id), "utf8");
+      } catch {
+        return null; // inert: pruned, or a crashed fan-out (see bus-wait)
+      }
+    },
+    markRead: async (uid, id) => {
+      if (!safe.test(uid) || !safe.test(id)) {
+        console.error(`pi-worker: refusing to mark read — unsafe address or id (${uid}, ${id})`);
+        return;
+      }
+      try {
+        await exec("nu", ["-c", `use '${modulePath}' *; queue-mark-read '${uid}' '${id}'`], {});
+      } catch (err) {
+        console.error(`pi-worker: queue-mark-read failed for ${uid}/${id}: ${err}`);
+      }
+    },
+    log: (line) => console.error(line),
+  };
+}
+
+export interface BusWatcher {
+  poll(): Promise<string[]>;
+}
+
+/**
+ * The self-claimed session's inbox watcher.
+ *
+ * Reuses `decideDelivery` unchanged — the gating is new, the decision is not.
+ * One message per poll, and a deferral stops the scan rather than skipping
+ * ahead, for the same reordering reason as `createInboxWatcher`.
+ */
+export function createBusWatcher(host: WatcherHost, uid: string, io: BusWatcherIO): BusWatcher {
+  return {
+    async poll(): Promise<string[]> {
+      if (typeof host.sendUserMessage !== "function") {
+        io.log("pi-worker: host exposes no sendUserMessage; bus delivery is inert");
+        return [];
+      }
+      const raw = io.readQueue(uid);
+      if (raw === null) return []; // no queue yet: zero mail, not an error
+
+      const unread = parseQueueRows(raw)
+        .filter((r) => !r.read)
+        .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
+      for (const row of unread) {
+        const messageRaw = io.readMessage(row.id);
+        if (messageRaw === null) continue; // inert row; keep scanning for real mail
+
+        let envelope: PeerEnvelope;
+        try {
+          envelope = JSON.parse(messageRaw);
+        } catch {
+          io.log(`pi-worker: unreadable bus message ${row.id}; marking read to stop retrying`);
+          await io.markRead(uid, row.id);
+          continue;
+        }
+
+        const state: AgentState = host.agentState ? host.agentState() : "unknown";
+        const decision = decideDelivery(state, envelope);
+        if (decision.mode === "defer") {
+          io.log(`pi-worker: deferring bus message ${row.id} — ${decision.reason}`);
+          break; // do not skip ahead; the next poll re-reads state
+        }
+
+        // Marked BEFORE the delivery attempt: a throw from sendUserMessage
+        // must not cost a redelivery (sp029 T7) — the row is already
+        // committed read by the time the call is made.
+        await io.markRead(uid, row.id);
+        try {
+          host.sendUserMessage(peerMessageText(envelope), {
+            deliverAs: decision.mode as "steer" | "followUp",
+          });
+        } catch (err) {
+          io.log(`pi-worker: sendUserMessage threw after marking ${row.id} read: ${err}`);
+        }
+        return [row.id];
+      }
+      return [];
+    },
+  };
+}
+
+/**
+ * Mint an address for a session nobody spawned.
+ *
+ * Not a lock: two sessions claiming at the same instant must not collide,
+ * which 48 bits of randomness makes astronomically unlikely without needing
+ * to check anything on disk — the same reasoning `mint-msg-id` uses on the nu
+ * side for message ids.
+ */
+export function claimSelfAddress(): string {
+  return `self-${randomBytes(6).toString("hex")}`;
+}
+
+/**
+ * The project-scoped bus directory for the session standing here.
+ *
+ * Shells to the nu module rather than re-deriving `main-worktree` and the
+ * project slug in TypeScript — one implementation of project scoping, in
+ * Task 1's own functions. Null covers every way this can fail to answer (no
+ * exec, not a repository, the module missing): a session outside a project
+ * claims no address and starts no watcher, silently — never a startup error.
+ */
+export async function resolveProjectBusDir(exec: ExecFn, modulePath: string): Promise<string | null> {
+  try {
+    const out = await exec("nu", ["-c", `use '${modulePath}' *; project-dir`], {});
+    if (out.code !== 0) return null;
+    const dir = out.stdout.trim();
+    return dir.length > 0 ? dir : null;
+  } catch {
+    return null;
+  }
+}
+
+/** What startWatcherLoop needs from a timer, so it can be tested without real ones. */
+export interface WatcherLoopClock {
+  setTimeout(fn: () => void, ms: number): unknown;
+  clearTimeout(handle: unknown): void;
+}
+
+const realWatcherClock: WatcherLoopClock = {
+  setTimeout: (fn, ms) => {
+    const handle = setTimeout(fn, ms);
+    if (typeof handle === "object" && handle && "unref" in handle) {
+      (handle as { unref: () => void }).unref(); // never hold the process open
+    }
+    return handle;
+  },
+  clearTimeout: (handle) => clearTimeout(handle as Parameters<typeof clearTimeout>[0]),
+};
+
+/**
+ * A self-respawning watcher loop, bounded per adr0014.
+ *
+ * One watcher per session (sp029 T7) multiplies the blast radius of the fork
+ * bomb that ADR was written for, so every guard it names is explicit here
+ * rather than assumed from "it's just a timer": `checkAlive` is the fail-fast
+ * setup check — a vanished project directory is unrecoverable from inside the
+ * loop, so this never retries it inline. Every branch below — alive or not,
+ * `tick` threw or not — reaches exactly one `schedule()` call, so no path
+ * through this function can iterate faster than `intervalMs`; that is the
+ * sleep floor applying to every iteration, including every fast-fail path.
+ * And `schedule` arms a real timer callback rather than recursing
+ * synchronously, which is "respawn bounded by a timer OUTSIDE the loop"
+ * translated to an event loop that has no process to fork in the first place.
+ */
+export function startWatcherLoop(opts: {
+  checkAlive: () => boolean;
+  tick: () => void;
+  intervalMs: number;
+  clock?: WatcherLoopClock;
+  onError?: (err: unknown) => void;
+}): { stop(): void } {
+  const clock = opts.clock ?? realWatcherClock;
+  let stopped = false;
+  let handle: unknown;
+
+  const schedule = () => {
+    if (stopped) return;
+    handle = clock.setTimeout(run, opts.intervalMs);
+  };
+
+  const run = () => {
+    if (stopped) return;
+    if (!opts.checkAlive()) {
+      schedule(); // fail fast: no inline retry, just wait for the next tick
+      return;
+    }
+    try {
+      opts.tick();
+    } catch (err) {
+      opts.onError?.(err);
+    }
+    schedule(); // sleep floor applies whether the tick succeeded or threw
+  };
+
+  schedule();
+  return {
+    stop: () => {
+      stopped = true;
+      clock.clearTimeout(handle);
     },
   };
 }
@@ -2365,6 +2660,38 @@ export default function piWorker(pi: ExtensionAPI): void {
     }
   }
 
+  // Self-claimed address (sp029 T7). Only when nobody spawned this session
+  // (no PI_WORKER_UID) — a spawned worker keeps its unchanged path below.
+  // Async and fire-and-forget: activation must never block on, or throw from,
+  // resolving a project that may not exist.
+  if (!process.env.PI_WORKER_UID && exec) {
+    const modulePath = join(dirname(fileURLToPath(import.meta.url)), "..", "scripts", "pi-worker.nu");
+    void resolveProjectBusDir(exec, modulePath).then((busDir) => {
+      // Not standing in a project: no address claimed, no watcher started,
+      // and nothing thrown — the edge case this branch exists for.
+      if (!busDir) return;
+
+      const selfUid = claimSelfAddress();
+      const busIo = createFsIo(busDir, exec, modulePath);
+      const tracker = createAgentStateTracker(pi as unknown as StateEventSource);
+      const api = pi as unknown as WatcherHost;
+      const host: WatcherHost = {
+        sendUserMessage: api.sendUserMessage?.bind(pi),
+        agentState: () => tracker.current(),
+      };
+      const watcher = createBusWatcher(host, selfUid, busIo);
+
+      startWatcherLoop({
+        checkAlive: () => existsSync(busDir),
+        tick: () => {
+          void watcher.poll().catch((err) => busIo.log(`pi-worker: bus poll failed: ${err}`));
+        },
+        intervalMs: 1000,
+        onError: (err) => busIo.log(`pi-worker: bus watcher tick failed: ${err}`),
+      });
+    });
+  }
+
   // Worker mode below. Only active when an orchestrator set PI_WORKER_RUN/UID,
   // so an ordinary session is unaffected by any of it.
   const inboxDir = workerInboxDir(process.env as Record<string, string | undefined>);
@@ -2471,15 +2798,11 @@ export default function piWorker(pi: ExtensionAPI): void {
   }
 
   const watcher = createInboxWatcher(host, identity, inboxDir, io);
-  const timer = setInterval(() => {
-    try {
-      watcher.poll();
-    } catch (err) {
-      // A watcher fault must never propagate into the host's event loop.
-      io.log(`pi-worker: inbox poll failed: ${err}`);
-    }
-  }, 1000);
-  if (typeof timer === "object" && timer && "unref" in timer) {
-    (timer as { unref: () => void }).unref(); // never hold the process open
-  }
+  startWatcherLoop({
+    checkAlive: () => true,
+    tick: () => watcher.poll(),
+    intervalMs: 1000,
+    // A watcher fault must never propagate into the host's event loop.
+    onError: (err) => io.log(`pi-worker: inbox poll failed: ${err}`),
+  });
 }

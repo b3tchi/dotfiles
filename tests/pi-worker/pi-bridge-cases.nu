@@ -480,6 +480,33 @@ let cases = [
         drop-tmux $t; rm -rf $root; rm -rf $repo
     })
 
+    # -------------------------------------------- self-claimed sessions (T7)
+    (run-case "self-claim/a-plain-window-carries-no-worker-env" {
+        # sp029 T7: the extension decides "nobody spawned me" by PI_WORKER_UID
+        # being unset, and claims its own address on that basis. That gate
+        # only fires correctly if an ordinary window — one worker-spawn never
+        # touched — really carries none of the PI_WORKER_* variables a spawned
+        # worker's window gets (see spawn/passes-worker-identity-into-the-
+        # window-environment above). A leak here would make the extension
+        # think an operator's own session was a worker, or vice versa.
+        let repo = (make-repo "self-claim-env")
+        let root = (make-runtime "self-claim-env")
+        let marker = ([(fixture-base) $"piw-t7-plain-env-(random chars --length 6)"] | path join)
+        let t = (make-tmux "self-claim-env" $"env | grep '^PI_WORKER_' > ($marker); sleep 30")
+        with-runtime $root {
+            with-env {PATH: ([$t.bin] ++ $env.PATH)} {
+                # A plain window, created directly rather than through
+                # worker-spawn — the shape of an ordinary interactive session.
+                # "pi" resolves through PATH to the stub in $t.bin, same as
+                # worker-spawn's own new-window call does.
+                ^tmux -L $t.socket new-window -t "dotfiles" -n "plain" "pi"
+                sleep 400ms
+                let seen = (if ($marker | path exists) { open --raw $marker } else { "" })
+                assert-true (($seen | str trim) | is-empty) "an ordinary window carries no PI_WORKER_* — the self-claim gate never fires on it otherwise"
+            }
+        }
+        rm -f $marker; drop-tmux $t; rm -rf $root; rm -rf $repo
+    })
 
 ]
 
