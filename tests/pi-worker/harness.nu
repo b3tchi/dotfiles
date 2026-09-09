@@ -13,13 +13,6 @@
 
 # ------------------------------------------------------------- assertions
 
-# Every suite runs against a fixture registry, never a real installation. The
-# names are deliberately not any consumer's: the bus treats them as opaque, and
-# a suite that spoke one framework's vocabulary would quietly re-couple them.
-export-env {
-    $env.PI_WORKER_STAGES = ($env.FILE_PWD | path join "stages.test.json")
-}
-
 export def assert-eq [actual, expected, msg: string = ""] {
     if $actual != $expected {
         error make {msg: $"expected ($expected | to nuon), got ($actual | to nuon). ($msg)"}

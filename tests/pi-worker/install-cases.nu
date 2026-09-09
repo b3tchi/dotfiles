@@ -151,6 +151,34 @@ let cases = [
         }
     })
 
+    (run-case "cli/spawn-refuses-without-isolation-naming-both-legal-values" {
+        # sp029 T8: the one property the stage registry bought — nothing lands
+        # in the operator's shared tree — now survives as this required flag,
+        # with no default. The refusal has to name both legal values, the
+        # existing habit of listing what IS available rather than only
+        # rejecting what was missing.
+        let root = (make-runtime "cli-spawn-no-isolation")
+        let out = (run-cli "spawn" "--role" "impl" "--subject" "t1" "--project" "dotfiles" "--repo" "/tmp" "--skill" "wk-build" --runtime $root)
+        assert-true ($out.exit_code != 0) "spawn must refuse without --isolation"
+        let err = ($out.stderr | str trim)
+        assert-true ($err | str contains "--isolation") "the refusal names the flag"
+        assert-true ($err | str contains "worktree") "and lists worktree"
+        assert-true ($err | str contains "main") "and main"
+        rm -rf $root
+    })
+
+    (run-case "cli/spawn-refuses-an-unknown-isolation-word" {
+        # A typo here must not fall through to the shared tree.
+        let root = (make-runtime "cli-spawn-bad-isolation")
+        let out = (run-cli "spawn" "--role" "impl" "--subject" "t1" "--project" "dotfiles" "--repo" "/tmp" "--skill" "wk-build" "--isolation" "sandbox" --runtime $root)
+        assert-true ($out.exit_code != 0) "an unknown isolation word must be refused"
+        let err = ($out.stderr | str trim)
+        assert-true ($err | str contains "sandbox") "the refusal names what was given"
+        assert-true ($err | str contains "worktree") "and lists worktree"
+        assert-true ($err | str contains "main") "and main"
+        rm -rf $root
+    })
+
     (run-case "cli/every-verb-names-the-flag-it-is-missing" {
         # `--run` and friends were declared `string` with no default across the
         # whole surface, so omitting one propagated a NULL inward until some

@@ -63,7 +63,7 @@ let cases = [
             with-runtime $root {
                 with-env {PATH: ([$t.bin] ++ $env.PATH)} {
                     # 1. Delegate a refinement to a visible worker.
-                    let w = (worker-spawn --run "acceptance" --uid "rev-sp028" --role "rev" --subject "sp028" --project "dotfiles" --repo $repo --task "" --session "sid-acceptance" --skill "doc-plan" --socket $t.socket)
+                    let w = (worker-spawn --run "acceptance" --uid "rev-sp028" --role "rev" --subject "sp028" --project "dotfiles" --repo $repo --task "" --session "sid-acceptance" --skill "doc-plan" --isolation "main" --socket $t.socket)
                     assert-eq $w.window "rev-sp028@dotfiles" "the operator sees a named window"
                     assert-true ($w.window in (windows-on $t.socket)) ""
 

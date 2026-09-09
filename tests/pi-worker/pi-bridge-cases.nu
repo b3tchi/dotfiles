@@ -68,12 +68,13 @@ def spawn-worker [
     t: record
     repo: string
     --skill: string = "wk-build"
+    --isolation: string = "worktree"
     --task: string = "t1"
     --socket: string = ""
     --session: string = "sid-1"
 ] {
     let sock = (if ($socket | is-empty) { $t.socket } else { $socket })
-    worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task $task --session $session --skill $skill --socket $sock
+    worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task $task --session $session --skill $skill --isolation $isolation --socket $sock
 }
 
 let cases = [
@@ -140,7 +141,7 @@ let cases = [
         let t = (make-tmux "slug-spawn" "sleep 30")
         with-runtime $root {
             with-env {PATH: ([$t.bin] ++ $env.PATH)} {
-                let got = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "Create timestamp-named text file" --project "dotfiles" --repo $repo --session "sid-1" --skill "doc-draft" --socket $t.socket)
+                let got = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "Create timestamp-named text file" --project "dotfiles" --repo $repo --session "sid-1" --skill "doc-draft" --isolation "main" --socket $t.socket)
                 assert-eq $got.window "impl-create-timestamp-named-text-file@dotfiles" "the window is named, not narrated"
                 assert-eq $got.subject "create-timestamp-named-text-file" "and the report says what the address became"
                 assert-true ($got.window in (windows-on $t.socket)) ""
@@ -153,8 +154,7 @@ let cases = [
         # The CLI used to refuse a --subject containing whitespace. An agent
         # that had already written its instruction into the wrong flag then got
         # a lecture instead of a worker, mid-round. Now the address is derived
-        # and the run continues; the instruction still has to travel by `send`,
-        # which the stage gate enforces separately.
+        # and the run continues; the instruction still has to travel by `send`.
         let repo = (make-repo "slug-cli")
         let root = (make-runtime "slug-cli")
         let t = (make-tmux "slug-cli" "sleep 30")
@@ -164,7 +164,7 @@ let cases = [
                 --run "run-1" --uid "impl-a" --role "impl"
                 --subject "Create timestamp-named text file with header"
                 --project "dotfiles" --repo $repo
-                --session "sid-1" --skill "doc-draft" --socket $t.socket) | complete
+                --session "sid-1" --skill "doc-draft" --isolation "main" --socket $t.socket) | complete
         })
         assert-eq $out.exit_code 0 $"spawn refused prose: ($out.stderr | str trim)"
         let got = ($out.stdout | from json)
@@ -256,7 +256,7 @@ let cases = [
         let t = (make-tmux "akm" "sleep 30")
         with-runtime $root {
             with-env {PATH: ([$t.bin] ++ $env.PATH)} {
-                let got = (spawn-worker $t $repo --task "" --skill "doc-plan" --session "sid-akm")
+                let got = (spawn-worker $t $repo --task "" --skill "doc-plan" --isolation "main" --session "sid-akm")
                 assert-eq $got.window "impl-t1@dotfiles" ""
                 assert-eq $got.cwd $repo "an AKM stage runs where AKM can be read and written"
                 assert-eq $got.branch "main" "on the default branch, where AKM lives"
@@ -361,7 +361,7 @@ let cases = [
         with-runtime $root {
             with-env {PATH: ([$t.bin] ++ $env.PATH)} {
                 assert-rejects {
-                    worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-o" --skill "wk-build" --socket $t.socket
+                    worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-o" --skill "wk-build" --isolation "worktree" --socket $t.socket
                 } "window" "the window failure is reported"
 
                 let identity = (bus-identity-of "impl-a" --run "run-1")
@@ -388,36 +388,51 @@ let cases = [
         rm -rf $root; rm -rf $repo
     })
 
-    (run-case "spawn/refuses-an-unknown-skill" {
-        # Edge case: skill configuration that no stage recognises. Launching
-        # anyway would produce a worker with no contract to follow.
-        let repo = (make-repo "skill")
-        let root = (make-runtime "skill")
-        let t = (make-tmux "skill" "sleep 30")
+    # -------------------------------------------- the retired registry
+    (run-case "spawn/a-legacy-payload-bearing-stages-file-has-no-effect" {
+        # sp029 T8: the registry retired. A stages.json installed under the
+        # previous shape (isolation/payload per stage) is simply never read —
+        # nothing here opens PI_WORKER_STAGES any more — so spawn behaves
+        # identically whether or not one is sitting there. Ignored, not
+        # half-honored.
+        let repo = (make-repo "legacy-stages")
+        let root = (make-runtime "legacy-stages")
+        let t = (make-tmux "legacy-stages" "sleep 30")
+        let legacy = ([(fixture-base) $"piw-legacy-stages-(random chars --length 6).json"] | path join)
+        '{"stages":[{"name":"wk-build","isolation":"worktree","payload":"ticket"}]}' | save -f $legacy
         with-runtime $root {
-            with-env {PATH: ([$t.bin] ++ $env.PATH)} {
-                assert-rejects {
-                    spawn-worker $t $repo --task "t1" --session "sid-1" --skill "not-a-real-skill"
-                } "skill" "an unknown skill is refused by name"
-                assert-true (not ("impl-t1@dotfiles" in (windows-on $t.socket))) "and no window is left behind"
+            with-env {PATH: ([$t.bin] ++ $env.PATH), PI_WORKER_STAGES: $legacy} {
+                let got = (spawn-worker $t $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree")
+                assert-eq $got.window "impl-t1@dotfiles" "spawn succeeds exactly as it would with no registry file at all"
             }
         }
-        drop-tmux $t; rm -rf $root; rm -rf $repo
+        rm -f $legacy; drop-tmux $t; rm -rf $root; rm -rf $repo
     })
 
-    (run-case "spawn/work-skill-requires-a-task-id" {
-        let repo = (make-repo "notask")
-        let root = (make-runtime "notask")
-        let t = (make-tmux "notask" "sleep 30")
+    (run-case "spawn/an-unparseable-stages-file-has-no-effect-either" {
+        # Nothing reads PI_WORKER_STAGES any more, so a file that would not
+        # even parse as JSON costs spawn nothing.
+        let repo = (make-repo "bad-stages")
+        let root = (make-runtime "bad-stages")
+        let t = (make-tmux "bad-stages" "sleep 30")
+        let broken = ([(fixture-base) $"piw-broken-stages-(random chars --length 6).json"] | path join)
+        "not json at all {{{" | save -f $broken
         with-runtime $root {
-            with-env {PATH: ([$t.bin] ++ $env.PATH)} {
-                assert-rejects {
-                    spawn-worker $t $repo --task "" --session "sid-1" --skill "wk-build"
-                } "ticket" "a ticket-payload stage without an id has no contract to read"
+            with-env {PATH: ([$t.bin] ++ $env.PATH), PI_WORKER_STAGES: $broken} {
+                let got = (spawn-worker $t $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree")
+                assert-eq $got.window "impl-t1@dotfiles" "spawn succeeds; a file it never opens cannot fail it"
             }
         }
-        drop-tmux $t; rm -rf $root; rm -rf $repo
+        rm -f $broken; drop-tmux $t; rm -rf $root; rm -rf $repo
     })
+
+    # sp029 T8: "spawn/refuses-an-unknown-skill" and
+    # "spawn/work-skill-requires-a-task-id" retired along with the stage
+    # registry they exercised. `--skill` is now an informational label, not a
+    # lookup key, so no name is "unknown", and whether `--task` is required
+    # was the registry's `payload: ticket` gate — the transport does not gate
+    # a message's shape any more (see `main spawn`'s own comment on --task).
+
     (run-case "spawn/refuses-a-uid-that-already-has-state-in-this-run" {
         # Reusing an address silently inherited the previous occupant's mail.
         # Observed live: a fresh spawn into run x1 / uid w1 got sequence 3 for
@@ -458,7 +473,7 @@ let cases = [
         with-runtime $root {
             with-env {PATH: ([$t.bin] ++ $env.PATH)} {
                 spawn-worker $t $repo --task "t1" --skill "wk-build" --session "sid-1"
-                let b = (worker-spawn --run "run-1" --uid "impl-b" --role "impl" --subject "t2" --project "dotfiles" --repo $repo --task "t2" --session "sid-2" --skill "wk-build" --socket $t.socket)
+                let b = (worker-spawn --run "run-1" --uid "impl-b" --role "impl" --subject "t2" --project "dotfiles" --repo $repo --task "t2" --session "sid-2" --skill "wk-build" --isolation "worktree" --socket $t.socket)
                 assert-eq $b.uid "impl-b" "a free address spawns normally"
             }
         }

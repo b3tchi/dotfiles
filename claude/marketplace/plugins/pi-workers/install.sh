@@ -53,9 +53,6 @@ check_deps() {
 link_cli() {
     mkdir -p "$HOME/.local/bin"
     ln -sf "$PKG_DIR/scripts/pi-worker.nu" "$HOME/.local/bin/pi-worker"
-    # Nushell resolves a relative `use` against the SYMLINK's directory, not the
-    # target's, so the module has to sit beside the link or the CLI cannot parse.
-    ln -sf "$PKG_DIR/scripts/stage-registry.nu" "$HOME/.local/bin/stage-registry.nu"
     echo "  Linked CLI:      ~/.local/bin/pi-worker"
     local found
     found="$(command -v pi-worker 2>/dev/null || true)"
@@ -72,6 +69,8 @@ unlink_cli() {
     local target="$HOME/.local/bin/pi-worker"
     if [ -L "$target" ] && [ "$(readlink "$target")" = "$PKG_DIR/scripts/pi-worker.nu" ]; then
         rm -f "$target"
+        # Cleanup for an install from before the stage registry retired
+        # (sp029 T8) — a stale link left by an older version of this script.
         local mod="$HOME/.local/bin/stage-registry.nu"
         [ -L "$mod" ] && [ "$(readlink "$mod")" = "$PKG_DIR/scripts/stage-registry.nu" ] && rm -f "$mod"
         echo "  Removed CLI:     ~/.local/bin/pi-worker"
@@ -131,7 +130,7 @@ if [ "$ACTION" = "uninstall" ] || [ "$ACTION" = "--uninstall" ]; then
     echo "Uninstalling pi-workers..."
     unlink_cli
     unregister_pi_package
-    echo "Done. The stage registry, if you installed one, was left alone."
+    echo "Done."
     exit 0
 fi
 
@@ -141,6 +140,5 @@ link_cli
 register_pi_package
 echo ""
 echo "  Verify with: pi-worker doctor"
-echo "  A consumer must install a stage registry (PI_WORKER_STAGES or"
-echo "  \${XDG_CONFIG_HOME:-~/.config}/pi-workers/stages.json) before spawning."
+echo "  spawn requires --isolation worktree|main — there is no default."
 echo "pi-workers installed."

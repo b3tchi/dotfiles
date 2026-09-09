@@ -249,6 +249,50 @@ let cases = [
     })
 
     # ------------------------------------------------ no copied task bodies
+
+    # --------------------------------------- flow vocabulary stays retired
+    (run-case "static/stage-registry-does-not-come-back" {
+        # sp029 T8: the stage registry retired — no isolation-by-skill-name
+        # lookup table, so there is nothing left for it to declare.
+        let registry = (
+            repo-root $env.FILE_PWD
+            | path join "claude" "marketplace" "plugins" "pi-workers" "scripts" "stage-registry.nu"
+        )
+        assert-true (not ($registry | path exists)) "the stage registry must not be reintroduced"
+    })
+
+    (run-case "static/flow-vocabulary-does-not-return-to-the-transport" {
+        # sp029 T8's own test_plan calls for a static regression guard so this
+        # vocabulary "cannot creep back": RESERVED_STAGES and the registry
+        # lookups it gated, and resume's rejection-counting/escalation. Named
+        # as DEFINITIONS (`const X`, `def X`) rather than as bare words, so
+        # this does not also flag the comments that explain the retirement.
+        let retired_defs = [
+            "const RESERVED_STAGES"
+            "def stage-for"
+            "export def stage-for"
+            "def load-stages"
+            "export def load-stages"
+            "def stages-taking"
+            "def rejection-count"
+        ]
+        let worker_text = (open --raw $worker)
+        let extension_text = (open --raw $extension)
+        for def in $retired_defs {
+            assert-true (not ($worker_text | str contains $def)) $"'($def)' must not reappear in ($worker)"
+            assert-true (not ($extension_text | str contains $def)) $"'($def)' must not reappear in ($extension)"
+        }
+        # `waiting_human` as a WRITE is the actual regression guard for
+        # escalation: `worker-resume` must never auto-park a worker again.
+        # `reopened` is deliberately EXEMPT — see the comment on
+        # `worker-resume`. It is not escalation policy; it is what keeps
+        # `legacy-bus-wait`/`legacy-bus-pending` (still what `main wait`/`main
+        # status` call) from re-serving a resumed worker's stale `complete`
+        # report as if it were fresh (dotfiles-nig0/ycvl), and retiring its
+        # writer before that read path migrates (sp029 T5/T9) would reopen a
+        # previously-fixed bug.
+        assert-true (not ($worker_text | str contains 'write-marker $run $uid "waiting_human"')) "resume must not write a waiting_human marker"
+    })
     ]
 
 $cases | to json

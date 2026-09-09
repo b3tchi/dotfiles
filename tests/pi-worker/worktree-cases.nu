@@ -528,7 +528,7 @@ let cases = [
 
     (run-case "worktree/an-akm-stage-is-placed-in-the-main-worktree" {
         let repo = (make-repo "akm-place")
-        let placed = (worker-placement --repo $repo --skill "doc-plan" --subject "sp028")
+        let placed = (worker-placement --repo $repo --isolation "main" --subject "sp028")
 
         assert-eq $placed.path $repo "an AKM stage runs where AKM can be read and written"
         assert-true (not ($placed.branch | str starts-with "wk-")) $"no task branch for an AKM stage, got ($placed.branch)"
@@ -540,7 +540,7 @@ let cases = [
     (run-case "worktree/a-work-stage-still-gets-its-own-isolated-worktree" {
         # The regression guard for the above: code work must stay isolated.
         let repo = (make-repo "work-place")
-        let placed = (worker-placement --repo $repo --skill "wk-build" --subject "dotfiles-963w.4")
+        let placed = (worker-placement --repo $repo --isolation "worktree" --subject "dotfiles-963w.4")
 
         assert-eq $placed.branch "wk-dotfiles-963w.4.0" "a work stage gets its task branch"
         assert-true ($placed.path != $repo) "in a directory of its own"

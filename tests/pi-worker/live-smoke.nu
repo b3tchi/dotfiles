@@ -23,6 +23,11 @@
 #   dotfiles-pwxf  `accept` removed the worktree, then declined to delete the
 #                  branch — leaving the worker unacceptable AND unreleasable
 #
+# sp029 T8 retired resume's rejection counting and `escalate`, but the
+# `reopened` marker that makes the nig0/ycvl fixes work SURVIVES — see the
+# comment on `worker-resume` in pi-worker.nu. `wait`/`status` still resolve to
+# `legacy-bus-wait`/`legacy-bus-pending`, which still depend on it.
+#
 # The worker instructions are part of the fixture, not decoration. The totals
 # row in the line-count task is worded the way it is because "sort the table by
 # line count descending, and add a TOTAL row" is ambiguous: the totals row is
@@ -258,7 +263,7 @@ def reap [workers: list<record>, run: string, repo: string, keepsake: string, so
 # ---------------------------------------------------------------------- main
 
 def main [
-    --stage: string = "work"           # a registered stage with isolation=worktree, payload=instructions
+    --stage: string = "work"           # a label for what these workers do; always spawned worktree-isolated, sent prose
     --glob: string = "*/scripts/*.nu"  # git pathspec for the corpus both tasks describe
     --timeout: int = 300         # seconds to block on any one report
     --project: string = ""       # tmux session group; derived from the current session when empty
@@ -277,19 +282,6 @@ def main [
     let repo = ($repo.stdout | str trim)
     check (($env | get -o TMUX | default "" | is-not-empty) or ($project | is-not-empty)) "inside tmux, or --project given"
 
-    # The stage gate is the consumer's, so the script asks rather than assumes:
-    # a stage placed in the main worktree would put both workers in the
-    # operator's own tree, and a ticket-payload stage cannot be sent prose.
-    let stages_path = ($env | get -o PI_WORKER_STAGES | default (
-        [($env | get -o XDG_CONFIG_HOME | default ([$env.HOME ".config"] | path join)) "pi-workers" "stages.json"] | path join
-    ))
-    check ($stages_path | path exists) $"a stage registry at ($stages_path)"
-    let registered = (open --raw $stages_path | from json | get stages | where name == $stage)
-    check ($registered | is-not-empty) $"stage '($stage)' is registered"
-    let declared = ($registered | first)
-    check ($declared.isolation == "worktree") $"stage '($stage)' is isolated, so neither worker touches the operator's tree"
-    check ($declared.payload == "instructions") $"stage '($stage)' takes prose"
-
     let corpus = (glob-files $repo $glob)
     let dirs = (dirs-with-matches $corpus)
     check (($corpus | length) >= 2) $"($glob) matches at least two tracked files — pass --glob otherwise"
@@ -306,9 +298,9 @@ def main [
         print ""
         step "spawn two workers"
         let project_args = (if ($project | is-empty) { [] } else { ["--project" $project] })
-        let a = (cli (["spawn" "--role" "impl" "--subject" $"smoke-dirs-($tag)" "--skill" $stage "--repo" $repo] ++ $project_args) $socket)
+        let a = (cli (["spawn" "--role" "impl" "--subject" $"smoke-dirs-($tag)" "--skill" $stage "--isolation" "worktree" "--repo" $repo] ++ $project_args) $socket)
         $run = $a.run
-        let b = (cli (["spawn" "--run" $run "--role" "impl" "--subject" $"smoke-lines-($tag)" "--skill" $stage "--repo" $repo] ++ $project_args) $socket)
+        let b = (cli (["spawn" "--run" $run "--role" "impl" "--subject" $"smoke-lines-($tag)" "--skill" $stage "--isolation" "worktree" "--repo" $repo] ++ $project_args) $socket)
         $workers = [$a $b]
         check ($a.liveness == "live") $"($a.uid) is live in ($a.window)"
         check ($b.liveness == "live") $"($b.uid) is live in ($b.window)"

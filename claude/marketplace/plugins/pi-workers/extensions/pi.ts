@@ -65,10 +65,6 @@ export const RESULT_STATUSES = ["complete", "waiting_human", "blocked", "failed"
 
 export type ResultStatus = (typeof RESULT_STATUSES)[number];
 
-/** Stages whose entire work content is a bd ticket id (ft013). */
-/** Stages the bus authors itself; they need no consumer declaration. */
-export const RESERVED_STAGES = ["rejection"] as const;
-
 /**
  * v2 (sp029 T2): `from`/`to`/`content` are what the bus itself validates now;
  * `sequence`/`run`/`uid`/`payload` are what the v1 pipeline (`legacy-inbox-send`,
@@ -294,86 +290,18 @@ export function createAgentStateTracker(source: StateEventSource): AgentStateTra
 }
 
 /**
- * Whether a stage's message is an ADDRESS (a ticket id) or prose.
- *
- * Read from the consumer's stage registry, so the bus never has to know what
- * any particular stage means. A stage the bus authors itself is prose by
- * construction.
- */
-function isTicketStage(stage: string): boolean {
-  if ((RESERVED_STAGES as readonly string[]).includes(stage)) return false;
-  for (const entry of loadStages()) {
-    if (entry.name === stage) return entry.payload === "ticket";
-  }
-  throw new Error(`unknown stage '${stage}': not declared in the stage registry`);
-}
-
-export interface StageEntry {
-  name: string;
-  isolation: string;
-  payload: string;
-}
-
-/**
- * The declared stages, for the tool description.
- *
- * Live: an agent tried `default`, then `work-do`, then `build`, and never
- * tried `probe` — the one it wanted. Every guess cost a turn and a refusal,
- * and the refusals were the third place it learned the names rather than the
- * first. A stage is a required argument with a closed set of values; nothing
- * is served by making the model discover that set by being told no.
- *
- * The payload kind is carried too, because knowing the name is not enough:
- * after landing on `build` the agent was refused again for having no ticket
- * id. Name plus payload is the whole decision.
- *
- * One line, because this goes in a tool description. An empty registry says so
- * explicitly — a tool that lists nothing reads as a tool that accepts
- * anything.
- */
-export function stageCatalogue(stages: StageEntry[]): string {
-  if (stages.length === 0) {
-    return "no stages are declared, so nothing can be spawned until the registry has one";
-  }
-  return stages.map((s) => `${s.name} (${s.payload})`).join(", ");
-}
-
-/**
- * The stage catalogue, or a note that it could not be read.
- *
- * Used to build a tool description, which is evaluated during registration —
- * so this must not throw. A missing or malformed registry is a real condition
- * (the consumer has not installed one yet) and saying so in the description is
- * more use to the caller than taking the extension down.
- */
-function describeStages(): string {
-  try {
-    return stageCatalogue(loadStages());
-  } catch {
-    return "the stage registry could not be read; run `pi-worker doctor`";
-  }
-}
-
-/** The consumer's stage registry, located the same way the CLI locates it. */
-function loadStages(): StageEntry[] {
-  const explicit = process.env.PI_WORKER_STAGES;
-  const base =
-    process.env.XDG_CONFIG_HOME ?? join(process.env.HOME ?? "", ".config");
-  const path = explicit && explicit.length > 0 ? explicit : join(base, "pi-workers", "stages.json");
-  const parsed = JSON.parse(readFileSync(path, "utf8")) as { stages?: StageEntry[] };
-  if (!Array.isArray(parsed.stages)) {
-    throw new Error(`stage registry ${path} must be an object with a 'stages' list`);
-  }
-  return parsed.stages;
-}
-
-/**
  * The user-visible message text for an inbox envelope.
  *
- * For a work stage this is the bare bd task id and nothing else — no framing,
- * no skill name, no instructions. The worker resolves its contract with
- * that id, and any prose here becomes a second description of the work
- * that drifts from bd the moment the ticket is edited.
+ * sp029 T8: which shape a payload carries is no longer read from a stage
+ * registry — the transport cannot interpret content, so it cannot gate its
+ * shape. This reads the shape off which field the payload actually carries:
+ * `task` (a bd ticket id and nothing else) or `instructions` (prose plus
+ * optional artifact ids). Exactly one must be present.
+ *
+ * For a ticket-shaped payload this is the bare bd task id and nothing else —
+ * no framing, no skill name, no instructions. The worker resolves its
+ * contract with that id, and any prose here becomes a second description of
+ * the work that drifts from bd the moment the ticket is edited.
  *
  * A payload that violates the shape is REJECTED rather than trimmed to fit:
  * trimming would hide the caller's mistake and deliver a message the protocol
@@ -382,22 +310,22 @@ function loadStages(): StageEntry[] {
 export function userPayloadFor(envelope: Envelope): string {
   const payload = envelope.payload as Record<string, unknown>;
   const stage = String(payload.stage ?? "");
+  const hasTask = payload.task !== undefined && payload.task !== null && payload.task !== "";
+  const hasInstructions =
+    payload.instructions !== undefined && payload.instructions !== null && payload.instructions !== "";
 
-  if (isTicketStage(stage)) {
+  if (hasTask) {
     const extra = Object.keys(payload).filter((k) => k !== "stage" && k !== "task");
     if (extra.length > 0) {
       throw new Error(
         `work-stage payload for '${stage}' may carry only stage and task; found ${extra.join(", ")}`,
       );
     }
-    if (!payload.task) {
-      throw new Error(`work-stage payload for '${stage}' must carry its bd task id`);
-    }
     return String(payload.task);
   }
 
-  if (!payload.instructions) {
-    throw new Error(`payload for '${stage}' must carry direct instructions`);
+  if (!hasInstructions) {
+    throw new Error(`payload for '${stage}' must carry either a task id or instructions`);
   }
   const artifacts = Array.isArray(payload.artifacts) ? payload.artifacts : [];
   return artifacts.length > 0
@@ -2143,7 +2071,9 @@ function summarise(verb: string, stdout: string): string {
         .join("\n");
     }
     case "resume":
-      return `resumed ${o.run}/${o.uid} (rejection ${o.rejections}${o.escalate ? ", escalated" : ""})`;
+      // sp029 T8: no rejection count, no escalate. `state` still reflects
+      // the worker's last filed report until it files a fresh one.
+      return `resumed ${o.run}/${o.uid} on session ${o.session} — ${o.window} (${o.state})`;
     default:
       return raw;
   }
@@ -2212,8 +2142,14 @@ const INITIATOR_TOOL_PARAMETERS = {
     project: { type: "string", description: "spawn: omit this. The tmux session group is derived from the session you are in, which is where the operator is looking. Pass it only when running outside tmux" },
     repo: { type: "string", description: "spawn/accept: on spawn, omit it — the repository is derived from the current directory. Pass it only when that is not a repository, or for accept" },
     session: { type: "string", description: "spawn: omit this. The worker's Pi session id is minted for you — do not generate one" },
-    skill: { type: "string", description: `spawn: which stage this worker runs. One of: ${describeStages()}. The payload kind in brackets says what else to pass — 'ticket' needs task, 'instructions' needs instructions` },
-    task: { type: "string", description: "spawn/send: a ticket ID and nothing else, only for stages whose payload is a ticket. It names the worker's git branch, so it must be short and have no spaces. To give a worker prose, use `send` with instructions — never this" },
+    skill: { type: "string", description: "spawn: a label for what this worker does, e.g. wk-build or doc-plan. Travels as identity, not a lookup key — it does not decide isolation or payload shape" },
+    isolation: {
+      type: "string",
+      enum: ["worktree", "main"],
+      description:
+        "spawn: REQUIRED, no default. 'worktree' gives the worker its own throwaway worktree and branch; 'main' runs it in the repo's main worktree, shared with the operator. Nothing lands in the shared tree without this being typed",
+    },
+    task: { type: "string", description: "spawn/send: a ticket ID and nothing else. It names the worker's git branch, so it must be short and have no spaces. To give a worker prose, use `send` with instructions — never this" },
     stage: { type: "string", description: "send: the stage this message belongs to" },
     instructions: { type: "string", description: "send: the actual work, as prose. This is the ONLY field that takes a description of the task; spawn has none, so spawn the worker first and send this second" },
     artifacts: { type: "string", description: "send: comma-separated artifact ids" },
@@ -2332,7 +2268,7 @@ export default function piWorker(pi: ExtensionAPI): void {
           "ACK EVERY RESULT you have handled: the ack is what releases the worker's tmux window and its pi process, so a run that never acks leaves one idle agent per worker sitting on the machine. Its worktree, branch and session id survive the release, so nothing is lost and `respawn` can bring the worker back on the same transcript. " +
           "Accept as soon as you judge the work correct: that reclaims the window, the worktree and the branch, and the session id it leaves on the bus is all a restore needs. If you want that worker again afterwards, call `respawn` with its uid — you get a NEW uid continuing the SAME Pi transcript, with its worktree rebuilt, so tearing down promptly costs you nothing. Verbs: " +
           INITIATOR_VERBS.join(", ") +
-          `. Stages: ${describeStages()}.`,
+          ".",
         promptSnippet: "pi_worker — spawn, watch and message Pi workers",
         parameters: INITIATOR_TOOL_PARAMETERS,
         // `self` so Pi draws no header box around an empty body: without it a
@@ -2470,17 +2406,10 @@ export default function piWorker(pi: ExtensionAPI): void {
           // The briefing that was built and never delivered. In the system
           // prompt rather than only in this description, because a worker has
           // to know it must report BEFORE it decides it has finished.
-          // The stage's isolation decides whether this worker owns a throwaway
-          // branch it has to commit to. Read defensively: a registry that
-          // cannot be loaded must cost the worker one paragraph of guidance,
-          // not its whole session.
-          promptGuidelines: workerPromptGuidelines(identity, (() => {
-            try {
-              return loadStages().find((s) => s.name === identity.skill)?.isolation;
-            } catch {
-              return undefined;
-            }
-          })()),
+          // Isolation decides whether this worker owns a throwaway branch it
+          // has to commit to. sp029 T8: no registry lookup by skill name —
+          // spawn records it directly as PI_WORKER_ISOLATION.
+          promptGuidelines: workerPromptGuidelines(identity, process.env.PI_WORKER_ISOLATION),
           parameters: RESULT_TOOL_PARAMETERS,
           execute: async (
             _id: string,

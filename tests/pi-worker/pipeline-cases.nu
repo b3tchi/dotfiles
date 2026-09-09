@@ -33,7 +33,8 @@ def windows-on [socket: string]: nothing -> list<string> {
 }
 
 def launch [t: record, repo: string, uid: string, role: string, skill: string = "wk-build"] {
-    worker-spawn --run "run-1" --uid $uid --role $role --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session $"sid-($uid)" --skill $skill --socket $t.socket
+    # Every skill exercised in this suite is a worktree-isolated one.
+    worker-spawn --run "run-1" --uid $uid --role $role --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session $"sid-($uid)" --skill $skill --isolation "worktree" --socket $t.socket
 }
 
 def complete-with [uid: string, summary: string, status: string = "complete"] {
@@ -237,8 +238,14 @@ let cases = [
         # `ack` is what clears delivery and `ack` releases the worker `resume`
         # needs alive.
         #
-        # `reopened` already records which result was sent back; delivery has
-        # to read it too, or the frame and the mailbox disagree.
+        # sp029 T8: `resume` no longer counts rejections or escalates, but the
+        # `reopened` marker itself SURVIVES — see the comment on `worker-resume`.
+        # It is not escalation policy; it is what keeps `legacy-bus-wait`/
+        # `legacy-bus-pending` (still what `main wait`/`main status` call —
+        # T9 has not moved the CLI onto the new project-addressed bus yet)
+        # from re-serving a result a resume already sent back. `reopened`
+        # already records which result was sent back; delivery has to read
+        # it too, or the frame and the mailbox disagree.
         with-pipeline "reopened-wait" {|t, repo|
             launch $t $repo "impl-a" "impl"
             complete-with "impl-a" "first attempt"
@@ -294,22 +301,12 @@ let cases = [
         }
     })
 
-    (run-case "pipeline/second-rejection-escalates-to-a-human" {
-        # Two failures on the same task is the point where a human decides.
-        # Looping a third time silently burns tokens on the same misunderstanding.
-        with-pipeline "escalate" {|t, repo|
-            launch $t $repo "impl-a" "impl"
-            complete-with "impl-a" "attempt one"
-            worker-resume "impl-a" --run "run-1" --feedback "gap 1" --socket $t.socket
-            complete-with "impl-a" "attempt two"
-            let second = (worker-resume "impl-a" --run "run-1" --feedback "gap 2" --socket $t.socket)
-
-            assert-eq $second.escalate true "the second rejection asks for a human"
-            assert-eq $second.rejections 2 ""
-            let status = (bus-status "impl-a" --run "run-1")
-            assert-eq $status.state "waiting_human" "and the worker is parked, not silently retried"
-        }
-    })
+    # sp029 T8: "pipeline/second-rejection-escalates-to-a-human" retired —
+    # there is no rejection count and no `escalate` any more (see
+    # `worker-resume`). Rejection counting scanned the inbox for a
+    # `stage: "rejection"` marker, and `resume`'s outgoing message no longer
+    # carries a `stage` at all, so the counting mechanism has nothing left to
+    # count even in principle.
 
     # ------------------------------------------------------------- concurrency
     (run-case "pipeline/simultaneous-completions-are-both-delivered" {
@@ -357,7 +354,7 @@ let cases = [
     (run-case "pipeline/acceptance-cannot-reach-another-runs-worker" {
         with-pipeline "isolation" {|t, repo|
             let mine = (launch $t $repo "impl-a" "impl")
-            let theirs = (worker-spawn --run "run-2" --uid "impl-b" --role "impl" --subject "t2" --project "dotfiles" --repo $repo --task "t2" --session "sid-impl-b" --skill "wk-build" --socket $t.socket)
+            let theirs = (worker-spawn --run "run-2" --uid "impl-b" --role "impl" --subject "t2" --project "dotfiles" --repo $repo --task "t2" --session "sid-impl-b" --skill "wk-build" --isolation "worktree" --socket $t.socket)
             complete-with "impl-a" "mine done"
 
             let done = (legacy-bus-wait --run "run-1")

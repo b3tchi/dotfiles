@@ -193,7 +193,7 @@ let cases = [
         # case exists so a future change that starts treating one as the other
         # is caught, and so the distinction is documented in executable form.
         with-server "ids" {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
 
             let window_id = (^tmux -L $t.socket list-windows -a -F "#{window_name} #{window_id}" | lines | where {|l| $l | str starts-with $w.window } | first | split row " " | last)
             let pane_id = (^tmux -L $t.socket list-panes -a -F "#{window_name} #{pane_id}" | lines | where {|l| $l | str starts-with $w.window } | first | split row " " | last)
@@ -220,7 +220,7 @@ let cases = [
         # If completions travelled by tmux, this is the moment a `send-keys`
         # would type into that shell. Nothing may appear in it.
         with-server "stale" {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
             ^tmux -L $t.socket kill-window -t $w.window
 
             # Something else now occupies the slot the worker had.
@@ -252,7 +252,7 @@ let cases = [
             ^tmux -L $t.socket new-window -d -t "dotfiles" -n "bystander" $nu.current-exe
             let before = (settled-pane-text $t.socket "bystander")
 
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
             legacy-inbox-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "t1"}
             bus-result "impl-a" --run "run-1" --result {
                 status: "complete", summary: "done", validation: "green"
@@ -271,8 +271,8 @@ let cases = [
 
     (run-case "live/acceptance-closes-only-the-worker-window" {
         with-server "scoped" {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
-            let other = (worker-spawn --run "run-1" --uid "rev-a" --role "rev" --subject "t2" --project "dotfiles" --repo $repo --task "t2" --session "sid-2" --skill "wk-review" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
+            let other = (worker-spawn --run "run-1" --uid "rev-a" --role "rev" --subject "t2" --project "dotfiles" --repo $repo --task "t2" --session "sid-2" --skill "wk-review" --isolation "worktree" --socket $t.socket)
             bus-result "impl-a" --run "run-1" --result {
                 status: "complete", summary: "done", validation: "green"
                 window: $w.window, session: "sid-1", resume: "pi --session sid-1"
@@ -298,7 +298,7 @@ let cases = [
 
     (run-case "live/ack-releases-the-worker-that-reported" {
         with-server "ack-release" {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
             bus-result "impl-a" --run "run-1" --result {
                 status: "complete", summary: "done", validation: "green"
                 window: $w.window, session: "sid-1", resume: "pi --session sid-1"
@@ -323,7 +323,7 @@ let cases = [
         # after a crash must not be told it did something illegal, and there is
         # no window left to kill the second time.
         with-server "ack-twice" {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
             bus-result "impl-a" --run "run-1" --result {
                 status: "complete", summary: "done", validation: "green"
                 window: $w.window, session: "sid-1", resume: "pi --session sid-1"
@@ -340,7 +340,7 @@ let cases = [
         # display host that cannot be reached must not cost the initiator its
         # delivery receipt, or `wait` will hand it the same envelope forever.
         with-server "ack-notmux" {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
             bus-result "impl-a" --run "run-1" --result {
                 status: "complete", summary: "done", validation: "green"
                 window: $w.window, session: "sid-1", resume: "pi --session sid-1"
@@ -359,7 +359,7 @@ let cases = [
         # the worker back must land IN it rather than allocating a fresh
         # iteration beside it.
         with-server "ack-respawn" {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
             # Committed, because reporting `complete` with a dirty tree is
             # refused by the stage gate — and rightly: an uncommitted branch
             # merges as a no-op.
@@ -381,35 +381,12 @@ let cases = [
         }
     })
 
-    (run-case "live/rejections-are-counted-along-the-respawn-lineage" {
-        # resume refuses a released worker and names respawn, which mints a new
-        # uid — so a per-uid rejection count would reset on every respawn and
-        # the escalate-after-two-rejections rule would silently stop working.
-        # The count follows the lineage instead.
-        with-server "ack-lineage" {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
-            bus-result "impl-a" --run "run-1" --result {
-                status: "complete", summary: "first attempt", validation: "green"
-                window: $w.window, session: "sid-1", resume: "pi --session sid-1"
-            }
-            # One rejection against the original, delivered while it is live.
-            let first = (worker-resume "impl-a" --run "run-1" --feedback "not good enough" --socket $t.socket)
-            assert-eq $first.rejections 1 ""
-            assert-eq $first.escalate false "one rejection is not an escalation"
-
-            legacy-bus-ack --run "run-1" --uid "impl-a" --sequence 1 --socket $t.socket
-            let back = (worker-respawn "impl-a" --run "run-1" --repo $repo --socket $t.socket)
-            assert-eq (worker-inspect $back.uid --run "run-1" | get rejections) 1 "the new uid inherits what was already rejected"
-
-            bus-result $back.uid --run "run-1" --result {
-                status: "complete", summary: "second attempt", validation: "green"
-                window: $back.window, session: "sid-1", resume: "pi --session sid-1"
-            }
-            let second = (worker-resume $back.uid --run "run-1" --feedback "still not right" --socket $t.socket)
-            assert-eq $second.rejections 2 "the second rejection counts as the second"
-            assert-eq $second.escalate true "and escalates, which is the whole point of counting"
-        }
-    })
+    # sp029 T8: "live/rejections-are-counted-along-the-respawn-lineage"
+    # retired along with rejection counting and `escalate` — see
+    # `worker-resume` and `worker-inspect`. Resume is now an ordinary send.
+    # (The `reopened` marker itself survives — see the comment on
+    # `worker-resume` and pipeline-cases.nu's "reopened-*" tests — but nothing
+    # here exercised that; this test was purely about the retired count.)
 
     # ------------------------------------------------------------- respawn
     #
@@ -424,7 +401,7 @@ let cases = [
     (run-case "live/respawn-continues-the-accepted-workers-session-under-a-new-uid" {
         let log = (argv-log "respawn")
         with-server "respawn" --stub (records-argv $log) {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
             bus-result "impl-a" --run "run-1" --result {
                 status: "complete", summary: "done", validation: "green"
                 window: $w.window, session: "sid-1", resume: "pi --session sid-1"
@@ -459,7 +436,7 @@ let cases = [
         # `reclaim` takes only the directory. Coming back must land on the same
         # ref: forking a new one off base would silently drop the work.
         with-server "respawn-branch" {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
             "work\n" | save -f ($w.cwd | path join "work.txt")
             ^git -C $w.cwd add -A
             ^git -C $w.cwd commit -q -m "work nobody merged"
@@ -482,7 +459,7 @@ let cases = [
         # work is in the base. Reconstructing off base is then the honest
         # answer, and the report says which happened.
         with-server "respawn-fork" {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
             bus-result "impl-a" --run "run-1" --result {
                 status: "complete", summary: "done", validation: "green"
                 window: $w.window, session: "sid-1", resume: "pi --session sid-1"
@@ -506,7 +483,7 @@ let cases = [
         # Respawning a live worker would put two Pi processes on one session
         # and one transcript. The window it already has is the answer.
         with-server "respawn-live" {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
             assert-rejects {
                 worker-respawn "impl-a" --run "run-1" --repo $repo --socket $t.socket
             } "still live" "a running worker is not respawned"
@@ -527,7 +504,7 @@ let cases = [
         # inbox, and a reclaimed worker has no process reading it. It looked
         # like feedback had been delivered.
         with-server "resume-dead" --stub (dies-with 3) {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
             wait-for-dead $t.socket $w.window_id
 
             assert-rejects {
@@ -547,7 +524,7 @@ let cases = [
 
     (run-case "live/reclaim-reaps-a-dead-worker-window" {
         with-server "gc-dead" --stub (dies-with 3) {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
             wait-for-dead $t.socket $w.window_id
 
             let got = (worktrees-reclaim --repo $repo --socket $t.socket)
@@ -566,7 +543,7 @@ let cases = [
         # kills a live worker's window destroys work; one that says nothing
         # about it leaves an operator with orphans they cannot see.
         with-server "gc-alive" {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
 
             let got = (worktrees-reclaim --repo $repo --socket $t.socket)
             assert-eq $got.windows_killed [] "a live window is never reaped"
@@ -582,7 +559,7 @@ let cases = [
         # the first cut of the report claimed 242 windows to reap where there
         # were 22, and would have issued eleven kills for each.
         with-server "gc-group" --stub (dies-with 3) {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
             wait-for-dead $t.socket $w.window_id
             # Two more views onto the same window list.
             ^tmux -L $t.socket new-session -d -t "dotfiles" -s "dotfiles_2"
@@ -605,7 +582,7 @@ let cases = [
             # project's naming to recognise. With no workers at all there is no
             # known project, and the sweep says nothing rather than guessing at
             # window names.
-            worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket
+            worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket
             ^tmux -L $t.socket new-window -d -n "impl-stray@dotfiles" -t "dotfiles" "sh -c 'exit 3'"
             ^tmux -L $t.socket set-option -t "impl-stray@dotfiles" remain-on-exit on
             # remain-on-exit has to be set BEFORE the process exits to hold the
@@ -627,7 +604,7 @@ let cases = [
         # where tmux cannot be reached must not report an empty window list as
         # though it had looked.
         with-server "gc-notmux" {|t, repo|
-            worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket
+            worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket
 
             let got = (worktrees-reclaim --repo $repo --socket $"($t.socket)-nowhere")
             assert-eq $got.tmux_reachable false "the report says the probe could not be made"
@@ -651,7 +628,7 @@ let cases = [
 
     (run-case "live/a-running-worker-is-live" {
         with-server "verdict-live" {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
 
             assert-eq (worker-liveness $w.window --socket $t.socket | get verdict) "live" "its process is running"
             assert-eq (worker-live? $w.window --socket $t.socket) true ""
@@ -662,7 +639,7 @@ let cases = [
         # The worker's OWN evidence about ITSELF: the process it was given ran
         # and stopped. Per adr0017 that is reportable, unlike an absent window.
         with-server "verdict-exited" --stub (dies-with 3) {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
             wait-for-dead $t.socket $w.window
 
             let seen = (worker-liveness $w.window --socket $t.socket)
@@ -690,7 +667,7 @@ let cases = [
         # process did not, which is the worker's own evidence about itself.
         # The genuinely unobservable case is the next one along.
         with-server "verdict-gone" {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
             ^tmux -L $t.socket kill-window -t $w.window
 
             let seen = (worker-liveness $w.window --socket $t.socket)
@@ -712,7 +689,7 @@ let cases = [
         # Knowing a process stopped is not knowing the work is finished. The
         # verdict is reportable; it licenses nothing.
         with-server "verdict-noclean" --stub (dies-with 1) {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
             wait-for-dead $t.socket $w.window
 
             assert-rejects {
@@ -727,7 +704,7 @@ let cases = [
         # wrong dies immediately, and spawn must say so rather than report
         # health it did not observe.
         with-server "verdict-spawn" --stub (dies-with 127) {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
             wait-for-dead $t.socket $w.window
 
             assert-eq (worker-liveness $w.window --socket $t.socket | get verdict) "exited" "the pane is dead"
@@ -745,7 +722,7 @@ let cases = [
         # deliberately bus-only, so that a restarted initiator can rebuild a run
         # without tmux — which is exactly why the probe needs its own verb.
         with-server "verb" --stub (dies-with 5) {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
             wait-for-dead $t.socket $w.window
 
             let out = (^$nu.current-exe (repo-root $env.FILE_PWD | path join "claude" "marketplace" "plugins" "pi-workers" "scripts" "pi-worker.nu") "liveness" "impl-a" "--run" "run-1" "--socket" $t.socket | complete)
@@ -791,7 +768,7 @@ let cases = [
             assert-true ("dotfiles_7|dotfiles" in $groups) $"fixture must be a group with no eponymous session, got ($groups)"
             assert-true ("dotfiles_8|dotfiles" in $groups) $"and more than one member, got ($groups)"
 
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
 
             assert-eq $w.window "impl-t1@dotfiles" "the window is named for the GROUP, which is what an operator scans for"
             assert-eq (worker-liveness $w.window --socket $t.socket | get verdict) "live" "and it really started"
@@ -802,7 +779,7 @@ let cases = [
         # Naming one session directly must keep working: it is unambiguous, and
         # it is what an operator reaches for when a group has many views.
         with-server "exact" {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
             assert-eq $w.window "impl-t1@dotfiles" ""
             assert-eq (worker-liveness $w.window --socket $t.socket | get verdict) "live" ""
         }
@@ -815,7 +792,7 @@ let cases = [
         # allocation, so a typo costs nothing.
         with-server "nogroup" {|t, repo|
             assert-rejects {
-                worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "nosuchproject" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket
+                worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "nosuchproject" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket
             } "nosuchproject" "the refusal must name what could not be found"
 
             assert-true (not (($repo | path join ".worktrees" "wk-t1.0") | path exists)) "and allocate nothing"
@@ -840,7 +817,7 @@ let cases = [
 
     (run-case "live/spawn-records-the-window-id-tmux-assigned" {
         with-server "wid" {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
 
             assert-true ($w.window_id | str starts-with "@") $"a tmux window id looks like @N, got ($w.window_id)"
             let recorded = (worker-inspect "impl-a" --run "run-1" | get identity.window_id)
@@ -851,8 +828,8 @@ let cases = [
     (run-case "live/two-workers-sharing-a-name-are-independently-addressable" {
         # The exact shape that broke: same role, same subject, different runs.
         with-server "collide" {|t, repo|
-            let a = (worker-spawn --run "run-a" --uid "w1" --role "rev" --subject "demo" --project "dotfiles" --repo $repo --task "demo" --session "sid-a" --skill "wk-build" --socket $t.socket)
-            let b = (worker-spawn --run "run-b" --uid "w1" --role "rev" --subject "demo" --project "dotfiles" --repo $repo --task "demo" --session "sid-b" --skill "wk-build" --socket $t.socket)
+            let a = (worker-spawn --run "run-a" --uid "w1" --role "rev" --subject "demo" --project "dotfiles" --repo $repo --task "demo" --session "sid-a" --skill "wk-build" --isolation "worktree" --socket $t.socket)
+            let b = (worker-spawn --run "run-b" --uid "w1" --role "rev" --subject "demo" --project "dotfiles" --repo $repo --task "demo" --session "sid-b" --skill "wk-build" --isolation "worktree" --socket $t.socket)
 
             assert-eq $a.window $b.window "they really do share a display name"
             assert-true ($a.window_id != $b.window_id) "but not an id"
@@ -874,7 +851,7 @@ let cases = [
         # every -t operation against the NAME misparsed it. Addressing by id
         # sidesteps the grammar entirely.
         with-server "dotted" {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1.4" --project "dotfiles" --repo $repo --task "t1.4" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1.4" --project "dotfiles" --repo $repo --task "t1.4" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
             # The dot no longer reaches the window name at all: slugify-subject
             # turns it into a separator, which is a stronger fix than tolerating
             # it and addressing around it. The ticket is still recognisable in a
@@ -896,7 +873,7 @@ let cases = [
         # Identities written before ids were recorded must not become
         # unaddressable: absent evidence is not a reason to strand a worker.
         with-server "legacy" {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
             assert-eq (worker-liveness $w.window --socket $t.socket | get verdict) "live" "a name still resolves"
         }
     })
@@ -905,7 +882,7 @@ let cases = [
         # A missing window is missing evidence, not proof the work is done.
         # The worktree must survive, because it may hold the only copy.
         with-server "dead" {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
             ^tmux -L $t.socket kill-window -t $w.window
 
             assert-eq (worker-live? $w.window --socket $t.socket) false "the window is gone"
@@ -930,7 +907,7 @@ let cases = [
         # so the flag itself has to be asserted -- otherwise the suite stays
         # green while the launched command never starts.
         with-server "sessionflag" {|t, repo|
-            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --socket $t.socket)
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
 
             let start = (
                 ^tmux -L $t.socket list-panes -a -F "#{window_name}\t#{pane_start_command}"

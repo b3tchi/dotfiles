@@ -14,16 +14,8 @@
 // operator run.
 
 import { expect, test, describe } from "bun:test";
-import { join } from "node:path";
 import { readFileSync } from "node:fs";
-
-// Stage shape is read from the consumer's registry now, so the suite supplies
-// one. Same fixture the nu suite uses, so both halves agree on the vocabulary.
-process.env.PI_WORKER_STAGES = join(
-  import.meta.dir,
-  "../../../../..",
-  "tests/pi-worker/stages.test.json",
-);
+import { join } from "node:path";
 import {
   createInboxWatcher,
   decideDelivery,
@@ -165,11 +157,12 @@ describe("user payload shaping", () => {
     expect(() => userPayloadFor(bad as never)).toThrow(/work/i);
   });
 
-  test("an unknown stage with neither task nor instructions is rejected", () => {
+  test("a payload with neither task nor instructions is rejected", () => {
+    // sp029 T8: there is no registry to refuse an unknown stage up front any
+    // more — the transport does not know what a stage is. What it can still
+    // check is the one thing it owns: the payload must carry SOMETHING.
     const bad = { ...workEnvelope, payload: { stage: "mystery" } };
-    // An undeclared stage is now refused up front, by the registry, rather than
-    // by the shape of what it happened to carry.
-    expect(() => userPayloadFor(bad as never)).toThrow(/not declared in the stage registry/i);
+    expect(() => userPayloadFor(bad as never)).toThrow(/must carry either a task id or instructions/i);
   });
 });
 

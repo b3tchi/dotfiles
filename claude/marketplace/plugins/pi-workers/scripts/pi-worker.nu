@@ -1,8 +1,11 @@
 #!/usr/bin/env nu
 # pi-worker — a message bus for visible Pi workers.
 #
-# Transport only. What a stage is allowed to do is declared by the consumer in
-# a stage registry; see scripts/stage-registry.nu.
+# Transport only. Flow lives in what agents say to each other, not in the
+# transport (sp029 T8): the stage registry that used to gate a message's shape
+# and a worker's placement by stage NAME retired. The one property it bought —
+# nothing lands in the operator's shared tree without that being typed — is
+# now a required `spawn --isolation worktree|main`, with no default.
 #
 # This file currently carries the PROTOCOL only: envelope schemas, the caps,
 # and the worker state machine. The commands that move bytes (`spawn`, `send`,
@@ -27,9 +30,12 @@
 # The only legitimate tmux calls are window/process lifecycle: new-window,
 # list-windows, kill-window.
 
-use stage-registry.nu *
-
 # ------------------------------------------------------------------ constants
+
+# The only two legal placements for a worker, and the whole of what survives
+# the stage registry's retirement (sp029 T8): nothing lands in the operator's
+# shared tree without the caller typing this, in full, every time.
+export const ISOLATIONS = ["worktree" "main"]
 
 # Bumped only for an incompatible envelope change. A reader that meets an
 # unknown version fails closed rather than guessing at the fields.
@@ -307,29 +313,11 @@ export def --env mint-msg-id []: nothing -> string {
     (crockford-encode $ts $CROCKFORD_TS_WIDTH) + $rand
 }
 
-# Stages the BUS itself authors, which therefore need no consumer declaration.
-# `resume` sends one of these to reopen a worker, so requiring the consumer to
-# register it would make the bus depend on its own caller.
-const RESERVED_STAGES = ["rejection"]
-
 # --------------------------------------------------------- payload contracts
-
-# Stages that take the other kind of payload, for a refusal to point at.
 #
-# A refusal is where the caller actually learns the vocabulary — observed all
-# evening: an agent tried stage `default`, then `work-do`, then `build`, and
-# learned the real names only from being told no. Saying "this stage wants a
-# ticket" without saying which stage wants prose leaves the caller to guess
-# again, and there may be no such stage at all — which is worth knowing,
-# because then the registry is the thing to fix, not the call.
-def stages-taking [shape: string]: nothing -> string {
-    let matching = (load-stages | where payload == $shape | get name)
-    if ($matching | is-empty) {
-        $"no stage in the registry takes ($shape); the registry needs one"
-    } else {
-        $matching | str join ", "
-    }
-}
+# sp029 T8: the registry's own vocabulary — RESERVED_STAGES, `stages-taking`,
+# stage names as transport words — retired with it. `resume` no longer sends
+# a reserved "rejection" stage; it is an ordinary message (see `worker-resume`).
 
 # sp029 T2: a message's content is opaque to the transport — "carries any
 # consumer's vocabulary and interprets none of it". The stage/ticket/
@@ -1322,7 +1310,12 @@ export def bus-result [
     # a repository, is our failure to observe rather than the worker's failure
     # to commit, and accept's own guard still stands behind this. adr0017's
     # rule, applied to a gate rather than a verdict.
-    if (($result | get -o status) == "complete") and ((stage-for $identity.skill | get isolation) == "worktree") {
+    # sp029 T8: isolation is now recorded directly on the identity at spawn
+    # time, not looked up by skill name in a registry. Absent on an identity
+    # from before this change (or one a fixture wrote directly), so the gate
+    # simply does not apply to it — the runtime bus this identity lives in is
+    # transient anyway.
+    if (($result | get -o status) == "complete") and (($identity | get -o isolation | default "") == "worktree") {
         let dirty = (do { ^git -C $identity.cwd status --porcelain } | complete)
         if $dirty.exit_code == 0 and ($dirty.stdout | str trim | is-not-empty) {
             let files = ($dirty.stdout | lines | each {|l| $l | str trim } | first 5 | str join ", ")
@@ -2721,25 +2714,28 @@ export def main-worktree [repo_in: string]: nothing -> string {
 
 # Where a worker runs, and on which branch.
 #
-# Declared per stage in the registry, because only the consumer knows which of
-# its stages can tolerate an isolated checkout:
+# `--isolation` is required and typed by the caller directly (sp029 T8) — no
+# default, and no stage-name lookup to a registry decides it for them:
 #
 #   isolation=worktree  its own throwaway `wk-<subject>.<N>` worktree and
 #                       branch, so concurrent workers never share a tree
 #   isolation=main      the repo's main worktree on the default branch, and no
-#                       task branch — for stages whose tooling refuses to run
+#                       task branch — for work whose tooling refuses to run
 #                       anywhere else, or whose writes belong on the canonical
 #                       branch
 #
 # `main` means the worker shares a tree with the operator and with every other
-# such worker, so a consumer that declares it owns the serialisation problem.
+# such worker, so the CALLER that asks for it owns the serialisation problem.
 export def worker-placement [
     --repo: string
-    --skill: string
+    --isolation: string
     --subject: string
 ]: nothing -> record {
     let repo = (expand-path $repo)
-    if (stage-for $skill | get isolation) == "main" {
+    if ($isolation | default "") not-in $ISOLATIONS {
+        error make {msg: $"--isolation must be one of ($ISOLATIONS | str join ', '), got '($isolation)': nothing may land in the main worktree without that word being typed"}
+    }
+    if $isolation == "main" {
         let main = (main-worktree $repo)
         let branch = (^git -C $main rev-parse --abbrev-ref HEAD | str trim)
         return {path: $main, branch: $branch, isolated: false}
@@ -3053,6 +3049,7 @@ export def worker-spawn [
     --task: string = ""
     --session: string
     --skill: string
+    --isolation: string
     --socket: string = ""
 ] {
     # An address is claimed once. Spawning onto an occupied one used to inherit
@@ -3068,11 +3065,6 @@ export def worker-spawn [
     let existing = (worker-dir $run $uid)
     if ($existing | path exists) {
         error make {msg: $"($run)/($uid) already exists: that address has been used, and spawning onto it would inherit its mail and markers. Use a different uid, or release this one with `rm --run ($run) --uid ($uid)` once it is finished with"}
-    }
-
-    let stage = (stage-for $skill)
-    if ($stage.payload == "ticket") and ($task | is-empty) {
-        error make {msg: $"stage '($skill)' takes a ticket payload and so needs a ticket id; the worker resolves the work from it"}
     }
 
     # Fail before allocating anything if the display host is unreachable.
@@ -3099,8 +3091,9 @@ export def worker-spawn [
     # and reports it as the entirely unrelated "External command failed", which
     # is how this sat hidden behind a passing-looking spawn.
     let subject_for_branch = (if ($task | is-empty) { $subject } else { $task })
-    # Placement is stage-dependent; the registry says which (dotfiles-ptba).
-    let tree = (worker-placement --repo $repo --skill $skill --subject $subject_for_branch)
+    # Placement is decided by the caller's own --isolation, typed at spawn
+    # time (sp029 T8, dotfiles-ptba).
+    let tree = (worker-placement --repo $repo --isolation $isolation --subject $subject_for_branch)
 
     bus-identity $uid --run $run --identity {
         role: $role
@@ -3108,6 +3101,7 @@ export def worker-spawn [
         branch: $tree.branch
         session: $session
         skill: $skill
+        isolation: $isolation
         window: $window
     }
 
@@ -3135,6 +3129,7 @@ export def worker-spawn [
         "-e" $"PI_WORKER_BRANCH=($tree.branch)"
         "-e" $"PI_WORKER_SESSION=($session)"
         "-e" $"PI_WORKER_SKILL=($skill)"
+        "-e" $"PI_WORKER_ISOLATION=($isolation)"
         "-e" $"PI_WORKER_WINDOW=($window)"
     ] ++ $commit_guard)
     # Creating the session, not resuming one: this uid is new and its uuid was
@@ -3153,6 +3148,7 @@ export def worker-spawn [
         branch: $tree.branch
         session: $session
         skill: $skill
+        isolation: $isolation
         window: $window
         window_id: $window_id
     }
@@ -3170,6 +3166,7 @@ export def worker-spawn [
         branch: $tree.branch
         session: $session
         skill: $skill
+        isolation: $isolation
         resume: $"pi --session ($session)"
         # Both, because they answer different questions. `live` is the bool an
         # operator skims; `liveness` is the verdict adr0017 requires when the
@@ -3210,18 +3207,16 @@ export def worker-spawn [
 # they survive exactly as long as the identity that makes them addressable —
 # past a runtime wipe, and past the worktree they describe being reclaimed.
 #
-# `waiting_human` and `reopened` are NOT part of that move. Both are still
-# written from `worker-resume` — one on a second rejection, escalating the
-# worker to `waiting_human` on ITS behalf, the other recording which result a
-# rejection answered — and that is exactly the "granted from outside" writer
-# sp029 T8 retires, per the spec's own account of the split (T8: "no
-# rejection counting, no `escalate`, no `reopened`"). Relocating their
-# STORAGE here without T8 having yet removed the writer would either
-# duplicate a marker across two trees or change what `pipeline-cases.nu`'s
-# `pipeline/second-rejection-escalates-to-a-human` and the `reopened-*` cases
-# observe, out from under a task that never touches `worker-resume`. So they
-# stay on the legacy runtime tree until T8 lands; see the bd notes on this
-# task for the deviation this records.
+# `waiting_human` and `reopened` are NOT part of that move. `waiting_human`
+# now has no writer at all: it used to be written from `worker-resume` on a
+# second rejection, escalating the worker to `waiting_human` on ITS behalf,
+# and that escalation policy is exactly what sp029 T8 retired — `resume` is
+# now an ordinary send, with no rejection counting and no `escalate`.
+# `reopened` keeps its writer, and deliberately: it is not escalation policy,
+# it is what keeps a resumed worker's stale `complete` report from being
+# re-served by `legacy-bus-wait`/`legacy-bus-pending` (still what `main
+# wait`/`main status` call) as if it were fresh (dotfiles-nig0/ycvl). See the
+# comment on `worker-resume`.
 def marker-path [run: string, uid: string, name: string]: nothing -> string {
     if $name in ["accepted" "stopped"] {
         let slug = (resolve-agent-slug $run $uid)
@@ -3252,38 +3247,12 @@ def marker-set? [run: string, uid: string, name: string]: nothing -> bool {
     marker-path $run $uid $name | path exists
 }
 
-# Count how many times this worker has been sent back. Rejections are derived
-# from the messages actually on the bus rather than tracked in the
-# orchestrator, so the count survives a restart.
-# Rejections against this worker AND against the ones it continues.
-#
-# `resume` refuses a worker with no live window and names `respawn`, which mints
-# a new uid — so a count kept per uid resets on every respawn, and the
-# escalate-after-two-rejections rule stops working precisely in the flow that
-# needs it. The lineage is on the bus as `respawned_from`, so it is walked.
-#
-# Depth-capped: a cycle cannot occur, because each respawn's ancestor already
-# existed when it was written, but a corrupt envelope must not spin forever.
-def rejection-count [run: string, uid: string]: nothing -> int {
-    mut total = 0
-    mut at = $uid
-    mut hops = 0
-    loop {
-        $total = $total + (
-            bus-inbox $at --run $run
-            | where {|e| ($e.payload | get -o stage) == "rejection" }
-            | length
-        )
-        let identity = (bus-identity-of $at --run $run)
-        let from = (if $identity == null { "" } else { $identity | get -o respawned_from | default "" })
-        $hops = $hops + 1
-        if ($from | is-empty) or $hops > 64 { break }
-        $at = $from
-    }
-    $total
-}
-
 # Everything known about one worker, without consuming anything.
+#
+# sp029 T8: no rejection count. Counting how many times a worker was sent back
+# was in service of the escalate-after-two-rejections rule, which retired with
+# `worker-resume`'s writer — that policy now belongs to the consumer's own
+# instructions ([[ft013]]), not to this inspection.
 export def worker-inspect [uid: string, --run: string, --sessions-dir: string = ""]: nothing -> record {
     let identity = (bus-identity-of $uid --run $run)
     if $identity == null {
@@ -3296,7 +3265,6 @@ export def worker-inspect [uid: string, --run: string, --sessions-dir: string = 
         identity: $identity
         state: (bus-status $uid --run $run | get state)
         last_result: (if ($results | is-empty) { null } else { $results | last | get payload })
-        rejections: (rejection-count $run $uid)
         resume: (resume-hint $identity --sessions-dir $sessions_dir)
         transcript: (pi-session-file $identity.session --sessions-dir $sessions_dir)
     }
@@ -3725,13 +3693,27 @@ export def worker-release [--run: string, --uid: string]: nothing -> record {
 #
 # Resuming rather than dispatching fresh is the point of a stable session id:
 # the worker still has its context and its worktree, so the second attempt
-# starts from the first rather than from nothing. The feedback travels as an
-# instruction-shaped message — it is prose, and a ticket payload carries only an id
-# id.
+# starts from the first rather than from nothing.
 #
-# A second rejection sets `escalate` and parks the worker at `waiting_human`.
-# A third silent retry would burn another model turn on the same
-# misunderstanding; at that point a person needs to look.
+# sp029 T8: the message itself is now ordinary. There is no rejection count
+# scanned off the inbox, no `escalate` on a second rejection, and no
+# auto-parking at `waiting_human` — that policy (how many times is too many,
+# and what happens then) was review policy, never transport, and it moves to
+# the consumer's own instructions ([[ft013]]). Rejection-counting could not
+# survive this anyway: it scanned for a `stage: "rejection"` marker on the
+# sent message, and the message sent below carries no `stage` at all.
+#
+# The `reopened` MARKER survives, and deliberately does not follow the
+# vocabulary it used to ride with. It is not escalation policy — it is the
+# thing that keeps a resumed worker's stale `complete` report from being
+# re-served as if it were fresh (dotfiles-nig0/ycvl). `main wait`/`main
+# status` still resolve to `legacy-bus-wait`/`legacy-bus-pending`, which still
+# read this marker for exactly that — T4 (sp029) added a project-addressed
+# `bus-wait --as` alongside them, but has not moved the CLI onto it (that is
+# T9's job), and a worker's typed RESULT does not travel through it either
+# (that migration is T5, sp029, not yet landed). Dropping the write now would
+# reopen a previously-fixed bug with its guarding tests still in the suite,
+# for a vocabulary reason that does not apply to it.
 export def worker-resume [
     uid: string
     --run: string
@@ -3739,11 +3721,10 @@ export def worker-resume [
     --socket: string = ""
 ]: nothing -> record {
     let seen = (worker-inspect $uid --run $run)
-    let rejections = ($seen.rejections + 1)
 
     # Feedback goes to a PROCESS. A worker whose window is gone — accepted,
     # stopped, swept, or crashed — has nothing reading its inbox, and the
-    # rejection used to land there anyway: the state flipped to `running`, the
+    # message used to land there anyway: the state flipped to `running`, the
     # verb reported success, and nobody was working. Refused rather than
     # silently queued, and the refusal names the verb that can bring the worker
     # back on the same session.
@@ -3757,16 +3738,14 @@ export def worker-resume [
     }
 
     legacy-inbox-send $uid --run $run --payload {
-        stage: "rejection"
         instructions: $feedback
         artifacts: []
     }
 
-    # Reopening is always the first move: `complete -> running` is a legal edge
-    # precisely so a rejected result can be sent back without inventing a new
-    # worker. Escalation is then a SECOND legal step, `running -> waiting_human`
-    # — walking the table rather than adding a `complete -> waiting_human` edge
-    # that would let a worker be parked without ever being reopened.
+    # `complete -> running` is a legal edge precisely so a rejected result can
+    # be sent back without inventing a new worker — validated here so a resume
+    # sent to a worker in a terminal state (accepted, stopped) is refused
+    # rather than silently accepted.
     validate-transition $seen.state "running"
     rm -f (marker-path $run $uid "waiting_human")
     let newest = (
@@ -3777,18 +3756,11 @@ export def worker-resume [
     )
     write-marker $run $uid "reopened" ($newest | into string)
 
-    if $rejections >= 2 {
-        validate-transition "running" "waiting_human"
-        write-marker $run $uid "waiting_human"
-    }
-
     {
         run: $run
         uid: $uid
         session: $seen.identity.session
         window: $seen.identity.window
-        rejections: $rejections
-        escalate: ($rejections >= 2)
         state: (bus-status $uid --run $run | get state)
     }
 }
@@ -3920,8 +3892,17 @@ export def worker-respawn [
         }
         {path: $path, branch: $old.branch, isolated: true}
     } else {
-        worker-placement --repo $repo --skill $old.skill --subject $subject
+        # This branch is reached only when the old branch is gone (merged or
+        # deleted) and the old placement was not the main worktree — so a
+        # fresh throwaway worktree is exactly what "worktree" means.
+        worker-placement --repo $repo --isolation "worktree" --subject $subject
     })
+
+    # `old.isolation` is recorded directly on a post-T8 identity; an identity
+    # written before this change (or imported from v1) has none, so it is
+    # derived from where the reconstructed tree actually landed instead of
+    # guessed from a skill name.
+    let isolation = ($old | get -o isolation | default (if $tree.isolated { "worktree" } else { "main" }))
 
     let window = (worker-window-name $old.role $subject $project)
     bus-identity $new_uid --run $run --identity {
@@ -3930,6 +3911,7 @@ export def worker-respawn [
         branch: $tree.branch
         session: $old.session
         skill: $old.skill
+        isolation: $isolation
         window: $window
         respawned_from: $uid
     }
@@ -3949,6 +3931,7 @@ export def worker-respawn [
         "-e" $"PI_WORKER_BRANCH=($tree.branch)"
         "-e" $"PI_WORKER_SESSION=($old.session)"
         "-e" $"PI_WORKER_SKILL=($old.skill)"
+        "-e" $"PI_WORKER_ISOLATION=($isolation)"
         "-e" $"PI_WORKER_WINDOW=($window)"
     ] ++ $commit_guard)
 
@@ -3964,6 +3947,7 @@ export def worker-respawn [
         branch: $tree.branch
         session: $old.session
         skill: $old.skill
+        isolation: $isolation
         window: $window
         window_id: $window_id
         respawned_from: $uid
@@ -4080,7 +4064,8 @@ def usage []: nothing -> string {
         "  pi-worker <verb> [flags]"
         ""
         "VERBS"
-        "  spawn    --run --uid --role --subject --project --repo --session --skill [--task] [--socket]"
+        "  spawn    --run --uid --role --subject --project --repo --session --skill"
+        "           --isolation worktree|main (no default) [--task] [--socket]"
         "  send     <uid> --run --stage [--task | --instructions] [--artifacts]"
         "  result   <uid> --run --status --summary [--validation]   report an outcome"
         "  settled  <uid> --run                 report settling with nothing to show"
@@ -4144,7 +4129,7 @@ def main [...args: string] {
 def "main spawn" [
     --run: string = "", --uid: string = "", --role: string = "", --subject: string
     --project: string = "", --repo: string = "", --session: string = "", --skill: string
-    --task: string = "", --socket: string = ""
+    --isolation: string, --task: string = "", --socket: string = ""
 ] {
     # Derived before the check below, so the caller is only asked for what
     # cannot be worked out from where it is standing.
@@ -4168,11 +4153,18 @@ def "main spawn" [
         ["--subject" $subject   "a short name for the work; it becomes the window name and the branch, slugified if it is not already a slug"]
         ["--project" $project   "the tmux session group to host the window. Normally derived from the session you are in — pass it only when running outside tmux"]
         ["--repo"    $repo      "the git repository the worker works in. Normally derived from the current directory — pass it only when that is not a repository"]
-        ["--skill"   $skill     "which stage this worker runs; `pi-worker doctor` lists them"]
+        ["--skill"   $skill     "a label for what this worker does; travels as identity, not a lookup key"]
+        ["--isolation" $isolation $"worktree or main, with no default — ($ISOLATIONS | str join ' or '): nothing may land in the main worktree without this being typed"]
     ] {
         if ($required.value | is-empty) {
             error make {msg: $"spawn needs ($required.flag): ($required.what)"}
         }
+    }
+
+    # Not just present — one of the two words. A typo here must not fall
+    # through to the shared tree the way an unchecked isolation once could.
+    if $isolation not-in $ISOLATIONS {
+        error make {msg: $"spawn --isolation must be one of ($ISOLATIONS | str join ', '), got '($isolation)'"}
     }
 
     # --subject is no longer refused for being prose: worker-spawn slugifies it
@@ -4190,18 +4182,11 @@ def "main spawn" [
     #     after 64 attempts
     #
     # which is git refusing 64 candidate branch names and saying so at the
-    # wrong altitude entirely.
-    #
-    # And the reason the prose went HERE is worth refusing separately: this
-    # stage takes instructions, spawn has nowhere to put instructions, and
-    # `--task` was the only field that looked like it accepted prose. Being
-    # told which verb carries instructions is the answer the caller needed;
-    # being told the branch allocator gave up is not.
+    # wrong altitude entirely. sp029 T8: whether a message is ticket-shaped or
+    # prose is no longer a registry gate on --task itself — that belongs to
+    # whoever sends the work (`send`) — but --task still names a branch, so it
+    # still has to look like one.
     if ($task | is-not-empty) {
-        let payload_kind = (stage-for $skill | get payload)
-        if $payload_kind != "ticket" {
-            error make {msg: $"spawn's --task is a TICKET ID and stage '($skill)' takes instructions, not a ticket. Spawn the worker without --task, then give it the work with `send --stage ($skill) --instructions '...'`"}
-        }
         if ($task | str length) > $MAX_SUBJECT_CHARS {
             error make {msg: $"spawn's --task is ($task | str length) characters; it names the worker's git branch, so it must be a ticket id, not a description. What the worker should DO belongs in the message"}
         }
@@ -4223,7 +4208,7 @@ def "main spawn" [
     loop {
         let uid = (if $minted { mint-uid $run $role } else { $uid })
         let outcome = (try {
-            {ok: true, value: (worker-spawn --run $run --uid $uid --role $role --subject $subject --project $project --repo $repo --task $task --session $session --skill $skill --socket $socket)}
+            {ok: true, value: (worker-spawn --run $run --uid $uid --role $role --subject $subject --project $project --repo $repo --task $task --session $session --skill $skill --isolation $isolation --socket $socket)}
         } catch {|e|
             {ok: false, error: $e}
         })
@@ -4409,7 +4394,7 @@ def "main resume" [uid: string, --run: string, --feedback: string, --socket: str
     require-flags "resume" [
         [flag, value, what];
         ["--run" $run $RUN_IS]
-        ["--feedback" $feedback "what the worker got wrong and what to do instead; it reaches its inbox as a rejection"]
+        ["--feedback" $feedback "what the worker got wrong and what to do instead; it reaches its inbox as an ordinary message"]
     ]
     worker-resume $uid --run $run --feedback $feedback --socket $socket | to json | print
 }
