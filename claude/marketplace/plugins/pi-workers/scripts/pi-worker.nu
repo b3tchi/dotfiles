@@ -4327,21 +4327,22 @@ def "main spawn" [
 # `send`/`wait` — `resolve-run` below is what lets the orchestration verbs
 # (`status`, `accept`, `resume`, ...) keep calling the still-run-shaped
 # internal functions (`bus-identity-of`, `worker-inspect`, ...) without a
-# caller ever typing one, by scanning the durable placement tree (T6's
-# `$XDG_STATE_HOME`, never the ephemeral runtime bus) for the one run that
-# recorded a given uid.
+# caller ever typing one, by resolving a uid within the CALLER's own project
+# — never a wider scan.
 #
-# Deliberately NOT scoped to "the project the caller is standing in": a
-# worker's placement record is keyed by the SLUG OF ITS OWN cwd (recorded at
-# `bus-identity` time), which for a real spawned worker matches the project
-# the orchestrator is standing in — but nothing requires the caller to BE
-# standing anywhere in particular to ask about a uid it already knows, and a
-# fixture (or a worker whose repo has since moved) may legitimately record an
-# identity under a cwd that resolves to a different slug than the caller's
-# own. Scanning every slug this user's state-root holds costs a handful of
-# directory listings and finds the uid regardless of where either side stands;
-# `$XDG_STATE_HOME` is already private to this user (adr0013), so this is a
-# lookup convenience, not a boundary the bus depends on for isolation.
+# Scoped to exactly one project slug, computed the same way `project-dir`
+# computes one: `main-worktree` of `--repo` (or the caller's cwd when it is
+# not given), so a `wk-*` worktree's caller resolves to the same slug as the
+# main worktree it belongs to. This is deliberate, not merely convenient:
+# sp029's `## solution` states "cross-project addressing stays structurally
+# impossible — one directory per project", and a uid lookup that scanned
+# every project this user's state-home holds — picking the first match when
+# two happened to collide — would turn that structural guarantee into a coin
+# flip. A caller genuinely outside any project (no derivable repo) gets
+# `resolve-project-slug`'s own documented fallback bucket, keyed off its raw
+# cwd, exactly like a hand-built test fixture recording an identity at a
+# throwaway path — the two only ever agree when both actually stand in (or
+# under) the same real project, which is what every genuine caller does.
 #
 # An unknown uid resolves to "" rather than refusing here: the downstream
 # identity check (already run/uid-shaped) reports "unknown" on ANY run value
