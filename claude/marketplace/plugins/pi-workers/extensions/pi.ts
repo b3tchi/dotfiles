@@ -24,7 +24,16 @@ import { fileURLToPath } from "node:url";
  */
 export const PROTOCOL_VERSION = 2;
 
-/** A bus message addresses work — it never carries it. */
+/**
+ * A bus message addresses work — it never carries it. This bounds the WHOLE
+ * serialized envelope written to disk, not just its content: the nushell
+ * write path (`bus-stage-message`, sp029 T3) enforces it a second time on the
+ * real byte count, separately from the content-only check the schema
+ * validator applies (content can sit at exactly 64 KiB and still be refused
+ * here once the envelope's own JSON wrapper is added on top — see
+ * dotfiles-6nvx.14). Nothing in this extension writes an envelope yet, so
+ * there is no matching enforcement on this side of the constant.
+ */
 export const MAX_ENVELOPE_BYTES = 65536;
 
 /** What the initiator reads inline; detail stays in the window and the JSONL. */
@@ -62,9 +71,14 @@ export const RESERVED_STAGES = ["rejection"] as const;
 
 /**
  * v2 (sp029 T2): `from`/`to`/`content` are what the bus itself validates now;
- * `sequence`/`run`/`uid`/`payload` are what the v1 pipeline (bus-send et al,
- * retired in T3/T4) still writes on the wire. Both sets ride on one envelope
- * during the transition, so they are typed optional here rather than one
+ * `sequence`/`run`/`uid`/`payload` are what the v1 pipeline (`legacy-inbox-send`,
+ * `bus-result`, `bus-settled`, identity — kept alive past T3 for `worker-resume`
+ * and the `main send` CLI verb, pending T7-T9) still writes on the wire. T3
+ * also gives nushell a real peer-addressed `bus-send`, which writes only
+ * `protocol`/`kind`/`id`/`from`/`to`/`created`/`content` — no `sequence`/`run`/
+ * `uid`/`payload` — but nothing here reads from the project-scoped bus yet.
+ * Both sets ride on one envelope shape below during the transition, so they
+ * are typed optional here rather than one
  * replacing the other outright — nothing in this extension reads `from`/`to`/
  * `content` yet (that lands with T7's self-addressing), so making them
  * required would be typing a promise this file does not keep.

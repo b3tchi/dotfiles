@@ -112,7 +112,7 @@ let cases = [
                 role: "impl", cwd: $nu.temp-dir, branch: "wk-t.0"
                 session: "sid-a", skill: "wk-build", window: "impl-a@dotfiles"
             }
-            let written = (bus-send "a" --run "r1" --payload {stage: "doc-plan", instructions: "go", artifacts: []})
+            let written = (legacy-inbox-send "a" --run "r1" --payload {stage: "doc-plan", instructions: "go", artifacts: []})
 
             # Parsed as UTC because of the Z, then compared with real UTC now.
             let stamped = ($written.created | into datetime)

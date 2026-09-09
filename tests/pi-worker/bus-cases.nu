@@ -51,12 +51,53 @@ def fake-sessions [tag: string, layout: record]: nothing -> string {
     $root
 }
 
+# ------------------------------------------------- send/queue helpers (sp029 T3)
+#
+# T4 (queue-rows/bus-wait rewritten) has not landed, so these are this suite's
+# own stand-in for "a reader": parse the fixed-width queue format straight off
+# disk and check which rows resolve to a real message under `messages/`. They
+# exist to prove the ON-DISK CONTRACT (row width, publish-last visibility)
+# holds independent of any reader implementation; T4 replaces them with the
+# real thing.
+def queue-raw [uid: string]: nothing -> string {
+    let path = ((project-dir) | path join "queue" $uid)
+    if ($path | path exists) { open --raw $path } else { "" }
+}
+
+# Newline-delimited, not fixed-byte-offset: a row short of the full width still
+# ends in its own `\n` in every fixture this suite constructs, so splitting on
+# the delimiter re-syncs after a malformed row instead of misreading everything
+# that follows it at a shifted byte offset.
+def parse-queue-content [raw: string]: nothing -> list<record> {
+    if ($raw | is-empty) { return [] }
+    $raw
+    | str trim --right --char "\n"
+    | split row "\n"
+    | where {|line| ($line | str length) == ($MSG_ID_CHARS + $QUEUE_SUFFIX_CHARS) }
+    | each {|line| {
+        id: ($line | str substring 0..<$MSG_ID_CHARS)
+        suffix: ($line | str substring $MSG_ID_CHARS..)
+    }}
+}
+
+def unread-rows [uid: string]: nothing -> list<record> {
+    parse-queue-content (queue-raw $uid) | where {|row| $row.suffix == "     " }
+}
+
+# What a well-behaved reader actually delivers: unread rows whose id resolves
+# to a real message. A row naming an id that never got published (a crashed
+# fan-out) is silently absent here rather than an error — "clean zero mail".
+def deliverable-mail [uid: string]: nothing -> list<record> {
+    let messages_dir = ((project-dir) | path join "messages")
+    unread-rows $uid | where {|row| ($messages_dir | path join $row.id) | path exists }
+}
+
 let cases = [
     # ------------------------------------------------------ addressed round trip
     (run-case "bus/send-then-worker-reads-its-own-inbox" {
         let root = (make-runtime "roundtrip")
         with-runtime $root {
-            bus-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "dotfiles-963w.2"}
+            legacy-inbox-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "dotfiles-963w.2"}
             let pending = (bus-inbox "impl-a" --run "run-1")
             assert-eq ($pending | length) 1 "the worker sees exactly its own message"
             assert-eq $pending.0.payload.task "dotfiles-963w.2" "payload survives the round trip"
@@ -68,7 +109,7 @@ let cases = [
     (run-case "bus/sequences-are-monotonic-per-worker" {
         let root = (make-runtime "seq")
         with-runtime $root {
-            for i in 1..4 { bus-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: $"t-($i)"} }
+            for i in 1..4 { legacy-inbox-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: $"t-($i)"} }
             let seqs = (bus-inbox "impl-a" --run "run-1" | get sequence)
             assert-eq $seqs [1 2 3 4] "sequences increase by one and arrive in order"
         }
@@ -79,7 +120,7 @@ let cases = [
     (run-case "bus/runtime-directories-are-0700" {
         let root = (make-runtime "perm-dir")
         with-runtime $root {
-            bus-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "t"}
+            legacy-inbox-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "t"}
             for dir in [(bus-root) (bus-root | path join "run-1") (bus-root | path join "run-1" "impl-a")] {
                 assert-eq (dir-mode-of $dir) "rwx------" $"($dir) must not be readable by other users"
             }
@@ -90,7 +131,7 @@ let cases = [
     (run-case "bus/envelope-files-are-0600" {
         let root = (make-runtime "perm-file")
         with-runtime $root {
-            bus-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "t"}
+            legacy-inbox-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "t"}
             put-result "run-1" "impl-a"
             let files = (glob ((bus-root) + "/run-1/impl-a/**/*.json"))
             assert-true (($files | length) >= 2) "both an inbox and an outbox envelope exist"
@@ -234,7 +275,7 @@ let cases = [
         let root = (make-runtime "race")
         with-runtime $root {
             let script = ([$root "writer.nu"] | path join)
-            $"use (worker-script $env.FILE_PWD) *\nlet n = \$env.WRITER_N\nfor i in 1..10 { bus-send \"impl-a\" --run \"run-1\" --payload {stage: \"wk-build\", task: \$\"t-\(\$n)-\(\$i)\"} }" | save -f $script
+            $"use (worker-script $env.FILE_PWD) *\nlet n = \$env.WRITER_N\nfor i in 1..10 { legacy-inbox-send \"impl-a\" --run \"run-1\" --payload {stage: \"wk-build\", task: \$\"t-\(\$n)-\(\$i)\"} }" | save -f $script
 
             let procs = ([1 2 3] | par-each {|n|
                 with-env {XDG_RUNTIME_DIR: $root, WRITER_N: ($n | into string)} {
@@ -263,7 +304,7 @@ let cases = [
         with-runtime $root {
             let huge = ("x" | fill --width 70000 --character "x")
             assert-rejects {
-                bus-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: $huge}
+                legacy-inbox-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: $huge}
             } "64 KiB" "content violating the size cap never reaches the runtime dir"
             let written = (glob ((bus-root) + "/**/*.json"))
             assert-eq $written [] "nothing was written"
@@ -309,7 +350,7 @@ let cases = [
         with-runtime $root {
             # Let the bus create its own tree — a plain mkdir here would apply
             # the umask and the case would be judging its own 0755 directory.
-            bus-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "t"}
+            legacy-inbox-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "t"}
             # /proc is root-owned and always present; standing in for a planted tree.
             assert-rejects { bus-assert-owned "/proc" } "owner" "a directory owned by another user is refused"
             bus-assert-owned (bus-root)
@@ -320,7 +361,7 @@ let cases = [
     (run-case "bus/rejects-a-loosened-runtime-directory" {
         let root = (make-runtime "loose")
         with-runtime $root {
-            bus-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "t"}
+            legacy-inbox-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "t"}
             chmod 755 (bus-root)
             assert-rejects { bus-assert-owned (bus-root) } "0700" "a group- or world-readable bus directory is refused"
         }
@@ -356,7 +397,7 @@ let cases = [
     (run-case "bus/status-reports-a-worker-without-consuming-its-mail" {
         let root = (make-runtime "status")
         with-runtime $root {
-            bus-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "t"}
+            legacy-inbox-send "impl-a" --run "run-1" --payload {stage: "wk-build", task: "t"}
             put-result "run-1" "impl-a" {status: "blocked", validation: null, summary: "needs a decision"}
 
             let s = (bus-status "impl-a" --run "run-1")
@@ -664,7 +705,7 @@ let cases = [
             }
 
             do $agrees   # created
-            bus-send "w1" --run "r1" --payload {stage: "doc-draft", instructions: "do the thing"}
+            legacy-inbox-send "w1" --run "r1" --payload {stage: "doc-draft", instructions: "do the thing"}
             do $agrees   # still created: being sent work is not reporting
 
             bus-result "w1" --run "r1" --result {
@@ -732,10 +773,10 @@ let cases = [
         let root = (make-runtime "next-run-id")
         with-runtime $root {
             assert-eq (next-run-id) "r1" "the first run of an empty bus"
-            bus-send "w" --run "r1" --payload {stage: "wk-build", task: "t"}
+            legacy-inbox-send "w" --run "r1" --payload {stage: "wk-build", task: "t"}
             assert-eq (next-run-id) "r2" "the next free one"
             # A run whose name is not `r<N>` must not confuse the counter.
-            bus-send "w" --run "custom" --payload {stage: "wk-build", task: "t"}
+            legacy-inbox-send "w" --run "custom" --payload {stage: "wk-build", task: "t"}
             assert-eq (next-run-id) "r2" "names outside the pattern are ignored, not parsed"
         }
         rm -rf $root
@@ -779,7 +820,7 @@ bus-result "w1" --run "r1" --result {status: "complete", summary: "done", window
     (run-case "bus/a-blocking-wait-gives-up-instead-of-hanging-forever" {
         let root = (make-runtime "wait-timeout")
         with-runtime $root {
-            bus-send "w1" --run "r1" --payload {stage: "wk-build", task: "t"}
+            legacy-inbox-send "w1" --run "r1" --payload {stage: "wk-build", task: "t"}
             let started = (date now)
             let got = (bus-wait --run "r1" --uid "w1" --block --timeout 2sec)
             let waited = ((date now) - $started)
@@ -794,7 +835,7 @@ bus-result "w1" --run "r1" --result {status: "complete", summary: "done", window
         # Regression guard: scripts rely on `wait` answering immediately.
         let root = (make-runtime "wait-peek")
         with-runtime $root {
-            bus-send "w1" --run "r1" --payload {stage: "wk-build", task: "t"}
+            legacy-inbox-send "w1" --run "r1" --payload {stage: "wk-build", task: "t"}
             let started = (date now)
             assert-eq (bus-wait --run "r1" --uid "w1") null "still nothing pending"
             assert-true (((date now) - $started) < 500ms) "and it did not block to say so"
@@ -815,7 +856,7 @@ bus-result "w1" --run "r1" --result {status: "complete", summary: "done", window
             }
             # A worker that has been addressed but never spawned: `send` creates
             # its directory before anything is recorded about a process.
-            bus-send "b" --run "r1" --payload {stage: "wk-build", task: "t"}
+            legacy-inbox-send "b" --run "r1" --payload {stage: "wk-build", task: "t"}
 
             let roster = (worker-roster --run "r1")
             let a = ($roster | where uid == "a" | first)
@@ -1100,6 +1141,207 @@ bus-result "impl-a" --run "run-1" --result {status: "complete", summary: "second
             mkdir $dir
             chmod 777 $dir
             assert-rejects { do { cd $repo; ensure-bus-dirs } } "not 0700" "a world-writable bus tree is refused, not silently used"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    # ----------------------------------------- peer-addressed send (sp029 T3)
+    #
+    # `bus-send` replaces the run/uid inbox model with `to`/`from`/`content`
+    # against the project bus: one message in `bus/messages/`, one 32-byte row
+    # per recipient in `bus/queue/<uid>`, publish by rename LAST. The legacy
+    # `legacy-inbox-send`/`claim-slot` path above is untouched and still backs
+    # `worker-resume` and the `main send` CLI verb pending T7-T9.
+
+    (run-case "send/fan-out-writes-one-message-and-a-row-in-each-recipients-queue" {
+        let repo = (make-repo "send-fanout")
+        let root = (make-runtime "send-fanout")
+        with-runtime $root {
+            do { cd $repo; bus-send --to ["a" "b"] --from "sender-1" --content "do the thing" }
+            let dir = (do { cd $repo; project-dir })
+
+            let messages = (ls ($dir | path join "messages") | get name)
+            assert-eq ($messages | length) 1 "exactly one message file"
+            let message_mtime = (ls $messages.0 | get 0.modified)
+
+            for uid in ["a" "b"] {
+                let qpath = ($dir | path join "queue" $uid)
+                let raw = (open --raw $qpath)
+                assert-eq ($raw | str length) $QUEUE_ROW_BYTES $"($uid)'s queue holds exactly one fixed-width row"
+                let row_mtime = (ls $qpath | get 0.modified)
+                assert-true ($message_mtime > $row_mtime) $"the message's mtime must be later than ($uid)'s row append — rows first, publish last"
+            }
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "send/interrupting-between-fanout-and-publish-leaves-no-message-and-clean-zero-mail" {
+        # The ordering fault: stage a message (rows appended, envelope written
+        # to a scratch name) and simply never publish it — standing in for a
+        # sender that dies right there. `bus-send` itself is `bus-publish-
+        # message (bus-stage-message ...)`, so calling only the first half is
+        # exactly "died before the rename," not a test-only hook.
+        let repo = (make-repo "send-fault")
+        let root = (make-runtime "send-fault")
+        with-runtime $root {
+            do { cd $repo; bus-stage-message --to ["a"] --from "sender-1" --content "never arrives" }
+
+            let dir = (do { cd $repo; project-dir })
+            assert-eq (ls ($dir | path join "messages") | length) 0 "an unpublished stage leaves no message file"
+
+            let unread = (do { cd $repo; unread-rows "a" })
+            assert-eq ($unread | length) 1 "the row was appended before the crash"
+
+            let deliverable = (do { cd $repo; deliverable-mail "a" })
+            assert-true ($deliverable | is-empty) "a reader resolving the row against messages/ sees clean zero mail, not an error"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "send/concurrent-senders-produce-well-formed-non-interleaved-rows" {
+        let repo = (make-repo "send-concurrent")
+        let root = (make-runtime "send-concurrent")
+        with-runtime $root {
+            let script = ([$root "send-writer.nu"] | path join)
+            $"use (worker-script $env.FILE_PWD) *\nlet n = \$env.WRITER_N\nfor i in 1..50 { bus-send --to [\"shared\"] --from \$\"writer-\($n)\" --content \$\"msg-\($n)-\($i)\" }" | save -f $script
+
+            let procs = ([1 2] | par-each {|n|
+                with-env {XDG_RUNTIME_DIR: $root, WRITER_N: ($n | into string)} {
+                    do { cd $repo; ^$nu.current-exe $script } | complete
+                }
+            })
+            for p in $procs { assert-eq $p.exit_code 0 $"writer failed: ($p.stderr)" }
+
+            let dir = (do { cd $repo; project-dir })
+            let raw = (open --raw ($dir | path join "queue" "shared"))
+            assert-eq ($raw | str length) (100 * $QUEUE_ROW_BYTES) "100 rows landed at exactly the fixed width — no interleaving, no truncation"
+
+            let rows = (do { cd $repo; parse-queue-content (queue-raw "shared") })
+            assert-eq ($rows | length) 100 "100 well-formed rows"
+            assert-eq ($rows | get id | uniq | length) 100 "no two messages share an id"
+
+            let messages_dir = ($dir | path join "messages")
+            for row in $rows {
+                assert-true (($messages_dir | path join $row.id) | path exists) $"row ($row.id) must resolve to a real message"
+            }
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "send/reader-skips-a-truncated-row-and-still-reads-the-following-row" {
+        let repo = (make-repo "send-truncated")
+        let root = (make-runtime "send-truncated")
+        with-runtime $root {
+            do { cd $repo; ensure-bus-dirs }
+            let dir = (do { cd $repo; project-dir })
+            let qpath = ($dir | path join "queue" "a")
+
+            # A row one byte short of the fixed width — 25 id characters
+            # instead of 26 — still newline-terminated, standing in for a
+            # write that was cut one byte short of the full id.
+            let short_id = ("Z" | fill --width 25 --character "Z")
+            $"($short_id)     \n" | save --append --raw $qpath
+
+            let sent = (do { cd $repo; bus-send --to ["a"] --from "sender-1" --content "the real one" })
+
+            let rows = (do { cd $repo; parse-queue-content (queue-raw "a") })
+            assert-eq ($rows | length) 1 "the malformed row is skipped, not counted"
+            assert-eq $rows.0.id $sent.id "the well-formed row appended after it is still read correctly"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "send/sending-to-an-unclaimed-address-succeeds" {
+        let repo = (make-repo "send-unclaimed")
+        let root = (make-runtime "send-unclaimed")
+        with-runtime $root {
+            let sent = (do { cd $repo; bus-send --to ["nobody-home"] --from "sender-1" --content "hello?" })
+            let deliverable = (do { cd $repo; deliverable-mail "nobody-home" })
+            assert-eq ($deliverable | length) 1 "sending never requires the recipient to exist"
+            assert-eq $deliverable.0.id $sent.id ""
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "send/a-recipients-queue-file-is-created-0600-on-first-append" {
+        let repo = (make-repo "send-perm")
+        let root = (make-runtime "send-perm")
+        with-runtime $root {
+            do { cd $repo; bus-send --to ["a"] --from "sender-1" --content "hi" }
+            let dir = (do { cd $repo; project-dir })
+            assert-eq (mode-of ($dir | path join "queue" "a")) "rw-------" "a recipient's first queue file must be private"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "send/a-dangling-symlink-queue-is-refused" {
+        let repo = (make-repo "send-symlink")
+        let root = (make-runtime "send-symlink")
+        with-runtime $root {
+            do { cd $repo; ensure-bus-dirs }
+            let dir = (do { cd $repo; project-dir })
+            ^ln -s "/nonexistent-target-for-pi-worker-tests" ($dir | path join "queue" "a")
+
+            assert-rejects {
+                do { cd $repo; bus-send --to ["a"] --from "sender-1" --content "hi" }
+            } "symlink" "a dangling queue symlink is refused, never silently followed or overwritten"
+            assert-eq (ls ($dir | path join "messages") | length) 0 "the refused send publishes nothing"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "send/duplicate-recipients-after-dedup-produce-exactly-one-row" {
+        let repo = (make-repo "send-dedup")
+        let root = (make-runtime "send-dedup")
+        with-runtime $root {
+            do { cd $repo; bus-send --to ["a" "a" "a"] --from "sender-1" --content "hi" }
+            let dir = (do { cd $repo; project-dir })
+            let raw = (open --raw ($dir | path join "queue" "a"))
+            assert-eq ($raw | str length) $QUEUE_ROW_BYTES "addressing one recipient three times still writes exactly one row"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "send/an-empty-to-is-refused-and-creates-nothing" {
+        let repo = (make-repo "send-empty-to")
+        let root = (make-runtime "send-empty-to")
+        with-runtime $root {
+            assert-rejects {
+                do { cd $repo; bus-send --to [] --from "sender-1" --content "hi" }
+            } "at least one address" ""
+            assert-true (not ((do { cd $repo; project-dir }) | path exists)) "a rejected send creates no directory at all"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "send/content-at-exactly-64-KiB-is-refused-once-the-envelope-wrapper-is-counted" {
+        # dotfiles-6nvx.14: `validate-envelope`'s own content-only check
+        # happily accepts content at exactly 64 KiB (schema/accepts-content-
+        # at-exactly-64-KiB in schema-cases.nu proves that, deliberately —
+        # the schema validator measures content alone). But wrapped in this
+        # envelope's own protocol/kind/id/from/to/created JSON, the TOTAL
+        # bytes are over 64 KiB, and nothing enforced that total until now.
+        # `bus-send` is the first thing that actually writes an envelope to
+        # disk, so it is where the total gets checked.
+        let repo = (make-repo "send-envelope-cap")
+        let root = (make-runtime "send-envelope-cap")
+        with-runtime $root {
+            let huge = ("x" | fill --width 65536 --character "x")
+            assert-rejects {
+                do { cd $repo; bus-send --to ["a"] --from "sender-1" --content $huge }
+            } "over the 64 KiB cap" "the write path enforces the envelope total, not just content"
+            assert-true (not ((do { cd $repo; project-dir }) | path exists)) "a refused send creates no directory at all"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "send/content-comfortably-under-the-cap-is-accepted" {
+        let repo = (make-repo "send-envelope-ok")
+        let root = (make-runtime "send-envelope-ok")
+        with-runtime $root {
+            let ok = ("x" | fill --width 65000 --character "x")
+            let sent = (do { cd $repo; bus-send --to ["a"] --from "sender-1" --content $ok })
+            assert-eq $sent.content $ok "content well clear of the wrapper overhead is written as-is"
         }
         rm -rf $root; rm -rf $repo
     })

@@ -36,9 +36,14 @@ use stage-registry.nu *
 #
 # 1 -> 2 (sp029 T2): the envelope becomes peer-addressed. `from`/`to`/`content`
 # join the schema; `sequence`/`run`/`uid`/`payload` stay on the wire for the
-# v1 pipeline (bus-send/bus-result/claim-slot, retired in T3/T4) but are no
-# longer part of what a v2 reader requires. No migration: the bus lives in
-# $XDG_RUNTIME_DIR, so the bump costs at most an in-flight project thread.
+# v1 pipeline (legacy-inbox-send/bus-result/bus-settled/identity, all still
+# `claim-slot`-based) but are no longer part of what a v2 reader requires. T3
+# gives `send` its own project/queue-addressed path (`bus-send`, `queue-append`)
+# alongside this legacy one, which `worker-resume` and the `main send` CLI verb
+# still call until T7-T9 move them onto real peer addressing; `claim-slot`
+# itself retires once T5 (bus-result/bus-settled) and T6 (identity) migrate.
+# No migration: the bus lives in $XDG_RUNTIME_DIR, so the bump costs at most an
+# in-flight project thread.
 export const PROTOCOL_VERSION = 2
 
 # Envelope cap: a bus message is an address plus a pointer, never a payload of
@@ -91,8 +96,8 @@ const WORK_PAYLOAD_ALLOWED = ["stage" "task"]
 
 # v2: addressing (`from`/`to`) and opaque `content` replace `sequence`/`run`/
 # `uid`/`payload` as what a reader is guaranteed. The legacy fields still ride
-# along on every envelope the v1 pipeline writes (bus-send, bus-result, ...,
-# retired in T3/T4) for their own bookkeeping, but a v2 validator no longer
+# along on every envelope the v1 pipeline writes (legacy-inbox-send, bus-result,
+# ..., pending T5/T6) for their own bookkeeping, but a v2 validator no longer
 # requires them.
 const ENVELOPE_REQUIRED = ["protocol" "kind" "from" "to" "created" "content"]
 
@@ -763,6 +768,14 @@ def identity-log-dir [run: string, uid: string]: nothing -> any {
 # place, so an envelope is never briefly readable by anyone else. link(2)
 # claims the slot; if another writer got there first, the next sequence is
 # tried. The scratch file is removed in both outcomes.
+#
+# sp029 T3: the peer-addressed send path (`bus-send`/`queue-append` below)
+# does not use this — a message id is minted, not claimed, and there is no
+# sequence to serialize. `claim-slot`/`next-sequence` survive only because
+# `legacy-inbox-send`, `bus-result`, `bus-settled` and `bus-identity` still
+# write run/uid-addressed, sequence-numbered envelopes pending T5 (result)
+# and T6 (identity); they retire for real once those migrate onto
+# `queue-append` (dotfiles-v1zt).
 def claim-slot [dir: string, envelope: record] {
     let scratch = ($dir | path join $".tmp.(random chars --length 10)")
 
@@ -867,17 +880,20 @@ def now-stamp []: nothing -> string {
     date now | date to-timezone UTC | format date "%Y-%m-%dT%H:%M:%S%.6fZ"
 }
 
-# sp029 T2 bridge: the v1 pipeline (bus-send/bus-result/bus-settled/identity,
-# all still `run`/`uid`-addressed pending T3/T4/T7's real peer addressing)
-# still calls this with a run and a worker uid, not a resolved peer list. It
-# derives a v2-shaped `from`/`to` from the direction the kind already implies
-# — `inbox` travels initiator-to-worker, everything else worker-to-initiator —
-# so every envelope this module writes satisfies the v2 validator without
-# every caller needing to know an address it cannot yet supply. `content`
-# mirrors `payload`: T3-T5 are what actually move a kind's data off `payload`
-# and onto `content` for good; until then both names carry the same value so
-# neither a v1 reader (`.payload...`) nor the v2 validator (`.content`) sees a
-# missing field.
+# sp029 T2 bridge: the v1 pipeline (legacy-inbox-send/bus-result/bus-settled/
+# identity, all still `run`/`uid`-addressed pending T5/T6/T7's real peer
+# addressing) still calls this with a run and a worker uid, not a resolved
+# peer list. It derives a v2-shaped `from`/`to` from the direction the kind
+# already implies — `inbox` travels initiator-to-worker, everything else
+# worker-to-initiator — so every envelope this module writes satisfies the v2
+# validator without every caller needing to know an address it cannot yet
+# supply. `content` mirrors `payload`: T3's own peer-addressed `bus-send`
+# (below) does not call this bridge at all — it builds a real `from`/`to`/
+# `content` envelope directly — so the mirroring here still only serves the
+# v1 callers. It survives past T3 on purpose: retiring it is T5's job
+# (bus-result/bus-settled move onto `content` for real), not a rename this
+# task can do safely underneath T5's still-open validate-result-payload
+# contract.
 def envelope-for [run: string, uid: string, kind: string, payload: record]: nothing -> record {
     let addressing = if $kind == "inbox" { {from: $run, to: [$uid]} } else { {from: $uid, to: [$run]} }
     {
@@ -897,7 +913,14 @@ def envelope-for [run: string, uid: string, kind: string, payload: record]: noth
 # --------------------------------------------------------------- commands
 
 # Address a message to one worker's inbox.
-export def bus-send [
+#
+# sp029 T3: this is the LEGACY, run/uid-addressed sender. `worker-resume`'s
+# rejection resend and the `main send` CLI verb still call it — both are T8/T9
+# territory (flow vocabulary, CLI surface) and out of scope here — so it keeps
+# its name and shape rather than being deleted out from under them. The real
+# T3 deliverable is `bus-send` below, addressed by `to`/`from` against the
+# project-scoped bus rather than a run.
+export def legacy-inbox-send [
     uid: string
     --run: string
     --payload: record
@@ -907,6 +930,159 @@ export def bus-send [
     validate-envelope (envelope-for $run $uid "inbox" $payload)
     ensure-worker-dirs $run $uid
     claim-slot (worker-dir $run $uid | path join "inbox") (envelope-for $run $uid "inbox" $payload)
+}
+
+# ------------------------------------------------------- peer-addressed send (sp029 T3)
+#
+# One bus, one queue per agent (## solution). A message is written once to
+# `bus/messages/<msg-id>` and fanned out to `bus/queue/<uid>` for every
+# recipient; nothing here is run-scoped or sequence-numbered, because nothing
+# needs to be — a message id (`mint-msg-id`, sp029 T2) is unique without
+# coordination, so concurrent senders never contend for anything.
+#
+# A queue row is exactly 32 bytes: the 26-character message id, a 5-byte
+# suffix zone (5 spaces until read, `-read` once marked by T4's
+# `queue-mark-read`), and a trailing newline. The width is load-bearing: T4
+# marks a row read with a same-length write at its own offset while this
+# code keeps appending to the end with `O_APPEND` — two operations that never
+# have to look at, or lock against, each other.
+export const QUEUE_SUFFIX_CHARS = 5
+export const QUEUE_ROW_BYTES = $MSG_ID_CHARS + $QUEUE_SUFFIX_CHARS + 1
+
+const QUEUE_UNREAD_SUFFIX = "     "
+
+def queue-path [uid: string]: nothing -> string {
+    project-dir | path join "queue" $uid
+}
+
+def queue-row [msg_id: string]: nothing -> string {
+    $"($msg_id)($QUEUE_UNREAD_SUFFIX)\n"
+}
+
+# Append one unread row naming `msg_id` to `uid`'s queue.
+#
+# The bus is shared; a queue is not (## solution) — every sender appends to
+# the SAME file many writers may be touching at once, so the append itself
+# has to be safe with no lock. `O_APPEND` (`save --append`) already gives that
+# for an EXISTING file. The one moment that is not automatically safe is the
+# file's own creation: two first-time senders both finding no queue file and
+# both trying to create it is exactly the race `ensure-dir` hit for
+# directories, so it is handled the same way here — write the row to a
+# private-mode scratch file first, then `ln` it into place. The winner's row
+# is what the file starts with; the loser's `ln` fails because the target now
+# exists, and it falls back to a plain append, landing its row right after
+# the winner's.
+export def queue-append [uid: string, msg_id: string]: nothing -> nothing {
+    let path = (queue-path $uid)
+    if (($path | path type) == "symlink") and not ($path | path exists) {
+        error make {msg: $"refusing to append to the queue for ($uid): ($path) is a dangling symlink"}
+    }
+
+    let row = (queue-row $msg_id)
+    if ($path | path exists) {
+        $row | save --append --raw $path
+        return
+    }
+
+    let scratch = ($path | path dirname | path join $".tmp.(random chars --length 10)")
+    $row | save -f $scratch
+    chmod 600 $scratch
+    let linked = (do { ^ln $scratch $path } | complete)
+    rm -f $scratch
+    if $linked.exit_code != 0 {
+        # Lost the create race: the file exists now (another sender made it,
+        # or it always existed and the check above raced it) — append after
+        # whatever is already there rather than losing this row.
+        $row | save --append --raw $path
+    }
+}
+
+def message-path [msg_id: string]: nothing -> string {
+    project-dir | path join "messages" $msg_id
+}
+
+# Stage a message: mint its id, append every recipient's queue row, THEN write
+# the envelope to a scratch name. The message is not yet visible to any reader
+# — nothing in `bus/messages/` carries this id until `bus-publish-message`
+# renames it into place. This split exists so a crash (or a test) can land
+# between the two: every row already names the final id, and no message
+# answers to it yet, which is exactly the state the fan-out anti-pattern in
+# `## plan` warns against publishing INTO. Rows first, message last, keeps a
+# reader that finds no message file reporting clean zero mail instead of
+# erroring on a name nothing resolves.
+#
+# Rows are appended before the envelope is written (not after, as the prose
+# in `## plan` lists them) so the message file's own mtime — set at its
+# creation, not touched again by the rename — is provably later than every
+# row it is behind. Which sub-step happens first between "write rows" and
+# "write the not-yet-visible scratch envelope" carries no safety meaning on
+# its own; only "rename last" does, and that still holds either way.
+export def bus-stage-message [
+    --to: list<string>
+    --from: string
+    --content: any
+]: nothing -> record {
+    # Validate before creating anything: a rejected message must leave no
+    # trace in the runtime directory, not even an empty project tree —
+    # `ensure-bus-dirs` runs only once the envelope is known-good.
+    let recipients = ($to | default [] | uniq)
+    let msg_id = (mint-msg-id)
+    let envelope = {
+        protocol: $PROTOCOL_VERSION
+        kind: "inbox"
+        id: $msg_id
+        from: $from
+        to: $recipients
+        created: (now-stamp)
+        content: $content
+    }
+    validate-envelope $envelope
+
+    # sp029 dotfiles-6nvx.14: `validate-envelope` (and T2's `content-bytes`
+    # check inside it) bounds CONTENT alone, deliberately — a 64 KiB content
+    # field wrapped in the envelope's own JSON is already over 64 KiB total,
+    # so that check has to ignore the wrapper to give an exact byte count for
+    # content specifically. But nothing was then bounding the bytes actually
+    # written to disk, and this is the first place anything is. So the 64 KiB
+    # cap is enforced a second time here, on the real serialized size, which
+    # is what `MAX_ENVELOPE_BYTES` and `envelope-bytes` were always for.
+    let bytes = (envelope-bytes $envelope)
+    if $bytes > $MAX_ENVELOPE_BYTES {
+        error make {msg: $"envelope is ($bytes) bytes, over the 64 KiB cap: a bus message addresses work, it does not carry it"}
+    }
+
+    ensure-bus-dirs
+    for uid in $recipients {
+        queue-append $uid $msg_id
+    }
+
+    let scratch = (project-dir | path join "messages" $".tmp.($msg_id)")
+    $envelope | to json | save -f $scratch
+    chmod 600 $scratch
+
+    {msg_id: $msg_id, scratch: $scratch, envelope: $envelope}
+}
+
+# Publish a staged message: the atomic step. `rename(2)` (`mv`, same
+# filesystem) is what makes the message appear whole or not at all to a
+# reader resolving a queue row's id against `bus/messages/`.
+export def bus-publish-message [staged: record]: nothing -> record {
+    mv $staged.scratch (message-path $staged.msg_id)
+    $staged.envelope
+}
+
+# Address a message to one or more agents' queues. `to` is deduplicated —
+# addressing the same agent twice, including the sender addressing itself, is
+# a sender mistake worth ignoring rather than a protocol violation
+# (`validate-envelope`'s own comment on `to`). Sending never requires a
+# recipient to exist: an address nobody has claimed yet is exactly as valid a
+# `to` as one that is live, since the bus keeps no registry to check against.
+export def bus-send [
+    --to: list<string>
+    --from: string
+    --content: any
+]: nothing -> record {
+    bus-publish-message (bus-stage-message --to $to --from $from --content $content)
 }
 
 # Write a worker's outcome to its outbox.
@@ -3373,7 +3549,7 @@ export def worker-resume [
         error make {msg: $"cannot resume ($run)/($uid): its window ($seen.identity.window) is ($alive.verdict), so nothing would read the feedback. Bring it back on its own session first: `respawn ($uid) --run ($run) --repo <repo>`"}
     }
 
-    bus-send $uid --run $run --payload {
+    legacy-inbox-send $uid --run $run --payload {
         stage: "rejection"
         instructions: $feedback
         artifacts: []
@@ -3867,7 +4043,7 @@ def "main send" [
     } else {
         {stage: $stage, task: $task}
     }
-    bus-send $uid --run $run --payload $payload | to json | print
+    legacy-inbox-send $uid --run $run --payload $payload | to json | print
 }
 
 # Prints nothing when there is no mail, so `if (pi-worker wait --run r |
