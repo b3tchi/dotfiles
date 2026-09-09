@@ -787,6 +787,46 @@ let cases = [
         rm -rf $root; rm -rf $repo_a; rm -rf $repo_b
     })
 
+    # sp029 T9 review round 3: `main settled` was the missed eighth path — it
+    # still called plain `resolve-run`, so an unresolved uid's empty run flowed
+    # into `bus-settled`, which calls `ensure-worker-dirs` BEFORE checking
+    # identity at all. That created a stray outbox directory under the bus
+    # root keyed by the unresolved uid, and only THEN failed — on
+    # `validate-envelope`'s "to must contain only non-empty addresses" (`to:
+    # [""]`, since `envelope-for` addresses an "error" envelope back to `run`,
+    # which was empty), naming neither the uid nor the project.
+    # `resolve-run-or-refuse` now refuses before `bus-settled` is ever called,
+    # so nothing is created. Asserts both halves: the message, and the litter.
+    (run-case "pipeline/settled-refuses-an-unknown-uid-before-any-litter-lands-on-the-bus" {
+        let repo = (make-repo "settled-unknown")
+        let root = (make-runtime "settled-unknown")
+        let cli = (worker-script $env.FILE_PWD)
+        let out = (with-env {XDG_RUNTIME_DIR: $root} {
+            do { cd $repo; ^$nu.current-exe $cli settled --as "totally-unknown-uid" | complete }
+        })
+        assert-true ($out.exit_code != 0) "settled must refuse an unresolvable uid"
+        let err = ($out.stderr | str trim)
+        # nushell's own pretty-printer hard-wraps a long `error make` message
+        # at the terminal width, which can split a long fixture path mid-token
+        # across a line break (and prefixes every continuation line with
+        # "| "). Stripping all whitespace and "|" from both sides before
+        # comparing survives that reflow without caring where it happened —
+        # wrapping only ever inserts decoration, never reorders content.
+        let err_flat = ($err | str replace --all --regex '[\s|]' "")
+        let repo_flat = ($repo | str replace --all --regex '\s' "")
+        assert-true ($err_flat | str contains "totally-unknown-uid") "the refusal names the uid"
+        assert-true ($err_flat | str contains $repo_flat) "and the project it was sought in"
+        assert-true (not ($err_flat | str contains "mustcontainonlynon-empty")) "not an envelope-internals message"
+
+        # The litter this refusal must prevent: `worker-dir "" uid` resolves
+        # to `bus-root/uid` directly (`path join ""` is a no-op), which is
+        # exactly where `ensure-worker-dirs` would have created inbox/outbox
+        # directories had `bus-settled` ever been reached.
+        let litter = ($root | path join "pi-worker" "totally-unknown-uid")
+        assert-true (not ($litter | path exists)) $"no stray directory for the unresolved uid, found: ($litter)"
+        rm -rf $root; rm -rf $repo
+    })
+
     (run-case "pipeline/worker-spawn-records-the-run-as-commissioner-so-a-real-spawned-worker-is-commissioned" {
         # The actual wiring this task adds: worker-spawn (not a hand-built
         # bus-identity fixture) records `commissioner: <run>` on every

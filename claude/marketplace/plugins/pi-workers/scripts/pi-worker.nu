@@ -4497,7 +4497,7 @@ def "main settled" [--as: string = ""] {
     if ($as_ | is-empty) {
         error make {msg: "settled needs --as: which agent settled. Omit it inside a worker window: PI_WORKER_UID is already there"}
     }
-    let run = (resolve-run $as_)
+    let run = (resolve-run-or-refuse "settled" $as_)
     bus-settled $as_ --run $run | to json | print
 }
 
