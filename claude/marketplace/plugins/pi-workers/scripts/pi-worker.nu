@@ -2135,26 +2135,111 @@ export def bus-identity-of [uid: string, --run: string]: nothing -> any {
 # Idempotent by construction rather than by a separate ledger: a `(run, uid)`
 # that already resolves a slug was either imported by a previous call or
 # written natively, and either way there is nothing left for THIS call to do.
+# The import reads v1 BYTES, so it carries its own reader rather than going
+# through `read-box`. `read-box` calls `validate-envelope`, which is the v2
+# gate: it requires `from`/`to`/`content` and refuses `protocol: 1` outright.
+# That refusal is correct and must stay — a v2 reader acting on a v1 message
+# is exactly the confusion the version field exists to prevent — but it is
+# also, literally, a refusal to read the only thing this bridge exists to
+# read. The two requirements are not in conflict once they stop sharing one
+# validator: the bus gate keeps refusing v1, and the import validates the v1
+# shape it actually expects.
+#
+# That shape is what the shipped v1 writer produced (`envelope-for` before
+# sp029 T2): `{protocol: 1, sequence, run, uid, kind, created, payload}` —
+# no `from`, no `to`, no `content`. Anything else in a legacy identity dir is
+# named and refused, never coerced: a record this build cannot account for is
+# a record an operator has to look at, and the alternative (skip it) loses a
+# placement whose worktree may still be occupied.
+const V1_PROTOCOL = 1
+const V1_IDENTITY_REQUIRED = ["protocol" "run" "uid" "kind" "created" "payload"]
+
+def validate-v1-identity-envelope [envelope: record] {
+    let fields = ($envelope | columns)
+
+    # Version FIRST, then shape: which fields are required is itself a
+    # function of the version, so "missing required field 'run'" is a
+    # misleading thing to say about a v2 record that never had one.
+    if "protocol" not-in $fields {
+        error make {msg: "v1 identity envelope is missing required field 'protocol'"}
+    }
+    if $envelope.protocol != $V1_PROTOCOL {
+        error make {msg: $"expected a v1 identity envelope \(protocol ($V1_PROTOCOL)), got protocol ($envelope.protocol): the import bridges v1 records only, and this build writes v($PROTOCOL_VERSION) natively"}
+    }
+
+    for required in $V1_IDENTITY_REQUIRED {
+        if $required not-in $fields {
+            error make {msg: $"v1 identity envelope is missing required field '($required)'"}
+        }
+    }
+
+    if $envelope.kind != "identity" {
+        error make {msg: $"expected a v1 envelope of kind 'identity', got '($envelope.kind)'"}
+    }
+
+    if not (($envelope.payload | describe) | str starts-with "record") {
+        error make {msg: $"v1 identity payload must be a record, got ($envelope.payload | describe)"}
+    }
+
+    # The same field set `bus-identity` enforces on write, so a record that
+    # passes here is one the durable writer will accept unchanged.
+    validate-identity $envelope.payload
+}
+
+# `read-box` for v1 identity logs. Fails closed for the same reason it does:
+# a named file an operator can fix beats a placement that quietly vanished.
+def read-v1-identity-box [dir: string]: nothing -> list<record> {
+    if not ($dir | path exists) { return [] }
+    let files = (
+        ls $dir
+        | get name
+        | where {|n| ($n | path basename | str ends-with ".json") }
+        | sort-by {|n| $n | path basename | str replace ".json" "" | into int }
+    )
+
+    # `for`, not `each`, for the reason spelled out over `read-box`: nushell
+    # 0.115 swallows an `error make` raised inside an `each` closure.
+    mut envelopes = []
+    for n in $files {
+        let raw = (open --raw $n)
+        let parsed = (try { $raw | from json } catch {
+            error make {msg: $"unparseable v1 identity ($n | path basename) in ($dir): the import fails closed rather than skipping a placement record"}
+        })
+        if not (($parsed | describe) | str starts-with "record") {
+            error make {msg: $"unparseable v1 identity ($n | path basename) in ($dir): expected a JSON object, got ($parsed | describe)"}
+        }
+        try { validate-v1-identity-envelope $parsed } catch {|e|
+            error make {msg: $"invalid v1 identity ($n | path basename) in ($dir): ($e.msg)"}
+        }
+        $envelopes = ($envelopes | append $parsed)
+    }
+    $envelopes
+}
+
 export def import-v1-identities []: nothing -> record {
     let root = (bus-root)
     if not ($root | path exists) {
         return {imported: [], already: []}
     }
 
-    let found = (
-        ls $root | where type == dir | get name | each {|run_dir|
-            let run = ($run_dir | path basename)
-            ls $run_dir | where type == dir | get name | each {|worker_dir|
-                let uid = ($worker_dir | path basename)
-                let records = (read-box ($worker_dir | path join "identity"))
-                if ($records | is-empty) {
-                    []
-                } else {
-                    [{run: $run, uid: $uid, payload: ($records | last | get payload)}]
-                }
-            } | flatten
-        } | flatten
-    )
+    # Nested `for` rather than nested `each`, for the reason the NOTE ON THE
+    # LOOP over `read-box` documents: an `error make` raised inside an `each`
+    # closure does not surface as itself. Here it does not vanish outright —
+    # the outer pipeline still fails — but it arrives as the bare "Eval block
+    # failed with pipeline input", losing the named file and named reason the
+    # reader went to the trouble of producing. An operator cannot fix a record
+    # the refusal will not name.
+    mut found = []
+    for run_dir in (ls $root | where type == dir | get name) {
+        let run = ($run_dir | path basename)
+        for worker_dir in (ls $run_dir | where type == dir | get name) {
+            let uid = ($worker_dir | path basename)
+            let records = (read-v1-identity-box ($worker_dir | path join "identity"))
+            if ($records | is-not-empty) {
+                $found = ($found | append {run: $run, uid: $uid, payload: ($records | last | get payload)})
+            }
+        }
+    }
 
     if ($found | is-empty) {
         return {imported: [], already: []}

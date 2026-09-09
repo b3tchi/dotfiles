@@ -1101,6 +1101,32 @@ let cases = [
         rm -rf $root; rm -rf $repo
     })
 
+    # The import carries its OWN reader (the v2 `validate-envelope` refuses
+    # protocol 1, which is the whole shape it exists to read). That reader has
+    # to be a validator and not a hole: a legacy dir holding something this
+    # build cannot account for must be named, not imported blind.
+    (run-case "worktree/v1-import-refuses-an-identity-file-that-is-not-v1" {
+        let root = (make-runtime "v1-not-v1")
+        with-runtime $root {
+            let idir = (bus-root | path join "r1" "impl-1" "identity")
+            mkdir-0700-chain [
+                (bus-root)
+                (bus-root | path join "r1")
+                (bus-root | path join "r1" "impl-1")
+                $idir
+            ]
+            # A v2-shaped envelope sitting where only v1 bytes belong.
+            {
+                protocol: 2, kind: "identity", from: "r1/impl-1", to: ["r1"]
+                created: "2026-01-01T00:00:00.000000Z", content: {}
+            } | to json | save -f ($idir | path join "1.json")
+
+            assert-rejects { import-v1-identities } "protocol 2" "the non-v1 record is named, not imported blind"
+            assert-eq (bus-identity-of "impl-1" --run "r1") null "and nothing was written for it"
+        }
+        rm -rf $root
+    })
+
     (run-case "worktree/xdg-state-home-unset-falls-back-to-local-state-under-home" {
         let repo = (make-repo "state-fallback")
         let root = (make-runtime "state-fallback")
