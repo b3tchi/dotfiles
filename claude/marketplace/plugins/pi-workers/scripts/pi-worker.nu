@@ -873,7 +873,7 @@ def read-box [dir: string]: nothing -> list<record> {
 #
 # Without `to-timezone UTC` this formatted local wall clock and labelled it Z,
 # putting every envelope out by the machine's offset. Ordering still looked
-# right on one host — bus-pending sorts on this field — and would invert the
+# right on one host — legacy-bus-pending sorts on this field — and would invert the
 # moment two hosts in different zones wrote into the same run. A timestamp that
 # lies about its zone is worse than no timestamp.
 def now-stamp []: nothing -> string {
@@ -1016,6 +1016,65 @@ def queue-has-row [uid: string, msg_id: string]: nothing -> bool {
     (open --raw $path) | str contains (queue-row $msg_id)
 }
 
+# Every row in `uid`'s queue, in file order — the read side of the fixed-width
+# format `queue-append` writes (sp029 T4).
+#
+# Newline-delimited, not fixed-byte-offset: splitting on the row's own `\n`
+# re-syncs after a malformed row (one short of the full width — a disk-full
+# mid-append, or hand-corrupted) instead of misreading every row after it at a
+# shifted absolute offset. A row that is not exactly `MSG_ID_CHARS +
+# QUEUE_SUFFIX_CHARS` characters between newlines is skipped, never
+# misparsed: `## edge_cases` names a partially-written row explicitly, and
+# silently swallowing it whole (rather than treating the survivable id+suffix
+# text after it as its own row) is not an option either — a row is atomic or
+# it does not count.
+#
+# Absent queue file is empty, not an error: a recipient nobody has sent to yet
+# is not a fault.
+export def queue-rows [uid: string]: nothing -> list<record> {
+    let path = (queue-path $uid)
+    if not ($path | path exists) { return [] }
+    let raw = (open --raw $path)
+    if ($raw | is-empty) { return [] }
+    $raw
+    | str trim --right --char "\n"
+    | split row "\n"
+    | where {|line| ($line | str length) == ($MSG_ID_CHARS + $QUEUE_SUFFIX_CHARS) }
+    | each {|line| {
+        id: ($line | str substring 0..<$MSG_ID_CHARS)
+        read: (($line | str substring $MSG_ID_CHARS..) == "-read")
+    }}
+}
+
+# Mark one row read, in place, at its own offset — the one deliberate
+# exception to create-and-rename (`## plan` / `## conventions`): a whole-file
+# rewrite would drop any row a concurrent sender appended between this
+# function's read and its write, which is exactly the anti-pattern the fixed
+# 5-byte suffix zone exists to make unnecessary.
+#
+# `str index-of` finds the row by its id (26 Crockford characters, ASCII, so
+# character offset equals byte offset); the write itself is a single `dd`
+# call with `oflag=seek_bytes` so the 5-byte suffix write is ONE `write(2)` at
+# an absolute byte position — `conv=notrunc` so the file is never truncated
+# or rewritten, `bs=5 count=1` (not `bs=1 count=5`) so it is one syscall, not
+# five separate ones a concurrent read could catch mid-write. Overwriting
+# `-read` with `-read` again is the same five bytes either way, so marking an
+# already-marked row is naturally idempotent — two processes marking the same
+# row race harmlessly.
+export def queue-mark-read [uid: string, msg_id: string]: nothing -> nothing {
+    let path = (queue-path $uid)
+    if not ($path | path exists) {
+        error make {msg: $"cannot mark ($msg_id) read: ($uid) has no queue file"}
+    }
+    let raw = (open --raw $path)
+    let offset = ($raw | str index-of $msg_id)
+    if $offset < 0 {
+        error make {msg: $"cannot mark ($msg_id) read: no row in ($uid)'s queue names that id"}
+    }
+    let suffix_offset = $offset + $MSG_ID_CHARS
+    "-read" | ^dd $"of=($path)" "bs=5" "count=1" $"seek=($suffix_offset)" "oflag=seek_bytes" "conv=notrunc" "status=none"
+}
+
 # Stage a message: mint its id, append every recipient's queue row, THEN write
 # the envelope to a scratch name. The message is not yet visible to any reader
 # — nothing in `bus/messages/` carries this id until `bus-publish-message`
@@ -1114,6 +1173,112 @@ export def bus-send [
     bus-publish-message (bus-stage-message --to $to --from $from --content $content)
 }
 
+# Every unread row in `as`'s own queue, resolved against `bus/messages/` —
+# sp029 T4's read side. No privileged reader (`## plan`'s named anti-pattern):
+# every call is scoped by the caller's own address, reads no other agent's
+# queue, and never lists `bus/messages/` itself — only specific ids a row
+# already named are ever opened, so a message no queue points at is simply
+# never looked at.
+#
+# A row naming an id that never resolves (T3's crash-before-publish ordering,
+# or a pruned message) is silently absent from the result rather than an
+# error: `## plan` calls this inert, and a reader treating it as inert is the
+# whole reason the write side is allowed to crash between fan-out and
+# publish at all.
+#
+# Non-destructive, at least once: this never marks anything itself.
+# `queue-mark-read` is a separate, explicit call, so calling `wait` twice with
+# nothing marked in between returns the same mail both times — there is no
+# ack file to make that automatic, and there does not need to be one.
+
+# Poll interval for a blocking wait. Short enough that a worker finishing
+# feels immediate, long enough that a directory listing four times a second
+# is not what the machine is doing with its life.
+const WAIT_POLL = 250ms
+
+export def bus-wait [
+    --as: string
+    --block
+    --timeout: duration = 60sec
+]: nothing -> any {
+    if ($as | is-empty) {
+        error make {msg: "wait needs --as: whose queue to read"}
+    }
+    let deadline = (date now) + $timeout
+    loop {
+        let unread = (queue-rows $as | where {|r| not $r.read })
+        mut mail = []
+        # `for`, not `each`: an `each` around a raised `error make` is silently
+        # swallowed in this nushell (see read-box's own note on the same
+        # shape), and a corrupt message file is exactly the case that must
+        # fail loudly rather than vanish.
+        for row in $unread {
+            let path = (message-path $row.id)
+            if ($path | path exists) {
+                let raw = (open --raw $path)
+                let parsed = (try { $raw | from json } catch {
+                    error make {msg: $"unparseable message ($row.id) in ($as)'s queue: the bus fails closed rather than skipping a message"}
+                })
+                $mail = ($mail | append $parsed)
+            }
+            # else: inert row, see above — not an error, just no mail for it.
+        }
+        if ($mail | is-not-empty) { return ($mail | sort-by id) }
+        if not $block { return [] }
+        if (date now) >= $deadline { return [] }
+        sleep $WAIT_POLL
+    }
+}
+
+# Delete a message once no queue holds an unread row for it.
+#
+# A message is addressed to a fixed set of recipients at send time; it can be
+# collected only once EVERY one of them has marked their own row read (or
+# never will — the row exists nowhere any more, orphaned or never sent). This
+# never inspects `to` on the envelope itself: the queues are the only
+# authoritative record of who still has not read it, because that is the
+# state a recipient actually changes.
+#
+# Rows naming a pruned message are left exactly as they are (`## plan` calls
+# them inert): deleting the message never touches a queue, so a stale row
+# some reader never got to keeps resolving to nothing, harmlessly, rather
+# than being cleaned up here too — `queue-mark-read`/a future GC owns rows,
+# `bus-prune` owns messages.
+export def bus-prune []: nothing -> record {
+    ensure-bus-dirs
+    let dir = (project-dir)
+    let queue_dir = ($dir | path join "queue")
+    let messages_dir = ($dir | path join "messages")
+
+    let queues = (if ($queue_dir | path exists) {
+        ls $queue_dir | where type == file | get name | each {|p| $p | path basename }
+    } else { [] })
+
+    mut referenced = []
+    for uid in $queues {
+        let unread_ids = (queue-rows $uid | where {|r| not $r.read } | get id)
+        $referenced = ($referenced | append $unread_ids)
+    }
+    let referenced = ($referenced | uniq)
+
+    let messages = (if ($messages_dir | path exists) {
+        ls $messages_dir
+        | where type == file
+        | get name
+        | where {|n| not ($n | path basename | str starts-with ".tmp.") }
+        | each {|n| $n | path basename }
+    } else { [] })
+
+    mut pruned = []
+    for id in $messages {
+        if $id not-in $referenced {
+            rm -f (message-path $id)
+            $pruned = ($pruned | append $id)
+        }
+    }
+    {pruned: $pruned}
+}
+
 # Write a worker's outcome to its outbox.
 export def bus-result [
     uid: string
@@ -1205,7 +1370,17 @@ export def bus-inbox [uid: string, --run: string]: nothing -> list<record> {
     read-box (worker-dir $run $uid | path join "inbox")
 }
 
-def ack-path [run: string, uid: string, sequence: int]: nothing -> string {
+# sp029 T4: this whole run/uid, ack-file-addressed result path is LEGACY.
+# `bus-status`'s `unacked` count and the `main wait`/`main ack` CLI verbs
+# still depend on it — both are out of this task's scope (bus-status's result
+# tracking moves once T5 turns a result into an ordinary queued message;
+# `main wait`/`main ack` are T9's CLI surface) — so `legacy-ack-path`,
+# `legacy-bus-pending` and `legacy-bus-ack` below keep their shape. The real
+# T4 deliverable is the project/queue-addressed `bus-wait` further down,
+# reading `queue-rows` against `bus/messages/` with no ack file at all: a row
+# is marked in place by `queue-mark-read` instead. Tracked for removal as
+# dotfiles-hp6v, once T5 and T9 land.
+def legacy-ack-path [run: string, uid: string, sequence: int]: nothing -> string {
     worker-dir $run $uid | path join "outbox" $"($sequence).ack"
 }
 
@@ -1219,9 +1394,9 @@ def ack-path [run: string, uid: string, sequence: int]: nothing -> string {
 # and there is no way to tell it from a fresh report.
 #
 # An ack cannot substitute for this. Acking is what stops redelivery, and
-# `bus-ack` releases the worker's window — the window `resume` requires alive —
+# `legacy-bus-ack` releases the worker's window — the window `resume` requires alive —
 # so "ack it, then send it back" is not an available ordering.
-export def bus-pending [run: string]: nothing -> list<record> {
+export def legacy-bus-pending [run: string]: nothing -> list<record> {
     let dir = (run-dir $run)
     if not ($dir | path exists) { return [] }
     let workers = (ls $dir | where type == dir | get name | sort)
@@ -1237,7 +1412,7 @@ export def bus-pending [run: string]: nothing -> list<record> {
         let unacked = (
             read-box ($w | path join "outbox")
             | where {|e| $e.sequence > $answered }
-            | where {|e| not (ack-path $run $uid $e.sequence | path exists) }
+            | where {|e| not (legacy-ack-path $run $uid $e.sequence | path exists) }
         )
         $pending = ($pending | append $unacked)
     }
@@ -1363,12 +1538,11 @@ export def next-run-id []: nothing -> string {
     $"r($n)"
 }
 
-# Poll interval for a blocking wait. Short enough that a worker finishing feels
-# immediate, long enough that a directory listing four times a second is not
-# what the machine is doing with its life.
-const WAIT_POLL = 250ms
-
-export def bus-wait [
+# sp029 T4: LEGACY — run/uid-addressed, reads the outbox via legacy-bus-
+# pending. `main wait` still calls this (T9's CLI surface migrates it); the
+# T4 deliverable is the project/queue-addressed `bus-wait` further down.
+# Tracked for removal as dotfiles-hp6v.
+export def legacy-bus-wait [
     --run: string
     --uid: string = ""
     --json
@@ -1417,7 +1591,7 @@ export def bus-wait [
         # envelope would otherwise hand its answer to whoever asked next
         # (dotfiles-idzp's stale-state shape, in the mailbox rather than the
         # window list).
-        let all = (bus-pending $run)
+        let all = (legacy-bus-pending $run)
         let scoped = (if ($uid | is-empty) { $all } else { $all | where uid == $uid })
         let pending = (if $after > 0 { $scoped | where sequence > $after } else { $scoped })
         if ($pending | is-not-empty) {
@@ -1453,7 +1627,11 @@ export def bus-wait [
 # The receipt is written FIRST and the release is best effort. An unreachable
 # tmux must not cost the initiator its ack, or `wait` hands it the same
 # envelope forever — so the outcome is reported rather than thrown.
-export def bus-ack [
+#
+# sp029 T4: LEGACY, same reason as `legacy-bus-wait` above — `main ack` still
+# calls this. The new model has no ack file at all: a row is marked read in
+# place by `queue-mark-read`. Tracked for removal as dotfiles-hp6v.
+export def legacy-bus-ack [
     --run: string
     --uid: string
     --sequence: int
@@ -1463,7 +1641,7 @@ export def bus-ack [
     if not ($envelope | path exists) {
         error make {msg: $"cannot acknowledge ($run)/($uid) sequence ($sequence): no such result envelope"}
     }
-    let marker = (ack-path $run $uid $sequence)
+    let marker = (legacy-ack-path $run $uid $sequence)
     let scratch = ($marker + $".tmp.(random chars --length 10)")
     (now-stamp) | save -f $scratch
     chmod 600 $scratch
@@ -1573,7 +1751,7 @@ export def bus-status [uid: string, --run: string]: nothing -> record {
     let markers = (state-markers $run $uid)
     let state = (derive-state $results $markers)
     # `unacked` counts what DELIVERY would hand over, which is why it reads the
-    # `reopened` marker the way bus-pending does (dotfiles-ycvl). It is the
+    # `reopened` marker the way legacy-bus-pending does (dotfiles-ycvl). It is the
     # field an orchestrator skims to decide whether to call `wait` at all, so
     # counting a result that was already sent back sends it looking for mail
     # that is not there. `results` stays the raw count: that one is history.
@@ -1581,7 +1759,7 @@ export def bus-status [uid: string, --run: string]: nothing -> record {
     let unacked = (
         $results
         | where {|e| $e.sequence > $answered }
-        | where {|e| not (ack-path $run $uid $e.sequence | path exists) }
+        | where {|e| not (legacy-ack-path $run $uid $e.sequence | path exists) }
     )
     {
         run: $run
@@ -4087,7 +4265,7 @@ def "main send" [
 # `--timeout 30sec`.
 def "main wait" [--run: string, --uid: string = "", --after: int = 0, --block, --timeout: int = 60] {
     require-flags "wait" [[flag, value, what]; ["--run" $run $RUN_IS]]
-    let next = (bus-wait --run $run --uid $uid --after $after --block=$block --timeout ($timeout * 1sec))
+    let next = (legacy-bus-wait --run $run --uid $uid --after $after --block=$block --timeout ($timeout * 1sec))
     if $next != null {
         print ($next | to json)
     } else if $block {
@@ -4110,7 +4288,7 @@ def "main ack" [--run: string, --uid: string, --sequence: int, --socket: string 
         ["--uid" $uid $UID_IS]
         ["--sequence" $sequence "the sequence number of the result being acknowledged, as `wait` reported it"]
     ]
-    bus-ack --run $run --uid $uid --sequence $sequence --socket $socket | to json | print
+    legacy-bus-ack --run $run --uid $uid --sequence $sequence --socket $socket | to json | print
 }
 
 # The worker's own side of the bus (dotfiles-87bt).

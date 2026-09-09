@@ -479,7 +479,7 @@ let cases = [
 
             let identity = (bus-identity-of "impl-a" --run "run-1")
             assert-eq $identity.session "sid-9" "the session id survives"
-            let result = (bus-wait --run "run-1")
+            let result = (legacy-bus-wait --run "run-1")
             assert-eq $result.payload.resume "pi --session sid-9" "the exact resume command survives"
         }
         rm -rf $root; rm -rf $repo

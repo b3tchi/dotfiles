@@ -105,7 +105,7 @@ let cases = [
                     assert-true ($w.window in (windows-on $t.socket)) "the window remains inspectable after completion"
 
                     # 5. Acceptance is the only thing that cleans up.
-                    bus-ack --run "acceptance" --uid "rev-sp028" --sequence $envelope.sequence
+                    legacy-bus-ack --run "acceptance" --uid "rev-sp028" --sequence $envelope.sequence
                     assert-true ($w.window in (windows-on $t.socket)) "ack alone does not close it"
 
                     worker-accept "rev-sp028" --run "acceptance" --repo $repo --socket $t.socket

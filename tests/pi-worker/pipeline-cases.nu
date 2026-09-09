@@ -65,11 +65,11 @@ let cases = [
             complete-with "impl-a" "implemented"
 
             # The initiator reads a compact envelope, not a transcript.
-            let done = (bus-wait --run "run-1")
+            let done = (legacy-bus-wait --run "run-1")
             assert-eq $done.payload.status "complete" ""
             assert-eq $done.payload.resume "pi --session sid-impl-a" "and can resume the named worker"
             assert-true ((envelope-bytes $done) < 2048) "the completion stays compact"
-            bus-ack --run "run-1" --uid "impl-a" --sequence $done.sequence
+            legacy-bus-ack --run "run-1" --uid "impl-a" --sequence $done.sequence
 
             # Acknowledged is not accepted: the window is still inspectable.
             assert-eq (bus-status "impl-a" --run "run-1" | get state) "complete" ""
@@ -97,8 +97,8 @@ let cases = [
         with-pipeline "evidence" {|t, repo|
             launch $t $repo "impl-a" "impl"
             complete-with "impl-a" "implemented"
-            let done = (bus-wait --run "run-1")
-            bus-ack --run "run-1" --uid "impl-a" --sequence $done.sequence
+            let done = (legacy-bus-wait --run "run-1")
+            legacy-bus-ack --run "run-1" --uid "impl-a" --sequence $done.sequence
             worker-accept "impl-a" --run "run-1" --repo $repo --socket $t.socket
 
             let seen = (worker-inspect "impl-a" --run "run-1" --sessions-dir $empty_sessions)
@@ -202,8 +202,8 @@ let cases = [
         with-pipeline "reject" {|t, repo|
             let impl = (launch $t $repo "impl-a" "impl")
             complete-with "impl-a" "first attempt"
-            let done = (bus-wait --run "run-1")
-            bus-ack --run "run-1" --uid "impl-a" --sequence $done.sequence
+            let done = (legacy-bus-wait --run "run-1")
+            legacy-bus-ack --run "run-1" --uid "impl-a" --sequence $done.sequence
 
             let resumed = (worker-resume "impl-a" --run "run-1" --feedback "criterion 2 is unmet" --socket $t.socket)
 
@@ -244,11 +244,11 @@ let cases = [
             complete-with "impl-a" "first attempt"
             worker-resume "impl-a" --run "run-1" --feedback "criterion 2 is unmet" --socket $t.socket
 
-            assert-eq (bus-wait --run "run-1") null "the superseded result is not pending"
-            assert-eq (bus-wait --run "run-1" --uid "impl-a") null "nor when the worker is asked about directly"
+            assert-eq (legacy-bus-wait --run "run-1") null "the superseded result is not pending"
+            assert-eq (legacy-bus-wait --run "run-1" --uid "impl-a") null "nor when the worker is asked about directly"
 
             complete-with "impl-a" "second attempt"
-            let fresh = (bus-wait --run "run-1")
+            let fresh = (legacy-bus-wait --run "run-1")
             assert-eq $fresh.payload.summary "second attempt" "what arrives is the round the worker just reported"
             assert-eq $fresh.sequence 2 ""
         }
@@ -288,7 +288,7 @@ let cases = [
             worker-resume "impl-a" --run "run-1" --feedback "not yet" --socket $t.socket
             complete-with "impl-b" "sibling done"
 
-            let got = (bus-wait --run "run-1")
+            let got = (legacy-bus-wait --run "run-1")
             assert-eq $got.uid "impl-b" "the run-wide wait skips the superseded envelope, not the run"
             assert-eq $got.payload.summary "sibling done" ""
         }
@@ -319,11 +319,11 @@ let cases = [
             complete-with "impl-a" "impl done"
             complete-with "rev-a" "review done"
 
-            let pending = (bus-pending "run-1")
+            let pending = (legacy-bus-pending "run-1")
             assert-eq ($pending | length) 2 "neither completion masks the other"
-            let first = (bus-wait --run "run-1")
-            bus-ack --run "run-1" --uid $first.uid --sequence $first.sequence
-            let second = (bus-wait --run "run-1")
+            let first = (legacy-bus-wait --run "run-1")
+            legacy-bus-ack --run "run-1" --uid $first.uid --sequence $first.sequence
+            let second = (legacy-bus-wait --run "run-1")
             assert-true ($second.uid != $first.uid) ""
         }
     })
@@ -360,8 +360,8 @@ let cases = [
             let theirs = (worker-spawn --run "run-2" --uid "impl-b" --role "impl" --subject "t2" --project "dotfiles" --repo $repo --task "t2" --session "sid-impl-b" --skill "wk-build" --socket $t.socket)
             complete-with "impl-a" "mine done"
 
-            let done = (bus-wait --run "run-1")
-            bus-ack --run "run-1" --uid "impl-a" --sequence $done.sequence
+            let done = (legacy-bus-wait --run "run-1")
+            legacy-bus-ack --run "run-1" --uid "impl-a" --sequence $done.sequence
             worker-accept "impl-a" --run "run-1" --repo $repo --socket $t.socket
 
             assert-true ($theirs.window in (windows-on $t.socket)) "the other run's window is untouched"

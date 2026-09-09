@@ -51,45 +51,19 @@ def fake-sessions [tag: string, layout: record]: nothing -> string {
     $root
 }
 
-# ------------------------------------------------- send/queue helpers (sp029 T3)
+# ------------------------------------------------- send/queue helpers (sp028 T3/T4)
 #
-# T4 (queue-rows/bus-wait rewritten) has not landed, so these are this suite's
-# own stand-in for "a reader": parse the fixed-width queue format straight off
-# disk and check which rows resolve to a real message under `messages/`. They
-# exist to prove the ON-DISK CONTRACT (row width, publish-last visibility)
-# holds independent of any reader implementation; T4 replaces them with the
-# real thing.
-def queue-raw [uid: string]: nothing -> string {
-    let path = ((project-dir) | path join "queue" $uid)
-    if ($path | path exists) { open --raw $path } else { "" }
-}
-
-# Newline-delimited, not fixed-byte-offset: a row short of the full width still
-# ends in its own `\n` in every fixture this suite constructs, so splitting on
-# the delimiter re-syncs after a malformed row instead of misreading everything
-# that follows it at a shifted byte offset.
-def parse-queue-content [raw: string]: nothing -> list<record> {
-    if ($raw | is-empty) { return [] }
-    $raw
-    | str trim --right --char "\n"
-    | split row "\n"
-    | where {|line| ($line | str length) == ($MSG_ID_CHARS + $QUEUE_SUFFIX_CHARS) }
-    | each {|line| {
-        id: ($line | str substring 0..<$MSG_ID_CHARS)
-        suffix: ($line | str substring $MSG_ID_CHARS..)
-    }}
-}
-
+# T3 landed with test-local stand-ins for "a reader" here, since T4's
+# queue-rows/bus-wait did not exist yet. T4 (this task) is the real thing, so
+# the stand-ins are gone: `unread-rows` and `deliverable-mail` below are now
+# thin wrappers over the production `queue-rows`/`bus-wait`, kept only
+# because a handful of T3's own cases read more clearly through them.
 def unread-rows [uid: string]: nothing -> list<record> {
-    parse-queue-content (queue-raw $uid) | where {|row| $row.suffix == "     " }
+    queue-rows $uid | where {|row| not $row.read }
 }
 
-# What a well-behaved reader actually delivers: unread rows whose id resolves
-# to a real message. A row naming an id that never got published (a crashed
-# fan-out) is silently absent here rather than an error — "clean zero mail".
 def deliverable-mail [uid: string]: nothing -> list<record> {
-    let messages_dir = ((project-dir) | path join "messages")
-    unread-rows $uid | where {|row| ($messages_dir | path join $row.id) | path exists }
+    bus-wait --as $uid
 }
 
 let cases = [
@@ -155,7 +129,7 @@ let cases = [
             let dir = ((bus-root) | path join "run-1" "impl-a" "outbox")
             "{\"protocol\":1,\"seq" | save -f ($dir | path join "2.json.tmp.crash")
 
-            let pending = (bus-pending "run-1")
+            let pending = (legacy-bus-pending "run-1")
             assert-eq ($pending | length) 1 "the interrupted write is not delivered"
             assert-eq $pending.0.sequence 1 "only the completed envelope is visible"
         }
@@ -173,12 +147,19 @@ let cases = [
     })
 
     # ------------------------------------------------- at-least-once delivery
+    #
+    # sp029 T4: this whole section exercises the LEGACY run/uid, ack-file
+    # result path (legacy-bus-wait/legacy-bus-pending/legacy-bus-ack), which
+    # bus-status and the main wait/main ack CLI verbs still depend on
+    # (dotfiles-hp6v tracks its retirement). The new project/queue-addressed
+    # `bus-wait` has its own "wait/*" section further down, with its own
+    # at-least-once story: no ack file, a row is marked in place instead.
     (run-case "bus/wait-redelivers-until-ack" {
         let root = (make-runtime "redeliver")
         with-runtime $root {
             put-result "run-1" "impl-a"
-            let first = (bus-wait --run "run-1")
-            let second = (bus-wait --run "run-1")
+            let first = (legacy-bus-wait --run "run-1")
+            let second = (legacy-bus-wait --run "run-1")
             assert-eq $first.sequence $second.sequence "wait is non-destructive until acknowledged"
             assert-eq $first.payload.status "complete" ""
         }
@@ -189,9 +170,9 @@ let cases = [
         let root = (make-runtime "ack")
         with-runtime $root {
             put-result "run-1" "impl-a"
-            let got = (bus-wait --run "run-1")
-            bus-ack --run "run-1" --uid "impl-a" --sequence $got.sequence
-            assert-true ((bus-wait --run "run-1") | is-empty) "an acknowledged result is not redelivered"
+            let got = (legacy-bus-wait --run "run-1")
+            legacy-bus-ack --run "run-1" --uid "impl-a" --sequence $got.sequence
+            assert-true ((legacy-bus-wait --run "run-1") | is-empty) "an acknowledged result is not redelivered"
         }
         rm -rf $root
     })
@@ -203,16 +184,16 @@ let cases = [
         let root = (make-runtime "restart")
         with-runtime $root {
             put-result "run-1" "impl-a"
-            let before = (bus-wait --run "run-1")
+            let before = (legacy-bus-wait --run "run-1")
             # A brand-new nushell process stands in for the restarted initiator.
             let script = ([$root "restart-probe.nu"] | path join)
-            $"use (worker-script $env.FILE_PWD) *\nbus-wait --run \"run-1\" | to json" | save -f $script
+            $"use (worker-script $env.FILE_PWD) *\nlegacy-bus-wait --run \"run-1\" | to json" | save -f $script
             let out = (with-env {XDG_RUNTIME_DIR: $root} { ^$nu.current-exe $script } | complete)
             assert-eq $out.exit_code 0 $"restart probe failed: ($out.stderr)"
             let after = ($out.stdout | from json)
             assert-eq $after.sequence $before.sequence "a restarted initiator sees the unacknowledged result"
 
-            bus-ack --run "run-1" --uid "impl-a" --sequence $before.sequence
+            legacy-bus-ack --run "run-1" --uid "impl-a" --sequence $before.sequence
             let out2 = (with-env {XDG_RUNTIME_DIR: $root} { ^$nu.current-exe $script } | complete)
             assert-eq ($out2.stdout | from json) null "and stops seeing it once acknowledged"
         }
@@ -225,8 +206,8 @@ let cases = [
         let root = (make-runtime "ack-meaning")
         with-runtime $root {
             put-result "run-1" "impl-a"
-            let got = (bus-wait --run "run-1")
-            bus-ack --run "run-1" --uid "impl-a" --sequence $got.sequence
+            let got = (legacy-bus-wait --run "run-1")
+            legacy-bus-ack --run "run-1" --uid "impl-a" --sequence $got.sequence
             assert-eq (bus-status "impl-a" --run "run-1" | get state) "complete" "ack leaves the worker complete, not accepted"
         }
         rm -rf $root
@@ -239,16 +220,16 @@ let cases = [
             put-result "run-1" "impl-a" {summary: "from run one"}
             put-result "run-2" "impl-b" {summary: "from run two"}
 
-            let one = (bus-wait --run "run-1")
-            let two = (bus-wait --run "run-2")
+            let one = (legacy-bus-wait --run "run-1")
+            let two = (legacy-bus-wait --run "run-2")
             assert-eq $one.payload.summary "from run one" ""
             assert-eq $two.payload.summary "from run two" ""
             assert-eq $one.uid "impl-a" ""
             assert-eq $two.uid "impl-b" ""
 
             # Acknowledging one run must not silence the other.
-            bus-ack --run "run-1" --uid "impl-a" --sequence $one.sequence
-            assert-true ((bus-wait --run "run-2") | is-not-empty) "run-2's mail is untouched"
+            legacy-bus-ack --run "run-1" --uid "impl-a" --sequence $one.sequence
+            assert-true ((legacy-bus-wait --run "run-2") | is-not-empty) "run-2's mail is untouched"
         }
         rm -rf $root
     })
@@ -260,13 +241,13 @@ let cases = [
         with-runtime $root {
             put-result "run-1" "impl-a" {summary: "a done"}
             put-result "run-1" "rev-a" {summary: "b done"}
-            let pending = (bus-pending "run-1")
+            let pending = (legacy-bus-pending "run-1")
             assert-eq ($pending | length) 2 "both completions are pending"
             assert-eq ($pending | get uid | sort) ["impl-a" "rev-a"] ""
 
-            let first = (bus-wait --run "run-1")
-            bus-ack --run "run-1" --uid $first.uid --sequence $first.sequence
-            let second = (bus-wait --run "run-1")
+            let first = (legacy-bus-wait --run "run-1")
+            legacy-bus-ack --run "run-1" --uid $first.uid --sequence $first.sequence
+            let second = (legacy-bus-wait --run "run-1")
             assert-true ($second.uid != $first.uid) "the second worker's result is still delivered"
         }
         rm -rf $root
@@ -335,7 +316,7 @@ let cases = [
             let dir = ((bus-root) | path join "run-1" "impl-a" "outbox")
             "not json at all" | save -f ($dir | path join "2.json")
 
-            assert-rejects { bus-pending "run-1" } "2.json" "the reader names the file it could not parse"
+            assert-rejects { legacy-bus-pending "run-1" } "2.json" "the reader names the file it could not parse"
             assert-true ((ls ($dir | path join "1.json")) | is-not-empty) "the good envelope is left intact"
         }
         rm -rf $root
@@ -352,7 +333,7 @@ let cases = [
             }
             | to json | save -f ($dir | path join "2.json")
 
-            assert-rejects { bus-pending "run-1" } "protocol" "an unknown protocol version fails closed on read"
+            assert-rejects { legacy-bus-pending "run-1" } "protocol" "an unknown protocol version fails closed on read"
         }
         rm -rf $root
     })
@@ -387,7 +368,7 @@ let cases = [
         # must not create the tree as a side effect of asking.
         let root = (make-runtime "absent")
         with-runtime $root {
-            assert-true ((bus-wait --run "run-1") | is-empty) "no mail before anything is sent"
+            assert-true ((legacy-bus-wait --run "run-1") | is-empty) "no mail before anything is sent"
             assert-true (not ((bus-root) | path join "run-1" | path exists)) "asking does not create the run"
         }
         rm -rf $root
@@ -398,7 +379,7 @@ let cases = [
         let root = (make-runtime "bounded")
         with-runtime $root {
             put-result "run-1" "impl-a"
-            let got = (bus-wait --run "run-1")
+            let got = (legacy-bus-wait --run "run-1")
             for field in ["status" "validation" "window" "session" "resume"] {
                 assert-true ($field in ($got.payload | columns)) $"the completion envelope must carry ($field)"
             }
@@ -419,7 +400,7 @@ let cases = [
             assert-eq $s.uid "impl-a" ""
             assert-eq $s.run "run-1" ""
             assert-eq $s.unacked 1 "an unacknowledged result is visible in status"
-            assert-true ((bus-wait --run "run-1") | is-not-empty) "status did not consume the result"
+            assert-true ((legacy-bus-wait --run "run-1") | is-not-empty) "status did not consume the result"
         }
         rm -rf $root
     })
@@ -820,7 +801,7 @@ bus-result "w1" --run "r1" --result {status: "complete", summary: "done", window
             job spawn { ^nu $script | ignore }
 
             let started = (date now)
-            let got = (bus-wait --run "r1" --uid "w1" --block --timeout 10sec)
+            let got = (legacy-bus-wait --run "r1" --uid "w1" --block --timeout 10sec)
             let waited = ((date now) - $started)
 
             assert-true ($got != null) "it came back with the result, not with nothing"
@@ -836,7 +817,7 @@ bus-result "w1" --run "r1" --result {status: "complete", summary: "done", window
         with-runtime $root {
             legacy-inbox-send "w1" --run "r1" --payload {stage: "wk-build", task: "t"}
             let started = (date now)
-            let got = (bus-wait --run "r1" --uid "w1" --block --timeout 2sec)
+            let got = (legacy-bus-wait --run "r1" --uid "w1" --block --timeout 2sec)
             let waited = ((date now) - $started)
             assert-eq $got null "nothing to report is not an error"
             assert-true ($waited >= 2sec) "it honoured the timeout"
@@ -851,7 +832,7 @@ bus-result "w1" --run "r1" --result {status: "complete", summary: "done", window
         with-runtime $root {
             legacy-inbox-send "w1" --run "r1" --payload {stage: "wk-build", task: "t"}
             let started = (date now)
-            assert-eq (bus-wait --run "r1" --uid "w1") null "still nothing pending"
+            assert-eq (legacy-bus-wait --run "r1" --uid "w1") null "still nothing pending"
             assert-true (((date now) - $started) < 500ms) "and it did not block to say so"
         }
         rm -rf $root
@@ -913,10 +894,10 @@ bus-result "w1" --run "r1" --result {status: "complete", summary: "done", window
             }
 
             # Unscoped keeps its meaning: oldest first, across the run.
-            assert-eq (bus-wait --run "r1" | get uid) "old" "the run-wide wait is unchanged"
+            assert-eq (legacy-bus-wait --run "r1" | get uid) "old" "the run-wide wait is unchanged"
             # Scoped answers about the worker asked about.
-            assert-eq (bus-wait --run "r1" --uid "new" | get payload.summary) "fresh" "scoped to the worker"
-            assert-eq (bus-wait --run "r1" --uid "old" | get payload.summary) "stale" ""
+            assert-eq (legacy-bus-wait --run "r1" --uid "new" | get payload.summary) "fresh" "scoped to the worker"
+            assert-eq (legacy-bus-wait --run "r1" --uid "old" | get payload.summary) "stale" ""
         }
         rm -rf $root
     })
@@ -932,14 +913,14 @@ bus-result "w1" --run "r1" --result {status: "complete", summary: "done", window
         with-runtime $root {
             put-result "run-1" "impl-a" {summary: "first round"}
 
-            assert-eq (bus-wait --run "run-1" --uid "impl-a" --after 1) null "nothing newer than what the caller has seen"
-            assert-eq (bus-wait --run "run-1" --uid "impl-a" | get sequence) 1 "and the earlier envelope is still pending for anyone asking plainly"
+            assert-eq (legacy-bus-wait --run "run-1" --uid "impl-a" --after 1) null "nothing newer than what the caller has seen"
+            assert-eq (legacy-bus-wait --run "run-1" --uid "impl-a" | get sequence) 1 "and the earlier envelope is still pending for anyone asking plainly"
 
             put-result "run-1" "impl-a" {summary: "second round"}
-            let newer = (bus-wait --run "run-1" --uid "impl-a" --after 1)
+            let newer = (legacy-bus-wait --run "run-1" --uid "impl-a" --after 1)
             assert-eq $newer.sequence 2 "the round the caller had not seen"
             assert-eq $newer.payload.summary "second round" ""
-            assert-eq (bus-wait --run "run-1" --uid "impl-a" | get sequence) 1 "the plain wait is unchanged: oldest unacked first"
+            assert-eq (legacy-bus-wait --run "run-1" --uid "impl-a" | get sequence) 1 "the plain wait is unchanged: oldest unacked first"
         }
         rm -rf $root
     })
@@ -951,8 +932,8 @@ bus-result "w1" --run "r1" --result {status: "complete", summary: "done", window
         let root = (make-runtime "wait-after-zero")
         with-runtime $root {
             put-result "run-1" "impl-a"
-            assert-eq (bus-wait --run "run-1" --uid "impl-a" --after 0 | get sequence) 1 ""
-            assert-eq (bus-wait --run "run-1" --uid "impl-a" | get sequence) 1 ""
+            assert-eq (legacy-bus-wait --run "run-1" --uid "impl-a" --after 0 | get sequence) 1 ""
+            assert-eq (legacy-bus-wait --run "run-1" --uid "impl-a" | get sequence) 1 ""
         }
         rm -rf $root
     })
@@ -966,7 +947,7 @@ bus-result "w1" --run "r1" --result {status: "complete", summary: "done", window
         with-runtime $root {
             put-result "run-1" "impl-a"
             assert-rejects {
-                bus-wait --run "run-1" --after 1
+                legacy-bus-wait --run "run-1" --after 1
             } "per worker" "an unscoped --after has no single meaning"
         }
         rm -rf $root
@@ -987,7 +968,7 @@ bus-result "impl-a" --run "run-1" --result {status: "complete", summary: "second
             job spawn { ^nu $script | ignore }
 
             let started = (date now)
-            let got = (bus-wait --run "run-1" --uid "impl-a" --after 1 --block --timeout 10sec)
+            let got = (legacy-bus-wait --run "run-1" --uid "impl-a" --after 1 --block --timeout 10sec)
             let waited = ((date now) - $started)
 
             assert-true ($got != null) "the blocking wait came back with the new round"
@@ -1005,7 +986,7 @@ bus-result "impl-a" --run "run-1" --result {status: "complete", summary: "second
                 role: "impl", cwd: $nu.temp-dir, branch: "wk-t.0"
                 session: "sid-a", skill: "wk-build", window: "impl-a@dotfiles"
             }
-            assert-eq (bus-wait --run "r1" --uid "a") null "silence, not someone else's mail"
+            assert-eq (legacy-bus-wait --run "r1" --uid "a") null "silence, not someone else's mail"
         }
         rm -rf $root
     })
@@ -1274,7 +1255,7 @@ bus-result "impl-a" --run "run-1" --result {status: "complete", summary: "second
             let raw = (open --raw ($dir | path join "queue" "shared"))
             assert-eq ($raw | str length) (100 * $QUEUE_ROW_BYTES) "100 rows landed at exactly the fixed width — no interleaving, no truncation"
 
-            let rows = (do { cd $repo; parse-queue-content (queue-raw "shared") })
+            let rows = (do { cd $repo; queue-rows "shared" })
             assert-eq ($rows | length) 100 "100 well-formed rows"
             assert-eq ($rows | get id | uniq | length) 100 "no two messages share an id"
 
@@ -1302,7 +1283,7 @@ bus-result "impl-a" --run "run-1" --result {status: "complete", summary: "second
 
             let sent = (do { cd $repo; bus-send --to ["a"] --from "sender-1" --content "the real one" })
 
-            let rows = (do { cd $repo; parse-queue-content (queue-raw "a") })
+            let rows = (do { cd $repo; queue-rows "a" })
             assert-eq ($rows | length) 1 "the malformed row is skipped, not counted"
             assert-eq $rows.0.id $sent.id "the well-formed row appended after it is still read correctly"
         }
@@ -1400,6 +1381,240 @@ bus-result "impl-a" --run "run-1" --result {status: "complete", summary: "second
             let ok = ("x" | fill --width 65000 --character "x")
             let sent = (do { cd $repo; bus-send --to ["a"] --from "sender-1" --content $ok })
             assert-eq $sent.content $ok "content well clear of the wrapper overhead is written as-is"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    # -------------------------------------------- read side, in-place marking, pruning (sp029 T4)
+
+    (run-case "wait/reads-only-its-own-queue-and-never-scans-messages" {
+        let repo = (make-repo "wait-scoped")
+        let root = (make-runtime "wait-scoped")
+        with-runtime $root {
+            let for_a = (do { cd $repo; bus-send --to ["a"] --from "s" --content "for a" })
+            let for_b = (do { cd $repo; bus-send --to ["b"] --from "s" --content "for b" })
+
+            let mail_a = (do { cd $repo; bus-wait --as "a" })
+            assert-eq ($mail_a | length) 1 "a sees only its own mail"
+            assert-eq $mail_a.0.id $for_a.id ""
+
+            # A message that exists on disk but that no row in a's queue
+            # names — proving delivery is driven by a's queue, not a scan of
+            # messages/.
+            let dir = (do { cd $repo; project-dir })
+            assert-true (($dir | path join "messages" $for_b.id) | path exists) "sanity: b's message really is on disk"
+            assert-true ($mail_a | where id == $for_b.id | is-empty) "a never sees a message it has no row for, even though it exists on disk"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "wait/an-absent-queue-file-is-zero-mail-not-an-error" {
+        let repo = (make-repo "wait-absent")
+        let root = (make-runtime "wait-absent")
+        with-runtime $root {
+            do { cd $repo; ensure-bus-dirs }
+            let mail = (do { cd $repo; bus-wait --as "never-sent-to" })
+            assert-true ($mail | is-empty) ""
+            let rows = (do { cd $repo; queue-rows "never-sent-to" })
+            assert-true ($rows | is-empty) ""
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "wait/a-queue-with-only-marked-rows-is-zero-mail-not-an-error" {
+        let repo = (make-repo "wait-all-marked")
+        let root = (make-runtime "wait-all-marked")
+        with-runtime $root {
+            let sent = (do { cd $repo; bus-send --to ["a"] --from "s" --content "hi" })
+            do { cd $repo; queue-mark-read "a" $sent.id }
+            let mail = (do { cd $repo; bus-wait --as "a" })
+            assert-true ($mail | is-empty) "every row already marked is zero mail, not an error"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "wait/a-row-naming-a-pruned-or-otherwise-missing-message-is-inert-not-an-error" {
+        let repo = (make-repo "wait-inert")
+        let root = (make-runtime "wait-inert")
+        with-runtime $root {
+            let sent = (do { cd $repo; bus-send --to ["a"] --from "s" --content "vanishing" })
+            let dir = (do { cd $repo; project-dir })
+            rm -f ($dir | path join "messages" $sent.id)
+
+            let mail = (do { cd $repo; bus-wait --as "a" })
+            assert-true ($mail | is-empty) "a row naming a message that is no longer there resolves to nothing, not an error"
+            let rows = (do { cd $repo; queue-rows "a" })
+            assert-eq ($rows | length) 1 "the inert row itself is untouched"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "wait/block-returns-within-the-timeout-and-prints-nothing-when-empty" {
+        let repo = (make-repo "wait-timeout")
+        let root = (make-runtime "wait-timeout")
+        with-runtime $root {
+            do { cd $repo; ensure-bus-dirs }
+            let start = (date now)
+            let mail = (do { cd $repo; bus-wait --as "nobody" --block --timeout 1sec })
+            let elapsed = ((date now) - $start)
+            assert-true ($mail | is-empty) "nothing pending, so wait returns empty rather than hanging"
+            assert-true ($elapsed < 3sec) $"a 1s timeout must not run long past its bound, took ($elapsed)"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "wait/block-returns-as-soon-as-mail-is-resolvable-not-after-the-full-timeout" {
+        let repo = (make-repo "wait-block-hit")
+        let root = (make-runtime "wait-block-hit")
+        with-runtime $root {
+            do { cd $repo; bus-send --to ["a"] --from "s" --content "hi" }
+            let start = (date now)
+            let mail = (do { cd $repo; bus-wait --as "a" --block --timeout 10sec })
+            let elapsed = ((date now) - $start)
+            assert-eq ($mail | length) 1 "already-pending mail is returned at once"
+            assert-true ($elapsed < 3sec) $"must not wait out the full 10s timeout when mail is already there, took ($elapsed)"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "queue-mark-read/writes-exactly-five-bytes-leaves-every-other-row-byte-identical" {
+        let repo = (make-repo "mark-bytes")
+        let root = (make-runtime "mark-bytes")
+        with-runtime $root {
+            let first = (do { cd $repo; bus-send --to ["a"] --from "s" --content "row-1" })
+            let second = (do { cd $repo; bus-send --to ["a"] --from "s" --content "row-2" })
+            let dir = (do { cd $repo; project-dir })
+            let path = ($dir | path join "queue" "a")
+            let before = (open --raw $path)
+            assert-eq ($before | str length) (2 * $QUEUE_ROW_BYTES) "sanity: two rows"
+
+            do { cd $repo; queue-mark-read "a" $first.id }
+            let after = (open --raw $path)
+
+            assert-eq ($after | str length) ($before | str length) "file size is unchanged by a mark"
+            let row2_before = ($before | str substring $QUEUE_ROW_BYTES..)
+            let row2_after = ($after | str substring $QUEUE_ROW_BYTES..)
+            assert-eq $row2_before $row2_after "the other row is byte-identical after the mark"
+
+            let rows = (do { cd $repo; queue-rows "a" })
+            assert-eq ($rows | where id == $first.id | get 0.read) true "the marked row now reads read"
+            assert-eq ($rows | where id == $second.id | get 0.read) false "the untouched row is still unread"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "queue-mark-read/marks-the-last-row-in-the-file-correctly" {
+        let repo = (make-repo "mark-last")
+        let root = (make-runtime "mark-last")
+        with-runtime $root {
+            let first = (do { cd $repo; bus-send --to ["a"] --from "s" --content "row-1" })
+            let last = (do { cd $repo; bus-send --to ["a"] --from "s" --content "row-2" })
+            do { cd $repo; queue-mark-read "a" $last.id }
+
+            let rows = (do { cd $repo; queue-rows "a" })
+            assert-eq ($rows | where id == $last.id | get 0.read) true "the last row in the file was marked"
+            assert-eq ($rows | where id == $first.id | get 0.read) false "the first row is untouched"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "queue-mark-read/marking-an-already-marked-row-is-idempotent" {
+        let repo = (make-repo "mark-idempotent")
+        let root = (make-runtime "mark-idempotent")
+        with-runtime $root {
+            let sent = (do { cd $repo; bus-send --to ["a"] --from "s" --content "hi" })
+            do { cd $repo; queue-mark-read "a" $sent.id }
+            let dir = (do { cd $repo; project-dir })
+            let before = (open --raw ($dir | path join "queue" "a"))
+
+            do { cd $repo; queue-mark-read "a" $sent.id }
+            let after = (open --raw ($dir | path join "queue" "a"))
+            assert-eq $before $after "marking twice writes the same five bytes both times"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "queue-mark-read/refuses-an-id-with-no-row-and-names-it" {
+        let repo = (make-repo "mark-unknown")
+        let root = (make-runtime "mark-unknown")
+        with-runtime $root {
+            do { cd $repo; bus-send --to ["a"] --from "s" --content "hi" }
+            assert-rejects {
+                do { cd $repo; queue-mark-read "a" "NOSUCHID0000000000000000A" }
+            } "no row" "the refusal names that no row carries this id"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "queue-mark-read/refuses-when-the-queue-file-does-not-exist" {
+        let repo = (make-repo "mark-no-queue")
+        let root = (make-runtime "mark-no-queue")
+        with-runtime $root {
+            do { cd $repo; ensure-bus-dirs }
+            assert-rejects {
+                do { cd $repo; queue-mark-read "never-sent-to" "NOSUCHID0000000000000000A" }
+            } "no queue file" ""
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "queue-mark-read/a-mark-and-a-concurrent-append-both-survive" {
+        # The exact anti-pattern this row format exists to avoid: marking row
+        # 1 while a sender appends row 50 must never read-modify-write the
+        # whole file, or one of the two effects is lost.
+        let repo = (make-repo "mark-concurrent")
+        let root = (make-runtime "mark-concurrent")
+        with-runtime $root {
+            let first = (do { cd $repo; bus-send --to ["a"] --from "s" --content "row-1" })
+            for i in 2..49 { do { cd $repo; bus-send --to ["a"] --from "s" --content $"row-($i)" } }
+
+            let mark_script = ([$root "mark-writer.nu"] | path join)
+            $"use (worker-script $env.FILE_PWD) *\nqueue-mark-read \"a\" \"($first.id)\"" | save -f $mark_script
+
+            let append_script = ([$root "append-writer.nu"] | path join)
+            $"use (worker-script $env.FILE_PWD) *\nbus-send --to [\"a\"] --from \"s\" --content \"row-50\"" | save -f $append_script
+
+            let procs = ([1 2] | par-each {|n|
+                let script = (if $n == 1 { $mark_script } else { $append_script })
+                with-env {XDG_RUNTIME_DIR: $root} {
+                    do { cd $repo; ^$nu.current-exe $script } | complete
+                }
+            })
+            for p in $procs { assert-eq $p.exit_code 0 $"writer failed: ($p.stderr)" }
+
+            let dir = (do { cd $repo; project-dir })
+            let raw = (open --raw ($dir | path join "queue" "a"))
+            assert-eq ($raw | str length) (50 * $QUEUE_ROW_BYTES) "all 50 rows present: the concurrent append was not dropped"
+
+            let rows = (do { cd $repo; queue-rows "a" })
+            assert-eq ($rows | length) 50 ""
+            assert-eq ($rows | where id == $first.id | get 0.read) true "the mark survived the concurrent append"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "bus-prune/a-message-survives-until-every-recipient-has-marked" {
+        let repo = (make-repo "prune-multi")
+        let root = (make-runtime "prune-multi")
+        with-runtime $root {
+            let sent = (do { cd $repo; bus-send --to ["a" "b"] --from "s" --content "hi" })
+            let dir = (do { cd $repo; project-dir })
+            let msg_path = ($dir | path join "messages" $sent.id)
+
+            do { cd $repo; queue-mark-read "a" $sent.id }
+            let pruned_once = (do { cd $repo; bus-prune })
+            assert-true ($sent.id not-in $pruned_once.pruned) "b has not marked yet, so the message stays"
+            assert-true ($msg_path | path exists) "the message file survives while b is unmarked"
+
+            do { cd $repo; queue-mark-read "b" $sent.id }
+            let pruned_twice = (do { cd $repo; bus-prune })
+            assert-true ($sent.id in $pruned_twice.pruned) "now both have marked, so it is collected"
+            assert-true (not ($msg_path | path exists)) "the message file is gone"
+
+            let rows_a = (do { cd $repo; queue-rows "a" })
+            let rows_b = (do { cd $repo; queue-rows "b" })
+            assert-eq ($rows_a | length) 1 "a's row is untouched, just inert now"
+            assert-eq ($rows_b | length) 1 "b's row is untouched, just inert now"
         }
         rm -rf $root; rm -rf $repo
     })

@@ -103,7 +103,7 @@ let cases = [
     (run-case "schema/created-is-real-utc-not-local-time-wearing-a-Z" {
         # `created` ended in Z while carrying LOCAL wall clock, so every
         # envelope was off by the machine's UTC offset. Ordering still looked
-        # right on one host — bus-pending sorts these — and would invert the
+        # right on one host — legacy-bus-pending sorts these — and would invert the
         # moment two hosts in different zones wrote to the same run. A
         # timestamp that lies about its zone is worse than none.
         let root = (make-runtime "utc")

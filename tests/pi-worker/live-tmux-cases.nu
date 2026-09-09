@@ -238,7 +238,7 @@ let cases = [
             }
 
             # And the completion did arrive — at the run-scoped waiter.
-            let got = (bus-wait --run "run-1")
+            let got = (legacy-bus-wait --run "run-1")
             assert-eq $got.payload.status "complete" "the completion reached the CLI waiter"
         }
     })
@@ -258,8 +258,8 @@ let cases = [
                 status: "complete", summary: "done", validation: "green"
                 window: $w.window, session: "sid-1", resume: "pi --session sid-1"
             }
-            let got = (bus-wait --run "run-1")
-            bus-ack --run "run-1" --uid "impl-a" --sequence $got.sequence
+            let got = (legacy-bus-wait --run "run-1")
+            legacy-bus-ack --run "run-1" --uid "impl-a" --sequence $got.sequence
             worker-inspect "impl-a" --run "run-1"
             run-workers "run-1"
             worker-accept "impl-a" --run "run-1" --repo $repo --socket $t.socket
@@ -305,7 +305,7 @@ let cases = [
             }
             assert-eq (worker-liveness $w.window_id --socket $t.socket | get verdict) "live" "still running before the ack"
 
-            let out = (bus-ack --run "run-1" --uid "impl-a" --sequence 1 --socket $t.socket)
+            let out = (legacy-bus-ack --run "run-1" --uid "impl-a" --sequence 1 --socket $t.socket)
             assert-eq $out.released true "the report says it released the worker"
             assert-eq (worker-liveness $w.window_id --socket $t.socket | get verdict) "gone" "window and process are gone"
             # Everything a restore needs survives.
@@ -328,8 +328,8 @@ let cases = [
                 status: "complete", summary: "done", validation: "green"
                 window: $w.window, session: "sid-1", resume: "pi --session sid-1"
             }
-            bus-ack --run "run-1" --uid "impl-a" --sequence 1 --socket $t.socket
-            let again = (bus-ack --run "run-1" --uid "impl-a" --sequence 1 --socket $t.socket)
+            legacy-bus-ack --run "run-1" --uid "impl-a" --sequence 1 --socket $t.socket
+            let again = (legacy-bus-ack --run "run-1" --uid "impl-a" --sequence 1 --socket $t.socket)
             assert-eq $again.released false "nothing left to release"
             assert-true ($again.reason | str contains "gone") $"the reason should say why: ($again.reason)"
         }
@@ -345,11 +345,11 @@ let cases = [
                 status: "complete", summary: "done", validation: "green"
                 window: $w.window, session: "sid-1", resume: "pi --session sid-1"
             }
-            let out = (bus-ack --run "run-1" --uid "impl-a" --sequence 1 --socket $"($t.socket)-nowhere")
+            let out = (legacy-bus-ack --run "run-1" --uid "impl-a" --sequence 1 --socket $"($t.socket)-nowhere")
             assert-eq $out.released false ""
             assert-true ($out.reason | str contains "could not") $"the reason should name the failure: ($out.reason)"
             # The receipt is what matters: the envelope must not be redelivered.
-            assert-true ((bus-wait --run "run-1") == null) "an acked result is not redelivered"
+            assert-true ((legacy-bus-wait --run "run-1") == null) "an acked result is not redelivered"
             assert-eq (worker-liveness $w.window_id --socket $t.socket | get verdict) "live" "and the worker is untouched"
         }
     })
@@ -370,7 +370,7 @@ let cases = [
                 status: "complete", summary: "done", validation: "green"
                 window: $w.window, session: "sid-1", resume: "pi --session sid-1"
             }
-            bus-ack --run "run-1" --uid "impl-a" --sequence 1 --socket $t.socket
+            legacy-bus-ack --run "run-1" --uid "impl-a" --sequence 1 --socket $t.socket
 
             let back = (worker-respawn "impl-a" --run "run-1" --repo $repo --socket $t.socket)
             assert-eq $back.cwd $w.cwd "back in the same directory"
@@ -397,7 +397,7 @@ let cases = [
             assert-eq $first.rejections 1 ""
             assert-eq $first.escalate false "one rejection is not an escalation"
 
-            bus-ack --run "run-1" --uid "impl-a" --sequence 1 --socket $t.socket
+            legacy-bus-ack --run "run-1" --uid "impl-a" --sequence 1 --socket $t.socket
             let back = (worker-respawn "impl-a" --run "run-1" --repo $repo --socket $t.socket)
             assert-eq (worker-inspect $back.uid --run "run-1" | get rejections) 1 "the new uid inherits what was already rejected"
 
