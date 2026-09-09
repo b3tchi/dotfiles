@@ -462,6 +462,153 @@ let cases = [
         }
     })
 
+    # ------------------------- sp029 T5: typed result as a message kind
+    #
+    # No live tmux/pi needed for these — they exercise bus-result/bus-settled
+    # directly against a recorded identity, the same way bus-cases.nu already
+    # does for the rest of the bus's unit contract. "Commissioner" is not
+    # wired into worker-spawn (that is T7/T9's job); these fixtures record it
+    # directly on the identity, which is exactly how it will arrive once
+    # something upstream does start setting it.
+
+    (run-case "pipeline/a-commissioned-results-content-lands-in-the-commissioners-queue" {
+        let repo = (make-repo "t5-delivery")
+        let root = (make-runtime "t5-delivery")
+        with-runtime $root {
+            do { cd $repo
+                bus-identity "impl-a" --run "run-1" --identity {
+                    role: "impl", cwd: "/tmp/nowhere", branch: "wk-t.0"
+                    session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
+                    commissioner: "orchestrator-1"
+                }
+                bus-result "impl-a" --run "run-1" --result {
+                    status: "complete", summary: "done", validation: "PASS"
+                    session: "sid-1", resume: "pi --session sid-1"
+                }
+            }
+            let mail = (do { cd $repo; bus-wait --as "orchestrator-1" })
+            assert-eq ($mail | length) 1 "the result is an ordinary message in the commissioner's queue"
+            assert-eq $mail.0.from "impl-a" ""
+            assert-eq $mail.0.content.status "complete" "the typed status rides as content, like any other message"
+            assert-eq $mail.0.content.validation "PASS" ""
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "pipeline/a-commissioned-agent-reporting-twice-delivers-both-the-bus-does-not-dedupe" {
+        let repo = (make-repo "t5-twice")
+        let root = (make-runtime "t5-twice")
+        with-runtime $root {
+            do { cd $repo
+                bus-identity "impl-a" --run "run-1" --identity {
+                    role: "impl", cwd: "/tmp/nowhere", branch: "wk-t.0"
+                    session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
+                    commissioner: "orchestrator-1"
+                }
+                bus-result "impl-a" --run "run-1" --result {
+                    status: "blocked", summary: "first", validation: null
+                    session: "sid-1", resume: "pi --session sid-1"
+                }
+                bus-result "impl-a" --run "run-1" --result {
+                    status: "complete", summary: "second", validation: "PASS"
+                    session: "sid-1", resume: "pi --session sid-1"
+                }
+            }
+            let mail = (do { cd $repo; bus-wait --as "orchestrator-1" })
+            assert-eq ($mail | length) 2 "both reports are delivered; the commissioner decides which one matters"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "pipeline/reporting-still-succeeds-when-the-commissioner-is-gone" {
+        let repo = (make-repo "t5-gone")
+        let root = (make-runtime "t5-gone")
+        with-runtime $root {
+            let sent = (do { cd $repo
+                bus-identity "impl-a" --run "run-1" --identity {
+                    role: "impl", cwd: "/tmp/nowhere", branch: "wk-t.0"
+                    session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
+                    commissioner: "long-gone"
+                }
+                bus-result "impl-a" --run "run-1" --result {
+                    status: "complete", summary: "done", validation: "PASS"
+                    session: "sid-1", resume: "pi --session sid-1"
+                }
+            })
+            assert-eq $sent.uid "impl-a" "reporting succeeds even though nobody will ever read long-gone's queue"
+            let dir = (do { cd $repo; project-dir })
+            assert-true (($dir | path join "queue" "long-gone") | path exists) "the row sits in a queue nobody reads — that is fine, not an error"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "pipeline/an-agent-commissioned-by-itself-can-address-its-own-queue" {
+        let repo = (make-repo "t5-self")
+        let root = (make-runtime "t5-self")
+        with-runtime $root {
+            do { cd $repo
+                bus-identity "impl-a" --run "run-1" --identity {
+                    role: "impl", cwd: "/tmp/nowhere", branch: "wk-t.0"
+                    session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
+                    commissioner: "impl-a"
+                }
+                bus-result "impl-a" --run "run-1" --result {
+                    status: "complete", summary: "done", validation: "PASS"
+                    session: "sid-1", resume: "pi --session sid-1"
+                }
+            }
+            let mail = (do { cd $repo; bus-wait --as "impl-a" })
+            assert-eq ($mail | length) 1 "self-commissioning addresses its own queue like any other address"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "pipeline/settled-writes-a-protocol-error-for-a-commissioned-agent" {
+        let root = (make-runtime "t5-settled-commissioned")
+        with-runtime $root {
+            bus-identity "impl-a" --run "run-1" --identity {
+                role: "impl", cwd: "/tmp/nowhere", branch: "wk-t.0"
+                session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
+                commissioner: "orchestrator-1"
+            }
+            let written = (bus-settled "impl-a" --run "run-1")
+            assert-true $written.reported "a commissioned agent settling silently is a protocol error"
+            assert-eq $written.uid "impl-a" "the report names the agent"
+        }
+        rm -rf $root
+    })
+
+    (run-case "pipeline/settled-produces-nothing-for-an-explicitly-uncommissioned-agent" {
+        let root = (make-runtime "t5-settled-uncommissioned")
+        with-runtime $root {
+            bus-identity "impl-a" --run "run-1" --identity {
+                role: "impl", cwd: "/tmp/nowhere", branch: "wk-t.0"
+                session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
+                commissioner: null
+            }
+            let written = (bus-settled "impl-a" --run "run-1")
+            assert-true (not $written.reported) "an uncommissioned agent settling has nothing to report"
+            assert-eq ((read-results "impl-a" --run "run-1") | length) 0 "no envelope is written at all"
+        }
+        rm -rf $root
+    })
+
+    (run-case "pipeline/settled-still-reports-when-no-commissioner-key-is-recorded-at-all" {
+        # Backward compatible default: an identity predating this concept
+        # (no `commissioner` key whatsoever — every worker spawned before
+        # T7/T9 wire commissioning through spawn) must not be silently
+        # reinterpreted as uncommissioned.
+        let root = (make-runtime "t5-settled-legacy-identity")
+        with-runtime $root {
+            bus-identity "impl-a" --run "run-1" --identity {
+                role: "impl", cwd: "/tmp/nowhere", branch: "wk-t.0"
+                session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
+            }
+            let written = (bus-settled "impl-a" --run "run-1")
+            assert-true $written.reported "no commissioner key at all still reports, for backward compatibility"
+        }
+        rm -rf $root
+    })
 
 ]
 

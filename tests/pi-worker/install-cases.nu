@@ -236,7 +236,7 @@ let cases = [
             }
         }
         let out = (with-env {PI_WORKER_RUN: "r1", PI_WORKER_UID: "impl-1"} {
-            run-cli "result" "--status" "complete" "--summary" "reported without an address" --runtime $root
+            run-cli "result" "--status" "complete" "--summary" "reported without an address" "--validation" "checked" --runtime $root
         })
         assert-eq $out.exit_code 0 $"result should derive its address: ($out.stderr | str trim)"
         with-env {XDG_RUNTIME_DIR: $root} {

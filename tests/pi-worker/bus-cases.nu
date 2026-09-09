@@ -890,7 +890,7 @@ bus-result "w1" --run "r1" --result {status: "complete", summary: "done", window
                 status: "blocked", summary: "stale", window: "w", session: "s", resume: "r"
             }
             bus-result "new" --run "r1" --result {
-                status: "complete", summary: "fresh", window: "w", session: "s", resume: "r"
+                status: "complete", summary: "fresh", window: "w", session: "s", resume: "r", validation: "checked"
             }
 
             # Unscoped keeps its meaning: oldest first, across the run.

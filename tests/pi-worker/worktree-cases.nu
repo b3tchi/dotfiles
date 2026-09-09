@@ -647,7 +647,7 @@ let cases = [
                 session: "sid-1", skill: "wk-build", window: "impl-done@dotfiles"
             }
             bus-result "impl-1" --run "r1" --result {
-                status: "complete", summary: "did the thing"
+                status: "complete", summary: "did the thing", validation: "checked"
                 window: "impl-done@dotfiles", session: "sid-1", resume: "pi --session sid-1"
             }
             assert-eq (bus-status "impl-1" --run "r1" | get state) "complete" "reported, not accepted"

@@ -335,8 +335,12 @@ def validate-inbox-payload [content: any, --stored] {
 }
 
 def validate-result-payload [content: record] {
+    # sp029 T5: `window` drops off the required list — the narrowed result
+    # shape is status/validation/summary/session/resume (## solution: "The
+    # typed result survives, narrowed"). Legacy callers may still set it as
+    # an extra field; nothing here forbids that.
     let fields = ($content | columns)
-    for required in ["status" "summary" "window" "session" "resume"] {
+    for required in ["status" "summary" "session" "resume"] {
         if $required not-in $fields {
             error make {msg: $"result payload must carry ($required)"}
         }
@@ -353,10 +357,20 @@ def validate-result-payload [content: record] {
         error make {msg: $"unknown result status '($status)': not one of ($RESULT_STATUSES | str join ', ')"}
     }
 
-    if (text-bytes $content.summary) > $MAX_SUMMARY_BYTES {
-        error make {msg: $"result summary exceeds the 4 KiB summary cap; detail belongs in the worker window and the Pi transcript, not the envelope"}
+    # adr0027: completion is never inferred from prose. A `complete` result
+    # must carry its own typed `validation` verdict, and an empty string is
+    # refused exactly as strictly as null — checking only for null would let
+    # "" pass as though it were a real answer. Not required for any other
+    # status: `blocked`/`failed`/`waiting_human` are not verdicts adr0027
+    # governs.
+    if $status == "complete" and (($content | get -o validation) | is-empty) {
+        error make {msg: "result status 'complete' must carry a non-null, non-empty 'validation' field (adr0027): completion is never inferred from prose"}
     }
 
+    let summary_bytes = (text-bytes $content.summary)
+    if $summary_bytes > $MAX_SUMMARY_BYTES {
+        error make {msg: $"result summary is ($summary_bytes) bytes, over the 4 KiB summary cap; detail belongs in the worker window and the Pi transcript, not the envelope"}
+    }
 }
 
 # Identity ties a worker UID to where it runs, what resumes it, and where it is
@@ -1325,7 +1339,22 @@ export def bus-result [
 
     validate-envelope (envelope-for $run $uid "result" $result)
     ensure-worker-dirs $run $uid
-    claim-slot (worker-dir $run $uid | path join "outbox") (envelope-for $run $uid "result" $result)
+    let written = (claim-slot (worker-dir $run $uid | path join "outbox") (envelope-for $run $uid "result" $result))
+
+    # sp029 T5: "a result is one message kind in the thread rather than the
+    # bus's purpose" (## solution). When a commissioner is recorded, the
+    # SAME content also travels as an ordinary peer message via T3's writer
+    # and T4's reader, addressed to it — additive, not a replacement. The
+    # legacy outbox write above is unchanged on purpose: bus-status,
+    # derive-state and worker-accept read ONLY that, and migrating them off
+    # it is not this task's job (dotfiles-v1zt's bus-result call site is
+    # therefore still here, not cleared).
+    let commissioner = ($identity | get -o commissioner)
+    if ($commissioner | is-not-empty) {
+        bus-send --to [$commissioner] --from $uid --content $result
+    }
+
+    $written
 }
 
 # Report that a worker's agent settled without reporting anything.
@@ -1343,6 +1372,24 @@ export def bus-result [
 # an error there would turn every healthy worker into a failed one, and
 # stacking one error per settle would bury the first real outcome.
 export def bus-settled [uid: string, --run: string]: nothing -> record {
+    # sp029 T5: only a COMMISSIONED agent owes anyone a report — "an
+    # uncommissioned peer that finishes a turn is simply done talking"
+    # (## solution). Absence of the `commissioner` key is the backward-
+    # compatible default: every identity recorded before this task predates
+    # the concept and was, in spirit, always spawned for someone. An
+    # explicit null/empty `commissioner` is the new, genuinely uncommissioned
+    # case — reachable today only by constructing an identity that says so
+    # directly, since nothing yet self-registers without one (sp029 T7).
+    let identity = (bus-identity-of $uid --run $run)
+    let uncommissioned = (
+        $identity != null
+        and ("commissioner" in ($identity | columns))
+        and ($identity.commissioner | is-empty)
+    )
+    if $uncommissioned {
+        return {reported: false, reason: "no commissioner recorded; an uncommissioned agent settling has nothing to report", run: $run, uid: $uid}
+    }
+
     ensure-worker-dirs $run $uid
     let existing = (read-box (worker-dir $run $uid | path join "outbox"))
     if ($existing | is-not-empty) {

@@ -206,6 +206,37 @@ let cases = [
     (run-case "schema/accepts-summary-at-the-cap" {
         validate-envelope (sample-envelope "result" | update payload.summary (filler 4096))
     })
+    (run-case "schema/rejects-oversized-summary-naming-the-exact-byte-count" {
+        assert-rejects {
+            validate-envelope (sample-envelope "result" | update payload.summary (filler 4097))
+        } "4097" "the refusal must name the exact byte count, not just the cap"
+    })
+
+    # ------------------------------------------ sp029 T5: the narrowed result
+    (run-case "schema/rejects-complete-with-null-validation" {
+        # adr0027: completion is never inferred from prose. A 'complete'
+        # result must carry its own typed verdict.
+        assert-rejects {
+            validate-envelope (sample-envelope "result" | update payload.status "complete" | update payload.validation null)
+        } "validation" "the refusal must name the missing field"
+    })
+    (run-case "schema/rejects-complete-with-empty-string-validation" {
+        # Empty is refused exactly as strictly as null — a validator that
+        # only checked for null would let "" pass as a real answer.
+        assert-rejects {
+            validate-envelope (sample-envelope "result" | update payload.status "complete" | update payload.validation "")
+        } "validation" "an empty string must be refused, not treated as present"
+    })
+    (run-case "schema/accepts-complete-with-a-non-empty-validation" {
+        validate-envelope (sample-envelope "result" | update payload.status "complete" | update payload.validation "PASS")
+    })
+    (run-case "schema/window-is-no-longer-required-on-a-result" {
+        # The narrowed field set is status/validation/summary/session/resume
+        # (## solution: "The typed result survives, narrowed") — window was
+        # the legacy display concept and nothing reads it off a result
+        # payload any more.
+        validate-envelope (sample-envelope "result" | reject payload.window)
+    })
 
     # ---------------------------------------------------------- message ids
     (run-case "msgid/is-26-characters" {

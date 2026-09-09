@@ -211,6 +211,12 @@ describe("typed result envelope", () => {
     );
   });
 
+  test("refuses a completion with an empty-string validation verdict, as strictly as null", () => {
+    expect(() =>
+      resultEnvelopeFrom({ status: "complete", summary: "s", validation: "" }, identity),
+    ).toThrow(/validation/i);
+  });
+
   test("refuses statuses a worker cannot grant itself", () => {
     for (const status of ["accepted", "stopped", "running", "unknown"]) {
       expect(() => resultEnvelopeFrom({ status, summary: "s" }, identity)).toThrow();
@@ -239,11 +245,23 @@ describe("typed result envelope", () => {
 });
 
 describe("settling without the result tool", () => {
-  test("produces a protocol error, never a completion", () => {
+  test("produces a protocol error for an identity with no commissioner key at all (backward compatible)", () => {
     const env = settledWithoutResult(identity);
-    expect(env.code).toBe("protocol_error");
-    expect(env.detail).toMatch(/result tool/i);
+    expect(env).not.toBeNull();
+    expect(env!.code).toBe("protocol_error");
+    expect(env!.detail).toMatch(/result tool/i);
     expect(JSON.stringify(env)).not.toContain("complete");
+  });
+
+  test("produces a protocol error for an identity with a recorded commissioner", () => {
+    const env = settledWithoutResult({ ...identity, commissioner: "orchestrator-1" });
+    expect(env).not.toBeNull();
+    expect(env!.code).toBe("protocol_error");
+  });
+
+  test("produces nothing for an identity explicitly marked uncommissioned", () => {
+    expect(settledWithoutResult({ ...identity, commissioner: null })).toBeNull();
+    expect(settledWithoutResult({ ...identity, commissioner: "" })).toBeNull();
   });
 });
 
