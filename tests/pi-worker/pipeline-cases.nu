@@ -740,6 +740,53 @@ let cases = [
         rm -rf $root; rm -rf $repo
     })
 
+    # sp029 T9 review gap 1: `resolve-run` used to scan every project this
+    # user's state-home held and return the first uid match — reaching a uid
+    # in a DIFFERENT project exactly as easily as this one, silently, with no
+    # refusal. `accept`/`reclaim`/`stop` DELETE worktrees and branches off
+    # whatever `resolve-run` hands them, so a first-match resolution feeding
+    # one of those is precisely the failure mode this epic designs against.
+    # This is the permanent regression guard for the narrowed, project-scoped
+    # resolution: two projects mint the SAME uid, and asking from inside one
+    # must find only that project's worker, never the other's.
+    (run-case "pipeline/resolve-run-never-crosses-projects-even-when-uids-collide" {
+        let repo_a = (make-repo "resolve-run-cross-a")
+        let repo_b = (make-repo "resolve-run-cross-b")
+        let root = (make-runtime "resolve-run-cross")
+        with-runtime $root {
+            do { cd $repo_a
+                bus-identity "impl-a" --run "run-a" --identity {
+                    role: "impl", cwd: $repo_a, branch: "wk-a.0"
+                    session: "sid-a", skill: "wk-build", window: "impl-a@a"
+                }
+            }
+            do { cd $repo_b
+                bus-identity "impl-a" --run "run-b" --identity {
+                    role: "impl", cwd: $repo_b, branch: "wk-b.0"
+                    session: "sid-b", skill: "wk-build", window: "impl-a@b"
+                }
+            }
+        }
+
+        let cli = (worker-script $env.FILE_PWD)
+        let from_a = (with-env {XDG_RUNTIME_DIR: $root} {
+            do { cd $repo_a; ^$nu.current-exe $cli inspect "impl-a" | complete }
+        })
+        assert-eq $from_a.exit_code 0 $"($from_a.stderr)"
+        let seen_a = ($from_a.stdout | from json)
+        assert-eq $seen_a.identity.session "sid-a" "resolution from inside A returns A's worker"
+        assert-eq $seen_a.identity.cwd $repo_a ""
+
+        let from_b = (with-env {XDG_RUNTIME_DIR: $root} {
+            do { cd $repo_b; ^$nu.current-exe $cli inspect "impl-a" | complete }
+        })
+        assert-eq $from_b.exit_code 0 $"($from_b.stderr)"
+        let seen_b = ($from_b.stdout | from json)
+        assert-eq $seen_b.identity.session "sid-b" "and from inside B, the SAME uid resolves to B's own worker — never crossing into A's"
+
+        rm -rf $root; rm -rf $repo_a; rm -rf $repo_b
+    })
+
     (run-case "pipeline/worker-spawn-records-the-run-as-commissioner-so-a-real-spawned-worker-is-commissioned" {
         # The actual wiring this task adds: worker-spawn (not a hand-built
         # bus-identity fixture) records `commissioner: <run>` on every

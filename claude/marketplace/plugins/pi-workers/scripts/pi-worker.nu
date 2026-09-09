@@ -4363,6 +4363,32 @@ def resolve-run [uid: string, repo: string = ""]: nothing -> string {
     if ($matches | is-empty) { "" } else { $matches | first }
 }
 
+# The project a lookup searched, worded for a refusal — the exact same
+# derivation `resolve-run` uses, so what a message names is what was actually
+# searched rather than a guess at it.
+def project-label [repo: string = ""]: nothing -> string {
+    let base = (if ($repo | is-empty) { current-repo } else { $repo })
+    if ($base | is-empty) { "no project (not inside a git repository)" } else { $base }
+}
+
+# `resolve-run`, refused BY NAME the moment a CLI verb sees an unknown uid —
+# naming both the uid and the project searched, rather than letting an empty
+# run flow downstream into an internal function's own `($run)/($uid)`
+# message. Observed live: with an empty run that interpolation reads
+# "unknown worker /nobody: ..." — a malformed address that also never says
+# WHERE it looked, so a wrong-project miss and a never-spawned uid are
+# indistinguishable to an operator. That distinction is the whole point of
+# scoping `resolve-run` to one project (sp029 T9) instead of scanning every
+# project this user has ever worked in and matching whichever came first.
+def resolve-run-or-refuse [verb: string, uid: string, repo: string = ""]: nothing -> string {
+    let run = (resolve-run $uid $repo)
+    if ($run | is-empty) {
+        let project = (project-label $repo)
+        error make {msg: $"($verb) refused: unknown worker ($uid) in ($project): no identity recorded there. Absent evidence is not permission to act \(adr0017)"}
+    }
+    $run
+}
+
 # Whose queue/outbox a verb acts as, absent an explicit `--as`. Mirrors
 # PI_WORKER_UID, already set on every spawned worker's window (`worker-spawn`).
 def self-uid []: nothing -> string { $env | get -o PI_WORKER_UID | default "" }
@@ -4441,7 +4467,7 @@ def "main result" [--as: string = "", --status: string = "", --summary: string =
         ["--status" $status $"the outcome, one of ($RESULT_STATUSES | str join ', ')"]
         ["--summary" $summary "what happened, in a line or two; detail belongs in the worker window and the Pi transcript"]
     ]
-    let run = (resolve-run $as_)
+    let run = (resolve-run-or-refuse "result" $as_)
     # The worker supplies its OUTCOME; window, session and resume come from the
     # identity the orchestrator recorded at spawn. A worker cannot be trusted to
     # say where it lives or how to reach it — that is the initiator's only route
@@ -4481,7 +4507,7 @@ def "main settled" [--as: string = ""] {
 # so it is the one that carries the --socket. Free to observe ANY uid — the
 # ownership line `wait` enforces is about marking mail read, not about looking.
 def "main liveness" [uid: string, --socket: string = ""] {
-    let run = (resolve-run $uid)
+    let run = (resolve-run-or-refuse "liveness" $uid)
     let identity = (bus-identity-of $uid --run $run)
     if $identity == null {
         error make {msg: $"unknown worker ($uid): no identity on the bus. Absent evidence is not permission to act \(adr0017)"}
@@ -4497,7 +4523,7 @@ def "main status" [uid: string] {
     bus-status $uid --run $run | to json | print
 }
 def "main inspect" [uid: string] {
-    let run = (resolve-run $uid)
+    let run = (resolve-run-or-refuse "inspect" $uid)
     worker-inspect $uid --run $run | to json | print
 }
 # A table by default, JSON on request.
@@ -4546,7 +4572,7 @@ def "main resume" [uid: string, --feedback: string = "", --socket: string = ""] 
         [flag, value, what];
         ["--feedback" $feedback "what the worker got wrong and what to do instead; it reaches its inbox as an ordinary message"]
     ]
-    let run = (resolve-run $uid)
+    let run = (resolve-run-or-refuse "resume" $uid)
     worker-resume $uid --run $run --feedback $feedback --socket $socket | to json | print
 }
 
@@ -4580,18 +4606,18 @@ def repo-or-refuse [verb: string, repo: any]: nothing -> string {
 
 def "main respawn" [uid: string, --repo: string, --socket: string = ""] {
     let repo = (repo-or-refuse "respawn" $repo)
-    let run = (resolve-run $uid)
+    let run = (resolve-run-or-refuse "respawn" $uid $repo)
     worker-respawn $uid --run $run --repo $repo --socket $socket | to json | print
 }
 
 def "main accept" [uid: string, --repo: string, --socket: string = ""] {
     let repo = (repo-or-refuse "accept" $repo)
-    let run = (resolve-run $uid)
+    let run = (resolve-run-or-refuse "accept" $uid $repo)
     worker-accept $uid --run $run --repo $repo --socket $socket | to json | print
 }
 
 def "main stop" [uid: string, --socket: string = ""] {
-    let run = (resolve-run $uid)
+    let run = (resolve-run-or-refuse "stop" $uid)
     worker-stop $uid --run $run --socket $socket | to json | print
 }
 
