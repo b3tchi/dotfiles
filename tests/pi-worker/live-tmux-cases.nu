@@ -423,6 +423,17 @@ let cases = [
 
             # The flag distinction, read off what was executed: the first
             # window CREATED the session, the second RESUMED it.
+            #
+            # The stub appends to $log ASYNCHRONOUSLY from inside its own tmux
+            # window (records-argv: `echo "$@" >> log; sleep 30`) — reading
+            # right after worker-respawn returns races that append. dotfiles-
+            # y2np: one missing line collapses `first` and `last` onto the
+            # same line, producing two different failure messages depending on
+            # which one landed first.
+            # The stub has not necessarily written $log AT ALL yet by the time
+            # this poll starts — `open` on a not-yet-created file throws,
+            # which would abort the wait instead of letting it keep polling.
+            wait-until {|| (if ($log | path exists) { open $log | lines | where {|l| $l | str contains "sid-1" } | length } else { 0 }) >= 2 } --timeout 10sec --interval 50ms --what $"($log) to record both the spawn and respawn argv lines for sid-1"
             let argv = (open $log | lines | where {|l| $l | str contains "sid-1" })
             assert-true (($argv | first) | str contains "--session-id sid-1") $"spawn must create the session, got ($argv)"
             assert-true (($argv | last) | str contains "--session sid-1") $"respawn must resume it, got ($argv)"
@@ -583,11 +594,16 @@ let cases = [
             # known project, and the sweep says nothing rather than guessing at
             # window names.
             worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket
-            ^tmux -L $t.socket new-window -d -n "impl-stray@dotfiles" -t "dotfiles" "sh -c 'exit 3'"
+            # A bare `exit 3` races the same tmux gap `dies-with` exists to
+            # avoid (see its comment above): if the shell exits before the
+            # NEXT `set-option` line runs, remain-on-exit was never on and
+            # tmux destroys the window outright, which is what made this case
+            # flake at roughly 1/3 independent of load.
+            ^tmux -L $t.socket new-window -d -n "impl-stray@dotfiles" -t "dotfiles" $"sh -c '(dies-with 3)'"
             ^tmux -L $t.socket set-option -t "impl-stray@dotfiles" remain-on-exit on
             # remain-on-exit has to be set BEFORE the process exits to hold the
             # window, so the pane is re-run once the option is on.
-            ^tmux -L $t.socket respawn-pane -k -t "impl-stray@dotfiles" "sh -c 'exit 3'"
+            ^tmux -L $t.socket respawn-pane -k -t "impl-stray@dotfiles" $"sh -c '(dies-with 3)'"
             wait-for-dead $t.socket "impl-stray@dotfiles"
 
             let got = (worktrees-reclaim --repo $repo --socket $t.socket)

@@ -118,6 +118,37 @@ let harness_cases = [
             assert-rejects { error make {msg: "something else"} } "sequence" "x"
         } "assert-rejects must fail when the reason does not match"
     })
+
+    # dotfiles-6nvx.21: wait-until replaces `sleep <n>; assert` across the live
+    # suites. A poll helper that never fails is as suspicious as a fixed sleep
+    # that always does, so both the success path AND the give-up path are
+    # pinned here — a closure cannot mutate an outer `mut`, so a file stands in
+    # as the counter (same trick as the leak-probe cases above).
+    (run-case "harness/wait-until-returns-once-the-condition-holds" {
+        let counter = ([$nu.temp-dir $"piw-witness-(random chars --length 6)"] | path join)
+        "0" | save -f $counter
+        wait-until {||
+            let next = (open $counter | into int) + 1
+            $next | save -f $counter
+            $next >= 3
+        } --timeout 2sec --interval 10ms --what "counter to reach 3"
+        let final = (open $counter | into int)
+        rm -f $counter
+        assert-true ($final >= 3) $"expected wait-until to poll until the condition held, got ($final)"
+    })
+
+    (run-case "harness/wait-until-gives-up-with-a-useful-message" {
+        # Points the helper at a condition that can never become true, so the
+        # deadline path is exercised for real rather than assumed to work.
+        assert-throws {
+            wait-until {|| false } --timeout 200ms --interval 20ms --what "a condition that never becomes true"
+        } "wait-until must give up and error rather than hang forever"
+        let caught = (try {
+            wait-until {|| false } --timeout 200ms --interval 20ms --what "a condition that never becomes true"
+        } catch {|e| $e.msg })
+        assert-true ($caught | str contains "a condition that never becomes true") $"the error must name what it waited for, got: ($caught)"
+        assert-true ($caught | str contains "200ms") $"the error must name the timeout, got: ($caught)"
+    })
 ]
 
 let results = ($harness_cases ++ ($SUITES | each {|s| run-subsuite $s.label $s.file } | flatten))

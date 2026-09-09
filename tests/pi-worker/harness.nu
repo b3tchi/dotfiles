@@ -165,6 +165,32 @@ export def pending [name: string, why: string] {
     {name: $name, status: "PENDING", detail: $why}
 }
 
+# Poll `cond` until it returns true, instead of `sleep <n>` followed by a
+# hopeful assert.
+#
+# dotfiles-6nvx.21: a fixed sleep is a bet on how long an async side effect
+# (a tmux pane redrawing, a background process writing a file) takes. Under
+# load — hundreds of real tmux servers from concurrent suite runs — the bet
+# loses: the read comes back short and the assertion fails on a passing
+# system. A deadline-bounded poll costs nothing on the happy path, because it
+# returns the moment `cond` holds; it only spends time when the fixed sleep
+# would have been wrong anyway.
+export def wait-until [
+    cond: closure
+    --timeout: duration = 10sec
+    --interval: duration = 50ms
+    --what: string = "condition"
+]: nothing -> nothing {
+    let give_up = ((date now) + $timeout)
+    loop {
+        if (do $cond) { return }
+        if (date now) >= $give_up {
+            error make {msg: $"timed out after ($timeout) waiting for: ($what)"}
+        }
+        sleep $interval
+    }
+}
+
 # ------------------------------------------------------------ repo paths
 
 # Suites sit at <repo>/tests/infinifu-worker/; the shipped protocol module and

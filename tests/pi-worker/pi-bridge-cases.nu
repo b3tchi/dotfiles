@@ -232,7 +232,10 @@ let cases = [
         with-runtime $root {
             with-env {PATH: ([$t.bin] ++ $env.PATH)} {
                 spawn-worker $t $repo --task "t1" --session "sid-77" --skill "wk-build"
-                sleep 400ms
+                # The stub writes $marker from inside its own tmux window,
+                # asynchronously to this process. A fixed sleep is a bet on how
+                # fast that write lands; poll for it instead (dotfiles-6nvx.21).
+                wait-until {|| ($marker | path exists) and ((open --raw $marker | str trim) | is-not-empty) } --timeout 5sec --interval 50ms --what $"($marker) to be written by the stub pi"
                 let argv = (open --raw $marker)
                 assert-true ($argv | str contains "--session") "pi is invoked with a session flag"
                 assert-true ($argv | str contains "sid-77") "and with the stable id"
@@ -277,7 +280,7 @@ let cases = [
         with-runtime $root {
             with-env {PATH: ([$t.bin] ++ $env.PATH)} {
                 spawn-worker $t $repo --task "t1" --session "sid-env" --skill "wk-build"
-                sleep 500ms
+                wait-until {|| ($marker | path exists) and ((open --raw $marker | str trim) | is-not-empty) } --timeout 5sec --interval 50ms --what $"($marker) to be written by the stub pi"
                 let seen = (open --raw $marker)
                 for pair in ["PI_WORKER_RUN=run-1" "PI_WORKER_UID=impl-a" "PI_WORKER_ROLE=impl" "PI_WORKER_SESSION=sid-env" "PI_WORKER_SKILL=wk-build" "PI_WORKER_WINDOW=impl-t1@dotfiles" "PI_WORKER_BRANCH=wk-t1.0"] {
                     assert-true ($seen | str contains $pair) $"the worker window carries ($pair)"
@@ -315,11 +318,10 @@ let cases = [
                 # Wait for the death, rather than for a duration. The old
                 # `sleep 400ms` was simultaneously too long (the process was
                 # already gone) and too short (on a loaded box it was not).
-                for _ in 0..300 {
+                wait-until {||
                     let dead = (do { ^tmux -L $t.socket list-panes -t $got.window -F "#{pane_dead}" } | complete)
-                    if ($dead.exit_code == 0) and (($dead.stdout | lines | first | default "" | str trim) == "1") { break }
-                    sleep 50ms
-                }
+                    $dead.exit_code == 0 and (($dead.stdout | lines | first | default "" | str trim) == "1")
+                } --timeout 15sec --interval 50ms --what $"pane for ($got.window) to report dead"
                 assert-true ($got.window in (windows-on $t.socket)) "the dead worker's window is still inspectable"
                 assert-eq (bus-identity-of "impl-a" --run "run-1" | get session) "sid-1" "and its identity survives"
             }
@@ -492,7 +494,13 @@ let cases = [
         let repo = (make-repo "self-claim-env")
         let root = (make-runtime "self-claim-env")
         let marker = ([(fixture-base) $"piw-t7-plain-env-(random chars --length 6)"] | path join)
-        let t = (make-tmux "self-claim-env" $"env | grep '^PI_WORKER_' > ($marker); sleep 30")
+        # The assertion below is on ABSENCE of content, so polling on the
+        # marker itself is not possible (an empty grep match is the expected,
+        # correct outcome, not something still in flight). A separate sentinel
+        # written right after the redirect is what we can wait for instead —
+        # its existence proves the env|grep step already ran to completion.
+        let done = $"($marker).done"
+        let t = (make-tmux "self-claim-env" $"env | grep '^PI_WORKER_' > ($marker); touch ($done); sleep 30")
         with-runtime $root {
             with-env {PATH: ([$t.bin] ++ $env.PATH)} {
                 # A plain window, created directly rather than through
@@ -500,12 +508,12 @@ let cases = [
                 # "pi" resolves through PATH to the stub in $t.bin, same as
                 # worker-spawn's own new-window call does.
                 ^tmux -L $t.socket new-window -t "dotfiles" -n "plain" "pi"
-                sleep 400ms
+                wait-until {|| $done | path exists } --timeout 5sec --interval 50ms --what $"($done) to signal the stub finished writing ($marker)"
                 let seen = (if ($marker | path exists) { open --raw $marker } else { "" })
                 assert-true (($seen | str trim) | is-empty) "an ordinary window carries no PI_WORKER_* — the self-claim gate never fires on it otherwise"
             }
         }
-        rm -f $marker; drop-tmux $t; rm -rf $root; rm -rf $repo
+        rm -f $marker; rm -f $done; drop-tmux $t; rm -rf $root; rm -rf $repo
     })
 
 ]
