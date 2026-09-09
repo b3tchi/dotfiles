@@ -389,8 +389,12 @@ const BUS_DIRNAME = "pi-worker"
 const BRANCH_PREFIX = "wk-"
 const MAX_SEQUENCE_ATTEMPTS = 64
 
-# Root of the bus tree. Keyed entirely off XDG_RUNTIME_DIR so a test — or a
-# second user on the same machine — gets a wholly separate universe.
+# Root of the LEGACY bus tree: one flat $XDG_RUNTIME_DIR/pi-worker directory
+# shared by every project, addressed through a minted `run` id. Every verb
+# still built on `run-dir`/`worker-dir` (send, wait, result, status, ...)
+# reads and writes here until T2-T4 rewrite them onto `project-dir` below —
+# changing what THIS returns would silently break all of them, which sp029 T1
+# is not scoped to do. New code should prefer `project-dir`.
 export def bus-root []: nothing -> string {
     let base = ($env | get -o XDG_RUNTIME_DIR | default "")
     if ($base | is-empty) {
@@ -445,6 +449,66 @@ def ensure-worker-dirs [run: string, uid: string] {
     for box in ["inbox" "outbox"] {
         ensure-dir (worker-dir $run $uid | path join $box)
     }
+}
+
+# -------------------------------------------------------------- project scoping (sp029 T1)
+
+# A filesystem-safe, collision-resistant name for a repository path.
+#
+# A readable prefix alone is not enough: `/a/b` and `/a-b` must land in
+# different projects, and a path separator and a literal hyphen both flatten
+# to `-` under any naive sanitizer, so a prefix built only from allowed
+# characters cannot tell them apart. The hash of the full normalized path
+# carries the actual identity; the prefix exists only so a directory listing
+# is legible to a human, and is never relied on for uniqueness.
+def project-slug [path: string]: nothing -> string {
+    let normalized = ($path | str trim --right --char "/")
+    let normalized = if ($normalized | is-empty) { "/" } else { $normalized }
+    let digest = ($normalized | hash sha256 | str substring 0..12)
+    let readable = (
+        $normalized
+        | path basename
+        | str replace --all --regex '[^A-Za-z0-9._]' "-"
+    )
+    let readable = if ($readable | is-empty) { "root" } else { $readable }
+    $"($readable)-($digest)"
+}
+
+# The project's bus tree, keyed by a slug of the repo's MAIN worktree.
+#
+# Deliberately `main-worktree`, never a bare `current-repo`: a worker stands
+# in a throwaway `wk-*` worktree, and slugging that path directly would make
+# every worker its own project, which is the exact discovery failure this
+# task exists to fix. Every agent working on the repo — from the main
+# worktree or any `wk-*` of it — resolves to the same directory.
+#
+# Errors rather than falling back to anything when there is no project to
+# resolve: a worker bus has no notion of a default project the way a shell
+# has a default directory, and creating one under an arbitrary cwd would
+# plant bus state nothing could find again. Pure lookup — never creates a
+# directory; pair with `ensure-bus-dirs` to do that.
+export def project-dir []: nothing -> string {
+    let base = ($env | get -o XDG_RUNTIME_DIR | default "")
+    if ($base | is-empty) {
+        error make {msg: "XDG_RUNTIME_DIR is unset: the worker bus has no runtime directory to address"}
+    }
+    let repo = (current-repo)
+    if ($repo | is-empty) {
+        error make {msg: "not inside a git repository: the worker bus has no project to address"}
+    }
+    let slug = (project-slug (main-worktree $repo))
+    $base | path join $BUS_DIRNAME $slug "bus"
+}
+
+# Create the project's flat message log and per-agent queue directory —
+# `bus/messages` and `bus/queue`, siblings under `project-dir`. Unlike the
+# legacy run/uid tree, nothing here is scoped to a worker address, so there
+# is no id to thread through: T2-T4 populate these once envelopes and queue
+# rows exist to put in them.
+export def ensure-bus-dirs []: nothing -> nothing {
+    ensure-dir (project-dir)
+    ensure-dir (project-dir | path join "messages")
+    ensure-dir (project-dir | path join "queue")
 }
 
 # Write `envelope` into `dir` at the next free sequence.
@@ -809,12 +873,20 @@ export def mint-session []: nothing -> string {
     random uuid
 }
 
-# The lowest free `r<n>` at the bus root.
+# The lowest free `r<n>` at the legacy bus root.
+#
+# sp029 retires the run concept in favor of project scoping (`project-dir`),
+# so this is a placeholder, not a design: `spawn` still threads a `run`
+# string down to `worker-dir` until T9 redesigns the CLI to address by
+# `--to` instead. Deliberately renamed off the old allocator's name — sp029
+# T1 retires that name from the module's exported surface — and deliberately
+# not exported: nothing outside `main spawn` should grow a new dependency on
+# it.
 #
 # Directories that are not shaped `r<n>` are ignored rather than parsed: a run
 # an operator named `x4` says nothing about which `r<n>` is free, and reading a
 # number out of it would hand back an address already in use.
-export def mint-run []: nothing -> string {
+def next-run-id []: nothing -> string {
     let root = (bus-root)
     let taken = (if ($root | path exists) {
         ls $root | where type == dir | get name | each {|d| $d | path basename }
@@ -1759,21 +1831,38 @@ export def expand-path [path: string]: nothing -> string {
     if ($path | is-empty) { $path } else { $path | path expand }
 }
 
-# The main worktree of a repo — the one git lists first, and where a stage
-# declared isolation=main runs.
+# The main worktree of a repo — where a stage declared isolation=main runs,
+# and the anchor `project-dir` slugs so a `wk-*` worker addresses the same
+# project as its initiator.
+#
+# Reads `git rev-parse --git-common-dir` rather than parsing `worktree list`:
+# every worktree of one repo — main or linked — shares the same common dir,
+# so its PARENT is the main worktree regardless of which worktree asked, and
+# unlike `worktree list --porcelain` this is correct even when a worktree's
+# `.git` is a FILE pointing elsewhere rather than a directory (every linked
+# worktree's `.git` is a file; only the main worktree's is a directory).
+# `worktree list` was tried first and rejected: for a submodule its own first
+# entry names the internal `.git/modules/<name>` gitdir, not the working
+# directory, so parsing it would have slugged a path nothing ever `cd`s into.
+#
+# A submodule or a bare repo has no common dir shaped `<worktree>/.git` — a
+# bare repo has none at all (`current-repo` already refuses that case before
+# this runs), and a submodule's is `<parent>/.git/modules/<name>`. Neither is
+# a "linked worktree of another checkout" in the sense this function resolves,
+# so both fall back to the repo path they were given: for a submodule that IS
+# already its own main (and only) worktree.
 export def main-worktree [repo_in: string]: nothing -> string {
     let repo = (expand-path $repo_in)
-    let listed = (do { ^git -C $repo worktree list --porcelain } | complete)
-    if $listed.exit_code != 0 {
-        error make {msg: $"cannot list worktrees for ($repo): ($listed.stderr | str trim)"}
+    let common = (do { ^git -C $repo rev-parse --path-format=absolute --git-common-dir } | complete)
+    if $common.exit_code != 0 {
+        error make {msg: $"cannot resolve the git directory for ($repo): ($common.stderr | str trim)"}
     }
-    let first = (
-        $listed.stdout
-        | lines
-        | where {|l| $l | str starts-with "worktree " }
-        | first
-    )
-    $first | str replace "worktree " "" | str trim
+    let common_dir = ($common.stdout | str trim)
+    if ($common_dir | str ends-with "/.git") {
+        $common_dir | path dirname
+    } else {
+        $repo
+    }
 }
 
 # Where a worker runs, and on which branch.
@@ -3242,7 +3331,7 @@ def "main spawn" [
         }
     }
 
-    let run = (if ($run | is-empty) { mint-run } else { $run })
+    let run = (if ($run | is-empty) { next-run-id } else { $run })
     let session = (if ($session | is-empty) { mint-session } else { $session })
     let minted = ($uid | is-empty)
 

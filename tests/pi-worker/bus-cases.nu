@@ -712,18 +712,10 @@ let cases = [
         assert-true ((mint-session) =~ '^[0-9a-f]{8}-[0-9a-f]{4}-') "and actually a uuid"
     })
 
-    (run-case "bus/a-run-is-minted-when-none-is-given" {
-        let root = (make-runtime "mint-run")
-        with-runtime $root {
-            assert-eq (mint-run) "r1" "the first run of an empty bus"
-            bus-send "w" --run "r1" --payload {stage: "wk-build", task: "t"}
-            assert-eq (mint-run) "r2" "the next free one"
-            # A run whose name is not `r<N>` must not confuse the counter.
-            bus-send "w" --run "custom" --payload {stage: "wk-build", task: "t"}
-            assert-eq (mint-run) "r2" "names outside the pattern are ignored, not parsed"
-        }
-        rm -rf $root
-    })
+    # `mint-run` is retired by sp029 T1 (project scoping replaces run
+    # scoping); `spawn`'s own minted-run behavior is CLI surface owned by T9
+    # and out of scope here. See the `project/*` cases below for what
+    # replaces it.
 
     (run-case "bus/wait-can-block-until-a-result-lands" {
         # `wait` peeked and returned nothing, so an agent told to "wait for its
@@ -976,6 +968,94 @@ bus-result "impl-a" --run "run-1" --result {status: "complete", summary: "second
         rm -rf $root
     })
 
+    # --------------------------------------------------- project scoping (sp029 T1)
+    #
+    # `project-dir` replaces the run id as the bus's address: a slug of the
+    # repo's MAIN worktree, so every agent working on it — from the main
+    # worktree or any `wk-*` of it — reaches the same directory without being
+    # told an id. `cd` is scoped with `do { }` (nushell restores $env.PWD when
+    # the block exits) so a case never leaks its directory into the next one.
+
+    (run-case "project/main-and-a-linked-worktree-share-one-project-dir" {
+        let repo = (make-repo "proj-shared")
+        let root = (make-runtime "proj-shared")
+        with-runtime $root {
+            let wk = (worktree-allocate --repo $repo --task "t1")
+            let from_main = (do { cd $repo; project-dir })
+            let from_wk = (do { cd $wk.path; project-dir })
+            assert-eq $from_main $from_wk "a worker in a wk-* worktree addresses the same project as the main worktree"
+            assert-true ($from_main | str starts-with $root) "still rooted at this test's own XDG_RUNTIME_DIR"
+            assert-true ($from_main | str ends-with "/bus") "project-dir names the bus subtree specifically"
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "project/similar-paths-slug-to-different-projects" {
+        # `/a/b` and `/a-b` must not collide: a path separator and a literal
+        # hyphen both flatten to `-` under a naive sanitizer, which is exactly
+        # the bug a prefix-only slug would have.
+        let base = ([(fixture-base) $"proj-collide-(random chars --length 6)"] | path join)
+        let repo_ab = ($base | path join "a" "b")
+        let repo_a_dash_b = ($"($base)-a-b")
+        mkdir ($repo_ab | path dirname)
+        ^git init -q -b main $repo_ab
+        ^git -C $repo_ab commit -q --allow-empty -m seed
+        ^git init -q -b main $repo_a_dash_b
+        ^git -C $repo_a_dash_b commit -q --allow-empty -m seed
+
+        let root = (make-runtime "proj-collide")
+        with-runtime $root {
+            let d1 = (do { cd $repo_ab; project-dir })
+            let d2 = (do { cd $repo_a_dash_b; project-dir })
+            assert-true ($d1 != $d2) $"/a/b and /a-b must not share a project dir: both resolved to ($d1)"
+        }
+        rm -rf $root; rm -rf $base; rm -rf $repo_a_dash_b
+    })
+
+    (run-case "project/outside-a-repository-is-refused-and-creates-nothing" {
+        let outside = ([(fixture-base) $"proj-outside-(random chars --length 6)"] | path join)
+        mkdir $outside
+        let root = (make-runtime "proj-outside")
+        with-runtime $root {
+            assert-rejects { do { cd $outside; project-dir } } "no project" "the refusal names what could not be resolved"
+            assert-true (not ($root | path join "pi-worker" | path exists)) "no directory was created by the failed lookup"
+        }
+        rm -rf $root; rm -rf $outside
+    })
+
+    (run-case "project/bus-messages-and-queue-are-created-0700" {
+        let repo = (make-repo "proj-perm")
+        let root = (make-runtime "proj-perm")
+        with-runtime $root {
+            do { cd $repo; ensure-bus-dirs }
+            let dir = (do { cd $repo; project-dir })
+            for sub in ["messages" "queue"] {
+                let d = ($dir | path join $sub)
+                assert-true ($d | path exists) $"($d) must exist"
+                assert-eq (dir-mode-of $d) "rwx------" $"($d) must be 0700"
+            }
+        }
+        rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "project/a-loosened-bus-tree-is-still-refused-by-ensure-bus-dirs" {
+        # `ensure-bus-dirs` reuses `ensure-dir` / `bus-assert-owned` unchanged
+        # rather than re-checking ownership itself, so this proves the
+        # refusal survives into the new call path. Ownership-by-another-uid
+        # is exercised directly against `bus-assert-owned` (via `/proc`,
+        # which is real and root-owned) in
+        # "bus/rejects-a-runtime-directory-owned-by-another-user" above —
+        # not repeated here since the check is the same function either way.
+        let repo = (make-repo "proj-owner")
+        let root = (make-runtime "proj-owner")
+        with-runtime $root {
+            let dir = (do { cd $repo; project-dir })
+            mkdir $dir
+            chmod 777 $dir
+            assert-rejects { do { cd $repo; ensure-bus-dirs } } "not 0700" "a world-writable bus tree is refused, not silently used"
+        }
+        rm -rf $root; rm -rf $repo
+    })
 
 ]
 
