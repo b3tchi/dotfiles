@@ -238,19 +238,30 @@ let cases = [
         # there. Making it pass its own address back is ceremony, and getting it
         # wrong is how a report lands on someone else's mail.
         let root = (make-runtime "worker-env")
+        # sp029 T9: `resolve-run` resolves a uid's run within the CALLER's own
+        # project, never a wide cross-project scan — so the identity's `cwd`
+        # and the CLI's own cwd must resolve to the SAME project slug, which a
+        # bare `/tmp/...` path never does against wherever the suite happens
+        # to run from.
+        let repo = (make-repo "worker-env")
         with-env {XDG_RUNTIME_DIR: $root} {
-            bus-identity "impl-1" --run "r1" --identity {
-                role: "impl", cwd: $nu.temp-dir, branch: "wk-t.0"
-                session: "sid-1", skill: "doc-draft", window: "impl-t@dotfiles"
+            do { cd $repo
+                bus-identity "impl-1" --run "r1" --identity {
+                    role: "impl", cwd: $repo, branch: "wk-t.0"
+                    session: "sid-1", skill: "doc-draft", window: "impl-t@dotfiles"
+                }
             }
         }
         let out = (with-env {PI_WORKER_RUN: "r1", PI_WORKER_UID: "impl-1"} {
-            run-cli "result" "--status" "complete" "--summary" "reported without an address" "--validation" "checked" --runtime $root
+            do { cd $repo
+                run-cli "result" "--status" "complete" "--summary" "reported without an address" "--validation" "checked" --runtime $root
+            }
         })
         assert-eq $out.exit_code 0 $"result should derive its address: ($out.stderr | str trim)"
         with-env {XDG_RUNTIME_DIR: $root} {
             assert-eq (bus-status "impl-1" --run "r1" | get state) "complete" "and the report lands on the right worker"
         }
+        rm -rf $repo
     })
 
     (run-case "cli/repo-is-derived-when-omitted-rather-than-arriving-as-null" {
@@ -361,46 +372,56 @@ let cases = [
     # a worker or a stub must be able to report from a shell.
 
     (run-case "cli/result-writes-an-outcome-a-waiting-initiator-can-read" {
+        # sp029 T9: `resolve-run` resolves a uid within the CALLER's own
+        # project (never a wide cross-project scan), so the identity's `cwd`
+        # and the CLI's own cwd have to resolve to the SAME project slug —
+        # a real repo, both written from and invoked from.
+        let repo = (make-repo "cli-result")
         let root = (make-runtime "cli-result")
-        with-runtime $root {
-            bus-identity "impl-a" --run "r1" --identity {
-                role: "impl", cwd: "/tmp/nowhere", branch: "wk-t1.0"
-                session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
-                commissioner: "orchestrator-1"
+        do { cd $repo
+            with-runtime $root {
+                bus-identity "impl-a" --run "r1" --identity {
+                    role: "impl", cwd: $repo, branch: "wk-t1.0"
+                    session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
+                    commissioner: "orchestrator-1"
+                }
             }
-        }
-        let out = (run-cli "result" "--as" "impl-a" "--status" "complete"
-            "--summary" "did the thing" "--validation" "TESTS PASS" --runtime $root)
-        assert-eq $out.exit_code 0 $"($out.stderr)"
+            let out = (run-cli "result" "--as" "impl-a" "--status" "complete"
+                "--summary" "did the thing" "--validation" "TESTS PASS" --runtime $root)
+            assert-eq $out.exit_code 0 $"($out.stderr)"
 
-        # The initiator's own verb must see it — reporting that only the writer
-        # can read is not reporting. sp029 T9: `wait` is now addressed by the
-        # COMMISSIONER's own uid, not the run — `worker-spawn` sets it to the
-        # run by default, but a hand-built identity (as here) names it
-        # explicitly.
-        let waited = (run-cli "wait" "--as" "orchestrator-1" --runtime $root)
-        assert-eq $waited.exit_code 0 $"($waited.stderr)"
-        let envelope = ($waited.stdout | from json | first)
-        assert-eq $envelope.content.status "complete" "carrying the reported status"
-        assert-eq $envelope.content.validation "TESTS PASS" "and its verdict"
-        rm -rf $root
+            # The initiator's own verb must see it — reporting that only the writer
+            # can read is not reporting. sp029 T9: `wait` is now addressed by the
+            # COMMISSIONER's own uid, not the run — `worker-spawn` sets it to the
+            # run by default, but a hand-built identity (as here) names it
+            # explicitly.
+            let waited = (run-cli "wait" "--as" "orchestrator-1" --runtime $root)
+            assert-eq $waited.exit_code 0 $"($waited.stderr)"
+            let envelope = ($waited.stdout | from json | first)
+            assert-eq $envelope.content.status "complete" "carrying the reported status"
+            assert-eq $envelope.content.validation "TESTS PASS" "and its verdict"
+        }
+        rm -rf $root; rm -rf $repo
     })
 
         (run-case "cli/result-refuses-a-status-only-the-initiator-may-grant" {
         # adr0017 / T6: `accepted` is the initiator's verdict. A worker that
         # could self-accept could close its own task.
+        let repo = (make-repo "cli-accept")
         let root = (make-runtime "cli-accept")
-        with-runtime $root {
-            bus-identity "impl-a" --run "r1" --identity {
-                role: "impl", cwd: "/tmp/nowhere", branch: "wk-t1.0"
-                session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
+        do { cd $repo
+            with-runtime $root {
+                bus-identity "impl-a" --run "r1" --identity {
+                    role: "impl", cwd: $repo, branch: "wk-t1.0"
+                    session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
+                }
             }
-        }
-        let out = (run-cli "result" "--as" "impl-a" "--status" "accepted"
-            "--summary" "I accept myself" --runtime $root)
+            let out = (run-cli "result" "--as" "impl-a" "--status" "accepted"
+                "--summary" "I accept myself" --runtime $root)
 
-        assert-true ($out.exit_code != 0) "self-acceptance must be refused"
-        rm -rf $root
+            assert-true ($out.exit_code != 0) "self-acceptance must be refused"
+        }
+        rm -rf $root; rm -rf $repo
     })
 
     (run-case "cli/settled-turns-a-silent-worker-into-a-readable-protocol-error" {
@@ -412,40 +433,46 @@ let cases = [
         # `bus-result` forwards a real report (dotfiles-8y9s, filed) — so this
         # asserts through `status`, which still reads the legacy outbox
         # `bus-settled` writes to either way.
+        let repo = (make-repo "cli-settled")
         let root = (make-runtime "cli-settled")
-        with-runtime $root {
-            bus-identity "impl-a" --run "r1" --identity {
-                role: "impl", cwd: "/tmp/nowhere", branch: "wk-t1.0"
-                session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
-                commissioner: "r1"
+        do { cd $repo
+            with-runtime $root {
+                bus-identity "impl-a" --run "r1" --identity {
+                    role: "impl", cwd: $repo, branch: "wk-t1.0"
+                    session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
+                    commissioner: "r1"
+                }
             }
-        }
-        let out = (run-cli "settled" "--as" "impl-a" --runtime $root)
-        assert-eq $out.exit_code 0 $"($out.stderr)"
+            let out = (run-cli "settled" "--as" "impl-a" --runtime $root)
+            assert-eq $out.exit_code 0 $"($out.stderr)"
 
-        let status_out = (run-cli "status" "impl-a" --runtime $root)
-        assert-eq $status_out.exit_code 0 $"($status_out.stderr)"
-        assert-eq ($status_out.stdout | from json | get state) "protocol_error" "settling silently is a readable protocol error"
-        rm -rf $root
+            let status_out = (run-cli "status" "impl-a" --runtime $root)
+            assert-eq $status_out.exit_code 0 $"($status_out.stderr)"
+            assert-eq ($status_out.stdout | from json | get state) "protocol_error" "settling silently is a readable protocol error"
+        }
+        rm -rf $root; rm -rf $repo
     })
 
     (run-case "cli/settled-after-a-real-result-stays-quiet" {
+        let repo = (make-repo "cli-settled-ok")
         let root = (make-runtime "cli-settled-ok")
-        with-runtime $root {
-            bus-identity "impl-a" --run "r1" --identity {
-                role: "impl", cwd: "/tmp/nowhere", branch: "wk-t1.0"
-                session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
-                commissioner: "r1"
+        do { cd $repo
+            with-runtime $root {
+                bus-identity "impl-a" --run "r1" --identity {
+                    role: "impl", cwd: $repo, branch: "wk-t1.0"
+                    session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
+                    commissioner: "r1"
+                }
+            }
+            run-cli "result" "--as" "impl-a" "--status" "blocked" "--summary" "stuck" --runtime $root
+            let out = (run-cli "settled" "--as" "impl-a" --runtime $root)
+            assert-eq $out.exit_code 0 $"($out.stderr)"
+
+            with-runtime $root {
+                assert-eq ((read-results "impl-a" --run "r1") | length) 1 "the real outcome is not buried"
             }
         }
-        run-cli "result" "--as" "impl-a" "--status" "blocked" "--summary" "stuck" --runtime $root
-        let out = (run-cli "settled" "--as" "impl-a" --runtime $root)
-        assert-eq $out.exit_code 0 $"($out.stderr)"
-
-        with-runtime $root {
-            assert-eq ((read-results "impl-a" --run "r1") | length) 1 "the real outcome is not buried"
-        }
-        rm -rf $root
+        rm -rf $root; rm -rf $repo
     })
 
     (run-case "cli/usage-lists-the-reporting-verbs" {

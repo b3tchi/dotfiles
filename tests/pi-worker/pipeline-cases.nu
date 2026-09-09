@@ -716,22 +716,28 @@ let cases = [
     })
 
     (run-case "pipeline/result-output-is-a-stable-envelope-shape" {
+        # sp029 T9: `resolve-run` resolves within the CALLER's own project —
+        # never a wide cross-project scan — so the identity's `cwd` and the
+        # CLI's own cwd must resolve to the same project slug.
+        let repo = (make-repo "t9-result-shape")
         let root = (make-runtime "t9-result-shape")
-        with-runtime $root {
-            bus-identity "impl-a" --run "r1" --identity {
-                role: "impl", cwd: "/tmp/nowhere", branch: "wk-t.0"
-                session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
+        do { cd $repo
+            with-runtime $root {
+                bus-identity "impl-a" --run "r1" --identity {
+                    role: "impl", cwd: $repo, branch: "wk-t.0"
+                    session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
+                }
             }
+            let out = (with-env {XDG_RUNTIME_DIR: $root} {
+                ^$nu.current-exe (cli-t9) result --as "impl-a" --status "complete" --summary "done" --validation "PASS" | complete
+            })
+            assert-eq $out.exit_code 0 $"($out.stderr)"
+            let written = ($out.stdout | from json)
+            assert-eq ($written | columns | sort) ["content" "created" "from" "kind" "payload" "protocol" "run" "sequence" "to" "uid"] "result's JSON shape is exactly these fields"
+            assert-eq $written.payload.status "complete" ""
+            assert-eq $written.payload.validation "PASS" ""
         }
-        let out = (with-env {XDG_RUNTIME_DIR: $root} {
-            ^$nu.current-exe (cli-t9) result --as "impl-a" --status "complete" --summary "done" --validation "PASS" | complete
-        })
-        assert-eq $out.exit_code 0 $"($out.stderr)"
-        let written = ($out.stdout | from json)
-        assert-eq ($written | columns | sort) ["content" "created" "from" "kind" "payload" "protocol" "run" "sequence" "to" "uid"] "result's JSON shape is exactly these fields"
-        assert-eq $written.payload.status "complete" ""
-        assert-eq $written.payload.validation "PASS" ""
-        rm -rf $root
+        rm -rf $root; rm -rf $repo
     })
 
     (run-case "pipeline/worker-spawn-records-the-run-as-commissioner-so-a-real-spawned-worker-is-commissioned" {

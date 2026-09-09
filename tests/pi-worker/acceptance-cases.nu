@@ -83,8 +83,13 @@ let cases = [
                         "--summary" "sp028 refined into 7 tasks; dependency graph acyclic; every task under 16h"
                         "--validation" "SRE PASS"
                     ]
+                    # sp029 T9: `resolve-run` resolves a uid within the
+                    # CALLER's own project — never a wide cross-project scan —
+                    # so the CLI has to run from inside the repo the worker's
+                    # identity was recorded under (here, the main worktree
+                    # itself, since this is an isolation=main spawn).
                     let reported = (with-env {XDG_RUNTIME_DIR: $root} {
-                        ^$nu.current-exe (cli) ...$report_args | complete
+                        do { cd $repo; ^$nu.current-exe (cli) ...$report_args | complete }
                     })
                     assert-eq $reported.exit_code 0 $"result failed: ($reported.stderr)"
 
@@ -94,7 +99,7 @@ let cases = [
                     # arrives — a project-addressed queue read, not "the
                     # oldest unacknowledged result across the run".
                     let waited = (with-env {XDG_RUNTIME_DIR: $root} {
-                        ^$nu.current-exe (cli) "wait" "--as" "acceptance" | complete
+                        do { cd $repo; ^$nu.current-exe (cli) "wait" "--as" "acceptance" | complete }
                     })
                     assert-eq $waited.exit_code 0 $"wait failed: ($waited.stderr)"
                     let envelope = ($waited.stdout | from json | first)

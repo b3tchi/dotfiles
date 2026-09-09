@@ -4347,27 +4347,19 @@ def "main spawn" [
 # identity check (already run/uid-shaped) reports "unknown" on ANY run value
 # that does not resolve, so a wrong-but-harmless "" reaches the same honest
 # answer instead of this helper duplicating that judgment.
-def resolve-run [uid: string]: nothing -> string {
-    let root = (state-root)
-    if not ($root | path exists) { return "" }
-    let slugs = (ls $root | where type == dir | get name | each {|d| $d | path basename })
-    for slug in $slugs {
-        let agents_dir = ($root | path join $slug "agents")
-        if not ($agents_dir | path exists) { continue }
-        let matches = (
-            ls $agents_dir
-            | where type == dir
-            | get name
-            | each {|d| $d | path basename }
-            | where {|run| (($agents_dir | path join $run $uid) | path exists) }
-        )
-        # More than one run recording the same uid (even within one slug) is
-        # the one genuinely ambiguous case — the first match is picked rather
-        # than refused, since every caller of this helper already has its own
-        # "unknown worker" refusal for the case that matters (nothing found).
-        if ($matches | is-not-empty) { return ($matches | first) }
-    }
-    ""
+def resolve-run [uid: string, repo: string = ""]: nothing -> string {
+    let base = (if ($repo | is-empty) { current-repo } else { $repo })
+    let slug = (resolve-project-slug $base)
+    let agents_dir = (state-root | path join $slug "agents")
+    if not ($agents_dir | path exists) { return "" }
+    let matches = (
+        ls $agents_dir
+        | where type == dir
+        | get name
+        | each {|d| $d | path basename }
+        | where {|run| (($agents_dir | path join $run $uid) | path exists) }
+    )
+    if ($matches | is-empty) { "" } else { $matches | first }
 }
 
 # Whose queue/outbox a verb acts as, absent an explicit `--as`. Mirrors

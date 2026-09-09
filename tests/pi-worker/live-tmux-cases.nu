@@ -742,8 +742,11 @@ let cases = [
             wait-for-dead $t.socket $w.window
 
             # sp029 T9: `liveness` no longer takes --run — a uid is looked up
-            # wherever this user's placement record last recorded it.
-            let out = (^$nu.current-exe (repo-root $env.FILE_PWD | path join "claude" "marketplace" "plugins" "pi-workers" "scripts" "pi-worker.nu") "liveness" "impl-a" "--socket" $t.socket | complete)
+            # within the CALLER's own project, so the CLI has to run from
+            # inside the same repo the worker's identity was recorded under.
+            let out = (do { cd $repo
+                ^$nu.current-exe (repo-root $env.FILE_PWD | path join "claude" "marketplace" "plugins" "pi-workers" "scripts" "pi-worker.nu") "liveness" "impl-a" "--socket" $t.socket | complete
+            })
             assert-eq $out.exit_code 0 $"($out.stderr)"
             let seen = ($out.stdout | from json)
             assert-eq $seen.verdict "exited" "the operator can ask, and gets the truth"
