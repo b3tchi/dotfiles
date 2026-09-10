@@ -746,16 +746,171 @@ let cases = [
         # `<role>-<n>` id is legible in a window name and in the frame, which a
         # uuid is not.
         let root = (make-runtime "mint-uid")
+        let repo = (make-repo "mint-uid")
         with-runtime $root {
-            assert-eq (mint-uid "r1" "impl") "impl-1" "the first of a role"
+            assert-eq (mint-uid "impl" $repo) "impl-1" "the first of a role"
             bus-identity "impl-1" --run "r1" --identity {
-                role: "impl", cwd: $nu.temp-dir, branch: "wk-t.0"
+                role: "impl", cwd: $repo, branch: "wk-t.0"
                 session: "s", skill: "wk-build", window: "impl-1@dotfiles"
             }
-            assert-eq (mint-uid "r1" "impl") "impl-2" "the next one skips the taken address"
-            assert-eq (mint-uid "r1" "rev") "rev-1" "counted per role, not per run"
-            assert-eq (mint-uid "r2" "impl") "impl-1" "and per run, not globally"
+            assert-eq (mint-uid "impl" $repo) "impl-2" "the next one skips the taken address"
+            assert-eq (mint-uid "rev" $repo) "rev-1" "counted per role"
         }
+        rm -rf $repo
+        rm -rf $root
+    })
+
+    (run-case "bus/an-address-minted-for-a-fresh-run-does-not-collide-with-a-live-one" {
+        # dotfiles-bg65, reproduced. `mint-uid` scoped its search to ONE run's
+        # directory, which made sense while `--run` was a caller-supplied
+        # grouping several workers shared. sp029 T9 retired `--run`: every
+        # spawn now mints its own run (`next-run-id`, unconditional), so the
+        # directory `mint-uid` searched was empty BY CONSTRUCTION and two
+        # ordinary same-role spawns both minted `<role>-1`.
+        #
+        # That is not a cosmetic clash. The peer bus addresses agents by bare
+        # uid, project-wide (`bus/queue/<uid>`), and `resolve-run` picks
+        # whichever run sorts first, so every uid-addressed verb (`stop`, `rm`,
+        # `status`, `resume`, `accept`) could only ever reach ONE of the two —
+        # the other stayed live with no CLI address at all. Observed live in
+        # the sp029 T11 smoke, which had to tear the loser down with `rm -rf`.
+        let root = (make-runtime "mint-collide")
+        let repo = (make-repo "mint-collide")
+        with-runtime $root {
+            # Spawn A: its own fresh run, no --uid.
+            let run_a = (next-run-id)
+            let uid_a = (mint-uid "peer" $repo)
+            bus-identity $uid_a --run $run_a --identity {
+                role: "peer", cwd: $repo, branch: "wk-a.0"
+                session: "sid-a", skill: "wk-build", window: "peer-a@dotfiles"
+            }
+            # Spawn B: the very next ordinary spawn, and so a fresh run again.
+            let run_b = (next-run-id)
+            let uid_b = (mint-uid "peer" $repo)
+            assert-true ($run_a != $run_b) "the fixture really is two separate runs"
+            assert-true ($uid_a != $uid_b) $"two spawns of one role must not share an address \(($uid_a) vs ($uid_b))"
+            assert-eq $uid_b "peer-2" "the second one counts past the first, whatever run it was filed under"
+        }
+        rm -rf $repo
+        rm -rf $root
+    })
+
+    (run-case "bus/addresses-are-unique-per-project-not-globally" {
+        # Uniqueness is scoped exactly where addressing is scoped: `resolve-run`
+        # searches ONE project's agents, and sp029's `## solution` makes
+        # cross-project addressing structurally impossible. Two projects
+        # therefore both start at `impl-1`, and neither can see the other's.
+        let root = (make-runtime "mint-scope")
+        let a = (make-repo "mint-scope-a")
+        let b = (make-repo "mint-scope-b")
+        with-runtime $root {
+            assert-eq (mint-uid "impl" $a) "impl-1" "the first of a role in project a"
+            bus-identity "impl-1" --run "r1" --identity {
+                role: "impl", cwd: $a, branch: "wk-t.0"
+                session: "s", skill: "wk-build", window: "impl-1@a"
+            }
+            assert-eq (mint-uid "impl" $a) "impl-2" "taken in project a"
+            assert-eq (mint-uid "impl" $b) "impl-1" "and free in project b"
+        }
+        rm -rf $a
+        rm -rf $b
+        rm -rf $root
+    })
+
+    (run-case "bus/a-worker-in-a-wk-worktree-mints-in-its-main-worktrees-project" {
+        # A worker stands in a throwaway `wk-*` tree. Slugging that path
+        # directly would make every worker its own project — the discovery
+        # failure sp029 T1 exists to fix — and would put uid uniqueness back
+        # where it started, one empty directory per spawn.
+        let root = (make-runtime "mint-wk")
+        let repo = (make-repo "mint-wk")
+        with-runtime $root {
+            let tree = (worker-placement --repo $repo --isolation "worktree" --subject "t1")
+            bus-identity "impl-1" --run "r1" --identity {
+                role: "impl", cwd: $tree.path, branch: $tree.branch
+                session: "s", skill: "wk-build", window: "impl-1@dotfiles"
+            }
+            assert-eq (mint-uid "impl" $tree.path) "impl-2" "the worktree resolves to the repo's own project"
+            assert-eq (mint-uid "impl" $repo) "impl-2" "and the repo agrees with it"
+        }
+        rm -rf $repo
+        rm -rf $root
+    })
+
+    (run-case "bus/a-released-address-is-free-to-mint-again" {
+        # `rm` is the documented way to recycle an address ("An address is
+        # claimed once: to reuse a uid after stopping or accepting it, call
+        # `rm`"). Once uniqueness is project-wide, that promise has to be kept
+        # project-wide too: releasing has to let go of the durable placement
+        # record, or the address is claimed forever and the message is a lie.
+        let root = (make-runtime "mint-release")
+        let repo = (make-repo "mint-release")
+        with-runtime $root {
+            let uid = (mint-uid "impl" $repo)
+            bus-identity $uid --run "r1" --identity {
+                role: "impl", cwd: $repo, branch: "wk-t.0"
+                session: "s", skill: "wk-build", window: $"($uid)@dotfiles"
+            }
+            assert-eq (mint-uid "impl" $repo) "impl-2" "claimed while it is in use"
+            worker-stop $uid --run "r1"
+            let released = (worker-release --run "r1" --uid $uid)
+            assert-true $released.removed "the address is freed"
+            assert-eq (mint-uid "impl" $repo) "impl-1" "and mintable again afterwards"
+        }
+        rm -rf $repo
+        rm -rf $root
+    })
+
+    (run-case "bus/an-occupied-address-is-refused-project-wide" {
+        # The occupied-address guard used to check the SAME fresh, always-empty
+        # run directory `mint-uid` searched, so it could not fire either. It
+        # answers for the project now: a uid already recorded under any run is
+        # refused, by name, rather than silently becoming a second worker on
+        # one queue.
+        let root = (make-runtime "claim-occupied")
+        let repo = (make-repo "claim-occupied")
+        with-runtime $root {
+            bus-identity "impl-1" --run "r1" --identity {
+                role: "impl", cwd: $repo, branch: "wk-t.0"
+                session: "s", skill: "wk-build", window: "impl-1@dotfiles"
+            }
+            assert-rejects { claim-address $repo "impl-1" } "already" "a recorded address is occupied"
+            # The claim itself is atomic: the winner of a race holds it, and the
+            # loser is refused rather than both proceeding on one address.
+            claim-address $repo "impl-9"
+            assert-rejects { claim-address $repo "impl-9" } "already" "a claimed address is occupied"
+            assert-eq (mint-uid "impl" $repo) "impl-2" "a claim counts as taken before any identity exists"
+            release-address $repo "impl-9"
+            claim-address $repo "impl-9" # freed, so claimable again
+        }
+        rm -rf $repo
+        rm -rf $root
+    })
+
+    (run-case "bus/racing-claims-cannot-both-win-one-address" {
+        # Two spawns starting at the same instant both see the same lowest-free
+        # uid — checking and then creating would let both proceed onto one
+        # queue, which is the failure this whole guard exists to prevent. The
+        # claim is a single `mkdir` without `-p`, so the kernel picks the
+        # winner and every loser is refused and re-mints (`main spawn`'s retry
+        # loop). Same reasoning as `claim-slot`'s link(2) on a sequence slot.
+        let root = (make-runtime "claim-race")
+        let repo = (make-repo "claim-race")
+        with-runtime $root {
+            let script = ([$root "claimer.nu"] | path join)
+            $"use (worker-script $env.FILE_PWD) *\ntry { claim-address \$env.RACE_REPO \"impl-1\"; print \"won\" } catch { print \"lost\" }" | save -f $script
+
+            let procs = ([1 2 3 4] | par-each {|n|
+                with-env {XDG_RUNTIME_DIR: $root, RACE_REPO: $repo} {
+                    ^$nu.current-exe $script | complete
+                }
+            })
+            for p in $procs { assert-eq $p.exit_code 0 $"claimer crashed: ($p.stderr)" }
+            let outcomes = ($procs | each {|p| $p.stdout | str trim })
+            assert-eq ($outcomes | where {|o| $o == "won" } | length) 1 "exactly one racer holds the address"
+            assert-eq ($outcomes | where {|o| $o == "lost" } | length) 3 "and every other one is refused"
+        }
+        rm -rf $repo
         rm -rf $root
     })
 

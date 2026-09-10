@@ -701,15 +701,17 @@ def resolve-project-slug [cwd: string]: nothing -> string {
 }
 
 # Nested one level deeper than the spec's own `agents/<uid>/` — `agents/<run>/
-# <uid>/` — and DELIBERATELY: `run` still exists pre-T9, and a uid is only
-# ever unique WITHIN its own run (`mint-uid` scopes its search to one run
-# directory). `live/two-workers-sharing-a-name-are-independently-addressable`
-# spawns "w1" in "run-a" and a SEPARATE "w1" in "run-b" against the very same
-# repo and requires stopping one to leave the other untouched — collapsing
-# `<uid>` alone to the project level would file both under the identical
-# state-home path and one worker's `stopped` marker would silently apply to
-# the other. Once T9 retires `run` this nesting is a single-element path
-# component and collapses to the letter of the spec on its own.
+# <uid>/`. That nesting was load-bearing while a uid was only unique within
+# its own run: two runs could hold a "w1" each, and collapsing `<uid>` to the
+# project level would have filed both under one path, where one worker's
+# `stopped` marker silently applied to the other.
+#
+# dotfiles-bg65 removed the premise rather than the nesting: a uid is now
+# unique per PROJECT (`mint-uid`/`claim-address`), so the `<run>` level is
+# vestigial — one uid can only ever appear under one run of it. It stays
+# because every reader and writer here is `(run, uid)`-shaped and flattening
+# them is a migration of stored state, not a rename; `project-uids` and
+# `resolve-run` both simply search across the level rather than within it.
 def agent-state-dir [slug: string, run: string, uid: string]: nothing -> string {
     state-root | path join $slug "agents" $run $uid
 }
@@ -766,6 +768,122 @@ def identity-log-dir [run: string, uid: string]: nothing -> any {
     let slug = (resolve-agent-slug $run $uid)
     if $slug == null { return null }
     agent-state-dir $slug $run $uid | path join "identity"
+}
+
+# ------------------------------------------ project-wide addresses (dotfiles-bg65)
+#
+# A uid is an address on the PROJECT's bus: `bus/queue/<uid>` is one file per
+# agent for the whole project, a message's `to` list names bare uids, and
+# `resolve-run` answers a uid by searching one project's whole agents tree.
+# Uniqueness therefore has to hold across the project — every run of it — and
+# for a while it did not: `mint-uid` searched a single run's directory, which
+# was a real namespace only while `--run` was a caller-supplied grouping that
+# several workers shared. sp029 T9 retired `--run`, so every spawn now mints
+# its own run and that directory is empty BY CONSTRUCTION — every ordinary
+# spawn of a role minted `<role>-1`, forever. Two live workers then shared one
+# queue, and `resolve-run` reached whichever run sorted first, leaving the
+# other addressable by nothing but `rm -rf` (observed in the sp029 T11 smoke).
+#
+# The project's queue directory, for a path standing inside it.
+#
+# The tolerant sibling of `project-dir`: same slug, same directory, but it
+# answers "" instead of raising when there is no runtime dir, because this is
+# only ever consulted to widen a taken-address set. A project with no bus
+# tree yet has no queues, which is the same answer an error would have to be
+# turned into at every call site.
+def project-queue-dir [base: string]: nothing -> string {
+    let root = ($env | get -o XDG_RUNTIME_DIR | default "")
+    if ($root | is-empty) { return "" }
+    $root | path join $BUS_DIRNAME (resolve-project-slug $base) "bus" "queue"
+}
+
+# Where this project's claimed addresses live: one directory per uid.
+#
+# Under `state-root`, beside the placement record and for the same reason
+# (sp029 T6): the runtime tree is wiped at logout while a worker's identity —
+# and so its address — outlives the login session that spawned it. A claim
+# whose only record was on the runtime bus would be forgotten by the next
+# login, which is exactly when re-minting an address that still resolves does
+# the most damage.
+def address-dir [slug: string]: nothing -> string {
+    state-root | path join $slug "addresses"
+}
+
+# Every uid this project can already address.
+#
+# The union of three sources, because each one holds addresses the others do
+# not:
+#
+#   agents/<run>/<uid>   the durable placement record — what `resolve-run`
+#                        answers a uid from, and so the authoritative set of
+#                        addresses a CLI verb can reach.
+#   addresses/<uid>      claims taken but not yet recorded: the window between
+#                        minting an address and writing its identity, which is
+#                        where two racing spawns used to both win.
+#   bus/queue/<uid>      addresses live on the project bus with no placement
+#                        record of their own — a session that claimed its own
+#                        address (sp029 T7) is exactly that shape. Those ids
+#                        are `self-<hex>` today and so cannot collide with a
+#                        `<role>-<n>`, but minting around them costs one `ls`
+#                        and does not depend on that staying true.
+export def project-uids [repo: string = ""]: nothing -> list<string> {
+    let base = (if ($repo | is-empty) { current-repo } else { $repo })
+    let slug = (resolve-project-slug $base)
+
+    let agents = (state-root | path join $slug "agents")
+    let placed = (if ($agents | path exists) {
+        ls $agents | where type == dir | get name | each {|run_dir|
+            ls $run_dir | where type == dir | get name | each {|d| $d | path basename }
+        } | flatten
+    } else { [] })
+
+    let claims = (address-dir $slug)
+    let claimed = (if ($claims | path exists) {
+        ls $claims | get name | each {|d| $d | path basename }
+    } else { [] })
+
+    let queues = (project-queue-dir $base)
+    let queued = (if ($queues | is-not-empty) and ($queues | path exists) {
+        ls $queues | get name | each {|f| $f | path basename }
+    } else { [] })
+
+    $placed | append $claimed | append $queued | uniq
+}
+
+# Take `uid` as this project's address, or refuse because someone else has it.
+#
+# Two steps, and the order matters. The `project-uids` check is what produces
+# a refusal an operator can act on — it names the address and says where it is
+# already known. The `mkdir` is what makes the claim SAFE: without `-p` it
+# fails when the directory exists, so it is one atomic create rather than a
+# check followed by a create, and two spawns racing for the same lowest-free
+# uid cannot both win it. That is the same reasoning `claim-slot` applies to a
+# sequence slot with link(2); `ensure-dir`'s `mkdir -p` is deliberately the
+# opposite (losing a create race there is a no-op, not an answer).
+export def claim-address [repo: string, uid: string]: nothing -> nothing {
+    let base = (if ($repo | is-empty) { current-repo } else { $repo })
+    let slug = (resolve-project-slug $base)
+    if $uid in (project-uids $base) {
+        error make {msg: $"($uid) is already an address in this project: spawning onto it would put two workers on one queue, where only one of them could ever be reached by uid. Use a different uid, or release this one with `rm --uid ($uid)` once it is finished with"}
+    }
+    let dir = (address-dir $slug)
+    ensure-dir (state-root)
+    ensure-dir (state-root | path join $slug)
+    ensure-dir $dir
+    # NOT `ensure-dir`: `-p` would make an occupied address look free.
+    let made = (do { ^mkdir -m 700 ($dir | path join $uid) } | complete)
+    if $made.exit_code != 0 {
+        error make {msg: $"($uid) is already an address in this project: another spawn claimed it first. Use a different uid, or release this one with `rm --uid ($uid)`"}
+    }
+}
+
+# Let go of a claimed address. Idempotent: releasing one nobody holds is not
+# an error, because both callers (a spawn that failed after claiming, and
+# `rm`) are cleaning up rather than asserting.
+export def release-address [repo: string, uid: string]: nothing -> nothing {
+    let base = (if ($repo | is-empty) { current-repo } else { $repo })
+    let dir = (address-dir (resolve-project-slug $base) | path join $uid)
+    if ($dir | path exists) { rm -rf $dir }
 }
 
 # Write `envelope` into `dir` at the next free sequence.
@@ -1499,13 +1617,17 @@ export def legacy-bus-pending [run: string]: nothing -> list<record> {
 # the tmux window, the frame's row, and the thing an operator says out loud.
 # `impl-2` survives all three; `0a77b1d8-3eed-4ff0-8bda-78159973b144` does not.
 
-# The lowest free `<role>-<n>` in a run.
-export def mint-uid [run: string, role: string]: nothing -> string {
+# The lowest free `<role>-<n>` in a PROJECT (dotfiles-bg65).
+#
+# `repo` is any path inside the project — the repo, or a worker's own `wk-*`
+# worktree, which `resolve-project-slug` walks back to the same main worktree
+# — and defaults to the caller's own repository, exactly like `resolve-run`.
+# It took a `run` before, and the run is gone rather than ignored: a per-run
+# search stopped being a namespace the moment sp029 T9 gave every spawn its
+# own run (see `project-uids` for the whole failure).
+export def mint-uid [role: string, repo: string = ""]: nothing -> string {
     let prefix = (if ($role | is-empty) { "w" } else { $role })
-    let dir = (bus-root | path join $run)
-    let taken = (if ($dir | path exists) {
-        ls $dir | where type == dir | get name | each {|d| $d | path basename }
-    } else { [] })
+    let taken = (project-uids $repo)
     mut n = 1
     while $"($prefix)-($n)" in $taken { $n = $n + 1 }
     $"($prefix)-($n)"
@@ -2118,7 +2240,9 @@ def bus-claims [repo: string]: nothing -> list<record> {
     let dir = (state-root | path join $slug "agents")
     if not ($dir | path exists) { return [] }
     # `agents/<run>/<uid>/` — see the comment on `agent-state-dir` for why the
-    # `run` level exists: a uid is only unique within its own run pre-T9.
+    # `run` level is still there. A uid appears under exactly one of them now
+    # that uniqueness is project-wide (dotfiles-bg65), so this walks the level
+    # rather than meaning anything by it.
     ls $dir | where type == dir | get name | each {|run_dir|
         let run = ($run_dir | path basename)
         ls $run_dir | where type == dir | get name | each {|uid_dir|
@@ -3139,6 +3263,48 @@ export def worker-spawn [
         error make {msg: $"($run)/($uid) already exists: that address has been used, and spawning onto it would inherit its mail and markers. Use a different uid, or release this one with `rm --run ($run) --uid ($uid)` once it is finished with"}
     }
 
+    # The guard above answers for ONE run, which stopped being an answer at
+    # all when sp029 T9 gave every spawn a fresh run of its own: the directory
+    # it checks is empty by construction, so it can no longer fire for the
+    # case it was written for (dotfiles-bg65). This one answers for the
+    # project — the scope a uid is actually an address in — and claims it
+    # atomically, so two spawns racing for the same lowest-free uid cannot
+    # both proceed.
+    claim-address $repo $uid
+    # Everything downstream allocates: a worktree, a branch, a tmux window. If
+    # any of it fails, nothing was spawned onto this address and holding it
+    # would burn the name for no one's benefit — so the claim is released and
+    # the original failure is re-raised untouched. A failure PAST the identity
+    # write keeps the address anyway, and deliberately: that record is the
+    # resume handle for a worker whose window never came up, and an address
+    # something can still be resumed from is not free.
+    let outcome = (try {
+        {ok: true, value: (worker-place --run $run --uid $uid --role $role --subject $subject --project $project --repo $repo --task $task --session $session --skill $skill --isolation $isolation --socket $socket)}
+    } catch {|e| {ok: false, error: $e} })
+    if not $outcome.ok {
+        release-address $repo $uid
+        error make $outcome.error.raw
+    }
+    $outcome.value
+}
+
+# Allocate the worker itself: the tmux target, the worktree, the identity and
+# the window. Split out of `worker-spawn` so the address claim above has a
+# failure boundary to release on, and for no other reason — the body is
+# unchanged.
+def worker-place [
+    --run: string
+    --uid: string
+    --role: string
+    --subject: string
+    --project: string
+    --repo: string
+    --task: string = ""
+    --session: string
+    --skill: string
+    --isolation: string
+    --socket: string = ""
+] {
     # Fail before allocating anything if the display host is unreachable.
     let reachable = (do { ^tmux ...(tmux-args $socket) list-sessions } | complete)
     if $reachable.exit_code != 0 {
@@ -3747,9 +3913,22 @@ export def worker-timeline [uid: string, --run: string]: nothing -> list<record>
 
 # Let go of a finished worker's address.
 #
-# The occupied-address guard claims an address for the life of the run
-# directory, so repeating a run otherwise needs a fresh id every time. This is
-# the deliberate way to reuse one.
+# The occupied-address guard claims an address for the life of the worker, so
+# repeating a run otherwise needs a fresh id every time. This is the
+# deliberate way to reuse one.
+#
+# Project-wide since dotfiles-bg65, because that is the scope a uid is an
+# address in: the runtime worker directory goes, and so do the PROJECT-level
+# records that make the uid resolvable — the durable placement record
+# (`agents/<run>/<uid>`, what `resolve-run` answers from), its slug pointer,
+# the address claim, and the bus queue. Leaving any of them would leave the
+# address taken while the tool tells its callers that `rm` is how an address
+# is recycled, and a later `mint-uid` would have to skip it forever.
+#
+# The placement record can go here and nowhere else: `worktrees-reclaim` keeps
+# a tree only while its claim is in a WORKING state, so a stopped or accepted
+# worker's tree was already sweepable before this record was removed — which
+# is why deleting it on an explicit `rm` changes no sweep's verdict.
 #
 # Refused while the worker is unfinished: its envelopes may be the only record
 # of what it did, and `running`, `blocked` or `waiting_human` all mean something
@@ -3763,10 +3942,36 @@ export def worker-release [--run: string, --uid: string]: nothing -> record {
     if $state not-in ["stopped" "accepted"] {
         error make {msg: $"refusing to release ($run)/($uid): it is ($state), and its envelopes may be the only record of what it did. Stop or accept it first"}
     }
+    # Read BEFORE anything is deleted: the identity's own `cwd` is what says
+    # which project this address belonged to, and it lives in the records
+    # below.
+    let identity = (bus-identity-of $uid --run $run)
+    let slug = (resolve-agent-slug $run $uid)
+
     rm -rf $dir
     # A run directory with nothing left in it is just clutter.
     let run_dir = (run-dir $run)
     if ($run_dir | path exists) and ((ls $run_dir | length) == 0) { rm -rf $run_dir }
+
+    if $identity != null {
+        let base = $identity.cwd
+        release-address $base $uid
+        let queues = (project-queue-dir $base)
+        if ($queues | is-not-empty) {
+            let queue = ($queues | path join $uid)
+            if ($queue | path exists) { rm -rf $queue }
+        }
+    }
+    if $slug != null {
+        let placement = (agent-state-dir $slug $run $uid)
+        if ($placement | path exists) { rm -rf $placement }
+        # The run level is per-run bookkeeping, not a record of its own.
+        let runs = (state-root | path join $slug "agents" $run)
+        if ($runs | path exists) and ((ls $runs | length) == 0) { rm -rf $runs }
+    }
+    let pointer = (agent-index-path $run $uid)
+    if ($pointer | path exists) { rm -rf $pointer }
+
     {run: $run, uid: $uid, removed: true, state: $state}
 }
 
@@ -3953,7 +4158,9 @@ export def worker-respawn [
     # gone session group must not leave a worktree behind to prune by hand.
     let target = (resolve-project-session $project --socket $socket)
 
-    let new_uid = (mint-uid $run $old.role)
+    # Project-scoped, like every other mint: a respawn's new uid is an
+    # address on the same bus its predecessor was on (dotfiles-bg65).
+    let new_uid = (mint-uid $old.role $repo)
     let main = (main-worktree $repo)
     # The branch is what a respawn wants to land on, and its directory too when
     # one is still registered: a released-but-unaccepted worker leaves both
@@ -4297,14 +4504,15 @@ def "main spawn" [
     let session = (if ($session | is-empty) { mint-session } else { $session })
     let minted = ($uid | is-empty)
 
-    # Retried only when the address was MINTED. Two spawns racing for the same
-    # run can each mint the same lowest-free uid, and the occupied-address
-    # guard is the thing that notices. An explicitly passed uid gets no retry:
-    # its refusal is the answer the caller asked for, and quietly spawning
-    # somewhere else would be worse than failing.
+    # Retried only when the address was MINTED. Two spawns racing can each mint
+    # the same lowest-free uid for the project, and `claim-address`'s atomic
+    # create is what notices — the loser is refused, re-mints, and takes the
+    # next free address. An explicitly passed uid gets no retry: its refusal is
+    # the answer the caller asked for, and quietly spawning somewhere else
+    # would be worse than failing.
     mut attempt = 0
     loop {
-        let uid = (if $minted { mint-uid $run $role } else { $uid })
+        let uid = (if $minted { mint-uid $role $repo } else { $uid })
         let outcome = (try {
             {ok: true, value: (worker-spawn --run $run --uid $uid --role $role --subject $subject --project $project --repo $repo --task $task --session $session --skill $skill --isolation $isolation --socket $socket)}
         } catch {|e|
@@ -4360,6 +4568,11 @@ def resolve-run [uid: string, repo: string = ""]: nothing -> string {
         | each {|d| $d | path basename }
         | where {|run| (($agents_dir | path join $run $uid) | path exists) }
     )
+    # `first` is not a tie-break: `mint-uid`/`claim-address` keep a uid unique
+    # across the whole project, so at most one run can hold it. It used to be
+    # one — two same-role spawns both minted `<role>-1`, and whichever run
+    # sorted first got every uid-addressed verb while the other worker stayed
+    # live with no address at all (dotfiles-bg65).
     if ($matches | is-empty) { "" } else { $matches | first }
 }
 

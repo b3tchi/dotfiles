@@ -777,18 +777,35 @@ let cases = [
         }
     })
 
-    (run-case "live/two-workers-sharing-a-name-are-independently-addressable" {
-        # The exact shape that broke: same role, same subject, different runs.
+    (run-case "live/two-workers-sharing-a-window-name-are-independently-addressable" {
+        # The exact shape that broke: same role, same subject, different runs —
+        # one display NAME for two workers, which is why nothing addresses a
+        # worker by its window name.
+        #
+        # They no longer share a UID. dotfiles-bg65: a uid is an address on the
+        # project's bus, so two same-role spawns take two addresses — minted
+        # here exactly as `main spawn` mints them, with no `--uid` from the
+        # caller. That is the case that used to hand both workers `rev-1`.
         with-server "collide" {|t, repo|
-            let a = (worker-spawn --run "run-a" --uid "w1" --role "rev" --subject "demo" --project "dotfiles" --repo $repo --task "demo" --session "sid-a" --skill "wk-build" --isolation "worktree" --socket $t.socket)
-            let b = (worker-spawn --run "run-b" --uid "w1" --role "rev" --subject "demo" --project "dotfiles" --repo $repo --task "demo" --session "sid-b" --skill "wk-build" --isolation "worktree" --socket $t.socket)
+            let uid_a = (mint-uid "rev" $repo)
+            let a = (worker-spawn --run "run-a" --uid $uid_a --role "rev" --subject "demo" --project "dotfiles" --repo $repo --task "demo" --session "sid-a" --skill "wk-build" --isolation "worktree" --socket $t.socket)
+            let uid_b = (mint-uid "rev" $repo)
+            assert-true ($uid_a != $uid_b) $"two spawns of one role must not share an address \(($uid_a) vs ($uid_b))"
+            let b = (worker-spawn --run "run-b" --uid $uid_b --role "rev" --subject "demo" --project "dotfiles" --repo $repo --task "demo" --session "sid-b" --skill "wk-build" --isolation "worktree" --socket $t.socket)
 
             assert-eq $a.window $b.window "they really do share a display name"
             assert-true ($a.window_id != $b.window_id) "but not an id"
 
+            # And an address that IS taken is refused, whatever run it is
+            # offered under: the guard used to check the spawn's own fresh run
+            # directory, which is empty by construction, so it never fired.
+            assert-rejects {
+                worker-spawn --run "run-c" --uid $uid_a --role "rev" --subject "demo" --project "dotfiles" --repo $repo --task "demo" --session "sid-c" --skill "wk-build" --isolation "worktree" --socket $t.socket
+            } "already" "an occupied address is refused, not silently shared"
+
             # Stopping one must leave the other running.
-            worker-stop "w1" --run "run-a" --socket $t.socket
-            assert-eq (bus-status "w1" --run "run-b" | get state) "created" "the other worker is untouched"
+            worker-stop $uid_a --run "run-a" --socket $t.socket
+            assert-eq (bus-status $uid_b --run "run-b" | get state) "created" "the other worker is untouched"
             assert-eq (worker-liveness $b.window_id --socket $t.socket | get verdict) "live" "and still alive"
             # This assertion's own message said "gone" while expecting
             # `unknown`: the prose had the right word before the verdict

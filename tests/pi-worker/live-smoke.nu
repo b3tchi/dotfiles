@@ -280,13 +280,14 @@ def main [
         print ""
         step "phase: two peers addressing each other directly"
         let outcome = (try {
-            # Explicit --uid on every spawn below (dotfiles-bg65): `mint-uid`'s
-            # per-run uniqueness check is vestigial now that every spawn call
-            # mints its own fresh, single-worker run — two ordinary
-            # `--role peer` spawns with no --uid both mint `peer-1`, live,
-            # confirmed the first time this script ran. Passing distinct uids
-            # explicitly is the workaround; the collision itself is filed, not
-            # fixed here.
+            # Explicit --uid on every spawn below. It is no longer a
+            # workaround — dotfiles-bg65 made minting project-wide, so two
+            # ordinary `--role peer` spawns now take two addresses rather than
+            # both minting `peer-1` (which is what this script found the first
+            # time it ran, leaving one peer reachable by nothing but `rm -rf`).
+            # The tagged names stay because THIS script names the peers to each
+            # other in its instructions, and `peer-a-<tag>` reads better in a
+            # transcript than whatever number the project's counter is on.
             let a = (cli ["spawn" "--uid" $"peer-a-($tag)" "--role" "peer" "--subject" $"smoke-peer-a-($tag)" "--skill" "smoke-peer" "--isolation" "worktree" "--repo" $repo])
             let b = (cli ["spawn" "--uid" $"peer-b-($tag)" "--role" "peer" "--subject" $"smoke-peer-b-($tag)" "--skill" "smoke-peer" "--isolation" "worktree" "--repo" $repo])
             $all_workers = ($all_workers | append [$a $b])
