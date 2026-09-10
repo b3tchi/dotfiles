@@ -819,8 +819,9 @@ describe("initiator tool", () => {
     // The human head is ordered like a frame row — address, state, then the
     // prose — without leading with an id that no tool verb accepts.
     expect(out.detail).toBe("from impl-1 complete · noted BASALT-7");
-    // The durable bus row still has its id in raw JSON for grepping and order.
-    expect(JSON.parse(raw)[0].id).toBe("01M25TS807Q3ARS5RQB51AVVCM");
+    // The tool's raw/JSON result still exposes the durable row id for grepping
+    // and ordering; only its human-facing detail drops the id.
+    expect(JSON.parse(out.raw ?? "")[0].id).toBe("01M25TS807Q3ARS5RQB51AVVCM");
   });
 
   test("an opaque peer message has an id-free head without a result label", async () => {

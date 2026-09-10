@@ -1027,6 +1027,8 @@ export type ExecFn = (
 export interface ReportOutcome {
   ok: boolean;
   detail: string;
+  /** Unsummarised CLI JSON, when the human-facing detail deliberately compresses it. */
+  raw?: string;
 }
 
 export interface ResultTool {
@@ -2516,7 +2518,13 @@ export function createInitiatorTool(opts: { exec: ExecFn; cwd?: string }): Initi
           // it as failure would make an idle worker look broken.
           return { ok: true, detail: "no mail" };
         }
-        return { ok: true, detail: summarise(args.verb, stdout) };
+        return {
+          ok: true,
+          detail: summarise(args.verb, stdout),
+          // Pi serialises `details` in its raw/JSON modes. Keep the complete
+          // wait envelopes there even though the transcript head is concise.
+          ...(args.verb === "wait" ? { raw: stdout } : {}),
+        };
       } catch (err) {
         return { ok: false, detail: String(err) };
       }
