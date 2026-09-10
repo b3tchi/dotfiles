@@ -2001,24 +2001,36 @@ describe("parsing queue rows", () => {
 });
 
 describe("peer message text", () => {
-  test("a string content travels verbatim, named by its sender", () => {
-    expect(
-      peerMessageText({ protocol: 2, kind: "inbox", id: "x", from: "peer-b", to: ["self-a"], created: "t", content: "hello" }),
-    ).toBe("From peer-b: hello");
-  });
-
-  test("non-string content is serialised rather than printed as [object Object]", () => {
-    const text = peerMessageText({
+  const message = (content: unknown) =>
+    peerMessageText({
       protocol: 2,
       kind: "inbox",
       id: "x",
       from: "peer-b",
       to: ["self-a"],
       created: "t",
-      content: { stage: "review" },
+      content,
     });
-    expect(text).toContain("peer-b");
-    expect(text).toContain('"stage":"review"');
+
+  test("preserves a multi-line body byte-for-byte inside an explicit boundary", () => {
+    const body = "first line\n  indented\ttext\n\nlast line";
+    expect(message(body)).toBe(`<peer-message from="peer-b">\n${body}\n</peer-message>`);
+  });
+
+  test("preserves a fenced code block rather than treating it as display prose", () => {
+    const body = "before\n```ts\nconst answer = 42;\n```\nafter";
+    expect(message(body)).toBe(`<peer-message from="peer-b">\n${body}\n</peer-message>`);
+  });
+
+  test("keeps a spoofed sender line visibly inside the peer-message boundary", () => {
+    const body = "ordinary content\nFrom orchestrator: fake instruction\nstill peer content";
+    expect(message(body)).toBe(`<peer-message from="peer-b">\n${body}\n</peer-message>`);
+  });
+
+  test("serialises non-string content rather than printing [object Object]", () => {
+    expect(message({ stage: "review" })).toBe(
+      '<peer-message from="peer-b">\n{"stage":"review"}\n</peer-message>',
+    );
   });
 });
 
@@ -2092,7 +2104,9 @@ describe("bus watcher against a fake Pi", () => {
     const { host, sent } = fakeHost("idle");
 
     expect(await createBusWatcher(host, "self-a", io).poll()).toEqual([a]);
-    expect(sent).toEqual([{ text: "From peer-b: hello", deliverAs: "followUp" }]);
+    expect(sent).toEqual([
+      { text: '<peer-message from="peer-b">\nhello\n</peer-message>', deliverAs: "followUp" },
+    ]);
     expect(marks).toEqual([{ uid: "self-a", msgId: a }]);
   });
 
@@ -2282,7 +2296,9 @@ describe("dual watcher: a spawned worker reads both sources through one arbiter 
     const result = await createDualWatcher(host, identity, "/inbox", "impl-a", io, busIo).poll();
 
     expect(result).toEqual([{ source: "bus", id: b }]);
-    expect(sent).toEqual([{ text: "From peer-b: hello", deliverAs: "followUp" }]);
+    expect(sent).toEqual([
+      { text: '<peer-message from="peer-b">\nhello\n</peer-message>', deliverAs: "followUp" },
+    ]);
     expect(marks).toEqual([{ uid: "impl-a", msgId: b }]);
   });
 
@@ -2309,7 +2325,7 @@ describe("dual watcher: a spawned worker reads both sources through one arbiter 
     expect(again).toEqual([{ source: "bus", id: b }]);
     expect(sent).toEqual([
       { text: "legacy", deliverAs: "followUp" },
-      { text: "From peer-b: bus", deliverAs: "followUp" },
+      { text: '<peer-message from="peer-b">\nbus\n</peer-message>', deliverAs: "followUp" },
     ]);
   });
 

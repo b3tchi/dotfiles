@@ -668,13 +668,14 @@ export interface PeerEnvelope {
  * this only decides how to SHOW it, never what it means. A string travels
  * verbatim; anything else is serialised, because the alternative is
  * `[object Object]`. The sender is named because a self-claimed session may
- * have several contacts, and which one spoke is not something the transport
- * can infer for the agent.
+ * have several contacts. The boundary keeps sender-like lines in the opaque
+ * body visibly scoped to that body; it does not authenticate `from`, which is
+ * self-asserted by the sender.
  */
 export function peerMessageText(envelope: PeerEnvelope): string {
   const body =
     typeof envelope.content === "string" ? envelope.content : JSON.stringify(envelope.content);
-  return `From ${envelope.from}: ${body}`;
+  return `<peer-message from="${envelope.from}">\n${body}\n</peer-message>`;
 }
 
 /** The id and suffix widths T2/T3 fixed the queue row's shape around. */
