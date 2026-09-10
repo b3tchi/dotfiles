@@ -1,19 +1,11 @@
 {
   "theme": "dark",
   "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.5",
+  "defaultModel": "gpt-5.6-sol",
+  "enableSkillCommands": true,
   "packages": [
-    "npm:@vanillagreen/pi-caveman@2.0.0",
-    "~/.dotfiles/claude/marketplace/plugins/infinifu"
+    "~/.dotfiles/claude/marketplace/plugins/infinifu",
+    "~/.dotfiles/claude/marketplace/plugins/pi-workers"
   ],
-  "kendex": {
-    "extensionManager": {
-      "config": {
-        "@vanillagreen/pi-caveman": {
-          "mode": "full"
-        }
-      }
-    }
-  },
-  "lastChangelogVersion": "0.84.4"
+  "lastChangelogVersion": "0.85.1"
 }
