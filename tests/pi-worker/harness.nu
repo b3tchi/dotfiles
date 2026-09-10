@@ -364,3 +364,91 @@ export def drop-tmux-server [socket: string] {
     let path = ([($env | get -o TMUX_TMPDIR | default "/tmp") $"tmux-(^id -u | str trim)" $socket] | path join)
     rm -f $path
 }
+
+# ------------------------------------------------------------ pane capture
+#
+# Moved here from live-tmux-cases.nu (sp029 T11) so live-smoke.nu can share
+# the exact primitive live-tmux-cases.nu's own regression case backs, rather
+# than a second hand-rolled copy drifting from it. Both suites `use harness.nu
+# *` already.
+
+# Read-only inspection of what a pane is showing. Reading is not messaging:
+# capture-pane never writes to the pane, and it is used here only to prove the
+# ABSENCE of injected text, or to record verbatim what a live pane showed.
+#
+# An empty `socket` means the default tmux server — `-L ""` would instead ask
+# tmux for a server literally named "", which is not the same thing and not
+# what a caller passing "" means. live-tmux-cases.nu always passes a real
+# private socket; live-smoke.nu runs against the operator's own real server
+# and passes "" for exactly this reason.
+export def pane-text [socket: string, target: string]: nothing -> string {
+    let args = (if ($socket | is-empty) { [] } else { ["-L" $socket] })
+    let out = (do { ^tmux ...$args capture-pane -p -t $target } | complete)
+    if $out.exit_code != 0 { "" } else { $out.stdout }
+}
+
+# Wait until a pane stops changing, and return what it settled on.
+#
+# Every flaky case in this suite did `sleep 600ms` and then snapshotted a
+# pane. That is a bet on how long the pane's program takes to draw, and on a
+# loaded machine it loses: the baseline gets captured mid-draw, the rest
+# arrives afterwards, and a case asserting "nothing changed" sees the draw
+# finish and calls it an injection.
+#
+# The honest baseline is not "after a while" but "once it has stopped moving".
+export def settled-pane-text [
+    socket: string
+    target: string
+    --quiet: duration = 300ms      # unchanged for this long counts as settled
+    --deadline: duration = 15sec
+    # No return-type annotation: nu will not type-check a `loop` whose exits
+    # are `return`s against one.
+] {
+    let give_up = ((date now) + $deadline)
+    mut last = (pane-text $socket $target)
+    mut since = (date now)
+    loop {
+        sleep 50ms
+        let seen = (pane-text $socket $target)
+        if $seen != $last {
+            $last = $seen
+            $since = (date now)
+        } else if ($last | str trim | is-not-empty) and (((date now) - $since) >= $quiet) {
+            # An EMPTY pane is not a settled one — it is a program that has not
+            # drawn anything yet, and on this box that can take longer than the
+            # quiet period to produce its first byte. Accepting empty as
+            # settled turned the race it was written to remove into the same
+            # race with better error text: the baseline came back "", the
+            # first draw arrived after, and the case reported it as an
+            # injection.
+            return $last
+        }
+        if (date now) >= $give_up {
+            error make {msg: $"pane ($target) never showed settled content within ($deadline). Last read: '(($last | str substring 0..160))'"}
+        }
+    }
+}
+
+# Assert a pane does not change, for a while.
+#
+# Strictly stronger than sleeping once and comparing. A single late sample can
+# miss an injection that lands before it and after the sleep; sampling
+# throughout the window catches anything that appears at any point in it. It
+# also degrades the right way under load — a slow machine takes MORE samples,
+# not a later one.
+export def assert-pane-unchanged [
+    socket: string
+    target: string
+    before: string
+    --watch: duration = 1500ms
+] {
+    let until = ((date now) + $watch)
+    loop {
+        let seen = (pane-text $socket $target)
+        if $seen != $before {
+            error make {msg: $"pane ($target) changed, where nothing may be written.\n  before: (($before | str substring 0..200))\n  after:  (($seen | str substring 0..200))"}
+        }
+        if (date now) >= $until { return }
+        sleep 100ms
+    }
+}
