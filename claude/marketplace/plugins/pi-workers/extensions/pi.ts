@@ -827,6 +827,75 @@ export function createBusWatcher(host: WatcherHost, uid: string, io: BusWatcherI
   };
 }
 
+export interface DualDelivery {
+  source: "inbox" | "bus";
+  id: string;
+}
+
+export interface DualWatcher {
+  poll(): Promise<DualDelivery[]>;
+}
+
+/**
+ * A spawned worker's watcher (dotfiles-uddc).
+ *
+ * `pi-worker send --to <uid>` (sp029 T3/T9) writes only the new project bus;
+ * a spawned worker previously ran `createInboxWatcher` alone, which never
+ * reads it, so a message addressed to a spawned worker sat unread forever —
+ * confirmed live in both isolation modes. The fix is not "run both watchers":
+ * two independent loops each calling `host.agentState()` around their own
+ * delivery would both read `idle` before either delivery's `sendUserMessage`
+ * call actually starts a turn, so both could deliver into the same idle
+ * window — exactly the hazard `decideDelivery`'s per-envelope re-read (see
+ * `createInboxWatcher`, dotfiles-c4kh) exists to prevent, just reintroduced
+ * across sources instead of within one.
+ *
+ * So there is exactly one arbiter. `decideDelivery` only ever looks at
+ * `state` (`_envelope` is unused — see its signature above), which means the
+ * agent's state can be read ONCE per tick and shared: this freezes it into a
+ * shim host and hands that shim to an unmodified `createInboxWatcher` and
+ * `createBusWatcher` in turn, rather than reimplementing either loop's
+ * scanning, skip, and mark-read behavior a second time. The legacy inbox is
+ * tried first and, if it delivers or defers, the bus is not even consulted
+ * this tick — at most one delivery total, matching "one message per poll" for
+ * the combined watcher, not just for each source alone. Both still read a
+ * fresh `frozenState` next tick, so state re-derivation is preserved.
+ */
+export function createDualWatcher(
+  host: WatcherHost,
+  identity: WorkerIdentity,
+  inboxDir: string,
+  uid: string,
+  io: WatcherIO,
+  busIo: BusWatcherIO,
+): DualWatcher {
+  let frozenState: AgentState = "unknown";
+  const shim: WatcherHost = {
+    agentState: () => frozenState,
+    sendUserMessage: host.sendUserMessage,
+  };
+  const inbox = createInboxWatcher(shim, identity, inboxDir, io);
+  const bus = createBusWatcher(shim, uid, busIo);
+
+  return {
+    async poll(): Promise<DualDelivery[]> {
+      if (typeof host.sendUserMessage !== "function") {
+        io.log("pi-worker: host exposes no sendUserMessage; delivery is inert");
+        return [];
+      }
+      frozenState = host.agentState ? host.agentState() : "unknown";
+
+      const fromInbox = inbox.poll();
+      if (fromInbox.length > 0) {
+        return fromInbox.map((sequence) => ({ source: "inbox" as const, id: String(sequence) }));
+      }
+
+      const fromBus = await bus.poll();
+      return fromBus.map((id) => ({ source: "bus" as const, id }));
+    },
+  };
+}
+
 /**
  * Mint an address for a session nobody spawned.
  *
@@ -2806,12 +2875,40 @@ export default function piWorker(pi: ExtensionAPI): void {
     }
   }
 
-  const watcher = createInboxWatcher(host, identity, inboxDir, io);
+  // A spawned worker reads BOTH the legacy inbox (`resume --feedback` still
+  // rides it — dotfiles-hp6v tracks its retirement) and the new project bus
+  // (what `send --to <uid>` writes) through one arbiter (dotfiles-uddc). The
+  // bus side needs the project directory, resolved the same way the
+  // self-claimed branch above resolves it — but a worker must not sit inert
+  // waiting on that exec: the loop below starts against a no-op bus (zero
+  // mail, never an error, same as an unplaced queue) and is upgraded to the
+  // real one the moment resolution finishes, so legacy delivery is never
+  // delayed by it.
+  let busIo: BusWatcherIO = {
+    readQueue: () => null,
+    readMessage: () => null,
+    markRead: async () => {},
+    log: (line) => io.log(line),
+  };
+  if (exec) {
+    const modulePath = join(dirname(fileURLToPath(import.meta.url)), "..", "scripts", "pi-worker.nu");
+    void resolveProjectBusDir(exec, modulePath).then((busDir) => {
+      if (busDir) busIo = createFsIo(busDir, exec, modulePath);
+    });
+  }
+  const watcher = createDualWatcher(host, identity, inboxDir, uid, io, {
+    readQueue: (u) => busIo.readQueue(u),
+    readMessage: (id) => busIo.readMessage(id),
+    markRead: (u, id) => busIo.markRead(u, id),
+    log: (line) => busIo.log(line),
+  });
   startWatcherLoop({
     checkAlive: () => true,
-    tick: () => watcher.poll(),
+    tick: () => {
+      void watcher.poll().catch((err) => io.log(`pi-worker: watcher poll failed: ${err}`));
+    },
     intervalMs: 1000,
     // A watcher fault must never propagate into the host's event loop.
-    onError: (err) => io.log(`pi-worker: inbox poll failed: ${err}`),
+    onError: (err) => io.log(`pi-worker: watcher tick failed: ${err}`),
   });
 }

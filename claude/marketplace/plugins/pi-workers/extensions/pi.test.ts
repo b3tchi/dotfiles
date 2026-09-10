@@ -57,6 +57,7 @@ import {
   startWatcherLoop,
   MSG_ID_CHARS,
   QUEUE_SUFFIX_CHARS,
+  createDualWatcher,
 } from "./pi.ts";
 
 const workEnvelope = {
@@ -2191,6 +2192,171 @@ describe("bus watcher against a fake Pi", () => {
       { uid: "self-a", msgId: b },
     ]);
     expect(logs.join(" ")).toMatch(/unreadable/i);
+  });
+});
+
+describe("dual watcher: a spawned worker reads both sources through one arbiter (dotfiles-uddc)", () => {
+  const rowId = (s: string) => s.padEnd(MSG_ID_CHARS, "0").slice(0, MSG_ID_CHARS);
+  const peerEnvelope = (from: string, content: unknown, to: string[] = ["impl-a"]) =>
+    JSON.stringify({ protocol: 2, kind: "inbox", id: "x", from, to, created: "2026-09-05T10:00:00Z", content });
+
+  const inboxEnvelope = (sequence: number, payload: unknown) => ({
+    protocol: 1,
+    sequence,
+    run: "run-1",
+    uid: "impl-a",
+    kind: "inbox",
+    created: "2026-09-05T10:00:00Z",
+    payload,
+  });
+
+  function fakeInboxIO(files: Record<string, unknown>) {
+    return {
+      list: () => Object.keys(files),
+      read: (path: string) => {
+        const name = path.split("/").pop()!;
+        const value = files[name];
+        return typeof value === "string" ? value : JSON.stringify(value);
+      },
+      join: (...parts: string[]) => parts.join("/"),
+      log: (_line: string) => {},
+    };
+  }
+
+  function fakeBusIo(opts: { rows?: Array<{ id: string; read?: boolean }>; messages?: Record<string, string> }) {
+    const state = new Map((opts.rows ?? []).map((r) => [r.id, r.read ?? false]));
+    const marks: Array<{ uid: string; msgId: string }> = [];
+    return {
+      marks,
+      io: {
+        readQueue: (_uid: string) => {
+          if (state.size === 0) return null;
+          return (
+            [...state.entries()]
+              .map(([id, read]) => `${id}${read ? "-read" : " ".repeat(QUEUE_SUFFIX_CHARS)}`)
+              .join("\n") + "\n"
+          );
+        },
+        readMessage: (msgId: string) => opts.messages?.[msgId] ?? null,
+        markRead: async (uid: string, msgId: string) => {
+          state.set(msgId, true);
+          marks.push({ uid, msgId });
+        },
+        log: (_line: string) => {},
+      },
+    };
+  }
+
+  function fakeHost(state: string = "idle") {
+    const sent: Array<{ text: string; deliverAs?: string }> = [];
+    return {
+      sent,
+      host: {
+        agentState: () => state,
+        sendUserMessage: (text: string, options?: { deliverAs?: string }) => {
+          sent.push({ text, deliverAs: options?.deliverAs });
+        },
+      },
+    };
+  }
+
+  test("delivers from the legacy inbox and never even reads the bus that tick", async () => {
+    const io = fakeInboxIO({ "1.json": inboxEnvelope(1, { stage: "wk-build", task: "one" }) });
+    const b = rowId("b1");
+    const { io: busIo, marks } = fakeBusIo({ rows: [{ id: b }], messages: { [b]: peerEnvelope("peer-b", "hello") } });
+    const { host, sent } = fakeHost("idle");
+
+    const result = await createDualWatcher(host, identity, "/inbox", "impl-a", io, busIo).poll();
+
+    expect(result).toEqual([{ source: "inbox", id: "1" }]);
+    expect(sent).toEqual([{ text: "one", deliverAs: "followUp" }]);
+    expect(marks).toHaveLength(0); // the bus row is untouched: only one source delivers per tick
+  });
+
+  test("falls through to the bus once the legacy inbox has nothing to deliver", async () => {
+    const io = fakeInboxIO({});
+    const b = rowId("b1");
+    const { io: busIo, marks } = fakeBusIo({ rows: [{ id: b }], messages: { [b]: peerEnvelope("peer-b", "hello") } });
+    const { host, sent } = fakeHost("idle");
+
+    const result = await createDualWatcher(host, identity, "/inbox", "impl-a", io, busIo).poll();
+
+    expect(result).toEqual([{ source: "bus", id: b }]);
+    expect(sent).toEqual([{ text: "From peer-b: hello", deliverAs: "followUp" }]);
+    expect(marks).toEqual([{ uid: "impl-a", msgId: b }]);
+  });
+
+  test("a message on both sources at once still yields exactly one delivery this tick", async () => {
+    // The regression this bug's fix must not reintroduce: two independent
+    // loops would both see `idle` and both deliver into the same window.
+    const io = fakeInboxIO({ "1.json": inboxEnvelope(1, { stage: "wk-build", task: "legacy" }) });
+    const b = rowId("b1");
+    const { io: busIo, marks } = fakeBusIo({ rows: [{ id: b }], messages: { [b]: peerEnvelope("peer-b", "bus") } });
+    const { host, sent } = fakeHost("idle");
+    const watcher = createDualWatcher(host, identity, "/inbox", "impl-a", io, busIo);
+
+    const result = await watcher.poll();
+
+    expect(result).toHaveLength(1);
+    expect(sent).toHaveLength(1);
+    expect(marks).toHaveLength(0); // bus untouched: legacy inbox won this tick
+
+    // The bus message is still there, unread, and goes out on the SAME
+    // watcher's next tick — deferred, not lost. A fresh watcher would replay
+    // envelope 1 (its high-water mark resets), so this reuses the instance,
+    // matching how the real wiring polls one long-lived watcher on a timer.
+    const again = await watcher.poll();
+    expect(again).toEqual([{ source: "bus", id: b }]);
+    expect(sent).toEqual([
+      { text: "legacy", deliverAs: "followUp" },
+      { text: "From peer-b: bus", deliverAs: "followUp" },
+    ]);
+  });
+
+  test("a mid-turn message on either source is deferred, not delivered, and neither is marked", async () => {
+    const io = fakeInboxIO({ "1.json": inboxEnvelope(1, { stage: "wk-build", task: "one" }) });
+    const b = rowId("b1");
+    const { io: busIo, marks } = fakeBusIo({ rows: [{ id: b }], messages: { [b]: peerEnvelope("peer-b", "hello") } });
+    const { host, sent } = fakeHost("streaming");
+
+    const result = await createDualWatcher(host, identity, "/inbox", "impl-a", io, busIo).poll();
+
+    expect(result).toEqual([]);
+    expect(sent).toHaveLength(0);
+    expect(marks).toHaveLength(0);
+  });
+
+  test("once idle again, the deferred message delivers — state is re-read each tick, not cached", async () => {
+    const io = fakeInboxIO({});
+    const b = rowId("b1");
+    const { io: busIo, marks } = fakeBusIo({ rows: [{ id: b }], messages: { [b]: peerEnvelope("peer-b", "hello") } });
+
+    const busy = createDualWatcher({ agentState: () => "streaming", sendUserMessage: () => {} }, identity, "/inbox", "impl-a", io, busIo);
+    expect(await busy.poll()).toEqual([]);
+    expect(marks).toHaveLength(0);
+
+    const { host, sent } = fakeHost("idle");
+    const settled = createDualWatcher(host, identity, "/inbox", "impl-a", io, busIo);
+    expect(await settled.poll()).toEqual([{ source: "bus", id: b }]);
+    expect(sent).toHaveLength(1);
+  });
+
+  test("an empty queue and an empty inbox deliver nothing, and the bus is read but not marked", async () => {
+    const io = fakeInboxIO({});
+    const busIo = { readQueue: () => null, readMessage: () => null, markRead: async () => {}, log: (_l: string) => {} };
+    const { host, sent } = fakeHost("idle");
+
+    expect(await createDualWatcher(host, identity, "/inbox", "impl-a", io, busIo).poll()).toEqual([]);
+    expect(sent).toHaveLength(0);
+  });
+
+  test("a host with no sendUserMessage is inert on both sources, not just one", async () => {
+    const io = fakeInboxIO({ "1.json": inboxEnvelope(1, { stage: "wk-build", task: "one" }) });
+    const b = rowId("b1");
+    const { io: busIo, marks } = fakeBusIo({ rows: [{ id: b }], messages: { [b]: peerEnvelope("peer-b", "hi") } });
+
+    expect(await createDualWatcher({}, identity, "/inbox", "impl-a", io, busIo).poll()).toEqual([]);
+    expect(marks).toHaveLength(0);
   });
 });
 
