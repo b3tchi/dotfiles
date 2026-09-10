@@ -115,7 +115,7 @@ if [ "${LAND_SKIP_INSTALL:-}" != "1" ]; then
       echo "POST-MERGE DEP SYNC FAILED — rolling back" >&2
       git -C "$AKM_ROOT" reset --hard ORIG_HEAD
       bd update "$ID" --status in_progress \
-        --notes "POST-MERGE FAIL (dep sync): '$INSTALL_CMD' failed after merging $BRANCH into $BASE. The merge changed a lockfile whose deps do not install. Not a test failure — the dependency change itself is broken." \
+        --append-notes "POST-MERGE FAIL (dep sync): '$INSTALL_CMD' failed after merging $BRANCH into $BASE. The merge changed a lockfile whose deps do not install. Not a test failure — the dependency change itself is broken." \
         >/dev/null
       exit 2
     fi
@@ -129,7 +129,7 @@ if [ -n "$TEST_CMD" ]; then
     echo "POST-MERGE TESTS FAILED — rolling back" >&2
     git -C "$AKM_ROOT" reset --hard ORIG_HEAD
     bd update "$ID" --status in_progress \
-      --notes "POST-MERGE FAIL: tests failed after merging $BRANCH into $BASE. Integration gap — fix and re-audit." \
+      --append-notes "POST-MERGE FAIL: tests failed after merging $BRANCH into $BASE. Integration gap — fix and re-audit." \
       >/dev/null
     exit 2   # caller (work-merge / work-audit) translates exit 2 to REJECTED
   fi

@@ -439,7 +439,9 @@ Claude native branch only: for each task, run `bd show <id>` and dispatch an `Ag
 - **Worktree path** — for reviewers to inspect the code
 - **Branch name** — for reviewers to merge
 
-Log these to bd notes: `bd update <id> --notes "Agent session: [id], worktree: [path], branch: [branch]"`
+Log these to bd notes: `bd update <id> --append-notes "Agent session: [id], worktree: [path], branch: [branch]"`
+(`--append-notes`, not `--notes` — a retry dispatch's own session metadata must
+not erase the first attempt's, and `--notes` replaces the field wholesale.)
 
 This enables resuming agents on rejection instead of dispatching fresh ones — the original agent retains its full context.
 
@@ -466,15 +468,43 @@ You do not interpret the report. You relay it. Do NOT wait for the reviewer — 
 
 The retry rule covers three failure modes: reviewer rejection, implementer error/timeout, and implementer-reported `blocked`. All three follow the same escalation pattern.
 
-1. **First failure (rejection / error / blocked):**
-   - If a reviewer rejection: reviewer updates bd with `--design` (new conditions) and `--notes` (rejection reason).
-   - If an implementer error or `blocked`: log the implementer's reason to `--notes`.
+**Which attempt this is comes from `bd`, not from this session's own memory.**
+A reviewer rejection is counted by work-audit's own durable counter
+(`metadata.rejection_count`, bumped via `--set-metadata` on every REJECTED
+verdict — see work-audit's "Counting rejections"). For an implementer
+error/timeout or a `blocked` report, where work-audit is never invoked, bump
+the same field yourself before deciding:
+
+```bash
+COUNT=$(bd show <id> --json | jq -r '.[0].metadata.rejection_count // 0')
+NEXT=$((COUNT + 1))
+bd update <id> --set-metadata rejection_count=$NEXT
+```
+
+Reading this instead of keeping a private count matters for the same reason
+work-audit switched: `bd update --notes` **replaces** the notes field, so a
+count kept only in this session's memory (or reconstructed by scanning notes
+text) is exactly what an intervening implementer report or a `POST-MERGE
+FAIL` note silently defeats — and it is also what a restarted scrum-master
+session has no way to recover at all. `metadata.rejection_count` is a
+separate field nothing else touches, so both problems disappear at once.
+
+1. **First failure (`$NEXT == 1`):**
+   - If a reviewer rejection: work-audit already recorded gaps via
+     `--append-notes` (never `--notes` — see its own "Counting rejections");
+     also update `--design` with any new conditions.
+   - If an implementer error or `blocked`: log the implementer's reason with
+     `bd update <id> --append-notes "<reason>"` — `--notes` would erase
+     whatever evidence is already there.
    - **Model upgrade:** if the original `worker_model` was `sonnet` or `haiku`, the retry uses `opus` (see "Failure-escalation rule" in Configuration). If it was already `opus` or `auto`, keep the same model.
    - **Claude native branch:** resume the original implementer via `SendMessage({to: "impl-<bd-id>", message: ...})` using its saved name — pass the failure details. The agent retains its full context and is already in the worktree. Resume preserves cheap context; only dispatch a fresh agent if the original session cannot be resumed (e.g., expired) or if the model is being upgraded across providers and a session swap is required. Pi may use only an installed Pi adapter's resume command; without that adapter, stop and defer multi-worker retry to [[sp028]].
    - When notified of completion, dispatch reviewer again (also in background).
-2. **Second failure on the same task:** Escalate to human — the task needs human attention. Do not retry a third time silently.
+2. **Second failure on the same task (`$NEXT >= 2`):** Do not retry a third time — even automatically, even silently. Report to the human that the task needs their attention.
 
-Log the retry decision in the bd notes so a later auditor can see why the model jumped (`bd update <id> --notes "Retry attempt 2: upgraded sonnet → opus after reviewer rejection"`).
+Log the retry decision with `--append-notes` (not `--notes`, for the same
+reason as above) so a later auditor can see why the model jumped: `bd update
+<id> --append-notes "Retry attempt $NEXT: upgraded sonnet → opus after
+reviewer rejection"`.
 
 ## Step 6: Report
 

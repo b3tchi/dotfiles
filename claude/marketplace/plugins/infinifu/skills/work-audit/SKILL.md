@@ -139,10 +139,14 @@ git -C "$WT" log --oneline "$BASE".."$BRANCH"    # BASE is usually main
 
 This is not pedantry. `work-merge` merges the *branch*; an uncommitted worktree means a branch with zero commits, a silent no-op merge, and work that survives only because `git worktree remove` refuses to delete dirty state. The tempting move — "the diff is right there in the worktree, I'll just commit it and land it" — **collapses the review gate**: you become the author of the artifact you just approved, and nothing independently verifies that what got committed is what got reviewed. That exact sequence happened once and is why this gate exists.
 
-Bounce it back instead:
+Bounce it back instead, through the same counted rejection every verdict in this
+skill uses — see "Counting rejections" under Step 7:
 
 ```bash
-bd update <id> --notes "REJECTED (pre-flight): branch <branch> has no commits over <base>. work-do Step 7 requires committing before reporting ready. Worktree left intact; commit and re-report."
+COUNT=$(bd show <id> --json | jq -r '.[0].metadata.rejection_count // 0')
+NEXT=$((COUNT + 1))
+bd update <id> --set-metadata rejection_count=$NEXT \
+  --append-notes "REJECTED (pre-flight, rejection #$NEXT): branch <branch> has no commits over <base>. work-do Step 7 requires committing before reporting ready. Worktree left intact; commit and re-report."
 ```
 
 Then report the rejection to the dispatcher. The implementer still has its worktree and full context; committing is a ten-second fix for them and a gate violation for you.
@@ -286,24 +290,47 @@ are actionable by someone who already has the context.
 **The second-rejection rule is now yours to enforce, not the bus's.** sp029 T8
 retired rejection-counting and the automatic `waiting_human` park from the
 transport — `resume` is an ordinary message now, with no count and no
-escalation field attached. So before calling `resume` again, count how many
-prior notes on this task already start `AUDITED: REJECTED` (`bd show <id>` —
-they accumulate in the task's own notes history). One prior rejection: resume
-as above. Two or more: do NOT resume a third time — stop, record `AUDITED:
-REJECTED (second time) — needs a human, not a third retry` on the task, and
-report to the dispatcher that this task needs a person rather than another
-pass. This reproduces the old CLI behavior exactly (two strikes, then a
-human), just enforced in this skill instead of inside `resume`.
+escalation field attached. Read the same `metadata.rejection_count` this
+skill's "Counting rejections" (Step 7, below) writes on every REJECTED
+verdict — **not** the notes field: `bd update --notes`/`--append-notes` calls
+made by the implementer's own next report, or by a later `POST-MERGE FAIL`,
+land on top of whatever prose is there, so a count kept only in notes text
+would already have been overwritten by the time you go looking for it. One
+prior rejection (`rejection_count == 1`): resume as above. Two or more: do
+NOT resume a third time — stop, and report to the dispatcher that this task
+needs a person rather than another pass. This reproduces the old CLI behavior
+exactly (two strikes, then a human), just enforced in this skill's own
+durable counter instead of inside `resume`.
 
 Until acceptance the worker's window stays open, so you can read the full
 transcript instead of relying on the compact envelope.
 
 ### Rejected
 
-One or more gaps found. Leave the task `in_progress` (do NOT close — the work isn't done) and record the rejection on the task itself so the next implementer dispatch has the evidence:
+One or more gaps found. Leave the task `in_progress` (do NOT close — the work isn't done) and record the rejection on the task itself so the next implementer dispatch has the evidence.
+
+#### Counting rejections
+
+`bd update --notes` **overwrites** the notes field; it does not append. The
+implementer's own next report (`work-do` Step 8's `bd update <id> --notes
+"IMPLEMENTED: ..."`) — or a later `POST-MERGE FAIL` note from `work-merge` —
+lands on top of whatever this step just wrote and erases it completely. A
+"count how many `AUDITED: REJECTED` lines are in the notes field" rule is
+therefore not a rule at all: by the second audit, the first rejection's note
+is usually already gone, so the count can never reach two and "two strikes,
+then a human" never fires. (Confirmed live: a real task's notes field held
+only its last write — three rounds of audit and implementer evidence, all
+overwritten.)
+
+The count instead lives in `--set-metadata`, a field nothing else in this
+pipeline touches, so it survives every intervening `--notes` overwrite by
+anyone. `--append-notes` (not `--notes`) carries the human-readable trail,
+for the same reason — it accumulates instead of replacing:
 
 ```bash
-bd update <id> --notes "AUDITED: REJECTED
+COUNT=$(bd show <id> --json | jq -r '.[0].metadata.rejection_count // 0')
+NEXT=$((COUNT + 1))
+bd update <id> --set-metadata rejection_count=$NEXT --append-notes "AUDITED: REJECTED (rejection #$NEXT)
 
 Gaps:
 - <criterion or check>: <what's missing, with file:line or command output>
@@ -312,10 +339,13 @@ Gaps:
 Requested action: <what the implementer needs to do to pass re-audit>"
 ```
 
+- `$NEXT == 1` → report REJECTED as usual; the dispatcher re-dispatches the implementer.
+- `$NEXT >= 2` → do **not** let a third automated pass happen. Report the task needs a human instead — see below.
+
 Then report to the dispatcher:
 
 ```
-Task <id>: REJECTED (left in_progress, notes updated)
+Task <id>: REJECTED (left in_progress, rejection #<NEXT>)
 
 Gaps:
 - <criterion or check>: <what's missing, with file:line or command output>
@@ -324,7 +354,15 @@ Gaps:
 Requested action: <what the implementer needs to do to pass re-audit>
 ```
 
-The dispatcher re-dispatches the implementer, who reads the updated notes with the rejection evidence and fixes the gaps. Re-run the audit after they report ready again. If rejected twice on the same gap, escalate to the human — don't loop indefinitely.
+If `<NEXT> >= 2`, replace the first line with `Task <id>: NEEDS A HUMAN
+(rejected twice on this gap — do not dispatch a third automated attempt)`
+and stop; do not re-dispatch the implementer yourself.
+
+The dispatcher re-dispatches the implementer (when `$NEXT < 2`), who reads the
+updated notes with the rejection evidence and fixes the gaps. Re-run the audit
+after they report ready again — `$NEXT` is read fresh from `metadata` each
+time, so it is unaffected by whatever the implementer's own report or a
+`POST-MERGE FAIL` did to the notes text in between.
 
 </the_process>
 
