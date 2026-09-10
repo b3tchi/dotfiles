@@ -2428,7 +2428,7 @@ function summarise(verb: string, stdout: string): string {
           // settled without reporting is a different kind of news and must
           // not read the same as silence.
           const label = content.status ?? content.code;
-          const head = `${m.id} · from ${m.from}${label ? ` ${label}` : ""}`;
+          const head = `from ${m.from}${label ? ` ${label}` : ""}`;
           // `summary` is the typed-result shape; `detail` is the bus-authored
           // `error` shape (dotfiles-87bt's protocol_error). Anything else is
           // truly opaque content from an arbitrary peer message, so it is

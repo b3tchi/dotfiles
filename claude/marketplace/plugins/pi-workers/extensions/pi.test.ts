@@ -809,16 +809,27 @@ describe("initiator tool", () => {
     expect(out.detail).toContain("…");
   });
 
-  test("a one-line summary is passed through untouched", async () => {
-    const { exec } = fakeExec({ stdout: JSON.stringify([{
-      id: "01ABC", from: "impl-1", to: ["orchestrator-1"],
+  test("a one-line summary is passed through without the envelope id", async () => {
+    const raw = JSON.stringify([{
+      id: "01M25TS807Q3ARS5RQB51AVVCM", from: "impl-1", to: ["orchestrator-1"],
       content: { status: "complete", summary: "noted BASALT-7", window: "w", session: "s", resume: "r" },
+    }]);
+    const { exec } = fakeExec({ stdout: raw });
+    const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", as: "orchestrator-1" });
+    // The human head is ordered like a frame row — address, state, then the
+    // prose — without leading with an id that no tool verb accepts.
+    expect(out.detail).toBe("from impl-1 complete · noted BASALT-7");
+    // The durable bus row still has its id in raw JSON for grepping and order.
+    expect(JSON.parse(raw)[0].id).toBe("01M25TS807Q3ARS5RQB51AVVCM");
+  });
+
+  test("an opaque peer message has an id-free head without a result label", async () => {
+    const { exec } = fakeExec({ stdout: JSON.stringify([{
+      id: "01M25TS807Q3ARS5RQB51AVVCM", from: "peer-3", to: ["orchestrator-1"],
+      content: "2",
     }]) });
     const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", as: "orchestrator-1" });
-    // Ordered like a frame row — address, state, then the prose — and using
-    // the frame's own separator, so the transcript and the widget read as one
-    // thing.
-    expect(out.detail).toBe("01ABC · from impl-1 complete · noted BASALT-7");
+    expect(out.detail).toBe("from peer-3 · 2");
   });
 
   test("a result that does not fit one line becomes a block, with the path intact", async () => {
@@ -842,7 +853,7 @@ describe("initiator tool", () => {
     const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", as: "orchestrator-1" });
     const lines = out.detail.split("\n");
     expect(lines.length).toBeGreaterThan(1);
-    expect(lines[0]).toBe("01XYZ · from impl-1 complete");
+    expect(lines[0]).toBe("from impl-1 complete");
     // The path survives whole, on one of the lines — that is the point.
     expect(lines.some((l) => l.includes("/temp-timestamp.Z6eOPR/20260908T113849Z.md"))).toBe(true);
     expect(out.detail).not.toContain("…");
@@ -856,7 +867,7 @@ describe("initiator tool", () => {
       content: { status: "complete", summary: "noted BASALT-7", window: "w", session: "s", resume: "r" },
     }]) });
     const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", as: "orchestrator-1" });
-    expect(out.detail).toBe("01ABC · from impl-1 complete · noted BASALT-7");
+    expect(out.detail).toBe("from impl-1 complete · noted BASALT-7");
   });
 
   test("a summary long enough to need a block is still capped", async () => {
@@ -902,8 +913,8 @@ describe("initiator tool", () => {
     const out = await createInitiatorTool({ exec }).invoke({ verb: "wait", as: "orchestrator-1" });
     const lines = out.detail.split("\n");
     for (const line of lines) expect(line.length).toBeLessThanOrEqual(100);
-    // The message id survives: it is what a caller correlates against.
-    expect(lines[0]).toContain("01DEF");
+    // The human-facing head stays focused on the actionable sender and state.
+    expect(lines[0]).not.toContain("01DEF");
     expect(lines[0]).toContain("from impl-1 complete");
     // And the whole path is readable, not cut in half.
     expect(out.detail).toContain("/tmp/tmp.b8LweM44cL/20260908T111021Z.md");
@@ -992,7 +1003,7 @@ describe("initiator tool", () => {
     expect(out.detail.split("\n")).toHaveLength(1);
     expect(out.detail).toContain("blocked");
     expect(out.detail).toContain("could not reach the fixture");
-    expect(out.detail).toContain("01GHI");
+    expect(out.detail).not.toContain("01GHI");
   });
 
   test("a protocol error is summarised as one, not as a result", async () => {
