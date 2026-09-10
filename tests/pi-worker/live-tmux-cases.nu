@@ -312,6 +312,22 @@ let cases = [
         }
     })
 
+    (run-case "live/respawn-carries-the-ticket-and-the-commissioner-forward" {
+        # A respawn continues the SAME worker under a new address, so it still
+        # serves the same bd issue and still owes its result to whoever
+        # commissioned the original. `commissioner` was already carried
+        # forward; `task` (dotfiles-v13r) has to be, for the same reason —
+        # otherwise the ticket association survives exactly one respawn.
+        with-server "respawn-metadata" {|t, repo|
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "dotfiles-v13r" --session "sid-1" --skill "wk-build" --isolation "worktree" --commissioner "orchestrator-1" --socket $t.socket)
+            ^tmux -L $t.socket kill-window -t $w.window_id
+            let back = (worker-respawn "impl-a" --run "run-1" --repo $repo --socket $t.socket)
+            let identity = (bus-identity-of $back.uid --run "run-1")
+            assert-eq ($identity | get -o task) "dotfiles-v13r" "the respawned worker still serves the same ticket"
+            assert-eq ($identity | get -o commissioner) "orchestrator-1" "and still owes its result to the same commissioner"
+        }
+    })
+
     # sp029 T8: "live/rejections-are-counted-along-the-respawn-lineage"
     # retired along with rejection counting and `escalate` — see
     # `worker-resume` and `worker-inspect`. Resume is now an ordinary send.

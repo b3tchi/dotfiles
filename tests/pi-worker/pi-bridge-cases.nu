@@ -284,9 +284,31 @@ let cases = [
                 spawn-worker $t $repo --task "t1" --session "sid-env" --skill "wk-build"
                 wait-until {|| ($marker | path exists) and ((open --raw $marker | str trim) | is-not-empty) } --timeout 5sec --interval 50ms --what $"($marker) to be written by the stub pi"
                 let seen = (open --raw $marker)
-                for pair in ["PI_WORKER_RUN=run-1" "PI_WORKER_UID=impl-a" "PI_WORKER_ROLE=impl" "PI_WORKER_SESSION=sid-env" "PI_WORKER_SKILL=wk-build" "PI_WORKER_WINDOW=impl-t1@dotfiles" "PI_WORKER_BRANCH=wk-t1.0"] {
+                for pair in ["PI_WORKER_RUN=run-1" "PI_WORKER_UID=impl-a" "PI_WORKER_ROLE=impl" "PI_WORKER_SESSION=sid-env" "PI_WORKER_SKILL=wk-build" "PI_WORKER_WINDOW=impl-t1@dotfiles" "PI_WORKER_BRANCH=wk-t1.0" "PI_WORKER_TASK=t1"] {
                     assert-true ($seen | str contains $pair) $"the worker window carries ($pair)"
                 }
+            }
+        }
+        rm -f $marker; drop-tmux $t; rm -rf $root; rm -rf $repo
+    })
+
+    (run-case "spawn/a-worker-with-no-ticket-carries-no-PI_WORKER_TASK-at-all" {
+        # dotfiles-v13r exports the ticket alongside the other PI_WORKER_*
+        # vars, and an empty one is exported as NOTHING rather than as an empty
+        # string: a reader cannot tell `PI_WORKER_TASK=` from "this stage has a
+        # ticket whose id is the empty string", and absence is the signal the
+        # rest of this protocol already uses for a field nobody set.
+        let repo = (make-repo "env-no-task")
+        let root = (make-runtime "env-no-task")
+        let marker = ([(fixture-base) $"piw-t4-envnotask-(random chars --length 6)"] | path join)
+        let t = (make-tmux "env-no-task" $"env | grep PI_WORKER_ > ($marker); sleep 30")
+        with-runtime $root {
+            with-env {PATH: ([$t.bin] ++ $env.PATH)} {
+                spawn-worker $t $repo --task "" --session "sid-env" --skill "wk-build"
+                wait-until {|| ($marker | path exists) and ((open --raw $marker | str trim) | is-not-empty) } --timeout 5sec --interval 50ms --what $"($marker) to be written by the stub pi"
+                let seen = (open --raw $marker)
+                assert-true ($seen | str contains "PI_WORKER_UID=impl-a") "sanity: the window did carry the other identity vars"
+                assert-true (not ($seen | str contains "PI_WORKER_TASK")) $"a ticketless worker must carry no PI_WORKER_TASK, got: ($seen)"
             }
         }
         rm -f $marker; drop-tmux $t; rm -rf $root; rm -rf $repo

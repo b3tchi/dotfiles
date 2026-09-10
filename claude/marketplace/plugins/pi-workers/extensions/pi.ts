@@ -1174,6 +1174,7 @@ export interface InitiatorArgs {
   session?: string;
   skill?: string;
   task?: string;
+  commissioner?: string;
   feedback?: string;
   block?: boolean;
   timeout?: number;
@@ -1193,7 +1194,10 @@ export interface InitiatorTool {
  */
 const VERB_FLAGS: Record<string, readonly string[]> = {
   ps: ["socket"],
-  spawn: ["uid", "role", "subject", "project", "repo", "session", "skill", "task", "socket"],
+  // dotfiles-uwz6: `commissioner` rides here so an orchestrator can name its
+  // OWN address at spawn. Absent means absent — the CLI then defaults to the
+  // run it mints, which is the behavior every existing caller already has.
+  spawn: ["uid", "role", "subject", "project", "repo", "session", "skill", "task", "commissioner", "socket"],
   send: ["as", "to", "content"],
   wait: ["as", "block", "timeout"],
   rm: ["uid"],
@@ -2538,7 +2542,7 @@ export function createInitiatorTool(opts: { exec: ExecFn; cwd?: string }): Initi
 // by itself. `send` carries `as`/`to`/`content` in place of the retired
 // ticket/instructions work-payload shape (that gate moved to the consumer's
 // own instructions per sp029 T8/T10).
-const INITIATOR_TOOL_PARAMETERS = {
+export const INITIATOR_TOOL_PARAMETERS = {
   type: "object",
   properties: {
     verb: { type: "string", enum: [...INITIATOR_VERBS], description: "which bus operation to run" },
@@ -2558,7 +2562,8 @@ const INITIATOR_TOOL_PARAMETERS = {
       description:
         "spawn: REQUIRED, no default. 'worktree' gives the worker its own throwaway worktree and branch; 'main' runs it in the repo's main worktree, shared with the operator. Nothing lands in the shared tree without this being typed",
     },
-    task: { type: "string", description: "spawn: a ticket ID and nothing else. It names the worker's git branch, so it must be short and have no spaces. To give a worker prose, use `send` with content — never this" },
+    task: { type: "string", description: "spawn: a ticket ID and nothing else. It names the worker's git branch AND is recorded on the worker's identity, so `inspect`/`ps`/`workers` can say which ticket a worker serves after a crash. Short, no spaces. To give a worker prose, use `send` with content — never this" },
+    commissioner: { type: "string", description: "spawn: the address to notify when this worker reports — normally your OWN claimed address. Omit it and the run this spawn mints is used, which is why the convention without it is to read `run` out of the spawn result and `wait --as <run>`. Pass it and you can simply `wait --as <your address>` instead of polling `ps`" },
     feedback: { type: "string", description: "resume: why the work is being sent back" },
     block: { type: "boolean", description: "wait: block until mail arrives instead of peeking. This is how you learn a worker finished" },
     timeout: { type: "number", description: "wait: seconds to block before giving up, default 60. Giving up is not a failure — the worker may still be working" },

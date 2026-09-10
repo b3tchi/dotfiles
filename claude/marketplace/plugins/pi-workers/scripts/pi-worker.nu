@@ -3260,8 +3260,27 @@ export def worker-spawn [
     --session: string
     --skill: string
     --isolation: string
+    # dotfiles-uwz6: who is to be told when this worker reports. Defaults to
+    # the run (see worker-place), which is exactly what every caller got
+    # before this flag existed.
+    --commissioner: string = ""
     --socket: string = ""
 ] {
+    # Refused BEFORE the address is claimed and before anything is allocated:
+    # a bad commissioner is a caller error detectable up front, and this guard
+    # lives on `worker-spawn` rather than on the CLI wrapper for the reason
+    # `slugify-subject` moved here too — every nu caller (the tests, the
+    # scrum-master skill, the next verb) goes straight past the wrapper.
+    if ($commissioner | is-not-empty) {
+        # An address becomes a queue file name under the bus (`queue-append`),
+        # so it is held to the same character set the extension's own queue
+        # reader enforces before it will touch a row — and `.`/`..` are
+        # refused outright rather than left to resolve as path segments.
+        if not ($commissioner =~ '^[A-Za-z0-9._-]+$') or ($commissioner in [".", ".."]) {
+            error make {msg: $"spawn's --commissioner is an address, not prose: '($commissioner)' must match [A-Za-z0-9._-]+. It names who is told when this worker reports — a peer's uid, or your own claimed address. Omit it and the run this spawn mints is used, which is what `wait --as <run>` reads"}
+        }
+    }
+
     # An address is claimed once. Spawning onto an occupied one used to inherit
     # the previous occupant's mail: the first message got a sequence continuing
     # someone else's, `wait` returned THEIR result envelope, and a stale
@@ -3293,7 +3312,7 @@ export def worker-spawn [
     # resume handle for a worker whose window never came up, and an address
     # something can still be resumed from is not free.
     let outcome = (try {
-        {ok: true, value: (worker-place --run $run --uid $uid --role $role --subject $subject --project $project --repo $repo --task $task --session $session --skill $skill --isolation $isolation --socket $socket)}
+        {ok: true, value: (worker-place --run $run --uid $uid --role $role --subject $subject --project $project --repo $repo --task $task --session $session --skill $skill --isolation $isolation --commissioner $commissioner --socket $socket)}
     } catch {|e| {ok: false, error: $e} })
     if not $outcome.ok {
         release-address $repo $uid
@@ -3317,6 +3336,7 @@ def worker-place [
     --session: string
     --skill: string
     --isolation: string
+    --commissioner: string = ""
     --socket: string = ""
 ] {
     # Fail before allocating anything if the display host is unreachable.
@@ -3347,6 +3367,35 @@ def worker-place [
     # time (sp029 T8, dotfiles-ptba).
     let tree = (worker-placement --repo $repo --isolation $isolation --subject $subject_for_branch)
 
+    # dotfiles-uwz6: the commissioner is an ADDRESS, and the run is only its
+    # default.
+    #
+    # sp029 T5 wired it to the run because "the run is the closest thing to a
+    # resolvable address an initiator has BEFORE T7/T9 land real peer
+    # addressing, so it doubles as the commissioner". T7/T9 shipped that
+    # addressing — `send`/`wait` take arbitrary addresses — and this stayed a
+    # pre-peer-addressing workaround inside a peer-addressed bus: an
+    # orchestrator operating under its OWN address was never told anything,
+    # silently, because mail addressed elsewhere is not an error, and the
+    # natural next move is to poll `ps` — which is what the bus exists to make
+    # unnecessary. `respawn` already carried a prior commissioner forward, so
+    # the field was never assumed to equal the run.
+    #
+    # Defaulting to the run keeps every existing caller on exactly today's
+    # behavior. A future self-registering agent (T7) never goes through
+    # worker-spawn at all, so it never gets this field — which is what leaves
+    # it uncommissioned by the same absent-key convention bus-settled reads.
+    let commissioner = (if ($commissioner | is-empty) { $run } else { $commissioner })
+
+    # dotfiles-v13r: `task` is the ticket this worker serves, RECORDED rather
+    # than merely consumed by `subject_for_branch` above. The branch cannot
+    # answer for it — `wk-foo.0` is identical whether `foo` arrived as a ticket
+    # id or as a plain subject — so without this the association between a
+    # worker and its bd issue survived only in whatever the dispatcher
+    # remembered or in the free-text briefing in its inbox, which is exactly
+    # the recovery hole ft014's "rebuild a worker's state from its durable
+    # identity record" claim did not cover. Empty when no ticket was named:
+    # absent, never substituted.
     bus-identity $uid --run $run --identity {
         role: $role
         cwd: $tree.path
@@ -3355,14 +3404,8 @@ def worker-place [
         skill: $skill
         isolation: $isolation
         window: $window
-        # sp029 T5: every worker `worker-spawn` places was spawned FOR
-        # something — the run it was placed into. `run` is the closest thing
-        # to a resolvable address an initiator has before T7/T9 land real
-        # peer addressing, so it doubles as the commissioner. A future
-        # self-registering agent (T7) never goes through worker-spawn at
-        # all, so it never gets this field — which is exactly what leaves it
-        # uncommissioned by the same absent-key convention bus-settled reads.
-        commissioner: $run
+        task: $task
+        commissioner: $commissioner
     }
 
     # The worker's identity reaches the extension as environment, not as a
@@ -3382,6 +3425,14 @@ def worker-place [
         ]
     } else { [] })
 
+    # dotfiles-v13r: the ticket travels into the window with the rest of the
+    # identity, so a worker can name its own bd issue without being told twice.
+    # An EMPTY task exports NOTHING rather than `PI_WORKER_TASK=`: a reader
+    # cannot tell a blank value from a stage whose ticket id happens to be
+    # blank, and absence is what the rest of this protocol already means by
+    # "nobody set this".
+    let task_env = (if ($task | is-empty) { [] } else { ["-e" $"PI_WORKER_TASK=($task)"] })
+
     let worker_env = ([
         "-e" $"PI_WORKER_RUN=($run)"
         "-e" $"PI_WORKER_UID=($uid)"
@@ -3391,7 +3442,7 @@ def worker-place [
         "-e" $"PI_WORKER_SKILL=($skill)"
         "-e" $"PI_WORKER_ISOLATION=($isolation)"
         "-e" $"PI_WORKER_WINDOW=($window)"
-    ] ++ $commit_guard)
+    ] ++ $task_env ++ $commit_guard)
     # Creating the session, not resuming one: this uid is new and its uuid was
     # minted moments ago.
     let window_id = (
@@ -3411,7 +3462,8 @@ def worker-place [
         isolation: $isolation
         window: $window
         window_id: $window_id
-        commissioner: $run
+        task: $task
+        commissioner: $commissioner
     }
 
     {
@@ -3428,6 +3480,10 @@ def worker-place [
         session: $session
         skill: $skill
         isolation: $isolation
+        # Named back so a dispatcher reads the association off its own spawn
+        # result rather than having to remember what it passed.
+        task: $task
+        commissioner: $commissioner
         resume: $"pi --session ($session)"
         # Both, because they answer different questions. `live` is the bool an
         # operator skims; `liveness` is the verdict adr0017 requires when the
@@ -3672,6 +3728,14 @@ export def run-workers [run: string]: nothing -> list<record> {
             uid: $uid
             state: $status.state
             unacked: $status.unacked
+            # dotfiles-v13r: which ticket this worker serves, so an
+            # orchestrator rebuilding from the bus alone can route review,
+            # merge and close back to the right bd issue. `get -o ... |
+            # default ""` and not `$identity.task`: an identity written before
+            # the field existed has no such column, and a roster that raises
+            # on one is a roster nobody can use during exactly the recovery it
+            # is for.
+            task: (if $identity == null { "" } else { $identity | get -o task | default "" })
             window: (if $identity == null { "" } else { $identity.window })
             resume: (if $identity == null { "" } else { $"pi --session ($identity.session)" })
         }
@@ -3710,6 +3774,11 @@ export def worker-roster [--run: string = "", --socket: string = ""]: nothing ->
                     run: $r
                     uid: $uid
                     role: (if $identity == null { "" } else { $identity.role })
+                    # dotfiles-v13r. Empty for an identity written before the
+                    # ticket was recorded — the same absent-field treatment
+                    # `window_id` below already gets, and for the same reason:
+                    # a record from the previous build must still list.
+                    task: (if $identity == null { "" } else { $identity | get -o task | default "" })
                     state: $state
                     liveness: (if ($target | is-empty) { "unknown" } else { worker-liveness $target --socket $socket | get verdict })
                     window: $window
@@ -4230,6 +4299,12 @@ export def worker-respawn [
     # respawn continues the same worker under a new uid, so it still owes
     # its result to whoever the original spawn commissioned it for.
     let commissioner = ($old | get -o commissioner | default $run)
+    # dotfiles-v13r: and the ticket, for the same reason — a respawn continues
+    # the same worker under a new address, so it still serves the same bd
+    # issue. Without this the association would survive exactly one respawn.
+    # Absent on an identity written before the field existed, which reads as
+    # "no ticket" rather than raising.
+    let task = ($old | get -o task | default "")
     bus-identity $new_uid --run $run --identity {
         role: $old.role
         cwd: $tree.path
@@ -4238,6 +4313,7 @@ export def worker-respawn [
         skill: $old.skill
         isolation: $isolation
         window: $window
+        task: $task
         respawned_from: $uid
         commissioner: $commissioner
     }
@@ -4250,6 +4326,7 @@ export def worker-respawn [
             "-e" $"GIT_CONFIG_VALUE_0=($hooks)"
         ]
     } else { [] })
+    let task_env = (if ($task | is-empty) { [] } else { ["-e" $"PI_WORKER_TASK=($task)"] })
     let worker_env = ([
         "-e" $"PI_WORKER_RUN=($run)"
         "-e" $"PI_WORKER_UID=($new_uid)"
@@ -4259,7 +4336,7 @@ export def worker-respawn [
         "-e" $"PI_WORKER_SKILL=($old.skill)"
         "-e" $"PI_WORKER_ISOLATION=($isolation)"
         "-e" $"PI_WORKER_WINDOW=($window)"
-    ] ++ $commit_guard)
+    ] ++ $task_env ++ $commit_guard)
 
     # Resuming, not creating: the session exists and holds the transcript this
     # worker is being brought back for.
@@ -4276,6 +4353,7 @@ export def worker-respawn [
         isolation: $isolation
         window: $window
         window_id: $window_id
+        task: $task
         respawned_from: $uid
         commissioner: $commissioner
     }
@@ -4294,6 +4372,8 @@ export def worker-respawn [
         # lowest free iteration, so a deleted `wk-t1.0` is handed out again and
         # a name comparison would call a fresh ref a reused one.
         reused_branch: $reuse
+        task: $task
+        commissioner: $commissioner
         resume: $"pi --session ($old.session)"
         live: (worker-live? $window_id --socket $socket)
         liveness: (worker-liveness $window_id --socket $socket | get verdict)
@@ -4399,7 +4479,8 @@ def usage []: nothing -> string {
         ""
         "VERBS"
         "  spawn    --uid --role --subject --project --repo --session --skill"
-        "           --isolation worktree|main (no default) [--task] [--socket]"
+        "           --isolation worktree|main (no default) [--task]"
+        "           [--commissioner <address>] [--socket]"
         "  send     --as --to --content         address a message to one or more agents"
         "  result   --as --status --summary [--validation]   report an outcome"
         "  settled  --as                         report settling with nothing to show"
@@ -4425,6 +4506,16 @@ def usage []: nothing -> string {
         "  doctor                               check dependencies"
         ""
         "NOTES"
+        "  spawn --task names the bd ticket the worker serves. It names the"
+        "  worker's branch as it always did, AND is now recorded on the identity,"
+        "  so `inspect`/`ps`/`workers` answer 'which ticket is this?' after a"
+        "  crash; the window gets it as PI_WORKER_TASK."
+        "  spawn --commissioner names WHO is told when the worker reports."
+        "  Default: the run this spawn minted, which is why `wait --as <run>`"
+        "  (reading `run` out of the spawn result) is the convention without it."
+        "  An orchestrator holding its own address should pass it here and then"
+        "  `wait --as <its own address>` — otherwise the completion is delivered"
+        "  correctly to an address it is not listening on, silently."
         "  wait both reads AND marks: there is no separate ack step any more, so"
         "  --as may only name this session's own address (PI_WORKER_UID, when"
         "  set) — reading and marking someone else's queue crosses the one"
@@ -4463,7 +4554,8 @@ def main [...args: string] {
 def "main spawn" [
     --uid: string = "", --role: string = "", --subject: string
     --project: string = "", --repo: string = "", --session: string = "", --skill: string
-    --isolation: string, --task: string = "", --socket: string = ""
+    --isolation: string, --task: string = "", --commissioner: string = ""
+    --socket: string = ""
 ] {
     # Derived before the check below, so the caller is only asked for what
     # cannot be worked out from where it is standing.
@@ -4543,7 +4635,7 @@ def "main spawn" [
     loop {
         let uid = (if $minted { mint-uid $role $repo } else { $uid })
         let outcome = (try {
-            {ok: true, value: (worker-spawn --run $run --uid $uid --role $role --subject $subject --project $project --repo $repo --task $task --session $session --skill $skill --isolation $isolation --socket $socket)}
+            {ok: true, value: (worker-spawn --run $run --uid $uid --role $role --subject $subject --project $project --repo $repo --task $task --session $session --skill $skill --isolation $isolation --commissioner $commissioner --socket $socket)}
         } catch {|e|
             {ok: false, error: $e}
         })

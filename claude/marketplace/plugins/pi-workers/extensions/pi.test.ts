@@ -29,6 +29,7 @@ import {
   createAgentStateTracker,
   createResultTool,
   createInitiatorTool,
+  INITIATOR_TOOL_PARAMETERS,
   rosterFrame,
   collapsedStateLine,
   EMPTY_GRACE_MS,
@@ -673,6 +674,49 @@ describe("initiator tool", () => {
     // CLI distinguishes absent from empty, and an empty one reads as a stage
     // that has a ticket id when it does not.
     expect(calls[0].args).not.toContain("--task");
+  });
+
+  test("spawn forwards --commissioner when the caller names one", async () => {
+    // dotfiles-uwz6: an orchestrator operating under its own bus address could
+    // not ask to be told when its workers finish — spawn hardwired the run as
+    // the commissioner and exposed no flag. The tool has to be able to say it,
+    // or the CLI's new flag is unreachable from the surface agents actually
+    // drive.
+    const { exec, calls } = fakeExec();
+    const tool = createInitiatorTool({ exec });
+
+    await tool.invoke({
+      verb: "spawn",
+      role: "impl",
+      subject: "demo",
+      skill: "probe",
+      task: "dotfiles-uwz6",
+      commissioner: "orchestrator-1",
+    });
+
+    expect(calls[0].args).toEqual([
+      "spawn", "--role", "impl", "--subject", "demo", "--skill", "probe",
+      "--task", "dotfiles-uwz6", "--commissioner", "orchestrator-1",
+    ]);
+  });
+
+  test("spawn omits --commissioner when none is named, so the run stays the default", async () => {
+    // Backward compatibility, at the tool boundary: an empty flag is not the
+    // same as no flag, and passing `--commissioner ""` would record a
+    // recorded-and-blank address that `bus-settled` reads as uncommissioned.
+    const { exec, calls } = fakeExec();
+    const tool = createInitiatorTool({ exec });
+
+    await tool.invoke({ verb: "spawn", role: "impl", subject: "demo", skill: "probe" });
+
+    expect(calls[0].args).not.toContain("--commissioner");
+  });
+
+  test("the initiator tool declares commissioner so an agent can discover it", async () => {
+    // A flag the schema does not mention is a flag no agent will ever pass.
+    const props = INITIATOR_TOOL_PARAMETERS.properties as Record<string, { description?: string }>;
+    expect(props.commissioner).toBeDefined();
+    expect(props.commissioner.description).toContain("spawn");
   });
 
   test("a positional verb puts the uid where the CLI expects it", async () => {

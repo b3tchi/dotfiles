@@ -844,6 +844,136 @@ let cases = [
         }
     })
 
+    # ------------------------------- dotfiles-v13r / dotfiles-uwz6: what spawn
+    # knows and the bus used to keep to itself.
+    #
+    # Both bugs are the same shape: a fact established at spawn time — the
+    # ticket the worker serves, and who wants to hear about it — reached no
+    # durable record, so `inspect`/`ps`/`workers` could not answer for it and a
+    # peer orchestrator could not be addressed. The identity envelope is where
+    # both belong, and neither is required: an identity written before this
+    # change has no `task` and no `commissioner`, and every reader below still
+    # answers for it.
+
+    (run-case "pipeline/spawn-records-the-ticket-a-worker-serves-on-its-identity" {
+        # dotfiles-v13r: `--task` chose the branch name and NOTHING else, so
+        # "which bd issue does this worker serve?" had no durable answer —
+        # `wk-foo.0` reads identically whether `foo` arrived as a ticket id or
+        # as a plain subject, which is why the association was unrecoverable
+        # rather than merely unqueryable. The branch naming is deliberately
+        # untouched: it works, and its own validation messages document it.
+        with-pipeline "spawn-records-task" {|t, repo|
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "some-subject" --project "dotfiles" --repo $repo --task "dotfiles-v13r" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
+            let identity = (bus-identity-of "impl-a" --run "run-1")
+            assert-eq ($identity | get -o task) "dotfiles-v13r" "the ticket survives on durable state"
+            assert-eq $w.task "dotfiles-v13r" "and the spawn result names it back"
+            assert-eq $w.branch "wk-dotfiles-v13r.0" "the branch naming is UNCHANGED: --task still names it"
+            let seen = (worker-inspect "impl-a" --run "run-1" --sessions-dir $repo)
+            assert-eq ($seen.identity | get -o task) "dotfiles-v13r" "inspect answers which ticket it serves"
+        }
+    })
+
+    (run-case "pipeline/spawn-with-no-ticket-records-an-empty-one-and-still-names-the-branch-off-the-subject" {
+        # The compatibility half: a spawn that passes no --task behaves exactly
+        # as it did, and the recorded ticket is honestly empty rather than a
+        # subject masquerading as an id.
+        with-pipeline "spawn-no-task" {|t, repo|
+            let w = (worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "some-subject" --project "dotfiles" --repo $repo --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket)
+            assert-eq ((bus-identity-of "impl-a" --run "run-1") | get -o task | default "") "" "no ticket is recorded as no ticket"
+            assert-eq $w.branch "wk-some-subject.0" "the subject still names the branch when no task is given"
+        }
+    })
+
+    (run-case "pipeline/ps-and-workers-report-the-ticket-a-worker-serves" {
+        # The orchestrator's actual question — route review, merge and close
+        # back to the right bd issue — asked of the two roster verbs rather
+        # than of whatever the dispatcher happens to remember.
+        with-pipeline "roster-task" {|t, repo|
+            worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "some-subject" --project "dotfiles" --repo $repo --task "dotfiles-v13r" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket
+            let row = (worker-roster --run "run-1" --socket $t.socket | where uid == "impl-a" | first)
+            assert-eq $row.task "dotfiles-v13r" "ps carries the ticket"
+            let bus_row = (run-workers "run-1" | where uid == "impl-a" | first)
+            assert-eq $bus_row.task "dotfiles-v13r" "and so does the bus-only roster a restarted initiator rebuilds from"
+        }
+    })
+
+    (run-case "pipeline/spawn-takes-a-commissioner-address-and-the-result-is-delivered-there" {
+        # dotfiles-uwz6: the run was hardwired as the commissioner, so an
+        # orchestrator operating under its OWN address was never told anything
+        # — silently, since mail addressed elsewhere is not an error. Naming it
+        # at spawn is the fix; bus-result already routes to whatever the
+        # identity records.
+        with-pipeline "spawn-commissioner-flag" {|t, repo|
+            do { cd $repo
+                worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --commissioner "orchestrator-1" --socket $t.socket
+                assert-eq ((bus-identity-of "impl-a" --run "run-1") | get -o commissioner) "orchestrator-1" "the named commissioner is recorded, not the run"
+                complete-with "impl-a" "done"
+                let mail = (bus-wait --as "orchestrator-1")
+                assert-eq ($mail | length) 1 "the orchestrator hears about it on its OWN address, with no polling"
+                assert-eq $mail.0.content.status "complete" "and reads a typed status"
+                assert-eq ((bus-wait --as "run-1") | length) 0 "the run is not also mailed: one commissioner, the one that was named"
+            }
+        }
+    })
+
+    (run-case "pipeline/spawn-without-a-commissioner-still-addresses-the-run" {
+        # Backward compatibility, stated as a test: a caller that passes
+        # neither flag gets exactly today's behavior — the run doubles as the
+        # commissioner, which is what every existing consumer waits on.
+        with-pipeline "spawn-commissioner-default" {|t, repo|
+            do { cd $repo
+                worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --socket $t.socket
+                assert-eq ((bus-identity-of "impl-a" --run "run-1") | get -o commissioner) "run-1" "the run is still the default commissioner"
+                complete-with "impl-a" "done"
+                assert-eq ((bus-wait --as "run-1") | length) 1 "and `wait --as <run>` still works unchanged"
+            }
+        }
+    })
+
+    (run-case "pipeline/spawn-refuses-a-commissioner-that-is-not-an-address" {
+        # The commissioner becomes a queue directory name and is written into
+        # durable state, so prose or a path segment here has to be refused at
+        # the flag rather than discovered as a stray directory later.
+        with-pipeline "spawn-commissioner-refusal" {|t, repo|
+            for bad in ["not an address" "../escape" "a/b" ".."] {
+                let failed = (try {
+                    worker-spawn --run "run-1" --uid "impl-a" --role "impl" --subject "t1" --project "dotfiles" --repo $repo --task "t1" --session "sid-1" --skill "wk-build" --isolation "worktree" --commissioner $bad --socket $t.socket
+                    false
+                } catch { true })
+                assert-true $failed $"spawn must refuse --commissioner '($bad)': it is an address, and an address is a queue name"
+            }
+        }
+    })
+
+    (run-case "pipeline/inspect-ps-and-workers-answer-for-an-identity-written-before-a-ticket-or-a-commissioner-was-recorded" {
+        # The six live workers on this box when both fixes landed had identity
+        # records written by the previous code: no `task`, no `commissioner`.
+        # Neither field may be required by any reader, and none may report a
+        # substitute — an absent ticket reads as absent, exactly like the
+        # absent-key convention `bus-settled` already relies on for the
+        # commissioner.
+        let root = (make-runtime "legacy-identity")
+        # A socket no server was ever started on: `worker-liveness` degrades to
+        # `unknown` rather than reaching the operator's real tmux.
+        let absent_socket = $"pi-worker-test-absent-(random chars --length 8)"
+        with-runtime $root {
+            bus-identity "impl-a" --run "run-1" --identity {
+                role: "impl", cwd: "/tmp/nowhere", branch: "wk-t.0"
+                session: "sid-1", skill: "wk-build", window: "impl-a@dotfiles"
+            }
+            let seen = (worker-inspect "impl-a" --run "run-1" --sessions-dir $root)
+            assert-eq ($seen.identity | get -o task | default "") "" "inspect reports no ticket rather than failing on a record that has none"
+            assert-eq ($seen.identity | get -o commissioner | default "") "" "and no commissioner"
+            let row = (worker-roster --run "run-1" --socket $absent_socket | where uid == "impl-a" | first)
+            assert-eq $row.task "" "ps degrades to an empty ticket"
+            assert-eq $row.uid "impl-a" "and still reports the row it always did"
+            let bus_row = (run-workers "run-1" | where uid == "impl-a" | first)
+            assert-eq $bus_row.task "" "so does the bus-only roster"
+            assert-eq ((bus-settled "impl-a" --run "run-1") | get reported) false "an identity with no commissioner key is still uncommissioned, not defaulted"
+        }
+        rm -rf $root
+    })
+
     # ------------------------------------------------ sp029 T10: consumer side
 
     # The literal success criterion: no consumer skill may invoke the retired
